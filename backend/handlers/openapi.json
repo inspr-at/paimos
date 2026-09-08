@@ -9162,6 +9162,29 @@
         }
       }
     },
+    "/api/projects/{id}/release-records/{releaseID}/acceptance/deployment-target": {
+      "post": {
+        "tags": ["release-acceptance"],
+        "summary": "Bind an exact deployment target to this release",
+        "description": "Live non-impersonated human session with project edit. CSRF required. Existence of a Pharos owner environment or a sole project environment is not selection. The bound identity includes registration or environment row id, delivery/attempt generation, and created_at so same-name retargeting, revocation, and generation changes invalidate standing policy. No fallback across namespaces.",
+        "security": [{"sessionCookie": []}],
+        "parameters": [
+          {"name": "id", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64", "minimum": 1}},
+          {"name": "releaseID", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64", "minimum": 1}}
+        ],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"type": "object", "required": ["kind"], "properties": {
+          "kind": {"type": "string", "enum": ["pharos_owner", "project_environment"]},
+          "registration_id": {"type": "integer", "format": "int64", "minimum": 1},
+          "environment_id": {"type": "integer", "format": "int64", "minimum": 1}
+        }}}}},
+        "responses": {
+          "200": {"description": "Updated acceptance projection with the bound target identity."},
+          "400": {"description": "Unknown or unusable target."},
+          "401": {"description": "Authentication required."},
+          "403": {"description": "Not a current human editor."}
+        }
+      }
+    },
     "/api/projects/{id}/acceptance-standing-policies": {
       "get": {
         "tags": ["release-acceptance"],
@@ -9177,7 +9200,7 @@
       "post": {
         "tags": ["release-acceptance"],
         "summary": "Approve a customer-operated standing policy",
-        "description": "Live non-impersonated human session with project edit. CSRF required. Customer-operated only. Does not authorize future email sends. target_ref is a bound deployment target (Pharos owner environment on the batch delivery, or a unique project environment). model_ref is the customer-operated arrangement. Unknown or freeform target/model values are refused.",
+        "description": "Live non-impersonated human session with project edit. CSRF required. Customer-operated only. Does not authorize future email sends. target_ref is the provenance digest of an explicitly bound deployment target for this baseline. model_ref is the customer-operated arrangement. Names, artifact coordinates, and inferred sole environments are refused.",
         "security": [{"sessionCookie": []}],
         "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64", "minimum": 1}}],
         "requestBody": {"required": true, "content": {"application/json": {"schema": {"type": "object"}}}},

@@ -99,7 +99,19 @@ export type Acceptance = {
   mail_recovery?: string
   mail_in_flight?: boolean
   deployment_target?: string
+  deployment_target_kind?: string
+  deployment_target_label?: string
   target_unknown_reason?: string
+  target_candidates?: TargetCandidate[]
+}
+
+export type TargetCandidate = {
+  kind: 'pharos_owner' | 'project_environment'
+  label: string
+  registration_id?: number
+  environment_id?: number
+  environment_symbol?: string
+  workflow_symbol?: string
 }
 
 export type StandingPolicy = {
@@ -209,6 +221,14 @@ export function applyStandingPolicy(projectId: number, releaseId: number, policy
   return api.post<Acceptance>(`/projects/${projectId}/release-records/${releaseId}/acceptance/apply-policy`, {
     policy_id: policyId,
   })
+}
+
+export function bindDeploymentTarget(
+  projectId: number,
+  releaseId: number,
+  body: { kind: TargetCandidate['kind']; registration_id?: number; environment_id?: number },
+) {
+  return api.post<Acceptance>(`/projects/${projectId}/release-records/${releaseId}/acceptance/deployment-target`, body)
 }
 
 export function portalListReleaseRecords(projectId: number) {

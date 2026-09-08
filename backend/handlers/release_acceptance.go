@@ -42,6 +42,7 @@ func RegisterReleaseAcceptanceRoutes(r chi.Router) {
 	r.With(auth.RequireProjectEdit).Post("/projects/{id}/release-records/{releaseID}/acceptance/email/authorize-send", releaseAcceptanceAuthorizeSend)
 	r.With(auth.RequireProjectEdit).Post("/projects/{id}/release-records/{releaseID}/acceptance/email/record-external", releaseAcceptanceRecordExternal)
 	r.With(auth.RequireProjectView).Get("/projects/{id}/release-records/{releaseID}/acceptance/evidence", releaseAcceptanceEvidence)
+	r.With(auth.RequireProjectEdit).Post("/projects/{id}/release-records/{releaseID}/acceptance/deployment-target", releaseAcceptanceBindTarget)
 	r.With(auth.RequireProjectView).Get("/projects/{id}/acceptance-standing-policies", releaseAcceptanceListPolicies)
 	r.With(auth.RequireProjectEdit).Post("/projects/{id}/acceptance-standing-policies", releaseAcceptanceApprovePolicy)
 	r.With(auth.RequireProjectEdit).Post("/projects/{id}/acceptance-standing-policies/{policyID}/revoke", releaseAcceptanceRevokePolicy)
@@ -296,6 +297,26 @@ func releaseAcceptanceEvidence(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "private, no-store")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(body)
+}
+
+func releaseAcceptanceBindTarget(w http.ResponseWriter, r *http.Request) {
+	actor, ok := releaseAcceptanceActor(r)
+	projectID, releaseID, okID := releaseAcceptanceIDs(r)
+	if !ok || !okID || releaseID <= 0 {
+		jsonError(w, "not found", http.StatusNotFound)
+		return
+	}
+	var req releaseacceptance.BindTargetRequest
+	if err := decodeAcceptanceBody(r, &req); err != nil {
+		jsonError(w, "invalid request", http.StatusBadRequest)
+		return
+	}
+	out, err := releaseAcceptanceService().BindTarget(r.Context(), actor, projectID, releaseID, req)
+	if err != nil {
+		releaseAcceptanceError(w, err)
+		return
+	}
+	jsonOK(w, out)
 }
 
 func releaseAcceptanceListPolicies(w http.ResponseWriter, r *http.Request) {

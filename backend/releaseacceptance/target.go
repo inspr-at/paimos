@@ -9,135 +9,365 @@ package releaseacceptance
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"strings"
 )
 
 const (
-	targetUnknownNoBinding = "no deployment target is bound: neither a Pharos owner environment on this batch delivery nor a single project environment"
-	targetUnknownAmbiguous = "multiple deployment targets are bound; standing policy requires one explicit target"
-	targetUnknownUnbound   = "deployment target is unknown; standing policy cannot apply until an explicit deployment target is bound"
+	TargetKindPharosOwner   = "pharos_owner"
+	TargetKindProjectEnv    = "project_environment"
+	targetUnknownUnbound    = "deployment target is unknown; standing policy cannot apply until an explicit deployment target is bound"
+	targetUnknownNoBinding  = "deployment target is unknown until a human selects an exact Pharos owner registration or project environment for this release"
+	targetUnknownRevoked    = "bound Pharos owner registration is revoked or missing; standing policy cannot fall back to a project environment"
+	targetUnknownGeneration = "bound delivery or attempt generation no longer matches this release"
+	targetUnknownChanged    = "bound project environment identity changed or is missing"
+	targetUnknownProvenance = "bound deployment target provenance no longer matches"
 )
 
-type resolvedTarget struct {
-	Ref    string
-	Reason string
+type TargetCandidate struct {
+	Kind              string `json:"kind"`
+	Label             string `json:"label"`
+	RegistrationID    int64  `json:"registration_id,omitempty"`
+	EnvironmentID     int64  `json:"environment_id,omitempty"`
+	EnvironmentSymbol string `json:"environment_symbol,omitempty"`
+	WorkflowSymbol    string `json:"workflow_symbol,omitempty"`
+}
+
+type BindTargetRequest struct {
+	Kind           string `json:"kind"`
+	RegistrationID int64  `json:"registration_id,omitempty"`
+	EnvironmentID  int64  `json:"environment_id,omitempty"`
+}
+
+type targetIdentity struct {
+	Kind              string `json:"kind"`
+	ProjectID         int64  `json:"project_id"`
+	RegistrationID    int64  `json:"registration_id,omitempty"`
+	DeliveryID        int64  `json:"delivery_id,omitempty"`
+	AttemptID         int64  `json:"attempt_id,omitempty"`
+	WorkflowSymbol    string `json:"workflow_symbol,omitempty"`
+	EnvironmentSymbol string `json:"environment_symbol,omitempty"`
+	EnvironmentID     int64  `json:"environment_id,omitempty"`
+	CreatedAt         string `json:"created_at,omitempty"`
+}
+
+type storedBinding struct {
+	Kind           string
+	TargetRef      string
+	RegistrationID sql.NullInt64
+	EnvironmentID  sql.NullInt64
+}
+
+func targetDigest(id targetIdentity) string {
+	raw, _ := json.Marshal(id)
+	sum := sha256.Sum256(raw)
+	return "sha256:" + hex.EncodeToString(sum[:])
+}
+
+func isTargetDigest(v string) bool {
+	return len(v) == 71 && strings.HasPrefix(v, "sha256:")
+}
+
+func (s *Service) BindTarget(ctx context.Context, actor Actor, projectID, releaseID int64, req BindTargetRequest) (Acceptance, error) {
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return Acceptance{}, err
+	}
+	defer tx.Rollback()
+	if _, err := s.currentAuthority(ctx, tx, actor, projectID, true); err != nil {
+		return Acceptance{}, err
+	}
+	rel, err := loadRelease(ctx, tx, projectID, releaseID)
+	if err != nil {
+		return Acceptance{}, err
+	}
+	identity, err := selectedTargetIdentity(ctx, tx, rel, req)
+	if err != nil {
+		return Acceptance{}, err
+	}
+	digest := targetDigest(identity)
+	now := s.now()
+	if _, err := tx.ExecContext(ctx, `INSERT INTO acceptance_target_bindings(
+		project_id,release_id,kind,target_ref,registration_id,environment_id,delivery_id,attempt_id,
+		environment_symbol,workflow_symbol,source_created_at,bound_by,session_credential_id,bound_at,binding_revision)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,1)
+		ON CONFLICT(release_id) DO UPDATE SET
+			kind=excluded.kind, target_ref=excluded.target_ref, registration_id=excluded.registration_id,
+			environment_id=excluded.environment_id, delivery_id=excluded.delivery_id, attempt_id=excluded.attempt_id,
+			environment_symbol=excluded.environment_symbol, workflow_symbol=excluded.workflow_symbol,
+			source_created_at=excluded.source_created_at, bound_by=excluded.bound_by,
+			session_credential_id=excluded.session_credential_id, bound_at=excluded.bound_at,
+			binding_revision=acceptance_target_bindings.binding_revision+1`,
+		projectID, releaseID, identity.Kind, digest, nullIfZero(identity.RegistrationID), nullIfZero(identity.EnvironmentID),
+		nullIfZero(identity.DeliveryID), nullIfZero(identity.AttemptID), identity.EnvironmentSymbol, identity.WorkflowSymbol,
+		identity.CreatedAt, actor.UserID, actor.SessionCredentialID, now); err != nil {
+		return Acceptance{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return Acceptance{}, err
+	}
+	return s.Get(ctx, actor, projectID, releaseID)
+}
+
+func nullIfZero(v int64) any {
+	if v == 0 {
+		return nil
+	}
+	return v
+}
+
+func selectedTargetIdentity(ctx context.Context, tx *sql.Tx, rel ReleaseRecord, req BindTargetRequest) (targetIdentity, error) {
+	switch strings.TrimSpace(req.Kind) {
+	case TargetKindPharosOwner:
+		if req.RegistrationID <= 0 {
+			return targetIdentity{}, fmt.Errorf("%w: pharos registration_id is required", ErrInvalid)
+		}
+		return loadPharosIdentity(ctx, tx, rel, req.RegistrationID)
+	case TargetKindProjectEnv:
+		if req.EnvironmentID <= 0 {
+			return targetIdentity{}, fmt.Errorf("%w: project environment_id is required", ErrInvalid)
+		}
+		return loadProjectEnvIdentity(ctx, tx, rel.ProjectID, req.EnvironmentID)
+	default:
+		return targetIdentity{}, fmt.Errorf("%w: deployment target kind", ErrInvalid)
+	}
+}
+
+func loadPharosIdentity(ctx context.Context, tx *sql.Tx, rel ReleaseRecord, registrationID int64) (targetIdentity, error) {
+	deliveryID, attemptID, err := batchDelivery(ctx, tx, rel.ProjectID, rel.BatchID)
+	if err != nil {
+		return targetIdentity{}, err
+	}
+	if deliveryID == 0 {
+		return targetIdentity{}, fmt.Errorf("%w: batch has no delivery for a Pharos target", ErrInvalid)
+	}
+	var workflow, env, created, revoked sql.NullString
+	var regDelivery int64
+	err = tx.QueryRowContext(ctx, `SELECT delivery_id, COALESCE(workflow_symbol,''), COALESCE(environment_symbol,''), created_at, revoked_at
+		FROM external_stage_reporter_registrations
+		WHERE id=? AND project_id=? AND reporter_class='pharos' AND reporter_role='owner'`,
+		registrationID, rel.ProjectID).Scan(&regDelivery, &workflow, &env, &created, &revoked)
+	if err == sql.ErrNoRows {
+		return targetIdentity{}, fmt.Errorf("%w: pharos owner registration", ErrInvalid)
+	}
+	if err != nil {
+		return targetIdentity{}, err
+	}
+	if revoked.Valid && strings.TrimSpace(revoked.String) != "" {
+		return targetIdentity{}, fmt.Errorf("%w: pharos owner registration is revoked", ErrInvalid)
+	}
+	if regDelivery != deliveryID {
+		return targetIdentity{}, fmt.Errorf("%w: pharos registration is not on this release delivery", ErrInvalid)
+	}
+	if !validOpaqueRef(env.String) {
+		return targetIdentity{}, fmt.Errorf("%w: pharos environment", ErrInvalid)
+	}
+	return targetIdentity{
+		Kind: TargetKindPharosOwner, ProjectID: rel.ProjectID, RegistrationID: registrationID,
+		DeliveryID: deliveryID, AttemptID: attemptID, WorkflowSymbol: workflow.String,
+		EnvironmentSymbol: env.String, CreatedAt: created.String,
+	}, nil
+}
+
+func loadProjectEnvIdentity(ctx context.Context, tx *sql.Tx, projectID, environmentID int64) (targetIdentity, error) {
+	var name, created string
+	err := tx.QueryRowContext(ctx, `SELECT name, created_at FROM project_environments WHERE id=? AND project_id=?`,
+		environmentID, projectID).Scan(&name, &created)
+	if err == sql.ErrNoRows {
+		return targetIdentity{}, fmt.Errorf("%w: project environment", ErrInvalid)
+	}
+	if err != nil {
+		return targetIdentity{}, err
+	}
+	name = strings.TrimSpace(name)
+	if !validOpaqueRef(name) {
+		return targetIdentity{}, fmt.Errorf("%w: project environment name", ErrInvalid)
+	}
+	return targetIdentity{
+		Kind: TargetKindProjectEnv, ProjectID: projectID, EnvironmentID: environmentID,
+		EnvironmentSymbol: name, CreatedAt: created,
+	}, nil
+}
+
+func batchDelivery(ctx context.Context, tx *sql.Tx, projectID, batchID int64) (deliveryID, attemptID int64, err error) {
+	var d, a sql.NullInt64
+	err = tx.QueryRowContext(ctx, `SELECT delivery_id, attempt_id FROM baseline_batch_batches WHERE id=? AND project_id=?`,
+		batchID, projectID).Scan(&d, &a)
+	if err == sql.ErrNoRows {
+		return 0, 0, fmt.Errorf("%w: batch", ErrNotFound)
+	}
+	if err != nil {
+		return 0, 0, err
+	}
+	return d.Int64, a.Int64, nil
 }
 
 func (s *Service) annotateDeploymentTarget(ctx context.Context, tx *sql.Tx, acc *Acceptance) {
-	got := resolveDeploymentTarget(ctx, tx, acc.Release.ProjectID, acc.Release.BatchID, acc.Release.ContentDigest, acc.Release.RevisionSeal)
-	acc.DeploymentTarget = got.Ref
-	if got.Ref == "" {
-		acc.TargetUnknownReason = got.Reason
+	acc.TargetCandidates = listTargetCandidates(ctx, tx, acc.Release)
+	live, reason := verifyReleaseTarget(ctx, tx, acc.Release)
+	acc.DeploymentTarget = live.Ref
+	acc.DeploymentTargetKind = live.Kind
+	acc.DeploymentTargetLabel = live.Label
+	if live.Ref == "" {
+		acc.TargetUnknownReason = reason
 	}
 }
 
 func bindStandingPolicyScope(ctx context.Context, tx *sql.Tx, projectID int64, req PolicyRequest) (targetRef, modelRef string, err error) {
-	live := resolveDeploymentTarget(ctx, tx, projectID, 0, req.ContentDigest, req.RevisionSeal)
-	requestedTarget := strings.TrimSpace(req.TargetRef)
-	if live.Ref == "" {
-		if requestedTarget != "" {
-			return "", "", fmt.Errorf("%w: target_ref is not a bound deployment target", ErrInvalid)
-		}
-	} else {
-		if requestedTarget != "" && requestedTarget != live.Ref {
-			return "", "", fmt.Errorf("%w: target_ref does not match the bound deployment target", ErrInvalid)
-		}
-		requestedTarget = live.Ref
-	}
 	requestedModel := strings.TrimSpace(req.ModelRef)
 	if requestedModel != "" && requestedModel != ModeCustomerOperated {
 		return "", "", fmt.Errorf("%w: model_ref must be the customer-operated arrangement", ErrInvalid)
 	}
+	requestedTarget := strings.TrimSpace(req.TargetRef)
+	if !isTargetDigest(requestedTarget) {
+		return "", "", fmt.Errorf("%w: explicit bound deployment target is required", ErrInvalid)
+	}
+	live, err := validBaselineTargetRefs(ctx, tx, projectID, req.ContentDigest, req.RevisionSeal)
+	if err != nil {
+		return "", "", err
+	}
+	if !contains(live, requestedTarget) {
+		return "", "", fmt.Errorf("%w: target_ref is not a currently bound deployment target for this baseline", ErrInvalid)
+	}
 	return requestedTarget, ModeCustomerOperated, nil
 }
 
-func resolveDeploymentTarget(ctx context.Context, tx *sql.Tx, projectID, batchID int64, contentDigest, revisionSeal string) resolvedTarget {
-	envs, err := pharosOwnerEnvironments(ctx, tx, projectID, batchID, contentDigest, revisionSeal)
-	if err != nil {
-		return resolvedTarget{Reason: targetUnknownNoBinding}
-	}
-	if len(envs) > 1 {
-		return resolvedTarget{Reason: targetUnknownAmbiguous}
-	}
-	if len(envs) == 1 && validOpaqueRef(envs[0]) {
-		return resolvedTarget{Ref: envs[0]}
-	}
-	names, err := projectEnvironmentNames(ctx, tx, projectID)
-	if err != nil {
-		return resolvedTarget{Reason: targetUnknownNoBinding}
-	}
-	if len(names) > 1 {
-		return resolvedTarget{Reason: targetUnknownAmbiguous}
-	}
-	if len(names) == 1 && validOpaqueRef(names[0]) {
-		return resolvedTarget{Ref: names[0]}
-	}
-	return resolvedTarget{Reason: targetUnknownNoBinding}
-}
-
-func pharosOwnerEnvironments(ctx context.Context, tx *sql.Tx, projectID, batchID int64, contentDigest, revisionSeal string) ([]string, error) {
-	query := `SELECT DISTINCT registration.environment_symbol
-		FROM baseline_batch_batches batch
-		JOIN external_stage_reporter_registrations registration
-		  ON registration.delivery_id=batch.delivery_id
-		WHERE batch.project_id=? AND batch.delivery_id IS NOT NULL
-		  AND registration.revoked_at IS NULL
-		  AND registration.reporter_class='pharos'
-		  AND registration.reporter_role='owner'
-		  AND registration.environment_symbol IS NOT NULL
-		  AND registration.environment_symbol<>''`
-	args := []any{projectID}
-	if batchID > 0 {
-		query += ` AND batch.id=?`
-		args = append(args, batchID)
-	} else {
-		query += ` AND batch.content_digest=? AND batch.revision_seal=?`
-		args = append(args, contentDigest, revisionSeal)
-	}
-	rows, err := tx.QueryContext(ctx, query, args...)
+func validBaselineTargetRefs(ctx context.Context, tx *sql.Tx, projectID int64, contentDigest, revisionSeal string) ([]string, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT r.id, r.project_id, r.batch_id, r.release_ref, r.batch_key, r.baseline_ref,
+		r.content_digest, r.revision_seal, r.artifact_digest, r.artifact_coordinate, r.version_scheme, r.release_channel,
+		r.release_sequence, r.version, r.commit_sha, r.state, r.revision, r.created_at
+		FROM release_records r
+		WHERE r.project_id=? AND r.content_digest=? AND r.revision_seal=?`, projectID, contentDigest, revisionSeal)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []string
-	seen := map[string]struct{}{}
+	var releases []ReleaseRecord
 	for rows.Next() {
-		var env string
-		if err := rows.Scan(&env); err != nil {
+		var rel ReleaseRecord
+		if err := rows.Scan(&rel.ID, &rel.ProjectID, &rel.BatchID, &rel.ReleaseRef, &rel.BatchKey, &rel.BaselineRef,
+			&rel.ContentDigest, &rel.RevisionSeal, &rel.ArtifactDigest, &rel.ArtifactCoordinate, &rel.VersionScheme,
+			&rel.ReleaseChannel, &rel.ReleaseSequence, &rel.Version, &rel.CommitSHA, &rel.State, &rel.Revision, &rel.CreatedAt); err != nil {
 			return nil, err
 		}
-		env = strings.TrimSpace(env)
-		if env == "" {
-			continue
-		}
-		if _, ok := seen[env]; ok {
-			continue
-		}
-		seen[env] = struct{}{}
-		out = append(out, env)
+		releases = append(releases, rel)
 	}
-	return out, rows.Err()
-}
-
-func projectEnvironmentNames(ctx context.Context, tx *sql.Tx, projectID int64) ([]string, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT name FROM project_environments WHERE project_id=? ORDER BY sort_order, id`, projectID)
-	if err != nil {
+	if err := rows.Err(); err != nil {
 		return nil, err
 	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	var refs []string
+	for _, rel := range releases {
+		live, _ := verifyReleaseTarget(ctx, tx, rel)
+		if live.Ref != "" {
+			refs = append(refs, live.Ref)
+		}
+	}
+	return refs, nil
+}
+
+type liveTarget struct {
+	Ref   string
+	Kind  string
+	Label string
+}
+
+func verifyReleaseTarget(ctx context.Context, tx *sql.Tx, rel ReleaseRecord) (liveTarget, string) {
+	var b storedBinding
+	err := tx.QueryRowContext(ctx, `SELECT kind, target_ref, registration_id, environment_id
+		FROM acceptance_target_bindings WHERE release_id=? AND project_id=?`, rel.ID, rel.ProjectID).
+		Scan(&b.Kind, &b.TargetRef, &b.RegistrationID, &b.EnvironmentID)
+	if err == sql.ErrNoRows {
+		return liveTarget{}, targetUnknownNoBinding
+	}
+	if err != nil {
+		return liveTarget{}, targetUnknownNoBinding
+	}
+	switch b.Kind {
+	case TargetKindPharosOwner:
+		if !b.RegistrationID.Valid {
+			return liveTarget{}, targetUnknownRevoked
+		}
+		got, err := loadPharosIdentity(ctx, tx, rel, b.RegistrationID.Int64)
+		if err != nil {
+			return liveTarget{}, targetUnknownRevoked
+		}
+		if targetDigest(got) != b.TargetRef {
+			return liveTarget{}, targetUnknownGeneration
+		}
+		return liveTarget{Ref: b.TargetRef, Kind: got.Kind, Label: pharosLabel(got)}, ""
+	case TargetKindProjectEnv:
+		if !b.EnvironmentID.Valid {
+			return liveTarget{}, targetUnknownChanged
+		}
+		got, err := loadProjectEnvIdentity(ctx, tx, rel.ProjectID, b.EnvironmentID.Int64)
+		if err != nil {
+			return liveTarget{}, targetUnknownChanged
+		}
+		if targetDigest(got) != b.TargetRef {
+			return liveTarget{}, targetUnknownChanged
+		}
+		return liveTarget{Ref: b.TargetRef, Kind: got.Kind, Label: projectEnvLabel(got)}, ""
+	default:
+		return liveTarget{}, targetUnknownProvenance
+	}
+}
+
+func pharosLabel(id targetIdentity) string {
+	return fmt.Sprintf("Pharos %s / %s (registration %d)", id.WorkflowSymbol, id.EnvironmentSymbol, id.RegistrationID)
+}
+
+func projectEnvLabel(id targetIdentity) string {
+	return fmt.Sprintf("Project environment %s (#%d)", id.EnvironmentSymbol, id.EnvironmentID)
+}
+
+func listTargetCandidates(ctx context.Context, tx *sql.Tx, rel ReleaseRecord) []TargetCandidate {
+	out := []TargetCandidate{}
+	deliveryID, _, err := batchDelivery(ctx, tx, rel.ProjectID, rel.BatchID)
+	if err == nil && deliveryID > 0 {
+		rows, qerr := tx.QueryContext(ctx, `SELECT id, COALESCE(workflow_symbol,''), COALESCE(environment_symbol,'')
+			FROM external_stage_reporter_registrations
+			WHERE delivery_id=? AND project_id=? AND reporter_class='pharos' AND reporter_role='owner' AND revoked_at IS NULL
+			ORDER BY id`, deliveryID, rel.ProjectID)
+		if qerr == nil {
+			for rows.Next() {
+				var id int64
+				var workflow, env string
+				if err := rows.Scan(&id, &workflow, &env); err != nil {
+					break
+				}
+				out = append(out, TargetCandidate{
+					Kind: TargetKindPharosOwner, RegistrationID: id, WorkflowSymbol: workflow, EnvironmentSymbol: env,
+					Label: fmt.Sprintf("Pharos %s / %s (registration %d)", workflow, env, id),
+				})
+			}
+			_ = rows.Close()
+		}
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT id, name FROM project_environments WHERE project_id=? ORDER BY sort_order, id`, rel.ProjectID)
+	if err != nil {
+		return out
+	}
 	defer rows.Close()
-	var out []string
 	for rows.Next() {
+		var id int64
 		var name string
-		if err := rows.Scan(&name); err != nil {
-			return nil, err
+		if err := rows.Scan(&id, &name); err != nil {
+			return out
 		}
-		name = strings.TrimSpace(name)
-		if name == "" || !validOpaqueRef(name) {
+		if !validOpaqueRef(strings.TrimSpace(name)) {
 			continue
 		}
-		out = append(out, name)
+		out = append(out, TargetCandidate{
+			Kind: TargetKindProjectEnv, EnvironmentID: id, EnvironmentSymbol: strings.TrimSpace(name),
+			Label: fmt.Sprintf("Project environment %s (#%d)", strings.TrimSpace(name), id),
+		})
 	}
-	return out, rows.Err()
+	return out
 }

@@ -32,7 +32,7 @@ func schemaNames(t *testing.T, database *sql.DB, query string) []string {
 	return names
 }
 
-const latestSchemaVersion = 185
+const latestSchemaVersion = 186
 
 func TestMigration177PreservesAttentionLedgerAndSequence(t *testing.T) {
 	database, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "m177.db")+"?_txlock=immediate")
@@ -1902,3 +1902,15 @@ func TestMigration185ReleaseAcceptanceTables(t *testing.T) {
 	}
 }
 
+func TestMigration186AcceptanceTargetBindings(t *testing.T) {
+	database := openTestDB(t)
+	if !tableExists(t, database, "acceptance_target_bindings") {
+		t.Fatal("M186 table acceptance_target_bindings missing")
+	}
+	if !columnExists(t, database, "acceptance_target_bindings", "target_ref") {
+		t.Fatal("M186 target_ref missing")
+	}
+	if !columnExists(t, database, "acceptance_target_bindings", "registration_id") {
+		t.Fatal("M186 registration_id missing")
+	}
+}

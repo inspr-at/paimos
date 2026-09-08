@@ -10,6 +10,7 @@ import {
   applyStandingPolicy,
   approveStandingPolicy,
   authorizeAcceptanceSend,
+  bindDeploymentTarget,
   configureReleaseAcceptance,
   confirmReleaseAcceptance,
   downloadAcceptanceEvidence,
@@ -23,6 +24,7 @@ import {
   type Acceptance,
   type ConfigureRequest,
   type StandingPolicy,
+  type TargetCandidate,
 } from '@/services/projectReleaseAcceptance'
 
 const props = defineProps<{
@@ -57,6 +59,7 @@ const externalAttestation = ref('')
 const policyRef = ref('policy_customer')
 const policyUse = ref('Same approved baseline implementation updates only.')
 const policyExpires = ref(defaultLocalExpiry())
+const selectedTargetKey = ref('')
 const users = ref<User[]>([])
 let partySeq = 0
 
@@ -157,6 +160,26 @@ function mailState(row: { display_state?: string; state: string }) {
   return row.display_state || row.state
 }
 
+function candidateKey(c: TargetCandidate) {
+  if (c.kind === 'pharos_owner') return `pharos:${c.registration_id}`
+  return `env:${c.environment_id}`
+}
+
+function bindSelectedTarget() {
+  const acc = acceptance.value
+  if (!acc) return Promise.resolve()
+  const selected = (acc.target_candidates ?? []).find((c) => candidateKey(c) === selectedTargetKey.value)
+  if (!selected) return Promise.resolve()
+  const body: { kind: TargetCandidate['kind']; registration_id?: number; environment_id?: number } = { kind: selected.kind }
+  if (selected.kind === 'pharos_owner' && selected.registration_id != null) {
+    body.registration_id = selected.registration_id
+  }
+  if (selected.kind === 'project_environment' && selected.environment_id != null) {
+    body.environment_id = selected.environment_id
+  }
+  return bindDeploymentTarget(props.projectId, acc.release.id, body)
+}
+
 const attestSummary = computed(() => {
   if (!attestedParties.value.length) {
     return 'None selected. Recipients of the recorded email are not consent. Linked members can still confirm themselves.'
@@ -233,6 +256,7 @@ function syncForm(acc: Acceptance) {
   attestedParties.value = []
   confirmAttest.value = false
   confirmSend.value = false
+  selectedTargetKey.value = ''
   if (!acc.mail_in_flight) {
     sendRequestKey.value = `send-${Date.now()}`
   }
@@ -540,14 +564,31 @@ onMounted(() => { void load() })
           <input v-model="policyExpires" class="ra-input" type="datetime-local" data-testid="policy-expires">
         </label>
         <p class="ra-meta" data-testid="deployment-target">
-          <template v-if="acceptance.deployment_target">Deployment target: {{ acceptance.deployment_target }}</template>
-          <template v-else>{{ acceptance.target_unknown_reason || 'Deployment target is unknown. Standing policy cannot apply until an explicit target is bound.' }}</template>
+          <template v-if="acceptance.deployment_target">{{ acceptance.deployment_target_label || 'Deployment target bound' }}</template>
+          <template v-else>{{ acceptance.target_unknown_reason || 'Deployment target is unknown until you bind an exact Pharos owner registration or project environment.' }}</template>
         </p>
+        <fieldset class="ra-stack" data-testid="target-candidates">
+          <legend class="ra-meta">Exact deployment target</legend>
+          <label v-for="c in (acceptance.target_candidates || [])" :key="candidateKey(c)">
+            <input v-model="selectedTargetKey" type="radio" :value="candidateKey(c)" data-testid="target-candidate">
+            {{ c.label }}
+          </label>
+          <p v-if="!(acceptance.target_candidates || []).length" class="ra-note">No selectable Pharos owner registration or project environment is available yet.</p>
+        </fieldset>
+        <button
+          type="button"
+          class="btn btn-sm"
+          data-testid="bind-target"
+          :disabled="busy || !selectedTargetKey"
+          @click="run(() => bindSelectedTarget())"
+        >
+          Bind this deployment target
+        </button>
         <button
           type="button"
           class="btn btn-sm"
           data-testid="approve-policy"
-          :disabled="busy || !acceptance.release.content_digest"
+          :disabled="busy || !acceptance.release.content_digest || !acceptance.deployment_target"
           @click="run(() => approveStandingPolicy(projectId, {
             policy_ref: policyRef,
             content_digest: acceptance!.release.content_digest,

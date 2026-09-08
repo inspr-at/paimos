@@ -13693,6 +13693,32 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 		)`,
 		`CREATE INDEX idx_acceptance_standing_policies_project ON acceptance_standing_policies(project_id, id DESC)`,
 	}})
+	// M186 / PAI-968: explicit human deployment-target binding for standing
+	// policy. Existence of an environment or Pharos owner registration is
+	// not selection. Identity is a provenance digest, not a display name.
+	migrations = append(migrations, migration{version: 186, steps: []string{
+		`CREATE TABLE acceptance_target_bindings (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			project_id INTEGER NOT NULL REFERENCES projects(id),
+			release_id INTEGER NOT NULL UNIQUE REFERENCES release_records(id),
+			kind TEXT NOT NULL CHECK (kind IN ('pharos_owner','project_environment')),
+			target_ref TEXT NOT NULL CHECK (length(CAST(target_ref AS BLOB))=71 AND substr(target_ref,1,7)='sha256:'),
+			registration_id INTEGER,
+			environment_id INTEGER,
+			delivery_id INTEGER,
+			attempt_id INTEGER,
+			environment_symbol TEXT NOT NULL DEFAULT '',
+			workflow_symbol TEXT NOT NULL DEFAULT '',
+			source_created_at TEXT NOT NULL DEFAULT '',
+			bound_by INTEGER NOT NULL REFERENCES users(id),
+			session_credential_id TEXT NOT NULL,
+			bound_at TEXT NOT NULL,
+			binding_revision INTEGER NOT NULL DEFAULT 1 CHECK (binding_revision>=1),
+			CHECK ((kind='pharos_owner' AND registration_id IS NOT NULL AND registration_id>0 AND environment_id IS NULL) OR
+			       (kind='project_environment' AND environment_id IS NOT NULL AND environment_id>0 AND registration_id IS NULL))
+		)`,
+		`CREATE INDEX idx_acceptance_target_bindings_project ON acceptance_target_bindings(project_id, release_id)`,
+	}})
 	for _, m := range migrations {
 		if m.version > maxVersion {
 			continue

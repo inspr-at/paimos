@@ -261,12 +261,13 @@ func TestStandingPolicyDriftAndRevocation(t *testing.T) {
 	f := openFixture(t)
 	rel := f.mint()
 	f.configure(rel.Release.ID, ModeCustomerOperated)
-	f.bindDeploymentTarget("production")
-	policy, err := f.svc.ApprovePolicy(context.Background(), f.admin, f.projectID, f.standingPolicy("policy_acc"))
+	envID := f.insertProjectEnv("production")
+	bound := f.bindProjectEnv(rel.Release.ID, envID)
+	policy, err := f.svc.ApprovePolicy(context.Background(), f.admin, f.projectID, f.standingPolicy("policy_acc", bound.DeploymentTarget))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if policy.TargetRef != "production" || policy.ModelRef != ModeCustomerOperated {
+	if policy.TargetRef != bound.DeploymentTarget || policy.ModelRef != ModeCustomerOperated {
 		t.Fatalf("policy bound wrong scope: %+v", policy)
 	}
 	if _, err := f.svc.ApplyPolicy(context.Background(), f.customer, f.projectID, rel.Release.ID, policy.ID); err != nil {
@@ -284,12 +285,11 @@ func TestAgencyModeIgnoresStandingPolicy(t *testing.T) {
 	f := openFixture(t)
 	rel := f.mint()
 	f.configure(rel.Release.ID, ModeAgencyOperated)
-	policy, err := f.svc.ApprovePolicy(context.Background(), f.admin, f.projectID, PolicyRequest{
-		PolicyRef: "policy_agency", ContentDigest: testDigest, RevisionSeal: testSeal,
-		Parties: []string{"party_customer"}, AgreementRef: "SOW-9",
-		Gaps:       []Gap{{GapRef: "gap_backup", Statement: "Backup restore not proven for this target."}},
-		BoundedUse: "no", ExpiresAt: "2026-12-01T00:00:00Z",
-	})
+	envID := f.insertProjectEnv("production")
+	bound := f.bindProjectEnv(rel.Release.ID, envID)
+	policy, err := f.svc.ApprovePolicy(context.Background(), f.admin, f.projectID, f.standingPolicy("policy_agency", bound.DeploymentTarget, func(req *PolicyRequest) {
+		req.BoundedUse = "no"
+	}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -591,6 +591,27 @@ func TestPolicyExpiryAndBindings(t *testing.T) {
 	}); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("expired approve err=%v", err)
 	}
+	envID := f.insertProjectEnv("production")
+	got, err := f.svc.Get(context.Background(), f.admin, f.projectID, rel.Release.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.DeploymentTarget != "" {
+		t.Fatalf("sole environment auto-bound: %+v", got)
+	}
+	if len(got.TargetCandidates) != 1 || got.TargetCandidates[0].EnvironmentID != envID {
+		t.Fatalf("candidates=%+v", got.TargetCandidates)
+	}
+	if _, err := f.svc.ApprovePolicy(context.Background(), f.admin, f.projectID, PolicyRequest{
+		PolicyRef: "policy_name_as_target", ContentDigest: testDigest, RevisionSeal: testSeal,
+		Parties: []string{"party_customer"}, AgreementRef: "SOW-9",
+		Gaps:       []Gap{{GapRef: "gap_backup", Statement: "Backup restore not proven for this target."}},
+		BoundedUse: "Same approved baseline implementation updates only.", ExpiresAt: "2026-12-01T00:00:00Z",
+		TargetRef:  "production",
+		ModelRef:   ModeCustomerOperated,
+	}); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("environment name as target err=%v", err)
+	}
 	if _, err := f.svc.ApprovePolicy(context.Background(), f.admin, f.projectID, PolicyRequest{
 		PolicyRef: "policy_artifact_as_target", ContentDigest: testDigest, RevisionSeal: testSeal,
 		Parties: []string{"party_customer"}, AgreementRef: "SOW-9",
@@ -601,52 +622,37 @@ func TestPolicyExpiryAndBindings(t *testing.T) {
 	}); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("unverified target err=%v", err)
 	}
-	if _, err := f.svc.ApprovePolicy(context.Background(), f.admin, f.projectID, PolicyRequest{
-		PolicyRef: "policy_scheme_as_model", ContentDigest: testDigest, RevisionSeal: testSeal,
-		Parties: []string{"party_customer"}, AgreementRef: "SOW-9",
-		Gaps:       []Gap{{GapRef: "gap_backup", Statement: "Backup restore not proven for this target."}},
-		BoundedUse: "Same approved baseline implementation updates only.", ExpiresAt: "2026-12-01T00:00:00Z",
-		ModelRef:   "inspr-calendar-v1",
-	}); !errors.Is(err, ErrInvalid) {
-		t.Fatalf("version scheme as model err=%v", err)
-	}
-	unknown, err := f.svc.ApprovePolicy(context.Background(), f.admin, f.projectID, PolicyRequest{
-		PolicyRef: "policy_unknown_target", ContentDigest: testDigest, RevisionSeal: testSeal,
-		Parties: []string{"party_customer"}, AgreementRef: "SOW-9",
-		Gaps:       []Gap{{GapRef: "gap_backup", Statement: "Backup restore not proven for this target."}},
-		BoundedUse: "Same approved baseline implementation updates only.", ExpiresAt: "2026-12-01T00:00:00Z",
-	})
+	bound := f.bindProjectEnv(rel.Release.ID, envID)
+	okPolicy, err := f.svc.ApprovePolicy(context.Background(), f.admin, f.projectID, f.standingPolicy("policy_ok_bind", bound.DeploymentTarget))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if unknown.TargetRef != "" || unknown.ModelRef != ModeCustomerOperated {
-		t.Fatalf("unknown policy stored unverified scope: %+v", unknown)
-	}
-	if _, err := f.svc.ApplyPolicy(context.Background(), f.customer, f.projectID, rel.Release.ID, unknown.ID); !errors.Is(err, ErrForbidden) {
-		t.Fatalf("unknown target apply err=%v", err)
-	}
-	got, err := f.svc.Get(context.Background(), f.admin, f.projectID, rel.Release.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got.DeploymentTarget != "" || got.TargetUnknownReason == "" {
-		t.Fatalf("projection hid unknown target: %+v", got)
-	}
-	f.bindDeploymentTarget("production")
-	okPolicy, err := f.svc.ApprovePolicy(context.Background(), f.admin, f.projectID, f.standingPolicy("policy_ok_bind"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if okPolicy.TargetRef != "production" || okPolicy.ModelRef != ModeCustomerOperated {
+	if okPolicy.TargetRef != bound.DeploymentTarget || okPolicy.ModelRef != ModeCustomerOperated {
 		t.Fatalf("bound policy=%+v", okPolicy)
 	}
 	if _, err := f.svc.ApplyPolicy(context.Background(), f.customer, f.projectID, rel.Release.ID, okPolicy.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.svc.ApprovePolicy(context.Background(), f.admin, f.projectID, f.standingPolicy("policy_wrong_target", func(req *PolicyRequest) {
-		req.TargetRef = "other-target"
-	})); !errors.Is(err, ErrInvalid) {
-		t.Fatalf("mismatched target err=%v", err)
+	if _, err := appdb.DB.Exec(`DELETE FROM project_environments WHERE id=?`, envID); err != nil {
+		t.Fatal(err)
+	}
+	replacement := f.insertProjectEnv("production")
+	drifted, err := f.svc.Get(context.Background(), f.admin, f.projectID, rel.Release.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if drifted.DeploymentTarget != "" || drifted.TargetUnknownReason == "" {
+		t.Fatalf("same-name retarget kept consent: %+v", drifted)
+	}
+	if _, err := f.svc.ApplyPolicy(context.Background(), f.customer, f.projectID, rel.Release.ID, okPolicy.ID); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("apply after same-name retarget err=%v", err)
+	}
+	rebound := f.bindProjectEnv(rel.Release.ID, replacement)
+	if rebound.DeploymentTarget == bound.DeploymentTarget {
+		t.Fatal("replacement environment reused prior identity")
+	}
+	if _, err := f.svc.ApprovePolicy(context.Background(), f.admin, f.projectID, f.standingPolicy("policy_stale_digest", bound.DeploymentTarget)); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("old identity still approved err=%v", err)
 	}
 }
 
@@ -755,5 +761,33 @@ func TestExportMarksDeliveryState(t *testing.T) {
 	}
 	if !strings.Contains(string(body), "X-Paimos-Delivery-State: failed") {
 		t.Fatalf("eml missing delivery state: %s", body)
+	}
+}
+
+func TestPharosBindingDoesNotFallBackToProjectEnv(t *testing.T) {
+	f := openFixture(t)
+	rel := f.mint()
+	f.configure(rel.Release.ID, ModeCustomerOperated)
+	_ = f.insertProjectEnv("production")
+	digest := targetDigest(targetIdentity{
+		Kind: TargetKindPharosOwner, ProjectID: f.projectID, RegistrationID: 999,
+		DeliveryID: 1, AttemptID: 1, EnvironmentSymbol: "production", CreatedAt: "2026-09-08T12:00:00.000Z",
+	})
+	if _, err := appdb.DB.Exec(`INSERT INTO acceptance_target_bindings(
+		project_id,release_id,kind,target_ref,registration_id,environment_id,delivery_id,attempt_id,
+		environment_symbol,bound_by,session_credential_id,bound_at)
+		VALUES(?,?,'pharos_owner',?,?,NULL,1,1,'production',?,?,?)`,
+		f.projectID, rel.Release.ID, digest, 999, f.adminID, f.admin.SessionCredentialID, f.svc.now()); err != nil {
+		t.Fatal(err)
+	}
+	got, err := f.svc.Get(context.Background(), f.admin, f.projectID, rel.Release.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.DeploymentTarget != "" {
+		t.Fatalf("missing Pharos registration fell back to project environment: %+v", got)
+	}
+	if !strings.Contains(got.TargetUnknownReason, "cannot fall back") {
+		t.Fatalf("reason=%q", got.TargetUnknownReason)
 	}
 }

@@ -10,6 +10,7 @@ package releaseacceptance
 import (
 	"context"
 	"database/sql"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -169,15 +170,32 @@ func (f *fixture) insertBatch() int64 {
 	return id
 }
 
-func (f *fixture) bindDeploymentTarget(name string) {
+func (f *fixture) insertProjectEnv(name string) int64 {
 	f.t.Helper()
-	if _, err := appdb.DB.Exec(`INSERT INTO project_environments(project_id, name, url, host_alias, host_ip, sort_order)
-		VALUES(?,?,'','','',0)`, f.projectID, name); err != nil {
+	res, err := appdb.DB.Exec(`INSERT INTO project_environments(project_id, name, url, host_alias, host_ip, sort_order)
+		VALUES(?,?,'','','',0)`, f.projectID, name)
+	if err != nil {
 		f.t.Fatal(err)
 	}
+	id, _ := res.LastInsertId()
+	return id
 }
 
-func (f *fixture) standingPolicy(policyRef string, extras ...func(*PolicyRequest)) PolicyRequest {
+func (f *fixture) bindProjectEnv(releaseID, envID int64) Acceptance {
+	f.t.Helper()
+	acc, err := f.svc.BindTarget(context.Background(), f.admin, f.projectID, releaseID, BindTargetRequest{
+		Kind: TargetKindProjectEnv, EnvironmentID: envID,
+	})
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	if acc.DeploymentTarget == "" || !strings.HasPrefix(acc.DeploymentTarget, "sha256:") {
+		f.t.Fatalf("bind did not store provenance identity: %+v", acc)
+	}
+	return acc
+}
+
+func (f *fixture) standingPolicy(policyRef, targetRef string, extras ...func(*PolicyRequest)) PolicyRequest {
 	req := PolicyRequest{
 		PolicyRef:      policyRef,
 		ContentDigest:  testDigest,
@@ -187,7 +205,7 @@ func (f *fixture) standingPolicy(policyRef string, extras ...func(*PolicyRequest
 		Gaps:           []Gap{{GapRef: "gap_backup", Statement: "Backup restore not proven for this target."}},
 		BoundedUse:     "Same approved baseline implementation updates only.",
 		ExpiresAt:      "2026-12-01T00:00:00Z",
-		TargetRef:      "production",
+		TargetRef:      targetRef,
 		ModelRef:       ModeCustomerOperated,
 		ReleaseChannel: "stable",
 		ArtifactDigest: testArt,

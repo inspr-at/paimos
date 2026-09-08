@@ -73,6 +73,15 @@ const acceptanceFixture: Acceptance = {
   },
   defaults: { agreement_ref: 'SOW-9' },
   offer_disclaimer: 'Provider-operated is representable here. It is not an offer that Augmentoring will operate the service.',
+  target_candidates: [],
+}
+
+const productionDigest = 'sha256:1111111111111111111111111111111111111111111111111111111111111111'
+const productionCandidate = {
+  kind: 'project_environment' as const,
+  label: 'production',
+  environment_id: 3,
+  environment_symbol: 'production',
 }
 
 function mockLoads(acc: Acceptance = acceptanceFixture) {
@@ -291,23 +300,88 @@ describe('ProjectReleaseAcceptanceSection', () => {
     app.unmount()
   })
 
-  it('approves standing policy with operating mode and bound deployment target, not artifact identity', async () => {
+  it('does not treat a sole candidate as a bound deployment target', async () => {
     mockLoads({
       ...acceptanceFixture,
       operating_mode: 'customer_operated',
       operating_mode_label: 'customer-operated',
-      deployment_target: 'production',
-      target_unknown_reason: '',
+      deployment_target: '',
+      target_unknown_reason: 'No exact deployment target is bound for this release. Existence is not selection.',
+      target_candidates: [productionCandidate],
     })
-    vi.mocked(api.post).mockResolvedValue({ id: 3, policy_ref: 'policy_customer', operating_mode: 'customer_operated', target_ref: 'production', model_ref: 'customer_operated' })
+    const { host, app } = await mountSection()
+    expect(host.querySelector('[data-testid="deployment-target"]')?.textContent).not.toMatch(/^\s*production\s*$/)
+    expect(host.querySelector('[data-testid="deployment-target"]')?.textContent).toContain('No exact deployment target is bound')
+    expect(host.querySelector('[data-testid="target-candidates"]')?.textContent).toContain('production')
+    expect(host.querySelector<HTMLButtonElement>('[data-testid="approve-policy"]')?.disabled).toBe(true)
+    expect(host.querySelector<HTMLButtonElement>('[data-testid="bind-target"]')?.disabled).toBe(true)
+    app.unmount()
+  })
+
+  it('binds the selected candidate by kind and environment id, not by name or digest', async () => {
+    mockLoads({
+      ...acceptanceFixture,
+      operating_mode: 'customer_operated',
+      operating_mode_label: 'customer-operated',
+      deployment_target: '',
+      target_candidates: [productionCandidate],
+    })
+    vi.mocked(api.post).mockResolvedValue({
+      ...acceptanceFixture,
+      operating_mode: 'customer_operated',
+      operating_mode_label: 'customer-operated',
+      deployment_target: productionDigest,
+      deployment_target_kind: 'project_environment',
+      deployment_target_label: 'production',
+      target_candidates: [productionCandidate],
+    })
+    const { host, app } = await mountSection()
+    host.querySelector<HTMLInputElement>('[data-testid="target-candidate"]')!.click()
+    await settle()
+    host.querySelector<HTMLButtonElement>('[data-testid="bind-target"]')!.click()
+    await settle()
+    const call = vi.mocked(api.post).mock.calls.find((item) => String(item[0]).endsWith('/acceptance/deployment-target'))
+    expect(call?.[1]).toEqual({
+      kind: 'project_environment',
+      environment_id: 3,
+    })
+    expect(call?.[1]).not.toEqual(expect.objectContaining({ kind: 'production' }))
+    expect(JSON.stringify(call?.[1])).not.toContain(productionDigest)
+    expect(JSON.stringify(call?.[1])).not.toContain('ghcr:demo:acc')
+    app.unmount()
+  })
+
+  it('approves standing policy with the live provenance digest, not a name or artifact identity', async () => {
+    mockLoads({
+      ...acceptanceFixture,
+      operating_mode: 'customer_operated',
+      operating_mode_label: 'customer-operated',
+      deployment_target: productionDigest,
+      deployment_target_kind: 'project_environment',
+      deployment_target_label: 'production',
+      target_unknown_reason: '',
+      target_candidates: [productionCandidate],
+    })
+    vi.mocked(api.post).mockResolvedValue({
+      id: 3,
+      policy_ref: 'policy_customer',
+      operating_mode: 'customer_operated',
+      target_ref: productionDigest,
+      model_ref: 'customer_operated',
+    })
     const { host, app } = await mountSection()
     expect(host.querySelector('[data-testid="deployment-target"]')?.textContent).toContain('production')
+    expect(host.querySelector('[data-testid="deployment-target"]')?.textContent).not.toContain(productionDigest)
+    expect(host.querySelector<HTMLButtonElement>('[data-testid="approve-policy"]')?.disabled).toBe(false)
     host.querySelector<HTMLButtonElement>('[data-testid="approve-policy"]')!.click()
     await settle()
     const call = vi.mocked(api.post).mock.calls.find((item) => String(item[0]).endsWith('/acceptance-standing-policies'))
     expect(call?.[1]).toEqual(expect.objectContaining({
-      target_ref: 'production',
+      target_ref: productionDigest,
       model_ref: 'customer_operated',
+    }))
+    expect(call?.[1]).not.toEqual(expect.objectContaining({
+      target_ref: 'production',
     }))
     expect(call?.[1]).not.toEqual(expect.objectContaining({
       target_ref: 'ghcr:demo:acc',
