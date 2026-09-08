@@ -55,7 +55,7 @@ type bridgeFixture struct {
 
 func openBridgeFixture(t *testing.T) *bridgeFixture {
 	t.Helper()
-	return openBridgeFixtureMode(t, ModeManual)
+	return openBridgeFixtureMode(t, ModeManual, false)
 }
 
 func openAgentBridgeFixture(t *testing.T, mode string) *bridgeFixture {
@@ -63,10 +63,18 @@ func openAgentBridgeFixture(t *testing.T, mode string) *bridgeFixture {
 	if mode != ModeAssisted && mode != ModeAutomatic {
 		t.Fatalf("agent fixture mode=%s", mode)
 	}
-	return openBridgeFixtureMode(t, mode)
+	return openBridgeFixtureMode(t, mode, false)
 }
 
-func openBridgeFixtureMode(t *testing.T, mode string) *bridgeFixture {
+func openClassOnlyAgentBridgeFixture(t *testing.T, mode string) *bridgeFixture {
+	t.Helper()
+	if mode != ModeAssisted && mode != ModeAutomatic {
+		t.Fatalf("class-only fixture mode=%s", mode)
+	}
+	return openBridgeFixtureMode(t, mode, true)
+}
+
+func openBridgeFixtureMode(t *testing.T, mode string, classOnly bool) *bridgeFixture {
 	t.Helper()
 	t.Setenv("DATA_DIR", t.TempDir())
 	t.Setenv("PAIMOS_TEST_MODE", "1")
@@ -118,7 +126,11 @@ func openBridgeFixtureMode(t *testing.T, mode string) *bridgeFixture {
 		if _, err := appdb.DB.Exec(`INSERT INTO project_agents(project_id,name) VALUES(?,'codex')`, projectID); err != nil {
 			t.Fatal(err)
 		}
-		f.daemon = newOwnedDaemon(t, projectID, userID)
+		if classOnly {
+			f.daemon = newOwnedClassOnlyClaudeDaemon(t, projectID, userID)
+		} else {
+			f.daemon = newOwnedDaemon(t, projectID, userID)
+		}
 	}
 	f.batch = f.startReviewedBatch(mode, "bridge-start-key-01")
 	return f

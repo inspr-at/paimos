@@ -33,11 +33,17 @@ func ownedDigest(raw []byte) string {
 }
 
 type probeAdapter struct {
+	name  string
 	label string
 	keys  map[string]bool
 }
 
-func (probeAdapter) Name() string { return agentd.AdapterCodex }
+func (a probeAdapter) Name() string {
+	if a.name != "" {
+		return a.name
+	}
+	return agentd.AdapterCodex
+}
 func (probeAdapter) Capabilities() []agentd.Capability {
 	return []agentd.Capability{agentd.CapabilityStatus, agentd.CapabilityInterrupt, agentd.CapabilityStop}
 }
@@ -60,7 +66,9 @@ type ownedDaemon struct {
 	identity         string
 	kernel           string
 	loader           string
+	accountLabel     string
 	accountKey       string
+	classOnly        bool
 	profile          dispatchprofile.Profile
 	hostKind         string
 	generationDigest string
@@ -68,6 +76,14 @@ type ownedDaemon struct {
 }
 
 func newOwnedDaemon(t *testing.T, projectID, userID int64) *ownedDaemon {
+	return newOwnedDaemonKind(t, projectID, userID, false)
+}
+
+func newOwnedClassOnlyClaudeDaemon(t *testing.T, projectID, userID int64) *ownedDaemon {
+	return newOwnedDaemonKind(t, projectID, userID, true)
+}
+
+func newOwnedDaemonKind(t *testing.T, projectID, userID int64, classOnly bool) *ownedDaemon {
 	t.Helper()
 	root, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
@@ -76,8 +92,14 @@ func newOwnedDaemon(t *testing.T, projectID, userID int64) *ownedDaemon {
 	hostKind, generationDigest, platformInputs := ownedPlatformFixture(t, root)
 	workspace, kernel, loader := ownedWorkspaceFixture(t, root)
 	identity := strings.Repeat("d", 64)
+	adapter := probeAdapter{label: "chatgpt", keys: map[string]bool{"coordinator": true}}
+	profileID, harness, label, accountKey := "codex-sol-high", "codex", "chatgpt", "coordinator"
+	if classOnly {
+		adapter = probeAdapter{name: agentd.AdapterClaude, label: "claude_ai_max"}
+		profileID, harness, label, accountKey = "claude-opus-xhigh", "claude", "claude_ai_max", ""
+	}
 	supervisor, err := agentd.NewSupervisor(agentd.SupervisorConfig{
-		Instance: "ppm-owned", Adapters: []agentd.Adapter{probeAdapter{label: "chatgpt", keys: map[string]bool{"coordinator": true}}},
+		Instance: "ppm-owned", Adapters: []agentd.Adapter{adapter},
 		WorkspaceInspector: func(_ context.Context, path, mode string) (agentd.WorkspaceProvenance, error) {
 			return agentd.WorkspaceProvenance{CanonicalPath: path, Identity: identity, Kind: "directory", Mode: mode}, nil
 		},
@@ -86,11 +108,12 @@ func newOwnedDaemon(t *testing.T, projectID, userID int64) *ownedDaemon {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = supervisor.Close(context.Background()) })
-	profile, err := dispatchprofile.Resolve("codex-sol-high", dispatchprofile.CatalogVersion, "codex")
+	profile, err := dispatchprofile.Resolve(profileID, dispatchprofile.CatalogVersion, harness)
 	if err != nil {
 		t.Fatal(err)
 	}
-	res, err := appdb.DB.Exec(`INSERT INTO api_keys(user_id,name,key_hash,key_prefix,scopes) VALUES(?,'owned-runtime','not-a-credential','fixture','*')`, userID)
+	res, err := appdb.DB.Exec(`INSERT INTO api_keys(user_id,name,key_hash,key_prefix,scopes) VALUES(?,?,?,'fixture','*')`,
+		userID, "owned-runtime-"+uuid.NewString(), uuid.NewString())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,7 +125,8 @@ func newOwnedDaemon(t *testing.T, projectID, userID int64) *ownedDaemon {
 	daemon := &ownedDaemon{
 		t: t, project: projectID, service: lifecycleintents.NewService(appdb.DB), harness: managedharness.NewService(appdb.DB),
 		reporter: reporter, supervisor: supervisor, host: "owned-fixture-host",
-		workspace: workspace, identity: identity, kernel: kernel, loader: loader, accountKey: "coordinator", profile: profile,
+		workspace: workspace, identity: identity, kernel: kernel, loader: loader,
+		accountLabel: label, accountKey: accountKey, classOnly: classOnly, profile: profile,
 		hostKind: hostKind, generationDigest: generationDigest, platformInputs: platformInputs,
 	}
 	daemon.register()
@@ -170,15 +194,24 @@ func ownedPlatformFixture(t *testing.T, root string) (hostKind, generationDigest
 
 func (d *ownedDaemon) register() {
 	d.t.Helper()
-	runtime, err := d.service.RegisterRuntime(context.Background(), d.reporter, d.project, ownedLease, lifecycleintents.Registration{
-		Generation:    uuid.NewString(),
-		Host:          d.host,
-		AccountLabel:  "chatgpt",
-		SchemaVersion: lifecycleintents.AccountChoiceSchemaV2,
-		Accounts:      []lifecycleintents.AccountChoice{{Key: d.accountKey, Label: "Coordinator"}},
-		Profiles:      []lifecycleintents.Profile{{ID: d.profile.ID, Version: d.profile.Version}},
-		Workspaces:    []lifecycleintents.Workspace{{Handle: uuid.NewString(), Identity: d.identity, Label: "Work"}},
-	})
+	in := lifecycleintents.Registration{
+		Generation: uuid.NewString(),
+		Host:       d.host,
+		Workspaces: []lifecycleintents.Workspace{{Handle: uuid.NewString(), Identity: d.identity, Label: "Work"}},
+	}
+	if d.classOnly {
+		in.SchemaVersion = lifecycleintents.AccountScopeSchemaV3
+		in.AccountScopes = []lifecycleintents.AccountScope{{
+			AccountLabel: d.accountLabel,
+			Profiles:     []lifecycleintents.Profile{{ID: d.profile.ID, Version: d.profile.Version}},
+		}}
+	} else {
+		in.AccountLabel = d.accountLabel
+		in.SchemaVersion = lifecycleintents.AccountChoiceSchemaV2
+		in.Accounts = []lifecycleintents.AccountChoice{{Key: d.accountKey, Label: "Coordinator"}}
+		in.Profiles = []lifecycleintents.Profile{{ID: d.profile.ID, Version: d.profile.Version}}
+	}
+	runtime, err := d.service.RegisterRuntime(context.Background(), d.reporter, d.project, ownedLease, in)
 	if err != nil {
 		d.t.Fatalf("owned runtime registration: %v", err)
 	}
@@ -188,7 +221,7 @@ func (d *ownedDaemon) register() {
 func (d *ownedDaemon) worker() WorkerSelection {
 	return WorkerSelection{
 		WorkerName: "codex", RuntimeID: d.runtime.ID, RuntimeGeneration: d.runtime.Generation,
-		AccountLabel: d.runtime.AccountLabel, AccountKey: d.accountKey,
+		AccountLabel: d.accountLabel, AccountKey: d.accountKey,
 		ProfileID: d.profile.ID, ProfileVersion: d.profile.Version,
 		WorkspaceHandle: d.runtime.Workspaces[0].Handle,
 	}

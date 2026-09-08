@@ -340,6 +340,81 @@ func TestRecordBuiltReceiptAutomaticAPIKeyBoundToStarter(t *testing.T) {
 	}
 }
 
+func TestRecordBuiltReceiptAutomaticAPIKeyOmittingNamedAccountIsForbidden(t *testing.T) {
+	f := openAgentBridgeFixture(t, ModeAutomatic)
+	if f.batch.Worker.AccountKey == "" {
+		t.Fatal("named fixture stored an empty account key")
+	}
+	keyID := insertReceiptAPIKey(t, f.userID, "agent-controls:write")
+	machine := Actor{Kind: string(auth.PrincipalAPIKey), UserID: f.userID, APIKeyID: keyID}
+	missing := calendarReceipt("receipt-auto-omit-named-01")
+	missing.ExpectedRuntimeGeneration = f.batch.Worker.RuntimeGeneration
+	if _, err := f.svc.RecordBuiltReceipt(context.Background(), machine, f.projectID, f.batch.ID, missing); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("omitted named account: %v", err)
+	}
+	if snapshotStage(f.snapshot(), delivery.StageImplementation).PolicySatisfied {
+		t.Fatal("omitted named account mutated implementation")
+	}
+}
+
+func TestRecordBuiltReceiptAutomaticClassOnlyAPIKey(t *testing.T) {
+	f := openClassOnlyAgentBridgeFixture(t, ModeAutomatic)
+	if f.batch.Worker.AccountLabel != "claude_ai_max" || f.batch.Worker.AccountKey != "" {
+		t.Fatalf("class-only stored %+v", f.batch.Worker)
+	}
+	starter := insertReceiptAPIKey(t, f.userID, "agent-controls:write")
+	machine := Actor{Kind: string(auth.PrincipalAPIKey), UserID: f.userID, APIKeyID: starter}
+
+	invented := calendarReceipt("receipt-auto-class-invented-01")
+	invented.ExpectedAccountKey = "claude-home"
+	invented.ExpectedRuntimeGeneration = f.batch.Worker.RuntimeGeneration
+	if _, err := f.svc.RecordBuiltReceipt(context.Background(), machine, f.projectID, f.batch.ID, invented); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("invented class-only key: %v", err)
+	}
+
+	wrongGen := calendarReceipt("receipt-auto-class-wrong-gen-01")
+	wrongGen.ExpectedRuntimeGeneration = "not-this-generation"
+	if _, err := f.svc.RecordBuiltReceipt(context.Background(), machine, f.projectID, f.batch.ID, wrongGen); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("wrong generation: %v", err)
+	}
+
+	missingGen := calendarReceipt("receipt-auto-class-missing-gen-01")
+	if _, err := f.svc.RecordBuiltReceipt(context.Background(), machine, f.projectID, f.batch.ID, missingGen); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("missing generation: %v", err)
+	}
+
+	other, _ := f.secondEditor()
+	otherKey := insertReceiptAPIKey(t, other.UserID, "agent-controls:write")
+	foreign := calendarReceipt("receipt-auto-class-foreign-01")
+	foreign.ExpectedRuntimeGeneration = f.batch.Worker.RuntimeGeneration
+	if _, err := f.svc.RecordBuiltReceipt(context.Background(), Actor{Kind: string(auth.PrincipalAPIKey), UserID: other.UserID, APIKeyID: otherKey},
+		f.projectID, f.batch.ID, foreign); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("non-owner key: %v", err)
+	}
+
+	narrow := insertReceiptAPIKey(t, f.userID, "projects:write")
+	narrowReq := calendarReceipt("receipt-auto-class-narrow-01")
+	narrowReq.ExpectedRuntimeGeneration = f.batch.Worker.RuntimeGeneration
+	if _, err := f.svc.RecordBuiltReceipt(context.Background(), Actor{Kind: string(auth.PrincipalAPIKey), UserID: f.userID, APIKeyID: narrow},
+		f.projectID, f.batch.ID, narrowReq); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("narrow key: %v", err)
+	}
+
+	if snapshotStage(f.snapshot(), delivery.StageImplementation).PolicySatisfied {
+		t.Fatal("class-only negatives mutated implementation")
+	}
+
+	ok := calendarReceipt("receipt-auto-class-ok-01")
+	ok.ExpectedRuntimeGeneration = f.batch.Worker.RuntimeGeneration
+	got, err := f.svc.RecordBuiltReceipt(context.Background(), machine, f.projectID, f.batch.ID, ok)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !snapshotStage(f.snapshot(), delivery.StageQA).PolicySatisfied {
+		t.Fatalf("class-only empty assertion failed: %+v", got.Progress)
+	}
+}
+
 func TestRecordBuiltReceiptAutomaticRejectsWrongOwnerWorkerGeneration(t *testing.T) {
 	f := openAgentBridgeFixture(t, ModeAutomatic)
 	other, _ := f.secondEditor()

@@ -42,6 +42,86 @@ func httpBuiltReceiptJSON(key string) map[string]any {
 	}
 }
 
+func postBaselineBearer(t *testing.T, ts *testServer, token, path string, body any) *http.Response {
+	t.Helper()
+	raw, err := json.Marshal(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req, err := http.NewRequest(http.MethodPost, ts.srv.URL+path, strings.NewReader(string(raw)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return resp
+}
+
+func mintHTTPAPIKey(t *testing.T, ts *testServer, cookie, name string, scopes []string) string {
+	t.Helper()
+	var keyBody struct {
+		Key string `json:"key"`
+	}
+	decode(t, ts.post(t, "/api/auth/api-keys", cookie, map[string]any{"name": name, "scopes": scopes}), &keyBody)
+	if keyBody.Key == "" {
+		t.Fatal("api key missing")
+	}
+	return keyBody.Key
+}
+
+func startAutomaticHTTPBatch(t *testing.T, ts *testServer, projectID int64, daemon *ownedDaemon, key string) baselinebatch.Batch {
+	t.Helper()
+	optIn(t, ts, projectID)
+	handover, _ := validHandover(t)
+	imported := postBaseline(t, ts, ts.adminCookie, fmt.Sprintf("/api/projects/%d/baseline-batches/import", projectID),
+		map[string]any{"handover": json.RawMessage(handover)})
+	if imported.StatusCode != 201 {
+		t.Fatalf("import=%d %s", imported.StatusCode, baselineReadBody(imported))
+	}
+	var draft baselinebatch.Draft
+	decode(t, imported, &draft)
+	worker := daemon.workerSelection("codex")
+	if resp := patchBaseline(t, ts, ts.adminCookie, fmt.Sprintf("/api/projects/%d/baseline-batches/%d", projectID, draft.ID),
+		map[string]any{"execution_mode": "automatic", "worker": worker}); resp.StatusCode != 200 {
+		t.Fatal(baselineReadBody(resp))
+	}
+	review := postBaseline(t, ts, ts.adminCookie, fmt.Sprintf("/api/projects/%d/baseline-batches/%d/review", projectID, draft.ID),
+		map[string]any{"execution_mode": "automatic", "worker": worker, "selected_requirement_refs": []string{"req.login"}})
+	if review.StatusCode != 200 {
+		t.Fatalf("review=%d %s", review.StatusCode, baselineReadBody(review))
+	}
+	decode(t, review, &draft)
+	if draft.Worker.AccountKey != daemon.accountKey || draft.Worker.AccountLabel != daemon.accountLabel {
+		t.Fatalf("review stored %+v", draft.Worker)
+	}
+	if resp := postBaseline(t, ts, ts.adminCookie, fmt.Sprintf("/api/projects/%d/baseline-batches/%d/readiness", projectID, draft.ID), nil); resp.StatusCode != 200 {
+		t.Fatal(baselineReadBody(resp))
+	}
+	if daemon.step(nil) == nil {
+		t.Fatal("no readiness")
+	}
+	started := postBaseline(t, ts, ts.adminCookie, fmt.Sprintf("/api/projects/%d/baseline-batches/%d/start", projectID, draft.ID), map[string]any{
+		"idempotency_key": key, "review_id": *draft.ReviewID, "draft_revision": draft.Revision,
+		"confirm": true, "content_digest": draft.Baseline.ContentDigest, "revision_seal": draft.Baseline.RevisionSeal,
+		"execution_mode": "automatic", "selected_requirement_refs": []string{"req.login"}, "worker": worker,
+	})
+	if started.StatusCode != 200 {
+		t.Fatalf("start=%d %s", started.StatusCode, baselineReadBody(started))
+	}
+	var batch baselinebatch.Batch
+	decode(t, started, &batch)
+	if daemon.step(nil) == nil {
+		t.Fatal("no start")
+	}
+	got := ts.get(t, fmt.Sprintf("/api/projects/%d/baseline-batches/batches/%d", projectID, batch.ID), ts.adminCookie)
+	decode(t, got, &batch)
+	return batch
+}
+
 func postHTTPBuiltReceipt(t *testing.T, ts *testServer, projectID int64, batch baselinebatch.Batch) baselinebatch.Batch {
 	t.Helper()
 	resp := postBaseline(t, ts, ts.adminCookie, fmt.Sprintf("/api/projects/%d/baseline-batches/batches/%d/built-receipt", projectID, batch.ID),
@@ -457,6 +537,99 @@ func TestBaselineBatchBuiltReceiptAPIKeyOnAssistedForbidden(t *testing.T) {
 	}
 	if resp.StatusCode != http.StatusForbidden {
 		t.Fatalf("assisted API key receipt=%d %s", resp.StatusCode, baselineReadBody(resp))
+	}
+}
+
+func TestBaselineBatchBuiltReceiptAutomaticClassOnlyAPIKey(t *testing.T) {
+	ts := newTestServer(t)
+	userID := promoteSuperAdmin(t, "admin")
+	projectID := responseID(t, ts.post(t, "/api/projects", ts.adminCookie, map[string]string{"name": "Class-only receipt", "key": "RCC"}))
+	if _, err := db.DB.Exec(`INSERT INTO project_agents(project_id,name) VALUES(?,'codex')`, projectID); err != nil {
+		t.Fatal(err)
+	}
+	var memberID int64
+	if err := db.DB.QueryRow(`SELECT id FROM users WHERE username='member'`).Scan(&memberID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.DB.Exec(`INSERT INTO project_members(project_id,user_id,access_level) VALUES(?,?,'editor')
+		ON CONFLICT(project_id,user_id) DO UPDATE SET access_level='editor'`, projectID, memberID); err != nil {
+		t.Fatal(err)
+	}
+	daemon := newOwnedClassOnlyClaudeDaemon(t, projectID, userID)
+	batch := startAutomaticHTTPBatch(t, ts, projectID, daemon, "class-only-receipt-start")
+	if batch.Worker.AccountLabel != "claude_ai_max" || batch.Worker.AccountKey != "" {
+		t.Fatalf("invented class-only key: %+v", batch.Worker)
+	}
+	path := fmt.Sprintf("/api/projects/%d/baseline-batches/batches/%d/built-receipt", projectID, batch.ID)
+	starter := mintHTTPAPIKey(t, ts, ts.adminCookie, "class-only-bot", []string{auth.ScopeAgentControlsWrite})
+	foreign := mintHTTPAPIKey(t, ts, ts.memberCookie, "class-only-foreign", []string{auth.ScopeAgentControlsWrite})
+	narrow := mintHTTPAPIKey(t, ts, ts.adminCookie, "class-only-narrow", []string{auth.ScopeProjectsWrite})
+
+	invented := httpBuiltReceiptJSON("class-only-invented")
+	invented["expected_account_key"] = "claude-home"
+	invented["expected_runtime_generation"] = batch.Worker.RuntimeGeneration
+	if resp := postBaselineBearer(t, ts, starter, path, invented); resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("invented key=%d %s", resp.StatusCode, baselineReadBody(resp))
+	}
+
+	wrongGen := httpBuiltReceiptJSON("class-only-wrong-gen")
+	wrongGen["expected_runtime_generation"] = "00000000-0000-4000-8000-000000000000"
+	if resp := postBaselineBearer(t, ts, starter, path, wrongGen); resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("wrong generation=%d %s", resp.StatusCode, baselineReadBody(resp))
+	}
+
+	missingGen := httpBuiltReceiptJSON("class-only-missing-gen")
+	if resp := postBaselineBearer(t, ts, starter, path, missingGen); resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("missing generation=%d %s", resp.StatusCode, baselineReadBody(resp))
+	}
+
+	okBody := httpBuiltReceiptJSON("class-only-ok")
+	okBody["expected_runtime_generation"] = batch.Worker.RuntimeGeneration
+	if resp := postBaselineBearer(t, ts, foreign, path, okBody); resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("non-owner=%d %s", resp.StatusCode, baselineReadBody(resp))
+	}
+	if resp := postBaselineBearer(t, ts, narrow, path, okBody); resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("narrow key=%d %s", resp.StatusCode, baselineReadBody(resp))
+	}
+	if snapshotStageMust(t, batch.IssueID, delivery.StageImplementation).PolicySatisfied {
+		t.Fatal("class-only negatives mutated implementation")
+	}
+
+	if resp := postBaselineBearer(t, ts, starter, path, okBody); resp.StatusCode != 200 {
+		t.Fatalf("class-only empty assertion=%d %s", resp.StatusCode, baselineReadBody(resp))
+	}
+	if !snapshotStageMust(t, batch.IssueID, delivery.StageQA).PolicySatisfied {
+		t.Fatal("class-only receipt did not satisfy QA")
+	}
+}
+
+func TestBaselineBatchBuiltReceiptAutomaticNamedAPIKeyRequiresAccount(t *testing.T) {
+	ts := newTestServer(t)
+	userID := promoteSuperAdmin(t, "admin")
+	projectID := responseID(t, ts.post(t, "/api/projects", ts.adminCookie, map[string]string{"name": "Named receipt", "key": "RCN"}))
+	if _, err := db.DB.Exec(`INSERT INTO project_agents(project_id,name) VALUES(?,'codex')`, projectID); err != nil {
+		t.Fatal(err)
+	}
+	daemon := newOwnedDaemon(t, projectID, userID)
+	batch := startAutomaticHTTPBatch(t, ts, projectID, daemon, "named-receipt-start")
+	if batch.Worker.AccountKey == "" {
+		t.Fatal("named automatic stored an empty account key")
+	}
+	path := fmt.Sprintf("/api/projects/%d/baseline-batches/batches/%d/built-receipt", projectID, batch.ID)
+	starter := mintHTTPAPIKey(t, ts, ts.adminCookie, "named-bot", []string{auth.ScopeAgentControlsWrite})
+	omitNamed := httpBuiltReceiptJSON("named-omit-key")
+	omitNamed["expected_runtime_generation"] = batch.Worker.RuntimeGeneration
+	if resp := postBaselineBearer(t, ts, starter, path, omitNamed); resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("omitted named key=%d %s", resp.StatusCode, baselineReadBody(resp))
+	}
+	if snapshotStageMust(t, batch.IssueID, delivery.StageImplementation).PolicySatisfied {
+		t.Fatal("omitted named key mutated implementation")
+	}
+	matchNamed := httpBuiltReceiptJSON("named-match-key")
+	matchNamed["expected_account_key"] = batch.Worker.AccountKey
+	matchNamed["expected_runtime_generation"] = batch.Worker.RuntimeGeneration
+	if resp := postBaselineBearer(t, ts, starter, path, matchNamed); resp.StatusCode != 200 {
+		t.Fatalf("named matching key=%d %s", resp.StatusCode, baselineReadBody(resp))
 	}
 }
 
