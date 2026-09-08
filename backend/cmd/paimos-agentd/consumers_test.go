@@ -5,11 +5,13 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io"
 	"net/url"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -18,22 +20,195 @@ import (
 	"github.com/google/uuid"
 	"github.com/inspr-at/paimos/backend/agentd"
 	"github.com/inspr-at/paimos/backend/agentmessage"
+	paimosdb "github.com/inspr-at/paimos/backend/db"
+	"github.com/inspr-at/paimos/backend/managedharness"
 	"github.com/inspr-at/paimos/backend/models"
 	"github.com/inspr-at/paimos/backend/runtimeconsumer"
+	"github.com/inspr-at/paimos/backend/secretvault"
 )
 
 type nativeFixtureProcess struct {
 	done            chan struct{}
 	once            sync.Once
 	inboxes, steers int
+	busy, stayReady bool
+	effects         []string
 }
 
 func (p *nativeFixtureProcess) PID() int         { return 4242 }
-func (p *nativeFixtureProcess) InboxReady() bool { return p.inboxes == 0 }
+func (p *nativeFixtureProcess) InboxReady() bool { return !p.busy && (p.stayReady || p.inboxes == 0) }
 func (p *nativeFixtureProcess) Wait() error      { <-p.done; return nil }
 func (p *nativeFixtureProcess) Inbox(_ context.Context, r agentd.ControlRequest) (agentd.ControlEffect, error) {
 	p.inboxes++
+	p.effects = append(p.effects, r.CorrelationID)
 	return agentd.ControlEffect{Primitive: "codex queue --thread", CorrelationID: r.CorrelationID}, nil
+}
+
+func TestNativeConsumersWaitForBusyReceiverWithoutLeasingFIFO(t *testing.T) {
+	previousDB := paimosdb.DB
+	t.Setenv("DATA_DIR", t.TempDir())
+	t.Setenv("PAIMOS_TEST_MODE", "1")
+	t.Setenv("PAIMOS_AGENT_BUS_INSTANCE", "fixture")
+	t.Setenv("PAIMOS_SECRET_KEY", base64.StdEncoding.EncodeToString(make([]byte, 32)))
+	secretvault.ResetForTest()
+	t.Cleanup(func() {
+		secretvault.ResetForTest()
+		if paimosdb.DB != nil {
+			_ = paimosdb.DB.Close()
+		}
+		paimosdb.DB = previousDB
+	})
+	if err := paimosdb.Open(); err != nil {
+		t.Fatal(err)
+	}
+	projectResult, err := paimosdb.DB.Exec(`INSERT INTO projects(name,key) VALUES('Busy fixture','BSY')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	project, _ := projectResult.LastInsertId()
+	if _, err := paimosdb.DB.Exec(`INSERT INTO project_agents(project_id,name) VALUES(?,'worker'),(?,'sender')`, project, project); err != nil {
+		t.Fatal(err)
+	}
+
+	root := t.TempDir()
+	process := &nativeFixtureProcess{done: make(chan struct{}), busy: true, stayReady: true}
+	controller, err := agentd.NewSupervisor(agentd.SupervisorConfig{Instance: "fixture", StateRoot: root, Adapters: []agentd.Adapter{nativeFixtureCursorAdapter{process}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer controller.Close(context.Background())
+	local, err := controller.Start(context.Background(), agentd.StartRequest{Adapter: "cursor", Identity: "cursor:worker", ProjectID: project, Workspace: t.TempDir(), Prompt: "fixture"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := managedharness.NewService(paimosdb.DB)
+	remote, _, err := server.Register(context.Background(), managedharness.RegisterInput{
+		ProjectID: project, AgentName: "worker", Harness: "cursor", Host: "fixture-host", SessionRef: "fixture-private-thread",
+		WorkerLease: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", ManagementMode: managedharness.ManagementManaged,
+		Role: managedharness.RoleWorker, SteerMode: managedharness.SteerNone, Capabilities: models.HarnessCapabilities{Inbox: true, Status: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := controller.CheckpointReporter(context.Background(), local.ID, agentd.ControlRequest{Instance: "fixture", ProjectID: project, Identity: "cursor:worker"}, agentd.ReporterState{PublicSessionID: remote.ID, Capabilities: []agentd.Capability{agentd.CapabilityInbox, agentd.CapabilityStatus}}); err != nil {
+		t.Fatal(err)
+	}
+	bus := agentmessage.NewService(paimosdb.DB)
+	if err := bus.AllowSender(context.Background(), project, "cursor:worker", "paimos:sender"); err != nil {
+		t.Fatal(err)
+	}
+	for _, body := range []string{"first", "second", "third"} {
+		if _, err := bus.SendEnvelope(context.Background(), agentmessage.SendEnvelopeInput{ProjectID: project, Sender: "sender", To: "cursor:worker", Body: body, DeliveryLevel: "simple"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	reporter, err := newCLIReporterWithRunner("fixture", "fixture-host", "/fixture/paimos", nil, func(_ context.Context, _ string, args, _ []string, _ io.Reader) ([]byte, error) {
+		if args[1] == "curl" {
+			route, err := url.Parse(args[2])
+			if err != nil {
+				return nil, err
+			}
+			switch {
+			case strings.HasSuffix(route.Path, "/message-targets"):
+				targets, err := bus.ListTargets(context.Background(), project, route.Query().Get("address"))
+				if err != nil {
+					return nil, err
+				}
+				return json.Marshal(map[string]any{"targets": targets, "count": len(targets)})
+			case strings.HasSuffix(route.Path, "/message-deliveries"):
+				deliveries, err := bus.ListDeliveryStatus(context.Background(), project)
+				if err != nil {
+					return nil, err
+				}
+				return json.Marshal(map[string]any{"deliveries": deliveries, "count": len(deliveries)})
+			}
+		}
+		switch args[2] {
+		case "status":
+			return json.Marshal(remote)
+		case "drain":
+			page, err := bus.ListInbox(context.Background(), agentmessage.InboxInput{ProjectID: project, Address: "cursor:worker", Agent: "worker", WorkerAdapter: agentmessage.AdapterManagedHarness, TargetID: remote.MessageTargetID, Limit: 100})
+			if err != nil {
+				return nil, err
+			}
+			for i := range page.Messages {
+				if page.Messages[i].DeliveryWork != nil {
+					page.Messages[i].DeliveryWork.TargetRef = ""
+				}
+			}
+			return json.Marshal(page)
+		case "complete-delivery":
+			cursor, _ := strconv.ParseInt(args[slices.Index(args, "--cursor")+1], 10, 64)
+			state, err := bus.CompleteLocalDelivery(context.Background(), agentmessage.CompleteDeliveryInput{ProjectID: project, Address: "cursor:worker", Agent: "worker", Cursor: cursor, DeliveryID: args[slices.Index(args, "--delivery-id")+1], EffectiveLevel: args[slices.Index(args, "--effective-level")+1], FallbackReason: args[slices.Index(args, "--fallback-reason")+1], TargetID: remote.MessageTargetID})
+			if err != nil {
+				return nil, err
+			}
+			return json.Marshal(state)
+		}
+		return nil, errors.New("unexpected fixture command")
+	}, newMemoryReporterLeaseStore())
+	if err != nil {
+		t.Fatal(err)
+	}
+	consumers, err := newNativeConsumers(root, "fixture", reporter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer consumers.supervisor.Stop()
+	consumers.controller = controller
+	for range 8 {
+		consumers.reconcile(context.Background())
+	}
+	statuses, err := bus.ListDeliveryStatus(context.Background(), project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, status := range statuses {
+		if status.State != "pending" || status.AttemptCount != 0 {
+			t.Fatalf("busy receiver consumed a server attempt: %#v", status)
+		}
+	}
+	if process.inboxes != 0 || consumers.supervisor.Snapshot()[0].Failures != 0 {
+		t.Fatal("busy wait executed an effect or counted a circuit failure")
+	}
+
+	process.busy = false // Models an idle transition after the long turn is cancelled.
+	for range len(statuses) + 2 {
+		consumers.reconcile(context.Background())
+	}
+	statuses, err = bus.ListDeliveryStatus(context.Background(), project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(process.effects) != len(statuses) {
+		t.Fatalf("effects=%d deliveries=%d", len(process.effects), len(statuses))
+	}
+	for i, status := range statuses {
+		if status.State != "handed_off" || status.AttemptCount != 1 || process.effects[i] != status.DeliveryID {
+			t.Fatalf("delivery %d lost FIFO/exactly-once semantics: status=%#v effects=%#v", i, status, process.effects)
+		}
+	}
+
+	// Reproduce the durable server shape left by the released implementation:
+	// a pre-effect lease on the FIFO head and later rows marked fifo_blocked.
+	for _, body := range []string{"poisoned head", "blocked follower"} {
+		if _, err := bus.SendEnvelope(context.Background(), agentmessage.SendEnvelopeInput{ProjectID: project, Sender: "sender", To: "cursor:worker", Body: body, DeliveryLevel: "simple"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := bus.ListInbox(context.Background(), agentmessage.InboxInput{ProjectID: project, Address: "cursor:worker", Agent: "worker", WorkerAdapter: agentmessage.AdapterManagedHarness, TargetID: remote.MessageTargetID, Limit: 100}); err != nil {
+		t.Fatal(err)
+	}
+	before := len(process.effects)
+	consumers.reconcile(context.Background())
+	if len(process.effects) != before || consumers.supervisor.Snapshot()[0].Failures != 0 {
+		t.Fatal("live leased head plus fifo_blocked followers was misclassified as a conflict")
+	}
+	status := controller.Status()
+	binding := runtimeconsumer.Binding{Instance: status.Instance, Machine: reporter.host, Generation: status.DaemonID, Session: local.ID, Address: local.Identity, Project: project, Kind: "primary", Revision: remote.ID}
+	if err := consumers.RecoverCircuit(context.Background(), binding, runtimeconsumer.Evidence{Reason: "singleton_conflict"}); err != nil {
+		t.Fatal("durable old-bug shape was not accepted for bounded repair", err)
+	}
 }
 func (p *nativeFixtureProcess) Steer(_ context.Context, r agentd.ControlRequest) (agentd.ControlEffect, error) {
 	p.steers++
@@ -55,6 +230,18 @@ func (nativeFixtureAdapter) Capabilities() []agentd.Capability {
 }
 func (a nativeFixtureAdapter) Start(_ context.Context, _ agentd.StartRequest, observe func(agentd.AdapterEvent)) (agentd.Process, error) {
 	observe(agentd.AdapterEvent{Kind: agentd.EventSessionStarted, HarnessSessionID: "fixture-vendor-ref"})
+	observe(agentd.AdapterEvent{Kind: agentd.EventTurnStarted})
+	return a.process, nil
+}
+
+type nativeFixtureCursorAdapter struct{ process *nativeFixtureProcess }
+
+func (nativeFixtureCursorAdapter) Name() string { return "cursor" }
+func (nativeFixtureCursorAdapter) Capabilities() []agentd.Capability {
+	return []agentd.Capability{agentd.CapabilityInbox, agentd.CapabilityStatus, agentd.CapabilityStop}
+}
+func (a nativeFixtureCursorAdapter) Start(_ context.Context, _ agentd.StartRequest, observe func(agentd.AdapterEvent)) (agentd.Process, error) {
+	observe(agentd.AdapterEvent{Kind: agentd.EventSessionStarted, HarnessSessionID: "fixture-cursor-ref"})
 	observe(agentd.AdapterEvent{Kind: agentd.EventTurnStarted})
 	return a.process, nil
 }
