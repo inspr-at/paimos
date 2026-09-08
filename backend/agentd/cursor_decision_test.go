@@ -130,6 +130,61 @@ func TestCursorPermissionIncompleteContentCannotApprove(t *testing.T) {
 	}
 }
 
+func TestCursorPermissionMissingAndNullContentHandling(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		setContent bool
+		incomplete bool
+		shape      string
+	}{
+		{name: "missing", incomplete: false, shape: "absent"},
+		{name: "null", setContent: true, incomplete: true, shape: "null"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			params := cursorPermissionTestParams("execute", "Run focused command", map[string]any{"command": "go test ./agentd"}, nil)
+			if tc.setContent {
+				params["toolCall"].(map[string]any)["content"] = nil
+			}
+			held, diagnostic, ok := parseCursorPermissionDetailed(cursorPermissionTestMessage(t, params), "sess-owned", "gen-owned")
+			if !ok || diagnostic != nil || held == nil {
+				t.Fatalf("ok=%v diagnostic=%+v held=%+v", ok, diagnostic, held)
+			}
+			if held.inspect.Incomplete != tc.incomplete || held.inspect.ToolContent != "" {
+				t.Fatalf("inspect=%+v", held.inspect)
+			}
+			if shape := cursorPermissionShape(cursorPermissionTestMessage(t, params).Params); shape.ContentType != tc.shape {
+				t.Fatalf("content shape=%q, want %q", shape.ContentType, tc.shape)
+			}
+
+			if tc.incomplete {
+				held.public.ExpiresAt = time.Now().Add(time.Minute)
+				writer := &cursorDecisionWriteCloser{}
+				process := &cursorProcess{
+					generation: "gen-owned", sessionID: "sess-owned", stdin: writer,
+					held: map[string]*cursorHeldDecision{held.public.RequestID: held}, evidence: &cursorEvidenceStore{},
+				}
+				answer := DecisionAnswer{
+					RequestID: held.public.RequestID, Generation: "gen-owned", Digest: held.public.Digest,
+					OptionID: "allow-once", Authority: DecisionAuthorityLocalOperator,
+				}
+				if _, err := process.Answer(context.Background(), answer); !errors.Is(err, ErrDecisionIncomplete) {
+					t.Fatalf("null-content approval err=%v", err)
+				}
+				if len(process.PendingDecisions()) != 1 {
+					t.Fatal("failed approval consumed the null-content request")
+				}
+				answer.OptionID = "reject-once"
+				if _, err := process.Answer(context.Background(), answer); err != nil {
+					t.Fatalf("null-content rejection err=%v", err)
+				}
+				if len(process.PendingDecisions()) != 0 || !strings.Contains(writer.String(), `"optionId":"reject-once"`) {
+					t.Fatalf("pending=%+v response=%q", process.PendingDecisions(), writer.String())
+				}
+			}
+		})
+	}
+}
+
 func TestCursorPermissionMalformedDiagnosticsAreValueFree(t *testing.T) {
 	fixtures := []struct {
 		name       string

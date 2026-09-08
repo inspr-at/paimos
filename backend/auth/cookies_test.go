@@ -116,19 +116,34 @@ func TestSharedOriginLogoutDoesNotExpireGenericCookies(t *testing.T) {
 }
 
 func TestSafeOIDCReturnPathPreservesQuery(t *testing.T) {
-	prefix, _ := publicbase.Parse("/paimos")
-	publicbase.SetCurrent(prefix)
-	t.Cleanup(func() { publicbase.SetCurrent("") })
+	for _, tc := range []struct {
+		name   string
+		mount  string
+		wanted string
+	}{
+		{name: "root", wanted: "/projects/6?tab=overview#baseline-batch"},
+		{name: "mounted", mount: "/paimos", wanted: "/paimos/projects/6?tab=overview#baseline-batch"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			prefix, err := publicbase.Parse(tc.mount)
+			if err != nil {
+				t.Fatal(err)
+			}
+			publicbase.SetCurrent(prefix)
+			t.Cleanup(func() { publicbase.SetCurrent("") })
 
-	got := safeOIDCReturnPath("/projects/6?tab=overview#baseline-batch")
-	if got != "/paimos/projects/6?tab=overview#baseline-batch" {
-		t.Fatalf("got %q", got)
-	}
-	if safeOIDCReturnPath("//evil.example") != "" {
-		t.Fatal("protocol-relative return must be rejected")
-	}
-	if safeOIDCReturnPath("/login") != "" {
-		t.Fatal("login loop must be rejected")
+			if got := safeOIDCReturnPath("/projects/6?tab=overview#baseline-batch"); got != tc.wanted {
+				t.Fatalf("got %q, want %q", got, tc.wanted)
+			}
+			for _, invalid := range []string{"//evil.example", `/\evil.example`, `/\/evil.example`, `/%5Cevil.example`, `/%5c/evil.example`} {
+				if got := safeOIDCReturnPath(invalid); got != "" {
+					t.Fatalf("unsafe return %q accepted as %q", invalid, got)
+				}
+			}
+			if safeOIDCReturnPath("/login") != "" {
+				t.Fatal("login loop must be rejected")
+			}
+		})
 	}
 }
 
@@ -137,14 +152,23 @@ func TestBrowserPathJoinsPrefix(t *testing.T) {
 	if got := browserPath("/login"); got != "/login" {
 		t.Fatalf("standalone login = %q", got)
 	}
+	if got := browserPath(`/\evil.example`); got != "/" {
+		t.Fatalf("standalone unsafe browser path = %q", got)
+	}
 	prefix, _ := publicbase.Parse("/paimos")
 	publicbase.SetCurrent(prefix)
 	t.Cleanup(func() { publicbase.SetCurrent("") })
 	if got := browserPath("/login"); got != "/paimos/login" {
 		t.Fatalf("prefixed login = %q", got)
 	}
+	if got := browserPath(`/\/evil.example`); got != "/paimos" {
+		t.Fatalf("prefixed unsafe browser path = %q", got)
+	}
 	if got := browserPath("https://idp.example/end"); got != "https://idp.example/end" {
 		t.Fatalf("absolute URL rewritten: %q", got)
+	}
+	if got := browserPath(`https://idp.example/trusted\path`); got != "/paimos" {
+		t.Fatalf("unsafe absolute browser path = %q", got)
 	}
 }
 

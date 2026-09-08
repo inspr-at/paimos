@@ -119,6 +119,9 @@ func clearSessionCookies(w http.ResponseWriter) {
 // Fully-qualified http(s) URLs are left unchanged (operator-owned).
 func browserPath(appPath string) string {
 	trimmed := strings.TrimSpace(appPath)
+	if strings.ContainsRune(trimmed, '\\') {
+		return publicbase.Current().Join("/")
+	}
 	if strings.HasPrefix(trimmed, "https://") || strings.HasPrefix(trimmed, "http://") {
 		return trimmed
 	}
@@ -126,11 +129,11 @@ func browserPath(appPath string) string {
 }
 
 func safeOIDCReturnPath(raw string) string {
-	if raw == "" || !strings.HasPrefix(raw, "/") || strings.HasPrefix(raw, "//") {
+	if raw == "" || !strings.HasPrefix(raw, "/") || strings.HasPrefix(raw, "//") || strings.ContainsRune(raw, '\\') {
 		return ""
 	}
 	parsed, err := url.Parse(raw)
-	if err != nil || parsed.Scheme != "" || parsed.Host != "" {
+	if err != nil || parsed.Scheme != "" || parsed.Host != "" || strings.ContainsRune(parsed.Path, '\\') {
 		return ""
 	}
 	if parsed.Path == "/login" || strings.HasPrefix(parsed.Path, "/login/") {

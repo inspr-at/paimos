@@ -684,7 +684,7 @@ func inspectableCursorContent(raw json.RawMessage) (string, bool, bool) {
 		return "", true, false
 	}
 	if bytes.Equal(raw, []byte("null")) {
-		return "", false, false
+		return "", true, true
 	}
 	var blocks []json.RawMessage
 	if json.Unmarshal(raw, &blocks) != nil {

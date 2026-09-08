@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/backend/db"
+	"github.com/inspr-at/paimos/backend/publicbase"
 )
 
 type oidcMockIssuer struct {
@@ -231,6 +232,69 @@ func TestOIDCLoginBuildsPKCERedirect(t *testing.T) {
 	}
 	if _, present := q["prompt"]; present {
 		t.Fatalf("prompt sent without OIDC_PROMPT: %s", loc.RawQuery)
+	}
+}
+
+func TestOIDCReturnRejectsBackslashQueryAndCookie(t *testing.T) {
+	for _, tc := range []struct {
+		name             string
+		mount            string
+		redirectURL      string
+		fallbackLocation string
+	}{
+		{
+			name:             "root",
+			redirectURL:      "https://paimos.example.test/api/auth/oidc/callback",
+			fallbackLocation: "/after-sso",
+		},
+		{
+			name:             "mounted",
+			mount:            "/paimos",
+			redirectURL:      "https://paimos.example.test/paimos/api/auth/oidc/callback",
+			fallbackLocation: "/paimos/after-sso",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			issuer := newOIDCMockIssuer(t, map[string]any{
+				"sub": "sub-existing", "email": "person@example.test", "email_verified": true,
+			})
+			setupOIDCTest(t, issuer)
+			prefix, err := publicbase.Parse(tc.mount)
+			if err != nil {
+				t.Fatal(err)
+			}
+			publicbase.SetCurrent(prefix)
+			t.Cleanup(func() { publicbase.SetCurrent("") })
+			t.Setenv("OIDC_REDIRECT_URL", tc.redirectURL)
+			seedOIDCUser(t, "person", "person@example.test", "member", "active")
+
+			for _, invalid := range []string{`/\evil.example`, `/\/evil.example`} {
+				req := httptest.NewRequest(http.MethodGet, "/api/auth/oidc/login?redirect="+url.QueryEscape(invalid), nil)
+				rec := httptest.NewRecorder()
+				OIDCLogin(rec, req)
+				if rec.Code != http.StatusFound {
+					t.Fatalf("login status = %d, want 302; body=%s", rec.Code, rec.Body.String())
+				}
+				for _, cookie := range rec.Result().Cookies() {
+					if cookie.Name == oidcReturnCookie || cookie.Name == legacyOIDCReturnCookie {
+						t.Fatalf("unsafe query %q set return cookie %q=%q", invalid, cookie.Name, cookie.Value)
+					}
+				}
+
+				loginRec, loc := startOIDCLogin(t)
+				callbackReq := httptest.NewRequest(http.MethodGet, "/api/auth/oidc/callback?code=mock-code&state="+url.QueryEscape(loc.Query().Get("state")), nil)
+				for _, cookie := range loginRec.Result().Cookies() {
+					callbackReq.AddCookie(cookie)
+				}
+				cookieValue := strings.ReplaceAll(invalid, `\`, "%5C")
+				callbackReq.AddCookie(&http.Cookie{Name: oidcReturnCookie, Value: cookieValue})
+				callbackRec := httptest.NewRecorder()
+				OIDCCallback(callbackRec, callbackReq)
+				if got := callbackRec.Header().Get("Location"); got != tc.fallbackLocation {
+					t.Fatalf("unsafe cookie %q redirected to %q, want %q", cookieValue, got, tc.fallbackLocation)
+				}
+			}
+		})
 	}
 }
 
