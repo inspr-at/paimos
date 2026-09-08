@@ -249,6 +249,19 @@ run_package() {
       # existing affected runners (or four sequential processes in lane=all).
       run_race_shards ./lifecycleintents '^(Test|Fuzz)' 4
       ;;
+    ./delivery)
+      # Every delivery fixture rebuilds the complete migration chain. PR 243 CI
+      # run 34171714168 hit the bounded 8m package timeout in db.Open while
+      # TestDeliveryPrivacyBackstopMatchesStoreValidation was still migrating —
+      # sqlite parser work, not a deadlock. Keep every discovered test.
+      run_race_shards ./delivery '^(Test|Fuzz)' 4
+      ;;
+    ./baselinebatch)
+      # Same cumulative migration budget. The same CI run timed out at 8m in
+      # applyForeignKeyRebuildMigration during
+      # TestBridgeAssistedUnavailableHandoffConfig. Keep every discovered test.
+      run_race_shards ./baselinebatch '^(Test|Fuzz)' 4
+      ;;
     ./managedharness)
       # Every managed-harness test rebuilds the complete SQLite migration chain.
       # Keep PR race instrumentation on the package's actual concurrency and
@@ -273,7 +286,10 @@ run_selected_package() {
       ;;
     affected)
       if [[ "$import_path" != "$MODULE/db" && "$import_path" != "$MODULE/handlers" && "$import_path" != "$MODULE/managedharness" ]]; then
-        if [[ "$import_path" == "$MODULE" || "$import_path" == "$MODULE/lifecycleintents" ]] || (( affected_index % SELECTED_SHARD_COUNT == SELECTED_SHARD )); then
+        if [[ "$import_path" == "$MODULE" ||
+              "$import_path" == "$MODULE/lifecycleintents" ||
+              "$import_path" == "$MODULE/delivery" ||
+              "$import_path" == "$MODULE/baselinebatch" ]] || (( affected_index % SELECTED_SHARD_COUNT == SELECTED_SHARD )); then
           run_package "$import_path"
         fi
         affected_index=$((affected_index + 1))

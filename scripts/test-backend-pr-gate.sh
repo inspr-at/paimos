@@ -495,6 +495,54 @@ lifecycle_all_plan=$("$RACE_RUNNER" --dry-run --lane=all github.com/inspr-at/pai
 [[ "$(grep -c '^go test -race -count=1 -timeout=8m ./lifecycleintents -run ' <<<"$lifecycle_all_plan")" -eq 4 ]] ||
   fail 'all-lane lifecycle race did not retain all four bounded invocations'
 assert_plan_covers_discovery_once 'all lifecycle race' "$lifecycle_all_plan" ./lifecycleintents '^(Test|Fuzz)'
+# Delivery and baseline-batch fixtures each rebuild all migrations. CI run
+# 34171714168 exhausted the 8m PR package timeout in db.Open/migrateThrough
+# (sqlite parser / foreign-key rebuild), not a deadlock. Split the complete
+# discovered set over the existing four runners without dropping tests.
+for sharded in delivery baselinebatch; do
+  package="./$sharded"
+  import="github.com/inspr-at/paimos/backend/$sharded"
+  sharded_race_plan=
+  for shard in 0 1 2 3; do
+    plan=$("$RACE_RUNNER" --dry-run --lane=affected --shard="$shard/4" \
+      github.com/inspr-at/paimos/backend/agentd \
+      "$import" \
+      github.com/inspr-at/paimos/backend/localjournal)
+    [[ "$(grep -c "^go test -race -count=1 -timeout=8m $package -run " <<<"$plan")" -eq 1 ]] ||
+      fail "$sharded race shard $shard did not retain one bounded invocation"
+    sharded_race_plan+="$plan"$'\n'
+  done
+  sharded_only_plan=$(grep "^go test -race .* $package -run " <<<"$sharded_race_plan")
+  assert_plan_covers_discovery_once "affected $sharded race" "$sharded_only_plan" "$package" '^(Test|Fuzz)'
+  [[ "$(grep -c '^go test -race .* ./agentd$' <<<"$sharded_race_plan")" -eq 1 &&
+    "$(grep -c '^go test -race .* ./localjournal$' <<<"$sharded_race_plan")" -eq 1 ]] ||
+    fail "$sharded sharding duplicated or omitted another affected package"
+  sharded_first_count=$(plan_test_names "$(sed -n '1p' <<<"$sharded_only_plan")" | wc -l)
+  sharded_last_count=$(plan_test_names "$(sed -n '4p' <<<"$sharded_only_plan")" | wc -l)
+  (( sharded_first_count >= sharded_last_count && sharded_first_count - sharded_last_count <= 1 )) ||
+    fail "$sharded test names were not balanced across the four race runners"
+  for shard in 0 1 2 3; do
+    plan=$("$RACE_RUNNER" --dry-run --lane=affected --shard="$shard/4" \
+      github.com/inspr-at/paimos/backend/agentd github.com/inspr-at/paimos/backend/localjournal)
+    [[ "$plan" != *"$package"* ]] || fail "unselected $sharded package leaked into the affected race plan"
+  done
+  sharded_all_plan=$("$RACE_RUNNER" --dry-run --lane=all "$import")
+  [[ "$(grep -c "^go test -race -count=1 -timeout=8m $package -run " <<<"$sharded_all_plan")" -eq 4 ]] ||
+    fail "all-lane $sharded race did not retain all four bounded invocations"
+  assert_plan_covers_discovery_once "all $sharded race" "$sharded_all_plan" "$package" '^(Test|Fuzz)'
+  sharded_sequential_state="$TMP_ROOT/$sharded-sequential-race"
+  mkdir -p "$sharded_sequential_state"
+  if ! FAKE_GO_STATE="$sharded_sequential_state" GO_COMMAND="$FIXTURES/sequential-go.sh" \
+    "$RACE_RUNNER" --lane=all "$import" >/dev/null 2>&1; then
+    fail "all-lane $sharded race did not execute sequentially"
+  fi
+  [[ ! -e "$sharded_sequential_state/overlap" && "$(wc -l < "$sharded_sequential_state/runs" | tr -d ' ')" -eq 4 ]] ||
+    fail "all-lane $sharded race overlapped or omitted a shard"
+  if GO_COMMAND="$FIXTURES/unsafe-go-list.sh" "$RACE_RUNNER" --dry-run --lane=affected \
+    --shard=0/4 "$import" >/dev/null 2>&1; then
+    fail "$sharded race sharder accepted an unsafe discovered test name"
+  fi
+done
 lifecycle_sequential_state="$TMP_ROOT/lifecycle-sequential-race"
 mkdir -p "$lifecycle_sequential_state"
 if ! FAKE_GO_STATE="$lifecycle_sequential_state" GO_COMMAND="$FIXTURES/sequential-go.sh" \

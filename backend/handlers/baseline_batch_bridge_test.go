@@ -87,11 +87,7 @@ func TestBaselineBatchAssistedReconcileHTTP(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var sessionCred string
-	if err := db.DB.QueryRow(`SELECT credential_id FROM sessions WHERE user_id=? ORDER BY created_at DESC LIMIT 1`, userID).Scan(&sessionCred); err != nil {
-		t.Fatal(err)
-	}
-	operator := externalstage.Principal{UserID: userID, Kind: "session", SessionCredentialID: sessionCred}
+	operator := externalstage.Principal{UserID: userID, Kind: "session", SessionCredentialID: operatorSessionCredential(t, userID)}
 	registerHTTPPharos(t, ext, operator, projectID, batch.IssueID)
 	reportHTTPBuildAndQA(t, store, userID, batch)
 
@@ -176,11 +172,7 @@ func TestBaselineBatchAssistedReconcileSealsRequiredJanusHTTP(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var sessionCred string
-	if err := db.DB.QueryRow(`SELECT credential_id FROM sessions ORDER BY created_at DESC LIMIT 1`).Scan(&sessionCred); err != nil {
-		t.Fatal(err)
-	}
-	operator := externalstage.Principal{UserID: userID, Kind: "session", SessionCredentialID: sessionCred}
+	operator := externalstage.Principal{UserID: userID, Kind: "session", SessionCredentialID: operatorSessionCredential(t, userID)}
 	registerHTTPPharos(t, ext, operator, projectID, batch.IssueID)
 	registerHTTPJanus(t, ext, operator, projectID, batch.IssueID)
 	reportHTTPBuildAndQA(t, store, userID, batch)
@@ -205,6 +197,27 @@ func TestBaselineBatchAssistedReconcileSealsRequiredJanusHTTP(t *testing.T) {
 type clockNow struct{ now time.Time }
 
 func (c clockNow) Now() time.Time { return c.now }
+
+// operatorSessionCredential binds RegisterReporter to the operator's own
+// session. newTestServer logs in admin, member, then external; an unfiltered
+// newest-row lookup can return the external credential. authorizeInternalTx
+// then treats the mismatched principal as ErrNotFound ("external stage handoff
+// not found") even though the delivery exists.
+func operatorSessionCredential(t *testing.T, userID int64) string {
+	t.Helper()
+	var sessionCred string
+	if err := db.DB.QueryRow(`SELECT credential_id FROM sessions WHERE user_id=? ORDER BY created_at DESC, id DESC LIMIT 1`, userID).Scan(&sessionCred); err != nil {
+		t.Fatal(err)
+	}
+	var foreign int
+	if err := db.DB.QueryRow(`SELECT COUNT(*) FROM sessions WHERE user_id<>?`, userID).Scan(&foreign); err != nil {
+		t.Fatal(err)
+	}
+	if foreign == 0 {
+		t.Fatal("fixture has no non-operator session; RegisterReporter isolation against newest-session lookup is unproven")
+	}
+	return sessionCred
+}
 
 func registerHTTPPharos(t *testing.T, ext *externalstage.Service, operator externalstage.Principal, projectID, issueID int64) {
 	t.Helper()
@@ -359,11 +372,7 @@ func TestBaselineBatchPartialIdentityHTTP(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var sessionCred string
-	if err := db.DB.QueryRow(`SELECT credential_id FROM sessions WHERE user_id=? ORDER BY created_at DESC LIMIT 1`, userID).Scan(&sessionCred); err != nil {
-		t.Fatal(err)
-	}
-	operator := externalstage.Principal{UserID: userID, Kind: "session", SessionCredentialID: sessionCred}
+	operator := externalstage.Principal{UserID: userID, Kind: "session", SessionCredentialID: operatorSessionCredential(t, userID)}
 	registerHTTPPharos(t, ext, operator, projectID, batch.IssueID)
 	reporter := delivery.Actor{Type: "user", OpaqueKey: fmt.Sprintf("user:%d", userID)}
 	impl, err := store.StartStageRetry(context.Background(), delivery.StageStartRequest{
@@ -573,11 +582,7 @@ func TestBaselineBatchJanusAfterEmptySealHTTP(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var sessionCred string
-	if err := db.DB.QueryRow(`SELECT credential_id FROM sessions WHERE user_id=? ORDER BY created_at DESC LIMIT 1`, userID).Scan(&sessionCred); err != nil {
-		t.Fatal(err)
-	}
-	operator := externalstage.Principal{UserID: userID, Kind: "session", SessionCredentialID: sessionCred}
+	operator := externalstage.Principal{UserID: userID, Kind: "session", SessionCredentialID: operatorSessionCredential(t, userID)}
 	registerHTTPPharos(t, ext, operator, projectID, batch.IssueID)
 	reportHTTPBuildAndQA(t, store, userID, batch)
 	activated := postBaseline(t, ts, ts.adminCookie, fmt.Sprintf("/api/projects/%d/baseline-batches/batches/%d/reconcile", projectID, batch.ID), map[string]any{})
