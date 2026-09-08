@@ -20,6 +20,10 @@ const undo = useUndoStore();
 const issueRefresh = useIssueRefreshPromptStore();
 const auth = useAuthStore();
 
+const props = defineProps<{
+  compact?: boolean
+}>()
+
 const ISSUE_AUTO_REFRESH_DEFAULT_SECONDS = 60;
 const ISSUE_AUTO_REFRESH_MIN_SECONDS = 10;
 const ISSUE_AUTO_REFRESH_STEP_SECONDS = 10;
@@ -331,7 +335,7 @@ defineExpose({
 </script>
 
 <template>
-  <header class="app-header">
+  <header class="app-header" :class="{ 'app-header--compact': props.compact }" data-testid="app-header">
     <!-- LEFT: breadcrumb or page title — filled via Teleport from each view -->
     <div id="app-header-left" class="ah-left" />
 
@@ -478,6 +482,12 @@ defineExpose({
   width: 100%;
   min-width: 0;
   transition: padding 0.2s ease;
+}
+
+.app-header--compact {
+  height: 40px;
+  padding: 0 1rem 0 1.1rem;
+  gap: 0.5rem;
 }
 
 /* LEFT */
