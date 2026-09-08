@@ -108,6 +108,7 @@ async function onFlowIntent(event: Event) {
     v-if="active"
     ref="shellEl"
     class="paimos-flow-host"
+    layout-mode="bounded"
     :logo-src="logoSrc"
     data-testid="paimos-flow-host"
     @flow-intent="onFlowIntent"

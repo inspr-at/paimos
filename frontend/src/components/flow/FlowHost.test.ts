@@ -96,6 +96,7 @@ describe('Flow host UI', () => {
     expect(mounted.el.querySelector('#baseline-batch')?.textContent).toContain('Baseline controls')
     const shell = mounted.el.querySelector('inspr-flow-shell')
     expect(shell).not.toBeNull()
+    expect(shell?.getAttribute('layout-mode')).toBe('bounded')
     shell?.dispatchEvent(
       new CustomEvent('flow-intent', {
         bubbles: true,
