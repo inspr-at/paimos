@@ -6,6 +6,31 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 with legacy releases using Semantic Versioning and new product cuts using the
 calendar form `yy.mm.dd[.hh.mm]`.
 
+## [26.09.08.09.02] — 2026-09-08
+
+### Added — scoped build and QA receipts (PAI-960)
+
+- Bind built artifact and QA evidence to the reviewed baseline attempt through
+  a typed receipt API and CLI, with atomic writes, exact replay handling and
+  current worker authority checks. Receipt acceptance does not prove a live
+  deployment or bypass the existing human start and readiness controls.
+
+### Added — mixed worker account scopes (PAI-964, PAI-966)
+
+- Select Codex, Claude, Pi and Cursor account/model scopes from the runtime's
+  reported capabilities in both repair and baseline review. Account, profile
+  and generation bindings remain explicit; changing selection invalidates
+  the previous human confirmation. Existing v1/v2 configurations remain valid.
+- Permit a class-only Claude built receipt only when its account binding is
+  actually empty; named bindings still require the exact selected account.
+
+### Fixed — installed runtime diagnostics (PAI-965)
+
+- Recognize the supported Pi and Cursor executable/account-registry service
+  flags while retaining private-file and owned-process checks. Real provider
+  authentication and configured cross-service delivery still require operator
+  setup and live verification after upgrade.
+
 ## [26.09.08] — 2026-09-08
 
 ### Added — deliberate baseline delivery controls (PAI-956)
