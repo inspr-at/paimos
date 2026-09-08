@@ -52,6 +52,12 @@ var (
 	ErrControlReplayCapacity = errors.New("managed control replay bound reached")
 	ErrDispatchProfile       = errors.New("managed dispatch profile is unavailable")
 	ErrWorkspaceConflict     = errors.New("managed workspace is already owned")
+	ErrDecisionUnknown       = errors.New("managed decision request was not found")
+	ErrDecisionMismatch      = errors.New("managed decision binding does not match the owned request")
+	ErrDecisionExpired       = errors.New("managed decision request expired")
+	ErrDecisionConsumed      = errors.New("managed decision request was already used")
+	ErrDecisionAuthority     = errors.New("managed decision authority is unavailable")
+	ErrDecisionIncomplete    = errors.New("managed decision is missing inspectable context")
 )
 
 const (
@@ -95,6 +101,7 @@ type StartRequest struct {
 	ResolvedProfile        *dispatchprofile.Profile `json:"-"`
 	queue                  *piQueueStore            `json:"-"`
 	generation             string                   `json:"-"`
+	cursorEvidence         *cursorEvidenceStore     `json:"-"`
 }
 
 type AdapterEvent struct {
@@ -127,7 +134,92 @@ const (
 	ErrorOwnershipLost       ErrorCode = "ownership_lost"
 	ErrorReporterUnavailable ErrorCode = "reporter_unavailable"
 	ErrorWorkspaceConflict   ErrorCode = "workspace_conflict"
+	ErrorDecisionRefused     ErrorCode = "decision_refused"
 )
+
+const DecisionAuthorityLocalOperator = "local_operator"
+
+type DecisionKind string
+
+const (
+	DecisionPermission DecisionKind = "permission"
+	DecisionQuestion   DecisionKind = "question"
+	DecisionPlan       DecisionKind = "plan"
+)
+
+// PendingDecision is the content-free operator view of an owned Cursor ACP
+// permission, question, or plan request. Raw tool input and model text stay
+// owner-private; this projection carries only identifiers, a digest, and the
+// exact offered option IDs.
+type PendingDecision struct {
+	RequestID  string       `json:"request_id"`
+	Generation string       `json:"generation"`
+	Method     string       `json:"method"`
+	Kind       DecisionKind `json:"kind"`
+	ToolKind   string       `json:"tool_kind,omitempty"`
+	Digest     string       `json:"digest"`
+	OptionIDs  []string     `json:"option_ids"`
+	ExpiresAt  time.Time    `json:"expires_at"`
+}
+
+type DecisionRefusal struct {
+	Method string `json:"method"`
+	Reason string `json:"reason"`
+}
+
+type DecisionAnswer struct {
+	Instance      string `json:"instance"`
+	ProjectID     int64  `json:"project_id"`
+	Identity      string `json:"identity"`
+	CorrelationID string `json:"correlation_id"`
+	RequestID     string `json:"request_id"`
+	Generation    string `json:"generation"`
+	Digest        string `json:"digest"`
+	OptionID      string `json:"option_id"`
+	Authority     string `json:"authority"`
+}
+
+type DecisionInspectRequest struct {
+	Instance   string `json:"instance"`
+	ProjectID  int64  `json:"project_id"`
+	Identity   string `json:"identity"`
+	RequestID  string `json:"request_id"`
+	Generation string `json:"generation"`
+	Digest     string `json:"digest"`
+}
+
+type DecisionOption struct {
+	ID    string `json:"id"`
+	Label string `json:"label"`
+	Kind  string `json:"kind,omitempty"`
+}
+
+// DecisionInspect is owner-only Unix-socket display data. It is untrusted,
+// never an authority token, and never written into public status or PPM.
+type DecisionInspect struct {
+	RequestID  string           `json:"request_id"`
+	Generation string           `json:"generation"`
+	Method     string           `json:"method"`
+	Kind       DecisionKind     `json:"kind"`
+	ToolKind   string           `json:"tool_kind,omitempty"`
+	Digest     string           `json:"digest"`
+	OptionIDs  []string         `json:"option_ids"`
+	Options    []DecisionOption `json:"options"`
+	Title      string           `json:"title,omitempty"`
+	Detail     string           `json:"detail,omitempty"`
+	ToolInput  string           `json:"tool_input,omitempty"`
+	Incomplete bool             `json:"incomplete"`
+	Untrusted  bool             `json:"untrusted"`
+	ExpiresAt  time.Time        `json:"expires_at"`
+}
+
+type VisibleOutput struct {
+	Generation string `json:"generation"`
+	Text       string `json:"text"`
+	Digest     string `json:"digest"`
+	Bytes      int    `json:"bytes"`
+	Truncated  bool   `json:"truncated"`
+}
 
 type ControlRequest struct {
 	Instance      string `json:"instance"`
@@ -156,6 +248,17 @@ type Process interface {
 // InboxProcess supports a documented simple handoff to the owned child.
 type InboxProcess interface {
 	Inbox(context.Context, ControlRequest) (ControlEffect, error)
+}
+
+// DecisionProcess holds scoped ACP permission/question/plan requests until a
+// local operator answers the exact generation/request/digest. Codex, Claude,
+// and Pi do not implement it.
+type DecisionProcess interface {
+	PendingDecisions() []PendingDecision
+	DecisionRefusals() []DecisionRefusal
+	Answer(context.Context, DecisionAnswer) (ControlEffect, error)
+	Inspect(DecisionInspectRequest) (DecisionInspect, error)
+	VisibleOutput() (VisibleOutput, error)
 }
 
 type Adapter interface {
@@ -220,6 +323,8 @@ type Session struct {
 	ActivityAt          time.Time                `json:"activity_at,omitempty"`
 	LastCorrelationID   string                   `json:"last_correlation_id,omitempty"`
 	LastErrorCode       ErrorCode                `json:"last_error_code,omitempty"`
+	PendingDecisions    []PendingDecision        `json:"pending_decisions,omitempty"`
+	DecisionRefusals    []DecisionRefusal        `json:"decision_refusals,omitempty"`
 	StartedAt           time.Time                `json:"started_at"`
 	HeartbeatAt         time.Time                `json:"heartbeat_at"`
 	ExitedAt            *time.Time               `json:"exited_at,omitempty"`
