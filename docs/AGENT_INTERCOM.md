@@ -762,10 +762,14 @@ text.
 `decisions` is the local operator view of pending Cursor ACP permission,
 question, and plan requests plus visible refusals. It carries request ids,
 tool kind, offered option ids, and a digest — never raw tool input, plan
-text, or model transcripts. `inspect` is the owner-only Unix-socket display
-of the exact pending request: option labels, question or plan text, and a
-bounded tool description bound to that same digest. Treat inspect payloads as
-untrusted display data, never as authority or a terminal command. `output`
+text, or model transcripts. Malformed permission refusals add a stable
+value-free reason code and bounded JSON-type/count metadata so protocol drift
+can be diagnosed without logging commands, paths, arguments, or content.
+`inspect` is the owner-only Unix-socket display of the exact pending request:
+option labels, question or plan text, and bounded tool input/content bound to
+that same digest. Treat inspect payloads as untrusted display data, never as
+authority or a terminal command. Unsupported, malformed, or truncated
+meaningful content cannot be approved. `output`
 returns the current generation's ephemeral visible assistant text (hash and
 length stay in the owner evidence journal). It never includes hidden
 reasoning, credentials, or raw tool results. `answer` applies one exact

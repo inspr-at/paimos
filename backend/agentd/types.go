@@ -163,8 +163,28 @@ type PendingDecision struct {
 }
 
 type DecisionRefusal struct {
-	Method string `json:"method"`
-	Reason string `json:"reason"`
+	Method    string                `json:"method"`
+	Reason    string                `json:"reason"`
+	Code      string                `json:"code,omitempty"`
+	Structure *DecisionRequestShape `json:"structure,omitempty"`
+}
+
+// DecisionRequestShape is a value-free structural description of a malformed
+// permission request. It records JSON types and bounded collection counts, but
+// never request values such as commands, paths, arguments, or content.
+type DecisionRequestShape struct {
+	ParamsType     string `json:"params_type"`
+	SessionIDType  string `json:"session_id_type"`
+	ToolCallType   string `json:"tool_call_type"`
+	ToolCallIDType string `json:"tool_call_id_type"`
+	KindType       string `json:"kind_type"`
+	TitleType      string `json:"title_type"`
+	StatusType     string `json:"status_type"`
+	RawInputType   string `json:"raw_input_type"`
+	ContentType    string `json:"content_type"`
+	ContentBlocks  int    `json:"content_blocks"`
+	OptionsType    string `json:"options_type"`
+	OptionCount    int    `json:"option_count"`
 }
 
 type DecisionAnswer struct {
@@ -197,20 +217,21 @@ type DecisionOption struct {
 // DecisionInspect is owner-only Unix-socket display data. It is untrusted,
 // never an authority token, and never written into public status or PPM.
 type DecisionInspect struct {
-	RequestID  string           `json:"request_id"`
-	Generation string           `json:"generation"`
-	Method     string           `json:"method"`
-	Kind       DecisionKind     `json:"kind"`
-	ToolKind   string           `json:"tool_kind,omitempty"`
-	Digest     string           `json:"digest"`
-	OptionIDs  []string         `json:"option_ids"`
-	Options    []DecisionOption `json:"options"`
-	Title      string           `json:"title,omitempty"`
-	Detail     string           `json:"detail,omitempty"`
-	ToolInput  string           `json:"tool_input,omitempty"`
-	Incomplete bool             `json:"incomplete"`
-	Untrusted  bool             `json:"untrusted"`
-	ExpiresAt  time.Time        `json:"expires_at"`
+	RequestID   string           `json:"request_id"`
+	Generation  string           `json:"generation"`
+	Method      string           `json:"method"`
+	Kind        DecisionKind     `json:"kind"`
+	ToolKind    string           `json:"tool_kind,omitempty"`
+	Digest      string           `json:"digest"`
+	OptionIDs   []string         `json:"option_ids"`
+	Options     []DecisionOption `json:"options"`
+	Title       string           `json:"title,omitempty"`
+	Detail      string           `json:"detail,omitempty"`
+	ToolInput   string           `json:"tool_input,omitempty"`
+	ToolContent string           `json:"tool_content,omitempty"`
+	Incomplete  bool             `json:"incomplete"`
+	Untrusted   bool             `json:"untrusted"`
+	ExpiresAt   time.Time        `json:"expires_at"`
 }
 
 type VisibleOutput struct {
