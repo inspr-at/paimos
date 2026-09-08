@@ -449,8 +449,11 @@ func (s *Service) Review(ctx context.Context, actor Actor, projectID, draftID in
 	}
 	selected = canonicalRequirementRefs(selected)
 	if req.ExecutionMode != ModeManual {
-		if req.Worker.RuntimeID == "" || req.Worker.AccountKey == "" || req.Worker.ProfileID == "" || req.Worker.WorkspaceHandle == "" || req.Worker.WorkerName == "" {
-			return Draft{}, fmt.Errorf("%w: agent execution requires named worker, account, profile and workspace", ErrInvalid)
+		if err := requireNamedWorker(req.Worker); err != nil {
+			return Draft{}, err
+		}
+		if err := s.validateAgentWorker(ctx, tx, projectID, req.Worker); err != nil {
+			return Draft{}, err
 		}
 	} else {
 		req.Worker = WorkerSelection{}
