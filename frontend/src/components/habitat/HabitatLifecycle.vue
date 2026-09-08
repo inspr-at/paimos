@@ -11,6 +11,10 @@ import {
   loadHabitatIntent,
   cancelHabitatIntent,
   parseHabitatRequest,
+  habitatAccountChoices,
+  habitatChoiceId,
+  habitatRuntimeClasses,
+  habitatRuntimeProfiles,
   type HabitatRuntime,
   type HabitatIntent,
   type HabitatLifecycleRequest,
@@ -46,7 +50,7 @@ const runtimeId = ref(''),
   workspace = ref(''),
   sessionId = ref(''),
   parentId = ref(''),
-  accountKey = ref('')
+  accountChoiceId = ref('')
 const ticketId = ref<number | null>(null)
 const workShape = ref<'ship' | 'scout'>('ship'),
   role = ref<'worker' | 'coordinator'>('worker')
@@ -95,14 +99,25 @@ const runtime = computed(
     ) ?? null,
 )
 const existing = computed(() => ['attach', 'reassign', 'restart'].includes(operation.value))
+const accountChoices = computed(() => {
+  if (!runtime.value) return []
+  return habitatAccountChoices(runtime.value, existing.value ? null : props.profile)
+})
 const selectedAccount = computed(
-  () => runtime.value?.accounts?.find((choice) => choice.key === accountKey.value) ?? null,
+  () => accountChoices.value.find((choice) => habitatChoiceId(choice) === accountChoiceId.value) ?? null,
+)
+const implicitAccount = computed(() => {
+  const choices = accountChoices.value
+  return choices.length === 1 && !choices[0]!.account_key ? choices[0]! : null
+})
+const accountKey = computed(() => selectedAccount.value?.account_key ?? implicitAccount.value?.account_key ?? '')
+const accountLabel = computed(
+  () => selectedAccount.value?.account_label ?? implicitAccount.value?.account_label ?? '',
 )
 const accountAvailable = computed(() => {
-  const owner = runtime.value
-  if (!owner) return false
-  if (!owner.accounts?.length) return accountKey.value === ''
-  return selectedAccount.value !== null
+  if (!runtime.value) return false
+  if (!accountChoices.value.length) return false
+  return selectedAccount.value !== null || implicitAccount.value !== null
 })
 const ownedWorkers = computed(() => {
   const owner = runtime.value
@@ -113,10 +128,8 @@ const ownedWorkers = computed(() => {
       worker.management_mode === 'managed' &&
       worker.runtime_provenance_trust === 'managed_reporter' &&
       worker.machine_id === owner.machine_id &&
-      worker.account_label === owner.account_label &&
-      (owner.accounts?.length
-        ? (worker.account_key ?? '') === accountKey.value
-        : !worker.account_key) &&
+      worker.account_label === accountLabel.value &&
+      (accountKey.value ? (worker.account_key ?? '') === accountKey.value : !worker.account_key) &&
       owner.sessions.some((row) => row.session_id === worker.harness_session_id) &&
       (operation.value === 'restart'
         ? worker.phase === 'stopped' && worker.liveness.state === 'dead'
@@ -154,7 +167,8 @@ const effectiveRole = computed(() => (existing.value ? selectedWorker.value?.rol
 const profileAvailable = computed(
   () =>
     !!effectiveProfile.value &&
-    !!runtime.value?.profiles.some(
+    !!runtime.value &&
+    habitatRuntimeProfiles(runtime.value).some(
       (profile) =>
         profile.id === effectiveProfile.value?.id &&
         profile.version === effectiveProfile.value?.version,
@@ -230,7 +244,8 @@ const requestIdentity = computed(() =>
     sessionId.value,
     selectedWorker.value?.revision,
     parentId.value,
-    accountKey.value,
+    accountChoiceId.value,
+    accountLabel.value,
   ]),
 )
 function invalidate() {
@@ -253,7 +268,7 @@ function invalidate() {
   ticketId.value = null
   parentId.value = ''
   sessionId.value = ''
-  accountKey.value = ''
+  accountChoiceId.value = ''
   runtimes.value = []
   candidates.value = []
 }
@@ -312,6 +327,11 @@ async function refreshRuntimes() {
         runtimeId.value = owners[0]!.id
         operation.value = worker.phase === 'stopped' ? 'restart' : 'reassign'
         sessionId.value = worker.harness_session_id
+        accountChoiceId.value = habitatChoiceId({
+          account_label: worker.account_label,
+          account_key: worker.account_key ?? '',
+          label: worker.account_label,
+        })
       }
     }
   } finally {
@@ -410,17 +430,18 @@ watch(reviewing, (value) => {
   if (value) void nextTick(() => confirmRef.value?.focus())
 })
 watch(
-  () => [runtime.value?.id, runtime.value?.accounts] as const,
+  () => [runtime.value?.id, accountChoices.value] as const,
   () => {
     if (pendingRequest.value) return
-    const accounts = runtime.value?.accounts ?? []
-    if (!accounts.length) {
-      accountKey.value = ''
+    const choices = accountChoices.value
+    if (!choices.length) {
+      accountChoiceId.value = ''
       return
     }
-    if (accounts.some((choice) => choice.key === accountKey.value)) return
-    accountKey.value = accounts.length === 1 ? accounts[0]!.key : ''
+    if (choices.some((choice) => habitatChoiceId(choice) === accountChoiceId.value)) return
+    accountChoiceId.value = choices.length === 1 ? habitatChoiceId(choices[0]!) : ''
   },
+  { immediate: true },
 )
 function prepare() {
   if (!canPrepare.value || !runtime.value || pendingRequest.value) return
@@ -428,7 +449,7 @@ function prepare() {
     request_key: crypto.randomUUID(),
     runtime_id: runtime.value.id,
     runtime_generation: runtime.value.generation,
-    account_label: runtime.value.account_label,
+    account_label: accountLabel.value,
     ...(operation.value !== 'repair' && accountKey.value ? { account_key: accountKey.value } : {}),
     ttl_seconds: 120,
   }
@@ -632,7 +653,7 @@ onScopeDispose(() => {
           >
             <option value="">Choose one runtime</option>
             <option v-for="row in runtimes" :key="row.id" :value="row.id">
-              {{ row.machine_id }} · {{ humanize(row.account_label) }} · {{ row.id.slice(0, 8) }}
+              {{ row.machine_id }} · {{ habitatRuntimeClasses(row).map(humanize).join(' + ') }} · {{ row.id.slice(0, 8) }}
             </option>
           </select></label
         >
@@ -640,23 +661,30 @@ onScopeDispose(() => {
           This runtime advertisement expired. Refresh before submitting.
         </p>
         <template v-if="runtime">
-            <label v-if="runtime.accounts?.length"
+            <label v-if="accountChoices.length > 1 || accountChoices.some((choice) => choice.account_key)"
             >Account<select
-              v-model="accountKey"
+              v-model="accountChoiceId"
               aria-label="Named account"
               :disabled="!!intent"
             >
               <option value="">Choose a configured account</option>
-              <option v-for="choice in runtime.accounts" :key="choice.key" :value="choice.key">
-                {{ choice.label }}
+              <option
+                v-for="choice in accountChoices"
+                :key="habitatChoiceId(choice)"
+                :value="habitatChoiceId(choice)"
+              >
+                {{ choice.label }} · {{ humanize(choice.account_label) }}
               </option>
             </select></label
           >
-          <p v-if="runtime.accounts?.length && !accountAvailable">
+          <p v-if="(accountChoices.length > 1 || accountChoices.some((choice) => choice.account_key)) && !accountAvailable">
             Choose one advertised account. Unsupported, forged or stale keys cannot be used.
           </p>
-          <p v-if="existing && runtime.accounts?.length && accountAvailable && !ownedWorkers.length">
+          <p v-if="existing && accountAvailable && !ownedWorkers.length">
             No owned worker uses this account. Changing account cannot adopt an existing generation.
+          </p>
+          <p v-if="runtime && effectiveProfile && !profileAvailable">
+            This profile is not advertised on the selected runtime.
           </p>
           <label
             >Operation<select
@@ -798,7 +826,7 @@ onScopeDispose(() => {
           <details>
             <summary>Runtime details</summary>
             <p>
-              {{ runtime.machine_id }} · {{ humanize(runtime.account_label)
+              {{ runtime.machine_id }} · {{ habitatRuntimeClasses(runtime).map(humanize).join(' + ')
               }}{{ selectedAccount ? ` · ${selectedAccount.label}` : '' }}. Advertisement expires
               {{ runtime.expires_at }}. A connected runtime does not prove a worker is ready.
             </p>

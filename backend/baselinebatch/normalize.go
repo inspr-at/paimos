@@ -3,6 +3,8 @@
 
 package baselinebatch
 
+import "github.com/inspr-at/paimos/backend/lifecycleintents"
+
 // normalizeDraft ensures list-shaped JSON fields serialize as [] rather than
 // null. Partial or older responses must not crash list consumers.
 func normalizeDraft(d *Draft) {
@@ -87,6 +89,9 @@ func normalizeWorkflow(w *Workflow) {
 		}
 		if r.Profiles == nil {
 			r.Profiles = []ProfileChoice{}
+		}
+		if r.AccountScopes == nil {
+			r.AccountScopes = []lifecycleintents.AccountScope{}
 		}
 		if r.Workspaces == nil {
 			r.Workspaces = []WorkspaceChoice{}

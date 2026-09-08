@@ -2,18 +2,29 @@
 import { api } from '@/api/client'
 import { epoch, fields, invalid, object, positive, uuid } from './habitatBoundary'
 import { parseIsoInstant } from '@/services/agentModeAggregateSchema'
+export interface HabitatAccountScope {
+  account_label: string
+  accounts?: { key: string; label: string }[]
+  profiles: { id: string; version: string }[]
+}
 export interface HabitatRuntime {
   id: string
   project_id: number
   generation: string
   machine_id: string
-  account_label: string
+  account_label?: string
   accounts?: { key: string; label: string }[]
-  schema_version?: 2
+  schema_version?: 2 | 3
   workspaces: { handle: string; identity: string; label?: string }[]
-  profiles: { id: string; version: string }[]
+  profiles?: { id: string; version: string }[]
+  account_scopes?: HabitatAccountScope[]
   expires_at: string
   sessions: { session_id: string; generation: string; workspace_handle?: string }[]
+}
+export type HabitatAccountChoice = {
+  account_label: string
+  account_key: string
+  label: string
 }
 export type HabitatStartRequest = {
   request_key: string
@@ -171,36 +182,57 @@ export function parseHabitatRuntimes(value: unknown, projectId: number): Habitat
   const seen = new Set<string>()
   return (root.runtimes as unknown[]).map((value) => {
     const runtime = object(value)
-    fields(runtime, [
-      'id',
-      'project_id',
-      'generation',
-      'machine_id',
-      'account_label',
-      'workspaces',
-      'profiles',
-      'expires_at',
-      'sessions',
-    ], ['accounts', 'schema_version'])
+    const scoped = runtime.schema_version === 3
+    if (scoped)
+      fields(runtime, [
+        'id',
+        'project_id',
+        'generation',
+        'machine_id',
+        'workspaces',
+        'account_scopes',
+        'schema_version',
+        'expires_at',
+        'sessions',
+      ])
+    else
+      fields(
+        runtime,
+        [
+          'id',
+          'project_id',
+          'generation',
+          'machine_id',
+          'account_label',
+          'workspaces',
+          'profiles',
+          'expires_at',
+          'sessions',
+        ],
+        ['accounts', 'schema_version'],
+      )
     const accounts = runtime.accounts
+    const scopes = runtime.account_scopes
     if (
       !uuid(runtime.id) ||
       !uuid(runtime.generation) ||
       runtime.project_id !== projectId ||
       !token(runtime.machine_id) ||
-      !ACCOUNTS.includes(String(runtime.account_label)) ||
       !parseIsoInstant(runtime.expires_at) ||
       !Array.isArray(runtime.workspaces) ||
-      !Array.isArray(runtime.profiles) ||
       runtime.workspaces.length > 64 ||
-      runtime.profiles.length > 128 ||
       seen.has(String(runtime.id)) ||
-      (accounts === undefined
-        ? runtime.schema_version !== undefined
-        : runtime.schema_version !== 2 ||
-          !Array.isArray(accounts) ||
-          accounts.length < 1 ||
-          accounts.length > 16)
+      (scoped
+        ? !Array.isArray(scopes) || scopes.length < 1 || scopes.length > 16
+        : !ACCOUNTS.includes(String(runtime.account_label)) ||
+          !Array.isArray(runtime.profiles) ||
+          runtime.profiles.length > 128 ||
+          (accounts === undefined
+            ? runtime.schema_version !== undefined
+            : runtime.schema_version !== 2 ||
+              !Array.isArray(accounts) ||
+              accounts.length < 1 ||
+              accounts.length > 16))
     )
       invalid()
     seen.add(String(runtime.id))
@@ -242,22 +274,28 @@ export function parseHabitatRuntimes(value: unknown, projectId: number): Habitat
       )
         invalid()
     }
-    const profileIds = new Set<string>()
-    for (const raw of runtime.profiles as unknown[]) {
-      const profile = object(raw)
-      fields(profile, ['id', 'version'])
-      if (
-        !token(profile.id) ||
-        !token(profile.version) ||
-        profileIds.has(`${profile.id}@${profile.version}`)
-      )
-        invalid()
-      profileIds.add(`${profile.id}@${profile.version}`)
+    const keys = new Set<string>()
+    const labels = new Set<string>()
+    const classes = new Set<string>()
+    const parseProfiles = (rows: unknown[], into: Set<string>) => {
+      for (const raw of rows) {
+        const profile = object(raw)
+        fields(profile, ['id', 'version'])
+        if (
+          !token(profile.id) ||
+          !token(profile.version) ||
+          into.has(`${profile.id}@${profile.version}`)
+        )
+          invalid()
+        into.add(`${profile.id}@${profile.version}`)
+      }
     }
-    if (accounts !== undefined) {
-      const keys = new Set<string>()
-      const labels = new Set<string>()
-      for (const raw of accounts as unknown[]) {
+    const parseAccounts = (
+      rows: unknown[],
+      classLabel: string,
+      profileRows: { id: string; version: string }[],
+    ) => {
+      for (const raw of rows) {
         const choice = object(raw)
         fields(choice, ['key', 'label'])
         if (
@@ -267,11 +305,9 @@ export function parseHabitatRuntimes(value: unknown, projectId: number): Habitat
           ACCOUNTS.includes(String(choice.label)) ||
           choice.key === runtime.generation ||
           choice.key === runtime.id ||
-          choice.key === runtime.account_label ||
-          choice.label === runtime.account_label ||
-          [...(runtime.profiles as { id: string; version: string }[])].some(
-            (profile) => profile.id === choice.key || profile.version === choice.key,
-          ) ||
+          choice.key === classLabel ||
+          choice.label === classLabel ||
+          profileRows.some((profile) => profile.id === choice.key || profile.version === choice.key) ||
           keys.has(String(choice.key)) ||
           labels.has(choice.label)
         )
@@ -279,6 +315,45 @@ export function parseHabitatRuntimes(value: unknown, projectId: number): Habitat
         keys.add(String(choice.key))
         labels.add(String(choice.label))
       }
+    }
+    if (scoped) {
+      for (const raw of scopes as unknown[]) {
+        const scope = object(raw)
+        fields(scope, ['account_label', 'profiles'], ['accounts'])
+        if (
+          !ACCOUNTS.includes(String(scope.account_label)) ||
+          classes.has(String(scope.account_label)) ||
+          !Array.isArray(scope.profiles) ||
+          scope.profiles.length < 1 ||
+          scope.profiles.length > 16
+        )
+          invalid()
+        classes.add(String(scope.account_label))
+        const scopeProfiles = new Set<string>()
+        parseProfiles(scope.profiles as unknown[], scopeProfiles)
+        if (scope.accounts !== undefined) {
+          if (
+            !Array.isArray(scope.accounts) ||
+            scope.accounts.length < 1 ||
+            scope.accounts.length > 16
+          )
+            invalid()
+          parseAccounts(
+            scope.accounts as unknown[],
+            String(scope.account_label),
+            scope.profiles as { id: string; version: string }[],
+          )
+        }
+      }
+    } else {
+      const profileIds = new Set<string>()
+      parseProfiles(runtime.profiles as unknown[], profileIds)
+      if (accounts !== undefined)
+        parseAccounts(
+          accounts as unknown[],
+          String(runtime.account_label),
+          runtime.profiles as { id: string; version: string }[],
+        )
     }
     return runtime as unknown as HabitatRuntime
   })
@@ -381,6 +456,71 @@ export function parseHabitatIntent(
     newGeneration: (root.new_generation as string | undefined) ?? null,
     resultSessionId: (root.result_session_id as string | undefined) ?? null,
   }
+}
+export function habitatRuntimeProfiles(
+  runtime: HabitatRuntime,
+): { id: string; version: string }[] {
+  if (runtime.schema_version === 3) {
+    const out: { id: string; version: string }[] = []
+    const seen = new Set<string>()
+    for (const scope of runtime.account_scopes ?? []) {
+      for (const profile of scope.profiles) {
+        const key = `${profile.id}@${profile.version}`
+        if (seen.has(key)) continue
+        seen.add(key)
+        out.push(profile)
+      }
+    }
+    return out
+  }
+  return runtime.profiles ?? []
+}
+export function habitatRuntimeClasses(runtime: HabitatRuntime): string[] {
+  if (runtime.schema_version === 3)
+    return [...new Set((runtime.account_scopes ?? []).map((scope) => scope.account_label))]
+  return runtime.account_label ? [runtime.account_label] : []
+}
+export function habitatAccountChoices(
+  runtime: HabitatRuntime,
+  profile?: { id: string; version: string } | null,
+): HabitatAccountChoice[] {
+  const scopes: HabitatAccountScope[] =
+    runtime.schema_version === 3
+      ? (runtime.account_scopes ?? [])
+      : runtime.account_label
+        ? [
+            {
+              account_label: runtime.account_label,
+              accounts: runtime.accounts,
+              profiles: runtime.profiles ?? [],
+            },
+          ]
+        : []
+  const out: HabitatAccountChoice[] = []
+  for (const scope of scopes) {
+    if (
+      profile &&
+      !scope.profiles.some((row) => row.id === profile.id && row.version === profile.version)
+    )
+      continue
+    if (scope.accounts?.length) {
+      for (const account of scope.accounts)
+        out.push({
+          account_label: scope.account_label,
+          account_key: account.key,
+          label: account.label,
+        })
+    } else
+      out.push({
+        account_label: scope.account_label,
+        account_key: '',
+        label: scope.account_label,
+      })
+  }
+  return out
+}
+export function habitatChoiceId(choice: HabitatAccountChoice): string {
+  return `${choice.account_label}\0${choice.account_key}`
 }
 export async function loadHabitatRuntimes(projectId: number, signal?: AbortSignal) {
   return parseHabitatRuntimes(

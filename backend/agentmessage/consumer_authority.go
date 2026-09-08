@@ -15,6 +15,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/inspr-at/paimos/backend/auth"
+	"github.com/inspr-at/paimos/backend/lifecyclefence"
 )
 
 const ConsumerLeaseHeader = "X-Paimos-Consumer-Lease"
@@ -106,22 +107,19 @@ func consumerRuntime(ctx context.Context, tx *sql.Tx, c ConsumerCredentials, pro
 	if e != nil || user != c.Principal.UserID() || key != c.Principal.APIKeyID() || gen != generation || !consumerProof(c.RuntimeLease) || subtle.ConstantTimeCompare(digest, d[:]) != 1 || (live && consumerExpired(deadline)) {
 		return "", "", ErrConsumerUnavailable
 	}
-	var registration struct {
-		AccountLabel string `json:"account_label"`
-	}
-	if json.Unmarshal([]byte(raw), &registration) != nil {
+	if !json.Valid([]byte(raw)) {
 		return "", "", ErrConsumerStorage
 	}
-	return host, registration.AccountLabel, nil
+	return host, "", nil
 }
 func consumerBinding(ctx context.Context, tx *sql.Tx, c ConsumerCredentials, project int64, r ConsumerRegistration, live bool) (consumerOwner, error) {
-	host, account, e := consumerRuntime(ctx, tx, c, project, r.RuntimeID, r.RuntimeGeneration, live)
+	host, _, e := consumerRuntime(ctx, tx, c, project, r.RuntimeID, r.RuntimeGeneration, live)
 	if e != nil {
 		return consumerOwner{}, e
 	}
 	var agentID int64
 	var name, harness, phase string
-	e = tx.QueryRowContext(ctx, `SELECT s.project_agent_id,s.agent_name,s.harness,s.phase FROM harness_sessions s JOIN lifecycle_runtime_sessions own ON own.session_id=s.id WHERE s.id=? AND s.project_id=? AND own.runtime_id=? AND own.generation=? AND s.management_mode='managed' AND s.host=? AND s.account_label=?`, r.SessionID, project, r.RuntimeID, r.SessionGeneration, host, account).Scan(&agentID, &name, &harness, &phase)
+	e = tx.QueryRowContext(ctx, `SELECT s.project_agent_id,s.agent_name,s.harness,s.phase FROM harness_sessions s JOIN lifecycle_runtime_sessions own ON own.session_id=s.id JOIN lifecycle_runtimes runtime ON runtime.id=own.runtime_id WHERE s.id=? AND s.project_id=? AND own.runtime_id=? AND own.generation=? AND s.management_mode='managed' AND s.host=? AND `+lifecyclefence.RuntimeSessionOwnershipSQL("runtime", "s"), r.SessionID, project, r.RuntimeID, r.SessionGeneration, host).Scan(&agentID, &name, &harness, &phase)
 	if e != nil || (live && phase == "stopped") {
 		return consumerOwner{}, ErrConsumerUnavailable
 	}

@@ -290,7 +290,12 @@ tools are not installed, or whose runtime doctor reports an unready local layer
 is reported `needs_setup`/`unavailable` with a next action. Manual delivery
 remains fully usable on such a host.
 
-Each project has one explicitly configured account class label. This unreleased
+Each project may advertise one account class (v1/v2) or multiple class-scoped
+groups on one runtime (registration schema v3). v3 `account_scopes` bind a closed
+account class to the named keys and catalog profiles that class may start, so
+Codex homes never pair with Cursor Composer/Grok. ChatGPT and API-key Codex
+classes can advertise the same profiles; the browser chooses the class+account
+tuple explicitly rather than guessing the first match. This unreleased
 source extension may also advertise one or more opaque named-account choices
 from the daemon's `--codex-accounts` registry (`accounts` with operator labels,
 or the legacy single `account_key`). One daemon can therefore offer several
@@ -301,11 +306,12 @@ key even when it cannot be shown as a label (`:` or length); the daemon then
 derives a stable non-secret display label rather than rejecting the key.
 Explicit `accounts[].label` values stay operator-chosen and are rejected at
 config load when they are not contract-valid. The browser selects only from a
-fresh owned advertisement; forged, unconfigured or stale keys fail closed on
+fresh owned advertisement; forged, unconfigured, cross-class or stale keys fail closed on
 the server and in the daemon before any model turn. Changing the selected
-account invalidates a reviewed start and cannot adopt an existing worker.
+account or class invalidates a reviewed start and cannot adopt an existing worker.
 Omitting `accounts` and `account_key` keeps the legacy class probe and does not
-claim named-account verification. Up to four
+claim named-account verification. Claude stays current-login: a Claude scope
+must not invent physical keys. Up to four
 independent project loops run in one daemon. Identity is re-probed from the
 physical workspace, the catalog supplies the exact immutable profile, and named
 Codex accounts are verified from the selected home rather than from class

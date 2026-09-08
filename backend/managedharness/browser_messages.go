@@ -20,6 +20,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/inspr-at/paimos/backend/auth"
+	"github.com/inspr-at/paimos/backend/lifecyclefence"
 	"github.com/inspr-at/paimos/backend/safetext"
 )
 
@@ -219,7 +220,7 @@ func (s *Service) SendBrowserMessageCAS(ctx context.Context, p auth.Principal, p
 		JOIN lifecycle_runtime_sessions owned ON owned.session_id=harness.id
 		JOIN lifecycle_runtimes runtime ON runtime.id=owned.runtime_id
 		 AND runtime.project_id=harness.project_id AND runtime.machine_id=harness.host
-		 AND json_extract(runtime.registration_json,'$.account_label')=harness.account_label
+		 AND ` + lifecyclefence.RuntimeSessionOwnershipSQL("runtime", "harness") + `
 		JOIN agent_message_targets target ON target.id=harness.message_target_id
 		 AND target.instance=? AND target.project_id=harness.project_id AND target.enabled=1
 		 AND target.role='primary' AND target.adapter='managed_harness'

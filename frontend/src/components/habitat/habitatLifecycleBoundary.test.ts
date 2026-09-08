@@ -3,6 +3,8 @@ import {
   parseHabitatIntent,
   parseHabitatRequest,
   parseHabitatRuntimes,
+  habitatAccountChoices,
+  habitatChoiceId,
   type HabitatStartRequest,
 } from './habitatLifecycle'
 const id = (suffix: string) => `00000000-0000-4000-8000-${suffix.padStart(12, '0')}`
@@ -96,6 +98,99 @@ describe('Habitat lifecycle response authority', () => {
     expect(() =>
       parseHabitatIntent({ ...intent(), schema_version: 2 }, 1, request),
     ).toThrow()
+  })
+  it('accepts v3 scoped runtimes and rejects mixed-version bodies', () => {
+    const scoped = {
+      id: id('2'),
+      project_id: 1,
+      generation: id('3'),
+      machine_id: 'fixture-machine',
+      schema_version: 3 as const,
+      workspaces: [{ handle: id('4'), identity: 'a'.repeat(64) }],
+      account_scopes: [
+        {
+          account_label: 'chatgpt',
+          accounts: [
+            { key: 'codex-work', label: 'Work' },
+            { key: 'codex-home', label: 'Home' },
+          ],
+          profiles: [
+            { id: 'codex-sol-high', version: '1' },
+            { id: 'codex-terra-high', version: '1' },
+          ],
+        },
+        {
+          account_label: 'cursor_context',
+          accounts: [{ key: 'cursor-op', label: 'Cursor' }],
+          profiles: [{ id: 'cursor-composer', version: '1' }],
+        },
+      ],
+      sessions: [],
+      expires_at: '2026-09-06T12:00:00Z',
+    }
+    expect(parseHabitatRuntimes({ schema_version: 1, runtimes: [scoped] }, 1)[0].account_scopes).toEqual(
+      scoped.account_scopes,
+    )
+    for (const changed of [
+      { ...scoped, account_label: 'chatgpt' },
+      { ...scoped, profiles: [{ id: 'codex-sol-high', version: '1' }] },
+      { ...scoped, account_scopes: [{ ...scoped.account_scopes[0] }, { ...scoped.account_scopes[0] }] },
+      {
+        ...scoped,
+        account_scopes: [
+          { ...scoped.account_scopes[0], accounts: [{ key: 'codex-work', label: 'Work' }, { key: 'codex-work', label: 'Other' }] },
+          scoped.account_scopes[1],
+        ],
+      },
+    ])
+      expect(() => parseHabitatRuntimes({ schema_version: 1, runtimes: [changed] }, 1)).toThrow()
+  })
+  it('chooses class+account tuples and does not flatten mixed-harness scopes', () => {
+    const scoped = parseHabitatRuntimes(
+      {
+        schema_version: 1,
+        runtimes: [
+          {
+            id: id('2'),
+            project_id: 1,
+            generation: id('3'),
+            machine_id: 'fixture-machine',
+            schema_version: 3,
+            workspaces: [{ handle: id('4'), identity: 'a'.repeat(64) }],
+            account_scopes: [
+              {
+                account_label: 'chatgpt',
+                accounts: [{ key: 'codex-work', label: 'Work' }],
+                profiles: [{ id: 'codex-sol-high', version: '1' }],
+              },
+              {
+                account_label: 'api_key',
+                accounts: [{ key: 'codex-api', label: 'API' }],
+                profiles: [{ id: 'codex-sol-high', version: '1' }],
+              },
+              {
+                account_label: 'cursor_context',
+                accounts: [{ key: 'cursor-op', label: 'Cursor' }],
+                profiles: [{ id: 'cursor-composer', version: '1' }],
+              },
+            ],
+            sessions: [],
+            expires_at: '2026-09-06T12:00:00Z',
+          },
+        ],
+      },
+      1,
+    )[0]
+    expect(habitatAccountChoices(scoped, { id: 'codex-sol-high', version: '1' })).toEqual([
+      { account_label: 'chatgpt', account_key: 'codex-work', label: 'Work' },
+      { account_label: 'api_key', account_key: 'codex-api', label: 'API' },
+    ])
+    expect(habitatChoiceId({ account_label: 'chatgpt', account_key: 'codex-work', label: 'Work' })).toBe(
+      'chatgpt\0codex-work',
+    )
+    expect(habitatAccountChoices(scoped, { id: 'cursor-composer', version: '1' })).toEqual([
+      { account_label: 'cursor_context', account_key: 'cursor-op', label: 'Cursor' },
+    ])
   })
   it('accepts scoped proof and rejects hidden fields, cross-project identities and duplicate mapping', () => {
     expect(parseHabitatRuntimes({ schema_version: 1, runtimes: [runtime] }, 1)[0].sessions).toEqual(

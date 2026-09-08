@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/backend/auth"
+	"github.com/inspr-at/paimos/backend/lifecyclefence"
 )
 
 const maxClosedTargetRecoveries = 8
@@ -251,7 +252,7 @@ func loadClosedTargetRecoveryFacts(ctx context.Context, tx *sql.Tx, in ClosedTar
 		 AND runtime.project_id=? AND runtime.machine_id=session.host
 		 AND runtime.expires_at>strftime('%Y-%m-%dT%H:%M:%fZ','now')
 		 AND runtime.user_id>0 AND runtime.api_key_id>0
-		 AND COALESCE(json_extract(runtime.registration_json,'$.account_label'),'')=session.account_label`,
+		 AND `+lifecyclefence.RuntimeSessionOwnershipSQL("runtime", "session"),
 		in.ReplacementSessionID, in.ProjectID, "-90 seconds", instanceName(), in.ProjectID, facts.plan.Address, in.ProjectID).Scan(
 		&facts.plan.ReplacementTarget.TargetID, &facts.plan.ReplacementTarget.TargetVersion, &replacementKind,
 		&facts.replacementMaximum, &facts.replacementRole, &facts.replacementAdapter,

@@ -16,7 +16,7 @@ func TestLifecycleOpenAPIClosedContract(t *testing.T) {
 		t.Fatal("invalid OpenAPI")
 	}
 	schemas := d["components"].(map[string]any)["schemas"].(map[string]any)
-	for _, name := range []string{"LifecycleRequestV1", "LifecycleIntentV1", "LifecycleRuntimeV1", "LifecycleTransitionV1", "LifecycleEventV1", "LifecycleRuntimeRegistrationV1", "LifecycleSessionRegistrationV1", "LifecycleSessionProjectionV1", "LifecycleAccountChoiceV2", "RuntimeHealthPageV1", "RuntimeHealthStatusV1", "RuntimeLayerHealthV1"} {
+	for _, name := range []string{"LifecycleRequestV1", "LifecycleIntentV1", "LifecycleRuntimeV1", "LifecycleRuntimeV3", "LifecycleRuntimeRegistrationV1", "LifecycleRuntimeRegistrationV3", "LifecycleAccountScopeV3", "LifecycleTransitionV1", "LifecycleEventV1", "LifecycleSessionRegistrationV1", "LifecycleSessionProjectionV1", "LifecycleAccountChoiceV2", "RuntimeHealthPageV1", "RuntimeHealthStatusV1", "RuntimeLayerHealthV1"} {
 		schema, ok := schemas[name].(map[string]any)
 		if !ok || schema["additionalProperties"] != false {
 			t.Fatalf("schema %s not closed", name)

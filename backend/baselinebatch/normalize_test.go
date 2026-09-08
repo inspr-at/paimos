@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/inspr-at/paimos/backend/lifecycleintents"
 )
 
 func TestNormalizeDraftEmptyLists(t *testing.T) {
@@ -37,5 +39,19 @@ func TestNormalizeWorkflowEmptyLists(t *testing.T) {
 	body := string(raw)
 	if strings.Contains(body, `"unresolved":null`) || strings.Contains(body, `"batches":null`) || strings.Contains(body, `"runtimes":null`) {
 		t.Fatalf("normalized workflow still has null lists: %s", body)
+	}
+}
+
+func TestNormalizeWorkflowKeepsV3AccountScopesUnflattened(t *testing.T) {
+	w := Workflow{Choices: WorkflowChoices{Runtimes: []RuntimeChoice{{
+		RuntimeID: "runtime", RuntimeGeneration: "gen", SchemaVersion: 3,
+		AccountScopes: []lifecycleintents.AccountScope{
+			{AccountLabel: "chatgpt", Accounts: []lifecycleintents.AccountChoice{{Key: "codex-work", Label: "Work"}}, Profiles: []lifecycleintents.Profile{{ID: "codex-sol-high", Version: "1"}}},
+			{AccountLabel: "cursor_context", Accounts: []lifecycleintents.AccountChoice{{Key: "cursor-op", Label: "Cursor"}}, Profiles: []lifecycleintents.Profile{{ID: "cursor-composer", Version: "1"}}},
+		},
+	}}}}
+	normalizeWorkflow(&w)
+	if len(w.Choices.Runtimes) != 1 || len(w.Choices.Runtimes[0].AccountScopes) != 2 || len(w.Choices.Runtimes[0].Accounts) != 0 || len(w.Choices.Runtimes[0].Profiles) != 0 {
+		t.Fatalf("v3 choice flattened: %+v", w.Choices.Runtimes[0])
 	}
 }
