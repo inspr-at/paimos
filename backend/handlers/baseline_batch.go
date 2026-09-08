@@ -13,9 +13,11 @@ import (
 	"strings"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/inspr-at/paimos/backend/agentmode"
 	"github.com/inspr-at/paimos/backend/auth"
 	"github.com/inspr-at/paimos/backend/baselinebatch"
 	"github.com/inspr-at/paimos/backend/db"
+	"github.com/inspr-at/paimos/backend/delivery"
 	"github.com/inspr-at/paimos/backend/lifecycleintents"
 	"github.com/inspr-at/paimos/backend/managedharness"
 )
@@ -32,12 +34,19 @@ func RegisterBaselineBatchRoutes(r chi.Router) {
 		r.With(auth.RequireProjectEdit).Post("/{draftID}/start", baselineBatchStart)
 		r.With(auth.RequireProjectView).Get("/batches/{batchID}", baselineBatchGet)
 		r.With(auth.RequireProjectEdit).Post("/batches/{batchID}/control", baselineBatchControl)
+		r.With(auth.RequireProjectEdit).Post("/batches/{batchID}/reconcile", baselineBatchReconcile)
 	})
 }
 
 func baselineBatchService(r *http.Request) *baselinebatch.Service {
-	return baselinebatch.NewService(db.DB, nil, deliveryStoreForRequest(r), lifecycleintents.NewService(db.DB),
+	authorizer := deliveryAuthorizerForRequest(r)
+	store := delivery.NewStore(db.DB, delivery.Options{Freshness: deliveryFreshnessPolicy(), Observer: agentmode.NotifyChange, Authorizer: authorizer})
+	svc := baselinebatch.NewService(db.DB, nil, store, lifecycleintents.NewService(db.DB),
 		managedharness.NewService(db.DB), nil)
+	if ext, err := externalStageServiceWithAuthorizer(authorizer); err == nil {
+		svc.External = ext
+	}
+	return svc
 }
 
 func baselineBatchActor(r *http.Request) (baselinebatch.Actor, bool) {
@@ -289,6 +298,22 @@ func baselineBatchControl(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out, err := baselineBatchService(r).Control(r.Context(), actor, projectID, batchID, body)
+	if err != nil {
+		baselineBatchError(w, err)
+		return
+	}
+	jsonOK(w, out)
+}
+
+func baselineBatchReconcile(w http.ResponseWriter, r *http.Request) {
+	actor, ok := baselineBatchActor(r)
+	projectID, okID := baselineBatchProject(r)
+	batchID, err := strconv.ParseInt(chi.URLParam(r, "batchID"), 10, 64)
+	if !ok || !okID || err != nil {
+		jsonError(w, "not found", http.StatusNotFound)
+		return
+	}
+	out, err := baselineBatchService(r).Reconcile(r.Context(), actor, projectID, batchID)
 	if err != nil {
 		baselineBatchError(w, err)
 		return

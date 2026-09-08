@@ -533,7 +533,7 @@ func validSafeLabel(value string, maximum int) bool {
 
 func validAccountLabel(value string) bool {
 	switch value {
-	case "unknown", "chatgpt", "api_key", "claude_ai_max", "claude_ai_pro", "claude_ai_team", "claude_ai_enterprise", "console", AccountPiContext:
+	case "unknown", "chatgpt", "api_key", "claude_ai_max", "claude_ai_pro", "claude_ai_team", "claude_ai_enterprise", "console", AccountPiContext, AccountCursorContext:
 		return true
 	default:
 		return false

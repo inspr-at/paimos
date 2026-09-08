@@ -20,6 +20,7 @@ type accountProbeKind uint8
 const (
 	accountProbeCodex accountProbeKind = iota + 1
 	accountProbeClaude
+	accountProbeCursor
 )
 
 func runAccountProbe(ctx context.Context, path string, maximum int, kind accountProbeKind) ([]byte, error) {
@@ -39,6 +40,8 @@ func runAccountProbeEnv(ctx context.Context, path string, maximum int, kind acco
 		args = []string{"login", "status"}
 	case accountProbeClaude:
 		args = []string{"auth", "status", "--json"}
+	case accountProbeCursor:
+		args = []string{"status", "--format", "json"}
 	default:
 		return nil, errors.New("account probe kind is invalid")
 	}

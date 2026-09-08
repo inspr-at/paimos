@@ -254,6 +254,34 @@ verification handoff can bind to that exact v2 deployment identity. After all
 supported Pharos releases pin the v2 fixture and schema tuple, a later ticket
 may retire v1 negotiation. V1 itself remains byte-for-byte immutable.
 
+Baseline-owned deliveries (PAI-960) additionally bind the artifact this batch
+built before owner deployment completion. That expected identity is taken only
+from implementation evidence:
+
+- `artifact` / `digest` — running OCI image **config** digest (`sha256`, 32 bytes);
+- `artifact` / `external_ref` prefixed `release-manifest:sha256:` — immutable
+  **release-set** document digest (the bytes named by owner-v2
+  `release_manifest_digest`, e.g. Pharos `release-set.json`);
+- `artifact` / `external_ref` prefixed `release-coordinate:` — immutable
+  coordinate of that **release-set**, not an OCI registry index;
+- `artifact` / `external_ref` prefixed `oci-manifest:sha256:` — optional OCI
+  image **index or manifest** digest; it may be recorded but is never a
+  release-set digest and never fills `release_manifest_digest`;
+- `artifact` / `external_ref` prefixed `inspr-release-v1:` — typed
+  `{scheme}/{channel}/{sequence}/{version}` where `scheme` is `legacy` or
+  `inspr-calendar-v1`. Generic `external_ref` strings, including colon-delimited
+  tuples without that prefix, are ignored and never parsed as release identity.
+  A recognized prefix with a malformed or conflicting payload is refused rather
+  than guessed as another digest class;
+- `implementation_result` / `commit` — source revision.
+
+A QA `test_result` digest remains the delivery QA binding digest from
+[`docs/DATA_MODEL.md`](DATA_MODEL.md); it is not a release-manifest identity.
+Non-baseline v1 owner reports keep digest/commit compatibility even when QA
+carries a digest. A baseline-owned delivery that already has a handoff refuses
+v1 owner success with `v2_report_required` rather than a generic invalid
+request. Frozen owner-v2 and Janus-v1 fixture bytes are unchanged.
+
 The first v2 publication pull request must be merged with a true merge commit,
 not a squash or rebase merge. The certified content commit recorded by
 `manifest-v2.json` must remain an ancestor of `main`; the release guard rejects

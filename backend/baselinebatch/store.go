@@ -16,6 +16,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/inspr-at/paimos/backend/delivery"
+	"github.com/inspr-at/paimos/backend/externalstage"
 	"github.com/inspr-at/paimos/backend/lifecycleintents"
 	"github.com/inspr-at/paimos/backend/managedharness"
 )
@@ -27,6 +28,12 @@ type Service struct {
 	Lifecycle *lifecycleintents.Service
 	Harness   *managedharness.Service
 	Verifier  OwnedVerifier
+	// External is the existing PAI-810/876 service. The bridge never mints
+	// credentials or forges a principal; missing config stays setup-required.
+	External *externalstage.Service
+	// failAfter is a test-only crash seam between already-committed external
+	// steps. Production code leaves it empty.
+	failAfter string
 }
 
 func NewService(database *sql.DB, clock Clock, store *delivery.Store, lifecycle *lifecycleintents.Service, harness *managedharness.Service, verifier OwnedVerifier) *Service {

@@ -172,6 +172,9 @@ func TestAgentMessageV1DeliveryWorkAdaptersRemainClosedWithoutPi(t *testing.T) {
 		t.Fatal(err)
 	}
 	allowed := schema.Properties["delivery_work"].Properties["adapter"].Enum
+	if slices.Contains(allowed, "agentd_cursor") {
+		t.Fatalf("frozen v1 must not grow agentd_cursor: %v", allowed)
+	}
 	if slices.Contains(allowed, "agentd_pi") {
 		t.Fatalf("frozen v1 must not grow agentd_pi: %v", allowed)
 	}
@@ -198,7 +201,7 @@ func TestAgentMessageDeliveryWorkSchemaIncludesBothOwnedAgentdAdapters(t *testin
 		t.Fatal(err)
 	}
 	allowed := schema.Properties["delivery_work"].Properties["adapter"].Enum
-	for _, adapter := range []string{"agentd_codex", "agentd_claude", "agentd_pi", "managed_harness"} {
+	for _, adapter := range []string{"agentd_codex", "agentd_claude", "agentd_pi", "agentd_cursor", "managed_harness"} {
 		if !slices.Contains(allowed, adapter) {
 			t.Fatalf("owned adapter %q missing from supported v2 enum %v", adapter, allowed)
 		}

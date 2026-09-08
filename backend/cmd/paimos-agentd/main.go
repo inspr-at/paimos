@@ -57,9 +57,9 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 	var projectID, ticketID int64
 	var allowSharedWorkspaces bool
 	sessionID, correlationID, codexPath := "", "", ""
-	claudePath, nodePath, claudeSDKPath, piPath := "", "", "", ""
+	claudePath, nodePath, claudeSDKPath, piPath, cursorPath := "", "", "", "", ""
 	reportHost, reportURL, reportAPIKeyFile, paimosPath := "", "", "", ""
-	lifecycleConfigPath, codexAccountsPath, piAccountsPath, accountKey := "", "", "", ""
+	lifecycleConfigPath, codexAccountsPath, piAccountsPath, cursorAccountsPath, accountKey := "", "", "", "", ""
 	if command == "serve" {
 		flags.StringVar(&lifecycleConfigPath, "lifecycle-config", "", "protected explicit project/account/profile/workspace JSON configuration for browser lifecycle authority")
 		flags.StringVar(&codexPath, "codex-path", "", "absolute Codex CLI path")
@@ -67,6 +67,7 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 		flags.StringVar(&nodePath, "node-path", "", "absolute Node.js >=18 runtime path")
 		flags.StringVar(&claudeSDKPath, "claude-sdk-path", "", "absolute operator-installed @anthropic-ai/claude-agent-sdk@0.3.251 sdk.mjs path")
 		flags.StringVar(&piPath, "pi-path", "", "absolute operator-authenticated Pi CLI path")
+		flags.StringVar(&cursorPath, "cursor-path", "", "absolute operator-authenticated Cursor CLI path")
 		flags.StringVar(&reportHost, "report-host", "", "non-secret stable host identity for authenticated M161 reporting")
 		flags.StringVar(&reportURL, "report-url", "", "exact M161 instance URL for non-interactive reporting")
 		flags.StringVar(&reportAPIKeyFile, "report-api-key-file", "", "protected owner-only file containing the M161 API key")
@@ -74,6 +75,7 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 		flags.BoolVar(&allowSharedWorkspaces, "allow-shared-workspaces", false, "separately authorize explicitly shared child workspaces")
 		flags.StringVar(&codexAccountsPath, "codex-accounts", "", "protected operator-controlled JSON registry of opaque Codex account keys")
 		flags.StringVar(&piAccountsPath, "pi-accounts", "", "protected operator-controlled JSON registry of opaque Pi account keys")
+		flags.StringVar(&cursorAccountsPath, "cursor-accounts", "", "protected operator-controlled JSON registry of opaque Cursor account keys")
 	}
 	if command == "start" {
 		flags.StringVar(&adapter, "adapter", "codex", "harness adapter")
@@ -168,7 +170,7 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 				return err
 			}
 		}
-		adapters := serveAdapters(codexPath, claudePath, nodePath, claudeSDKPath, piPath)
+		adapters := serveAdapters(codexPath, claudePath, nodePath, claudeSDKPath, piPath, cursorPath)
 		if codexAccountsPath != "" {
 			raw, e := lifecycleclient.ReadPrivate(codexAccountsPath, 64<<10)
 			if e != nil {
@@ -193,6 +195,19 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 			}
 			if pi, ok := adapters[2].(*agentd.PiAdapter); ok {
 				pi.SetAccounts(registry)
+			}
+		}
+		if cursorAccountsPath != "" {
+			raw, e := lifecycleclient.ReadPrivate(cursorAccountsPath, 64<<10)
+			if e != nil {
+				return errors.New("cursor account registry requires a protected owner-only JSON file")
+			}
+			registry, e := agentd.ParseCursorAccountRegistry(raw)
+			if e != nil {
+				return e
+			}
+			if cursor, ok := adapters[3].(*agentd.CursorAdapter); ok {
+				cursor.SetAccounts(registry)
 			}
 		}
 		supervisor, err := agentd.NewSupervisor(agentd.SupervisorConfig{Instance: common.instance, StateRoot: root,
@@ -301,11 +316,12 @@ func ownedReceiverReference(status agentd.Status, instance, session, identity st
 	return "", errors.New("owned receiver generation is not running and publicly registered")
 }
 
-func serveAdapters(codexPath, claudePath, nodePath, claudeSDKPath, piPath string) []agentd.Adapter {
+func serveAdapters(codexPath, claudePath, nodePath, claudeSDKPath, piPath, cursorPath string) []agentd.Adapter {
 	return []agentd.Adapter{
 		agentd.NewCodexAdapter(codexPath, Version),
 		agentd.NewClaudeAdapter(claudePath, nodePath, claudeSDKPath),
 		agentd.NewPiAdapter(piPath),
+		agentd.NewCursorAdapter(cursorPath, Version),
 	}
 }
 

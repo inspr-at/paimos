@@ -20,6 +20,7 @@ const (
 	AdapterAgentdCodex  = "agentd_codex"
 	AdapterAgentdClaude = "agentd_claude"
 	AdapterAgentdPi     = "agentd_pi"
+	AdapterAgentdCursor = "agentd_cursor"
 	KindAgentdSession   = "agentd_session"
 )
 
@@ -31,6 +32,7 @@ type AgentdTarget struct {
 type AgentdCodexPlugin struct{}
 type AgentdClaudePlugin struct{}
 type AgentdPiPlugin struct{}
+type AgentdCursorPlugin struct{}
 
 func (AgentdCodexPlugin) Name() string          { return AdapterAgentdCodex }
 func (AgentdCodexPlugin) Kind() string          { return KindAgentdSession }
@@ -44,6 +46,10 @@ func (AgentdPiPlugin) Name() string             { return AdapterAgentdPi }
 func (AgentdPiPlugin) Kind() string             { return KindAgentdSession }
 func (AgentdPiPlugin) MaximumLevel() string     { return LevelSteer }
 func (AgentdPiPlugin) Mode() string             { return ModeLocal }
+func (AgentdCursorPlugin) Name() string         { return AdapterAgentdCursor }
+func (AgentdCursorPlugin) Kind() string         { return KindAgentdSession }
+func (AgentdCursorPlugin) MaximumLevel() string { return LevelSimple }
+func (AgentdCursorPlugin) Mode() string         { return ModeLocal }
 
 func decodeAgentdTarget(ref string) (AgentdTarget, error) {
 	if len(ref) > 4096 || !json.Valid([]byte(ref)) {
@@ -80,6 +86,10 @@ func (AgentdPiPlugin) ValidateTarget(ctx context.Context, ref string) error {
 	return (AgentdCodexPlugin{}).ValidateTarget(ctx, ref)
 }
 
+func (AgentdCursorPlugin) ValidateTarget(ctx context.Context, ref string) error {
+	return (AgentdCodexPlugin{}).ValidateTarget(ctx, ref)
+}
+
 // Deliver is intentionally steer-only and lease-correlated. Simple delivery
 // remains on the ordinary inbox adapter; managed control never queue-fakes a
 // steer and cannot be invoked through the legacy unleased --deliver-target.
@@ -93,6 +103,13 @@ func (AgentdClaudePlugin) Deliver(ctx context.Context, request DeliverRequest) (
 
 func (AgentdPiPlugin) Deliver(ctx context.Context, request DeliverRequest) (DeliverResult, error) {
 	return deliverAgentdSteer(ctx, request, "pi rpc steer", false)
+}
+
+func (AgentdCursorPlugin) Deliver(ctx context.Context, request DeliverRequest) (DeliverResult, error) {
+	if request.Level == LevelSteer {
+		return DeliverResult{}, &UnavailableError{Message: "owned Cursor ACP has no same-turn text steer", FallbackReason: "unsupported", Reroute: true}
+	}
+	return DeliverResult{}, &UnavailableError{Message: "agentd Cursor target delivers next-turn inbox on the owned child", FallbackReason: "not_steerable", Reroute: true}
 }
 
 func deliverAgentdSteer(ctx context.Context, request DeliverRequest, primitive string, requireVendorMessageID bool) (DeliverResult, error) {
@@ -156,6 +173,9 @@ func init() {
 		panic(err)
 	}
 	if err := Register(AgentdPiPlugin{}); err != nil {
+		panic(err)
+	}
+	if err := Register(AgentdCursorPlugin{}); err != nil {
 		panic(err)
 	}
 }

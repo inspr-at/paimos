@@ -91,7 +91,7 @@ func TestWorkerFleetOpenAPIPreservesV1AndClosesV2(t *testing.T) {
 		t.Fatalf("v2 workspace provenance leaked local values: %+v", workspace)
 	}
 	dispatch := components["HarnessDispatchProfile"].(map[string]any)["properties"].(map[string]any)
-	if dispatch["model"].(map[string]any)["maxLength"] != float64(128) || len(dispatch["effort"].(map[string]any)["enum"].([]any)) != 5 {
+	if dispatch["model"].(map[string]any)["maxLength"] != float64(128) || len(dispatch["effort"].(map[string]any)["enum"].([]any)) != 6 {
 		t.Fatalf("v2 dispatch provenance is unbounded: %+v", dispatch)
 	}
 	if v2Properties["recent_communication"].(map[string]any)["maxItems"] != float64(4) {

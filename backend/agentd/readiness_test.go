@@ -365,3 +365,48 @@ func TestObserveReadinessPiNamedContextIsNotVerifiedIdentity(t *testing.T) {
 		t.Fatal("selected Pi context was mislabeled as verified provider identity")
 	}
 }
+
+type cursorReadinessAdapter struct {
+	keyedDispatchAdapter
+}
+
+func (*cursorReadinessAdapter) Name() string { return AdapterCursor }
+
+func (*cursorReadinessAdapter) AccountLabel(context.Context) string { return "unknown" }
+
+func TestObserveReadinessCursorNamedContextIsNotASubscriptionClass(t *testing.T) {
+	host := newReadinessHost(t)
+	adapter := &cursorReadinessAdapter{keyedDispatchAdapter: keyedDispatchAdapter{
+		dispatchAdapter: dispatchAdapter{label: "unknown"},
+		keys:            map[string]bool{"operator-cursor": true},
+	}}
+	supervisor, err := NewSupervisor(SupervisorConfig{
+		Instance: "ppm-readiness", Adapters: []Adapter{adapter},
+		WorkspaceInspector: func(_ context.Context, path, mode string) (WorkspaceProvenance, error) {
+			return WorkspaceProvenance{CanonicalPath: path, Identity: readinessWorkspaceIdentity, Kind: WorkspaceDirectory, Mode: mode}, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = supervisor.Close(context.Background()) })
+	spec := host.spec(t)
+	profile, err := dispatchprofile.Resolve("cursor-composer", dispatchprofile.CatalogVersion, AdapterCursor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec.Profile = profile
+	spec.AccountLabel = AccountCursorContext
+	spec.AccountKey = "operator-cursor"
+	observation, err := supervisor.ObserveReadiness(context.Background(), spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := checkByID(t, observation, "paimos_account")
+	if got.Status != "pass" || got.Reason != "named_context_selected" {
+		t.Fatalf("cursor account check=%+v", got)
+	}
+	if got.Reason == "account_verified" {
+		t.Fatal("selected Cursor context was mislabeled as a subscription class")
+	}
+}

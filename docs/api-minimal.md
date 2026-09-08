@@ -63,6 +63,7 @@ POST   /projects/:id/baseline-batches/:draftID/start
 GET    /projects/:id/baseline-batches/:draftID/export
 GET    /projects/:id/baseline-batches/batches/:batchID
 POST   /projects/:id/baseline-batches/batches/:batchID/control
+POST   /projects/:id/baseline-batches/batches/:batchID/reconcile
 ```
 
 PAI-956 baseline batches are an opt-in INSPR stream on a project: every route
@@ -87,9 +88,30 @@ does not invent an AI account.
 Batch state, stage progress, forecasts and the available controls are derived
 from the delivery attempt, the lifecycle intent and the owned harness session on
 every read. `completed` follows only from every required delivery stage being
-satisfied, never from a worker finishing. Pause and cancel write real PAI-903
-harness controls (or release a not-yet-claimed start intent through the
-lifecycle revision CAS); an action with no owned effect is reported as
+satisfied, never from a worker finishing. Human review of the immutable Aithema
+baseline records specification evidence only. Implementation/QA require scoped
+source and test evidence; Pharos deployment and verification reuse the existing
+external-stage `RegisterReporter` / `ActivateOwner` / `SealPrerequisites` /
+`CreateHandoff` path. `POST .../reconcile` applies the next currently authorized
+step of that frozen plan: manual never auto-creates a handoff, assisted requires
+the current editor session, and automatic may use that session or a live scoped
+API key with `agent-controls:write`. Missing Pharos registration, an unsealed
+prerequisite set, a sealed set that does not cover currently active Janus
+dependencies (`prerequisite_review`), incomplete built artifact identity
+(`built_artifact_identity`), or a revoked current-generation handoff is
+`setup_required` plus `next_action` (`human_review_required` when specification
+is unsatisfied; `v2_report` when a baseline-owned Pharos receipt must use the
+owner-v2 artifact tuple). Baseline-owned deliveries require the typed
+implementation evidence contract in [`docs/EXTERNAL_STAGE_CONTRACT.md`](EXTERNAL_STAGE_CONTRACT.md)
+before handoff or owner completion; generic `external_ref` strings, QA
+`test_result` digests, and OCI index/manifest refs are not the release-set
+identity named by owner-v2 `release_manifest_digest`. Cancelling a batch does
+not drop that binding on a still-live handoff. Conflicting or malformed typed
+identity is `setup_required=built_artifact_identity` rather than an internal
+error, so pause and cancel remain available. Credentials stay on the owner-only
+secret-file mint CLI and never appear in the batch JSON. Pause and cancel write
+real PAI-903 harness controls (or release a not-yet-claimed start intent through
+the lifecycle revision CAS); an action with no owned effect is reported as
 unavailable with its reason instead of being offered.
 
 Project lifecycle is operational, not decorative: only `active` projects

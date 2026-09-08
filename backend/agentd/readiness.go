@@ -357,14 +357,18 @@ func (s *Supervisor) checkAccount(ctx context.Context, spec ReadinessSpec) Readi
 	if harness == "" {
 		return ReadinessCheckResult{"paimos_account", "unknown", "harness_unknown", ""}
 	}
-	if harness == AdapterPi {
-		if spec.AccountLabel != AccountPiContext {
+	if harness == AdapterPi || harness == AdapterCursor {
+		expected := AccountPiContext
+		if harness == AdapterCursor {
+			expected = AccountCursorContext
+		}
+		if spec.AccountLabel != expected {
 			return ReadinessCheckResult{"paimos_account", "fail", "account_label_mismatch", ""}
 		}
 		if spec.AccountKey == "" || !s.HasAccount(harness, spec.AccountKey) {
 			return ReadinessCheckResult{"paimos_account", "fail", "named_account_unavailable", ""}
 		}
-		return ReadinessCheckResult{"paimos_account", "pass", "named_context_selected", digestText(AccountPiContext)}
+		return ReadinessCheckResult{"paimos_account", "pass", "named_context_selected", digestText(expected)}
 	}
 	label := s.ProbeAccount(ctx, harness)
 	if label == "unknown" {

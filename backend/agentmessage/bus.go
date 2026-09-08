@@ -36,6 +36,7 @@ const (
 	AdapterAgentdCodex    = harnessplugin.AdapterAgentdCodex
 	AdapterAgentdClaude   = harnessplugin.AdapterAgentdClaude
 	AdapterAgentdPi       = harnessplugin.AdapterAgentdPi
+	AdapterAgentdCursor   = harnessplugin.AdapterAgentdCursor
 	AdapterGrokBotRoutine = harnessplugin.AdapterGrokBotRoutine
 	AdapterClaudeResume   = harnessplugin.AdapterClaudeResume
 	AdapterClaudeChannel  = harnessplugin.AdapterClaudeChannel
@@ -73,7 +74,7 @@ const selectedDeliveryTargetSQL = `(CASE
 	WHEN d.last_error_code='managed_target_unavailable' AND d.fallback_target_id IS NOT NULL
 	THEN d.fallback_target_id
 	WHEN d.requested_level='simple' AND ` + effectivePrimaryDeliveryTargetSQL + ` IS NOT NULL AND d.fallback_target_id IS NOT NULL
-	 AND (SELECT adapter FROM agent_message_targets policy_target WHERE policy_target.id=` + effectivePrimaryDeliveryTargetSQL + `) IN ('agentd_codex','agentd_claude','agentd_pi')
+	 AND (SELECT adapter FROM agent_message_targets policy_target WHERE policy_target.id=` + effectivePrimaryDeliveryTargetSQL + `) IN ('agentd_codex','agentd_claude','agentd_pi','agentd_cursor')
 	THEN d.fallback_target_id
 	WHEN d.requested_level='steer' AND ` + effectivePrimaryDeliveryTargetSQL + ` IS NOT NULL AND d.fallback_target_id IS NOT NULL
 	 AND (SELECT maximum_level FROM agent_message_targets policy_target WHERE policy_target.id=` + effectivePrimaryDeliveryTargetSQL + `)='simple'
@@ -842,7 +843,7 @@ func (s *Service) RerouteUnavailableLocalDelivery(ctx context.Context, in Rerout
 // Process target. Bus reroute and managed-harness standby registration share
 // this predicate so adding an owned adapter cannot silently change primacy.
 func IsManagedAgentdAdapter(adapter string) bool {
-	return adapter == AdapterAgentdCodex || adapter == AdapterAgentdClaude || adapter == AdapterAgentdPi
+	return adapter == AdapterAgentdCodex || adapter == AdapterAgentdClaude || adapter == AdapterAgentdPi || adapter == AdapterAgentdCursor
 }
 
 // CompleteLocalDelivery records one accepted local primitive (including a

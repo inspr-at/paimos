@@ -62,7 +62,7 @@ func TestServeRejectsPartialReporterConfiguration(t *testing.T) {
 }
 
 func TestServeRegistersOwnedCodexAndClaudeAdapters(t *testing.T) {
-	adapters := serveAdapters("/operator/codex", "/operator/claude", "/runtime/node", "/operator/sdk.mjs", "/operator/pi")
+	adapters := serveAdapters("/operator/codex", "/operator/claude", "/runtime/node", "/operator/sdk.mjs", "/operator/pi", "/operator/cursor-agent")
 	var names []string
 	for _, adapter := range adapters {
 		names = append(names, adapter.Name())
@@ -70,7 +70,7 @@ func TestServeRegistersOwnedCodexAndClaudeAdapters(t *testing.T) {
 			t.Fatalf("adapter %q has no stop capability", adapter.Name())
 		}
 	}
-	if !slices.Equal(names, []string{agentd.AdapterCodex, agentd.AdapterClaude, agentd.AdapterPi}) {
+	if !slices.Equal(names, []string{agentd.AdapterCodex, agentd.AdapterClaude, agentd.AdapterPi, agentd.AdapterCursor}) {
 		t.Fatalf("adapters=%v", names)
 	}
 }

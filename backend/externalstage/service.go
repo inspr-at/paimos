@@ -35,6 +35,7 @@ var (
 	ErrInvalid     = errors.New("invalid external stage request")
 	ErrConflict    = errors.New("external stage conflict")
 	ErrUnavailable = errors.New("external stage dependency unavailable")
+	ErrV2Required  = errors.New("external stage v2 report required")
 
 	handoffIDPattern = regexp.MustCompile(`^[0-9A-HJKMNP-TV-Z]{26}$`)
 	symbolPattern    = regexp.MustCompile(`^[a-z][a-z0-9._-]{0,63}$`)
@@ -300,6 +301,9 @@ func (s *Service) CreateHandoff(ctx context.Context, principal Principal, delive
 		h, err := s.loadHandoffTx(ctx, tx, prior)
 		if err != nil {
 			return CreateHandoffResult{}, err
+		}
+		if h.revokedAt != "" {
+			return CreateHandoffResult{}, ErrConflict
 		}
 		h.credentialEpoch, h.state, h.revokedAt = 0, "issued", ""
 		return CreateHandoffResult{HandoffMetadata: h.metadata(s.fixture), Duplicate: true}, nil
@@ -788,6 +792,14 @@ func (s *Service) reportNormalized(ctx context.Context, p Principal, handoffID, 
 		return s.reportHeartbeat(ctx, tx, h, p, requestDigest, idemDigest, req)
 	}
 	if err := validateSemanticReportContract(h, req, secret, contractMajor, artifactV2); err != nil {
+		return ReportReceipt{}, err
+	}
+	if h.role == string(ReporterRoleOwner) && req.State == HandoffStateSucceeded {
+		if err := assertSealedPrerequisitesMatchActiveJanusTx(ctx, tx, h); err != nil {
+			return ReportReceipt{}, err
+		}
+	}
+	if err := bindBuiltOwnerArtifactTx(ctx, tx, h, req, artifactV2); err != nil {
 		return ReportReceipt{}, err
 	}
 	result, err := tx.ExecContext(ctx, `INSERT INTO external_stage_report_events(handoff_row_id,actor_api_key_id,

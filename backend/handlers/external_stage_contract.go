@@ -349,6 +349,12 @@ func writeExternalStageServiceError(w http.ResponseWriter, r *http.Request, err 
 	switch {
 	case errors.Is(err, externalstage.ErrNotFound):
 		writeControlNotFound(w, r)
+	case errors.Is(err, externalstage.ErrV2Required):
+		requestID := trustedControlResponseRequestID(r)
+		w.Header().Set(RequestIDHeader, requestID)
+		SetControlCachePolicy(w)
+		writeProblem(w, nil, ProblemDetails{Status: http.StatusConflict, Code: "v2_report_required",
+			Detail: "external stage v2 report required", RequestID: requestID})
 	case errors.Is(err, externalstage.ErrInvalid):
 		writeExternalStageStatus(w, r, http.StatusBadRequest)
 	case errors.Is(err, externalstage.ErrConflict):

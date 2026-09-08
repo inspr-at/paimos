@@ -1277,6 +1277,28 @@ refused because there is no live paused child. The spool is fail-closed at
 advertised pause. Receipts and status never carry the raw text. This slice is
 fake-native composition only and does not claim fully live Pi support.
 
+Owned Cursor ACP is a fourth adapter. It starts the pinned operator
+`cursor-agent` (`2026.09.02-c22c1a3`) with documented `acp` stdio and a
+human-selected included model (`composer-2.5` or `grok-4.6` via catalog ids
+`cursor-composer` / `cursor-grok`). Auto and unapproved third-party models are
+refused before spawn. After `session/new`, the adapter parses
+`models.currentModelId` and the `configOptions` model `currentValue` and stops
+before `session/prompt` if they disagree with the selected profile. Composer
+does not advertise a reasoning effort (`effort=default`); Grok high is
+acknowledged as `grok-4.6[effort=high,fast=true]`. The child uses official ACP
+`initialize`, `session/new`, `session/prompt`, and `session/cancel` only; there
+is no PTY, private RPC, or same-turn text steer. Permission, plan, and
+question requests fail closed (reject-once / cancelled). Named Cursor accounts
+are a separate operator-local registry (`paimos-agentd serve --cursor-accounts`)
+that maps opaque keys to expected email/userId. Tokens stay in the vendor
+store; the adapter does not copy auth, swap accounts, or set `HOME`. Official
+`status --format json` must report `status=authenticated` and
+`isAuthenticated=true` with matching `userInfo.email` before spawn. The closed
+class is `cursor_context`: selected trusted identity mapping, not a
+subscription tier and not an unkeyed probe. Native included-model inference
+proof is deliberately later and must not copy auth files or call `authenticate`
+/ `login` from this slice.
+
 Registrations created before this contract remain readable. They have null
 workspace/profile provenance and an `unknown` account label; PAIMOS does not
 retroactively infer ownership or execution axes from process lists, paths, or

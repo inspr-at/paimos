@@ -9,18 +9,29 @@ import (
 	"fmt"
 
 	"github.com/inspr-at/paimos/backend/auth"
+	"github.com/inspr-at/paimos/backend/externalstage"
 )
 
 func (s *Service) currentAuthority(ctx context.Context, tx *sql.Tx, actor Actor, projectID int64, write bool) (ProjectAuthority, error) {
 	if projectID <= 0 {
 		return ProjectAuthority{}, fmt.Errorf("%w: project", ErrInvalid)
 	}
-	if actor.Kind != string(auth.PrincipalSession) || actor.UserID <= 0 || actor.SessionCredentialID == "" || actor.Impersonated || actor.APIKeyID != 0 {
-		if write {
-			return ProjectAuthority{}, fmt.Errorf("%w: human session required", ErrForbidden)
+	sessionActor := actor.Kind == string(auth.PrincipalSession) && actor.UserID > 0 && actor.SessionCredentialID != "" && !actor.Impersonated && actor.APIKeyID == 0
+	apiKeyActor := actor.Kind == string(auth.PrincipalAPIKey) && actor.UserID > 0 && actor.APIKeyID > 0 && actor.SessionCredentialID == "" && !actor.Impersonated
+	if write && !sessionActor && !apiKeyActor {
+		return ProjectAuthority{}, fmt.Errorf("%w: current editor session or scoped api key required", ErrForbidden)
+	}
+	if actor.UserID <= 0 {
+		return ProjectAuthority{}, fmt.Errorf("%w: authenticated actor required", ErrUnauthorized)
+	}
+	if sessionActor {
+		if err := requireLiveSession(ctx, tx, actor); err != nil {
+			return ProjectAuthority{}, err
 		}
-		if actor.UserID <= 0 {
-			return ProjectAuthority{}, fmt.Errorf("%w: authenticated actor required", ErrUnauthorized)
+	}
+	if apiKeyActor {
+		if err := requireLiveAPIKey(ctx, tx, actor, write); err != nil {
+			return ProjectAuthority{}, err
 		}
 	}
 	var status string
@@ -89,9 +100,58 @@ func (a Actor) principal() (auth.Principal, error) {
 	return p, nil
 }
 
+func (a Actor) externalPrincipal() (externalstage.Principal, error) {
+	switch a.Kind {
+	case string(auth.PrincipalSession):
+		if err := requireHuman(a); err != nil {
+			return externalstage.Principal{}, err
+		}
+		return externalstage.Principal{UserID: a.UserID, Kind: "session", SessionCredentialID: a.SessionCredentialID}, nil
+	case string(auth.PrincipalAPIKey):
+		if a.UserID <= 0 || a.APIKeyID <= 0 || a.SessionCredentialID != "" || a.Impersonated {
+			return externalstage.Principal{}, fmt.Errorf("%w: current scoped api key required", ErrForbidden)
+		}
+		return externalstage.Principal{UserID: a.UserID, Kind: "api_key", APIKeyID: a.APIKeyID}, nil
+	default:
+		return externalstage.Principal{}, fmt.Errorf("%w: current editor session or scoped api key required", ErrForbidden)
+	}
+}
+
 func requireHuman(actor Actor) error {
 	if actor.Kind != string(auth.PrincipalSession) || actor.UserID <= 0 || actor.SessionCredentialID == "" || actor.Impersonated || actor.APIKeyID != 0 {
 		return fmt.Errorf("%w: current human session required", ErrForbidden)
+	}
+	return nil
+}
+
+func requireLiveSession(ctx context.Context, tx *sql.Tx, actor Actor) error {
+	var n int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM sessions
+		WHERE credential_id=? AND COALESCE(acting_as_user_id,user_id)=? AND expires_at>datetime('now')`,
+		actor.SessionCredentialID, actor.UserID).Scan(&n)
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return fmt.Errorf("%w: current human session required", ErrForbidden)
+	}
+	return nil
+}
+
+func requireLiveAPIKey(ctx context.Context, tx *sql.Tx, actor Actor, write bool) error {
+	query := `SELECT COUNT(*) FROM api_keys
+		WHERE id=? AND user_id=? AND disabled_at IS NULL
+		 AND (expires_at IS NULL OR julianday(expires_at)>julianday('now'))`
+	if write {
+		query += ` AND (scopes='*' OR (','||replace(scopes,' ','')||',') LIKE '%,agent-controls:write,%')`
+	}
+	var n int
+	err := tx.QueryRowContext(ctx, query, actor.APIKeyID, actor.UserID).Scan(&n)
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return fmt.Errorf("%w: current scoped api key required", ErrForbidden)
 	}
 	return nil
 }

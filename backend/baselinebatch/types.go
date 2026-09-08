@@ -50,6 +50,27 @@ const (
 
 	ImportedClaimAuthenticity = "untrusted_imported_claim"
 
+	SetupRequiredPharosRegistration = "pharos_owner_registration"
+	SetupRequiredHandoffSecretMint  = "handoff_secret_mint"
+	SetupRequiredHandoffConfig      = "handoff_config"
+	SetupRequiredPrerequisiteSeal   = "prerequisite_seal"
+	SetupRequiredHandoffRevoked     = "handoff_revoked"
+	SetupRequiredPrerequisiteReview = "prerequisite_review"
+	SetupRequiredBuiltArtifact      = "built_artifact_identity"
+	SetupRequiredV2Report           = "v2_report"
+
+	NextActionHumanReview            = "human_review_required"
+	NextActionImplementationEvidence = "implementation_evidence"
+	NextActionQAEvidence             = "qa_evidence"
+	NextActionPharosRegistration     = "pharos_owner_registration"
+	NextActionAuthorizeHandoff       = "authorize_pharos_handoff"
+	NextActionMintHandoffSecret      = "mint_handoff_secret"
+	NextActionDeploymentReceipt      = "pharos_deployment_receipt"
+	NextActionVerificationHandoff    = "authorize_verification_handoff"
+	NextActionVerificationObserve    = "pharos_verification_observation"
+	NextActionRotateHandoff          = "rotate_revoked_handoff"
+	NextActionExternalStageCLI       = "operator_external_stage_cli"
+
 	maxImportBytes    = 256 << 10
 	maxRequirements   = 64
 	maxConstraints    = 64
@@ -202,6 +223,25 @@ type Progress struct {
 	EvidenceObserved bool        `json:"evidence_observed"`
 	FreshnessAsOf    string      `json:"freshness_as_of,omitempty"`
 	BlockingReason   string      `json:"blocking_reason,omitempty"`
+	// SetupRequired is a precise operator-provisioning boundary. It is never a
+	// secret and never an invented host/command. Empty means this batch is not
+	// waiting on missing Pharos/Janus setup.
+	SetupRequired string `json:"setup_required,omitempty"`
+	// NextAction is the current bound step. It is not an unconditional advance
+	// control and does not upgrade guesses or worker-exit into completion.
+	NextAction string       `json:"next_action,omitempty"`
+	Handoff    *HandoffView `json:"handoff,omitempty"`
+}
+
+// HandoffView is the safe projection of the current external-stage handoff.
+// Credential bytes never appear here; mint_required means the existing
+// owner-only secret file path still has to mint epoch 0.
+type HandoffView struct {
+	StageKey        string `json:"stage_key"`
+	HandoffID       string `json:"handoff_id"`
+	State           string `json:"state"`
+	CredentialEpoch int64  `json:"credential_epoch"`
+	MintRequired    bool   `json:"mint_required"`
 }
 
 // ControlOption is a control the current human may actually perform on this

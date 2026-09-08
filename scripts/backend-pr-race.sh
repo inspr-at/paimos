@@ -130,9 +130,36 @@ run_race() {
   fi
 }
 
+run_one_race_pattern() {
+  local package="$1" pattern="$2"
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    printf 'go test -race -count=1 -timeout=%s %q -run %q\n' "$RACE_PACKAGE_TIMEOUT" "$package" "$pattern"
+    return
+  fi
+  # An indexed PR job executes one shard. Grouped packages emit several
+  # sequential invocations here. Exhaustive lane=all walks every shard in
+  # the foreground so heavyweight SQLite contracts never contend as multiple
+  # Go processes on one two-core runner.
+  GOMAXPROCS="$RACE_GOMAXPROCS" "$GO_COMMAND" test -race -count=1 -timeout="$RACE_PACKAGE_TIMEOUT" "$package" -run "$pattern"
+}
+
+pattern_for_names() {
+  local pattern='^(' name
+  [[ $# -gt 0 ]] || {
+    echo 'backend-pr-race: refusing an empty race group' >&2
+    exit 1
+  }
+  for name in "$@"; do
+    [[ "$pattern" == '^(' ]] || pattern+='|'
+    pattern+="$name"
+  done
+  printf '%s\n' "${pattern})$"
+}
+
 run_race_shards() {
-  local package="$1" match="$2" shard_count="$3"
-  local listed name names=() shard index pattern shard_start=0 shard_end="$shard_count"
+  local package="$1" match="$2" shard_count="$3" group_size="${4:-0}"
+  local listed name names=() shard index shard_start=0 shard_end="$shard_count"
+  local shard_names=() offset group=()
   cd "$BACKEND"
   listed=$("$GO_COMMAND" test -list "$match" "$package")
   while IFS= read -r name; do
@@ -150,6 +177,10 @@ run_race_shards() {
     echo "backend-pr-race: no tests matched $match in $package" >&2
     exit 1
   }
+  [[ "$group_size" =~ ^[0-9]+$ ]] || {
+    echo "backend-pr-race: invalid group size: $group_size" >&2
+    exit 2
+  }
 
   if (( SELECTED_SHARD >= 0 )); then
     [[ "$SELECTED_SHARD_COUNT" -eq "$shard_count" ]] || {
@@ -161,24 +192,22 @@ run_race_shards() {
   fi
 
   for ((shard = shard_start; shard < shard_end; shard++)); do
-    pattern='^('
+    shard_names=()
     for ((index = shard; index < ${#names[@]}; index += shard_count)); do
-      [[ "$pattern" == '^(' ]] || pattern+='|'
-      pattern+="${names[$index]}"
+      shard_names+=("${names[$index]}")
     done
-    [[ "$pattern" != '^(' ]] || {
+    [[ "${#shard_names[@]}" -gt 0 ]] || {
       echo "backend-pr-race: shard $shard is empty for $package" >&2
       exit 1
     }
-    pattern+=')$'
-    if [[ "$DRY_RUN" -eq 1 ]]; then
-      printf 'go test -race -count=1 -timeout=%s %q -run %q\n' "$RACE_PACKAGE_TIMEOUT" "$package" "$pattern"
-    else
-      # An indexed PR job executes one shard. The exhaustive workflow walks all
-      # shards here in the foreground so heavyweight SQLite contracts never
-      # contend as multiple Go processes on one two-core runner.
-      GOMAXPROCS="$RACE_GOMAXPROCS" "$GO_COMMAND" test -race -count=1 -timeout="$RACE_PACKAGE_TIMEOUT" "$package" -run "$pattern"
+    if (( group_size == 0 )); then
+      run_one_race_pattern "$package" "$(pattern_for_names "${shard_names[@]}")"
+      continue
     fi
+    for ((offset = 0; offset < ${#shard_names[@]}; offset += group_size)); do
+      group=("${shard_names[@]:$offset:$group_size}")
+      run_one_race_pattern "$package" "$(pattern_for_names "${group[@]}")"
+    done
   done
 }
 
@@ -249,6 +278,22 @@ run_package() {
       # existing affected runners (or four sequential processes in lane=all).
       run_race_shards ./lifecycleintents '^(Test|Fuzz)' 4
       ;;
+    ./delivery)
+      # Every delivery fixture rebuilds the complete migration chain. Keep every
+      # discovered test on the existing four affected runners, then split each
+      # runner's tests into sequential groups of four. Hosted CI 34175171447
+      # still exhausted 8m on 12-test baselinebatch shards; delivery shares the
+      # same Open()/migrateThrough cost.
+      run_race_shards ./delivery '^(Test|Fuzz)' 4 4
+      ;;
+    ./baselinebatch)
+      # Hosted CI 34175171447 (jobs 101903029365/374/438, shards 3/2/0) timed
+      # out at 8m after five completed migration fixtures, 28-47s into the next
+      # (RetryAfterJanusDivergence / IssuedHandoffThenJanusChange /
+      # PartialBuiltIdentity) still in migrateThrough. ~87s/test hosted; a
+      # group of four is ~346s vs 480s. Keep every test; do not raise timeout.
+      run_race_shards ./baselinebatch '^(Test|Fuzz)' 4 4
+      ;;
     ./managedharness)
       # Every managed-harness test rebuilds the complete SQLite migration chain.
       # Keep PR race instrumentation on the package's actual concurrency and
@@ -273,7 +318,10 @@ run_selected_package() {
       ;;
     affected)
       if [[ "$import_path" != "$MODULE/db" && "$import_path" != "$MODULE/handlers" && "$import_path" != "$MODULE/managedharness" ]]; then
-        if [[ "$import_path" == "$MODULE" || "$import_path" == "$MODULE/lifecycleintents" ]] || (( affected_index % SELECTED_SHARD_COUNT == SELECTED_SHARD )); then
+        if [[ "$import_path" == "$MODULE" ||
+              "$import_path" == "$MODULE/lifecycleintents" ||
+              "$import_path" == "$MODULE/delivery" ||
+              "$import_path" == "$MODULE/baselinebatch" ]] || (( affected_index % SELECTED_SHARD_COUNT == SELECTED_SHARD )); then
           run_package "$import_path"
         fi
         affected_index=$((affected_index + 1))
