@@ -398,9 +398,11 @@ type cursorProcess struct {
 	persistent bool
 	model      string
 	accountKey string
+	generation string
 	*ownedProcess
-	stdin   io.WriteCloser
-	observe func(AdapterEvent)
+	stdin    io.WriteCloser
+	observe  func(AdapterEvent)
+	evidence *cursorEvidenceStore
 
 	writeMu sync.Mutex
 	rpcMu   sync.Mutex
@@ -413,16 +415,28 @@ type cursorProcess struct {
 	promptCorrelation string
 	startingPrompt    bool
 	terminalFailure   bool
+	decisionTTL       time.Duration
+	held              map[string]*cursorHeldDecision
+	refusals          []DecisionRefusal
 	streamDone        chan struct{}
 	streamDoneOnce    sync.Once
 }
 
 func newCursorProcess(cmd *exec.Cmd, stdin io.WriteCloser, stdout io.Reader, observe func(AdapterEvent), requests ...StartRequest) *cursorProcess {
 	p := &cursorProcess{ownedProcess: newOwnedProcess(cmd), stdin: stdin, observe: observe,
-		pending: map[string]chan cursorRPCMessage{}, streamDone: make(chan struct{})}
+		pending: map[string]chan cursorRPCMessage{}, held: map[string]*cursorHeldDecision{},
+		decisionTTL: cursorDecisionTTL, streamDone: make(chan struct{})}
 	if len(requests) > 0 {
 		p.persistent = requests[0].KeepAlive
 		p.accountKey = strings.TrimSpace(requests[0].AccountKey)
+		p.generation = strings.TrimSpace(requests[0].generation)
+		if p.generation == "" {
+			p.generation = "unbound"
+		}
+		p.evidence = requests[0].cursorEvidence
+		if p.evidence == nil {
+			p.evidence = &cursorEvidenceStore{}
+		}
 		if requests[0].ResolvedProfile != nil {
 			p.model = requests[0].ResolvedProfile.Model
 		}
@@ -493,6 +507,7 @@ func (p *cursorProcess) readLoop(reader io.Reader) {
 }
 
 func (p *cursorProcess) abortStream() {
+	p.cancelHeldDecisions()
 	p.closeInput()
 	_, _ = p.signalOwned(true)
 }
@@ -501,12 +516,8 @@ func (p *cursorProcess) handlePeer(message cursorRPCMessage) {
 	switch message.Method {
 	case "session/update":
 		p.handleUpdate(message.Params)
-	case "session/request_permission":
-		p.rejectPermission(message)
-	case "cursor/ask_question":
-		p.rejectBlockingExtension(message, map[string]any{"outcome": map[string]any{"outcome": "cancelled"}})
-	case "cursor/create_plan":
-		p.rejectBlockingExtension(message, map[string]any{"outcome": map[string]any{"outcome": "cancelled"}})
+	case "session/request_permission", "cursor/ask_question", "cursor/create_plan":
+		p.holdPeerDecision(message)
 	case "cursor/update_todos", "cursor/task", "cursor/generate_image":
 		if len(message.ID) == 0 {
 			// Documented fire-and-forget notifications. No approval is implied.
@@ -516,6 +527,9 @@ func (p *cursorProcess) handlePeer(message cursorRPCMessage) {
 	default:
 		if len(message.ID) > 0 {
 			p.failClosedPeer(message.ID, -32601, "method not found")
+			p.noteRefusal(closedPeerMethod(message.Method), "unknown_method")
+			p.recordEvidence(cursorEvidenceRecord{Generation: p.generation, Method: closedPeerMethod(message.Method), Outcome: "unknown_method"})
+			p.observeEvent(AdapterEvent{ErrorCode: ErrorDecisionRefused})
 		}
 	}
 }
@@ -527,6 +541,11 @@ func (p *cursorProcess) handleUpdate(raw json.RawMessage) {
 			SessionUpdate string `json:"sessionUpdate"`
 			ToolCallID    string `json:"toolCallId"`
 			Status        string `json:"status"`
+			Kind          string `json:"kind"`
+			Content       struct {
+				Type string `json:"type"`
+				Text string `json:"text"`
+			} `json:"content"`
 		} `json:"update"`
 	}
 	if json.Unmarshal(raw, &params) != nil {
@@ -541,55 +560,14 @@ func (p *cursorProcess) handleUpdate(raw json.RawMessage) {
 	if params.Update.SessionUpdate == "tool_call" || (params.Update.SessionUpdate == "tool_call_update" && params.Update.Status == "in_progress") {
 		p.observeEvent(AdapterEvent{Kind: EventToolStarted})
 	}
-}
-
-func (p *cursorProcess) rejectPermission(message cursorRPCMessage) {
-	var params struct {
-		SessionID string `json:"sessionId"`
-		Options   []struct {
-			OptionID string `json:"optionId"`
-			Kind     string `json:"kind"`
-		} `json:"options"`
-	}
-	if json.Unmarshal(message.Params, &params) != nil {
-		p.failClosedPeer(message.ID, -32602, "invalid params")
-		return
-	}
-	p.stateMu.Lock()
-	owned := params.SessionID != "" && params.SessionID == p.sessionID && !p.terminalFailure
-	p.stateMu.Unlock()
-	if !owned {
-		p.failClosedPeer(message.ID, -32602, "invalid params")
-		return
-	}
-	optionID := ""
-	for _, option := range params.Options {
-		if option.Kind == "reject_once" || option.OptionID == "reject-once" {
-			optionID = option.OptionID
-			if optionID == "" {
-				optionID = "reject-once"
-			}
-			break
+	switch params.Update.SessionUpdate {
+	case "agent_message_chunk":
+		p.recordOutputDigest("message", params.Update.Content.Text)
+	case "tool_call", "tool_call_update":
+		if params.Update.Content.Text != "" {
+			p.recordOutputDigest(closedToolKind(params.Update.Kind), params.Update.Content.Text)
 		}
 	}
-	if optionID == "" {
-		_ = p.send(map[string]any{
-			"jsonrpc": "2.0", "id": rawJSON(message.ID),
-			"result": map[string]any{"outcome": map[string]any{"outcome": "cancelled"}},
-		})
-		return
-	}
-	_ = p.send(map[string]any{
-		"jsonrpc": "2.0", "id": rawJSON(message.ID),
-		"result": map[string]any{"outcome": map[string]any{"outcome": "selected", "optionId": optionID}},
-	})
-}
-
-func (p *cursorProcess) rejectBlockingExtension(message cursorRPCMessage, result map[string]any) {
-	if len(message.ID) == 0 {
-		return
-	}
-	_ = p.send(map[string]any{"jsonrpc": "2.0", "id": rawJSON(message.ID), "result": result})
 }
 
 func (p *cursorProcess) failClosedPeer(id json.RawMessage, code int, message string) {
@@ -779,6 +757,7 @@ func (*cursorProcess) Steer(context.Context, ControlRequest) (ControlEffect, err
 }
 
 func (p *cursorProcess) Interrupt(ctx context.Context, request ControlRequest) (ControlEffect, error) {
+	p.cancelHeldDecisions()
 	p.stateMu.Lock()
 	sessionID := p.sessionID
 	promptID := p.promptID

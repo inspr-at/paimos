@@ -166,6 +166,9 @@ func validateRegistryRecord(record registryRecord) error {
 	if s.Reporter.Closed && !s.Reporter.RemoteClosed && !locallyRejected {
 		return errors.New("invalid closed agentd reporter state")
 	}
+	if len(s.PendingDecisions) != 0 || len(s.DecisionRefusals) != 0 {
+		return errors.New("invalid agentd live decision projection")
+	}
 	return nil
 }
 
@@ -175,6 +178,8 @@ func (j *registryJournal) put(session Session) error {
 	}
 	session.PID = 0
 	session.Steerable = false
+	session.PendingDecisions = nil
+	session.DecisionRefusals = nil
 	return j.journal.Put(registryRecord{Session: session})
 }
 

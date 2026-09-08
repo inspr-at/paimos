@@ -76,6 +76,7 @@ type Supervisor struct {
 	journal               *registryJournal
 	starts                *startJournal
 	queue                 *piQueueStore
+	cursorEvidence        *cursorEvidenceStore
 	reporter              Reporter
 	dispatchResolver      DispatchResolver
 	allowSharedWorkspaces bool
@@ -131,6 +132,10 @@ func NewSupervisor(config SupervisorConfig) (*Supervisor, error) {
 			return nil, err
 		}
 		s.queue, err = openPiQueueStore(config.StateRoot, config.Instance)
+		if err != nil {
+			return nil, err
+		}
+		s.cursorEvidence, err = openCursorEvidenceStore(config.StateRoot, config.Instance)
 		if err != nil {
 			return nil, err
 		}
@@ -307,6 +312,7 @@ func (s *Supervisor) startOnce(ctx context.Context, request StartRequest, attemp
 	validated.KeepAlive = true
 	validated.queue = s.queue
 	validated.generation = entry.session.ID
+	validated.cursorEvidence = s.cursorEvidence
 	process, err := adapter.Start(startCtx, validated, observe)
 	if err != nil {
 		s.releaseReservation(entry.session.ID)
@@ -551,7 +557,7 @@ func validEventKind(kind EventKind) bool {
 
 func validErrorCode(code ErrorCode) bool {
 	switch code {
-	case ErrorEventStreamBound, ErrorAppServerProtocol, ErrorChildExitFailed, ErrorTurnFailed, ErrorChildStopFailed, ErrorOwnershipLost, ErrorWorkspaceConflict:
+	case ErrorEventStreamBound, ErrorAppServerProtocol, ErrorChildExitFailed, ErrorTurnFailed, ErrorChildStopFailed, ErrorOwnershipLost, ErrorWorkspaceConflict, ErrorDecisionRefused:
 		return true
 	default:
 		return false
@@ -711,6 +717,12 @@ func (e *sessionEntry) refreshSteerableLocked() {
 func (e *sessionEntry) snapshotLocked() Session {
 	out := e.session
 	out.Capabilities = append([]Capability(nil), e.session.Capabilities...)
+	if e.process != nil {
+		if decider, ok := e.process.(DecisionProcess); ok {
+			out.PendingDecisions = decider.PendingDecisions()
+			out.DecisionRefusals = decider.DecisionRefusals()
+		}
+	}
 	return out
 }
 

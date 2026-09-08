@@ -60,6 +60,7 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 	claudePath, nodePath, claudeSDKPath, piPath, cursorPath := "", "", "", "", ""
 	reportHost, reportURL, reportAPIKeyFile, paimosPath := "", "", "", ""
 	lifecycleConfigPath, codexAccountsPath, piAccountsPath, cursorAccountsPath, accountKey := "", "", "", "", ""
+	requestID, digest, optionID := "", "", ""
 	if command == "serve" {
 		flags.StringVar(&lifecycleConfigPath, "lifecycle-config", "", "protected explicit project/account/profile/workspace JSON configuration for browser lifecycle authority")
 		flags.StringVar(&codexPath, "codex-path", "", "absolute Codex CLI path")
@@ -94,13 +95,18 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 	if command == "workspace-identity" {
 		flags.StringVar(&workspace, "workspace", "", "existing absolute workspace to inspect without mutation")
 	}
-	if command == "steer" || command == "interrupt" || command == "stop" || command == "receiver-reference" || command == "held-queue" || command == "resume-queue" {
+	if command == "steer" || command == "interrupt" || command == "stop" || command == "receiver-reference" || command == "held-queue" || command == "resume-queue" || command == "decisions" || command == "answer" {
 		flags.StringVar(&sessionID, "session", "", "managed agentd session UUID")
 		flags.StringVar(&identity, "identity", "", "expected attributed harness identity")
 		flags.Int64Var(&projectID, "project-id", 0, "expected PPM project numeric ID")
 	}
-	if command == "steer" || command == "interrupt" || command == "stop" || command == "receiver-reference" || command == "resume-queue" {
+	if command == "steer" || command == "interrupt" || command == "stop" || command == "receiver-reference" || command == "resume-queue" || command == "answer" {
 		flags.StringVar(&correlationID, "correlation-id", "", "durable message/delivery/control ID")
+	}
+	if command == "answer" {
+		flags.StringVar(&requestID, "request-id", "", "exact owned ACP decision request id")
+		flags.StringVar(&digest, "digest", "", "exact tool/input digest for the pending request")
+		flags.StringVar(&optionID, "option-id", "", "exact offered ACP option id")
 	}
 	if err := flags.Parse(args); err != nil {
 		return err
@@ -111,7 +117,7 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 	if command == "receiver-reference" && (strings.TrimSpace(identity) == "" || uuid.Validate(sessionID) != nil || projectID <= 0) {
 		return errors.New("receiver reference requires exact --session generation, --identity and positive --project-id")
 	}
-	if command == "start" || command == "steer" || command == "interrupt" || command == "stop" || command == "held-queue" || command == "resume-queue" {
+	if command == "start" || command == "steer" || command == "interrupt" || command == "stop" || command == "held-queue" || command == "resume-queue" || command == "decisions" || command == "answer" {
 		if projectID <= 0 {
 			return errors.New("--project-id is required")
 		}
@@ -295,8 +301,28 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 		output, err = client.ResumeQueue(ctx, sessionID, agentd.ControlRequest{
 			Instance: common.instance, ProjectID: projectID, Identity: identity, CorrelationID: correlationID,
 		})
+	case "decisions":
+		status, e := client.Status(ctx)
+		if e != nil {
+			return e
+		}
+		for _, session := range status.Sessions {
+			if session.ID == sessionID && session.ProjectID == projectID && session.Identity == identity {
+				output = map[string]any{"pending_decisions": session.PendingDecisions, "decision_refusals": session.DecisionRefusals}
+				break
+			}
+		}
+		if output == nil {
+			return agentd.ErrSessionNotFound
+		}
+	case "answer":
+		output, err = client.Answer(ctx, sessionID, agentd.DecisionAnswer{
+			Instance: common.instance, ProjectID: projectID, Identity: identity, CorrelationID: correlationID,
+			RequestID: requestID, Generation: sessionID, Digest: digest, OptionID: optionID,
+			Authority: agentd.DecisionAuthorityLocalOperator,
+		})
 	default:
-		return errors.New("command must be serve, start, status, workspace-identity, receiver-reference, steer, interrupt, stop, held-queue, resume-queue, or version")
+		return errors.New("command must be serve, start, status, workspace-identity, receiver-reference, steer, interrupt, stop, held-queue, resume-queue, decisions, answer, or version")
 	}
 	if err != nil {
 		return err
