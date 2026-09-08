@@ -195,9 +195,36 @@ func (c *nativeConsumers) Poll(ctx context.Context, b runtimeconsumer.Binding) (
 	}
 	// Polling the server is a lease mutation. A receiver that cannot accept the
 	// FIFO head must wait locally so ordinary busy time consumes no attempts.
-	// Prepare repeats this check to close the local race before effect intent.
-	if c.controller.DeliveryHeld(session.ID) || !session.Steerable && !c.controller.InboxReady(session.ID) {
+	// A steerable busy receiver consults the existing redacted delivery ledger
+	// and drains only when the exact FIFO head can be steered. Prepare repeats
+	// the readiness check to close the local race before effect intent.
+	if c.controller.DeliveryHeld(session.ID) {
 		return nil, runtimeconsumer.ErrDeferred
+	}
+	if !c.controller.InboxReady(session.ID) {
+		if !session.Steerable {
+			return nil, runtimeconsumer.ErrDeferred
+		}
+		head, err := c.deliveryHead(ctx, b)
+		if err != nil {
+			return nil, err
+		}
+		if head == nil {
+			return nil, nil
+		}
+		if head.EffectiveTargetID != target.ID || head.EffectiveTargetVersion != target.Version {
+			return nil, runtimeconsumer.ErrOwnership
+		}
+		switch head.State {
+		case "leased":
+			return nil, runtimeconsumer.ErrDeferred
+		case "pending", "retry":
+		default:
+			return nil, runtimeconsumer.ErrConflict
+		}
+		if head.RequestedLevel != "steer" || target.MaximumLevel != "steer" {
+			return nil, runtimeconsumer.ErrDeferred
+		}
 	}
 	raw, err := c.command(ctx, b, "drain")
 	if err != nil {
@@ -273,6 +300,37 @@ func (c *nativeConsumers) primaryTarget(ctx context.Context, b runtimeconsumer.B
 		return agentmessage.Target{}, runtimeconsumer.ErrOwnership
 	}
 	return *own, nil
+}
+
+func (c *nativeConsumers) deliveryStatuses(ctx context.Context, b runtimeconsumer.Binding) ([]agentmessage.DeliveryStatus, error) {
+	route := fmt.Sprintf("/api/projects/%d/message-deliveries", b.Project)
+	callCtx, cancel := context.WithTimeout(ctx, reporterSessionTimeout)
+	raw, callErr := c.reporter.run(callCtx, c.reporter.paimosPath, []string{"--json", "curl", route}, c.reporter.environment, nil)
+	cancel()
+	var response struct {
+		Deliveries []agentmessage.DeliveryStatus `json:"deliveries"`
+	}
+	if callErr != nil || len(raw) > reporterOutputLimit || json.Unmarshal(raw, &response) != nil {
+		return nil, runtimeconsumer.ErrAuthority
+	}
+	return response.Deliveries, nil
+}
+
+func (c *nativeConsumers) deliveryHead(ctx context.Context, b runtimeconsumer.Binding) (*agentmessage.DeliveryStatus, error) {
+	deliveries, err := c.deliveryStatuses(ctx, b)
+	if err != nil {
+		return nil, err
+	}
+	for _, delivery := range deliveries {
+		if delivery.Address != b.Address || delivery.State == "handed_off" || delivery.State == "dead" {
+			continue
+		}
+		if uuid.Validate(delivery.DeliveryID) != nil || (delivery.RequestedLevel != "simple" && delivery.RequestedLevel != "steer") {
+			return nil, runtimeconsumer.ErrAuthority
+		}
+		return &delivery, nil
+	}
+	return nil, nil
 }
 func (c *nativeConsumers) Prepare(_ context.Context, b runtimeconsumer.Binding, w runtimeconsumer.Work) error {
 	session, err := c.local(b)
@@ -366,19 +424,13 @@ func (c *nativeConsumers) RecoverCircuit(ctx context.Context, b runtimeconsumer.
 	if err != nil {
 		return err
 	}
-	route := fmt.Sprintf("/api/projects/%d/message-deliveries", b.Project)
-	callCtx, cancel := context.WithTimeout(ctx, reporterSessionTimeout)
-	raw, callErr := c.reporter.run(callCtx, c.reporter.paimosPath, []string{"--json", "curl", route}, c.reporter.environment, nil)
-	cancel()
-	var response struct {
-		Deliveries []agentmessage.DeliveryStatus `json:"deliveries"`
-	}
-	if callErr != nil || len(raw) > reporterOutputLimit || json.Unmarshal(raw, &response) != nil {
+	deliveries, err := c.deliveryStatuses(ctx, b)
+	if err != nil {
 		return runtimeconsumer.ErrUnknown
 	}
 	leased, blocked := false, false
 	seen := map[string]bool{}
-	for _, delivery := range response.Deliveries {
+	for _, delivery := range deliveries {
 		if delivery.Address != b.Address || delivery.State == "handed_off" || delivery.State == "dead" {
 			continue
 		}

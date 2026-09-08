@@ -931,10 +931,13 @@ control completion, and stop all require that complete scope. Registration
 with the same stable external reference is an idempotent replay only with the
 same generation lease; a different lease cannot take over the live row.
 
-Agentd waits locally before the lease-mutating drain while an owned
-non-steerable receiver is busy or native delivery is held. A canonical
-`fifo_blocked` server page is also a wait state, not a listener conflict, so
-busy time does not consume delivery attempts or open the consumer circuit.
+Agentd waits locally before the lease-mutating drain while native delivery is
+held. While an owned receiver is busy, it uses the existing redacted delivery
+ledger to drain only an exact-target steer head that the receiver can accept;
+ordinary or already-leased work waits without consuming another attempt. A
+canonical `fifo_blocked` server page is also a wait state, not a listener
+conflict, so busy time does not exhaust delivery attempts or open the consumer
+circuit.
 Repair of an older false `singleton_conflict` circuit requires the exact
 current target/version, one leased FIFO head followed by attempt-free
 `fifo_blocked` rows, and no pending local effect receipt. Any missing or

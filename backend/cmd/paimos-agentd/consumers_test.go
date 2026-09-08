@@ -276,13 +276,20 @@ func TestNativeConsumersUsePrivateWorkerLeaseAndExactCanonicalFIFO(t *testing.T)
 			t.Fatal("reporter configuration changed")
 		}
 		if args[1] == "curl" {
+			if strings.HasSuffix(args[2], "/message-deliveries") {
+				deliveries := []agentmessage.DeliveryStatus{}
+				if len(pending) > 0 {
+					deliveries = append(deliveries, agentmessage.DeliveryStatus{DeliveryID: pending[0].DeliveryWork.DeliveryID, Address: "codex:worker", RequestedLevel: pending[0].DeliveryWork.RequestedLevel, State: "pending", EffectiveTargetID: target, EffectiveTargetVersion: 1})
+				}
+				return json.Marshal(map[string]any{"deliveries": deliveries, "count": len(deliveries)})
+			}
 			adapter := agentmessage.AdapterManagedHarness
 			id := target
 			if legacy {
 				adapter = "agentd_codex"
 				id = uuid.NewString()
 			}
-			return json.Marshal(map[string]any{"targets": []agentmessage.Target{{ID: id, Instance: "fixture", ProjectID: 42, Address: "codex:worker", Adapter: adapter, Enabled: true, Role: "primary", Version: 1}}})
+			return json.Marshal(map[string]any{"targets": []agentmessage.Target{{ID: id, Instance: "fixture", ProjectID: 42, Address: "codex:worker", Adapter: adapter, Enabled: true, Role: "primary", MaximumLevel: "steer", Version: 1}}})
 		}
 		operation := args[2]
 		if operation == "status" {
@@ -328,6 +335,12 @@ func TestNativeConsumersUsePrivateWorkerLeaseAndExactCanonicalFIFO(t *testing.T)
 	}
 	defer consumers.supervisor.Stop()
 	consumers.controller = controller
+	process.busy = true
+	consumers.reconcile(context.Background())
+	if completed != 0 || process.inboxes != 0 || process.steers != 0 || consumers.supervisor.Snapshot()[0].Failures != 0 {
+		t.Fatal("busy steerable receiver leased or executed a simple FIFO head")
+	}
+	process.busy = false
 	consumers.reconcile(context.Background())
 	consumers.reconcile(context.Background())
 	if completed != 2 || process.inboxes != 1 || process.steers != 1 {
