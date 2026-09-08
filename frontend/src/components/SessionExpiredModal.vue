@@ -22,6 +22,7 @@
 import { computed } from "vue";
 import { sessionExpired } from "@/api/client";
 import { useAuthStore } from "@/stores/auth";
+import { publicURL, stripPublicBase } from "@/publicPath";
 
 const auth = useAuthStore();
 
@@ -36,10 +37,10 @@ function signIn() {
   // link the user back to where they were. LoginView reads
   // `?redirect=…` via postLoginRedirectOrFallback — match that
   // convention here.
-  const here = window.location.pathname + window.location.search;
-  const isLoginPage = window.location.pathname.startsWith("/login");
+  const here = stripPublicBase(window.location.pathname) + window.location.search;
+  const isLoginPage = here === "/login" || here.startsWith("/login?") || here.startsWith("/login/");
   const qs = !isLoginPage ? `?redirect=${encodeURIComponent(here)}` : "";
-  window.location.href = `/login${qs}`;
+  window.location.href = `${publicURL("/login")}${qs}`;
 }
 </script>
 

@@ -3,6 +3,10 @@
 declare const __APP_VERSION__: string
 declare const __GIT_HASH__: string
 
+interface Window {
+  __PAIMOS_PUBLIC_BASE_PATH__?: string
+}
+
 declare module '@inspr/flow-shell'
 declare module '@inspr/flow-shell/identity' {
   export function identityBinding(identity: unknown): Record<string, unknown>

@@ -25,6 +25,7 @@
  */
 import { ref, computed } from 'vue'
 import type { Attachment } from '@/types'
+import { publicURL } from '@/publicPath'
 
 export type LightboxAlignment = 'left' | 'center' | 'right' | 'full'
 export type LightboxSize      = 'sm'   | 'md'     | 'lg'    | 'full'
@@ -82,7 +83,7 @@ export function buildMarkdownReference(
   size:  LightboxSize,
 ): string {
   const safeAlt = attachment.filename.replace(/"/g, '&quot;')
-  return `<img src="/api/attachments/${attachment.id}" alt="${safeAlt}" class="md-img md-img--${align} md-img--${size}" />`
+  return `<img src="${publicURL(`/api/attachments/${attachment.id}`)}" alt="${safeAlt}" class="md-img md-img--${align} md-img--${size}" />`
 }
 
 export function useAttachmentLightbox() {

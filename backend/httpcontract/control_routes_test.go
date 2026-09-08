@@ -15,6 +15,7 @@ import (
 	"testing"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/inspr-at/paimos/backend/publicbase"
 )
 
 // Every frozen family, spelled out. This list is the contract: a family
@@ -333,5 +334,35 @@ func TestControlRouteClassesAreClosedAndOpaque(t *testing.T) {
 		if strings.ContainsAny(label, " \t\r\n\"/{}%") {
 			t.Fatalf("route class %q is not a safe log token", label)
 		}
+	}
+}
+
+func TestClassifyControlRequestStripsConfiguredPrefix(t *testing.T) {
+	prefix, err := publicbase.Parse("/paimos")
+	if err != nil {
+		t.Fatal(err)
+	}
+	publicbase.SetCurrent(prefix)
+	t.Cleanup(func() { publicbase.SetCurrent("") })
+
+	req := httptest.NewRequest(http.MethodPost, "/paimos/api/runs/17/control-commands", nil)
+	class, ok := ClassifyControlRequest(req)
+	if !ok || class != ControlRouteRunCommands {
+		t.Fatalf("prefixed control path class=%q ok=%v", class, ok)
+	}
+
+	leftover := httptest.NewRequest(http.MethodPost, "/api/runs/17/control-commands", nil)
+	if class, ok := ClassifyControlRequest(leftover); !ok || class != ControlRouteRunCommands {
+		t.Fatal("root-shaped leftover control URL must stay classified")
+	}
+
+	near := httptest.NewRequest(http.MethodPost, "/paimos2/api/runs/17/control-commands", nil)
+	if _, ok := ClassifyControlRequest(near); ok {
+		t.Fatal("mount near-miss must not classify as control")
+	}
+
+	miss := httptest.NewRequest(http.MethodPost, "/paimos/api/runs/17/telemetry", nil)
+	if _, ok := ClassifyControlRequest(miss); ok {
+		t.Fatal("prefixed near-miss must keep ordinary behavior")
 	}
 }

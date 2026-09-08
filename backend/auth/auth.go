@@ -49,8 +49,6 @@ var errInvalidSession = errors.New("invalid session")
 
 const totpPendingTTLAuth = 5 * time.Minute
 
-const sessionCookie = "session"
-
 // PAI-322: 30-day sliding window with a 90-day absolute cap.
 //
 //   - sessionDuration is the sliding window. Every authenticated request
@@ -100,7 +98,7 @@ func CheckPassword(hash, password string) bool {
 // this package preserve "the current session" when pruning sessions on a
 // password change without duplicating the cookie name.
 func CurrentSessionID(r *http.Request) string {
-	if c, err := r.Cookie(sessionCookie); err == nil {
+	if c, err := readSessionCookie(r); err == nil {
 		return c.Value
 	}
 	return ""
@@ -234,7 +232,7 @@ func Middleware(next http.Handler) http.Handler {
 		}
 
 		// 2. Fall back to session cookie
-		cookie, err := r.Cookie(sessionCookie)
+		cookie, err := readSessionCookie(r)
 		if err != nil {
 			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
 			return
@@ -287,16 +285,7 @@ func Middleware(next http.Handler) http.Handler {
 				log.Printf("Middleware: slide renewal credential_id=%s: %v", rec.credentialID, uerr)
 			} else {
 				rec.expiresAt = newExpiry
-				// #nosec G124 -- HttpOnly + SameSite=Lax are set; Secure mirrors COOKIE_SECURE (true on HTTPS deployments).
-				http.SetCookie(w, &http.Cookie{
-					Name:     sessionCookie,
-					Value:    cookie.Value,
-					Path:     "/",
-					Expires:  time.Now().Add(sessionAbsoluteLifetime),
-					HttpOnly: true,
-					Secure:   cookieSecure,
-					SameSite: http.SameSiteLaxMode,
-				})
+				setSessionCookieValue(w, cookie.Value, time.Now().Add(sessionAbsoluteLifetime))
 			}
 		}
 
@@ -321,7 +310,7 @@ func Middleware(next http.Handler) http.Handler {
 			if t, err := IssueCSRFForSession(w, cookie.Value); err == nil {
 				rec.csrfTok = t
 			}
-		} else if _, err := r.Cookie(CSRFCookieName); err == http.ErrNoCookie {
+		} else if _, err := readCSRFCookie(r); err == http.ErrNoCookie {
 			// PAI-370: DB has a token but the browser doesn't carry one.
 			// Pre-fix the CSRF cookie was browser-session-only while the
 			// session cookie persisted 90 days, so any browser restart
@@ -364,15 +353,7 @@ func Middleware(next http.Handler) http.Handler {
 // (absolute cap, account disabled, etc.) so the browser doesn't keep
 // presenting a value the server has already deleted.
 func clearSessionCookie(w http.ResponseWriter) {
-	// #nosec G124 -- deletion cookie (empty value, MaxAge -1); it carries no session data to protect.
-	http.SetCookie(w, &http.Cookie{
-		Name:    sessionCookie,
-		Value:   "",
-		Path:    "/",
-		Expires: time.Unix(0, 0),
-		MaxAge:  -1,
-	})
-	ClearCSRFCookie(w)
+	clearSessionCookies(w)
 }
 
 // userScanDests returns the scan destination pointers for userSelectCols.
@@ -601,16 +582,7 @@ func LoginHandler(w http.ResponseWriter, r *http.Request) {
 	// backend has slid expires_at past the current value. The DB row
 	// is the source of truth; the cookie just has to survive long
 	// enough for the next request to renew it.
-	// #nosec G124 -- HttpOnly + SameSite=Lax are set; Secure mirrors COOKIE_SECURE (true on HTTPS deployments).
-	http.SetCookie(w, &http.Cookie{
-		Name:     sessionCookie,
-		Value:    sid,
-		Path:     "/",
-		Expires:  now.Add(sessionAbsoluteLifetime),
-		HttpOnly: true,
-		Secure:   cookieSecure,
-		SameSite: http.SameSiteLaxMode,
-	})
+	setSessionCookieValue(w, sid, now.Add(sessionAbsoluteLifetime))
 	// PAI-113: bind a fresh CSRF token to the new session and expose it
 	// to the SPA via a non-HttpOnly cookie. Do not fail the login if this
 	// fails — the lazy-upgrade path in Middleware will retry.
@@ -633,21 +605,13 @@ func LoginHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func LogoutHandler(w http.ResponseWriter, r *http.Request) {
-	cookie, err := r.Cookie(sessionCookie)
+	cookie, err := readSessionCookie(r)
 	if err == nil {
 		if _, err := db.DB.Exec("DELETE FROM sessions WHERE id=?", cookie.Value); err != nil {
 			log.Printf("LogoutHandler: delete session: %v", err)
 		}
 	}
-	// #nosec G124 -- deletion cookie (empty value, MaxAge -1); it carries no session data to protect.
-	http.SetCookie(w, &http.Cookie{
-		Name:    sessionCookie,
-		Value:   "",
-		Path:    "/",
-		Expires: time.Unix(0, 0),
-		MaxAge:  -1,
-	})
-	ClearCSRFCookie(w)
+	clearSessionCookies(w)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -748,7 +712,7 @@ func ChangePassword(w http.ResponseWriter, r *http.Request) {
 	// the conservative choice (an automated client doesn't have a
 	// "this one" to keep).
 	currentSID := ""
-	if c, err := r.Cookie(sessionCookie); err == nil {
+	if c, err := readSessionCookie(r); err == nil {
 		currentSID = c.Value
 	}
 	if currentSID != "" {

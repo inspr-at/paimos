@@ -27,7 +27,7 @@ const version = readFileSync(resolve(frontendDir, '../VERSION'), 'utf-8').trim()
 let gitHash = ''
 try { gitHash = execSync('git rev-parse --short HEAD', { encoding: 'utf-8' }).trim() } catch { /* not in git */ }
 
-export default defineConfig({
+export default defineConfig(({ command }) => ({
   plugins: [
     vue({
       template: {
@@ -37,6 +37,9 @@ export default defineConfig({
       },
     }),
   ],
+  // Relative asset URLs plus the server-injected <base href> let one
+  // built artifact run at origin-root or a configured native prefix.
+  base: command === 'build' ? './' : '/',
   define: {
     __APP_VERSION__: JSON.stringify(version),
     __GIT_HASH__: JSON.stringify(gitHash),
@@ -81,4 +84,4 @@ export default defineConfig({
       },
     },
   },
-})
+}))

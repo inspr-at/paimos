@@ -139,6 +139,13 @@ func newClient(inst InstanceConfig) *Client {
 	}
 }
 
+// joinInstanceAPI concatenates the operator-selected instance URL with an
+// app path that starts with /api. The prefix, if any, already lives in the
+// instance URL; this joins /api once.
+func joinInstanceAPI(baseURL, path string) string {
+	return strings.TrimRight(baseURL, "/") + path
+}
+
 // do makes an HTTP request and returns the decoded JSON body (as raw
 // bytes, the caller unmarshals into a concrete type). On any 4xx/5xx
 // it returns a typed error that includes the server's JSON error
@@ -167,7 +174,7 @@ func (c *Client) doForHarnessContext(ctx context.Context, method, path string, b
 		reqBody = bytes.NewReader(b)
 	}
 	// #nosec G704 -- baseURL is the operator-selected PAIMOS instance and path is assembled by CLI commands for that instance.
-	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, reqBody)
+	req, err := http.NewRequestWithContext(ctx, method, joinInstanceAPI(c.baseURL, path), reqBody)
 	if err != nil {
 		return nil, fmt.Errorf("build request: %w", err)
 	}

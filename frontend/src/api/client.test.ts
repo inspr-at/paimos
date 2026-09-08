@@ -23,6 +23,7 @@ import {
   errMsg,
   mustChangePassword,
   permissionsEpoch,
+  readCsrfToken,
   resetPermissionsEpoch,
   sessionExpired,
 } from './client'
@@ -348,5 +349,32 @@ describe('api client 401 interceptor', () => {
     currentXHR.onload?.()
     await expect(current).resolves.toEqual({ id: 4 })
     expect(permissionsEpoch.value).toBe('5')
+  })
+})
+
+describe('readCsrfToken', () => {
+  afterEach(() => {
+    document.cookie = 'csrf_token=; Max-Age=0; path=/'
+    document.cookie = 'paimos_csrf_token=; Max-Age=0; path=/'
+    window.__PAIMOS_PUBLIC_BASE_PATH__ = ''
+  })
+
+  it('reads legacy csrf_token in standalone', () => {
+    document.cookie = 'csrf_token=legacy; path=/'
+    expect(readCsrfToken()).toBe('legacy')
+  })
+
+  it('prefers paimos_csrf_token in standalone', () => {
+    document.cookie = 'csrf_token=legacy; path=/'
+    document.cookie = 'paimos_csrf_token=named; path=/'
+    expect(readCsrfToken()).toBe('named')
+  })
+
+  it('ignores generic csrf_token in shared-origin', () => {
+    window.__PAIMOS_PUBLIC_BASE_PATH__ = '/paimos'
+    document.cookie = 'csrf_token=stolen; path=/'
+    expect(readCsrfToken()).toBe('')
+    document.cookie = 'paimos_csrf_token=ok; path=/'
+    expect(readCsrfToken()).toBe('ok')
   })
 })

@@ -352,7 +352,7 @@ func TestReleaseAcceptanceHTTPRejectsKeysImpersonationRevokedAndCrossProject(t *
 	}
 	cross.Body.Close()
 
-	sid := strings.TrimPrefix(ts.memberCookie, "session=")
+	sid := cookieSessionID(ts.memberCookie)
 	if _, err := db.DB.Exec(`UPDATE sessions SET expires_at=datetime('now','-1 hour') WHERE id=?`, sid); err != nil {
 		t.Fatal(err)
 	}

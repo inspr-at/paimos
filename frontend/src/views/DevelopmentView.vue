@@ -2,6 +2,7 @@
 import LoadingText from "@/components/LoadingText.vue";
 import { ref, onMounted, computed } from 'vue'
 import { api } from '@/api/client'
+import { publicURL } from '@/publicPath'
 import { useAuthStore } from '@/stores/auth'
 import { useRouter } from 'vue-router'
 import { formatInteger } from '@/composables/useNumberFormat'
@@ -65,7 +66,7 @@ async function openReport(filename: string) {
   reportHTML.value = ''
   try {
     // Fetch raw HTML — use fetch directly since api client parses JSON.
-    const resp = await fetch(`/api/dev/test-reports/${filename}`, {
+    const resp = await fetch(publicURL(`/api/dev/test-reports/${filename}`), {
       credentials: 'same-origin',
     })
     reportHTML.value = await resp.text()

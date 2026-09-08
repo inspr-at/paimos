@@ -44,7 +44,7 @@ func TestRegression_Auth_002_DisabledBlocked(t *testing.T) {
 		t.Errorf("INV-AUTH-002 violated: deleted-user cookie returned %d, want 401", resp.StatusCode)
 	}
 	var n int
-	_ = db.DB.QueryRow("SELECT COUNT(*) FROM sessions WHERE id=?", strings.TrimPrefix(cookie, "session=")).Scan(&n)
+	_ = db.DB.QueryRow("SELECT COUNT(*) FROM sessions WHERE id=?", cookieSessionID(cookie)).Scan(&n)
 	if n != 0 {
 		t.Errorf("INV-AUTH-002 violated: session row not cleaned up after disable")
 	}
@@ -117,7 +117,7 @@ func TestRegression_CSRF_001_ValidTokenAllows(t *testing.T) {
 
 	parent := newTestServer(t)
 	cookie := parent.memberCookie
-	sid := strings.TrimPrefix(cookie, "session=")
+	sid := cookieSessionID(cookie)
 	var csrf string
 	_ = db.DB.QueryRow("SELECT csrf_token FROM sessions WHERE id=?", sid).Scan(&csrf)
 	if csrf == "" {
@@ -182,19 +182,25 @@ func TestRegression_CSRF_002_CookieAttrs(t *testing.T) {
 		"username": "member", "password": "memberpass",
 	})
 	defer resp.Body.Close()
+	seen := map[string]*http.Cookie{}
 	for _, c := range resp.Cookies() {
-		if c.Name != "csrf_token" {
+		if c.Name != "csrf_token" && c.Name != "paimos_csrf_token" {
 			continue
 		}
+		seen[c.Name] = c
 		if c.HttpOnly {
-			t.Error("INV-CSRF-002 violated: csrf_token cookie is HttpOnly")
+			t.Errorf("INV-CSRF-002 violated: %s cookie is HttpOnly", c.Name)
 		}
 		if c.SameSite != http.SameSiteStrictMode {
-			t.Errorf("INV-CSRF-002 violated: csrf_token cookie SameSite=%v, want Strict", c.SameSite)
+			t.Errorf("INV-CSRF-002 violated: %s cookie SameSite=%v, want Strict", c.Name, c.SameSite)
 		}
-		return
 	}
-	t.Error("INV-CSRF-002 violated: login response did not set csrf_token cookie")
+	if seen["csrf_token"] == nil {
+		t.Error("INV-CSRF-002 violated: login response did not set csrf_token cookie")
+	}
+	if seen["paimos_csrf_token"] == nil {
+		t.Error("INV-CSRF-002 violated: login response did not set paimos_csrf_token cookie")
+	}
 }
 
 func TestRegression_Authz_001_NoViewIsNotFound(t *testing.T) {
@@ -407,7 +413,7 @@ func TestRegression_Hdr_003_CSPReportOnly(t *testing.T) {
 // so we verify by reading the row before and after.
 func TestRegression_Session_001_SlidingRenewalBumpsExpiry(t *testing.T) {
 	ts := newTestServer(t)
-	sid := strings.TrimPrefix(ts.memberCookie, "session=")
+	sid := cookieSessionID(ts.memberCookie)
 
 	// Force the session to be "near expiry" — within the 15-day renew
 	// threshold. Use a stamp 1 day from now.
@@ -441,7 +447,7 @@ func TestRegression_Session_001_SlidingRenewalBumpsExpiry(t *testing.T) {
 // even when sliding would otherwise extend it.
 func TestRegression_Session_002_AbsoluteCapForcesLogout(t *testing.T) {
 	ts := newTestServer(t)
-	memberSID := strings.TrimPrefix(ts.memberCookie, "session=")
+	memberSID := cookieSessionID(ts.memberCookie)
 	var userID int64
 	if err := db.DB.QueryRow("SELECT user_id FROM sessions WHERE id=?", memberSID).Scan(&userID); err != nil {
 		t.Fatal(err)
@@ -617,7 +623,7 @@ func TestRegression_MustChange_002_PasswordChangeUnlocks(t *testing.T) {
 	}
 	cookie := ts.login(t, "newhire2", "tempinitial")
 	// Submit the password change. CSRF is enforced — fetch token first.
-	sid := strings.TrimPrefix(cookie, "session=")
+	sid := cookieSessionID(cookie)
 	var csrfTok string
 	_ = db.DB.QueryRow("SELECT csrf_token FROM sessions WHERE id=?", sid).Scan(&csrfTok)
 	body := bytes.NewBufferString(`{"current_password":"tempinitial","new_password":"realpermpw"}`)
@@ -676,7 +682,7 @@ func TestRegression_Session_004_PasswordChangeKillsOtherSessions(t *testing.T) {
 	if err := db.DB.QueryRow("SELECT id FROM users WHERE username='member'").Scan(&memberID); err != nil {
 		t.Fatal(err)
 	}
-	currentSID := strings.TrimPrefix(ts.memberCookie, "session=")
+	currentSID := cookieSessionID(ts.memberCookie)
 
 	// Plant a second, separate session for the same user — simulates a
 	// second device / browser. Use a known id and a future expiry so

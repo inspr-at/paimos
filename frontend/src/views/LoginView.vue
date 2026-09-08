@@ -3,6 +3,7 @@ import { ref, watch, computed, onMounted } from 'vue'
 import { useRoute, useRouter, RouterLink } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { ApiError, api } from '@/api/client'
+import { publicURL } from '@/publicPath'
 import { useBranding } from '@/composables/useBranding'
 import { useSidebarColors } from '@/composables/useSidebarColors'
 import { postLoginRedirectOrFallback } from '@/router/redirects'
@@ -45,10 +46,13 @@ const methodSSO = ref(false)
 
 /** SSO entry point, carrying the identifier so the IdP can skip its own prompt. */
 const ssoHref = computed(() => {
+  const params = new URLSearchParams()
   const id = username.value.trim()
-  return id
-    ? `/api/auth/oidc/login?login_hint=${encodeURIComponent(id)}`
-    : '/api/auth/oidc/login'
+  if (id) params.set('login_hint', id)
+  const redirect = Array.isArray(route.query.redirect) ? route.query.redirect[0] : route.query.redirect
+  if (typeof redirect === 'string' && redirect) params.set('redirect', redirect)
+  const q = params.toString()
+  return publicURL('/api/auth/oidc/login') + (q ? `?${q}` : '')
 })
 
 async function submitIdentifier() {

@@ -47,6 +47,8 @@ import (
 	"log"
 	"net/http"
 	"os"
+
+	"github.com/inspr-at/paimos/backend/publicbase"
 )
 
 // SecurityHeaders is the global middleware that applies the baseline set.
@@ -107,7 +109,7 @@ func csp() string {
 		"frame-ancestors 'self'; " +
 		"base-uri 'self'; " +
 		"form-action 'self'; " +
-		"report-uri /api/csp-report"
+		"report-uri " + publicbase.Current().Join("/api/csp-report")
 }
 
 // CSPReport receives JSON violation reports from browsers running with the

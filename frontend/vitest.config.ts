@@ -16,12 +16,20 @@
  */
 
 import { defineConfig, mergeConfig } from 'vitest/config'
+import type { ConfigEnv, UserConfig } from 'vite'
 import viteConfig from './vite.config'
+
+function resolvedViteConfig(): UserConfig {
+  if (typeof viteConfig === 'function') {
+    return viteConfig({ command: 'serve', mode: 'test' } as ConfigEnv)
+  }
+  return viteConfig
+}
 
 // Vitest 3 + happy-dom. Config merges the existing Vite config so path aliases
 // (@/), plugins, and define: flags all flow through unchanged.
 export default mergeConfig(
-  viteConfig,
+  resolvedViteConfig(),
   defineConfig({
     test: {
       environment: 'happy-dom',

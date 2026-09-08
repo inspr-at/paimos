@@ -18,6 +18,7 @@ import {
   type LightboxSize,
 } from '@/composables/useAttachmentLightbox'
 import { formatInteger } from '@/composables/useNumberFormat'
+import { publicURL } from '@/publicPath'
 
 const lb = useAttachmentLightbox()
 
@@ -83,7 +84,7 @@ function download() {
   const att = lb.current.value
   if (!att) return
   const a = document.createElement('a')
-  a.href = `/api/attachments/${att.id}`
+  a.href = publicURL(`/api/attachments/${att.id}`)
   a.download = att.filename
   document.body.appendChild(a)
   a.click()
@@ -111,7 +112,7 @@ window.addEventListener('keydown', onKeydown)
 onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
 
 const imageUrl = computed(() =>
-  lb.current.value ? `/api/attachments/${lb.current.value.id}` : '',
+  lb.current.value ? publicURL(`/api/attachments/${lb.current.value.id}`) : '',
 )
 </script>
 

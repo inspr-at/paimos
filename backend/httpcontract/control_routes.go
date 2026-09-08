@@ -38,6 +38,8 @@ package httpcontract
 import (
 	"net/http"
 	"strings"
+
+	"github.com/inspr-at/paimos/backend/publicbase"
 )
 
 // ControlRouteClass is the closed vocabulary of safe labels. Every value
@@ -175,10 +177,16 @@ func ClassifyControlRequest(r *http.Request) (ControlRouteClass, bool) {
 	if r == nil || r.URL == nil {
 		return "", false
 	}
+	path := r.URL.Path
 	if r.URL.RawPath != "" {
-		return ClassifyControlPath(r.URL.RawPath)
+		path = r.URL.RawPath
 	}
-	return ClassifyControlPath(r.URL.Path)
+	// Strip the configured native prefix before matching frozen /api
+	// families. Do this here — at classification time — so logging and
+	// no-store run on the app-relative path. Unstripped leftover /api
+	// control URLs stay classified so they are never ordinary-logged.
+	path = publicbase.Current().AppPath(path)
+	return ClassifyControlPath(path)
 }
 
 // IsControlRequest is the boolean form for middleware that only needs to

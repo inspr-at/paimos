@@ -27,6 +27,7 @@ import {
   permissionsEpoch,
   sessionExpiresAt,
 } from '@/api/client'
+import { publicURL } from '@/publicPath'
 import {
   toSpeechWire,
   type NarrationLocale,
@@ -121,7 +122,7 @@ function observePermissionsEpoch(response: Response, required: boolean): string 
 
 async function voiceFetch(path: string, init: RequestInit, failureMessage: string): Promise<Response> {
   const epochGeneration = capturePermissionsEpochGeneration()
-  const response = await fetch(`/api${path}`, {
+  const response = await fetch(publicURL(`/api${path}`), {
     ...init,
     cache: 'no-store',
     credentials: 'same-origin',
@@ -276,7 +277,7 @@ function projectNameAlias(value: unknown): string {
  * delivery action: the next Agent Mode snapshot remains the sole authority. */
 export async function loadAgentModeVoiceProjectCatalog(signal?: AbortSignal): Promise<VoiceProjectRef[]> {
   const epochGeneration = capturePermissionsEpochGeneration()
-  const response = await fetch('/api/projects?status=all', {
+  const response = await fetch(publicURL('/api/projects?status=all'), {
     method: 'GET',
     cache: 'no-store',
     credentials: 'same-origin',

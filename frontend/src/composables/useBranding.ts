@@ -39,6 +39,7 @@ import {
 } from '@/constants/storage'
 import { applyTypeColorsToDOM } from './useTypeColors'
 import { applyTableAppearanceToDOM } from './useTableAppearance'
+import { publicURL } from '@/publicPath'
 import {
   isBackgroundPattern,
   type BackgroundPattern,
@@ -156,9 +157,9 @@ function applyToDOM(cfg: BrandingConfig) {
 
   // Update favicon
   const faviconEl = document.querySelector<HTMLLinkElement>('link[rel="icon"]')
-  if (faviconEl) faviconEl.href = cfg.favicon
+  if (faviconEl) faviconEl.href = publicURL(cfg.favicon)
   const touchEl = document.querySelector<HTMLLinkElement>('link[rel="apple-touch-icon"]')
-  if (touchEl) touchEl.href = cfg.logo
+  if (touchEl) touchEl.href = publicURL(cfg.logo)
 }
 
 let initPromise: Promise<void> | null = null
@@ -169,7 +170,7 @@ let initPromise: Promise<void> | null = null
 async function fetchAndApply(): Promise<void> {
   try {
     const file = localStorage.getItem(LS_KEY) || ''
-    const url = file ? `/api/branding?file=${encodeURIComponent(file)}` : '/api/branding'
+    const url = file ? publicURL(`/api/branding?file=${encodeURIComponent(file)}`) : publicURL('/api/branding')
     const resp = await fetch(url, { cache: 'no-store' })
     if (resp.ok) {
       const data = await resp.json()

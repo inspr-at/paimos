@@ -1,4 +1,5 @@
 import { api } from '@/api/client'
+import { publicURL } from '@/publicPath'
 
 export interface AICallRow {
   id: number
@@ -162,6 +163,6 @@ export function undoMutationByRequestId(
 
 export function buildAICallsExportUrl(mode: 'admin' | 'self', query: AICallQuery = {}): string {
   return mode === 'admin'
-    ? `/api/ai/calls/export.csv${buildQuery(query)}`
-    : `/api/ai/calls/me/export.csv${buildQuery(query)}`
+    ? publicURL(`/api/ai/calls/export.csv${buildQuery(query)}`)
+    : publicURL(`/api/ai/calls/me/export.csv${buildQuery(query)}`)
 }

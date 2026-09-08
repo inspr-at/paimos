@@ -2,6 +2,7 @@
 import { ref, computed, nextTick, onBeforeUnmount, watch, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { api, csrfHeaders, errMsg } from '@/api/client'
+import { publicURL } from '@/publicPath'
 import { MAX_IMAGE_SIZE } from '@/utils/constants'
 import { userInitials } from '@/utils/userDisplay'
 import { useAuthStore } from '@/stores/auth'
@@ -227,7 +228,7 @@ async function uploadAvatar(e: Event) {
   const fd = new FormData()
   fd.append('avatar', file)
   try {
-    const res = await fetch('/api/auth/avatar', { method: 'POST', body: fd, credentials: 'same-origin', headers: csrfHeaders() })
+    const res = await fetch(publicURL('/api/auth/avatar'), { method: 'POST', body: fd, credentials: 'same-origin', headers: csrfHeaders() })
     if (!res.ok) { const d = await res.json(); throw new Error(d.error ?? 'Upload failed.') }
     await auth.refreshMe()
   } catch (e: unknown) {

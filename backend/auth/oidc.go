@@ -56,6 +56,7 @@ import (
 
 	"github.com/inspr-at/paimos/backend/db"
 	"github.com/inspr-at/paimos/backend/models"
+	"github.com/inspr-at/paimos/backend/publicbase"
 	"github.com/inspr-at/paimos/backend/secretinput"
 )
 
@@ -120,6 +121,9 @@ func loadOIDCConfig(ctx context.Context) (oidcConfig, error) {
 	if cfg.AutoCreateRole != "member" && cfg.AutoCreateRole != "external" {
 		return cfg, errors.New("OIDC_AUTO_CREATE_ROLE must be member or external")
 	}
+	if err := validateOIDCRedirectURL(cfg.RedirectURL); err != nil {
+		return cfg, err
+	}
 
 	if oidcCfg.loaded && oidcCfg.sameConfigInput(cfg) {
 		return oidcCfg, nil
@@ -134,6 +138,24 @@ func loadOIDCConfig(ctx context.Context) (oidcConfig, error) {
 	cfg.loaded = true
 	oidcCfg = cfg
 	return cfg, nil
+}
+
+func validateOIDCRedirectURL(raw string) error {
+	u, err := url.Parse(raw)
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return errors.New("OIDC_REDIRECT_URL must be an absolute URL with scheme and host")
+	}
+	if u.Scheme != "https" && u.Scheme != "http" {
+		return errors.New("OIDC_REDIRECT_URL must be an http(s) URL")
+	}
+	want := publicbase.Current().Join("/api/auth/oidc/callback")
+	if u.EscapedPath() != want && u.Path != want {
+		return fmt.Errorf("OIDC_REDIRECT_URL path must be exactly %s", want)
+	}
+	if u.RawQuery != "" || u.Fragment != "" {
+		return errors.New("OIDC_REDIRECT_URL must not include query or fragment")
+	}
+	return nil
 }
 
 func (c oidcConfig) sameConfigInput(other oidcConfig) bool {
@@ -191,36 +213,29 @@ var httpClient = &http.Client{Timeout: 15 * time.Second}
 
 // ── Cookies (OIDC handshake state) ──────────────────────────────────
 
-const (
-	oidcStateCookie = "oidc_state"
-	oidcVerifCookie = "oidc_pkce"
-	oidcNonceCookie = "oidc_nonce"
-)
-
 // setShortCookie writes a SameSite=Lax HttpOnly cookie with a 10-minute
 // lifetime. Used for the state/PKCE/nonce values that survive only the
 // authorisation redirect.
-func setShortCookie(w http.ResponseWriter, name, value string) {
+func setShortCookie(w http.ResponseWriter, canonical, legacy, value string) {
 	// #nosec G124 -- HttpOnly + SameSite=Lax are set; Secure mirrors COOKIE_SECURE (true on HTTPS deployments).
-	http.SetCookie(w, &http.Cookie{
-		Name:     name,
+	base := http.Cookie{
 		Value:    value,
 		Path:     "/",
 		Expires:  time.Now().Add(10 * time.Minute),
 		HttpOnly: true,
 		Secure:   cookieSecure,
 		SameSite: http.SameSiteLaxMode,
-	})
+	}
+	for _, name := range cookieWriteNames(canonical, legacy) {
+		setHTTPCookie(w, name, base)
+	}
 }
 
-func clearCookie(w http.ResponseWriter, name string) {
-	// #nosec G124 -- deletion cookie (empty value, MaxAge -1); it carries no handshake state to protect.
-	http.SetCookie(w, &http.Cookie{
-		Name:   name,
-		Value:  "",
-		Path:   "/",
-		MaxAge: -1,
-	})
+func clearOIDCCookies(w http.ResponseWriter) {
+	expireNamedCookies(w, oidcStateCookie, oidcVerifCookie, oidcNonceCookie, oidcReturnCookie)
+	if !sharedOriginCookies() {
+		expireNamedCookies(w, legacyOIDCStateCookie, legacyOIDCVerifCookie, legacyOIDCNonceCookie, legacyOIDCReturnCookie)
+	}
 }
 
 // ── Handlers ─────────────────────────────────────────────────────────
@@ -257,9 +272,12 @@ func OIDCLogin(w http.ResponseWriter, r *http.Request) {
 	challenge := pkceChallengeS256(verifier)
 	nonce := mustRandom(16)
 
-	setShortCookie(w, oidcStateCookie, state)
-	setShortCookie(w, oidcVerifCookie, verifier)
-	setShortCookie(w, oidcNonceCookie, nonce)
+	setShortCookie(w, oidcStateCookie, legacyOIDCStateCookie, state)
+	setShortCookie(w, oidcVerifCookie, legacyOIDCVerifCookie, verifier)
+	setShortCookie(w, oidcNonceCookie, legacyOIDCNonceCookie, nonce)
+	if ret := safeOIDCReturnPath(r.URL.Query().Get("redirect")); ret != "" {
+		setShortCookie(w, oidcReturnCookie, legacyOIDCReturnCookie, ret)
+	}
 
 	q := url.Values{}
 	q.Set("response_type", "code")
@@ -308,20 +326,22 @@ func OIDCCallback(w http.ResponseWriter, r *http.Request) {
 		ssoError(w, r, "missing_params")
 		return
 	}
-	stateCookie, err := r.Cookie(oidcStateCookie)
+	stateCookie, err := readOIDCCookie(r, oidcStateCookie, legacyOIDCStateCookie)
 	if err != nil || stateCookie.Value == "" || stateCookie.Value != state {
 		ssoError(w, r, "bad_state")
 		return
 	}
-	verifierCookie, err := r.Cookie(oidcVerifCookie)
+	verifierCookie, err := readOIDCCookie(r, oidcVerifCookie, legacyOIDCVerifCookie)
 	if err != nil || verifierCookie.Value == "" {
 		ssoError(w, r, "missing_verifier")
 		return
 	}
+	returnPath := ""
+	if retCookie, err := readOIDCCookie(r, oidcReturnCookie, legacyOIDCReturnCookie); err == nil {
+		returnPath = safeOIDCReturnPath(retCookie.Value)
+	}
 	// One-shot — clear regardless of outcome below.
-	clearCookie(w, oidcStateCookie)
-	clearCookie(w, oidcVerifCookie)
-	clearCookie(w, oidcNonceCookie)
+	clearOIDCCookies(w)
 
 	tok, err := exchangeCode(r.Context(), cfg, code, verifierCookie.Value)
 	if err != nil {
@@ -365,16 +385,7 @@ func OIDCCallback(w http.ResponseWriter, r *http.Request) {
 		ssoError(w, r, "session_failed")
 		return
 	}
-	// #nosec G124 -- HttpOnly + SameSite=Lax are set; Secure mirrors COOKIE_SECURE (true on HTTPS deployments).
-	http.SetCookie(w, &http.Cookie{
-		Name:     sessionCookie,
-		Value:    sid,
-		Path:     "/",
-		Expires:  now.Add(sessionAbsoluteLifetime),
-		HttpOnly: true,
-		Secure:   cookieSecure,
-		SameSite: http.SameSiteLaxMode,
-	})
+	setSessionCookieValue(w, sid, now.Add(sessionAbsoluteLifetime))
 	if _, err := IssueCSRFForSession(w, sid); err != nil {
 		log.Printf("oidc: issue csrf: %v", err)
 	}
@@ -385,8 +396,12 @@ func OIDCCallback(w http.ResponseWriter, r *http.Request) {
 
 	// Final hop — back to the SPA. Use the operator-configured public
 	// URL when available so a redirect never lands on the literal IdP
-	// referer.
-	dest := envDefault("OIDC_POST_LOGIN_REDIRECT", "/")
+	// referer. Join the native prefix unless the operator already supplied
+	// a fully-qualified URL.
+	dest := browserPath(envDefault("OIDC_POST_LOGIN_REDIRECT", "/"))
+	if returnPath != "" {
+		dest = returnPath
+	}
 	http.Redirect(w, r, dest, http.StatusFound)
 }
 
@@ -569,10 +584,8 @@ func sanitiseUsername(s string) string {
 }
 
 func ssoError(w http.ResponseWriter, r *http.Request, code string) {
-	clearCookie(w, oidcStateCookie)
-	clearCookie(w, oidcVerifCookie)
-	clearCookie(w, oidcNonceCookie)
-	dest := "/login?sso_error=" + url.QueryEscape(code)
+	clearOIDCCookies(w)
+	dest := browserPath("/login") + "?sso_error=" + url.QueryEscape(code)
 	http.Redirect(w, r, dest, http.StatusFound)
 }
 

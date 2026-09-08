@@ -30,6 +30,7 @@ credentials, and secret-manager runtime files.
 | `ADMIN_PASSWORD` | *(empty)* | **First-run only.** Seeds the `admin` user on a fresh DB. No effect once `admin` exists. Supports `ADMIN_PASSWORD_FILE`. |
 | `COOKIE_SECURE` | *(unset)* | Set to `true` on HTTPS deployments to add `Secure` to session cookies |
 | `INSTANCE_LABEL` | *(empty)* | Shows a banner in the sidebar (e.g. `STAGING`) — useful on non-prod instances |
+| `PAIMOS_PUBLIC_BASE_PATH` | *(empty)* | Optional native public URL prefix for a shared-origin reverse-proxy mount (e.g. `/paimos` or `/apps/paimos`). Empty keeps today's standalone origin-root. Canonical ASCII absolute path; segments `[A-Za-z0-9_-]+`; no trailing slash, dots, percent encoding, query, or fragment. Invalid values fail closed at startup. Same origin is a shared trust domain — cookie names avoid accidental collisions but are not app isolation. Cookie `Path=/` is not a security boundary. Production path choice is operator-owned. |
 
 ## Secret encryption
 
@@ -191,7 +192,7 @@ permissions remain local authorization.
 | `OIDC_ISSUER_URL` | *(unset)* | Required. e.g. `https://login.example.com` (no trailing slash). The discovery doc must be reachable at `${OIDC_ISSUER_URL}/.well-known/openid-configuration`. |
 | `OIDC_CLIENT_ID` | *(unset)* | Required. |
 | `OIDC_CLIENT_SECRET` | *(unset)* | Optional for public clients (PKCE-only); required for confidential clients. Supports `OIDC_CLIENT_SECRET_FILE`. |
-| `OIDC_REDIRECT_URL` | *(unset)* | Required. Must exactly match the IdP-registered redirect (e.g. `https://paimos.example.com/api/auth/oidc/callback`). |
+| `OIDC_REDIRECT_URL` | *(unset)* | Required. Must exactly match the IdP-registered redirect **including** `PAIMOS_PUBLIC_BASE_PATH` when set (standalone: `https://paimos.example.com/api/auth/oidc/callback`; prefix `/paimos`: `https://paimos.example.com/paimos/api/auth/oidc/callback`). |
 | `OIDC_SCOPES` | `openid email profile` | Space-separated. |
 | `OIDC_PROMPT` | *(unset)* | Optional space-separated OIDC prompt values forwarded to the authorization endpoint. Unset preserves the IdP's normal session-reuse behavior; `select_account` asks compatible providers to show an account chooser. Provider extensions are allowed. |
 | `OIDC_BUTTON_LABEL` | `Sign in with SSO` | Shown on the login page. |
@@ -238,6 +239,16 @@ operators know where to look if they need to fork the defaults:
 
 Cookie `Expires` is set to `sessionAbsoluteLifetime` so browser
 state doesn't outlive what the server will accept.
+
+Browser cookie names are `paimos_session`, `paimos_csrf_token`, and
+`paimos_oidc_state` / `paimos_oidc_pkce` / `paimos_oidc_nonce` /
+`paimos_oidc_return`. Standalone (empty `PAIMOS_PUBLIC_BASE_PATH`)
+also dual-writes and dual-reads the legacy names `session`,
+`csrf_token`, and `oidc_*` so existing browsers keep working. A
+shared-origin mount writes and reads **only** the `paimos_*` names,
+including on logout, so PAIMOS does not clobber another app's generic
+cookies. `__Host-` cookies, if used later, stay `Secure`, `Path=/`,
+and without `Domain`.
 
 Two response headers expose session state to clients (PAI-320 /
 PAI-322):

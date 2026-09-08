@@ -22,6 +22,7 @@ import LoadingText from "@/components/LoadingText.vue";
 import { ref, computed, onMounted, watch } from 'vue'
 import AppIcon from '@/components/AppIcon.vue'
 import { api, csrfHeaders, errMsg } from '@/api/client'
+import { publicURL } from '@/publicPath'
 import { formatFileSize } from '@/composables/useNumberFormat'
 import { fmtDate as formatDisplayDate } from '@/utils/formatTime'
 import type { Document } from '@/types'
@@ -53,8 +54,8 @@ const listUrl = computed(() =>
 )
 const uploadUrl = computed(() =>
   props.scope === 'customer'
-    ? `/api/customers/${props.scopeId}/documents`
-    : `/api/projects/${props.scopeId}/documents`,
+    ? publicURL(`/api/customers/${props.scopeId}/documents`)
+    : publicURL(`/api/projects/${props.scopeId}/documents`),
 )
 
 async function load() {
@@ -147,7 +148,7 @@ async function deleteDoc(d: Document) {
   }
 }
 
-function downloadUrl(d: Document) { return `/api/documents/${d.id}/download` }
+function downloadUrl(d: Document) { return publicURL(`/api/documents/${d.id}/download`) }
 
 function fileIcon(mime: string): string {
   if (mime.startsWith('image/')) return 'image'

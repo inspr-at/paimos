@@ -13,6 +13,7 @@ import type { AttachmentJob } from '@/composables/useAttachmentUploads'
 import { useAttachmentLightbox } from '@/composables/useAttachmentLightbox'
 import { formatFileSize, formatInteger } from '@/composables/useNumberFormat'
 import type { Attachment } from '@/types'
+import { publicURL } from '@/publicPath'
 
 const props = defineProps<{
   jobs: AttachmentJob[]
@@ -92,7 +93,7 @@ function canManageJob(job: AttachmentJob): boolean {
 }
 
 function openUrlForJob(job: AttachmentJob): string | null {
-  return job.attachmentId != null ? `/api/attachments/${job.attachmentId}` : null
+  return job.attachmentId != null ? publicURL(`/api/attachments/${job.attachmentId}`) : null
 }
 </script>
 
