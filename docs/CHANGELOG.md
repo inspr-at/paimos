@@ -6,6 +6,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 with legacy releases using Semantic Versioning and new product cuts using the
 calendar form `yy.mm.dd[.hh.mm]`.
 
+## [26.09.08.17.06] — 2026-09-08
+
+### Changed
+
+- Publish the reviewed daily delivery batch: shared Flow navigation, release-specific acceptance and email evidence, and scoped operator responses for local workers.
+- Replace the unpublished 26.09.08.16.12 release attempt with this new coordinate through the canonical protected squash release path. The earlier attempt stopped before tagging; its source history remains intact.
+
 ## [26.09.08.16.12] — 2026-09-08
 
 ### Added — shared delivery navigation (PAI-967)
