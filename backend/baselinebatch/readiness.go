@@ -206,9 +206,8 @@ func (s *Service) RequestReadiness(ctx context.Context, actor Actor, projectID, 
 	if draft.ExecutionMode == ModeManual || draft.ExecutionMode == "" {
 		return ReadinessEvidence{}, fmt.Errorf("%w: manual delivery does not need an owned readiness probe", ErrInvalid)
 	}
-	if worker.RuntimeID == "" || worker.RuntimeGeneration == "" || worker.AccountLabel == "" ||
-		worker.ProfileID == "" || worker.ProfileVersion == "" || worker.WorkspaceHandle == "" {
-		return ReadinessEvidence{}, fmt.Errorf("%w: select runtime, account, profile and workspace first", ErrInvalid)
+	if err := s.validateAgentWorker(ctx, tx, projectID, worker); err != nil {
+		return ReadinessEvidence{}, err
 	}
 	// One probe per exact target: repeating the request re-reads the same intent
 	// instead of queueing a second observation of the same host.

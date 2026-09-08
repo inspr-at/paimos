@@ -733,6 +733,149 @@ describe('ProjectBaselineBatchSection', () => {
     expect(vi.mocked(api.post).mock.calls.filter((call) => String(call[0]).includes('/reconcile'))).toHaveLength(1)
     second.app.unmount()
   })
+
+  it('keeps v3 Codex and Cursor profiles inside the selected class and does not guess the first scope', async () => {
+    const current = v3MixedWorkflow({ review_valid: false, review_id: null, account_label: '', account_key: '', profile_id: '', profile_version: '' })
+    vi.mocked(api.get).mockImplementation(async () => structuredClone(current) as Workflow)
+    vi.mocked(api.post).mockImplementation(async (url: string, body?: unknown) => {
+      if (String(url).endsWith('/review')) {
+        const req = body as { execution_mode?: string; selected_requirement_refs?: string[]; worker?: Draft['worker'] }
+        current.draft = bindDraft(current, req, 51)
+        return current.draft
+      }
+      throw new Error(`unexpected post ${url}`)
+    })
+    const { el, app } = mount()
+    await settle()
+    const account = el.querySelector('[data-testid="baseline-account"]') as HTMLSelectElement | null
+    expect(account?.value ?? '').toBe('')
+    const profiles = optionValues(el, 'baseline-profile')
+    expect(profiles).toEqual([])
+    const classes = optionValues(el, 'baseline-account-class')
+    expect(classes).toEqual(['chatgpt', 'cursor_context'])
+
+    setSelect(el, 'baseline-account-class', 'chatgpt')
+    await settle()
+    expect(optionValues(el, 'baseline-account')).toEqual(['codex-work'])
+    expect(optionValues(el, 'baseline-profile')).toEqual(['codex-sol-high@1'])
+    expect(optionValues(el, 'baseline-profile')).not.toContain('cursor-composer@1')
+
+    setSelect(el, 'baseline-account', 'codex-work')
+    setSelect(el, 'baseline-profile', 'codex-sol-high@1')
+    await settle()
+    ;(el.querySelector('[data-testid="bind-review"]') as HTMLButtonElement).click()
+    await settle()
+    expect(reviewCalls()[0][1]).toMatchObject({
+      execution_mode: 'assisted',
+      worker: {
+        account_label: 'chatgpt',
+        account_key: 'codex-work',
+        profile_id: 'codex-sol-high',
+        profile_version: '1',
+        runtime_generation: 'gen-v3',
+      },
+    })
+
+    setSelect(el, 'baseline-account-class', 'cursor_context')
+    await settle()
+    expect(el.querySelector('[data-testid="baseline-state"]')!.textContent).toBe('needs-review')
+    expect(optionValues(el, 'baseline-account')).toEqual(['cursor-op'])
+    expect(optionValues(el, 'baseline-profile')).toEqual(['cursor-composer@1'])
+    expect((el.querySelector('[data-testid="baseline-account"]') as HTMLSelectElement).value).toBe('')
+    expect((el.querySelector('[data-testid="baseline-profile"]') as HTMLSelectElement).value).toBe('')
+    app.unmount()
+  })
+
+  it('preserves class-only Claude without inventing a named key and invalidates on generation change', async () => {
+    const current = v3ClassOnlyWorkflow()
+    vi.mocked(api.get).mockImplementation(async () => structuredClone(current) as Workflow)
+    vi.mocked(api.post).mockImplementation(async (url: string, body?: unknown) => {
+      if (String(url).endsWith('/review')) {
+        const req = body as { execution_mode?: string; selected_requirement_refs?: string[]; worker?: Draft['worker'] }
+        current.draft = bindDraft(current, req, 61)
+        return current.draft
+      }
+      if (String(url).includes('/start')) return batchFixture()
+      throw new Error(`unexpected post ${url}`)
+    })
+    const { el, app } = mount()
+    await settle()
+    expect(el.querySelector('[data-testid="baseline-class-only"]')!.textContent).toContain('claude_ai_max')
+    expect(el.querySelector('[data-testid="baseline-account"]')).toBeNull()
+    expect(optionValues(el, 'baseline-profile')).toEqual(['claude-opus-xhigh@1'])
+    ;(el.querySelector('[data-testid="bind-review"]') as HTMLButtonElement).click()
+    await settle()
+    const payload = reviewCalls()[0][1] as { worker: Record<string, string> }
+    expect(payload.worker.account_label).toBe('claude_ai_max')
+    expect(payload.worker.account_key).toBeUndefined()
+    expect(payload.worker.runtime_generation).toBe('gen-claude')
+    expect(el.querySelector('[data-testid="baseline-state"]')!.textContent).toBe('review')
+
+    setSelect(el, 'baseline-runtime', 'rt-other')
+    await settle()
+    expect(el.querySelector('[data-testid="baseline-state"]')!.textContent).toBe('needs-review')
+    const confirm = el.querySelector('[data-testid="confirm-start"]') as HTMLInputElement
+    confirm.checked = true
+    confirm.dispatchEvent(new Event('change'))
+    await settle()
+    expect(confirm.checked).toBe(false)
+    expect(startCalls()).toHaveLength(0)
+    app.unmount()
+  })
+
+  it('fails closed on missing, ambiguous and unknown v3 scopes', async () => {
+    vi.mocked(api.get).mockResolvedValue(v3BrokenWorkflow({ schema_version: 3, account_scopes: [] }))
+    const missing = mount()
+    await settle()
+    expect(missing.el.querySelector('[data-testid="baseline-scope-error"]')!.textContent).toContain('no account scopes')
+    missing.app.unmount()
+
+    document.body.innerHTML = ''
+    vi.mocked(api.get).mockResolvedValue(v3BrokenWorkflow({
+      schema_version: 3,
+      account_scopes: [
+        { account_label: 'chatgpt', profiles: [{ id: 'codex-sol-high', version: '1' }] },
+        { account_label: 'chatgpt', profiles: [{ id: 'codex-sol-xhigh', version: '1' }] },
+      ],
+    }))
+    const ambiguous = mount()
+    await settle()
+    expect(ambiguous.el.querySelector('[data-testid="baseline-scope-error"]')!.textContent).toContain('ambiguous')
+    ambiguous.app.unmount()
+
+    document.body.innerHTML = ''
+    vi.mocked(api.get).mockResolvedValue(v3BrokenWorkflow({ schema_version: 9, account_scopes: [] }))
+    const unknown = mount()
+    await settle()
+    expect(unknown.el.querySelector('[data-testid="baseline-scope-error"]')!.textContent).toContain('Unknown runtime account schema')
+    unknown.app.unmount()
+  })
+
+  it('clears worker authority in manual mode and still uses v2 named accounts', async () => {
+    const current = assistedWorkflow()
+    current.draft = { ...current.draft!, review_id: null, review_valid: false, status: 'open' }
+    vi.mocked(api.get).mockImplementation(async () => structuredClone(current) as Workflow)
+    vi.mocked(api.post).mockImplementation(async (url: string, body?: unknown) => {
+      if (String(url).endsWith('/review')) {
+        const req = body as { execution_mode?: string; selected_requirement_refs?: string[]; worker?: Draft['worker'] }
+        current.draft = bindDraft(current, req, 71)
+        return current.draft
+      }
+      throw new Error(`unexpected post ${url}`)
+    })
+    const { el, app } = mount()
+    await settle()
+    expect(optionValues(el, 'baseline-account')).toEqual(['acct-a', 'acct-b'])
+    expect(optionValues(el, 'baseline-profile')).toEqual(['prof-a@1', 'prof-b@2'])
+    const manual = [...el.querySelectorAll('.bb-mode input')].find((n) => (n as HTMLInputElement).value === 'manual') as HTMLInputElement
+    manual.checked = true
+    manual.dispatchEvent(new Event('change'))
+    await settle()
+    ;(el.querySelector('[data-testid="bind-review"]') as HTMLButtonElement).click()
+    await settle()
+    expect(reviewCalls()[0][1]).toMatchObject({ execution_mode: 'manual', worker: {} })
+    app.unmount()
+  })
 })
 
 function startCalls() {
@@ -805,19 +948,30 @@ function openAit7Draft(): Workflow {
   return wf
 }
 
-function bindDraft(wf: Workflow, body: { execution_mode?: string; selected_requirement_refs?: string[] }, reviewId: number): Draft {
+function bindDraft(wf: Workflow, body: { execution_mode?: string; selected_requirement_refs?: string[]; worker?: Draft['worker'] }, reviewId: number): Draft {
+  const mode = body.execution_mode ?? wf.draft!.execution_mode
   return {
     ...wf.draft!,
     status: 'reviewing',
     review_id: reviewId,
     review_valid: true,
-    execution_mode: body.execution_mode ?? wf.draft!.execution_mode,
+    execution_mode: mode,
     selected: {
       requirement_refs: body.selected_requirement_refs ?? wf.draft!.selected.requirement_refs,
       constraint_refs: wf.draft!.selected.constraint_refs,
     },
-    worker: (body.execution_mode ?? wf.draft!.execution_mode) === 'manual' ? {} : wf.draft!.worker,
+    worker: mode === 'manual' ? {} : (body.worker ?? wf.draft!.worker),
   }
+}
+
+function optionValues(el: HTMLElement, testId: string) {
+  return [...el.querySelectorAll(`[data-testid="${testId}"] option`)].map((n) => (n as HTMLOptionElement).value).filter(Boolean)
+}
+
+function setSelect(el: HTMLElement, testId: string, value: string) {
+  const select = el.querySelector(`[data-testid="${testId}"]`) as HTMLSelectElement
+  select.value = value
+  select.dispatchEvent(new Event('change'))
 }
 
 function assistedWorkflow(): Workflow {
@@ -865,6 +1019,141 @@ function assistedWorkflow(): Workflow {
           { handle: 'ws-a', identity: 'workspace-a', label: 'Workspace A' },
           { handle: 'ws-b', identity: 'workspace-b', label: 'Workspace B' },
         ],
+      }],
+      note: '',
+    },
+  })
+}
+
+function readyReadiness(): Workflow['readiness'] {
+  return {
+    status: 'ready',
+    basis: 'owned_daemon_probe',
+    contract_version: 'inspr.readiness.v1',
+    named_account_proof: true,
+    model_profile_proof: true,
+    workspace_proof: true,
+    client_ready_ignored: true,
+    checks: [],
+  }
+}
+
+function v3MixedWorkflow(overrides: { review_valid?: boolean; review_id?: number | null; account_label?: string; account_key?: string; profile_id?: string; profile_version?: string } = {}): Workflow {
+  return workflowFixture({
+    active_batch: null,
+    batches: [],
+    readiness: readyReadiness(),
+    draft: draftFixture({
+      status: overrides.review_valid === false ? 'open' : 'reviewing',
+      execution_mode: 'assisted',
+      review_id: overrides.review_id === undefined ? 7 : overrides.review_id,
+      review_valid: overrides.review_valid ?? true,
+      worker: {
+        worker_name: 'builder',
+        runtime_id: 'rt-v3',
+        runtime_generation: 'gen-v3',
+        account_label: overrides.account_label === undefined ? 'chatgpt' : overrides.account_label,
+        account_key: overrides.account_key === undefined ? 'codex-work' : overrides.account_key,
+        profile_id: overrides.profile_id === undefined ? 'codex-sol-high' : overrides.profile_id,
+        profile_version: overrides.profile_version === undefined ? '1' : overrides.profile_version,
+        workspace_handle: 'ws-a',
+      },
+    }),
+    choices: {
+      execution_modes: ['manual', 'assisted', 'automatic'],
+      runtimes: [{
+        runtime_id: 'rt-v3',
+        runtime_generation: 'gen-v3',
+        schema_version: 3,
+        accounts: [],
+        profiles: [],
+        account_scopes: [
+          {
+            account_label: 'chatgpt',
+            accounts: [{ key: 'codex-work', label: 'Work' }],
+            profiles: [{ id: 'codex-sol-high', version: '1' }],
+          },
+          {
+            account_label: 'cursor_context',
+            accounts: [{ key: 'cursor-op', label: 'Cursor' }],
+            profiles: [{ id: 'cursor-composer', version: '1' }],
+          },
+        ],
+        workspaces: [{ handle: 'ws-a', identity: 'a'.repeat(64), label: 'Workspace A' }],
+      }],
+      note: '',
+    },
+  })
+}
+
+function v3ClassOnlyWorkflow(): Workflow {
+  return workflowFixture({
+    active_batch: null,
+    batches: [],
+    readiness: readyReadiness(),
+    draft: draftFixture({
+      status: 'open',
+      execution_mode: 'assisted',
+      review_id: null,
+      review_valid: false,
+      worker: {
+        worker_name: 'builder',
+        runtime_id: 'rt-claude',
+        runtime_generation: 'gen-claude',
+        account_label: 'claude_ai_max',
+        profile_id: 'claude-opus-xhigh',
+        profile_version: '1',
+        workspace_handle: 'ws-a',
+      },
+    }),
+    choices: {
+      execution_modes: ['manual', 'assisted', 'automatic'],
+      runtimes: [
+        {
+          runtime_id: 'rt-claude',
+          runtime_generation: 'gen-claude',
+          schema_version: 3,
+          accounts: [],
+          profiles: [],
+          account_scopes: [{
+            account_label: 'claude_ai_max',
+            profiles: [{ id: 'claude-opus-xhigh', version: '1' }],
+          }],
+          workspaces: [{ handle: 'ws-a', identity: 'a'.repeat(64), label: 'Workspace A' }],
+        },
+        {
+          runtime_id: 'rt-other',
+          runtime_generation: 'gen-other',
+          schema_version: 3,
+          accounts: [],
+          profiles: [],
+          account_scopes: [{
+            account_label: 'claude_ai_max',
+            profiles: [{ id: 'claude-opus-xhigh', version: '1' }],
+          }],
+          workspaces: [{ handle: 'ws-a', identity: 'a'.repeat(64), label: 'Workspace A' }],
+        },
+      ],
+      note: '',
+    },
+  })
+}
+
+function v3BrokenWorkflow(runtime: { schema_version: number; account_scopes: { account_label: string; profiles: { id: string; version: string }[] }[] }): Workflow {
+  return workflowFixture({
+    active_batch: null,
+    batches: [],
+    draft: draftFixture({ execution_mode: 'assisted', review_id: null, review_valid: false, worker: { worker_name: 'builder' } }),
+    choices: {
+      execution_modes: ['manual', 'assisted', 'automatic'],
+      runtimes: [{
+        runtime_id: 'rt-bad',
+        runtime_generation: 'gen-bad',
+        schema_version: runtime.schema_version,
+        accounts: [],
+        profiles: [],
+        account_scopes: runtime.account_scopes,
+        workspaces: [{ handle: 'ws-a', identity: 'a'.repeat(64) }],
       }],
       note: '',
     },
