@@ -307,9 +307,11 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   min-height: 100vh;
+  height: 100vh;
 }
 .app-shell > .layout {
   flex: 1;
+  min-height: 0;
 }
 
 /* ── Layout grid ──────────────────────────────────────────────────────────── */
@@ -317,7 +319,7 @@ onBeforeUnmount(() => {
   --sidebar-width: 230px;
   display: grid;
   grid-template-columns: var(--sidebar-width) 1fr;
-  min-height: 100vh;
+  min-height: 0;
   transition: grid-template-columns 0.2s ease;
 }
 .layout.sidebar-collapsed {
@@ -333,7 +335,8 @@ onBeforeUnmount(() => {
   justify-content: space-between;
   position: sticky;
   top: 0;
-  height: 100vh;
+  min-height: 0;
+  height: 100%;
   width: 230px;
   overflow: hidden;
   flex-shrink: 0;
@@ -501,7 +504,8 @@ onBeforeUnmount(() => {
 
 /* ── Main ─────────────────────────────────────────────────────────────────── */
 .main {
-  height: 100vh;
+  min-height: 0;
+  height: 100%;
   overflow: hidden;
   display: flex;
   flex-direction: column;
