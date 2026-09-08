@@ -265,7 +265,7 @@ func verifyServeArgs(args []string, instance, root, expectedURL string) error {
 		switch k {
 		case "--allow-shared-workspaces":
 			return errors.New("shared workspace service requires separate review")
-		case "--instance", "--state-root", "--socket", "--codex-path", "--claude-path", "--node-path", "--claude-sdk-path", "--report-host", "--report-url", "--report-api-key-file", "--paimos-path", "--lifecycle-config", "--codex-accounts":
+		case "--instance", "--state-root", "--socket", "--codex-path", "--claude-path", "--node-path", "--claude-sdk-path", "--pi-path", "--cursor-path", "--report-host", "--report-url", "--report-api-key-file", "--paimos-path", "--lifecycle-config", "--codex-accounts", "--pi-accounts", "--cursor-accounts":
 		default:
 			return errors.New("service arguments unsupported")
 		}
@@ -286,7 +286,7 @@ func verifyServeArgs(args []string, instance, root, expectedURL string) error {
 	if v := values["--socket"]; v != "" && v != filepath.Join(dir, "agentd.sock") {
 		return errors.New("service socket outside owned directory")
 	}
-	for _, key := range []string{"--codex-path", "--claude-path", "--node-path", "--claude-sdk-path", "--paimos-path"} {
+	for _, key := range []string{"--codex-path", "--claude-path", "--node-path", "--claude-sdk-path", "--pi-path", "--cursor-path", "--paimos-path"} {
 		if v := values[key]; v != "" {
 			i, e := os.Stat(v)
 			if !filepath.IsAbs(v) || e != nil || !i.Mode().IsRegular() || i.Mode().Perm()&0022 != 0 || key != "--claude-sdk-path" && i.Mode().Perm()&0111 == 0 {
@@ -303,13 +303,23 @@ func verifyServeArgs(args []string, instance, root, expectedURL string) error {
 			return errors.New("lifecycle configuration metadata unsafe")
 		}
 	}
-	if _, present := seen["--codex-accounts"]; present {
-		v := values["--codex-accounts"]
-		if v == "" || !filepath.IsAbs(v) {
-			return errors.New("codex account registry invalid")
-		}
-		if _, e := safeFile(v, false); e != nil {
-			return errors.New("codex account registry metadata unsafe")
+	for _, entry := range []struct {
+		flag       string
+		invalidMsg string
+		unsafeMsg  string
+	}{
+		{"--codex-accounts", "codex account registry invalid", "codex account registry metadata unsafe"},
+		{"--pi-accounts", "pi account registry invalid", "pi account registry metadata unsafe"},
+		{"--cursor-accounts", "cursor account registry invalid", "cursor account registry metadata unsafe"},
+	} {
+		if _, present := seen[entry.flag]; present {
+			v := values[entry.flag]
+			if v == "" || !filepath.IsAbs(v) {
+				return errors.New(entry.invalidMsg)
+			}
+			if _, e := safeFile(v, false); e != nil {
+				return errors.New(entry.unsafeMsg)
+			}
 		}
 	}
 	if report {
