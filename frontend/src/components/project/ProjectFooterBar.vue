@@ -80,6 +80,12 @@ function tabAriaLabel(t: TabSpec): string {
   if (t.dot) return `${t.label}, populated`
   return t.label
 }
+
+function revealFocusedTab(event: FocusEvent) {
+  const target = event.currentTarget
+  if (!(target instanceof HTMLElement)) return
+  target.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+}
 </script>
 
 <template>
@@ -94,6 +100,7 @@ function tabAriaLabel(t: TabSpec): string {
       :aria-selected="modelValue === t.key"
       :aria-label="tabAriaLabel(t)"
       @click="select(t.key)"
+      @focus="revealFocusedTab"
     >
       <AppIcon :name="t.icon" :size="13" class="pfb__icon" />
       <span class="pfb__label">{{ t.label }}</span>
@@ -118,6 +125,7 @@ function tabAriaLabel(t: TabSpec): string {
       :aria-selected="modelValue === 'settings'"
       aria-label="Settings"
       @click="select('settings')"
+      @focus="revealFocusedTab"
     >
       <AppIcon name="settings" :size="13" class="pfb__icon" />
       <span class="pfb__label">Settings</span>

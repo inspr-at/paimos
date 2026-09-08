@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Markus Barta <markus@barta.com>
  */
 
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -73,5 +73,28 @@ describe('ProjectFooterBar (PAI-967 mobile footer)', () => {
     expect(source).toMatch(/\.pfb\s*\{[\s\S]*overflow-x:\s*auto/)
     expect(source).toMatch(/\.pfb__tab\s*\{[\s\S]*flex-shrink:\s*0/)
     expect(source).toMatch(/scroll-margin-inline/)
+  })
+
+  it('reveals the focused tab inside the horizontal strip', async () => {
+    const mounted = await mountComponent(ProjectFooterBar, {
+      modelValue: 'knowledge',
+      openIssues: 7,
+      agentCount: 0,
+      canEditSettings: true,
+    })
+    const nav = mounted.el.querySelector('.pfb') as HTMLElement
+    const agents = mounted.el.querySelector('[aria-label="Agents, 0"]') as HTMLButtonElement
+    Object.defineProperty(nav, 'clientWidth', { configurable: true, value: 240 })
+    Object.defineProperty(nav, 'scrollWidth', { configurable: true, value: 900 })
+    nav.scrollLeft = 0
+    const reveal = vi.spyOn(agents, 'scrollIntoView')
+
+    agents.focus()
+    await nextTick()
+
+    expect(document.activeElement).toBe(agents)
+    expect(reveal).toHaveBeenCalledWith({ block: 'nearest', inline: 'nearest' })
+
+    await mounted.unmount()
   })
 })
