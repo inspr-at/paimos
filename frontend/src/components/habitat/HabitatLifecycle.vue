@@ -101,7 +101,10 @@ const runtime = computed(
 const existing = computed(() => ['attach', 'reassign', 'restart'].includes(operation.value))
 const accountChoices = computed(() => {
   if (!runtime.value) return []
-  return habitatAccountChoices(runtime.value, existing.value ? null : props.profile)
+  return habitatAccountChoices(
+    runtime.value,
+    existing.value || operation.value === 'repair' ? null : props.profile,
+  )
 })
 const selectedAccount = computed(
   () => accountChoices.value.find((choice) => habitatChoiceId(choice) === accountChoiceId.value) ?? null,
@@ -110,9 +113,17 @@ const implicitAccount = computed(() => {
   const choices = accountChoices.value
   return choices.length === 1 && !choices[0]!.account_key ? choices[0]! : null
 })
+const uniqueRepairClass = computed(() => {
+  if (operation.value !== 'repair' || !runtime.value) return ''
+  const classes = habitatRuntimeClasses(runtime.value)
+  return classes.length === 1 ? classes[0]! : ''
+})
 const accountKey = computed(() => selectedAccount.value?.account_key ?? implicitAccount.value?.account_key ?? '')
 const accountLabel = computed(
-  () => selectedAccount.value?.account_label ?? implicitAccount.value?.account_label ?? '',
+  () =>
+    selectedAccount.value?.account_label ??
+    implicitAccount.value?.account_label ??
+    uniqueRepairClass.value,
 )
 const accountAvailable = computed(() => {
   if (!runtime.value) return false
@@ -214,7 +225,7 @@ const canPrepare = computed(
     eligible.value &&
     runtime.value !== null &&
     runtimeState.value === 'ready' &&
-    (operation.value === 'repair' || accountAvailable.value) &&
+    (operation.value === 'repair' ? accountLabel.value !== '' : accountAvailable.value) &&
     (operation.value === 'repair' ||
       (profileAvailable.value &&
         /^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/.test(effectiveAgent.value) &&
@@ -439,12 +450,13 @@ watch(
       return
     }
     if (choices.some((choice) => habitatChoiceId(choice) === accountChoiceId.value)) return
-    accountChoiceId.value = choices.length === 1 ? habitatChoiceId(choices[0]!) : ''
+    const uniqueClass = !!runtime.value && habitatRuntimeClasses(runtime.value).length === 1
+    accountChoiceId.value = choices.length === 1 && uniqueClass ? habitatChoiceId(choices[0]!) : ''
   },
   { immediate: true },
 )
 function prepare() {
-  if (!canPrepare.value || !runtime.value || pendingRequest.value) return
+  if (!canPrepare.value || !runtime.value || pendingRequest.value || !accountLabel.value) return
   const common = {
     request_key: crypto.randomUUID(),
     runtime_id: runtime.value.id,
@@ -677,7 +689,7 @@ onScopeDispose(() => {
               </option>
             </select></label
           >
-          <p v-if="(accountChoices.length > 1 || accountChoices.some((choice) => choice.account_key)) && !accountAvailable">
+          <p v-if="(accountChoices.length > 1 || accountChoices.some((choice) => choice.account_key)) && !accountAvailable && (operation !== 'repair' || !accountLabel)">
             Choose one advertised account. Unsupported, forged or stale keys cannot be used.
           </p>
           <p v-if="existing && accountAvailable && !ownedWorkers.length">

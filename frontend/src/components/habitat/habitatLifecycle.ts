@@ -94,6 +94,8 @@ const ACCOUNTS = [
   'pi_context',
   'cursor_context',
 ]
+const NAMED_ACCOUNT_CLASSES = ['chatgpt', 'api_key', 'pi_context', 'cursor_context']
+const REQUIRED_NAMED_ACCOUNT_CLASSES = ['pi_context', 'cursor_context']
 const STATES = ['requested', 'claimed', 'executing', 'completed', 'failed', 'expired', 'cancelled']
 const token = (value: unknown): value is string =>
   typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(value)
@@ -331,8 +333,11 @@ export function parseHabitatRuntimes(value: unknown, projectId: number): Habitat
         classes.add(String(scope.account_label))
         const scopeProfiles = new Set<string>()
         parseProfiles(scope.profiles as unknown[], scopeProfiles)
+        if (REQUIRED_NAMED_ACCOUNT_CLASSES.includes(String(scope.account_label)) && scope.accounts === undefined)
+          invalid()
         if (scope.accounts !== undefined) {
           if (
+            !NAMED_ACCOUNT_CLASSES.includes(String(scope.account_label)) ||
             !Array.isArray(scope.accounts) ||
             scope.accounts.length < 1 ||
             scope.accounts.length > 16

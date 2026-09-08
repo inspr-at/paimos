@@ -175,6 +175,73 @@ func leftover(raw map[string]json.RawMessage, names ...string) bool {
 	return false
 }
 
+func (w *Workspace) UnmarshalJSON(data []byte) error {
+	raw, err := decodeClosedObject(data)
+	if err != nil {
+		return err
+	}
+	if leftover(raw, "handle", "identity", "label") {
+		return ErrInvalid
+	}
+	handle, err := requiredString(raw, "handle")
+	if err != nil {
+		return err
+	}
+	identity, err := requiredString(raw, "identity")
+	if err != nil {
+		return err
+	}
+	label := ""
+	if fieldPresent(raw, "label") {
+		label, err = requiredString(raw, "label")
+		if err != nil {
+			return err
+		}
+	}
+	*w = Workspace{Handle: handle, Identity: identity, Label: label}
+	return nil
+}
+
+func (p *Profile) UnmarshalJSON(data []byte) error {
+	raw, err := decodeClosedObject(data)
+	if err != nil {
+		return err
+	}
+	if leftover(raw, "id", "version") {
+		return ErrInvalid
+	}
+	id, err := requiredString(raw, "id")
+	if err != nil {
+		return err
+	}
+	version, err := requiredString(raw, "version")
+	if err != nil {
+		return err
+	}
+	*p = Profile{ID: id, Version: version}
+	return nil
+}
+
+func (c *AccountChoice) UnmarshalJSON(data []byte) error {
+	raw, err := decodeClosedObject(data)
+	if err != nil {
+		return err
+	}
+	if leftover(raw, "key", "label") {
+		return ErrInvalid
+	}
+	key, err := requiredString(raw, "key")
+	if err != nil {
+		return err
+	}
+	label, err := requiredString(raw, "label")
+	if err != nil {
+		return err
+	}
+	*c = AccountChoice{Key: key, Label: label}
+	return nil
+}
+
 func fieldPresent(raw map[string]json.RawMessage, name string) bool {
 	_, ok := raw[name]
 	return ok
@@ -281,6 +348,9 @@ func (s *AccountScope) UnmarshalJSON(data []byte) error {
 	accounts, err := optionalAccounts(raw)
 	if err != nil {
 		return err
+	}
+	if fieldPresent(raw, "accounts") && len(accounts) == 0 {
+		return ErrInvalid
 	}
 	*s = AccountScope{AccountLabel: label, Accounts: accounts, Profiles: profiles}
 	return nil

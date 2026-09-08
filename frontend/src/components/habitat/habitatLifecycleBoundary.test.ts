@@ -142,6 +142,24 @@ describe('Habitat lifecycle response authority', () => {
           scoped.account_scopes[1],
         ],
       },
+      {
+        ...scoped,
+        account_scopes: [{ account_label: 'chatgpt', accounts: [], profiles: scoped.account_scopes[0].profiles }],
+      },
+      {
+        ...scoped,
+        account_scopes: [
+          {
+            account_label: 'claude_ai_max',
+            accounts: [{ key: 'claude-home', label: 'Claude' }],
+            profiles: [{ id: 'claude-opus-xhigh', version: '1' }],
+          },
+        ],
+      },
+      {
+        ...scoped,
+        account_scopes: [{ account_label: 'cursor_context', profiles: [{ id: 'cursor-composer', version: '1' }] }],
+      },
     ])
       expect(() => parseHabitatRuntimes({ schema_version: 1, runtimes: [changed] }, 1)).toThrow()
   })

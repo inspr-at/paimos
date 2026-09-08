@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/json"
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -16,11 +17,37 @@ func TestLifecycleOpenAPIClosedContract(t *testing.T) {
 		t.Fatal("invalid OpenAPI")
 	}
 	schemas := d["components"].(map[string]any)["schemas"].(map[string]any)
-	for _, name := range []string{"LifecycleRequestV1", "LifecycleIntentV1", "LifecycleRuntimeV1", "LifecycleRuntimeV3", "LifecycleRuntimeRegistrationV1", "LifecycleRuntimeRegistrationV3", "LifecycleAccountScopeV3", "LifecycleTransitionV1", "LifecycleEventV1", "LifecycleSessionRegistrationV1", "LifecycleSessionProjectionV1", "LifecycleAccountChoiceV2", "RuntimeHealthPageV1", "RuntimeHealthStatusV1", "RuntimeLayerHealthV1"} {
+	for _, name := range []string{"LifecycleRequestV1", "LifecycleIntentV1", "LifecycleRuntimeV1", "LifecycleRuntimeV3", "LifecycleRuntimeRegistrationV1", "LifecycleRuntimeRegistrationV3", "LifecycleAccountScopeNamedV3", "LifecycleAccountScopeClassOnlyV3", "LifecycleTransitionV1", "LifecycleEventV1", "LifecycleSessionRegistrationV1", "LifecycleSessionProjectionV1", "LifecycleAccountChoiceV2", "RuntimeHealthPageV1", "RuntimeHealthStatusV1", "RuntimeLayerHealthV1"} {
 		schema, ok := schemas[name].(map[string]any)
 		if !ok || schema["additionalProperties"] != false {
 			t.Fatalf("schema %s not closed", name)
 		}
+	}
+	scope := schemas["LifecycleAccountScopeV3"].(map[string]any)
+	if len(scope["oneOf"].([]any)) != 2 {
+		t.Fatal("v3 account scope is not named vs class-only")
+	}
+	named := schemas["LifecycleAccountScopeNamedV3"].(map[string]any)
+	namedRequired := map[string]bool{}
+	for _, field := range named["required"].([]any) {
+		namedRequired[field.(string)] = true
+	}
+	if !namedRequired["accounts"] {
+		t.Fatal("named v3 scopes must require accounts")
+	}
+	namedEnum := named["properties"].(map[string]any)["account_label"].(map[string]any)["enum"].([]any)
+	for _, label := range namedEnum {
+		if s, _ := label.(string); strings.HasPrefix(s, "claude_") || s == "console" {
+			t.Fatalf("claude class in named v3 enum: %s", s)
+		}
+	}
+	classOnly := schemas["LifecycleAccountScopeClassOnlyV3"].(map[string]any)
+	if _, ok := classOnly["properties"].(map[string]any)["accounts"]; ok {
+		t.Fatal("class-only v3 scopes must omit accounts")
+	}
+	accounts := named["properties"].(map[string]any)["accounts"].(map[string]any)
+	if accounts["minItems"] != float64(1) {
+		t.Fatal("present v3 accounts must be non-empty")
 	}
 	request := schemas["LifecycleRequestV1"].(map[string]any)
 	if len(request["oneOf"].([]any)) != 5 {

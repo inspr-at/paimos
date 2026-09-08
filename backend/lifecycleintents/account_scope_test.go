@@ -138,6 +138,51 @@ func TestMatchScopeDoesNotSilentlyPickOverlappingCodexClasses(t *testing.T) {
 	}
 }
 
+func TestRegistrationRejectsUnknownNestedFields(t *testing.T) {
+	generation, host := uuid.NewString(), "fixture-machine"
+	v1 := `{"generation":"` + generation + `","host":"` + host + `","account_label":"chatgpt","workspaces":[{"handle":"` + uuid.NewString() + `","identity":"` + fmtIdentity(1) + `"}],"profiles":[{"id":"codex-sol-high","version":"1"}]}`
+	v2 := `{"generation":"` + generation + `","host":"` + host + `","account_label":"chatgpt","schema_version":2,"accounts":[{"key":"coordinator","label":"Coordinator"}],"workspaces":[{"handle":"` + uuid.NewString() + `","identity":"` + fmtIdentity(1) + `"}],"profiles":[{"id":"codex-sol-high","version":"1"}]}`
+	v3 := `{"generation":"` + generation + `","host":"` + host + `","schema_version":3,"workspaces":[{"handle":"` + uuid.NewString() + `","identity":"` + fmtIdentity(1) + `"}],"account_scopes":[{"account_label":"chatgpt","accounts":[{"key":"codex-work","label":"Work"}],"profiles":[{"id":"codex-sol-high","version":"1"}]}]}`
+	for _, body := range []string{v1, v2, v3} {
+		var parsed Registration
+		if json.Unmarshal([]byte(body), &parsed) != nil {
+			t.Fatalf("canonical closed body refused: %s", body)
+		}
+		if err := validateRegistration(parsed); err != nil {
+			t.Fatalf("canonical closed body invalid: %v %s", err, body)
+		}
+	}
+	for _, body := range []string{
+		`{"generation":"` + generation + `","host":"` + host + `","account_label":"chatgpt","workspaces":[{"handle":"` + uuid.NewString() + `","identity":"` + fmtIdentity(1) + `","path":"/secret"}],"profiles":[{"id":"codex-sol-high","version":"1"}]}`,
+		`{"generation":"` + generation + `","host":"` + host + `","account_label":"chatgpt","workspaces":[{"handle":"` + uuid.NewString() + `","identity":"` + fmtIdentity(1) + `"}],"profiles":[{"id":"codex-sol-high","version":"1","harness":"codex"}]}`,
+		`{"generation":"` + generation + `","host":"` + host + `","account_label":"chatgpt","schema_version":2,"accounts":[{"key":"coordinator","label":"Coordinator","home":"~/.codex"}],"workspaces":[{"handle":"` + uuid.NewString() + `","identity":"` + fmtIdentity(1) + `"}],"profiles":[{"id":"codex-sol-high","version":"1"}]}`,
+		`{"generation":"` + generation + `","host":"` + host + `","schema_version":3,"workspaces":[{"handle":"` + uuid.NewString() + `","identity":"` + fmtIdentity(1) + `","path":"/secret"}],"account_scopes":[{"account_label":"chatgpt","profiles":[{"id":"codex-sol-high","version":"1"}]}]}`,
+		`{"generation":"` + generation + `","host":"` + host + `","schema_version":3,"workspaces":[{"handle":"` + uuid.NewString() + `","identity":"` + fmtIdentity(1) + `"}],"account_scopes":[{"account_label":"chatgpt","profiles":[{"id":"codex-sol-high","version":"1","harness":"codex"}]}]}`,
+		`{"generation":"` + generation + `","host":"` + host + `","schema_version":3,"workspaces":[{"handle":"` + uuid.NewString() + `","identity":"` + fmtIdentity(1) + `"}],"account_scopes":[{"account_label":"chatgpt","accounts":[{"key":"codex-work","label":"Work","home":"~/.codex"}],"profiles":[{"id":"codex-sol-high","version":"1"}]}]}`,
+	} {
+		var parsed Registration
+		if json.Unmarshal([]byte(body), &parsed) == nil {
+			t.Fatalf("unknown nested field silently dropped: %s", body)
+		}
+	}
+}
+
+func TestV3RegistrationRejectsEmptyAccountsArrayAndKeepsClassOnlyOmission(t *testing.T) {
+	generation, handle := uuid.NewString(), uuid.NewString()
+	classOnly := `{"generation":"` + generation + `","host":"fixture-machine","schema_version":3,"workspaces":[{"handle":"` + handle + `","identity":"` + fmtIdentity(1) + `"}],"account_scopes":[{"account_label":"chatgpt","profiles":[{"id":"codex-sol-high","version":"1"}]}]}`
+	var parsed Registration
+	if json.Unmarshal([]byte(classOnly), &parsed) != nil {
+		t.Fatal("omitted accounts refused")
+	}
+	if err := validateRegistration(parsed); err != nil || len(parsed.AccountScopes[0].Accounts) != 0 {
+		t.Fatalf("class-only chatgpt: %+v err=%v", parsed, err)
+	}
+	empty := `{"generation":"` + generation + `","host":"fixture-machine","schema_version":3,"workspaces":[{"handle":"` + handle + `","identity":"` + fmtIdentity(1) + `"}],"account_scopes":[{"account_label":"chatgpt","accounts":[],"profiles":[{"id":"codex-sol-high","version":"1"}]}]}`
+	if json.Unmarshal([]byte(empty), &parsed) == nil && validateRegistration(parsed) == nil {
+		t.Fatal("empty accounts array canonicalized as class-only")
+	}
+}
+
 func TestV3RegistrationRejectsCursorWithoutKeysAndClaudeNamedKeys(t *testing.T) {
 	host := "fixture-machine"
 	cursor := Registration{

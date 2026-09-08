@@ -3861,15 +3861,30 @@
     "identity"
   ]
 },
-      "LifecycleAccountScopeV3": {
+      "LifecycleAccountScopeNamedV3": {
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "account_label": {"type":"string","enum":["chatgpt","api_key","claude_ai_max","claude_ai_pro","claude_ai_team","claude_ai_enterprise","console","pi_context","cursor_context"]},
+          "account_label": {"type":"string","enum":["chatgpt","api_key","pi_context","cursor_context"]},
           "accounts": {"type":"array","minItems":1,"maxItems":16,"items":{"$ref":"#/components/schemas/LifecycleAccountChoiceV2"}},
           "profiles": {"type":"array","minItems":1,"maxItems":16,"items":{"$ref":"#/components/schemas/LifecycleProfileV1"}}
         },
+        "required": ["account_label","accounts","profiles"]
+      },
+      "LifecycleAccountScopeClassOnlyV3": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "account_label": {"type":"string","enum":["chatgpt","api_key","claude_ai_max","claude_ai_pro","claude_ai_team","claude_ai_enterprise","console"]},
+          "profiles": {"type":"array","minItems":1,"maxItems":16,"items":{"$ref":"#/components/schemas/LifecycleProfileV1"}}
+        },
         "required": ["account_label","profiles"]
+      },
+      "LifecycleAccountScopeV3": {
+        "oneOf": [
+          {"$ref":"#/components/schemas/LifecycleAccountScopeNamedV3"},
+          {"$ref":"#/components/schemas/LifecycleAccountScopeClassOnlyV3"}
+        ]
       },
       "LifecycleRuntimeRegistrationV3": {
         "type": "object",
