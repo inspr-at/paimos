@@ -25,6 +25,8 @@ import (
 func RegisterBaselineBatchRoutes(r chi.Router) {
 	r.Route("/projects/{id}/baseline-batches", func(r chi.Router) {
 		r.With(auth.RequireProjectView).Get("/", baselineBatchWorkflow)
+		r.With(auth.RequireProjectView).Get("/flow-state", baselineFlowState)
+		r.With(auth.RequireProjectView).Post("/flow-intents", baselineFlowIntents)
 		r.With(auth.RequireProjectEdit).Post("/opt-in", baselineBatchOptIn)
 		r.With(auth.RequireProjectEdit).Post("/import", baselineBatchImport)
 		r.With(auth.RequireProjectView).Get("/{draftID}/export", baselineBatchExport)

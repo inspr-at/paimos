@@ -133,6 +133,10 @@
   border-bottom: 1px solid var(--h-line);
   background: var(--h-surface);
 }
+.habitat-header--flow-toolbar {
+  padding: 8px 2.5vw;
+  gap: 10px;
+}
 .habitat-brand {
   display: flex;
   gap: 12px;

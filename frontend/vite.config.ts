@@ -28,7 +28,15 @@ let gitHash = ''
 try { gitHash = execSync('git rev-parse --short HEAD', { encoding: 'utf-8' }).trim() } catch { /* not in git */ }
 
 export default defineConfig({
-  plugins: [vue()],
+  plugins: [
+    vue({
+      template: {
+        compilerOptions: {
+          isCustomElement: (tag) => tag === 'inspr-flow-shell',
+        },
+      },
+    }),
+  ],
   define: {
     __APP_VERSION__: JSON.stringify(version),
     __GIT_HASH__: JSON.stringify(gitHash),

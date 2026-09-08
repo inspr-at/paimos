@@ -4093,6 +4093,77 @@
         "pattern": "^(?:sha256:)?[0-9a-f]{64}$",
         "description": "SHA-256 digest as lowercase 64-hex, optionally prefixed with sha256:."
       },
+      "FlowHostState": {
+        "type": "object",
+        "description": "Host-issued Flow shell state. identityContext is opaque display data, never a credential.",
+        "required": ["evaluatedAt", "header", "delivery", "prerequisites", "progress", "identityContext"],
+        "properties": {
+          "evaluatedAt": {"type": "string", "format": "date-time"},
+          "header": {"type": "object"},
+          "health": {"type": "object"},
+          "delivery": {"type": "object"},
+          "prerequisites": {"type": "object"},
+          "progress": {"type": "object"},
+          "executionModes": {"type": "array", "items": {"type": "string"}},
+          "selectedExecutionMode": {"type": "string"},
+          "selectedAction": {"type": "string"},
+          "identityContext": {"$ref": "#/components/schemas/FlowHostIdentityContext"}
+        }
+      },
+      "FlowHostIdentityContext": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["contract_version", "host_id", "principal_kind", "principal_ref", "binding_ref", "project_ref", "actor_kind", "issued_at", "expires_at", "fresh_until", "context_revision", "authority_disclaimer", "display"],
+        "properties": {
+          "contract_version": {"type": "string", "const": "inspr.flow-identity/0.1-draft"},
+          "evaluated_at": {"type": "string", "format": "date-time"},
+          "host_id": {"type": "string", "const": "paimos"},
+          "principal_kind": {"type": "string", "enum": ["local_host"]},
+          "principal_ref": {"type": "string"},
+          "binding_ref": {"type": "string"},
+          "organization_ref": {"type": ["string", "null"]},
+          "project_ref": {"type": "string"},
+          "actor_kind": {"type": "string", "enum": ["human", "agent"]},
+          "issued_at": {"type": "string", "format": "date-time"},
+          "expires_at": {"type": "string", "format": "date-time"},
+          "fresh_until": {"type": "string", "format": "date-time"},
+          "context_revision": {"type": "string"},
+          "authority_disclaimer": {"type": "string"},
+          "display": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "user_label": {"type": "string"},
+              "user_initials": {"type": "string"},
+              "project_label": {"type": "string"},
+              "fixture_label": {"type": "string"}
+            }
+          }
+        }
+      },
+      "FlowHostIntentRequest": {
+        "type": "object",
+        "required": ["type"],
+        "properties": {
+          "type": {"type": "string"},
+          "identity": {"type": "object"},
+          "detail": {"type": "object"}
+        }
+      },
+      "FlowHostIntentResult": {
+        "type": "object",
+        "required": ["executed"],
+        "properties": {
+          "executed": {"type": "boolean", "const": false},
+          "unsupported": {"type": "boolean"},
+          "routed": {"type": ["string", "null"]},
+          "location": {"type": "string"},
+          "reason": {"type": "string"},
+          "notice": {"type": "string"},
+          "error": {"type": "string"},
+          "issues": {"type": "array", "items": {"type": "string"}}
+        }
+      },
       "BaselineBatchBuiltReceiptRequest": {
         "type": "object",
         "additionalProperties": false,
@@ -8944,6 +9015,55 @@
     "/api/projects/{id}/harness-sessions/{sessionID}/messages/v1": {"post":{"summary":"Send one authenticated human message to an exact owned worker generation","description":"Non-impersonated internal browser session with transaction-current project editor authority. The selected managed non-stopping harness generation, revision, advertised simple/steer capability, current runtime reporter authority, and enabled primary target are checked atomically. The canonical ledger row is role human and from_address user:N; no agent attribution header is accepted or required. Exact replays return the original receipt after authorization even if the generation later stops; a changed tuple conflicts. Delivery snapshots only the selected target and never implicitly retargets a fallback. Text is valid UTF-8 up to 8192 bytes, preserves internal newlines, and rejects control or credential-like content without echoing it.","security":[{"sessionCookie":[]}],"parameters":[{"in":"path","name":"id","required":true,"schema":{"type":"integer","minimum":1}},{"in":"path","name":"sessionID","required":true,"schema":{"type":"string","format":"uuid"}}],"responses":{"201":{"description":"Canonical human message and delivery created, or exact replay returned","headers":{"Cache-Control":{"schema":{"type":"string"},"description":"private,no-store"},"X-Permissions-Epoch":{"$ref":"#/components/headers/PermissionsEpoch"}},"content":{"application/json":{"schema":{"$ref":"#/components/schemas/HarnessBrowserMessageResponseV1"}}}},"400":{"description":"Malformed or unsafe bounded request"},"401":{"description":"Authentication required"},"403":{"description":"Uniform unavailable authority, generation, capability, runtime, or target"},"409":{"description":"Stale selected revision or changed idempotent tuple"},"503":{"description":"Storage unavailable"}},"requestBody":{"required":true,"content":{"application/json":{"schema":{"$ref":"#/components/schemas/HarnessBrowserMessageRequestV1"}}}}}},
     "/api/projects/{id}/harness-sessions/{sessionID}/controls/v1/{kind}": {"post":{"summary":"Atomic revisioned owned control","description":"Non-impersonated internal browser session; transactional project editor for controls, viewer for history. Unknown/foreign/revoked/capability-denied is 403 harness_browser_unavailable; stale revision 409 harness_browser_conflict; malformed 400 harness_browser_invalid. No totals/private refs. Legacy routes unchanged. Revision checked before replay; pending same-kind control coalesces. History next is last returned revision. Body max1024 bytes; unknown/duplicate fields rejected.","security":[{"sessionCookie":[]}],"parameters":[{"in":"path","name":"id","required":true,"schema":{"type":"integer","minimum":1}},{"in":"path","name":"sessionID","required":true,"schema":{"type":"string","format":"uuid"}},{"in":"path","name":"kind","required":true,"schema":{"type":"string","enum":["interrupt","stop"]}}],"responses":{"200":{"description":"Bounded result","headers":{"Cache-Control":{"schema":{"type":"string"},"description":"private,no-store"},"X-Permissions-Epoch":{"$ref":"#/components/headers/PermissionsEpoch"}},"content":{"application/json":{"schema":{"$ref":"#/components/schemas/HarnessBrowserControlResponseV1"}}}},"400":{"description":"Bounded result","headers":{"Cache-Control":{"schema":{"type":"string"},"description":"private,no-store"},"X-Permissions-Epoch":{"$ref":"#/components/headers/PermissionsEpoch"}},"content":{"application/json":{"schema":{"type":"object","properties":{"error":{"type":"string"}}}}}},"401":{"description":"Bounded result","headers":{"Cache-Control":{"schema":{"type":"string"},"description":"private,no-store"},"X-Permissions-Epoch":{"$ref":"#/components/headers/PermissionsEpoch"}},"content":{"application/json":{"schema":{"type":"object","properties":{"error":{"type":"string"}}}}}},"403":{"description":"Bounded result","headers":{"Cache-Control":{"schema":{"type":"string"},"description":"private,no-store"},"X-Permissions-Epoch":{"$ref":"#/components/headers/PermissionsEpoch"}},"content":{"application/json":{"schema":{"type":"object","properties":{"error":{"type":"string"}}}}}},"409":{"description":"Bounded result","headers":{"Cache-Control":{"schema":{"type":"string"},"description":"private,no-store"},"X-Permissions-Epoch":{"$ref":"#/components/headers/PermissionsEpoch"}},"content":{"application/json":{"schema":{"type":"object","properties":{"error":{"type":"string"}}}}}},"503":{"description":"Bounded result","headers":{"Cache-Control":{"schema":{"type":"string"},"description":"private,no-store"},"X-Permissions-Epoch":{"$ref":"#/components/headers/PermissionsEpoch"}},"content":{"application/json":{"schema":{"type":"object","properties":{"error":{"type":"string"}}}}}}},"requestBody":{"required":true,"content":{"application/json":{"schema":{"$ref":"#/components/schemas/HarnessBrowserControlRequestV1"}}}}}},
     "/api/projects/{id}/harness-sessions/{sessionID}/assignment-history/v1": {"get":{"summary":"Authorized immutable assignment history","description":"Non-impersonated internal browser session; transactional project editor for controls, viewer for history. Unknown/foreign/revoked/capability-denied is 403 harness_browser_unavailable; stale revision 409 harness_browser_conflict; malformed 400 harness_browser_invalid. No totals/private refs. Legacy routes unchanged. Revision checked before replay; pending same-kind control coalesces. History next is last returned revision. Body max1024 bytes; unknown/duplicate fields rejected.","security":[{"sessionCookie":[]}],"parameters":[{"in":"path","name":"id","required":true,"schema":{"type":"integer","minimum":1}},{"in":"path","name":"sessionID","required":true,"schema":{"type":"string","format":"uuid"}},{"in":"query","name":"after_revision","schema":{"type":"integer","minimum":0,"default":0}},{"in":"query","name":"limit","schema":{"type":"integer","minimum":1,"maximum":100,"default":50}}],"responses":{"200":{"description":"Bounded result","headers":{"Cache-Control":{"schema":{"type":"string"},"description":"private,no-store"},"X-Permissions-Epoch":{"$ref":"#/components/headers/PermissionsEpoch"}},"content":{"application/json":{"schema":{"$ref":"#/components/schemas/HarnessAssignmentHistoryV1"}}}},"400":{"description":"Bounded result","headers":{"Cache-Control":{"schema":{"type":"string"},"description":"private,no-store"},"X-Permissions-Epoch":{"$ref":"#/components/headers/PermissionsEpoch"}},"content":{"application/json":{"schema":{"type":"object","properties":{"error":{"type":"string"}}}}}},"401":{"description":"Bounded result","headers":{"Cache-Control":{"schema":{"type":"string"},"description":"private,no-store"},"X-Permissions-Epoch":{"$ref":"#/components/headers/PermissionsEpoch"}},"content":{"application/json":{"schema":{"type":"object","properties":{"error":{"type":"string"}}}}}},"403":{"description":"Bounded result","headers":{"Cache-Control":{"schema":{"type":"string"},"description":"private,no-store"},"X-Permissions-Epoch":{"$ref":"#/components/headers/PermissionsEpoch"}},"content":{"application/json":{"schema":{"type":"object","properties":{"error":{"type":"string"}}}}}},"409":{"description":"Bounded result","headers":{"Cache-Control":{"schema":{"type":"string"},"description":"private,no-store"},"X-Permissions-Epoch":{"$ref":"#/components/headers/PermissionsEpoch"}},"content":{"application/json":{"schema":{"type":"object","properties":{"error":{"type":"string"}}}}}},"503":{"description":"Bounded result","headers":{"Cache-Control":{"schema":{"type":"string"},"description":"private,no-store"},"X-Permissions-Epoch":{"$ref":"#/components/headers/PermissionsEpoch"}},"content":{"application/json":{"schema":{"type":"object","properties":{"error":{"type":"string"}}}}}}}}},
+    "/api/projects/{id}/baseline-batches/flow-state": {
+      "get": {
+        "tags": ["baseline-batches"],
+        "summary": "Issue current opaque Flow host context for an opted-in project",
+        "description": "Project-viewer read. Returns host-issued local_host Flow identity and current baseline mapping for an INSPR-opted-in project. Ordinary authenticated sessions are local_host principals. Context is display data, not a credential. Missing, revoked, opted-out, or unauthorized projects fail closed. No raw session, token, email, role arrays, or invented organization. Imported Aithema approval is untrusted until current human review.",
+        "security": [{"sessionCookie": []}, {"bearerAPIKey": []}],
+        "parameters": [
+          {"name": "id", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64", "minimum": 1}}
+        ],
+        "responses": {
+          "200": {
+            "description": "Current opaque Flow shell state.",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/FlowHostState"}}}
+          },
+          "401": {"description": "Missing or invalid credentials.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
+          "404": {"description": "Unknown project, no view, or Flow not enabled.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}}
+        }
+      }
+    },
+    "/api/projects/{id}/baseline-batches/flow-intents": {
+      "post": {
+        "tags": ["baseline-batches"],
+        "summary": "Revalidate a Flow intent against current host authority",
+        "description": "Project-viewer revalidation. Consequential Review/Start intents reissue current context and refuse stale, wrong-project, expired, impersonated, or agent start authority. This route never starts a baseline batch, never introduces generic action dispatch, and routes humans to existing /projects/{id}?tab=overview baseline controls. CSRF required for browser sessions.",
+        "security": [{"sessionCookie": []}, {"bearerAPIKey": []}],
+        "parameters": [
+          {"name": "id", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64", "minimum": 1}}
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {"$ref": "#/components/schemas/FlowHostIntentRequest"}
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Intent revalidated and routed. executed is always false.",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/FlowHostIntentResult"}}}
+          },
+          "400": {"description": "Malformed intent.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
+          "401": {"description": "Missing or invalid credentials.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
+          "403": {"description": "Agent or impersonated start authority refused.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/FlowHostIntentResult"}}}},
+          "404": {"description": "Unknown project, no view, or Flow not enabled.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
+          "409": {"description": "Stale, expired, or wrong-project context.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/FlowHostIntentResult"}}}}
+        }
+      }
+    },
     "/api/projects/{id}/baseline-batches/batches/{batchID}/built-receipt": {
       "post": {
         "tags": ["baseline-batches"],
