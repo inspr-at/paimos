@@ -173,6 +173,7 @@ db_expected=$(printf '%s\n' \
   github.com/inspr-at/paimos/backend/db \
   github.com/inspr-at/paimos/backend/delivery \
   github.com/inspr-at/paimos/backend/externalstage \
+  github.com/inspr-at/paimos/backend/flowhost \
   github.com/inspr-at/paimos/backend/handlers \
   github.com/inspr-at/paimos/backend/handlers/crm/http \
   github.com/inspr-at/paimos/backend/handlers/crm/hubspot \
