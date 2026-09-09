@@ -107,7 +107,7 @@ func TestBaselineBatchBuiltReceiptOpenAPIClosesTypedProducer(t *testing.T) {
 		}
 	}
 	scheme := properties["version_scheme"].(map[string]any)["enum"].([]any)
-	if len(scheme) != 2 || scheme[0] != "legacy" || scheme[1] != "inspr-calendar-v1" {
+	if len(scheme) != 3 || scheme[0] != "legacy" || scheme[1] != "inspr-calendar-v1" || scheme[2] != "inspr-calendar-v2" {
 		t.Fatalf("version_scheme enum=%v", scheme)
 	}
 	cas, ok := request["oneOf"].([]any)

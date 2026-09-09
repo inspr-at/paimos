@@ -2,9 +2,36 @@
 
 All notable changes to PAIMOS are documented here.
 
-The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
-with legacy releases using Semantic Versioning and new product cuts using the
-calendar form `yy.mm.dd[.hh.mm]`.
+The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
+Three version eras appear in one sequence and are never retagged: legacy
+Semantic Versioning (`x.y.z`, until 5.21.0), INSPR calendar v1
+(`yy.mm.dd[.hh.mm]`, 26.08.31 – 26.09.09.13.13), and INSPR calendar v2
+(`YYMMDDhhmmss.0.0`, the UTC reservation second as a SemVer-shaped
+coordinate, from the first entry below that form).
+
+## [Unreleased]
+
+### Changed — INSPR calendar v2 release coordinates (PAI-979, INSPR-395)
+
+- Releases are now cut as `YYMMDDhhmmss.0.0`: the UTC reservation second as
+  the SemVer MAJOR segment with MINOR and PATCH fixed at `0.0`. The coordinate
+  is syntactically valid SemVer, fixed-width and therefore string-sortable, and
+  is published as exactly one immutable image tag with no numeric aliases.
+  `scripts/release.sh now` reserves it; an explicit coordinate reserved earlier
+  the same UTC day is also accepted. Legacy `patch|minor|major` and
+  `yy.mm.dd[.hh.mm]` cuts are closed once the first v2 coordinate exists.
+  Every published tag, image and changelog entry from the earlier eras stays
+  exactly as it is.
+- The delivery-evidence contract accepts `inspr-calendar-v2` next to `legacy`
+  and `inspr-calendar-v1` (external-stage v2 artifact evidence, baseline built
+  receipts, typed release identities, `/api/schema`, OpenAPI). Versions are
+  validated against the grammar of their declared scheme and never inferred
+  from shape; unknown schemes fail closed. The frozen owner-v2 fixture gains an
+  explicit calendar v2 deployment plus verification pair, and the stored
+  evidence table admits the new scheme through an additive migration.
+- The changelog parser, release hygiene, doc-sync, GHCR pruning and the CLI
+  release workflow recognise the new coordinate; the migration anchor is
+  recorded in `scripts/release/version-scheme.json`.
 
 ## [26.09.09.13.13] — 2026-09-09
 

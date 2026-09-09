@@ -20,11 +20,17 @@ type VersionScheme string
 const (
 	VersionSchemeLegacy        VersionScheme = "legacy"
 	VersionSchemeINSPRCalendar VersionScheme = "inspr-calendar-v1"
+	// VersionSchemeINSPRCalendarV2 is the INSPR calendar v2 coordinate
+	// (INSPR-395 / PAI-979): the UTC reservation second as a twelve-digit
+	// SemVer MAJOR with MINOR and PATCH fixed at 0.0, e.g. 260910081500.0.0.
+	// It is SemVer-syntactic on purpose and still never inferred from shape.
+	VersionSchemeINSPRCalendarV2 VersionScheme = "inspr-calendar-v2"
 )
 
 var VersionSchemesV2 = []string{
 	string(VersionSchemeLegacy),
 	string(VersionSchemeINSPRCalendar),
+	string(VersionSchemeINSPRCalendarV2),
 }
 
 // ArtifactEvidenceV2 keeps the original v1 version and digest spellings while

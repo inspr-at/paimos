@@ -699,7 +699,8 @@ jobs:
             kind="$(release_version::kind "$version")"
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "calendar=$([[ "$kind" = calendar ]] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+          # Both calendar eras publish exactly one immutable tag (PAI-979).
+          echo "calendar=$([[ "$kind" = calendar || "$kind" = calendar-v2 ]] && echo true || echo false)" >> "$GITHUB_OUTPUT"
           echo "semver=$([[ "$kind" = semver ]] && echo true || echo false)" >> "$GITHUB_OUTPUT"
 
       - uses: docker/setup-buildx-action@v4

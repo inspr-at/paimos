@@ -89,12 +89,16 @@ func TestCanonicalExternalStageV2FixtureAndDigest(t *testing.T) {
 		t.Fatalf("fixture has trailing JSON: %v", err)
 	}
 	if fixture.SchemaMajor != externalstage.ContractMajorV2 || fixture.ReporterClass != externalstage.ReporterClassPharos ||
-		fixture.ReporterRole != externalstage.ReporterRoleOwner || len(fixture.Cases) != 4 {
+		fixture.ReporterRole != externalstage.ReporterRoleOwner || len(fixture.Cases) != 6 {
 		t.Fatalf("unexpected fixture identity: %+v", fixture)
 	}
 	wantSchemes := []externalstage.VersionScheme{externalstage.VersionSchemeLegacy, externalstage.VersionSchemeINSPRCalendar,
-		externalstage.VersionSchemeINSPRCalendar, externalstage.VersionSchemeLegacy}
-	wantStates := []string{"deployed_unverified", "deployed_unverified", "verified", "deployed_unverified"}
+		externalstage.VersionSchemeINSPRCalendar, externalstage.VersionSchemeLegacy,
+		externalstage.VersionSchemeINSPRCalendarV2, externalstage.VersionSchemeINSPRCalendarV2}
+	wantStates := []string{"deployed_unverified", "deployed_unverified", "verified", "deployed_unverified", "deployed_unverified", "verified"}
+	if len(fixture.Cases) != len(wantStates) {
+		t.Fatalf("fixture case count=%d want %d", len(fixture.Cases), len(wantStates))
+	}
 	for i, item := range fixture.Cases {
 		if item.Report.PharosEvidence == nil || item.Report.PharosEvidence.Artifact.VersionScheme != wantSchemes[i] ||
 			item.Report.PharosEvidence.Artifact.ReleaseManifestCoordinate == "" || item.Report.PharosEvidence.Artifact.ReleaseManifestDigest == "" ||
@@ -134,6 +138,21 @@ func TestCanonicalExternalStageV2FixtureAndDigest(t *testing.T) {
 		rollback.Report.PharosEvidence.Artifact.ReleaseSequence >= deployment.Report.PharosEvidence.Artifact.ReleaseSequence ||
 		!rollbackReceivedAt.After(verificationReceivedAt) {
 		t.Fatalf("rollback fixture must be a later fact naming an older immutable release: %+v", rollback)
+	}
+	// PAI-979: the INSPR calendar v2 pair is a later, explicitly discriminated
+	// deployment plus its exact verification; nothing about it is inferred
+	// from the SemVer-shaped spelling.
+	v2Deployment, v2Verification := fixture.Cases[4], fixture.Cases[5]
+	if v2Deployment.StageKey != "deployment" || v2Verification.StageKey != "verification" ||
+		v2Deployment.Report.PharosEvidence.Artifact.Version != "260910081500.0.0" ||
+		v2Verification.DeploymentServerReceivedAt != v2Deployment.ServerReceivedAt ||
+		v2Verification.Report.PharosEvidence.Artifact != v2Deployment.Report.PharosEvidence.Artifact ||
+		!externalstage.ValidVersionForScheme(externalstage.VersionSchemeINSPRCalendarV2, v2Deployment.Report.PharosEvidence.Artifact.Version) {
+		t.Fatalf("calendar v2 fixture pair is not an explicit bound identity: deployment=%+v verification=%+v", v2Deployment, v2Verification)
+	}
+	v2ReceivedAt, _ := time.Parse(time.RFC3339Nano, v2Deployment.ServerReceivedAt)
+	if !v2ReceivedAt.After(rollbackReceivedAt) {
+		t.Fatal("calendar v2 facts must be later than the legacy rollback fact")
 	}
 	hash := sha256.New()
 	_, _ = hash.Write([]byte(externalStageFixtureDomainV2))

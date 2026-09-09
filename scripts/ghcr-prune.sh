@@ -20,7 +20,7 @@
 #   --package=NAME       Package name. Default: paimos.
 #
 # What it preserves:
-#   - Every stable release-tagged version (legacy SemVer, calendar versions,
+#   - Every stable release-tagged version (legacy SemVer, calendar v1 and v2 versions,
 #     `latest`, and old-line aliases such as `3.7`).
 #   - The N most recent versions whose ONLY tags are `sha-XXXXXXX`.
 #   - Cosign signature/attestation versions (`sha256-*.sig`, `.att`, bare)

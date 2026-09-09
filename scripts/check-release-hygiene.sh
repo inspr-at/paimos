@@ -10,7 +10,7 @@ fail=0
 
 version=$(tr -d '[:space:]' < VERSION)
 if ! release_version::is_supported "$version"; then
-  echo "release hygiene: VERSION is not supported SemVer or yy.mm.dd[.hh.mm]: $version" >&2
+  echo "release hygiene: VERSION is not a supported release version (YYMMDDhhmmss.0.0, legacy yy.mm.dd[.hh.mm], or legacy x.y.z): $version" >&2
   fail=1
 fi
 
