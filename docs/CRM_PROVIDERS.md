@@ -17,7 +17,10 @@ provider. This page is the developer guide for adding either shape.
 PAIMOS designs for three audiences ([PAI-28]):
 
 1. **No-CRM users** — manual customer entry is a primary mode, not a
-   fallback. The plugin layer is opt-in.
+   fallback. The plugin layer is opt-in. Instances that want no customer
+   surface at all flip the instance switch under Integrations → CRM
+   (`crm_enabled`, PAI-980): it hides the Customers entry points in every
+   shell without touching data or routes.
 2. **HubSpot users** — one-shot import + manual re-sync + deep-link
    via the in-tree HubSpot provider.
 3. **Other-CRM users** — write a Go provider against the

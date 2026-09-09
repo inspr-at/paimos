@@ -16,6 +16,7 @@
 import LoadingText from "@/components/LoadingText.vue";
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { RouterLink, useRouter } from 'vue-router'
+import { useCustomerBase } from '@/composables/useCustomerBase'
 import { api, errMsg } from '@/api/client'
 import { useAuthStore } from '@/stores/auth'
 import { useExternalProvider } from '@/composables/useExternalProvider'
@@ -29,6 +30,7 @@ import { publicURL } from '@/publicPath'
 
 const auth = useAuthStore()
 const router = useRouter()
+const { detailPath } = useCustomerBase()
 const isAdmin = computed(() => auth.isAdmin)
 
 const customers = ref<Customer[]>([])
@@ -144,7 +146,7 @@ async function importRemoteHit(providerId: string, externalId: string) {
   try {
     const ref_ = externalId
     const res = await api.post<{ id: number }>('/customers/import', { provider: providerId, ref: ref_ })
-    router.push(`/customers/${res.id}`)
+    router.push(detailPath(res.id))
   } catch (e: unknown) {
     remoteError.value = errMsg(e, 'Import failed.')
   } finally {
@@ -211,11 +213,11 @@ function openImport(p: ExternalProvider) {
 function onCreated(c: Customer) {
   showCreate.value = false
   customers.value.unshift(c)
-  router.push(`/customers/${c.id}`)
+  router.push(detailPath(c.id))
 }
 function onImported(id: number) {
   showImport.value = false
-  router.push(`/customers/${id}`)
+  router.push(detailPath(id))
 }
 
 function fmtRate(v: number | null | undefined): string {
@@ -284,7 +286,7 @@ function fmtRate(v: number | null | undefined): string {
               <div class="cv-remote-hit-actions">
                 <RouterLink
                   v-if="h.already_imported && h.local_customer_id"
-                  :to="`/customers/${h.local_customer_id}`"
+                  :to="detailPath(h.local_customer_id)"
                   class="btn btn-ghost btn-sm"
                   @click="clearRemote()"
                 >Open in PAIMOS</RouterLink>
@@ -382,7 +384,7 @@ function fmtRate(v: number | null | undefined): string {
     <RouterLink
       v-for="c in filtered"
       :key="c.id"
-      :to="`/customers/${c.id}`"
+      :to="detailPath(c.id)"
       class="cv-card"
     >
       <div class="cv-card-top">

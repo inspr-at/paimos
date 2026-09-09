@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { LS_HABITAT_THEME } from '@/constants/storage'
 import {
+  Building2,
   Command,
   LogOut,
   Mic,
@@ -29,7 +30,7 @@ import AppImpersonationBanner from '@/components/AppImpersonationBanner.vue'
 import SessionExpiredModal from '@/components/SessionExpiredModal.vue'
 import { useBranding } from '@/composables/useBranding'
 import { useTotpNag } from '@/composables/useTotpNag'
-import { instanceLabel, instanceHostname, loadInstance } from '@/api/instance'
+import { crmEnabled, instanceLabel, instanceHostname, loadInstance } from '@/api/instance'
 import '@/components/habitat/habitat.css'
 import { useAuthStore } from '@/stores/auth'
 import { commandShortcutLabel } from '@/v6/commandPalette'
@@ -118,6 +119,9 @@ async function activate(item: Paimos6PaletteActivation) {
   } else if (item.action === 'open_settings') {
     palette.close()
     await router.push('/settings?tab=account').catch(() => {})
+  } else if (item.action === 'open_crm') {
+    palette.close()
+    await router.push('/crm').catch(() => {})
   } else if (item.action === 'return_5x') {
     palette.close()
     await router.push('/legacy').catch(() => {})
@@ -147,6 +151,18 @@ const navigation = [
 const view = computed(() =>
   typeof route.query.session === 'string' ? 'sessions' : route.query.view || 'home',
 )
+// PAI-980: the CRM door lives on its own path, not on a home `view`.
+const onCrm = computed(() => {
+  const path = typeof route.path === 'string' ? route.path : ''
+  return path === '/crm' || path.startsWith('/crm/')
+})
+const locationLabel = computed(() => {
+  if (onCrm.value) return 'Customers'
+  return (
+    navigation.find((item) => item.view === view.value)?.label ||
+    (view.value === 'assign' ? 'Start work' : 'Product sessions')
+  )
+})
 const theme = ref<'day' | 'night'>(initialTheme())
 function initialTheme(): 'day' | 'night' {
   try {
@@ -201,11 +217,18 @@ onScopeDispose(() => {
             v-for="item in navigation"
             :key="item.view"
             :to="{ path: '/', query: { ...route.query, view: item.view, session: undefined } }"
-            :aria-current="view === item.view ? 'page' : undefined"
+            :aria-current="view === item.view && !onCrm ? 'page' : undefined"
             :aria-label="item.label"
             ><component :is="item.icon" :size="18" aria-hidden="true" /><span>{{
               item.label
             }}</span></RouterLink
+          >
+          <RouterLink
+            v-if="crmEnabled"
+            to="/crm"
+            :aria-current="onCrm ? 'page' : undefined"
+            aria-label="Customers"
+            ><Building2 :size="18" aria-hidden="true" /><span>Customers</span></RouterLink
           >
         </nav>
         <div class="habitat-rail-bottom">
@@ -236,10 +259,7 @@ onScopeDispose(() => {
             <header class="habitat-header" :class="{ 'habitat-header--flow-toolbar': flowHostActive }">
           <div class="habitat-location">
             <span>Workspace</span><span>/</span
-            ><strong>{{
-              navigation.find((item) => item.view === view)?.label ||
-              (view === 'assign' ? 'Start work' : 'Product sessions')
-            }}</strong>
+            ><strong>{{ locationLabel }}</strong>
           </div>
           <div class="habitat-header-tools">
             <button type="button" class="habitat-voice" @click="openTalk">
@@ -309,6 +329,7 @@ onScopeDispose(() => {
       :shortcut-label="shortcutLabel"
       :shortcut-source="palette.settings.value?.source ?? null"
       :selected-session-id="selectedSessionId"
+      :crm-enabled="crmEnabled"
       :announcement="palette.announcement.value"
       :return-focus="commandButton"
       @update:query="palette.query.value = $event"
