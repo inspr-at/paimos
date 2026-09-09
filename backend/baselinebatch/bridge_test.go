@@ -87,8 +87,10 @@ func openDelegatedBridgeFixture(t *testing.T) *bridgeFixture {
 
 func openBridgeFixtureModeWithLaunch(t *testing.T, mode string, classOnly, delegated bool) *bridgeFixture {
 	t.Helper()
-	t.Setenv("DATA_DIR", t.TempDir())
+	dir := t.TempDir()
+	t.Setenv("DATA_DIR", dir)
 	t.Setenv("PAIMOS_TEST_MODE", "1")
+	writeBaselineSchemaClone(t, dir)
 	if err := appdb.Open(); err != nil {
 		t.Fatal(err)
 	}
