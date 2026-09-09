@@ -347,9 +347,20 @@ Pharos submits no grant or admission identifier. Its candidate contains only:
 - `reviewed_plan_digest`, Pharos's domain-separated digest of the exact reviewed
   deployment plan;
 - `operation_binding_digest`, Pharos's separate domain-separated digest binding
-  that operation to the handoff/credential epoch, target/workflow/environment,
-  artifact, deployment stage, attempt/plan/execution/authority, and current
+  that operation to every available public-pull binding: handoff/credential
+  epoch, target/workflow/environment, the full artifact, `reviewed_plan_digest`,
+  deployment stage, execution/authority, and the exact
   plan/predecessor/context digests.
+
+The public pull does not expose raw attempt numbers or plan revisions, so Pharos
+must not guess or reconstruct them. The immutable, Paimos-derived `plan_digest`
+transitively commits to the attempt ID, plan revision, and attempt-start event;
+`context_digest` commits to the delivery key, attempt ID, stage, execution,
+authority, and registration; and `predecessor_digest` commits to the current
+execution, authority, and semantic event lineage. Database guards independently
+reproduce and seal these domain-separated commitments. Together with the other
+public-pull fields above, they are the canonical attempt/plan binding available
+to the Pharos candidate.
 
 Paimos validates both supplied digests as distinct canonical SHA-256 values and
 stores them immutably. They remain Pharos-produced review fingerprints, not
@@ -367,7 +378,12 @@ plan/predecessor/context digests, both Pharos digests, `max_launches:1`,
 `used_launches:0`, issue/expiry times, and `state:"issued"`. Its expiry is the
 earliest of the root-grant expiry, handoff expiry, and server receipt time plus
 15 minutes. A different candidate or idempotency key conflicts; it cannot mint
-a second identity.
+a second identity. The admission exposes the server-resolved raw attempt and
+plan values, but these are outputs rather than candidate inputs: the consumer
+verifies them and the admission's plan/predecessor/context commitments against
+the pull used to build the candidate; it does not derive a candidate from a
+future admission. Even an exact candidate retry may refuse after authority is
+paused or revoked.
 
 First consume revalidates every current gate and atomically spends launch 1.
 Pause, cancel/stop, replan, retry, authority or credential rotation, revocation,
@@ -375,9 +391,10 @@ target drift, registration loss, stale artifact, or expiry refuses without a
 fallback or new retry authority. Exact replay returns the byte-identical durable
 receipt, including after a restart. Once consumed, that receipt remains
 historical idempotent evidence even if the grant or handoff later expires: it
-does not refresh authority, authorize another launch, or change a duplicate
-flag. These endpoints only seal and spend authority; Paimos performs no Pharos,
-host, provider, command, URL, path, credential, or secret effect.
+does not refresh authority, authorize another launch, serve as a fresh dispatch
+instruction, or change a duplicate flag. These endpoints only seal and spend
+authority; Paimos performs no Pharos, host, provider, command, URL, path,
+credential, or secret effect.
 
 CLI adapters use protected file/stdin inputs:
 
