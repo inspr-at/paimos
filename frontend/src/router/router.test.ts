@@ -56,8 +56,23 @@ describe('router shell contract (PAI-805)', () => {
 
   it('leaves every route except the focused production and development shells on standard chrome', () => {
     for (const r of router.getRoutes()) {
-      if (r.path === '/' || r.path === '/agent-mode' || r.path === '/dev/agent-mode' || r.path === '/dev/paimos-6') continue
+      if (r.path === '/' || r.path === '/agent-mode' || r.path === '/dev/agent-mode' || r.path === '/dev/paimos-6' || r.path === '/crm' || r.path === '/crm/:id') continue
       expect(r.meta.shell, `${r.path} must not opt into a reduced shell`).toBeUndefined()
+    }
+  })
+
+  it('gives the CRM door (/crm, /crm/:id) the Paimos 6 shell in production (PAI-980)', () => {
+    const prod = buildRoutes(false)
+    for (const path of ['/crm', '/crm/:id']) {
+      const r = prod.find((rt) => rt.path === path)
+      expect(r, `expected ${path} to be registered`).toBeDefined()
+      expect(r!.meta?.shell).toBe('v6')
+      expect(r!.meta?.public).toBeUndefined()
+      expect(r!.meta?.portal).toBeUndefined()
+    }
+    // The 5.x customer routes stay on standard chrome.
+    for (const path of ['/customers', '/customers/:id']) {
+      expect(prod.find((rt) => rt.path === path)?.meta?.shell).toBeUndefined()
     }
   })
 

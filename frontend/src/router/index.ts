@@ -127,6 +127,19 @@ export function buildRoutes(includeDev: boolean): RouteRecordRaw[] {
       component: () => import("@/views/CustomersView.vue"),
     },
     {
+      // PAI-980: the CRM door in the Paimos 6 shell. Renders the existing
+      // customer views inside the v6 layout; list ↔ detail links keep the
+      // /crm base so the shell never changes underneath the user.
+      path: "/crm",
+      component: () => import("@/views/v6/CrmDoorView.vue"),
+      meta: { shell: "v6" },
+    },
+    {
+      path: "/crm/:id",
+      component: () => import("@/views/v6/CrmDoorView.vue"),
+      meta: { shell: "v6" },
+    },
+    {
       path: "/customers/:id",
       component: () => import("@/views/CustomerDetailView.vue"),
     },

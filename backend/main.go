@@ -285,11 +285,14 @@ func instanceHandler(w http.ResponseWriter, r *http.Request) {
 	// `attachments_enabled` lets the SPA hide drop zones on instances that
 	// don't have MinIO wired up — otherwise the first upload surfaces a
 	// 503 with a stuck 0% progress bar. See ACME-1.
+	// `crm_enabled` (PAI-980) is the instance-level CRM module switch; the
+	// shells use it to show or hide the Customers entry points.
 	json.NewEncoder(w).Encode(map[string]any{
 		"label":                label,
 		"hostname":             hostname,
 		"attachments_enabled":  storage.Enabled(),
 		"live_updates_enabled": liveUpdatesConfigured(),
+		"crm_enabled":          handlers.CRMModuleEnabled(r.Context()),
 	})
 }
 
@@ -1094,6 +1097,10 @@ func mountAPI(r chi.Router) {
 		// `crm.List()` only returns whatever was blank-imported in
 		// this binary.
 		r.With(auth.RequireAdmin).Get("/integrations/crm", crm.ListProviders)
+		// PAI-980: instance-level CRM module switch (read for everyone via
+		// GET /instance; admin read/write here).
+		r.With(auth.RequireAdmin).Get("/integrations/crm/module", handlers.GetCRMModule)
+		r.With(auth.RequireAdmin).Put("/integrations/crm/module", handlers.PutCRMModule)
 		r.With(auth.RequireAdmin).Get("/integrations/crm/{id}/config", crm.GetProviderConfig)
 		r.With(auth.RequireAdmin).Put("/integrations/crm/{id}/config", crm.PutProviderConfig)
 		r.With(auth.RequireAdmin).Put("/integrations/crm/{id}/enabled", crm.PutProviderEnabled)

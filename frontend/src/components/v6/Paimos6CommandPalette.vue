@@ -15,7 +15,7 @@ export type Paimos6PaletteActivation =
   | { kind: 'session'; row: CommandPaletteSessionResult }
   | { kind: 'node'; row: CommandPaletteNodeResult }
   | { kind: 'knowledge'; row: CommandPaletteKnowledgeResult }
-  | { kind: 'action'; action: 'open_talk' | 'clear_session' | 'open_settings' | 'return_5x' }
+  | { kind: 'action'; action: 'open_talk' | 'clear_session' | 'open_settings' | 'open_crm' | 'return_5x' }
 
 const props = defineProps<{
   open: boolean
@@ -28,6 +28,8 @@ const props = defineProps<{
   selectedSessionId: string | null
   announcement: string
   returnFocus: HTMLElement | null
+  // PAI-980: instance CRM switch; adds the Customers door when on.
+  crmEnabled?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -67,6 +69,10 @@ const items = computed<PaletteItem[]>(() => {
     { key: 'action:open_settings', group: 'Shell actions', label: 'Command shortcut settings', detail: 'Open Settings → Account', activation: { kind: 'action', action: 'open_settings' } },
     { key: 'action:return_5x', group: 'Shell actions', label: 'Open 5.x dashboard', detail: 'Navigate to the legacy dashboard at /legacy', activation: { kind: 'action', action: 'return_5x' } },
   ]
+  if (props.crmEnabled) actions.splice(actions.length - 1, 0, {
+    key: 'action:open_crm', group: 'Shell actions', label: 'Customers',
+    detail: 'Open the customer list at /crm', activation: { kind: 'action', action: 'open_crm' },
+  })
   if (props.selectedSessionId) actions.splice(1, 0, {
     key: 'action:clear_session', group: 'Shell actions', label: 'Clear selected session',
     detail: 'Clear the current authorized v6 selection', activation: { kind: 'action', action: 'clear_session' },
