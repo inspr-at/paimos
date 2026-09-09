@@ -373,3 +373,136 @@ func TestDelegatedLaunchRefusesTargetDriftAndHumanRevocation(t *testing.T) {
 		}
 	})
 }
+
+func TestDelegatedLaunchRefusesIssuedAdmissionReplayAfterAuthorityLoss(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		want   error
+		mutate func(*testing.T, *bridgeFixture, storedHandoff, *[]byte)
+	}{
+		{"human revoke", externalstage.ErrConflict, func(t *testing.T, f *bridgeFixture, _ storedHandoff, _ *[]byte) {
+			if _, err := f.svc.Control(context.Background(), f.actor, f.projectID, f.batch.ID,
+				ControlRequest{Action: "revoke_launch", RequestKey: "97800000-0000-4000-8000-000000000011"}); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{"paused batch", externalstage.ErrConflict, func(t *testing.T, f *bridgeFixture, _ storedHandoff, _ *[]byte) {
+			if _, err := f.svc.Control(context.Background(), f.actor, f.projectID, f.batch.ID,
+				ControlRequest{Action: "pause", RequestKey: "97800000-0000-4000-8000-000000000012"}); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{"credential rotation current secret", externalstage.ErrConflict, func(t *testing.T, f *bridgeFixture, handoff storedHandoff, secret *[]byte) {
+			rotated, err := f.ext.Mint(context.Background(), f.operator, handoff.HandoffID, 1, true)
+			if err != nil {
+				t.Fatal(err)
+			}
+			*secret = rotated
+		}},
+		{"credential rotation stale secret", externalstage.ErrNotFound, func(t *testing.T, f *bridgeFixture, handoff storedHandoff, _ *[]byte) {
+			if _, err := f.ext.Mint(context.Background(), f.operator, handoff.HandoffID, 1, true); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{"target drift", externalstage.ErrConflict, func(t *testing.T, f *bridgeFixture, _ storedHandoff, _ *[]byte) {
+			if _, err := appdb.DB.Exec(`UPDATE project_environments SET host_alias='changed-host',updated_at=datetime('now','+1 second')
+				WHERE project_id=?`, f.projectID); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{"expired root and admission", externalstage.ErrConflict, func(t *testing.T, f *bridgeFixture, _ storedHandoff, _ *[]byte) {
+			f.now = f.now.Add(2 * time.Hour)
+		}},
+		{"granting human loses project authority", externalstage.ErrConflict, func(t *testing.T, f *bridgeFixture, _ storedHandoff, _ *[]byte) {
+			if _, err := appdb.DB.Exec(`UPDATE users SET role='external',is_super_admin=0 WHERE id=?`, f.userID); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{"review binding drift", externalstage.ErrConflict, func(t *testing.T, f *bridgeFixture, _ storedHandoff, _ *[]byte) {
+			if _, err := appdb.DB.Exec(`UPDATE baseline_batch_reviews SET binding_hash=? WHERE id=?`,
+				"0000000000000000000000000000000000000000000000000000000000000000", f.batch.ReviewID); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{"invalidated review", externalstage.ErrConflict, func(t *testing.T, f *bridgeFixture, _ storedHandoff, _ *[]byte) {
+			if _, err := appdb.DB.Exec(`UPDATE baseline_batch_reviews SET invalidated_at=datetime('now') WHERE id=?`, f.batch.ReviewID); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{"human session expired", externalstage.ErrConflict, func(t *testing.T, f *bridgeFixture, _ storedHandoff, _ *[]byte) {
+			if _, err := appdb.DB.Exec(`UPDATE sessions SET expires_at=? WHERE credential_id=?`,
+				f.now.Add(-time.Minute).Format(time.RFC3339Nano), f.actor.SessionCredentialID); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{"lifecycle cancelled", externalstage.ErrConflict, func(t *testing.T, f *bridgeFixture, _ storedHandoff, _ *[]byte) {
+			if _, err := f.svc.Control(context.Background(), f.actor, f.projectID, f.batch.ID,
+				ControlRequest{Action: "cancel", RequestKey: "97800000-0000-4000-8000-000000000013"}); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{"qa predecessor lost", externalstage.ErrConflict, func(t *testing.T, f *bridgeFixture, _ storedHandoff, _ *[]byte) {
+			if f.batch.DeliveryID == nil || f.batch.AttemptID == nil {
+				t.Fatal("missing delivery")
+			}
+			if _, err := appdb.DB.Exec(`UPDATE delivery_stage_latest SET semantic_stage_event_id=NULL
+				WHERE delivery_id=? AND attempt_id=? AND stage_key='qa'`, *f.batch.DeliveryID, *f.batch.AttemptID); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{"execution authority drift", externalstage.ErrNotFound, func(t *testing.T, f *bridgeFixture, _ storedHandoff, _ *[]byte) {
+			if f.batch.DeliveryID == nil || f.batch.AttemptID == nil {
+				t.Fatal("missing delivery")
+			}
+			if _, err := appdb.DB.Exec(`DELETE FROM delivery_stage_latest
+				WHERE delivery_id=? AND attempt_id=? AND stage_key='deployment'`, *f.batch.DeliveryID, *f.batch.AttemptID); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{"registration revoked", externalstage.ErrNotFound, func(t *testing.T, f *bridgeFixture, _ storedHandoff, _ *[]byte) {
+			var registrationID int64
+			if err := appdb.DB.QueryRow(`SELECT id FROM external_stage_reporter_registrations
+				WHERE project_id=? AND reporter_role='owner' AND revoked_at IS NULL`, f.projectID).Scan(&registrationID); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := f.ext.RevokeReporter(context.Background(), f.operator, fmt.Sprintf("issue:%d", f.batch.IssueID),
+				"replay-registration-revoke", registrationID); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{"draft binding opened", externalstage.ErrConflict, func(t *testing.T, f *bridgeFixture, _ storedHandoff, _ *[]byte) {
+			if _, err := appdb.DB.Exec(`UPDATE baseline_batch_drafts SET status='open' WHERE id=?`, f.batch.DraftID); err != nil {
+				t.Fatal(err)
+			}
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f, handoff, secret, candidate := prepareDelegatedLaunch(t)
+			if _, err := f.ext.AdmitLaunch(context.Background(), f.reporter, handoff.HandoffID,
+				"issued-replay", secret, candidate); err != nil {
+				t.Fatal(err)
+			}
+			tc.mutate(t, f, handoff, &secret)
+			if _, err := f.ext.AdmitLaunch(context.Background(), f.reporter, handoff.HandoffID,
+				"issued-replay", secret, candidate); !errors.Is(err, tc.want) {
+				t.Fatalf("issued admission replay err=%v want=%v", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestDelegatedLaunchCancelBeforeWriterDoesNotSpendAuthority(t *testing.T) {
+	f, handoff, secret, candidate := prepareDelegatedLaunch(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := f.ext.AdmitLaunch(ctx, f.reporter, handoff.HandoffID, "cancelled-candidate", secret, candidate); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled admit err=%v", err)
+	}
+	var count int
+	if err := appdb.DB.QueryRow(`SELECT COUNT(*) FROM external_stage_launch_admissions`).Scan(&count); err != nil || count != 0 {
+		t.Fatalf("cancelled admit spent authority count=%d err=%v", count, err)
+	}
+	if _, err := f.ext.AdmitLaunch(context.Background(), f.reporter, handoff.HandoffID, "cancelled-candidate", secret, candidate); err != nil {
+		t.Fatalf("fresh admit after cancel err=%v", err)
+	}
+}

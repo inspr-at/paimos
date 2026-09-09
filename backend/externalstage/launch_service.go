@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -21,6 +22,36 @@ import (
 )
 
 const launchAdmissionTTL = 15 * time.Minute
+
+// launchAdmissionQueue serializes in-process AdmitLaunch and ConsumeLaunch
+// before BEGIN IMMEDIATE so duplicate candidates cannot starve SQLite's
+// busy handler. Unique handoff admission rows remain the durable
+// cross-process max-1 authority. A cancelled waiter never starts a
+// transaction and therefore cannot spend or return launch authority.
+type launchAdmissionQueue struct {
+	once sync.Once
+	slot chan struct{}
+}
+
+func (q *launchAdmissionQueue) acquire(ctx context.Context) (func(), error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	q.once.Do(func() {
+		q.slot = make(chan struct{}, 1)
+		q.slot <- struct{}{}
+	})
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-q.slot:
+	}
+	if err := ctx.Err(); err != nil {
+		q.slot <- struct{}{}
+		return nil, err
+	}
+	return func() { q.slot <- struct{}{} }, nil
+}
 
 type launchGrantRow struct {
 	grantID, baselineRef, contentDigest, revisionSeal, targetRef, workflow, environment string
@@ -103,6 +134,11 @@ func (s *Service) AdmitLaunch(ctx context.Context, principal Principal, handoffI
 		return nil, err
 	}
 	idempotencyDigest := sha256.Sum256([]byte(idempotencyKey))
+	release, err := s.launchAdmission.acquire(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
@@ -115,31 +151,7 @@ func (s *Service) AdmitLaunch(ctx context.Context, principal Principal, handoffI
 	if prior, found, err := loadAdmissionByHandoff(ctx, tx, handoff.rowID); err != nil {
 		return nil, err
 	} else if found {
-		if subtle.ConstantTimeCompare(prior.candidateDigest, candidateDigest[:]) != 1 ||
-			subtle.ConstantTimeCompare(prior.idempotencyDigest, idempotencyDigest[:]) != 1 ||
-			prior.credentialEpoch != handoff.credentialEpoch {
-			return nil, ErrConflict
-		}
-		var admission LaunchAdmission
-		if json.Unmarshal(prior.response, &admission) != nil || admission.CredentialEpoch != handoff.credentialEpoch {
-			return nil, ErrConflict
-		}
-		expires, expiryErr := time.Parse(time.RFC3339Nano, admission.ExpiresAt)
-		if expiryErr != nil || !expires.After(s.clock.Now().UTC()) {
-			return nil, ErrConflict
-		}
-		replayCandidate := LaunchCandidate{TargetRef: admission.TargetRef, Workflow: admission.Workflow,
-			Environment: admission.Environment, Artifact: admission.Artifact, ReviewedPlanDigest: admission.ReviewedPlanDigest,
-			OperationBindingDigest: admission.OperationBindingDigest}
-		_, expectedArtifact, err := s.validateLaunchAuthorityTx(ctx, tx, handoff, replayCandidate)
-		if err != nil || matchBuiltOwnerArtifact(expectedArtifact, &PharosEvidence{
-			Workflow: replayCandidate.Workflow, Environment: replayCandidate.Environment,
-			Artifact: ArtifactEvidence{Version: replayCandidate.Artifact.Version, Digest: replayCandidate.Artifact.Digest,
-				CommitDigest: replayCandidate.Artifact.CommitDigest},
-		}, &replayCandidate.Artifact) != nil {
-			return nil, ErrConflict
-		}
-		return append([]byte(nil), prior.response...), nil
+		return s.replayIssuedAdmission(ctx, tx, handoff, prior, candidateDigest, idempotencyDigest)
 	}
 	grant, expectedArtifact, err := s.validateLaunchAuthorityTx(ctx, tx, handoff, candidate)
 	if err != nil {
@@ -220,6 +232,15 @@ func (s *Service) AdmitLaunch(ctx context.Context, principal Principal, handoffI
 		handoff.stageKey, handoff.attemptNumber, handoff.planRevision, handoff.executionNumber, handoff.authorityEpoch,
 		identity.PlanDigest, identity.PredecessorDigest, identity.ContextDigest, identity.IssuedAt, identity.ExpiresAt, response)
 	if err != nil {
+		if uniqueConstraint(err) {
+			prior, found, loadErr := loadAdmissionByHandoff(ctx, tx, handoff.rowID)
+			if loadErr != nil {
+				return nil, loadErr
+			}
+			if found {
+				return s.replayIssuedAdmission(ctx, tx, handoff, prior, candidateDigest, idempotencyDigest)
+			}
+		}
 		return nil, mapConflict(err)
 	}
 	if s.beforeCommit != nil {
@@ -242,6 +263,11 @@ func (s *Service) ConsumeLaunch(ctx context.Context, principal Principal, handof
 	}
 	requestDigest, _ := canonicalDigest(request)
 	idempotencyDigest := sha256.Sum256([]byte(idempotencyKey))
+	release, err := s.launchAdmission.acquire(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
@@ -337,6 +363,38 @@ func loadAdmissionByHandoff(ctx context.Context, tx *sql.Tx, handoffRowID int64)
 		return storedLaunchAdmission{}, false, nil
 	}
 	return admission, err == nil, err
+}
+
+func (s *Service) replayIssuedAdmission(ctx context.Context, tx *sql.Tx, handoff handoffRow, prior storedLaunchAdmission, candidateDigest, idempotencyDigest [sha256.Size]byte) ([]byte, error) {
+	if subtle.ConstantTimeCompare(prior.candidateDigest, candidateDigest[:]) != 1 ||
+		subtle.ConstantTimeCompare(prior.idempotencyDigest, idempotencyDigest[:]) != 1 ||
+		prior.credentialEpoch != handoff.credentialEpoch {
+		return nil, ErrConflict
+	}
+	var admission LaunchAdmission
+	if json.Unmarshal(prior.response, &admission) != nil || admission.CredentialEpoch != handoff.credentialEpoch {
+		return nil, ErrConflict
+	}
+	expires, expiryErr := time.Parse(time.RFC3339Nano, admission.ExpiresAt)
+	if expiryErr != nil || !expires.After(s.clock.Now().UTC()) {
+		return nil, ErrConflict
+	}
+	replayCandidate := LaunchCandidate{TargetRef: admission.TargetRef, Workflow: admission.Workflow,
+		Environment: admission.Environment, Artifact: admission.Artifact, ReviewedPlanDigest: admission.ReviewedPlanDigest,
+		OperationBindingDigest: admission.OperationBindingDigest}
+	_, expectedArtifact, err := s.validateLaunchAuthorityTx(ctx, tx, handoff, replayCandidate)
+	if err != nil || matchBuiltOwnerArtifact(expectedArtifact, &PharosEvidence{
+		Workflow: replayCandidate.Workflow, Environment: replayCandidate.Environment,
+		Artifact: ArtifactEvidence{Version: replayCandidate.Artifact.Version, Digest: replayCandidate.Artifact.Digest,
+			CommitDigest: replayCandidate.Artifact.CommitDigest},
+	}, &replayCandidate.Artifact) != nil {
+		return nil, ErrConflict
+	}
+	return append([]byte(nil), prior.response...), nil
+}
+
+func uniqueConstraint(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "UNIQUE constraint")
 }
 
 func (s *Service) validateLaunchAuthorityTx(ctx context.Context, tx *sql.Tx, handoff handoffRow, candidate LaunchCandidate) (launchGrantRow, BuiltOwnerArtifact, error) {
@@ -511,25 +569,12 @@ func validLaunchGrantBinding(grant launchGrantRow) bool {
 }
 
 func currentProjectTargetRef(ctx context.Context, tx *sql.Tx, projectID int64, targetRef, environment string) bool {
-	rows, err := tx.QueryContext(ctx, `SELECT id FROM project_environments WHERE project_id=?`, projectID)
-	if err != nil {
+	var id int64
+	if tx.QueryRowContext(ctx, `SELECT id FROM project_environments WHERE project_id=? AND name=?`, projectID, environment).Scan(&id) != nil {
 		return false
 	}
-	defer rows.Close()
-	var ids []int64
-	for rows.Next() {
-		var id int64
-		if rows.Scan(&id) == nil {
-			ids = append(ids, id)
-		}
-	}
-	for _, id := range ids {
-		identity, err := targetidentity.LoadProjectEnvironment(ctx, tx, projectID, id)
-		if err == nil && identity.EnvironmentSymbol == environment && targetidentity.Digest(identity) == targetRef {
-			return true
-		}
-	}
-	return false
+	identity, err := targetidentity.LoadProjectEnvironment(ctx, tx, projectID, id)
+	return err == nil && identity.EnvironmentSymbol == environment && targetidentity.Digest(identity) == targetRef
 }
 
 func uuidPattern(value string) bool {

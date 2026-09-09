@@ -81,6 +81,7 @@ type Service struct {
 	activeStaleAfter time.Duration
 	beforeCommit     func(string) error
 	fixture          [sha256.Size]byte
+	launchAdmission  launchAdmissionQueue
 }
 
 func NewService(database *sql.DB, opts Options) (*Service, error) {
