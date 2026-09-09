@@ -48,16 +48,16 @@ type testServer struct {
 	externalCookie string
 }
 
-// newTestServer opens an isolated temporary SQLite DB, runs all migrations, seeds
-// admin + member users, wires the real router, and starts an httptest.Server.
+// newTestServer opens an isolated temporary SQLite DB from a closed current-schema
+// clone, seeds admin + member users, wires the real router, and starts an httptest.Server.
 func newTestServer(t *testing.T) *testServer {
 	t.Helper()
 
 	// Keep every test process on its own temporary SQLite DSN and restore the
 	// environment during cleanup, including when a test fails early.
-	t.Setenv("DATA_DIR", t.TempDir())
-	// Speed up migrations (applied inside db.Open before we can set them here).
-	t.Setenv("PAIMOS_TEST_MODE", "1")
+	// Copy a closed current-schema snapshot so each case does not re-apply all
+	// migrations; db.Open still installs hooks, pool settings, and skip checks.
+	prepareIsolatedMigratedDir(t)
 
 	if err := db.Open(); err != nil {
 		t.Fatalf("db.Open: %v", err)

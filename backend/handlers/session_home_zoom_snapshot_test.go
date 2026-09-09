@@ -19,6 +19,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/inspr-at/paimos/backend/auth"
 	"github.com/inspr-at/paimos/backend/db"
+	"github.com/inspr-at/paimos/backend/handlers/testschema"
 	"github.com/inspr-at/paimos/backend/models"
 	"modernc.org/sqlite"
 )
@@ -62,6 +63,9 @@ var sessionHomeZoomCountingDriverSequence atomic.Int64
 func TestSessionHomeZoomAuthorizationAndDataShareOneSnapshot(t *testing.T) {
 	dataDir := t.TempDir()
 	t.Setenv("DATA_DIR", dataDir)
+	if err := testschema.WriteClone(dataDir); err != nil {
+		t.Fatal(err)
+	}
 	if err := db.Open(); err != nil {
 		t.Fatal(err)
 	}
@@ -160,6 +164,9 @@ func TestSessionHomeZoomSQLStatementCountIsIndependentOfSessionCount(t *testing.
 	dataDir := t.TempDir()
 	t.Setenv("DATA_DIR", dataDir)
 	t.Setenv("PAIMOS_TEST_MODE", "1")
+	if err := testschema.WriteClone(dataDir); err != nil {
+		t.Fatal(err)
+	}
 	if err := db.Open(); err != nil {
 		t.Fatal(err)
 	}

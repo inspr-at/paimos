@@ -14,8 +14,7 @@ import (
 
 func openChangesTestDB(t *testing.T) {
 	t.Helper()
-	t.Setenv("DATA_DIR", t.TempDir())
-	t.Setenv("PAIMOS_TEST_MODE", "1")
+	prepareIsolatedMigratedDir(t)
 	if err := db.Open(); err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}

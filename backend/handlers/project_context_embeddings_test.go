@@ -8,8 +8,7 @@ import (
 )
 
 func TestSyncProjectContextEmbeddingsUpsertsAndDeletesStaleRows(t *testing.T) {
-	t.Setenv("DATA_DIR", t.TempDir())
-	t.Setenv("PAIMOS_TEST_MODE", "1")
+	prepareIsolatedMigratedDir(t)
 	if err := db.Open(); err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}
@@ -98,8 +97,7 @@ func TestSyncProjectContextEmbeddingsUpsertsAndDeletesStaleRows(t *testing.T) {
 }
 
 func TestIndexProjectContextEmbeddingsStaysBoundToScheduledDatabase(t *testing.T) {
-	t.Setenv("DATA_DIR", t.TempDir())
-	t.Setenv("PAIMOS_TEST_MODE", "1")
+	prepareIsolatedMigratedDir(t)
 	if err := db.Open(); err != nil {
 		t.Fatalf("open scheduled database: %v", err)
 	}
@@ -125,7 +123,7 @@ func TestIndexProjectContextEmbeddingsStaysBoundToScheduledDatabase(t *testing.T
 
 	// Simulate the handlers test harness moving on to a fresh database while
 	// an embedding job scheduled by the previous test is still pending.
-	t.Setenv("DATA_DIR", t.TempDir())
+	prepareIsolatedMigratedDir(t)
 	if err := db.Open(); err != nil {
 		t.Fatalf("open replacement database: %v", err)
 	}
@@ -165,8 +163,7 @@ func TestIndexProjectContextEmbeddingsStaysBoundToScheduledDatabase(t *testing.T
 }
 
 func TestProjectContextEmbeddingJobSurvivesDatabaseTeardown(t *testing.T) {
-	t.Setenv("DATA_DIR", t.TempDir())
-	t.Setenv("PAIMOS_TEST_MODE", "1")
+	prepareIsolatedMigratedDir(t)
 	if err := db.Open(); err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}

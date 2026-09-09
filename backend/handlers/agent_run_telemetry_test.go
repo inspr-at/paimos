@@ -28,8 +28,7 @@ type directTelemetryServer struct {
 
 func newDirectTelemetryServer(t *testing.T) *directTelemetryServer {
 	t.Helper()
-	t.Setenv("DATA_DIR", t.TempDir())
-	t.Setenv("PAIMOS_TEST_MODE", "1")
+	prepareIsolatedMigratedDir(t)
 	if err := db.Open(); err != nil {
 		t.Fatal(err)
 	}

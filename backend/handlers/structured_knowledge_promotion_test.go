@@ -18,8 +18,7 @@ import (
 )
 
 func TestStructuredKnowledgePromotionTransactionConcealsAndCommitsAtomicDrop(t *testing.T) {
-	t.Setenv("DATA_DIR", t.TempDir())
-	t.Setenv("PAIMOS_TEST_MODE", "1")
+	prepareIsolatedMigratedDir(t)
 	if err := db.Open(); err != nil {
 		t.Fatal(err)
 	}
