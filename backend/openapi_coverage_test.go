@@ -228,29 +228,8 @@ func TestExternalStageOpenAPIRouteCoverageIsBidirectional(t *testing.T) {
 	registered := registeredAPIOperations(t)
 	documented := documentedAPIOperations(t)
 	want := map[string]string{}
-	for _, route := range externalstage.Routes {
-		path := normalizeAPIPath(route.Path)
-		operation := strings.ToLower(route.Method)
-		key := strings.ToUpper(operation) + " " + path
-		want[key] = route.OperationID
-		if !registered[path][operation] {
-			t.Errorf("frozen external-stage route is not mounted: %s", key)
-		}
-		raw, ok := documented[path][operation]
-		if !ok {
-			t.Errorf("frozen external-stage route is not documented: %s", key)
-			continue
-		}
-		var value struct {
-			OperationID string `json:"operationId"`
-		}
-		if err := json.Unmarshal(raw, &value); err != nil {
-			t.Fatalf("%s: %v", key, err)
-		}
-		if value.OperationID != route.OperationID {
-			t.Errorf("%s operationId=%q want %q", key, value.OperationID, route.OperationID)
-		}
-	}
+	coverExactExternalStageRoutes(t, registered, documented, want, "frozen", externalstage.Routes)
+	coverExactExternalStageRoutes(t, registered, documented, want, "launch-admission", externalstage.LaunchRoutes)
 	for path, methods := range registered {
 		if !strings.Contains(path, "/external-stage") {
 			continue
@@ -258,7 +237,7 @@ func TestExternalStageOpenAPIRouteCoverageIsBidirectional(t *testing.T) {
 		for method := range methods {
 			key := strings.ToUpper(method) + " " + path
 			if _, ok := want[key]; !ok {
-				t.Errorf("mounted external-stage operation is outside the frozen contract: %s", key)
+				t.Errorf("mounted external-stage operation is outside the frozen and launch-admission contracts: %s", key)
 			}
 		}
 	}
@@ -269,8 +248,38 @@ func TestExternalStageOpenAPIRouteCoverageIsBidirectional(t *testing.T) {
 		for method := range methods {
 			key := strings.ToUpper(method) + " " + path
 			if _, ok := want[key]; !ok {
-				t.Errorf("documented external-stage operation is outside the frozen contract: %s", key)
+				t.Errorf("documented external-stage operation is outside the frozen and launch-admission contracts: %s", key)
 			}
+		}
+	}
+}
+
+func coverExactExternalStageRoutes(t *testing.T, registered map[string]map[string]bool, documented map[string]map[string]json.RawMessage, want map[string]string, label string, routes []externalstage.Route) {
+	t.Helper()
+	for _, route := range routes {
+		path := normalizeAPIPath(route.Path)
+		operation := strings.ToLower(route.Method)
+		key := strings.ToUpper(operation) + " " + path
+		if _, dup := want[key]; dup {
+			t.Errorf("%s external-stage route collides with another exact contract: %s", label, key)
+		}
+		want[key] = route.OperationID
+		if !registered[path][operation] {
+			t.Errorf("%s external-stage route is not mounted: %s", label, key)
+		}
+		raw, ok := documented[path][operation]
+		if !ok {
+			t.Errorf("%s external-stage route is not documented: %s", label, key)
+			continue
+		}
+		var value struct {
+			OperationID string `json:"operationId"`
+		}
+		if err := json.Unmarshal(raw, &value); err != nil {
+			t.Fatalf("%s: %v", key, err)
+		}
+		if value.OperationID != route.OperationID {
+			t.Errorf("%s operationId=%q want %q", key, value.OperationID, route.OperationID)
 		}
 	}
 }

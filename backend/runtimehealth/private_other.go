@@ -31,4 +31,8 @@ func lockHeld(string) (bool, error) { return false, errors.New("runtime platform
 
 func trustedDefinitionOwner(os.FileInfo) bool { return false }
 
+func openUnfollowedRegular(string, os.FileInfo) (*os.File, error) {
+	return nil, errors.New("runtime platform unsupported")
+}
+
 func writableDirectory(string) bool { return false }

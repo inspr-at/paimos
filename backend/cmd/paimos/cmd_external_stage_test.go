@@ -1020,8 +1020,18 @@ func TestExternalStageRawSecretZeroizationHelpers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if reads, clears := bytes.Count(source, []byte("rawSecret, err := readExternalStageSecret(secret)")), bytes.Count(source, []byte("defer clearExternalStageSecret(rawSecret)")); reads != 3 || clears != reads {
-		t.Fatalf("raw credential read/defer-clear sites reads=%d clears=%d", reads, clears)
+	assignment := []byte("rawSecret, err := readExternalStageSecret(secret)")
+	immediateClear := []byte("rawSecret, err := readExternalStageSecret(secret)\n\t\t\tif err != nil {\n\t\t\t\treturn err\n\t\t\t}\n\t\t\tdefer clearExternalStageSecret(rawSecret)")
+	reads := bytes.Count(source, assignment)
+	if reads == 0 {
+		t.Fatal("no raw credential read sites")
+	}
+	if paired := bytes.Count(source, immediateClear); paired != reads {
+		t.Fatalf("raw credential read site missing immediate defer-clear: reads=%d paired=%d", reads, paired)
+	}
+	otherReads := bytes.Count(source, []byte("readExternalStageSecret(")) - reads - bytes.Count(source, []byte("func readExternalStageSecret("))
+	if otherReads != 0 {
+		t.Fatalf("unpaired readExternalStageSecret call sites: %d", otherReads)
 	}
 }
 

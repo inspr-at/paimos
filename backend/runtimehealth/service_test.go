@@ -263,7 +263,29 @@ func putServiceArgs(t *testing.T, p *PlatformService, args []string) {
 
 func browserGuardRefusalShim(t *testing.T, dir string) string {
 	t.Helper()
-	return writeBrowserGuardShim(t, filepath.Join(dir, "browser-refusal"), "#!/bin/sh\n"+browserGuardRefusalBody)
+	return writeBrowserGuardShim(t, filepath.Join(dir, "browser-refusal"), browserGuardExactShim(t))
+}
+
+func browserGuardExactShim(t *testing.T) string {
+	t.Helper()
+	return "#!" + trustedBrowserGuardInterpreter(t) + "\n" + browserGuardRefusalBody
+}
+
+func trustedBrowserGuardInterpreter(t *testing.T) string {
+	t.Helper()
+	for _, path := range []string{"/bin/sh", "/bin/bash", "/usr/bin/bash", "/usr/bin/sh"} {
+		info, err := os.Lstat(path)
+		if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0111 == 0 || info.Mode().Perm()&0022 != 0 || !trustedDefinitionOwner(info) {
+			continue
+		}
+		base := filepath.Base(path)
+		if base != "sh" && base != "bash" {
+			continue
+		}
+		return path
+	}
+	t.Fatal("no trusted absolute sh/bash interpreter available for Darwin fixture")
+	return ""
 }
 
 func writeBrowserGuardShim(t *testing.T, path, body string) string {
@@ -765,8 +787,55 @@ func TestRuntimeDarwinAcceptsDeclaredBrowserGuardEnvironment(t *testing.T) {
 	}
 }
 
+func TestRuntimeBrowserGuardShimOpenUsesNoFollowAndDocumentedGosecWaiver(t *testing.T) {
+	helper, err := os.ReadFile("private_unix.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(helper, []byte("os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW, 0) // #nosec G304 --")) {
+		t.Fatal("trusted shim open lost no-follow G304 waiver")
+	}
+	if !bytes.Contains(helper, []byte("!os.SameFile(info, actual)")) {
+		t.Fatal("trusted shim open lost SameFile identity check")
+	}
+	service, err := os.ReadFile("service.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := bytes.Index(service, []byte("func verifyBrowserGuardRefusalShim"))
+	if start < 0 {
+		t.Fatal("browser-guard shim verifier missing")
+	}
+	rest := service[start+1:]
+	endRel := bytes.Index(rest, []byte("\nfunc "))
+	if endRel < 0 {
+		t.Fatal("browser-guard shim verifier bounds missing")
+	}
+	body := service[start : start+1+endRel]
+	if bytes.Contains(body, []byte("os.Open(")) || bytes.Contains(body, []byte("EvalSymlinks")) {
+		t.Fatal("browser-guard shim verifier opened a variable path without no-follow custody")
+	}
+	if !bytes.Contains(body, []byte("openUnfollowedRegular(path, info)")) {
+		t.Fatal("browser-guard shim verifier does not use the no-follow custody helper")
+	}
+	interpStart := bytes.Index(service, []byte("func verifyBrowserGuardInterpreter"))
+	if interpStart < 0 {
+		t.Fatal("browser-guard interpreter verifier missing")
+	}
+	interpRest := service[interpStart+1:]
+	interpEndRel := bytes.Index(interpRest, []byte("\nfunc "))
+	if interpEndRel < 0 {
+		t.Fatal("browser-guard interpreter verifier bounds missing")
+	}
+	interpBody := service[interpStart : interpStart+1+interpEndRel]
+	if bytes.Contains(interpBody, []byte("EvalSymlinks")) || !bytes.Contains(interpBody, []byte("os.Lstat(path)")) {
+		t.Fatal("browser-guard interpreter verifier no longer refuses symlink interpreters")
+	}
+}
+
 func TestRuntimeDarwinRejectsHostileLaunchdEnvironment(t *testing.T) {
-	exact := "#!/bin/sh\n" + browserGuardRefusalBody
+	exact := browserGuardExactShim(t)
+	interp := trustedBrowserGuardInterpreter(t)
 	for _, kind := range []string{
 		"path",
 		"node_options",
@@ -790,6 +859,8 @@ func TestRuntimeDarwinRejectsHostileLaunchdEnvironment(t *testing.T) {
 		"interpreter-args",
 		"relative-interpreter",
 		"writable-interpreter",
+		"symlink-shim",
+		"symlink-interpreter",
 		"no-shebang",
 		"string-value",
 		"program",
@@ -848,11 +919,11 @@ func TestRuntimeDarwinRejectsHostileLaunchdEnvironment(t *testing.T) {
 					t.Fatal(e)
 				}
 			case "command-before-exit":
-				writeBrowserGuardShim(t, shim, "#!/bin/sh\ntrue\n"+browserGuardRefusalBody)
+				writeBrowserGuardShim(t, shim, "#!"+interp+"\ntrue\n"+browserGuardRefusalBody)
 			case "comment-marker":
-				writeBrowserGuardShim(t, shim, "#!/bin/sh\n# INSPR agent browser guard (NIX-445): native browser launch refused.\nexit 0\n")
+				writeBrowserGuardShim(t, shim, "#!"+interp+"\n# INSPR agent browser guard (NIX-445): native browser launch refused.\nexit 0\n")
 			case "comment-exit":
-				writeBrowserGuardShim(t, shim, "#!/bin/sh\n# exit 78\ntrue\n")
+				writeBrowserGuardShim(t, shim, "#!"+interp+"\n# exit 78\ntrue\n")
 			case "appended":
 				writeBrowserGuardShim(t, shim, exact+"true\n")
 			case "unsafe-interpreter":
@@ -862,14 +933,25 @@ func TestRuntimeDarwinRejectsHostileLaunchdEnvironment(t *testing.T) {
 			case "relative-interpreter":
 				writeBrowserGuardShim(t, shim, "#!sh\n"+browserGuardRefusalBody)
 			case "writable-interpreter":
-				interp := filepath.Join(p.Home, "bash")
-				if e := os.WriteFile(interp, []byte("#!/bin/sh\n"), 0700); e != nil {
+				localInterp := filepath.Join(p.Home, "bash")
+				if e := os.WriteFile(localInterp, []byte("#!/bin/sh\n"), 0700); e != nil {
 					t.Fatal(e)
 				}
-				if e := os.Chmod(interp, 0777); e != nil {
+				if e := os.Chmod(localInterp, 0777); e != nil {
 					t.Fatal(e)
 				}
-				writeBrowserGuardShim(t, shim, "#!"+interp+"\n"+browserGuardRefusalBody)
+				writeBrowserGuardShim(t, shim, "#!"+localInterp+"\n"+browserGuardRefusalBody)
+			case "symlink-shim":
+				real := writeBrowserGuardShim(t, filepath.Join(p.Home, "browser-refusal-real"), exact)
+				if e := os.Symlink(real, shim); e != nil {
+					t.Fatal(e)
+				}
+			case "symlink-interpreter":
+				link := filepath.Join(p.Home, "sh")
+				if e := os.Symlink(interp, link); e != nil {
+					t.Fatal(e)
+				}
+				writeBrowserGuardShim(t, shim, "#!"+link+"\n"+browserGuardRefusalBody)
 			case "no-shebang":
 				writeBrowserGuardShim(t, shim, browserGuardRefusalBody)
 			case "string-value":

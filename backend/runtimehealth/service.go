@@ -650,15 +650,11 @@ func verifyBrowserGuardRefusalShim(path string) error {
 	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0111 == 0 || info.Mode().Perm()&0022 != 0 || !trustedDefinitionOwner(info) || info.Size() == 0 || info.Size() > browserGuardShimSizeLimit {
 		return errors.New("LaunchAgent environment override unsupported")
 	}
-	f, err := os.Open(path)
+	f, err := openUnfollowedRegular(path, info)
 	if err != nil {
 		return errors.New("LaunchAgent environment override unsupported")
 	}
 	defer f.Close()
-	actual, err := f.Stat()
-	if err != nil || !os.SameFile(info, actual) {
-		return errors.New("LaunchAgent environment override unsupported")
-	}
 	raw, err := io.ReadAll(io.LimitReader(f, browserGuardShimSizeLimit+1))
 	if err != nil || int64(len(raw)) != info.Size() || int64(len(raw)) > browserGuardShimSizeLimit {
 		return errors.New("LaunchAgent environment override unsupported")
