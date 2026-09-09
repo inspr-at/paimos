@@ -74,9 +74,9 @@ func cookieWriteNames(canonical, legacy string) []string {
 	return []string{canonical, legacy}
 }
 
+// #nosec G124 -- callers set SameSite and deployment-configured Secure; session/OIDC are HttpOnly, while CSRF must remain SPA-readable.
 func setHTTPCookie(w http.ResponseWriter, name string, cookie http.Cookie) {
 	cookie.Name = name
-	// #nosec G124 -- callers set SameSite and deployment-configured Secure; session/OIDC are HttpOnly, while CSRF must remain SPA-readable.
 	http.SetCookie(w, &cookie)
 }
 
