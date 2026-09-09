@@ -32,7 +32,42 @@ func schemaNames(t *testing.T, database *sql.DB, query string) []string {
 	return names
 }
 
-const latestSchemaVersion = 186
+const latestSchemaVersion = 187
+
+func TestMigration187AddsClosedOneShotLaunchAuthority(t *testing.T) {
+	database := openTestDB(t)
+	for _, table := range []string{
+		"baseline_batch_launch_grants",
+		"baseline_batch_launch_grant_revocations",
+		"external_stage_launch_admissions",
+	} {
+		if !tableExists(t, database, table) {
+			t.Fatalf("M187 table %s missing", table)
+		}
+	}
+	if !columnExists(t, database, "external_stage_reporter_registrations", "target_ref") ||
+		!columnExists(t, database, "baseline_batch_drafts", "delegated_launch_json") ||
+		!columnExists(t, database, "baseline_batch_reviews", "delegated_launch_json") ||
+		!columnExists(t, database, "baseline_batch_batches", "delegated_launch_json") {
+		t.Fatal("M187 additive target or delegated launch columns missing")
+	}
+	for _, trigger := range []string{
+		"trg_external_stage_registration_target_immutable",
+		"trg_baseline_batch_closed_draft_launch_immutable",
+		"trg_baseline_batch_review_launch_immutable",
+		"trg_baseline_batch_launch_selection_immutable",
+		"trg_baseline_batch_launch_grants_identity_immutable",
+		"trg_baseline_batch_launch_grants_revoke_guard",
+		"trg_baseline_batch_launch_grant_revocations_no_update",
+		"trg_external_stage_launch_admissions_identity_immutable",
+		"trg_external_stage_launch_admissions_consume_guard",
+	} {
+		var count int
+		if err := database.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='trigger' AND name=?`, trigger).Scan(&count); err != nil || count != 1 {
+			t.Fatalf("M187 trigger %s count=%d err=%v", trigger, count, err)
+		}
+	}
+}
 
 func TestMigration177PreservesAttentionLedgerAndSequence(t *testing.T) {
 	database, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "m177.db")+"?_txlock=immediate")

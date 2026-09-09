@@ -26,10 +26,37 @@ import (
 )
 
 const externalStageTestHandoffID = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
+const externalStageTestAdmissionID = "97800000-0000-4000-8000-000000000002"
 
 const externalStageTestIdempotencyKey = "9f1c2d3e-4a5b-4c6d-8e7f-0a1b2c3d4e5f"
 
 var externalStageTestSecret = []byte("0123456789abcdefghijklmnopqrstuv")
+
+func externalStageLaunchCandidateFixture() externalstage.LaunchCandidate {
+	return externalstage.LaunchCandidate{
+		Schema: externalstage.LaunchAdmissionSchema, Version: externalstage.LaunchAdmissionVersion,
+		TargetRef: "sha256:" + strings.Repeat("1", 64), Workflow: "deploy-production", Environment: "production-eu1",
+		Artifact: externalstage.ArtifactEvidenceV2{VersionScheme: externalstage.VersionSchemeINSPRCalendar,
+			Version: "26.09.09.10.00.00", ReleaseChannel: "stable", ReleaseSequence: 260909100000,
+			Digest: "sha256:" + strings.Repeat("2", 64), CommitDigest: strings.Repeat("3", 40),
+			ReleaseManifestCoordinate: "ghcr:inspr-at/pharos/releases/26.09.09.10.00.00",
+			ReleaseManifestDigest:     "sha256:" + strings.Repeat("4", 64)},
+		ReviewedPlanDigest: "sha256:" + strings.Repeat("5", 64), OperationBindingDigest: "sha256:" + strings.Repeat("6", 64),
+		ObservedAt: "2026-09-09T10:00:00Z",
+	}
+}
+
+func externalStageLaunchAdmissionFixture(candidate externalstage.LaunchCandidate) externalstage.LaunchAdmission {
+	return externalstage.LaunchAdmission{Schema: externalstage.LaunchAdmissionSchema, Version: externalstage.LaunchAdmissionVersion,
+		GrantID: "97800000-0000-4000-8000-000000000001", GrantRevision: 1, GrantDigest: "sha256:" + strings.Repeat("7", 64),
+		AdmissionID: externalStageTestAdmissionID, AdmissionDigest: "sha256:" + strings.Repeat("8", 64),
+		HandoffID: externalStageTestHandoffID, CredentialEpoch: 1, TargetRef: candidate.TargetRef, Workflow: candidate.Workflow,
+		Environment: candidate.Environment, Artifact: candidate.Artifact, Stage: "deployment", Attempt: 1, Plan: 1,
+		Execution: 1, Authority: 1, PlanDigest: "sha256:" + strings.Repeat("9", 64),
+		PredecessorDigest: "sha256:" + strings.Repeat("a", 64), ContextDigest: "sha256:" + strings.Repeat("b", 64),
+		ReviewedPlanDigest: candidate.ReviewedPlanDigest, OperationBindingDigest: candidate.OperationBindingDigest,
+		MaxLaunches: 1, UsedLaunches: 0, IssuedAt: "2026-09-09T10:00:01Z", ExpiresAt: "2026-09-09T10:15:01Z", State: "issued"}
+}
 
 func TestExternalStageCreateDryRunUsesFrozenRouteAndDTO(t *testing.T) {
 	out, _, err := executeCLIForTest(t,
@@ -84,7 +111,7 @@ func TestExternalStageReusableIdempotencyFlagIsLimitedToExactReplayJSONOperation
 	replayable := []*cobra.Command{
 		externalStageCreateCmd(), externalStageRevokeCmd(), externalStageAcceptCmd(), externalStageReportCmd(),
 		externalStageRegistrationsCreateCmd(), externalStageRegistrationsRevokeCmd(), externalStagePrerequisitesSealCmd(),
-		externalStageOwnerActivateCmd(),
+		externalStageOwnerActivateCmd(), externalStageLaunchCandidateCmd(), externalStageLaunchConsumeCmd(),
 	}
 	for _, command := range replayable {
 		if command.Flags().Lookup("idempotency-key") == nil {
@@ -103,6 +130,86 @@ func TestExternalStageReusableIdempotencyFlagIsLimitedToExactReplayJSONOperation
 			t.Fatalf("%s does not explain raw-once lost-response recovery", command.Name())
 		}
 	}
+}
+
+func TestExternalStageLaunchCandidateFileAndStdinUseClosedMedia(t *testing.T) {
+	for _, source := range []string{"file", "stdin"} {
+		t.Run(source, func(t *testing.T) {
+			candidate := externalStageLaunchCandidateFixture()
+			admission := externalStageLaunchAdmissionFixture(candidate)
+			setExternalStageRoundTripper(t, func(r *http.Request) any {
+				if r.Method != http.MethodPost || r.URL.Path != "/api/external-stage/handoffs/"+externalStageTestHandoffID+"/launch-candidates" ||
+					r.Header.Get("Content-Type") != externalstage.LaunchAdmissionMediaType ||
+					r.Header.Get("Accept") != externalstage.LaunchAdmissionMediaType ||
+					r.Header.Get(externalstage.HandoffSecretHeader) != base64.RawURLEncoding.EncodeToString(externalStageTestSecret) ||
+					r.Header.Get(idempotencyHeader) != externalStageTestIdempotencyKey {
+					t.Errorf("launch request=%s %s headers=%v", r.Method, r.URL.Path, r.Header)
+				}
+				var got externalstage.LaunchCandidate
+				decoder := json.NewDecoder(r.Body)
+				decoder.DisallowUnknownFields()
+				if err := decoder.Decode(&got); err != nil || got != candidate {
+					t.Errorf("candidate=%+v err=%v", got, err)
+				}
+				return admission
+			})
+			setExternalStageTestInstance(t, "http://paimos.test")
+			secretPath := writeExternalStageSecretFile(t, externalStageTestSecret, 0o600)
+			candidateRaw, _ := json.Marshal(candidate)
+			candidatePath := "-"
+			if source == "stdin" {
+				withExternalStageStdin(t, candidateRaw)
+			} else {
+				candidatePath = filepath.Join(t.TempDir(), "candidate.json")
+				if err := os.WriteFile(candidatePath, candidateRaw, 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			out, errOut, err := executeCLIForTest(t, "--json", "external-stage", "launch-candidate", externalStageTestHandoffID,
+				"--candidate-file", candidatePath, "--secret-file", secretPath, "--idempotency-key", externalStageTestIdempotencyKey)
+			if err != nil {
+				t.Fatalf("launch-candidate: %v stderr=%s", err, errOut)
+			}
+			var got externalstage.LaunchAdmission
+			if err := json.Unmarshal([]byte(out), &got); err != nil || got.AdmissionID != admission.AdmissionID {
+				t.Fatalf("admission=%s err=%v", out, err)
+			}
+			assertExternalStageOutputHasNoSecret(t, out, errOut, nil)
+		})
+	}
+}
+
+func TestExternalStageLaunchConsumeReadsSecretFromStdin(t *testing.T) {
+	candidate := externalStageLaunchCandidateFixture()
+	admission := externalStageLaunchAdmissionFixture(candidate)
+	receipt := externalstage.LaunchReceipt{Schema: externalstage.LaunchAdmissionSchema, Version: externalstage.LaunchAdmissionVersion,
+		AdmissionID: admission.AdmissionID, AdmissionDigest: admission.AdmissionDigest, HandoffID: externalStageTestHandoffID,
+		CredentialEpoch: 1, LaunchNumber: 1, State: "consumed", ConsumedAt: "2026-09-09T10:00:02Z"}
+	setExternalStageRoundTripper(t, func(r *http.Request) any {
+		if r.URL.Path != "/api/external-stage/handoffs/"+externalStageTestHandoffID+"/launch-admissions/"+admission.AdmissionID+"/consume" ||
+			r.Header.Get("Content-Type") != externalstage.LaunchAdmissionMediaType ||
+			r.Header.Get(externalstage.HandoffSecretHeader) != base64.RawURLEncoding.EncodeToString(externalStageTestSecret) {
+			t.Errorf("consume path=%s headers=%v", r.URL.Path, r.Header)
+		}
+		var request externalstage.ConsumeLaunchAdmissionRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil || request.AdmissionDigest != admission.AdmissionDigest {
+			t.Errorf("consume request=%+v err=%v", request, err)
+		}
+		return receipt
+	})
+	setExternalStageTestInstance(t, "http://paimos.test")
+	withExternalStageStdin(t, externalStageTestSecret)
+	out, errOut, err := executeCLIForTest(t, "--json", "external-stage", "launch-consume", externalStageTestHandoffID,
+		admission.AdmissionID, "--admission-digest", admission.AdmissionDigest, "--secret-stdin",
+		"--idempotency-key", externalStageTestIdempotencyKey)
+	if err != nil {
+		t.Fatalf("launch-consume: %v stderr=%s", err, errOut)
+	}
+	var got externalstage.LaunchReceipt
+	if err := json.Unmarshal([]byte(out), &got); err != nil || got != receipt {
+		t.Fatalf("receipt=%s err=%v", out, err)
+	}
+	assertExternalStageOutputHasNoSecret(t, out, errOut, nil)
 }
 
 func TestExternalStageReusableIdempotencyDryRunShowsSourceWithoutPrintingKey(t *testing.T) {
@@ -1280,6 +1387,27 @@ func setExternalStageTestInstance(t *testing.T, url string) {
 	t.Helper()
 	t.Setenv(envURL, url)
 	t.Setenv(envAPIKey, "separate-test-api-key")
+}
+
+type externalStageRoundTripFunc func(*http.Request) (*http.Response, error)
+
+func (fn externalStageRoundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
+	return fn(request)
+}
+
+func setExternalStageRoundTripper(t *testing.T, respond func(*http.Request) any) {
+	t.Helper()
+	prior := http.DefaultTransport
+	http.DefaultTransport = externalStageRoundTripFunc(func(request *http.Request) (*http.Response, error) {
+		value := respond(request)
+		raw, err := json.Marshal(value)
+		if err != nil {
+			return nil, err
+		}
+		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {externalstage.LaunchAdmissionMediaType}},
+			Body: io.NopCloser(bytes.NewReader(raw)), Request: request}, nil
+	})
+	t.Cleanup(func() { http.DefaultTransport = prior })
 }
 
 func writeExternalStageSecretFile(t *testing.T, raw []byte, mode os.FileMode) string {

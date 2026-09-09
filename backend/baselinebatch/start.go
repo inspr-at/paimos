@@ -70,12 +70,12 @@ func (s *Service) Start(ctx context.Context, actor Actor, projectID int64, req S
 	} else if err != nil && !isNotFound(err) {
 		return Batch{}, err
 	}
-	var reviewMode, reviewWorkerJSON, reviewSelectedJSON, binding, sessionCred string
+	var reviewMode, reviewWorkerJSON, reviewSelectedJSON, reviewDelegatedJSON, binding, sessionCred string
 	var reviewDraftID, reviewRevision, reviewUser int64
 	var invalidated sql.NullString
 	err = tx.QueryRowContext(ctx, `SELECT draft_id,draft_revision,binding_hash,execution_mode,worker_json,selected_requirement_refs_json,
-		human_user_id,session_credential_id,invalidated_at FROM baseline_batch_reviews WHERE id=?`, req.ReviewID).
-		Scan(&reviewDraftID, &reviewRevision, &binding, &reviewMode, &reviewWorkerJSON, &reviewSelectedJSON, &reviewUser, &sessionCred, &invalidated)
+		human_user_id,session_credential_id,invalidated_at,delegated_launch_json FROM baseline_batch_reviews WHERE id=?`, req.ReviewID).
+		Scan(&reviewDraftID, &reviewRevision, &binding, &reviewMode, &reviewWorkerJSON, &reviewSelectedJSON, &reviewUser, &sessionCred, &invalidated, &reviewDelegatedJSON)
 	if err == sql.ErrNoRows {
 		return Batch{}, fmt.Errorf("%w: review", ErrNotFound)
 	}
@@ -111,6 +111,8 @@ func (s *Service) Start(ctx context.Context, actor Actor, projectID int64, req S
 	_ = json.Unmarshal([]byte(reviewWorkerJSON), &reviewWorker)
 	var reviewSelected []string
 	_ = json.Unmarshal([]byte(reviewSelectedJSON), &reviewSelected)
+	var reviewDelegated *DelegatedLaunchSelection
+	decodeDelegatedLaunch(reviewDelegatedJSON, &reviewDelegated)
 	// Scope is a set of whole refs. Click order must not mint a second
 	// binding or refuse the reviewed membership. Compare the canonical
 	// arrays directly; a delimiter-joined key would collapse distinct
@@ -118,8 +120,12 @@ func (s *Service) Start(ctx context.Context, actor Actor, projectID int64, req S
 	if !sameCanonicalScope(req.Selected, reviewSelected) {
 		return Batch{}, fmt.Errorf("%w: confirmation does not bind reviewed mode, scope, or worker", ErrStale)
 	}
-	if reviewBinding(draft, req.ExecutionMode, req.Selected, req.Worker) != binding {
+	if !sameDelegatedLaunch(req.DelegatedLaunch, reviewDelegated) ||
+		reviewBinding(draft, req.ExecutionMode, req.Selected, req.Worker, req.DelegatedLaunch) != binding {
 		return Batch{}, fmt.Errorf("%w: confirmation does not bind reviewed mode, scope, or worker", ErrStale)
+	}
+	if err := s.validateDelegatedLaunch(ctx, tx, projectID, req.ExecutionMode, req.DelegatedLaunch); err != nil {
+		return Batch{}, err
 	}
 	active, err := s.hasActiveBatch(ctx, tx, projectID)
 	if err != nil {
@@ -205,13 +211,13 @@ func (s *Service) Start(ctx context.Context, actor Actor, projectID int64, req S
 		project_id,batch_key,draft_id,draft_revision,review_id,baseline_ref,content_digest,revision_seal,execution_mode,
 		scope_json,worker_json,issue_id,delivery_id,attempt_id,lifecycle_intent_id,readiness_intent_id,control_state,
 		confirmation_json,idempotency_key,imported_claimed_approved_by,imported_claimed_approved_at,imported_authenticity,
-		stream_ref,started_by,started_at)
-		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'started',?,?,?,?,?,?,?,?)`,
+		stream_ref,started_by,started_at,delegated_launch_json)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'started',?,?,?,?,?,?,?,?,?)`,
 		projectID, batchKey, draft.ID, draft.Revision, req.ReviewID, draft.Baseline.BaselineRef, draft.Baseline.ContentDigest,
 		draft.Baseline.RevisionSeal, req.ExecutionMode, encodeJSON(scope), encodeJSON(reviewWorker), issueID, attempt.DeliveryID,
 		attempt.ID, intentID, evidence.IntentID, encodeJSON(confirm), req.IdempotencyKey,
 		draft.Baseline.ImportedClaimedApprovedBy, draft.Baseline.ImportedClaimedApprovedAt, ImportedClaimAuthenticity,
-		draft.Baseline.StreamRef, actor.UserID, now)
+		draft.Baseline.StreamRef, actor.UserID, now, encodeDelegatedLaunch(req.DelegatedLaunch))
 	if err != nil {
 		if isUniqueConstraint(err) {
 			return Batch{}, fmt.Errorf("%w: a batch already exists for this confirmation", ErrConflict)
@@ -219,6 +225,14 @@ func (s *Service) Start(ctx context.Context, actor Actor, projectID int64, req S
 		return Batch{}, err
 	}
 	batchID, _ := result.LastInsertId()
+	draft.ReviewID = &req.ReviewID
+	draft.ExecutionMode = req.ExecutionMode
+	draft.Worker = reviewWorker
+	draft.Selected.RequirementRefs = reviewSelected
+	if err := s.mintLaunchGrantTx(ctx, tx, actor, draft, batchID, attempt.ID, attempt.DeliveryID,
+		attempt.AttemptNumber, attempt.PlanRevision, req.DelegatedLaunch); err != nil {
+		return Batch{}, err
+	}
 	eta := int64(len(scope.RequirementRefs) * 1800)
 	guess := Forecast{Subject: "overall", Percent: 0, ETASeconds: &eta, Kind: ForecastGuess,
 		Basis: "requirement count at confirmation; nothing has been observed yet", AsOf: now}

@@ -2598,6 +2598,84 @@
       },
       "ExternalStageSHA256Digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
       "ExternalStageHandoffState": {"type": "string", "enum": ["issued", "accepted", "active", "waiting", "blocked", "succeeded", "failed"]},
+      "ExternalStageLaunchUUID": {"type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"},
+      "ExternalStageLaunchCandidate": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["schema", "version", "target_ref", "workflow", "environment", "artifact", "reviewed_plan_digest", "operation_binding_digest", "observed_at"],
+        "properties": {
+          "schema": {"const": "paimos.external-stage-launch-admission"},
+          "version": {"const": 1},
+          "target_ref": {"$ref": "#/components/schemas/ExternalStageSHA256Digest"},
+          "workflow": {"const": "deploy-production"},
+          "environment": {"type": "string", "pattern": "^[a-z][a-z0-9._-]{0,63}$"},
+          "artifact": {"$ref": "#/components/schemas/ExternalStageArtifactEvidenceV2"},
+          "reviewed_plan_digest": {"$ref": "#/components/schemas/ExternalStageSHA256Digest"},
+          "operation_binding_digest": {"$ref": "#/components/schemas/ExternalStageSHA256Digest"},
+          "observed_at": {"type": "string", "format": "date-time"}
+        }
+      },
+      "ExternalStageLaunchAdmission": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["schema", "version", "grant_id", "grant_revision", "grant_digest", "admission_id", "admission_digest", "handoff_id", "credential_epoch", "target_ref", "workflow", "environment", "artifact", "stage", "attempt", "plan", "execution", "authority", "plan_digest", "predecessor_digest", "context_digest", "reviewed_plan_digest", "operation_binding_digest", "max_launches", "used_launches", "issued_at", "expires_at", "state"],
+        "properties": {
+          "schema": {"const": "paimos.external-stage-launch-admission"},
+          "version": {"const": 1},
+          "grant_id": {"$ref": "#/components/schemas/ExternalStageLaunchUUID"},
+          "grant_revision": {"const": 1},
+          "grant_digest": {"$ref": "#/components/schemas/ExternalStageSHA256Digest"},
+          "admission_id": {"$ref": "#/components/schemas/ExternalStageLaunchUUID"},
+          "admission_digest": {"$ref": "#/components/schemas/ExternalStageSHA256Digest"},
+          "handoff_id": {"$ref": "#/components/schemas/ExternalStageHandoffID"},
+          "credential_epoch": {"type": "integer", "format": "int64", "minimum": 1},
+          "target_ref": {"$ref": "#/components/schemas/ExternalStageSHA256Digest"},
+          "workflow": {"const": "deploy-production"},
+          "environment": {"type": "string", "pattern": "^[a-z][a-z0-9._-]{0,63}$"},
+          "artifact": {"$ref": "#/components/schemas/ExternalStageArtifactEvidenceV2"},
+          "stage": {"const": "deployment"},
+          "attempt": {"type": "integer", "format": "int64", "minimum": 1},
+          "plan": {"type": "integer", "format": "int64", "minimum": 1},
+          "execution": {"type": "integer", "format": "int64", "minimum": 1},
+          "authority": {"type": "integer", "format": "int64", "minimum": 1},
+          "plan_digest": {"$ref": "#/components/schemas/ExternalStageSHA256Digest"},
+          "predecessor_digest": {"$ref": "#/components/schemas/ExternalStageSHA256Digest"},
+          "context_digest": {"$ref": "#/components/schemas/ExternalStageSHA256Digest"},
+          "reviewed_plan_digest": {"$ref": "#/components/schemas/ExternalStageSHA256Digest"},
+          "operation_binding_digest": {"$ref": "#/components/schemas/ExternalStageSHA256Digest"},
+          "max_launches": {"const": 1},
+          "used_launches": {"const": 0},
+          "issued_at": {"type": "string", "format": "date-time"},
+          "expires_at": {"type": "string", "format": "date-time"},
+          "state": {"const": "issued"}
+        }
+      },
+      "ExternalStageLaunchConsumeRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["schema", "version", "admission_digest"],
+        "properties": {
+          "schema": {"const": "paimos.external-stage-launch-admission"},
+          "version": {"const": 1},
+          "admission_digest": {"$ref": "#/components/schemas/ExternalStageSHA256Digest"}
+        }
+      },
+      "ExternalStageLaunchReceipt": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["schema", "version", "admission_id", "admission_digest", "handoff_id", "credential_epoch", "launch_number", "state", "consumed_at"],
+        "properties": {
+          "schema": {"const": "paimos.external-stage-launch-admission"},
+          "version": {"const": 1},
+          "admission_id": {"$ref": "#/components/schemas/ExternalStageLaunchUUID"},
+          "admission_digest": {"$ref": "#/components/schemas/ExternalStageSHA256Digest"},
+          "handoff_id": {"$ref": "#/components/schemas/ExternalStageHandoffID"},
+          "credential_epoch": {"type": "integer", "format": "int64", "minimum": 1},
+          "launch_number": {"const": 1},
+          "state": {"const": "consumed"},
+          "consumed_at": {"type": "string", "format": "date-time"}
+        }
+      },
       "AgentModeProblem": {
         "type": "object",
         "additionalProperties": false,
@@ -8387,6 +8465,50 @@
           "415": {"description": "Content-Type does not equal the selected contract media type", "headers": {"Cache-Control": {"schema": {"const": "private, no-store"}}}},
           "429": {"description": "Bounded admission rejected", "headers": {"Cache-Control": {"schema": {"const": "private, no-store"}}, "Retry-After": {"schema": {"type": "integer"}}}},
           "500": {"description": "Atomic report/audit/evidence/hint persistence failed", "headers": {"Cache-Control": {"schema": {"const": "private, no-store"}}}}
+        }
+      }
+    },
+    "/api/external-stage/handoffs/{handoffID}/launch-candidates": {
+      "post": {
+        "operationId": "admitExternalStageLaunch",
+        "tags": ["external-stage"],
+        "summary": "Resolve a reviewed one-shot launch candidate into one server-owned admission",
+        "description": "Requires the exact registered API key and independent handoff secret. Paimos resolves and revalidates the current human root grant, project target, artifact, handoff, plan, execution, and authority. A changed candidate conflicts and cannot mint another admission.",
+        "security": [{"bearerAPIKey": []}],
+        "parameters": [{"$ref": "#/components/parameters/ExternalStageHandoffPath"}, {"$ref": "#/components/parameters/ExternalStageSecretHeader"}, {"$ref": "#/components/parameters/ExternalStageIdempotencyHeader"}],
+        "requestBody": {"required": true, "content": {"application/vnd.paimos.external-stage-launch-admission.v1+json": {"schema": {"$ref": "#/components/schemas/ExternalStageLaunchCandidate"}}}},
+        "responses": {
+          "200": {"description": "New or byte-identical exact replay admission", "headers": {"Cache-Control": {"schema": {"const": "private, no-store"}}}, "content": {"application/vnd.paimos.external-stage-launch-admission.v1+json": {"schema": {"$ref": "#/components/schemas/ExternalStageLaunchAdmission"}}}},
+          "400": {"description": "Strict JSON, candidate, or idempotency refusal", "headers": {"Cache-Control": {"schema": {"const": "private, no-store"}}}},
+          "404": {"description": "Canonical credential concealment", "headers": {"Cache-Control": {"schema": {"const": "private, no-store"}}}},
+          "406": {"description": "Accept does not select the exact launch media type", "headers": {"Cache-Control": {"schema": {"const": "private, no-store"}}}},
+          "409": {"description": "No current root grant or stale, changed, expired, revoked, paused, stopped, replanned, retried, rotated, mismatched target/artifact/authority, or conflicting candidate", "headers": {"Cache-Control": {"schema": {"const": "private, no-store"}}}},
+          "413": {"description": "Body exceeds 64 KiB", "headers": {"Cache-Control": {"schema": {"const": "private, no-store"}}}},
+          "415": {"description": "Content-Type is not exact launch media", "headers": {"Cache-Control": {"schema": {"const": "private, no-store"}}}},
+          "429": {"description": "Bounded admission rejected", "headers": {"Cache-Control": {"schema": {"const": "private, no-store"}}, "Retry-After": {"schema": {"type": "integer"}}}},
+          "500": {"description": "Atomic persistence failed", "headers": {"Cache-Control": {"schema": {"const": "private, no-store"}}}}
+        }
+      }
+    },
+    "/api/external-stage/handoffs/{handoffID}/launch-admissions/{admissionID}/consume": {
+      "post": {
+        "operationId": "consumeExternalStageLaunch",
+        "tags": ["external-stage"],
+        "summary": "Atomically consume one exact launch admission",
+        "description": "First consume requires every current gate and spends launch number one. Exact replay returns identical durable receipt bytes even after later expiry; that receipt is historical evidence, never fresh authority or permission for a second launch.",
+        "security": [{"bearerAPIKey": []}],
+        "parameters": [{"$ref": "#/components/parameters/ExternalStageHandoffPath"}, {"name": "admissionID", "in": "path", "required": true, "schema": {"$ref": "#/components/schemas/ExternalStageLaunchUUID"}}, {"$ref": "#/components/parameters/ExternalStageSecretHeader"}, {"$ref": "#/components/parameters/ExternalStageIdempotencyHeader"}],
+        "requestBody": {"required": true, "content": {"application/vnd.paimos.external-stage-launch-admission.v1+json": {"schema": {"$ref": "#/components/schemas/ExternalStageLaunchConsumeRequest"}}}},
+        "responses": {
+          "200": {"description": "New consume or byte-identical historical replay receipt", "headers": {"Cache-Control": {"schema": {"const": "private, no-store"}}}, "content": {"application/vnd.paimos.external-stage-launch-admission.v1+json": {"schema": {"$ref": "#/components/schemas/ExternalStageLaunchReceipt"}}}},
+          "400": {"description": "Strict JSON, digest, or idempotency refusal", "headers": {"Cache-Control": {"schema": {"const": "private, no-store"}}}},
+          "404": {"description": "Canonical credential or admission concealment", "headers": {"Cache-Control": {"schema": {"const": "private, no-store"}}}},
+          "406": {"description": "Accept does not select the exact launch media type", "headers": {"Cache-Control": {"schema": {"const": "private, no-store"}}}},
+          "409": {"description": "First consume lacks current authority or conflicts with the immutable admission/request", "headers": {"Cache-Control": {"schema": {"const": "private, no-store"}}}},
+          "413": {"description": "Body exceeds 64 KiB", "headers": {"Cache-Control": {"schema": {"const": "private, no-store"}}}},
+          "415": {"description": "Content-Type is not exact launch media", "headers": {"Cache-Control": {"schema": {"const": "private, no-store"}}}},
+          "429": {"description": "Bounded admission rejected", "headers": {"Cache-Control": {"schema": {"const": "private, no-store"}}, "Retry-After": {"schema": {"type": "integer"}}}},
+          "500": {"description": "Atomic persistence failed", "headers": {"Cache-Control": {"schema": {"const": "private, no-store"}}}}
         }
       }
     },

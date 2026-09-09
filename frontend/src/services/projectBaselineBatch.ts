@@ -161,6 +161,29 @@ export type ImpactEstimate = {
   forecast: Forecast
 }
 
+export type DelegatedLaunchSelection = {
+  target_ref: string
+  workflow: 'deploy-production'
+  environment: string
+  expires_at: string
+  max_launches: 1
+}
+
+export type DelegatedLaunchTarget = {
+  target_ref: string
+  environment: string
+  label: string
+}
+
+export type LaunchGrant = DelegatedLaunchSelection & {
+  grant_id: string
+  revision: number
+  grant_digest: string
+  used_launches: number
+  issued_at: string
+  state: 'active' | 'revoked' | 'consumed' | 'expired'
+}
+
 export type Draft = {
   id: number
   project_id: number
@@ -175,6 +198,7 @@ export type Draft = {
   review_id?: number | null
   review_valid: boolean
   impact: ImpactEstimate
+  delegated_launch?: DelegatedLaunchSelection | null
 }
 
 export type StageView = {
@@ -243,6 +267,8 @@ export type Batch = {
   baseline: BaselineClaim
   scope: { requirement_refs: string[] }
   started_at: string
+  delegated_launch?: DelegatedLaunchSelection | null
+  launch_grant?: LaunchGrant | null
 }
 
 export type Workflow = {
@@ -257,6 +283,7 @@ export type Workflow = {
   choices: {
     execution_modes: string[]
     runtimes: RuntimeChoice[]
+    delegated_launch_targets?: DelegatedLaunchTarget[]
     note: string
   }
 }

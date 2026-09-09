@@ -83,6 +83,40 @@ func normalizedExternalStageProblem(t *testing.T, recorder *httptest.ResponseRec
 	return normalized
 }
 
+func TestExternalStageLaunchRoutesEnforceClosedBoundedMedia(t *testing.T) {
+	router := externalStageAdapterTestRouter()
+	path := "/api/external-stage/handoffs/01K35P6YRG00000000000000AB/launch-candidates"
+	validPrefix := `{"schema":"paimos.external-stage-launch-admission","version":1,"target_ref":"sha256:` + strings.Repeat("a", 64) + `"`
+	tests := []struct {
+		name        string
+		body        string
+		contentType string
+		accept      string
+		want        int
+	}{
+		{name: "wrong media", body: `{}`, contentType: "application/json", accept: externalstage.LaunchAdmissionMediaType, want: http.StatusUnsupportedMediaType},
+		{name: "wrong accept", body: `{}`, contentType: externalstage.LaunchAdmissionMediaType, accept: "application/json", want: http.StatusNotAcceptable},
+		{name: "unknown field", body: validPrefix + `,"unknown":true}`, contentType: externalstage.LaunchAdmissionMediaType, accept: externalstage.LaunchAdmissionMediaType, want: http.StatusBadRequest},
+		{name: "duplicate field", body: validPrefix + `,"version":1}`, contentType: externalstage.LaunchAdmissionMediaType, accept: externalstage.LaunchAdmissionMediaType, want: http.StatusBadRequest},
+		{name: "trailing json", body: validPrefix + `} {}`, contentType: externalstage.LaunchAdmissionMediaType, accept: externalstage.LaunchAdmissionMediaType, want: http.StatusBadRequest},
+		{name: "over 64 KiB", body: validPrefix + `,"padding":"` + strings.Repeat("x", (64<<10)+1) + `"}`, contentType: externalstage.LaunchAdmissionMediaType, accept: externalstage.LaunchAdmissionMediaType, want: http.StatusRequestEntityTooLarge},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodPost, path, strings.NewReader(test.body))
+			request.Header.Set("Content-Type", test.contentType)
+			request.Header.Set("Accept", test.accept)
+			request.Header.Set("Idempotency-Key", "97800000-0000-4000-8000-000000000002")
+			request = externalStageRequestWithPrincipal(t, request, 978)
+			recorder := httptest.NewRecorder()
+			router.ServeHTTP(recorder, request)
+			if recorder.Code != test.want || recorder.Header().Get("Cache-Control") != "private, no-store" {
+				t.Fatalf("status=%d want=%d headers=%v body=%s", recorder.Code, test.want, recorder.Header(), recorder.Body.String())
+			}
+		})
+	}
+}
+
 func TestExternalStageRealRouterWrongMethodIsCanonicallyConcealed(t *testing.T) {
 	router := externalStageProductionRouteSlice()
 	request := httptest.NewRequest(http.MethodPut,

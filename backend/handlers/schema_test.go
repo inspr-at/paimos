@@ -38,8 +38,8 @@ import (
 // The hash is computed over the marshaled schemaJSON bytes (including the
 // version string), so a version bump alone also shifts it.
 func TestSchemaPayloadHash(t *testing.T) {
-	const expectedVersion = "2.4.0"
-	const expectedHash = "667341990a9d31c55d7b46ef5038abb989c7ee1ac9222d9ec02a3487009e3907"
+	const expectedVersion = "2.5.0"
+	const expectedHash = "6abc41aef9ebee629cee7eae188ad2b75c5a92acc0de3ffcdebe7210779f36c6"
 
 	if handlers.SchemaVersion != expectedVersion {
 		t.Errorf("SchemaVersion = %q, test expects %q — update either the code or the test constant",

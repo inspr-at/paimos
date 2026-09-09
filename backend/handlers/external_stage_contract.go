@@ -242,6 +242,8 @@ func MountExternalStageContractRoutes(r chi.Router) {
 	r.Get(externalStageMountPath(externalstage.ExternalPullPath, "/api"), pullExternalStageHandoff)
 	r.Post(externalStageMountPath(externalstage.ExternalAcceptPath, "/api"), acceptExternalStageHandoff)
 	r.Post(externalStageMountPath(externalstage.ExternalReportPath, "/api"), reportExternalStageHandoff)
+	r.Post(externalStageMountPath(externalstage.LaunchCandidatePath, "/api"), admitExternalStageLaunch)
+	r.Post(externalStageMountPath(externalstage.LaunchConsumePath, "/api"), consumeExternalStageLaunch)
 }
 
 func exactHeader(r *http.Request, name, value string) bool {
@@ -559,6 +561,67 @@ func reportExternalStageHandoff(w http.ResponseWriter, r *http.Request) {
 		}
 		return service.Report(r.Context(), p, chi.URLParam(r, "handoffID"), idem, secret, bodyV1)
 	})
+}
+
+func admitExternalStageLaunch(w http.ResponseWriter, r *http.Request) {
+	var body externalstage.LaunchCandidate
+	if err := decodeExternalStageJSON(w, r, externalstage.LaunchAdmissionMediaType, externalstage.LaunchAdmissionMediaType, &body); err != nil {
+		writeExternalStageDecodeError(w, r, err)
+		return
+	}
+	idem, err := externalStageIdempotency(r)
+	if err != nil {
+		writeExternalStageStatus(w, r, http.StatusBadRequest)
+		return
+	}
+	externalStageLaunchMutation(w, r, func(service *externalstage.Service, principal externalstage.Principal, secret []byte) ([]byte, error) {
+		return service.AdmitLaunch(r.Context(), principal, chi.URLParam(r, "handoffID"), idem, secret, body)
+	})
+}
+
+func consumeExternalStageLaunch(w http.ResponseWriter, r *http.Request) {
+	var body externalstage.ConsumeLaunchAdmissionRequest
+	if err := decodeExternalStageJSON(w, r, externalstage.LaunchAdmissionMediaType, externalstage.LaunchAdmissionMediaType, &body); err != nil {
+		writeExternalStageDecodeError(w, r, err)
+		return
+	}
+	idem, err := externalStageIdempotency(r)
+	if err != nil {
+		writeExternalStageStatus(w, r, http.StatusBadRequest)
+		return
+	}
+	externalStageLaunchMutation(w, r, func(service *externalstage.Service, principal externalstage.Principal, secret []byte) ([]byte, error) {
+		return service.ConsumeLaunch(r.Context(), principal, chi.URLParam(r, "handoffID"), chi.URLParam(r, "admissionID"), idem, secret, body)
+	})
+}
+
+func externalStageLaunchMutation(w http.ResponseWriter, r *http.Request,
+	fn func(*externalstage.Service, externalstage.Principal, []byte) ([]byte, error),
+) {
+	secret, err := externalStageSecret(r)
+	if err != nil {
+		writeControlNotFound(w, r)
+		return
+	}
+	defer zeroBytes(secret)
+	principal, ok := externalStagePrincipal(r)
+	if !ok {
+		writeControlNotFound(w, r)
+		return
+	}
+	service, ok := externalStageServiceForRequest(w, r)
+	if !ok {
+		return
+	}
+	raw, err := fn(service, principal, secret)
+	if err != nil {
+		writeExternalStageServiceError(w, r, err)
+		return
+	}
+	w.Header().Set("Cache-Control", "private, no-store")
+	w.Header().Set("Content-Type", externalstage.LaunchAdmissionMediaType)
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(raw)
 }
 func externalStageMutation(w http.ResponseWriter, r *http.Request, fn func(externalstage.Principal, []byte) (externalstage.ReportReceipt, error)) {
 	externalStageMutationWithMedia(w, r, externalstage.MediaTypeV1, fn)

@@ -4,11 +4,13 @@
 package baselinebatch
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"slices"
 	"sort"
 	"strings"
@@ -104,31 +106,62 @@ type ImportRequest struct {
 }
 
 type PatchDraftRequest struct {
-	Selected       *[]string        `json:"selected_requirement_refs"`
-	ConstraintRefs *[]string        `json:"selected_constraint_refs"`
-	ExecutionMode  *string          `json:"execution_mode"`
-	Worker         *WorkerSelection `json:"worker"`
+	Selected        *[]string            `json:"selected_requirement_refs"`
+	ConstraintRefs  *[]string            `json:"selected_constraint_refs"`
+	ExecutionMode   *string              `json:"execution_mode"`
+	Worker          *WorkerSelection     `json:"worker"`
+	DelegatedLaunch DelegatedLaunchPatch `json:"delegated_launch"`
+}
+
+// DelegatedLaunchPatch preserves the security-significant difference between
+// an omitted field and an explicit JSON null. encoding/json collapses that
+// distinction for **T, which would make the deliberate UI unable to turn an
+// already-selected grant back off before review.
+type DelegatedLaunchPatch struct {
+	Set   bool
+	Value *DelegatedLaunchSelection
+}
+
+func (p *DelegatedLaunchPatch) UnmarshalJSON(raw []byte) error {
+	p.Set = true
+	if string(raw) == "null" {
+		p.Value = nil
+		return nil
+	}
+	var value DelegatedLaunchSelection
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&value); err != nil {
+		return err
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		return fmt.Errorf("delegated_launch trailing JSON")
+	}
+	p.Value = &value
+	return nil
 }
 
 type ReviewRequest struct {
-	ExecutionMode string          `json:"execution_mode"`
-	Worker        WorkerSelection `json:"worker"`
-	Selected      []string        `json:"selected_requirement_refs"`
+	ExecutionMode   string                    `json:"execution_mode"`
+	Worker          WorkerSelection           `json:"worker"`
+	Selected        []string                  `json:"selected_requirement_refs"`
+	DelegatedLaunch *DelegatedLaunchSelection `json:"delegated_launch,omitempty"`
 }
 
 type StartRequest struct {
-	IdempotencyKey   string          `json:"idempotency_key"`
-	ReviewID         int64           `json:"review_id"`
-	DraftID          int64           `json:"-"`
-	DraftRevision    int64           `json:"draft_revision"`
-	Confirm          bool            `json:"confirm"`
-	ContentDigest    string          `json:"content_digest"`
-	RevisionSeal     string          `json:"revision_seal"`
-	ExecutionMode    string          `json:"execution_mode"`
-	Selected         []string        `json:"selected_requirement_refs"`
-	Worker           WorkerSelection `json:"worker"`
-	ClientReady      *bool           `json:"ready"`
-	ClientAuthorized *bool           `json:"authorized"`
+	IdempotencyKey   string                    `json:"idempotency_key"`
+	ReviewID         int64                     `json:"review_id"`
+	DraftID          int64                     `json:"-"`
+	DraftRevision    int64                     `json:"draft_revision"`
+	Confirm          bool                      `json:"confirm"`
+	ContentDigest    string                    `json:"content_digest"`
+	RevisionSeal     string                    `json:"revision_seal"`
+	ExecutionMode    string                    `json:"execution_mode"`
+	Selected         []string                  `json:"selected_requirement_refs"`
+	Worker           WorkerSelection           `json:"worker"`
+	DelegatedLaunch  *DelegatedLaunchSelection `json:"delegated_launch,omitempty"`
+	ClientReady      *bool                     `json:"ready"`
+	ClientAuthorized *bool                     `json:"authorized"`
 }
 
 func (s *Service) Workflow(ctx context.Context, actor Actor, projectID int64) (Workflow, error) {
@@ -163,6 +196,10 @@ func (s *Service) Workflow(ctx context.Context, actor Actor, projectID int64) (W
 		return out, nil
 	}
 	out.Choices.Runtimes, err = s.listRuntimeChoices(ctx, tx, projectID)
+	if err != nil {
+		return Workflow{}, err
+	}
+	out.Choices.DelegatedLaunchTargets, err = s.listDelegatedLaunchTargets(ctx, tx, projectID)
 	if err != nil {
 		return Workflow{}, err
 	}
@@ -230,7 +267,8 @@ func (s *Service) projectBatch(ctx context.Context, tx *sql.Tx, stored storedBat
 		ID: stored.ID, ProjectID: stored.ProjectID, BatchKey: stored.BatchKey, DraftID: stored.DraftID,
 		DraftRevision: stored.DraftRevision, ReviewID: stored.ReviewID, Baseline: stored.Baseline,
 		ExecutionMode: stored.ExecutionMode, Scope: stored.Scope, Worker: stored.Worker, IssueID: stored.IssueID,
-		DeliveryID: stored.DeliveryID, AttemptID: stored.AttemptID, LifecycleIntentID: stored.LifecycleIntentID,
+		DelegatedLaunch: stored.DelegatedLaunch,
+		DeliveryID:      stored.DeliveryID, AttemptID: stored.AttemptID, LifecycleIntentID: stored.LifecycleIntentID,
 		ReadinessIntentID: stored.ReadinessIntentID, ControlState: stored.ControlState, ControlReason: stored.ControlReason,
 		Status: state, WorkflowState: state, Progress: progress, Forecasts: forecasts,
 		Controls: controlOptions(stored, state, execution), StartedBy: stored.StartedBy, StartedAt: stored.StartedAt,
@@ -241,6 +279,19 @@ func (s *Service) projectBatch(ctx context.Context, tx *sql.Tx, stored storedBat
 			return Batch{}, err
 		}
 		batch.Readiness = &evidence
+	}
+	batch.LaunchGrant, err = loadLaunchGrantView(ctx, tx, stored.ID, s.now())
+	if err != nil {
+		return Batch{}, err
+	}
+	if batch.LaunchGrant != nil {
+		available := batch.LaunchGrant.State == "active"
+		reason := ""
+		if !available {
+			reason = "launch grant is " + batch.LaunchGrant.State
+		}
+		batch.Controls = append(batch.Controls, ControlOption{Action: "revoke_launch", Available: available,
+			Effect: "launch_grant_revoke", Reason: reason})
 	}
 	normalizeBatch(&batch)
 	return batch, nil
@@ -387,6 +438,10 @@ func (s *Service) patchDraftTx(ctx context.Context, tx *sql.Tx, actor Actor, dra
 		draft.Worker = *req.Worker
 		changed = true
 	}
+	if req.DelegatedLaunch.Set {
+		draft.DelegatedLaunch = req.DelegatedLaunch.Value
+		changed = true
+	}
 	if !changed {
 		return nil
 	}
@@ -399,9 +454,9 @@ func (s *Service) patchDraftTx(ctx context.Context, tx *sql.Tx, actor Actor, dra
 		return err
 	}
 	_, err := tx.ExecContext(ctx, `UPDATE baseline_batch_drafts SET revision=?,status='open',selected_requirement_refs_json=?,
-		selected_constraint_refs_json=?,execution_mode=?,worker_json=?,updated_at=? WHERE id=? AND project_id=?`,
+		selected_constraint_refs_json=?,execution_mode=?,worker_json=?,delegated_launch_json=?,updated_at=? WHERE id=? AND project_id=?`,
 		draft.Revision, encodeStrings(draft.Selected.RequirementRefs), encodeStrings(draft.Selected.ConstraintRefs),
-		draft.ExecutionMode, encodeJSON(draft.Worker), now, draft.ID, draft.ProjectID)
+		draft.ExecutionMode, encodeJSON(draft.Worker), encodeDelegatedLaunch(draft.DelegatedLaunch), now, draft.ID, draft.ProjectID)
 	if err != nil {
 		return err
 	}
@@ -458,24 +513,27 @@ func (s *Service) Review(ctx context.Context, actor Actor, projectID, draftID in
 	} else {
 		req.Worker = WorkerSelection{}
 	}
+	if err := s.validateDelegatedLaunch(ctx, tx, projectID, req.ExecutionMode, req.DelegatedLaunch); err != nil {
+		return Draft{}, err
+	}
 	now := s.stamp()
 	if _, err := tx.ExecContext(ctx, `UPDATE baseline_batch_reviews SET invalidated_at=?,invalidate_reason='superseded'
 		WHERE draft_id=? AND invalidated_at IS NULL`, now, draft.ID); err != nil {
 		return Draft{}, err
 	}
-	binding := reviewBinding(draft, req.ExecutionMode, selected, req.Worker)
+	binding := reviewBinding(draft, req.ExecutionMode, selected, req.Worker, req.DelegatedLaunch)
 	res, err := tx.ExecContext(ctx, `INSERT INTO baseline_batch_reviews(
 		draft_id,draft_revision,binding_hash,execution_mode,worker_json,selected_requirement_refs_json,
-		human_user_id,session_credential_id,created_at) VALUES(?,?,?,?,?,?,?,?,?)`,
+		human_user_id,session_credential_id,created_at,delegated_launch_json) VALUES(?,?,?,?,?,?,?,?,?,?)`,
 		draft.ID, draft.Revision, binding, req.ExecutionMode, encodeJSON(req.Worker), encodeStrings(selected),
-		actor.UserID, actor.SessionCredentialID, now)
+		actor.UserID, actor.SessionCredentialID, now, encodeDelegatedLaunch(req.DelegatedLaunch))
 	if err != nil {
 		return Draft{}, err
 	}
 	reviewID, _ := res.LastInsertId()
 	if _, err := tx.ExecContext(ctx, `UPDATE baseline_batch_drafts SET status='reviewing',execution_mode=?,worker_json=?,
-		selected_requirement_refs_json=?,updated_at=? WHERE id=?`, req.ExecutionMode, encodeJSON(req.Worker),
-		encodeStrings(selected), now, draft.ID); err != nil {
+		selected_requirement_refs_json=?,delegated_launch_json=?,updated_at=? WHERE id=?`, req.ExecutionMode, encodeJSON(req.Worker),
+		encodeStrings(selected), encodeDelegatedLaunch(req.DelegatedLaunch), now, draft.ID); err != nil {
 		return Draft{}, err
 	}
 	_ = reviewID
@@ -562,7 +620,11 @@ func (s *Service) listRuntimeChoices(ctx context.Context, tx *sql.Tx, projectID 
 	return out, rows.Err()
 }
 
-func reviewBinding(draft Draft, mode string, selected []string, worker WorkerSelection) string {
+func reviewBinding(draft Draft, mode string, selected []string, worker WorkerSelection, delegated ...*DelegatedLaunchSelection) string {
+	var launch *DelegatedLaunchSelection
+	if len(delegated) > 0 {
+		launch = delegated[0]
+	}
 	return DigestSHA256(
 		draft.Baseline.ContentDigest,
 		draft.Baseline.RevisionSeal,
@@ -571,6 +633,7 @@ func reviewBinding(draft Draft, mode string, selected []string, worker WorkerSel
 		canonicalScopeKey(selected),
 		worker.RuntimeID, worker.RuntimeGeneration, worker.AccountKey, worker.AccountLabel,
 		worker.ProfileID, worker.ProfileVersion, worker.WorkspaceHandle, worker.WorkerName,
+		encodeDelegatedLaunch(launch),
 	)
 }
 
@@ -656,15 +719,15 @@ func loadOpenDraft(ctx context.Context, tx *sql.Tx, projectID int64) (Draft, err
 
 func loadDraftByID(ctx context.Context, tx *sql.Tx, projectID, id int64) (Draft, error) {
 	var d Draft
-	var content, selectedJSON, constraintJSON, workerJSON string
+	var content, selectedJSON, constraintJSON, workerJSON, delegatedJSON string
 	var reviewID sql.NullInt64
 	err := tx.QueryRowContext(ctx, `SELECT id,project_id,revision,status,baseline_ref,baseline_revision,content_digest,revision_seal,stream_ref,
 		imported_claimed_approved_by,imported_claimed_approved_at,imported_authenticity,bounded_content_json,
-		selected_requirement_refs_json,selected_constraint_refs_json,execution_mode,worker_json,created_at,updated_at
+		selected_requirement_refs_json,selected_constraint_refs_json,execution_mode,worker_json,delegated_launch_json,created_at,updated_at
 		FROM baseline_batch_drafts WHERE id=? AND project_id=?`, id, projectID).Scan(
 		&d.ID, &d.ProjectID, &d.Revision, &d.Status, &d.Baseline.BaselineRef, &d.Baseline.Revision, &d.Baseline.ContentDigest,
 		&d.Baseline.RevisionSeal, &d.Baseline.StreamRef, &d.Baseline.ImportedClaimedApprovedBy, &d.Baseline.ImportedClaimedApprovedAt,
-		&d.Baseline.Authenticity, &content, &selectedJSON, &constraintJSON, &d.ExecutionMode, &workerJSON, &d.CreatedAt, &d.UpdatedAt)
+		&d.Baseline.Authenticity, &content, &selectedJSON, &constraintJSON, &d.ExecutionMode, &workerJSON, &delegatedJSON, &d.CreatedAt, &d.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Draft{}, fmt.Errorf("%w: draft", ErrNotFound)
 	}
@@ -675,6 +738,7 @@ func loadDraftByID(ctx context.Context, tx *sql.Tx, projectID, id int64) (Draft,
 	_ = json.Unmarshal([]byte(selectedJSON), &d.Selected.RequirementRefs)
 	_ = json.Unmarshal([]byte(constraintJSON), &d.Selected.ConstraintRefs)
 	_ = json.Unmarshal([]byte(workerJSON), &d.Worker)
+	decodeDelegatedLaunch(delegatedJSON, &d.DelegatedLaunch)
 	var boxed struct {
 		Requirements []Requirement    `json:"requirements"`
 		Constraints  []Constraint     `json:"constraints"`
@@ -748,6 +812,7 @@ type storedBatch struct {
 	ExecutionMode     string
 	Scope             Scope
 	Worker            WorkerSelection
+	DelegatedLaunch   *DelegatedLaunchSelection
 	IssueID           int64
 	DeliveryID        *int64
 	AttemptID         *int64
@@ -790,16 +855,16 @@ func listBatches(ctx context.Context, tx *sql.Tx, projectID int64) ([]storedBatc
 func loadBatchByID(ctx context.Context, tx *sql.Tx, projectID, id int64) (storedBatch, error) {
 	var b storedBatch
 	var deliveryID, attemptID sql.NullInt64
-	var scopeJSON, workerJSON, claimedBy, claimedAt, authenticity, streamRef string
+	var scopeJSON, workerJSON, delegatedJSON, claimedBy, claimedAt, authenticity, streamRef string
 	err := tx.QueryRowContext(ctx, `SELECT id,project_id,batch_key,draft_id,draft_revision,review_id,baseline_ref,content_digest,revision_seal,
 		execution_mode,scope_json,worker_json,issue_id,delivery_id,attempt_id,lifecycle_intent_id,readiness_intent_id,
 		control_state,control_reason,imported_claimed_approved_by,imported_claimed_approved_at,imported_authenticity,
-		stream_ref,started_by,started_at
+		stream_ref,started_by,started_at,delegated_launch_json
 		FROM baseline_batch_batches WHERE id=? AND project_id=?`, id, projectID).Scan(
 		&b.ID, &b.ProjectID, &b.BatchKey, &b.DraftID, &b.DraftRevision, &b.ReviewID, &b.Baseline.BaselineRef,
 		&b.Baseline.ContentDigest, &b.Baseline.RevisionSeal, &b.ExecutionMode, &scopeJSON, &workerJSON, &b.IssueID,
 		&deliveryID, &attemptID, &b.LifecycleIntentID, &b.ReadinessIntentID, &b.ControlState, &b.ControlReason,
-		&claimedBy, &claimedAt, &authenticity, &streamRef, &b.StartedBy, &b.StartedAt)
+		&claimedBy, &claimedAt, &authenticity, &streamRef, &b.StartedBy, &b.StartedAt, &delegatedJSON)
 	if errors.Is(err, sql.ErrNoRows) {
 		return storedBatch{}, fmt.Errorf("%w: batch", ErrNotFound)
 	}
@@ -812,6 +877,7 @@ func loadBatchByID(ctx context.Context, tx *sql.Tx, projectID, id int64) (stored
 	b.Baseline.StreamRef = streamRef
 	_ = json.Unmarshal([]byte(scopeJSON), &b.Scope)
 	_ = json.Unmarshal([]byte(workerJSON), &b.Worker)
+	decodeDelegatedLaunch(delegatedJSON, &b.DelegatedLaunch)
 	if deliveryID.Valid {
 		v := deliveryID.Int64
 		b.DeliveryID = &v

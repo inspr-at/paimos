@@ -82,6 +82,9 @@ func normalizeWorkflow(w *Workflow) {
 	if w.Choices.Runtimes == nil {
 		w.Choices.Runtimes = []RuntimeChoice{}
 	}
+	if w.Choices.DelegatedLaunchTargets == nil {
+		w.Choices.DelegatedLaunchTargets = []DelegatedLaunchTarget{}
+	}
 	for i := range w.Choices.Runtimes {
 		r := &w.Choices.Runtimes[i]
 		if r.Accounts == nil {

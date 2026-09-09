@@ -164,22 +164,23 @@ type ImpactEstimate struct {
 }
 
 type Draft struct {
-	ID            int64            `json:"id"`
-	ProjectID     int64            `json:"project_id"`
-	Revision      int64            `json:"revision"`
-	Status        string           `json:"status"`
-	Baseline      BaselineClaim    `json:"baseline"`
-	Requirements  []Requirement    `json:"requirements"`
-	Constraints   []Constraint     `json:"constraints"`
-	Selected      Scope            `json:"selected"`
-	Unresolved    []UnresolvedItem `json:"unresolved"`
-	ExecutionMode string           `json:"execution_mode"`
-	Worker        WorkerSelection  `json:"worker"`
-	ReviewID      *int64           `json:"review_id,omitempty"`
-	ReviewValid   bool             `json:"review_valid"`
-	Impact        ImpactEstimate   `json:"impact"`
-	CreatedAt     string           `json:"created_at"`
-	UpdatedAt     string           `json:"updated_at"`
+	ID              int64                     `json:"id"`
+	ProjectID       int64                     `json:"project_id"`
+	Revision        int64                     `json:"revision"`
+	Status          string                    `json:"status"`
+	Baseline        BaselineClaim             `json:"baseline"`
+	Requirements    []Requirement             `json:"requirements"`
+	Constraints     []Constraint              `json:"constraints"`
+	Selected        Scope                     `json:"selected"`
+	Unresolved      []UnresolvedItem          `json:"unresolved"`
+	ExecutionMode   string                    `json:"execution_mode"`
+	Worker          WorkerSelection           `json:"worker"`
+	DelegatedLaunch *DelegatedLaunchSelection `json:"delegated_launch,omitempty"`
+	ReviewID        *int64                    `json:"review_id,omitempty"`
+	ReviewValid     bool                      `json:"review_valid"`
+	Impact          ImpactEstimate            `json:"impact"`
+	CreatedAt       string                    `json:"created_at"`
+	UpdatedAt       string                    `json:"updated_at"`
 }
 
 type Review struct {
@@ -257,31 +258,33 @@ type ControlOption struct {
 }
 
 type Batch struct {
-	ID                int64              `json:"id"`
-	ProjectID         int64              `json:"project_id"`
-	BatchKey          string             `json:"batch_key"`
-	DraftID           int64              `json:"draft_id"`
-	DraftRevision     int64              `json:"draft_revision"`
-	ReviewID          int64              `json:"review_id"`
-	Baseline          BaselineClaim      `json:"baseline"`
-	ExecutionMode     string             `json:"execution_mode"`
-	Scope             Scope              `json:"scope"`
-	Worker            WorkerSelection    `json:"worker"`
-	IssueID           int64              `json:"issue_id"`
-	DeliveryID        *int64             `json:"delivery_id,omitempty"`
-	AttemptID         *int64             `json:"attempt_id,omitempty"`
-	LifecycleIntentID string             `json:"lifecycle_intent_id,omitempty"`
-	ReadinessIntentID string             `json:"readiness_intent_id,omitempty"`
-	ControlState      string             `json:"control_state"`
-	ControlReason     string             `json:"control_reason,omitempty"`
-	Status            string             `json:"status"`
-	WorkflowState     string             `json:"workflow_state"`
-	Progress          Progress           `json:"progress"`
-	Forecasts         []Forecast         `json:"forecasts"`
-	Controls          []ControlOption    `json:"controls"`
-	Readiness         *ReadinessEvidence `json:"readiness,omitempty"`
-	StartedBy         int64              `json:"started_by"`
-	StartedAt         string             `json:"started_at"`
+	ID                int64                     `json:"id"`
+	ProjectID         int64                     `json:"project_id"`
+	BatchKey          string                    `json:"batch_key"`
+	DraftID           int64                     `json:"draft_id"`
+	DraftRevision     int64                     `json:"draft_revision"`
+	ReviewID          int64                     `json:"review_id"`
+	Baseline          BaselineClaim             `json:"baseline"`
+	ExecutionMode     string                    `json:"execution_mode"`
+	Scope             Scope                     `json:"scope"`
+	Worker            WorkerSelection           `json:"worker"`
+	DelegatedLaunch   *DelegatedLaunchSelection `json:"delegated_launch,omitempty"`
+	LaunchGrant       *LaunchGrantView          `json:"launch_grant,omitempty"`
+	IssueID           int64                     `json:"issue_id"`
+	DeliveryID        *int64                    `json:"delivery_id,omitempty"`
+	AttemptID         *int64                    `json:"attempt_id,omitempty"`
+	LifecycleIntentID string                    `json:"lifecycle_intent_id,omitempty"`
+	ReadinessIntentID string                    `json:"readiness_intent_id,omitempty"`
+	ControlState      string                    `json:"control_state"`
+	ControlReason     string                    `json:"control_reason,omitempty"`
+	Status            string                    `json:"status"`
+	WorkflowState     string                    `json:"workflow_state"`
+	Progress          Progress                  `json:"progress"`
+	Forecasts         []Forecast                `json:"forecasts"`
+	Controls          []ControlOption           `json:"controls"`
+	Readiness         *ReadinessEvidence        `json:"readiness,omitempty"`
+	StartedBy         int64                     `json:"started_by"`
+	StartedAt         string                    `json:"started_at"`
 }
 
 type Workflow struct {
@@ -297,9 +300,38 @@ type Workflow struct {
 }
 
 type WorkflowChoices struct {
-	ExecutionModes []string        `json:"execution_modes"`
-	Runtimes       []RuntimeChoice `json:"runtimes"`
-	Note           string          `json:"note"`
+	ExecutionModes         []string                `json:"execution_modes"`
+	Runtimes               []RuntimeChoice         `json:"runtimes"`
+	DelegatedLaunchTargets []DelegatedLaunchTarget `json:"delegated_launch_targets"`
+	Note                   string                  `json:"note"`
+}
+
+type DelegatedLaunchSelection struct {
+	TargetRef   string `json:"target_ref"`
+	Workflow    string `json:"workflow"`
+	Environment string `json:"environment"`
+	ExpiresAt   string `json:"expires_at"`
+	MaxLaunches int    `json:"max_launches"`
+}
+
+type DelegatedLaunchTarget struct {
+	TargetRef   string `json:"target_ref"`
+	Environment string `json:"environment"`
+	Label       string `json:"label"`
+}
+
+type LaunchGrantView struct {
+	GrantID      string `json:"grant_id"`
+	Revision     int    `json:"revision"`
+	GrantDigest  string `json:"grant_digest"`
+	TargetRef    string `json:"target_ref"`
+	Workflow     string `json:"workflow"`
+	Environment  string `json:"environment"`
+	MaxLaunches  int    `json:"max_launches"`
+	UsedLaunches int    `json:"used_launches"`
+	IssuedAt     string `json:"issued_at"`
+	ExpiresAt    string `json:"expires_at"`
+	State        string `json:"state"`
 }
 
 type RuntimeChoice struct {

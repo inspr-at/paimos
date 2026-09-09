@@ -13719,6 +13719,124 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 		)`,
 		`CREATE INDEX idx_acceptance_target_bindings_project ON acceptance_target_bindings(project_id, release_id)`,
 	}})
+	// M187 / PAI-978: deliberate human one-shot launch grants and the closed
+	// additive Pharos candidate/admission/consume sidecar. Existing external
+	// stage v1/v2 tables and bytes are unchanged.
+	migrations = append(migrations, migration{version: 187, steps: []string{
+		`ALTER TABLE external_stage_reporter_registrations ADD COLUMN target_ref TEXT NOT NULL DEFAULT ''
+			CHECK(target_ref='' OR (length(CAST(target_ref AS BLOB))=71 AND substr(target_ref,1,7)='sha256:'))`,
+		`CREATE TRIGGER trg_external_stage_registration_target_immutable BEFORE UPDATE OF target_ref
+			ON external_stage_reporter_registrations BEGIN SELECT RAISE(ABORT,'external stage registration target is immutable'); END`,
+		`ALTER TABLE baseline_batch_drafts ADD COLUMN delegated_launch_json TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE baseline_batch_reviews ADD COLUMN delegated_launch_json TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE baseline_batch_batches ADD COLUMN delegated_launch_json TEXT NOT NULL DEFAULT ''`,
+		`CREATE TRIGGER trg_baseline_batch_closed_draft_launch_immutable BEFORE UPDATE OF delegated_launch_json
+			ON baseline_batch_drafts WHEN OLD.status='closed' OR NEW.status='closed'
+			BEGIN SELECT RAISE(ABORT,'closed draft launch selection is immutable'); END`,
+		`CREATE TRIGGER trg_baseline_batch_review_launch_immutable BEFORE UPDATE OF delegated_launch_json
+			ON baseline_batch_reviews BEGIN SELECT RAISE(ABORT,'reviewed launch selection is immutable'); END`,
+		`CREATE TRIGGER trg_baseline_batch_launch_selection_immutable BEFORE UPDATE OF delegated_launch_json
+			ON baseline_batch_batches BEGIN SELECT RAISE(ABORT,'batch launch selection is immutable'); END`,
+		`CREATE TABLE baseline_batch_launch_grants (
+			grant_id TEXT PRIMARY KEY CHECK(` + sqlUUIDCheck("grant_id") + `),
+			revision INTEGER NOT NULL CHECK(revision=1),
+			grant_digest BLOB NOT NULL UNIQUE CHECK(length(grant_digest)=32),
+			project_id INTEGER NOT NULL REFERENCES projects(id),
+			draft_id INTEGER NOT NULL REFERENCES baseline_batch_drafts(id),
+			draft_revision INTEGER NOT NULL,
+			review_id INTEGER NOT NULL REFERENCES baseline_batch_reviews(id),
+			batch_id INTEGER NOT NULL UNIQUE REFERENCES baseline_batch_batches(id),
+			delivery_id INTEGER NOT NULL REFERENCES deliveries(id),
+			attempt_id INTEGER NOT NULL REFERENCES delivery_attempts(id),
+			attempt_number INTEGER NOT NULL CHECK(attempt_number>0),
+			plan_revision INTEGER NOT NULL CHECK(plan_revision>0),
+			baseline_ref TEXT NOT NULL,
+			content_digest TEXT NOT NULL CHECK(length(CAST(content_digest AS BLOB))=71),
+			revision_seal TEXT NOT NULL CHECK(length(CAST(revision_seal AS BLOB))=71),
+			scope_digest BLOB NOT NULL CHECK(length(scope_digest)=32),
+			worker_digest BLOB NOT NULL CHECK(length(worker_digest)=32),
+			target_ref TEXT NOT NULL CHECK(length(CAST(target_ref AS BLOB))=71 AND substr(target_ref,1,7)='sha256:'),
+			workflow_symbol TEXT NOT NULL CHECK(workflow_symbol='deploy-production'),
+			environment_symbol TEXT NOT NULL,
+			max_launches INTEGER NOT NULL CHECK(max_launches=1),
+			human_user_id INTEGER NOT NULL REFERENCES users(id),
+			human_session_credential_id TEXT NOT NULL,
+			issued_at TEXT NOT NULL,
+			expires_at TEXT NOT NULL,
+			revoked_at TEXT,
+			revoked_by INTEGER REFERENCES users(id),
+			revoked_session_credential_id TEXT,
+			CHECK(issued_at<expires_at),
+			CHECK((revoked_at IS NULL AND revoked_by IS NULL AND revoked_session_credential_id IS NULL) OR
+			      (revoked_at IS NOT NULL AND revoked_by IS NOT NULL AND revoked_session_credential_id IS NOT NULL))
+		)`,
+		`CREATE INDEX idx_baseline_batch_launch_grants_project ON baseline_batch_launch_grants(project_id,batch_id)`,
+		`CREATE TRIGGER trg_baseline_batch_launch_grants_identity_immutable BEFORE UPDATE OF
+			grant_id,revision,grant_digest,project_id,draft_id,draft_revision,review_id,batch_id,delivery_id,attempt_id,
+			attempt_number,plan_revision,baseline_ref,content_digest,revision_seal,scope_digest,worker_digest,target_ref,
+			workflow_symbol,environment_symbol,max_launches,human_user_id,human_session_credential_id,issued_at,expires_at
+			ON baseline_batch_launch_grants BEGIN SELECT RAISE(ABORT,'launch grant identity is immutable'); END`,
+		`CREATE TRIGGER trg_baseline_batch_launch_grants_revoke_guard BEFORE UPDATE OF revoked_at,revoked_by,revoked_session_credential_id
+			ON baseline_batch_launch_grants WHEN OLD.revoked_at IS NOT NULL OR NEW.revoked_at IS NULL
+			BEGIN SELECT RAISE(ABORT,'launch grant revocation is immutable'); END`,
+		`CREATE TABLE baseline_batch_launch_grant_revocations (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			grant_id TEXT NOT NULL UNIQUE REFERENCES baseline_batch_launch_grants(grant_id),
+			batch_id INTEGER NOT NULL UNIQUE REFERENCES baseline_batch_batches(id),
+			actor_user_id INTEGER NOT NULL REFERENCES users(id),
+			actor_session_credential_id TEXT NOT NULL,
+			idempotency_digest BLOB NOT NULL CHECK(length(idempotency_digest)=32),
+			revoked_at TEXT NOT NULL
+		)`,
+		`CREATE TRIGGER trg_baseline_batch_launch_grant_revocations_no_update BEFORE UPDATE ON baseline_batch_launch_grant_revocations
+			BEGIN SELECT RAISE(ABORT,'launch grant revocation is immutable'); END`,
+		`CREATE TABLE external_stage_launch_admissions (
+			admission_id TEXT PRIMARY KEY CHECK(` + sqlUUIDCheck("admission_id") + `),
+			admission_digest BLOB NOT NULL UNIQUE CHECK(length(admission_digest)=32),
+			grant_id TEXT NOT NULL UNIQUE REFERENCES baseline_batch_launch_grants(grant_id),
+			handoff_row_id INTEGER NOT NULL UNIQUE REFERENCES external_stage_handoffs(id),
+			handoff_id TEXT NOT NULL UNIQUE,
+			credential_epoch INTEGER NOT NULL CHECK(credential_epoch>0),
+			candidate_digest BLOB NOT NULL CHECK(length(candidate_digest)=32),
+			candidate_idempotency_digest BLOB NOT NULL CHECK(length(candidate_idempotency_digest)=32),
+			target_ref TEXT NOT NULL,
+			workflow_symbol TEXT NOT NULL CHECK(workflow_symbol='deploy-production'),
+			environment_symbol TEXT NOT NULL,
+			artifact_json TEXT NOT NULL,
+			reviewed_plan_digest TEXT NOT NULL,
+			operation_binding_digest TEXT NOT NULL,
+			stage_key TEXT NOT NULL CHECK(stage_key='deployment'),
+			attempt_number INTEGER NOT NULL CHECK(attempt_number>0),
+			plan_revision INTEGER NOT NULL CHECK(plan_revision>0),
+			execution_number INTEGER NOT NULL CHECK(execution_number>0),
+			authority_epoch INTEGER NOT NULL CHECK(authority_epoch>0),
+			plan_digest TEXT NOT NULL,
+			predecessor_digest TEXT NOT NULL,
+			context_digest TEXT NOT NULL,
+			max_launches INTEGER NOT NULL CHECK(max_launches=1),
+			issued_at TEXT NOT NULL,
+			expires_at TEXT NOT NULL,
+			state TEXT NOT NULL CHECK(state IN ('issued','consumed')),
+			response_bytes BLOB NOT NULL,
+			consume_request_digest BLOB,
+			consume_idempotency_digest BLOB,
+			receipt_bytes BLOB,
+			consumed_at TEXT,
+			CHECK(issued_at<expires_at),
+			CHECK((state='issued' AND consume_request_digest IS NULL AND consume_idempotency_digest IS NULL AND receipt_bytes IS NULL AND consumed_at IS NULL) OR
+			      (state='consumed' AND length(consume_request_digest)=32 AND length(consume_idempotency_digest)=32 AND receipt_bytes IS NOT NULL AND consumed_at IS NOT NULL))
+		)`,
+		`CREATE TRIGGER trg_external_stage_launch_admissions_identity_immutable BEFORE UPDATE OF
+			admission_id,admission_digest,grant_id,handoff_row_id,handoff_id,credential_epoch,candidate_digest,
+			candidate_idempotency_digest,target_ref,workflow_symbol,environment_symbol,artifact_json,
+			reviewed_plan_digest,operation_binding_digest,stage_key,attempt_number,plan_revision,execution_number,
+			authority_epoch,plan_digest,predecessor_digest,context_digest,max_launches,issued_at,expires_at,response_bytes
+			ON external_stage_launch_admissions BEGIN SELECT RAISE(ABORT,'launch admission identity is immutable'); END`,
+		`CREATE TRIGGER trg_external_stage_launch_admissions_consume_guard BEFORE UPDATE OF
+			state,consume_request_digest,consume_idempotency_digest,receipt_bytes,consumed_at ON external_stage_launch_admissions
+			WHEN OLD.state<>'issued' OR NEW.state<>'consumed'
+			BEGIN SELECT RAISE(ABORT,'launch admission consume is one-shot'); END`,
+	}})
 	for _, m := range migrations {
 		if m.version > maxVersion {
 			continue

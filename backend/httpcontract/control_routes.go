@@ -64,6 +64,8 @@ const (
 	ControlRouteExternalHandoffPull      ControlRouteClass = "external_stage.handoff_pull"
 	ControlRouteExternalHandoffAccept    ControlRouteClass = "external_stage.handoff_accept"
 	ControlRouteExternalHandoffReport    ControlRouteClass = "external_stage.handoff_report"
+	ControlRouteExternalLaunchCandidate  ControlRouteClass = "external_stage.launch_candidate"
+	ControlRouteExternalLaunchConsume    ControlRouteClass = "external_stage.launch_consume"
 	ControlRouteConsumerRegister         ControlRouteClass = "runtime.consumer.register"
 	ControlRouteConsumerClaim            ControlRouteClass = "runtime.consumer.claim"
 	ControlRouteConsumerExecute          ControlRouteClass = "runtime.consumer.execute"
@@ -108,6 +110,8 @@ var controlRoutes = []struct {
 	{[]string{"api", "external-stage", "handoffs", controlRouteParam}, ControlRouteExternalHandoffPull},
 	{[]string{"api", "external-stage", "handoffs", controlRouteParam, "accept"}, ControlRouteExternalHandoffAccept},
 	{[]string{"api", "external-stage", "handoffs", controlRouteParam, "reports"}, ControlRouteExternalHandoffReport},
+	{[]string{"api", "external-stage", "handoffs", controlRouteParam, "launch-candidates"}, ControlRouteExternalLaunchCandidate},
+	{[]string{"api", "external-stage", "handoffs", controlRouteParam, "launch-admissions", controlRouteParam, "consume"}, ControlRouteExternalLaunchConsume},
 }
 
 // ControlRouteClasses returns every label the classifier can produce.
