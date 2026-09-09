@@ -287,7 +287,9 @@ A QA `test_result` digest remains the delivery QA binding digest from
 Non-baseline v1 owner reports keep digest/commit compatibility even when QA
 carries a digest. A baseline-owned delivery that already has a handoff refuses
 v1 owner success with `v2_report_required` rather than a generic invalid
-request. Frozen owner-v2 and Janus-v1 fixture bytes are unchanged.
+request. Frozen Janus-v1 fixture bytes are unchanged; the owner-v2 fixture was
+republished with the calendar v2 pair in PAI-979 and re-certified through
+`manifest-v2.json`.
 
 The first v2 publication pull request must be merged with a true merge commit,
 not a squash or rebase merge. The certified content commit recorded by
