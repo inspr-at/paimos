@@ -420,15 +420,32 @@ func splitUnitCommand(s string) ([]string, error) {
 // Declarative browser-guard LaunchAgents may set only the closed harness-hint
 // environment. PATH, NODE_OPTIONS, loader variables and any other key remain
 // execution overrides. The three path values must be one absolute refusal shim
-// whose contents prove the public refusal contract; a path substring is not
-// authority.
+// whose bytes are a trusted sh/bash shebang plus the exact NIX-445 refusal
+// body; a marker substring is not authority.
 const (
 	browserGuardModeKey       = "INSPR_AGENT_BROWSER_GUARD"
 	browserGuardModeEnvOnly   = "env-only"
-	browserGuardRefusalMarker = "INSPR agent browser guard (NIX-445): native browser launch refused."
-	browserGuardRefusalExit   = "exit 78"
 	browserGuardShimSizeLimit = 8 << 10
+	browserGuardShebangLimit  = 256
 )
+
+// Exact text after writeShellScriptBin's shebang line: mkRefusalText plus the
+// wrapper's trailing newline. Unknown future wording fails closed.
+const browserGuardRefusalBody = "set -eu\n" +
+	"printf '%s\\n' \\\n" +
+	"  'INSPR agent browser guard (NIX-445): native browser launch refused.' \\\n" +
+	"  \"\" \\\n" +
+	"  '  Agent worker sessions must not start a native browser on this Mac.' \\\n" +
+	"  '  Chrome aborts in macOS _RegisterApplication from a sandboxed agent' \\\n" +
+	"  '  session and disrupts the operator desktop.' \\\n" +
+	"  \"\" \\\n" +
+	"  '  Browser QA belongs to a verified controller-owned or remote runner.' \\\n" +
+	"  '  Ask the controller for it; if none is available, report browser QA as' \\\n" +
+	"  '  unavailable. Do not retry, do not look for another browser binary,' \\\n" +
+	"  '  and do not disable the guard.' \\\n" +
+	"  \"\" \\\n" +
+	"  '  A blocked launch is NOT a passed browser test. Report the refusal.' >&2\n" +
+	"exit 78\n\n"
 
 var browserGuardPathKeys = []string{
 	"PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH",
@@ -646,7 +663,24 @@ func verifyBrowserGuardRefusalShim(path string) error {
 	if err != nil || int64(len(raw)) != info.Size() || int64(len(raw)) > browserGuardShimSizeLimit {
 		return errors.New("LaunchAgent environment override unsupported")
 	}
-	if !bytes.HasPrefix(raw, []byte("#!")) || !bytes.Contains(raw, []byte(browserGuardRefusalMarker)) || !bytes.Contains(raw, []byte(browserGuardRefusalExit)) {
+	line, rest, ok := bytes.Cut(raw, []byte{'\n'})
+	if !ok || len(line) > browserGuardShebangLimit || bytes.Contains(line, []byte{'\r'}) || !bytes.HasPrefix(line, []byte("#!")) {
+		return errors.New("LaunchAgent environment override unsupported")
+	}
+	interp := string(line[2:])
+	base := filepath.Base(interp)
+	if interp == "" || !filepath.IsAbs(interp) || strings.ContainsAny(interp, " \t\x00") || (base != "sh" && base != "bash") {
+		return errors.New("LaunchAgent environment override unsupported")
+	}
+	if !bytes.Equal(rest, []byte(browserGuardRefusalBody)) {
+		return errors.New("LaunchAgent environment override unsupported")
+	}
+	return verifyBrowserGuardInterpreter(interp)
+}
+
+func verifyBrowserGuardInterpreter(path string) error {
+	info, err := os.Lstat(path)
+	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0111 == 0 || info.Mode().Perm()&0022 != 0 || !trustedDefinitionOwner(info) {
 		return errors.New("LaunchAgent environment override unsupported")
 	}
 	return nil

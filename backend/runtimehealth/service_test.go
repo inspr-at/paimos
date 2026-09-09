@@ -8,6 +8,8 @@ package runtimehealth
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/xml"
 	"errors"
 	"fmt"
@@ -261,8 +263,11 @@ func putServiceArgs(t *testing.T, p *PlatformService, args []string) {
 
 func browserGuardRefusalShim(t *testing.T, dir string) string {
 	t.Helper()
-	path := filepath.Join(dir, "browser-refusal")
-	body := "#!/bin/sh\nset -eu\nprintf '%s\\n' 'INSPR agent browser guard (NIX-445): native browser launch refused.' >&2\nexit 78\n"
+	return writeBrowserGuardShim(t, filepath.Join(dir, "browser-refusal"), "#!/bin/sh\n"+browserGuardRefusalBody)
+}
+
+func writeBrowserGuardShim(t *testing.T, path, body string) string {
+	t.Helper()
 	if e := os.WriteFile(path, []byte(body), 0700); e != nil {
 		t.Fatal(e)
 	}
@@ -309,6 +314,27 @@ func putDarwinServiceEnv(t *testing.T, p *PlatformService, args []string, env ma
 	}
 	b.WriteString(`<key>KeepAlive</key><true/></dict></plist>`)
 	putFixture(t, p.File, b.String())
+}
+
+func darwinPlistWithDuplicateEnvKey(p *PlatformService, args []string, shim string) string {
+	var b strings.Builder
+	b.WriteString(`<plist version="1.0"><dict><key>Label</key><string>` + p.Name + `</string><key>ProgramArguments</key><array>`)
+	for _, a := range args {
+		b.WriteString("<string>")
+		_ = xml.EscapeText(&b, []byte(a))
+		b.WriteString("</string>")
+	}
+	b.WriteString(`</array><key>EnvironmentVariables</key><dict>`)
+	b.WriteString(`<key>INSPR_AGENT_BROWSER_GUARD</key><string>env-only</string>`)
+	for _, key := range []string{"PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH", "PUPPETEER_EXECUTABLE_PATH", "CHROME_PATH", "CHROME_PATH"} {
+		b.WriteString("<key>")
+		_ = xml.EscapeText(&b, []byte(key))
+		b.WriteString("</key><string>")
+		_ = xml.EscapeText(&b, []byte(shim))
+		b.WriteString("</string>")
+	}
+	b.WriteString(`</dict><key>KeepAlive</key><true/></dict></plist>`)
+	return b.String()
 }
 
 func protectedDummy(t *testing.T, dir, name string) string {
@@ -723,6 +749,10 @@ func TestRuntimeManagerRefusesUnlistedExecutable(t *testing.T) {
 }
 
 func TestRuntimeDarwinAcceptsDeclaredBrowserGuardEnvironment(t *testing.T) {
+	sum := sha256.Sum256([]byte(browserGuardRefusalBody))
+	if hex.EncodeToString(sum[:]) != "abc22b56513f3a970aab18055aa60336ff65cdce27a113ce4408e43e7245627a" {
+		t.Fatal("canonical refusal body is not the exact NIX-445 mkRefusalText")
+	}
 	p, _, calls := serviceFixture(t, "darwin")
 	shim := browserGuardRefusalShim(t, p.Home)
 	putDarwinServiceEnv(t, p, fullServeArgs(p), declaredBrowserGuardEnv(shim))
@@ -736,7 +766,7 @@ func TestRuntimeDarwinAcceptsDeclaredBrowserGuardEnvironment(t *testing.T) {
 }
 
 func TestRuntimeDarwinRejectsHostileLaunchdEnvironment(t *testing.T) {
-	shimBody := "#!/bin/sh\nset -eu\nprintf '%s\\n' 'INSPR agent browser guard (NIX-445): native browser launch refused.' >&2\nexit 78\n"
+	exact := "#!/bin/sh\n" + browserGuardRefusalBody
 	for _, kind := range []string{
 		"path",
 		"node_options",
@@ -747,11 +777,19 @@ func TestRuntimeDarwinRejectsHostileLaunchdEnvironment(t *testing.T) {
 		"empty",
 		"relative",
 		"mismatch",
+		"duplicate-env-key",
 		"missing-shim",
 		"directory",
 		"mode",
 		"binary",
-		"unmarked",
+		"command-before-exit",
+		"comment-marker",
+		"comment-exit",
+		"appended",
+		"unsafe-interpreter",
+		"interpreter-args",
+		"relative-interpreter",
+		"writable-interpreter",
 		"no-shebang",
 		"string-value",
 		"program",
@@ -759,40 +797,49 @@ func TestRuntimeDarwinRejectsHostileLaunchdEnvironment(t *testing.T) {
 		t.Run(kind, func(t *testing.T) {
 			p, _, calls := serviceFixture(t, "darwin")
 			shim := filepath.Join(p.Home, "browser-refusal")
-			if kind != "missing-shim" && kind != "directory" && kind != "binary" && kind != "unmarked" && kind != "no-shebang" && kind != "string-value" && kind != "program" {
-				if e := os.WriteFile(shim, []byte(shimBody), 0700); e != nil {
-					t.Fatal(e)
-				}
-			}
 			env := declaredBrowserGuardEnv(shim)
+			rawPlist := ""
 			switch kind {
 			case "path":
+				writeBrowserGuardShim(t, shim, exact)
 				env["PATH"] = "/tmp"
 			case "node_options":
+				writeBrowserGuardShim(t, shim, exact)
 				env["NODE_OPTIONS"] = "--require /tmp/loader.js"
 			case "dyld":
+				writeBrowserGuardShim(t, shim, exact)
 				env["DYLD_INSERT_LIBRARIES"] = "/tmp/loader.dylib"
 			case "unknown":
+				writeBrowserGuardShim(t, shim, exact)
 				env["FOREIGN_KEY"] = "x"
 			case "missing-mode":
+				writeBrowserGuardShim(t, shim, exact)
 				delete(env, "INSPR_AGENT_BROWSER_GUARD")
 			case "sandbox-mode":
+				writeBrowserGuardShim(t, shim, exact)
 				env["INSPR_AGENT_BROWSER_GUARD"] = "sandbox"
 			case "empty":
+				writeBrowserGuardShim(t, shim, exact)
 				env = map[string]string{}
 			case "relative":
+				writeBrowserGuardShim(t, shim, exact)
 				env["CHROME_PATH"] = "browser-refusal"
 				env["PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH"] = "browser-refusal"
 				env["PUPPETEER_EXECUTABLE_PATH"] = "browser-refusal"
 			case "mismatch":
+				writeBrowserGuardShim(t, shim, exact)
 				other := protectedExecutable(t, p.Home, "other-bin")
 				env["CHROME_PATH"] = other
+			case "duplicate-env-key":
+				writeBrowserGuardShim(t, shim, exact)
+				rawPlist = darwinPlistWithDuplicateEnvKey(p, fullServeArgs(p), shim)
 			case "missing-shim":
 			case "directory":
 				if e := os.Mkdir(shim, 0700); e != nil {
 					t.Fatal(e)
 				}
 			case "mode":
+				writeBrowserGuardShim(t, shim, exact)
 				if e := os.Chmod(shim, 0777); e != nil {
 					t.Fatal(e)
 				}
@@ -800,22 +847,40 @@ func TestRuntimeDarwinRejectsHostileLaunchdEnvironment(t *testing.T) {
 				if e := os.WriteFile(shim, bytes.Repeat([]byte{0xcf, 0xfa, 0xed, 0xfe}, 1024), 0700); e != nil {
 					t.Fatal(e)
 				}
-			case "unmarked":
-				if e := os.WriteFile(shim, []byte("#!/bin/sh\nexit 78\n"), 0700); e != nil {
+			case "command-before-exit":
+				writeBrowserGuardShim(t, shim, "#!/bin/sh\ntrue\n"+browserGuardRefusalBody)
+			case "comment-marker":
+				writeBrowserGuardShim(t, shim, "#!/bin/sh\n# INSPR agent browser guard (NIX-445): native browser launch refused.\nexit 0\n")
+			case "comment-exit":
+				writeBrowserGuardShim(t, shim, "#!/bin/sh\n# exit 78\ntrue\n")
+			case "appended":
+				writeBrowserGuardShim(t, shim, exact+"true\n")
+			case "unsafe-interpreter":
+				writeBrowserGuardShim(t, shim, "#!/usr/bin/env bash\n"+browserGuardRefusalBody)
+			case "interpreter-args":
+				writeBrowserGuardShim(t, shim, "#!/bin/sh -e\n"+browserGuardRefusalBody)
+			case "relative-interpreter":
+				writeBrowserGuardShim(t, shim, "#!sh\n"+browserGuardRefusalBody)
+			case "writable-interpreter":
+				interp := filepath.Join(p.Home, "bash")
+				if e := os.WriteFile(interp, []byte("#!/bin/sh\n"), 0700); e != nil {
 					t.Fatal(e)
 				}
+				if e := os.Chmod(interp, 0777); e != nil {
+					t.Fatal(e)
+				}
+				writeBrowserGuardShim(t, shim, "#!"+interp+"\n"+browserGuardRefusalBody)
 			case "no-shebang":
-				if e := os.WriteFile(shim, []byte("INSPR agent browser guard (NIX-445): native browser launch refused.\nexit 78\n"), 0700); e != nil {
-					t.Fatal(e)
-				}
+				writeBrowserGuardShim(t, shim, browserGuardRefusalBody)
 			case "string-value":
-				raw := `<plist version="1.0"><dict><key>Label</key><string>` + p.Name + `</string><key>ProgramArguments</key><array><string>` + filepath.Join(p.Home, "paimos-agentd") + `</string><string>serve</string><string>--instance</string><string>fixture</string><string>--state-root</string><string>` + p.StateRoot + `</string></array><key>EnvironmentVariables</key><string>CHROME_PATH=/tmp</string></dict></plist>`
-				putFixture(t, p.File, raw)
+				rawPlist = `<plist version="1.0"><dict><key>Label</key><string>` + p.Name + `</string><key>ProgramArguments</key><array><string>` + filepath.Join(p.Home, "paimos-agentd") + `</string><string>serve</string><string>--instance</string><string>fixture</string><string>--state-root</string><string>` + p.StateRoot + `</string></array><key>EnvironmentVariables</key><string>CHROME_PATH=/tmp</string></dict></plist>`
 			case "program":
 				raw, _ := os.ReadFile(p.File)
-				putFixture(t, p.File, strings.Replace(string(raw), "</dict>", "<key>Program</key><string>/bin/true</string></dict>", 1))
+				rawPlist = strings.Replace(string(raw), "</dict>", "<key>Program</key><string>/bin/true</string></dict>", 1)
 			}
-			if kind != "string-value" && kind != "program" {
+			if rawPlist != "" {
+				putFixture(t, p.File, rawPlist)
+			} else {
 				putDarwinServiceEnv(t, p, fullServeArgs(p), env)
 			}
 			if _, e := p.Inspect(context.Background()); e == nil {
