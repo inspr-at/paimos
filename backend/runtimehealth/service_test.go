@@ -6,6 +6,7 @@
 package runtimehealth
 
 import (
+	"bytes"
 	"context"
 	"encoding/xml"
 	"errors"
@@ -13,6 +14,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -255,6 +257,58 @@ func putServiceArgs(t *testing.T, p *PlatformService, args []string) {
 		definition = "[Unit]\nDescription=fixture\n[Service]\nExecStart=" + strings.Join(args, " ") + "\nRestart=on-failure\n[Install]\nWantedBy=default.target\n"
 	}
 	putFixture(t, p.File, definition)
+}
+
+func browserGuardRefusalShim(t *testing.T, dir string) string {
+	t.Helper()
+	path := filepath.Join(dir, "browser-refusal")
+	body := "#!/bin/sh\nset -eu\nprintf '%s\\n' 'INSPR agent browser guard (NIX-445): native browser launch refused.' >&2\nexit 78\n"
+	if e := os.WriteFile(path, []byte(body), 0700); e != nil {
+		t.Fatal(e)
+	}
+	return path
+}
+
+func declaredBrowserGuardEnv(shim string) map[string]string {
+	return map[string]string{
+		"INSPR_AGENT_BROWSER_GUARD":           "env-only",
+		"PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH": shim,
+		"PUPPETEER_EXECUTABLE_PATH":           shim,
+		"CHROME_PATH":                         shim,
+	}
+}
+
+func putDarwinServiceEnv(t *testing.T, p *PlatformService, args []string, env map[string]string) {
+	t.Helper()
+	if p.Platform != "darwin" {
+		t.Fatal("guard environment contract is a LaunchAgent declaration")
+	}
+	var b strings.Builder
+	b.WriteString(`<plist version="1.0"><dict><key>Label</key><string>` + p.Name + `</string><key>ProgramArguments</key><array>`)
+	for _, a := range args {
+		b.WriteString("<string>")
+		_ = xml.EscapeText(&b, []byte(a))
+		b.WriteString("</string>")
+	}
+	b.WriteString(`</array>`)
+	if env != nil {
+		b.WriteString(`<key>EnvironmentVariables</key><dict>`)
+		keys := make([]string, 0, len(env))
+		for k := range env {
+			keys = append(keys, k)
+		}
+		slices.Sort(keys)
+		for _, k := range keys {
+			b.WriteString("<key>")
+			_ = xml.EscapeText(&b, []byte(k))
+			b.WriteString("</key><string>")
+			_ = xml.EscapeText(&b, []byte(env[k]))
+			b.WriteString("</string>")
+		}
+		b.WriteString(`</dict>`)
+	}
+	b.WriteString(`<key>KeepAlive</key><true/></dict></plist>`)
+	putFixture(t, p.File, b.String())
 }
 
 func protectedDummy(t *testing.T, dir, name string) string {
@@ -665,5 +719,120 @@ func TestRuntimePlatformRecoveryScenarios(t *testing.T) {
 func TestRuntimeManagerRefusesUnlistedExecutable(t *testing.T) {
 	if _, err := runManager(context.Background(), "sh", "-c", "exit 0"); err == nil {
 		t.Fatal("platform runner accepted an executable outside its closed manager set")
+	}
+}
+
+func TestRuntimeDarwinAcceptsDeclaredBrowserGuardEnvironment(t *testing.T) {
+	p, _, calls := serviceFixture(t, "darwin")
+	shim := browserGuardRefusalShim(t, p.Home)
+	putDarwinServiceEnv(t, p, fullServeArgs(p), declaredBrowserGuardEnv(shim))
+	s, e := p.Inspect(context.Background())
+	if e != nil || !s.Verified {
+		t.Fatalf("declared browser-guard environment not verified: %v", e)
+	}
+	if len(*calls) == 0 {
+		t.Fatal("verified definition never reached the platform manager")
+	}
+}
+
+func TestRuntimeDarwinRejectsHostileLaunchdEnvironment(t *testing.T) {
+	shimBody := "#!/bin/sh\nset -eu\nprintf '%s\\n' 'INSPR agent browser guard (NIX-445): native browser launch refused.' >&2\nexit 78\n"
+	for _, kind := range []string{
+		"path",
+		"node_options",
+		"dyld",
+		"unknown",
+		"missing-mode",
+		"sandbox-mode",
+		"empty",
+		"relative",
+		"mismatch",
+		"missing-shim",
+		"directory",
+		"mode",
+		"binary",
+		"unmarked",
+		"no-shebang",
+		"string-value",
+		"program",
+	} {
+		t.Run(kind, func(t *testing.T) {
+			p, _, calls := serviceFixture(t, "darwin")
+			shim := filepath.Join(p.Home, "browser-refusal")
+			if kind != "missing-shim" && kind != "directory" && kind != "binary" && kind != "unmarked" && kind != "no-shebang" && kind != "string-value" && kind != "program" {
+				if e := os.WriteFile(shim, []byte(shimBody), 0700); e != nil {
+					t.Fatal(e)
+				}
+			}
+			env := declaredBrowserGuardEnv(shim)
+			switch kind {
+			case "path":
+				env["PATH"] = "/tmp"
+			case "node_options":
+				env["NODE_OPTIONS"] = "--require /tmp/loader.js"
+			case "dyld":
+				env["DYLD_INSERT_LIBRARIES"] = "/tmp/loader.dylib"
+			case "unknown":
+				env["FOREIGN_KEY"] = "x"
+			case "missing-mode":
+				delete(env, "INSPR_AGENT_BROWSER_GUARD")
+			case "sandbox-mode":
+				env["INSPR_AGENT_BROWSER_GUARD"] = "sandbox"
+			case "empty":
+				env = map[string]string{}
+			case "relative":
+				env["CHROME_PATH"] = "browser-refusal"
+				env["PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH"] = "browser-refusal"
+				env["PUPPETEER_EXECUTABLE_PATH"] = "browser-refusal"
+			case "mismatch":
+				other := protectedExecutable(t, p.Home, "other-bin")
+				env["CHROME_PATH"] = other
+			case "missing-shim":
+			case "directory":
+				if e := os.Mkdir(shim, 0700); e != nil {
+					t.Fatal(e)
+				}
+			case "mode":
+				if e := os.Chmod(shim, 0777); e != nil {
+					t.Fatal(e)
+				}
+			case "binary":
+				if e := os.WriteFile(shim, bytes.Repeat([]byte{0xcf, 0xfa, 0xed, 0xfe}, 1024), 0700); e != nil {
+					t.Fatal(e)
+				}
+			case "unmarked":
+				if e := os.WriteFile(shim, []byte("#!/bin/sh\nexit 78\n"), 0700); e != nil {
+					t.Fatal(e)
+				}
+			case "no-shebang":
+				if e := os.WriteFile(shim, []byte("INSPR agent browser guard (NIX-445): native browser launch refused.\nexit 78\n"), 0700); e != nil {
+					t.Fatal(e)
+				}
+			case "string-value":
+				raw := `<plist version="1.0"><dict><key>Label</key><string>` + p.Name + `</string><key>ProgramArguments</key><array><string>` + filepath.Join(p.Home, "paimos-agentd") + `</string><string>serve</string><string>--instance</string><string>fixture</string><string>--state-root</string><string>` + p.StateRoot + `</string></array><key>EnvironmentVariables</key><string>CHROME_PATH=/tmp</string></dict></plist>`
+				putFixture(t, p.File, raw)
+			case "program":
+				raw, _ := os.ReadFile(p.File)
+				putFixture(t, p.File, strings.Replace(string(raw), "</dict>", "<key>Program</key><string>/bin/true</string></dict>", 1))
+			}
+			if kind != "string-value" && kind != "program" {
+				putDarwinServiceEnv(t, p, fullServeArgs(p), env)
+			}
+			if _, e := p.Inspect(context.Background()); e == nil {
+				t.Fatal("hostile environment accepted")
+			}
+			if len(*calls) != 0 {
+				t.Fatal("manager reached with invalid definition")
+			}
+		})
+	}
+}
+
+func TestRuntimeLinuxServiceRejectsEnvironmentOverride(t *testing.T) {
+	p, _, calls := serviceFixture(t, "linux")
+	raw, _ := os.ReadFile(p.File)
+	putFixture(t, p.File, strings.Replace(string(raw), "ExecStart=", "Environment=PATH=/tmp\nExecStart=", 1))
+	if _, e := p.Inspect(context.Background()); e == nil || len(*calls) != 0 {
+		t.Fatal("linux environment override accepted")
 	}
 }
