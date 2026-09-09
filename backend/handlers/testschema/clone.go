@@ -22,6 +22,8 @@ import (
 	appdb "github.com/inspr-at/paimos/backend/db"
 )
 
+const snapshotName = "schema-snapshot.db"
+
 var handlerSchema struct {
 	once  sync.Once
 	bytes []byte
@@ -75,7 +77,7 @@ func buildTemplate() error {
 		_ = closeDB()
 		return fmt.Errorf("checkpoint handler schema template: %w", err)
 	}
-	snap := filepath.Join(dir, "schema-snapshot.db")
+	snap := filepath.Join(dir, snapshotName)
 	quoted := "'" + strings.ReplaceAll(snap, "'", "''") + "'"
 	// #nosec G202 -- snap is a MkdirTemp path owned by this process; not user input.
 	if _, err := appdb.DB.Exec(`VACUUM INTO ` + quoted); err != nil {
@@ -90,7 +92,12 @@ func buildTemplate() error {
 			return fmt.Errorf("handler schema template left %s after snapshot", sidecar)
 		}
 	}
-	bytes, err := os.ReadFile(snap)
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return err
+	}
+	defer root.Close()
+	bytes, err := root.ReadFile(snapshotName)
 	if err != nil {
 		return err
 	}
