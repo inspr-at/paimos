@@ -14,6 +14,7 @@ trap 'rm -rf "$TMP_ROOT"' EXIT
 
 MANUAL_RECOVERY_REASON='manual_squash_merge_missing_auto_merge_provenance'
 IMMEDIATE_AUTO_MERGE_RECOVERY_REASON='canonical_auto_merge_immediate_merge_post_merge_request_missing'
+PROTECTED_SQUASH_RECOVERY_REASON='protected_squash_merge_missing_auto_merge_provenance'
 IMMEDIATE_RECOVERY_VERSION='5.20.0'
 MANUAL_RECOVERY_VERSION='5.19.0'
 
@@ -791,10 +792,22 @@ test_committed_recovery_receipts_are_exact() {
     }
   ' "$ROOT/scripts/release/recovery/v26.09.02.json" >/dev/null ||
     fail 'committed v26.09.02 recovery receipt is missing or drifted'
+
+  jq -e --arg reason "$PROTECTED_SQUASH_RECOVERY_REASON" '
+    . == {
+      schema_version: 1,
+      release: "v26.09.09",
+      pull_request: 253,
+      approved_head: "eece1ab92c43ca4e3402ebd54af3a6305c7ab4fe",
+      merge_commit: "afb87c190e5235a11a21d0d4eee821b8eff96729",
+      incident_reason: $reason
+    }
+  ' "$ROOT/scripts/release/recovery/v26.09.09.json" >/dev/null ||
+    fail 'committed v26.09.09 recovery receipt is missing or drifted'
 }
 
 test_calendar_missing_provenance_receipt_recovery() {
-  local version="$1" reason="$2" fixture="$3" bad_reason
+  local version="$1" reason="$2" fixture="$3" expanded="${4:-0}" bad_reason receipt_path wrong_tag_oid
   local repo state origin head merge receipt_work valid_main output
 
   repo=$(setup_repo "$fixture" "v$version")
@@ -836,6 +849,13 @@ test_calendar_missing_provenance_receipt_recovery() {
   assert_recovery_rejected "$repo" "$state" "$origin" 'a wrong calendar recovery receipt' \
     'targets PR 2 instead of PR 1' "$version"
 
+  if [[ "$expanded" == "1" ]]; then
+    publish_recovery_receipt "$receipt_work" 'mutate calendar recovery version' \
+      v26.09.08 1 "$head" "$merge" "$reason" "v$version"
+    assert_recovery_rejected "$repo" "$state" "$origin" 'a wrong calendar recovery version' \
+      "targets v26.09.08 instead of v$version" "$version"
+  fi
+
   publish_recovery_receipt "$receipt_work" 'mutate calendar recovery head' \
     "v$version" 1 0000000000000000000000000000000000000000 "$merge" "$reason"
   assert_recovery_rejected "$repo" "$state" "$origin" 'a wrong calendar recovery head' \
@@ -856,6 +876,42 @@ test_calendar_missing_provenance_receipt_recovery() {
   publish_recovery_receipt "$receipt_work" 'add exact calendar recovery receipt' \
     "v$version" 1 "$head" "$merge" "$reason"
   valid_main=$(git -C "$receipt_work" rev-parse HEAD)
+
+  if [[ "$expanded" == "1" ]]; then
+    receipt_path="$receipt_work/scripts/release/recovery/v$version.json"
+    jq '.unexpected = "not reviewed"' "$receipt_path" > "$receipt_path.next"
+    mv "$receipt_path.next" "$receipt_path"
+    git -C "$receipt_work" add "scripts/release/recovery/v$version.json"
+    git -C "$receipt_work" commit -q --no-gpg-sign --signoff -m 'mutate calendar recovery receipt'
+    FAKE_GH_SERVER_MERGE=1 git -C "$receipt_work" push -q origin HEAD:main
+    assert_recovery_rejected "$repo" "$state" "$origin" 'a mutated calendar recovery receipt' \
+      'invalid release recovery receipt' "$version"
+
+    publish_recovery_receipt "$receipt_work" 'restore exact calendar recovery receipt' \
+      "v$version" 1 "$head" "$merge" "$reason"
+    valid_main=$(git -C "$receipt_work" rev-parse HEAD)
+
+    touch "$state/checks-empty"
+    assert_recovery_rejected "$repo" "$state" "$origin" 'missing required checks' \
+      'approved PR head has missing, pending, or failed required checks' "$version"
+    rm "$state/checks-empty"
+
+    wrong_tag_oid=$(git --git-dir="$origin" rev-parse "$merge^")
+    git -C "$receipt_work" tag -a --no-sign "v$version" "$wrong_tag_oid" -m 'wrong recovery target'
+    git -C "$receipt_work" push -q origin "v$version"
+    output="$TMP_ROOT/$fixture/wrong-tag-output"
+    if FAKE_RELEASE_VERSION="$version" \
+       run_release "$repo" "$state" "$version" --no-edit >"$output" 2>&1; then
+      fail 'release recovery accepted an existing wrong release tag'
+    fi
+    grep -qF "release recovery requires absent tag v$version" "$output" ||
+      fail 'existing wrong release tag was rejected at the wrong gate'
+    [[ $(git --git-dir="$origin" rev-parse "refs/tags/v$version^{}") == "$wrong_tag_oid" ]] ||
+      fail 'release recovery moved the existing wrong release tag'
+    git -C "$receipt_work" tag -d "v$version" >/dev/null
+    git --git-dir="$origin" tag -d "v$version" >/dev/null
+    git -C "$repo" tag -d "v$version" >/dev/null 2>&1 || true
+  fi
 
   printf '%s\n' 'unrelated post-release source' > "$receipt_work/unrelated.txt"
   git -C "$receipt_work" add unrelated.txt
@@ -1844,6 +1900,8 @@ test_calendar_missing_provenance_receipt_recovery \
   26.09.01 "$IMMEDIATE_AUTO_MERGE_RECOVERY_REASON" calendar-immediate-recovery
 test_calendar_missing_provenance_receipt_recovery \
   26.09.02 "$MANUAL_RECOVERY_REASON" calendar-manual-recovery
+test_calendar_missing_provenance_receipt_recovery \
+  26.09.09 "$PROTECTED_SQUASH_RECOVERY_REASON" calendar-protected-squash-recovery 1
 test_interrupted_calendar_descendant_recovery
 test_calendar_release_and_rejections
 test_committed_recovery_receipts_are_exact

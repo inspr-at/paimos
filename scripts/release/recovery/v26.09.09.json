@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "release": "v26.09.09",
+  "pull_request": 253,
+  "approved_head": "eece1ab92c43ca4e3402ebd54af3a6305c7ab4fe",
+  "merge_commit": "afb87c190e5235a11a21d0d4eee821b8eff96729",
+  "incident_reason": "protected_squash_merge_missing_auto_merge_provenance"
+}
