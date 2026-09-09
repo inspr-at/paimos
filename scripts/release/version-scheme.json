@@ -1,0 +1,34 @@
+{
+  "repository": "paimos",
+  "version_scheme": "inspr-calendar-v2",
+  "release_channel": "stable",
+  "version_source": "VERSION",
+  "reservation": "UTC second at `scripts/release.sh now`; explicit coordinates must be reserved the same UTC day, be later than every published v2 coordinate, and not lie in the future",
+  "form": "YYMMDDhhmmss.0.0 (no short form, no prerelease or build suffix)",
+  "ordering": "numeric on the first segment, identical to fixed-width string order; cross-era ordering only through release_sequence and this anchor",
+  "release_sequence": "1-based ordinal of the tag in `git tag --sort=creatordate | release_version::tag_filter`",
+  "legacy": [
+    {
+      "version_scheme": "legacy",
+      "form": "x.y.z (SemVer, single-digit major)",
+      "first_version": "0.1.0",
+      "last_version": "5.21.0",
+      "closed_by": "26.08.31"
+    },
+    {
+      "version_scheme": "inspr-calendar-v1",
+      "form": "yy.mm.dd[.hh.mm] (Vienna day; Paimos used hh.mm, the doctrine long form is hh.mm.ss)",
+      "first_version": "26.08.31",
+      "last_version": "26.09.09.13.13",
+      "closed_by": "260909151030.0.0"
+    }
+  ],
+  "anchor": {
+    "last_legacy_scheme": "inspr-calendar-v1",
+    "last_legacy_version": "26.09.09.13.13",
+    "first_calendar_version": "260909151030.0.0",
+    "first_release_sequence": null
+  },
+  "doctrine": "inspr-modules docs/AGENTS-VERSIONING.md (fa7d30b1, INSPR-395)",
+  "ticket": "PAI-979"
+}
