@@ -82,9 +82,11 @@ import (
 // discover which api-key scopes unlock which endpoints. The scope list
 // is populated at init() from auth.ScopeCatalog() — a single source of
 // truth shared with the runtime check.
+// 2.5.0 (PAI-979): added `inspr-calendar-v2` to external_stage_version_scheme
+//   and republished the v2 fixture digest with the calendar v2 owner cases.
 // 2.4.0 (PAI-876): added the additive external-stage v2 media type,
 // fixture digest, contract major, and explicit release-version scheme.
-const SchemaVersion = "2.4.0"
+const SchemaVersion = "2.5.0"
 
 // SchemaPayload is the shape returned by GET /api/schema. See PAI-87.
 type SchemaPayload struct {

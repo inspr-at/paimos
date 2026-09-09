@@ -48,8 +48,9 @@ type BuiltOwnerArtifact struct {
 func (a BuiltOwnerArtifact) Complete() bool {
 	return len(a.Digest) == 32 && len(a.ReleaseManifest) == 32 && commitPattern.MatchString(a.Commit) &&
 		releaseManifestCoordinatePattern.MatchString(a.Coordinate) &&
-		(a.Scheme == string(VersionSchemeLegacy) || a.Scheme == string(VersionSchemeINSPRCalendar)) &&
-		symbolPattern.MatchString(a.Channel) && a.Sequence >= 0 && versionPattern.MatchString(a.Version)
+		KnownVersionScheme(VersionScheme(a.Scheme)) &&
+		symbolPattern.MatchString(a.Channel) && a.Sequence >= 0 && versionPattern.MatchString(a.Version) &&
+		ValidVersionForScheme(VersionScheme(a.Scheme), a.Version)
 }
 
 func FormatReleaseIdentity(scheme VersionScheme, channel string, sequence int64, version string) string {
@@ -77,13 +78,13 @@ func ParseReleaseIdentity(value string) (scheme, channel, version string, sequen
 		return "", "", "", 0, false
 	}
 	scheme, channel, version = parts[0], parts[1], parts[3]
-	if scheme != string(VersionSchemeLegacy) && scheme != string(VersionSchemeINSPRCalendar) {
+	if !KnownVersionScheme(VersionScheme(scheme)) {
 		return "", "", "", 0, false
 	}
 	if !symbolPattern.MatchString(channel) || !versionPattern.MatchString(version) {
 		return "", "", "", 0, false
 	}
-	if scheme == string(VersionSchemeINSPRCalendar) && !validINSPRCalendarVersion(version) {
+	if !ValidVersionForScheme(VersionScheme(scheme), version) {
 		return "", "", "", 0, false
 	}
 	sequence, err := strconv.ParseInt(parts[2], 10, 64)

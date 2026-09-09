@@ -139,7 +139,7 @@ arguments or outputs.`,
 	c.Flags().StringVar(&releaseManifest, "release-manifest-digest", "", "release-set digest")
 	c.Flags().StringVar(&releaseCoordinate, "release-coordinate", "", "release-set coordinate")
 	c.Flags().StringVar(&ociIndexDigest, "oci-index-digest", "", "optional OCI index digest")
-	c.Flags().StringVar(&scheme, "scheme", "", "version scheme (legacy or inspr-calendar-v1)")
+	c.Flags().StringVar(&scheme, "scheme", "", "version scheme (legacy, inspr-calendar-v1, or inspr-calendar-v2)")
 	c.Flags().StringVar(&channel, "channel", "", "release channel")
 	c.Flags().Int64Var(&sequence, "sequence", 0, "release sequence")
 	c.Flags().StringVar(&version, "version", "", "release version")

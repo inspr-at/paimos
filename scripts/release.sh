@@ -241,6 +241,10 @@ assert_calendar_cut_day() {
   if release_version::is_calendar "$NEW" && ! release_version::is_calendar_cut_today "$NEW"; then
     fail "Vienna calendar day changed before $context; refusing release $NEW"
   fi
+  if release_version::is_calendar_v2 "$NEW" &&
+     [[ "$(release_version::calendar_v2_day "$NEW")" != "$(release_version::utc_date_compact)" ]]; then
+    fail "UTC calendar day changed before $context; refusing release $NEW"
+  fi
 }
 
 changed_worktree_files() {
@@ -382,7 +386,7 @@ assert_external_stage_v2_release_pin() {
     else error("invalid v2 certification tuple") end
   ' <<<"$manifest") || fail "$ref carries an invalid external-stage v2 release manifest"
   IFS=$'\t' read -r release_pin commit_pin <<<"$pin_record"
-  [[ "$release_pin" =~ ^v[0-9]{2}\.[0-9]{2}\.[0-9]{2}(\.[0-9]{2}\.[0-9]{2})?$ ]] ||
+  release_version::is_any_calendar "$release_pin" ||
     fail "external-stage v2 paimos_release is not an INSPR calendar tag: $release_pin"
   [[ "$commit_pin" =~ ^[0-9a-f]{40}$ ]] || fail "external-stage v2 paimos_commit is not lowercase 40-hex"
   git cat-file -e "$commit_pin^{commit}" 2>/dev/null || fail "external-stage v2 pinned commit is unavailable: $commit_pin"
@@ -895,7 +899,7 @@ select_release_tag_commit() {
   local release_merge="$1" candidate remote_tag tag_state
   TAG_OID="$release_merge"
   CALENDAR_RECOVERY_MERGE_OID=''
-  release_version::is_calendar "$NEW" || return 0
+  release_version::is_any_calendar "$NEW" || return 0
 
   if [[ -n "$AUDITED_RELEASE_RECOVERY_MERGE_OID" ]]; then
     [[ "$AUDITED_RELEASE_RECOVERY_MERGE_OID" == "$release_merge" ]] ||
@@ -924,7 +928,7 @@ select_release_tag_commit() {
 
 tag_release_merge() {
   local merge_oid="$1" existing_oid remote_oid recovery_tag_state
-  if release_version::is_calendar "$NEW" && [[ -n "$AUDITED_RELEASE_RECOVERY_MERGE_OID" ]]; then
+  if release_version::is_any_calendar "$NEW" && [[ -n "$AUDITED_RELEASE_RECOVERY_MERGE_OID" ]]; then
     [[ "$merge_oid" == "$AUDITED_RELEASE_RECOVERY_MERGE_OID" ]] ||
       fail "audited release recovery attempted to tag a different commit"
   fi
@@ -951,7 +955,7 @@ tag_release_merge() {
       # Re-pin protected main as the final operation before materializing the
       # local tag, closing movement during that query as well.
       assert_exact_calendar_recovery_main "$merge_oid"
-    elif release_version::is_calendar "$NEW" && [[ -n "$AUDITED_RELEASE_RECOVERY_MERGE_OID" ]]; then
+    elif release_version::is_any_calendar "$NEW" && [[ -n "$AUDITED_RELEASE_RECOVERY_MERGE_OID" ]]; then
       # Revalidate the live receipt and exact recovery-only main delta after
       # the remote tag query. TAG_OID remains the original protected squash.
       assert_release_recovery_receipt "$PR_JSON"
@@ -1012,7 +1016,9 @@ prepare_release_branch() {
   esac
 
   "$ROOT/scripts/check-claims.sh"
-  if release_version::is_calendar "$NEW"; then
+  if release_version::is_calendar_v2 "$NEW"; then
+    today=$(release_version::calendar_v2_iso_date "$NEW")
+  elif release_version::is_calendar "$NEW"; then
     today=$(release_version::calendar_iso_date "$NEW")
   else
     today=$(release_version::vienna_iso_date)
@@ -1160,12 +1166,29 @@ if [[ -z "$MODE" ]]; then
   echo "Runtime-relevant (backend/ frontend/src/):"
   git log "$LAST_TAG..origin/main" --oneline -- backend/ frontend/src/ || echo "  (none)"
   echo
-  echo "Re-run with: patch | minor | major | <x.y.z> | <yy.mm.dd[.hh.mm]>"
+  echo "Re-run with: now | <YYMMDDhhmmss.0.0>   (INSPR calendar v2, UTC; legacy modes are closed)"
   exit 0
 fi
 
+EXISTING_RELEASE_TAGS=$(origin_release_tags)
+# PAI-979 / INSPR-395: once a v2 coordinate is published, every older era is
+# closed for new cuts. Legacy SemVer was already closed by the first v1 cut.
+if release_version::has_calendar_v2_tag "$EXISTING_RELEASE_TAGS"; then
+  CALENDAR_V2_ACTIVE=1
+else
+  CALENDAR_V2_ACTIVE=0
+fi
 case "$MODE" in
+  now)
+    # Reserve the current UTC second as the coordinate. It is used for the
+    # tag, image, VERSION, changelog and every artifact of this release.
+    NEW=$(release_version::utc_coordinate)
+    release_version::calendar_v2_reservation_policy "$NEW" "$EXISTING_RELEASE_TAGS" ||
+      fail "could not reserve UTC coordinate $NEW (a later v2 coordinate is already published?)"
+    ;;
   patch|minor|major)
+    [[ "$CALENDAR_V2_ACTIVE" -eq 0 ]] ||
+      fail "legacy $MODE releases are closed after this product's first INSPR calendar v2 release; use: now"
     [[ "$LAST_KIND" == semver ]] ||
       fail "$MODE is available only before this product's first calendar release"
     IFS=. read -r LAST_MAJOR LAST_MINOR LAST_PATCH <<<"$LAST_VERSION"
@@ -1178,20 +1201,29 @@ case "$MODE" in
   *)
     NEW="${MODE#v}"
     release_version::is_supported "$NEW" ||
-      fail "mode must be patch|minor|major|<x.y.z>|<yy.mm.dd[.hh.mm]>; 6.0.0 is prohibited (got: $MODE)"
-    if release_version::is_calendar "$NEW"; then
-      EXISTING_RELEASE_TAGS=$(origin_release_tags)
+      fail "mode must be now|<YYMMDDhhmmss.0.0> (or a legacy form before the first v2 cut); 6.0.0 is prohibited (got: $MODE)"
+    if release_version::is_calendar_v2 "$NEW"; then
+      # An explicit coordinate must have been reserved earlier the same UTC
+      # day (for example by an external-stage publication that pins the
+      # next release tag) and must still be later than every published one.
+      release_version::calendar_v2_reservation_policy "$NEW" "$EXISTING_RELEASE_TAGS" ||
+        fail "v2 coordinate must be today's UTC day, not in the future, and later than every published v2 release: $NEW"
+    elif release_version::is_calendar "$NEW"; then
+      [[ "$CALENDAR_V2_ACTIVE" -eq 0 ]] ||
+        fail "calendar v1 (yy.mm.dd[.hh.mm]) releases are closed after this product's first INSPR calendar v2 release; use: now"
       release_version::calendar_recut_policy "$NEW" "$EXISTING_RELEASE_TAGS" ||
         fail "calendar release must use today's Vienna date; .hh.mm is valid only for a same-day recut"
       assert_origin_calendar_recut_evidence "$NEW" "$EXISTING_RELEASE_TAGS"
     else
+      [[ "$CALENDAR_V2_ACTIVE" -eq 0 ]] ||
+        fail "legacy SemVer releases are closed after this product's first INSPR calendar v2 release; use: now"
       [[ "$LAST_KIND" == semver ]] ||
         fail "legacy SemVer releases are closed after this product's first calendar release"
     fi
     ;;
 esac
 release_version::is_supported "$NEW" ||
-  fail "computed release $NEW is prohibited; use the actual Vienna calendar cut for the next major"
+  fail "computed release $NEW is prohibited; reserve the UTC coordinate with: now"
 NEW_TAG="v$NEW"
 RELEASE_BRANCH="release/$NEW_TAG"
 assert_external_stage_release_pin origin/main "$NEW_TAG"

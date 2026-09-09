@@ -33,8 +33,10 @@ surfaces the bits an agent needs extra reminders for.
 1. Merge PR to `main`.
 2. Update `docs/CHANGELOG.md`: add one reviewed leading `## [Unreleased]`
    section with a short headline and notable changes.
-3. Run the protected release script with legacy `patch|minor|major` or the
-   exact Vienna calendar cut `yy.mm.dd[.hh.mm]`; never create `6.0.0`.
+3. Run the protected release script with `now` (reserves the UTC
+   `YYMMDDhhmmss.0.0` coordinate, INSPR calendar v2) or an explicit
+   coordinate reserved earlier the same UTC day. Legacy `patch|minor|major`
+   and `yy.mm.dd[.hh.mm]` are closed; never create `6.0.0`.
 4. CI (`.github/workflows/ci.yml`) syncs `VERSION` from the git ref
    before the docker build, so the committed `VERSION` file is a
    dev baseline only — no manual bump is required for a release.

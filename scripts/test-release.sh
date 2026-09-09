@@ -1725,6 +1725,65 @@ test_interrupted_calendar_descendant_recovery() {
     fail 'calendar recovery midnight rejection still published a tag'
 }
 
+# PAI-979: INSPR calendar v2. An explicit coordinate reserved earlier the same
+# UTC day is accepted, the tag/VERSION/changelog carry it verbatim, and every
+# older era is closed once a v2 coordinate is published.
+test_calendar_v2_release_and_closures() {
+  local repo state origin output v2_version v2_iso earlier_version future_version vienna_version
+  v2_version="$(date -u +%y%m%d%H%M%S).0.0"
+  v2_iso=$(date -u +%Y-%m-%d)
+  earlier_version="$(date -u +%y%m%d)000000.0.0"
+  future_version="991231235959.0.0"
+  vienna_version=$(TZ=Europe/Vienna date +%y.%m.%d)
+  repo=$(setup_repo calendar-v2-release v1.0.0)
+  state="$TMP_ROOT/calendar-v2-release/gh-state"
+  origin=$(git -C "$repo" remote get-url origin)
+  prepend_release_notes "$repo" "$v2_version"
+
+  if FAKE_RELEASE_VERSION="$future_version" \
+     run_release "$repo" "$state" "$future_version" --no-edit >"$TMP_ROOT/calendar-v2-release/future" 2>&1; then
+    fail 'future v2 coordinate was accepted'
+  fi
+  grep -q 'not in the future' "$TMP_ROOT/calendar-v2-release/future" ||
+    fail 'future v2 coordinate rejection did not name the reservation policy'
+  if FAKE_RELEASE_VERSION="$v2_version" \
+     run_release "$repo" "$state" "260910081500.0.1" --no-edit >"$TMP_ROOT/calendar-v2-release/patch" 2>&1; then
+    fail 'non-zero PATCH accepted as a v2 coordinate'
+  fi
+
+  FAKE_RELEASE_VERSION="$v2_version" \
+    run_release "$repo" "$state" "$v2_version" --no-edit >/dev/null
+
+  [[ $(git --git-dir="$origin" show refs/pull/1/head:VERSION) == "$v2_version" ]] ||
+    fail 'v2 release did not write the exact coordinate into VERSION'
+  git --git-dir="$origin" show refs/pull/1/head:README.md | grep -qF "<code>v$v2_version</code>" ||
+    fail 'v2 release did not refresh the README badge'
+  git --git-dir="$origin" show refs/pull/1/head:docs/CHANGELOG.md | grep -qF "## [$v2_version] — $v2_iso" ||
+    fail 'v2 release changelog heading did not carry the UTC date of the coordinate'
+  [[ $(git --git-dir="$origin" rev-parse "refs/tags/v$v2_version^{}") == "$(<"$state/merge-oid")" ]] ||
+    fail 'v2 tag did not pin the protected merge'
+
+  # Exact published coordinate is a resumable checkpoint.
+  FAKE_RELEASE_VERSION="$v2_version" \
+    run_release "$repo" "$state" "$v2_version" --no-edit >/dev/null
+
+  # Every older era is closed once a v2 coordinate is published.
+  if FAKE_RELEASE_VERSION="$vienna_version" \
+     run_release "$repo" "$state" "$vienna_version" --no-edit >"$TMP_ROOT/calendar-v2-release/v1" 2>&1; then
+    fail 'calendar v1 cut accepted after the first v2 coordinate'
+  fi
+  grep -q 'closed after this product' "$TMP_ROOT/calendar-v2-release/v1" ||
+    fail 'v1 closure did not explain itself'
+  if FAKE_RELEASE_VERSION="1.0.1" \
+     run_release "$repo" "$state" patch --no-edit >"$TMP_ROOT/calendar-v2-release/patch-mode" 2>&1; then
+    fail 'legacy patch mode accepted after the first v2 coordinate'
+  fi
+  if FAKE_RELEASE_VERSION="$earlier_version" \
+     run_release "$repo" "$state" "$earlier_version" --no-edit >"$TMP_ROOT/calendar-v2-release/earlier" 2>&1; then
+    fail 'earlier same-day coordinate accepted behind a published v2 release'
+  fi
+}
+
 test_calendar_release_and_rejections() {
   local repo state origin output calendar_version calendar_iso next_day recut_version merge_oid wrong_oid blob_oid
   calendar_version=$(TZ=Europe/Vienna date +%y.%m.%d)
@@ -1903,6 +1962,7 @@ test_calendar_missing_provenance_receipt_recovery \
 test_calendar_missing_provenance_receipt_recovery \
   26.09.09 "$PROTECTED_SQUASH_RECOVERY_REASON" calendar-protected-squash-recovery 1
 test_interrupted_calendar_descendant_recovery
+test_calendar_v2_release_and_closures
 test_calendar_release_and_rejections
 test_committed_recovery_receipts_are_exact
 test_canonical_unreleased_is_consumed

@@ -13719,6 +13719,72 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 		)`,
 		`CREATE INDEX idx_acceptance_target_bindings_project ON acceptance_target_bindings(project_id, release_id)`,
 	}})
+
+	// M187 / PAI-979: admit the INSPR calendar v2 scheme (`inspr-calendar-v2`,
+	// UTC `YYMMDDhhmmss.0.0`) in stored Pharos v2 evidence. SQLite cannot widen a
+	// CHECK in place, so the M175 table is rebuilt byte-for-byte with the
+	// extended constraint; rows, the self-referencing deployment binding, the
+	// insert guard and the immutability triggers are preserved unchanged.
+	migrations = append(migrations, migration{version: 187, steps: []string{
+		`PRAGMA foreign_keys=OFF`,
+		`ALTER TABLE external_stage_pharos_evidence_v2 RENAME TO external_stage_pharos_evidence_v2_old187`,
+		`DROP TRIGGER IF EXISTS trg_external_stage_pharos_evidence_v2_insert_guard`,
+		`DROP TRIGGER IF EXISTS trg_external_stage_pharos_evidence_v2_no_update`,
+		`DROP TRIGGER IF EXISTS trg_external_stage_pharos_evidence_v2_no_delete`,
+		`CREATE TABLE external_stage_pharos_evidence_v2 (
+		 report_event_id                 INTEGER PRIMARY KEY REFERENCES external_stage_pharos_evidence(report_event_id),
+		 version_scheme                  TEXT NOT NULL CHECK(version_scheme IN ('legacy','inspr-calendar-v1','inspr-calendar-v2')),
+		 release_channel                 TEXT NOT NULL CHECK(length(CAST(release_channel AS BLOB)) BETWEEN 1 AND 64 AND
+		  release_channel GLOB '[a-z]*' AND release_channel NOT GLOB '*[^a-z0-9._-]*'),
+		 release_sequence                INTEGER NOT NULL CHECK(release_sequence>=0),
+		 release_manifest_coordinate     TEXT NOT NULL CHECK(length(CAST(release_manifest_coordinate AS BLOB)) BETWEEN 3 AND 255 AND
+		  instr(release_manifest_coordinate,':') BETWEEN 2 AND 65 AND
+		  substr(release_manifest_coordinate,1,1) GLOB '[a-z]' AND
+		  substr(release_manifest_coordinate,1,instr(release_manifest_coordinate,':')-1) NOT GLOB '*[^a-z0-9._-]*' AND
+		  substr(release_manifest_coordinate,instr(release_manifest_coordinate,':')+1,1) GLOB '[A-Za-z0-9]' AND
+		  substr(release_manifest_coordinate,instr(release_manifest_coordinate,':')+1) NOT GLOB '*[^A-Za-z0-9._/@:+-]*'),
+		 release_manifest_digest         BLOB NOT NULL CHECK(typeof(release_manifest_digest)='blob' AND length(release_manifest_digest)=32),
+		 bound_deployment_report_event_id INTEGER REFERENCES external_stage_pharos_evidence_v2(report_event_id)
+		) WITHOUT ROWID`,
+		`INSERT INTO external_stage_pharos_evidence_v2(report_event_id,version_scheme,release_channel,release_sequence,
+		  release_manifest_coordinate,release_manifest_digest,bound_deployment_report_event_id)
+		 SELECT report_event_id,version_scheme,release_channel,release_sequence,
+		  release_manifest_coordinate,release_manifest_digest,bound_deployment_report_event_id
+		 FROM external_stage_pharos_evidence_v2_old187 ORDER BY report_event_id`,
+		`DROP TABLE external_stage_pharos_evidence_v2_old187`,
+		`CREATE TRIGGER trg_external_stage_pharos_evidence_v2_insert_guard
+		 BEFORE INSERT ON external_stage_pharos_evidence_v2
+		 WHEN NOT EXISTS(
+		  SELECT 1 FROM external_stage_pharos_evidence evidence
+		  JOIN external_stage_report_events report ON report.id=evidence.report_event_id
+		  JOIN external_stage_handoffs handoff ON handoff.id=report.handoff_row_id
+		  WHERE evidence.report_event_id=NEW.report_event_id AND handoff.reporter_class='pharos'
+		   AND ((evidence.evidence_kind='deployment' AND NEW.bound_deployment_report_event_id IS NULL) OR
+		        (evidence.evidence_kind='verification' AND NEW.bound_deployment_report_event_id IS NOT NULL AND EXISTS(
+		          SELECT 1 FROM external_stage_pharos_evidence deployment
+		          JOIN external_stage_pharos_evidence_v2 deployment_v2 ON deployment_v2.report_event_id=deployment.report_event_id
+		          JOIN external_stage_report_events deployment_report ON deployment_report.id=deployment.report_event_id
+		          JOIN external_stage_handoffs deployment_handoff ON deployment_handoff.id=deployment_report.handoff_row_id
+		          WHERE deployment.report_event_id=NEW.bound_deployment_report_event_id
+		           AND deployment.evidence_kind='deployment' AND deployment.result='succeeded'
+		           AND deployment_handoff.delivery_id=handoff.delivery_id AND deployment_handoff.attempt_id=handoff.attempt_id
+		           AND deployment_handoff.stage_key='deployment' AND deployment_handoff.lifecycle_state='succeeded'
+		           AND deployment.environment_symbol=evidence.environment_symbol
+		           AND deployment.artifact_version=evidence.artifact_version
+		           AND deployment.artifact_digest=evidence.artifact_digest
+		           AND deployment.commit_digest=evidence.commit_digest
+		           AND deployment_v2.version_scheme=NEW.version_scheme
+		           AND deployment_v2.release_channel=NEW.release_channel
+		           AND deployment_v2.release_sequence=NEW.release_sequence
+		           AND deployment_v2.release_manifest_coordinate=NEW.release_manifest_coordinate
+		           AND deployment_v2.release_manifest_digest=NEW.release_manifest_digest))))
+		 BEGIN SELECT RAISE(ABORT,'invalid external stage Pharos v2 evidence binding'); END`,
+		`CREATE TRIGGER trg_external_stage_pharos_evidence_v2_no_update BEFORE UPDATE ON external_stage_pharos_evidence_v2
+		 BEGIN SELECT RAISE(ABORT,'external stage v2 evidence is immutable'); END`,
+		`CREATE TRIGGER trg_external_stage_pharos_evidence_v2_no_delete BEFORE DELETE ON external_stage_pharos_evidence_v2
+		 BEGIN SELECT RAISE(ABORT,'external stage v2 evidence is immutable'); END`,
+		`PRAGMA foreign_keys=ON`,
+	}})
 	for _, m := range migrations {
 		if m.version > maxVersion {
 			continue

@@ -221,15 +221,22 @@ ever inferred from punctuation in the version string.
 V2 changes only the Pharos artifact evidence and the pull certification tuple.
 Every Pharos deployment or verification fact carries all of:
 
-- `version_scheme`: exactly `legacy` or `inspr-calendar-v1`;
+- `version_scheme`: exactly `legacy`, `inspr-calendar-v1`, or `inspr-calendar-v2`;
 - the original `version` spelling, preserved without translation;
 - an explicit symbolic `release_channel` and non-negative monotonic
   `release_sequence`;
 - the exact artifact SHA-256 and source commit digest from v1;
 - an immutable `release_manifest_coordinate` and its exact SHA-256 digest.
 
-Calendar versions use `yy.mm.dd` or `yy.mm.dd.hh.mm.ss`, with fixed-width
-two-digit fields and real Gregorian dates. Legacy versions remain explicitly
+Calendar v1 versions use `yy.mm.dd` or `yy.mm.dd.hh.mm.ss`, with fixed-width
+two-digit fields and real Gregorian dates. Calendar v2 versions
+(INSPR-395 / PAI-979) use exactly `YYMMDDhhmmss.0.0`: the UTC reservation
+second as twelve fixed-width digits followed by the literal constant `0.0`,
+with no prerelease or build suffix. A v2 coordinate is also a syntactically
+valid SemVer string; that is deliberate and still never used to infer the
+scheme. Each version is validated only against the grammar of its declared
+scheme, so a v1 spelling under `inspr-calendar-v2` and a v2 spelling under
+`inspr-calendar-v1` both fail closed. Legacy versions remain explicitly
 legacy even when their spelling resembles a calendar. Rollback is an explicit
 new deployment fact naming the older immutable artifact and release-set
 manifest; the service never silently rewrites, downgrades, or promotes an
@@ -268,8 +275,8 @@ from implementation evidence:
   image **index or manifest** digest; it may be recorded but is never a
   release-set digest and never fills `release_manifest_digest`;
 - `artifact` / `external_ref` prefixed `inspr-release-v1:` — typed
-  `{scheme}/{channel}/{sequence}/{version}` where `scheme` is `legacy` or
-  `inspr-calendar-v1`. Generic `external_ref` strings, including colon-delimited
+  `{scheme}/{channel}/{sequence}/{version}` where `scheme` is `legacy`,
+  `inspr-calendar-v1`, or `inspr-calendar-v2`. Generic `external_ref` strings, including colon-delimited
   tuples without that prefix, are ignored and never parsed as release identity.
   A recognized prefix with a malformed or conflicting payload is refused rather
   than guessed as another digest class;
@@ -280,7 +287,9 @@ A QA `test_result` digest remains the delivery QA binding digest from
 Non-baseline v1 owner reports keep digest/commit compatibility even when QA
 carries a digest. A baseline-owned delivery that already has a handoff refuses
 v1 owner success with `v2_report_required` rather than a generic invalid
-request. Frozen owner-v2 and Janus-v1 fixture bytes are unchanged.
+request. Frozen Janus-v1 fixture bytes are unchanged; the owner-v2 fixture was
+republished with the calendar v2 pair in PAI-979 and re-certified through
+`manifest-v2.json`.
 
 The first v2 publication pull request must be merged with a true merge commit,
 not a squash or rebase merge. The certified content commit recorded by
@@ -291,11 +300,12 @@ make the first calendar release impossible.
 
 The canonical v2 owner fixture lives in
 `backend/contracts/fixtures/external-stage-v2/owner-pharos-v2.json`. It covers
-an explicit legacy deployment, an explicit calendar deployment with its exact
-verification, and a later explicit legacy rollback. Its fixture-set digest is:
+an explicit legacy deployment, an explicit calendar v1 deployment with its
+exact verification, a later explicit legacy rollback, and an explicit calendar
+v2 deployment with its exact verification. Its fixture-set digest is:
 
 ```text
-sha256:6bba9613230c6ea728db58ffea5533399caed19e6d56a8d78ef19d0fde20be8a
+sha256:fb68cb9990bfcdfe4168f9780c412327d357ecd4181a6b24499352c7858be5f6
 ```
 
 The v2 fixture digest uses the same framed algorithm with the domain changed to
