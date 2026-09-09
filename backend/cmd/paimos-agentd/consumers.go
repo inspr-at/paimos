@@ -182,6 +182,87 @@ func (c *nativeConsumers) Verify(ctx context.Context, b runtimeconsumer.Binding)
 	return nil
 }
 func (c *nativeConsumers) Poll(ctx context.Context, b runtimeconsumer.Binding) (*runtimeconsumer.Work, error) {
+	target, err := c.primaryTarget(ctx, b)
+	if err != nil {
+		return nil, err
+	}
+	session, err := c.local(b)
+	if err != nil {
+		return nil, err
+	}
+	if !c.controller.SupportsInbox(session.ID) || session.Adapter != "codex" && session.Adapter != "claude" && session.Adapter != "pi" && session.Adapter != "cursor" {
+		return nil, runtimeconsumer.ErrUnsupported
+	}
+	// Polling the server is a lease mutation. A receiver that cannot accept the
+	// FIFO head must wait locally so ordinary busy time consumes no attempts.
+	// A steerable busy receiver consults the existing redacted delivery ledger
+	// and drains only when the exact FIFO head can be steered. Prepare repeats
+	// the readiness check to close the local race before effect intent.
+	if c.controller.DeliveryHeld(session.ID) {
+		return nil, runtimeconsumer.ErrDeferred
+	}
+	if !c.controller.InboxReady(session.ID) {
+		if !session.Steerable {
+			return nil, runtimeconsumer.ErrDeferred
+		}
+		head, err := c.deliveryHead(ctx, b)
+		if err != nil {
+			return nil, err
+		}
+		if head == nil {
+			return nil, nil
+		}
+		if head.EffectiveTargetID != target.ID || head.EffectiveTargetVersion != target.Version {
+			return nil, runtimeconsumer.ErrOwnership
+		}
+		switch head.State {
+		case "leased":
+			return nil, runtimeconsumer.ErrDeferred
+		case "pending", "retry":
+		default:
+			return nil, runtimeconsumer.ErrConflict
+		}
+		if head.RequestedLevel != "steer" || target.MaximumLevel != "steer" {
+			return nil, runtimeconsumer.ErrDeferred
+		}
+	}
+	raw, err := c.command(ctx, b, "drain")
+	if err != nil {
+		return nil, err
+	}
+	var page agentmessage.InboxPage
+	if json.Unmarshal(raw, &page) != nil || page.Address != b.Address || len(page.Messages) > 100 {
+		return nil, runtimeconsumer.ErrAuthority
+	}
+	var work *runtimeconsumer.Work
+	waiting := false
+	for _, message := range page.Messages {
+		delivery := message.DeliveryWork
+		if delivery == nil || delivery.TargetRef != "" || delivery.Instance != b.Instance || delivery.ProjectID != b.Project || message.To != b.Address || uuid.Validate(delivery.DeliveryID) != nil {
+			return nil, runtimeconsumer.ErrAuthority
+		}
+		switch delivery.State {
+		case "leased":
+			if delivery.Adapter != agentmessage.AdapterManagedHarness || work != nil {
+				return nil, runtimeconsumer.ErrAuthority
+			}
+			work = &runtimeconsumer.Work{ID: delivery.DeliveryID, Cursor: message.Cursor, Payload: message, Revision: target.ID}
+		case "pending", "retry":
+			if delivery.Adapter != agentmessage.AdapterManagedHarness || delivery.FallbackReason != "fifo_blocked" {
+				return nil, runtimeconsumer.ErrConflict
+			}
+			waiting = true
+		default:
+			return nil, runtimeconsumer.ErrConflict
+		}
+	}
+	if work == nil && waiting {
+		return nil, runtimeconsumer.ErrDeferred
+	}
+	return work, nil
+}
+
+func (c *nativeConsumers) primaryTarget(ctx context.Context, b runtimeconsumer.Binding) (agentmessage.Target, error) {
 	// Inventory contains only redacted metadata. Detect a conflicting legacy
 	// target without scanning command lines or signalling an unowned process.
 	query := url.Values{"address": []string{b.Address}}
@@ -193,56 +274,63 @@ func (c *nativeConsumers) Poll(ctx context.Context, b runtimeconsumer.Binding) (
 		Targets []agentmessage.Target `json:"targets"`
 	}
 	if inventoryErr != nil || len(inventory) > reporterOutputLimit || json.Unmarshal(inventory, &inventoryResponse) != nil {
-		return nil, runtimeconsumer.ErrAuthority
+		return agentmessage.Target{}, runtimeconsumer.ErrAuthority
 	}
 	c.mu.Lock()
 	targetID := c.targets[b.Key()]
 	c.mu.Unlock()
-	own := false
+	var own *agentmessage.Target
 	for _, target := range inventoryResponse.Targets {
 		if target.Instance != b.Instance || target.ProjectID != b.Project || target.Address != b.Address {
-			return nil, runtimeconsumer.ErrAuthority
+			return agentmessage.Target{}, runtimeconsumer.ErrAuthority
 		}
 		if target.Enabled && target.Role == "primary" {
 			if target.ID == targetID && target.Adapter == agentmessage.AdapterManagedHarness {
-				own = true
+				copy := target
+				own = &copy
 				continue
 			}
 			if target.Adapter != agentmessage.AdapterManagedHarness {
-				return nil, runtimeconsumer.ErrLegacy
+				return agentmessage.Target{}, runtimeconsumer.ErrLegacy
 			}
-			return nil, runtimeconsumer.ErrOwnership
+			return agentmessage.Target{}, runtimeconsumer.ErrOwnership
 		}
 	}
-	if !own {
-		return nil, runtimeconsumer.ErrOwnership
+	if own == nil {
+		return agentmessage.Target{}, runtimeconsumer.ErrOwnership
 	}
-	raw, err := c.command(ctx, b, "drain")
+	return *own, nil
+}
+
+func (c *nativeConsumers) deliveryStatuses(ctx context.Context, b runtimeconsumer.Binding) ([]agentmessage.DeliveryStatus, error) {
+	route := fmt.Sprintf("/api/projects/%d/message-deliveries", b.Project)
+	callCtx, cancel := context.WithTimeout(ctx, reporterSessionTimeout)
+	raw, callErr := c.reporter.run(callCtx, c.reporter.paimosPath, []string{"--json", "curl", route}, c.reporter.environment, nil)
+	cancel()
+	var response struct {
+		Deliveries []agentmessage.DeliveryStatus `json:"deliveries"`
+	}
+	if callErr != nil || len(raw) > reporterOutputLimit || json.Unmarshal(raw, &response) != nil {
+		return nil, runtimeconsumer.ErrAuthority
+	}
+	return response.Deliveries, nil
+}
+
+func (c *nativeConsumers) deliveryHead(ctx context.Context, b runtimeconsumer.Binding) (*agentmessage.DeliveryStatus, error) {
+	deliveries, err := c.deliveryStatuses(ctx, b)
 	if err != nil {
 		return nil, err
 	}
-	var page agentmessage.InboxPage
-	if json.Unmarshal(raw, &page) != nil || page.Address != b.Address || len(page.Messages) > 100 {
-		return nil, runtimeconsumer.ErrAuthority
-	}
-	var work *runtimeconsumer.Work
-	for _, message := range page.Messages {
-		delivery := message.DeliveryWork
-		if delivery == nil {
-			return nil, runtimeconsumer.ErrAuthority
-		}
-		if delivery.State != "leased" || delivery.Adapter != agentmessage.AdapterManagedHarness {
+	for _, delivery := range deliveries {
+		if delivery.Address != b.Address || delivery.State == "handed_off" || delivery.State == "dead" {
 			continue
 		}
-		if delivery.TargetRef != "" || delivery.Instance != b.Instance || delivery.ProjectID != b.Project || message.To != b.Address || uuid.Validate(delivery.DeliveryID) != nil || work != nil {
+		if uuid.Validate(delivery.DeliveryID) != nil || (delivery.RequestedLevel != "simple" && delivery.RequestedLevel != "steer") {
 			return nil, runtimeconsumer.ErrAuthority
 		}
-		work = &runtimeconsumer.Work{ID: delivery.DeliveryID, Cursor: message.Cursor, Payload: message, Revision: targetID}
+		return &delivery, nil
 	}
-	if work == nil && len(page.Messages) > 0 {
-		return nil, runtimeconsumer.ErrConflict
-	}
-	return work, nil
+	return nil, nil
 }
 func (c *nativeConsumers) Prepare(_ context.Context, b runtimeconsumer.Binding, w runtimeconsumer.Work) error {
 	session, err := c.local(b)
@@ -319,6 +407,50 @@ func (c *nativeConsumers) Complete(ctx context.Context, b runtimeconsumer.Bindin
 	}
 	var cursor agentmessage.CursorState
 	if json.Unmarshal(raw, &cursor) != nil || cursor.Address != b.Address || cursor.Cursor < w.Cursor {
+		return runtimeconsumer.ErrUnknown
+	}
+	return nil
+}
+
+// RecoverCircuit accepts only the durable shape produced by the old busy/FIFO
+// bug: one exact-target lease followed by rows explicitly marked fifo_blocked.
+// Local pending effect receipts are checked by runtimeconsumer before this
+// read-only proof is requested.
+func (c *nativeConsumers) RecoverCircuit(ctx context.Context, b runtimeconsumer.Binding, evidence runtimeconsumer.Evidence) error {
+	if evidence.Reason != "singleton_conflict" {
+		return runtimeconsumer.ErrUnknown
+	}
+	target, err := c.primaryTarget(ctx, b)
+	if err != nil {
+		return err
+	}
+	deliveries, err := c.deliveryStatuses(ctx, b)
+	if err != nil {
+		return runtimeconsumer.ErrUnknown
+	}
+	leased, blocked := false, false
+	seen := map[string]bool{}
+	for _, delivery := range deliveries {
+		if delivery.Address != b.Address || delivery.State == "handed_off" || delivery.State == "dead" {
+			continue
+		}
+		if uuid.Validate(delivery.DeliveryID) != nil || seen[delivery.DeliveryID] || delivery.EffectiveTargetID != target.ID || delivery.EffectiveTargetVersion != target.Version || (delivery.RequestedLevel != "simple" && delivery.RequestedLevel != "steer") {
+			return runtimeconsumer.ErrUnknown
+		}
+		seen[delivery.DeliveryID] = true
+		if !leased {
+			if delivery.State != "leased" || delivery.AttemptCount < 1 || delivery.LastErrorCode != "" {
+				return runtimeconsumer.ErrUnknown
+			}
+			leased = true
+			continue
+		}
+		if (delivery.State != "pending" && delivery.State != "retry") || delivery.AttemptCount != 0 || delivery.LastErrorCode != "fifo_blocked" {
+			return runtimeconsumer.ErrUnknown
+		}
+		blocked = true
+	}
+	if !leased || !blocked {
 		return runtimeconsumer.ErrUnknown
 	}
 	return nil

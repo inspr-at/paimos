@@ -1,4 +1,5 @@
 import { api } from '@/api/client'
+import { publicURL } from '@/publicPath'
 import type { IssueDetailForm } from '@/config/issueDetailForm'
 import type { Issue, Project, Sprint, Tag, User } from '@/types'
 
@@ -231,7 +232,7 @@ export function adminPortalVisibilityCsvUrl(
   projectId: number,
   section: 'current' | 'audit',
 ): string {
-  return `/api/admin/projects/${projectId}/portal-visibility.csv?section=${section}`
+  return publicURL(`/api/admin/projects/${projectId}/portal-visibility.csv?section=${section}`)
 }
 
 export function assignIssueSprint(issueId: number, sprintId: number): Promise<void> {

@@ -15,6 +15,7 @@ import { useBranding } from '@/composables/useBranding'
 import { useFlowHost } from '@/composables/useFlowHost'
 import { FLOW_OVERVIEW_LOCATION } from '@/services/flowHost'
 import { formatDisplayVersion } from '@/utils/version'
+import { publicURL, stripPublicBase } from '@/publicPath'
 
 const CONSEQUENTIAL = new Set(['flow:start-intent', 'flow:review-batch', 'flow:save-proposal'])
 
@@ -83,7 +84,7 @@ async function onFlowIntent(event: Event) {
   }
   if (type === 'flow:health') {
     try {
-      const response = await fetch('/api/health', { headers: { accept: 'application/json' } })
+      const response = await fetch(publicURL('/api/health'), { headers: { accept: 'application/json' } })
       const body = (await response.json().catch(() => ({}))) as { version?: string }
       notice.value = response.ok
         ? `Paimos health probe succeeded (${body.version || formatDisplayVersion(__APP_VERSION__)}). This is not delivery evidence.`
@@ -99,7 +100,7 @@ async function onFlowIntent(event: Event) {
   const location = result.location || (props.projectId ? FLOW_OVERVIEW_LOCATION(props.projectId) : '')
   if (!location) return
   const target = new URL(location, window.location.origin)
-  await router.push(`${target.pathname}${target.search}${target.hash}`).catch(() => {})
+  await router.push(stripPublicBase(`${target.pathname}${target.search}${target.hash}`)).catch(() => {})
   await nextTick()
   document.getElementById('baseline-batch')?.scrollIntoView({ block: 'start' })
 }

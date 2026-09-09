@@ -20,7 +20,8 @@
 // event log is append-only; `seq` is the per-session cursor used both for
 // time-travel and SSE resume.
 
-import { api } from "@/api/client";
+import { api, readCsrfToken } from "@/api/client";
+import { publicURL } from "@/publicPath";
 
 export type IntakeLanguage = "en" | "de";
 export type IntakeSessionStatus = "active" | "completed" | "abandoned";
@@ -146,7 +147,7 @@ export function restoreIntakeSession(id: number, seq: number) {
 }
 
 export function intakeStreamURL(id: number, sinceSeq = 0): string {
-  return `/api/intake/sessions/${id}/stream?since=${encodeURIComponent(String(sinceSeq))}`;
+  return publicURL(`/api/intake/sessions/${id}/stream?since=${encodeURIComponent(String(sinceSeq))}`);
 }
 
 /**
@@ -158,12 +159,8 @@ export async function postIntakeAudio(
   id: number,
   blob: Blob,
 ): Promise<{ seq: number; text: string }> {
-  const csrf =
-    document.cookie
-      .split("; ")
-      .find((c) => c.startsWith("csrf_token="))
-      ?.split("=")[1] ?? "";
-  const res = await fetch(`/api/intake/sessions/${id}/audio`, {
+  const csrf = readCsrfToken();
+  const res = await fetch(publicURL(`/api/intake/sessions/${id}/audio`), {
     method: "POST",
     credentials: "include",
     headers: {
@@ -184,7 +181,7 @@ export async function postIntakeAudio(
 /** Whether speech input is configured on this instance (from /ai/status). */
 export async function voiceAvailable(): Promise<boolean> {
   try {
-    const res = await fetch("/api/ai/status", { credentials: "include" });
+    const res = await fetch(publicURL("/api/ai/status"), { credentials: "include" });
     if (!res.ok) return false;
     const data = (await res.json()) as { voice_available?: boolean };
     return data.voice_available === true;

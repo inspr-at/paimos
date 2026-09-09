@@ -90,7 +90,7 @@ func SessionIDFromRequest(r *http.Request) string {
 	if sid, ok := r.Context().Value(sessionIDKey).(string); ok && strings.TrimSpace(sid) != "" {
 		return sid
 	}
-	cookie, err := r.Cookie(sessionCookie)
+	cookie, err := readSessionCookie(r)
 	if err != nil {
 		return ""
 	}

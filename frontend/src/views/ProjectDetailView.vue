@@ -12,6 +12,7 @@ import type { MetaOption } from '@/components/MetaSelect.vue'
 import ImportCollisionModal from '@/components/ImportCollisionModal.vue'
 import type { PreflightResult, CollisionStrategy } from '@/components/ImportCollisionModal.vue'
 import { errMsg } from '@/api/client'
+import { publicURL } from '@/publicPath'
 import { MAX_IMAGE_SIZE } from '@/utils/constants'
 import { useAuthStore } from '@/stores/auth'
 import { useSearchStore } from '@/stores/search'
@@ -848,7 +849,7 @@ watch(
         </RouterLink>
         <img
           v-if="project.logo_path"
-          :src="project.logo_path"
+          :src="publicURL(project.logo_path)"
           class="ah-project-logo"
           :alt="project.name"
         />
@@ -1176,7 +1177,7 @@ watch(
                 <div class="logo-upload-row">
                   <img
                     v-if="project?.logo_path"
-                    :src="project.logo_path"
+                    :src="publicURL(project.logo_path)"
                     class="logo-preview"
                     alt="Current logo"
                   />

@@ -25,6 +25,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
@@ -34,6 +35,7 @@ import (
 	"github.com/inspr-at/paimos/backend/handlers"
 	"github.com/inspr-at/paimos/backend/handlers/knowledge"
 	"github.com/inspr-at/paimos/backend/httpcontract"
+	"github.com/inspr-at/paimos/backend/publicbase"
 
 	_ "modernc.org/sqlite"
 )
@@ -115,6 +117,7 @@ func buildRouter() http.Handler {
 	r := chi.NewRouter()
 	r.Use(handlers.ClassifiedControlCachePolicyMiddleware)
 	r.Use(handlers.ControlAwareRecoverer)
+	r.Use(publicbase.RejectOutsideAndStrip(publicbase.Current()))
 	r.Use(handlers.SessionAuditMiddleware) // PAI-97 — off unless PAIMOS_AUDIT_SESSIONS=true
 	r.Use(handlers.RequestIDMiddleware)
 
@@ -570,13 +573,26 @@ func (ts *testServer) login(t *testing.T, username, password string) string {
 		body, _ := io.ReadAll(resp.Body)
 		t.Fatalf("login %s: status %d: %s", username, resp.StatusCode, body)
 	}
-	for _, c := range resp.Cookies() {
-		if c.Name == "session" {
-			return c.Name + "=" + c.Value
+	for _, name := range []string{"paimos_session", "session"} {
+		for _, c := range resp.Cookies() {
+			if c.Name == name {
+				return c.Name + "=" + c.Value
+			}
 		}
 	}
 	t.Fatalf("login %s: no session cookie", username)
 	return ""
+}
+
+func cookieSessionID(cookie string) string {
+	switch {
+	case strings.HasPrefix(cookie, "paimos_session="):
+		return strings.TrimPrefix(cookie, "paimos_session=")
+	case strings.HasPrefix(cookie, "session="):
+		return strings.TrimPrefix(cookie, "session=")
+	default:
+		return cookie
+	}
 }
 
 // get performs a GET request with the given cookie.

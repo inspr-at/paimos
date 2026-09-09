@@ -20,6 +20,7 @@ import { useAuthStore } from "@/stores/auth";
 import { useUndoStore } from "@/stores/undo";
 import { safePostLoginRedirect } from "@/router/redirects";
 import { mustChangePassword } from "@/api/client";
+import { publicURL, routerHistoryBase } from "@/publicPath";
 import type { AppShell } from "@/router/shell";
 
 // Route meta shape. `projectIdParam` names the URL param that holds the
@@ -240,7 +241,7 @@ export function buildRoutes(includeDev: boolean): RouteRecordRaw[] {
 }
 
 const router = createRouter({
-  history: createWebHistory(),
+  history: createWebHistory(routerHistoryBase()),
   routes: buildRoutes(import.meta.env.DEV),
 });
 
@@ -318,7 +319,7 @@ router.onError((error, to) => {
     error.message.includes("Importing a module script failed") ||
     error.message.includes("error loading dynamically imported module")
   ) {
-    window.location.href = to.fullPath;
+    window.location.href = publicURL(to.fullPath);
   }
 });
 

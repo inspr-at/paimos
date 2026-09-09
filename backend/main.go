@@ -38,6 +38,7 @@ import (
 	"github.com/inspr-at/paimos/backend/handlers/crm"
 	"github.com/inspr-at/paimos/backend/handlers/knowledge"
 	"github.com/inspr-at/paimos/backend/mailer"
+	"github.com/inspr-at/paimos/backend/publicbase"
 	"github.com/inspr-at/paimos/backend/releaseacceptance"
 	"github.com/inspr-at/paimos/backend/secretinput"
 	"github.com/inspr-at/paimos/backend/storage"
@@ -95,6 +96,12 @@ func main() {
 		log.Fatalf("configuration: %v", err)
 	}
 
+	publicBasePath, err := publicbase.LoadFromEnv()
+	if err != nil {
+		log.Fatalf("configuration: %v", err)
+	}
+	publicbase.SetCurrent(publicBasePath)
+
 	// PAI-267: validate dev-login config at boot. No-op on production
 	// builds (prod stub returns immediately). On dev builds, panics if
 	// PAIMOS_ENV=production OR if PAIMOS_DEV_LOGIN_TOKEN is set but
@@ -138,6 +145,10 @@ func main() {
 	// can record a control request under the ordinary format.
 	r.Use(handlers.ControlAwareRequestLogger)
 	r.Use(handlers.ControlAwareRecoverer)
+	// Native prefix: reject off-mount requests and strip the configured
+	// path so chi routes stay /api and /*. Classification already ran on
+	// the original URL via publicbase.Current().
+	r.Use(publicbase.RejectOutsideAndStrip(publicBasePath))
 	r.Use(middleware.Compress(5))
 	// PAI-114: baseline security headers on every response. Non-breaking
 	// (X-Frame-Options=SAMEORIGIN keeps the in-app PDF preview iframes
@@ -179,7 +190,7 @@ func main() {
 				// SPA fallback (or root /): serve index.html with no-cache so
 				// browsers always fetch the latest version after deploys.
 				w.Header().Set("Cache-Control", "no-cache")
-				http.ServeFile(w, r, indexPath)
+				serveSPAIndex(w, indexPath)
 				return
 			}
 			// Cache strategy under /assets/:
@@ -364,6 +375,18 @@ func getStaticDir() string {
 		return dir
 	}
 	return "/app/static"
+}
+
+func serveSPAIndex(w http.ResponseWriter, indexPath string) {
+	// #nosec G304 -- indexPath is STATIC_DIR/index.html from operator config.
+	body, err := os.ReadFile(indexPath)
+	if err != nil {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	body = publicbase.InjectIndexBootstrap(body, publicbase.Current())
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_, _ = w.Write(body)
 }
 
 func getDataDir() string {

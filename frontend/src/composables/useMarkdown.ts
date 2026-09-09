@@ -18,6 +18,7 @@
 import { computed, type Ref } from 'vue'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
+import { rewriteRootAbsoluteURLs } from '@/publicPath'
 
 // Configure marked once — gfm (GitHub Flavored Markdown), no async renderer.
 marked.setOptions({ gfm: true, breaks: true })
@@ -42,7 +43,7 @@ export function useMarkdown(text: Ref<string>, enabled: Ref<boolean>) {
         .replace(/\n/g, '<br>')
     }
     const rendered = marked.parse(src) as string
-    return DOMPurify.sanitize(rendered)
+    return rewriteRootAbsoluteURLs(DOMPurify.sanitize(rendered))
   })
 
   return { html }

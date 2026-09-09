@@ -2,6 +2,7 @@
 import LoadingText from "@/components/LoadingText.vue";
 import { ref, computed } from 'vue'
 import { api } from '@/api/client'
+import { publicURL } from '@/publicPath'
 import { formatInteger } from '@/composables/useNumberFormat'
 
 interface DevReportMeta { filename: string; version: string; generated_at: string; size_bytes: number; passed?: number; failed?: number; total?: number }
@@ -97,7 +98,7 @@ async function uploadBundle() {
   if (uploadSummaryFile.value) body.append('summary', uploadSummaryFile.value)
   uploadLoading.value = true
   try {
-    const res = await fetch('/api/dev/test-reports', {
+    const res = await fetch(publicURL('/api/dev/test-reports'), {
       method: 'POST',
       credentials: 'same-origin',
       body,
@@ -122,7 +123,7 @@ async function openDevReport(filename: string) {
   devSelectedReport.value = filename
   devReportLoading.value = true
   try {
-    const res = await fetch(`/api/dev/test-reports/${filename}`, { credentials: 'same-origin' })
+    const res = await fetch(publicURL(`/api/dev/test-reports/${filename}`), { credentials: 'same-origin' })
     devReportHTML.value = await res.text()
   } catch { devReportHTML.value = '<p>Failed to load report.</p>' }
   finally { devReportLoading.value = false }

@@ -33,6 +33,7 @@ import { createPortalFetcher } from '@/composables/issueQueryFetchers'
 import { provideIssueContext } from '@/composables/useIssueContext'
 import { formatInteger } from '@/composables/useNumberFormat'
 import type { Issue, Project, Sprint, Tag, User } from '@/types'
+import { publicURL } from '@/publicPath'
 
 interface PortalProject {
   id: number
@@ -460,11 +461,11 @@ async function submitRequest() {
       <div class="pv__header-left">
         <img
           v-if="project.logo_path"
-          :src="project.logo_path"
+          :src="publicURL(project.logo_path)"
           alt=""
           class="pv__logo"
         />
-        <img v-else :src="branding.logo" alt="" class="pv__logo pv__logo--fallback" />
+        <img v-else :src="publicURL(branding.logo)" alt="" class="pv__logo pv__logo--fallback" />
         <div>
           <div class="pv__key">{{ project.key }}</div>
           <h1 class="pv__name">{{ project.name }}</h1>

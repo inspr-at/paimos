@@ -275,16 +275,7 @@ func TOTPVerify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// #nosec G124 -- HttpOnly + SameSite=Lax are set; Secure mirrors COOKIE_SECURE (true on HTTPS deployments).
-	http.SetCookie(w, &http.Cookie{
-		Name:     sessionCookie,
-		Value:    sid,
-		Path:     "/",
-		Expires:  expiresAt,
-		HttpOnly: true,
-		Secure:   cookieSecure,
-		SameSite: http.SameSiteLaxMode,
-	})
+	setSessionCookieValue(w, sid, expiresAt)
 	// PAI-113: bind a fresh CSRF token to the new session.
 	if _, err := IssueCSRFForSession(w, sid); err != nil {
 		log.Printf("TOTPVerify: issue csrf token: %v", err)

@@ -61,11 +61,6 @@ import (
 )
 
 const (
-	// CSRFCookieName is the cookie the SPA reads to find the current
-	// session's CSRF token. Non-HttpOnly by design — the entire point is
-	// that JS in the SPA reads it and echoes it back in a header.
-	CSRFCookieName = "csrf_token"
-
 	// CSRFHeaderName is the header the SPA sets on every mutating request.
 	CSRFHeaderName = "X-CSRF-Token"
 )
@@ -124,29 +119,25 @@ func NewCSRFToken() (string, error) {
 // `csrf_token_mismatch` because `got` was empty.
 func SetCSRFCookie(w http.ResponseWriter, token string) {
 	// #nosec G124 -- intentionally non-HttpOnly (the SPA must echo the token back); SameSite=Strict; Secure mirrors COOKIE_SECURE.
-	http.SetCookie(w, &http.Cookie{
-		Name:    CSRFCookieName,
-		Value:   token,
-		Path:    "/",
-		Expires: time.Now().Add(sessionAbsoluteLifetime),
-		// Intentionally NOT HttpOnly — the SPA must read this from JS.
+	base := http.Cookie{
+		Value:    token,
+		Path:     "/",
+		Expires:  time.Now().Add(sessionAbsoluteLifetime),
 		HttpOnly: false,
 		Secure:   cookieSecure,
-		// Strict is fine: the cookie is only ever needed when the SPA is
-		// running, which by definition is a same-site context.
 		SameSite: http.SameSiteStrictMode,
-	})
+	}
+	for _, name := range cookieWriteNames(CSRFCookieName, legacyCSRFCookieName) {
+		setHTTPCookie(w, name, base)
+	}
 }
 
 // ClearCSRFCookie removes the cookie at logout time.
 func ClearCSRFCookie(w http.ResponseWriter) {
-	// #nosec G124 -- deletion cookie (empty value, MaxAge -1); it carries no token to protect.
-	http.SetCookie(w, &http.Cookie{
-		Name:   CSRFCookieName,
-		Value:  "",
-		Path:   "/",
-		MaxAge: -1,
-	})
+	expireNamedCookies(w, CSRFCookieName)
+	if !sharedOriginCookies() {
+		expireNamedCookies(w, legacyCSRFCookieName)
+	}
 }
 
 // IssueCSRFForSession generates a new token, persists it on the session

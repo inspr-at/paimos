@@ -26,6 +26,7 @@ import {
 } from '@/services/projectAgents'
 import LoadingText from '@/components/LoadingText.vue'
 import { formatInteger } from '@/composables/useNumberFormat'
+import { publicURL } from '@/publicPath'
 
 const props = defineProps<{
   projectId: number
@@ -145,15 +146,15 @@ function statusLabel(status: string): string {
 }
 
 function artifactJsonHref(agent: ProjectAgent): string {
-  return `/api/projects/${props.projectId}/agents/${encodeURIComponent(agent.name)}.json`
+  return publicURL(`/api/projects/${props.projectId}/agents/${encodeURIComponent(agent.name)}.json`)
 }
 
 function artifactMarkdownHref(agent: ProjectAgent): string {
-  return `/api/projects/${props.projectId}/agents/${encodeURIComponent(agent.name)}.md`
+  return publicURL(`/api/projects/${props.projectId}/agents/${encodeURIComponent(agent.name)}.md`)
 }
 
 function issueHref(run: AgentRun): string {
-  return `/projects/${props.projectId}/issues/${run.issue_id}#ai-workbench`
+  return publicURL(`/projects/${props.projectId}/issues/${run.issue_id}#ai-workbench`)
 }
 
 function artifactStatus(agent: ProjectAgent): string {

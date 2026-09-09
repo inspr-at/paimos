@@ -1,6 +1,7 @@
 import { onBeforeUnmount, onMounted, watch, type Ref } from "vue";
 
 import { liveUpdatesEnabled, loadInstance } from "@/api/instance";
+import { publicURL } from "@/publicPath";
 import { useChangesStore, type MutationChangeEvent } from "@/stores/changes";
 
 const LAST_SEQ_KEY = "paimos.changes.lastSeq";
@@ -26,7 +27,7 @@ export function useChangesStream(enabled?: Ref<boolean>) {
   function connect() {
     if (source) return;
     const since = readLastSeq();
-    source = new EventSource(`/api/changes?since=${encodeURIComponent(String(since))}`);
+    source = new EventSource(publicURL(`/api/changes?since=${encodeURIComponent(String(since))}`));
     let opened = false;
     source.onopen = () => {
       opened = true;

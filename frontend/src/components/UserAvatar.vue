@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
+import { publicURL } from '@/publicPath'
 import { userDisplayName, userInitials } from '@/utils/userDisplay'
 
 const props = withDefaults(defineProps<{
@@ -49,7 +50,7 @@ function onMouseLeave() {
   >
     <img
       v-if="hasAvatar"
-      :src="user!.avatar_path"
+      :src="publicURL(user!.avatar_path!)"
       :alt="user!.username"
       class="ua-img"
       loading="lazy"
@@ -62,7 +63,7 @@ function onMouseLeave() {
 
     <span v-if="showTooltip && tooltipVisible && user" class="ua-tooltip">
       <span class="ua-tooltip-avatar">
-        <img v-if="hasAvatar" :src="user.avatar_path" class="ua-tooltip-img" loading="lazy" />
+        <img v-if="hasAvatar" :src="publicURL(user.avatar_path!)" class="ua-tooltip-img" loading="lazy" />
         <span v-else class="ua-tooltip-initials">{{ initials }}</span>
       </span>
       <span class="ua-tooltip-info">

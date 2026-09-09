@@ -33,6 +33,7 @@ import AiActionMenu from '@/components/ai/AiActionMenu.vue'
 import AiSurfaceFeedback from '@/components/ai/AiSurfaceFeedback.vue'
 import { formatCompactCurrency, formatCurrency, formatInteger } from '@/composables/useNumberFormat'
 import { fmtRelative } from '@/utils/formatTime'
+import { publicURL } from '@/publicPath'
 
 const route = useRoute()
 const router = useRouter()
@@ -415,7 +416,7 @@ function effectiveRate(p: Project, kind: 'hourly' | 'lp'): { value: number | nul
               class="cd-provider-link"
               :title="`Open in ${providerName}`"
             >
-              <img v-if="providerLogo" :src="providerLogo" :alt="providerName" class="cd-provider-logo" />
+              <img v-if="providerLogo" :src="publicURL(providerLogo)" :alt="providerName" class="cd-provider-logo" />
               <AppIcon v-else name="external-link" :size="13" />
               <span>{{ providerName }}<span v-if="customer.external_id"> · #{{ customer.external_id }}</span></span>
               <AppIcon name="external-link" :size="11" class="cd-provider-arrow" />
@@ -724,7 +725,7 @@ function effectiveRate(p: Project, kind: 'hourly' | 'lp'): { value: number | nul
           </header>
           <div class="cd-sync-card">
             <div class="cd-sync-card-row">
-              <img v-if="providerLogo" :src="providerLogo" :alt="providerName" class="cd-sync-card-logo" />
+              <img v-if="providerLogo" :src="publicURL(providerLogo)" :alt="providerName" class="cd-sync-card-logo" />
               <AppIcon v-else name="globe" :size="14" />
               <span class="cd-sync-card-name">
                 {{ providerName }}<span v-if="customer.external_id"> · #{{ customer.external_id }}</span>

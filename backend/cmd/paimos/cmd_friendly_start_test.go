@@ -57,6 +57,10 @@ type friendlyFixture struct {
 	requests, writes, configReads int
 	conflict, changed             bool
 	revision                      int64
+	agents                        []map[string]any
+	allowlistSenders              *[]string
+	allowlistStatus               int
+	targetsJSON                   string
 }
 
 func newFriendlyFixture(t *testing.T) *friendlyFixture {
@@ -64,6 +68,10 @@ func newFriendlyFixture(t *testing.T) *friendlyFixture {
 	f := &friendlyFixture{daemon: &friendlyFakeDaemon{status: agentd.Status{Instance: "test-deployment", DaemonID: "daemon-fixture"}, public: true}}
 	f.opts = friendlyStartOptions{Project: "PAI", Agent: "builder", Ticket: "PAI-921", Shape: "ship", Parent: friendlyParentID, Role: "worker", Profile: "codex-sol-high@1", Workspace: t.TempDir(), Key: "fixture-start", Deployment: "test-deployment", Label: "builder", StateRoot: t.TempDir(), ExpectedRevision: -1}
 	f.sessions = []models.HarnessSession{{ID: friendlyParentID, ProjectID: 42, AgentName: "root", Harness: "codex", Role: "coordinator", Phase: "working"}}
+	oldAgent := flagAgentName
+	flagAgentName = ""
+	t.Cleanup(func() { flagAgentName = oldAgent })
+	t.Setenv("PAIMOS_AGENT_NAME", "")
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		f.requests++
 		if r.Method != http.MethodGet {
@@ -76,7 +84,11 @@ func newFriendlyFixture(t *testing.T) *friendlyFixture {
 		case "/api/projects":
 			json.NewEncoder(w).Encode([]orchestratorProject{{ID: 42, Key: "PAI"}})
 		case "/api/projects/42/agents":
-			ioString(w, `[{"project_id":42,"name":"builder"}]`)
+			if f.agents != nil {
+				json.NewEncoder(w).Encode(f.agents)
+				return
+			}
+			ioString(w, `[{"id":7,"project_id":42,"name":"builder"}]`)
 		case "/api/projects/42/agents/builder.json":
 			ioString(w, `{"project":{"id":42,"key":"PAI"},"agent":{"name":"builder","project_id":42,"body":"PRIVATE FIXTURE PERSONA","non_negotiable_rules":[]}}`)
 		case "/api/ai/execution-options":
@@ -132,7 +144,26 @@ func newFriendlyFixture(t *testing.T) *friendlyFixture {
 			}
 			json.NewEncoder(w).Encode(config)
 		case "/api/projects/42/message-targets":
+			if f.targetsJSON != "" {
+				ioString(w, f.targetsJSON)
+				return
+			}
 			ioString(w, `{"targets":[]}`)
+		case "/api/projects/42/message-allowlist":
+			if r.Method != http.MethodGet {
+				t.Errorf("allowlist probe used mutating method %s", r.Method)
+				http.Error(w, `{"error":"method"}`, http.StatusMethodNotAllowed)
+				return
+			}
+			if f.allowlistStatus != 0 {
+				http.Error(w, `{"error":"unavailable"}`, f.allowlistStatus)
+				return
+			}
+			if f.allowlistSenders == nil {
+				http.NotFound(w, r)
+				return
+			}
+			json.NewEncoder(w).Encode(map[string]any{"receiver": r.URL.Query().Get("receiver"), "senders": *f.allowlistSenders})
 		default:
 			t.Errorf("unexpected fixture route: %s", r.URL.Path)
 			http.NotFound(w, r)
@@ -154,6 +185,9 @@ func TestFriendlyStartWorkerResolvesAndReplaysOriginalOutcome(t *testing.T) {
 	if err != nil || result.Outcome != "started" || result.PublicSessionID != friendlyPublicID || result.State != "running" {
 		t.Fatalf("start failed: %v", err)
 	}
+	if strings.Contains(result.Reason, "Ordinary messages and controls use the automatic owned primary inbox") {
+		t.Fatal("start claimed ordinary delivery from public registration alone")
+	}
 	if f.daemon.request.TicketID != 921 || f.daemon.request.ParentSessionID != friendlyParentID || f.daemon.request.DispatchProfileVersion != "1" || !strings.Contains(f.daemon.request.Prompt, "PRIVATE FIXTURE PERSONA") {
 		t.Fatal("canonical resolution was not applied")
 	}
@@ -162,10 +196,9 @@ func TestFriendlyStartWorkerResolvesAndReplaysOriginalOutcome(t *testing.T) {
 			t.Errorf("missing %s command", name)
 		}
 	}
-	requests := f.requests
 	f.sessions[0].Phase = "stopped"
 	replay, err := runFriendlyStart(context.Background(), f.opts)
-	if err != nil || replay.PublicSessionID != result.PublicSessionID || !replay.Replayed || f.requests != requests || f.daemon.startCount != 1 {
+	if err != nil || replay.PublicSessionID != result.PublicSessionID || !replay.Replayed || f.writes != 0 || f.daemon.startCount != 1 {
 		t.Fatal("replay did not return original result without repeated effects")
 	}
 	f.opts.Shape = "scout"
@@ -589,4 +622,173 @@ func TestFriendlyReceiverSetupRequiresFreshEmptySlotAndExactScope(t *testing.T) 
 	if strings.Contains(claude, "simple_fallback") || strings.Contains(claude, "target set") {
 		t.Fatalf("Claude received unsupported fallback setup: %q", claude)
 	}
+}
+
+func friendlyMessagingAgents(names ...string) []map[string]any {
+	rows := []map[string]any{{"id": 7, "project_id": 42, "name": "builder"}}
+	for i, name := range names {
+		rows = append(rows, map[string]any{"id": int64(8 + i), "project_id": 42, "name": name})
+	}
+	return rows
+}
+
+func friendlyAssertNoActionBypass(t *testing.T, result friendlyStartResult) {
+	t.Helper()
+	blob := result.Reason
+	for _, command := range result.Commands {
+		blob += "\n" + command
+	}
+	for _, forbidden := range []string{"--action-request", "message allow *", "resolution", "recover-closed-target", "release held"} {
+		if strings.Contains(blob, forbidden) {
+			t.Fatalf("action-request or hold bypass leaked: %q in %q", forbidden, blob)
+		}
+	}
+	if result.Outcome == "started" && !strings.Contains(result.Reason, "Action-request messages stay held for human review") {
+		t.Fatal("started result omitted action-request hold policy")
+	}
+}
+
+func TestFriendlyStartMessagingReadiness(t *testing.T) {
+	t.Run("unknown attributed sender", func(t *testing.T) {
+		f := newFriendlyFixture(t)
+		result, err := runFriendlyStart(context.Background(), f.opts)
+		if err != nil || result.Outcome != "started" || result.Readiness == nil {
+			t.Fatalf("start: %v %#v", err, result.Readiness)
+		}
+		if result.Readiness.Sender.State != friendlyUnknown || result.Readiness.Policy.State != friendlyUnknown || result.Commands["allow"] != "" {
+			t.Fatalf("unknown sender leaked a grant: %#v %q", result.Readiness, result.Commands["allow"])
+		}
+		if strings.Contains(result.Reason, "codex:root") || strings.Contains(result.Reason, friendlyParentID) || !strings.Contains(result.Reason, "not inferred from the parent") {
+			t.Fatal("unknown sender borrowed parent identity")
+		}
+		friendlyAssertNoActionBypass(t, result)
+	})
+	t.Run("fresh agents no grant", func(t *testing.T) {
+		f := newFriendlyFixture(t)
+		flagAgentName = "codex"
+		f.agents = friendlyMessagingAgents("codex")
+		empty := []string{}
+		f.allowlistSenders = &empty
+		result, err := runFriendlyStart(context.Background(), f.opts)
+		if err != nil || result.Outcome != "started" || f.daemon.startCount != 1 || f.writes != 0 {
+			t.Fatalf("start: %v outcome=%s starts=%d writes=%d", err, result.Outcome, f.daemon.startCount, f.writes)
+		}
+		if result.Readiness.Sender.State != friendlyReady || result.Readiness.Policy.State != friendlyMissing || result.Readiness.SenderAddress != "paimos:codex" {
+			t.Fatalf("readiness=%#v", result.Readiness)
+		}
+		allow := result.Commands["allow"]
+		if !strings.Contains(allow, "message allow 'paimos:codex'") || !strings.Contains(allow, "--project 'PAI'") || !strings.Contains(allow, "--for 'codex:builder'") || strings.Contains(allow, "*") {
+			t.Fatalf("allow command=%q", allow)
+		}
+		if strings.Contains(result.Reason, "Ordinary tell from this exact sender may be delivered") {
+			t.Fatal("missing grant claimed delivery")
+		}
+		friendlyAssertNoActionBypass(t, result)
+	})
+	t.Run("wildcard grant is not exact", func(t *testing.T) {
+		f := newFriendlyFixture(t)
+		flagAgentName = "codex"
+		f.agents = friendlyMessagingAgents("codex")
+		wildcard := []string{"*"}
+		f.allowlistSenders = &wildcard
+		result, err := runFriendlyStart(context.Background(), f.opts)
+		if err != nil || result.Outcome != "started" || result.Readiness.Policy.State != friendlyUnknown || result.Commands["allow"] != "" {
+			t.Fatalf("wildcard treated as exact grant: %v %#v", err, result.Readiness)
+		}
+		friendlyAssertNoActionBypass(t, result)
+	})
+	t.Run("granted exact sender", func(t *testing.T) {
+		f := newFriendlyFixture(t)
+		flagAgentName = "codex"
+		f.agents = friendlyMessagingAgents("codex")
+		granted := []string{"paimos:codex"}
+		f.allowlistSenders = &granted
+		result, err := runFriendlyStart(context.Background(), f.opts)
+		if err != nil || result.Outcome != "started" || result.Commands["allow"] != "" {
+			t.Fatalf("granted start: %v allow=%q", err, result.Commands["allow"])
+		}
+		if result.Readiness.Sender.State != friendlyReady || result.Readiness.Policy.State != friendlyReady {
+			t.Fatalf("readiness=%#v", result.Readiness)
+		}
+		if !strings.Contains(result.Reason, "Ordinary tell from this exact sender may be delivered") {
+			t.Fatal("granted sender omitted delivery claim")
+		}
+		friendlyAssertNoActionBypass(t, result)
+	})
+	t.Run("metadata read failure", func(t *testing.T) {
+		f := newFriendlyFixture(t)
+		flagAgentName = "codex"
+		f.agents = friendlyMessagingAgents("codex")
+		f.allowlistStatus = http.StatusInternalServerError
+		result, err := runFriendlyStart(context.Background(), f.opts)
+		if err != nil || result.Outcome != "started" || f.daemon.startCount != 1 {
+			t.Fatalf("unavailable grant changed generation: %v %#v", err, result)
+		}
+		if result.Readiness.Policy.State != friendlyUnavailable || result.Commands["allow"] != "" {
+			t.Fatalf("failed metadata was treated as a grant decision: %#v %q", result.Readiness.Policy, result.Commands["allow"])
+		}
+		if !strings.Contains(result.Reason, "ordinary delivery is unverified") {
+			t.Fatal("metadata failure claimed a known grant")
+		}
+		friendlyAssertNoActionBypass(t, result)
+	})
+	t.Run("target change cached start", func(t *testing.T) {
+		f := newFriendlyFixture(t)
+		flagAgentName = "codex"
+		f.agents = friendlyMessagingAgents("codex")
+		empty := []string{}
+		f.allowlistSenders = &empty
+		first, err := runFriendlyStart(context.Background(), f.opts)
+		if err != nil || first.Outcome != "started" || first.Readiness.Fallback.State != friendlyMissing {
+			t.Fatalf("empty slot: %v %#v", err, first.Readiness)
+		}
+		f.targetsJSON = `{"targets":[{"address":"codex:builder","adapter":"codex","role":"simple_fallback","enabled":true}]}`
+		granted := []string{"paimos:codex"}
+		f.allowlistSenders = &granted
+		replay, err := runFriendlyStart(context.Background(), f.opts)
+		if err != nil || replay.Outcome != "started" || !replay.Replayed || f.daemon.startCount != 1 || f.writes != 0 {
+			t.Fatal("cached start respawned or mutated after target change")
+		}
+		if strings.Contains(replay.Commands["receiver-setup"], "target set") || !strings.Contains(replay.Commands["receiver-setup"], "runtime handoff") {
+			t.Fatalf("cached start replaced existing targets: %q", replay.Commands["receiver-setup"])
+		}
+		if replay.Readiness.Policy.State != friendlyReady || replay.Commands["allow"] != "" {
+			t.Fatalf("cached start did not re-check grant: %#v", replay.Readiness)
+		}
+		friendlyAssertNoActionBypass(t, replay)
+	})
+	t.Run("cached start re-checks current attribution", func(t *testing.T) {
+		f := newFriendlyFixture(t)
+		first, err := runFriendlyStart(context.Background(), f.opts)
+		if err != nil {
+			t.Fatal(err)
+		}
+		flagAgentName = "codex"
+		f.agents = friendlyMessagingAgents("codex")
+		empty := []string{}
+		f.allowlistSenders = &empty
+		replay, err := runFriendlyStart(context.Background(), f.opts)
+		if err != nil || replay.Outcome != first.Outcome || replay.PublicSessionID != first.PublicSessionID || f.daemon.startCount != 1 {
+			t.Fatal("cached start changed generation while re-checking attribution")
+		}
+		if replay.Readiness.Sender.State != friendlyReady || replay.Readiness.Policy.State != friendlyMissing {
+			t.Fatalf("cached start skipped current attribution: %#v", replay.Readiness)
+		}
+	})
+	t.Run("preserves generation when messaging is incomplete", func(t *testing.T) {
+		f := newFriendlyFixture(t)
+		flagAgentName = "missing-sender"
+		result, err := runFriendlyStart(context.Background(), f.opts)
+		if err != nil || result.Outcome != "started" || result.Readiness.Sender.State != friendlyMissing {
+			t.Fatalf("unregistered sender: %v %#v", err, result.Readiness)
+		}
+		if result.Commands["allow"] != "" || result.Key != f.opts.Key {
+			t.Fatal("unregistered sender suggested an allow or dropped the key")
+		}
+		replay, err := runFriendlyStart(context.Background(), f.opts)
+		if err != nil || replay.Outcome != "started" || !replay.Replayed || f.daemon.startCount != 1 || replay.Key != result.Key {
+			t.Fatal("incomplete messaging retried spawn or lost idempotency")
+		}
+		friendlyAssertNoActionBypass(t, result)
+	})
 }

@@ -27,6 +27,7 @@ import { ref, computed } from 'vue'
 import type { Ref } from 'vue'
 import type { Attachment } from '@/types'
 import { api, errMsg } from '@/api/client'
+import { publicURL } from '@/publicPath'
 
 export type UploadStatus = 'pending' | 'done' | 'failed'
 export type AttachmentJobOrigin = 'current-session' | 'seeded'
@@ -201,7 +202,7 @@ export function useAttachmentUploads(opts: UseAttachmentUploadsOptions): UseAtta
       status: 'done',
       attachmentId: a.id,
       // Server URL — no blob revoke needed.
-      previewUrl: a.content_type.startsWith('image/') ? `/api/attachments/${a.id}` : null,
+      previewUrl: a.content_type.startsWith('image/') ? publicURL(`/api/attachments/${a.id}`) : null,
     }))
   }
 

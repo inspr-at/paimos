@@ -88,7 +88,9 @@ func TestNativeConsumerRealCLIStatusAndAttributedDelivery(t *testing.T) {
 			if r.URL.Query().Get("address") != "codex:worker" {
 				t.Error("target inventory lost receiver")
 			}
-			write(map[string]any{"targets": []agentmessage.Target{{ID: target, Instance: "fixture", ProjectID: 42, Address: "codex:worker", Adapter: agentmessage.AdapterManagedHarness, Enabled: true, Role: "primary", Version: 1}}})
+			write(map[string]any{"targets": []agentmessage.Target{{ID: target, Instance: "fixture", ProjectID: 42, Address: "codex:worker", Adapter: agentmessage.AdapterManagedHarness, Enabled: true, Role: "primary", MaximumLevel: "steer", Version: 1}}})
+		case "GET /api/projects/42/message-deliveries":
+			write(map[string]any{"deliveries": []agentmessage.DeliveryStatus{}, "count": 0})
 		case "POST /api/projects/42/harness-sessions/" + public + "/drain", "POST /api/projects/42/harness-sessions/" + public + "/complete-delivery":
 			if r.Header.Get("X-Paimos-Harness-Worker-Lease") != lease || r.Header.Get("X-Paimos-Agent-Name") != "worker" {
 				t.Error("worker command lost exact lease or agent")
@@ -136,7 +138,7 @@ func TestNativeConsumerRealCLIStatusAndAttributedDelivery(t *testing.T) {
 	consumers.reconcile(context.Background())
 	mu.Lock()
 	defer mu.Unlock()
-	if statusReads < 2 || drains != 2 || completions != 1 || process.inboxes != 1 {
+	if statusReads < 2 || drains != 1 || completions != 1 || process.inboxes != 1 {
 		t.Fatalf("real CLI did not verify/drain/complete once: status=%d drains=%d completions=%d effects=%d", statusReads, drains, completions, process.inboxes)
 	}
 }

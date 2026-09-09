@@ -17,6 +17,7 @@ import {
   backgroundPatternImage,
   type BackgroundPattern,
 } from '@/composables/backgroundPattern'
+import { publicURL } from '@/publicPath'
 
 const { branding, refresh } = useBranding()
 
@@ -125,10 +126,10 @@ async function onUpload(kind: 'logo' | 'favicon', ev: Event) {
 // Cache-busted preview URL: when a freshly uploaded asset overwrites an
 // existing file, the browser would otherwise show the cached old bytes.
 const logoPreviewURL = computed(() =>
-  form.logo ? `${form.logo}${form.logo.includes('?') ? '&' : '?'}v=${Date.now()}` : '',
+  form.logo ? `${publicURL(form.logo)}${form.logo.includes('?') ? '&' : '?'}v=${Date.now()}` : '',
 )
 const faviconPreviewURL = computed(() =>
-  form.favicon ? `${form.favicon}${form.favicon.includes('?') ? '&' : '?'}v=${Date.now()}` : '',
+  form.favicon ? `${publicURL(form.favicon)}${form.favicon.includes('?') ? '&' : '?'}v=${Date.now()}` : '',
 )
 
 function patternPreviewStyle(pattern: BackgroundPattern) {

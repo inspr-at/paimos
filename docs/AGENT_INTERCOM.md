@@ -332,9 +332,21 @@ the binding CAS on completion before the daemon mirrors it locally. `repair`
 performs a fresh reporter pass or bounded listener repair for the selected project.
 It does not restart arbitrary processes.
 
-Primary ordinary messages and controls work after native managed registration.
-Optional simple fallback and root attention require a one-time target binding for
-the new owned vendor generation. After a successful friendly `worker start` or
+Native managed registration proves the owned generation and its harness control
+capabilities. It does not prove that this attributed sender can already deliver
+ordinary messages. Friendly start reads the canonical project-agent registry and,
+when the public API exposes it, exact receiver allowlist metadata. Those layers
+are independent of process startup and of optional fallback. Ready, missing
+registration or grant, and unavailable, stale, or unknown evidence are reported
+separately. A parent session, running PID, or successful spawn is not a grant.
+Unknown caller attribution stays unknown. When both identities are authoritative
+and the exact grant is missing, start may suggest one reviewed
+`paimos message allow <sender-address> --project <key> --for <receiver-address>`
+command. It never auto-grants, uses wildcards, impersonates a parent, replaces
+existing targets, releases held history, or bypasses action-request review.
+
+Optional simple fallback and root attention remain a separate one-time target
+binding for the new owned vendor generation. After a successful friendly `worker start` or
 `orchestrator start`, the `receiver-setup` next command is a scoped pipe from
 `paimos-agentd receiver-reference` directly into the existing
 `paimos message target set --target-ref-file - --role simple_fallback
@@ -750,10 +762,14 @@ text.
 `decisions` is the local operator view of pending Cursor ACP permission,
 question, and plan requests plus visible refusals. It carries request ids,
 tool kind, offered option ids, and a digest — never raw tool input, plan
-text, or model transcripts. `inspect` is the owner-only Unix-socket display
-of the exact pending request: option labels, question or plan text, and a
-bounded tool description bound to that same digest. Treat inspect payloads as
-untrusted display data, never as authority or a terminal command. `output`
+text, or model transcripts. Malformed permission refusals add a stable
+value-free reason code and bounded JSON-type/count metadata so protocol drift
+can be diagnosed without logging commands, paths, arguments, or content.
+`inspect` is the owner-only Unix-socket display of the exact pending request:
+option labels, question or plan text, and bounded tool input/content bound to
+that same digest. Treat inspect payloads as untrusted display data, never as
+authority or a terminal command. Unsupported, malformed, or truncated
+meaningful content cannot be approved. `output`
 returns the current generation's ephemeral visible assistant text (hash and
 length stay in the owner evidence journal). It never includes hidden
 reasoning, credentials, or raw tool results. `answer` applies one exact
@@ -918,6 +934,18 @@ UUID, and attributed agent. Heartbeat, yield, delivery drain/completion,
 control completion, and stop all require that complete scope. Registration
 with the same stable external reference is an idempotent replay only with the
 same generation lease; a different lease cannot take over the live row.
+
+Agentd waits locally before the lease-mutating drain while native delivery is
+held. While an owned receiver is busy, it uses the existing redacted delivery
+ledger to drain only an exact-target steer head that the receiver can accept;
+ordinary or already-leased work waits without consuming another attempt. A
+canonical `fifo_blocked` server page is also a wait state, not a listener
+conflict, so busy time does not exhaust delivery attempts or open the consumer
+circuit.
+Repair of an older false `singleton_conflict` circuit requires the exact
+current target/version, one leased FIFO head followed by attempt-free
+`fifo_blocked` rows, and no pending local effect receipt. Any missing or
+different evidence stays quarantined for operator review.
 
 Inbox-capable registration is target-first and recoverable. The server first
 creates or reuses the encrypted `managed_harness` target, then commits the

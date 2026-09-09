@@ -8,6 +8,7 @@ import AppIcon from '@/components/AppIcon.vue'
 import ImportCollisionModal from '@/components/ImportCollisionModal.vue'
 import type { PreflightResult, CollisionStrategy } from '@/components/ImportCollisionModal.vue'
 import { api, csrfHeaders, errMsg } from '@/api/client'
+import { publicURL } from '@/publicPath'
 import { useAuthStore } from '@/stores/auth'
 import TagChip from '@/components/TagChip.vue'
 import type { ProjectStatus, Tag } from '@/types'
@@ -213,7 +214,7 @@ async function onGlobalImportFile(e: Event) {
   try {
     const fd = new FormData()
     fd.append('file', file)
-    const resp = await fetch('/api/import/csv/preflight', { method: 'POST', credentials: 'include', headers: csrfHeaders(), body: fd })
+    const resp = await fetch(publicURL('/api/import/csv/preflight'), { method: 'POST', credentials: 'include', headers: csrfHeaders(), body: fd })
     const data = await resp.json()
     if (!resp.ok) { globalImportError.value = data.error ?? 'Preflight failed.'; return }
     globalPreflight.value = data
@@ -236,7 +237,7 @@ async function onImportConfirm(strategy: CollisionStrategy, projectName: string)
     fd.append('file', pendingImportFile.value)
     fd.append('strategy', strategy)
     if (projectName) fd.append('project_name', projectName)
-    const resp = await fetch('/api/import/csv', { method: 'POST', credentials: 'include', headers: csrfHeaders(), body: fd })
+    const resp = await fetch(publicURL('/api/import/csv'), { method: 'POST', credentials: 'include', headers: csrfHeaders(), body: fd })
     const data = await resp.json()
     if (!resp.ok) { globalImportError.value = data.error ?? 'Import failed.'; return }
     globalImportResult.value = data
@@ -530,7 +531,7 @@ onMounted(() => {
         <div class="project-card-top">
           <span class="project-key-badge">{{ p.key }}</span>
           <span v-if="p.status !== 'active'" :class="`badge badge-${p.status}`">{{ p.status }}</span>
-          <img v-if="p.logo_path" :src="p.logo_path" class="project-card-logo" :alt="p.name" />
+          <img v-if="p.logo_path" :src="publicURL(p.logo_path)" class="project-card-logo" :alt="p.name" />
         </div>
         <div class="project-card-name">{{ p.name }}</div>
         <RouterLink

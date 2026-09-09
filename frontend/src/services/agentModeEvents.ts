@@ -13,6 +13,7 @@ import {
   isAgentModeCursor,
   type AgentModeSnapshotQuery,
 } from './agentModeTransport'
+import { publicURL } from '@/publicPath'
 
 export const AGENT_MODE_EVENTS_PATH = '/api/agent-mode/deliveries/events'
 export const AGENT_MODE_EVENT_HINT_LIMIT = 512
@@ -125,14 +126,14 @@ function validReset(event: AgentModeMessageEvent): boolean {
 export function agentModeStreamBindingKey(query: AgentModeSnapshotQuery = {}): string {
   const params = buildAgentModeFilterParams(query, false)
   const queryString = params.toString()
-  return queryString ? `${AGENT_MODE_EVENTS_PATH}?${queryString}` : AGENT_MODE_EVENTS_PATH
+  return queryString ? `${publicURL(AGENT_MODE_EVENTS_PATH)}?${queryString}` : publicURL(AGENT_MODE_EVENTS_PATH)
 }
 
 export function buildAgentModeEventsURL(query: AgentModeSnapshotQuery, cursor: string): string {
   if (!isAgentModeCursor(cursor)) throw new Error('invalid Agent Mode stream cursor')
   const params = buildAgentModeFilterParams(query, false)
   params.set('cursor', cursor)
-  return `${AGENT_MODE_EVENTS_PATH}?${params.toString()}`
+  return `${publicURL(AGENT_MODE_EVENTS_PATH)}?${params.toString()}`
 }
 
 const nativeEventSourceFactory: AgentModeEventSourceFactory = (url) => {

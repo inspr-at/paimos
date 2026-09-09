@@ -13,6 +13,7 @@ import {
   permissionsEpoch,
   sessionExpiresAt,
 } from '@/api/client'
+import { publicURL } from '@/publicPath'
 
 export type Paimos6UtteranceRouteKind = 'project_agent' | 'paimos'
 
@@ -210,7 +211,7 @@ export async function sendPaimos6SessionUtterance(
 ): Promise<Paimos6SessionUtteranceResult> {
   validateRequest(request)
   const generation = capturePermissionsEpochGeneration()
-  const response = await fetch(`/api/projects/${request.projectId}/session-utterances/v1`, {
+  const response = await fetch(publicURL(`/api/projects/${request.projectId}/session-utterances/v1`), {
     method: 'POST',
     cache: 'no-store',
     credentials: 'same-origin',

@@ -16,8 +16,11 @@
  */
 
 import { ref } from "vue";
+import { isSharedOrigin, publicURL, stripPublicBase } from "@/publicPath";
 
-const BASE = "/api";
+export function apiBase(): string {
+  return publicURL("/api");
+}
 
 export class ApiError extends Error {
   code?: string;
@@ -217,7 +220,7 @@ function markSessionExpired() {
     // overwrite this with /login or whatever the app navigated to in
     // the meantime.
     if (!sessionReturnPath.value) {
-      const path = window.location.pathname + window.location.search;
+      const path = stripPublicBase(window.location.pathname) + window.location.search;
       if (!path.startsWith("/login")) sessionReturnPath.value = path;
     }
     sessionExpired.value = true;
@@ -266,8 +269,20 @@ const REQUEST_TIMEOUT_MS = 30_000;
 // request. Empty string when not yet authenticated — the backend does
 // not enforce CSRF on the public auth endpoints.
 export function readCsrfToken(): string {
-  const m = document.cookie.match(/(?:^|;\s*)csrf_token=([^;]+)/);
-  return m ? decodeURIComponent(m[1]) : "";
+  const names = isSharedOrigin()
+    ? ["paimos_csrf_token"]
+    : ["paimos_csrf_token", "csrf_token"];
+  const cookies = document.cookie.split(";");
+  for (const name of names) {
+    const prefix = `${name}=`;
+    for (const part of cookies) {
+      const c = part.trim();
+      if (c.startsWith(prefix)) {
+        return decodeURIComponent(c.slice(prefix.length));
+      }
+    }
+  }
+  return "";
 }
 
 // csrfHeaders returns a headers object pre-populated with the CSRF header
@@ -413,7 +428,7 @@ async function fetchResponse(
       ...(body ? { "Content-Type": "application/json" } : {}),
       ...(opts?.headers ?? {}),
     };
-    const res = await fetch(`${BASE}${path}`, {
+    const res = await fetch(`${apiBase()}${path}`, {
       method,
       headers: withCsrfHeader(method, headers),
       body: body ? JSON.stringify(body) : undefined,
@@ -570,7 +585,7 @@ async function upload<T>(
   const epochGeneration = capturePermissionsEpochGeneration();
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
-    xhr.open("POST", `${BASE}${path}`);
+    xhr.open("POST", `${apiBase()}${path}`);
     xhr.withCredentials = true;
     // PAI-113: echo CSRF token on multipart uploads too. Cookie path
     // doesn't trip Origin/Referer issues because the SPA is same-origin.

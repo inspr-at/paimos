@@ -25,6 +25,8 @@ import { createIntakeTtsPlayback } from "@/composables/useIntakeTtsPlayback";
 import { useMicPermission } from "@/composables/useMicPermission";
 import { useMicTranscript } from "@/composables/useMicTranscript";
 import { postIntakeAudio, voiceAvailable } from "@/api/intake";
+import { readCsrfToken } from "@/api/client";
+import { publicURL } from "@/publicPath";
 import { lineDiff } from "@/components/ai/lineDiff";
 
 const {
@@ -350,13 +352,12 @@ async function speakSelectedEli() {
   if (!s || ttsMuted.value || !voiceReady.value || text === "" || text === lastSpokenText) return;
   lastSpokenText = text;
   await ttsPlayback.play(async () => {
-    const res = await fetch(`/api/intake/sessions/${s.id}/tts`, {
+    const res = await fetch(publicURL(`/api/intake/sessions/${s.id}/tts`), {
       method: "POST",
       credentials: "include",
       headers: {
         "Content-Type": "application/json",
-        "X-CSRF-Token":
-          document.cookie.split("; ").find((c) => c.startsWith("csrf_token="))?.split("=")[1] ?? "",
+        "X-CSRF-Token": readCsrfToken(),
       },
       body: JSON.stringify({ level: eliLevel.value }),
     });

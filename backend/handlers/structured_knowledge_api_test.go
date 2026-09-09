@@ -33,7 +33,7 @@ func structuredKnowledgeMutation(t *testing.T, ts *testServer, method, path, coo
 	request.Header.Set("Cookie", cookie)
 	request.Header.Set("Origin", ts.srv.URL)
 	var csrfToken string
-	if err := db.DB.QueryRow(`SELECT csrf_token FROM sessions WHERE id=?`, strings.TrimPrefix(cookie, "session=")).Scan(&csrfToken); err != nil {
+	if err := db.DB.QueryRow(`SELECT csrf_token FROM sessions WHERE id=?`, cookieSessionID(cookie)).Scan(&csrfToken); err != nil {
 		t.Fatal(err)
 	}
 	request.Header.Set("X-CSRF-Token", csrfToken)

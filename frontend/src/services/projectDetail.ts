@@ -1,4 +1,5 @@
 import { api, csrfHeaders } from '@/api/client'
+import { publicURL } from '@/publicPath'
 import type { CollisionStrategy, PreflightResult } from '@/components/ImportCollisionModal.vue'
 import type { Customer, Issue, IssueListEnvelope, Project, SavedView, Tag, User } from '@/types'
 
@@ -58,7 +59,7 @@ export function buildProjectIssuesUrl(
 }
 
 export function buildProjectCsvExportUrl(projectId: number, selectedIds: number[]): string {
-  let url = `/api/projects/${projectId}/export/csv`
+  let url = publicURL(`/api/projects/${projectId}/export/csv`)
   if (selectedIds.length > 0) {
     url += `?ids=${selectedIds.join(',')}`
   }
@@ -116,7 +117,7 @@ export function loadProjectIssuesEnvelope(
 export async function uploadProjectLogo(projectId: number, file: File): Promise<Project> {
   const fd = new FormData()
   fd.append('logo', file)
-  const resp = await fetch(`/api/projects/${projectId}/logo`, {
+  const resp = await fetch(publicURL(`/api/projects/${projectId}/logo`), {
     method: 'POST',
     body: fd,
     credentials: 'same-origin',
@@ -148,7 +149,7 @@ export function executeProjectTimeEntryPurge(projectId: number, payload: Record<
 export async function preflightProjectCsvImport(projectId: number, file: File): Promise<PreflightResult> {
   const fd = new FormData()
   fd.append('file', file)
-  const resp = await fetch(`/api/projects/${projectId}/import/csv/preflight`, {
+  const resp = await fetch(publicURL(`/api/projects/${projectId}/import/csv/preflight`), {
     method: 'POST',
     credentials: 'include',
     headers: csrfHeaders(),
@@ -169,7 +170,7 @@ export async function runProjectCsvImport(
   const fd = new FormData()
   fd.append('file', file)
   fd.append('strategy', strategy)
-  const resp = await fetch(`/api/projects/${projectId}/import/csv`, {
+  const resp = await fetch(publicURL(`/api/projects/${projectId}/import/csv`), {
     method: 'POST',
     credentials: 'include',
     headers: csrfHeaders(),

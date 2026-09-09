@@ -83,6 +83,12 @@ type Driver interface {
 	Complete(context.Context, Binding, Work, Outcome) error
 }
 
+// circuitRecoveryDriver supplies read-only durable evidence for a circuit
+// reason that cannot be reopened from local authority and receipts alone.
+type circuitRecoveryDriver interface {
+	RecoverCircuit(context.Context, Binding, Evidence) error
+}
+
 type Evidence struct {
 	ProjectID   int64     `json:"project_id,omitempty"`
 	Kind        string    `json:"kind"`
@@ -403,15 +409,25 @@ func (s *Supervisor) Repair(ctx context.Context, b Binding) error {
 		if c.Key != b.Stream() {
 			continue
 		}
-		if c.Evidence.Reason != "transport_unavailable" && c.Evidence.Reason != "authority_unavailable" && c.Evidence.Reason != "ownership_changed" && c.Evidence.Reason != "" {
-			return ErrUnknown
-		}
 		// Every retained unknown is checked again by Step even if it belongs to
 		// another binding. Conservatively refuse repair while any effect is pending.
 		for _, receipt := range s.receipts.Snapshot() {
 			if receipt.Phase == "pending" {
 				return ErrUnknown
 			}
+		}
+		switch c.Evidence.Reason {
+		case "transport_unavailable", "authority_unavailable", "ownership_changed", "":
+		case "singleton_conflict":
+			recovery, ok := s.driver.(circuitRecoveryDriver)
+			if !ok {
+				return ErrUnknown
+			}
+			if err := recovery.RecoverCircuit(ctx, b, c.Evidence); err != nil {
+				return err
+			}
+		default:
+			return ErrUnknown
 		}
 		state := Evidence{Kind: b.Kind, Generation: b.Generation, State: "ready", ProjectID: b.Project}
 		if err := s.circuits.Put(circuit{b.Stream(), state}); err != nil {

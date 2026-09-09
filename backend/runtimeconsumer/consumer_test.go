@@ -17,6 +17,8 @@ type fixtureDriver struct {
 	works                                          []Work
 	effects, acks, polls                           int
 	verifyErr, executeErr, completeErr, prepareErr error
+	recoverErr                                     error
+	recoveries                                     int
 	afterEffect                                    func()
 }
 
@@ -43,6 +45,10 @@ func (d *fixtureDriver) Complete(context.Context, Binding, Work, Outcome) error 
 	}
 	d.works = d.works[1:]
 	return nil
+}
+func (d *fixtureDriver) RecoverCircuit(context.Context, Binding, Evidence) error {
+	d.recoveries++
+	return d.recoverErr
 }
 func fixtureBinding() Binding {
 	return Binding{Instance: "fixture", Machine: "fixture-host", Generation: "daemon-one", Session: "session-one", Address: "codex:fixture", Project: 42, Kind: "primary", Revision: "target-one"}
@@ -227,6 +233,49 @@ func TestTransientRepairKeepsDurableEffectsAndUnknownQuarantined(t *testing.T) {
 	if !errors.Is(s.Repair(context.Background(), b), ErrUnknown) || len(s.receipts.Snapshot()) != 1 || d.effects != 1 {
 		t.Fatal("repair discarded ambiguous effect")
 	}
+}
+func TestSingletonConflictRepairRequiresDriverProofAndNoUnknownEffect(t *testing.T) {
+	b := fixtureBinding()
+	t.Run("proved false conflict", func(t *testing.T) {
+		d := &fixtureDriver{}
+		s := fixtureSupervisor(t, t.TempDir(), d)
+		state := Evidence{Kind: b.Kind, Generation: b.Generation, ProjectID: b.Project, State: "circuit_open", Reason: "singleton_conflict", Failures: 3, Attention: true}
+		if err := s.circuits.Put(circuit{Key: b.Stream(), Evidence: state}); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.Repair(context.Background(), b); err != nil {
+			t.Fatal(err)
+		}
+		if d.recoveries != 1 || s.Snapshot()[0].State != "ready" {
+			t.Fatal("proved false conflict was not reopened")
+		}
+	})
+	t.Run("true conflict", func(t *testing.T) {
+		d := &fixtureDriver{recoverErr: ErrConflict}
+		s := fixtureSupervisor(t, t.TempDir(), d)
+		state := Evidence{Kind: b.Kind, Generation: b.Generation, ProjectID: b.Project, State: "circuit_open", Reason: "singleton_conflict", Failures: 3, Attention: true}
+		if err := s.circuits.Put(circuit{Key: b.Stream(), Evidence: state}); err != nil {
+			t.Fatal(err)
+		}
+		if !errors.Is(s.Repair(context.Background(), b), ErrConflict) || s.circuits.Snapshot()[0].Evidence.State != "circuit_open" {
+			t.Fatal("true conflict circuit was reopened")
+		}
+	})
+	t.Run("unknown effect", func(t *testing.T) {
+		d := &fixtureDriver{}
+		s := fixtureSupervisor(t, t.TempDir(), d)
+		state := Evidence{Kind: b.Kind, Generation: b.Generation, ProjectID: b.Project, State: "circuit_open", Reason: "singleton_conflict", Failures: 3, Attention: true}
+		if err := s.circuits.Put(circuit{Key: b.Stream(), Evidence: state}); err != nil {
+			t.Fatal(err)
+		}
+		pending := checkpoint{Key: digest(struct{ ID string }{"unknown"}), Binding: b.Key(), Phase: "pending"}
+		if err := s.receipts.Put(pending); err != nil {
+			t.Fatal(err)
+		}
+		if !errors.Is(s.Repair(context.Background(), b), ErrUnknown) || d.recoveries != 0 || s.circuits.Snapshot()[0].Evidence.State != "circuit_open" {
+			t.Fatal("unknown effect did not retain quarantine")
+		}
+	})
 }
 func TestRepairReopensOwnershipChangedStreamForVerifiedSuccessor(t *testing.T) {
 	dir := t.TempDir()

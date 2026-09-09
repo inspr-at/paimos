@@ -3,6 +3,7 @@ import { ref, watch, computed, onMounted } from 'vue'
 import { useRoute, useRouter, RouterLink } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { ApiError, api } from '@/api/client'
+import { publicURL } from '@/publicPath'
 import { useBranding } from '@/composables/useBranding'
 import { useSidebarColors } from '@/composables/useSidebarColors'
 import { postLoginRedirectOrFallback } from '@/router/redirects'
@@ -45,10 +46,13 @@ const methodSSO = ref(false)
 
 /** SSO entry point, carrying the identifier so the IdP can skip its own prompt. */
 const ssoHref = computed(() => {
+  const params = new URLSearchParams()
   const id = username.value.trim()
-  return id
-    ? `/api/auth/oidc/login?login_hint=${encodeURIComponent(id)}`
-    : '/api/auth/oidc/login'
+  if (id) params.set('login_hint', id)
+  const redirect = Array.isArray(route.query.redirect) ? route.query.redirect[0] : route.query.redirect
+  if (typeof redirect === 'string' && redirect) params.set('redirect', redirect)
+  const q = params.toString()
+  return publicURL('/api/auth/oidc/login') + (q ? `?${q}` : '')
 })
 
 async function submitIdentifier() {
@@ -186,7 +190,7 @@ function backToLogin() {
 
     <div class="login-card">
       <div class="login-header">
-        <img :src="branding.logo" :alt="branding.company" class="login-logo" />
+        <img :src="publicURL(branding.logo)" :alt="branding.company" class="login-logo" />
         <h1 class="login-title">{{ branding.product }}</h1>
         <p class="login-sub">{{ branding.company }} {{ branding.tagline }}</p>
       </div>
@@ -312,7 +316,7 @@ function backToLogin() {
       </div>
 
       <footer class="login-footer">
-        <img :src="branding.logo" alt="" class="footer-logo" aria-hidden="true" />
+        <img :src="publicURL(branding.logo)" alt="" class="footer-logo" aria-hidden="true" />
         <span>{{ branding.company }}</span>
         <span class="footer-sep">·</span>
         <span>v{{ version }}</span>

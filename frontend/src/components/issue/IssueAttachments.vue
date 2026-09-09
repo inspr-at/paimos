@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { errMsg } from '@/api/client'
+import { publicURL } from '@/publicPath'
 import { attachmentsEnabled } from '@/api/instance'
 import { MAX_ATTACHMENT_SIZE } from '@/utils/constants'
 import { useAuthStore } from '@/stores/auth'
@@ -130,11 +131,11 @@ async function deleteAttachment(a: Attachment) {
             :title="`Open ${a.filename}`"
             @click="(e) => openInLightbox(a, e)"
           >
-            <img :src="`/api/attachments/${a.id}`" :alt="a.filename" class="attach-thumb" loading="lazy" />
+            <img :src="publicURL(`/api/attachments/${a.id}`)" :alt="a.filename" class="attach-thumb" loading="lazy" />
           </button>
           <div v-else class="attach-file">
             <AppIcon name="file" :size="20" />
-            <a :href="`/api/attachments/${a.id}`" target="_blank" class="attach-file-name">{{ a.filename }}</a>
+            <a :href="publicURL(`/api/attachments/${a.id}`)" target="_blank" class="attach-file-name">{{ a.filename }}</a>
           </div>
           <div class="attach-meta">
             <span class="attach-size">{{ formatSize(a.size_bytes) }}</span>

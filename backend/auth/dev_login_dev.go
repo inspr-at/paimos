@@ -140,15 +140,7 @@ func DevLoginHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	http.SetCookie(w, &http.Cookie{
-		Name:     sessionCookie,
-		Value:    sid,
-		Path:     "/",
-		Expires:  expiresAt,
-		HttpOnly: true,
-		Secure:   cookieSecure,
-		SameSite: http.SameSiteLaxMode,
-	})
+	setSessionCookieValue(w, sid, expiresAt)
 	if _, err := IssueCSRFForSession(w, sid); err != nil {
 		log.Printf("DevLoginHandler: issue csrf token: %v", err)
 	}

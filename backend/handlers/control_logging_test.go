@@ -18,6 +18,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/inspr-at/paimos/backend/db"
+	"github.com/inspr-at/paimos/backend/publicbase"
 )
 
 // controlLogLine is the whole permitted shape of a control access-log
@@ -315,5 +316,49 @@ func TestMalformedConsumerRouteKeepsPrivacyEnvelope(t *testing.T) {
 		if strings.Contains(response, canary) {
 			t.Fatalf("malformed consumer privacy envelope reflected %q", canary)
 		}
+	}
+}
+
+func TestPrefixedControlRequestKeepsPrivateLog(t *testing.T) {
+	prefix, err := publicbase.Parse("/paimos")
+	if err != nil {
+		t.Fatal(err)
+	}
+	publicbase.SetCurrent(prefix)
+	t.Cleanup(func() { publicbase.SetCurrent("") })
+
+	ordinaryCalls := 0
+	countOrdinaryLoggerCalls(t, &ordinaryCalls)
+	logs := captureHandlerLog(t)
+	handler := ClassifiedControlCachePolicyMiddleware(
+		ControlAwareRequestLogger(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusNoContent)
+		})),
+	)
+	path := "/paimos/api/runs/" + logCanaryDelivery + "/control-commands"
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, hostileControlRequest(path))
+	if rec.Header().Get("Cache-Control") != "private, no-store" {
+		t.Fatal("prefixed control request was cacheable")
+	}
+	if ordinaryCalls != 0 {
+		t.Fatal("prefixed control request reached the ordinary logger")
+	}
+	line := strings.TrimSpace(logs.String())
+	if !controlLogLine.MatchString(line) {
+		t.Fatalf("prefixed control log was not closed: %q", line)
+	}
+	if strings.Contains(line, logCanaryDelivery) || strings.Contains(line, "/paimos/") || strings.Contains(line, "/api/runs/") {
+		t.Fatalf("prefixed control log leaked path: %q", line)
+	}
+
+	nearLogs := captureHandlerLog(t)
+	ordinaryCalls = 0
+	handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/paimos/api/runs/17/telemetry", nil))
+	if ordinaryCalls == 0 {
+		t.Fatal("prefixed near-miss must keep ordinary logging")
+	}
+	if strings.Contains(nearLogs.String(), "route_class=") {
+		t.Fatal("prefixed near-miss used the control logger")
 	}
 }

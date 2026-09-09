@@ -59,7 +59,7 @@ vi.mock("@/api/client", async () => {
 
 vi.mock("@/composables/useBranding", () => ({
   useBranding: () => ({
-    branding: { value: { logo: "", company: "C", product: "P", tagline: "t" } },
+    branding: { logo: "/logo.svg", company: "C", product: "P", tagline: "t" },
   }),
 }));
 
@@ -109,6 +109,7 @@ describe("LoginView identifier-first flow (PAI-743)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockRoute.query = {};
+    window.__PAIMOS_PUBLIC_BASE_PATH__ = "";
     document.body.innerHTML = "";
     apiGet.mockResolvedValue({ enabled: true, label: "Sign in with SSO" });
   });
@@ -119,6 +120,14 @@ describe("LoginView identifier-first flow (PAI-743)", () => {
     expect(m.el.querySelector("#password")).toBeNull();
     // The SSO button must not be reachable before we know the realm.
     expect(m.el.querySelector(".login-sso-btn")).toBeNull();
+    await m.unmount();
+  });
+
+  it("prefixes login-card and footer logo URLs under a public mount", async () => {
+    window.__PAIMOS_PUBLIC_BASE_PATH__ = "/paimos";
+    const m = await mountLogin();
+    const logos = [...m.el.querySelectorAll<HTMLImageElement>("img")].map(img => img.getAttribute("src"));
+    expect(logos).toEqual(["/paimos/logo.svg", "/paimos/logo.svg"]);
     await m.unmount();
   });
 

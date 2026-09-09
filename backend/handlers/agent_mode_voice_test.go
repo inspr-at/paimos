@@ -20,7 +20,7 @@ import (
 
 func csrfTokenForSessionCookie(t *testing.T, cookie string) string {
 	t.Helper()
-	sessionID := strings.TrimPrefix(cookie, "session=")
+	sessionID := cookieSessionID(cookie)
 	if sessionID == cookie || sessionID == "" {
 		t.Fatalf("invalid session cookie %q", cookie)
 	}

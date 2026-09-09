@@ -23,6 +23,7 @@ import AppModal from '@/components/AppModal.vue'
 import BulkGenerateSummaryModal from '@/components/BulkGenerateSummaryModal.vue'
 import MetaSelect from '@/components/MetaSelect.vue'
 import type { MetaOption } from '@/components/MetaSelect.vue'
+import { publicURL } from '@/publicPath'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -251,7 +252,7 @@ function download() {
     p.set('snapshot', '1')
     p.set('text_source', textSource.value)
     p.set('statuses', [...selectedStates.value].join(','))
-    window.open(`/api/projects/${props.projectId}/reports/projektbericht/pdf?${p.toString()}`, '_blank')
+    window.open(publicURL(`/api/projects/${props.projectId}/reports/projektbericht/pdf?${p.toString()}`), '_blank')
     emit('close')
     return
   }
@@ -290,7 +291,7 @@ function download() {
     if (props.dateFrom) params.set('date_from', props.dateFrom)
     if (props.dateTo) params.set('date_to', props.dateTo)
   }
-  window.open(`/api/projects/${props.projectId}/reports/projektbericht/pdf?${params.toString()}`, '_blank')
+  window.open(publicURL(`/api/projects/${props.projectId}/reports/projektbericht/pdf?${params.toString()}`), '_blank')
   emit('close')
 }
 </script>

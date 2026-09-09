@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { api, errMsg } from '@/api/client'
+import { publicURL } from '@/publicPath'
 import AppIcon from '@/components/AppIcon.vue'
 import LoadingText from '@/components/LoadingText.vue'
 import { formatInteger } from '@/composables/useNumberFormat'
@@ -78,7 +79,7 @@ onMounted(load)
       <p v-if="error" class="pra-error">{{ error }}</p>
 
       <div class="pra-actions">
-        <a class="btn btn-ghost" :href="`/api/projektberichte/${report.code}/pdf`" target="_blank">
+        <a class="btn btn-ghost" :href="publicURL(`/api/projektberichte/${report.code}/pdf`)" target="_blank">
           <AppIcon name="download" :size="15" /> PDF öffnen
         </a>
         <button class="btn btn-primary" :disabled="accepted || eligible === 0 || accepting" @click="acceptReport">

@@ -2,6 +2,7 @@
 import { ref, watch } from 'vue'
 
 import { DEFAULT_BRAND_LOGO } from '@/composables/brandingAssets'
+import { publicURL } from '@/publicPath'
 
 defineOptions({ inheritAttrs: false })
 
@@ -40,7 +41,7 @@ function onError() {
   <img
     v-if="visible"
     v-bind="$attrs"
-    :src="resolvedSrc"
+    :src="publicURL(resolvedSrc)"
     :alt="alt"
     :data-logo-fallback="fallbackAttempted ? 'true' : 'false'"
     @error="onError"

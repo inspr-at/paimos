@@ -4,6 +4,7 @@
  */
 
 import { api } from '@/api/client'
+import { publicURL } from '@/publicPath'
 
 export type Gap = {
   gap_ref: string
@@ -247,7 +248,7 @@ export function portalConfirmReleaseAcceptance(projectId: number, releaseId: num
 }
 
 export async function downloadAcceptanceEvidence(projectId: number, releaseId: number, format: 'json' | 'eml' | 'html') {
-  const res = await fetch(`/api/projects/${projectId}/release-records/${releaseId}/acceptance/evidence?format=${format}`, {
+  const res = await fetch(publicURL(`/api/projects/${projectId}/release-records/${releaseId}/acceptance/evidence?format=${format}`), {
     credentials: 'include',
   })
   if (!res.ok) {

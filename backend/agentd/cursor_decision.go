@@ -17,6 +17,7 @@ import (
 const (
 	maxCursorPendingDecisions = 8
 	maxCursorDecisionRefusals = 8
+	maxCursorContentBlocks    = 8
 	maxCursorInspectBytes     = 8 << 10
 	maxCursorVisibleBytes     = 16 << 10
 	cursorDecisionTTL         = 2 * time.Minute
@@ -54,7 +55,14 @@ func (p *cursorProcess) PendingDecisions() []PendingDecision {
 func (p *cursorProcess) DecisionRefusals() []DecisionRefusal {
 	p.stateMu.Lock()
 	defer p.stateMu.Unlock()
-	return append([]DecisionRefusal(nil), p.refusals...)
+	out := append([]DecisionRefusal(nil), p.refusals...)
+	for i := range out {
+		if out[i].Structure != nil {
+			shape := *out[i].Structure
+			out[i].Structure = &shape
+		}
+	}
+	return out
 }
 
 func (p *cursorProcess) EvidenceRecords() []cursorEvidenceRecord {
@@ -248,10 +256,10 @@ func (p *cursorProcess) holdPeerDecision(message cursorRPCMessage) {
 		p.observeEvent(AdapterEvent{ErrorCode: ErrorDecisionRefused})
 		return
 	}
-	parsed, ok := parseCursorDecisionRequest(message, sessionID, generation)
+	parsed, diagnostic, ok := parseCursorDecisionRequestDetailed(message, sessionID, generation)
 	if !ok {
 		p.failClosedPeer(message.ID, -32602, "invalid params")
-		p.noteRefusal(closedPeerMethod(message.Method), "invalid")
+		p.noteRefusalDiagnostic(closedPeerMethod(message.Method), "invalid", diagnostic)
 		p.recordEvidence(cursorEvidenceRecord{Generation: generation, Method: closedPeerMethod(message.Method), Outcome: "refused"})
 		p.observeEvent(AdapterEvent{ErrorCode: ErrorDecisionRefused})
 		return
@@ -342,6 +350,10 @@ func (p *cursorProcess) cancelRPC(id json.RawMessage) {
 }
 
 func (p *cursorProcess) noteRefusal(method, reason string) {
+	p.noteRefusalDiagnostic(method, reason, nil)
+}
+
+func (p *cursorProcess) noteRefusalDiagnostic(method, reason string, diagnostic *cursorDecisionDiagnostic) {
 	method = closedPeerMethod(method)
 	if method == "" {
 		method = "invalid"
@@ -351,7 +363,12 @@ func (p *cursorProcess) noteRefusal(method, reason string) {
 	}
 	p.stateMu.Lock()
 	defer p.stateMu.Unlock()
-	p.refusals = append(p.refusals, DecisionRefusal{Method: method, Reason: reason})
+	refusal := DecisionRefusal{Method: method, Reason: reason}
+	if diagnostic != nil {
+		refusal.Code = diagnostic.code
+		refusal.Structure = diagnostic.structure
+	}
+	p.refusals = append(p.refusals, refusal)
 	if len(p.refusals) > maxCursorDecisionRefusals {
 		p.refusals = p.refusals[len(p.refusals)-maxCursorDecisionRefusals:]
 	}
@@ -375,27 +392,50 @@ func (p *cursorProcess) recordOutputDigest(kind, raw string) {
 	})
 }
 
+type cursorDecisionDiagnostic struct {
+	code      string
+	structure *DecisionRequestShape
+}
+
 func parseCursorDecisionRequest(message cursorRPCMessage, sessionID, generation string) (*cursorHeldDecision, bool) {
+	held, _, ok := parseCursorDecisionRequestDetailed(message, sessionID, generation)
+	return held, ok
+}
+
+func parseCursorDecisionRequestDetailed(message cursorRPCMessage, sessionID, generation string) (*cursorHeldDecision, *cursorDecisionDiagnostic, bool) {
 	switch message.Method {
 	case "session/request_permission":
-		return parseCursorPermission(message, sessionID, generation)
+		return parseCursorPermissionDetailed(message, sessionID, generation)
 	case "cursor/ask_question":
-		return parseCursorQuestion(message, sessionID, generation)
+		held, ok := parseCursorQuestion(message, sessionID, generation)
+		return held, nil, ok
 	case "cursor/create_plan":
-		return parseCursorPlan(message, sessionID, generation)
+		held, ok := parseCursorPlan(message, sessionID, generation)
+		return held, nil, ok
 	default:
-		return nil, false
+		return nil, nil, false
 	}
 }
 
 func parseCursorPermission(message cursorRPCMessage, sessionID, generation string) (*cursorHeldDecision, bool) {
+	held, _, ok := parseCursorPermissionDetailed(message, sessionID, generation)
+	return held, ok
+}
+
+func parseCursorPermissionDetailed(message cursorRPCMessage, sessionID, generation string) (*cursorHeldDecision, *cursorDecisionDiagnostic, bool) {
+	shape := cursorPermissionShape(message.Params)
+	fail := func(code string) (*cursorHeldDecision, *cursorDecisionDiagnostic, bool) {
+		return nil, &cursorDecisionDiagnostic{code: code, structure: shape}, false
+	}
 	var params struct {
 		SessionID string `json:"sessionId"`
 		ToolCall  *struct {
 			ToolCallID string          `json:"toolCallId"`
 			Kind       string          `json:"kind"`
 			Title      string          `json:"title"`
+			Status     string          `json:"status"`
 			RawInput   json.RawMessage `json:"rawInput"`
+			Content    json.RawMessage `json:"content"`
 		} `json:"toolCall"`
 		Options []struct {
 			OptionID string `json:"optionId"`
@@ -403,45 +443,70 @@ func parseCursorPermission(message cursorRPCMessage, sessionID, generation strin
 			Kind     string `json:"kind"`
 		} `json:"options"`
 	}
-	if json.Unmarshal(message.Params, &params) != nil || sessionID == "" || params.SessionID != sessionID || params.ToolCall == nil {
-		return nil, false
+	if json.Unmarshal(message.Params, &params) != nil {
+		return fail("permission_params_invalid")
 	}
-	if !validOpaqueID(params.ToolCall.ToolCallID) || len(params.Options) == 0 || len(params.Options) > 8 {
-		return nil, false
+	if params.SessionID == "" {
+		return fail("permission_session_missing")
+	}
+	if sessionID == "" || params.SessionID != sessionID {
+		return fail("permission_session_mismatch")
+	}
+	if params.ToolCall == nil {
+		return fail("permission_tool_call_missing")
+	}
+	if !validOpaqueID(params.ToolCall.ToolCallID) {
+		return fail("permission_tool_call_id_invalid")
+	}
+	if len(params.Options) == 0 || len(params.Options) > 8 {
+		return fail("permission_options_count_invalid")
+	}
+	if params.ToolCall.Status != "" && params.ToolCall.Status != "pending" {
+		return fail("permission_status_invalid")
 	}
 	toolKind := closedToolKind(params.ToolCall.Kind)
 	title, titleOK, titleTrunc := inspectableText(params.ToolCall.Title, 256)
 	if params.ToolCall.Title != "" && !titleOK {
-		return nil, false
+		return fail("permission_title_invalid")
 	}
 	toolInput, inputOK, inputTrunc := inspectableRawInput(params.ToolCall.RawInput)
 	if !inputOK {
-		return nil, false
+		return fail("permission_raw_input_invalid")
+	}
+	toolContent, contentOK, contentIncomplete := inspectableCursorContent(params.ToolCall.Content)
+	if !contentOK {
+		return fail("permission_content_invalid")
 	}
 	optionIDs := make([]string, 0, len(params.Options))
 	optionKind := map[string]string{}
 	options := make([]DecisionOption, 0, len(params.Options))
 	for _, option := range params.Options {
 		label, labelOK, labelTrunc := inspectableText(option.Name, 128)
-		if !validOpaqueID(option.OptionID) || len(option.OptionID) > 64 || optionKind[option.OptionID] != "" || !labelOK || label == "" || labelTrunc {
-			return nil, false
+		if !validOpaqueID(option.OptionID) || len(option.OptionID) > 64 {
+			return fail("permission_option_id_invalid")
+		}
+		if optionKind[option.OptionID] != "" {
+			return fail("permission_option_id_duplicate")
+		}
+		if !labelOK || label == "" || labelTrunc {
+			return fail("permission_option_label_invalid")
 		}
 		kind := strings.TrimSpace(option.Kind)
 		switch kind {
 		case "allow_once", "allow_always", "reject_once", "reject_always":
 		default:
-			return nil, false
+			return fail("permission_option_kind_unsupported")
 		}
 		optionIDs = append(optionIDs, option.OptionID)
 		optionKind[option.OptionID] = kind
 		options = append(options, DecisionOption{ID: option.OptionID, Label: label, Kind: kind})
 	}
-	if title == "" && toolInput == "" {
-		return nil, false
+	if title == "" && toolInput == "" && toolContent == "" {
+		return fail("permission_operation_missing")
 	}
-	incomplete := titleTrunc || inputTrunc
-	display := title + "\x00" + toolInput + "\x00" + cursorOptionBinding(options)
-	digest := cursorDecisionDigest(generation, message.Method, params.SessionID, params.ToolCall.ToolCallID, toolKind, params.ToolCall.RawInput, optionIDs, display)
+	incomplete := titleTrunc || inputTrunc || contentIncomplete
+	display := title + "\x00" + toolInput + "\x00" + toolContent + "\x00" + cursorOptionBinding(options)
+	digest := cursorDecisionDigest(generation, message.Method, params.SessionID, params.ToolCall.ToolCallID, toolKind, message.Params, optionIDs, display)
 	public := PendingDecision{
 		RequestID: cursorDecisionRequestID(generation, message.ID, message.Method), Generation: generation,
 		Method: message.Method, Kind: DecisionPermission, ToolKind: toolKind, Digest: digest, OptionIDs: optionIDs,
@@ -449,8 +514,8 @@ func parseCursorPermission(message cursorRPCMessage, sessionID, generation strin
 	return newHeldDecision(message, public, optionKind, "", DecisionInspect{
 		RequestID: public.RequestID, Generation: generation, Method: message.Method, Kind: DecisionPermission,
 		ToolKind: toolKind, Digest: digest, OptionIDs: optionIDs, Options: options, Title: title, ToolInput: toolInput,
-		Incomplete: incomplete, Untrusted: true,
-	}), true
+		ToolContent: toolContent, Incomplete: incomplete, Untrusted: true,
+	}), nil, true
 }
 
 func parseCursorQuestion(message cursorRPCMessage, sessionID, generation string) (*cursorHeldDecision, bool) {
@@ -611,6 +676,166 @@ func inspectableRawInput(raw json.RawMessage) (string, bool, bool) {
 		return "", false, false
 	}
 	return inspectableText(string(compact), maxCursorInspectBytes)
+}
+
+func inspectableCursorContent(raw json.RawMessage) (string, bool, bool) {
+	raw = bytes.TrimSpace(raw)
+	if len(raw) == 0 {
+		return "", true, false
+	}
+	if bytes.Equal(raw, []byte("null")) {
+		return "", true, true
+	}
+	var blocks []json.RawMessage
+	if json.Unmarshal(raw, &blocks) != nil {
+		return "", false, false
+	}
+	var compact bytes.Buffer
+	if json.Compact(&compact, raw) != nil {
+		return "", false, false
+	}
+	display, displayOK, displayTrunc := inspectableText(compact.String(), maxCursorInspectBytes)
+	if !displayOK {
+		return "", false, false
+	}
+	incomplete := displayTrunc || len(blocks) == 0 || len(blocks) > maxCursorContentBlocks
+	for _, block := range blocks {
+		supported, valid := supportedCursorContentBlock(block)
+		if !valid {
+			return "", false, false
+		}
+		if !supported {
+			incomplete = true
+		}
+	}
+	return display, true, incomplete
+}
+
+func supportedCursorContentBlock(raw json.RawMessage) (bool, bool) {
+	var block map[string]json.RawMessage
+	if json.Unmarshal(raw, &block) != nil || block == nil {
+		return false, false
+	}
+	var kind string
+	if json.Unmarshal(block["type"], &kind) != nil || kind == "" {
+		return false, false
+	}
+	switch kind {
+	case "content":
+		var content map[string]json.RawMessage
+		if json.Unmarshal(block["content"], &content) != nil || content == nil {
+			return false, false
+		}
+		var contentType, text string
+		if json.Unmarshal(content["type"], &contentType) != nil || contentType == "" ||
+			json.Unmarshal(content["text"], &text) != nil {
+			return false, false
+		}
+		if _, ok, _ := inspectableText(text, 0); !ok {
+			return false, false
+		}
+		return contentType == "text" && onlyJSONFields(block, "type", "content") && onlyJSONFields(content, "type", "text"), true
+	case "diff":
+		var path, newText string
+		if json.Unmarshal(block["path"], &path) != nil || path == "" ||
+			json.Unmarshal(block["newText"], &newText) != nil {
+			return false, false
+		}
+		oldRaw, hasOld := block["oldText"]
+		if !hasOld {
+			return false, false
+		}
+		if !bytes.Equal(bytes.TrimSpace(oldRaw), []byte("null")) {
+			var oldText string
+			if json.Unmarshal(oldRaw, &oldText) != nil {
+				return false, false
+			}
+			if _, ok, _ := inspectableText(oldText, 0); !ok {
+				return false, false
+			}
+		}
+		for _, value := range []string{path, newText} {
+			if _, ok, _ := inspectableText(value, 0); !ok {
+				return false, false
+			}
+		}
+		return onlyJSONFields(block, "type", "path", "oldText", "newText"), true
+	default:
+		return false, true
+	}
+}
+
+func onlyJSONFields(value map[string]json.RawMessage, allowed ...string) bool {
+	if len(value) != len(allowed) {
+		return false
+	}
+	for _, key := range allowed {
+		if _, ok := value[key]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
+func cursorPermissionShape(raw json.RawMessage) *DecisionRequestShape {
+	shape := &DecisionRequestShape{
+		ParamsType: "absent", SessionIDType: "absent", ToolCallType: "absent", ToolCallIDType: "absent",
+		KindType: "absent", TitleType: "absent", StatusType: "absent", RawInputType: "absent",
+		ContentType: "absent", OptionsType: "absent",
+	}
+	shape.ParamsType = jsonStructuralType(raw)
+	var params map[string]json.RawMessage
+	if json.Unmarshal(raw, &params) != nil || params == nil {
+		return shape
+	}
+	shape.SessionIDType = jsonStructuralType(params["sessionId"])
+	shape.ToolCallType = jsonStructuralType(params["toolCall"])
+	shape.OptionsType = jsonStructuralType(params["options"])
+	shape.OptionCount = boundedJSONArrayCount(params["options"], 8)
+	var toolCall map[string]json.RawMessage
+	if json.Unmarshal(params["toolCall"], &toolCall) != nil || toolCall == nil {
+		return shape
+	}
+	shape.ToolCallIDType = jsonStructuralType(toolCall["toolCallId"])
+	shape.KindType = jsonStructuralType(toolCall["kind"])
+	shape.TitleType = jsonStructuralType(toolCall["title"])
+	shape.StatusType = jsonStructuralType(toolCall["status"])
+	shape.RawInputType = jsonStructuralType(toolCall["rawInput"])
+	shape.ContentType = jsonStructuralType(toolCall["content"])
+	shape.ContentBlocks = boundedJSONArrayCount(toolCall["content"], maxCursorContentBlocks)
+	return shape
+}
+
+func jsonStructuralType(raw json.RawMessage) string {
+	raw = bytes.TrimSpace(raw)
+	if len(raw) == 0 {
+		return "absent"
+	}
+	switch raw[0] {
+	case 'n':
+		return "null"
+	case '"':
+		return "string"
+	case '{':
+		return "object"
+	case '[':
+		return "array"
+	case 't', 'f':
+		return "boolean"
+	default:
+		return "number"
+	}
+}
+
+func boundedJSONArrayCount(raw json.RawMessage, max int) int {
+	var values []json.RawMessage
+	if json.Unmarshal(raw, &values) != nil {
+		return 0
+	}
+	if len(values) > max {
+		return max + 1
+	}
+	return len(values)
 }
 
 func inspectableText(value string, max int) (string, bool, bool) {

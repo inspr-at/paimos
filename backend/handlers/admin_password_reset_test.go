@@ -138,7 +138,7 @@ func TestAdminPasswordReset_OptOutSkipsForcedChange(t *testing.T) {
 func TestAdminPasswordReset_SelfEditKeepsCurrentSession(t *testing.T) {
 	ts := newTestServer(t)
 	adminID := userID(t, "admin")
-	adminSID := ts.adminCookie[len("session="):]
+	adminSID := cookieSessionID(ts.adminCookie)
 
 	resp := ts.put(t, "/api/users/"+itoa(adminID), ts.adminCookie, map[string]any{
 		"password": "newadminpass123",
