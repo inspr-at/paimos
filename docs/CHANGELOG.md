@@ -6,6 +6,19 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 with legacy releases using Semantic Versioning and new product cuts using the
 calendar form `yy.mm.dd[.hh.mm]`.
 
+## [26.09.09] — 2026-09-09
+
+### Added
+
+- Support optional native public base paths for shared-origin deployments, including frontend assets, authentication redirects and CLI worker messaging (PAI-972, PAI-976).
+
+### Fixed
+
+- Distinguish worker startup from messaging readiness and preserve busy inbox/steer delivery until the receiver is ready (PAI-973, PAI-974).
+- Preserve and diagnose optional Cursor permission content without exposing private message payloads (PAI-975).
+- Reject unsafe authentication return paths and retain cookie security flag coverage across session, OIDC and CSRF cookies.
+- Restore unsupported-platform security test compilation by sharing the Cursor redaction assertion outside platform-specific test files.
+
 ## [26.09.08.17.06] — 2026-09-08
 
 ### Changed
