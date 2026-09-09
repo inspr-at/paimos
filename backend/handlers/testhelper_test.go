@@ -521,6 +521,9 @@ func buildRouter() http.Handler {
 			r.With(auth.RequireAdmin).Get("/gdpr/retention", handlers.GetRetentionPolicy)
 			r.With(auth.RequireAdmin).Get("/system/settings", handlers.GetSystemSettings)
 			r.With(auth.RequireAdmin).Put("/system/settings", handlers.PutSystemSettings)
+			// PAI-980: instance-level CRM module switch — mirrors main.go.
+			r.With(auth.RequireAdmin).Get("/integrations/crm/module", handlers.GetCRMModule)
+			r.With(auth.RequireAdmin).Put("/integrations/crm/module", handlers.PutCRMModule)
 
 			// Incident log
 			r.With(auth.RequireAdmin).Get("/incidents/export", handlers.ExportIncidents)

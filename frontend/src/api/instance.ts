@@ -33,12 +33,16 @@ export const instanceLabel       = ref('')
 export const instanceHostname    = ref('')
 export const attachmentsEnabled  = ref(true)
 export const liveUpdatesEnabled  = ref(true)
+// PAI-980: instance-level CRM module switch. Default on (optimistic) so
+// existing instances never lose the Customers entry points on load.
+export const crmEnabled          = ref(true)
 
 interface InstanceInfo {
   label?: string
   hostname?: string
   attachments_enabled?: boolean
   live_updates_enabled?: boolean
+  crm_enabled?: boolean
 }
 
 let loadPromise: Promise<void> | null = null
@@ -51,6 +55,7 @@ export function loadInstance(): Promise<void> {
       instanceHostname.value   = d.hostname ?? ''
       attachmentsEnabled.value = d.attachments_enabled ?? true
       liveUpdatesEnabled.value = d.live_updates_enabled ?? true
+      crmEnabled.value         = d.crm_enabled ?? true
     })
     .catch(() => {
       // Swallow — not logged in yet (401), network blip, etc.

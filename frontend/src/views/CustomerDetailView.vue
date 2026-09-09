@@ -21,6 +21,7 @@
 import LoadingText from "@/components/LoadingText.vue";
 import { ref, computed, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
 import { useRoute, useRouter, RouterLink } from 'vue-router'
+import { useCustomerBase } from '@/composables/useCustomerBase'
 import { api, errMsg } from '@/api/client'
 import { useAuthStore } from '@/stores/auth'
 import AppIcon from '@/components/AppIcon.vue'
@@ -37,6 +38,7 @@ import { publicURL } from '@/publicPath'
 
 const route = useRoute()
 const router = useRouter()
+const { base: customerBase } = useCustomerBase()
 const auth = useAuthStore()
 const isAdmin = computed(() => auth.isAdmin)
 
@@ -277,7 +279,7 @@ async function doDelete() {
   deleteError.value = ''
   try {
     await api.delete(`/customers/${customer.value.id}`)
-    router.push('/customers')
+    router.push(customerBase.value)
   } catch (e: unknown) {
     deleteError.value = errMsg(e, 'Delete failed.')
   } finally {
@@ -382,7 +384,7 @@ function effectiveRate(p: Project, kind: 'hourly' | 'lp'): { value: number | nul
 <template>
   <Teleport defer to="#app-header-left">
     <span v-if="customer" class="ah-title">
-      <RouterLink to="/customers" class="ah-crumb">Customers</RouterLink>
+      <RouterLink :to="customerBase" class="ah-crumb">Customers</RouterLink>
       <span class="ah-sep">/</span>
       {{ customer.name }}
     </span>

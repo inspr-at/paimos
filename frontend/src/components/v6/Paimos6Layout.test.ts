@@ -4,6 +4,7 @@ import { h, nextTick } from 'vue'
 import { api } from '@/api/client'
 import { mountComponent } from '@/components/ai/testMount'
 import { commandShortcutLabel } from '@/v6/commandPalette'
+import { crmEnabled } from '@/api/instance'
 
 const { route, router } = vi.hoisted(() => ({
   route: { query: { project: '42' } as Record<string, string>, fullPath: '/?project=42' },
@@ -73,9 +74,9 @@ describe('Paimos6Layout (PAI-854 / PAI-867 isolated production shell)', () => {
     expect(shell.querySelector('nav')?.getAttribute('aria-label')).toBe('Control room')
     expect(
       [...shell.querySelectorAll('.habitat-nav a')].map((link) => link.getAttribute('aria-label')),
-    ).toEqual(['Home', 'Workers', 'Projects', 'Needs you'])
+    ).toEqual(['Home', 'Workers', 'Projects', 'Needs you', 'Customers'])
     expect(shell.querySelector('[aria-label="Start work"]')).not.toBeNull()
-    for (const label of ['Customers', 'Reporting', 'New Issue', 'Timer', 'Undo']) {
+    for (const label of ['Reporting', 'New Issue', 'Timer', 'Undo']) {
       expect(text).not.toContain(label)
     }
     expect(text).toContain('Classic workspace')
@@ -91,12 +92,57 @@ describe('Paimos6Layout (PAI-854 / PAI-867 isolated production shell)', () => {
     expect(shell.textContent).toContain('Command shortcut settings')
     expect(shell.textContent).toContain('Open 5.x dashboard')
     expect(shell.textContent).not.toContain('Clear selected session')
+    // PAI-980: the CRM door is a palette action while the instance switch is on.
+    const options = [...shell.querySelectorAll<HTMLButtonElement>('[role="option"]')]
+    const crm = options.find((button) => button.textContent?.includes('Open the customer list at /crm'))!
+    expect(crm).toBeDefined()
+    crm.click()
+    await vi.waitFor(() => expect(router.push).toHaveBeenCalledWith('/crm'))
+    shell.querySelector<HTMLButtonElement>('.p6-command-mount')!.click()
+    await nextTick()
     const legacy = [...shell.querySelectorAll<HTMLButtonElement>('[role="option"]')].find(
       (button) => button.textContent?.includes('Open 5.x dashboard'),
     )!
     legacy.click()
     await vi.waitFor(() => expect(router.push).toHaveBeenCalledWith('/legacy'))
     await mounted.unmount()
+  })
+
+  it('hides the CRM door from the rail and the palette when the instance switch is off (PAI-980)', async () => {
+    vi.spyOn(api, 'get').mockImplementation((path: string) =>
+      Promise.resolve(
+        path === '/instance'
+          ? ({ label: '', hostname: 'fixture', crm_enabled: false } as never)
+          : ({
+              schema_version: 1,
+              default_shortcut: 'Mod+KeyK',
+              instance_shortcut: null,
+              user_shortcut: null,
+              effective_shortcut: 'Mod+KeyK',
+              source: 'default',
+            } as never),
+      ),
+    )
+    crmEnabled.value = false
+    try {
+      const mounted = await mountComponent(
+        Paimos6Layout,
+        {},
+        { default: () => h('main', { class: 'fixture-home' }, 'session home') },
+      )
+      const shell = mounted.el.querySelector<HTMLElement>('[data-shell="v6"]')!
+      expect(
+        [...shell.querySelectorAll('.habitat-nav a')].map((link) => link.getAttribute('aria-label')),
+      ).toEqual(['Home', 'Workers', 'Projects', 'Needs you'])
+      expect(shell.textContent).not.toContain('Customers')
+      shell.querySelector<HTMLButtonElement>('.p6-command-mount')!.click()
+      await nextTick()
+      expect(shell.textContent).toContain('Open 5.x dashboard')
+      expect(shell.textContent).not.toContain('Open the customer list at /crm')
+      await mounted.unmount()
+    } finally {
+      crmEnabled.value = true
+    }
   })
 
   it('renders authorized grouped results and keeps unavailable node activation honest', async () => {

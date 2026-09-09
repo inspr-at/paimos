@@ -6,6 +6,22 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 with legacy releases using Semantic Versioning and new product cuts using the
 calendar form `yy.mm.dd[.hh.mm]`.
 
+## [Unreleased]
+
+### Added — CRM door in the Paimos 6 shell (PAI-980)
+
+- Add `/crm` and `/crm/:id` in the Paimos 6 shell, rendering the existing
+  customer list and detail inside the v6 layout, with a `Customers` rail entry
+  and a `Customers` command-palette action. List and detail links keep the
+  `/crm` base so the shell never changes underneath the user. The 5.x views
+  are reused, not rewritten; no CRM capability is added.
+- Add the instance-level switch `crm_enabled` (default on, `app_settings`),
+  exposed to every authenticated user through `GET /api/instance` and
+  writable by admins through `PUT /api/integrations/crm/module` and the new
+  toggle under Integrations → CRM. Off hides the Customers entry points in the
+  5.x sidebar, the Paimos 6 rail and the palette; customer data and the
+  `/customers` routes stay reachable and nothing is deleted.
+
 ## [26.09.09] — 2026-09-09
 
 ### Added

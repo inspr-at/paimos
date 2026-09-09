@@ -19,6 +19,7 @@ import { ref, reactive, computed, onMounted } from 'vue'
 import { api, errMsg } from '@/api/client'
 import AppIcon from '@/components/AppIcon.vue'
 import { useExternalProvider } from '@/composables/useExternalProvider'
+import { crmEnabled, loadInstance } from '@/api/instance'
 import { formatTimeWithLocale } from '@/composables/useDateFormat'
 import type { CRMTestResult, ExternalProvider, ExternalProviderConfig, ExternalProviderConfigField } from '@/types'
 import { publicURL } from '@/publicPath'
@@ -51,6 +52,24 @@ const testing = reactive<Record<string, boolean>>({})
 const testLogs = reactive<Record<string, TestLog[]>>({})
 
 const { refresh: refreshProviderCache } = useExternalProvider()
+
+// PAI-980: instance-level CRM module switch. Off hides the Customers entry
+// points (5.x sidebar, Paimos 6 rail, Cmd-K); data and routes stay.
+void loadInstance()
+const moduleSaving = ref(false)
+const moduleError = ref('')
+async function toggleModule() {
+  moduleSaving.value = true
+  moduleError.value = ''
+  try {
+    const res = await api.put<{ enabled: boolean }>('/integrations/crm/module', { enabled: !crmEnabled.value })
+    crmEnabled.value = res.enabled
+  } catch (e: unknown) {
+    moduleError.value = errMsg(e, 'Could not update the CRM switch.')
+  } finally {
+    moduleSaving.value = false
+  }
+}
 
 async function loadProviders() {
   loading.value = true
@@ -241,6 +260,31 @@ const hasProviders = computed(() => providers.value.length > 0)
 </script>
 
 <template>
+  <div class="section crm-module" data-testid="crm-module">
+    <div class="section-header">
+      <h2 class="section-title">CRM on this instance</h2>
+      <p class="section-desc">
+        Off hides the Customers entry points in the sidebar, the Paimos 6 rail
+        and the command palette. Customer data and <code>/customers</code>
+        stay reachable; nothing is deleted.
+      </p>
+    </div>
+    <label class="crm-module-row">
+      <label class="crm-toggle" @click.stop>
+        <input
+          type="checkbox"
+          :checked="crmEnabled"
+          :disabled="moduleSaving"
+          aria-label="CRM enabled on this instance"
+          @change="toggleModule"
+        />
+        <span class="crm-toggle-track" />
+      </label>
+      <span class="crm-module-label">{{ crmEnabled ? 'CRM enabled' : 'CRM disabled' }}</span>
+      <span v-if="moduleSaving" class="crm-module-hint">Saving…</span>
+      <span v-else-if="moduleError" class="crm-module-error">{{ moduleError }}</span>
+    </label>
+  </div>
   <div class="section">
     <div class="section-header">
       <h2 class="section-title">CRM Providers</h2>
@@ -651,4 +695,16 @@ const hasProviders = computed(() => providers.value.length > 0)
   padding: .05rem 0;
   word-break: break-all;
 }
+
+/* PAI-980: instance switch row */
+.crm-module { margin-bottom: 20px; }
+.crm-module-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  cursor: pointer;
+}
+.crm-module-label { font-weight: 600; }
+.crm-module-hint { font-size: 0.85rem; opacity: 0.7; }
+.crm-module-error { font-size: 0.85rem; color: var(--danger, #b42318); }
 </style>

@@ -16,7 +16,7 @@ import { useRecentProjects } from '@/composables/useRecentProjects'
 import { useKeyboardShortcuts } from '@/composables/useKeyboardShortcuts'
 import { useTotpNag } from '@/composables/useTotpNag'
 import { api } from '@/api/client'
-import { instanceLabel, loadInstance } from '@/api/instance'
+import { crmEnabled, instanceLabel, loadInstance } from '@/api/instance'
 import AppIcon from '@/components/AppIcon.vue'
 import BrandLogo from '@/components/BrandLogo.vue'
 import AppHeader from '@/components/AppHeader.vue'
@@ -226,7 +226,7 @@ onBeforeUnmount(() => {
           <RouterLink to="/projects" :class="['nav-item', { active: isActive('/projects') }]" :title="isExpanded ? '' : 'Projects'">
             <AppIcon name="folder" /><span class="sl">Projects</span>
           </RouterLink>
-          <RouterLink to="/customers" :class="['nav-item', { active: isActive('/customers') }]" :title="isExpanded ? '' : 'Customers'">
+          <RouterLink v-if="crmEnabled" to="/customers" :class="['nav-item', { active: isActive('/customers') }]" :title="isExpanded ? '' : 'Customers'">
             <AppIcon name="building-2" /><span class="sl">Customers</span>
           </RouterLink>
           <RouterLink to="/issues"   :class="['nav-item', { active: isActive('/issues') }]"   :title="isExpanded ? '' : 'Issues'">
