@@ -132,10 +132,8 @@ defineExpose({ paginate })
         :aria-label="`Seite ${index + 1}`"
       >
         <div class="hdr">
-          <span>ANGEBOT {{ offer.offer_no }}</span
-          ><span class="mid"
-            >{{ offer.document.customer.name }} · {{ offer.document.sender.company }}</span
-          ><span class="right">{{ date(offer.document.offer_date) }}</span>
+          <span>ANGEBOT {{ offer.offer_no }}</span>
+          <span class="right">{{ date(offer.document.offer_date) }}</span>
         </div>
         <div class="page-content">
           <OfferCover v-if="page.kind === 'cover'" :offer="offer" :editable="editable" />

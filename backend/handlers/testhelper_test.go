@@ -550,6 +550,7 @@ func buildRouter() http.Handler {
 			r.Get("/customers/{id}", handlers.GetCustomer)
 			r.With(auth.RequireAdmin).Post("/customers", handlers.CreateCustomer)
 			r.With(auth.RequireAdmin).Put("/customers/{id}", handlers.UpdateCustomer)
+			r.With(auth.RequireAdmin).Post("/customers/{id}/number/reformat", handlers.ReformatCustomerNumber)
 			r.With(auth.RequireAdmin).Delete("/customers/{id}", handlers.DeleteCustomer)
 			r.Get("/customers/{id}/contacts", handlers.ListCustomerContacts)
 			r.With(auth.RequireAdmin).Post("/customers/{id}/contacts", handlers.CreateCustomerContact)

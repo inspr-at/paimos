@@ -106,7 +106,9 @@
 }
 .offer-document .hdr {
   display: grid;
-  grid-template-columns: 1fr auto 1fr;
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: 8mm;
+  white-space: nowrap;
   align-items: baseline;
   font-size: 7.5pt;
   letter-spacing: 0.14em;
@@ -115,9 +117,6 @@
   font-weight: 600;
   padding-bottom: 5px;
   border-bottom: 1px solid var(--rule);
-}
-.offer-document .hdr .mid {
-  text-align: center;
 }
 .offer-document .hdr .right {
   text-align: right;
@@ -569,11 +568,6 @@
 .offer-document .page .ftr {
   flex-shrink: 0;
   margin-top: 7mm;
-}
-.offer-document .hdr .mid {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 .offer-document .offer-cover,
 .offer-document .offer-acceptance {

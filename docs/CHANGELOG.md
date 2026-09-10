@@ -17,6 +17,15 @@ coordinate, from the first entry below that form).
 - Explicit online acceptance records the signer, company, time and immutable audit receipt atomically. Expired offers stay readable and cannot be accepted; repeated attempts cannot replace the first signer.
 - Show creator-specific accepted offers in CRM. Keep capability URLs out of application logs, caches and referrers; rate-limit public requests and honor the CRM module switch.
 
+### Fixed — Offer page headers (PAI-991)
+
+- Keep the offer number and date on one line; full company names stay in the address block and no longer crowd the repeated page header.
+
+### Changed — Monthly customer numbers (PAI-991)
+
+- Assign `KYYMM` followed by an unpadded monthly counter, such as `K26091`, `K26092`, then `K26101` in October.
+- Allow an explicit admin conversion of a legacy customer number while all associated offers remain drafts; update their snapshots and revisions atomically. Issued documents and monthly numbers remain fixed.
+
 ## [260910133810.0.0] — 2026-09-10
 
 ### Added — CRM offer editor and PDF printing (PAI-991)
