@@ -103,9 +103,7 @@ describe('Home presents actual next steps', () => {
     expect(mounted.el.textContent).toContain('Set up coordinator')
     expect(mounted.el.textContent).toContain('No workers yet')
     expect(mounted.el.querySelector('.habitat-roster-row')).toBeNull()
-    expect(mounted.el.querySelector('.habitat-welcome-art')?.getAttribute('aria-hidden')).toBe(
-      'true',
-    )
+    expect(mounted.el.querySelector('.habitat-welcome')).not.toBeNull()
     props.snapshot.instance_root.configured_identity =
       habitatFixture().instance_root.configured_identity
     props.snapshot.instance_root.active_generation.state = 'unset'

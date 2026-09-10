@@ -26,32 +26,18 @@ const { t } = useI18n({
   useScope: 'local',
   messages: {
     en: {
-      home: 'Your workspace.',
-      workers: 'Your workers and their current work.',
-      projects: 'Your projects.',
-      assign: 'Start something new.',
-      attention: 'Needs you.',
-      homeDeck: 'Your projects, your workers, and what’s next.',
-      workersDeck: 'See who’s working, what they’re doing, and where you can help.',
-      projectsDeck: 'Open a project to see its workers, current work, and next steps.',
-      assignDeck: 'Choose a worker, give it a project, and set a clear first task.',
-      attentionDeck: 'Decisions and questions that move the work forward.',
+      home: 'Home',
+      workers: 'Workers',
+      projects: 'Projects',
+      assign: 'Start work',
+      attention: 'Needs you',
     },
     de: {
-      home: 'Hier ist deine Aufmerksamkeit gefragt.',
-      workers: 'Wer arbeitet woran, mit welcher Befugnis.',
-      projects: 'Deine Projekte.',
-      attention: 'Braucht dich.',
-      attentionDeck: 'Entscheidungen und Fragen, die die Arbeit weiterbringen.',
-      assign: 'Ein klarer Start für die nächste Generation.',
-      homeDeck:
-        'Entscheidungen, Übergaben und Wiederherstellung stehen im Vordergrund. Gesunde Hintergrundarbeit bleibt ruhig.',
-      workersDeck:
-        'Vom Instanz-Orchestrator zu jedem Projekt und Worker. Wähle eine Präsenz, um ihre Nachweise zu prüfen.',
-      projectsDeck:
-        'Von einer Lieferung zum gesamten Portfolio. Fortschritt bleibt durch verlässliche Nachweise belegt.',
-      assignDeck:
-        'Identität binden, Projekt wählen und einen verwalteten Worker mit eindeutigem Ausführungsprofil starten.',
+      home: 'Start',
+      workers: 'Worker',
+      projects: 'Projekte',
+      attention: 'Braucht dich',
+      assign: 'Arbeit starten',
     },
   },
 })
@@ -106,10 +92,7 @@ const inspector = ref<HTMLElement | null>(null)
 const inspectorActions = ref<InstanceType<typeof HabitatInspector> | null>(null)
 const announcement = ref('')
 const viewOptions = ref(false)
-const firstName = computed(
-  () => (auth.user?.nickname || auth.user?.first_name || '').split(/\s+/)[0],
-)
-const greeting = computed(() => (firstName.value ? `Welcome back, ${firstName.value}.` : t('home')))
+const pageTitle = computed(() => t(view.value))
 const inspectorTrigger = ref<HTMLElement | null>(null)
 const compactMedia = globalThis.matchMedia?.('(max-width: 760px)')
 const compactViewport = ref(compactMedia?.matches ?? false)
@@ -404,11 +387,7 @@ onScopeDispose(() => registerContext?.(null))
     </div>
     <header class="habitat-hero">
       <div>
-        <span class="habitat-eyebrow">{{
-          view === 'home' ? 'Your workspace' : `Habitat · ${humanize(view)}`
-        }}</span>
-        <h1>{{ view === 'home' ? greeting : t(view) }}</h1>
-        <p>{{ t(`${view}Deck`) }}</p>
+        <h1>{{ pageTitle }}</h1>
       </div>
       <button
         v-if="!['assign', 'home', 'attention'].includes(view)"

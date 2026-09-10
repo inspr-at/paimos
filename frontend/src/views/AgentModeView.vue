@@ -90,7 +90,7 @@ import {
 } from '@/composables/agent-mode/useAgentModeVoice'
 import { buildControlVoicePhrase } from '@/composables/agent-mode/agentModeVoiceIntent'
 import { useInteractionHold } from '@/composables/agent-mode/useInteractionHold'
-import { formatRelativeTimeWithLocale, formatTimeWithLocale, useDateFormat } from '@/composables/useDateFormat'
+import { formatRelativeTimeWithLocale, useDateFormat } from '@/composables/useDateFormat'
 import { lsAgentModeDensityKey, lsAgentModeSelectedKey } from '@/constants/storage'
 import type { AgentModeSnapshotLoader, Delivery } from '@/services/agentMode'
 import type { AgentModeAggregates } from '@/services/agentModeAggregateSchema'
@@ -1094,14 +1094,6 @@ const counts = computed(() => {
     : null
 })
 
-const headline = computed(() => {
-  const c = counts.value
-  if (!c) return t('agentMode.aggregate.unavailable')
-  const n = c.total
-  if (n === 0) return t('agentMode.headline.none')
-  if (n === 1) return t('agentMode.headline.one')
-  return t('agentMode.headline.many', { n })
-})
 const breakdown = computed(() => {
   const c = counts.value
   if (!c) return ''
@@ -1112,11 +1104,6 @@ const breakdown = computed(() => {
   if (c.unknown) parts.push(t('agentMode.narration.partUnknown', { n: c.unknown }))
   return parts.join(' · ')
 })
-const dateLine = computed(() => {
-  const weekday = new Intl.DateTimeFormat(locale.value, { weekday: 'long' }).format(new Date(serverNowMs.value))
-  return `${weekday} · ${formatTimeWithLocale(serverNowMs.value, locale.value)}`
-})
-
 const feedLive = computed(() => (data.status.value === 'ready' || data.status.value === 'empty') && !data.refreshing.value)
 const liveLabel = computed(() => {
   if (props.sourceLabel) return props.sourceLabel
@@ -1348,14 +1335,6 @@ const selectedPosition = computed(() => {
       />
 
       <template v-else>
-        <header class="am-canvas-head">
-          <div>
-            <span class="am-eyebrow">{{ dateLine }}</span>
-            <h1 class="am-headline">{{ headline }}</h1>
-            <p v-if="breakdown" class="am-subline">{{ breakdown }}</p>
-          </div>
-        </header>
-
         <div v-if="showOfflineBanner" class="am-banner" role="status">
           <AppIcon :name="data.status.value === 'offline' ? 'wifi-off' : 'alert-circle'" :size="13" aria-hidden="true" />
           <span>
@@ -1603,22 +1582,6 @@ const selectedPosition = computed(() => {
 }
 .am-root--compact .am-canvas { padding: 22px 18px 32px; }
 .am-canvas > * + * { margin-top: 18px; }
-
-.am-eyebrow {
-  color: var(--am-muted);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-.am-headline {
-  margin: 6px 0 4px;
-  font-family: 'Bricolage Grotesque', 'DM Sans', sans-serif;
-  font-size: clamp(22px, 2.6vw, 30px);
-  font-weight: 500;
-  letter-spacing: -0.03em;
-}
-.am-subline { margin: 0; color: var(--am-muted); font-size: 13px; }
 
 .am-banner {
   display: flex;

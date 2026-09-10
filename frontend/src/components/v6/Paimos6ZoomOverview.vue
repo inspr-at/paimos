@@ -13,11 +13,10 @@ defineProps<{
 <template>
   <section class="p6-overview" aria-labelledby="p6-overview-title" style="min-width: 0; max-width: 100%; box-sizing: border-box;">
     <div class="p6-overview-copy">
-      <p>Exception-first projection · {{ band }}</p>
-      <h3 id="p6-overview-title">{{ totals.sessions }} authorized sessions</h3>
+      <h3 id="p6-overview-title">{{ totals.sessions }} sessions · {{ band }}</h3>
       <span>
-        Showing {{ sampledSessions }} of {{ totals.sessions }}; bounded at {{ sampleLimit }}.
-        {{ sampleTruncated ? 'The sample is truncated.' : 'The sample is complete.' }}
+        Showing {{ sampledSessions }} of {{ totals.sessions }} (limit {{ sampleLimit }}).
+        {{ sampleTruncated ? 'Sample truncated.' : 'Sample complete.' }}
       </span>
     </div>
     <dl>
@@ -45,8 +44,7 @@ defineProps<{
   background: #f8faf7;
 }
 .p6-overview-copy { min-width: 0; }
-.p6-overview-copy p { color: #5d7467; font-size: 9px; font-weight: 750; letter-spacing: 0.07em; text-transform: uppercase; }
-.p6-overview-copy h3 { margin-top: 4px; color: #31443a; font: 600 18px/1.1 "Bricolage Grotesque", sans-serif; }
+.p6-overview-copy h3 { margin: 0; color: #31443a; font: 600 16px/1.2 "Bricolage Grotesque", sans-serif; }
 .p6-overview-copy span { display: block; margin-top: 7px; color: #68756e; font-size: 9.5px; line-height: 1.45; }
 .p6-overview dl { display: grid; min-width: 0; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
 .p6-overview dl div { min-width: 0; padding: 8px; border-left: 1px solid #d5dfd9; }
