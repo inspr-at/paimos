@@ -62,12 +62,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        group: [core, runtime]
-    # Exact-main run 33871597020 reached supervision 38m19s into this step;
-    # its last selected test was 28s old when the old 8m package alarm fired.
-    # A 15m package cap plus the current roughly 13m tail projects to 66m19s.
-    # The added root/runtime fixtures project to roughly 30m. Give them a
-    # separate runner so the core group retains its original outer-job margin.
+        group: [core, handlers, runtime]
+    # PAI-991: exact release run 34514767389 exhausted the 90m core job
+    # during the second agentmode invocation. All ten handler invocations
+    # had already passed, using about 45m. Give those unchanged invocations
+    # their own sequential runner; core retains every other package and its
+    # existing limits. Runtime and the full serial suite remain unchanged.
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v5
