@@ -9,6 +9,13 @@ Semantic Versioning (`x.y.z`, until 5.21.0), INSPR calendar v1
 (`YYMMDDhhmmss.0.0`, the UTC reservation second as a SemVer-shaped
 coordinate, from the first entry below that form).
 
+## [260910221338.0.0] — 2026-09-10
+
+### Changed — Final calendar version display (PAI-994)
+
+- Render calendar version labels with the approved revision 3 segment weights and sun-coloured date tint from the pinned INSPR display data. Canonical version strings, copyable values and legacy labels stay unchanged.
+- Verify the vendored display data against its immutable upstream revision in offline builds and initialized checkouts.
+
 ## [260910201738.0.0] — 2026-09-10
 
 ### Fixed — Exhaustive race job budget (PAI-991)
