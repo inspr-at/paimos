@@ -9,7 +9,19 @@ Semantic Versioning (`x.y.z`, until 5.21.0), INSPR calendar v1
 (`YYMMDDhhmmss.0.0`, the UTC reservation second as a SemVer-shaped
 coordinate, from the first entry below that form).
 
+## [Unreleased]
+
+### Fixed — Exhaustive race job budget (PAI-991)
+
+- Run the complete handler race plan on its own CI runner, keeping every test, package timeout, outer-job limit and exact-release assurance gate unchanged. This avoids the accumulated 90-minute core-run timeout that prevented the prior reservation from publishing.
+
+### Included — CRM offer delivery (PAI-991)
+
+- Publish the pending customer link/QR/online acceptance, compact running headers and monthly `KYYMMN` customer numbers described below. The prior `260910172446.0.0` reservation produced no tag or release image.
+
 ## [260910172446.0.0] — 2026-09-10
+
+Unpublished reservation: its exact-head exhaustive CI reached the outer time limit. No tag or image was published; the application changes are included in the next release above.
 
 ### Added — Customer offer links and online acceptance (PAI-991)
 

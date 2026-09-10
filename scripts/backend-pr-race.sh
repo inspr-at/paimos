@@ -36,7 +36,7 @@ while [[ $# -gt 0 ]]; do
     --group=*)
       BROAD_GROUP=${1#--group=}
       case "$BROAD_GROUP" in
-        core|runtime) ;;
+        core|handlers|runtime) ;;
         *)
           echo "backend-pr-race: invalid broad group: $BROAD_GROUP" >&2
           exit 2
@@ -97,7 +97,7 @@ case "$LANE" in
     ;;
 esac
 [[ $# -gt 0 ]] || {
-  echo "usage: $0 [--dry-run] [--lane=all|affected|db|handlers|managedharness] [--shard=INDEX/COUNT] [--group=core|runtime] <changed-package>..." >&2
+  echo "usage: $0 [--dry-run] [--lane=all|affected|db|handlers|managedharness] [--shard=INDEX/COUNT] [--group=core|handlers|runtime] <changed-package>..." >&2
   exit 2
 }
 if [[ "$BROAD_GROUP" != all && ( "$LANE" != all || $# -ne 1 || "$1" != './...' ) ]]; then
@@ -356,11 +356,11 @@ run_selected_package() {
 affected_index=0
 for import_path in "$@"; do
   if [[ "$import_path" == './...' ]]; then
-    # One membership list owns the default broad plan and both exhaustive
+    # One membership list owns the default broad plan and all exhaustive
     # groups. Each group stays sequential on its own CI runner.
     for affected in \
       "core:$MODULE/db" \
-      "core:$MODULE/handlers" \
+      "handlers:$MODULE/handlers" \
       "core:$MODULE/cmd/paimos" \
       "core:$MODULE/supervision" \
       "core:$MODULE/agentmessage" \

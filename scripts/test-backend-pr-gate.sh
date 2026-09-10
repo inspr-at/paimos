@@ -707,13 +707,16 @@ assert_plan_covers_discovery_once 'broad managed-harness race' "$broad_managedha
 # Exhaustive groups partition the exact default plan, including every root and
 # lifecycle shard. They only affect broad all-lane runs, never PR selection.
 core_group_plan=$("$RACE_RUNNER" --dry-run --group=core './...')
+handlers_group_plan=$("$RACE_RUNNER" --dry-run --group=handlers './...')
 runtime_group_plan=$("$RACE_RUNNER" --dry-run --group=runtime './...')
-[[ -n "$core_group_plan" && -n "$runtime_group_plan" ]] || fail 'a broad race group is empty'
-group_union=$(printf '%s\n' "$core_group_plan" "$runtime_group_plan" | LC_ALL=C sort)
+[[ -n "$core_group_plan" && -n "$handlers_group_plan" && -n "$runtime_group_plan" ]] || fail 'a broad race group is empty'
+group_union=$(printf '%s\n' "$core_group_plan" "$handlers_group_plan" "$runtime_group_plan" | LC_ALL=C sort)
 [[ "$group_union" == "$(LC_ALL=C sort <<<"$broad_race_plan")" ]] ||
   fail 'broad groups omitted, duplicated, or changed a default race invocation'
 [[ -z "$(comm -12 <(LC_ALL=C sort <<<"$core_group_plan") <(LC_ALL=C sort <<<"$runtime_group_plan"))" ]] ||
   fail 'broad core and runtime groups overlap'
+[[ "$handlers_group_plan" == "$handler_all_plan" ]] ||
+  fail 'handlers broad group changed its complete bounded concurrency plan or ordering'
 expected_runtime_group=$(printf '%s\n' "$lifecycle_all_plan" \
   'go test -race -count=1 -timeout=8m ./lifecycleclient' \
   'go test -race -count=1 -timeout=8m ./runtimeconsumer' \
@@ -725,7 +728,7 @@ for invalid_group in '' all unknown; do
     fail "race runner accepted invalid or empty broad group [$invalid_group]"
   fi
 done
-for group in core runtime; do
+for group in core handlers runtime; do
   if "$RACE_RUNNER" --dry-run --group="$group" github.com/inspr-at/paimos/backend >/dev/null 2>&1 ||
     "$RACE_RUNNER" --dry-run --group="$group" --lane=affected --shard=0/4 './...' >/dev/null 2>&1; then
     fail 'broad group filtering escaped its all-lane ./... interface'
@@ -745,7 +748,7 @@ fi
 exec "${SEQUENTIAL_GO_FIXTURE:?}" "$@"
 EOF
 chmod +x "$group_go"
-for group in core runtime; do
+for group in core handlers runtime; do
   group_state="$TMP_ROOT/$group-sequential-race"
   mkdir -p "$group_state"
   expected_group_plan=$(GO_COMMAND="$group_go" "$RACE_RUNNER" --dry-run --group="$group" './...')
@@ -871,7 +874,7 @@ done
   fail 'full backend serial/platform assurance lacks an explicit independent budget'
 [[ "$full_race" == *'needs: backend-full-authorize'* && "$full_race" == *'timeout-minutes: 90'* &&
   "$full_race" == *'BACKEND_RACE_PACKAGE_TIMEOUT: 15m'* &&
-  "$full_race" == *'matrix:'* && "$full_race" == *'group: [core, runtime]'* &&
+  "$full_race" == *'matrix:'* && "$full_race" == *'group: [core, handlers, runtime]'* &&
   "$full_race" == *'fail-fast: false'* && "$full_race" != *'continue-on-error:'* &&
   "$full_race" == *"backend-pr-race.sh --group=\"\${{ matrix.group }}\" './...'"* &&
   "$full_race" == *'sequential'* ]] ||
