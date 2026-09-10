@@ -74,7 +74,7 @@ watch(
   { deep: true },
 )
 async function save(): Promise<boolean> {
-  if (document.querySelector('input:invalid')) {
+  if (document.querySelector('.offer-document .sheet input:invalid')) {
     error.value = 'Bitte ungültige Zahlen korrigieren.'
     return false
   }
@@ -138,7 +138,7 @@ async function printOffer() {
   await document.fonts.ready
   await renderer.value?.paginate()
   await nextTick()
-  if (overflow.value || document.querySelector('input:invalid')) {
+  if (overflow.value || document.querySelector('.offer-document .sheet input:invalid')) {
     error.value = overflow.value || 'Bitte ungültige Zahlen korrigieren.'
     return
   }
