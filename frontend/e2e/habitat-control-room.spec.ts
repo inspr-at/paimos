@@ -312,6 +312,10 @@ test('the original brand assets and local fonts render intact in bright and dark
   })
   await page.goto(`${ORIGIN}/?view=home`)
   await expect(page.locator('.habitat-welcome')).toBeVisible()
+  await expect(page.locator('.habitat-welcome-art')).toHaveCount(0)
+  await expect(
+    page.getByRole('heading', { name: 'Start with your coordinator.', exact: true }),
+  ).toBeVisible()
   await page.evaluate(() => document.fonts.ready)
   expect(await page.evaluate(() => document.fonts.check('14px "DM Sans"'))).toBe(true)
   expect(fontResponses.length).toBeGreaterThan(0)
@@ -382,17 +386,16 @@ test('the original brand assets and local fonts render intact in bright and dark
       expect(render.backing).toBe('rgb(247, 246, 242)')
       renders.push({ viewportWidth: width, theme, ...render })
       if (width === 1440) {
-        const hero = page.locator('.habitat-welcome-art img')
-        await expect(hero).toBeVisible()
-        expect(
-          await hero.evaluate((img: HTMLImageElement) => [img.naturalWidth, img.naturalHeight]),
-        ).toEqual([1672, 941])
+        await expect(page.locator('.habitat-welcome-art')).toHaveCount(0)
+        await expect(
+          page.getByRole('heading', { name: 'Start with your coordinator.', exact: true }),
+        ).toBeVisible()
       }
       const primary = page.getByRole('button', { name: 'Set up coordinator', exact: true })
       await primary.focus()
       await expect(primary).toBeFocused()
       await assertFits(page)
-      await page.screenshot({ path: `${SHOTS}/setup-hero-${width}-${theme}.png`, fullPage: true })
+      await page.screenshot({ path: `${SHOTS}/setup-welcome-${width}-${theme}.png`, fullPage: true })
     }
   }
   await page.goto(`${ORIGIN}/?view=assign&project=1`)
@@ -483,9 +486,7 @@ test('Habitat selected design: bright/dark, worker tree, phone, short laptop, 20
 }) => {
   await installFixture(page)
   await page.goto(`${ORIGIN}/?view=workers`)
-  await expect(
-    page.getByRole('heading', { name: 'Your workers and their current work.' }),
-  ).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Workers', exact: true })).toBeVisible()
   await page.getByRole('button', { name: 'Expand coordinator descendants' }).click()
   await page
     .locator('[data-worker-id="00000000-0000-4000-8000-000000000001"] .habitat-worker-select')

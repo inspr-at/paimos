@@ -101,6 +101,6 @@ describe('Paimos 6 semantic zoom controls and source truth (PAI-864)', () => {
     expect(control.style.maxWidth).toBe('100%')
     expect(overview.style.maxWidth).toBe('100%')
     expect(root.querySelector('input')?.getAttribute('type')).toBe('text')
-    expect(overview.textContent).toContain('Exception-first projection')
+    expect(overview.textContent).toContain('sessions ·')
   })
 })

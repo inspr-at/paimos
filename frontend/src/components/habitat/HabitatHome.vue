@@ -12,8 +12,6 @@ import {
   workerNeedsAttention,
   type HabitatWorker,
 } from './habitatModel'
-import { publicURL } from '@/publicPath'
-
 const props = defineProps<{
   snapshot: OrchestrationSnapshotV1
   deliveries: Delivery[]
@@ -181,7 +179,6 @@ function projectStatus(id: number) {
 
     <section v-if="noWorkers && !attentionOnly" class="habitat-welcome">
       <div>
-        <span class="habitat-eyebrow">YOUR FIRST STEP</span>
         <h2>{{ nextStep.title }}</h2>
         <p>{{ nextStep.description }}</p>
         <div class="habitat-actions">
@@ -189,9 +186,6 @@ function projectStatus(id: number) {
             {{ nextStep.action }}<ArrowRight :size="15" aria-hidden="true" />
           </button>
         </div>
-      </div>
-      <div class="habitat-welcome-art" aria-hidden="true">
-        <img :src="publicURL('/assets/brand/paimos-hero.png')" alt="" />
       </div>
     </section>
 

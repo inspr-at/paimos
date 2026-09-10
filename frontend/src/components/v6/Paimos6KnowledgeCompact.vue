@@ -13,8 +13,7 @@ defineProps<{
   <section class="p6-compact" aria-labelledby="p6-compact-title">
     <header>
       <div>
-        <p><BookOpen :size="13" aria-hidden="true" /> Knowledge Compact</p>
-        <h2 id="p6-compact-title">Small facts, explicit provenance</h2>
+        <h2 id="p6-compact-title"><BookOpen :size="14" aria-hidden="true" /> Knowledge</h2>
       </div>
       <span v-if="snapshot?.compact_product_session_id" class="p6-compact-session">
         Product session · {{ snapshot.compact_product_session_id.slice(0, 8) }}
@@ -72,8 +71,7 @@ defineProps<{
 <style scoped>
 .p6-compact { margin-top: 28px; padding: 20px; border: 1px solid #d6e0da; border-radius: 18px; background: rgba(248, 251, 248, 0.78); }
 .p6-compact > header { display: flex; align-items: end; justify-content: space-between; gap: 18px; }
-.p6-compact > header p { display: flex; align-items: center; gap: 6px; color: #5d7467; font-size: 10px; font-weight: 750; letter-spacing: .08em; text-transform: uppercase; }
-.p6-compact > header h2 { margin-top: 4px; color: #31443a; font: 600 20px/1.2 "Bricolage Grotesque", sans-serif; letter-spacing: -.03em; }
+.p6-compact > header h2 { display: flex; align-items: center; gap: 6px; margin: 0; color: #31443a; font: 600 16px/1.2 "Bricolage Grotesque", sans-serif; letter-spacing: -.02em; }
 .p6-compact-session { color: #4d6758; font: 600 9px/1.2 "JetBrains Mono", monospace; }
 .p6-compact-session.is-unbound { color: #8a684f; }
 .p6-compact-state { margin-top: 16px; padding: 22px; border: 1px dashed #cad6cf; border-radius: 12px; color: #59655e; font-size: 11px; text-align: center; }

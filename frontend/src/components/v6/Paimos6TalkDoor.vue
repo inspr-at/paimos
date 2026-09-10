@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
-import { Mic, MicOff, Plus, Sparkles, X } from 'lucide-vue-next'
+import { Mic, MicOff, Plus, X } from 'lucide-vue-next'
+import AppIcon from '@/components/AppIcon.vue'
 
 const props = defineProps<{
   open: boolean
@@ -161,7 +162,7 @@ onBeforeUnmount(() => {
     ref="triggerRef"
     type="button"
     class="p6-door-trigger"
-    aria-label="Open the talk-first door"
+    aria-label="Open voice panel"
     @click="emit('update:open', true)"
   >
     <Plus :size="22" aria-hidden="true" />
@@ -172,7 +173,7 @@ onBeforeUnmount(() => {
       type="button"
       class="p6-door-backdrop"
       tabindex="-1"
-      aria-label="Close the talk-first door"
+      aria-label="Close voice panel"
       @click="closeDoor"
     ></button>
     <aside
@@ -186,17 +187,16 @@ onBeforeUnmount(() => {
     >
     <header class="p6-talk-head">
       <div>
-        <span class="p6-eyebrow">Talk-first door</span>
-        <h2 id="p6-talk-title">What should {{ orchestratorLabel }} do?</h2>
+        <h2 id="p6-talk-title">Voice · {{ orchestratorLabel }}</h2>
       </div>
-      <button type="button" class="p6-close" aria-label="Close the talk-first door" @click="closeDoor">
+      <button type="button" class="p6-close" aria-label="Close voice panel" @click="closeDoor">
         <X :size="18" aria-hidden="true" />
       </button>
     </header>
 
     <section class="p6-orchestrator" aria-labelledby="p6-orchestrator-title">
       <div class="p6-orchestrator-identity">
-        <span class="p6-orchestrator-orb" aria-hidden="true"><Sparkles :size="17" /></span>
+        <span class="p6-orchestrator-orb" aria-hidden="true"><AppIcon name="bot" :size="16" /></span>
         <div>
           <h3 id="p6-orchestrator-title">{{ orchestratorLabel }}</h3>
           <p>{{ routeCopy }}</p>
@@ -236,8 +236,8 @@ onBeforeUnmount(() => {
 
       <details class="p6-node-door">
       <summary>
-        <span>Human node form</span>
-        <small>Secondary · the 1% door</small>
+        <span>Node form</span>
+        <small>Local preview only</small>
       </summary>
       <form @submit.prevent="stageNode">
         <label for="p6-node-title">Node title</label>
@@ -308,8 +308,7 @@ onBeforeUnmount(() => {
   box-shadow: 0 24px 70px rgba(28, 48, 38, 0.16);
 }
 .p6-talk-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; }
-.p6-eyebrow { color: #59655e; font-size: 9px; font-weight: 750; letter-spacing: 0.11em; text-transform: uppercase; }
-.p6-talk-head h2 { margin-top: 4px; font-family: "Bricolage Grotesque", "DM Sans", sans-serif; font-size: 23px; font-weight: 600; letter-spacing: -0.035em; }
+.p6-talk-head h2 { margin: 0; font-family: "Bricolage Grotesque", "DM Sans", sans-serif; font-size: 18px; font-weight: 600; letter-spacing: -0.02em; }
 .p6-close { display: grid; width: 34px; height: 34px; place-items: center; border: 1px solid #dce4df; border-radius: 10px; color: #637068; background: #fff; }
 .p6-orchestrator { margin-top: 24px; padding: 18px; border: 1px solid #d8e3dc; border-radius: 17px; background: linear-gradient(145deg, #f0f7f2, #fbfcfa 72%); }
 .p6-orchestrator-identity { display: flex; align-items: center; gap: 11px; }

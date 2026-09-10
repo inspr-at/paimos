@@ -367,8 +367,8 @@ describe('Paimos6PreviewView semantic-zoom session home (PAI-864)', () => {
     expect(mounted.el.querySelectorAll('.p6-session-card')).toHaveLength(3)
     expect(text.match(/PAI-854 · Paimos 6.0 cut/g)).toHaveLength(2)
     expect(text).toContain('Loose session · no node attached')
-    expect(text).toContain('Responsive web home')
-    expect(text).toContain('mobile web—not a native client')
+    expect(text).toContain('Product sessions')
+    expect(text).toContain('3 of 3 visible')
     expect(mounted.el.querySelector('.p6-session-card.is-selected')).toBeNull()
     expect(text).toContain('No selection · preview target Paimos')
 
@@ -424,7 +424,7 @@ describe('Paimos6PreviewView semantic-zoom session home (PAI-864)', () => {
       `/projects/${PROJECT_ID}/session-home/zoom/v1?zoom=${far}`,
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     )
-    expect(mounted.el.textContent).toContain('Exception-first projection · far')
+    expect(mounted.el.textContent).toContain('sessions · far')
     await mounted.unmount()
   })
 
@@ -539,7 +539,7 @@ describe('Paimos6PreviewView semantic-zoom session home (PAI-864)', () => {
     await flush()
     expect(renderedStatus(mounted.el)).toContain(PROJECT_A_TITLE)
     expect(renderedStatus(mounted.el)).toContain(PROJECT_A_ADDRESS)
-    mounted.el.querySelector<HTMLButtonElement>('[aria-label="Open the talk-first door"]')!.click()
+    mounted.el.querySelector<HTMLButtonElement>('[aria-label="Open voice panel"]')!.click()
     await nextTick()
     expect(mounted.el.querySelector('.p6-talk-door')?.textContent).toContain(PROJECT_A_ADDRESS)
 
@@ -600,7 +600,7 @@ describe('Paimos6PreviewView semantic-zoom session home (PAI-864)', () => {
     const mounted = await mountWithHome(liveProjection(), configuredOrchestrator())
     await flush()
 
-    mounted.el.querySelector<HTMLButtonElement>('[aria-label="Open the talk-first door"]')!.click()
+    mounted.el.querySelector<HTMLButtonElement>('[aria-label="Open voice panel"]')!.click()
     await nextTick()
     const door = mounted.el.querySelector<HTMLElement>('.p6-talk-door')!
     expect(door).not.toBeNull()
@@ -608,9 +608,9 @@ describe('Paimos6PreviewView semantic-zoom session home (PAI-864)', () => {
     const mic = door.querySelector<HTMLButtonElement>('.p6-mic')!
     await vi.waitFor(() => expect(document.activeElement).toBe(mic))
     expect(door.textContent!.indexOf('aMY / Primary')).toBeLessThan(
-      door.textContent!.indexOf('Human node form'),
+      door.textContent!.indexOf('Node form'),
     )
-    expect(door.textContent).toContain('What should aMY / Primary do?')
+    expect(door.textContent).toContain('Voice · aMY / Primary')
     expect(door.textContent).toContain('orchestrator configured')
     expect(door.textContent).toContain('Tap to toggle · hold to talk, release to stop')
     expect(door.textContent).toContain('Raw audio stays ephemeral')
@@ -660,7 +660,7 @@ describe('Paimos6PreviewView semantic-zoom session home (PAI-864)', () => {
     )
     await nextTick()
     const reopenedTrigger = mounted.el.querySelector<HTMLButtonElement>(
-      '[aria-label="Open the talk-first door"]',
+      '[aria-label="Open voice panel"]',
     )!
     await vi.waitFor(() => expect(document.activeElement).toBe(reopenedTrigger))
     expect(mounted.el.querySelector('main')?.hasAttribute('inert')).toBe(false)

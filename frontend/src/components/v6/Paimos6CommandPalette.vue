@@ -65,7 +65,7 @@ const items = computed<PaletteItem[]>(() => {
     detail: `${row.type_label} · ${row.slug}`, activation: { kind: 'knowledge', row },
   })
   const actions: PaletteItem[] = [
-    { key: 'action:open_talk', group: 'Shell actions', label: 'Open talk-first door', detail: 'Open the existing read-only talk surface', activation: { kind: 'action', action: 'open_talk' } },
+    { key: 'action:open_talk', group: 'Shell actions', label: 'Open voice panel', detail: 'Open the voice capture panel', activation: { kind: 'action', action: 'open_talk' } },
     { key: 'action:open_settings', group: 'Shell actions', label: 'Command shortcut settings', detail: 'Open Settings → Account', activation: { kind: 'action', action: 'open_settings' } },
     { key: 'action:return_5x', group: 'Shell actions', label: 'Open 5.x dashboard', detail: 'Navigate to the legacy dashboard at /legacy', activation: { kind: 'action', action: 'return_5x' } },
   ]
@@ -128,7 +128,7 @@ function onKeydown(event: KeyboardEvent) {
       @keydown="onKeydown"
     >
       <header>
-        <div><span class="p6-command-eyebrow">Responsive web · no push</span><h2 id="p6-command-title">Command palette</h2></div>
+        <div><h2 id="p6-command-title">Command palette</h2></div>
         <button type="button" class="p6-command-close" aria-label="Close command palette" @click="emit('close')"><X :size="18" /></button>
       </header>
       <label class="p6-command-search">
@@ -189,8 +189,7 @@ function onKeydown(event: KeyboardEvent) {
 .p6-command-backdrop { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; background: rgba(22, 31, 27, .42); }
 .p6-command-dialog { position: relative; width: min(680px, 100%); max-height: 82vh; overflow: hidden; border: 1px solid #cbd8d0; border-radius: 20px; background: #fbfcfa; box-shadow: 0 28px 90px rgba(20, 40, 30, .24); }
 .p6-command-dialog > header { display: flex; align-items: center; justify-content: space-between; padding: 18px 20px 12px; }
-.p6-command-eyebrow { color: #64736b; font-size: 9px; font-weight: 750; letter-spacing: .09em; text-transform: uppercase; }
-.p6-command-dialog h2 { margin-top: 2px; font: 600 22px/1.1 "Bricolage Grotesque", sans-serif; }
+.p6-command-dialog h2 { margin: 0; font: 600 18px/1.1 "Bricolage Grotesque", sans-serif; }
 .p6-command-close { display: grid; width: 44px; height: 44px; place-items: center; border: 1px solid #d8e1db; border-radius: 11px; background: #fff; }
 .p6-command-search { display: flex; min-height: 52px; align-items: center; gap: 9px; margin: 0 20px; padding: 0 13px; border: 1px solid #aac0b3; border-radius: 12px; background: #fff; }
 .p6-command-search input { min-width: 0; flex: 1; border: 0; outline: 0; background: transparent; font-size: 14px; }
