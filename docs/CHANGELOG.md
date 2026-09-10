@@ -9,6 +9,17 @@ Semantic Versioning (`x.y.z`, until 5.21.0), INSPR calendar v1
 (`YYMMDDhhmmss.0.0`, the UTC reservation second as a SemVer-shaped
 coordinate, from the first entry below that form).
 
+## [Unreleased]
+
+### Fixed — Docker image build after the display-weights frontend change (PAI-989)
+
+- The frontend build stage now copies `scripts/release/version-scheme.json`,
+  which `vite.config.ts` reads for `__APP_VERSION_SCHEME__` since
+  260910071632.0.0. Without it the image build failed on every main push and
+  on the `v260910071632.0.0` tag, so that coordinate is a tag-only reservation
+  without a published image; this entry ships the first image that carries
+  the weighted version footer.
+
 ## [260910071632.0.0] — 2026-09-10
 
 ### Added — calendar v2 display weights in the shell (PAI-989, INSPR-400)
