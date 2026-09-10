@@ -2,7 +2,7 @@
 import { onMounted, ref } from 'vue'
 import { RouterLink } from 'vue-router'
 import { api } from '@/api/client'
-import { date, type Offer } from './types'
+import { receiptTime, type Offer } from './types'
 const offers = ref<Offer[]>([])
 onMounted(async () => {
   try {
@@ -17,7 +17,7 @@ onMounted(async () => {
     <strong>Ihre angenommenen Angebote</strong
     ><RouterLink v-for="offer in offers" :key="offer.id" :to="`/crm/offers/${offer.id}`"
       >{{ offer.offer_no }} · {{ offer.document.customer.name }} · {{ offer.accepted_name }} ·
-      {{ date(offer.accepted_at!) }}</RouterLink
+      {{ receiptTime(offer.accepted_at) }}</RouterLink
     >
   </aside>
 </template>

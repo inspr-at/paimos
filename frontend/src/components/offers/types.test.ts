@@ -28,4 +28,5 @@ it('shows acceptance timestamps in Vienna time with a zone label', () => {
   expect(summer).toContain('18:43')
   expect(summer).toMatch(/MESZ|GMT\+2/)
   expect(receiptTime('2026-01-10T16:43:00Z')).toContain('17:43')
+  expect(receiptTime('2026-09-10T22:30:00Z')).toContain('11.09.2026')
 })
