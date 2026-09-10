@@ -17,6 +17,7 @@ IMMEDIATE_AUTO_MERGE_RECOVERY_REASON='canonical_auto_merge_immediate_merge_post_
 PROTECTED_SQUASH_RECOVERY_REASON='protected_squash_merge_missing_auto_merge_provenance'
 IMMEDIATE_RECOVERY_VERSION='5.20.0'
 MANUAL_RECOVERY_VERSION='5.19.0'
+V2_RECOVERY_VERSION='260910221338.0.0'
 
 fail() {
   echo "test-release: $*" >&2
@@ -122,6 +123,17 @@ if [[ -n "${FAKE_GH_STATE:-}" && -f "$FAKE_GH_STATE/vienna-date" ]]; then
       printf '20%s-%s-%s\n' "$year" "$month" "$day"
       exit 0
       ;;
+  esac
+fi
+if [[ -n "${FAKE_GH_STATE:-}" && -f "$FAKE_GH_STATE/utc-stamp" ]]; then
+  value=$(<"$FAKE_GH_STATE/utc-stamp")
+  case "$*" in
+    '-u +%y%m%d') printf '%s\n' "${value:0:6}"; exit 0 ;;
+    '-u +%Y-%m-%d')
+      printf '20%s-%s-%s\n' "${value:0:2}" "${value:2:2}" "${value:4:2}"
+      exit 0
+      ;;
+    '-u +%y%m%d%H%M%S') printf '%s\n' "$value"; exit 0 ;;
   esac
 fi
 exec "${REAL_DATE:?}" "$@"
@@ -804,10 +816,22 @@ test_committed_recovery_receipts_are_exact() {
     }
   ' "$ROOT/scripts/release/recovery/v26.09.09.json" >/dev/null ||
     fail 'committed v26.09.09 recovery receipt is missing or drifted'
+
+  jq -e --arg reason "$IMMEDIATE_AUTO_MERGE_RECOVERY_REASON" '
+    . == {
+      schema_version: 1,
+      release: "v260910221338.0.0",
+      pull_request: 281,
+      approved_head: "319fe2e8d7e01047bc3143f9c1157df7152247e9",
+      merge_commit: "7fd67e971ad05e1cda131d02ad687b823edefed7",
+      incident_reason: $reason
+    }
+  ' "$ROOT/scripts/release/recovery/v260910221338.0.0.json" >/dev/null ||
+    fail 'committed v260910221338.0.0 recovery receipt is missing or drifted'
 }
 
 test_calendar_missing_provenance_receipt_recovery() {
-  local version="$1" reason="$2" fixture="$3" expanded="${4:-0}" bad_reason receipt_path wrong_tag_oid
+  local version="$1" reason="$2" fixture="$3" expanded="${4:-0}" bad_reason receipt_path wrong_tag_oid wrong_release
   local repo state origin head merge receipt_work valid_main output
 
   repo=$(setup_repo "$fixture" "v$version")
@@ -816,6 +840,9 @@ test_calendar_missing_provenance_receipt_recovery() {
   prepend_release_notes "$repo" "$version"
   mkdir -p "$state"
   printf '%s\n' "$version" > "$state/vienna-date"
+  if [[ "$version" == "$V2_RECOVERY_VERSION" ]]; then
+    printf '%s\n' '260910235959' > "$state/utc-stamp"
+  fi
   touch "$state/missing-auto-merge-provenance"
 
   output="$TMP_ROOT/$fixture/missing-output"
@@ -850,10 +877,12 @@ test_calendar_missing_provenance_receipt_recovery() {
     'targets PR 2 instead of PR 1' "$version"
 
   if [[ "$expanded" == "1" ]]; then
+    wrong_release=v26.09.08
+    [[ "$version" != "$V2_RECOVERY_VERSION" ]] || wrong_release=v260910221337.0.0
     publish_recovery_receipt "$receipt_work" 'mutate calendar recovery version' \
-      v26.09.08 1 "$head" "$merge" "$reason" "v$version"
+      "$wrong_release" 1 "$head" "$merge" "$reason" "v$version"
     assert_recovery_rejected "$repo" "$state" "$origin" 'a wrong calendar recovery version' \
-      "targets v26.09.08 instead of v$version" "$version"
+      "targets $wrong_release instead of v$version" "$version"
   fi
 
   publish_recovery_receipt "$receipt_work" 'mutate calendar recovery head' \
@@ -895,6 +924,22 @@ test_calendar_missing_provenance_receipt_recovery() {
     assert_recovery_rejected "$repo" "$state" "$origin" 'missing required checks' \
       'approved PR head has missing, pending, or failed required checks' "$version"
     rm "$state/checks-empty"
+    touch "$state/checks-pending"
+    assert_recovery_rejected "$repo" "$state" "$origin" 'pending required checks' \
+      'approved PR head has missing, pending, or failed required checks' "$version"
+    rm "$state/checks-pending"
+    touch "$state/checks-failed"
+    assert_recovery_rejected "$repo" "$state" "$origin" 'failed required checks' \
+      'approved PR head has missing, pending, or failed required checks' "$version"
+    rm "$state/checks-failed"
+
+    if [[ "$version" == "$V2_RECOVERY_VERSION" ]]; then
+      printf '%s\n' '260911000000' > "$state/utc-stamp"
+      assert_recovery_rejected "$repo" "$state" "$origin" \
+        'the exact receipt at the authoritative UTC cutoff' \
+        'v2 coordinate must be today' "$version"
+      printf '%s\n' '260910235959' > "$state/utc-stamp"
+    fi
 
     wrong_tag_oid=$(git --git-dir="$origin" rev-parse "$merge^")
     git -C "$receipt_work" tag -a --no-sign "v$version" "$wrong_tag_oid" -m 'wrong recovery target'
@@ -1961,6 +2006,8 @@ test_calendar_missing_provenance_receipt_recovery \
   26.09.02 "$MANUAL_RECOVERY_REASON" calendar-manual-recovery
 test_calendar_missing_provenance_receipt_recovery \
   26.09.09 "$PROTECTED_SQUASH_RECOVERY_REASON" calendar-protected-squash-recovery 1
+test_calendar_missing_provenance_receipt_recovery \
+  "$V2_RECOVERY_VERSION" "$IMMEDIATE_AUTO_MERGE_RECOVERY_REASON" calendar-v2-immediate-recovery 1
 test_interrupted_calendar_descendant_recovery
 test_calendar_v2_release_and_closures
 test_calendar_release_and_rejections
