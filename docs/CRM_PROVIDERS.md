@@ -275,3 +275,36 @@ tickets.
 
 [PAI-56]:  https://pm.barta.cm/projects/PAI/issues/PAI-56
 [PAI-108]: https://pm.barta.cm/projects/PAI/issues/PAI-108
+
+
+## Offers (PAI-991, first delivery)
+
+From the customer's **Angebote** section, choose **Angebot erstellen**. Configure
+sender details and editable German text defaults under Integrations → CRM →
+**Angebote: Absender & Textbausteine**, or in the editor's dialog. No company,
+UID or bank account is invented in backend defaults. Existing contacts are reused.
+The suggested terms come from the supplied v8 prototype and are operator-editable.
+
+Offers receive `A<YYMMDD>-<NN>` at draft creation; customers receive
+`K<YY>-<NNN>` with their first offer. Counters use Europe/Vienna calendar dates,
+are transactional, immutable and never reused. Draft gaps are intentional.
+The first version stores positions, sender, recipient and text as an atomic JSON
+document with a revision, rather than a separate positions table. Quantities
+have two decimal places; amounts are integer cents, rounded half-up per position
+on the server. A stale revision returns 409 without changing the document.
+
+**Finalisieren** freezes that document; it does not send email. **Duplizieren**
+creates a new editable offer. **Druckansicht / PDF** opens an authenticated route
+without application chrome; browser Print / Save as PDF exports the same document.
+The v8 visual rules are preserved, with extra pages when the complete terms or
+positions exceed A4. An indivisible item exceeding a whole page must be split or
+shortened before printing. Bundled fonts avoid external font dependencies.
+
+API: admin `GET/PUT /api/integrations/crm/offers` stores `offer_sender` and
+`offer_defaults`; authenticated `GET /api/customers/{id}/offers` and
+`GET /api/offers/{id}` read documents. Admin `POST /api/offers` accepts
+`customer_id` and optional `duplicate_id`; admin `PUT /api/offers/{id}` accepts
+`revision`, `document` and optional `finalize`. The CRM module switch follows
+PAI-980 (UI reachability; data/API remain available).
+Public token views, QR, online/manual acceptance status controls, automatic
+expiry, and server-generated PDFs are not part of this first delivery.

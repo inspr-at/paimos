@@ -13785,6 +13785,17 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 		 BEGIN SELECT RAISE(ABORT,'external stage v2 evidence is immutable'); END`,
 		`PRAGMA foreign_keys=ON`,
 	}})
+	// PAI-991: atomic offer documents, immutable numbers and optimistic revisions.
+	migrations = append(migrations, migration{version: 188, steps: []string{
+		`ALTER TABLE customers ADD COLUMN customer_no TEXT`,
+		`CREATE UNIQUE INDEX idx_customers_customer_no ON customers(customer_no) WHERE customer_no IS NOT NULL`,
+		`CREATE TABLE offer_sequences(key TEXT PRIMARY KEY,value INTEGER NOT NULL CHECK(value>0))`,
+		`CREATE TABLE offers(id INTEGER PRIMARY KEY AUTOINCREMENT,offer_no TEXT NOT NULL UNIQUE,customer_id INTEGER NOT NULL REFERENCES customers(id),status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft','sent','accepted','declined','expired')),revision INTEGER NOT NULL DEFAULT 1,document TEXT NOT NULL CHECK(json_valid(document)),created_by INTEGER REFERENCES users(id),created_at TEXT NOT NULL DEFAULT (datetime('now')),updated_at TEXT NOT NULL DEFAULT (datetime('now')),sent_at TEXT)`,
+		`CREATE INDEX idx_offers_customer ON offers(customer_id,id)`,
+		`CREATE TRIGGER offers_immutable_number BEFORE UPDATE OF offer_no,customer_id ON offers BEGIN SELECT RAISE(ABORT,'offer identity is immutable'); END`,
+		`CREATE TRIGGER offers_frozen_document BEFORE UPDATE OF document ON offers WHEN OLD.status!='draft' BEGIN SELECT RAISE(ABORT,'finalized offer is immutable'); END`,
+		`CREATE TRIGGER customer_no_immutable BEFORE UPDATE OF customer_no ON customers WHEN OLD.customer_no IS NOT NULL AND NEW.customer_no IS NOT OLD.customer_no BEGIN SELECT RAISE(ABORT,'customer number is immutable'); END`,
+	}})
 	for _, m := range migrations {
 		if m.version > maxVersion {
 			continue

@@ -58,6 +58,7 @@ export type {
 // employee_count / annual_revenue_cents / description / phone / billing
 // & visit address quartets) are first-class.
 export interface Customer {
+  customer_no?: string | null
   id: number
   name: string
   external_id: string | null

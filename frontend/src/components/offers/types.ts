@@ -1,0 +1,86 @@
+import { formatDecimal, formatDecimalFlex } from '@/composables/useNumberFormat'
+import { formatDateWithLocale } from '@/composables/useDateFormat'
+export interface OfferBlock {
+  heading: string
+  body: string
+}
+export interface OfferSender {
+  company: string
+  street: string
+  postal_code: string
+  city: string
+  country: string
+  register_no: string
+  register_court: string
+  email: string
+  phone: string
+  website: string
+  uid: string
+  bank_name: string
+  iban: string
+  bic: string
+  contact_person: string
+}
+export interface OfferDefaults {
+  intro: string
+  blocks: OfferBlock[]
+  accept_text: string
+  vat_note: string
+}
+export interface OfferSettings {
+  sender: OfferSender
+  defaults: OfferDefaults
+}
+export interface OfferPosition {
+  short_text: string
+  long_text: string
+  quantity: number
+  unit: string
+  unit_price_cents: number
+  total_cents: number
+}
+export interface OfferDocument extends OfferDefaults {
+  title: string
+  subtitle: string
+  project_ref: string
+  offer_date: string
+  valid_until: string
+  sender: OfferSender
+  customer: { name: string; address: string; contact: string; country: string; customer_no: string }
+  positions: OfferPosition[]
+  net_total_cents: number
+}
+export interface Offer {
+  id: number
+  offer_no: string
+  customer_id: number
+  status: string
+  revision: number
+  document: OfferDocument
+  created_at: string
+  updated_at: string
+  sent_at: string | null
+}
+export const money = (cents: number) => `€ ${formatDecimal(cents / 100, 2, 'de-AT')}`
+export const quantity = (n: number) => formatDecimalFlex(n, 2, 'de-AT')
+export const date = (s: string) =>
+  formatDateWithLocale(s, 'de-AT', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    timeZone: 'UTC',
+  })
+export const total = (p: OfferPosition) =>
+  Math.floor((Math.round(p.quantity * 100) * p.unit_price_cents + 50) / 100)
+export const net = (d: OfferDocument) => d.positions.reduce((n, p) => n + total(p), 0)
+export function parseAmount(s: string): number | null {
+  const stripped = s.replace(/[€\s]/g, '')
+  const clean = stripped.includes(',')
+    ? stripped.replace(/\./g, '').replace(',', '.')
+    : /^\d{1,3}(\.\d{3})+$/.test(stripped)
+      ? stripped.replace(/\./g, '')
+      : stripped
+  if (!/^\d+(\.\d{1,2})?$/.test(clean)) return null
+  const n = Number(clean)
+  return Number.isFinite(n) ? n : null
+}

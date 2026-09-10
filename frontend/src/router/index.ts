@@ -134,6 +134,8 @@ export function buildRoutes(includeDev: boolean): RouteRecordRaw[] {
       component: () => import("@/views/v6/CrmDoorView.vue"),
       meta: { shell: "v6" },
     },
+    { path: "/crm/offers/:id/print", component: () => import("@/views/v6/OfferView.vue"), meta: { shell: "print" } },
+    { path: "/crm/offers/:id", component: () => import("@/views/v6/OfferView.vue"), meta: { shell: "v6" } },
     {
       path: "/crm/:id",
       component: () => import("@/views/v6/CrmDoorView.vue"),

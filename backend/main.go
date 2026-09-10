@@ -1101,6 +1101,13 @@ func mountAPI(r chi.Router) {
 		// GET /instance; admin read/write here).
 		r.With(auth.RequireAdmin).Get("/integrations/crm/module", handlers.GetCRMModule)
 		r.With(auth.RequireAdmin).Put("/integrations/crm/module", handlers.PutCRMModule)
+		r.With(auth.RequireAdmin).Get("/integrations/crm/offers", handlers.GetOfferSettings)
+		r.With(auth.RequireAdmin).Put("/integrations/crm/offers", handlers.PutOfferSettings)
+		r.Get("/customers/{id}/offers", handlers.ListCustomerOffers)
+		r.Get("/offers/{id}", handlers.GetOffer)
+		r.With(auth.RequireAdmin).Post("/offers", handlers.CreateOffer)
+		r.With(auth.RequireAdmin).Put("/offers/{id}", handlers.PutOffer)
+
 		r.With(auth.RequireAdmin).Get("/integrations/crm/{id}/config", crm.GetProviderConfig)
 		r.With(auth.RequireAdmin).Put("/integrations/crm/{id}/config", crm.PutProviderConfig)
 		r.With(auth.RequireAdmin).Put("/integrations/crm/{id}/enabled", crm.PutProviderEnabled)

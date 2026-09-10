@@ -30,6 +30,7 @@ package models
 // existing API consumers keep working until the read-fallback hits zero
 // in prod logs.
 type Customer struct {
+	CustomerNo       *string `json:"customer_no"`
 	ID               int64   `json:"id"`
 	Name             string  `json:"name"`
 	ExternalID       *string `json:"external_id"`
