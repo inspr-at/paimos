@@ -70,3 +70,8 @@ describe('resolveLayout (PAI-805 route → shell contract)', () => {
     expect(app).toMatch(/layoutKind\.value !== "v6"/)
   })
 })
+
+// PAI-991: bare print chrome does not mark the route public or bypass login.
+it('keeps offer print chrome bare without a public auth marker', () => {
+ expect(resolveLayout({ shell: 'print' })).toBe('public')
+})

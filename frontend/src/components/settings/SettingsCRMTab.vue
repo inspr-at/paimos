@@ -24,6 +24,9 @@ import { formatTimeWithLocale } from '@/composables/useDateFormat'
 import type { CRMTestResult, ExternalProvider, ExternalProviderConfig, ExternalProviderConfigField } from '@/types'
 import { publicURL } from '@/publicPath'
 
+import OfferSettingsDialog from '@/components/offers/OfferSettingsDialog.vue'
+const offerSettingsOpen = ref(false)
+
 const providers = ref<ExternalProvider[]>([])
 const loading = ref(true)
 const loadError = ref('')
@@ -260,6 +263,7 @@ const hasProviders = computed(() => providers.value.length > 0)
 </script>
 
 <template>
+  <div class="section"><button class="btn" @click="offerSettingsOpen=true">Angebote: Absender &amp; Textbausteine</button><OfferSettingsDialog :open="offerSettingsOpen" @close="offerSettingsOpen=false" /></div>
   <div class="section crm-module" data-testid="crm-module">
     <div class="section-header">
       <h2 class="section-title">CRM on this instance</h2>

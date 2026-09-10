@@ -377,7 +377,7 @@ func customerSelectColumns() string {
 		c.billing_address_zip, c.billing_address_country,
 		c.visit_address_street, c.visit_address_zip,
 		c.rate_hourly, c.rate_lp, c.notes,
-		c.created_at, c.updated_at`
+		c.created_at, c.updated_at, c.customer_no`
 }
 
 func scanCustomer(s rowScanner) *models.Customer {
@@ -393,7 +393,7 @@ func scanCustomer(s rowScanner) *models.Customer {
 		&c.BillingAddressZip, &c.BillingAddressCountry,
 		&c.VisitAddressStreet, &c.VisitAddressZip,
 		&c.RateHourly, &c.RateLp, &c.Notes,
-		&c.CreatedAt, &c.UpdatedAt,
+		&c.CreatedAt, &c.UpdatedAt, &c.CustomerNo,
 		&c.ProjectCount,
 	)
 	if err != nil {

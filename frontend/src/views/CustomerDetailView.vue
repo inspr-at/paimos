@@ -26,6 +26,7 @@ import { api, errMsg } from '@/api/client'
 import { useAuthStore } from '@/stores/auth'
 import AppIcon from '@/components/AppIcon.vue'
 import AppModal from '@/components/AppModal.vue'
+import CustomerOffers from '@/components/customer/CustomerOffers.vue'
 import DocumentsSection from '@/components/customer/DocumentsSection.vue'
 import { useExternalProvider } from '@/composables/useExternalProvider'
 import type { Customer, Contact, Project } from '@/types'
@@ -511,6 +512,8 @@ function effectiveRate(p: Project, kind: 'hourly' | 'lp'): { value: number | nul
     <div class="cd-body">
       <!-- Primary column ─────────────────────────────────────────── -->
       <div class="cd-primary">
+        <p v-if="customer?.customer_no" class="cd-card-count">Kundennummer {{ customer.customer_no }}</p>
+        <CustomerOffers :customer-id="customerId" />
         <!-- Contacts (PAI-273: real multi-contact list) -->
         <section class="cd-card">
           <header class="cd-card-header">

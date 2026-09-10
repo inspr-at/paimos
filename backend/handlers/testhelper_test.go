@@ -524,6 +524,12 @@ func buildRouter() http.Handler {
 			// PAI-980: instance-level CRM module switch — mirrors main.go.
 			r.With(auth.RequireAdmin).Get("/integrations/crm/module", handlers.GetCRMModule)
 			r.With(auth.RequireAdmin).Put("/integrations/crm/module", handlers.PutCRMModule)
+			r.With(auth.RequireAdmin).Get("/integrations/crm/offers", handlers.GetOfferSettings)
+			r.With(auth.RequireAdmin).Put("/integrations/crm/offers", handlers.PutOfferSettings)
+			r.Get("/customers/{id}/offers", handlers.ListCustomerOffers)
+			r.Get("/offers/{id}", handlers.GetOffer)
+			r.With(auth.RequireAdmin).Post("/offers", handlers.CreateOffer)
+			r.With(auth.RequireAdmin).Put("/offers/{id}", handlers.PutOffer)
 
 			// Incident log
 			r.With(auth.RequireAdmin).Get("/incidents/export", handlers.ExportIncidents)

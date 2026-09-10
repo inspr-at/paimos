@@ -9,6 +9,15 @@ Semantic Versioning (`x.y.z`, until 5.21.0), INSPR calendar v1
 (`YYMMDDhhmmss.0.0`, the UTC reservation second as a SemVer-shaped
 coordinate, from the first entry below that form).
 
+## [Unreleased]
+
+### Added — CRM offer editor and PDF printing (PAI-991)
+
+- Create saved offers from a customer's CRM page; reuse primary contacts and assign permanent customer/offer numbers in Europe/Vienna.
+- Edit the supplied v8 A4 document, positions and amounts directly, with autosave and concurrent-edit protection. Configure sender and suggested German text blocks in a small dialog under Integrations → CRM or the editor.
+- Finalize an immutable document snapshot, duplicate it with a new number, and print through a shared A4 renderer with additional pages for longer terms or positions. Anta and Manrope are bundled locally.
+- First delivery uses browser PDF and manual forwarding. Public customer links, QR codes and online acceptance remain in PAI-991's later stage.
+
 ## [260910101110.0.0] — 2026-09-10
 
 ### Fixed — Docker image build after the display-weights frontend change (PAI-989)

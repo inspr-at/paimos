@@ -28,7 +28,7 @@
 //   v6        → Paimos6Layout (PAI-867 production Paimos 6 shell)
 //   standard  → AppLayout (sidebar, header, footer chrome)
 
-export type AppShell = 'agent' | 'v6'
+export type AppShell = 'agent' | 'v6' | 'print'
 
 export type AppLayoutKind = 'portal' | 'public' | 'agent' | 'v6' | 'standard'
 
@@ -45,7 +45,7 @@ export function resolveLayout(
   if (!hasMatchedRoute) return null
   if (!meta) return 'standard'
   if (meta.portal) return 'portal'
-  if (meta.public) return 'public'
+  if (meta.public || meta.shell === 'print') return 'public'
   if (meta.shell === 'agent') return 'agent'
   if (meta.shell === 'v6') return 'v6'
   return 'standard'
