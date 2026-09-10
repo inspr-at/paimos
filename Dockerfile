@@ -23,6 +23,8 @@ COPY frontend/ ./
 # vite.config.ts reads ../VERSION relative to frontend/ (__dirname = /src here);
 # AppChangelogModal.vue imports @docs/CHANGELOG.md?raw (alias -> ../docs/).
 COPY VERSION /VERSION
+# vite.config.ts also reads ../scripts/release/version-scheme.json (__APP_VERSION_SCHEME__, PAI-989).
+COPY scripts/release/version-scheme.json /scripts/release/version-scheme.json
 COPY docs/ /docs/
 COPY backend/contracts/ /backend/contracts/
 RUN npm run build \
