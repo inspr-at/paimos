@@ -5,6 +5,8 @@
 <h1 align="center">Paimos</h1>
 
 <p align="center">
+
+[![Paimos on StartupScores](https://startupscores.com/badge/paimos.svg?style=shield&v=combo&theme=dark)](https://startupscores.com/open-source/paimos)
   <strong>One project picture for people and AI agents.</strong>
 </p>
 
