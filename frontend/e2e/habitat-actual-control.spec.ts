@@ -337,7 +337,7 @@ test('actual browser controls one fresh owned child and closes every generation'
       waitUntil: 'domcontentloaded',
     })
     await expect(
-      target.getByRole('heading', { name: 'Your workers and their current work.' }),
+      target.getByRole('heading', { name: 'Workers', exact: true }),
     ).toBeVisible()
     for (let attempt = 0; attempt < 6; attempt++) {
       const row = target.locator(`[data-worker-id="${id}"]`)
