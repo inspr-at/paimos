@@ -88,7 +88,7 @@ import (
 //
 // 2.4.0 (PAI-876): added the additive external-stage v2 media type,
 // fixture digest, contract major, and explicit release-version scheme.
-const SchemaVersion = "2.6.0"
+const SchemaVersion = "2.7.0"
 
 // SchemaPayload is the shape returned by GET /api/schema. See PAI-87.
 type SchemaPayload struct {
@@ -268,7 +268,7 @@ var Schema = SchemaPayload{
 		"external_stage_artifact.version_scheme": "external_stage_version_scheme",
 	},
 	Conventions: map[string]string{
-		"crm_offers":             "PAI-991: admin GET/PUT /api/integrations/crm/offers configures sender/default text; GET /api/customers/{id}/offers lists offers; admin POST /api/offers accepts customer_id and optional duplicate_id; GET /api/offers/{id}; admin PUT /api/offers/{id} accepts revision, document, optional finalize. CAS conflict=409. Draft-time numbers use Europe/Vienna, A<YYMMDD>-<NN> and K<YY>-<NNN>. Document positions use quantity (two decimals), unit_price_cents, server-calculated total_cents and net_total_cents; finalization freezes the document aggregate. No public link or online acceptance in the first delivery.",
+		"crm_offers":             "PAI-991: admin GET/PUT /api/integrations/crm/offers configures sender/default text; GET /api/customers/{id}/offers lists offers; admin POST /api/offers accepts customer_id and optional duplicate_id; GET /api/offers/{id}; admin PUT /api/offers/{id} accepts revision, document, optional finalize. CAS conflict=409. Draft-time numbers use Europe/Vienna, A<YYMMDD>-<NN> and K<YY>-<NNN>. Document positions use quantity (two decimals), unit_price_cents, server-calculated total_cents and net_total_cents; finalization freezes the document aggregate. Finalization creates a 32-byte random public_token; admin POST /api/offers/{id}/link enables links for legacy finalized offers. Public GET /api/public/offers/{token} returns only offer_no/status/revision/document and acceptance fields. POST /api/public/offers/{token}/accept requires JSON, X-Offer-Acceptance: 1, revision, name, company, confirmed=true and optional note; atomic acceptance/audit; stale/expired/repeated=409, token/IP rate limit=429, unavailable/draft/CRM-disabled=404. Sent offers project expired after valid_until (Europe/Vienna, inclusive). Authenticated GET /api/offers/acceptances lists the current creator’s recent accepted offers.",
 		"acceptance_criteria":    "markdown checkbox list: `- [ ] ...` / `- [x] ...`",
 		"enum_values":            "Enum values are canonical lowercase wire values. Display surfaces may render proper-case labels, but requests must submit the schema value.",
 		"idempotency_key":        "Create-style writes may accept `Idempotency-Key: <uuid-or-ulid>`; clients should reuse the same key only when retrying the same logical request.",

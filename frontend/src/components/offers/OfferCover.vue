@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import OfferText from './OfferText.vue'
 import { date, type Offer } from './types'
-defineProps<{ offer: Offer; editable?: boolean }>()
+defineProps<{ offer: Pick<Offer, 'offer_no' | 'document'>; editable?: boolean }>()
 </script>
 <template>
   <div class="offer-cover">

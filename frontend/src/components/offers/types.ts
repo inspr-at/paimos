@@ -59,6 +59,11 @@ export interface Offer {
   document: OfferDocument
   created_at: string
   updated_at: string
+  public_token?: string
+  accepted_at?: string
+  accepted_name?: string
+  accepted_company?: string
+  accepted_note?: string
   sent_at: string | null
 }
 export const money = (cents: number) => `€ ${formatDecimal(cents / 100, 2, 'de-AT')}`
@@ -84,3 +89,23 @@ export function parseAmount(s: string): number | null {
   const n = Number(clean)
   return Number.isFinite(n) ? n : null
 }
+
+export type PublicOffer = Pick<
+  Offer,
+  | 'offer_no'
+  | 'status'
+  | 'revision'
+  | 'document'
+  | 'accepted_at'
+  | 'accepted_name'
+  | 'accepted_company'
+  | 'accepted_note'
+>
+export const offerStatus = (status: string) =>
+  ({
+    draft: 'Entwurf',
+    sent: 'Finalisiert',
+    accepted: 'Angenommen',
+    declined: 'Abgelehnt',
+    expired: 'Abgelaufen',
+  })[status] || status

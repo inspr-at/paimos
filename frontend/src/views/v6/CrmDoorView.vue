@@ -25,6 +25,7 @@ import { computed } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
 import { crmEnabled, loadInstance } from '@/api/instance'
 import { useAuthStore } from '@/stores/auth'
+import OfferAcceptanceNotices from '@/components/offers/OfferAcceptanceNotices.vue'
 import CustomersView from '@/views/CustomersView.vue'
 import CustomerDetailView from '@/views/CustomerDetailView.vue'
 
@@ -41,6 +42,7 @@ const isDetail = computed(() => typeof route.params.id === 'string' && route.par
         <div id="app-header-left" class="crm-door-title" />
         <div id="app-header-right" class="crm-door-tools" />
       </header>
+      <OfferAcceptanceNotices v-if="!isDetail" />
       <div class="crm-door-body">
         <CustomerDetailView v-if="isDetail" :key="String(route.params.id)" />
         <CustomersView v-else />

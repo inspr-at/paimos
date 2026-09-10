@@ -9,6 +9,14 @@ Semantic Versioning (`x.y.z`, until 5.21.0), INSPR calendar v1
 (`YYMMDDhhmmss.0.0`, the UTC reservation second as a SemVer-shaped
 coordinate, from the first entry below that form).
 
+## [Unreleased]
+
+### Added — Customer offer links and online acceptance (PAI-991)
+
+- Share finalized offers through a customer link or a printable SVG QR code; customers can read and print without an account.
+- Explicit online acceptance records the signer, company, time and immutable audit receipt atomically. Expired offers stay readable and cannot be accepted; repeated attempts cannot replace the first signer.
+- Show creator-specific accepted offers in CRM. Keep capability URLs out of application logs, caches and referrers; rate-limit public requests and honor the CRM module switch.
+
 ## [260910133810.0.0] — 2026-09-10
 
 ### Added — CRM offer editor and PDF printing (PAI-991)

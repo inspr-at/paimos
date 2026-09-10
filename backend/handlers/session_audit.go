@@ -64,7 +64,7 @@ func auditEnabled() bool {
 // compensating value.
 func SessionAuditMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !auditEnabled() || !isMutation(r.Method) || httpcontract.IsControlRequest(r) {
+		if !auditEnabled() || !isMutation(r.Method) || httpcontract.IsControlRequest(r) || isPublicOfferRequest(r) {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -111,7 +111,7 @@ var ordinaryRequestLogger = chimiddleware.Logger
 func ControlAwareRecoverer(next http.Handler) http.Handler {
 	ordinary := chimiddleware.Recoverer(next)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !httpcontract.IsControlRequest(r) {
+		if !httpcontract.IsControlRequest(r) && !isPublicOfferRequest(r) {
 			ordinary.ServeHTTP(w, r)
 			return
 		}
@@ -146,7 +146,10 @@ func ControlAwareRequestLogger(next http.Handler) http.Handler {
 	ordinary := ordinaryRequestLogger(next)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		class, isControl := httpcontract.ClassifyControlRequest(r)
-		if !isControl {
+		if isPublicOfferRequest(r) {
+			class = "public_offer"
+		}
+		if !isControl && !isPublicOfferRequest(r) {
 			ordinary.ServeHTTP(w, r)
 			return
 		}

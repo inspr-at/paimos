@@ -11,7 +11,7 @@ import OfferTable from './OfferTable.vue'
 import OfferAcceptance from './OfferAcceptance.vue'
 import OfferFootmark from './OfferFootmark.vue'
 import { date, type Offer } from './types'
-const props = defineProps<{ offer: Offer; editable?: boolean }>()
+const props = defineProps<{ offer: Pick<Offer, 'offer_no' | 'document'>; editable?: boolean; publicUrl?: string }>()
 const emit = defineEmits<{ overflow: [message: string]; change: [] }>()
 type Page = {
   kind: 'cover' | 'terms' | 'positions'
@@ -85,7 +85,7 @@ function schedule() {
     await paginate()
   })
 }
-watch(() => props.offer.document, schedule, { deep: true })
+watch(() => [props.offer.document, props.publicUrl], schedule, { deep: true })
 onMounted(async () => {
   await document.fonts.ready
   await paginate()
@@ -121,7 +121,7 @@ defineExpose({ paginate })
         <OfferTable
           :positions="offer.document.positions"
           :indices="offer.document.positions.map((_, i) => i)"
-        /><OfferAcceptance :document="offer.document" />
+        /><OfferAcceptance :document="offer.document" :public-url="publicUrl" />
       </div>
     </div>
     <div class="sheet">
@@ -169,7 +169,7 @@ defineExpose({ paginate })
             @move="move"
             @change="emit('change')"
           />
-          <OfferAcceptance v-if="page.acceptance" :document="offer.document" :editable="editable" />
+          <OfferAcceptance v-if="page.acceptance" :document="offer.document" :public-url="publicUrl" :editable="editable" />
         </div>
         <div class="ftr">
           <span>{{ offer.offer_no }}</span
