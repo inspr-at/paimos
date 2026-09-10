@@ -208,7 +208,10 @@ assert_audited_release_recovery_main() {
       v26.09.02:scripts/test-release.sh|\
       v26.09.09:scripts/release.sh|\
       v26.09.09:scripts/release/recovery/v26.09.09.json|\
-      v26.09.09:scripts/test-release.sh)
+      v26.09.09:scripts/test-release.sh|\
+      v260910221338.0.0:scripts/release.sh|\
+      v260910221338.0.0:scripts/release/recovery/v260910221338.0.0.json|\
+      v260910221338.0.0:scripts/test-release.sh)
         ;;
       *) fail "audited release recovery contains an unrelated file: $file" ;;
     esac
@@ -644,6 +647,11 @@ assert_release_recovery_receipt() {
       # PAI-977 records only the observed protected squash of PR #253 and the
       # missing post-merge autoMergeRequest value. It deliberately does not
       # infer whether --auto was used. Keep every pinned gate below mandatory.
+      ;;
+    v260910221338.0.0:canonical_auto_merge_immediate_merge_post_merge_request_missing)
+      # PAI-994 records the same GitHub immediate-merge incident for PR #281.
+      # Keep this release-specific: the audited receipt and every fail-closed
+      # head/check/tree/ancestry/tag gate below remain mandatory.
       ;;
     *)
       fail "release recovery receipt carries an unrecognized incident reason"
