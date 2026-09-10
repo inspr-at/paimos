@@ -24,6 +24,9 @@ import { resolve } from 'node:path'
 
 const frontendDir = fileURLToPath(new URL('.', import.meta.url))
 const version = readFileSync(resolve(frontendDir, '../VERSION'), 'utf-8').trim()
+const versionScheme = String(
+  JSON.parse(readFileSync(resolve(frontendDir, '../scripts/release/version-scheme.json'), 'utf-8')).version_scheme,
+)
 let gitHash = ''
 try { gitHash = execSync('git rev-parse --short HEAD', { encoding: 'utf-8' }).trim() } catch { /* not in git */ }
 
@@ -42,6 +45,7 @@ export default defineConfig(({ command }) => ({
   base: command === 'build' ? './' : '/',
   define: {
     __APP_VERSION__: JSON.stringify(version),
+    __APP_VERSION_SCHEME__: JSON.stringify(versionScheme),
     __GIT_HASH__: JSON.stringify(gitHash),
   },
   resolve: {
