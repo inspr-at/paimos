@@ -377,6 +377,9 @@ jobs:
       - name: Release hygiene
         run: ./scripts/check-release-hygiene.sh
 
+      - name: Calendar v2 display weights pinned to the doctrine
+        run: ./scripts/check-calendar-version-display.sh
+
       - name: Release version grammar and Docker metadata
         run: bash ./scripts/test-release-version.sh
 

@@ -3,9 +3,9 @@ import { ref } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { useBranding } from '@/composables/useBranding'
-import { formatDisplayVersion } from '@/utils/version'
 import AppIcon from '@/components/AppIcon.vue'
 import AppChangelogModal from '@/components/AppChangelogModal.vue'
+import CalendarVersion from '@/components/CalendarVersion.vue'
 import { userInitials } from '@/utils/userDisplay'
 import { publicURL } from '@/publicPath'
 
@@ -18,7 +18,7 @@ defineProps<{
 const route = useRoute()
 const auth = useAuthStore()
 const { branding } = useBranding()
-const version   = formatDisplayVersion(__APP_VERSION__)
+const rawVersion = __APP_VERSION__
 const gitHash   = __GIT_HASH__
 const showChangelog = ref(false)
 
@@ -54,7 +54,7 @@ function isActive(path: string) {
   <div class="sidebar-footer">
     <template v-if="isExpanded">
       <a :href="branding.website" target="_blank" rel="noopener" class="footer-link">&copy; {{ branding.website.replace(/^https?:\/\//, '') }}</a>
-      <button class="footer-version" @click="showChangelog = true" title="What's new">v{{ version }}</button>
+      <button class="footer-version" @click="showChangelog = true" title="What's new"><CalendarVersion :version="rawVersion" /></button>
     </template>
   </div>
   <div class="sidebar-meta-row">

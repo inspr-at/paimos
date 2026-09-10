@@ -9,6 +9,19 @@ Semantic Versioning (`x.y.z`, until 5.21.0), INSPR calendar v1
 (`YYMMDDhhmmss.0.0`, the UTC reservation second as a SemVer-shaped
 coordinate, from the first entry below that form).
 
+## [260910071632.0.0] — 2026-09-10
+
+### Added — calendar v2 display weights in the shell (PAI-989, INSPR-400)
+
+- `CalendarVersion.vue` renders the instance version with the INSPR calendar v2
+  display weights: per-segment opacity and the teal Schmuckfarbe mixed into the
+  date, read at build time from `frontend/src/brand/calendar-version-display.json`,
+  an in-repo copy pinned byte-for-byte to `doctrine/lib/calendar-version-display.json`
+  (inspr-modules 0.9.0) by `scripts/check-calendar-version-display.sh` (CI step).
+  The scheme comes from `scripts/release/version-scheme.json` via
+  `__APP_VERSION_SCHEME__`, never from the string's shape; text content and
+  `data-version` stay the canonical label. Used in the sidebar footer.
+
 ## [260909151030.0.0] — 2026-09-09
 
 ### Changed — INSPR calendar v2 release coordinates (PAI-979, INSPR-395)
