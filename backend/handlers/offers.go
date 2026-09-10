@@ -241,7 +241,7 @@ func scanOffer(row rowScanner) (Offer, error) {
 	err := row.Scan(&o.ID, &o.OfferNo, &o.CustomerID, &o.Status, &o.Revision, &raw, &o.CreatedAt, &o.UpdatedAt, &o.SentAt, &o.PublicToken, &o.AcceptedAt, &o.AcceptedName, &o.AcceptedCompany, &o.AcceptedNote)
 	if err == nil {
 		err = json.Unmarshal([]byte(raw), &o.Document)
-		if err == nil && o.Status == "sent" && o.Document.ValidUntil < offerToday() {
+		if err == nil && o.Status == "sent" && (!offerDateValid(o.Document.ValidUntil) || o.Document.ValidUntil < offerToday()) {
 			o.Status = "expired"
 		}
 	}

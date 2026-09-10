@@ -20,7 +20,7 @@ const qr = computed(() => {
     <div class="box">
       <div class="cap">
         <b>Angebot online ansehen und annehmen</b><span>PDF und Annahme im Kundenbereich</span
-        ><a :href="url" rel="noreferrer">{{ url }}</a>
+        ><a :href="url" rel="noreferrer">{{ url.slice(0, url.lastIndexOf('/') + 1) }}<wbr/><span class="token">{{ url.slice(url.lastIndexOf('/') + 1) }}</span></a>
       </div>
       <svg
         :viewBox="`0 0 ${qr.size} ${qr.size}`"
@@ -35,9 +35,12 @@ const qr = computed(() => {
   </div>
 </template>
 <style scoped>
+.offer-document .qr .box { width:100%;grid-template-columns:minmax(0,1fr) 26mm;text-align:left }
+.token {white-space:nowrap}
+
 .cap a {
   display: block;
-  max-width: 110mm;
+  max-width: 136mm;
   overflow-wrap: anywhere;
   font: 7.5pt monospace;
   color: inherit;

@@ -326,7 +326,12 @@ Unknown and draft links return the same 404. Unlike the existing internal CRM
 APIs, the public surface also closes when `crm_enabled=0`. Public SPA/API
 responses use no-store, no-referrer and noindex; application access/session logs
 exclude capability URLs. Reverse-proxy access logging must likewise avoid
-recording these URLs.
+recording these URLs. `OFFER_TRUSTED_PROXY_CIDRS` is a comma-separated allowlist
+of immediate reverse proxies; unset means all forwarding headers are ignored.
+The limiter and audit use the same address: the nearest untrusted hop in a
+trusted proxy's X-Forwarded-For chain, otherwise the TCP peer. PMA uses the
+verified Docker bridge gateway (172.17.0.1/32), with Caddy as the only public
+entry point and the container published on host loopback only.
 
 `valid_until` includes the entire Europe/Vienna calendar day. Subsequent reads
 project unaccepted sent offers as expired, and the acceptance transaction checks

@@ -2,7 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { onBeforeRouteLeave, RouterLink, useRoute, useRouter } from 'vue-router'
 import { publicURL } from '@/publicPath'
-import { offerStatus } from '@/components/offers/types'
+import { offerStatus, receiptTime } from '@/components/offers/types'
 import { api, errMsg, ApiError } from '@/api/client'
 import { crmEnabled, loadInstance } from '@/api/instance'
 import { useAuthStore } from '@/stores/auth'
@@ -292,7 +292,7 @@ onBeforeRouteLeave(async () => !dirty.value || (await save()))
       </p>
       <p v-if="offer?.status === 'accepted'" class="offer-notice" role="status">
         Angenommen von {{ offer.accepted_name }} · {{ offer.accepted_company }} ·
-        {{ offer.accepted_at?.replace('T', ' ').replace('Z', ' UTC')
+        {{ receiptTime(offer.accepted_at)
         }}<br v-if="offer.accepted_note" />{{ offer.accepted_note }}
       </p>
       <p v-if="offer?.status === 'expired'" class="offer-notice">

@@ -219,3 +219,65 @@ func TestPublicOfferAuditFailureRollsBackAcceptance(t *testing.T) {
 		t.Fatal("acceptance committed without audit")
 	}
 }
+
+func TestPublicOfferLegacyLinksAndFinalizationGates(t *testing.T) {
+	ts := newTestServer(t)
+	o := publicOfferFixture(t, ts, false)
+	_, err := db.DB.Exec("UPDATE offers SET public_token=NULL WHERE id=?", o.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := fmt.Sprintf("/api/offers/%d/link", o.ID)
+	resp := ts.post(t, path, ts.memberCookie, map[string]any{})
+	assertStatus(t, resp, 403)
+	resp.Body.Close()
+	resp = ts.post(t, path, ts.adminCookie, map[string]any{})
+	assertStatus(t, resp, 200)
+	var linked handlers.Offer
+	decode(t, resp, &linked)
+	if len(linked.PublicToken) != 43 || linked.Revision != o.Revision || linked.Document.Title != o.Document.Title {
+		t.Fatal("legacy snapshot changed")
+	}
+	resp = ts.post(t, path, ts.adminCookie, map[string]any{})
+	assertStatus(t, resp, 200)
+	var again handlers.Offer
+	decode(t, resp, &again)
+	if linked.PublicToken != again.PublicToken || again.Revision != o.Revision {
+		t.Fatal("link creation not idempotent")
+	}
+	b, _ := json.Marshal(map[string]any{"name": "Eva Test", "company": "Testkunde", "confirmed": true, "revision": linked.Revision})
+	req, _ := http.NewRequest("POST", ts.srv.URL+"/api/public/offers/"+linked.PublicToken+"/accept", bytes.NewReader(b))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Offer-Acceptance", "1")
+	req.Header.Set("Sec-Fetch-Site", "cross-site")
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertStatus(t, resp, 403)
+	resp.Body.Close()
+	resp = acceptRequest(t, ts, linked, "Eva Test", true)
+	assertStatus(t, resp, 200)
+	resp.Body.Close()
+	resp = ts.post(t, path, ts.adminCookie, map[string]any{})
+	assertStatus(t, resp, 200)
+	decode(t, resp, &again)
+	if again.Status != "accepted" || again.PublicToken != linked.PublicToken {
+		t.Fatal("accepted receipt changed")
+	}
+	resp = ts.post(t, "/api/offers", ts.adminCookie, map[string]any{"customer_id": o.CustomerID})
+	assertStatus(t, resp, 201)
+	var draft handlers.Offer
+	decode(t, resp, &draft)
+	resp = ts.post(t, fmt.Sprintf("/api/offers/%d/link", draft.ID), ts.adminCookie, map[string]any{})
+	assertStatus(t, resp, 404)
+	resp.Body.Close()
+	draft.Document.Positions = o.Document.Positions
+	draft.Document.OfferDate = "2020-01-01"
+	for _, until := range []string{"2020-01-31", "10.10.2099", "2099-02-30", "2099-9-5"} {
+		draft.Document.ValidUntil = until
+		resp = ts.put(t, fmt.Sprintf("/api/offers/%d", draft.ID), ts.adminCookie, map[string]any{"revision": draft.Revision, "document": draft.Document, "finalize": true})
+		assertStatus(t, resp, 400)
+		resp.Body.Close()
+	}
+}

@@ -9,11 +9,15 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"mime"
 	"net"
 	"net/http"
+	"net/netip"
+	"os"
 	"strings"
 	"sync"
 	"time"
+	_ "time/tzdata"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/inspr-at/paimos/backend/auth"
@@ -21,9 +25,64 @@ import (
 	"github.com/inspr-at/paimos/backend/publicbase"
 )
 
-func offerToday() string {
-	loc, _ := time.LoadLocation("Europe/Vienna")
-	return time.Now().In(loc).Format("2006-01-02")
+var offerLocation = func() *time.Location {
+	loc, err := time.LoadLocation("Europe/Vienna")
+	if err != nil {
+		panic("Europe/Vienna timezone is required for offers")
+	}
+	return loc
+}()
+
+func offerToday() string { return time.Now().In(offerLocation).Format("2006-01-02") }
+func offerDateValid(day string) bool {
+	parsed, err := time.Parse("2006-01-02", day)
+	return err == nil && parsed.Format("2006-01-02") == day
+}
+
+// Forwarded addresses are evidence only when supplied by an explicitly trusted
+// immediate proxy. Direct/unconfigured deployments ignore all forwarding headers.
+func offerClientIP(r *http.Request) string {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		host = r.RemoteAddr
+	}
+	peer, err := netip.ParseAddr(host)
+	if err != nil {
+		return "unknown"
+	}
+	peer = peer.Unmap()
+	trusted := false
+	for _, raw := range strings.Split(os.Getenv("OFFER_TRUSTED_PROXY_CIDRS"), ",") {
+		prefix, e := netip.ParsePrefix(strings.TrimSpace(raw))
+		if e == nil && prefix.Contains(peer) {
+			trusted = true
+			break
+		}
+	}
+	if trusted {
+		// Walk from the nearest peer toward the client; ignore attacker-supplied
+		// entries to the left of the first untrusted hop.
+		chain := strings.Split(r.Header.Get("X-Forwarded-For"), ",")
+		for i := len(chain) - 1; i >= 0; i-- {
+			ip, e := netip.ParseAddr(strings.TrimSpace(chain[i]))
+			if e != nil {
+				return peer.String()
+			}
+			ip = ip.Unmap()
+			hopTrusted := false
+			for _, raw := range strings.Split(os.Getenv("OFFER_TRUSTED_PROXY_CIDRS"), ",") {
+				prefix, e := netip.ParsePrefix(strings.TrimSpace(raw))
+				if e == nil && prefix.Contains(ip) {
+					hopTrusted = true
+					break
+				}
+			}
+			if !hopTrusted || i == 0 {
+				return ip.String()
+			}
+		}
+	}
+	return peer.String()
 }
 func newOfferToken() (string, error) {
 	b := make([]byte, 32)
@@ -108,10 +167,7 @@ func PublicOfferMiddleware() func(http.Handler) http.Handler {
 				jsonError(w, "Angebot nicht verfügbar", 404)
 				return
 			}
-			ip, _, splitErr := net.SplitHostPort(r.RemoteAddr)
-			if splitErr != nil {
-				ip = r.RemoteAddr
-			}
+			ip := offerClientIP(r)
 			token := chi.URLParam(r, "token")
 			hash := sha256.Sum256([]byte(token))
 			now := time.Now()
@@ -174,7 +230,8 @@ func GetPublicOffer(w http.ResponseWriter, r *http.Request) {
 func AcceptPublicOffer(w http.ResponseWriter, r *http.Request) {
 	// JSON-only and a custom header prevent HTML forms/cross-origin simple requests.
 	// No session credentials are used: the unguessable link is the capability.
-	if strings.Split(r.Header.Get("Content-Type"), ";")[0] != "application/json" || r.Header.Get("X-Offer-Acceptance") != "1" || r.Header.Get("Sec-Fetch-Site") == "cross-site" {
+	mediaType, _, mediaErr := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	if mediaErr != nil || mediaType != "application/json" || r.Header.Get("X-Offer-Acceptance") != "1" || r.Header.Get("Sec-Fetch-Site") == "cross-site" {
 		jsonError(w, "Ungültige Annahmeanfrage", 403)
 		return
 	}
@@ -207,7 +264,7 @@ func AcceptPublicOffer(w http.ResponseWriter, r *http.Request) {
 	// A conditional write is the first DB statement, so concurrent attempts
 	// serialize before reading. No duplicate acceptance can replace the signer.
 	now := time.Now().UTC().Format(time.RFC3339)
-	o, err := scanOffer(tx.QueryRowContext(r.Context(), `UPDATE offers SET status='accepted',accepted_at=?,accepted_name=?,accepted_company=?,accepted_note=?,revision=revision+1,updated_at=? WHERE public_token=? AND status='sent' AND revision=? AND json_extract(document,'$.valid_until')>=? RETURNING `+offerColumns, now, body.Name, body.Company, body.Note, now, chi.URLParam(r, "token"), body.Revision, offerToday()))
+	o, err := scanOffer(tx.QueryRowContext(r.Context(), `UPDATE offers SET status='accepted',accepted_at=?,accepted_name=?,accepted_company=?,accepted_note=?,revision=revision+1,updated_at=? WHERE public_token=? AND status='sent' AND revision=? AND date(json_extract(document,'$.valid_until'))=json_extract(document,'$.valid_until') AND json_extract(document,'$.valid_until')>=? RETURNING `+offerColumns, now, body.Name, body.Company, body.Note, now, chi.URLParam(r, "token"), body.Revision, offerToday()))
 	if errors.Is(err, sql.ErrNoRows) {
 		jsonError(w, "Dieses Angebot ist nicht mehr zur Annahme verfügbar. Bitte neu laden.", 409)
 		return
@@ -226,7 +283,7 @@ func AcceptPublicOffer(w http.ResponseWriter, r *http.Request) {
 	if len(ua) > 1000 {
 		ua = ua[:1000]
 	}
-	_, err = tx.ExecContext(r.Context(), `INSERT INTO offer_acceptance_audit(offer_id,accepted_at,accepted_name,accepted_company,accepted_note,ip,user_agent,document_sha256,offer_revision) VALUES(?,?,?,?,?,?,?,?,?)`, o.ID, now, body.Name, body.Company, body.Note, auth.ClientIP(r), ua, hex.EncodeToString(hash[:]), body.Revision)
+	_, err = tx.ExecContext(r.Context(), `INSERT INTO offer_acceptance_audit(offer_id,accepted_at,accepted_name,accepted_company,accepted_note,ip,user_agent,document_sha256,offer_revision) VALUES(?,?,?,?,?,?,?,?,?)`, o.ID, now, body.Name, body.Company, body.Note, offerClientIP(r), ua, hex.EncodeToString(hash[:]), body.Revision)
 	if err != nil {
 		jsonError(w, "Annahme konnte nicht dokumentiert werden", 503)
 		return

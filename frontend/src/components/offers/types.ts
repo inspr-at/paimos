@@ -1,5 +1,5 @@
 import { formatDecimal, formatDecimalFlex } from '@/composables/useNumberFormat'
-import { formatDateWithLocale } from '@/composables/useDateFormat'
+import { formatDateWithLocale, formatDateTimeWithLocale } from '@/composables/useDateFormat'
 export interface OfferBlock {
   heading: string
   body: string
@@ -109,3 +109,5 @@ export const offerStatus = (status: string) =>
     declined: 'Abgelehnt',
     expired: 'Abgelaufen',
   })[status] || status
+
+export const receiptTime = (value?: string) => formatDateTimeWithLocale(value || '', 'de-AT', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Vienna', timeZoneName: 'short' })

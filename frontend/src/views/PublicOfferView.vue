@@ -3,7 +3,7 @@ import { computed, nextTick, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { apiURL, publicURL } from '@/publicPath'
 import OfferDocument from '@/components/offers/OfferDocument.vue'
-import { date, type PublicOffer } from '@/components/offers/types'
+import { date, receiptTime, type PublicOffer } from '@/components/offers/types'
 const route = useRoute()
 const offer = ref<PublicOffer>()
 const error = ref(''),
@@ -127,7 +127,7 @@ watch(
           <h2>Vielen Dank. Das Angebot wurde angenommen.</h2>
           <p>
             {{ offer.accepted_name }} · {{ offer.accepted_company }}<br />{{
-              offer.accepted_at?.replace('T', ' ').replace('Z', ' UTC')
+              receiptTime(offer.accepted_at)
             }}
           </p>
           <p v-if="offer.accepted_note">{{ offer.accepted_note }}</p>
@@ -278,7 +278,7 @@ textarea {
 }
 .audit-note {
   font-size: 12px;
-  color: #596e70;
+  color: #203c3d;
 }
 button {
   white-space: normal;
