@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { money, parseAmount, total, type OfferPosition } from './types'
+import { money, parseAmount, total, receiptTime, type OfferPosition } from './types'
 describe('offer amounts', () => {
   it('rounds fractional quantities half-up in cents', () => {
     for (const [quantity, price, want] of [
@@ -20,4 +20,13 @@ describe('offer amounts', () => {
     expect(parseAmount('1,234')).toBeNull()
     expect(parseAmount('x')).toBeNull()
   })
+})
+
+it('shows acceptance timestamps in Vienna time with a zone label', () => {
+  const summer = receiptTime('2026-09-10T16:43:00Z')
+  expect(summer).toContain('10.09.2026')
+  expect(summer).toContain('18:43')
+  expect(summer).toMatch(/MESZ|GMT\+2/)
+  expect(receiptTime('2026-01-10T16:43:00Z')).toContain('17:43')
+  expect(receiptTime('2026-09-10T22:30:00Z')).toContain('11.09.2026')
 })

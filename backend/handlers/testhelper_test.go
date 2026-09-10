@@ -118,6 +118,7 @@ func buildRouter() http.Handler {
 	r.Use(handlers.ClassifiedControlCachePolicyMiddleware)
 	r.Use(handlers.ControlAwareRecoverer)
 	r.Use(publicbase.RejectOutsideAndStrip(publicbase.Current()))
+	r.Use(handlers.OfferPrivacyMiddleware)
 	r.Use(handlers.SessionAuditMiddleware) // PAI-97 — off unless PAIMOS_AUDIT_SESSIONS=true
 	r.Use(handlers.RequestIDMiddleware)
 
@@ -129,6 +130,7 @@ func buildRouter() http.Handler {
 
 		// Public whitelist — mirrors main.go exactly. ACME-1 relies
 		// on this list being minimal.
+		handlers.RegisterPublicOfferRoutes(r)
 		r.Get("/branding", handlers.GetBranding)
 		r.Post("/auth/login", auth.LoginHandler)
 		r.Post("/auth/forgot", handlers.ForgotPassword)
@@ -527,6 +529,8 @@ func buildRouter() http.Handler {
 			r.With(auth.RequireAdmin).Get("/integrations/crm/offers", handlers.GetOfferSettings)
 			r.With(auth.RequireAdmin).Put("/integrations/crm/offers", handlers.PutOfferSettings)
 			r.Get("/customers/{id}/offers", handlers.ListCustomerOffers)
+			r.Get("/offers/acceptances", handlers.ListOfferAcceptances)
+			r.With(auth.RequireAdmin).Post("/offers/{id}/link", handlers.CreateOfferLink)
 			r.Get("/offers/{id}", handlers.GetOffer)
 			r.With(auth.RequireAdmin).Post("/offers", handlers.CreateOffer)
 			r.With(auth.RequireAdmin).Put("/offers/{id}", handlers.PutOffer)

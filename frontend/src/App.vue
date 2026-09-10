@@ -61,7 +61,7 @@ const HEARTBEAT_MS = 5 * 60 * 1000;
 let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
 
 async function probeSession() {
-  if (!auth.user) return;
+  if (!auth.user || route.name === "public-offer") return;
   const wasLoggedIn = !!auth.user;
   try {
     await auth.fetchMe();
@@ -118,7 +118,7 @@ onBeforeUnmount(() => {
     @apply="undo.resolveConflict($event)"
   />
   <!-- Wait for auth and a matched route so no application shell flashes before navigation resolves. -->
-  <LoadingText v-if="!auth.checked || layoutKind === null" class="app-loading" label="Loading…" />
+  <LoadingText v-if="(!auth.checked && route.name !== 'public-offer') || layoutKind === null" class="app-loading" label="Loading…" />
   <RouterView v-else v-slot="{ Component }">
     <PortalLayout v-if="layoutKind === 'portal'">
       <component :is="Component" />

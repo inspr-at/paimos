@@ -208,3 +208,18 @@ describe('App route shell isolation', () => {
     app.unmount()
   })
 })
+
+it('renders a customer capability without waiting for internal auth', async () => {
+  const pinia = createPinia(); setActivePinia(pinia)
+  const auth = useAuthStore(pinia); auth.checked = false
+  const fetchMe = vi.spyOn(auth, 'fetchMe')
+  const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/offers/:token', name: 'public-offer', meta: { public: true }, component: defineComponent({ setup: () => () => h('div', 'Customer offer') }) }] })
+  await router.push('/offers/test'); await router.isReady()
+  const el = document.createElement('div'); document.body.appendChild(el)
+  const app = createApp(App); app.use(pinia); app.use(router); app.mount(el); await nextTick()
+  expect(el.textContent).toContain('Customer offer')
+  expect(el.querySelector('[data-loading]')).toBeNull()
+  expect(el.querySelector('[data-shell]')).toBeNull()
+  expect(fetchMe).not.toHaveBeenCalled()
+  app.unmount(); el.remove()
+})

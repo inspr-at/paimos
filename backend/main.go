@@ -154,6 +154,7 @@ func main() {
 	// (X-Frame-Options=SAMEORIGIN keeps the in-app PDF preview iframes
 	// working, CSP runs in Report-Only mode until PAI-118 lands).
 	r.Use(handlers.SecurityHeaders)
+	r.Use(handlers.OfferPrivacyMiddleware)
 	// PAI-97 / PAI-116: session-scoped mutation audit. On by default; set
 	// PAIMOS_AUDIT_SESSIONS=false to disable.
 	r.Use(handlers.SessionAuditMiddleware)
@@ -189,7 +190,9 @@ func main() {
 			if os.IsNotExist(err) || (info != nil && info.IsDir()) {
 				// SPA fallback (or root /): serve index.html with no-cache so
 				// browsers always fetch the latest version after deploys.
-				w.Header().Set("Cache-Control", "no-cache")
+				if w.Header().Get("Cache-Control") != "no-store" {
+					w.Header().Set("Cache-Control", "no-cache")
+				}
 				serveSPAIndex(w, indexPath)
 				return
 			}
@@ -427,9 +430,11 @@ func mountAPI(r chi.Router) {
 	//   (a) health checks for Docker / CI / monitoring, or
 	//   (b) the login page needs it before any session can exist, or
 	//   (c) agent-discovery endpoints the CLI / MCP fetch before
-	//       any API key is issued (e.g. /api/schema).
+	//       any API key is issued (e.g. /api/schema), or
+	//   (d) finalized offer capabilities, with dedicated expiry and rate gates.
 	// Audited 2026-04-21.
-	r.Get("/health", healthHandler)          // (a) Docker + CI
+	r.Get("/health", healthHandler) // (a) Docker + CI
+	handlers.RegisterPublicOfferRoutes(r)
 	r.Get("/branding", handlers.GetBranding) // (b) login page logo + colors
 	r.Get("/schema", handlers.GetAPISchema)  // (c) CLI / MCP discovery (PAI-87)
 	// PAI-332: public adapter registry. CLI / external tooling
@@ -1104,6 +1109,8 @@ func mountAPI(r chi.Router) {
 		r.With(auth.RequireAdmin).Get("/integrations/crm/offers", handlers.GetOfferSettings)
 		r.With(auth.RequireAdmin).Put("/integrations/crm/offers", handlers.PutOfferSettings)
 		r.Get("/customers/{id}/offers", handlers.ListCustomerOffers)
+		r.Get("/offers/acceptances", handlers.ListOfferAcceptances)
+		r.With(auth.RequireAdmin).Post("/offers/{id}/link", handlers.CreateOfferLink)
 		r.Get("/offers/{id}", handlers.GetOffer)
 		r.With(auth.RequireAdmin).Post("/offers", handlers.CreateOffer)
 		r.With(auth.RequireAdmin).Put("/offers/{id}", handlers.PutOffer)

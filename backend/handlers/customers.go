@@ -329,6 +329,14 @@ func DeleteCustomer(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, "customer has assigned projects; reassign or archive them first", http.StatusConflict)
 		return
 	}
+	if err := db.DB.QueryRow("SELECT COUNT(*) FROM offers WHERE customer_id=?", id).Scan(&n); err != nil {
+		jsonError(w, "query failed", 500)
+		return
+	}
+	if n > 0 {
+		jsonError(w, "Kunden mit Angeboten können nicht gelöscht werden.", 409)
+		return
+	}
 	res, err := db.DB.Exec("DELETE FROM customers WHERE id=?", id)
 	if err != nil {
 		jsonError(w, "delete failed", http.StatusInternalServerError)

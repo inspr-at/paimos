@@ -5,7 +5,7 @@ import { api, errMsg } from '@/api/client'
 import { useAuthStore } from '@/stores/auth'
 import { crmEnabled } from '@/api/instance'
 import OfferSettingsDialog from '@/components/offers/OfferSettingsDialog.vue'
-import { money, date, type Offer, type OfferSettings } from '@/components/offers/types'
+import { money, date, offerStatus, type Offer, type OfferSettings } from '@/components/offers/types'
 const props = defineProps<{ customerId: number }>()
 const router = useRouter(),
   auth = useAuthStore()
@@ -66,7 +66,7 @@ function saved() {
         }}<small>{{ date(o.document.offer_date) }}</small></span
       ><span
         >{{ money(o.document.net_total_cents)
-        }}<small>{{ o.status === 'draft' ? 'Entwurf' : 'Finalisiert' }}</small></span
+        }}<small>{{ offerStatus(o.status) }}</small></span
       ></RouterLink
     ><OfferSettingsDialog :open="settingsOpen" @saved="saved" @close="settingsOpen = false" />
   </section>

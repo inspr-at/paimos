@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { onBeforeRouteLeave, RouterLink, useRoute, useRouter } from 'vue-router'
+import { publicURL } from '@/publicPath'
+import { offerStatus, receiptTime } from '@/components/offers/types'
 import { api, errMsg, ApiError } from '@/api/client'
 import { crmEnabled, loadInstance } from '@/api/instance'
 import { useAuthStore } from '@/stores/auth'
@@ -22,7 +24,27 @@ const loading = ref(true),
   finalizing = ref(false)
 const renderer = ref<InstanceType<typeof OfferDocument>>()
 const finalizeDialog = ref<HTMLDialogElement>()
-watch(finalizeOpen, async (open) => { await nextTick(); if (open) finalizeDialog.value?.showModal(); else finalizeDialog.value?.close() })
+watch(finalizeOpen, async (open) => {
+  await nextTick()
+  if (open) finalizeDialog.value?.showModal()
+  else finalizeDialog.value?.close()
+})
+const publicUrl = computed(() =>
+  offer.value?.public_token
+    ? new URL(publicURL(`/offers/${offer.value.public_token}`), window.location.origin).href
+    : '',
+)
+const copied = ref(false)
+async function copyLink() {
+  if (!offer.value) return
+  try {
+    if (!publicUrl.value) offer.value = await api.post<Offer>(`/offers/${offer.value.id}/link`, {})
+    await navigator.clipboard.writeText(publicUrl.value)
+    copied.value = true
+  } catch (e) {
+    error.value = errMsg(e)
+  }
+}
 const printMode = computed(() => route.path.endsWith('/print'))
 const editable = computed(
   () =>
@@ -43,8 +65,8 @@ const state = computed(() =>
       ? 'Speichert …'
       : dirty.value
         ? 'Ungespeichert'
-        : offer.value?.status === 'sent'
-          ? 'Finalisiert'
+        : offer.value?.status !== 'draft' && offer.value
+          ? offerStatus(offer.value.status)
           : 'Gespeichert',
 )
 async function load() {
@@ -166,10 +188,16 @@ function applySettings(s: OfferSettings) {
   if (editable.value && offer.value) offer.value.document.sender = structuredClone(s.sender)
 }
 function downloadDraft() {
- if (!offer.value) return
- const blob = new Blob([JSON.stringify(offer.value.document, null, 2)], { type: 'application/json' })
- const url = URL.createObjectURL(blob), link = document.createElement('a')
- link.href = url; link.download = `${offer.value.offer_no}-entwurf.json`; link.click(); URL.revokeObjectURL(url)
+  if (!offer.value) return
+  const blob = new Blob([JSON.stringify(offer.value.document, null, 2)], {
+    type: 'application/json',
+  })
+  const url = URL.createObjectURL(blob),
+    link = document.createElement('a')
+  link.href = url
+  link.download = `${offer.value.offer_no}-entwurf.json`
+  link.click()
+  URL.revokeObjectURL(url)
 }
 function addPosition() {
   offer.value?.document.positions.push({
@@ -213,6 +241,14 @@ onBeforeRouteLeave(async () => !dirty.value || (await save()))
         ><strong>{{ offer?.offer_no || 'Angebot' }}</strong
         ><span role="status">{{ state }}</span>
         <div class="offer-actions">
+          <button
+            v-if="offer && offer.status !== 'draft' && !printMode && (publicUrl || auth.isAdmin)"
+            type="button"
+            class="btn"
+            @click="copyLink"
+          >
+            {{ copied ? 'Link kopiert' : 'Kundenlink kopieren' }}
+          </button>
           <button v-if="editable" type="button" class="btn" @click="settingsOpen = true">
             Absender &amp; Textbausteine</button
           ><button v-if="editable" type="button" class="btn" @click="addPosition">+ Position</button
@@ -254,16 +290,30 @@ onBeforeRouteLeave(async () => !dirty.value || (await save()))
       <p v-else-if="offer?.status === 'sent' && !printMode" class="offer-notice">
         Finalisiert am {{ offer.sent_at?.slice(0, 10) }}. Zum Ändern ein neues Angebot duplizieren.
       </p>
+      <p v-if="offer?.status === 'accepted'" class="offer-notice" role="status">
+        Angenommen von {{ offer.accepted_name }} · {{ offer.accepted_company }} ·
+        {{ receiptTime(offer.accepted_at)
+        }}<br v-if="offer.accepted_note" />{{ offer.accepted_note }}
+      </p>
+      <p v-if="offer?.status === 'expired'" class="offer-notice">
+        Die Bindefrist ist abgelaufen. Der Kundenlink zeigt das Angebot ohne Annahmeformular.
+      </p>
       <div v-if="conflict" class="offer-notice" role="alert">
-        Deine Änderungen sind noch in diesem Fenster. Du kannst sie sichern oder den aktuellen Serverstand laden.
-        <button type="button" class="btn" @click="downloadDraft">Lokalen Entwurf herunterladen</button>
-        <button type="button" class="btn" @click="load">Serverstand laden und lokale Änderungen verwerfen</button>
+        Deine Änderungen sind noch in diesem Fenster. Du kannst sie sichern oder den aktuellen
+        Serverstand laden.
+        <button type="button" class="btn" @click="downloadDraft">
+          Lokalen Entwurf herunterladen
+        </button>
+        <button type="button" class="btn" @click="load">
+          Serverstand laden und lokale Änderungen verwerfen
+        </button>
       </div>
       <OfferDocument
         v-if="offer"
         ref="renderer"
         :key="`${offer.id}-${printMode}`"
         :offer="offer"
+        :public-url="publicUrl"
         :editable="editable"
         @overflow="overflow = $event"
       />
@@ -272,23 +322,46 @@ onBeforeRouteLeave(async () => !dirty.value || (await save()))
         @close="settingsOpen = false"
         @saved="applySettings"
       />
-      <dialog ref="finalizeDialog" class="finalize-dialog" aria-label="Angebot finalisieren" @cancel.prevent="finalizeOpen=false"><h2>Angebot finalisieren</h2><p>
+      <dialog
+        ref="finalizeDialog"
+        class="finalize-dialog"
+        aria-label="Angebot finalisieren"
+        @cancel.prevent="finalizeOpen = false"
+      >
+        <h2>Angebot finalisieren</h2>
+        <p>
           Absender, Kundenanschrift, Texte und Preise werden festgeschrieben. Danach kannst du das
-          Angebot als PDF weitergeben. Eine E-Mail wird dabei nicht verschickt.
+          Angebot per Kundenlink, QR-Code oder PDF weitergeben. Wer den Kundenlink besitzt, kann das
+          Angebot ansehen und bis zum Ablaufdatum annehmen. Eine E-Mail wird dabei nicht verschickt.
         </p>
         <p v-if="error" role="alert">{{ error }}</p>
         <button class="btn btn-primary" :disabled="saving" @click="finalize">
-          Jetzt finalisieren
-        </button><button type="button" class="btn" @click="finalizeOpen=false">Abbrechen</button></dialog>
+          Jetzt finalisieren</button
+        ><button type="button" class="btn" @click="finalizeOpen = false">Abbrechen</button>
+      </dialog>
     </template>
     <p v-else class="offer-notice">CRM ist auf dieser Instanz deaktiviert.</p>
   </main>
 </template>
 <style scoped>
-.finalize-dialog { color:#203c3d;background:#fffefa;border:1px solid #dfe6e5;border-radius:12px;padding:24px;width:min(500px,calc(100vw - 32px)); }
-.finalize-dialog::backdrop {background:#10232788}
-.finalize-dialog h2 {font-size:18px;margin:0 0 12px}
-.finalize-dialog p {line-height:1.5}
+.finalize-dialog {
+  color: #203c3d;
+  background: #fffefa;
+  border: 1px solid #dfe6e5;
+  border-radius: 12px;
+  padding: 24px;
+  width: min(500px, calc(100vw - 32px));
+}
+.finalize-dialog::backdrop {
+  background: #10232788;
+}
+.finalize-dialog h2 {
+  font-size: 18px;
+  margin: 0 0 12px;
+}
+.finalize-dialog p {
+  line-height: 1.5;
+}
 
 .offer-view {
   min-width: 0;

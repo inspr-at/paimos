@@ -108,3 +108,11 @@ describe('router shell contract (PAI-805)', () => {
     expect(String(preview!.component)).toContain('Paimos6PreviewView.vue')
   })
 })
+
+describe('offer capability route', () => {
+  it('allows only the token view without login while keeping CRM and print authenticated', () => {
+    const prod = buildRoutes(false)
+    expect(prod.find(r => r.path === '/offers/:token')?.meta?.public).toBe(true)
+    for (const path of ['/crm/offers/:id', '/crm/offers/:id/print']) expect(prod.find(r => r.path === path)?.meta?.public).toBeUndefined()
+  })
+})

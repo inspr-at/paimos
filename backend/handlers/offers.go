@@ -82,15 +82,20 @@ type OfferDocument struct {
 	NetTotalCents int64           `json:"net_total_cents"`
 }
 type Offer struct {
-	ID         int64         `json:"id"`
-	OfferNo    string        `json:"offer_no"`
-	CustomerID int64         `json:"customer_id"`
-	Status     string        `json:"status"`
-	Revision   int64         `json:"revision"`
-	Document   OfferDocument `json:"document"`
-	CreatedAt  string        `json:"created_at"`
-	UpdatedAt  string        `json:"updated_at"`
-	SentAt     *string       `json:"sent_at"`
+	ID              int64         `json:"id"`
+	OfferNo         string        `json:"offer_no"`
+	CustomerID      int64         `json:"customer_id"`
+	Status          string        `json:"status"`
+	Revision        int64         `json:"revision"`
+	Document        OfferDocument `json:"document"`
+	CreatedAt       string        `json:"created_at"`
+	UpdatedAt       string        `json:"updated_at"`
+	SentAt          *string       `json:"sent_at"`
+	PublicToken     string        `json:"public_token,omitempty"`
+	AcceptedAt      *string       `json:"accepted_at,omitempty"`
+	AcceptedName    string        `json:"accepted_name,omitempty"`
+	AcceptedCompany string        `json:"accepted_company,omitempty"`
+	AcceptedNote    string        `json:"accepted_note,omitempty"`
 }
 
 func loadOfferSettings() (OfferSettings, error) {
@@ -233,14 +238,17 @@ func calculateOffer(d *OfferDocument, final bool) error {
 func scanOffer(row rowScanner) (Offer, error) {
 	var o Offer
 	var raw string
-	err := row.Scan(&o.ID, &o.OfferNo, &o.CustomerID, &o.Status, &o.Revision, &raw, &o.CreatedAt, &o.UpdatedAt, &o.SentAt)
+	err := row.Scan(&o.ID, &o.OfferNo, &o.CustomerID, &o.Status, &o.Revision, &raw, &o.CreatedAt, &o.UpdatedAt, &o.SentAt, &o.PublicToken, &o.AcceptedAt, &o.AcceptedName, &o.AcceptedCompany, &o.AcceptedNote)
 	if err == nil {
 		err = json.Unmarshal([]byte(raw), &o.Document)
+		if err == nil && o.Status == "sent" && (!offerDateValid(o.Document.ValidUntil) || o.Document.ValidUntil < offerToday()) {
+			o.Status = "expired"
+		}
 	}
 	return o, err
 }
 
-const offerColumns = `id,offer_no,customer_id,status,revision,document,created_at,updated_at,sent_at`
+const offerColumns = `id,offer_no,customer_id,status,revision,document,created_at,updated_at,sent_at,COALESCE(public_token,''),accepted_at,accepted_name,accepted_company,accepted_note`
 
 func GetOffer(w http.ResponseWriter, r *http.Request) {
 	o, err := scanOffer(db.DB.QueryRow(`SELECT `+offerColumns+` FROM offers WHERE id=?`, chi.URLParam(r, "id")))
@@ -417,11 +425,22 @@ func PutOffer(w http.ResponseWriter, r *http.Request) {
 	raw, _ := json.Marshal(body.Document)
 	status := "draft"
 	var sent any
+	var token any
 	if body.Finalize {
+		if body.Document.ValidUntil < offerToday() {
+			jsonError(w, "Die Bindefrist ist bereits abgelaufen", 400)
+			return
+		}
+		generated, e := newOfferToken()
+		if e != nil {
+			jsonError(w, "Kundenlink konnte nicht erstellt werden", 500)
+			return
+		}
+		token = generated
 		status = "sent"
 		sent = time.Now().UTC().Format(time.RFC3339)
 	}
-	o, err := scanOffer(db.DB.QueryRow(`UPDATE offers SET document=?,status=?,sent_at=?,revision=revision+1,updated_at=datetime('now') WHERE id=? AND revision=? AND status='draft' RETURNING `+offerColumns, string(raw), status, sent, chi.URLParam(r, "id"), body.Revision))
+	o, err := scanOffer(db.DB.QueryRow(`UPDATE offers SET document=?,status=?,sent_at=?,public_token=COALESCE(?,public_token),revision=revision+1,updated_at=datetime('now') WHERE id=? AND revision=? AND status='draft' RETURNING `+offerColumns, string(raw), status, sent, token, chi.URLParam(r, "id"), body.Revision))
 	if errors.Is(err, sql.ErrNoRows) {
 		jsonError(w, "Das Angebot wurde inzwischen geändert oder bereits finalisiert. Bitte neu laden.", 409)
 		return

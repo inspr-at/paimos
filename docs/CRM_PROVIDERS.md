@@ -277,7 +277,7 @@ tickets.
 [PAI-108]: https://pm.barta.cm/projects/PAI/issues/PAI-108
 
 
-## Offers (PAI-991, first delivery)
+## Offers (PAI-991)
 
 From the customer's **Angebote** section, choose **Angebot erstellen**. Configure
 sender details and editable German text defaults under Integrations → CRM →
@@ -306,5 +306,34 @@ API: admin `GET/PUT /api/integrations/crm/offers` stores `offer_sender` and
 `customer_id` and optional `duplicate_id`; admin `PUT /api/offers/{id}` accepts
 `revision`, `document` and optional `finalize`. The CRM module switch follows
 PAI-980 (UI reachability; data/API remain available).
-Public token views, QR, online/manual acceptance status controls, automatic
-expiry, and server-generated PDFs are not part of this first delivery.
+Finalization also creates a 32-byte random customer capability. **Kundenlink
+kopieren** copies `/offers/<token>`; existing finalized offers can enable their
+link through the same admin action. The last printed page includes a 26 mm SVG
+QR code with a four-module quiet zone. No third-party QR service sees the link.
+
+The customer can read and print without login and explicitly accept with name,
+company, confirmation and an optional note. One transaction changes status and
+writes an immutable receipt with UTC time, IP/browser metadata, the frozen
+JSON document hash and its revision. Repeated, stale or expired acceptance gets
+409 and cannot overwrite the first signer. Creator-specific accepted-offer
+notices are derived durably from these receipts and shown when opening CRM;
+there is no email dispatch or general notification service in this slice.
+
+`GET /api/public/offers/{token}` returns the document and receipt only;
+`POST .../accept` requires JSON, `X-Offer-Acceptance: 1`, `revision`, `name`,
+`company`, `confirmed: true` and optional `note`. Token/IP limits return 429.
+Unknown and draft links return the same 404. Unlike the existing internal CRM
+APIs, the public surface also closes when `crm_enabled=0`. Public SPA/API
+responses use no-store, no-referrer and noindex; application access/session logs
+exclude capability URLs. Reverse-proxy access logging must likewise avoid
+recording these URLs. `OFFER_TRUSTED_PROXY_CIDRS` is a comma-separated allowlist
+of immediate reverse proxies; unset means all forwarding headers are ignored.
+The limiter and audit use the same address: the nearest untrusted hop in a
+trusted proxy's X-Forwarded-For chain, otherwise the TCP peer. PMA uses the
+verified Docker bridge gateway (172.17.0.1/32), with Caddy as the only public
+entry point and the container published on host loopback only.
+
+`valid_until` includes the entire Europe/Vienna calendar day. Subsequent reads
+project unaccepted sent offers as expired, and the acceptance transaction checks
+the deadline again. Expired offers remain readable but have no acceptance form.
+Manual acceptance/decline controls and server-generated PDFs remain deferred.

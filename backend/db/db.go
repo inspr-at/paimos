@@ -13796,6 +13796,19 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 		`CREATE TRIGGER offers_frozen_document BEFORE UPDATE OF document ON offers WHEN OLD.status!='draft' BEGIN SELECT RAISE(ABORT,'finalized offer is immutable'); END`,
 		`CREATE TRIGGER customer_no_immutable BEFORE UPDATE OF customer_no ON customers WHEN OLD.customer_no IS NOT NULL AND NEW.customer_no IS NOT OLD.customer_no BEGIN SELECT RAISE(ABORT,'customer number is immutable'); END`,
 	}})
+	// PAI-991: capability links and an atomic, immutable acceptance receipt.
+	migrations = append(migrations, migration{version: 189, steps: []string{
+		`ALTER TABLE offers ADD COLUMN public_token TEXT`,
+		`CREATE UNIQUE INDEX idx_offers_public_token ON offers(public_token) WHERE public_token IS NOT NULL`,
+		`ALTER TABLE offers ADD COLUMN accepted_at TEXT`,
+		`ALTER TABLE offers ADD COLUMN accepted_name TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE offers ADD COLUMN accepted_company TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE offers ADD COLUMN accepted_note TEXT NOT NULL DEFAULT ''`,
+		`CREATE TABLE offer_acceptance_audit(offer_id INTEGER PRIMARY KEY REFERENCES offers(id),accepted_at TEXT NOT NULL,accepted_name TEXT NOT NULL,accepted_company TEXT NOT NULL,accepted_note TEXT NOT NULL,ip TEXT NOT NULL,user_agent TEXT NOT NULL,document_sha256 TEXT NOT NULL,offer_revision INTEGER NOT NULL)`,
+		`CREATE TRIGGER offer_acceptance_audit_no_update BEFORE UPDATE ON offer_acceptance_audit BEGIN SELECT RAISE(ABORT,'acceptance audit is immutable'); END`,
+		`CREATE TRIGGER offer_acceptance_audit_no_delete BEFORE DELETE ON offer_acceptance_audit BEGIN SELECT RAISE(ABORT,'acceptance audit is immutable'); END`,
+		`CREATE TRIGGER offers_acceptance_immutable BEFORE UPDATE ON offers WHEN OLD.status='accepted' BEGIN SELECT RAISE(ABORT,'accepted offer is immutable'); END`,
+	}})
 	for _, m := range migrations {
 		if m.version > maxVersion {
 			continue
