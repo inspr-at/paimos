@@ -19,8 +19,18 @@ describe('CalendarVersion', () => {
   it('bundles the pinned doctrine data', () => {
     expect(display.schema).toBe('inspr.calendar-version-display.v1')
     expect(display.scheme).toBe('inspr-calendar-v2')
+    expect(display.design_revision).toBe(3)
     expect(display.weights.yy).toBe(1)
+    expect(display.weights.mm).toBe(0.8)
+    expect(display.weights.dd).toBe(1)
+    expect(display.weights.hh).toBe(0.6)
+    expect(display.weights.mi).toBe(0.4)
+    expect(display.weights.ss).toBe(0.2)
+    expect(display.weights.tail).toBe(0.2)
     expect(display.tint.segments).toEqual(['yy', 'mm', 'dd'])
+    expect(display.tint.default).toBe('#d69b31')
+    expect(display.tint.mix).toBe(0.8)
+    expect(display.tint.space).toBe('oklab')
   })
 
   it('weights a calendar v2 coordinate from the data and keeps the canonical text', () => {
@@ -37,6 +47,7 @@ describe('CalendarVersion', () => {
       expect(span.style.getPropertyValue(property)).toBe(String(weight))
     }
     expect(span.style.getPropertyValue('--cv2-mix')).toBe(`${Math.round(display.tint.mix * 100)}%`)
+    expect(span.style.getPropertyValue('--cv2-tint')).toBe(display.tint.default)
     expect(span.querySelectorAll('b.tinted').length).toBe(display.tint.segments.length)
     app.unmount()
   })

@@ -3,9 +3,9 @@
   Copyright (C) 2026 Markus Barta
 
   CalendarVersion — renders a version label with the INSPR calendar v2 display
-  weights (PAI-989, INSPR-400). The weights, tinted segments and mix are read at
-  build time from src/brand/calendar-version-display.json, an in-repo copy of the
-  doctrine data file pinned by scripts/check-calendar-version-display.sh.
+  design (PAI-994, INSPR-414). The weights and tint are read at build time from
+  src/brand/calendar-version-display.json, an in-repo copy of the doctrine data
+  file pinned by scripts/check-calendar-version-display.sh.
 
   Only an `inspr-calendar-v2` coordinate is weighted, and only when the release
   record says so (the scheme comes from scripts/release/version-scheme.json via
@@ -20,9 +20,6 @@ import display from '@/brand/calendar-version-display.json'
 const SEGMENTS = ['v', 'yy', 'mm', 'dd', 'hh', 'mi', 'ss', 'tail'] as const
 type Segment = (typeof SEGMENTS)[number]
 const CALENDAR_V2 = /^[1-9]\d{11}\.0\.0$/
-
-/** Paimos' Schmuckfarbe: the teal selection ink. */
-const TINT = 'var(--paimos-teal, #0e6f6c)'
 
 const props = withDefaults(
   defineProps<{
@@ -58,7 +55,7 @@ const weights = display.weights as Record<Segment, number>
 const style = computed(() => {
   const vars: Record<string, string> = {}
   for (const segment of SEGMENTS) vars[properties[segment]] = String(weights[segment])
-  vars[properties.tint] = TINT
+  vars[properties.tint] = display.tint.default
   vars[properties.mix] = `${Math.round(display.tint.mix * 100)}%`
   return vars
 })
