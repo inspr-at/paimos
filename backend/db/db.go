@@ -13809,6 +13809,22 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 		`CREATE TRIGGER offer_acceptance_audit_no_delete BEFORE DELETE ON offer_acceptance_audit BEGIN SELECT RAISE(ABORT,'acceptance audit is immutable'); END`,
 		`CREATE TRIGGER offers_acceptance_immutable BEFORE UPDATE ON offers WHEN OLD.status='accepted' BEGIN SELECT RAISE(ABORT,'accepted offer is immutable'); END`,
 	}})
+	// PAI-991: permit one explicit legacy-to-monthly number conversion while
+	// every related offer is still a draft. No existing number is auto-rewritten.
+	migrations = append(migrations, migration{version: 190, steps: []string{
+		`DROP TRIGGER customer_no_immutable`,
+		`CREATE TRIGGER customer_no_immutable BEFORE UPDATE OF customer_no ON customers
+		 WHEN OLD.customer_no IS NOT NULL AND NEW.customer_no IS NOT OLD.customer_no
+		 AND (NEW.customer_no IS NULL OR NOT (
+		   OLD.customer_no GLOB 'K[0-9][0-9]-[0-9][0-9][0-9]*'
+		   AND substr(OLD.customer_no,5) NOT GLOB '*[^0-9]*'
+		   AND length(NEW.customer_no)>=6 AND substr(NEW.customer_no,1,1)='K'
+		   AND substr(NEW.customer_no,2) NOT GLOB '*[^0-9]*'
+		   AND substr(NEW.customer_no,4,2) BETWEEN '01' AND '12'
+		   AND substr(NEW.customer_no,6,1) BETWEEN '1' AND '9'
+		   AND NOT EXISTS(SELECT 1 FROM offers WHERE customer_id=OLD.id AND status!='draft')
+		 )) BEGIN SELECT RAISE(ABORT,'customer number is immutable'); END`,
+	}})
 	for _, m := range migrations {
 		if m.version > maxVersion {
 			continue

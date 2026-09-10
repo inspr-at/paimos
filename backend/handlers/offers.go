@@ -347,12 +347,12 @@ func CreateOffer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !customerNo.Valid {
-		seq, e := nextOfferSequence(tx, "customer:"+now.Format("06"))
+		number, e := nextCustomerNumber(tx, now)
 		if e != nil {
 			jsonError(w, "Nummernvergabe fehlgeschlagen", 500)
 			return
 		}
-		customerNo.String = fmt.Sprintf("K%s-%03d", now.Format("06"), seq)
+		customerNo.String = number
 		if _, err = tx.Exec(`UPDATE customers SET customer_no=? WHERE id=?`, customerNo.String, c.ID); err != nil {
 			jsonError(w, "Nummernvergabe fehlgeschlagen", 500)
 			return

@@ -286,8 +286,14 @@ UID or bank account is invented in backend defaults. Existing contacts are reuse
 The suggested terms come from the supplied v8 prototype and are operator-editable.
 
 Offers receive `A<YYMMDD>-<NN>` at draft creation; customers receive
-`K<YY>-<NNN>` with their first offer. Counters use Europe/Vienna calendar dates,
-are transactional, immutable and never reused. Draft gaps are intentional.
+`K<YYMM><N>` with their first offer: `K26091`, `K26092`, then `K26101` in October.
+The unpadded customer counter restarts each Europe/Vienna calendar month.
+Allocations are transactional, permanent and never reused. Draft offer gaps are intentional.
+An admin may explicitly convert a legacy `K<YY>-<NNN>` number through
+`POST /api/customers/{id}/number/reformat` with `expected_customer_no`, but only
+while every related offer remains a draft. The customer and all draft snapshots
+change atomically, and draft revisions advance so stale editors cannot restore
+the old number. Finalized offers and existing monthly numbers cannot be renumbered.
 The first version stores positions, sender, recipient and text as an atomic JSON
 document with a revision, rather than a separate positions table. Quantities
 have two decimal places; amounts are integer cents, rounded half-up per position
