@@ -1,7 +1,9 @@
+<script setup lang="ts">
+import OfferBrandDots from './OfferBrandDots.vue'
+</script>
 <template>
   <div class="footmark">
-    <span class="dots"><i /><i /><i /></span
-    ><svg
+    <OfferBrandDots /><svg
       class="logotype"
       role="img"
       aria-label="augmentoring"
