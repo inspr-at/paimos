@@ -87,9 +87,11 @@ covers the original risk.
   normal-package shards, four DB shards, five handler shards, the unchanged Agent
   Mode five-second performance contract, and directly changed race targets.
   Selection for normal tests is the directly changed package plus its bounded
-  transitive reverse test-dependency closure. The affected lane excludes only
-  the DB/handler shards and isolated performance duplicate; it still runs the
-  parent stream test's other subtests.
+  transitive reverse test-dependency closure. Normal PR lanes exclude individual tests
+  selected by the direct race plan, retaining normal tests for race-dependent
+  packages and their importers plus the isolated performance contract. New race
+  guards fail the gate self-test. Handler security invariants run in affected
+  lanes; the separate invariant job runs only unsupported-platform contracts.
 - DB, handler, managed-harness, and other directly changed race targets use
   separate required runners. Generic affected race packages are distributed
   exactly once across four matrix runners. The original two M147 SQLite
@@ -107,9 +109,9 @@ covers the original risk.
   oracle owns one independently provisioned PR matrix runner. A new package
   concurrency/recovery oracle must update the semantic selector and shard
   topology in the same change; the gate pins the currently selected names
-  exactly once. Normal PR selection and the exhaustive full-serial workflow
-  still run all 17; the broad main, nightly, and manually authorized race
-  workflow retains the same complete set of four package-local concurrency and
+  exactly once. Combined normal/race PR selection and the exhaustive full-serial
+  workflow still cover all 17; the broad main, nightly, and manually authorized
+  race workflow retains the same complete set of four package-local concurrency and
   recovery oracles in four sequential foreground processes.
   E2E and security scanning remain separate required contexts.
 - The protected `test` context is an aggregator over every vet, normal, race,
@@ -118,12 +120,14 @@ covers the original risk.
 - Full serial `go test -p 1 ./...` and a broad sequential sweep of package-local
   control-plane concurrency contracts (including sequential handler shards) run
   as parallel jobs in a dedicated workflow on `main`, nightly, and manual
-  dispatch, outside the ordinary PR merge path. Main and tag image paths gate
-  on a compact backend/platform job, including executable unsupported-platform
-  denial contracts, and require a successful `backend-full.yml` run for their
-  exact head before the stable `test` context can permit publication. A tag can
-  reuse the already-green exhaustive result from the identical protected-main
-  head instead of starting the serial suite again. For hosted pre-merge timing
+  dispatch, outside the ordinary PR merge path. Main and tag publication waits
+  for successful exact-head `backend-full.yml` evidence, including
+  unsupported-platform contracts; quality/frontend/E2E stay PR-only. Quality
+  checks follow their complete inputs; clock-dependent self-tests always run.
+  Main reruns govulncheck and npm audit against live vulnerability databases,
+  while pinned gosec and gitleaks reuse PR assurance.
+  A tag can reuse the already-green exhaustive result from the identical
+  protected-main head instead of starting the serial suite again. For hosted pre-merge timing
   evidence, an operator can apply the explicit `backend-full-evidence` PR label;
   other PR events and labels cannot authorize the exhaustive jobs.
 - A release tag is created from the exact protected-main merge only after that

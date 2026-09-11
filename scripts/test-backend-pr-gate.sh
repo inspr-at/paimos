@@ -33,6 +33,8 @@ fail() {
   exit 1
 }
 
+python3 "$ROOT/scripts/backend-race-exclusions.py" --check "$ROOT/backend"
+
 select_files() {
   local output first packages
   output=$(printf '%s\n' "$@" | "$SELECTOR" --files-from -)
@@ -861,12 +863,12 @@ done
   "$handlers_race" == *"--shard=\"\${{ matrix.shard }}/5\""* ]] ||
   fail 'handler race shards do not run on five independent matrix runners'
 
-[[ "$invariants" == *'TestRegression_'* && "$invariants" == *'TestAuthzFuzz_'* && "$invariants" == *'paimos_test_unsupported'* ]] ||
+[[ "$invariants" != *'TestRegression_'* && "$invariants" != *'TestAuthzFuzz_'* && "$invariants" == *'paimos_test_unsupported'* ]] ||
   fail 'parallel security/platform invariant lane is incomplete'
 [[ "$publish_invariants" == *"github.event_name == 'push'"* &&
-  "$publish_invariants" == *'paimos_test_unsupported'* &&
+  "$publish_invariants" != *'go test'* &&
   "$publish_invariants" == *"$FULL_WAIT_CALL"* ]] ||
-  fail 'main/tag publish path lacks executable backend fail-closed assurance'
+  fail 'main/tag publish path duplicates tests or lacks exact-head backend assurance'
 
 [[ "$full_authorize" == *'backend-full-authorize.sh'* &&
   "$full_authorize" == *"if: $FULL_PR_GUARD"* &&
@@ -920,4 +922,5 @@ grep -q 'two tag workflows' "$RELEASE_DOC" || fail 'release documentation does n
 grep -q 'backend-full.yml' "$RELEASE_DOC" || fail 'release documentation omits pre-tag exhaustive backend assurance'
 
 python3 "$ROOT/scripts/test-backend-full-reuse.py"
+python3 "$ROOT/scripts/test-backend-ci-dedupe.py"
 echo 'test-backend-pr-gate: ok'
