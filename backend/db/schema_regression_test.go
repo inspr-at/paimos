@@ -32,7 +32,7 @@ func schemaNames(t *testing.T, database *sql.DB, query string) []string {
 	return names
 }
 
-const latestSchemaVersion = 193
+const latestSchemaVersion = 194
 
 func TestMigration191AddsClosedOneShotLaunchAuthority(t *testing.T) {
 	database := openTestDB(t)

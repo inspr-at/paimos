@@ -4,6 +4,7 @@
 package baselinebatch
 
 import (
+	"encoding/json"
 	"errors"
 	"time"
 
@@ -122,6 +123,34 @@ type BaselineClaim struct {
 	ImportedClaimedApprovedAt string `json:"imported_claimed_approved_at"`
 	Authenticity              string `json:"authenticity"`
 	StreamRef                 string `json:"stream_ref"`
+}
+
+// MarshalJSON keeps legacy uncertainty explicit. Drafts and newly persisted
+// batches always carry a positive revision; an old batch whose migration could
+// not prove the value from its sealed snapshot is represented as null, never as
+// a fabricated baseline revision zero.
+func (claim BaselineClaim) MarshalJSON() ([]byte, error) {
+	var revision *int
+	if claim.Revision > 0 {
+		value := claim.Revision
+		revision = &value
+	}
+	return json.Marshal(struct {
+		BaselineRef               string `json:"baseline_ref"`
+		Revision                  *int   `json:"revision"`
+		ContentDigest             string `json:"content_digest"`
+		RevisionSeal              string `json:"revision_seal"`
+		ImportedClaimedApprovedBy string `json:"imported_claimed_approved_by"`
+		ImportedClaimedApprovedAt string `json:"imported_claimed_approved_at"`
+		Authenticity              string `json:"authenticity"`
+		StreamRef                 string `json:"stream_ref"`
+	}{
+		BaselineRef: claim.BaselineRef, Revision: revision,
+		ContentDigest: claim.ContentDigest, RevisionSeal: claim.RevisionSeal,
+		ImportedClaimedApprovedBy: claim.ImportedClaimedApprovedBy,
+		ImportedClaimedApprovedAt: claim.ImportedClaimedApprovedAt,
+		Authenticity:              claim.Authenticity, StreamRef: claim.StreamRef,
+	})
 }
 
 type UnresolvedItem struct {

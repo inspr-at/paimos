@@ -196,6 +196,7 @@ func (s *Service) Start(ctx context.Context, actor Actor, projectID int64, req S
 	confirm := map[string]any{
 		"human_user_id":         actor.UserID,
 		"session_credential_id": actor.SessionCredentialID,
+		"baseline_revision":     draft.Baseline.Revision,
 		"content_digest":        draft.Baseline.ContentDigest,
 		"revision_seal":         draft.Baseline.RevisionSeal,
 		"draft_revision":        draft.Revision,
@@ -208,12 +209,12 @@ func (s *Service) Start(ctx context.Context, actor Actor, projectID int64, req S
 		"readiness_observed_at": evidence.ObservedAt,
 	}
 	result, err := tx.ExecContext(ctx, `INSERT INTO baseline_batch_batches(
-		project_id,batch_key,draft_id,draft_revision,review_id,baseline_ref,content_digest,revision_seal,execution_mode,
+		project_id,batch_key,draft_id,draft_revision,review_id,baseline_ref,baseline_revision,content_digest,revision_seal,execution_mode,
 		scope_json,worker_json,issue_id,delivery_id,attempt_id,lifecycle_intent_id,readiness_intent_id,control_state,
 		confirmation_json,idempotency_key,imported_claimed_approved_by,imported_claimed_approved_at,imported_authenticity,
 		stream_ref,started_by,started_at,delegated_launch_json)
-		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'started',?,?,?,?,?,?,?,?,?)`,
-		projectID, batchKey, draft.ID, draft.Revision, req.ReviewID, draft.Baseline.BaselineRef, draft.Baseline.ContentDigest,
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'started',?,?,?,?,?,?,?,?,?)`,
+		projectID, batchKey, draft.ID, draft.Revision, req.ReviewID, draft.Baseline.BaselineRef, draft.Baseline.Revision, draft.Baseline.ContentDigest,
 		draft.Baseline.RevisionSeal, req.ExecutionMode, encodeJSON(scope), encodeJSON(reviewWorker), issueID, attempt.DeliveryID,
 		attempt.ID, intentID, evidence.IntentID, encodeJSON(confirm), req.IdempotencyKey,
 		draft.Baseline.ImportedClaimedApprovedBy, draft.Baseline.ImportedClaimedApprovedAt, ImportedClaimAuthenticity,
