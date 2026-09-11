@@ -16,18 +16,14 @@ RUN CGO_ENABLED=0 GOOS=linux go build \
 FROM node:24-alpine AS spa-build
 ARG SOURCE_DATE_EPOCH=0
 ENV SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH
-WORKDIR /src
+WORKDIR /src/frontend
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci --ignore-scripts
-COPY frontend/ ./
-# vite.config.ts reads ../VERSION relative to frontend/ (__dirname = /src here);
-# AppChangelogModal.vue imports @docs/CHANGELOG.md?raw (alias -> ../docs/).
-COPY VERSION /VERSION
-# vite.config.ts also reads ../scripts/release/version-scheme.json (__APP_VERSION_SCHEME__, PAI-989).
-COPY scripts/release/version-scheme.json /scripts/release/version-scheme.json
-COPY docs/ /docs/
-COPY backend/contracts/ /backend/contracts/
+# Preserve the checkout layout for all frontend imports and build-time reads.
+COPY . /src/
+# Keep the runtime stage's artifact path independent of the source layout.
 RUN npm run build \
+  && mv dist /src/dist \
   && find /src/dist -exec touch -d "@${SOURCE_DATE_EPOCH}" {} +
 
 FROM alpine:3.21
