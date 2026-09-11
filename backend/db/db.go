@@ -13958,6 +13958,9 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 		`CREATE INDEX idx_offer_confirmations_due ON offer_confirmations(state,next_attempt_at)`,
 		`CREATE TABLE offer_visibility(offer_id INTEGER PRIMARY KEY REFERENCES offers(id),deleted_at TEXT,deleted_by INTEGER REFERENCES users(id))`,
 	}})
+	// M194 / PAI-1015: preserve the Aithema baseline revision in the immutable
+	// batch snapshot; recover historical values only from seal-proven snapshots.
+	migrations = append(migrations, migration{version: 194})
 
 	for _, m := range migrations {
 		if m.version > maxVersion {
@@ -13999,6 +14002,9 @@ func applyMigration(ctx context.Context, conn *sql.Conn, m migration) error {
 	}
 	if m.version == 192 {
 		return applyHarnessRetirementMigration192(ctx, conn)
+	}
+	if m.version == 194 {
+		return applyBaselineRevisionMigration194(ctx, conn)
 	}
 	if migrationUsesForeignKeyPragma(m) {
 		return applyForeignKeyRebuildMigration(ctx, conn, m)
@@ -14089,6 +14095,7 @@ func migrationUsesForeignKeyPragma(m migration) bool {
 // operator can repair the data. Checks run only when the migration is pending
 // (zero cost for already-upgraded instances) on the same pinned connection.
 var migrationPreconditions = map[int]func(context.Context, *sql.Conn) error{
+	194: checkM194SchemaIsUnapplied,
 	// PAI-576: migration 113 adds a UNIQUE index on (project_id, issue_number).
 	113: checkNoDuplicateIssueNumbers,
 	// PAI-799/801: M142's original SQLite length() checks counted Unicode

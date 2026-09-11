@@ -854,15 +854,15 @@ func listBatches(ctx context.Context, tx *sql.Tx, projectID int64) ([]storedBatc
 
 func loadBatchByID(ctx context.Context, tx *sql.Tx, projectID, id int64) (storedBatch, error) {
 	var b storedBatch
-	var deliveryID, attemptID sql.NullInt64
+	var baselineRevision, deliveryID, attemptID sql.NullInt64
 	var scopeJSON, workerJSON, delegatedJSON, claimedBy, claimedAt, authenticity, streamRef string
-	err := tx.QueryRowContext(ctx, `SELECT id,project_id,batch_key,draft_id,draft_revision,review_id,baseline_ref,content_digest,revision_seal,
+	err := tx.QueryRowContext(ctx, `SELECT id,project_id,batch_key,draft_id,draft_revision,review_id,baseline_ref,baseline_revision,content_digest,revision_seal,
 		execution_mode,scope_json,worker_json,issue_id,delivery_id,attempt_id,lifecycle_intent_id,readiness_intent_id,
 		control_state,control_reason,imported_claimed_approved_by,imported_claimed_approved_at,imported_authenticity,
 		stream_ref,started_by,started_at,delegated_launch_json
 		FROM baseline_batch_batches WHERE id=? AND project_id=?`, id, projectID).Scan(
 		&b.ID, &b.ProjectID, &b.BatchKey, &b.DraftID, &b.DraftRevision, &b.ReviewID, &b.Baseline.BaselineRef,
-		&b.Baseline.ContentDigest, &b.Baseline.RevisionSeal, &b.ExecutionMode, &scopeJSON, &workerJSON, &b.IssueID,
+		&baselineRevision, &b.Baseline.ContentDigest, &b.Baseline.RevisionSeal, &b.ExecutionMode, &scopeJSON, &workerJSON, &b.IssueID,
 		&deliveryID, &attemptID, &b.LifecycleIntentID, &b.ReadinessIntentID, &b.ControlState, &b.ControlReason,
 		&claimedBy, &claimedAt, &authenticity, &streamRef, &b.StartedBy, &b.StartedAt, &delegatedJSON)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -875,6 +875,9 @@ func loadBatchByID(ctx context.Context, tx *sql.Tx, projectID, id int64) (stored
 	b.Baseline.ImportedClaimedApprovedAt = claimedAt
 	b.Baseline.Authenticity = ImportedClaimAuthenticity
 	b.Baseline.StreamRef = streamRef
+	if baselineRevision.Valid {
+		b.Baseline.Revision = int(baselineRevision.Int64)
+	}
 	_ = json.Unmarshal([]byte(scopeJSON), &b.Scope)
 	_ = json.Unmarshal([]byte(workerJSON), &b.Worker)
 	decodeDelegatedLaunch(delegatedJSON, &b.DelegatedLaunch)
