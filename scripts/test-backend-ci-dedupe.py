@@ -74,7 +74,7 @@ class DedupeTests(unittest.TestCase):
             step = next(s for s in block.split('      - ') if f'./scripts/{script}' in s)
             self.assertNotIn('if:', step)
         for lane in ('backend-pr', 'backend-pr-db', 'backend-pr-handlers', 'backend-pr-performance'):
-            self.assertIn('backend-ci-packages.sh --direct', job(lane))
+            self.assertIn('needs.backend-pr-plan.outputs.direct_selection', job(lane))
             self.assertIn('--direct-packages="$direct_selection"', job(lane))
         invariants = job('backend-security-invariants')
         self.assertNotIn('backend-security-invariants.sh', invariants)
@@ -91,9 +91,11 @@ class DedupeTests(unittest.TestCase):
     def test_aggregator_requires_correct_results(self):
         block = job('test')
         script = block.split('        run: |\n', 1)[1]
-        keys = re.findall(r'^          (\w+): \$\{\{ needs\.', block, re.M)
+        keys = re.findall(r'^          (\w+): \$\{\{ needs\.[\w-]+\.result', block, re.M)
+        planned = re.findall(r'^          (\w+_PLANNED):', block, re.M)
         for event in ('pull_request', 'push'):
             statuses = {key: ('success' if event == 'pull_request' else 'skipped') for key in keys}
+            statuses.update({key: 'true' if event == 'pull_request' else '' for key in planned})
             statuses['BACKEND_PUBLISH_INVARIANTS'] = 'skipped' if event == 'pull_request' else 'success'
             for key in ('QUALITY', 'FRONTEND_QUALITY', 'E2E'):
                 self.assertIn(key, statuses)
