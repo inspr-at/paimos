@@ -14257,8 +14257,8 @@ var migrationPreconditions = map[int]func(context.Context, *sql.Conn) error{
 		}
 		return nil
 	},
-	188: func(ctx context.Context, conn *sql.Conn) error {
-		return checkSchemaObjectsAbsent(ctx, conn, 188, []string{
+	192: func(ctx context.Context, conn *sql.Conn) error {
+		return checkSchemaObjectsAbsent(ctx, conn, 192, []string{
 			"harness_session_retirements", "idx_harness_session_retirements_runtime", "idx_harness_session_retirements_active",
 			"trg_harness_session_retirement_identity", "trg_harness_session_retirement_transition",
 			"trg_harness_session_retirement_no_delete", "trg_harness_retirement_binding_admission",
