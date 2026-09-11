@@ -1233,6 +1233,74 @@ test_mid_wait_head_mutation_is_rejected() {
     fail 'release tagged a mutated PR head'
 }
 
+test_prepare_and_reviewed_resume() {
+  local repo state origin head base output
+  repo=$(setup_repo prepare-reviewed)
+  state="$TMP_ROOT/prepare-reviewed/gh-state"
+  origin=$(git -C "$repo" remote get-url origin)
+  base=$(git -C "$repo" rev-parse HEAD)
+  prepend_release_notes "$repo"
+  output="$TMP_ROOT/prepare-reviewed/prepare-output"
+  run_release "$repo" "$state" 1.0.1 --prepare-only --no-edit >"$output"
+  head=$(git -C "$repo" rev-parse HEAD)
+  [[ -z $(git -C "$repo" status --porcelain) ]] || fail 'prepared branch is dirty'
+  tail -n1 "$output" | jq -e --arg head "$head" --arg base "$base" \
+    '.version == "1.0.1" and .head == $head and .base == $base and .branch == "release/v1.0.1"' >/dev/null ||
+    fail 'prepare receipt does not identify the reviewed content'
+  run_release "$repo" "$state" 1.0.1 --prepare-only --no-edit >/dev/null
+  [[ $(git -C "$repo" rev-parse HEAD) == "$head" ]] || fail 'repeat preparation changed commit'
+  ! git --git-dir="$origin" show-ref --verify --quiet refs/heads/release/v1.0.1 || fail 'prepare published branch'
+  ! git --git-dir="$origin" show-ref --verify --quiet refs/tags/v1.0.1 || fail 'prepare published tag'
+  ! grep -q '^pr create' "$state/calls.log" || fail 'prepare created a PR'
+
+  if run_release "$repo" "$state" 1.0.1 --reviewed-head "$base" --no-edit >/dev/null 2>&1; then
+    fail 'resume accepted wrong reviewed head'
+  fi
+  ! git --git-dir="$origin" show-ref --verify --quiet refs/heads/release/v1.0.1 || fail 'wrong review still pushed'
+  run_release "$repo" "$state" 1.0.1 --reviewed-head "$head" --no-edit >/dev/null
+  [[ $(git --git-dir="$origin" rev-parse refs/pull/1/head) == "$head" ]] || fail 'resume changed reviewed commit'
+  [[ $(git --git-dir="$origin" rev-parse 'refs/tags/v1.0.1^{}') == "$(<"$state/merge-oid")" ]] || fail 'resume tagged wrong merge'
+  assert_one_pr "$state"
+  run_release "$repo" "$state" 1.0.1 --reviewed-head "$head" --no-edit >/dev/null
+  assert_one_pr "$state"
+}
+
+test_reviewed_resume_rejects_main_advance() {
+  local repo state origin head phase output
+  for phase in local published; do
+    repo=$(setup_repo "reviewed-advance-$phase")
+    state="$TMP_ROOT/reviewed-advance-$phase/gh-state"
+    origin=$(git -C "$repo" remote get-url origin)
+    prepend_release_notes "$repo"
+    run_release "$repo" "$state" 1.0.1 --prepare-only --no-edit >/dev/null
+    head=$(git -C "$repo" rev-parse HEAD)
+    if [[ "$phase" == published ]]; then
+      if FAKE_GH_DEFER_MERGE=1 RELEASE_MERGE_TIMEOUT=2 \
+         run_release "$repo" "$state" 1.0.1 --reviewed-head "$head" --no-edit >/dev/null 2>&1; then
+        fail 'deferred review fixture unexpectedly merged'
+      fi
+    fi
+    git -C "$repo" switch -q main
+    printf 'concurrent main edit\n' > "$repo/main-only.txt"
+    git -C "$repo" add main-only.txt
+    git -C "$repo" commit -q --no-gpg-sign --signoff -m 'main advances after review'
+    FAKE_GH_SERVER_MERGE=1 git -C "$repo" push -q origin main
+    git -C "$repo" switch -q release/v1.0.1
+    output="$state/advance-output"
+    if run_release "$repo" "$state" 1.0.1 --reviewed-head "$head" --no-edit >"$output" 2>&1; then
+      fail 'reviewed resume accepted advanced main'
+    fi
+    grep -q 'main advanced since release preparation' "$output" || fail 'missing actionable main drift error'
+    [[ $(git -C "$repo" rev-parse HEAD) == "$head" ]] || fail 'reviewed branch was synced'
+    ! git --git-dir="$origin" show-ref --verify --quiet refs/tags/v1.0.1 || fail 'main drift still tagged'
+    if [[ "$phase" == local ]]; then
+      ! git --git-dir="$origin" show-ref --verify --quiet refs/heads/release/v1.0.1 || fail 'main drift still pushed'
+    else
+      [[ $(git --git-dir="$origin" rev-parse refs/heads/release/v1.0.1) == "$head" ]] || fail 'remote review was synced'
+    fi
+  done
+}
+
 test_local_pre_push_interruption_resumes() {
   local repo state origin
   repo=$(setup_repo local-resume)
@@ -1703,6 +1771,23 @@ setup_interrupted_calendar_descendant_recovery() {
     -m 'fix exhaustive race timeout'
   FAKE_GH_SERVER_MERGE=1 git -C "$RECOVERY_REPO" push -q origin main
   RECOVERY_CANDIDATE=$(git -C "$RECOVERY_REPO" rev-parse HEAD)
+}
+
+test_reviewed_resume_rejects_descendant_recovery() {
+  local calendar_version reviewed output
+  calendar_version=$(TZ=Europe/Vienna date +%y.%m.%d)
+  setup_interrupted_calendar_descendant_recovery reviewed-descendant "$calendar_version"
+  reviewed=$(git --git-dir="$RECOVERY_ORIGIN" rev-parse refs/pull/1/head)
+  output="$RECOVERY_STATE/reviewed-output"
+  if FAKE_RELEASE_VERSION="$calendar_version" \
+     run_release "$RECOVERY_REPO" "$RECOVERY_STATE" "$calendar_version" \
+       --reviewed-head "$reviewed" --no-edit >"$output" 2>&1; then
+    fail 'reviewed resume accepted changed descendant recovery contents'
+  fi
+  grep -q 'selected recovery commit changes reviewed content' "$output" ||
+    fail 'reviewed recovery did not reject the selected changed tree'
+  ! git --git-dir="$RECOVERY_ORIGIN" show-ref --verify --quiet "refs/tags/v$calendar_version" ||
+    fail 'reviewed descendant recovery still tagged'
 }
 
 test_interrupted_calendar_descendant_recovery() {
@@ -2208,6 +2293,18 @@ test_calendar_release_and_rejections() {
 }
 
 write_fake_commands "$TMP_ROOT/fake-bin"
+if [[ "${1:-}" == '--reviewed-recovery' ]]; then
+  test_reviewed_resume_rejects_descendant_recovery
+  echo 'test-release: reviewed recovery ok'
+  exit 0
+fi
+test_reviewed_resume_rejects_descendant_recovery
+test_prepare_and_reviewed_resume
+test_reviewed_resume_rejects_main_advance
+if [[ "${1:-}" == '--prepare-review' ]]; then
+  echo 'test-release: prepare/review ok'
+  exit 0
+fi
 test_calendar_missing_provenance_receipt_recovery \
   26.09.01 "$IMMEDIATE_AUTO_MERGE_RECOVERY_REASON" calendar-immediate-recovery
 test_calendar_missing_provenance_receipt_recovery \
