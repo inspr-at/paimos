@@ -37,6 +37,42 @@ jobs:
       - name: Every PR commit carries its author's DCO sign-off
         run: ./scripts/check-dco.sh "${{ github.event.pull_request.base.sha }}" "${{ github.event.pull_request.head.sha }}"
 
+  # Decide runner allocation once, before any PR matrix is expanded.
+  backend-pr-plan:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      selection: ${{ steps.plan.outputs.selection }}
+      direct_selection: ${{ steps.plan.outputs.direct_selection }}
+      backend-pr: ${{ steps.plan.outputs.backend-pr }}
+      backend-pr-shards: ${{ steps.plan.outputs.backend-pr-shards }}
+      backend-pr-db: ${{ steps.plan.outputs.backend-pr-db }}
+      backend-pr-handlers: ${{ steps.plan.outputs.backend-pr-handlers }}
+      backend-pr-handlers-shards: ${{ steps.plan.outputs.backend-pr-handlers-shards }}
+      backend-pr-performance: ${{ steps.plan.outputs.backend-pr-performance }}
+      backend-pr-race: ${{ steps.plan.outputs.backend-pr-race }}
+      backend-pr-race-shards: ${{ steps.plan.outputs.backend-pr-race-shards }}
+      backend-pr-managedharness-race: ${{ steps.plan.outputs.backend-pr-managedharness-race }}
+      backend-pr-managedharness-race-shards: ${{ steps.plan.outputs.backend-pr-managedharness-race-shards }}
+      backend-pr-db-race: ${{ steps.plan.outputs.backend-pr-db-race }}
+      backend-pr-handlers-race: ${{ steps.plan.outputs.backend-pr-handlers-race }}
+      backend-pr-handlers-race-shards: ${{ steps.plan.outputs.backend-pr-handlers-race-shards }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.26.6'
+          cache-dependency-path: backend/go.sum
+      - name: Plan affected and direct backend invocations
+        id: plan
+        env:
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: python3 scripts/backend-pr-plan.py "$PR_BASE" "$PR_HEAD" >> "$GITHUB_OUTPUT"
+
   backend-pr-vet:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
@@ -57,12 +93,13 @@ jobs:
         run: go vet ./...
 
   backend-pr:
-    if: github.event_name == 'pull_request'
+    needs: backend-pr-plan
+    if: github.event_name == 'pull_request' && needs.backend-pr-plan.outputs.backend-pr == 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        shard: [0, 1]
+        shard: ${{ fromJSON(needs.backend-pr-plan.outputs.backend-pr == 'true' && needs.backend-pr-plan.outputs.backend-pr-shards || '[0]') }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -75,25 +112,18 @@ jobs:
 
       - name: Backend — affected package tests
         working-directory: backend
+        env:
+          selection: ${{ needs.backend-pr-plan.outputs.selection }}
+          direct_selection: ${{ needs.backend-pr-plan.outputs.direct_selection }}
         run: |
           set -euo pipefail
-          selection=$(../scripts/backend-ci-packages.sh \
-            '${{ github.event.pull_request.base.sha }}' \
-            '${{ github.event.pull_request.head.sha }}')
-          direct_selection=$(../scripts/backend-ci-packages.sh --direct \
-            '${{ github.event.pull_request.base.sha }}' \
-            '${{ github.event.pull_request.head.sha }}')
-          packages=()
-          [[ -z "$selection" ]] || mapfile -t packages <<<"$selection"
-          if (( ${#packages[@]} == 0 )); then
-            echo 'No backend package changed; affected test lane is empty.'
-          else
-            printf 'Affected backend package: %s\n' "${packages[@]}"
-            ../scripts/backend-pr-test.sh --lane=affected --shard="${{ matrix.shard }}/2" --direct-packages="$direct_selection" "${packages[@]}"
-          fi
+          [[ -n "$selection" ]]
+          mapfile -t packages <<<"$selection"
+          ../scripts/backend-pr-test.sh --lane=affected --shard="${{ matrix.shard }}/2" --direct-packages="$direct_selection" "${packages[@]}"
 
   backend-pr-db:
-    if: github.event_name == 'pull_request'
+    needs: backend-pr-plan
+    if: github.event_name == 'pull_request' && needs.backend-pr-plan.outputs.backend-pr-db == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -107,29 +137,23 @@ jobs:
 
       - name: Backend — affected DB tests (four isolated shards)
         working-directory: backend
+        env:
+          selection: ${{ needs.backend-pr-plan.outputs.selection }}
+          direct_selection: ${{ needs.backend-pr-plan.outputs.direct_selection }}
         run: |
           set -euo pipefail
-          selection=$(../scripts/backend-ci-packages.sh \
-            '${{ github.event.pull_request.base.sha }}' \
-            '${{ github.event.pull_request.head.sha }}')
-          direct_selection=$(../scripts/backend-ci-packages.sh --direct \
-            '${{ github.event.pull_request.base.sha }}' \
-            '${{ github.event.pull_request.head.sha }}')
-          packages=()
-          [[ -z "$selection" ]] || mapfile -t packages <<<"$selection"
-          if (( ${#packages[@]} == 0 )); then
-            echo 'No backend package changed; DB test lane is empty.'
-          else
-            ../scripts/backend-pr-test.sh --lane=db --direct-packages="$direct_selection" "${packages[@]}"
-          fi
+          [[ -n "$selection" ]]
+          mapfile -t packages <<<"$selection"
+          ../scripts/backend-pr-test.sh --lane=db --direct-packages="$direct_selection" "${packages[@]}"
 
   backend-pr-handlers:
-    if: github.event_name == 'pull_request'
+    needs: backend-pr-plan
+    if: github.event_name == 'pull_request' && needs.backend-pr-plan.outputs.backend-pr-handlers == 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        shard: [0, 1, 2, 3, 4]
+        shard: ${{ fromJSON(needs.backend-pr-plan.outputs.backend-pr-handlers == 'true' && needs.backend-pr-plan.outputs.backend-pr-handlers-shards || '[0]') }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -142,24 +166,18 @@ jobs:
 
       - name: Backend — affected handler tests (five isolated shards)
         working-directory: backend
+        env:
+          selection: ${{ needs.backend-pr-plan.outputs.selection }}
+          direct_selection: ${{ needs.backend-pr-plan.outputs.direct_selection }}
         run: |
           set -euo pipefail
-          selection=$(../scripts/backend-ci-packages.sh \
-            '${{ github.event.pull_request.base.sha }}' \
-            '${{ github.event.pull_request.head.sha }}')
-          direct_selection=$(../scripts/backend-ci-packages.sh --direct \
-            '${{ github.event.pull_request.base.sha }}' \
-            '${{ github.event.pull_request.head.sha }}')
-          packages=()
-          [[ -z "$selection" ]] || mapfile -t packages <<<"$selection"
-          if (( ${#packages[@]} == 0 )); then
-            echo 'No backend package changed; handler test lane is empty.'
-          else
-            ../scripts/backend-pr-test.sh --lane=handlers --shard="${{ matrix.shard }}/5" --direct-packages="$direct_selection" "${packages[@]}"
-          fi
+          [[ -n "$selection" ]]
+          mapfile -t packages <<<"$selection"
+          ../scripts/backend-pr-test.sh --lane=handlers --shard="${{ matrix.shard }}/5" --direct-packages="$direct_selection" "${packages[@]}"
 
   backend-pr-performance:
-    if: github.event_name == 'pull_request'
+    needs: backend-pr-plan
+    if: github.event_name == 'pull_request' && needs.backend-pr-plan.outputs.backend-pr-performance == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -176,29 +194,23 @@ jobs:
       # the parent test's other subtests and excludes only this exact duplicate.
       - name: Backend — isolated Agent Mode performance contract
         working-directory: backend
+        env:
+          selection: ${{ needs.backend-pr-plan.outputs.selection }}
+          direct_selection: ${{ needs.backend-pr-plan.outputs.direct_selection }}
         run: |
           set -euo pipefail
-          selection=$(../scripts/backend-ci-packages.sh \
-            '${{ github.event.pull_request.base.sha }}' \
-            '${{ github.event.pull_request.head.sha }}')
-          direct_selection=$(../scripts/backend-ci-packages.sh --direct \
-            '${{ github.event.pull_request.base.sha }}' \
-            '${{ github.event.pull_request.head.sha }}')
-          packages=()
-          [[ -z "$selection" ]] || mapfile -t packages <<<"$selection"
-          if (( ${#packages[@]} == 0 )); then
-            echo 'No backend package changed; performance test lane is empty.'
-          else
-            ../scripts/backend-pr-test.sh --lane=performance --direct-packages="$direct_selection" "${packages[@]}"
-          fi
+          [[ -n "$selection" ]]
+          mapfile -t packages <<<"$selection"
+          ../scripts/backend-pr-test.sh --lane=performance --direct-packages="$direct_selection" "${packages[@]}"
 
   backend-pr-race:
-    if: github.event_name == 'pull_request'
+    needs: backend-pr-plan
+    if: github.event_name == 'pull_request' && needs.backend-pr-plan.outputs.backend-pr-race == 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        shard: [0, 1, 2, 3]
+        shard: ${{ fromJSON(needs.backend-pr-plan.outputs.backend-pr-race == 'true' && needs.backend-pr-plan.outputs.backend-pr-race-shards || '[0]') }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -211,26 +223,22 @@ jobs:
 
       - name: Backend — directly changed package race (four isolated package shards)
         working-directory: backend
+        env:
+          selection: ${{ needs.backend-pr-plan.outputs.direct_selection }}
         run: |
           set -euo pipefail
-          selection=$(../scripts/backend-ci-packages.sh --direct \
-            '${{ github.event.pull_request.base.sha }}' \
-            '${{ github.event.pull_request.head.sha }}')
-          packages=()
-          [[ -z "$selection" ]] || mapfile -t packages <<<"$selection"
-          if (( ${#packages[@]} == 0 )); then
-            echo 'No backend package changed; affected race lane is empty.'
-          else
-            ../scripts/backend-pr-race.sh --lane=affected --shard="${{ matrix.shard }}/4" "${packages[@]}"
-          fi
+          [[ -n "$selection" ]]
+          mapfile -t packages <<<"$selection"
+          ../scripts/backend-pr-race.sh --lane=affected --shard="${{ matrix.shard }}/4" "${packages[@]}"
 
   backend-pr-managedharness-race:
-    if: github.event_name == 'pull_request'
+    needs: backend-pr-plan
+    if: github.event_name == 'pull_request' && needs.backend-pr-plan.outputs.backend-pr-managedharness-race == 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        shard: [0, 1, 2, 3, 4, 5, 6]
+        shard: ${{ fromJSON(needs.backend-pr-plan.outputs.backend-pr-managedharness-race == 'true' && needs.backend-pr-plan.outputs.backend-pr-managedharness-race-shards || '[0]') }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -243,21 +251,17 @@ jobs:
 
       - name: Backend — managed-harness race contracts (seven isolated oracle shards)
         working-directory: backend
+        env:
+          selection: ${{ needs.backend-pr-plan.outputs.direct_selection }}
         run: |
           set -euo pipefail
-          selection=$(../scripts/backend-ci-packages.sh --direct \
-            '${{ github.event.pull_request.base.sha }}' \
-            '${{ github.event.pull_request.head.sha }}')
-          packages=()
-          [[ -z "$selection" ]] || mapfile -t packages <<<"$selection"
-          if (( ${#packages[@]} == 0 )); then
-            echo 'No backend package changed; managed-harness race lane is empty.'
-          else
-            ../scripts/backend-pr-race.sh --lane=managedharness --shard="${{ matrix.shard }}/7" "${packages[@]}"
-          fi
+          [[ -n "$selection" ]]
+          mapfile -t packages <<<"$selection"
+          ../scripts/backend-pr-race.sh --lane=managedharness --shard="${{ matrix.shard }}/7" "${packages[@]}"
 
   backend-pr-db-race:
-    if: github.event_name == 'pull_request'
+    needs: backend-pr-plan
+    if: github.event_name == 'pull_request' && needs.backend-pr-plan.outputs.backend-pr-db-race == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -271,26 +275,22 @@ jobs:
 
       - name: Backend — directly changed DB race contracts
         working-directory: backend
+        env:
+          selection: ${{ needs.backend-pr-plan.outputs.direct_selection }}
         run: |
           set -euo pipefail
-          selection=$(../scripts/backend-ci-packages.sh --direct \
-            '${{ github.event.pull_request.base.sha }}' \
-            '${{ github.event.pull_request.head.sha }}')
-          packages=()
-          [[ -z "$selection" ]] || mapfile -t packages <<<"$selection"
-          if (( ${#packages[@]} == 0 )); then
-            echo 'No backend package changed; DB race lane is empty.'
-          else
-            ../scripts/backend-pr-race.sh --lane=db "${packages[@]}"
-          fi
+          [[ -n "$selection" ]]
+          mapfile -t packages <<<"$selection"
+          ../scripts/backend-pr-race.sh --lane=db "${packages[@]}"
 
   backend-pr-handlers-race:
-    if: github.event_name == 'pull_request'
+    needs: backend-pr-plan
+    if: github.event_name == 'pull_request' && needs.backend-pr-plan.outputs.backend-pr-handlers-race == 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        shard: [0, 1, 2, 3, 4]
+        shard: ${{ fromJSON(needs.backend-pr-plan.outputs.backend-pr-handlers-race == 'true' && needs.backend-pr-plan.outputs.backend-pr-handlers-race-shards || '[0]') }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -303,18 +303,13 @@ jobs:
 
       - name: Backend — directly changed handler race contracts (five isolated shards)
         working-directory: backend
+        env:
+          selection: ${{ needs.backend-pr-plan.outputs.direct_selection }}
         run: |
           set -euo pipefail
-          selection=$(../scripts/backend-ci-packages.sh --direct \
-            '${{ github.event.pull_request.base.sha }}' \
-            '${{ github.event.pull_request.head.sha }}')
-          packages=()
-          [[ -z "$selection" ]] || mapfile -t packages <<<"$selection"
-          if (( ${#packages[@]} == 0 )); then
-            echo 'No backend package changed; handler race lane is empty.'
-          else
-            ../scripts/backend-pr-race.sh --lane=handlers --shard="${{ matrix.shard }}/5" "${packages[@]}"
-          fi
+          [[ -n "$selection" ]]
+          mapfile -t packages <<<"$selection"
+          ../scripts/backend-pr-race.sh --lane=handlers --shard="${{ matrix.shard }}/5" "${packages[@]}"
 
   backend-security-invariants:
     if: github.event_name == 'pull_request'
@@ -485,6 +480,7 @@ jobs:
   test:
     if: always()
     needs:
+      - backend-pr-plan
       - backend-pr-vet
       - backend-pr
       - backend-pr-db
@@ -504,6 +500,15 @@ jobs:
       - name: Require every event-relevant test lane
         env:
           EVENT_NAME: ${{ github.event_name }}
+          BACKEND_PR_PLAN: ${{ needs.backend-pr-plan.result }}
+          BACKEND_PR_PLANNED: ${{ needs.backend-pr-plan.outputs.backend-pr }}
+          BACKEND_PR_DB_PLANNED: ${{ needs.backend-pr-plan.outputs.backend-pr-db }}
+          BACKEND_PR_HANDLERS_PLANNED: ${{ needs.backend-pr-plan.outputs.backend-pr-handlers }}
+          BACKEND_PR_PERFORMANCE_PLANNED: ${{ needs.backend-pr-plan.outputs.backend-pr-performance }}
+          BACKEND_PR_RACE_PLANNED: ${{ needs.backend-pr-plan.outputs.backend-pr-race }}
+          BACKEND_PR_MANAGEDHARNESS_RACE_PLANNED: ${{ needs.backend-pr-plan.outputs.backend-pr-managedharness-race }}
+          BACKEND_PR_DB_RACE_PLANNED: ${{ needs.backend-pr-plan.outputs.backend-pr-db-race }}
+          BACKEND_PR_HANDLERS_RACE_PLANNED: ${{ needs.backend-pr-plan.outputs.backend-pr-handlers-race }}
           BACKEND_PR_VET: ${{ needs.backend-pr-vet.result }}
           BACKEND_PR: ${{ needs.backend-pr.result }}
           BACKEND_PR_DB: ${{ needs.backend-pr-db.result }}
@@ -520,19 +525,27 @@ jobs:
           E2E: ${{ needs.e2e.result }}
         run: |
           set -euo pipefail
+          require_planned_lane() {
+            case "$1:$2" in
+              true:success|false:skipped) return 0 ;;
+              *) echo "Unexpected planned lane result: $1:$2" >&2; return 1 ;;
+            esac
+          }
           if [[ "$EVENT_NAME" == 'pull_request' ]]; then
+            [[ "$BACKEND_PR_PLAN" == 'success' ]] || exit 1
             [[ "$BACKEND_PR_VET" == 'success' ]] || exit 1
-            [[ "$BACKEND_PR" == 'success' ]] || exit 1
-            [[ "$BACKEND_PR_DB" == 'success' ]] || exit 1
-            [[ "$BACKEND_PR_HANDLERS" == 'success' ]] || exit 1
-            [[ "$BACKEND_PR_PERFORMANCE" == 'success' ]] || exit 1
-            [[ "$BACKEND_PR_RACE" == 'success' ]] || exit 1
-            [[ "$BACKEND_PR_MANAGEDHARNESS_RACE" == 'success' ]] || exit 1
-            [[ "$BACKEND_PR_DB_RACE" == 'success' ]] || exit 1
-            [[ "$BACKEND_PR_HANDLERS_RACE" == 'success' ]] || exit 1
+            require_planned_lane "$BACKEND_PR_PLANNED" "$BACKEND_PR"
+            require_planned_lane "$BACKEND_PR_DB_PLANNED" "$BACKEND_PR_DB"
+            require_planned_lane "$BACKEND_PR_HANDLERS_PLANNED" "$BACKEND_PR_HANDLERS"
+            require_planned_lane "$BACKEND_PR_PERFORMANCE_PLANNED" "$BACKEND_PR_PERFORMANCE"
+            require_planned_lane "$BACKEND_PR_RACE_PLANNED" "$BACKEND_PR_RACE"
+            require_planned_lane "$BACKEND_PR_MANAGEDHARNESS_RACE_PLANNED" "$BACKEND_PR_MANAGEDHARNESS_RACE"
+            require_planned_lane "$BACKEND_PR_DB_RACE_PLANNED" "$BACKEND_PR_DB_RACE"
+            require_planned_lane "$BACKEND_PR_HANDLERS_RACE_PLANNED" "$BACKEND_PR_HANDLERS_RACE"
             [[ "$BACKEND_SECURITY_INVARIANTS" == 'success' ]] || exit 1
             [[ "$BACKEND_PUBLISH_INVARIANTS" == 'skipped' ]] || exit 1
           else
+            [[ "$BACKEND_PR_PLAN" == 'skipped' ]] || exit 1
             [[ "$BACKEND_PR_VET" == 'skipped' ]] || exit 1
             [[ "$BACKEND_PR" == 'skipped' ]] || exit 1
             [[ "$BACKEND_PR_DB" == 'skipped' ]] || exit 1

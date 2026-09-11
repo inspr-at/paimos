@@ -83,6 +83,16 @@ covers the original risk.
 
 ## Execution policy and timing evidence
 
+- PAI-1002 computes the affected and direct PR selections once in
+  `backend-pr-plan`. Each normal/race lane's own dry-run command determines
+  whether it has an invocation and which matrix shards have work. Job-level
+  conditions skip empty lanes before runner allocation; active matrices contain
+  only nonempty shards, retaining their original shard indices and counts.
+  The `test` aggregator requires a successful plan and accepts a skipped lane
+  only when that plan explicitly marked it empty. Vet, unsupported-platform
+  invariants, frontend quality, E2E, security scanning, DCO, and the quality job
+  remain unconditional on PRs. Main/tag publication and its exact-head
+  exhaustive-evidence wait are unchanged.
 - Pull requests run independent required lanes for `go vet ./...`, two affected
   normal-package shards, four DB shards, five handler shards, the unchanged Agent
   Mode five-second performance contract, and directly changed race targets.
