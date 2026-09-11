@@ -879,12 +879,17 @@ done
   "$full_race" == *"backend-pr-race.sh --group=\"\${{ matrix.group }}\" './...'"* &&
   "$full_race" == *'sequential'* ]] ||
   fail 'full backend broad race lacks an explicit independent budget or sequential topology'
-[[ "$full" == *'needs: [backend-full-authorize, backend-full-serial, backend-full-race]'* &&
+[[ "$full" == *'needs: [backend-full-authorize, backend-full-serial, backend-full-race, backend-frontend-contracts]'* &&
   "$full" == *"if: $FULL_AGGREGATE_GUARD"* && "$full" == *"$FULL_AUTH_RESULT"* &&
   "$full" == *"$FULL_AUTH_ASSERT"* && "$full" == *"$FULL_SERIAL_RESULT"* &&
   "$full" == *"$FULL_RACE_RESULT"* && "$full" == *"$FULL_SERIAL_ASSERT"* &&
   "$full" == *"$FULL_RACE_ASSERT"* ]] ||
   fail 'full backend workflow lacks a fail-closed serial/race aggregator'
+[[ "$full" == *'[[ "$FRONTEND_CONTRACTS" == '\''success'\'' ]]'* ]] ||
+  fail 'reused backend evidence lacks current documentation contracts'
+frontend_contracts=$(job_block backend-frontend-contracts "$FULL_WORKFLOW")
+[[ "$frontend_contracts" == *"go test -count=1 ./cmd/paimos ./cmd/paimos-agentd -run '^TestAgentIntercom'"* ]] ||
+  fail 'reused backend evidence omits tests reading README/INSTALL'
 grep -q 'BACKEND_FULL_TIMEOUT_SECONDS:-6000' "$FULL_WAITER" ||
   fail 'exact-head full-suite waiter budget is not derived from parallel job budgets'
 

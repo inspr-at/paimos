@@ -23,7 +23,7 @@ jobs:
   backend-full-authorize:
     if: github.event_name != 'pull_request' || github.event.label.name == 'backend-full-evidence'
     runs-on: ubuntu-latest
-    timeout-minutes: 2
+    timeout-minutes: 5
     outputs:
       run_full: ${{ steps.scope.outputs.run_full }}
       source_run: ${{ steps.scope.outputs.source_run }}
@@ -105,9 +105,26 @@ jobs:
           BACKEND_RACE_PACKAGE_TIMEOUT: 15m
         run: ../scripts/backend-pr-race.sh --group="${{ matrix.group }}" './...'
 
+  backend-frontend-contracts:
+    needs: backend-full-authorize
+    if: needs.backend-full-authorize.outputs.run_full == 'false'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.26.6'
+          cache-dependency-path: backend/go.sum
+      # These small contracts read README/INSTALL from the repository. Keep
+      # them current when reusing the otherwise unchanged backend execution.
+      - name: Check documentation consumed by backend tests
+        working-directory: backend
+        run: go test -count=1 ./cmd/paimos ./cmd/paimos-agentd -run '^TestAgentIntercom'
+
   backend-full:
     if: always() && (github.event_name != 'pull_request' || github.event.label.name == 'backend-full-evidence')
-    needs: [backend-full-authorize, backend-full-serial, backend-full-race]
+    needs: [backend-full-authorize, backend-full-serial, backend-full-race, backend-frontend-contracts]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -119,6 +136,7 @@ jobs:
           RUN_FULL: ${{ needs.backend-full-authorize.outputs.run_full }}
           SOURCE_RUN: ${{ needs.backend-full-authorize.outputs.source_run }}
           SOURCE_SHA: ${{ needs.backend-full-authorize.outputs.source_sha }}
+          FRONTEND_CONTRACTS: ${{ needs.backend-frontend-contracts.result }}
         run: |
           set -euo pipefail
           [[ "$AUTHORIZATION" == 'success' ]]
@@ -126,9 +144,11 @@ jobs:
             [[ "$GITHUB_EVENT_NAME" == 'push' && "$GITHUB_REF" == 'refs/heads/main' ]]
             [[ "$SOURCE_RUN" =~ ^[1-9][0-9]*$ && "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
             [[ "$SERIAL" == 'skipped' && "$RACE" == 'skipped' ]]
+            [[ "$FRONTEND_CONTRACTS" == 'success' ]]
             echo "Unchanged backend verified by full execution $SOURCE_RUN at $SOURCE_SHA."
             exit 0
           fi
           [[ "$RUN_FULL" == 'true' ]]
+          [[ "$FRONTEND_CONTRACTS" == 'skipped' ]]
           [[ "$SERIAL" == 'success' ]]
           [[ "$RACE" == 'success' ]]

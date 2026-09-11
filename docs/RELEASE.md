@@ -23,6 +23,8 @@ suites. Nightly, manual and explicit PR runs always execute them. This keeps
 frontend iterations short without changing publication smoke, frontend checks,
 signatures or deployment controls. The first policy change itself requires a
 new full baseline; it does not shortcut a release already in progress.
+The short `TestAgentIntercom` documentation contracts still run at the current
+head because those backend tests read the allowlisted README/INSTALL files.
 
 The full serial/platform and broad-race jobs run in parallel and are not duplicated on the
 identical tag commit. Applying the explicit `backend-full-evidence` label is the

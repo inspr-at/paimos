@@ -64,10 +64,12 @@ class ReuseTests(unittest.TestCase):
                                         "source_url": "https://github.com/example/product/actions/runs/42"})
 
     def test_backend_and_unknown_paths_require_full(self):
+        frontend_head = self.head
         for path in ("backend/main.go", "Dockerfile", "frontend/package.json",
                      "scripts/backend-full-reuse.py", ".github/workflows/backend-full.yml",
                      "odd\nfrontend/src/file"):
             with self.subTest(path=path):
+                self.git("checkout", "-q", frontend_head)
                 self.head = self.commit(path, "changed\n")
                 self.assertEqual(self.choose(), {"run_full": "true"})
 
