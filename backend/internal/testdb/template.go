@@ -37,6 +37,7 @@ func Prepare(t testing.TB) {
 		t.Fatalf("build database template: %v", template.err)
 	}
 	path := filepath.Join(dir, brand.Default.DBFilename)
+	// #nosec G304 G703 -- path joins the calling test's DATA_DIR from t.TempDir() with the fixed brand database filename; no request input.
 	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
 		t.Fatalf("create fixture database: %v", err)
@@ -88,5 +89,6 @@ func build(t testing.TB) ([]byte, error) {
 	}
 	// Keep immutable bytes for the test binary's lifetime, so the first test's
 	// temporary directory can be removed without invalidating later fixtures.
+	// #nosec G304 -- path joins the template's t.TempDir() with the fixed brand database filename; no request input.
 	return os.ReadFile(path)
 }
