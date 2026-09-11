@@ -9,6 +9,14 @@ Semantic Versioning (`x.y.z`, until 5.21.0), INSPR calendar v1
 (`YYMMDDhhmmss.0.0`, the UTC reservation second as a SemVer-shaped
 coordinate, from the first entry below that form).
 
+## [260911063734.0.0] — 2026-09-11
+
+### Fixed — Offer section headings and pagination (PAI-991)
+
+- Number the conditions and performance sections with Roman numerals and show each heading only once, at the start of its section.
+- Match the spacing below section headings to the numbered-block gap and preserve a consistent top inset on continuation pages.
+- Measure section and table headers during pagination, retaining the print guard for content too large to fit on one page.
+
 ## [260911005821.0.0] — 2026-09-11
 
 ### Changed — Final calendar version display (PAI-994)
