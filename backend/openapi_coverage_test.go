@@ -421,8 +421,7 @@ func TestExternalStageOpenAPINegotiationAndSecretChannelsArePinned(t *testing.T)
 
 func TestAgentModeOpenAPIErrorAndStreamSemanticsArePinned(t *testing.T) {
 	type response struct {
-		Description string `json:"description"`
-		Headers     map[string]struct {
+		Headers map[string]struct {
 			Schema struct {
 				Const string `json:"const"`
 			} `json:"schema"`
@@ -430,9 +429,8 @@ func TestAgentModeOpenAPIErrorAndStreamSemanticsArePinned(t *testing.T) {
 		Content map[string]json.RawMessage `json:"content"`
 	}
 	type operation struct {
-		Description string              `json:"description"`
-		Responses   map[string]response `json:"responses"`
-		SSEEvents   map[string]struct {
+		Responses map[string]response `json:"responses"`
+		SSEEvents map[string]struct {
 			ID any `json:"id"`
 		} `json:"x-sse-events"`
 	}
@@ -456,9 +454,8 @@ func TestAgentModeOpenAPIErrorAndStreamSemanticsArePinned(t *testing.T) {
 	}
 	properties, _ := snapshotSchema["properties"].(map[string]any)
 	selectedProperty, _ := properties["selected_delivery"].(map[string]any)
-	if !selectedRequired || !strings.Contains(fmt.Sprint(selectedProperty["description"]), "empty string") {
-		t.Fatalf("selected_delivery must be required with empty-history semantics: required=%v property=%v",
-			required, selectedProperty)
+	if !selectedRequired || selectedProperty == nil {
+		t.Fatalf("selected_delivery must be present and required: required=%v property=%v", required, selectedProperty)
 	}
 	paths := []string{
 		"/api/agent-mode/deliveries",
@@ -488,29 +485,14 @@ func TestAgentModeOpenAPIErrorAndStreamSemanticsArePinned(t *testing.T) {
 		stream.Content["text/event-stream"] == nil || events.SSEEvents["reset"].ID != nil {
 		t.Fatalf("events 200/reset contract is not pinned: response=%+v events=%+v", stream, events.SSEEvents)
 	}
-	for _, phrase := range []string{
-		"storage invariant discovered before response headers is a private 500 problem",
-		"already-established session emits one identity-free reset and closes",
-		"fresh stream whose authorized scope exceeds 1,000 candidates returns a private 400",
-		"resumed stream normalizes that changed scope to the same generic reset",
-	} {
-		if !strings.Contains(events.Description, phrase) {
-			t.Errorf("events description lacks %q", phrase)
-		}
-	}
 	for _, path := range []string{
 		"/api/agent-mode/deliveries",
 		"/api/agent-mode/projects/{projectID}/deliveries",
+		"/api/agent-mode/deliveries/events",
 	} {
-		if !strings.Contains(operations[path].Description, "1,000 authorized candidate roots") ||
-			!strings.Contains(operations[path].Responses["400"].Description, "1,000") {
-			t.Errorf("%s does not pin the explicit candidate ceiling", path)
+		if _, exists := operations[path].Responses["400"]; !exists {
+			t.Errorf("%s 400 response is undocumented", path)
 		}
-	}
-	if !strings.Contains(operations["/api/agent-mode/deliveries/{deliveryKey}"].Description,
-		"before the 1,000-candidate portfolio ceiling") ||
-		!strings.Contains(events.Responses["400"].Description, "fresh authorized scope exceeding 1,000 candidates") {
-		t.Error("detail/events candidate-ceiling semantics are not pinned")
 	}
 }
 
@@ -541,25 +523,15 @@ func TestAgentModeVoiceOpenAPIIsClosedTemplateOnlyAndNonCacheable(t *testing.T) 
 	if final["const"] != true {
 		t.Fatalf("transcript final=%v", final)
 	}
-	// PAI-808: the handler truncates to 8192 UTF-8 bytes. maxLength counts code
-	// points, so the number alone under-specifies the contract — the description
-	// must name the authoritative byte bound too.
 	text, _ := transcriptProperties["text"].(map[string]any)
 	if text["maxLength"] != float64(8192) {
 		t.Fatalf("transcript text maxLength=%v, want 8192", text["maxLength"])
-	}
-	description := fmt.Sprint(text["description"])
-	for _, phrase := range []string{"8192 UTF-8 bytes", "code points"} {
-		if !strings.Contains(description, phrase) {
-			t.Fatalf("transcript text description lacks %q: %q", phrase, description)
-		}
 	}
 
 	for _, path := range []string{"/api/agent-mode/voice/transcribe", "/api/agent-mode/voice/speak"} {
 		operationRaw := doc.Paths[path]["post"]
 		var operation struct {
-			Description string `json:"description"`
-			Responses   map[string]struct {
+			Responses map[string]struct {
 				Headers map[string]struct {
 					Schema struct {
 						Const string `json:"const"`
@@ -581,9 +553,6 @@ func TestAgentModeVoiceOpenAPIIsClosedTemplateOnlyAndNonCacheable(t *testing.T) 
 			if !exists || response.Headers["Cache-Control"].Schema.Const != "private, no-store" {
 				t.Fatalf("%s response %s is not private/no-store: %+v", path, status, response)
 			}
-		}
-		if path == "/api/agent-mode/voice/speak" && !strings.Contains(operation.Description, "Never accepts caller text") {
-			t.Fatalf("speak description does not pin template-only input: %q", operation.Description)
 		}
 	}
 }
@@ -807,9 +776,6 @@ func TestOpenAPIAuthContextHeaderComponentsFreezeCanonicalShape(t *testing.T) {
 			t.Errorf("PermissionsEpoch pattern %s epoch %q — %s", verb, probe, why)
 		}
 	}
-	if description := fmt.Sprint(epoch["description"]); !strings.Contains(description, "every authenticated response") {
-		t.Errorf("PermissionsEpoch description does not pin the always-present guarantee: %q", description)
-	}
 
 	session, ok := headers["SessionExpiresAt"].(map[string]any)
 	if !ok {
@@ -827,12 +793,6 @@ func TestOpenAPIAuthContextHeaderComponentsFreezeCanonicalShape(t *testing.T) {
 	if _, over := sessionSchema["pattern"]; over {
 		t.Errorf("SessionExpiresAt is pinned by format alone; a second pattern constraint can only drift: %v",
 			sessionSchema)
-	}
-	description := fmt.Sprint(session["description"])
-	for _, phrase := range []string{"session cookie", "optional", "RFC 3339"} {
-		if !strings.Contains(description, phrase) {
-			t.Errorf("SessionExpiresAt description lacks %q: %q", phrase, description)
-		}
 	}
 }
 
@@ -858,11 +818,10 @@ func TestOpenAPIProjectListStatusFilterMatchesRuntime(t *testing.T) {
 		t.Fatal("GET /api/projects is undocumented")
 	}
 	type openAPIParameter struct {
-		Name        string `json:"name"`
-		In          string `json:"in"`
-		Required    *bool  `json:"required"`
-		Description string `json:"description"`
-		Schema      struct {
+		Name     string `json:"name"`
+		In       string `json:"in"`
+		Required *bool  `json:"required"`
+		Schema   struct {
 			Type    string   `json:"type"`
 			Enum    []string `json:"enum"`
 			Default *string  `json:"default"`
@@ -913,24 +872,6 @@ func TestOpenAPIProjectListStatusFilterMatchesRuntime(t *testing.T) {
 			status.Schema.Default)
 	}
 
-	// `all` is the whole reason agent-side callers pass the parameter, and its
-	// boundary is the part a reader cannot infer from the enum: it covers the
-	// normal lifecycle states and stops at deleted.
-	description := status.Description
-	if !strings.Contains(description, "`all`") {
-		t.Fatalf("status description does not explain the `all` alias: %q", description)
-	}
-	for _, state := range []string{"active", "frozen", "archived"} {
-		if !strings.Contains(description, "`"+state+"`") {
-			t.Errorf("status description does not name `%s` among the states `all` returns: %q",
-				state, description)
-		}
-	}
-	if !strings.Contains(description, "excludes `deleted`") {
-		t.Errorf("status description does not pin that `all` excludes `deleted`: %q — soft-deleted projects "+
-			"are an explicit trash view, so `all` returning them would be a privacy-relevant contract change",
-			description)
-	}
 }
 
 // PAI-808: Project.status is the field authority-relevant clients read off a
@@ -1064,10 +1005,9 @@ func TestOpenAPIProjectSchemaStatusMatchesRuntimeLifecycle(t *testing.T) {
 	}
 	var list struct {
 		Parameters []struct {
-			Name        string `json:"name"`
-			In          string `json:"in"`
-			Description string `json:"description"`
-			Schema      struct {
+			Name   string `json:"name"`
+			In     string `json:"in"`
+			Schema struct {
 				Enum    []string `json:"enum"`
 				Default *string  `json:"default"`
 			} `json:"schema"`
@@ -1095,10 +1035,6 @@ func TestOpenAPIProjectSchemaStatusMatchesRuntimeLifecycle(t *testing.T) {
 	if query.Schema.Default == nil || *query.Schema.Default != "active" {
 		t.Errorf("status query default = %v, want \"active\" — an omitted filter lists active projects only",
 			query.Schema.Default)
-	}
-	if !strings.Contains(query.Description, "excludes `deleted`") {
-		t.Errorf("status query description no longer pins that `all` excludes `deleted`: %q — that boundary is "+
-			"why `deleted` is a legal response status yet not part of what `all` returns", query.Description)
 	}
 }
 

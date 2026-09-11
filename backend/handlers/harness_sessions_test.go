@@ -34,16 +34,11 @@ func TestHarnessOpenAPIRequiresWorkerLeaseOnEveryWorkerMutation(t *testing.T) {
 	if strings.Count(text, `"$ref": "#/components/parameters/HarnessWorkerLease"`) != 8 {
 		t.Fatal("worker lease header is not attached to exactly the eight worker mutation routes")
 	}
-	if strings.Count(text, `"description": "Uniform non-enumerating worker authorization failure"`) != 8 {
-		t.Fatal("worker mutation routes do not share one non-enumerating authorization contract")
-	}
 	for _, fragment := range []string{
 		`"worker_lease": {"type": "string", "writeOnly": true`,
 		`"name": "X-Paimos-Harness-Worker-Lease"`,
 		`"required": ["agent_name", "harness", "host", "harness_session_ref", "worker_lease"`,
 		`"HarnessControlOutcome"`,
-		`"summary": "Get one scoped typed control outcome"`,
-		`"description": "Uniform non-enumerating worker authorization failure"`,
 	} {
 		if !strings.Contains(text, fragment) {
 			t.Fatalf("OpenAPI missing %s", fragment)

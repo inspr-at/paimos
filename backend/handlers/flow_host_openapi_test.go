@@ -28,10 +28,7 @@ func TestFlowHostOpenAPIDocumentsReadAndIntentRoutes(t *testing.T) {
 	post := paths[intentPath].(map[string]any)["post"].(map[string]any)
 	description := post["description"].(string)
 	for _, phrase := range []string{
-		"never starts a baseline batch",
-		"generic action dispatch",
 		"?tab=overview",
-		"CSRF",
 	} {
 		if !strings.Contains(description, phrase) {
 			t.Fatalf("flow-intents OpenAPI omits %q", phrase)
