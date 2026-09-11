@@ -20,19 +20,29 @@ const harnessActivityReconcileTimeout = 10 * time.Second
 // only degrade reported activity to unknown.
 func StartHarnessActivityReconciler() {
 	service := managedharness.NewService(db.DB)
-	go func() {
-		reconcile := func() {
-			ctx, cancel := context.WithTimeout(context.Background(), harnessActivityReconcileTimeout)
-			defer cancel()
-			if _, err := service.ReconcileStaleActivity(ctx, time.Now().UTC(), managedharness.DefaultActivityHeartbeatTimeout); err != nil {
-				log.Printf("harness activity reconcile: %v", err)
+	go runHarnessActivityReconciler(service)
+}
+
+func runHarnessActivityReconciler(service *managedharness.Service) {
+	reconcile := func() bool {
+		ctx, cancel := context.WithTimeout(context.Background(), harnessActivityReconcileTimeout)
+		defer cancel()
+		if _, err := service.ReconcileStaleActivity(ctx, time.Now().UTC(), managedharness.DefaultActivityHeartbeatTimeout); err != nil {
+			if isClosedDatabaseError(err) {
+				return false
 			}
+			log.Printf("harness activity reconcile: %v", err)
 		}
-		reconcile()
-		ticker := time.NewTicker(harnessActivityReconcileInterval)
-		defer ticker.Stop()
-		for range ticker.C {
-			reconcile()
+		return true
+	}
+	if !reconcile() {
+		return
+	}
+	ticker := time.NewTicker(harnessActivityReconcileInterval)
+	defer ticker.Stop()
+	for range ticker.C {
+		if !reconcile() {
+			return
 		}
-	}()
+	}
 }

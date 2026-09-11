@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/inspr-at/paimos/backend/auth"
 	"github.com/inspr-at/paimos/backend/db"
+	"github.com/inspr-at/paimos/backend/internal/testdb"
 	"github.com/inspr-at/paimos/backend/lifecycleintents"
 )
 
@@ -65,6 +66,7 @@ func TestLifecycleActualServerRevokedOutcomeDoesNotStarveFreshIntent(t *testing.
 	t.Setenv("DATA_DIR", t.TempDir())
 	t.Setenv("PAIMOS_TEST_MODE", "1")
 	t.Setenv("PAIMOS_SECRET_KEY", base64.StdEncoding.EncodeToString(make([]byte, 32)))
+	testdb.Prepare(t)
 	if err := db.Open(); err != nil {
 		t.Fatal(err)
 	}

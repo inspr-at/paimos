@@ -21,6 +21,7 @@ import (
 	"github.com/inspr-at/paimos/backend/agentd"
 	"github.com/inspr-at/paimos/backend/agentmessage"
 	paimosdb "github.com/inspr-at/paimos/backend/db"
+	"github.com/inspr-at/paimos/backend/internal/testdb"
 	"github.com/inspr-at/paimos/backend/managedharness"
 	"github.com/inspr-at/paimos/backend/models"
 	"github.com/inspr-at/paimos/backend/runtimeconsumer"
@@ -58,6 +59,7 @@ func TestNativeConsumersWaitForBusyReceiverWithoutLeasingFIFO(t *testing.T) {
 		}
 		paimosdb.DB = previousDB
 	})
+	testdb.Prepare(t)
 	if err := paimosdb.Open(); err != nil {
 		t.Fatal(err)
 	}

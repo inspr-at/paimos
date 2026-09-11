@@ -10,6 +10,7 @@ import (
 
 	"github.com/inspr-at/paimos/backend/agentmessage"
 	"github.com/inspr-at/paimos/backend/db"
+	"github.com/inspr-at/paimos/backend/internal/testdb"
 )
 
 func openEnvelopeSecurityDB(t *testing.T, agentNames ...string) (*agentmessage.Service, int64, map[string]int64) {
@@ -25,6 +26,7 @@ func openEnvelopeSecurityDB(t *testing.T, agentNames ...string) (*agentmessage.S
 	})
 	_ = os.Setenv("DATA_DIR", t.TempDir())
 	_ = os.Setenv("PAIMOS_TEST_MODE", "1")
+	testdb.Prepare(t)
 	if err := db.Open(); err != nil {
 		t.Fatal(err)
 	}
@@ -56,6 +58,7 @@ func TestEnvelopeLedgerResolvesAddressesAndSupportsCursorReads(t *testing.T) {
 	})
 	_ = os.Setenv("DATA_DIR", t.TempDir())
 	_ = os.Setenv("PAIMOS_TEST_MODE", "1")
+	testdb.Prepare(t)
 	if err := db.Open(); err != nil {
 		t.Fatal(err)
 	}
@@ -200,6 +203,7 @@ func TestEnvelopeLedgerAllowSenderIsNameScopedAndIdempotent(t *testing.T) {
 	})
 	_ = os.Setenv("DATA_DIR", t.TempDir())
 	_ = os.Setenv("PAIMOS_TEST_MODE", "1")
+	testdb.Prepare(t)
 	if err := db.Open(); err != nil {
 		t.Fatal(err)
 	}

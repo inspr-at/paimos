@@ -81,6 +81,30 @@ UI rendering. A future drop must record all three facts in this ledger: the old
 claim, evidence that the claim is false now, and the exact remaining test that
 covers the original risk.
 
+## Migrated database fixtures (PAI-1001)
+
+Fresh database setup in handlers, auth, cmd/paimos, cmd/paimos-agentd,
+agentmessage, agentmode, workerfleet, devseed, lifecycleclient, and the root
+package opts into `internal/testdb.Prepare` before the normal `db.Open` call.
+Each test binary migrates one empty database without application seed data,
+checkpoints WAL, closes it, and retains immutable file bytes. Every fixture
+copies only that database into its own fresh `DATA_DIR`; vault keys and SQLite
+sidecars are never copied. Migration-defined defaults remain intact. Production
+connection setup, the explicit `DATA_DIR` guard, and the caller's test-mode
+MEMORY journal behavior are unchanged. Database tests remain sequential.
+Handler fixture passwords use `bcrypt.MinCost`; production hashing and auth's
+own `HashPassword` tests retain the production cost.
+
+All `backend/db` tests deliberately retain the real migration path, including
+fresh installs, populated upgrades, rollback, partial schemas, and earlier
+migration versions. `TestRepairedPopulatedM161CloneAppliesCurrentM162` in
+`internal/knowledge857` also retains both real opens because it downgrades and
+repairs a populated database before verifying the normal upgrade. No selected
+fixture test depends on fresh migration timestamps or generated legacy session
+credential IDs. Other packages' existing fixtures are outside this conversion.
+`internal/testdb` is imported only by test files; verify production exclusion
+with `go list -deps . ./cmd/...` and check that its import path is absent.
+
 ## Execution policy and timing evidence
 
 - PAI-1002 computes the affected and direct PR selections once in

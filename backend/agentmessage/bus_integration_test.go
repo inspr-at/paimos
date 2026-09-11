@@ -15,6 +15,7 @@ import (
 
 	harnessplugin "github.com/inspr-at/paimos/backend/agentmessage/harness"
 	paimosdb "github.com/inspr-at/paimos/backend/db"
+	"github.com/inspr-at/paimos/backend/internal/testdb"
 	"github.com/inspr-at/paimos/backend/secretvault"
 )
 
@@ -46,6 +47,7 @@ func openBusTestDB(t *testing.T) (*Service, int64) {
 		}
 		paimosdb.DB = oldDB
 	})
+	testdb.Prepare(t)
 	if err := paimosdb.Open(); err != nil {
 		t.Fatal(err)
 	}

@@ -35,6 +35,7 @@ import (
 	"github.com/inspr-at/paimos/backend/handlers"
 	"github.com/inspr-at/paimos/backend/handlers/knowledge"
 	"github.com/inspr-at/paimos/backend/httpcontract"
+	"github.com/inspr-at/paimos/backend/internal/testdb"
 	"github.com/inspr-at/paimos/backend/publicbase"
 
 	_ "modernc.org/sqlite"
@@ -48,7 +49,7 @@ type testServer struct {
 	externalCookie string
 }
 
-// newTestServer opens an isolated temporary SQLite DB, runs all migrations, seeds
+// newTestServer opens an isolated copy of the migrated SQLite template, seeds
 // admin + member users, wires the real router, and starts an httptest.Server.
 func newTestServer(t *testing.T) *testServer {
 	t.Helper()
@@ -56,9 +57,10 @@ func newTestServer(t *testing.T) *testServer {
 	// Keep every test process on its own temporary SQLite DSN and restore the
 	// environment during cleanup, including when a test fails early.
 	t.Setenv("DATA_DIR", t.TempDir())
-	// Speed up migrations (applied inside db.Open before we can set them here).
+	// Retain the existing test-mode connection behavior.
 	t.Setenv("PAIMOS_TEST_MODE", "1")
 
+	testdb.Prepare(t)
 	if err := db.Open(); err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}
@@ -70,7 +72,7 @@ func newTestServer(t *testing.T) *testServer {
 	})
 
 	// Seed admin user.
-	adminHash, _ := auth.HashPassword("adminpass")
+	adminHash := bcryptHash(t, "adminpass")
 	adminRes, _ := db.DB.Exec("INSERT INTO users(username,password,role,status) VALUES(?,?,?,?)", "admin", adminHash, "admin", "active")
 	if adminRes != nil {
 		if id, _ := adminRes.LastInsertId(); id > 0 {
@@ -79,7 +81,7 @@ func newTestServer(t *testing.T) *testServer {
 	}
 
 	// Seed member user.
-	memberHash, _ := auth.HashPassword("memberpass")
+	memberHash := bcryptHash(t, "memberpass")
 	memberRes, _ := db.DB.Exec("INSERT INTO users(username,password,role,status) VALUES(?,?,?,?)", "member", memberHash, "member", "active")
 	if memberRes != nil {
 		if id, _ := memberRes.LastInsertId(); id > 0 {
@@ -88,7 +90,7 @@ func newTestServer(t *testing.T) *testServer {
 	}
 
 	// Seed external user. Externals are not auto-seeded — access is granted per-project.
-	externalHash, _ := auth.HashPassword("externalpass")
+	externalHash := bcryptHash(t, "externalpass")
 	db.DB.Exec("INSERT INTO users(username,password,role,status) VALUES(?,?,?,?)", "external", externalHash, "external", "active")
 
 	// Seed a global tag.

@@ -17,6 +17,7 @@ import (
 	"github.com/inspr-at/paimos/backend/agentmessage"
 	harnessplugin "github.com/inspr-at/paimos/backend/agentmessage/harness"
 	paimosdb "github.com/inspr-at/paimos/backend/db"
+	"github.com/inspr-at/paimos/backend/internal/testdb"
 	"github.com/inspr-at/paimos/backend/secretvault"
 )
 
@@ -79,6 +80,7 @@ func runAgentBusRealCodexE2E(t *testing.T, threadID, level, probe string) agentB
 	t.Setenv("PAIMOS_SECRET_KEY", base64.StdEncoding.EncodeToString(make([]byte, 32)))
 	secretvault.ResetForTest()
 	t.Cleanup(secretvault.ResetForTest)
+	testdb.Prepare(t)
 	if err := paimosdb.Open(); err != nil {
 		t.Fatal(err)
 	}
