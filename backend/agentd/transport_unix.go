@@ -119,6 +119,17 @@ func transportHandler(supervisor *Supervisor) http.Handler {
 		err := supervisor.QuiesceRuntime(r.Context(), request.Generation, request.Sessions)
 		writeTransportResult(w, struct{}{}, err)
 	})
+	mux.HandleFunc("POST /v1/accounts", func(w http.ResponseWriter, r *http.Request) {
+		var request AccountLifecycleRequest
+		if decodeTransportJSON(w, r, &request) != nil {
+			return
+		}
+		result, err := supervisor.ApplyAccountLifecycle(r.Context(), request)
+		writeTransportResult(w, result, err)
+	})
+	mux.HandleFunc("GET /v1/accounts", func(w http.ResponseWriter, r *http.Request) {
+		writeTransportJSON(w, http.StatusOK, supervisor.AccountLifecycleStatus(0))
+	})
 	mux.HandleFunc("GET /v1/status", func(w http.ResponseWriter, _ *http.Request) {
 		writeTransportJSON(w, http.StatusOK, supervisor.Status())
 	})
@@ -244,6 +255,24 @@ func writeTransportResult(w http.ResponseWriter, value any, err error) {
 		status, code = http.StatusConflict, "decision_expired"
 	case errors.Is(err, ErrDecisionConsumed):
 		status, code = http.StatusConflict, "decision_consumed"
+	case errors.Is(err, ErrAccountLifecycleConflict):
+		status, code = http.StatusConflict, "account_lifecycle_conflict"
+	case errors.Is(err, ErrAccountLifecycleRejected):
+		status, code = http.StatusConflict, "account_lifecycle_rejected"
+	case errors.Is(err, ErrAccountInUse):
+		status, code = http.StatusConflict, "account_in_use"
+	case errors.Is(err, ErrAccountDrainRequired):
+		status, code = http.StatusConflict, "account_drain_required"
+	case errors.Is(err, ErrAccountStale):
+		status, code = http.StatusConflict, "account_stale"
+	case errors.Is(err, ErrAccountUnsupported):
+		status, code = http.StatusUnprocessableEntity, "account_unsupported"
+	case errors.Is(err, ErrAccountDetached):
+		status, code = http.StatusConflict, "account_detached"
+	case errors.Is(err, ErrAccountForeign):
+		status, code = http.StatusForbidden, "account_foreign"
+	case errors.Is(err, ErrAccountLifecycleUnavailable):
+		status, code = http.StatusServiceUnavailable, "account_lifecycle_unavailable"
 	}
 	writeTransportJSON(w, status, map[string]string{"error": code})
 }
@@ -316,6 +345,33 @@ func (c *Client) request(ctx context.Context, method, path string, input, output
 		if problem.Error == "decision_consumed" {
 			return ErrDecisionConsumed
 		}
+		if problem.Error == "account_lifecycle_conflict" {
+			return ErrAccountLifecycleConflict
+		}
+		if problem.Error == "account_lifecycle_rejected" {
+			return ErrAccountLifecycleRejected
+		}
+		if problem.Error == "account_in_use" {
+			return ErrAccountInUse
+		}
+		if problem.Error == "account_drain_required" {
+			return ErrAccountDrainRequired
+		}
+		if problem.Error == "account_stale" {
+			return ErrAccountStale
+		}
+		if problem.Error == "account_unsupported" {
+			return ErrAccountUnsupported
+		}
+		if problem.Error == "account_detached" {
+			return ErrAccountDetached
+		}
+		if problem.Error == "account_foreign" {
+			return ErrAccountForeign
+		}
+		if problem.Error == "account_lifecycle_unavailable" {
+			return ErrAccountLifecycleUnavailable
+		}
 		return fmt.Errorf("agentd request failed with HTTP %d", response.StatusCode)
 	}
 	return json.NewDecoder(io.LimitReader(response.Body, maxTransportBody+1)).Decode(output)
@@ -385,4 +441,16 @@ func (c *Client) LookupStart(ctx context.Context, key string) (Session, error) {
 	var session Session
 	err := c.request(ctx, http.MethodPost, "/v1/starts/lookup", map[string]string{"idempotency_key": key}, &session)
 	return session, err
+}
+
+func (c *Client) ApplyAccountLifecycle(ctx context.Context, request AccountLifecycleRequest) (AccountLifecycleResult, error) {
+	var out AccountLifecycleResult
+	err := c.request(ctx, http.MethodPost, "/v1/accounts", request, &out)
+	return out, err
+}
+
+func (c *Client) AccountLifecycleStatus(ctx context.Context) ([]RuntimeAccountState, error) {
+	var out []RuntimeAccountState
+	err := c.request(ctx, http.MethodGet, "/v1/accounts", nil, &out)
+	return out, err
 }

@@ -62,6 +62,10 @@ func (a *CursorAdapter) HasAccount(key string) bool {
 	return a.accounts.HasAccount(key)
 }
 
+func (a *CursorAdapter) EnrolledAccountKeys() []string {
+	return a.accounts.EnrolledAccountKeys()
+}
+
 func (*CursorAdapter) Name() string { return AdapterCursor }
 
 func (*CursorAdapter) Capabilities() []Capability {

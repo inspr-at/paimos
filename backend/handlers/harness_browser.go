@@ -16,6 +16,7 @@ import (
 
 func RegisterHarnessBrowserRoutes(r chi.Router) {
 	r.Post("/projects/{id}/harness-sessions/{sessionID}/controls/v1/{kind}", requestHarnessControlV1)
+	r.Get("/projects/{id}/harness-sessions/{sessionID}/controls/v1/retire-after-work/{controlID}", getHarnessRetirementV1)
 	r.Post("/projects/{id}/harness-sessions/{sessionID}/messages/v1", sendHarnessMessageV1)
 	r.Get("/projects/{id}/harness-sessions/{sessionID}/assignment-history/v1", getHarnessAssignmentHistoryV1)
 }
@@ -51,12 +52,37 @@ func requestHarnessControlV1(w http.ResponseWriter, r *http.Request) {
 		harnessBrowserError(w, managedharness.ErrBrowserInvalid)
 		return
 	}
-	out, err := managedharness.NewService(db.DB).RequestControlCAS(r.Context(), p, project, chi.URLParam(r, "sessionID"), chi.URLParam(r, "kind"), request)
+	service := managedharness.NewService(db.DB)
+	if chi.URLParam(r, "kind") == "retire-after-work" {
+		out, err := service.RequestRetirementCAS(r.Context(), p, project, chi.URLParam(r, "sessionID"), request)
+		if err != nil {
+			harnessBrowserError(w, err)
+			return
+		}
+		writeHarnessJSON(w, 200, out)
+		return
+	}
+	out, err := service.RequestControlCAS(r.Context(), p, project, chi.URLParam(r, "sessionID"), chi.URLParam(r, "kind"), request)
 	if err != nil {
 		harnessBrowserError(w, err)
 		return
 	}
 	writeHarnessJSON(w, 200, out)
+}
+func getHarnessRetirementV1(w http.ResponseWriter, r *http.Request) {
+	p, project, ok := harnessBrowserContext(w, r)
+	if !ok || r.URL.RawQuery != "" {
+		if ok {
+			harnessBrowserError(w, managedharness.ErrBrowserInvalid)
+		}
+		return
+	}
+	out, err := managedharness.NewService(db.DB).GetRetirementBrowser(r.Context(), p, project, chi.URLParam(r, "sessionID"), chi.URLParam(r, "controlID"))
+	if err != nil {
+		harnessBrowserError(w, err)
+		return
+	}
+	writeHarnessJSON(w, http.StatusOK, out)
 }
 func sendHarnessMessageV1(w http.ResponseWriter, r *http.Request) {
 	p, project, ok := harnessBrowserContext(w, r)

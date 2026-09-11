@@ -27,7 +27,7 @@ func TestAgentIntercomRunbookUsesShippedAgentdCommandsAndFlags(t *testing.T) {
 		}
 		docs[name] = string(raw)
 	}
-	for _, command := range []string{"serve", "start", "status", "steer", "interrupt", "stop", "held-queue", "resume-queue", "decisions", "inspect", "output", "answer"} {
+	for _, command := range []string{"serve", "start", "status", "steer", "interrupt", "stop", "held-queue", "resume-queue", "decisions", "inspect", "output", "answer", "account-connect", "account-disconnect", "account-status"} {
 		for name, doc := range docs {
 			if !strings.Contains(doc, "paimos-agentd "+command) {
 				t.Errorf("%s quickstart lost paimos-agentd %s", name, command)
@@ -41,18 +41,21 @@ func TestAgentIntercomRunbookUsesShippedAgentdCommandsAndFlags(t *testing.T) {
 	}
 
 	runbookFlags := map[string][]string{
-		"serve":        {"instance", "socket", "report-host", "report-url", "report-api-key-file"},
-		"start":        {"instance", "socket", "adapter", "workspace", "project-id", "identity"},
-		"status":       {"instance", "socket"},
-		"steer":        {"instance", "socket", "session", "project-id", "identity", "correlation-id"},
-		"interrupt":    {"instance", "socket", "session", "project-id", "identity", "correlation-id"},
-		"stop":         {"instance", "socket", "session", "project-id", "identity", "correlation-id"},
-		"held-queue":   {"instance", "socket", "session", "project-id", "identity"},
-		"resume-queue": {"instance", "socket", "session", "project-id", "identity", "correlation-id"},
-		"decisions":    {"instance", "socket", "session", "project-id", "identity"},
-		"inspect":      {"instance", "socket", "session", "project-id", "identity", "request-id", "digest"},
-		"output":       {"instance", "socket", "session", "project-id", "identity"},
-		"answer":       {"instance", "socket", "session", "project-id", "identity", "correlation-id", "request-id", "digest", "option-id"},
+		"serve":              {"instance", "socket", "report-host", "report-url", "report-api-key-file"},
+		"start":              {"instance", "socket", "adapter", "workspace", "project-id", "identity"},
+		"status":             {"instance", "socket"},
+		"steer":              {"instance", "socket", "session", "project-id", "identity", "correlation-id"},
+		"interrupt":          {"instance", "socket", "session", "project-id", "identity", "correlation-id"},
+		"stop":               {"instance", "socket", "session", "project-id", "identity", "correlation-id"},
+		"held-queue":         {"instance", "socket", "session", "project-id", "identity"},
+		"resume-queue":       {"instance", "socket", "session", "project-id", "identity", "correlation-id"},
+		"decisions":          {"instance", "socket", "session", "project-id", "identity"},
+		"inspect":            {"instance", "socket", "session", "project-id", "identity", "request-id", "digest"},
+		"output":             {"instance", "socket", "session", "project-id", "identity"},
+		"answer":             {"instance", "socket", "session", "project-id", "identity", "correlation-id", "request-id", "digest", "option-id"},
+		"account-connect":    {"instance", "socket", "project-id", "adapter", "account-key", "request-key"},
+		"account-disconnect": {"instance", "socket", "project-id", "adapter", "account-key", "request-key"},
+		"account-status":     {"instance", "socket", "project-id"},
 	}
 	for name, contract := range map[string]map[string][]string{"runbook": runbookFlags} {
 		for command, names := range contract {
@@ -63,18 +66,21 @@ func TestAgentIntercomRunbookUsesShippedAgentdCommandsAndFlags(t *testing.T) {
 	}
 
 	actualFlags := map[string][]string{
-		"serve":        {"instance", "socket", "codex-path", "claude-path", "node-path", "claude-sdk-path", "pi-path", "pi-accounts", "cursor-path", "cursor-accounts", "report-host", "report-url", "report-api-key-file", "paimos-path"},
-		"start":        {"instance", "socket", "adapter", "workspace", "project-id", "identity", "account-key"},
-		"status":       {"instance", "socket"},
-		"steer":        {"instance", "socket", "session", "project-id", "identity", "correlation-id"},
-		"interrupt":    {"instance", "socket", "session", "project-id", "identity", "correlation-id"},
-		"stop":         {"instance", "socket", "session", "project-id", "identity", "correlation-id"},
-		"held-queue":   {"instance", "socket", "session", "project-id", "identity"},
-		"resume-queue": {"instance", "socket", "session", "project-id", "identity", "correlation-id"},
-		"decisions":    {"instance", "socket", "session", "project-id", "identity"},
-		"inspect":      {"instance", "socket", "session", "project-id", "identity", "request-id", "digest"},
-		"output":       {"instance", "socket", "session", "project-id", "identity"},
-		"answer":       {"instance", "socket", "session", "project-id", "identity", "correlation-id", "request-id", "digest", "option-id"},
+		"serve":              {"instance", "socket", "codex-path", "claude-path", "node-path", "claude-sdk-path", "pi-path", "pi-accounts", "cursor-path", "cursor-accounts", "report-host", "report-url", "report-api-key-file", "paimos-path"},
+		"start":              {"instance", "socket", "adapter", "workspace", "project-id", "identity", "account-key", "attachment-revision"},
+		"status":             {"instance", "socket"},
+		"steer":              {"instance", "socket", "session", "project-id", "identity", "correlation-id"},
+		"interrupt":          {"instance", "socket", "session", "project-id", "identity", "correlation-id"},
+		"stop":               {"instance", "socket", "session", "project-id", "identity", "correlation-id"},
+		"held-queue":         {"instance", "socket", "session", "project-id", "identity"},
+		"resume-queue":       {"instance", "socket", "session", "project-id", "identity", "correlation-id"},
+		"decisions":          {"instance", "socket", "session", "project-id", "identity"},
+		"inspect":            {"instance", "socket", "session", "project-id", "identity", "request-id", "digest"},
+		"output":             {"instance", "socket", "session", "project-id", "identity"},
+		"answer":             {"instance", "socket", "session", "project-id", "identity", "correlation-id", "request-id", "digest", "option-id"},
+		"account-connect":    {"instance", "socket", "project-id", "adapter", "account-key", "request-key", "expected-revision"},
+		"account-disconnect": {"instance", "socket", "project-id", "adapter", "account-key", "request-key", "expected-revision"},
+		"account-status":     {"instance", "socket", "project-id"},
 	}
 	for command, names := range actualFlags {
 		for _, name := range names {

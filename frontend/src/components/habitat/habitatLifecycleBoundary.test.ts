@@ -80,7 +80,9 @@ describe('Habitat lifecycle response authority', () => {
     expect(parseHabitatRuntimes({ schema_version: 1, runtimes: [named] }, 1)[0].accounts).toEqual(
       named.accounts,
     )
-    expect(parseHabitatRuntimes({ schema_version: 1, runtimes: [runtime] }, 1)[0].accounts).toBeUndefined()
+    expect(
+      parseHabitatRuntimes({ schema_version: 1, runtimes: [runtime] }, 1)[0].accounts,
+    ).toBeUndefined()
     for (const changed of [
       { ...named, schema_version: 1 },
       { ...named, accounts: [{ key: 'chatgpt', label: 'Coordinator' }] },
@@ -91,13 +93,14 @@ describe('Habitat lifecycle response authority', () => {
     ])
       expect(() => parseHabitatRuntimes({ schema_version: 1, runtimes: [changed] }, 1)).toThrow()
     const namedRequest = { ...request, account_key: 'coordinator' }
-    expect(parseHabitatIntent({ ...intent(), schema_version: 2, request: namedRequest }, 1, namedRequest).state).toBe(
-      'requested',
-    )
-    expect(() => parseHabitatIntent({ ...intent(), request: namedRequest }, 1, namedRequest)).toThrow()
+    expect(
+      parseHabitatIntent({ ...intent(), schema_version: 2, request: namedRequest }, 1, namedRequest)
+        .state,
+    ).toBe('requested')
     expect(() =>
-      parseHabitatIntent({ ...intent(), schema_version: 2 }, 1, request),
+      parseHabitatIntent({ ...intent(), request: namedRequest }, 1, namedRequest),
     ).toThrow()
+    expect(() => parseHabitatIntent({ ...intent(), schema_version: 2 }, 1, request)).toThrow()
   })
   it('accepts v3 scoped runtimes and rejects mixed-version bodies', () => {
     const scoped = {
@@ -128,23 +131,34 @@ describe('Habitat lifecycle response authority', () => {
       sessions: [],
       expires_at: '2026-09-06T12:00:00Z',
     }
-    expect(parseHabitatRuntimes({ schema_version: 1, runtimes: [scoped] }, 1)[0].account_scopes).toEqual(
-      scoped.account_scopes,
-    )
+    expect(
+      parseHabitatRuntimes({ schema_version: 1, runtimes: [scoped] }, 1)[0].account_scopes,
+    ).toEqual(scoped.account_scopes)
     for (const changed of [
       { ...scoped, account_label: 'chatgpt' },
       { ...scoped, profiles: [{ id: 'codex-sol-high', version: '1' }] },
-      { ...scoped, account_scopes: [{ ...scoped.account_scopes[0] }, { ...scoped.account_scopes[0] }] },
+      {
+        ...scoped,
+        account_scopes: [{ ...scoped.account_scopes[0] }, { ...scoped.account_scopes[0] }],
+      },
       {
         ...scoped,
         account_scopes: [
-          { ...scoped.account_scopes[0], accounts: [{ key: 'codex-work', label: 'Work' }, { key: 'codex-work', label: 'Other' }] },
+          {
+            ...scoped.account_scopes[0],
+            accounts: [
+              { key: 'codex-work', label: 'Work' },
+              { key: 'codex-work', label: 'Other' },
+            ],
+          },
           scoped.account_scopes[1],
         ],
       },
       {
         ...scoped,
-        account_scopes: [{ account_label: 'chatgpt', accounts: [], profiles: scoped.account_scopes[0].profiles }],
+        account_scopes: [
+          { account_label: 'chatgpt', accounts: [], profiles: scoped.account_scopes[0].profiles },
+        ],
       },
       {
         ...scoped,
@@ -158,7 +172,9 @@ describe('Habitat lifecycle response authority', () => {
       },
       {
         ...scoped,
-        account_scopes: [{ account_label: 'cursor_context', profiles: [{ id: 'cursor-composer', version: '1' }] }],
+        account_scopes: [
+          { account_label: 'cursor_context', profiles: [{ id: 'cursor-composer', version: '1' }] },
+        ],
       },
     ])
       expect(() => parseHabitatRuntimes({ schema_version: 1, runtimes: [changed] }, 1)).toThrow()
@@ -203,12 +219,96 @@ describe('Habitat lifecycle response authority', () => {
       { account_label: 'chatgpt', account_key: 'codex-work', label: 'Work' },
       { account_label: 'api_key', account_key: 'codex-api', label: 'API' },
     ])
-    expect(habitatChoiceId({ account_label: 'chatgpt', account_key: 'codex-work', label: 'Work' })).toBe(
-      'chatgpt\0codex-work',
-    )
+    expect(
+      habitatChoiceId({ account_label: 'chatgpt', account_key: 'codex-work', label: 'Work' }),
+    ).toBe('chatgpt\0codex-work')
     expect(habitatAccountChoices(scoped, { id: 'cursor-composer', version: '1' })).toEqual([
       { account_label: 'cursor_context', account_key: 'cursor-op', label: 'Cursor' },
     ])
+  })
+  it('accepts lifecycle-aware choices and exposes no launch choice for explicit unavailable state', () => {
+    const lifecycle = parseHabitatRuntimes(
+      {
+        schema_version: 1,
+        runtimes: [
+          {
+            id: id('2'),
+            project_id: 1,
+            generation: id('3'),
+            machine_id: 'fixture-machine',
+            schema_version: 4,
+            workspaces: [{ handle: id('4'), identity: 'a'.repeat(64) }],
+            account_scopes: [
+              {
+                account_label: 'chatgpt',
+                accounts: [{ key: 'codex-work', label: 'Work' }],
+                profiles: [{ id: 'codex-sol-high', version: '1' }],
+                attachment_revision: 7,
+                account_availability: 'available',
+              },
+              {
+                account_label: 'cursor_context',
+                profiles: [{ id: 'cursor-composer', version: '1' }],
+                attachment_revision: 9,
+                account_availability: 'unavailable',
+              },
+            ],
+            sessions: [],
+            expires_at: '2026-09-06T12:00:00Z',
+          },
+        ],
+      },
+      1,
+    )[0]
+    expect(habitatAccountChoices(lifecycle)).toEqual([
+      {
+        account_label: 'chatgpt',
+        account_key: 'codex-work',
+        label: 'Work',
+        attachment_revision: 7,
+      },
+    ])
+    const reviewed = { ...request, account_key: 'codex-work', attachment_revision: 7 }
+    expect(parseHabitatRequest(reviewed)).toEqual(reviewed)
+    const legacyNamed = {
+      ...lifecycle,
+      account_scopes: [
+        lifecycle.account_scopes![0],
+        {
+          account_label: 'cursor_context',
+          accounts: [{ key: 'cursor-op', label: 'Cursor' }],
+          profiles: [{ id: 'cursor-composer', version: '1' }],
+        },
+      ],
+    }
+    expect(
+      parseHabitatRuntimes({ schema_version: 1, runtimes: [legacyNamed] }, 1)[0].account_scopes?.[1]
+        .attachment_revision,
+    ).toBeUndefined()
+    for (const changed of [
+      {
+        ...lifecycle,
+        account_scopes: [{ ...lifecycle.account_scopes![0], attachment_revision: 0 }],
+      },
+      {
+        ...lifecycle,
+        account_scopes: [
+          {
+            account_label: 'chatgpt',
+            accounts: [{ key: 'codex-work', label: 'Work' }],
+            profiles: [{ id: 'codex-sol-high', version: '1' }],
+            account_availability: 'available',
+          },
+        ],
+      },
+      {
+        ...lifecycle,
+        account_scopes: [
+          { ...lifecycle.account_scopes![1], accounts: [{ key: 'cursor-op', label: 'Cursor' }] },
+        ],
+      },
+    ])
+      expect(() => parseHabitatRuntimes({ schema_version: 1, runtimes: [changed] }, 1)).toThrow()
   })
   it('accepts scoped proof and rejects hidden fields, cross-project identities and duplicate mapping', () => {
     expect(parseHabitatRuntimes({ schema_version: 1, runtimes: [runtime] }, 1)[0].sessions).toEqual(
@@ -224,9 +324,9 @@ describe('Habitat lifecycle response authority', () => {
   })
   it('accepts pi_context and cursor_context runtimes and requests and still rejects unknown labels and closed keys', () => {
     const piRuntime = { ...runtime, account_label: 'pi_context' }
-    expect(parseHabitatRuntimes({ schema_version: 1, runtimes: [piRuntime] }, 1)[0].account_label).toBe(
-      'pi_context',
-    )
+    expect(
+      parseHabitatRuntimes({ schema_version: 1, runtimes: [piRuntime] }, 1)[0].account_label,
+    ).toBe('pi_context')
     expect(parseHabitatRequest({ ...request, account_label: 'pi_context' }).account_label).toBe(
       'pi_context',
     )

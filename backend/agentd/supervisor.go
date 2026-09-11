@@ -75,6 +75,8 @@ type Supervisor struct {
 	instance              string
 	journal               *registryJournal
 	starts                *startJournal
+	accounts              *accountLifecycleStore
+	lifecycleProjects     map[int64]struct{}
 	queue                 *piQueueStore
 	cursorEvidence        *cursorEvidenceStore
 	reporter              Reporter
@@ -128,6 +130,10 @@ func NewSupervisor(config SupervisorConfig) (*Supervisor, error) {
 		}
 		s.journal = journal
 		s.starts, err = openStartJournal(config.StateRoot, config.Instance)
+		if err != nil {
+			return nil, err
+		}
+		s.accounts, err = openAccountLifecycleStore(config.StateRoot, config.Instance)
 		if err != nil {
 			return nil, err
 		}
@@ -248,11 +254,27 @@ func (s *Supervisor) startOnce(ctx context.Context, request StartRequest, attemp
 		return Session{}, err
 	}
 	accountLabel := "unknown"
+	if validated.AccountKey != "" && s.accountLifecycleBindingActive() && !s.accountLifecycleProjectBound(validated.ProjectID) {
+		return Session{}, ErrAccountForeign
+	}
+	attached, explicit := s.attachmentSnapshot(validated.ProjectID, validated.Adapter)
 	if validated.AccountKey != "" {
 		resolver, ok := adapter.(accountContextResolver)
 		if !ok || !resolver.HasAccount(validated.AccountKey) {
 			return Session{}, errors.New("managed account selection is unavailable")
 		}
+		if !s.accountAttached(validated.ProjectID, validated.Adapter, validated.AccountKey) {
+			return Session{}, ErrAccountDetached
+		}
+		if explicit {
+			if validated.AttachmentRevision != attached.Revision {
+				return Session{}, ErrAccountStale
+			}
+		} else if validated.AttachmentRevision != 0 {
+			return Session{}, ErrAccountStale
+		}
+	} else if explicit {
+		return Session{}, ErrAccountDetached
 	} else if prober, ok := adapter.(AccountProber); ok {
 		if candidate := prober.AccountLabel(ctx); validAccountLabel(candidate) {
 			accountLabel = candidate
@@ -288,10 +310,18 @@ func (s *Supervisor) startOnce(ctx context.Context, request StartRequest, attemp
 	if generation == "" {
 		generation = uuid.NewString()
 	}
+	var modelEvidence *ModelEvidence
+	if validated.Adapter == AdapterClaude {
+		requested := ""
+		if profile != nil {
+			requested = profile.Model
+		}
+		modelEvidence = &ModelEvidence{RequestedModel: requested, Status: ModelEvidenceUnverified}
+	}
 	entry := &sessionEntry{session: Session{
 		ID: generation, Identity: validated.Identity, Adapter: validated.Adapter, Workspace: validated.Workspace,
 		ProjectID: validated.ProjectID, Role: validated.Role, ParentSessionID: validated.ParentSessionID, TicketID: validated.TicketID, WorkShape: validated.WorkShape,
-		WorkspaceProvenance: provenance, DispatchProfile: profile, AccountLabel: accountLabel, AccountKey: validated.AccountKey,
+		WorkspaceProvenance: provenance, DispatchProfile: profile, ModelEvidence: modelEvidence, AccountLabel: accountLabel, AccountKey: validated.AccountKey,
 		Capabilities: append([]Capability(nil), capabilities...), Managed: true, State: StateStarting,
 		StartedAt: now, HeartbeatAt: now,
 	}, capabilities: capabilitySet, monitorDone: make(chan struct{})}
@@ -434,6 +464,9 @@ func validateStartRequest(request StartRequest) (StartRequest, error) {
 	if request.AccountKey != "" && !validAccountKey(request.AccountKey) {
 		return request, errors.New("invalid managed account selection")
 	}
+	if request.AttachmentRevision < 0 {
+		return request, errors.New("invalid managed account selection")
+	}
 	if request.ExpectedMachineID != "" && !validSafeLabel(request.ExpectedMachineID, 128) {
 		return request, errors.New("invalid expected machine identity")
 	}
@@ -505,8 +538,28 @@ func validateStartRequest(request StartRequest) (StartRequest, error) {
 func (e *sessionEntry) observe(event AdapterEvent) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	if event.HarnessSessionID != "" && validOpaqueID(event.HarnessSessionID) && e.session.HarnessSessionID == "" {
-		e.session.HarnessSessionID = event.HarnessSessionID
+	sessionBound := false
+	if event.HarnessSessionID != "" && validOpaqueID(event.HarnessSessionID) {
+		if e.session.HarnessSessionID == "" {
+			e.session.HarnessSessionID = event.HarnessSessionID
+			sessionBound = true
+		} else {
+			sessionBound = e.session.HarnessSessionID == event.HarnessSessionID
+		}
+	}
+	if e.session.Adapter == AdapterClaude && event.Kind == EventSessionStarted && sessionBound {
+		validEvidence := event.ModelEvidence == ModelEvidenceUnverified && event.EffectiveModel == "" ||
+			event.ModelEvidence == ModelEvidenceVendorReported && validModelIdentity(event.EffectiveModel)
+		if validEvidence {
+			requested := ""
+			if e.session.ModelEvidence != nil {
+				requested = e.session.ModelEvidence.RequestedModel
+			}
+			e.session.ModelEvidence = &ModelEvidence{
+				RequestedModel: requested, EffectiveModel: event.EffectiveModel,
+				Status: event.ModelEvidence, HarnessSessionID: event.HarnessSessionID,
+			}
+		}
 	}
 	if validEventKind(event.Kind) {
 		e.session.LastEventKind = event.Kind
@@ -535,6 +588,20 @@ func validOpaqueID(value string) bool {
 
 func validSafeLabel(value string, maximum int) bool {
 	return value == strings.TrimSpace(value) && value != "" && len(value) <= maximum && utf8.ValidString(value) && !strings.ContainsAny(value, "\x00\r\n")
+}
+
+func validModelIdentity(value string) bool {
+	if value == "" || len(value) > 128 || !utf8.ValidString(value) {
+		return false
+	}
+	for index, char := range []byte(value) {
+		if char >= 'A' && char <= 'Z' || char >= 'a' && char <= 'z' || char >= '0' && char <= '9' ||
+			index > 0 && (char == '.' || char == '_' || char == ':' || char == '-') {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func validAccountLabel(value string) bool {
@@ -717,6 +784,10 @@ func (e *sessionEntry) refreshSteerableLocked() {
 func (e *sessionEntry) snapshotLocked() Session {
 	out := e.session
 	out.Capabilities = append([]Capability(nil), e.session.Capabilities...)
+	if e.session.ModelEvidence != nil {
+		evidence := *e.session.ModelEvidence
+		out.ModelEvidence = &evidence
+	}
 	if e.process != nil {
 		if decider, ok := e.process.(DecisionProcess); ok {
 			out.PendingDecisions = decider.PendingDecisions()

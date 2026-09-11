@@ -712,14 +712,20 @@ describe('Habitat browser lifecycle', () => {
         project_id: 1,
         generation: id('52'),
         machine_id: 'fixture-machine',
-        account_label: 'chatgpt',
-        schema_version: 2,
-        accounts: [
-          { key: 'coordinator', label: 'Coordinator' },
-          { key: 'personal', label: 'Personal' },
+        schema_version: 4,
+        account_scopes: [
+          {
+            account_label: 'chatgpt',
+            accounts: [
+              { key: 'coordinator', label: 'Coordinator' },
+              { key: 'personal', label: 'Personal' },
+            ],
+            profiles: [{ id: profile.id, version: profile.version }],
+            attachment_revision: 7,
+            account_availability: 'available' as const,
+          },
         ],
         workspaces: [{ handle: id('53'), identity: 'a'.repeat(64) }],
-        profiles: [{ id: profile.id, version: profile.version }],
         sessions: [],
         expires_at: new Date(Date.now() + 120000).toISOString(),
       },
@@ -749,6 +755,8 @@ describe('Habitat browser lifecycle', () => {
     button(mounted.el, 'Review start request').click()
     await nextTick()
     expect(mounted.el.textContent).toContain('coordinator')
+    expect(mounted.el.textContent).toContain('Attachment revision')
+    expect(mounted.el.textContent).toContain('7')
     account.value = 'chatgpt\0personal'
     account.dispatchEvent(new Event('change'))
     await nextTick()
@@ -811,6 +819,49 @@ describe('Habitat browser lifecycle', () => {
     account.dispatchEvent(new Event('change'))
     await nextTick()
     expect(mounted.el.querySelector('[aria-label="Lifecycle request review"]')).toBeNull()
+    expect(submitHabitatIntent).not.toHaveBeenCalled()
+    await mounted.unmount()
+  })
+
+  it('shows committed empty account availability without offering a launch choice', async () => {
+    mockTicketList()
+    const profile = habitatFixture().fleet.workers[0]!.dispatch_profile!
+    vi.mocked(loadOrchestration).mockResolvedValue(habitatFixture('100', 1))
+    vi.mocked(loadHabitatRuntimes).mockResolvedValue([
+      {
+        id: id('91'),
+        project_id: 1,
+        generation: id('92'),
+        machine_id: 'fixture-machine',
+        schema_version: 4,
+        workspaces: [{ handle: id('93'), identity: 'a'.repeat(64) }],
+        account_scopes: [
+          {
+            account_label: 'chatgpt',
+            profiles: [{ id: profile.id, version: profile.version }],
+            attachment_revision: 9,
+            account_availability: 'unavailable',
+          },
+        ],
+        sessions: [],
+        expires_at: new Date(Date.now() + 120000).toISOString(),
+      },
+    ])
+    const mounted = await mountComponent(HabitatLifecycle, {
+      projectId: 1,
+      agent: 'coordinator',
+      profile,
+      authority: 'human:1',
+      deployment: 'fixture',
+      fresh: true,
+    })
+    await vi.waitFor(() => expect(mounted.el.textContent).toContain('fixture-machine'))
+    combobox(mounted.el, 'Runtime').value = id('91')
+    combobox(mounted.el, 'Runtime').dispatchEvent(new Event('change'))
+    await nextTick()
+    expect(mounted.el.querySelector('[aria-label="Named account"]')).toBeNull()
+    expect(mounted.el.textContent).toContain('No named account is attached')
+    expect(button(mounted.el, 'Review start request').disabled).toBe(true)
     expect(submitHabitatIntent).not.toHaveBeenCalled()
     await mounted.unmount()
   })

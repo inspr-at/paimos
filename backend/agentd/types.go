@@ -43,21 +43,30 @@ const (
 )
 
 var (
-	ErrSessionNotFound       = errors.New("managed session not found")
-	ErrSessionNotRunning     = errors.New("managed session is not running")
-	ErrAdapterUnsupported    = errors.New("harness adapter is unsupported")
-	ErrCapabilityMissing     = errors.New("managed session capability is unavailable")
-	ErrControlScopeMismatch  = errors.New("managed control scope does not match the owned session")
-	ErrControlReplayConflict = errors.New("managed control correlation was reused with different input")
-	ErrControlReplayCapacity = errors.New("managed control replay bound reached")
-	ErrDispatchProfile       = errors.New("managed dispatch profile is unavailable")
-	ErrWorkspaceConflict     = errors.New("managed workspace is already owned")
-	ErrDecisionUnknown       = errors.New("managed decision request was not found")
-	ErrDecisionMismatch      = errors.New("managed decision binding does not match the owned request")
-	ErrDecisionExpired       = errors.New("managed decision request expired")
-	ErrDecisionConsumed      = errors.New("managed decision request was already used")
-	ErrDecisionAuthority     = errors.New("managed decision authority is unavailable")
-	ErrDecisionIncomplete    = errors.New("managed decision is missing inspectable context")
+	ErrSessionNotFound             = errors.New("managed session not found")
+	ErrSessionNotRunning           = errors.New("managed session is not running")
+	ErrAdapterUnsupported          = errors.New("harness adapter is unsupported")
+	ErrCapabilityMissing           = errors.New("managed session capability is unavailable")
+	ErrControlScopeMismatch        = errors.New("managed control scope does not match the owned session")
+	ErrControlReplayConflict       = errors.New("managed control correlation was reused with different input")
+	ErrControlReplayCapacity       = errors.New("managed control replay bound reached")
+	ErrDispatchProfile             = errors.New("managed dispatch profile is unavailable")
+	ErrWorkspaceConflict           = errors.New("managed workspace is already owned")
+	ErrDecisionUnknown             = errors.New("managed decision request was not found")
+	ErrDecisionMismatch            = errors.New("managed decision binding does not match the owned request")
+	ErrDecisionExpired             = errors.New("managed decision request expired")
+	ErrDecisionConsumed            = errors.New("managed decision request was already used")
+	ErrDecisionAuthority           = errors.New("managed decision authority is unavailable")
+	ErrDecisionIncomplete          = errors.New("managed decision is missing inspectable context")
+	ErrAccountLifecycleUnavailable = errors.New("owned account lifecycle journal unavailable")
+	ErrAccountLifecycleConflict    = errors.New("owned account lifecycle key was reused with different input")
+	ErrAccountLifecycleRejected    = errors.New("owned account lifecycle selection was rejected")
+	ErrAccountInUse                = errors.New("account owns active or unsettled work")
+	ErrAccountDrainRequired        = errors.New("account disconnect requires drain or settlement first")
+	ErrAccountStale                = errors.New("account lifecycle selection is stale")
+	ErrAccountUnsupported          = errors.New("account lifecycle adapter is unsupported")
+	ErrAccountDetached             = errors.New("managed account is not attached to this runtime")
+	ErrAccountForeign              = errors.New("account lifecycle project is not bound to this runtime")
 )
 
 const (
@@ -85,6 +94,7 @@ type StartRequest struct {
 	IdempotencyKey         string                   `json:"idempotency_key,omitempty"`
 	ExpectedAccountLabel   string                   `json:"expected_account_label,omitempty"`
 	AccountKey             string                   `json:"account_key,omitempty"`
+	AttachmentRevision     int64                    `json:"attachment_revision,omitempty"`
 	ExpectedMachineID      string                   `json:"expected_machine_id,omitempty"`
 	Adapter                string                   `json:"adapter"`
 	Workspace              string                   `json:"workspace"`
@@ -104,11 +114,81 @@ type StartRequest struct {
 	cursorEvidence         *cursorEvidenceStore     `json:"-"`
 }
 
+const (
+	AccountLifecycleConnect             = "connect"
+	AccountLifecycleDisconnect          = "disconnect"
+	AccountLifecycleLegacy              = "legacy"
+	AccountLifecycleExplicit            = "explicit"
+	AccountAdvertisementCommitted       = "committed"
+	AccountAdvertisementRestartRequired = "restart_required"
+)
+
+// AccountLifecycleRequest is an explicit reviewed attach/detach of an already
+// enrolled opaque account. Labels, homes, emails and credentials are never
+// accepted as authority.
+type AccountLifecycleRequest struct {
+	IdempotencyKey    string `json:"idempotency_key"`
+	Operation         string `json:"operation"`
+	ProjectID         int64  `json:"project_id"`
+	RuntimeGeneration string `json:"runtime_generation"`
+	AccountKey        string `json:"account_key"`
+	Adapter           string `json:"adapter"`
+	ExpectedRevision  int64  `json:"expected_revision"`
+}
+
+type AccountLifecycleResult struct {
+	ProjectID           int64    `json:"project_id"`
+	Adapter             string   `json:"adapter"`
+	AccountKey          string   `json:"account_key"`
+	Operation           string   `json:"operation"`
+	State               string   `json:"state"`
+	Mode                string   `json:"mode"`
+	Revision            int64    `json:"revision"`
+	RuntimeGeneration   string   `json:"runtime_generation"`
+	AttachedKeys        []string `json:"attached_keys"`
+	Advertisement       string   `json:"advertisement"`
+	AdvertisementReason string   `json:"advertisement_reason,omitempty"`
+	Replayed            bool     `json:"replayed,omitempty"`
+}
+
+type RuntimeAccountState struct {
+	ProjectID         int64    `json:"project_id"`
+	Adapter           string   `json:"adapter"`
+	Mode              string   `json:"mode"`
+	Revision          int64    `json:"revision"`
+	Keys              []string `json:"keys"`
+	RuntimeGeneration string   `json:"runtime_generation"`
+}
+
 type AdapterEvent struct {
 	Kind             EventKind
 	HarnessSessionID string
 	CorrelationID    string
 	ErrorCode        ErrorCode
+	EffectiveModel   string
+	ModelEvidence    ModelEvidenceStatus
+}
+
+// ModelEvidenceStatus is deliberately closed. An alias in a dispatch profile
+// remains requested intent; only the owned vendor session's init frame can
+// establish a vendor-reported effective identity.
+type ModelEvidenceStatus string
+
+const (
+	ModelEvidenceUnverified     ModelEvidenceStatus = "unverified"
+	ModelEvidenceVendorReported ModelEvidenceStatus = "vendor_reported"
+)
+
+// ModelEvidence is content-free execution provenance for one owned generation
+// and vendor session. The enclosing Session.ID binds the generation, while
+// HarnessSessionID prevents evidence from being moved between vendor sessions.
+// RequestedModel is history, not proof that an alias resolved to any specific
+// model generation.
+type ModelEvidence struct {
+	RequestedModel   string              `json:"requested_model,omitempty"`
+	EffectiveModel   string              `json:"effective_model,omitempty"`
+	Status           ModelEvidenceStatus `json:"status"`
+	HarnessSessionID string              `json:"harness_session_id,omitempty"`
 }
 
 type EventKind string
@@ -331,6 +411,7 @@ type Session struct {
 	Workspace           string                   `json:"workspace"`
 	WorkspaceProvenance WorkspaceProvenance      `json:"workspace_provenance"`
 	DispatchProfile     *dispatchprofile.Profile `json:"dispatch_profile,omitempty"`
+	ModelEvidence       *ModelEvidence           `json:"model_evidence,omitempty"`
 	AccountLabel        string                   `json:"account_label"`
 	AccountKey          string                   `json:"account_key,omitempty"`
 	HarnessSessionID    string                   `json:"harness_session_id,omitempty"`

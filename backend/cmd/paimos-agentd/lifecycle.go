@@ -171,6 +171,10 @@ func newDaemonLifecycle(path, root, instance, reportURL, keyFile string, supervi
 		if err := lifecycleintents.ValidateRegistration(p.registration); err != nil {
 			return nil, errors.New("lifecycle advertised accounts rejected by server contract")
 		}
+		p.registration = applyCommittedAccountAdvertisement(supervisor, c, p.registration)
+		if err := lifecycleintents.ValidateRegistration(p.registration); err != nil {
+			return nil, errors.New("lifecycle advertised accounts rejected by committed runtime state")
+		}
 		lease, e := lifecycleclient.NewProof()
 		if e != nil {
 			return nil, e
@@ -203,6 +207,11 @@ func newDaemonLifecycle(path, root, instance, reportURL, keyFile string, supervi
 		}
 		d.projects = append(d.projects, p)
 	}
+	ids := make([]int64, 0, len(d.projects))
+	for _, p := range d.projects {
+		ids = append(ids, p.config.ProjectID)
+	}
+	supervisor.BindAccountLifecycleProjects(ids)
 	return d, nil
 }
 func configuredProfile(id, version string) (dispatchprofile.Profile, error) {
@@ -269,6 +278,93 @@ func advertisedAccountReservedNames(c configuredProject, generation, host string
 		reserved = append(reserved, profile.ID, profile.Version)
 	}
 	return reserved
+}
+
+func applyCommittedAccountAdvertisement(supervisor *agentd.Supervisor, c configuredProject, registration lifecycleintents.Registration) lifecycleintents.Registration {
+	if supervisor == nil {
+		return registration
+	}
+	if registration.SchemaVersion == lifecycleintents.AccountScopeSchemaV3 || registration.SchemaVersion == lifecycleintents.AccountLifecycleSchemaV4 {
+		scopes := make([]lifecycleintents.AccountScope, 0, len(registration.AccountScopes))
+		lifecycleAware := false
+		for _, scope := range registration.AccountScopes {
+			adapter := adapterForAccountClass(scope.AccountLabel)
+			if adapter == "" {
+				scopes = append(scopes, scope)
+				continue
+			}
+			keys, mode, revision := supervisor.AttachedAccountKeys(c.ProjectID, adapter)
+			if mode != agentd.AccountLifecycleExplicit {
+				scopes = append(scopes, scope)
+				continue
+			}
+			lifecycleAware = true
+			scope.Accounts = filterAdvertisedAccountChoices(scope.Accounts, keys)
+			scope.AttachmentRevision = revision
+			scope.AccountAvailability = lifecycleintents.AccountAvailabilityAvailable
+			if len(scope.Accounts) == 0 {
+				scope.AccountAvailability = lifecycleintents.AccountAvailabilityUnavailable
+			}
+			scopes = append(scopes, scope)
+		}
+		registration.AccountScopes = scopes
+		if lifecycleAware {
+			registration.SchemaVersion = lifecycleintents.AccountLifecycleSchemaV4
+		}
+		return registration
+	}
+	adapter := adapterForAccountClass(registration.AccountLabel)
+	if adapter == "" {
+		return registration
+	}
+	keys, mode, revision := supervisor.AttachedAccountKeys(c.ProjectID, adapter)
+	if mode != agentd.AccountLifecycleExplicit {
+		return registration
+	}
+	filtered := filterAdvertisedAccountChoices(registration.Accounts, keys)
+	availability := lifecycleintents.AccountAvailabilityAvailable
+	if len(filtered) == 0 {
+		availability = lifecycleintents.AccountAvailabilityUnavailable
+	}
+	registration.AccountScopes = []lifecycleintents.AccountScope{{
+		AccountLabel: registration.AccountLabel, Accounts: filtered, Profiles: registration.Profiles,
+		AttachmentRevision: revision, AccountAvailability: availability,
+	}}
+	registration.AccountLabel = ""
+	registration.Accounts = nil
+	registration.Profiles = nil
+	registration.SchemaVersion = lifecycleintents.AccountLifecycleSchemaV4
+	return registration
+}
+
+func adapterForAccountClass(class string) string {
+	switch class {
+	case "chatgpt", "api_key":
+		return agentd.AdapterCodex
+	case agentd.AccountPiContext:
+		return agentd.AdapterPi
+	case agentd.AccountCursorContext:
+		return agentd.AdapterCursor
+	default:
+		return ""
+	}
+}
+
+func filterAdvertisedAccountChoices(configured []lifecycleintents.AccountChoice, attached []string) []lifecycleintents.AccountChoice {
+	allowed := map[string]bool{}
+	for _, key := range attached {
+		allowed[key] = true
+	}
+	out := make([]lifecycleintents.AccountChoice, 0, len(configured))
+	seen := map[string]bool{}
+	for _, choice := range configured {
+		if !allowed[choice.Key] || seen[choice.Key] {
+			continue
+		}
+		seen[choice.Key] = true
+		out = append(out, choice)
+	}
+	return out
 }
 func (d *daemonLifecycle) Run(ctx context.Context) {
 	var wg sync.WaitGroup
@@ -433,8 +529,27 @@ func (p *projectLifecycle) Prepare(ctx context.Context, in lifecycleintents.Inte
 		}
 		return nil
 	}
-	if !p.registration.MatchScope(in.Request.AccountLabel, in.Request.AccountKey, in.Request.DispatchProfileID, in.Request.DispatchProfileVersion, true) {
+	if !p.registration.MatchScopeAtRevision(in.Request.AccountLabel, in.Request.AccountKey, in.Request.DispatchProfileID, in.Request.DispatchProfileVersion, true, in.Request.AttachmentRevision) {
 		return lifecycleclient.ErrOwnership
+	}
+	if in.Request.AccountKey != "" {
+		profile, e := configuredProfile(in.Request.DispatchProfileID, in.Request.DispatchProfileVersion)
+		if e != nil {
+			return e
+		}
+		_, mode, revision := p.owner.supervisor.AttachedAccountKeys(p.config.ProjectID, profile.Harness)
+		if !p.owner.supervisor.AccountAttached(p.config.ProjectID, profile.Harness, in.Request.AccountKey) ||
+			(mode == agentd.AccountLifecycleExplicit && in.Request.AttachmentRevision != revision) ||
+			(mode != agentd.AccountLifecycleExplicit && in.Request.AttachmentRevision != 0) {
+			return lifecycleclient.ErrOwnership
+		}
+	} else if in.Request.DispatchProfileID != "" {
+		if profile, e := configuredProfile(in.Request.DispatchProfileID, in.Request.DispatchProfileVersion); e == nil {
+			_, mode, _ := p.owner.supervisor.AttachedAccountKeys(p.config.ProjectID, profile.Harness)
+			if mode == agentd.AccountLifecycleExplicit {
+				return lifecycleclient.ErrOwnership
+			}
+		}
 	}
 	if in.Request.Operation == "readiness" {
 		// A readiness probe reserves nothing and starts nothing. It still has to
@@ -517,7 +632,7 @@ func (p *projectLifecycle) Prepare(ctx context.Context, in lifecycleintents.Inte
 	if len(prompt) > 256<<10 {
 		return lifecycleclient.ErrOwnership
 	}
-	request := agentd.StartRequest{IdempotencyKey: "lifecycle:" + in.ID, Adapter: profile.Harness, Workspace: workspace, WorkspaceMode: profile.WorkspaceMode, ExpectedAccountLabel: in.Request.AccountLabel, AccountKey: in.Request.AccountKey, ExpectedMachineID: p.registration.Host, Identity: profile.Harness + ":" + in.Request.AgentName, ProjectID: p.config.ProjectID, Role: in.Request.Role, DispatchProfileID: profile.ID, DispatchProfileVersion: profile.Version, Prompt: prompt}
+	request := agentd.StartRequest{IdempotencyKey: "lifecycle:" + in.ID, Adapter: profile.Harness, Workspace: workspace, WorkspaceMode: profile.WorkspaceMode, ExpectedAccountLabel: in.Request.AccountLabel, AccountKey: in.Request.AccountKey, AttachmentRevision: in.Request.AttachmentRevision, ExpectedMachineID: p.registration.Host, Identity: profile.Harness + ":" + in.Request.AgentName, ProjectID: p.config.ProjectID, Role: in.Request.Role, DispatchProfileID: profile.ID, DispatchProfileVersion: profile.Version, Prompt: prompt}
 	if in.Request.TicketID != nil {
 		request.TicketID = *in.Request.TicketID
 		request.WorkShape = in.Request.WorkShape

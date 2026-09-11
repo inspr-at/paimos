@@ -74,6 +74,15 @@ a claim: `approved_by` never authenticates a human. Start requires a current
 human session, project edit, and an explicit confirmation bound to
 digest/seal/revision/scope/mode.
 
+Automatic mode still grants no host-launch authority by itself. A human may,
+during deliberate review, opt into one `delegated_launch` selection bound to
+that review: one server-listed project-environment `target_ref`, workflow
+`deploy-production`, its exact environment symbol, `max_launches:1`, and an
+expiry in the next 24 hours. Start revalidates that selection with the same
+current, non-impersonated editor session and mints a batch-bound root grant.
+Omitting the selection is the default and preserves attended behavior. The
+separate `revoke_launch` batch control irreversibly closes an unused grant.
+
 Assisted and automatic modes require a current **owned readiness observation**:
 `readiness` submits an `inspr.readiness.v1` probe as a lifecycle intent, the
 operator-owned daemon claims it, runs the host checks (`host_kind`,
@@ -596,7 +605,19 @@ POST /agent-mode/external-stage-handoffs/:handoffID/revoke        internal termi
 GET  /external-stage/handoffs/:handoffID                          external pull
 POST /external-stage/handoffs/:handoffID/accept                   external sequence-one accept
 POST /external-stage/handoffs/:handoffID/reports                  external exact-next report
+POST /external-stage/handoffs/:handoffID/launch-candidates        additive one-shot candidate admission
+POST /external-stage/handoffs/:handoffID/launch-admissions/:admissionID/consume
 ```
+
+The two launch sidecar routes use
+`application/vnd.paimos.external-stage-launch-admission.v1+json` and retain the
+same registered API key plus independent handoff-secret boundary. They never
+run a host command, contact a provider, expose a secret, or make deployment a
+completed delivery fact. Candidate admission is possible only for an accepted,
+current deployment handoff whose exact Pharos registration includes the still
+live delegated `target_ref`; an older registration with no target remains valid
+for attended v1/v2 reporting but cannot obtain delegated admission. See the
+contract document for the closed bodies and historical replay semantics.
 
 Prerequisite-set requests always carry an explicit array of 0–16
 `{dependency_key, reporter_registration_id, requirement}` items, where

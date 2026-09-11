@@ -6,13 +6,17 @@
 package runtimehealth
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/xml"
 	"errors"
 	"fmt"
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -255,6 +259,104 @@ func putServiceArgs(t *testing.T, p *PlatformService, args []string) {
 		definition = "[Unit]\nDescription=fixture\n[Service]\nExecStart=" + strings.Join(args, " ") + "\nRestart=on-failure\n[Install]\nWantedBy=default.target\n"
 	}
 	putFixture(t, p.File, definition)
+}
+
+func browserGuardRefusalShim(t *testing.T, dir string) string {
+	t.Helper()
+	return writeBrowserGuardShim(t, filepath.Join(dir, "browser-refusal"), browserGuardExactShim(t))
+}
+
+func browserGuardExactShim(t *testing.T) string {
+	t.Helper()
+	return "#!" + trustedBrowserGuardInterpreter(t) + "\n" + browserGuardRefusalBody
+}
+
+func trustedBrowserGuardInterpreter(t *testing.T) string {
+	t.Helper()
+	for _, path := range []string{"/bin/sh", "/bin/bash", "/usr/bin/bash", "/usr/bin/sh"} {
+		info, err := os.Lstat(path)
+		if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0111 == 0 || info.Mode().Perm()&0022 != 0 || !trustedDefinitionOwner(info) {
+			continue
+		}
+		base := filepath.Base(path)
+		if base != "sh" && base != "bash" {
+			continue
+		}
+		return path
+	}
+	t.Fatal("no trusted absolute sh/bash interpreter available for Darwin fixture")
+	return ""
+}
+
+func writeBrowserGuardShim(t *testing.T, path, body string) string {
+	t.Helper()
+	if e := os.WriteFile(path, []byte(body), 0700); e != nil {
+		t.Fatal(e)
+	}
+	return path
+}
+
+func declaredBrowserGuardEnv(shim string) map[string]string {
+	return map[string]string{
+		"INSPR_AGENT_BROWSER_GUARD":           "env-only",
+		"PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH": shim,
+		"PUPPETEER_EXECUTABLE_PATH":           shim,
+		"CHROME_PATH":                         shim,
+	}
+}
+
+func putDarwinServiceEnv(t *testing.T, p *PlatformService, args []string, env map[string]string) {
+	t.Helper()
+	if p.Platform != "darwin" {
+		t.Fatal("guard environment contract is a LaunchAgent declaration")
+	}
+	var b strings.Builder
+	b.WriteString(`<plist version="1.0"><dict><key>Label</key><string>` + p.Name + `</string><key>ProgramArguments</key><array>`)
+	for _, a := range args {
+		b.WriteString("<string>")
+		_ = xml.EscapeText(&b, []byte(a))
+		b.WriteString("</string>")
+	}
+	b.WriteString(`</array>`)
+	if env != nil {
+		b.WriteString(`<key>EnvironmentVariables</key><dict>`)
+		keys := make([]string, 0, len(env))
+		for k := range env {
+			keys = append(keys, k)
+		}
+		slices.Sort(keys)
+		for _, k := range keys {
+			b.WriteString("<key>")
+			_ = xml.EscapeText(&b, []byte(k))
+			b.WriteString("</key><string>")
+			_ = xml.EscapeText(&b, []byte(env[k]))
+			b.WriteString("</string>")
+		}
+		b.WriteString(`</dict>`)
+	}
+	b.WriteString(`<key>KeepAlive</key><true/></dict></plist>`)
+	putFixture(t, p.File, b.String())
+}
+
+func darwinPlistWithDuplicateEnvKey(p *PlatformService, args []string, shim string) string {
+	var b strings.Builder
+	b.WriteString(`<plist version="1.0"><dict><key>Label</key><string>` + p.Name + `</string><key>ProgramArguments</key><array>`)
+	for _, a := range args {
+		b.WriteString("<string>")
+		_ = xml.EscapeText(&b, []byte(a))
+		b.WriteString("</string>")
+	}
+	b.WriteString(`</array><key>EnvironmentVariables</key><dict>`)
+	b.WriteString(`<key>INSPR_AGENT_BROWSER_GUARD</key><string>env-only</string>`)
+	for _, key := range []string{"PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH", "PUPPETEER_EXECUTABLE_PATH", "CHROME_PATH", "CHROME_PATH"} {
+		b.WriteString("<key>")
+		_ = xml.EscapeText(&b, []byte(key))
+		b.WriteString("</key><string>")
+		_ = xml.EscapeText(&b, []byte(shim))
+		b.WriteString("</string>")
+	}
+	b.WriteString(`</dict><key>KeepAlive</key><true/></dict></plist>`)
+	return b.String()
 }
 
 func protectedDummy(t *testing.T, dir, name string) string {
@@ -665,5 +767,219 @@ func TestRuntimePlatformRecoveryScenarios(t *testing.T) {
 func TestRuntimeManagerRefusesUnlistedExecutable(t *testing.T) {
 	if _, err := runManager(context.Background(), "sh", "-c", "exit 0"); err == nil {
 		t.Fatal("platform runner accepted an executable outside its closed manager set")
+	}
+}
+
+func TestRuntimeDarwinAcceptsDeclaredBrowserGuardEnvironment(t *testing.T) {
+	sum := sha256.Sum256([]byte(browserGuardRefusalBody))
+	if hex.EncodeToString(sum[:]) != "abc22b56513f3a970aab18055aa60336ff65cdce27a113ce4408e43e7245627a" {
+		t.Fatal("canonical refusal body is not the exact NIX-445 mkRefusalText")
+	}
+	p, _, calls := serviceFixture(t, "darwin")
+	shim := browserGuardRefusalShim(t, p.Home)
+	putDarwinServiceEnv(t, p, fullServeArgs(p), declaredBrowserGuardEnv(shim))
+	s, e := p.Inspect(context.Background())
+	if e != nil || !s.Verified {
+		t.Fatalf("declared browser-guard environment not verified: %v", e)
+	}
+	if len(*calls) == 0 {
+		t.Fatal("verified definition never reached the platform manager")
+	}
+}
+
+func TestRuntimeBrowserGuardShimOpenUsesNoFollowAndDocumentedGosecWaiver(t *testing.T) {
+	helper, err := os.ReadFile("private_unix.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(helper, []byte("os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW, 0) // #nosec G304 --")) {
+		t.Fatal("trusted shim open lost no-follow G304 waiver")
+	}
+	if !bytes.Contains(helper, []byte("!os.SameFile(info, actual)")) {
+		t.Fatal("trusted shim open lost SameFile identity check")
+	}
+	service, err := os.ReadFile("service.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := bytes.Index(service, []byte("func verifyBrowserGuardRefusalShim"))
+	if start < 0 {
+		t.Fatal("browser-guard shim verifier missing")
+	}
+	rest := service[start+1:]
+	endRel := bytes.Index(rest, []byte("\nfunc "))
+	if endRel < 0 {
+		t.Fatal("browser-guard shim verifier bounds missing")
+	}
+	body := service[start : start+1+endRel]
+	if bytes.Contains(body, []byte("os.Open(")) || bytes.Contains(body, []byte("EvalSymlinks")) {
+		t.Fatal("browser-guard shim verifier opened a variable path without no-follow custody")
+	}
+	if !bytes.Contains(body, []byte("openUnfollowedRegular(path, info)")) {
+		t.Fatal("browser-guard shim verifier does not use the no-follow custody helper")
+	}
+	interpStart := bytes.Index(service, []byte("func verifyBrowserGuardInterpreter"))
+	if interpStart < 0 {
+		t.Fatal("browser-guard interpreter verifier missing")
+	}
+	interpRest := service[interpStart+1:]
+	interpEndRel := bytes.Index(interpRest, []byte("\nfunc "))
+	if interpEndRel < 0 {
+		t.Fatal("browser-guard interpreter verifier bounds missing")
+	}
+	interpBody := service[interpStart : interpStart+1+interpEndRel]
+	if bytes.Contains(interpBody, []byte("EvalSymlinks")) || !bytes.Contains(interpBody, []byte("os.Lstat(path)")) {
+		t.Fatal("browser-guard interpreter verifier no longer refuses symlink interpreters")
+	}
+}
+
+func TestRuntimeDarwinRejectsHostileLaunchdEnvironment(t *testing.T) {
+	exact := browserGuardExactShim(t)
+	interp := trustedBrowserGuardInterpreter(t)
+	for _, kind := range []string{
+		"path",
+		"node_options",
+		"dyld",
+		"unknown",
+		"missing-mode",
+		"sandbox-mode",
+		"empty",
+		"relative",
+		"mismatch",
+		"duplicate-env-key",
+		"missing-shim",
+		"directory",
+		"mode",
+		"binary",
+		"command-before-exit",
+		"comment-marker",
+		"comment-exit",
+		"appended",
+		"unsafe-interpreter",
+		"interpreter-args",
+		"relative-interpreter",
+		"writable-interpreter",
+		"symlink-shim",
+		"symlink-interpreter",
+		"no-shebang",
+		"string-value",
+		"program",
+	} {
+		t.Run(kind, func(t *testing.T) {
+			p, _, calls := serviceFixture(t, "darwin")
+			shim := filepath.Join(p.Home, "browser-refusal")
+			env := declaredBrowserGuardEnv(shim)
+			rawPlist := ""
+			switch kind {
+			case "path":
+				writeBrowserGuardShim(t, shim, exact)
+				env["PATH"] = "/tmp"
+			case "node_options":
+				writeBrowserGuardShim(t, shim, exact)
+				env["NODE_OPTIONS"] = "--require /tmp/loader.js"
+			case "dyld":
+				writeBrowserGuardShim(t, shim, exact)
+				env["DYLD_INSERT_LIBRARIES"] = "/tmp/loader.dylib"
+			case "unknown":
+				writeBrowserGuardShim(t, shim, exact)
+				env["FOREIGN_KEY"] = "x"
+			case "missing-mode":
+				writeBrowserGuardShim(t, shim, exact)
+				delete(env, "INSPR_AGENT_BROWSER_GUARD")
+			case "sandbox-mode":
+				writeBrowserGuardShim(t, shim, exact)
+				env["INSPR_AGENT_BROWSER_GUARD"] = "sandbox"
+			case "empty":
+				writeBrowserGuardShim(t, shim, exact)
+				env = map[string]string{}
+			case "relative":
+				writeBrowserGuardShim(t, shim, exact)
+				env["CHROME_PATH"] = "browser-refusal"
+				env["PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH"] = "browser-refusal"
+				env["PUPPETEER_EXECUTABLE_PATH"] = "browser-refusal"
+			case "mismatch":
+				writeBrowserGuardShim(t, shim, exact)
+				other := protectedExecutable(t, p.Home, "other-bin")
+				env["CHROME_PATH"] = other
+			case "duplicate-env-key":
+				writeBrowserGuardShim(t, shim, exact)
+				rawPlist = darwinPlistWithDuplicateEnvKey(p, fullServeArgs(p), shim)
+			case "missing-shim":
+			case "directory":
+				if e := os.Mkdir(shim, 0700); e != nil {
+					t.Fatal(e)
+				}
+			case "mode":
+				writeBrowserGuardShim(t, shim, exact)
+				if e := os.Chmod(shim, 0777); e != nil {
+					t.Fatal(e)
+				}
+			case "binary":
+				if e := os.WriteFile(shim, bytes.Repeat([]byte{0xcf, 0xfa, 0xed, 0xfe}, 1024), 0700); e != nil {
+					t.Fatal(e)
+				}
+			case "command-before-exit":
+				writeBrowserGuardShim(t, shim, "#!"+interp+"\ntrue\n"+browserGuardRefusalBody)
+			case "comment-marker":
+				writeBrowserGuardShim(t, shim, "#!"+interp+"\n# INSPR agent browser guard (NIX-445): native browser launch refused.\nexit 0\n")
+			case "comment-exit":
+				writeBrowserGuardShim(t, shim, "#!"+interp+"\n# exit 78\ntrue\n")
+			case "appended":
+				writeBrowserGuardShim(t, shim, exact+"true\n")
+			case "unsafe-interpreter":
+				writeBrowserGuardShim(t, shim, "#!/usr/bin/env bash\n"+browserGuardRefusalBody)
+			case "interpreter-args":
+				writeBrowserGuardShim(t, shim, "#!/bin/sh -e\n"+browserGuardRefusalBody)
+			case "relative-interpreter":
+				writeBrowserGuardShim(t, shim, "#!sh\n"+browserGuardRefusalBody)
+			case "writable-interpreter":
+				localInterp := filepath.Join(p.Home, "bash")
+				if e := os.WriteFile(localInterp, []byte("#!/bin/sh\n"), 0700); e != nil {
+					t.Fatal(e)
+				}
+				if e := os.Chmod(localInterp, 0777); e != nil {
+					t.Fatal(e)
+				}
+				writeBrowserGuardShim(t, shim, "#!"+localInterp+"\n"+browserGuardRefusalBody)
+			case "symlink-shim":
+				real := writeBrowserGuardShim(t, filepath.Join(p.Home, "browser-refusal-real"), exact)
+				if e := os.Symlink(real, shim); e != nil {
+					t.Fatal(e)
+				}
+			case "symlink-interpreter":
+				link := filepath.Join(p.Home, "sh")
+				if e := os.Symlink(interp, link); e != nil {
+					t.Fatal(e)
+				}
+				writeBrowserGuardShim(t, shim, "#!"+link+"\n"+browserGuardRefusalBody)
+			case "no-shebang":
+				writeBrowserGuardShim(t, shim, browserGuardRefusalBody)
+			case "string-value":
+				rawPlist = `<plist version="1.0"><dict><key>Label</key><string>` + p.Name + `</string><key>ProgramArguments</key><array><string>` + filepath.Join(p.Home, "paimos-agentd") + `</string><string>serve</string><string>--instance</string><string>fixture</string><string>--state-root</string><string>` + p.StateRoot + `</string></array><key>EnvironmentVariables</key><string>CHROME_PATH=/tmp</string></dict></plist>`
+			case "program":
+				raw, _ := os.ReadFile(p.File)
+				rawPlist = strings.Replace(string(raw), "</dict>", "<key>Program</key><string>/bin/true</string></dict>", 1)
+			}
+			if rawPlist != "" {
+				putFixture(t, p.File, rawPlist)
+			} else {
+				putDarwinServiceEnv(t, p, fullServeArgs(p), env)
+			}
+			if _, e := p.Inspect(context.Background()); e == nil {
+				t.Fatal("hostile environment accepted")
+			}
+			if len(*calls) != 0 {
+				t.Fatal("manager reached with invalid definition")
+			}
+		})
+	}
+}
+
+func TestRuntimeLinuxServiceRejectsEnvironmentOverride(t *testing.T) {
+	p, _, calls := serviceFixture(t, "linux")
+	raw, _ := os.ReadFile(p.File)
+	putFixture(t, p.File, strings.Replace(string(raw), "ExecStart=", "Environment=PATH=/tmp\nExecStart=", 1))
+	if _, e := p.Inspect(context.Background()); e == nil || len(*calls) != 0 {
+		t.Fatal("linux environment override accepted")
 	}
 }

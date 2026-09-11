@@ -148,6 +148,7 @@ func runtimeCmd() *cobra.Command {
 		}
 		cmd.AddCommand(child)
 	}
+	cmd.AddCommand(runtimeAccountCmd(&root, &expected, &projectID, &projectKey))
 	return cmd
 }
 

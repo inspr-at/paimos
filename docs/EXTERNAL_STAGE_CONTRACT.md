@@ -23,6 +23,9 @@ bytes—never JSON, base64, or a response header.
 | external | `POST /api/external-stage/handoffs/{handoffID}/accept` | Accept as sequence 1 |
 | external | `POST /api/external-stage/handoffs/{handoffID}/reports` | Append the exact-next report |
 
+The additive launch-admission sidecar described below changes neither these
+seven routes nor either frozen media type or any v1/v2 fixture byte.
+
 External calls require two independent credentials: the exact registered
 Bearer API key and the handoff credential in the inbound-only
 `X-PAIMOS-Handoff-Secret` header. The header contains unpadded base64url of the
@@ -54,7 +57,8 @@ paimos --json external-stage registrations list issue:4664
 
 paimos --json external-stage registrations create issue:4664 \
   --api-key-id "$PHAROS_API_KEY_ID" --class pharos --role owner \
-  --workflow deploy-production --environment production-eu1
+  --workflow deploy-production --environment production-eu1 \
+  --target-ref "$SERVER_LISTED_TARGET_REF"
 
 paimos --json external-stage registrations create issue:4664 \
   --api-key-id "$JANUS_API_KEY_ID" --class janus --role dependency \
@@ -314,3 +318,106 @@ alongside v1 through `/api/openapi.json`; `/api/schema` advertises both contract
 majors, their exact media types, and the v2 fixture digest (v1 remains available
 through the immutable v1 contract response). The immutable certified commit
 and first release are recorded in `manifest-v2.json` beside the fixture.
+
+## Additive one-shot launch admission
+
+PAI-978 adds two routes under the existing external audience without changing
+the frozen reporting contracts:
+
+| Method and route | Closed body and result |
+|---|---|
+| `POST /api/external-stage/handoffs/{handoffID}/launch-candidates` | `ExternalStageLaunchCandidate` → immutable `ExternalStageLaunchAdmission` |
+| `POST /api/external-stage/handoffs/{handoffID}/launch-admissions/{admissionID}/consume` | `{schema,version,admission_digest}` → immutable consumed receipt |
+
+Both use
+`application/vnd.paimos.external-stage-launch-admission.v1+json`, the registered
+Bearer API key, the separate `X-PAIMOS-Handoff-Secret`, and `Idempotency-Key`.
+Bodies are at most 64 KiB and are decoded as exactly one closed JSON value:
+unknown or duplicate fields, trailing values, a wrong or parameterized media
+type, and any non-canonical identifier fail closed. Responses use `no-store`.
+
+Possessing an automatic-mode batch, a handoff, or its credentials is not host
+consent. The root authority exists only when a current, non-impersonated human
+editor deliberately selects the default-off `delegated_launch` during review
+and confirms Start. The server binds that grant to the exact project, baseline,
+draft/revision, review/session, canonical scope, worker provenance, batch,
+delivery, current attempt/plan, server-listed target provenance, workflow,
+environment, one-launch ceiling, and expiry. Start refuses a selection more
+than 24 hours ahead. A delegated candidate additionally requires the exact
+still-live Pharos owner registration to carry the same `target_ref`; there is
+no sole-registration fallback. Legacy registrations may omit `target_ref` only
+for attended reporting.
+
+Pharos submits no grant or admission identifier. Its candidate contains only:
+
+- `schema`, `version`, `target_ref`, `workflow`, `environment`, and `observed_at`;
+- the existing owner-v2 artifact fields `version_scheme`, `version`,
+  `release_channel`, `release_sequence`, `digest`, `commit_digest`,
+  `release_manifest_coordinate`, and `release_manifest_digest`;
+- `reviewed_plan_digest`, Pharos's domain-separated digest of the exact reviewed
+  deployment plan;
+- `operation_binding_digest`, Pharos's separate domain-separated digest binding
+  that operation to every available public-pull binding: handoff/credential
+  epoch, target/workflow/environment, the full artifact, `reviewed_plan_digest`,
+  deployment stage, execution/authority, and the exact
+  plan/predecessor/context digests.
+
+The public pull does not expose raw attempt numbers or plan revisions, so Pharos
+must not guess or reconstruct them. The immutable, Paimos-derived `plan_digest`
+transitively commits to the attempt ID, plan revision, and attempt-start event;
+`context_digest` commits to the delivery key, attempt ID, stage, execution,
+authority, and registration; and `predecessor_digest` commits to the current
+execution, authority, and semantic event lineage. Database guards independently
+reproduce and seal these domain-separated commitments. Together with the other
+public-pull fields above, they are the canonical attempt/plan binding available
+to the Pharos candidate.
+
+Paimos validates both supplied digests as distinct canonical SHA-256 values and
+stores them immutably. They remain Pharos-produced review fingerprints, not
+free-form Paimos authority. Paimos independently resolves its root grant and
+revalidates the live human session and project edit, immutable review/batch
+digests, target and registration, current handoff secret/credential epoch,
+attempt, plan, execution, authority, predecessor/context, successful immutable
+implementation+QA evidence, and exact eight-field artifact identity. Impact,
+data-loss, privacy, scope, and review gates are not bypassed or enlarged.
+
+The returned admission is server-derived and binds the root grant ID/revision/
+digest, admission ID/digest, handoff/epoch, target/workflow/environment,
+artifact, deployment stage, attempt/plan/execution/authority, the existing
+plan/predecessor/context digests, both Pharos digests, `max_launches:1`,
+`used_launches:0`, issue/expiry times, and `state:"issued"`. Its expiry is the
+earliest of the root-grant expiry, handoff expiry, and server receipt time plus
+15 minutes. A different candidate or idempotency key conflicts; it cannot mint
+a second identity. The admission exposes the server-resolved raw attempt and
+plan values, but these are outputs rather than candidate inputs: the consumer
+verifies them and the admission's plan/predecessor/context commitments against
+the pull used to build the candidate; it does not derive a candidate from a
+future admission. Even an exact candidate retry may refuse after authority is
+paused or revoked.
+
+First consume revalidates every current gate and atomically spends launch 1.
+Pause, cancel/stop, replan, retry, authority or credential rotation, revocation,
+target drift, registration loss, stale artifact, or expiry refuses without a
+fallback or new retry authority. Exact replay returns the byte-identical durable
+receipt, including after a restart. Once consumed, that receipt remains
+historical idempotent evidence even if the grant or handoff later expires: it
+does not refresh authority, authorize another launch, serve as a fresh dispatch
+instruction, or change a duplicate flag. These endpoints only seal and spend
+authority; Paimos performs no Pharos, host, provider, command, URL, path,
+credential, or secret effect.
+
+CLI adapters use protected file/stdin inputs:
+
+```sh
+paimos --json external-stage launch-candidate "$HANDOFF_ID" \
+  --candidate-file candidate.json --secret-file /run/credentials/pharos-handoff.bin
+
+paimos --json external-stage launch-consume "$HANDOFF_ID" "$ADMISSION_ID" \
+  --admission-digest "$ADMISSION_DIGEST" \
+  --secret-file /run/credentials/pharos-handoff.bin
+```
+
+`--candidate-file -` has file/stdin parity but cannot share stdin with
+`--secret-stdin`. The standalone closed schema and immutable fixtures live at
+`backend/contracts/external-stage-launch-admission-v1.schema.json` and
+`backend/contracts/fixtures/external-stage-launch-admission-v1/`.

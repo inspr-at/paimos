@@ -21,6 +21,8 @@ CREATE TABLE session_row(account_label TEXT, account_key TEXT, dispatch_profile_
 		t.Fatal(err)
 	}
 	v3 := `{"schema_version":3,"account_scopes":[{"account_label":"chatgpt","accounts":[{"key":"codex-work","label":"Work"}],"profiles":[{"id":"codex-sol-high","version":"1"}]},{"account_label":"cursor_context","accounts":[{"key":"cursor-op","label":"Cursor"}],"profiles":[{"id":"cursor-composer","version":"1"}]}]}`
+	v4Available := `{"schema_version":4,"account_scopes":[{"account_label":"chatgpt","accounts":[{"key":"codex-work","label":"Work"}],"profiles":[{"id":"codex-sol-high","version":"1"}],"attachment_revision":7,"account_availability":"available"}]}`
+	v4Unavailable := `{"schema_version":4,"account_scopes":[{"account_label":"chatgpt","profiles":[{"id":"codex-sol-high","version":"1"}],"attachment_revision":8,"account_availability":"unavailable"}]}`
 	v1 := `{"generation":"g","host":"h","account_label":"chatgpt","workspaces":[],"profiles":[]}`
 	cases := []struct {
 		name, registration, class, key, profile, version string
@@ -34,6 +36,8 @@ CREATE TABLE session_row(account_label TEXT, account_key TEXT, dispatch_profile_
 		{"v3 wrong key", v3, "chatgpt", "cursor-op", "codex-sol-high", "1", 0},
 		{"v3 wrong profile version", v3, "chatgpt", "codex-work", "codex-sol-high", "999", 0},
 		{"v3 cursor profile under chatgpt", v3, "chatgpt", "codex-work", "cursor-composer", "1", 0},
+		{"v4 available exact", v4Available, "chatgpt", "codex-work", "codex-sol-high", "1", 1},
+		{"v4 unavailable refuses ambient", v4Unavailable, "chatgpt", "", "codex-sol-high", "1", 0},
 	}
 	sqlText := `SELECT ` + RuntimeSessionOwnershipSQL("runtime_row", "session_row") + ` FROM runtime_row JOIN session_row`
 	for _, tc := range cases {
@@ -80,7 +84,8 @@ func TestProductionOwnershipSQLParity(t *testing.T) {
 		"account_key",
 		"dispatch_profile_id",
 		"dispatch_profile_version",
-		"=3 THEN CASE WHEN EXISTS(",
+		"IN (3,4) THEN CASE WHEN EXISTS(",
+		"account_availability",
 		"json_each(",
 		"WHEN json_extract(",
 		"THEN 1",

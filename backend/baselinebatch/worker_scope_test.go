@@ -35,6 +35,15 @@ func TestWorkerMatchesRegistrationPreservesScopedBindings(t *testing.T) {
 		Profiles:      []lifecycleintents.Profile{{ID: "codex-sol-high", Version: "1"}},
 		Workspaces:    []lifecycleintents.Workspace{{Handle: workspace, Identity: strings.Repeat("a", 64)}},
 	}
+	v4 := lifecycleintents.Registration{
+		SchemaVersion: lifecycleintents.AccountLifecycleSchemaV4,
+		Workspaces:    []lifecycleintents.Workspace{{Handle: workspace, Identity: strings.Repeat("a", 64)}},
+		AccountScopes: []lifecycleintents.AccountScope{{
+			AccountLabel: "chatgpt", Accounts: []lifecycleintents.AccountChoice{{Key: "codex-work", Label: "Work"}},
+			Profiles:           []lifecycleintents.Profile{{ID: "codex-sol-high", Version: "1"}},
+			AttachmentRevision: 5, AccountAvailability: lifecycleintents.AccountAvailabilityAvailable,
+		}},
+	}
 	base := WorkerSelection{
 		WorkerName: "builder", RuntimeID: uuid.NewString(), RuntimeGeneration: uuid.NewString(),
 		AccountLabel: "chatgpt", AccountKey: "codex-work", ProfileID: "codex-sol-high", ProfileVersion: "1",
@@ -47,6 +56,12 @@ func TestWorkerMatchesRegistrationPreservesScopedBindings(t *testing.T) {
 		want   string
 	}{
 		{name: "v3 mixed chatgpt", reg: mixed, worker: base},
+		{name: "v4 exact attachment revision", reg: v4, worker: WorkerSelection{
+			WorkerName: "builder", RuntimeID: base.RuntimeID, RuntimeGeneration: base.RuntimeGeneration,
+			AccountLabel: "chatgpt", AccountKey: "codex-work", AttachmentRevision: 5,
+			ProfileID: "codex-sol-high", ProfileVersion: "1", WorkspaceHandle: workspace,
+		}},
+		{name: "v4 missing attachment revision", reg: v4, worker: base, want: "advertised scope"},
 		{name: "v3 mixed cursor", reg: mixed, worker: WorkerSelection{
 			WorkerName: "builder", RuntimeID: base.RuntimeID, RuntimeGeneration: base.RuntimeGeneration,
 			AccountLabel: "cursor_context", AccountKey: "cursor-op", ProfileID: "cursor-composer", ProfileVersion: "1",
@@ -146,5 +161,10 @@ func TestReviewBindingIncludesClassAndGeneration(t *testing.T) {
 	generation.RuntimeGeneration = "gen-b"
 	if left == reviewBinding(draft, ModeAssisted, []string{"req.a"}, generation) {
 		t.Fatal("runtime generation change reused the reviewed binding")
+	}
+	revision := base
+	revision.AttachmentRevision = 2
+	if left == reviewBinding(draft, ModeAssisted, []string{"req.a"}, revision) {
+		t.Fatal("attachment revision change reused the reviewed binding")
 	}
 }

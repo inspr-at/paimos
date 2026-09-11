@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -932,6 +933,16 @@ type keyedDispatchAdapter struct {
 }
 
 func (a *keyedDispatchAdapter) HasAccount(key string) bool { return a.keys[key] }
+func (a *keyedDispatchAdapter) EnrolledAccountKeys() []string {
+	keys := make([]string, 0, len(a.keys))
+	for key, ok := range a.keys {
+		if ok {
+			keys = append(keys, key)
+		}
+	}
+	sort.Strings(keys)
+	return keys
+}
 func (a *keyedDispatchAdapter) Start(_ context.Context, request StartRequest, observe func(AdapterEvent)) (Process, error) {
 	a.requests = append(a.requests, request)
 	observe(AdapterEvent{Kind: EventSessionStarted, HarnessSessionID: "dispatch-thread"})

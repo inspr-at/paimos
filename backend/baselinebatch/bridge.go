@@ -116,7 +116,7 @@ func (s *Service) reconcileAuthorizedSteps(ctx context.Context, actor Actor, sto
 		return err
 	}
 	deliveryKey := fmt.Sprintf("issue:%d", stored.IssueID)
-	registrationID, err := s.currentPharosOwnerRegistration(ctx, principal, deliveryKey)
+	registrationID, err := s.currentPharosOwnerRegistration(ctx, principal, deliveryKey, stored.DelegatedLaunch)
 	if err != nil {
 		if errors.Is(err, externalstage.ErrNotFound) || errors.Is(err, ErrForbidden) {
 			return fmt.Errorf("%w: current authorization cannot use the external-stage plane", ErrForbidden)
@@ -138,13 +138,14 @@ func (s *Service) reconcileAuthorizedSteps(ctx context.Context, actor Actor, sto
 	return nil
 }
 
-func (s *Service) currentPharosOwnerRegistration(ctx context.Context, principal externalstage.Principal, deliveryKey string) (int64, error) {
+func (s *Service) currentPharosOwnerRegistration(ctx context.Context, principal externalstage.Principal, deliveryKey string, delegated *DelegatedLaunchSelection) (int64, error) {
 	listed, err := s.External.ListReporters(ctx, principal, deliveryKey)
 	if err != nil {
 		return 0, err
 	}
 	for _, row := range listed.Registrations {
-		if row.ReporterClass == externalstage.ReporterClassPharos && row.ReporterRole == externalstage.ReporterRoleOwner && row.RevokedAt == "" {
+		if row.ReporterClass == externalstage.ReporterClassPharos && row.ReporterRole == externalstage.ReporterRoleOwner && row.RevokedAt == "" &&
+			(delegated == nil || (row.TargetRef == delegated.TargetRef && row.Workflow == delegated.Workflow && row.Environment == delegated.Environment)) {
 			return row.RegistrationID, nil
 		}
 	}

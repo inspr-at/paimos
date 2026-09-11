@@ -114,7 +114,7 @@ func (s *Service) validateTargetForOutcome(ctx context.Context, tx *sql.Tx, proj
 		// A probe observes the exact advertised account, catalog profile and
 		// workspace. It reserves nothing: observing a host does not occupy an
 		// agent, a coordinator seat or an exclusive workspace.
-		if !runtime.MatchScope(r.AccountLabel, r.AccountKey, r.DispatchProfileID, r.DispatchProfileVersion, true) {
+		if !runtime.MatchScopeAtRevision(r.AccountLabel, r.AccountKey, r.DispatchProfileID, r.DispatchProfileVersion, true, r.AttachmentRevision) {
 			return ErrUnavailable
 		}
 		if _, err := resolveProfile(r.DispatchProfileID, r.DispatchProfileVersion); err != nil {
@@ -125,7 +125,7 @@ func (s *Service) validateTargetForOutcome(ctx context.Context, tx *sql.Tx, proj
 		}
 		return nil
 	}
-	if !runtime.MatchScope(r.AccountLabel, r.AccountKey, r.DispatchProfileID, r.DispatchProfileVersion, true) {
+	if !runtime.MatchScopeAtRevision(r.AccountLabel, r.AccountKey, r.DispatchProfileID, r.DispatchProfileVersion, true, r.AttachmentRevision) {
 		return ErrUnavailable
 	}
 	profile, err := resolveProfile(r.DispatchProfileID, r.DispatchProfileVersion)

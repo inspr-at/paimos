@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -9,6 +10,28 @@ import (
 	"github.com/google/uuid"
 	"github.com/inspr-at/paimos/backend/auth"
 )
+
+func TestHarnessBrowserRoutesExposeDurableRetirementWithoutDrain(t *testing.T) {
+	router := chi.NewRouter()
+	RegisterHarnessBrowserRoutes(router)
+	want := map[string]bool{
+		"POST /projects/{id}/harness-sessions/{sessionID}/controls/v1/{kind}":                       false,
+		"GET /projects/{id}/harness-sessions/{sessionID}/controls/v1/retire-after-work/{controlID}": false,
+	}
+	if err := chi.Walk(router, func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
+		if _, ok := want[method+" "+route]; ok {
+			want[method+" "+route] = true
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for route, found := range want {
+		if !found {
+			t.Fatalf("missing %s", route)
+		}
+	}
+}
 
 func TestHarnessBrowserStrictWire(t *testing.T) {
 	router := chi.NewRouter()

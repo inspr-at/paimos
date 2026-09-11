@@ -9,7 +9,6 @@ package handlers
 
 import (
 	"context"
-	"os"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -44,7 +43,7 @@ const fakeIntakeJSON = `{"markdown":"# Generated Spec\n\n## Summary\nFrom the fa
 // one member user + one active session with transcript material.
 func openIntakeTestDB(t *testing.T) (sessionID int64) {
 	t.Helper()
-	os.Setenv("DATA_DIR", t.TempDir())
+	t.Setenv("DATA_DIR", t.TempDir())
 	t.Setenv("PAIMOS_TEST_MODE", "1")
 	testdb.Prepare(t)
 	if err := db.Open(); err != nil {

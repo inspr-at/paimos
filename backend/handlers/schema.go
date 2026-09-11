@@ -82,13 +82,14 @@ import (
 // discover which api-key scopes unlock which endpoints. The scope list
 // is populated at init() from auth.ScopeCatalog() — a single source of
 // truth shared with the runtime check.
+// 2.8.0 (PAI-978): added the closed one-shot launch admission sidecar.
+// 2.7.0 (PAI-991): added public offer acceptance and receipt discovery.
+// 2.6.0 (PAI-991): added editable CRM offers.
 // 2.5.0 (PAI-979): added `inspr-calendar-v2` to external_stage_version_scheme
-//
-//	and republished the v2 fixture digest with the calendar v2 owner cases.
-//
+// and republished the v2 fixture digest with the calendar v2 owner cases.
 // 2.4.0 (PAI-876): added the additive external-stage v2 media type,
 // fixture digest, contract major, and explicit release-version scheme.
-const SchemaVersion = "2.7.0"
+const SchemaVersion = "2.8.0"
 
 // SchemaPayload is the shape returned by GET /api/schema. See PAI-87.
 type SchemaPayload struct {
@@ -152,15 +153,16 @@ type SchemaAgent struct {
 // widening the pre-existing delivery stage enums. Detailed closed DTO shapes
 // remain authoritative in /api/openapi.json.
 type SchemaExternalStage struct {
-	ContractMajor       int               `json:"contract_major"`
-	MediaType           string            `json:"media_type"`
-	ContractMajorV2     int               `json:"contract_major_v2"`
-	MediaTypeV2         string            `json:"media_type_v2"`
-	FixtureDigestV2     string            `json:"fixture_digest_v2"`
-	SecretMediaType     string            `json:"secret_media_type"`
-	HandoffSecretHeader string            `json:"handoff_secret_header"`
-	OneTimeSecretBytes  int               `json:"one_time_secret_bytes"`
-	Routes              map[string]string `json:"routes"`
+	ContractMajor            int               `json:"contract_major"`
+	MediaType                string            `json:"media_type"`
+	ContractMajorV2          int               `json:"contract_major_v2"`
+	MediaTypeV2              string            `json:"media_type_v2"`
+	FixtureDigestV2          string            `json:"fixture_digest_v2"`
+	LaunchAdmissionMediaType string            `json:"launch_admission_media_type"`
+	SecretMediaType          string            `json:"secret_media_type"`
+	HandoffSecretHeader      string            `json:"handoff_secret_header"`
+	OneTimeSecretBytes       int               `json:"one_time_secret_bytes"`
+	Routes                   map[string]string `json:"routes"`
 }
 
 // Schema is the compile-time-constant API schema. Backend enum changes
@@ -364,22 +366,25 @@ func init() {
 		},
 	}
 	Schema.ExternalStage = &SchemaExternalStage{
-		ContractMajor:       externalstage.ContractMajor,
-		MediaType:           externalstage.MediaTypeV1,
-		ContractMajorV2:     externalstage.ContractMajorV2,
-		MediaTypeV2:         externalstage.MediaTypeV2,
-		FixtureDigestV2:     "sha256:" + contracts.ExternalStageV2FixtureDigestHex,
-		SecretMediaType:     externalstage.SecretMediaTypeV1,
-		HandoffSecretHeader: externalstage.HandoffSecretHeader,
-		OneTimeSecretBytes:  externalstage.OneTimeSecretBytes,
+		ContractMajor:            externalstage.ContractMajor,
+		MediaType:                externalstage.MediaTypeV1,
+		ContractMajorV2:          externalstage.ContractMajorV2,
+		MediaTypeV2:              externalstage.MediaTypeV2,
+		FixtureDigestV2:          "sha256:" + contracts.ExternalStageV2FixtureDigestHex,
+		LaunchAdmissionMediaType: externalstage.LaunchAdmissionMediaType,
+		SecretMediaType:          externalstage.SecretMediaTypeV1,
+		HandoffSecretHeader:      externalstage.HandoffSecretHeader,
+		OneTimeSecretBytes:       externalstage.OneTimeSecretBytes,
 		Routes: map[string]string{
-			"create": externalstage.Routes[0].Method + " " + externalstage.InternalCreatePath,
-			"mint":   externalstage.Routes[1].Method + " " + externalstage.InternalMintPath,
-			"rotate": externalstage.Routes[2].Method + " " + externalstage.InternalRotatePath,
-			"revoke": externalstage.Routes[3].Method + " " + externalstage.InternalRevokePath,
-			"pull":   externalstage.Routes[4].Method + " " + externalstage.ExternalPullPath,
-			"accept": externalstage.Routes[5].Method + " " + externalstage.ExternalAcceptPath,
-			"report": externalstage.Routes[6].Method + " " + externalstage.ExternalReportPath,
+			"create":           externalstage.Routes[0].Method + " " + externalstage.InternalCreatePath,
+			"mint":             externalstage.Routes[1].Method + " " + externalstage.InternalMintPath,
+			"rotate":           externalstage.Routes[2].Method + " " + externalstage.InternalRotatePath,
+			"revoke":           externalstage.Routes[3].Method + " " + externalstage.InternalRevokePath,
+			"pull":             externalstage.Routes[4].Method + " " + externalstage.ExternalPullPath,
+			"accept":           externalstage.Routes[5].Method + " " + externalstage.ExternalAcceptPath,
+			"report":           externalstage.Routes[6].Method + " " + externalstage.ExternalReportPath,
+			"launch_candidate": http.MethodPost + " " + externalstage.LaunchCandidatePath,
+			"launch_consume":   http.MethodPost + " " + externalstage.LaunchConsumePath,
 		},
 	}
 	b, err := json.MarshalIndent(&Schema, "", "  ")

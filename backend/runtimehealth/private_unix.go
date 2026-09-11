@@ -179,4 +179,17 @@ func trustedDefinitionOwner(i os.FileInfo) bool {
 	return ok && (s.Uid == 0 || int64(s.Uid) == int64(os.Geteuid()))
 }
 
+func openUnfollowedRegular(path string, info os.FileInfo) (*os.File, error) {
+	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW, 0) // #nosec G304 -- path already passed Lstat regular/owner/mode/size gates; no-follow plus SameFile on this descriptor refuse symlink substitution before bytes are read.
+	if err != nil {
+		return nil, err
+	}
+	actual, err := f.Stat()
+	if err != nil || !os.SameFile(info, actual) || !actual.Mode().IsRegular() || !trustedDefinitionOwner(actual) {
+		_ = f.Close()
+		return nil, errors.New("file identity changed")
+	}
+	return f, nil
+}
+
 func writableDirectory(path string) bool { return syscall.Access(path, 2) == nil }

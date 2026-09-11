@@ -44,6 +44,10 @@ func (a *CodexAdapter) HasAccount(key string) bool {
 	return a.accounts.HasAccount(key)
 }
 
+func (a *CodexAdapter) EnrolledAccountKeys() []string {
+	return a.accounts.EnrolledAccountKeys()
+}
+
 func (*CodexAdapter) Name() string { return AdapterCodex }
 func (*CodexAdapter) Capabilities() []Capability {
 	return []Capability{CapabilityInbox, CapabilityStatus, CapabilitySteer, CapabilityInterrupt, CapabilityStop}

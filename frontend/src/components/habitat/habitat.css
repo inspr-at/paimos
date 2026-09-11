@@ -2042,3 +2042,80 @@
 .habitat-form :is(input, select, textarea):focus {
   border-color: var(--h-mint);
 }
+
+.habitat-removal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: #10232759;
+}
+.habitat-removal-dialog {
+  width: min(100%, 28rem);
+  max-height: min(92dvh, 40rem);
+  overflow: auto;
+  margin: 0;
+}
+.habitat-removal-meta {
+  margin: 0 0 8px;
+  font-size: 12px;
+  color: var(--h-muted);
+}
+.habitat-removal-choices {
+  margin: 16px 0;
+  padding: 0;
+  border: 0;
+}
+.habitat-removal-legend {
+  font-weight: 600;
+  margin-bottom: 10px;
+}
+.habitat-removal-choice {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 10px;
+  align-items: start;
+  padding: 10px;
+  margin-bottom: 8px;
+  border: 1px solid var(--h-line);
+  border-radius: 11px;
+  background: var(--h-surface);
+  cursor: pointer;
+}
+.habitat-removal-choice-disabled {
+  opacity: 0.72;
+  cursor: not-allowed;
+}
+.habitat-removal-choice strong {
+  display: block;
+  margin-bottom: 4px;
+}
+.habitat-removal-choice small {
+  display: block;
+  color: var(--h-muted);
+  line-height: 1.45;
+}
+.habitat-removal-unavailable {
+  margin-top: 6px;
+  color: var(--h-coral);
+}
+.habitat-removal-handoff {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .habitat-removal-backdrop {
+    animation: none;
+  }
+}
+@container habitat (max-width: 360px) {
+  .habitat-removal-dialog {
+    padding: 14px;
+  }
+  .habitat-removal-choice {
+    grid-template-columns: 1fr;
+  }
+}

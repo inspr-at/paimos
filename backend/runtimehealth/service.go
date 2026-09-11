@@ -416,6 +416,43 @@ func splitUnitCommand(s string) ([]string, error) {
 	}
 	return out, nil
 }
+
+// Declarative browser-guard LaunchAgents may set only the closed harness-hint
+// environment. PATH, NODE_OPTIONS, loader variables and any other key remain
+// execution overrides. The three path values must be one absolute refusal shim
+// whose bytes are a trusted sh/bash shebang plus the exact NIX-445 refusal
+// body; a marker substring is not authority.
+const (
+	browserGuardModeKey       = "INSPR_AGENT_BROWSER_GUARD"
+	browserGuardModeEnvOnly   = "env-only"
+	browserGuardShimSizeLimit = 8 << 10
+	browserGuardShebangLimit  = 256
+)
+
+// Exact text after writeShellScriptBin's shebang line: mkRefusalText plus the
+// wrapper's trailing newline. Unknown future wording fails closed.
+const browserGuardRefusalBody = "set -eu\n" +
+	"printf '%s\\n' \\\n" +
+	"  'INSPR agent browser guard (NIX-445): native browser launch refused.' \\\n" +
+	"  \"\" \\\n" +
+	"  '  Agent worker sessions must not start a native browser on this Mac.' \\\n" +
+	"  '  Chrome aborts in macOS _RegisterApplication from a sandboxed agent' \\\n" +
+	"  '  session and disrupts the operator desktop.' \\\n" +
+	"  \"\" \\\n" +
+	"  '  Browser QA belongs to a verified controller-owned or remote runner.' \\\n" +
+	"  '  Ask the controller for it; if none is available, report browser QA as' \\\n" +
+	"  '  unavailable. Do not retry, do not look for another browser binary,' \\\n" +
+	"  '  and do not disable the guard.' \\\n" +
+	"  \"\" \\\n" +
+	"  '  A blocked launch is NOT a passed browser test. Report the refusal.' >&2\n" +
+	"exit 78\n\n"
+
+var browserGuardPathKeys = []string{
+	"PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH",
+	"PUPPETEER_EXECUTABLE_PATH",
+	"CHROME_PATH",
+}
+
 func launchArguments(raw []byte, name, root, instance string) ([]string, error) {
 	d := xml.NewDecoder(bytes.NewReader(raw))
 	depth := 0
@@ -425,6 +462,7 @@ func launchArguments(raw []byte, name, root, instance string) ([]string, error) 
 	logs := map[string]string{}
 	umask := -1
 	var args []string
+	var guardEnv map[string]string
 	for {
 		tok, e := d.Token()
 		if e == io.EOF {
@@ -445,7 +483,7 @@ func launchArguments(raw []byte, name, root, instance string) ([]string, error) 
 					return nil, errors.New("duplicate LaunchAgent key")
 				}
 				seen[key] = true
-				if key == "EnvironmentVariables" || key == "Program" || key == "UserName" {
+				if key == "Program" || key == "UserName" {
 					return nil, errors.New("LaunchAgent execution override unsupported")
 				}
 			} else if key == "Label" && depth == 3 {
@@ -486,10 +524,25 @@ func launchArguments(raw []byte, name, root, instance string) ([]string, error) 
 				}
 				args = a.Strings
 				depth--
+			} else if key == "EnvironmentVariables" && depth == 3 {
+				if guardEnv != nil || t.Name.Local != "dict" {
+					return nil, errors.New("LaunchAgent environment override unsupported")
+				}
+				guardEnv, e = parseLaunchdStringDict(d, t)
+				if e != nil {
+					return nil, e
+				}
+				if e = verifyLaunchdBrowserGuardEnv(guardEnv); e != nil {
+					return nil, e
+				}
+				depth--
 			}
 		case xml.EndElement:
 			depth--
 		}
+	}
+	if seen["EnvironmentVariables"] && guardEnv == nil {
+		return nil, errors.New("LaunchAgent environment override unsupported")
 	}
 	dir, _ := agentd.InstanceStateDir(root, instance)
 	if len(logs) > 0 && umask != 63 {
@@ -504,6 +557,129 @@ func launchArguments(raw []byte, name, root, instance string) ([]string, error) 
 		return nil, fmt.Errorf("LaunchAgent label or arguments mismatch")
 	}
 	return args, nil
+}
+
+func parseLaunchdStringDict(d *xml.Decoder, start xml.StartElement) (map[string]string, error) {
+	if start.Name.Local != "dict" {
+		return nil, errors.New("LaunchAgent environment override unsupported")
+	}
+	out := map[string]string{}
+	depth := 1
+	pending := ""
+	for {
+		tok, e := d.Token()
+		if e != nil {
+			if e == io.EOF {
+				return nil, errors.New("LaunchAgent environment override unsupported")
+			}
+			return nil, errors.New("LaunchAgent syntax invalid")
+		}
+		switch t := tok.(type) {
+		case xml.StartElement:
+			depth++
+			if depth != 2 {
+				return nil, errors.New("LaunchAgent environment override unsupported")
+			}
+			if t.Name.Local == "key" {
+				if pending != "" {
+					return nil, errors.New("LaunchAgent environment override unsupported")
+				}
+				var k string
+				if e = d.DecodeElement(&k, &t); e != nil {
+					return nil, e
+				}
+				depth--
+				if k == "" || strings.ContainsAny(k, "\x00\r\n") {
+					return nil, errors.New("LaunchAgent environment override unsupported")
+				}
+				if _, dup := out[k]; dup {
+					return nil, errors.New("duplicate LaunchAgent environment key")
+				}
+				pending = k
+				continue
+			}
+			if t.Name.Local == "string" && pending != "" {
+				var v string
+				if e = d.DecodeElement(&v, &t); e != nil {
+					return nil, e
+				}
+				depth--
+				out[pending] = v
+				pending = ""
+				continue
+			}
+			return nil, errors.New("LaunchAgent environment override unsupported")
+		case xml.EndElement:
+			depth--
+			if depth == 0 {
+				if pending != "" {
+					return nil, errors.New("LaunchAgent environment override unsupported")
+				}
+				return out, nil
+			}
+		}
+	}
+}
+
+func verifyLaunchdBrowserGuardEnv(env map[string]string) error {
+	if env == nil || len(env) != 1+len(browserGuardPathKeys) {
+		return errors.New("LaunchAgent environment override unsupported")
+	}
+	if env[browserGuardModeKey] != browserGuardModeEnvOnly {
+		return errors.New("LaunchAgent environment override unsupported")
+	}
+	var shim string
+	for _, key := range browserGuardPathKeys {
+		value, ok := env[key]
+		if !ok || strings.ContainsAny(value, "\x00\r\n") || !filepath.IsAbs(value) {
+			return errors.New("LaunchAgent environment override unsupported")
+		}
+		if shim == "" {
+			shim = value
+			continue
+		}
+		if value != shim {
+			return errors.New("LaunchAgent environment override unsupported")
+		}
+	}
+	return verifyBrowserGuardRefusalShim(shim)
+}
+
+func verifyBrowserGuardRefusalShim(path string) error {
+	info, err := os.Lstat(path)
+	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0111 == 0 || info.Mode().Perm()&0022 != 0 || !trustedDefinitionOwner(info) || info.Size() == 0 || info.Size() > browserGuardShimSizeLimit {
+		return errors.New("LaunchAgent environment override unsupported")
+	}
+	f, err := openUnfollowedRegular(path, info)
+	if err != nil {
+		return errors.New("LaunchAgent environment override unsupported")
+	}
+	defer f.Close()
+	raw, err := io.ReadAll(io.LimitReader(f, browserGuardShimSizeLimit+1))
+	if err != nil || int64(len(raw)) != info.Size() || int64(len(raw)) > browserGuardShimSizeLimit {
+		return errors.New("LaunchAgent environment override unsupported")
+	}
+	line, rest, ok := bytes.Cut(raw, []byte{'\n'})
+	if !ok || len(line) > browserGuardShebangLimit || bytes.Contains(line, []byte{'\r'}) || !bytes.HasPrefix(line, []byte("#!")) {
+		return errors.New("LaunchAgent environment override unsupported")
+	}
+	interp := string(line[2:])
+	base := filepath.Base(interp)
+	if interp == "" || !filepath.IsAbs(interp) || strings.ContainsAny(interp, " \t\x00") || (base != "sh" && base != "bash") {
+		return errors.New("LaunchAgent environment override unsupported")
+	}
+	if !bytes.Equal(rest, []byte(browserGuardRefusalBody)) {
+		return errors.New("LaunchAgent environment override unsupported")
+	}
+	return verifyBrowserGuardInterpreter(interp)
+}
+
+func verifyBrowserGuardInterpreter(path string) error {
+	info, err := os.Lstat(path)
+	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0111 == 0 || info.Mode().Perm()&0022 != 0 || !trustedDefinitionOwner(info) {
+		return errors.New("LaunchAgent environment override unsupported")
+	}
+	return nil
 }
 
 // Platform stop commands may return before the owned daemon exits. Wait only

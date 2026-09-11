@@ -45,12 +45,38 @@ func TestSecretNeverAppearsInJSONDTOs(t *testing.T) {
 		reflect.TypeOf(RevokeHandoffRequest{}), reflect.TypeOf(HandoffMetadata{}),
 		reflect.TypeOf(PullResponse{}), reflect.TypeOf(AcceptRequest{}),
 		reflect.TypeOf(ReportRequest{}), reflect.TypeOf(ReportReceipt{}),
+		reflect.TypeOf(LaunchCandidate{}), reflect.TypeOf(LaunchAdmission{}),
+		reflect.TypeOf(ConsumeLaunchAdmissionRequest{}), reflect.TypeOf(LaunchReceipt{}),
 	}
 	for _, typ := range types {
 		for index := 0; index < typ.NumField(); index++ {
 			name := strings.Split(typ.Field(index).Tag.Get("json"), ",")[0]
 			if strings.Contains(name, "secret") || strings.Contains(name, "token") || strings.Contains(name, "credential_value") {
 				t.Fatalf("%s exposes forbidden JSON field %q", typ.Name(), name)
+			}
+		}
+	}
+}
+
+func TestLaunchAdmissionContractIsSeparateClosedAndValueFree(t *testing.T) {
+	if LaunchAdmissionMediaType != "application/vnd.paimos.external-stage-launch-admission.v1+json" ||
+		LaunchAdmissionSchema != "paimos.external-stage-launch-admission" || LaunchAdmissionVersion != 1 || len(LaunchRoutes) != 2 {
+		t.Fatalf("launch contract drifted: media=%q schema=%q version=%d routes=%v",
+			LaunchAdmissionMediaType, LaunchAdmissionSchema, LaunchAdmissionVersion, LaunchRoutes)
+	}
+	for _, route := range LaunchRoutes {
+		if route.Method != "POST" || route.Audience != "external" || strings.Contains(route.Path, "{action}") {
+			t.Fatalf("open launch route: %+v", route)
+		}
+	}
+	for _, typ := range []reflect.Type{reflect.TypeOf(LaunchCandidate{}), reflect.TypeOf(LaunchAdmission{}),
+		reflect.TypeOf(ConsumeLaunchAdmissionRequest{}), reflect.TypeOf(LaunchReceipt{})} {
+		for index := 0; index < typ.NumField(); index++ {
+			field := strings.Split(typ.Field(index).Tag.Get("json"), ",")[0]
+			for _, forbidden := range []string{"host", "path", "command", "url", "secret", "credential_value", "authority_text"} {
+				if strings.Contains(field, forbidden) {
+					t.Fatalf("%s exposes forbidden launch field %q", typ.Name(), field)
+				}
 			}
 		}
 	}

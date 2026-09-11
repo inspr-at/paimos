@@ -11,6 +11,7 @@ import (
 	"fmt"
 
 	"github.com/inspr-at/paimos/backend/delivery"
+	"github.com/inspr-at/paimos/backend/targetidentity"
 )
 
 const (
@@ -27,6 +28,7 @@ type RegisterReporterRequest struct {
 	DependencyKey string        `json:"dependency_key,omitempty"`
 	Workflow      string        `json:"workflow,omitempty"`
 	Environment   string        `json:"environment,omitempty"`
+	TargetRef     string        `json:"target_ref,omitempty"`
 }
 
 type ReporterRegistration struct {
@@ -38,6 +40,7 @@ type ReporterRegistration struct {
 	DependencyKey   string         `json:"dependency_key,omitempty"`
 	Workflow        string         `json:"workflow,omitempty"`
 	Environment     string         `json:"environment,omitempty"`
+	TargetRef       string         `json:"target_ref,omitempty"`
 	EvidenceCeiling []EvidenceKind `json:"evidence_ceiling"`
 	CreatedAt       string         `json:"created_at"`
 	RevokedAt       string         `json:"revoked_at,omitempty"`
@@ -106,10 +109,11 @@ func validateRegistrationRequest(req RegisterReporterRequest) error {
 	if req.APIKeyID <= 0 {
 		return ErrInvalid
 	}
-	if req.ReporterClass == ReporterClassPharos && req.ReporterRole == ReporterRoleOwner && req.DependencyKey == "" && symbolPattern.MatchString(req.Workflow) && symbolPattern.MatchString(req.Environment) {
+	if req.ReporterClass == ReporterClassPharos && req.ReporterRole == ReporterRoleOwner && req.DependencyKey == "" && symbolPattern.MatchString(req.Workflow) && symbolPattern.MatchString(req.Environment) &&
+		(req.TargetRef == "" || targetidentity.IsDigest(req.TargetRef)) {
 		return nil
 	}
-	if req.ReporterClass == ReporterClassJanus && req.ReporterRole == ReporterRoleDependency && symbolPattern.MatchString(req.DependencyKey) && req.Workflow == "" && req.Environment == "" {
+	if req.ReporterClass == ReporterClassJanus && req.ReporterRole == ReporterRoleDependency && symbolPattern.MatchString(req.DependencyKey) && req.Workflow == "" && req.Environment == "" && req.TargetRef == "" {
 		return nil
 	}
 	return ErrInvalid
@@ -362,14 +366,14 @@ func scanRegistration(row interface{ Scan(...any) error }) (ReporterRegistration
 	var r ReporterRegistration
 	var class, role string
 	var ad, av, aa, ac int
-	err := row.Scan(&r.RegistrationID, &r.ReporterID, &r.APIKeyID, &class, &role, &r.DependencyKey, &r.Workflow, &r.Environment, &ad, &av, &aa, &ac, &r.CreatedAt, &r.RevokedAt)
+	err := row.Scan(&r.RegistrationID, &r.ReporterID, &r.APIKeyID, &class, &role, &r.DependencyKey, &r.Workflow, &r.Environment, &r.TargetRef, &ad, &av, &aa, &ac, &r.CreatedAt, &r.RevokedAt)
 	r.ReporterClass, r.ReporterRole = ReporterClass(class), ReporterRole(role)
 	r.EvidenceCeiling = registrationCeiling(r.ReporterClass)
 	return r, err
 }
 
 const registrationSelect = `SELECT id,reporter_id,api_key_id,reporter_class,reporter_role,COALESCE(dependency_key,''),
-	COALESCE(workflow_symbol,''),COALESCE(environment_symbol,''),allow_deployment,allow_verification,
+	COALESCE(workflow_symbol,''),COALESCE(environment_symbol,''),target_ref,allow_deployment,allow_verification,
 	allow_authorization,allow_credential_handoff,created_at,COALESCE(revoked_at,'') FROM external_stage_reporter_registrations `
 
 // CurrentReporterAuthoritySQL is the owning-domain liveness predicate for a
@@ -438,7 +442,7 @@ func (s *Service) RegisterReporter(ctx context.Context, p Principal, deliveryKey
 	if err != nil {
 		return ReporterRegistration{}, err
 	}
-	opaqueDigest := sha256.Sum256([]byte(fmt.Sprintf("external-reporter\x00%d\x00%d\x00%s\x00%s\x00%s\x00%s", deliveryID, req.APIKeyID, req.ReporterClass, req.DependencyKey, req.Workflow, req.Environment)))
+	opaqueDigest := sha256.Sum256([]byte(fmt.Sprintf("external-reporter\x00%d\x00%d\x00%s\x00%s\x00%s\x00%s\x00%s", deliveryID, req.APIKeyID, req.ReporterClass, req.DependencyKey, req.Workflow, req.Environment, req.TargetRef)))
 	opaque := "external:" + fmt.Sprintf("%x", opaqueDigest[:])
 	if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO delivery_reporters(delivery_id,reporter_type,opaque_key,created_at) VALUES(?,'external',?,strftime('%Y-%m-%dT%H:%M:%fZ','now'))`, deliveryID, opaque); err != nil {
 		return ReporterRegistration{}, err
@@ -454,9 +458,9 @@ func (s *Service) RegisterReporter(ctx context.Context, p Principal, deliveryKey
 		aa, ac = 1, 1
 	}
 	res, err := tx.ExecContext(ctx, `INSERT INTO external_stage_reporter_registrations(delivery_id,project_id,user_id,api_key_id,
-		reporter_id,reporter_class,reporter_role,dependency_key,workflow_symbol,environment_symbol,allow_deployment,
-		allow_verification,allow_authorization,allow_credential_handoff) VALUES(?,?,?,?,?,?,?,NULLIF(?,''),NULLIF(?,''),NULLIF(?,''),?,?,?,?)`,
-		deliveryID, projectID, userID, req.APIKeyID, reporterID, req.ReporterClass, req.ReporterRole, req.DependencyKey, req.Workflow, req.Environment, ad, av, aa, ac)
+		reporter_id,reporter_class,reporter_role,dependency_key,workflow_symbol,environment_symbol,target_ref,allow_deployment,
+		allow_verification,allow_authorization,allow_credential_handoff) VALUES(?,?,?,?,?,?,?,NULLIF(?,''),NULLIF(?,''),NULLIF(?,''),?,?,?,?,?)`,
+		deliveryID, projectID, userID, req.APIKeyID, reporterID, req.ReporterClass, req.ReporterRole, req.DependencyKey, req.Workflow, req.Environment, req.TargetRef, ad, av, aa, ac)
 	if err != nil {
 		return ReporterRegistration{}, mapConflict(err)
 	}

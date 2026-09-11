@@ -82,3 +82,45 @@ export function clearIntentRecovery(scope: RecoveryScope) {
     /* unavailable */
   }
 }
+
+/** Unsubmitted lifecycle review drafts only; never matches a live server intent receipt. */
+export function findLifecycleDraftForSession(
+  principalId: number,
+  projectId: number,
+  sessionId: string,
+): { scope: RecoveryScope; recovery: IntentRecovery } | null {
+  if (!positive(principalId) || !positive(projectId) || !uuid(sessionId)) return null
+  try {
+    for (let index = 0; index < sessionStorage.length; index++) {
+      const storageKey = sessionStorage.key(index)
+      if (!storageKey?.startsWith(SS_HABITAT_INTENT_PREFIX)) continue
+      const raw = sessionStorage.getItem(storageKey)
+      if (!raw || raw.length > MAX_BYTES) continue
+      const row = object(JSON.parse(raw))
+      fields(row, ['schema_version', 'scope', 'intentId', 'request', 'savedAt'])
+      if (row.schema_version !== 1 || row.intentId !== null || !positive(row.savedAt)) continue
+      const storedScope = object(row.scope)
+      fields(storedScope, ['origin', 'instance', 'principalId', 'projectId'])
+      if (storedScope.principalId !== principalId || storedScope.projectId !== projectId) continue
+      const request = parseHabitatRequest(row.request)
+      if ('session_id' in request && request.session_id === sessionId) {
+        return {
+          scope: {
+            origin: String(storedScope.origin),
+            instance: String(storedScope.instance),
+            principalId: Number(storedScope.principalId),
+            projectId: Number(storedScope.projectId),
+          },
+          recovery: {
+            intentId: null,
+            request,
+            savedAt: row.savedAt as number,
+          },
+        }
+      }
+    }
+  } catch {
+    return null
+  }
+  return null
+}

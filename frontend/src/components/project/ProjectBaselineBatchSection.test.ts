@@ -876,6 +876,88 @@ describe('ProjectBaselineBatchSection', () => {
     expect(reviewCalls()[0][1]).toMatchObject({ execution_mode: 'manual', worker: {} })
     app.unmount()
   })
+
+  it('keeps delegated launch default-off and binds an exact one-shot target only through deliberate review and Start', async () => {
+    const targetRef = `sha256:${'1'.repeat(64)}`
+    const otherRef = `sha256:${'2'.repeat(64)}`
+    const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString()
+    const current = assistedWorkflow()
+    current.draft = { ...current.draft!, execution_mode: 'automatic', status: 'open', review_id: null, review_valid: false }
+    current.choices.delegated_launch_targets = [
+      { target_ref: targetRef, environment: 'production-eu1', label: 'Project environment production-eu1 (#1)' },
+      { target_ref: otherRef, environment: 'production-eu2', label: 'Project environment production-eu2 (#2)' },
+    ]
+    vi.mocked(api.get).mockImplementation(async () => structuredClone(current) as Workflow)
+    vi.mocked(api.post).mockImplementation(async (url: string, body?: unknown) => {
+      if (String(url).endsWith('/review')) {
+        const req = body as Parameters<typeof bindDraft>[1]
+        current.draft = bindDraft(current, req, 78)
+        return current.draft
+      }
+      if (String(url).includes('/start')) return batchFixture({ execution_mode: 'automatic' })
+      throw new Error(`unexpected post ${url}`)
+    })
+    const { el, app } = mount()
+    await settle()
+    expect((el.querySelector('[data-testid="delegated-launch-enabled"]') as HTMLInputElement).checked).toBe(false)
+    expect(el.querySelector('[data-testid="delegated-launch-target"]')).toBeNull()
+
+    const enable = el.querySelector('[data-testid="delegated-launch-enabled"]') as HTMLInputElement
+    enable.checked = true
+    enable.dispatchEvent(new Event('change'))
+    await settle()
+    expect(el.textContent).toContain('never host consent')
+    expect((el.querySelector('[data-testid="bind-review"]') as HTMLButtonElement).disabled).toBe(true)
+    setSelect(el, 'delegated-launch-target', targetRef)
+    const expiry = el.querySelector('[data-testid="delegated-launch-expiry"]') as HTMLInputElement
+    expiry.value = expiresAt
+    expiry.dispatchEvent(new Event('input'))
+    await settle()
+    expect((el.querySelector('[data-testid="bind-review"]') as HTMLButtonElement).disabled).toBe(false)
+
+    ;(el.querySelector('[data-testid="bind-review"]') as HTMLButtonElement).click()
+    await settle()
+    const selection = {
+      target_ref: targetRef,
+      workflow: 'deploy-production',
+      environment: 'production-eu1',
+      expires_at: expiresAt,
+      max_launches: 1,
+    }
+    expect(reviewCalls()[0][1]).toMatchObject({ execution_mode: 'automatic', delegated_launch: selection })
+    const confirm = el.querySelector('[data-testid="confirm-start"]') as HTMLInputElement
+    expect(confirm.disabled).toBe(false)
+    confirm.checked = true
+    confirm.dispatchEvent(new Event('change'))
+    await settle()
+    ;(el.querySelector('[data-testid="start-batch"]') as HTMLButtonElement).click()
+    await settle()
+    expect(startCalls()).toHaveLength(1)
+    expect(startCalls()[0][1]).toMatchObject({ confirm: true, review_id: 78, delegated_launch: selection })
+    app.unmount()
+  })
+
+  it('shows the bounded grant and exposes only the server-authorized revoke control', async () => {
+    vi.mocked(api.get).mockResolvedValue(workflowFixture({
+      draft: null,
+      active_batch: batchFixture({
+        execution_mode: 'automatic',
+        launch_grant: {
+          grant_id: '97800000-0000-4000-8000-000000000001', revision: 1,
+          grant_digest: `sha256:${'7'.repeat(64)}`, target_ref: `sha256:${'1'.repeat(64)}`,
+          workflow: 'deploy-production', environment: 'production-eu1', max_launches: 1, used_launches: 0,
+          issued_at: '2026-09-09T10:00:00Z', expires_at: '2026-09-09T11:00:00Z', state: 'active',
+        },
+        controls: [{ action: 'revoke_launch', available: true, effect: 'launch_grant_revoke' }],
+      }),
+    }))
+    const { el, app } = mount()
+    await settle()
+    expect(el.querySelector('[data-testid="launch-grant"]')!.textContent).toContain('used 0/1')
+    expect(el.querySelector('[data-control="revoke_launch"]')).not.toBeNull()
+    expect(el.textContent).not.toContain('Launch now')
+    app.unmount()
+  })
 })
 
 function startCalls() {
@@ -948,7 +1030,7 @@ function openAit7Draft(): Workflow {
   return wf
 }
 
-function bindDraft(wf: Workflow, body: { execution_mode?: string; selected_requirement_refs?: string[]; worker?: Draft['worker'] }, reviewId: number): Draft {
+function bindDraft(wf: Workflow, body: { execution_mode?: string; selected_requirement_refs?: string[]; worker?: Draft['worker']; delegated_launch?: Draft['delegated_launch'] }, reviewId: number): Draft {
   const mode = body.execution_mode ?? wf.draft!.execution_mode
   return {
     ...wf.draft!,
@@ -961,6 +1043,7 @@ function bindDraft(wf: Workflow, body: { execution_mode?: string; selected_requi
       constraint_refs: wf.draft!.selected.constraint_refs,
     },
     worker: mode === 'manual' ? {} : (body.worker ?? wf.draft!.worker),
+    delegated_launch: body.delegated_launch ?? null,
   }
 }
 

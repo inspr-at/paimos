@@ -5,6 +5,7 @@ package baselinebatch
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -50,11 +51,14 @@ func (s *Service) Control(ctx context.Context, actor Actor, projectID, batchID i
 	if err := requireHuman(actor); err != nil {
 		return Batch{}, err
 	}
-	if req.Action != "pause" && req.Action != "resume" && req.Action != "cancel" {
+	if req.Action != "pause" && req.Action != "resume" && req.Action != "cancel" && req.Action != "revoke_launch" {
 		return Batch{}, fmt.Errorf("%w: action", ErrInvalid)
 	}
 	if req.RequestKey != "" && uuid.Validate(req.RequestKey) != nil {
 		return Batch{}, fmt.Errorf("%w: request_key", ErrInvalid)
+	}
+	if req.Action == "revoke_launch" {
+		return s.revokeLaunchGrant(ctx, actor, projectID, batchID, req.RequestKey)
 	}
 	stored, state, execution, err := s.controlContext(ctx, actor, projectID, batchID)
 	if err != nil {
@@ -86,6 +90,55 @@ func (s *Service) Control(ctx context.Context, actor Actor, projectID, batchID i
 		return Batch{}, err
 	}
 	if err := s.recordControl(ctx, actor, stored, req.Action, plan, effectRef, key); err != nil {
+		return Batch{}, err
+	}
+	return s.GetBatch(ctx, actor, projectID, batchID)
+}
+
+func (s *Service) revokeLaunchGrant(ctx context.Context, actor Actor, projectID, batchID int64, requestKeyValue string) (Batch, error) {
+	if requestKeyValue == "" {
+		requestKeyValue = uuid.NewString()
+	}
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return Batch{}, err
+	}
+	defer tx.Rollback()
+	if _, err := s.currentAuthority(ctx, tx, actor, projectID, true); err != nil {
+		return Batch{}, err
+	}
+	var grantID string
+	var revoked sql.NullString
+	var consumed int
+	if err := tx.QueryRowContext(ctx, `SELECT grant.grant_id,grant.revoked_at,
+		EXISTS(SELECT 1 FROM external_stage_launch_admissions admission WHERE admission.grant_id=grant.grant_id AND admission.state='consumed')
+		FROM baseline_batch_launch_grants grant WHERE grant.project_id=? AND grant.batch_id=?`, projectID, batchID).
+		Scan(&grantID, &revoked, &consumed); errors.Is(err, sql.ErrNoRows) {
+		return Batch{}, fmt.Errorf("%w: launch grant", ErrNotFound)
+	} else if err != nil {
+		return Batch{}, err
+	}
+	if revoked.Valid {
+		if err := tx.Commit(); err != nil {
+			return Batch{}, err
+		}
+		return s.GetBatch(ctx, actor, projectID, batchID)
+	}
+	if consumed != 0 {
+		return Batch{}, fmt.Errorf("%w: consumed launch grant cannot be revoked", ErrConflict)
+	}
+	idem := sha256.Sum256([]byte(requestKeyValue))
+	now := s.stamp()
+	if _, err := tx.ExecContext(ctx, `INSERT INTO baseline_batch_launch_grant_revocations(
+		grant_id,batch_id,actor_user_id,actor_session_credential_id,idempotency_digest,revoked_at) VALUES(?,?,?,?,?,?)`,
+		grantID, batchID, actor.UserID, actor.SessionCredentialID, idem[:], now); err != nil {
+		return Batch{}, err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE baseline_batch_launch_grants SET revoked_at=?,revoked_by=?,
+		revoked_session_credential_id=? WHERE grant_id=? AND revoked_at IS NULL`, now, actor.UserID, actor.SessionCredentialID, grantID); err != nil {
+		return Batch{}, err
+	}
+	if err := tx.Commit(); err != nil {
 		return Batch{}, err
 	}
 	return s.GetBatch(ctx, actor, projectID, batchID)

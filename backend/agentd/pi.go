@@ -47,6 +47,10 @@ func (a *PiAdapter) HasAccount(key string) bool {
 	return a.accounts.HasAccount(key)
 }
 
+func (a *PiAdapter) EnrolledAccountKeys() []string {
+	return a.accounts.EnrolledAccountKeys()
+}
+
 func (*PiAdapter) Name() string { return AdapterPi }
 
 func (*PiAdapter) Capabilities() []Capability {

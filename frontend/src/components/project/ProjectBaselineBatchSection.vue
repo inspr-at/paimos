@@ -15,12 +15,15 @@ import {
   setBaselineStreamEnabled,
   startBaselineBatch,
   isClassOnlyScope,
+  isUnavailableScope,
   runtimeChoiceProblem,
   runtimeScopes,
+  scopeAttachmentRevision,
   scopedAccounts,
   scopedProfiles,
   type Batch,
   type ControlOption,
+  type DelegatedLaunchSelection,
   type Draft,
   type Forecast,
   type WorkerSelection,
@@ -47,6 +50,9 @@ const accountKey = ref('')
 const profileKey = ref('')
 const workspaceHandle = ref('')
 const workerName = ref('')
+const delegatedLaunchEnabled = ref(false)
+const delegatedTargetRef = ref('')
+const delegatedExpiresAt = ref('')
 
 const enabled = computed(() => workflow.value?.inspr_stream_enabled === true)
 const draft = computed(() => workflow.value?.draft ?? null)
@@ -56,14 +62,34 @@ const runtimes = computed(() => workflow.value?.choices.runtimes ?? [])
 const runtime = computed(() => runtimes.value.find((r) => r.runtime_id === runtimeId.value) ?? runtimes.value[0] ?? null)
 const agentMode = computed(() => mode.value !== 'manual')
 const readiness = computed(() => workflow.value?.readiness ?? null)
-const scopeProblem = computed(() => (agentMode.value ? runtimeChoiceProblem(runtime.value) : ''))
+const scopeProblem = computed(() => {
+  if (!agentMode.value) return ''
+  const contractProblem = runtimeChoiceProblem(runtime.value)
+  if (contractProblem) return contractProblem
+  if (isUnavailableScope(runtime.value, accountLabel.value))
+    return 'This account scope has no attached account available. Connect an enrolled account and restart the owned runtime before review.'
+  return ''
+})
 const accountClasses = computed(() => runtime.value ? runtimeScopes(runtime.value).map((scope) => scope.account_label) : [])
 const namedAccounts = computed(() => scopedAccounts(runtime.value, accountLabel.value))
 const classProfiles = computed(() => scopedProfiles(runtime.value, accountLabel.value))
 const classOnly = computed(() => isClassOnlyScope(runtime.value, accountLabel.value))
+const delegatedTargets = computed(() => workflow.value?.choices.delegated_launch_targets ?? [])
+const delegatedTarget = computed(() => delegatedTargets.value.find((target) => target.target_ref === delegatedTargetRef.value) ?? null)
+const launchSelectionProblem = computed(() => {
+  if (!delegatedLaunchEnabled.value) return ''
+  if (mode.value !== 'automatic') return 'Delegated launch is available only in automatic mode.'
+  if (!delegatedTarget.value) return 'Select one current server-listed project environment.'
+  const expires = Date.parse(delegatedExpiresAt.value)
+  if (!Number.isFinite(expires) || expires <= Date.now() || expires > Date.now() + 24 * 60 * 60 * 1000) {
+    return 'Choose an expiry after now and no more than 24 hours away.'
+  }
+  return ''
+})
 // Agent execution needs a current owned observation. Manual delivery does not,
 // and never invents one.
 const startBlockedReason = computed(() => {
+  if (launchSelectionProblem.value) return launchSelectionProblem.value
   if (!agentMode.value) return ''
   if (scopeProblem.value) return scopeProblem.value
   if (!readiness.value) return 'Select a runtime, account, profile and workspace, then check readiness.'
@@ -95,6 +121,7 @@ function workerInputs(modeValue: string, worker: WorkerSelection) {
       runtime_generation: '',
       account_label: '',
       account_key: '',
+      attachment_revision: 0,
       profile_id: '',
       profile_version: '',
       workspace_handle: '',
@@ -106,6 +133,7 @@ function workerInputs(modeValue: string, worker: WorkerSelection) {
     runtime_generation: worker.runtime_generation ?? '',
     account_label: worker.account_label ?? '',
     account_key: worker.account_key ?? '',
+    attachment_revision: worker.attachment_revision ?? 0,
     profile_id: worker.profile_id ?? '',
     profile_version: worker.profile_version ?? '',
     workspace_handle: worker.workspace_handle ?? '',
@@ -122,10 +150,12 @@ function localReviewInputs() {
       runtime_generation: runtime.value?.runtime_generation ?? '',
       account_label: accountLabel.value,
       account_key: accountKey.value,
+      attachment_revision: scopeAttachmentRevision(runtime.value, accountLabel.value),
       profile_id: profileKey.value.split('@')[0],
       profile_version: profileKey.value.split('@').slice(1).join('@'),
       workspace_handle: workspaceHandle.value,
     }),
+    delegated_launch: delegatedLaunchPayload(),
   }
 }
 
@@ -134,6 +164,7 @@ function reviewedInputs(d: Draft) {
     mode: d.execution_mode,
     selected: sortedRefs(d.selected?.requirement_refs),
     ...workerInputs(d.execution_mode, d.worker ?? {}),
+    delegated_launch: d.delegated_launch ?? null,
   }
 }
 
@@ -145,9 +176,11 @@ function sameReviewInputs(local: ReturnType<typeof localReviewInputs>, reviewed:
     && local.runtime_generation === reviewed.runtime_generation
     && local.account_label === reviewed.account_label
     && local.account_key === reviewed.account_key
+    && local.attachment_revision === reviewed.attachment_revision
     && local.profile_id === reviewed.profile_id
     && local.profile_version === reviewed.profile_version
     && local.workspace_handle === reviewed.workspace_handle
+    && JSON.stringify(local.delegated_launch) === JSON.stringify(reviewed.delegated_launch)
 }
 
 // Server review_valid is the last bound snapshot. Local edits are not patched
@@ -191,7 +224,12 @@ watch(accountLabel, (label) => {
   }
 })
 
-watch([mode, selected, runtimeId, accountLabel, accountKey, profileKey, workspaceHandle, workerName], () => {
+watch(mode, (value) => {
+  if (value !== 'automatic') delegatedLaunchEnabled.value = false
+})
+
+watch([mode, selected, runtimeId, accountLabel, accountKey, profileKey, workspaceHandle, workerName,
+  delegatedLaunchEnabled, delegatedTargetRef, delegatedExpiresAt], () => {
   confirmStart.value = false
 })
 
@@ -212,6 +250,9 @@ function hydrateFromDraft(d: Draft) {
   profileKey.value = d.worker.profile_id ? `${d.worker.profile_id}@${d.worker.profile_version ?? ''}` : ''
   workspaceHandle.value = d.worker.workspace_handle ?? ''
   workerName.value = d.worker.worker_name ?? ''
+  delegatedLaunchEnabled.value = !!d.delegated_launch
+  delegatedTargetRef.value = d.delegated_launch?.target_ref ?? ''
+  delegatedExpiresAt.value = d.delegated_launch?.expires_at ?? ''
 }
 
 const draftUnresolved = computed(() => draft.value?.unresolved ?? [])
@@ -321,12 +362,25 @@ function workerPayload() {
     runtime_id: runtime.value?.runtime_id,
     runtime_generation: runtime.value?.runtime_generation,
     account_label: accountLabel.value,
+    attachment_revision: scopeAttachmentRevision(runtime.value, accountLabel.value),
     profile_id: profileId,
     profile_version: profileVersion,
     workspace_handle: workspaceHandle.value,
   }
   if (accountKey.value) payload.account_key = accountKey.value
   return payload
+}
+
+function delegatedLaunchPayload(): DelegatedLaunchSelection | null {
+  const target = delegatedTarget.value
+  if (!delegatedLaunchEnabled.value || mode.value !== 'automatic' || !target) return null
+  return {
+    target_ref: target.target_ref,
+    workflow: 'deploy-production',
+    environment: target.environment,
+    expires_at: delegatedExpiresAt.value.trim(),
+    max_launches: 1,
+  }
 }
 
 // The selection is stored on the draft first so the owned probe and the review
@@ -337,6 +391,7 @@ async function saveSelection() {
     execution_mode: mode.value,
     selected_requirement_refs: sortedRefs(selected.value),
     worker: workerPayload(),
+    delegated_launch: delegatedLaunchPayload(),
   })
 }
 
@@ -356,7 +411,7 @@ async function checkReadiness() {
 }
 
 async function review() {
-  if (!draft.value) return
+  if (!draft.value || launchSelectionProblem.value) return
   busy.value = true
   error.value = ''
   try {
@@ -364,6 +419,7 @@ async function review() {
       execution_mode: mode.value,
       selected_requirement_refs: sortedRefs(selected.value),
       worker: workerPayload(),
+      delegated_launch: delegatedLaunchPayload(),
     })
     confirmStart.value = false
     if (workflow.value) workflow.value = { ...workflow.value, draft: reviewed }
@@ -393,6 +449,7 @@ async function start() {
       execution_mode: mode.value,
       selected_requirement_refs: sortedRefs(selected.value),
       worker: workerPayload(),
+      delegated_launch: delegatedLaunchPayload(),
     }, idempotencyKey)
     confirmStart.value = false
     await load()
@@ -580,6 +637,11 @@ function stateLabel(d: Draft | null, b: Batch | null) {
         </li>
       </ul>
       <p class="bb-meta">{{ active.baseline.content_digest }}</p>
+      <p v-if="active.launch_grant" class="bb-launch-summary" data-testid="launch-grant">
+        One-shot launch grant: <strong>{{ active.launch_grant.state }}</strong> ·
+        {{ active.launch_grant.environment }} · used {{ active.launch_grant.used_launches }}/{{ active.launch_grant.max_launches }} ·
+        expires {{ active.launch_grant.expires_at }}
+      </p>
       <div v-if="canWrite" class="bb-actions">
         <button
           v-for="option in availableControls(active)"
@@ -662,6 +724,34 @@ function stateLabel(d: Draft | null, b: Batch | null) {
         <p v-if="scopeProblem" class="bb-unresolved" data-testid="baseline-scope-error">{{ scopeProblem }}</p>
         <p v-else-if="!runtimes.length" class="bb-note">No owned runtime advertised. Assisted and automatic stay blocked until an owned probe proves this development target. Manual remains usable.</p>
       </div>
+      <fieldset v-if="canWrite && mode === 'automatic'" class="bb-launch" data-testid="delegated-launch-review">
+        <legend>One-shot deployment launch</legend>
+        <label class="bb-confirm">
+          <input v-model="delegatedLaunchEnabled" type="checkbox" data-testid="delegated-launch-enabled" />
+          Allow the reviewed automatic batch to request exactly one deploy-production launch
+        </label>
+        <template v-if="delegatedLaunchEnabled">
+          <label>
+            Exact server-listed target
+            <select v-model="delegatedTargetRef" class="bb-input" data-testid="delegated-launch-target">
+              <option disabled value="">Select project environment</option>
+              <option v-for="target in delegatedTargets" :key="target.target_ref" :value="target.target_ref">
+                {{ target.label }}
+              </option>
+            </select>
+          </label>
+          <label>
+            Expires at (RFC3339, within 24 hours)
+            <input v-model="delegatedExpiresAt" class="bb-input" data-testid="delegated-launch-expiry" placeholder="2026-09-09T18:00:00Z" />
+          </label>
+          <p class="bb-note">
+            This review binds the exact target digest, production workflow, environment, expiry, and maximum of one launch.
+            Automatic mode or possession of a handoff secret alone is never host consent. Existing impact, privacy, data-loss,
+            scope, review, artifact, and authority gates remain mandatory.
+          </p>
+          <p v-if="launchSelectionProblem" class="bb-unresolved" data-testid="delegated-launch-problem">{{ launchSelectionProblem }}</p>
+        </template>
+      </fieldset>
       <div v-if="agentMode" class="bb-readiness" data-testid="readiness">
         <p class="bb-meta">
           Readiness: <strong>{{ readiness?.status ?? 'unknown' }}</strong>
@@ -680,7 +770,7 @@ function stateLabel(d: Draft | null, b: Batch | null) {
         </button>
       </div>
       <div v-if="canWrite" class="bb-actions">
-        <button type="button" class="btn btn-sm" data-testid="bind-review" :disabled="busy" @click="review">Bind review</button>
+        <button type="button" class="btn btn-sm" data-testid="bind-review" :disabled="busy || !!launchSelectionProblem" @click="review">Bind review</button>
         <label class="bb-confirm">
           <input
             type="checkbox"
@@ -689,7 +779,7 @@ function stateLabel(d: Draft | null, b: Batch | null) {
             :disabled="!reviewBindingCurrent"
             @change="onConfirmStart"
           />
-          I confirm this exact baseline, scope, and mode
+          I confirm this exact baseline, scope, mode, and any displayed one-shot launch grant
         </label>
         <button type="button" class="btn btn-primary btn-sm" data-testid="start-batch" :disabled="!canStart" @click="start">
           Start batch
@@ -763,6 +853,15 @@ function stateLabel(d: Draft | null, b: Batch | null) {
   align-items: center;
   min-width: 0;
 }
+.bb-launch {
+  display: flex;
+  flex-direction: column;
+  gap: .45rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  min-width: 0;
+}
+.bb-launch-summary { font-size: 12px; color: var(--text-muted); overflow-wrap: anywhere; }
 .bb-readiness { display: flex; flex-direction: column; gap: .35rem; min-width: 0; }
 .bb-reqs, .bb-forecasts, .bb-stages {
   list-style: none;

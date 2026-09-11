@@ -1,7 +1,11 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { ssHabitatIntentKey } from '@/constants/storage'
-import { readIntentRecovery, writeIntentRecovery } from './habitatRecovery'
-import type { HabitatStartRequest } from './habitatLifecycle'
+import {
+  findLifecycleDraftForSession,
+  readIntentRecovery,
+  writeIntentRecovery,
+} from './habitatRecovery'
+import type { HabitatExistingRequest, HabitatStartRequest } from './habitatLifecycle'
 const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`
 const scope = {
   origin: 'https://fixture.local',
@@ -57,5 +61,36 @@ describe('Non-authoritative lifecycle recovery', () => {
       expect(readIntentRecovery(scope)).toBeNull()
       expect(sessionStorage.getItem(key)).toBeNull()
     }
+  })
+  it('finds only unsubmitted lifecycle drafts bound to one worker session', () => {
+    const sessionId = id(9)
+    const draft: HabitatExistingRequest = {
+      request_key: id(10),
+      operation: 'reassign',
+      runtime_id: id(2),
+      runtime_generation: id(3),
+      account_label: 'chatgpt',
+      ttl_seconds: 120,
+      workspace_handle: id(4),
+      agent_name: 'fixture',
+      dispatch_profile_id: 'fixture-profile',
+      dispatch_profile_version: '1',
+      ticket_id: 917,
+      work_shape: 'ship',
+      role: 'worker',
+      parent_harness_session_id: null,
+      session_id: sessionId,
+      session_generation: id(11),
+      expected_revision: 2,
+    }
+    expect(
+      writeIntentRecovery(scope, { intentId: null, request: draft, savedAt: Date.now() }),
+    ).toBe(true)
+    expect(findLifecycleDraftForSession(1, 1, sessionId)?.recovery.request).toEqual(draft)
+    expect(findLifecycleDraftForSession(1, 1, id(12))).toBeNull()
+    expect(
+      writeIntentRecovery(scope, { intentId: id(5), request: draft, savedAt: Date.now() }),
+    ).toBe(true)
+    expect(findLifecycleDraftForSession(1, 1, sessionId)).toBeNull()
   })
 })

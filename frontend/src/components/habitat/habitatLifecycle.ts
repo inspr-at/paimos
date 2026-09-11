@@ -6,6 +6,8 @@ export interface HabitatAccountScope {
   account_label: string
   accounts?: { key: string; label: string }[]
   profiles: { id: string; version: string }[]
+  attachment_revision?: number
+  account_availability?: 'available' | 'unavailable'
 }
 export interface HabitatRuntime {
   id: string
@@ -14,7 +16,7 @@ export interface HabitatRuntime {
   machine_id: string
   account_label?: string
   accounts?: { key: string; label: string }[]
-  schema_version?: 2 | 3
+  schema_version?: 2 | 3 | 4
   workspaces: { handle: string; identity: string; label?: string }[]
   profiles?: { id: string; version: string }[]
   account_scopes?: HabitatAccountScope[]
@@ -25,6 +27,7 @@ export type HabitatAccountChoice = {
   account_label: string
   account_key: string
   label: string
+  attachment_revision?: number
 }
 export type HabitatStartRequest = {
   request_key: string
@@ -33,6 +36,7 @@ export type HabitatStartRequest = {
   runtime_generation: string
   account_label: string
   account_key?: string
+  attachment_revision?: number
   ttl_seconds: number
   workspace_handle: string
   agent_name: string
@@ -132,7 +136,9 @@ export function parseHabitatRequest(value: unknown): HabitatLifecycleRequest {
         ? ['repair_layer']
         : [...binding, ...(row.operation === 'start' ? [] : existing)]),
     ],
-    row.operation === 'repair' ? ['account_key'] : [...nullable, 'account_key'],
+    row.operation === 'repair'
+      ? ['account_key', 'attachment_revision']
+      : [...nullable, 'account_key', 'attachment_revision'],
   )
   if (
     !uuid(row.request_key) ||
@@ -140,6 +146,8 @@ export function parseHabitatRequest(value: unknown): HabitatLifecycleRequest {
     !uuid(row.runtime_generation) ||
     !ACCOUNTS.includes(String(row.account_label)) ||
     (row.account_key !== undefined && !accountKey(row.account_key)) ||
+    (row.attachment_revision !== undefined && !positive(row.attachment_revision)) ||
+    (row.account_key === undefined && row.attachment_revision !== undefined) ||
     !Number.isSafeInteger(row.ttl_seconds) ||
     Number(row.ttl_seconds) < 30 ||
     Number(row.ttl_seconds) > 600
@@ -184,7 +192,7 @@ export function parseHabitatRuntimes(value: unknown, projectId: number): Habitat
   const seen = new Set<string>()
   return (root.runtimes as unknown[]).map((value) => {
     const runtime = object(value)
-    const scoped = runtime.schema_version === 3
+    const scoped = runtime.schema_version === 3 || runtime.schema_version === 4
     if (scoped)
       fields(runtime, [
         'id',
@@ -309,7 +317,9 @@ export function parseHabitatRuntimes(value: unknown, projectId: number): Habitat
           choice.key === runtime.id ||
           choice.key === classLabel ||
           choice.label === classLabel ||
-          profileRows.some((profile) => profile.id === choice.key || profile.version === choice.key) ||
+          profileRows.some(
+            (profile) => profile.id === choice.key || profile.version === choice.key,
+          ) ||
           keys.has(String(choice.key)) ||
           labels.has(choice.label)
         )
@@ -321,7 +331,11 @@ export function parseHabitatRuntimes(value: unknown, projectId: number): Habitat
     if (scoped) {
       for (const raw of scopes as unknown[]) {
         const scope = object(raw)
-        fields(scope, ['account_label', 'profiles'], ['accounts'])
+        fields(
+          scope,
+          ['account_label', 'profiles'],
+          ['accounts', 'attachment_revision', 'account_availability'],
+        )
         if (
           !ACCOUNTS.includes(String(scope.account_label)) ||
           classes.has(String(scope.account_label)) ||
@@ -333,7 +347,27 @@ export function parseHabitatRuntimes(value: unknown, projectId: number): Habitat
         classes.add(String(scope.account_label))
         const scopeProfiles = new Set<string>()
         parseProfiles(scope.profiles as unknown[], scopeProfiles)
-        if (REQUIRED_NAMED_ACCOUNT_CLASSES.includes(String(scope.account_label)) && scope.accounts === undefined)
+        const lifecycleAware =
+          scope.attachment_revision !== undefined || scope.account_availability !== undefined
+        const lifecycleClass = NAMED_ACCOUNT_CLASSES.includes(String(scope.account_label))
+        const requiresLifecycle = runtime.schema_version === 4 && lifecycleAware
+        if (runtime.schema_version === 3 && lifecycleAware) invalid()
+        if (requiresLifecycle && !lifecycleClass) invalid()
+        if (requiresLifecycle) {
+          if (
+            !NAMED_ACCOUNT_CLASSES.includes(String(scope.account_label)) ||
+            !positive(scope.attachment_revision) ||
+            !['available', 'unavailable'].includes(String(scope.account_availability)) ||
+            (scope.account_availability === 'available' && !Array.isArray(scope.accounts)) ||
+            (scope.account_availability === 'unavailable' && scope.accounts !== undefined)
+          )
+            invalid()
+        }
+        if (
+          REQUIRED_NAMED_ACCOUNT_CLASSES.includes(String(scope.account_label)) &&
+          scope.accounts === undefined &&
+          !lifecycleAware
+        )
           invalid()
         if (scope.accounts !== undefined) {
           if (
@@ -462,10 +496,8 @@ export function parseHabitatIntent(
     resultSessionId: (root.result_session_id as string | undefined) ?? null,
   }
 }
-export function habitatRuntimeProfiles(
-  runtime: HabitatRuntime,
-): { id: string; version: string }[] {
-  if (runtime.schema_version === 3) {
+export function habitatRuntimeProfiles(runtime: HabitatRuntime): { id: string; version: string }[] {
+  if (runtime.schema_version === 3 || runtime.schema_version === 4) {
     const out: { id: string; version: string }[] = []
     const seen = new Set<string>()
     for (const scope of runtime.account_scopes ?? []) {
@@ -481,7 +513,7 @@ export function habitatRuntimeProfiles(
   return runtime.profiles ?? []
 }
 export function habitatRuntimeClasses(runtime: HabitatRuntime): string[] {
-  if (runtime.schema_version === 3)
+  if (runtime.schema_version === 3 || runtime.schema_version === 4)
     return [...new Set((runtime.account_scopes ?? []).map((scope) => scope.account_label))]
   return runtime.account_label ? [runtime.account_label] : []
 }
@@ -490,7 +522,7 @@ export function habitatAccountChoices(
   profile?: { id: string; version: string } | null,
 ): HabitatAccountChoice[] {
   const scopes: HabitatAccountScope[] =
-    runtime.schema_version === 3
+    runtime.schema_version === 3 || runtime.schema_version === 4
       ? (runtime.account_scopes ?? [])
       : runtime.account_label
         ? [
@@ -508,12 +540,14 @@ export function habitatAccountChoices(
       !scope.profiles.some((row) => row.id === profile.id && row.version === profile.version)
     )
       continue
+    if (scope.account_availability === 'unavailable') continue
     if (scope.accounts?.length) {
       for (const account of scope.accounts)
         out.push({
           account_label: scope.account_label,
           account_key: account.key,
           label: account.label,
+          ...(scope.attachment_revision ? { attachment_revision: scope.attachment_revision } : {}),
         })
     } else
       out.push({

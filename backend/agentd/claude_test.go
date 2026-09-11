@@ -20,6 +20,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/inspr-at/paimos/backend/dispatchprofile"
 )
 
 const claudeBridgeHelperEnvironment = "PAIMOS_CLAUDE_BRIDGE_HELPER"
@@ -120,6 +122,180 @@ func TestClaudeProcessBindsSteerAndInterruptToOneLiveQuery(t *testing.T) {
 		if strings.Contains(logText, privateText) || strings.Contains(string(evidence), privateText) {
 			t.Fatalf("content leaked into evidence log: %q", privateText)
 		}
+	}
+}
+
+func TestClaudeInitModelEvidenceIsBoundedAndTruthful(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node runtime unavailable")
+	}
+	profile, err := dispatchprofile.Resolve("claude-opus-xhigh", "1", AdapterClaude)
+	if err != nil {
+		t.Fatal(err)
+	}
+	exactProfile := profile
+	exactProfile.ID = "claude-opus-fixture-exact"
+	exactProfile.Version = "fixture-1"
+	exactProfile.Model = "claude-opus-fixture-20260909"
+
+	t.Run("exact claim matches vendor identity", func(t *testing.T) {
+		adapter := newTestClaudeAdapter(t, node)
+		process, err := adapter.Start(context.Background(), StartRequest{
+			Adapter: AdapterClaude, Workspace: t.TempDir(), Identity: "claude:model-exact",
+			Prompt: "private input", ResolvedProfile: &exactProfile,
+		}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer process.Stop(context.Background(), ControlRequest{CorrelationID: "model-exact-cleanup"})
+	})
+
+	for name, mode := range map[string]string{"mismatch": "", "missing": "missing_model"} {
+		t.Run("exact claim "+name+" fails closed", func(t *testing.T) {
+			if mode != "" {
+				t.Setenv("PAIMOS_CLAUDE_TEST_MODE", mode)
+			}
+			mismatched := exactProfile
+			if name == "mismatch" {
+				mismatched.Model = "claude-sonnet-fixture-20260909"
+			}
+			adapter := newTestClaudeAdapter(t, node)
+			if _, err := adapter.Start(context.Background(), StartRequest{
+				Adapter: AdapterClaude, Workspace: t.TempDir(), Identity: "claude:model-exact-invalid",
+				Prompt: "private input", ResolvedProfile: &mismatched,
+			}, nil); err == nil {
+				t.Fatal("unverified exact model claim started an owned session")
+			}
+		})
+	}
+
+	t.Run("vendor reported identity stays distinct from requested alias", func(t *testing.T) {
+		adapter := newTestClaudeAdapter(t, node)
+		events := make(chan AdapterEvent, 16)
+		process, err := adapter.Start(context.Background(), StartRequest{
+			Adapter: AdapterClaude, Workspace: t.TempDir(), Identity: "claude:model-evidence",
+			Prompt: "private input", ResolvedProfile: &profile,
+		}, func(event AdapterEvent) { events <- event })
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer process.Stop(context.Background(), ControlRequest{CorrelationID: "model-evidence-cleanup"})
+		var started AdapterEvent
+		for len(events) > 0 {
+			event := <-events
+			if event.Kind == EventSessionStarted {
+				started = event
+			}
+		}
+		if started.HarnessSessionID != "claude-owned-session" || started.EffectiveModel != "claude-opus-fixture-20260909" ||
+			started.ModelEvidence != ModelEvidenceVendorReported {
+			t.Fatalf("session evidence=%+v", started)
+		}
+		if started.EffectiveModel == profile.Model {
+			t.Fatal("requested alias was presented as the effective vendor model")
+		}
+	})
+
+	t.Run("missing identity is explicitly unverified", func(t *testing.T) {
+		t.Setenv("PAIMOS_CLAUDE_TEST_MODE", "missing_model")
+		adapter := newTestClaudeAdapter(t, node)
+		events := make(chan AdapterEvent, 16)
+		process, err := adapter.Start(context.Background(), StartRequest{
+			Adapter: AdapterClaude, Workspace: t.TempDir(), Identity: "claude:model-missing", Prompt: "private input",
+		}, func(event AdapterEvent) { events <- event })
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer process.Stop(context.Background(), ControlRequest{CorrelationID: "model-missing-cleanup"})
+		var started AdapterEvent
+		for len(events) > 0 {
+			event := <-events
+			if event.Kind == EventSessionStarted {
+				started = event
+			}
+		}
+		if started.HarnessSessionID != "claude-owned-session" || started.EffectiveModel != "" ||
+			started.ModelEvidence != ModelEvidenceUnverified {
+			t.Fatalf("session evidence=%+v", started)
+		}
+	})
+
+	t.Run("identical repeated init remains one observation", func(t *testing.T) {
+		t.Setenv("PAIMOS_CLAUDE_TEST_MODE", "repeated_init")
+		adapter := newTestClaudeAdapter(t, node)
+		events := make(chan AdapterEvent, 16)
+		process, err := adapter.Start(context.Background(), StartRequest{
+			Adapter: AdapterClaude, Workspace: t.TempDir(), Identity: "claude:model-repeat", Prompt: "private input",
+		}, func(event AdapterEvent) { events <- event })
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer process.Stop(context.Background(), ControlRequest{CorrelationID: "model-repeat-cleanup"})
+		count := 0
+		for len(events) > 0 {
+			if event := <-events; event.Kind == EventSessionStarted {
+				count++
+			}
+		}
+		if count != 1 {
+			t.Fatalf("session evidence observations=%d, want 1", count)
+		}
+	})
+
+	for _, mode := range []string{"malformed_model", "changed_model", "foreign_session"} {
+		t.Run(mode+" fails closed", func(t *testing.T) {
+			t.Setenv("PAIMOS_CLAUDE_TEST_MODE", mode)
+			adapter := newTestClaudeAdapter(t, node)
+			process, err := adapter.Start(context.Background(), StartRequest{
+				Adapter: AdapterClaude, Workspace: t.TempDir(), Identity: "claude:model-invalid", Prompt: "private input",
+			}, nil)
+			if err == nil {
+				// The SDK emits init only after accepting the first input, and Start
+				// may observe the first valid init before a conflicting repeat. The
+				// owned bridge must still terminate rather than retaining authority.
+				if waitErr := process.Wait(); waitErr == nil {
+					t.Fatal("conflicting init evidence left the owned session running")
+				}
+			}
+		})
+	}
+}
+
+func TestClaudeSupervisorReturnsUnverifiedMissingModelEvidence(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node runtime unavailable")
+	}
+	t.Setenv("PAIMOS_CLAUDE_TEST_MODE", "missing_model")
+	profile, err := dispatchprofile.Resolve("claude-opus-xhigh", "1", AdapterClaude)
+	if err != nil {
+		t.Fatal(err)
+	}
+	supervisor, err := NewSupervisor(SupervisorConfig{
+		Adapters: []Adapter{newTestClaudeAdapter(t, node)}, StateRoot: t.TempDir(), Instance: "ppm-claude-model-missing",
+		DispatchResolver: &profileResolver{profile: profile},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = supervisor.Close(context.Background()) })
+	session, err := supervisor.Start(context.Background(), StartRequest{
+		Adapter: AdapterClaude, Workspace: t.TempDir(), Identity: "claude:model-missing", ProjectID: 984,
+		Prompt: "private input", DispatchProfileID: profile.ID, DispatchProfileVersion: profile.Version,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if session.ModelEvidence == nil || session.ModelEvidence.RequestedModel != "opus" ||
+		session.ModelEvidence.EffectiveModel != "" || session.ModelEvidence.Status != ModelEvidenceUnverified ||
+		session.ModelEvidence.HarnessSessionID != session.HarnessSessionID {
+		t.Fatalf("model evidence=%+v harness_session_id=%q", session.ModelEvidence, session.HarnessSessionID)
+	}
+	status := supervisor.Status()
+	if len(status.Sessions) != 1 || status.Sessions[0].ModelEvidence == nil ||
+		*status.Sessions[0].ModelEvidence != *session.ModelEvidence {
+		t.Fatalf("status sessions=%+v", status.Sessions)
 	}
 }
 
@@ -448,8 +624,13 @@ func TestClaudeSupervisorRestartLosesOwnershipWithoutPersistingContent(t *testin
 		t.Skip("node runtime unavailable")
 	}
 	adapter := newTestClaudeAdapter(t, node)
+	profile, err := dispatchprofile.Resolve("claude-opus-xhigh", "1", AdapterClaude)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolver := &profileResolver{profile: profile}
 	root := t.TempDir()
-	first, err := NewSupervisor(SupervisorConfig{Adapters: []Adapter{adapter}, StateRoot: root, Instance: "ppm-claude-850"})
+	first, err := NewSupervisor(SupervisorConfig{Adapters: []Adapter{adapter}, StateRoot: root, Instance: "ppm-claude-850", DispatchResolver: resolver})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -457,9 +638,43 @@ func TestClaudeSupervisorRestartLosesOwnershipWithoutPersistingContent(t *testin
 	session, err := first.Start(context.Background(), StartRequest{
 		Adapter: AdapterClaude, Workspace: t.TempDir(), Identity: "claude:owned",
 		Prompt: "private initial words 850", ProjectID: 850,
+		DispatchProfileID: profile.ID, DispatchProfileVersion: profile.Version,
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if resolver.calls != 1 || session.ModelEvidence == nil || session.ModelEvidence.RequestedModel != "opus" ||
+		session.ModelEvidence.EffectiveModel != "claude-opus-fixture-20260909" ||
+		session.ModelEvidence.Status != ModelEvidenceVendorReported ||
+		session.ModelEvidence.HarnessSessionID != session.HarnessSessionID {
+		t.Fatalf("model evidence=%+v harness_session_id=%q resolver_calls=%d", session.ModelEvidence, session.HarnessSessionID, resolver.calls)
+	}
+	durable := session
+	durable.PID = 0
+	durable.Steerable = false
+	if err := validateRegistryRecord(registryRecord{Session: durable}); err != nil {
+		t.Fatalf("valid model evidence record: %v", err)
+	}
+	legacy := durable
+	legacy.ModelEvidence = nil
+	if err := validateRegistryRecord(registryRecord{Session: legacy}); err != nil {
+		t.Fatalf("historical record without model evidence: %v", err)
+	}
+	for name, mutate := range map[string]func(*ModelEvidence){
+		"foreign session":     func(evidence *ModelEvidence) { evidence.HarnessSessionID = "foreign-session" },
+		"requested mismatch":  func(evidence *ModelEvidence) { evidence.RequestedModel = "sonnet" },
+		"malformed effective": func(evidence *ModelEvidence) { evidence.EffectiveModel = "private model text" },
+		"false unverified":    func(evidence *ModelEvidence) { evidence.Status = ModelEvidenceUnverified },
+	} {
+		t.Run("journal rejects "+name, func(t *testing.T) {
+			candidate := durable
+			evidence := *durable.ModelEvidence
+			mutate(&evidence)
+			candidate.ModelEvidence = &evidence
+			if err := validateRegistryRecord(registryRecord{Session: candidate}); err == nil {
+				t.Fatalf("accepted model evidence=%+v", evidence)
+			}
+		})
 	}
 	receipt, err := first.Steer(context.Background(), session.ID,
 		scopedControl(first, session, "delivery-durable-850", "private steering words 850"))
@@ -496,6 +711,9 @@ func TestClaudeSupervisorRestartLosesOwnershipWithoutPersistingContent(t *testin
 	recovered := second.Status().Sessions
 	if len(recovered) != 1 || recovered[0].ID != session.ID || recovered[0].State != StateOwnershipLost || recovered[0].Steerable || recovered[0].PID != 0 {
 		t.Fatalf("recovered=%+v", recovered)
+	}
+	if recovered[0].ModelEvidence == nil || *recovered[0].ModelEvidence != *session.ModelEvidence {
+		t.Fatalf("recovered model evidence=%+v want=%+v", recovered[0].ModelEvidence, session.ModelEvidence)
 	}
 	if _, err := second.Steer(context.Background(), session.ID, scopedControl(second, recovered[0], "delivery-after-restart", "must-fail")); !errors.Is(err, ErrSessionNotRunning) {
 		t.Fatalf("restart steer error=%v", err)
@@ -832,12 +1050,22 @@ export function query({ prompt }) {
   const queued = [];
   let first = true;
   let initialResultPending = false;
+  const initFrame = (sessionID = "claude-owned-session", model = "claude-opus-fixture-20260909") => {
+    const frame = { type: "system", subtype: "init", session_id: sessionID,
+      capabilities: process.env.PAIMOS_CLAUDE_TEST_MODE === "missing_interrupt_receipt" ? [] : ["interrupt_receipt_v1"] };
+    if (process.env.PAIMOS_CLAUDE_TEST_MODE !== "missing_model") frame.model = model;
+    return frame;
+  };
   (async () => {
     for await (const message of prompt) {
       if (first) {
         first = false;
         if (process.env.PAIMOS_CLAUDE_TEST_MODE !== "block_init") {
-          output.push({ type: "system", subtype: "init", session_id: "claude-owned-session", capabilities: process.env.PAIMOS_CLAUDE_TEST_MODE === "missing_interrupt_receipt" ? [] : ["interrupt_receipt_v1"] });
+          const mode = process.env.PAIMOS_CLAUDE_TEST_MODE;
+          output.push(initFrame("claude-owned-session", mode === "malformed_model" ? "not a model" : "claude-opus-fixture-20260909"));
+          if (mode === "repeated_init") output.push(initFrame());
+          if (mode === "changed_model") output.push(initFrame("claude-owned-session", "claude-sonnet-fixture-20260909"));
+          if (mode === "foreign_session") output.push(initFrame("claude-foreign-session"));
           output.push({ type: "stream_event", session_id: "claude-owned-session" });
           output.push({ type: "assistant", session_id: "claude-owned-session", message: { content: [{ type: "text", text: message.message.content[0].text }] } });
 		  if (["hold_initial_turn", "complete_before_interrupt_receipt"].includes(process.env.PAIMOS_CLAUDE_TEST_MODE)) initialResultPending = true;
@@ -887,7 +1115,7 @@ export function query({ prompt }) {
       const still_queued = messages.map((message) => message.uuid);
       for (const message of messages) {
         const uuid = message.uuid;
-        output.push({ type: "system", subtype: "init", session_id: "claude-owned-session", capabilities: ["interrupt_receipt_v1"] });
+        output.push(initFrame());
         output.push({ type: "stream_event", session_id: "claude-owned-session", user_message_uuid: uuid });
         output.push({ type: "assistant", session_id: "claude-owned-session", user_message_uuid: uuid, message: { content: [{ type: "text", text: message.message.content[0].text }] } });
 		output.push({ type: "result", session_id: "claude-owned-session", user_message_uuid: uuid });

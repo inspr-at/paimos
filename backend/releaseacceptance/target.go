@@ -9,12 +9,10 @@ package releaseacceptance
 
 import (
 	"context"
-	"crypto/sha256"
 	"database/sql"
-	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"github.com/inspr-at/paimos/backend/externalstage"
+	"github.com/inspr-at/paimos/backend/targetidentity"
 	"strings"
 )
 
@@ -54,25 +52,7 @@ type BindTargetRequest struct {
 	EnvironmentID  int64  `json:"environment_id,omitempty"`
 }
 
-type targetIdentity struct {
-	Kind              string `json:"kind"`
-	ProjectID         int64  `json:"project_id"`
-	RegistrationID    int64  `json:"registration_id,omitempty"`
-	DeliveryID        int64  `json:"delivery_id,omitempty"`
-	AttemptID         int64  `json:"attempt_id,omitempty"`
-	WorkflowSymbol    string `json:"workflow_symbol,omitempty"`
-	EnvironmentSymbol string `json:"environment_symbol,omitempty"`
-	EnvironmentID     int64  `json:"environment_id,omitempty"`
-	APIKeyID          int64  `json:"api_key_id,omitempty"`
-	UserID            int64  `json:"user_id,omitempty"`
-	ReporterID        int64  `json:"reporter_id,omitempty"`
-	AllowDeployment   int64  `json:"allow_deployment,omitempty"`
-	URL               string `json:"url,omitempty"`
-	HostAlias         string `json:"host_alias,omitempty"`
-	HostIP            string `json:"host_ip,omitempty"`
-	CreatedAt         string `json:"created_at,omitempty"`
-	UpdatedAt         string `json:"updated_at,omitempty"`
-}
+type targetIdentity = targetidentity.Identity
 
 type storedBinding struct {
 	Kind           string
@@ -82,13 +62,11 @@ type storedBinding struct {
 }
 
 func targetDigest(id targetIdentity) string {
-	raw, _ := json.Marshal(id)
-	sum := sha256.Sum256(raw)
-	return "sha256:" + hex.EncodeToString(sum[:])
+	return targetidentity.Digest(id)
 }
 
 func isTargetDigest(v string) bool {
-	return len(v) == 71 && strings.HasPrefix(v, "sha256:")
+	return targetidentity.IsDigest(v)
 }
 
 func (s *Service) BindTarget(ctx context.Context, actor Actor, projectID, releaseID int64, req BindTargetRequest) (Acceptance, error) {
@@ -189,25 +167,14 @@ func loadPharosIdentity(ctx context.Context, tx *sql.Tx, rel ReleaseRecord, regi
 }
 
 func loadProjectEnvIdentity(ctx context.Context, tx *sql.Tx, projectID, environmentID int64) (targetIdentity, error) {
-	var name, created, url, alias, ip, updated string
-	err := tx.QueryRowContext(ctx, `SELECT name, created_at, COALESCE(url,''), COALESCE(host_alias,''), COALESCE(host_ip,''), COALESCE(updated_at,'')
-		FROM project_environments WHERE id=? AND project_id=?`,
-		environmentID, projectID).Scan(&name, &created, &url, &alias, &ip, &updated)
+	identity, err := targetidentity.LoadProjectEnvironment(ctx, tx, projectID, environmentID)
 	if err == sql.ErrNoRows {
 		return targetIdentity{}, fmt.Errorf("%w: project environment", ErrInvalid)
 	}
 	if err != nil {
-		return targetIdentity{}, err
+		return targetIdentity{}, fmt.Errorf("%w: project environment identity", ErrInvalid)
 	}
-	name = strings.TrimSpace(name)
-	if !validOpaqueRef(name) {
-		return targetIdentity{}, fmt.Errorf("%w: project environment name", ErrInvalid)
-	}
-	return targetIdentity{
-		Kind: TargetKindProjectEnv, ProjectID: projectID, EnvironmentID: environmentID,
-		EnvironmentSymbol: name, CreatedAt: created, URL: strings.TrimSpace(url),
-		HostAlias: strings.TrimSpace(alias), HostIP: strings.TrimSpace(ip), UpdatedAt: strings.TrimSpace(updated),
-	}, nil
+	return identity, nil
 }
 
 func batchDelivery(ctx context.Context, tx *sql.Tx, projectID, batchID int64) (deliveryID, attemptID int64, err error) {

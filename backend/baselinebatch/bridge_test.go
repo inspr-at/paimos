@@ -24,6 +24,7 @@ import (
 	"github.com/inspr-at/paimos/backend/externalstage"
 	"github.com/inspr-at/paimos/backend/lifecycleintents"
 	"github.com/inspr-at/paimos/backend/managedharness"
+	"github.com/inspr-at/paimos/backend/targetidentity"
 )
 
 const (
@@ -51,6 +52,7 @@ type bridgeFixture struct {
 	batch     Batch
 	now       time.Time
 	daemon    *ownedDaemon
+	targetRef string
 }
 
 func openBridgeFixture(t *testing.T) *bridgeFixture {
@@ -75,9 +77,20 @@ func openClassOnlyAgentBridgeFixture(t *testing.T, mode string) *bridgeFixture {
 }
 
 func openBridgeFixtureMode(t *testing.T, mode string, classOnly bool) *bridgeFixture {
+	return openBridgeFixtureModeWithLaunch(t, mode, classOnly, false)
+}
+
+func openDelegatedBridgeFixture(t *testing.T) *bridgeFixture {
 	t.Helper()
-	t.Setenv("DATA_DIR", t.TempDir())
+	return openBridgeFixtureModeWithLaunch(t, ModeAutomatic, false, true)
+}
+
+func openBridgeFixtureModeWithLaunch(t *testing.T, mode string, classOnly, delegated bool) *bridgeFixture {
+	t.Helper()
+	dir := t.TempDir()
+	t.Setenv("DATA_DIR", dir)
 	t.Setenv("PAIMOS_TEST_MODE", "1")
+	writeBaselineSchemaClone(t, dir)
 	if err := appdb.Open(); err != nil {
 		t.Fatal(err)
 	}
@@ -122,6 +135,19 @@ func openBridgeFixtureMode(t *testing.T, mode string, classOnly bool) *bridgeFix
 		lifecycleintents.NewService(appdb.DB), managedharness.NewService(appdb.DB), nil)
 	svc.External = ext
 	f.svc, f.ext, f.delivery = svc, ext, deliveryStore
+	if delegated {
+		result, err := appdb.DB.Exec(`INSERT INTO project_environments(project_id,name,url,host_alias,host_ip,sort_order)
+			VALUES(?,'production-eu1','https://private.invalid','private-host','192.0.2.10',0)`, projectID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		environmentID, _ := result.LastInsertId()
+		identity, err := targetidentity.LoadProjectEnvironment(context.Background(), appdb.DB, projectID, environmentID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		f.targetRef = targetidentity.Digest(identity)
+	}
 	if mode != ModeManual {
 		if _, err := appdb.DB.Exec(`INSERT INTO project_agents(project_id,name) VALUES(?,'codex')`, projectID); err != nil {
 			t.Fatal(err)
@@ -132,7 +158,12 @@ func openBridgeFixtureMode(t *testing.T, mode string, classOnly bool) *bridgeFix
 			f.daemon = newOwnedDaemon(t, projectID, userID)
 		}
 	}
-	f.batch = f.startReviewedBatch(mode, "bridge-start-key-01")
+	var launch *DelegatedLaunchSelection
+	if delegated {
+		launch = &DelegatedLaunchSelection{TargetRef: f.targetRef, Workflow: delegatedLaunchWorkflow,
+			Environment: "production-eu1", ExpiresAt: f.now.Add(time.Hour).Format(time.RFC3339Nano), MaxLaunches: 1}
+	}
+	f.batch = f.startReviewedBatchWithLaunch(mode, "bridge-start-key-01", launch)
 	return f
 }
 
@@ -141,6 +172,10 @@ type clockNow struct{ now *time.Time }
 func (c clockNow) Now() time.Time { return c.now.UTC() }
 
 func (f *bridgeFixture) startReviewedBatch(mode, idem string) Batch {
+	return f.startReviewedBatchWithLaunch(mode, idem, nil)
+}
+
+func (f *bridgeFixture) startReviewedBatchWithLaunch(mode, idem string, launch *DelegatedLaunchSelection) Batch {
 	f.t.Helper()
 	reqs := []Requirement{{
 		Ref: "req.login", Statement: "Users sign in with email",
@@ -182,7 +217,7 @@ func (f *bridgeFixture) startReviewedBatch(mode, idem string) Batch {
 		}
 	}
 	reviewed, err := f.svc.Review(ctx, f.actor, f.projectID, draft.ID, ReviewRequest{
-		ExecutionMode: mode, Selected: []string{"req.login"}, Worker: worker,
+		ExecutionMode: mode, Selected: []string{"req.login"}, Worker: worker, DelegatedLaunch: launch,
 	})
 	if err != nil {
 		f.t.Fatal(err)
@@ -198,6 +233,7 @@ func (f *bridgeFixture) startReviewedBatch(mode, idem string) Batch {
 	batch, err := f.svc.Start(ctx, f.actor, f.projectID, StartRequest{
 		IdempotencyKey: idem, ReviewID: *reviewed.ReviewID, DraftRevision: reviewed.Revision, Confirm: true,
 		ContentDigest: digest, RevisionSeal: seal, ExecutionMode: mode, Selected: []string{"req.login"}, Worker: worker,
+		DelegatedLaunch: launch,
 	})
 	if err != nil {
 		f.t.Fatal(err)
@@ -234,7 +270,7 @@ func (f *bridgeFixture) registerPharos() int64 {
 	f.reporter = externalstage.Principal{UserID: reporterUser, Kind: "api_key", APIKeyID: keyID}
 	reg, err := f.ext.RegisterReporter(context.Background(), f.operator, fmt.Sprintf("issue:%d", f.batch.IssueID), "register-pharos",
 		externalstage.RegisterReporterRequest{APIKeyID: keyID, ReporterClass: externalstage.ReporterClassPharos,
-			ReporterRole: externalstage.ReporterRoleOwner, Workflow: "deploy-production", Environment: "production-eu1"})
+			ReporterRole: externalstage.ReporterRoleOwner, Workflow: "deploy-production", Environment: "production-eu1", TargetRef: f.targetRef})
 	if err != nil {
 		f.t.Fatal(err)
 	}

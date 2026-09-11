@@ -48,6 +48,8 @@ func TestClassifyControlPathCoversEveryFrozenFamily(t *testing.T) {
 		{"/api/external-stage/handoffs/01K35P6YRG00000000000000AB", ControlRouteExternalHandoffPull},
 		{"/api/external-stage/handoffs/01K35P6YRG00000000000000AB/accept", ControlRouteExternalHandoffAccept},
 		{"/api/external-stage/handoffs/01K35P6YRG00000000000000AB/reports", ControlRouteExternalHandoffReport},
+		{"/api/external-stage/handoffs/01K35P6YRG00000000000000AB/launch-candidates", ControlRouteExternalLaunchCandidate},
+		{"/api/external-stage/handoffs/01K35P6YRG00000000000000AB/launch-admissions/97800000-0000-4000-8000-000000000001/consume", ControlRouteExternalLaunchConsume},
 	}
 	seen := map[ControlRouteClass]struct{}{}
 	for _, tc := range cases {

@@ -10,13 +10,21 @@ import (
 
 const AccountScopeSchemaV3 = 3
 
+const (
+	AccountAvailabilityAvailable   = "available"
+	AccountAvailabilityUnavailable = "unavailable"
+)
+
 // AccountScope binds one closed account class to the named keys and catalog
 // profiles that class may actually start. Keys stay distinct from class,
 // harness, generation, host and profile identity.
 type AccountScope struct {
-	AccountLabel string          `json:"account_label"`
-	Accounts     []AccountChoice `json:"accounts,omitempty"`
-	Profiles     []Profile       `json:"profiles"`
+	AccountLabel        string          `json:"account_label"`
+	Accounts            []AccountChoice `json:"accounts,omitempty"`
+	Profiles            []Profile       `json:"profiles"`
+	AttachmentRevision  int64           `json:"attachment_revision,omitempty"`
+	AccountAvailability string          `json:"account_availability,omitempty"`
+	accountsPresent     bool
 }
 
 type registrationLegacyJSON struct {
@@ -64,10 +72,10 @@ type runtimeV3JSON struct {
 }
 
 func (r Registration) MarshalJSON() ([]byte, error) {
-	if r.SchemaVersion == AccountScopeSchemaV3 {
+	if r.SchemaVersion == AccountScopeSchemaV3 || r.SchemaVersion == AccountLifecycleSchemaV4 {
 		return json.Marshal(registrationV3JSON{
 			Generation: r.Generation, Host: r.Host, Workspaces: r.Workspaces,
-			AccountScopes: r.AccountScopes, SchemaVersion: AccountScopeSchemaV3,
+			AccountScopes: r.AccountScopes, SchemaVersion: r.SchemaVersion,
 		})
 	}
 	return json.Marshal(registrationLegacyJSON{
@@ -82,11 +90,11 @@ func (r Runtime) MarshalJSON() ([]byte, error) {
 	if sessions == nil {
 		sessions = []SessionProjection{}
 	}
-	if r.SchemaVersion == AccountScopeSchemaV3 {
+	if r.SchemaVersion == AccountScopeSchemaV3 || r.SchemaVersion == AccountLifecycleSchemaV4 {
 		return json.Marshal(runtimeV3JSON{
 			ID: r.ID, ProjectID: r.ProjectID, Generation: r.Generation, MachineID: r.MachineID,
 			Workspaces: r.Workspaces, AccountScopes: r.AccountScopes, ExpiresAt: r.ExpiresAt,
-			Sessions: sessions, SchemaVersion: AccountScopeSchemaV3,
+			Sessions: sessions, SchemaVersion: r.SchemaVersion,
 		})
 	}
 	return json.Marshal(runtimeLegacyJSON{
@@ -120,7 +128,7 @@ func (r *Registration) UnmarshalJSON(data []byte) error {
 	if err != nil {
 		return err
 	}
-	if version == AccountScopeSchemaV3 {
+	if version == AccountScopeSchemaV3 || version == AccountLifecycleSchemaV4 {
 		if fieldPresent(raw, "account_label") || fieldPresent(raw, "accounts") || fieldPresent(raw, "profiles") {
 			return ErrInvalid
 		}
@@ -128,7 +136,7 @@ func (r *Registration) UnmarshalJSON(data []byte) error {
 		if err != nil {
 			return err
 		}
-		*r = Registration{Generation: generation, Host: host, Workspaces: workspaces, AccountScopes: scopes, SchemaVersion: AccountScopeSchemaV3}
+		*r = Registration{Generation: generation, Host: host, Workspaces: workspaces, AccountScopes: scopes, SchemaVersion: version}
 		return nil
 	}
 	if fieldPresent(raw, "account_scopes") {
@@ -278,6 +286,21 @@ func optionalInt(raw map[string]json.RawMessage, name string) (int, error) {
 	return out, nil
 }
 
+func optionalInt64(raw map[string]json.RawMessage, name string) (int64, error) {
+	value, ok := raw[name]
+	if !ok {
+		return 0, nil
+	}
+	if jsonNull(value) {
+		return 0, ErrInvalid
+	}
+	var out int64
+	if json.Unmarshal(value, &out) != nil {
+		return 0, ErrInvalid
+	}
+	return out, nil
+}
+
 func requiredWorkspaces(raw map[string]json.RawMessage) ([]Workspace, error) {
 	value, ok := raw["workspaces"]
 	if !ok || jsonNull(value) {
@@ -334,7 +357,7 @@ func (s *AccountScope) UnmarshalJSON(data []byte) error {
 	if err != nil {
 		return err
 	}
-	if leftover(raw, "account_label", "accounts", "profiles") {
+	if leftover(raw, "account_label", "accounts", "profiles", "attachment_revision", "account_availability") {
 		return ErrInvalid
 	}
 	label, err := requiredString(raw, "account_label")
@@ -349,10 +372,18 @@ func (s *AccountScope) UnmarshalJSON(data []byte) error {
 	if err != nil {
 		return err
 	}
-	if fieldPresent(raw, "accounts") && len(accounts) == 0 {
-		return ErrInvalid
+	revision, err := optionalInt64(raw, "attachment_revision")
+	if err != nil {
+		return err
 	}
-	*s = AccountScope{AccountLabel: label, Accounts: accounts, Profiles: profiles}
+	availability := ""
+	if fieldPresent(raw, "account_availability") {
+		availability, err = requiredString(raw, "account_availability")
+		if err != nil {
+			return err
+		}
+	}
+	*s = AccountScope{AccountLabel: label, Accounts: accounts, Profiles: profiles, AttachmentRevision: revision, AccountAvailability: availability, accountsPresent: fieldPresent(raw, "accounts")}
 	return nil
 }
 
@@ -392,6 +423,9 @@ func (s AccountScope) hasProfile(id, version string) bool {
 }
 
 func (s AccountScope) matchKey(key string) bool {
+	if s.AccountAvailability == AccountAvailabilityUnavailable {
+		return false
+	}
 	if len(s.Accounts) == 0 {
 		return key == ""
 	}
@@ -407,7 +441,7 @@ func (s AccountScope) matchKey(key string) bool {
 }
 
 func (r Registration) Scopes() []AccountScope {
-	if r.SchemaVersion == AccountScopeSchemaV3 {
+	if r.SchemaVersion == AccountScopeSchemaV3 || r.SchemaVersion == AccountLifecycleSchemaV4 {
 		return r.AccountScopes
 	}
 	return []AccountScope{{AccountLabel: r.AccountLabel, Accounts: r.Accounts, Profiles: r.Profiles}}
@@ -440,6 +474,27 @@ func (r Runtime) MatchScope(class, key, profileID, version string, requireProfil
 	return r.registration().MatchScope(class, key, profileID, version, requireProfile)
 }
 
+// MatchScopeAtRevision binds a named choice to the attachment epoch that was
+// advertised for review. Frozen v1-v3 registrations use epoch zero; a v4
+// lifecycle scope requires its exact positive epoch.
+func (r Registration) MatchScopeAtRevision(class, key, profileID, version string, requireProfile bool, revision int64) bool {
+	matches := 0
+	for _, scope := range r.Scopes() {
+		if scope.AccountLabel != class || !scope.matchKey(key) || scope.AttachmentRevision != revision {
+			continue
+		}
+		if requireProfile && !scope.hasProfile(profileID, version) {
+			continue
+		}
+		matches++
+	}
+	return matches == 1
+}
+
+func (r Runtime) MatchScopeAtRevision(class, key, profileID, version string, requireProfile bool, revision int64) bool {
+	return r.registration().MatchScopeAtRevision(class, key, profileID, version, requireProfile, revision)
+}
+
 // MatchRepair reports whether class uniquely identifies a scope and an optional
 // named key belongs to that scope. Empty key remains valid on named v1/v2
 // runtimes because repair does not start a model turn.
@@ -462,7 +517,7 @@ func (r Runtime) MatchRepair(class, key string) bool {
 }
 
 func ValidateAccountScopes(in Registration) error {
-	if in.SchemaVersion != AccountScopeSchemaV3 {
+	if in.SchemaVersion != AccountScopeSchemaV3 && in.SchemaVersion != AccountLifecycleSchemaV4 {
 		if len(in.AccountScopes) != 0 {
 			return ErrInvalid
 		}
@@ -478,7 +533,31 @@ func ValidateAccountScopes(in Registration) error {
 			return ErrInvalid
 		}
 		classes[scope.AccountLabel] = true
-		if classRequiresNamedAccounts(scope.AccountLabel) && len(scope.Accounts) == 0 {
+		lifecycleAware := scope.AttachmentRevision > 0 || scope.AccountAvailability != ""
+		if in.SchemaVersion == AccountScopeSchemaV3 && lifecycleAware {
+			return ErrInvalid
+		}
+		if in.SchemaVersion == AccountScopeSchemaV3 && scope.accountsPresent && len(scope.Accounts) == 0 {
+			return ErrInvalid
+		}
+		if lifecycleAware {
+			if !classAllowsNamedAccounts(scope.AccountLabel) || scope.AttachmentRevision < 1 {
+				return ErrInvalid
+			}
+			switch scope.AccountAvailability {
+			case AccountAvailabilityAvailable:
+				if len(scope.Accounts) == 0 {
+					return ErrInvalid
+				}
+			case AccountAvailabilityUnavailable:
+				if len(scope.Accounts) != 0 {
+					return ErrInvalid
+				}
+			default:
+				return ErrInvalid
+			}
+		}
+		if classRequiresNamedAccounts(scope.AccountLabel) && len(scope.Accounts) == 0 && !lifecycleAware {
 			return ErrInvalid
 		}
 		if !classAllowsNamedAccounts(scope.AccountLabel) && len(scope.Accounts) > 0 {

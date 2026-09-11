@@ -28,6 +28,7 @@ import (
 )
 
 const externalStageMaxJSONBytes = 1 << 20
+const externalStageLaunchMaxJSONBytes = 64 << 10
 
 const (
 	externalStageAdminMediaType         = "application/json"
@@ -38,15 +39,16 @@ const (
 )
 
 var (
-	externalStageHandoffIDPattern = regexp.MustCompile(`^[0-9A-HJKMNP-TV-Z]{26}$`)
-	externalStageDeliveryPattern  = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$`)
-	externalStageSymbolPattern    = regexp.MustCompile(`^[a-z][a-z0-9._-]{0,63}$`)
-	externalStageVersionPattern   = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$`)
-	externalStageDigestPattern    = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
-	externalStageCommitPattern    = regexp.MustCompile(`^(?:[0-9a-f]{40}|[0-9a-f]{64})$`)
-	externalStageUUIDPattern      = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
-	externalStageSyncDirectory    = syncExternalStageOutputDirectory
-	externalStageNewCopyBuffer    = func() []byte { return make([]byte, externalstage.OneTimeSecretBytes) }
+	externalStageHandoffIDPattern  = regexp.MustCompile(`^[0-9A-HJKMNP-TV-Z]{26}$`)
+	externalStageDeliveryPattern   = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$`)
+	externalStageSymbolPattern     = regexp.MustCompile(`^[a-z][a-z0-9._-]{0,63}$`)
+	externalStageVersionPattern    = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$`)
+	externalStageDigestPattern     = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
+	externalStageCommitPattern     = regexp.MustCompile(`^(?:[0-9a-f]{40}|[0-9a-f]{64})$`)
+	externalStageCoordinatePattern = regexp.MustCompile(`^[a-z][a-z0-9._-]{0,63}:[A-Za-z0-9][A-Za-z0-9._/@:+-]{0,189}$`)
+	externalStageUUIDPattern       = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
+	externalStageSyncDirectory     = syncExternalStageOutputDirectory
+	externalStageNewCopyBuffer     = func() []byte { return make([]byte, externalstage.OneTimeSecretBytes) }
 )
 
 type externalStageSecretInput struct {
@@ -65,6 +67,7 @@ type externalStageRegistrationRequest struct {
 	DependencyKey string `json:"dependency_key,omitempty"`
 	Workflow      string `json:"workflow,omitempty"`
 	Environment   string `json:"environment,omitempty"`
+	TargetRef     string `json:"target_ref,omitempty"`
 }
 
 type externalStageRegistration struct {
@@ -76,6 +79,7 @@ type externalStageRegistration struct {
 	DependencyKey   string                       `json:"dependency_key,omitempty"`
 	Workflow        string                       `json:"workflow,omitempty"`
 	Environment     string                       `json:"environment,omitempty"`
+	TargetRef       string                       `json:"target_ref,omitempty"`
 	EvidenceCeiling []externalstage.EvidenceKind `json:"evidence_ceiling"`
 	CreatedAt       string                       `json:"created_at"`
 	RevokedAt       string                       `json:"revoked_at,omitempty"`
@@ -133,7 +137,7 @@ func externalStageCmd() *cobra.Command {
 	c := commandGroup(&cobra.Command{
 		Use:   "external-stage",
 		Short: "Create and report pinned v1 external delivery-stage handoffs",
-		Long: `Create internal handoffs and drive the pinned external-stage v1 protocol.
+		Long: `Create internal handoffs, drive the pinned external-stage v1 protocol, and use the additive one-shot launch-admission sidecar.
 
 The independent 32-byte handoff credential is never accepted as an argument,
 environment variable, URL, query value, cookie, JSON value, or output. Mint and
@@ -152,6 +156,8 @@ X-PAIMOS-Handoff-Secret request header.`,
 	c.AddCommand(externalStagePullCmd())
 	c.AddCommand(externalStageAcceptCmd())
 	c.AddCommand(externalStageReportCmd())
+	c.AddCommand(externalStageLaunchCandidateCmd())
+	c.AddCommand(externalStageLaunchConsumeCmd())
 	return c
 }
 
@@ -330,6 +336,7 @@ func externalStageRegistrationsCreateCmd() *cobra.Command {
 	c.Flags().StringVar(&request.DependencyKey, "dependency", "", "Janus dependency key")
 	c.Flags().StringVar(&request.Workflow, "workflow", "", "Pharos workflow symbol")
 	c.Flags().StringVar(&request.Environment, "environment", "", "Pharos environment symbol")
+	c.Flags().StringVar(&request.TargetRef, "target-ref", "", "exact server-listed project target digest (required for delegated launch)")
 	addExternalStageReusableIdempotencyFlag(c, &mutation)
 	c.Flags().BoolVar(&dryRun, "dry-run", false, "print the safe request without sending it")
 	return c
@@ -692,6 +699,118 @@ stream cannot carry both the report and the independent credential.`,
 	return c
 }
 
+func externalStageLaunchCandidateCmd() *cobra.Command {
+	var secret externalStageSecretInput
+	var mutation externalStageMutationOptions
+	var candidateFile string
+	c := &cobra.Command{
+		Use:   "launch-candidate <handoff-id>",
+		Short: "Submit one exact reviewed launch candidate",
+		Long: `Submit one strict launch candidate from a file or stdin. The candidate
+contains only the exact v2 artifact identity and reviewed binding digests. Use
+--candidate-file - only with --secret-file so the independent credential never
+shares its stdin stream with JSON.`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			handoffID, err := validateExternalStageHandoffID(args[0])
+			if err != nil {
+				return err
+			}
+			if err := mutation.validate(); err != nil {
+				return err
+			}
+			if strings.TrimSpace(candidateFile) == "" {
+				return &usageError{msg: "--candidate-file is required"}
+			}
+			if candidateFile == "-" && secret.stdin {
+				return &usageError{msg: "--candidate-file - cannot be combined with --secret-stdin"}
+			}
+			candidate, err := readExternalStageLaunchCandidate(candidateFile)
+			if err != nil {
+				return err
+			}
+			rawSecret, err := readExternalStageSecret(secret)
+			if err != nil {
+				return err
+			}
+			defer clearExternalStageSecret(rawSecret)
+			client, err := instanceClient()
+			if err != nil {
+				return err
+			}
+			path := strings.Replace(externalstage.LaunchCandidatePath, "{handoffID}", handoffID, 1)
+			var admission externalstage.LaunchAdmission
+			if err := externalStageJSONRoundTripMedia(client, http.MethodPost, path, candidate, rawSecret,
+				mutation.idempotencyKey, externalstage.LaunchAdmissionMediaType, &admission); err != nil {
+				return reportError(err)
+			}
+			if err := validateExternalStageLaunchAdmission(handoffID, candidate, admission, rawSecret); err != nil {
+				return reportError(err)
+			}
+			return emitExternalStageResult(admission,
+				fmt.Sprintf("admitted one launch for handoff %s", admission.HandoffID))
+		},
+	}
+	c.Flags().StringVar(&candidateFile, "candidate-file", "", "strict launch candidate JSON file, or - for stdin")
+	addExternalStageReusableIdempotencyFlag(c, &mutation)
+	addExternalStageSecretInputFlags(c, &secret)
+	return c
+}
+
+func externalStageLaunchConsumeCmd() *cobra.Command {
+	var secret externalStageSecretInput
+	var mutation externalStageMutationOptions
+	var admissionDigest string
+	c := &cobra.Command{
+		Use:   "launch-consume <handoff-id> <admission-id>",
+		Short: "Atomically consume one exact launch admission",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			handoffID, err := validateExternalStageHandoffID(args[0])
+			if err != nil {
+				return err
+			}
+			admissionID := strings.TrimSpace(args[1])
+			if !externalStageUUIDPattern.MatchString(admissionID) {
+				return &usageError{msg: "admission-id must be a canonical lowercase UUID"}
+			}
+			if err := mutation.validate(); err != nil {
+				return err
+			}
+			if !externalStageDigestPattern.MatchString(admissionDigest) {
+				return &usageError{msg: "--admission-digest must be a lowercase sha256 digest"}
+			}
+			rawSecret, err := readExternalStageSecret(secret)
+			if err != nil {
+				return err
+			}
+			defer clearExternalStageSecret(rawSecret)
+			client, err := instanceClient()
+			if err != nil {
+				return err
+			}
+			path := strings.Replace(externalstage.LaunchConsumePath, "{handoffID}", handoffID, 1)
+			path = strings.Replace(path, "{admissionID}", admissionID, 1)
+			request := externalstage.ConsumeLaunchAdmissionRequest{Schema: externalstage.LaunchAdmissionSchema,
+				Version: externalstage.LaunchAdmissionVersion, AdmissionDigest: admissionDigest}
+			var receipt externalstage.LaunchReceipt
+			if err := externalStageJSONRoundTripMedia(client, http.MethodPost, path, request, rawSecret,
+				mutation.idempotencyKey, externalstage.LaunchAdmissionMediaType, &receipt); err != nil {
+				return reportError(err)
+			}
+			if err := validateExternalStageLaunchReceipt(handoffID, admissionID, admissionDigest, receipt, rawSecret); err != nil {
+				return reportError(err)
+			}
+			return emitExternalStageResult(receipt,
+				fmt.Sprintf("consumed launch admission %s", receipt.AdmissionID))
+		},
+	}
+	c.Flags().StringVar(&admissionDigest, "admission-digest", "", "exact admission digest returned by launch-candidate")
+	addExternalStageReusableIdempotencyFlag(c, &mutation)
+	addExternalStageSecretInputFlags(c, &secret)
+	return c
+}
+
 func addExternalStageSecretInputFlags(c *cobra.Command, input *externalStageSecretInput) {
 	c.Flags().StringVar(&input.file, "secret-file", "", "owner-only file containing exactly 32 raw credential bytes")
 	c.Flags().BoolVar(&input.stdin, "secret-stdin", false, "read exactly 32 raw credential bytes from stdin")
@@ -801,7 +920,37 @@ func readExternalStageReport(path string) (externalstage.ReportRequest, error) {
 	return report, nil
 }
 
+func readExternalStageLaunchCandidate(path string) (externalstage.LaunchCandidate, error) {
+	var reader io.Reader
+	var file *os.File
+	if path == "-" {
+		reader = os.Stdin
+	} else {
+		var err error
+		file, err = os.Open(path) // #nosec G304 -- explicit non-secret candidate file chosen by the operator.
+		if err != nil {
+			return externalstage.LaunchCandidate{}, fmt.Errorf("open candidate file: %w", err)
+		}
+		defer file.Close()
+		reader = file
+	}
+	var candidate externalstage.LaunchCandidate
+	if err := decodeExternalStageJSON(io.LimitReader(reader, externalStageLaunchMaxJSONBytes+1), &candidate); err != nil {
+		return candidate, fmt.Errorf("decode candidate file: %w", err)
+	}
+	if err := validateExternalStageLaunchCandidate(candidate); err != nil {
+		return candidate, err
+	}
+	return candidate, nil
+}
+
 func externalStageJSONRoundTrip(client *Client, method, path string, body any, rawSecret []byte, idempotencyKey string, target any) error {
+	return externalStageJSONRoundTripMedia(client, method, path, body, rawSecret, idempotencyKey, externalstage.MediaTypeV1, target)
+}
+
+func externalStageJSONRoundTripMedia(client *Client, method, path string, body any, rawSecret []byte,
+	idempotencyKey, mediaType string, target any,
+) error {
 	var requestBody io.Reader
 	if body != nil {
 		raw, err := json.Marshal(body)
@@ -814,7 +963,7 @@ func externalStageJSONRoundTrip(client *Client, method, path string, body any, r
 	if err != nil {
 		return fmt.Errorf("build external-stage request: %w", err)
 	}
-	client.prepareRequest(req, body != nil, externalstage.MediaTypeV1, externalstage.MediaTypeV1)
+	client.prepareRequest(req, body != nil, mediaType, mediaType)
 	if idempotencyKey != "" {
 		req.Header.Set(idempotencyHeader, idempotencyKey)
 	}
@@ -830,20 +979,20 @@ func externalStageJSONRoundTrip(client *Client, method, path string, body any, r
 		return err
 	}
 	defer resp.Body.Close()
-	if strings.TrimSpace(resp.Header.Get("Content-Type")) != externalstage.MediaTypeV1 {
-		return errors.New("external-stage response did not use the pinned v1 JSON media type")
+	if strings.TrimSpace(resp.Header.Get("Content-Type")) != mediaType {
+		return errors.New("external-stage response did not use the selected JSON media type")
 	}
 	if err := decodeExternalStageJSON(io.LimitReader(resp.Body, externalStageMaxJSONBytes+1), target); err != nil {
 		if len(rawSecret) > 0 {
-			return errors.New("external-stage response violated the pinned v1 JSON schema")
+			return errors.New("external-stage response violated the selected JSON schema")
 		}
 		if idempotencyKey != "" && strings.Contains(err.Error(), idempotencyKey) {
-			return errors.New("external-stage response violated the pinned v1 JSON schema")
+			return errors.New("external-stage response violated the selected JSON schema")
 		}
 		return fmt.Errorf("decode external-stage response: %w", err)
 	}
 	if externalStageResponseContainsIdempotencyKey(target, idempotencyKey) {
-		return errors.New("external-stage response violated the pinned v1 JSON schema")
+		return errors.New("external-stage response violated the selected JSON schema")
 	}
 	return nil
 }
@@ -1132,16 +1281,87 @@ func validateExternalStageRegistration(request externalStageRegistrationRequest)
 	switch externalstage.ReporterClass(request.ReporterClass) {
 	case externalstage.ReporterClassPharos:
 		if externalstage.ReporterRole(request.ReporterRole) != externalstage.ReporterRoleOwner || request.DependencyKey != "" ||
-			!externalStageSymbolPattern.MatchString(request.Workflow) || !externalStageSymbolPattern.MatchString(request.Environment) {
+			!externalStageSymbolPattern.MatchString(request.Workflow) || !externalStageSymbolPattern.MatchString(request.Environment) ||
+			(request.TargetRef != "" && !externalStageDigestPattern.MatchString(request.TargetRef)) {
 			return &usageError{msg: "Pharos requires role owner, exact workflow/environment symbols, and no dependency"}
 		}
 	case externalstage.ReporterClassJanus:
 		if externalstage.ReporterRole(request.ReporterRole) != externalstage.ReporterRoleDependency ||
-			!externalStageSymbolPattern.MatchString(request.DependencyKey) || request.Workflow != "" || request.Environment != "" {
+			!externalStageSymbolPattern.MatchString(request.DependencyKey) || request.Workflow != "" || request.Environment != "" || request.TargetRef != "" {
 			return &usageError{msg: "Janus requires role dependency, one exact dependency symbol, and no workflow/environment"}
 		}
 	default:
 		return &usageError{msg: "--class must be pharos or janus"}
+	}
+	return nil
+}
+
+func validateExternalStageLaunchCandidate(candidate externalstage.LaunchCandidate) error {
+	artifact := candidate.Artifact
+	if candidate.Schema != externalstage.LaunchAdmissionSchema || candidate.Version != externalstage.LaunchAdmissionVersion ||
+		!externalStageDigestPattern.MatchString(candidate.TargetRef) || candidate.Workflow != "deploy-production" ||
+		!externalStageSymbolPattern.MatchString(candidate.Environment) ||
+		!externalStageDigestPattern.MatchString(candidate.ReviewedPlanDigest) ||
+		!externalStageDigestPattern.MatchString(candidate.OperationBindingDigest) ||
+		candidate.ReviewedPlanDigest == candidate.OperationBindingDigest {
+		return &usageError{msg: "candidate must bind the closed launch schema, target, deploy-production workflow, environment, and two distinct digests"}
+	}
+	if artifact.VersionScheme != externalstage.VersionSchemeLegacy && artifact.VersionScheme != externalstage.VersionSchemeINSPRCalendar {
+		return &usageError{msg: "candidate artifact version_scheme must be an existing discriminated value"}
+	}
+	if !externalStageVersionPattern.MatchString(artifact.Version) || !externalStageSymbolPattern.MatchString(artifact.ReleaseChannel) ||
+		artifact.ReleaseSequence < 0 || !externalStageDigestPattern.MatchString(artifact.Digest) ||
+		!externalStageCommitPattern.MatchString(artifact.CommitDigest) ||
+		!externalStageCoordinatePattern.MatchString(artifact.ReleaseManifestCoordinate) ||
+		!externalStageDigestPattern.MatchString(artifact.ReleaseManifestDigest) {
+		return &usageError{msg: "candidate artifact must contain all eight exact existing v2 identity fields"}
+	}
+	if _, err := time.Parse(time.RFC3339Nano, candidate.ObservedAt); err != nil {
+		return &usageError{msg: "candidate observed_at must be RFC3339"}
+	}
+	return nil
+}
+
+func validateExternalStageLaunchAdmission(handoffID string, candidate externalstage.LaunchCandidate,
+	admission externalstage.LaunchAdmission, rawSecret []byte,
+) error {
+	stringsToCheck := []string{admission.GrantID, admission.GrantDigest, admission.AdmissionID, admission.AdmissionDigest,
+		admission.HandoffID, admission.TargetRef, admission.Workflow, admission.Environment, admission.PlanDigest,
+		admission.PredecessorDigest, admission.ContextDigest, admission.ReviewedPlanDigest, admission.OperationBindingDigest,
+		admission.IssuedAt, admission.ExpiresAt, string(admission.Artifact.VersionScheme), admission.Artifact.Version,
+		admission.Artifact.ReleaseChannel, admission.Artifact.Digest, admission.Artifact.CommitDigest,
+		admission.Artifact.ReleaseManifestCoordinate, admission.Artifact.ReleaseManifestDigest}
+	if externalStageResponseReflectsSecret(rawSecret, stringsToCheck...) || admission.Schema != externalstage.LaunchAdmissionSchema ||
+		admission.Version != externalstage.LaunchAdmissionVersion || !externalStageUUIDPattern.MatchString(admission.GrantID) ||
+		admission.GrantRevision != 1 || !externalStageDigestPattern.MatchString(admission.GrantDigest) ||
+		!externalStageUUIDPattern.MatchString(admission.AdmissionID) || !externalStageDigestPattern.MatchString(admission.AdmissionDigest) ||
+		admission.HandoffID != handoffID || admission.CredentialEpoch < 1 || admission.TargetRef != candidate.TargetRef ||
+		admission.Workflow != candidate.Workflow || admission.Environment != candidate.Environment || admission.Artifact != candidate.Artifact ||
+		admission.Stage != "deployment" || admission.Attempt < 1 || admission.Plan < 1 || admission.Execution < 1 || admission.Authority < 1 ||
+		!externalStageDigestPattern.MatchString(admission.PlanDigest) || !externalStageDigestPattern.MatchString(admission.PredecessorDigest) ||
+		!externalStageDigestPattern.MatchString(admission.ContextDigest) || admission.ReviewedPlanDigest != candidate.ReviewedPlanDigest ||
+		admission.OperationBindingDigest != candidate.OperationBindingDigest || admission.MaxLaunches != 1 || admission.UsedLaunches != 0 || admission.State != "issued" {
+		return errors.New("external-stage launch admission violated the closed schema")
+	}
+	issued, issueErr := time.Parse(time.RFC3339Nano, admission.IssuedAt)
+	expires, expiryErr := time.Parse(time.RFC3339Nano, admission.ExpiresAt)
+	if issueErr != nil || expiryErr != nil || !expires.After(issued) {
+		return errors.New("external-stage launch admission violated the closed schema")
+	}
+	return nil
+}
+
+func validateExternalStageLaunchReceipt(handoffID, admissionID, admissionDigest string,
+	receipt externalstage.LaunchReceipt, rawSecret []byte,
+) error {
+	if externalStageResponseReflectsSecret(rawSecret, receipt.AdmissionID, receipt.AdmissionDigest, receipt.HandoffID, receipt.ConsumedAt) ||
+		receipt.Schema != externalstage.LaunchAdmissionSchema || receipt.Version != externalstage.LaunchAdmissionVersion ||
+		receipt.AdmissionID != admissionID || receipt.AdmissionDigest != admissionDigest || receipt.HandoffID != handoffID ||
+		receipt.CredentialEpoch < 1 || receipt.LaunchNumber != 1 || receipt.State != "consumed" {
+		return errors.New("external-stage launch receipt violated the closed schema")
+	}
+	if _, err := time.Parse(time.RFC3339Nano, receipt.ConsumedAt); err != nil {
+		return errors.New("external-stage launch receipt violated the closed schema")
 	}
 	return nil
 }

@@ -88,6 +88,13 @@ func (s *Service) RequestControlCAS(ctx context.Context, p auth.Principal, proje
 	if current.Revision != request.ExpectedRevision {
 		return BrowserControlResponse{}, ErrBrowserConflict
 	}
+	var retiring int
+	if tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM harness_session_retirements WHERE harness_session_id=? AND (state<>'rejected' OR reason='outcome_unknown'))`, sessionID).Scan(&retiring) != nil {
+		return BrowserControlResponse{}, ErrBrowserStorage
+	}
+	if retiring == 1 {
+		return BrowserControlResponse{}, ErrBrowserConflict
+	}
 	digest := sha256.Sum256([]byte(fmt.Sprintf("paimos-browser-control-v1:%d:%d:%s:%s:%d:%s", p.UserID(), project, sessionID, kind, request.ExpectedRevision, request.RequestKey)))
 	digest[6] = (digest[6] & 0x0f) | 0x40
 	digest[8] = (digest[8] & 0x3f) | 0x80

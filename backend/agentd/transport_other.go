@@ -59,3 +59,11 @@ func (c *Client) QuiesceRuntime(context.Context, string, []string) error {
 func (*Client) LookupStart(context.Context, string) (Session, error) {
 	return Session{}, errors.New("agentd transport is unsupported")
 }
+
+func (*Client) ApplyAccountLifecycle(context.Context, AccountLifecycleRequest) (AccountLifecycleResult, error) {
+	return AccountLifecycleResult{}, errors.New("agentd transport is unsupported")
+}
+
+func (*Client) AccountLifecycleStatus(context.Context) ([]RuntimeAccountState, error) {
+	return nil, errors.New("agentd transport is unsupported")
+}

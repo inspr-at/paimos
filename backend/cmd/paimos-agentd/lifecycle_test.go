@@ -5,11 +5,13 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -32,6 +34,16 @@ type lifecycleFixtureAdapter struct {
 func (*lifecycleFixtureAdapter) Name() string                        { return "codex" }
 func (*lifecycleFixtureAdapter) AccountLabel(context.Context) string { return "chatgpt" }
 func (a *lifecycleFixtureAdapter) HasAccount(key string) bool        { return a.accounts[key] }
+func (a *lifecycleFixtureAdapter) EnrolledAccountKeys() []string {
+	keys := make([]string, 0, len(a.accounts))
+	for key, ok := range a.accounts {
+		if ok {
+			keys = append(keys, key)
+		}
+	}
+	sort.Strings(keys)
+	return keys
+}
 func (*lifecycleFixtureAdapter) Capabilities() []agentd.Capability {
 	return []agentd.Capability{agentd.CapabilityInbox, agentd.CapabilityStatus, agentd.CapabilityStop}
 }
@@ -47,6 +59,33 @@ func (a *lifecycleFixtureAdapter) Start(_ context.Context, r agentd.StartRequest
 type lifecycleFixtureReporter struct {
 	controller agentd.Controller
 	public     string
+}
+
+type queuedLifecycleAuthority struct {
+	intent *lifecycleintents.Intent
+}
+
+func (*queuedLifecycleAuthority) RegisterRuntime(context.Context, lifecycleintents.Registration) (lifecycleintents.Runtime, error) {
+	return lifecycleintents.Runtime{}, errors.New("unused")
+}
+func (*queuedLifecycleAuthority) RegisterSession(context.Context, string, lifecycleintents.SessionRegistration, string) error {
+	return errors.New("unused")
+}
+func (a *queuedLifecycleAuthority) Claim(context.Context, string) (*lifecycleintents.Intent, error) {
+	if a.intent == nil {
+		return nil, nil
+	}
+	out := *a.intent
+	return &out, nil
+}
+func (a *queuedLifecycleAuthority) Transition(_ context.Context, _ string, transition lifecycleintents.Transition) (lifecycleintents.Intent, error) {
+	if a.intent == nil || transition.ExpectedRevision != a.intent.Revision {
+		return lifecycleintents.Intent{}, lifecycleintents.ErrConflict
+	}
+	a.intent.State = transition.State
+	a.intent.Reason = transition.Reason
+	a.intent.Revision++
+	return *a.intent, nil
 }
 
 func (r *lifecycleFixtureReporter) BindController(c agentd.Controller) error {
@@ -290,6 +329,103 @@ func TestDaemonLifecycleAdvertisesTwoAccountsAndRejectsWrongKey(t *testing.T) {
 	intent.ID, intent.Request.AccountKey, intent.NewGeneration = uuid.NewString(), "personal", uuid.NewString()
 	if err := d.projects[0].Prepare(ctx, intent); err != nil || d.projects[0].prepared[intent.ID].AccountKey != "personal" {
 		t.Fatal("second configured account could not be prepared")
+	}
+}
+
+func TestDaemonLifecyclePrepareRefusesDetachedAccountAndRestartAdvertisesCommittedSet(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	root := t.TempDir()
+	workspace, _ := filepath.EvalSymlinks(t.TempDir())
+	profile, _ := dispatchprofile.Resolve("codex-sol-high", "1", "codex")
+	bridge, _ := newCLIReporterWithRunner("fixture", "fixture-host", "/fixture/paimos", nil, func(context.Context, string, []string, []string, io.Reader) ([]byte, error) {
+		return json.Marshal(map[string]any{"dispatch_profiles": []dispatchprofile.Profile{profile}})
+	}, newMemoryReporterLeaseStore())
+	a := &lifecycleFixtureAdapter{accounts: map[string]bool{"coordinator": true, "personal": true}}
+	reporter := &lifecycleFixtureReporter{public: uuid.NewString()}
+	controller, e := agentd.NewSupervisor(agentd.SupervisorConfig{Instance: "account-detach", StateRoot: root, Adapters: []agentd.Adapter{a}, Reporter: reporter, DispatchResolver: bridge, HeartbeatInterval: 20 * time.Millisecond})
+	if e != nil {
+		t.Fatal(e)
+	}
+	provenance, e := controller.InspectWorkspace(ctx, workspace, agentd.WorkspaceExclusive)
+	if e != nil {
+		t.Fatal(e)
+	}
+	primary, e := newNativeConsumers(root, "account-detach", bridge)
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer primary.supervisor.Stop()
+	primary.controller = controller
+	handle := uuid.NewString()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/agents/worker.json") {
+			_ = json.NewEncoder(w).Encode(map[string]any{"project": map[string]any{"id": 42, "key": "FIX"}, "agent": map[string]any{"project_id": 42, "name": "worker", "body": "canonical fixture instructions"}})
+			return
+		}
+		http.Error(w, "unavailable", 404)
+	}))
+	defer server.Close()
+	config := lifecycleConfig{Projects: []configuredProject{{
+		ProjectID: 42, AccountLabel: "chatgpt",
+		Accounts:   []configuredAccount{{Key: "coordinator", Label: "Coordinator"}, {Key: "personal", Label: "Personal"}},
+		Profiles:   []lifecycleintents.Profile{{ID: profile.ID, Version: profile.Version}},
+		Workspaces: []configuredWorkspace{{Handle: handle, Path: workspace, Identity: provenance.Identity, Label: "Fixture workspace"}},
+	}}}
+	configPath := filepath.Join(t.TempDir(), "runtime.json")
+	keyPath := filepath.Join(t.TempDir(), "key")
+	raw, _ := json.Marshal(config)
+	_ = os.WriteFile(configPath, raw, 0600)
+	_ = os.WriteFile(keyPath, []byte("fixture-key"), 0600)
+	d, e := newDaemonLifecycle(configPath, root, "account-detach", server.URL, keyPath, controller, primary, bridge)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if _, err := controller.ApplyAccountLifecycle(ctx, agentd.AccountLifecycleRequest{
+		IdempotencyKey: "detach-personal", Operation: agentd.AccountLifecycleDisconnect, ProjectID: 42,
+		RuntimeGeneration: controller.Status().DaemonID, AccountKey: "personal", Adapter: agentd.AdapterCodex,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	intent := lifecycleintents.Intent{
+		SchemaVersion: lifecycleintents.AccountChoiceSchemaV2, ID: uuid.NewString(), ProjectID: 42, State: "claimed", NewGeneration: uuid.NewString(),
+		Request: lifecycleintents.Request{
+			RequestKey: uuid.NewString(), Operation: "start", RuntimeID: uuid.NewString(), RuntimeGeneration: controller.Status().DaemonID,
+			AccountLabel: "chatgpt", AccountKey: "personal", TTLSeconds: 120, WorkspaceHandle: handle, AgentName: "worker",
+			DispatchProfileID: profile.ID, DispatchProfileVersion: profile.Version, Role: "worker", WorkShape: "unknown",
+		},
+	}
+	if err := d.projects[0].Prepare(ctx, intent); err == nil {
+		t.Fatal("detached account was prepared")
+	}
+	intent.ID, intent.Request.AccountKey, intent.NewGeneration = uuid.NewString(), "coordinator", uuid.NewString()
+	if err := d.projects[0].Prepare(ctx, intent); err == nil {
+		t.Fatal("pre-disconnect advertisement prepared through the new attachment revision")
+	}
+	if err := controller.Close(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	restarted, e := agentd.NewSupervisor(agentd.SupervisorConfig{Instance: "account-detach", StateRoot: root, Adapters: []agentd.Adapter{a}, Reporter: reporter, DispatchResolver: bridge, HeartbeatInterval: 20 * time.Millisecond})
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer restarted.Close(context.Background())
+	again, e := newDaemonLifecycle(configPath, root, "account-detach", server.URL, keyPath, restarted, primary, bridge)
+	if e != nil {
+		t.Fatal(e)
+	}
+	reg := again.projects[0].registration
+	if len(reg.AccountScopes) != 1 || len(reg.AccountScopes[0].Accounts) != 1 || reg.AccountScopes[0].Accounts[0].Key != "coordinator" {
+		t.Fatalf("restart advertisement=%+v", reg.AccountScopes)
+	}
+	if reg.SchemaVersion != lifecycleintents.AccountLifecycleSchemaV4 || len(reg.AccountScopes) != 1 || reg.AccountScopes[0].AttachmentRevision < 1 {
+		t.Fatalf("restart did not advertise the committed attachment revision: %+v", reg)
+	}
+	intent.ID, intent.NewGeneration = uuid.NewString(), uuid.NewString()
+	intent.Request.RuntimeGeneration = reg.Generation
+	intent.Request.AttachmentRevision = reg.AccountScopes[0].AttachmentRevision
+	if err := again.projects[0].Prepare(ctx, intent); err != nil {
+		t.Fatalf("current advertised account revision was not prepared: %v", err)
 	}
 }
 
@@ -545,10 +681,290 @@ func TestDaemonLifecyclePreparesMixedCodexAndCursorScopes(t *testing.T) {
 	if prepared.ExpectedAccountLabel != "cursor_context" || prepared.AccountKey != "cursor-op" || prepared.Adapter != "cursor" {
 		t.Fatalf("prepared=%+v", prepared)
 	}
+	connected, err := controller.ApplyAccountLifecycle(ctx, agentd.AccountLifecycleRequest{
+		IdempotencyKey: "attach-codex", Operation: agentd.AccountLifecycleConnect, ProjectID: 42,
+		RuntimeGeneration: controller.Status().DaemonID, AccountKey: "codex-work", Adapter: agentd.AdapterCodex,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg = applyCommittedAccountAdvertisement(controller, config.Projects[0], reg)
+	if err := lifecycleintents.ValidateRegistration(reg); err != nil || reg.SchemaVersion != lifecycleintents.AccountLifecycleSchemaV4 {
+		t.Fatalf("mixed explicit and legacy advertisement invalid: %+v err=%v", reg, err)
+	}
+	d.projects[0].registration = reg
+	codexRevision, cursorRevision := int64(0), int64(-1)
+	for _, scope := range reg.AccountScopes {
+		switch scope.AccountLabel {
+		case "chatgpt":
+			codexRevision = scope.AttachmentRevision
+		case "cursor_context":
+			cursorRevision = scope.AttachmentRevision
+		}
+	}
+	if codexRevision != connected.Revision || cursorRevision != 0 {
+		t.Fatalf("mixed attachment revisions codex=%d cursor=%d", codexRevision, cursorRevision)
+	}
+	legacyCursor := cursorIntent
+	legacyCursor.ID, legacyCursor.NewGeneration, legacyCursor.Request.RequestKey = uuid.NewString(), uuid.NewString(), uuid.NewString()
+	if err := d.projects[0].Prepare(ctx, legacyCursor); err != nil {
+		t.Fatalf("legacy cursor scope was not preserved beside explicit Codex: %v", err)
+	}
+	codexIntent := cursorIntent
+	codexIntent.ID, codexIntent.NewGeneration, codexIntent.Request.RequestKey = uuid.NewString(), uuid.NewString(), uuid.NewString()
+	codexIntent.Request.AccountLabel, codexIntent.Request.AccountKey = "chatgpt", "codex-work"
+	codexIntent.Request.DispatchProfileID, codexIntent.Request.DispatchProfileVersion = codexProfile.ID, codexProfile.Version
+	codexIntent.Request.WorkspaceHandle = codexHandle
+	if err := d.projects[0].Prepare(ctx, codexIntent); err == nil {
+		t.Fatal("explicit Codex selection without its advertised revision was prepared")
+	}
+	codexIntent.Request.AttachmentRevision = codexRevision
+	if err := d.projects[0].Prepare(ctx, codexIntent); err != nil {
+		t.Fatalf("explicit Codex selection at its advertised revision was not prepared: %v", err)
+	}
 	crossed := cursorIntent
 	crossed.ID, crossed.NewGeneration, crossed.Request.RequestKey = uuid.NewString(), uuid.NewString(), uuid.NewString()
 	crossed.Request.AccountLabel, crossed.Request.AccountKey = "chatgpt", "codex-work"
 	if err := d.projects[0].Prepare(ctx, crossed); err == nil {
 		t.Fatal("codex class prepared a cursor profile")
 	}
+}
+
+func TestDaemonLifecycleAdvertisementPreservesCodexClassMembership(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	root := t.TempDir()
+	workspace, _ := filepath.EvalSymlinks(t.TempDir())
+	chatgptProfile, _ := dispatchprofile.Resolve("codex-sol-high", "1", "codex")
+	apiKeyProfile, _ := dispatchprofile.Resolve("codex-luna-medium", "1", "codex")
+	bridge, _ := newCLIReporterWithRunner("fixture", "fixture-host", "/fixture/paimos", nil, func(context.Context, string, []string, []string, io.Reader) ([]byte, error) {
+		return json.Marshal(map[string]any{"dispatch_profiles": []dispatchprofile.Profile{chatgptProfile, apiKeyProfile}})
+	}, newMemoryReporterLeaseStore())
+	a := &lifecycleFixtureAdapter{accounts: map[string]bool{"codex-work": true, "codex-lab": true}}
+	reporter := &lifecycleFixtureReporter{public: uuid.NewString()}
+	controller, e := agentd.NewSupervisor(agentd.SupervisorConfig{Instance: "codex-classes", StateRoot: root, Adapters: []agentd.Adapter{a}, Reporter: reporter, DispatchResolver: bridge, HeartbeatInterval: 20 * time.Millisecond})
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer controller.Close(context.Background())
+	provenance, e := controller.InspectWorkspace(ctx, workspace, agentd.WorkspaceExclusive)
+	if e != nil {
+		t.Fatal(e)
+	}
+	primary, e := newNativeConsumers(root, "codex-classes", bridge)
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer primary.supervisor.Stop()
+	primary.controller = controller
+	handle := uuid.NewString()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "unavailable", 404)
+	}))
+	defer server.Close()
+	config := lifecycleConfig{Projects: []configuredProject{{
+		ProjectID: 42,
+		AccountScopes: []lifecycleintents.AccountScope{
+			{AccountLabel: "chatgpt", Accounts: []lifecycleintents.AccountChoice{{Key: "codex-work", Label: "Work"}}, Profiles: []lifecycleintents.Profile{{ID: chatgptProfile.ID, Version: chatgptProfile.Version}}},
+			{AccountLabel: "api_key", Accounts: []lifecycleintents.AccountChoice{{Key: "codex-lab", Label: "Lab"}}, Profiles: []lifecycleintents.Profile{{ID: apiKeyProfile.ID, Version: apiKeyProfile.Version}}},
+		},
+		Workspaces: []configuredWorkspace{{Handle: handle, Path: workspace, Identity: provenance.Identity, Label: "Codex"}},
+	}}}
+	configPath := filepath.Join(t.TempDir(), "runtime.json")
+	keyPath := filepath.Join(t.TempDir(), "key")
+	raw, _ := json.Marshal(config)
+	_ = os.WriteFile(configPath, raw, 0600)
+	_ = os.WriteFile(keyPath, []byte("fixture-key"), 0600)
+	d, e := newDaemonLifecycle(configPath, root, "codex-classes", server.URL, keyPath, controller, primary, bridge)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if _, err := controller.ApplyAccountLifecycle(ctx, agentd.AccountLifecycleRequest{
+		IdempotencyKey: "attach-work", Operation: agentd.AccountLifecycleConnect, ProjectID: 42,
+		RuntimeGeneration: controller.Status().DaemonID, AccountKey: "codex-work", Adapter: agentd.AdapterCodex,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	reg := applyCommittedAccountAdvertisement(controller, config.Projects[0], d.projects[0].registration)
+	if err := lifecycleintents.ValidateRegistration(reg); err != nil {
+		t.Fatalf("class-preserving lifecycle advertisement invalid: %v", err)
+	}
+	if reg.SchemaVersion != lifecycleintents.AccountLifecycleSchemaV4 || len(reg.AccountScopes) != 2 {
+		t.Fatalf("advertisement=%+v", reg)
+	}
+	byClass := map[string][]string{}
+	for _, scope := range reg.AccountScopes {
+		for _, choice := range scope.Accounts {
+			byClass[scope.AccountLabel] = append(byClass[scope.AccountLabel], choice.Key)
+		}
+	}
+	if len(byClass["chatgpt"]) != 1 || byClass["chatgpt"][0] != "codex-work" {
+		t.Fatalf("chatgpt advertisement=%v", byClass["chatgpt"])
+	}
+	if containsString(byClass["chatgpt"], "codex-lab") {
+		t.Fatal("api_key key appeared under chatgpt")
+	}
+	if len(byClass["api_key"]) != 1 || byClass["api_key"][0] != "codex-lab" {
+		t.Fatalf("api_key advertisement=%v", byClass["api_key"])
+	}
+}
+
+func TestDaemonLifecycleDetachingAllCodexKeysDoesNotAdvertiseAmbient(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	root := t.TempDir()
+	workspace, _ := filepath.EvalSymlinks(t.TempDir())
+	profile, _ := dispatchprofile.Resolve("codex-sol-high", "1", "codex")
+	bridge, _ := newCLIReporterWithRunner("fixture", "fixture-host", "/fixture/paimos", nil, func(context.Context, string, []string, []string, io.Reader) ([]byte, error) {
+		return json.Marshal(map[string]any{"dispatch_profiles": []dispatchprofile.Profile{profile}})
+	}, newMemoryReporterLeaseStore())
+	a := &lifecycleFixtureAdapter{accounts: map[string]bool{"coordinator": true, "personal": true}}
+	reporter := &lifecycleFixtureReporter{public: uuid.NewString()}
+	controller, e := agentd.NewSupervisor(agentd.SupervisorConfig{Instance: "codex-empty", StateRoot: root, Adapters: []agentd.Adapter{a}, Reporter: reporter, DispatchResolver: bridge, HeartbeatInterval: 20 * time.Millisecond})
+	if e != nil {
+		t.Fatal(e)
+	}
+	provenance, e := controller.InspectWorkspace(ctx, workspace, agentd.WorkspaceExclusive)
+	if e != nil {
+		t.Fatal(e)
+	}
+	primary, e := newNativeConsumers(root, "codex-empty", bridge)
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer primary.supervisor.Stop()
+	primary.controller = controller
+	handle := uuid.NewString()
+	// Both exercised starts are rejected by the local attachment-epoch check,
+	// before any remote canonical-agent read is permitted.
+	reportURL := "http://127.0.0.1:1"
+	config := lifecycleConfig{Projects: []configuredProject{{
+		ProjectID: 42, AccountLabel: "chatgpt",
+		Accounts:   []configuredAccount{{Key: "coordinator", Label: "Coordinator"}, {Key: "personal", Label: "Personal"}},
+		Profiles:   []lifecycleintents.Profile{{ID: profile.ID, Version: profile.Version}},
+		Workspaces: []configuredWorkspace{{Handle: handle, Path: workspace, Identity: provenance.Identity, Label: "Fixture workspace"}},
+	}}}
+	configPath := filepath.Join(t.TempDir(), "runtime.json")
+	keyPath := filepath.Join(t.TempDir(), "key")
+	raw, _ := json.Marshal(config)
+	_ = os.WriteFile(configPath, raw, 0600)
+	_ = os.WriteFile(keyPath, []byte("fixture-key"), 0600)
+	d, e := newDaemonLifecycle(configPath, root, "codex-empty", reportURL, keyPath, controller, primary, bridge)
+	if e != nil {
+		t.Fatal(e)
+	}
+	generation := controller.Status().DaemonID
+	connected, err := controller.ApplyAccountLifecycle(ctx, agentd.AccountLifecycleRequest{
+		IdempotencyKey: "attach", Operation: agentd.AccountLifecycleConnect, ProjectID: 42,
+		RuntimeGeneration: generation, AccountKey: "coordinator", Adapter: agentd.AdapterCodex,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	advertised := applyCommittedAccountAdvertisement(controller, config.Projects[0], d.projects[0].registration)
+	d.projects[0].registration = advertised
+	queuedRuntime := lifecycleintents.Runtime{
+		ID: uuid.NewString(), ProjectID: 42, Generation: advertised.Generation, MachineID: advertised.Host,
+		Workspaces: advertised.Workspaces, AccountScopes: advertised.AccountScopes,
+		SchemaVersion: advertised.SchemaVersion, Sessions: []lifecycleintents.SessionProjection{},
+		ExpiresAt: time.Now().Add(time.Minute).UTC().Format(time.RFC3339Nano),
+	}
+	queued := &queuedLifecycleAuthority{intent: &lifecycleintents.Intent{
+		SchemaVersion: lifecycleintents.AccountChoiceSchemaV2, ID: uuid.NewString(), ProjectID: 42,
+		State: "claimed", Revision: 2, NewGeneration: uuid.NewString(),
+		Request: lifecycleintents.Request{
+			RequestKey: uuid.NewString(), Operation: "start", RuntimeID: queuedRuntime.ID,
+			RuntimeGeneration: generation, AccountLabel: "chatgpt", AccountKey: "coordinator",
+			AttachmentRevision: connected.Revision, TTLSeconds: 120, WorkspaceHandle: handle,
+			AgentName: "worker", DispatchProfileID: profile.ID, DispatchProfileVersion: profile.Version,
+			WorkShape: "unknown", Role: "worker",
+		},
+	}}
+	runner, err := lifecycleclient.NewRunner(filepath.Join(t.TempDir(), "runner"), generation, queued, d.projects[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	disconnected, err := controller.ApplyAccountLifecycle(ctx, agentd.AccountLifecycleRequest{
+		IdempotencyKey: "detach-coordinator", Operation: agentd.AccountLifecycleDisconnect, ProjectID: 42,
+		RuntimeGeneration: generation, AccountKey: "coordinator", Adapter: agentd.AdapterCodex, ExpectedRevision: connected.Revision,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reconnected, err := controller.ApplyAccountLifecycle(ctx, agentd.AccountLifecycleRequest{
+		IdempotencyKey: "reconnect-coordinator", Operation: agentd.AccountLifecycleConnect, ProjectID: 42,
+		RuntimeGeneration: generation, AccountKey: "coordinator", Adapter: agentd.AdapterCodex, ExpectedRevision: disconnected.Revision,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := runner.Step(ctx, queuedRuntime); err != nil {
+		t.Fatalf("queued stale start did not settle as failed: %v", err)
+	}
+	if queued.intent.State != "failed" || len(a.requests) != 0 {
+		t.Fatalf("queued stale start state=%s spawned=%d", queued.intent.State, len(a.requests))
+	}
+	disconnected, err = controller.ApplyAccountLifecycle(ctx, agentd.AccountLifecycleRequest{
+		IdempotencyKey: "detach-coordinator-final", Operation: agentd.AccountLifecycleDisconnect, ProjectID: 42,
+		RuntimeGeneration: generation, AccountKey: "coordinator", Adapter: agentd.AdapterCodex, ExpectedRevision: reconnected.Revision,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := controller.ApplyAccountLifecycle(ctx, agentd.AccountLifecycleRequest{
+		IdempotencyKey: "detach-personal", Operation: agentd.AccountLifecycleDisconnect, ProjectID: 42,
+		RuntimeGeneration: generation, AccountKey: "personal", Adapter: agentd.AdapterCodex, ExpectedRevision: disconnected.Revision,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := controller.Start(ctx, agentd.StartRequest{
+		Adapter: agentd.AdapterCodex, Workspace: workspace, Prompt: "ambient", Identity: "codex:ambient", ProjectID: 42,
+	}); !errors.Is(err, agentd.ErrAccountDetached) {
+		t.Fatalf("empty named set started ambient Codex: %v", err)
+	}
+	intent := lifecycleintents.Intent{
+		SchemaVersion: lifecycleintents.AccountChoiceSchemaV2, ID: uuid.NewString(), ProjectID: 42, State: "claimed", NewGeneration: uuid.NewString(),
+		Request: lifecycleintents.Request{
+			RequestKey: uuid.NewString(), Operation: "start", RuntimeID: uuid.NewString(), RuntimeGeneration: generation,
+			AccountLabel: "chatgpt", AccountKey: "coordinator", TTLSeconds: 120, WorkspaceHandle: handle, AgentName: "worker",
+			DispatchProfileID: profile.ID, DispatchProfileVersion: profile.Version, Role: "worker", WorkShape: "unknown",
+		},
+	}
+	if err := d.projects[0].Prepare(ctx, intent); err == nil {
+		t.Fatal("detached Codex key was prepared")
+	}
+	if err := controller.Close(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	restarted, e := agentd.NewSupervisor(agentd.SupervisorConfig{Instance: "codex-empty", StateRoot: root, Adapters: []agentd.Adapter{a}, Reporter: reporter, DispatchResolver: bridge, HeartbeatInterval: 20 * time.Millisecond})
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer restarted.Close(context.Background())
+	again, e := newDaemonLifecycle(configPath, root, "codex-empty", reportURL, keyPath, restarted, primary, bridge)
+	if e != nil {
+		t.Fatal(e)
+	}
+	reg := again.projects[0].registration
+	if reg.SchemaVersion != lifecycleintents.AccountLifecycleSchemaV4 || reg.AccountLabel != "" || len(reg.AccountScopes) != 1 ||
+		reg.AccountScopes[0].AccountLabel != "chatgpt" || len(reg.AccountScopes[0].Accounts) != 0 ||
+		reg.AccountScopes[0].AccountAvailability != lifecycleintents.AccountAvailabilityUnavailable || reg.AccountScopes[0].AttachmentRevision < 1 {
+		t.Fatalf("empty named Codex availability was not advertised explicitly: %+v", reg)
+	}
+	if _, err := restarted.ApplyAccountLifecycle(ctx, agentd.AccountLifecycleRequest{
+		IdempotencyKey: "reconnect-after-empty-restart", Operation: agentd.AccountLifecycleConnect, ProjectID: 42,
+		RuntimeGeneration: restarted.Status().DaemonID, AccountKey: "coordinator", Adapter: agentd.AdapterCodex,
+		ExpectedRevision: reg.AccountScopes[0].AttachmentRevision,
+	}); err != nil || !restarted.AccountAttached(42, agentd.AdapterCodex, "coordinator") {
+		t.Fatalf("persisted empty named mode could not reconnect a configured account: %v", err)
+	}
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
