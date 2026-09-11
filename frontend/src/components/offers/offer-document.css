@@ -156,7 +156,7 @@
   background: var(--muted);
 }
 .offer-document .ftr .logotype {
-  height: 2.9mm;
+  height: 1em;
   width: auto;
   display: block;
 }
@@ -367,6 +367,12 @@
   color: var(--muted);
   font-size: 9pt;
 }
+.offer-document tbody.last-position tr.long td {
+  border-bottom: 0;
+}
+.offer-document .sheet .page {
+  zoom: var(--offer-zoom, 1);
+}
 .offer-document td.pos-no {
   width: 9mm;
   color: var(--teal);
@@ -452,7 +458,9 @@
 }
 .offer-document .totals {
   margin: 4mm 0 0 auto;
-  width: 66mm;
+  width: 100%;
+  border-top: 1px solid var(--ink);
+  padding-top: 6px;
 }
 .offer-document .totals div {
   display: flex;
@@ -464,9 +472,8 @@
 .offer-document .totals .grand {
   font-weight: 700;
   font-size: 11pt;
-  border-top: 1px solid var(--ink);
-  margin-top: 2px;
-  padding-top: 6px;
+  width: 66mm;
+  margin-left: auto;
 }
 .offer-document .totals .vatnote {
   justify-content: flex-end;
@@ -675,6 +682,9 @@
     gap: 0;
     display: block;
     overflow: visible;
+  }
+  .offer-document .sheet .page {
+    zoom: 1 !important;
   }
   .offer-document .page {
     margin: 0;

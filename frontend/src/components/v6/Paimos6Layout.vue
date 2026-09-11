@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { OFFER_CHROME_KEY } from '@/composables/useOfferChrome'
 import { LS_HABITAT_THEME } from '@/constants/storage'
 import {
   Building2,
@@ -36,9 +37,14 @@ import { useAuthStore } from '@/stores/auth'
 import { commandShortcutLabel } from '@/v6/commandPalette'
 import { PAIMOS6_COMMAND_CONTEXT_KEY, type Paimos6CommandContext } from '@/v6/commandPaletteContext'
 
+const offerChromeCollapsed = ref(true)
+provide(OFFER_CHROME_KEY, offerChromeCollapsed)
 const auth = useAuthStore()
 const route = useRoute()
 const router = useRouter()
+const compactOffer = computed(
+  () => /^\/crm\/offers\/[^/]+$/.test(route.path) && offerChromeCollapsed.value,
+)
 const commandButton = shallowRef<HTMLElement | null>(null)
 const commandContext = shallowRef<Paimos6CommandContext | null>(null)
 const principalId = computed(() => auth.user?.id ?? null)
@@ -233,8 +239,8 @@ onScopeDispose(() => {
         </nav>
         <div class="habitat-rail-bottom">
           <RouterLink
-          class="habitat-rail-start"
-          aria-label="Start work"
+            class="habitat-rail-start"
+            aria-label="Start work"
             :to="{ path: '/', query: { ...route.query, view: 'assign', session: undefined } }"
             ><Plus :size="18" aria-hidden="true" /><span>Start work</span></RouterLink
           >
@@ -256,48 +262,51 @@ onScopeDispose(() => {
       <div class="habitat-app-content">
         <FlowHost :project-id="projectId" @active="flowHostActive = $event">
           <template #toolbar>
-            <header class="habitat-header" :class="{ 'habitat-header--flow-toolbar': flowHostActive }">
-          <div class="habitat-location">
-            <span>Workspace</span><span>/</span
-            ><strong>{{ locationLabel }}</strong>
-          </div>
-          <div class="habitat-header-tools">
-            <button type="button" class="habitat-voice" @click="openTalk">
-              <Mic :size="16" aria-hidden="true" /><span>Voice</span>
-            </button>
-            <button
-              ref="commandButton"
-              type="button"
-              class="p6-command-mount habitat-search"
-              :aria-label="`Open command palette (${shortcutLabel})`"
-              @click="palette.show"
+            <header
+              v-show="!compactOffer"
+              class="habitat-header"
+              :class="{ 'habitat-header--flow-toolbar': flowHostActive }"
             >
-              <Search :size="15" aria-hidden="true" /><span>Search anything</span
-              ><kbd><Command :size="11" aria-hidden="true" />{{ shortcutLabel }}</kbd>
-            </button>
-            <button
-              type="button"
-              :aria-label="theme === 'day' ? 'Switch to dark mode' : 'Switch to bright mode'"
-              @click="toggleTheme"
-            >
-              <Moon v-if="theme === 'day'" :size="16" aria-hidden="true" /><Sun
-                v-else
-                :size="16"
-                aria-hidden="true"
-              />
-            </button>
-            <RouterLink
-              class="habitat-account habitat-mobile-account"
-              to="/settings?tab=account"
-              :aria-label="`Signed in as ${displayName}. Open settings`"
-              >{{ displayName }}</RouterLink
-            >
-            <button type="button" aria-label="Log out" @click="auth.logout()">
-              <LogOut :size="16" aria-hidden="true" />
-            </button>
-          </div>
-        </header>
-            <div class="habitat-source">
+              <div class="habitat-location">
+                <span>Workspace</span><span>/</span><strong>{{ locationLabel }}</strong>
+              </div>
+              <div class="habitat-header-tools">
+                <button type="button" class="habitat-voice" @click="openTalk">
+                  <Mic :size="16" aria-hidden="true" /><span>Voice</span>
+                </button>
+                <button
+                  ref="commandButton"
+                  type="button"
+                  class="p6-command-mount habitat-search"
+                  :aria-label="`Open command palette (${shortcutLabel})`"
+                  @click="palette.show"
+                >
+                  <Search :size="15" aria-hidden="true" /><span>Search anything</span
+                  ><kbd><Command :size="11" aria-hidden="true" />{{ shortcutLabel }}</kbd>
+                </button>
+                <button
+                  type="button"
+                  :aria-label="theme === 'day' ? 'Switch to dark mode' : 'Switch to bright mode'"
+                  @click="toggleTheme"
+                >
+                  <Moon v-if="theme === 'day'" :size="16" aria-hidden="true" /><Sun
+                    v-else
+                    :size="16"
+                    aria-hidden="true"
+                  />
+                </button>
+                <RouterLink
+                  class="habitat-account habitat-mobile-account"
+                  to="/settings?tab=account"
+                  :aria-label="`Signed in as ${displayName}. Open settings`"
+                  >{{ displayName }}</RouterLink
+                >
+                <button type="button" aria-label="Log out" @click="auth.logout()">
+                  <LogOut :size="16" aria-hidden="true" />
+                </button>
+              </div>
+            </header>
+            <div v-show="!compactOffer" class="habitat-source">
               <span>{{ instanceHostname || 'Instance identity unavailable' }}</span
               ><span>Authenticated browser session</span>
             </div>
