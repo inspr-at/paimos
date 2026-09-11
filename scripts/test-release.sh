@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# This suite simulates the operator process, even when run as a CI self-test.
+export GITHUB_ACTIONS=false
 export GIT_CONFIG_NOSYSTEM=1
 export GIT_CONFIG_GLOBAL=/dev/null
 
@@ -361,6 +363,12 @@ case "${1:-} ${2:-}" in
         "$check_name" "$state_value" "$bucket"
     fi
     ;;
+  'workflow run')
+    [[ "$*" == *'workflow run backend-full.yml'* && "$*" == *'--ref main'* &&
+       "$*" == *"target_sha=$(<"$state/backend-full-head")"* ]]
+    [[ ! -f "$state/backend-dispatch-failed" ]] || exit 1
+    printf '%s\n' "$(<"$state/backend-full-head")" > "$state/backend-dispatched"
+    ;;
   'run list')
     if [[ "$*" == *'--workflow backend-full.yml'* ]]; then
       head_sha=
@@ -372,8 +380,19 @@ case "${1:-} ${2:-}" in
         fi
         previous=$argument
       done
+      if [[ -z "$head_sha" ]]; then head_sha=$(<"$state/backend-full-head"); fi
       [[ "$head_sha" =~ ^[0-9a-f]{40}$ ]]
       printf '%s\n' "$head_sha" > "$state/backend-full-head"
+      if [[ -f "$state/backend-requires-dispatch" ]]; then
+        if [[ -f "$state/backend-dispatched" && "$*" == *'--event workflow_dispatch'* ]]; then
+          printf '[{"event":"workflow_dispatch","headBranch":"main","databaseId":3,"headSha":"%s","displayTitle":"backend-full %s","status":"completed","conclusion":"success"}]\n' \
+            "$(git --git-dir="$origin" rev-parse refs/heads/main)" "$(<"$state/backend-dispatched")"
+        else
+          printf '[]\n'
+        fi
+        exit 0
+      fi
+      if [[ "$*" == *'--event workflow_dispatch'* ]]; then printf '[]\n'; exit 0; fi
       if [[ "${FAKE_VIENNA_FLIP_AFTER_BACKEND:-0}" == "1" ]]; then
         printf '%s\n' "${FAKE_VIENNA_NEXT_DAY:?}" > "$state/vienna-date"
       fi
@@ -390,7 +409,7 @@ case "${1:-} ${2:-}" in
       fi
       conclusion=success
       [[ ! -f "$state/backend-full-failed" ]] || conclusion=failure
-      printf '[{"databaseId":3,"headSha":"%s","status":"completed","conclusion":"%s","url":"https://example.test/run/backend-full"}]\n' \
+      printf '[{"event":"schedule","headBranch":"main","databaseId":3,"headSha":"%s","status":"completed","conclusion":"%s","url":"https://example.test/run/backend-full"}]\n' \
         "$head_sha" "$conclusion"
     elif printf '%s\n' "$*" | grep -q 'workflowName == \\"release\\"'; then
       [[ "$*" == *"--branch $release_tag"* ]]
@@ -402,7 +421,7 @@ case "${1:-} ${2:-}" in
     ;;
   'run view')
     [[ "$*" == *'run view 3'* && "$*" == *'--json jobs'* ]]
-    printf '{"jobs":[{"name":"backend-full","status":"completed","conclusion":"success"}]}\n'
+    printf '{"jobs":[{"name":"backend-full-authorize","status":"completed","conclusion":"success"},{"name":"backend-full-serial","status":"completed","conclusion":"success"},{"name":"backend-full","status":"completed","conclusion":"success"},{"name":"backend-full-race (core)","status":"completed","conclusion":"success"},{"name":"backend-full-race (handlers)","status":"completed","conclusion":"success"},{"name":"backend-full-race (runtime)","status":"completed","conclusion":"success"}]}\n'
     ;;
   *)
     echo "unexpected fake gh call: $*" >&2
@@ -1106,6 +1125,31 @@ test_exhaustive_backend_failure_blocks_tag_creation() {
     fail 'release did not query exact-head exhaustive backend assurance before tagging'
   [[ "$(<"$state/backend-full-head")" == "$(<"$state/merge-oid")" ]] ||
     fail 'release queried exhaustive backend assurance for a head other than its protected merge'
+}
+
+test_exhaustive_backend_dispatch_pins_release_after_main_advances() {
+  local repo state origin merge_oid
+  repo=$(setup_repo backend-dispatch)
+  state="$TMP_ROOT/backend-dispatch/gh-state"
+  origin=$(git -C "$repo" remote get-url origin)
+  prepend_release_notes "$repo"
+  mkdir -p "$state"
+  touch "$state/backend-requires-dispatch" "$state/backend-dispatch-failed"
+  if FAKE_GH_ADVANCE_AFTER_MERGE=1 BACKEND_FULL_POLL_SECONDS=0 \
+    run_release "$repo" "$state" patch --no-edit >/dev/null 2>&1; then
+    fail 'failed backend dispatch still created a release tag'
+  fi
+  ! git --git-dir="$origin" show-ref --verify --quiet refs/tags/v1.0.1 ||
+    fail 'failed dispatch published a tag'
+  rm "$state/backend-dispatch-failed"
+  BACKEND_FULL_POLL_SECONDS=0 run_release "$repo" "$state" 1.0.1 --no-edit >/dev/null
+  merge_oid=$(<"$state/merge-oid")
+  [[ "$(<"$state/backend-dispatched")" == "$merge_oid" ]] || fail 'dispatch used moving main instead of tag target'
+  [[ "$(git --git-dir="$origin" rev-parse refs/heads/main)" != "$merge_oid" ]] || fail 'fixture main did not advance'
+  [[ "$(git --git-dir="$origin" rev-parse 'refs/tags/v1.0.1^{}')" == "$merge_oid" ]] || fail 'release tagged moving main'
+  BACKEND_FULL_POLL_SECONDS=0 run_release "$repo" "$state" 1.0.1 --no-edit >/dev/null
+  [[ "$(grep -c '^workflow run backend-full.yml' "$state/calls.log")" -eq 2 ]] ||
+    fail 'resume dispatched again despite green evidence (expected one failure and one success)'
 }
 
 test_unnamed_required_check_is_not_reused_as_green() {
@@ -2183,6 +2227,7 @@ test_versioned_entry_cannot_leave_stale_unreleased
 test_unreleased_consumption_rejects_prior_history_tamper
 test_protected_release_and_resume_states
 test_exhaustive_backend_failure_blocks_tag_creation
+test_exhaustive_backend_dispatch_pins_release_after_main_advances
 test_unnamed_required_check_is_not_reused_as_green
 test_missing_auto_merge_recovery_receipt
 test_existing_manual_recovery_reason_remains_accepted

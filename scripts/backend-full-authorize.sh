@@ -5,7 +5,13 @@ event=${GITHUB_EVENT_NAME:?GITHUB_EVENT_NAME is required}
 label=${BACKEND_FULL_LABEL:-}
 
 case "$event" in
-  push|schedule|workflow_dispatch)
+  schedule)
+    [[ "${GITHUB_REF:-}" == 'refs/heads/main' ]] || {
+      echo 'backend-full-authorize: schedule must execute main' >&2
+      exit 1
+    }
+    ;;
+  workflow_dispatch)
     ;;
   pull_request)
     [[ "$label" == 'backend-full-evidence' ]] || {

@@ -17,6 +17,7 @@ SELECTED_SHARD=-1
 SELECTED_SHARD_COUNT=0
 DIRECT_PACKAGES=
 RACE_COVERAGE=
+BROAD_SELECTION=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -80,15 +81,19 @@ validate_package() {
 }
 
 # A newline-separated direct selection, independently computed with the same
-# PR base/head as the race jobs. Missing selection conservatively keeps tests.
-if [[ -n "$DIRECT_PACKAGES" ]]; then
-  direct=()
-  while IFS= read -r package; do
-    [[ -z "$package" ]] || direct+=("$package")
-  done <<<"$DIRECT_PACKAGES"
-  RACE_COVERAGE=$("$ROOT/scripts/backend-pr-race.sh" --coverage "${direct[@]}")
+# PR base/head as the race jobs. Their full affected coverage drives dedupe.
+# Missing selection conservatively keeps normal tests.
+load_race_coverage() {
+  [[ -n "$DIRECT_PACKAGES" && $# -gt 0 ]] || return 0
+  if (( BROAD_SELECTION )); then
+    # The full-tree fallback races a curated broad package set. Do not infer
+    # race ownership for every package expanded by the normal selector.
+    RACE_COVERAGE=$("$ROOT/scripts/backend-pr-race.sh" --coverage --direct-packages="$DIRECT_PACKAGES" './...')
+  else
+    RACE_COVERAGE=$("$ROOT/scripts/backend-pr-race.sh" --coverage --direct-packages="$DIRECT_PACKAGES" "$@")
+  fi
   # Retain the guarded packages and their transitive importers, including
-  # test-only imports. Unrelated packages still use the direct race plan.
+  # test-only imports. Other packages use the same affected race plan.
   race_exclusions=$(python3 "$ROOT/scripts/backend-race-exclusions.py" "$BACKEND")
   filtered_coverage=
   while IFS=$'\t' read -r package pattern; do
@@ -97,7 +102,7 @@ if [[ -n "$DIRECT_PACKAGES" ]]; then
     filtered_coverage+="$package"$'\t'"$pattern"$'\n'
   done <<<"$RACE_COVERAGE"
   RACE_COVERAGE=$filtered_coverage
-fi
+}
 
 race_skip() {
   local wanted=".${1#"$MODULE"}" package pattern skip=
@@ -188,6 +193,7 @@ run_shards() {
 
 packages=("$@")
 if [[ " ${packages[*]} " == *' ./... '* ]]; then
+  BROAD_SELECTION=1
   listed_packages=$(cd "$BACKEND" && "$GO_COMMAND" list ./...)
   packages=()
   while IFS= read -r package; do
@@ -226,6 +232,8 @@ case "$LANE" in
           ;;
       esac
     done
+    # Query only this lane's packages, preserving the same per-package mask.
+    load_race_coverage ${normal[@]+"${normal[@]}"}
     unfiltered=()
     for package in ${normal[@]+"${normal[@]}"}; do
       skip=$(race_skip "$package")
@@ -260,11 +268,13 @@ case "$LANE" in
     ;;
   db)
     if has_package "$MODULE/db"; then
+      load_race_coverage "$MODULE/db"
       run_shards ./db '^(Test|Fuzz)' "$DB_SHARDS" db
     fi
     ;;
   handlers)
     if has_package "$MODULE/handlers"; then
+      load_race_coverage "$MODULE/handlers"
       run_shards ./handlers '^(Test|Fuzz)' "$HANDLER_SHARDS" handlers
     fi
     ;;

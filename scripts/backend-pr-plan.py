@@ -31,15 +31,14 @@ def plan(args, input=None):
     direct = run([str(SCRIPTS / 'backend-ci-packages.sh'), '--direct', *args], input)
     outputs = {'selection': selection, 'direct_selection': direct}
     for job, kind, lane, count in LANES:
-        packages = (selection if kind == 'test' else direct).splitlines()
+        packages = selection.splitlines()
         active = []
         if packages:
             for shard in range(count or 1):
                 command = [str(SCRIPTS / f'backend-pr-{kind}.sh'), '--dry-run', f'--lane={lane}']
                 if count:
                     command.append(f'--shard={shard}/{count}')
-                if kind == 'test':
-                    command.append(f'--direct-packages={direct}')
+                command.append(f'--direct-packages={direct}')
                 if run([*command, *packages]):
                     active.append(shard)
         outputs[job] = 'true' if active else 'false'
