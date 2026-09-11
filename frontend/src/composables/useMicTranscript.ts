@@ -16,7 +16,7 @@
  */
 
 // PAI-710 / PAI-719: continuous-listening microphone TranscriptSource for
-// the Voice Intake workbench. Batch pattern from the amt-start research:
+// the Voice Intake workbench. Batch pattern from the start-agm-com research:
 // MediaRecorder utterances cut by an RMS energy gate, each blob shipped to
 // the session's audio endpoint; transcripts return via the session SSE.
 //
@@ -174,7 +174,7 @@ function armRecorder(): boolean {
         armRecorder(); // silent/too short — recycle and keep listening
       }
     };
-    rec.start(200); // 200 ms timeslice, per the amt-start tuning
+    rec.start(200); // 200 ms timeslice, per the start-agm-com tuning
 
     // RMS silence gate — interval-based (see header).
     const data = new Uint8Array(analyser!.fftSize);
