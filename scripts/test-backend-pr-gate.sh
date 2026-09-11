@@ -275,6 +275,8 @@ for shard in 0 1; do
     github.com/inspr-at/paimos/backend/db \
     github.com/inspr-at/paimos/backend/handlers)
   [[ -n "$plan" ]] || fail "affected normal shard $shard is empty"
+  ! grep -qv '^go test -count=1 -timeout=8m ' <<<"$plan" ||
+    fail "affected normal shard $shard lost its eight-minute timeout"
   affected_plan+="$plan"$'\n'
 done
 [[ "$affected_plan" == *'subscribe\ before\ high-water'* && "$affected_plan" == *'permission\ grant\ and\ revoke'* ]] ||
@@ -285,7 +287,7 @@ done
   fail 'affected normal shards omit or duplicate a selected package'
 
 db_plan=$("$TEST_RUNNER" --dry-run --lane=db github.com/inspr-at/paimos/backend/db)
-[[ "$(grep -c '^go test .* ./db -run ' <<<"$db_plan")" -eq 4 ]] ||
+[[ "$(grep -c '^go test -count=1 -timeout=15m ./db -run ' <<<"$db_plan")" -eq 4 ]] ||
   fail 'db package is not split into four normal-test shards'
 for shard in 0 1 2 3; do
   shard_line=$(sed -n "$((shard + 1))p" <<<"$db_plan")
@@ -302,7 +304,7 @@ if "$TEST_RUNNER" --dry-run --lane=handlers --shard=0/4 github.com/inspr-at/paim
 fi
 for shard in 0 1 2 3 4; do
   plan=$("$TEST_RUNNER" --dry-run --lane=handlers --shard="$shard/5" github.com/inspr-at/paimos/backend/handlers)
-  [[ "$(grep -c '^go test .* ./handlers -run ' <<<"$plan")" -eq 1 ]] ||
+  [[ "$(grep -c '^go test -count=1 -timeout=15m ./handlers -run ' <<<"$plan")" -eq 1 ]] ||
     fail "handler normal shard $shard does not own exactly one invocation"
   [[ "$(printf '%s\n' "$plan" | rg -o 'Test[A-Za-z0-9_]+' | wc -l | tr -d ' ')" -gt 0 ]] ||
     fail "handler normal shard $shard is empty"
@@ -315,6 +317,8 @@ if GO_COMMAND="$FIXTURES/unsafe-go-list.sh" "$TEST_RUNNER" --dry-run --lane=hand
 fi
 
 performance_plan=$("$TEST_RUNNER" --dry-run --lane=performance github.com/inspr-at/paimos/backend/agentmode)
+[[ "$performance_plan" == 'go test -count=1 -timeout=8m '* ]] ||
+  fail 'performance normal lane lost its eight-minute timeout'
 [[ "$performance_plan" == *'overflow\ lost\ wake\ coalescing\ and\ restart'* && "$performance_plan" != *'subscribe\ before\ high-water'* ]] ||
   fail 'isolated normal lane does not exclusively own the unchanged Agent Mode performance contract'
 

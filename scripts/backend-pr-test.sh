@@ -8,6 +8,9 @@ GO_COMMAND=${GO_COMMAND:-go}
 AFFECTED_SHARDS=2
 DB_SHARDS=4
 HANDLER_SHARDS=5
+# PAI-999: handler shard 3 measured 6 to 9 minutes on slow runners;
+# give shards more headroom than run_normal's 8m timeout.
+SHARD_TIMEOUT=15m
 LANE=affected
 DRY_RUN=0
 SELECTED_SHARD=-1
@@ -124,9 +127,9 @@ run_shards() {
     }
     pattern+=')$'
     if [[ "$DRY_RUN" -eq 1 ]]; then
-      printf 'go test -count=1 -timeout=8m %q -run %q\n' "$package" "$pattern"
+      printf 'go test -count=1 -timeout=%s %q -run %q\n' "$SHARD_TIMEOUT" "$package" "$pattern"
     else
-      "$GO_COMMAND" test -count=1 -timeout=8m "$package" -run "$pattern" &
+      "$GO_COMMAND" test -count=1 -timeout="$SHARD_TIMEOUT" "$package" -run "$pattern" &
       pids+=("$!")
     fi
   done
