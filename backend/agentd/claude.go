@@ -306,7 +306,11 @@ func (a *ClaudeAdapter) Start(ctx context.Context, request StartRequest, observe
 		_ = cmd.Wait()
 		return nil, err
 	}
-	process := newClaudeProcess(cmd, stdin, stdout, dir, observe)
+	requestedModel := ""
+	if request.ResolvedProfile != nil {
+		requestedModel = request.ResolvedProfile.Model
+	}
+	process := newClaudeProcess(cmd, stdin, stdout, dir, requestedModel, observe)
 	defer func() {
 		if returnErr != nil {
 			process.abortStart()
@@ -336,12 +340,14 @@ func (a *ClaudeAdapter) Start(ctx context.Context, request StartRequest, observe
 }
 
 type claudeBridgeEvent struct {
-	Kind             string    `json:"kind"`
-	HarnessSessionID string    `json:"harness_session_id"`
-	CorrelationID    string    `json:"correlation_id"`
-	VendorMessageID  string    `json:"vendor_message_id"`
-	ErrorCode        ErrorCode `json:"error_code"`
-	Reason           string    `json:"reason"`
+	Kind             string              `json:"kind"`
+	HarnessSessionID string              `json:"harness_session_id"`
+	CorrelationID    string              `json:"correlation_id"`
+	VendorMessageID  string              `json:"vendor_message_id"`
+	ErrorCode        ErrorCode           `json:"error_code"`
+	Reason           string              `json:"reason"`
+	EffectiveModel   string              `json:"effective_model"`
+	ModelEvidence    ModelEvidenceStatus `json:"model_evidence_status"`
 }
 
 type claudeControlResult struct {
@@ -363,13 +369,17 @@ type claudeProcess struct {
 	cleanup sync.Once
 	stopped bool
 	active  bool
+	// requestedModel is immutable profile intent. Only non-alias values are
+	// exact claims; they must match the later vendor init evidence. This check
+	// cannot precede first input because system/init is emitted afterwards.
+	requestedModel string
 }
 
-func newClaudeProcess(cmd *exec.Cmd, stdin io.WriteCloser, stdout io.Reader, runtimeDir string, observe func(AdapterEvent)) *claudeProcess {
+func newClaudeProcess(cmd *exec.Cmd, stdin io.WriteCloser, stdout io.Reader, runtimeDir, requestedModel string, observe func(AdapterEvent)) *claudeProcess {
 	p := &claudeProcess{
 		ownedProcess: newOwnedProcess(cmd), stdin: stdin, runtimeDir: runtimeDir, observe: observe,
 		pending: map[string]chan claudeControlResult{}, ready: make(chan error, 1),
-		active: true,
+		active: true, requestedModel: requestedModel,
 	}
 	go p.readLoop(stdout)
 	return p
@@ -408,6 +418,15 @@ func validClaudeBridgeID(value string, maximum int) bool {
 	return value != "" && value == strings.TrimSpace(value) && len(value) <= maximum && utf8.ValidString(value) && !strings.ContainsAny(value, "\x00\r\n")
 }
 
+func claudeExactModelClaim(requested string) bool {
+	switch requested {
+	case "", "haiku", "sonnet", "opus", "fable":
+		return false
+	default:
+		return true
+	}
+}
+
 func (p *claudeProcess) readLoop(reader io.Reader) {
 	defer func() {
 		p.closeInput()
@@ -428,11 +447,19 @@ func (p *claudeProcess) readLoop(reader io.Reader) {
 		}
 		switch event.Kind {
 		case string(EventSessionStarted):
-			if !validClaudeBridgeID(event.HarnessSessionID, 256) {
+			validEvidence := event.ModelEvidence == ModelEvidenceUnverified && event.EffectiveModel == "" ||
+				event.ModelEvidence == ModelEvidenceVendorReported && validModelIdentity(event.EffectiveModel)
+			if !validClaudeBridgeID(event.HarnessSessionID, 256) || !validEvidence {
 				p.protocolFailure(ErrorAppServerProtocol)
 				return
 			}
-			p.observeEvent(AdapterEvent{Kind: EventSessionStarted, HarnessSessionID: event.HarnessSessionID})
+			if claudeExactModelClaim(p.requestedModel) &&
+				(event.ModelEvidence != ModelEvidenceVendorReported || event.EffectiveModel != p.requestedModel) {
+				p.protocolFailure(ErrorAppServerProtocol)
+				return
+			}
+			p.observeEvent(AdapterEvent{Kind: EventSessionStarted, HarnessSessionID: event.HarnessSessionID,
+				EffectiveModel: event.EffectiveModel, ModelEvidence: event.ModelEvidence})
 		case string(EventTurnStarted):
 			p.stateMu.Lock()
 			p.active = true

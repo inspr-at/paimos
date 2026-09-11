@@ -84,6 +84,7 @@ type ReadinessSpec struct {
 	BaselineDigest string
 	AccountLabel   string
 	AccountKey     string
+	ProjectID      int64
 	Expect         ReadinessExpectation
 	Inputs         ReadinessInputs
 	Profile        dispatchprofile.Profile
@@ -368,6 +369,9 @@ func (s *Supervisor) checkAccount(ctx context.Context, spec ReadinessSpec) Readi
 		if spec.AccountKey == "" || !s.HasAccount(harness, spec.AccountKey) {
 			return ReadinessCheckResult{"paimos_account", "fail", "named_account_unavailable", ""}
 		}
+		if spec.ProjectID > 0 && !s.accountAttached(spec.ProjectID, harness, spec.AccountKey) {
+			return ReadinessCheckResult{"paimos_account", "fail", "named_account_unavailable", ""}
+		}
 		return ReadinessCheckResult{"paimos_account", "pass", "named_context_selected", digestText(expected)}
 	}
 	label := s.ProbeAccount(ctx, harness)
@@ -378,6 +382,9 @@ func (s *Supervisor) checkAccount(ctx context.Context, spec ReadinessSpec) Readi
 		return ReadinessCheckResult{"paimos_account", "fail", "account_label_mismatch", ""}
 	}
 	if spec.AccountKey != "" && !s.HasAccount(harness, spec.AccountKey) {
+		return ReadinessCheckResult{"paimos_account", "fail", "named_account_unavailable", ""}
+	}
+	if spec.AccountKey != "" && spec.ProjectID > 0 && !s.accountAttached(spec.ProjectID, harness, spec.AccountKey) {
 		return ReadinessCheckResult{"paimos_account", "fail", "named_account_unavailable", ""}
 	}
 	return ReadinessCheckResult{"paimos_account", "pass", "account_verified", digestText(label)}

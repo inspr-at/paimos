@@ -39,6 +39,8 @@ func RegisterHarnessSessionRoutes(r chi.Router) {
 	r.With(auth.RequireProjectEdit).Post("/projects/{id}/harness-sessions/{sessionID}/controls/{kind}", requestHarnessControl)
 	r.With(auth.RequireProjectView).Get("/projects/{id}/harness-sessions/{sessionID}/controls/{controlID}", getHarnessControl)
 	r.With(auth.RequireProjectEdit).Post("/projects/{id}/harness-sessions/{sessionID}/controls/{controlID}/complete", completeHarnessControl)
+	r.With(auth.RequireProjectEdit).Post("/projects/{id}/harness-sessions/{sessionID}/retirements/{retirementID}/ready", prepareHarnessRetirement)
+	r.With(auth.RequireProjectEdit).Post("/projects/{id}/harness-sessions/{sessionID}/retirements/{retirementID}/complete", completeHarnessRetirement)
 	r.With(auth.RequireProjectEdit).Post("/projects/{id}/harness-sessions/{sessionID}/stop", stopHarnessSession)
 }
 
@@ -132,7 +134,7 @@ func harnessStatus(err error) int {
 	if managedharness.IsCode(err, managedharness.CodeNotFound) {
 		return http.StatusNotFound
 	}
-	if managedharness.IsCode(err, managedharness.CodeConflict) {
+	if managedharness.IsCode(err, managedharness.CodeConflict) || managedharness.IsCode(err, managedharness.CodeRetirementNotReady) {
 		return http.StatusConflict
 	}
 	return http.StatusBadRequest
@@ -370,6 +372,15 @@ func drainHarnessInbox(w http.ResponseWriter, r *http.Request, requireSteer bool
 		harnessProblem(w, errors.New("owned steer is unavailable"), managedharness.CodeCapabilityUnavailable, 400)
 		return
 	}
+	blocked, blockErr := managedharness.NewService(db.DB).RetirementAdmissionBlocked(r.Context(), session.ID)
+	if blockErr != nil {
+		harnessProblem(w, blockErr, "harness_session_retirement_check_failed", http.StatusServiceUnavailable)
+		return
+	}
+	if blocked {
+		harnessProblem(w, errors.New("harness retirement blocks new delivery admission"), "harness_session_retiring", http.StatusConflict)
+		return
+	}
 	// Never filter by requested delivery level here: the canonical ledger is
 	// FIFO across simple and steer work, so a steer-capable worker must first
 	// complete any older simple message for the same address.
@@ -479,6 +490,48 @@ func completeHarnessControl(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeHarnessJSON(w, 200, out)
+}
+func prepareHarnessRetirement(w http.ResponseWriter, r *http.Request) {
+	projectID, ok := harnessProjectID(w, r)
+	if !ok {
+		return
+	}
+	session, ok := requireHarnessWorker(w, r, projectID)
+	if !ok {
+		return
+	}
+	var req struct{}
+	if !decodeHarnessJSON(w, r, &req) {
+		return
+	}
+	p, _ := auth.GetPrincipal(r)
+	out, err := managedharness.NewService(db.DB).PrepareRetirement(r.Context(), projectID, session.ID, chi.URLParam(r, "retirementID"), p.APIKeyID())
+	if err != nil {
+		harnessProblem(w, err, "harness_session_retirement_not_ready", harnessStatus(err))
+		return
+	}
+	writeHarnessJSON(w, http.StatusOK, out)
+}
+func completeHarnessRetirement(w http.ResponseWriter, r *http.Request) {
+	projectID, ok := harnessProjectID(w, r)
+	if !ok {
+		return
+	}
+	session, ok := requireHarnessWorker(w, r, projectID)
+	if !ok {
+		return
+	}
+	var req completeControlRequest
+	if !decodeHarnessJSON(w, r, &req) {
+		return
+	}
+	p, _ := auth.GetPrincipal(r)
+	out, err := managedharness.NewService(db.DB).CompleteRetirement(r.Context(), projectID, session.ID, chi.URLParam(r, "retirementID"), req.Outcome, req.Reason, p.APIKeyID())
+	if err != nil {
+		harnessProblem(w, err, "harness_session_retirement_complete_failed", harnessStatus(err))
+		return
+	}
+	writeHarnessJSON(w, http.StatusOK, out)
 }
 func stopHarnessSession(w http.ResponseWriter, r *http.Request) {
 	projectID, ok := harnessProjectID(w, r)

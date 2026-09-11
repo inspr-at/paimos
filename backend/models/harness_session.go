@@ -154,3 +154,41 @@ type HarnessControlOutcome struct {
 	ClaimedAt        string `json:"claimed_at,omitempty"`
 	CompletedAt      string `json:"completed_at,omitempty"`
 }
+
+// HarnessRetirementClaim is the generation-fenced worker view of one durable
+// finish-current-work request. It contains no human credential or process
+// reference; agentd must match both generations before acting.
+type HarnessRetirementClaim struct {
+	ID                        string `json:"id"`
+	ProjectID                 int64  `json:"project_id"`
+	HarnessSessionID          string `json:"harness_session_id"`
+	HarnessSessionRevision    int64  `json:"harness_session_revision"`
+	RequestedActivitySequence int64  `json:"requested_activity_sequence"`
+	RuntimeID                 string `json:"runtime_id"`
+	RuntimeGeneration         string `json:"runtime_generation"`
+	SessionGeneration         string `json:"session_generation"`
+	State                     string `json:"state"`
+	RequestedAt               string `json:"requested_at"`
+	ClaimedAt                 string `json:"claimed_at"`
+	StoppingAt                string `json:"stopping_at,omitempty"`
+}
+
+// HarnessRetirementOutcome is the non-secret browser/operator projection. A
+// completed state requires both a worker-reported owned stop receipt and the
+// exact generation's authenticated stopped report.
+type HarnessRetirementOutcome struct {
+	ID                     string `json:"id"`
+	ProjectID              int64  `json:"project_id"`
+	HarnessSessionID       string `json:"harness_session_id"`
+	CorrelationID          string `json:"correlation_id"`
+	Kind                   string `json:"kind"`
+	RequestedRevision      int64  `json:"requested_revision"`
+	State                  string `json:"state"`
+	Reason                 string `json:"reason,omitempty"`
+	RequestedAt            string `json:"requested_at"`
+	ClaimedAt              string `json:"claimed_at,omitempty"`
+	StoppingAt             string `json:"stopping_at,omitempty"`
+	CompletedAt            string `json:"completed_at,omitempty"`
+	OwnedStopReceipt       bool   `json:"owned_stop_receipt"`
+	StoppedGenerationProof bool   `json:"stopped_generation_proof"`
+}

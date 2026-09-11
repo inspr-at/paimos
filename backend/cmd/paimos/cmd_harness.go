@@ -21,7 +21,8 @@ func harnessCmd() *cobra.Command {
 	cmd := commandGroup(&cobra.Command{Use: "harness", Short: "Manage durable harness-session control-plane state"})
 	cmd.AddCommand(harnessRegisterCmd(), harnessListCmd(), harnessStatusCmd(), harnessOrchestratorCmd(), harnessHeartbeatCmd(), harnessYieldCmd(),
 		harnessDrainCmd(), harnessCompleteDeliveryCmd(), harnessDrainSteerCmd(), harnessCompleteSteerCmd(),
-		harnessControlCmd("interrupt"), harnessControlCmd("stop"), harnessControlGroupCmd(), harnessCompleteControlCmd(), harnessMarkStoppedCmd(), harnessBindCmd())
+		harnessControlCmd("interrupt"), harnessControlCmd("stop"), harnessControlGroupCmd(), harnessCompleteControlCmd(),
+		harnessRetirementReadyCmd(), harnessCompleteRetirementCmd(), harnessMarkStoppedCmd(), harnessBindCmd())
 	return cmd
 }
 
@@ -231,7 +232,7 @@ func decodeHarnessRegistrationSecrets(raw []byte) (harnessRegistrationSecrets, e
 }
 
 func harnessProjectCommand(use, short, method, suffix string, body func() any, attributed bool) *cobra.Command {
-	var project, sessionID, controlID, agent, workerLeaseFile string
+	var project, sessionID, controlID, retirementID, agent, workerLeaseFile string
 	cmd := &cobra.Command{Use: use, Short: short, RunE: func(cmd *cobra.Command, args []string) error {
 		if project == "" {
 			return &usageError{msg: "--project is required"}
@@ -242,6 +243,9 @@ func harnessProjectCommand(use, short, method, suffix string, body func() any, a
 		if strings.Contains(suffix, "{control}") && controlID == "" {
 			return &usageError{msg: "--control-id is required"}
 		}
+		if strings.Contains(suffix, "{retirement}") && retirementID == "" {
+			return &usageError{msg: "--retirement-id is required"}
+		}
 		client, err := instanceClient()
 		if err != nil {
 			return err
@@ -250,7 +254,9 @@ func harnessProjectCommand(use, short, method, suffix string, body func() any, a
 		if err != nil {
 			return reportError(err)
 		}
-		path := fmt.Sprintf("/api/projects/%d/harness-sessions", id) + strings.ReplaceAll(strings.ReplaceAll(suffix, "{session}", sessionID), "{control}", controlID)
+		path := fmt.Sprintf("/api/projects/%d/harness-sessions", id) + strings.NewReplacer(
+			"{session}", sessionID, "{control}", controlID, "{retirement}", retirementID,
+		).Replace(suffix)
 		var raw []byte
 		if attributed {
 			if agent == "" || workerLeaseFile == "" {
@@ -279,6 +285,9 @@ func harnessProjectCommand(use, short, method, suffix string, body func() any, a
 	}
 	if strings.Contains(suffix, "{control}") {
 		cmd.Flags().StringVar(&controlID, "control-id", "", "claimed control UUID (required)")
+	}
+	if strings.Contains(suffix, "{retirement}") {
+		cmd.Flags().StringVar(&retirementID, "retirement-id", "", "claimed retirement UUID (required)")
 	}
 	if attributed {
 		cmd.Flags().StringVar(&agent, "agent", "", "registered project agent attribution (required)")
@@ -391,6 +400,20 @@ func harnessCompleteControlCmd() *cobra.Command {
 	cmd := harnessProjectCommand("complete-control", "Complete a claimed typed owned control", http.MethodPost, "/{session}/controls/{control}/complete", func() any { return map[string]string{"outcome": outcome, "reason": reason} }, true)
 	cmd.Flags().StringVar(&outcome, "outcome", "applied", "applied or rejected")
 	cmd.Flags().StringVar(&reason, "reason", "applied", "closed completion reason")
+	return cmd
+}
+
+func harnessRetirementReadyCmd() *cobra.Command {
+	return harnessProjectCommand("retirement-ready", "Establish the settled finish boundary before an owned retirement stop", http.MethodPost,
+		"/{session}/retirements/{retirement}/ready", func() any { return map[string]any{} }, true)
+}
+
+func harnessCompleteRetirementCmd() *cobra.Command {
+	var outcome, reason string
+	cmd := harnessProjectCommand("complete-retirement", "Record the exact owned retirement stop outcome", http.MethodPost,
+		"/{session}/retirements/{retirement}/complete", func() any { return map[string]string{"outcome": outcome, "reason": reason} }, true)
+	cmd.Flags().StringVar(&outcome, "outcome", "applied", "applied or rejected")
+	cmd.Flags().StringVar(&reason, "reason", "applied", "applied, not_running, unsupported, ownership_lost, failed, or outcome_unknown")
 	return cmd
 }
 

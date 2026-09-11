@@ -102,14 +102,15 @@ type Scope struct {
 }
 
 type WorkerSelection struct {
-	WorkerName        string `json:"worker_name,omitempty"`
-	AccountLabel      string `json:"account_label,omitempty"`
-	AccountKey        string `json:"account_key,omitempty"`
-	ProfileID         string `json:"profile_id,omitempty"`
-	ProfileVersion    string `json:"profile_version,omitempty"`
-	WorkspaceHandle   string `json:"workspace_handle,omitempty"`
-	RuntimeID         string `json:"runtime_id,omitempty"`
-	RuntimeGeneration string `json:"runtime_generation,omitempty"`
+	WorkerName         string `json:"worker_name,omitempty"`
+	AccountLabel       string `json:"account_label,omitempty"`
+	AccountKey         string `json:"account_key,omitempty"`
+	AttachmentRevision int64  `json:"attachment_revision,omitempty"`
+	ProfileID          string `json:"profile_id,omitempty"`
+	ProfileVersion     string `json:"profile_version,omitempty"`
+	WorkspaceHandle    string `json:"workspace_handle,omitempty"`
+	RuntimeID          string `json:"runtime_id,omitempty"`
+	RuntimeGeneration  string `json:"runtime_generation,omitempty"`
 }
 
 type BaselineClaim struct {

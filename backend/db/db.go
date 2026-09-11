@@ -13837,6 +13837,10 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 			WHEN OLD.state<>'issued' OR NEW.state<>'consumed'
 			BEGIN SELECT RAISE(ABORT,'launch admission consume is one-shot'); END`,
 	}})
+	// M188 / PAI-986: durable finish-current-work retirement and admission fence.
+	// The schema lives in a dedicated file because M187 is owned by a separate
+	// release-sequencing correction and must remain byte-for-byte untouched.
+	migrations = append(migrations, migration{version: 188})
 	for _, m := range migrations {
 		if m.version > maxVersion {
 			continue
@@ -13874,6 +13878,9 @@ func applyMigration(ctx context.Context, conn *sql.Conn, m migration) error {
 	}
 	if m.version == 180 {
 		return applyHarnessMessagesMigration180(ctx, conn)
+	}
+	if m.version == 188 {
+		return applyHarnessRetirementMigration188(ctx, conn)
 	}
 	if migrationUsesForeignKeyPragma(m) {
 		return applyForeignKeyRebuildMigration(ctx, conn, m)
@@ -14144,6 +14151,15 @@ var migrationPreconditions = map[int]func(context.Context, *sql.Conn) error{
 			return fmt.Errorf("M181 schema is partially present or locally incompatible: harness account_key columns=%d", columns)
 		}
 		return nil
+	},
+	188: func(ctx context.Context, conn *sql.Conn) error {
+		return checkSchemaObjectsAbsent(ctx, conn, 188, []string{
+			"harness_session_retirements", "idx_harness_session_retirements_runtime", "idx_harness_session_retirements_active",
+			"trg_harness_session_retirement_identity", "trg_harness_session_retirement_transition",
+			"trg_harness_session_retirement_no_delete", "trg_harness_retirement_binding_admission",
+			"trg_harness_retirement_delivery_admission", "trg_harness_retirement_consumer_admission",
+			"trg_harness_retirement_control_admission",
+		})
 	},
 }
 

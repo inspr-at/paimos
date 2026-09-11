@@ -97,7 +97,7 @@ func validateRegistryRecord(record registryRecord) error {
 		return errors.New("agentd work shape has no ticket binding")
 	}
 	if s.WorkspaceProvenance.Identity == "" {
-		if s.DispatchProfile != nil || s.AccountKey != "" || s.AccountLabel != "" && s.AccountLabel != "unknown" {
+		if s.DispatchProfile != nil || s.ModelEvidence != nil || s.AccountKey != "" || s.AccountLabel != "" && s.AccountLabel != "unknown" {
 			return errors.New("invalid legacy agentd execution provenance")
 		}
 	} else {
@@ -123,6 +123,28 @@ func validateRegistryRecord(record registryRecord) error {
 			profile := *s.DispatchProfile
 			if dispatchprofile.ValidateSnapshot(profile) != nil || profile.Harness != s.Adapter || profile.WorkspaceMode != workspace.Mode {
 				return errors.New("invalid agentd dispatch profile")
+			}
+		}
+		if evidence := s.ModelEvidence; evidence != nil {
+			if s.Adapter != AdapterClaude || evidence.HarnessSessionID != s.HarnessSessionID ||
+				(evidence.RequestedModel != "" && !validModelIdentity(evidence.RequestedModel)) {
+				return errors.New("invalid agentd model evidence binding")
+			}
+			if s.DispatchProfile == nil && evidence.RequestedModel != "" ||
+				s.DispatchProfile != nil && evidence.RequestedModel != s.DispatchProfile.Model {
+				return errors.New("invalid agentd requested model evidence")
+			}
+			switch evidence.Status {
+			case ModelEvidenceUnverified:
+				if evidence.EffectiveModel != "" {
+					return errors.New("unverified agentd model evidence has an effective identity")
+				}
+			case ModelEvidenceVendorReported:
+				if evidence.HarnessSessionID == "" || !validModelIdentity(evidence.EffectiveModel) {
+					return errors.New("invalid vendor-reported agentd model evidence")
+				}
+			default:
+				return errors.New("invalid agentd model evidence status")
 			}
 		}
 		if !validAccountLabel(s.AccountLabel) {
@@ -152,9 +174,11 @@ func validateRegistryRecord(record registryRecord) error {
 		}
 	}
 	if pending := s.Reporter.Pending; pending != nil {
+		validKind := pending.Kind == "interrupt" || pending.Kind == "stop" || pending.Kind == "retire_after_work"
 		validOutcome := pending.Outcome == "applied" && pending.Reason == "applied"
 		validRejection := pending.Outcome == "rejected" && (pending.Reason == "not_running" || pending.Reason == "unsupported" || pending.Reason == "ownership_lost" || pending.Reason == "failed")
-		if s.Reporter.PublicSessionID == "" || !validOpaqueID(pending.ControlID) || (pending.Kind != "interrupt" && pending.Kind != "stop") || (!validOutcome && !validRejection) {
+		validRetirementUnknown := pending.Kind == "retire_after_work" && pending.Outcome == "rejected" && pending.Reason == "outcome_unknown"
+		if s.Reporter.PublicSessionID == "" || !validOpaqueID(pending.ControlID) || !validKind || (!validOutcome && !validRejection && !validRetirementUnknown) {
 			return errors.New("invalid agentd reporter completion")
 		}
 	}

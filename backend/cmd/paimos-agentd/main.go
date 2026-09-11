@@ -61,6 +61,8 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 	reportHost, reportURL, reportAPIKeyFile, paimosPath := "", "", "", ""
 	lifecycleConfigPath, codexAccountsPath, piAccountsPath, cursorAccountsPath, accountKey := "", "", "", "", ""
 	requestID, digest, optionID := "", "", ""
+	lifecycleKey, runtimeGeneration := "", ""
+	var expectedRevision, attachmentRevision int64
 	if command == "serve" {
 		flags.StringVar(&lifecycleConfigPath, "lifecycle-config", "", "protected explicit project/account/profile/workspace JSON configuration for browser lifecycle authority")
 		flags.StringVar(&codexPath, "codex-path", "", "absolute Codex CLI path")
@@ -91,6 +93,18 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 		flags.StringVar(&dispatchProfile, "dispatch-profile", "", "execution-options dispatch profile id")
 		flags.StringVar(&dispatchProfileVersion, "dispatch-profile-version", "", "exact immutable dispatch profile version")
 		flags.StringVar(&accountKey, "account-key", "", "opaque operator registry account key; never a path, env, or credential")
+		flags.Int64Var(&attachmentRevision, "attachment-revision", 0, "committed attachment revision this start was reviewed against")
+	}
+	if command == "account-connect" || command == "account-disconnect" {
+		flags.Int64Var(&projectID, "project-id", 0, "owning PPM project numeric ID")
+		flags.StringVar(&adapter, "adapter", "codex", "named-account adapter: codex, pi, or cursor")
+		flags.StringVar(&accountKey, "account-key", "", "opaque operator registry account key; never a path, env, label, or credential")
+		flags.StringVar(&runtimeGeneration, "runtime-generation", "", "current daemon generation UUID; omit to use the live generation")
+		flags.StringVar(&lifecycleKey, "request-key", "", "idempotency key for this reviewed account lifecycle mutation")
+		flags.Int64Var(&expectedRevision, "expected-revision", 0, "expected committed attachment revision")
+	}
+	if command == "account-status" {
+		flags.Int64Var(&projectID, "project-id", 0, "optional project filter for truthful attached-account discovery")
 	}
 	if command == "workspace-identity" {
 		flags.StringVar(&workspace, "workspace", "", "existing absolute workspace to inspect without mutation")
@@ -278,6 +292,7 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 			Adapter: adapter, Workspace: workspace, Identity: identity, ProjectID: projectID, Prompt: string(prompt),
 			Role: role, ParentSessionID: parentSessionID, TicketID: ticketID, WorkShape: workShape, WorkspaceMode: workspaceMode,
 			DispatchProfileID: dispatchProfile, DispatchProfileVersion: dispatchProfileVersion, AccountKey: accountKey,
+			AttachmentRevision: attachmentRevision,
 		})
 	case "steer":
 		body, readErr := io.ReadAll(io.LimitReader(stdin, (64<<10)+1))
@@ -332,8 +347,50 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 		output, err = client.VisibleOutput(ctx, sessionID, agentd.ControlRequest{
 			Instance: common.instance, ProjectID: projectID, Identity: identity,
 		})
+	case "account-connect", "account-disconnect":
+		if projectID <= 0 {
+			return errors.New("--project-id is required")
+		}
+		if strings.TrimSpace(accountKey) == "" {
+			return errors.New("--account-key is required")
+		}
+		if strings.TrimSpace(lifecycleKey) == "" {
+			return errors.New("--request-key is required")
+		}
+		generation := strings.TrimSpace(runtimeGeneration)
+		if generation == "" {
+			status, e := client.Status(ctx)
+			if e != nil {
+				return errors.New("owned runtime unavailable")
+			}
+			generation = status.DaemonID
+		}
+		operation := agentd.AccountLifecycleConnect
+		if command == "account-disconnect" {
+			operation = agentd.AccountLifecycleDisconnect
+		}
+		output, err = client.ApplyAccountLifecycle(ctx, agentd.AccountLifecycleRequest{
+			IdempotencyKey: lifecycleKey, Operation: operation, ProjectID: projectID,
+			RuntimeGeneration: generation, AccountKey: accountKey, Adapter: adapter,
+			ExpectedRevision: expectedRevision,
+		})
+	case "account-status":
+		states, e := client.AccountLifecycleStatus(ctx)
+		if e != nil {
+			return e
+		}
+		if projectID > 0 {
+			filtered := states[:0]
+			for _, state := range states {
+				if state.ProjectID == projectID {
+					filtered = append(filtered, state)
+				}
+			}
+			states = filtered
+		}
+		output = states
 	default:
-		return errors.New("command must be serve, start, status, workspace-identity, receiver-reference, steer, interrupt, stop, held-queue, resume-queue, decisions, inspect, output, answer, or version")
+		return errors.New("command must be serve, start, status, workspace-identity, receiver-reference, steer, interrupt, stop, held-queue, resume-queue, decisions, inspect, output, answer, account-connect, account-disconnect, account-status, or version")
 	}
 	if err != nil {
 		return err

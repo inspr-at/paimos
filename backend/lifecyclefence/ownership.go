@@ -6,16 +6,18 @@ package lifecyclefence
 // whether a live runtime advertisement owns a managed harness session. v1/v2
 // keep the singular registration class. v3 requires an exact account-scope
 // membership of class, named key (or class-only empty key), and profile
-// id@version. Aliases must be simple SQL identifiers; anything else fails closed.
+// id@version. v4 additionally refuses an explicitly unavailable scope. Aliases
+// must be simple SQL identifiers; anything else fails closed.
 func RuntimeSessionOwnershipSQL(runtimeAlias, sessionAlias string) string {
 	runtime, session := sqlIdent(runtimeAlias), sqlIdent(sessionAlias)
 	if runtime == "" || session == "" {
 		return "(0)"
 	}
 	return `(CASE
- WHEN CAST(json_extract(` + runtime + `.registration_json,'$.schema_version') AS INTEGER)=3 THEN CASE WHEN EXISTS(
+ WHEN CAST(json_extract(` + runtime + `.registration_json,'$.schema_version') AS INTEGER) IN (3,4) THEN CASE WHEN EXISTS(
   SELECT 1 FROM json_each(` + runtime + `.registration_json,'$.account_scopes') AS scope
   WHERE json_extract(scope.value,'$.account_label')=` + session + `.account_label
+   AND COALESCE(json_extract(scope.value,'$.account_availability'),'available')<>'unavailable'
    AND (
     (COALESCE(json_array_length(json_extract(scope.value,'$.accounts')),0)=0 AND COALESCE(` + session + `.account_key,'')='')
     OR EXISTS(

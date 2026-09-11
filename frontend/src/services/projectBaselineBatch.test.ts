@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest'
 
 import {
   isClassOnlyScope,
+  isUnavailableScope,
   runtimeChoiceProblem,
+  scopeAttachmentRevision,
   scopedAccounts,
   scopedProfiles,
   type RuntimeChoice,
@@ -39,10 +41,51 @@ describe('projectBaselineBatch scoped choices', () => {
   it('treats omitted v3 accounts as class-only and fails closed on unknown schema', () => {
     const claude: RuntimeChoice = {
       ...mixed,
-      account_scopes: [{ account_label: 'claude_ai_max', profiles: [{ id: 'claude-opus-xhigh', version: '1' }] }],
+      account_scopes: [
+        { account_label: 'claude_ai_max', profiles: [{ id: 'claude-opus-xhigh', version: '1' }] },
+      ],
     }
     expect(isClassOnlyScope(claude, 'claude_ai_max')).toBe(true)
-    expect(runtimeChoiceProblem({ ...mixed, schema_version: 9 })).toContain('Unknown runtime account schema')
+    expect(runtimeChoiceProblem({ ...mixed, schema_version: 9 })).toContain(
+      'Unknown runtime account schema',
+    )
     expect(runtimeChoiceProblem({ ...mixed, account_scopes: [] })).toContain('no account scopes')
+  })
+
+  it('keeps explicit empty v4 availability distinct from ambient class-only scope', () => {
+    const unavailable: RuntimeChoice = {
+      ...mixed,
+      schema_version: 4,
+      account_scopes: [
+        {
+          account_label: 'chatgpt',
+          profiles: [{ id: 'codex-sol-high', version: '1' }],
+          attachment_revision: 8,
+          account_availability: 'unavailable',
+        },
+      ],
+    }
+    expect(runtimeChoiceProblem(unavailable)).toBe('')
+    expect(isUnavailableScope(unavailable, 'chatgpt')).toBe(true)
+    expect(isClassOnlyScope(unavailable, 'chatgpt')).toBe(false)
+    expect(scopeAttachmentRevision(unavailable, 'chatgpt')).toBe(8)
+    const legacyNamed = {
+      ...unavailable,
+      account_scopes: [
+        {
+          account_label: 'chatgpt' as const,
+          accounts: [{ key: 'codex-work', label: 'Work' }],
+          profiles: [{ id: 'codex-sol-high', version: '1' }],
+        },
+      ],
+    }
+    expect(runtimeChoiceProblem(legacyNamed)).toBe('')
+    expect(scopeAttachmentRevision(legacyNamed, 'chatgpt')).toBe(0)
+    expect(
+      runtimeChoiceProblem({
+        ...legacyNamed,
+        account_scopes: [{ ...legacyNamed.account_scopes[0], account_availability: 'available' }],
+      }),
+    ).toContain('attachment revision')
   })
 })

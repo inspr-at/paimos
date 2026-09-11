@@ -467,6 +467,32 @@ SESSION_ID="$({
 paimos-agentd status --instance "$INSTANCE" --socket "$AGENTD_SOCKET"
 ```
 
+Already enrolled Codex, Pi, or Cursor accounts attach to this owned runtime
+without editing the declarative registry, changing vendor login, or mutating
+`HOME`. Labels are never authority. Connect and disconnect are refused for a
+project this runtime is not configured to serve. Public registration stays
+immutable for the current generation, so newly connected keys and disconnected
+keys appear in browser-compatible advertisements on the next owned runtime
+generation; local start and readiness already use the committed attachment set.
+A reviewed named start must carry `--attachment-revision` from `account-status`.
+Disconnect then reconnect advances that revision and refuses the older
+selection. Detaching every named Codex key keeps the named registration; it
+does not widen the runtime back to ambient class-only Codex.
+
+```bash
+paimos-agentd account-status --instance "$INSTANCE" --socket "$AGENTD_SOCKET" \
+  --project-id "$PROJECT_ID"
+paimos-agentd account-connect --instance "$INSTANCE" --socket "$AGENTD_SOCKET" \
+  --project-id "$PROJECT_ID" --adapter codex --account-key coordinator \
+  --request-key reviewed-connect-1 --expected-revision 0
+paimos-agentd account-disconnect --instance "$INSTANCE" --socket "$AGENTD_SOCKET" \
+  --project-id "$PROJECT_ID" --adapter codex --account-key coordinator \
+  --request-key reviewed-disconnect-1 --expected-revision 1
+```
+
+Disconnect refuses while that account still owns a live or unsettled generation.
+It does not stop unrelated workers or delete vendor authentication.
+
 Owned Pi is a separate adapter. It requires an operator-authenticated `--pi-path`,
 an explicit `--pi-accounts` registry (opaque key → protected
 `PI_CODING_AGENT_DIR`; never a shared default `~/.pi`), a human-selected catalog

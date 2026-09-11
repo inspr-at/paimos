@@ -15,8 +15,10 @@ import {
   setBaselineStreamEnabled,
   startBaselineBatch,
   isClassOnlyScope,
+  isUnavailableScope,
   runtimeChoiceProblem,
   runtimeScopes,
+  scopeAttachmentRevision,
   scopedAccounts,
   scopedProfiles,
   type Batch,
@@ -60,7 +62,14 @@ const runtimes = computed(() => workflow.value?.choices.runtimes ?? [])
 const runtime = computed(() => runtimes.value.find((r) => r.runtime_id === runtimeId.value) ?? runtimes.value[0] ?? null)
 const agentMode = computed(() => mode.value !== 'manual')
 const readiness = computed(() => workflow.value?.readiness ?? null)
-const scopeProblem = computed(() => (agentMode.value ? runtimeChoiceProblem(runtime.value) : ''))
+const scopeProblem = computed(() => {
+  if (!agentMode.value) return ''
+  const contractProblem = runtimeChoiceProblem(runtime.value)
+  if (contractProblem) return contractProblem
+  if (isUnavailableScope(runtime.value, accountLabel.value))
+    return 'This account scope has no attached account available. Connect an enrolled account and restart the owned runtime before review.'
+  return ''
+})
 const accountClasses = computed(() => runtime.value ? runtimeScopes(runtime.value).map((scope) => scope.account_label) : [])
 const namedAccounts = computed(() => scopedAccounts(runtime.value, accountLabel.value))
 const classProfiles = computed(() => scopedProfiles(runtime.value, accountLabel.value))
@@ -112,6 +121,7 @@ function workerInputs(modeValue: string, worker: WorkerSelection) {
       runtime_generation: '',
       account_label: '',
       account_key: '',
+      attachment_revision: 0,
       profile_id: '',
       profile_version: '',
       workspace_handle: '',
@@ -123,6 +133,7 @@ function workerInputs(modeValue: string, worker: WorkerSelection) {
     runtime_generation: worker.runtime_generation ?? '',
     account_label: worker.account_label ?? '',
     account_key: worker.account_key ?? '',
+    attachment_revision: worker.attachment_revision ?? 0,
     profile_id: worker.profile_id ?? '',
     profile_version: worker.profile_version ?? '',
     workspace_handle: worker.workspace_handle ?? '',
@@ -139,6 +150,7 @@ function localReviewInputs() {
       runtime_generation: runtime.value?.runtime_generation ?? '',
       account_label: accountLabel.value,
       account_key: accountKey.value,
+      attachment_revision: scopeAttachmentRevision(runtime.value, accountLabel.value),
       profile_id: profileKey.value.split('@')[0],
       profile_version: profileKey.value.split('@').slice(1).join('@'),
       workspace_handle: workspaceHandle.value,
@@ -164,6 +176,7 @@ function sameReviewInputs(local: ReturnType<typeof localReviewInputs>, reviewed:
     && local.runtime_generation === reviewed.runtime_generation
     && local.account_label === reviewed.account_label
     && local.account_key === reviewed.account_key
+    && local.attachment_revision === reviewed.attachment_revision
     && local.profile_id === reviewed.profile_id
     && local.profile_version === reviewed.profile_version
     && local.workspace_handle === reviewed.workspace_handle
@@ -349,6 +362,7 @@ function workerPayload() {
     runtime_id: runtime.value?.runtime_id,
     runtime_generation: runtime.value?.runtime_generation,
     account_label: accountLabel.value,
+    attachment_revision: scopeAttachmentRevision(runtime.value, accountLabel.value),
     profile_id: profileId,
     profile_version: profileVersion,
     workspace_handle: workspaceHandle.value,

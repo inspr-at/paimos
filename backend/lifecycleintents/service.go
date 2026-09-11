@@ -22,9 +22,10 @@ import (
 var mutationMu sync.Mutex
 
 var listOwnedRuntimeSessionsSQL = `SELECT own.session_id,own.generation,s.workspace_identity FROM lifecycle_runtime_sessions own JOIN harness_sessions s ON s.id=own.session_id JOIN lifecycle_runtimes runtime ON runtime.id=own.runtime_id WHERE own.runtime_id=? AND s.project_id=? AND s.management_mode='managed' AND s.host=? AND (CASE
- WHEN CAST(json_extract(runtime.registration_json,'$.schema_version') AS INTEGER)=3 THEN CASE WHEN EXISTS(
+ WHEN CAST(json_extract(runtime.registration_json,'$.schema_version') AS INTEGER) IN (3,4) THEN CASE WHEN EXISTS(
   SELECT 1 FROM json_each(runtime.registration_json,'$.account_scopes') AS scope
   WHERE json_extract(scope.value,'$.account_label')=s.account_label
+   AND COALESCE(json_extract(scope.value,'$.account_availability'),'available')<>'unavailable'
    AND (
     (COALESCE(json_array_length(json_extract(scope.value,'$.accounts')),0)=0 AND COALESCE(s.account_key,'')='')
     OR EXISTS(
@@ -84,13 +85,13 @@ func leaseDigest(generation, lease string) []byte {
 	return d[:]
 }
 func validateRegistration(in Registration) error {
-	if in.SchemaVersion != 0 && in.SchemaVersion != RuntimeSchemaV1 && in.SchemaVersion != AccountChoiceSchemaV2 && in.SchemaVersion != AccountScopeSchemaV3 {
+	if in.SchemaVersion != 0 && in.SchemaVersion != RuntimeSchemaV1 && in.SchemaVersion != AccountChoiceSchemaV2 && in.SchemaVersion != AccountScopeSchemaV3 && in.SchemaVersion != AccountLifecycleSchemaV4 {
 		return ErrInvalid
 	}
 	if !validID(in.Generation) || !label(in.Host, 128) || len(in.Workspaces) > 16 || in.Workspaces == nil {
 		return ErrInvalid
 	}
-	if in.SchemaVersion == AccountScopeSchemaV3 {
+	if in.SchemaVersion == AccountScopeSchemaV3 || in.SchemaVersion == AccountLifecycleSchemaV4 {
 		if err := ValidateAccountScopes(in); err != nil {
 			return err
 		}

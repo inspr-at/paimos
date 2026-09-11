@@ -316,6 +316,7 @@ func (s *Service) submitStartIntent(ctx context.Context, tx *sql.Tx, actor Actor
 		RuntimeGeneration:      worker.RuntimeGeneration,
 		AccountLabel:           worker.AccountLabel,
 		AccountKey:             worker.AccountKey,
+		AttachmentRevision:     worker.AttachmentRevision,
 		TTLSeconds:             startIntentTTLSeconds,
 		WorkspaceHandle:        worker.WorkspaceHandle,
 		AgentName:              worker.WorkerName,

@@ -31,14 +31,15 @@ func requireAgentWorkerBinding(worker WorkerSelection) error {
 
 func knownAccountSchema(version int) bool {
 	return version == 0 || version == lifecycleintents.RuntimeSchemaV1 ||
-		version == lifecycleintents.AccountChoiceSchemaV2 || version == lifecycleintents.AccountScopeSchemaV3
+		version == lifecycleintents.AccountChoiceSchemaV2 || version == lifecycleintents.AccountScopeSchemaV3 ||
+		version == lifecycleintents.AccountLifecycleSchemaV4
 }
 
 func workerMatchesRegistration(worker WorkerSelection, reg lifecycleintents.Registration) error {
 	if !knownAccountSchema(reg.SchemaVersion) {
 		return fmt.Errorf("%w: unknown runtime account schema", ErrInvalid)
 	}
-	if reg.SchemaVersion == lifecycleintents.AccountScopeSchemaV3 {
+	if reg.SchemaVersion == lifecycleintents.AccountScopeSchemaV3 || reg.SchemaVersion == lifecycleintents.AccountLifecycleSchemaV4 {
 		if len(reg.AccountScopes) == 0 {
 			return fmt.Errorf("%w: missing account scopes", ErrInvalid)
 		}
@@ -50,7 +51,7 @@ func workerMatchesRegistration(worker WorkerSelection, reg lifecycleintents.Regi
 			seen[scope.AccountLabel] = true
 		}
 	}
-	if !reg.MatchScope(worker.AccountLabel, worker.AccountKey, worker.ProfileID, worker.ProfileVersion, true) {
+	if !reg.MatchScopeAtRevision(worker.AccountLabel, worker.AccountKey, worker.ProfileID, worker.ProfileVersion, true, worker.AttachmentRevision) {
 		return fmt.Errorf("%w: account class, key and profile are not an advertised scope", ErrInvalid)
 	}
 	for _, workspace := range reg.Workspaces {

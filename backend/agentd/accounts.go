@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 )
 
@@ -49,6 +50,11 @@ type codexAccountRegistryEntry struct {
 
 type accountContextResolver interface {
 	HasAccount(string) bool
+}
+
+type enrolledAccountCatalog interface {
+	accountContextResolver
+	EnrolledAccountKeys() []string
 }
 
 type accountSelection interface {
@@ -144,6 +150,10 @@ func (r CodexAccountRegistry) lookup(key string) (codexAccount, bool) {
 func (r CodexAccountRegistry) HasAccount(key string) bool {
 	_, ok := r.lookup(key)
 	return ok
+}
+
+func (r CodexAccountRegistry) EnrolledAccountKeys() []string {
+	return enrolledAccountKeys(r.byKey)
 }
 
 func inheritOperatorEnv() []string {
@@ -250,6 +260,10 @@ func (r PiAccountRegistry) HasAccount(key string) bool {
 	return ok
 }
 
+func (r PiAccountRegistry) EnrolledAccountKeys() []string {
+	return enrolledAccountKeys(r.byKey)
+}
+
 const maxCursorAccountRegistryBytes = 64 << 10
 
 // CursorAccountRegistry maps opaque non-secret keys to expected Cursor
@@ -335,4 +349,20 @@ func (r CursorAccountRegistry) lookup(key string) (cursorAccount, bool) {
 func (r CursorAccountRegistry) HasAccount(key string) bool {
 	_, ok := r.lookup(key)
 	return ok
+}
+
+func (r CursorAccountRegistry) EnrolledAccountKeys() []string {
+	return enrolledAccountKeys(r.byKey)
+}
+
+func enrolledAccountKeys[T any](byKey map[string]T) []string {
+	if len(byKey) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(byKey))
+	for key := range byKey {
+		out = append(out, key)
+	}
+	slices.Sort(out)
+	return out
 }

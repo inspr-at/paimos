@@ -111,6 +111,7 @@ func (p *projectLifecycle) readinessSpec(in lifecycleintents.Intent) (agentd.Rea
 		BaselineDigest: in.Request.BaselineDigest,
 		AccountLabel:   in.Request.AccountLabel,
 		AccountKey:     in.Request.AccountKey,
+		ProjectID:      p.config.ProjectID,
 		Profile:        profile,
 		Expect: agentd.ReadinessExpectation{
 			HostKind:             expect.HostKind,

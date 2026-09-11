@@ -25,6 +25,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/inspr-at/paimos/backend/agentd"
 	"github.com/inspr-at/paimos/backend/dispatchprofile"
+	"github.com/inspr-at/paimos/backend/managedharness"
+	"github.com/inspr-at/paimos/backend/models"
 )
 
 const reporterOutputLimit = 64 << 10
@@ -102,19 +104,21 @@ type harnessSessionResponse struct {
 		Inbox bool `json:"inbox"`
 		Steer bool `json:"steer"`
 	} `json:"advertised_capabilities"`
-	ID              string                      `json:"id"`
-	ProjectID       int64                       `json:"project_id"`
-	AgentName       string                      `json:"agent_name"`
-	Harness         string                      `json:"harness"`
-	Phase           string                      `json:"phase"`
-	Role            string                      `json:"role,omitempty"`
-	ParentSessionID *string                     `json:"parent_harness_session_id"`
-	TicketID        *int64                      `json:"ticket_id"`
-	WorkShape       string                      `json:"work_shape"`
-	Workspace       *agentd.WorkspaceProvenance `json:"workspace_provenance"`
-	DispatchProfile *dispatchprofile.Profile    `json:"dispatch_profile"`
-	AccountLabel    string                      `json:"account_label"`
-	AccountKey      string                      `json:"account_key,omitempty"`
+	ID               string                      `json:"id"`
+	ProjectID        int64                       `json:"project_id"`
+	AgentName        string                      `json:"agent_name"`
+	Harness          string                      `json:"harness"`
+	Phase            string                      `json:"phase"`
+	ActivitySequence int64                       `json:"activity_sequence"`
+	Revision         int64                       `json:"revision"`
+	Role             string                      `json:"role,omitempty"`
+	ParentSessionID  *string                     `json:"parent_harness_session_id"`
+	TicketID         *int64                      `json:"ticket_id"`
+	WorkShape        string                      `json:"work_shape"`
+	Workspace        *agentd.WorkspaceProvenance `json:"workspace_provenance"`
+	DispatchProfile  *dispatchprofile.Profile    `json:"dispatch_profile"`
+	AccountLabel     string                      `json:"account_label"`
+	AccountKey       string                      `json:"account_key,omitempty"`
 }
 
 type harnessControlResponse struct {
@@ -126,8 +130,9 @@ type harnessControlResponse struct {
 }
 
 type harnessYieldResponse struct {
-	Session  harnessSessionResponse   `json:"session"`
-	Controls []harnessControlResponse `json:"controls"`
+	Session     harnessSessionResponse          `json:"session"`
+	Controls    []harnessControlResponse        `json:"controls"`
+	Retirements []models.HarnessRetirementClaim `json:"retirements"`
 }
 
 func newCLIReporter(instance, stateRoot, host, paimosPath, reportURL, apiKeyFile string) (*cliReporter, error) {
@@ -316,7 +321,7 @@ func (r *cliReporter) ReportStatus(ctx context.Context, status agentd.Status) er
 	for attempted := 0; attempted < len(status.Sessions); attempted++ {
 		index := (start + attempted) % len(status.Sessions)
 		sessionCtx, cancel := context.WithTimeout(ctx, reporterSessionTimeout)
-		err := r.reportSession(sessionCtx, status.Sessions[index])
+		err := r.reportSession(sessionCtx, status.DaemonID, status.Sessions[index])
 		cancel()
 		r.nextSession = (index + 1) % len(status.Sessions)
 		if err != nil {
@@ -332,7 +337,7 @@ func (r *cliReporter) ReportStatus(ctx context.Context, status agentd.Status) er
 	return nil
 }
 
-func (r *cliReporter) reportSession(ctx context.Context, session agentd.Session) error {
+func (r *cliReporter) reportSession(ctx context.Context, runtimeGeneration string, session agentd.Session) error {
 	if r.nativeDelivery && session.State == agentd.StateStarting {
 		return nil
 	}
@@ -368,7 +373,10 @@ func (r *cliReporter) reportSession(ctx context.Context, session agentd.Session)
 		if err != nil {
 			return err
 		}
-		if err := r.completeControl(ctx, known.publicID, session, agentName, workerLease, *pending); err != nil {
+		if !exists || known.publicID == "" {
+			return errors.New("agentd reporter pending completion has no durable public session")
+		}
+		if err := r.completePending(ctx, known.publicID, session, agentName, workerLease, *pending); err != nil {
 			return err
 		}
 		if err := r.checkpoint(ctx, session, r.baseReporterState(session, known.publicID)); err != nil {
@@ -406,7 +414,7 @@ func (r *cliReporter) reportSession(ctx context.Context, session agentd.Session)
 		if err := r.heartbeat(ctx, known.publicID, session, workerLease, reporterPhase(session.State)); err != nil {
 			return err
 		}
-		return r.yieldControls(ctx, known.publicID, session, workerLease)
+		return r.yieldControls(ctx, runtimeGeneration, known.publicID, session, workerLease)
 	}
 	harness, agentName, err := reporterIdentity(session)
 	if err != nil {
@@ -516,7 +524,7 @@ func (r *cliReporter) reportSession(ctx context.Context, session agentd.Session)
 	if err := r.heartbeat(ctx, response.ID, session, workerLease, reporterPhase(session.State)); err != nil {
 		return err
 	}
-	return r.yieldControls(ctx, response.ID, session, workerLease)
+	return r.yieldControls(ctx, runtimeGeneration, response.ID, session, workerLease)
 }
 
 func reporterExecutionMatches(response harnessSessionResponse, session agentd.Session) bool {
@@ -650,7 +658,7 @@ func (r *cliReporter) heartbeat(ctx context.Context, publicID string, session ag
 	return nil
 }
 
-func (r *cliReporter) yieldControls(ctx context.Context, publicID string, session agentd.Session, workerLease string) error {
+func (r *cliReporter) yieldControls(ctx context.Context, runtimeGeneration, publicID string, session agentd.Session, workerLease string) error {
 	_, agentName, err := reporterIdentity(session)
 	if err != nil {
 		return err
@@ -700,7 +708,23 @@ func (r *cliReporter) yieldControls(ctx context.Context, publicID string, sessio
 			return err
 		}
 	}
+	for _, retirement := range response.Retirements {
+		if err := r.processRetirement(ctx, runtimeGeneration, publicID, session, response.Session, agentName, workerLease, retirement); err != nil {
+			return err
+		}
+		// A successfully reported retirement either stopped this owned process or
+		// closed the request conservatively. Never consume later work from the
+		// stale pre-stop status snapshot.
+		return nil
+	}
 	return nil
+}
+
+func (r *cliReporter) completePending(ctx context.Context, publicID string, session agentd.Session, agentName, workerLease string, completion agentd.ReporterCompletion) error {
+	if completion.Kind == managedharness.RetirementKind {
+		return r.completeRetirement(ctx, publicID, session, agentName, workerLease, completion)
+	}
+	return r.completeControl(ctx, publicID, session, agentName, workerLease, completion)
 }
 
 func validReporterReceipt(receipt agentd.Receipt, operation string, session agentd.Session, request agentd.ControlRequest) bool {

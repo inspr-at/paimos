@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import HabitatAssignmentHistory from './HabitatAssignmentHistory.vue'
+import HabitatWorkerRemoval from './HabitatWorkerRemoval.vue'
 import { RouterLink } from 'vue-router'
 import { computed, nextTick, onScopeDispose, ref, toRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
 import { useHabitatActions } from '@/composables/habitat/useHabitatActions'
+import { useHabitatRemoval } from '@/composables/habitat/useHabitatRemoval'
 import { useMicTranscript } from '@/composables/useMicTranscript'
 import { transcribeAgentModeAudio } from '@/services/agentModeVoice'
 import type { Delivery } from '@/services/agentMode'
@@ -31,6 +33,13 @@ const actions = useHabitatActions({
   authority: toRef(props, 'authority'),
   fresh: toRef(props, 'fresh'),
   editable,
+})
+const removal = useHabitatRemoval({
+  worker: toRef(props, 'worker'),
+  authority: toRef(props, 'authority'),
+  fresh: toRef(props, 'fresh'),
+  editable,
+  principalId: computed(() => auth.user?.id ?? null),
 })
 const { action, draft, feedback, busy, control } = actions
 const parent = computed(() =>
@@ -285,6 +294,13 @@ onScopeDispose(stopVoice)
           @click="prepareAction('stop', $event)"
         >
           Stop</button
+        ><button
+          type="button"
+          class="habitat-danger"
+          :disabled="!removal.allowed.value || busy || removal.busy.value"
+          @click="removal.begin()"
+        >
+          Remove worker</button
         ><button type="button" @click="emit('refresh')">Refresh status</button
         ><button
           type="button"
@@ -376,6 +392,9 @@ onScopeDispose(stopVoice)
         </div>
       </div>
       <p class="habitat-status" role="status">{{ feedback }}</p>
+      <p v-if="removal.feedback.value" class="habitat-status" role="status">
+        {{ removal.feedback.value }}
+      </p>
       <div v-if="control" class="habitat-card">
         <strong>{{ humanize(control.kind) }} · {{ humanize(control.state) }}</strong>
         <p>
@@ -387,6 +406,26 @@ onScopeDispose(stopVoice)
           Check control outcome
         </button>
       </div>
+      <div v-if="removal.control.value" class="habitat-card">
+        <strong
+          >Removal {{ humanize(removal.control.value.kind) }} ·
+          {{ humanize(removal.control.value.state) }}</strong
+        >
+        <p>
+          {{
+            removal.control.value.outcome
+              ? humanize(removal.control.value.outcome)
+              : 'No terminal outcome confirmed'
+          }}<template v-if="removal.control.value.reason">
+            · {{ humanize(removal.control.value.reason) }}</template
+          >
+        </p>
+        <small>Control {{ removal.control.value.id }}</small
+        ><button type="button" :disabled="removal.busy.value" @click="removal.checkControl()">
+          Check removal outcome
+        </button>
+      </div>
+      <HabitatWorkerRemoval v-if="worker" :worker="worker" :removal="removal" />
     </section>
     <section>
       <h3>Owned generation &amp; runtime</h3>

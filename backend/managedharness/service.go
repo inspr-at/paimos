@@ -70,6 +70,7 @@ const (
 	CodeInvalid               = "harness_session_invalid"
 	CodeNotFound              = "harness_session_not_found"
 	CodeConflict              = "harness_session_conflict"
+	CodeRetirementNotReady    = "harness_session_retirement_not_ready"
 	CodeCapabilityInvalid     = "harness_session_capability_invalid"
 	CodeCapabilityUnavailable = "harness_session_capability_unavailable"
 	MaxHierarchyDepth         = 16
@@ -133,8 +134,9 @@ type RegisterInput struct {
 }
 
 type YieldResult struct {
-	Session  models.HarnessSession   `json:"session"`
-	Controls []models.HarnessControl `json:"controls"`
+	Session     models.HarnessSession           `json:"session"`
+	Controls    []models.HarnessControl         `json:"controls"`
+	Retirements []models.HarnessRetirementClaim `json:"retirements,omitempty"`
 }
 
 // ActivityEvidence is the bounded, content-free tail of one owned adapter
@@ -933,6 +935,13 @@ func (s *Service) AssignBinding(ctx context.Context, input BindingInput) (models
 	if current.Revision != input.ExpectedRevision {
 		return models.HarnessSession{}, coded(CodeConflict, "harness session binding revision is stale")
 	}
+	var retiring int
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM harness_session_retirements WHERE harness_session_id=? AND (state<>'rejected' OR reason='outcome_unknown'))`, current.ID).Scan(&retiring); err != nil {
+		return models.HarnessSession{}, err
+	}
+	if retiring == 1 {
+		return models.HarnessSession{}, coded(CodeConflict, "harness retirement blocks assignment admission")
+	}
 	if ticket == nil && desiredWorkShape != workshape.Unknown {
 		return models.HarnessSession{}, coded(CodeInvalid, "a detached ticket binding must have unknown work shape")
 	}
@@ -1123,6 +1132,13 @@ func (s *Service) RequestControl(ctx context.Context, sessionID, kind string, ac
 	if mode != ManagementManaged || (kind == ControlInterrupt && interrupt != 1) || (kind == ControlStop && stop != 1) {
 		return models.HarnessControl{}, coded(CodeCapabilityUnavailable, "owned control is unavailable for this session")
 	}
+	var retiring int
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM harness_session_retirements WHERE harness_session_id=? AND (state<>'rejected' OR reason='outcome_unknown'))`, sessionID).Scan(&retiring); err != nil {
+		return models.HarnessControl{}, err
+	}
+	if retiring == 1 {
+		return models.HarnessControl{}, coded(CodeConflict, "harness retirement already owns lifecycle control")
+	}
 	prior, priorErr := scanControl(tx.QueryRowContext(ctx, `SELECT `+controlColumns+` FROM harness_session_controls WHERE harness_session_id=? AND kind=? AND state IN ('pending','claimed')`, sessionID, kind))
 	if priorErr == nil {
 		return prior, nil
@@ -1193,6 +1209,10 @@ func (s *Service) Yield(ctx context.Context, sessionID string) (YieldResult, err
 	if err := rows.Close(); err != nil {
 		return YieldResult{}, err
 	}
+	retirements, err := claimRetirementsTx(ctx, tx, sessionID)
+	if err != nil {
+		return YieldResult{}, err
+	}
 	if claimed > 0 {
 		if err := appendSessionEventTx(ctx, tx, session, "yield"); err != nil {
 			return YieldResult{}, err
@@ -1201,7 +1221,7 @@ func (s *Service) Yield(ctx context.Context, sessionID string) (YieldResult, err
 	if err := tx.Commit(); err != nil {
 		return YieldResult{}, err
 	}
-	return YieldResult{Session: session, Controls: controls}, nil
+	return YieldResult{Session: session, Controls: controls, Retirements: retirements}, nil
 }
 
 func (s *Service) CompleteControl(ctx context.Context, sessionID, controlID, outcome, reason string) (models.HarnessControl, error) {
@@ -1280,6 +1300,9 @@ func (s *Service) StopWithReason(ctx context.Context, id, closedReason string) (
 		return models.HarnessSession{}, coded(CodeConflict, "harness session is already stopped or missing")
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE harness_session_controls SET state='rejected',reason='ownership_lost',claimed_at=COALESCE(claimed_at,strftime('%Y-%m-%dT%H:%M:%fZ','now')),completed_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE harness_session_id=? AND state IN ('pending','claimed')`, id); err != nil {
+		return models.HarnessSession{}, err
+	}
+	if err := rejectRetirementForStopTx(ctx, tx, id); err != nil {
 		return models.HarnessSession{}, err
 	}
 	out, err := scanSession(tx.QueryRowContext(ctx, `SELECT `+sessionColumns+` FROM harness_sessions WHERE id=?`, strings.TrimSpace(id)))

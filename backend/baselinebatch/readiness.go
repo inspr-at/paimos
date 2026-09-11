@@ -213,7 +213,7 @@ func (s *Service) RequestReadiness(ctx context.Context, actor Actor, projectID, 
 	// instead of queueing a second observation of the same host.
 	key := requestKey(projectID, "readiness", strings.Join([]string{
 		worker.RuntimeID, worker.RuntimeGeneration, worker.AccountLabel, worker.AccountKey,
-		worker.ProfileID, worker.ProfileVersion, worker.WorkspaceHandle, draft.Baseline.ContentDigest,
+		fmt.Sprintf("%d", worker.AttachmentRevision), worker.ProfileID, worker.ProfileVersion, worker.WorkspaceHandle, draft.Baseline.ContentDigest,
 	}, "\x00"))
 	if _, _, err := s.Lifecycle.SubmitTx(ctx, tx, principal, projectID, lifecycleintents.Request{
 		RequestKey:             key,
@@ -222,6 +222,7 @@ func (s *Service) RequestReadiness(ctx context.Context, actor Actor, projectID, 
 		RuntimeGeneration:      worker.RuntimeGeneration,
 		AccountLabel:           worker.AccountLabel,
 		AccountKey:             worker.AccountKey,
+		AttachmentRevision:     worker.AttachmentRevision,
 		TTLSeconds:             lifecycleintents.ReadinessTTLSeconds,
 		WorkspaceHandle:        worker.WorkspaceHandle,
 		DispatchProfileID:      worker.ProfileID,

@@ -31,10 +31,10 @@ func TestHarnessOpenAPIRequiresWorkerLeaseOnEveryWorkerMutation(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(raw)
-	if strings.Count(text, `"$ref": "#/components/parameters/HarnessWorkerLease"`) != 8 {
-		t.Fatal("worker lease header is not attached to exactly the eight worker mutation routes")
+	if strings.Count(text, `"$ref": "#/components/parameters/HarnessWorkerLease"`) != 10 {
+		t.Fatal("worker lease header is not attached to exactly the ten worker mutation routes")
 	}
-	if strings.Count(text, `"description": "Uniform non-enumerating worker authorization failure"`) != 8 {
+	if strings.Count(text, `"description": "Uniform non-enumerating worker authorization failure"`) != 10 {
 		t.Fatal("worker mutation routes do not share one non-enumerating authorization contract")
 	}
 	for _, fragment := range []string{
@@ -92,21 +92,23 @@ func TestHarnessSessionRoutesAreProjectScopedAndDistinct(t *testing.T) {
 	router := chi.NewRouter()
 	RegisterHarnessSessionRoutes(router)
 	want := map[string]bool{
-		"GET /projects/{id}/harness-sessions":                                            false,
-		"GET /projects/{id}/harness-sessions/orchestrator":                               false,
-		"POST /projects/{id}/harness-sessions":                                           false,
-		"GET /projects/{id}/harness-sessions/{sessionID}":                                false,
-		"PATCH /projects/{id}/harness-sessions/{sessionID}/binding":                      false,
-		"POST /projects/{id}/harness-sessions/{sessionID}/heartbeat":                     false,
-		"POST /projects/{id}/harness-sessions/{sessionID}/yield":                         false,
-		"POST /projects/{id}/harness-sessions/{sessionID}/drain":                         false,
-		"POST /projects/{id}/harness-sessions/{sessionID}/complete-delivery":             false,
-		"POST /projects/{id}/harness-sessions/{sessionID}/drain-steer":                   false,
-		"POST /projects/{id}/harness-sessions/{sessionID}/complete-steer":                false,
-		"POST /projects/{id}/harness-sessions/{sessionID}/controls/{kind}":               false,
-		"GET /projects/{id}/harness-sessions/{sessionID}/controls/{controlID}":           false,
-		"POST /projects/{id}/harness-sessions/{sessionID}/controls/{controlID}/complete": false,
-		"POST /projects/{id}/harness-sessions/{sessionID}/stop":                          false,
+		"GET /projects/{id}/harness-sessions":                                                  false,
+		"GET /projects/{id}/harness-sessions/orchestrator":                                     false,
+		"POST /projects/{id}/harness-sessions":                                                 false,
+		"GET /projects/{id}/harness-sessions/{sessionID}":                                      false,
+		"PATCH /projects/{id}/harness-sessions/{sessionID}/binding":                            false,
+		"POST /projects/{id}/harness-sessions/{sessionID}/heartbeat":                           false,
+		"POST /projects/{id}/harness-sessions/{sessionID}/yield":                               false,
+		"POST /projects/{id}/harness-sessions/{sessionID}/drain":                               false,
+		"POST /projects/{id}/harness-sessions/{sessionID}/complete-delivery":                   false,
+		"POST /projects/{id}/harness-sessions/{sessionID}/drain-steer":                         false,
+		"POST /projects/{id}/harness-sessions/{sessionID}/complete-steer":                      false,
+		"POST /projects/{id}/harness-sessions/{sessionID}/controls/{kind}":                     false,
+		"GET /projects/{id}/harness-sessions/{sessionID}/controls/{controlID}":                 false,
+		"POST /projects/{id}/harness-sessions/{sessionID}/controls/{controlID}/complete":       false,
+		"POST /projects/{id}/harness-sessions/{sessionID}/retirements/{retirementID}/ready":    false,
+		"POST /projects/{id}/harness-sessions/{sessionID}/retirements/{retirementID}/complete": false,
+		"POST /projects/{id}/harness-sessions/{sessionID}/stop":                                false,
 	}
 	if err := chi.Walk(router, func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
 		key := method + " " + route
@@ -505,6 +507,8 @@ func TestHarnessWorkerMutationsUseUniformNonEnumeratingAuthorization(t *testing.
 		{"drain-steer", drainHarnessSteer, `{}`},
 		{"complete-steer", completeHarnessSteer, `{}`},
 		{"complete-control", completeHarnessControl, `{"outcome":"applied","reason":"applied"}`},
+		{"retirement-ready", prepareHarnessRetirement, `{}`},
+		{"retirement-complete", completeHarnessRetirement, `{"outcome":"applied","reason":"applied"}`},
 		{"stop", stopHarnessSession, `{}`},
 	}
 	type denial struct {
@@ -536,6 +540,7 @@ func TestHarnessWorkerMutationsUseUniformNonEnumeratingAuthorization(t *testing.
 		route.URLParams.Add("id", strconv.FormatInt(projectID, 10))
 		route.URLParams.Add("sessionID", d.sessionID)
 		route.URLParams.Add("controlID", control.ID)
+		route.URLParams.Add("retirementID", uuid.NewString())
 		return req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, route))
 	}
 	var expectedBody string

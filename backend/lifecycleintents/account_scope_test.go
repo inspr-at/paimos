@@ -183,6 +183,72 @@ func TestV3RegistrationRejectsEmptyAccountsArrayAndKeepsClassOnlyOmission(t *tes
 	}
 }
 
+func TestV4RegistrationCarriesRevisionAndExplicitEmptyAvailability(t *testing.T) {
+	base := Registration{
+		Generation: uuid.NewString(), Host: "fixture-machine", SchemaVersion: AccountLifecycleSchemaV4,
+		Workspaces: []Workspace{{Handle: uuid.NewString(), Identity: fmtIdentity(1)}},
+		AccountScopes: []AccountScope{
+			{AccountLabel: "chatgpt", Accounts: []AccountChoice{{Key: "codex-work", Label: "Work"}}, Profiles: []Profile{{ID: "codex-sol-high", Version: "1"}}, AttachmentRevision: 7, AccountAvailability: AccountAvailabilityAvailable},
+			{AccountLabel: "cursor_context", Profiles: []Profile{{ID: "cursor-composer", Version: "1"}}, AttachmentRevision: 9, AccountAvailability: AccountAvailabilityUnavailable},
+		},
+	}
+	if err := validateRegistration(base); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var round Registration
+	if err := json.Unmarshal(raw, &round); err != nil || validateRegistration(round) != nil {
+		t.Fatalf("v4 round trip err=%v body=%s", err, raw)
+	}
+	if !round.MatchScopeAtRevision("chatgpt", "codex-work", "codex-sol-high", "1", true, 7) ||
+		round.MatchScopeAtRevision("chatgpt", "codex-work", "codex-sol-high", "1", true, 6) ||
+		round.MatchScope("cursor_context", "", "cursor-composer", "1", true) {
+		t.Fatalf("v4 revision or empty availability was widened: %+v", round.AccountScopes)
+	}
+	for _, mutate := range []func(*Registration){
+		func(r *Registration) { r.AccountScopes[0].AttachmentRevision = 0 },
+		func(r *Registration) { r.AccountScopes[0].AccountAvailability = "" },
+		func(r *Registration) { r.AccountScopes[0].AccountAvailability = AccountAvailabilityUnavailable },
+		func(r *Registration) { r.AccountScopes[1].AccountAvailability = AccountAvailabilityAvailable },
+	} {
+		candidate := round
+		candidate.AccountScopes = append([]AccountScope(nil), round.AccountScopes...)
+		mutate(&candidate)
+		if err := validateRegistration(candidate); err != ErrInvalid {
+			t.Fatalf("invalid v4 lifecycle scope accepted: %+v err=%v", candidate.AccountScopes, err)
+		}
+	}
+	legacy := round
+	legacy.AccountScopes = append([]AccountScope(nil), round.AccountScopes...)
+	legacy.AccountScopes[0].AttachmentRevision = 0
+	legacy.AccountScopes[0].AccountAvailability = ""
+	if err := validateRegistration(legacy); err != nil || !legacy.MatchScopeAtRevision("chatgpt", "codex-work", "codex-sol-high", "1", true, 0) {
+		t.Fatalf("v4 registration did not preserve a legacy named scope: %+v err=%v", legacy.AccountScopes, err)
+	}
+}
+
+func TestV4RegistrationAllowsExplicitAndLegacyNamedScopesWithoutConflatingEpochs(t *testing.T) {
+	in := Registration{
+		Generation: uuid.NewString(), Host: "fixture-machine", SchemaVersion: AccountLifecycleSchemaV4,
+		Workspaces: []Workspace{{Handle: uuid.NewString(), Identity: fmtIdentity(1)}},
+		AccountScopes: []AccountScope{
+			{AccountLabel: "chatgpt", Accounts: []AccountChoice{{Key: "codex-work", Label: "Work"}}, Profiles: []Profile{{ID: "codex-sol-high", Version: "1"}}, AttachmentRevision: 4, AccountAvailability: AccountAvailabilityAvailable},
+			{AccountLabel: "cursor_context", Accounts: []AccountChoice{{Key: "cursor-op", Label: "Cursor"}}, Profiles: []Profile{{ID: "cursor-composer", Version: "1"}}},
+		},
+	}
+	if err := validateRegistration(in); err != nil {
+		t.Fatal(err)
+	}
+	if !in.MatchScopeAtRevision("chatgpt", "codex-work", "codex-sol-high", "1", true, 4) ||
+		in.MatchScopeAtRevision("chatgpt", "codex-work", "codex-sol-high", "1", true, 0) ||
+		!in.MatchScopeAtRevision("cursor_context", "cursor-op", "cursor-composer", "1", true, 0) {
+		t.Fatalf("mixed lifecycle epochs were conflated: %+v", in.AccountScopes)
+	}
+}
+
 func TestV3RegistrationRejectsCursorWithoutKeysAndClaudeNamedKeys(t *testing.T) {
 	host := "fixture-machine"
 	cursor := Registration{
@@ -245,5 +311,48 @@ func TestLifecycleAdvertisesMixedCodexAndCursorScopesOnOneRuntime(t *testing.T) 
 	}
 	if _, _, err = f.s.Submit(ctx, f.human, f.project, codex); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestLifecycleQueueBindsNamedRequestToAdvertisedAttachmentRevision(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+	f.now = f.now.Add(121 * time.Second)
+	registration := Registration{
+		Generation: uuid.NewString(), Host: f.registration.Host, SchemaVersion: AccountLifecycleSchemaV4,
+		Workspaces: []Workspace{{Handle: uuid.NewString(), Identity: fmtIdentity(3)}},
+		AccountScopes: []AccountScope{{
+			AccountLabel: "chatgpt", Accounts: []AccountChoice{{Key: "codex-work", Label: "Work"}},
+			Profiles:           []Profile{{ID: "codex-sol-high", Version: "1"}},
+			AttachmentRevision: 12, AccountAvailability: AccountAvailabilityAvailable,
+		}},
+	}
+	runtime, err := f.s.RegisterRuntime(ctx, f.reporter, f.project, testLease, registration)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := Request{
+		RequestKey: uuid.NewString(), Operation: "start", RuntimeID: runtime.ID, RuntimeGeneration: runtime.Generation,
+		AccountLabel: "chatgpt", AccountKey: "codex-work", TTLSeconds: 120,
+		WorkspaceHandle: registration.Workspaces[0].Handle, AgentName: "worker",
+		DispatchProfileID: "codex-sol-high", DispatchProfileVersion: "1", WorkShape: "unknown", Role: "worker",
+	}
+	if _, _, err := f.s.Submit(ctx, f.human, f.project, request); err != ErrUnavailable {
+		t.Fatalf("explicit named request without revision err=%v", err)
+	}
+	request.RequestKey = uuid.NewString()
+	request.AttachmentRevision = 11
+	if _, _, err := f.s.Submit(ctx, f.human, f.project, request); err != ErrUnavailable {
+		t.Fatalf("stale named request err=%v", err)
+	}
+	request.RequestKey = uuid.NewString()
+	request.AttachmentRevision = 12
+	queued, created, err := f.s.Submit(ctx, f.human, f.project, request)
+	if err != nil || !created || queued.Request.AttachmentRevision != 12 {
+		t.Fatalf("queued=%+v created=%v err=%v", queued, created, err)
+	}
+	claimed, err := f.s.Claim(ctx, f.reporter, f.project, runtime.ID, testLease)
+	if err != nil || claimed == nil || claimed.Request.AttachmentRevision != 12 {
+		t.Fatalf("claimed=%+v err=%v", claimed, err)
 	}
 }

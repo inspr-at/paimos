@@ -602,7 +602,7 @@ func (s *Service) listRuntimeChoices(ctx context.Context, tx *sql.Tx, projectID 
 			continue
 		}
 		choice := RuntimeChoice{RuntimeID: id, RuntimeGeneration: generation, AccountLabel: reg.AccountLabel, ExpiresAt: expires, SchemaVersion: reg.SchemaVersion}
-		if reg.SchemaVersion == lifecycleintents.AccountScopeSchemaV3 {
+		if reg.SchemaVersion == lifecycleintents.AccountScopeSchemaV3 || reg.SchemaVersion == lifecycleintents.AccountLifecycleSchemaV4 {
 			choice.AccountScopes = append([]lifecycleintents.AccountScope(nil), reg.AccountScopes...)
 		} else {
 			for _, a := range reg.Accounts {
@@ -631,7 +631,7 @@ func reviewBinding(draft Draft, mode string, selected []string, worker WorkerSel
 		fmt.Sprintf("%d", draft.Revision),
 		mode,
 		canonicalScopeKey(selected),
-		worker.RuntimeID, worker.RuntimeGeneration, worker.AccountKey, worker.AccountLabel,
+		worker.RuntimeID, worker.RuntimeGeneration, worker.AccountKey, fmt.Sprintf("%d", worker.AttachmentRevision), worker.AccountLabel,
 		worker.ProfileID, worker.ProfileVersion, worker.WorkspaceHandle, worker.WorkerName,
 		encodeDelegatedLaunch(launch),
 	)

@@ -17,7 +17,7 @@ func TestLifecycleOpenAPIClosedContract(t *testing.T) {
 		t.Fatal("invalid OpenAPI")
 	}
 	schemas := d["components"].(map[string]any)["schemas"].(map[string]any)
-	for _, name := range []string{"LifecycleRequestV1", "LifecycleIntentV1", "LifecycleRuntimeV1", "LifecycleRuntimeV3", "LifecycleRuntimeRegistrationV1", "LifecycleRuntimeRegistrationV3", "LifecycleAccountScopeNamedV3", "LifecycleAccountScopeClassOnlyV3", "LifecycleTransitionV1", "LifecycleEventV1", "LifecycleSessionRegistrationV1", "LifecycleSessionProjectionV1", "LifecycleAccountChoiceV2", "RuntimeHealthPageV1", "RuntimeHealthStatusV1", "RuntimeLayerHealthV1"} {
+	for _, name := range []string{"LifecycleRequestV1", "LifecycleIntentV1", "LifecycleRuntimeV1", "LifecycleRuntimeV3", "LifecycleRuntimeV4", "LifecycleRuntimeRegistrationV1", "LifecycleRuntimeRegistrationV3", "LifecycleRuntimeRegistrationV4", "LifecycleAccountScopeNamedV3", "LifecycleAccountScopeClassOnlyV3", "LifecycleAccountScopeAvailableV4", "LifecycleAccountScopeUnavailableV4", "LifecycleAccountScopeClassOnlyV4", "LifecycleTransitionV1", "LifecycleEventV1", "LifecycleSessionRegistrationV1", "LifecycleSessionProjectionV1", "LifecycleAccountChoiceV2", "RuntimeHealthPageV1", "RuntimeHealthStatusV1", "RuntimeLayerHealthV1"} {
 		schema, ok := schemas[name].(map[string]any)
 		if !ok || schema["additionalProperties"] != false {
 			t.Fatalf("schema %s not closed", name)
@@ -49,6 +49,28 @@ func TestLifecycleOpenAPIClosedContract(t *testing.T) {
 	if accounts["minItems"] != float64(1) {
 		t.Fatal("present v3 accounts must be non-empty")
 	}
+	v4 := schemas["LifecycleAccountScopeV4"].(map[string]any)
+	if len(v4["oneOf"].([]any)) != 4 {
+		t.Fatal("v4 account scope does not distinguish lifecycle, legacy named and class-only states")
+	}
+	availableV4 := schemas["LifecycleAccountScopeAvailableV4"].(map[string]any)
+	unavailableV4 := schemas["LifecycleAccountScopeUnavailableV4"].(map[string]any)
+	for _, schema := range []map[string]any{availableV4, unavailableV4} {
+		required := map[string]bool{}
+		for _, field := range schema["required"].([]any) {
+			required[field.(string)] = true
+		}
+		if !required["attachment_revision"] || !required["account_availability"] {
+			t.Fatal("v4 named scope does not require availability epoch")
+		}
+	}
+	if _, ok := unavailableV4["properties"].(map[string]any)["accounts"]; ok {
+		t.Fatal("unavailable v4 scope promises account choices")
+	}
+	classOnlyV4 := schemas["LifecycleAccountScopeClassOnlyV4"].(map[string]any)
+	if _, ok := classOnlyV4["properties"].(map[string]any)["accounts"]; ok {
+		t.Fatal("legacy class-only v4 scopes must omit accounts")
+	}
 	request := schemas["LifecycleRequestV1"].(map[string]any)
 	if len(request["oneOf"].([]any)) != 5 {
 		t.Fatal("missing operation-specific field restrictions")
@@ -62,6 +84,15 @@ func TestLifecycleOpenAPIClosedContract(t *testing.T) {
 	}
 	if _, ok := request["properties"].(map[string]any)["account_key"]; !ok {
 		t.Fatal("named account_key missing from request contract")
+	}
+	if _, ok := request["properties"].(map[string]any)["attachment_revision"]; !ok {
+		t.Fatal("reviewed attachment revision missing from request contract")
+	}
+	for index, operation := range request["oneOf"].([]any) {
+		_, present := operation.(map[string]any)["properties"].(map[string]any)["attachment_revision"]
+		if present != (index < 4) {
+			t.Fatalf("attachment revision operation contract index=%d present=%v", index, present)
+		}
 	}
 	registration := schemas["LifecycleRuntimeRegistrationV1"].(map[string]any)
 	regRequired := map[string]bool{}

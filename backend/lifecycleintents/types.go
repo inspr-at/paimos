@@ -33,9 +33,10 @@ var (
 )
 
 const (
-	RuntimeSchemaV1       = 1
-	AccountChoiceSchemaV2 = 2
-	maxAdvertisedAccounts = 16
+	RuntimeSchemaV1          = 1
+	AccountChoiceSchemaV2    = 2
+	AccountLifecycleSchemaV4 = 4
+	maxAdvertisedAccounts    = 16
 )
 
 type Workspace struct {
@@ -160,6 +161,7 @@ type Request struct {
 	RuntimeGeneration      string  `json:"runtime_generation"`
 	AccountLabel           string  `json:"account_label"`
 	AccountKey             string  `json:"account_key,omitempty"`
+	AttachmentRevision     int64   `json:"attachment_revision,omitempty"`
 	TTLSeconds             int     `json:"ttl_seconds"`
 	WorkspaceHandle        string  `json:"workspace_handle,omitempty"`
 	AgentName              string  `json:"agent_name,omitempty"`
@@ -344,6 +346,9 @@ func (r Request) validate() error {
 	if r.AccountKey != "" && !validAccountKey(r.AccountKey) {
 		return ErrInvalid
 	}
+	if r.AttachmentRevision < 0 || (r.AccountKey == "" && r.AttachmentRevision != 0) {
+		return ErrInvalid
+	}
 	if r.Operation != "readiness" && r.BaselineDigest != "" {
 		return ErrInvalid
 	}
@@ -361,7 +366,7 @@ func (r Request) validate() error {
 		return nil
 	}
 	if r.Operation == "repair" {
-		if (r.RepairLayer != "reporter" && r.RepairLayer != "listeners") || r.WorkspaceHandle != "" || r.AgentName != "" || r.DispatchProfileID != "" || r.DispatchProfileVersion != "" || r.TicketID != nil || r.WorkShape != "" || r.Role != "" || r.ParentSessionID != nil || r.SessionID != "" || r.SessionGeneration != "" || r.ExpectedRevision != 0 {
+		if (r.RepairLayer != "reporter" && r.RepairLayer != "listeners") || r.AttachmentRevision != 0 || r.WorkspaceHandle != "" || r.AgentName != "" || r.DispatchProfileID != "" || r.DispatchProfileVersion != "" || r.TicketID != nil || r.WorkShape != "" || r.Role != "" || r.ParentSessionID != nil || r.SessionID != "" || r.SessionGeneration != "" || r.ExpectedRevision != 0 {
 			return ErrInvalid
 		}
 		return nil

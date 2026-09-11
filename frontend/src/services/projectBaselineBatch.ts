@@ -36,6 +36,7 @@ export type WorkerSelection = {
   worker_name?: string
   account_label?: string
   account_key?: string
+  attachment_revision?: number
   profile_id?: string
   profile_version?: string
   workspace_handle?: string
@@ -61,6 +62,8 @@ export type BaselineAccountScope = {
   account_label: string
   accounts?: { key: string; label: string }[]
   profiles: { id: string; version: string }[]
+  attachment_revision?: number
+  account_availability?: 'available' | 'unavailable'
 }
 
 export type RuntimeChoice = {
@@ -78,10 +81,10 @@ export type RuntimeChoice = {
 export function runtimeChoiceProblem(runtime: RuntimeChoice | null): string {
   if (!runtime) return ''
   const schema = runtime.schema_version ?? 0
-  if (schema !== 0 && schema !== 1 && schema !== 2 && schema !== 3) {
+  if (schema !== 0 && schema !== 1 && schema !== 2 && schema !== 3 && schema !== 4) {
     return 'Unknown runtime account schema. Assisted and automatic stay blocked until the advertised scopes are recognizable.'
   }
-  if (schema === 3) {
+  if (schema === 3 || schema === 4) {
     const scopes = runtime.account_scopes ?? []
     if (scopes.length < 1) {
       return 'This runtime advertises no account scopes. Assisted and automatic stay blocked.'
@@ -98,6 +101,35 @@ export function runtimeChoiceProblem(runtime: RuntimeChoice | null): string {
       if (!scope.profiles?.length) {
         return 'This runtime advertises a scope without profiles. Assisted and automatic stay blocked.'
       }
+      const lifecycleAware =
+        scope.attachment_revision !== undefined || scope.account_availability !== undefined
+      const lifecycleClass = ['chatgpt', 'api_key', 'pi_context', 'cursor_context'].includes(
+        scope.account_label,
+      )
+      const requiresLifecycle = schema === 4 && lifecycleAware
+      if (schema === 3 && lifecycleAware) {
+        return 'This runtime mixes incompatible account lifecycle fields. Assisted and automatic stay blocked.'
+      }
+      if (requiresLifecycle && !lifecycleClass) {
+        return 'This runtime mixes account lifecycle fields into a class-only scope. Assisted and automatic stay blocked.'
+      }
+      if (requiresLifecycle) {
+        if (
+          !Number.isSafeInteger(scope.attachment_revision) ||
+          Number(scope.attachment_revision) < 1
+        ) {
+          return 'This runtime advertises an invalid account attachment revision. Assisted and automatic stay blocked.'
+        }
+        if (scope.account_availability === 'available' && !scope.accounts?.length) {
+          return 'This runtime promises account availability without a named choice. Assisted and automatic stay blocked.'
+        }
+        if (scope.account_availability === 'unavailable' && scope.accounts?.length) {
+          return 'This runtime mixes unavailable state with named choices. Assisted and automatic stay blocked.'
+        }
+        if (!['available', 'unavailable'].includes(scope.account_availability ?? '')) {
+          return 'This runtime advertises an unknown account availability. Assisted and automatic stay blocked.'
+        }
+      }
     }
     return ''
   }
@@ -105,7 +137,7 @@ export function runtimeChoiceProblem(runtime: RuntimeChoice | null): string {
 }
 
 export function runtimeScopes(runtime: RuntimeChoice): BaselineAccountScope[] {
-  if ((runtime.schema_version ?? 0) === 3) return runtime.account_scopes ?? []
+  if ((runtime.schema_version ?? 0) === 3 || (runtime.schema_version ?? 0) === 4) return runtime.account_scopes ?? []
   if (!runtime.account_label) return []
   return [{
     account_label: runtime.account_label,
@@ -127,7 +159,17 @@ export function scopedProfiles(runtime: RuntimeChoice | null, accountLabel: stri
 export function isClassOnlyScope(runtime: RuntimeChoice | null, accountLabel: string) {
   if (!runtime || !accountLabel) return false
   const scope = runtimeScopes(runtime).find((row) => row.account_label === accountLabel)
-  return !!scope && !(scope.accounts?.length)
+  return !!scope && scope.account_availability !== 'unavailable' && !(scope.accounts?.length)
+}
+
+export function scopeAttachmentRevision(runtime: RuntimeChoice | null, accountLabel: string) {
+  if (!runtime || !accountLabel) return 0
+  return runtimeScopes(runtime).find((scope) => scope.account_label === accountLabel)?.attachment_revision ?? 0
+}
+
+export function isUnavailableScope(runtime: RuntimeChoice | null, accountLabel: string) {
+  if (!runtime || !accountLabel) return false
+  return runtimeScopes(runtime).find((scope) => scope.account_label === accountLabel)?.account_availability === 'unavailable'
 }
 
 export type ReadinessCheck = { id: string; status: string; reason: string }

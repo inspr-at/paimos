@@ -257,6 +257,7 @@ const requestIdentity = computed(() =>
     parentId.value,
     accountChoiceId.value,
     accountLabel.value,
+    selectedAccount.value?.attachment_revision,
   ]),
 )
 function invalidate() {
@@ -463,6 +464,9 @@ function prepare() {
     runtime_generation: runtime.value.generation,
     account_label: accountLabel.value,
     ...(operation.value !== 'repair' && accountKey.value ? { account_key: accountKey.value } : {}),
+    ...(operation.value !== 'repair' && selectedAccount.value?.attachment_revision
+      ? { attachment_revision: selectedAccount.value.attachment_revision }
+      : {}),
     ttl_seconds: 120,
   }
   const specification = {
@@ -692,6 +696,9 @@ onScopeDispose(() => {
           <p v-if="(accountChoices.length > 1 || accountChoices.some((choice) => choice.account_key)) && !accountAvailable && (operation !== 'repair' || !accountLabel)">
             Choose one advertised account. Unsupported, forged or stale keys cannot be used.
           </p>
+          <p v-if="runtime.account_scopes?.some((scope) => scope.account_availability === 'unavailable') && !accountChoices.length">
+            No named account is attached in this runtime generation. Connect an enrolled account and restart the owned runtime to advertise it.
+          </p>
           <p v-if="existing && accountAvailable && !ownedWorkers.length">
             No owned worker uses this account. Changing account cannot adopt an existing generation.
           </p>
@@ -899,6 +906,10 @@ onScopeDispose(() => {
                   : humanize(pendingRequest.account_label)
               }}
             </dd>
+            <template v-if="'attachment_revision' in pendingRequest && pendingRequest.attachment_revision">
+              <dt>Attachment revision</dt>
+              <dd>{{ pendingRequest.attachment_revision }}</dd>
+            </template>
             <template v-if="pendingRequest.operation !== 'repair'"
               ><dt>Workspace handle</dt>
               <dd>{{ pendingRequest.workspace_handle }}</dd>

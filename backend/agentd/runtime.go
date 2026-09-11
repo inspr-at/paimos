@@ -25,6 +25,7 @@ type RuntimeStatus struct {
 	ReporterLastSuccess time.Time                  `json:"reporter_last_success"`
 	ReporterUnavailable bool                       `json:"reporter_unavailable"`
 	Sessions            []RuntimeSession           `json:"sessions"`
+	Accounts            []RuntimeAccountState      `json:"accounts,omitempty"`
 	Closed              bool                       `json:"closed"`
 }
 type RuntimeSession struct {
@@ -44,6 +45,7 @@ func (s *Supervisor) RuntimeStatus(ctx context.Context) RuntimeStatus {
 	out := RuntimeStatus{DaemonID: s.daemonID, Instance: s.instance, PID: os.Getpid(), ReporterConfigured: s.reporter != nil, ReporterLastSuccess: s.reporterLastSuccess, ReporterUnavailable: s.reporterErrorCode != "", Closed: s.closed, Sessions: []RuntimeSession{}}
 	consumers := s.consumers
 	s.mu.Unlock()
+	out.Accounts = s.AccountLifecycleStatus(0)
 	if consumers != nil {
 		out.Consumers = consumers.Snapshot()
 	}

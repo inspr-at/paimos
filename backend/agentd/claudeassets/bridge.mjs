@@ -179,6 +179,8 @@ let controlInput;
 let stopping = false;
 let sessionStarted = false;
 let sessionID = "";
+let effectiveModel = "";
+let modelEvidenceStatus = "";
 let initialTurnStarted = false;
 let turnActive = false;
 let interruptReceipt = false;
@@ -398,12 +400,27 @@ try {
         queryHandle.close();
         break;
       }
+      const initModelMissing = message.model === undefined;
+      if (!initModelMissing && !validDispatchValue(message.model)) {
+        fail();
+        queryHandle.close();
+        break;
+      }
+      const initModel = initModelMissing ? "" : message.model;
+      const initModelEvidenceStatus = initModelMissing ? "unverified" : "vendor_reported";
       interruptReceipt = true;
       if (!sessionStarted) {
         sessionStarted = true;
         sessionID = message.session_id;
-        emit({ kind: "session_started", harness_session_id: message.session_id });
-      } else if (message.session_id !== sessionID) {
+        effectiveModel = initModel;
+        modelEvidenceStatus = initModelEvidenceStatus;
+        // Agent SDK system/init is emitted only after Query has accepted its
+        // first streamed user input. This evidence annotates that owned
+        // session; it cannot truthfully validate the first input in advance.
+        emit({ kind: "session_started", harness_session_id: message.session_id,
+          effective_model: effectiveModel, model_evidence_status: modelEvidenceStatus });
+      } else if (message.session_id !== sessionID || initModel !== effectiveModel ||
+          initModelEvidenceStatus !== modelEvidenceStatus) {
         fail();
         queryHandle.close();
         break;
