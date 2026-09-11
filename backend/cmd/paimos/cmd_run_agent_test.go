@@ -33,6 +33,7 @@ import (
 	appdb "github.com/inspr-at/paimos/backend/db"
 	"github.com/inspr-at/paimos/backend/delivery"
 	"github.com/inspr-at/paimos/backend/handlers"
+	"github.com/inspr-at/paimos/backend/internal/testdb"
 	"github.com/inspr-at/paimos/backend/models"
 )
 
@@ -494,6 +495,7 @@ func TestAgentRunnerRunTestsAtUsesExplicitExecutionRoot(t *testing.T) {
 func TestAgentRunnerSourceFreeDeployReachesRealHandler(t *testing.T) {
 	t.Setenv("DATA_DIR", t.TempDir())
 	t.Setenv("PAIMOS_TEST_MODE", "1")
+	testdb.Prepare(t)
 	if err := appdb.Open(); err != nil {
 		t.Fatal(err)
 	}

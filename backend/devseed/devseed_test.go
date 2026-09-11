@@ -19,12 +19,14 @@ import (
 	"github.com/inspr-at/paimos/backend/auth"
 	"github.com/inspr-at/paimos/backend/db"
 	"github.com/inspr-at/paimos/backend/devseed"
+	"github.com/inspr-at/paimos/backend/internal/testdb"
 )
 
 func TestRun_SeedsSyntheticDevAdminIdentityAndAvatar(t *testing.T) {
 	dataDir := t.TempDir()
 	t.Setenv("DATA_DIR", dataDir)
 	t.Setenv("PAIMOS_TEST_MODE", "1")
+	testdb.Prepare(t)
 	if err := db.Open(); err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}
@@ -93,6 +95,7 @@ func TestRun_SeedsSyntheticDevAdminIdentityAndAvatar(t *testing.T) {
 func TestRun_Idempotency(t *testing.T) {
 	t.Setenv("DATA_DIR", t.TempDir())
 	t.Setenv("PAIMOS_TEST_MODE", "1")
+	testdb.Prepare(t)
 	if err := db.Open(); err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}
@@ -259,6 +262,7 @@ func TestRun_PAIHeroFixture(t *testing.T) {
 func TestRun_PinnedUserIDs(t *testing.T) {
 	t.Setenv("DATA_DIR", t.TempDir())
 	t.Setenv("PAIMOS_TEST_MODE", "1")
+	testdb.Prepare(t)
 	if err := db.Open(); err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}
@@ -305,6 +309,7 @@ func TestRun_PinnedUserIDs(t *testing.T) {
 func TestRun_PasswordsAreEmpty(t *testing.T) {
 	t.Setenv("DATA_DIR", t.TempDir())
 	t.Setenv("PAIMOS_TEST_MODE", "1")
+	testdb.Prepare(t)
 	if err := db.Open(); err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}
@@ -443,6 +448,7 @@ func openDevseedTestDB(t *testing.T) {
 	t.Helper()
 	t.Setenv("DATA_DIR", t.TempDir())
 	t.Setenv("PAIMOS_TEST_MODE", "1")
+	testdb.Prepare(t)
 	if err := db.Open(); err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}
@@ -497,6 +503,7 @@ func assertNoMembership(t *testing.T, username, projectKey string) {
 func TestRun_RichFixtures(t *testing.T) {
 	t.Setenv("DATA_DIR", t.TempDir())
 	t.Setenv("PAIMOS_TEST_MODE", "1")
+	testdb.Prepare(t)
 	if err := db.Open(); err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}

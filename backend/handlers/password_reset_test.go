@@ -25,19 +25,19 @@ import (
 	"testing"
 	"time"
 
-	"github.com/inspr-at/paimos/backend/auth"
 	"github.com/inspr-at/paimos/backend/db"
+	"golang.org/x/crypto/bcrypt"
 )
 
-// bcryptHash wraps auth.HashPassword so tests can seed users with
-// real password hashes compatible with auth.CheckPassword.
+// bcryptHash uses the minimum cost for fixture users while retaining real
+// password hashes compatible with auth.CheckPassword.
 func bcryptHash(t *testing.T, password string) string {
 	t.Helper()
-	h, err := auth.HashPassword(password)
+	h, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.MinCost)
 	if err != nil {
-		t.Fatalf("HashPassword: %v", err)
+		t.Fatalf("fixture password hash: %v", err)
 	}
-	return h
+	return string(h)
 }
 
 // sha256Hex mirrors the token-hashing scheme used by the handler so

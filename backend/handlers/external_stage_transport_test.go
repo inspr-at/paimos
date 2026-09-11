@@ -21,6 +21,7 @@ import (
 	"github.com/inspr-at/paimos/backend/contracts"
 	"github.com/inspr-at/paimos/backend/db"
 	"github.com/inspr-at/paimos/backend/externalstage"
+	"github.com/inspr-at/paimos/backend/internal/testdb"
 )
 
 func externalStageRequestWithPrincipal(t *testing.T, request *http.Request, keyID int64) *http.Request {
@@ -127,6 +128,7 @@ func setupExternalStageTransportFixture(t *testing.T) externalStageTransportFixt
 	t.Helper()
 	t.Setenv("DATA_DIR", t.TempDir())
 	t.Setenv("PAIMOS_TEST_MODE", "1")
+	testdb.Prepare(t)
 	if err := db.Open(); err != nil {
 		t.Fatal(err)
 	}
