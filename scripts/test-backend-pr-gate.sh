@@ -12,7 +12,7 @@ WORKFLOW="$ROOT/.github/workflows/ci-v2.yml"
 FULL_WORKFLOW="$ROOT/.github/workflows/backend-full.yml"
 RELEASE_DOC="$ROOT/docs/RELEASE.md"
 SELECTION_SENTINEL='PAIMOS_BACKEND_SELECTION_OK_V1'
-FULL_WAIT_CALL="wait-backend-full.sh \"\$GITHUB_SHA\""
+FULL_WAIT_CALL="wait-backend-full.sh --check \"\$GITHUB_SHA\""
 FULL_PR_GUARD="github.event_name != 'pull_request' || github.event.label.name == 'backend-full-evidence'"
 FULL_AGGREGATE_GUARD="always() && (github.event_name != 'pull_request' || github.event.label.name == 'backend-full-evidence')"
 FULL_LABEL_ENV="BACKEND_FULL_LABEL: \${{ github.event.label.name }}"
@@ -75,19 +75,25 @@ check_selection_contains() {
 
 GITHUB_EVENT_NAME=pull_request BACKEND_FULL_LABEL=backend-full-evidence "$FULL_AUTHORIZER" ||
   fail 'backend-full evidence authorizer rejected the stable operator label'
-GITHUB_EVENT_NAME=push "$FULL_AUTHORIZER" ||
-  fail 'backend-full evidence authorizer rejected protected-main execution'
+if GITHUB_EVENT_NAME=push "$FULL_AUTHORIZER" >/dev/null 2>&1; then
+  fail 'backend-full evidence authorizer accepted a push'
+fi
+GITHUB_EVENT_NAME=schedule GITHUB_REF=refs/heads/main "$FULL_AUTHORIZER" ||
+  fail 'backend-full authorizer rejected nightly main execution'
+if GITHUB_EVENT_NAME=schedule GITHUB_REF=refs/heads/other "$FULL_AUTHORIZER" >/dev/null 2>&1; then
+  fail 'backend-full authorizer accepted a nightly run outside main'
+fi
 if GITHUB_EVENT_NAME=pull_request BACKEND_FULL_LABEL=unrelated "$FULL_AUTHORIZER" >/dev/null 2>&1; then
   fail 'backend-full evidence authorizer accepted an unrelated PR label'
 fi
 
 fixture_head='1111111111111111111111111111111111111111'
 FAKE_HEAD_SHA="$fixture_head" FAKE_BACKEND_FULL_MODE=success \
-  GH_COMMAND="$FIXTURES/backend-full-gh.sh" "$FULL_WAITER" "$fixture_head" >/dev/null ||
+  GH_COMMAND="$FIXTURES/backend-full-gh.sh" "$FULL_WAITER" --check "$fixture_head" >/dev/null ||
   fail 'exact-head backend-full waiter rejected successful exhaustive evidence'
 for mode in failed wrong-head skipped; do
   if FAKE_HEAD_SHA="$fixture_head" FAKE_BACKEND_FULL_MODE="$mode" \
-    GH_COMMAND="$FIXTURES/backend-full-gh.sh" "$FULL_WAITER" "$fixture_head" >/dev/null 2>&1; then
+    GH_COMMAND="$FIXTURES/backend-full-gh.sh" "$FULL_WAITER" --check "$fixture_head" >/dev/null 2>&1; then
     fail "exact-head backend-full waiter accepted $mode evidence"
   fi
 done
@@ -180,6 +186,7 @@ db_expected=$(printf '%s\n' \
   github.com/inspr-at/paimos/backend/handlers/crm/hubspot \
   github.com/inspr-at/paimos/backend/handlers/knowledge \
   github.com/inspr-at/paimos/backend/internal/knowledge857 \
+  github.com/inspr-at/paimos/backend/internal/testdb \
   github.com/inspr-at/paimos/backend/lifecycleclient \
   github.com/inspr-at/paimos/backend/lifecycleintents \
   github.com/inspr-at/paimos/backend/managedharness \
@@ -780,7 +787,7 @@ grep -q '^  pull_request:$' "$FULL_WORKFLOW" || fail 'labeled PR evidence trigge
 grep -q '^    types: \[labeled\]$' "$FULL_WORKFLOW" || fail 'PR evidence trigger is not limited to label events'
 grep -q '^  schedule:$' "$FULL_WORKFLOW" || fail 'nightly schedule trigger is missing'
 grep -q '^  workflow_dispatch:$' "$FULL_WORKFLOW" || fail 'manual full-suite trigger is missing'
-grep -q 'branches: \[main\]' "$FULL_WORKFLOW" || fail 'main full-suite trigger is missing'
+! grep -q '^  push:' "$FULL_WORKFLOW" || fail 'push still triggers full backend suites'
 ! grep -q "tags: \['v\*'\]" "$FULL_WORKFLOW" || fail 'tag duplicates already-green protected-main exhaustive assurance'
 
 vet=$(job_block backend-pr-vet)
@@ -865,9 +872,10 @@ done
 [[ "$invariants" != *'TestRegression_'* && "$invariants" != *'TestAuthzFuzz_'* && "$invariants" == *'paimos_test_unsupported'* ]] ||
   fail 'parallel security/platform invariant lane is incomplete'
 [[ "$publish_invariants" == *"github.event_name == 'push'"* &&
+  "$publish_invariants" == *"github.ref_type == 'tag'"* &&
   "$publish_invariants" != *'go test'* &&
   "$publish_invariants" == *"$FULL_WAIT_CALL"* ]] ||
-  fail 'main/tag publish path duplicates tests or lacks exact-head backend assurance'
+  fail 'tag publish path duplicates tests, polls, or lacks exact-code backend assurance'
 
 [[ "$full_authorize" == *'backend-full-authorize.sh'* &&
   "$full_authorize" == *"if: $FULL_PR_GUARD"* &&
@@ -884,17 +892,16 @@ done
   "$full_race" == *"backend-pr-race.sh --group=\"\${{ matrix.group }}\" './...'"* &&
   "$full_race" == *'sequential'* ]] ||
   fail 'full backend broad race lacks an explicit independent budget or sequential topology'
-[[ "$full" == *'needs: [backend-full-authorize, backend-full-serial, backend-full-race, backend-frontend-contracts]'* &&
+[[ "$full" == *'needs: [backend-full-authorize, backend-full-serial, backend-full-race]'* &&
   "$full" == *"if: $FULL_AGGREGATE_GUARD"* && "$full" == *"$FULL_AUTH_RESULT"* &&
   "$full" == *"$FULL_AUTH_ASSERT"* && "$full" == *"$FULL_SERIAL_RESULT"* &&
   "$full" == *"$FULL_RACE_RESULT"* && "$full" == *"$FULL_SERIAL_ASSERT"* &&
   "$full" == *"$FULL_RACE_ASSERT"* ]] ||
   fail 'full backend workflow lacks a fail-closed serial/race aggregator'
-[[ "$full" == *'[[ "$FRONTEND_CONTRACTS" == '\''success'\'' ]]'* ]] ||
-  fail 'reused backend evidence lacks current documentation contracts'
-frontend_contracts=$(job_block backend-frontend-contracts "$FULL_WORKFLOW")
-[[ "$frontend_contracts" == *"go test -count=1 ./cmd/paimos ./cmd/paimos-agentd -run '^TestAgentIntercom'"* ]] ||
-  fail 'reused backend evidence omits tests reading README/INSTALL'
+[[ "$(cat "$FULL_WORKFLOW")" != *'run_full'* &&
+  "$(cat "$FULL_WORKFLOW")" != *'backend-full-reuse'* &&
+  "$(cat "$FULL_WORKFLOW")" != *'continue-on-error'* ]] ||
+  fail 'nightly backend evidence can skip execution or hide a failure'
 grep -q 'BACKEND_FULL_TIMEOUT_SECONDS:-6000' "$FULL_WAITER" ||
   fail 'exact-head full-suite waiter budget is not derived from parallel job budgets'
 
@@ -920,7 +927,7 @@ done
 grep -q 'two tag workflows' "$RELEASE_DOC" || fail 'release documentation does not name the two artifact tag workflows'
 grep -q 'backend-full.yml' "$RELEASE_DOC" || fail 'release documentation omits pre-tag exhaustive backend assurance'
 
-python3 "$ROOT/scripts/test-backend-full-reuse.py"
+python3 "$ROOT/scripts/test-backend-full-evidence.py"
 python3 "$ROOT/scripts/test-backend-ci-dedupe.py"
 python3 "$ROOT/scripts/test-backend-pr-plan.py"
 echo 'test-backend-pr-gate: ok'

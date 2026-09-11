@@ -144,16 +144,17 @@
   justify-content: center;
   gap: 2.2mm;
 }
-.offer-document .ftr .footmark .dots {
-  display: flex;
-  gap: 1.3mm;
-}
-.offer-document .ftr .footmark .dots i {
+.offer-document .brand-dots {
   display: block;
-  width: 1.6mm;
+  flex: none;
+  width: 11.25mm;
+  height: 2.5mm;
+  color: var(--teal);
+}
+.offer-document .ftr .brand-dots {
+  width: 7.2mm;
   height: 1.6mm;
-  border-radius: 50%;
-  background: var(--muted);
+  color: var(--muted);
 }
 .offer-document .ftr .logotype {
   height: 1em;
@@ -180,7 +181,7 @@
 .offer-document .top {
   display: flex;
   justify-content: space-between;
-  align-items: flex-start;
+  align-items: center;
   gap: 12mm;
   margin: 11mm 0 0;
 }
@@ -197,6 +198,10 @@
   height: 6mm;
 }
 .offer-document .section-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6mm;
   margin: 0;
   padding: 6mm 0 4.2mm;
   font-family: var(--display);

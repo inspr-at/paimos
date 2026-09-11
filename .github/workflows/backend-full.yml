@@ -1,19 +1,20 @@
 name: backend-full
 
-# Expensive exhaustive assurance stays off the ordinary PR merge path. It
-# runs when backend inputs change, nightly, and on demand. Frontend-only main
-# pushes reuse a successful ancestral full execution after comparing all paths.
-# release.sh requires the exact protected-main result before creating a tag; no duplicate
-# tag run is needed for the identical commit. Applying the explicit
-# backend-full-evidence label provides the same hosted proof on a PR head.
+# Full execution is nightly and on demand, never on ordinary main pushes.
+# Dispatch may pin an older protected-main commit for a release. The run title
+# binds that checkout to evidence even if main advances before dispatch starts.
+run-name: backend-full ${{ inputs.target_sha || github.event.pull_request.head.sha || github.sha }}
 on:
-  push:
-    branches: [main]
   pull_request:
     types: [labeled]
   schedule:
     - cron: '17 2 * * *'
   workflow_dispatch:
+    inputs:
+      target_sha:
+        description: 'Exact protected-main commit to verify (empty uses dispatch head)'
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -25,28 +26,30 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
-      run_full: ${{ steps.scope.outputs.run_full }}
-      source_run: ${{ steps.scope.outputs.source_run }}
-      source_sha: ${{ steps.scope.outputs.source_sha }}
+      source_sha: ${{ steps.authorize.outputs.source_sha }}
     steps:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
       - name: Authorize exhaustive backend evidence
+        id: authorize
         env:
           BACKEND_FULL_LABEL: ${{ github.event.label.name }}
-        run: scripts/backend-full-authorize.sh
-
-      - name: Reuse verified unchanged backend inputs
-        id: scope
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: python3 scripts/backend-full-reuse.py
+          BACKEND_FULL_REQUESTED_SHA: ${{ inputs.target_sha }}
+          BACKEND_FULL_TARGET_SHA: ${{ inputs.target_sha || github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          scripts/backend-full-authorize.sh
+          target="$BACKEND_FULL_TARGET_SHA"
+          [[ "$target" =~ ^[0-9a-f]{40}$ ]] || exit 1
+          if [[ -n "$BACKEND_FULL_REQUESTED_SHA" ]]; then
+            git merge-base --is-ancestor "$target" origin/main || exit 1
+          fi
+          echo "source_sha=$target" >> "$GITHUB_OUTPUT"
 
   backend-full-serial:
     needs: backend-full-authorize
-    if: needs.backend-full-authorize.outputs.run_full == 'true'
     runs-on: ubuntu-latest
     # Exact-main run 33871597020 started handlers 19m05s into the full step;
     # its 747th of 749 tests then exhausted the old 30m Go alarm. A 40m package
@@ -55,17 +58,19 @@ jobs:
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.backend-full-authorize.outputs.source_sha }}
 
       - uses: actions/setup-go@v6
         with:
           go-version: '1.26.6'
           cache-dependency-path: backend/go.sum
 
-      - name: Backend — full serial suite
+      - name: Backend - full serial suite
         working-directory: backend
         run: go test -count=1 -p 1 -timeout=40m ./...
 
-      - name: Backend — unsupported platform fails closed
+      - name: Backend - unsupported platform fails closed
         working-directory: backend
         run: |
           go test -tags paimos_test_unsupported -count=1 ./cmd/paimos -run '^TestUnsupportedPlatformProcessOwnershipFailsClosed$'
@@ -73,7 +78,6 @@ jobs:
 
   backend-full-race:
     needs: backend-full-authorize
-    if: needs.backend-full-authorize.outputs.run_full == 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -87,13 +91,15 @@ jobs:
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.backend-full-authorize.outputs.source_sha }}
 
       - uses: actions/setup-go@v6
         with:
           go-version: '1.26.6'
           cache-dependency-path: backend/go.sum
 
-      - name: Backend — broad control-plane race (${{ matrix.group }})
+      - name: Backend - broad control-plane race (${{ matrix.group }})
         working-directory: backend
         # The runner walks package-local and handler shard concurrency contracts sequentially.
         # That stays broad without starving latency-budget tests by racing all
@@ -105,26 +111,9 @@ jobs:
           BACKEND_RACE_PACKAGE_TIMEOUT: 15m
         run: ../scripts/backend-pr-race.sh --group="${{ matrix.group }}" './...'
 
-  backend-frontend-contracts:
-    needs: backend-full-authorize
-    if: needs.backend-full-authorize.outputs.run_full == 'false'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-go@v6
-        with:
-          go-version: '1.26.6'
-          cache-dependency-path: backend/go.sum
-      # These small contracts read README/INSTALL from the repository. Keep
-      # them current when reusing the otherwise unchanged backend execution.
-      - name: Check documentation consumed by backend tests
-        working-directory: backend
-        run: go test -count=1 ./cmd/paimos ./cmd/paimos-agentd -run '^TestAgentIntercom'
-
   backend-full:
     if: always() && (github.event_name != 'pull_request' || github.event.label.name == 'backend-full-evidence')
-    needs: [backend-full-authorize, backend-full-serial, backend-full-race, backend-frontend-contracts]
+    needs: [backend-full-authorize, backend-full-serial, backend-full-race]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -133,22 +122,8 @@ jobs:
           AUTHORIZATION: ${{ needs.backend-full-authorize.result }}
           SERIAL: ${{ needs.backend-full-serial.result }}
           RACE: ${{ needs.backend-full-race.result }}
-          RUN_FULL: ${{ needs.backend-full-authorize.outputs.run_full }}
-          SOURCE_RUN: ${{ needs.backend-full-authorize.outputs.source_run }}
-          SOURCE_SHA: ${{ needs.backend-full-authorize.outputs.source_sha }}
-          FRONTEND_CONTRACTS: ${{ needs.backend-frontend-contracts.result }}
         run: |
           set -euo pipefail
-          [[ "$AUTHORIZATION" == 'success' ]]
-          if [[ "$RUN_FULL" == 'false' ]]; then
-            [[ "$GITHUB_EVENT_NAME" == 'push' && "$GITHUB_REF" == 'refs/heads/main' ]]
-            [[ "$SOURCE_RUN" =~ ^[1-9][0-9]*$ && "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
-            [[ "$SERIAL" == 'skipped' && "$RACE" == 'skipped' ]]
-            [[ "$FRONTEND_CONTRACTS" == 'success' ]]
-            echo "Unchanged backend verified by full execution $SOURCE_RUN at $SOURCE_SHA."
-            exit 0
-          fi
-          [[ "$RUN_FULL" == 'true' ]]
-          [[ "$FRONTEND_CONTRACTS" == 'skipped' ]]
-          [[ "$SERIAL" == 'success' ]]
-          [[ "$RACE" == 'success' ]]
+          [[ "$AUTHORIZATION" == 'success' ]] || exit 1
+          [[ "$SERIAL" == 'success' ]] || exit 1
+          [[ "$RACE" == 'success' ]] || exit 1

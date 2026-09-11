@@ -10,6 +10,7 @@ import OfferText from './OfferText.vue'
 import OfferTable from './OfferTable.vue'
 import OfferAcceptance from './OfferAcceptance.vue'
 import OfferFootmark from './OfferFootmark.vue'
+import OfferBrandDots from './OfferBrandDots.vue'
 import { date, type Offer } from './types'
 const props = defineProps<{
   offer: Pick<Offer, 'offer_no' | 'document'>
@@ -128,9 +129,12 @@ defineExpose({ paginate })
       <div ref="measure" class="offer-measure-content">
         <OfferCover :offer="offer" />
         <div class="page-continuation" data-page-inset />
-        <h2 class="section-heading" data-section-heading="terms">I. BEDINGUNGEN</h2>
+        <h2 class="section-heading" data-section-heading="terms">
+          <span>I. BEDINGUNGEN</span><OfferBrandDots />
+        </h2>
         <h2 class="section-heading" data-section-heading="positions">
-          {{ offer.document.blocks.length ? 'II.' : 'I.' }} LEISTUNGSAUFSTELLUNG
+          <span>{{ offer.document.blocks.length ? 'II.' : 'I.' }} LEISTUNGSAUFSTELLUNG</span>
+          <OfferBrandDots />
         </h2>
         <div v-for="(block, i) in offer.document.blocks" :key="i" class="sec" :data-block="i">
           <span class="n">{{ i + 1 }}</span>
@@ -158,11 +162,12 @@ defineExpose({ paginate })
           <div v-if="index > 0 && !page.heading" class="page-continuation" />
           <OfferCover v-if="page.kind === 'cover'" :offer="offer" :editable="editable" />
           <h2 v-if="page.heading" class="section-heading">
-            {{
+            <span>{{
               page.heading === 'terms'
                 ? 'I. BEDINGUNGEN'
                 : `${offer.document.blocks.length ? 'II.' : 'I.'} LEISTUNGSAUFSTELLUNG`
-            }}
+            }}</span>
+            <OfferBrandDots />
           </h2>
           <div v-if="page.blocks.length" class="sections">
             <div v-for="i in page.blocks" :key="i" class="sec">

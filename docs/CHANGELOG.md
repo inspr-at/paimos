@@ -9,6 +9,31 @@ Semantic Versioning (`x.y.z`, until 5.21.0), INSPR calendar v1
 (`YYMMDDhhmmss.0.0`, the UTC reservation second as a SemVer-shaped
 coordinate, from the first entry below that form).
 
+## [260911121105.0.0] — 2026-09-11
+
+### Changed — Compact offer editor (PAI-991)
+
+- Collapse workspace and offer chrome into a slim, expandable toolbar with SVG actions and page-width, whole-page and percentage zoom.
+- Keep save feedback visible with a one-second activity indicator, successful-save timestamp and a manual save action that preserves revision checks.
+- Distinguish failed saves and invalid inputs from saved state; clarify that customer links and QR codes are created when an offer is finalized.
+- Match footer logo height to the footer text and separate the net total with one full-width rule while retaining position separators.
+
+### Changed — Frontend release assurance (PAI-998)
+
+- Reuse successful ancestral full backend execution only for eligible frontend and release-metadata changes, retaining exact-head contracts and failing closed for unknown inputs.
+
+### Improved — Faster test and build feedback (PAI-999, PAI-1000, PAI-1001, PAI-1002, PAI-1004, PAI-1005)
+
+- Give database and handler shards sufficient timeout headroom while preserving the other lane budgets.
+- Remove duplicate backend executions, plan affected PR lanes once and avoid allocating runners for empty lanes.
+- Reuse migrated template databases in backend tests with pinned fixture dependencies and inexpensive integrity hashes.
+- Remove tests that only enforce documentation prose while retaining schema and behavior checks.
+- Build the production SPA from the real repository context so required release metadata is available without copying a synthetic frontend-only tree.
+
+### Maintenance — Intake attribution comments (PAI-997)
+
+- Credit start-agm-com in the audio and TTS implementation comments after its rename.
+
 ## [260911063734.0.0] — 2026-09-11
 
 ### Fixed — Offer section headings and pagination (PAI-991)

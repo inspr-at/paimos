@@ -182,13 +182,23 @@ func runProjectContextEmbeddingJob(job projectContextEmbeddingJob) {
 		projectContextEmbeddingState.running[job] = true
 		projectContextEmbeddingState.mu.Unlock()
 
-		time.Sleep(projectContextEmbeddingDebounce)
-		if err := indexProjectContextEmbeddingsWithRetry(job.db, job.projectID); err != nil {
+		// Closed handles cannot recover. Check before debouncing so stale jobs
+		// cannot hold up the single worker after database teardown or shutdown.
+		var err error
+		if job.db != nil {
+			err = job.db.Ping()
+		}
+		if !isClosedDatabaseError(err) {
+			time.Sleep(projectContextEmbeddingDebounce)
+			err = indexProjectContextEmbeddingsWithRetry(job.db, job.projectID)
+		}
+		closed := isClosedDatabaseError(err)
+		if err != nil && !closed {
 			log.Printf("project context embedding index project=%d: %v", job.projectID, err)
 		}
 
 		projectContextEmbeddingState.mu.Lock()
-		if projectContextEmbeddingState.rerun[job] {
+		if projectContextEmbeddingState.rerun[job] && !closed {
 			projectContextEmbeddingState.rerun[job] = false
 			projectContextEmbeddingState.queued[job] = true
 			projectContextEmbeddingState.mu.Unlock()

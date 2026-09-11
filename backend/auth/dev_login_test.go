@@ -23,6 +23,7 @@ import (
 
 	"github.com/inspr-at/paimos/backend/auth"
 	"github.com/inspr-at/paimos/backend/db"
+	"github.com/inspr-at/paimos/backend/internal/testdb"
 )
 
 // devLoginTestSetup opens an in-memory DB, seeds a single fixture
@@ -36,6 +37,7 @@ func devLoginTestSetup(t *testing.T, token string) {
 	t.Setenv("PAIMOS_TEST_MODE", "1")
 	t.Setenv("PAIMOS_DEV_LOGIN_TOKEN", token)
 	t.Setenv("PAIMOS_ENV", "development")
+	testdb.Prepare(t)
 	if err := db.Open(); err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}

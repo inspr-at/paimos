@@ -81,8 +81,47 @@ UI rendering. A future drop must record all three facts in this ledger: the old
 claim, evidence that the claim is false now, and the exact remaining test that
 covers the original risk.
 
+## Migrated database fixtures (PAI-1001)
+
+Fresh database setup in handlers, auth, cmd/paimos, cmd/paimos-agentd,
+agentmessage, agentmode, workerfleet, devseed, lifecycleclient, and the root
+package opts into `internal/testdb.Prepare` before the normal `db.Open` call.
+Each test binary migrates one empty database without application seed data,
+checkpoints WAL, closes it, and retains immutable file bytes. Every fixture
+copies only that database into its own fresh `DATA_DIR`; vault keys and SQLite
+sidecars are never copied. Migration-defined defaults remain intact. Production
+connection setup, the explicit `DATA_DIR` guard, and the caller's test-mode
+MEMORY journal behavior are unchanged. Database tests remain sequential.
+Handler fixture passwords use `bcrypt.MinCost`; production hashing and auth's
+own `HashPassword` tests retain the production cost.
+
+All `backend/db` tests deliberately retain the real migration path, including
+fresh installs, populated upgrades, rollback, partial schemas, and earlier
+migration versions. `TestRepairedPopulatedM161CloneAppliesCurrentM162` in
+`internal/knowledge857` also retains both real opens because it downgrades and
+repairs a populated database before verifying the normal upgrade. No selected
+fixture test depends on fresh migration timestamps or generated legacy session
+credential IDs. Other packages' existing fixtures are outside this conversion.
+`internal/testdb` is imported only by test files; verify production exclusion
+with `go list -deps . ./cmd/...` and check that its import path is absent.
+
 ## Execution policy and timing evidence
 
+- PAI-1003 removes full backend execution and its polling publication job from
+  ordinary main merges. Strict up-to-date PR checks verify the merged tree.
+  Full serial/platform and broad race groups execute nightly on main and on
+  manual or explicit PR-label requests; every scheduled failure fails the
+  workflow. Frontend-only ancestral reuse is removed. Release preparation
+  dispatches full execution for the immutable tag target when evidence is
+  missing and waits operator-side. Tag CI requires completed exact-code full
+  execution in one check, with no runner polling another workflow.
+  PR race lanes now receive the affected selection plus the direct selection:
+  direct packages retain their existing plans, while dependency-only packages
+  select concurrency, race, atomicity, replay, and recovery names in bounded
+  groups of at most four. Empty selections/shards allocate no runner. Agent
+  Mode's latency-sensitive stream subtest stays in the isolated normal lane.
+  The normal mask consumes this same race coverage, retaining the existing
+  race-guard exclusions and partial-subtest protection.
 - PAI-1002 computes the affected and direct PR selections once in
   `backend-pr-plan`. Each normal/race lane's own dry-run command determines
   whether it has an invocation and which matrix shards have work. Job-level
@@ -91,14 +130,13 @@ covers the original risk.
   The `test` aggregator requires a successful plan and accepts a skipped lane
   only when that plan explicitly marked it empty. Vet, unsupported-platform
   invariants, frontend quality, E2E, security scanning, DCO, and the quality job
-  remain unconditional on PRs. Main/tag publication and its exact-head
-  exhaustive-evidence wait are unchanged.
+  remain unconditional on PRs. PAI-1003 changes main/tag evidence as described above.
 - Pull requests run independent required lanes for `go vet ./...`, two affected
   normal-package shards, four DB shards, five handler shards, the unchanged Agent
-  Mode five-second performance contract, and directly changed race targets.
+  Mode five-second performance contract, and affected race targets.
   Selection for normal tests is the directly changed package plus its bounded
   transitive reverse test-dependency closure. Normal PR lanes exclude individual tests
-  selected by the direct race plan, retaining normal tests for race-dependent
+  selected by the affected race plan, retaining normal tests for race-dependent
   packages and their importers plus the isolated performance contract. New race
   guards fail the gate self-test. Handler security invariants run in affected
   lanes; the separate invariant job runs only unsupported-platform contracts.
@@ -120,7 +158,7 @@ covers the original risk.
   concurrency/recovery oracle must update the semantic selector and shard
   topology in the same change; the gate pins the currently selected names
   exactly once. Combined normal/race PR selection and the exhaustive full-serial
-  workflow still cover all 17; the broad main, nightly, and manually authorized
+  workflow still cover all 17; the broad nightly and manually authorized
   race workflow retains the same complete set of four package-local concurrency and
   recovery oracles in four sequential foreground processes.
   E2E and security scanning remain separate required contexts.
@@ -129,10 +167,10 @@ covers the original risk.
   fails closed while those lanes run concurrently.
 - Full serial `go test -p 1 ./...` and a broad sequential sweep of package-local
   control-plane concurrency contracts (including sequential handler shards) run
-  as parallel jobs in a dedicated workflow on `main`, nightly, and manual
-  dispatch, outside the ordinary PR merge path. Main and tag publication waits
-  for successful exact-head `backend-full.yml` evidence, including
-  unsupported-platform contracts; quality/frontend/E2E stay PR-only. Quality
+  as parallel jobs in a dedicated workflow nightly on `main` and on manual
+  dispatch, outside the ordinary merge path. Tags require successful exact-code
+  `backend-full.yml` execution, including unsupported-platform contracts;
+  main publication reuses PR assurance and quality/frontend/E2E stay PR-only. Quality
   checks follow their complete inputs; clock-dependent self-tests always run.
   Main reruns govulncheck and npm audit against live vulnerability databases,
   while pinned gosec and gitleaks reuse PR assurance.
@@ -193,7 +231,7 @@ covers the original risk.
   required runners; final exact-head hosted timing remains the acceptance proof.
 - The final full serial suite passed in 722.08s, including unsharded `handlers`
   in 413.893s, `db` in 92.098s, and `supervision` in 55.184s. This is
-  the exact assurance retained on main, nightly, and manual dispatch before a
+  the exact assurance retained nightly and on manual dispatch before a
   release tag can be created.
 - The final broad package-local concurrency sweep passed in 687.32s. Its five
   handler shards ran foreground-only in 80.149s, 75.453s, 61.048s, 61.892s, and

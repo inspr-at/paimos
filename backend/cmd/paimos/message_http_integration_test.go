@@ -14,6 +14,7 @@ import (
 	"github.com/inspr-at/paimos/backend/brand"
 	"github.com/inspr-at/paimos/backend/db"
 	"github.com/inspr-at/paimos/backend/handlers"
+	"github.com/inspr-at/paimos/backend/internal/testdb"
 )
 
 // Exercise the actual CLI serialization, HTTP authorization, handler, and
@@ -24,6 +25,7 @@ func TestTellRealHTTPMultilineFileAndStdin(t *testing.T) {
 	t.Setenv("DATA_DIR", t.TempDir())
 	t.Setenv("PAIMOS_TEST_MODE", "1")
 	t.Setenv("PAIMOS_AGENT_BUS_INSTANCE", "multiline-cli-fixture")
+	testdb.Prepare(t)
 	if err := db.Open(); err != nil {
 		t.Fatal(err)
 	}

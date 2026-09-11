@@ -50,11 +50,10 @@ class PlanTests(unittest.TestCase):
                 self.assertNotIn('continue-on-error:', block)
                 self.assertNotIn('backend-ci-packages.sh', block)
                 self.assertIn(f'{name}: ${{{{ steps.plan.outputs.{name} }}}}', plan)
-                selected = 'selection' if kind == 'test' else 'direct_selection'
+                selected = 'selection'
                 self.assertIn(f'selection: ${{{{ needs.backend-pr-plan.outputs.{selected} }}}}', block)
                 self.assertIn(f'backend-pr-{kind}.sh --lane={lane}', block)
-                if kind == 'test':
-                    self.assertIn('--direct-packages="$direct_selection"', block)
+                self.assertIn('--direct-packages="$direct_selection"', block)
                 if count:
                     self.assertIn(f'--shard="${{{{ matrix.shard }}}}/{count}"', block)
                     self.assertIn(f"shard: ${{{{ fromJSON({prefix} == 'true' && {prefix}-shards || '[0]') }}}}", block)
@@ -90,9 +89,8 @@ class PlanTests(unittest.TestCase):
                 args = [str(planner.SCRIPTS / f'backend-pr-{kind}.sh'), '--dry-run', f'--lane={lane}']
                 if count:
                     args.append(f'--shard={shard}/{count}')
-                if kind == 'test':
-                    args.append('--direct-packages=' + MODULE + '/direct')
-                args.append(MODULE + ('/affected' if kind == 'test' else '/direct'))
+                args.append('--direct-packages=' + MODULE + '/direct')
+                args.append(MODULE + '/affected')
                 expected.append(args)
         self.assertEqual(calls[2:], expected)
         self.assertEqual(result['backend-pr'], 'true')
@@ -101,7 +99,7 @@ class PlanTests(unittest.TestCase):
 
     def test_real_simulated_prs(self):
         expected_active = {
-            'backend/handlers/issues.go': {'backend-pr', 'backend-pr-handlers', 'backend-pr-handlers-race'},
+            'backend/handlers/issues.go': {'backend-pr', 'backend-pr-handlers', 'backend-pr-handlers-race', 'backend-pr-race'},
             'frontend/src/main.ts': set(),
             'docs/INSTALL.md': set(),
         }
@@ -110,7 +108,7 @@ class PlanTests(unittest.TestCase):
                 result = planner.plan(['--files-from', '-'], path + '\n')
                 self.assertEqual({name for name in LANES if result[name] == 'true'}, active)
                 if active:
-                    self.assertEqual(result['direct_selection'], MODULE + '/handlers')
+                    self.assertEqual(result['direct_selection'], MODULE + '/' + path.split('/')[1])
                     self.assertIn(MODULE + '/handlers', result['selection'].splitlines())
                     self.assertEqual(json.loads(result['backend-pr-shards']), [0, 1])
                     for name in ('backend-pr-handlers', 'backend-pr-handlers-race'):

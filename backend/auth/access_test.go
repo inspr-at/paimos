@@ -24,6 +24,7 @@ import (
 
 	"github.com/inspr-at/paimos/backend/auth"
 	"github.com/inspr-at/paimos/backend/db"
+	"github.com/inspr-at/paimos/backend/internal/testdb"
 	"github.com/inspr-at/paimos/backend/models"
 
 	_ "modernc.org/sqlite"
@@ -34,8 +35,9 @@ func setupAccessTestDB(t *testing.T) {
 	// t.Setenv auto-restores on cleanup and t.TempDir auto-deletes, so each
 	// test gets a fresh DB file that the next test can't contaminate.
 	t.Setenv("DATA_DIR", t.TempDir())
-	// PAIMOS_TEST_MODE also speeds up the migration run inside db.Open().
+	// Retain test-mode connection behavior when opening the template copy.
 	t.Setenv("PAIMOS_TEST_MODE", "1")
+	testdb.Prepare(t)
 	if err := db.Open(); err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}

@@ -1478,10 +1478,10 @@ if [[ -n "$REVIEWED_HEAD" ]]; then
   [[ "$(git rev-parse "$TAG_OID^{tree}")" == "$(git rev-parse "$REVIEWED_HEAD^{tree}")" ]] ||
     fail 'selected recovery commit changes reviewed content; prepare and review a fresh release'
 fi
-# The exhaustive workflow is triggered by the protected-main commit selected
-# above. Require its exact-head result before creating the tag, so tag CI can
-# reuse evidence that is already green instead of waiting for a second run.
-GITHUB_REPOSITORY="$REPO" "$ROOT/scripts/wait-backend-full.sh" "$TAG_OID"
+# Dispatch the full workflow for this immutable protected-main commit if no
+# evidence exists. Only the operator waits; tag CI checks completed evidence
+# once. Main may advance without changing the code verified or tagged.
+GITHUB_REPOSITORY="$REPO" "$ROOT/scripts/wait-backend-full.sh" --dispatch "$TAG_OID"
 tag_release_merge "$TAG_OID"
 cleanup_checkout
 
