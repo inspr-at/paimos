@@ -1,8 +1,9 @@
 name: backend-full
 
 # Expensive exhaustive assurance stays off the ordinary PR merge path. It
-# runs for every protected-main commit, nightly, and on demand. release.sh
-# requires the exact protected-main result before creating a tag; no duplicate
+# runs when backend inputs change, nightly, and on demand. Frontend-only main
+# pushes reuse a successful ancestral full execution after comparing all paths.
+# release.sh requires the exact protected-main result before creating a tag; no duplicate
 # tag run is needed for the identical commit. Applying the explicit
 # backend-full-evidence label provides the same hosted proof on a PR head.
 on:
@@ -16,22 +17,36 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   backend-full-authorize:
     if: github.event_name != 'pull_request' || github.event.label.name == 'backend-full-evidence'
     runs-on: ubuntu-latest
-    timeout-minutes: 2
+    timeout-minutes: 5
+    outputs:
+      run_full: ${{ steps.scope.outputs.run_full }}
+      source_run: ${{ steps.scope.outputs.source_run }}
+      source_sha: ${{ steps.scope.outputs.source_sha }}
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
 
       - name: Authorize exhaustive backend evidence
         env:
           BACKEND_FULL_LABEL: ${{ github.event.label.name }}
         run: scripts/backend-full-authorize.sh
 
+      - name: Reuse verified unchanged backend inputs
+        id: scope
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/backend-full-reuse.py
+
   backend-full-serial:
     needs: backend-full-authorize
+    if: needs.backend-full-authorize.outputs.run_full == 'true'
     runs-on: ubuntu-latest
     # Exact-main run 33871597020 started handlers 19m05s into the full step;
     # its 747th of 749 tests then exhausted the old 30m Go alarm. A 40m package
@@ -58,6 +73,7 @@ jobs:
 
   backend-full-race:
     needs: backend-full-authorize
+    if: needs.backend-full-authorize.outputs.run_full == 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -89,9 +105,26 @@ jobs:
           BACKEND_RACE_PACKAGE_TIMEOUT: 15m
         run: ../scripts/backend-pr-race.sh --group="${{ matrix.group }}" './...'
 
+  backend-frontend-contracts:
+    needs: backend-full-authorize
+    if: needs.backend-full-authorize.outputs.run_full == 'false'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.26.6'
+          cache-dependency-path: backend/go.sum
+      # These small contracts read README/INSTALL from the repository. Keep
+      # them current when reusing the otherwise unchanged backend execution.
+      - name: Check documentation consumed by backend tests
+        working-directory: backend
+        run: go test -count=1 ./cmd/paimos ./cmd/paimos-agentd -run '^TestAgentIntercom'
+
   backend-full:
     if: always() && (github.event_name != 'pull_request' || github.event.label.name == 'backend-full-evidence')
-    needs: [backend-full-authorize, backend-full-serial, backend-full-race]
+    needs: [backend-full-authorize, backend-full-serial, backend-full-race, backend-frontend-contracts]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -100,8 +133,22 @@ jobs:
           AUTHORIZATION: ${{ needs.backend-full-authorize.result }}
           SERIAL: ${{ needs.backend-full-serial.result }}
           RACE: ${{ needs.backend-full-race.result }}
+          RUN_FULL: ${{ needs.backend-full-authorize.outputs.run_full }}
+          SOURCE_RUN: ${{ needs.backend-full-authorize.outputs.source_run }}
+          SOURCE_SHA: ${{ needs.backend-full-authorize.outputs.source_sha }}
+          FRONTEND_CONTRACTS: ${{ needs.backend-frontend-contracts.result }}
         run: |
           set -euo pipefail
           [[ "$AUTHORIZATION" == 'success' ]]
+          if [[ "$RUN_FULL" == 'false' ]]; then
+            [[ "$GITHUB_EVENT_NAME" == 'push' && "$GITHUB_REF" == 'refs/heads/main' ]]
+            [[ "$SOURCE_RUN" =~ ^[1-9][0-9]*$ && "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+            [[ "$SERIAL" == 'skipped' && "$RACE" == 'skipped' ]]
+            [[ "$FRONTEND_CONTRACTS" == 'success' ]]
+            echo "Unchanged backend verified by full execution $SOURCE_RUN at $SOURCE_SHA."
+            exit 0
+          fi
+          [[ "$RUN_FULL" == 'true' ]]
+          [[ "$FRONTEND_CONTRACTS" == 'skipped' ]]
           [[ "$SERIAL" == 'success' ]]
           [[ "$RACE" == 'success' ]]

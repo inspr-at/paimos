@@ -50,7 +50,7 @@ while true; do
     if jq -e '
       any(.jobs[]; .name == "backend-full" and .status == "completed" and .conclusion == "success")
     ' >/dev/null <<<"$jobs"; then
-      echo "Exhaustive backend assurance is green for exact head $HEAD_SHA."
+      echo "Backend assurance is green for exact head $HEAD_SHA (execution or verified unchanged inputs)."
       exit 0
     fi
   done <<<"$successful_run_ids"
