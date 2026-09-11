@@ -12,7 +12,6 @@ WORKFLOW="$ROOT/.github/workflows/ci-v2.yml"
 FULL_WORKFLOW="$ROOT/.github/workflows/backend-full.yml"
 RELEASE_DOC="$ROOT/docs/RELEASE.md"
 SELECTION_SENTINEL='PAIMOS_BACKEND_SELECTION_OK_V1'
-CI_SELECTION_CALL="selection=\$(../scripts/backend-ci-packages.sh"
 FULL_WAIT_CALL="wait-backend-full.sh \"\$GITHUB_SHA\""
 FULL_PR_GUARD="github.event_name != 'pull_request' || github.event.label.name == 'backend-full-evidence'"
 FULL_AGGREGATE_GUARD="always() && (github.event_name != 'pull_request' || github.event.label.name == 'backend-full-evidence')"
@@ -819,47 +818,47 @@ for lane_and_plan in \
 do
   lane=${lane_and_plan%%:*}
   plan=${lane_and_plan#*:}
-  [[ "$plan" == *"github.event_name == 'pull_request'"* && "$plan" == *'backend-ci-packages.sh'* &&
+  [[ "$plan" == *"github.event_name == 'pull_request'"* && "$plan" == *'needs.backend-pr-plan.outputs.selection'* &&
     "$plan" == *"backend-pr-test.sh --lane=$lane"* ]] ||
     fail "parallel PR $lane lane is incomplete"
-  [[ "$plan" == *"$CI_SELECTION_CALL"* &&
-    "$plan" != *'mapfile -t packages < <('* ]] ||
-    fail "parallel PR $lane lane does not propagate selector failures"
+  [[ "$plan" == *'needs: backend-pr-plan'* &&
+    "$plan" != *'backend-ci-packages.sh'* ]] ||
+    fail "parallel PR $lane lane bypasses the shared plan"
   [[ "$plan" != *'-p 1'* && "$plan" != *'go test -count=1 -timeout=30m ./...'* ]] ||
     fail "parallel PR $lane lane still runs the serialized/full tree"
 done
-[[ "$handlers" == *'matrix:'* && "$handlers" == *'shard: [0, 1, 2, 3, 4]'* &&
+[[ "$handlers" == *'matrix:'* && "$handlers" == *'needs.backend-pr-plan.outputs.backend-pr-handlers-shards'* &&
   "$handlers" == *"--shard=\"\${{ matrix.shard }}/5\""* ]] ||
   fail 'handler normal shards do not run on five independent matrix runners'
-[[ "$normal" == *'matrix:'* && "$normal" == *'shard: [0, 1]'* &&
+[[ "$normal" == *'matrix:'* && "$normal" == *'needs.backend-pr-plan.outputs.backend-pr-shards'* &&
   "$normal" == *"--shard=\"\${{ matrix.shard }}/2\""* ]] ||
   fail 'affected normal packages do not run on two independent matrix runners'
 
 [[ "$race" == *"github.event_name == 'pull_request'"* ]] || fail 'race PR lane is not pull-request-only'
-[[ "$race" == *'backend-ci-packages.sh --direct'* && "$race" == *'backend-pr-race.sh --lane=affected'* ]] ||
+[[ "$race" == *'needs.backend-pr-plan.outputs.direct_selection'* && "$race" == *'backend-pr-race.sh --lane=affected'* ]] ||
   fail 'race PR lane does not race changed packages'
 for lane_and_plan in "race:$race" "managedharness-race:$managedharness_race" "db-race:$db_race" "handlers-race:$handlers_race"; do
   lane=${lane_and_plan%%:*}
   plan=${lane_and_plan#*:}
-  [[ "$plan" == *"$CI_SELECTION_CALL"* &&
-    "$plan" != *'mapfile -t packages < <('* ]] ||
-    fail "parallel PR $lane lane does not propagate selector failures"
+  [[ "$plan" == *'needs: backend-pr-plan'* &&
+    "$plan" != *'backend-ci-packages.sh'* ]] ||
+    fail "parallel PR $lane lane bypasses the shared plan"
 done
 [[ "$race" != *'-p 1'* && "$race" != *'go test -race -count=1 -timeout=30m ./...'* ]] ||
   fail 'race PR lane still races the full tree'
-[[ "$race" == *'matrix:'* && "$race" == *'shard: [0, 1, 2, 3]'* &&
+[[ "$race" == *'matrix:'* && "$race" == *'needs.backend-pr-plan.outputs.backend-pr-race-shards'* &&
   "$race" == *"--shard=\"\${{ matrix.shard }}/4\""* ]] ||
   fail 'affected race packages do not run on four independent matrix runners'
-[[ "$managedharness_race" == *'backend-ci-packages.sh --direct'* &&
+[[ "$managedharness_race" == *'needs.backend-pr-plan.outputs.direct_selection'* &&
   "$managedharness_race" == *'backend-pr-race.sh --lane=managedharness'* &&
-  "$managedharness_race" == *'matrix:'* && "$managedharness_race" == *'shard: [0, 1, 2, 3, 4, 5, 6]'* &&
+  "$managedharness_race" == *'matrix:'* && "$managedharness_race" == *'needs.backend-pr-plan.outputs.backend-pr-managedharness-race-shards'* &&
   "$managedharness_race" == *"--shard=\"\${{ matrix.shard }}/7\""* ]] ||
   fail 'managed-harness race oracles do not run on seven independent matrix runners'
-[[ "$db_race" == *'backend-ci-packages.sh --direct'* && "$db_race" == *'backend-pr-race.sh --lane=db'* ]] ||
+[[ "$db_race" == *'needs.backend-pr-plan.outputs.direct_selection'* && "$db_race" == *'backend-pr-race.sh --lane=db'* ]] ||
   fail 'parallel PR DB race lane is incomplete'
-[[ "$handlers_race" == *'backend-ci-packages.sh --direct'* && "$handlers_race" == *'backend-pr-race.sh --lane=handlers'* ]] ||
+[[ "$handlers_race" == *'needs.backend-pr-plan.outputs.direct_selection'* && "$handlers_race" == *'backend-pr-race.sh --lane=handlers'* ]] ||
   fail 'parallel PR handler race lane is incomplete'
-[[ "$handlers_race" == *'matrix:'* && "$handlers_race" == *'shard: [0, 1, 2, 3, 4]'* &&
+[[ "$handlers_race" == *'matrix:'* && "$handlers_race" == *'needs.backend-pr-plan.outputs.backend-pr-handlers-race-shards'* &&
   "$handlers_race" == *"--shard=\"\${{ matrix.shard }}/5\""* ]] ||
   fail 'handler race shards do not run on five independent matrix runners'
 
@@ -903,14 +902,14 @@ grep -q 'BACKEND_FULL_TIMEOUT_SECONDS:-6000' "$FULL_WAITER" ||
 [[ "$frontend" == *'npm run schema:check'* && "$frontend" == *'npm test'* ]] ||
   fail 'frontend quality lane lost schema, lint, type, or unit assurance'
 for dependency in \
-  backend-pr-vet backend-pr backend-pr-db backend-pr-handlers backend-pr-performance \
+  backend-pr-plan backend-pr-vet backend-pr backend-pr-db backend-pr-handlers backend-pr-performance \
   backend-pr-race backend-pr-managedharness-race backend-pr-db-race backend-pr-handlers-race \
   backend-security-invariants backend-publish-invariants quality frontend-quality
 do
   [[ "$aggregate" == *"$dependency"* ]] || fail "required test aggregator does not depend on $dependency"
 done
 [[ "$aggregate" == *'BACKEND_PR_MANAGEDHARNESS_RACE: ${{ needs.backend-pr-managedharness-race.result }}'* &&
-  "$aggregate" == *'[[ "$BACKEND_PR_MANAGEDHARNESS_RACE" == '\''success'\'' ]]'* &&
+  "$aggregate" == *'require_planned_lane "$BACKEND_PR_MANAGEDHARNESS_RACE_PLANNED" "$BACKEND_PR_MANAGEDHARNESS_RACE"'* &&
   "$aggregate" == *'[[ "$BACKEND_PR_MANAGEDHARNESS_RACE" == '\''skipped'\'' ]]'* ]] ||
   fail 'required test aggregator does not fail closed on the managed-harness race matrix result'
 [[ "$aggregate" != *'backend-full'* ]] || fail 'required PR test aggregator still depends on the full backend suite'
@@ -923,4 +922,5 @@ grep -q 'backend-full.yml' "$RELEASE_DOC" || fail 'release documentation omits p
 
 python3 "$ROOT/scripts/test-backend-full-reuse.py"
 python3 "$ROOT/scripts/test-backend-ci-dedupe.py"
+python3 "$ROOT/scripts/test-backend-pr-plan.py"
 echo 'test-backend-pr-gate: ok'
