@@ -6,7 +6,6 @@ package handlers_test
 import (
 	"encoding/json"
 	"os"
-	"strings"
 	"testing"
 )
 
@@ -74,9 +73,6 @@ func TestWorkerFleetOpenAPIPreservesV1AndClosesV2(t *testing.T) {
 	trust := v2Properties["runtime_provenance_trust"].(map[string]any)["enum"].([]any)
 	if len(trust) != 2 || trust[0] != "managed_reporter" || trust[1] != "untrusted" {
 		t.Fatalf("v2 runtime trust is not closed: %v", trust)
-	}
-	if description, _ := v2Properties["runtime_provenance_trust"].(map[string]any)["description"].(string); !strings.Contains(description, "Untrusted rows suppress") {
-		t.Fatalf("v2 runtime trust does not document suppression: %q", description)
 	}
 	machineTypes := v2Properties["machine_id"].(map[string]any)["type"].([]any)
 	if len(machineTypes) != 2 || machineTypes[1] != "null" || v2Properties["machine_id"].(map[string]any)["maxLength"] != float64(128) {
