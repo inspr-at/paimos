@@ -2,7 +2,12 @@
 import OfferQR from './OfferQR.vue'
 import OfferText from './OfferText.vue'
 import { money, net, type OfferDocument } from './types'
-defineProps<{ document: OfferDocument; editable?: boolean; publicUrl?: string }>()
+defineProps<{
+  document: OfferDocument
+  editable?: boolean
+  publicUrl?: string
+  qrPreview?: boolean
+}>()
 </script>
 <template>
   <div class="offer-acceptance">
@@ -21,6 +26,6 @@ defineProps<{ document: OfferDocument; editable?: boolean; publicUrl?: string }>
         <div>Ort, Datum, Unterschrift Auftragnehmer</div>
       </div>
     </div>
-    <OfferQR v-if="publicUrl" :url="publicUrl" />
+    <OfferQR v-if="publicUrl || qrPreview" :url="publicUrl" :preview="!publicUrl && qrPreview" />
   </div>
 </template>

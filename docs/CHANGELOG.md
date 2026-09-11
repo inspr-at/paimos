@@ -9,6 +9,17 @@ Semantic Versioning (`x.y.z`, until 5.21.0), INSPR calendar v1
 (`YYMMDDhhmmss.0.0`, the UTC reservation second as a SemVer-shaped
 coordinate, from the first entry below that form).
 
+## [260911160144.0.0] — 2026-09-11
+
+### Changed — Reviewed release preparation (PAI-1008)
+
+- Prepare release metadata locally for review, then resume publication only from the exact reviewed commit while failing closed on main drift.
+
+### Changed — Draft QR preview (PAI-1006)
+
+- Show the customer QR and link area in drafts with clearly labelled preview data, while keeping real public links unavailable until finalization.
+- Preserve the same QR layout in editor and PDF output; final documents continue to show the real customer link without the preview badge.
+
 ## [260911125749.0.0] — 2026-09-11
 
 ### Changed — Offer brand dots (PAI-1007)

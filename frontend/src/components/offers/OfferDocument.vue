@@ -17,6 +17,7 @@ const props = defineProps<{
   zoom?: number
   editable?: boolean
   publicUrl?: string
+  qrPreview?: boolean
 }>()
 const emit = defineEmits<{ overflow: [message: string]; change: [] }>()
 type Page = {
@@ -100,7 +101,7 @@ function schedule() {
     await paginate()
   })
 }
-watch(() => [props.offer.document, props.publicUrl], schedule, { deep: true })
+watch(() => [props.offer.document, props.publicUrl, props.qrPreview], schedule, { deep: true })
 onMounted(async () => {
   await document.fonts.ready
   await paginate()
@@ -144,7 +145,11 @@ defineExpose({ paginate })
         <OfferTable
           :positions="offer.document.positions"
           :indices="offer.document.positions.map((_, i) => i)"
-        /><OfferAcceptance :document="offer.document" :public-url="publicUrl" />
+        /><OfferAcceptance
+          :document="offer.document"
+          :public-url="publicUrl"
+          :qr-preview="qrPreview"
+        />
       </div>
     </div>
     <div class="sheet" :style="{ '--offer-zoom': zoom ?? 1 }">
@@ -198,6 +203,7 @@ defineExpose({ paginate })
             v-if="page.acceptance"
             :document="offer.document"
             :public-url="publicUrl"
+            :qr-preview="qrPreview"
             :editable="editable"
           />
         </div>

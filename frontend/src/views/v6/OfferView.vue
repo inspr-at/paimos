@@ -515,6 +515,7 @@ onBeforeRouteLeave(async () => !dirty.value || (await save()))
         :offer="offer"
         :zoom="zoom"
         :public-url="publicUrl"
+        :qr-preview="offer.status === 'draft'"
         :editable="editable"
         @overflow="overflow = $event"
       />
