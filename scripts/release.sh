@@ -1474,6 +1474,10 @@ esac
 
 assert_release_merge "$MERGE_OID"
 select_release_tag_commit "$MERGE_OID"
+if [[ -n "$REVIEWED_HEAD" ]]; then
+  [[ "$(git rev-parse "$TAG_OID^{tree}")" == "$(git rev-parse "$REVIEWED_HEAD^{tree}")" ]] ||
+    fail 'selected recovery commit changes reviewed content; prepare and review a fresh release'
+fi
 # The exhaustive workflow is triggered by the protected-main commit selected
 # above. Require its exact-head result before creating the tag, so tag CI can
 # reuse evidence that is already green instead of waiting for a second run.

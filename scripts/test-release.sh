@@ -1729,6 +1729,23 @@ setup_interrupted_calendar_descendant_recovery() {
   RECOVERY_CANDIDATE=$(git -C "$RECOVERY_REPO" rev-parse HEAD)
 }
 
+test_reviewed_resume_rejects_descendant_recovery() {
+  local calendar_version reviewed output
+  calendar_version=$(TZ=Europe/Vienna date +%y.%m.%d)
+  setup_interrupted_calendar_descendant_recovery reviewed-descendant "$calendar_version"
+  reviewed=$(git --git-dir="$RECOVERY_ORIGIN" rev-parse refs/pull/1/head)
+  output="$RECOVERY_STATE/reviewed-output"
+  if FAKE_RELEASE_VERSION="$calendar_version" \
+     run_release "$RECOVERY_REPO" "$RECOVERY_STATE" "$calendar_version" \
+       --reviewed-head "$reviewed" --no-edit >"$output" 2>&1; then
+    fail 'reviewed resume accepted changed descendant recovery contents'
+  fi
+  grep -q 'selected recovery commit changes reviewed content' "$output" ||
+    fail 'reviewed recovery did not reject the selected changed tree'
+  ! git --git-dir="$RECOVERY_ORIGIN" show-ref --verify --quiet "refs/tags/v$calendar_version" ||
+    fail 'reviewed descendant recovery still tagged'
+}
+
 test_interrupted_calendar_descendant_recovery() {
   local calendar_version next_day output later_branch legacy_oid divergent_oid legacy_tag
   local index mutation fixture blob_oid
@@ -2232,6 +2249,12 @@ test_calendar_release_and_rejections() {
 }
 
 write_fake_commands "$TMP_ROOT/fake-bin"
+if [[ "${1:-}" == '--reviewed-recovery' ]]; then
+  test_reviewed_resume_rejects_descendant_recovery
+  echo 'test-release: reviewed recovery ok'
+  exit 0
+fi
+test_reviewed_resume_rejects_descendant_recovery
 test_prepare_and_reviewed_resume
 test_reviewed_resume_rejects_main_advance
 if [[ "${1:-}" == '--prepare-review' ]]; then
