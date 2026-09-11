@@ -46,6 +46,7 @@ RECOVERY_RECEIPT_DIR='scripts/release/recovery'
 CALENDAR_RECOVERY_MERGE_OID=''
 AUDITED_RELEASE_RECOVERY_MERGE_OID=''
 AUDITED_RELEASE_RECOVERY_RECEIPT_OID=''
+RELEASE_TAG_FETCH_BATCH_SIZE=64
 
 fail() {
   echo "error: $*" >&2
@@ -90,6 +91,113 @@ fetch_origin_release_tag_commit() {
   printf '%s\n' "$fetched_oid"
 }
 
+snapshot_origin_release_tag_refs() {
+  local output="$1" raw="$2" normalized="$3"
+  local oid ref extra tag filtered
+
+  if ! git ls-remote --tags origin > "$raw"; then
+    fail "could not snapshot origin release tags"
+  fi
+  : > "$normalized"
+  while IFS=$'\t' read -r oid ref extra; do
+    [[ -n "$oid" && -n "$ref" && -z "$extra" &&
+       "$oid" =~ ^[0-9a-f]{40}$ && "$ref" == refs/tags/* ]] ||
+      fail "origin tag snapshot contains a malformed ref"
+    tag="${ref#refs/tags/}"
+    tag="${tag%\^\{\}}"
+    filtered=$(printf '%s\n' "$tag" | release_version::tag_filter)
+    [[ "$filtered" == "$tag" ]] || continue
+    case "$ref" in
+      *'^{}') printf '%s\tpeeled\t%s\n' "$tag" "$oid" >> "$normalized" ;;
+      *) printf '%s\tdirect\t%s\n' "$tag" "$oid" >> "$normalized" ;;
+    esac
+  done < "$raw"
+
+  awk -F '\t' '
+    $2 == "direct" {
+      if ($1 in direct) bad = 1
+      direct[$1] = $3
+      tags[$1] = 1
+      next
+    }
+    $2 == "peeled" {
+      if ($1 in peeled) bad = 1
+      peeled[$1] = $3
+      tags[$1] = 1
+      next
+    }
+    { bad = 1 }
+    END {
+      for (tag in tags) {
+        if (!(tag in direct)) bad = 1
+        else print tag "\t" direct[tag] "\t" ((tag in peeled) ? peeled[tag] : "-")
+      }
+      if (bad) exit 1
+    }
+  ' "$normalized" | LC_ALL=C sort > "$output" ||
+    fail "origin release-tag snapshot contains contradictory or missing refs"
+}
+
+assert_no_release_tag_after_merge() {
+  local release_merge="$1" audit_dir before after raw normalized
+  local tag remote_object peeled evidence_ref fetched_object fetched_type tag_oid
+  local batch_count=0
+  local -a refspecs=()
+
+  audit_dir=$(mktemp -d "${TMPDIR:-/tmp}/paimos-release-tag-audit.XXXXXX")
+  before="$audit_dir/before"
+  after="$audit_dir/after"
+  raw="$audit_dir/raw"
+  normalized="$audit_dir/normalized"
+  snapshot_origin_release_tag_refs "$before" "$raw" "$normalized"
+  [[ -s "$before" ]] || fail "origin release-tag snapshot is empty"
+
+  while IFS=$'\t' read -r tag remote_object peeled; do
+    refspecs+=("+refs/tags/$tag:refs/paimos/release-origin-tags/$tag")
+    batch_count=$((batch_count + 1))
+    if [[ "$batch_count" -eq "$RELEASE_TAG_FETCH_BATCH_SIZE" ]]; then
+      git fetch --quiet --no-tags origin "${refspecs[@]}" ||
+        fail "could not fetch exact origin release-tag evidence batch"
+      refspecs=()
+      batch_count=0
+    fi
+  done < "$before"
+  if [[ "$batch_count" -gt 0 ]]; then
+    git fetch --quiet --no-tags origin "${refspecs[@]}" ||
+      fail "could not fetch exact origin release-tag evidence batch"
+  fi
+
+  snapshot_origin_release_tag_refs "$after" "$raw" "$normalized"
+  cmp -s "$before" "$after" ||
+    fail "origin release tags moved, disappeared, or appeared during evidence fetch"
+
+  while IFS=$'\t' read -r tag remote_object peeled; do
+    evidence_ref="refs/paimos/release-origin-tags/$tag"
+    fetched_object=$(git rev-parse "$evidence_ref" 2>/dev/null) ||
+      fail "fetched release-tag evidence ref is missing: $tag"
+    [[ "$fetched_object" == "$remote_object" ]] ||
+      fail "fetched release tag differs from exact origin ref: $tag"
+    fetched_type=$(git cat-file -t "$fetched_object" 2>/dev/null) ||
+      fail "fetched release tag has no readable object: $tag"
+    if [[ "$peeled" == "-" ]]; then
+      [[ "$fetched_type" == "commit" ]] ||
+        fail "origin release tag is missing commit peel evidence: $tag"
+      tag_oid="$fetched_object"
+    else
+      [[ "$fetched_type" == "tag" ]] ||
+        fail "origin release tag has contradictory peel evidence: $tag"
+      tag_oid=$(git rev-parse "$evidence_ref^{commit}" 2>/dev/null) ||
+        fail "origin release tag does not resolve to a commit: $tag"
+      [[ "$tag_oid" == "$peeled" ]] ||
+        fail "fetched release tag peel differs from exact origin ref: $tag"
+    fi
+    [[ "$tag" == "$NEW_TAG" ]] && continue
+    git merge-base --is-ancestor "$tag_oid" "$release_merge" ||
+      fail "origin release tag is newer than or divergent from the interrupted release merge: $tag"
+  done < "$after"
+  rm -rf "$audit_dir"
+}
+
 assert_origin_calendar_recut_evidence() {
   local version="$1" existing_tags="$2" day tag stripped fetched_oid
   local evidence_count=0
@@ -109,17 +217,6 @@ assert_origin_calendar_recut_evidence() {
   done <<<"$existing_tags"
   (( evidence_count > 0 )) ||
     fail "calendar recut has no authoritative prior same-day release on origin"
-}
-
-assert_no_release_tag_after_merge() {
-  local release_merge="$1" tag tag_oid existing_tags
-  existing_tags=$(origin_release_tags)
-  while IFS= read -r tag; do
-    [[ -n "$tag" && "$tag" != "$NEW_TAG" ]] || continue
-    tag_oid=$(fetch_origin_release_tag_commit "$tag")
-    git merge-base --is-ancestor "$tag_oid" "$release_merge" ||
-      fail "origin release tag is newer than or divergent from the interrupted release merge: $tag"
-  done <<<"$existing_tags"
 }
 
 assert_exact_calendar_recovery_main() {
@@ -969,6 +1066,9 @@ tag_release_merge() {
       assert_release_recovery_receipt "$PR_JSON"
       assert_audited_release_recovery_main "$merge_oid"
     fi
+    # Every blocking remote audit is complete. Read the real cut-day clock as
+    # the final operation before materializing an absent calendar tag.
+    assert_calendar_cut_day "creating absent tag $NEW_TAG after remote audit"
     git tag -a --no-sign "$NEW_TAG" "$merge_oid" -m "release $NEW"
     echo "Created $NEW_TAG at protected-main commit $merge_oid."
     git push origin "refs/tags/$NEW_TAG"
