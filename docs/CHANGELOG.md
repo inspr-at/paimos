@@ -9,6 +9,18 @@ Semantic Versioning (`x.y.z`, until 5.21.0), INSPR calendar v1
 (`YYMMDDhhmmss.0.0`, the UTC reservation second as a SemVer-shaped
 coordinate, from the first entry below that form).
 
+## [260911125749.0.0] — 2026-09-11
+
+### Changed — Offer brand dots (PAI-1007)
+
+- Reuse one three-circle brand mark beside the offer title and Roman section headings, keeping the circles identical, round and aligned with the heading text.
+- Show a smaller grey variant before the unchanged footer logotype while preserving pagination, accessible heading names and sender-specific footers.
+
+### Changed — Release backend assurance scheduling (PAI-1003)
+
+- Run exhaustive backend assurance nightly and for the exact immutable release merge before tagging instead of repeating it after every main merge.
+- Keep release publication fail-closed on successful full execution for the exact release commit.
+
 ## [260911121105.0.0] — 2026-09-11
 
 ### Changed — Compact offer editor (PAI-991)
