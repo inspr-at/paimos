@@ -88,7 +88,7 @@ jobs:
           # Bump deliberately when govulncheck flags the standard library.
           cache-dependency-path: backend/go.sum
 
-      - name: Backend — vet
+      - name: Backend - vet
         working-directory: backend
         run: go vet ./...
 
@@ -110,7 +110,7 @@ jobs:
           go-version: '1.26.6'
           cache-dependency-path: backend/go.sum
 
-      - name: Backend — affected package tests
+      - name: Backend - affected package tests
         working-directory: backend
         env:
           selection: ${{ needs.backend-pr-plan.outputs.selection }}
@@ -135,7 +135,7 @@ jobs:
           go-version: '1.26.6'
           cache-dependency-path: backend/go.sum
 
-      - name: Backend — affected DB tests (four isolated shards)
+      - name: Backend - affected DB tests (four isolated shards)
         working-directory: backend
         env:
           selection: ${{ needs.backend-pr-plan.outputs.selection }}
@@ -164,7 +164,7 @@ jobs:
           go-version: '1.26.6'
           cache-dependency-path: backend/go.sum
 
-      - name: Backend — affected handler tests (five isolated shards)
+      - name: Backend - affected handler tests (five isolated shards)
         working-directory: backend
         env:
           selection: ${{ needs.backend-pr-plan.outputs.selection }}
@@ -192,7 +192,7 @@ jobs:
       # This unchanged five-second SLO must run on an otherwise-idle runner.
       # Package contention invalidates the measurement; the affected lane runs
       # the parent test's other subtests and excludes only this exact duplicate.
-      - name: Backend — isolated Agent Mode performance contract
+      - name: Backend - isolated Agent Mode performance contract
         working-directory: backend
         env:
           selection: ${{ needs.backend-pr-plan.outputs.selection }}
@@ -221,15 +221,16 @@ jobs:
           go-version: '1.26.6'
           cache-dependency-path: backend/go.sum
 
-      - name: Backend — directly changed package race (four isolated package shards)
+      - name: Backend - affected package race (four isolated package shards)
         working-directory: backend
         env:
-          selection: ${{ needs.backend-pr-plan.outputs.direct_selection }}
+          selection: ${{ needs.backend-pr-plan.outputs.selection }}
+          direct_selection: ${{ needs.backend-pr-plan.outputs.direct_selection }}
         run: |
           set -euo pipefail
           [[ -n "$selection" ]]
           mapfile -t packages <<<"$selection"
-          ../scripts/backend-pr-race.sh --lane=affected --shard="${{ matrix.shard }}/4" "${packages[@]}"
+          ../scripts/backend-pr-race.sh --lane=affected --shard="${{ matrix.shard }}/4" --direct-packages="$direct_selection" "${packages[@]}"
 
   backend-pr-managedharness-race:
     needs: backend-pr-plan
@@ -249,15 +250,16 @@ jobs:
           go-version: '1.26.6'
           cache-dependency-path: backend/go.sum
 
-      - name: Backend — managed-harness race contracts (seven isolated oracle shards)
+      - name: Backend - managed-harness race contracts (seven isolated oracle shards)
         working-directory: backend
         env:
-          selection: ${{ needs.backend-pr-plan.outputs.direct_selection }}
+          selection: ${{ needs.backend-pr-plan.outputs.selection }}
+          direct_selection: ${{ needs.backend-pr-plan.outputs.direct_selection }}
         run: |
           set -euo pipefail
           [[ -n "$selection" ]]
           mapfile -t packages <<<"$selection"
-          ../scripts/backend-pr-race.sh --lane=managedharness --shard="${{ matrix.shard }}/7" "${packages[@]}"
+          ../scripts/backend-pr-race.sh --lane=managedharness --shard="${{ matrix.shard }}/7" --direct-packages="$direct_selection" "${packages[@]}"
 
   backend-pr-db-race:
     needs: backend-pr-plan
@@ -273,15 +275,16 @@ jobs:
           go-version: '1.26.6'
           cache-dependency-path: backend/go.sum
 
-      - name: Backend — directly changed DB race contracts
+      - name: Backend - affected DB race contracts
         working-directory: backend
         env:
-          selection: ${{ needs.backend-pr-plan.outputs.direct_selection }}
+          selection: ${{ needs.backend-pr-plan.outputs.selection }}
+          direct_selection: ${{ needs.backend-pr-plan.outputs.direct_selection }}
         run: |
           set -euo pipefail
           [[ -n "$selection" ]]
           mapfile -t packages <<<"$selection"
-          ../scripts/backend-pr-race.sh --lane=db "${packages[@]}"
+          ../scripts/backend-pr-race.sh --lane=db --direct-packages="$direct_selection" "${packages[@]}"
 
   backend-pr-handlers-race:
     needs: backend-pr-plan
@@ -301,15 +304,16 @@ jobs:
           go-version: '1.26.6'
           cache-dependency-path: backend/go.sum
 
-      - name: Backend — directly changed handler race contracts (five isolated shards)
+      - name: Backend - affected handler race contracts (five isolated shards)
         working-directory: backend
         env:
-          selection: ${{ needs.backend-pr-plan.outputs.direct_selection }}
+          selection: ${{ needs.backend-pr-plan.outputs.selection }}
+          direct_selection: ${{ needs.backend-pr-plan.outputs.direct_selection }}
         run: |
           set -euo pipefail
           [[ -n "$selection" ]]
           mapfile -t packages <<<"$selection"
-          ../scripts/backend-pr-race.sh --lane=handlers --shard="${{ matrix.shard }}/5" "${packages[@]}"
+          ../scripts/backend-pr-race.sh --lane=handlers --shard="${{ matrix.shard }}/5" --direct-packages="$direct_selection" "${packages[@]}"
 
   backend-security-invariants:
     if: github.event_name == 'pull_request'
@@ -332,18 +336,19 @@ jobs:
           go test -tags paimos_test_unsupported -count=1 ./cmd/paimos -run '^TestUnsupportedPlatformProcessOwnershipFailsClosed$'
           go test -tags paimos_test_unsupported -count=1 ./agentd ./agentdwire ./ownedprocess -run '^TestUnsupportedPlatform'
 
-  # Main and tag pushes skip the PR matrices, but publishing must still wait
-  # for executable backend/platform assurance on the exact image source head.
+  # Release tags require completed exact-code evidence. Main reuses strict,
+  # up-to-date PR checks and allocates no cross-workflow polling runner.
   backend-publish-invariants:
-    if: github.event_name == 'push'
+    if: github.event_name == 'push' && github.ref_type == 'tag'
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v5
 
       - name: Require exhaustive backend assurance for this exact publish head
         env:
           GH_TOKEN: ${{ github.token }}
-        run: ./scripts/wait-backend-full.sh "$GITHUB_SHA"
+        run: ./scripts/wait-backend-full.sh --check "$GITHUB_SHA"
 
   quality:
     if: github.event_name == 'pull_request'
@@ -556,7 +561,12 @@ jobs:
             [[ "$BACKEND_PR_DB_RACE" == 'skipped' ]] || exit 1
             [[ "$BACKEND_PR_HANDLERS_RACE" == 'skipped' ]] || exit 1
             [[ "$BACKEND_SECURITY_INVARIANTS" == 'skipped' ]] || exit 1
-            [[ "$BACKEND_PUBLISH_INVARIANTS" == 'success' ]] || exit 1
+            if [[ "$GITHUB_REF_TYPE" == 'tag' ]]; then
+              [[ "$BACKEND_PUBLISH_INVARIANTS" == 'success' ]] || exit 1
+            else
+              [[ "$GITHUB_REF" == 'refs/heads/main' ]] || exit 1
+              [[ "$BACKEND_PUBLISH_INVARIANTS" == 'skipped' ]] || exit 1
+            fi
           fi
           if [[ "$EVENT_NAME" == 'push' ]]; then
             [[ "$QUALITY" == 'skipped' ]] || exit 1

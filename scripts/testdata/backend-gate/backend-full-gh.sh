@@ -4,7 +4,7 @@ set -euo pipefail
 if [[ "$*" == *'run view 1'* && "$*" == *'--json jobs'* ]]; then
   case "${FAKE_BACKEND_FULL_MODE:?}" in
     success)
-      printf '{"jobs":[{"name":"backend-full","status":"completed","conclusion":"success"}]}\n'
+      printf '{"jobs":[{"name":"backend-full-authorize","status":"completed","conclusion":"success"},{"name":"backend-full-serial","status":"completed","conclusion":"success"},{"name":"backend-full","status":"completed","conclusion":"success"},{"name":"backend-full-race (core)","status":"completed","conclusion":"success"},{"name":"backend-full-race (handlers)","status":"completed","conclusion":"success"},{"name":"backend-full-race (runtime)","status":"completed","conclusion":"success"}]}\n'
       ;;
     skipped)
       printf '{"jobs":[{"name":"backend-full","status":"completed","conclusion":"skipped"}]}\n'
@@ -15,20 +15,20 @@ if [[ "$*" == *'run view 1'* && "$*" == *'--json jobs'* ]]; then
 fi
 
 [[ "$*" == *'run list'* && "$*" == *'--workflow backend-full.yml'* &&
-  "$*" == *"--commit ${FAKE_HEAD_SHA:?}"* ]] || exit 47
+  ( "$*" == *"--commit ${FAKE_HEAD_SHA:?}"* || "$*" == *'--event workflow_dispatch --branch main'* ) ]] || exit 47
 
 case "${FAKE_BACKEND_FULL_MODE:?}" in
   success)
-    printf '[{"databaseId":1,"headSha":"%s","status":"completed","conclusion":"success","url":"https://example.test/1"}]\n' "$FAKE_HEAD_SHA"
+    printf '[{"event":"schedule","headBranch":"main","databaseId":1,"headSha":"%s","status":"completed","conclusion":"success","url":"https://example.test/1"}]\n' "$FAKE_HEAD_SHA"
     ;;
   skipped)
-    printf '[{"databaseId":1,"headSha":"%s","status":"completed","conclusion":"success","url":"https://example.test/1"}]\n' "$FAKE_HEAD_SHA"
+    printf '[{"event":"schedule","headBranch":"main","databaseId":1,"headSha":"%s","status":"completed","conclusion":"success","url":"https://example.test/1"}]\n' "$FAKE_HEAD_SHA"
     ;;
   failed)
-    printf '[{"databaseId":2,"headSha":"%s","status":"completed","conclusion":"failure","url":"https://example.test/2"}]\n' "$FAKE_HEAD_SHA"
+    printf '[{"event":"schedule","headBranch":"main","databaseId":2,"headSha":"%s","status":"completed","conclusion":"failure","url":"https://example.test/2"}]\n' "$FAKE_HEAD_SHA"
     ;;
   wrong-head)
-    printf '[{"databaseId":3,"headSha":"0000000000000000000000000000000000000000","status":"completed","conclusion":"success","url":"https://example.test/3"},{"databaseId":4,"headSha":"%s","status":"completed","conclusion":"failure","url":"https://example.test/4"}]\n' "$FAKE_HEAD_SHA"
+    printf '[{"event":"schedule","headBranch":"main","databaseId":3,"headSha":"0000000000000000000000000000000000000000","status":"completed","conclusion":"success","url":"https://example.test/3"},{"event":"schedule","headBranch":"main","databaseId":4,"headSha":"%s","status":"completed","conclusion":"failure","url":"https://example.test/4"}]\n' "$FAKE_HEAD_SHA"
     ;;
   *) exit 48 ;;
 esac

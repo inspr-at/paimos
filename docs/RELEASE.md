@@ -12,19 +12,15 @@ produces the container image and supply-chain evidence,
 (PAI-99) produces the signed CLI binaries. They execute independently; both
 must succeed for a release to be fully published. Before creating the tag, the
 release script requires a successful [`backend-full.yml`](../.github/workflows/backend-full.yml)
-run for the exact protected-main merge. For main pushes changing only
-`frontend/src/`, `frontend/public/`, `README.md`, `VERSION`, `docs/CHANGELOG.md`
-or `docs/INSTALL.md`, it may reuse an ancestral successful hosted run whose
-serial/platform and all three broad-race jobs actually executed successfully.
-The entire diff is checked; skipped/reused suites cannot form evidence chains.
-The source commit and run are recorded in the workflow summary. Unknown paths,
-backend/build/dependency/test-policy changes or missing evidence run the full
-suites. Nightly, manual and explicit PR runs always execute them. This keeps
-frontend iterations short without changing publication smoke, frontend checks,
-signatures or deployment controls. The first policy change itself requires a
-new full baseline; it does not shortcut a release already in progress.
-The short `TestAgentIntercom` documentation contracts still run at the current
-head because those backend tests read the allowlisted README/INSTALL files.
+run for the exact code being tagged, including successful serial/platform and
+all three broad-race jobs. Ordinary merges to main start no full backend run
+and allocate no polling runner. Main publishes after its normal image pipeline
+and live vulnerability scans, reusing the strict, up-to-date required PR checks.
+
+Full backend execution runs nightly on main, by manual dispatch, or through the
+explicit PR evidence label. Every such run executes the suites; there is no
+frontend-only or ancestral reuse shortcut. Nightly failures fail the workflow.
+The documentation contracts are included in the full serial suite.
 
 The full serial/platform and broad-race jobs run in parallel and are not duplicated on the
 identical tag commit. Applying the explicit `backend-full-evidence` label is the
@@ -171,6 +167,27 @@ The script never pushes `main` or uses a ruleset bypass. It creates or reuses
 `release/v<release-version>`, opens one PR against `main`, enables protected squash
 auto-merge, and tags the merge commit returned for that PR. If another change
 lands on `main` later, it is not accidentally included in the release tag.
+
+After validating the protected merge and selecting the exact tag commit,
+`release.sh` looks for completed full execution of that code. If none exists
+and no run is in progress, it dispatches `backend-full.yml` from main with
+`target_sha` set to that immutable commit. The workflow verifies that the target
+is on main's history and checks it out in every serial/race job. Its run title
+records the target because GitHub's dispatch `headSha` describes the workflow
+ref, which can advance beyond the release commit.
+
+Only the operator's `release.sh` process polls, with the existing 100-minute
+budget. Failed, cancelled, skipped, malformed, or wrong-code evidence prevents
+tag creation. A failed run must be rerun successfully before resuming the same
+release; existing active or green evidence is reused without another dispatch.
+The operator needs Actions write permission to dispatch. All existing release
+file, DCO, protected merge, tree, recovery, cut-day, and tag drift checks remain.
+
+The tag publish job calls `wait-backend-full.sh --check` once and fails immediately
+if actual full execution is missing. It never waits for another workflow. For
+an interrupted pre-tag verification, rerun the same explicit release command or
+run `scripts/wait-backend-full.sh --dispatch <exact-commit-sha>` locally. This does
+not create a tag; `release.sh` still performs all tag authorization checks.
 
 For agent / non-TTY runs, the reviewed CHANGELOG content must already exist
 (the script refuses to commit its generated TODO stub). When current `main`
