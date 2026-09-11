@@ -11,10 +11,15 @@ import OfferTable from './OfferTable.vue'
 import OfferAcceptance from './OfferAcceptance.vue'
 import OfferFootmark from './OfferFootmark.vue'
 import { date, type Offer } from './types'
-const props = defineProps<{ offer: Pick<Offer, 'offer_no' | 'document'>; editable?: boolean; publicUrl?: string }>()
+const props = defineProps<{
+  offer: Pick<Offer, 'offer_no' | 'document'>
+  editable?: boolean
+  publicUrl?: string
+}>()
 const emit = defineEmits<{ overflow: [message: string]; change: [] }>()
 type Page = {
   kind: 'cover' | 'terms' | 'positions'
+  heading?: 'terms' | 'positions'
   blocks: number[]
   positions: number[]
   acceptance: boolean
@@ -33,6 +38,10 @@ async function paginate() {
   const available = (probe.value?.getBoundingClientRect().height ?? 0) - 12
   if (!root || available <= 0) return
   const height = (s: string) => root.querySelector(s)?.getBoundingClientRect().height ?? 0
+  const termsHeadingHeight = height('[data-section-heading="terms"]')
+  const positionsHeadingHeight = height('[data-section-heading="positions"]')
+  const tableHeaderHeight = height('.offer-table thead') + 12
+  const continuationInset = height('[data-page-inset]')
   const next: Page[] = [{ kind: 'cover', blocks: [], positions: [], acceptance: false }]
   let remaining = available - height('.offer-cover')
   let error =
@@ -41,14 +50,16 @@ async function paginate() {
       : ''
   for (const [i] of props.offer.document.blocks.entries()) {
     const h = height(`[data-block="${i}"]`) + 17
-    if (h > available - 70)
+    const headingHeight = i === 0 ? termsHeadingHeight : 0
+    if (h + (headingHeight || continuationInset) > available)
       error = `Textbaustein ${i + 1} ist länger als eine Seite. Bitte kürzen oder auf mehrere Bausteine verteilen.`
-    if (h > remaining) {
+    if (h + headingHeight > remaining) {
       next.push({ kind: 'terms', blocks: [], positions: [], acceptance: false })
-      remaining = available - 70
+      remaining = available - (headingHeight ? 0 : continuationInset)
     }
+    if (i === 0) next[next.length - 1]!.heading = 'terms'
     next[next.length - 1]!.blocks.push(i)
-    remaining -= h
+    remaining -= h + headingHeight
   }
   const positionPage = (): Page => ({
     kind: 'positions',
@@ -57,20 +68,22 @@ async function paginate() {
     acceptance: false,
   })
   next.push(positionPage())
-  remaining = available - 90
+  next[next.length - 1]!.heading = 'positions'
+  remaining = available - positionsHeadingHeight - tableHeaderHeight
   for (const [i] of props.offer.document.positions.entries()) {
     const h = height(`[data-position="${i}"]`) + 2
-    if (h > available - 90)
+    if (h > available - tableHeaderHeight - (i === 0 ? positionsHeadingHeight : continuationInset))
       error = `Position ${i + 1} ist länger als eine Seite. Bitte die Beschreibung auf mehrere Positionen verteilen.`
-    if (h > remaining) {
+    if (h > remaining && i > 0) {
       next.push(positionPage())
-      remaining = available - 90
+      remaining = available - continuationInset - tableHeaderHeight
     }
     next[next.length - 1]!.positions.push(i)
     remaining -= h
   }
   const acceptanceHeight = height('.offer-acceptance') + 28
-  if (acceptanceHeight > available - 90) error = 'Der Annahmetext ist zu lang. Bitte kürzen.'
+  if (acceptanceHeight > available - continuationInset)
+    error = 'Der Annahmetext ist zu lang. Bitte kürzen.'
   if (acceptanceHeight > remaining) next.push(positionPage())
   next[next.length - 1]!.acceptance = true
   if (JSON.stringify(next) !== JSON.stringify(pages.value)) pages.value = next
@@ -113,6 +126,11 @@ defineExpose({ paginate })
       </section>
       <div ref="measure" class="offer-measure-content">
         <OfferCover :offer="offer" />
+        <div class="page-continuation" data-page-inset />
+        <h2 class="section-heading" data-section-heading="terms">I. BEDINGUNGEN</h2>
+        <h2 class="section-heading" data-section-heading="positions">
+          {{ offer.document.blocks.length ? 'II.' : 'I.' }} LEISTUNGSAUFSTELLUNG
+        </h2>
         <div v-for="(block, i) in offer.document.blocks" :key="i" class="sec" :data-block="i">
           <span class="n">{{ i + 1 }}</span>
           <h3>{{ block.heading }}</h3>
@@ -136,12 +154,15 @@ defineExpose({ paginate })
           <span class="right">{{ date(offer.document.offer_date) }}</span>
         </div>
         <div class="page-content">
+          <div v-if="index > 0 && !page.heading" class="page-continuation" />
           <OfferCover v-if="page.kind === 'cover'" :offer="offer" :editable="editable" />
-          <div v-else class="top">
-            <div class="word">
-              {{ page.kind === 'terms' ? 'BEDINGUNGEN' : 'LEISTUNGSAUFSTELLUNG' }}
-            </div>
-          </div>
+          <h2 v-if="page.heading" class="section-heading">
+            {{
+              page.heading === 'terms'
+                ? 'I. BEDINGUNGEN'
+                : `${offer.document.blocks.length ? 'II.' : 'I.'} LEISTUNGSAUFSTELLUNG`
+            }}
+          </h2>
           <div v-if="page.blocks.length" class="sections">
             <div v-for="i in page.blocks" :key="i" class="sec">
               <span class="n">{{ i + 1 }}</span
@@ -167,7 +188,12 @@ defineExpose({ paginate })
             @move="move"
             @change="emit('change')"
           />
-          <OfferAcceptance v-if="page.acceptance" :document="offer.document" :public-url="publicUrl" :editable="editable" />
+          <OfferAcceptance
+            v-if="page.acceptance"
+            :document="offer.document"
+            :public-url="publicUrl"
+            :editable="editable"
+          />
         </div>
         <div class="ftr">
           <span>{{ offer.offer_no }}</span
