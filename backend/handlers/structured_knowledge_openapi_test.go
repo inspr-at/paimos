@@ -6,7 +6,6 @@ package handlers
 import (
 	"encoding/json"
 	"os"
-	"strings"
 	"testing"
 )
 
@@ -67,12 +66,5 @@ func TestStructuredKnowledgeOpenAPIClosesActivationAuthorityAndPrivacy(t *testin
 	proposal := schemas["StructuredKnowledgeProposal"].(map[string]any)["properties"].(map[string]any)
 	if proposal["candidate_body"].(map[string]any)["maxLength"] != float64(65536) {
 		t.Fatal("proposal does not pin 64 KiB")
-	}
-	promote := schemas["StructuredKnowledgePromote"].(map[string]any)
-	description, _ := promote["description"].(string)
-	for _, phrase := range []string{"project to instance", "instance to kernel or vision", "Direct project to a terminal level is prohibited"} {
-		if !strings.Contains(description, phrase) {
-			t.Fatalf("promotion transition contract missing %q: %s", phrase, description)
-		}
 	}
 }

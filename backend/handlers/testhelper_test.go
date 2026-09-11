@@ -35,6 +35,7 @@ import (
 	"github.com/inspr-at/paimos/backend/handlers"
 	"github.com/inspr-at/paimos/backend/handlers/knowledge"
 	"github.com/inspr-at/paimos/backend/httpcontract"
+	"github.com/inspr-at/paimos/backend/internal/testdb"
 	"github.com/inspr-at/paimos/backend/publicbase"
 
 	_ "modernc.org/sqlite"
@@ -48,17 +49,18 @@ type testServer struct {
 	externalCookie string
 }
 
-// newTestServer opens an isolated temporary SQLite DB from a closed current-schema
-// clone, seeds admin + member users, wires the real router, and starts an httptest.Server.
+// newTestServer opens an isolated copy of the migrated SQLite template, seeds
+// admin + member users, wires the real router, and starts an httptest.Server.
 func newTestServer(t *testing.T) *testServer {
 	t.Helper()
 
 	// Keep every test process on its own temporary SQLite DSN and restore the
 	// environment during cleanup, including when a test fails early.
-	// Copy a closed current-schema snapshot so each case does not re-apply all
-	// migrations; db.Open still installs hooks, pool settings, and skip checks.
-	prepareIsolatedMigratedDir(t)
+	t.Setenv("DATA_DIR", t.TempDir())
+	// Retain the existing test-mode connection behavior.
+	t.Setenv("PAIMOS_TEST_MODE", "1")
 
+	testdb.Prepare(t)
 	if err := db.Open(); err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}
@@ -70,7 +72,7 @@ func newTestServer(t *testing.T) *testServer {
 	})
 
 	// Seed admin user.
-	adminHash, _ := auth.HashPassword("adminpass")
+	adminHash := bcryptHash(t, "adminpass")
 	adminRes, _ := db.DB.Exec("INSERT INTO users(username,password,role,status) VALUES(?,?,?,?)", "admin", adminHash, "admin", "active")
 	if adminRes != nil {
 		if id, _ := adminRes.LastInsertId(); id > 0 {
@@ -79,7 +81,7 @@ func newTestServer(t *testing.T) *testServer {
 	}
 
 	// Seed member user.
-	memberHash, _ := auth.HashPassword("memberpass")
+	memberHash := bcryptHash(t, "memberpass")
 	memberRes, _ := db.DB.Exec("INSERT INTO users(username,password,role,status) VALUES(?,?,?,?)", "member", memberHash, "member", "active")
 	if memberRes != nil {
 		if id, _ := memberRes.LastInsertId(); id > 0 {
@@ -88,7 +90,7 @@ func newTestServer(t *testing.T) *testServer {
 	}
 
 	// Seed external user. Externals are not auto-seeded — access is granted per-project.
-	externalHash, _ := auth.HashPassword("externalpass")
+	externalHash := bcryptHash(t, "externalpass")
 	db.DB.Exec("INSERT INTO users(username,password,role,status) VALUES(?,?,?,?)", "external", externalHash, "external", "active")
 
 	// Seed a global tag.
@@ -118,6 +120,7 @@ func buildRouter() http.Handler {
 	r.Use(handlers.ClassifiedControlCachePolicyMiddleware)
 	r.Use(handlers.ControlAwareRecoverer)
 	r.Use(publicbase.RejectOutsideAndStrip(publicbase.Current()))
+	r.Use(handlers.OfferPrivacyMiddleware)
 	r.Use(handlers.SessionAuditMiddleware) // PAI-97 — off unless PAIMOS_AUDIT_SESSIONS=true
 	r.Use(handlers.RequestIDMiddleware)
 
@@ -129,6 +132,7 @@ func buildRouter() http.Handler {
 
 		// Public whitelist — mirrors main.go exactly. ACME-1 relies
 		// on this list being minimal.
+		handlers.RegisterPublicOfferRoutes(r)
 		r.Get("/branding", handlers.GetBranding)
 		r.Post("/auth/login", auth.LoginHandler)
 		r.Post("/auth/forgot", handlers.ForgotPassword)
@@ -524,6 +528,14 @@ func buildRouter() http.Handler {
 			// PAI-980: instance-level CRM module switch — mirrors main.go.
 			r.With(auth.RequireAdmin).Get("/integrations/crm/module", handlers.GetCRMModule)
 			r.With(auth.RequireAdmin).Put("/integrations/crm/module", handlers.PutCRMModule)
+			r.With(auth.RequireAdmin).Get("/integrations/crm/offers", handlers.GetOfferSettings)
+			r.With(auth.RequireAdmin).Put("/integrations/crm/offers", handlers.PutOfferSettings)
+			r.Get("/customers/{id}/offers", handlers.ListCustomerOffers)
+			r.Get("/offers/acceptances", handlers.ListOfferAcceptances)
+			r.With(auth.RequireAdmin).Post("/offers/{id}/link", handlers.CreateOfferLink)
+			r.Get("/offers/{id}", handlers.GetOffer)
+			r.With(auth.RequireAdmin).Post("/offers", handlers.CreateOffer)
+			r.With(auth.RequireAdmin).Put("/offers/{id}", handlers.PutOffer)
 
 			// Incident log
 			r.With(auth.RequireAdmin).Get("/incidents/export", handlers.ExportIncidents)
@@ -540,6 +552,7 @@ func buildRouter() http.Handler {
 			r.Get("/customers/{id}", handlers.GetCustomer)
 			r.With(auth.RequireAdmin).Post("/customers", handlers.CreateCustomer)
 			r.With(auth.RequireAdmin).Put("/customers/{id}", handlers.UpdateCustomer)
+			r.With(auth.RequireAdmin).Post("/customers/{id}/number/reformat", handlers.ReformatCustomerNumber)
 			r.With(auth.RequireAdmin).Delete("/customers/{id}", handlers.DeleteCustomer)
 			r.Get("/customers/{id}/contacts", handlers.ListCustomerContacts)
 			r.With(auth.RequireAdmin).Post("/customers/{id}/contacts", handlers.CreateCustomerContact)

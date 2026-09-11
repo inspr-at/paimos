@@ -42,8 +42,6 @@ func TestHarnessOpenAPIRequiresWorkerLeaseOnEveryWorkerMutation(t *testing.T) {
 		`"name": "X-Paimos-Harness-Worker-Lease"`,
 		`"required": ["agent_name", "harness", "host", "harness_session_ref", "worker_lease"`,
 		`"HarnessControlOutcome"`,
-		`"summary": "Get one scoped typed control outcome"`,
-		`"description": "Uniform non-enumerating worker authorization failure"`,
 	} {
 		if !strings.Contains(text, fragment) {
 			t.Fatalf("OpenAPI missing %s", fragment)

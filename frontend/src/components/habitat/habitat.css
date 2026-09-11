@@ -298,12 +298,6 @@
   letter-spacing: -0.05em;
   text-wrap: balance;
 }
-.habitat-hero p {
-  max-width: 620px;
-  margin: 16px 0 0;
-  color: var(--h-muted);
-  font-size: 16px;
-}
 .habitat-workspace {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 340px;
@@ -686,9 +680,6 @@
   .habitat-root {
     flex-wrap: wrap;
   }
-  .habitat-hero p {
-    font-size: 14px;
-  }
 }
 @media (max-height: 720px) {
   .habitat-inspector {
@@ -972,12 +963,6 @@
   margin: 7px 0 9px;
   text-wrap: initial;
 }
-.habitat-hero p {
-  font-size: 14px;
-  max-width: 700px;
-  margin: 0;
-  line-height: 1.6;
-}
 .habitat-eyebrow {
   font-size: 10px;
   letter-spacing: 0.16em;
@@ -1195,12 +1180,9 @@
   padding-left: 10px;
 }
 .habitat-welcome {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 265px;
-  align-items: center;
-  min-height: 266px;
-  padding: 32px 35px;
-  margin-bottom: 29px;
+  display: block;
+  padding: 24px 28px;
+  margin-bottom: 24px;
   border: 1px solid var(--h-line);
   border-radius: 16px;
   overflow: hidden;
@@ -1225,26 +1207,6 @@
 }
 .habitat-welcome .habitat-actions {
   margin-top: 23px;
-}
-.habitat-welcome-art {
-  position: relative;
-  height: 194px;
-  display: grid;
-  place-items: center;
-  pointer-events: none;
-  overflow: hidden;
-  border: 1px solid var(--h-gold-line);
-  border-radius: 50% 50% 18px 18px;
-  background: var(--paimos-pearl, #f7f6f2);
-  box-shadow:
-    0 14px 28px #204e4d10,
-    0 0 0 7px var(--h-surface);
-}
-.habitat-welcome-art img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  object-position: 50% 52%;
 }
 .habitat-home-columns {
   display: grid;
@@ -1657,11 +1619,7 @@
     padding-inline: 13px;
   }
   .habitat-welcome {
-    grid-template-columns: minmax(0, 1fr) 215px;
-    padding: 29px;
-  }
-  .habitat-welcome-art {
-    transform: scale(0.86);
+    padding: 22px 24px;
   }
   .habitat-overview-source {
     display: none;
@@ -1804,9 +1762,6 @@
     letter-spacing: -0.95px;
     margin-top: 7px;
   }
-  .habitat-hero p {
-    font-size: 13px;
-  }
   .habitat-shell .habitat-view-options {
     font-size: 12px;
   }
@@ -1838,13 +1793,8 @@
     gap: 22px;
   }
   .habitat-welcome {
-    grid-template-columns: minmax(0, 1fr) 185px;
-    padding: 27px;
-    margin-bottom: 27px;
-    min-height: 270px;
-  }
-  .habitat-welcome-art {
-    transform: scale(0.72);
+    padding: 22px 24px;
+    margin-bottom: 22px;
   }
   .habitat-welcome h2 {
     font-size: 27px;
@@ -1903,9 +1853,6 @@
     font-size: 28px;
     letter-spacing: -0.8px;
   }
-  .habitat-hero .habitat-eyebrow {
-    font-size: 9px;
-  }
   .habitat-overview {
     align-items: start;
   }
@@ -1947,9 +1894,6 @@
   .habitat-welcome p {
     max-width: 310px;
     font-size: 13px;
-  }
-  .habitat-welcome-art {
-    display: none;
   }
   .habitat-home-secondary {
     grid-template-columns: minmax(0, 1fr);

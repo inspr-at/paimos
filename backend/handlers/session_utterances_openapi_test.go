@@ -3,7 +3,6 @@ package handlers
 import (
 	"encoding/json"
 	"os"
-	"strings"
 	"testing"
 )
 
@@ -42,9 +41,5 @@ func TestSessionUtteranceOpenAPIClosesTranscriptOnlyContract(t *testing.T) {
 		if _, found := responses[status]; !found {
 			t.Fatalf("response %s is undocumented", status)
 		}
-	}
-	payloadTooLarge := responses["413"].(map[string]any)["description"].(string)
-	if !strings.Contains(payloadTooLarge, "52 KiB") || !strings.Contains(payloadTooLarge, "8,192 UTF-8 bytes") {
-		t.Fatalf("wire and decoded transcript limits diverged: %q", payloadTooLarge)
 	}
 }

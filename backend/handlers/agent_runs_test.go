@@ -869,10 +869,7 @@ func seedLiveImplementRunnerAction(t *testing.T, userID, projectID int64, device
 
 func seedMemberUser(t *testing.T, ts *testServer, username, password string) (int64, string) {
 	t.Helper()
-	hash, err := auth.HashPassword(password)
-	if err != nil {
-		t.Fatalf("hash password: %v", err)
-	}
+	hash := bcryptHash(t, password)
 	res, err := db.DB.Exec(
 		`INSERT INTO users(username, password, role, status) VALUES(?,?,?,?)`,
 		username, hash, "member", "active")

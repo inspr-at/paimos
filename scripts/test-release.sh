@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# This suite simulates the operator process, even when run as a CI self-test.
+export GITHUB_ACTIONS=false
 export GIT_CONFIG_NOSYSTEM=1
 export GIT_CONFIG_GLOBAL=/dev/null
 
@@ -17,6 +19,7 @@ IMMEDIATE_AUTO_MERGE_RECOVERY_REASON='canonical_auto_merge_immediate_merge_post_
 PROTECTED_SQUASH_RECOVERY_REASON='protected_squash_merge_missing_auto_merge_provenance'
 IMMEDIATE_RECOVERY_VERSION='5.20.0'
 MANUAL_RECOVERY_VERSION='5.19.0'
+V2_RECOVERY_VERSION='260910221338.0.0'
 
 fail() {
   echo "test-release: $*" >&2
@@ -70,6 +73,9 @@ write_fake_commands() {
 set -euo pipefail
 
 real_git=${REAL_GIT:?}
+if [[ "${1:-}" == "push" && "$*" == *"refs/tags/v${FAKE_RELEASE_VERSION:-1.0.1}"* ]]; then
+  touch "${FAKE_GH_STATE:?}/release-tag-push-attempted"
+fi
 advance_main() {
   local label="$1" advance_work="$FAKE_GH_STATE/$1-advance-work"
   "$real_git" clone -q "${FAKE_GH_ORIGIN:?}" "$advance_work" >/dev/null 2>&1
@@ -82,19 +88,69 @@ advance_main() {
   FAKE_GH_SERVER_MERGE=1 "$real_git" -C "$advance_work" push -q origin main
 }
 
-if [[ ( "${FAKE_ADVANCE_MAIN_DURING_TAG_AUDIT:-0}" == "1" ||
-        "${FAKE_ADVANCE_MAIN_DURING_POST_AUDIT_TAG_QUERY:-0}" == "1" ) &&
-      "$*" == *'refs/paimos/release-origin-tags/'* ]]; then
-  "$real_git" "$@"
-  count_file="${FAKE_GH_STATE:?}/tag-audit-count"
+if [[ "${1:-}" == "ls-remote" && "$*" == "ls-remote --tags origin" ]]; then
+  count_file="${FAKE_GH_STATE:?}/tag-audit-snapshot-count"
   count=0
   [[ ! -f "$count_file" ]] || count=$(<"$count_file")
   count=$((count + 1))
   printf '%s\n' "$count" > "$count_file"
-  if [[ "$count" -eq 2 && "${FAKE_ADVANCE_MAIN_DURING_TAG_AUDIT:-0}" == "1" ]]; then
-    advance_main historical-tag-audit
-  elif [[ "$count" -eq 2 ]]; then
+
+  if [[ "$count" -eq 2 && -f "$FAKE_GH_STATE/tag-audit-mutation" &&
+        ! -f "$FAKE_GH_STATE/tag-audit-mutation-done" ]]; then
+    mutation=$(<"$FAKE_GH_STATE/tag-audit-mutation")
+    case "$mutation" in
+      move) "$real_git" --git-dir="${FAKE_GH_ORIGIN:?}" update-ref refs/tags/v1.0.0 refs/heads/main ;;
+      delete) "$real_git" --git-dir="${FAKE_GH_ORIGIN:?}" update-ref -d refs/tags/v1.0.0 ;;
+      new) "$real_git" --git-dir="${FAKE_GH_ORIGIN:?}" update-ref refs/tags/v4.9.9 refs/heads/main ;;
+      *) exit 65 ;;
+    esac
+    touch "$FAKE_GH_STATE/tag-audit-mutation-done"
+  fi
+  if [[ "$count" -eq 2 && "${FAKE_ADVANCE_MAIN_DURING_POST_AUDIT_TAG_QUERY:-0}" == "1" ]]; then
     touch "$FAKE_GH_STATE/post-audit-tag-query-ready"
+  fi
+  if [[ "$count" -eq 4 && -f "$FAKE_GH_STATE/tag-audit-rollover-utc" ]]; then
+    printf '%s\n' '260911000000' > "$FAKE_GH_STATE/utc-stamp"
+    touch "$FAKE_GH_STATE/tag-audit-rollover-done"
+  fi
+  output=$("$real_git" "$@")
+  if [[ "$count" -le 2 && -f "$FAKE_GH_STATE/tag-audit-snapshot-corruption" ]]; then
+    corruption=$(<"$FAKE_GH_STATE/tag-audit-snapshot-corruption")
+    case "$corruption" in
+      malformed) output="$output
+not-an-object refs/tags/v4.7.7" ;;
+      duplicate)
+        duplicate=$(printf '%s\n' "$output" | awk '$2 == "refs/tags/v1.0.0" { print; exit }')
+        output="$output
+$duplicate"
+        ;;
+      missing-direct) output=$(printf '%s\n' "$output" | awk '$2 != "refs/tags/v1.0.0"') ;;
+      missing-peel) output=$(printf '%s\n' "$output" | awk '$2 != "refs/tags/v1.0.0^{}"') ;;
+      *) exit 66 ;;
+    esac
+  fi
+  [[ -z "$output" ]] || printf '%s\n' "$output"
+  exit 0
+fi
+if [[ "$*" == *'--no-tags origin'* && "$*" == *'refs/paimos/release-origin-tags/'* ]]; then
+  count_file="${FAKE_GH_STATE:?}/tag-audit-fetch-count"
+  count=0
+  [[ ! -f "$count_file" ]] || count=$(<"$count_file")
+  count=$((count + 1))
+  printf '%s\n' "$count" > "$count_file"
+  if [[ -f "$FAKE_GH_STATE/tag-audit-fetch-fail" &&
+        ! -f "$FAKE_GH_STATE/tag-audit-fetch-failed" ]]; then
+    touch "$FAKE_GH_STATE/tag-audit-fetch-failed"
+    exit 1
+  fi
+  "$real_git" "$@"
+  if [[ -f "$FAKE_GH_STATE/tag-audit-incomplete-fetch" &&
+        ! -f "$FAKE_GH_STATE/tag-audit-incomplete-fetch-done" ]]; then
+    "$real_git" update-ref -d refs/paimos/release-origin-tags/v1.0.0
+    touch "$FAKE_GH_STATE/tag-audit-incomplete-fetch-done"
+  fi
+  if [[ "$count" -eq 1 && "${FAKE_ADVANCE_MAIN_DURING_TAG_AUDIT:-0}" == "1" ]]; then
+    advance_main historical-tag-audit
   fi
   exit 0
 fi
@@ -122,6 +178,17 @@ if [[ -n "${FAKE_GH_STATE:-}" && -f "$FAKE_GH_STATE/vienna-date" ]]; then
       printf '20%s-%s-%s\n' "$year" "$month" "$day"
       exit 0
       ;;
+  esac
+fi
+if [[ -n "${FAKE_GH_STATE:-}" && -f "$FAKE_GH_STATE/utc-stamp" ]]; then
+  value=$(<"$FAKE_GH_STATE/utc-stamp")
+  case "$*" in
+    '-u +%y%m%d') printf '%s\n' "${value:0:6}"; exit 0 ;;
+    '-u +%Y-%m-%d')
+      printf '20%s-%s-%s\n' "${value:0:2}" "${value:2:2}" "${value:4:2}"
+      exit 0
+      ;;
+    '-u +%y%m%d%H%M%S') printf '%s\n' "$value"; exit 0 ;;
   esac
 fi
 exec "${REAL_DATE:?}" "$@"
@@ -296,6 +363,12 @@ case "${1:-} ${2:-}" in
         "$check_name" "$state_value" "$bucket"
     fi
     ;;
+  'workflow run')
+    [[ "$*" == *'workflow run backend-full.yml'* && "$*" == *'--ref main'* &&
+       "$*" == *"target_sha=$(<"$state/backend-full-head")"* ]]
+    [[ ! -f "$state/backend-dispatch-failed" ]] || exit 1
+    printf '%s\n' "$(<"$state/backend-full-head")" > "$state/backend-dispatched"
+    ;;
   'run list')
     if [[ "$*" == *'--workflow backend-full.yml'* ]]; then
       head_sha=
@@ -307,8 +380,19 @@ case "${1:-} ${2:-}" in
         fi
         previous=$argument
       done
+      if [[ -z "$head_sha" ]]; then head_sha=$(<"$state/backend-full-head"); fi
       [[ "$head_sha" =~ ^[0-9a-f]{40}$ ]]
       printf '%s\n' "$head_sha" > "$state/backend-full-head"
+      if [[ -f "$state/backend-requires-dispatch" ]]; then
+        if [[ -f "$state/backend-dispatched" && "$*" == *'--event workflow_dispatch'* ]]; then
+          printf '[{"event":"workflow_dispatch","headBranch":"main","databaseId":3,"headSha":"%s","displayTitle":"backend-full %s","status":"completed","conclusion":"success"}]\n' \
+            "$(git --git-dir="$origin" rev-parse refs/heads/main)" "$(<"$state/backend-dispatched")"
+        else
+          printf '[]\n'
+        fi
+        exit 0
+      fi
+      if [[ "$*" == *'--event workflow_dispatch'* ]]; then printf '[]\n'; exit 0; fi
       if [[ "${FAKE_VIENNA_FLIP_AFTER_BACKEND:-0}" == "1" ]]; then
         printf '%s\n' "${FAKE_VIENNA_NEXT_DAY:?}" > "$state/vienna-date"
       fi
@@ -325,7 +409,7 @@ case "${1:-} ${2:-}" in
       fi
       conclusion=success
       [[ ! -f "$state/backend-full-failed" ]] || conclusion=failure
-      printf '[{"databaseId":3,"headSha":"%s","status":"completed","conclusion":"%s","url":"https://example.test/run/backend-full"}]\n' \
+      printf '[{"event":"schedule","headBranch":"main","databaseId":3,"headSha":"%s","status":"completed","conclusion":"%s","url":"https://example.test/run/backend-full"}]\n' \
         "$head_sha" "$conclusion"
     elif printf '%s\n' "$*" | grep -q 'workflowName == \\"release\\"'; then
       [[ "$*" == *"--branch $release_tag"* ]]
@@ -337,7 +421,7 @@ case "${1:-} ${2:-}" in
     ;;
   'run view')
     [[ "$*" == *'run view 3'* && "$*" == *'--json jobs'* ]]
-    printf '{"jobs":[{"name":"backend-full","status":"completed","conclusion":"success"}]}\n'
+    printf '{"jobs":[{"name":"backend-full-authorize","status":"completed","conclusion":"success"},{"name":"backend-full-serial","status":"completed","conclusion":"success"},{"name":"backend-full","status":"completed","conclusion":"success"},{"name":"backend-full-race (core)","status":"completed","conclusion":"success"},{"name":"backend-full-race (handlers)","status":"completed","conclusion":"success"},{"name":"backend-full-race (runtime)","status":"completed","conclusion":"success"}]}\n'
     ;;
   *)
     echo "unexpected fake gh call: $*" >&2
@@ -804,10 +888,22 @@ test_committed_recovery_receipts_are_exact() {
     }
   ' "$ROOT/scripts/release/recovery/v26.09.09.json" >/dev/null ||
     fail 'committed v26.09.09 recovery receipt is missing or drifted'
+
+  jq -e --arg reason "$IMMEDIATE_AUTO_MERGE_RECOVERY_REASON" '
+    . == {
+      schema_version: 1,
+      release: "v260910221338.0.0",
+      pull_request: 281,
+      approved_head: "319fe2e8d7e01047bc3143f9c1157df7152247e9",
+      merge_commit: "7fd67e971ad05e1cda131d02ad687b823edefed7",
+      incident_reason: $reason
+    }
+  ' "$ROOT/scripts/release/recovery/v260910221338.0.0.json" >/dev/null ||
+    fail 'committed v260910221338.0.0 recovery receipt is missing or drifted'
 }
 
 test_calendar_missing_provenance_receipt_recovery() {
-  local version="$1" reason="$2" fixture="$3" expanded="${4:-0}" bad_reason receipt_path wrong_tag_oid
+  local version="$1" reason="$2" fixture="$3" expanded="${4:-0}" bad_reason receipt_path wrong_tag_oid wrong_release
   local repo state origin head merge receipt_work valid_main output
 
   repo=$(setup_repo "$fixture" "v$version")
@@ -816,6 +912,9 @@ test_calendar_missing_provenance_receipt_recovery() {
   prepend_release_notes "$repo" "$version"
   mkdir -p "$state"
   printf '%s\n' "$version" > "$state/vienna-date"
+  if [[ "$version" == "$V2_RECOVERY_VERSION" ]]; then
+    printf '%s\n' '260910235959' > "$state/utc-stamp"
+  fi
   touch "$state/missing-auto-merge-provenance"
 
   output="$TMP_ROOT/$fixture/missing-output"
@@ -850,10 +949,12 @@ test_calendar_missing_provenance_receipt_recovery() {
     'targets PR 2 instead of PR 1' "$version"
 
   if [[ "$expanded" == "1" ]]; then
+    wrong_release=v26.09.08
+    [[ "$version" != "$V2_RECOVERY_VERSION" ]] || wrong_release=v260910221337.0.0
     publish_recovery_receipt "$receipt_work" 'mutate calendar recovery version' \
-      v26.09.08 1 "$head" "$merge" "$reason" "v$version"
+      "$wrong_release" 1 "$head" "$merge" "$reason" "v$version"
     assert_recovery_rejected "$repo" "$state" "$origin" 'a wrong calendar recovery version' \
-      "targets v26.09.08 instead of v$version" "$version"
+      "targets $wrong_release instead of v$version" "$version"
   fi
 
   publish_recovery_receipt "$receipt_work" 'mutate calendar recovery head' \
@@ -895,6 +996,43 @@ test_calendar_missing_provenance_receipt_recovery() {
     assert_recovery_rejected "$repo" "$state" "$origin" 'missing required checks' \
       'approved PR head has missing, pending, or failed required checks' "$version"
     rm "$state/checks-empty"
+    touch "$state/checks-pending"
+    assert_recovery_rejected "$repo" "$state" "$origin" 'pending required checks' \
+      'approved PR head has missing, pending, or failed required checks' "$version"
+    rm "$state/checks-pending"
+    touch "$state/checks-failed"
+    assert_recovery_rejected "$repo" "$state" "$origin" 'failed required checks' \
+      'approved PR head has missing, pending, or failed required checks' "$version"
+    rm "$state/checks-failed"
+
+    if [[ "$version" == "$V2_RECOVERY_VERSION" ]]; then
+      printf '%s\n' '260911000000' > "$state/utc-stamp"
+      assert_recovery_rejected "$repo" "$state" "$origin" \
+        'the exact receipt at the authoritative UTC cutoff' \
+        'v2 coordinate must be today' "$version"
+      printf '%s\n' '260910235959' > "$state/utc-stamp"
+
+      rm -f "$state/tag-audit-snapshot-count" "$state/tag-audit-fetch-count"
+      touch "$state/tag-audit-rollover-utc"
+      output="$TMP_ROOT/$fixture/remote-audit-rollover-output"
+      if FAKE_RELEASE_VERSION="$version" \
+         run_release "$repo" "$state" "$version" --no-edit >"$output" 2>&1; then
+        fail 'calendar-v2 recovery tagged after UTC rolled over during the remote audit'
+      fi
+      [[ -f "$state/tag-audit-rollover-done" ]] ||
+        fail 'calendar-v2 rollover fixture did not advance UTC during the final remote audit'
+      grep -qF "UTC calendar day changed before creating absent tag v$version after remote audit" "$output" ||
+        fail 'calendar-v2 remote-audit rollover rejection was not the final pre-tag clock gate'
+      ! git -C "$repo" show-ref --verify --quiet "refs/tags/v$version" ||
+        fail 'calendar-v2 rollover created a local release tag'
+      ! git --git-dir="$origin" show-ref --verify --quiet "refs/tags/v$version" ||
+        fail 'calendar-v2 rollover pushed a release tag'
+      [[ ! -f "$state/release-tag-push-attempted" ]] ||
+        fail 'calendar-v2 rollover attempted a release-tag push'
+      rm -f "$state/tag-audit-rollover-utc" "$state/tag-audit-rollover-done" \
+        "$state/tag-audit-snapshot-count" "$state/tag-audit-fetch-count"
+      printf '%s\n' '260910235959' > "$state/utc-stamp"
+    fi
 
     wrong_tag_oid=$(git --git-dir="$origin" rev-parse "$merge^")
     git -C "$receipt_work" tag -a --no-sign "v$version" "$wrong_tag_oid" -m 'wrong recovery target'
@@ -989,6 +1127,31 @@ test_exhaustive_backend_failure_blocks_tag_creation() {
     fail 'release queried exhaustive backend assurance for a head other than its protected merge'
 }
 
+test_exhaustive_backend_dispatch_pins_release_after_main_advances() {
+  local repo state origin merge_oid
+  repo=$(setup_repo backend-dispatch)
+  state="$TMP_ROOT/backend-dispatch/gh-state"
+  origin=$(git -C "$repo" remote get-url origin)
+  prepend_release_notes "$repo"
+  mkdir -p "$state"
+  touch "$state/backend-requires-dispatch" "$state/backend-dispatch-failed"
+  if FAKE_GH_ADVANCE_AFTER_MERGE=1 BACKEND_FULL_POLL_SECONDS=0 \
+    run_release "$repo" "$state" patch --no-edit >/dev/null 2>&1; then
+    fail 'failed backend dispatch still created a release tag'
+  fi
+  ! git --git-dir="$origin" show-ref --verify --quiet refs/tags/v1.0.1 ||
+    fail 'failed dispatch published a tag'
+  rm "$state/backend-dispatch-failed"
+  BACKEND_FULL_POLL_SECONDS=0 run_release "$repo" "$state" 1.0.1 --no-edit >/dev/null
+  merge_oid=$(<"$state/merge-oid")
+  [[ "$(<"$state/backend-dispatched")" == "$merge_oid" ]] || fail 'dispatch used moving main instead of tag target'
+  [[ "$(git --git-dir="$origin" rev-parse refs/heads/main)" != "$merge_oid" ]] || fail 'fixture main did not advance'
+  [[ "$(git --git-dir="$origin" rev-parse 'refs/tags/v1.0.1^{}')" == "$merge_oid" ]] || fail 'release tagged moving main'
+  BACKEND_FULL_POLL_SECONDS=0 run_release "$repo" "$state" 1.0.1 --no-edit >/dev/null
+  [[ "$(grep -c '^workflow run backend-full.yml' "$state/calls.log")" -eq 2 ]] ||
+    fail 'resume dispatched again despite green evidence (expected one failure and one success)'
+}
+
 test_unnamed_required_check_is_not_reused_as_green() {
   local repo state output
   repo=$(setup_repo unnamed-required-check)
@@ -1068,6 +1231,74 @@ test_mid_wait_head_mutation_is_rejected() {
   [[ -f "$state/head-mutated" ]] || fail 'head-mutation fixture did not execute'
   ! git --git-dir="$(git -C "$repo" remote get-url origin)" show-ref --verify --quiet refs/tags/v1.0.1 ||
     fail 'release tagged a mutated PR head'
+}
+
+test_prepare_and_reviewed_resume() {
+  local repo state origin head base output
+  repo=$(setup_repo prepare-reviewed)
+  state="$TMP_ROOT/prepare-reviewed/gh-state"
+  origin=$(git -C "$repo" remote get-url origin)
+  base=$(git -C "$repo" rev-parse HEAD)
+  prepend_release_notes "$repo"
+  output="$TMP_ROOT/prepare-reviewed/prepare-output"
+  run_release "$repo" "$state" 1.0.1 --prepare-only --no-edit >"$output"
+  head=$(git -C "$repo" rev-parse HEAD)
+  [[ -z $(git -C "$repo" status --porcelain) ]] || fail 'prepared branch is dirty'
+  tail -n1 "$output" | jq -e --arg head "$head" --arg base "$base" \
+    '.version == "1.0.1" and .head == $head and .base == $base and .branch == "release/v1.0.1"' >/dev/null ||
+    fail 'prepare receipt does not identify the reviewed content'
+  run_release "$repo" "$state" 1.0.1 --prepare-only --no-edit >/dev/null
+  [[ $(git -C "$repo" rev-parse HEAD) == "$head" ]] || fail 'repeat preparation changed commit'
+  ! git --git-dir="$origin" show-ref --verify --quiet refs/heads/release/v1.0.1 || fail 'prepare published branch'
+  ! git --git-dir="$origin" show-ref --verify --quiet refs/tags/v1.0.1 || fail 'prepare published tag'
+  ! grep -q '^pr create' "$state/calls.log" || fail 'prepare created a PR'
+
+  if run_release "$repo" "$state" 1.0.1 --reviewed-head "$base" --no-edit >/dev/null 2>&1; then
+    fail 'resume accepted wrong reviewed head'
+  fi
+  ! git --git-dir="$origin" show-ref --verify --quiet refs/heads/release/v1.0.1 || fail 'wrong review still pushed'
+  run_release "$repo" "$state" 1.0.1 --reviewed-head "$head" --no-edit >/dev/null
+  [[ $(git --git-dir="$origin" rev-parse refs/pull/1/head) == "$head" ]] || fail 'resume changed reviewed commit'
+  [[ $(git --git-dir="$origin" rev-parse 'refs/tags/v1.0.1^{}') == "$(<"$state/merge-oid")" ]] || fail 'resume tagged wrong merge'
+  assert_one_pr "$state"
+  run_release "$repo" "$state" 1.0.1 --reviewed-head "$head" --no-edit >/dev/null
+  assert_one_pr "$state"
+}
+
+test_reviewed_resume_rejects_main_advance() {
+  local repo state origin head phase output
+  for phase in local published; do
+    repo=$(setup_repo "reviewed-advance-$phase")
+    state="$TMP_ROOT/reviewed-advance-$phase/gh-state"
+    origin=$(git -C "$repo" remote get-url origin)
+    prepend_release_notes "$repo"
+    run_release "$repo" "$state" 1.0.1 --prepare-only --no-edit >/dev/null
+    head=$(git -C "$repo" rev-parse HEAD)
+    if [[ "$phase" == published ]]; then
+      if FAKE_GH_DEFER_MERGE=1 RELEASE_MERGE_TIMEOUT=2 \
+         run_release "$repo" "$state" 1.0.1 --reviewed-head "$head" --no-edit >/dev/null 2>&1; then
+        fail 'deferred review fixture unexpectedly merged'
+      fi
+    fi
+    git -C "$repo" switch -q main
+    printf 'concurrent main edit\n' > "$repo/main-only.txt"
+    git -C "$repo" add main-only.txt
+    git -C "$repo" commit -q --no-gpg-sign --signoff -m 'main advances after review'
+    FAKE_GH_SERVER_MERGE=1 git -C "$repo" push -q origin main
+    git -C "$repo" switch -q release/v1.0.1
+    output="$state/advance-output"
+    if run_release "$repo" "$state" 1.0.1 --reviewed-head "$head" --no-edit >"$output" 2>&1; then
+      fail 'reviewed resume accepted advanced main'
+    fi
+    grep -q 'main advanced since release preparation' "$output" || fail 'missing actionable main drift error'
+    [[ $(git -C "$repo" rev-parse HEAD) == "$head" ]] || fail 'reviewed branch was synced'
+    ! git --git-dir="$origin" show-ref --verify --quiet refs/tags/v1.0.1 || fail 'main drift still tagged'
+    if [[ "$phase" == local ]]; then
+      ! git --git-dir="$origin" show-ref --verify --quiet refs/heads/release/v1.0.1 || fail 'main drift still pushed'
+    else
+      [[ $(git --git-dir="$origin" rev-parse refs/heads/release/v1.0.1) == "$head" ]] || fail 'remote review was synced'
+    fi
+  done
 }
 
 test_local_pre_push_interruption_resumes() {
@@ -1542,8 +1773,26 @@ setup_interrupted_calendar_descendant_recovery() {
   RECOVERY_CANDIDATE=$(git -C "$RECOVERY_REPO" rev-parse HEAD)
 }
 
+test_reviewed_resume_rejects_descendant_recovery() {
+  local calendar_version reviewed output
+  calendar_version=$(TZ=Europe/Vienna date +%y.%m.%d)
+  setup_interrupted_calendar_descendant_recovery reviewed-descendant "$calendar_version"
+  reviewed=$(git --git-dir="$RECOVERY_ORIGIN" rev-parse refs/pull/1/head)
+  output="$RECOVERY_STATE/reviewed-output"
+  if FAKE_RELEASE_VERSION="$calendar_version" \
+     run_release "$RECOVERY_REPO" "$RECOVERY_STATE" "$calendar_version" \
+       --reviewed-head "$reviewed" --no-edit >"$output" 2>&1; then
+    fail 'reviewed resume accepted changed descendant recovery contents'
+  fi
+  grep -q 'selected recovery commit changes reviewed content' "$output" ||
+    fail 'reviewed recovery did not reject the selected changed tree'
+  ! git --git-dir="$RECOVERY_ORIGIN" show-ref --verify --quiet "refs/tags/v$calendar_version" ||
+    fail 'reviewed descendant recovery still tagged'
+}
+
 test_interrupted_calendar_descendant_recovery() {
   local calendar_version next_day output later_branch legacy_oid divergent_oid legacy_tag
+  local index mutation fixture blob_oid
   calendar_version=$(TZ=Europe/Vienna date +%y.%m.%d)
   next_day=$(next_calendar_day "$(TZ=Europe/Vienna date +%Y-%m-%d)")
 
@@ -1564,15 +1813,104 @@ test_interrupted_calendar_descendant_recovery() {
 
   setup_interrupted_calendar_descendant_recovery calendar-descendant-legacy-version "$calendar_version"
   legacy_oid=$(git --git-dir="$RECOVERY_ORIGIN" rev-parse 'refs/tags/v1.0.0^{}')
-  for legacy_tag in v1.1.1 v1.1.2 v1.2.0 v1.2.1; do
-    git -C "$RECOVERY_REPO" tag -a --no-sign "$legacy_tag" "$legacy_oid" -m "$legacy_tag"
+  index=1
+  while [[ "$index" -le 242 ]]; do
+    legacy_tag="v4.0.$index"
+    if (( index % 2 == 0 )); then
+      git -C "$RECOVERY_REPO" -c tag.gpgSign=false tag "$legacy_tag" "$legacy_oid"
+    else
+      git -C "$RECOVERY_REPO" tag -a --no-sign "$legacy_tag" "$legacy_oid" -m "$legacy_tag"
+    fi
+    index=$((index + 1))
   done
-  git -C "$RECOVERY_REPO" push -q origin v1.1.1 v1.1.2 v1.2.0 v1.2.1
+  git -C "$RECOVERY_REPO" push -q origin --tags
+  rm -f "$RECOVERY_STATE/tag-audit-snapshot-count" "$RECOVERY_STATE/tag-audit-fetch-count"
   rm "$RECOVERY_STATE/backend-full-failed"
   FAKE_RELEASE_VERSION="$calendar_version" \
     run_release "$RECOVERY_REPO" "$RECOVERY_STATE" "$calendar_version" --no-edit >/dev/null
   [[ $(git --git-dir="$RECOVERY_ORIGIN" rev-parse "refs/tags/v$calendar_version^{}") == "$RECOVERY_CANDIDATE" ]] ||
     fail 'calendar recovery rejected authoritative legacy ancestor tags with historical VERSION drift'
+  [[ "$(<"$RECOVERY_STATE/tag-audit-snapshot-count")" == 4 ]] ||
+    fail '243-tag audit did not use exactly two remote snapshots per validation'
+  [[ "$(<"$RECOVERY_STATE/tag-audit-fetch-count")" == 8 ]] ||
+    fail '243-tag audit fetches were not bounded to four 64-ref batches per validation'
+
+  for mutation in move delete new; do
+    fixture="calendar-descendant-tag-$mutation"
+    setup_interrupted_calendar_descendant_recovery "$fixture" "$calendar_version"
+    rm "$RECOVERY_STATE/backend-full-failed"
+    printf '%s\n' "$mutation" > "$RECOVERY_STATE/tag-audit-mutation"
+    output="$TMP_ROOT/$fixture/output"
+    if FAKE_RELEASE_VERSION="$calendar_version" \
+       run_release "$RECOVERY_REPO" "$RECOVERY_STATE" "$calendar_version" --no-edit >"$output" 2>&1; then
+      fail "calendar recovery accepted a remote release-tag $mutation during its audit"
+    fi
+    grep -qF 'origin release tags moved, disappeared, or appeared during evidence fetch' "$output" ||
+      fail "remote release-tag $mutation rejection was not explicit"
+    ! git --git-dir="$RECOVERY_ORIGIN" show-ref --verify --quiet "refs/tags/v$calendar_version" ||
+      fail "remote release-tag $mutation still allowed release publication"
+  done
+
+  for mutation in malformed duplicate missing-direct missing-peel; do
+    fixture="calendar-descendant-tag-snapshot-$mutation"
+    setup_interrupted_calendar_descendant_recovery "$fixture" "$calendar_version"
+    rm "$RECOVERY_STATE/backend-full-failed"
+    printf '%s\n' "$mutation" > "$RECOVERY_STATE/tag-audit-snapshot-corruption"
+    output="$TMP_ROOT/$fixture/output"
+    if FAKE_RELEASE_VERSION="$calendar_version" \
+       run_release "$RECOVERY_REPO" "$RECOVERY_STATE" "$calendar_version" --no-edit >"$output" 2>&1; then
+      fail "calendar recovery accepted $mutation release-tag snapshot evidence"
+    fi
+    case "$mutation" in
+      malformed)
+        grep -qF 'origin tag snapshot contains a malformed ref' "$output" ||
+          fail 'malformed release-tag snapshot rejection was not explicit'
+        ;;
+      duplicate|missing-direct)
+        grep -qF 'origin release-tag snapshot contains contradictory or missing refs' "$output" ||
+          fail "$mutation release-tag snapshot rejection was not explicit"
+        ;;
+      missing-peel)
+        grep -qF 'origin release tag is missing commit peel evidence: v1.0.0' "$output" ||
+          fail 'missing release-tag peel rejection was not explicit'
+        ;;
+    esac
+  done
+
+  setup_interrupted_calendar_descendant_recovery calendar-descendant-incomplete-tag-fetch "$calendar_version"
+  rm "$RECOVERY_STATE/backend-full-failed"
+  touch "$RECOVERY_STATE/tag-audit-incomplete-fetch"
+  output="$TMP_ROOT/calendar-descendant-incomplete-tag-fetch/output"
+  if FAKE_RELEASE_VERSION="$calendar_version" \
+     run_release "$RECOVERY_REPO" "$RECOVERY_STATE" "$calendar_version" --no-edit >"$output" 2>&1; then
+    fail 'calendar recovery accepted incomplete fetched release-tag evidence'
+  fi
+  grep -qF 'fetched release-tag evidence ref is missing: v1.0.0' "$output" ||
+    fail 'incomplete release-tag evidence rejection was not explicit'
+
+  setup_interrupted_calendar_descendant_recovery calendar-descendant-tag-fetch-failure "$calendar_version"
+  rm "$RECOVERY_STATE/backend-full-failed"
+  touch "$RECOVERY_STATE/tag-audit-fetch-fail"
+  output="$TMP_ROOT/calendar-descendant-tag-fetch-failure/output"
+  if FAKE_RELEASE_VERSION="$calendar_version" \
+     run_release "$RECOVERY_REPO" "$RECOVERY_STATE" "$calendar_version" --no-edit >"$output" 2>&1; then
+    fail 'calendar recovery accepted a failed release-tag evidence fetch'
+  fi
+  grep -qF 'could not fetch exact origin release-tag evidence batch' "$output" ||
+    fail 'failed release-tag evidence fetch rejection was not explicit'
+
+  setup_interrupted_calendar_descendant_recovery calendar-descendant-noncommit-tag "$calendar_version"
+  rm "$RECOVERY_STATE/backend-full-failed"
+  blob_oid=$(printf 'not a commit\n' | git -C "$RECOVERY_REPO" hash-object -w --stdin)
+  git -C "$RECOVERY_REPO" -c tag.gpgSign=false tag v4.8.8 "$blob_oid"
+  git -C "$RECOVERY_REPO" push -q origin v4.8.8
+  output="$TMP_ROOT/calendar-descendant-noncommit-tag/output"
+  if FAKE_RELEASE_VERSION="$calendar_version" \
+     run_release "$RECOVERY_REPO" "$RECOVERY_STATE" "$calendar_version" --no-edit >"$output" 2>&1; then
+    fail 'calendar recovery accepted a release tag that does not resolve to a commit'
+  fi
+  grep -qF 'origin release tag is missing commit peel evidence: v4.8.8' "$output" ||
+    fail 'noncommit release-tag rejection was not explicit'
 
   setup_interrupted_calendar_descendant_recovery calendar-descendant-missing-timeout "$calendar_version"
   rm "$RECOVERY_STATE/backend-full-failed"
@@ -1689,7 +2027,7 @@ test_interrupted_calendar_descendant_recovery() {
      run_release "$RECOVERY_REPO" "$RECOVERY_STATE" "$calendar_version" --no-edit >"$output" 2>&1; then
     fail 'calendar recovery tagged after main moved during the historical tag audit'
   fi
-  [[ "$(<"$RECOVERY_STATE/tag-audit-count")" == 2 ]] ||
+  [[ "$(<"$RECOVERY_STATE/tag-audit-fetch-count")" == 1 ]] ||
     fail 'historical tag audit race fixture did not advance main during the pre-tag audit'
   grep -qF 'is not the exact current protected origin/main head' "$output" ||
     fail 'historical tag audit main-race rejection was not explicit'
@@ -1723,6 +2061,65 @@ test_interrupted_calendar_descendant_recovery() {
     fail 'calendar recovery midnight rejection was not explicit'
   ! git --git-dir="$RECOVERY_ORIGIN" show-ref --verify --quiet "refs/tags/v$calendar_version" ||
     fail 'calendar recovery midnight rejection still published a tag'
+}
+
+# PAI-979: INSPR calendar v2. An explicit coordinate reserved earlier the same
+# UTC day is accepted, the tag/VERSION/changelog carry it verbatim, and every
+# older era is closed once a v2 coordinate is published.
+test_calendar_v2_release_and_closures() {
+  local repo state origin output v2_version v2_iso earlier_version future_version vienna_version
+  v2_version="$(date -u +%y%m%d%H%M%S).0.0"
+  v2_iso=$(date -u +%Y-%m-%d)
+  earlier_version="$(date -u +%y%m%d)000000.0.0"
+  future_version="991231235959.0.0"
+  vienna_version=$(TZ=Europe/Vienna date +%y.%m.%d)
+  repo=$(setup_repo calendar-v2-release v1.0.0)
+  state="$TMP_ROOT/calendar-v2-release/gh-state"
+  origin=$(git -C "$repo" remote get-url origin)
+  prepend_release_notes "$repo" "$v2_version"
+
+  if FAKE_RELEASE_VERSION="$future_version" \
+     run_release "$repo" "$state" "$future_version" --no-edit >"$TMP_ROOT/calendar-v2-release/future" 2>&1; then
+    fail 'future v2 coordinate was accepted'
+  fi
+  grep -q 'not in the future' "$TMP_ROOT/calendar-v2-release/future" ||
+    fail 'future v2 coordinate rejection did not name the reservation policy'
+  if FAKE_RELEASE_VERSION="$v2_version" \
+     run_release "$repo" "$state" "260910081500.0.1" --no-edit >"$TMP_ROOT/calendar-v2-release/patch" 2>&1; then
+    fail 'non-zero PATCH accepted as a v2 coordinate'
+  fi
+
+  FAKE_RELEASE_VERSION="$v2_version" \
+    run_release "$repo" "$state" "$v2_version" --no-edit >/dev/null
+
+  [[ $(git --git-dir="$origin" show refs/pull/1/head:VERSION) == "$v2_version" ]] ||
+    fail 'v2 release did not write the exact coordinate into VERSION'
+  git --git-dir="$origin" show refs/pull/1/head:README.md | grep -qF "<code>v$v2_version</code>" ||
+    fail 'v2 release did not refresh the README badge'
+  git --git-dir="$origin" show refs/pull/1/head:docs/CHANGELOG.md | grep -qF "## [$v2_version] — $v2_iso" ||
+    fail 'v2 release changelog heading did not carry the UTC date of the coordinate'
+  [[ $(git --git-dir="$origin" rev-parse "refs/tags/v$v2_version^{}") == "$(<"$state/merge-oid")" ]] ||
+    fail 'v2 tag did not pin the protected merge'
+
+  # Exact published coordinate is a resumable checkpoint.
+  FAKE_RELEASE_VERSION="$v2_version" \
+    run_release "$repo" "$state" "$v2_version" --no-edit >/dev/null
+
+  # Every older era is closed once a v2 coordinate is published.
+  if FAKE_RELEASE_VERSION="$vienna_version" \
+     run_release "$repo" "$state" "$vienna_version" --no-edit >"$TMP_ROOT/calendar-v2-release/v1" 2>&1; then
+    fail 'calendar v1 cut accepted after the first v2 coordinate'
+  fi
+  grep -q 'closed after this product' "$TMP_ROOT/calendar-v2-release/v1" ||
+    fail 'v1 closure did not explain itself'
+  if FAKE_RELEASE_VERSION="1.0.1" \
+     run_release "$repo" "$state" patch --no-edit >"$TMP_ROOT/calendar-v2-release/patch-mode" 2>&1; then
+    fail 'legacy patch mode accepted after the first v2 coordinate'
+  fi
+  if FAKE_RELEASE_VERSION="$earlier_version" \
+     run_release "$repo" "$state" "$earlier_version" --no-edit >"$TMP_ROOT/calendar-v2-release/earlier" 2>&1; then
+    fail 'earlier same-day coordinate accepted behind a published v2 release'
+  fi
 }
 
 test_calendar_release_and_rejections() {
@@ -1896,13 +2293,28 @@ test_calendar_release_and_rejections() {
 }
 
 write_fake_commands "$TMP_ROOT/fake-bin"
+if [[ "${1:-}" == '--reviewed-recovery' ]]; then
+  test_reviewed_resume_rejects_descendant_recovery
+  echo 'test-release: reviewed recovery ok'
+  exit 0
+fi
+test_reviewed_resume_rejects_descendant_recovery
+test_prepare_and_reviewed_resume
+test_reviewed_resume_rejects_main_advance
+if [[ "${1:-}" == '--prepare-review' ]]; then
+  echo 'test-release: prepare/review ok'
+  exit 0
+fi
 test_calendar_missing_provenance_receipt_recovery \
   26.09.01 "$IMMEDIATE_AUTO_MERGE_RECOVERY_REASON" calendar-immediate-recovery
 test_calendar_missing_provenance_receipt_recovery \
   26.09.02 "$MANUAL_RECOVERY_REASON" calendar-manual-recovery
 test_calendar_missing_provenance_receipt_recovery \
   26.09.09 "$PROTECTED_SQUASH_RECOVERY_REASON" calendar-protected-squash-recovery 1
+test_calendar_missing_provenance_receipt_recovery \
+  "$V2_RECOVERY_VERSION" "$IMMEDIATE_AUTO_MERGE_RECOVERY_REASON" calendar-v2-immediate-recovery 1
 test_interrupted_calendar_descendant_recovery
+test_calendar_v2_release_and_closures
 test_calendar_release_and_rejections
 test_committed_recovery_receipts_are_exact
 test_canonical_unreleased_is_consumed
@@ -1912,6 +2324,7 @@ test_versioned_entry_cannot_leave_stale_unreleased
 test_unreleased_consumption_rejects_prior_history_tamper
 test_protected_release_and_resume_states
 test_exhaustive_backend_failure_blocks_tag_creation
+test_exhaustive_backend_dispatch_pins_release_after_main_advances
 test_unnamed_required_check_is_not_reused_as_green
 test_missing_auto_merge_recovery_receipt
 test_existing_manual_recovery_reason_remains_accepted

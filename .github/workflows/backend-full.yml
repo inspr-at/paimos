@@ -1,34 +1,52 @@
 name: backend-full
 
-# Expensive exhaustive assurance stays off the ordinary PR merge path. It
-# runs for every protected-main commit, nightly, and on demand. release.sh
-# requires the exact protected-main result before creating a tag; no duplicate
-# tag run is needed for the identical commit. Applying the explicit
-# backend-full-evidence label provides the same hosted proof on a PR head.
+# Full execution is nightly and on demand, never on ordinary main pushes.
+# Dispatch may pin an older protected-main commit for a release. The run title
+# binds that checkout to evidence even if main advances before dispatch starts.
+run-name: backend-full ${{ inputs.target_sha || github.event.pull_request.head.sha || github.sha }}
 on:
-  push:
-    branches: [main]
   pull_request:
     types: [labeled]
   schedule:
     - cron: '17 2 * * *'
   workflow_dispatch:
+    inputs:
+      target_sha:
+        description: 'Exact protected-main commit to verify (empty uses dispatch head)'
+        required: false
+        type: string
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   backend-full-authorize:
     if: github.event_name != 'pull_request' || github.event.label.name == 'backend-full-evidence'
     runs-on: ubuntu-latest
-    timeout-minutes: 2
+    timeout-minutes: 5
+    outputs:
+      source_sha: ${{ steps.authorize.outputs.source_sha }}
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
 
       - name: Authorize exhaustive backend evidence
+        id: authorize
         env:
           BACKEND_FULL_LABEL: ${{ github.event.label.name }}
-        run: scripts/backend-full-authorize.sh
+          BACKEND_FULL_REQUESTED_SHA: ${{ inputs.target_sha }}
+          BACKEND_FULL_TARGET_SHA: ${{ inputs.target_sha || github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          scripts/backend-full-authorize.sh
+          target="$BACKEND_FULL_TARGET_SHA"
+          [[ "$target" =~ ^[0-9a-f]{40}$ ]] || exit 1
+          if [[ -n "$BACKEND_FULL_REQUESTED_SHA" ]]; then
+            git merge-base --is-ancestor "$target" origin/main || exit 1
+          fi
+          echo "source_sha=$target" >> "$GITHUB_OUTPUT"
 
   backend-full-serial:
     needs: backend-full-authorize
@@ -40,17 +58,19 @@ jobs:
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.backend-full-authorize.outputs.source_sha }}
 
       - uses: actions/setup-go@v6
         with:
           go-version: '1.26.6'
           cache-dependency-path: backend/go.sum
 
-      - name: Backend — full serial suite
+      - name: Backend - full serial suite
         working-directory: backend
         run: go test -count=1 -p 1 -timeout=40m ./...
 
-      - name: Backend — unsupported platform fails closed
+      - name: Backend - unsupported platform fails closed
         working-directory: backend
         run: |
           go test -tags paimos_test_unsupported -count=1 ./cmd/paimos -run '^TestUnsupportedPlatformProcessOwnershipFailsClosed$'
@@ -62,22 +82,24 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        group: [core, runtime]
-    # Exact-main run 33871597020 reached supervision 38m19s into this step;
-    # its last selected test was 28s old when the old 8m package alarm fired.
-    # A 15m package cap plus the current roughly 13m tail projects to 66m19s.
-    # The added root/runtime fixtures project to roughly 30m. Give them a
-    # separate runner so the core group retains its original outer-job margin.
+        group: [core, handlers, runtime]
+    # PAI-991: exact release run 34514767389 exhausted the 90m core job
+    # during the second agentmode invocation. All ten handler invocations
+    # had already passed, using about 45m. Give those unchanged invocations
+    # their own sequential runner; core retains every other package and its
+    # existing limits. Runtime and the full serial suite remain unchanged.
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.backend-full-authorize.outputs.source_sha }}
 
       - uses: actions/setup-go@v6
         with:
           go-version: '1.26.6'
           cache-dependency-path: backend/go.sum
 
-      - name: Backend — broad control-plane race (${{ matrix.group }})
+      - name: Backend - broad control-plane race (${{ matrix.group }})
         working-directory: backend
         # The runner walks package-local and handler shard concurrency contracts sequentially.
         # That stays broad without starving latency-budget tests by racing all
@@ -102,6 +124,6 @@ jobs:
           RACE: ${{ needs.backend-full-race.result }}
         run: |
           set -euo pipefail
-          [[ "$AUTHORIZATION" == 'success' ]]
-          [[ "$SERIAL" == 'success' ]]
-          [[ "$RACE" == 'success' ]]
+          [[ "$AUTHORIZATION" == 'success' ]] || exit 1
+          [[ "$SERIAL" == 'success' ]] || exit 1
+          [[ "$RACE" == 'success' ]] || exit 1

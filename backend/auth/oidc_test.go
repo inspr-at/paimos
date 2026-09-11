@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/backend/db"
+	"github.com/inspr-at/paimos/backend/internal/testdb"
 	"github.com/inspr-at/paimos/backend/publicbase"
 )
 
@@ -89,6 +90,7 @@ func setupOIDCTest(t *testing.T, issuer *oidcMockIssuer) {
 	t.Setenv("OIDC_POST_LOGIN_REDIRECT", "/after-sso")
 
 	resetOIDCTestGlobals()
+	testdb.Prepare(t)
 	if err := db.Open(); err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}

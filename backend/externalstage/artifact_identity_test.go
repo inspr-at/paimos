@@ -95,3 +95,37 @@ func TestApplyImplementationEvidenceIgnoresGenericExternalRef(t *testing.T) {
 		t.Fatalf("generic external_ref filled identity: %+v", expected)
 	}
 }
+
+// PAI-979: typed release identities carry the v2 scheme end to end and reject
+// cross-era spellings.
+func TestParseReleaseIdentityINSPRCalendarV2(t *testing.T) {
+	got := FormatReleaseIdentity(VersionSchemeINSPRCalendarV2, "stable", 260910081500, "260910081500.0.0")
+	scheme, channel, version, sequence, ok := ParseReleaseIdentity(got)
+	if !ok || scheme != string(VersionSchemeINSPRCalendarV2) || channel != "stable" || sequence != 260910081500 || version != "260910081500.0.0" {
+		t.Fatalf("v2 identity roundtrip=%q scheme=%s channel=%s version=%s sequence=%d ok=%v", got, scheme, channel, version, sequence, ok)
+	}
+	for _, value := range []string{
+		"inspr-release-v1:inspr-calendar-v2/stable/1/26.09.10.08.15.00",
+		"inspr-release-v1:inspr-calendar-v1/stable/1/260910081500.0.0",
+		"inspr-release-v1:inspr-calendar-v3/stable/1/260910081500.0.0",
+		"inspr-release-v1:inspr-calendar-v2/stable/1/260910081500.0.0-rc1",
+	} {
+		if _, _, _, _, ok := ParseReleaseIdentity(value); ok {
+			t.Fatalf("cross-era or unknown identity accepted: %s", value)
+		}
+	}
+	artifact := BuiltOwnerArtifact{
+		Digest: make([]byte, 32), ReleaseManifest: make([]byte, 32),
+		Commit:     strings.Repeat("a", 40),
+		Coordinate: "ghcr:inspr-at/paimos/releases/260910081500.0.0",
+		Scheme:     string(VersionSchemeINSPRCalendarV2), Channel: "stable",
+		Sequence: 260910081500, Version: "260910081500.0.0",
+	}
+	if !artifact.Complete() {
+		t.Fatal("complete v2 built artifact rejected")
+	}
+	artifact.Version = "26.09.10"
+	if artifact.Complete() {
+		t.Fatal("v1 spelling accepted under the v2 scheme")
+	}
+}

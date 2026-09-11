@@ -69,14 +69,15 @@ type launchScope struct {
 }
 
 type launchWorker struct {
-	WorkerName        string `json:"worker_name,omitempty"`
-	AccountLabel      string `json:"account_label,omitempty"`
-	AccountKey        string `json:"account_key,omitempty"`
-	ProfileID         string `json:"profile_id,omitempty"`
-	ProfileVersion    string `json:"profile_version,omitempty"`
-	WorkspaceHandle   string `json:"workspace_handle,omitempty"`
-	RuntimeID         string `json:"runtime_id,omitempty"`
-	RuntimeGeneration string `json:"runtime_generation,omitempty"`
+	WorkerName         string `json:"worker_name,omitempty"`
+	AccountLabel       string `json:"account_label,omitempty"`
+	AccountKey         string `json:"account_key,omitempty"`
+	AttachmentRevision int64  `json:"attachment_revision,omitempty"`
+	ProfileID          string `json:"profile_id,omitempty"`
+	ProfileVersion     string `json:"profile_version,omitempty"`
+	WorkspaceHandle    string `json:"workspace_handle,omitempty"`
+	RuntimeID          string `json:"runtime_id,omitempty"`
+	RuntimeGeneration  string `json:"runtime_generation,omitempty"`
 }
 
 type launchSelection struct {
@@ -522,7 +523,8 @@ func validLaunchGrantBinding(grant launchGrantRow) bool {
 	}
 	reviewParts := []string{
 		grant.contentDigest, grant.revisionSeal, strconv.FormatInt(grant.draftRevision, 10), "automatic",
-		string(selectedJSON), worker.RuntimeID, worker.RuntimeGeneration, worker.AccountKey, worker.AccountLabel,
+		string(selectedJSON), worker.RuntimeID, worker.RuntimeGeneration, worker.AccountKey,
+		strconv.FormatInt(worker.AttachmentRevision, 10), worker.AccountLabel,
 		worker.ProfileID, worker.ProfileVersion, worker.WorkspaceHandle, worker.WorkerName, grant.delegatedJSON,
 	}
 	reviewDigest := sha256.Sum256([]byte(strings.Join(reviewParts, "\x00")))

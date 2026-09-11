@@ -8,11 +8,11 @@ import (
 	"database/sql"
 )
 
-// applyHarnessRetirementMigration188 adds an append-preserving retirement
+// applyHarnessRetirementMigration192 adds an append-preserving retirement
 // ledger. A retirement row fences new assignment and delivery admission while
 // leaving the session, workspace, credentials, messages, and history intact.
-func applyHarnessRetirementMigration188(ctx context.Context, conn *sql.Conn) error {
-	return applyMigrationAtomic(ctx, conn, migration{version: 188, steps: []string{
+func applyHarnessRetirementMigration192(ctx context.Context, conn *sql.Conn) error {
+	return applyMigrationAtomic(ctx, conn, migration{version: 192, steps: []string{
 		`CREATE TABLE harness_session_retirements (
 		 id                            TEXT PRIMARY KEY CHECK(` + sqlUUIDCheck("id") + `),
 		 project_id                    INTEGER NOT NULL REFERENCES projects(id),

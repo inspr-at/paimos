@@ -56,7 +56,7 @@ describe('router shell contract (PAI-805)', () => {
 
   it('leaves every route except the focused production and development shells on standard chrome', () => {
     for (const r of router.getRoutes()) {
-      if (r.path === '/' || r.path === '/agent-mode' || r.path === '/dev/agent-mode' || r.path === '/dev/paimos-6' || r.path === '/crm' || r.path === '/crm/:id') continue
+      if (r.path === '/' || r.path === '/agent-mode' || r.path === '/dev/agent-mode' || r.path === '/dev/paimos-6' || r.path === '/crm' || r.path === '/crm/:id' || r.path.startsWith('/crm/offers/')) continue
       expect(r.meta.shell, `${r.path} must not opt into a reduced shell`).toBeUndefined()
     }
   })
@@ -106,5 +106,13 @@ describe('router shell contract (PAI-805)', () => {
     expect(preview).toBeDefined()
     expect(preview!.meta?.shell).toBe('v6')
     expect(String(preview!.component)).toContain('Paimos6PreviewView.vue')
+  })
+})
+
+describe('offer capability route', () => {
+  it('allows only the token view without login while keeping CRM and print authenticated', () => {
+    const prod = buildRoutes(false)
+    expect(prod.find(r => r.path === '/offers/:token')?.meta?.public).toBe(true)
+    for (const path of ['/crm/offers/:id', '/crm/offers/:id/print']) expect(prod.find(r => r.path === path)?.meta?.public).toBeUndefined()
   })
 })

@@ -4,12 +4,10 @@ import {
   Check,
   Clipboard,
   Inbox,
-  Layers3,
   MessageCircle,
   RadioTower,
   RefreshCw,
   UserPlus,
-  WifiOff,
 } from 'lucide-vue-next'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
@@ -575,12 +573,7 @@ onScopeDispose(() => {
         <Paimos6SourceRail />
         <div class="p6-title-row">
           <div>
-            <p class="p6-kicker">Your agent loop, without the CRUD chrome</p>
-            <h1 id="p6-title">Good morning. Here’s what needs you.</h1>
-            <p class="p6-deck">
-              Live, project-authorized product sessions. These are not relabelled 5.x issues,
-              deliveries, runs, or harness sessions.
-            </p>
+            <h1 id="p6-title">Product sessions</h1>
           </div>
           <dl class="p6-glance" aria-label="Live session summary">
             <div>
@@ -602,8 +595,7 @@ onScopeDispose(() => {
       <section class="p6-sessions" aria-labelledby="p6-sessions-title">
         <div class="p6-section-head">
           <div>
-            <p class="p6-section-kicker"><Layers3 :size="13" aria-hidden="true" /> Session home</p>
-            <h2 id="p6-sessions-title">Near you now</h2>
+            <h2 id="p6-sessions-title">Sessions</h2>
             <label v-if="projects.length" class="p6-project-picker">
               Authorized project
               <select :value="selectedProjectId ?? ''" @change="changeProject">
@@ -880,7 +872,7 @@ onScopeDispose(() => {
             />
           </section>
           <div class="p6-sample-label">
-            Exception-first sample · {{ home.sessions.value.length }} visible
+            {{ home.sessions.value.length }} of {{ home.totals.value.sessions }} visible
           </div>
           <div class="p6-session-grid">
             <Paimos6SessionCard
@@ -897,21 +889,6 @@ onScopeDispose(() => {
       </section>
 
       <Paimos6KnowledgeCompact :state="knowledgeState" :snapshot="knowledgeSnapshot" />
-
-      <section class="p6-honesty" aria-labelledby="p6-honesty-title">
-        <WifiOff :size="19" aria-hidden="true" />
-        <div>
-          <h2 id="p6-honesty-title">Responsive web home</h2>
-          <p>
-            Rows come from the strict, project-authorized semantic-zoom endpoint. The
-            exception-first sample is bounded while totals and a separately hydrated selection stay
-            authoritative. Voice commits only a finalized transcript through the selected session
-            contract; other controls remain capability previews. At 390px this remains mobile
-            web—not a native client—and no push capability is claimed.
-          </p>
-        </div>
-        <span>Web · no push</span>
-      </section>
 
       <p class="p6-status" role="status" aria-live="polite" aria-atomic="true">
         <Inbox :size="13" aria-hidden="true" /> {{ statusMessage }}
@@ -944,7 +921,7 @@ onScopeDispose(() => {
 .p6-home {
   width: min(1180px, calc(100% - 64px));
   margin: 0 auto;
-  padding: 70px 0 44px;
+  padding: 28px 0 44px;
 }
 .p6-intro {
   max-width: 1080px;
@@ -954,32 +931,17 @@ onScopeDispose(() => {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: end;
-  gap: 70px;
-  margin-top: 30px;
-}
-.p6-kicker,
-.p6-section-kicker {
-  color: #5d7467;
-  font-size: 10px;
-  font-weight: 750;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
+  gap: 32px;
+  margin-top: 16px;
 }
 .p6-title-row h1 {
   max-width: 720px;
-  margin-top: 9px;
+  margin: 0;
   font-family: 'Bricolage Grotesque', 'DM Sans', sans-serif;
-  font-size: clamp(35px, 5vw, 59px);
-  font-weight: 500;
-  line-height: 1.04;
-  letter-spacing: -0.055em;
-}
-.p6-deck {
-  max-width: 680px;
-  margin-top: 18px;
-  color: #66736c;
-  font-size: 13px;
-  line-height: 1.7;
+  font-size: clamp(22px, 2.8vw, 28px);
+  font-weight: 600;
+  line-height: 1.15;
+  letter-spacing: -0.03em;
 }
 .p6-glance {
   display: grid;
@@ -1016,7 +978,7 @@ onScopeDispose(() => {
     sans-serif;
 }
 .p6-sessions {
-  margin-top: 78px;
+  margin-top: 28px;
 }
 .p6-section-head {
   display: flex;
@@ -1025,13 +987,8 @@ onScopeDispose(() => {
   gap: 24px;
   margin-bottom: 17px;
 }
-.p6-section-kicker {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
 .p6-section-head h2 {
-  margin-top: 4px;
+  margin: 0;
   font-family: 'Bricolage Grotesque', 'DM Sans', sans-serif;
   font-size: 23px;
   font-weight: 600;
@@ -1282,36 +1239,6 @@ onScopeDispose(() => {
   color: #59655e;
   font-size: 11.5px;
 }
-.p6-honesty {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 14px;
-  margin-top: 17px;
-  padding: 16px 18px;
-  border: 1px dashed #cad6cf;
-  border-radius: 14px;
-  color: #68756e;
-  background: rgba(252, 253, 250, 0.58);
-}
-.p6-honesty h2 {
-  color: #4d5b53;
-  font-size: 11px;
-  font-weight: 700;
-}
-.p6-honesty p {
-  margin-top: 3px;
-  font-size: 10.5px;
-  line-height: 1.5;
-}
-.p6-honesty > span {
-  padding: 4px 7px;
-  border: 1px solid #d5ded9;
-  border-radius: 999px;
-  font-size: 9px;
-  font-weight: 700;
-  text-transform: uppercase;
-}
 .p6-status {
   display: flex;
   align-items: center;
@@ -1325,7 +1252,7 @@ onScopeDispose(() => {
 @media (max-width: 940px) {
   .p6-home {
     width: min(100% - 36px, 760px);
-    padding-top: 48px;
+    padding-top: 24px;
   }
   .p6-title-row {
     grid-template-columns: 1fr;
@@ -1345,13 +1272,7 @@ onScopeDispose(() => {
     padding: 34px 0 86px;
   }
   .p6-title-row {
-    margin-top: 22px;
-  }
-  .p6-title-row h1 {
-    font-size: clamp(34px, 11vw, 44px);
-  }
-  .p6-deck {
-    font-size: 12px;
+    margin-top: 14px;
   }
   .p6-glance {
     min-width: 0;
@@ -1360,7 +1281,7 @@ onScopeDispose(() => {
     padding: 0 10px;
   }
   .p6-sessions {
-    margin-top: 52px;
+    margin-top: 24px;
   }
   .p6-section-head {
     align-items: flex-start;
@@ -1389,14 +1310,6 @@ onScopeDispose(() => {
   }
   .p6-setup-actions > * {
     flex: 1 1 170px;
-  }
-  .p6-honesty {
-    grid-template-columns: auto 1fr;
-    align-items: start;
-  }
-  .p6-honesty > span {
-    grid-column: 2;
-    justify-self: start;
   }
 }
 </style>

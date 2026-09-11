@@ -12,8 +12,7 @@ WORKFLOW="$ROOT/.github/workflows/ci-v2.yml"
 FULL_WORKFLOW="$ROOT/.github/workflows/backend-full.yml"
 RELEASE_DOC="$ROOT/docs/RELEASE.md"
 SELECTION_SENTINEL='PAIMOS_BACKEND_SELECTION_OK_V1'
-CI_SELECTION_CALL="selection=\$(../scripts/backend-ci-packages.sh"
-FULL_WAIT_CALL="wait-backend-full.sh \"\$GITHUB_SHA\""
+FULL_WAIT_CALL="wait-backend-full.sh --check \"\$GITHUB_SHA\""
 FULL_PR_GUARD="github.event_name != 'pull_request' || github.event.label.name == 'backend-full-evidence'"
 FULL_AGGREGATE_GUARD="always() && (github.event_name != 'pull_request' || github.event.label.name == 'backend-full-evidence')"
 FULL_LABEL_ENV="BACKEND_FULL_LABEL: \${{ github.event.label.name }}"
@@ -32,6 +31,8 @@ fail() {
   echo "test-backend-pr-gate: $*" >&2
   exit 1
 }
+
+python3 "$ROOT/scripts/backend-race-exclusions.py" --check "$ROOT/backend"
 
 select_files() {
   local output first packages
@@ -74,19 +75,25 @@ check_selection_contains() {
 
 GITHUB_EVENT_NAME=pull_request BACKEND_FULL_LABEL=backend-full-evidence "$FULL_AUTHORIZER" ||
   fail 'backend-full evidence authorizer rejected the stable operator label'
-GITHUB_EVENT_NAME=push "$FULL_AUTHORIZER" ||
-  fail 'backend-full evidence authorizer rejected protected-main execution'
+if GITHUB_EVENT_NAME=push "$FULL_AUTHORIZER" >/dev/null 2>&1; then
+  fail 'backend-full evidence authorizer accepted a push'
+fi
+GITHUB_EVENT_NAME=schedule GITHUB_REF=refs/heads/main "$FULL_AUTHORIZER" ||
+  fail 'backend-full authorizer rejected nightly main execution'
+if GITHUB_EVENT_NAME=schedule GITHUB_REF=refs/heads/other "$FULL_AUTHORIZER" >/dev/null 2>&1; then
+  fail 'backend-full authorizer accepted a nightly run outside main'
+fi
 if GITHUB_EVENT_NAME=pull_request BACKEND_FULL_LABEL=unrelated "$FULL_AUTHORIZER" >/dev/null 2>&1; then
   fail 'backend-full evidence authorizer accepted an unrelated PR label'
 fi
 
 fixture_head='1111111111111111111111111111111111111111'
 FAKE_HEAD_SHA="$fixture_head" FAKE_BACKEND_FULL_MODE=success \
-  GH_COMMAND="$FIXTURES/backend-full-gh.sh" "$FULL_WAITER" "$fixture_head" >/dev/null ||
+  GH_COMMAND="$FIXTURES/backend-full-gh.sh" "$FULL_WAITER" --check "$fixture_head" >/dev/null ||
   fail 'exact-head backend-full waiter rejected successful exhaustive evidence'
 for mode in failed wrong-head skipped; do
   if FAKE_HEAD_SHA="$fixture_head" FAKE_BACKEND_FULL_MODE="$mode" \
-    GH_COMMAND="$FIXTURES/backend-full-gh.sh" "$FULL_WAITER" "$fixture_head" >/dev/null 2>&1; then
+    GH_COMMAND="$FIXTURES/backend-full-gh.sh" "$FULL_WAITER" --check "$fixture_head" >/dev/null 2>&1; then
     fail "exact-head backend-full waiter accepted $mode evidence"
   fi
 done
@@ -179,6 +186,7 @@ db_expected=$(printf '%s\n' \
   github.com/inspr-at/paimos/backend/handlers/crm/hubspot \
   github.com/inspr-at/paimos/backend/handlers/knowledge \
   github.com/inspr-at/paimos/backend/internal/knowledge857 \
+  github.com/inspr-at/paimos/backend/internal/testdb \
   github.com/inspr-at/paimos/backend/lifecycleclient \
   github.com/inspr-at/paimos/backend/lifecycleintents \
   github.com/inspr-at/paimos/backend/managedharness \
@@ -275,6 +283,8 @@ for shard in 0 1; do
     github.com/inspr-at/paimos/backend/db \
     github.com/inspr-at/paimos/backend/handlers)
   [[ -n "$plan" ]] || fail "affected normal shard $shard is empty"
+  ! grep -qv '^go test -count=1 -timeout=8m ' <<<"$plan" ||
+    fail "affected normal shard $shard lost its eight-minute timeout"
   affected_plan+="$plan"$'\n'
 done
 [[ "$affected_plan" == *'subscribe\ before\ high-water'* && "$affected_plan" == *'permission\ grant\ and\ revoke'* ]] ||
@@ -285,7 +295,7 @@ done
   fail 'affected normal shards omit or duplicate a selected package'
 
 db_plan=$("$TEST_RUNNER" --dry-run --lane=db github.com/inspr-at/paimos/backend/db)
-[[ "$(grep -c '^go test .* ./db -run ' <<<"$db_plan")" -eq 4 ]] ||
+[[ "$(grep -c '^go test -count=1 -timeout=15m ./db -run ' <<<"$db_plan")" -eq 4 ]] ||
   fail 'db package is not split into four normal-test shards'
 for shard in 0 1 2 3; do
   shard_line=$(sed -n "$((shard + 1))p" <<<"$db_plan")
@@ -302,7 +312,7 @@ if "$TEST_RUNNER" --dry-run --lane=handlers --shard=0/4 github.com/inspr-at/paim
 fi
 for shard in 0 1 2 3 4; do
   plan=$("$TEST_RUNNER" --dry-run --lane=handlers --shard="$shard/5" github.com/inspr-at/paimos/backend/handlers)
-  [[ "$(grep -c '^go test .* ./handlers -run ' <<<"$plan")" -eq 1 ]] ||
+  [[ "$(grep -c '^go test -count=1 -timeout=15m ./handlers -run ' <<<"$plan")" -eq 1 ]] ||
     fail "handler normal shard $shard does not own exactly one invocation"
   [[ "$(printf '%s\n' "$plan" | rg -o 'Test[A-Za-z0-9_]+' | wc -l | tr -d ' ')" -gt 0 ]] ||
     fail "handler normal shard $shard is empty"
@@ -315,6 +325,8 @@ if GO_COMMAND="$FIXTURES/unsafe-go-list.sh" "$TEST_RUNNER" --dry-run --lane=hand
 fi
 
 performance_plan=$("$TEST_RUNNER" --dry-run --lane=performance github.com/inspr-at/paimos/backend/agentmode)
+[[ "$performance_plan" == 'go test -count=1 -timeout=8m '* ]] ||
+  fail 'performance normal lane lost its eight-minute timeout'
 [[ "$performance_plan" == *'overflow\ lost\ wake\ coalescing\ and\ restart'* && "$performance_plan" != *'subscribe\ before\ high-water'* ]] ||
   fail 'isolated normal lane does not exclusively own the unchanged Agent Mode performance contract'
 
@@ -707,13 +719,16 @@ assert_plan_covers_discovery_once 'broad managed-harness race' "$broad_managedha
 # Exhaustive groups partition the exact default plan, including every root and
 # lifecycle shard. They only affect broad all-lane runs, never PR selection.
 core_group_plan=$("$RACE_RUNNER" --dry-run --group=core './...')
+handlers_group_plan=$("$RACE_RUNNER" --dry-run --group=handlers './...')
 runtime_group_plan=$("$RACE_RUNNER" --dry-run --group=runtime './...')
-[[ -n "$core_group_plan" && -n "$runtime_group_plan" ]] || fail 'a broad race group is empty'
-group_union=$(printf '%s\n' "$core_group_plan" "$runtime_group_plan" | LC_ALL=C sort)
+[[ -n "$core_group_plan" && -n "$handlers_group_plan" && -n "$runtime_group_plan" ]] || fail 'a broad race group is empty'
+group_union=$(printf '%s\n' "$core_group_plan" "$handlers_group_plan" "$runtime_group_plan" | LC_ALL=C sort)
 [[ "$group_union" == "$(LC_ALL=C sort <<<"$broad_race_plan")" ]] ||
   fail 'broad groups omitted, duplicated, or changed a default race invocation'
 [[ -z "$(comm -12 <(LC_ALL=C sort <<<"$core_group_plan") <(LC_ALL=C sort <<<"$runtime_group_plan"))" ]] ||
   fail 'broad core and runtime groups overlap'
+[[ "$handlers_group_plan" == "$handler_all_plan" ]] ||
+  fail 'handlers broad group changed its complete bounded concurrency plan or ordering'
 expected_runtime_group=$(printf '%s\n' "$lifecycle_all_plan" \
   'go test -race -count=1 -timeout=8m ./lifecycleclient' \
   'go test -race -count=1 -timeout=8m ./runtimeconsumer' \
@@ -725,7 +740,7 @@ for invalid_group in '' all unknown; do
     fail "race runner accepted invalid or empty broad group [$invalid_group]"
   fi
 done
-for group in core runtime; do
+for group in core handlers runtime; do
   if "$RACE_RUNNER" --dry-run --group="$group" github.com/inspr-at/paimos/backend >/dev/null 2>&1 ||
     "$RACE_RUNNER" --dry-run --group="$group" --lane=affected --shard=0/4 './...' >/dev/null 2>&1; then
     fail 'broad group filtering escaped its all-lane ./... interface'
@@ -745,7 +760,7 @@ fi
 exec "${SEQUENTIAL_GO_FIXTURE:?}" "$@"
 EOF
 chmod +x "$group_go"
-for group in core runtime; do
+for group in core handlers runtime; do
   group_state="$TMP_ROOT/$group-sequential-race"
   mkdir -p "$group_state"
   expected_group_plan=$(GO_COMMAND="$group_go" "$RACE_RUNNER" --dry-run --group="$group" './...')
@@ -772,7 +787,7 @@ grep -q '^  pull_request:$' "$FULL_WORKFLOW" || fail 'labeled PR evidence trigge
 grep -q '^    types: \[labeled\]$' "$FULL_WORKFLOW" || fail 'PR evidence trigger is not limited to label events'
 grep -q '^  schedule:$' "$FULL_WORKFLOW" || fail 'nightly schedule trigger is missing'
 grep -q '^  workflow_dispatch:$' "$FULL_WORKFLOW" || fail 'manual full-suite trigger is missing'
-grep -q 'branches: \[main\]' "$FULL_WORKFLOW" || fail 'main full-suite trigger is missing'
+! grep -q '^  push:' "$FULL_WORKFLOW" || fail 'push still triggers full backend suites'
 ! grep -q "tags: \['v\*'\]" "$FULL_WORKFLOW" || fail 'tag duplicates already-green protected-main exhaustive assurance'
 
 vet=$(job_block backend-pr-vet)
@@ -810,56 +825,57 @@ for lane_and_plan in \
 do
   lane=${lane_and_plan%%:*}
   plan=${lane_and_plan#*:}
-  [[ "$plan" == *"github.event_name == 'pull_request'"* && "$plan" == *'backend-ci-packages.sh'* &&
+  [[ "$plan" == *"github.event_name == 'pull_request'"* && "$plan" == *'needs.backend-pr-plan.outputs.selection'* &&
     "$plan" == *"backend-pr-test.sh --lane=$lane"* ]] ||
     fail "parallel PR $lane lane is incomplete"
-  [[ "$plan" == *"$CI_SELECTION_CALL"* &&
-    "$plan" != *'mapfile -t packages < <('* ]] ||
-    fail "parallel PR $lane lane does not propagate selector failures"
+  [[ "$plan" == *'needs: backend-pr-plan'* &&
+    "$plan" != *'backend-ci-packages.sh'* ]] ||
+    fail "parallel PR $lane lane bypasses the shared plan"
   [[ "$plan" != *'-p 1'* && "$plan" != *'go test -count=1 -timeout=30m ./...'* ]] ||
     fail "parallel PR $lane lane still runs the serialized/full tree"
 done
-[[ "$handlers" == *'matrix:'* && "$handlers" == *'shard: [0, 1, 2, 3, 4]'* &&
+[[ "$handlers" == *'matrix:'* && "$handlers" == *'needs.backend-pr-plan.outputs.backend-pr-handlers-shards'* &&
   "$handlers" == *"--shard=\"\${{ matrix.shard }}/5\""* ]] ||
   fail 'handler normal shards do not run on five independent matrix runners'
-[[ "$normal" == *'matrix:'* && "$normal" == *'shard: [0, 1]'* &&
+[[ "$normal" == *'matrix:'* && "$normal" == *'needs.backend-pr-plan.outputs.backend-pr-shards'* &&
   "$normal" == *"--shard=\"\${{ matrix.shard }}/2\""* ]] ||
   fail 'affected normal packages do not run on two independent matrix runners'
 
 [[ "$race" == *"github.event_name == 'pull_request'"* ]] || fail 'race PR lane is not pull-request-only'
-[[ "$race" == *'backend-ci-packages.sh --direct'* && "$race" == *'backend-pr-race.sh --lane=affected'* ]] ||
+[[ "$race" == *'needs.backend-pr-plan.outputs.direct_selection'* && "$race" == *'backend-pr-race.sh --lane=affected'* ]] ||
   fail 'race PR lane does not race changed packages'
 for lane_and_plan in "race:$race" "managedharness-race:$managedharness_race" "db-race:$db_race" "handlers-race:$handlers_race"; do
   lane=${lane_and_plan%%:*}
   plan=${lane_and_plan#*:}
-  [[ "$plan" == *"$CI_SELECTION_CALL"* &&
-    "$plan" != *'mapfile -t packages < <('* ]] ||
-    fail "parallel PR $lane lane does not propagate selector failures"
+  [[ "$plan" == *'needs: backend-pr-plan'* &&
+    "$plan" != *'backend-ci-packages.sh'* ]] ||
+    fail "parallel PR $lane lane bypasses the shared plan"
 done
 [[ "$race" != *'-p 1'* && "$race" != *'go test -race -count=1 -timeout=30m ./...'* ]] ||
   fail 'race PR lane still races the full tree'
-[[ "$race" == *'matrix:'* && "$race" == *'shard: [0, 1, 2, 3]'* &&
+[[ "$race" == *'matrix:'* && "$race" == *'needs.backend-pr-plan.outputs.backend-pr-race-shards'* &&
   "$race" == *"--shard=\"\${{ matrix.shard }}/4\""* ]] ||
   fail 'affected race packages do not run on four independent matrix runners'
-[[ "$managedharness_race" == *'backend-ci-packages.sh --direct'* &&
+[[ "$managedharness_race" == *'needs.backend-pr-plan.outputs.direct_selection'* &&
   "$managedharness_race" == *'backend-pr-race.sh --lane=managedharness'* &&
-  "$managedharness_race" == *'matrix:'* && "$managedharness_race" == *'shard: [0, 1, 2, 3, 4, 5, 6]'* &&
+  "$managedharness_race" == *'matrix:'* && "$managedharness_race" == *'needs.backend-pr-plan.outputs.backend-pr-managedharness-race-shards'* &&
   "$managedharness_race" == *"--shard=\"\${{ matrix.shard }}/7\""* ]] ||
   fail 'managed-harness race oracles do not run on seven independent matrix runners'
-[[ "$db_race" == *'backend-ci-packages.sh --direct'* && "$db_race" == *'backend-pr-race.sh --lane=db'* ]] ||
+[[ "$db_race" == *'needs.backend-pr-plan.outputs.direct_selection'* && "$db_race" == *'backend-pr-race.sh --lane=db'* ]] ||
   fail 'parallel PR DB race lane is incomplete'
-[[ "$handlers_race" == *'backend-ci-packages.sh --direct'* && "$handlers_race" == *'backend-pr-race.sh --lane=handlers'* ]] ||
+[[ "$handlers_race" == *'needs.backend-pr-plan.outputs.direct_selection'* && "$handlers_race" == *'backend-pr-race.sh --lane=handlers'* ]] ||
   fail 'parallel PR handler race lane is incomplete'
-[[ "$handlers_race" == *'matrix:'* && "$handlers_race" == *'shard: [0, 1, 2, 3, 4]'* &&
+[[ "$handlers_race" == *'matrix:'* && "$handlers_race" == *'needs.backend-pr-plan.outputs.backend-pr-handlers-race-shards'* &&
   "$handlers_race" == *"--shard=\"\${{ matrix.shard }}/5\""* ]] ||
   fail 'handler race shards do not run on five independent matrix runners'
 
-[[ "$invariants" == *'TestRegression_'* && "$invariants" == *'TestAuthzFuzz_'* && "$invariants" == *'paimos_test_unsupported'* ]] ||
+[[ "$invariants" != *'TestRegression_'* && "$invariants" != *'TestAuthzFuzz_'* && "$invariants" == *'paimos_test_unsupported'* ]] ||
   fail 'parallel security/platform invariant lane is incomplete'
 [[ "$publish_invariants" == *"github.event_name == 'push'"* &&
-  "$publish_invariants" == *'paimos_test_unsupported'* &&
+  "$publish_invariants" == *"github.ref_type == 'tag'"* &&
+  "$publish_invariants" != *'go test'* &&
   "$publish_invariants" == *"$FULL_WAIT_CALL"* ]] ||
-  fail 'main/tag publish path lacks executable backend fail-closed assurance'
+  fail 'tag publish path duplicates tests, polls, or lacks exact-code backend assurance'
 
 [[ "$full_authorize" == *'backend-full-authorize.sh'* &&
   "$full_authorize" == *"if: $FULL_PR_GUARD"* &&
@@ -871,7 +887,7 @@ done
   fail 'full backend serial/platform assurance lacks an explicit independent budget'
 [[ "$full_race" == *'needs: backend-full-authorize'* && "$full_race" == *'timeout-minutes: 90'* &&
   "$full_race" == *'BACKEND_RACE_PACKAGE_TIMEOUT: 15m'* &&
-  "$full_race" == *'matrix:'* && "$full_race" == *'group: [core, runtime]'* &&
+  "$full_race" == *'matrix:'* && "$full_race" == *'group: [core, handlers, runtime]'* &&
   "$full_race" == *'fail-fast: false'* && "$full_race" != *'continue-on-error:'* &&
   "$full_race" == *"backend-pr-race.sh --group=\"\${{ matrix.group }}\" './...'"* &&
   "$full_race" == *'sequential'* ]] ||
@@ -882,6 +898,10 @@ done
   "$full" == *"$FULL_RACE_RESULT"* && "$full" == *"$FULL_SERIAL_ASSERT"* &&
   "$full" == *"$FULL_RACE_ASSERT"* ]] ||
   fail 'full backend workflow lacks a fail-closed serial/race aggregator'
+[[ "$(cat "$FULL_WORKFLOW")" != *'run_full'* &&
+  "$(cat "$FULL_WORKFLOW")" != *'backend-full-reuse'* &&
+  "$(cat "$FULL_WORKFLOW")" != *'continue-on-error'* ]] ||
+  fail 'nightly backend evidence can skip execution or hide a failure'
 grep -q 'BACKEND_FULL_TIMEOUT_SECONDS:-6000' "$FULL_WAITER" ||
   fail 'exact-head full-suite waiter budget is not derived from parallel job budgets'
 
@@ -889,14 +909,14 @@ grep -q 'BACKEND_FULL_TIMEOUT_SECONDS:-6000' "$FULL_WAITER" ||
 [[ "$frontend" == *'npm run schema:check'* && "$frontend" == *'npm test'* ]] ||
   fail 'frontend quality lane lost schema, lint, type, or unit assurance'
 for dependency in \
-  backend-pr-vet backend-pr backend-pr-db backend-pr-handlers backend-pr-performance \
+  backend-pr-plan backend-pr-vet backend-pr backend-pr-db backend-pr-handlers backend-pr-performance \
   backend-pr-race backend-pr-managedharness-race backend-pr-db-race backend-pr-handlers-race \
   backend-security-invariants backend-publish-invariants quality frontend-quality
 do
   [[ "$aggregate" == *"$dependency"* ]] || fail "required test aggregator does not depend on $dependency"
 done
 [[ "$aggregate" == *'BACKEND_PR_MANAGEDHARNESS_RACE: ${{ needs.backend-pr-managedharness-race.result }}'* &&
-  "$aggregate" == *'[[ "$BACKEND_PR_MANAGEDHARNESS_RACE" == '\''success'\'' ]]'* &&
+  "$aggregate" == *'require_planned_lane "$BACKEND_PR_MANAGEDHARNESS_RACE_PLANNED" "$BACKEND_PR_MANAGEDHARNESS_RACE"'* &&
   "$aggregate" == *'[[ "$BACKEND_PR_MANAGEDHARNESS_RACE" == '\''skipped'\'' ]]'* ]] ||
   fail 'required test aggregator does not fail closed on the managed-harness race matrix result'
 [[ "$aggregate" != *'backend-full'* ]] || fail 'required PR test aggregator still depends on the full backend suite'
@@ -907,4 +927,7 @@ done
 grep -q 'two tag workflows' "$RELEASE_DOC" || fail 'release documentation does not name the two artifact tag workflows'
 grep -q 'backend-full.yml' "$RELEASE_DOC" || fail 'release documentation omits pre-tag exhaustive backend assurance'
 
+python3 "$ROOT/scripts/test-backend-full-evidence.py"
+python3 "$ROOT/scripts/test-backend-ci-dedupe.py"
+python3 "$ROOT/scripts/test-backend-pr-plan.py"
 echo 'test-backend-pr-gate: ok'

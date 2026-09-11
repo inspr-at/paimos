@@ -2,9 +2,163 @@
 
 All notable changes to PAIMOS are documented here.
 
-The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
-with legacy releases using Semantic Versioning and new product cuts using the
-calendar form `yy.mm.dd[.hh.mm]`.
+The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
+Three version eras appear in one sequence and are never retagged: legacy
+Semantic Versioning (`x.y.z`, until 5.21.0), INSPR calendar v1
+(`yy.mm.dd[.hh.mm]`, 26.08.31 – 26.09.09.13.13), and INSPR calendar v2
+(`YYMMDDhhmmss.0.0`, the UTC reservation second as a SemVer-shaped
+coordinate, from the first entry below that form).
+
+## [260911125749.0.0] — 2026-09-11
+
+### Changed — Offer brand dots (PAI-1007)
+
+- Reuse one three-circle brand mark beside the offer title and Roman section headings, keeping the circles identical, round and aligned with the heading text.
+- Show a smaller grey variant before the unchanged footer logotype while preserving pagination, accessible heading names and sender-specific footers.
+
+### Changed — Release backend assurance scheduling (PAI-1003)
+
+- Run exhaustive backend assurance nightly and for the exact immutable release merge before tagging instead of repeating it after every main merge.
+- Keep release publication fail-closed on successful full execution for the exact release commit.
+
+## [260911121105.0.0] — 2026-09-11
+
+### Changed — Compact offer editor (PAI-991)
+
+- Collapse workspace and offer chrome into a slim, expandable toolbar with SVG actions and page-width, whole-page and percentage zoom.
+- Keep save feedback visible with a one-second activity indicator, successful-save timestamp and a manual save action that preserves revision checks.
+- Distinguish failed saves and invalid inputs from saved state; clarify that customer links and QR codes are created when an offer is finalized.
+- Match footer logo height to the footer text and separate the net total with one full-width rule while retaining position separators.
+
+### Changed — Frontend release assurance (PAI-998)
+
+- Reuse successful ancestral full backend execution only for eligible frontend and release-metadata changes, retaining exact-head contracts and failing closed for unknown inputs.
+
+### Improved — Faster test and build feedback (PAI-999, PAI-1000, PAI-1001, PAI-1002, PAI-1004, PAI-1005)
+
+- Give database and handler shards sufficient timeout headroom while preserving the other lane budgets.
+- Remove duplicate backend executions, plan affected PR lanes once and avoid allocating runners for empty lanes.
+- Reuse migrated template databases in backend tests with pinned fixture dependencies and inexpensive integrity hashes.
+- Remove tests that only enforce documentation prose while retaining schema and behavior checks.
+- Build the production SPA from the real repository context so required release metadata is available without copying a synthetic frontend-only tree.
+
+### Maintenance — Intake attribution comments (PAI-997)
+
+- Credit start-agm-com in the audio and TTS implementation comments after its rename.
+
+## [260911063734.0.0] — 2026-09-11
+
+### Fixed — Offer section headings and pagination (PAI-991)
+
+- Number the conditions and performance sections with Roman numerals and show each heading only once, at the start of its section.
+- Match the spacing below section headings to the numbered-block gap and preserve a consistent top inset on continuation pages.
+- Measure section and table headers during pagination, retaining the print guard for content too large to fit on one page.
+
+## [260911005821.0.0] — 2026-09-11
+
+### Changed — Final calendar version display (PAI-994)
+
+- Render calendar version labels with the approved revision 3 segment weights and sun-coloured date tint from the pinned INSPR display data. Canonical version strings, copyable values and legacy labels stay unchanged.
+- Verify the vendored display data against its immutable upstream revision in offline builds and initialized checkouts.
+- Include the display changes from the unpublished `260910221338.0.0` reservation. Its tag audit did not finish before the UTC cut-day boundary; no tag or release image was published.
+
+### Fixed — Release tag audit and UTC cutoff (PAI-995)
+
+- Batch remote tag verification while preserving exact object, ancestry and movement checks, reducing the network round trips required for release recovery.
+- Recheck the UTC cut day immediately before creating a release tag, including after a recovery audit.
+
+## [260910221338.0.0] — 2026-09-10
+
+### Changed — Final calendar version display (PAI-994)
+
+- Render calendar version labels with the approved revision 3 segment weights and sun-coloured date tint from the pinned INSPR display data. Canonical version strings, copyable values and legacy labels stay unchanged.
+- Verify the vendored display data against its immutable upstream revision in offline builds and initialized checkouts.
+
+## [260910201738.0.0] — 2026-09-10
+
+### Fixed — Exhaustive race job budget (PAI-991)
+
+- Run the complete handler race plan on its own CI runner, keeping every test, package timeout, outer-job limit and exact-release assurance gate unchanged. This avoids the accumulated 90-minute core-run timeout that prevented the prior reservation from publishing.
+
+### Included — CRM offer delivery (PAI-991)
+
+- Publish the pending customer link/QR/online acceptance, compact running headers and monthly `KYYMMN` customer numbers described below. The prior `260910172446.0.0` reservation produced no tag or release image.
+
+## [260910172446.0.0] — 2026-09-10
+
+Unpublished reservation: its exact-head exhaustive CI reached the outer time limit. No tag or image was published; the application changes are included in the next release above.
+
+### Added — Customer offer links and online acceptance (PAI-991)
+
+- Share finalized offers through a customer link or a printable SVG QR code; customers can read and print without an account.
+- Explicit online acceptance records the signer, company, time and immutable audit receipt atomically. Expired offers stay readable and cannot be accepted; repeated attempts cannot replace the first signer.
+- Show creator-specific accepted offers in CRM. Keep capability URLs out of application logs, caches and referrers; rate-limit public requests and honor the CRM module switch.
+
+### Fixed — Offer page headers (PAI-991)
+
+- Keep the offer number and date on one line; full company names stay in the address block and no longer crowd the repeated page header.
+
+### Changed — Monthly customer numbers (PAI-991)
+
+- Assign `KYYMM` followed by an unpadded monthly counter, such as `K26091`, `K26092`, then `K26101` in October.
+- Allow an explicit admin conversion of a legacy customer number while all associated offers remain drafts; update their snapshots and revisions atomically. Issued documents and monthly numbers remain fixed.
+
+## [260910133810.0.0] — 2026-09-10
+
+### Added — CRM offer editor and PDF printing (PAI-991)
+
+- Create saved offers from a customer's CRM page; reuse primary contacts and assign permanent customer/offer numbers in Europe/Vienna.
+- Edit the supplied v8 A4 document, positions and amounts directly, with autosave and concurrent-edit protection. Configure sender and suggested German text blocks in a small dialog under Integrations → CRM or the editor.
+- Finalize an immutable document snapshot, duplicate it with a new number, and print through a shared A4 renderer with additional pages for longer terms or positions. Anta and Manrope are bundled locally.
+- First delivery uses browser PDF and manual forwarding. Public customer links, QR codes and online acceptance remain in PAI-991's later stage.
+
+## [260910101110.0.0] — 2026-09-10
+
+### Fixed — Docker image build after the display-weights frontend change (PAI-989)
+
+- The frontend build stage now copies `scripts/release/version-scheme.json`,
+  which `vite.config.ts` reads for `__APP_VERSION_SCHEME__` since
+  260910071632.0.0. Without it the image build failed on every main push and
+  on the `v260910071632.0.0` tag, so that coordinate is a tag-only reservation
+  without a published image; this entry ships the first image that carries
+  the weighted version footer.
+
+## [260910071632.0.0] — 2026-09-10
+
+### Added — calendar v2 display weights in the shell (PAI-989, INSPR-400)
+
+- `CalendarVersion.vue` renders the instance version with the INSPR calendar v2
+  display weights: per-segment opacity and the teal Schmuckfarbe mixed into the
+  date, read at build time from `frontend/src/brand/calendar-version-display.json`,
+  an in-repo copy pinned byte-for-byte to `doctrine/lib/calendar-version-display.json`
+  (inspr-modules 0.9.0) by `scripts/check-calendar-version-display.sh` (CI step).
+  The scheme comes from `scripts/release/version-scheme.json` via
+  `__APP_VERSION_SCHEME__`, never from the string's shape; text content and
+  `data-version` stay the canonical label. Used in the sidebar footer.
+
+## [260909151030.0.0] — 2026-09-09
+
+### Changed — INSPR calendar v2 release coordinates (PAI-979, INSPR-395)
+
+- Releases are now cut as `YYMMDDhhmmss.0.0`: the UTC reservation second as
+  the SemVer MAJOR segment with MINOR and PATCH fixed at `0.0`. The coordinate
+  is syntactically valid SemVer, fixed-width and therefore string-sortable, and
+  is published as exactly one immutable image tag with no numeric aliases.
+  `scripts/release.sh now` reserves it; an explicit coordinate reserved earlier
+  the same UTC day is also accepted. Legacy `patch|minor|major` and
+  `yy.mm.dd[.hh.mm]` cuts are closed once the first v2 coordinate exists.
+  Every published tag, image and changelog entry from the earlier eras stays
+  exactly as it is.
+- The delivery-evidence contract accepts `inspr-calendar-v2` next to `legacy`
+  and `inspr-calendar-v1` (external-stage v2 artifact evidence, baseline built
+  receipts, typed release identities, `/api/schema`, OpenAPI). Versions are
+  validated against the grammar of their declared scheme and never inferred
+  from shape; unknown schemes fail closed. The frozen owner-v2 fixture gains an
+  explicit calendar v2 deployment plus verification pair, and the stored
+  evidence table admits the new scheme through an additive migration.
+- The changelog parser, release hygiene, doc-sync, GHCR pruning and the CLI
+  release workflow recognise the new coordinate; the migration anchor is
+  recorded in `scripts/release/version-scheme.json`.
 
 ## [26.09.09.13.13] — 2026-09-09
 

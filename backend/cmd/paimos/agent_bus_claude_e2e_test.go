@@ -17,6 +17,7 @@ import (
 
 	"github.com/inspr-at/paimos/backend/agentmessage"
 	paimosdb "github.com/inspr-at/paimos/backend/db"
+	"github.com/inspr-at/paimos/backend/internal/testdb"
 	"github.com/inspr-at/paimos/backend/secretvault"
 )
 
@@ -44,6 +45,7 @@ func TestAgentBusRealClaudeSimpleE2E(t *testing.T) {
 	t.Setenv("PAIMOS_SECRET_KEY", base64.StdEncoding.EncodeToString(make([]byte, 32)))
 	secretvault.ResetForTest()
 	t.Cleanup(secretvault.ResetForTest)
+	testdb.Prepare(t)
 	if err := paimosdb.Open(); err != nil {
 		t.Fatal(err)
 	}

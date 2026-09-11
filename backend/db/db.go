@@ -13719,10 +13719,10 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 		)`,
 		`CREATE INDEX idx_acceptance_target_bindings_project ON acceptance_target_bindings(project_id, release_id)`,
 	}})
-	// M187 / PAI-978: deliberate human one-shot launch grants and the closed
+	// M191 / PAI-978: deliberate human one-shot launch grants and the closed
 	// additive Pharos candidate/admission/consume sidecar. Existing external
 	// stage v1/v2 tables and bytes are unchanged.
-	migrations = append(migrations, migration{version: 187, steps: []string{
+	launchAuthorityMigration := migration{version: 191, steps: []string{
 		`ALTER TABLE external_stage_reporter_registrations ADD COLUMN target_ref TEXT NOT NULL DEFAULT ''
 			CHECK(target_ref='' OR (length(CAST(target_ref AS BLOB))=71 AND substr(target_ref,1,7)='sha256:'))`,
 		`CREATE TRIGGER trg_external_stage_registration_target_immutable BEFORE UPDATE OF target_ref
@@ -13836,11 +13836,116 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 			state,consume_request_digest,consume_idempotency_digest,receipt_bytes,consumed_at ON external_stage_launch_admissions
 			WHEN OLD.state<>'issued' OR NEW.state<>'consumed'
 			BEGIN SELECT RAISE(ABORT,'launch admission consume is one-shot'); END`,
+	}}
+
+	// M187 / PAI-979: admit the INSPR calendar v2 scheme (`inspr-calendar-v2`,
+	// UTC `YYMMDDhhmmss.0.0`) in stored Pharos v2 evidence. SQLite cannot widen a
+	// CHECK in place, so the M175 table is rebuilt byte-for-byte with the
+	// extended constraint; rows, the self-referencing deployment binding, the
+	// insert guard and the immutability triggers are preserved unchanged.
+	migrations = append(migrations, migration{version: 187, steps: []string{
+		`PRAGMA foreign_keys=OFF`,
+		`ALTER TABLE external_stage_pharos_evidence_v2 RENAME TO external_stage_pharos_evidence_v2_old187`,
+		`DROP TRIGGER IF EXISTS trg_external_stage_pharos_evidence_v2_insert_guard`,
+		`DROP TRIGGER IF EXISTS trg_external_stage_pharos_evidence_v2_no_update`,
+		`DROP TRIGGER IF EXISTS trg_external_stage_pharos_evidence_v2_no_delete`,
+		`CREATE TABLE external_stage_pharos_evidence_v2 (
+		 report_event_id                 INTEGER PRIMARY KEY REFERENCES external_stage_pharos_evidence(report_event_id),
+		 version_scheme                  TEXT NOT NULL CHECK(version_scheme IN ('legacy','inspr-calendar-v1','inspr-calendar-v2')),
+		 release_channel                 TEXT NOT NULL CHECK(length(CAST(release_channel AS BLOB)) BETWEEN 1 AND 64 AND
+		  release_channel GLOB '[a-z]*' AND release_channel NOT GLOB '*[^a-z0-9._-]*'),
+		 release_sequence                INTEGER NOT NULL CHECK(release_sequence>=0),
+		 release_manifest_coordinate     TEXT NOT NULL CHECK(length(CAST(release_manifest_coordinate AS BLOB)) BETWEEN 3 AND 255 AND
+		  instr(release_manifest_coordinate,':') BETWEEN 2 AND 65 AND
+		  substr(release_manifest_coordinate,1,1) GLOB '[a-z]' AND
+		  substr(release_manifest_coordinate,1,instr(release_manifest_coordinate,':')-1) NOT GLOB '*[^a-z0-9._-]*' AND
+		  substr(release_manifest_coordinate,instr(release_manifest_coordinate,':')+1,1) GLOB '[A-Za-z0-9]' AND
+		  substr(release_manifest_coordinate,instr(release_manifest_coordinate,':')+1) NOT GLOB '*[^A-Za-z0-9._/@:+-]*'),
+		 release_manifest_digest         BLOB NOT NULL CHECK(typeof(release_manifest_digest)='blob' AND length(release_manifest_digest)=32),
+		 bound_deployment_report_event_id INTEGER REFERENCES external_stage_pharos_evidence_v2(report_event_id)
+		) WITHOUT ROWID`,
+		`INSERT INTO external_stage_pharos_evidence_v2(report_event_id,version_scheme,release_channel,release_sequence,
+		  release_manifest_coordinate,release_manifest_digest,bound_deployment_report_event_id)
+		 SELECT report_event_id,version_scheme,release_channel,release_sequence,
+		  release_manifest_coordinate,release_manifest_digest,bound_deployment_report_event_id
+		 FROM external_stage_pharos_evidence_v2_old187 ORDER BY report_event_id`,
+		`DROP TABLE external_stage_pharos_evidence_v2_old187`,
+		`CREATE TRIGGER trg_external_stage_pharos_evidence_v2_insert_guard
+		 BEFORE INSERT ON external_stage_pharos_evidence_v2
+		 WHEN NOT EXISTS(
+		  SELECT 1 FROM external_stage_pharos_evidence evidence
+		  JOIN external_stage_report_events report ON report.id=evidence.report_event_id
+		  JOIN external_stage_handoffs handoff ON handoff.id=report.handoff_row_id
+		  WHERE evidence.report_event_id=NEW.report_event_id AND handoff.reporter_class='pharos'
+		   AND ((evidence.evidence_kind='deployment' AND NEW.bound_deployment_report_event_id IS NULL) OR
+		        (evidence.evidence_kind='verification' AND NEW.bound_deployment_report_event_id IS NOT NULL AND EXISTS(
+		          SELECT 1 FROM external_stage_pharos_evidence deployment
+		          JOIN external_stage_pharos_evidence_v2 deployment_v2 ON deployment_v2.report_event_id=deployment.report_event_id
+		          JOIN external_stage_report_events deployment_report ON deployment_report.id=deployment.report_event_id
+		          JOIN external_stage_handoffs deployment_handoff ON deployment_handoff.id=deployment_report.handoff_row_id
+		          WHERE deployment.report_event_id=NEW.bound_deployment_report_event_id
+		           AND deployment.evidence_kind='deployment' AND deployment.result='succeeded'
+		           AND deployment_handoff.delivery_id=handoff.delivery_id AND deployment_handoff.attempt_id=handoff.attempt_id
+		           AND deployment_handoff.stage_key='deployment' AND deployment_handoff.lifecycle_state='succeeded'
+		           AND deployment.environment_symbol=evidence.environment_symbol
+		           AND deployment.artifact_version=evidence.artifact_version
+		           AND deployment.artifact_digest=evidence.artifact_digest
+		           AND deployment.commit_digest=evidence.commit_digest
+		           AND deployment_v2.version_scheme=NEW.version_scheme
+		           AND deployment_v2.release_channel=NEW.release_channel
+		           AND deployment_v2.release_sequence=NEW.release_sequence
+		           AND deployment_v2.release_manifest_coordinate=NEW.release_manifest_coordinate
+		           AND deployment_v2.release_manifest_digest=NEW.release_manifest_digest))))
+		 BEGIN SELECT RAISE(ABORT,'invalid external stage Pharos v2 evidence binding'); END`,
+		`CREATE TRIGGER trg_external_stage_pharos_evidence_v2_no_update BEFORE UPDATE ON external_stage_pharos_evidence_v2
+		 BEGIN SELECT RAISE(ABORT,'external stage v2 evidence is immutable'); END`,
+		`CREATE TRIGGER trg_external_stage_pharos_evidence_v2_no_delete BEFORE DELETE ON external_stage_pharos_evidence_v2
+		 BEGIN SELECT RAISE(ABORT,'external stage v2 evidence is immutable'); END`,
+		`PRAGMA foreign_keys=ON`,
 	}})
-	// M188 / PAI-986: durable finish-current-work retirement and admission fence.
-	// The schema lives in a dedicated file because M187 is owned by a separate
-	// release-sequencing correction and must remain byte-for-byte untouched.
-	migrations = append(migrations, migration{version: 188})
+	// PAI-991: atomic offer documents, immutable numbers and optimistic revisions.
+	migrations = append(migrations, migration{version: 188, steps: []string{
+		`ALTER TABLE customers ADD COLUMN customer_no TEXT`,
+		`CREATE UNIQUE INDEX idx_customers_customer_no ON customers(customer_no) WHERE customer_no IS NOT NULL`,
+		`CREATE TABLE offer_sequences(key TEXT PRIMARY KEY,value INTEGER NOT NULL CHECK(value>0))`,
+		`CREATE TABLE offers(id INTEGER PRIMARY KEY AUTOINCREMENT,offer_no TEXT NOT NULL UNIQUE,customer_id INTEGER NOT NULL REFERENCES customers(id),status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft','sent','accepted','declined','expired')),revision INTEGER NOT NULL DEFAULT 1,document TEXT NOT NULL CHECK(json_valid(document)),created_by INTEGER REFERENCES users(id),created_at TEXT NOT NULL DEFAULT (datetime('now')),updated_at TEXT NOT NULL DEFAULT (datetime('now')),sent_at TEXT)`,
+		`CREATE INDEX idx_offers_customer ON offers(customer_id,id)`,
+		`CREATE TRIGGER offers_immutable_number BEFORE UPDATE OF offer_no,customer_id ON offers BEGIN SELECT RAISE(ABORT,'offer identity is immutable'); END`,
+		`CREATE TRIGGER offers_frozen_document BEFORE UPDATE OF document ON offers WHEN OLD.status!='draft' BEGIN SELECT RAISE(ABORT,'finalized offer is immutable'); END`,
+		`CREATE TRIGGER customer_no_immutable BEFORE UPDATE OF customer_no ON customers WHEN OLD.customer_no IS NOT NULL AND NEW.customer_no IS NOT OLD.customer_no BEGIN SELECT RAISE(ABORT,'customer number is immutable'); END`,
+	}})
+	// PAI-991: capability links and an atomic, immutable acceptance receipt.
+	migrations = append(migrations, migration{version: 189, steps: []string{
+		`ALTER TABLE offers ADD COLUMN public_token TEXT`,
+		`CREATE UNIQUE INDEX idx_offers_public_token ON offers(public_token) WHERE public_token IS NOT NULL`,
+		`ALTER TABLE offers ADD COLUMN accepted_at TEXT`,
+		`ALTER TABLE offers ADD COLUMN accepted_name TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE offers ADD COLUMN accepted_company TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE offers ADD COLUMN accepted_note TEXT NOT NULL DEFAULT ''`,
+		`CREATE TABLE offer_acceptance_audit(offer_id INTEGER PRIMARY KEY REFERENCES offers(id),accepted_at TEXT NOT NULL,accepted_name TEXT NOT NULL,accepted_company TEXT NOT NULL,accepted_note TEXT NOT NULL,ip TEXT NOT NULL,user_agent TEXT NOT NULL,document_sha256 TEXT NOT NULL,offer_revision INTEGER NOT NULL)`,
+		`CREATE TRIGGER offer_acceptance_audit_no_update BEFORE UPDATE ON offer_acceptance_audit BEGIN SELECT RAISE(ABORT,'acceptance audit is immutable'); END`,
+		`CREATE TRIGGER offer_acceptance_audit_no_delete BEFORE DELETE ON offer_acceptance_audit BEGIN SELECT RAISE(ABORT,'acceptance audit is immutable'); END`,
+		`CREATE TRIGGER offers_acceptance_immutable BEFORE UPDATE ON offers WHEN OLD.status='accepted' BEGIN SELECT RAISE(ABORT,'accepted offer is immutable'); END`,
+	}})
+	// PAI-991: permit one explicit legacy-to-monthly number conversion while
+	// every related offer is still a draft. No existing number is auto-rewritten.
+	migrations = append(migrations, migration{version: 190, steps: []string{
+		`DROP TRIGGER customer_no_immutable`,
+		`CREATE TRIGGER customer_no_immutable BEFORE UPDATE OF customer_no ON customers
+		 WHEN OLD.customer_no IS NOT NULL AND NEW.customer_no IS NOT OLD.customer_no
+		 AND (NEW.customer_no IS NULL OR NOT (
+		   OLD.customer_no GLOB 'K[0-9][0-9]-[0-9][0-9][0-9]*'
+		   AND substr(OLD.customer_no,5) NOT GLOB '*[^0-9]*'
+		   AND length(NEW.customer_no)>=6 AND substr(NEW.customer_no,1,1)='K'
+		   AND substr(NEW.customer_no,2) NOT GLOB '*[^0-9]*'
+		   AND substr(NEW.customer_no,4,2) BETWEEN '01' AND '12'
+		   AND substr(NEW.customer_no,6,1) BETWEEN '1' AND '9'
+		   AND NOT EXISTS(SELECT 1 FROM offers WHERE customer_id=OLD.id AND status!='draft')
+		 )) BEGIN SELECT RAISE(ABORT,'customer number is immutable'); END`,
+	}})
+	// M192 / PAI-986: durable finish-current-work retirement and admission fence.
+	// Both held migrations remain additive after published main migrations 187–190.
+	migrations = append(migrations, launchAuthorityMigration, migration{version: 192})
 	for _, m := range migrations {
 		if m.version > maxVersion {
 			continue
@@ -13879,8 +13984,8 @@ func applyMigration(ctx context.Context, conn *sql.Conn, m migration) error {
 	if m.version == 180 {
 		return applyHarnessMessagesMigration180(ctx, conn)
 	}
-	if m.version == 188 {
-		return applyHarnessRetirementMigration188(ctx, conn)
+	if m.version == 192 {
+		return applyHarnessRetirementMigration192(ctx, conn)
 	}
 	if migrationUsesForeignKeyPragma(m) {
 		return applyForeignKeyRebuildMigration(ctx, conn, m)

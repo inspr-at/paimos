@@ -14,6 +14,7 @@ import (
 
 	"github.com/inspr-at/paimos/backend/auth"
 	"github.com/inspr-at/paimos/backend/db"
+	"github.com/inspr-at/paimos/backend/internal/testdb"
 )
 
 // PAI-739: the first-run seed must produce a super-admin — granting
@@ -24,6 +25,7 @@ func openSeedTestDB(t *testing.T) {
 	t.Helper()
 	t.Setenv("DATA_DIR", t.TempDir())
 	t.Setenv("PAIMOS_TEST_MODE", "1")
+	testdb.Prepare(t)
 	if err := db.Open(); err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}

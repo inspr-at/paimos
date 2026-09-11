@@ -18,8 +18,9 @@ One production instance pulls from the registry:
 
 Registry: `ghcr.io/inspr-at/paimos`. Images produced per-commit on `main`
 (`:latest`, `:sha-<short>`) and per release tag. Legacy SemVer tags retain
-their `:X.Y.Z`, `:X.Y`, and `:X` aliases; calendar tags publish only their
-exact `:yy.mm.dd[.hh.mm]` value and never mutable numeric aliases.
+their `:X.Y.Z`, `:X.Y`, and `:X` aliases; calendar tags (v1 `yy.mm.dd[.hh.mm]`
+and v2 `YYMMDDhhmmss.0.0`) publish only their exact value and never mutable
+numeric aliases.
 CI source of truth: [`.github/workflows/ci-v2.yml`](../.github/workflows/ci-v2.yml).
 
 ---
@@ -27,7 +28,7 @@ CI source of truth: [`.github/workflows/ci-v2.yml`](../.github/workflows/ci-v2.y
 ## The four steps
 
 ```
-just release [patch|minor|major|x.y.z|yy.mm.dd[.hh.mm]] # protected PR → merge-commit tag → evidence
+just release now                    # reserve the UTC YYMMDDhhmmss.0.0 coordinate → protected PR → merge-commit tag → evidence
 just verify-release <tag>                # verify signature + SBOM attestations + provenance before deploy
 # deploy ppm via the composeStack path — see "Deploying ppm" below
 just doc-sync [tag]                      # file a "doc/site sync follow-up" ticket in PAIMOS
@@ -94,10 +95,12 @@ runbook `ppm-deploy-composestack` (#4278).
    The only permitted initial dirty state is a reviewed, uncommitted
    `docs/CHANGELOG.md` entry for a non-interactive release.
 2. If no argument: dumps commits since the last release tag (all + runtime-only) and
-   exits. Look at the output, decide patch/minor/major, re-run.
-3. Accepts `patch|minor|major` while the product remains on its legacy SemVer
-   line, or an explicit calendar `yy.mm.dd[.hh.mm]` cut matching the actual
-   Vienna day. The suffix is reserved for a same-day recut; `6.0.0` is rejected.
+   exits. Look at the output, then re-run with `now`.
+3. Accepts `now` (reserves the current UTC second as `YYMMDDhhmmss.0.0`,
+   INSPR calendar v2) or an explicit v2 coordinate reserved earlier the same
+   UTC day that is later than every published v2 coordinate. Legacy
+   `patch|minor|major` and `yy.mm.dd[.hh.mm]` are closed once the first v2
+   coordinate exists; `6.0.0` is rejected.
 4. Creates deterministic `release/v<version>`, updates `VERSION`, refreshes the
    README badge and pinned install examples, and prepends a draft CHANGELOG
    entry pre-seeded from commit subjects. Interactive runs open `$EDITOR`;
@@ -122,6 +125,22 @@ branch, PR target, merge-commit, or tag drift is rejected. A behind branch is
 merged with current `origin/main` locally using a merge commit carrying the
 author's DCO sign-off, so the required checks can rerun without an unsigned
 GitHub-generated update.
+
+For a separate release review, use the supported local preparation checkpoint:
+
+```bash
+scripts/release.sh now --prepare-only --no-edit
+# Review the four-file commit. The final JSON line records version, branch,
+# head and base; use that explicit version and full reviewed commit SHA below.
+scripts/release.sh <version> --reviewed-head <full-sha> --no-edit
+```
+
+Preparation returns successfully before any push, PR creation or tag. Repeat
+preparation with the recorded version to inspect the same commit. Reviewed
+resume retains all normal release gates and rejects a different head or an
+advanced main instead of automatically merging new code into the reviewed
+release. If main advanced, prepare a fresh version and review its delta.
+The receipt identifies the content; it does not itself grant approval.
 
 An exceptional merged PR with missing GitHub auto-merge provenance is not a
 manual-tag invitation. It can resume only after a separate reviewed main-branch

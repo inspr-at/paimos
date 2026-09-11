@@ -1,0 +1,31 @@
+{
+  "intro": "Vielen Dank für Ihr Interesse. Auf Basis unseres Gesprächs und der übermittelten Unterlagen bieten wir die nachfolgend beschriebenen Beratungsleistungen zu den genannten Bedingungen an.",
+  "blocks": [
+    {
+      "heading": "Vertragspartner",
+      "body": "Auftragnehmer ist der oben angeführte Absender, Auftraggeber ist der oben genannte Empfänger. Dieses Angebot richtet sich ausschließlich an Unternehmer im Sinne des UGB."
+    },
+    {
+      "heading": "Leistungsgegenstand",
+      "body": "Gegenstand ist eine Beratungs- und Analyseleistung (Consulting). Die Leistung wird nach Aufwand oder als Paket laut Aufstellung erbracht. Ergebnisse sind Analysen, Empfehlungen, Prototypen und Dokumentation; ein bestimmter wirtschaftlicher Erfolg wird nicht geschuldet."
+    },
+    {
+      "heading": "Gewährleistung und Haftung",
+      "body": "Beratungsergebnisse beruhen auf den vom Auftraggeber bereitgestellten Informationen. Die Gewährleistung für Prototypen, Modelle und Auswertungen wird ausgeschlossen, soweit gesetzlich zulässig. Die Haftung ist auf Vorsatz und grobe Fahrlässigkeit beschränkt und der Höhe nach mit dem Auftragswert begrenzt."
+    },
+    {
+      "heading": "Datenschutz",
+      "body": "Der Auftraggeber bleibt Verantwortlicher im Sinne der DSGVO. Für die Leistung werden keine personenbezogenen Daten benötigt; der Auftraggeber stellt Unterlagen bereinigt oder anonymisiert bereit. Eine Verarbeitung personenbezogener Daten im Auftrag findet nicht statt, es sei denn, sie wird gesondert schriftlich vereinbart."
+    },
+    {
+      "heading": "Vergütung und Zahlung",
+      "body": "Alle Preise verstehen sich in Euro zuzüglich 20 % Umsatzsteuer. Reise- und Nebenkosten werden nach tatsächlichem Aufwand verrechnet. Zahlbar innerhalb von 14 Tagen ab Rechnungsdatum ohne Abzug."
+    },
+    {
+      "heading": "Bindefrist und anwendbares Recht",
+      "body": "Dieses Angebot ist bis zum oben genannten Datum gültig. Es gilt österreichisches Recht; Gerichtsstand ist der Sitz des Auftragnehmers."
+    }
+  ],
+  "accept_text": "Wir bitten um rechtsverbindliche Annahme dieses Angebots durch firmenmäßige Unterschrift und Rücksendung an die oben angeführte E-Mail-Adresse. Mit der Unterschrift werden die in diesem Angebot genannten Bedingungen Vertragsbestandteil.",
+  "vat_note": "exklusive 20 % USt"
+}

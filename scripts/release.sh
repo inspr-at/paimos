@@ -6,6 +6,8 @@
 #
 # Usage:
 #   scripts/release.sh patch|minor|major|<x.y.z>|<yy.mm.dd[.hh.mm]> [--no-edit]
+#   scripts/release.sh <version>|now --prepare-only --no-edit
+#   scripts/release.sh <version> --reviewed-head <full-sha> --no-edit
 #   scripts/release.sh                            # report commits since tag
 
 set -euo pipefail
@@ -16,14 +18,34 @@ cd "$ROOT"
 source "$ROOT/scripts/release-version.sh"
 
 NO_EDIT=0
+PREPARE_ONLY=0
+REVIEWED_HEAD=''
 ARGS=()
-for arg in "$@"; do
-  case "$arg" in
-    --no-edit) NO_EDIT=1 ;;
-    *) ARGS+=("$arg") ;;
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --no-edit) NO_EDIT=1; shift ;;
+    --prepare-only) PREPARE_ONLY=1; shift ;;
+    --reviewed-head)
+      [[ "${2:-}" =~ ^[0-9a-f]{40}$ ]] || {
+        echo 'error: --reviewed-head requires a full lowercase commit SHA' >&2
+        exit 2
+      }
+      REVIEWED_HEAD="$2"; shift 2
+      ;;
+    --*) echo "error: unknown option: $1" >&2; exit 2 ;;
+    *) ARGS+=("$1"); shift ;;
   esac
 done
 MODE="${ARGS[0]:-}"
+if [[ ${#ARGS[@]} -gt 1 || ( "$PREPARE_ONLY" -eq 1 && -n "$REVIEWED_HEAD" ) ||
+      ( -z "$MODE" && ( "$PREPARE_ONLY" -eq 1 || -n "$REVIEWED_HEAD" ) ) ]]; then
+  echo 'error: use <version>|now --prepare-only, or <version> --reviewed-head <sha>' >&2
+  exit 2
+fi
+if [[ -n "$REVIEWED_HEAD" ]] && ! release_version::is_supported "$MODE"; then
+  echo 'error: reviewed resume requires the explicit prepared version' >&2
+  exit 2
+fi
 case "${EDITOR:-}" in
   ""|true|:|cat|tee) NO_EDIT=1 ;;
 esac
@@ -46,10 +68,35 @@ RECOVERY_RECEIPT_DIR='scripts/release/recovery'
 CALENDAR_RECOVERY_MERGE_OID=''
 AUDITED_RELEASE_RECOVERY_MERGE_OID=''
 AUDITED_RELEASE_RECOVERY_RECEIPT_OID=''
+RELEASE_TAG_FETCH_BATCH_SIZE=64
 
 fail() {
   echo "error: $*" >&2
   exit 1
+}
+
+assert_reviewed_head() {
+  [[ -z "$REVIEWED_HEAD" || "$(git rev-parse "$1")" == "$REVIEWED_HEAD" ]] ||
+    fail "release head differs from reviewed commit $REVIEWED_HEAD"
+}
+
+assert_reviewed_base() {
+  local head="$1"
+  [[ -n "$REVIEWED_HEAD" ]] || return 0
+  assert_reviewed_head "$head"
+  git fetch --quiet origin main
+  [[ "$(git rev-parse origin/main)" == "$(git rev-parse "$head^")" ]] ||
+    fail 'main advanced since release preparation; prepare and review a fresh release instead of syncing the reviewed head'
+}
+
+prepared_release_receipt() {
+  local head base
+  head=$(git rev-parse HEAD)
+  base=$(git rev-parse HEAD^)
+  echo 'Prepared locally; no branch, PR or tag has been published.'
+  jq -cn --arg version "$NEW" --arg branch "$RELEASE_BRANCH" \
+    --arg head "$head" --arg base "$base" \
+    '{version:$version, branch:$branch, head:$head, base:$base}'
 }
 
 require_command() {
@@ -90,6 +137,113 @@ fetch_origin_release_tag_commit() {
   printf '%s\n' "$fetched_oid"
 }
 
+snapshot_origin_release_tag_refs() {
+  local output="$1" raw="$2" normalized="$3"
+  local oid ref extra tag filtered
+
+  if ! git ls-remote --tags origin > "$raw"; then
+    fail "could not snapshot origin release tags"
+  fi
+  : > "$normalized"
+  while IFS=$'\t' read -r oid ref extra; do
+    [[ -n "$oid" && -n "$ref" && -z "$extra" &&
+       "$oid" =~ ^[0-9a-f]{40}$ && "$ref" == refs/tags/* ]] ||
+      fail "origin tag snapshot contains a malformed ref"
+    tag="${ref#refs/tags/}"
+    tag="${tag%\^\{\}}"
+    filtered=$(printf '%s\n' "$tag" | release_version::tag_filter)
+    [[ "$filtered" == "$tag" ]] || continue
+    case "$ref" in
+      *'^{}') printf '%s\tpeeled\t%s\n' "$tag" "$oid" >> "$normalized" ;;
+      *) printf '%s\tdirect\t%s\n' "$tag" "$oid" >> "$normalized" ;;
+    esac
+  done < "$raw"
+
+  awk -F '\t' '
+    $2 == "direct" {
+      if ($1 in direct) bad = 1
+      direct[$1] = $3
+      tags[$1] = 1
+      next
+    }
+    $2 == "peeled" {
+      if ($1 in peeled) bad = 1
+      peeled[$1] = $3
+      tags[$1] = 1
+      next
+    }
+    { bad = 1 }
+    END {
+      for (tag in tags) {
+        if (!(tag in direct)) bad = 1
+        else print tag "\t" direct[tag] "\t" ((tag in peeled) ? peeled[tag] : "-")
+      }
+      if (bad) exit 1
+    }
+  ' "$normalized" | LC_ALL=C sort > "$output" ||
+    fail "origin release-tag snapshot contains contradictory or missing refs"
+}
+
+assert_no_release_tag_after_merge() {
+  local release_merge="$1" audit_dir before after raw normalized
+  local tag remote_object peeled evidence_ref fetched_object fetched_type tag_oid
+  local batch_count=0
+  local -a refspecs=()
+
+  audit_dir=$(mktemp -d "${TMPDIR:-/tmp}/paimos-release-tag-audit.XXXXXX")
+  before="$audit_dir/before"
+  after="$audit_dir/after"
+  raw="$audit_dir/raw"
+  normalized="$audit_dir/normalized"
+  snapshot_origin_release_tag_refs "$before" "$raw" "$normalized"
+  [[ -s "$before" ]] || fail "origin release-tag snapshot is empty"
+
+  while IFS=$'\t' read -r tag remote_object peeled; do
+    refspecs+=("+refs/tags/$tag:refs/paimos/release-origin-tags/$tag")
+    batch_count=$((batch_count + 1))
+    if [[ "$batch_count" -eq "$RELEASE_TAG_FETCH_BATCH_SIZE" ]]; then
+      git fetch --quiet --no-tags origin "${refspecs[@]}" ||
+        fail "could not fetch exact origin release-tag evidence batch"
+      refspecs=()
+      batch_count=0
+    fi
+  done < "$before"
+  if [[ "$batch_count" -gt 0 ]]; then
+    git fetch --quiet --no-tags origin "${refspecs[@]}" ||
+      fail "could not fetch exact origin release-tag evidence batch"
+  fi
+
+  snapshot_origin_release_tag_refs "$after" "$raw" "$normalized"
+  cmp -s "$before" "$after" ||
+    fail "origin release tags moved, disappeared, or appeared during evidence fetch"
+
+  while IFS=$'\t' read -r tag remote_object peeled; do
+    evidence_ref="refs/paimos/release-origin-tags/$tag"
+    fetched_object=$(git rev-parse "$evidence_ref" 2>/dev/null) ||
+      fail "fetched release-tag evidence ref is missing: $tag"
+    [[ "$fetched_object" == "$remote_object" ]] ||
+      fail "fetched release tag differs from exact origin ref: $tag"
+    fetched_type=$(git cat-file -t "$fetched_object" 2>/dev/null) ||
+      fail "fetched release tag has no readable object: $tag"
+    if [[ "$peeled" == "-" ]]; then
+      [[ "$fetched_type" == "commit" ]] ||
+        fail "origin release tag is missing commit peel evidence: $tag"
+      tag_oid="$fetched_object"
+    else
+      [[ "$fetched_type" == "tag" ]] ||
+        fail "origin release tag has contradictory peel evidence: $tag"
+      tag_oid=$(git rev-parse "$evidence_ref^{commit}" 2>/dev/null) ||
+        fail "origin release tag does not resolve to a commit: $tag"
+      [[ "$tag_oid" == "$peeled" ]] ||
+        fail "fetched release tag peel differs from exact origin ref: $tag"
+    fi
+    [[ "$tag" == "$NEW_TAG" ]] && continue
+    git merge-base --is-ancestor "$tag_oid" "$release_merge" ||
+      fail "origin release tag is newer than or divergent from the interrupted release merge: $tag"
+  done < "$after"
+  rm -rf "$audit_dir"
+}
+
 assert_origin_calendar_recut_evidence() {
   local version="$1" existing_tags="$2" day tag stripped fetched_oid
   local evidence_count=0
@@ -109,17 +263,6 @@ assert_origin_calendar_recut_evidence() {
   done <<<"$existing_tags"
   (( evidence_count > 0 )) ||
     fail "calendar recut has no authoritative prior same-day release on origin"
-}
-
-assert_no_release_tag_after_merge() {
-  local release_merge="$1" tag tag_oid existing_tags
-  existing_tags=$(origin_release_tags)
-  while IFS= read -r tag; do
-    [[ -n "$tag" && "$tag" != "$NEW_TAG" ]] || continue
-    tag_oid=$(fetch_origin_release_tag_commit "$tag")
-    git merge-base --is-ancestor "$tag_oid" "$release_merge" ||
-      fail "origin release tag is newer than or divergent from the interrupted release merge: $tag"
-  done <<<"$existing_tags"
 }
 
 assert_exact_calendar_recovery_main() {
@@ -208,7 +351,10 @@ assert_audited_release_recovery_main() {
       v26.09.02:scripts/test-release.sh|\
       v26.09.09:scripts/release.sh|\
       v26.09.09:scripts/release/recovery/v26.09.09.json|\
-      v26.09.09:scripts/test-release.sh)
+      v26.09.09:scripts/test-release.sh|\
+      v260910221338.0.0:scripts/release.sh|\
+      v260910221338.0.0:scripts/release/recovery/v260910221338.0.0.json|\
+      v260910221338.0.0:scripts/test-release.sh)
         ;;
       *) fail "audited release recovery contains an unrelated file: $file" ;;
     esac
@@ -240,6 +386,10 @@ assert_calendar_cut_day() {
   local context="$1"
   if release_version::is_calendar "$NEW" && ! release_version::is_calendar_cut_today "$NEW"; then
     fail "Vienna calendar day changed before $context; refusing release $NEW"
+  fi
+  if release_version::is_calendar_v2 "$NEW" &&
+     [[ "$(release_version::calendar_v2_day "$NEW")" != "$(release_version::utc_date_compact)" ]]; then
+    fail "UTC calendar day changed before $context; refusing release $NEW"
   fi
 }
 
@@ -382,7 +532,7 @@ assert_external_stage_v2_release_pin() {
     else error("invalid v2 certification tuple") end
   ' <<<"$manifest") || fail "$ref carries an invalid external-stage v2 release manifest"
   IFS=$'\t' read -r release_pin commit_pin <<<"$pin_record"
-  [[ "$release_pin" =~ ^v[0-9]{2}\.[0-9]{2}\.[0-9]{2}(\.[0-9]{2}\.[0-9]{2})?$ ]] ||
+  release_version::is_any_calendar "$release_pin" ||
     fail "external-stage v2 paimos_release is not an INSPR calendar tag: $release_pin"
   [[ "$commit_pin" =~ ^[0-9a-f]{40}$ ]] || fail "external-stage v2 paimos_commit is not lowercase 40-hex"
   git cat-file -e "$commit_pin^{commit}" 2>/dev/null || fail "external-stage v2 pinned commit is unavailable: $commit_pin"
@@ -543,6 +693,7 @@ fetch_and_validate_pr_head() {
   fetched_head=$(git rev-parse "$PR_HEAD_REF")
   [[ "$fetched_head" == "$api_head" ]] ||
     fail "fetched PR head $fetched_head differs from API head $api_head"
+  assert_reviewed_head "$PR_HEAD_REF"
   base=$(git merge-base origin/main "$PR_HEAD_REF")
   [[ -n "$base" ]] || fail "release PR head has no merge-base with origin/main"
   assert_release_delta "$base" "$PR_HEAD_REF" "$NEW"
@@ -640,6 +791,11 @@ assert_release_recovery_receipt() {
       # PAI-977 records only the observed protected squash of PR #253 and the
       # missing post-merge autoMergeRequest value. It deliberately does not
       # infer whether --auto was used. Keep every pinned gate below mandatory.
+      ;;
+    v260910221338.0.0:canonical_auto_merge_immediate_merge_post_merge_request_missing)
+      # PAI-994 records the same GitHub immediate-merge incident for PR #281.
+      # Keep this release-specific: the audited receipt and every fail-closed
+      # head/check/tree/ancestry/tag gate below remain mandatory.
       ;;
     *)
       fail "release recovery receipt carries an unrecognized incident reason"
@@ -761,6 +917,7 @@ checkout_release_branch_for_sync() {
 }
 
 sync_release_branch() {
+  [[ -z "$REVIEWED_HEAD" ]] || fail 'reviewed release cannot be automatically synced; prepare and review a fresh release'
   checkout_release_branch_for_sync
   git fetch --quiet origin main
   if git merge-base --is-ancestor origin/main HEAD; then
@@ -790,6 +947,7 @@ ensure_auto_merge() {
     return
   fi
   head_oid=$(printf '%s\n' "$pr_json" | jq -r '.headRefOid')
+  assert_reviewed_base "$head_oid"
   gh pr merge "$PR_NUMBER" \
     --repo "$REPO" \
     --auto \
@@ -895,7 +1053,7 @@ select_release_tag_commit() {
   local release_merge="$1" candidate remote_tag tag_state
   TAG_OID="$release_merge"
   CALENDAR_RECOVERY_MERGE_OID=''
-  release_version::is_calendar "$NEW" || return 0
+  release_version::is_any_calendar "$NEW" || return 0
 
   if [[ -n "$AUDITED_RELEASE_RECOVERY_MERGE_OID" ]]; then
     [[ "$AUDITED_RELEASE_RECOVERY_MERGE_OID" == "$release_merge" ]] ||
@@ -924,7 +1082,7 @@ select_release_tag_commit() {
 
 tag_release_merge() {
   local merge_oid="$1" existing_oid remote_oid recovery_tag_state
-  if release_version::is_calendar "$NEW" && [[ -n "$AUDITED_RELEASE_RECOVERY_MERGE_OID" ]]; then
+  if release_version::is_any_calendar "$NEW" && [[ -n "$AUDITED_RELEASE_RECOVERY_MERGE_OID" ]]; then
     [[ "$merge_oid" == "$AUDITED_RELEASE_RECOVERY_MERGE_OID" ]] ||
       fail "audited release recovery attempted to tag a different commit"
   fi
@@ -951,12 +1109,15 @@ tag_release_merge() {
       # Re-pin protected main as the final operation before materializing the
       # local tag, closing movement during that query as well.
       assert_exact_calendar_recovery_main "$merge_oid"
-    elif release_version::is_calendar "$NEW" && [[ -n "$AUDITED_RELEASE_RECOVERY_MERGE_OID" ]]; then
+    elif release_version::is_any_calendar "$NEW" && [[ -n "$AUDITED_RELEASE_RECOVERY_MERGE_OID" ]]; then
       # Revalidate the live receipt and exact recovery-only main delta after
       # the remote tag query. TAG_OID remains the original protected squash.
       assert_release_recovery_receipt "$PR_JSON"
       assert_audited_release_recovery_main "$merge_oid"
     fi
+    # Every blocking remote audit is complete. Read the real cut-day clock as
+    # the final operation before materializing an absent calendar tag.
+    assert_calendar_cut_day "creating absent tag $NEW_TAG after remote audit"
     git tag -a --no-sign "$NEW_TAG" "$merge_oid" -m "release $NEW"
     echo "Created $NEW_TAG at protected-main commit $merge_oid."
     git push origin "refs/tags/$NEW_TAG"
@@ -994,6 +1155,8 @@ prepare_release_branch() {
           fail "prepared local release branch contains a commit without its author's DCO sign-off"
         "$ROOT/scripts/check-claims.sh"
         "$ROOT/scripts/check-release-hygiene.sh"
+        [[ "$PREPARE_ONLY" -eq 0 ]] || return 0
+        assert_reviewed_base HEAD
         git push -u origin "$RELEASE_BRANCH"
         fetch_release_branch
         assert_release_branch
@@ -1012,7 +1175,9 @@ prepare_release_branch() {
   esac
 
   "$ROOT/scripts/check-claims.sh"
-  if release_version::is_calendar "$NEW"; then
+  if release_version::is_calendar_v2 "$NEW"; then
+    today=$(release_version::calendar_v2_iso_date "$NEW")
+  elif release_version::is_calendar "$NEW"; then
     today=$(release_version::calendar_iso_date "$NEW")
   else
     today=$(release_version::vienna_iso_date)
@@ -1086,6 +1251,8 @@ prepare_release_branch() {
   git commit --no-gpg-sign --signoff -m "release: $NEW_TAG"
   base=$(git merge-base origin/main HEAD)
   assert_release_delta "$base" HEAD "$NEW"
+  [[ "$PREPARE_ONLY" -eq 0 ]] || return 0
+  assert_reviewed_base HEAD
   if [[ "${RELEASE_TEST_FAILPOINT:-}" == "before-branch-push" ]]; then
     fail "injected interruption before release branch push"
   fi
@@ -1096,6 +1263,7 @@ prepare_release_branch() {
 
 create_release_pr() {
   local body
+  assert_reviewed_base "origin/$RELEASE_BRANCH"
   body=$(printf '%s\n' \
     "## Release $NEW_TAG" \
     "" \
@@ -1160,12 +1328,29 @@ if [[ -z "$MODE" ]]; then
   echo "Runtime-relevant (backend/ frontend/src/):"
   git log "$LAST_TAG..origin/main" --oneline -- backend/ frontend/src/ || echo "  (none)"
   echo
-  echo "Re-run with: patch | minor | major | <x.y.z> | <yy.mm.dd[.hh.mm]>"
+  echo "Re-run with: now | <YYMMDDhhmmss.0.0>   (INSPR calendar v2, UTC; legacy modes are closed)"
   exit 0
 fi
 
+EXISTING_RELEASE_TAGS=$(origin_release_tags)
+# PAI-979 / INSPR-395: once a v2 coordinate is published, every older era is
+# closed for new cuts. Legacy SemVer was already closed by the first v1 cut.
+if release_version::has_calendar_v2_tag "$EXISTING_RELEASE_TAGS"; then
+  CALENDAR_V2_ACTIVE=1
+else
+  CALENDAR_V2_ACTIVE=0
+fi
 case "$MODE" in
+  now)
+    # Reserve the current UTC second as the coordinate. It is used for the
+    # tag, image, VERSION, changelog and every artifact of this release.
+    NEW=$(release_version::utc_coordinate)
+    release_version::calendar_v2_reservation_policy "$NEW" "$EXISTING_RELEASE_TAGS" ||
+      fail "could not reserve UTC coordinate $NEW (a later v2 coordinate is already published?)"
+    ;;
   patch|minor|major)
+    [[ "$CALENDAR_V2_ACTIVE" -eq 0 ]] ||
+      fail "legacy $MODE releases are closed after this product's first INSPR calendar v2 release; use: now"
     [[ "$LAST_KIND" == semver ]] ||
       fail "$MODE is available only before this product's first calendar release"
     IFS=. read -r LAST_MAJOR LAST_MINOR LAST_PATCH <<<"$LAST_VERSION"
@@ -1178,20 +1363,29 @@ case "$MODE" in
   *)
     NEW="${MODE#v}"
     release_version::is_supported "$NEW" ||
-      fail "mode must be patch|minor|major|<x.y.z>|<yy.mm.dd[.hh.mm]>; 6.0.0 is prohibited (got: $MODE)"
-    if release_version::is_calendar "$NEW"; then
-      EXISTING_RELEASE_TAGS=$(origin_release_tags)
+      fail "mode must be now|<YYMMDDhhmmss.0.0> (or a legacy form before the first v2 cut); 6.0.0 is prohibited (got: $MODE)"
+    if release_version::is_calendar_v2 "$NEW"; then
+      # An explicit coordinate must have been reserved earlier the same UTC
+      # day (for example by an external-stage publication that pins the
+      # next release tag) and must still be later than every published one.
+      release_version::calendar_v2_reservation_policy "$NEW" "$EXISTING_RELEASE_TAGS" ||
+        fail "v2 coordinate must be today's UTC day, not in the future, and later than every published v2 release: $NEW"
+    elif release_version::is_calendar "$NEW"; then
+      [[ "$CALENDAR_V2_ACTIVE" -eq 0 ]] ||
+        fail "calendar v1 (yy.mm.dd[.hh.mm]) releases are closed after this product's first INSPR calendar v2 release; use: now"
       release_version::calendar_recut_policy "$NEW" "$EXISTING_RELEASE_TAGS" ||
         fail "calendar release must use today's Vienna date; .hh.mm is valid only for a same-day recut"
       assert_origin_calendar_recut_evidence "$NEW" "$EXISTING_RELEASE_TAGS"
     else
+      [[ "$CALENDAR_V2_ACTIVE" -eq 0 ]] ||
+        fail "legacy SemVer releases are closed after this product's first INSPR calendar v2 release; use: now"
       [[ "$LAST_KIND" == semver ]] ||
         fail "legacy SemVer releases are closed after this product's first calendar release"
     fi
     ;;
 esac
 release_version::is_supported "$NEW" ||
-  fail "computed release $NEW is prohibited; use the actual Vienna calendar cut for the next major"
+  fail "computed release $NEW is prohibited; reserve the UTC coordinate with: now"
 NEW_TAG="v$NEW"
 RELEASE_BRANCH="release/$NEW_TAG"
 assert_external_stage_release_pin origin/main "$NEW_TAG"
@@ -1215,18 +1409,33 @@ if [[ -n "$PR_JSON" ]]; then
   PR_NUMBER=$(printf '%s\n' "$PR_JSON" | jq -r '.number')
   PR_URL=$(printf '%s\n' "$PR_JSON" | jq -r '.url')
   PR_STATE=$(printf '%s\n' "$PR_JSON" | jq -r '.state')
+  [[ "$PREPARE_ONLY" -eq 0 ]] || fail 'release already has a PR; prepare-only cannot modify a published release'
+  if [[ -n "$REVIEWED_HEAD" ]]; then
+    [[ "$(printf '%s\n' "$PR_JSON" | jq -r '.headRefOid')" == "$REVIEWED_HEAD" ]] ||
+      fail "release PR differs from reviewed commit $REVIEWED_HEAD"
+    [[ "$PR_STATE" != 'OPEN' ]] || assert_reviewed_base "$REVIEWED_HEAD"
+  fi
   echo "Reusing release PR: $PR_URL ($PR_STATE)"
 else
   if git rev-parse "$NEW_TAG" >/dev/null 2>&1; then
     fail "$NEW_TAG exists without its canonical $RELEASE_BRANCH PR"
   fi
+  if [[ -n "$REVIEWED_HEAD" ]]; then
+    [[ -z "$(changed_worktree_files)" ]] || fail 'reviewed release checkout is dirty'
+    assert_reviewed_base HEAD
+  fi
   if remote_branch_exists; then
+    [[ "$PREPARE_ONLY" -eq 0 ]] || fail 'release branch already published; prepare-only is local only'
     [[ -z "$(changed_worktree_files)" ]] ||
       fail "working tree is dirty while reusing origin/$RELEASE_BRANCH"
     fetch_release_branch
     assert_release_branch
   else
     prepare_release_branch
+    if [[ "$PREPARE_ONLY" -eq 1 ]]; then
+      prepared_release_receipt
+      exit 0
+    fi
   fi
   create_release_pr
   PR_JSON=$(find_release_pr)
@@ -1265,10 +1474,14 @@ esac
 
 assert_release_merge "$MERGE_OID"
 select_release_tag_commit "$MERGE_OID"
-# The exhaustive workflow is triggered by the protected-main commit selected
-# above. Require its exact-head result before creating the tag, so tag CI can
-# reuse evidence that is already green instead of waiting for a second run.
-GITHUB_REPOSITORY="$REPO" "$ROOT/scripts/wait-backend-full.sh" "$TAG_OID"
+if [[ -n "$REVIEWED_HEAD" ]]; then
+  [[ "$(git rev-parse "$TAG_OID^{tree}")" == "$(git rev-parse "$REVIEWED_HEAD^{tree}")" ]] ||
+    fail 'selected recovery commit changes reviewed content; prepare and review a fresh release'
+fi
+# Dispatch the full workflow for this immutable protected-main commit if no
+# evidence exists. Only the operator waits; tag CI checks completed evidence
+# once. Main may advance without changing the code verified or tagged.
+GITHUB_REPOSITORY="$REPO" "$ROOT/scripts/wait-backend-full.sh" --dispatch "$TAG_OID"
 tag_release_merge "$TAG_OID"
 cleanup_checkout
 

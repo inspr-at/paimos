@@ -16,7 +16,7 @@ import (
 	"github.com/inspr-at/paimos/backend/externalstage"
 )
 
-const externalStageV2StandaloneSchemaSHA256 = "57b2ceaebc2991f89b9adb4de713c2c760c40f521ee8bde8cd67dfb5559ae33a"
+const externalStageV2StandaloneSchemaSHA256 = "9e9140bb7fbf4b46caf53ab9576be8ff99b208dcb4a10b8512f0d69959190ed0"
 
 func TestExternalStageV2StandaloneSchemaIsPinnedAndClosed(t *testing.T) {
 	raw, err := os.ReadFile("external-stage-v2.schema.json")

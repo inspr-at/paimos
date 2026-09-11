@@ -2453,7 +2453,7 @@
         "additionalProperties": false,
         "required": ["version_scheme", "version", "release_channel", "release_sequence", "digest", "commit_digest", "release_manifest_coordinate", "release_manifest_digest"],
         "properties": {
-          "version_scheme": {"type": "string", "enum": ["legacy", "inspr-calendar-v1"]},
+          "version_scheme": {"type": "string", "enum": ["legacy", "inspr-calendar-v1", "inspr-calendar-v2"]},
           "version": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$"},
           "release_channel": {"type": "string", "pattern": "^[a-z][a-z0-9._-]{0,63}$"},
           "release_sequence": {"type": "integer", "format": "int64", "minimum": 0},
@@ -2462,7 +2462,7 @@
           "release_manifest_coordinate": {"type": "string", "pattern": "^[a-z][a-z0-9._-]{0,63}:[A-Za-z0-9][A-Za-z0-9._/@:+-]{0,189}$"},
           "release_manifest_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
         },
-        "description": "Explicitly discriminated release identity. inspr-calendar-v1 versions are also calendar-validated by the service; legacy strings are never inferred from punctuation."
+        "description": "Explicitly discriminated release identity. inspr-calendar-v1 (yy.mm.dd[.hh.mm.ss]) and inspr-calendar-v2 (UTC YYMMDDhhmmss.0.0) versions are also calendar-validated by the service; legacy strings are never inferred from punctuation."
       },
       "ExternalStagePharosEvidence": {
         "type": "object",
@@ -4351,7 +4351,7 @@
           "release_manifest_digest": {"$ref": "#/components/schemas/BaselineBatchDigestHex"},
           "release_manifest_coordinate": {"type": "string", "pattern": "^[a-z][a-z0-9._-]{0,63}:[A-Za-z0-9][A-Za-z0-9._/@:+-]{0,189}$"},
           "oci_index_digest": {"$ref": "#/components/schemas/BaselineBatchDigestHex"},
-          "version_scheme": {"type": "string", "enum": ["legacy", "inspr-calendar-v1"]},
+          "version_scheme": {"type": "string", "enum": ["legacy", "inspr-calendar-v1", "inspr-calendar-v2"]},
           "release_channel": {"type": "string", "pattern": "^[a-z][a-z0-9._-]{0,63}$"},
           "release_sequence": {"type": "integer", "format": "int64", "minimum": 0},
           "version": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$"},

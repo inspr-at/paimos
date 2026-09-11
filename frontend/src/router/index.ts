@@ -134,6 +134,9 @@ export function buildRoutes(includeDev: boolean): RouteRecordRaw[] {
       component: () => import("@/views/v6/CrmDoorView.vue"),
       meta: { shell: "v6" },
     },
+    { path: "/offers/:token", name: "public-offer", component: () => import("@/views/PublicOfferView.vue"), meta: { public: true } },
+    { path: "/crm/offers/:id/print", component: () => import("@/views/v6/OfferView.vue"), meta: { shell: "print" } },
+    { path: "/crm/offers/:id", component: () => import("@/views/v6/OfferView.vue"), meta: { shell: "v6" } },
     {
       path: "/crm/:id",
       component: () => import("@/views/v6/CrmDoorView.vue"),
@@ -259,6 +262,7 @@ const router = createRouter({
 });
 
 router.beforeEach(async (to) => {
+  if (to.name === "public-offer") return; // Independent of internal login/password-change state.
   const auth = useAuthStore();
   const undo = useUndoStore();
   if (!auth.checked) await auth.fetchMe();

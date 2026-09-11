@@ -16,6 +16,7 @@ import (
 
 	"github.com/inspr-at/paimos/backend/ai"
 	"github.com/inspr-at/paimos/backend/db"
+	"github.com/inspr-at/paimos/backend/internal/testdb"
 
 	_ "modernc.org/sqlite"
 )
@@ -42,7 +43,9 @@ const fakeIntakeJSON = `{"markdown":"# Generated Spec\n\n## Summary\nFrom the fa
 // one member user + one active session with transcript material.
 func openIntakeTestDB(t *testing.T) (sessionID int64) {
 	t.Helper()
-	prepareIsolatedMigratedDir(t)
+	t.Setenv("DATA_DIR", t.TempDir())
+	t.Setenv("PAIMOS_TEST_MODE", "1")
+	testdb.Prepare(t)
 	if err := db.Open(); err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}

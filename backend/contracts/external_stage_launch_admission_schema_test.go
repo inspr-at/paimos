@@ -17,7 +17,7 @@ import (
 	"github.com/inspr-at/paimos/backend/externalstage"
 )
 
-const launchAdmissionSchemaSHA256 = "6c7ac4984affdd0ead93091cf02b9c522b83ca5fdc56ab81c80507e547f7a066"
+const launchAdmissionSchemaSHA256 = "3b15130cddc9461d038f06332f066220274c265bfd15a3d2aaa636b8b229415c"
 
 func TestExternalStageLaunchAdmissionSchemaAndFixturesAreClosedAndPinned(t *testing.T) {
 	schemaRaw, err := os.ReadFile("external-stage-launch-admission-v1.schema.json")

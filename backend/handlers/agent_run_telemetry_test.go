@@ -14,6 +14,7 @@ import (
 
 	"github.com/inspr-at/paimos/backend/auth"
 	"github.com/inspr-at/paimos/backend/db"
+	"github.com/inspr-at/paimos/backend/internal/testdb"
 	"github.com/inspr-at/paimos/backend/sse"
 )
 
@@ -28,7 +29,9 @@ type directTelemetryServer struct {
 
 func newDirectTelemetryServer(t *testing.T) *directTelemetryServer {
 	t.Helper()
-	prepareIsolatedMigratedDir(t)
+	t.Setenv("DATA_DIR", t.TempDir())
+	t.Setenv("PAIMOS_TEST_MODE", "1")
+	testdb.Prepare(t)
 	if err := db.Open(); err != nil {
 		t.Fatal(err)
 	}
@@ -39,7 +42,7 @@ func newDirectTelemetryServer(t *testing.T) *directTelemetryServer {
 	for _, user := range []struct {
 		name, password, role string
 	}{{"admin", "adminpass", "admin"}, {"member", "memberpass", "member"}, {"external", "externalpass", "external"}} {
-		hash, _ := auth.HashPassword(user.password)
+		hash := bcryptHash(t, user.password)
 		res, err := db.DB.Exec(`INSERT INTO users(username,password,role,status) VALUES(?,?,?,'active')`, user.name, hash, user.role)
 		if err != nil {
 			t.Fatal(err)

@@ -28,6 +28,7 @@ import (
 
 	"github.com/inspr-at/paimos/backend/ai"
 	"github.com/inspr-at/paimos/backend/db"
+	"github.com/inspr-at/paimos/backend/internal/testdb"
 
 	_ "modernc.org/sqlite"
 )
@@ -38,7 +39,9 @@ import (
 // test that needs the project + issues tables.
 func withTempDB(t *testing.T) func() {
 	t.Helper()
-	prepareIsolatedMigratedDir(t)
+	t.Setenv("DATA_DIR", t.TempDir())
+	t.Setenv("PAIMOS_TEST_MODE", "1")
+	testdb.Prepare(t)
 	if err := db.Open(); err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}

@@ -18,7 +18,7 @@ describe('Paimos6TalkDoor orchestrator identity (PAI-865)', () => {
       voiceCanRetry: false,
     })
     const text = mounted.el.textContent ?? ''
-    expect(text).toContain('What should aMY / Primary do?')
+    expect(text).toContain('Voice · aMY / Primary')
     expect(text).toContain('Preview target · aMY / Primary (no session selected)')
     expect(text).toContain('Talk to aMY / Primary')
     expect(text).toContain('orchestrator configured')
@@ -41,7 +41,7 @@ describe('Paimos6TalkDoor orchestrator identity (PAI-865)', () => {
     expect(identity).toContain('Paimos')
     expect(identity).toContain('orchestrator not configured')
     expect(identity).not.toMatch(/Amy|Star|Aithema|START/)
-    expect(mounted.el.textContent).toContain('What should Paimos do?')
+    expect(mounted.el.textContent).toContain('Voice · Paimos')
     expect(mounted.el.textContent).toContain('Talk to Paimos')
     await mounted.unmount()
   })

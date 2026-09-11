@@ -19,6 +19,7 @@ import (
 	"time"
 
 	paimosdb "github.com/inspr-at/paimos/backend/db"
+	"github.com/inspr-at/paimos/backend/internal/testdb"
 	"github.com/inspr-at/paimos/backend/managedharness"
 	"github.com/inspr-at/paimos/backend/models"
 	"github.com/inspr-at/paimos/backend/workshape"
@@ -48,6 +49,7 @@ func openFleetTestDB(t *testing.T) fleetTestDB {
 	_ = os.Setenv("DATA_DIR", t.TempDir())
 	_ = os.Setenv("PAIMOS_TEST_MODE", "1")
 	_ = os.Setenv("PAIMOS_SECRET_KEY", base64.StdEncoding.EncodeToString(make([]byte, 32)))
+	testdb.Prepare(t)
 	if err := paimosdb.Open(); err != nil {
 		t.Fatal(err)
 	}

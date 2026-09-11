@@ -11,6 +11,12 @@ RACE_PACKAGE_TIMEOUT_MAX_MINUTES=15
 LANE=all
 BROAD_GROUP=all
 DRY_RUN=0
+COVERAGE=0
+DIRECT_PACKAGES=
+DIRECT_SPECIFIED=0
+ALLOW_EMPTY=0
+SKIP_TEST=
+DEPENDENT_MATCH='^Test.*(Concurrent|Concurrency|Race|Atomic|Replay|Recover|BatchesReleaseWriter|RacedPoke).*$'
 SELECTED_SHARD=-1
 SELECTED_SHARD_COUNT=0
 
@@ -25,6 +31,15 @@ SELECTED_SHARD_COUNT=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --direct-packages=*)
+      DIRECT_PACKAGES=${1#--direct-packages=}
+      DIRECT_SPECIFIED=1
+      shift
+      ;;
+    --coverage)
+      COVERAGE=1
+      shift
+      ;;
     --dry-run)
       DRY_RUN=1
       shift
@@ -36,7 +51,7 @@ while [[ $# -gt 0 ]]; do
     --group=*)
       BROAD_GROUP=${1#--group=}
       case "$BROAD_GROUP" in
-        core|runtime) ;;
+        core|handlers|runtime) ;;
         *)
           echo "backend-pr-race: invalid broad group: $BROAD_GROUP" >&2
           exit 2
@@ -97,16 +112,41 @@ case "$LANE" in
     ;;
 esac
 [[ $# -gt 0 ]] || {
-  echo "usage: $0 [--dry-run] [--lane=all|affected|db|handlers|managedharness] [--shard=INDEX/COUNT] [--group=core|runtime] <changed-package>..." >&2
+  echo "usage: $0 [--direct-packages=NEWLINE_SELECTION] [--dry-run|--coverage] [--lane=all|affected|db|handlers|managedharness] [--shard=INDEX/COUNT] [--group=core|handlers|runtime] <changed-package>..." >&2
   exit 2
 }
+if (( COVERAGE )) && [[ "$LANE" != all ]]; then
+  echo 'backend-pr-race: --coverage requires lane=all (union of PR shards)' >&2
+  exit 2
+fi
 if [[ "$BROAD_GROUP" != all && ( "$LANE" != all || $# -ne 1 || "$1" != './...' ) ]]; then
   echo 'backend-pr-race: --group requires lane=all and exactly ./...' >&2
   exit 2
 fi
 
+# Expand the execution selector into individual top-level oracles. This is
+# consumed by the normal lane; never infer ownership from a package name.
+coverage_for_pattern() {
+  local package="$1" pattern="$2" kinds="$3" listed name
+  if [[ "$pattern" == */* ]]; then
+    printf '%s\t%s\n' "$package" "$pattern"
+    return
+  fi
+  listed=$(cd "$BACKEND" && "$GO_COMMAND" test -list "$pattern" "$package")
+  while IFS= read -r name; do
+    [[ -z "$SKIP_TEST" || "$name" != "$SKIP_TEST" ]] || continue
+    if [[ "$name" =~ $kinds && "$name" =~ ^[A-Za-z0-9_]+$ ]]; then
+      printf '%s\t^%s$\n' "$package" "$name"
+    fi
+  done <<<"$listed"
+}
+
 run_race() {
   local package="$1" pattern="${2:-}"
+  if [[ "$COVERAGE" -eq 1 ]]; then
+    coverage_for_pattern "$package" "${pattern:-.}" '^(Test|Fuzz|Example)'
+    return
+  fi
   if [[ "$DRY_RUN" -eq 1 ]]; then
     if [[ -n "$pattern" ]]; then
       printf 'go test -race -count=1 -timeout=%s %q -run %q\n' "$RACE_PACKAGE_TIMEOUT" "$package" "$pattern"
@@ -160,9 +200,15 @@ run_race_shards() {
   local package="$1" match="$2" shard_count="$3" group_size="${4:-0}"
   local listed name names=() shard index shard_start=0 shard_end="$shard_count"
   local shard_names=() offset group=()
+  # The normal lane consumes this same selector before shard expansion.
+  if [[ "$COVERAGE" -eq 1 ]]; then
+    coverage_for_pattern "$package" "$match" '^(Test|Fuzz)'
+    return
+  fi
   cd "$BACKEND"
   listed=$("$GO_COMMAND" test -list "$match" "$package")
   while IFS= read -r name; do
+    [[ -z "$SKIP_TEST" || "$name" != "$SKIP_TEST" ]] || continue
     case "$name" in
       Test*|Fuzz*)
         [[ "$name" =~ ^(Test|Fuzz)[A-Za-z0-9_]+$ ]] || {
@@ -173,6 +219,7 @@ run_race_shards() {
         ;;
     esac
   done <<<"$listed"
+  if (( ALLOW_EMPTY && ${#names[@]} == 0 )); then return 0; fi
   [[ "${#names[@]}" -gt 0 ]] || {
     echo "backend-pr-race: no tests matched $match in $package" >&2
     exit 1
@@ -196,6 +243,7 @@ run_race_shards() {
     for ((index = shard; index < ${#names[@]}; index += shard_count)); do
       shard_names+=("${names[$index]}")
     done
+    if (( ALLOW_EMPTY && ${#shard_names[@]} == 0 )); then continue; fi
     [[ "${#shard_names[@]}" -gt 0 ]] || {
       echo "backend-pr-race: shard $shard is empty for $package" >&2
       exit 1
@@ -211,6 +259,11 @@ run_race_shards() {
   done
 }
 
+is_direct() {
+  (( ! DIRECT_SPECIFIED )) ||
+    grep -Fxq -e "$1" -e './...' <<<"$DIRECT_PACKAGES"
+}
+
 run_package() {
   local import_path="$1" package
   [[ "$import_path" == "$MODULE" || "$import_path" == "$MODULE/"* ]] || {
@@ -223,6 +276,30 @@ run_package() {
     exit 2
   }
 
+  if ! is_direct "$import_path"; then
+    # Dependency-only packages own semantic concurrency contracts, never their
+    # whole suite. Empty selections/shards are legitimate and allocate no job.
+    local count=4 match="$DEPENDENT_MATCH"
+    case "$package" in
+      ./handlers) count=5 ;;
+      ./managedharness) count=7 ;;
+      ./db) count=1 ;;
+      ./agentmode)
+        # Keep the five-second overflow SLO out of race instrumentation.
+        # The remaining stream subtests are still race-covered below.
+        SKIP_TEST=TestStreamSubscribeRaceOverflowLostWakeRestartAndPermissionChanges
+        ;;
+    esac
+    ALLOW_EMPTY=1
+    run_race_shards "$package" "$match" "$count" 4
+    ALLOW_EMPTY=0
+    SKIP_TEST=
+    if [[ "$package" == ./agentmode ]] && (( SELECTED_SHARD < 0 || SELECTED_SHARD == 0 )); then
+      run_race ./agentmode '^TestStreamSubscribeRaceOverflowLostWakeRestartAndPermissionChanges$/(subscribe before high-water|permission grant and revoke)$'
+    fi
+    return
+  fi
+
   case "$package" in
     .)
       # The root routing and seed contracts rebuild six complete databases.
@@ -233,7 +310,7 @@ run_package() {
     ./db)
       run_race ./db '^(TestApplyMigrationAtomic.*|TestSchemaAgentRunTelemetryTerminalWriteRace)$'
       # Race instrumentation uses the production pool in isolated processes.
-      # The exhaustive normal plan separately retains the original same-name
+      # The normal PR and exhaustive plans retain the differently named
       # 32-connection/32-writer M147 contention oracles without weakening them.
       run_race ./db '^TestM147ConcurrentCanonicalCommandsConvergeProductionPool$'
       run_race ./db '^TestM147ConcurrentRuntimeAcceptanceHasOneEffectOwnerProductionPool$'
@@ -331,7 +408,7 @@ run_selected_package() {
       ;;
     affected)
       if [[ "$import_path" != "$MODULE/db" && "$import_path" != "$MODULE/handlers" && "$import_path" != "$MODULE/managedharness" ]]; then
-        if [[ "$import_path" == "$MODULE" ||
+        if ! is_direct "$import_path" || [[ "$import_path" == "$MODULE" ||
               "$import_path" == "$MODULE/lifecycleintents" ||
               "$import_path" == "$MODULE/delivery" ||
               "$import_path" == "$MODULE/baselinebatch" ||
@@ -356,11 +433,11 @@ run_selected_package() {
 affected_index=0
 for import_path in "$@"; do
   if [[ "$import_path" == './...' ]]; then
-    # One membership list owns the default broad plan and both exhaustive
+    # One membership list owns the default broad plan and all exhaustive
     # groups. Each group stays sequential on its own CI runner.
     for affected in \
       "core:$MODULE/db" \
-      "core:$MODULE/handlers" \
+      "handlers:$MODULE/handlers" \
       "core:$MODULE/cmd/paimos" \
       "core:$MODULE/supervision" \
       "core:$MODULE/agentmessage" \

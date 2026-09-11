@@ -14,7 +14,7 @@
 </p>
 
 <p align="center">
-  <code>v26.09.09.13.13</code> · <code>AGPL-3.0-only</code> ·
+  <code>v260911125749.0.0</code> · <code>AGPL-3.0-only</code> ·
   <code>Go + Vue + SQLite</code>
 </p>
 
@@ -48,8 +48,9 @@ Augmentoring's professional services use and integrate Paimos; Augmentoring is
 not the product owner.
 
 > [!NOTE]
-> Paimos 6 is production-used and actively developed. Releases use calendar
-> tags such as `v26.09.01`; the preserved 5.x interface remains available at
+> Paimos 6 is production-used and actively developed. Releases use INSPR
+> calendar v2 tags such as `v260910081500.0.0` (the UTC reservation second as
+> a SemVer-shaped coordinate); the preserved 5.x interface remains available at
 > `/legacy`. The deployment model is deliberately compact: one Go process and
 > one SQLite database. It is not a multi-node high-availability service. See
 > [Current maturity and limits](#current-maturity-and-limits) before a production
@@ -118,8 +119,9 @@ shipped code and documented verification.
   credential.
 - Paimos 6 promoted the session-first product shell to the authenticated home
   (26.08.31), while preserving the complete 5.x dashboard at `/legacy`.
-- Release tags now use the calendar form `yy.mm.dd[.hh.mm]`; the changelog keeps
-  the 5.x history and every later product cut in one sequence.
+- Release tags use INSPR calendar v2, `YYMMDDhhmmss.0.0` in UTC (PAI-979); the
+  earlier `yy.mm.dd[.hh.mm]` cuts and the 5.x SemVer history stay in the
+  changelog as one sequence and are never retagged.
 - Voice Intake shipped end-to-end (5.1.0–5.4.0): ElevenLabs Scribe speech
   capture that survives interruptions, a live spec workbench with project
   auto-detection and impact analysis, spoken ELI summaries, and a

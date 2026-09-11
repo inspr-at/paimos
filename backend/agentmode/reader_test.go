@@ -16,6 +16,7 @@ import (
 
 	appdb "github.com/inspr-at/paimos/backend/db"
 	"github.com/inspr-at/paimos/backend/delivery"
+	"github.com/inspr-at/paimos/backend/internal/testdb"
 	"github.com/inspr-at/paimos/backend/secretvault"
 )
 
@@ -805,6 +806,7 @@ func openAgentModeTestDB(t *testing.T) *sql.DB {
 		t.Fatal(err)
 	}
 	secretvault.ResetForTest()
+	testdb.Prepare(t)
 	if err := appdb.Open(); err != nil {
 		t.Fatal(err)
 	}

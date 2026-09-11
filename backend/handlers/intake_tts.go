@@ -17,7 +17,7 @@
 // for a LEVEL (eli5|eli10|eli15), the server reads that text from the
 // session's own summaries artifact and returns synthesized speech as raw
 // audio/mpeg bytes with cache-control: no-store — bytes, not URLs, so
-// nothing is stored and nothing needs authorizing later (amt-start
+// nothing is stored and nothing needs authorizing later (start-agm-com
 // pattern). Binding the endpoint to the session artifact (instead of
 // accepting caller text) keeps it from being a free-form TTS proxy.
 //
@@ -39,7 +39,7 @@ import (
 )
 
 const (
-	intakeTTSMaxChars = 2000 // truncate, don't reject (amt-start cap)
+	intakeTTSMaxChars = 2000 // truncate, don't reject (start-agm-com cap)
 	intakeTTSTimeout  = 45 * time.Second
 )
 

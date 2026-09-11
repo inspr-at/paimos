@@ -103,6 +103,18 @@ git config core.hooksPath .githooks
 5. Push and open a PR. Describe **what changed and why** in the body;
    link the issue.
 
+PR normal tests omit individual tests selected by the affected race plan.
+Direct packages keep their package-specific race plans; dependency-only
+packages race their named concurrency, replay, and recovery contracts.
+Handler security invariants run in the affected lanes; the separate invariant
+job runs only the unsupported-platform contracts. Race-dependent packages and
+their importers retain normal tests, and new guards fail the gate self-test.
+Quality self-tests and dev-login checks follow their changed inputs (clock-based
+checks always run); main publication reuses PR quality/frontend/E2E assurance,
+and reruns live-database security scans (govulncheck and npm audit). Full backend
+execution runs nightly and before release tags; tag publication checks completed
+exact-code evidence without holding a polling runner.
+
 ### Protected `main` and break glass
 
 The active GitHub ruleset for `main` requires a pull request and successful

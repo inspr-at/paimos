@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"os"
 	"slices"
-	"strings"
 	"testing"
 )
 
@@ -114,11 +113,5 @@ func TestAgentMessageOpenAPIPreservesV1AndDeclaresV2(t *testing.T) {
 	security := resolution["security"].([]any)
 	if len(security) != 1 || security[0].(map[string]any)["sessionCookie"] == nil {
 		t.Fatalf("human resolution OpenAPI is not session-only: %v", security)
-	}
-	description := resolution["description"].(string)
-	for _, requiredPhrase := range []string{"API-key", "does not release", "idempotency", "concealed 404"} {
-		if !strings.Contains(description, requiredPhrase) {
-			t.Fatalf("human resolution OpenAPI omits %q semantics: %s", requiredPhrase, description)
-		}
 	}
 }

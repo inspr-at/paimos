@@ -12,8 +12,17 @@ produces the container image and supply-chain evidence,
 (PAI-99) produces the signed CLI binaries. They execute independently; both
 must succeed for a release to be fully published. Before creating the tag, the
 release script requires a successful [`backend-full.yml`](../.github/workflows/backend-full.yml)
-run for the exact protected-main merge. That workflow runs its exhaustive
-serial/platform and broad-race jobs in parallel and is not duplicated on the
+run for the exact code being tagged, including successful serial/platform and
+all three broad-race jobs. Ordinary merges to main start no full backend run
+and allocate no polling runner. Main publishes after its normal image pipeline
+and live vulnerability scans, reusing the strict, up-to-date required PR checks.
+
+Full backend execution runs nightly on main, by manual dispatch, or through the
+explicit PR evidence label. Every such run executes the suites; there is no
+frontend-only or ancestral reuse shortcut. Nightly failures fail the workflow.
+The documentation contracts are included in the full serial suite.
+
+The full serial/platform and broad-race jobs run in parallel and are not duplicated on the
 identical tag commit. Applying the explicit `backend-full-evidence` label is the
 supported way to obtain hosted exhaustive evidence for an exact PR head; normal
 PR events and unrelated labels do not authorize those jobs.
@@ -22,7 +31,7 @@ PR events and unrelated labels do not authorize those jobs.
 
 1. **Image** — `ghcr.io/inspr-at/paimos:<release-version>` (immutable per
    tag). Legacy SemVer releases also publish `:<x>.<y>` and `:<x>` moving
-   aliases; calendar releases publish no mutable numeric aliases. The digest is
+   aliases; calendar releases (v1 and v2) publish no mutable numeric aliases. The digest is
    also tagged `sha-<short>` for SHA-pinned deploys.
 2. **CycloneDX SBOMs** (PAI-121) — uploaded as a release artifact
    named `sbom-v<release-version>` containing `backend.sbom.json` and
@@ -138,20 +147,47 @@ or when a downstream auditor asks for a snapshot.
 
 ## Cutting a release
 
-Legacy product lines may pick patch / minor / major. A new product cut uses
-the actual Vienna calendar version `yy.mm.dd`, adding `.hh.mm` only for a
-same-day recut. The script handles the VERSION update, README
-badge, CHANGELOG date, release commit with DCO sign-off, protected PR, auto-merge,
-exact merge-commit tag, and the wait for `ghcr.io/.../<ver>` to appear:
+A product cut reserves an INSPR calendar v2 coordinate (PAI-979 / INSPR-395):
+`YYMMDDhhmmss.0.0`, the current UTC second as the SemVer MAJOR segment with
+MINOR and PATCH fixed at `0.0`. `now` reserves it at the moment the script
+starts; an explicit coordinate is accepted when it was reserved earlier the
+same UTC day (for example by an external-stage publication that must pin the
+next release tag), is later than every published v2 coordinate, and is not in
+the future. Legacy `patch|minor|major` and `yy.mm.dd[.hh.mm]` cuts are closed
+once the first v2 coordinate exists; the migration anchor lives in
+[`scripts/release/version-scheme.json`](../scripts/release/version-scheme.json).
+The script handles the VERSION update, README badge, CHANGELOG date, release
+commit with DCO sign-off, protected PR, auto-merge, exact merge-commit tag, and
+the wait for `ghcr.io/.../<ver>` to appear:
 
-    just release patch
-    just release minor
-    just release <yy.mm.dd[.hh.mm]> # explicit calendar cut
+    just release now
+    just release <YYMMDDhhmmss.0.0>  # coordinate reserved earlier today (UTC)
 
 The script never pushes `main` or uses a ruleset bypass. It creates or reuses
 `release/v<release-version>`, opens one PR against `main`, enables protected squash
 auto-merge, and tags the merge commit returned for that PR. If another change
 lands on `main` later, it is not accidentally included in the release tag.
+
+After validating the protected merge and selecting the exact tag commit,
+`release.sh` looks for completed full execution of that code. If none exists
+and no run is in progress, it dispatches `backend-full.yml` from main with
+`target_sha` set to that immutable commit. The workflow verifies that the target
+is on main's history and checks it out in every serial/race job. Its run title
+records the target because GitHub's dispatch `headSha` describes the workflow
+ref, which can advance beyond the release commit.
+
+Only the operator's `release.sh` process polls, with the existing 100-minute
+budget. Failed, cancelled, skipped, malformed, or wrong-code evidence prevents
+tag creation. A failed run must be rerun successfully before resuming the same
+release; existing active or green evidence is reused without another dispatch.
+The operator needs Actions write permission to dispatch. All existing release
+file, DCO, protected merge, tree, recovery, cut-day, and tag drift checks remain.
+
+The tag publish job calls `wait-backend-full.sh --check` once and fails immediately
+if actual full execution is missing. It never waits for another workflow. For
+an interrupted pre-tag verification, rerun the same explicit release command or
+run `scripts/wait-backend-full.sh --dispatch <exact-commit-sha>` locally. This does
+not create a tag; `release.sh` still performs all tag authorization checks.
 
 For agent / non-TTY runs, the reviewed CHANGELOG content must already exist
 (the script refuses to commit its generated TODO stub). When current `main`
@@ -161,9 +197,9 @@ release byte-for-byte. Otherwise, starting from clean, current `main`, add only
 the `## [<release-version>]` section to [`docs/CHANGELOG.md`](CHANGELOG.md), leave that
 one file uncommitted, then run:
 
-    ./scripts/release.sh patch --no-edit
-    # or the explicit form, e.g. when the latest tag is an -rc pre-release:
-    ./scripts/release.sh <yy.mm.dd[.hh.mm]> --no-edit
+    ./scripts/release.sh now --no-edit
+    # or the explicit, already-reserved coordinate:
+    ./scripts/release.sh <YYMMDDhhmmss.0.0> --no-edit
 
 That reviewed working-tree change moves onto the release branch before the
 other deterministic release files are updated. Interactive runs start clean,

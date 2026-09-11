@@ -23,7 +23,7 @@
 //
 // INV-INTAKE-06: audio is transcribed and DROPPED — a voice recording is
 // biometric-adjacent personal data and there is no reason to keep it once
-// the words exist (amt-start research conclusion). No audio bytes are
+// the words exist (start-agm-com research conclusion). No audio bytes are
 // ever written to disk, the DB, logs, or ai_calls.
 
 package handlers
@@ -44,7 +44,7 @@ import (
 )
 
 const (
-	intakeAudioMaxBytes    = 12 << 20 // matches the amt-start transcribe cap
+	intakeAudioMaxBytes    = 12 << 20 // matches the start-agm-com transcribe cap
 	intakeAudioSTTTimeout  = 60 * time.Second
 	intakeAudioMinTextRune = 1
 )
@@ -186,7 +186,7 @@ func TranscribeIntakeAudio(w http.ResponseWriter, r *http.Request) {
 }
 
 // transcribeWithElevenLabs calls the batch Scribe endpoint. Language
-// mapping follows the amt-start adapter (de→deu, en→eng, ISO 639-3).
+// mapping follows the start-agm-com adapter (de→deu, en→eng, ISO 639-3).
 func transcribeWithElevenLabs(ctx context.Context, vs VoiceSettings, contentType string, audio []byte, language string) (string, error) {
 	lang := map[string]string{"de": "deu", "en": "eng"}[language]
 

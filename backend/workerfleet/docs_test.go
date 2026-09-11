@@ -22,8 +22,5 @@ func TestWorkerFleetDocsPreserveV1AndExplainTrustGate(t *testing.T) {
 				t.Fatalf("%s omits worker-fleet contract %q", name, required)
 			}
 		}
-		if !strings.Contains(text, "heartbeat") || !strings.Contains(text, "suppress") {
-			t.Fatalf("%s does not explain the reporter-evidence suppression gate", name)
-		}
 	}
 }

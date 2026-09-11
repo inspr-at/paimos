@@ -32,9 +32,9 @@ func schemaNames(t *testing.T, database *sql.DB, query string) []string {
 	return names
 }
 
-const latestSchemaVersion = 188
+const latestSchemaVersion = 192
 
-func TestMigration187AddsClosedOneShotLaunchAuthority(t *testing.T) {
+func TestMigration191AddsClosedOneShotLaunchAuthority(t *testing.T) {
 	database := openTestDB(t)
 	for _, table := range []string{
 		"baseline_batch_launch_grants",
@@ -42,14 +42,14 @@ func TestMigration187AddsClosedOneShotLaunchAuthority(t *testing.T) {
 		"external_stage_launch_admissions",
 	} {
 		if !tableExists(t, database, table) {
-			t.Fatalf("M187 table %s missing", table)
+			t.Fatalf("M191 table %s missing", table)
 		}
 	}
 	if !columnExists(t, database, "external_stage_reporter_registrations", "target_ref") ||
 		!columnExists(t, database, "baseline_batch_drafts", "delegated_launch_json") ||
 		!columnExists(t, database, "baseline_batch_reviews", "delegated_launch_json") ||
 		!columnExists(t, database, "baseline_batch_batches", "delegated_launch_json") {
-		t.Fatal("M187 additive target or delegated launch columns missing")
+		t.Fatal("M191 additive target or delegated launch columns missing")
 	}
 	for _, trigger := range []string{
 		"trg_external_stage_registration_target_immutable",
@@ -64,7 +64,40 @@ func TestMigration187AddsClosedOneShotLaunchAuthority(t *testing.T) {
 	} {
 		var count int
 		if err := database.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='trigger' AND name=?`, trigger).Scan(&count); err != nil || count != 1 {
-			t.Fatalf("M187 trigger %s count=%d err=%v", trigger, count, err)
+			t.Fatalf("M191 trigger %s count=%d err=%v", trigger, count, err)
+		}
+	}
+}
+
+func TestHeldMigrationsFollowPublishedMain190(t *testing.T) {
+	database, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "main190-upgrade.db")+"?_txlock=immediate")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+
+	if err := migrateThrough(database, 190); err != nil {
+		t.Fatalf("migrate published main through M190: %v", err)
+	}
+	if version, err := CurrentSchemaVersion(database); err != nil || version != 190 {
+		t.Fatalf("published main schema version=%d err=%v, want 190", version, err)
+	}
+	if !tableExists(t, database, "offers") || !columnExists(t, database, "external_stage_pharos_evidence_v2", "version_scheme") {
+		t.Fatal("published main M187-M190 schema was not preserved")
+	}
+
+	if err := migrateThrough(database, latestSchemaVersion); err != nil {
+		t.Fatalf("apply held migrations after published main: %v", err)
+	}
+	for _, table := range []string{"baseline_batch_launch_grants", "external_stage_launch_admissions", "harness_session_retirements"} {
+		if !tableExists(t, database, table) {
+			t.Fatalf("held additive table %s missing after M190 upgrade", table)
+		}
+	}
+	for version := 187; version <= latestSchemaVersion; version++ {
+		var count int
+		if err := database.QueryRow(`SELECT COUNT(*) FROM schema_versions WHERE version=?`, version).Scan(&count); err != nil || count != 1 {
+			t.Fatalf("schema version %d count=%d err=%v", version, count, err)
 		}
 	}
 }

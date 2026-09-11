@@ -1,6 +1,6 @@
 name: ci
 
-# Test on every push and PR. Build + publish the Docker image only on
+# Test PRs; reuse protected-main assurance on push. Publish images only on
 # pushes to `main` and on tag pushes `v*`. The image is tagged:
 #   - `latest` on main
 #   - exact version on supported release tags (v-prefix stripped)
@@ -37,6 +37,42 @@ jobs:
       - name: Every PR commit carries its author's DCO sign-off
         run: ./scripts/check-dco.sh "${{ github.event.pull_request.base.sha }}" "${{ github.event.pull_request.head.sha }}"
 
+  # Decide runner allocation once, before any PR matrix is expanded.
+  backend-pr-plan:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      selection: ${{ steps.plan.outputs.selection }}
+      direct_selection: ${{ steps.plan.outputs.direct_selection }}
+      backend-pr: ${{ steps.plan.outputs.backend-pr }}
+      backend-pr-shards: ${{ steps.plan.outputs.backend-pr-shards }}
+      backend-pr-db: ${{ steps.plan.outputs.backend-pr-db }}
+      backend-pr-handlers: ${{ steps.plan.outputs.backend-pr-handlers }}
+      backend-pr-handlers-shards: ${{ steps.plan.outputs.backend-pr-handlers-shards }}
+      backend-pr-performance: ${{ steps.plan.outputs.backend-pr-performance }}
+      backend-pr-race: ${{ steps.plan.outputs.backend-pr-race }}
+      backend-pr-race-shards: ${{ steps.plan.outputs.backend-pr-race-shards }}
+      backend-pr-managedharness-race: ${{ steps.plan.outputs.backend-pr-managedharness-race }}
+      backend-pr-managedharness-race-shards: ${{ steps.plan.outputs.backend-pr-managedharness-race-shards }}
+      backend-pr-db-race: ${{ steps.plan.outputs.backend-pr-db-race }}
+      backend-pr-handlers-race: ${{ steps.plan.outputs.backend-pr-handlers-race }}
+      backend-pr-handlers-race-shards: ${{ steps.plan.outputs.backend-pr-handlers-race-shards }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.26.6'
+          cache-dependency-path: backend/go.sum
+      - name: Plan affected and direct backend invocations
+        id: plan
+        env:
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: python3 scripts/backend-pr-plan.py "$PR_BASE" "$PR_HEAD" >> "$GITHUB_OUTPUT"
+
   backend-pr-vet:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
@@ -52,17 +88,18 @@ jobs:
           # Bump deliberately when govulncheck flags the standard library.
           cache-dependency-path: backend/go.sum
 
-      - name: Backend — vet
+      - name: Backend - vet
         working-directory: backend
         run: go vet ./...
 
   backend-pr:
-    if: github.event_name == 'pull_request'
+    needs: backend-pr-plan
+    if: github.event_name == 'pull_request' && needs.backend-pr-plan.outputs.backend-pr == 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        shard: [0, 1]
+        shard: ${{ fromJSON(needs.backend-pr-plan.outputs.backend-pr == 'true' && needs.backend-pr-plan.outputs.backend-pr-shards || '[0]') }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -73,24 +110,20 @@ jobs:
           go-version: '1.26.6'
           cache-dependency-path: backend/go.sum
 
-      - name: Backend — affected package tests
+      - name: Backend - affected package tests
         working-directory: backend
+        env:
+          selection: ${{ needs.backend-pr-plan.outputs.selection }}
+          direct_selection: ${{ needs.backend-pr-plan.outputs.direct_selection }}
         run: |
           set -euo pipefail
-          selection=$(../scripts/backend-ci-packages.sh \
-            '${{ github.event.pull_request.base.sha }}' \
-            '${{ github.event.pull_request.head.sha }}')
-          packages=()
-          [[ -z "$selection" ]] || mapfile -t packages <<<"$selection"
-          if (( ${#packages[@]} == 0 )); then
-            echo 'No backend package changed; affected test lane is empty.'
-          else
-            printf 'Affected backend package: %s\n' "${packages[@]}"
-            ../scripts/backend-pr-test.sh --lane=affected --shard="${{ matrix.shard }}/2" "${packages[@]}"
-          fi
+          [[ -n "$selection" ]]
+          mapfile -t packages <<<"$selection"
+          ../scripts/backend-pr-test.sh --lane=affected --shard="${{ matrix.shard }}/2" --direct-packages="$direct_selection" "${packages[@]}"
 
   backend-pr-db:
-    if: github.event_name == 'pull_request'
+    needs: backend-pr-plan
+    if: github.event_name == 'pull_request' && needs.backend-pr-plan.outputs.backend-pr-db == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -102,28 +135,25 @@ jobs:
           go-version: '1.26.6'
           cache-dependency-path: backend/go.sum
 
-      - name: Backend — affected DB tests (four isolated shards)
+      - name: Backend - affected DB tests (four isolated shards)
         working-directory: backend
+        env:
+          selection: ${{ needs.backend-pr-plan.outputs.selection }}
+          direct_selection: ${{ needs.backend-pr-plan.outputs.direct_selection }}
         run: |
           set -euo pipefail
-          selection=$(../scripts/backend-ci-packages.sh \
-            '${{ github.event.pull_request.base.sha }}' \
-            '${{ github.event.pull_request.head.sha }}')
-          packages=()
-          [[ -z "$selection" ]] || mapfile -t packages <<<"$selection"
-          if (( ${#packages[@]} == 0 )); then
-            echo 'No backend package changed; DB test lane is empty.'
-          else
-            ../scripts/backend-pr-test.sh --lane=db "${packages[@]}"
-          fi
+          [[ -n "$selection" ]]
+          mapfile -t packages <<<"$selection"
+          ../scripts/backend-pr-test.sh --lane=db --direct-packages="$direct_selection" "${packages[@]}"
 
   backend-pr-handlers:
-    if: github.event_name == 'pull_request'
+    needs: backend-pr-plan
+    if: github.event_name == 'pull_request' && needs.backend-pr-plan.outputs.backend-pr-handlers == 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        shard: [0, 1, 2, 3, 4]
+        shard: ${{ fromJSON(needs.backend-pr-plan.outputs.backend-pr-handlers == 'true' && needs.backend-pr-plan.outputs.backend-pr-handlers-shards || '[0]') }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -134,23 +164,20 @@ jobs:
           go-version: '1.26.6'
           cache-dependency-path: backend/go.sum
 
-      - name: Backend — affected handler tests (five isolated shards)
+      - name: Backend - affected handler tests (five isolated shards)
         working-directory: backend
+        env:
+          selection: ${{ needs.backend-pr-plan.outputs.selection }}
+          direct_selection: ${{ needs.backend-pr-plan.outputs.direct_selection }}
         run: |
           set -euo pipefail
-          selection=$(../scripts/backend-ci-packages.sh \
-            '${{ github.event.pull_request.base.sha }}' \
-            '${{ github.event.pull_request.head.sha }}')
-          packages=()
-          [[ -z "$selection" ]] || mapfile -t packages <<<"$selection"
-          if (( ${#packages[@]} == 0 )); then
-            echo 'No backend package changed; handler test lane is empty.'
-          else
-            ../scripts/backend-pr-test.sh --lane=handlers --shard="${{ matrix.shard }}/5" "${packages[@]}"
-          fi
+          [[ -n "$selection" ]]
+          mapfile -t packages <<<"$selection"
+          ../scripts/backend-pr-test.sh --lane=handlers --shard="${{ matrix.shard }}/5" --direct-packages="$direct_selection" "${packages[@]}"
 
   backend-pr-performance:
-    if: github.event_name == 'pull_request'
+    needs: backend-pr-plan
+    if: github.event_name == 'pull_request' && needs.backend-pr-plan.outputs.backend-pr-performance == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -165,28 +192,25 @@ jobs:
       # This unchanged five-second SLO must run on an otherwise-idle runner.
       # Package contention invalidates the measurement; the affected lane runs
       # the parent test's other subtests and excludes only this exact duplicate.
-      - name: Backend — isolated Agent Mode performance contract
+      - name: Backend - isolated Agent Mode performance contract
         working-directory: backend
+        env:
+          selection: ${{ needs.backend-pr-plan.outputs.selection }}
+          direct_selection: ${{ needs.backend-pr-plan.outputs.direct_selection }}
         run: |
           set -euo pipefail
-          selection=$(../scripts/backend-ci-packages.sh \
-            '${{ github.event.pull_request.base.sha }}' \
-            '${{ github.event.pull_request.head.sha }}')
-          packages=()
-          [[ -z "$selection" ]] || mapfile -t packages <<<"$selection"
-          if (( ${#packages[@]} == 0 )); then
-            echo 'No backend package changed; performance test lane is empty.'
-          else
-            ../scripts/backend-pr-test.sh --lane=performance "${packages[@]}"
-          fi
+          [[ -n "$selection" ]]
+          mapfile -t packages <<<"$selection"
+          ../scripts/backend-pr-test.sh --lane=performance --direct-packages="$direct_selection" "${packages[@]}"
 
   backend-pr-race:
-    if: github.event_name == 'pull_request'
+    needs: backend-pr-plan
+    if: github.event_name == 'pull_request' && needs.backend-pr-plan.outputs.backend-pr-race == 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        shard: [0, 1, 2, 3]
+        shard: ${{ fromJSON(needs.backend-pr-plan.outputs.backend-pr-race == 'true' && needs.backend-pr-plan.outputs.backend-pr-race-shards || '[0]') }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -197,28 +221,25 @@ jobs:
           go-version: '1.26.6'
           cache-dependency-path: backend/go.sum
 
-      - name: Backend — directly changed package race (four isolated package shards)
+      - name: Backend - affected package race (four isolated package shards)
         working-directory: backend
+        env:
+          selection: ${{ needs.backend-pr-plan.outputs.selection }}
+          direct_selection: ${{ needs.backend-pr-plan.outputs.direct_selection }}
         run: |
           set -euo pipefail
-          selection=$(../scripts/backend-ci-packages.sh --direct \
-            '${{ github.event.pull_request.base.sha }}' \
-            '${{ github.event.pull_request.head.sha }}')
-          packages=()
-          [[ -z "$selection" ]] || mapfile -t packages <<<"$selection"
-          if (( ${#packages[@]} == 0 )); then
-            echo 'No backend package changed; affected race lane is empty.'
-          else
-            ../scripts/backend-pr-race.sh --lane=affected --shard="${{ matrix.shard }}/4" "${packages[@]}"
-          fi
+          [[ -n "$selection" ]]
+          mapfile -t packages <<<"$selection"
+          ../scripts/backend-pr-race.sh --lane=affected --shard="${{ matrix.shard }}/4" --direct-packages="$direct_selection" "${packages[@]}"
 
   backend-pr-managedharness-race:
-    if: github.event_name == 'pull_request'
+    needs: backend-pr-plan
+    if: github.event_name == 'pull_request' && needs.backend-pr-plan.outputs.backend-pr-managedharness-race == 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        shard: [0, 1, 2, 3, 4, 5, 6]
+        shard: ${{ fromJSON(needs.backend-pr-plan.outputs.backend-pr-managedharness-race == 'true' && needs.backend-pr-plan.outputs.backend-pr-managedharness-race-shards || '[0]') }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -229,23 +250,20 @@ jobs:
           go-version: '1.26.6'
           cache-dependency-path: backend/go.sum
 
-      - name: Backend — managed-harness race contracts (seven isolated oracle shards)
+      - name: Backend - managed-harness race contracts (seven isolated oracle shards)
         working-directory: backend
+        env:
+          selection: ${{ needs.backend-pr-plan.outputs.selection }}
+          direct_selection: ${{ needs.backend-pr-plan.outputs.direct_selection }}
         run: |
           set -euo pipefail
-          selection=$(../scripts/backend-ci-packages.sh --direct \
-            '${{ github.event.pull_request.base.sha }}' \
-            '${{ github.event.pull_request.head.sha }}')
-          packages=()
-          [[ -z "$selection" ]] || mapfile -t packages <<<"$selection"
-          if (( ${#packages[@]} == 0 )); then
-            echo 'No backend package changed; managed-harness race lane is empty.'
-          else
-            ../scripts/backend-pr-race.sh --lane=managedharness --shard="${{ matrix.shard }}/7" "${packages[@]}"
-          fi
+          [[ -n "$selection" ]]
+          mapfile -t packages <<<"$selection"
+          ../scripts/backend-pr-race.sh --lane=managedharness --shard="${{ matrix.shard }}/7" --direct-packages="$direct_selection" "${packages[@]}"
 
   backend-pr-db-race:
-    if: github.event_name == 'pull_request'
+    needs: backend-pr-plan
+    if: github.event_name == 'pull_request' && needs.backend-pr-plan.outputs.backend-pr-db-race == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -257,28 +275,25 @@ jobs:
           go-version: '1.26.6'
           cache-dependency-path: backend/go.sum
 
-      - name: Backend — directly changed DB race contracts
+      - name: Backend - affected DB race contracts
         working-directory: backend
+        env:
+          selection: ${{ needs.backend-pr-plan.outputs.selection }}
+          direct_selection: ${{ needs.backend-pr-plan.outputs.direct_selection }}
         run: |
           set -euo pipefail
-          selection=$(../scripts/backend-ci-packages.sh --direct \
-            '${{ github.event.pull_request.base.sha }}' \
-            '${{ github.event.pull_request.head.sha }}')
-          packages=()
-          [[ -z "$selection" ]] || mapfile -t packages <<<"$selection"
-          if (( ${#packages[@]} == 0 )); then
-            echo 'No backend package changed; DB race lane is empty.'
-          else
-            ../scripts/backend-pr-race.sh --lane=db "${packages[@]}"
-          fi
+          [[ -n "$selection" ]]
+          mapfile -t packages <<<"$selection"
+          ../scripts/backend-pr-race.sh --lane=db --direct-packages="$direct_selection" "${packages[@]}"
 
   backend-pr-handlers-race:
-    if: github.event_name == 'pull_request'
+    needs: backend-pr-plan
+    if: github.event_name == 'pull_request' && needs.backend-pr-plan.outputs.backend-pr-handlers-race == 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        shard: [0, 1, 2, 3, 4]
+        shard: ${{ fromJSON(needs.backend-pr-plan.outputs.backend-pr-handlers-race == 'true' && needs.backend-pr-plan.outputs.backend-pr-handlers-race-shards || '[0]') }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -289,20 +304,16 @@ jobs:
           go-version: '1.26.6'
           cache-dependency-path: backend/go.sum
 
-      - name: Backend — directly changed handler race contracts (five isolated shards)
+      - name: Backend - affected handler race contracts (five isolated shards)
         working-directory: backend
+        env:
+          selection: ${{ needs.backend-pr-plan.outputs.selection }}
+          direct_selection: ${{ needs.backend-pr-plan.outputs.direct_selection }}
         run: |
           set -euo pipefail
-          selection=$(../scripts/backend-ci-packages.sh --direct \
-            '${{ github.event.pull_request.base.sha }}' \
-            '${{ github.event.pull_request.head.sha }}')
-          packages=()
-          [[ -z "$selection" ]] || mapfile -t packages <<<"$selection"
-          if (( ${#packages[@]} == 0 )); then
-            echo 'No backend package changed; handler race lane is empty.'
-          else
-            ../scripts/backend-pr-race.sh --lane=handlers --shard="${{ matrix.shard }}/5" "${packages[@]}"
-          fi
+          [[ -n "$selection" ]]
+          mapfile -t packages <<<"$selection"
+          ../scripts/backend-pr-race.sh --lane=handlers --shard="${{ matrix.shard }}/5" --direct-packages="$direct_selection" "${packages[@]}"
 
   backend-security-invariants:
     if: github.event_name == 'pull_request'
@@ -315,10 +326,6 @@ jobs:
           go-version: '1.26.6'
           cache-dependency-path: backend/go.sum
 
-      - name: Backend — security invariants
-        working-directory: backend
-        run: go test -count=1 -run '^TestRegression_|^TestAuthzFuzz_' ./handlers/...
-
       # PAI-809: force the complementary process implementation into the
       # executable Linux test binary. A cross-compile proves only syntax; this
       # test proves the unsupported-platform path withholds the owned-process
@@ -329,38 +336,34 @@ jobs:
           go test -tags paimos_test_unsupported -count=1 ./cmd/paimos -run '^TestUnsupportedPlatformProcessOwnershipFailsClosed$'
           go test -tags paimos_test_unsupported -count=1 ./agentd ./agentdwire ./ownedprocess -run '^TestUnsupportedPlatform'
 
-  # Main and tag pushes skip the PR matrices, but publishing must still wait
-  # for executable backend/platform assurance on the exact image source head.
+  # Release tags require completed exact-code evidence. Main reuses strict,
+  # up-to-date PR checks and allocates no cross-workflow polling runner.
   backend-publish-invariants:
-    if: github.event_name == 'push'
+    if: github.event_name == 'push' && github.ref_type == 'tag'
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v5
-
-      - uses: actions/setup-go@v6
-        with:
-          go-version: '1.26.6'
-          cache-dependency-path: backend/go.sum
-
-      - name: Backend — main/tag smoke and unsupported platform fail-closed
-        working-directory: backend
-        run: |
-          go test -count=1 ./auth ./cmd/paimos ./ownedprocess
-          go test -tags paimos_test_unsupported -count=1 ./cmd/paimos -run '^TestUnsupportedPlatformProcessOwnershipFailsClosed$'
-          go test -tags paimos_test_unsupported -count=1 ./agentd ./agentdwire ./ownedprocess -run '^TestUnsupportedPlatform'
 
       - name: Require exhaustive backend assurance for this exact publish head
         env:
           GH_TOKEN: ${{ github.token }}
-        run: ./scripts/wait-backend-full.sh "$GITHUB_SHA"
+        run: ./scripts/wait-backend-full.sh --check "$GITHUB_SHA"
 
   quality:
-    if: github.ref == 'refs/heads/main' || github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
+
+      - name: Select quality checks from PR inputs
+        id: inputs
+        env:
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: python3 scripts/quality-ci-inputs.py "$PR_BASE" "$PR_HEAD" >> "$GITHUB_OUTPUT"
 
       - uses: actions/setup-go@v6
         with:
@@ -375,24 +378,33 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y ripgrep
 
       - name: Release hygiene
+        if: steps.inputs.outputs.release_hygiene == 'true'
         run: ./scripts/check-release-hygiene.sh
+
+      - name: Calendar v2 display weights pinned to the doctrine
+        if: steps.inputs.outputs.calendar_display == 'true'
+        run: ./scripts/check-calendar-version-display.sh
 
       - name: Release version grammar and Docker metadata
         run: bash ./scripts/test-release-version.sh
 
       - name: Release documentation sync
+        if: steps.inputs.outputs.release_doc_sync == 'true'
         run: bash ./scripts/test-release-doc-sync.sh
 
       - name: Knowledge freshness — live contract
+        if: steps.inputs.outputs.knowledge_freshness == 'true'
         run: ./scripts/test-knowledge-freshness.sh
 
       - name: Deploy scripts — target resolution
+        if: steps.inputs.outputs.deploy_target == 'true'
         run: ./scripts/test-deploy-target.sh
 
       - name: Release scripts — protected-main flow and recovery
         run: ./scripts/test-release.sh
 
       - name: CI scripts — backend PR/full split
+        if: steps.inputs.outputs.backend_gate == 'true'
         run: ./scripts/test-backend-pr-gate.sh
 
       # PAI-270: prove the dev-login route does NOT ship in production
@@ -404,6 +416,7 @@ jobs:
       # refactor accidentally moves dev-login code into a non-tagged
       # file, one of these greps catches it before the image ships.
       - name: Backend — dev-login symbol absent in production binary (PAI-270)
+        if: steps.inputs.outputs.dev_login == 'true'
         working-directory: backend
         run: |
           set -euo pipefail
@@ -438,6 +451,7 @@ jobs:
           echo "✓ dev-login canaries: absent in prod build, present in dev build"
 
       - name: Backend — dev-login tagged contracts
+        if: steps.inputs.outputs.dev_login == 'true'
         working-directory: backend
         run: go test -tags dev_login -count=1 ./auth ./devseed
 
@@ -446,7 +460,7 @@ jobs:
         run: go run ./cmd/paimos anchors verify --repo-root .. --index ../.paimos/anchors.json
 
   frontend-quality:
-    if: github.ref == 'refs/heads/main' || github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -471,6 +485,7 @@ jobs:
   test:
     if: always()
     needs:
+      - backend-pr-plan
       - backend-pr-vet
       - backend-pr
       - backend-pr-db
@@ -484,11 +499,21 @@ jobs:
       - backend-publish-invariants
       - quality
       - frontend-quality
+      - e2e
     runs-on: ubuntu-latest
     steps:
       - name: Require every event-relevant test lane
         env:
           EVENT_NAME: ${{ github.event_name }}
+          BACKEND_PR_PLAN: ${{ needs.backend-pr-plan.result }}
+          BACKEND_PR_PLANNED: ${{ needs.backend-pr-plan.outputs.backend-pr }}
+          BACKEND_PR_DB_PLANNED: ${{ needs.backend-pr-plan.outputs.backend-pr-db }}
+          BACKEND_PR_HANDLERS_PLANNED: ${{ needs.backend-pr-plan.outputs.backend-pr-handlers }}
+          BACKEND_PR_PERFORMANCE_PLANNED: ${{ needs.backend-pr-plan.outputs.backend-pr-performance }}
+          BACKEND_PR_RACE_PLANNED: ${{ needs.backend-pr-plan.outputs.backend-pr-race }}
+          BACKEND_PR_MANAGEDHARNESS_RACE_PLANNED: ${{ needs.backend-pr-plan.outputs.backend-pr-managedharness-race }}
+          BACKEND_PR_DB_RACE_PLANNED: ${{ needs.backend-pr-plan.outputs.backend-pr-db-race }}
+          BACKEND_PR_HANDLERS_RACE_PLANNED: ${{ needs.backend-pr-plan.outputs.backend-pr-handlers-race }}
           BACKEND_PR_VET: ${{ needs.backend-pr-vet.result }}
           BACKEND_PR: ${{ needs.backend-pr.result }}
           BACKEND_PR_DB: ${{ needs.backend-pr-db.result }}
@@ -502,46 +527,61 @@ jobs:
           BACKEND_PUBLISH_INVARIANTS: ${{ needs.backend-publish-invariants.result }}
           QUALITY: ${{ needs.quality.result }}
           FRONTEND_QUALITY: ${{ needs.frontend-quality.result }}
+          E2E: ${{ needs.e2e.result }}
         run: |
           set -euo pipefail
+          require_planned_lane() {
+            case "$1:$2" in
+              true:success|false:skipped) return 0 ;;
+              *) echo "Unexpected planned lane result: $1:$2" >&2; return 1 ;;
+            esac
+          }
           if [[ "$EVENT_NAME" == 'pull_request' ]]; then
-            [[ "$BACKEND_PR_VET" == 'success' ]]
-            [[ "$BACKEND_PR" == 'success' ]]
-            [[ "$BACKEND_PR_DB" == 'success' ]]
-            [[ "$BACKEND_PR_HANDLERS" == 'success' ]]
-            [[ "$BACKEND_PR_PERFORMANCE" == 'success' ]]
-            [[ "$BACKEND_PR_RACE" == 'success' ]]
-            [[ "$BACKEND_PR_MANAGEDHARNESS_RACE" == 'success' ]]
-            [[ "$BACKEND_PR_DB_RACE" == 'success' ]]
-            [[ "$BACKEND_PR_HANDLERS_RACE" == 'success' ]]
-            [[ "$BACKEND_SECURITY_INVARIANTS" == 'success' ]]
-            [[ "$BACKEND_PUBLISH_INVARIANTS" == 'skipped' ]]
+            [[ "$BACKEND_PR_PLAN" == 'success' ]] || exit 1
+            [[ "$BACKEND_PR_VET" == 'success' ]] || exit 1
+            require_planned_lane "$BACKEND_PR_PLANNED" "$BACKEND_PR"
+            require_planned_lane "$BACKEND_PR_DB_PLANNED" "$BACKEND_PR_DB"
+            require_planned_lane "$BACKEND_PR_HANDLERS_PLANNED" "$BACKEND_PR_HANDLERS"
+            require_planned_lane "$BACKEND_PR_PERFORMANCE_PLANNED" "$BACKEND_PR_PERFORMANCE"
+            require_planned_lane "$BACKEND_PR_RACE_PLANNED" "$BACKEND_PR_RACE"
+            require_planned_lane "$BACKEND_PR_MANAGEDHARNESS_RACE_PLANNED" "$BACKEND_PR_MANAGEDHARNESS_RACE"
+            require_planned_lane "$BACKEND_PR_DB_RACE_PLANNED" "$BACKEND_PR_DB_RACE"
+            require_planned_lane "$BACKEND_PR_HANDLERS_RACE_PLANNED" "$BACKEND_PR_HANDLERS_RACE"
+            [[ "$BACKEND_SECURITY_INVARIANTS" == 'success' ]] || exit 1
+            [[ "$BACKEND_PUBLISH_INVARIANTS" == 'skipped' ]] || exit 1
           else
-            [[ "$BACKEND_PR_VET" == 'skipped' ]]
-            [[ "$BACKEND_PR" == 'skipped' ]]
-            [[ "$BACKEND_PR_DB" == 'skipped' ]]
-            [[ "$BACKEND_PR_HANDLERS" == 'skipped' ]]
-            [[ "$BACKEND_PR_PERFORMANCE" == 'skipped' ]]
-            [[ "$BACKEND_PR_RACE" == 'skipped' ]]
-            [[ "$BACKEND_PR_MANAGEDHARNESS_RACE" == 'skipped' ]]
-            [[ "$BACKEND_PR_DB_RACE" == 'skipped' ]]
-            [[ "$BACKEND_PR_HANDLERS_RACE" == 'skipped' ]]
-            [[ "$BACKEND_SECURITY_INVARIANTS" == 'skipped' ]]
-            [[ "$BACKEND_PUBLISH_INVARIANTS" == 'success' ]]
+            [[ "$BACKEND_PR_PLAN" == 'skipped' ]] || exit 1
+            [[ "$BACKEND_PR_VET" == 'skipped' ]] || exit 1
+            [[ "$BACKEND_PR" == 'skipped' ]] || exit 1
+            [[ "$BACKEND_PR_DB" == 'skipped' ]] || exit 1
+            [[ "$BACKEND_PR_HANDLERS" == 'skipped' ]] || exit 1
+            [[ "$BACKEND_PR_PERFORMANCE" == 'skipped' ]] || exit 1
+            [[ "$BACKEND_PR_RACE" == 'skipped' ]] || exit 1
+            [[ "$BACKEND_PR_MANAGEDHARNESS_RACE" == 'skipped' ]] || exit 1
+            [[ "$BACKEND_PR_DB_RACE" == 'skipped' ]] || exit 1
+            [[ "$BACKEND_PR_HANDLERS_RACE" == 'skipped' ]] || exit 1
+            [[ "$BACKEND_SECURITY_INVARIANTS" == 'skipped' ]] || exit 1
+            if [[ "$GITHUB_REF_TYPE" == 'tag' ]]; then
+              [[ "$BACKEND_PUBLISH_INVARIANTS" == 'success' ]] || exit 1
+            else
+              [[ "$GITHUB_REF" == 'refs/heads/main' ]] || exit 1
+              [[ "$BACKEND_PUBLISH_INVARIANTS" == 'skipped' ]] || exit 1
+            fi
           fi
-          if [[ "$EVENT_NAME" == 'push' && "$GITHUB_REF_TYPE" == 'tag' ]]; then
-            [[ "$QUALITY" == 'skipped' ]]
-            [[ "$FRONTEND_QUALITY" == 'skipped' ]]
+          if [[ "$EVENT_NAME" == 'push' ]]; then
+            [[ "$QUALITY" == 'skipped' ]] || exit 1
+            [[ "$FRONTEND_QUALITY" == 'skipped' ]] || exit 1
+            [[ "$E2E" == 'skipped' ]] || exit 1
           else
-            [[ "$QUALITY" == 'success' ]]
-            [[ "$FRONTEND_QUALITY" == 'success' ]]
+            [[ "$QUALITY" == 'success' ]] || exit 1
+            [[ "$FRONTEND_QUALITY" == 'success' ]] || exit 1
+            [[ "$E2E" == 'success' ]] || exit 1
           fi
 
   e2e:
     # PAI-297: E2E smoke — boots the real backend + vite stack and drives the
-    # cross-boundary flows with Playwright. Skipped on tag pushes (same
-    # reasoning as `test`).
-    if: github.ref == 'refs/heads/main' || github.event_name == 'pull_request'
+    # cross-boundary flows with Playwright. Protected main reuses PR assurance.
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -609,7 +649,9 @@ jobs:
       # with --log-opts=-1 (tip commit only), so a secret that was committed
       # and then superseded was never scanned. Scanning the full history
       # costs ~0.4s for ~800 commits, so there is no reason to narrow it.
+      # PAI-1000: pinned scanners reuse PR results on main; live databases rerun.
       - name: gitleaks (secret scanning)
+        if: github.event_name == 'pull_request'
         env:
           GITLEAKS_VERSION: 8.30.1
           GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
@@ -647,6 +689,7 @@ jobs:
       # the same commit). govulncheck stays @latest on purpose: it is not
       # baseline-gated and we want the freshest vulnerability database.
       - name: gosec (Go SAST baseline gate)
+        if: github.event_name == 'pull_request'
         run: |
           go install github.com/securego/gosec/v2/cmd/gosec@v2.27.1
           ./scripts/check-gosec-baseline.sh
@@ -699,7 +742,8 @@ jobs:
             kind="$(release_version::kind "$version")"
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "calendar=$([[ "$kind" = calendar ]] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+          # Both calendar eras publish exactly one immutable tag (PAI-979).
+          echo "calendar=$([[ "$kind" = calendar || "$kind" = calendar-v2 ]] && echo true || echo false)" >> "$GITHUB_OUTPUT"
           echo "semver=$([[ "$kind" = semver ]] && echo true || echo false)" >> "$GITHUB_OUTPUT"
 
       - uses: docker/setup-buildx-action@v4

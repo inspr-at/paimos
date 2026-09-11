@@ -5,15 +5,20 @@ export interface VersionEntry {
   bumpKind: 'major' | 'minor' | 'patch' | 'unknown'
 }
 
+// PAI-979: INSPR calendar v2 — the UTC reservation second as a twelve-digit
+// SemVer MAJOR with MINOR/PATCH fixed at 0.0. It is SemVer-shaped on purpose,
+// so it must be matched before the legacy SemVer alternative and must never be
+// bump-classified.
+const CALENDAR_V2_VERSION = String.raw`[1-9]\d{11}\.0\.0`
 const CALENDAR_VERSION = String.raw`\d{2}\.\d{2}\.\d{2}(?:\.\d{2}\.\d{2})?`
-const SEMVER_VERSION = String.raw`(?!\d{2}\.)\d+\.\d+\.\d+`
-const RELEASE_VERSION = `(?:${CALENDAR_VERSION}|${SEMVER_VERSION})`
+const SEMVER_VERSION = String.raw`(?!\d{2}\.)\d\.\d+\.\d+`
+const RELEASE_VERSION = `(?:${CALENDAR_V2_VERSION}|${CALENDAR_VERSION}|${SEMVER_VERSION})`
 const VERSION_HEADING_RE = new RegExp(
   String.raw`^## \[(${RELEASE_VERSION})\] — (\d{4}-\d{2}-\d{2})`,
   'm',
 )
 const VERSION_SECTION_RE = new RegExp(String.raw`(?=^## \[${RELEASE_VERSION}\])`, 'm')
-const CALENDAR_VERSION_RE = new RegExp(`^${CALENDAR_VERSION}$`)
+const CALENDAR_VERSION_RE = new RegExp(`^(?:${CALENDAR_V2_VERSION}|${CALENDAR_VERSION})$`)
 
 export function parseChangelog(raw: string): VersionEntry[] {
   const list: VersionEntry[] = raw
