@@ -9,6 +9,19 @@ Semantic Versioning (`x.y.z`, until 5.21.0), INSPR calendar v1
 (`YYMMDDhhmmss.0.0`, the UTC reservation second as a SemVer-shaped
 coordinate, from the first entry below that form).
 
+## [260911005821.0.0] — 2026-09-11
+
+### Changed — Final calendar version display (PAI-994)
+
+- Render calendar version labels with the approved revision 3 segment weights and sun-coloured date tint from the pinned INSPR display data. Canonical version strings, copyable values and legacy labels stay unchanged.
+- Verify the vendored display data against its immutable upstream revision in offline builds and initialized checkouts.
+- Include the display changes from the unpublished `260910221338.0.0` reservation. Its tag audit did not finish before the UTC cut-day boundary; no tag or release image was published.
+
+### Fixed — Release tag audit and UTC cutoff (PAI-995)
+
+- Batch remote tag verification while preserving exact object, ancestry and movement checks, reducing the network round trips required for release recovery.
+- Recheck the UTC cut day immediately before creating a release tag, including after a recovery audit.
+
 ## [260910221338.0.0] — 2026-09-10
 
 ### Changed — Final calendar version display (PAI-994)
