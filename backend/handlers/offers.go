@@ -65,6 +65,7 @@ type OfferCustomer struct {
 	Contact    string `json:"contact"`
 	Country    string `json:"country"`
 	CustomerNo string `json:"customer_no"`
+	Email      string `json:"email,omitempty"`
 }
 
 // The first delivery stores the versioned document as one atomic aggregate.
@@ -82,20 +83,23 @@ type OfferDocument struct {
 	NetTotalCents int64           `json:"net_total_cents"`
 }
 type Offer struct {
-	ID              int64         `json:"id"`
-	OfferNo         string        `json:"offer_no"`
-	CustomerID      int64         `json:"customer_id"`
-	Status          string        `json:"status"`
-	Revision        int64         `json:"revision"`
-	Document        OfferDocument `json:"document"`
-	CreatedAt       string        `json:"created_at"`
-	UpdatedAt       string        `json:"updated_at"`
-	SentAt          *string       `json:"sent_at"`
-	PublicToken     string        `json:"public_token,omitempty"`
-	AcceptedAt      *string       `json:"accepted_at,omitempty"`
-	AcceptedName    string        `json:"accepted_name,omitempty"`
-	AcceptedCompany string        `json:"accepted_company,omitempty"`
-	AcceptedNote    string        `json:"accepted_note,omitempty"`
+	Deleted         bool               `json:"deleted"`
+	ID              int64              `json:"id"`
+	OfferNo         string             `json:"offer_no"`
+	CustomerID      int64              `json:"customer_id"`
+	Status          string             `json:"status"`
+	Revision        int64              `json:"revision"`
+	Document        OfferDocument      `json:"document"`
+	CreatedAt       string             `json:"created_at"`
+	UpdatedAt       string             `json:"updated_at"`
+	DocumentSHA256  string             `json:"document_sha256,omitempty"`
+	Confirmation    *OfferConfirmation `json:"confirmation,omitempty"`
+	SentAt          *string            `json:"sent_at"`
+	PublicToken     string             `json:"public_token,omitempty"`
+	AcceptedAt      *string            `json:"accepted_at,omitempty"`
+	AcceptedName    string             `json:"accepted_name,omitempty"`
+	AcceptedCompany string             `json:"accepted_company,omitempty"`
+	AcceptedNote    string             `json:"accepted_note,omitempty"`
 }
 
 func loadOfferSettings() (OfferSettings, error) {
@@ -229,6 +233,12 @@ func calculateOffer(d *OfferDocument, final bool) error {
 		if strings.TrimSpace(d.Title) == "" || strings.TrimSpace(d.Customer.Name) == "" || strings.TrimSpace(d.Customer.Address) == "" || len(d.Positions) == 0 {
 			return errors.New("Titel, Kundenanschrift und mindestens eine Position sind erforderlich")
 		}
+		if !validOfferEmail(d.Sender.Email) {
+			return errors.New("Gültige Absender-E-Mail ist erforderlich")
+		}
+		if !validOfferEmail(d.Customer.Email) {
+			return errors.New("Gültige E-Mail des Kundenkontakts ist erforderlich")
+		}
 		if err := validateOfferSender(d.Sender); err != nil {
 			return err
 		}
@@ -238,7 +248,7 @@ func calculateOffer(d *OfferDocument, final bool) error {
 func scanOffer(row rowScanner) (Offer, error) {
 	var o Offer
 	var raw string
-	err := row.Scan(&o.ID, &o.OfferNo, &o.CustomerID, &o.Status, &o.Revision, &raw, &o.CreatedAt, &o.UpdatedAt, &o.SentAt, &o.PublicToken, &o.AcceptedAt, &o.AcceptedName, &o.AcceptedCompany, &o.AcceptedNote)
+	err := row.Scan(&o.ID, &o.OfferNo, &o.CustomerID, &o.Status, &o.Revision, &raw, &o.CreatedAt, &o.UpdatedAt, &o.SentAt, &o.PublicToken, &o.AcceptedAt, &o.AcceptedName, &o.AcceptedCompany, &o.AcceptedNote, &o.Deleted)
 	if err == nil {
 		err = json.Unmarshal([]byte(raw), &o.Document)
 		if err == nil && o.Status == "sent" && (!offerDateValid(o.Document.ValidUntil) || o.Document.ValidUntil < offerToday()) {
@@ -248,7 +258,7 @@ func scanOffer(row rowScanner) (Offer, error) {
 	return o, err
 }
 
-const offerColumns = `id,offer_no,customer_id,status,revision,document,created_at,updated_at,sent_at,COALESCE(public_token,''),accepted_at,accepted_name,accepted_company,accepted_note`
+const offerColumns = `id,offer_no,customer_id,status,revision,document,created_at,updated_at,sent_at,COALESCE(public_token,''),accepted_at,accepted_name,accepted_company,accepted_note,EXISTS(SELECT 1 FROM offer_visibility WHERE offer_id=offers.id AND deleted_at IS NOT NULL)`
 
 func GetOffer(w http.ResponseWriter, r *http.Request) {
 	o, err := scanOffer(db.DB.QueryRow(`SELECT `+offerColumns+` FROM offers WHERE id=?`, chi.URLParam(r, "id")))
@@ -260,10 +270,14 @@ func GetOffer(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, "Laden fehlgeschlagen", 500)
 		return
 	}
+	if o.Status == "draft" {
+		_ = db.DB.QueryRowContext(r.Context(), `SELECT contact_email FROM customers WHERE id=?`, o.CustomerID).Scan(&o.Document.Customer.Email)
+	}
+	loadOfferConfirmation(r.Context(), &o)
 	jsonOK(w, o)
 }
 func ListCustomerOffers(w http.ResponseWriter, r *http.Request) {
-	rows, err := db.DB.Query(`SELECT `+offerColumns+` FROM offers WHERE customer_id=? ORDER BY id DESC`, chi.URLParam(r, "id"))
+	rows, err := db.DB.Query(`SELECT `+offerColumns+` FROM offers WHERE customer_id=? AND (? OR NOT EXISTS(SELECT 1 FROM offer_visibility WHERE offer_id=offers.id AND deleted_at IS NOT NULL)) ORDER BY id DESC`, chi.URLParam(r, "id"), r.URL.Query().Get("include_deleted") == "1")
 	if err != nil {
 		jsonError(w, "Laden fehlgeschlagen", 500)
 		return
@@ -314,7 +328,7 @@ func CreateOffer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := time.Now().In(loc)
-	d := OfferDocument{Title: "Beratungsleistungen", OfferDate: now.Format("2006-01-02"), ValidUntil: now.AddDate(0, 0, 30).Format("2006-01-02"), Sender: s.Sender, OfferDefaults: s.Defaults, Positions: []OfferPosition{{Quantity: 1, Unit: "Pauschale"}}, Customer: OfferCustomer{Name: c.Name, Contact: c.ContactName, Address: c.Address, Country: c.Country}}
+	d := OfferDocument{Title: "Beratungsleistungen", OfferDate: now.Format("2006-01-02"), ValidUntil: now.AddDate(0, 0, 30).Format("2006-01-02"), Sender: s.Sender, OfferDefaults: s.Defaults, Positions: []OfferPosition{{Quantity: 1, Unit: "Pauschale"}}, Customer: OfferCustomer{Name: c.Name, Contact: c.ContactName, Email: c.ContactEmail, Address: c.Address, Country: c.Country}}
 	if c.BillingAddressStreet != "" {
 		d.Customer.Address = c.BillingAddressStreet + "\n" + strings.TrimSpace(c.BillingAddressZip+" "+c.BillingAddressCity)
 		d.Customer.Country = c.BillingAddressCountry
@@ -359,6 +373,7 @@ func CreateOffer(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	d.Customer.CustomerNo = customerNo.String
+	d.Customer.Email = c.ContactEmail
 	if err = calculateOffer(&d, false); err != nil {
 		jsonError(w, err.Error(), 400)
 		return
@@ -400,6 +415,13 @@ func PutOffer(w http.ResponseWriter, r *http.Request) {
 	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 512<<10)).Decode(&body) != nil || body.Revision < 1 {
 		jsonError(w, "Ungültiges Angebot", 400)
 		return
+	}
+	if body.Finalize {
+		if err := db.DB.QueryRowContext(r.Context(), `SELECT contact_email FROM customers WHERE id=(SELECT customer_id FROM offers WHERE id=?)`, chi.URLParam(r, "id")).Scan(&body.Document.Customer.Email); err != nil {
+			jsonError(w, "Kundenkontakt konnte nicht geladen werden", 400)
+			return
+		}
+		body.Document.Customer.Email = strings.TrimSpace(body.Document.Customer.Email)
 	}
 	if err := calculateOffer(&body.Document, body.Finalize); err != nil {
 		jsonError(w, err.Error(), 400)

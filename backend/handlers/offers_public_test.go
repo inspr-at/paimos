@@ -18,7 +18,7 @@ func publicOfferFixture(t *testing.T, ts *testServer, expired bool) handlers.Off
 	resp := ts.put(t, "/api/integrations/crm/offers", ts.adminCookie, offerSettingsFixture())
 	assertStatus(t, resp, 200)
 	resp.Body.Close()
-	resp = ts.post(t, "/api/customers", ts.adminCookie, map[string]any{"name": "Offer customer", "address": "Teststraße 1, Wien", "contact_name": "Eva Test"})
+	resp = ts.post(t, "/api/customers", ts.adminCookie, map[string]any{"name": "Offer customer", "address": "Teststraße 1, Wien", "contact_name": "Eva Test", "contact_email": "eva@example.test"})
 	assertStatus(t, resp, 201)
 	var c struct {
 		ID int64 `json:"id"`
@@ -280,4 +280,61 @@ func TestPublicOfferLegacyLinksAndFinalizationGates(t *testing.T) {
 		assertStatus(t, resp, 400)
 		resp.Body.Close()
 	}
+}
+
+func TestOffersSoftDeleteRestoreAndFrozenRecipient(t *testing.T) {
+	ts := newTestServer(t)
+	o := publicOfferFixture(t, ts, false)
+	// Master data changes cannot change a finalized recipient snapshot.
+	if _, err := db.DB.Exec(`UPDATE customers SET contact_email='new@example.test' WHERE id=?`, o.CustomerID); err != nil {
+		t.Fatal(err)
+	}
+	resp := ts.get(t, fmt.Sprintf("/api/offers/%d", o.ID), ts.adminCookie)
+	var frozen handlers.Offer
+	decode(t, resp, &frozen)
+	if frozen.Document.Customer.Email != "eva@example.test" {
+		t.Fatal("recipient snapshot changed")
+	}
+	path := fmt.Sprintf("/api/offers/%d/deleted", o.ID)
+	resp = ts.put(t, path, ts.memberCookie, map[string]bool{"deleted": true})
+	assertStatus(t, resp, 403)
+	resp.Body.Close()
+	resp = ts.put(t, path, ts.adminCookie, map[string]bool{"deleted": true})
+	assertStatus(t, resp, 200)
+	resp.Body.Close()
+	resp = ts.get(t, fmt.Sprintf("/api/customers/%d/offers", o.CustomerID), ts.adminCookie)
+	var offers []handlers.Offer
+	decode(t, resp, &offers)
+	if len(offers) != 0 {
+		t.Fatal("deleted offer visible by default")
+	}
+	resp = ts.get(t, fmt.Sprintf("/api/customers/%d/offers?include_deleted=1", o.CustomerID), ts.adminCookie)
+	decode(t, resp, &offers)
+	if len(offers) != 1 || !offers[0].Deleted {
+		t.Fatal("deleted filter missing offer")
+	}
+	resp = ts.get(t, "/api/public/offers/"+o.PublicToken, "")
+	assertStatus(t, resp, 200)
+	resp.Body.Close()
+	resp = ts.put(t, path, ts.adminCookie, map[string]bool{"deleted": false})
+	assertStatus(t, resp, 200)
+	resp.Body.Close()
+	resp = ts.get(t, "/api/offers/summary", ts.adminCookie)
+	var summaries []struct {
+		ID      int64  `json:"id"`
+		Status  string `json:"status"`
+		Deleted bool   `json:"deleted"`
+	}
+	decode(t, resp, &summaries)
+	if len(summaries) != 1 || summaries[0].ID != o.ID || summaries[0].Status != "sent" || summaries[0].Deleted {
+		t.Fatal("restore or summary failed")
+	}
+	// Finalization rejects missing contact email even if the client invents one.
+	resp = ts.post(t, "/api/offers", ts.adminCookie, map[string]any{"customer_id": o.CustomerID, "duplicate_id": o.ID})
+	decode(t, resp, &o)
+	db.DB.Exec(`UPDATE customers SET contact_email='' WHERE id=?`, o.CustomerID)
+	o.Document.Customer.Email = "invented@example.test"
+	resp = ts.put(t, fmt.Sprintf("/api/offers/%d", o.ID), ts.adminCookie, map[string]any{"revision": o.Revision, "document": o.Document, "finalize": true})
+	assertStatus(t, resp, 400)
+	resp.Body.Close()
 }

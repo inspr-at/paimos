@@ -76,6 +76,7 @@ export default defineConfig(({ command }) => ({
   build: {
     outDir: 'dist',
     rollupOptions: {
+      input: { app: resolve(frontendDir, "index.html"), offerPdf: resolve(frontendDir, "offer-pdf.html") },
       output: {
         manualChunks(id) {
           if (!id.includes('node_modules')) return

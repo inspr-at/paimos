@@ -13,6 +13,9 @@
  admin has at least one provider enabled + configured.
 -->
 <script setup lang="ts">
+import OfferStatusBadge from '@/components/offers/OfferStatusBadge.vue'
+import { crmEnabled } from '@/api/instance'
+import { FileText } from 'lucide-vue-next'
 import LoadingText from "@/components/LoadingText.vue";
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { RouterLink, useRouter } from 'vue-router'
@@ -33,6 +36,16 @@ const router = useRouter()
 const { detailPath } = useCustomerBase()
 const isAdmin = computed(() => auth.isAdmin)
 
+type OfferSummary = { deleted?: boolean; id: number; customer_id: number; offer_no: string; title: string; status: string }
+const showDeletedOffers = ref(false)
+watch(showDeletedOffers, () => void load())
+const offerSummaries = ref<OfferSummary[]>([])
+const offerSummaryError = ref('')
+const offersByCustomer = computed(() => {
+ const groups = new Map<number, OfferSummary[]>()
+ for (const offer of offerSummaries.value) groups.set(offer.customer_id, [...(groups.get(offer.customer_id) || []), offer])
+ return groups
+})
 const customers = ref<Customer[]>([])
 const loading = ref(true)
 const loadError = ref('')
@@ -195,6 +208,10 @@ async function load() {
   loadError.value = ''
   try {
     customers.value = await api.get<Customer[]>('/customers')
+    if (crmEnabled.value) {
+      try { offerSummaries.value = await api.get<OfferSummary[]>(`/offers/summary${showDeletedOffers.value ? '?include_deleted=1' : ''}`); offerSummaryError.value = '' }
+      catch { offerSummaryError.value = 'Angebotsstatus konnte nicht geladen werden.' }
+    }
   } catch (e: unknown) {
     loadError.value = errMsg(e, 'Failed to load customers.')
   } finally {
@@ -332,6 +349,7 @@ function fmtRate(v: number | null | undefined): string {
       </div>
     </div>
 
+  <label v-if="crmEnabled" class="cv-deleted-filter"><input v-model="showDeletedOffers" type="checkbox" /> Gelöschte anzeigen</label>
     <div v-if="isAdmin" class="cv-add-wrapper">
       <button class="btn btn-primary cv-add" @click="openCreate">
         <AppIcon name="plus" :size="14" />
@@ -381,12 +399,8 @@ function fmtRate(v: number | null | undefined): string {
   </div>
 
   <div v-else class="cv-grid">
-    <RouterLink
-      v-for="c in filtered"
-      :key="c.id"
-      :to="detailPath(c.id)"
-      class="cv-card"
-    >
+    <article v-for="c in filtered" :key="c.id" class="cv-card">
+      <RouterLink :to="detailPath(c.id)" class="cv-customer-link">
       <div class="cv-card-top">
         <h3 class="cv-card-name">{{ c.name }}</h3>
         <ProviderBadge
@@ -417,7 +431,15 @@ function fmtRate(v: number | null | undefined): string {
           <span class="cv-stat-label">/LP</span>
         </div>
       </div>
-    </RouterLink>
+      </RouterLink>
+      <details v-if="crmEnabled && offersByCustomer.get(c.id)?.length" class="cv-offers">
+        <summary><FileText :size="15" aria-hidden="true" /> {{ offersByCustomer.get(c.id)!.length }} {{ offersByCustomer.get(c.id)!.length === 1 ? "Angebot" : "Angebote" }}</summary>
+        <RouterLink v-for="offer in offersByCustomer.get(c.id)" :key="offer.id" :to="`/crm/offers/${offer.id}`">
+          <span>{{ offer.offer_no }} · {{ offer.title }}<small v-if="offer.deleted"> · {{ offer.status === "draft" ? "Gelöscht" : "Archiviert" }}</small></span><OfferStatusBadge :status="offer.status" />
+        </RouterLink>
+      </details>
+      <p v-else-if="offerSummaryError" role="status">{{ offerSummaryError }}</p>
+    </article>
   </div>
 
   <CustomerCreateModal :open="showCreate" @close="showCreate = false" @created="onCreated" />
@@ -430,6 +452,12 @@ function fmtRate(v: number | null | undefined): string {
 </template>
 
 <style scoped>
+.cv-deleted-filter { display: flex; align-items: center; gap: 6px; margin: 12px 0; font-size: 12px; color: var(--text-muted); }
+.cv-customer-link { display: block; color: inherit; text-decoration: none; }
+.cv-offers { margin-top: 12px; font-size: 12px; }
+.cv-offers summary { cursor: pointer; display: flex; align-items: center; gap: 6px; }
+.cv-offers a { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 0; color: inherit; text-decoration: none; border-bottom: 1px solid var(--border); }
+
 .cv-toolbar {
   display: flex; align-items: center; gap: 1rem;
   margin-bottom: 1.25rem;

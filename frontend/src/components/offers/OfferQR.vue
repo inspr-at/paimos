@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import qrcode from 'qrcode-generator'
-const props = defineProps<{ url?: string; preview?: boolean }>()
+const props = defineProps<{ url?: string; preview?: boolean; accepted?: boolean }>()
 const qr = computed(() => {
   const code = qrcode(0, 'M')
   code.addData(props.preview ? 'ANGEBOT VORSCHAU - KEIN KUNDENLINK' : (props.url ?? ''), 'Byte')
@@ -19,7 +19,10 @@ const qr = computed(() => {
   <div class="qr">
     <div class="box">
       <div class="cap">
-        <b>Angebot online ansehen und annehmen</b><span>PDF und Annahme im Kundenbereich</span>
+        <b>{{
+          accepted ? 'Angenommenes Angebot online ansehen' : 'Angebot online ansehen und annehmen'
+        }}</b
+        ><span>PDF und Annahme im Kundenbereich</span>
         <span v-if="preview" class="preview-link">Kundenlink folgt beim Finalisieren</span>
         <a v-else-if="url" :href="url" rel="noreferrer"
           >{{ url.slice(0, url.lastIndexOf('/') + 1) }}<wbr /><span class="token">{{

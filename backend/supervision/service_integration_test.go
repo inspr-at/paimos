@@ -20,6 +20,7 @@ import (
 
 	"github.com/inspr-at/paimos/backend/auth"
 	storedb "github.com/inspr-at/paimos/backend/db"
+	"github.com/inspr-at/paimos/backend/internal/testdb"
 	"modernc.org/sqlite"
 )
 
@@ -107,6 +108,7 @@ func openSupervisionTestDB(t *testing.T) *sql.DB {
 	priorDataDir, priorTestMode := os.Getenv("DATA_DIR"), os.Getenv("PAIMOS_TEST_MODE")
 	t.Setenv("DATA_DIR", t.TempDir())
 	t.Setenv("PAIMOS_TEST_MODE", "1")
+	testdb.Prepare(t)
 	if err := storedb.Open(); err != nil {
 		t.Fatalf("open migrated database: %v", err)
 	}

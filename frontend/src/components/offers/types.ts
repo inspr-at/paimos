@@ -46,11 +46,27 @@ export interface OfferDocument extends OfferDefaults {
   offer_date: string
   valid_until: string
   sender: OfferSender
-  customer: { name: string; address: string; contact: string; country: string; customer_no: string }
+  customer: {
+    name: string
+    address: string
+    contact: string
+    country: string
+    customer_no: string
+    email?: string
+  }
   positions: OfferPosition[]
   net_total_cents: number
 }
+export interface OfferConfirmation {
+  state: string
+  sent_at?: string
+  error_class?: string
+  pdf_ready: boolean
+}
 export interface Offer {
+  deleted?: boolean
+  document_sha256?: string
+  confirmation?: OfferConfirmation
   id: number
   offer_no: string
   customer_id: number
@@ -100,14 +116,28 @@ export type PublicOffer = Pick<
   | 'accepted_name'
   | 'accepted_company'
   | 'accepted_note'
+  | 'document_sha256'
+  | 'confirmation'
 >
 export const offerStatus = (status: string) =>
   ({
-    draft: 'Entwurf',
+    draft: 'In Bearbeitung',
     sent: 'Finalisiert',
     accepted: 'Angenommen',
     declined: 'Abgelehnt',
     expired: 'Abgelaufen',
   })[status] || status
 
-export const receiptTime = (value?: string) => formatDateTimeWithLocale(value || '', 'de-AT', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Vienna', timeZoneName: 'short' })
+export const receiptTime = (value?: string) =>
+  formatDateTimeWithLocale(value || '', 'de-AT', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    timeZone: 'Europe/Vienna',
+    timeZoneName: 'short',
+  })
+
+export const validOfferEmail = (email?: string) =>
+  !!email && /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(email)

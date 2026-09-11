@@ -28,7 +28,7 @@ RUN npm run build \
 
 FROM alpine:3.21
 LABEL org.opencontainers.image.licenses="AGPL-3.0-only"
-RUN apk add --no-cache ca-certificates
+RUN apk add --no-cache ca-certificates chromium
 COPY --from=go-build /paimos /usr/local/bin/paimos
 COPY --from=spa-build /src/dist /app/static
 RUN mkdir -p /app/data
