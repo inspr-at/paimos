@@ -1,11 +1,15 @@
 <script setup lang="ts">
 import OfferText from './OfferText.vue'
+import OfferBrandDots from './OfferBrandDots.vue'
 import { date, type Offer } from './types'
 defineProps<{ offer: Pick<Offer, 'offer_no' | 'document'>; editable?: boolean }>()
 </script>
 <template>
   <div class="offer-cover">
-    <div class="top"><div class="word">ANGEBOT</div></div>
+    <div class="top">
+      <div class="word">ANGEBOT</div>
+      <OfferBrandDots />
+    </div>
     <OfferText
       v-model="offer.document.title"
       tag="h1"
