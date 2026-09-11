@@ -126,6 +126,22 @@ merged with current `origin/main` locally using a merge commit carrying the
 author's DCO sign-off, so the required checks can rerun without an unsigned
 GitHub-generated update.
 
+For a separate release review, use the supported local preparation checkpoint:
+
+```bash
+scripts/release.sh now --prepare-only --no-edit
+# Review the four-file commit. The final JSON line records version, branch,
+# head and base; use that explicit version and full reviewed commit SHA below.
+scripts/release.sh <version> --reviewed-head <full-sha> --no-edit
+```
+
+Preparation returns successfully before any push, PR creation or tag. Repeat
+preparation with the recorded version to inspect the same commit. Reviewed
+resume retains all normal release gates and rejects a different head or an
+advanced main instead of automatically merging new code into the reviewed
+release. If main advanced, prepare a fresh version and review its delta.
+The receipt identifies the content; it does not itself grant approval.
+
 An exceptional merged PR with missing GitHub auto-merge provenance is not a
 manual-tag invitation. It can resume only after a separate reviewed main-branch
 change adds the exact receipt under `scripts/release/recovery/`; the script then

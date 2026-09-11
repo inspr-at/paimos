@@ -6,6 +6,8 @@
 #
 # Usage:
 #   scripts/release.sh patch|minor|major|<x.y.z>|<yy.mm.dd[.hh.mm]> [--no-edit]
+#   scripts/release.sh <version>|now --prepare-only --no-edit
+#   scripts/release.sh <version> --reviewed-head <full-sha> --no-edit
 #   scripts/release.sh                            # report commits since tag
 
 set -euo pipefail
@@ -16,14 +18,34 @@ cd "$ROOT"
 source "$ROOT/scripts/release-version.sh"
 
 NO_EDIT=0
+PREPARE_ONLY=0
+REVIEWED_HEAD=''
 ARGS=()
-for arg in "$@"; do
-  case "$arg" in
-    --no-edit) NO_EDIT=1 ;;
-    *) ARGS+=("$arg") ;;
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --no-edit) NO_EDIT=1; shift ;;
+    --prepare-only) PREPARE_ONLY=1; shift ;;
+    --reviewed-head)
+      [[ "${2:-}" =~ ^[0-9a-f]{40}$ ]] || {
+        echo 'error: --reviewed-head requires a full lowercase commit SHA' >&2
+        exit 2
+      }
+      REVIEWED_HEAD="$2"; shift 2
+      ;;
+    --*) echo "error: unknown option: $1" >&2; exit 2 ;;
+    *) ARGS+=("$1"); shift ;;
   esac
 done
 MODE="${ARGS[0]:-}"
+if [[ ${#ARGS[@]} -gt 1 || ( "$PREPARE_ONLY" -eq 1 && -n "$REVIEWED_HEAD" ) ||
+      ( -z "$MODE" && ( "$PREPARE_ONLY" -eq 1 || -n "$REVIEWED_HEAD" ) ) ]]; then
+  echo 'error: use <version>|now --prepare-only, or <version> --reviewed-head <sha>' >&2
+  exit 2
+fi
+if [[ -n "$REVIEWED_HEAD" ]] && ! release_version::is_supported "$MODE"; then
+  echo 'error: reviewed resume requires the explicit prepared version' >&2
+  exit 2
+fi
 case "${EDITOR:-}" in
   ""|true|:|cat|tee) NO_EDIT=1 ;;
 esac
@@ -51,6 +73,30 @@ RELEASE_TAG_FETCH_BATCH_SIZE=64
 fail() {
   echo "error: $*" >&2
   exit 1
+}
+
+assert_reviewed_head() {
+  [[ -z "$REVIEWED_HEAD" || "$(git rev-parse "$1")" == "$REVIEWED_HEAD" ]] ||
+    fail "release head differs from reviewed commit $REVIEWED_HEAD"
+}
+
+assert_reviewed_base() {
+  local head="$1"
+  [[ -n "$REVIEWED_HEAD" ]] || return 0
+  assert_reviewed_head "$head"
+  git fetch --quiet origin main
+  [[ "$(git rev-parse origin/main)" == "$(git rev-parse "$head^")" ]] ||
+    fail 'main advanced since release preparation; prepare and review a fresh release instead of syncing the reviewed head'
+}
+
+prepared_release_receipt() {
+  local head base
+  head=$(git rev-parse HEAD)
+  base=$(git rev-parse HEAD^)
+  echo 'Prepared locally; no branch, PR or tag has been published.'
+  jq -cn --arg version "$NEW" --arg branch "$RELEASE_BRANCH" \
+    --arg head "$head" --arg base "$base" \
+    '{version:$version, branch:$branch, head:$head, base:$base}'
 }
 
 require_command() {
@@ -647,6 +693,7 @@ fetch_and_validate_pr_head() {
   fetched_head=$(git rev-parse "$PR_HEAD_REF")
   [[ "$fetched_head" == "$api_head" ]] ||
     fail "fetched PR head $fetched_head differs from API head $api_head"
+  assert_reviewed_head "$PR_HEAD_REF"
   base=$(git merge-base origin/main "$PR_HEAD_REF")
   [[ -n "$base" ]] || fail "release PR head has no merge-base with origin/main"
   assert_release_delta "$base" "$PR_HEAD_REF" "$NEW"
@@ -870,6 +917,7 @@ checkout_release_branch_for_sync() {
 }
 
 sync_release_branch() {
+  [[ -z "$REVIEWED_HEAD" ]] || fail 'reviewed release cannot be automatically synced; prepare and review a fresh release'
   checkout_release_branch_for_sync
   git fetch --quiet origin main
   if git merge-base --is-ancestor origin/main HEAD; then
@@ -899,6 +947,7 @@ ensure_auto_merge() {
     return
   fi
   head_oid=$(printf '%s\n' "$pr_json" | jq -r '.headRefOid')
+  assert_reviewed_base "$head_oid"
   gh pr merge "$PR_NUMBER" \
     --repo "$REPO" \
     --auto \
@@ -1106,6 +1155,8 @@ prepare_release_branch() {
           fail "prepared local release branch contains a commit without its author's DCO sign-off"
         "$ROOT/scripts/check-claims.sh"
         "$ROOT/scripts/check-release-hygiene.sh"
+        [[ "$PREPARE_ONLY" -eq 0 ]] || return 0
+        assert_reviewed_base HEAD
         git push -u origin "$RELEASE_BRANCH"
         fetch_release_branch
         assert_release_branch
@@ -1200,6 +1251,8 @@ prepare_release_branch() {
   git commit --no-gpg-sign --signoff -m "release: $NEW_TAG"
   base=$(git merge-base origin/main HEAD)
   assert_release_delta "$base" HEAD "$NEW"
+  [[ "$PREPARE_ONLY" -eq 0 ]] || return 0
+  assert_reviewed_base HEAD
   if [[ "${RELEASE_TEST_FAILPOINT:-}" == "before-branch-push" ]]; then
     fail "injected interruption before release branch push"
   fi
@@ -1210,6 +1263,7 @@ prepare_release_branch() {
 
 create_release_pr() {
   local body
+  assert_reviewed_base "origin/$RELEASE_BRANCH"
   body=$(printf '%s\n' \
     "## Release $NEW_TAG" \
     "" \
@@ -1355,18 +1409,33 @@ if [[ -n "$PR_JSON" ]]; then
   PR_NUMBER=$(printf '%s\n' "$PR_JSON" | jq -r '.number')
   PR_URL=$(printf '%s\n' "$PR_JSON" | jq -r '.url')
   PR_STATE=$(printf '%s\n' "$PR_JSON" | jq -r '.state')
+  [[ "$PREPARE_ONLY" -eq 0 ]] || fail 'release already has a PR; prepare-only cannot modify a published release'
+  if [[ -n "$REVIEWED_HEAD" ]]; then
+    [[ "$(printf '%s\n' "$PR_JSON" | jq -r '.headRefOid')" == "$REVIEWED_HEAD" ]] ||
+      fail "release PR differs from reviewed commit $REVIEWED_HEAD"
+    [[ "$PR_STATE" != 'OPEN' ]] || assert_reviewed_base "$REVIEWED_HEAD"
+  fi
   echo "Reusing release PR: $PR_URL ($PR_STATE)"
 else
   if git rev-parse "$NEW_TAG" >/dev/null 2>&1; then
     fail "$NEW_TAG exists without its canonical $RELEASE_BRANCH PR"
   fi
+  if [[ -n "$REVIEWED_HEAD" ]]; then
+    [[ -z "$(changed_worktree_files)" ]] || fail 'reviewed release checkout is dirty'
+    assert_reviewed_base HEAD
+  fi
   if remote_branch_exists; then
+    [[ "$PREPARE_ONLY" -eq 0 ]] || fail 'release branch already published; prepare-only is local only'
     [[ -z "$(changed_worktree_files)" ]] ||
       fail "working tree is dirty while reusing origin/$RELEASE_BRANCH"
     fetch_release_branch
     assert_release_branch
   else
     prepare_release_branch
+    if [[ "$PREPARE_ONLY" -eq 1 ]]; then
+      prepared_release_receipt
+      exit 0
+    fi
   fi
   create_release_pr
   PR_JSON=$(find_release_pr)
