@@ -9,6 +9,28 @@ Semantic Versioning (`x.y.z`, until 5.21.0), INSPR calendar v1
 (`YYMMDDhhmmss.0.0`, the UTC reservation second as a SemVer-shaped
 coordinate, from the first entry below that form).
 
+## [260911172741.0.0] — 2026-09-11
+
+### Added — Reviewed delivery launch (PAI-978)
+
+- Request a single-use Pharos launch only for the reviewed delivery, selected worker accounts and current authority; stale selections, changed candidates and any second launch are refused, while an exact retry returns the original admission or receipt.
+- Publish the versioned launch-admission contract and CLI transport while retaining explicit release-scheme discrimination.
+
+### Improved — Account and worker lifecycle (PAI-984, PAI-985, PAI-986)
+
+- Record the effective Claude model returned by the running harness instead of presenting the requested model as execution evidence.
+- Attach and detach enrolled accounts through reviewed lifecycle actions bound to the current account attachment revision.
+- Retire workers with durable intent and recovery state, and make unfinished-work disposition explicit in the Habitat removal flow.
+
+### Fixed — Browser-guard runtime diagnostics (PAI-981)
+
+- Accept the declared agent browser-guard LaunchAgent environment on macOS only when every guarded path points at the exact refusal shim; any other LaunchAgent environment override is still refused.
+
+### Fixed — Integration compatibility
+
+- Preserve current Flow, release tooling and test-database improvements while adding launch and retirement migrations after the already-published migration sequence.
+- Keep Unix transport tests scoped to the platforms supported by the production transport.
+
 ## [260911160144.0.0] — 2026-09-11
 
 ### Changed — Reviewed release preparation (PAI-1008)
