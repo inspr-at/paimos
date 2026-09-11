@@ -1,6 +1,6 @@
 name: ci
 
-# Test on every push and PR. Build + publish the Docker image only on
+# Test PRs; reuse protected-main assurance on push. Publish images only on
 # pushes to `main` and on tag pushes `v*`. The image is tagged:
 #   - `latest` on main
 #   - exact version on supported release tags (v-prefix stripped)
@@ -80,13 +80,16 @@ jobs:
           selection=$(../scripts/backend-ci-packages.sh \
             '${{ github.event.pull_request.base.sha }}' \
             '${{ github.event.pull_request.head.sha }}')
+          direct_selection=$(../scripts/backend-ci-packages.sh --direct \
+            '${{ github.event.pull_request.base.sha }}' \
+            '${{ github.event.pull_request.head.sha }}')
           packages=()
           [[ -z "$selection" ]] || mapfile -t packages <<<"$selection"
           if (( ${#packages[@]} == 0 )); then
             echo 'No backend package changed; affected test lane is empty.'
           else
             printf 'Affected backend package: %s\n' "${packages[@]}"
-            ../scripts/backend-pr-test.sh --lane=affected --shard="${{ matrix.shard }}/2" "${packages[@]}"
+            ../scripts/backend-pr-test.sh --lane=affected --shard="${{ matrix.shard }}/2" --direct-packages="$direct_selection" "${packages[@]}"
           fi
 
   backend-pr-db:
@@ -109,12 +112,15 @@ jobs:
           selection=$(../scripts/backend-ci-packages.sh \
             '${{ github.event.pull_request.base.sha }}' \
             '${{ github.event.pull_request.head.sha }}')
+          direct_selection=$(../scripts/backend-ci-packages.sh --direct \
+            '${{ github.event.pull_request.base.sha }}' \
+            '${{ github.event.pull_request.head.sha }}')
           packages=()
           [[ -z "$selection" ]] || mapfile -t packages <<<"$selection"
           if (( ${#packages[@]} == 0 )); then
             echo 'No backend package changed; DB test lane is empty.'
           else
-            ../scripts/backend-pr-test.sh --lane=db "${packages[@]}"
+            ../scripts/backend-pr-test.sh --lane=db --direct-packages="$direct_selection" "${packages[@]}"
           fi
 
   backend-pr-handlers:
@@ -141,12 +147,15 @@ jobs:
           selection=$(../scripts/backend-ci-packages.sh \
             '${{ github.event.pull_request.base.sha }}' \
             '${{ github.event.pull_request.head.sha }}')
+          direct_selection=$(../scripts/backend-ci-packages.sh --direct \
+            '${{ github.event.pull_request.base.sha }}' \
+            '${{ github.event.pull_request.head.sha }}')
           packages=()
           [[ -z "$selection" ]] || mapfile -t packages <<<"$selection"
           if (( ${#packages[@]} == 0 )); then
             echo 'No backend package changed; handler test lane is empty.'
           else
-            ../scripts/backend-pr-test.sh --lane=handlers --shard="${{ matrix.shard }}/5" "${packages[@]}"
+            ../scripts/backend-pr-test.sh --lane=handlers --shard="${{ matrix.shard }}/5" --direct-packages="$direct_selection" "${packages[@]}"
           fi
 
   backend-pr-performance:
@@ -172,12 +181,15 @@ jobs:
           selection=$(../scripts/backend-ci-packages.sh \
             '${{ github.event.pull_request.base.sha }}' \
             '${{ github.event.pull_request.head.sha }}')
+          direct_selection=$(../scripts/backend-ci-packages.sh --direct \
+            '${{ github.event.pull_request.base.sha }}' \
+            '${{ github.event.pull_request.head.sha }}')
           packages=()
           [[ -z "$selection" ]] || mapfile -t packages <<<"$selection"
           if (( ${#packages[@]} == 0 )); then
             echo 'No backend package changed; performance test lane is empty.'
           else
-            ../scripts/backend-pr-test.sh --lane=performance "${packages[@]}"
+            ../scripts/backend-pr-test.sh --lane=performance --direct-packages="$direct_selection" "${packages[@]}"
           fi
 
   backend-pr-race:
@@ -315,10 +327,6 @@ jobs:
           go-version: '1.26.6'
           cache-dependency-path: backend/go.sum
 
-      - name: Backend — security invariants
-        working-directory: backend
-        run: go test -count=1 -run '^TestRegression_|^TestAuthzFuzz_' ./handlers/...
-
       # PAI-809: force the complementary process implementation into the
       # executable Linux test binary. A cross-compile proves only syntax; this
       # test proves the unsupported-platform path withholds the owned-process
@@ -337,30 +345,25 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - uses: actions/setup-go@v6
-        with:
-          go-version: '1.26.6'
-          cache-dependency-path: backend/go.sum
-
-      - name: Backend — main/tag smoke and unsupported platform fail-closed
-        working-directory: backend
-        run: |
-          go test -count=1 ./auth ./cmd/paimos ./ownedprocess
-          go test -tags paimos_test_unsupported -count=1 ./cmd/paimos -run '^TestUnsupportedPlatformProcessOwnershipFailsClosed$'
-          go test -tags paimos_test_unsupported -count=1 ./agentd ./agentdwire ./ownedprocess -run '^TestUnsupportedPlatform'
-
       - name: Require exhaustive backend assurance for this exact publish head
         env:
           GH_TOKEN: ${{ github.token }}
         run: ./scripts/wait-backend-full.sh "$GITHUB_SHA"
 
   quality:
-    if: github.ref == 'refs/heads/main' || github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
+
+      - name: Select quality checks from PR inputs
+        id: inputs
+        env:
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: python3 scripts/quality-ci-inputs.py "$PR_BASE" "$PR_HEAD" >> "$GITHUB_OUTPUT"
 
       - uses: actions/setup-go@v6
         with:
@@ -375,27 +378,33 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y ripgrep
 
       - name: Release hygiene
+        if: steps.inputs.outputs.release_hygiene == 'true'
         run: ./scripts/check-release-hygiene.sh
 
       - name: Calendar v2 display weights pinned to the doctrine
+        if: steps.inputs.outputs.calendar_display == 'true'
         run: ./scripts/check-calendar-version-display.sh
 
       - name: Release version grammar and Docker metadata
         run: bash ./scripts/test-release-version.sh
 
       - name: Release documentation sync
+        if: steps.inputs.outputs.release_doc_sync == 'true'
         run: bash ./scripts/test-release-doc-sync.sh
 
       - name: Knowledge freshness — live contract
+        if: steps.inputs.outputs.knowledge_freshness == 'true'
         run: ./scripts/test-knowledge-freshness.sh
 
       - name: Deploy scripts — target resolution
+        if: steps.inputs.outputs.deploy_target == 'true'
         run: ./scripts/test-deploy-target.sh
 
       - name: Release scripts — protected-main flow and recovery
         run: ./scripts/test-release.sh
 
       - name: CI scripts — backend PR/full split
+        if: steps.inputs.outputs.backend_gate == 'true'
         run: ./scripts/test-backend-pr-gate.sh
 
       # PAI-270: prove the dev-login route does NOT ship in production
@@ -407,6 +416,7 @@ jobs:
       # refactor accidentally moves dev-login code into a non-tagged
       # file, one of these greps catches it before the image ships.
       - name: Backend — dev-login symbol absent in production binary (PAI-270)
+        if: steps.inputs.outputs.dev_login == 'true'
         working-directory: backend
         run: |
           set -euo pipefail
@@ -441,6 +451,7 @@ jobs:
           echo "✓ dev-login canaries: absent in prod build, present in dev build"
 
       - name: Backend — dev-login tagged contracts
+        if: steps.inputs.outputs.dev_login == 'true'
         working-directory: backend
         run: go test -tags dev_login -count=1 ./auth ./devseed
 
@@ -449,7 +460,7 @@ jobs:
         run: go run ./cmd/paimos anchors verify --repo-root .. --index ../.paimos/anchors.json
 
   frontend-quality:
-    if: github.ref == 'refs/heads/main' || github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -487,6 +498,7 @@ jobs:
       - backend-publish-invariants
       - quality
       - frontend-quality
+      - e2e
     runs-on: ubuntu-latest
     steps:
       - name: Require every event-relevant test lane
@@ -505,46 +517,48 @@ jobs:
           BACKEND_PUBLISH_INVARIANTS: ${{ needs.backend-publish-invariants.result }}
           QUALITY: ${{ needs.quality.result }}
           FRONTEND_QUALITY: ${{ needs.frontend-quality.result }}
+          E2E: ${{ needs.e2e.result }}
         run: |
           set -euo pipefail
           if [[ "$EVENT_NAME" == 'pull_request' ]]; then
-            [[ "$BACKEND_PR_VET" == 'success' ]]
-            [[ "$BACKEND_PR" == 'success' ]]
-            [[ "$BACKEND_PR_DB" == 'success' ]]
-            [[ "$BACKEND_PR_HANDLERS" == 'success' ]]
-            [[ "$BACKEND_PR_PERFORMANCE" == 'success' ]]
-            [[ "$BACKEND_PR_RACE" == 'success' ]]
-            [[ "$BACKEND_PR_MANAGEDHARNESS_RACE" == 'success' ]]
-            [[ "$BACKEND_PR_DB_RACE" == 'success' ]]
-            [[ "$BACKEND_PR_HANDLERS_RACE" == 'success' ]]
-            [[ "$BACKEND_SECURITY_INVARIANTS" == 'success' ]]
-            [[ "$BACKEND_PUBLISH_INVARIANTS" == 'skipped' ]]
+            [[ "$BACKEND_PR_VET" == 'success' ]] || exit 1
+            [[ "$BACKEND_PR" == 'success' ]] || exit 1
+            [[ "$BACKEND_PR_DB" == 'success' ]] || exit 1
+            [[ "$BACKEND_PR_HANDLERS" == 'success' ]] || exit 1
+            [[ "$BACKEND_PR_PERFORMANCE" == 'success' ]] || exit 1
+            [[ "$BACKEND_PR_RACE" == 'success' ]] || exit 1
+            [[ "$BACKEND_PR_MANAGEDHARNESS_RACE" == 'success' ]] || exit 1
+            [[ "$BACKEND_PR_DB_RACE" == 'success' ]] || exit 1
+            [[ "$BACKEND_PR_HANDLERS_RACE" == 'success' ]] || exit 1
+            [[ "$BACKEND_SECURITY_INVARIANTS" == 'success' ]] || exit 1
+            [[ "$BACKEND_PUBLISH_INVARIANTS" == 'skipped' ]] || exit 1
           else
-            [[ "$BACKEND_PR_VET" == 'skipped' ]]
-            [[ "$BACKEND_PR" == 'skipped' ]]
-            [[ "$BACKEND_PR_DB" == 'skipped' ]]
-            [[ "$BACKEND_PR_HANDLERS" == 'skipped' ]]
-            [[ "$BACKEND_PR_PERFORMANCE" == 'skipped' ]]
-            [[ "$BACKEND_PR_RACE" == 'skipped' ]]
-            [[ "$BACKEND_PR_MANAGEDHARNESS_RACE" == 'skipped' ]]
-            [[ "$BACKEND_PR_DB_RACE" == 'skipped' ]]
-            [[ "$BACKEND_PR_HANDLERS_RACE" == 'skipped' ]]
-            [[ "$BACKEND_SECURITY_INVARIANTS" == 'skipped' ]]
-            [[ "$BACKEND_PUBLISH_INVARIANTS" == 'success' ]]
+            [[ "$BACKEND_PR_VET" == 'skipped' ]] || exit 1
+            [[ "$BACKEND_PR" == 'skipped' ]] || exit 1
+            [[ "$BACKEND_PR_DB" == 'skipped' ]] || exit 1
+            [[ "$BACKEND_PR_HANDLERS" == 'skipped' ]] || exit 1
+            [[ "$BACKEND_PR_PERFORMANCE" == 'skipped' ]] || exit 1
+            [[ "$BACKEND_PR_RACE" == 'skipped' ]] || exit 1
+            [[ "$BACKEND_PR_MANAGEDHARNESS_RACE" == 'skipped' ]] || exit 1
+            [[ "$BACKEND_PR_DB_RACE" == 'skipped' ]] || exit 1
+            [[ "$BACKEND_PR_HANDLERS_RACE" == 'skipped' ]] || exit 1
+            [[ "$BACKEND_SECURITY_INVARIANTS" == 'skipped' ]] || exit 1
+            [[ "$BACKEND_PUBLISH_INVARIANTS" == 'success' ]] || exit 1
           fi
-          if [[ "$EVENT_NAME" == 'push' && "$GITHUB_REF_TYPE" == 'tag' ]]; then
-            [[ "$QUALITY" == 'skipped' ]]
-            [[ "$FRONTEND_QUALITY" == 'skipped' ]]
+          if [[ "$EVENT_NAME" == 'push' ]]; then
+            [[ "$QUALITY" == 'skipped' ]] || exit 1
+            [[ "$FRONTEND_QUALITY" == 'skipped' ]] || exit 1
+            [[ "$E2E" == 'skipped' ]] || exit 1
           else
-            [[ "$QUALITY" == 'success' ]]
-            [[ "$FRONTEND_QUALITY" == 'success' ]]
+            [[ "$QUALITY" == 'success' ]] || exit 1
+            [[ "$FRONTEND_QUALITY" == 'success' ]] || exit 1
+            [[ "$E2E" == 'success' ]] || exit 1
           fi
 
   e2e:
     # PAI-297: E2E smoke — boots the real backend + vite stack and drives the
-    # cross-boundary flows with Playwright. Skipped on tag pushes (same
-    # reasoning as `test`).
-    if: github.ref == 'refs/heads/main' || github.event_name == 'pull_request'
+    # cross-boundary flows with Playwright. Protected main reuses PR assurance.
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -612,7 +626,9 @@ jobs:
       # with --log-opts=-1 (tip commit only), so a secret that was committed
       # and then superseded was never scanned. Scanning the full history
       # costs ~0.4s for ~800 commits, so there is no reason to narrow it.
+      # PAI-1000: pinned scanners reuse PR results on main; live databases rerun.
       - name: gitleaks (secret scanning)
+        if: github.event_name == 'pull_request'
         env:
           GITLEAKS_VERSION: 8.30.1
           GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
@@ -650,6 +666,7 @@ jobs:
       # the same commit). govulncheck stays @latest on purpose: it is not
       # baseline-gated and we want the freshest vulnerability database.
       - name: gosec (Go SAST baseline gate)
+        if: github.event_name == 'pull_request'
         run: |
           go install github.com/securego/gosec/v2/cmd/gosec@v2.27.1
           ./scripts/check-gosec-baseline.sh

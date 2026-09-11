@@ -11,6 +11,7 @@ RACE_PACKAGE_TIMEOUT_MAX_MINUTES=15
 LANE=all
 BROAD_GROUP=all
 DRY_RUN=0
+COVERAGE=0
 SELECTED_SHARD=-1
 SELECTED_SHARD_COUNT=0
 
@@ -25,6 +26,10 @@ SELECTED_SHARD_COUNT=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --coverage)
+      COVERAGE=1
+      shift
+      ;;
     --dry-run)
       DRY_RUN=1
       shift
@@ -97,16 +102,40 @@ case "$LANE" in
     ;;
 esac
 [[ $# -gt 0 ]] || {
-  echo "usage: $0 [--dry-run] [--lane=all|affected|db|handlers|managedharness] [--shard=INDEX/COUNT] [--group=core|handlers|runtime] <changed-package>..." >&2
+  echo "usage: $0 [--dry-run|--coverage] [--lane=all|affected|db|handlers|managedharness] [--shard=INDEX/COUNT] [--group=core|handlers|runtime] <changed-package>..." >&2
   exit 2
 }
+if (( COVERAGE )) && [[ "$LANE" != all ]]; then
+  echo 'backend-pr-race: --coverage requires lane=all (union of PR shards)' >&2
+  exit 2
+fi
 if [[ "$BROAD_GROUP" != all && ( "$LANE" != all || $# -ne 1 || "$1" != './...' ) ]]; then
   echo 'backend-pr-race: --group requires lane=all and exactly ./...' >&2
   exit 2
 fi
 
+# Expand the execution selector into individual top-level oracles. This is
+# consumed by the normal lane; never infer ownership from a package name.
+coverage_for_pattern() {
+  local package="$1" pattern="$2" kinds="$3" listed name
+  if [[ "$pattern" == */* ]]; then
+    printf '%s\t%s\n' "$package" "$pattern"
+    return
+  fi
+  listed=$(cd "$BACKEND" && "$GO_COMMAND" test -list "$pattern" "$package")
+  while IFS= read -r name; do
+    if [[ "$name" =~ $kinds && "$name" =~ ^[A-Za-z0-9_]+$ ]]; then
+      printf '%s\t^%s$\n' "$package" "$name"
+    fi
+  done <<<"$listed"
+}
+
 run_race() {
   local package="$1" pattern="${2:-}"
+  if [[ "$COVERAGE" -eq 1 ]]; then
+    coverage_for_pattern "$package" "${pattern:-.}" '^(Test|Fuzz|Example)'
+    return
+  fi
   if [[ "$DRY_RUN" -eq 1 ]]; then
     if [[ -n "$pattern" ]]; then
       printf 'go test -race -count=1 -timeout=%s %q -run %q\n' "$RACE_PACKAGE_TIMEOUT" "$package" "$pattern"
@@ -160,6 +189,11 @@ run_race_shards() {
   local package="$1" match="$2" shard_count="$3" group_size="${4:-0}"
   local listed name names=() shard index shard_start=0 shard_end="$shard_count"
   local shard_names=() offset group=()
+  # The normal lane consumes this same selector before shard expansion.
+  if [[ "$COVERAGE" -eq 1 ]]; then
+    coverage_for_pattern "$package" "$match" '^(Test|Fuzz)'
+    return
+  fi
   cd "$BACKEND"
   listed=$("$GO_COMMAND" test -list "$match" "$package")
   while IFS= read -r name; do
@@ -233,7 +267,7 @@ run_package() {
     ./db)
       run_race ./db '^(TestApplyMigrationAtomic.*|TestSchemaAgentRunTelemetryTerminalWriteRace)$'
       # Race instrumentation uses the production pool in isolated processes.
-      # The exhaustive normal plan separately retains the original same-name
+      # The normal PR and exhaustive plans retain the differently named
       # 32-connection/32-writer M147 contention oracles without weakening them.
       run_race ./db '^TestM147ConcurrentCanonicalCommandsConvergeProductionPool$'
       run_race ./db '^TestM147ConcurrentRuntimeAcceptanceHasOneEffectOwnerProductionPool$'
