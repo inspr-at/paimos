@@ -9,6 +9,7 @@ import {
   Copy,
   FileCheck2,
   Link,
+  ListPlus,
   LoaderCircle,
   Minus,
   Plus,
@@ -124,17 +125,19 @@ let pending: Promise<boolean> | undefined
 const state = computed(() =>
   loading.value
     ? 'Lädt …'
-    : conflict.value
-      ? 'Speicherkonflikt'
-      : busy.value
-        ? 'Speichert …'
-        : saveFailed.value
-          ? 'Nicht gespeichert'
-          : dirty.value
-            ? 'Ungespeichert'
-            : offer.value?.status !== 'draft' && offer.value
-              ? offerStatus(offer.value.status)
-              : 'Gespeichert',
+    : !offer.value
+      ? 'Nicht geladen'
+      : conflict.value
+        ? 'Speicherkonflikt'
+        : busy.value
+          ? 'Speichert …'
+          : saveFailed.value
+            ? 'Nicht gespeichert'
+            : dirty.value
+              ? 'Ungespeichert'
+              : offer.value?.status !== 'draft' && offer.value
+                ? offerStatus(offer.value.status)
+                : 'Gespeichert',
 )
 async function load() {
   loading.value = true
@@ -165,6 +168,7 @@ watch(
 )
 async function save(force = false): Promise<boolean> {
   if (document.querySelector('.offer-document .sheet input:invalid')) {
+    saveFailed.value = true
     error.value = 'Bitte ungültige Zahlen korrigieren.'
     return false
   }
@@ -425,7 +429,7 @@ onBeforeRouteLeave(async () => !dirty.value || (await save()))
             aria-label="Position hinzufügen"
             @click="addPosition"
           >
-            <Plus :size="16" /><span class="action-label">Position</span>
+            <ListPlus :size="16" /><span class="action-label">Position</span>
           </button>
           <button
             v-if="auth.isAdmin && offer && !printMode"
@@ -442,7 +446,7 @@ onBeforeRouteLeave(async () => !dirty.value || (await save()))
             v-if="editable"
             class="tool-button"
             type="button"
-            title="Finalisieren"
+            title="Finalisieren: Kundenlink und QR-Code erstellen"
             aria-label="Finalisieren"
             :disabled="saving || !!overflow"
             @click="finalizeOpen = true"
@@ -480,6 +484,7 @@ onBeforeRouteLeave(async () => !dirty.value || (await save()))
       </p>
       <p v-if="editable && !collapsed" class="offer-notice">
         Klicke in einen Text, um ihn zu bearbeiten. Änderungen werden automatisch gespeichert.
+        Kundenlink und QR-Code werden beim Finalisieren erstellt.
       </p>
       <p v-else-if="offer?.status === 'sent' && !printMode" class="offer-notice">
         Finalisiert am {{ offer.sent_at?.slice(0, 10) }}. Zum Ändern ein neues Angebot duplizieren.
@@ -527,8 +532,9 @@ onBeforeRouteLeave(async () => !dirty.value || (await save()))
         <h2>Angebot finalisieren</h2>
         <p>
           Absender, Kundenanschrift, Texte und Preise werden festgeschrieben. Danach kannst du das
-          Angebot per Kundenlink, QR-Code oder PDF weitergeben. Wer den Kundenlink besitzt, kann das
-          Angebot ansehen und bis zum Ablaufdatum annehmen. Eine E-Mail wird dabei nicht verschickt.
+          Angebot per Kundenlink, QR-Code oder PDF weitergeben. Der QR-Code erscheint dann auch im
+          Dokument und in der PDF. Wer den Kundenlink besitzt, kann das Angebot ansehen und bis zum
+          Ablaufdatum annehmen. Eine E-Mail wird dabei nicht verschickt.
         </p>
         <p v-if="error" role="alert">{{ error }}</p>
         <button class="btn btn-primary" :disabled="saving" @click="finalize">
