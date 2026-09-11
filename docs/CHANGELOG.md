@@ -9,6 +9,16 @@ Semantic Versioning (`x.y.z`, until 5.21.0), INSPR calendar v1
 (`YYMMDDhhmmss.0.0`, the UTC reservation second as a SemVer-shaped
 coordinate, from the first entry below that form).
 
+## [260911190918.0.0] — 2026-09-11
+
+### Added — Offer acceptance confirmations and overview status (PAI-1012)
+
+- Show offer statuses in customer and offer overviews; preserve each offer’s state when a customer has multiple offers.
+- Freeze validated contact and sender email addresses at finalization and send a joint acceptance confirmation with customer link and the stored accepted PDF.
+- Stamp the customer signature area with acceptance metadata and “Annahmenachweis (SHA-256):”; share the same document renderer between the browser and server PDF.
+- Preserve acceptance across PDF or email failures with bounded retries and explicit handling of uncertain SMTP delivery.
+- Let drafts be marked deleted and finalized offers archived through a reversible flag, with a default-off deleted filter and restore action.
+
 ## [260911172741.0.0] — 2026-09-11
 
 ### Added — Reviewed delivery launch (PAI-978)
