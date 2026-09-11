@@ -910,4 +910,5 @@ done
 grep -q 'two tag workflows' "$RELEASE_DOC" || fail 'release documentation does not name the two artifact tag workflows'
 grep -q 'backend-full.yml' "$RELEASE_DOC" || fail 'release documentation omits pre-tag exhaustive backend assurance'
 
+python3 "$ROOT/scripts/test-backend-full-reuse.py"
 echo 'test-backend-pr-gate: ok'

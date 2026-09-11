@@ -12,8 +12,19 @@ produces the container image and supply-chain evidence,
 (PAI-99) produces the signed CLI binaries. They execute independently; both
 must succeed for a release to be fully published. Before creating the tag, the
 release script requires a successful [`backend-full.yml`](../.github/workflows/backend-full.yml)
-run for the exact protected-main merge. That workflow runs its exhaustive
-serial/platform and broad-race jobs in parallel and is not duplicated on the
+run for the exact protected-main merge. For main pushes changing only
+`frontend/src/`, `frontend/public/`, `README.md`, `VERSION`, `docs/CHANGELOG.md`
+or `docs/INSTALL.md`, it may reuse an ancestral successful hosted run whose
+serial/platform and all three broad-race jobs actually executed successfully.
+The entire diff is checked; skipped/reused suites cannot form evidence chains.
+The source commit and run are recorded in the workflow summary. Unknown paths,
+backend/build/dependency/test-policy changes or missing evidence run the full
+suites. Nightly, manual and explicit PR runs always execute them. This keeps
+frontend iterations short without changing publication smoke, frontend checks,
+signatures or deployment controls. The first policy change itself requires a
+new full baseline; it does not shortcut a release already in progress.
+
+The full serial/platform and broad-race jobs run in parallel and are not duplicated on the
 identical tag commit. Applying the explicit `backend-full-evidence` label is the
 supported way to obtain hosted exhaustive evidence for an exact PR head; normal
 PR events and unrelated labels do not authorize those jobs.
