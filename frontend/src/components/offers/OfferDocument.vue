@@ -13,6 +13,7 @@ import OfferFootmark from './OfferFootmark.vue'
 import { date, type Offer } from './types'
 const props = defineProps<{
   offer: Pick<Offer, 'offer_no' | 'document'>
+  zoom?: number
   editable?: boolean
   publicUrl?: string
 }>()
@@ -142,7 +143,7 @@ defineExpose({ paginate })
         /><OfferAcceptance :document="offer.document" :public-url="publicUrl" />
       </div>
     </div>
-    <div class="sheet">
+    <div class="sheet" :style="{ '--offer-zoom': zoom ?? 1 }">
       <section
         v-for="(page, index) in pages"
         :key="index"

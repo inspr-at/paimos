@@ -36,7 +36,12 @@ function numberInput(e: Event, index: number, price: boolean) {
         <th v-if="editable" class="act" />
       </tr>
     </thead>
-    <tbody v-for="i in indices" :key="i" :data-position="i">
+    <tbody
+      v-for="i in indices"
+      :key="i"
+      :data-position="i"
+      :class="{ 'last-position': i === positions.length - 1 }"
+    >
       <tr class="pos">
         <td class="pos-no">{{ String(i + 1).padStart(2, '0') }}</td>
         <td class="short">
