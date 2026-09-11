@@ -193,12 +193,18 @@
   color: var(--teal);
   line-height: 1;
 }
-.offer-document .p2 .top {
-  margin-top: 6mm;
+.offer-document .page-continuation {
+  height: 6mm;
 }
-.offer-document .p2 .top .word {
+.offer-document .section-heading {
+  margin: 0;
+  padding: 6mm 0 4.2mm;
+  font-family: var(--display);
   font-size: 18pt;
+  font-weight: 400;
   letter-spacing: 0.14em;
+  color: var(--teal);
+  line-height: 1.2;
 }
 .offer-document h1.title {
   margin: 7mm 0 1.5mm;
@@ -617,6 +623,7 @@
 }
 .offer-document .offer-table {
   table-layout: fixed;
+  margin-top: 0;
 }
 .offer-document .offer-table th:nth-child(1) {
   width: 9mm;
@@ -692,6 +699,13 @@
 }
 
 @media print {
- .offer-document[data-print-blocked] .sheet { display:none !important; }
- .offer-document[data-print-blocked]::before { content:attr(data-print-blocked); display:block; padding:20mm; color:#1e2727; }
+  .offer-document[data-print-blocked] .sheet {
+    display: none !important;
+  }
+  .offer-document[data-print-blocked]::before {
+    content: attr(data-print-blocked);
+    display: block;
+    padding: 20mm;
+    color: #1e2727;
+  }
 }
