@@ -13,7 +13,7 @@ import OfferFootmark from './OfferFootmark.vue'
 import OfferBrandDots from './OfferBrandDots.vue'
 import { date, type Offer } from './types'
 const props = defineProps<{
-  offer: Pick<Offer, 'offer_no' | 'document'>
+  offer: Pick<Offer, 'offer_no' | 'document'> & Partial<Offer>
   zoom?: number
   editable?: boolean
   publicUrl?: string
@@ -101,7 +101,7 @@ function schedule() {
     await paginate()
   })
 }
-watch(() => [props.offer.document, props.publicUrl, props.qrPreview], schedule, { deep: true })
+watch(() => [props.offer, props.publicUrl, props.qrPreview], schedule, { deep: true })
 onMounted(async () => {
   await document.fonts.ready
   await paginate()
@@ -147,6 +147,7 @@ defineExpose({ paginate })
           :indices="offer.document.positions.map((_, i) => i)"
         /><OfferAcceptance
           :document="offer.document"
+          :receipt="offer"
           :public-url="publicUrl"
           :qr-preview="qrPreview"
         />
@@ -202,6 +203,7 @@ defineExpose({ paginate })
           <OfferAcceptance
             v-if="page.acceptance"
             :document="offer.document"
+            :receipt="offer"
             :public-url="publicUrl"
             :qr-preview="qrPreview"
             :editable="editable"

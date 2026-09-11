@@ -13946,6 +13946,19 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 	// M192 / PAI-986: durable finish-current-work retirement and admission fence.
 	// Both held migrations remain additive after published main migrations 187–190.
 	migrations = append(migrations, launchAuthorityMigration, migration{version: 192})
+	// PAI-1012: one durable confirmation per acceptance; legacy offers are not queued.
+	migrations = append(migrations, migration{version: 193, steps: []string{
+		`CREATE TABLE offer_confirmations (
+		 offer_id INTEGER PRIMARY KEY REFERENCES offer_acceptance_audit(offer_id),
+		 state TEXT NOT NULL DEFAULT 'pending' CHECK(state IN ('pending','rendering','sending','sent','failed','uncertain')),
+		 attempts INTEGER NOT NULL DEFAULT 0, next_attempt_at TEXT NOT NULL,
+		 updated_at TEXT NOT NULL, sent_at TEXT, error_class TEXT NOT NULL DEFAULT '',
+		 public_url TEXT NOT NULL, message_id TEXT NOT NULL UNIQUE, pdf BLOB,
+		 CHECK(pdf IS NULL OR length(pdf)<=20971520))`,
+		`CREATE INDEX idx_offer_confirmations_due ON offer_confirmations(state,next_attempt_at)`,
+		`CREATE TABLE offer_visibility(offer_id INTEGER PRIMARY KEY REFERENCES offers(id),deleted_at TEXT,deleted_by INTEGER REFERENCES users(id))`,
+	}})
+
 	for _, m := range migrations {
 		if m.version > maxVersion {
 			continue

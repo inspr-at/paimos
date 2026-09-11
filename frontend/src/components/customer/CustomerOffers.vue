@@ -1,24 +1,29 @@
 <script setup lang="ts">
+import OfferStatusBadge from '@/components/offers/OfferStatusBadge.vue'
+import { FileText } from 'lucide-vue-next'
 import { ref, watch } from 'vue'
 import { RouterLink, useRouter } from 'vue-router'
 import { api, errMsg } from '@/api/client'
 import { useAuthStore } from '@/stores/auth'
 import { crmEnabled } from '@/api/instance'
 import OfferSettingsDialog from '@/components/offers/OfferSettingsDialog.vue'
-import { money, date, offerStatus, type Offer, type OfferSettings } from '@/components/offers/types'
+import { money, date, type Offer, type OfferSettings } from '@/components/offers/types'
 const props = defineProps<{ customerId: number }>()
 const router = useRouter(),
   auth = useAuthStore()
+const showDeleted = ref(false)
 const offers = ref<Offer[]>([]),
   error = ref(''),
   busy = ref(false),
   settingsOpen = ref(false),
   createAfterSettings = ref(false)
 watch(
-  () => props.customerId,
+  () => [props.customerId, showDeleted.value],
   async () => {
     try {
-      offers.value = await api.get<Offer[]>(`/customers/${props.customerId}/offers`)
+      offers.value = await api.get<Offer[]>(
+        `/customers/${props.customerId}/offers${showDeleted.value ? '?include_deleted=1' : ''}`,
+      )
     } catch (e) {
       error.value = errMsg(e)
     }
@@ -58,20 +63,36 @@ function saved() {
         + Angebot erstellen
       </button>
     </header>
+    <label class="deleted-filter"
+      ><input v-model="showDeleted" type="checkbox" /> Gelöschte anzeigen</label
+    >
     <p v-if="error" role="alert">{{ error }}</p>
     <p v-if="!offers.length">Noch keine Angebote.</p>
     <RouterLink v-for="o in offers" :key="o.id" class="offer-row" :to="`/crm/offers/${o.id}`"
       ><span
-        ><strong>{{ o.offer_no }}</strong> · {{ o.document.title
-        }}<small>{{ date(o.document.offer_date) }}</small></span
+        ><FileText :size="16" aria-hidden="true" /> <strong>{{ o.offer_no }}</strong> ·
+        {{ o.document.title }}<small>{{ date(o.document.offer_date) }}</small></span
       ><span
         >{{ money(o.document.net_total_cents)
-        }}<small>{{ offerStatus(o.status) }}</small></span
+        }}<small
+          ><OfferStatusBadge :status="o.status" />
+          <span v-if="o.deleted">
+            · {{ o.status === 'draft' ? 'Gelöscht' : 'Archiviert' }}</span
+          ></small
+        ></span
       ></RouterLink
     ><OfferSettingsDialog :open="settingsOpen" @saved="saved" @close="settingsOpen = false" />
   </section>
 </template>
 <style scoped>
+.deleted-filter {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 12px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
 .customer-offers {
   padding: 20px;
   border: 1px solid var(--border);

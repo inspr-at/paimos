@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, onUnmounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { apiURL, publicURL } from '@/publicPath'
+import OfferConfirmationStatus from '@/components/offers/OfferConfirmationStatus.vue'
 import OfferDocument from '@/components/offers/OfferDocument.vue'
 import { date, receiptTime, type PublicOffer } from '@/components/offers/types'
 const route = useRoute()
@@ -89,6 +90,19 @@ async function print() {
   await nextTick()
   if (!overflow.value) window.print()
 }
+const confirmationTimer = setInterval(async () => {
+  if (
+    offer.value?.status !== 'accepted' ||
+    !['pending', 'rendering', 'sending'].includes(offer.value.confirmation?.state || '')
+  )
+    return
+  try {
+    offer.value = await request()
+  } catch {
+    /* Keep the authoritative receipt visible. */
+  }
+}, 5000)
+onUnmounted(() => clearInterval(confirmationTimer))
 watch(
   () => route.params.token,
   () => {
@@ -131,6 +145,10 @@ watch(
             }}
           </p>
           <p v-if="offer.accepted_note">{{ offer.accepted_note }}</p>
+          <OfferConfirmationStatus
+            :confirmation="offer.confirmation"
+            :public-token="String(route.params.token)"
+          />
         </div>
         <p v-else-if="offer.status === 'expired'" class="receipt" role="status">
           Die Bindefrist ist abgelaufen. Eine Online-Annahme ist nicht mehr möglich. Bitte wenden

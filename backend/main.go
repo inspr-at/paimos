@@ -134,6 +134,7 @@ func main() {
 	// wake targets. Local Codex targets remain owned by paimos listen.
 	agentmessage.StartWebhookDispatcher(db.DB)
 	releaseacceptance.StartMailDispatcher(db.DB, mailer.FromEnv())
+	handlers.StartOfferConfirmationDispatcher(mailer.FromEnv())
 
 	r := chi.NewRouter()
 	// PAI-809: first and unconditional for every structurally classified
@@ -1110,6 +1111,11 @@ func mountAPI(r chi.Router) {
 		r.With(auth.RequireAdmin).Put("/integrations/crm/offers", handlers.PutOfferSettings)
 		r.Get("/customers/{id}/offers", handlers.ListCustomerOffers)
 		r.Get("/offers/acceptances", handlers.ListOfferAcceptances)
+		r.Get("/offers/summary", handlers.ListOfferSummary)
+		r.With(auth.RequireAdmin).Put("/offers/{id}/deleted", handlers.SetOfferDeleted)
+		r.With(auth.RequireAdmin).Get("/offers/readiness", handlers.GetOfferDeliveryReadiness)
+		r.With(auth.RequireAdmin).Post("/offers/{id}/confirmation/retry", handlers.RetryOfferConfirmation)
+		r.Get("/offers/{id}/pdf", handlers.GetOfferPDF)
 		r.With(auth.RequireAdmin).Post("/offers/{id}/link", handlers.CreateOfferLink)
 		r.Get("/offers/{id}", handlers.GetOffer)
 		r.With(auth.RequireAdmin).Post("/offers", handlers.CreateOffer)

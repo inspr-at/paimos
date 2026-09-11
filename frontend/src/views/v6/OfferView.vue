@@ -3,6 +3,8 @@ import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } fr
 import { onBeforeRouteLeave, RouterLink, useRoute, useRouter } from 'vue-router'
 import {
   ArrowLeft,
+  Trash2,
+  Undo2,
   Check,
   ChevronDown,
   ChevronUp,
@@ -20,10 +22,11 @@ import {
 import { ensureUTC } from '@/composables/useDateFormat'
 import { OFFER_CHROME_KEY } from '@/composables/useOfferChrome'
 import { publicURL } from '@/publicPath'
-import { offerStatus, receiptTime } from '@/components/offers/types'
+import { offerStatus, receiptTime, validOfferEmail } from '@/components/offers/types'
 import { api, errMsg, ApiError } from '@/api/client'
 import { crmEnabled, instanceHostname, loadInstance } from '@/api/instance'
 import { useAuthStore } from '@/stores/auth'
+import OfferConfirmationStatus from '@/components/offers/OfferConfirmationStatus.vue'
 import OfferDocument from '@/components/offers/OfferDocument.vue'
 import OfferSettingsDialog from '@/components/offers/OfferSettingsDialog.vue'
 import type { Offer, OfferSettings } from '@/components/offers/types'
@@ -223,6 +226,33 @@ async function save(force = false): Promise<boolean> {
   })()
   return pending
 }
+const deleteOpen = ref(false),
+  deleting = ref(false)
+async function setDeleted() {
+  if (!offer.value || deleting.value || !(await save())) return
+  deleting.value = true
+  try {
+    const result = await api.put<{ deleted: boolean }>(`/offers/${offer.value.id}/deleted`, {
+      deleted: !offer.value.deleted,
+    })
+    offer.value.deleted = result.deleted
+    deleteOpen.value = false
+  } catch (e) {
+    error.value = errMsg(e)
+  } finally {
+    deleting.value = false
+  }
+}
+async function refreshConfirmation() {
+  if (offer.value?.status !== 'accepted') return
+  try {
+    const updated = await api.get<Offer>(`/offers/${offer.value.id}`)
+    offer.value.confirmation = updated.confirmation
+    offer.value.document_sha256 = updated.document_sha256
+  } catch {
+    /* Keep receipt visible. */
+  }
+}
 async function finalize() {
   if (!offer.value || !(await save())) return
   await renderer.value?.paginate()
@@ -316,7 +346,15 @@ onMounted(() => {
   if (toolbar.value) resizeObserver.observe(toolbar.value)
   fitZoom()
 })
+const confirmationTimer = setInterval(() => {
+  if (
+    offer.value?.status === 'accepted' &&
+    ['pending', 'rendering', 'sending'].includes(offer.value.confirmation?.state || '')
+  )
+    void refreshConfirmation()
+}, 5000)
 onBeforeUnmount(() => {
+  clearInterval(confirmationTimer)
   if (timer) clearTimeout(timer)
   window.removeEventListener('beforeunload', beforeUnload)
   window.removeEventListener('resize', fitZoom)
@@ -508,6 +546,42 @@ onBeforeRouteLeave(async () => !dirty.value || (await save()))
           Serverstand laden und lokale Änderungen verwerfen
         </button>
       </div>
+      <div v-if="auth.isAdmin && offer" class="offer-visibility">
+        <button
+          class="btn btn-sm"
+          :disabled="deleting || saving"
+          @click="offer.deleted ? setDeleted() : (deleteOpen = true)"
+        >
+          <component :is="offer.deleted ? Undo2 : Trash2" :size="14" />{{
+            offer.deleted
+              ? 'Wiederherstellen'
+              : offer.status === 'draft'
+                ? 'Löschen'
+                : 'Archivieren'
+          }}
+        </button>
+        <span v-if="offer.deleted"
+          >{{ offer.status === 'draft' ? 'Als gelöscht markiert' : 'Archiviert' }} · aus den
+          Übersichten ausgeblendet</span
+        >
+        <div v-if="deleteOpen" role="alert">
+          <span
+            >Angebot aus den Übersichten ausblenden? Inhalte, Nachweise und Kundenlinks bleiben
+            erhalten.</span
+          >
+          <button class="btn btn-sm" :disabled="deleting" @click="setDeleted">
+            {{ offer.status === 'draft' ? 'Als gelöscht markieren' : 'Archivieren' }}
+          </button>
+          <button class="btn btn-sm" @click="deleteOpen = false">Abbrechen</button>
+        </div>
+      </div>
+      <OfferConfirmationStatus
+        v-if="offer?.status === 'accepted'"
+        :offer-id="offer.id"
+        :confirmation="offer.confirmation"
+        :admin="auth.isAdmin"
+        @refresh="refreshConfirmation"
+      />
       <OfferDocument
         v-if="offer"
         ref="renderer"
@@ -537,8 +611,24 @@ onBeforeRouteLeave(async () => !dirty.value || (await save()))
           Dokument und in der PDF. Wer den Kundenlink besitzt, kann das Angebot ansehen und bis zum
           Ablaufdatum annehmen. Eine E-Mail wird dabei nicht verschickt.
         </p>
+        <p>
+          Kundenkontakt:
+          {{
+            offer?.document.customer.email ||
+            'E-Mail fehlt – bitte im Kundenkontakt ergänzen und neu laden.'
+          }}<br />Absender: {{ offer?.document.sender.email || 'E-Mail fehlt' }}
+        </p>
+        <p>Nach der Annahme erhalten beide Adressen eine gemeinsame Bestätigung mit PDF.</p>
         <p v-if="error" role="alert">{{ error }}</p>
-        <button class="btn btn-primary" :disabled="saving" @click="finalize">
+        <button
+          class="btn btn-primary"
+          :disabled="
+            saving ||
+            !validOfferEmail(offer?.document.customer.email) ||
+            !validOfferEmail(offer?.document.sender.email)
+          "
+          @click="finalize"
+        >
           Jetzt finalisieren</button
         ><button type="button" class="btn" @click="finalizeOpen = false">Abbrechen</button>
       </dialog>
@@ -547,6 +637,24 @@ onBeforeRouteLeave(async () => !dirty.value || (await save()))
   </main>
 </template>
 <style scoped>
+.offer-visibility {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 4px 12px;
+  font-size: 12px;
+}
+.offer-visibility button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+@media print {
+  .offer-visibility {
+    display: none;
+  }
+}
 .finalize-dialog {
   color: #203c3d;
   background: #fffefa;

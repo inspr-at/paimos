@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"mime"
 	"net"
 	"net/http"
@@ -195,22 +196,25 @@ func RegisterPublicOfferRoutes(r chi.Router) {
 		r.Use(PublicOfferMiddleware())
 		r.Get("/", GetPublicOffer)
 		r.Post("/accept", AcceptPublicOffer)
+		r.Get("/pdf", GetPublicOfferPDF)
 	})
 }
 
 type publicOffer struct {
-	OfferNo         string        `json:"offer_no"`
-	Status          string        `json:"status"`
-	Revision        int64         `json:"revision"`
-	Document        OfferDocument `json:"document"`
-	AcceptedAt      *string       `json:"accepted_at,omitempty"`
-	AcceptedName    string        `json:"accepted_name,omitempty"`
-	AcceptedCompany string        `json:"accepted_company,omitempty"`
-	AcceptedNote    string        `json:"accepted_note,omitempty"`
+	DocumentSHA256  string             `json:"document_sha256,omitempty"`
+	Confirmation    *OfferConfirmation `json:"confirmation,omitempty"`
+	OfferNo         string             `json:"offer_no"`
+	Status          string             `json:"status"`
+	Revision        int64              `json:"revision"`
+	Document        OfferDocument      `json:"document"`
+	AcceptedAt      *string            `json:"accepted_at,omitempty"`
+	AcceptedName    string             `json:"accepted_name,omitempty"`
+	AcceptedCompany string             `json:"accepted_company,omitempty"`
+	AcceptedNote    string             `json:"accepted_note,omitempty"`
 }
 
 func publicOfferView(o Offer) publicOffer {
-	return publicOffer{o.OfferNo, o.Status, o.Revision, o.Document, o.AcceptedAt, o.AcceptedName, o.AcceptedCompany, o.AcceptedNote}
+	return publicOffer{o.DocumentSHA256, o.Confirmation, o.OfferNo, o.Status, o.Revision, o.Document, o.AcceptedAt, o.AcceptedName, o.AcceptedCompany, o.AcceptedNote}
 }
 func loadPublicOffer(r *http.Request) (Offer, error) {
 	return scanOffer(db.DB.QueryRowContext(r.Context(), `SELECT `+offerColumns+` FROM offers WHERE public_token=? AND status IN ('sent','accepted','expired')`, chi.URLParam(r, "token")))
@@ -225,6 +229,7 @@ func GetPublicOffer(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, "Angebot derzeit nicht verfügbar", 503)
 		return
 	}
+	loadOfferConfirmation(r.Context(), &o)
 	jsonOK(w, publicOfferView(o))
 }
 func AcceptPublicOffer(w http.ResponseWriter, r *http.Request) {
@@ -288,10 +293,17 @@ func AcceptPublicOffer(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, "Annahme konnte nicht dokumentiert werden", 503)
 		return
 	}
+	if validOfferEmail(o.Document.Customer.Email) && validOfferEmail(o.Document.Sender.Email) {
+		if _, err = tx.ExecContext(r.Context(), `INSERT INTO offer_confirmations(offer_id,next_attempt_at,updated_at,public_url,message_id) VALUES(?,?,?,?,?)`, o.ID, now, now, offerCustomerURL(o.PublicToken), "offer-"+hex.EncodeToString(hash[:])+"-"+fmt.Sprint(o.ID)); err != nil {
+			jsonError(w, "Annahme konnte nicht dokumentiert werden", 503)
+			return
+		}
+	}
 	if err = tx.Commit(); err != nil {
 		jsonError(w, "Annahme konnte nicht gespeichert werden", 503)
 		return
 	}
+	loadOfferConfirmation(r.Context(), &o)
 	jsonOK(w, publicOfferView(o))
 }
 

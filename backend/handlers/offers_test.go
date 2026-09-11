@@ -18,7 +18,7 @@ func TestOffersLifecycleSnapshotsAndConcurrency(t *testing.T) {
 	resp := ts.put(t, "/api/integrations/crm/offers", ts.adminCookie, settings)
 	assertStatus(t, resp, 200)
 	resp.Body.Close()
-	resp = ts.post(t, "/api/customers", ts.adminCookie, map[string]any{"name": "Testkunde", "address": "Kundenstraße 2\n1010 Wien", "contact_name": "Eva Test"})
+	resp = ts.post(t, "/api/customers", ts.adminCookie, map[string]any{"name": "Testkunde", "address": "Kundenstraße 2\n1010 Wien", "contact_name": "Eva Test", "contact_email": "eva@example.test"})
 	assertStatus(t, resp, 201)
 	var customer struct {
 		ID int64 `json:"id"`
