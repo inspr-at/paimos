@@ -1082,6 +1082,67 @@
           }
         }
       },
+      "MachineNotifierBinding": {
+        "type": "object", "additionalProperties": false,
+        "required": ["project_id", "sender", "to", "target_id", "target_version"],
+        "properties": {
+          "project_id": {"type": "integer", "minimum": 1},
+          "sender": {"type": "string", "minLength": 1, "maxLength": 64},
+          "to": {"type": "string", "minLength": 3, "maxLength": 129},
+          "target_id": {"type": "string", "format": "uuid"},
+          "target_version": {"type": "integer", "minimum": 1}
+        }
+      },
+      "MachineNotifierEnrollmentRequest": {
+        "type": "object", "additionalProperties": false,
+        "required": ["name", "project_id", "sender", "to", "target_id", "target_version", "expires_at"],
+        "properties": {
+          "name": {"type": "string", "minLength": 1, "maxLength": 128},
+          "project_id": {"type": "integer", "minimum": 1},
+          "sender": {"type": "string", "minLength": 1, "maxLength": 64},
+          "to": {"type": "string", "minLength": 3, "maxLength": 129},
+          "target_id": {"type": "string", "format": "uuid"},
+          "target_version": {"type": "integer", "minimum": 1},
+          "expires_at": {"type": "string", "format": "date-time"}
+        }
+      },
+      "MachineNotifierEnrollmentResponse": {
+        "type": "object", "additionalProperties": false,
+        "required": ["id", "name", "key_prefix", "key", "expires_at", "binding"],
+        "properties": {
+          "id": {"type": "integer", "minimum": 1},
+          "name": {"type": "string"},
+          "key_prefix": {"type": "string"},
+          "key": {"type": "string", "description": "One-time credential value; never retrievable again."},
+          "expires_at": {"type": "string", "format": "date-time"},
+          "binding": {"$ref": "#/components/schemas/MachineNotifierBinding"}
+        }
+      },
+      "MachineNotifierSendRequest": {
+        "type": "object", "additionalProperties": false,
+        "required": ["body"],
+        "properties": {"body": {"type": "string", "minLength": 1, "maxLength": 32768}}
+      },
+      "MachineNotifierMessageID": {
+        "type": "object", "additionalProperties": false,
+        "required": ["message_id"],
+        "properties": {"message_id": {"type": "string", "format": "uuid"}}
+      },
+      "MachineNotifierReceipt": {
+        "type": "object", "additionalProperties": false,
+        "description": "Content-free delivery state for a message owned by the same notifier credential.",
+        "required": ["message_id", "project_id", "address", "state", "effective_level", "handed_off_at", "effective_target_id", "effective_target_version"],
+        "properties": {
+          "message_id": {"type": "string", "format": "uuid"},
+          "project_id": {"type": "integer", "minimum": 1},
+          "address": {"type": "string"},
+          "state": {"type": "string", "enum": ["blocked", "pending", "leased", "retry", "handed_off", "dead"]},
+          "effective_level": {"type": "string", "enum": ["", "simple"]},
+          "handed_off_at": {"type": "string"},
+          "effective_target_id": {"type": "string", "format": "uuid"},
+          "effective_target_version": {"type": "integer", "minimum": 1}
+        }
+      },
       "AgentMessageV1": {
         "type": "object", "additionalProperties": false,
         "description": "Frozen original agent-message envelope. Reply-obligation fields are deliberately absent; use AgentMessageV2 for new consumers.",
@@ -6125,6 +6186,50 @@
               }
             }
           }
+        }
+      }
+    },
+    "/api/auth/machine-notifiers": {
+      "post": {
+        "tags": ["auth", "agent-messages"],
+        "summary": "Enroll one target-bound machine notifier credential",
+        "description": "Requires a current non-impersonated administrator browser session and CSRF proof. The credential value is returned once. The named project, sender, receiver, enabled primary simple HTTPS webhook target and exact target version are checked and stored atomically.",
+        "security": [{"sessionCookie": []}],
+        "parameters": [{"name": "X-CSRF-Token", "in": "header", "required": true, "schema": {"type": "string"}}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/MachineNotifierEnrollmentRequest"}}}},
+        "responses": {
+          "201": {"description": "Enrolled; key is shown once", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/MachineNotifierEnrollmentResponse"}}}},
+          "400": {"description": "Invalid or unavailable binding"},
+          "403": {"$ref": "#/components/responses/Forbidden"}
+        }
+      }
+    },
+    "/api/machine-notifier/messages": {
+      "post": {
+        "tags": ["agent-messages"],
+        "summary": "Send simple text through the notifier's immutable binding",
+        "description": "Accepts only body. Project, sender, receiver, simple delivery level and pinned target are supplied by the credential binding. Attribution headers and action requests are refused. Idempotency is scoped to the exact credential.",
+        "security": [{"bearerAPIKey": []}],
+        "parameters": [{"name": "Idempotency-Key", "in": "header", "required": true, "schema": {"type": "string", "minLength": 1, "maxLength": 128}}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/MachineNotifierSendRequest"}}}},
+        "responses": {
+          "201": {"description": "Message durably queued for the pinned target", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/MachineNotifierMessageID"}}}},
+          "400": {"description": "Invalid body, action request, attribution, or idempotency key"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "409": {"description": "Immutable binding is no longer current"}
+        }
+      }
+    },
+    "/api/machine-notifier/messages/{messageID}/receipt": {
+      "get": {
+        "tags": ["agent-messages"],
+        "summary": "Read a content-free receipt owned by this notifier credential",
+        "security": [{"bearerAPIKey": []}],
+        "parameters": [{"name": "messageID", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}],
+        "responses": {
+          "200": {"description": "Own message delivery receipt", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/MachineNotifierReceipt"}}}},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "404": {"$ref": "#/components/responses/NotFound"}
         }
       }
     },

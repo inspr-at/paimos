@@ -23,8 +23,9 @@ import (
 type PrincipalKind string
 
 const (
-	PrincipalSession PrincipalKind = "session"
-	PrincipalAPIKey  PrincipalKind = "api_key"
+	PrincipalSession         PrincipalKind = "session"
+	PrincipalAPIKey          PrincipalKind = "api_key"
+	PrincipalMachineNotifier PrincipalKind = "machine_notifier"
 )
 
 // Principal is the safe credential identity authenticated for one request.
@@ -86,11 +87,18 @@ func NewSessionPrincipal(credentialID string, actorUserID, userID int64, imperso
 }
 
 func NewAPIKeyPrincipal(keyID, userID int64, scopes ScopeSet) (Principal, error) {
+	return newAPIKeyPrincipal(PrincipalAPIKey, keyID, userID, scopes)
+}
+
+func newAPIKeyPrincipal(kind PrincipalKind, keyID, userID int64, scopes ScopeSet) (Principal, error) {
 	if keyID <= 0 || userID <= 0 {
 		return Principal{}, ErrCredentialUnavailable
 	}
+	if kind != PrincipalAPIKey && kind != PrincipalMachineNotifier {
+		return Principal{}, ErrCredentialUnavailable
+	}
 	return Principal{
-		kind:        PrincipalAPIKey,
+		kind:        kind,
 		apiKeyID:    keyID,
 		actorUserID: userID,
 		userID:      userID,
@@ -123,7 +131,7 @@ func (principal Principal) SafeCredentialID() string {
 	if principal.kind == PrincipalSession {
 		return principal.sessionCredentialID
 	}
-	if principal.kind == PrincipalAPIKey {
+	if principal.kind == PrincipalAPIKey || principal.kind == PrincipalMachineNotifier {
 		return strconv.FormatInt(principal.apiKeyID, 10)
 	}
 	return ""
@@ -173,7 +181,7 @@ func ReauthorizePrincipalTx(ctx context.Context, tx *sql.Tx, principal Principal
 	switch principal.kind {
 	case PrincipalSession:
 		return reauthorizeSessionPrincipalTx(ctx, tx, principal, now)
-	case PrincipalAPIKey:
+	case PrincipalAPIKey, PrincipalMachineNotifier:
 		return reauthorizeAPIKeyPrincipalTx(ctx, tx, principal, now)
 	default:
 		return nil, Principal{}, ErrCredentialUnavailable
@@ -258,16 +266,16 @@ func reauthorizeSessionPrincipalTx(ctx context.Context, tx *sql.Tx, expected Pri
 }
 
 func reauthorizeAPIKeyPrincipalTx(ctx context.Context, tx *sql.Tx, expected Principal, now time.Time) (*models.User, Principal, error) {
-	if expected.kind != PrincipalAPIKey || expected.apiKeyID <= 0 || expected.sessionCredentialID != "" {
+	if (expected.kind != PrincipalAPIKey && expected.kind != PrincipalMachineNotifier) || expected.apiKeyID <= 0 || expected.sessionCredentialID != "" {
 		return nil, Principal{}, ErrCredentialUnavailable
 	}
 	user := &models.User{}
-	var scopesCSV string
+	var scopesCSV, credentialKind string
 	var disabledAt, expiresAt sql.NullString
-	dests := append([]any{&scopesCSV, &disabledAt, &expiresAt}, userScanDests(user)...)
+	dests := append([]any{&scopesCSV, &credentialKind, &disabledAt, &expiresAt}, userScanDests(user)...)
 	// #nosec G202 -- userSelectCols is a fixed package constant.
 	err := tx.QueryRowContext(ctx, `
-		SELECT ak.scopes,ak.disabled_at,ak.expires_at,`+userSelectCols+`
+		SELECT ak.scopes,ak.credential_kind,ak.disabled_at,ak.expires_at,`+userSelectCols+`
 		FROM api_keys ak JOIN users u ON u.id=ak.user_id
 		WHERE ak.id=?
 	`, expected.apiKeyID).Scan(dests...)
@@ -280,7 +288,11 @@ func reauthorizeAPIKeyPrincipalTx(ctx context.Context, tx *sql.Tx, expected Prin
 			return nil, Principal{}, ErrCredentialUnavailable
 		}
 	}
-	current, err := NewAPIKeyPrincipal(expected.apiKeyID, user.ID, ParseScopes(scopesCSV))
+	kind, ok := principalKindForCredential(credentialKind)
+	if !ok {
+		return nil, Principal{}, ErrCredentialUnavailable
+	}
+	current, err := newAPIKeyPrincipal(kind, expected.apiKeyID, user.ID, ParseScopes(scopesCSV))
 	if err != nil {
 		return nil, Principal{}, ErrCredentialUnavailable
 	}
@@ -307,7 +319,7 @@ func (principal Principal) valid() bool {
 			(principal.impersonated || principal.actorUserID == principal.userID) &&
 			(!principal.impersonated || principal.actorUserID != principal.userID) &&
 			principal.scopes.Has(ScopeAll)
-	case PrincipalAPIKey:
+	case PrincipalAPIKey, PrincipalMachineNotifier:
 		return principal.sessionCredentialID == "" && principal.apiKeyID > 0 &&
 			principal.actorUserID > 0 && principal.userID == principal.actorUserID &&
 			!principal.impersonated
@@ -333,12 +345,27 @@ func validSessionCredentialID(value string) bool {
 	return true
 }
 
-func principalForAPIKey(keyID int64, userID int64, scopes ScopeSet) (Principal, error) {
-	principal, err := NewAPIKeyPrincipal(keyID, userID, scopes)
+func principalForAPIKey(credentialKind string, keyID int64, userID int64, scopes ScopeSet) (Principal, error) {
+	kind, ok := principalKindForCredential(credentialKind)
+	if !ok {
+		return Principal{}, fmt.Errorf("invalid api-key principal")
+	}
+	principal, err := newAPIKeyPrincipal(kind, keyID, userID, scopes)
 	if err != nil {
 		return Principal{}, fmt.Errorf("invalid api-key principal")
 	}
 	return principal, nil
+}
+
+func principalKindForCredential(credentialKind string) (PrincipalKind, bool) {
+	switch credentialKind {
+	case "general":
+		return PrincipalAPIKey, true
+	case "machine_notifier":
+		return PrincipalMachineNotifier, true
+	default:
+		return "", false
+	}
 }
 
 func parseCredentialTimestamp(value string) (time.Time, error) {

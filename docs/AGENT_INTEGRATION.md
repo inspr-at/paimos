@@ -290,6 +290,54 @@ retry/dead-letter state, and SSRF controls, and records a `steer` request as
 [`AGENT_INTERFACE.md` § Grok Bot routine wake](AGENT_INTERFACE.md#grok-bot-routine-wake)
 and [`CONFIGURATION.md` § Instant agent bus](CONFIGURATION.md#instant-agent-bus).
 
+### Target-bound machine notifiers
+
+An unattended notifier that only needs to send simple text should use a
+machine-notifier credential instead of a general API key. A current,
+non-impersonated administrator enrolls it with
+`POST /api/auth/machine-notifiers` and the usual browser CSRF proof:
+
+```json
+{
+  "name": "host health notifier",
+  "project_id": 17,
+  "sender": "hostd59",
+  "to": "grok_bot:amy",
+  "target_id": "00000000-0000-4000-8000-000000000000",
+  "target_version": 1,
+  "expires_at": "2026-10-01T00:00:00Z"
+}
+```
+
+The project must be active; both agents and their sender allowlist entry must
+already exist; and the exact target must be the enabled primary
+`grok_bot_routine` / `https_webhook` target with `maximum_level=simple`.
+Enrollment checks those facts in the same transaction that creates the
+immutable binding. The response returns the credential once. Store it directly
+in the notifier's root-owned secret store; never write the response to a log or
+place the credential in argv.
+
+The credential can call only these endpoints:
+
+```text
+POST /api/machine-notifier/messages
+  Idempotency-Key: <stable event identifier>
+  {"body":"plain notification text"}
+
+GET /api/machine-notifier/messages/<message-id>/receipt
+```
+
+The server supplies the project, sender, receiver, simple level, and exact
+target from the binding. Attribution headers, extra JSON fields, action-like
+requests, fallback targets, and target recovery are refused. The receipt is
+content-free and available only to the credential that created the message; it
+contains the message and project IDs, bound address, delivery state, effective
+level, handoff time, and effective target ID/version. A target rotation,
+disablement, project archival, sender-allowlist removal, owner disablement, or
+credential expiry/revocation stops any queued delivery before the webhook
+lease commits. Revoke the credential through the existing
+`DELETE /api/auth/api-keys/<id>` administrator route.
+
 Blast-radius queries are available at
 `GET /api/projects/:id/graph/blast-radius?issue=PAI-79&depth=3` for the
 "what else is affected if I change this?" agent flow.

@@ -102,6 +102,9 @@ func (d *WebhookDispatcher) DispatchOne(ctx context.Context) (bool, error) {
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
+	if errors.Is(err, ErrMachineNotifierTargetChanged) {
+		return true, err
+	}
 	if err != nil {
 		return false, err
 	}
@@ -198,6 +201,22 @@ func (d *WebhookDispatcher) leaseWebhook(ctx context.Context) (*webhookJob, erro
 		&from, &job.wake.To, &hop, &body)
 	if err != nil {
 		return nil, err
+	}
+	targetCurrent, err := machineNotifierDeliveryTargetCurrentTx(ctx, tx, deliveryID, chosenID)
+	if err != nil {
+		return nil, err
+	}
+	if !targetCurrent {
+		if _, err := tx.ExecContext(ctx, `UPDATE agent_message_deliveries
+			SET state='dead',lease_until=NULL,last_error_code='notifier_target_changed',
+			updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
+			WHERE delivery_id=? AND state='leased'`, deliveryID); err != nil {
+			return nil, err
+		}
+		if err := tx.Commit(); err != nil {
+			return nil, err
+		}
+		return nil, ErrMachineNotifierTargetChanged
 	}
 	plain, err := secretvault.Decrypt(targetSecretDomain, cipher)
 	if err != nil {
