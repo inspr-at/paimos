@@ -39,7 +39,13 @@ type SendEnvelopeInput struct {
 	ExpectsReply   bool
 	DeliveryLevel  string
 	IdempotencyKey string
+	// NotifierAuthority is set only by the closed machine-notifier route. It
+	// reauthorizes the exact credential in this transaction; the immutable
+	// binding then supplies every routing field.
+	NotifierAuthority NotifierAuthority
 }
+
+type NotifierAuthority func(context.Context, *sql.Tx) (int64, error)
 
 type ListFilter struct {
 	includeOutstandingDeliveries bool
@@ -85,25 +91,11 @@ func coded(code, detail string) error { return &CodedError{Code: code, Err: erro
 // exclusively from trusted request attribution. Client-supplied numeric agent
 // IDs are never accepted.
 func (s *Service) SendEnvelope(ctx context.Context, in SendEnvelopeInput) (*Envelope, error) {
-	if strings.TrimSpace(in.Sender) == "" {
-		return nil, coded("agent_message_attribution_required", "X-Paimos-Agent-Name attribution is required")
-	}
-	targetHarness, targetName, err := parseAddress(in.To)
-	if err != nil {
-		return nil, err
-	}
 	if !utf8.ValidString(in.Body) || len([]byte(in.Body)) == 0 {
 		return nil, coded("agent_message_body_required", "message body is required")
 	}
 	if len([]byte(in.Body)) > MaxBodySize {
 		return nil, ErrBodyTooLarge
-	}
-	in.DeliveryLevel = strings.ToLower(strings.TrimSpace(in.DeliveryLevel))
-	if in.DeliveryLevel == "" {
-		in.DeliveryLevel = "simple"
-	}
-	if in.DeliveryLevel != "simple" && in.DeliveryLevel != "steer" {
-		return nil, coded("agent_message_delivery_level_invalid", "delivery_level must be simple or steer")
 	}
 	if in.IdempotencyKey != "" && (!utf8.ValidString(in.IdempotencyKey) || len([]byte(in.IdempotencyKey)) < 1 || len([]byte(in.IdempotencyKey)) > 128) {
 		return nil, coded("agent_message_idempotency_key_invalid", "Idempotency-Key must be 1 to 128 UTF-8 bytes")
@@ -114,6 +106,48 @@ func (s *Service) SendEnvelope(ctx context.Context, in SendEnvelopeInput) (*Enve
 		return nil, err
 	}
 	defer tx.Rollback()
+
+	notifierAPIKeyID := int64(0)
+	pinnedTargetID := ""
+	pinnedTargetVersion := 0
+	if in.NotifierAuthority != nil {
+		notifierAPIKeyID, err = in.NotifierAuthority(ctx, tx)
+		if err != nil || notifierAPIKeyID <= 0 {
+			return nil, coded("machine_notifier_unauthorized", "machine notifier credential is unavailable")
+		}
+		var senderName string
+		err = tx.QueryRowContext(ctx, `SELECT b.project_id,sender.name,b.address,b.target_id,b.target_version
+			FROM machine_notifier_bindings b
+			JOIN api_keys ak ON ak.id=b.api_key_id AND ak.credential_kind='machine_notifier'
+			JOIN project_agents sender ON sender.id=b.sender_agent_id AND sender.project_id=b.project_id
+			JOIN project_agents receiver ON receiver.id=b.receiver_agent_id AND receiver.project_id=b.project_id
+			JOIN projects p ON p.id=b.project_id AND p.status='active'
+			WHERE b.api_key_id=?`, notifierAPIKeyID).Scan(&in.ProjectID, &senderName, &in.To, &pinnedTargetID, &pinnedTargetVersion)
+		if err != nil {
+			return nil, coded("machine_notifier_binding_unavailable", "machine notifier binding is unavailable")
+		}
+		in.Sender = senderName
+		in.IssueID, in.ReplyTo, in.ThreadID, in.Metadata = nil, "", "", nil
+		in.ActionRequest, in.ExpectsReply, in.DeliveryLevel = false, false, "simple"
+		if detectActionRequest(in.Body) {
+			return nil, coded("machine_notifier_action_refused", "machine notifier messages cannot request actions")
+		}
+		in.IdempotencyKey = fmt.Sprintf("machine-notifier:%d:%s", notifierAPIKeyID, in.IdempotencyKey)
+	}
+	if strings.TrimSpace(in.Sender) == "" {
+		return nil, coded("agent_message_attribution_required", "X-Paimos-Agent-Name attribution is required")
+	}
+	targetHarness, targetName, err := parseAddress(in.To)
+	if err != nil {
+		return nil, err
+	}
+	in.DeliveryLevel = strings.ToLower(strings.TrimSpace(in.DeliveryLevel))
+	if in.DeliveryLevel == "" {
+		in.DeliveryLevel = "simple"
+	}
+	if in.DeliveryLevel != "simple" && in.DeliveryLevel != "steer" {
+		return nil, coded("agent_message_delivery_level_invalid", "delivery_level must be simple or steer")
+	}
 
 	var projectKey string
 	if err := tx.QueryRowContext(ctx, `SELECT key FROM projects WHERE id=?`, in.ProjectID).Scan(&projectKey); err != nil {
@@ -238,6 +272,9 @@ func (s *Service) SendEnvelope(ctx context.Context, in SendEnvelopeInput) (*Enve
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM agent_message_allowlist WHERE receiver_agent_id=? AND sender_agent_id=?`, toID, fromID).Scan(&authorized); err != nil {
 		return nil, err
 	}
+	if notifierAPIKeyID > 0 && authorized != 1 {
+		return nil, coded("machine_notifier_sender_unavailable", "machine notifier sender is no longer allowed for the receiver")
+	}
 	delivered := authorized > 0 && !isAction
 	if in.ExpectsReply && !delivered {
 		return nil, coded("agent_message_expectation_unavailable", "a message can expect a reply only when it is accepted into the receiver inbox")
@@ -254,20 +291,39 @@ func (s *Service) SendEnvelope(ctx context.Context, in SendEnvelopeInput) (*Enve
 	}
 	primaryTargetID, fallbackTargetID := "", ""
 	if delivered {
-		primaryTargetID, fallbackTargetID, err = resolveTargetVersionsTx(ctx, tx, instance, in.ProjectID, toAddress)
-		if err != nil {
-			return nil, err
+		if notifierAPIKeyID > 0 {
+			var current int
+			err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM machine_notifier_bindings b
+				JOIN agent_message_targets t ON t.id=b.target_id
+				WHERE b.api_key_id=? AND b.instance=? AND b.project_id=?
+				AND b.sender_agent_id=? AND b.receiver_agent_id=? AND b.address=?
+				AND b.target_id=? AND b.target_version=?
+				AND t.instance=b.instance AND t.project_id=b.project_id AND t.address=b.address
+				AND t.version=b.target_version AND t.role='primary' AND t.enabled=1
+				AND t.target_kind='https_webhook' AND t.maximum_level='simple'`,
+				notifierAPIKeyID, instance, in.ProjectID, fromID, toID, toAddress,
+				pinnedTargetID, pinnedTargetVersion).Scan(&current)
+			if err != nil || current != 1 {
+				return nil, coded("machine_notifier_target_changed", "machine notifier target binding is no longer current")
+			}
+			primaryTargetID = pinnedTargetID
+		} else {
+			primaryTargetID, fallbackTargetID, err = resolveTargetVersionsTx(ctx, tx, instance, in.ProjectID, toAddress)
+			if err != nil {
+				return nil, err
+			}
 		}
 	}
 
 	result, err := tx.ExecContext(ctx, `INSERT INTO agent_messages
 		(from_agent_id,to_agent_id,issue_id,parent_message_id,hop_count,body,is_action_request,delivered,held_reason,delivered_at,
 		 message_id,context_id,task_id,role,parts_json,metadata_json,from_address,to_address,reply_to,thread_id,session_id,
-		 delivery_level,delivery_fallback,delivery_primary_target_id,delivery_fallback_target_id,expects_reply)
-		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		 delivery_level,delivery_fallback,delivery_primary_target_id,delivery_fallback_target_id,expects_reply,machine_notifier_api_key_id)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		fromID, toID, in.IssueID, parentID, hop, in.Body, boolToInt(isAction), boolToInt(delivered), heldReason, deliveredAt,
 		messageID, projectKey, taskID, "agent", string(partsJSON), string(metadataJSON), fromAddress, toAddress, in.ReplyTo, threadID, strings.TrimSpace(in.SessionID),
-		in.DeliveryLevel, "simple", nullableString(primaryTargetID), nullableString(fallbackTargetID), boolToInt(in.ExpectsReply))
+		in.DeliveryLevel, "simple", nullableString(primaryTargetID), nullableString(fallbackTargetID), boolToInt(in.ExpectsReply),
+		nullableInt64(notifierAPIKeyID))
 	if err != nil {
 		if strings.Contains(err.Error(), "paimos_contains_secret_like") || strings.Contains(err.Error(), "paimos_message_body_contains_secret_like") {
 			return nil, ErrContainsSecret
@@ -346,6 +402,13 @@ func sendRequestDigest(in SendEnvelopeInput, normalizedTo string) ([]byte, error
 
 func nullableString(value string) any {
 	if value == "" {
+		return nil
+	}
+	return value
+}
+
+func nullableInt64(value int64) any {
+	if value <= 0 {
 		return nil
 	}
 	return value
