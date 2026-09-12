@@ -9,6 +9,14 @@ Semantic Versioning (`x.y.z`, until 5.21.0), INSPR calendar v1
 (`YYMMDDhhmmss.0.0`, the UTC reservation second as a SemVer-shaped
 coordinate, from the first entry below that form).
 
+## [260912053553.0.0] — 2026-09-12
+
+### Fixed — Immutable requirements revision (PAI-1015)
+
+- Preserve the approved Aithema baseline revision when starting a delivery batch and return it unchanged from later reads, lists and restarts.
+- Keep historical batch identity independent of subsequent draft edits and requirements imports.
+- Recover older batch revisions only from an exact sealed snapshot; leave unavailable historical revisions explicitly unknown.
+
 ## [260911190918.0.0] — 2026-09-11
 
 ### Added — Offer acceptance confirmations and overview status (PAI-1012)
