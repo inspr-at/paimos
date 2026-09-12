@@ -12,13 +12,16 @@ interface APIKeyFixture {
   created_at: string
   last_used_at: string | null
   scopes?: string[]
+  credential_kind?: 'general' | 'machine_notifier'
 }
 
-const { apiGet, apiPost, apiPatch, apiDelete } = vi.hoisted(() => ({
+const { apiGet, apiPost, apiPatch, apiDelete, authState, confirmAction } = vi.hoisted(() => ({
   apiGet: vi.fn(),
   apiPost: vi.fn(),
   apiPatch: vi.fn(),
   apiDelete: vi.fn(),
+  authState: { isAdmin: false },
+  confirmAction: vi.fn(),
 }))
 
 vi.mock('@/api/client', () => ({
@@ -37,14 +40,16 @@ vi.mock('vue-router', () => ({
 vi.mock('@/stores/auth', () => ({
   useAuthStore: () => ({
     user: { id: 1, username: 'operator', role: 'member', first_name: 'Op', last_name: 'Erator' },
-    isAdmin: false,
+    get isAdmin() {
+      return authState.isAdmin
+    },
     setTOTPEnabled: vi.fn(),
     refreshMe: vi.fn(),
   }),
 }))
 
 vi.mock('@/composables/useConfirm', () => ({
-  useConfirm: () => ({ confirm: vi.fn().mockResolvedValue(false) }),
+  useConfirm: () => ({ confirm: confirmAction }),
 }))
 
 // Rendered as nothing: this test is about one table cell, and the child
@@ -55,7 +60,12 @@ vi.mock('@/components/ai/AiPaperTrailPanel.vue', () => ({ default: { name: 'AiPa
 
 import SettingsAccountTab from './SettingsAccountTab.vue'
 
-function apiKey(id: number, name: string, scopes?: string[]): APIKeyFixture {
+function apiKey(
+  id: number,
+  name: string,
+  scopes?: string[],
+  credentialKind?: 'general' | 'machine_notifier',
+): APIKeyFixture {
   const key: APIKeyFixture = {
     id,
     name,
@@ -64,6 +74,7 @@ function apiKey(id: number, name: string, scopes?: string[]): APIKeyFixture {
     last_used_at: null,
   }
   if (scopes !== undefined) key.scopes = scopes
+  if (credentialKind !== undefined) key.credential_kind = credentialKind
   return key
 }
 
@@ -91,6 +102,8 @@ function scopeCells(el: HTMLElement): HTMLTableCellElement[] {
 describe('SettingsAccountTab API-key scope truth (PAI-809)', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    authState.isAdmin = false
+    confirmAction.mockResolvedValue(false)
     document.body.innerHTML = ''
   })
 
@@ -171,5 +184,191 @@ describe('SettingsAccountTab API-key scope truth (PAI-809)', () => {
     expect([...reveal.querySelectorAll('code.icode')].map(node => node.textContent)).toEqual(['agent-controls:runner'])
     expect(reveal.textContent).not.toContain('full')
     expect(reveal.textContent).not.toContain('none')
+  })
+})
+
+function input(el: HTMLElement, id: string, value: string) {
+  const node = el.querySelector<HTMLInputElement | HTMLTextAreaElement>(`#${id}`)!
+  node.value = value
+  node.dispatchEvent(new Event('input', { bubbles: true }))
+}
+
+async function settle() {
+  await Promise.resolve()
+  for (let index = 0; index < 8; index++) await nextTick()
+}
+
+function encryptedEnrollment(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 41,
+    name: 'gateway notifier',
+    key_prefix: 'paimos_ab',
+    expires_at: '2027-01-01T00:00:00.000Z',
+    binding: {
+      project_id: 17,
+      sender: 'gateway',
+      to: 'agent:receiver',
+      target_id: 'target-current',
+      target_version: 4,
+    },
+    credential_delivery: 'age',
+    key_age_base64: window.btoa('age-encryption.org/v1\nencrypted credential bytes'),
+    ...overrides,
+  }
+}
+
+async function fillNotifierForm(el: HTMLElement, recipients = 'age1publicrecipient') {
+  input(el, 'notifier-name', 'gateway notifier')
+  input(el, 'notifier-project', '17')
+  input(el, 'notifier-sender', 'gateway')
+  input(el, 'notifier-to', 'agent:receiver')
+  input(el, 'notifier-target', 'target-current')
+  input(el, 'notifier-target-version', '4')
+  input(el, 'notifier-expiry', '2027-01-01T00:00:00Z')
+  input(el, 'notifier-recipients', recipients)
+  await nextTick()
+}
+
+describe('SettingsAccountTab machine notifier enrollment (PAI-1021)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    authState.isAdmin = false
+    confirmAction.mockResolvedValue(false)
+    document.body.innerHTML = ''
+    Object.defineProperty(URL, 'createObjectURL', {
+      configurable: true,
+      writable: true,
+      value: vi.fn(() => 'blob:notifier-age'),
+    })
+    Object.defineProperty(URL, 'revokeObjectURL', {
+      configurable: true,
+      writable: true,
+      value: vi.fn(),
+    })
+  })
+
+  it('does not expose enrollment to a non-admin', async () => {
+    const el = await mountWithKeys([])
+    expect(el.querySelector('[data-testid="machine-notifier-enrollment"]')).toBeNull()
+    expect(apiPost).not.toHaveBeenCalledWith('/auth/machine-notifiers', expect.anything())
+  })
+
+  it('submits the exact binding and downloads only validated age ciphertext', async () => {
+    vi.useFakeTimers()
+    authState.isAdmin = true
+    apiPost.mockResolvedValueOnce(encryptedEnrollment())
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+    const el = await mountWithKeys([])
+    await fillNotifierForm(el, 'age1first\nssh-ed25519 AAAApublic')
+
+    el.querySelector<HTMLButtonElement>(
+      '[data-testid="machine-notifier-enrollment"] button[type="submit"]',
+    )!.click()
+    await settle()
+
+    expect(apiPost).toHaveBeenCalledWith('/auth/machine-notifiers', {
+      name: 'gateway notifier',
+      project_id: 17,
+      sender: 'gateway',
+      to: 'agent:receiver',
+      target_id: 'target-current',
+      target_version: 4,
+      expires_at: '2027-01-01T00:00:00Z',
+      age_recipients: ['age1first', 'ssh-ed25519 AAAApublic'],
+    })
+    expect(URL.createObjectURL).toHaveBeenCalledOnce()
+    const blob = vi.mocked(URL.createObjectURL).mock.calls[0]![0] as Blob
+    expect(await blob.text()).toBe('age-encryption.org/v1\nencrypted credential bytes')
+    expect(click).toHaveBeenCalledOnce()
+    expect(URL.revokeObjectURL).not.toHaveBeenCalled()
+    expect(document.querySelector('a[download="gateway-notifier.age"]')).not.toBeNull()
+    expect(el.textContent).toContain('Encrypted credential ready as gateway-notifier.age. Download started.')
+    expect(el.textContent).toContain('Machine notifier')
+    expect(el.textContent).toContain('fixed notifier route')
+    expect(el.textContent).not.toContain(encryptedEnrollment().key_age_base64)
+    expect(el.querySelector('.apikey-reveal')).toBeNull()
+
+    const retry = [...el.querySelectorAll<HTMLButtonElement>('button')].find(
+      button => button.textContent?.trim() === 'Download encrypted credential again',
+    )!
+    retry.click()
+    await nextTick()
+    expect(apiPost).toHaveBeenCalledTimes(1)
+    expect(URL.createObjectURL).toHaveBeenCalledTimes(2)
+    const retryBlob = vi.mocked(URL.createObjectURL).mock.calls[1]![0] as Blob
+    expect(await retryBlob.text()).toBe(await blob.text())
+    expect(click).toHaveBeenCalledTimes(2)
+    expect(document.querySelectorAll('a[download="gateway-notifier.age"]')).toHaveLength(2)
+
+    vi.runOnlyPendingTimers()
+    expect(URL.revokeObjectURL).toHaveBeenCalledTimes(2)
+    expect(document.querySelector('a[download="gateway-notifier.age"]')).toBeNull()
+    vi.useRealTimers()
+  })
+
+  it('rejects plaintext or mismatched responses without creating a download surface', async () => {
+    authState.isAdmin = true
+    apiPost
+      .mockResolvedValueOnce({ ...encryptedEnrollment(), key: 'plaintext-must-not-render' })
+      .mockResolvedValueOnce(
+        encryptedEnrollment({ binding: { ...encryptedEnrollment().binding, target_version: 5 } }),
+      )
+      .mockResolvedValueOnce(
+        encryptedEnrollment({ key_age_base64: window.btoa('not an age credential') }),
+      )
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+    const el = await mountWithKeys([])
+    await fillNotifierForm(el)
+
+    const submit = el.querySelector<HTMLButtonElement>(
+      '[data-testid="machine-notifier-enrollment"] button[type="submit"]',
+    )!
+    submit.click()
+    await settle()
+    expect(el.textContent).toContain('Failed to create a valid encrypted notifier credential.')
+    expect(el.textContent).not.toContain('plaintext-must-not-render')
+    expect(URL.createObjectURL).not.toHaveBeenCalled()
+
+    submit.click()
+    await settle()
+    expect(URL.createObjectURL).not.toHaveBeenCalled()
+
+    submit.click()
+    await settle()
+    expect(URL.createObjectURL).not.toHaveBeenCalled()
+    expect(click).not.toHaveBeenCalled()
+  })
+
+  it('rejects duplicate recipients before calling the enrollment endpoint', async () => {
+    authState.isAdmin = true
+    const el = await mountWithKeys([])
+    await fillNotifierForm(el, 'age1duplicate\nage1duplicate')
+    el.querySelector<HTMLButtonElement>(
+      '[data-testid="machine-notifier-enrollment"] button[type="submit"]',
+    )!.click()
+    await settle()
+    expect(apiPost).not.toHaveBeenCalled()
+    expect(el.textContent).toContain('Add 1 to 8 unique public age recipients')
+    expect(URL.createObjectURL).not.toHaveBeenCalled()
+  })
+
+  it('labels both credential kinds and preserves the shared revoke endpoint', async () => {
+    authState.isAdmin = true
+    confirmAction.mockResolvedValue(true)
+    const el = await mountWithKeys([
+      apiKey(1, 'ordinary', ['*'], 'general'),
+      apiKey(2, 'notifier', [], 'machine_notifier'),
+    ])
+    const rows = [...el.querySelectorAll<HTMLTableRowElement>('table.settings-table tbody tr')]
+    expect(rows[0]!.textContent).toContain('API key')
+    expect(rows[1]!.textContent).toContain('Machine notifier')
+    expect(rows[1]!.textContent).toContain('fixed notifier route')
+
+    rows[0]!.querySelector<HTMLButtonElement>('button')!.click()
+    await settle()
+    expect(apiDelete).toHaveBeenCalledWith('/auth/api-keys/1')
+    expect(confirmAction).toHaveBeenCalledWith(
+      expect.objectContaining({ message: expect.stringContaining('API key') }),
+    )
   })
 })

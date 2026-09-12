@@ -4,6 +4,7 @@
 package handlers
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -14,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"filippo.io/age"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/inspr-at/paimos/backend/agentmessage"
@@ -24,13 +26,14 @@ import (
 const machineNotifierMaximumLifetime = 366 * 24 * time.Hour
 
 type createMachineNotifierRequest struct {
-	Name          string `json:"name"`
-	ProjectID     int64  `json:"project_id"`
-	Sender        string `json:"sender"`
-	To            string `json:"to"`
-	TargetID      string `json:"target_id"`
-	TargetVersion int    `json:"target_version"`
-	ExpiresAt     string `json:"expires_at"`
+	Name          string          `json:"name"`
+	ProjectID     int64           `json:"project_id"`
+	Sender        string          `json:"sender"`
+	To            string          `json:"to"`
+	TargetID      string          `json:"target_id"`
+	TargetVersion int             `json:"target_version"`
+	ExpiresAt     string          `json:"expires_at"`
+	AgeRecipients json.RawMessage `json:"age_recipients"`
 }
 
 type machineNotifierSendRequest struct {
@@ -53,6 +56,24 @@ func CreateMachineNotifier(w http.ResponseWriter, r *http.Request) {
 		messageProblem(w, r, "machine_notifier_expiry_invalid", "expires_at must be a future RFC 3339 timestamp within 366 days", http.StatusBadRequest)
 		return
 	}
+	var ageRecipients []age.Recipient
+	ageDelivery := req.AgeRecipients != nil
+	if ageDelivery {
+		if bytes.Equal(bytes.TrimSpace(req.AgeRecipients), []byte("null")) {
+			messageProblem(w, r, "machine_notifier_request_invalid", "machine notifier enrollment is invalid", http.StatusBadRequest)
+			return
+		}
+		var encoded []string
+		if err := json.Unmarshal(req.AgeRecipients, &encoded); err != nil {
+			messageProblem(w, r, "machine_notifier_request_invalid", "machine notifier enrollment is invalid", http.StatusBadRequest)
+			return
+		}
+		ageRecipients, err = parseMachineNotifierAgeRecipients(encoded)
+		if err != nil {
+			messageProblem(w, r, "machine_notifier_request_invalid", "machine notifier enrollment is invalid", http.StatusBadRequest)
+			return
+		}
+	}
 
 	tx, err := db.DB.BeginTx(r.Context(), nil)
 	if err != nil {
@@ -69,6 +90,14 @@ func CreateMachineNotifier(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		jsonError(w, "key generation failed", http.StatusInternalServerError)
 		return
+	}
+	var encryptedCredential string
+	if ageDelivery {
+		encryptedCredential, err = encryptMachineNotifierCredential(full, ageRecipients)
+		if err != nil {
+			jsonError(w, "enrollment unavailable", http.StatusInternalServerError)
+			return
+		}
 	}
 	result, err := tx.ExecContext(r.Context(), `INSERT INTO api_keys
 		(user_id,name,key_hash,key_prefix,scopes,expires_at,credential_kind)
@@ -96,13 +125,21 @@ func CreateMachineNotifier(w http.ResponseWriter, r *http.Request) {
 	log.Printf("audit: machine_notifier_created username=%q key_id=%d project_id=%d target_id=%s target_version=%d",
 		user.Username, keyID, req.ProjectID, strings.TrimSpace(req.TargetID), req.TargetVersion)
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusCreated)
-	_ = json.NewEncoder(w).Encode(map[string]any{
-		"id": keyID, "name": req.Name, "key_prefix": prefix, "key": full,
+	response := map[string]any{
+		"id": keyID, "name": req.Name, "key_prefix": prefix,
 		"expires_at": expires.UTC().Format("2006-01-02T15:04:05.000Z"),
 		"binding": map[string]any{"project_id": req.ProjectID, "sender": strings.TrimSpace(req.Sender),
 			"to": strings.TrimSpace(req.To), "target_id": strings.TrimSpace(req.TargetID), "target_version": req.TargetVersion},
-	})
+	}
+	if ageDelivery {
+		response["credential_delivery"] = "age"
+		response["key_age_base64"] = encryptedCredential
+	} else {
+		response["key"] = full
+	}
+	_ = json.NewEncoder(w).Encode(response)
 }
 
 func SendMachineNotifierMessage(w http.ResponseWriter, r *http.Request) {
