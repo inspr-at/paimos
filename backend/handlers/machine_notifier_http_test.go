@@ -6,21 +6,27 @@ package handlers_test
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
+	"filippo.io/age"
+	"filippo.io/age/agessh"
 	"github.com/go-chi/chi/v5"
 	"github.com/inspr-at/paimos/backend/agentmessage"
 	"github.com/inspr-at/paimos/backend/auth"
 	"github.com/inspr-at/paimos/backend/db"
 	"github.com/inspr-at/paimos/backend/handlers"
 	"github.com/inspr-at/paimos/backend/secretvault"
+	"golang.org/x/crypto/ssh"
 )
 
 const machineNotifierHTTPBody = "HOSTD-59 paper Gateway notification. Please SendToUser this concise notice to Markus in this existing Grok chat. This is notification only: do not trade, restart anything, or change account settings. Event test-event: controlled test notice"
@@ -71,6 +77,7 @@ func newMachineNotifierHTTPFixture(t *testing.T) machineNotifierHTTPFixture {
 			r.Use(auth.CSRFMiddleware)
 			r.Use(auth.MustChangePasswordGate)
 			r.With(auth.RequireAdmin).Post("/auth/machine-notifiers", handlers.CreateMachineNotifier)
+			r.Get("/auth/api-keys", handlers.ListAPIKeys)
 			r.With(auth.RequireAdmin).Post("/auth/api-keys", handlers.CreateAPIKey)
 			r.Delete("/auth/api-keys/{id}", handlers.DeleteAPIKey)
 			r.Post("/machine-notifier/messages", handlers.SendMachineNotifierMessage)
@@ -85,6 +92,14 @@ func newMachineNotifierHTTPFixture(t *testing.T) machineNotifierHTTPFixture {
 		t.Fatal(err)
 	}
 	return machineNotifierHTTPFixture{base: base, server: server, projectID: projectID, target: target, csrf: csrf}
+}
+
+func machineNotifierEnrollmentRequest(f machineNotifierHTTPFixture) map[string]any {
+	return map[string]any{
+		"name": "HOSTD59", "project_id": f.projectID, "sender": "hostd59", "to": "grok_bot:amy",
+		"target_id": f.target.ID, "target_version": f.target.Version,
+		"expires_at": time.Now().UTC().Add(time.Hour).Format(time.RFC3339),
+	}
 }
 
 func (f machineNotifierHTTPFixture) request(t *testing.T, method, path, bearer string, body any, headers map[string]string) *http.Response {
@@ -123,11 +138,7 @@ func (f machineNotifierHTTPFixture) adminHeaders() map[string]string {
 
 func enrollMachineNotifier(t *testing.T, f machineNotifierHTTPFixture) (int64, string) {
 	t.Helper()
-	resp := f.request(t, http.MethodPost, "/api/auth/machine-notifiers", "", map[string]any{
-		"name": "HOSTD59", "project_id": f.projectID, "sender": "hostd59", "to": "grok_bot:amy",
-		"target_id": f.target.ID, "target_version": f.target.Version,
-		"expires_at": time.Now().UTC().Add(time.Hour).Format(time.RFC3339),
-	}, f.adminHeaders())
+	resp := f.request(t, http.MethodPost, "/api/auth/machine-notifiers", "", machineNotifierEnrollmentRequest(f), f.adminHeaders())
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusCreated {
 		raw, _ := io.ReadAll(resp.Body)
@@ -141,6 +152,196 @@ func enrollMachineNotifier(t *testing.T, f machineNotifierHTTPFixture) (int64, s
 		t.Fatalf("enrollment=%#v err=%v", got, err)
 	}
 	return got.ID, got.Key
+}
+
+func TestMachineNotifierEnrollmentPlaintextCompatibility(t *testing.T) {
+	f := newMachineNotifierHTTPFixture(t)
+	request := machineNotifierEnrollmentRequest(f)
+	resp := f.request(t, http.MethodPost, "/api/auth/machine-notifiers", "", request, f.adminHeaders())
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		raw, _ := io.ReadAll(resp.Body)
+		t.Fatalf("plaintext enroll status=%d body=%s", resp.StatusCode, raw)
+	}
+	if got := resp.Header.Get("Cache-Control"); got != "no-store" {
+		t.Fatalf("plaintext enrollment cache control=%q", got)
+	}
+	var result map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		t.Fatal(err)
+	}
+	if len(result) != 6 || result["key"] == "" {
+		t.Fatalf("plaintext enrollment contract=%v", result)
+	}
+	if _, ok := result["credential_delivery"]; ok {
+		t.Fatalf("plaintext enrollment added delivery metadata: %v", result)
+	}
+	if _, ok := result["key_age_base64"]; ok {
+		t.Fatalf("plaintext enrollment added ciphertext: %v", result)
+	}
+	binding, ok := result["binding"].(map[string]any)
+	if !ok || binding["project_id"] != float64(f.projectID) || binding["sender"] != "hostd59" ||
+		binding["to"] != "grok_bot:amy" || binding["target_id"] != f.target.ID ||
+		binding["target_version"] != float64(f.target.Version) {
+		t.Fatalf("plaintext enrollment binding=%v", result["binding"])
+	}
+}
+
+func TestMachineNotifierEnrollmentEncryptedAgeDelivery(t *testing.T) {
+	f := newMachineNotifierHTTPFixture(t)
+	nativeIdentity, err := age.GenerateX25519Identity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sshPublicKey, sshPrivateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sshIdentity, err := agessh.NewEd25519Identity(sshPrivateKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sshAuthorizedKey, err := ssh.NewPublicKey(sshPublicKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := machineNotifierEnrollmentRequest(f)
+	request["age_recipients"] = []string{nativeIdentity.Recipient().String(), strings.TrimSpace(string(ssh.MarshalAuthorizedKey(sshAuthorizedKey)))}
+	resp := f.request(t, http.MethodPost, "/api/auth/machine-notifiers", "", request, f.adminHeaders())
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		raw, _ := io.ReadAll(resp.Body)
+		t.Fatalf("encrypted enroll status=%d body=%s", resp.StatusCode, raw)
+	}
+	if got := resp.Header.Get("Cache-Control"); got != "no-store" {
+		t.Fatalf("encrypted enrollment cache control=%q", got)
+	}
+	var result map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		t.Fatal(err)
+	}
+	if _, exposed := result["key"]; exposed {
+		t.Fatalf("encrypted enrollment exposed plaintext key: %v", result)
+	}
+	if len(result) != 7 || result["credential_delivery"] != "age" {
+		t.Fatalf("encrypted enrollment fields=%v", result)
+	}
+	encoded, ok := result["key_age_base64"].(string)
+	if !ok || encoded == "" {
+		t.Fatalf("encrypted enrollment omitted ciphertext: %v", result)
+	}
+	ciphertext, err := base64.StdEncoding.Strict().DecodeString(encoded)
+	if err != nil || !bytes.HasPrefix(ciphertext, []byte("age-encryption.org/v1\n")) {
+		t.Fatalf("age ciphertext invalid: prefix=%q err=%v", ciphertext[:min(len(ciphertext), 24)], err)
+	}
+	var token string
+	for _, identity := range []age.Identity{nativeIdentity, sshIdentity} {
+		reader, err := age.Decrypt(bytes.NewReader(ciphertext), identity)
+		if err != nil {
+			t.Fatal(err)
+		}
+		plaintext, err := io.ReadAll(reader)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(plaintext) == 0 || plaintext[len(plaintext)-1] != '\n' || bytes.Count(plaintext, []byte("\n")) != 1 {
+			t.Fatalf("decrypted credential framing=%q", plaintext)
+		}
+		decrypted := string(plaintext[:len(plaintext)-1])
+		if token == "" {
+			token = decrypted
+		} else if token != decrypted {
+			t.Fatal("recipients decrypted different credentials")
+		}
+	}
+
+	sent := f.request(t, http.MethodPost, "/api/machine-notifier/messages", token,
+		map[string]string{"body": machineNotifierHTTPBody}, map[string]string{"Idempotency-Key": "encrypted-test-event"})
+	defer sent.Body.Close()
+	if sent.StatusCode != http.StatusCreated {
+		t.Fatalf("encrypted credential send status=%d", sent.StatusCode)
+	}
+	unrelated := f.request(t, http.MethodGet, "/api/unrelated", token, nil, nil)
+	_ = unrelated.Body.Close()
+	if unrelated.StatusCode != http.StatusForbidden {
+		t.Fatalf("encrypted credential unrelated route status=%d", unrelated.StatusCode)
+	}
+
+	keyID := int64(result["id"].(float64))
+	listed := f.request(t, http.MethodGet, "/api/auth/api-keys", "", nil, f.adminHeaders())
+	defer listed.Body.Close()
+	var keys []map[string]any
+	if err := json.NewDecoder(listed.Body).Decode(&keys); err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, key := range keys {
+		if int64(key["id"].(float64)) == keyID {
+			found = true
+			if key["credential_kind"] != "machine_notifier" {
+				t.Fatalf("listed credential kind=%v", key)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("encrypted credential %d missing from key listing", keyID)
+	}
+}
+
+func TestMachineNotifierEnrollmentRejectsInvalidAgeRecipientsWithoutPersistence(t *testing.T) {
+	f := newMachineNotifierHTTPFixture(t)
+	identity, err := age.GenerateX25519Identity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	valid := identity.Recipient().String()
+	sshPublicKey, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sshAuthorizedKey, err := ssh.NewPublicKey(sshPublicKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sshRecipient := strings.TrimSpace(string(ssh.MarshalAuthorizedKey(sshAuthorizedKey)))
+	cases := map[string]any{
+		"null":                    nil,
+		"empty":                   []string{},
+		"malformed":               []string{"age1-not-a-recipient"},
+		"duplicate native":        []string{valid, valid},
+		"duplicate ssh canonical": []string{sshRecipient + " first", sshRecipient + " second"},
+		"too many":                []string{valid, valid, valid, valid, valid, valid, valid, valid, valid},
+		"oversized":               []string{"age1" + strings.Repeat("q", 1025)},
+		"unsupported":             []string{"ssh-dss AAAAB3NzaC1kc3MAAACB"},
+		"multiple ssh keys":       []string{sshRecipient + "\n" + sshRecipient},
+		"wrong type":              valid,
+	}
+	for name, recipients := range cases {
+		t.Run(name, func(t *testing.T) {
+			request := machineNotifierEnrollmentRequest(f)
+			request["age_recipients"] = recipients
+			resp := f.request(t, http.MethodPost, "/api/auth/machine-notifiers", "", request, f.adminHeaders())
+			defer resp.Body.Close()
+			if resp.StatusCode != http.StatusBadRequest {
+				raw, _ := io.ReadAll(resp.Body)
+				t.Fatalf("status=%d body=%s", resp.StatusCode, raw)
+			}
+			raw, _ := io.ReadAll(resp.Body)
+			if bytes.Contains(raw, []byte("paimos_")) {
+				t.Fatalf("error exposed credential-shaped data: %s", raw)
+			}
+			var keys, bindings int
+			if err := db.DB.QueryRow(`SELECT COUNT(*) FROM api_keys WHERE credential_kind='machine_notifier'`).Scan(&keys); err != nil {
+				t.Fatal(err)
+			}
+			if err := db.DB.QueryRow(`SELECT COUNT(*) FROM machine_notifier_bindings`).Scan(&bindings); err != nil {
+				t.Fatal(err)
+			}
+			if keys != 0 || bindings != 0 {
+				t.Fatalf("invalid recipients persisted keys=%d bindings=%d", keys, bindings)
+			}
+		})
+	}
 }
 
 func TestMachineNotifierHTTPContractAndRevocation(t *testing.T) {
@@ -260,13 +461,26 @@ func TestGeneralAPIKeyKeepsOrdinaryRoutes(t *testing.T) {
 
 func TestMachineNotifierEnrollmentPinsCurrentTarget(t *testing.T) {
 	f := newMachineNotifierHTTPFixture(t)
-	resp := f.request(t, http.MethodPost, "/api/auth/machine-notifiers", "", map[string]any{
-		"name": "wrong pin", "project_id": f.projectID, "sender": "hostd59", "to": "grok_bot:amy",
-		"target_id": f.target.ID, "target_version": f.target.Version + 1,
-		"expires_at": time.Now().UTC().Add(time.Hour).Format(time.RFC3339),
-	}, f.adminHeaders())
+	identity, err := age.GenerateX25519Identity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := machineNotifierEnrollmentRequest(f)
+	request["target_version"] = f.target.Version + 1
+	request["age_recipients"] = []string{identity.Recipient().String()}
+	resp := f.request(t, http.MethodPost, "/api/auth/machine-notifiers", "", request, f.adminHeaders())
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("wrong target version status=%d", resp.StatusCode)
+	}
+	var keys, bindings int
+	if err := db.DB.QueryRow(`SELECT COUNT(*) FROM api_keys WHERE credential_kind='machine_notifier'`).Scan(&keys); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.DB.QueryRow(`SELECT COUNT(*) FROM machine_notifier_bindings`).Scan(&bindings); err != nil {
+		t.Fatal(err)
+	}
+	if keys != 0 || bindings != 0 {
+		t.Fatalf("invalid encrypted binding persisted keys=%d bindings=%d", keys, bindings)
 	}
 }

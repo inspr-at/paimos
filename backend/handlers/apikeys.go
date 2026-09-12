@@ -51,7 +51,7 @@ func generateAPIKey() (full, prefix, hash string, err error) {
 func ListAPIKeys(w http.ResponseWriter, r *http.Request) {
 	user := auth.GetUser(r)
 	rows, err := db.DB.Query(`
-		SELECT id, name, key_prefix, created_at, last_used_at, scopes
+		SELECT id, name, key_prefix, created_at, last_used_at, scopes, credential_kind
 		FROM api_keys WHERE user_id = ?
 		ORDER BY created_at DESC
 	`, user.ID)
@@ -62,18 +62,19 @@ func ListAPIKeys(w http.ResponseWriter, r *http.Request) {
 	defer rows.Close()
 
 	type APIKey struct {
-		ID         int64    `json:"id"`
-		Name       string   `json:"name"`
-		KeyPrefix  string   `json:"key_prefix"`
-		CreatedAt  string   `json:"created_at"`
-		LastUsedAt *string  `json:"last_used_at"`
-		Scopes     []string `json:"scopes"`
+		ID             int64    `json:"id"`
+		Name           string   `json:"name"`
+		KeyPrefix      string   `json:"key_prefix"`
+		CreatedAt      string   `json:"created_at"`
+		LastUsedAt     *string  `json:"last_used_at"`
+		Scopes         []string `json:"scopes"`
+		CredentialKind string   `json:"credential_kind"`
 	}
 	keys := []APIKey{}
 	for rows.Next() {
 		var k APIKey
 		var scopesCSV string
-		if err := rows.Scan(&k.ID, &k.Name, &k.KeyPrefix, &k.CreatedAt, &k.LastUsedAt, &scopesCSV); err == nil {
+		if err := rows.Scan(&k.ID, &k.Name, &k.KeyPrefix, &k.CreatedAt, &k.LastUsedAt, &scopesCSV, &k.CredentialKind); err == nil {
 			k.Scopes = scopesSetToSortedSlice(auth.ParseScopes(scopesCSV))
 			keys = append(keys, k)
 		}
