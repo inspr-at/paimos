@@ -318,7 +318,7 @@ async function disableTOTP() {
 }
 
 // ── API Keys ─────────────────────────────────────────────────────────────────
-interface APIKey { id: number; name: string; key_prefix: string; created_at: string; last_used_at: string | null; scopes?: string[] }
+interface APIKey { id: number; name: string; key_prefix: string; created_at: string; last_used_at: string | null; scopes?: string[]; credential_kind?: 'general' | 'machine_notifier' }
 // PAI-379: api-key scopes. The sentinel '*' means "full owner-role
 // power" (the long-standing default). Named scopes narrow the key. The
 // catalog is fetched from /api/schema on mount so the UI stays in sync
@@ -381,12 +381,159 @@ async function createAPIKey() {
   } catch (e: unknown) { newKeyError.value = errMsg(e, 'Failed.') }
   finally { newKeyCreating.value = false }
 }
-async function revokeAPIKey(id: number) {
-  if (!await confirm({ message: 'Revoke this API key? Any integrations using it will stop working immediately.', confirmLabel: 'Revoke', danger: true })) return
-  await api.delete(`/auth/api-keys/${id}`)
-  apiKeys.value = apiKeys.value.filter(k => k.id !== id)
+async function revokeAPIKey(key: APIKey) {
+  const label = key.credential_kind === 'machine_notifier' ? 'machine notifier credential' : 'API key'
+  if (!await confirm({ message: `Revoke this ${label}? Any integrations using it will stop working immediately.`, confirmLabel: 'Revoke', danger: true })) return
+  await api.delete(`/auth/api-keys/${key.id}`)
+  apiKeys.value = apiKeys.value.filter(k => k.id !== key.id)
 }
 async function copyKey(key: string) { await navigator.clipboard.writeText(key) }
+
+// ── Machine notifier enrollment ─────────────────────────────────────────────
+interface MachineNotifierBinding {
+  project_id: number
+  sender: string
+  to: string
+  target_id: string
+  target_version: number
+}
+interface MachineNotifierEnrollment {
+  id: number
+  name: string
+  key_prefix: string
+  expires_at: string
+  binding: MachineNotifierBinding
+  credential_delivery: 'age'
+  key_age_base64: string
+}
+
+const machineNotifierForm = ref({
+  name: '',
+  project_id: null as number | null,
+  sender: '',
+  to: '',
+  target_id: '',
+  target_version: null as number | null,
+  expires_at: '',
+  age_recipients: '',
+})
+const machineNotifierCreating = ref(false)
+const machineNotifierError = ref('')
+const machineNotifierOK = ref('')
+
+function ownObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function hasExactKeys(value: Record<string, unknown>, expected: string[]): boolean {
+  const actual = Object.keys(value).sort()
+  return actual.length === expected.length && expected.slice().sort().every((key, index) => key === actual[index])
+}
+
+function decodeAgeCiphertext(value: unknown): Uint8Array | null {
+  if (typeof value !== 'string' || value.length === 0 || value.length > 1024 * 1024 || value.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(value)) return null
+  try {
+    const raw = window.atob(value)
+    if (window.btoa(raw) !== value) return null
+    const bytes = Uint8Array.from(raw, character => character.charCodeAt(0))
+    const header = 'age-encryption.org/v1\n'
+    if (bytes.length <= header.length || ![...header].every((character, index) => bytes[index] === character.charCodeAt(0))) return null
+    return bytes
+  } catch {
+    return null
+  }
+}
+
+function parseMachineNotifierEnrollment(
+  value: unknown,
+  expected: MachineNotifierBinding & { name: string; expires_at: string },
+): { enrollment: MachineNotifierEnrollment; ciphertext: Uint8Array } {
+  const responseKeys = ['id', 'name', 'key_prefix', 'expires_at', 'binding', 'credential_delivery', 'key_age_base64']
+  const bindingKeys = ['project_id', 'sender', 'to', 'target_id', 'target_version']
+  if (!ownObject(value) || Object.prototype.hasOwnProperty.call(value, 'key') || !hasExactKeys(value, responseKeys) || !ownObject(value.binding) || !hasExactKeys(value.binding, bindingKeys)) {
+    throw new Error('invalid encrypted enrollment response')
+  }
+  const response = value as unknown as MachineNotifierEnrollment
+  const expiry = Date.parse(response.expires_at)
+  const expectedExpiry = Date.parse(expected.expires_at)
+  const binding = response.binding
+  const ciphertext = decodeAgeCiphertext(response.key_age_base64)
+  if (
+    !Number.isSafeInteger(response.id) || response.id <= 0 ||
+    response.name !== expected.name || typeof response.key_prefix !== 'string' || response.key_prefix.length === 0 ||
+    response.credential_delivery !== 'age' || !Number.isFinite(expiry) || expiry !== expectedExpiry ||
+    binding.project_id !== expected.project_id || binding.sender !== expected.sender || binding.to !== expected.to ||
+    binding.target_id !== expected.target_id || binding.target_version !== expected.target_version || !ciphertext
+  ) {
+    throw new Error('invalid encrypted enrollment response')
+  }
+  return { enrollment: response, ciphertext }
+}
+
+function downloadMachineNotifierCredential(name: string, id: number, ciphertext: Uint8Array): string {
+  const stem = name.replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 64) || `machine-notifier-${id}`
+  const filename = `${stem}.age`
+  const credentialBytes = new Uint8Array(ciphertext.length)
+  credentialBytes.set(ciphertext)
+  const blob = new Blob([credentialBytes.buffer], { type: 'application/octet-stream' })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  link.click()
+  URL.revokeObjectURL(url)
+  return filename
+}
+
+async function createMachineNotifier() {
+  if (!auth.isAdmin || machineNotifierCreating.value) return
+  machineNotifierError.value = ''
+  machineNotifierOK.value = ''
+  const name = machineNotifierForm.value.name.trim()
+  const sender = machineNotifierForm.value.sender.trim()
+  const to = machineNotifierForm.value.to.trim()
+  const targetID = machineNotifierForm.value.target_id.trim()
+  const expiresAt = machineNotifierForm.value.expires_at.trim()
+  const projectID = Number(machineNotifierForm.value.project_id)
+  const targetVersion = Number(machineNotifierForm.value.target_version)
+  const recipients = machineNotifierForm.value.age_recipients.split(/\r?\n/).map(value => value.trim()).filter(Boolean)
+  if (!name || !sender || !to || !targetID || !expiresAt) {
+    machineNotifierError.value = 'All notifier fields are required.'
+    return
+  }
+  if (!Number.isSafeInteger(projectID) || projectID <= 0 || !Number.isSafeInteger(targetVersion) || targetVersion <= 0) {
+    machineNotifierError.value = 'Project ID and target version must be positive whole numbers.'
+    return
+  }
+  if (!Number.isFinite(Date.parse(expiresAt)) || Date.parse(expiresAt) <= Date.now()) {
+    machineNotifierError.value = 'Expiry must be a future RFC 3339 timestamp.'
+    return
+  }
+  if (recipients.length === 0 || recipients.length > 8 || new Set(recipients).size !== recipients.length) {
+    machineNotifierError.value = 'Add 1 to 8 unique public age recipients, one per line.'
+    return
+  }
+  const binding = { project_id: projectID, sender, to, target_id: targetID, target_version: targetVersion }
+  const payload = { name, ...binding, expires_at: expiresAt, age_recipients: recipients }
+  machineNotifierCreating.value = true
+  try {
+    const raw = await api.post<unknown>('/auth/machine-notifiers', payload)
+    const { enrollment, ciphertext } = parseMachineNotifierEnrollment(raw, { name, ...binding, expires_at: expiresAt })
+    const filename = downloadMachineNotifierCredential(enrollment.name, enrollment.id, ciphertext)
+    apiKeys.value.unshift({
+      id: enrollment.id, name: enrollment.name, key_prefix: enrollment.key_prefix,
+      created_at: new Date().toISOString().slice(0, 19).replace('T', ' '), last_used_at: null,
+      scopes: [], credential_kind: 'machine_notifier',
+    })
+    machineNotifierOK.value = `Encrypted credential downloaded as ${filename}.`
+    machineNotifierForm.value.name = ''
+    machineNotifierForm.value.age_recipients = ''
+  } catch (e: unknown) {
+    machineNotifierError.value = errMsg(e, 'Failed to create a valid encrypted notifier credential.')
+  } finally {
+    machineNotifierCreating.value = false
+  }
+}
 
 // ── Auto-watch sync (PAI-331) ───────────────────────────────────────────────
 // Per-(device, project) toggle. The CLI (`paimos sync watch`) registers
@@ -798,6 +945,46 @@ init()
     </div>
   </div>
 
+  <div v-if="auth.isAdmin" class="section" data-testid="machine-notifier-enrollment">
+    <div class="section-header">
+      <h2 class="section-title">Machine notifier credential</h2>
+      <p class="section-desc">Create one credential fixed to a project, sender, recipient, and current delivery target. The credential is downloaded only as an age-encrypted file.</p>
+    </div>
+    <form class="card notifier-enrollment" @submit.prevent="createMachineNotifier">
+      <div class="notifier-grid">
+        <div class="field"><label for="notifier-name">Credential name</label>
+          <input id="notifier-name" v-model="machineNotifierForm.name" type="text" maxlength="128" required />
+        </div>
+        <div class="field"><label for="notifier-project">Project ID</label>
+          <input id="notifier-project" v-model.number="machineNotifierForm.project_id" type="number" min="1" step="1" required />
+        </div>
+        <div class="field"><label for="notifier-sender">Sender agent</label>
+          <input id="notifier-sender" v-model="machineNotifierForm.sender" type="text" required />
+        </div>
+        <div class="field"><label for="notifier-to">Recipient address</label>
+          <input id="notifier-to" v-model="machineNotifierForm.to" type="text" required />
+        </div>
+        <div class="field"><label for="notifier-target">Delivery target ID</label>
+          <input id="notifier-target" v-model="machineNotifierForm.target_id" type="text" required />
+        </div>
+        <div class="field"><label for="notifier-target-version">Delivery target version</label>
+          <input id="notifier-target-version" v-model.number="machineNotifierForm.target_version" type="number" min="1" step="1" required />
+        </div>
+        <div class="field notifier-wide"><label for="notifier-expiry">Expiry (RFC 3339)</label>
+          <input id="notifier-expiry" v-model="machineNotifierForm.expires_at" type="text" placeholder="2026-12-31T23:59:59Z" required />
+        </div>
+        <div class="field notifier-wide"><label for="notifier-recipients">Public age recipients <span class="field-hint">— one native age or supported SSH recipient per line, maximum 8</span></label>
+          <textarea id="notifier-recipients" v-model="machineNotifierForm.age_recipients" rows="3" required />
+        </div>
+      </div>
+      <div v-if="machineNotifierError" class="form-error" role="alert">{{ machineNotifierError }}</div>
+      <div v-if="machineNotifierOK" class="ok-banner" role="status">{{ machineNotifierOK }}</div>
+      <div class="form-actions">
+        <button type="submit" class="btn btn-primary btn-sm" :disabled="machineNotifierCreating">{{ machineNotifierCreating ? 'Creating encrypted credential…' : 'Create and download encrypted credential' }}</button>
+      </div>
+    </form>
+  </div>
+
   <div class="section">
     <div class="section-header">
       <h2 class="section-title">API Keys</h2>
@@ -841,21 +1028,23 @@ init()
     </div>
     <div v-if="apiKeys.length > 0" class="card" style="padding:0;overflow:hidden;margin-top:.25rem">
       <table class="settings-table">
-        <thead><tr><th>Name</th><th>Prefix</th><th>Scopes</th><th>Created</th><th>Last used</th><th></th></tr></thead>
+        <thead><tr><th>Name</th><th>Prefix</th><th>Scopes</th><th>Kind</th><th>Created</th><th>Last used</th><th></th></tr></thead>
         <tbody>
           <tr v-for="k in apiKeys" :key="k.id">
             <td class="fw500">{{ k.name }}</td>
             <td><code class="icode">{{ k.key_prefix }}…</code></td>
             <td>
-              <span v-if="scopeDisplay(k.scopes) === 'full'" class="muted">full</span>
+              <span v-if="k.credential_kind === 'machine_notifier'" class="muted">fixed notifier route</span>
+              <span v-else-if="scopeDisplay(k.scopes) === 'full'" class="muted">full</span>
               <span v-else-if="scopeDisplay(k.scopes) === 'none'" class="muted" aria-label="No scoped access">none</span>
               <span v-else class="apikey-scope-chips">
                 <code v-for="s in k.scopes" :key="s" class="icode">{{ s }}</code>
               </span>
             </td>
+            <td class="muted">{{ k.credential_kind === 'machine_notifier' ? 'Machine notifier' : 'API key' }}</td>
             <td class="muted">{{ k.created_at.slice(0,10) }}</td>
             <td class="muted">{{ k.last_used_at ? k.last_used_at.slice(0,10) : '—' }}</td>
-            <td class="actions-cell"><button class="btn btn-ghost btn-sm danger" @click="revokeAPIKey(k.id)">Revoke</button></td>
+            <td class="actions-cell"><button class="btn btn-ghost btn-sm danger" @click="revokeAPIKey(k)">Revoke</button></td>
           </tr>
         </tbody>
       </table>
@@ -1015,6 +1204,17 @@ init()
 .apikey-scope-row { display: flex; align-items: center; gap: .45rem; font-size: 12px; }
 .apikey-scope-row input[type="checkbox"] { margin: 0; }
 .apikey-scope-chips { display: inline-flex; flex-wrap: wrap; gap: .3rem; align-items: center; }
+
+/* ── Machine notifier enrollment ────────────────────────────────────────── */
+.notifier-enrollment { max-width: 760px; }
+.notifier-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .7rem 1rem; }
+.notifier-wide { grid-column: 1 / -1; }
+.notifier-enrollment textarea { width: 100%; resize: vertical; font-family: 'DM Mono','Fira Code',monospace; font-size: 12px; }
+.notifier-enrollment .form-actions { margin-top: .75rem; }
+@media (max-width: 720px) {
+  .notifier-grid { grid-template-columns: 1fr; }
+  .notifier-wide { grid-column: auto; }
+}
 
 /* ── Editor preference toggles ────────────────────────────────────────────── */
 .section-divider {
