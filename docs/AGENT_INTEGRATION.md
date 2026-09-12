@@ -305,7 +305,8 @@ non-impersonated administrator enrolls it with
   "to": "grok_bot:amy",
   "target_id": "00000000-0000-4000-8000-000000000000",
   "target_version": 1,
-  "expires_at": "2026-10-01T00:00:00Z"
+  "expires_at": "2026-10-01T00:00:00Z",
+  "age_recipients": ["age1...", "ssh-ed25519 AAAA..."]
 }
 ```
 
@@ -313,8 +314,16 @@ The project must be active; both agents and their sender allowlist entry must
 already exist; and the exact target must be the enabled primary
 `grok_bot_routine` / `https_webhook` target with `maximum_level=simple`.
 Enrollment checks those facts in the same transaction that creates the
-immutable binding. The response returns the credential once. Store it directly
-in the notifier's root-owned secret store; never write the response to a log or
+immutable binding. To keep the one-time credential out of browser-visible
+plaintext, provide one to eight distinct native age X25519, SSH Ed25519, or SSH
+RSA public recipients in `age_recipients`. The response then omits `key` and
+returns `credential_delivery: "age"` plus `key_age_base64`, which is base64 of
+a raw age v1 ciphertext containing the credential and a trailing newline.
+Decode it directly to an `.age` file and decrypt it only into the notifier's
+restricted secret store. A present null, empty, malformed, unsupported, or
+canonically duplicate recipient list is rejected without creating a credential
+or binding. Omitting `age_recipients` preserves the existing one-time plaintext
+`key` response for compatible clients. Never write either response to a log or
 place the credential in argv.
 
 The credential can call only these endpoints:

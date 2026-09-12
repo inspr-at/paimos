@@ -1103,7 +1103,12 @@
           "to": {"type": "string", "minLength": 3, "maxLength": 129},
           "target_id": {"type": "string", "format": "uuid"},
           "target_version": {"type": "integer", "minimum": 1},
-          "expires_at": {"type": "string", "format": "date-time"}
+          "expires_at": {"type": "string", "format": "date-time"},
+          "age_recipients": {
+            "type": "array", "minItems": 1, "maxItems": 8, "uniqueItems": true,
+            "description": "Distinct native age X25519 or SSH Ed25519/RSA public recipients. When present, the one-time credential is returned only as age-encrypted ciphertext.",
+            "items": {"type": "string", "minLength": 1, "maxLength": 1024}
+          }
         }
       },
       "MachineNotifierEnrollmentResponse": {
@@ -1116,6 +1121,19 @@
           "key": {"type": "string", "description": "One-time credential value; never retrievable again."},
           "expires_at": {"type": "string", "format": "date-time"},
           "binding": {"$ref": "#/components/schemas/MachineNotifierBinding"}
+        }
+      },
+      "MachineNotifierEncryptedEnrollmentResponse": {
+        "type": "object", "additionalProperties": false,
+        "required": ["id", "name", "key_prefix", "expires_at", "binding", "credential_delivery", "key_age_base64"],
+        "properties": {
+          "id": {"type": "integer", "minimum": 1},
+          "name": {"type": "string"},
+          "key_prefix": {"type": "string"},
+          "expires_at": {"type": "string", "format": "date-time"},
+          "binding": {"$ref": "#/components/schemas/MachineNotifierBinding"},
+          "credential_delivery": {"type": "string", "enum": ["age"]},
+          "key_age_base64": {"type": "string", "contentEncoding": "base64", "minLength": 1, "description": "Base64-encoded raw age v1 ciphertext containing the one-time credential followed by a newline."}
         }
       },
       "MachineNotifierSendRequest": {
@@ -6193,12 +6211,15 @@
       "post": {
         "tags": ["auth", "agent-messages"],
         "summary": "Enroll one target-bound machine notifier credential",
-        "description": "Requires a current non-impersonated administrator browser session and CSRF proof. The credential value is returned once. The named project, sender, receiver, enabled primary simple HTTPS webhook target and exact target version are checked and stored atomically.",
+        "description": "Requires a current non-impersonated administrator browser session and CSRF proof. The credential is returned once, either in the existing plaintext field or as base64-encoded age ciphertext when age_recipients is present. The named project, sender, receiver, enabled primary simple HTTPS webhook target and exact target version are checked and stored atomically.",
         "security": [{"sessionCookie": []}],
         "parameters": [{"name": "X-CSRF-Token", "in": "header", "required": true, "schema": {"type": "string"}}],
         "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/MachineNotifierEnrollmentRequest"}}}},
         "responses": {
-          "201": {"description": "Enrolled; key is shown once", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/MachineNotifierEnrollmentResponse"}}}},
+          "201": {"description": "Enrolled; credential is delivered once", "content": {"application/json": {"schema": {"oneOf": [
+            {"$ref": "#/components/schemas/MachineNotifierEnrollmentResponse"},
+            {"$ref": "#/components/schemas/MachineNotifierEncryptedEnrollmentResponse"}
+          ]}}}},
           "400": {"description": "Invalid or unavailable binding"},
           "403": {"$ref": "#/components/responses/Forbidden"}
         }
