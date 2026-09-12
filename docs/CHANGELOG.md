@@ -9,6 +9,14 @@ Semantic Versioning (`x.y.z`, until 5.21.0), INSPR calendar v1
 (`YYMMDDhhmmss.0.0`, the UTC reservation second as a SemVer-shaped
 coordinate, from the first entry below that form).
 
+## [260912203754.0.0] — 2026-09-12
+
+### Added — Target-bound machine notifier credentials (PAI-1018)
+
+- Let administrators enroll expiring, revocable machine-notifier credentials bound to one active project, owning user, sender, receiver and exact enabled simple-webhook target version.
+- Limit those credentials to text-only message creation and content-free delivery receipts for their own messages; reject caller-supplied attribution and every unrelated API route.
+- Recheck the credential, owner, project, sender-to-receiver allowlist and pinned target before webhook handoff, so revoked authority or target rotation stops queued delivery without falling through to another target.
+
 ## [260912053553.0.0] — 2026-09-12
 
 ### Fixed — Immutable requirements revision (PAI-1015)
