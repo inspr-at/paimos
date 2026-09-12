@@ -420,6 +420,7 @@ const machineNotifierForm = ref({
 const machineNotifierCreating = ref(false)
 const machineNotifierError = ref('')
 const machineNotifierOK = ref('')
+const machineNotifierDownload = ref<{ filename: string; ciphertext: Uint8Array } | null>(null)
 
 function ownObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -470,9 +471,13 @@ function parseMachineNotifierEnrollment(
   return { enrollment: response, ciphertext }
 }
 
-function downloadMachineNotifierCredential(name: string, id: number, ciphertext: Uint8Array): string {
+function machineNotifierFilename(name: string, id: number): string {
   const stem = name.replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 64) || `machine-notifier-${id}`
-  const filename = `${stem}.age`
+  return `${stem}.age`
+}
+
+function downloadMachineNotifierCredential(ready: { filename: string; ciphertext: Uint8Array }) {
+  const { filename, ciphertext } = ready
   const credentialBytes = new Uint8Array(ciphertext.length)
   credentialBytes.set(ciphertext)
   const blob = new Blob([credentialBytes.buffer], { type: 'application/octet-stream' })
@@ -480,9 +485,16 @@ function downloadMachineNotifierCredential(name: string, id: number, ciphertext:
   const link = document.createElement('a')
   link.href = url
   link.download = filename
-  link.click()
-  URL.revokeObjectURL(url)
-  return filename
+  link.hidden = true
+  document.body.appendChild(link)
+  try {
+    link.click()
+  } finally {
+    window.setTimeout(() => {
+      link.remove()
+      URL.revokeObjectURL(url)
+    }, 1000)
+  }
 }
 
 async function createMachineNotifier() {
@@ -519,15 +531,24 @@ async function createMachineNotifier() {
   try {
     const raw = await api.post<unknown>('/auth/machine-notifiers', payload)
     const { enrollment, ciphertext } = parseMachineNotifierEnrollment(raw, { name, ...binding, expires_at: expiresAt })
-    const filename = downloadMachineNotifierCredential(enrollment.name, enrollment.id, ciphertext)
+    const ready = {
+      filename: machineNotifierFilename(enrollment.name, enrollment.id),
+      ciphertext: Uint8Array.from(ciphertext),
+    }
+    machineNotifierDownload.value = ready
     apiKeys.value.unshift({
       id: enrollment.id, name: enrollment.name, key_prefix: enrollment.key_prefix,
       created_at: new Date().toISOString().slice(0, 19).replace('T', ' '), last_used_at: null,
       scopes: [], credential_kind: 'machine_notifier',
     })
-    machineNotifierOK.value = `Encrypted credential downloaded as ${filename}.`
+    machineNotifierOK.value = `Encrypted credential ready as ${ready.filename}. Download started.`
     machineNotifierForm.value.name = ''
     machineNotifierForm.value.age_recipients = ''
+    try {
+      downloadMachineNotifierCredential(ready)
+    } catch {
+      machineNotifierOK.value = `Encrypted credential ready as ${ready.filename}. Use the download button to try again.`
+    }
   } catch (e: unknown) {
     machineNotifierError.value = errMsg(e, 'Failed to create a valid encrypted notifier credential.')
   } finally {
@@ -981,6 +1002,7 @@ init()
       <div v-if="machineNotifierOK" class="ok-banner" role="status">{{ machineNotifierOK }}</div>
       <div class="form-actions">
         <button type="submit" class="btn btn-primary btn-sm" :disabled="machineNotifierCreating">{{ machineNotifierCreating ? 'Creating encrypted credential…' : 'Create and download encrypted credential' }}</button>
+        <button v-if="machineNotifierDownload" type="button" class="btn btn-ghost btn-sm" @click="downloadMachineNotifierCredential(machineNotifierDownload)">Download encrypted credential again</button>
       </div>
     </form>
   </div>

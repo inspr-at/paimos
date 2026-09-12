@@ -254,6 +254,7 @@ describe('SettingsAccountTab machine notifier enrollment (PAI-1021)', () => {
   })
 
   it('submits the exact binding and downloads only validated age ciphertext', async () => {
+    vi.useFakeTimers()
     authState.isAdmin = true
     apiPost.mockResolvedValueOnce(encryptedEnrollment())
     const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
@@ -279,12 +280,30 @@ describe('SettingsAccountTab machine notifier enrollment (PAI-1021)', () => {
     const blob = vi.mocked(URL.createObjectURL).mock.calls[0]![0] as Blob
     expect(await blob.text()).toBe('age-encryption.org/v1\nencrypted credential bytes')
     expect(click).toHaveBeenCalledOnce()
-    expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:notifier-age')
-    expect(el.textContent).toContain('Encrypted credential downloaded as gateway-notifier.age.')
+    expect(URL.revokeObjectURL).not.toHaveBeenCalled()
+    expect(document.querySelector('a[download="gateway-notifier.age"]')).not.toBeNull()
+    expect(el.textContent).toContain('Encrypted credential ready as gateway-notifier.age. Download started.')
     expect(el.textContent).toContain('Machine notifier')
     expect(el.textContent).toContain('fixed notifier route')
     expect(el.textContent).not.toContain(encryptedEnrollment().key_age_base64)
     expect(el.querySelector('.apikey-reveal')).toBeNull()
+
+    const retry = [...el.querySelectorAll<HTMLButtonElement>('button')].find(
+      button => button.textContent?.trim() === 'Download encrypted credential again',
+    )!
+    retry.click()
+    await nextTick()
+    expect(apiPost).toHaveBeenCalledTimes(1)
+    expect(URL.createObjectURL).toHaveBeenCalledTimes(2)
+    const retryBlob = vi.mocked(URL.createObjectURL).mock.calls[1]![0] as Blob
+    expect(await retryBlob.text()).toBe(await blob.text())
+    expect(click).toHaveBeenCalledTimes(2)
+    expect(document.querySelectorAll('a[download="gateway-notifier.age"]')).toHaveLength(2)
+
+    vi.runOnlyPendingTimers()
+    expect(URL.revokeObjectURL).toHaveBeenCalledTimes(2)
+    expect(document.querySelector('a[download="gateway-notifier.age"]')).toBeNull()
+    vi.useRealTimers()
   })
 
   it('rejects plaintext or mismatched responses without creating a download surface', async () => {
