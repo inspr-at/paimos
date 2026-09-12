@@ -505,6 +505,9 @@ func mountAPI(r chi.Router) {
 		r.Get("/auth/api-keys", handlers.ListAPIKeys)
 		r.Post("/auth/api-keys", handlers.CreateAPIKey)
 		r.Delete("/auth/api-keys/{id}", handlers.DeleteAPIKey)
+		r.With(auth.RequireAdmin).Post("/auth/machine-notifiers", handlers.CreateMachineNotifier)
+		r.Post("/machine-notifier/messages", handlers.SendMachineNotifierMessage)
+		r.Get("/machine-notifier/messages/{messageID}/receipt", handlers.GetMachineNotifierReceipt)
 
 		// PAI-331 — auto-watch sync subscriptions (per-user,
 		// per-(device, project) toggle). The browser UI hits these;

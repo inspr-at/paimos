@@ -60,13 +60,13 @@ func resolveAPIKeyPrincipalAt(rawKey string, now time.Time) (*models.User, Princ
 	hash := hex.EncodeToString(sum[:])
 
 	var keyID int64
-	var scopesCSV string
+	var scopesCSV, credentialKind string
 	var disabledAt, expiresAt, lastUsedAt sql.NullString
 	u := &models.User{}
 	// Scan order: key id + scopes column + the user-cols list.
-	dests := append([]any{&keyID, &scopesCSV, &disabledAt, &expiresAt, &lastUsedAt}, userScanDests(u)...)
+	dests := append([]any{&keyID, &scopesCSV, &credentialKind, &disabledAt, &expiresAt, &lastUsedAt}, userScanDests(u)...)
 	err := db.DB.QueryRow(`
-		SELECT ak.id,ak.scopes,ak.disabled_at,ak.expires_at,ak.last_used_at,`+userSelectCols+`
+		SELECT ak.id,ak.scopes,ak.credential_kind,ak.disabled_at,ak.expires_at,ak.last_used_at,`+userSelectCols+`
 		FROM api_keys ak JOIN users u ON u.id = ak.user_id
 		WHERE ak.key_hash = ?
 	`, hash).Scan(dests...)
@@ -90,7 +90,7 @@ func resolveAPIKeyPrincipalAt(rawKey string, now time.Time) (*models.User, Princ
 		stampAPIKeyUsage(keyID)
 	}
 
-	principal, err := principalForAPIKey(keyID, u.ID, ParseScopes(scopesCSV))
+	principal, err := principalForAPIKey(credentialKind, keyID, u.ID, ParseScopes(scopesCSV))
 	if err != nil {
 		return nil, Principal{}, fmt.Errorf("invalid api key")
 	}

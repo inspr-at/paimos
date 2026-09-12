@@ -13961,6 +13961,53 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 	// M194 / PAI-1015: preserve the Aithema baseline revision in the immutable
 	// batch snapshot; recover historical values only from seal-proven snapshots.
 	migrations = append(migrations, migration{version: 194})
+	// M195 / PAI-1018: one narrowly bound machine-notifier credential. The
+	// credential remains an API key for hashing, expiry, usage accounting, and
+	// revocation, while its kind and immutable binding prevent it from inheriting
+	// the owning administrator's ordinary routes.
+	migrations = append(migrations, migration{version: 195, steps: []string{
+		`ALTER TABLE api_keys ADD COLUMN credential_kind TEXT NOT NULL DEFAULT 'general'
+		 CHECK(credential_kind IN ('general','machine_notifier'))`,
+		`CREATE TRIGGER trg_api_keys_credential_kind_immutable BEFORE UPDATE OF credential_kind ON api_keys
+		 BEGIN SELECT RAISE(ABORT,'api key credential kind is immutable'); END`,
+		`CREATE TABLE machine_notifier_bindings (
+		 api_key_id       INTEGER PRIMARY KEY REFERENCES api_keys(id),
+		 instance         TEXT NOT NULL CHECK(length(CAST(instance AS BLOB)) BETWEEN 1 AND 64),
+		 project_id       INTEGER NOT NULL REFERENCES projects(id),
+		 sender_agent_id  INTEGER NOT NULL REFERENCES project_agents(id),
+		 receiver_agent_id INTEGER NOT NULL REFERENCES project_agents(id),
+		 address          TEXT NOT NULL CHECK(length(CAST(address AS BLOB)) BETWEEN 3 AND 129),
+		 target_id        TEXT NOT NULL REFERENCES agent_message_targets(id),
+		 target_version   INTEGER NOT NULL CHECK(target_version>0),
+		 created_at       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+		 CHECK(sender_agent_id<>receiver_agent_id)
+		)`,
+		`CREATE INDEX idx_machine_notifier_project ON machine_notifier_bindings(project_id,api_key_id)`,
+		`CREATE TRIGGER trg_machine_notifier_binding_guard BEFORE INSERT ON machine_notifier_bindings
+		 WHEN NOT EXISTS(
+		  SELECT 1 FROM api_keys ak JOIN users u ON u.id=ak.user_id
+		  JOIN projects p ON p.id=NEW.project_id
+		  JOIN project_agents sender ON sender.id=NEW.sender_agent_id AND sender.project_id=NEW.project_id
+		  JOIN project_agents receiver ON receiver.id=NEW.receiver_agent_id AND receiver.project_id=NEW.project_id
+		  JOIN agent_message_allowlist allow ON allow.sender_agent_id=sender.id AND allow.receiver_agent_id=receiver.id
+		  JOIN agent_message_targets target ON target.id=NEW.target_id
+		  WHERE ak.id=NEW.api_key_id AND ak.credential_kind='machine_notifier' AND ak.disabled_at IS NULL
+		   AND (ak.expires_at IS NULL OR datetime(ak.expires_at)>datetime('now')) AND u.status='active' AND p.status='active'
+		   AND target.instance=NEW.instance AND target.project_id=NEW.project_id AND target.address=NEW.address
+		   AND target.version=NEW.target_version AND target.role='primary' AND target.enabled=1
+		   AND target.target_kind='https_webhook' AND target.maximum_level='simple'
+		 ) BEGIN SELECT RAISE(ABORT,'invalid machine notifier binding'); END`,
+		`CREATE TRIGGER trg_machine_notifier_binding_no_update BEFORE UPDATE ON machine_notifier_bindings
+		 BEGIN SELECT RAISE(ABORT,'machine notifier binding is immutable'); END`,
+		`ALTER TABLE agent_messages ADD COLUMN machine_notifier_api_key_id INTEGER REFERENCES api_keys(id)`,
+		`CREATE INDEX idx_agent_messages_machine_notifier
+		 ON agent_messages(machine_notifier_api_key_id,message_id) WHERE machine_notifier_api_key_id IS NOT NULL`,
+		`CREATE TRIGGER trg_machine_notifier_no_target_recovery
+		 BEFORE INSERT ON agent_message_delivery_recoveries
+		 WHEN EXISTS(SELECT 1 FROM agent_message_deliveries d JOIN agent_messages m ON m.id=d.message_row_id
+		             WHERE d.delivery_id=NEW.delivery_id AND m.machine_notifier_api_key_id IS NOT NULL)
+		 BEGIN SELECT RAISE(ABORT,'machine notifier delivery target is immutable'); END`,
+	}})
 
 	for _, m := range migrations {
 		if m.version > maxVersion {
@@ -14096,6 +14143,7 @@ func migrationUsesForeignKeyPragma(m migration) bool {
 // (zero cost for already-upgraded instances) on the same pinned connection.
 var migrationPreconditions = map[int]func(context.Context, *sql.Conn) error{
 	194: checkM194SchemaIsUnapplied,
+	195: checkM195SchemaIsUnapplied,
 	// PAI-576: migration 113 adds a UNIQUE index on (project_id, issue_number).
 	113: checkNoDuplicateIssueNumbers,
 	// PAI-799/801: M142's original SQLite length() checks counted Unicode

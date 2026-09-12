@@ -138,8 +138,8 @@ func CreateAPIKey(w http.ResponseWriter, r *http.Request) {
 
 	var id int64
 	res, err := db.DB.Exec(`
-		INSERT INTO api_keys(user_id, name, key_hash, key_prefix, scopes)
-		VALUES (?, ?, ?, ?, ?)
+		INSERT INTO api_keys(user_id, name, key_hash, key_prefix, scopes, credential_kind)
+		VALUES (?, ?, ?, ?, ?, 'general')
 	`, user.ID, body.Name, hash, prefix, scopesCSV)
 	if err != nil {
 		jsonError(w, "insert failed", http.StatusInternalServerError)
@@ -172,7 +172,23 @@ func DeleteAPIKey(w http.ResponseWriter, r *http.Request) {
 	// Only delete own keys (admins may delete any)
 	var query string
 	var args []any
-	if auth.IsAdmin(user) {
+	var credentialKind string
+	var ownerID int64
+	if err := db.DB.QueryRow(`SELECT credential_kind,user_id FROM api_keys WHERE id=?`, id).Scan(&credentialKind, &ownerID); err != nil {
+		jsonError(w, "key not found", http.StatusNotFound)
+		return
+	}
+	if ownerID != user.ID && !auth.IsAdmin(user) {
+		jsonError(w, "key not found", http.StatusNotFound)
+		return
+	}
+	if credentialKind == "machine_notifier" {
+		query = "UPDATE api_keys SET disabled_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=? AND disabled_at IS NULL"
+		args = []any{id}
+	} else if credentialKind != "general" {
+		jsonError(w, "key not found", http.StatusNotFound)
+		return
+	} else if auth.IsAdmin(user) {
 		query = "DELETE FROM api_keys WHERE id = ?"
 		args = []any{id}
 	} else {
@@ -189,6 +205,10 @@ func DeleteAPIKey(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, "key not found", http.StatusNotFound)
 		return
 	}
-	log.Printf("audit: api_key_deleted username=%q key_id=%d", user.Username, id)
+	if credentialKind == "machine_notifier" {
+		log.Printf("audit: machine_notifier_revoked username=%q key_id=%d", user.Username, id)
+	} else {
+		log.Printf("audit: api_key_deleted username=%q key_id=%d", user.Username, id)
+	}
 	w.WriteHeader(http.StatusNoContent)
 }

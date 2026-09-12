@@ -215,6 +215,10 @@ func Middleware(next http.Handler) http.Handler {
 				http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
 				return
 			}
+			if principal.Kind() == PrincipalMachineNotifier && !machineNotifierRouteAllowed(r) {
+				http.Error(w, `{"error":"forbidden"}`, http.StatusForbidden)
+				return
+			}
 			// PAI-320: API-key callers also get the epoch so any
 			// frontend that talks via a key picks up role / membership
 			// changes on the next request.
@@ -346,6 +350,22 @@ func Middleware(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, req)
 	})
+}
+
+func machineNotifierRouteAllowed(r *http.Request) bool {
+	if r == nil {
+		return false
+	}
+	const messages = "/api/machine-notifier/messages"
+	if r.Method == http.MethodPost && r.URL.Path == messages {
+		return true
+	}
+	if r.Method != http.MethodGet || !strings.HasPrefix(r.URL.Path, messages+"/") {
+		return false
+	}
+	rest := strings.TrimPrefix(r.URL.Path, messages+"/")
+	parts := strings.Split(rest, "/")
+	return len(parts) == 2 && parts[0] != "" && parts[1] == "receipt"
 }
 
 // clearSessionCookie writes a Set-Cookie that immediately expires the
