@@ -607,6 +607,11 @@ func TestM148DirectHandoffMutationsRequireCausalFacts(t *testing.T) {
 		SET lifecycle_state='active',last_sequence=2 WHERE id=?`, fixture.handoffRowID); err == nil {
 		t.Fatal("lifecycle advance without report/audit/latest unexpectedly succeeded")
 	}
+	if _, err := fixture.database.Exec(`UPDATE external_stage_handoffs
+		SET lifecycle_state='succeeded',last_sequence=2,terminal_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
+		WHERE id=?`, fixture.handoffRowID); err == nil {
+		t.Fatal("direct terminal advance without report/audit/latest unexpectedly succeeded")
+	}
 }
 
 func TestM148ReportEvidenceAuditAndLatestDirectWriteGuards(t *testing.T) {

@@ -1751,6 +1751,237 @@ func registerRequiredServiceDependency(t *testing.T, f *serviceFixture, dependen
 	return registration
 }
 
+func TestServiceCanonicalDirectTerminalReports(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		evidence func(string) *JanusEvidence
+	}{
+		{name: "authorization", evidence: func(observedAt string) *JanusEvidence {
+			authorized := true
+			return &JanusEvidence{Kind: EvidenceKindAuthorization, Result: EvidenceResultSatisfied,
+				Authorized: &authorized, ObservedAt: observedAt}
+		}},
+		{name: "credential handoff", evidence: func(observedAt string) *JanusEvidence {
+			ready := true
+			return &JanusEvidence{Kind: EvidenceKindCredentialHandoff, Result: EvidenceResultSatisfied,
+				CredentialReady: &ready, ObservedAt: observedAt}
+		}},
+	} {
+		t.Run("Janus "+test.name, func(t *testing.T) {
+			f := setupServiceFixture(t)
+			registration := registerRequiredServiceDependency(t, f, "runtime.admission", strings.ReplaceAll(test.name, " ", "-"))
+			handoff, secret := createAcceptedServiceHandoff(t, f, registration.RegistrationID, f.reporter,
+				"direct-"+strings.ReplaceAll(test.name, " ", "-"), f.now.Add(time.Hour))
+			f.now = f.now.Add(time.Second)
+			observedAt := f.now.Format(time.RFC3339Nano)
+			request := ReportRequest{Sequence: 2, State: HandoffStateSucceeded, ObservedAt: observedAt,
+				JanusEvidence: test.evidence(observedAt)}
+
+			receipt, err := f.service.Report(t.Context(), f.reporter, handoff.HandoffID,
+				"direct-"+strings.ReplaceAll(test.name, " ", "-"), secret, request)
+			if err != nil || receipt.Duplicate || receipt.Sequence != 2 || receipt.State != HandoffStateSucceeded {
+				t.Fatalf("direct terminal receipt=%+v err=%v", receipt, err)
+			}
+			replay, err := f.service.Report(t.Context(), f.reporter, handoff.HandoffID,
+				"direct-"+strings.ReplaceAll(test.name, " ", "-"), secret, request)
+			if err != nil || !replay.Duplicate || replay.ServerReceivedAt != receipt.ServerReceivedAt {
+				t.Fatalf("direct terminal replay=%+v err=%v", replay, err)
+			}
+
+			var handoffState, dependencyState string
+			var handoffSequence, dependencySequence, canonicalReports, reports, audits, evidence int64
+			if err := f.database.QueryRow(`SELECT lifecycle_state,last_sequence FROM external_stage_handoffs
+				WHERE handoff_id=?`, handoff.HandoffID).Scan(&handoffState, &handoffSequence); err != nil {
+				t.Fatal(err)
+			}
+			if err := f.database.QueryRow(`SELECT lifecycle_state,sequence FROM external_stage_dependency_latest
+				WHERE attempt_id=? AND stage_key='deployment' AND dependency_key='runtime.admission'`, f.attemptID).
+				Scan(&dependencyState, &dependencySequence); err != nil {
+				t.Fatal(err)
+			}
+			if err := f.database.QueryRow(`SELECT COUNT(*) FROM delivery_stage_events
+				WHERE attempt_id=? AND stage_key='deployment' AND event_type='semantic_report'`, f.attemptID).
+				Scan(&canonicalReports); err != nil {
+				t.Fatal(err)
+			}
+			if err := f.database.QueryRow(`SELECT
+				(SELECT COUNT(*) FROM external_stage_report_events WHERE handoff_row_id=handoff.id),
+				(SELECT COUNT(*) FROM external_stage_audit_events audit JOIN external_stage_report_events report
+				 ON report.id=audit.report_event_id WHERE report.handoff_row_id=handoff.id AND audit.event_kind='reported'),
+				(SELECT COUNT(*) FROM external_stage_janus_evidence evidence JOIN external_stage_report_events report
+				 ON report.id=evidence.report_event_id WHERE report.handoff_row_id=handoff.id)
+				FROM external_stage_handoffs handoff WHERE handoff.handoff_id=?`, handoff.HandoffID).
+				Scan(&reports, &audits, &evidence); err != nil {
+				t.Fatal(err)
+			}
+			if handoffState != "succeeded" || handoffSequence != 2 || dependencyState != "succeeded" ||
+				dependencySequence != 2 || canonicalReports != 0 || reports != 1 || audits != 1 || evidence != 1 {
+				t.Fatalf("direct terminal state handoff=%s/%d dependency=%s/%d canonical_reports=%d facts=%d/%d/%d",
+					handoffState, handoffSequence, dependencyState, dependencySequence, canonicalReports, reports, audits, evidence)
+			}
+		})
+	}
+
+	t.Run("Pharos deployment", func(t *testing.T) {
+		f := setupServiceFixture(t)
+		f.sealEmpty(t)
+		handoff, secret := createAcceptedServiceHandoff(t, f, f.registrationID, f.reporter,
+			"direct-pharos", f.now.Add(time.Hour))
+		f.now = f.now.Add(time.Second)
+		observedAt := f.now.Format(time.RFC3339Nano)
+		request := ReportRequest{Sequence: 2, State: HandoffStateSucceeded, ObservedAt: observedAt,
+			PharosEvidence: &PharosEvidence{Kind: EvidenceKindDeployment, Workflow: "deploy-production", Environment: "production",
+				Artifact: ArtifactEvidence{Version: "v5.11.0", Digest: "sha256:" + fmt.Sprintf("%064x", 5110),
+					CommitDigest: fmt.Sprintf("%040x", 5110)}, Result: EvidenceResultSucceeded, ObservedAt: observedAt}}
+
+		receipt, err := f.service.Report(t.Context(), f.reporter, handoff.HandoffID, "direct-pharos", secret, request)
+		if err != nil || receipt.Duplicate || receipt.Sequence != 2 || receipt.State != HandoffStateSucceeded {
+			t.Fatalf("direct terminal receipt=%+v err=%v", receipt, err)
+		}
+		replay, err := f.service.Report(t.Context(), f.reporter, handoff.HandoffID, "direct-pharos", secret, request)
+		if err != nil || !replay.Duplicate || replay.ServerReceivedAt != receipt.ServerReceivedAt {
+			t.Fatalf("direct terminal replay=%+v err=%v", replay, err)
+		}
+		var handoffState, ownerState, canonicalState string
+		var handoffSequence, ownerSequence int64
+		if err := f.database.QueryRow(`SELECT lifecycle_state,last_sequence FROM external_stage_handoffs
+			WHERE handoff_id=?`, handoff.HandoffID).Scan(&handoffState, &handoffSequence); err != nil {
+			t.Fatal(err)
+		}
+		if err := f.database.QueryRow(`SELECT lifecycle_state,sequence FROM external_stage_owner_latest
+			WHERE attempt_id=? AND stage_key='deployment'`, f.attemptID).Scan(&ownerState, &ownerSequence); err != nil {
+			t.Fatal(err)
+		}
+		if err := f.database.QueryRow(`SELECT event.semantic_state FROM delivery_stage_latest latest
+			JOIN delivery_stage_events event ON event.id=latest.semantic_stage_event_id
+			WHERE latest.attempt_id=? AND latest.stage_key='deployment'`, f.attemptID).Scan(&canonicalState); err != nil {
+			t.Fatal(err)
+		}
+		if handoffState != "succeeded" || handoffSequence != 2 || ownerState != "succeeded" ||
+			ownerSequence != 2 || canonicalState != "succeeded" {
+			t.Fatalf("direct terminal state handoff=%s/%d owner=%s/%d canonical=%s",
+				handoffState, handoffSequence, ownerState, ownerSequence, canonicalState)
+		}
+		var deploymentEvidenceReceivedAt string
+		if err := f.database.QueryRow(`SELECT evidence.server_received_at
+			FROM external_stage_pharos_evidence evidence
+			JOIN external_stage_report_events report ON report.id=evidence.report_event_id
+			JOIN external_stage_handoffs handoff ON handoff.id=report.handoff_row_id
+			WHERE handoff.handoff_id=? AND evidence.evidence_kind='deployment'`, handoff.HandoffID).
+			Scan(&deploymentEvidenceReceivedAt); err != nil {
+			t.Fatal(err)
+		}
+
+		activation, err := f.service.ActivateOwner(t.Context(), f.operator, f.deliveryKey, "direct-verification-activation",
+			ActivateOwnerRequest{ReporterRegistrationID: f.registrationID, StageKey: "verification",
+				ExpectedAttemptNumber: 1, ExpectedPlanRevision: 1, ExpectedCurrentExecution: 0,
+				ExpectedCurrentAuthorityEpoch: 0})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.service.SealPrerequisites(t.Context(), f.operator, f.deliveryKey, "direct-verification-seal",
+			SealPrerequisitesRequest{StageKey: "verification", ExecutionNumber: activation.ExecutionNumber,
+				ExpectedPlanRevision: activation.PlanRevision, ExpectedAuthorityEpoch: activation.AuthorityEpoch,
+				Prerequisites: []Prerequisite{}}); err != nil {
+			t.Fatal(err)
+		}
+		verification, err := f.service.CreateHandoff(t.Context(), f.operator, f.deliveryKey, "direct-verification-create",
+			CreateHandoffRequest{StageKey: "verification", ExecutionNumber: activation.ExecutionNumber,
+				ExpectedPlanRevision: activation.PlanRevision, ExpectedAuthorityEpoch: activation.AuthorityEpoch,
+				ReporterRegistrationID: f.registrationID, ExpiresAt: f.now.Add(time.Hour).Format(time.RFC3339Nano)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		verificationSecret, err := f.service.Mint(t.Context(), f.operator, verification.HandoffID, 0, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		f.now = f.now.Add(time.Second)
+		verificationObservedAt := f.now.Format(time.RFC3339Nano)
+		if _, err := f.service.Accept(t.Context(), f.reporter, verification.HandoffID, "direct-verification-accept",
+			verificationSecret, AcceptRequest{Sequence: 1, ObservedAt: verificationObservedAt}); err != nil {
+			t.Fatal(err)
+		}
+		verificationRequest := ReportRequest{Sequence: 2, State: HandoffStateSucceeded, ObservedAt: verificationObservedAt,
+			PharosEvidence: &PharosEvidence{Kind: EvidenceKindVerification, Workflow: "deploy-production", Environment: "production",
+				Artifact: request.PharosEvidence.Artifact, Result: EvidenceResultSucceeded, ObservedAt: verificationObservedAt}}
+		verificationReceipt, err := f.service.Report(t.Context(), f.reporter, verification.HandoffID,
+			"direct-verification", verificationSecret, verificationRequest)
+		if err != nil || verificationReceipt.Duplicate || verificationReceipt.Sequence != 2 ||
+			verificationReceipt.State != HandoffStateSucceeded {
+			t.Fatalf("direct verification receipt=%+v err=%v", verificationReceipt, err)
+		}
+		verificationReplay, err := f.service.Report(t.Context(), f.reporter, verification.HandoffID,
+			"direct-verification", verificationSecret, verificationRequest)
+		if err != nil || !verificationReplay.Duplicate || verificationReplay.ServerReceivedAt != verificationReceipt.ServerReceivedAt {
+			t.Fatalf("direct verification replay=%+v err=%v", verificationReplay, err)
+		}
+		if err := f.database.QueryRow(`SELECT owner.lifecycle_state,owner.sequence,event.semantic_state
+			FROM external_stage_owner_latest owner
+			JOIN delivery_stage_latest latest ON latest.attempt_id=owner.attempt_id AND latest.stage_key=owner.stage_key
+			JOIN delivery_stage_events event ON event.id=latest.semantic_stage_event_id
+			WHERE owner.attempt_id=? AND owner.stage_key='verification'`, f.attemptID).
+			Scan(&ownerState, &ownerSequence, &canonicalState); err != nil {
+			t.Fatal(err)
+		}
+		var verificationHandoffState, verificationTerminalAt string
+		var verificationHandoffSequence int64
+		if err := f.database.QueryRow(`SELECT lifecycle_state,last_sequence,terminal_at
+			FROM external_stage_handoffs WHERE handoff_id=?`, verification.HandoffID).
+			Scan(&verificationHandoffState, &verificationHandoffSequence, &verificationTerminalAt); err != nil {
+			t.Fatal(err)
+		}
+		var evidenceKind, evidenceWorkflow, evidenceEnvironment, evidenceVersion, evidenceCommit string
+		var evidenceResult, evidenceObservedAt, evidenceReceivedAt string
+		var evidenceDigest []byte
+		if err := f.database.QueryRow(`SELECT evidence.evidence_kind,evidence.workflow_symbol,evidence.environment_symbol,
+			evidence.artifact_version,evidence.artifact_digest,evidence.commit_digest,evidence.result,
+			evidence.observed_at,evidence.server_received_at
+			FROM external_stage_pharos_evidence evidence
+			JOIN external_stage_report_events report ON report.id=evidence.report_event_id
+			JOIN external_stage_handoffs handoff ON handoff.id=report.handoff_row_id
+			WHERE handoff.handoff_id=? AND evidence.evidence_kind='verification'`, verification.HandoffID).
+			Scan(&evidenceKind, &evidenceWorkflow, &evidenceEnvironment, &evidenceVersion, &evidenceDigest,
+				&evidenceCommit, &evidenceResult, &evidenceObservedAt, &evidenceReceivedAt); err != nil {
+			t.Fatal(err)
+		}
+		if ownerState != "succeeded" || ownerSequence != 2 || canonicalState != "succeeded" ||
+			verificationHandoffState != "succeeded" || verificationHandoffSequence != 2 ||
+			verificationTerminalAt != verificationReceipt.ServerReceivedAt {
+			t.Fatalf("direct verification state owner=%s/%d canonical=%s handoff=%s/%d terminal=%s receipt=%s",
+				ownerState, ownerSequence, canonicalState, verificationHandoffState, verificationHandoffSequence,
+				verificationTerminalAt, verificationReceipt.ServerReceivedAt)
+		}
+		if evidenceKind != string(verificationRequest.PharosEvidence.Kind) ||
+			evidenceWorkflow != verificationRequest.PharosEvidence.Workflow ||
+			evidenceEnvironment != verificationRequest.PharosEvidence.Environment ||
+			evidenceVersion != verificationRequest.PharosEvidence.Artifact.Version ||
+			"sha256:"+hex.EncodeToString(evidenceDigest) != verificationRequest.PharosEvidence.Artifact.Digest ||
+			evidenceCommit != verificationRequest.PharosEvidence.Artifact.CommitDigest ||
+			evidenceResult != string(verificationRequest.PharosEvidence.Result) ||
+			evidenceObservedAt != verificationRequest.PharosEvidence.ObservedAt ||
+			evidenceReceivedAt != verificationReceipt.ServerReceivedAt {
+			t.Fatalf("persisted verification evidence differs from accepted report")
+		}
+		deploymentReceived, err := time.Parse(time.RFC3339Nano, deploymentEvidenceReceivedAt)
+		if err != nil {
+			t.Fatal(err)
+		}
+		verificationObserved, err := time.Parse(time.RFC3339Nano, evidenceObservedAt)
+		if err != nil {
+			t.Fatal(err)
+		}
+		verificationReceived, err := time.Parse(time.RFC3339Nano, evidenceReceivedAt)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !verificationObserved.After(deploymentReceived) || !verificationReceived.After(deploymentReceived) {
+			t.Fatalf("verification evidence is not fresh after deployment receipt: deployment=%s observed=%s received=%s",
+				deploymentEvidenceReceivedAt, evidenceObservedAt, evidenceReceivedAt)
+		}
+	})
+}
+
 func TestInternalAPIKeyOperatorLifecycleAndReplayAuditsExactPrincipal(t *testing.T) {
 	f := setupServiceFixture(t)
 	f.sealEmpty(t)

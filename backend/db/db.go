@@ -14009,6 +14009,69 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 		 BEGIN SELECT RAISE(ABORT,'machine notifier delivery target is immutable'); END`,
 	}})
 
+	// M196 / PAI-1022: align the durable handoff guard with the frozen v1
+	// fixtures. A reporter may accept a handoff and immediately commit its
+	// already-observed terminal evidence; all report, audit, latest-projection,
+	// sequence, epoch, and timestamp causal checks remain mandatory.
+	migrations = append(migrations, migration{version: 196, steps: []string{
+		`DROP TRIGGER trg_external_stage_handoff_causal_update_guard`,
+		`CREATE TRIGGER trg_external_stage_handoff_causal_update_guard
+			 BEFORE UPDATE ON external_stage_handoffs
+			 WHEN NOT (
+			  (NEW.credential_epoch=OLD.credential_epoch+1 AND NEW.secret_digest IS NOT OLD.secret_digest AND
+			   NEW.lifecycle_state=OLD.lifecycle_state AND NEW.last_sequence=OLD.last_sequence AND
+			   NEW.accepted_at IS OLD.accepted_at AND NEW.terminal_at IS OLD.terminal_at AND NEW.revoked_at IS OLD.revoked_at AND
+			   EXISTS(SELECT 1 FROM external_stage_operation_events operation
+			    JOIN external_stage_audit_events audit ON audit.operation_event_id=operation.id
+			    WHERE operation.handoff_row_id=OLD.id AND operation.credential_epoch=NEW.credential_epoch
+			     AND operation.operation_kind=CASE WHEN OLD.credential_epoch=0 THEN 'secret_minted' ELSE 'secret_rotated' END
+			     AND audit.event_kind=CASE WHEN OLD.credential_epoch=0 THEN 'secret_minted' ELSE 'secret_rotated' END
+			     AND audit.credential_epoch=NEW.credential_epoch AND audit.outcome='committed')) OR
+			  (NEW.credential_epoch=OLD.credential_epoch AND NEW.secret_digest IS OLD.secret_digest AND
+			   NEW.lifecycle_state=OLD.lifecycle_state AND NEW.last_sequence=OLD.last_sequence AND
+			   NEW.accepted_at IS OLD.accepted_at AND NEW.terminal_at IS OLD.terminal_at AND OLD.revoked_at IS NULL AND
+			   EXISTS(SELECT 1 FROM external_stage_operation_events operation
+			    JOIN external_stage_audit_events audit ON audit.operation_event_id=operation.id
+			    WHERE operation.handoff_row_id=OLD.id AND operation.operation_kind='revoked'
+			     AND operation.credential_epoch=OLD.credential_epoch AND NEW.revoked_at=operation.server_received_at
+			     AND audit.event_kind='revoked' AND audit.credential_epoch=OLD.credential_epoch AND audit.outcome='committed')) OR
+			  (NEW.credential_epoch=OLD.credential_epoch AND NEW.secret_digest IS OLD.secret_digest AND
+			   OLD.lifecycle_state='issued' AND NEW.lifecycle_state='accepted' AND NEW.last_sequence=OLD.last_sequence+1 AND
+			   OLD.accepted_at IS NULL AND NEW.terminal_at IS NULL AND OLD.revoked_at IS NULL AND NEW.revoked_at IS NULL AND
+			   EXISTS(SELECT 1 FROM external_stage_operation_events operation
+			    JOIN external_stage_audit_events audit ON audit.operation_event_id=operation.id
+			    WHERE operation.handoff_row_id=OLD.id AND operation.operation_kind='accepted'
+			     AND operation.sequence=NEW.last_sequence AND operation.credential_epoch=OLD.credential_epoch
+			     AND NEW.accepted_at=operation.server_received_at AND audit.event_kind='accepted'
+			     AND audit.sequence=NEW.last_sequence AND audit.outcome='committed')) OR
+			  (NEW.credential_epoch=OLD.credential_epoch AND NEW.secret_digest IS OLD.secret_digest AND
+			   NEW.lifecycle_state=OLD.lifecycle_state AND NEW.last_sequence=OLD.last_sequence+1 AND
+			   NEW.accepted_at IS OLD.accepted_at AND NEW.terminal_at IS OLD.terminal_at AND NEW.revoked_at IS OLD.revoked_at AND
+			   EXISTS(SELECT 1 FROM external_stage_heartbeat_windows window
+			    WHERE window.handoff_row_id=OLD.id AND window.credential_epoch=OLD.credential_epoch
+			     AND window.last_sequence=NEW.last_sequence AND window.lifecycle_state=OLD.lifecycle_state)) OR
+			  (NEW.credential_epoch=OLD.credential_epoch AND NEW.secret_digest IS OLD.secret_digest AND
+			   NEW.last_sequence=OLD.last_sequence+1 AND NEW.accepted_at IS OLD.accepted_at AND NEW.revoked_at IS OLD.revoked_at AND
+			   ((OLD.lifecycle_state='accepted' AND NEW.lifecycle_state IN ('active','waiting','blocked','succeeded','failed')) OR
+			    (OLD.lifecycle_state IN ('active','waiting','blocked') AND NEW.lifecycle_state IN ('active','waiting','blocked','succeeded','failed'))) AND
+			   ((NEW.lifecycle_state IN ('succeeded','failed') AND NEW.terminal_at IS NOT NULL) OR
+			    (NEW.lifecycle_state IN ('active','waiting','blocked') AND NEW.terminal_at IS NULL)) AND
+			   EXISTS(SELECT 1 FROM external_stage_report_events report
+			    JOIN external_stage_audit_events audit ON audit.report_event_id=report.id AND audit.event_kind='reported'
+			    WHERE report.handoff_row_id=OLD.id AND report.sequence=NEW.last_sequence
+			     AND report.credential_epoch=OLD.credential_epoch AND report.lifecycle_state=NEW.lifecycle_state
+			     AND ((NEW.lifecycle_state IN ('succeeded','failed') AND NEW.terminal_at=report.server_received_at) OR
+			          (NEW.lifecycle_state IN ('active','waiting','blocked') AND NEW.terminal_at IS NULL))
+			     AND audit.sequence=report.sequence AND audit.credential_epoch=report.credential_epoch AND audit.outcome='committed'
+			     AND ((OLD.reporter_role='owner' AND EXISTS(SELECT 1 FROM external_stage_owner_latest latest
+			          WHERE latest.handoff_row_id=OLD.id AND latest.report_event_id=report.id AND latest.sequence=report.sequence)) OR
+			          (OLD.reporter_role='dependency' AND EXISTS(SELECT 1 FROM external_stage_dependency_latest latest
+			          WHERE latest.handoff_row_id=OLD.id AND latest.report_event_id=report.id AND latest.sequence=report.sequence
+			           AND latest.credential_epoch=OLD.credential_epoch)))) )
+			 )
+			 BEGIN SELECT RAISE(ABORT,'external stage handoff update lacks an exact causal fact'); END`,
+	}})
+
 	for _, m := range migrations {
 		if m.version > maxVersion {
 			continue
