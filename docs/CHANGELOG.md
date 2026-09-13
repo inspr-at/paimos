@@ -9,6 +9,16 @@ Semantic Versioning (`x.y.z`, until 5.21.0), INSPR calendar v1
 (`YYMMDDhhmmss.0.0`, the UTC reservation second as a SemVer-shaped
 coordinate, from the first entry below that form).
 
+## [260913063837.0.0] — 2026-09-13
+
+### Fixed
+
+- Accept valid PNG and other binary raster attachments containing inert SVG or HTML metadata, including C2PA icon previews. Explicit active content types and disguised markup remain rejected (PAI-1019).
+
+### Added
+
+- Export newly enrolled machine-notifier credentials through encrypted enrollment delivery (PAI-1021).
+
 ## [260912203754.0.0] — 2026-09-12
 
 ### Added — Target-bound machine notifier credentials (PAI-1018)
