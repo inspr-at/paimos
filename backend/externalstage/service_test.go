@@ -1862,6 +1862,62 @@ func TestServiceCanonicalDirectTerminalReports(t *testing.T) {
 			t.Fatalf("direct terminal state handoff=%s/%d owner=%s/%d canonical=%s",
 				handoffState, handoffSequence, ownerState, ownerSequence, canonicalState)
 		}
+
+		activation, err := f.service.ActivateOwner(t.Context(), f.operator, f.deliveryKey, "direct-verification-activation",
+			ActivateOwnerRequest{ReporterRegistrationID: f.registrationID, StageKey: "verification",
+				ExpectedAttemptNumber: 1, ExpectedPlanRevision: 1, ExpectedCurrentExecution: 0,
+				ExpectedCurrentAuthorityEpoch: 0})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.service.SealPrerequisites(t.Context(), f.operator, f.deliveryKey, "direct-verification-seal",
+			SealPrerequisitesRequest{StageKey: "verification", ExecutionNumber: activation.ExecutionNumber,
+				ExpectedPlanRevision: activation.PlanRevision, ExpectedAuthorityEpoch: activation.AuthorityEpoch,
+				Prerequisites: []Prerequisite{}}); err != nil {
+			t.Fatal(err)
+		}
+		verification, err := f.service.CreateHandoff(t.Context(), f.operator, f.deliveryKey, "direct-verification-create",
+			CreateHandoffRequest{StageKey: "verification", ExecutionNumber: activation.ExecutionNumber,
+				ExpectedPlanRevision: activation.PlanRevision, ExpectedAuthorityEpoch: activation.AuthorityEpoch,
+				ReporterRegistrationID: f.registrationID, ExpiresAt: f.now.Add(time.Hour).Format(time.RFC3339Nano)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		verificationSecret, err := f.service.Mint(t.Context(), f.operator, verification.HandoffID, 0, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		f.now = f.now.Add(time.Second)
+		verificationObservedAt := f.now.Format(time.RFC3339Nano)
+		if _, err := f.service.Accept(t.Context(), f.reporter, verification.HandoffID, "direct-verification-accept",
+			verificationSecret, AcceptRequest{Sequence: 1, ObservedAt: verificationObservedAt}); err != nil {
+			t.Fatal(err)
+		}
+		verificationRequest := ReportRequest{Sequence: 2, State: HandoffStateSucceeded, ObservedAt: verificationObservedAt,
+			PharosEvidence: &PharosEvidence{Kind: EvidenceKindVerification, Workflow: "deploy-production", Environment: "production",
+				Artifact: request.PharosEvidence.Artifact, Result: EvidenceResultSucceeded, ObservedAt: verificationObservedAt}}
+		verificationReceipt, err := f.service.Report(t.Context(), f.reporter, verification.HandoffID,
+			"direct-verification", verificationSecret, verificationRequest)
+		if err != nil || verificationReceipt.Duplicate || verificationReceipt.Sequence != 2 ||
+			verificationReceipt.State != HandoffStateSucceeded {
+			t.Fatalf("direct verification receipt=%+v err=%v", verificationReceipt, err)
+		}
+		verificationReplay, err := f.service.Report(t.Context(), f.reporter, verification.HandoffID,
+			"direct-verification", verificationSecret, verificationRequest)
+		if err != nil || !verificationReplay.Duplicate || verificationReplay.ServerReceivedAt != verificationReceipt.ServerReceivedAt {
+			t.Fatalf("direct verification replay=%+v err=%v", verificationReplay, err)
+		}
+		if err := f.database.QueryRow(`SELECT owner.lifecycle_state,owner.sequence,event.semantic_state
+			FROM external_stage_owner_latest owner
+			JOIN delivery_stage_latest latest ON latest.attempt_id=owner.attempt_id AND latest.stage_key=owner.stage_key
+			JOIN delivery_stage_events event ON event.id=latest.semantic_stage_event_id
+			WHERE owner.attempt_id=? AND owner.stage_key='verification'`, f.attemptID).
+			Scan(&ownerState, &ownerSequence, &canonicalState); err != nil {
+			t.Fatal(err)
+		}
+		if ownerState != "succeeded" || ownerSequence != 2 || canonicalState != "succeeded" {
+			t.Fatalf("direct verification state owner=%s/%d canonical=%s", ownerState, ownerSequence, canonicalState)
+		}
 	})
 }
 
