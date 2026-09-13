@@ -1862,6 +1862,15 @@ func TestServiceCanonicalDirectTerminalReports(t *testing.T) {
 			t.Fatalf("direct terminal state handoff=%s/%d owner=%s/%d canonical=%s",
 				handoffState, handoffSequence, ownerState, ownerSequence, canonicalState)
 		}
+		var deploymentEvidenceReceivedAt string
+		if err := f.database.QueryRow(`SELECT evidence.server_received_at
+			FROM external_stage_pharos_evidence evidence
+			JOIN external_stage_report_events report ON report.id=evidence.report_event_id
+			JOIN external_stage_handoffs handoff ON handoff.id=report.handoff_row_id
+			WHERE handoff.handoff_id=? AND evidence.evidence_kind='deployment'`, handoff.HandoffID).
+			Scan(&deploymentEvidenceReceivedAt); err != nil {
+			t.Fatal(err)
+		}
 
 		activation, err := f.service.ActivateOwner(t.Context(), f.operator, f.deliveryKey, "direct-verification-activation",
 			ActivateOwnerRequest{ReporterRegistrationID: f.registrationID, StageKey: "verification",
@@ -1915,8 +1924,60 @@ func TestServiceCanonicalDirectTerminalReports(t *testing.T) {
 			Scan(&ownerState, &ownerSequence, &canonicalState); err != nil {
 			t.Fatal(err)
 		}
-		if ownerState != "succeeded" || ownerSequence != 2 || canonicalState != "succeeded" {
-			t.Fatalf("direct verification state owner=%s/%d canonical=%s", ownerState, ownerSequence, canonicalState)
+		var verificationHandoffState, verificationTerminalAt string
+		var verificationHandoffSequence int64
+		if err := f.database.QueryRow(`SELECT lifecycle_state,last_sequence,terminal_at
+			FROM external_stage_handoffs WHERE handoff_id=?`, verification.HandoffID).
+			Scan(&verificationHandoffState, &verificationHandoffSequence, &verificationTerminalAt); err != nil {
+			t.Fatal(err)
+		}
+		var evidenceKind, evidenceWorkflow, evidenceEnvironment, evidenceVersion, evidenceCommit string
+		var evidenceResult, evidenceObservedAt, evidenceReceivedAt string
+		var evidenceDigest []byte
+		if err := f.database.QueryRow(`SELECT evidence.evidence_kind,evidence.workflow_symbol,evidence.environment_symbol,
+			evidence.artifact_version,evidence.artifact_digest,evidence.commit_digest,evidence.result,
+			evidence.observed_at,evidence.server_received_at
+			FROM external_stage_pharos_evidence evidence
+			JOIN external_stage_report_events report ON report.id=evidence.report_event_id
+			JOIN external_stage_handoffs handoff ON handoff.id=report.handoff_row_id
+			WHERE handoff.handoff_id=? AND evidence.evidence_kind='verification'`, verification.HandoffID).
+			Scan(&evidenceKind, &evidenceWorkflow, &evidenceEnvironment, &evidenceVersion, &evidenceDigest,
+				&evidenceCommit, &evidenceResult, &evidenceObservedAt, &evidenceReceivedAt); err != nil {
+			t.Fatal(err)
+		}
+		if ownerState != "succeeded" || ownerSequence != 2 || canonicalState != "succeeded" ||
+			verificationHandoffState != "succeeded" || verificationHandoffSequence != 2 ||
+			verificationTerminalAt != verificationReceipt.ServerReceivedAt {
+			t.Fatalf("direct verification state owner=%s/%d canonical=%s handoff=%s/%d terminal=%s receipt=%s",
+				ownerState, ownerSequence, canonicalState, verificationHandoffState, verificationHandoffSequence,
+				verificationTerminalAt, verificationReceipt.ServerReceivedAt)
+		}
+		if evidenceKind != string(verificationRequest.PharosEvidence.Kind) ||
+			evidenceWorkflow != verificationRequest.PharosEvidence.Workflow ||
+			evidenceEnvironment != verificationRequest.PharosEvidence.Environment ||
+			evidenceVersion != verificationRequest.PharosEvidence.Artifact.Version ||
+			"sha256:"+hex.EncodeToString(evidenceDigest) != verificationRequest.PharosEvidence.Artifact.Digest ||
+			evidenceCommit != verificationRequest.PharosEvidence.Artifact.CommitDigest ||
+			evidenceResult != string(verificationRequest.PharosEvidence.Result) ||
+			evidenceObservedAt != verificationRequest.PharosEvidence.ObservedAt ||
+			evidenceReceivedAt != verificationReceipt.ServerReceivedAt {
+			t.Fatalf("persisted verification evidence differs from accepted report")
+		}
+		deploymentReceived, err := time.Parse(time.RFC3339Nano, deploymentEvidenceReceivedAt)
+		if err != nil {
+			t.Fatal(err)
+		}
+		verificationObserved, err := time.Parse(time.RFC3339Nano, evidenceObservedAt)
+		if err != nil {
+			t.Fatal(err)
+		}
+		verificationReceived, err := time.Parse(time.RFC3339Nano, evidenceReceivedAt)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !verificationObserved.After(deploymentReceived) || !verificationReceived.After(deploymentReceived) {
+			t.Fatalf("verification evidence is not fresh after deployment receipt: deployment=%s observed=%s received=%s",
+				deploymentEvidenceReceivedAt, evidenceObservedAt, evidenceReceivedAt)
 		}
 	})
 }
