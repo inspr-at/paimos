@@ -339,6 +339,13 @@ db_race_plan=$("$RACE_RUNNER" --dry-run --lane=db github.com/inspr-at/paimos/bac
   fail 'db race plan does not isolate the two production-pool 32-writer arbitration proofs'
 [[ "$db_race_plan" != *'./...'* && "$db_race_plan" != *'./handlers'* ]] ||
   fail 'db race plan escaped the changed package'
+db_dependency_race_plan=$(
+  "$RACE_RUNNER" --dry-run --lane=db \
+    --direct-packages=github.com/inspr-at/paimos/backend/externalstage \
+    github.com/inspr-at/paimos/backend/db
+)
+[[ "$db_dependency_race_plan" == "$db_race_plan" ]] ||
+  fail 'dependency-only DB race plan does not retain the isolated direct DB contract'
 handler_race_plan=
 if "$RACE_RUNNER" --dry-run --lane=handlers github.com/inspr-at/paimos/backend/handlers >/dev/null 2>&1; then
   fail 'handler race lane still allows local multi-process execution instead of requiring one matrix shard'
