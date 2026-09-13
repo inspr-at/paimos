@@ -9,6 +9,12 @@ Semantic Versioning (`x.y.z`, until 5.21.0), INSPR calendar v1
 (`YYMMDDhhmmss.0.0`, the UTC reservation second as a SemVer-shaped
 coordinate, from the first entry below that form).
 
+## [260913075842.0.0] — 2026-09-13
+
+### Fixed — Native baseline review handoff (PAI-967)
+
+- Route Flow’s Review batch action directly to Paimos’s native baseline review controls and use concise review labels, while Start batch remains subject to the existing review and authority gates.
+
 ## [260913063837.0.0] — 2026-09-13
 
 ### Fixed
