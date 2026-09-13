@@ -234,6 +234,7 @@ func MountInternalExternalStageContractRoutes(r chi.Router) {
 		r.Post(externalStageMountPath(externalstage.AdminRegistrationRevokePath, "/api/agent-mode"), revokeExternalStageReporter)
 		r.Post(externalStageMountPath(externalstage.AdminPrerequisiteSetsPath, "/api/agent-mode"), sealExternalStagePrerequisites)
 		r.Post(externalStageMountPath(externalstage.AdminOwnerActivationsPath, "/api/agent-mode"), activateExternalStageOwner)
+		r.Get(externalStageMountPath(externalstage.AdminTerminalEvidencePath, "/api/agent-mode"), readExternalStageTerminalEvidence)
 	})
 }
 
@@ -698,6 +699,25 @@ func listExternalStageRegistrations(w http.ResponseWriter, r *http.Request) {
 	}
 	writeExternalStageJSON(w, 200, "application/json", out)
 }
+
+func readExternalStageTerminalEvidence(w http.ResponseWriter, r *http.Request) {
+	p, ok := externalStagePrincipal(r)
+	if !ok {
+		writeControlNotFound(w, r)
+		return
+	}
+	service, ok := externalStageServiceForRequest(w, r)
+	if !ok {
+		return
+	}
+	out, err := service.TerminalEvidence(r.Context(), p, chi.URLParam(r, "deliveryKey"), chi.URLParam(r, "handoffID"))
+	if err != nil {
+		writeExternalStageServiceError(w, r, err)
+		return
+	}
+	writeExternalStageJSON(w, http.StatusOK, "application/json", out)
+}
+
 func revokeExternalStageReporter(w http.ResponseWriter, r *http.Request) {
 	var body struct{}
 	if err := decodeExternalStageAdmin(w, r, &body); err != nil {
