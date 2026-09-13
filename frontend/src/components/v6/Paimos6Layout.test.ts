@@ -36,9 +36,33 @@ import Paimos6Layout from './Paimos6Layout.vue'
 describe('Paimos6Layout (PAI-854 / PAI-867 isolated production shell)', () => {
   afterEach(() => {
     document.body.innerHTML = ''
+    window.__PAIMOS_PUBLIC_BASE_PATH__ = ''
     vi.restoreAllMocks()
     router.replace.mockReset().mockResolvedValue(undefined)
     router.push.mockReset().mockResolvedValue(undefined)
+  })
+
+  it('keeps the v6 brand navigation inside a configured public mount', async () => {
+    window.__PAIMOS_PUBLIC_BASE_PATH__ = '/paimos'
+    vi.spyOn(api, 'get').mockResolvedValue({
+      schema_version: 1,
+      default_shortcut: 'Mod+KeyK',
+      instance_shortcut: null,
+      user_shortcut: null,
+      effective_shortcut: 'Mod+KeyK',
+      source: 'default',
+    } as never)
+
+    const mounted = await mountComponent(
+      Paimos6Layout,
+      {},
+      { default: () => h('main', { class: 'fixture-home' }, 'session home') },
+    )
+
+    expect(
+      mounted.el.querySelector<HTMLAnchorElement>('.habitat-brand')?.getAttribute('href'),
+    ).toBe('/paimos/')
+    await mounted.unmount()
   })
 
   it('mounts the compact workspace navigation and commands without ordinary CRUD chrome', async () => {

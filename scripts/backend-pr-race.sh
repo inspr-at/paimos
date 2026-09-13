@@ -264,6 +264,15 @@ is_direct() {
     grep -Fxq -e "$1" -e './...' <<<"$DIRECT_PACKAGES"
 }
 
+run_db_race_contracts() {
+  run_race ./db '^(TestApplyMigrationAtomic.*|TestSchemaAgentRunTelemetryTerminalWriteRace)$'
+  # Race instrumentation uses the production pool in isolated processes.
+  # The normal PR and exhaustive plans retain the differently named
+  # 32-connection/32-writer M147 contention oracles without weakening them.
+  run_race ./db '^TestM147ConcurrentCanonicalCommandsConvergeProductionPool$'
+  run_race ./db '^TestM147ConcurrentRuntimeAcceptanceHasOneEffectOwnerProductionPool$'
+}
+
 run_package() {
   local import_path="$1" package
   [[ "$import_path" == "$MODULE" || "$import_path" == "$MODULE/"* ]] || {
@@ -277,13 +286,18 @@ run_package() {
   }
 
   if ! is_direct "$import_path"; then
+    # DB has dedicated race/normal partitions even when selected as a reverse
+    # dependency; keep its heavyweight production-pool oracles isolated.
+    if [[ "$package" == ./db ]]; then
+      run_db_race_contracts
+      return
+    fi
     # Dependency-only packages own semantic concurrency contracts, never their
     # whole suite. Empty selections/shards are legitimate and allocate no job.
     local count=4 match="$DEPENDENT_MATCH"
     case "$package" in
       ./handlers) count=5 ;;
       ./managedharness) count=7 ;;
-      ./db) count=1 ;;
       ./agentmode)
         # Keep the five-second overflow SLO out of race instrumentation.
         # The remaining stream subtests are still race-covered below.
@@ -308,12 +322,7 @@ run_package() {
       run_race_shards . '^(Test|Fuzz)' 4
       ;;
     ./db)
-      run_race ./db '^(TestApplyMigrationAtomic.*|TestSchemaAgentRunTelemetryTerminalWriteRace)$'
-      # Race instrumentation uses the production pool in isolated processes.
-      # The normal PR and exhaustive plans retain the differently named
-      # 32-connection/32-writer M147 contention oracles without weakening them.
-      run_race ./db '^TestM147ConcurrentCanonicalCommandsConvergeProductionPool$'
-      run_race ./db '^TestM147ConcurrentRuntimeAcceptanceHasOneEffectOwnerProductionPool$'
+      run_db_race_contracts
       ;;
     ./handlers)
       # Hosted PR 247 backend-pr-handlers-race(0) exhausted 8m on a six-test
