@@ -20,6 +20,7 @@ import { computed, nextTick, onScopeDispose, provide, ref, shallowRef } from 'vu
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 
 import { permissionsEpoch, permissionsEpochGeneration } from '@/api/client'
+import { publicURL } from '@/publicPath'
 import Paimos6CommandPalette, {
   type Paimos6PaletteActivation,
 } from '@/components/v6/Paimos6CommandPalette.vue'
@@ -204,7 +205,7 @@ onScopeDispose(() => {
     <a class="habitat-skip" href="#habitat-main">Skip to content</a>
     <div class="habitat-app-frame">
       <aside class="habitat-rail" aria-label="Workspace navigation">
-        <a class="habitat-brand" href="/" :aria-label="brandName + ' home'">
+        <a class="habitat-brand" :href="publicURL('/')" :aria-label="brandName + ' home'">
           <BrandLogo :src="branding.logo" :alt="brandName" />
           <span
             ><strong>{{ brandName }}</strong
