@@ -2508,6 +2508,30 @@
           "context_digest": {"$ref": "#/components/schemas/ExternalStageSHA256Digest"}
         }
       },
+      "ExternalStageTerminalEvidence": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["handoff_id", "delivery_key", "issue_key", "attempt_number", "plan_revision", "stage_key", "execution_number", "authority_epoch", "credential_epoch", "reporter_class", "reporter_role", "terminal_status", "terminal_sequence", "terminal_at", "terminal_report_digest"],
+        "properties": {
+          "handoff_id": {"$ref": "#/components/schemas/ExternalStageHandoffID"},
+          "delivery_key": {"type": "string", "minLength": 1, "maxLength": 128},
+          "issue_key": {"type": "string", "minLength": 1, "maxLength": 64},
+          "attempt_number": {"type": "integer", "format": "int64", "minimum": 1},
+          "plan_revision": {"type": "integer", "format": "int64", "minimum": 1},
+          "stage_key": {"type": "string", "enum": ["specification", "implementation", "qa", "deployment", "verification"]},
+          "execution_number": {"type": "integer", "format": "int64", "minimum": 1},
+          "authority_epoch": {"type": "integer", "format": "int64", "minimum": 1},
+          "credential_epoch": {"type": "integer", "format": "int64", "minimum": 1},
+          "reporter_class": {"type": "string", "enum": ["pharos", "janus"]},
+          "reporter_role": {"type": "string", "enum": ["owner", "dependency"]},
+          "dependency_key": {"type": "string", "pattern": "^[a-z][a-z0-9._-]{0,63}$"},
+          "terminal_status": {"type": "string", "enum": ["succeeded", "failed"]},
+          "terminal_sequence": {"type": "integer", "format": "int64", "minimum": 1},
+          "terminal_at": {"type": "string", "format": "date-time"},
+          "terminal_report_digest": {"$ref": "#/components/schemas/ExternalStageSHA256Digest"}
+        },
+        "description": "Owner-authorized value-free projection of one immutable terminal report; secrets and report bodies never cross this boundary."
+      },
       "ExternalStageAcceptRequest": {
         "type": "object",
         "additionalProperties": false,
@@ -8494,6 +8518,23 @@
         "parameters": [{"$ref": "#/components/parameters/AgentModeDeliveryPath"}, {"name": "registrationID", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64", "minimum": 1}}, {"$ref": "#/components/parameters/ExternalStageIdempotencyHeader"}],
         "requestBody": {"required": true, "content": {"application/json": {"schema": {"type": "object", "additionalProperties": false}}}},
         "responses": {"200": {"description": "Registration revoked", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ExternalStageReporterRegistration"}}}}, "400": {"description": "Strict JSON refusal"}, "404": {"description": "Canonical concealment"}, "409": {"description": "Conflicting replay"}}
+      }
+    },
+    "/api/agent-mode/deliveries/{deliveryKey}/external-stage-handoffs/{handoffID}/terminal-evidence": {
+      "get": {
+        "operationId": "readExternalStageTerminalEvidence", "tags": ["external-stage"],
+        "summary": "Read one owner-authorized immutable terminal handoff projection",
+        "description": "Returns value-free terminal identity and a server-derived digest of the immutable terminal report. Nonterminal, missing, cross-delivery, and unauthorized handoffs are concealed; report bodies, credentials, and secrets never cross this route.",
+        "parameters": [
+          {"$ref": "#/components/parameters/AgentModeDeliveryPath"},
+          {"$ref": "#/components/parameters/ExternalStageHandoffPath"},
+          {"$ref": "#/components/parameters/ExternalStageAcceptHeader"}
+        ],
+        "responses": {
+          "200": {"description": "Terminal handoff evidence", "headers": {"Cache-Control": {"schema": {"const": "private, no-store"}}}, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ExternalStageTerminalEvidence"}}}},
+          "404": {"description": "Canonical concealment for absent, nonterminal, cross-delivery, or unauthorized handoff", "headers": {"Cache-Control": {"schema": {"const": "private, no-store"}}}},
+          "429": {"description": "Bounded admission rejected", "headers": {"Cache-Control": {"schema": {"const": "private, no-store"}}, "Retry-After": {"schema": {"type": "integer"}}}}
+        }
       }
     },
     "/api/agent-mode/deliveries/{deliveryKey}/external-prerequisite-sets": {

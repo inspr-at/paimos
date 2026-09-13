@@ -90,6 +90,7 @@ func TestExternalStageOpenAPIClosesSemanticAndAdministrativeShapes(t *testing.T)
 	for _, path := range []string{
 		"/api/agent-mode/deliveries/{deliveryKey}/external-reporter-registrations",
 		"/api/agent-mode/deliveries/{deliveryKey}/external-reporter-registrations/{registrationID}/revoke",
+		"/api/agent-mode/deliveries/{deliveryKey}/external-stage-handoffs/{handoffID}/terminal-evidence",
 		"/api/agent-mode/deliveries/{deliveryKey}/external-prerequisite-sets",
 		"/api/agent-mode/deliveries/{deliveryKey}/external-owner-activations",
 	} {

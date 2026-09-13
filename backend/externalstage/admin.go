@@ -362,6 +362,56 @@ func authorizeInternalTx(ctx context.Context, tx *sql.Tx, p Principal, deliveryK
 	return deliveryID, issueID, projectID, err
 }
 
+// TerminalEvidence returns the immutable terminal report identity for an
+// owned delivery. The external Pull contract intentionally remains unable to
+// read terminal handoffs; this projection gives delivery coordinators the
+// server-owned tuple and digest needed to bind a retry without exposing the
+// report body or any credential material.
+func (s *Service) TerminalEvidence(ctx context.Context, p Principal, deliveryKey, handoffID string) (TerminalEvidence, error) {
+	_, _, _, err := principalColumns(p)
+	if err != nil || deliveryKey == "" || !handoffIDPattern.MatchString(handoffID) {
+		return TerminalEvidence{}, ErrNotFound
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return TerminalEvidence{}, err
+	}
+	defer tx.Rollback()
+	if _, _, _, err := authorizeInternalTx(ctx, tx, p, deliveryKey); err != nil {
+		return TerminalEvidence{}, err
+	}
+	var out TerminalEvidence
+	var digest string
+	err = tx.QueryRowContext(ctx, `SELECT handoff.handoff_id,handoff.delivery_key,
+		project.key||'-'||issue.issue_number,handoff.attempt_number,handoff.plan_revision,
+		handoff.stage_key,handoff.execution_number,handoff.authority_epoch,handoff.credential_epoch,
+		handoff.reporter_class,handoff.reporter_role,COALESCE(handoff.dependency_key,''),
+		handoff.lifecycle_state,report.sequence,handoff.terminal_at,lower(hex(report.request_digest))
+		FROM external_stage_handoffs handoff
+		JOIN issues issue ON issue.id=handoff.root_issue_id AND issue.project_id=handoff.project_id AND issue.deleted_at IS NULL
+		JOIN projects project ON project.id=handoff.project_id
+		JOIN external_stage_report_events report ON report.handoff_row_id=handoff.id
+			AND report.sequence=handoff.last_sequence AND report.lifecycle_state=handoff.lifecycle_state
+		WHERE handoff.delivery_key=? AND handoff.handoff_id=?
+			AND handoff.lifecycle_state IN ('succeeded','failed') AND handoff.terminal_at IS NOT NULL
+		ORDER BY report.id DESC LIMIT 1`, deliveryKey, handoffID).
+		Scan(&out.HandoffID, &out.DeliveryKey, &out.IssueKey, &out.AttemptNumber, &out.PlanRevision,
+			&out.StageKey, &out.ExecutionNumber, &out.AuthorityEpoch, &out.CredentialEpoch,
+			&out.ReporterClass, &out.ReporterRole, &out.DependencyKey, &out.TerminalStatus,
+			&out.TerminalSequence, &out.TerminalAt, &digest)
+	if errors.Is(err, sql.ErrNoRows) {
+		return TerminalEvidence{}, ErrNotFound
+	}
+	if err != nil {
+		return TerminalEvidence{}, err
+	}
+	if len(digest) != sha256.Size*2 {
+		return TerminalEvidence{}, fmt.Errorf("external stage terminal evidence digest has invalid length")
+	}
+	out.TerminalReportDigest = "sha256:" + digest
+	return out, nil
+}
+
 func scanRegistration(row interface{ Scan(...any) error }) (ReporterRegistration, error) {
 	var r ReporterRegistration
 	var class, role string

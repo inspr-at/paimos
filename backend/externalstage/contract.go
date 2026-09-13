@@ -20,13 +20,14 @@ const (
 	HandoffSecretHeader = "X-PAIMOS-Handoff-Secret"
 	OneTimeSecretBytes  = 32
 
-	InternalCreatePath = "/api/agent-mode/deliveries/{deliveryKey}/external-stage-handoffs"
-	InternalMintPath   = "/api/agent-mode/external-stage-handoffs/{handoffID}/mint"
-	InternalRotatePath = "/api/agent-mode/external-stage-handoffs/{handoffID}/rotate"
-	InternalRevokePath = "/api/agent-mode/external-stage-handoffs/{handoffID}/revoke"
-	ExternalPullPath   = "/api/external-stage/handoffs/{handoffID}"
-	ExternalAcceptPath = "/api/external-stage/handoffs/{handoffID}/accept"
-	ExternalReportPath = "/api/external-stage/handoffs/{handoffID}/reports"
+	InternalCreatePath        = "/api/agent-mode/deliveries/{deliveryKey}/external-stage-handoffs"
+	InternalMintPath          = "/api/agent-mode/external-stage-handoffs/{handoffID}/mint"
+	InternalRotatePath        = "/api/agent-mode/external-stage-handoffs/{handoffID}/rotate"
+	InternalRevokePath        = "/api/agent-mode/external-stage-handoffs/{handoffID}/revoke"
+	AdminTerminalEvidencePath = "/api/agent-mode/deliveries/{deliveryKey}/external-stage-handoffs/{handoffID}/terminal-evidence"
+	ExternalPullPath          = "/api/external-stage/handoffs/{handoffID}"
+	ExternalAcceptPath        = "/api/external-stage/handoffs/{handoffID}/accept"
+	ExternalReportPath        = "/api/external-stage/handoffs/{handoffID}/reports"
 )
 
 // Route is one literal v1 operation. Action suffixes stay separate so chi,
@@ -47,6 +48,7 @@ var Routes = []Route{
 	{OperationID: "pullExternalStageHandoff", Method: http.MethodGet, Path: ExternalPullPath, Audience: "external"},
 	{OperationID: "acceptExternalStageHandoff", Method: http.MethodPost, Path: ExternalAcceptPath, Audience: "external"},
 	{OperationID: "reportExternalStageHandoff", Method: http.MethodPost, Path: ExternalReportPath, Audience: "external"},
+	{OperationID: "readExternalStageTerminalEvidence", Method: http.MethodGet, Path: AdminTerminalEvidencePath, Audience: "internal"},
 }
 
 type ReporterClass string
@@ -227,4 +229,26 @@ type ReportReceipt struct {
 	CredentialEpoch  int64        `json:"credential_epoch"`
 	Duplicate        bool         `json:"duplicate"`
 	ServerReceivedAt string       `json:"server_received_at"`
+}
+
+// TerminalEvidence is an owner-authorized, value-free projection of one
+// immutable terminal report. It deliberately excludes report bodies,
+// evidence payloads, credentials, and handoff secrets.
+type TerminalEvidence struct {
+	HandoffID            string        `json:"handoff_id"`
+	DeliveryKey          string        `json:"delivery_key"`
+	IssueKey             string        `json:"issue_key"`
+	AttemptNumber        int64         `json:"attempt_number"`
+	PlanRevision         int64         `json:"plan_revision"`
+	StageKey             string        `json:"stage_key"`
+	ExecutionNumber      int64         `json:"execution_number"`
+	AuthorityEpoch       int64         `json:"authority_epoch"`
+	CredentialEpoch      int64         `json:"credential_epoch"`
+	ReporterClass        ReporterClass `json:"reporter_class"`
+	ReporterRole         ReporterRole  `json:"reporter_role"`
+	DependencyKey        string        `json:"dependency_key,omitempty"`
+	TerminalStatus       HandoffState  `json:"terminal_status"`
+	TerminalSequence     int64         `json:"terminal_sequence"`
+	TerminalAt           string        `json:"terminal_at"`
+	TerminalReportDigest string        `json:"terminal_report_digest"`
 }

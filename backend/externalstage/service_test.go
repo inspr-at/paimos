@@ -2400,3 +2400,175 @@ func attachDigestBearingBuildEvidence(t *testing.T, f *serviceFixture) (plan, ex
 	f.authorityStageID = handed.ExecutionStartEventID
 	return attempt.PlanRevision, handed.ExecutionNumber, handed.AuthorityEpoch, nil
 }
+
+func terminalPharosEvidence(observedAt string, result EvidenceResult) *PharosEvidence {
+	return &PharosEvidence{Kind: EvidenceKindDeployment, Workflow: "deploy-production", Environment: "production",
+		Artifact: ArtifactEvidence{Version: "0.1.1024", Digest: "sha256:" + fmt.Sprintf("%064x", 1024), CommitDigest: fmt.Sprintf("%040x", 1024)},
+		Result:   result, ObservedAt: observedAt}
+}
+
+func TestTerminalEvidenceReturnsSucceededProjectionAndConcealsNonterminal(t *testing.T) {
+	f := setupServiceFixture(t)
+	f.sealEmpty(t)
+	ctx := t.Context()
+	handoff, err := f.service.CreateHandoff(ctx, f.operator, f.deliveryKey, "terminal-evidence-succeeded-create",
+		CreateHandoffRequest{StageKey: "deployment", ExecutionNumber: 1, ExpectedPlanRevision: 1,
+			ExpectedAuthorityEpoch: 1, ReporterRegistrationID: f.registrationID,
+			ExpiresAt: f.now.Add(time.Hour).Format(time.RFC3339Nano)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	secret, err := f.service.Mint(ctx, f.operator, handoff.HandoffID, 0, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.now = f.now.Add(time.Second)
+	observedAt := f.now.Format(time.RFC3339Nano)
+	if _, err := f.service.Accept(ctx, f.reporter, handoff.HandoffID, "terminal-evidence-succeeded-accept", secret,
+		AcceptRequest{Sequence: 1, ObservedAt: observedAt}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.service.TerminalEvidence(ctx, f.operator, f.deliveryKey, handoff.HandoffID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("nonterminal handoff err=%v, want concealment", err)
+	}
+	if _, err := f.service.Report(ctx, f.reporter, handoff.HandoffID, "terminal-evidence-succeeded-report", secret,
+		ReportRequest{Sequence: 2, State: HandoffStateSucceeded, ObservedAt: observedAt,
+			PharosEvidence: terminalPharosEvidence(observedAt, EvidenceResultSucceeded)}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := f.service.TerminalEvidence(ctx, f.operator, f.deliveryKey, handoff.HandoffID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.HandoffID != handoff.HandoffID || got.DeliveryKey != f.deliveryKey || got.IssueKey != "ESS-810" ||
+		got.AttemptNumber != 1 || got.PlanRevision != 1 || got.StageKey != "deployment" || got.ExecutionNumber != 1 ||
+		got.AuthorityEpoch != 1 || got.CredentialEpoch != 1 || got.ReporterClass != ReporterClassPharos ||
+		got.ReporterRole != ReporterRoleOwner || got.TerminalStatus != HandoffStateSucceeded || got.TerminalSequence != 2 ||
+		!strings.HasPrefix(got.TerminalReportDigest, "sha256:") || len(got.TerminalReportDigest) != len("sha256:")+64 {
+		t.Fatalf("terminal projection=%+v", got)
+	}
+	var requestDigest string
+	if err := f.database.QueryRow(`SELECT lower(hex(request_digest)) FROM external_stage_report_events
+		WHERE handoff_row_id=(SELECT id FROM external_stage_handoffs WHERE handoff_id=?) AND sequence=2`, handoff.HandoffID).Scan(&requestDigest); err != nil {
+		t.Fatal(err)
+	}
+	if got.TerminalReportDigest != "sha256:"+requestDigest {
+		t.Fatalf("terminal digest=%q want server request digest", got.TerminalReportDigest)
+	}
+
+	if _, err := f.service.TerminalEvidence(ctx,
+		Principal{UserID: 999999, Kind: "session", SessionCredentialID: "missing-session"}, f.deliveryKey, handoff.HandoffID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("unauthorized handoff err=%v, want concealment", err)
+	}
+}
+
+func TestTerminalEvidenceReturnsFailedProjectionAndConcealsWrongDelivery(t *testing.T) {
+	f := setupServiceFixture(t)
+	f.sealEmpty(t)
+	ctx := t.Context()
+	handoff, err := f.service.CreateHandoff(ctx, f.operator, f.deliveryKey, "terminal-evidence-failed-create",
+		CreateHandoffRequest{StageKey: "deployment", ExecutionNumber: 1, ExpectedPlanRevision: 1,
+			ExpectedAuthorityEpoch: 1, ReporterRegistrationID: f.registrationID,
+			ExpiresAt: f.now.Add(time.Hour).Format(time.RFC3339Nano)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	secret, err := f.service.Mint(ctx, f.operator, handoff.HandoffID, 0, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.now = f.now.Add(time.Second)
+	observedAt := f.now.Format(time.RFC3339Nano)
+	if _, err := f.service.Accept(ctx, f.reporter, handoff.HandoffID, "terminal-evidence-failed-accept", secret,
+		AcceptRequest{Sequence: 1, ObservedAt: observedAt}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.service.Report(ctx, f.reporter, handoff.HandoffID, "terminal-evidence-failed-report", secret,
+		ReportRequest{Sequence: 2, State: HandoffStateFailed, ObservedAt: observedAt,
+			PharosEvidence: terminalPharosEvidence(observedAt, EvidenceResultFailed)}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := f.service.TerminalEvidence(ctx, f.operator, f.deliveryKey, handoff.HandoffID)
+	if err != nil || got.TerminalStatus != HandoffStateFailed || got.TerminalSequence != 2 {
+		t.Fatalf("failed terminal projection=%+v err=%v", got, err)
+	}
+	var projectID int64
+	if err := f.database.QueryRow(`SELECT project_id FROM issues WHERE id=?`, f.issueID).Scan(&projectID); err != nil {
+		t.Fatal(err)
+	}
+	result, err := f.database.Exec(`INSERT INTO issues(project_id,issue_number,title) VALUES(?,811,'Other delivery')`, projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherIssueID, _ := result.LastInsertId()
+	otherDeliveryKey := fmt.Sprintf("issue:%d", otherIssueID)
+	if _, err := f.database.Exec(`INSERT INTO deliveries(issue_id,delivery_key,project_id_hint,created_at,updated_at)
+		VALUES(?,?,?,strftime('%Y-%m-%dT%H:%M:%fZ','now'),strftime('%Y-%m-%dT%H:%M:%fZ','now'))`, otherIssueID, otherDeliveryKey, projectID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.service.TerminalEvidence(ctx, f.operator, otherDeliveryKey, handoff.HandoffID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("wrong delivery err=%v, want concealment", err)
+	}
+}
+
+func TestTerminalEvidenceReturnsJanusDependencyProjection(t *testing.T) {
+	f := setupServiceFixture(t)
+	ctx := t.Context()
+	result, err := f.database.Exec(`INSERT INTO users(username,password,role,status) VALUES('terminal-evidence-janus','x','member','active')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	janusUserID, _ := result.LastInsertId()
+	result, err = f.database.Exec(`INSERT INTO api_keys(user_id,name,key_hash,key_prefix,scopes)
+		VALUES(?,'terminal-evidence-janus',?,'paimos_terminal_evidence_janus','*')`, janusUserID, fmt.Sprintf("%064d", 1025))
+	if err != nil {
+		t.Fatal(err)
+	}
+	janusAPIKeyID, _ := result.LastInsertId()
+	janus := Principal{UserID: janusUserID, Kind: "api_key", APIKeyID: janusAPIKeyID}
+	registration, err := f.service.RegisterReporter(ctx, f.operator, f.deliveryKey, "terminal-evidence-janus-register",
+		RegisterReporterRequest{APIKeyID: janusAPIKeyID, ReporterClass: ReporterClassJanus,
+			ReporterRole: ReporterRoleDependency, DependencyKey: "security.approval"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.service.SealPrerequisites(ctx, f.operator, f.deliveryKey, "terminal-evidence-janus-seal",
+		SealPrerequisitesRequest{StageKey: "deployment", ExecutionNumber: 1, ExpectedPlanRevision: 1,
+			ExpectedAuthorityEpoch: 1, Prerequisites: []Prerequisite{{DependencyKey: "security.approval",
+				ReporterRegistrationID: registration.RegistrationID, Requirement: PrerequisiteRequired}}}); err != nil {
+		t.Fatal(err)
+	}
+	handoff, err := f.service.CreateHandoff(ctx, f.operator, f.deliveryKey, "terminal-evidence-janus-create",
+		CreateHandoffRequest{StageKey: "deployment", ExecutionNumber: 1, ExpectedPlanRevision: 1,
+			ExpectedAuthorityEpoch: 1, ReporterRegistrationID: registration.RegistrationID,
+			ExpiresAt: f.now.Add(time.Hour).Format(time.RFC3339Nano)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	secret, err := f.service.Mint(ctx, f.operator, handoff.HandoffID, 0, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.now = f.now.Add(time.Second)
+	observedAt := f.now.Format(time.RFC3339Nano)
+	if _, err := f.service.Accept(ctx, janus, handoff.HandoffID, "terminal-evidence-janus-accept", secret,
+		AcceptRequest{Sequence: 1, ObservedAt: observedAt}); err != nil {
+		t.Fatal(err)
+	}
+	authorized := true
+	if _, err := f.service.Report(ctx, janus, handoff.HandoffID, "terminal-evidence-janus-report", secret,
+		ReportRequest{Sequence: 2, State: HandoffStateSucceeded, ObservedAt: observedAt,
+			JanusEvidence: &JanusEvidence{Kind: EvidenceKindAuthorization, Result: EvidenceResultSatisfied,
+				Authorized: &authorized, ObservedAt: observedAt}}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := f.service.TerminalEvidence(ctx, f.operator, f.deliveryKey, handoff.HandoffID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ReporterClass != ReporterClassJanus || got.ReporterRole != ReporterRoleDependency ||
+		got.DependencyKey != "security.approval" || got.TerminalStatus != HandoffStateSucceeded || got.TerminalSequence != 2 ||
+		len(got.TerminalReportDigest) != len("sha256:")+64 {
+		t.Fatalf("janus terminal projection=%+v", got)
+	}
+}

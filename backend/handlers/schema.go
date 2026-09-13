@@ -36,6 +36,7 @@ import (
 //
 // The version doubles as cache key: clients refetch when the value changes.
 //
+// 2.9.0 (PAI-1024): added owner-authorized terminal handoff evidence.
 // 2.3.0 (PAI-810): froze the external-stage v1 routes, media/header contract,
 // and the separate handoff/reporter/evidence enum families.
 // 2.2.0 (PAI-809): added the agent-controls:write and agent-controls:runner
@@ -89,7 +90,7 @@ import (
 // and republished the v2 fixture digest with the calendar v2 owner cases.
 // 2.4.0 (PAI-876): added the additive external-stage v2 media type,
 // fixture digest, contract major, and explicit release-version scheme.
-const SchemaVersion = "2.8.0"
+const SchemaVersion = "2.9.0"
 
 // SchemaPayload is the shape returned by GET /api/schema. See PAI-87.
 type SchemaPayload struct {
@@ -376,15 +377,16 @@ func init() {
 		HandoffSecretHeader:      externalstage.HandoffSecretHeader,
 		OneTimeSecretBytes:       externalstage.OneTimeSecretBytes,
 		Routes: map[string]string{
-			"create":           externalstage.Routes[0].Method + " " + externalstage.InternalCreatePath,
-			"mint":             externalstage.Routes[1].Method + " " + externalstage.InternalMintPath,
-			"rotate":           externalstage.Routes[2].Method + " " + externalstage.InternalRotatePath,
-			"revoke":           externalstage.Routes[3].Method + " " + externalstage.InternalRevokePath,
-			"pull":             externalstage.Routes[4].Method + " " + externalstage.ExternalPullPath,
-			"accept":           externalstage.Routes[5].Method + " " + externalstage.ExternalAcceptPath,
-			"report":           externalstage.Routes[6].Method + " " + externalstage.ExternalReportPath,
-			"launch_candidate": http.MethodPost + " " + externalstage.LaunchCandidatePath,
-			"launch_consume":   http.MethodPost + " " + externalstage.LaunchConsumePath,
+			"create":            externalstage.Routes[0].Method + " " + externalstage.InternalCreatePath,
+			"mint":              externalstage.Routes[1].Method + " " + externalstage.InternalMintPath,
+			"rotate":            externalstage.Routes[2].Method + " " + externalstage.InternalRotatePath,
+			"revoke":            externalstage.Routes[3].Method + " " + externalstage.InternalRevokePath,
+			"pull":              externalstage.Routes[4].Method + " " + externalstage.ExternalPullPath,
+			"accept":            externalstage.Routes[5].Method + " " + externalstage.ExternalAcceptPath,
+			"report":            externalstage.Routes[6].Method + " " + externalstage.ExternalReportPath,
+			"terminal_evidence": http.MethodGet + " " + externalstage.AdminTerminalEvidencePath,
+			"launch_candidate":  http.MethodPost + " " + externalstage.LaunchCandidatePath,
+			"launch_consume":    http.MethodPost + " " + externalstage.LaunchConsumePath,
 		},
 	}
 	b, err := json.MarshalIndent(&Schema, "", "  ")
