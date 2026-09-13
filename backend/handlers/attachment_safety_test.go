@@ -16,6 +16,11 @@
 package handlers
 
 import (
+	"bytes"
+	"encoding/binary"
+	"hash/crc32"
+	"image"
+	"image/png"
 	"strings"
 	"testing"
 )
@@ -154,16 +159,47 @@ func TestSafeServePolicy_UnknownTypeForcesAttachment(t *testing.T) {
 
 func TestNormalizeContentType(t *testing.T) {
 	cases := map[string]string{
-		"":                                   "",
-		"text/html":                          "text/html",
-		"Text/HTML":                          "text/html",
-		"text/html; charset=utf-8":           "text/html",
-		"  application/PDF  ;  foo=bar  ":    "application/pdf",
-		"image/svg+xml; charset=us-ascii":    "image/svg+xml",
+		"":                                "",
+		"text/html":                       "text/html",
+		"Text/HTML":                       "text/html",
+		"text/html; charset=utf-8":        "text/html",
+		"  application/PDF  ;  foo=bar  ": "application/pdf",
+		"image/svg+xml; charset=us-ascii": "image/svg+xml",
 	}
 	for in, want := range cases {
 		if got := normalizeContentType(in); got != want {
 			t.Errorf("normalize(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+// Valid PNG with the same metadata shape as the rejected generated image.
+func TestRejectActiveContent_C2PAMetadata(t *testing.T) {
+	var encoded bytes.Buffer
+	if err := png.Encode(&encoded, image.NewRGBA(image.Rect(0, 0, 1, 1))); err != nil {
+		t.Fatal(err)
+	}
+	metadata := []byte(`c2pa.icon image/svg+xml <svg><path d="M0 0"/></svg> <script>inert metadata</script>`)
+	var chunk bytes.Buffer
+	binary.Write(&chunk, binary.BigEndian, uint32(len(metadata)))
+	chunk.WriteString("caBX")
+	chunk.Write(metadata)
+	binary.Write(&chunk, binary.BigEndian, crc32.ChecksumIEEE(chunk.Bytes()[4:]))
+	raw := encoded.Bytes()
+	payload := append(append(append([]byte{}, raw[:33]...), chunk.Bytes()...), raw[33:]...)
+	if _, err := png.Decode(bytes.NewReader(payload)); err != nil {
+		t.Fatalf("fixture invalid: %v", err)
+	}
+	head := payload
+	if len(head) > 512 {
+		head = head[:512]
+	}
+	for _, declared := range []string{"image/png", "application/octet-stream", ""} {
+		if reason := rejectActiveContent(declared, head); reason != "" {
+			t.Errorf("%s rejected: %s", declared, reason)
+		}
+	}
+	if reason := rejectActiveContent("image/svg+xml", head); reason != "image/svg+xml" {
+		t.Fatalf("active declaration bypassed: %q", reason)
 	}
 }

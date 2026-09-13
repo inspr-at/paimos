@@ -91,9 +91,9 @@ func normalizeContentType(ct string) string {
 
 // looksLikeSVGBytes catches SVG payloads that http.DetectContentType
 // returns as text/xml or text/plain. Any payload containing "<svg"
-// in its first 512 bytes is treated as SVG regardless of the declared
-// type — clients can and do lie about Content-Type to bypass naive
-// allowlists.
+// in its first 512 bytes is treated as SVG unless a binary raster
+// signature has already been recognized. The declared type is insufficient:
+// clients can lie about Content-Type to bypass naive allowlists.
 func looksLikeSVGBytes(head []byte) bool {
 	return strings.Contains(strings.ToLower(string(head)), "<svg")
 }
@@ -126,6 +126,14 @@ func rejectActiveContent(declaredCT string, head []byte) string {
 	}
 	if _, bad := activeContentTypes[detected]; bad {
 		return detected
+	}
+	// Raster containers can carry SVG/HTML strings in inert metadata (for
+	// example a C2PA icon). Only the sniffed binary signature earns this
+	// exemption; a client declaring image/png for SVG still reaches the
+	// markup checks below. Declared active types remain rejected above.
+	switch detected {
+	case "image/png", "image/jpeg", "image/gif", "image/webp":
+		return ""
 	}
 	if looksLikeSVGBytes(head) {
 		return "image/svg+xml"
