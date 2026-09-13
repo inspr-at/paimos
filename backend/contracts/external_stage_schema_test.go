@@ -18,7 +18,7 @@ import (
 	"github.com/inspr-at/paimos/backend/externalstage"
 )
 
-const externalStageStandaloneSchemaSHA256 = "c9de59698e68cb7c21dd84ff8d8a9a209eef1188a54bdca8f766613f540182ff"
+const externalStageStandaloneSchemaSHA256 = "4628502bd9ea0a5c34ff9c1bbd0b52628b898f38058d8961a62a6496aacb85a1"
 
 var externalStageStandaloneRoots = []string{
 	"ExternalStageCreateRequest",
@@ -33,6 +33,7 @@ var externalStageStandaloneRoots = []string{
 	"ExternalStageOwnerActivation",
 	"ExternalStageHandoffMetadata",
 	"ExternalStagePullResponse",
+	"ExternalStageTerminalEvidence",
 	"ExternalStageAcceptRequest",
 	"ExternalStageReportRequest",
 	"ExternalStageReportReceipt",
@@ -119,8 +120,8 @@ func externalStageOpenAPIDefinitions(t *testing.T) map[string]any {
 			definitions[name] = rewriteExternalStageSchemaReferences(definition)
 		}
 	}
-	if len(definitions) != 22 {
-		t.Fatalf("ExternalStage OpenAPI component count=%d want 22", len(definitions))
+	if len(definitions) != 23 {
+		t.Fatalf("ExternalStage OpenAPI component count=%d want 23", len(definitions))
 	}
 	return definitions
 }

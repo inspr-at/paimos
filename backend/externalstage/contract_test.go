@@ -13,8 +13,8 @@ func TestV1RouteAndMediaContractIsLiteralAndClosed(t *testing.T) {
 		t.Fatalf("v1 constants drifted: major=%d media=%q secret_media=%q header=%q bytes=%d",
 			ContractMajor, MediaTypeV1, SecretMediaTypeV1, HandoffSecretHeader, OneTimeSecretBytes)
 	}
-	if len(Routes) != 7 {
-		t.Fatalf("routes=%d want 7", len(Routes))
+	if len(Routes) != 8 {
+		t.Fatalf("routes=%d want 8", len(Routes))
 	}
 	seen := map[string]bool{}
 	for _, route := range Routes {

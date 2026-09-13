@@ -8527,12 +8527,13 @@
         "description": "Returns value-free terminal identity and a server-derived digest of the immutable terminal report. Nonterminal, missing, cross-delivery, and unauthorized handoffs are concealed; report bodies, credentials, and secrets never cross this route.",
         "parameters": [
           {"$ref": "#/components/parameters/AgentModeDeliveryPath"},
-          {"$ref": "#/components/parameters/ExternalStageHandoffPath"}
+          {"$ref": "#/components/parameters/ExternalStageHandoffPath"},
+          {"$ref": "#/components/parameters/ExternalStageAcceptHeader"}
         ],
         "responses": {
           "200": {"description": "Terminal handoff evidence", "headers": {"Cache-Control": {"schema": {"const": "private, no-store"}}}, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ExternalStageTerminalEvidence"}}}},
           "404": {"description": "Canonical concealment for absent, nonterminal, cross-delivery, or unauthorized handoff", "headers": {"Cache-Control": {"schema": {"const": "private, no-store"}}}},
-          "429": {"description": "Bounded admission rejected", "headers": {"Retry-After": {"schema": {"type": "integer"}}}}
+          "429": {"description": "Bounded admission rejected", "headers": {"Cache-Control": {"schema": {"const": "private, no-store"}}, "Retry-After": {"schema": {"type": "integer"}}}}
         }
       }
     },

@@ -49,6 +49,9 @@
       "$ref": "#/$defs/ExternalStagePullResponse"
     },
     {
+      "$ref": "#/$defs/ExternalStageTerminalEvidence"
+    },
+    {
       "$ref": "#/$defs/ExternalStageAcceptRequest"
     },
     {
@@ -1405,6 +1408,115 @@
         "succeeded",
         "failed"
       ]
+    },
+    "ExternalStageTerminalEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "handoff_id",
+        "delivery_key",
+        "issue_key",
+        "attempt_number",
+        "plan_revision",
+        "stage_key",
+        "execution_number",
+        "authority_epoch",
+        "credential_epoch",
+        "reporter_class",
+        "reporter_role",
+        "terminal_status",
+        "terminal_sequence",
+        "terminal_at",
+        "terminal_report_digest"
+      ],
+      "properties": {
+        "handoff_id": {
+          "$ref": "#/$defs/ExternalStageHandoffID"
+        },
+        "delivery_key": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "issue_key": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "attempt_number": {
+          "type": "integer",
+          "format": "int64",
+          "minimum": 1
+        },
+        "plan_revision": {
+          "type": "integer",
+          "format": "int64",
+          "minimum": 1
+        },
+        "stage_key": {
+          "type": "string",
+          "enum": [
+            "specification",
+            "implementation",
+            "qa",
+            "deployment",
+            "verification"
+          ]
+        },
+        "execution_number": {
+          "type": "integer",
+          "format": "int64",
+          "minimum": 1
+        },
+        "authority_epoch": {
+          "type": "integer",
+          "format": "int64",
+          "minimum": 1
+        },
+        "credential_epoch": {
+          "type": "integer",
+          "format": "int64",
+          "minimum": 1
+        },
+        "reporter_class": {
+          "type": "string",
+          "enum": [
+            "pharos",
+            "janus"
+          ]
+        },
+        "reporter_role": {
+          "type": "string",
+          "enum": [
+            "owner",
+            "dependency"
+          ]
+        },
+        "dependency_key": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9._-]{0,63}$"
+        },
+        "terminal_status": {
+          "type": "string",
+          "enum": [
+            "succeeded",
+            "failed"
+          ]
+        },
+        "terminal_sequence": {
+          "type": "integer",
+          "format": "int64",
+          "minimum": 1
+        },
+        "terminal_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "terminal_report_digest": {
+          "$ref": "#/$defs/ExternalStageSHA256Digest"
+        }
+      },
+      "description": "Owner-authorized value-free projection of one immutable terminal report; secrets and report bodies never cross this boundary."
     }
   }
 }
