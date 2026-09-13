@@ -9,6 +9,19 @@ Semantic Versioning (`x.y.z`, until 5.21.0), INSPR calendar v1
 (`YYMMDDhhmmss.0.0`, the UTC reservation second as a SemVer-shaped
 coordinate, from the first entry below that form).
 
+## [260913202224.0.0] — 2026-09-13
+
+### Added — Retry-safe terminal evidence (PAI-1024)
+
+- Expose owner-authorized terminal external-stage handoff evidence with the exact delivery, execution, authority, reporter, credential and terminal-report bindings required for a fresh retry.
+
+### Fixed
+
+- Accept a producer’s causal direct transition from accepted to succeeded or failed while preserving sequence, epoch, and typed-evidence checks (PAI-1022).
+- Keep the v6 home link inside a configured public base path instead of navigating to the origin root (PAI-972).
+- Isolate dependency-only database race checks while retaining the full required backend release assurance surface (PAI-1003).
+- Restore the immutable v1 external-stage contract source while retaining the additive terminal-evidence API in an unpinned declaration file (PAI-1024).
+
 ## [260913075842.0.0] — 2026-09-13
 
 ### Fixed — Native baseline review handoff (PAI-967)
