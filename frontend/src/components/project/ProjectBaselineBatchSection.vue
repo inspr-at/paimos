@@ -426,7 +426,7 @@ async function review() {
     hydrateFromDraft(reviewed)
     await load()
   } catch (e) {
-    error.value = errMsg(e, 'Review could not be bound.')
+    error.value = errMsg(e, 'Changes could not be reviewed.')
     confirmStart.value = false
   } finally {
     busy.value = false
@@ -770,7 +770,7 @@ function stateLabel(d: Draft | null, b: Batch | null) {
         </button>
       </div>
       <div v-if="canWrite" class="bb-actions">
-        <button type="button" class="btn btn-sm" data-testid="bind-review" :disabled="busy || !!launchSelectionProblem" @click="review">Bind review</button>
+        <button type="button" class="btn btn-sm" data-testid="bind-review" :disabled="busy || !!launchSelectionProblem" @click="review">Review changes</button>
         <label class="bb-confirm">
           <input
             type="checkbox"
@@ -779,7 +779,7 @@ function stateLabel(d: Draft | null, b: Batch | null) {
             :disabled="!reviewBindingCurrent"
             @change="onConfirmStart"
           />
-          I confirm this exact baseline, scope, mode, and any displayed one-shot launch grant
+          I confirm these exact changes and any one-shot launch grant
         </label>
         <button type="button" class="btn btn-primary btn-sm" data-testid="start-batch" :disabled="!canStart" @click="start">
           Start batch

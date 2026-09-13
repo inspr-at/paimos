@@ -289,7 +289,9 @@ describe('ProjectBaselineBatchSection', () => {
     expect(el.querySelector('[data-testid="draft-impact"]')!.textContent).toContain('0 unresolved')
     expect(el.textContent).toContain('party:approver')
     expect(el.textContent).toContain('untrusted')
-    expect(el.textContent).toContain('Bind review')
+    expect(el.textContent).toContain('Review changes')
+    expect(el.textContent).toContain('I confirm these exact changes and any one-shot launch grant')
+    expect(el.textContent).not.toContain('Bind review')
     expect(el.textContent).toContain('Manual')
     app.unmount()
   })
@@ -361,8 +363,11 @@ describe('ProjectBaselineBatchSection', () => {
     const { el, app } = mount()
     await settle()
 
-    ;(el.querySelector('[data-testid="bind-review"]') as HTMLButtonElement).click()
+    const reviewButton = el.querySelector('[data-testid="bind-review"]') as HTMLButtonElement
+    expect(reviewButton.textContent).toContain('Review changes')
+    reviewButton.click()
     await settle()
+    expect(reviewCalls()[0][0]).toBe('/projects/9/baseline-batches/1/review')
     expect(el.querySelector('[data-testid="baseline-state"]')!.textContent).toBe('review')
 
     toggleReq(el, 'req.unicode')
@@ -381,7 +386,7 @@ describe('ProjectBaselineBatchSection', () => {
     await settle()
     expect(startCalls()).toHaveLength(0)
 
-    ;(el.querySelector('[data-testid="bind-review"]') as HTMLButtonElement).click()
+    reviewButton.click()
     await settle()
     expect(el.querySelector('[data-testid="baseline-state"]')!.textContent).toBe('review')
     expect(confirm.disabled).toBe(false)
@@ -556,7 +561,7 @@ describe('ProjectBaselineBatchSection', () => {
     expect(el.querySelector('[data-testid="baseline-state"]')!.textContent).toBe('needs-review')
     ;(el.querySelector('[data-testid="bind-review"]') as HTMLButtonElement).click()
     await settle()
-    expect(el.textContent).toContain('Review could not be bound.')
+    expect(el.textContent).toContain('Changes could not be reviewed.')
     expect(el.querySelector('[data-testid="baseline-state"]')!.textContent).toBe('needs-review')
     const confirm = el.querySelector('[data-testid="confirm-start"]') as HTMLInputElement
     expect(confirm.disabled).toBe(true)

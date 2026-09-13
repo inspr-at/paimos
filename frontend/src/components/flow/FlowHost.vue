@@ -73,6 +73,7 @@ async function onFlowIntent(event: Event) {
     return
   }
   const type = String(detail.type || '')
+  if (type === 'flow:review-batch') event.preventDefault()
   if (type === 'flow:navigate-stage' || type === 'flow:toggle-map') return
   if (type === 'flow:header-identity' || type === 'flow:header-account') {
     await router.push('/settings?tab=account').catch(() => {})

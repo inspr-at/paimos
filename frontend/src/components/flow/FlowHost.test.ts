@@ -101,25 +101,27 @@ describe('Flow host UI', () => {
     expect(shell).not.toBeNull()
     expect(shell?.getAttribute('layout-mode')).toBe('bounded')
     expect(shell?.getAttribute('content-layout')).toBeNull()
-    shell?.dispatchEvent(
-      new CustomEvent('flow-intent', {
-        bubbles: true,
-        composed: true,
-        detail: { type: 'flow:review-batch' },
-      }),
-    )
+    const reviewIntent = new CustomEvent('flow-intent', {
+      bubbles: true,
+      cancelable: true,
+      composed: true,
+      detail: { type: 'flow:review-batch' },
+    })
+    expect(shell?.dispatchEvent(reviewIntent)).toBe(false)
+    expect(reviewIntent.defaultPrevented).toBe(true)
     await vi.waitFor(() => expect(postFlowHostIntent).toHaveBeenCalled())
     expect(postFlowHostIntent.mock.calls[0][1]).toBe('flow:review-batch')
     await vi.waitFor(() =>
       expect(routerPush).toHaveBeenCalledWith('/projects/9?tab=overview#baseline-batch'),
     )
-    shell?.dispatchEvent(
-      new CustomEvent('flow-intent', {
-        bubbles: true,
-        composed: true,
-        detail: { type: 'flow:start-intent' },
-      }),
-    )
+    const startIntent = new CustomEvent('flow-intent', {
+      bubbles: true,
+      cancelable: true,
+      composed: true,
+      detail: { type: 'flow:start-intent' },
+    })
+    expect(shell?.dispatchEvent(startIntent)).toBe(true)
+    expect(startIntent.defaultPrevented).toBe(false)
     await vi.waitFor(() =>
       expect(postFlowHostIntent.mock.calls.some((call) => call[1] === 'flow:start-intent')).toBe(true),
     )
