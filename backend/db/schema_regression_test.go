@@ -32,7 +32,41 @@ func schemaNames(t *testing.T, database *sql.DB, query string) []string {
 	return names
 }
 
-const latestSchemaVersion = 195
+const latestSchemaVersion = 196
+
+func TestMigration196PreservesM195AndReplacesExternalStageCausalGuard(t *testing.T) {
+	database, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "m196-upgrade.db")+"?_txlock=immediate")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+
+	if err := migrateThrough(database, 195); err != nil {
+		t.Fatalf("migrate through M195: %v", err)
+	}
+	if version, err := CurrentSchemaVersion(database); err != nil || version != 195 {
+		t.Fatalf("pre-upgrade schema version=%d err=%v", version, err)
+	}
+	if !tableExists(t, database, "machine_notifier_bindings") {
+		t.Fatal("M195 machine notifier binding disappeared before M196")
+	}
+
+	if err := migrateThrough(database, 196); err != nil {
+		t.Fatalf("apply M196: %v", err)
+	}
+	if version, err := CurrentSchemaVersion(database); err != nil || version != 196 {
+		t.Fatalf("post-upgrade schema version=%d err=%v", version, err)
+	}
+	var triggerCount int
+	if err := database.QueryRow(`SELECT COUNT(*) FROM sqlite_master
+		WHERE type='trigger' AND name='trg_external_stage_handoff_causal_update_guard'`).Scan(&triggerCount); err != nil {
+		t.Fatal(err)
+	}
+	if triggerCount != 1 || !tableExists(t, database, "machine_notifier_bindings") {
+		t.Fatalf("M196 trigger count=%d preserved_m195=%t", triggerCount,
+			tableExists(t, database, "machine_notifier_bindings"))
+	}
+}
 
 func TestMigration191AddsClosedOneShotLaunchAuthority(t *testing.T) {
 	database := openTestDB(t)

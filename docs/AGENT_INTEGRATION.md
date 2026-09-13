@@ -1118,9 +1118,9 @@ External-stage reporting is a separate machine-to-machine boundary from local
 run telemetry. A handoff is bound to one delivery/issue, immutable attempt plan,
 stage execution and predecessor lineage, authority epoch, reporter
 registration, credential epoch, expiry, schema major, fixture digest, and safe
-context digest. Handoff lifecycle is
-`issued → accepted → active|waiting|blocked → succeeded|failed`; it does not
-widen the canonical delivery-stage enums.
+context digest. Handoff lifecycle is `issued → accepted → succeeded|failed`;
+reporters may emit `active|waiting|blocked` progress states between acceptance
+and a terminal report. This does not widen the canonical delivery-stage enums.
 
 Every external pull, accept, or report requires the exact registered Bearer API
 key plus a separate credential in the inbound-only
