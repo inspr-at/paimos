@@ -23,9 +23,10 @@ import (
 type PrincipalKind string
 
 const (
-	PrincipalSession         PrincipalKind = "session"
-	PrincipalAPIKey          PrincipalKind = "api_key"
-	PrincipalMachineNotifier PrincipalKind = "machine_notifier"
+	PrincipalSession             PrincipalKind = "session"
+	PrincipalAPIKey              PrincipalKind = "api_key"
+	PrincipalMachineNotifier     PrincipalKind = "machine_notifier"
+	PrincipalConversationService PrincipalKind = "conversation_service"
 )
 
 // Principal is the safe credential identity authenticated for one request.
@@ -90,11 +91,17 @@ func NewAPIKeyPrincipal(keyID, userID int64, scopes ScopeSet) (Principal, error)
 	return newAPIKeyPrincipal(PrincipalAPIKey, keyID, userID, scopes)
 }
 
+// NewConversationServicePrincipal reconstructs the safe identity of a
+// persisted conversation-service credential. It never accepts bearer bytes.
+func NewConversationServicePrincipal(keyID, userID int64) (Principal, error) {
+	return newAPIKeyPrincipal(PrincipalConversationService, keyID, userID, ScopeSet{})
+}
+
 func newAPIKeyPrincipal(kind PrincipalKind, keyID, userID int64, scopes ScopeSet) (Principal, error) {
 	if keyID <= 0 || userID <= 0 {
 		return Principal{}, ErrCredentialUnavailable
 	}
-	if kind != PrincipalAPIKey && kind != PrincipalMachineNotifier {
+	if kind != PrincipalAPIKey && kind != PrincipalMachineNotifier && kind != PrincipalConversationService {
 		return Principal{}, ErrCredentialUnavailable
 	}
 	return Principal{
@@ -131,7 +138,7 @@ func (principal Principal) SafeCredentialID() string {
 	if principal.kind == PrincipalSession {
 		return principal.sessionCredentialID
 	}
-	if principal.kind == PrincipalAPIKey || principal.kind == PrincipalMachineNotifier {
+	if principal.kind == PrincipalAPIKey || principal.kind == PrincipalMachineNotifier || principal.kind == PrincipalConversationService {
 		return strconv.FormatInt(principal.apiKeyID, 10)
 	}
 	return ""
@@ -181,7 +188,7 @@ func ReauthorizePrincipalTx(ctx context.Context, tx *sql.Tx, principal Principal
 	switch principal.kind {
 	case PrincipalSession:
 		return reauthorizeSessionPrincipalTx(ctx, tx, principal, now)
-	case PrincipalAPIKey, PrincipalMachineNotifier:
+	case PrincipalAPIKey, PrincipalMachineNotifier, PrincipalConversationService:
 		return reauthorizeAPIKeyPrincipalTx(ctx, tx, principal, now)
 	default:
 		return nil, Principal{}, ErrCredentialUnavailable
@@ -266,7 +273,7 @@ func reauthorizeSessionPrincipalTx(ctx context.Context, tx *sql.Tx, expected Pri
 }
 
 func reauthorizeAPIKeyPrincipalTx(ctx context.Context, tx *sql.Tx, expected Principal, now time.Time) (*models.User, Principal, error) {
-	if (expected.kind != PrincipalAPIKey && expected.kind != PrincipalMachineNotifier) || expected.apiKeyID <= 0 || expected.sessionCredentialID != "" {
+	if (expected.kind != PrincipalAPIKey && expected.kind != PrincipalMachineNotifier && expected.kind != PrincipalConversationService) || expected.apiKeyID <= 0 || expected.sessionCredentialID != "" {
 		return nil, Principal{}, ErrCredentialUnavailable
 	}
 	user := &models.User{}
@@ -275,7 +282,11 @@ func reauthorizeAPIKeyPrincipalTx(ctx context.Context, tx *sql.Tx, expected Prin
 	dests := append([]any{&scopesCSV, &credentialKind, &disabledAt, &expiresAt}, userScanDests(user)...)
 	// #nosec G202 -- userSelectCols is a fixed package constant.
 	err := tx.QueryRowContext(ctx, `
-		SELECT ak.scopes,ak.credential_kind,ak.disabled_at,ak.expires_at,`+userSelectCols+`
+		SELECT ak.scopes,CASE
+		 WHEN ak.credential_kind='general' AND EXISTS(
+		  SELECT 1 FROM conversation_service_bindings binding WHERE binding.api_key_id=ak.id
+		 ) THEN 'conversation_service' ELSE ak.credential_kind END,
+		 ak.disabled_at,ak.expires_at,`+userSelectCols+`
 		FROM api_keys ak JOIN users u ON u.id=ak.user_id
 		WHERE ak.id=?
 	`, expected.apiKeyID).Scan(dests...)
@@ -319,7 +330,7 @@ func (principal Principal) valid() bool {
 			(principal.impersonated || principal.actorUserID == principal.userID) &&
 			(!principal.impersonated || principal.actorUserID != principal.userID) &&
 			principal.scopes.Has(ScopeAll)
-	case PrincipalAPIKey, PrincipalMachineNotifier:
+	case PrincipalAPIKey, PrincipalMachineNotifier, PrincipalConversationService:
 		return principal.sessionCredentialID == "" && principal.apiKeyID > 0 &&
 			principal.actorUserID > 0 && principal.userID == principal.actorUserID &&
 			!principal.impersonated
@@ -363,6 +374,8 @@ func principalKindForCredential(credentialKind string) (PrincipalKind, bool) {
 		return PrincipalAPIKey, true
 	case "machine_notifier":
 		return PrincipalMachineNotifier, true
+	case "conversation_service":
+		return PrincipalConversationService, true
 	default:
 		return "", false
 	}

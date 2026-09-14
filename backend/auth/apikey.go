@@ -66,7 +66,11 @@ func resolveAPIKeyPrincipalAt(rawKey string, now time.Time) (*models.User, Princ
 	// Scan order: key id + scopes column + the user-cols list.
 	dests := append([]any{&keyID, &scopesCSV, &credentialKind, &disabledAt, &expiresAt, &lastUsedAt}, userScanDests(u)...)
 	err := db.DB.QueryRow(`
-		SELECT ak.id,ak.scopes,ak.credential_kind,ak.disabled_at,ak.expires_at,ak.last_used_at,`+userSelectCols+`
+		SELECT ak.id,ak.scopes,CASE
+		 WHEN ak.credential_kind='general' AND EXISTS(
+		  SELECT 1 FROM conversation_service_bindings binding WHERE binding.api_key_id=ak.id
+		 ) THEN 'conversation_service' ELSE ak.credential_kind END,
+		 ak.disabled_at,ak.expires_at,ak.last_used_at,`+userSelectCols+`
 		FROM api_keys ak JOIN users u ON u.id = ak.user_id
 		WHERE ak.key_hash = ?
 	`, hash).Scan(dests...)
