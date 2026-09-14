@@ -13,12 +13,12 @@ import { describe, expect, it } from 'vitest'
 import { isUsableFlowState } from './flowHost'
 
 const FLOW_TARBALL_URL =
-  'https://github.com/inspr-at/flow-shell/releases/download/v0.2.1/inspr-flow-shell-0.2.1.tgz'
-const FLOW_TARBALL_SHA256 = '26d77999397dc25247066a189c8a4a728f636a0f7046b60dbb13cfedeab250bf'
+  'https://github.com/inspr-at/flow-shell/releases/download/v0.2.2/inspr-flow-shell-0.2.2.tgz'
+const FLOW_TARBALL_SHA256 = '44768b96966a5bcf2d45da927340d95cdb2f2f6e3dd87455af00ce5139769a69'
 const frontendRoot = join(dirname(fileURLToPath(import.meta.url)), '../..')
 
 describe('Flow host packaging', () => {
-  it('pins public Flow 0.2.1 and the verified GitHub tarball digest', () => {
+  it('pins public Flow 0.2.2 and the verified GitHub tarball digest', () => {
     const pkg = JSON.parse(readFileSync(join(frontendRoot, 'package.json'), 'utf8')) as {
       engines?: { node?: string }
       version: string
@@ -31,7 +31,7 @@ describe('Flow host packaging', () => {
     expect(pkg.engines?.node).toBe('>=24')
     expect(pkg.dependencies['@inspr/flow-shell']).toBe(FLOW_TARBALL_URL)
     const entry = lock.packages['node_modules/@inspr/flow-shell']
-    expect(entry.version).toBe('0.2.1')
+    expect(entry.version).toBe('0.2.2')
     expect(entry.resolved).toBe(FLOW_TARBALL_URL)
     expect(entry.integrity).toMatch(/^sha512-/)
     const hex = Buffer.from(entry.integrity!.slice('sha512-'.length), 'base64').toString('hex')

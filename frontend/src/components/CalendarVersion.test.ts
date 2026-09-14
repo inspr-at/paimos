@@ -1,77 +1,139 @@
-import { afterEach, describe, expect, it } from 'vitest'
-import { createApp, h } from 'vue'
-
-import display from '@/brand/calendar-version-display.json'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { createApp, h, nextTick, reactive, type App } from 'vue'
+import display from '@/vendor/calendar-version-display/display.json'
 import CalendarVersion from './CalendarVersion.vue'
+import * as renderer from '@/vendor/calendar-version-display/version.js'
 
-function mount(props: { version: string; scheme?: string; prefix?: string }) {
-  document.body.innerHTML = '<div id="root"></div>'
+type Props = {
+  version: string
+  scheme?: string
+  prefix?: string
+  mode?: 'pretty' | 'reduced'
+  brand?: string
+  interactive?: boolean
+}
+const apps: App[] = []
+async function mount(input: Props) {
+  const root = document.createElement('div')
+  document.body.append(root)
+  const props = reactive(input)
   const app = createApp({ render: () => h(CalendarVersion, props) })
-  app.mount('#root')
-  return app
+  app.mount(root)
+  apps.push(app)
+  await nextTick()
+  return { app, props, root, label: root.querySelector<HTMLElement>('.calendar-version-label')! }
 }
 
-describe('CalendarVersion', () => {
+function clipboard() {
+  return vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue()
+}
+
+describe('CalendarVersion shared adapter', () => {
   afterEach(() => {
-    document.body.innerHTML = ''
+    for (const app of apps.splice(0)) app.unmount()
+    document.body.replaceChildren()
+    vi.restoreAllMocks()
   })
 
-  it('bundles the pinned doctrine data', () => {
-    expect(display.schema).toBe('inspr.calendar-version-display.v1')
-    expect(display.scheme).toBe('inspr-calendar-v2')
-    expect(display.design_revision).toBe(3)
-    expect(display.weights.yy).toBe(1)
-    expect(display.weights.mm).toBe(0.8)
-    expect(display.weights.dd).toBe(1)
-    expect(display.weights.hh).toBe(0.6)
-    expect(display.weights.mi).toBe(0.4)
-    expect(display.weights.ss).toBe(0.2)
-    expect(display.weights.tail).toBe(0.2)
-    expect(display.tint.segments).toEqual(['yy', 'mm', 'dd'])
-    expect(display.tint.default).toBe('#d69b31')
-    expect(display.tint.mix).toBe(0.8)
-    expect(display.tint.space).toBe('oklab')
-  })
-
-  it('weights a calendar v2 coordinate from the data and keeps the canonical text', () => {
-    const app = mount({ version: '260909151030.0.0', scheme: 'inspr-calendar-v2' })
-    const span = document.querySelector<HTMLSpanElement>('span.cv2')!
-    expect(span).not.toBeNull()
-    expect(span.textContent).toBe('v260909151030.0.0')
-    expect(span.dataset.version).toBe('v260909151030.0.0')
-    expect(span.querySelector('b.yy')!.textContent).toBe('26')
-    expect(span.querySelector('b.hh')!.textContent).toBe('15')
-    expect(span.querySelector('b.tail')!.textContent).toBe('.0.0')
-    for (const [segment, weight] of Object.entries(display.weights)) {
-      const property = (display.css.properties as Record<string, string>)[segment]
-      expect(span.style.getPropertyValue(property)).toBe(String(weight))
-    }
-    expect(span.style.getPropertyValue('--cv2-mix')).toBe(`${Math.round(display.tint.mix * 100)}%`)
-    expect(span.style.getPropertyValue('--cv2-tint')).toBe(display.tint.default)
-    expect(span.querySelectorAll('b.tinted').length).toBe(display.tint.segments.length)
-    app.unmount()
-  })
-
-  it('renders plain text for other schemes and never decides by shape', () => {
-    for (const [version, scheme] of [
-      ['26.09.04', 'inspr-calendar-v1'],
-      ['5.21.0', 'legacy'],
-      ['260909151030.0.0', 'inspr-calendar-v1'],
-      ['26.09.04', 'inspr-calendar-v2'],
-    ] as const) {
-      const app = mount({ version, scheme })
-      expect(document.querySelector('span.cv2')).toBeNull()
-      expect(document.getElementById('root')!.textContent).toBe(`v${version}`)
-      app.unmount()
-    }
-  })
-
-  it('defaults the scheme to the build-time release record', () => {
-    expect(typeof __APP_VERSION_SCHEME__).toBe('string')
-    const app = mount({ version: '260909151030.0.0' })
-    expect(document.querySelector('span.cv2') !== null).toBe(
-      __APP_VERSION_SCHEME__ === 'inspr-calendar-v2',
+  it('uses Pretty by default while preserving canonical machine metadata and product brand', async () => {
+    const render = vi.spyOn(renderer, 'renderVersion')
+    const { label } = await mount({
+      version: '260909151030.0.0',
+      scheme: 'inspr-calendar-v2',
+      brand: '#123456',
+    })
+    expect(label.querySelector('.separator')).not.toBeNull()
+    expect(label.dataset.version).toBe('v260909151030.0.0')
+    expect(label.dataset.canonical).toBe('260909151030.0.0')
+    expect(label.querySelector<HTMLElement>('.yy')!.style.opacity).toBe(String(display.weights.yy))
+    expect(render).toHaveBeenCalledWith(
+      label,
+      'v260909151030.0.0',
+      'inspr-calendar-v2',
+      expect.objectContaining({ brand: '#123456' }),
     )
+    expect(label.getAttribute('aria-label')).toContain('Copy version')
+  })
+
+  it('copies the exact canonical version by mouse and keyboard, without decorative prefix', async () => {
+    const copy = clipboard()
+    const { label } = await mount({ version: '260909151030.0.0', scheme: 'inspr-calendar-v2' })
+    label.click()
+    await nextTick()
+    expect(copy).toHaveBeenLastCalledWith('260909151030.0.0')
+    label.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+    await nextTick()
+    expect(copy).toHaveBeenCalledTimes(2)
+    await vi.waitFor(() =>
+      expect(label.querySelector('[role="status"]')!.textContent).toBe('Copied'),
+    )
+  })
+
+  it('keeps SemVer available and preserves canonical copy in that mode', async () => {
+    const copy = clipboard()
+    const { root, label } = await mount({
+      version: '260909151030.0.0',
+      scheme: 'inspr-calendar-v2',
+    })
+    root.querySelector<HTMLButtonElement>('[aria-label="Show SemVer"]')!.click()
+    await nextTick()
+    expect(label.querySelector('.separator')).toBeNull()
+    expect(label.textContent).toBe('v260909151030.0.0')
+    label.click()
+    expect(copy).toHaveBeenLastCalledWith('260909151030.0.0')
+    root.querySelector<HTMLButtonElement>('[aria-label="Show Pretty version"]')!.click()
+    await nextTick()
+    expect(label.querySelector('.separator')).not.toBeNull()
+  })
+
+  it('disposes the old controller on prop changes and unmount', async () => {
+    const copy = clipboard()
+    const { app, props, label } = await mount({
+      version: '260909151030.0.0',
+      scheme: 'inspr-calendar-v2',
+    })
+    props.version = '260910151030.0.0'
+    await nextTick()
+    label.click()
+    expect(copy).toHaveBeenCalledTimes(1)
+    expect(copy).toHaveBeenLastCalledWith('260910151030.0.0')
     app.unmount()
+    apps.splice(apps.indexOf(app), 1)
+    label.click()
+    expect(copy).toHaveBeenCalledTimes(1)
+  })
+
+  it('leaves legacy, wrong-scheme, invalid dates and arbitrary prefixes plain', async () => {
+    for (const input of [
+      { version: '5.21.0', scheme: 'legacy' },
+      { version: '260909151030.0.0', scheme: 'inspr-calendar-v1' },
+      { version: '260229151030.0.0', scheme: 'inspr-calendar-v2' },
+      { version: '260431151030.0.0', scheme: 'inspr-calendar-v2' },
+      { version: '260909151030.0.0', scheme: 'inspr-calendar-v2', prefix: 'release-' },
+    ]) {
+      const { label, root } = await mount(input)
+      expect(label.textContent).toBe(`${input.prefix ?? 'v'}${input.version}`)
+      expect(label.getAttribute('role')).toBeNull()
+      expect(root.querySelector('button')).toBeNull()
+    }
+  })
+
+  it('supports empty prefixes, real leap dates and non-interactive surrounding controls', async () => {
+    const { label, root } = await mount({
+      version: '280229151030.0.0',
+      scheme: 'inspr-calendar-v2',
+      prefix: '',
+      interactive: false,
+    })
+    expect(label.querySelector('.yy')!.textContent).toBe('28')
+    expect(label.querySelector('.v')).toBeNull()
+    expect(label.getAttribute('role')).toBe('img')
+    expect(label.hasAttribute('tabindex')).toBe(false)
+    expect(root.querySelector('button')).toBeNull()
+  })
+
+  it('defaults the scheme to the release record rather than guessing from the string', async () => {
+    const { label } = await mount({ version: '260909151030.0.0' })
+    expect(Boolean(label.querySelector('.yy'))).toBe(__APP_VERSION_SCHEME__ === 'inspr-calendar-v2')
   })
 })

@@ -7,14 +7,14 @@ import { publicURL } from '@/publicPath'
 import { useBranding } from '@/composables/useBranding'
 import { useSidebarColors } from '@/composables/useSidebarColors'
 import { postLoginRedirectOrFallback } from '@/router/redirects'
-import { formatDisplayVersion } from '@/utils/version'
 import AppIcon from '@/components/AppIcon.vue'
+import CalendarVersion from '@/components/CalendarVersion.vue'
 
 const { branding } = useBranding()
 const { bgColor, patternImage } = useSidebarColors()
 const route = useRoute()
 
-const version = formatDisplayVersion(__APP_VERSION__)
+const version = __APP_VERSION__
 
 // PAI-120: SSO probe. The button only appears once /api/auth/oidc/status
 // reports enabled=true, so an instance with no IdP configured looks
@@ -319,7 +319,7 @@ function backToLogin() {
         <img :src="publicURL(branding.logo)" alt="" class="footer-logo" aria-hidden="true" />
         <span>{{ branding.company }}</span>
         <span class="footer-sep">·</span>
-        <span>v{{ version }}</span>
+        <CalendarVersion :version="version" />
         <span class="footer-sep">·</span>
         <a href="https://github.com/PAIMOS/paimos" target="_blank" rel="noopener" class="footer-gh" title="GitHub">
           <AppIcon name="github" :size="12" />

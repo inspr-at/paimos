@@ -28,7 +28,7 @@
     "@fontsource/dm-sans": "^5.2.8",
     "@fontsource/jetbrains-mono": "^5.2.8",
     "@fontsource/manrope": "^5.3.0",
-    "@inspr/flow-shell": "https://github.com/inspr-at/flow-shell/releases/download/v0.2.1/inspr-flow-shell-0.2.1.tgz",
+    "@inspr/flow-shell": "https://github.com/inspr-at/flow-shell/releases/download/v0.2.2/inspr-flow-shell-0.2.2.tgz",
     "dompurify": "^3.4.12",
     "force-graph": "^1.51.4",
     "lucide-vue-next": "^0.577.0",

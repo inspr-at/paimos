@@ -19,10 +19,14 @@ import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import { fileURLToPath, URL } from 'node:url'
 import { readFileSync } from 'node:fs'
-import { execSync } from 'node:child_process'
+import { execFileSync, execSync } from 'node:child_process'
 import { resolve } from 'node:path'
 
 const frontendDir = fileURLToPath(new URL('.', import.meta.url))
+// Direct local and Docker builds enforce the same offline closure as CI.
+execFileSync(process.execPath, [resolve(frontendDir, '../scripts/verify-calendar-version-bundle.mjs')], {
+  stdio: 'inherit',
+})
 const version = readFileSync(resolve(frontendDir, '../VERSION'), 'utf-8').trim()
 const versionScheme = String(
   JSON.parse(readFileSync(resolve(frontendDir, '../scripts/release/version-scheme.json'), 'utf-8')).version_scheme,

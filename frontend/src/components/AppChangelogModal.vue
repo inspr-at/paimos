@@ -24,6 +24,8 @@ import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import AppModal from '@/components/AppModal.vue'
 import AppIcon from '@/components/AppIcon.vue'
+import CalendarVersion from '@/components/CalendarVersion.vue'
+import releaseScheme from '../../../scripts/release/version-scheme.json'
 import changelogRaw from '@docs/CHANGELOG.md?raw'
 import { formatDateWithLocale } from '@/composables/useDateFormat'
 import { parseChangelog, type VersionEntry } from '@/utils/changelog'
@@ -32,6 +34,16 @@ const props = defineProps<{ open: boolean }>()
 defineEmits<{ close: [] }>()
 
 const entries = computed<VersionEntry[]>(() => parseChangelog(changelogRaw))
+const calendarAnchorIndex = computed(() =>
+  entries.value.findIndex(entry => entry.version === releaseScheme.anchor.first_calendar_version),
+)
+// Changelog order plus the explicit migration anchor identifies the era.
+// Never infer a historical version's scheme from its numeric shape.
+function displayScheme(index: number) {
+  return releaseScheme.version_scheme === 'inspr-calendar-v2' &&
+    calendarAnchorIndex.value >= 0 && index <= calendarAnchorIndex.value
+    ? 'inspr-calendar-v2' : 'legacy'
+}
 
 const selectedIndex = ref(0)
 const selected = computed<VersionEntry | null>(() =>
@@ -153,7 +165,7 @@ watch(
               @click="selectRelease(i)"
             >
               <span class="cl-row-dot" />
-              <span class="cl-row-ver">{{ e.version }}</span>
+              <span class="cl-row-ver"><CalendarVersion :version="e.version" :scheme="displayScheme(i)" prefix="" :interactive="false" /></span>
               <span class="cl-row-date">{{ fmtSidebarDate(e.date) }}</span>
             </button>
           </li>
@@ -167,7 +179,7 @@ watch(
           <div class="cl-content-toolbar">
             <div class="cl-content-head-id">
               <span :class="['cl-row-dot', 'cl-row-dot--lg', `cl-row--${selected.bumpKind}`]" />
-              <h2>v{{ selected.version }}</h2>
+              <h2><CalendarVersion :version="selected.version" :scheme="displayScheme(selectedIndex)" /></h2>
               <span v-if="selected.bumpKind !== 'unknown'" class="cl-bump-label">{{ selected.bumpKind }}</span>
             </div>
             <nav class="cl-release-nav" aria-label="Release navigation">

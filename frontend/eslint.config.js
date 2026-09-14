@@ -15,6 +15,7 @@ export default defineConfigWithVueTs(
       'coverage/**',
       'node_modules/**',
       'src/types/generated/**', // generated from the Go schema
+      'src/vendor/calendar-version-display/**', // immutable upstream closure; verified before builds
       'scripts/.visual-tooling/**',
       '*.config.{js,ts,mjs,cjs}',
     ],
@@ -30,6 +31,8 @@ export default defineConfigWithVueTs(
     name: 'app/rules',
     rules: {
       'vue/multi-word-component-names': 'off',
+      // Flow uses a native Shadow DOM slot, not Vue's deprecated slot syntax.
+      'vue/no-deprecated-slot-attribute': ['error', { ignoreParents: ['inspr-flow-shell'] }],
       '@typescript-eslint/no-explicit-any': 'warn',
       // PAI-295 — first adoption: the gate enforces all the *bug* rules
       // (no-undef, valid-v-for, no-dupe-args, …) as errors so new violations
