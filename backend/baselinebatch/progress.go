@@ -188,6 +188,9 @@ func (s *Service) finishBatchState(ctx context.Context, tx *sql.Tx, stored store
 	if err := s.annotateBridge(ctx, tx, stored, snapshot, &progress, &state); err != nil {
 		return BatchBlocked, progress, snapshot, err
 	}
+	if err := projectJanusPrerequisite(ctx, tx, stored, snapshot, &progress, state); err != nil {
+		return BatchBlocked, progress, snapshot, err
+	}
 	return state, progress, snapshot, nil
 }
 
