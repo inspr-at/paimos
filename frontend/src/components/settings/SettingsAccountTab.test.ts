@@ -12,7 +12,7 @@ interface APIKeyFixture {
   created_at: string
   last_used_at: string | null
   scopes?: string[]
-  credential_kind?: 'general' | 'machine_notifier'
+  credential_kind?: 'general' | 'machine_notifier' | 'conversation_service'
 }
 
 const { apiGet, apiPost, apiPatch, apiDelete, authState, confirmAction } = vi.hoisted(() => ({
@@ -64,7 +64,7 @@ function apiKey(
   id: number,
   name: string,
   scopes?: string[],
-  credentialKind?: 'general' | 'machine_notifier',
+  credentialKind?: 'general' | 'machine_notifier' | 'conversation_service',
 ): APIKeyFixture {
   const key: APIKeyFixture = {
     id,
@@ -250,6 +250,7 @@ describe('SettingsAccountTab machine notifier enrollment (PAI-1021)', () => {
   it('does not expose enrollment to a non-admin', async () => {
     const el = await mountWithKeys([])
     expect(el.querySelector('[data-testid="machine-notifier-enrollment"]')).toBeNull()
+    expect(el.querySelector('[data-testid="conversation-enrollment"]')).toBeNull()
     expect(apiPost).not.toHaveBeenCalledWith('/auth/machine-notifiers', expect.anything())
   })
 
@@ -358,17 +359,27 @@ describe('SettingsAccountTab machine notifier enrollment (PAI-1021)', () => {
     const el = await mountWithKeys([
       apiKey(1, 'ordinary', ['*'], 'general'),
       apiKey(2, 'notifier', [], 'machine_notifier'),
+      apiKey(3, 'conversation', [], 'conversation_service'),
     ])
     const rows = [...el.querySelectorAll<HTMLTableRowElement>('table.settings-table tbody tr')]
     expect(rows[0]!.textContent).toContain('API key')
     expect(rows[1]!.textContent).toContain('Machine notifier')
     expect(rows[1]!.textContent).toContain('fixed notifier route')
+    expect(rows[2]!.textContent).toContain('Conversation service')
+    expect(rows[2]!.textContent).toContain('fixed conversation binding')
 
     rows[0]!.querySelector<HTMLButtonElement>('button')!.click()
     await settle()
     expect(apiDelete).toHaveBeenCalledWith('/auth/api-keys/1')
     expect(confirmAction).toHaveBeenCalledWith(
       expect.objectContaining({ message: expect.stringContaining('API key') }),
+    )
+
+    rows[2]!.querySelector<HTMLButtonElement>('button')!.click()
+    await settle()
+    expect(apiDelete).toHaveBeenCalledWith('/auth/api-keys/3')
+    expect(confirmAction).toHaveBeenLastCalledWith(
+      expect.objectContaining({ message: expect.stringContaining('conversation service credential') }),
     )
   })
 })

@@ -17,6 +17,14 @@ import AppModal from '@/components/AppModal.vue'
 import AppIcon from '@/components/AppIcon.vue'
 import AiPaperTrailPanel from '@/components/ai/AiPaperTrailPanel.vue'
 import Paimos6CommandShortcutSettings from '@/components/v6/Paimos6CommandShortcutSettings.vue'
+import ConversationEnrollment from './ConversationEnrollment.vue'
+import {
+  decodeAgeCiphertext,
+  downloadEncryptedCredential,
+  hasExactKeys,
+  ownObject,
+  type EncryptedCredentialDownload,
+} from './encryptedCredential'
 
 const auth = useAuthStore()
 const route = useRoute()
@@ -318,7 +326,7 @@ async function disableTOTP() {
 }
 
 // ── API Keys ─────────────────────────────────────────────────────────────────
-interface APIKey { id: number; name: string; key_prefix: string; created_at: string; last_used_at: string | null; scopes?: string[]; credential_kind?: 'general' | 'machine_notifier' }
+interface APIKey { id: number; name: string; key_prefix: string; created_at: string; last_used_at: string | null; scopes?: string[]; credential_kind?: 'general' | 'machine_notifier' | 'conversation_service' }
 // PAI-379: api-key scopes. The sentinel '*' means "full owner-role
 // power" (the long-standing default). Named scopes narrow the key. The
 // catalog is fetched from /api/schema on mount so the UI stays in sync
@@ -382,7 +390,11 @@ async function createAPIKey() {
   finally { newKeyCreating.value = false }
 }
 async function revokeAPIKey(key: APIKey) {
-  const label = key.credential_kind === 'machine_notifier' ? 'machine notifier credential' : 'API key'
+  const label = key.credential_kind === 'machine_notifier'
+    ? 'machine notifier credential'
+    : key.credential_kind === 'conversation_service'
+      ? 'conversation service credential'
+      : 'API key'
   if (!await confirm({ message: `Revoke this ${label}? Any integrations using it will stop working immediately.`, confirmLabel: 'Revoke', danger: true })) return
   await api.delete(`/auth/api-keys/${key.id}`)
   apiKeys.value = apiKeys.value.filter(k => k.id !== key.id)
@@ -420,30 +432,7 @@ const machineNotifierForm = ref({
 const machineNotifierCreating = ref(false)
 const machineNotifierError = ref('')
 const machineNotifierOK = ref('')
-const machineNotifierDownload = ref<{ filename: string; ciphertext: Uint8Array } | null>(null)
-
-function ownObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
-function hasExactKeys(value: Record<string, unknown>, expected: string[]): boolean {
-  const actual = Object.keys(value).sort()
-  return actual.length === expected.length && expected.slice().sort().every((key, index) => key === actual[index])
-}
-
-function decodeAgeCiphertext(value: unknown): Uint8Array | null {
-  if (typeof value !== 'string' || value.length === 0 || value.length > 1024 * 1024 || value.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(value)) return null
-  try {
-    const raw = window.atob(value)
-    if (window.btoa(raw) !== value) return null
-    const bytes = Uint8Array.from(raw, character => character.charCodeAt(0))
-    const header = 'age-encryption.org/v1\n'
-    if (bytes.length <= header.length || ![...header].every((character, index) => bytes[index] === character.charCodeAt(0))) return null
-    return bytes
-  } catch {
-    return null
-  }
-}
+const machineNotifierDownload = ref<EncryptedCredentialDownload | null>(null)
 
 function parseMachineNotifierEnrollment(
   value: unknown,
@@ -474,27 +463,6 @@ function parseMachineNotifierEnrollment(
 function machineNotifierFilename(name: string, id: number): string {
   const stem = name.replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 64) || `machine-notifier-${id}`
   return `${stem}.age`
-}
-
-function downloadMachineNotifierCredential(ready: { filename: string; ciphertext: Uint8Array }) {
-  const { filename, ciphertext } = ready
-  const credentialBytes = new Uint8Array(ciphertext.length)
-  credentialBytes.set(ciphertext)
-  const blob = new Blob([credentialBytes.buffer], { type: 'application/octet-stream' })
-  const url = URL.createObjectURL(blob)
-  const link = document.createElement('a')
-  link.href = url
-  link.download = filename
-  link.hidden = true
-  document.body.appendChild(link)
-  try {
-    link.click()
-  } finally {
-    window.setTimeout(() => {
-      link.remove()
-      URL.revokeObjectURL(url)
-    }, 1000)
-  }
 }
 
 async function createMachineNotifier() {
@@ -545,7 +513,7 @@ async function createMachineNotifier() {
     machineNotifierForm.value.name = ''
     machineNotifierForm.value.age_recipients = ''
     try {
-      downloadMachineNotifierCredential(ready)
+      downloadEncryptedCredential(ready)
     } catch {
       machineNotifierOK.value = `Encrypted credential ready as ${ready.filename}. Use the download button to try again.`
     }
@@ -554,6 +522,10 @@ async function createMachineNotifier() {
   } finally {
     machineNotifierCreating.value = false
   }
+}
+
+function addConversationCredential(credential: APIKey) {
+  apiKeys.value.unshift(credential)
 }
 
 // ── Auto-watch sync (PAI-331) ───────────────────────────────────────────────
@@ -1002,10 +974,12 @@ init()
       <div v-if="machineNotifierOK" class="ok-banner" role="status">{{ machineNotifierOK }}</div>
       <div class="form-actions">
         <button type="submit" class="btn btn-primary btn-sm" :disabled="machineNotifierCreating">{{ machineNotifierCreating ? 'Creating encrypted credential…' : 'Create and download encrypted credential' }}</button>
-        <button v-if="machineNotifierDownload" type="button" class="btn btn-ghost btn-sm" @click="downloadMachineNotifierCredential(machineNotifierDownload)">Download encrypted credential again</button>
+        <button v-if="machineNotifierDownload" type="button" class="btn btn-ghost btn-sm" @click="downloadEncryptedCredential(machineNotifierDownload)">Download encrypted credential again</button>
       </div>
     </form>
   </div>
+
+  <ConversationEnrollment v-if="auth.isAdmin" @created="addConversationCredential" />
 
   <div class="section">
     <div class="section-header">
@@ -1057,13 +1031,14 @@ init()
             <td><code class="icode">{{ k.key_prefix }}…</code></td>
             <td>
               <span v-if="k.credential_kind === 'machine_notifier'" class="muted">fixed notifier route</span>
+              <span v-else-if="k.credential_kind === 'conversation_service'" class="muted">fixed conversation binding</span>
               <span v-else-if="scopeDisplay(k.scopes) === 'full'" class="muted">full</span>
               <span v-else-if="scopeDisplay(k.scopes) === 'none'" class="muted" aria-label="No scoped access">none</span>
               <span v-else class="apikey-scope-chips">
                 <code v-for="s in k.scopes" :key="s" class="icode">{{ s }}</code>
               </span>
             </td>
-            <td class="muted">{{ k.credential_kind === 'machine_notifier' ? 'Machine notifier' : 'API key' }}</td>
+            <td class="muted">{{ k.credential_kind === 'machine_notifier' ? 'Machine notifier' : k.credential_kind === 'conversation_service' ? 'Conversation service' : 'API key' }}</td>
             <td class="muted">{{ k.created_at.slice(0,10) }}</td>
             <td class="muted">{{ k.last_used_at ? k.last_used_at.slice(0,10) : '—' }}</td>
             <td class="actions-cell"><button class="btn btn-ghost btn-sm danger" @click="revokeAPIKey(k)">Revoke</button></td>
