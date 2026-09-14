@@ -560,11 +560,13 @@ func mapProgress(draft *baselinebatch.Draft, batch *baselinebatch.Batch, now tim
 	if currentHumanReview(draft, batch) && batch == nil {
 		overallForecast = fallbackForecast(25, now, asOf)
 	}
+	hasOverall, hasTask := false, false
 	for _, item := range forecasts {
 		view := forecastFrom(item, now, asOf)
 		progress := progressFrom(item, asOf, fresh)
 		switch item.Subject {
 		case "overall", "":
+			hasOverall = true
 			overallForecast = view
 			overallProgress = progress
 			if item.Observed && item.Fresh {
@@ -575,10 +577,18 @@ func mapProgress(draft *baselinebatch.Draft, batch *baselinebatch.Batch, now tim
 				freshnessLabel = "Educated guess · " + strings.TrimSpace(item.Label+" "+item.Basis)
 			}
 		default:
+			hasTask = true
 			taskLabel = item.Subject
 			taskForecast = view
 			taskProgress = progress
 		}
+	}
+	// With no narrower task report, "Current batch" describes the same batch
+	// as "Overall". Preserve its evidence and estimate instead of showing the
+	// unrelated zero-percent fallback. A real task report always takes priority.
+	if batch != nil && hasOverall && !hasTask {
+		taskForecast = overallForecast
+		taskProgress = overallProgress
 	}
 	if batch != nil && (batch.ControlState == baselinebatch.ControlPaused || batch.Status == baselinebatch.BatchPaused) {
 		taskProgress.Progress["status"] = "pending"
