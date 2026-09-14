@@ -13,6 +13,7 @@ import (
 	"errors"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"slices"
 	"sync"
 	"testing"
@@ -86,6 +87,9 @@ func TestCodexConversationStreamsAndDeduplicatesCompletedAnswer(t *testing.T) {
 	}
 	if _, err := collector.replay(3); !errors.Is(err, ErrCodexConversationCursor) {
 		t.Fatalf("future cursor error=%v", err)
+	}
+	if _, err := collector.replay(^uint64(0)); !errors.Is(err, ErrCodexConversationCursor) {
+		t.Fatalf("unrepresentable cursor error=%v", err)
 	}
 }
 
@@ -324,6 +328,38 @@ func TestCodexConversationEntryPointIsExplicitAndCallable(t *testing.T) {
 	t.Cleanup(func() { _, _ = process.Stop(context.Background(), ControlRequest{CorrelationID: "ordinary-cleanup"}) })
 	if _, exposed := process.(CodexConversationExecution); exposed {
 		t.Fatal("ordinary coding Start exposed conversation collection")
+	}
+}
+
+func TestCodexConversationCleanupRejectsReplacedScratch(t *testing.T) {
+	parent := canonicalTempDir(t)
+	scratch := filepath.Join(parent, "paimos-conversation-owned")
+	if err := os.Mkdir(scratch, 0700); err != nil {
+		t.Fatal(err)
+	}
+	_, identity, err := canonicalCodexConversationScratch(scratch, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	outside := canonicalTempDir(t)
+	outsideFixture := filepath.Join(outside, "outside-fixture")
+	if err := os.WriteFile(outsideFixture, []byte("harmless fixture"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(scratch); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, scratch); err != nil {
+		t.Fatal(err)
+	}
+
+	execution := &codexConversationExecution{scratch: scratch, scratchIdentity: identity}
+	execution.cleanupScratch()
+	if content, err := os.ReadFile(outsideFixture); err != nil || string(content) != "harmless fixture" {
+		t.Fatalf("cleanup escaped replaced scratch: content=%q err=%v", content, err)
+	}
+	if info, err := os.Lstat(scratch); err != nil || info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("unowned replacement was removed: info=%v err=%v", info, err)
 	}
 }
 

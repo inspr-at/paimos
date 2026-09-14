@@ -125,7 +125,7 @@ func (a *CodexAdapter) StartConversation(ctx context.Context, request StartReque
 	if err != nil {
 		return nil, errors.New("create Codex conversation scratch")
 	}
-	if err = os.Chmod(scratch, 0700); err != nil {
+	if err = os.Chmod(scratch, 0700); err != nil { // #nosec G302 -- a private directory requires owner execute permission; group/other access remains disabled.
 		_ = os.RemoveAll(scratch)
 		return nil, errors.New("protect Codex conversation scratch")
 	}
@@ -142,7 +142,7 @@ func (a *CodexAdapter) StartConversation(ctx context.Context, request StartReque
 		_ = os.RemoveAll(scratch)
 		return nil, err
 	}
-	return &codexConversationExecution{codexProcess: process, scratch: scratch}, nil
+	return &codexConversationExecution{codexProcess: process, scratch: scratch, scratchIdentity: mode.scratchIdentity}, nil
 }
 
 func (a *CodexAdapter) startRestrictedConversation(ctx context.Context, request StartRequest, options CodexConversationOptions, mode codexConversationMode, observe func(AdapterEvent), collector *codexConversationCollector) (_ *codexProcess, returnErr error) {

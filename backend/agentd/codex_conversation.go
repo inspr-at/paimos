@@ -98,14 +98,16 @@ type CodexConversationExecution interface {
 
 type codexConversationExecution struct {
 	*codexProcess
-	scratch     string
-	cleanupOnce sync.Once
+	scratch         string
+	scratchIdentity os.FileInfo
+	cleanupOnce     sync.Once
 }
 
 func (p *codexConversationExecution) cleanupScratch() {
 	p.cleanupOnce.Do(func() {
-		if p.scratch != "" {
-			_ = os.RemoveAll(p.scratch)
+		canonical, identity, err := canonicalCodexConversationScratch(p.scratch, false)
+		if err == nil && canonical == p.scratch && p.scratchIdentity != nil && os.SameFile(identity, p.scratchIdentity) {
+			_ = os.RemoveAll(canonical) // #nosec G703 -- the sole constructor stores an MkdirTemp child and its identity; canonical owner/no-symlink and SameFile checks rebind it above.
 		}
 	})
 }
@@ -575,12 +577,12 @@ func (c *codexConversationCollector) wait(ctx context.Context) (CodexConversatio
 func (c *codexConversationCollector) replay(after uint64) ([]CodexConversationDelta, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if after > c.nextCursor {
+	if after > maxCodexConversationEvents || after > c.nextCursor {
 		return nil, ErrCodexConversationCursor
 	}
-	start := int(after)
-	out := make([]CodexConversationDelta, len(c.deltas)-start)
-	copy(out, c.deltas[start:])
+	tail := c.deltas[after:]
+	out := make([]CodexConversationDelta, len(tail))
+	copy(out, tail)
 	return out, nil
 }
 
