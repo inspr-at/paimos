@@ -4,8 +4,8 @@ import { useRoute, useRouter, RouterLink } from 'vue-router'
 import { api, ApiError } from '@/api/client'
 import { useBranding } from '@/composables/useBranding'
 import { useSidebarColors } from '@/composables/useSidebarColors'
-import { formatDisplayVersion } from '@/utils/version'
 import AppIcon from '@/components/AppIcon.vue'
+import CalendarVersion from '@/components/CalendarVersion.vue'
 import LoadingText from '@/components/LoadingText.vue'
 import { publicURL } from '@/publicPath'
 
@@ -13,7 +13,7 @@ const route = useRoute()
 const router = useRouter()
 const { branding } = useBranding()
 const { bgColor, patternImage } = useSidebarColors()
-const version = formatDisplayVersion(__APP_VERSION__)
+const version = __APP_VERSION__
 
 const token = computed(() => String(route.params.token || ''))
 
@@ -154,7 +154,7 @@ const invalidMessage = computed(() => {
         <img :src="publicURL(branding.logo)" alt="" class="footer-logo" aria-hidden="true" />
         <span>{{ branding.company }}</span>
         <span class="footer-sep">·</span>
-        <span>v{{ version }}</span>
+        <CalendarVersion :version="version" />
       </footer>
     </div>
   </div>

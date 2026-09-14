@@ -54,7 +54,12 @@ function isActive(path: string) {
   <div class="sidebar-footer">
     <template v-if="isExpanded">
       <a :href="branding.website" target="_blank" rel="noopener" class="footer-link">&copy; {{ branding.website.replace(/^https?:\/\//, '') }}</a>
-      <button class="footer-version" @click="showChangelog = true" title="What's new"><CalendarVersion :version="rawVersion" /></button>
+      <span class="footer-version-group">
+        <CalendarVersion :version="rawVersion" />
+        <button class="footer-version" type="button" @click="showChangelog = true" title="What's new" aria-label="What's new">
+          <AppIcon name="history" :size="13" />
+        </button>
+      </span>
     </template>
   </div>
   <div class="sidebar-meta-row">
@@ -139,6 +144,10 @@ function isActive(path: string) {
   letter-spacing: .02em; transition: color .15s;
 }
 .footer-link:hover { color: #9ab8ce; }
+.footer-version-group {
+  display: inline-flex; align-items: center; gap: .4rem;
+  font-size: 10px; color: #5a7a96; font-weight: 600;
+}
 .footer-version {
   font-size: 10px; color: #5a7a96; font-weight: 600; letter-spacing: .04em;
   flex-shrink: 0; background: none; border: none; padding: 0; cursor: pointer;

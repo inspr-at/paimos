@@ -4,13 +4,13 @@ import { RouterLink } from 'vue-router'
 import { api, ApiError } from '@/api/client'
 import { useBranding } from '@/composables/useBranding'
 import { useSidebarColors } from '@/composables/useSidebarColors'
-import { formatDisplayVersion } from '@/utils/version'
 import AppIcon from '@/components/AppIcon.vue'
+import CalendarVersion from '@/components/CalendarVersion.vue'
 import { publicURL } from '@/publicPath'
 
 const { branding } = useBranding()
 const { bgColor, patternImage } = useSidebarColors()
-const version = formatDisplayVersion(__APP_VERSION__)
+const version = __APP_VERSION__
 
 const email = ref('')
 const loading = ref(false)
@@ -89,7 +89,7 @@ async function submit() {
         <img :src="publicURL(branding.logo)" alt="" class="footer-logo" aria-hidden="true" />
         <span>{{ branding.company }}</span>
         <span class="footer-sep">·</span>
-        <span>v{{ version }}</span>
+        <CalendarVersion :version="version" />
       </footer>
     </div>
   </div>

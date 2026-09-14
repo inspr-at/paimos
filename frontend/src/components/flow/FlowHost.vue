@@ -5,6 +5,7 @@
  */
 
 import '@inspr/flow-shell'
+import CalendarVersion from '@/components/CalendarVersion.vue'
 import flowLogo from '@inspr/flow-shell/assets/inspr-logo.svg'
 
 import { computed, nextTick, ref, watch } from 'vue'
@@ -38,6 +39,7 @@ const router = useRouter()
 const projectRef = computed(() => props.projectId)
 const { state, active, notice, submitIntent } = useFlowHost(projectRef)
 const logoSrc = flowLogo as string
+const appVersion = __APP_VERSION__
 const shellEl = ref<FlowShellElement | null>(null)
 const useFillLayout = computed(() => props.contentLayout === 'fill')
 
@@ -118,6 +120,7 @@ async function onFlowIntent(event: Event) {
     data-testid="paimos-flow-host"
     @flow-intent="onFlowIntent"
   >
+    <CalendarVersion slot="header-version" class="paimos-flow-version" :version="appVersion" />
     <div
       class="paimos-flow-toolbar"
       :data-flow-host-region="useFillLayout ? 'toolbar' : undefined"
@@ -156,6 +159,10 @@ async function onFlowIntent(event: Event) {
 .paimos-flow-toolbar,
 .paimos-flow-body {
   min-width: 0;
+}
+.paimos-flow-version {
+  font-size: 11px;
+  color: var(--muted);
 }
 .paimos-flow-body {
   flex: 1;

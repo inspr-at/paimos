@@ -9,6 +9,17 @@ Semantic Versioning (`x.y.z`, until 5.21.0), INSPR calendar v1
 (`YYMMDDhhmmss.0.0`, the UTC reservation second as a SemVer-shaped
 coordinate, from the first entry below that form).
 
+## [Unreleased]
+
+### Changed
+
+- Use the shared INSPR Calendar Versioning display in the sidebar and authentication footers, with Pretty/SemVer selection, canonical version copying and product branding (PAI-1025). Verify the pinned renderer, configuration and license files offline before builds.
+
+### Fixed
+
+- Show current, fulfilled Janus prerequisites in the delivery flow without treating them as user access authorization (PAI-967).
+- Use the reported batch forecast for Current batch when no separate task forecast exists (PAI-967).
+
 ## [260913202224.0.0] — 2026-09-13
 
 ### Added — Retry-safe terminal evidence (PAI-1024)

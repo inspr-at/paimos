@@ -1,114 +1,142 @@
-<!--
-  SPDX-License-Identifier: AGPL-3.0-only
-  Copyright (C) 2026 Markus Barta
+<!-- SPDX-License-Identifier: AGPL-3.0-only -->
+<script lang="ts">
+import { ref } from 'vue'
 
-  CalendarVersion — renders a version label with the INSPR calendar v2 display
-  design (PAI-994, INSPR-414). The weights and tint are read at build time from
-  src/brand/calendar-version-display.json, an in-repo copy of the doctrine data
-  file pinned by scripts/check-calendar-version-display.sh.
+type VersionMode = 'pretty' | 'reduced'
+const preferenceKey = 'paimos:calendar-version-mode'
+const preferredMode = ref<VersionMode>('pretty')
+try {
+  if (localStorage.getItem(preferenceKey) === 'reduced') preferredMode.value = 'reduced'
+} catch {
+  /* Storage is optional; the shared default is Pretty. */
+}
+</script>
 
-  Only an `inspr-calendar-v2` coordinate is weighted, and only when the release
-  record says so (the scheme comes from scripts/release/version-scheme.json via
-  __APP_VERSION_SCHEME__, never from the string's shape). Everything else renders
-  plain. The element's text content and data-version stay the canonical label.
--->
 <script setup lang="ts">
-import { computed } from 'vue'
-
-import display from '@/brand/calendar-version-display.json'
-
-const SEGMENTS = ['v', 'yy', 'mm', 'dd', 'hh', 'mi', 'ss', 'tail'] as const
-type Segment = (typeof SEGMENTS)[number]
-const CALENDAR_V2 = /^[1-9]\d{11}\.0\.0$/
+import { computed, onBeforeUnmount, unref, watchEffect } from 'vue'
+import { useBranding } from '@/composables/useBranding'
+import display from '@/vendor/calendar-version-display/display.json'
+import { disposeVersion, parts, renderVersion } from '@/vendor/calendar-version-display/version.js'
+import { attachVersionInteraction } from '@/vendor/calendar-version-display/version-interaction.js'
 
 const props = withDefaults(
   defineProps<{
     version: string
     scheme?: string
     prefix?: string
+    mode?: VersionMode
+    brand?: string
+    interactive?: boolean
   }>(),
-  { scheme: () => __APP_VERSION_SCHEME__, prefix: 'v' },
+  { scheme: () => __APP_VERSION_SCHEME__, prefix: 'v', interactive: true },
+)
+const { branding } = useBranding()
+const host = ref<HTMLElement | null>(null)
+const mode = computed(() => props.mode ?? preferredMode.value)
+const label = computed(() => `${props.prefix}${props.version}`)
+const valid = computed(() => parts(label.value, props.scheme) !== null)
+let reducedInteraction: { dispose: () => void } | undefined
+let feedbackObserver: MutationObserver | undefined
+
+function dispose() {
+  feedbackObserver?.disconnect()
+  feedbackObserver = undefined
+  reducedInteraction?.dispose()
+  reducedInteraction = undefined
+  if (host.value) disposeVersion(host.value)
+}
+
+watchEffect(
+  () => {
+    const element = host.value
+    if (!element) return
+    dispose()
+    renderVersion(element, label.value, props.scheme, {
+      config: display,
+      mode: mode.value,
+      brand: props.brand ?? unref(branding)?.colors?.accent ?? display.tint.default,
+      interactive: props.interactive,
+    })
+    element.dataset.version = label.value
+    element.dataset.canonical = props.version
+    if (valid.value && props.interactive) {
+      // Upstream adds interaction for Pretty; use the same helper for SemVer.
+      if (mode.value === 'reduced')
+        reducedInteraction = attachVersionInteraction(element, props.version)
+      element.setAttribute('aria-label', `${props.version} — Copy version`)
+      feedbackObserver = new MutationObserver(() => {
+        const feedback = element.querySelector('[role="status"]')
+        if (!feedback) return
+        if (element.dataset.copyState === 'copied') feedback.textContent = 'Copied'
+        if (element.dataset.copyState === 'error')
+          feedback.textContent = 'Copy unavailable. Select the version.'
+      })
+      feedbackObserver.observe(element, { attributes: true, attributeFilter: ['data-copy-state'] })
+    }
+  },
+  { flush: 'post' },
 )
 
-const plain = computed(() => `${props.prefix}${props.version}`)
-const weighted = computed(
-  () =>
-    display.scheme === props.scheme &&
-    props.scheme === 'inspr-calendar-v2' &&
-    CALENDAR_V2.test(props.version),
-)
-const parts = computed<Record<Segment, string>>(() => {
-  const d = props.version
-  return {
-    v: props.prefix,
-    yy: d.slice(0, 2),
-    mm: d.slice(2, 4),
-    dd: d.slice(4, 6),
-    hh: d.slice(6, 8),
-    mi: d.slice(8, 10),
-    ss: d.slice(10, 12),
-    tail: d.slice(12),
+function toggleMode() {
+  preferredMode.value = mode.value === 'pretty' ? 'reduced' : 'pretty'
+  try {
+    localStorage.setItem(preferenceKey, preferredMode.value)
+  } catch {
+    /* Optional preference. */
   }
-})
-const properties = display.css.properties as Record<Segment | 'tint' | 'mix', string>
-const weights = display.weights as Record<Segment, number>
-const style = computed(() => {
-  const vars: Record<string, string> = {}
-  for (const segment of SEGMENTS) vars[properties[segment]] = String(weights[segment])
-  vars[properties.tint] = display.tint.default
-  vars[properties.mix] = `${Math.round(display.tint.mix * 100)}%`
-  return vars
-})
-const tinted = new Set(display.tint.segments)
-const segments = SEGMENTS
+}
+onBeforeUnmount(dispose)
 </script>
 
 <template>
-  <span v-if="weighted" class="cv2" :data-version="plain" :style="style"
-    ><b
-      v-for="segment in segments"
-      :key="segment"
-      :class="[segment, { tinted: tinted.has(segment) }]"
-      >{{ parts[segment] }}</b
-    ></span
-  >
-  <template v-else>{{ plain }}</template>
+  <span class="calendar-version">
+    <span ref="host" class="calendar-version-label" />
+    <button
+      v-if="valid && interactive && !props.mode"
+      class="calendar-version-mode"
+      type="button"
+      :title="mode === 'pretty' ? 'Show SemVer' : 'Show Pretty version'"
+      :aria-label="mode === 'pretty' ? 'Show SemVer' : 'Show Pretty version'"
+      @click.stop="toggleMode"
+    >
+      <svg
+        viewBox="0 0 16 16"
+        width="12"
+        height="12"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.4"
+        aria-hidden="true"
+      >
+        <path d="M5.5 4 1.5 8l4 4m5-8 4 4-4 4M9.5 2l-3 12" />
+      </svg>
+    </button>
+  </span>
 </template>
 
 <style scoped>
-.cv2 {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
+.calendar-version {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3em;
+  max-width: 100%;
 }
-.cv2 > b {
-  font-weight: inherit;
+.calendar-version-label {
+  min-width: 0;
 }
-.cv2 .v {
-  opacity: var(--o-v);
+.calendar-version-mode {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.15em;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  opacity: 0.55;
+  cursor: pointer;
+  flex: none;
 }
-.cv2 .yy {
-  opacity: var(--o-yy);
-}
-.cv2 .mm {
-  opacity: var(--o-mm);
-}
-.cv2 .dd {
-  opacity: var(--o-dd);
-}
-.cv2 .hh {
-  opacity: var(--o-hh);
-}
-.cv2 .mi {
-  opacity: var(--o-mi);
-}
-.cv2 .ss {
-  opacity: var(--o-ss);
-}
-.cv2 .tail {
-  opacity: var(--o-tail);
-}
-.cv2 .tinted {
-  color: color-mix(in oklab, currentColor, var(--cv2-tint) var(--cv2-mix));
+.calendar-version-mode:hover,
+.calendar-version-mode:focus-visible {
+  opacity: 1;
 }
 </style>

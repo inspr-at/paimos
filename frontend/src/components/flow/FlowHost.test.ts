@@ -63,12 +63,58 @@ function usableState() {
 
 describe('Flow host UI', () => {
   afterEach(() => {
+    vi.restoreAllMocks()
     document.body.innerHTML = ''
     getFlowHostState.mockReset()
     postFlowHostIntent.mockReset()
     routerPush.mockReset().mockResolvedValue(undefined)
     sessionExpired.value = false
     permissionsEpoch.value = null
+  })
+
+  it('renders the build version in the host-owned header slot without routing its controls', async () => {
+    getFlowHostState.mockResolvedValue(usableState())
+    const copy = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue()
+    const HostHarness = defineComponent({
+      setup() {
+        return () =>
+          h(
+            FlowHost,
+            { projectId: 9 },
+            {
+              toolbar: () => h('div', { 'data-testid': 'host-search' }, 'Search'),
+              default: () => h('div', { id: 'baseline-batch' }, 'Baseline controls'),
+            },
+          )
+      },
+    })
+    const mounted = await mountComponent(HostHarness)
+    await vi.waitFor(() => expect(getFlowHostState).toHaveBeenCalledWith(9))
+    await nextTick()
+
+    const shell = mounted.el.querySelector('inspr-flow-shell')
+    const version = shell?.querySelector<HTMLElement>('[slot="header-version"]')
+    const label = version?.querySelector<HTMLElement>('.calendar-version-label')
+    expect(version?.parentElement).toBe(shell)
+    expect(version?.classList.contains('paimos-flow-version')).toBe(true)
+    expect(__APP_VERSION_SCHEME__).toBe('inspr-calendar-v2')
+    expect(label?.dataset.canonical).toBe(__APP_VERSION__)
+    expect(label?.dataset.version).toBe(`v${__APP_VERSION__}`)
+    expect(label?.querySelector('.separator')).not.toBeNull()
+
+    label?.click()
+    await vi.waitFor(() => expect(copy).toHaveBeenCalledWith(__APP_VERSION__))
+    version?.querySelector<HTMLButtonElement>('[aria-label="Show SemVer"]')?.click()
+    await nextTick()
+    expect(label?.querySelector('.separator')).toBeNull()
+    version?.querySelector<HTMLButtonElement>('[aria-label="Show Pretty version"]')?.click()
+    await nextTick()
+
+    expect(postFlowHostIntent).not.toHaveBeenCalled()
+    expect(routerPush).not.toHaveBeenCalled()
+    expect(mounted.el.querySelector('[data-testid="host-search"]')?.textContent).toBe('Search')
+    expect(mounted.el.querySelector('#baseline-batch')?.textContent).toBe('Baseline controls')
+    await mounted.unmount()
   })
 
   it('keeps search toolbar and routes review without mutating start', async () => {
@@ -123,7 +169,9 @@ describe('Flow host UI', () => {
     expect(shell?.dispatchEvent(startIntent)).toBe(true)
     expect(startIntent.defaultPrevented).toBe(false)
     await vi.waitFor(() =>
-      expect(postFlowHostIntent.mock.calls.some((call) => call[1] === 'flow:start-intent')).toBe(true),
+      expect(postFlowHostIntent.mock.calls.some((call) => call[1] === 'flow:start-intent')).toBe(
+        true,
+      ),
     )
     await mounted.unmount()
   })
@@ -133,13 +181,17 @@ describe('Flow host UI', () => {
     const mounted = await mountComponent(FlowHost, { projectId: 4 })
     await vi.waitFor(() => expect(getFlowHostState).toHaveBeenCalled())
     sessionExpired.value = true
-    await vi.waitFor(() => expect(mounted.el.querySelector('[data-testid="paimos-flow-host"]')).toBeNull())
+    await vi.waitFor(() =>
+      expect(mounted.el.querySelector('[data-testid="paimos-flow-host"]')).toBeNull(),
+    )
     await mounted.unmount()
   })
 
   it('aligns refresh to full ten-minute boundaries', () => {
     expect(msUntilNextTenMinuteBoundary(Date.parse('2026-09-08T08:41:00.000Z'))).toBe(9 * 60 * 1000)
-    expect(msUntilNextTenMinuteBoundary(Date.parse('2026-09-08T08:50:00.000Z'))).toBe(10 * 60 * 1000)
+    expect(msUntilNextTenMinuteBoundary(Date.parse('2026-09-08T08:50:00.000Z'))).toBe(
+      10 * 60 * 1000,
+    )
   })
 
   it('does not mount Flow without a selected project', async () => {
@@ -170,7 +222,11 @@ describe('Flow host UI', () => {
       {
         default: () =>
           h('div', [
-            h('div', { id: 'project-footer-slot', class: 'project-footer-slot', 'data-flow-host-region': 'footer' }),
+            h('div', {
+              id: 'project-footer-slot',
+              class: 'project-footer-slot',
+              'data-flow-host-region': 'footer',
+            }),
             h('footer', { class: 'habitat-footer' }, [
               h('a', { href: '/legacy' }, 'Classic workspace'),
               h('a', { href: '/settings' }, 'Settings'),
@@ -188,9 +244,9 @@ describe('Flow host UI', () => {
     expect(shell?.getAttribute('layout-mode')).toBe('bounded')
     expect(shell?.getAttribute('content-layout')).toBeNull()
     expect(flowBody?.querySelector('#project-footer-slot')).not.toBeNull()
-    expect(flowBody?.querySelector('#project-footer-slot')?.getAttribute('data-flow-host-region')).toBe(
-      'footer',
-    )
+    expect(
+      flowBody?.querySelector('#project-footer-slot')?.getAttribute('data-flow-host-region'),
+    ).toBe('footer')
     expect(flowBody?.querySelector('footer.habitat-footer')).not.toBeNull()
 
     reset.remove()
@@ -207,7 +263,11 @@ describe('Flow host UI', () => {
         default: () =>
           h('div', [
             h('div', { class: 'main-content' }, 'Scroll body'),
-            h('div', { id: 'project-footer-slot', class: 'project-footer-slot', 'data-flow-host-region': 'footer' }),
+            h('div', {
+              id: 'project-footer-slot',
+              class: 'project-footer-slot',
+              'data-flow-host-region': 'footer',
+            }),
           ]),
       },
     )
@@ -219,7 +279,9 @@ describe('Flow host UI', () => {
     expect(shell?.getAttribute('content-layout')).toBe('fill')
     expect(toolbar?.getAttribute('data-flow-host-region')).toBe('toolbar')
     expect(body?.getAttribute('data-flow-host-region')).toBe('body')
-    expect(body?.querySelector('#project-footer-slot')?.getAttribute('data-flow-host-region')).toBe('footer')
+    expect(body?.querySelector('#project-footer-slot')?.getAttribute('data-flow-host-region')).toBe(
+      'footer',
+    )
 
     await mounted.unmount()
   })
