@@ -50,12 +50,12 @@ func TestCodexConversationModeBuildsFixedConfigurationAndThreadStart(t *testing.
 	}
 	wantProfile := `{filesystem={":minimal"="read",` + tomlQuoted(scratch) + `="write"},network={enabled=false}}`
 	fixed := map[string]string{
-		"analytics.enabled": "false",
-		"mcp_servers":       "{}",
+		"analytics.enabled":   "false",
+		"default_permissions": `"` + codexConversationPermissionProfile + `"`,
+		"mcp_servers":         "{}",
 		"permissions." + codexConversationPermissionProfile: wantProfile,
 		"project_doc_max_bytes":                             "0",
 		"shell_environment_policy":                          `{inherit="none",ignore_default_excludes=false,set={PATH="/usr/bin:/bin"},experimental_use_profile=false}`,
-		"tools.view_image":                                  "false",
 		"web_search":                                        `"disabled"`,
 	}
 	for key, want := range fixed {
@@ -300,11 +300,18 @@ func TestCodexConversationModeOfflineSandboxDenyFixture(t *testing.T) {
 	if err := run("/usr/bin/touch", inside); err != nil {
 		t.Fatal("scratch write was denied")
 	}
-	outside := filepath.Join(parent, "outside")
-	if err := run("/usr/bin/touch", outside); err == nil {
+	outsideFixture := filepath.Join(parent, "outside-fixture")
+	if err := os.WriteFile(outsideFixture, []byte("harmless fixture"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := run("/bin/cat", outsideFixture); err == nil {
+		t.Fatal("outside read unexpectedly succeeded")
+	}
+	outsideWrite := filepath.Join(parent, "outside-write")
+	if err := run("/usr/bin/touch", outsideWrite); err == nil {
 		t.Fatal("outside write unexpectedly succeeded")
 	}
-	if _, err := os.Stat(outside); !errors.Is(err, os.ErrNotExist) {
+	if _, err := os.Stat(outsideWrite); !errors.Is(err, os.ErrNotExist) {
 		t.Fatal("outside fixture was modified")
 	}
 
@@ -372,12 +379,12 @@ func completeCodexConversationPreflight(mode codexConversationMode) (
 	response.Model = mode.model
 	response.ModelProvider = "openai"
 	response.MultiAgentMode = json.RawMessage(`"explicitRequestOnly"`)
-	roots := []string{mode.scratch}
+	roots := []string{}
 	response.RuntimeWorkspaceRoots = &roots
 	response.Sandbox.Type = "workspaceWrite"
 	networkDisabled := false
 	response.Sandbox.NetworkAccess = &networkDisabled
-	writableRoots := []string{mode.scratch}
+	writableRoots := []string{}
 	response.Sandbox.WritableRoots = &writableRoots
 	response.Thread.ID = "thread-restricted"
 	response.Thread.CWD = mode.scratch

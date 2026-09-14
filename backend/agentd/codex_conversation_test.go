@@ -17,6 +17,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/inspr-at/paimos/backend/dispatchprofile"
 )
 
 func testConversationCollector(t *testing.T, bytes, events int) *codexConversationCollector {
@@ -270,17 +272,18 @@ func TestCodexConversationCollectorConcurrentReplayAndLateEvents(t *testing.T) {
 }
 
 func TestCodexConversationEntryPointIsExplicitAndCallable(t *testing.T) {
-	adapter := NewCodexAdapter(os.Args[0], "test")
-	adapter.command = func(_ string, _ ...string) *exec.Cmd {
+	adapter, request := conversationTestAdapter(t)
+	var argv []string
+	adapter.command = func(_ string, args ...string) *exec.Cmd {
+		argv = append([]string(nil), args...)
 		cmd := exec.Command(os.Args[0], "-test.run=^TestCodexConversationHelperProcess$")
 		cmd.Env = append(os.Environ(), codexHelperEnvironment+"=conversation-answer")
 		return cmd
 	}
 	var eventsMu sync.Mutex
 	var events []AdapterEvent
-	execution, err := adapter.StartConversation(context.Background(), StartRequest{
-		Workspace: t.TempDir(), Prompt: "private prompt", Identity: "codex:conversation", Adapter: AdapterCodex,
-	}, CodexConversationOptions{MaxOutputBytes: 64, MaxEvents: 8}, func(event AdapterEvent) {
+	scratchRoot := canonicalTempDir(t)
+	execution, err := adapter.StartConversation(context.Background(), request, CodexConversationOptions{MaxOutputBytes: 64, MaxEvents: 8, ScratchRoot: scratchRoot}, func(event AdapterEvent) {
 		eventsMu.Lock()
 		events = append(events, event)
 		eventsMu.Unlock()
@@ -288,11 +291,17 @@ func TestCodexConversationEntryPointIsExplicitAndCallable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if len(argv) < 4 || !slices.Equal(argv[:4], []string{"app-server", "--listen", "stdio://", "--strict-config"}) || slices.Contains(argv, "tools.view_image=false") || !slices.Contains(argv, "features.view_image=false") || !slices.Contains(argv, `default_permissions="aithema-conversation-v1"`) {
+		t.Fatalf("restricted app-server argv=%q", argv)
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	result, err := execution.WaitConversation(ctx)
 	if err != nil || result.Outcome != ConversationCompleted || result.Text != "Héllo 🌍" || result.ThreadID != "thread-owned" || result.TurnID != "turn-owned" || result.ItemID != "item-answer" {
 		t.Fatalf("result=%+v err=%v", result, err)
+	}
+	if entries, err := os.ReadDir(scratchRoot); err != nil || len(entries) != 0 {
+		t.Fatalf("conversation scratch survived reap: entries=%v err=%v", entries, err)
 	}
 	deltas, err := execution.ReplayConversation(0)
 	if err != nil || len(deltas) != 2 || deltas[0].Text+deltas[1].Text != result.Text {
@@ -334,16 +343,14 @@ func TestCodexConversationWaitCancellationAndDeadlineReapOwnedChild(t *testing.T
 		}, ConversationFailureDeadline},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			adapter := NewCodexAdapter(os.Args[0], "test")
+			adapter, request := conversationTestAdapter(t)
 			var child *exec.Cmd
 			adapter.command = func(_ string, _ ...string) *exec.Cmd {
 				child = exec.Command(os.Args[0], "-test.run=^TestCodexConversationHelperProcess$")
 				child.Env = append(os.Environ(), codexHelperEnvironment+"=conversation-hang")
 				return child
 			}
-			execution, err := adapter.StartConversation(context.Background(), StartRequest{
-				Workspace: t.TempDir(), Prompt: "private prompt", Identity: "codex:conversation-cancel", Adapter: AdapterCodex,
-			}, CodexConversationOptions{MaxOutputBytes: 64, MaxEvents: 8}, nil)
+			execution, err := adapter.StartConversation(context.Background(), request, CodexConversationOptions{MaxOutputBytes: 64, MaxEvents: 8}, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -367,6 +374,7 @@ func TestCodexConversationHelperProcess(t *testing.T) {
 	}
 	scanner := bufio.NewScanner(os.Stdin)
 	encoder := json.NewEncoder(os.Stdout)
+	step := 0
 	for scanner.Scan() {
 		var request struct {
 			ID     int             `json:"id"`
@@ -377,13 +385,51 @@ func TestCodexConversationHelperProcess(t *testing.T) {
 			os.Exit(2)
 		}
 		respond := func(result any) { _ = encoder.Encode(map[string]any{"id": request.ID, "result": result}) }
+		expect := func(want int) {
+			if step != want {
+				os.Exit(3)
+			}
+			step++
+		}
 		switch request.Method {
 		case "initialized":
+			expect(1)
 		case "initialize":
+			expect(0)
 			respond(map[string]any{})
+		case "account/read":
+			expect(2)
+			respond(map[string]any{"account": map[string]any{"type": "chatgpt", "email": "conversation@example.invalid"}})
+		case "experimentalFeature/list":
+			expect(3)
+			var data []codexConversationFeatureState
+			for _, feature := range codexConversationRequiredFeatures() {
+				feature.Stage = "stable"
+				if feature.Name == "skip_host_skill_discovery" {
+					feature.Stage = "underDevelopment"
+				}
+				data = append(data, feature)
+			}
+			respond(codexConversationExperimentalFeatureListResponse{Data: data})
+		case "permissionProfile/list":
+			expect(4)
+			respond(codexConversationPermissionProfileListResponse{Data: []codexConversationPermissionProfileState{{ID: codexConversationPermissionProfile, Allowed: true}}})
 		case "thread/start":
-			respond(map[string]any{"thread": map[string]any{"id": "thread-owned"}})
+			expect(5)
+			var params codexConversationThreadStartParams
+			if json.Unmarshal(request.Params, &params) != nil {
+				os.Exit(4)
+			}
+			respond(map[string]any{
+				"thread":                  map[string]any{"id": "thread-owned", "cwd": params.CWD, "environments": []any{}, "ephemeral": true, "model": params.Model, "modelProvider": "openai", "parentThreadId": nil, "path": nil},
+				"activePermissionProfile": map[string]any{"id": codexConversationPermissionProfile, "extends": nil},
+				"approvalPolicy":          "never", "approvalsReviewer": "user", "cwd": params.CWD,
+				"instructionSources": []any{}, "model": params.Model, "modelProvider": "openai",
+				"multiAgentMode": "explicitRequestOnly", "runtimeWorkspaceRoots": []any{},
+				"sandbox": map[string]any{"type": "workspaceWrite", "networkAccess": false, "writableRoots": []any{}},
+			})
 		case "turn/start":
+			expect(6)
 			respond(map[string]any{"turn": map[string]any{"id": "turn-owned", "status": "inProgress"}})
 			if mode == "conversation-hang" {
 				continue
@@ -397,4 +443,21 @@ func TestCodexConversationHelperProcess(t *testing.T) {
 		}
 	}
 	os.Exit(0)
+}
+
+func conversationTestAdapter(t *testing.T) (*CodexAdapter, StartRequest) {
+	t.Helper()
+	home := writeCodexHome(t, "conversation@example.invalid")
+	registry := testCodexRegistry(t, codexAccountRegistryEntry{Key: "conversation-account", Home: home, Email: "conversation@example.invalid"})
+	adapter := NewCodexAdapter(os.Args[0], "test")
+	adapter.SetAccounts(registry)
+	profile, err := dispatchprofile.Resolve("codex-sol-high", "1", AdapterCodex)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return adapter, StartRequest{
+		Prompt: "private prompt", Identity: "codex:conversation", Adapter: AdapterCodex,
+		AccountKey: "conversation-account", DispatchProfileID: profile.ID,
+		DispatchProfileVersion: profile.Version, ResolvedProfile: &profile,
+	}
 }

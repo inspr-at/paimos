@@ -226,11 +226,11 @@ func (mode codexConversationMode) configOverrides() []string {
 	profile := `{filesystem={":minimal"="read",` + tomlQuoted(mode.scratch) + `="write"},network={enabled=false}}`
 	overrides := []string{
 		"analytics.enabled=false",
+		`default_permissions="` + codexConversationPermissionProfile + `"`,
 		"mcp_servers={}",
 		"permissions." + codexConversationPermissionProfile + "=" + profile,
 		"project_doc_max_bytes=0",
 		`shell_environment_policy={inherit="none",ignore_default_excludes=false,set={PATH="` + codexConversationToolPath + `"},experimental_use_profile=false}`,
-		"tools.view_image=false",
 		`web_search="disabled"`,
 	}
 	// Deterministic ordering makes the complete deny policy reviewable and keeps
@@ -395,7 +395,10 @@ func (mode codexConversationMode) validateThreadStart(response codexConversation
 	if response.CWD != mode.scratch || response.Model != mode.model || response.ModelProvider != "openai" {
 		return fmt.Errorf("%w: cwd or server-approved model mismatched", errCodexConversationUnsupported)
 	}
-	if response.RuntimeWorkspaceRoots == nil || !slices.Equal(*response.RuntimeWorkspaceRoots, []string{mode.scratch}) {
+	// Codex normalizes cwd out of both returned extra-root collections. Empty
+	// therefore proves that the exact cwd is the sole workspace root; a repeated
+	// scratch path here would be an additional root rather than stronger proof.
+	if response.RuntimeWorkspaceRoots == nil || len(*response.RuntimeWorkspaceRoots) != 0 {
 		return fmt.Errorf("%w: runtime workspace roots mismatched", errCodexConversationUnsupported)
 	}
 	// An empty source set is the allowlist. Together with the enabled
@@ -408,7 +411,7 @@ func (mode codexConversationMode) validateThreadStart(response codexConversation
 		return fmt.Errorf("%w: multi-agent mode mismatched", errCodexConversationUnsupported)
 	}
 	if response.Sandbox.Type != "workspaceWrite" || response.Sandbox.NetworkAccess == nil || *response.Sandbox.NetworkAccess ||
-		response.Sandbox.WritableRoots == nil || !slices.Equal(*response.Sandbox.WritableRoots, []string{mode.scratch}) {
+		response.Sandbox.WritableRoots == nil || len(*response.Sandbox.WritableRoots) != 0 {
 		return fmt.Errorf("%w: sandbox authority exceeded the scratch-only profile", errCodexConversationUnsupported)
 	}
 	if !validOpaqueID(response.Thread.ID) || response.Thread.Ephemeral == nil || !*response.Thread.Ephemeral ||

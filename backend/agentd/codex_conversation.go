@@ -7,14 +7,15 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
 	"strings"
 	"sync"
 	"unicode/utf8"
 )
 
 const (
-	maxCodexConversationOutputBytes = 4 << 20
-	maxCodexConversationEvents      = 4096
+	maxCodexConversationOutputBytes = 256 << 10
+	maxCodexConversationEvents      = 512
 	maxCodexConversationPrebind     = 256
 )
 
@@ -30,6 +31,13 @@ type CodexConversationOptions struct {
 	// MaxEvents counts correlated deltas, completed items, and terminal
 	// notifications, including assistant items embedded in a terminal turn.
 	MaxEvents int
+	// ScratchRoot, when set, is a private operator-owned directory in which a
+	// fresh per-call directory is created. Empty uses the OS temporary root; the
+	// created child is still owner-only, identity-pinned, and removed after reap.
+	ScratchRoot string
+	// OutputSchema is the server-selected structured result contract. A caller
+	// cannot select it through ordinary Start, and only a JSON object is accepted.
+	OutputSchema json.RawMessage
 }
 
 type ConversationOutcome string
@@ -83,11 +91,42 @@ type CodexConversationResult struct {
 // it by explicitly calling CodexAdapter.StartConversation.
 type CodexConversationExecution interface {
 	Process
+	ConversationIdentity() (string, string, error)
 	ReplayConversation(after uint64) ([]CodexConversationDelta, error)
 	WaitConversation(context.Context) (CodexConversationResult, error)
 }
 
-type codexConversationExecution struct{ *codexProcess }
+type codexConversationExecution struct {
+	*codexProcess
+	scratch     string
+	cleanupOnce sync.Once
+}
+
+func (p *codexConversationExecution) cleanupScratch() {
+	p.cleanupOnce.Do(func() {
+		if p.scratch != "" {
+			_ = os.RemoveAll(p.scratch)
+		}
+	})
+}
+
+func (p *codexConversationExecution) Wait() error {
+	err := p.codexProcess.Wait()
+	p.cleanupScratch()
+	return err
+}
+
+func (p *codexConversationExecution) Stop(ctx context.Context, request ControlRequest) (ControlEffect, error) {
+	effect, err := p.codexProcess.Stop(ctx, request)
+	if err == nil {
+		p.cleanupScratch()
+	}
+	return effect, err
+}
+
+func (p *codexConversationExecution) ConversationIdentity() (string, string, error) {
+	return p.codexProcess.target()
+}
 
 type codexConversationItem struct {
 	streamed string

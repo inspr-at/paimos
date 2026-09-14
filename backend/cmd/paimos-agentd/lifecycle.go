@@ -64,6 +64,7 @@ type configuredProject struct {
 	AccountScopes []lifecycleintents.AccountScope `json:"account_scopes,omitempty"`
 	Workspaces    []configuredWorkspace           `json:"workspaces"`
 	Readiness     *configuredReadiness            `json:"readiness,omitempty"`
+	Conversation  *configuredConversation         `json:"conversation,omitempty"`
 }
 type lifecycleConfig struct {
 	Projects []configuredProject `json:"projects"`
@@ -88,6 +89,7 @@ type daemonLifecycle struct {
 	journal    *localjournal.Journal[runtimeRegistrationRecord]
 }
 type projectLifecycle struct {
+	runtimeMu        sync.RWMutex
 	owner            *daemonLifecycle
 	config           configuredProject
 	registration     lifecycleintents.Registration
@@ -101,6 +103,7 @@ type projectLifecycle struct {
 	consumers        *lifecycleclient.Consumers
 	consumerEvidence []runtimeconsumer.Evidence
 	healthAt         time.Time
+	conversation     *lifecycleclient.ConversationRunner
 }
 
 func newDaemonLifecycle(path, root, instance, reportURL, keyFile string, supervisor *agentd.Supervisor, primary *nativeConsumers, reporter *cliReporter) (*daemonLifecycle, error) {
@@ -212,6 +215,12 @@ func newDaemonLifecycle(path, root, instance, reportURL, keyFile string, supervi
 		ids = append(ids, p.config.ProjectID)
 	}
 	supervisor.BindAccountLifecycleProjects(ids)
+	for _, p := range d.projects {
+		projectDir := filepath.Join(dir, fmt.Sprintf("lifecycle-project-%d", p.config.ProjectID))
+		if err := configureProjectConversation(p, projectDir); err != nil {
+			return nil, err
+		}
+	}
 	return d, nil
 }
 func configuredProfile(id, version string) (dispatchprofile.Profile, error) {
@@ -405,6 +414,13 @@ func (d *daemonLifecycle) Run(ctx context.Context) {
 				}
 			}
 		}()
+		if p.conversation != nil {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				p.runConversation(ctx)
+			}()
+		}
 	}
 	wg.Wait()
 }
@@ -472,7 +488,9 @@ func (p *projectLifecycle) step(ctx context.Context) error {
 		if e != nil {
 			return e
 		}
+		p.runtimeMu.Lock()
 		p.record.Runtime = runtime
+		p.runtimeMu.Unlock()
 		if e = p.owner.journal.Put(p.record); e != nil {
 			return e
 		}
