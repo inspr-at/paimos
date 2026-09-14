@@ -79,11 +79,34 @@ func (a *CodexAdapter) executable() (string, error) {
 	return resolvePinnedExecutable(a.path, "codex", "operator-authenticated Codex CLI")
 }
 
+// StartConversation is an explicit, one-turn-only opt-in to assistant answer
+// collection. It is intentionally outside Adapter and the advertised adapter
+// capabilities: a future owned conversation binding must supply its own
+// isolation and authorization gate before calling it.
+func (a *CodexAdapter) StartConversation(ctx context.Context, request StartRequest, options CodexConversationOptions, observe func(AdapterEvent)) (CodexConversationExecution, error) {
+	collector, err := newCodexConversationCollector(options)
+	if err != nil {
+		return nil, err
+	}
+	if request.KeepAlive {
+		return nil, errors.New("Codex conversation collection requires a single-turn execution")
+	}
+	process, err := a.start(ctx, request, observe, collector)
+	if err != nil {
+		return nil, err
+	}
+	return &codexConversationExecution{codexProcess: process}, nil
+}
+
 // Start owns one documented app-server stdio child and creates the thread and
 // turn through that same initialized RPC connection. The returned Process is
 // therefore the only live control object; no vendor session ID can reconstruct
 // it after restart.
 func (a *CodexAdapter) Start(ctx context.Context, request StartRequest, observe func(AdapterEvent)) (_ Process, returnErr error) {
+	return a.start(ctx, request, observe, nil)
+}
+
+func (a *CodexAdapter) start(ctx context.Context, request StartRequest, observe func(AdapterEvent), collector *codexConversationCollector) (_ *codexProcess, returnErr error) {
 	path, err := a.executable()
 	if err != nil {
 		return nil, err
@@ -121,7 +144,7 @@ func (a *CodexAdapter) Start(ctx context.Context, request StartRequest, observe 
 		_ = cmd.Wait()
 		return nil, err
 	}
-	process := newCodexProcess(cmd, stdin, stdout, observe, request)
+	process := newCodexProcess(cmd, stdin, stdout, observe, collector, request)
 	defer func() {
 		if returnErr != nil {
 			_, _ = process.Stop(context.Background(), ControlRequest{CorrelationID: "agentd-codex-start-failed"})
@@ -242,11 +265,12 @@ type codexProcess struct {
 	turnDoneOnce        sync.Once
 	streamDone          chan struct{}
 	streamDoneOnce      sync.Once
+	conversation        *codexConversationCollector
 }
 
-func newCodexProcess(cmd *exec.Cmd, stdin io.WriteCloser, stdout io.Reader, observe func(AdapterEvent), requests ...StartRequest) *codexProcess {
+func newCodexProcess(cmd *exec.Cmd, stdin io.WriteCloser, stdout io.Reader, observe func(AdapterEvent), conversation *codexConversationCollector, requests ...StartRequest) *codexProcess {
 	p := &codexProcess{ownedProcess: newOwnedProcess(cmd), stdin: stdin, observe: observe,
-		pending: map[string]chan codexRPCMessage{}, turnDone: make(chan codexTurnResult, 1), streamDone: make(chan struct{})}
+		pending: map[string]chan codexRPCMessage{}, turnDone: make(chan codexTurnResult, 1), streamDone: make(chan struct{}), conversation: conversation}
 	if len(requests) > 0 {
 		p.persistent = requests[0].KeepAlive
 		if requests[0].ResolvedProfile != nil {
@@ -291,6 +315,9 @@ func (p *codexProcess) observeEvent(event AdapterEvent) {
 
 func (p *codexProcess) readLoop(reader io.Reader) {
 	defer func() {
+		if p.conversation != nil {
+			p.conversation.transportEnded()
+		}
 		p.closeInput()
 		p.streamDoneOnce.Do(func() { close(p.streamDone) })
 		p.finishAfterDrain()
@@ -332,6 +359,9 @@ func (p *codexProcess) abortStream() {
 func (p *codexProcess) handleNotification(message codexRPCMessage) {
 	p.eventMu.Lock()
 	defer p.eventMu.Unlock()
+	if p.conversation != nil {
+		p.conversation.handleNotification(message)
+	}
 	var params struct {
 		ThreadID string `json:"threadId"`
 		TurnID   string `json:"turnId"`
@@ -453,6 +483,9 @@ func (p *codexProcess) setThread(threadID string) {
 	p.stateMu.Lock()
 	p.threadID = threadID
 	p.stateMu.Unlock()
+	if p.conversation != nil {
+		p.conversation.bindThread(threadID)
+	}
 }
 
 func (p *codexProcess) setTurn(turnID string) {
@@ -472,6 +505,9 @@ func (p *codexProcess) setTurn(turnID string) {
 	p.earlyToolTurns = nil
 	p.earlyCompleted, p.earlyCompletedState = "", ""
 	p.stateMu.Unlock()
+	if p.conversation != nil {
+		p.conversation.bindTurn(turnID)
+	}
 	if earlyTool {
 		p.observeEvent(AdapterEvent{Kind: EventToolStarted})
 	}
@@ -498,6 +534,9 @@ func (p *codexProcess) failAmbiguousTurn() {
 	p.earlyToolTurns = nil
 	p.earlyCompleted, p.earlyCompletedState = "", ""
 	p.stateMu.Unlock()
+	if p.conversation != nil {
+		p.conversation.protocolFailed()
+	}
 	p.observeEvent(AdapterEvent{ErrorCode: ErrorAppServerProtocol})
 	p.abortStream()
 }
@@ -621,6 +660,9 @@ func (p *codexProcess) closeInput() {
 }
 
 func (p *codexProcess) Stop(ctx context.Context, request ControlRequest) (ControlEffect, error) {
+	if p.conversation != nil {
+		p.conversation.cancel(ConversationFailureCancelled)
+	}
 	// Interrupt is best-effort here: Stop's authoritative effect is terminating
 	// the exact owned app-server process group, even if the turn just completed.
 	_, _ = p.Interrupt(ctx, request)
