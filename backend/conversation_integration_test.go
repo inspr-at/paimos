@@ -1,0 +1,410 @@
+// PAIMOS — Your Professional & Personal AI Project OS
+// Copyright (C) 2026 Markus Barta <markus@barta.com>
+
+package main
+
+import (
+	"bytes"
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/inspr-at/paimos/backend/conversationturns"
+	"github.com/inspr-at/paimos/backend/lifecycleclient"
+	"github.com/inspr-at/paimos/backend/lifecycleintents"
+)
+
+const syntheticConversationAnswer = "Synthetic integration answer."
+
+const syntheticUnderstanding = `{"summary":"Synthetic integration understanding","facts":[],"open_questions":[],"next_question":"","candidate_requirements":[],"project_kinds":["integration"]}`
+
+type integrationConversationLauncher struct {
+	mu     sync.Mutex
+	claims []lifecycleclient.ConversationClaim
+}
+
+func (l *integrationConversationLauncher) LaunchConversation(_ context.Context, claim lifecycleclient.ConversationClaim) (lifecycleclient.ConversationProcess, error) {
+	l.mu.Lock()
+	l.claims = append(l.claims, claim)
+	index := len(l.claims)
+	l.mu.Unlock()
+	answer := syntheticConversationAnswer
+	if claim.Purpose == "understand" || claim.Purpose == "interpret" {
+		answer = syntheticUnderstanding
+	}
+	return integrationConversationProcess{
+		threadID: fmt.Sprintf("synthetic-thread-%d", index),
+		turnID:   fmt.Sprintf("synthetic-turn-%d", index),
+		answer:   answer,
+	}, nil
+}
+
+func (l *integrationConversationLauncher) snapshot() []lifecycleclient.ConversationClaim {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return append([]lifecycleclient.ConversationClaim(nil), l.claims...)
+}
+
+type integrationConversationProcess struct {
+	threadID string
+	turnID   string
+	answer   string
+}
+
+func (p integrationConversationProcess) Identity() (string, string, error) {
+	return p.threadID, p.turnID, nil
+}
+
+func (p integrationConversationProcess) Wait(context.Context) (lifecycleclient.ConversationExecutionResult, error) {
+	return lifecycleclient.ConversationExecutionResult{
+		Outcome: "completed", ThreadID: p.threadID, TurnID: p.turnID, Text: p.answer,
+	}, nil
+}
+
+func (integrationConversationProcess) Stop(context.Context) error { return nil }
+
+type blockingIntegrationLauncher struct {
+	launched chan struct{}
+	process  *blockingIntegrationProcess
+}
+
+func (l *blockingIntegrationLauncher) LaunchConversation(context.Context, lifecycleclient.ConversationClaim) (lifecycleclient.ConversationProcess, error) {
+	close(l.launched)
+	return l.process, nil
+}
+
+type blockingIntegrationProcess struct {
+	stopped chan struct{}
+	once    sync.Once
+}
+
+func (*blockingIntegrationProcess) Identity() (string, string, error) {
+	return "synthetic-blocking-thread", "synthetic-blocking-turn", nil
+}
+
+func (p *blockingIntegrationProcess) Wait(ctx context.Context) (lifecycleclient.ConversationExecutionResult, error) {
+	select {
+	case <-p.stopped:
+		return lifecycleclient.ConversationExecutionResult{
+			Outcome: "cancelled", Failure: "cancelled", ThreadID: "synthetic-blocking-thread", TurnID: "synthetic-blocking-turn",
+		}, nil
+	case <-ctx.Done():
+		return lifecycleclient.ConversationExecutionResult{
+			Outcome: "cancelled", Failure: "deadline_exceeded", ThreadID: "synthetic-blocking-thread", TurnID: "synthetic-blocking-turn",
+		}, ctx.Err()
+	}
+}
+
+func (p *blockingIntegrationProcess) Stop(context.Context) error {
+	p.once.Do(func() { close(p.stopped) })
+	return nil
+}
+
+func newIntegrationConversationRunner(t *testing.T, f *conversationRouteFixture, origin string) (*lifecycleclient.ConversationRunner, *integrationConversationLauncher) {
+	t.Helper()
+	authority, err := lifecycleclient.NewHTTP(origin, f.projectID, conversationTestLease, func() (string, error) {
+		return f.runnerKey, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	directory := t.TempDir()
+	if err := os.Chmod(directory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	launcher := &integrationConversationLauncher{}
+	runner, err := lifecycleclient.NewConversationRunner(directory, f.runtime.Generation, authority, launcher)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return runner, launcher
+}
+
+func integrationConversationAuthority(t *testing.T, f *conversationRouteFixture, origin string) *lifecycleclient.HTTP {
+	t.Helper()
+	authority, err := lifecycleclient.NewHTTP(origin, f.projectID, conversationTestLease, func() (string, error) {
+		return f.runnerKey, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return authority
+}
+
+func submitIntegrationConversation(t *testing.T, client *http.Client, origin string, f *conversationRouteFixture, request conversationturns.Request) conversationturns.Call {
+	t.Helper()
+	raw, err := json.Marshal(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := fmt.Sprintf("%s/api/projects/%d/conversation/v1/calls", origin, f.projectID)
+	req, err := http.NewRequest(http.MethodPost, target, bytes.NewReader(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Authorization", "Bearer "+f.serviceKey)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(conversationturns.ActorIssuerHeader, f.actor.Issuer)
+	req.Header.Set(conversationturns.ActorSubjectHeader, f.actor.Subject)
+	response, err := client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode != http.StatusAccepted {
+		t.Fatalf("submit status=%d body=%s", response.StatusCode, body)
+	}
+	var call conversationturns.Call
+	if err := json.Unmarshal(body, &call); err != nil {
+		t.Fatalf("decode admitted call: %v", err)
+	}
+	return call
+}
+
+func TestConversationLifecycleClientAgainstProductionRouter(t *testing.T) {
+	f := openConversationRouteFixture(t)
+	server := httptest.NewServer(f.router)
+	defer server.Close()
+	runner, launcher := newIntegrationConversationRunner(t, f, server.URL)
+
+	for _, purpose := range []string{"chat", "understand"} {
+		request := f.callRequest("integration-"+purpose, "integration-conversation-"+purpose, purpose)
+		call := submitIntegrationConversation(t, server.Client(), server.URL, f, request)
+		if err := runner.Step(context.Background(), f.runtime); err != nil {
+			t.Fatalf("run %s conversation: %v", purpose, err)
+		}
+		base := fmt.Sprintf("/api/projects/%d/conversation/v1", f.projectID)
+		response := f.request(t, http.MethodGet, base+"/calls/"+call.CallID, nil, f.serviceKey, true)
+		completed := decodeResponse[conversationturns.Call](t, response)
+		want := syntheticConversationAnswer
+		if purpose == "understand" {
+			want = syntheticUnderstanding
+		}
+		if response.Code != http.StatusOK || completed.State != "completed" || completed.OutputText != want || completed.LastSequence != 3 {
+			t.Fatalf("%s completion status=%d call=%+v", purpose, response.Code, completed)
+		}
+		wrongActor, err := http.NewRequest(http.MethodGet,
+			fmt.Sprintf("%s/api/projects/%d/conversation/v1/calls/%s", server.URL, f.projectID, call.CallID), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		wrongActor.Header.Set("Authorization", "Bearer "+f.serviceKey)
+		wrongActor.Header.Set(conversationturns.ActorIssuerHeader, f.actor.Issuer)
+		wrongActor.Header.Set(conversationturns.ActorSubjectHeader, "synthetic-wrong-actor")
+		wrongActorResponse, err := server.Client().Do(wrongActor)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = wrongActorResponse.Body.Close()
+		if wrongActorResponse.StatusCode != http.StatusForbidden {
+			t.Fatalf("%s actor mismatch status=%d", purpose, wrongActorResponse.StatusCode)
+		}
+	}
+
+	claims := launcher.snapshot()
+	if len(claims) != 2 || claims[0].Purpose != "chat" || len(claims[0].OutputSchema) != 0 ||
+		claims[1].Purpose != "understand" || len(claims[1].OutputSchema) == 0 {
+		t.Fatalf("runner received incompatible claims: %+v", claims)
+	}
+	last := claims[1]
+	digest := sha256.Sum256([]byte(syntheticUnderstanding))
+	replay := lifecycleclient.ConversationEvent{
+		Sequence: 3, Kind: "completed", ThreadID: "synthetic-thread-2", TurnID: "synthetic-turn-2",
+		OutputSHA256: hex.EncodeToString(digest[:]),
+	}
+	authority := integrationConversationAuthority(t, f, server.URL)
+	if _, err := authority.ReportConversationEvent(context.Background(), f.runtime.ID, f.runtime.Generation,
+		last.Call.CallID, last.ExecutionGeneration, replay); err != nil {
+		t.Fatalf("exact terminal replay: %v", err)
+	}
+	// The runner's serialized terminal event is immutable: changed bytes at the
+	// same sequence and a skipped sequence must conflict at the real boundary.
+	replay.OutputSHA256 = strings.Repeat("0", 64)
+	_, err := authority.ReportConversationEvent(context.Background(), f.runtime.ID, f.runtime.Generation,
+		last.Call.CallID, last.ExecutionGeneration, replay)
+	if !errors.Is(err, lifecycleintents.ErrConflict) {
+		t.Fatalf("changed terminal replay err=%v", err)
+	}
+	_, err = authority.ReportConversationEvent(context.Background(), f.runtime.ID, f.runtime.Generation,
+		last.Call.CallID, last.ExecutionGeneration, lifecycleclient.ConversationEvent{
+			Sequence: 5, Kind: "assistant_delta", Text: "skipped", ThreadID: "synthetic-thread-2", TurnID: "synthetic-turn-2",
+		})
+	if !errors.Is(err, lifecycleintents.ErrConflict) {
+		t.Fatalf("skipped event sequence err=%v", err)
+	}
+}
+
+func TestConversationLifecycleClientCancellationAndDeadlineAgainstProductionRouter(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		timeoutMS int64
+		cancel    bool
+	}{
+		{name: "cancel", timeoutMS: 3_000, cancel: true},
+		{name: "deadline", timeoutMS: 200},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			f := openConversationRouteFixture(t)
+			server := httptest.NewServer(f.router)
+			defer server.Close()
+			authority := integrationConversationAuthority(t, f, server.URL)
+			process := &blockingIntegrationProcess{stopped: make(chan struct{})}
+			launcher := &blockingIntegrationLauncher{launched: make(chan struct{}), process: process}
+			directory := t.TempDir()
+			if err := os.Chmod(directory, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			runner, err := lifecycleclient.NewConversationRunner(directory, f.runtime.Generation, authority, launcher)
+			if err != nil {
+				t.Fatal(err)
+			}
+			request := f.callRequest("integration-"+test.name, "integration-conversation-"+test.name, "chat")
+			request.TimeoutMS = test.timeoutMS
+			call := submitIntegrationConversation(t, server.Client(), server.URL, f, request)
+			runDone := make(chan error, 1)
+			go func() { runDone <- runner.Step(context.Background(), f.runtime) }()
+			select {
+			case <-launcher.launched:
+			case <-time.After(time.Second):
+				t.Fatal("conversation process did not launch")
+			}
+			if test.cancel {
+				response := f.request(t, http.MethodPost,
+					fmt.Sprintf("/api/projects/%d/conversation/v1/calls/%s/cancel", f.projectID, call.CallID),
+					struct{}{}, f.serviceKey, true)
+				if response.Code != http.StatusOK || decodeResponse[conversationturns.Call](t, response).State != "cancel_requested" {
+					t.Fatalf("cancel status=%d body=%s", response.Code, response.Body.String())
+				}
+			}
+			select {
+			case err := <-runDone:
+				if err != nil {
+					t.Fatalf("runner result: %v", err)
+				}
+			case <-time.After(2 * time.Second):
+				t.Fatal("conversation runner did not terminate")
+			}
+			base := fmt.Sprintf("/api/projects/%d/conversation/v1", f.projectID)
+			response := f.request(t, http.MethodGet, base+"/calls/"+call.CallID, nil, f.serviceKey, true)
+			completed := decodeResponse[conversationturns.Call](t, response)
+			if response.Code != http.StatusOK || completed.State != "cancelled" || completed.OutputText != "" {
+				t.Fatalf("%s terminal status=%d call=%+v", test.name, response.Code, completed)
+			}
+		})
+	}
+}
+
+func TestAithemaPaimosProviderAgainstProductionRouter(t *testing.T) {
+	source := os.Getenv("AITHEMA_CONTRACT_SOURCE")
+	if source == "" {
+		t.Skip("set AITHEMA_CONTRACT_SOURCE to an absolute Aithema checkout for the cross-language oracle")
+	}
+	if !filepath.IsAbs(source) {
+		t.Fatalf("AITHEMA_CONTRACT_SOURCE must be absolute: %q", source)
+	}
+	providerSource := filepath.Join(source, "runtime", "paimos-provider.js")
+	if info, err := os.Stat(providerSource); err != nil || !info.Mode().IsRegular() {
+		t.Fatalf("Aithema provider source unavailable: %v", err)
+	}
+
+	f := openConversationRouteFixture(t)
+	server := httptest.NewServer(f.router)
+	defer server.Close()
+	runner, launcher := newIntegrationConversationRunner(t, f, server.URL)
+	workerContext, stopWorker := context.WithCancel(context.Background())
+	workerDone := make(chan error, 1)
+	go func() {
+		for {
+			if workerContext.Err() != nil {
+				workerDone <- nil
+				return
+			}
+			if err := runner.Step(workerContext, f.runtime); err != nil && workerContext.Err() == nil {
+				workerDone <- err
+				return
+			}
+			if len(launcher.snapshot()) >= 2 {
+				workerDone <- nil
+				return
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+	}()
+	defer stopWorker()
+
+	credentialFile := filepath.Join(t.TempDir(), "conversation.key")
+	if err := os.WriteFile(credentialFile, []byte(f.serviceKey+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	script := `
+import { pathToFileURL } from 'node:url';
+import { join } from 'node:path';
+const [source, origin, credentialFile, projectID, bindingID, issuer, subject] = process.argv.slice(2);
+const { PaimosHarnessProvider } = await import(pathToFileURL(join(source, 'runtime', 'paimos-provider.js')).href);
+const provider = new PaimosHarnessProvider({
+  id: 'paimos-contract', origin, credentialFile, projectID, bindingID,
+  bindingRevision: 1, trustedIssuer: issuer, modelId: 'codex-sol-high',
+  allowedModels: ['codex-sol-high'], executionLocation: 'cloud',
+  allowedDataClasses: ['confidential'], mode: 'test', pollIntervalMs: 5,
+  retryDelayMs: 5, cleanupTimeoutMs: 200, limits: { maxDurationMs: 3000 },
+});
+const actor = Object.freeze({
+  party_ref: 'party:synthetic', actor_kind: 'human',
+  roles: Object.freeze(['requirements_approver']), subject, projects: Object.freeze([]),
+});
+const request = (purpose) => ({
+  system: 'Synthetic integration context.',
+  messages: [{ role: 'user', content: 'Return the synthetic oracle response.' }],
+  model: 'codex-sol-high',
+  executionContext: {
+    actor, projectRef: 'aithema-project-1', conversationId: 'cross-language-' + purpose,
+    turnId: 'turn-' + purpose, purpose, requestId: 'cross-language-' + purpose,
+  },
+});
+let chat = '';
+for await (const chunk of provider.streamChat(request('chat'))) chat += chunk;
+if (chat !== 'Synthetic integration answer.') throw new Error('chat oracle mismatch');
+const understood = await provider.understand(request('understand'));
+if (understood.summary !== 'Synthetic integration understanding') throw new Error('understanding oracle mismatch');
+`
+	commandContext, cancelCommand := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancelCommand()
+	command := exec.CommandContext(commandContext, "node", "--input-type=module", "-",
+		source, server.URL, credentialFile, strconv.FormatInt(f.projectID, 10), f.bindingID, f.actor.Issuer, f.actor.Subject)
+	command.Stdin = strings.NewReader(script)
+	output, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("Aithema provider oracle: %v\n%s", err, output)
+	}
+	stopWorker()
+	select {
+	case err := <-workerDone:
+		if err != nil {
+			t.Fatalf("conversation runner: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("conversation runner did not finish")
+	}
+	claims := launcher.snapshot()
+	if len(claims) != 2 || claims[0].Purpose != "chat" || claims[1].Purpose != "understand" {
+		t.Fatalf("cross-language claims=%+v", claims)
+	}
+}
