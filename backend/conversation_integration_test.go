@@ -78,6 +78,91 @@ func (p integrationConversationProcess) Wait(context.Context) (lifecycleclient.C
 
 func (integrationConversationProcess) Stop(context.Context) error { return nil }
 
+type scriptedIntegrationLauncher struct {
+	mu        sync.Mutex
+	result    lifecycleclient.ConversationExecutionResult
+	launchErr error
+	launches  int
+	waits     int
+	stops     int
+	claim     lifecycleclient.ConversationClaim
+}
+
+func (l *scriptedIntegrationLauncher) LaunchConversation(_ context.Context, claim lifecycleclient.ConversationClaim) (lifecycleclient.ConversationProcess, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.launches++
+	l.claim = claim
+	if l.launchErr != nil {
+		return nil, l.launchErr
+	}
+	return &scriptedIntegrationProcess{launcher: l}, nil
+}
+
+func (l *scriptedIntegrationLauncher) snapshot() (int, int, int) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.launches, l.waits, l.stops
+}
+
+func (l *scriptedIntegrationLauncher) claimSnapshot() lifecycleclient.ConversationClaim {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.claim
+}
+
+type scriptedIntegrationProcess struct {
+	launcher *scriptedIntegrationLauncher
+}
+
+func (p *scriptedIntegrationProcess) Identity() (string, string, error) {
+	return p.launcher.result.ThreadID, p.launcher.result.TurnID, nil
+}
+
+func (p *scriptedIntegrationProcess) Wait(context.Context) (lifecycleclient.ConversationExecutionResult, error) {
+	p.launcher.mu.Lock()
+	p.launcher.waits++
+	result := p.launcher.result
+	p.launcher.mu.Unlock()
+	return result, nil
+}
+
+func (p *scriptedIntegrationProcess) Stop(context.Context) error {
+	p.launcher.mu.Lock()
+	p.launcher.stops++
+	p.launcher.mu.Unlock()
+	return nil
+}
+
+type cancelAfterFinalControlAuthority struct {
+	base   *lifecycleclient.HTTP
+	cancel func()
+	mu     sync.Mutex
+	count  int
+}
+
+func (a *cancelAfterFinalControlAuthority) ClaimConversation(ctx context.Context, runtime, generation string) (*lifecycleclient.ConversationClaim, error) {
+	return a.base.ClaimConversation(ctx, runtime, generation)
+}
+
+func (a *cancelAfterFinalControlAuthority) ConversationControl(ctx context.Context, runtime, callID, execution string) (lifecycleclient.ConversationControl, error) {
+	control, err := a.base.ConversationControl(ctx, runtime, callID, execution)
+	a.mu.Lock()
+	a.count++
+	count := a.count
+	a.mu.Unlock()
+	if err == nil && count == 3 {
+		// The returned control is deliberately stale: cancellation commits at
+		// the server after this final check and before the completion report.
+		a.cancel()
+	}
+	return control, err
+}
+
+func (a *cancelAfterFinalControlAuthority) ReportConversationEvent(ctx context.Context, runtime, generation, callID, execution string, event lifecycleclient.ConversationEvent) (lifecycleclient.ConversationCall, error) {
+	return a.base.ReportConversationEvent(ctx, runtime, generation, callID, execution, event)
+}
+
 type blockingIntegrationLauncher struct {
 	launched chan struct{}
 	process  *blockingIntegrationProcess
@@ -345,6 +430,158 @@ func TestConversationLifecycleClientCancellationAndDeadlineAgainstProductionRout
 				t.Fatalf("%s account reuse cleanup status=%d body=%s", test.name, cleanup.Code, cleanup.Body.String())
 			}
 		})
+	}
+}
+
+func TestConversationLifecycleClientFailureVocabularyAgainstProductionRouter(t *testing.T) {
+	tests := []struct {
+		name       string
+		failure    string
+		wantState  string
+		wantCode   string
+		launchFail bool
+	}{
+		{name: "protocol", failure: "protocol_error", wantState: "failed", wantCode: "malformed_completion"},
+		{name: "output_bound", failure: "output_bound", wantState: "failed", wantCode: "output_limit"},
+		{name: "event_bound", failure: "event_bound", wantState: "failed", wantCode: "event_limit"},
+		{name: "transport_ended", failure: "transport_ended", wantState: "failed", wantCode: "execution_failed"},
+		{name: "turn_failed", failure: "turn_failed", wantState: "failed", wantCode: "execution_failed"},
+		{name: "ownership_lost", failure: "ownership_lost", wantState: "failed", wantCode: "authority_revoked"},
+		{name: "unknown_native", failure: "private_native_detail", wantState: "failed", wantCode: "execution_failed"},
+		{name: "deadline_after_start", failure: "deadline_exceeded", wantState: "cancelled", wantCode: "deadline_exceeded"},
+		{name: "preflight_without_process", wantState: "failed", wantCode: "runtime_unavailable", launchFail: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			f := openConversationRouteFixture(t)
+			server := httptest.NewServer(f.router)
+			defer server.Close()
+			authority := integrationConversationAuthority(t, f, server.URL)
+			launcher := &scriptedIntegrationLauncher{result: lifecycleclient.ConversationExecutionResult{
+				Outcome: "failed", Failure: test.failure, ThreadID: "failure-thread", TurnID: "failure-turn",
+			}}
+			if test.launchFail {
+				launcher.launchErr = errors.New("synthetic preflight failure")
+			}
+			directory := t.TempDir()
+			if err := os.Chmod(directory, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			runner, err := lifecycleclient.NewConversationRunner(directory, f.runtime.Generation, authority, launcher)
+			if err != nil {
+				t.Fatal(err)
+			}
+			request := f.callRequest("failure-"+test.name, "failure-"+test.name, "chat")
+			call := submitIntegrationConversation(t, server.Client(), server.URL, f, request)
+			if err := runner.Step(context.Background(), f.runtime); err != nil {
+				t.Fatalf("runner terminal report: %v", err)
+			}
+
+			base := fmt.Sprintf("/api/projects/%d/conversation/v1", f.projectID)
+			response := f.request(t, http.MethodGet, base+"/calls/"+call.CallID, nil, f.serviceKey, true)
+			terminalCall := decodeResponse[conversationturns.Call](t, response)
+			if response.Code != http.StatusOK || terminalCall.State != test.wantState {
+				t.Fatalf("terminal status=%d call=%+v", response.Code, terminalCall)
+			}
+			if test.wantState == "failed" && terminalCall.ErrorCode != test.wantCode {
+				t.Fatalf("terminal error_code=%q want=%q", terminalCall.ErrorCode, test.wantCode)
+			}
+			pageResponse := f.request(t, http.MethodGet, base+"/calls/"+call.CallID+"/events?after=0", nil, f.serviceKey, true)
+			page := decodeResponse[conversationturns.EventsPage](t, pageResponse)
+			if pageResponse.Code != http.StatusOK || len(page.Events) == 0 {
+				t.Fatalf("terminal events status=%d page=%+v", pageResponse.Code, page)
+			}
+			last := page.Events[len(page.Events)-1]
+			if last.Kind != test.wantState || last.ErrorCode != test.wantCode {
+				t.Fatalf("terminal events status=%d page=%+v", pageResponse.Code, page)
+			}
+			launches, waits, _ := launcher.snapshot()
+			if launches != 1 || test.launchFail && waits != 0 || !test.launchFail && waits != 1 {
+				t.Fatalf("process proof launches=%d waits=%d launch_fail=%t", launches, waits, test.launchFail)
+			}
+			var released int
+			if err := db.DB.QueryRow(`SELECT released_at IS NOT NULL FROM conversation_account_slots WHERE call_id=?`, call.CallID).Scan(&released); err != nil || released != 1 {
+				t.Fatalf("slot release=%d err=%v", released, err)
+			}
+			next := f.callRequest("failure-next-"+test.name, "failure-next-"+test.name, "chat")
+			nextCall := submitIntegrationConversation(t, server.Client(), server.URL, f, next)
+			cleanup := f.request(t, http.MethodPost, base+"/calls/"+nextCall.CallID+"/cancel", struct{}{}, f.serviceKey, true)
+			if cleanup.Code != http.StatusOK || decodeResponse[conversationturns.Call](t, cleanup).State != "cancelled" {
+				t.Fatalf("account reuse cleanup status=%d body=%s", cleanup.Code, cleanup.Body.String())
+			}
+		})
+	}
+}
+
+func TestConversationLifecycleClientServerCancelWinsAfterFinalControl(t *testing.T) {
+	f := openConversationRouteFixture(t)
+	server := httptest.NewServer(f.router)
+	defer server.Close()
+	baseAuthority := integrationConversationAuthority(t, f, server.URL)
+	launcher := &scriptedIntegrationLauncher{result: lifecycleclient.ConversationExecutionResult{
+		Outcome: "completed", ThreadID: "boundary-thread", TurnID: "boundary-turn",
+	}}
+	request := f.callRequest("cancel-final-boundary", "cancel-final-boundary", "chat")
+	call := submitIntegrationConversation(t, server.Client(), server.URL, f, request)
+	base := fmt.Sprintf("/api/projects/%d/conversation/v1", f.projectID)
+	authority := &cancelAfterFinalControlAuthority{base: baseAuthority}
+	authority.cancel = func() {
+		response := f.request(t, http.MethodPost, base+"/calls/"+call.CallID+"/cancel", struct{}{}, f.serviceKey, true)
+		if response.Code != http.StatusOK || decodeResponse[conversationturns.Call](t, response).State != "cancel_requested" {
+			t.Fatalf("boundary cancel status=%d body=%s", response.Code, response.Body.String())
+		}
+	}
+	directory := t.TempDir()
+	if err := os.Chmod(directory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	runner, err := lifecycleclient.NewConversationRunner(directory, f.runtime.Generation, authority, launcher)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := runner.Step(context.Background(), f.runtime); err != nil {
+		t.Fatalf("runner cancellation reconciliation: %v", err)
+	}
+
+	response := f.request(t, http.MethodGet, base+"/calls/"+call.CallID, nil, f.serviceKey, true)
+	terminalCall := decodeResponse[conversationturns.Call](t, response)
+	if response.Code != http.StatusOK || terminalCall.State != "cancelled" || terminalCall.OutputText != "" {
+		t.Fatalf("terminal status=%d call=%+v", response.Code, terminalCall)
+	}
+	pageResponse := f.request(t, http.MethodGet, base+"/calls/"+call.CallID+"/events?after=0", nil, f.serviceKey, true)
+	page := decodeResponse[conversationturns.EventsPage](t, pageResponse)
+	if pageResponse.Code != http.StatusOK || len(page.Events) != 2 || page.Events[0].Kind != "started" || page.Events[1].Kind != "cancelled" {
+		t.Fatalf("immutable cancellation sequence status=%d page=%+v", pageResponse.Code, page)
+	}
+	claim := page.Events[0]
+	replay := lifecycleclient.ConversationEvent{
+		Sequence: 2, Kind: "cancelled", ThreadID: claim.ThreadID, TurnID: claim.TurnID, ErrorCode: "cancelled",
+	}
+	if _, err := baseAuthority.ReportConversationEvent(context.Background(), f.runtime.ID, f.runtime.Generation,
+		call.CallID, launcher.claimSnapshot().ExecutionGeneration, replay); err != nil {
+		t.Fatalf("cancelled replay: %v", err)
+	}
+	emptyDigest := sha256.Sum256(nil)
+	if _, err := baseAuthority.ReportConversationEvent(context.Background(), f.runtime.ID, f.runtime.Generation,
+		call.CallID, launcher.claimSnapshot().ExecutionGeneration, lifecycleclient.ConversationEvent{
+			Sequence: 2, Kind: "completed", ThreadID: claim.ThreadID, TurnID: claim.TurnID,
+			OutputSHA256: hex.EncodeToString(emptyDigest[:]),
+		}); !errors.Is(err, lifecycleintents.ErrConflict) {
+		t.Fatalf("completion replaced accepted cancellation err=%v", err)
+	}
+	launches, waits, _ := launcher.snapshot()
+	if launches != 1 || waits != 1 {
+		t.Fatalf("unexpected relaunch/re-adoption launches=%d waits=%d", launches, waits)
+	}
+	var released int
+	if err := db.DB.QueryRow(`SELECT released_at IS NOT NULL FROM conversation_account_slots WHERE call_id=?`, call.CallID).Scan(&released); err != nil || released != 1 {
+		t.Fatalf("slot release=%d err=%v", released, err)
+	}
+	next := f.callRequest("cancel-final-boundary-next", "cancel-final-boundary-next", "chat")
+	nextCall := submitIntegrationConversation(t, server.Client(), server.URL, f, next)
+	cleanup := f.request(t, http.MethodPost, base+"/calls/"+nextCall.CallID+"/cancel", struct{}{}, f.serviceKey, true)
+	if cleanup.Code != http.StatusOK || decodeResponse[conversationturns.Call](t, cleanup).State != "cancelled" {
+		t.Fatalf("account reuse cleanup status=%d body=%s", cleanup.Code, cleanup.Body.String())
 	}
 }
 

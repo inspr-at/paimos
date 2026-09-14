@@ -30,6 +30,7 @@ type ConversationExecutionResult struct {
 
 type ConversationProcess interface {
 	Identity() (string, string, error)
+	// Wait returns only after the owned process has stopped and been reaped.
 	Wait(context.Context) (ConversationExecutionResult, error)
 	// Stop returns only after the owned process has stopped and been reaped.
 	Stop(context.Context) error
@@ -119,12 +120,18 @@ func (r *ConversationRunner) Step(ctx context.Context, runtime lifecycleintents.
 			}
 			continue
 		}
-		known[saved.CallID] = saved
 		if len(saved.Pending) > 0 {
-			if err := r.flush(ctx, runtime, &saved); err != nil {
+			var err error
+			if saved.Phase == "terminal" {
+				err = r.flushTerminal(ctx, runtime, &saved)
+			} else {
+				err = r.flush(ctx, runtime, &saved)
+			}
+			if err != nil {
 				return err
 			}
 		}
+		known[saved.CallID] = saved
 		if saved.Phase == "launching" || saved.Phase == "running" {
 			// A recovered journal has no process handle. It may poll its known
 			// generation, but can neither adopt nor signal a saved PID.
@@ -251,6 +258,20 @@ func (r *ConversationRunner) execute(ctx context.Context, runtime lifecycleinten
 	for {
 		select {
 		case completed := <-resultCh:
+			if completed.result.Outcome == "completed" {
+				// Native completion is process-reap evidence, but success still
+				// requires one final authority observation. A cancel ordered after
+				// this check is reconciled at the report boundary below.
+				control, controlErr := r.authority.ConversationControl(ctx, runtime.ID, record.CallID, record.Claim.ExecutionGeneration)
+				if controlErr != nil || control.DeadlineAt != record.Claim.Call.DeadlineAt || !control.Continue || control.CancelRequested {
+					completed.result = ConversationExecutionResult{
+						Outcome: "failed", Failure: "ownership_lost", ThreadID: record.ThreadID, TurnID: record.TurnID,
+					}
+					if controlErr == nil && control.DeadlineAt == record.Claim.Call.DeadlineAt && control.CancelRequested {
+						completed.result.Outcome, completed.result.Failure = "cancelled", "cancelled"
+					}
+				}
+			}
 			return r.finishProcess(ctx, runtime, &record, completed.result, completed.err)
 		case <-ticker.C:
 			_ = r.flush(ctx, runtime, &record)
@@ -260,6 +281,11 @@ func (r *ConversationRunner) execute(ctx context.Context, runtime lifecycleinten
 				completed := <-resultCh
 				if controlErr != nil || control.DeadlineAt != record.Claim.Call.DeadlineAt || !control.Continue && !control.CancelRequested {
 					completed.result.Outcome, completed.result.Failure = "failed", "ownership_lost"
+				} else if control.CancelRequested {
+					// Stop/Wait above prove the process is reaped. A collector that
+					// closed completed just before Stop cannot erase the observed
+					// server cancellation.
+					completed.result.Outcome, completed.result.Failure = "cancelled", "cancelled"
 				}
 				return r.finishProcess(ctx, runtime, &record, completed.result, completed.err)
 			}
@@ -272,6 +298,9 @@ func (r *ConversationRunner) execute(ctx context.Context, runtime lifecycleinten
 }
 
 func (r *ConversationRunner) finishWithoutProcess(ctx context.Context, runtime lifecycleintents.Runtime, record *conversationRecord, kind, code string) error {
+	if kind == "failed" {
+		code = closedConversationFailure(code)
+	}
 	record.Phase = "terminal"
 	if err := r.appendEvents(record, ConversationEvent{Kind: kind, ErrorCode: code}); err != nil {
 		return err
@@ -279,7 +308,7 @@ func (r *ConversationRunner) finishWithoutProcess(ctx context.Context, runtime l
 	if err := r.journal.Put(*record); err != nil {
 		return ErrUnknown
 	}
-	return r.flush(ctx, runtime, record)
+	return r.flushTerminal(ctx, runtime, record)
 }
 
 func (r *ConversationRunner) finishProcess(ctx context.Context, runtime lifecycleintents.Runtime, record *conversationRecord, result ConversationExecutionResult, waitErr error) error {
@@ -306,13 +335,16 @@ func (r *ConversationRunner) finishProcess(ctx context.Context, runtime lifecycl
 	} else {
 		terminal.Kind, terminal.ErrorCode = "failed", closedConversationFailure(result.Failure)
 	}
+	if terminal.Kind == "failed" {
+		terminal.ErrorCode = closedConversationFailure(terminal.ErrorCode)
+	}
 	if err := r.appendEvents(record, terminal); err != nil {
 		return err
 	}
 	if err := r.journal.Put(*record); err != nil {
 		return ErrUnknown
 	}
-	return r.flush(ctx, runtime, record)
+	return r.flushTerminal(ctx, runtime, record)
 }
 
 func (r *ConversationRunner) appendEvents(record *conversationRecord, events ...ConversationEvent) error {
@@ -348,6 +380,32 @@ func (r *ConversationRunner) flush(ctx context.Context, runtime lifecycleintents
 	return nil
 }
 
+// flushTerminal may collapse only an explicitly rejected, never-accepted
+// output suffix into cancellation. Exact accepted event replays return success
+// at the authority, so ErrConflict plus a current cancel control proves the
+// first pending sequence was not accepted. Phase "terminal" proves this runner
+// has already reaped the process (or proved that no process was launched).
+func (r *ConversationRunner) flushTerminal(ctx context.Context, runtime lifecycleintents.Runtime, record *conversationRecord) error {
+	err := r.flush(ctx, runtime, record)
+	if !errors.Is(err, lifecycleintents.ErrConflict) || record.Phase != "terminal" || len(record.Pending) == 0 ||
+		(record.Pending[0].Kind != "assistant_delta" && record.Pending[0].Kind != "completed") {
+		return err
+	}
+	control, controlErr := r.authority.ConversationControl(ctx, runtime.ID, record.CallID, record.Claim.ExecutionGeneration)
+	if controlErr != nil || control.DeadlineAt != record.Claim.Call.DeadlineAt || control.Continue || !control.CancelRequested {
+		return err
+	}
+	sequence := record.Pending[0].Sequence
+	record.Sequence = sequence
+	record.Pending = []ConversationEvent{{
+		Sequence: sequence, Kind: "cancelled", ThreadID: record.ThreadID, TurnID: record.TurnID, ErrorCode: "cancelled",
+	}}
+	if err := r.journal.Put(*record); err != nil {
+		return ErrUnknown
+	}
+	return r.flush(ctx, runtime, record)
+}
+
 func conversationChunks(text string, maximum int) ([]string, bool) {
 	if text == "" {
 		return nil, true
@@ -369,8 +427,20 @@ func conversationChunks(text string, maximum int) ([]string, bool) {
 
 func closedConversationFailure(value string) string {
 	switch value {
-	case "protocol_error", "output_bound", "event_bound", "transport_ended", "turn_failed", "deadline_exceeded", "ownership_lost", "preflight_failed":
+	case "execution_failed", "deadline_exceeded", "malformed_completion", "output_limit", "event_limit", "runtime_unavailable", "authority_revoked", "outcome_unknown":
 		return value
+	case "protocol_error":
+		return "malformed_completion"
+	case "output_bound":
+		return "output_limit"
+	case "event_bound":
+		return "event_limit"
+	case "ownership_lost":
+		return "authority_revoked"
+	case "preflight_failed":
+		return "runtime_unavailable"
+	case "transport_ended", "turn_failed":
+		return "execution_failed"
 	default:
 		return "execution_failed"
 	}

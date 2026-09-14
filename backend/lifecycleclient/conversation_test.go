@@ -177,7 +177,7 @@ func TestConversationRunnerStartedReportFailureStopsAndNeverRespawns(t *testing.
 		t.Fatal(err)
 	}
 	if launcher.launches != 1 || len(authority.events) != 2 || authority.events[0].Kind != "started" ||
-		authority.events[1].Kind != "failed" || authority.events[1].ErrorCode != "ownership_lost" {
+		authority.events[1].Kind != "failed" || authority.events[1].ErrorCode != "authority_revoked" {
 		t.Fatalf("launches=%d events=%+v", launcher.launches, authority.events)
 	}
 }
@@ -219,6 +219,94 @@ func TestConversationRunnerCancellationStopsBeforeCancelledEvent(t *testing.T) {
 	}
 	if !launcher.process.stopped || len(authority.events) != 2 || authority.events[1].Kind != "cancelled" || authority.events[1].ErrorCode != "cancelled" {
 		t.Fatalf("stopped=%t events=%+v", launcher.process.stopped, authority.events)
+	}
+}
+
+func TestConversationFailureVocabularyNormalizesToWireContract(t *testing.T) {
+	tests := []struct {
+		failure string
+		want    string
+	}{
+		{failure: "protocol_error", want: "malformed_completion"},
+		{failure: "output_bound", want: "output_limit"},
+		{failure: "event_bound", want: "event_limit"},
+		{failure: "transport_ended", want: "execution_failed"},
+		{failure: "turn_failed", want: "execution_failed"},
+		{failure: "ownership_lost", want: "authority_revoked"},
+		{failure: "preflight_failed", want: "runtime_unavailable"},
+		{failure: "deadline_exceeded", want: "deadline_exceeded"},
+		{failure: "private_native_detail", want: "execution_failed"},
+	}
+	for _, test := range tests {
+		t.Run(test.failure, func(t *testing.T) {
+			got := closedConversationFailure(test.failure)
+			if got != test.want {
+				t.Fatalf("normalized failure=%q want=%q", got, test.want)
+			}
+			if err := validateConversationEvent(ConversationEvent{Sequence: 1, Kind: "failed", ErrorCode: got}); err != nil {
+				t.Fatalf("normalized failure rejected locally: %v", err)
+			}
+		})
+	}
+}
+
+func TestConversationRunnerLaunchFailureReportsClosedRuntimeFailure(t *testing.T) {
+	authority, _, runtime := testConversationRuntime(t, "")
+	runner, err := NewConversationRunner(conversationJournalDir(t), runtime.Generation, authority, failingConversationLauncher{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = runner.Step(context.Background(), runtime); err != nil {
+		t.Fatal(err)
+	}
+	if len(authority.events) != 1 || authority.events[0].Kind != "failed" || authority.events[0].ErrorCode != "runtime_unavailable" ||
+		authority.events[0].ThreadID != "" || authority.events[0].TurnID != "" {
+		t.Fatalf("preflight terminal=%+v", authority.events)
+	}
+}
+
+func TestConversationRunnerCancelObservationWinsCompletedCollectorRace(t *testing.T) {
+	authority, _, runtime := testConversationRuntime(t, "")
+	process := &completedBeforeStopConversationProcess{
+		complete: make(chan struct{}), waitReturned: make(chan struct{}),
+	}
+	raceAuthority := &cancelOnThirdControlAuthority{
+		fakeConversationAuthority: authority, complete: process.complete, waitReturned: process.waitReturned,
+	}
+	runner, err := NewConversationRunner(conversationJournalDir(t), runtime.Generation, raceAuthority, singleConversationLauncher{process: process})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = runner.Step(context.Background(), runtime); err != nil {
+		t.Fatal(err)
+	}
+	process.mu.Lock()
+	stopped := process.stopped
+	process.mu.Unlock()
+	if !stopped || len(authority.events) != 2 || authority.events[0].Kind != "started" ||
+		authority.events[1].Kind != "cancelled" || authority.events[1].ErrorCode != "cancelled" {
+		t.Fatalf("stopped=%t events=%+v", stopped, authority.events)
+	}
+}
+
+func TestConversationRunnerServerCancelAfterFinalControlReplacesOnlyRejectedCompletion(t *testing.T) {
+	authority, launcher, runtime := testConversationRuntime(t, "")
+	raceAuthority := &cancelAfterFinalControlFakeAuthority{fakeConversationAuthority: authority}
+	runner, err := NewConversationRunner(conversationJournalDir(t), runtime.Generation, raceAuthority, launcher)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = runner.Step(context.Background(), runtime); err != nil {
+		t.Fatal(err)
+	}
+	if launcher.launches != 1 || len(authority.events) != 2 || authority.events[0].Kind != "started" ||
+		authority.events[1].Kind != "cancelled" || authority.events[1].Sequence != 2 {
+		t.Fatalf("launches=%d events=%+v", launcher.launches, authority.events)
+	}
+	for _, saved := range runner.journal.Snapshot() {
+		if saved.Phase != "terminal" || len(saved.Pending) != 0 || saved.Sequence != 2 {
+			t.Fatalf("journal=%+v", saved)
+		}
 	}
 }
 
@@ -321,6 +409,99 @@ type fakeConversationLauncher struct {
 func (l *fakeConversationLauncher) LaunchConversation(context.Context, ConversationClaim) (ConversationProcess, error) {
 	l.launches++
 	return l.process, nil
+}
+
+type failingConversationLauncher struct{}
+
+func (failingConversationLauncher) LaunchConversation(context.Context, ConversationClaim) (ConversationProcess, error) {
+	return nil, ErrOwnership
+}
+
+type singleConversationLauncher struct {
+	process ConversationProcess
+}
+
+func (l singleConversationLauncher) LaunchConversation(context.Context, ConversationClaim) (ConversationProcess, error) {
+	return l.process, nil
+}
+
+type cancelOnThirdControlAuthority struct {
+	*fakeConversationAuthority
+	complete     chan struct{}
+	waitReturned chan struct{}
+}
+
+type cancelAfterFinalControlFakeAuthority struct {
+	*fakeConversationAuthority
+	mu              sync.Mutex
+	serverCancelled bool
+}
+
+func (a *cancelAfterFinalControlFakeAuthority) ConversationControl(ctx context.Context, runtime, callID, execution string) (ConversationControl, error) {
+	control, err := a.fakeConversationAuthority.ConversationControl(ctx, runtime, callID, execution)
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.fakeConversationAuthority.controls == 3 {
+		// Return the successful final observation while committing a server
+		// cancellation before the runner can report completion.
+		a.serverCancelled = true
+		return control, err
+	}
+	if a.serverCancelled {
+		control.Continue = false
+		control.CancelRequested = true
+	}
+	return control, err
+}
+
+func (a *cancelAfterFinalControlFakeAuthority) ReportConversationEvent(ctx context.Context, runtime, generation, callID, execution string, event ConversationEvent) (ConversationCall, error) {
+	a.mu.Lock()
+	cancelled := a.serverCancelled
+	a.mu.Unlock()
+	if cancelled && (event.Kind == "assistant_delta" || event.Kind == "completed") {
+		return ConversationCall{}, lifecycleintents.ErrConflict
+	}
+	return a.fakeConversationAuthority.ReportConversationEvent(ctx, runtime, generation, callID, execution, event)
+}
+
+func (a *cancelOnThirdControlAuthority) ConversationControl(context.Context, string, string, string) (ConversationControl, error) {
+	a.mu.Lock()
+	a.controls++
+	controlNumber := a.controls
+	callID := a.claim.Call.CallID
+	execution := a.claim.ExecutionGeneration
+	deadline := a.claim.Call.DeadlineAt
+	a.mu.Unlock()
+	if controlNumber == 3 {
+		close(a.complete)
+		<-a.waitReturned
+		return ConversationControl{SchemaVersion: 1, CallID: callID, ExecutionGeneration: execution, CancelRequested: true, DeadlineAt: deadline}, nil
+	}
+	return ConversationControl{SchemaVersion: 1, CallID: callID, ExecutionGeneration: execution, Continue: true, DeadlineAt: deadline}, nil
+}
+
+type completedBeforeStopConversationProcess struct {
+	complete     chan struct{}
+	waitReturned chan struct{}
+	mu           sync.Mutex
+	stopped      bool
+}
+
+func (*completedBeforeStopConversationProcess) Identity() (string, string, error) {
+	return "thread-owned", "turn-owned", nil
+}
+
+func (p *completedBeforeStopConversationProcess) Wait(context.Context) (ConversationExecutionResult, error) {
+	<-p.complete
+	close(p.waitReturned)
+	return ConversationExecutionResult{Outcome: "completed", ThreadID: "thread-owned", TurnID: "turn-owned", Text: "must-not-escape"}, nil
+}
+
+func (p *completedBeforeStopConversationProcess) Stop(context.Context) error {
+	p.mu.Lock()
+	p.stopped = true
+	p.mu.Unlock()
+	return nil
 }
 
 type fakeConversationProcess struct {

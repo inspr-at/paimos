@@ -229,7 +229,8 @@ func validateConversationCall(call ConversationCall) error {
 	if call.OutputSHA256 != "" && !validLowerDigest(call.OutputSHA256) {
 		return ErrOwnership
 	}
-	if len(call.OutputText) > conversationMaxOutput || !utf8.ValidString(call.OutputText) || len(call.ErrorCode) > 64 || strings.ContainsAny(call.ErrorCode, "\x00\r\n") {
+	if len(call.OutputText) > conversationMaxOutput || !utf8.ValidString(call.OutputText) ||
+		(call.State == "failed" && !validConversationErrorCode(call.ErrorCode)) || (call.State != "failed" && call.ErrorCode != "") {
 		return ErrOwnership
 	}
 	return nil
@@ -254,13 +255,22 @@ func validateConversationEvent(event ConversationEvent) error {
 			return ErrOwnership
 		}
 	case "failed", "cancelled":
-		if event.Text != "" || event.OutputSHA256 != "" || event.ErrorCode == "" || (event.ThreadID != "" || event.TurnID != "") && !ids {
+		if event.Text != "" || event.OutputSHA256 != "" || !validConversationErrorCode(event.ErrorCode) || (event.ThreadID != "" || event.TurnID != "") && !ids {
 			return ErrOwnership
 		}
 	default:
 		return ErrOwnership
 	}
 	return nil
+}
+
+func validConversationErrorCode(value string) bool {
+	switch value {
+	case "execution_failed", "deadline_exceeded", "cancelled", "malformed_completion", "output_limit", "event_limit", "runtime_unavailable", "authority_revoked", "outcome_unknown":
+		return true
+	default:
+		return false
+	}
 }
 
 func validLowerDigest(value string) bool {
