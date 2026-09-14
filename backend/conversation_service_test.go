@@ -561,6 +561,12 @@ func TestConversationServiceStartedRaceStaysCancelledAndReleasesOnlyOnTerminalEv
 			if response := f.report(t, admitted.CallID, claim.ExecutionGeneration, delta); response.Code != wantOutputStatus {
 				t.Fatalf("post-cancel output status=%d want=%d body=%s", response.Code, wantOutputStatus, response.Body.String())
 			}
+			emptyDigest := sha256.Sum256(nil)
+			completed := conversationturns.Event{Sequence: 2, Kind: "completed", ThreadID: started.ThreadID, TurnID: started.TurnID,
+				OutputSHA256: hex.EncodeToString(emptyDigest[:])}
+			if response := f.report(t, admitted.CallID, claim.ExecutionGeneration, completed); response.Code != wantOutputStatus {
+				t.Fatalf("post-cancel completion status=%d want=%d body=%s", response.Code, wantOutputStatus, response.Body.String())
+			}
 			terminal := conversationturns.Event{Sequence: 2, Kind: "cancelled", ThreadID: started.ThreadID, TurnID: started.TurnID, ErrorCode: "cancelled"}
 			terminalResponse := f.report(t, admitted.CallID, claim.ExecutionGeneration, terminal)
 			terminalCall := decodeResponse[conversationturns.Call](t, terminalResponse)

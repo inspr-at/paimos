@@ -838,7 +838,10 @@ func (s *Service) reportTx(ctx context.Context, tx *sql.Tx, call row, runtimeID 
 			return Call{}, ErrTooLarge
 		}
 	case "completed":
-		if call.State != "running" || !eventMatchesNative(call, event) || sha256Text(assembled) != event.OutputSHA256 {
+		if call.State != "running" {
+			return Call{}, ErrConflict
+		}
+		if !eventMatchesNative(call, event) || sha256Text(assembled) != event.OutputSHA256 {
 			return Call{}, ErrInvalid
 		}
 		if (call.Purpose == "understand" || call.Purpose == "interpret") && validateUnderstandingOutput(assembled) != nil {
