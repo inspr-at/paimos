@@ -1282,30 +1282,49 @@ create_release_pr() {
 }
 
 cleanup_checkout() {
-  local current local_oid remote_oid
+  local current local_oid main_worktree pr_head_oid remote_oid tag_oid
   current=$(git rev-parse --abbrev-ref HEAD)
   git fetch --quiet origin main
   if [[ "$current" == "$RELEASE_BRANCH" ]]; then
     [[ -z "$(changed_worktree_files)" ]] ||
       fail "cannot clean up: release checkout is dirty"
-    git switch main >/dev/null
+    main_worktree=$(git worktree list --porcelain | awk '
+      $1 == "worktree" { worktree = $2 }
+      $1 == "branch" && $2 == "refs/heads/main" { print worktree; exit }
+    ')
+    if [[ -n "$main_worktree" ]]; then
+      tag_oid=$(git rev-parse "$NEW_TAG^{commit}" 2>/dev/null) ||
+        fail "cannot clean up: local $NEW_TAG does not resolve to a commit"
+      [[ "$tag_oid" == "$TAG_OID" ]] ||
+        fail "cannot clean up: local $NEW_TAG points to $tag_oid, expected $TAG_OID"
+      git switch --detach "$TAG_OID" >/dev/null
+      [[ "$(git rev-parse HEAD)" == "$TAG_OID" ]] ||
+        fail "cannot clean up: detached checkout differs from $TAG_OID"
+    else
+      git switch main >/dev/null
+    fi
   fi
   if [[ "$(git rev-parse --abbrev-ref HEAD)" == "main" ]]; then
     git merge --ff-only origin/main >/dev/null
-    if git show-ref --verify --quiet "refs/heads/$RELEASE_BRANCH"; then
-      local_oid=$(git rev-parse "$RELEASE_BRANCH")
-      [[ "$local_oid" == "$VALIDATED_HEAD_OID" ]] ||
-        fail "refusing to delete drifted local $RELEASE_BRANCH at $local_oid"
-      git branch -D "$RELEASE_BRANCH" >/dev/null
-    fi
-    remote_oid=$(git ls-remote --heads origin "$RELEASE_BRANCH" | awk '{print $1}')
-    if [[ -n "$remote_oid" ]]; then
-      [[ "$remote_oid" == "$VALIDATED_HEAD_OID" ]] ||
-        fail "refusing to delete drifted origin/$RELEASE_BRANCH at $remote_oid"
-      git push origin --delete "$RELEASE_BRANCH" >/dev/null
-    fi
   fi
-  git update-ref -d "$PR_HEAD_REF"
+  if git show-ref --verify --quiet "refs/heads/$RELEASE_BRANCH"; then
+    local_oid=$(git rev-parse "$RELEASE_BRANCH")
+    [[ "$local_oid" == "$VALIDATED_HEAD_OID" ]] ||
+      fail "refusing to delete drifted local $RELEASE_BRANCH at $local_oid"
+    git branch -D "$RELEASE_BRANCH" >/dev/null
+  fi
+  remote_oid=$(git ls-remote --heads origin "$RELEASE_BRANCH" | awk '{print $1}')
+  if [[ -n "$remote_oid" ]]; then
+    [[ "$remote_oid" == "$VALIDATED_HEAD_OID" ]] ||
+      fail "refusing to delete drifted origin/$RELEASE_BRANCH at $remote_oid"
+    git push origin --delete "$RELEASE_BRANCH" >/dev/null
+  fi
+  if git show-ref --verify --quiet "$PR_HEAD_REF"; then
+    pr_head_oid=$(git rev-parse "$PR_HEAD_REF")
+    [[ "$pr_head_oid" == "$VALIDATED_HEAD_OID" ]] ||
+      fail "refusing to delete drifted PR evidence ref $PR_HEAD_REF at $pr_head_oid"
+    git update-ref -d "$PR_HEAD_REF" "$VALIDATED_HEAD_OID"
+  fi
 }
 
 for cmd in git gh jq cmp; do
