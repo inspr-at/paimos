@@ -9,6 +9,17 @@ Semantic Versioning (`x.y.z`, until 5.21.0), INSPR calendar v1
 (`YYMMDDhhmmss.0.0`, the UTC reservation second as a SemVer-shaped
 coordinate, from the first entry below that form).
 
+## [260914224513.0.0] — 2026-09-14
+
+### Added
+
+- Connect Aithema chat and structured understanding to explicitly bound native Codex accounts through a scoped conversation service, with project/actor authorization, immutable account/model bindings and bounded restricted execution (PAI-1027).
+
+### Fixed
+
+- Reconcile failed and cancelled conversations without replaying inference, losing terminal evidence or holding account slots after the owned process exits (PAI-1027).
+- Complete release cleanup when the main branch belongs to another worktree (PAI-1026).
+
 ## [260914132108.0.0] — 2026-09-14
 
 ### Changed
