@@ -246,16 +246,19 @@ type StageView struct {
 // Progress separates what the delivery ledger says happened from how fresh
 // that evidence is. Completion never follows from a worker saying it finished.
 type Progress struct {
-	Stages           []StageView `json:"stages"`
-	IntentState      string      `json:"intent_state,omitempty"`
-	IntentReason     string      `json:"intent_reason,omitempty"`
-	SessionID        string      `json:"session_id,omitempty"`
-	SessionPhase     string      `json:"session_phase,omitempty"`
-	SessionActivity  string      `json:"session_activity,omitempty"`
-	EvidenceFresh    bool        `json:"evidence_fresh"`
-	EvidenceObserved bool        `json:"evidence_observed"`
-	FreshnessAsOf    string      `json:"freshness_as_of,omitempty"`
-	BlockingReason   string      `json:"blocking_reason,omitempty"`
+	// Internal server projection only. Imported or serialized batch JSON cannot
+	// supply Janus evidence to Flow, and this never authorizes an operation.
+	JanusPrerequisite *JanusPrerequisiteEvidence `json:"-"`
+	Stages            []StageView                `json:"stages"`
+	IntentState       string                     `json:"intent_state,omitempty"`
+	IntentReason      string                     `json:"intent_reason,omitempty"`
+	SessionID         string                     `json:"session_id,omitempty"`
+	SessionPhase      string                     `json:"session_phase,omitempty"`
+	SessionActivity   string                     `json:"session_activity,omitempty"`
+	EvidenceFresh     bool                       `json:"evidence_fresh"`
+	EvidenceObserved  bool                       `json:"evidence_observed"`
+	FreshnessAsOf     string                     `json:"freshness_as_of,omitempty"`
+	BlockingReason    string                     `json:"blocking_reason,omitempty"`
 	// SetupRequired is a precise operator-provisioning boundary. It is never a
 	// secret and never an invented host/command. Empty means this batch is not
 	// waiting on missing Pharos/Janus setup.
@@ -264,6 +267,14 @@ type Progress struct {
 	// control and does not upgrade guesses or worker-exit into completion.
 	NextAction string       `json:"next_action,omitempty"`
 	Handoff    *HandoffView `json:"handoff,omitempty"`
+}
+
+// JanusPrerequisiteEvidence describes required checks already satisfied for an
+// owned execution. It is not a user access grant or a credential value.
+type JanusPrerequisiteEvidence struct {
+	HandoffID  string
+	StageKey   string
+	ObservedAt string
 }
 
 // HandoffView is the safe projection of the current external-stage handoff.

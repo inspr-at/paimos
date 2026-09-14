@@ -370,7 +370,18 @@ func mapPharos(batch *baselinebatch.Batch, asOf, fresh string) Gate {
 	)
 }
 
-func mapJanus(batch *baselinebatch.Batch, _, _ string) Gate {
+func mapJanus(batch *baselinebatch.Batch, _, fresh string) Gate {
+	if batch != nil && (batch.Status == baselinebatch.BatchActive || batch.Status == baselinebatch.BatchCompleted) {
+		if proof := batch.Progress.JanusPrerequisite; proof != nil && proof.HandoffID != "" && proof.ObservedAt != "" &&
+			(proof.StageKey == delivery.StageDeployment || proof.StageKey == delivery.StageVerification) {
+			ref := OpaqueRef("ev", "janus-prerequisite", fmt.Sprintf("%d", batch.ID), proof.HandoffID)
+			return Gate{
+				Status: "pass", GateKind: "access",
+				Message:     "Required Janus checks passed for this delivery. User access remains separately authorized.",
+				EvidenceRef: &ref, ObservedAt: &proof.ObservedAt, FreshUntil: &fresh,
+			}
+		}
+	}
 	if batch != nil && batch.Progress.SetupRequired != "" {
 		return unknownGate(setupMessage(batch.Progress.SetupRequired), "access")
 	}
