@@ -219,6 +219,10 @@ func Middleware(next http.Handler) http.Handler {
 				http.Error(w, `{"error":"forbidden"}`, http.StatusForbidden)
 				return
 			}
+			if principal.Kind() == PrincipalConversationService && !conversationServiceRouteAllowed(r) {
+				http.Error(w, `{"error":"forbidden"}`, http.StatusForbidden)
+				return
+			}
 			// PAI-320: API-key callers also get the epoch so any
 			// frontend that talks via a key picks up role / membership
 			// changes on the next request.
@@ -366,6 +370,28 @@ func machineNotifierRouteAllowed(r *http.Request) bool {
 	rest := strings.TrimPrefix(r.URL.Path, messages+"/")
 	parts := strings.Split(rest, "/")
 	return len(parts) == 2 && parts[0] != "" && parts[1] == "receipt"
+}
+
+func conversationServiceRouteAllowed(r *http.Request) bool {
+	if r == nil {
+		return false
+	}
+	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+	if len(parts) < 6 || parts[0] != "api" || parts[1] != "projects" || parts[2] == "" ||
+		parts[3] != "conversation" || parts[4] != "v1" || parts[5] != "calls" {
+		return false
+	}
+	switch len(parts) {
+	case 6:
+		return r.Method == http.MethodPost
+	case 7:
+		return parts[6] != "" && r.Method == http.MethodGet
+	case 8:
+		return parts[6] != "" && ((parts[7] == "events" && r.Method == http.MethodGet) ||
+			(parts[7] == "cancel" && r.Method == http.MethodPost))
+	default:
+		return false
+	}
 }
 
 // clearSessionCookie writes a Set-Cookie that immediately expires the

@@ -32,7 +32,70 @@ func schemaNames(t *testing.T, database *sql.DB, query string) []string {
 	return names
 }
 
-const latestSchemaVersion = 196
+const latestSchemaVersion = 197
+
+func TestMigration197KeepsRevokedConversationCredentialDedicated(t *testing.T) {
+	database, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "m197-upgrade.db")+"?_txlock=immediate")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+
+	if err := migrateThrough(database, 196); err != nil {
+		t.Fatalf("migrate through M196: %v", err)
+	}
+	user, err := database.Exec(`INSERT INTO users(username,password,role,status) VALUES('m197-owner','x','admin','active')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	userID, _ := user.LastInsertId()
+	project, err := database.Exec(`INSERT INTO projects(name,key,status) VALUES('M197 conversation','M197','active')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	projectID, _ := project.LastInsertId()
+	key, err := database.Exec(`INSERT INTO api_keys(user_id,name,key_hash,key_prefix,scopes,credential_kind)
+		VALUES(?,'m197-conversation',lower(hex(randomblob(32))),'paimos_m197','','general')`, userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyID, _ := key.LastInsertId()
+
+	if err := migrateThrough(database, 197); err != nil {
+		t.Fatalf("apply M197: %v", err)
+	}
+	if version, err := CurrentSchemaVersion(database); err != nil || version != 197 {
+		t.Fatalf("post-upgrade schema version=%d err=%v", version, err)
+	}
+	const bindingID = "11111111-1111-4111-8111-111111111111"
+	_, err = database.Exec(`INSERT INTO conversation_service_bindings(
+		binding_id,revision,api_key_id,project_id,host_id,project_ref,runtime_id,runtime_generation,
+		account_label,account_key,attachment_revision,dispatch_profile_id,dispatch_profile_version,
+		execution_policy_id,max_input_bytes,max_messages,max_output_bytes,max_event_bytes,max_events,
+		max_timeout_ms,created_by,session_credential_id,created_at)
+		VALUES(?,1,?,?,'m197-host','m197-project','22222222-2222-4222-8222-222222222222',
+		'33333333-3333-4333-8333-333333333333','chatgpt','acct-main',7,'codex-sol-high','1',
+		'aithema-conversation-v1',131072,128,262144,8192,512,180000,?,'m197-session',
+		'2026-09-14T12:00:00.000Z')`, bindingID, keyID, projectID, userID)
+	if err != nil {
+		t.Fatalf("insert M197 dedicated binding: %v", err)
+	}
+	if _, err := database.Exec(`UPDATE api_keys SET disabled_at='2026-09-14T12:01:00.000Z' WHERE id=?`, keyID); err != nil {
+		t.Fatalf("revoke dedicated credential: %v", err)
+	}
+	if _, err := database.Exec(`DELETE FROM conversation_service_bindings WHERE binding_id=?`, bindingID); err == nil {
+		t.Fatal("revocation allowed the dedicated binding to be removed")
+	}
+	var effectiveKind string
+	err = database.QueryRow(`SELECT CASE
+		WHEN key.credential_kind='general' AND EXISTS(
+		 SELECT 1 FROM conversation_service_bindings binding WHERE binding.api_key_id=key.id
+		) THEN 'conversation_service' ELSE key.credential_kind END
+		FROM api_keys key WHERE key.id=?`, keyID).Scan(&effectiveKind)
+	if err != nil || effectiveKind != "conversation_service" {
+		t.Fatalf("revoked credential effective kind=%q err=%v", effectiveKind, err)
+	}
+}
 
 func TestMigration196PreservesM195AndReplacesExternalStageCausalGuard(t *testing.T) {
 	database, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "m196-upgrade.db")+"?_txlock=immediate")

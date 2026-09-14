@@ -300,6 +300,37 @@ func (s *Service) Runtimes(ctx context.Context, p auth.Principal, project int64)
 	return out, nil
 }
 
+// CurrentRuntimeTx resolves one live runtime through the production lifecycle
+// authority, including current reporter credential and active-project checks.
+// It is intentionally read-only and exists for server-owned integrations that
+// must pin an advertised runtime inside their own transaction.
+func (s *Service) CurrentRuntimeTx(ctx context.Context, tx *sql.Tx, project int64, id, generation string) (Runtime, error) {
+	out, err := s.runtime(ctx, tx, project, id, nil, "", true)
+	if err != nil || out.Generation != generation {
+		if err == ErrStorage {
+			return Runtime{}, err
+		}
+		return Runtime{}, ErrUnavailable
+	}
+	return out, nil
+}
+
+// AuthorizeRuntimeTx additionally binds the exact current runner principal and
+// private runtime lease. A lease or generation alone never grants authority.
+func (s *Service) AuthorizeRuntimeTx(ctx context.Context, tx *sql.Tx, p auth.Principal, project int64, id, generation, lease string) (Runtime, error) {
+	if err := s.authorize(ctx, tx, p, project, auth.PrincipalAPIKey); err != nil {
+		return Runtime{}, err
+	}
+	out, err := s.runtime(ctx, tx, project, id, &p, lease, true)
+	if err != nil || out.Generation != generation {
+		if err == ErrStorage {
+			return Runtime{}, err
+		}
+		return Runtime{}, ErrUnavailable
+	}
+	return out, nil
+}
+
 const intentColumns = `id,project_id,request_json,state,revision,created_at,expires_at,updated_at,new_generation,result_session_id,reason`
 
 func loadIntent(ctx context.Context, tx *sql.Tx, project int64, id string) (Intent, error) {

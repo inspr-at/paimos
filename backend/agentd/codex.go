@@ -10,12 +10,15 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/inspr-at/paimos/backend/dispatchprofile"
 	"github.com/inspr-at/paimos/backend/ownedprocess"
 )
 
@@ -79,11 +82,193 @@ func (a *CodexAdapter) executable() (string, error) {
 	return resolvePinnedExecutable(a.path, "codex", "operator-authenticated Codex CLI")
 }
 
+// StartConversation is an explicit, one-turn-only opt-in to assistant answer
+// collection. It is intentionally outside Adapter and the advertised adapter
+// capabilities: a future owned conversation binding must supply its own
+// isolation and authorization gate before calling it.
+func (a *CodexAdapter) StartConversation(ctx context.Context, request StartRequest, options CodexConversationOptions, observe func(AdapterEvent)) (CodexConversationExecution, error) {
+	collector, err := newCodexConversationCollector(options)
+	if err != nil {
+		return nil, err
+	}
+	if request.KeepAlive || request.Workspace != "" || !validAccountKey(request.AccountKey) || request.ResolvedProfile == nil ||
+		request.ResolvedProfile.Harness != AdapterCodex || request.DispatchProfileID != request.ResolvedProfile.ID ||
+		request.DispatchProfileVersion != request.ResolvedProfile.Version {
+		return nil, errors.New("Codex conversation collection requires a single-turn execution")
+	}
+	if err := dispatchprofile.ValidateSnapshot(*request.ResolvedProfile); err != nil {
+		return nil, errors.New("Codex conversation dispatch profile is invalid")
+	}
+	if len(request.Prompt) == 0 || len(request.Prompt) > 192<<10 {
+		return nil, errors.New("Codex conversation input bound is invalid")
+	}
+	if len(options.OutputSchema) > 0 {
+		var schema map[string]any
+		if len(options.OutputSchema) > 64<<10 || json.Unmarshal(options.OutputSchema, &schema) != nil || schema == nil {
+			return nil, errors.New("Codex conversation output schema is invalid")
+		}
+	}
+	scratchRoot := options.ScratchRoot
+	if scratchRoot == "" {
+		scratchRoot, err = filepath.EvalSymlinks(os.TempDir())
+		if err != nil {
+			return nil, errors.New("Codex conversation temporary root is unavailable")
+		}
+	} else {
+		canonical, info, e := canonicalCodexConversationScratch(scratchRoot, false)
+		if e != nil || canonical != filepath.Clean(scratchRoot) || info.Mode().Perm()&0077 != 0 {
+			return nil, errors.New("Codex conversation scratch root is invalid")
+		}
+		scratchRoot = canonical
+	}
+	scratch, err := os.MkdirTemp(scratchRoot, "paimos-conversation-")
+	if err != nil {
+		return nil, errors.New("create Codex conversation scratch")
+	}
+	if err = os.Chmod(scratch, 0700); err != nil { // #nosec G302 -- a private directory requires owner execute permission; group/other access remains disabled.
+		_ = os.RemoveAll(scratch)
+		return nil, errors.New("protect Codex conversation scratch")
+	}
+	mode, err := buildCodexConversationMode(codexConversationModeInput{
+		AccountKey: request.AccountKey, DispatchProfileID: request.ResolvedProfile.ID,
+		Model: request.ResolvedProfile.Model, Scratch: scratch,
+	})
+	if err != nil {
+		_ = os.RemoveAll(scratch)
+		return nil, err
+	}
+	process, err := a.startRestrictedConversation(ctx, request, options, mode, observe, collector)
+	if err != nil {
+		_ = os.RemoveAll(scratch)
+		return nil, err
+	}
+	return &codexConversationExecution{codexProcess: process, scratch: scratch, scratchIdentity: mode.scratchIdentity}, nil
+}
+
+func (a *CodexAdapter) startRestrictedConversation(ctx context.Context, request StartRequest, options CodexConversationOptions, mode codexConversationMode, observe func(AdapterEvent), collector *codexConversationCollector) (_ *codexProcess, returnErr error) {
+	path, err := a.executable()
+	if err != nil {
+		return nil, err
+	}
+	account, ok := a.accounts.lookup(request.AccountKey)
+	if !ok {
+		return nil, errors.New("managed account selection is unavailable")
+	}
+	command := a.command
+	if command == nil {
+		command = exec.Command
+	}
+	cmd := command(path, mode.appServerArgs()...) // #nosec G204 G702 -- fixed sealed mode argv and operator-selected executable.
+	cmd.Env = applyCodexHome(cmd.Env, account.home)
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return nil, errors.New("open Codex app-server stdin")
+	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, errors.New("open Codex app-server stdout")
+	}
+	cmd.Stderr = io.Discard
+	configured := ownedprocess.Configure(cmd)
+	if err = cmd.Start(); err != nil {
+		return nil, errors.New("start Codex app-server child")
+	}
+	if err = ownedprocess.Verify(cmd, configured); err != nil {
+		_ = ownedprocess.Signal(cmd, true)
+		_ = cmd.Wait()
+		return nil, err
+	}
+	process := newCodexProcess(cmd, stdin, stdout, observe, collector, request)
+	defer func() {
+		if returnErr != nil {
+			_, _ = process.Stop(context.Background(), ControlRequest{CorrelationID: "agentd-codex-conversation-start-failed"})
+		}
+	}()
+
+	operationCtx, cancel := context.WithTimeout(ctx, codexOperationTimeout)
+	defer cancel()
+	version := a.clientVersion
+	if version == "" {
+		version = "dev"
+	}
+	if err = process.call(operationCtx, "initialize", map[string]any{
+		"clientInfo":   map[string]string{"name": "paimos-agentd", "title": "PAIMOS agentd", "version": version},
+		"capabilities": map[string]any{"experimentalApi": true},
+	}, nil); err != nil {
+		return nil, fmt.Errorf("initialize Codex app-server: %w", err)
+	}
+	if err = process.notify("initialized", map[string]any{}); err != nil {
+		return nil, errors.New("notify Codex app-server initialized")
+	}
+	label, err := process.verifyChatGPTAccount(operationCtx, account.email)
+	if err != nil {
+		return nil, err
+	}
+	process.stateMu.Lock()
+	process.accountKey, process.accountLabel = request.AccountKey, label
+	process.stateMu.Unlock()
+
+	var features codexConversationExperimentalFeatureListResponse
+	if err = process.call(operationCtx, "experimentalFeature/list", mode.experimentalFeatureListParams(), &features); err != nil {
+		return nil, fmt.Errorf("preflight Codex features: %w", err)
+	}
+	var profiles codexConversationPermissionProfileListResponse
+	if err = process.call(operationCtx, "permissionProfile/list", mode.permissionProfileListParams(), &profiles); err != nil {
+		return nil, fmt.Errorf("preflight Codex permissions: %w", err)
+	}
+	var threadResponse codexConversationThreadStartResponse
+	if err = process.call(operationCtx, "thread/start", mode.threadStartParams(), &threadResponse); err != nil {
+		return nil, fmt.Errorf("start restricted Codex thread: %w", err)
+	}
+	if err = mode.validatePreflight(features, profiles, threadResponse); err != nil {
+		return nil, err
+	}
+	process.setThread(threadResponse.Thread.ID)
+	process.observeEvent(AdapterEvent{Kind: EventSessionStarted, HarnessSessionID: threadResponse.Thread.ID})
+	if !process.beginTurn() {
+		return nil, ErrCapabilityMissing
+	}
+	turnStart := map[string]any{
+		"threadId": threadResponse.Thread.ID,
+		"input":    []map[string]string{{"type": "text", "text": request.Prompt}},
+		"model":    request.ResolvedProfile.Model,
+		"effort":   request.ResolvedProfile.Effort,
+	}
+	if len(options.OutputSchema) > 0 {
+		var schema map[string]any
+		_ = json.Unmarshal(options.OutputSchema, &schema)
+		turnStart["outputSchema"] = schema
+	}
+	var turnResponse struct {
+		Turn struct {
+			ID     string `json:"id"`
+			Status string `json:"status"`
+		} `json:"turn"`
+	}
+	if err = process.call(operationCtx, "turn/start", turnStart, &turnResponse); err != nil {
+		process.failAmbiguousTurn()
+		return nil, fmt.Errorf("start restricted Codex turn: %w", err)
+	}
+	if !validOpaqueID(turnResponse.Turn.ID) || turnResponse.Turn.Status != "inProgress" {
+		process.failAmbiguousTurn()
+		return nil, errors.New("Codex app-server returned an invalid active turn")
+	}
+	process.setTurn(turnResponse.Turn.ID)
+	if _, _, targetErr := process.target(); targetErr == nil {
+		process.observeEvent(AdapterEvent{Kind: EventTurnStarted})
+	}
+	return process, nil
+}
+
 // Start owns one documented app-server stdio child and creates the thread and
 // turn through that same initialized RPC connection. The returned Process is
 // therefore the only live control object; no vendor session ID can reconstruct
 // it after restart.
 func (a *CodexAdapter) Start(ctx context.Context, request StartRequest, observe func(AdapterEvent)) (_ Process, returnErr error) {
+	return a.start(ctx, request, observe, nil)
+}
+
+func (a *CodexAdapter) start(ctx context.Context, request StartRequest, observe func(AdapterEvent), collector *codexConversationCollector) (_ *codexProcess, returnErr error) {
 	path, err := a.executable()
 	if err != nil {
 		return nil, err
@@ -121,7 +306,7 @@ func (a *CodexAdapter) Start(ctx context.Context, request StartRequest, observe 
 		_ = cmd.Wait()
 		return nil, err
 	}
-	process := newCodexProcess(cmd, stdin, stdout, observe, request)
+	process := newCodexProcess(cmd, stdin, stdout, observe, collector, request)
 	defer func() {
 		if returnErr != nil {
 			_, _ = process.Stop(context.Background(), ControlRequest{CorrelationID: "agentd-codex-start-failed"})
@@ -242,11 +427,12 @@ type codexProcess struct {
 	turnDoneOnce        sync.Once
 	streamDone          chan struct{}
 	streamDoneOnce      sync.Once
+	conversation        *codexConversationCollector
 }
 
-func newCodexProcess(cmd *exec.Cmd, stdin io.WriteCloser, stdout io.Reader, observe func(AdapterEvent), requests ...StartRequest) *codexProcess {
+func newCodexProcess(cmd *exec.Cmd, stdin io.WriteCloser, stdout io.Reader, observe func(AdapterEvent), conversation *codexConversationCollector, requests ...StartRequest) *codexProcess {
 	p := &codexProcess{ownedProcess: newOwnedProcess(cmd), stdin: stdin, observe: observe,
-		pending: map[string]chan codexRPCMessage{}, turnDone: make(chan codexTurnResult, 1), streamDone: make(chan struct{})}
+		pending: map[string]chan codexRPCMessage{}, turnDone: make(chan codexTurnResult, 1), streamDone: make(chan struct{}), conversation: conversation}
 	if len(requests) > 0 {
 		p.persistent = requests[0].KeepAlive
 		if requests[0].ResolvedProfile != nil {
@@ -291,6 +477,9 @@ func (p *codexProcess) observeEvent(event AdapterEvent) {
 
 func (p *codexProcess) readLoop(reader io.Reader) {
 	defer func() {
+		if p.conversation != nil {
+			p.conversation.transportEnded()
+		}
 		p.closeInput()
 		p.streamDoneOnce.Do(func() { close(p.streamDone) })
 		p.finishAfterDrain()
@@ -332,6 +521,9 @@ func (p *codexProcess) abortStream() {
 func (p *codexProcess) handleNotification(message codexRPCMessage) {
 	p.eventMu.Lock()
 	defer p.eventMu.Unlock()
+	if p.conversation != nil {
+		p.conversation.handleNotification(message)
+	}
 	var params struct {
 		ThreadID string `json:"threadId"`
 		TurnID   string `json:"turnId"`
@@ -453,6 +645,9 @@ func (p *codexProcess) setThread(threadID string) {
 	p.stateMu.Lock()
 	p.threadID = threadID
 	p.stateMu.Unlock()
+	if p.conversation != nil {
+		p.conversation.bindThread(threadID)
+	}
 }
 
 func (p *codexProcess) setTurn(turnID string) {
@@ -472,6 +667,9 @@ func (p *codexProcess) setTurn(turnID string) {
 	p.earlyToolTurns = nil
 	p.earlyCompleted, p.earlyCompletedState = "", ""
 	p.stateMu.Unlock()
+	if p.conversation != nil {
+		p.conversation.bindTurn(turnID)
+	}
 	if earlyTool {
 		p.observeEvent(AdapterEvent{Kind: EventToolStarted})
 	}
@@ -498,6 +696,9 @@ func (p *codexProcess) failAmbiguousTurn() {
 	p.earlyToolTurns = nil
 	p.earlyCompleted, p.earlyCompletedState = "", ""
 	p.stateMu.Unlock()
+	if p.conversation != nil {
+		p.conversation.protocolFailed()
+	}
 	p.observeEvent(AdapterEvent{ErrorCode: ErrorAppServerProtocol})
 	p.abortStream()
 }
@@ -621,6 +822,9 @@ func (p *codexProcess) closeInput() {
 }
 
 func (p *codexProcess) Stop(ctx context.Context, request ControlRequest) (ControlEffect, error) {
+	if p.conversation != nil {
+		p.conversation.cancel(ConversationFailureCancelled)
+	}
 	// Interrupt is best-effort here: Stop's authoritative effect is terminating
 	// the exact owned app-server process group, even if the turn just completed.
 	_, _ = p.Interrupt(ctx, request)

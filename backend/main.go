@@ -618,6 +618,18 @@ func mountAPI(r chi.Router) {
 		handlers.RegisterHarnessBrowserRoutes(r)
 	})
 
+	// PAI-1027: dedicated conversation-service and exact-runtime runner lanes.
+	// The credential kind has a strict method/path allowlist in auth middleware;
+	// every domain transition reauthorizes its immutable binding again.
+	r.Group(func(r chi.Router) {
+		r.Use(auth.AgentModePrivateNoStore)
+		r.Use(auth.Middleware)
+		r.Use(auth.CSRFMiddleware)
+		r.Use(auth.MustChangePasswordGate)
+		r.With(auth.RequireAdmin).Post("/auth/conversation-services", handlers.CreateConversationService)
+		handlers.RegisterConversationRoutes(r)
+	})
+
 	// PAI-863: the structured-knowledge surface is private on every outcome.
 	// No-store must wrap authentication and every refusal gate so even early
 	// 401/403/concealed-404 responses cannot be cached. Keep this dedicated

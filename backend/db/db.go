@@ -14072,6 +14072,158 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 			 BEGIN SELECT RAISE(ABORT,'external stage handoff update lacks an exact causal fact'); END`,
 	}})
 
+	// M197 / PAI-1027: durable, authenticated Aithema conversation turns.
+	// A conversation-service credential remains in api_keys for the existing
+	// hash/expiry/revocation custody, but its immutable one-to-one binding is
+	// the dedicated kind discriminator used by authentication.
+	migrations = append(migrations, migration{version: 197, steps: []string{
+		`CREATE TABLE conversation_service_bindings (
+		 binding_id              TEXT PRIMARY KEY CHECK(` + sqlUUIDCheck("binding_id") + `),
+		 revision                INTEGER NOT NULL CHECK(revision=1),
+		 api_key_id               INTEGER NOT NULL UNIQUE REFERENCES api_keys(id),
+		 project_id               INTEGER NOT NULL REFERENCES projects(id),
+		 host_id                  TEXT NOT NULL CHECK(length(CAST(host_id AS BLOB)) BETWEEN 1 AND 128),
+		 project_ref              TEXT NOT NULL CHECK(length(CAST(project_ref AS BLOB)) BETWEEN 1 AND 128),
+		 runtime_id               TEXT NOT NULL CHECK(` + sqlUUIDCheck("runtime_id") + `),
+		 runtime_generation       TEXT NOT NULL CHECK(` + sqlUUIDCheck("runtime_generation") + `),
+		 account_label            TEXT NOT NULL CHECK(length(CAST(account_label AS BLOB)) BETWEEN 1 AND 64),
+		 account_key              TEXT NOT NULL CHECK(length(CAST(account_key AS BLOB)) BETWEEN 1 AND 128),
+		 attachment_revision      INTEGER NOT NULL CHECK(attachment_revision>0),
+		 dispatch_profile_id      TEXT NOT NULL CHECK(length(CAST(dispatch_profile_id AS BLOB)) BETWEEN 1 AND 128),
+		 dispatch_profile_version TEXT NOT NULL CHECK(length(CAST(dispatch_profile_version AS BLOB)) BETWEEN 1 AND 128),
+		 execution_policy_id      TEXT NOT NULL CHECK(execution_policy_id='aithema-conversation-v1'),
+		 max_input_bytes          INTEGER NOT NULL CHECK(max_input_bytes BETWEEN 1 AND 131072),
+		 max_messages             INTEGER NOT NULL CHECK(max_messages BETWEEN 1 AND 128),
+		 max_output_bytes         INTEGER NOT NULL CHECK(max_output_bytes BETWEEN 1 AND 262144),
+		 max_event_bytes          INTEGER NOT NULL CHECK(max_event_bytes BETWEEN 1 AND 8192),
+		 max_events               INTEGER NOT NULL CHECK(max_events BETWEEN 2 AND 512),
+		 max_timeout_ms           INTEGER NOT NULL CHECK(max_timeout_ms BETWEEN 1 AND 180000),
+		 created_by               INTEGER NOT NULL REFERENCES users(id),
+		 session_credential_id    TEXT NOT NULL,
+		 created_at               TEXT NOT NULL,
+		 CHECK(host_id NOT GLOB '*[^ -~]*' AND project_ref NOT GLOB '*[^ -~]*' AND
+		       account_label NOT GLOB '*[^A-Za-z0-9._:-]*' AND account_key NOT GLOB '*[^A-Za-z0-9._:-]*' AND
+		       dispatch_profile_id NOT GLOB '*[^A-Za-z0-9._:-]*' AND dispatch_profile_version NOT GLOB '*[^A-Za-z0-9._:-]*')
+		)`,
+		`CREATE INDEX idx_conversation_service_binding_runtime
+		 ON conversation_service_bindings(project_id,runtime_id,runtime_generation,account_key)`,
+		`CREATE TRIGGER trg_conversation_service_binding_guard BEFORE INSERT ON conversation_service_bindings
+		 WHEN NOT EXISTS(SELECT 1 FROM api_keys key JOIN users owner ON owner.id=key.user_id
+		                 JOIN projects project ON project.id=NEW.project_id
+		                 WHERE key.id=NEW.api_key_id AND key.credential_kind='general' AND key.scopes=''
+		                  AND key.disabled_at IS NULL AND (key.expires_at IS NULL OR julianday(key.expires_at)>julianday('now'))
+		                  AND owner.status='active' AND project.status='active')
+		 BEGIN SELECT RAISE(ABORT,'invalid conversation service credential binding'); END`,
+		`CREATE TRIGGER trg_conversation_service_binding_no_update BEFORE UPDATE ON conversation_service_bindings
+		 BEGIN SELECT RAISE(ABORT,'conversation service binding is immutable'); END`,
+		`CREATE TRIGGER trg_conversation_service_binding_no_delete BEFORE DELETE ON conversation_service_bindings
+		 BEGIN SELECT RAISE(ABORT,'conversation service binding is durable'); END`,
+		`CREATE TABLE conversation_service_actors (
+		 binding_id TEXT NOT NULL REFERENCES conversation_service_bindings(binding_id),
+		 issuer     TEXT NOT NULL CHECK(length(CAST(issuer AS BLOB)) BETWEEN 1 AND 256 AND issuer NOT GLOB '*[^ -~]*'),
+		 subject    TEXT NOT NULL CHECK(length(CAST(subject AS BLOB)) BETWEEN 1 AND 256 AND subject NOT GLOB '*[^ -~]*'),
+		 user_id    INTEGER NOT NULL REFERENCES users(id),
+		 created_at TEXT NOT NULL,
+		 PRIMARY KEY(binding_id,issuer,subject)
+		) WITHOUT ROWID`,
+		`CREATE INDEX idx_conversation_service_actor_user ON conversation_service_actors(binding_id,user_id)`,
+		`CREATE TRIGGER trg_conversation_service_actor_no_update BEFORE UPDATE ON conversation_service_actors
+		 BEGIN SELECT RAISE(ABORT,'conversation service actor mapping is immutable'); END`,
+		`CREATE TRIGGER trg_conversation_service_actor_no_delete BEFORE DELETE ON conversation_service_actors
+		 BEGIN SELECT RAISE(ABORT,'conversation service actor mapping is durable'); END`,
+		`CREATE TABLE conversation_calls (
+		 call_id                  TEXT PRIMARY KEY CHECK(` + sqlUUIDCheck("call_id") + `),
+		 binding_id               TEXT NOT NULL REFERENCES conversation_service_bindings(binding_id),
+		 binding_revision         INTEGER NOT NULL CHECK(binding_revision>0),
+		 api_key_id               INTEGER NOT NULL REFERENCES api_keys(id),
+		 project_id               INTEGER NOT NULL REFERENCES projects(id),
+		 request_id               TEXT NOT NULL CHECK(length(CAST(request_id AS BLOB)) BETWEEN 1 AND 128),
+		 request_digest           BLOB NOT NULL CHECK(typeof(request_digest)='blob' AND length(request_digest)=32),
+		 request_json             TEXT NOT NULL CHECK(json_valid(request_json) AND length(CAST(request_json AS BLOB))<=819200),
+		 actor_issuer             TEXT NOT NULL,
+		 actor_subject            TEXT NOT NULL,
+		 actor_user_id            INTEGER NOT NULL REFERENCES users(id),
+		 project_ref              TEXT NOT NULL,
+		 conversation_id          TEXT NOT NULL CHECK(length(CAST(conversation_id AS BLOB)) BETWEEN 1 AND 128),
+		 turn_id                  TEXT NOT NULL CHECK(length(CAST(turn_id AS BLOB)) BETWEEN 1 AND 128),
+		 purpose                  TEXT NOT NULL CHECK(purpose IN ('chat','understand','interpret')),
+		 state                    TEXT NOT NULL CHECK(state IN ('queued','claimed','running','cancel_requested','completed','failed','cancelled')),
+		 deadline_at              TEXT NOT NULL,
+		 last_sequence            INTEGER NOT NULL DEFAULT 0 CHECK(last_sequence BETWEEN 0 AND 512),
+		 execution_generation     TEXT CHECK(execution_generation IS NULL OR ` + sqlUUIDCheck("execution_generation") + `),
+		 runtime_id               TEXT NOT NULL,
+		 runtime_generation       TEXT NOT NULL,
+		 account_key              TEXT NOT NULL,
+		 attachment_revision      INTEGER NOT NULL CHECK(attachment_revision>0),
+		 dispatch_profile_id      TEXT NOT NULL,
+		 dispatch_profile_version TEXT NOT NULL,
+		 execution_policy_id      TEXT NOT NULL CHECK(execution_policy_id='aithema-conversation-v1'),
+		 native_thread_id         TEXT NOT NULL DEFAULT '' CHECK(length(CAST(native_thread_id AS BLOB))<=256),
+		 native_turn_id           TEXT NOT NULL DEFAULT '' CHECK(length(CAST(native_turn_id AS BLOB))<=256),
+		 assembled_text           TEXT NOT NULL DEFAULT '' CHECK(length(CAST(assembled_text AS BLOB))<=262144),
+		 output_text              TEXT NOT NULL DEFAULT '' CHECK(length(CAST(output_text AS BLOB))<=262144),
+		 output_sha256            TEXT NOT NULL DEFAULT '' CHECK(output_sha256='' OR (length(output_sha256)=64 AND output_sha256 NOT GLOB '*[^0-9a-f]*')),
+		 error_code               TEXT NOT NULL DEFAULT '' CHECK(length(error_code)<=64),
+		 created_at               TEXT NOT NULL,
+		 updated_at               TEXT NOT NULL,
+		 UNIQUE(api_key_id,project_id,request_id),
+		 UNIQUE(binding_id,call_id)
+		)`,
+		`CREATE UNIQUE INDEX idx_conversation_calls_active_conversation
+		 ON conversation_calls(project_id,project_ref,conversation_id)
+		 WHERE state IN ('queued','claimed','running','cancel_requested')`,
+		`CREATE INDEX idx_conversation_calls_claim
+		 ON conversation_calls(project_id,runtime_id,runtime_generation,state,created_at,call_id)`,
+		`CREATE TRIGGER trg_conversation_call_identity_immutable BEFORE UPDATE OF
+		 call_id,binding_id,binding_revision,api_key_id,project_id,request_id,request_digest,request_json,
+		 actor_issuer,actor_subject,actor_user_id,project_ref,conversation_id,turn_id,purpose,deadline_at,
+		 runtime_id,runtime_generation,account_key,attachment_revision,dispatch_profile_id,
+		 dispatch_profile_version,execution_policy_id,created_at ON conversation_calls
+		 BEGIN SELECT RAISE(ABORT,'conversation call identity is immutable'); END`,
+		`CREATE TRIGGER trg_conversation_call_no_delete BEFORE DELETE ON conversation_calls
+		 BEGIN SELECT RAISE(ABORT,'conversation call is durable'); END`,
+		`CREATE TABLE conversation_account_slots (
+		 call_id            TEXT PRIMARY KEY REFERENCES conversation_calls(call_id),
+		 project_id         INTEGER NOT NULL REFERENCES projects(id),
+		 host_id            TEXT NOT NULL,
+		 runtime_id         TEXT NOT NULL,
+		 runtime_generation TEXT NOT NULL,
+		 account_label      TEXT NOT NULL,
+		 account_key        TEXT NOT NULL,
+		 reserved_at        TEXT NOT NULL,
+		 released_at        TEXT
+		)`,
+		`CREATE UNIQUE INDEX idx_conversation_account_slot_active
+		 ON conversation_account_slots(project_id,host_id,account_label,account_key)
+		 WHERE released_at IS NULL`,
+		`CREATE TRIGGER trg_conversation_account_slot_identity_immutable BEFORE UPDATE OF
+		 call_id,project_id,host_id,runtime_id,runtime_generation,account_label,account_key,reserved_at ON conversation_account_slots
+		 BEGIN SELECT RAISE(ABORT,'conversation account reservation identity is immutable'); END`,
+		`CREATE TRIGGER trg_conversation_account_slot_release_terminal BEFORE UPDATE OF released_at ON conversation_account_slots
+		 WHEN OLD.released_at IS NOT NULL OR NEW.released_at IS NULL
+		 BEGIN SELECT RAISE(ABORT,'conversation account reservation release is terminal'); END`,
+		`CREATE TRIGGER trg_conversation_account_slot_no_delete BEFORE DELETE ON conversation_account_slots
+		 BEGIN SELECT RAISE(ABORT,'conversation account reservation is durable'); END`,
+		`CREATE TABLE conversation_call_events (
+		 call_id              TEXT NOT NULL REFERENCES conversation_calls(call_id),
+		 sequence             INTEGER NOT NULL CHECK(sequence BETWEEN 1 AND 512),
+		 execution_generation TEXT,
+		 kind                 TEXT NOT NULL CHECK(kind IN ('started','assistant_delta','completed','failed','cancelled')),
+		 text                 TEXT NOT NULL DEFAULT '' CHECK(length(CAST(text AS BLOB))<=8192),
+		 thread_id            TEXT NOT NULL DEFAULT '' CHECK(length(CAST(thread_id AS BLOB))<=256),
+		 turn_id              TEXT NOT NULL DEFAULT '' CHECK(length(CAST(turn_id AS BLOB))<=256),
+		 output_sha256        TEXT NOT NULL DEFAULT '' CHECK(output_sha256='' OR (length(output_sha256)=64 AND output_sha256 NOT GLOB '*[^0-9a-f]*')),
+		 error_code           TEXT NOT NULL DEFAULT '' CHECK(length(error_code)<=64),
+		 event_digest         BLOB NOT NULL CHECK(typeof(event_digest)='blob' AND length(event_digest)=32),
+		 created_at           TEXT NOT NULL,
+		 PRIMARY KEY(call_id,sequence)
+		) WITHOUT ROWID`,
+		`CREATE TRIGGER trg_conversation_call_event_no_update BEFORE UPDATE ON conversation_call_events
+		 BEGIN SELECT RAISE(ABORT,'conversation event is immutable'); END`,
+		`CREATE TRIGGER trg_conversation_call_event_no_delete BEFORE DELETE ON conversation_call_events
+		 BEGIN SELECT RAISE(ABORT,'conversation event is durable'); END`,
+	}})
+
 	for _, m := range migrations {
 		if m.version > maxVersion {
 			continue
@@ -14207,6 +14359,7 @@ func migrationUsesForeignKeyPragma(m migration) bool {
 var migrationPreconditions = map[int]func(context.Context, *sql.Conn) error{
 	194: checkM194SchemaIsUnapplied,
 	195: checkM195SchemaIsUnapplied,
+	197: checkM197SchemaIsUnapplied,
 	// PAI-576: migration 113 adds a UNIQUE index on (project_id, issue_number).
 	113: checkNoDuplicateIssueNumbers,
 	// PAI-799/801: M142's original SQLite length() checks counted Unicode
@@ -14397,6 +14550,22 @@ var migrationPreconditions = map[int]func(context.Context, *sql.Conn) error{
 			"trg_harness_retirement_control_admission",
 		})
 	},
+}
+
+func checkM197SchemaIsUnapplied(ctx context.Context, conn *sql.Conn) error {
+	return checkSchemaObjectsAbsent(ctx, conn, 197, []string{
+		"conversation_service_bindings", "idx_conversation_service_binding_runtime",
+		"trg_conversation_service_binding_guard", "trg_conversation_service_binding_no_update",
+		"trg_conversation_service_binding_no_delete", "conversation_service_actors",
+		"idx_conversation_service_actor_user", "trg_conversation_service_actor_no_update",
+		"trg_conversation_service_actor_no_delete", "conversation_calls",
+		"idx_conversation_calls_active_conversation", "idx_conversation_calls_claim",
+		"trg_conversation_call_identity_immutable", "trg_conversation_call_no_delete",
+		"conversation_account_slots", "idx_conversation_account_slot_active",
+		"trg_conversation_account_slot_identity_immutable", "trg_conversation_account_slot_release_terminal",
+		"trg_conversation_account_slot_no_delete", "conversation_call_events",
+		"trg_conversation_call_event_no_update", "trg_conversation_call_event_no_delete",
+	})
 }
 
 func checkSessionUtteranceFoundation(ctx context.Context, conn *sql.Conn) error {

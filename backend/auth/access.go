@@ -180,6 +180,31 @@ func CanEditProject(r *http.Request, projectID int64) bool {
 	return lvl == AccessEditor
 }
 
+// CanViewProjectTx applies the production role-default and explicit-membership
+// rules inside a caller-owned authority transaction. It avoids request caches
+// at admission and execution boundaries where membership must be current.
+func CanViewProjectTx(ctx context.Context, tx *sql.Tx, userID, projectID int64) bool {
+	if tx == nil || userID < 1 || projectID < 1 {
+		return false
+	}
+	var status, role string
+	var explicit sql.NullString
+	err := tx.QueryRowContext(ctx, `SELECT u.status,`+userRoleSelectExpr+`,membership.access_level
+		FROM users u LEFT JOIN project_members membership
+		 ON membership.user_id=u.id AND membership.project_id=?
+		WHERE u.id=?`, projectID, userID).Scan(&status, &role, &explicit)
+	if err != nil || status != "active" {
+		return false
+	}
+	if IsAdminRole(role) {
+		return true
+	}
+	if explicit.Valid {
+		return explicit.String == string(AccessViewer) || explicit.String == string(AccessEditor)
+	}
+	return role == RoleMember
+}
+
 // ProjectAccessLevel returns the effective access level for (user, project)
 // as seen by the handler. Useful for per-capability checks beyond view/edit.
 func ProjectAccessLevel(r *http.Request, projectID int64) AccessLevel {
