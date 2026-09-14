@@ -505,3 +505,81 @@ func TestConversationServiceCancelDeadlineMalformedAndRevocation(t *testing.T) {
 		t.Fatalf("expired runtime claim status=%d body=%s", response.Code, response.Body.String())
 	}
 }
+
+func TestConversationServiceStartedRaceStaysCancelledAndReleasesOnlyOnTerminalEvidence(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		timeoutMS int64
+		cancel    bool
+		revoke    bool
+	}{
+		{name: "cancel", timeoutMS: 60_000, cancel: true},
+		{name: "deadline", timeoutMS: 500},
+		{name: "authority_revoked", timeoutMS: 60_000, revoke: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			f := openConversationRouteFixture(t)
+			base := fmt.Sprintf("/api/projects/%d/conversation/v1", f.projectID)
+			request := f.callRequest("started-race-"+test.name, "started-race-"+test.name, "chat")
+			request.TimeoutMS = test.timeoutMS
+			admitted := decodeResponse[conversationturns.Call](t,
+				f.request(t, http.MethodPost, base+"/calls", request, f.serviceKey, true))
+			claim := f.claim(t).Claim
+			if claim == nil || claim.Call.CallID != admitted.CallID {
+				t.Fatalf("claim=%+v admitted=%+v", claim, admitted)
+			}
+			if test.cancel {
+				cancelled := f.request(t, http.MethodPost, base+"/calls/"+admitted.CallID+"/cancel", struct{}{}, f.serviceKey, true)
+				if cancelled.Code != http.StatusOK || decodeResponse[conversationturns.Call](t, cancelled).State != "cancel_requested" {
+					t.Fatalf("cancel status=%d body=%s", cancelled.Code, cancelled.Body.String())
+				}
+			} else if test.revoke {
+				if _, err := db.DB.Exec(`INSERT INTO project_members(user_id,project_id,access_level) VALUES(?,?,'none')`, f.actorID, f.projectID); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				time.Sleep(550 * time.Millisecond)
+			}
+
+			started := conversationturns.Event{Sequence: 1, Kind: "started", ThreadID: "thread-race", TurnID: "turn-race"}
+			startedResponse := f.report(t, admitted.CallID, claim.ExecutionGeneration, started)
+			startedCall := decodeResponse[conversationturns.Call](t, startedResponse)
+			if startedResponse.Code != http.StatusOK || startedCall.State != "cancel_requested" || startedCall.DeadlineAt != admitted.DeadlineAt {
+				t.Fatalf("started race status=%d call=%+v", startedResponse.Code, startedCall)
+			}
+			var released int
+			if err := db.DB.QueryRow(`SELECT released_at IS NOT NULL FROM conversation_account_slots WHERE call_id=?`, admitted.CallID).Scan(&released); err != nil || released != 0 {
+				t.Fatalf("slot released before stopped evidence=%d err=%v", released, err)
+			}
+			delta := conversationturns.Event{Sequence: 2, Kind: "assistant_delta", Text: "forbidden", ThreadID: started.ThreadID, TurnID: started.TurnID}
+			wantOutputStatus := http.StatusConflict
+			if test.revoke {
+				wantOutputStatus = http.StatusForbidden
+			}
+			if response := f.report(t, admitted.CallID, claim.ExecutionGeneration, delta); response.Code != wantOutputStatus {
+				t.Fatalf("post-cancel output status=%d want=%d body=%s", response.Code, wantOutputStatus, response.Body.String())
+			}
+			terminal := conversationturns.Event{Sequence: 2, Kind: "cancelled", ThreadID: started.ThreadID, TurnID: started.TurnID, ErrorCode: "cancelled"}
+			terminalResponse := f.report(t, admitted.CallID, claim.ExecutionGeneration, terminal)
+			terminalCall := decodeResponse[conversationturns.Call](t, terminalResponse)
+			if terminalResponse.Code != http.StatusOK || terminalCall.State != "cancelled" || terminalCall.OutputText != "" {
+				t.Fatalf("terminal status=%d call=%+v", terminalResponse.Code, terminalCall)
+			}
+			if replay := f.report(t, admitted.CallID, claim.ExecutionGeneration, terminal); replay.Code != http.StatusOK {
+				t.Fatalf("terminal replay status=%d body=%s", replay.Code, replay.Body.String())
+			}
+			if err := db.DB.QueryRow(`SELECT released_at IS NOT NULL FROM conversation_account_slots WHERE call_id=?`, admitted.CallID).Scan(&released); err != nil || released != 1 {
+				t.Fatalf("slot not released after stopped evidence=%d err=%v", released, err)
+			}
+			if test.revoke {
+				if _, err := db.DB.Exec(`UPDATE project_members SET access_level='editor' WHERE user_id=? AND project_id=?`, f.actorID, f.projectID); err != nil {
+					t.Fatal(err)
+				}
+			}
+			next := f.callRequest("started-race-next-"+test.name, "started-race-next-"+test.name, "chat")
+			if response := f.request(t, http.MethodPost, base+"/calls", next, f.serviceKey, true); response.Code != http.StatusAccepted {
+				t.Fatalf("account remained stranded status=%d body=%s", response.Code, response.Body.String())
+			}
+		})
+	}
+}

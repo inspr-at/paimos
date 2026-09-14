@@ -31,6 +31,7 @@ type ConversationExecutionResult struct {
 type ConversationProcess interface {
 	Identity() (string, string, error)
 	Wait(context.Context) (ConversationExecutionResult, error)
+	// Stop returns only after the owned process has stopped and been reaped.
 	Stop(context.Context) error
 }
 
@@ -208,6 +209,28 @@ func (r *ConversationRunner) execute(ctx context.Context, runtime lifecycleinten
 	if err := r.journal.Put(record); err != nil {
 		_ = process.Stop(context.Background())
 		return ErrUnknown
+	}
+	// Publish the native identity before waiting for output. Cancellation and
+	// deadline transitions may race this report, but the service keeps those
+	// states cancel-only while retaining the exact execution sequence.
+	if reportErr := r.flush(ctx, runtime, &record); reportErr != nil {
+		if stopErr := process.Stop(context.Background()); stopErr != nil {
+			return errors.Join(reportErr, ErrUnknown)
+		}
+		return r.finishProcess(ctx, runtime, &record, ConversationExecutionResult{
+			Outcome: "failed", Failure: "ownership_lost", ThreadID: threadID, TurnID: turnID,
+		}, reportErr)
+	}
+	control, err = r.authority.ConversationControl(ctx, runtime.ID, record.CallID, record.Claim.ExecutionGeneration)
+	if err != nil || control.DeadlineAt != record.Claim.Call.DeadlineAt || !control.Continue || control.CancelRequested {
+		if stopErr := process.Stop(context.Background()); stopErr != nil {
+			return errors.Join(ErrUnknown, err, stopErr)
+		}
+		result := ConversationExecutionResult{Outcome: "failed", Failure: "ownership_lost", ThreadID: threadID, TurnID: turnID}
+		if err == nil && control.DeadlineAt == record.Claim.Call.DeadlineAt && control.CancelRequested {
+			result.Outcome, result.Failure = "cancelled", "cancelled"
+		}
+		return r.finishProcess(ctx, runtime, &record, result, err)
 	}
 
 	waitCtx, cancelWait := context.WithDeadline(ctx, deadline)

@@ -158,7 +158,7 @@ func validateEventShape(event Event) error {
 			return ErrInvalid
 		}
 	case "cancelled":
-		if event.Text != "" || event.OutputSHA256 != "" || event.ErrorCode != "" {
+		if event.Text != "" || event.OutputSHA256 != "" || event.ErrorCode != "" && !validErrorCode(event.ErrorCode) {
 			return ErrInvalid
 		}
 	default:

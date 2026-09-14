@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/backend/conversationturns"
+	"github.com/inspr-at/paimos/backend/db"
 	"github.com/inspr-at/paimos/backend/lifecycleclient"
 	"github.com/inspr-at/paimos/backend/lifecycleintents"
 )
@@ -80,11 +81,22 @@ func (integrationConversationProcess) Stop(context.Context) error { return nil }
 type blockingIntegrationLauncher struct {
 	launched chan struct{}
 	process  *blockingIntegrationProcess
+	mu       sync.Mutex
+	claim    lifecycleclient.ConversationClaim
 }
 
-func (l *blockingIntegrationLauncher) LaunchConversation(context.Context, lifecycleclient.ConversationClaim) (lifecycleclient.ConversationProcess, error) {
+func (l *blockingIntegrationLauncher) LaunchConversation(_ context.Context, claim lifecycleclient.ConversationClaim) (lifecycleclient.ConversationProcess, error) {
+	l.mu.Lock()
+	l.claim = claim
+	l.mu.Unlock()
 	close(l.launched)
 	return l.process, nil
+}
+
+func (l *blockingIntegrationLauncher) snapshot() lifecycleclient.ConversationClaim {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.claim
 }
 
 type blockingIntegrationProcess struct {
@@ -307,6 +319,30 @@ func TestConversationLifecycleClientCancellationAndDeadlineAgainstProductionRout
 			completed := decodeResponse[conversationturns.Call](t, response)
 			if response.Code != http.StatusOK || completed.State != "cancelled" || completed.OutputText != "" {
 				t.Fatalf("%s terminal status=%d call=%+v", test.name, response.Code, completed)
+			}
+			pageResponse := f.request(t, http.MethodGet, base+"/calls/"+call.CallID+"/events?after=0", nil, f.serviceKey, true)
+			page := decodeResponse[conversationturns.EventsPage](t, pageResponse)
+			if pageResponse.Code != http.StatusOK || len(page.Events) != 2 || page.Events[0].Kind != "started" || page.Events[1].Kind != "cancelled" {
+				t.Fatalf("%s terminal events status=%d page=%+v", test.name, pageResponse.Code, page)
+			}
+			claim := launcher.snapshot()
+			terminal := page.Events[1]
+			if _, err := authority.ReportConversationEvent(context.Background(), f.runtime.ID, f.runtime.Generation,
+				call.CallID, claim.ExecutionGeneration, lifecycleclient.ConversationEvent{
+					Sequence: int(terminal.Sequence), Kind: terminal.Kind, ThreadID: terminal.ThreadID,
+					TurnID: terminal.TurnID, ErrorCode: terminal.ErrorCode,
+				}); err != nil {
+				t.Fatalf("%s terminal replay: %v", test.name, err)
+			}
+			var released int
+			if err := db.DB.QueryRow(`SELECT released_at IS NOT NULL FROM conversation_account_slots WHERE call_id=?`, call.CallID).Scan(&released); err != nil || released != 1 {
+				t.Fatalf("%s slot release=%d err=%v", test.name, released, err)
+			}
+			next := f.callRequest("integration-next-"+test.name, "integration-next-"+test.name, "chat")
+			nextCall := submitIntegrationConversation(t, server.Client(), server.URL, f, next)
+			cleanup := f.request(t, http.MethodPost, base+"/calls/"+nextCall.CallID+"/cancel", struct{}{}, f.serviceKey, true)
+			if cleanup.Code != http.StatusOK || decodeResponse[conversationturns.Call](t, cleanup).State != "cancelled" {
+				t.Fatalf("%s account reuse cleanup status=%d body=%s", test.name, cleanup.Code, cleanup.Body.String())
 			}
 		})
 	}

@@ -799,7 +799,7 @@ func (s *Service) reportTx(ctx context.Context, tx *sql.Tx, call row, runtimeID 
 		return Call{}, ErrStorage
 	}
 	currentAuthority := s.storedAuthorityCurrent(ctx, tx, call)
-	if !currentAuthority && report.Event.Kind != "failed" && report.Event.Kind != "cancelled" {
+	if !currentAuthority && report.Event.Kind != "started" && report.Event.Kind != "failed" && report.Event.Kind != "cancelled" {
 		return Call{}, ErrUnavailable
 	}
 	if report.Event.Sequence != call.LastSequence+1 {
@@ -818,10 +818,17 @@ func (s *Service) reportTx(ctx context.Context, tx *sql.Tx, call row, runtimeID 
 	newState, newError, assembled, output, outputDigest := call.State, call.ErrorCode, call.AssembledText, call.OutputText, call.OutputSHA256
 	switch event.Kind {
 	case "started":
-		if call.State != "claimed" || call.LastSequence != 0 {
+		if (call.State != "claimed" && call.State != "cancel_requested") || call.LastSequence != 0 {
 			return Call{}, ErrConflict
 		}
-		newState = "running"
+		// Cancellation or deadline expiry can race the runner's first report
+		// after the owned native process has already started. Preserve that
+		// exact native identity and sequence without reopening success authority.
+		if call.State == "claimed" && currentAuthority {
+			newState = "running"
+		} else {
+			newState = "cancel_requested"
+		}
 	case "assistant_delta":
 		if call.State != "running" || !eventMatchesNative(call, event) {
 			return Call{}, ErrConflict

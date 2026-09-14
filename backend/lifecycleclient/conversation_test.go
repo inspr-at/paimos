@@ -113,6 +113,11 @@ func decodeConversationTestBody(t *testing.T, request *http.Request, output any)
 
 func TestConversationRunnerClaimsOnceReportsExactDigestAndRetainsPrivateAnswer(t *testing.T) {
 	authority, launcher, runtime := testConversationRuntime(t, "answer 🌍")
+	launcher.process.beforeWait = func() bool {
+		authority.mu.Lock()
+		defer authority.mu.Unlock()
+		return len(authority.events) == 1 && authority.events[0].Kind == "started"
+	}
 	runner, err := NewConversationRunner(conversationJournalDir(t), runtime.Generation, authority, launcher)
 	if err != nil {
 		t.Fatal(err)
@@ -122,6 +127,9 @@ func TestConversationRunnerClaimsOnceReportsExactDigestAndRetainsPrivateAnswer(t
 	}
 	if authority.claims != 1 || launcher.launches != 1 {
 		t.Fatalf("claims=%d launches=%d", authority.claims, launcher.launches)
+	}
+	if !launcher.process.observedStarted {
+		t.Fatal("process wait began before the started event was accepted")
 	}
 	if len(authority.events) != 3 || authority.events[0].Kind != "started" || authority.events[1].Kind != "assistant_delta" || authority.events[1].Text != "answer 🌍" || authority.events[2].Kind != "completed" {
 		t.Fatalf("events=%+v", authority.events)
@@ -145,7 +153,7 @@ func TestConversationRunnerClaimsOnceReportsExactDigestAndRetainsPrivateAnswer(t
 	}
 }
 
-func TestConversationRunnerTransportRetryNeverRespawns(t *testing.T) {
+func TestConversationRunnerStartedReportFailureStopsAndNeverRespawns(t *testing.T) {
 	authority, launcher, runtime := testConversationRuntime(t, "private answer")
 	authority.failReports = true
 	directory := conversationJournalDir(t)
@@ -168,7 +176,8 @@ func TestConversationRunnerTransportRetryNeverRespawns(t *testing.T) {
 	if err = restarted.Step(context.Background(), runtime); err != nil {
 		t.Fatal(err)
 	}
-	if launcher.launches != 1 || len(authority.events) != 3 || authority.events[2].Kind != "completed" {
+	if launcher.launches != 1 || len(authority.events) != 2 || authority.events[0].Kind != "started" ||
+		authority.events[1].Kind != "failed" || authority.events[1].ErrorCode != "ownership_lost" {
 		t.Fatalf("launches=%d events=%+v", launcher.launches, authority.events)
 	}
 }
@@ -315,15 +324,23 @@ func (l *fakeConversationLauncher) LaunchConversation(context.Context, Conversat
 }
 
 type fakeConversationProcess struct {
-	result  ConversationExecutionResult
-	block   chan struct{}
-	stopped bool
+	result          ConversationExecutionResult
+	block           chan struct{}
+	stopped         bool
+	beforeWait      func() bool
+	observedStarted bool
 }
 
 func (*fakeConversationProcess) Identity() (string, string, error) {
 	return "thread-owned", "turn-owned", nil
 }
 func (p *fakeConversationProcess) Wait(context.Context) (ConversationExecutionResult, error) {
+	if p.beforeWait != nil {
+		p.observedStarted = p.beforeWait()
+		if !p.observedStarted {
+			return ConversationExecutionResult{Outcome: "failed", Failure: "protocol_error", ThreadID: "thread-owned", TurnID: "turn-owned"}, nil
+		}
+	}
 	if p.block != nil {
 		<-p.block
 	}
