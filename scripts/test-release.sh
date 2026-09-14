@@ -196,7 +196,8 @@ DATE
 
   cat > "$bin/docker" <<'DOCKER'
 #!/usr/bin/env bash
-[[ "$*" == "manifest inspect ghcr.io/inspr-at/paimos:${FAKE_RELEASE_VERSION:-1.0.1}" ]]
+[[ "$*" == "manifest inspect ghcr.io/inspr-at/paimos:${FAKE_RELEASE_VERSION:-1.0.1}" ]] || exit 1
+touch "${FAKE_GH_STATE:?}/image-verified"
 DOCKER
 
   cat > "$bin/gh" <<'GH'
@@ -1105,6 +1106,52 @@ test_protected_release_and_resume_states() {
 
   run_release "$repo" "$state" 1.0.1 --no-edit >/dev/null
   assert_one_pr "$state"
+}
+
+test_release_cleanup_with_main_in_other_worktree() {
+  local main_repo release_repo state origin main_branch main_head main_readme_oid
+  local merge_oid output tag_oid
+  main_repo=$(setup_repo cleanup-main-held)
+  release_repo="$TMP_ROOT/cleanup-main-held/release-worktree"
+  state="$TMP_ROOT/cleanup-main-held/gh-state"
+  output="$TMP_ROOT/cleanup-main-held/release-output"
+  origin=$(git -C "$main_repo" remote get-url origin)
+  main_branch=$(git -C "$main_repo" branch --show-current)
+  main_head=$(git -C "$main_repo" rev-parse HEAD)
+  main_readme_oid=$(git -C "$main_repo" hash-object README.md)
+
+  git -C "$main_repo" worktree add --force -q "$release_repo" main
+  prepend_release_notes "$release_repo"
+  run_release "$release_repo" "$state" patch --no-edit >"$output" 2>&1
+
+  merge_oid=$(<"$state/merge-oid")
+  tag_oid=$(git --git-dir="$origin" rev-parse 'refs/tags/v1.0.1^{}')
+  [[ "$tag_oid" == "$merge_oid" ]] ||
+    fail 'main-held cleanup changed the exact protected release tag target'
+  [[ "$(git -C "$release_repo" rev-parse --abbrev-ref HEAD)" == HEAD ]] ||
+    fail 'main-held release worktree was not detached after publication'
+  [[ "$(git -C "$release_repo" rev-parse HEAD)" == "$tag_oid" ]] ||
+    fail 'main-held release worktree was not detached at the exact tag target'
+  [[ "$(git -C "$main_repo" branch --show-current)" == "$main_branch" ]] ||
+    fail 'release cleanup moved the other main worktree off its branch'
+  [[ "$(git -C "$main_repo" rev-parse HEAD)" == "$main_head" ]] ||
+    fail 'release cleanup moved the other main worktree HEAD'
+  [[ "$(git -C "$main_repo" hash-object README.md)" == "$main_readme_oid" ]] ||
+    fail 'release cleanup changed content in the other main worktree'
+  [[ -z "$(git -C "$main_repo" status --porcelain)" ]] ||
+    fail 'release cleanup dirtied the other main worktree'
+  ! git -C "$release_repo" show-ref --verify --quiet refs/heads/release/v1.0.1 ||
+    fail 'main-held cleanup retained the validated local release branch'
+  ! git --git-dir="$origin" show-ref --verify --quiet refs/heads/release/v1.0.1 ||
+    fail 'main-held cleanup retained the validated remote release branch'
+  ! git -C "$release_repo" show-ref --verify --quiet refs/paimos/release-prs/1/head ||
+    fail 'main-held cleanup retained the validated PR evidence ref'
+  [[ -f "$state/image-verified" ]] ||
+    fail 'main-held release did not reach image publication verification'
+  grep -qF 'Waiting for tag workflows to publish release evidence' "$output" ||
+    fail 'main-held release did not continue into tag-workflow verification'
+  grep -qF 'just verify-release v1.0.1' "$output" ||
+    fail 'main-held release did not complete publication verification'
 }
 
 test_exhaustive_backend_failure_blocks_tag_creation() {
@@ -2323,6 +2370,7 @@ test_duplicate_unreleased_is_rejected
 test_versioned_entry_cannot_leave_stale_unreleased
 test_unreleased_consumption_rejects_prior_history_tamper
 test_protected_release_and_resume_states
+test_release_cleanup_with_main_in_other_worktree
 test_exhaustive_backend_failure_blocks_tag_creation
 test_exhaustive_backend_dispatch_pins_release_after_main_advances
 test_unnamed_required_check_is_not_reused_as_green
