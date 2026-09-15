@@ -83,21 +83,22 @@ const limitFields: { key: keyof Limits; label: string; min: number; max: number 
   { key: 'max_timeout_ms', label: 'Timeout (ms)', min: 1, max: 180_000 },
 ]
 
-const selectedRuntime = computed(() => runtimes.value.find(runtime => runtime.id === runtimeID.value) ?? null)
 const profileKeys = computed(() => new Set(profiles.value.map(profile => `${profile.id}@${profile.version}`)))
+const conversationRuntimes = computed(() => runtimes.value.filter(runtime => {
+  const capability = runtime.conversation
+  return runtime.schema_version === 4 && capability?.schema_version === 1 &&
+    capability.execution_policy_id === 'aithema-conversation-v1' &&
+    profileKeys.value.has(`${capability.dispatch_profile_id}@${capability.dispatch_profile_version}`)
+}))
+const selectedRuntime = computed(() => conversationRuntimes.value.find(runtime => runtime.id === runtimeID.value) ?? null)
 const accountOptions = computed(() => {
   const runtime = selectedRuntime.value
   if (!runtime || runtime.schema_version !== 4) return []
-  const compatibleLabels = new Set(
-    (runtime.account_scopes ?? [])
-      .filter(scope => scope.profiles.some(profile => profileKeys.value.has(`${profile.id}@${profile.version}`)))
-      .map(scope => scope.account_label),
-  )
+  const capability = runtime.conversation
+  if (!capability) return []
   return habitatAccountChoices(runtime).filter(choice =>
-    compatibleLabels.has(choice.account_label) &&
-    !!choice.account_key &&
-    Number.isSafeInteger(choice.attachment_revision) &&
-    Number(choice.attachment_revision) > 0,
+    choice.account_label === 'chatgpt' && choice.account_key === capability.account_key &&
+    choice.attachment_revision === capability.attachment_revision,
   )
 })
 const selectedAccount = computed(() =>
@@ -106,13 +107,11 @@ const selectedAccount = computed(() =>
 const profileOptions = computed(() => {
   const runtime = selectedRuntime.value
   const account = selectedAccount.value
-  if (!runtime || !account) return []
-  const advertised = new Set(
-    (runtime.account_scopes ?? [])
-      .find(scope => scope.account_label === account.account_label)
-      ?.profiles.map(profile => `${profile.id}@${profile.version}`) ?? [],
+  const capability = runtime?.conversation
+  if (!runtime || !account || !capability) return []
+  return profiles.value.filter(profile =>
+    profile.id === capability.dispatch_profile_id && profile.version === capability.dispatch_profile_version,
   )
-  return profiles.value.filter(profile => advertised.has(`${profile.id}@${profile.version}`))
 })
 const selectedProfile = computed(() =>
   profileOptions.value.find(profile => `${profile.id}@${profile.version}` === profileID.value) ?? null,
@@ -203,6 +202,11 @@ watch(runtimeID, () => {
   profileID.value = ''
   verified.value = false
 })
+watch(selectedRuntime, runtime => {
+  if (!runtime?.conversation) return
+  limits.value.max_output_bytes = runtime.conversation.max_output_bytes
+  limits.value.max_events = runtime.conversation.max_events
+})
 watch(accountID, () => {
   profileID.value = ''
   verified.value = false
@@ -229,6 +233,8 @@ function currentBindingSelection() {
     !project || !projects.value.some(choice => choice.id === project) ||
     !runtime || !account || !profile || !account.attachment_revision
   ) return null
+  const capability = runtime.conversation
+  if (!capability) return null
   return {
     project_id: project,
     host_id: runtime.machine_id,
@@ -239,6 +245,9 @@ function currentBindingSelection() {
     attachment_revision: account.attachment_revision,
     dispatch_profile_id: profile.id,
     dispatch_profile_version: profile.version,
+    execution_policy_id: capability.execution_policy_id,
+    max_output_bytes: capability.max_output_bytes,
+    max_events: capability.max_events,
   }
 }
 
@@ -268,6 +277,9 @@ function validateForm() {
   for (const field of limitFields) {
     const value = Number(limits.value[field.key])
     if (!Number.isSafeInteger(value) || value < field.min || value > field.max) return `${field.label} must be a whole number from ${field.min} to ${field.max}.`
+  }
+  if (limits.value.max_output_bytes !== binding.max_output_bytes || limits.value.max_events !== binding.max_events) {
+    return 'Output bytes and events must match the current conversation consumer caps.'
   }
   const recipients = ageRecipients.value.split(/\r?\n/).map(value => value.trim()).filter(Boolean)
   if (
@@ -439,7 +451,7 @@ onMounted(() => { void loadInitialChoices() })
           <div class="field"><label for="conversation-runtime">Current runtime</label>
             <select id="conversation-runtime" v-model="runtimeID" :disabled="!projectID || loading" required>
               <option value="" disabled>Select a runtime</option>
-              <option v-for="runtime in runtimes" :key="runtime.id" :value="runtime.id">{{ runtime.machine_id }} · {{ runtime.id }}</option>
+              <option v-for="runtime in conversationRuntimes" :key="runtime.id" :value="runtime.id">{{ runtime.machine_id }} · {{ runtime.id }}</option>
             </select>
           </div>
           <div class="field"><label for="conversation-account">Attached Codex account</label>
@@ -456,8 +468,7 @@ onMounted(() => { void loadInitialChoices() })
           </div>
           <div class="field"><label for="conversation-expiry">Expiry (RFC 3339, max 366 days)</label><input id="conversation-expiry" v-model="expiresAt" placeholder="2027-01-01T00:00:00Z" required /></div>
         </div>
-        <p v-if="projectID && !loading && runtimes.length === 0" class="empty-hint">No current runtimes are available for this project.</p>
-        <p v-else-if="selectedRuntime && !loading && accountOptions.length === 0" class="empty-hint">This runtime has no available attached Codex account with a current attachment revision.</p>
+        <p v-if="projectID && !loading && conversationRuntimes.length === 0" class="empty-hint">Conversation setup is needed: configure a Codex conversation consumer and restart its current daemon.</p>
       </fieldset>
 
       <fieldset>
@@ -482,7 +493,7 @@ onMounted(() => { void loadInitialChoices() })
         <div class="limit-grid">
           <div v-for="field in limitFields" :key="field.key" class="field">
             <label :for="`conversation-${field.key}`">{{ field.label }}</label>
-            <input :id="`conversation-${field.key}`" v-model.number="limits[field.key]" type="number" :min="field.min" :max="field.max" step="1" required />
+            <input :id="`conversation-${field.key}`" v-model.number="limits[field.key]" type="number" :min="field.min" :max="field.max" :readonly="field.key === 'max_output_bytes' || field.key === 'max_events'" step="1" required />
           </div>
         </div>
       </fieldset>

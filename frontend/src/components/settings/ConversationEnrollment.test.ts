@@ -43,6 +43,16 @@ const runtime = (overrides: Record<string, unknown> = {}) => ({
     attachment_revision: 7,
     account_availability: 'available' as const,
   }],
+  conversation: {
+    schema_version: 1 as const,
+    account_key: 'account-a',
+    attachment_revision: 7,
+    dispatch_profile_id: 'codex-sol-high',
+    dispatch_profile_version: '1',
+    execution_policy_id: 'aithema-conversation-v1' as const,
+    max_output_bytes: 262144,
+    max_events: 512,
+  },
   expires_at: '2027-01-01T00:00:00Z',
   sessions: [],
   ...overrides,
@@ -173,6 +183,18 @@ describe('ConversationEnrollment (PAI-1029)', () => {
     expect(host.textContent).not.toContain('Grok')
   })
 
+  it('shows setup needed and offers no ordinary coding runtime without readiness', async () => {
+    const codingOnly = runtime({ conversation: undefined })
+    loadRuntimes.mockResolvedValueOnce([codingOnly])
+    const host = await mountEnrollment()
+    setValue(host, '#conversation-project', '17', 'change')
+    await settle()
+
+    expect(host.textContent).toContain('Conversation setup is needed')
+    expect(host.querySelectorAll('#conversation-runtime option')).toHaveLength(1)
+    expect(host.textContent).not.toContain(codingOnly.id)
+  })
+
   it('refreshes authority, submits the exact verified binding, and downloads only ciphertext', async () => {
     vi.useFakeTimers()
     const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
@@ -251,6 +273,23 @@ describe('ConversationEnrollment (PAI-1029)', () => {
 
     expect(apiPost).not.toHaveBeenCalled()
     expect(host.textContent).toContain('runtime, account attachment, or profile changed')
+  })
+
+  it('invalidates review when the initialized consumer caps change during refresh', async () => {
+    loadRuntimes
+      .mockResolvedValueOnce([runtime()])
+      .mockResolvedValueOnce([runtime({
+        conversation: { ...runtime().conversation, max_events: 256 },
+      })])
+    const host = await mountEnrollment()
+    await fillForm(host)
+
+    host.querySelector<HTMLButtonElement>('button[type="submit"]')!.click()
+    await settle()
+
+    expect(apiPost).not.toHaveBeenCalled()
+    expect(host.textContent).toContain('runtime, account attachment, or profile changed')
+    expect(host.querySelector<HTMLInputElement>('#conversation-max_events')!.value).toBe('256')
   })
 
   it('rejects plaintext, mismatched binding, and malformed ciphertext responses', async () => {

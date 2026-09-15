@@ -71,6 +71,10 @@ func TestConfiguredConversationIsExplicitCompleteAndCurrent(t *testing.T) {
 	if err = configureProjectConversation(project, projectDir); err != nil || project.conversation == nil {
 		t.Fatalf("complete binding not wired: %v", err)
 	}
+	if project.registration.Conversation == nil || project.registration.Conversation.AccountKey != "conversation-account" ||
+		project.registration.Conversation.MaxOutputBytes != 256<<10 || project.registration.Conversation.MaxEvents != 512 {
+		t.Fatalf("initialized consumer readiness not advertised: %+v", project.registration.Conversation)
+	}
 	project.config.Conversation.ExecutionPolicyID = "ordinary-coding"
 	if err = configureProjectConversation(project, projectDir); err == nil {
 		t.Fatal("unsupported execution policy was accepted")
@@ -79,6 +83,19 @@ func TestConfiguredConversationIsExplicitCompleteAndCurrent(t *testing.T) {
 	project.config.Conversation.AttachmentRevision++
 	if err = configureProjectConversation(project, projectDir); err == nil {
 		t.Fatal("stale attachment revision was accepted")
+	}
+	if project.registration.Conversation != nil || project.conversation != nil {
+		t.Fatal("failed consumer configuration retained readiness")
+	}
+}
+
+func TestMissingConversationConfigurationDoesNotAdvertiseReadiness(t *testing.T) {
+	project := &projectLifecycle{registration: lifecycleintents.Registration{Conversation: &lifecycleintents.ConversationCapability{SchemaVersion: 1}}}
+	if err := configureProjectConversation(project, privateConversationTestDir(t)); err != nil {
+		t.Fatal(err)
+	}
+	if project.conversation != nil || project.registration.Conversation != nil {
+		t.Fatal("absent consumer configuration advertised conversation readiness")
 	}
 }
 

@@ -42,6 +42,10 @@ type conversationRouteFixture struct {
 }
 
 func openConversationRouteFixture(t *testing.T) *conversationRouteFixture {
+	return openConversationRouteFixtureConfigured(t, true, true)
+}
+
+func openConversationRouteFixtureConfigured(t *testing.T, advertiseConversation, enrollConversation bool) *conversationRouteFixture {
 	t.Helper()
 	t.Setenv("DATA_DIR", t.TempDir())
 	t.Setenv("PAIMOS_TEST_MODE", "1")
@@ -101,9 +105,16 @@ func openConversationRouteFixture(t *testing.T) *conversationRouteFixture {
 		Workspaces: []lifecycleintents.Workspace{{Handle: uuid.NewString(), Identity: fmt.Sprintf("%064x", 1)}},
 		AccountScopes: []lifecycleintents.AccountScope{{
 			AccountLabel: "chatgpt", Accounts: []lifecycleintents.AccountChoice{{Key: "acct-main", Label: "Main"}},
-			Profiles: []lifecycleintents.Profile{{ID: "codex-sol-high", Version: "1"}}, AttachmentRevision: 7,
+			Profiles: []lifecycleintents.Profile{{ID: "codex-sol-high", Version: "1"}, {ID: "codex-luna-medium", Version: "1"}}, AttachmentRevision: 7,
 			AccountAvailability: lifecycleintents.AccountAvailabilityAvailable,
 		}},
+	}
+	if advertiseConversation {
+		registration.Conversation = &lifecycleintents.ConversationCapability{
+			SchemaVersion: lifecycleintents.ConversationSchemaV1, AccountKey: "acct-main", AttachmentRevision: 7,
+			DispatchProfileID: "codex-sol-high", DispatchProfileVersion: "1",
+			ExecutionPolicyID: lifecycleintents.ConversationExecutionPolicyV1, MaxOutputBytes: 262144, MaxEvents: 512,
+		}
 	}
 	f.runtime, err = lifecycleintents.NewService(db.DB).RegisterRuntime(context.Background(), runner, f.projectID, conversationTestLease, registration)
 	if err != nil {
@@ -112,7 +123,9 @@ func openConversationRouteFixture(t *testing.T) *conversationRouteFixture {
 	router := chi.NewRouter()
 	router.Route("/api", mountAPI)
 	f.router = router
-	f.enroll(t, "acct-main", registration.Generation)
+	if enrollConversation {
+		f.enroll(t, "acct-main", registration.Generation)
+	}
 	return f
 }
 
@@ -211,6 +224,55 @@ func (f *conversationRouteFixture) enroll(t *testing.T, accountKey, generation s
 		t.Fatal("age envelope did not contain a credential")
 	}
 	return recorder
+}
+
+func (f *conversationRouteFixture) postEnrollment(t *testing.T, enrollment map[string]any) *httptest.ResponseRecorder {
+	t.Helper()
+	identity, err := age.GenerateX25519Identity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	enrollment["age_recipients"] = []string{identity.Recipient().String()}
+	body, err := json.Marshal(enrollment)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/conversation-services", bytes.NewReader(body))
+	req.Host = "paimos.test"
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Cookie", "paimos_session="+f.sessionID)
+	req.Header.Set("Origin", "https://paimos.test")
+	req.Header.Set(auth.CSRFHeaderName, f.csrf)
+	recorder := httptest.NewRecorder()
+	f.router.ServeHTTP(recorder, req)
+	return recorder
+}
+
+func TestConversationEnrollmentRequiresExactCurrentCapability(t *testing.T) {
+	t.Run("absent_consumer", func(t *testing.T) {
+		f := openConversationRouteFixtureConfigured(t, false, false)
+		if response := f.postEnrollment(t, f.enrollmentBody("acct-main", f.runtime.Generation)); response.Code != http.StatusForbidden {
+			t.Fatalf("absent consumer enrollment status=%d body=%s", response.Code, response.Body.String())
+		}
+	})
+	for name, mutate := range map[string]func(map[string]any){
+		"wrong_account":  func(in map[string]any) { in["account_key"] = "acct-other" },
+		"stale_revision": func(in map[string]any) { in["attachment_revision"] = 6 },
+		"wrong_profile":  func(in map[string]any) { in["dispatch_profile_id"] = "codex-luna-medium" },
+		"wrong_output_cap": func(in map[string]any) {
+			in["limits"].(map[string]any)["max_output_bytes"] = 128 << 10
+		},
+		"wrong_event_cap": func(in map[string]any) { in["limits"].(map[string]any)["max_events"] = 256 },
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := openConversationRouteFixture(t)
+			body := f.enrollmentBody("acct-main", f.runtime.Generation)
+			mutate(body)
+			if response := f.postEnrollment(t, body); response.Code != http.StatusForbidden {
+				t.Fatalf("mismatched readiness enrollment status=%d body=%s", response.Code, response.Body.String())
+			}
+		})
+	}
 }
 
 func (f *conversationRouteFixture) callRequest(requestID, conversationID, purpose string) conversationturns.Request {

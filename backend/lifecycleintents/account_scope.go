@@ -38,11 +38,12 @@ type registrationLegacyJSON struct {
 }
 
 type registrationV3JSON struct {
-	Generation    string         `json:"generation"`
-	Host          string         `json:"host"`
-	Workspaces    []Workspace    `json:"workspaces"`
-	AccountScopes []AccountScope `json:"account_scopes"`
-	SchemaVersion int            `json:"schema_version"`
+	Generation    string                  `json:"generation"`
+	Host          string                  `json:"host"`
+	Workspaces    []Workspace             `json:"workspaces"`
+	AccountScopes []AccountScope          `json:"account_scopes"`
+	SchemaVersion int                     `json:"schema_version"`
+	Conversation  *ConversationCapability `json:"conversation,omitempty"`
 }
 
 type runtimeLegacyJSON struct {
@@ -60,22 +61,26 @@ type runtimeLegacyJSON struct {
 }
 
 type runtimeV3JSON struct {
-	ID            string              `json:"id"`
-	ProjectID     int64               `json:"project_id"`
-	Generation    string              `json:"generation"`
-	MachineID     string              `json:"machine_id"`
-	Workspaces    []Workspace         `json:"workspaces"`
-	AccountScopes []AccountScope      `json:"account_scopes"`
-	ExpiresAt     string              `json:"expires_at"`
-	Sessions      []SessionProjection `json:"sessions"`
-	SchemaVersion int                 `json:"schema_version"`
+	ID            string                  `json:"id"`
+	ProjectID     int64                   `json:"project_id"`
+	Generation    string                  `json:"generation"`
+	MachineID     string                  `json:"machine_id"`
+	Workspaces    []Workspace             `json:"workspaces"`
+	AccountScopes []AccountScope          `json:"account_scopes"`
+	ExpiresAt     string                  `json:"expires_at"`
+	Sessions      []SessionProjection     `json:"sessions"`
+	SchemaVersion int                     `json:"schema_version"`
+	Conversation  *ConversationCapability `json:"conversation,omitempty"`
 }
 
 func (r Registration) MarshalJSON() ([]byte, error) {
+	if r.Conversation != nil && r.SchemaVersion != AccountLifecycleSchemaV4 {
+		return nil, ErrInvalid
+	}
 	if r.SchemaVersion == AccountScopeSchemaV3 || r.SchemaVersion == AccountLifecycleSchemaV4 {
 		return json.Marshal(registrationV3JSON{
 			Generation: r.Generation, Host: r.Host, Workspaces: r.Workspaces,
-			AccountScopes: r.AccountScopes, SchemaVersion: r.SchemaVersion,
+			AccountScopes: r.AccountScopes, SchemaVersion: r.SchemaVersion, Conversation: r.Conversation,
 		})
 	}
 	return json.Marshal(registrationLegacyJSON{
@@ -86,6 +91,9 @@ func (r Registration) MarshalJSON() ([]byte, error) {
 }
 
 func (r Runtime) MarshalJSON() ([]byte, error) {
+	if r.Conversation != nil && r.SchemaVersion != AccountLifecycleSchemaV4 {
+		return nil, ErrInvalid
+	}
 	sessions := r.Sessions
 	if sessions == nil {
 		sessions = []SessionProjection{}
@@ -94,7 +102,7 @@ func (r Runtime) MarshalJSON() ([]byte, error) {
 		return json.Marshal(runtimeV3JSON{
 			ID: r.ID, ProjectID: r.ProjectID, Generation: r.Generation, MachineID: r.MachineID,
 			Workspaces: r.Workspaces, AccountScopes: r.AccountScopes, ExpiresAt: r.ExpiresAt,
-			Sessions: sessions, SchemaVersion: r.SchemaVersion,
+			Sessions: sessions, SchemaVersion: r.SchemaVersion, Conversation: r.Conversation,
 		})
 	}
 	return json.Marshal(runtimeLegacyJSON{
@@ -109,7 +117,7 @@ func (r *Registration) UnmarshalJSON(data []byte) error {
 	if err != nil {
 		return err
 	}
-	if leftover(raw, "generation", "host", "account_label", "accounts", "workspaces", "profiles", "schema_version", "account_scopes") {
+	if leftover(raw, "generation", "host", "account_label", "accounts", "workspaces", "profiles", "schema_version", "account_scopes", "conversation") {
 		return ErrInvalid
 	}
 	version, err := optionalInt(raw, "schema_version")
@@ -136,10 +144,14 @@ func (r *Registration) UnmarshalJSON(data []byte) error {
 		if err != nil {
 			return err
 		}
-		*r = Registration{Generation: generation, Host: host, Workspaces: workspaces, AccountScopes: scopes, SchemaVersion: version}
+		conversation, err := optionalConversation(raw)
+		if err != nil || (conversation != nil && version != AccountLifecycleSchemaV4) {
+			return ErrInvalid
+		}
+		*r = Registration{Generation: generation, Host: host, Workspaces: workspaces, AccountScopes: scopes, SchemaVersion: version, Conversation: conversation}
 		return nil
 	}
-	if fieldPresent(raw, "account_scopes") {
+	if fieldPresent(raw, "account_scopes") || fieldPresent(raw, "conversation") {
 		return ErrInvalid
 	}
 	label, err := requiredString(raw, "account_label")
@@ -352,6 +364,66 @@ func optionalAccounts(raw map[string]json.RawMessage) ([]AccountChoice, error) {
 	return out, nil
 }
 
+func optionalConversation(raw map[string]json.RawMessage) (*ConversationCapability, error) {
+	value, ok := raw["conversation"]
+	if !ok {
+		return nil, nil
+	}
+	if jsonNull(value) {
+		return nil, ErrInvalid
+	}
+	var out ConversationCapability
+	if json.Unmarshal(value, &out) != nil {
+		return nil, ErrInvalid
+	}
+	return &out, nil
+}
+
+func (c *ConversationCapability) UnmarshalJSON(data []byte) error {
+	raw, err := decodeClosedObject(data)
+	if err != nil || leftover(raw, "schema_version", "account_key", "attachment_revision", "dispatch_profile_id", "dispatch_profile_version", "execution_policy_id", "max_output_bytes", "max_events") {
+		return ErrInvalid
+	}
+	version, err := optionalInt(raw, "schema_version")
+	if err != nil || !fieldPresent(raw, "schema_version") {
+		return ErrInvalid
+	}
+	account, err := requiredString(raw, "account_key")
+	if err != nil {
+		return err
+	}
+	revision, err := optionalInt64(raw, "attachment_revision")
+	if err != nil || !fieldPresent(raw, "attachment_revision") {
+		return ErrInvalid
+	}
+	profileID, err := requiredString(raw, "dispatch_profile_id")
+	if err != nil {
+		return err
+	}
+	profileVersion, err := requiredString(raw, "dispatch_profile_version")
+	if err != nil {
+		return err
+	}
+	policy, err := requiredString(raw, "execution_policy_id")
+	if err != nil {
+		return err
+	}
+	maxOutput, err := optionalInt64(raw, "max_output_bytes")
+	if err != nil || !fieldPresent(raw, "max_output_bytes") {
+		return ErrInvalid
+	}
+	maxEvents, err := optionalInt64(raw, "max_events")
+	if err != nil || !fieldPresent(raw, "max_events") {
+		return ErrInvalid
+	}
+	*c = ConversationCapability{
+		SchemaVersion: version, AccountKey: account, AttachmentRevision: revision,
+		DispatchProfileID: profileID, DispatchProfileVersion: profileVersion,
+		ExecutionPolicyID: policy, MaxOutputBytes: maxOutput, MaxEvents: maxEvents,
+	}
+	return nil
+}
+
 func (s *AccountScope) UnmarshalJSON(data []byte) error {
 	raw, err := decodeClosedObject(data)
 	if err != nil {
@@ -451,7 +523,17 @@ func (r Runtime) registration() Registration {
 	return Registration{
 		Generation: r.Generation, Host: r.MachineID, AccountLabel: r.AccountLabel, Accounts: r.Accounts,
 		Workspaces: r.Workspaces, Profiles: r.Profiles, SchemaVersion: r.SchemaVersion, AccountScopes: r.AccountScopes,
+		Conversation: r.Conversation,
 	}
+}
+
+func (r Runtime) MatchConversation(account string, revision int64, profileID, profileVersion, policy string, maxOutputBytes, maxEvents int64) bool {
+	c := r.Conversation
+	return r.SchemaVersion == AccountLifecycleSchemaV4 && c != nil &&
+		c.SchemaVersion == ConversationSchemaV1 && c.AccountKey == account && c.AttachmentRevision == revision &&
+		c.DispatchProfileID == profileID && c.DispatchProfileVersion == profileVersion && c.ExecutionPolicyID == policy &&
+		c.MaxOutputBytes == maxOutputBytes && c.MaxEvents == maxEvents &&
+		r.MatchScopeAtRevision("chatgpt", account, profileID, profileVersion, true, revision)
 }
 
 // MatchScope reports whether class, key and optional profile resolve to exactly
@@ -603,6 +685,20 @@ func ValidateAccountScopes(in Registration) error {
 				return ErrInvalid
 			}
 		}
+	}
+	return nil
+}
+
+func validateConversation(in Registration) error {
+	if in.Conversation == nil {
+		return nil
+	}
+	c := in.Conversation
+	if in.SchemaVersion != AccountLifecycleSchemaV4 || c.SchemaVersion != ConversationSchemaV1 ||
+		!validAccountKey(c.AccountKey) || c.AttachmentRevision < 1 || c.ExecutionPolicyID != ConversationExecutionPolicyV1 ||
+		c.MaxOutputBytes < 1 || c.MaxOutputBytes > 256<<10 || c.MaxEvents < 2 || c.MaxEvents > 512 ||
+		!in.MatchScopeAtRevision("chatgpt", c.AccountKey, c.DispatchProfileID, c.DispatchProfileVersion, true, c.AttachmentRevision) {
+		return ErrInvalid
 	}
 	return nil
 }

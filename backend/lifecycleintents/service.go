@@ -91,6 +91,9 @@ func validateRegistration(in Registration) error {
 	if !validID(in.Generation) || !label(in.Host, 128) || len(in.Workspaces) > 16 || in.Workspaces == nil {
 		return ErrInvalid
 	}
+	if err := validateConversation(in); err != nil {
+		return err
+	}
 	if in.SchemaVersion == AccountScopeSchemaV3 || in.SchemaVersion == AccountLifecycleSchemaV4 {
 		if err := ValidateAccountScopes(in); err != nil {
 			return err
@@ -198,7 +201,7 @@ func (s *Service) RegisterRuntime(ctx context.Context, p auth.Principal, project
 	return out, nil
 }
 func runtimeProjection(id string, project int64, in Registration, deadline string) Runtime {
-	return Runtime{ID: id, ProjectID: project, Generation: in.Generation, MachineID: in.Host, AccountLabel: in.AccountLabel, Accounts: in.Accounts, Workspaces: in.Workspaces, Profiles: in.Profiles, ExpiresAt: deadline, Sessions: []SessionProjection{}, SchemaVersion: in.SchemaVersion, AccountScopes: in.AccountScopes}
+	return Runtime{ID: id, ProjectID: project, Generation: in.Generation, MachineID: in.Host, AccountLabel: in.AccountLabel, Accounts: in.Accounts, Workspaces: in.Workspaces, Profiles: in.Profiles, ExpiresAt: deadline, Sessions: []SessionProjection{}, SchemaVersion: in.SchemaVersion, AccountScopes: in.AccountScopes, Conversation: in.Conversation}
 }
 func workspaceHandleForIdentity(workspaces []Workspace, identity string) string {
 	if identity == "" {
