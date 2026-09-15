@@ -9,6 +9,18 @@ Semantic Versioning (`x.y.z`, until 5.21.0), INSPR calendar v1
 (`YYMMDDhhmmss.0.0`, the UTC reservation second as a SemVer-shaped
 coordinate, from the first entry below that form).
 
+## [260915004615.0.0] — 2026-09-15
+
+### Added
+
+- Connect Aithema to a current native Codex account from Settings → Account, with explicit project and actor bindings, encrypted credential download, and existing credential revocation controls (PAI-1029).
+- Refresh account and runtime authority before enrollment and reject stale selections or mismatched credential responses (PAI-1029).
+
+### Fixed
+
+- Offer conversation enrollment only after the owned worker has initialized its configured conversation consumer. Keep coding-only workers available for coding without implying conversation support (PAI-1030).
+- Revalidate the exact conversation account, attachment revision, dispatch profile, policy and output limits when enrolling and using a binding; require re-enrollment after the configured worker is refreshed (PAI-1030).
+
 ## [260914224513.0.0] — 2026-09-14
 
 ### Added
