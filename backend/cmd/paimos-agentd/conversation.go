@@ -99,6 +99,8 @@ func (l *projectConversationLauncher) LaunchConversation(ctx context.Context, cl
 }
 
 func configureProjectConversation(p *projectLifecycle, projectDir string) error {
+	p.conversation = nil
+	p.registration.Conversation = nil
 	c := p.config.Conversation
 	if c == nil {
 		return nil
@@ -129,10 +131,22 @@ func configureProjectConversation(p *projectLifecycle, projectDir string) error 
 		return errors.New("conversation scratch root is not private")
 	}
 	launcher := &projectConversationLauncher{project: p, adapter: adapter, scratchRoot: scratchRoot}
-	p.conversation, err = lifecycleclient.NewConversationRunner(filepath.Join(projectDir, "conversation"), p.registration.Generation, p.authority, launcher)
+	runner, err := lifecycleclient.NewConversationRunner(filepath.Join(projectDir, "conversation"), p.registration.Generation, p.authority, launcher)
 	if err != nil {
 		return err
 	}
+	capability := &lifecycleintents.ConversationCapability{
+		SchemaVersion: lifecycleintents.ConversationSchemaV1, AccountKey: c.AccountKey,
+		AttachmentRevision: c.AttachmentRevision, DispatchProfileID: c.DispatchProfileID,
+		DispatchProfileVersion: c.DispatchProfileVersion, ExecutionPolicyID: c.ExecutionPolicyID,
+		MaxOutputBytes: int64(c.MaxOutputBytes), MaxEvents: int64(c.MaxEvents),
+	}
+	p.registration.Conversation = capability
+	if err := lifecycleintents.ValidateRegistration(p.registration); err != nil {
+		p.registration.Conversation = nil
+		return errors.New("conversation readiness advertisement invalid")
+	}
+	p.conversation = runner
 	return nil
 }
 

@@ -36,8 +36,11 @@ const (
 	RuntimeSchemaV1          = 1
 	AccountChoiceSchemaV2    = 2
 	AccountLifecycleSchemaV4 = 4
+	ConversationSchemaV1     = 1
 	maxAdvertisedAccounts    = 16
 )
+
+const ConversationExecutionPolicyV1 = "aithema-conversation-v1"
 
 type Workspace struct {
 	Handle   string `json:"handle"`
@@ -56,29 +59,41 @@ type AccountChoice struct {
 	Key   string `json:"key"`
 	Label string `json:"label"`
 }
+type ConversationCapability struct {
+	SchemaVersion          int    `json:"schema_version"`
+	AccountKey             string `json:"account_key"`
+	AttachmentRevision     int64  `json:"attachment_revision"`
+	DispatchProfileID      string `json:"dispatch_profile_id"`
+	DispatchProfileVersion string `json:"dispatch_profile_version"`
+	ExecutionPolicyID      string `json:"execution_policy_id"`
+	MaxOutputBytes         int64  `json:"max_output_bytes"`
+	MaxEvents              int64  `json:"max_events"`
+}
 type Registration struct {
-	Generation    string          `json:"generation"`
-	Host          string          `json:"host"`
-	AccountLabel  string          `json:"account_label"`
-	Accounts      []AccountChoice `json:"accounts,omitempty"`
-	Workspaces    []Workspace     `json:"workspaces"`
-	Profiles      []Profile       `json:"profiles"`
-	SchemaVersion int             `json:"schema_version,omitempty"`
-	AccountScopes []AccountScope  `json:"account_scopes,omitempty"`
+	Generation    string                  `json:"generation"`
+	Host          string                  `json:"host"`
+	AccountLabel  string                  `json:"account_label"`
+	Accounts      []AccountChoice         `json:"accounts,omitempty"`
+	Workspaces    []Workspace             `json:"workspaces"`
+	Profiles      []Profile               `json:"profiles"`
+	SchemaVersion int                     `json:"schema_version,omitempty"`
+	AccountScopes []AccountScope          `json:"account_scopes,omitempty"`
+	Conversation  *ConversationCapability `json:"conversation,omitempty"`
 }
 type Runtime struct {
-	ID            string              `json:"id"`
-	ProjectID     int64               `json:"project_id"`
-	Generation    string              `json:"generation"`
-	MachineID     string              `json:"machine_id"`
-	AccountLabel  string              `json:"account_label"`
-	Accounts      []AccountChoice     `json:"accounts,omitempty"`
-	Workspaces    []Workspace         `json:"workspaces"`
-	Profiles      []Profile           `json:"profiles"`
-	ExpiresAt     string              `json:"expires_at"`
-	Sessions      []SessionProjection `json:"sessions"`
-	SchemaVersion int                 `json:"schema_version,omitempty"`
-	AccountScopes []AccountScope      `json:"account_scopes,omitempty"`
+	ID            string                  `json:"id"`
+	ProjectID     int64                   `json:"project_id"`
+	Generation    string                  `json:"generation"`
+	MachineID     string                  `json:"machine_id"`
+	AccountLabel  string                  `json:"account_label"`
+	Accounts      []AccountChoice         `json:"accounts,omitempty"`
+	Workspaces    []Workspace             `json:"workspaces"`
+	Profiles      []Profile               `json:"profiles"`
+	ExpiresAt     string                  `json:"expires_at"`
+	Sessions      []SessionProjection     `json:"sessions"`
+	SchemaVersion int                     `json:"schema_version,omitempty"`
+	AccountScopes []AccountScope          `json:"account_scopes,omitempty"`
+	Conversation  *ConversationCapability `json:"conversation,omitempty"`
 }
 
 // ReadinessContractVersion is the inspr readiness evidence contract this

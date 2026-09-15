@@ -9,6 +9,16 @@ export interface HabitatAccountScope {
   attachment_revision?: number
   account_availability?: 'available' | 'unavailable'
 }
+export interface HabitatConversationCapability {
+  schema_version: 1
+  account_key: string
+  attachment_revision: number
+  dispatch_profile_id: string
+  dispatch_profile_version: string
+  execution_policy_id: 'aithema-conversation-v1'
+  max_output_bytes: number
+  max_events: number
+}
 export interface HabitatRuntime {
   id: string
   project_id: number
@@ -20,6 +30,7 @@ export interface HabitatRuntime {
   workspaces: { handle: string; identity: string; label?: string }[]
   profiles?: { id: string; version: string }[]
   account_scopes?: HabitatAccountScope[]
+  conversation?: HabitatConversationCapability
   expires_at: string
   sessions: { session_id: string; generation: string; workspace_handle?: string }[]
 }
@@ -194,17 +205,21 @@ export function parseHabitatRuntimes(value: unknown, projectId: number): Habitat
     const runtime = object(value)
     const scoped = runtime.schema_version === 3 || runtime.schema_version === 4
     if (scoped)
-      fields(runtime, [
-        'id',
-        'project_id',
-        'generation',
-        'machine_id',
-        'workspaces',
-        'account_scopes',
-        'schema_version',
-        'expires_at',
-        'sessions',
-      ])
+      fields(
+        runtime,
+        [
+          'id',
+          'project_id',
+          'generation',
+          'machine_id',
+          'workspaces',
+          'account_scopes',
+          'schema_version',
+          'expires_at',
+          'sessions',
+        ],
+        runtime.schema_version === 4 ? ['conversation'] : [],
+      )
     else
       fields(
         runtime,
@@ -383,6 +398,44 @@ export function parseHabitatRuntimes(value: unknown, projectId: number): Habitat
             scope.profiles as { id: string; version: string }[],
           )
         }
+      }
+      if (runtime.conversation !== undefined) {
+        const conversation = object(runtime.conversation)
+        fields(conversation, [
+          'schema_version',
+          'account_key',
+          'attachment_revision',
+          'dispatch_profile_id',
+          'dispatch_profile_version',
+          'execution_policy_id',
+          'max_output_bytes',
+          'max_events',
+        ])
+        const matchingScopes = (scopes as HabitatAccountScope[]).filter(scope =>
+          scope.account_label === 'chatgpt' &&
+          scope.account_availability === 'available' &&
+          scope.attachment_revision === conversation.attachment_revision &&
+          scope.accounts?.some(choice => choice.key === conversation.account_key) &&
+          scope.profiles.some(profile =>
+            profile.id === conversation.dispatch_profile_id &&
+            profile.version === conversation.dispatch_profile_version,
+          ),
+        )
+        if (
+          conversation.schema_version !== 1 ||
+          !accountKey(conversation.account_key) ||
+          !positive(conversation.attachment_revision) ||
+          !token(conversation.dispatch_profile_id) ||
+          !token(conversation.dispatch_profile_version) ||
+          conversation.execution_policy_id !== 'aithema-conversation-v1' ||
+          !positive(conversation.max_output_bytes) ||
+          Number(conversation.max_output_bytes) > 256 * 1024 ||
+          !Number.isSafeInteger(conversation.max_events) ||
+          Number(conversation.max_events) < 2 ||
+          Number(conversation.max_events) > 512 ||
+          matchingScopes.length !== 1
+        )
+          invalid()
       }
     } else {
       const profileIds = new Set<string>()

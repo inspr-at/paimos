@@ -3,6 +3,7 @@ package lifecycleintents
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -17,6 +18,38 @@ import (
 	"github.com/inspr-at/paimos/backend/managedharness"
 	"github.com/inspr-at/paimos/backend/models"
 )
+
+func TestConversationCapabilityPersistsInRuntimeRegistration(t *testing.T) {
+	f := setup(t)
+	f.now = f.now.Add(RuntimeTTLSeconds*time.Second + time.Second)
+	in := Registration{
+		Generation: uuid.NewString(), Host: f.registration.Host, SchemaVersion: AccountLifecycleSchemaV4,
+		Workspaces: f.registration.Workspaces,
+		AccountScopes: []AccountScope{{
+			AccountLabel: "chatgpt", Accounts: []AccountChoice{{Key: "acct-main", Label: "Main"}},
+			Profiles: []Profile{{ID: "codex-sol-high", Version: "1"}}, AttachmentRevision: 7,
+			AccountAvailability: AccountAvailabilityAvailable,
+		}},
+		Conversation: &ConversationCapability{
+			SchemaVersion: ConversationSchemaV1, AccountKey: "acct-main", AttachmentRevision: 7,
+			DispatchProfileID: "codex-sol-high", DispatchProfileVersion: "1",
+			ExecutionPolicyID: ConversationExecutionPolicyV1, MaxOutputBytes: 256 << 10, MaxEvents: 512,
+		},
+	}
+	runtime, err := f.s.RegisterRuntime(context.Background(), f.reporter, f.project, testLease, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stored string
+	if err := db.DB.QueryRow(`SELECT registration_json FROM lifecycle_runtimes WHERE id=?`, runtime.ID).Scan(&stored); err != nil {
+		t.Fatal(err)
+	}
+	var round Registration
+	if err := json.Unmarshal([]byte(stored), &round); err != nil || round.Conversation == nil ||
+		*round.Conversation != *in.Conversation || runtime.Conversation == nil || *runtime.Conversation != *in.Conversation {
+		t.Fatalf("persisted capability mismatch err=%v body=%s runtime=%+v", err, stored, runtime.Conversation)
+	}
+}
 
 const testLease = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
 

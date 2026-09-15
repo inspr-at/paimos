@@ -177,6 +177,7 @@ db_expected=$(printf '%s\n' \
   github.com/inspr-at/paimos/backend/cmd/paimos-agentd \
   github.com/inspr-at/paimos/backend/cmd/paimos-mcp \
   github.com/inspr-at/paimos/backend/contracts \
+  github.com/inspr-at/paimos/backend/conversationturns \
   github.com/inspr-at/paimos/backend/db \
   github.com/inspr-at/paimos/backend/delivery \
   github.com/inspr-at/paimos/backend/externalstage \

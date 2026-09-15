@@ -5,6 +5,7 @@ package lifecycleintents
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -227,6 +228,67 @@ func TestV4RegistrationCarriesRevisionAndExplicitEmptyAvailability(t *testing.T)
 	legacy.AccountScopes[0].AccountAvailability = ""
 	if err := validateRegistration(legacy); err != nil || !legacy.MatchScopeAtRevision("chatgpt", "codex-work", "codex-sol-high", "1", true, 0) {
 		t.Fatalf("v4 registration did not preserve a legacy named scope: %+v err=%v", legacy.AccountScopes, err)
+	}
+}
+
+func TestV4ConversationCapabilityRoundTripsWithoutWidening(t *testing.T) {
+	in := Registration{
+		Generation: uuid.NewString(), Host: "fixture-machine", SchemaVersion: AccountLifecycleSchemaV4,
+		Workspaces: []Workspace{{Handle: uuid.NewString(), Identity: fmtIdentity(1)}},
+		AccountScopes: []AccountScope{{
+			AccountLabel: "chatgpt", Accounts: []AccountChoice{{Key: "codex-work", Label: "Work"}},
+			Profiles: []Profile{{ID: "codex-sol-high", Version: "1"}}, AttachmentRevision: 7,
+			AccountAvailability: AccountAvailabilityAvailable,
+		}},
+		Conversation: &ConversationCapability{
+			SchemaVersion: ConversationSchemaV1, AccountKey: "codex-work", AttachmentRevision: 7,
+			DispatchProfileID: "codex-sol-high", DispatchProfileVersion: "1",
+			ExecutionPolicyID: ConversationExecutionPolicyV1, MaxOutputBytes: 256 << 10, MaxEvents: 512,
+		},
+	}
+	if err := validateRegistration(in); err != nil {
+		t.Fatal(err)
+	}
+	body, err := json.Marshal(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var round Registration
+	if err := json.Unmarshal(body, &round); err != nil || validateRegistration(round) != nil ||
+		round.Conversation == nil || *round.Conversation != *in.Conversation {
+		t.Fatalf("conversation round trip err=%v body=%s capability=%+v", err, body, round.Conversation)
+	}
+	runtime := runtimeProjection(uuid.NewString(), 7, round, "2027-01-01T00:00:00.000Z")
+	if !runtime.MatchConversation("codex-work", 7, "codex-sol-high", "1", ConversationExecutionPolicyV1, 256<<10, 512) ||
+		runtime.MatchConversation("codex-work", 7, "codex-sol-high", "1", ConversationExecutionPolicyV1, 128<<10, 512) {
+		t.Fatalf("conversation capability match widened: %+v", runtime.Conversation)
+	}
+
+	absent := in
+	absent.Conversation = nil
+	if err := validateRegistration(absent); err != nil {
+		t.Fatalf("schema4 coding-only producer rejected: %v", err)
+	}
+	for name, mutate := range map[string]func(*ConversationCapability){
+		"wrong_account":  func(c *ConversationCapability) { c.AccountKey = "other" },
+		"stale_revision": func(c *ConversationCapability) { c.AttachmentRevision-- },
+		"wrong_profile":  func(c *ConversationCapability) { c.DispatchProfileID = "codex-luna-medium" },
+		"wrong_policy":   func(c *ConversationCapability) { c.ExecutionPolicyID = "ordinary-coding" },
+		"wrong_caps":     func(c *ConversationCapability) { c.MaxEvents = 513 },
+	} {
+		t.Run(name, func(t *testing.T) {
+			candidate := in
+			capability := *in.Conversation
+			mutate(&capability)
+			candidate.Conversation = &capability
+			if err := validateRegistration(candidate); err != ErrInvalid {
+				t.Fatalf("invalid conversation capability accepted: %+v err=%v", capability, err)
+			}
+		})
+	}
+	unknown := strings.Replace(string(body), `"max_events":512`, `"max_events":512,"credential":"forbidden"`, 1)
+	if json.Unmarshal([]byte(unknown), &round) == nil {
+		t.Fatal("unknown conversation capability field was accepted")
 	}
 }
 

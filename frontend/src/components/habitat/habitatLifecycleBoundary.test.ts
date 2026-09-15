@@ -268,6 +268,35 @@ describe('Habitat lifecycle response authority', () => {
         attachment_revision: 7,
       },
     ])
+    const conversation = {
+      schema_version: 1,
+      account_key: 'codex-work',
+      attachment_revision: 7,
+      dispatch_profile_id: 'codex-sol-high',
+      dispatch_profile_version: '1',
+      execution_policy_id: 'aithema-conversation-v1',
+      max_output_bytes: 262144,
+      max_events: 512,
+    }
+    expect(
+      parseHabitatRuntimes({ schema_version: 1, runtimes: [{ ...lifecycle, conversation }] }, 1)[0]
+        .conversation,
+    ).toEqual(conversation)
+    for (const invalidConversation of [
+      { ...conversation, account_key: 'other' },
+      { ...conversation, attachment_revision: 6 },
+      { ...conversation, dispatch_profile_id: 'codex-luna-medium' },
+      { ...conversation, execution_policy_id: 'ordinary-coding' },
+      { ...conversation, max_events: 513 },
+      { ...conversation, private_config: 'forbidden' },
+    ]) {
+      expect(() =>
+        parseHabitatRuntimes(
+          { schema_version: 1, runtimes: [{ ...lifecycle, conversation: invalidConversation }] },
+          1,
+        ),
+      ).toThrow()
+    }
     const reviewed = { ...request, account_key: 'codex-work', attachment_revision: 7 }
     expect(parseHabitatRequest(reviewed)).toEqual(reviewed)
     const legacyNamed = {

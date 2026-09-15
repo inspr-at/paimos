@@ -57,8 +57,11 @@ func bindingMatchesRuntime(binding Binding, runtime lifecycleintents.Runtime) bo
 	if runtime.ID != binding.RuntimeID || runtime.Generation != binding.RuntimeGeneration || runtime.MachineID != binding.HostID {
 		return false
 	}
-	_, ok := resolveAccountLabel(runtime, binding.AccountKey, binding.DispatchProfileID, binding.DispatchProfileVersion, binding.AttachmentRevision)
-	return ok
+	label, ok := resolveAccountLabel(runtime, binding.AccountKey, binding.DispatchProfileID, binding.DispatchProfileVersion, binding.AttachmentRevision)
+	return ok && (binding.AccountLabel == "" || binding.AccountLabel == label) && runtime.MatchConversation(
+		binding.AccountKey, binding.AttachmentRevision, binding.DispatchProfileID, binding.DispatchProfileVersion,
+		binding.ExecutionPolicyID, binding.Limits.MaxOutputBytes, binding.Limits.MaxEvents,
+	)
 }
 
 // EnrollTx atomically binds an already-minted, still-uncommitted API-key row to
@@ -87,7 +90,8 @@ func (s *Service) EnrollTx(ctx context.Context, tx *sql.Tx, operator auth.Princi
 		return Binding{}, ErrUnavailable
 	}
 	accountLabel, ok := resolveAccountLabel(runtime, in.AccountKey, in.DispatchProfileID, in.DispatchProfileVersion, in.AttachmentRevision)
-	if !ok {
+	if !ok || !runtime.MatchConversation(in.AccountKey, in.AttachmentRevision, in.DispatchProfileID,
+		in.DispatchProfileVersion, ExecutionPolicyID, limits.MaxOutputBytes, limits.MaxEvents) {
 		return Binding{}, ErrUnavailable
 	}
 	for _, actor := range in.Actors {
@@ -655,19 +659,15 @@ func (s *Service) Claim(ctx context.Context, principal auth.Principal, project i
 		if call.State != "queued" {
 			continue
 		}
-		if !s.storedAuthorityCurrent(ctx, tx, call) || !bindingMatchesRuntime(Binding{
-			RuntimeID: call.RuntimeID, RuntimeGeneration: call.RuntimeGeneration, AccountKey: call.AccountKey,
-			AttachmentRevision: call.AttachmentRevision, DispatchProfileID: call.DispatchProfileID,
-			DispatchProfileVersion: call.DispatchProfileVersion, HostID: runtime.MachineID,
-		}, runtime) {
+		binding, bindingErr := loadBinding(ctx, tx, project, call.APIKeyID, call.BindingID, call.BindingRevision)
+		if bindingErr != nil {
+			return ClaimEnvelope{}, bindingErr
+		}
+		if !s.storedAuthorityCurrent(ctx, tx, call) || !bindingMatchesRuntime(binding, runtime) {
 			if err := s.terminalize(ctx, tx, &call, "failed", "authority_revoked", true); err != nil {
 				return ClaimEnvelope{}, err
 			}
 			continue
-		}
-		binding, err := loadBinding(ctx, tx, project, call.APIKeyID, call.BindingID, call.BindingRevision)
-		if err != nil {
-			return ClaimEnvelope{}, err
 		}
 		executionGeneration := uuid.NewString()
 		result, err := tx.ExecContext(ctx, `UPDATE conversation_calls SET state='claimed',execution_generation=?,updated_at=?
