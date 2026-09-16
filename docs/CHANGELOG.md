@@ -9,6 +9,16 @@ Semantic Versioning (`x.y.z`, until 5.21.0), INSPR calendar v1
 (`YYMMDDhhmmss.0.0`, the UTC reservation second as a SemVer-shaped
 coordinate, from the first entry below that form).
 
+## [260916122330.0.0] — 2026-09-16
+
+### Added
+
+- Return a canonical, server-accepted lifecycle readiness receipt to the owned `paimos-agentd` after an authorized transition. Its private socket supports only exact tuple lookup bound to the current daemon generation, account, immutable profile, workspace identity and mode, baseline, and expiry (PAI-1036).
+
+### Fixed
+
+- Reconcile the daemon-owned workspace availability immediately before Start, preserving the server’s final downgrade or expiry state and rejecting stale or mismatched readiness evidence (PAI-1035).
+
 ## [260915004615.0.0] — 2026-09-15
 
 ### Added
