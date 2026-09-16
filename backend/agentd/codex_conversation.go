@@ -59,6 +59,8 @@ const (
 	ConversationFailureTurnFailed     ConversationFailure = "turn_failed"
 	ConversationFailureCancelled      ConversationFailure = "cancelled"
 	ConversationFailureDeadline       ConversationFailure = "deadline_exceeded"
+	ConversationFailureRefusal        ConversationFailure = "refusal"
+	ConversationFailureTruncated      ConversationFailure = "truncated"
 )
 
 // CodexConversationDelta is private answer content. Cursor starts at one and
