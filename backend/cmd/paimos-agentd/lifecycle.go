@@ -70,12 +70,13 @@ type lifecycleConfig struct {
 	Projects []configuredProject `json:"projects"`
 }
 type runtimeRegistrationRecord struct {
-	Key          string                                     `json:"key"`
-	Lease        string                                     `json:"lease"`
-	Generation   string                                     `json:"generation"`
-	FirstAttempt time.Time                                  `json:"first_attempt"`
-	Runtime      lifecycleintents.Runtime                   `json:"runtime"`
-	Health       map[string]agentmessage.RuntimeHealthInput `json:"health,omitempty"`
+	Key              string                                     `json:"key"`
+	Lease            string                                     `json:"lease"`
+	Generation       string                                     `json:"generation"`
+	FirstAttempt     time.Time                                  `json:"first_attempt"`
+	Runtime          lifecycleintents.Runtime                   `json:"runtime"`
+	LifecycleRenewal runtimeconsumer.LifecycleRenewalDiagnostic `json:"lifecycle_renewal,omitempty"`
+	Health           map[string]agentmessage.RuntimeHealthInput `json:"health,omitempty"`
 }
 type daemonLifecycle struct {
 	mu         sync.Mutex
@@ -390,7 +391,7 @@ func (d *daemonLifecycle) Run(ctx context.Context) {
 				stepCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
 				err := p.step(stepCtx)
 				cancel()
-				e := runtimeconsumer.Evidence{Kind: "intents", Generation: d.supervisor.Status().DaemonID, ProjectID: p.config.ProjectID, State: "ready", LastSuccess: time.Now().UTC()}
+				e := runtimeconsumer.Evidence{Kind: "intents", Generation: d.supervisor.Status().DaemonID, ProjectID: p.config.ProjectID, State: "ready", LastSuccess: time.Now().UTC(), LifecycleRenewal: p.lifecycleRenewalDiagnostic()}
 				if err != nil {
 					e.State = "unavailable"
 					e.Reason = "authority_unavailable"
@@ -434,36 +435,52 @@ func (d *daemonLifecycle) Snapshot() []runtimeconsumer.Evidence {
 	return out
 }
 func (p *projectLifecycle) verifyConfiguration(ctx context.Context) error {
+	_, err := p.verifyConfigurationCategory(ctx)
+	return err
+}
+
+// verifyConfigurationCategory preserves the ordinary configuration gate while
+// identifying only its stage for content-free renewal diagnostics. It never
+// returns remote error detail to that diagnostic.
+func (p *projectLifecycle) verifyConfigurationCategory(ctx context.Context) (string, error) {
 	for _, w := range p.config.Workspaces {
-		actual, e := p.owner.supervisor.InspectWorkspace(ctx, w.Path, agentd.WorkspaceExclusive)
-		if e != nil || actual.Identity != w.Identity {
-			return lifecycleclient.ErrOwnership
+		actual, err := p.owner.supervisor.InspectWorkspace(ctx, w.Path, agentd.WorkspaceExclusive)
+		if err != nil {
+			return runtimeconsumer.LifecycleRenewalWorkspaceIdentityUnavailable, lifecycleclient.ErrOwnership
+		}
+		if actual.Identity != w.Identity {
+			return runtimeconsumer.LifecycleRenewalWorkspaceIdentityMismatch, lifecycleclient.ErrOwnership
 		}
 	}
 	for _, scope := range p.registration.Scopes() {
 		for _, v := range scope.Profiles {
-			profile, e := configuredProfile(v.ID, v.Version)
-			if e != nil {
-				return e
+			profile, err := configuredProfile(v.ID, v.Version)
+			if err != nil {
+				return runtimeconsumer.LifecycleRenewalProfileResolutionFailed, err
 			}
-			actual, e := p.owner.reporter.ResolveDispatchProfile(ctx, v.ID, v.Version, profile.Harness)
-			if e != nil || actual != profile {
-				return lifecycleclient.ErrOwnership
+			// The reporter intentionally hides remote catalog detail, including
+			// incompatibility, so renewal evidence can prove only this stage failed.
+			actual, err := p.owner.reporter.ResolveDispatchProfile(ctx, v.ID, v.Version, profile.Harness)
+			if err != nil {
+				return runtimeconsumer.LifecycleRenewalProfileResolutionFailed, lifecycleclient.ErrOwnership
+			}
+			if actual != profile {
+				return runtimeconsumer.LifecycleRenewalProfileResolutionFailed, lifecycleclient.ErrOwnership
 			}
 			if len(scope.Accounts) > 0 {
 				for _, account := range scope.Accounts {
 					if !p.owner.supervisor.HasAccount(profile.Harness, account.Key) {
-						return lifecycleclient.ErrOwnership
+						return runtimeconsumer.LifecycleRenewalAccountUnavailable, lifecycleclient.ErrOwnership
 					}
 				}
 				continue
 			}
 			if p.owner.supervisor.ProbeAccount(ctx, profile.Harness) != scope.AccountLabel {
-				return lifecycleclient.ErrOwnership
+				return runtimeconsumer.LifecycleRenewalAccountMismatch, lifecycleclient.ErrOwnership
 			}
 		}
 	}
-	return nil
+	return "", nil
 }
 func (p *projectLifecycle) step(ctx context.Context) error {
 	if p.lost {
@@ -481,17 +498,31 @@ func (p *projectLifecycle) step(ctx context.Context) error {
 		return lifecycleclient.ErrOwnership
 	}
 	if now.After(p.refresh) {
-		if e := p.verifyConfiguration(ctx); e != nil {
-			return e
+		if category, err := p.verifyConfigurationCategory(ctx); err != nil {
+			if recorded := p.recordRenewalFailure(now, category); recorded != nil {
+				return recorded
+			}
+			return err
 		}
 		runtime, e := p.authority.RegisterRuntime(ctx, p.registration)
 		if e != nil {
+			if recorded := p.recordRenewalFailure(now, renewalFailureCategory()); recorded != nil {
+				return recorded
+			}
 			return e
 		}
 		p.runtimeMu.Lock()
 		p.record.Runtime = runtime
+		// This timestamp is diagnostic-only. The stored runtime remains the
+		// authority for the existing next-step expiry fence, including malformed
+		// and already-expired responses.
+		if expires, parseErr := time.Parse(time.RFC3339Nano, runtime.ExpiresAt); parseErr == nil {
+			p.record.LifecycleRenewal.LastSuccessfulAt = now.UTC()
+			p.record.LifecycleRenewal.ExpiresAt = expires.UTC()
+		}
+		record := p.record
 		p.runtimeMu.Unlock()
-		if e = p.owner.journal.Put(p.record); e != nil {
+		if e = p.owner.journal.Put(record); e != nil {
 			return e
 		}
 		p.refresh = now.Add(30 * time.Second)
@@ -508,6 +539,35 @@ func (p *projectLifecycle) step(ctx context.Context) error {
 	consumerErr := p.consume(ctx)
 	healthErr := p.publishHealth(ctx)
 	return errors.Join(intentErr, consumerErr, healthErr)
+}
+
+// renewalFailureCategory records an attempted registration failure without
+// inferring whether it was local pre-send validation, transport, or a remote
+// authority decision: lifecycleclient deliberately collapses those details.
+func renewalFailureCategory() string {
+	return runtimeconsumer.LifecycleRenewalRuntimeRegistrationFailed
+}
+
+func (p *projectLifecycle) recordRenewalFailure(at time.Time, category string) error {
+	p.runtimeMu.Lock()
+	p.record.LifecycleRenewal.LastFailureAt = at.UTC()
+	p.record.LifecycleRenewal.LastFailureCategory = category
+	record := p.record
+	p.runtimeMu.Unlock()
+	return p.owner.journal.Put(record)
+}
+
+func (p *projectLifecycle) lifecycleRenewalDiagnostic() *runtimeconsumer.LifecycleRenewalDiagnostic {
+	p.runtimeMu.RLock()
+	diagnostic := p.record.LifecycleRenewal
+	generation := p.record.Generation
+	p.runtimeMu.RUnlock()
+	if !diagnostic.Valid() {
+		return nil
+	}
+	diagnostic.ProjectID = p.config.ProjectID
+	diagnostic.Generation = generation
+	return &diagnostic
 }
 func (p *projectLifecycle) registerSession(ctx context.Context, s agentd.Session) error {
 	lease, e := p.owner.reporter.leases.GetOrCreate(s.ID)

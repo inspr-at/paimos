@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/backend/agentd"
+	"github.com/inspr-at/paimos/backend/runtimeconsumer"
 )
 
 type State string
@@ -30,10 +31,11 @@ const (
 )
 
 type Layer struct {
-	Name   string `json:"name"`
-	State  State  `json:"state"`
-	Code   string `json:"code"`
-	Action string `json:"action,omitempty"`
+	Name             string                                      `json:"name"`
+	State            State                                       `json:"state"`
+	Code             string                                      `json:"code"`
+	Action           string                                      `json:"action,omitempty"`
+	LifecycleRenewal *runtimeconsumer.LifecycleRenewalDiagnostic `json:"lifecycle_renewal,omitempty"`
 }
 type Report struct {
 	Instance  string     `json:"instance"`
@@ -55,6 +57,14 @@ func (r Report) WriteHuman(w io.Writer) error {
 		}
 		if l.Action != "" {
 			fmt.Fprintf(w, "; %s", l.Action)
+		}
+		if d := l.LifecycleRenewal; d != nil {
+			if !d.LastSuccessfulAt.IsZero() {
+				fmt.Fprintf(w, "; renewal last-success=%s expires=%s", d.LastSuccessfulAt.Format(time.RFC3339Nano), d.ExpiresAt.Format(time.RFC3339Nano))
+			}
+			if !d.LastFailureAt.IsZero() {
+				fmt.Fprintf(w, "; renewal last-failure=%s at=%s", d.LastFailureCategory, d.LastFailureAt.Format(time.RFC3339Nano))
+			}
 		}
 		fmt.Fprintln(w)
 	}
@@ -150,7 +160,7 @@ func New(c Config) (*Runtime, error) {
 	return &Runtime{Config: c, directory: dir}, nil
 }
 func layer(name string, state State, code, action string) Layer {
-	return Layer{name, state, code, action}
+	return Layer{Name: name, State: state, Code: code, Action: action}
 }
 func (r *Runtime) report() Report {
 	return Report{Instance: r.Instance, Layers: []Layer{}, Preserved: []string{"credentials and reporter leases", "instance configuration and declarative services", "remote history, targets and orchestrator bindings", "worktrees and unrelated repositories", "shared vendor services and unmanaged sessions"}, Bootstrap: "paimos --instance " + r.Instance + " runtime setup --state-root " + shellQuote(r.StateRoot)}

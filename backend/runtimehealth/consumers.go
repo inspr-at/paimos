@@ -6,6 +6,7 @@ package runtimehealth
 import (
 	"context"
 	"github.com/inspr-at/paimos/backend/agentd"
+	"github.com/inspr-at/paimos/backend/runtimeconsumer"
 	"time"
 )
 
@@ -16,6 +17,8 @@ func ConsumerExtensions(ctx context.Context, status agentd.RuntimeStatus) []Laye
 	filtered := status
 	filtered.Consumers = nil
 	intent := layer("browser_intents", Unknown, "browser_intents_unavailable", "configure the reviewed daemon lifecycle project/account/profile/workspace mapping")
+	var renewal *runtimeconsumer.LifecycleRenewalDiagnostic
+	currentProjects := 0
 	seen, ready := false, true
 	for _, e := range status.Consumers {
 		if e.Kind != "intents" {
@@ -24,6 +27,13 @@ func ConsumerExtensions(ctx context.Context, status agentd.RuntimeStatus) []Laye
 		}
 		seen = true
 		ready = ready && e.Generation == status.DaemonID && e.State == "ready" && !e.LastSuccess.IsZero() && time.Since(e.LastSuccess) < 45*time.Second && !e.LastSuccess.After(time.Now().Add(5*time.Second))
+		if e.ProjectID > 0 && e.Generation == status.DaemonID {
+			currentProjects++
+			if d := e.LifecycleRenewal; d != nil && d.Valid() && d.ProjectID == e.ProjectID && d.Generation == e.Generation {
+				copy := *d
+				renewal = &copy
+			}
+		}
 		if e.Reason == "outcome_unknown" {
 			intent = layer("browser_intents", ActionRequired, "lifecycle_outcome_unknown", "reconcile the quarantined lifecycle effect receipt with its server intent before treating the runtime as healthy")
 		}
@@ -33,6 +43,13 @@ func ConsumerExtensions(ctx context.Context, status agentd.RuntimeStatus) []Laye
 	}
 	if seen && ready {
 		intent = layer("browser_intents", Known, "owned_lifecycle_executor_ready", "")
+	}
+	// The browser-intents layer is aggregate rather than project-scoped. Expose
+	// renewal evidence only when exactly one current project record has a
+	// self-consistent diagnostic; otherwise another project cannot be mistaken
+	// for current, including when its own diagnostic is absent or invalid.
+	if currentProjects == 1 && renewal != nil {
+		intent.LifecycleRenewal = renewal
 	}
 	primary := layer("primary_inbox", Unknown, "primary_inbox_unavailable", "start an owned managed generation and verify its reporter binding")
 	primarySeen, primaryReady := false, true
