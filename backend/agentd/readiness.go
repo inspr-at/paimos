@@ -299,6 +299,24 @@ func (s *Supervisor) checkWorkspaceIsolation(ctx context.Context, spec Readiness
 	if provenance.Mode != mode {
 		return ReadinessCheckResult{"workspace_isolation", "fail", "workspace_mode_mismatch", ""}
 	}
+	// A distinct Git worktree identifies the physical workspace; it does not
+	// establish that another owned worker is not currently using it. Observe
+	// the same local conflict set that Start reserves against, without taking
+	// a reservation or changing any session state.
+	s.mu.RLock()
+	occupied := false
+	for _, entry := range s.sessions {
+		entry.mu.Lock()
+		occupied = workspaceConflicts(entry.session, provenance.Identity, mode)
+		entry.mu.Unlock()
+		if occupied {
+			break
+		}
+	}
+	s.mu.RUnlock()
+	if occupied {
+		return ReadinessCheckResult{"workspace_isolation", "fail", "workspace_occupied", ""}
+	}
 	return ReadinessCheckResult{"workspace_isolation", "pass", "workspace_verified", digestText(provenance.Identity)}
 }
 

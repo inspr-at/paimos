@@ -46,7 +46,31 @@ func (s *Service) recordReadinessTx(ctx context.Context, tx *sql.Tx, in Intent, 
 	if !deadline.After(now) {
 		return ErrUnavailable
 	}
-	checks, err := json.Marshal(report.Checks)
+	// The daemon can only inspect its own sessions. Reconcile its observation
+	// with this authority's same-machine reservations and registered sessions
+	// before storing a ready result. This is still a point-in-time observation;
+	// Start performs the final atomic reservation against the same ledger.
+	occupied, err := readinessWorkspaceOccupiedTx(ctx, tx, in, runtime, workspace)
+	if err != nil {
+		return err
+	}
+	stored := *report
+	if occupied {
+		stored.Checks = append([]ReadinessCheck(nil), report.Checks...)
+		for i := range stored.Checks {
+			if stored.Checks[i].ID == "workspace_isolation" {
+				stored.Checks[i].Status = "fail"
+				stored.Checks[i].Reason = "workspace_occupied"
+				stored.Checks[i].Digest = ""
+				break
+			}
+		}
+		if stored.Status == "ready" {
+			stored.Status = "needs_setup"
+			stored.NextAction = "select_declared_workspace"
+		}
+	}
+	checks, err := json.Marshal(stored.Checks)
 	if err != nil {
 		return ErrStorage
 	}
@@ -56,12 +80,44 @@ func (s *Service) recordReadinessTx(ctx context.Context, tx *sql.Tx, in Intent, 
 		next_action,host_kind,checks_json,observed_at,expires_at,recorded_at)
 		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		in.ProjectID, in.ID, r.RuntimeID, r.RuntimeGeneration, r.AccountLabel, r.AccountKey, r.DispatchProfileID,
-		r.DispatchProfileVersion, r.WorkspaceHandle, workspace, r.BaselineDigest, report.ContractVersion, report.Status,
-		report.NextAction, report.HostKind, string(checks), stamp(observed), stamp(deadline), stamp(now))
+		r.DispatchProfileVersion, r.WorkspaceHandle, workspace, r.BaselineDigest, stored.ContractVersion, stored.Status,
+		stored.NextAction, stored.HostKind, string(checks), stamp(observed), stamp(deadline), stamp(now))
 	if err != nil {
 		return ErrConflict
 	}
 	return nil
+}
+
+// readinessWorkspaceOccupiedTx observes Paimos-owned same-machine claims and
+// sessions. It does not reserve the workspace or make a claim about unmanaged
+// processes. The final Start claim repeats the authority check atomically.
+func readinessWorkspaceOccupiedTx(ctx context.Context, tx *sql.Tx, in Intent, runtime Runtime, workspace string) (bool, error) {
+	profile, err := resolveProfile(in.Request.DispatchProfileID, in.Request.DispatchProfileVersion)
+	if err != nil {
+		return false, err
+	}
+	var reserved int
+	err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM lifecycle_intents i
+   JOIN lifecycle_runtimes owner ON owner.id=i.runtime_id
+   LEFT JOIN json_each(owner.registration_json,'$.workspaces') w
+    ON json_extract(w.value,'$.handle')=json_extract(i.request_json,'$.workspace_handle')
+   WHERE i.state IN ('claimed','executing')
+    AND json_extract(i.request_json,'$.operation') IN ('start','restart')
+    AND owner.machine_id=? AND json_extract(w.value,'$.identity')=?`, runtime.MachineID, workspace).Scan(&reserved)
+	if err != nil {
+		return false, ErrStorage
+	}
+	if reserved != 0 {
+		return true, nil
+	}
+	var sessions int
+	err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM harness_sessions
+   WHERE host=? AND workspace_identity=? AND phase<>'stopped'
+    AND (workspace_mode='exclusive' OR ?='exclusive')`, runtime.MachineID, workspace, profile.WorkspaceMode).Scan(&sessions)
+	if err != nil {
+		return false, ErrStorage
+	}
+	return sessions != 0, nil
 }
 
 // earliest clamps a deadline to a stored RFC3339 boundary. Unparseable input

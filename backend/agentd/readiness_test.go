@@ -22,13 +22,13 @@ const readinessWorkspaceIdentity = "b1946ac92492d2347c6235b4d2611184b1946ac92492
 // a workspace. The probe reads all of them for real using the host kind that
 // observeHostKind can actually observe on this GOOS.
 type readinessHost struct {
-	root              string
-	workspace         string
-	kernel            string
-	loader            string
-	hostKind          string
-	generationDigest  string
-	platformInputs    ReadinessInputs
+	root             string
+	workspace        string
+	kernel           string
+	loader           string
+	hostKind         string
+	generationDigest string
+	platformInputs   ReadinessInputs
 }
 
 func newReadinessHost(t *testing.T) readinessHost {
@@ -224,6 +224,43 @@ func TestObserveReadinessProvesRealHostState(t *testing.T) {
 		if strings.Contains(check.Reason, "/") || strings.Contains(check.Reason, host.root) {
 			t.Fatalf("check reason leaks host detail: %+v", check)
 		}
+	}
+}
+
+func TestObserveReadinessChecksOwnedWorkspaceAvailability(t *testing.T) {
+	host := newReadinessHost(t)
+	for _, test := range []struct {
+		name          string
+		identity      string
+		existingMode  string
+		requestedMode string
+		state         SessionState
+		wantStatus    string
+	}{
+		{"same exclusive worktree", readinessWorkspaceIdentity, WorkspaceExclusive, WorkspaceExclusive, StateRunning, "fail"},
+		{"shared worker blocks exclusive request", readinessWorkspaceIdentity, WorkspaceShared, WorkspaceExclusive, StateRunning, "fail"},
+		{"two explicit shared workers", readinessWorkspaceIdentity, WorkspaceShared, WorkspaceShared, StateRunning, "pass"},
+		{"different worktree", strings.Repeat("9", 64), WorkspaceExclusive, WorkspaceExclusive, StateRunning, "pass"},
+		{"stopped worker", readinessWorkspaceIdentity, WorkspaceExclusive, WorkspaceExclusive, StateStopped, "pass"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			supervisor := newReadinessSupervisor(t, readinessWorkspaceIdentity)
+			supervisor.mu.Lock()
+			supervisor.sessions["existing"] = &sessionEntry{session: Session{
+				ID: "existing", State: test.state,
+				WorkspaceProvenance: WorkspaceProvenance{Identity: test.identity, Mode: test.existingMode},
+			}}
+			supervisor.mu.Unlock()
+			spec := host.spec(t)
+			spec.Inputs.WorkspaceMode = test.requestedMode
+			got := supervisor.checkWorkspaceIsolation(context.Background(), spec)
+			if got.Status != test.wantStatus {
+				t.Fatalf("workspace readiness=%+v, want %s", got, test.wantStatus)
+			}
+			if test.wantStatus == "fail" && (got.Reason != "workspace_occupied" || got.Digest != "") {
+				t.Fatalf("occupied workspace leaked or used wrong reason: %+v", got)
+			}
+		})
 	}
 }
 

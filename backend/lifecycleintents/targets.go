@@ -169,8 +169,8 @@ func (s *Service) validateTargetForOutcome(ctx context.Context, tx *sql.Tx, proj
 		var occupied int
 		if tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM harness_sessions WHERE phase<>'stopped' AND id<>? AND (
    (project_id=? AND harness=? AND agent_name=?) OR
-   (host=? AND workspace_identity=? AND workspace_mode='exclusive') OR
-   (project_id=? AND role='coordinator' AND ?='coordinator'))`, result, project, profile.Harness, r.AgentName, runtime.MachineID, workspaceIdentity(runtime, r.WorkspaceHandle), project, r.Role).Scan(&occupied) != nil {
+	   (host=? AND workspace_identity=? AND (workspace_mode='exclusive' OR ?='exclusive')) OR
+	   (project_id=? AND role='coordinator' AND ?='coordinator'))`, result, project, profile.Harness, r.AgentName, runtime.MachineID, workspaceIdentity(runtime, r.WorkspaceHandle), profile.WorkspaceMode, project, r.Role).Scan(&occupied) != nil {
 			return ErrStorage
 		}
 		if occupied > 0 {
