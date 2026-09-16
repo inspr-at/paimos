@@ -49,7 +49,7 @@ type grokConversationProcess struct {
 }
 
 func (a *GrokConversationAdapter) startNativeConversation(ctx context.Context, request StartRequest, options GrokConversationOptions) (_ GrokConversationExecution, returnErr error) {
-	if err := verifyGrokExecutable(a.binding.BinaryPath); err != nil {
+	if err := verifyGrokExecutableVariant(a.binding.BinaryVariant, a.binding.BinaryPath); err != nil {
 		return nil, err
 	}
 	before, bearer, subject, err := readGrokAuth(a.binding.AuthPath, a.binding.PrincipalSHA256)
@@ -104,7 +104,7 @@ func (a *GrokConversationAdapter) startNativeConversation(ctx context.Context, r
 			proxy.stop()
 		}
 	}()
-	seatbelt, err := grokSeatbeltProfile(scratch, a.binding.BinaryPath, a.binding.AuthPath, proxy.port)
+	seatbelt, err := grokSeatbeltProfileVariant(a.binding.BinaryVariant, scratch, a.binding.BinaryPath, a.binding.AuthPath, proxy.port)
 	if err != nil {
 		return nil, err
 	}
@@ -328,6 +328,14 @@ func (p *grokConversationProcess) ReplayConversation(after uint64) ([]CodexConve
 }
 
 func verifyGrokExecutable(path string) error {
+	return verifyGrokExecutableVariant(GrokBinaryNPM1030, path)
+}
+
+func verifyGrokExecutableVariant(variant GrokBinaryVariant, path string) error {
+	spec, err := grokVariantSpecFor(variant)
+	if err != nil {
+		return err
+	}
 	if !safeGrokAbsolutePath(path) {
 		return errors.New("native Grok executable unavailable")
 	}
@@ -345,10 +353,27 @@ func verifyGrokExecutable(path string) error {
 	}
 	defer file.Close()
 	hash := sha256.New()
-	if _, err = io.Copy(hash, file); err != nil || hex.EncodeToString(hash.Sum(nil)) != grokNativeSHA256 {
+	if filepath.Base(path) != spec.binaryName || !grokBinaryPathMatchesVariant(variant, path) {
+		return errors.New("native Grok executable path changed")
+	}
+	if _, err = io.Copy(hash, file); err != nil || hex.EncodeToString(hash.Sum(nil)) != spec.executableSHA {
 		return errors.New("native Grok executable hash mismatch")
 	}
 	return nil
+}
+
+func grokBinaryPathMatchesVariant(variant GrokBinaryVariant, path string) bool {
+	switch variant {
+	case GrokBinaryNPM1030:
+		root := filepath.Dir(filepath.Dir(path))
+		return filepath.Base(filepath.Dir(path)) == "bin" && filepath.Base(root) == "grok" &&
+			filepath.Base(filepath.Dir(root)) == "@xai-official" && filepath.Base(filepath.Dir(filepath.Dir(root))) == "node_modules"
+	case GrokBinarySourceBuilt1032:
+		releaseRoot := filepath.Dir(path)
+		return filepath.Base(releaseRoot) == "release" && filepath.Base(filepath.Dir(releaseRoot)) == "target"
+	default:
+		return false
+	}
 }
 
 func writePinnedGrokAsset(path string, value []byte, expected string) error {
@@ -382,7 +407,11 @@ func verifyGrokAssets(configPath, profilePath string) error {
 }
 
 func grokSeatbeltProfile(scratch, binary, auth string, port int) (string, error) {
-	packageRoot, err := grokPackageRoot(binary, auth, scratch)
+	return grokSeatbeltProfileVariant(GrokBinaryNPM1030, scratch, binary, auth, port)
+}
+
+func grokSeatbeltProfileVariant(variant GrokBinaryVariant, scratch, binary, auth string, port int) (string, error) {
+	packageRoot, err := grokBinaryRoot(variant, binary, auth, scratch)
 	if err != nil {
 		return "", err
 	}
