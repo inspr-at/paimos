@@ -90,16 +90,54 @@ type circuitRecoveryDriver interface {
 }
 
 type Evidence struct {
-	ProjectID   int64     `json:"project_id,omitempty"`
-	Kind        string    `json:"kind"`
-	State       string    `json:"state"`
-	Reason      string    `json:"reason,omitempty"`
-	Generation  string    `json:"generation"`
-	LastSuccess time.Time `json:"last_success,omitempty"`
-	Failures    int       `json:"failures"`
-	NextAttempt time.Time `json:"next_attempt,omitempty"`
-	Attention   bool      `json:"attention"`
+	ProjectID        int64                       `json:"project_id,omitempty"`
+	Kind             string                      `json:"kind"`
+	State            string                      `json:"state"`
+	Reason           string                      `json:"reason,omitempty"`
+	Generation       string                      `json:"generation"`
+	LastSuccess      time.Time                   `json:"last_success,omitempty"`
+	Failures         int                         `json:"failures"`
+	NextAttempt      time.Time                   `json:"next_attempt,omitempty"`
+	Attention        bool                        `json:"attention"`
+	LifecycleRenewal *LifecycleRenewalDiagnostic `json:"lifecycle_renewal,omitempty"`
 }
+
+// LifecycleRenewalDiagnostic is content-free renewal evidence from the
+// lifecycle registration loop. It intentionally carries only fixed categories
+// and timestamps: transport details, server responses, credentials, URLs and
+// registration content never leave that loop.
+type LifecycleRenewalDiagnostic struct {
+	ProjectID           int64     `json:"project_id"`
+	Generation          string    `json:"generation"`
+	LastSuccessfulAt    time.Time `json:"last_successful_at,omitempty"`
+	ExpiresAt           time.Time `json:"expires_at,omitempty"`
+	LastFailureAt       time.Time `json:"last_failure_at,omitempty"`
+	LastFailureCategory string    `json:"last_failure_category,omitempty"`
+}
+
+const (
+	LifecycleRenewalWorkspaceIdentityUnavailable = "workspace_identity_unavailable"
+	LifecycleRenewalWorkspaceIdentityMismatch    = "workspace_identity_mismatch"
+	LifecycleRenewalProfileResolutionFailed      = "profile_resolution_failed"
+	LifecycleRenewalAccountUnavailable           = "account_unavailable"
+	LifecycleRenewalAccountMismatch              = "account_mismatch"
+	LifecycleRenewalRuntimeRegistrationFailed    = "runtime_registration_failed"
+)
+
+func (d LifecycleRenewalDiagnostic) Valid() bool {
+	if d.LastSuccessfulAt.IsZero() != d.ExpiresAt.IsZero() || d.LastFailureAt.IsZero() != (d.LastFailureCategory == "") {
+		return false
+	}
+	switch d.LastFailureCategory {
+	case "", LifecycleRenewalWorkspaceIdentityUnavailable, LifecycleRenewalWorkspaceIdentityMismatch,
+		LifecycleRenewalProfileResolutionFailed, LifecycleRenewalAccountUnavailable,
+		LifecycleRenewalAccountMismatch, LifecycleRenewalRuntimeRegistrationFailed:
+	default:
+		return false
+	}
+	return !d.LastSuccessfulAt.IsZero() || !d.LastFailureAt.IsZero()
+}
+
 type checkpoint struct {
 	Key     string  `json:"key"`
 	Binding string  `json:"binding"`
