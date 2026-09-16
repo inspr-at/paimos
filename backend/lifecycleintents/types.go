@@ -149,6 +149,7 @@ type ReadinessReport struct {
 
 // ReadinessObservation is the durable projection of one accepted report.
 type ReadinessObservation struct {
+	ContractVersion   string           `json:"contract_version"`
 	IntentID          string           `json:"intent_id"`
 	ProjectID         int64            `json:"project_id"`
 	RuntimeID         string           `json:"runtime_id"`
@@ -159,6 +160,7 @@ type ReadinessObservation struct {
 	ProfileVersion    string           `json:"dispatch_profile_version"`
 	WorkspaceHandle   string           `json:"workspace_handle"`
 	WorkspaceIdentity string           `json:"workspace_identity"`
+	WorkspaceMode     string           `json:"workspace_mode"`
 	BaselineDigest    string           `json:"baseline_digest"`
 	HostKind          string           `json:"host_kind"`
 	Status            string           `json:"status"`
@@ -204,6 +206,10 @@ type Intent struct {
 	NewGeneration   string  `json:"new_generation,omitempty"`
 	ResultSessionID string  `json:"result_session_id,omitempty"`
 	Reason          string  `json:"reason"`
+	// AcceptedReadiness is populated only on the daemon's authorized
+	// transition response. It is the final server-held observation, after
+	// tuple binding, expiry clamping, and any authority-side downgrade.
+	AcceptedReadiness *ReadinessObservation `json:"accepted_readiness,omitempty"`
 }
 type Event struct {
 	Revision  int64  `json:"revision"`

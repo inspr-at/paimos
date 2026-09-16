@@ -79,6 +79,7 @@ type Supervisor struct {
 	lifecycleProjects     map[int64]struct{}
 	queue                 *piQueueStore
 	cursorEvidence        *cursorEvidenceStore
+	receipts              *readinessReceiptStore
 	reporter              Reporter
 	dispatchResolver      DispatchResolver
 	allowSharedWorkspaces bool
@@ -142,6 +143,10 @@ func NewSupervisor(config SupervisorConfig) (*Supervisor, error) {
 			return nil, err
 		}
 		s.cursorEvidence, err = openCursorEvidenceStore(config.StateRoot, config.Instance)
+		if err != nil {
+			return nil, err
+		}
+		s.receipts, err = openReadinessReceiptStore(config.StateRoot, config.Instance)
 		if err != nil {
 			return nil, err
 		}

@@ -245,6 +245,48 @@ func TestDaemonLifecycleStartsReservedGenerationAndProvesPublicMapping(t *testin
 	}
 }
 
+func TestCommittedReadinessPersistsOnlyTheValidatedAuthorityReceipt(t *testing.T) {
+	supervisor, err := agentd.NewSupervisor(agentd.SupervisorConfig{Instance: "readiness-commit", StateRoot: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer supervisor.Close(context.Background())
+	now := time.Now().UTC()
+	baseline := "sha256:" + strings.Repeat("7", 64)
+	checks := []lifecycleintents.ReadinessCheck{}
+	for _, id := range lifecycleintents.RequiredReadinessChecks {
+		checks = append(checks, lifecycleintents.ReadinessCheck{ID: id, Status: "pass", Reason: "verified"})
+	}
+	in := lifecycleintents.Intent{ID: uuid.NewString(), ProjectID: 440, Request: lifecycleintents.Request{Operation: "readiness", RuntimeID: uuid.NewString(), RuntimeGeneration: supervisor.Status().DaemonID,
+		AccountLabel: "chatgpt", TTLSeconds: 300, WorkspaceHandle: uuid.NewString(), DispatchProfileID: "codex-sol-high", DispatchProfileVersion: "1", BaselineDigest: baseline}}
+	in.AcceptedReadiness = &lifecycleintents.ReadinessObservation{ContractVersion: lifecycleintents.ReadinessContractVersion, IntentID: in.ID, ProjectID: in.ProjectID,
+		RuntimeID: in.Request.RuntimeID, RuntimeGeneration: in.Request.RuntimeGeneration, AccountLabel: in.Request.AccountLabel, ProfileID: in.Request.DispatchProfileID,
+		ProfileVersion: in.Request.DispatchProfileVersion, WorkspaceHandle: in.Request.WorkspaceHandle, WorkspaceIdentity: strings.Repeat("8", 64), WorkspaceMode: "exclusive", BaselineDigest: baseline,
+		HostKind: "macos-home-manager", Status: "ready", NextAction: "none", ObservedAt: now.Format(time.RFC3339Nano), ExpiresAt: now.Add(time.Minute).Format(time.RFC3339Nano), Checks: checks}
+	p := &projectLifecycle{owner: &daemonLifecycle{supervisor: supervisor}}
+	if err = p.Committed(context.Background(), in); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = supervisor.ReadinessReceipt(agentd.ReadinessReceiptRequest{ProjectID: in.ProjectID, RuntimeID: in.Request.RuntimeID, RuntimeGeneration: in.Request.RuntimeGeneration,
+		AccountLabel: in.Request.AccountLabel, ProfileID: in.Request.DispatchProfileID, ProfileVersion: in.Request.DispatchProfileVersion, WorkspaceHandle: in.Request.WorkspaceHandle, WorkspaceIdentity: strings.Repeat("8", 64), WorkspaceMode: "exclusive", BaselineDigest: baseline}); err != nil {
+		t.Fatalf("validated authority receipt was not retained: %v", err)
+	}
+	in.AcceptedReadiness.ExpiresAt = now.Add(-time.Minute).Format(time.RFC3339Nano)
+	if err = p.Committed(context.Background(), in); !errors.Is(err, lifecycleclient.ErrOwnership) {
+		t.Fatalf("stale receipt commit error=%v", err)
+	}
+	in.AcceptedReadiness.ExpiresAt = now.Add(time.Minute).Format(time.RFC3339Nano)
+	in.AcceptedReadiness.ProfileVersion = "other"
+	if err = p.Committed(context.Background(), in); !errors.Is(err, lifecycleclient.ErrOwnership) {
+		t.Fatalf("mismatched receipt commit error=%v", err)
+	}
+	in.AcceptedReadiness.ProfileVersion = "1"
+	in.AcceptedReadiness.WorkspaceMode = "shared"
+	if err = p.Committed(context.Background(), in); !errors.Is(err, lifecycleclient.ErrOwnership) {
+		t.Fatalf("profile-mode mismatch commit error=%v", err)
+	}
+}
+
 func TestDaemonLifecycleAdvertisesTwoAccountsAndRejectsWrongKey(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

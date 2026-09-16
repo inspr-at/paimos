@@ -155,6 +155,13 @@ func (s *Service) Transition(ctx context.Context, p auth.Principal, project int6
 		if s.creator(ctx, tx, in) != nil {
 			return Intent{}, ErrUnavailable
 		}
+		if readinessIntent && in.State == "completed" {
+			accepted, receiptErr := ReadinessReceiptForIntentTx(ctx, tx, project, in.ID)
+			if receiptErr != nil {
+				return Intent{}, ErrUnavailable
+			}
+			in.AcceptedReadiness = &accepted
+		}
 		if tx.Commit() != nil {
 			return Intent{}, ErrStorage
 		}
@@ -189,9 +196,12 @@ func (s *Service) Transition(ctx context.Context, p auth.Principal, project int6
 		}
 	}
 	if t.State == "completed" {
-		if err = s.completeEffect(ctx, tx, in, runtime, t); err != nil {
+		accepted, effectErr := s.completeEffect(ctx, tx, in, runtime, t)
+		if effectErr != nil {
+			err = effectErr
 			return Intent{}, err
 		}
+		in.AcceptedReadiness = accepted
 	}
 	if err = s.change(ctx, tx, p, &in, t.State, t.Reason, t.ResultSessionID); err != nil {
 		return Intent{}, err

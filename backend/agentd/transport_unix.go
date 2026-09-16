@@ -133,6 +133,14 @@ func transportHandler(supervisor *Supervisor) http.Handler {
 	mux.HandleFunc("GET /v1/status", func(w http.ResponseWriter, _ *http.Request) {
 		writeTransportJSON(w, http.StatusOK, supervisor.Status())
 	})
+	mux.HandleFunc("POST /v1/readiness/lookup", func(w http.ResponseWriter, r *http.Request) {
+		var request ReadinessReceiptRequest
+		if decodeTransportJSON(w, r, &request) != nil {
+			return
+		}
+		receipt, err := supervisor.ReadinessReceipt(request)
+		writeTransportResult(w, receipt, err)
+	})
 	mux.HandleFunc("POST /v1/starts/lookup", func(w http.ResponseWriter, r *http.Request) {
 		var request struct {
 			Key string `json:"idempotency_key"`
@@ -380,6 +388,11 @@ func (c *Client) request(ctx context.Context, method, path string, input, output
 func (c *Client) Status(ctx context.Context) (Status, error) {
 	var out Status
 	err := c.request(ctx, http.MethodGet, "/v1/status", nil, &out)
+	return out, err
+}
+func (c *Client) ReadinessReceipt(ctx context.Context, request ReadinessReceiptRequest) (ReadinessReceipt, error) {
+	var out ReadinessReceipt
+	err := c.request(ctx, http.MethodPost, "/v1/readiness/lookup", request, &out)
 	return out, err
 }
 func (c *Client) Start(ctx context.Context, request StartRequest) (Session, error) {

@@ -132,13 +132,42 @@ func TestReadinessObservesAnInFlightStartOnTheSameMachine(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer tx.Rollback()
-	if err = f.s.recordReadinessTx(context.Background(), tx, in, f.runtime, f.readinessReport()); err != nil {
+	if _, err = f.s.recordReadinessTx(context.Background(), tx, in, f.runtime, f.readinessReport()); err != nil {
 		t.Fatal(err)
 	}
 	if err = tx.Commit(); err != nil {
 		t.Fatal(err)
 	}
 	assertOccupiedReadiness(t, f)
+}
+
+func TestReadinessTransitionReturnsTheFinalBoundReceiptAndReplaysIt(t *testing.T) {
+	f := setup(t)
+	f.managed(t)
+	ctx := context.Background()
+	in := f.submit(t, f.readinessRequest())
+	in = f.claim(t)
+	in = f.transition(t, in, "executing", "")
+	completed, err := f.s.Transition(ctx, f.reporter, f.project, in.ID, testLease, Transition{
+		RuntimeID: f.runtime.ID, RuntimeGeneration: f.runtime.Generation, ExpectedRevision: in.Revision,
+		State: "completed", Reason: "applied", Readiness: f.readinessReport(),
+	})
+	if err != nil || completed.AcceptedReadiness == nil {
+		t.Fatalf("accepted receipt error=%v receipt=%+v", err, completed.AcceptedReadiness)
+	}
+	receipt := *completed.AcceptedReadiness
+	if err = ValidateReadinessReceipt(receipt, time.Now()); err != nil || receipt.Status != "needs_setup" || receipt.NextAction != "select_declared_workspace" ||
+		receipt.RuntimeID != f.runtime.ID || receipt.RuntimeGeneration != f.runtime.Generation || receipt.WorkspaceHandle != f.runtime.Workspaces[0].Handle || receipt.BaselineDigest != fixtureBaseline {
+		t.Fatalf("final server receipt=%+v validation=%v", receipt, err)
+	}
+	f.now = f.now.Add(RuntimeTTLSeconds*time.Second + time.Second)
+	replayed, err := f.s.Transition(ctx, f.reporter, f.project, in.ID, testLease, Transition{
+		RuntimeID: f.runtime.ID, RuntimeGeneration: f.runtime.Generation, ExpectedRevision: completed.Revision - 1,
+		State: "completed", Reason: "applied", Readiness: f.readinessReport(),
+	})
+	if err != nil || replayed.AcceptedReadiness == nil || replayed.AcceptedReadiness.Status != receipt.Status || replayed.AcceptedReadiness.IntentID != in.ID {
+		t.Fatalf("terminal replay did not return the same accepted receipt: out=%+v err=%v", replayed.AcceptedReadiness, err)
+	}
 }
 
 func assertOccupiedReadiness(t *testing.T, f *fixture) {

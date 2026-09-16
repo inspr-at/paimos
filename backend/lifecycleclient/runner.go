@@ -223,14 +223,28 @@ func (r *Runner) complete(ctx context.Context, runtime lifecycleintents.Runtime,
 	if out.State != state || out.Reason != c.Result.Reason || out.ResultSessionID != c.Result.SessionID || intentDigest(out) != c.Digest {
 		return ErrOwnership
 	}
+	if out.Request.Operation == "readiness" && out.State == "completed" {
+		if out.AcceptedReadiness != nil && (lifecycleintents.ValidateReadinessReceiptShape(*out.AcceptedReadiness) != nil ||
+			!receiptMatchesIntent(*out.AcceptedReadiness, out)) {
+			return ErrOwnership
+		}
+	}
 	if out.State == "completed" {
 		if err = r.executor.Committed(ctx, out); err != nil {
 			return err
 		}
 	}
+	c.Intent = out
 	c.Phase = "terminal"
 	if err = r.journal.Put(c); err != nil {
 		return ErrUnknown
 	}
 	return nil
+}
+
+func receiptMatchesIntent(receipt lifecycleintents.ReadinessObservation, in lifecycleintents.Intent) bool {
+	r := in.Request
+	return receipt.IntentID == in.ID && receipt.ProjectID == in.ProjectID && receipt.RuntimeID == r.RuntimeID && receipt.RuntimeGeneration == r.RuntimeGeneration &&
+		receipt.AccountLabel == r.AccountLabel && receipt.AccountKey == r.AccountKey && receipt.ProfileID == r.DispatchProfileID &&
+		receipt.ProfileVersion == r.DispatchProfileVersion && receipt.WorkspaceHandle == r.WorkspaceHandle && receipt.BaselineDigest == r.BaselineDigest
 }

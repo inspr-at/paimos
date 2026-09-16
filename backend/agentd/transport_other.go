@@ -21,6 +21,9 @@ func Serve(context.Context, string, *Supervisor) error {
 func (*Client) Status(context.Context) (Status, error) {
 	return Status{}, errors.New("agentd Unix transport is unsupported")
 }
+func (*Client) ReadinessReceipt(context.Context, ReadinessReceiptRequest) (ReadinessReceipt, error) {
+	return ReadinessReceipt{}, errors.New("agentd Unix transport is unsupported")
+}
 func (*Client) Start(context.Context, StartRequest) (Session, error) {
 	return Session{}, errors.New("agentd Unix transport is unsupported")
 }
