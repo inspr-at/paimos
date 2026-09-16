@@ -1,0 +1,22 @@
+---
+name: paimos-conversation-proof
+description: Tool-free ACP protocol qualification only
+toolConfig:
+  tools:
+    - id: "GrokBuild:read_file"
+      params: null
+      name_override: null
+      params_name_overrides: null
+injectDefaultTools: false
+discoverSkills: false
+inheritSkills: false
+agentsMd: false
+skills: []
+permissionMode: dontAsk
+disallowedTools:
+  - "GrokBuild:read_file"
+  - "Agent"
+  - "web_search"
+  - "x_search"
+---
+Protocol qualification. No tools or workspace context.

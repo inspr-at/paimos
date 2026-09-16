@@ -1,0 +1,45 @@
+[cli]
+auto_update = false
+use_leader = false
+
+[ui]
+permission_mode = "dontAsk"
+
+[memory]
+enabled = false
+
+[workflows]
+enabled = false
+
+[toolset.bash]
+login_shell_capture = false
+
+[compat.claude]
+skills = false
+rules = false
+agents = false
+mcps = false
+hooks = false
+sessions = false
+
+[compat.cursor]
+skills = false
+rules = false
+agents = false
+mcps = false
+hooks = false
+sessions = false
+
+[compat.codex]
+sessions = false
+
+[marketplace]
+default_skills_installs_purged = true
+official_marketplace_auto_installed = true
+
+[[marketplace.sources]]
+name = "xAI Official"
+git = "https://github.com/xai-org/plugin-marketplace.git"
+
+[features]
+backend_tools = false
