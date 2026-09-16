@@ -21,10 +21,46 @@ const (
 	grokConversationProfileID = "grok-native-4.6-xhigh"
 	grokConversationModel     = "grok-4.6"
 	grokConversationEffort    = "xhigh"
-	grokNativeSHA256          = "d53b6e543e482716236748914331db50145c696ac7af91f1ebdedcf5654cfecb"
 	grokConfigSHA256          = "3b9f1cefb4672eed5856debd6173bb82009546ad9b10f28d8372749d1bb8e259"
 	grokProfileSHA256         = "9cd1990054adc092e004e649da746e4bb2844ae6debae4a8aa5495df5ecfb231"
 )
+
+// GrokBinaryVariant identifies an operator-local executable layout and its
+// immutable artifact digest. Variants are deliberately explicit: the
+// source-built artifact is not treated as the npm CLI package.
+type GrokBinaryVariant string
+
+const (
+	GrokBinaryNPM1030         GrokBinaryVariant = "npm-grok-1.0.30"
+	GrokBinarySourceBuilt1032 GrokBinaryVariant = "source-xai-grok-pager-1.0.32"
+)
+
+type grokVariantSpec struct {
+	variant       GrokBinaryVariant
+	binaryName    string
+	executableSHA string
+	sourceCommit  string
+}
+
+func grokVariantSpecFor(variant GrokBinaryVariant) (grokVariantSpec, error) {
+	switch variant {
+	case GrokBinaryNPM1030:
+		return grokVariantSpec{
+			variant:       variant,
+			binaryName:    "grok-native",
+			executableSHA: "d53b6e543e482716236748914331db50145c696ac7af91f1ebdedcf5654cfecb",
+		}, nil
+	case GrokBinarySourceBuilt1032:
+		return grokVariantSpec{
+			variant:       variant,
+			binaryName:    "xai-grok-pager",
+			executableSHA: "6294a6bc10304e3d3b5896194277f6d24fca643b0605d650ca39bad5b40a6d14",
+			sourceCommit:  "482711333c7195dc16a272777f86086d615e2afb",
+		}, nil
+	default:
+		return grokVariantSpec{}, errors.New("native Grok executable variant unavailable")
+	}
+}
 
 //go:embed grokassets/config.toml
 var grokConversationConfig []byte
@@ -36,6 +72,7 @@ var grokConversationProfile []byte
 // key and expected OIDC subject digest must be enrolled through the existing
 // account/attachment authority before a caller may use this adapter.
 type GrokConversationBinding struct {
+	BinaryVariant   GrokBinaryVariant
 	BinaryPath      string
 	AuthPath        string
 	AccountKey      string
@@ -54,7 +91,7 @@ func NewGrokConversationAdapter(binding GrokConversationBinding) (*GrokConversat
 		len(binding.PrincipalSHA256) != 64 {
 		return nil, errors.New("native Grok conversation binding is unavailable")
 	}
-	if _, err := grokPackageRoot(binding.BinaryPath, binding.AuthPath, binding.ScratchRoot); err != nil {
+	if _, err := grokBinaryRoot(binding.BinaryVariant, binding.BinaryPath, binding.AuthPath, binding.ScratchRoot); err != nil {
 		return nil, err
 	}
 	if _, err := hex.DecodeString(binding.PrincipalSHA256); err != nil ||
@@ -105,8 +142,23 @@ func safeGrokAbsolutePath(value string) bool {
 }
 
 func grokPackageRoot(binary, authPath, scratchRoot string) (string, error) {
+	return grokBinaryRoot(GrokBinaryNPM1030, binary, authPath, scratchRoot)
+}
+
+func grokBinaryRoot(variant GrokBinaryVariant, binary, authPath, scratchRoot string) (string, error) {
+	spec, err := grokVariantSpecFor(variant)
+	if err != nil {
+		return "", err
+	}
+	if variant == GrokBinarySourceBuilt1032 {
+		return grokSourceBuildRoot(spec, binary, authPath, scratchRoot)
+	}
+	return grokNPMPackageRoot(spec, binary, authPath, scratchRoot)
+}
+
+func grokNPMPackageRoot(spec grokVariantSpec, binary, authPath, scratchRoot string) (string, error) {
 	root := filepath.Dir(filepath.Dir(binary))
-	if filepath.Base(binary) != "grok-native" || filepath.Base(filepath.Dir(binary)) != "bin" ||
+	if filepath.Base(binary) != spec.binaryName || filepath.Base(filepath.Dir(binary)) != "bin" ||
 		filepath.Base(root) != "grok" || filepath.Base(filepath.Dir(root)) != "@xai-official" ||
 		filepath.Base(filepath.Dir(filepath.Dir(root))) != "node_modules" || !safeGrokAbsolutePath(root) {
 		return "", errors.New("native Grok package path is unavailable")
@@ -117,6 +169,20 @@ func grokPackageRoot(binary, authPath, scratchRoot string) (string, error) {
 		return "", errors.New("native Grok package read boundary is unsafe")
 	}
 	return root, nil
+}
+
+func grokSourceBuildRoot(spec grokVariantSpec, binary, authPath, scratchRoot string) (string, error) {
+	releaseRoot := filepath.Dir(binary)
+	if filepath.Base(binary) != spec.binaryName || filepath.Base(releaseRoot) != "release" ||
+		filepath.Base(filepath.Dir(releaseRoot)) != "target" || !safeGrokAbsolutePath(releaseRoot) {
+		return "", errors.New("native Grok source-built path is unavailable")
+	}
+	home := os.Getenv("HOME")
+	if !safeGrokAbsolutePath(home) || pathInsideGrok(releaseRoot, home) || pathInsideGrok(releaseRoot, authPath) ||
+		pathInsideGrok(releaseRoot, scratchRoot) || pathInsideGrok(scratchRoot, releaseRoot) {
+		return "", errors.New("native Grok source-built read boundary is unsafe")
+	}
+	return releaseRoot, nil
 }
 
 func pathInsideGrok(root, target string) bool {

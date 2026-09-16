@@ -5,9 +5,70 @@ package agentd
 
 import (
 	"bytes"
+	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func TestGrokConversationBinaryVariantsAreExplicitAndPinned(t *testing.T) {
+	source, err := grokVariantSpecFor(GrokBinarySourceBuilt1032)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if source.binaryName != "xai-grok-pager" || source.executableSHA != "6294a6bc10304e3d3b5896194277f6d24fca643b0605d650ca39bad5b40a6d14" ||
+		source.sourceCommit != "482711333c7195dc16a272777f86086d615e2afb" {
+		t.Fatalf("source-built identity changed: %+v", source)
+	}
+	npm, err := grokVariantSpecFor(GrokBinaryNPM1030)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if npm.binaryName != "grok-native" || npm.executableSHA == source.executableSHA || npm.sourceCommit != "" {
+		t.Fatalf("npm identity overlaps source-built variant: %+v", npm)
+	}
+	if _, err := grokVariantSpecFor(GrokBinaryVariant("unrecognized")); err == nil {
+		t.Fatal("unrecognized executable variant accepted")
+	}
+}
+
+func TestGrokConversationSourceBuiltBindingPathAndVariantRejection(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("HOME", filepath.Join(root, "home"))
+	binary := filepath.Join(root, "target", "release", "xai-grok-pager")
+	auth := filepath.Join(root, "auth.json")
+	scratch := filepath.Join(root, "scratch")
+	binding := GrokConversationBinding{
+		BinaryVariant:   GrokBinarySourceBuilt1032,
+		BinaryPath:      binary,
+		AuthPath:        auth,
+		AccountKey:      "grok-codex",
+		PrincipalSHA256: strings.Repeat("0", 64),
+		ScratchRoot:     scratch,
+	}
+	if _, err := NewGrokConversationAdapter(binding); err != nil {
+		t.Fatalf("source-built binding rejected: %v", err)
+	}
+	if _, err := grokBinaryRoot(GrokBinaryNPM1030, binary, auth, scratch); err == nil {
+		t.Fatal("source-built layout accepted under npm variant")
+	}
+	if _, err := grokBinaryRoot(GrokBinarySourceBuilt1032, filepath.Join(root, "target", "release", "grok-native"), auth, scratch); err == nil {
+		t.Fatal("npm executable name accepted under source-built variant")
+	}
+	if _, err := grokBinaryRoot(GrokBinarySourceBuilt1032, binary, filepath.Join(root, "target", "release", "auth.json"), scratch); err == nil {
+		t.Fatal("source-built auth inside executable read root accepted")
+	}
+	if _, err := grokBinaryRoot(GrokBinarySourceBuilt1032, binary, auth, filepath.Join(root, "target", "release", "scratch")); err == nil {
+		t.Fatal("source-built scratch inside executable read root accepted")
+	}
+	binding.BinaryVariant = GrokBinaryVariant("unrecognized")
+	if _, err := NewGrokConversationAdapter(binding); err == nil {
+		t.Fatal("unrecognized binding variant accepted")
+	}
+	binding.BinaryVariant = ""
+	if _, err := NewGrokConversationAdapter(binding); err == nil {
+		t.Fatal("zero binding variant accepted")
+	}
+}
 
 func grokFixture(t *testing.T, frames ...string) (CodexConversationResult, []CodexConversationDelta, string) {
 	t.Helper()
