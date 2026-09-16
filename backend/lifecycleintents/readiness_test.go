@@ -110,6 +110,54 @@ func TestReadinessObservationIsStoredBoundAndClamped(t *testing.T) {
 	}
 }
 
+func TestReadinessCannotClaimAnOccupiedWorkspaceAcrossDaemons(t *testing.T) {
+	f := setup(t)
+	f.managed(t)
+	if err := f.completeReadiness(t, f.readinessReport()); err != nil {
+		t.Fatalf("record occupied readiness: %v", err)
+	}
+	assertOccupiedReadiness(t, f)
+}
+
+func TestReadinessObservesAnInFlightStartOnTheSameMachine(t *testing.T) {
+	f := setup(t)
+	f.submit(t, f.request("start"))
+	f.claim(t)
+	// Claim deliberately returns the older owned Start until it completes.
+	// Exercise the same transactional recorder directly to simulate a second
+	// runtime's readiness completion while that Start remains in flight.
+	in := f.submit(t, f.readinessRequest())
+	tx, err := db.DB.BeginTx(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	if err = f.s.recordReadinessTx(context.Background(), tx, in, f.runtime, f.readinessReport()); err != nil {
+		t.Fatal(err)
+	}
+	if err = tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	assertOccupiedReadiness(t, f)
+}
+
+func assertOccupiedReadiness(t *testing.T, f *fixture) {
+	t.Helper()
+	observation, err := f.current(t, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if observation.Status != "needs_setup" || observation.NextAction != "select_declared_workspace" {
+		t.Fatalf("occupied workspace was ready: %+v", observation)
+	}
+	for _, check := range observation.Checks {
+		if check.ID == "workspace_isolation" && check.Status == "fail" && check.Reason == "workspace_occupied" && check.Digest == "" {
+			return
+		}
+	}
+	t.Fatalf("workspace conflict was not recorded without identity leakage: %+v", observation.Checks)
+}
+
 func TestReadinessReportsThatDoNotMatchTheAuthorizedTargetAreRefused(t *testing.T) {
 	cases := []struct {
 		name   string

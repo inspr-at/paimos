@@ -410,9 +410,7 @@ func (s *Supervisor) reserveSession(entry *sessionEntry) error {
 		terminal := existing.session.State == StateStopped || existing.session.State == StateExited ||
 			existing.session.State == StateFailed || existing.session.State == StateOwnershipLost
 		remoteClosed := existing.session.Reporter.PublicSessionID == "" || existing.session.Reporter.Closed
-		workspaceConflict := !terminal && existing.session.WorkspaceProvenance.Identity != "" &&
-			existing.session.WorkspaceProvenance.Identity == entry.session.WorkspaceProvenance.Identity &&
-			(existing.session.WorkspaceProvenance.Mode == WorkspaceExclusive || entry.session.WorkspaceProvenance.Mode == WorkspaceExclusive)
+		workspaceConflict := workspaceConflicts(existing.session, entry.session.WorkspaceProvenance.Identity, entry.session.WorkspaceProvenance.Mode)
 		existing.mu.Unlock()
 		if workspaceConflict {
 			s.mu.Unlock()
@@ -448,6 +446,16 @@ func (s *Supervisor) reserveSession(entry *sessionEntry) error {
 		}
 	}
 	return nil
+}
+
+// workspaceConflicts is the owned-session rule used by both the read-only
+// readiness observation and Start's atomic reservation. It says nothing about
+// unmanaged processes or sessions owned by another daemon generation.
+func workspaceConflicts(existing Session, identity, mode string) bool {
+	terminal := existing.State == StateStopped || existing.State == StateExited ||
+		existing.State == StateFailed || existing.State == StateOwnershipLost
+	return !terminal && identity != "" && existing.WorkspaceProvenance.Identity == identity &&
+		(existing.WorkspaceProvenance.Mode == WorkspaceExclusive || mode == WorkspaceExclusive)
 }
 
 func (s *Supervisor) releaseReservation(id string) {
