@@ -5,8 +5,10 @@ package runtimehealth
 
 import (
 	"context"
+	"encoding/json"
 	"github.com/inspr-at/paimos/backend/agentd"
 	"github.com/inspr-at/paimos/backend/runtimeconsumer"
+	"strings"
 	"testing"
 	"time"
 )
@@ -51,6 +53,41 @@ func TestLifecycleReadinessIsIndependentAndNeverStaticSuccess(t *testing.T) {
 	s.Consumers[0].Reason = "ownership_lost"
 	if got := ConsumerExtensions(context.Background(), s)[1]; got.State != ActionRequired || got.Code != "runtime_authority_expired" {
 		t.Fatal("expired authority masked")
+	}
+}
+
+func TestLifecycleRenewalDoctorProjectionIsBounded(t *testing.T) {
+	now := time.Now().UTC()
+	diagnostic := &runtimeconsumer.LifecycleRenewalDiagnostic{
+		ProjectID: 42, Generation: "fixture",
+		LastSuccessfulAt: now.Add(-time.Minute), ExpiresAt: now.Add(time.Minute),
+		LastFailureAt: now.Add(-30 * time.Second), LastFailureCategory: runtimeconsumer.LifecycleRenewalRuntimeRegistrationFailed,
+	}
+	s := agentd.RuntimeStatus{DaemonID: "fixture", Consumers: []runtimeconsumer.Evidence{{
+		ProjectID: 42, Kind: "intents", State: "unavailable", Reason: "ownership_lost", Generation: "fixture", LifecycleRenewal: diagnostic,
+	}}}
+	got := ConsumerExtensions(context.Background(), s)[1]
+	if got.LifecycleRenewal == nil || got.LifecycleRenewal.LastFailureCategory != runtimeconsumer.LifecycleRenewalRuntimeRegistrationFailed || got.LifecycleRenewal.ExpiresAt != diagnostic.ExpiresAt {
+		t.Fatalf("renewal metadata missing: %+v", got.LifecycleRenewal)
+	}
+	raw, err := json.Marshal(got)
+	if err != nil || strings.Contains(string(raw), "fixture-private-error") {
+		t.Fatalf("doctor leaked an error: err=%v json=%s", err, raw)
+	}
+	stale := *diagnostic
+	stale.ProjectID, stale.Generation = 99, "obsolete"
+	s.Consumers = append(s.Consumers, runtimeconsumer.Evidence{ProjectID: 99, Kind: "intents", State: "unavailable", Generation: "obsolete", LifecycleRenewal: &stale})
+	if got = ConsumerExtensions(context.Background(), s)[1]; got.LifecycleRenewal == nil || got.LifecycleRenewal.ProjectID != 42 || got.LifecycleRenewal.Generation != "fixture" {
+		t.Fatalf("obsolete diagnostic replaced current scope: %+v", got.LifecycleRenewal)
+	}
+	s.Consumers = append(s.Consumers, runtimeconsumer.Evidence{ProjectID: 99, Kind: "intents", State: "unavailable", Generation: "fixture"})
+	if got = ConsumerExtensions(context.Background(), s)[1]; got.LifecycleRenewal != nil {
+		t.Fatalf("aggregate doctor selected a diagnostic while another current project had none: %+v", got.LifecycleRenewal)
+	}
+	s.Consumers = s.Consumers[:1]
+	s.Consumers[0].LifecycleRenewal.LastFailureCategory = "fixture-private-error"
+	if got = ConsumerExtensions(context.Background(), s)[1]; got.LifecycleRenewal != nil {
+		t.Fatalf("unrecognized failure category projected: %+v", got.LifecycleRenewal)
 	}
 }
 

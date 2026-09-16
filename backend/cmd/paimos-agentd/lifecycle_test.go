@@ -23,6 +23,7 @@ import (
 	"github.com/inspr-at/paimos/backend/dispatchprofile"
 	"github.com/inspr-at/paimos/backend/lifecycleclient"
 	"github.com/inspr-at/paimos/backend/lifecycleintents"
+	"github.com/inspr-at/paimos/backend/runtimeconsumer"
 )
 
 type lifecycleFixtureAdapter struct {
@@ -284,6 +285,166 @@ func TestCommittedReadinessPersistsOnlyTheValidatedAuthorityReceipt(t *testing.T
 	in.AcceptedReadiness.WorkspaceMode = "shared"
 	if err = p.Committed(context.Background(), in); !errors.Is(err, lifecycleclient.ErrOwnership) {
 		t.Fatalf("profile-mode mismatch commit error=%v", err)
+	}
+}
+
+func TestLifecycleRenewalDiagnosticsPersistBoundedFailureCategoriesAndKeepExpiryFailClosed(t *testing.T) {
+	t.Run("runtime registration failure", func(t *testing.T) {
+		d, cleanup := daemonLifecycleFromProject(t, "renewal-transport", configuredProject{ProjectID: 42, AccountLabel: "chatgpt"})
+		defer cleanup()
+		p := d.projects[0]
+		if err := p.step(context.Background()); !errors.Is(err, lifecycleclient.ErrTransport) {
+			t.Fatalf("transport renewal error=%v", err)
+		}
+		diagnostic := p.lifecycleRenewalDiagnostic()
+		if diagnostic == nil || diagnostic.LastFailureCategory != runtimeconsumer.LifecycleRenewalRuntimeRegistrationFailed || diagnostic.LastFailureAt.IsZero() {
+			t.Fatalf("transport diagnostic=%+v", diagnostic)
+		}
+		if saved := d.journal.Snapshot()[0].LifecycleRenewal; saved.LastFailureCategory != runtimeconsumer.LifecycleRenewalRuntimeRegistrationFailed || saved.LastFailureAt.IsZero() {
+			t.Fatalf("transport diagnostic was not persisted: %+v", saved)
+		}
+	})
+	t.Run("workspace identity mismatch", func(t *testing.T) {
+		workspace, err := filepath.EvalSymlinks(t.TempDir())
+		if err != nil {
+			t.Fatal(err)
+		}
+		d, cleanup := daemonLifecycleFromProject(t, "renewal-config", configuredProject{
+			ProjectID: 42, AccountLabel: "chatgpt",
+			Workspaces: []configuredWorkspace{{Handle: uuid.NewString(), Path: workspace, Identity: strings.Repeat("0", 64), Label: "Fixture workspace"}},
+		})
+		defer cleanup()
+		p := d.projects[0]
+		if err := p.step(context.Background()); !errors.Is(err, lifecycleclient.ErrOwnership) {
+			t.Fatalf("configuration renewal error=%v", err)
+		}
+		diagnostic := p.lifecycleRenewalDiagnostic()
+		if diagnostic == nil || diagnostic.LastFailureCategory != runtimeconsumer.LifecycleRenewalWorkspaceIdentityMismatch || diagnostic.LastFailureAt.IsZero() {
+			t.Fatalf("configuration diagnostic=%+v", diagnostic)
+		}
+	})
+	t.Run("remote profile resolution failure is stage-only", func(t *testing.T) {
+		d, cleanup := daemonLifecycleFromProject(t, "renewal-profile", configuredProject{ProjectID: 42, AccountLabel: "chatgpt"})
+		defer cleanup()
+		p := d.projects[0]
+		const privateFailure = "fixture-private-profile-fetch-error"
+		p.owner.reporter.run = func(context.Context, string, []string, []string, io.Reader) ([]byte, error) {
+			return nil, errors.New(privateFailure)
+		}
+		if err := p.step(context.Background()); !errors.Is(err, lifecycleclient.ErrOwnership) || strings.Contains(err.Error(), privateFailure) {
+			t.Fatalf("profile resolution renewal error=%v", err)
+		}
+		diagnostic := p.lifecycleRenewalDiagnostic()
+		if diagnostic == nil || diagnostic.LastFailureCategory != runtimeconsumer.LifecycleRenewalProfileResolutionFailed || diagnostic.LastFailureAt.IsZero() {
+			t.Fatalf("profile resolution diagnostic=%+v", diagnostic)
+		}
+		raw, err := json.Marshal(diagnostic)
+		if err != nil || strings.Contains(string(raw), privateFailure) {
+			t.Fatalf("renewal diagnostic leaked remote failure: err=%v json=%s", err, raw)
+		}
+	})
+	t.Run("expired remains ownership lost", func(t *testing.T) {
+		d, cleanup := daemonLifecycleFromProject(t, "renewal-expired", configuredProject{ProjectID: 42, AccountLabel: "chatgpt"})
+		defer cleanup()
+		p := d.projects[0]
+		now := time.Now().UTC()
+		p.record.Runtime = lifecycleintents.Runtime{ID: uuid.NewString(), ExpiresAt: now.Add(-time.Second).Format(time.RFC3339Nano)}
+		p.record.LifecycleRenewal = runtimeconsumer.LifecycleRenewalDiagnostic{LastSuccessfulAt: now.Add(-2 * time.Minute), ExpiresAt: now.Add(-time.Second)}
+		if err := p.step(context.Background()); !errors.Is(err, lifecycleclient.ErrOwnership) || !p.lost {
+			t.Fatalf("expired renewal err=%v lost=%t", err, p.lost)
+		}
+		if diagnostic := p.lifecycleRenewalDiagnostic(); diagnostic == nil || diagnostic.ExpiresAt.After(now) {
+			t.Fatalf("expired renewal diagnostic=%+v", diagnostic)
+		}
+	})
+}
+
+func renewalResponseAuthority(t *testing.T, p *projectLifecycle, expiresAt string) func() {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || !strings.HasSuffix(r.URL.Path, "/lifecycle/v1/runtimes") {
+			http.NotFound(w, r)
+			return
+		}
+		var registration lifecycleintents.Registration
+		if err := json.NewDecoder(r.Body).Decode(&registration); err != nil {
+			t.Fatalf("decode registration: %v", err)
+		}
+		_ = json.NewEncoder(w).Encode(lifecycleintents.Runtime{
+			ID: uuid.NewString(), ProjectID: p.config.ProjectID, Generation: registration.Generation,
+			MachineID: registration.Host, AccountLabel: registration.AccountLabel, Accounts: registration.Accounts,
+			Workspaces: registration.Workspaces, Profiles: registration.Profiles, SchemaVersion: registration.SchemaVersion,
+			AccountScopes: registration.AccountScopes, Conversation: registration.Conversation, ExpiresAt: expiresAt,
+		})
+	}))
+	authority, err := lifecycleclient.NewHTTP(server.URL, p.config.ProjectID, p.record.Lease, func() (string, error) {
+		return "fixture-key", nil
+	})
+	if err != nil {
+		server.Close()
+		t.Fatal(err)
+	}
+	previous := p.authority
+	p.authority = authority
+	return func() {
+		p.authority = previous
+		server.Close()
+	}
+}
+
+func TestLifecycleRenewalPreSendCredentialFailureIsStageOnly(t *testing.T) {
+	d, cleanup := daemonLifecycleFromProject(t, "renewal-pre-send", configuredProject{ProjectID: 42, AccountLabel: "chatgpt"})
+	defer cleanup()
+	p := d.projects[0]
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { requests++ }))
+	defer server.Close()
+	authority, err := lifecycleclient.NewHTTP(server.URL, p.config.ProjectID, p.record.Lease, func() (string, error) {
+		return "", errors.New("fixture-private-credential-read-error")
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.authority = authority
+	if err := p.step(context.Background()); !errors.Is(err, lifecycleclient.ErrOwnership) {
+		t.Fatalf("pre-send renewal error=%v", err)
+	}
+	if requests != 0 {
+		t.Fatalf("pre-send credential error sent %d requests", requests)
+	}
+	diagnostic := p.lifecycleRenewalDiagnostic()
+	if diagnostic == nil || diagnostic.LastFailureCategory != runtimeconsumer.LifecycleRenewalRuntimeRegistrationFailed || diagnostic.LastFailureAt.IsZero() {
+		t.Fatalf("pre-send diagnostic=%+v", diagnostic)
+	}
+	raw, err := json.Marshal(diagnostic)
+	if err != nil || strings.Contains(string(raw), "fixture-private-credential-read-error") {
+		t.Fatalf("pre-send diagnostic leaked credential error: err=%v json=%s", err, raw)
+	}
+}
+
+func TestLifecycleRenewalReturnedExpiryPreservesExistingFence(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		expiresAt string
+	}{
+		{name: "malformed", expiresAt: "not-a-timestamp"},
+		{name: "expired", expiresAt: time.Now().Add(-time.Minute).UTC().Format(time.RFC3339Nano)},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			d, cleanup := daemonLifecycleFromProject(t, "renewal-returned-"+test.name, configuredProject{ProjectID: 42, AccountLabel: "chatgpt"})
+			defer cleanup()
+			p := d.projects[0]
+			defer renewalResponseAuthority(t, p, test.expiresAt)()
+			if err := p.step(context.Background()); !errors.Is(err, lifecycleclient.ErrOwnership) || p.lost {
+				t.Fatalf("initial returned-expiry handling err=%v lost=%t", err, p.lost)
+			}
+			if p.record.Runtime.ExpiresAt != test.expiresAt || p.record.Runtime.ID == "" {
+				t.Fatalf("returned runtime was not preserved: %+v", p.record.Runtime)
+			}
+			if err := p.step(context.Background()); !errors.Is(err, lifecycleclient.ErrOwnership) || !p.lost {
+				t.Fatalf("next-step returned-expiry fence err=%v lost=%t", err, p.lost)
+			}
+		})
 	}
 }
 
