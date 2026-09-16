@@ -177,3 +177,68 @@ func TestUnixTransportIsPrivateAndRoundTrips(t *testing.T) {
 		t.Fatal("daemon did not stop")
 	}
 }
+
+func TestUnixTransportReadinessReceiptIsBoundAndRedacted(t *testing.T) {
+	supervisor, err := NewSupervisor(SupervisorConfig{Instance: "receipt-transport", StateRoot: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer supervisor.Close(context.Background())
+	receipt := receiptFixture(time.Now())
+	receipt.RuntimeGeneration = supervisor.Status().DaemonID
+	if err = supervisor.StoreReadinessReceipt(receipt); err != nil {
+		t.Fatal(err)
+	}
+	handler := transportHandler(supervisor)
+	body, err := json.Marshal(receiptRequest(receipt))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ok := httptest.NewRecorder()
+	handler.ServeHTTP(ok, httptest.NewRequest(http.MethodPost, "/v1/readiness/lookup", bytes.NewReader(body)))
+	if ok.Code != http.StatusOK || strings.Contains(ok.Body.String(), "lease") || strings.Contains(ok.Body.String(), "/tmp/") {
+		t.Fatalf("receipt response status=%d body=%s", ok.Code, ok.Body.String())
+	}
+	wrong := receiptRequest(receipt)
+	wrong.ProfileVersion = "2"
+	body, _ = json.Marshal(wrong)
+	denied := httptest.NewRecorder()
+	handler.ServeHTTP(denied, httptest.NewRequest(http.MethodPost, "/v1/readiness/lookup", bytes.NewReader(body)))
+	if denied.Code == http.StatusOK {
+		t.Fatal("tuple mismatch was served on private transport")
+	}
+	socketDir := t.TempDir()
+	if err = os.Chmod(socketDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	socket := filepath.Join(socketDir, "agentd.sock")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- Serve(ctx, socket, supervisor) }()
+	client, err := NewClient(socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		got, callErr := client.ReadinessReceipt(context.Background(), receiptRequest(receipt))
+		if callErr == nil {
+			if got.IntentID != receipt.IntentID {
+				t.Fatalf("socket receipt=%+v", got)
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("private receipt socket did not serve: %v", callErr)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if _, err = client.ReadinessReceipt(context.Background(), wrong); err == nil {
+		t.Fatal("socket returned mismatched receipt")
+	}
+	cancel()
+	if err = <-done; err != nil {
+		t.Fatal(err)
+	}
+}

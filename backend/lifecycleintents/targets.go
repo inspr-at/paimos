@@ -311,28 +311,29 @@ func (s *Service) RegisterSession(ctx context.Context, p auth.Principal, project
 	}
 	return nil
 }
-func (s *Service) completeEffect(ctx context.Context, tx *sql.Tx, in Intent, runtime Runtime, t Transition) error {
+func (s *Service) completeEffect(ctx context.Context, tx *sql.Tx, in Intent, runtime Runtime, t Transition) (*ReadinessObservation, error) {
 	r := in.Request
 	result := t.ResultSessionID
 	switch r.Operation {
 	case "readiness":
-		return s.recordReadinessTx(ctx, tx, in, runtime, t.Readiness)
+		out, err := s.recordReadinessTx(ctx, tx, in, runtime, t.Readiness)
+		return &out, err
 	case "repair":
 		if result != "" {
-			return ErrInvalid
+			return nil, ErrInvalid
 		}
-		return nil
+		return nil, nil
 	case "attach", "reassign":
 		if result != r.SessionID {
-			return ErrUnavailable
+			return nil, ErrUnavailable
 		}
 		current, err := loadSession(ctx, tx, in.ProjectID, r.SessionID)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		revision, err := replayEquivalentRevision(ctx, tx, current, r.ExpectedRevision)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		var parent, ticket, shape any
 		if r.ParentSessionID != nil {
@@ -344,28 +345,28 @@ func (s *Service) completeEffect(ctx context.Context, tx *sql.Tx, in Intent, run
 		}
 		res, err := tx.ExecContext(ctx, `UPDATE harness_sessions SET parent_harness_session_id=?,ticket_id=?,work_shape=?,revision=revision+1,updated_at=? WHERE project_id=? AND id=? AND revision=?`, parent, ticket, shape, stamp(s.now()), in.ProjectID, r.SessionID, revision)
 		if err != nil {
-			return ErrStorage
+			return nil, ErrStorage
 		}
 		if n, _ := res.RowsAffected(); n != 1 {
-			return ErrConflict
+			return nil, ErrConflict
 		}
-		return nil
+		return nil, nil
 	case "start", "restart":
 		if !validID(result) || result == r.SessionID {
-			return ErrUnavailable
+			return nil, ErrUnavailable
 		}
 		current, err := loadSession(ctx, tx, in.ProjectID, result)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if !sameSpecification(current, r, runtime) || !sameBinding(current, r) || current.phase == "stopped" || current.createdAt < in.CreatedAt {
-			return ErrUnavailable
+			return nil, ErrUnavailable
 		}
 		var present int
 		if tx.QueryRowContext(ctx, `SELECT 1 FROM lifecycle_runtime_sessions WHERE session_id=? AND runtime_id=? AND generation=?`, result, r.RuntimeID, in.NewGeneration).Scan(&present) != nil {
-			return ErrUnavailable
+			return nil, ErrUnavailable
 		}
-		return nil
+		return nil, nil
 	}
-	return ErrInvalid
+	return nil, ErrInvalid
 }

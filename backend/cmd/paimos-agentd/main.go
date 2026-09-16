@@ -60,7 +60,7 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 	claudePath, nodePath, claudeSDKPath, piPath, cursorPath := "", "", "", "", ""
 	reportHost, reportURL, reportAPIKeyFile, paimosPath := "", "", "", ""
 	lifecycleConfigPath, codexAccountsPath, piAccountsPath, cursorAccountsPath, accountKey := "", "", "", "", ""
-	requestID, digest, optionID := "", "", ""
+	requestID, digest, optionID, workspaceIdentity := "", "", "", ""
 	lifecycleKey, runtimeGeneration := "", ""
 	var expectedRevision, attachmentRevision int64
 	if command == "serve" {
@@ -105,6 +105,19 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 	}
 	if command == "account-status" {
 		flags.Int64Var(&projectID, "project-id", 0, "optional project filter for truthful attached-account discovery")
+	}
+	if command == "readiness-receipt" {
+		flags.Int64Var(&projectID, "project-id", 0, "owning PPM project numeric ID")
+		flags.StringVar(&runtimeGeneration, "runtime-generation", "", "exact daemon runtime generation UUID")
+		flags.StringVar(&identity, "runtime-id", "", "exact lifecycle runtime UUID")
+		flags.StringVar(&accountKey, "account-key", "", "opaque configured account key, if selected")
+		flags.StringVar(&adapter, "account-label", "", "exact configured account label")
+		flags.StringVar(&dispatchProfile, "dispatch-profile", "", "exact dispatch profile ID")
+		flags.StringVar(&dispatchProfileVersion, "dispatch-profile-version", "", "exact dispatch profile version")
+		flags.StringVar(&workspace, "workspace-handle", "", "exact configured workspace handle")
+		flags.StringVar(&workspaceIdentity, "workspace-identity", "", "exact configured workspace identity digest")
+		flags.StringVar(&workspaceMode, "workspace-mode", "", "exact configured workspace mode: exclusive or shared")
+		flags.StringVar(&digest, "baseline-digest", "", "exact configured baseline digest")
 	}
 	if command == "workspace-identity" {
 		flags.StringVar(&workspace, "workspace", "", "existing absolute workspace to inspect without mutation")
@@ -283,6 +296,9 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 		return e
 	case "status":
 		output, err = client.Status(ctx)
+	case "readiness-receipt":
+		output, err = client.ReadinessReceipt(ctx, agentd.ReadinessReceiptRequest{ProjectID: projectID, RuntimeID: identity, RuntimeGeneration: runtimeGeneration,
+			AccountLabel: adapter, AccountKey: accountKey, ProfileID: dispatchProfile, ProfileVersion: dispatchProfileVersion, WorkspaceHandle: workspace, WorkspaceIdentity: workspaceIdentity, WorkspaceMode: workspaceMode, BaselineDigest: digest})
 	case "start":
 		prompt, readErr := io.ReadAll(io.LimitReader(stdin, (256<<10)+1))
 		if readErr != nil || len(prompt) == 0 || len(prompt) > 256<<10 {
@@ -390,7 +406,7 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 		}
 		output = states
 	default:
-		return errors.New("command must be serve, start, status, workspace-identity, receiver-reference, steer, interrupt, stop, held-queue, resume-queue, decisions, inspect, output, answer, account-connect, account-disconnect, account-status, or version")
+		return errors.New("command must be serve, start, status, readiness-receipt, workspace-identity, receiver-reference, steer, interrupt, stop, held-queue, resume-queue, decisions, inspect, output, answer, account-connect, account-disconnect, account-status, or version")
 	}
 	if err != nil {
 		return err

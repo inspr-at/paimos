@@ -14,21 +14,25 @@ import (
 // server-held runtime registration; only the outcome, its closed check codes
 // and the daemon's own observation time come from the report. A report that
 // disagrees with the authorized target is refused, never reinterpreted.
-func (s *Service) recordReadinessTx(ctx context.Context, tx *sql.Tx, in Intent, runtime Runtime, report *ReadinessReport) error {
+func (s *Service) recordReadinessTx(ctx context.Context, tx *sql.Tx, in Intent, runtime Runtime, report *ReadinessReport) (ReadinessObservation, error) {
 	if err := validateReadinessReport(report); err != nil {
-		return err
+		return ReadinessObservation{}, err
 	}
 	r := in.Request
+	profile, err := resolveProfile(r.DispatchProfileID, r.DispatchProfileVersion)
+	if err != nil {
+		return ReadinessObservation{}, err
+	}
 	workspace := workspaceIdentity(runtime, r.WorkspaceHandle)
 	if workspace == "" || report.WorkspaceIdentity != workspace {
-		return ErrUnavailable
+		return ReadinessObservation{}, ErrUnavailable
 	}
 	if report.AccountKey != r.AccountKey || report.BaselineDigest != r.BaselineDigest {
-		return ErrUnavailable
+		return ReadinessObservation{}, ErrUnavailable
 	}
 	observed, err := time.Parse(time.RFC3339Nano, report.ObservedAt)
 	if err != nil {
-		return ErrInvalid
+		return ReadinessObservation{}, ErrInvalid
 	}
 	now := s.now()
 	created, err := time.Parse(time.RFC3339Nano, in.CreatedAt)
@@ -38,13 +42,13 @@ func (s *Service) recordReadinessTx(ctx context.Context, tx *sql.Tx, in Intent, 
 	// The daemon's clock is trusted only inside the window this authority
 	// already owns: after the intent it answers, and not in the future.
 	if observed.After(now.Add(5*time.Second)) || observed.Before(created.Add(-5*time.Second)) {
-		return ErrUnavailable
+		return ReadinessObservation{}, ErrUnavailable
 	}
 	deadline := observed.Add(time.Duration(report.TTLSeconds) * time.Second)
 	deadline = earliest(deadline, runtime.ExpiresAt)
 	deadline = earliest(deadline, in.ExpiresAt)
 	if !deadline.After(now) {
-		return ErrUnavailable
+		return ReadinessObservation{}, ErrUnavailable
 	}
 	// The daemon can only inspect its own sessions. Reconcile its observation
 	// with this authority's same-machine reservations and registered sessions
@@ -52,7 +56,7 @@ func (s *Service) recordReadinessTx(ctx context.Context, tx *sql.Tx, in Intent, 
 	// Start performs the final atomic reservation against the same ledger.
 	occupied, err := readinessWorkspaceOccupiedTx(ctx, tx, in, runtime, workspace)
 	if err != nil {
-		return err
+		return ReadinessObservation{}, err
 	}
 	stored := *report
 	if occupied {
@@ -72,7 +76,7 @@ func (s *Service) recordReadinessTx(ctx context.Context, tx *sql.Tx, in Intent, 
 	}
 	checks, err := json.Marshal(stored.Checks)
 	if err != nil {
-		return ErrStorage
+		return ReadinessObservation{}, ErrStorage
 	}
 	_, err = tx.ExecContext(ctx, `INSERT INTO lifecycle_readiness_observations(
 		project_id,intent_id,runtime_id,runtime_generation,account_label,account_key,dispatch_profile_id,
@@ -83,9 +87,16 @@ func (s *Service) recordReadinessTx(ctx context.Context, tx *sql.Tx, in Intent, 
 		r.DispatchProfileVersion, r.WorkspaceHandle, workspace, r.BaselineDigest, stored.ContractVersion, stored.Status,
 		stored.NextAction, stored.HostKind, string(checks), stamp(observed), stamp(deadline), stamp(now))
 	if err != nil {
-		return ErrConflict
+		return ReadinessObservation{}, ErrConflict
 	}
-	return nil
+	return ReadinessObservation{
+		ContractVersion: stored.ContractVersion, IntentID: in.ID, ProjectID: in.ProjectID,
+		RuntimeID: r.RuntimeID, RuntimeGeneration: r.RuntimeGeneration, AccountLabel: r.AccountLabel,
+		AccountKey: r.AccountKey, ProfileID: r.DispatchProfileID, ProfileVersion: r.DispatchProfileVersion,
+		WorkspaceHandle: r.WorkspaceHandle, WorkspaceIdentity: workspace, WorkspaceMode: profile.WorkspaceMode, BaselineDigest: r.BaselineDigest,
+		HostKind: stored.HostKind, Status: stored.Status, NextAction: stored.NextAction,
+		ObservedAt: stamp(observed), ExpiresAt: stamp(deadline), Checks: append([]ReadinessCheck(nil), stored.Checks...),
+	}, nil
 }
 
 // readinessWorkspaceOccupiedTx observes Paimos-owned same-machine claims and
@@ -130,7 +141,7 @@ func earliest(deadline time.Time, boundary string) time.Time {
 	return parsed
 }
 
-const readinessColumns = `intent_id,project_id,runtime_id,runtime_generation,account_label,account_key,
+const readinessColumns = `contract_version,intent_id,project_id,runtime_id,runtime_generation,account_label,account_key,
 	dispatch_profile_id,dispatch_profile_version,workspace_handle,workspace_identity,baseline_digest,
 	host_kind,status,next_action,observed_at,expires_at,checks_json`
 
@@ -147,7 +158,7 @@ func CurrentReadinessTx(ctx context.Context, tx *sql.Tx, projectID int64, target
 		 AND expires_at>? ORDER BY observed_at DESC, id DESC LIMIT 1`,
 		projectID, target.RuntimeID, target.RuntimeGeneration, target.AccountLabel, target.AccountKey,
 		target.ProfileID, target.ProfileVersion, target.WorkspaceHandle, target.BaselineDigest, stamp(now)).
-		Scan(&out.IntentID, &out.ProjectID, &out.RuntimeID, &out.RuntimeGeneration, &out.AccountLabel, &out.AccountKey,
+		Scan(&out.ContractVersion, &out.IntentID, &out.ProjectID, &out.RuntimeID, &out.RuntimeGeneration, &out.AccountLabel, &out.AccountKey,
 			&out.ProfileID, &out.ProfileVersion, &out.WorkspaceHandle, &out.WorkspaceIdentity, &out.BaselineDigest,
 			&out.HostKind, &out.Status, &out.NextAction, &out.ObservedAt, &out.ExpiresAt, &checks)
 	if err != nil {
@@ -156,7 +167,82 @@ func CurrentReadinessTx(ctx context.Context, tx *sql.Tx, projectID int64, target
 	if json.Unmarshal([]byte(checks), &out.Checks) != nil {
 		return ReadinessObservation{}, ErrStorage
 	}
+	if profile, err := resolveProfile(out.ProfileID, out.ProfileVersion); err != nil {
+		return ReadinessObservation{}, err
+	} else {
+		out.WorkspaceMode = profile.WorkspaceMode
+	}
 	return out, nil
+}
+
+// ReadinessReceiptForIntentTx returns the one observation that this terminal
+// readiness intent accepted. Terminal replay must never substitute a newer
+// tuple match, and it must remain replayable after the evidence has expired so
+// a daemon can journal the accepted outcome without treating old evidence as
+// current availability.
+func ReadinessReceiptForIntentTx(ctx context.Context, tx *sql.Tx, projectID int64, intentID string) (ReadinessObservation, error) {
+	var out ReadinessObservation
+	var checks string
+	err := tx.QueryRowContext(ctx, `SELECT `+readinessColumns+` FROM lifecycle_readiness_observations WHERE project_id=? AND intent_id=? LIMIT 1`, projectID, intentID).
+		Scan(&out.ContractVersion, &out.IntentID, &out.ProjectID, &out.RuntimeID, &out.RuntimeGeneration, &out.AccountLabel, &out.AccountKey,
+			&out.ProfileID, &out.ProfileVersion, &out.WorkspaceHandle, &out.WorkspaceIdentity, &out.BaselineDigest,
+			&out.HostKind, &out.Status, &out.NextAction, &out.ObservedAt, &out.ExpiresAt, &checks)
+	if err != nil {
+		return ReadinessObservation{}, err
+	}
+	if json.Unmarshal([]byte(checks), &out.Checks) != nil {
+		return ReadinessObservation{}, ErrStorage
+	}
+	if profile, err := resolveProfile(out.ProfileID, out.ProfileVersion); err != nil {
+		return ReadinessObservation{}, err
+	} else {
+		out.WorkspaceMode = profile.WorkspaceMode
+	}
+	return out, nil
+}
+
+// ValidateReadinessReceipt verifies the bounded data a daemon may retain after
+// its own authorized transition. It deliberately checks freshness and the
+// closed report vocabulary again so a stale or malformed transport response
+// cannot become local availability evidence.
+func ValidateReadinessReceipt(in ReadinessObservation, now time.Time) error {
+	if err := ValidateReadinessReceiptShape(in); err != nil {
+		return err
+	}
+	observed, _ := time.Parse(time.RFC3339Nano, in.ObservedAt)
+	expires, err := time.Parse(time.RFC3339Nano, in.ExpiresAt)
+	if err != nil || !expires.After(now) || !expires.After(observed) {
+		return ErrUnavailable
+	}
+	return nil
+}
+
+// ValidateReadinessReceiptShape checks an authority response without deciding
+// whether its expiry is still current. Terminal replay uses this to retain its
+// accepted outcome while callers still use ValidateReadinessReceipt before
+// treating an observation as live availability evidence.
+func ValidateReadinessReceiptShape(in ReadinessObservation) error {
+	if in.ContractVersion != ReadinessContractVersion || !validID(in.IntentID) || in.ProjectID <= 0 || !validID(in.RuntimeID) || !validID(in.RuntimeGeneration) ||
+		!label(in.AccountLabel, 128) || (in.AccountKey != "" && !validAccountKey(in.AccountKey)) || !label(in.ProfileID, 128) || !label(in.ProfileVersion, 128) ||
+		!label(in.WorkspaceHandle, 128) || !identity.MatchString(in.WorkspaceIdentity) || (in.WorkspaceMode != "exclusive" && in.WorkspaceMode != "shared") || !ValidBaselineDigest(in.BaselineDigest) {
+		return ErrInvalid
+	}
+	profile, err := resolveProfile(in.ProfileID, in.ProfileVersion)
+	if err != nil || profile.WorkspaceMode != in.WorkspaceMode {
+		return ErrInvalid
+	}
+	if err := validateReadinessReport(&ReadinessReport{ContractVersion: in.ContractVersion, Status: in.Status, TTLSeconds: 30, HostKind: in.HostKind, NextAction: in.NextAction, WorkspaceIdentity: in.WorkspaceIdentity, AccountKey: in.AccountKey, BaselineDigest: in.BaselineDigest, Checks: in.Checks}); err != nil {
+		return err
+	}
+	observed, err := time.Parse(time.RFC3339Nano, in.ObservedAt)
+	if err != nil || observed.IsZero() {
+		return ErrInvalid
+	}
+	expires, err := time.Parse(time.RFC3339Nano, in.ExpiresAt)
+	if err != nil || !expires.After(observed) {
+		return ErrInvalid
+	}
+	return nil
 }
 
 // ReadinessTarget is the exact tuple an observation must cover to authorize a

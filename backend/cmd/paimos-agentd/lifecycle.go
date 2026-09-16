@@ -750,6 +750,39 @@ func (p *projectLifecycle) optionalReceiverUnconfigured(kind string) bool {
 	return seen
 }
 func (p *projectLifecycle) Committed(ctx context.Context, in lifecycleintents.Intent) error {
+	if in.Request.Operation == "readiness" {
+		if in.AcceptedReadiness == nil {
+			// A pre-receipt server can still terminalize its existing transition.
+			// It cannot create local availability evidence without a receipt.
+			return nil
+		}
+		receipt := in.AcceptedReadiness
+		if lifecycleintents.ValidateReadinessReceiptShape(*receipt) != nil {
+			return lifecycleclient.ErrOwnership
+		}
+		if receipt.IntentID != in.ID || receipt.ProjectID != in.ProjectID || receipt.RuntimeID != in.Request.RuntimeID || receipt.RuntimeGeneration != in.Request.RuntimeGeneration ||
+			receipt.AccountLabel != in.Request.AccountLabel || receipt.AccountKey != in.Request.AccountKey || receipt.ProfileID != in.Request.DispatchProfileID ||
+			receipt.ProfileVersion != in.Request.DispatchProfileVersion || receipt.WorkspaceHandle != in.Request.WorkspaceHandle || receipt.BaselineDigest != in.Request.BaselineDigest {
+			return lifecycleclient.ErrOwnership
+		}
+		if lifecycleintents.ValidateReadinessReceipt(*receipt, time.Now()) != nil {
+			// A replayed, expired receipt records a settled server outcome but is
+			// never current local availability evidence.
+			return nil
+		}
+		out := agentd.ReadinessReceipt{ContractVersion: receipt.ContractVersion, IntentID: receipt.IntentID, ProjectID: receipt.ProjectID,
+			RuntimeID: receipt.RuntimeID, RuntimeGeneration: receipt.RuntimeGeneration, AccountLabel: receipt.AccountLabel, AccountKey: receipt.AccountKey,
+			ProfileID: receipt.ProfileID, ProfileVersion: receipt.ProfileVersion, WorkspaceHandle: receipt.WorkspaceHandle, WorkspaceIdentity: receipt.WorkspaceIdentity, WorkspaceMode: receipt.WorkspaceMode,
+			BaselineDigest: receipt.BaselineDigest, HostKind: receipt.HostKind, Status: receipt.Status, NextAction: receipt.NextAction,
+			ObservedAt: receipt.ObservedAt, ExpiresAt: receipt.ExpiresAt}
+		for _, check := range receipt.Checks {
+			out.Checks = append(out.Checks, agentd.ReadinessReceiptCheck{ID: check.ID, Status: check.Status, Reason: check.Reason, Digest: check.Digest})
+		}
+		// The server transition is already final. A bounded local cache failure
+		// must not keep that terminal outcome in an infinite retry loop.
+		_ = p.owner.supervisor.StoreReadinessReceipt(out)
+		return nil
+	}
 	if in.Request.Operation != "attach" && in.Request.Operation != "reassign" {
 		return nil
 	}
