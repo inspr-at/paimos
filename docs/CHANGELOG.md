@@ -9,6 +9,23 @@ Semantic Versioning (`x.y.z`, until 5.21.0), INSPR calendar v1
 (`YYMMDDhhmmss.0.0`, the UTC reservation second as a SemVer-shaped
 coordinate, from the first entry below that form).
 
+## [260919114708.0.0] — 2026-09-19
+
+### Added
+
+- Let owned Codex and Claude agents send bounded native messages and threaded replies under their current worker identity, preserving receiver allowlists, reply hops, rate limits and human action holds (PAI-1041).
+- Add internal support for restricted native Grok conversations and an explicitly bound private source-built variant (PAI-1028).
+
+### Fixed
+
+- Ship the pinned native message schema with the Claude bridge so standalone SDK installations work without a separate Zod peer. Verify its integrity, preserve its license and check the actual SDK tool protocol before deployment (PAI-1041).
+- Keep native responses off vendor output readers, exclude echoed message arguments from runtime journals, bound startup waits and scope replay keys to each worker generation (PAI-1041).
+- Expose bounded owned-runtime renewal diagnostics (PAI-1030).
+
+### Changed
+
+- Require DCO sign-offs for new contributions and link the active contribution ruleset (PAI-1039).
+
 ## [260919111200.0.0] — 2026-09-19
 
 ### Added
