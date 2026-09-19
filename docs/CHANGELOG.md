@@ -9,6 +9,13 @@ Semantic Versioning (`x.y.z`, until 5.21.0), INSPR calendar v1
 (`YYMMDDhhmmss.0.0`, the UTC reservation second as a SemVer-shaped
 coordinate, from the first entry below that form).
 
+## [260919160247.0.0] — 2026-09-19
+
+### Fixed
+
+- Allow owned Codex and Claude native messages to proceed while heartbeat and control reporting is busy, retaining first-heartbeat confirmation and exact sender authority (PAI-1041).
+- Use already-confirmed worker proof for native sends and clear it on session closure, avoiding lease recreation from message calls (PAI-1041).
+
 ## [260919135916.0.0] — 2026-09-19
 
 ### Fixed
