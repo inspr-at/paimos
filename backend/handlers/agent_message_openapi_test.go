@@ -62,7 +62,7 @@ func TestAgentMessageOpenAPIPreservesV1AndDeclaresV2(t *testing.T) {
 	}
 	v1 := schemas["AgentMessageV1"].(map[string]any)
 	v1Properties := v1["properties"].(map[string]any)
-	if v1Properties["expects_reply"] != nil || v1Properties["human_resolution_outcome"] != nil || v1Properties["delivery_effective_target"] != nil {
+	if v1Properties["expects_reply"] != nil || v1Properties["human_resolution_outcome"] != nil || v1Properties["delivery_effective_target"] != nil || v1Properties["reply_address"] != nil {
 		t.Fatalf("v2 fields leaked into OpenAPI v1: %v", v1Properties)
 	}
 	v2 := schemas["AgentMessageV2"].(map[string]any)
@@ -75,6 +75,9 @@ func TestAgentMessageOpenAPIPreservesV1AndDeclaresV2(t *testing.T) {
 		t.Fatalf("OpenAPI v2 does not require expects_reply: %v", requiredNames)
 	}
 	v2Properties := v2["properties"].(map[string]any)
+	if v2Properties["reply_address"].(map[string]any)["type"] != "string" || slices.Contains(requiredNames, "reply_address") {
+		t.Fatal("OpenAPI owned return route must be optional")
+	}
 	if v2Properties["delivery_effective_target"].(map[string]any)["$ref"] != "#/components/schemas/AgentMessageRecoveryBinding" {
 		t.Fatalf("OpenAPI v2 omits effective recovery binding: %v", v2Properties["delivery_effective_target"])
 	}

@@ -376,7 +376,8 @@ func nativeMessageText(message agentmessage.Envelope) string {
 	return (agentmessage.FramedMessage{
 		From: message.From, Project: message.ContextID, Issue: message.TaskID,
 		Hop: message.Hop, MessageID: message.MessageID, ExpectsReply: message.ExpectsReply,
-		Body: body, IsActionRequest: message.IsActionRequest,
+		ReplyAddress: message.ReplyAddress,
+		Body:         body, IsActionRequest: message.IsActionRequest,
 	}).FullMessage()
 }
 func (c *nativeConsumers) Execute(ctx context.Context, b runtimeconsumer.Binding, w runtimeconsumer.Work) (runtimeconsumer.Outcome, error) {
