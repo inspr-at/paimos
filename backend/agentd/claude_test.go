@@ -754,7 +754,7 @@ func TestClaudeReleaseUsesPinnedOperatorSDKWithoutBundledVendorBytes(t *testing.
 	}
 	bridge := string(claudeAgentSDKBridge)
 	if strings.Contains(bridge, `"Bash"`) || !strings.Contains(bridge, `const DEFAULT_TOOLS = ["Read", "Glob", "Grep", "Edit", "Write"]`) ||
-		!strings.Contains(bridge, "allowedTools: DEFAULT_TOOLS") || !strings.Contains(bridge, "tools: DEFAULT_TOOLS") {
+		!strings.Contains(bridge, `allowedTools = [...DEFAULT_TOOLS, "mcp__paimos__send_message"]`) || !strings.Contains(bridge, "tools: DEFAULT_TOOLS") {
 		t.Fatalf("bridge default tool policy widened beyond repository edits")
 	}
 	if !strings.Contains(bridge, `...(start.model ? { model: start.model, effort: start.effort } : {})`) ||
@@ -1045,7 +1045,9 @@ class Queue {
   }
 }
 
-export function query({ prompt }) {
+export function tool(name, description, schema, handler) { return { name, handler }; }
+export function createSdkMcpServer(options) { return options; }
+export function query({ prompt, options }) {
   const output = new Queue();
   const queued = [];
   let first = true;
@@ -1068,6 +1070,12 @@ export function query({ prompt }) {
           if (mode === "foreign_session") output.push(initFrame("claude-foreign-session"));
           output.push({ type: "stream_event", session_id: "claude-owned-session" });
           output.push({ type: "assistant", session_id: "claude-owned-session", message: { content: [{ type: "text", text: message.message.content[0].text }] } });
+          if (mode === "native_message") {
+            if (options.tools.includes("Bash") || !options.allowedTools.includes("mcp__paimos__send_message") || Object.keys(options.mcpServers).join() !== "paimos") throw new Error("tool policy");
+            const receipt = await options.mcpServers.paimos.tools[0].handler({to:"codex:peer",body:"model-originated fixture",reply_to:"",is_action_request:false,expects_reply:false});
+            if (receipt.isError || JSON.parse(receipt.content[0].text).message_id !== "receipt") throw new Error("tool result");
+            log("native receipt accepted");
+          }
 		  if (["hold_initial_turn", "complete_before_interrupt_receipt"].includes(process.env.PAIMOS_CLAUDE_TEST_MODE)) initialResultPending = true;
 		  else output.push({ type: "result", session_id: "claude-owned-session" });
 		  if (process.env.PAIMOS_CLAUDE_TEST_MODE === "subsequent_activity_without_reaction") {

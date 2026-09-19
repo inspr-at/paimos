@@ -43,6 +43,16 @@ type SendEnvelopeInput struct {
 	// reauthorizes the exact credential in this transaction; the immutable
 	// binding then supplies every routing field.
 	NotifierAuthority NotifierAuthority
+	// SenderAuthority binds an owned worker's identity inside this transaction.
+	// It is supplied by trusted server code, never decoded from a request.
+	SenderAuthority func(context.Context, *sql.Tx) (SenderBinding, error)
+}
+
+type SenderBinding struct {
+	ProjectID int64
+	Agent     string
+	SessionID string
+	IssueID   *int64
 }
 
 type NotifierAuthority func(context.Context, *sql.Tx) (int64, error)
@@ -106,6 +116,13 @@ func (s *Service) SendEnvelope(ctx context.Context, in SendEnvelopeInput) (*Enve
 		return nil, err
 	}
 	defer tx.Rollback()
+	if in.SenderAuthority != nil {
+		binding, err := in.SenderAuthority(ctx, tx)
+		if err != nil {
+			return nil, err
+		}
+		in.ProjectID, in.Sender, in.SessionID, in.IssueID = binding.ProjectID, binding.Agent, binding.SessionID, binding.IssueID
+	}
 
 	notifierAPIKeyID := int64(0)
 	pinnedTargetID := ""

@@ -147,6 +147,7 @@ func tellCmd() *cobra.Command {
 
 func messageCmd() *cobra.Command {
 	c := commandGroup(&cobra.Command{Use: "message", Short: "Read the durable agent message ledger"})
+	c.AddCommand(nativeMessageCmd())
 	c.AddCommand(messageListCmd(), messageGetCmd(), messageAllowCmd(), messageTargetCmd(), messageDeliveryCmd(), messageDeliveryRecoveryCmd())
 	return c
 }

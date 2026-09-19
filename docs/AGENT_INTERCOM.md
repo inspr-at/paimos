@@ -37,6 +37,37 @@ This guide uses only public command names and placeholder identities. Keep
 actual target references, socket paths, credentials, and message content out of
 documentation and logs.
 
+## Native replies from owned agents (PAI-1041)
+
+Matching server, CLI, and daemon builds with PAI-1041 expose
+`paimos_send_message` to owned Codex threads and
+`mcp__paimos__send_message` to owned Claude queries. Existing sessions must be
+restarted to receive the tool. Claude retains its existing file tools; the
+message tool does not enable shell access or load workspace MCP configuration.
+
+The tool accepts `to` (`harness:agent`), `body` (at most 4096 UTF-8 bytes),
+`reply_to`, `is_action_request`, and `expects_reply`. Use the incoming envelope's
+`message_id` as `reply_to` and finish the exchange when its purpose is met.
+The runtime supplies sender identity, project, public session, ticket, worker
+proof, and a stable idempotency key per native call. None are model parameters.
+
+The authenticated worker endpoint is
+`POST /api/projects/{id}/harness-sessions/{sessionID}/messages`. It rechecks
+current project permissions and the worker lease within the ledger transaction.
+Only managed inbox-capable sessions in working/yielded phase with a heartbeat
+newer than two minutes may send. Receiver allowlists, reply hops, rate limits,
+secret detection, and human action holds remain ledger decisions. This tool
+sends ordinary queued messages; it does not interrupt the recipient.
+
+Each child can have one send in flight. Tool arguments travel transiently over
+the private parent/child pipe and authenticated CLI stdin; they are excluded
+from activity events and runtime journals. Credentials stay in the existing
+protected reporter path. The result contains only message/thread IDs, ledger
+acceptance or hold status, or a closed error code. Acceptance is not proof that
+the recipient model has read or completed the request. A timeout is ambiguous:
+the ledger may have accepted the call. Replaying the same native call preserves
+its idempotency key; a fresh model tool call is a new request.
+
 ## Local runtime setup, doctor, repair and reset
 
 Use the same explicit configured instance for the CLI and the platform service:

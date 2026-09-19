@@ -1,6 +1,7 @@
 // PAIMOS owns this bridge process and one documented Agent SDK Query handle.
-// Its stdout protocol is deliberately content-free; prompts and model output
-// remain only in the inherited local Claude process pipeline.
+// Lifecycle events are content-free. The explicit native_message frame carries
+// bounded send arguments transiently to the owner; it is never journaled.
+import { createRequire } from "node:module";
 import { randomUUID } from "node:crypto";
 import { createInterface } from "node:readline";
 import { pathToFileURL } from "node:url";
@@ -185,6 +186,42 @@ let initialTurnStarted = false;
 let turnActive = false;
 let interruptReceipt = false;
 const correlations = new Map();
+const nativeMessages = new Map();
+function nativeMessage(args) {
+  const failure = { content: [{ type: "text", text: '{"error":"send_unavailable"}' }], isError: true };
+  if (stopping || nativeMessages.size >= 1 || Buffer.byteLength(JSON.stringify(args)) > 30 * 1024) return Promise.resolve(failure);
+  return new Promise((resolve) => {
+    const id = randomUUID();
+    const timer = setTimeout(() => { nativeMessages.delete(id); resolve(failure); }, 20000);
+    nativeMessages.set(id, { resolve, timer });
+    emit({ kind: "native_message", correlation_id: id, arguments: args });
+  });
+}
+function closeNativeMessages() {
+  for (const pending of nativeMessages.values()) {
+    clearTimeout(pending.timer);
+    pending.resolve({ content: [{ type: "text", text: '{"error":"sender_unavailable"}' }], isError: true });
+  }
+  nativeMessages.clear();
+}
+function nativeMessageResult(line) {
+  // An inbox control can be waiting for the model awaiting this tool. Resolve
+  // receipts outside the serialized control chain to avoid that deadlock.
+  let request;
+  try { request = JSON.parse(line); } catch { return false; }
+  if (request?.op !== "native_message_result") return false;
+  const pending = nativeMessages.get(request.correlation_id);
+  if (!pending) return true;
+  nativeMessages.delete(request.correlation_id);
+  clearTimeout(pending.timer);
+  const receipt = request.receipt;
+  if (!receipt || typeof receipt !== "object" || Buffer.byteLength(JSON.stringify(receipt)) > 2048) {
+    pending.resolve({ content: [{ type: "text", text: '{"error":"send_failed"}' }], isError: true });
+  } else {
+    pending.resolve({ content: [{ type: "text", text: JSON.stringify(receipt) }], isError: !!receipt.error });
+  }
+  return true;
+}
 
 function deleteCorrelation(uuid) {
   const state = correlations.get(uuid);
@@ -233,7 +270,19 @@ function observeTool(message) {
 }
 
 try {
-  const { query } = await import(pathToFileURL(sdkPath));
+  const { query, tool, createSdkMcpServer } = await import(pathToFileURL(sdkPath));
+  let mcpServers = {};
+  let allowedTools = DEFAULT_TOOLS;
+  if (start.native_messages === "v1") {
+    const { z } = createRequire(pathToFileURL(sdkPath))("zod");
+    mcpServers = { paimos: createSdkMcpServer({ name: "paimos", version: "1.0.0", tools: [tool(
+      "send_message",
+      "Send a short durable Paimos message under your owned identity. Use reply_to from the received envelope when replying; stop when complete. Requests for action must set is_action_request and are held for human review. Receipt means ledger acceptance, not receiver completion.",
+      { to: z.string().max(129), body: z.string().min(1).max(4096), reply_to: z.string().max(256), is_action_request: z.boolean(), expects_reply: z.boolean() },
+      nativeMessage
+    )] }) };
+    allowedTools = [...DEFAULT_TOOLS, "mcp__paimos__send_message"];
+  }
   input = new InputStream(userMessage(start.prompt));
   start.prompt = "";
   const queryOptions = {
@@ -242,11 +291,11 @@ try {
     persistSession: false,
     settingSources: [],
     strictMcpConfig: true,
-    mcpServers: {},
+    mcpServers,
     plugins: [],
     includePartialMessages: true,
     permissionMode: "dontAsk",
-    allowedTools: DEFAULT_TOOLS,
+    allowedTools,
     tools: DEFAULT_TOOLS,
     systemPrompt: { type: "preset", preset: "claude_code" },
     ...(start.model ? { model: start.model, effort: start.effort } : {})
@@ -283,6 +332,7 @@ async function streamInputBound(message) {
   }
 }
 const handleControlLine = (line) => {
+  if (Buffer.byteLength(line) <= MAX_INPUT_FRAME_BYTES && nativeMessageResult(line)) return;
   controlChain = controlChain.then(async () => {
     if (Buffer.byteLength(line) > MAX_INPUT_FRAME_BYTES) {
       fail("event_stream_bound");
@@ -368,6 +418,7 @@ const handleControlLine = (line) => {
         emit({ kind: "control_applied", correlation_id: correlationID });
       } else if (request.op === "stop") {
         stopping = true;
+        closeNativeMessages();
         controlInput.close();
         input.close();
         queryHandle.close();
@@ -439,6 +490,7 @@ try {
       emit({ kind: "turn_completed" });
     }
   }
+  closeNativeMessages();
   queryEndedResolve();
   lines.close();
   controlInput.close();
@@ -450,6 +502,7 @@ try {
     process.exitCode = 1;
   }
 } catch {
+  closeNativeMessages();
   queryEndedResolve();
   lines.close();
   controlInput?.close();

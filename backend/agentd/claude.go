@@ -29,7 +29,7 @@ const (
 	claudeSteerPrimitive        = agentdwire.ClaudeSteerPrimitive
 	claudeInterruptPrimitive    = "Claude Agent SDK Query.interrupt()"
 	claudeStopPrimitive         = "Claude Agent SDK Query.close()"
-	maxClaudeBridgeEventFrame   = 16 << 10
+	maxClaudeBridgeEventFrame   = 32 << 10
 	maxClaudeBridgeRequestFrame = (maxPromptBytes * 6) + (4 << 10)
 	maxClaudePendingControls    = 256
 	claudeOperationTimeout      = 30 * time.Second
@@ -310,13 +310,16 @@ func (a *ClaudeAdapter) Start(ctx context.Context, request StartRequest, observe
 	if request.ResolvedProfile != nil {
 		requestedModel = request.ResolvedProfile.Model
 	}
-	process := newClaudeProcess(cmd, stdin, stdout, dir, requestedModel, observe)
+	process := newClaudeProcess(cmd, stdin, stdout, dir, requestedModel, observe, request.sendNativeMessage)
 	defer func() {
 		if returnErr != nil {
 			process.abortStart()
 		}
 	}()
 	startFrame := map[string]string{"op": "start", "prompt": request.Prompt}
+	if request.sendNativeMessage != nil {
+		startFrame["native_messages"] = "v1"
+	}
 	if request.ResolvedProfile != nil {
 		startFrame["model"] = request.ResolvedProfile.Model
 		startFrame["effort"] = request.ResolvedProfile.Effort
@@ -340,6 +343,7 @@ func (a *ClaudeAdapter) Start(ctx context.Context, request StartRequest, observe
 }
 
 type claudeBridgeEvent struct {
+	Arguments        json.RawMessage     `json:"arguments,omitempty"`
 	Kind             string              `json:"kind"`
 	HarnessSessionID string              `json:"harness_session_id"`
 	CorrelationID    string              `json:"correlation_id"`
@@ -356,6 +360,7 @@ type claudeControlResult struct {
 }
 
 type claudeProcess struct {
+	nativeMessages *nativeMessageExecutor
 	*ownedProcess
 	stdin      io.WriteCloser
 	runtimeDir string
@@ -375,11 +380,14 @@ type claudeProcess struct {
 	requestedModel string
 }
 
-func newClaudeProcess(cmd *exec.Cmd, stdin io.WriteCloser, stdout io.Reader, runtimeDir, requestedModel string, observe func(AdapterEvent)) *claudeProcess {
+func newClaudeProcess(cmd *exec.Cmd, stdin io.WriteCloser, stdout io.Reader, runtimeDir, requestedModel string, observe func(AdapterEvent), senders ...nativeMessageSender) *claudeProcess {
 	p := &claudeProcess{
 		ownedProcess: newOwnedProcess(cmd), stdin: stdin, runtimeDir: runtimeDir, observe: observe,
 		pending: map[string]chan claudeControlResult{}, ready: make(chan error, 1),
 		active: true, requestedModel: requestedModel,
+	}
+	if len(senders) > 0 {
+		p.nativeMessages = newNativeMessageExecutor(senders[0])
 	}
 	go p.readLoop(stdout)
 	return p
@@ -446,6 +454,10 @@ func (p *claudeProcess) readLoop(reader io.Reader) {
 			return
 		}
 		switch event.Kind {
+		case "native_message":
+			p.nativeMessages.run(p.done, event.CorrelationID, event.Arguments, func(receipt NativeMessageReceipt) {
+				_ = p.send(map[string]any{"op": "native_message_result", "correlation_id": event.CorrelationID, "receipt": receipt})
+			})
 		case string(EventSessionStarted):
 			validEvidence := event.ModelEvidence == ModelEvidenceUnverified && event.EffectiveModel == "" ||
 				event.ModelEvidence == ModelEvidenceVendorReported && validModelIdentity(event.EffectiveModel)
