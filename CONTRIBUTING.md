@@ -73,24 +73,42 @@ cd frontend && npm test
 
 ## Developer Certificate of Origin
 
-PAIMOS uses the [DCO](DCO.md) in place of a CLA. Every commit must
-include a sign-off line:
+New contributions use the unmodified [Developer Certificate of Origin 1.1](DCO.md).
+A `Signed-off-by: Name <email>` trailer records that you have the right to submit
+the contribution under the project licence. It is not a cryptographic signature
+or a guarantee of correctness. Use the same identity as the commit author;
+a GitHub-associated noreply address is fine. Sign-offs remain in public history.
+This applies to maintainers and outside contributors alike, from adoption onward;
+existing history is not rewritten. After reading the DCO, create each new commit
+with `git commit -s` using your own name and GitHub-associated email.
 
-```
-Signed-off-by: Your Name <you@example.com>
-```
+Fork the repository, create a branch from the current upstream `main`, implement
+and test your change, then push to your fork and open a pull request to `main`.
+Describe the change, its purpose, tests, and any limitations. Contributors need
+no write access to this repository. The maintainer reviews agent findings and
+decides whether to merge; passing checks never grants an agent merge authority.
 
-Add it automatically with `git commit -s` (or `-sm "message"`).
+The required `dco` check validates every commit introduced by a PR, including
+merge commits on the contributor branch. An empty or incomplete range fails.
+It reads real Git trailers, so a sign-off quoted in prose does not count.
+Missing sign-offs must be supplied by the contributor, not invented by a reviewer
+or agent. Do not rewrite shared history to repair them without explicit agreement.
 
-The sign-off certifies that you wrote the change or otherwise have the
-right to submit it under AGPL-3.0-only. By signing off, you acknowledge the
-DCO terms in `DCO.md`.
+Bots are not exempt. Dependabot's native `Signed-off-by` service address is
+accepted for its exact GitHub author identity; other bots use their own matching
+author/sign-off identity. This checks declarations, not account authenticity.
+For agent-assisted work, the human contributor must understand and authorize
+their DCO declaration; the agent must not invent identities or sign for others.
 
-Enable the repo's pre-commit hook once:
+GitHub web commits require sign-off. For squash merges, retain the original
+commit messages and move their existing sign-off declarations into the final
+trailer block; an indented or quoted sign-off is not a trailer. Check that the
+final author still has a matching declaration. Never invent a contributor's
+sign-off. Use a regular merge when combining authors would obscure provenance.
+Release and deployment remain maintainer-controlled. Existing review and CI
+requirements still apply; DCO introduces no second-maintainer requirement.
 
-```bash
-git config core.hooksPath .githooks
-```
+Enable the repository pre-commit hook once with `git config core.hooksPath .githooks`.
 
 ## Pull request flow
 
@@ -122,8 +140,9 @@ The active GitHub ruleset for `main` requires a pull request and successful
 deletion are blocked. Zero approving reviews are required because PAIMOS is
 currently maintained by one person; the pull request and hosted gates provide
 the durable review trail without pretending that an author can independently
-approve their own change. Enable auto-merge and let the gates complete instead
-of merging around pending jobs. The live policy is publicly inspectable as
+approve their own change. Only after the maintainer explicitly approves the
+reviewed PR may an agent merge or enable auto-merge; let the gates complete
+before merging. The live policy is publicly inspectable as
 [ruleset 20708526](https://github.com/inspr-at/paimos/rules/20708526).
 
 Repository administrators have a **pull-request-only** bypass for break-glass
@@ -133,10 +152,9 @@ choose GitHub's bypass action, record the reason in that PR and the relevant
 PAI issue, and repair or restore the normal gate in the same incident. Direct
 pushes to `main` are not a break-glass path.
 
-The `dco` job checks every commit introduced by a PR against its author's exact
-`Signed-off-by` trailer. GitHub web commits are configured to add sign-offs,
-and the repository's squash setting retains individual commit messages, so
-squash merging remains compatible with the DCO requirement.
+The `dco` job enforces the contribution policy above. Preserving source commit
+messages alone does not guarantee a valid final squash trailer; verify it as
+described above.
 
 ## What makes a PR easier to review
 
