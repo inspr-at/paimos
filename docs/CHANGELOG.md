@@ -9,6 +9,13 @@ Semantic Versioning (`x.y.z`, until 5.21.0), INSPR calendar v1
 (`YYMMDDhhmmss.0.0`, the UTC reservation second as a SemVer-shaped
 coordinate, from the first entry below that form).
 
+## [260919135916.0.0] — 2026-09-19
+
+### Fixed
+
+- Preserve the sender, message ID, ticket context and reply expectation when delivering messages into owned Codex and Claude inboxes, so agents can identify and thread native replies (PAI-1041).
+- Include the attributed sender's configured return address, escape all context attributes and keep private runtime references outside model-visible inbox messages (PAI-1041).
+
 ## [260919114708.0.0] — 2026-09-19
 
 ### Added
