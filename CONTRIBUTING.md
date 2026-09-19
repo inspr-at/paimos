@@ -138,15 +138,16 @@ exact-code evidence without holding a polling runner.
 
 ### Protected `main` and break glass
 
-The active GitHub ruleset for `main` requires a pull request and successful
-`dco`, `test`, `e2e`, and `security-scan` checks. Force pushes and branch
+The active GitHub rulesets for `main` require a pull request and successful
+`dco`, `dco-tests`, `test`, `e2e`, and `security-scan` checks. Force pushes and branch
 deletion are blocked. Zero approving reviews are required because PAIMOS is
 currently maintained by one person; the pull request and hosted gates provide
 the durable review trail without pretending that an author can independently
 approve their own change. Only after the maintainer explicitly approves the
 reviewed PR may an agent merge or enable auto-merge; let the gates complete
 before merging. The live policy is publicly inspectable as
-[ruleset 20708526](https://github.com/inspr-at/paimos/rules/20708526).
+[ruleset 20708526](https://github.com/inspr-at/paimos/rules/20708526) and the
+[DCO contribution ruleset 23696749](https://github.com/inspr-at/paimos/rules/23696749).
 
 Repository administrators have a **pull-request-only** bypass for break-glass
 recovery. It is reserved for an incident or a broken required-check mechanism,
