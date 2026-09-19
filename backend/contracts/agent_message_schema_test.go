@@ -75,6 +75,9 @@ func TestAgentMessageV2SchemaRequiresReplyExpectationFact(t *testing.T) {
 	if schema.Properties["delivery_effective_target"].Ref != "#/$defs/RecoveryBinding" {
 		t.Fatalf("v2 recovery binding=%#v", schema.Properties["delivery_effective_target"])
 	}
+	if schema.Properties["reply_address"].Ref != "#/$defs/Address" || slices.Contains(schema.Required, "reply_address") {
+		t.Fatal("owned return route must remain an optional v2 address")
+	}
 }
 
 func TestAgentMessageVersionProjectionsMatchClosedSchemaProperties(t *testing.T) {
@@ -83,7 +86,8 @@ func TestAgentMessageVersionProjectionsMatchClosedSchemaProperties(t *testing.T)
 		Parts: []agentmessage.TextPart{{Kind: "text", Text: "body"}}, Metadata: map[string]any{},
 		From: "codex:sender", To: "codex:receiver", ThreadID: "thread", Hop: 1,
 		Delivered: true, ExpectsReply: true, HumanResolutionOutcome: "resolved",
-		CreatedAt: "2026-09-04T00:00:00Z", DeliveryLevel: "simple", DeliveryFallback: "simple",
+		ReplyAddress: "codex:sender",
+		CreatedAt:    "2026-09-04T00:00:00Z", DeliveryLevel: "simple", DeliveryFallback: "simple",
 	}
 	for _, tc := range []struct {
 		name, path string

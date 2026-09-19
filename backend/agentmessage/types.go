@@ -12,6 +12,7 @@ package agentmessage
 
 import (
 	"errors"
+	"html"
 	"strconv"
 	"time"
 )
@@ -87,6 +88,9 @@ type Envelope struct {
 	HeldReason      string         `json:"held_reason,omitempty"`
 	IsActionRequest bool           `json:"is_action_request"`
 	ExpectsReply    bool           `json:"expects_reply"`
+	// ReplyAddress is a public route derived from the attributed owned sender
+	// session. It is never taken from message text or arbitrary metadata.
+	ReplyAddress string `json:"reply_address,omitempty"`
 	// HumanResolutionOutcome is the content-free authoritative disposition of
 	// a held action request. The human/session attribution remains in the
 	// private audit ledger and is deliberately not projected with messages.
@@ -254,6 +258,10 @@ type FramedMessage struct {
 	Project string `json:"project"`
 	Issue   string `json:"issue,omitempty"`
 	Hop     int    `json:"hop"`
+	// Durable reply context belongs to the outer frame, never to sender text.
+	MessageID    string `json:"message_id,omitempty"`
+	ExpectsReply bool   `json:"expects_reply,omitempty"`
+	ReplyAddress string `json:"reply_address,omitempty"`
 
 	// The actual message body - UNTRUSTED
 	Body string `json:"body"`
@@ -268,11 +276,21 @@ func (f FramedMessage) Wrapper() string {
 	// Use strconv.Itoa for safe integer conversion (fixes G115)
 	hopStr := strconv.Itoa(f.Hop)
 
-	wrapper := "<paimos-message from=\"" + f.From + "\" project=\"" + f.Project + "\""
+	wrapper := "<paimos-message from=\"" + html.EscapeString(f.From) + "\" project=\"" + html.EscapeString(f.Project) + "\""
 	if f.Issue != "" {
-		wrapper += " issue=\"" + f.Issue + "\""
+		wrapper += " issue=\"" + html.EscapeString(f.Issue) + "\""
 	}
-	wrapper += " hop=\"" + hopStr + "\">"
+	wrapper += " hop=\"" + hopStr + "\""
+	if f.MessageID != "" {
+		wrapper += " message_id=\"" + html.EscapeString(f.MessageID) + "\""
+	}
+	if f.ExpectsReply {
+		wrapper += " expects_reply=\"true\""
+	}
+	if f.ReplyAddress != "" {
+		wrapper += " reply_address=\"" + html.EscapeString(f.ReplyAddress) + "\""
+	}
+	wrapper += ">"
 	return wrapper
 }
 

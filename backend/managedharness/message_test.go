@@ -27,7 +27,7 @@ func TestNativeMessageSenderGenerationAndLedger(t *testing.T) {
 		return MessageSenderTx(ctx, tx, projectID, session.ID, "worker", testWorkerLease)
 	}
 	bus := agentmessage.NewService(paimosdb.DB)
-	input := agentmessage.SendEnvelopeInput{ProjectID: projectID, Sender: "forged", SessionID: "forged", To: "claude:sender", Body: "status observation", DeliveryLevel: "simple", IdempotencyKey: uuid.NewString(), SenderAuthority: authority}
+	input := agentmessage.SendEnvelopeInput{ProjectID: projectID, Sender: "forged", SessionID: "forged", To: "claude:sender", Body: "status observation", Metadata: map[string]any{"reply_address": "grok:forged"}, DeliveryLevel: "simple", IdempotencyKey: uuid.NewString(), SenderAuthority: authority}
 	held, err := bus.SendEnvelope(ctx, input)
 	if err != nil || held.Delivered || held.From != "paimos:worker" {
 		t.Fatalf("held=%+v err=%v", held, err)
@@ -38,12 +38,16 @@ func TestNativeMessageSenderGenerationAndLedger(t *testing.T) {
 	input.IdempotencyKey = uuid.NewString()
 	input.ExpectsReply = true
 	first, err := bus.SendEnvelope(ctx, input)
-	if err != nil || !first.Delivered {
+	if err != nil || !first.Delivered || first.ReplyAddress != "codex:worker" {
 		t.Fatalf("first=%+v err=%v", first, err)
 	}
 	replay, err := bus.SendEnvelope(ctx, input)
 	if err != nil || replay.MessageID != first.MessageID {
 		t.Fatalf("replay=%+v err=%v", replay, err)
+	}
+	foreign, err := bus.SendEnvelope(ctx, agentmessage.SendEnvelopeInput{ProjectID: projectID, Sender: "sender", SessionID: session.ID, To: "codex:worker", Body: "unbound session observation"})
+	if err != nil || foreign.ReplyAddress != "" {
+		t.Fatalf("another agent borrowed an owned return route: %+v %v", foreign, err)
 	}
 	other, _, err := NewService(paimosdb.DB).Register(ctx, RegisterInput{ProjectID: projectID, AgentName: "worker", Harness: "claude", Host: "test", SessionRef: "other-owned", WorkerLease: testWorkerLease, ManagementMode: ManagementManaged, Role: RoleWorker, SteerMode: SteerOwned, Capabilities: models.HarnessCapabilities{Inbox: true, Status: true, Steer: true}})
 	if err != nil {
@@ -57,7 +61,7 @@ func TestNativeMessageSenderGenerationAndLedger(t *testing.T) {
 		return MessageSenderTx(ctx, tx, projectID, other.ID, "worker", testWorkerLease)
 	}
 	second, err := bus.SendEnvelope(ctx, secondInput)
-	if err != nil || second.MessageID == first.MessageID {
+	if err != nil || second.MessageID == first.MessageID || second.ReplyAddress != "claude:worker" {
 		t.Fatalf("native call crossed generations: second=%+v err=%v", second, err)
 	}
 	secondInput.ProjectID = projectID + 1

@@ -1184,6 +1184,7 @@
           "from": {"type": "string"}, "to": {"type": "string"}, "reply_to": {"type": "string"}, "thread_id": {"type": "string"},
           "hop": {"type": "integer"}, "delivered": {"type": "boolean"}, "held_reason": {"type": "string"}, "is_action_request": {"type": "boolean"},
           "expects_reply": {"type": "boolean"}, "human_resolution_outcome": {"enum": ["resolved", "dismissed"]},
+          "reply_address": {"type": "string", "description": "Optional public return route derived from the attributed owned sender session"},
           "created_at": {"type": "string"}, "read_at": {"type": "string"}, "delivery_level": {"enum": ["simple", "steer"]},
           "delivery_fallback": {"const": "simple"}, "delivery_target": {"type": ["object", "null"]},
           "delivery_effective_target": {"$ref": "#/components/schemas/AgentMessageRecoveryBinding"}, "delivery_work": {"type": "object"}
