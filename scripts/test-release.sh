@@ -44,6 +44,7 @@ write_stub_scripts() {
   cp "$ROOT/scripts/wait-backend-full.sh" "$repo/scripts/wait-backend-full.sh"
 
   cp "$ROOT/scripts/check-dco.sh" "$repo/scripts/check-dco.sh"
+  cp "$ROOT/scripts/check-dco.py" "$repo/scripts/check-dco.py"
   cat > "$repo/scripts/check-claims.sh" <<'GATE'
 #!/usr/bin/env bash
 GATE_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)

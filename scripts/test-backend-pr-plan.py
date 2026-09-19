@@ -14,6 +14,7 @@ spec = importlib.util.spec_from_file_location('planner', ROOT / 'scripts/backend
 planner = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(planner)
 WORKFLOW = (ROOT / '.github/workflows/ci-v2.yml').read_text()
+DCO_WORKFLOW = (ROOT / '.github/workflows/dco.yml').read_text()
 MODULE = 'github.com/inspr-at/paimos/backend'
 # Deliberately independent pins: topology changes need a review of both the
 # execution command and runner allocation, including PAI-1000's normal masks.
@@ -29,8 +30,8 @@ LANES = {
 }
 
 
-def job(name):
-    return re.search(rf'^  {name}:\n(.*?)(?=^  [\w-]+:|\Z)', WORKFLOW, re.M | re.S)[1]
+def job(name, workflow=WORKFLOW):
+    return re.search(rf'^  {name}:\n(.*?)(?=^  [\w-]+:|\Z)', workflow, re.M | re.S)[1]
 
 
 class PlanTests(unittest.TestCase):
@@ -63,8 +64,9 @@ class PlanTests(unittest.TestCase):
         # weakened by the selection plan, even when every package lane is empty.
         for name in ('backend-pr-vet', 'backend-security-invariants',
                      'quality', 'frontend-quality', 'e2e', 'dco'):
-            self.assertIn("    if: github.event_name == 'pull_request'\n", job(name))
-            self.assertNotIn('needs:', job(name))
+            block = job(name, DCO_WORKFLOW if name == 'dco' else WORKFLOW)
+            self.assertIn("    if: github.event_name == 'pull_request'\n", block)
+            self.assertNotIn('needs:', block)
         self.assertIn("    if: github.ref == 'refs/heads/main' || github.event_name == 'pull_request'\n",
                       job('security-scan'))
 

@@ -25,18 +25,6 @@ permissions:
   attestations: write
 
 jobs:
-  dco:
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          # The DCO gate validates every commit introduced by the PR.
-          fetch-depth: 0
-
-      - name: Every PR commit carries its author's DCO sign-off
-        run: ./scripts/check-dco.sh "${{ github.event.pull_request.base.sha }}" "${{ github.event.pull_request.head.sha }}"
-
   # Decide runner allocation once, before any PR matrix is expanded.
   backend-pr-plan:
     if: github.event_name == 'pull_request'

@@ -51,4 +51,5 @@ identity — this is the statement that binds you to the certification
 above.
 
 The repo's pre-commit hook (`.githooks/pre-commit`) does not enforce
-this; GitHub's DCO check (once configured on the published repo) will.
+this; the required GitHub `dco` check does. See `CONTRIBUTING.md` for the
+full contribution and merge policy.
