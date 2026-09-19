@@ -4,6 +4,8 @@ package agentd
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"os"
 	"os/exec"
@@ -12,6 +14,46 @@ import (
 	"testing"
 	"time"
 )
+
+func TestClaudeNativeSchemaShipsPinnedRuntimeAndLicense(t *testing.T) {
+	digest := sha256.Sum256(claudeNativeMessageSchema)
+	if hex.EncodeToString(digest[:]) != claudeMessageSchemaSHA256 {
+		t.Fatal("embedded schema digest differs from reviewed pin")
+	}
+	var manifest struct {
+		Version      string `json:"version"`
+		BundleSHA256 string `json:"bundle_sha256"`
+		SourceSHA256 string `json:"source_sha256"`
+	}
+	raw, err := os.ReadFile("claudeassets/native-message-schema.json")
+	if err != nil || json.Unmarshal(raw, &manifest) != nil {
+		t.Fatal("schema provenance unavailable")
+	}
+	source, err := os.ReadFile("claudeassets/native-message-schema.src.mjs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sourceDigest := sha256.Sum256(source)
+	if manifest.Version != "4.0.17" || manifest.BundleSHA256 != claudeMessageSchemaSHA256 || manifest.SourceSHA256 != hex.EncodeToString(sourceDigest[:]) {
+		t.Fatal("schema provenance mismatch")
+	}
+	if !strings.Contains(string(claudeNativeMessageSchema), "MIT License") || !strings.Contains(string(claudeNativeMessageSchema), "Colin McDonnell") {
+		t.Fatal("bundled dependency license missing")
+	}
+	dir, _, err := materializeClaudeBridge(claudeAgentSDKBridge, claudeBridgeSHA256)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { removeClaudeRuntime(dir) })
+	info, err := os.Stat(filepath.Join(dir, "native-message-schema.mjs"))
+	if err != nil || info.Mode().Perm() != 0600 {
+		t.Fatal("schema runtime is not owner-only")
+	}
+	removeClaudeRuntime(dir)
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Fatal("schema runtime was not cleaned up")
+	}
+}
 
 func TestClaudeNativeMessageUsesOnlyBoundedCustomTool(t *testing.T) {
 	node, err := exec.LookPath("node")
@@ -22,15 +64,8 @@ func TestClaudeNativeMessageUsesOnlyBoundedCustomTool(t *testing.T) {
 	logPath := filepath.Join(t.TempDir(), "events")
 	t.Setenv("PAIMOS_CLAUDE_TEST_LOG", logPath)
 	adapter := newTestClaudeAdapter(t, node)
-	// The fake SDK only needs chainable field declarations. Production resolves
-	// the real Zod peer dependency alongside the operator's pinned SDK.
-	zod := filepath.Join(filepath.Dir(adapter.sdkPath), "node_modules", "zod")
-	if err := os.MkdirAll(zod, 0700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(zod, "index.js"), []byte(`const field={min(){return this},max(){return this}};exports.z={string:()=>field,boolean:()=>field};`), 0600); err != nil {
-		t.Fatal(err)
-	}
+	// The installed SDK can have no Zod peer. The bridge must carry its own
+	// pinned schema runtime and work in a workspace with no node_modules.
 	sent := make(chan NativeMessage, 1)
 	events := make(chan AdapterEvent, 32)
 	process, err := adapter.Start(context.Background(), StartRequest{Adapter: AdapterClaude, Workspace: t.TempDir(), Identity: "claude:fixture", Prompt: "fixture", sendNativeMessage: func(_ context.Context, id string, message NativeMessage) NativeMessageReceipt {

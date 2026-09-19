@@ -1,0 +1,10 @@
+{
+  "dependency": "zod",
+  "version": "4.0.17",
+  "url": "https://registry.npmjs.org/zod/-/zod-4.0.17.tgz",
+  "integrity": "sha512-1PHjlYRevNxxdy2JZ8JcNAw7rX8V9P1AKkP+x/xZfxB0K5FYfuV+Ug6P/6NVSR2jHQ+FzDDoDHS04nYUsOIyLQ==",
+  "license": "MIT",
+  "esbuild": "0.25.12",
+  "source_sha256": "818010e0d2dc928b65ae4fed99bb5c95fd9f908815bfd9e3beb2a5f76e8914ce",
+  "bundle_sha256": "cd2fb323b484064de4c3c5e09265bdd12dbb5fa610ea3e1bfbb2f4a1e1db3910"
+}

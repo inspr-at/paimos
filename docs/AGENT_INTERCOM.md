@@ -44,6 +44,14 @@ Matching server, CLI, and daemon builds with PAI-1041 expose
 `mcp__paimos__send_message` to owned Claude queries. Existing sessions must be
 restarted to receive the tool. Claude retains its existing file tools; the
 message tool does not enable shell access or load workspace MCP configuration.
+The bridge carries a pinned MIT-licensed Zod Mini schema bundle, so an SDK
+installation without a separately installed peer package still works. Its source,
+provenance and license ship with Paimos; normal builds and worker startup never
+download schema dependencies. Regenerate explicitly with
+`python3 scripts/vendor-claude-message-schema.py --work-dir <new-scratch-dir>`
+after installing the locked frontend build tools, review the generated delta,
+and update the Go digest pin. Validate the real pinned SDK without a model call
+using `node scripts/check-claude-message-schema.mjs /absolute/path/to/sdk.mjs`.
 
 The tool accepts `to` (`harness:agent`), `body` (at most 4096 UTF-8 bytes),
 `reply_to`, `is_action_request`, and `expects_reply`. Use the incoming envelope's
