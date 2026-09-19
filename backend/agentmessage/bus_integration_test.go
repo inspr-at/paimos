@@ -775,7 +775,10 @@ func TestWebhookDispatcherEmptyQueueLeavesRequestWritesWritable(t *testing.T) {
 		err    error
 	}
 	result := make(chan dispatchResult, 1)
-	ctx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
+	// Allow instrumented SQLite query planning time. The writer stays locked
+	// until after the result is checked, so a poll that joins the writer queue
+	// still fails with an error regardless of this bounded deadline's duration.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	go func() {
 		close(started)
