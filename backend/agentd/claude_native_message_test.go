@@ -107,3 +107,54 @@ func TestClaudeNativeMessageUsesOnlyBoundedCustomTool(t *testing.T) {
 		}
 	}
 }
+
+// Exercise the owned supervisor snapshot and the live bridge's second-turn
+// control path, including a tool result needed before Query acknowledges inbox.
+func TestClaudeNativeReplyCompletesBeforeInboxAcknowledgement(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node unavailable")
+	}
+	t.Setenv("PAIMOS_CLAUDE_TEST_MODE", "native_reply_before_input_receipt")
+	logPath := filepath.Join(t.TempDir(), "events")
+	t.Setenv("PAIMOS_CLAUDE_TEST_LOG", logPath)
+	reporter := &claudeReplyReporter{sessions: make(chan Session, 1)}
+	s, err := NewSupervisor(SupervisorConfig{Instance: "fixture", StateRoot: t.TempDir(), Reporter: reporter, Adapters: []Adapter{newTestClaudeAdapter(t, node)}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close(context.Background())
+	session, err := s.Start(context.Background(), StartRequest{Adapter: AdapterClaude, Identity: "claude:worker", ProjectID: 6, Workspace: t.TempDir(), Prompt: "initial turn"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	receipt, err := s.Inbox(ctx, session.ID, ControlRequest{Instance: "fixture", ProjectID: 6, Identity: "claude:worker", CorrelationID: "inbox-native-reply", Text: "bounded fixture inbox"})
+	if err != nil || receipt.CorrelationID != "inbox-native-reply" {
+		t.Fatalf("inbox receipt missing: %v", err)
+	}
+	select {
+	case snapshot := <-reporter.sessions:
+		if snapshot.ID != session.ID || snapshot.State != StateRunning || !snapshot.Managed || snapshot.Identity != "claude:worker" {
+			t.Fatal("native reply lost owned sender scope")
+		}
+	case <-ctx.Done():
+		t.Fatal("native reply blocked behind inbox acknowledgement")
+	}
+	raw, err := os.ReadFile(logPath)
+	if err != nil || !strings.Contains(string(raw), "native reply accepted before input receipt") {
+		t.Fatal("second-turn native receipt missing")
+	}
+}
+
+type claudeReplyReporter struct{ sessions chan Session }
+
+func (*claudeReplyReporter) ReportStatus(context.Context, Status) error { return nil }
+func (r *claudeReplyReporter) SendNativeMessage(ctx context.Context, s Session, _ string, m NativeMessage) NativeMessageReceipt {
+	if ctx.Err() != nil || m.ReplyTo != "incoming-message" || m.Body != "native inbox reply" {
+		return NativeMessageReceipt{Error: "sender_unavailable"}
+	}
+	r.sessions <- s
+	return NativeMessageReceipt{MessageID: "receipt", Delivered: true}
+}

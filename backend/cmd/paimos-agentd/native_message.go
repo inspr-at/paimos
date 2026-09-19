@@ -26,17 +26,13 @@ func (r *cliReporter) SendNativeMessage(ctx context.Context, session agentd.Sess
 	defer ticker.Stop()
 	var known reportedSession
 	for {
-		if r.mu.TryLock() {
-			var ok bool
-			known, ok = r.sessions[session.ID]
-			if ok && (known.terminal || known.identity != session.Identity || known.projectID != session.ProjectID || uuid.Validate(known.publicID) != nil) {
-				r.mu.Unlock()
-				return failed
-			}
-			if ok && known.ready {
-				break
-			}
-			r.mu.Unlock()
+		var ok bool
+		known, ok = r.reportedSession(session.ID)
+		if ok && (known.terminal || known.identity != session.Identity || known.projectID != session.ProjectID || uuid.Validate(known.publicID) != nil) {
+			return failed
+		}
+		if ok && known.ready && known.workerLease != "" {
+			break
 		}
 		select {
 		case <-callCtx.Done():
@@ -45,19 +41,13 @@ func (r *cliReporter) SendNativeMessage(ctx context.Context, session agentd.Sess
 		}
 	}
 	if callCtx.Err() != nil {
-		r.mu.Unlock()
-		return failed
-	}
-	lease, err := r.leases.GetOrCreate(session.ID)
-	r.mu.Unlock()
-	if err != nil {
 		return failed
 	}
 	_, agent, err := reporterIdentity(session)
 	if err != nil {
 		return failed
 	}
-	frame, err := json.Marshal(map[string]any{"worker_lease": lease, "message": message})
+	frame, err := json.Marshal(map[string]any{"worker_lease": known.workerLease, "message": message})
 	if err != nil {
 		return failed
 	}

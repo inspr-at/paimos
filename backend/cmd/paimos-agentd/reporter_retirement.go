@@ -90,9 +90,9 @@ func (r *cliReporter) closeRetiredSession(ctx context.Context, publicID string, 
 	if err := r.checkpoint(ctx, session, closedState); err != nil {
 		return err
 	}
-	known := r.sessions[session.ID]
+	known, _ := r.reportedSession(session.ID)
 	known.terminal = true
-	r.sessions[session.ID] = known
+	r.publishSession(session.ID, known)
 	return nil
 }
 

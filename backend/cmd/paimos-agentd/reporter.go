@@ -73,11 +73,12 @@ func (s *memoryReporterLeaseStore) Delete(sessionID string) error {
 }
 
 type reportedSession struct {
-	ready     bool
-	publicID  string
-	projectID int64
-	identity  string
-	terminal  bool
+	workerLease string
+	ready       bool
+	publicID    string
+	projectID   int64
+	identity    string
+	terminal    bool
 }
 
 // cliReporter is the authenticated bridge from agentd to M161. The paimos
@@ -85,7 +86,8 @@ type reportedSession struct {
 // credentials, vendor traffic, prompts, or output.
 type cliReporter struct {
 	nativeDelivery bool
-	mu             sync.Mutex
+	mu             sync.Mutex // serializes reporter network/control cycles
+	sessionsMu     sync.Mutex // protects published sender proof; never held over network calls
 	instance       string
 	host           string
 	paimosPath     string
@@ -347,6 +349,12 @@ func (r *cliReporter) reportSession(ctx context.Context, runtimeGeneration strin
 	if (terminal && len(session.Reporter.Capabilities) == 0) || session.ProjectID <= 0 || !session.Managed {
 		return nil
 	}
+	if session.Reporter.Closed || session.Reporter.RemoteClosed {
+		if known, ok := r.reportedSession(session.ID); ok {
+			known.terminal = true
+			r.publishSession(session.ID, known)
+		}
+	}
 	if session.Reporter.Closed {
 		return nil
 	}
@@ -363,10 +371,10 @@ func (r *cliReporter) reportSession(ctx context.Context, runtimeGeneration strin
 	if err != nil {
 		return errors.New("private agentd worker lease is unavailable")
 	}
-	known, exists := r.sessions[session.ID]
+	known, exists := r.reportedSession(session.ID)
 	if !exists && session.Reporter.PublicSessionID != "" {
 		known = reportedSession{publicID: session.Reporter.PublicSessionID, projectID: session.ProjectID, identity: session.Identity}
-		r.sessions[session.ID] = known
+		r.publishSession(session.ID, known)
 		exists = true
 	}
 	if pending := session.Reporter.Pending; pending != nil {
@@ -409,7 +417,7 @@ func (r *cliReporter) reportSession(ctx context.Context, runtimeGeneration strin
 				return err
 			}
 			known.terminal = true
-			r.sessions[session.ID] = known
+			r.publishSession(session.ID, known)
 			return nil
 		}
 		if err := r.heartbeat(ctx, known.publicID, session, workerLease, reporterPhase(session.State)); err != nil {
@@ -506,7 +514,7 @@ func (r *cliReporter) reportSession(ctx context.Context, runtimeGeneration strin
 	if err := r.checkpoint(ctx, session, agentd.ReporterState{PublicSessionID: response.ID, Capabilities: ownedCapabilities}); err != nil {
 		return err
 	}
-	r.sessions[session.ID] = reportedSession{publicID: response.ID, projectID: session.ProjectID, identity: session.Identity}
+	r.publishSession(session.ID, reportedSession{publicID: response.ID, projectID: session.ProjectID, identity: session.Identity})
 	if terminal {
 		if err := r.markStopped(ctx, response.ID, session, workerLease); err != nil {
 			return err
@@ -656,9 +664,10 @@ func (r *cliReporter) heartbeat(ctx context.Context, publicID string, session ag
 	if json.Unmarshal(raw, &response) != nil || response.ID != publicID || response.ProjectID != session.ProjectID || response.AgentName != agentName || response.Harness != session.Adapter || response.Phase != phase {
 		return errors.New("paimos reporter returned mismatched heartbeat evidence")
 	}
-	if known, ok := r.sessions[session.ID]; ok && known.publicID == publicID {
+	if known, ok := r.reportedSession(session.ID); ok && known.publicID == publicID {
 		known.ready = phase == "working" || phase == "yielded"
-		r.sessions[session.ID] = known
+		known.workerLease = workerLease
+		r.publishSession(session.ID, known)
 	}
 	return nil
 }
@@ -825,4 +834,24 @@ func nativeInboxSupported(controller agentd.Controller, session agentd.Session) 
 		}
 	}
 	return false
+}
+
+// Only validated registration/heartbeat evidence is published here. Native
+// sends read a snapshot independently of potentially slow reporter I/O. The
+// server still validates this generation's worker lease inside its transaction.
+func (r *cliReporter) reportedSession(id string) (reportedSession, bool) {
+	r.sessionsMu.Lock()
+	defer r.sessionsMu.Unlock()
+	known, ok := r.sessions[id]
+	return known, ok
+}
+
+func (r *cliReporter) publishSession(id string, known reportedSession) {
+	if known.terminal {
+		known.ready = false
+		known.workerLease = ""
+	}
+	r.sessionsMu.Lock()
+	defer r.sessionsMu.Unlock()
+	r.sessions[id] = known
 }
