@@ -12,6 +12,7 @@ package agentmessage
 
 import (
 	"errors"
+	"html"
 	"strconv"
 	"time"
 )
@@ -254,6 +255,9 @@ type FramedMessage struct {
 	Project string `json:"project"`
 	Issue   string `json:"issue,omitempty"`
 	Hop     int    `json:"hop"`
+	// Durable reply context belongs to the outer frame, never to sender text.
+	MessageID    string `json:"message_id,omitempty"`
+	ExpectsReply bool   `json:"expects_reply,omitempty"`
 
 	// The actual message body - UNTRUSTED
 	Body string `json:"body"`
@@ -272,7 +276,14 @@ func (f FramedMessage) Wrapper() string {
 	if f.Issue != "" {
 		wrapper += " issue=\"" + f.Issue + "\""
 	}
-	wrapper += " hop=\"" + hopStr + "\">"
+	wrapper += " hop=\"" + hopStr + "\""
+	if f.MessageID != "" {
+		wrapper += " message_id=\"" + html.EscapeString(f.MessageID) + "\""
+	}
+	if f.ExpectsReply {
+		wrapper += " expects_reply=\"true\""
+	}
+	wrapper += ">"
 	return wrapper
 }
 

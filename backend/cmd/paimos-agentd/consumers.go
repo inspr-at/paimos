@@ -366,7 +366,18 @@ func nativeMessageText(message agentmessage.Envelope) string {
 			text = append(text, part.Text)
 		}
 	}
-	return strings.Join(text, "\n")
+	body := strings.Join(text, "\n")
+	if body == "" {
+		return ""
+	}
+	// Managed drains return raw parts. Preserve the public envelope identity
+	// before crossing into the model so it can reply without guessing an ID.
+	// Never forward DeliveryWork, private target references, or sender metadata.
+	return (agentmessage.FramedMessage{
+		From: message.From, Project: message.ContextID, Issue: message.TaskID,
+		Hop: message.Hop, MessageID: message.MessageID, ExpectsReply: message.ExpectsReply,
+		Body: body, IsActionRequest: message.IsActionRequest,
+	}).FullMessage()
 }
 func (c *nativeConsumers) Execute(ctx context.Context, b runtimeconsumer.Binding, w runtimeconsumer.Work) (runtimeconsumer.Outcome, error) {
 	session, err := c.local(b)
