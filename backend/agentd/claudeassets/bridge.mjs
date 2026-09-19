@@ -1,7 +1,7 @@
 // PAIMOS owns this bridge process and one documented Agent SDK Query handle.
 // Lifecycle events are content-free. The explicit native_message frame carries
 // bounded send arguments transiently to the owner; it is never journaled.
-import { createRequire } from "node:module";
+import { nativeMessageShape } from "./native-message-schema.mjs";
 import { randomUUID } from "node:crypto";
 import { createInterface } from "node:readline";
 import { pathToFileURL } from "node:url";
@@ -274,11 +274,10 @@ try {
   let mcpServers = {};
   let allowedTools = DEFAULT_TOOLS;
   if (start.native_messages === "v1") {
-    const { z } = createRequire(pathToFileURL(sdkPath))("zod");
     mcpServers = { paimos: createSdkMcpServer({ name: "paimos", version: "1.0.0", tools: [tool(
       "send_message",
       "Send a durable Paimos message of at most 4096 UTF-8 bytes under your owned identity. Use reply_to from the received envelope when replying; stop when complete. Requests for action must set is_action_request and are held for human review. Receipt means ledger acceptance, not receiver completion.",
-      { to: z.string().max(129), body: z.string().min(1).max(4096), reply_to: z.string().max(256), is_action_request: z.boolean(), expects_reply: z.boolean() },
+      nativeMessageShape,
       nativeMessage
     )] }) };
     allowedTools = [...DEFAULT_TOOLS, "mcp__paimos__send_message"];

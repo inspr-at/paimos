@@ -246,6 +246,10 @@ func materializeClaudeBridge(bridge []byte, expectedSHA256 string) (dir, bridgeP
 	if hex.EncodeToString(bridgeDigest[:]) != expectedSHA256 {
 		return "", "", errors.New("embedded PAIMOS Claude bridge failed integrity validation")
 	}
+	schemaDigest := sha256.Sum256(claudeNativeMessageSchema)
+	if hex.EncodeToString(schemaDigest[:]) != claudeMessageSchemaSHA256 {
+		return "", "", errors.New("embedded PAIMOS message schema failed integrity validation")
+	}
 	dir, err = os.MkdirTemp("", "paimos-agentd-claude-")
 	if err != nil {
 		return "", "", errors.New("create private Claude bridge runtime")
@@ -256,12 +260,23 @@ func materializeClaudeBridge(bridge []byte, expectedSHA256 string) (dir, bridgeP
 	}
 	bridgePath = filepath.Join(dir, "bridge.mjs")
 	err = os.WriteFile(bridgePath, bridge, 0600)
+	if err == nil {
+		err = os.WriteFile(filepath.Join(dir, "native-message-schema.mjs"), claudeNativeMessageSchema, 0600)
+	}
 	if err != nil {
-		_ = os.Remove(bridgePath)
-		_ = os.Remove(dir)
+		removeClaudeRuntime(dir)
 		return "", "", errors.New("materialize PAIMOS Claude bridge runtime")
 	}
 	return dir, bridgePath, nil
+}
+
+func removeClaudeRuntime(dir string) {
+	if dir == "" {
+		return
+	}
+	_ = os.Remove(filepath.Join(dir, "bridge.mjs"))
+	_ = os.Remove(filepath.Join(dir, "native-message-schema.mjs"))
+	_ = os.Remove(dir)
 }
 
 // Start creates one local Agent SDK Query over one owned Node/Claude process
@@ -278,8 +293,7 @@ func (a *ClaudeAdapter) Start(ctx context.Context, request StartRequest, observe
 	}
 	defer func() {
 		if returnErr != nil {
-			_ = os.Remove(bridgePath)
-			_ = os.Remove(dir)
+			removeClaudeRuntime(dir)
 		}
 	}()
 	command := a.command
@@ -403,8 +417,7 @@ func (p *claudeProcess) cleanupRuntime() {
 	p.cleanup.Do(func() {
 		finished := make(chan struct{})
 		go func() {
-			_ = os.Remove(filepath.Join(p.runtimeDir, "bridge.mjs"))
-			_ = os.Remove(p.runtimeDir)
+			removeClaudeRuntime(p.runtimeDir)
 			close(finished)
 		}()
 		timer := time.NewTimer(claudeRuntimeCleanupTimeout)
