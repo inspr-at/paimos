@@ -350,9 +350,23 @@ func (s *Supervisor) startOnce(ctx context.Context, request StartRequest, attemp
 	validated.cursorEvidence = s.cursorEvidence
 	if sender, ok := s.reporter.(NativeMessageReporter); ok {
 		validated.sendNativeMessage = func(ctx context.Context, callID string, message NativeMessage) NativeMessageReceipt {
-			entry.mu.Lock()
-			snapshot := entry.snapshotLocked()
-			entry.mu.Unlock()
+			ticker := time.NewTicker(10 * time.Millisecond)
+			defer ticker.Stop()
+			var snapshot Session
+			for {
+				if entry.mu.TryLock() {
+					snapshot = entry.snapshotLocked()
+					entry.mu.Unlock()
+					if snapshot.State != StateStarting {
+						break
+					}
+				}
+				select {
+				case <-ctx.Done():
+					return NativeMessageReceipt{Error: "sender_unavailable"}
+				case <-ticker.C:
+				}
+			}
 			if snapshot.State != StateRunning || !snapshot.Managed {
 				return NativeMessageReceipt{Error: "sender_unavailable"}
 			}

@@ -360,6 +360,7 @@ type claudeControlResult struct {
 }
 
 type claudeProcess struct {
+	nativeReplies  *nativeReplyQueue
 	nativeMessages *nativeMessageExecutor
 	*ownedProcess
 	stdin      io.WriteCloser
@@ -389,6 +390,7 @@ func newClaudeProcess(cmd *exec.Cmd, stdin io.WriteCloser, stdout io.Reader, run
 	if len(senders) > 0 {
 		p.nativeMessages = newNativeMessageExecutor(senders[0])
 	}
+	p.nativeReplies = newNativeReplyQueue(p.done)
 	go p.readLoop(stdout)
 	return p
 }
@@ -455,8 +457,13 @@ func (p *claudeProcess) readLoop(reader io.Reader) {
 		}
 		switch event.Kind {
 		case "native_message":
-			p.nativeMessages.run(p.done, event.CorrelationID, event.Arguments, func(receipt NativeMessageReceipt) {
-				_ = p.send(map[string]any{"op": "native_message_result", "correlation_id": event.CorrelationID, "receipt": receipt})
+			correlationID := event.CorrelationID
+			p.nativeMessages.run(p.done, correlationID, event.Arguments, func(receipt NativeMessageReceipt) {
+				if !p.nativeReplies.enqueue(func() {
+					_ = p.send(map[string]any{"op": "native_message_result", "correlation_id": correlationID, "receipt": receipt})
+				}) {
+					_, _ = p.signalOwned(true)
+				}
 			})
 		case string(EventSessionStarted):
 			validEvidence := event.ModelEvidence == ModelEvidenceUnverified && event.EffectiveModel == "" ||

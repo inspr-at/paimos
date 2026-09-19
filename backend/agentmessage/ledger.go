@@ -121,7 +121,16 @@ func (s *Service) SendEnvelope(ctx context.Context, in SendEnvelopeInput) (*Enve
 		if err != nil {
 			return nil, err
 		}
+		if binding.ProjectID != in.ProjectID {
+			return nil, coded("agent_message_forbidden", "owned sender project mismatch")
+		}
 		in.ProjectID, in.Sender, in.SessionID, in.IssueID = binding.ProjectID, binding.Agent, binding.SessionID, binding.IssueID
+		// Native call keys are generation-scoped even if a transport client
+		// accidentally reuses the same key after starting a fresh worker.
+		if in.IdempotencyKey != "" {
+			key := sha256.Sum256([]byte(binding.SessionID + "\x00" + in.IdempotencyKey))
+			in.IdempotencyKey = fmt.Sprintf("native:%x", key)
+		}
 	}
 
 	notifierAPIKeyID := int64(0)

@@ -16,7 +16,7 @@ import (
 )
 
 const NativeMessageTool = "paimos_send_message"
-const NativeMessageDescription = "Send a short durable Paimos message under your owned identity. Use reply_to from the received envelope when replying; stop when the exchange is complete. Requests for action must set is_action_request and are held for human review. Receipt means ledger acceptance, not receiver completion."
+const NativeMessageDescription = "Send a durable Paimos message of at most 4096 UTF-8 bytes under your owned identity. Use reply_to from the received envelope when replying; stop when the exchange is complete. Requests for action must set is_action_request and are held for human review. Receipt means ledger acceptance, not receiver completion."
 const MaxNativeMessageBody = 4096
 
 // NativeMessage is the entire model-writable surface. Identity, project,
@@ -42,6 +42,41 @@ type NativeMessageReporter interface {
 }
 type nativeMessageSender func(context.Context, string, NativeMessage) NativeMessageReceipt
 
+// Even rejection replies must leave the stdout reader immediately. A bounded
+// writer queue prevents an input/output pipe cycle without unbounded goroutines.
+type nativeReplyQueue struct {
+	pending chan func()
+	done    <-chan struct{}
+}
+
+func newNativeReplyQueue(done <-chan struct{}) *nativeReplyQueue {
+	q := &nativeReplyQueue{pending: make(chan func(), 16), done: done}
+	go func() {
+		for {
+			select {
+			case <-done:
+				return
+			case write := <-q.pending:
+				write()
+			}
+		}
+	}()
+	return q
+}
+func (q *nativeReplyQueue) enqueue(write func()) bool {
+	select {
+	case <-q.done:
+		return false
+	default:
+	}
+	select {
+	case q.pending <- write:
+		return true
+	default:
+		return false
+	}
+}
+
 // A single outstanding send per child bounds work independently of model
 // parallel tool requests. Shutdown cancels the transport, not the ledger.
 type nativeMessageExecutor struct {
@@ -56,7 +91,7 @@ func newNativeMessageExecutor(send nativeMessageSender) *nativeMessageExecutor {
 	return &nativeMessageExecutor{send: send, slot: make(chan struct{}, 1)}
 }
 
-func (e *nativeMessageExecutor) run(done <-chan struct{}, id string, raw []byte, reply func(NativeMessageReceipt)) {
+func (e *nativeMessageExecutor) run(done <-chan struct{}, id string, raw []byte, reply func(NativeMessageReceipt), gates ...func(context.Context) bool) {
 	message, err := DecodeNativeMessage(raw)
 	if e == nil || err != nil || !validOpaqueID(id) {
 		reply(NativeMessageReceipt{Error: "invalid_message"})
@@ -83,6 +118,12 @@ func (e *nativeMessageExecutor) run(done <-chan struct{}, id string, raw []byte,
 		case <-done:
 			return
 		default:
+		}
+		for _, allowed := range gates {
+			if !allowed(ctx) {
+				reply(NativeMessageReceipt{Error: "sender_unavailable"})
+				return
+			}
 		}
 		reply(e.send(ctx, id, message))
 	}()

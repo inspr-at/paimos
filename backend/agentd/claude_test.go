@@ -1072,7 +1072,13 @@ export function query({ prompt, options }) {
           output.push({ type: "assistant", session_id: "claude-owned-session", message: { content: [{ type: "text", text: message.message.content[0].text }] } });
           if (mode === "native_message") {
             if (options.tools.includes("Bash") || !options.allowedTools.includes("mcp__paimos__send_message") || Object.keys(options.mcpServers).join() !== "paimos") throw new Error("tool policy");
-            const receipt = await options.mcpServers.paimos.tools[0].handler({to:"codex:peer",body:"model-originated fixture",reply_to:"",is_action_request:false,expects_reply:false});
+            const args = {to:"codex:peer",body:"model-originated fixture",reply_to:"",is_action_request:false,expects_reply:false};
+            const block = {type:"tool_use",id:"native-tool",name:"mcp__paimos__send_message",input:args};
+            output.push({type:"assistant",session_id:"claude-owned-session",message:{content:[block]}});
+            output.push({type:"stream_event",session_id:"claude-owned-session",event:{type:"content_block_start",content_block:block}});
+            output.push({type:"stream_event",session_id:"claude-owned-session",event:{type:"content_block_delta",delta:{type:"input_json_delta",partial_json:JSON.stringify(args)}}});
+            const receipt = await options.mcpServers.paimos.tools[0].handler(args);
+            output.push({type:"user",session_id:"claude-owned-session",message:{content:[{type:"tool_result",tool_use_id:"native-tool",content:JSON.stringify({...receipt,echo:args})}]}});
             if (receipt.isError || JSON.parse(receipt.content[0].text).message_id !== "receipt") throw new Error("tool result");
             log("native receipt accepted");
           }

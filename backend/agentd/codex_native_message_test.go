@@ -25,6 +25,8 @@ func TestCodexNativeMessageBindsThreadTurnAndClosedTool(t *testing.T) {
 		sent <- m
 		return NativeMessageReceipt{MessageID: "receipt", Delivered: true}
 	})}
+	p.nativeReplies = newNativeReplyQueue(p.streamDone)
+	defer close(p.streamDone)
 	for _, tc := range []struct {
 		thread, turn, tool string
 		accepted           bool
@@ -50,5 +52,41 @@ func TestCodexNativeMessageBindsThreadTurnAndClosedTool(t *testing.T) {
 	}
 	if len(sent) != 1 {
 		t.Fatalf("calls=%d", len(sent))
+	}
+}
+
+func TestNativeRejectionDoesNotBlockReaderBehindControlWrite(t *testing.T) {
+	frames := make(nativeFrameWriter, 1)
+	done := make(chan struct{})
+	defer close(done)
+	p := &codexProcess{stdin: frames, nativeReplies: newNativeReplyQueue(done)}
+	p.writeMu.Lock()
+	locked := true
+	defer func() {
+		if locked {
+			p.writeMu.Unlock()
+		}
+	}()
+	id := json.RawMessage(`42`)
+	returned := make(chan struct{})
+	go func() { p.handleNativeMessage(codexRPCMessage{ID: id, Params: json.RawMessage(`{}`)}); close(returned) }()
+	select {
+	case <-returned:
+	case <-time.After(time.Second):
+		t.Fatal("reader blocked behind control write")
+	}
+	copy(id, []byte(`99`))
+	p.writeMu.Unlock()
+	locked = false
+	select {
+	case raw := <-frames:
+		var frame struct {
+			ID int `json:"id"`
+		}
+		if json.Unmarshal(raw, &frame) != nil || frame.ID != 42 {
+			t.Fatal("async request id changed")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("rejection reply missing")
 	}
 }

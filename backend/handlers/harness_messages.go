@@ -36,7 +36,8 @@ func sendHarnessMessage(w http.ResponseWriter, r *http.Request) {
 	}
 	authority := harnessRegistrationAuthority(r, projectID)
 	out, err := agentmessage.NewService(db.DB).SendEnvelope(r.Context(), agentmessage.SendEnvelopeInput{
-		To: message.To, Body: message.Body, ReplyTo: message.ReplyTo, ActionRequest: message.ActionRequest,
+		ProjectID: projectID,
+		To:        message.To, Body: message.Body, ReplyTo: message.ReplyTo, ActionRequest: message.ActionRequest,
 		ExpectsReply: message.ExpectsReply, DeliveryLevel: "simple", IdempotencyKey: keys[0],
 		SenderAuthority: func(ctx context.Context, tx *sql.Tx) (agentmessage.SenderBinding, error) {
 			if _, err := authority(ctx, tx); err != nil {

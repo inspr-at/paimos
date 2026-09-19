@@ -27,7 +27,7 @@ func TestNativeMessageSenderGenerationAndLedger(t *testing.T) {
 		return MessageSenderTx(ctx, tx, projectID, session.ID, "worker", testWorkerLease)
 	}
 	bus := agentmessage.NewService(paimosdb.DB)
-	input := agentmessage.SendEnvelopeInput{ProjectID: 999, Sender: "forged", SessionID: "forged", To: "claude:sender", Body: "status observation", DeliveryLevel: "simple", IdempotencyKey: uuid.NewString(), SenderAuthority: authority}
+	input := agentmessage.SendEnvelopeInput{ProjectID: projectID, Sender: "forged", SessionID: "forged", To: "claude:sender", Body: "status observation", DeliveryLevel: "simple", IdempotencyKey: uuid.NewString(), SenderAuthority: authority}
 	held, err := bus.SendEnvelope(ctx, input)
 	if err != nil || held.Delivered || held.From != "paimos:worker" {
 		t.Fatalf("held=%+v err=%v", held, err)
@@ -44,6 +44,25 @@ func TestNativeMessageSenderGenerationAndLedger(t *testing.T) {
 	replay, err := bus.SendEnvelope(ctx, input)
 	if err != nil || replay.MessageID != first.MessageID {
 		t.Fatalf("replay=%+v err=%v", replay, err)
+	}
+	other, _, err := NewService(paimosdb.DB).Register(ctx, RegisterInput{ProjectID: projectID, AgentName: "worker", Harness: "claude", Host: "test", SessionRef: "other-owned", WorkerLease: testWorkerLease, ManagementMode: ManagementManaged, Role: RoleWorker, SteerMode: SteerOwned, Capabilities: models.HarnessCapabilities{Inbox: true, Status: true, Steer: true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := paimosdb.DB.Exec(`UPDATE harness_sessions SET phase='working',heartbeat_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?`, other.ID); err != nil {
+		t.Fatal(err)
+	}
+	secondInput := input
+	secondInput.SenderAuthority = func(ctx context.Context, tx *sql.Tx) (agentmessage.SenderBinding, error) {
+		return MessageSenderTx(ctx, tx, projectID, other.ID, "worker", testWorkerLease)
+	}
+	second, err := bus.SendEnvelope(ctx, secondInput)
+	if err != nil || second.MessageID == first.MessageID {
+		t.Fatalf("native call crossed generations: second=%+v err=%v", second, err)
+	}
+	secondInput.ProjectID = projectID + 1
+	if _, err := bus.SendEnvelope(ctx, secondInput); err == nil {
+		t.Fatal("authority overrode requested project")
 	}
 	input.Body = "changed"
 	if _, err := bus.SendEnvelope(ctx, input); err == nil {

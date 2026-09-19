@@ -404,6 +404,7 @@ type codexRPCMessage struct {
 type codexTurnResult struct{ failed bool }
 
 type codexProcess struct {
+	nativeReplies  *nativeReplyQueue
 	nativeMessages *nativeMessageExecutor
 	persistent     bool
 	model, effort  string
@@ -437,6 +438,7 @@ type codexProcess struct {
 func newCodexProcess(cmd *exec.Cmd, stdin io.WriteCloser, stdout io.Reader, observe func(AdapterEvent), conversation *codexConversationCollector, requests ...StartRequest) *codexProcess {
 	p := &codexProcess{ownedProcess: newOwnedProcess(cmd), stdin: stdin, observe: observe,
 		pending: map[string]chan codexRPCMessage{}, turnDone: make(chan codexTurnResult, 1), streamDone: make(chan struct{}), conversation: conversation}
+	p.nativeReplies = newNativeReplyQueue(p.streamDone)
 	if len(requests) > 0 {
 		p.nativeMessages = newNativeMessageExecutor(requests[0].sendNativeMessage)
 		p.persistent = requests[0].KeepAlive

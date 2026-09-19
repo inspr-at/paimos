@@ -188,7 +188,7 @@ let interruptReceipt = false;
 const correlations = new Map();
 const nativeMessages = new Map();
 function nativeMessage(args) {
-  const failure = { content: [{ type: "text", text: '{"error":"send_unavailable"}' }], isError: true };
+  const failure = { content: [{ type: "text", text: '{"error":"sender_unavailable"}' }], isError: true };
   if (stopping || nativeMessages.size >= 1 || Buffer.byteLength(JSON.stringify(args)) > 30 * 1024) return Promise.resolve(failure);
   return new Promise((resolve) => {
     const id = randomUUID();
@@ -277,7 +277,7 @@ try {
     const { z } = createRequire(pathToFileURL(sdkPath))("zod");
     mcpServers = { paimos: createSdkMcpServer({ name: "paimos", version: "1.0.0", tools: [tool(
       "send_message",
-      "Send a short durable Paimos message under your owned identity. Use reply_to from the received envelope when replying; stop when complete. Requests for action must set is_action_request and are held for human review. Receipt means ledger acceptance, not receiver completion.",
+      "Send a durable Paimos message of at most 4096 UTF-8 bytes under your owned identity. Use reply_to from the received envelope when replying; stop when complete. Requests for action must set is_action_request and are held for human review. Receipt means ledger acceptance, not receiver completion.",
       { to: z.string().max(129), body: z.string().min(1).max(4096), reply_to: z.string().max(256), is_action_request: z.boolean(), expects_reply: z.boolean() },
       nativeMessage
     )] }) };

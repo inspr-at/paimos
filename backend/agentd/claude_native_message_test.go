@@ -1,3 +1,5 @@
+//go:build !paimos_test_unsupported
+
 package agentd
 
 import (

@@ -18,30 +18,42 @@ func (r *cliReporter) SendNativeMessage(ctx context.Context, session agentd.Sess
 	if !safeReporterValue(callID, 256) || session.State != agentd.StateRunning || !session.Managed {
 		return failed
 	}
-	// Serialize with registration/closure: a child cannot choose another
-	// session's proof, and terminal cleanup cannot recreate its lease here.
+	callCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	// Wait for registration and its first heartbeat without starving the
+	// reporter that establishes them. Never recreate a terminal worker lease.
 	ticker := time.NewTicker(10 * time.Millisecond)
 	defer ticker.Stop()
-	for !r.mu.TryLock() {
+	var known reportedSession
+	for {
+		if r.mu.TryLock() {
+			var ok bool
+			known, ok = r.sessions[session.ID]
+			if ok && (known.terminal || known.identity != session.Identity || known.projectID != session.ProjectID || uuid.Validate(known.publicID) != nil) {
+				r.mu.Unlock()
+				return failed
+			}
+			if ok && known.ready {
+				break
+			}
+			r.mu.Unlock()
+		}
 		select {
-		case <-ctx.Done():
+		case <-callCtx.Done():
 			return failed
 		case <-ticker.C:
 		}
 	}
-	defer r.mu.Unlock()
-	if ctx.Err() != nil {
-		return failed
-	}
-	known, ok := r.sessions[session.ID]
-	if !ok || known.terminal || known.identity != session.Identity || known.projectID != session.ProjectID || uuid.Validate(known.publicID) != nil {
-		return failed
-	}
-	_, agent, err := reporterIdentity(session)
-	if err != nil {
+	if callCtx.Err() != nil {
+		r.mu.Unlock()
 		return failed
 	}
 	lease, err := r.leases.GetOrCreate(session.ID)
+	r.mu.Unlock()
+	if err != nil {
+		return failed
+	}
+	_, agent, err := reporterIdentity(session)
 	if err != nil {
 		return failed
 	}
@@ -50,8 +62,6 @@ func (r *cliReporter) SendNativeMessage(ctx context.Context, session agentd.Sess
 		return failed
 	}
 	key := uuid.NewSHA1(uuid.NameSpaceOID, []byte(session.ID+"/"+callID)).String()
-	callCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
 	args := []string{"--json", "message", "send-native", "--project-id", strconv.FormatInt(session.ProjectID, 10), "--session", known.publicID, "--agent", agent, "--idempotency-key", key}
 	raw, err := r.run(callCtx, r.paimosPath, args, r.environment, bytes.NewReader(frame))
 	if err != nil {
