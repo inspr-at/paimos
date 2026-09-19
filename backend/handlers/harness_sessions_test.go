@@ -31,10 +31,10 @@ func TestHarnessOpenAPIRequiresWorkerLeaseOnEveryWorkerMutation(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(raw)
-	if strings.Count(text, `"$ref": "#/components/parameters/HarnessWorkerLease"`) != 10 {
-		t.Fatal("worker lease header is not attached to exactly the ten worker mutation routes")
+	if strings.Count(text, `"$ref": "#/components/parameters/HarnessWorkerLease"`) != 11 {
+		t.Fatal("worker lease header is not attached to exactly the eleven worker mutation routes")
 	}
-	if strings.Count(text, `"description": "Uniform non-enumerating worker authorization failure"`) != 10 {
+	if strings.Count(text, `"description": "Uniform non-enumerating worker authorization failure"`) != 11 {
 		t.Fatal("worker mutation routes do not share one non-enumerating authorization contract")
 	}
 	for _, fragment := range []string{

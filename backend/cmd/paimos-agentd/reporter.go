@@ -73,6 +73,7 @@ func (s *memoryReporterLeaseStore) Delete(sessionID string) error {
 }
 
 type reportedSession struct {
+	ready     bool
 	publicID  string
 	projectID int64
 	identity  string
@@ -654,6 +655,10 @@ func (r *cliReporter) heartbeat(ctx context.Context, publicID string, session ag
 	var response harnessSessionResponse
 	if json.Unmarshal(raw, &response) != nil || response.ID != publicID || response.ProjectID != session.ProjectID || response.AgentName != agentName || response.Harness != session.Adapter || response.Phase != phase {
 		return errors.New("paimos reporter returned mismatched heartbeat evidence")
+	}
+	if known, ok := r.sessions[session.ID]; ok && known.publicID == publicID {
+		known.ready = phase == "working" || phase == "yielded"
+		r.sessions[session.ID] = known
 	}
 	return nil
 }

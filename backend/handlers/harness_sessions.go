@@ -25,6 +25,7 @@ const harnessWorkerLeaseHeader = "X-Paimos-Harness-Worker-Lease"
 // never spawn a process and are intentionally distinct from agent_runs and
 // the attribution-only `paimos session start` lifecycle.
 func RegisterHarnessSessionRoutes(r chi.Router) {
+	r.With(auth.RequireProjectEdit).Post("/projects/{id}/harness-sessions/{sessionID}/messages", sendHarnessMessage)
 	r.With(auth.RequireProjectView).Get("/projects/{id}/harness-sessions", listHarnessSessions)
 	r.With(auth.RequireProjectView).Get("/projects/{id}/harness-sessions/orchestrator", getHarnessOrchestrator)
 	r.With(auth.RequireProjectEdit).Post("/projects/{id}/harness-sessions", registerHarnessSession)

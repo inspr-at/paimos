@@ -91,6 +91,7 @@ type WorkspaceProvenance struct {
 }
 
 type StartRequest struct {
+	sendNativeMessage      nativeMessageSender
 	KeepAlive              bool                     `json:"-"`
 	IdempotencyKey         string                   `json:"idempotency_key,omitempty"`
 	ExpectedAccountLabel   string                   `json:"expected_account_label,omitempty"`

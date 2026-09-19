@@ -344,6 +344,9 @@ func (a *CodexAdapter) start(ctx context.Context, request StartRequest, observe 
 		} `json:"thread"`
 	}
 	threadStart := map[string]any{"cwd": request.Workspace, "approvalPolicy": "never"}
+	if request.sendNativeMessage != nil {
+		threadStart["dynamicTools"] = []map[string]any{{"type": "function", "name": NativeMessageTool, "description": NativeMessageDescription, "inputSchema": nativeMessageSchema()}}
+	}
 	if request.ResolvedProfile != nil {
 		threadStart["model"] = request.ResolvedProfile.Model
 	}
@@ -401,10 +404,12 @@ type codexRPCMessage struct {
 type codexTurnResult struct{ failed bool }
 
 type codexProcess struct {
-	persistent    bool
-	model, effort string
-	accountKey    string
-	accountLabel  string
+	nativeReplies  *nativeReplyQueue
+	nativeMessages *nativeMessageExecutor
+	persistent     bool
+	model, effort  string
+	accountKey     string
+	accountLabel   string
 	*ownedProcess
 	stdin   io.WriteCloser
 	observe func(AdapterEvent)
@@ -433,7 +438,9 @@ type codexProcess struct {
 func newCodexProcess(cmd *exec.Cmd, stdin io.WriteCloser, stdout io.Reader, observe func(AdapterEvent), conversation *codexConversationCollector, requests ...StartRequest) *codexProcess {
 	p := &codexProcess{ownedProcess: newOwnedProcess(cmd), stdin: stdin, observe: observe,
 		pending: map[string]chan codexRPCMessage{}, turnDone: make(chan codexTurnResult, 1), streamDone: make(chan struct{}), conversation: conversation}
+	p.nativeReplies = newNativeReplyQueue(p.streamDone)
 	if len(requests) > 0 {
+		p.nativeMessages = newNativeMessageExecutor(requests[0].sendNativeMessage)
 		p.persistent = requests[0].KeepAlive
 		if requests[0].ResolvedProfile != nil {
 			p.model, p.effort = requests[0].ResolvedProfile.Model, requests[0].ResolvedProfile.Effort
@@ -503,6 +510,10 @@ func (p *codexProcess) readLoop(reader io.Reader) {
 				default:
 				}
 			}
+			continue
+		}
+		if len(message.ID) > 0 && message.Method == "item/tool/call" {
+			p.handleNativeMessage(message)
 			continue
 		}
 		p.handleNotification(message)

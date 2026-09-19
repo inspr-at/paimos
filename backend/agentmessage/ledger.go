@@ -43,6 +43,16 @@ type SendEnvelopeInput struct {
 	// reauthorizes the exact credential in this transaction; the immutable
 	// binding then supplies every routing field.
 	NotifierAuthority NotifierAuthority
+	// SenderAuthority binds an owned worker's identity inside this transaction.
+	// It is supplied by trusted server code, never decoded from a request.
+	SenderAuthority func(context.Context, *sql.Tx) (SenderBinding, error)
+}
+
+type SenderBinding struct {
+	ProjectID int64
+	Agent     string
+	SessionID string
+	IssueID   *int64
 }
 
 type NotifierAuthority func(context.Context, *sql.Tx) (int64, error)
@@ -106,6 +116,22 @@ func (s *Service) SendEnvelope(ctx context.Context, in SendEnvelopeInput) (*Enve
 		return nil, err
 	}
 	defer tx.Rollback()
+	if in.SenderAuthority != nil {
+		binding, err := in.SenderAuthority(ctx, tx)
+		if err != nil {
+			return nil, err
+		}
+		if binding.ProjectID != in.ProjectID {
+			return nil, coded("agent_message_forbidden", "owned sender project mismatch")
+		}
+		in.ProjectID, in.Sender, in.SessionID, in.IssueID = binding.ProjectID, binding.Agent, binding.SessionID, binding.IssueID
+		// Native call keys are generation-scoped even if a transport client
+		// accidentally reuses the same key after starting a fresh worker.
+		if in.IdempotencyKey != "" {
+			key := sha256.Sum256([]byte(binding.SessionID + "\x00" + in.IdempotencyKey))
+			in.IdempotencyKey = fmt.Sprintf("native:%x", key)
+		}
+	}
 
 	notifierAPIKeyID := int64(0)
 	pinnedTargetID := ""
