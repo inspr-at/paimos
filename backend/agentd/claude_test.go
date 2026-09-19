@@ -1108,6 +1108,13 @@ export function query({ prompt, options }) {
       if (process.env.PAIMOS_CLAUDE_TEST_MODE === "consumed_before_receipt") {
         output.push({ type: "stream_event", session_id: "claude-owned-session", user_message_uuid: message.uuid });
       }
+      if (process.env.PAIMOS_CLAUDE_TEST_MODE === "native_reply_before_input_receipt") {
+        const receipt = await options.mcpServers.paimos.tools[0].handler({to:"codex:peer",body:"native inbox reply",reply_to:"incoming-message",is_action_request:false,expects_reply:false});
+        if (receipt.isError || JSON.parse(receipt.content[0].text).message_id !== "receipt") throw new Error("native reply unavailable");
+        log("native reply accepted before input receipt");
+        output.push({ type: "stream_event", session_id: "claude-owned-session", user_message_uuid: message.uuid });
+        output.push({ type: "result", session_id: "claude-owned-session", user_message_uuid: message.uuid });
+      }
     }
   };
   return {
