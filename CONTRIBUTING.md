@@ -90,6 +90,9 @@ decides whether to merge; passing checks never grants an agent merge authority.
 
 The required `dco` check validates every commit introduced by a PR, including
 merge commits on the contributor branch. An empty or incomplete range fails.
+Local checks require Python 3 and full Git history; deepen a shallow checkout
+with `git fetch --unshallow` first. When merging upstream updates into your
+branch, use `git merge --signoff upstream/main` after fetching upstream.
 It reads real Git trailers, so a sign-off quoted in prose does not count.
 Missing sign-offs must be supplied by the contributor, not invented by a reviewer
 or agent. Do not rewrite shared history to repair them without explicit agreement.
@@ -151,6 +154,9 @@ not ordinary delivery. The administrator must still open a PR, explicitly
 choose GitHub's bypass action, record the reason in that PR and the relevant
 PAI issue, and repair or restore the normal gate in the same incident. Direct
 pushes to `main` are not a break-glass path.
+The additional DCO contribution ruleset has no bypass: the legacy ruleset
+exception cannot skip `dco` or `dco-tests`. A broken DCO gate requires an
+explicitly authorized, recorded ruleset repair; it is never an automatic bypass.
 
 The `dco` job enforces the contribution policy above. Preserving source commit
 messages alone does not guarantee a valid final squash trailer; verify it as
