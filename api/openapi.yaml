@@ -1821,6 +1821,38 @@ paths:
         '400': {description: Invalid registration or label}
         '403': {description: Scope required or another agent requested}
         '409': {description: Active generation conflicts with registration}
+  /projects/{projectId}/harness-sessions/{sessionId}:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: getHarnessSession
+      description: Session detail, including at most 20 recent activity notes, newest first.
+      responses:
+        '200': {description: Session detail, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessSession'}}}}
+  /projects/{projectId}/harness-sessions/{sessionId}/heartbeat:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: heartbeatHarnessSession
+      description: The attributed worker reports liveness and optionally a current step. Changed nonempty notes append bounded activity history in the same transaction.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [phase, activity_sequence]
+              properties:
+                phase: {type: string, enum: [starting, working, yielded, stopping]}
+                activity: {type: string, enum: [unknown, busy, idle]}
+                activity_sequence: {type: integer, format: int64, minimum: 0}
+                activity_note: {type: string, minLength: 1, maxLength: 120, description: Plain text; whitespace trimmed and control characters stripped.}
+      responses:
+        '200': {description: Updated session, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessSession'}}}}
+        '400': {description: Invalid note or heartbeat}
+        '403': {description: Worker proof rejected}
   /harness-sessions:
     get:
       operationId: listHarnessSessions
@@ -1860,7 +1892,8 @@ paths:
         contributes nothing. principal_id and name are present only with members.read or harness.read at that project
         (as approval agent names, AEON-171); session_id only with harness.read in the workspace. Needs nodes.read in
         the workspace or any project binding; an agent key also needs harness.read. One answer holds at most 500
-        sessions, freshest heartbeat first; truncated says more were live.
+        sessions, freshest heartbeat first; truncated says more were live. activity_note is returned only where
+        the caller holds harness.read at the project.
       responses:
         '200':
           description: Live agents, freshest heartbeat first
@@ -4782,6 +4815,8 @@ components:
         work_order_id: {type: [string, 'null'], format: uuid}
         parent_harness_session_id: {type: [string, 'null'], format: uuid}
         display_label: {type: [string, 'null'], maxLength: 128, description: Public per-session label; null for generations registered without a label.}
+        activity_note: {type: [string, 'null'], maxLength: 120, description: Current step reported by the worker.}
+        activity_history: {type: array, description: Up to 20 changed notes, newest first; present on session detail., items: {$ref: '#/components/schemas/HarnessActivityNote'}}
         harness: {type: string, enum: [codex, claude, pi, cursor, grok]}
         host: {type: string}
         management_mode: {type: string, enum: [managed, unmanaged]}
@@ -4796,6 +4831,12 @@ components:
         stopped_at: {type: [string, 'null'], format: date-time}
         stop_reason: {type: [string, 'null']}
         created_at: {type: string, format: date-time}
+    HarnessActivityNote:
+      type: object
+      required: [note, at]
+      properties:
+        note: {type: string, maxLength: 120}
+        at: {type: string, format: date-time}
     HarnessSessionSummary:
       allOf:
         - {$ref: '#/components/schemas/HarnessSession'}
@@ -4826,6 +4867,7 @@ components:
         role: {type: string, enum: [worker, coordinator]}
         phase: {type: string, enum: [starting, working, stopping]}
         activity: {type: string, enum: [busy, unknown]}
+        activity_note: {type: [string, 'null'], maxLength: 120, description: Current step, present only with harness.read at the project}
         ticket:
           description: The bound ticket and the project it lives in now
           oneOf:

@@ -18,6 +18,8 @@
 // replays them with tenant/project visibility. Clients treat them as read hints.
 // AEON-184 adds GET /api/harness-sessions/live: the agents actively working
 // in each visible project right now, for the Projects page (live.go).
+// AEON-192 adds activity_note on heartbeat. New(pool) remains the coordinator's
+// httpapi.Module constructor and Plugin() remains its compiled manifest.
 package harness
 
 import (
@@ -76,36 +78,56 @@ func (m *Module) Mount(mux *http.ServeMux) {
 }
 
 type Session struct {
-	ID                     string     `json:"id"`
-	ProjectID              string     `json:"project_id"`
-	AgentPrincipalID       string     `json:"agent_principal_id"`
-	RunID                  *string    `json:"run_id"`
-	TicketNodeID           *string    `json:"ticket_node_id"`
-	WorkOrderID            *string    `json:"work_order_id"`
-	ParentID               *string    `json:"parent_harness_session_id"`
-	Harness                string     `json:"harness"`
-	Host                   string     `json:"host"`
-	DisplayLabel           *string    `json:"display_label"`
-	Management             string     `json:"management_mode"`
-	Role                   string     `json:"role"`
-	WorkShape              string     `json:"work_shape"`
-	Capabilities           []string   `json:"advertised_capabilities"`
-	Phase                  string     `json:"phase"`
-	Activity               string     `json:"activity"`
-	ActivitySequence       int64      `json:"activity_sequence"`
-	Revision               int64      `json:"revision"`
-	HeartbeatAt            *time.Time `json:"heartbeat_at"`
-	StoppedAt              *time.Time `json:"stopped_at"`
-	StopReason             *string    `json:"stop_reason"`
-	CreatedAt              time.Time  `json:"created_at"`
+	ID                     string         `json:"id"`
+	ProjectID              string         `json:"project_id"`
+	AgentPrincipalID       string         `json:"agent_principal_id"`
+	RunID                  *string        `json:"run_id"`
+	TicketNodeID           *string        `json:"ticket_node_id"`
+	WorkOrderID            *string        `json:"work_order_id"`
+	ParentID               *string        `json:"parent_harness_session_id"`
+	Harness                string         `json:"harness"`
+	Host                   string         `json:"host"`
+	DisplayLabel           *string        `json:"display_label"`
+	ActivityNote           *string        `json:"activity_note"`
+	ActivityHistory        []ActivityNote `json:"activity_history,omitempty"`
+	Management             string         `json:"management_mode"`
+	Role                   string         `json:"role"`
+	WorkShape              string         `json:"work_shape"`
+	Capabilities           []string       `json:"advertised_capabilities"`
+	Phase                  string         `json:"phase"`
+	Activity               string         `json:"activity"`
+	ActivitySequence       int64          `json:"activity_sequence"`
+	Revision               int64          `json:"revision"`
+	HeartbeatAt            *time.Time     `json:"heartbeat_at"`
+	StoppedAt              *time.Time     `json:"stopped_at"`
+	StopReason             *string        `json:"stop_reason"`
+	CreatedAt              time.Time      `json:"created_at"`
 	refDigest, leaseDigest []byte
 }
 
-const sessionColumns = `id::text,project_id::text,agent_principal_id::text,run_id::text,ticket_node_id::text,work_order_id::text,parent_id::text,harness,host,management,role,work_shape,capabilities,phase,activity,activity_sequence,revision,heartbeat_at,stopped_at,stop_reason,created_at,ref_digest,lease_digest,display_label`
+type ActivityNote struct {
+	Note string    `json:"note"`
+	At   time.Time `json:"at"`
+}
+
+func normalizeActivityNote(raw string) (string, bool) {
+	if !utf8.ValidString(raw) {
+		return "", false
+	}
+	clean := strings.TrimSpace(strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return -1
+		}
+		return r
+	}, raw))
+	return clean, clean != "" && utf8.RuneCountInString(clean) <= 120
+}
+
+const sessionColumns = `id::text,project_id::text,agent_principal_id::text,run_id::text,ticket_node_id::text,work_order_id::text,parent_id::text,harness,host,management,role,work_shape,capabilities,phase,activity,activity_sequence,revision,heartbeat_at,stopped_at,stop_reason,created_at,ref_digest,lease_digest,display_label,activity_note`
 
 func scanSession(row pgx.Row) (Session, error) {
 	var s Session
-	err := row.Scan(&s.ID, &s.ProjectID, &s.AgentPrincipalID, &s.RunID, &s.TicketNodeID, &s.WorkOrderID, &s.ParentID, &s.Harness, &s.Host, &s.Management, &s.Role, &s.WorkShape, &s.Capabilities, &s.Phase, &s.Activity, &s.ActivitySequence, &s.Revision, &s.HeartbeatAt, &s.StoppedAt, &s.StopReason, &s.CreatedAt, &s.refDigest, &s.leaseDigest, &s.DisplayLabel)
+	err := row.Scan(&s.ID, &s.ProjectID, &s.AgentPrincipalID, &s.RunID, &s.TicketNodeID, &s.WorkOrderID, &s.ParentID, &s.Harness, &s.Host, &s.Management, &s.Role, &s.WorkShape, &s.Capabilities, &s.Phase, &s.Activity, &s.ActivitySequence, &s.Revision, &s.HeartbeatAt, &s.StoppedAt, &s.StopReason, &s.CreatedAt, &s.refDigest, &s.leaseDigest, &s.DisplayLabel, &s.ActivityNote)
 	return s, err
 }
 func project(ctx context.Context, tx pgx.Tx, id string) error {
@@ -417,7 +439,26 @@ func (m *Module) list(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, erro
 	return out, rows.Err()
 }
 func (m *Module) status(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
-	return load(r.Context(), tx, r.PathValue("projectId"), r.PathValue("sessionId"), false)
+	s, err := load(r.Context(), tx, r.PathValue("projectId"), r.PathValue("sessionId"), false)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := tx.Query(r.Context(), `SELECT note,created_at FROM harness_activity_notes WHERE session_id=$1 ORDER BY id DESC LIMIT 20`, s.ID)
+	if err != nil {
+		return nil, err
+	}
+	s.ActivityHistory = []ActivityNote{}
+	for rows.Next() {
+		var item ActivityNote
+		if err = rows.Scan(&item.Note, &item.At); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		s.ActivityHistory = append(s.ActivityHistory, item)
+	}
+	err = rows.Err()
+	rows.Close()
+	return s, err
 }
 func (m *Module) orchestrator(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
 	id := r.PathValue("projectId")
@@ -490,7 +531,7 @@ func (m *Module) bind(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, erro
 		}
 	}
 	before := s
-	err = tx.QueryRow(ctx, `UPDATE harness_sessions SET parent_id=$2,ticket_node_id=$3,work_shape=$4,revision=revision+1 WHERE id=$1 RETURNING `+sessionColumns, s.ID, in.ParentID, in.TicketNodeID, in.WorkShape).Scan(&s.ID, &s.ProjectID, &s.AgentPrincipalID, &s.RunID, &s.TicketNodeID, &s.WorkOrderID, &s.ParentID, &s.Harness, &s.Host, &s.Management, &s.Role, &s.WorkShape, &s.Capabilities, &s.Phase, &s.Activity, &s.ActivitySequence, &s.Revision, &s.HeartbeatAt, &s.StoppedAt, &s.StopReason, &s.CreatedAt, &s.refDigest, &s.leaseDigest, &s.DisplayLabel)
+	err = tx.QueryRow(ctx, `UPDATE harness_sessions SET parent_id=$2,ticket_node_id=$3,work_shape=$4,revision=revision+1 WHERE id=$1 RETURNING `+sessionColumns, s.ID, in.ParentID, in.TicketNodeID, in.WorkShape).Scan(&s.ID, &s.ProjectID, &s.AgentPrincipalID, &s.RunID, &s.TicketNodeID, &s.WorkOrderID, &s.ParentID, &s.Harness, &s.Host, &s.Management, &s.Role, &s.WorkShape, &s.Capabilities, &s.Phase, &s.Activity, &s.ActivitySequence, &s.Revision, &s.HeartbeatAt, &s.StoppedAt, &s.StopReason, &s.CreatedAt, &s.refDigest, &s.leaseDigest, &s.DisplayLabel, &s.ActivityNote)
 	if err != nil {
 		return nil, err
 	}
@@ -498,9 +539,10 @@ func (m *Module) bind(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, erro
 }
 func (m *Module) heartbeat(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
 	var in struct {
-		Phase            string `json:"phase"`
-		Activity         string `json:"activity"`
-		ActivitySequence int64  `json:"activity_sequence"`
+		Phase            string  `json:"phase"`
+		Activity         string  `json:"activity"`
+		ActivitySequence int64   `json:"activity_sequence"`
+		ActivityNote     *string `json:"activity_note"`
 	}
 	if err := workorders.Decode(r, &in); err != nil {
 		return nil, err
@@ -525,10 +567,30 @@ func (m *Module) heartbeat(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 	if in.ActivitySequence == s.ActivitySequence && in.Activity != s.Activity {
 		return nil, workorders.Fail(409, "divergent activity replay")
 	}
+	if in.ActivityNote != nil {
+		note, valid := normalizeActivityNote(*in.ActivityNote)
+		if !valid {
+			return nil, workorders.Fail(400, "activity note must be at most 120 characters")
+		}
+		in.ActivityNote = &note
+	}
+	note := s.ActivityNote
+	changed := in.ActivityNote != nil && (note == nil || *note != *in.ActivityNote)
+	if in.ActivityNote != nil {
+		note = in.ActivityNote
+	}
 	before := s
-	err = tx.QueryRow(ctx, `UPDATE harness_sessions SET phase=$2,activity=$3,activity_sequence=$4,heartbeat_at=clock_timestamp() WHERE id=$1 RETURNING `+sessionColumns, s.ID, in.Phase, in.Activity, in.ActivitySequence).Scan(&s.ID, &s.ProjectID, &s.AgentPrincipalID, &s.RunID, &s.TicketNodeID, &s.WorkOrderID, &s.ParentID, &s.Harness, &s.Host, &s.Management, &s.Role, &s.WorkShape, &s.Capabilities, &s.Phase, &s.Activity, &s.ActivitySequence, &s.Revision, &s.HeartbeatAt, &s.StoppedAt, &s.StopReason, &s.CreatedAt, &s.refDigest, &s.leaseDigest, &s.DisplayLabel)
+	err = tx.QueryRow(ctx, `UPDATE harness_sessions SET phase=$2,activity=$3,activity_sequence=$4,heartbeat_at=clock_timestamp(),activity_note=$5 WHERE id=$1 RETURNING `+sessionColumns, s.ID, in.Phase, in.Activity, in.ActivitySequence, note).Scan(&s.ID, &s.ProjectID, &s.AgentPrincipalID, &s.RunID, &s.TicketNodeID, &s.WorkOrderID, &s.ParentID, &s.Harness, &s.Host, &s.Management, &s.Role, &s.WorkShape, &s.Capabilities, &s.Phase, &s.Activity, &s.ActivitySequence, &s.Revision, &s.HeartbeatAt, &s.StoppedAt, &s.StopReason, &s.CreatedAt, &s.refDigest, &s.leaseDigest, &s.DisplayLabel, &s.ActivityNote)
 	if err != nil {
 		return nil, err
+	}
+	if changed && note != nil {
+		if _, err = tx.Exec(ctx, `INSERT INTO harness_activity_notes(tenant_id,session_id,note) VALUES($1,$2,$3)`, p.TenantID, s.ID, *note); err != nil {
+			return nil, err
+		}
+		if _, err = tx.Exec(ctx, `DELETE FROM harness_activity_notes WHERE tenant_id=$1 AND session_id=$2 AND id NOT IN (SELECT id FROM harness_activity_notes WHERE tenant_id=$1 AND session_id=$2 ORDER BY id DESC LIMIT 20)`, p.TenantID, s.ID); err != nil {
+			return nil, err
+		}
 	}
 	if err = record(ctx, tx, p, s, "heartbeat", before, s); err != nil {
 		return nil, err

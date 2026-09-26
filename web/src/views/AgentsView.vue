@@ -15,6 +15,7 @@ import AccountsCard from '../components/agents/AccountsCard.vue'
 import ApprovalQueue from '../components/agents/ApprovalQueue.vue'
 import SessionList from '../components/agents/SessionList.vue'
 import SessionPanel from '../components/agents/SessionPanel.vue'
+import LiveNow from '../components/agents/LiveNow.vue'
 import StartAgentDialog from '../components/agents/StartAgentDialog.vue'
 import RunQueue from '../components/agents/RunQueue.vue'
 
@@ -245,19 +246,21 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
          page does not jump as each read lands. -->
     <div :key="agents.loaded ? 'ready' : 'loading'" class="layout">
       <div class="main-col">
+        <LiveNow :views="agents.views" :now="agents.now" :selected="sessionId" :loaded="agents.loaded" :can-start="canStart" @open="id => id ? openSession(id) : startDialog?.open()" />
         <ApprovalQueue
+          v-if="!agents.loaded || agents.needsCount || history.length"
           ref="queue" :pending="agents.pending" :held="agents.held" :history="history" :now="agents.now" :loaded="agents.loaded"
           :cursor="cursor" :can-decide="canDecide" :can-decide-approval="canDecideApproval" :can-resolve="canResolve" :can-revoke="canRevoke" :asker="agents.askerName" :resource="resource" :decide="decide" :revoke="agents.revoke" :resolve="resolveHeld"
           @focus-row="id => cursor = id" @open-agent="openAgent"
         />
         <p v-if="agents.approvalsState === 'error'" class="inline-error" role="alert"><AppIcon name="alert" :size="14" />Permission requests could not be loaded: {{ agents.approvalsError }} <button type="button" class="btn sm" @click="agents.refreshApprovals()">Try again</button></p>
-        <RunQueue v-if="agents.loaded" />
         <SessionList
           v-if="agents.loaded"
           :groups="agents.grouped" :now="agents.now" :cursor="cursor" :selected="sessionId" :state="agents.sessionsState" :error="agents.sessionsError"
-          :loaded="agents.loaded" :controls="agents.controls" :can-control="writable"
-          @open="openSession" @control="control" @focus-row="id => cursor = id" @retry="agents.loadAll()"
+          :loaded="agents.loaded" :controls="agents.controls" :can-control="writable" :can-start="canStart"
+          @open="openSession" @control="control" @focus-row="id => cursor = id" @retry="agents.loadAll()" @start="startDialog?.open()"
         />
+        <RunQueue v-if="agents.loaded" />
         <p v-if="agents.loaded && (agents.sessions.length || agents.pending.length)" class="hint" aria-hidden="true">
           <kbd class="keycap">j</kbd><kbd class="keycap">k</kbd> move · <kbd class="keycap"><AppIcon name="enter" /></kbd> open · <kbd class="keycap">a</kbd> approve · <kbd class="keycap">d</kbd> deny
         </p>
