@@ -20,7 +20,7 @@ const route = useRoute(), router = useRouter()
 const root = ref<HTMLElement>(), host = ref<HTMLElement>(), stage = ref<HTMLElement>(), header = ref<HTMLElement>(), footer = ref<HTMLElement>()
 const media = window.matchMedia('(prefers-reduced-motion: reduce)'), scheme = window.matchMedia('(prefers-color-scheme: dark)')
 const dimension = ref<GraphDimension>(media.matches ? '2d' : '3d'), paused = ref(media.matches)
-const ready = ref(false), error = ref(''), fallback = ref(false), labels = ref<GraphLabels>('smart'), rate = ref<GraphFPS>(props.fps)
+const ready = ref(false), labelsReady = ref(false), error = ref(''), fallback = ref(false), labels = ref<GraphLabels>('smart'), rate = ref<GraphFPS>(props.fps)
 const hovered = ref(''), phase = ref<MotionPhase>(paused.value ? 'paused' : 'orbiting'), height = ref(480)
 const focused = computed(() => route.query[props.focusQuery] === '1')
 const storageKey = computed(() => props.viewerKey ? `aeon:graph:${props.viewerKey}:labels` : '')
@@ -29,10 +29,14 @@ let renderer: GraphRenderer | null = null, controller: AbortController | undefin
 let focusFrame = 0
 let mounted = false, beforeFocus: HTMLElement | null = null
 let background: { el: HTMLElement; inert: boolean }[] = []
-function loadLabels() {
+function loadLabels(key: string, previous?: string) {
+  // An empty key is "the person is not known yet", not "this person prefers Smart".
+  // Reading then would keep the default and, on the next person, could miss theirs.
+  if (!key) return
   let saved: string | null = null
-  try { saved = storageKey.value ? localStorage.getItem(storageKey.value) : null } catch { /* Private browsing can deny storage. */ }
-  labels.value = saved === 'all' || saved === 'off' ? saved : 'smart'
+  try { saved = localStorage.getItem(key) } catch { return }
+  if (saved === 'all' || saved === 'off') labels.value = saved
+  else if (previous) labels.value = 'smart'
 }
 function setLabels(value: GraphLabels) {
   labels.value = value
@@ -58,7 +62,7 @@ function measure() {
   if (host.value) renderer?.resize(host.value.clientWidth, host.value.clientHeight)
 }
 async function start() {
-  controller?.abort(); renderer?.dispose(); renderer = null; ready.value = false
+  controller?.abort(); renderer?.dispose(); renderer = null; ready.value = false; labelsReady.value = false
   const request = controller = new AbortController()
   await nextTick()
   if (!host.value || !mounted || request.signal.aborted) return
@@ -68,6 +72,7 @@ async function start() {
       reduced: media.matches, signal: request.signal, fps: rate.value, labels: labels.value,
       select, open: n => emit('open', n), clear: () => emit('clear'),
       hover: n => { hovered.value = n?.id ?? ''; emit('hover', n); emphasis() }, motionState: value => { phase.value = value },
+      labelsSettled: value => { if (request.signal.aborted || !mounted) return; labelsReady.value = value },
     })
     if (!next) return
     if (request.signal.aborted || !mounted) { next.dispose(); return }
@@ -124,7 +129,7 @@ function keydown(event: KeyboardEvent) {
 }
 function onReduced() { paused.value = media.matches; if (media.matches) dimension.value = '2d'; void start() }
 function retheme() { renderer?.theme() }
-watch(storageKey, loadLabels, { immediate: true })
+watch(storageKey, (key, previous) => loadLabels(key, previous), { immediate: true })
 watch(labels, value => renderer?.labels(value))
 watch(() => props.fps, value => { rate.value = value })
 watch(rate, value => renderer?.frameRate(value))
@@ -154,7 +159,7 @@ defineExpose({ focus: () => host.value?.focus({ preventScroll: true }), focusNod
     <section ref="root" class="graph-viewer" :class="{ 'graph-focus': focused }" :role="focused ? 'dialog' : undefined" :aria-modal="focused ? true : undefined" :aria-label="title" :data-focus="focused">
       <header ref="header" class="graph-header"><div class="graph-heading"><h2>{{ title }}</h2><p role="status">{{ summary }}</p></div><GraphControls :dimension="dimension" :paused="paused" :fallback="fallback" :labels="labels" :fps="rate" :focus="focused" @fit="fit" @dimension="setDimension" @pause="toggleMotion" @labels="setLabels" @fps="setFPS" @focus="toggleFocus"><slot name="controls" /></GraphControls></header>
       <div ref="stage" class="graph-stage" @pointermove="emit('pointer', $event)" :style="focused ? undefined : { height: `${height}px` }">
-        <div ref="host" class="graph-surface" :class="canvasClass" role="img" tabindex="0" :aria-label="surfaceLabel" :data-dimension="dimension" :data-ready="ready" :data-motion="paused ? 'still' : 'on'" :data-motion-phase="phase" :data-labels="labels" :data-fps="rate" />
+        <div ref="host" class="graph-surface" :class="canvasClass" role="img" tabindex="0" :aria-label="surfaceLabel" :data-dimension="dimension" :data-ready="ready" :data-labels-ready="labelsReady" :data-viewer="viewerKey ?? ''" :data-motion="paused ? 'still' : 'on'" :data-motion-phase="phase" :data-labels="labels" :data-fps="rate" />
         <div v-if="error" class="graph-error" role="alert"><p>{{ error }}</p><button type="button" class="btn" @click="start">Try again</button></div>
         <slot :dimension="dimension" :focused="focused" />
       </div>

@@ -35,6 +35,8 @@ export interface GraphRendererOptions {
   reduced: boolean; signal: AbortSignal; fps?: GraphFPS; labels?: GraphLabels
   select(node: GraphNode): void; open(node: GraphNode): void; hover(node: GraphNode | null): void; clear(): void
   motionState?(phase: MotionPhase): void
+  // Fired when the current label mode has been placed, not merely requested.
+  labelsSettled?(ready: boolean): void
 }
 type Graph3D = ForceGraph3DInstance<LayoutNode, LayoutEdge>
 type Graph2D = ForceGraph2D<LayoutNode, LayoutEdge>
@@ -75,6 +77,7 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
   let labelMode = options.labels ?? 'smart', fps = options.fps ?? 60
   let paintFrame = 0, fitFrame = 0, frame = 0, lastFrame = 0, driftTime = 0, resumeAt = 0, dragging = false
   let lastPhase: MotionPhase | undefined
+  let labelsWereSettled: boolean | undefined
   let settleTimer: ReturnType<typeof setTimeout> | undefined, pickTimer: ReturnType<typeof setTimeout> | undefined
   let cameraTaken = false, fitOnSettle = true
   let pointerNode: LayoutNode | null = null, openedAt = -Infinity
@@ -94,7 +97,7 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
     const fragment = document.createDocumentFragment()
     for (const n of nodes) {
       const el = document.createElement('span')
-      el.className = 'graph-label'; el.textContent = n.label.length > 34 ? n.label.slice(0, 31) + '…' : n.label
+      el.className = 'graph-label'; el.hidden = true; el.textContent = n.label.length > 34 ? n.label.slice(0, 31) + '…' : n.label
       fragment.append(el)
       labels.set(n.id, { el, w: 0, h: 0 })
     }
@@ -138,6 +141,33 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
       label.el.style.opacity = mandatory ? '1' : String(Math.max(.55, alpha(n)))
       label.el.style.zIndex = mandatory ? '2' : '1'
     }
+  }
+  // Placement is a frame behind the camera. Report it only once it matches the
+  // mode, so a caller can wait for labels instead of guessing a frame budget.
+  function labelSettlement() {
+    const shown = [...labels.values()].filter(label => !label.el.hidden).length
+    const laidOut = nodes.every(n => n.x !== undefined && n.y !== undefined)
+    if (!nodes.length) return true
+    if (!laidOut) return false
+    if (labelMode === 'all') return shown === nodes.length
+    if (labelMode === 'off') {
+      const must = nodes.some(n => n.id === emphasis.selected || n.id === emphasis.hovered)
+      return must ? shown > 0 : shown === 0
+    }
+    return shown > 0
+  }
+  function publishLabels() {
+    placeLabels()
+    const settled = labelSettlement()
+    if (settled === labelsWereSettled) return
+    labelsWereSettled = settled
+    options.labelsSettled?.(settled)
+  }
+  function publishPhase(now = performance.now()) {
+    const phase: MotionPhase = paused ? 'paused' : dragging || now < resumeAt ? 'interacting' : 'orbiting'
+    if (phase === lastPhase) return
+    lastPhase = phase
+    options.motionState?.(phase)
   }
   function material(n: LayoutNode, shell: boolean) {
     const key = `${shell ? 'shell' : color(n)}:${alpha(n)}`
@@ -192,6 +222,7 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
     const graph = g3 ?? g2
     graph?.cooldownTicks(paused ? 0 : 140).linkDirectionalParticles(particles)
     if (!paused) graph?.d3ReheatSimulation()
+    publishPhase()
     redraw()
   }
   function redraw() {
@@ -200,7 +231,7 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
     const graph = g3 ?? g2
     graph?.linkColor(linkColor).linkDirectionalParticles(particles)
     g2?.nodeCanvasObject((n, ctx, scale) => draw2D(n, ctx, scale))
-    placeLabels()
+    publishLabels()
   }
   if (dimension === '3d') {
     const modules = await Promise.all([import('3d-force-graph'), import('three')])
@@ -278,10 +309,12 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
   function tick(now: number) {
     if (disposed) return
     frame = requestAnimationFrame(tick)
+    // Phase follows the click even when this tab is hidden or the frame budget
+    // skips the draw. The orbit itself still waits for a visible frame.
+    publishPhase(now)
+    const phase = lastPhase
     if (document.hidden || now - lastFrame < 1000 / fps - .5) return
     const dt = Math.min(.1, (now - (lastFrame || now)) / 1000); lastFrame = now
-    const phase: MotionPhase = paused ? 'paused' : dragging || now < resumeAt ? 'interacting' : 'orbiting'
-    if (phase !== lastPhase) { lastPhase = phase; options.motionState?.(phase) }
     if (g3) (g3.controls() as OrbitControls).autoRotate = phase === 'orbiting'
     if (phase === 'orbiting') {
       driftTime += dt
@@ -293,7 +326,7 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
         g2.centerAt(center.x + Math.cos(driftTime / 9) * dt * .9, center.y + Math.sin(driftTime / 7) * dt * .6)
       }
     }
-    graph.resumeAnimation(); graph.pauseAnimation(); placeLabels()
+    graph.resumeAnimation(); graph.pauseAnimation(); publishLabels()
   }
   frame = requestAnimationFrame(tick)
   // Fit fills about 80% of the stage along its tighter side, bubbles included.
@@ -320,11 +353,13 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
       }
       const at = centre.clone().add(back.multiplyScalar(distance))
       g3.cameraPosition({ x: at.x, y: at.y, z: at.z }, { x: centre.x, y: centre.y, z: centre.z }, duration())
+      publishLabels()
     } else if (g2) {
       let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity
       for (const n of nodes) { const r = graphRadius(n), x = n.x ?? 0, y = n.y ?? 0; x0 = Math.min(x0, x - r); x1 = Math.max(x1, x + r); y0 = Math.min(y0, y - r); y1 = Math.max(y1, y + r) }
       const zoom = Math.min(MAX_ZOOM, g2.width() * FILL / Math.max(1, x1 - x0), g2.height() * FILL / Math.max(1, y1 - y0))
       g2.centerAt((x0 + x1) / 2, (y0 + y1) / 2, duration()); g2.zoom(zoom, duration()); refreshPicking(duration())
+      publishLabels()
     }
   }
   // A selection sits in the middle with its direct links in view (80% of the stage),
@@ -350,6 +385,7 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
         distance = Math.max(distance, depth + (Math.abs(v.dot(up)) + r) / (tan * FILL), depth + (Math.abs(v.dot(right)) + r) / (tan * aspect * FILL))
       }
       g3.cameraPosition({ x: x + back.x * distance, y: y + back.y * distance, z: z + back.z * distance }, { x, y, z }, duration())
+      publishLabels()
     } else if (g2) {
       let zoom = FOCUS_ZOOM
       for (const n of around) {
@@ -357,6 +393,7 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
         zoom = Math.min(zoom, g2.width() * FILL / 2 / (Math.abs((n.x ?? 0) - x) + r), g2.height() * FILL / 2 / (Math.abs((n.y ?? 0) - y) + r))
       }
       g2.centerAt(x, y, duration()); g2.zoom(Math.max(.2, zoom), duration()); refreshPicking(duration())
+      publishLabels()
     }
   }
   // The engines lay out and build their objects a moment after new data. Wait for both
@@ -379,9 +416,11 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
       palette = graphPalette(nodes)
       const names = [...new Set(nodes.map(n => n.group))].sort(), radius = names.length > 1 ? 35 + Math.sqrt(nodes.length) * 9 : 0
       groups = new Map(names.map((group, i) => { const angle = i * 2 * Math.PI / names.length; return [group, { x: Math.cos(angle) * radius, y: Math.sin(angle) * radius, z: Math.sin(angle * 2) * radius * .3 }] }))
+      labelsWereSettled = undefined
+      options.labelsSettled?.(false)
       graph.graphData({ nodes, links }); rebuildLabels(); redraw()
       clearTimeout(settleTimer)
-      whenLaidOut(() => { redraw(); if (emphasis.selected) focus(emphasis.selected); else if (!cameraTaken) fit() })
+      whenLaidOut(() => { redraw(); if (emphasis.selected) focus(emphasis.selected); else if (!cameraTaken) fit(); publishLabels() })
       if (!paused) settleTimer = setTimeout(() => { if (emphasis.selected) focus(emphasis.selected); else if (!cameraTaken) fit() }, 1200)
     },
     emphasis(value) { emphasis = value; redraw() },
@@ -396,7 +435,7 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
       else if (!cameraTaken && !emphasis.selected) fitFrame = requestAnimationFrame(fit)
     },
     fit, focus, motion, interact,
-    labels(mode) { labelMode = mode; placeLabels() },
+    labels(mode) { labelMode = mode; labelsWereSettled = undefined; publishLabels() },
     frameRate(value) { fps = value },
     dispose() {
       if (disposed) return
@@ -406,8 +445,16 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
       window.removeEventListener('pointermove', pointerMove); window.removeEventListener('pointerup', pointerUp); window.removeEventListener('pointercancel', pointerUp)
       graph.onNodeHover(() => {}).onNodeClick(() => {}).onBackgroundClick(() => {}).onNodeDrag(() => {}).onNodeDragEnd(() => {}).onEngineStop(() => {}).pauseAnimation()
       const renderer = g3?.renderer()
+      const gl = renderer?.getContext()
+      const canvas = renderer?.domElement ?? null
       graph._destructor(); geometry?.dispose(); materials.forEach(m => m.dispose()); materials.clear(); objects.clear(); labels.clear()
-      renderer?.forceContextLoss(); nodes = []; links = []; host.replaceChildren()
+      // _destructor drops three's context-restored listener first. loseContext
+      // then posts webglcontextlost for a later turn; dispatch it now so the
+      // context is released before this canvas leaves the document. A once-only
+      // listener ignores the browser's later copy of the same event.
+      renderer?.forceContextLoss()
+      if (gl && canvas) canvas.dispatchEvent(new Event('webglcontextlost', { cancelable: true }))
+      nodes = []; links = []; host.replaceChildren()
     },
   }
 }
