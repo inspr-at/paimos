@@ -3,18 +3,26 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import type { Harness } from '../../lib/agents'
 import type { LiveBotState } from '../../lib/liveAgents'
+import { useAgentIndicator, type AgentIndicatorStyle } from '../../lib/agentIndicator'
+import PlayfulBot from './PlayfulBot.vue'
 
 // Shared LA2 / AM1 indicator: import LiveBot from components/projects/LiveBot.vue.
 // `state`: working | waiting (approval) | stale; `harness`: identity metadata,
 // never a state colour; `size`: CSS pixels. The parent supplies an accessible
-// status label (this artwork is decorative). No store or API dependency.
+// status label (this artwork is decorative). LA3 reads the viewer's account
+// preference here, so wrappers need no settings wiring. `indicatorStyle` is only
+// for the two Settings previews; ordinary consumers inherit the stored choice.
+// Optional id/index/lead preserve LA1's identity tint and staggered animation.
 // `eventPulse`: a monotonic counter advanced ONLY by observed activity_sequence
 // or heartbeat evidence. Initial render, remount, hover and state changes do
 // not pulse. Optional eventCaption must describe that evidence, never a guess.
 const props = withDefaults(defineProps<{
   state?: LiveBotState; harness?: Harness; size?: number; eventPulse?: number; eventCaption?: string
-}>(), { state: 'working', size: 28, eventPulse: 0, eventCaption: '' })
-const style = computed(() => ({ '--size': `${props.size}px` }))
+  indicatorStyle?: AgentIndicatorStyle; id?: string; index?: number; lead?: boolean
+}>(), { state: 'working', size: 28, eventPulse: 0, eventCaption: '', id: '', index: 0, lead: true })
+const { choice } = useAgentIndicator()
+const indicator = computed(() => props.indicatorStyle ?? choice.value.style)
+const style = computed(() => ({ '--size': `${props.size}px`, '--lag': `${-(props.index * .53 + ((parseInt(props.id.slice(0, 2), 16) || 0) % 7) * .31).toFixed(2)}s` }))
 const pulse = ref(0)
 let lastPulse = props.eventPulse
 let clear: ReturnType<typeof setTimeout> | undefined
@@ -33,8 +41,9 @@ onBeforeUnmount(() => clearTimeout(clear))
 </script>
 
 <template>
-  <span class="live-bot" :class="state" :style="style" :data-state="state" :data-harness="harness" aria-hidden="true">
-    <svg class="bot" viewBox="0 0 32 32" focusable="false">
+  <span class="live-bot" :class="[state, { hovering: choice.hovering, lead }]" :style="style" :data-style="indicator" :data-state="state" :data-harness="harness" aria-hidden="true">
+    <PlayfulBot v-if="indicator === 'playful'" :id="id" :size="size" :index="index" :lead="lead" :state="state" :hovering="choice.hovering" />
+    <svg v-else class="bot" viewBox="0 0 32 32" focusable="false">
       <circle class="disk" cx="16" cy="16" r="14.5" />
       <circle class="ring-track" cx="16" cy="16" r="14" />
       <circle v-if="state !== 'stale'" class="ring-sweep" cx="16" cy="16" r="14" pathLength="100" />
@@ -73,10 +82,13 @@ onBeforeUnmount(() => clearTimeout(clear))
 .glint { fill: var(--gold-ink); stroke: var(--surface-raised); stroke-width: .7; transform-origin: 26px 6px; animation: event-opacity .6s ease-out both; }
 .event-caption { position: absolute; top: calc(100% + 3px); left: 50%; translate: -50% 0; white-space: nowrap; font: 500 10px/1.2 var(--font); color: var(--gold-ink); pointer-events: none; animation: event-opacity .6s ease-out both; }
 @media (prefers-reduced-motion: no-preference) {
+  .hovering:not(.stale) .robot { animation: bot-hover 1.9s ease-in-out infinite; animation-delay: var(--lag); }
+  .hovering:not(.lead) .robot { animation-duration: 2.3s; }
   .ring-sweep { animation: activity-sweep 2.4s cubic-bezier(.4, .25, .6, .75) infinite; }
   .waiting .ring-sweep { animation-play-state: paused; }
   .glint { animation-name: event-glint; }
 }
+@keyframes bot-hover { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-1.1px); } }
 @keyframes activity-sweep { from { transform: rotate(-85deg); } to { transform: rotate(275deg); } }
 @keyframes event-glint { 0% { opacity: 0; transform: scale(.65); } 25% { opacity: 1; transform: scale(1); } 100% { opacity: 0; transform: scale(.85); } }
 @keyframes event-opacity { 0%, 100% { opacity: 0; } 25%, 50% { opacity: 1; } }
@@ -84,5 +96,5 @@ onBeforeUnmount(() => clearTimeout(clear))
 
 <style>
 /* The project chip pauses the ring while outside the viewport. */
-.asleep .live-bot .ring-sweep { animation-play-state: paused; }
+.asleep .live-bot .ring-sweep, .asleep .live-bot .robot { animation-play-state: paused; }
 </style>

@@ -8,6 +8,7 @@ import { agentKey, chipText, elapsedFor, liveSummary, phaseLabel, who, type Live
 import { useLiveAgents } from '../../stores/liveAgents'
 import { useProjects } from '../../stores/projects'
 import AppIcon from '../AppIcon.vue'
+import { useAgentIndicator } from '../../lib/agentIndicator'
 import LiveBot from './LiveBot.vue'
 
 // The agents working in one project right now (AEON-184), as a small living
@@ -19,6 +20,7 @@ import LiveBot from './LiveBot.vue'
 // a phone robots only).
 const props = withDefaults(defineProps<{ agents: LiveAgent[]; project: { title: string; routeKey: string }; variant?: 'card' | 'row' }>(), { variant: 'card' })
 const live = useLiveAgents()
+const { choice: indicator } = useAgentIndicator()
 const projects = useProjects()
 const id = useId()
 const trigger = ref<HTMLButtonElement>()
@@ -138,13 +140,13 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <span v-if="agents.length" ref="root" class="live" :class="[`as-${variant}`, state, { open, asleep }]" @keydown="keydown">
+  <span v-if="agents.length" ref="root" class="live" :class="[`as-${variant}`, state, { open, asleep, playful: indicator.style === 'playful' }]" @keydown="keydown">
     <button
       ref="trigger" type="button" class="live-chip" :aria-expanded="open" :aria-controls="open ? id : undefined"
       :aria-label="`${summary}. Who works on what`" @click="toggle" @pointerenter="enter" @pointerleave="leave" @focusin="focusIn" @focusout="focusOut"
     >
       <span class="faces">
-        <LiveBot v-for="agent in faces" :key="agentKey(agent)" class="face" :state="agent.state" :harness="agent.harness" :event-pulse="live.eventPulseFor(agent)" :size="variant === 'card' ? 28 : 26" />
+        <LiveBot v-for="(agent, i) in faces" :key="agentKey(agent)" :id="agent.principal_id" :index="i" :lead="i === 0" class="face" :state="agent.state" :harness="agent.harness" :event-pulse="live.eventPulseFor(agent)" :size="indicator.style === 'playful' ? (variant === 'card' ? 26 : 22) : (variant === 'card' ? 28 : 26)" />
         <span v-if="agents.length > 1" class="count mono">{{ agents.length }}</span>
       </span>
       <span v-if="variant === 'card'" class="words">
@@ -155,6 +157,7 @@ onBeforeUnmount(() => {
       </span>
       <span v-else-if="chip.key" class="key mono">{{ chip.key }}</span>
       <span v-else class="row-name">{{ chip.name }}</span>
+      <span v-if="indicator.style === 'playful' && state === 'working'" class="typing" aria-hidden="true"><i /><i /><i /></span>
 
     </button>
     <Teleport to="body">
@@ -173,7 +176,7 @@ onBeforeUnmount(() => {
               :is="agent.session_id ? RouterLink : 'div'" class="agent-line" :to="agent.session_id ? `/agents/${encodeURIComponent(agent.session_id)}` : undefined"
               :aria-label="agent.session_id ? `${who(agent)}, ${harnessLabel(agent.harness)}, ${phaseLabel(agent).toLowerCase()} ${agePrefix(agent)} ${elapsedFor(agent, live.serverNow)}. Open the session` : undefined"
             >
-              <LiveBot :state="agent.state" :harness="agent.harness" :event-pulse="live.eventPulseFor(agent)" :size="32" />
+              <LiveBot :id="agent.principal_id" :index="i" :state="agent.state" :harness="agent.harness" :event-pulse="live.eventPulseFor(agent)" :size="indicator.style === 'playful' ? 30 : 32" />
               <span class="agent-text">
                 <span class="agent-name">{{ who(agent) }}<span class="harness">{{ harnessLabel(agent.harness) }}</span></span>
                 <span class="agent-meta"><span class="phase" :class="agent.state ?? agent.phase">{{ phaseLabel(agent) }}</span><span class="sep" />{{ agePrefix(agent) }} <time class="mono" :datetime="agent.since" :title="absoluteTime(agent.since)">{{ elapsedFor(agent, live.serverNow) }}</time><span class="sep" /><span class="since">since {{ clock(agent.since) }}</span></span>
@@ -201,6 +204,18 @@ onBeforeUnmount(() => {
   color: var(--ink); font: 500 12px/1 var(--font); cursor: pointer; -webkit-user-select: none; user-select: none; transition: none;
 }
 .live-chip:hover, .live.open .live-chip { box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--signal) 40%, transparent); }
+/* LA1's warm chip and typing rhythm accompany its original robot. */
+.playful.working .live-chip { background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line), 0 1px 2px rgba(14, 111, 108, .08); }
+.playful.working .live-chip:hover, .playful.working.open .live-chip { box-shadow: inset 0 0 0 1px var(--chip-teal-line), 0 6px 16px -8px rgba(14, 111, 108, .55); }
+.typing { display: inline-flex; align-items: center; gap: 2px; flex-shrink: 0; height: 10px; }
+.typing i { width: 3px; height: 3px; border-radius: 50%; background: var(--teal); opacity: .5; }
+@media (prefers-reduced-motion: no-preference) {
+  .typing i { animation: live-typing 1.2s ease-in-out infinite; }
+  .typing i:nth-child(2) { animation-delay: .16s; }
+  .typing i:nth-child(3) { animation-delay: .32s; }
+}
+@keyframes live-typing { 0%, 60%, 100% { transform: translateY(0); opacity: .45; } 30% { transform: translateY(-2.5px); opacity: 1; } }
+.live.asleep .typing i { animation-play-state: paused; }
 /* A finger's reach: the chip answers a little beyond its edge (44px tall, and wide on a phone row). */
 .live-chip::before { content: ''; position: absolute; inset: -6px -2px; border-radius: 999px; }
 .live-chip:focus-visible { outline: none; box-shadow: inset 0 0 0 1px var(--chip-teal-line), var(--focus-ring); }
@@ -221,6 +236,7 @@ onBeforeUnmount(() => {
 /* Keep two overlapping robots and the total in the phone row's gutter. */
 @media (max-width: 760px) {
   .as-row .key, .as-row .row-name { display: none; }
+  .as-row .typing { display: none; }
   .as-row .live-chip { height: 32px; padding: 0 3px; }
   .as-row .live-chip::before { inset: -6px -2px; }
 }

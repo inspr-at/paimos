@@ -53,6 +53,27 @@ it('a failed refresh preserves the last successful timestamp and recovers on the
   expect(store.sessionsState).toBe('ready')
 })
 
+it('pulses only when the latest activity entry advances across session polls', async () => {
+  const session = (activity_note_id: number, activity_sequence: number, heartbeat_at: string) =>
+    ({ id: 'lead', activity_note_id, activity_note: 'Running tests', activity_sequence, heartbeat_at }) as HarnessSession
+  const at = '2026-09-26T12:00:00Z'
+  vi.mocked(listAllSessions).mockResolvedValueOnce({ items: [session(7, 3, at)], next_cursor: null })
+    .mockResolvedValueOnce({ items: [session(7, 4, '2026-09-26T12:01:00Z')], next_cursor: null })
+    .mockResolvedValueOnce({ items: [session(8, 4, '2026-09-26T12:01:00Z')], next_cursor: null })
+    .mockResolvedValueOnce({ items: [session(7, 4, at)], next_cursor: null })
+    .mockResolvedValueOnce({ items: [session(8, 4, at)], next_cursor: null })
+  const store = useAgents()
+  await store.refreshSessions()
+  expect(store.eventPulseFor('lead')).toBe(0)
+  await store.refreshSessions()
+  expect(store.eventPulseFor('lead')).toBe(0)
+  await store.refreshSessions()
+  expect(store.eventPulseFor('lead')).toBe(1)
+  await store.refreshSessions()
+  await store.refreshSessions()
+  expect(store.eventPulseFor('lead')).toBe(1)
+})
+
 it('a stalled optional account read does not hold up a newly registered worker', async () => {
   let finish!: (value: never[]) => void
   vi.mocked(listAccounts).mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
