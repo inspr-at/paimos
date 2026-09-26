@@ -91,7 +91,7 @@ defineExpose({ focus: () => canvas.value?.focus() })
 
 <template>
   <div class="kg">
-    <GraphCanvas ref="canvas" :data="adapted" :viewer-key="viewer" title="Knowledge, connected" :summary="loading ? 'Finding the connections…' : summary" :selected-id="selected?.id" :matches="matches" :searching="!!query" canvas-class="kg-canvas" @select="selectCanvas" @open="openCanvas" @hover="hoverCanvas" @clear="clear" @pointer="move">
+    <GraphCanvas v-if="viewer" ref="canvas" :data="adapted" :viewer-key="viewer" title="Knowledge, connected" :summary="loading ? 'Finding the connections…' : summary" :selected-id="selected?.id" :matches="matches" :searching="!!query" canvas-class="kg-canvas" @select="selectCanvas" @open="openCanvas" @hover="hoverCanvas" @clear="clear" @pointer="move">
       <template #controls><KnowledgeGraphControls :tickets="tickets" @tickets="tickets = !tickets" /></template>
       <template #default="{ dimension, focused }">
       <div v-if="loading || error || !visible.nodes.length" class="kg-state">
