@@ -15,11 +15,15 @@ defineProps<{
   density: 'comfortable' | 'compact'
   columns?: { order: ColumnId[]; visible: ColumnId[]; customised: boolean } | null
   grouped?: boolean
+  headerGraph?: boolean
 }>()
+// The header graph is on until a person turns it off. Callers that omit the
+// prop keep that default so the switch does not flash off.
 const emit = defineEmits<{
   group: [value: GroupBy]; sort: [keys: SortKey[]]; density: [value: 'comfortable' | 'compact']
   columns: [order: ColumnId[], visible: ColumnId[]]; columnsReset: []
   expandAll: []; collapseAll: []; expandGroups: []; collapseGroups: []
+  headerGraph: [value: boolean]
 }>()
 </script>
 
@@ -54,6 +58,12 @@ const emit = defineEmits<{
       </div>
     </div>
     <ColumnPicker v-if="columns" class="section" :order="columns.order" :visible="columns.visible" :customised="columns.customised" @change="(order, visible) => emit('columns', order, visible)" @reset="emit('columnsReset')" />
+    <div class="section">
+      <label class="switch">
+        <input type="checkbox" :checked="headerGraph !== false" @change="emit('headerGraph', ($event.target as HTMLInputElement).checked)" />
+        <span>Graph in project header</span>
+      </label>
+    </div>
   </div>
 </template>
 

@@ -8,7 +8,7 @@ import { can } from '../lib/authz'
 import { confirmAction } from '../lib/confirm'
 import { asListItem, guardedMove, keyPrefix, kinds } from '../lib/useTicket'
 import { useOutline } from '../lib/useOutline'
-import { useDensity } from '../lib/prefs'
+import { useDensity, useHeaderGraph } from '../lib/prefs'
 import { orderOf, PINNED, type ColumnId, type ListPrefs } from '../lib/columns'
 import { copyName, duplicateView, loadViews, removeView, renameView, saveNewView, saveViewState, shareView, viewsOf } from '../lib/savedViews'
 import { usePreference } from '../lib/preferences'
@@ -39,6 +39,7 @@ import LabelMenu, { type LabelChoice } from '../components/work/LabelMenu.vue'
 import OptionMenu from '../components/work/OptionMenu.vue'
 import EpicPicker from '../components/work/EpicPicker.vue'
 import JourneyChip from '../components/journey/JourneyChip.vue'
+import HeaderGlimpse from '../components/work/HeaderGlimpse.vue'
 import type KnowledgeEntryPageType from '../components/knowledge/KnowledgeEntryPage.vue'
 import type KnowledgeTabType from '../components/knowledge/KnowledgeTab.vue'
 import { DOCK_LIST_RESERVE, DOCK_MEDIA, entryPath, isKnowledgeType, parseEntryParam, type KnowledgeType } from '../lib/knowledge'
@@ -93,6 +94,8 @@ function resetColumns() {
 }
 function saveWidths(widths: Partial<Record<ColumnId, number>>) { listPref.value?.save({ ...(listPrefs.value ?? {}), widths }) }
 const { density, set: setDensity } = useDensity()
+const { headerGraph, ready: headerGraphReady, set: setHeaderGraph } = useHeaderGraph()
+const glimpseActive = ref(false)
 const list = useTicketList(projectId, filters)
 const now = ref(Date.now())
 // Sections own their views. The registry also supplies TG1's optional renderer.
@@ -1156,7 +1159,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
     <template v-if="project">
       <div v-show="!fullView && !knowledgeEntryOpen" class="list-view" :class="{ selecting: selectable && selected.size }">
       <header class="project-head">
-        <div class="head-flex">
+        <div class="head-flex" :class="{ 'with-glimpse': glimpseActive }">
         <div class="head-main">
           <div class="title-line">
             <span class="key-badge big">{{ project.routeKey }}</span>
@@ -1167,6 +1170,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
           <p class="description" :data-tip="project.description.length > 120 ? project.description : undefined">{{ project.description || 'No description yet.' }}</p>
           <div :class="{ 'journey-chip-slot': journeyActive }"><JourneyChip :project-id="project.id" :active="journeyActive" @go="journeyActive ? journeyStageTo(journeyStage as Stage ?? 'inspire') : setSection('journey')" /></div>
         </div>
+        <HeaderGlimpse v-if="headerGraphReady && headerGraph && !graphActive" :project-id="project.id" :project-key="project.routeKey" :ticket-count="counts?.total ?? 0" :enabled="headerGraph" @active="glimpseActive = $event" />
         <div v-if="counts" class="head-stats" :aria-label="`${counts.open} open, ${counts.progress} in progress, ${counts.done} done of ${counts.total}`">
           <div class="stat-line">
             <span class="stat" data-tip="Open · new and backlog"><StatusIcon state="new" :size="11" /><b>{{ counts.open.toLocaleString('en-GB') }}</b> open</span>
@@ -1202,6 +1206,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
           :view="viewMode" :knowledge-view="knowledgeView" @view="setView" @expand-all="outline.expandAll()" @collapse-all="outline.collapseAll()"
           @expand-groups="setAllGroups(true)" @collapse-groups="setAllGroups(false)"
           :columns="toolbarColumns" @columns="saveColumns" @columns-reset="resetColumns"
+          :header-graph="headerGraph" @header-graph="setHeaderGraph"
         />
       </div>
 
@@ -1306,7 +1311,11 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
    leave the list as narrow as a phone on a wide screen (AEON-140). */
 .project-head { padding: 4px 0 14px; container: projecthead / inline-size; }
 .head-flex { display: flex; align-items: flex-end; justify-content: space-between; gap: 32px; }
-.head-main { min-width: 0; flex: 1; }
+.head-flex.with-glimpse { display: grid; grid-template-columns: minmax(0, max-content) minmax(180px, 1fr) auto; align-items: stretch; column-gap: 28px; }
+.head-flex.with-glimpse .head-stats { align-self: end; }
+.head-flex.with-glimpse .head-main { align-self: center; }
+.head-main { min-width: 0; flex: 1; position: relative; z-index: 1; }
+.head-stats { position: relative; z-index: 1; }
 .journey-chip-slot { min-height: 40px; }
 .title-line { display: flex; align-items: center; gap: 12px; min-width: 0; }
 .key-badge.big { height: 26px; padding: 0 10px; font-size: 12px; border-radius: 7px; }
@@ -1359,6 +1368,10 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
 .sk-a { width: 320px; height: 26px; border-radius: 8px; } .sk-b { width: 520px; } .sk-c { width: 100%; height: 44px; border-radius: 12px; margin-top: 18px; }
 @media (max-width: 1080px) { .progress-line { width: 200px; } .stat-line { gap: 12px; } }
 @container projecthead (max-width: 760px) {
+  .head-flex.with-glimpse { display: flex; }
+  .head-flex.with-glimpse .head-main, .head-flex.with-glimpse .head-stats { align-self: stretch; }
+  .head-flex.with-glimpse .head-main { padding-top: 0; }
+  .head-flex.with-glimpse :deep(.glimpse-col) { display: none; }
   .head-flex { flex-direction: column; align-items: stretch; gap: 12px; }
   .head-stats { justify-items: start; }
   .head-stats-skeleton { width: 100%; min-height: 103px; }

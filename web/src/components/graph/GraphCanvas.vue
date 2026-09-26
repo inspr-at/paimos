@@ -12,13 +12,15 @@ import { useGraphMotion } from '../../lib/graphMotion'
 // fps defaults to 60; updates emit update:fps. focusQuery defaults to ?focus=1.
 // Ticket views opt into single-click opening, suspend canvas keys behind their
 // panel, and may lower minStageHeight. Knowledge keeps all existing defaults.
+// glimpse is a fitted decoration: no chrome, labels, keyboard or pointer capture.
+// The host page supplies the mask, the hit target and when to pause or dispose.
 // Like QuoteWorkspace, one mounted workspace serves normal/full-area layouts;
 // rarely used settings stay collapsed and all canvas/camera state survives.
 const props = withDefaults(defineProps<{
   data: GraphData; viewerKey?: string; title?: string; summary?: string; selectedId?: string
   matches?: Set<string>; searching?: boolean; fps?: GraphFPS; focusQuery?: string; canvasClass?: string
-  openOnClick?: boolean; keyboardActive?: boolean; minStageHeight?: number
-}>(), { title: 'Graph', summary: '', selectedId: '', searching: false, fps: 60, focusQuery: 'focus', canvasClass: '', openOnClick: false, keyboardActive: true, minStageHeight: 480 })
+  openOnClick?: boolean; keyboardActive?: boolean; minStageHeight?: number; glimpse?: boolean; layoutBias?: 'elliptic'
+}>(), { title: 'Graph', summary: '', selectedId: '', searching: false, fps: 60, focusQuery: 'focus', canvasClass: '', openOnClick: false, keyboardActive: true, minStageHeight: 480, glimpse: false })
 const emit = defineEmits<{ select: [node: GraphNode, via?: 'pointer' | 'key']; open: [node: GraphNode]; hover: [node: GraphNode | null]; clear: []; 'update:fps': [fps: GraphFPS]; pointer: [event: PointerEvent] }>()
 const route = useRoute(), router = useRouter()
 const root = ref<HTMLElement>(), host = ref<HTMLElement>(), stage = ref<HTMLElement>(), header = ref<HTMLElement>(), footer = ref<HTMLElement>()
@@ -26,7 +28,7 @@ const media = window.matchMedia('(prefers-reduced-motion: reduce)'), scheme = wi
 const dimension = ref<GraphDimension>(media.matches ? '2d' : '3d'), paused = ref(media.matches)
 const ready = ref(false), labelsReady = ref(false), error = ref(''), fallback = ref(false), labels = ref<GraphLabels>('smart'), rate = ref<GraphFPS>(props.fps)
 const hovered = ref(''), phase = ref<MotionPhase>(paused.value ? 'paused' : 'orbiting'), height = ref(480)
-const focused = computed(() => route.query[props.focusQuery] === '1')
+const focused = computed(() => !props.glimpse && route.query[props.focusQuery] === '1')
 // Orbit period is an account preference, not a canvas prop, so knowledge,
 // tickets and the project glimpse all follow the one setting.
 const { seconds: orbitSeconds } = useGraphMotion()
@@ -57,7 +59,9 @@ function emphasis() {
   }
   renderer?.emphasis({ selected: props.selectedId, neighbours, matches: props.matches ?? new Set(), searching: props.searching, hovered: hovered.value })
 }
+function setPaused(value: boolean) { paused.value = value; renderer?.motion(value) }
 function measure() {
+  if (props.glimpse) { if (host.value) renderer?.resize(host.value.clientWidth, host.value.clientHeight); return }
   if (!stage.value || !root.value) return
   root.value.style.setProperty('--graph-overlay-top', `${(header.value?.offsetHeight ?? 0) + 34}px`)
   root.value.style.setProperty('--graph-overlay-bottom', `${(footer.value?.offsetHeight ?? 0) + 28}px`)
@@ -76,9 +80,9 @@ async function start() {
   error.value = ''
   try {
     const next = await createGraphRenderer(host.value, dimension.value, {
-      reduced: media.matches, signal: request.signal, fps: rate.value, labels: labels.value,
-      select: n => { select(n, 'pointer'); if (props.openOnClick) emit('open', n) }, open: n => emit('open', n), clear: () => emit('clear'),
-      hover: n => { hovered.value = n?.id ?? ''; emit('hover', n); emphasis() }, motionState: value => { phase.value = value },
+      reduced: media.matches, signal: request.signal, fps: rate.value, labels: props.glimpse ? 'off' : labels.value, glimpse: props.glimpse, layoutBias: props.layoutBias,
+      select: n => { if (props.glimpse) return; select(n, 'pointer'); if (props.openOnClick) emit('open', n) }, open: n => { if (!props.glimpse) emit('open', n) }, clear: () => { if (!props.glimpse) emit('clear') },
+      hover: n => { if (props.glimpse) return; hovered.value = n?.id ?? ''; emit('hover', n); emphasis() }, motionState: value => { phase.value = value },
       labelsSettled: value => { if (request.signal.aborted || !mounted) return; labelsReady.value = value },
     })
     if (!next) return
@@ -113,7 +117,7 @@ async function syncFocus(value: boolean) {
   measure()
 }
 function keydown(event: KeyboardEvent) {
-  if (event.defaultPrevented || !props.keyboardActive) return
+  if (props.glimpse || event.defaultPrevented || !props.keyboardActive) return
   if (event.key === 'Escape' && focused.value) {
     event.preventDefault(); event.stopImmediatePropagation(); toggleFocus(); return
   }
@@ -136,8 +140,8 @@ function keydown(event: KeyboardEvent) {
 }
 function onReduced() { paused.value = media.matches; if (media.matches) dimension.value = '2d'; void start() }
 function retheme() { renderer?.theme() }
-watch(storageKey, (key, previous) => loadLabels(key, previous), { immediate: true })
-watch(labels, value => renderer?.labels(value))
+watch(storageKey, (key, previous) => { if (!props.glimpse) loadLabels(key, previous) }, { immediate: true })
+watch(labels, value => { if (!props.glimpse) renderer?.labels(value) })
 watch(() => props.fps, value => { rate.value = value })
 watch(rate, value => renderer?.frameRate(value))
 watch(() => props.data, value => { hovered.value = ''; emit('hover', null); renderer?.data(value); emphasis() })
@@ -150,7 +154,7 @@ onMounted(() => {
   for (const el of [root.value, host.value, header.value, footer.value]) if (el) resize.observe(el)
   theme = new MutationObserver(retheme); theme.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme', 'style', 'class'] })
   media.addEventListener('change', onReduced); scheme.addEventListener('change', retheme)
-  window.addEventListener('resize', measure); window.addEventListener('keydown', keydown, true)
+  window.addEventListener('resize', measure); if (!props.glimpse) window.addEventListener('keydown', keydown, true)
   if (focused.value) void syncFocus(true)
   measure(); void start()
 })
@@ -159,10 +163,13 @@ onBeforeUnmount(() => {
   media.removeEventListener('change', onReduced); scheme.removeEventListener('change', retheme)
   window.removeEventListener('resize', measure); window.removeEventListener('keydown', keydown, true)
 })
-defineExpose({ focus: () => host.value?.focus({ preventScroll: true }), focusNode: (id: string) => renderer?.focus(id), interact: () => renderer?.interact() })
+defineExpose({ focus: () => host.value?.focus({ preventScroll: true }), focusNode: (id: string) => renderer?.focus(id), interact: () => renderer?.interact(), setPaused })
 </script>
 <template>
-  <Teleport to="body" :disabled="!focused">
+  <div v-if="glimpse" ref="root" class="graph-glimpse">
+    <div ref="host" class="graph-surface" :class="canvasClass" aria-hidden="true" data-glimpse="" :data-dimension="dimension" :data-ready="ready" :data-labels-ready="labelsReady" :data-motion="paused ? 'still' : 'on'" :data-motion-phase="phase" data-labels="off" :data-fps="rate" :data-orbit-seconds="orbitSeconds" />
+  </div>
+  <Teleport v-else to="body" :disabled="!focused">
     <section ref="root" class="graph-viewer" :class="{ 'graph-focus': focused }" :role="focused ? 'dialog' : undefined" :aria-modal="focused ? true : undefined" :aria-label="title" :data-focus="focused">
       <header ref="header" class="graph-header"><div class="graph-heading"><h2>{{ title }}</h2><p role="status">{{ summary }}</p></div><GraphControls :dimension="dimension" :paused="paused" :fallback="fallback" :labels="labels" :fps="rate" :focus="focused" @fit="fit" @dimension="setDimension" @pause="toggleMotion" @labels="setLabels" @fps="setFPS" @focus="toggleFocus"><slot name="controls" /></GraphControls></header>
       <div ref="stage" class="graph-stage" @pointermove="emit('pointer', $event)" :style="focused ? undefined : { height: `${height}px`, minHeight: `${minStageHeight}px` }">
@@ -175,6 +182,8 @@ defineExpose({ focus: () => host.value?.focus({ preventScroll: true }), focusNod
   </Teleport>
 </template>
 <style scoped>
+.graph-glimpse { position: absolute; inset: 0; min-width: 0; pointer-events: none; background: transparent; }
+.graph-glimpse .graph-surface { position: absolute; inset: 0; width: auto; height: auto; background: transparent; }
 .graph-viewer { position: relative; min-width: 0; background: var(--canvas); color: var(--ink); border-radius: var(--radius); box-shadow: var(--shadow); }
 .graph-header { display: flex; justify-content: space-between; flex-wrap: wrap; align-items: center; gap: 16px; padding: 22px 24px 16px; position: relative; z-index: 5; }
 .graph-heading h2 { font-size: 17px; font-weight: 580; letter-spacing: -.025em; }
