@@ -164,7 +164,7 @@ test('list rows carry a compact live chip: robots and the ticket key', async ({ 
   const hausv = row(page, 'p-hausv')
   await expect(hausv.getByRole('button', { name: /^1 agent working: hausv on HAUSV-887/ })).toContainText('HAUSV-887')
   await expect(row(page, 'p-ops').locator('.live-bot')).toHaveCount(2)
-  await expect(row(page, 'p-ops').locator('.live-chip .more')).toHaveText('+1')
+  await expect(row(page, 'p-ops').locator('.live-chip .count')).toHaveText('3')
   await expect(row(page, 'p-pharos').locator('.live')).toHaveCount(0)
   // The chip ends where the project column ends, before the counts.
   const chip = (await hausv.locator('.live-chip').boundingBox())!
@@ -205,11 +205,12 @@ test('starting, stopping and stale agents: polls every 20 seconds and says what 
   await page.clock.fastForward(23_100)
   await expect(card(page, 'p-janus').locator('.live')).toHaveCount(0)
   await expect(news).toHaveText('No agent is working on Janus any more.')
-  // A heartbeat older than two minutes on the server's clock no longer counts.
+  // A stale reading remains visible but never claims it is working.
   data.live.push(liveAgent({ project_id: 'p-site', name: 'late', heartbeat_at: new Date(Date.parse('2026-09-23T12:00:00Z') - 150_000).toISOString() }))
   await page.clock.fastForward(20_500)
   await expect.poll(reads).toBe(6)
-  await expect(card(page, 'p-site').locator('.live')).toHaveCount(0)
+  await expect(card(page, 'p-site').locator('.live-bot')).toHaveAttribute('data-state', 'stale')
+  await expect(card(page, 'p-site').locator('.live-chip')).toHaveAccessibleName(/no recent activity/)
   // A hidden tab asks nothing and catches up when shown again.
   await page.evaluate(() => { Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true }); document.dispatchEvent(new Event('visibilitychange')) })
   await page.clock.fastForward(65_000)
@@ -249,8 +250,8 @@ test('a server without the read, or a person without access, gets a still page',
   expect(errors).toEqual([])
 })
 
-// Every animation and transition on live chips, their popover and the cards'
-// auras, read from the styles themselves (keyframes by name), so a short
+// Every animation and transition on live chips and their popover, read from
+// the styles themselves (keyframes by name), so a short
 // animation that has already finished is still checked.
 function motionProperties() {
   const keyframes = new Map<string, Set<string>>()
@@ -266,10 +267,9 @@ function motionProperties() {
   for (const sheet of document.styleSheets) { try { collect(sheet.cssRules) } catch { /* cross-origin */ } }
   const COMPOSITOR_PROPS = ['opacity', 'transform', 'translate', 'scale', 'rotate']
   const animated = new Set<string>(), transitioned = new Set<string>(), animations = new Set<string>()
-  // The chips and popovers entirely; of a live card only its aura (the card's own hover is not new here).
+  // Chips and popovers only; the card's own hover is outside this indicator.
   const own = [...document.querySelectorAll('span.live, span.live *, .live-pop, .live-pop *')].map(el => [el, [null, '::before', '::after']] as const)
-  const auras = [...document.querySelectorAll('li.card.live')].map(el => [el, ['::before']] as const)
-  for (const [el, pseudos] of [...own, ...auras]) {
+  for (const [el, pseudos] of own) {
     for (const pseudo of pseudos) {
       const style = getComputedStyle(el, pseudo)
       for (const name of style.animationName.split(',').map(n => n.trim()).filter(n => n !== 'none')) {
@@ -286,15 +286,16 @@ const COMPOSITOR = ['opacity', 'transform', 'translate', 'scale', 'rotate']
 
 test.describe('motion', () => {
   test.use({ reducedMotion: 'no-preference' })
-  test('the robots, the chip and its details move on the compositor and out of step', async ({ page }) => {
+  test('only the activity ring moves continuously; the robot stays still on hover', async ({ page }) => {
     await cards(page, world())
     const bots = card(page, 'p-ops').locator('.live-bot')
-    const names = await bots.first().locator('.bob').evaluate(el => getComputedStyle(el).animationName)
-    expect(names).toMatch(/^bot-bob/)
-    const lags = await bots.evaluateAll(els => els.map(el => getComputedStyle(el).getPropertyValue('--lag')))
-    expect(new Set(lags).size).toBe(3)
+    const ring = bots.first().locator('.ring-sweep')
+    expect(await ring.evaluate(el => getComputedStyle(el).animationName)).toMatch(/^activity-sweep/)
+    expect(await ring.evaluate(el => getComputedStyle(el).animationDuration)).toBe('2.4s')
+    expect(await bots.first().locator('.robot').evaluate(el => getComputedStyle(el).animationName)).toBe('none')
+    await expect(bots.locator('.glint')).toHaveCount(0)
     const closed = await page.evaluate(motionProperties)
-    expect(closed.animations.some(name => name.startsWith('live-aura')), closed.animations.join(',')).toBe(true)
+    expect(closed.animations.every(name => name.startsWith('activity-sweep'))).toBe(true)
     // Open the details: their entrance and pulse count too.
     await card(page, 'p-ops').locator('.live-chip').hover()
     await expect(page.getByRole('dialog', { name: 'Agents working on Operations' })).toBeVisible()
@@ -311,10 +312,10 @@ test.describe('motion', () => {
 test('reduced motion keeps the robots still and the chip clearly working', async ({ page }) => {
   await cards(page, world())
   const bot = card(page, 'p-hausv').locator('.live-bot').first()
-  expect(await bot.locator('.bob').evaluate(el => getComputedStyle(el).animationName)).toBe('none')
-  expect(await card(page, 'p-hausv').locator('.typing i').first().evaluate(el => getComputedStyle(el).animationName)).toBe('none')
+  expect(await bot.locator('.ring-sweep').evaluate(el => getComputedStyle(el).animationName)).toBe('none')
   await expect(card(page, 'p-hausv').locator('.live-chip')).toContainText('HAUSV-887')
-  expect(Number(await bot.locator('.tip').evaluate(el => getComputedStyle(el).opacity))).toBe(1)
+  await expect(bot.locator('.robot')).toBeVisible()
+  await expect(bot.locator('.glint')).toHaveCount(0)
 })
 
 for (const colorScheme of ['light', 'dark'] as const) {
@@ -345,6 +346,79 @@ for (const colorScheme of ['light', 'dark'] as const) {
   })
 }
 
+// Mount the shared component through Vite, independently of the Projects store.
+// AM1 can supply approval state without inventing a field on LA1's live API.
+async function mountIndicator(page: Page, state = 'working', eventPulse = 0) {
+  await page.evaluate(async ({ state, eventPulse }) => {
+    const vuePath = '/node_modules/.vite/deps/vue.js'
+    const botPath = '/src/components/projects/LiveBot.vue'
+    const { createApp, h, reactive } = await import(vuePath)
+    const { default: Bot } = await import(botPath)
+    const host = document.createElement('div')
+    host.id = 'shared-indicator'
+    host.style.cssText = 'position:fixed;top:100px;left:16px;z-index:100;padding:24px;background:var(--surface-raised);border-radius:12px'
+    document.body.append(host)
+    const props = reactive({ state, harness: 'codex', size: 44, eventPulse, eventCaption: 'Activity received' })
+    document.addEventListener('indicator-props', event => Object.assign(props, (event as CustomEvent).detail))
+    createApp({ render: () => h(Bot, props) }).mount(host)
+  }, { state, eventPulse })
+  return page.locator('#shared-indicator')
+}
+async function indicatorProps(page: Page, detail: Record<string, unknown>) {
+  await page.evaluate(detail => document.dispatchEvent(new CustomEvent('indicator-props', { detail })), detail)
+}
+
+for (const reducedMotion of ['reduce', 'no-preference'] as const) {
+  test.describe(`event evidence (${reducedMotion})`, () => {
+    test.use({ reducedMotion })
+    test('heartbeat advancement glints once; ordinary polls and view remounts do not', async ({ page }) => {
+      const data = world()
+      const calls = await cards(page, data)
+      const reads = () => calls.filter(c => c.path === '/api/harness-sessions/live').length
+      const bot = card(page, 'p-hausv').locator('.live-bot')
+      await expect(bot.locator('.glint')).toHaveCount(0)
+      await page.clock.fastForward(20_000)
+      await expect.poll(reads).toBe(2)
+      await expect(bot.locator('.glint')).toHaveCount(0)
+      data.live[0]!.heartbeat_at = '2026-09-23T12:00:10Z'
+      await page.clock.fastForward(20_000)
+      await expect(bot.locator('.glint')).toHaveCount(1)
+      const frames = await bot.locator('.glint').evaluate(el => el.getAnimations().flatMap(a => (a.effect as KeyframeEffect).getKeyframes()))
+      if (reducedMotion === 'reduce') expect(frames.every(f => !('transform' in f))).toBe(true)
+      await page.clock.fastForward(650)
+      await expect(bot.locator('.glint')).toHaveCount(0)
+      await page.clock.fastForward(20_000)
+      await expect(bot.locator('.glint')).toHaveCount(0)
+      await page.getByRole('radio', { name: 'List view' }).click()
+      await expect(row(page, 'p-hausv').locator('.live-bot .glint')).toHaveCount(0)
+    })
+
+    test('shared indicator pauses for approval and stale; pulses require an advancing counter', async ({ page }) => {
+      await cards(page, world('none'))
+      const fixture = await mountIndicator(page, 'waiting', 12)
+      const ring = fixture.locator('.ring-sweep')
+      await expect(fixture.locator('.clock')).toBeVisible()
+      await expect(fixture.locator('.glint')).toHaveCount(0)
+      const style = await ring.evaluate(el => ({ name: getComputedStyle(el).animationName, play: getComputedStyle(el).animationPlayState }))
+      expect(reducedMotion === 'reduce' ? style.name === 'none' : style.play === 'paused').toBe(true)
+      await indicatorProps(page, { eventPulse: 13 })
+      await expect(fixture.locator('.glint')).toHaveCount(1)
+      await page.clock.fastForward(650)
+      await expect(fixture.locator('.glint')).toHaveCount(0)
+      await indicatorProps(page, { eventPulse: 12 })
+      await indicatorProps(page, { eventPulse: 13 })
+      await expect(fixture.locator('.glint')).toHaveCount(0)
+      await indicatorProps(page, { state: 'working' })
+      await expect(fixture.locator('.clock')).toHaveCount(0)
+      await expect(fixture.locator('.glint')).toHaveCount(0)
+      await indicatorProps(page, { state: 'stale', eventPulse: 14 })
+      await expect(fixture.locator('.ring-sweep, .clock, .glint')).toHaveCount(0)
+      expect(await fixture.locator('.ring-track').evaluate(el => getComputedStyle(el).strokeDasharray)).not.toBe('none')
+      expect(await fixture.evaluate(el => el.getAnimations({ subtree: true }).length)).toBe(0)
+    })
+  })
+}
+
 // ---------- Design review screenshots (LIVE_SHOTS=<dir>) ----------
 const shots = process.env.LIVE_SHOTS ?? ''
 test.describe('screenshots', () => {
@@ -355,7 +429,7 @@ test.describe('screenshots', () => {
       for (const view of ['cards', 'list'] as const) {
         test(`shot ${view} ${width} ${colorScheme}`, async ({ page }) => {
           mkdirSync(shots, { recursive: true })
-          await page.setViewportSize({ width, height: width > 600 ? 1000 : 1400 })
+          await page.setViewportSize({ width, height: width > 600 ? 1000 : 2400 })
           await page.emulateMedia({ colorScheme })
           const data = world()
           data.preferences.projects = { view }
@@ -363,10 +437,38 @@ test.describe('screenshots', () => {
           await page.goto('/')
           await expect(page.locator('.live-chip').first()).toBeVisible()
           await page.waitForTimeout(700)
-          await page.screenshot({ path: `${shots}/la1-${view}-${width}-${colorScheme}.png` })
+          expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+          if (width === 390 && view === 'list') {
+            const chip = (await row(page, 'p-ops').locator('.live-chip').boundingBox())!
+            const progress = (await row(page, 'p-ops').locator('.progress').boundingBox())!
+            expect(chip.y).toBeGreaterThan(progress.y + progress.height)
+          }
+          await page.screenshot({ path: `${shots}/la2-${view}-${width}-${colorScheme}.png`, fullPage: true })
         })
       }
     }
+    test(`shot shared states ${colorScheme}`, async ({ page }) => {
+      mkdirSync(shots, { recursive: true })
+      await page.emulateMedia({ colorScheme })
+      await cards(page, world('none'))
+      await page.evaluate(async () => {
+        const vuePath = '/node_modules/.vite/deps/vue.js', botPath = '/src/components/projects/LiveBot.vue'
+        const { createApp, h, reactive } = await import(vuePath)
+        const { default: Bot } = await import(botPath)
+        const host = document.createElement('div')
+        host.id = 'indicator-states'
+        host.style.cssText = 'position:fixed;top:100px;left:24px;z-index:100;display:flex;gap:36px;padding:32px;background:var(--surface-raised);color:var(--ink);border-radius:12px'
+        document.body.append(host)
+        const props = reactive({ eventPulse: 0 })
+        document.addEventListener('indicator-props', event => Object.assign(props, (event as CustomEvent).detail))
+        const specimen = (state: string, label: string, extra = {}) => h('div', { style: 'display:grid;justify-items:center;gap:20px;font-size:12px' }, [h(Bot, { state, harness: 'codex', size: 48, ...extra }), label])
+        createApp({ render: () => [specimen('working', 'Working'), specimen('waiting', 'Waiting for approval'), specimen('stale', 'No recent activity'), specimen('working', 'Real event', props)] }).mount(host)
+      })
+      await indicatorProps(page, { eventPulse: 1 })
+      await expect(page.locator('#indicator-states .glint')).toHaveCount(1)
+      await page.evaluate(() => { for (const a of document.getAnimations()) { a.pause(); a.currentTime = 150 } })
+      await page.locator('#indicator-states').screenshot({ path: `${shots}/la2-states-${colorScheme}.png` })
+    })
     test(`shot popover ${colorScheme}`, async ({ page }) => {
       mkdirSync(shots, { recursive: true })
       await page.setViewportSize({ width: 1600, height: 1000 })
@@ -376,7 +478,7 @@ test.describe('screenshots', () => {
       await card(page, 'p-ops').locator('.live-chip').hover()
       await expect(page.getByRole('dialog', { name: 'Agents working on Operations' })).toBeVisible()
       await page.waitForTimeout(400)
-      await page.screenshot({ path: `${shots}/la1-popover-${colorScheme}.png` })
+      await page.screenshot({ path: `${shots}/la2-popover-${colorScheme}.png` })
     })
   }
   test.describe('frames', () => {
@@ -394,13 +496,13 @@ test.describe('screenshots', () => {
         for (const [i, t] of [0, 480, 960, 1440].entries()) {
           // Every animation paused at the same moment of its own loop.
           await page.evaluate(ms => { for (const a of document.getAnimations()) { a.pause(); a.currentTime = ms } }, 3000 + t)
-          await page.screenshot({ path: `${shots}/la1-frame-${colorScheme}-${i + 1}.png`, clip: { x: box.x, y: box.y + box.height - 62, width: box.width * .62, height: 62 } })
+          await page.screenshot({ path: `${shots}/la2-frame-${colorScheme}-${i + 1}.png`, clip: { x: box.x, y: box.y + box.height - 62, width: box.width * .62, height: 62 } })
         }
-        // Pointed at, the robots smile back (before the details open).
+        // Hover keeps the geometric robot unchanged (before the details open).
         await page.evaluate(() => { for (const a of document.getAnimations()) a.play() })
         await target.locator('.live-chip').hover()
         await page.waitForTimeout(150)
-        await page.screenshot({ path: `${shots}/la1-hover-${colorScheme}.png`, clip: { x: box.x, y: box.y + box.height - 62, width: box.width * .62, height: 62 } })
+        await page.screenshot({ path: `${shots}/la2-hover-${colorScheme}.png`, clip: { x: box.x, y: box.y + box.height - 62, width: box.width * .62, height: 62 } })
       })
     }
   })

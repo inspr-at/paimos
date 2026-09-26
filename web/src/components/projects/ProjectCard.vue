@@ -15,7 +15,7 @@ import StatCount from './StatCount.vue'
 // lately and when. The card is a link; its … button opens the same menu as a row.
 // Dragging a card (the page does it) arranges your own order: while carried, a
 // lifted copy follows the pointer and the card itself marks where it will land.
-// While agents work in the project (AEON-184) their robots come alive in the
+// While agents work in the project (AEON-184) their activity rings turn in the
 // footer, over the people who were active lately (kept, hidden, so the card
 // never changes size); the chip is the link's sibling, so it can be a button.
 const props = defineProps<{ project: Project; term: string; now: number; to: string; label: string; selected: boolean; dragging: boolean; menuOpen: boolean }>()
@@ -94,16 +94,6 @@ const agents = computed(() => live.forProject(props.project.id))
 /* The live chip rides the footer line, left, leaving the time its place. */
 .card { container: live-card / inline-size; }
 .card-live { position: absolute; left: 15px; bottom: 10px; z-index: 2; max-width: calc(100% - 30px - 92px); }
-/* Someone is in: a soft light rises from the chip's corner (under the content, breathing). */
-.card.live::before {
-  content: ''; position: absolute; z-index: -1; inset: 0; border-radius: inherit; pointer-events: none;
-  background: radial-gradient(110% 62% at 10% 100%, var(--live-aura), transparent 70%);
-  --live-aura: rgba(14, 111, 108, .14);
-}
-@media (prefers-reduced-motion: no-preference) {
-  .card.live::before { animation: live-aura 4.2s ease-in-out infinite; }
-  @keyframes live-aura { 0%, 100% { opacity: .55; } 50% { opacity: 1; } }
-}
 .activity { margin-left: auto; font-size: 12.5px; color: var(--ink-2); white-space: nowrap; }
 .card-more { position: absolute; top: 12px; right: 12px; width: 30px; height: 30px; color: var(--ink-3); opacity: 0; }
 .card:hover .card-more, .card:focus-within .card-more, .card.menu .card-more { opacity: 1; }
@@ -117,9 +107,6 @@ const agents = computed(() => live.forProject(props.project.id))
 </style>
 
 <style>
-/* The live aura in dark mode (reads the theme on <html>, so not scoped). */
-:root[data-theme="dark"] li.card.live::before { --live-aura: rgba(164, 229, 223, .11); }
-@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) li.card.live::before { --live-aura: rgba(164, 229, 223, .11); } }
 /* The lifted copy of a carried card (lives on <body>, so not scoped). */
 li.card.card-ghost { position: fixed; z-index: 80; margin: 0; list-style: none; pointer-events: none; will-change: translate; }
 li.card.card-ghost.lifted { scale: 1.025; box-shadow: 0 0 0 1px var(--chip-teal-line), 0 30px 60px -22px rgba(8, 24, 27, .46), 0 10px 22px -12px rgba(8, 24, 27, .3); }

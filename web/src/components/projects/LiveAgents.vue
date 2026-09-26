@@ -4,7 +4,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, useId, watch } fro
 import { RouterLink } from 'vue-router'
 import { absoluteTime } from '../../lib/work'
 import { harnessLabel } from '../../lib/agentState'
-import { chipText, elapsedFor, liveSummary, phaseLabel, who, type LiveAgent } from '../../lib/liveAgents'
+import { agentKey, chipText, elapsedFor, liveSummary, phaseLabel, who, type LiveAgent } from '../../lib/liveAgents'
 import { useLiveAgents } from '../../stores/liveAgents'
 import { useProjects } from '../../stores/projects'
 import AppIcon from '../AppIcon.vue'
@@ -31,15 +31,17 @@ const above = ref(true)
 const asleep = ref(false)
 
 const faces = computed(() => props.agents.slice(0, props.variant === 'card' ? 3 : 2))
-const more = computed(() => props.agents.length - faces.value.length)
 const chip = computed(() => chipText(props.agents))
 const summary = computed(() => liveSummary(props.agents))
 const lead = computed(() => props.agents[0])
+const state = computed(() => props.agents.some(a => !a.state || a.state === 'working') ? 'working' : props.agents.some(a => a.state === 'waiting') ? 'waiting' : 'stale')
+const groupLabel = computed(() => state.value === 'working' ? 'working' : state.value === 'waiting' ? 'waiting for approval' : 'with no recent activity')
 const elapsed = computed(() => lead.value ? elapsedFor(lead.value, live.serverNow) : '')
 // Without a ticket, a lead that is still starting (or stopping) says so.
-const leadPhase = computed(() => lead.value && lead.value.phase !== 'working' ? phaseLabel(lead.value).toLowerCase() : '')
+const leadPhase = computed(() => lead.value && (lead.value.phase !== 'working' || (lead.value.state && lead.value.state !== 'working')) ? phaseLabel(lead.value).toLowerCase() : '')
 const clockFormat = new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit' })
 const clock = (iso: string) => clockFormat.format(Date.parse(iso))
+const agePrefix = (agent: LiveAgent) => agent.state === 'stale' || agent.state === 'waiting' ? 'session age' : 'for'
 // A ticket links into the project it lives in now, which may not be this card's
 // (the agent is listed here because its session started here).
 const ticketHref = (agent: LiveAgent) => {
@@ -136,16 +138,15 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <span v-if="agents.length" ref="root" class="live" :class="[`as-${variant}`, { open, asleep }]" @keydown="keydown">
+  <span v-if="agents.length" ref="root" class="live" :class="[`as-${variant}`, state, { open, asleep }]" @keydown="keydown">
     <button
       ref="trigger" type="button" class="live-chip" :aria-expanded="open" :aria-controls="open ? id : undefined"
       :aria-label="`${summary}. Who works on what`" @click="toggle" @pointerenter="enter" @pointerleave="leave" @focusin="focusIn" @focusout="focusOut"
     >
       <span class="faces">
-        <LiveBot v-for="(agent, i) in faces" :id="agent.principal_id" :key="agent.session_id ?? `${agent.since}${i}`" class="face" :index="i" :lead="i === 0" :size="variant === 'card' ? 26 : 22" />
+        <LiveBot v-for="agent in faces" :key="agentKey(agent)" class="face" :state="agent.state" :harness="agent.harness" :event-pulse="live.eventPulseFor(agent)" :size="variant === 'card' ? 28 : 26" />
         <span v-if="agents.length > 1" class="count mono">{{ agents.length }}</span>
       </span>
-      <span v-if="more" class="more mono">+{{ more }}</span>
       <span v-if="variant === 'card'" class="words">
         <span class="name">{{ chip.name }}</span>
         <template v-if="chip.key"><span class="dot" /><span class="key mono">{{ chip.key }}</span></template>
@@ -154,28 +155,28 @@ onBeforeUnmount(() => {
       </span>
       <span v-else-if="chip.key" class="key mono">{{ chip.key }}</span>
       <span v-else class="row-name">{{ chip.name }}</span>
-      <span class="typing" aria-hidden="true"><i /><i /><i /></span>
+
     </button>
     <Teleport to="body">
       <div
-        v-if="open" :id="id" ref="panel" class="live-pop floating pop" :class="{ above }" role="dialog" :aria-label="`Agents working on ${project.title}`"
+        v-if="open" :id="id" ref="panel" class="live-pop floating pop" :class="{ above }" role="dialog" :aria-label="`Agents ${groupLabel} on ${project.title}`"
         :style="{ left: `${x}px`, top: `${y}px` }" @pointerenter="enter" @pointerleave="leave" @focusout="focusOut" @keydown="keydown"
       >
         <p class="pop-head">
-          <span class="pulse" aria-hidden="true" />
-          <span>{{ agents.length }} {{ agents.length === 1 ? 'agent' : 'agents' }} working</span>
+          <span class="status-dot" :class="state" aria-hidden="true" />
+          <span>{{ agents.length }} {{ agents.length === 1 ? 'agent' : 'agents' }} {{ groupLabel }}</span>
           <span class="pop-project">{{ project.title }}</span>
         </p>
         <ul class="pop-list">
           <li v-for="(agent, i) in agents" :key="agent.session_id ?? `${agent.since}${i}`" class="pop-agent">
             <component
               :is="agent.session_id ? RouterLink : 'div'" class="agent-line" :to="agent.session_id ? `/agents/${encodeURIComponent(agent.session_id)}` : undefined"
-              :aria-label="agent.session_id ? `${who(agent)}, ${harnessLabel(agent.harness)}, ${phaseLabel(agent).toLowerCase()} for ${elapsedFor(agent, live.serverNow)}. Open the session` : undefined"
+              :aria-label="agent.session_id ? `${who(agent)}, ${harnessLabel(agent.harness)}, ${phaseLabel(agent).toLowerCase()} ${agePrefix(agent)} ${elapsedFor(agent, live.serverNow)}. Open the session` : undefined"
             >
-              <LiveBot :id="agent.principal_id" :index="i" :size="30" />
+              <LiveBot :state="agent.state" :harness="agent.harness" :event-pulse="live.eventPulseFor(agent)" :size="32" />
               <span class="agent-text">
                 <span class="agent-name">{{ who(agent) }}<span class="harness">{{ harnessLabel(agent.harness) }}</span></span>
-                <span class="agent-meta"><span class="phase" :class="agent.phase">{{ phaseLabel(agent) }}</span><span class="sep" />for <time class="mono" :datetime="agent.since" :title="absoluteTime(agent.since)">{{ elapsedFor(agent, live.serverNow) }}</time><span class="sep" /><span class="since">since {{ clock(agent.since) }}</span></span>
+                <span class="agent-meta"><span class="phase" :class="agent.state ?? agent.phase">{{ phaseLabel(agent) }}</span><span class="sep" />{{ agePrefix(agent) }} <time class="mono" :datetime="agent.since" :title="absoluteTime(agent.since)">{{ elapsedFor(agent, live.serverNow) }}</time><span class="sep" /><span class="since">since {{ clock(agent.since) }}</span></span>
               </span>
               <AppIcon v-if="agent.session_id" class="go" name="chevron-right" :size="14" />
             </component>
@@ -191,22 +192,23 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.live { position: relative; display: inline-flex; min-width: 0; max-width: 100%; }
+.live { --signal: var(--teal); position: relative; display: inline-flex; min-width: 0; max-width: 100%; }
+.live.waiting { --signal: var(--warn); }
+.live.stale { --signal: var(--ink-3); }
 .live-chip {
   position: relative; display: inline-flex; align-items: center; gap: 7px; min-width: 0; max-width: 100%; height: 32px; padding: 0 11px 0 3px;
-  border: 0; border-radius: 999px; background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line), 0 1px 2px rgba(14, 111, 108, .08);
-  color: var(--ink); font: 500 12px/1 var(--font); cursor: pointer; -webkit-user-select: none; user-select: none;
+  border: 0; border-radius: 999px; background: color-mix(in oklab, var(--signal) 5%, var(--surface-raised)); box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--signal) 18%, transparent);
+  color: var(--ink); font: 500 12px/1 var(--font); cursor: pointer; -webkit-user-select: none; user-select: none; transition: none;
 }
-.live-chip:hover, .live.open .live-chip { box-shadow: inset 0 0 0 1px var(--chip-teal-line), 0 6px 16px -8px rgba(14, 111, 108, .55); }
+.live-chip:hover, .live.open .live-chip { box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--signal) 40%, transparent); }
 /* A finger's reach: the chip answers a little beyond its edge (44px tall, and wide on a phone row). */
 .live-chip::before { content: ''; position: absolute; inset: -6px -2px; border-radius: 999px; }
 .live-chip:focus-visible { outline: none; box-shadow: inset 0 0 0 1px var(--chip-teal-line), var(--focus-ring); }
 .faces { position: relative; display: inline-flex; align-items: center; flex-shrink: 0; }
 .face + .face { margin-left: -10px; }
 .face:nth-child(1) { z-index: 3; } .face:nth-child(2) { z-index: 2; } .face:nth-child(3) { z-index: 1; }
-/* How many there are, on the lead's shoulder: only where the other faces step aside (a phone row). */
-.count { display: none; position: absolute; z-index: 4; right: -6px; bottom: -3px; min-width: 15px; height: 15px; padding: 0 4px; border-radius: 999px; background: var(--teal); color: var(--button-ink); box-shadow: 0 0 0 1.5px var(--surface-raised); font-size: 9.5px; font-weight: 700; line-height: 15px; text-align: center; }
-.more { flex-shrink: 0; margin-left: -3px; font-size: 10.5px; font-weight: 600; color: var(--teal-ink); }
+/* The total accompanies overlapping robots at every size. */
+.count { position: relative; z-index: 4; display: grid; place-items: center; flex-shrink: 0; min-width: 16px; height: 16px; margin-left: 3px; padding: 0 3px; border-radius: 999px; background: var(--surface-sunken); color: var(--ink-2); font-size: 10px; font-weight: 600; }
 .words { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
 .name, .row-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 650; letter-spacing: -.005em; }
 .row-name { font-weight: 600; font-size: 11.5px; }
@@ -214,28 +216,15 @@ onBeforeUnmount(() => {
 .key { flex-shrink: 0; font-size: 11px; font-weight: 600; letter-spacing: .04em; color: var(--teal-ink); white-space: nowrap; }
 .phase-word { flex-shrink: 0; color: var(--ink-2); }
 .elapsed { flex-shrink: 0; font-size: 11px; color: var(--ink-3); }
-/* Three dots take turns, like someone typing. */
-.typing { display: inline-flex; align-items: center; gap: 2px; flex-shrink: 0; height: 10px; }
-.typing i { width: 3px; height: 3px; border-radius: 50%; background: var(--teal); opacity: .5; }
-.as-row .live-chip { height: 28px; gap: 6px; padding: 0 9px 0 3px; }
-.as-row .face + .face { margin-left: -9px; }
-/* A phone row keeps one robot, its count on its shoulder, in the row's right gutter. */
+.as-row .live-chip { height: 30px; gap: 6px; padding: 0 8px 0 2px; }
+.as-row .face + .face { margin-left: -10px; }
+/* Keep two overlapping robots and the total in the phone row's gutter. */
 @media (max-width: 760px) {
-  .as-row .key, .as-row .row-name, .as-row .typing, .as-row .more, .as-row .face + .face { display: none; }
-  .as-row .count { display: block; }
+  .as-row .key, .as-row .row-name { display: none; }
   .as-row .live-chip { height: 32px; padding: 0 3px; }
-  .as-row .live-chip::before { inset: -6px -8px; }
+  .as-row .live-chip::before { inset: -6px -2px; }
 }
 @container live-card (max-width: 300px) { .elapsed { display: none; } }
-@media (prefers-reduced-motion: no-preference) {
-  .typing i { animation: live-typing 1.2s ease-in-out infinite; }
-  .typing i:nth-child(2) { animation-delay: .16s; }
-  .typing i:nth-child(3) { animation-delay: .32s; }
-  .live-chip { transition: translate .15s ease; }
-  .live-chip:hover { translate: 0 -1px; }
-}
-@keyframes live-typing { 0%, 60%, 100% { transform: translateY(0); opacity: .45; } 30% { transform: translateY(-2.5px); opacity: 1; } }
-.live.asleep .typing i { animation-play-state: paused; }
 
 /* ---------- The popover ---------- */
 /* Placed by left and top (set once when it opens or the page moves); it arrives
@@ -249,11 +238,9 @@ onBeforeUnmount(() => {
 @keyframes live-pop-in-below { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
 .pop-head { display: flex; align-items: center; gap: 8px; padding: 4px 8px 8px; font: 600 11px/1.2 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--ink-2); font-variant-ligatures: none; }
 .pop-project { margin-left: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 50%; font: 500 12px/1.2 var(--font); letter-spacing: 0; text-transform: none; color: var(--ink-3); }
-.pulse { position: relative; flex-shrink: 0; width: 7px; height: 7px; border-radius: 50%; background: var(--ok); }
-@media (prefers-reduced-motion: no-preference) {
-  .pulse::after { content: ''; position: absolute; inset: 0; border-radius: 50%; background: inherit; animation: live-pulse 1.8s cubic-bezier(.2, .7, .2, 1) infinite; }
-}
-@keyframes live-pulse { from { transform: scale(1); opacity: .5; } to { transform: scale(2.6); opacity: 0; } }
+.status-dot { flex-shrink: 0; width: 6px; height: 6px; border-radius: 50%; background: var(--teal); }
+.status-dot.waiting { background: var(--warn); }
+.status-dot.stale { background: var(--ink-3); }
 .pop-list { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; }
 .pop-agent { display: grid; gap: 2px; padding: 4px; border-radius: 10px; background: var(--surface-sunken); }
 /* Hover answers at once: no colour or shadow transitions (only the compositor moves things here). */
@@ -264,8 +251,10 @@ a.agent-line:focus-visible, .ticket-line:focus-visible { outline: none; box-shad
 .agent-text { display: grid; gap: 3px; min-width: 0; flex: 1; }
 .agent-name { display: flex; align-items: center; gap: 7px; min-width: 0; font-size: 13.5px; font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .harness { flex-shrink: 0; padding: 2px 6px; border-radius: 999px; background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); font: 500 10.5px/1.2 var(--font); color: var(--ink-2); }
-.agent-meta { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink-2); }
-.phase { font-weight: 600; color: var(--ok); }
+.agent-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 12px; color: var(--ink-2); }
+.phase { font-weight: 600; color: var(--teal-ink); }
+.phase.waiting { color: var(--warn); }
+.phase.stale { color: var(--ink-3); }
 .phase.starting, .phase.stopping { color: var(--teal-ink); }
 .sep { width: 3px; height: 3px; border-radius: 50%; background: var(--ink-3); }
 .agent-meta time { color: var(--ink); font-size: 11.5px; }
