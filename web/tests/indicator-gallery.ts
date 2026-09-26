@@ -3,7 +3,7 @@
 // IV1 imports Robot2/3/4.vue by filename with exactly state/size/pulse/seed/lead.
 import { createApp, h, ref, type Component } from 'vue'
 import LiveBot from '../src/components/projects/LiveBot.vue'
-import PlayfulBot from '../src/components/projects/PlayfulBot.vue'
+import Robot5 from '../src/components/indicators/Robot5.vue'
 import Robot2 from '../src/components/indicators/Robot2.vue'
 import Robot3 from '../src/components/indicators/Robot3.vue'
 import Robot4 from '../src/components/indicators/Robot4.vue'
@@ -52,7 +52,7 @@ const variants: { label: string; description: string; component: Component }[] =
   { label: 'Robot 2', description: 'Calm-friendly', component: Robot2 },
   { label: 'Robot 3', description: 'Friendly · middle', component: Robot3 },
   { label: 'Robot 4', description: 'Lively', component: Robot4 },
-  { label: 'Robot 5', description: 'Existing · playful', component: PlayfulBot },
+  { label: 'Robot 5', description: 'Existing · playful', component: Robot5 },
 ]
 const states = ['working', 'waiting', 'stale'] as const
 type State = typeof states[number]
@@ -66,9 +66,7 @@ createApp({
       const variant = variants[index]!
       return h(variant.component, index === 0
         ? { state, size, lead: isLead, eventPulse: pulse.value, id: seed, indicatorStyle: 'calm' }
-        : index === 4
-          ? { state, size, lead: isLead, id: seed, hovering: false }
-          : { state, size, lead: isLead, seed, pulse: pulse.value })
+        : { state, size, lead: isLead, seed, pulse: pulse.value })
     }
     const setTheme = (value: string) => { theme.value = value; document.documentElement.dataset.theme = value }
     return () => h('main', [

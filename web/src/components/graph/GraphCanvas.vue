@@ -4,6 +4,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import GraphControls from './GraphControls.vue'
 import { createGraphRenderer, type GraphData, type GraphDimension, type GraphFPS, type GraphLabels, type GraphNode, type GraphRenderer, type MotionPhase } from '../../lib/graphRenderer'
+import { useGraphMotion } from '../../lib/graphMotion'
 
 // TG1: supply GraphData, a tenant/principal viewerKey and selectedId. Selection
 // and open events return adapter node fields (href is advisory, never auto-
@@ -26,6 +27,9 @@ const dimension = ref<GraphDimension>(media.matches ? '2d' : '3d'), paused = ref
 const ready = ref(false), labelsReady = ref(false), error = ref(''), fallback = ref(false), labels = ref<GraphLabels>('smart'), rate = ref<GraphFPS>(props.fps)
 const hovered = ref(''), phase = ref<MotionPhase>(paused.value ? 'paused' : 'orbiting'), height = ref(480)
 const focused = computed(() => route.query[props.focusQuery] === '1')
+// Orbit period is an account preference, not a canvas prop, so knowledge,
+// tickets and the project glimpse all follow the one setting.
+const { seconds: orbitSeconds } = useGraphMotion()
 const storageKey = computed(() => props.viewerKey ? `aeon:graph:${props.viewerKey}:labels` : '')
 const surfaceLabel = computed(() => `${props.title}: ${props.summary}. Left and right arrows select nodes; Enter opens; Escape ${focused.value ? 'exits focus' : 'clears selection'}.`)
 let renderer: GraphRenderer | null = null, controller: AbortController | undefined, resize: ResizeObserver | undefined, theme: MutationObserver | undefined
@@ -162,7 +166,7 @@ defineExpose({ focus: () => host.value?.focus({ preventScroll: true }), focusNod
     <section ref="root" class="graph-viewer" :class="{ 'graph-focus': focused }" :role="focused ? 'dialog' : undefined" :aria-modal="focused ? true : undefined" :aria-label="title" :data-focus="focused">
       <header ref="header" class="graph-header"><div class="graph-heading"><h2>{{ title }}</h2><p role="status">{{ summary }}</p></div><GraphControls :dimension="dimension" :paused="paused" :fallback="fallback" :labels="labels" :fps="rate" :focus="focused" @fit="fit" @dimension="setDimension" @pause="toggleMotion" @labels="setLabels" @fps="setFPS" @focus="toggleFocus"><slot name="controls" /></GraphControls></header>
       <div ref="stage" class="graph-stage" @pointermove="emit('pointer', $event)" :style="focused ? undefined : { height: `${height}px`, minHeight: `${minStageHeight}px` }">
-        <div ref="host" class="graph-surface" :class="canvasClass" role="img" tabindex="0" :aria-label="surfaceLabel" :data-dimension="dimension" :data-ready="ready" :data-labels-ready="labelsReady" :data-viewer="viewerKey ?? ''" :data-motion="paused ? 'still' : 'on'" :data-motion-phase="phase" :data-labels="labels" :data-fps="rate" />
+        <div ref="host" class="graph-surface" :class="canvasClass" role="img" tabindex="0" :aria-label="surfaceLabel" :data-dimension="dimension" :data-ready="ready" :data-labels-ready="labelsReady" :data-viewer="viewerKey ?? ''" :data-motion="paused ? 'still' : 'on'" :data-motion-phase="phase" :data-labels="labels" :data-fps="rate" :data-orbit-seconds="orbitSeconds" />
         <div v-if="error" class="graph-error" role="alert"><p>{{ error }}</p><button type="button" class="btn" @click="start">Try again</button></div>
         <slot :dimension="dimension" :focused="focused" />
       </div>
@@ -180,8 +184,9 @@ defineExpose({ focus: () => host.value?.focus({ preventScroll: true }), focusNod
 .graph-surface:focus-visible { box-shadow: inset 0 0 0 2px var(--teal); border-radius: 8px; }
 .graph-surface :deep(canvas) { display: block; }
 .graph-surface :deep(.graph-labels) { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
-.graph-surface :deep(.graph-label) { position: absolute; top: 0; left: 0; white-space: nowrap; font: 500 11px/16px var(--font); padding: 2px 7px; color: var(--ink); background: color-mix(in srgb, var(--surface-raised) 88%, transparent); border: 1px solid var(--line); border-radius: 12px; }
+.graph-surface :deep(.graph-label) { position: absolute; top: 0; left: 0; white-space: nowrap; font: 500 11px/16px var(--font); padding: 2px 7px; color: var(--ink); background: color-mix(in srgb, var(--surface-raised) 88%, transparent); border: 1px solid var(--line); border-radius: 12px; transition: opacity 0.7s ease-in-out; }
 .graph-surface :deep(.graph-label[hidden]) { display: none; }
+@media (prefers-reduced-motion: reduce) { .graph-surface :deep(.graph-label) { transition: none; } }
 .graph-footer { padding: 16px 24px 20px; }
 .graph-footer > p { font-size: 11.5px; color: var(--ink-3); margin-top: 10px; }
 .graph-error { position: absolute; inset: 0; display: grid; place-content: center; justify-items: center; gap: 16px; padding: 24px; background: var(--canvas); }

@@ -16,8 +16,8 @@ import StatCount from './StatCount.vue'
 // Dragging a card (the page does it) arranges your own order: while carried, a
 // lifted copy follows the pointer and the card itself marks where it will land.
 // While agents work in the project (AEON-184) their activity rings turn in the
-// footer, over the people who were active lately (kept, hidden, so the card
-// never changes size); the chip is the link's sibling, so it can be a button.
+// footer, in place of recent people. The footer reserves a constant height;
+// its chip is outside the card link, so it can be a button.
 const props = defineProps<{ project: Project; term: string; now: number; to: string; label: string; selected: boolean; dragging: boolean; menuOpen: boolean }>()
 const emit = defineEmits<{ menu: [anchor: HTMLElement] }>()
 const live = useLiveAgents()
@@ -44,12 +44,12 @@ const agents = computed(() => live.forProject(props.project.id))
           <StatCount kind="done" :value="project.done" label />
         </span>
       </span>
-      <span class="card-foot">
-        <PeopleStack :people="project.people" :size="22" :class="{ 'under-live': agents.length }" />
-        <time class="activity" :datetime="project.last_activity" :data-tip="absoluteTime(project.last_activity)">{{ relativeTime(project.last_activity, { now, long: true }) }}</time>
-      </span>
     </RouterLink>
-    <LiveAgents v-if="agents.length" class="card-live" :agents="agents" :project="project" />
+    <div class="card-foot">
+      <LiveAgents v-if="agents.length" class="card-live" :agents="agents" :project="project" />
+      <PeopleStack v-else :people="project.people" :size="22" />
+      <time class="activity" :datetime="project.last_activity" :data-tip="absoluteTime(project.last_activity)">{{ relativeTime(project.last_activity, { now, long: true }) }}</time>
+    </div>
     <span class="card-grip" aria-hidden="true" data-tip="Drag to arrange · Alt and the arrow keys"><AppIcon name="grip" :size="12" /></span>
     <button
       type="button" class="icon-btn sm flat card-more" :aria-label="`Actions for ${project.routeKey} ${project.title}`" aria-haspopup="menu" :aria-expanded="menuOpen"
@@ -60,7 +60,7 @@ const agents = computed(() => live.forProject(props.project.id))
 
 <style scoped>
 .card {
-  position: relative; display: flex; min-width: 0; border-radius: var(--radius); border: 1px solid var(--glass-edge);
+  position: relative; display: flex; flex-direction: column; min-width: 0; border-radius: var(--radius); border: 1px solid var(--glass-edge);
   background: linear-gradient(165deg, var(--surface-raised-2), var(--glass) 60%); box-shadow: var(--shadow);
   -webkit-backdrop-filter: blur(18px) saturate(1.15); backdrop-filter: blur(18px) saturate(1.15);
 }
@@ -77,7 +77,7 @@ const agents = computed(() => live.forProject(props.project.id))
 .card.dragging > *, .card.dragging::before { visibility: hidden; }
 .card.archived .card-link { opacity: .72; }
 .card { -webkit-user-select: none; user-select: none; }
-.card-link { display: flex; flex-direction: column; flex: 1; min-width: 0; padding: 16px 18px 14px; border-radius: inherit; color: var(--ink); text-decoration: none; }
+.card-link { display: flex; flex-direction: column; flex: 1; min-width: 0; padding: 16px 18px 0; border-radius: inherit; color: var(--ink); text-decoration: none; }
 .card-link:focus-visible { box-shadow: none; }
 .card-top { display: flex; align-items: center; gap: 8px; min-height: 22px; padding-right: 56px; }
 .state-chip { height: 18px; padding: 0 7px; font-size: 10px; text-transform: uppercase; letter-spacing: .08em; }
@@ -89,12 +89,11 @@ const agents = computed(() => live.forProject(props.project.id))
 .counts { display: grid; gap: 7px; width: min(100%, 176px); }
 .counts :deep(.stat-count) { gap: 8px; }
 /* Always as tall as a row of faces, so the live chip sits on the same line in every card. */
-.card-foot { display: flex; align-items: center; gap: 10px; min-height: 35px; margin-top: 18px; padding-top: 12px; border-top: 1px solid var(--line); }
-.under-live { visibility: hidden; }
-/* The live chip rides the footer line, left, leaving the time its place. */
+.card-foot { display: flex; align-items: center; gap: 10px; height: 49px; margin: 18px 18px 14px; padding-top: 12px; border-top: 1px solid var(--line); }
+/* The actual timestamp width determines how much room the chip can use. */
 .card { container: live-card / inline-size; }
-.card-live { position: absolute; left: 15px; bottom: 10px; z-index: 2; max-width: calc(100% - 30px - 92px); }
-.activity { margin-left: auto; font-size: 12.5px; color: var(--ink-2); white-space: nowrap; }
+.card-live { flex: 0 1 auto; min-width: 0; }
+.activity { flex: 0 0 auto; margin-left: auto; font-size: 12.5px; color: var(--ink-2); white-space: nowrap; }
 .card-more { position: absolute; top: 12px; right: 12px; width: 30px; height: 30px; color: var(--ink-3); opacity: 0; }
 .card:hover .card-more, .card:focus-within .card-more, .card.menu .card-more { opacity: 1; }
 /* Beside the … button on hover, a grip says the card can be dragged. */
@@ -103,7 +102,7 @@ const agents = computed(() => live.forProject(props.project.id))
 @media (hover: hover) and (prefers-reduced-motion: no-preference) { .card-grip, .card-more { transition: opacity .15s ease; } }
 .card-more:hover, .card.menu .card-more { color: var(--teal-ink); }
 @media (hover: none) { .card-more { opacity: 1; } .card-grip { display: none; } }
-@media (max-width: 600px) { .card-link { padding: 14px 16px 12px; } .card-top { padding-right: 40px; } .card-more { top: 6px; right: 6px; width: 44px; height: 44px; } .card-live { left: 13px; bottom: 8px; max-width: calc(100% - 26px - 88px); } }
+@media (max-width: 600px) { .card-link { padding: 14px 16px 0; } .card-foot { margin: 18px 16px 12px; } .card-top { padding-right: 40px; } .card-more { top: 6px; right: 6px; width: 44px; height: 44px; } }
 </style>
 
 <style>
