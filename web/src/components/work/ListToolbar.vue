@@ -28,6 +28,7 @@ const props = defineProps<{
   // The table's columns for the Display menu's picker.
   columns?: { order: ColumnId[]; visible: ColumnId[]; customised: boolean } | null
   facetLoading?: boolean
+  headerGraph?: boolean
 }>()
 const emit = defineEmits<{
   search: [q: string]
@@ -50,6 +51,7 @@ const emit = defineEmits<{
   collapseGroups: []
   columns: [order: ColumnId[], visible: ColumnId[]]
   columnsReset: []
+  headerGraph: [value: boolean]
 }>()
 
 const draft = ref(props.filters.q)
@@ -227,8 +229,10 @@ defineExpose({ focusSearch, openFilterMenu, input })
     <FloatingPanel v-if="displayAnchor" :anchor="displayAnchor" :width="320" :tallest="760" align="end" label="Display options" @close="closeDisplay">
       <DisplayPanel
         :filters="filters" :view="view === 'outline' ? 'outline' : 'list'" :density="density" :columns="columns" :grouped="view === 'list' && filters.group !== 'none'"
+        :header-graph="headerGraph"
         @group="value => emit('group', value)" @sort="keys => emit('sort', keys)" @density="value => emit('density', value)"
         @columns="(order, visible) => emit('columns', order, visible)" @columns-reset="emit('columnsReset')"
+        @header-graph="value => emit('headerGraph', value)"
         @expand-all="emit('expandAll'); closeDisplay(false)" @collapse-all="emit('collapseAll'); closeDisplay(false)"
         @expand-groups="emit('expandGroups')" @collapse-groups="emit('collapseGroups')"
       />
