@@ -1,6 +1,6 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, ref, shallowRef, watch } from 'vue'
+import { computed, inject, nextTick, onBeforeUnmount, ref, shallowRef, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import GraphCanvas from '../graph/GraphCanvas.vue'
 import AppIcon from '../AppIcon.vue'
@@ -9,11 +9,13 @@ import { fetchTicketGraph, type TicketGraph, type TicketGraphNode } from '../../
 import { filterTicketGraph, ticketGraphData, ticketLinkStyles, ticketStatusTokens, type TicketGraphState } from '../../lib/ticketGraphRenderer'
 import type { GraphNode } from '../../lib/graphRenderer'
 import type { ListFilters } from '../../lib/ticketList'
+import { TICKET_PEEK } from '../../lib/ticketPeek'
 import { plural, statusMeta } from '../../lib/work'
 
 const props = defineProps<{ project: { id: string; routeKey: string; title: string }; filters: ListFilters }>()
 const emit = defineEmits<{ open: [key: string]; state: [state: TicketGraphState] }>()
 const route = useRoute(), router = useRouter(), session = useSession()
+const peek = inject(TICKET_PEEK, null)
 const canvas = ref<InstanceType<typeof GraphCanvas>>()
 const empty: TicketGraph = { nodes: [], links: [], truncated: false }
 const data = shallowRef<TicketGraph>(empty), loading = ref(true), error = ref(''), selection = ref('')
@@ -42,12 +44,21 @@ async function load() {
   } catch (e) { if (!controller.signal.aborted) error.value = e instanceof Error ? e.message : 'The ticket graph could not be loaded.' }
   finally { if (!controller.signal.aborted) loading.value = false }
 }
+function inThisProject(key: string) {
+  const prefix = key.split('-')[0] ?? ''
+  return !key.includes('-') || prefix.toUpperCase() === props.project.routeKey.toUpperCase()
+}
 async function open(node: GraphNode) {
   const ticket = visible.value.nodes.find(n => n.id === node.id)
   if (!ticket || loading.value) return
   // The shared panel belongs to the project shell. Leave the focus dialog first
   // so its inert background and focus trap cannot hide the opened ticket.
   if (route.query.focus === '1') await router.replace({ query: { ...route.query, focus: undefined } })
+  // This project's tickets keep the project panel. A ticket from another project peeks.
+  if (!inThisProject(ticket.key) && peek) {
+    peek.open(ticket.key, document.activeElement instanceof HTMLElement ? document.activeElement : null)
+    return
+  }
   emit('open', ticket.key)
 }
 watch([() => props.project.id, () => props.filters.showClosed, viewer], load, { immediate: true })

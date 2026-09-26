@@ -4,6 +4,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import GraphControls from './GraphControls.vue'
 import { createGraphRenderer, type GraphData, type GraphDimension, type GraphFPS, type GraphLabels, type GraphNode, type GraphRenderer, type MotionPhase } from '../../lib/graphRenderer'
+import { useGraphMotion } from '../../lib/graphMotion'
 
 // TG1: supply GraphData, a tenant/principal viewerKey and selectedId. Selection
 // and open events return adapter node fields (href is advisory, never auto-
@@ -20,24 +21,31 @@ const props = withDefaults(defineProps<{
   matches?: Set<string>; searching?: boolean; fps?: GraphFPS; focusQuery?: string; canvasClass?: string
   openOnClick?: boolean; keyboardActive?: boolean; minStageHeight?: number; glimpse?: boolean; layoutBias?: 'elliptic'
 }>(), { title: 'Graph', summary: '', selectedId: '', searching: false, fps: 60, focusQuery: 'focus', canvasClass: '', openOnClick: false, keyboardActive: true, minStageHeight: 480, glimpse: false })
-const emit = defineEmits<{ select: [node: GraphNode]; open: [node: GraphNode]; hover: [node: GraphNode | null]; clear: []; 'update:fps': [fps: GraphFPS]; pointer: [event: PointerEvent] }>()
+const emit = defineEmits<{ select: [node: GraphNode, via?: 'pointer' | 'key']; open: [node: GraphNode]; hover: [node: GraphNode | null]; clear: []; 'update:fps': [fps: GraphFPS]; pointer: [event: PointerEvent] }>()
 const route = useRoute(), router = useRouter()
 const root = ref<HTMLElement>(), host = ref<HTMLElement>(), stage = ref<HTMLElement>(), header = ref<HTMLElement>(), footer = ref<HTMLElement>()
 const media = window.matchMedia('(prefers-reduced-motion: reduce)'), scheme = window.matchMedia('(prefers-color-scheme: dark)')
 const dimension = ref<GraphDimension>(media.matches ? '2d' : '3d'), paused = ref(media.matches)
-const ready = ref(false), error = ref(''), fallback = ref(false), labels = ref<GraphLabels>('smart'), rate = ref<GraphFPS>(props.fps)
+const ready = ref(false), labelsReady = ref(false), error = ref(''), fallback = ref(false), labels = ref<GraphLabels>('smart'), rate = ref<GraphFPS>(props.fps)
 const hovered = ref(''), phase = ref<MotionPhase>(paused.value ? 'paused' : 'orbiting'), height = ref(480)
 const focused = computed(() => !props.glimpse && route.query[props.focusQuery] === '1')
+// Orbit period is an account preference, not a canvas prop, so knowledge,
+// tickets and the project glimpse all follow the one setting.
+const { seconds: orbitSeconds } = useGraphMotion()
 const storageKey = computed(() => props.viewerKey ? `aeon:graph:${props.viewerKey}:labels` : '')
 const surfaceLabel = computed(() => `${props.title}: ${props.summary}. Left and right arrows select nodes; Enter opens; Escape ${focused.value ? 'exits focus' : 'clears selection'}.`)
 let renderer: GraphRenderer | null = null, controller: AbortController | undefined, resize: ResizeObserver | undefined, theme: MutationObserver | undefined
 let focusFrame = 0
 let mounted = false, beforeFocus: HTMLElement | null = null
 let background: { el: HTMLElement; inert: boolean }[] = []
-function loadLabels() {
+function loadLabels(key: string, previous?: string) {
+  // An empty key is "the person is not known yet", not "this person prefers Smart".
+  // Reading then would keep the default and, on the next person, could miss theirs.
+  if (!key) return
   let saved: string | null = null
-  try { saved = storageKey.value ? localStorage.getItem(storageKey.value) : null } catch { /* Private browsing can deny storage. */ }
-  labels.value = saved === 'all' || saved === 'off' ? saved : 'smart'
+  try { saved = localStorage.getItem(key) } catch { return }
+  if (saved === 'all' || saved === 'off') labels.value = saved
+  else if (previous) labels.value = 'smart'
 }
 function setLabels(value: GraphLabels) {
   labels.value = value
@@ -65,7 +73,7 @@ function measure() {
   if (host.value) renderer?.resize(host.value.clientWidth, host.value.clientHeight)
 }
 async function start() {
-  controller?.abort(); renderer?.dispose(); renderer = null; ready.value = false
+  controller?.abort(); renderer?.dispose(); renderer = null; ready.value = false; labelsReady.value = false
   const request = controller = new AbortController()
   await nextTick()
   if (!host.value || !mounted || request.signal.aborted) return
@@ -73,8 +81,9 @@ async function start() {
   try {
     const next = await createGraphRenderer(host.value, dimension.value, {
       reduced: media.matches, signal: request.signal, fps: rate.value, labels: props.glimpse ? 'off' : labels.value, glimpse: props.glimpse, layoutBias: props.layoutBias,
-      select: n => { if (props.glimpse) return; select(n); if (props.openOnClick) emit('open', n) }, open: n => { if (!props.glimpse) emit('open', n) }, clear: () => { if (!props.glimpse) emit('clear') },
+      select: n => { if (props.glimpse) return; select(n, 'pointer'); if (props.openOnClick) emit('open', n) }, open: n => { if (!props.glimpse) emit('open', n) }, clear: () => { if (!props.glimpse) emit('clear') },
       hover: n => { if (props.glimpse) return; hovered.value = n?.id ?? ''; emit('hover', n); emphasis() }, motionState: value => { phase.value = value },
+      labelsSettled: value => { if (request.signal.aborted || !mounted) return; labelsReady.value = value },
     })
     if (!next) return
     if (request.signal.aborted || !mounted) { next.dispose(); return }
@@ -84,7 +93,7 @@ async function start() {
     if (props.selectedId) renderer.focus(props.selectedId)
   } catch { if (!request.signal.aborted) error.value = 'The graph could not start. You can still explore every entry in the list.' }
 }
-function select(node: GraphNode) { renderer?.interact(); emit('select', node); renderer?.focus(node.id); host.value?.focus({ preventScroll: true }) }
+function select(node: GraphNode, via: 'pointer' | 'key' = 'key') { renderer?.interact(); emit('select', node, via); renderer?.focus(node.id); host.value?.focus({ preventScroll: true }) }
 function fit() { renderer?.interact(); renderer?.fit() }
 function setDimension(value: GraphDimension) { if (dimension.value !== value) { dimension.value = value; hovered.value = ''; emit('hover', null); void start() } }
 function toggleMotion() { paused.value = !paused.value; renderer?.motion(paused.value) }
@@ -131,7 +140,7 @@ function keydown(event: KeyboardEvent) {
 }
 function onReduced() { paused.value = media.matches; if (media.matches) dimension.value = '2d'; void start() }
 function retheme() { renderer?.theme() }
-watch(storageKey, () => { if (!props.glimpse) loadLabels() }, { immediate: true })
+watch(storageKey, (key, previous) => { if (!props.glimpse) loadLabels(key, previous) }, { immediate: true })
 watch(labels, value => { if (!props.glimpse) renderer?.labels(value) })
 watch(() => props.fps, value => { rate.value = value })
 watch(rate, value => renderer?.frameRate(value))
@@ -158,13 +167,13 @@ defineExpose({ focus: () => host.value?.focus({ preventScroll: true }), focusNod
 </script>
 <template>
   <div v-if="glimpse" ref="root" class="graph-glimpse">
-    <div ref="host" class="graph-surface" :class="canvasClass" aria-hidden="true" data-glimpse="" :data-dimension="dimension" :data-ready="ready" :data-motion="paused ? 'still' : 'on'" :data-motion-phase="phase" data-labels="off" :data-fps="rate" />
+    <div ref="host" class="graph-surface" :class="canvasClass" aria-hidden="true" data-glimpse="" :data-dimension="dimension" :data-ready="ready" :data-labels-ready="labelsReady" :data-motion="paused ? 'still' : 'on'" :data-motion-phase="phase" data-labels="off" :data-fps="rate" :data-orbit-seconds="orbitSeconds" />
   </div>
   <Teleport v-else to="body" :disabled="!focused">
     <section ref="root" class="graph-viewer" :class="{ 'graph-focus': focused }" :role="focused ? 'dialog' : undefined" :aria-modal="focused ? true : undefined" :aria-label="title" :data-focus="focused">
       <header ref="header" class="graph-header"><div class="graph-heading"><h2>{{ title }}</h2><p role="status">{{ summary }}</p></div><GraphControls :dimension="dimension" :paused="paused" :fallback="fallback" :labels="labels" :fps="rate" :focus="focused" @fit="fit" @dimension="setDimension" @pause="toggleMotion" @labels="setLabels" @fps="setFPS" @focus="toggleFocus"><slot name="controls" /></GraphControls></header>
       <div ref="stage" class="graph-stage" @pointermove="emit('pointer', $event)" :style="focused ? undefined : { height: `${height}px`, minHeight: `${minStageHeight}px` }">
-        <div ref="host" class="graph-surface" :class="canvasClass" role="img" tabindex="0" :aria-label="surfaceLabel" :data-dimension="dimension" :data-ready="ready" :data-motion="paused ? 'still' : 'on'" :data-motion-phase="phase" :data-labels="labels" :data-fps="rate" />
+        <div ref="host" class="graph-surface" :class="canvasClass" role="img" tabindex="0" :aria-label="surfaceLabel" :data-dimension="dimension" :data-ready="ready" :data-labels-ready="labelsReady" :data-viewer="viewerKey ?? ''" :data-motion="paused ? 'still' : 'on'" :data-motion-phase="phase" :data-labels="labels" :data-fps="rate" :data-orbit-seconds="orbitSeconds" />
         <div v-if="error" class="graph-error" role="alert"><p>{{ error }}</p><button type="button" class="btn" @click="start">Try again</button></div>
         <slot :dimension="dimension" :focused="focused" />
       </div>
@@ -184,8 +193,9 @@ defineExpose({ focus: () => host.value?.focus({ preventScroll: true }), focusNod
 .graph-surface:focus-visible { box-shadow: inset 0 0 0 2px var(--teal); border-radius: 8px; }
 .graph-surface :deep(canvas) { display: block; }
 .graph-surface :deep(.graph-labels) { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
-.graph-surface :deep(.graph-label) { position: absolute; top: 0; left: 0; white-space: nowrap; font: 500 11px/16px var(--font); padding: 2px 7px; color: var(--ink); background: color-mix(in srgb, var(--surface-raised) 88%, transparent); border: 1px solid var(--line); border-radius: 12px; }
+.graph-surface :deep(.graph-label) { position: absolute; top: 0; left: 0; white-space: nowrap; font: 500 11px/16px var(--font); padding: 2px 7px; color: var(--ink); background: color-mix(in srgb, var(--surface-raised) 88%, transparent); border: 1px solid var(--line); border-radius: 12px; transition: opacity 0.7s ease-in-out; }
 .graph-surface :deep(.graph-label[hidden]) { display: none; }
+@media (prefers-reduced-motion: reduce) { .graph-surface :deep(.graph-label) { transition: none; } }
 .graph-footer { padding: 16px 24px 20px; }
 .graph-footer > p { font-size: 11.5px; color: var(--ink-3); margin-top: 10px; }
 .graph-error { position: absolute; inset: 0; display: grid; place-content: center; justify-items: center; gap: 16px; padding: 24px; background: var(--canvas); }

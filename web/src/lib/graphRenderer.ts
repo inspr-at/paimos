@@ -6,6 +6,7 @@ import type { ForceGraph3DInstance } from '3d-force-graph'
 import type ForceGraph2D from 'force-graph'
 import type { Group, MeshPhysicalMaterial, PerspectiveCamera, SphereGeometry } from 'three'
 import type { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
+import { graphOrbitPace, graphOrbitSeconds } from './graphOrbitState.ts'
 
 export type GraphDimension = '2d' | '3d'
 export type GraphLabels = 'off' | 'smart' | 'all'
@@ -37,7 +38,7 @@ export interface GraphRenderer {
 }
 export interface GraphRendererOptions {
   reduced: boolean; signal: AbortSignal; fps?: GraphFPS; labels?: GraphLabels
-  // Fitted decoration: no labels or pointer handling, a slower orbit and a
+  // Fitted decoration: no labels or pointer handling, a bounded orbit and a
   // transparent clear. The host reserves a region clear of its text.
   glimpse?: boolean
   // Optional force anchors for a wide, volumetric cloud; normal graphs retain
@@ -45,6 +46,8 @@ export interface GraphRendererOptions {
   layoutBias?: 'elliptic'
   select(node: GraphNode): void; open(node: GraphNode): void; hover(node: GraphNode | null): void; clear(): void
   motionState?(phase: MotionPhase): void
+  // Fired when the current label mode has been placed, not merely requested.
+  labelsSettled?(ready: boolean): void
 }
 type Graph3D = ForceGraph3DInstance<LayoutNode, LayoutEdge>
 type Graph2D = ForceGraph2D<LayoutNode, LayoutEdge>
@@ -81,6 +84,24 @@ export function graphLayout(data: GraphData): { nodes: LayoutNode[]; links: Layo
 }
 export interface LabelBox { x: number; y: number; w: number; h: number }
 const overlaps = (a: LabelBox, b: LabelBox) => Math.abs(a.x - b.x) < (a.w + b.w) / 2 + 4 && Math.abs(a.y - b.y) < (a.h + b.h) / 2 + 3
+const LABEL_FADE = 'opacity 0.7s ease-in-out'
+const LABEL_FADE_MS = 700
+// Critically damped: a placement change settles inside the fade, with no overshoot.
+const LABEL_OMEGA = 14
+function damp(x: number, v: number, target: number, dt: number, omega: number) {
+  if (dt <= 0) return { x, v }
+  const exp = Math.exp(-omega * dt)
+  const change = x - target
+  const temp = (v + omega * change) * dt
+  let next = target + (change + temp) * exp
+  let velocity = (v - omega * temp) * exp
+  if ((x - target) * (next - target) < 0 || Math.abs(next - target) < 0.35) { next = target; velocity = 0 }
+  return { x: next, v: velocity }
+}
+function labelFits(box: LabelBox, placed: LabelBox[], width: number, height: number) {
+  const inside = box.x - box.w / 2 >= 2 && box.x + box.w / 2 <= width - 2 && box.y - box.h / 2 >= 2 && box.y + box.h / 2 <= height - 2
+  return inside && !placed.some(other => overlaps(box, other))
+}
 // Deterministic screen-space greedy placement; try below/above/right/left and
 // diagonals. All shows every label; Smart gives connected hubs first choice.
 export function labelPosition(x: number, y: number, radius: number, w: number, h: number, placed: LabelBox[], width: number, height: number, always: boolean): LabelBox | undefined {
@@ -99,6 +120,7 @@ function graphPalette(nodes: LayoutNode[], links: LayoutEdge[] = []) {
 }
 
 export async function createGraphRenderer(host: HTMLElement, dimension: GraphDimension, options: GraphRendererOptions): Promise<GraphRenderer | null> {
+  void import('./graphMotion.ts').then(mod => mod.ensureGraphMotion())
   let three: typeof import('three') | undefined, g3: Graph3D | undefined, g2: Graph2D | undefined
   let geometry: SphereGeometry | undefined
   const materials = new Map<string, MeshPhysicalMaterial>()
@@ -110,6 +132,7 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
   let labelMode = glimpse ? 'off' : (options.labels ?? 'smart'), fps = options.fps ?? 60
   let paintFrame = 0, fitFrame = 0, frame = 0, lastFrame = 0, driftTime = 0, resumeAt = 0, dragging = false
   let lastPhase: MotionPhase | undefined
+  let labelsWereSettled: boolean | undefined
   let settleTimer: ReturnType<typeof setTimeout> | undefined, pickTimer: ReturnType<typeof setTimeout> | undefined
   let cameraTaken = false, fitOnSettle = true
   let glimpseLaidOut = false
@@ -129,19 +152,58 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
   }
   const labelLayer = document.createElement('div')
   labelLayer.className = 'graph-labels'; labelLayer.setAttribute('aria-hidden', 'true')
-  const labels = new Map<string, { el: HTMLSpanElement; w: number; h: number }>()
+  interface LabelEntry {
+    el: HTMLSpanElement; w: number; h: number
+    ox: number; oy: number; vx: number; vy: number; tox: number; toy: number
+    want: boolean; anchored: boolean; opacityReady: boolean; fadeDoneAt: number
+  }
+  const labels = new Map<string, LabelEntry>()
+  let labelClock = 0
+  const prefersReduced = () => options.reduced || window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  function measureLabel(label: LabelEntry) {
+    if (label.w > 0) return
+    const hidden = label.el.hidden
+    if (hidden) label.el.hidden = false
+    label.w = label.el.offsetWidth
+    label.h = label.el.offsetHeight
+    if (hidden) label.el.hidden = true
+  }
+  function fadeTo(label: LabelEntry, opacity: string, reduced: boolean) {
+    const show = opacity !== '0'
+    if (show && label.el.hidden) {
+      label.el.hidden = false
+      label.el.style.transition = 'none'
+      label.el.style.opacity = '0'
+      void label.el.offsetWidth
+    }
+    if (!show && label.el.hidden) { label.opacityReady = true; return }
+    const transition = reduced ? 'none' : LABEL_FADE
+    if (label.el.style.transition !== transition) label.el.style.transition = transition
+    if (label.el.style.opacity !== opacity) {
+      label.el.style.opacity = opacity
+      label.opacityReady = reduced
+      label.fadeDoneAt = performance.now() + (reduced ? 0 : LABEL_FADE_MS)
+    } else if (reduced) label.opacityReady = true
+    if (!label.opacityReady && performance.now() >= label.fadeDoneAt) label.opacityReady = true
+    if (!show && label.opacityReady) label.el.hidden = true
+  }
   function rebuildLabels() {
     if (glimpse) return
-    labelLayer.replaceChildren(); labels.clear()
+    labelLayer.replaceChildren(); labels.clear(); labelClock = 0
     const fragment = document.createDocumentFragment()
+    const transition = prefersReduced() ? 'none' : LABEL_FADE
     for (const n of nodes) {
       const el = document.createElement('span')
-      el.className = 'graph-label'; el.textContent = n.label.length > 34 ? n.label.slice(0, 31) + '…' : n.label
+      el.className = 'graph-label'
+      el.hidden = true
+      el.textContent = n.label.length > 34 ? n.label.slice(0, 31) + '…' : n.label
+      el.style.opacity = '0'
+      el.style.transition = transition
       fragment.append(el)
-      labels.set(n.id, { el, w: 0, h: 0 })
+      labels.set(n.id, { el, w: 0, h: 0, ox: 0, oy: 0, vx: 0, vy: 0, tox: 0, toy: 0, want: false, anchored: false, opacityReady: true, fadeDoneAt: 0 })
     }
     labelLayer.append(fragment)
-    for (const label of labels.values()) { label.w = label.el.offsetWidth; label.h = label.el.offsetHeight }
+    for (const label of labels.values()) measureLabel(label)
   }
   function orderLabels() {
     labelOrder = [...nodes].sort((a, b) => Number(b.id === emphasis.selected) - Number(a.id === emphasis.selected) || Number(b.id === emphasis.hovered) - Number(a.id === emphasis.hovered) || b.degree - a.degree || a.id.localeCompare(b.id))
@@ -167,7 +229,7 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
       if (object) { object.visible = depth > camera.near; object.scale.setScalar(glimpseRadius(n) * Math.max(0, depth) / (projection * graphRadius(n))) }
     }
   }
-  function placeLabels() {
+  function placeLabels(dt: number) {
     if (glimpse) return
     const graph = g3 ?? g2
     if (!graph || disposed) return
@@ -188,20 +250,85 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
       projected.set(n.id, { ...screen, radius })
       placed.push({ x: screen.x, y: screen.y, w: radius * 2, h: radius * 2 })
     }
+    const reduced = prefersReduced()
     for (const n of labelOrder) {
       const label = labels.get(n.id); if (!label) continue
+      measureLabel(label)
       const mandatory = n.id === emphasis.selected || n.id === emphasis.hovered
-      label.el.hidden = true
-      if (labelMode === 'off' && !mandatory) continue
-      const screen = projected.get(n.id); if (!screen) continue
-      const radius = screen.radius
-      const box = labelPosition(screen.x, screen.y, radius, label.w, label.h, placed, width, height, mandatory || labelMode === 'all')
-      if (!box) continue
-      placed.push(box); label.el.hidden = false
-      label.el.style.transform = `translate(${Math.round(box.x - box.w / 2)}px, ${Math.round(box.y - box.h / 2)}px)`
-      label.el.style.opacity = mandatory ? '1' : String(Math.max(.55, alpha(n)))
+      const screen = projected.get(n.id)
+      const wasWanted = label.want
+      let box: LabelBox | undefined
+      if (screen && (labelMode !== 'off' || mandatory)) {
+        // Keep a slot that still fits so orbiting does not retarget every frame.
+        if (wasWanted && label.anchored) {
+          const kept: LabelBox = { x: screen.x + label.tox + label.w / 2, y: screen.y + label.toy + label.h / 2, w: label.w, h: label.h }
+          if (labelFits(kept, placed, width, height)) box = kept
+        }
+        box ??= labelPosition(screen.x, screen.y, screen.radius, label.w, label.h, placed, width, height, mandatory || labelMode === 'all')
+      }
+      if (!box || !screen) {
+        label.want = false
+        if (screen && label.anchored) label.el.style.transform = `translate(${screen.x + label.ox}px, ${screen.y + label.oy}px)`
+        fadeTo(label, '0', reduced)
+        continue
+      }
+      const tox = Math.round(box.x - box.w / 2 - screen.x)
+      const toy = Math.round(box.y - box.h / 2 - screen.y)
+      label.want = true
+      label.anchored = true
+      label.tox = tox
+      label.toy = toy
+      // Glide only the offset from the orb. The orb's screen position is applied
+      // raw each frame, so a moving camera does not leave the label behind.
+      if (!wasWanted || reduced) { label.ox = tox; label.oy = toy; label.vx = 0; label.vy = 0 }
+      else if (dt > 0 && (label.ox !== tox || label.oy !== toy || label.vx !== 0 || label.vy !== 0)) {
+        const x = damp(label.ox, label.vx, tox, dt, LABEL_OMEGA)
+        const y = damp(label.oy, label.vy, toy, dt, LABEL_OMEGA)
+        label.ox = x.x; label.vx = x.v; label.oy = y.x; label.vy = y.v
+      }
+      placed.push(box)
+      label.el.style.transform = `translate(${screen.x + label.ox}px, ${screen.y + label.oy}px)`
       label.el.style.zIndex = mandatory ? '2' : '1'
+      fadeTo(label, mandatory ? '1' : String(Math.max(0.55, alpha(n))), reduced)
     }
+  }
+  function labelAtRest(label: LabelEntry) {
+    const placed = !label.want || (label.ox === label.tox && label.oy === label.toy)
+    return label.opacityReady && placed
+  }
+  // Settled when the fade and the glide have arrived, not when they were requested.
+  function labelSettlement() {
+    if (glimpse) return !nodes.length || glimpseLaidOut
+    const laidOut = nodes.every(n => n.x !== undefined && n.y !== undefined)
+    if (!nodes.length) return true
+    if (!laidOut) return false
+    let shown = 0
+    for (const label of labels.values()) {
+      if (!labelAtRest(label)) return false
+      if (label.want) shown++
+    }
+    if (labelMode === 'all') return shown === nodes.length
+    if (labelMode === 'off') {
+      const must = nodes.some(n => n.id === emphasis.selected || n.id === emphasis.hovered)
+      return must ? shown > 0 : shown === 0
+    }
+    return shown > 0
+  }
+  function publishLabels() {
+    const now = performance.now()
+    const dt = labelClock ? Math.min(0.1, (now - labelClock) / 1000) : 0
+    labelClock = now
+    placeLabels(dt)
+    const settled = labelSettlement()
+    if (settled === labelsWereSettled) return
+    labelsWereSettled = settled
+    options.labelsSettled?.(settled)
+  }
+  function publishPhase(now = performance.now()) {
+    const phase: MotionPhase = paused ? 'paused' : dragging || now < resumeAt ? 'interacting' : 'orbiting'
+    if (phase === lastPhase) return
+    lastPhase = phase
+    options.motionState?.(phase)
   }
   function material(n: LayoutNode, shell: boolean) {
     const key = `${shell ? 'shell' : color(n)}:${alpha(n)}`
@@ -256,6 +383,7 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
     const graph = g3 ?? g2
     graph?.cooldownTicks(paused ? 0 : 140).linkDirectionalParticles(particles)
     if (!paused) graph?.d3ReheatSimulation()
+    publishPhase()
     redraw()
   }
   function redraw() {
@@ -264,7 +392,7 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
     const graph = g3 ?? g2
     graph?.linkColor(linkColor).linkDirectionalParticles(particles)
     g2?.nodeCanvasObject((n, ctx, scale) => draw2D(n, ctx, scale))
-    placeLabels()
+    publishLabels()
   }
   if (dimension === '3d') {
     const modules = await Promise.all([import('3d-force-graph'), import('three')])
@@ -290,7 +418,7 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
         return group
       }).linkOpacity(1).linkWidth(l => glimpse ? 0 : l.width ?? .55)
       const controls = g3.controls() as OrbitControls
-      controls.autoRotateSpeed = 1 // One revolution per 60 seconds; glimpse uses a bounded orbit below.
+      controls.autoRotateSpeed = graphOrbitPace() // Speed 1 is one turn per 60s; the default pace is one turn per 120s.
       controls.enableDamping = !options.reduced
       if (glimpse) { controls.enableRotate = false; controls.enableZoom = false; controls.enablePan = false }
       clearGlimpse()
@@ -349,7 +477,8 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
     graph.d3Force('link')?.strength(.05)
     graph.d3Force('elliptic', (alpha: number) => {
       const radius = 55 + Math.sqrt(nodes.length) * 3
-      const aspect = Math.max(1.4, Math.min(12, graph.width() / Math.max(1, graph.height()) * 1.12))
+      const compact = Math.max(0, Math.min(1, (700 - graph.width()) / 176))
+      const aspect = Math.max(1.4, Math.min(12, graph.width() / Math.max(1, graph.height()) * (1.12 - .22 * compact)))
       nodes.forEach((n, i) => {
         const index = (i * anchorStride) % nodes.length
         const y = 1 - 2 * (index + .5) / nodes.length, angle = i * Math.PI * (3 - Math.sqrt(5))
@@ -368,17 +497,27 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
   function tick(now: number) {
     if (disposed) return
     frame = requestAnimationFrame(tick)
+    // Phase follows the click even when this tab is hidden or the frame budget
+    // skips the draw. The orbit itself still waits for a visible frame.
+    publishPhase(now)
+    const phase = lastPhase
+    const pace = graphOrbitPace()
+    const shownSeconds = String(graphOrbitSeconds())
+    if (host.dataset.orbitSeconds !== shownSeconds) host.dataset.orbitSeconds = shownSeconds
+    if (g3) {
+      const controls = g3.controls() as OrbitControls
+      controls.autoRotate = phase === 'orbiting' && pace > 0 && !glimpse
+      controls.autoRotateSpeed = pace
+    }
     if (document.hidden || (glimpse && (!nodes.length || nodes.some(n => n.x === undefined))) || now - lastFrame < 1000 / fps - .5) return
     const dt = Math.min(.1, (now - (lastFrame || now)) / 1000); lastFrame = now
-    const phase: MotionPhase = paused ? 'paused' : dragging || now < resumeAt ? 'interacting' : 'orbiting'
-    if (phase !== lastPhase) { lastPhase = phase; options.motionState?.(phase) }
-    if (g3) (g3.controls() as OrbitControls).autoRotate = phase === 'orbiting' && !glimpse
-    if (phase === 'orbiting') {
+    // Pace 1 matches the old drift. Default (120s) is half of that; Off adds none.
+    if (phase === 'orbiting' && pace > 0) {
       const before = driftTime
-      driftTime += dt
+      driftTime += dt * pace
       if (g3 && three && glimpse) {
-        // A bounded orbit exposes parallax without ever turning a wide cloud
-        // end-on. Full revolutions would eventually make the glimpse a sliver.
+        // The bounded orbit reveals parallax without turning the wide cloud
+        // end-on. Its rate follows the same viewer preference as other graphs.
         const camera = g3.camera(), target = (g3.controls() as OrbitControls).target
         const orbit = new three.Spherical().setFromVector3(camera.position.clone().sub(target))
         orbit.theta += (Math.sin(driftTime / 18) - Math.sin(before / 18)) * .12
@@ -386,15 +525,15 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
         camera.position.copy(target).add(new three.Vector3().setFromSpherical(orbit))
       } else if (g3) {
         const camera = g3.camera(), controls = g3.controls() as OrbitControls
-        camera.position.y += Math.cos(driftTime / 7) * dt * camera.position.distanceTo(controls.target) * .003
+        camera.position.y += Math.cos(driftTime / 7) * dt * pace * camera.position.distanceTo(controls.target) * .003
       } else if (g2 && !glimpse) {
         const center = g2.centerAt()
-        g2.centerAt(center.x + Math.cos(driftTime / 9) * dt * .9, center.y + Math.sin(driftTime / 7) * dt * .6)
+        g2.centerAt(center.x + Math.cos(driftTime / 9) * dt * pace * .9, center.y + Math.sin(driftTime / 7) * dt * pace * .6)
       }
     }
     if (disposed) return
     sizeGlimpseOrbs()
-    clearGlimpse(); graph.resumeAnimation(); if (disposed) return; graph.pauseAnimation(); placeLabels()
+    clearGlimpse(); graph.resumeAnimation(); if (disposed) return; graph.pauseAnimation(); publishLabels()
   }
   frame = requestAnimationFrame(tick)
   // Fit fills about 80% of the stage along its tighter side, bubbles included.
@@ -405,6 +544,12 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
     if (glimpse && (!glimpseLaidOut || graph.width() < 24 || graph.height() < 24)) return
     if (g3 && three) {
       const camera = g3.camera() as PerspectiveCamera
+      if (glimpse) {
+        // Keep the compact cloud clear of the stats without shrinking its height.
+        const compact = Math.max(0, Math.min(1, (700 - g3.width()) / 176))
+        camera.aspect = g3.width() / Math.max(1, g3.height()) * (1 + .04 * compact)
+        camera.updateProjectionMatrix()
+      }
       const right = new three.Vector3(1, 0, 0).applyQuaternion(camera.quaternion)
       const up = new three.Vector3(0, 1, 0).applyQuaternion(camera.quaternion)
       const back = new three.Vector3(0, 0, 1).applyQuaternion(camera.quaternion)
@@ -421,7 +566,10 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
         const v = new three.Vector3(n.x ?? 0, n.y ?? 0, n.z ?? 0).sub(centre), depth = v.dot(back)
         // Fit only the dense core's HEIGHT in a glimpse. Outliers and sides
         // can enter the fade without shrinking the entire cloud into a strip.
-        if (glimpse) distance = Math.max(distance, depth + Math.abs(v.dot(up)) / (tan * (1.15 - 8 / g3.height())))
+        if (glimpse) {
+          const compact = Math.max(0, Math.min(1, (700 - g3.width()) / 176))
+          distance = Math.max(distance, depth + Math.abs(v.dot(up)) / (tan * (1.20 + .32 * compact - 8 / g3.height())))
+        }
         else {
           const r = graphRadius(n)
           distance = Math.max(distance, depth + (Math.abs(v.dot(up)) + r) / (tan * FILL), depth + (Math.abs(v.dot(right)) + r) / (tan * aspect * FILL))
@@ -429,11 +577,13 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
       }
       const at = centre.clone().add(back.multiplyScalar(distance))
       g3.cameraPosition({ x: at.x, y: at.y, z: at.z }, { x: centre.x, y: centre.y, z: centre.z }, duration())
+      publishLabels()
     } else if (g2) {
       let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity
       for (const n of glimpse ? glimpseCore(nodes) : nodes) { const r = glimpse ? 0 : graphRadius(n), x = n.x ?? 0, y = n.y ?? 0; x0 = Math.min(x0, x - r); x1 = Math.max(x1, x + r); y0 = Math.min(y0, y - r); y1 = Math.max(y1, y + r) }
       const zoom = glimpse ? Math.max(1, g2.height() * 1.15 - 8) / Math.max(1, y1 - y0) : Math.min(MAX_ZOOM, g2.width() * FILL / Math.max(1, x1 - x0), g2.height() * FILL / Math.max(1, y1 - y0))
       g2.centerAt((x0 + x1) / 2, (y0 + y1) / 2, duration()); g2.zoom(zoom, duration()); refreshPicking(duration())
+      publishLabels()
     }
     if (glimpse) { sizeGlimpseOrbs(); graph.linkVisibility(glimpseLinkVisible); host.style.visibility = '' }
   }
@@ -460,6 +610,7 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
         distance = Math.max(distance, depth + (Math.abs(v.dot(up)) + r) / (tan * FILL), depth + (Math.abs(v.dot(right)) + r) / (tan * aspect * FILL))
       }
       g3.cameraPosition({ x: x + back.x * distance, y: y + back.y * distance, z: z + back.z * distance }, { x, y, z }, duration())
+      publishLabels()
     } else if (g2) {
       let zoom = FOCUS_ZOOM
       for (const n of around) {
@@ -467,6 +618,7 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
         zoom = Math.min(zoom, g2.width() * FILL / 2 / (Math.abs((n.x ?? 0) - x) + r), g2.height() * FILL / 2 / (Math.abs((n.y ?? 0) - y) + r))
       }
       g2.centerAt(x, y, duration()); g2.zoom(Math.max(.2, zoom), duration()); refreshPicking(duration())
+      publishLabels()
     }
   }
   // The engines lay out and build their objects a moment after new data. Wait for both
@@ -492,11 +644,13 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
       palette = graphPalette(nodes, links)
       const names = [...new Set(nodes.map(n => n.group))].sort(), radius = names.length > 1 ? 35 + Math.sqrt(nodes.length) * 9 : 0
       groups = new Map(names.map((group, i) => { const angle = i * 2 * Math.PI / names.length; return [group, { x: Math.cos(angle) * radius, y: Math.sin(angle) * radius, z: Math.sin(angle * 2) * radius * .3 }] }))
+      labelsWereSettled = undefined
+      options.labelsSettled?.(false)
       graph.graphData({ nodes, links }); rebuildLabels(); redraw()
       clearTimeout(settleTimer)
       whenLaidOut(() => {
         if (glimpse) glimpseLaidOut = true
-        redraw(); if (emphasis.selected) focus(emphasis.selected); else if (!cameraTaken) fit()
+        redraw(); if (emphasis.selected) focus(emphasis.selected); else if (!cameraTaken) fit(); publishLabels()
       })
       if (!paused) settleTimer = setTimeout(() => { if (emphasis.selected) focus(emphasis.selected); else if (!cameraTaken) fit() }, 1200)
     },
@@ -514,7 +668,7 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
       else if (!cameraTaken && !emphasis.selected) fitFrame = requestAnimationFrame(fit)
     },
     fit, focus, motion, interact,
-    labels(mode) { if (glimpse) return; labelMode = mode; placeLabels() },
+    labels(mode) { if (glimpse) return; labelMode = mode; labelsWereSettled = undefined; publishLabels() },
     frameRate(value) { fps = value },
     dispose() {
       if (disposed) return
@@ -524,8 +678,16 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
       window.removeEventListener('pointermove', pointerMove); window.removeEventListener('pointerup', pointerUp); window.removeEventListener('pointercancel', pointerUp)
       graph.onNodeHover(() => {}).onNodeClick(() => {}).onBackgroundClick(() => {}).onNodeDrag(() => {}).onNodeDragEnd(() => {}).onEngineStop(() => {}).pauseAnimation()
       const renderer = g3?.renderer()
+      const gl = renderer?.getContext()
+      const canvas = renderer?.domElement ?? null
       graph._destructor(); geometry?.dispose(); materials.forEach(m => m.dispose()); materials.clear(); objects.clear(); labels.clear()
-      renderer?.forceContextLoss(); nodes = []; links = []; host.replaceChildren()
+      // _destructor drops three's context-restored listener first. loseContext
+      // then posts webglcontextlost for a later turn; dispatch it now so the
+      // context is released before this canvas leaves the document. A once-only
+      // listener ignores the browser's later copy of the same event.
+      renderer?.forceContextLoss()
+      if (gl && canvas) canvas.dispatchEvent(new Event('webglcontextlost', { cancelable: true }))
+      nodes = []; links = []; host.replaceChildren()
     },
   }
 }

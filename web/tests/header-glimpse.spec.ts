@@ -70,6 +70,17 @@ test('a wide project with tickets and a link shows a labelless 60fps glimpse', a
   expect(hit).toBe('project-title')
 })
 
+test('the glimpse follows the viewer’s Off motion preference without adding labels', async ({ page }) => {
+  const world = ticketGraphWorld()
+  world.work.preferences['graph-motion'] = { pace: 'off' }
+  await mockTicketGraph(page, world)
+  await page.goto('/p/PHAROS/tickets')
+  await ready(page)
+  await expect(surface(page)).toHaveAttribute('data-orbit-seconds', '0')
+  await expect(surface(page)).toHaveAttribute('data-labels-ready', 'true', { timeout: 20_000 })
+  await expect(page.locator('.glimpse-col .graph-label')).toHaveCount(0)
+})
+
 test('hover shows Open graph and Pause; clicking the glimpse opens the graph', async ({ page }) => {
   await mockTicketGraph(page)
   await page.goto('/p/PHAROS/tickets')

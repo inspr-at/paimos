@@ -1,14 +1,14 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
+import { computed, inject, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import AppIcon from '../AppIcon.vue'
 import GraphCanvas from '../graph/GraphCanvas.vue'
 import KnowledgeGraphControls from './KnowledgeGraphControls.vue'
 import KnowledgeGraphLegend from './KnowledgeGraphLegend.vue'
-import { listNodes } from '../../lib/api'
-import { toast } from '../../lib/toast'
 import { useSession } from '../../stores/session'
+import { TICKET_PEEK } from '../../lib/ticketPeek'
+import { normalKey } from '../../lib/ticketLinks'
 import { entryPath, type KnowledgeType } from '../../lib/knowledge'
 import { STATUS_VIEWS, type KnowledgeFilters } from '../../lib/useKnowledge'
 import { fetchKnowledgeGraph, filterGraph, graphEntry, graphMatches, graphTypeLabel, graphTypeTokens, type GraphNode, type KnowledgeGraphData } from '../../lib/knowledgeGraph'
@@ -19,6 +19,7 @@ import type { GraphNode as CanvasNode } from '../../lib/graphRenderer'
 const props = defineProps<{ project: { id: string; routeKey: string; title: string }; filters: KnowledgeFilters; canWrite: boolean; docked?: boolean }>()
 const emit = defineEmits<{ create: []; reset: []; list: [] }>()
 const route = useRoute(), router = useRouter(), session = useSession()
+const peek = inject(TICKET_PEEK, null)
 const canvas = ref<InstanceType<typeof GraphCanvas>>()
 const viewer = computed(() => session.identity ? `${session.identity.tenant.id}:${session.identity.principal.id}` : undefined)
 const empty: KnowledgeGraphData = { nodes: [], edges: [], truncated: false }
@@ -29,6 +30,7 @@ const pointer = ref({ x: 0, y: 0 })
 const visible = computed(() => filterGraph(data.value, props.filters.type))
 const adapted = computed(() => knowledgeGraphData(visible.value, props.project.routeKey))
 const selected = computed(() => visible.value.nodes.find(n => n.kind === 'knowledge' ? graphEntry(n) === route.query.entry : n.id === ticketSelection.value) ?? null)
+const peekingTicket = computed(() => selected.value?.kind === 'ticket' && peek?.openKey.value === normalKey(selected.value.key))
 const query = computed(() => props.filters.q.trim())
 const matches = computed(() => graphMatches(visible.value.nodes, query.value))
 const searchResults = computed(() => query.value ? visible.value.nodes.filter(n => matches.value.has(n.id)).slice(0, 5) : [])
@@ -60,23 +62,32 @@ function clear() {
 }
 async function open(node: GraphNode) {
   if (!mounted) return
-  if (node.kind === 'knowledge') {
-    const { entry: _entry, focus: _focus, mode: _mode, ...query } = route.query
-    await router.push({ path: entryPath(props.project.routeKey, node.type as KnowledgeType, node.slug), query })
+  if (node.kind === 'ticket') {
+    // Leave the fullscreen graph first: its inert background would hide the peek.
+    if (route.query.focus === '1' || route.query.entry) {
+      const { focus: _focus, entry: _entry, ...query } = route.query
+      await router.replace({ path: route.path, query, hash: route.hash })
+    }
+    peek?.open(node.key, document.activeElement instanceof HTMLElement ? document.activeElement : null)
     return
   }
-  // A satellite can belong to another project. Resolve its project only when
-  // opening the full ticket; graph loading never requests ticket bodies.
-  try {
-    const page = await listNodes({ q: node.key, kind: ['ticket'], sort: 'key', limit: 100 })
-    if (!mounted) return
-    const project = page.items.find(item => item.id === node.id)?.project
-    if (!project) throw new Error('Ticket project unavailable')
-    await router.push({ path: `/p/${encodeURIComponent(project.key)}/${encodeURIComponent(node.key)}` })
-  } catch { toast('The ticket could not be opened. Please try again.', { tone: 'error' }) }
+  const { entry: _entry, focus: _focus, mode: _mode, peek: _peek, ...query } = route.query
+  await router.push({ path: entryPath(props.project.routeKey, node.type as KnowledgeType, node.slug), query })
 }
 function find(node: CanvasNode) { return visible.value.nodes.find(n => n.id === node.id) }
-function selectCanvas(node: CanvasNode) { const source = find(node); if (source) select(source) }
+function selectCanvas(node: CanvasNode, via?: 'pointer' | 'key') {
+  const source = find(node)
+  if (!source) return
+  if (via === 'pointer' && source.kind === 'ticket') {
+    canvas.value?.interact()
+    ticketSelection.value = source.id
+    canvas.value?.focusNode(source.id)
+    canvas.value?.focus()
+    void open(source)
+    return
+  }
+  select(source)
+}
 function openCanvas(node: CanvasNode) { const source = find(node); if (source) void open(source) }
 function hoverCanvas(node: CanvasNode | null) { hovered.value = node ? find(node) ?? null : null }
 function move(event: PointerEvent) {
@@ -91,7 +102,7 @@ defineExpose({ focus: () => canvas.value?.focus() })
 
 <template>
   <div class="kg">
-    <GraphCanvas ref="canvas" :data="adapted" :viewer-key="viewer" title="Knowledge, connected" :summary="loading ? 'Finding the connections…' : summary" :selected-id="selected?.id" :matches="matches" :searching="!!query" canvas-class="kg-canvas" @select="selectCanvas" @open="openCanvas" @hover="hoverCanvas" @clear="clear" @pointer="move">
+    <GraphCanvas v-if="viewer" ref="canvas" :data="adapted" :viewer-key="viewer" title="Knowledge, connected" :summary="loading ? 'Finding the connections…' : summary" :selected-id="selected?.id" :matches="matches" :searching="!!query" canvas-class="kg-canvas" @select="selectCanvas" @open="openCanvas" @hover="hoverCanvas" @clear="clear" @pointer="move">
       <template #controls><KnowledgeGraphControls :tickets="tickets" @tickets="tickets = !tickets" /></template>
       <template #default="{ dimension, focused }">
       <div v-if="loading || error || !visible.nodes.length" class="kg-state">
@@ -105,7 +116,7 @@ defineExpose({ focus: () => canvas.value?.focus() })
         <button v-if="!matches.size" type="button" @click="emit('reset')">Clear the filters<AppIcon name="close" :size="12" /></button>
       </div>
       <div v-if="!loading && visible.nodes.length && (!visible.edges.length || visible.nodes.length < 5) && !selected && !query" class="kg-sparse"><AppIcon name="link" :size="14" /><span>Add <code>[[slug]]</code> mentions or relations to connect these entries.</span><button class="btn sm" type="button" @click="open(visible.nodes[0])">Open an entry<AppIcon name="arrow" :size="12" /></button></div>
-      <div v-if="selected && (focused || !(docked && selected.kind === 'knowledge'))" class="kg-selection" :class="{ focused }" aria-live="polite">
+      <div v-if="selected && !peekingTicket && (focused || !(docked && selected.kind === 'knowledge'))" class="kg-selection" :class="{ focused }" aria-live="polite">
         <div class="kg-selection-meta"><span class="kg-dot" :style="{ background: `var(${graphTypeTokens[selected.type]})` }" />{{ graphTypeLabel(selected) }}<span class="mono">{{ selected.degree }} {{ selected.degree === 1 ? 'link' : 'links' }}</span><button type="button" class="icon-btn sm flat" aria-label="Clear graph selection" @click="clear"><AppIcon name="close" :size="12" /></button></div>
         <h3>{{ selected.title }}</h3><p class="mono">{{ selected.slug || selected.key }}</p>
         <button type="button" class="btn sm" @click="open(selected)">Open {{ selected.kind === 'ticket' ? 'ticket' : 'entry' }}<AppIcon name="external" :size="12" /></button><span class="kg-enter"><kbd class="keycap">Enter</kbd></span>
