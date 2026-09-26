@@ -41,10 +41,14 @@ async function settledBox(page: Page) {
   return JSON.parse(last) as { x: number; y: number; width: number; height: number }
 }
 async function ready(page: Page) {
-  // Cold lazy-module compilation and a software GPU can exceed the default 5s
-  // when the coordinator runs the suite with four browser workers.
-  await expect(canvas(page)).toHaveAttribute('data-ready', 'true', { timeout: 15_000 })
-  await expect(page.locator('.kg-state')).toHaveCount(0)
+  // Cold shader compilation on a software GPU, with four browser workers, can
+  // take longer than Playwright's default. The canvas is ready only once the
+  // renderer has started and the loading overlay is gone, observed together.
+  await expect.poll(() => page.evaluate(() => {
+    const surfaces = document.querySelectorAll('.kg-canvas')
+    const surface = surfaces.length === 1 ? surfaces[0] : null
+    return !!surface && surface.getAttribute('data-ready') === 'true' && document.querySelectorAll('.kg-state').length === 0
+  }), { timeout: 30_000 }).toBe(true)
 }
 
 async function holdNextSessionCheck(page: Page) {
@@ -218,7 +222,8 @@ test('no WebGL uses the canvas fallback with the same selection controls', async
 })
 
 test('20 mode switches dispose every WebGL context and removed canvas', async ({ page }) => {
-  test.setTimeout(120_000)
+  // Twenty software-WebGL lifecycles, four at a time, outlast the default two minutes.
+  test.setTimeout(240_000)
   await page.emulateMedia({ reducedMotion: 'no-preference' })
   await page.addInitScript(() => {
     const state = { created: 0, lost: 0 }; Object.assign(window, { graphContexts: state })
@@ -237,7 +242,10 @@ test('20 mode switches dispose every WebGL context and removed canvas', async ({
     await toggle(page, 'Graph').click(); await ready(page)
     await expect(canvas(page)).toHaveAttribute('data-dimension', '3d')
     await expect(page.locator('.kg-canvas canvas')).toHaveCount(1)
-    await toggle(page, 'Entries').click(); await expect(page.locator('.kg-canvas canvas')).toHaveCount(0)
+    await toggle(page, 'Entries').click()
+    // Leaving the graph waits on /api/me before the canvas is removed.
+    await expect(page).toHaveURL(/[?&]view=entries(?:&|$)/, { timeout: 15_000 })
+    await expect(page.locator('.kg-canvas canvas')).toHaveCount(0)
     await expect.poll(() => page.evaluate(() => { const s = (window as unknown as { graphContexts: { created: number; lost: number } }).graphContexts; return s.created - s.lost })).toBe(0)
   }
   expect(await page.evaluate(() => (window as unknown as { graphContexts: { created: number } }).graphContexts.created)).toBeGreaterThanOrEqual(20)
@@ -290,6 +298,7 @@ test('motion toggles after interaction and resumes five seconds after a drag', a
 })
 
 test('reduced motion starts paused and permits an explicit play', async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' })
   await setup(page); await page.goto('/p/PHAROS/knowledge?view=graph'); await ready(page)
   await expect(canvas(page)).toHaveAttribute('data-motion', 'still')
   await page.getByRole('button', { name: 'Resume motion' }).click()
@@ -300,25 +309,48 @@ test('reduced motion starts paused and permits an explicit play', async ({ page 
 })
 
 test('Off Smart All labels persist per viewer; selected labels survive Off', async ({ page }) => {
+  test.setTimeout(90_000)
   await setup(page); await page.goto('/p/PHAROS/knowledge?view=graph'); await ready(page)
   const labels = page.getByRole('combobox', { name: 'Graph labels', exact: true })
+  const viewer = 't1:11111111-1111-4111-8111-111111111111'
+  await expect(canvas(page)).toHaveAttribute('data-viewer', viewer)
   await expect(labels).toHaveValue('smart')
+  await expect(canvas(page)).toHaveAttribute('data-labels-ready', 'true', { timeout: 15_000 })
   await expect.poll(() => page.locator('.graph-label:not([hidden])').count()).toBeGreaterThan(0)
   await labels.selectOption('off')
+  await expect(canvas(page)).toHaveAttribute('data-labels', 'off')
+  await expect(canvas(page)).toHaveAttribute('data-labels-ready', 'true', { timeout: 15_000 })
   await expect(page.locator('.graph-label:not([hidden])')).toHaveCount(0)
   await canvas(page).press('ArrowRight')
+  // Selection is the address, and the address waits on /api/me.
+  await expect(page).toHaveURL(/entry=/, { timeout: 15_000 })
+  await expect(canvas(page)).toHaveAttribute('data-labels-ready', 'true', { timeout: 15_000 })
   await expect.poll(() => page.locator('.graph-label:not([hidden])').count()).toBeGreaterThan(0)
   await canvas(page).press('Escape')
+  await expect(page).not.toHaveURL(/entry=/, { timeout: 15_000 })
   await labels.selectOption('all')
   await expect(canvas(page)).toHaveAttribute('data-labels', 'all')
+  await expect(canvas(page)).toHaveAttribute('data-labels-ready', 'true', { timeout: 15_000 })
   await page.reload(); await ready(page)
+  await expect(canvas(page)).toHaveAttribute('data-viewer', viewer)
   await expect(labels).toHaveValue('all')
+  await expect(canvas(page)).toHaveAttribute('data-labels-ready', 'true', { timeout: 15_000 })
   await expect(page.locator('.graph-label:not([hidden])')).toHaveCount(8)
   await labels.selectOption('smart')
   await expect(canvas(page)).toHaveAttribute('data-labels', 'smart')
-  expect(await page.evaluate(() => Object.keys(localStorage).filter(key => key.startsWith('aeon:graph:')))).toEqual(['aeon:graph:t1:11111111-1111-4111-8111-111111111111:labels'])
+  expect(await page.evaluate(() => Object.keys(localStorage).filter(key => key.startsWith('aeon:graph:')))).toEqual([`aeon:graph:${viewer}:labels`])
+  // Commit this viewer's Off before the next /api/me can name someone else.
+  await labels.selectOption('off')
+  await expect(canvas(page)).toHaveAttribute('data-labels', 'off')
+  const switched = page.waitForResponse(async response => {
+    if (new URL(response.url()).pathname !== '/api/me' || response.request().method() !== 'GET') return false
+    try { return (await response.json()).principal?.id === 'different-person' } catch { return false }
+  })
   await page.route('**/api/me', route => route.fulfill({ json: { principal: { id: 'different-person', name: 'Mira Holm', kind: 'person', roles: ['member'] }, tenant: { id: 't1', name: 'INSPR Studio' } } }))
-  await labels.selectOption('off'); await page.reload(); await ready(page)
+  await page.reload()
+  await switched
+  await ready(page)
+  await expect(canvas(page)).toHaveAttribute('data-viewer', 't1:different-person')
   await expect(labels).toHaveValue('smart')
 })
 

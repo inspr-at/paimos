@@ -17,6 +17,7 @@ import { can } from '../lib/authz'
 import { command, consume, run } from '../lib/commands'
 import { fatal } from '../lib/fatal'
 import { accountEmail, accountName } from '../lib/api'
+import { usePoller } from '../lib/usePolledData'
 import { placeOf, sequence, visiblePlaces, type PlaceId } from '../lib/places'
 import { SETTINGS_SECTIONS, sectionOf } from '../lib/settings'
 import AppIcon from './AppIcon.vue'
@@ -150,7 +151,7 @@ function placeKeys(event: KeyboardEvent) {
   if (route.path !== hit.to) void router.push(hit.to)
 }
 // The Agents badge: permission requests and held action requests, checked each minute.
-let needsPoll: ReturnType<typeof setInterval> | undefined
+const needsPoll = usePoller(() => agents.loadNeeds(true), 60_000, { enabled: () => !!session.identity && !agentsPage.value, invalidate: agents.invalidatePolls })
 watch(() => session.identity?.principal.id, id => {
   if (!id) { business.reset(); customers.reset(); quotes.reset(); profile.reset(); return }
   void profile.load(true)
@@ -159,9 +160,9 @@ watch(() => session.identity?.principal.id, id => {
 }, { immediate: true })
 onMounted(() => {
   document.addEventListener('pointerdown', outside); window.addEventListener('keydown', shortcut); window.addEventListener('keydown', placeKeys, true)
-  needsPoll = setInterval(() => { if (session.identity && !agentsPage.value) void agents.loadNeeds() }, 60_000)
+  needsPoll.start()
 })
-onBeforeUnmount(() => { document.removeEventListener('pointerdown', outside); window.removeEventListener('keydown', shortcut); window.removeEventListener('keydown', placeKeys, true); clearInterval(needsPoll) })
+onBeforeUnmount(() => { document.removeEventListener('pointerdown', outside); window.removeEventListener('keydown', shortcut); window.removeEventListener('keydown', placeKeys, true); needsPoll.stop() })
 </script>
 
 <template>

@@ -1,9 +1,10 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import './details.css'
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { getConfirmation, lifecycleError, readiness, receiptBusy, receiptUrl, retryConfirmation, shortDigest, RECEIPT_PILL, type ConfirmationJob, type Readiness } from '../../../lib/quotes/lifecycle'
 import { toast } from '../../../lib/toast'
+import { usePoller } from '../../../lib/usePolledData'
 import AppIcon from '../../AppIcon.vue'
 import BizIcon from '../../business/BizIcon.vue'
 
@@ -18,24 +19,24 @@ const loaded = ref(false)
 const error = ref('')
 const busy = ref(false)
 const checked = ref(false)
-let timer: number | undefined
+const poll = usePoller(load, 5000, { enabled: () => receiptBusy(job.value?.state) })
+const failures = ref(0)
 let generation = 0
 const hasReceipt = computed(() => !!job.value?.receipt_sha256)
 const when = (iso: string | undefined) => iso ? new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }).format(new Date(iso)) : ''
 
 async function load() {
   const current = ++generation
-  window.clearTimeout(timer)
   try {
     const [next, readyState] = await Promise.all([getConfirmation(props.quoteId, props.version), ready.value ? Promise.resolve(ready.value) : readiness().catch(() => null)])
     if (current !== generation) return
-    job.value = next; ready.value = readyState; error.value = ''
-    if (receiptBusy(next?.state)) timer = window.setTimeout(() => { void load() }, 5000)
-  } catch (e) { if (current === generation) error.value = lifecycleError(e, 'The receipt could not be read.') }
+    job.value = next; ready.value = readyState; error.value = ''; failures.value = 0
+  } catch (e) { if (current === generation && ++failures.value >= (job.value ? 3 : 1)) error.value = lifecycleError(e, 'The receipt could not be read.') }
   finally { if (current === generation) loaded.value = true }
 }
-watch(() => [props.quoteId, props.version], () => { job.value = null; loaded.value = false; checked.value = false; void load() }, { immediate: true })
-onBeforeUnmount(() => { generation++; window.clearTimeout(timer) })
+watch(() => [props.quoteId, props.version], () => { job.value = null; loaded.value = false; checked.value = false; failures.value = 0; void load() }, { immediate: true })
+onMounted(() => poll.start())
+onBeforeUnmount(() => { generation++; poll.stop() })
 
 async function retry() {
   if (busy.value) return
@@ -61,7 +62,7 @@ async function copyDigest(value: string) {
       <p v-if="!job" class="d-text">No receipt belongs to this version. Receipts are made for acceptances through the customer link or by a signed-in contact.</p>
       <template v-else>
         <p v-if="hasReceipt" class="d-text">A PDF of the accepted version with its acceptance stamp, made {{ when(job.updated_at) }}. It is kept exactly as made.</p>
-        <p v-else-if="receiptBusy(job.state)" class="d-text" role="status">The receipt is being made. This card updates by itself.</p>
+        <p v-else-if="receiptBusy(job.state)" class="d-text" role="status">The receipt is being made. This card updates by itself.<template v-if="failures"> Retrying.</template></p>
         <p v-else-if="job.state === 'failed'" class="d-text">Making the receipt failed after {{ job.attempts }} {{ job.attempts === 1 ? 'try' : 'tries' }}. The acceptance itself is recorded and safe.</p>
         <p v-else-if="job.state === 'uncertain'" class="d-text">It is not certain whether the receipt went out. It is not sent again by itself.</p>
         <dl v-if="hasReceipt" class="d-facts">

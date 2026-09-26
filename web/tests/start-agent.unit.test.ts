@@ -71,7 +71,7 @@ describe('work-order launch', () => {
   })
   it('recovers an accepted run after the POST response was lost', async () => {
     const calls = backend({ lostRunResponse: true })
-    await expect(startAgent(selection)).rejects.toThrow('Network connection lost')
+    await expect(startAgent(selection)).rejects.toThrow('No connection')
     expect(await startAgent(selection)).toEqual({ run: queued, reused: true })
     expect(calls.filter(c => c.path === '/api/work-orders' && c.method === 'POST')).toHaveLength(1)
     expect(calls.filter(c => c.path.endsWith('/runs') && c.method === 'POST')).toHaveLength(1)
