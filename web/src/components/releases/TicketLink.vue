@@ -1,16 +1,9 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
-<script lang="ts">
-import type { InjectionKey, Ref } from 'vue'
-// The release history provides this: a plain click shows the ticket in its side
-// panel; the link stays a real link for a new tab or window.
-export interface TicketPeek { open: (key: string, from: HTMLElement) => void; openKey: Ref<string | null> }
-export const TICKET_PEEK: InjectionKey<TicketPeek> = Symbol('ticket-peek')
-</script>
-
 <script setup lang="ts">
 import { computed, inject, onBeforeUnmount, watchEffect } from 'vue'
 import { useRouter } from 'vue-router'
 import { brand } from '../../lib/brand'
+import { TICKET_PEEK } from '../../lib/ticketPeek'
 import { normalKey, showingTicketKeys, ticketRef, wantTicketKey } from '../../lib/ticketLinks'
 import { useProjects } from '../../stores/projects'
 

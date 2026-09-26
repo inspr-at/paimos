@@ -11,8 +11,10 @@ import ErrorPage from './components/ErrorPage.vue'
 import StatusPage from './components/StatusPage.vue'
 import ShortcutSheet from './components/work/ShortcutSheet.vue'
 import AppIcon from './components/AppIcon.vue'
+import TicketPeekHost from './components/TicketPeekHost.vue'
 import { command, consume } from './lib/commands'
 import { clearFatal, fatal } from './lib/fatal'
+import { provideTicketPeek } from './lib/ticketPeek'
 import { useSession } from './stores/session'
 import { useReleases } from './stores/releases'
 import { brand } from './lib/brand'
@@ -25,6 +27,7 @@ const ReleasesSheet = defineAsyncComponent(() => import('./components/releases/R
 const session = useSession()
 const route = useRoute()
 const router = useRouter()
+const ticketPeek = provideTicketPeek()
 const main = ref<HTMLElement>()
 const shortcuts = ref<InstanceType<typeof ShortcutSheet>>()
 const retrying = ref(false)
@@ -164,7 +167,7 @@ watch(() => [route.path, route.params.projectKey, route.params.ticketKey, route.
         <span>Your session has ended. Sign in again in a new tab; what you typed stays on this page.</span>
         <button type="button" class="btn sm" @click="signInAgain">Sign in</button>
       </div>
-      <div class="page-flow" :class="{ fill: route.meta.fill && !session.error && !fatal }">
+      <div class="page-flow" :class="{ fill: route.meta.fill && !session.error && !fatal, 'peek-open': !!ticketPeek.openKey.value && !releasesOpen }">
         <ErrorPage v-if="fatal" :error="fatal" />
         <StatusPage v-else-if="session.error && !bare" eyebrow="Connection interrupted" title="Let’s try that again." tone="problem">
           <p role="alert">{{ session.error }}</p>
@@ -178,6 +181,7 @@ watch(() => [route.path, route.params.projectKey, route.params.ticketKey, route.
     <!-- A row of the shell: the page, docked panels and toasts all end above it. -->
     <AppFooter v-if="!bare" :hidden="footerHidden" @releases="openReleases()" />
     <ReleasesSheet v-if="releasesOpen" :target="releasesTarget" @select="selectRelease" @close="closeReleases" @home="goHome" @navigate="leaveReleasesFor" />
+    <TicketPeekHost v-if="ticketPeek.openKey.value && !releasesOpen" :ref="ticketPeek.bind" :ticket-key="ticketPeek.openKey.value" :back-label="ticketPeek.backLabel.value" @close="ticketPeek.close()" />
     <ToastHost />
     <ConfirmHost />
     <ShortcutSheet ref="shortcuts" />
@@ -203,6 +207,9 @@ main:focus-visible { box-shadow: none; }
 .page-flow > :first-child { flex: 1 0 auto; }
 .page-flow.fill { height: 100%; }
 .page-flow.fill > :first-child { flex: 1 1 auto; min-height: 0; }
+@media (min-width: 1100px) {
+  .page-flow.peek-open { padding-right: calc(var(--panel-w) + 22px); }
+}
 /* Out of sight until focused; its shadow too, or it smudges the top of bare pages. */
 .skip-link { position: fixed; z-index: 90; top: 8px; left: 16px; padding: 10px 16px; border-radius: 999px; background: var(--surface-raised); box-shadow: none; transform: translateY(-160%); }
 .skip-link:focus { transform: translateY(0); box-shadow: var(--shadow-pop); }
