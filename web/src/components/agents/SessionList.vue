@@ -9,14 +9,16 @@ import AppIcon from '../AppIcon.vue'
 import FloatingPanel from '../work/FloatingPanel.vue'
 import ConnectHint from './ConnectHint.vue'
 import LiveDot from './LiveDot.vue'
+import AgentGlyph from './AgentGlyph.vue'
+import { currentStep } from './activity'
 
 // Session families stay together across status groups. Each lead's history is
 // opt-in for this mounted list only; refreshes never open it or persist it.
 const props = defineProps<{
   groups: Record<SessionGroup, SessionView[]>; now: number; cursor: string; selected: string; state: Availability; error: string
-  loaded: boolean; controls: Record<string, SessionControl>; canControl: boolean
+  loaded: boolean; controls: Record<string, SessionControl>; canControl: boolean; canStart: boolean
 }>()
-const emit = defineEmits<{ open: [id: string]; control: [view: SessionView, kind: SessionControl['kind']]; focusRow: [id: string]; retry: [] }>()
+const emit = defineEmits<{ open: [id: string]; control: [view: SessionView, kind: SessionControl['kind']]; focusRow: [id: string]; retry: []; start: [] }>()
 const showStopped = ref(false)
 const total = computed(() => GROUPS.reduce((sum, g) => sum + props.groups[g.id].length, 0))
 const live = computed(() => total.value - props.groups.stopped.length)
@@ -124,12 +126,11 @@ function rowClick(event: MouseEvent, id: string) {
     <div v-else-if="!loaded" class="skeleton-rows" role="status" aria-label="Loading sessions">
       <div v-for="i in 5" :key="i" class="sk-row"><span class="skeleton dot" /><span class="skeleton" :style="{ width: `${18 + (i * 7) % 16}%` }" /><span class="skeleton key" /><span class="skeleton" style="width: 12%" /></div>
     </div>
-    <ConnectHint v-else-if="!total" />
+    <ConnectHint v-else-if="!total" :can-start="canStart" @start="emit('start')" />
 
     <div v-else class="table" role="table" aria-label="Agent sessions">
       <div class="thead" role="row">
-        <span role="columnheader">State</span><span role="columnheader">Agent</span><span role="columnheader">Ticket</span>
-        <span role="columnheader" class="c-account">Account</span><span role="columnheader" class="c-model">Model</span>
+        <span role="columnheader">State</span><span role="columnheader">Agent &amp; work</span><span role="columnheader">Ticket</span>
         <span role="columnheader" class="right">Heartbeat</span><span role="columnheader" class="right c-elapsed">Running</span><span role="columnheader"><span class="sr-only">Actions</span></span>
       </div>
       <template v-for="group in GROUPS" :key="group.id">
@@ -153,8 +154,8 @@ function rowClick(event: MouseEvent, id: string) {
           <span role="cell" class="c-agent">
             <span v-if="depth" class="sr-only">Worker of {{ parent }}. </span>
             <RouterLink class="agent-link" :to="`/agents/${view.session.id}`" :aria-label="`${view.harness} ${view.name}, ${view.status.label}`">
-              <span class="harness" :class="view.session.harness">{{ view.harness }}</span>
-              <span class="who"><span class="agent-name">{{ view.name }}</span><span v-if="view.session.host && view.session.host !== view.name" class="host mono">on {{ view.session.host }}</span></span>
+              <AgentGlyph :view="view" :size="30" />
+              <span class="who"><span class="agent-name">{{ view.name }}</span><span class="step">{{ currentStep(view, branch.liveCount - 1) }}</span><span v-if="view.session.host && view.session.host !== view.name" class="host mono">on {{ view.session.host }}</span></span>
             </RouterLink>
             <span v-if="view.session.role === 'coordinator'" class="role" data-tip="Coordinates other sessions">Lead</span>
             <span v-if="branch.children.length" class="worker-tools">
@@ -170,8 +171,6 @@ function rowClick(event: MouseEvent, id: string) {
             <RouterLink v-if="view.ticket" class="ticket-chip" :to="view.ticket.href" :data-tip="view.ticket.title">{{ view.ticket.key }}</RouterLink>
             <span v-else class="faint">{{ view.projectKey || '—' }}</span>
           </span>
-          <span role="cell" class="c-account">{{ view.account || '—' }}</span>
-          <span role="cell" class="c-model mono-cell" :data-tip="view.model || undefined">{{ view.model || '—' }}</span>
           <span role="cell" class="right c-beat">
             <time v-if="view.session.heartbeat_at" :datetime="view.session.heartbeat_at">{{ relativeTime(view.session.heartbeat_at, { now }) }}</time>
             <span v-else class="faint">never</span>
@@ -216,7 +215,7 @@ function rowClick(event: MouseEvent, id: string) {
 .card-head { display: flex; align-items: baseline; gap: 10px; padding: 14px 18px 10px; }
 .card-head h2 { font-size: 15px; font-weight: 650; }
 .sub { font-size: 12.5px; color: var(--ink-3); }
-.table { --state-width: 132px; --tree-step: 18px; display: grid; grid-template-columns: var(--state-width) minmax(210px, 1.5fr) minmax(96px, .8fr) minmax(90px, .8fr) minmax(110px, .9fr) 84px 72px 76px; padding: 0 0 8px; }
+.table { --state-width: 132px; --tree-step: 28px; display: grid; grid-template-columns: var(--state-width) minmax(200px, 1.5fr) minmax(90px, .8fr) 88px 76px 76px; padding: 0 0 8px; }
 .thead, .row, .group-row { display: grid; grid-template-columns: subgrid; grid-column: 1 / -1; align-items: center; column-gap: 0; }
 .thead { height: 32px; padding: 0 12px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); font: 500 10.5px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--ink-3); font-variant-ligatures: none; white-space: nowrap; }
 .thead > span, .row > span { padding: 0 8px; min-width: 0; }
@@ -229,7 +228,7 @@ function rowClick(event: MouseEvent, id: string) {
 .group-toggle:hover { background: var(--row-hover); color: var(--ink); }
 .group-toggle:focus-visible { box-shadow: var(--focus-ring); }
 .chev.turned { transform: rotate(90deg); }
-.row { --tree-joint: 24px; position: relative; min-height: 48px; margin: 0 6px; padding: 0 4px; border-radius: 10px; outline: none; cursor: pointer; font-size: 13px; }
+.row { --tree-joint: 28px; position: relative; min-height: 48px; margin: 0 6px; padding: 0 4px; border-radius: 10px; outline: none; cursor: pointer; font-size: 13px; }
 .row.family { background: var(--chip-bg); border-radius: 0; }
 .row.family-start { border-radius: 10px 10px 0 0; }
 .row.family-end { border-radius: 0 0 10px 10px; }
@@ -240,15 +239,16 @@ function rowClick(event: MouseEvent, id: string) {
 .row.stopped { color: var(--ink-2); background: var(--chip-bg); }
 .row.stopped .agent-name { font-weight: 450; color: var(--ink-2); }
 .row.worker .c-agent { padding-left: calc(8px + var(--depth) * var(--tree-step)); }
-/* Neutral one-pixel tree strokes, never state accents or text glyphs. The
-   ancestor tracks continue only while that ancestor has another visible sibling. */
-.row > .tree-lines { position: absolute; inset: 0 0 0 calc(var(--state-width) + 4px); padding: 0; pointer-events: none; color: var(--ink-3); }
+/* The track is anchored to the lead glyph's centre. Each visible descendant
+   carries its ancestors' tracks across row boundaries; the last child closes
+   its track at the badge. The toggle remains in the lead's text column. */
+.row > .tree-lines { position: absolute; inset: 0 0 0 calc(var(--state-width) + 17px); padding: 0; pointer-events: none; color: var(--ink-3); }
 .tree-guide, .tree-stem { position: absolute; left: calc(var(--level) * var(--tree-step)); top: 0; bottom: 0; width: var(--tree-step); }
 .tree-guide.continues::before, .tree-guide.elbow::before { content: ''; position: absolute; top: 0; bottom: 0; width: 1px; background: currentColor; }
-.tree-guide.last::before { bottom: auto; height: var(--tree-joint); }
-.tree-guide.elbow::after { content: ''; position: absolute; top: var(--tree-joint); width: calc(var(--tree-step) - 4px); height: 1px; background: currentColor; }
-.tree-stem { top: auto; height: 6px; width: 1px; background: currentColor; }
-.worker-tools { display: flex; align-items: center; flex-wrap: wrap; gap: 2px; flex-basis: 100%; padding: 2px 0 6px; color: var(--ink-2); font-size: 11.5px; }
+.tree-guide.last::before { bottom: auto; height: calc(var(--tree-joint) - 4px); }
+.tree-guide.elbow::after { content: ''; position: absolute; top: calc(var(--tree-joint) - 4px); left: 0; width: calc(var(--tree-step) - 15px); height: 5px; border: solid currentColor; border-width: 0 0 1px 1px; border-radius: 0 0 0 5px; }
+.tree-stem { top: calc(var(--tree-joint) + 15px); bottom: 0; width: 1px; background: currentColor; }
+.worker-tools { display: flex; align-items: center; flex-wrap: wrap; gap: 2px; flex-basis: 100%; padding: 2px 0 6px 38px; color: var(--ink-2); font-size: 11.5px; }
 .worker-toggle { display: inline-flex; align-items: center; justify-content: center; gap: 4px; min-height: 28px; padding: 2px 6px; border: 0; border-radius: 6px; background: transparent; color: var(--ink); font: inherit; font-weight: 550; white-space: nowrap; }
 .worker-toggle:hover:not(:disabled) { background: var(--row-hover); }
 .worker-toggle:disabled { cursor: default; }
@@ -266,14 +266,13 @@ function rowClick(event: MouseEvent, id: string) {
 .agent-link:focus-visible { box-shadow: var(--focus-ring); border-radius: 6px; }
 .who { display: grid; min-width: 0; line-height: 1.25; }
 .agent-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.step { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-2); font-size: 12px; }
 .row:hover .agent-name { color: var(--teal-ink); }
 .harness { flex-shrink: 0; display: inline-flex; align-items: center; height: 20px; padding: 0 7px; border-radius: 6px; background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); font: 500 10.5px/1 var(--mono); letter-spacing: .03em; color: var(--ink-2); font-variant-ligatures: none; }
 .role { flex-shrink: 0; height: 18px; padding: 0 6px; border-radius: 999px; background: var(--gold-wash); color: var(--gold-ink); font: 600 10px/18px var(--mono); letter-spacing: .06em; text-transform: uppercase; font-variant-ligatures: none; }
 .ticket-chip { display: inline-flex; align-items: center; height: 22px; padding: 0 8px; border-radius: 6px; background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); font: 600 11.5px/1 var(--mono); text-decoration: none; font-variant-ligatures: none; white-space: nowrap; }
 .ticket-chip:hover { filter: brightness(1.04); text-decoration: underline; }
 .ticket-chip:focus-visible { box-shadow: var(--focus-ring); }
-.row .c-account, .row .c-model { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-2); }
-.row .c-model { font-size: 12px; }
 .row .c-beat { font-size: 12.5px; color: var(--ink-2); white-space: nowrap; }
 .row .c-elapsed { font-size: 12px; color: var(--ink-2); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .faint { color: var(--ink-3); }
@@ -305,28 +304,27 @@ function rowClick(event: MouseEvent, id: string) {
 .sk-row .dot { width: 10px; height: 10px; border-radius: 50%; }
 .sk-row .key { width: 70px; height: 20px; border-radius: 6px; }
 @container sessions (max-width: 920px) {
-  .table { --state-width: 118px; grid-template-columns: var(--state-width) minmax(150px, 1.3fr) minmax(96px, .8fr) minmax(100px, .9fr) 80px 64px 76px; }
-  .c-account { display: none; }
+  .table { --state-width: 118px; grid-template-columns: var(--state-width) minmax(150px, 1.3fr) minmax(90px, .8fr) 80px 64px 76px; }
 }
 @container sessions (max-width: 760px) {
   .table { --state-width: 112px; grid-template-columns: var(--state-width) minmax(140px, 1fr) minmax(90px, auto) 78px 76px; }
-  .c-model, .c-elapsed { display: none; }
+  .c-elapsed { display: none; }
 }
 /* Phones: two lines per session, actions live in the session panel. */
 @container sessions (max-width: 560px) {
-  .table { --tree-step: 12px; display: block; }
+  .table { --tree-step: 20px; display: block; }
   .thead { display: none; }
   .group-row { display: block; margin: 12px 8px 2px; padding: 0 8px; }
-  .row { --tree-joint: 30px; display: grid; grid-template-columns: auto minmax(0, 1fr) auto 44px; grid-template-areas: "agent agent beat actions" "state ticket ticket actions"; row-gap: 6px; column-gap: 0; min-height: 64px; margin: 0 6px; padding: 10px 4px 10px calc(10px + var(--depth) * var(--tree-step)); }
+  .row { --tree-joint: 38px; display: grid; grid-template-columns: auto minmax(0, 1fr) auto 44px; grid-template-areas: "agent agent beat actions" "state ticket ticket actions"; row-gap: 6px; column-gap: 0; min-height: 64px; margin: 0 6px; padding: 10px 4px 10px calc(10px + var(--depth) * var(--tree-step)); }
   .row > span { padding: 0; }
   .c-agent { grid-area: agent; }
   .row.worker .c-agent { padding-left: 0; }
-  .row > .tree-lines { left: 10px; }
+  .row > .tree-lines { left: 25px; }
   .worker-toggle { min-height: 44px; padding-inline: 8px; }
   .c-state { grid-area: state; margin-right: 10px; }
   .c-ticket { grid-area: ticket; justify-self: start; }
   .c-beat { grid-area: beat; }
-  .c-account, .c-model, .c-elapsed { display: none; }
+  .c-elapsed { display: none; }
   .c-actions { grid-area: actions; align-self: center; justify-content: center; }
   .act { display: none; }
   .more { display: grid; width: 44px; height: 44px; }

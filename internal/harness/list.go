@@ -31,9 +31,10 @@ type PrincipalSummary struct {
 
 type SessionSummary struct {
 	Session
-	Project NodeSummary       `json:"project"`
-	Ticket  *NodeSummary      `json:"ticket"`
-	Agent   *PrincipalSummary `json:"agent"`
+	ActivityNoteID *int64            `json:"activity_note_id,omitempty"`
+	Project        NodeSummary       `json:"project"`
+	Ticket         *NodeSummary      `json:"ticket"`
+	Agent          *PrincipalSummary `json:"agent"`
 }
 
 type sessionPage struct {
@@ -106,6 +107,31 @@ func (m *Module) listAll(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, e
 		next := base64.RawURLEncoding.EncodeToString(b)
 		out.NextCursor = &next
 	}
+	// The latest entry ID is stable across ordinary heartbeats and monotonically
+	// increases only when a new note is recorded. Fetch once for the bounded page.
+	sessionIDs := make([]string, 0, len(out.Items))
+	for _, s := range out.Items {
+		sessionIDs = append(sessionIDs, s.ID)
+	}
+	noteRows, err := tx.Query(r.Context(), `SELECT DISTINCT ON (session_id) session_id::text,id FROM harness_activity_notes WHERE session_id=ANY($1::uuid[]) ORDER BY session_id,id DESC`, sessionIDs)
+	if err != nil {
+		return nil, err
+	}
+	latestNotes := map[string]int64{}
+	for noteRows.Next() {
+		var sessionID string
+		var noteID int64
+		if err = noteRows.Scan(&sessionID, &noteID); err != nil {
+			noteRows.Close()
+			return nil, err
+		}
+		latestNotes[sessionID] = noteID
+	}
+	err = noteRows.Err()
+	noteRows.Close()
+	if err != nil {
+		return nil, err
+	}
 	// Fetch the bounded set of node summaries in one query after closing rows.
 	ids := []string{}
 	for _, s := range out.Items {
@@ -153,6 +179,9 @@ func (m *Module) listAll(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, e
 	}
 	for i := range out.Items {
 		s := &out.Items[i]
+		if noteID, ok := latestNotes[s.ID]; ok {
+			s.ActivityNoteID = &noteID
+		}
 		s.Project = summaries[s.ProjectID]
 		if s.TicketNodeID != nil {
 			n := summaries[*s.TicketNodeID]

@@ -371,7 +371,7 @@ async function indicatorProps(page: Page, detail: Record<string, unknown>) {
 for (const reducedMotion of ['reduce', 'no-preference'] as const) {
   test.describe(`event evidence (${reducedMotion})`, () => {
     test.use({ reducedMotion })
-    test('heartbeat advancement glints once; ordinary polls and view remounts do not', async ({ page }) => {
+    test('a new activity entry glints once; heartbeats, ordinary polls and remounts do not', async ({ page }) => {
       const data = world()
       const calls = await cards(page, data)
       const reads = () => calls.filter(c => c.path === '/api/harness-sessions/live').length
@@ -381,6 +381,10 @@ for (const reducedMotion of ['reduce', 'no-preference'] as const) {
       await expect.poll(reads).toBe(2)
       await expect(bot.locator('.glint')).toHaveCount(0)
       data.live[0]!.heartbeat_at = '2026-09-23T12:00:10Z'
+      await page.clock.fastForward(20_000)
+      await expect.poll(reads).toBe(3)
+      await expect(bot.locator('.glint')).toHaveCount(0)
+      Object.assign(data.live[0]!, { activity_note: 'Running tests', activity_note_id: 10, activity_sequence: 7 })
       await page.clock.fastForward(20_000)
       await expect(bot.locator('.glint')).toHaveCount(1)
       const frames = await bot.locator('.glint').evaluate(el => el.getAnimations().flatMap(a => (a.effect as KeyframeEffect).getKeyframes()))

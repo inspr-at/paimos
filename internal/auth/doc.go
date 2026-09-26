@@ -16,7 +16,7 @@
 //
 // Agent route-to-scope table (GET and HEAD are reads unless noted):
 //
-//	/api/projects, /api/nodes, /api/node-keys, /api/kinds:
+//	/api/projects, /api/nodes, /api/node-keys, /api/kinds, GET /api/tickets/graph:
 //	  nodes.read; node writes use nodes.write; kind and tag writes use
 //	  nodes.configure. Kind mutations and tag rename/delete require a person
 //	  admin; other tag metadata edits retain the member route.
