@@ -121,7 +121,7 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
         </template>
       </div>
       <p v-if="view && !loading" class="head-sub">
-        <RouterLink v-if="view.ticket" class="ticket-chip" :to="view.ticket.href" :aria-label="`Ticket ${view.ticket.key}: ${view.ticket.title}`">{{ view.ticket.key }}</RouterLink>
+        <span v-if="view.ticket" class="ticket-chip">{{ view.ticket.key }}</span>
         <span v-if="view.ticket" class="head-ticket">{{ view.ticket.title }}</span>
         <span v-if="meta" class="head-account"><AppIcon name="gauge" :size="12" />{{ meta }}</span>
       </p>

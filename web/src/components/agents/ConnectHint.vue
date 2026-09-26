@@ -8,7 +8,8 @@ const emit = defineEmits<{ start: [] }>()
 <template>
   <div class="connect">
     <span class="halo"><AppIcon name="agent" :size="22" /></span>
-    <p class="lead">No agent has connected yet. {{ canStart ? 'Start one to begin.' : 'Ask a workspace admin to start one.' }}</p>
+    <h3>No agent has connected yet</h3>
+    <p class="lead">{{ canStart ? 'Start an agent to queue a run; its daemon connects when an account is ready.' : 'Ask a workspace admin to start an agent; its daemon connects when an account is ready.' }}</p>
     <button v-if="canStart" type="button" class="btn sm" @click="emit('start')"><AppIcon name="plus" :size="14" />Start agent</button>
   </div>
 </template>

@@ -45,18 +45,16 @@ test('the header links to Agents with a count of what needs you', async ({ page 
   await expect(page.getByRole('navigation', { name: 'Breadcrumb' })).toHaveCount(0)
 })
 
-test('sessions are grouped by what they need, with ticket, account, model and heartbeat', async ({ page }) => {
+test('sessions are grouped by what they need, with ticket and heartbeat; details show account and model', async ({ page }) => {
   const errors = watchErrors(page)
   await setup(page)
   await openAgents(page)
   await expect(page.locator('.group-row')).toHaveText([/Needs you\s*4/, /Working\s*1/, /Idle\s*1/, /Stopped\s*3/])
   const lead = row(page, camy)
-  await expect(lead).toContainText('Claude')
+  await expect(lead.getByRole('link', { name: /Claude camy, Working/ })).toBeVisible()
   await expect(lead).toContainText('camy')
   await expect(lead).toContainText('Lead')
   await expect(lead.getByRole('link', { name: 'PHAROS-11' })).toHaveAttribute('href', '/p/PHAROS/PHAROS-11')
-  await expect(lead).toContainText('Claude Max')
-  await expect(lead).toContainText('claude-fable-high')
   await expect(lead.locator('.state-label')).toHaveText('Working')
   await expect(row(page, session(5)).locator('.state-label')).toHaveText('No heartbeat')
   await expect(row(page, session(6)).locator('.state-label')).toHaveText('Starting')
@@ -65,6 +63,9 @@ test('sessions are grouped by what they need, with ticket, account, model and he
   await page.getByRole('button', { name: /^Stopped/ }).click()
   await expect(row(page, session(7))).toBeVisible()
   await expect(page.locator('.summary')).toHaveText('4 need you · 1 working · 1 idle')
+  await lead.locator('.agent-link').click()
+  await expect(panel(page)).toContainText('Claude Max')
+  await expect(panel(page)).toContainText('claude-fable-high')
   expect(errors).toEqual([])
 })
 
@@ -224,6 +225,7 @@ test('the session panel shows the ticket, runs, telemetry and the thread, and se
   await expect(details.getByRole('heading', { name: /camy/ })).toBeVisible()
   await expect(details.locator('.head-sub')).toContainText('Claude Max')
   await expect(details).toContainText('lead session · owned by AEON')
+  await expect(details.locator('.head-sub .ticket-chip')).toHaveText('PHAROS-11')
   await expect(details.getByRole('link', { name: /PHAROS-11/ })).toHaveAttribute('href', '/p/PHAROS/PHAROS-11')
   await expect(details).toContainText('Claude Max')
   await expect(details.locator('.metric')).toHaveText([/Running/, /184k/, /22k/, /\$3\.84/])
@@ -376,15 +378,18 @@ test('accounts explain themselves when the person may not see them', async ({ pa
 
 test('an empty workspace explains how an agent connects', async ({ page }) => {
   await setup(page, { empty: true })
+  await page.route('**/api/me/permissions*', route => {
+    const effective = mockEffectivePermissions('admin')
+    effective.workspace.permissions.push('run.create')
+    return route.fulfill({ json: effective })
+  })
   await page.goto('/agents')
   await expect(page.getByRole('heading', { name: 'No agent has connected yet' })).toBeVisible()
-  await expect(page.locator('.connect code').nth(1)).toContainText('aeon harness register --project KEY --agent NAME')
-  await expect(page.locator('.connect code').nth(1)).toContainText('--management unmanaged')
-  await expect(page.locator('.connect')).toContainText('This page does not start or attach to an existing local process.')
-  await expect(page.locator('.connect')).toContainText('registers an unmanaged session')
-  await expect(page.locator('.connect')).toContainText('aeon-agentd owns and controls only children it launches')
-  await expect(queue(page)).toContainText('Nothing waits on you')
+  await expect(page.locator('.connect .lead')).toHaveText('Start an agent to queue a run; its daemon connects when an account is ready.')
+  await expect(queue(page)).toHaveCount(0)
   await expect(page.locator('.summary')).toHaveText('No agent connected yet')
+  await page.locator('.connect').getByRole('button', { name: 'Start agent' }).click()
+  await expect(page.getByRole('dialog', { name: 'Start agent' })).toContainText('Its daemon starts a fresh session when an account is ready.')
 })
 
 test('a failing sessions read is a real error with a retry, and approvals keep working', async ({ page }) => {
