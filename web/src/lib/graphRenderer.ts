@@ -6,6 +6,7 @@ import type { ForceGraph3DInstance } from '3d-force-graph'
 import type ForceGraph2D from 'force-graph'
 import type { Group, MeshPhysicalMaterial, PerspectiveCamera, SphereGeometry } from 'three'
 import type { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
+import { graphOrbitPace, graphOrbitSeconds } from './graphOrbitState.ts'
 
 export type GraphDimension = '2d' | '3d'
 export type GraphLabels = 'off' | 'smart' | 'all'
@@ -53,6 +54,24 @@ export function graphLayout(data: GraphData): { nodes: LayoutNode[]; links: Layo
 }
 export interface LabelBox { x: number; y: number; w: number; h: number }
 const overlaps = (a: LabelBox, b: LabelBox) => Math.abs(a.x - b.x) < (a.w + b.w) / 2 + 4 && Math.abs(a.y - b.y) < (a.h + b.h) / 2 + 3
+const LABEL_FADE = 'opacity 0.7s ease-in-out'
+const LABEL_FADE_MS = 700
+// Critically damped: a placement change settles inside the fade, with no overshoot.
+const LABEL_OMEGA = 14
+function damp(x: number, v: number, target: number, dt: number, omega: number) {
+  if (dt <= 0) return { x, v }
+  const exp = Math.exp(-omega * dt)
+  const change = x - target
+  const temp = (v + omega * change) * dt
+  let next = target + (change + temp) * exp
+  let velocity = (v - omega * temp) * exp
+  if ((x - target) * (next - target) < 0 || Math.abs(next - target) < 0.35) { next = target; velocity = 0 }
+  return { x: next, v: velocity }
+}
+function labelFits(box: LabelBox, placed: LabelBox[], width: number, height: number) {
+  const inside = box.x - box.w / 2 >= 2 && box.x + box.w / 2 <= width - 2 && box.y - box.h / 2 >= 2 && box.y + box.h / 2 <= height - 2
+  return inside && !placed.some(other => overlaps(box, other))
+}
 // Deterministic screen-space greedy placement; try below/above/right/left and
 // diagonals. All shows every label; Smart gives connected hubs first choice.
 export function labelPosition(x: number, y: number, radius: number, w: number, h: number, placed: LabelBox[], width: number, height: number, always: boolean): LabelBox | undefined {
@@ -71,6 +90,7 @@ function graphPalette(nodes: LayoutNode[], links: LayoutEdge[] = []) {
 }
 
 export async function createGraphRenderer(host: HTMLElement, dimension: GraphDimension, options: GraphRendererOptions): Promise<GraphRenderer | null> {
+  void import('./graphMotion.ts').then(mod => mod.ensureGraphMotion())
   let three: typeof import('three') | undefined, g3: Graph3D | undefined, g2: Graph2D | undefined
   let geometry: SphereGeometry | undefined
   const materials = new Map<string, MeshPhysicalMaterial>()
@@ -98,23 +118,62 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
   }
   const labelLayer = document.createElement('div')
   labelLayer.className = 'graph-labels'; labelLayer.setAttribute('aria-hidden', 'true')
-  const labels = new Map<string, { el: HTMLSpanElement; w: number; h: number }>()
+  interface LabelEntry {
+    el: HTMLSpanElement; w: number; h: number
+    ox: number; oy: number; vx: number; vy: number; tox: number; toy: number
+    want: boolean; anchored: boolean; opacityReady: boolean; fadeDoneAt: number
+  }
+  const labels = new Map<string, LabelEntry>()
+  let labelClock = 0
+  const prefersReduced = () => options.reduced || window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  function measureLabel(label: LabelEntry) {
+    if (label.w > 0) return
+    const hidden = label.el.hidden
+    if (hidden) label.el.hidden = false
+    label.w = label.el.offsetWidth
+    label.h = label.el.offsetHeight
+    if (hidden) label.el.hidden = true
+  }
+  function fadeTo(label: LabelEntry, opacity: string, reduced: boolean) {
+    const show = opacity !== '0'
+    if (show && label.el.hidden) {
+      label.el.hidden = false
+      label.el.style.transition = 'none'
+      label.el.style.opacity = '0'
+      void label.el.offsetWidth
+    }
+    if (!show && label.el.hidden) { label.opacityReady = true; return }
+    const transition = reduced ? 'none' : LABEL_FADE
+    if (label.el.style.transition !== transition) label.el.style.transition = transition
+    if (label.el.style.opacity !== opacity) {
+      label.el.style.opacity = opacity
+      label.opacityReady = reduced
+      label.fadeDoneAt = performance.now() + (reduced ? 0 : LABEL_FADE_MS)
+    } else if (reduced) label.opacityReady = true
+    if (!label.opacityReady && performance.now() >= label.fadeDoneAt) label.opacityReady = true
+    if (!show && label.opacityReady) label.el.hidden = true
+  }
   function rebuildLabels() {
-    labelLayer.replaceChildren(); labels.clear()
+    labelLayer.replaceChildren(); labels.clear(); labelClock = 0
     const fragment = document.createDocumentFragment()
+    const transition = prefersReduced() ? 'none' : LABEL_FADE
     for (const n of nodes) {
       const el = document.createElement('span')
-      el.className = 'graph-label'; el.hidden = true; el.textContent = n.label.length > 34 ? n.label.slice(0, 31) + '…' : n.label
+      el.className = 'graph-label'
+      el.hidden = true
+      el.textContent = n.label.length > 34 ? n.label.slice(0, 31) + '…' : n.label
+      el.style.opacity = '0'
+      el.style.transition = transition
       fragment.append(el)
-      labels.set(n.id, { el, w: 0, h: 0 })
+      labels.set(n.id, { el, w: 0, h: 0, ox: 0, oy: 0, vx: 0, vy: 0, tox: 0, toy: 0, want: false, anchored: false, opacityReady: true, fadeDoneAt: 0 })
     }
     labelLayer.append(fragment)
-    for (const label of labels.values()) { label.w = label.el.offsetWidth; label.h = label.el.offsetHeight }
+    for (const label of labels.values()) measureLabel(label)
   }
   function orderLabels() {
     labelOrder = [...nodes].sort((a, b) => Number(b.id === emphasis.selected) - Number(a.id === emphasis.selected) || Number(b.id === emphasis.hovered) - Number(a.id === emphasis.hovered) || b.degree - a.degree || a.id.localeCompare(b.id))
   }
-  function placeLabels() {
+  function placeLabels(dt: number) {
     const graph = g3 ?? g2
     if (!graph || disposed) return
     const placed: LabelBox[] = [], width = graph.width(), height = graph.height()
@@ -134,28 +193,62 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
       projected.set(n.id, { ...screen, radius })
       placed.push({ x: screen.x, y: screen.y, w: radius * 2, h: radius * 2 })
     }
+    const reduced = prefersReduced()
     for (const n of labelOrder) {
       const label = labels.get(n.id); if (!label) continue
+      measureLabel(label)
       const mandatory = n.id === emphasis.selected || n.id === emphasis.hovered
-      label.el.hidden = true
-      if (labelMode === 'off' && !mandatory) continue
-      const screen = projected.get(n.id); if (!screen) continue
-      const radius = screen.radius
-      const box = labelPosition(screen.x, screen.y, radius, label.w, label.h, placed, width, height, mandatory || labelMode === 'all')
-      if (!box) continue
-      placed.push(box); label.el.hidden = false
-      label.el.style.transform = `translate(${Math.round(box.x - box.w / 2)}px, ${Math.round(box.y - box.h / 2)}px)`
-      label.el.style.opacity = mandatory ? '1' : String(Math.max(.55, alpha(n)))
+      const screen = projected.get(n.id)
+      const wasWanted = label.want
+      let box: LabelBox | undefined
+      if (screen && (labelMode !== 'off' || mandatory)) {
+        // Keep a slot that still fits so orbiting does not retarget every frame.
+        if (wasWanted && label.anchored) {
+          const kept: LabelBox = { x: screen.x + label.tox + label.w / 2, y: screen.y + label.toy + label.h / 2, w: label.w, h: label.h }
+          if (labelFits(kept, placed, width, height)) box = kept
+        }
+        box ??= labelPosition(screen.x, screen.y, screen.radius, label.w, label.h, placed, width, height, mandatory || labelMode === 'all')
+      }
+      if (!box || !screen) {
+        label.want = false
+        if (screen && label.anchored) label.el.style.transform = `translate(${screen.x + label.ox}px, ${screen.y + label.oy}px)`
+        fadeTo(label, '0', reduced)
+        continue
+      }
+      const tox = Math.round(box.x - box.w / 2 - screen.x)
+      const toy = Math.round(box.y - box.h / 2 - screen.y)
+      label.want = true
+      label.anchored = true
+      label.tox = tox
+      label.toy = toy
+      // Glide only the offset from the orb. The orb's screen position is applied
+      // raw each frame, so a moving camera does not leave the label behind.
+      if (!wasWanted || reduced) { label.ox = tox; label.oy = toy; label.vx = 0; label.vy = 0 }
+      else if (dt > 0 && (label.ox !== tox || label.oy !== toy || label.vx !== 0 || label.vy !== 0)) {
+        const x = damp(label.ox, label.vx, tox, dt, LABEL_OMEGA)
+        const y = damp(label.oy, label.vy, toy, dt, LABEL_OMEGA)
+        label.ox = x.x; label.vx = x.v; label.oy = y.x; label.vy = y.v
+      }
+      placed.push(box)
+      label.el.style.transform = `translate(${screen.x + label.ox}px, ${screen.y + label.oy}px)`
       label.el.style.zIndex = mandatory ? '2' : '1'
+      fadeTo(label, mandatory ? '1' : String(Math.max(0.55, alpha(n))), reduced)
     }
   }
-  // Placement is a frame behind the camera. Report it only once it matches the
-  // mode, so a caller can wait for labels instead of guessing a frame budget.
+  function labelAtRest(label: LabelEntry) {
+    const placed = !label.want || (label.ox === label.tox && label.oy === label.toy)
+    return label.opacityReady && placed
+  }
+  // Settled when the fade and the glide have arrived, not when they were requested.
   function labelSettlement() {
-    const shown = [...labels.values()].filter(label => !label.el.hidden).length
     const laidOut = nodes.every(n => n.x !== undefined && n.y !== undefined)
     if (!nodes.length) return true
     if (!laidOut) return false
+    let shown = 0
+    for (const label of labels.values()) {
+      if (!labelAtRest(label)) return false
+      if (label.want) shown++
+    }
     if (labelMode === 'all') return shown === nodes.length
     if (labelMode === 'off') {
       const must = nodes.some(n => n.id === emphasis.selected || n.id === emphasis.hovered)
@@ -164,7 +257,10 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
     return shown > 0
   }
   function publishLabels() {
-    placeLabels()
+    const now = performance.now()
+    const dt = labelClock ? Math.min(0.1, (now - labelClock) / 1000) : 0
+    labelClock = now
+    placeLabels(dt)
     const settled = labelSettlement()
     if (settled === labelsWereSettled) return
     labelsWereSettled = settled
@@ -259,7 +355,7 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
         return group
       }).linkOpacity(1).linkWidth(l => l.width ?? .55)
       const controls = g3.controls() as OrbitControls
-      controls.autoRotateSpeed = 1 // OrbitControls: one revolution per 60 seconds, using elapsed time.
+      controls.autoRotateSpeed = graphOrbitPace() // Speed 1 is one turn per 60s; the default pace is one turn per 120s.
       controls.enableDamping = !options.reduced
     } catch {
       const failedRenderer = g3?.renderer(); g3?._destructor(); failedRenderer?.forceContextLoss(); g3 = undefined
@@ -320,17 +416,25 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
     // skips the draw. The orbit itself still waits for a visible frame.
     publishPhase(now)
     const phase = lastPhase
+    const pace = graphOrbitPace()
+    const shownSeconds = String(graphOrbitSeconds())
+    if (host.dataset.orbitSeconds !== shownSeconds) host.dataset.orbitSeconds = shownSeconds
+    if (g3) {
+      const controls = g3.controls() as OrbitControls
+      controls.autoRotate = phase === 'orbiting' && pace > 0
+      controls.autoRotateSpeed = pace
+    }
     if (document.hidden || now - lastFrame < 1000 / fps - .5) return
     const dt = Math.min(.1, (now - (lastFrame || now)) / 1000); lastFrame = now
-    if (g3) (g3.controls() as OrbitControls).autoRotate = phase === 'orbiting'
-    if (phase === 'orbiting') {
-      driftTime += dt
+    // Pace 1 matches the old drift. Default (120s) is half of that; Off adds none.
+    if (phase === 'orbiting' && pace > 0) {
+      driftTime += dt * pace
       if (g3) {
         const camera = g3.camera(), controls = g3.controls() as OrbitControls
-        camera.position.y += Math.cos(driftTime / 7) * dt * camera.position.distanceTo(controls.target) * .003
+        camera.position.y += Math.cos(driftTime / 7) * dt * pace * camera.position.distanceTo(controls.target) * .003
       } else if (g2) {
         const center = g2.centerAt()
-        g2.centerAt(center.x + Math.cos(driftTime / 9) * dt * .9, center.y + Math.sin(driftTime / 7) * dt * .6)
+        g2.centerAt(center.x + Math.cos(driftTime / 9) * dt * pace * .9, center.y + Math.sin(driftTime / 7) * dt * pace * .6)
       }
     }
     graph.resumeAnimation(); graph.pauseAnimation(); publishLabels()

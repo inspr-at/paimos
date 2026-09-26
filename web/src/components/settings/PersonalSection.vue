@@ -11,6 +11,7 @@ import KeyCap from '../KeyCap.vue'
 import ProfileCard from './ProfileCard.vue'
 import SettingsCard from './SettingsCard.vue'
 import AgentIndicatorSettings from './AgentIndicatorSettings.vue'
+import GraphMotionSettings from './GraphMotionSettings.vue'
 
 // Everyone's own settings: the profile (photo, names, handle, time zone, language),
 // the theme, the greeting, and the keys.
@@ -74,6 +75,7 @@ const KEYS: { keys: string[][]; label: string }[] = [
         </div>
       </template>
       <AgentIndicatorSettings />
+      <GraphMotionSettings />
     </SettingsCard>
 
     <SettingsCard v-if="profile || profileError" title="Greeting" icon="sparkle" anchor="greeting">
