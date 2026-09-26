@@ -1,17 +1,19 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { computed } from 'vue'
 import { usePreference } from './preferences.ts'
+import { isAgentIndicatorStyle, type AgentIndicatorStyle } from './indicatorVariants.ts'
 
-export type AgentIndicatorStyle = 'calm' | 'playful'
+export type { AgentIndicatorStyle } from './indicatorVariants.ts'
 export interface AgentIndicatorPreference { style: AgentIndicatorStyle; hovering: boolean }
 export const AGENT_INDICATOR_KEY = 'agent-indicator'
 
 // A viewer's account preference, shared by every LiveBot (including wrappers).
-// Missing/older/malformed settings keep LA2's stationary Calm default. Hovering
-// is independent of the drawing; CSS still gives reduced motion precedence.
+// Legacy names migrate on read and are written canonically on the next save.
+// Unknown settings keep LA2's stationary default. Hovering is independent.
 export function normalizeAgentIndicator(value: unknown): AgentIndicatorPreference {
   const saved = value && typeof value === 'object' ? value as Record<string, unknown> : {}
-  return { style: saved.style === 'playful' ? 'playful' : 'calm', hovering: saved.hovering === true }
+  const style = saved.style === 'calm' ? 'robot-1' : saved.style === 'playful' ? 'robot-5' : saved.style
+  return { style: isAgentIndicatorStyle(style) ? style : 'robot-1', hovering: saved.hovering === true }
 }
 
 export function useAgentIndicator() {

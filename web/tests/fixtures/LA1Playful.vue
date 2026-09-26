@@ -1,8 +1,9 @@
+<!-- Frozen visual reference from aee24ca0f92a938ba91e0f8de171070e59d001ef:PlayfulBot.vue. Keep artwork unchanged. -->
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed } from 'vue'
-import type { LiveBotState } from '../../lib/liveAgents'
-import { avatarColor, type AvatarColor } from '../../lib/avatar'
+import type { LiveBotState } from '../../src/lib/liveAgents'
+import { avatarColor, type AvatarColor } from '../../src/lib/avatar'
 
 // LA1 artwork and animation restored from 28d2425 (AEON-184). LiveBot owns
 // the viewer preference; this renderer blinks, glances along its screen,
