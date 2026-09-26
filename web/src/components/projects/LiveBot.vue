@@ -28,7 +28,7 @@ const props = withDefaults(defineProps<{
 const { choice } = useAgentIndicator()
 const indicator = computed(() => resolveIndicatorStyle(normalizeAgentIndicator({ style: props.indicatorStyle ?? choice.value.style }).style, availableVariants))
 const seed = computed(() => `${props.id}:${props.index}`)
-const style = computed(() => ({ '--size': `${props.size}px`, '--lag': `${-(props.index * .53 + Array.from(props.id).reduce((hash, char) => (hash * 31 + char.charCodeAt(0)) >>> 0, 0) % 700 / 100)}s` }))
+const style = computed(() => ({ '--size': `${props.size}px`, '--lag': `${-(props.index * .53 + ((parseInt(props.id.slice(0, 2), 16) || 0) % 7) * .31).toFixed(2)}s` }))
 const pulse = ref(0)
 let lastPulse = props.eventPulse
 let clear: ReturnType<typeof setTimeout> | undefined
@@ -60,7 +60,8 @@ onBeforeUnmount(() => clearTimeout(clear))
 .indicator-art { display: grid; place-items: center; width: 100%; height: 100%; }
 .event-caption { position: absolute; top: calc(100% + 3px); left: 50%; translate: -50% 0; white-space: nowrap; font: 500 10px/1.2 var(--font); color: var(--gold-ink); pointer-events: none; animation: event-opacity .6s ease-out both; }
 @media (prefers-reduced-motion: no-preference) {
-  .hovering.working.lead .indicator-art { animation: indicator-hover 2.4s ease-in-out infinite; animation-delay: var(--lag); }
+  /* The original robots float their faces inside stationary disks. */
+  .hovering.working.lead:not([data-style="robot-1"], [data-style="robot-5"]) .indicator-art { animation: indicator-hover 2.4s ease-in-out infinite; animation-delay: var(--lag); }
 }
 @keyframes indicator-hover { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-1.1px); } }
 @keyframes event-opacity { 0%, 100% { opacity: 0; } 25%, 50% { opacity: 1; } }

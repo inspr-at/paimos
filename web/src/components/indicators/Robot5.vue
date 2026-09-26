@@ -1,13 +1,28 @@
-<!-- Robot 5 · playful end (5/5). Original LA1 round face; curious sideways glances, blinks and an antenna wink. -->
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { avatarColor, type AvatarColor } from '../../lib/avatar'
 
+// Preserve LA1's artwork, palette and animation exactly. LiveBot encodes the
+// original principal id and stack index in seed as `${id}:${index}`.
 const props = withDefaults(defineProps<{
   state: 'working' | 'waiting' | 'stale'; size?: number; pulse: number; seed: string; lead: boolean
 }>(), { size: 26 })
+const identity = computed(() => {
+  const split = props.seed.lastIndexOf(':')
+  const indexed = split >= 0 && /^\d+$/.test(props.seed.slice(split + 1))
+  return { id: indexed ? props.seed.slice(0, split) : props.seed, index: indexed ? Number(props.seed.slice(split + 1)) : 0 }
+})
+const HUES: Record<AvatarColor, number> = { slate: 255, sage: 150, moss: 125, ocean: 222, steel: 238, denim: 258, iris: 290, plum: 330, rose: 12, clay: 45, sand: 82, teal: 188 }
+// The robot is drawn a little larger than its disk, so its lit antenna peeks over the rim.
+const art = computed(() => Math.round(props.size * 1.1))
 const style = computed(() => ({
-  '--lag': `${-(Array.from(props.seed).reduce((hash, char) => (hash * 31 + char.charCodeAt(0)) >>> 0, 0) % 700) / 100}s`,
+  '--size': `${props.size}px`,
+  // Head centred a touch below the disk's centre (the head's centre is 58% down the art).
+  '--art-top': `${(props.size / 2 + props.size * .06 - art.value * .579).toFixed(1)}px`,
+  '--h': String(identity.value.id ? HUES[avatarColor(identity.value.id)] : HUES.teal),
+  // Negative delays start each bot part-way through its loops.
+  '--lag': `${-(identity.value.index * 0.53 + (identity.value.id ? (parseInt(identity.value.id.slice(0, 2), 16) || 0) % 7 : 0) * 0.31).toFixed(2)}s`,
 }))
 const glint = ref(0)
 let serial = 0
@@ -29,79 +44,124 @@ onBeforeUnmount(() => clearTimeout(clear))
 </script>
 
 <template>
-  <svg class="indicator robot5" :class="[state, { lead }]" :style="style" viewBox="0 0 32 32" :width="size" :height="size" aria-hidden="true" focusable="false">
-    <circle class="halo" cx="16" cy="16" r="15" />
-    <circle class="disk" cx="16" cy="16" r="14.5" />
-    <g transform="translate(0 -1) scale(1.333333)">
-      <path class="stalk" d="M12 7.6V3.9" />
-      <circle class="tip-glow" cx="12" cy="2.5" r="1.7" />
-      <circle class="tip" cx="12" cy="2.5" r="1.65" />
-      <rect class="ear" x="2.3" y="11.7" width="2.3" height="4.8" rx="1.15" />
-      <rect class="ear" x="19.4" y="11.7" width="2.3" height="4.8" rx="1.15" />
-      <rect class="head" x="4.4" y="7.6" width="15.2" height="12.6" rx="4.8" />
-      <g class="look"><g class="blink">
-        <rect class="eye" x="8.2" y="11.9" width="2.4" height="3.3" rx="1.2" />
-        <rect class="eye" x="13.4" y="11.9" width="2.4" height="3.3" rx="1.2" />
-      </g></g>
-      <path class="happy" d="M8.1 14.2q1.3-1.9 2.6 0M13.3 14.2q1.3-1.9 2.6 0" />
-      <circle class="cheek" cx="7.3" cy="16.6" r="1.05" />
-      <circle class="cheek" cx="16.7" cy="16.6" r="1.05" />
-      <path class="smile" d="M10.5 17.1q1.5 1 3 0" />
-    </g>
-    <path v-if="lead && state === 'working'" class="spark" d="m3 4 .8 2.2L6 7l-2.2.8L3 10l-.8-2.2L0 7l2.2-.8Z" />
-    <g v-if="state === 'waiting'" class="clock">
-      <circle cx="26" cy="6" r="5" /><path d="M26 3.5V6l1.8 1.2" />
-    </g>
-    <path v-if="glint && state !== 'stale'" :key="glint" class="glint" d="m26 1 1.5 3.5L31 6l-3.5 1.5L26 11l-1.5-3.5L21 6l3.5-1.5Z" />
-  </svg>
+  <span class="indicator robot5" :class="[state, { lead }]" :style="style" aria-hidden="true">
+    <span v-if="lead && state === 'working'" class="halo" />
+    <span class="disk" />
+    <svg class="bot" viewBox="0 0 24 24" :width="art" :height="art" focusable="false">
+      <g class="bob">
+        <path class="stalk" d="M12 7.6V3.9" />
+        <circle class="tip-glow" cx="12" cy="2.5" r="1.7" />
+        <circle class="tip" cx="12" cy="2.5" r="1.65" />
+        <rect class="ear" x="2.3" y="11.7" width="2.3" height="4.8" rx="1.15" />
+        <rect class="ear" x="19.4" y="11.7" width="2.3" height="4.8" rx="1.15" />
+        <rect class="head" x="4.4" y="7.6" width="15.2" height="12.6" rx="4.8" />
+        <g class="look">
+          <g class="blink">
+            <rect class="eye" x="8.2" y="11.9" width="2.4" height="3.3" rx="1.2" />
+            <rect class="eye" x="13.4" y="11.9" width="2.4" height="3.3" rx="1.2" />
+          </g>
+        </g>
+        <path class="happy" d="M8.1 14.2q1.3-1.9 2.6 0M13.3 14.2q1.3-1.9 2.6 0" />
+        <circle class="cheek" cx="7.3" cy="16.6" r="1.05" />
+        <circle class="cheek" cx="16.7" cy="16.6" r="1.05" />
+        <path class="smile" d="M10.5 17.1q1.5 1 3 0" />
+      </g>
+    </svg>
+    <svg v-if="state === 'waiting'" class="waiting-clock clock" viewBox="0 0 12 12" focusable="false">
+      <circle cx="6" cy="6" r="5" /><path d="M6 3V6l2 1.5" />
+    </svg>
+    <svg v-if="glint && state !== 'stale'" class="event-mark" viewBox="0 0 32 32" focusable="false">
+      <path :key="glint" class="glint" d="m26 1 1.5 3.5L31 6l-3.5 1.5L26 11l-1.5-3.5L21 6l3.5-1.5Z" />
+    </svg>
+    <template v-if="lead && state === 'working'">
+      <svg class="spark s1" viewBox="0 0 10 10" focusable="false"><path d="M5 0l1.2 3.8L10 5 6.2 6.2 5 10 3.8 6.2 0 5l3.8-1.2z" /></svg>
+      <svg class="spark s2" viewBox="0 0 10 10" focusable="false"><path d="M5 0l1.2 3.8L10 5 6.2 6.2 5 10 3.8 6.2 0 5l3.8-1.2z" /></svg>
+    </template>
+  </span>
 </template>
 
 <style scoped>
-
-.indicator { --signal: var(--accent, #2f8f86); display: block; overflow: visible; }
-.indicator.waiting { --signal: var(--warn); }
-.indicator.stale { --signal: var(--ink-3); }
-:global(:root[data-theme="dark"] .robot5.working) { --signal: var(--accent, var(--teal)); }
-@media (prefers-color-scheme: dark) {
-  :global(:root:not([data-theme="light"]) .robot5.working) { --signal: var(--accent, var(--teal)); }
+.robot5 {
+  --face: oklch(.975 .025 var(--h)); --rim: oklch(.47 .07 var(--h)); --eye: oklch(.3 .05 var(--h));
+  --disk: radial-gradient(circle at 32% 26%, #fff, oklch(.93 .045 var(--h)) 70%);
+  --glow: #0e6f6c; --spark: #d69b31; --blush: oklch(.8 .09 20 / .55);
+  position: relative; display: inline-grid; place-items: center; flex-shrink: 0; width: var(--size); height: var(--size);
 }
-.clock { fill: var(--surface-raised); stroke: var(--signal); stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; }
-.clock path { fill: none; }
+.disk {
+  position: absolute; inset: 0; border-radius: 50%;
+  background: var(--disk); box-shadow: 0 0 0 1.5px var(--surface-raised), inset 0 0 0 1px color-mix(in oklab, var(--glow) 30%, transparent), 0 2px 6px -2px rgba(14, 111, 108, .35);
+}
+.bot { position: absolute; top: var(--art-top); left: 50%; translate: -50% 0; display: block; overflow: visible; }
+.stalk { fill: none; stroke: var(--rim); stroke-width: 1.5; stroke-linecap: round; }
+.tip { fill: var(--glow); }
+.tip-glow { fill: var(--glow); opacity: 0; }
+.ear { fill: var(--rim); opacity: .75; }
+.head { fill: var(--face); stroke: var(--rim); stroke-width: 1.5; }
+.eye { fill: var(--eye); }
+.cheek { fill: var(--blush); }
+.smile { fill: none; stroke: var(--eye); stroke-width: 1.2; stroke-linecap: round; }
+.happy { fill: none; stroke: var(--eye); stroke-width: 1.35; stroke-linecap: round; opacity: 0; }
+.halo {
+  position: absolute; inset: -7px; border-radius: 50%; pointer-events: none;
+  background: radial-gradient(circle, color-mix(in oklab, var(--glow) 50%, transparent) 36%, transparent 70%); opacity: .6;
+}
+.spark { position: absolute; z-index: 1; width: 7px; height: 7px; fill: var(--spark); opacity: 0; pointer-events: none; }
+.s1 { top: -6px; right: -2px; }
+.s2 { top: -1px; left: -6px; width: 5px; height: 5px; }
+
+.robot5.waiting { --glow: var(--warn); }
+.robot5.stale { --face: var(--surface-raised); --rim: var(--ink-3); --eye: var(--ink-3); --disk: var(--surface-sunken); --glow: var(--ink-3); --blush: transparent; }
+.robot5.stale { filter: grayscale(1); }
+.robot5.stale * { animation: none !important; }
+.waiting-clock { position: absolute; top: -4px; right: -4px; width: 12px; height: 12px; fill: var(--surface-raised); stroke: var(--warn); stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; }
+.waiting-clock path { fill: none; }
+
+@media (prefers-reduced-motion: no-preference) {
+  :global(.live-bot.hovering .robot5.working .bob) { animation: bot-bob 1.9s ease-in-out infinite; animation-delay: var(--lag); }
+  .working .blink { transform-box: fill-box; transform-origin: center; animation: bot-blink 4.6s linear infinite; animation-delay: var(--lag); }
+  .working .look { animation: bot-look 7.4s ease-in-out infinite; animation-delay: var(--lag); }
+  .working .tip { animation: bot-tip 1.9s ease-in-out infinite; animation-delay: var(--lag); }
+  .working .tip-glow { transform-box: fill-box; transform-origin: center; animation: bot-ping 1.9s cubic-bezier(.2, .7, .2, 1) infinite; animation-delay: var(--lag); }
+  .working .halo { animation: bot-breathe 3.2s ease-in-out infinite; animation-delay: var(--lag); }
+  .working .spark { animation: bot-spark 3.2s ease-out infinite; animation-delay: var(--lag); }
+  .working .s2 { animation-delay: calc(var(--lag) - 1.6s); }
+  :global(.live-bot.hovering .robot5.working:not(.lead) .bob) { animation-duration: 2.3s; }
+  .eye, .happy { transition: opacity .12s ease; }
+}
+.event-mark { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
 .glint { fill: #c9a24a; stroke: var(--surface-raised); stroke-width: .65; transform-origin: 26px 6px; animation: event-opacity .6s ease-out both; }
+@media (prefers-reduced-motion: no-preference) { .glint { animation-name: event-glint; } }
 @keyframes event-opacity { 0%, 100% { opacity: 0; } 25%, 50% { opacity: 1; } }
 @keyframes event-glint { 0% { opacity: 0; transform: scale(.65); } 25% { opacity: 1; transform: scale(1); } 100% { opacity: 0; transform: scale(.85); } }
-@media (prefers-reduced-motion: no-preference) { .glint { animation-name: event-glint; } }
-
-.robot5 { --face: var(--surface-raised); --rim: color-mix(in srgb, var(--signal) 65%, var(--ink)); --eye: var(--ink); }
-.halo { fill: var(--signal); opacity: 0; transform-origin: 16px 16px; }
-.disk { fill: color-mix(in srgb, var(--signal) 10%, var(--surface-raised)); stroke: color-mix(in srgb, var(--signal) 24%, var(--surface-raised)); stroke-width: 1; }
-.stalk { fill: none; stroke: var(--rim); stroke-width: 1.5; stroke-linecap: round; }
-.tip, .tip-glow { fill: var(--signal); }
-.tip-glow { opacity: 0; transform-box: fill-box; transform-origin: center; }
-.ear { fill: var(--rim); opacity: .75; }
-.head { fill: var(--face); stroke: var(--rim); stroke-width: 1.3; }
-.eye { fill: var(--eye); }
-.cheek { fill: color-mix(in srgb, var(--warn) 28%, transparent); }
-.smile, .happy { fill: none; stroke: var(--eye); stroke-width: 1.2; stroke-linecap: round; }
-.happy { opacity: 0; }
-.spark { fill: var(--signal); opacity: 0; transform-origin: 3px 7px; }
-.waiting { --eye: var(--signal); }
-.stale { --rim: var(--ink-3); --eye: var(--ink-3); }
-.stale .cheek { opacity: 0; }
-@media (prefers-reduced-motion: no-preference) {
-  .working .blink { transform-box: fill-box; transform-origin: center; animation: bot-blink 4.6s linear infinite; animation-delay: var(--lag); }
-  .working:not(.lead) .blink { animation-duration: 7.8s; }
-  .working.lead .look { animation: bot-look 7.4s ease-in-out infinite; animation-delay: var(--lag); }
-  .working.lead .tip-glow { animation: bot-ping 3.2s ease-out infinite; animation-delay: var(--lag); }
-  .working.lead .halo { animation: bot-breathe 3.2s ease-in-out infinite; animation-delay: var(--lag); }
-  .working.lead .spark { animation: bot-spark 6.4s ease-out infinite; animation-delay: var(--lag); }
-}
-.robot5.working:hover .eye { opacity: 0; }
-.robot5.working:hover .happy { opacity: 1; }
+@keyframes bot-bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-1.1px); } }
 @keyframes bot-blink { 0%, 90%, 100% { transform: scaleY(1); } 93% { transform: scaleY(.12); } 96% { transform: scaleY(1); } }
 @keyframes bot-look { 0%, 34%, 100% { transform: translateX(0); } 40%, 56% { transform: translateX(.8px); } 62%, 80% { transform: translateX(-.6px); } 86% { transform: translateX(0); } }
-@keyframes bot-ping { 0% { transform: scale(1); opacity: .4; } 65%, 100% { transform: scale(2); opacity: 0; } }
-@keyframes bot-breathe { 0%, 100% { transform: scale(.96); opacity: .05; } 50% { transform: scale(1.08); opacity: .18; } }
-@keyframes bot-spark { 0%, 24%, 100% { transform: scale(.4) rotate(0deg); opacity: 0; } 10% { transform: scale(1) rotate(20deg); opacity: .7; } }
+@keyframes bot-tip { 0%, 100% { opacity: .78; } 50% { opacity: 1; } }
+@keyframes bot-ping { 0% { transform: scale(1); opacity: .55; } 70%, 100% { transform: scale(2.6); opacity: 0; } }
+@keyframes bot-breathe { 0%, 100% { transform: scale(.84); opacity: .4; } 50% { transform: scale(1.1); opacity: .95; } }
+@keyframes bot-spark { 0% { transform: translateY(2px) scale(.2) rotate(0deg); opacity: 0; } 12% { opacity: 1; transform: translateY(0) scale(1) rotate(20deg); } 30% { opacity: 0; transform: translateY(-3px) scale(.5) rotate(60deg); } 100% { opacity: 0; } }
+</style>
 
+<style>
+/* Dark: a lit face on a deep disk, the antenna in aqua. (Unscoped: these read
+   the theme on <html> and the chip around the robot.) */
+:root[data-theme="dark"] .robot5:not(.stale) {
+  --face: oklch(.4 .04 var(--h)); --rim: oklch(.88 .06 var(--h)); --eye: oklch(.96 .03 var(--h));
+  --disk: radial-gradient(circle at 32% 26%, oklch(.42 .05 var(--h)), oklch(.3 .04 var(--h)) 72%);
+  --glow: #a4e5df; --spark: #e8c07a; --blush: oklch(.72 .1 20 / .45);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .robot5:not(.stale) {
+    --face: oklch(.4 .04 var(--h)); --rim: oklch(.88 .06 var(--h)); --eye: oklch(.96 .03 var(--h));
+    --disk: radial-gradient(circle at 32% 26%, oklch(.42 .05 var(--h)), oklch(.3 .04 var(--h)) 72%);
+    --glow: #a4e5df; --spark: #e8c07a; --blush: oklch(.72 .1 20 / .45);
+  }
+}
+:root[data-theme="dark"] .robot5.waiting { --glow: var(--warn); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .robot5.waiting { --glow: var(--warn); } }
+/* Pointed at, the robots smile back: their eyes turn into happy arcs. */
+.live-chip:hover .robot5.working .eye, .live-chip:focus-visible .robot5.working .eye, .robot5.working:hover .eye { opacity: 0; }
+.live-chip:hover .robot5.working .happy, .live-chip:focus-visible .robot5.working .happy, .robot5.working:hover .happy { opacity: 1; }
+/* Paused while off screen (the chip sets .asleep). */
+.asleep .robot5, .asleep .robot5 * { animation-play-state: paused !important; }
 </style>

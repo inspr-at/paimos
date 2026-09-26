@@ -1,14 +1,11 @@
 <!-- Robot 1 · calm end (1/5). Original LA2 line robot; an even activity arc does the work. -->
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { onBeforeUnmount, ref, watch } from 'vue'
 
 const props = withDefaults(defineProps<{
   state: 'working' | 'waiting' | 'stale'; size?: number; pulse: number; seed: string; lead: boolean
 }>(), { size: 26 })
-const style = computed(() => ({
-  '--lag': `${-(Array.from(props.seed).reduce((hash, char) => (hash * 31 + char.charCodeAt(0)) >>> 0, 0) % 700) / 100}s`,
-}))
 const glint = ref(0)
 let serial = 0
 let lastPulse = props.pulse
@@ -29,7 +26,7 @@ onBeforeUnmount(() => clearTimeout(clear))
 </script>
 
 <template>
-  <svg class="indicator robot1" :class="[state, { lead }]" :style="style" viewBox="0 0 32 32" :width="size" :height="size" aria-hidden="true" focusable="false">
+  <svg class="indicator robot1" :class="[state, { lead }]" viewBox="0 0 32 32" :width="size" :height="size" aria-hidden="true" focusable="false">
     <circle class="disk" cx="16" cy="16" r="14.5" />
     <circle class="ring-track" cx="16" cy="16" r="14" />
     <circle v-if="state !== 'stale'" class="ring-sweep" cx="16" cy="16" r="14" pathLength="100" />
@@ -47,13 +44,9 @@ onBeforeUnmount(() => clearTimeout(clear))
 
 <style scoped>
 
-.indicator { --signal: var(--accent, #2f8f86); display: block; overflow: visible; }
+.indicator { --signal: var(--teal); display: block; overflow: visible; }
 .indicator.waiting { --signal: var(--warn); }
 .indicator.stale { --signal: var(--ink-3); }
-:global(:root[data-theme="dark"] .robot1.working) { --signal: var(--accent, var(--teal)); }
-@media (prefers-color-scheme: dark) {
-  :global(:root:not([data-theme="light"]) .robot1.working) { --signal: var(--accent, var(--teal)); }
-}
 .clock { fill: var(--surface-raised); stroke: var(--signal); stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; }
 .clock path { fill: none; }
 .glint { fill: #c9a24a; stroke: var(--surface-raised); stroke-width: .65; transform-origin: 26px 6px; animation: event-opacity .6s ease-out both; }
@@ -67,14 +60,14 @@ onBeforeUnmount(() => clearTimeout(clear))
 .ring-sweep { stroke-dasharray: 30 70; stroke-linecap: round; transform-origin: 16px 16px; transform: rotate(-85deg); }
 .robot { fill: none; stroke: var(--ink); stroke-width: 1.35; stroke-linecap: round; stroke-linejoin: round; }
 .waiting .ring-sweep { animation-play-state: paused; }
-.waiting .robot { stroke: var(--signal); }
 .stale .ring-track { stroke-dasharray: .6 3.2; stroke-linecap: round; opacity: .8; }
 .stale .robot { stroke: var(--ink-3); }
 @media (prefers-reduced-motion: no-preference) {
-  .working.lead .ring-sweep { animation: activity-sweep 2.8s linear infinite; animation-delay: var(--lag); }
-  .working:not(.lead) .ring-sweep { animation: quiet-signal 4.8s ease-in-out infinite; animation-delay: var(--lag); }
+  .working .ring-sweep { animation: activity-sweep 2.4s cubic-bezier(.4, .25, .6, .75) infinite; }
+  :global(.live-bot.hovering .robot1.working .robot) { animation: bot-hover 1.9s ease-in-out infinite; animation-delay: var(--lag); }
+  :global(.live-bot.hovering .robot1.working:not(.lead) .robot) { animation-duration: 2.3s; }
 }
+@keyframes bot-hover { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-1.1px); } }
 @keyframes activity-sweep { from { transform: rotate(-85deg); } to { transform: rotate(275deg); } }
-@keyframes quiet-signal { 0%, 100% { opacity: .5; } 50% { opacity: .85; } }
 
 </style>

@@ -79,8 +79,9 @@ for (const option of available) {
       const chip = page.locator(`${project} .live-chip`), bot = chip.locator('.live-bot').first()
       await expect(chip.locator('.live-bot')).toHaveCount(2)
       await expect(bot).toHaveAttribute('data-style', option.id)
-      await expect(bot.locator('.indicator-art')).not.toHaveCSS('animation-name', 'none')
-      await expect(chip.locator('.live-bot').nth(1).locator('.indicator-art')).toHaveCSS('animation-name', 'none')
+      const hoverArt = option.id === 'robot-5' ? '.bob' : option.id === 'robot-1' ? '.robot' : '.indicator-art'
+      await expect(bot.locator(hoverArt)).not.toHaveCSS('animation-name', 'none')
+      if (!['robot-1', 'robot-5'].includes(option.id)) await expect(chip.locator('.live-bot').nth(1).locator(hoverArt)).toHaveCSS('animation-name', 'none')
       await expect(bot.locator('svg').first()).toBeVisible()
       await chip.hover()
       const pop = page.getByRole('dialog', { name: 'Agents working on Aeon' })
@@ -149,7 +150,7 @@ test('IV1 renderers: event-only glints, paused states, quiet stacks and reduced 
   await page.emulateMedia({ reducedMotion: 'no-preference' })
   await page.goto('/tests/indicator-harness.html')
   const sheet = page.locator('.sheet')
-  await expect(sheet.locator('svg')).toHaveCount(18)
+  await expect(sheet.locator('.indicator')).toHaveCount(18)
   await expect(sheet.locator('.glint')).toHaveCount(0) // mounted with pulse=7
   for (const state of ['waiting', 'stale']) expect(await loops(sheet.locator(`[data-state="${state}"]`).first())).toBe(0)
   const working = sheet.locator('[data-state="working"][data-size="26"]')
@@ -175,7 +176,7 @@ test('IV1 renderers: event-only glints, paused states, quiet stacks and reduced 
 for (const theme of ['light', 'dark']) test(`IV1 craft sheet: ${theme}, three states at 26 and 64 px`, async ({ page }) => {
   await page.setViewportSize({ width: 1024, height: 950 })
   await page.goto(`/tests/indicator-harness.html?theme=${theme}`)
-  await expect(page.locator('.sheet svg')).toHaveCount(18)
+  await expect(page.locator('.sheet .indicator')).toHaveCount(18)
   const directory = new URL('../../.agent-shots/', import.meta.url)
   mkdirSync(directory, { recursive: true })
   await page.screenshot({ path: fileURLToPath(new URL(`iv1-verified-${theme}.png`, directory)), fullPage: true })

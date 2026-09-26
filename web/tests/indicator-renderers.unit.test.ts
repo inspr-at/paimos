@@ -2,6 +2,7 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import { createRenderer, h, nextTick, reactive, type Component } from 'vue'
 import * as Vue from 'vue'
+import * as Avatar from '../src/lib/avatar'
 import { readFileSync } from 'node:fs'
 import { parse, compileScript } from '@vue/compiler-sfc'
 import ts from 'typescript'
@@ -15,6 +16,7 @@ function component(filename: string): Component {
   const { outputText } = ts.transpileModule(content, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } })
   const exports: { default?: Component } = {}
   new Function('require', 'exports', outputText)((id: string) => {
+    if (id === '../../lib/avatar') return Avatar
     if (id !== 'vue') throw new Error(`Unexpected renderer dependency: ${id}`)
     return Vue
   }, exports)
@@ -57,7 +59,9 @@ it.each<[string, Component]>([['Pulse', Pulse], ['Robot 1', Robot1], ['Robot 5',
   const app = renderer.createApp({ render: () => h(component, props) })
   app.mount(root)
   try {
-    expect(root.children[0]?.props).toMatchObject({ width: 26, height: 26, 'aria-hidden': 'true', focusable: 'false' })
+    expect(root.children[0]?.props).toMatchObject({ 'aria-hidden': 'true' })
+    if (component === Robot5) expect(root.children[0]?.props.style).toMatchObject({ '--size': '26px' })
+    else expect(root.children[0]?.props).toMatchObject({ width: 26, height: 26, focusable: 'false' })
     expect(count(root, 'glint')).toBe(0)
     props.pulse = 10
     await nextTick()
