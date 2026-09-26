@@ -1,16 +1,20 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed, watch } from 'vue'
+import { computed, createVNode, getCurrentInstance, onBeforeUnmount, onMounted, ref, render, watch, type AppContext } from 'vue'
 import MarkdownIt from 'markdown-it'
 import { ATTACHMENT_REF, contentUrl } from '../lib/attachments'
 import { headingSlug, type Heading } from '../lib/knowledge'
+import { installMarkdownTicketLinks } from '../lib/markdownLinks'
+import TicketLink from './releases/TicketLink.vue'
 // anchors (knowledge pages): headings get ids and a link to themselves, the
 // outline is emitted for a table of contents, and web links open in a new tab.
 const props = defineProps<{ body: string; anchors?: boolean }>()
 const emit = defineEmits<{ openAttachment: [id: string]; headings: [items: Heading[]]; anchor: [id: string]; jump: [id: string] }>()
-// Raw HTML stays text; markdown-it rejects script/data links. Only this ticket's own
-// attachments render as images (![caption](attachment:<id>)); any other image stays
-// text, so viewing another principal's Markdown never loads third-party resources.
+// Raw HTML stays text; markdown-it rejects script/data links. linkify stays off:
+// bare http(s) addresses and ticket keys are linked by our own pass, which skips
+// code and links that are already written. Only this ticket's own attachments
+// render as images (![caption](attachment:<id>)); any other image stays text,
+// so viewing another principal's Markdown never loads third-party resources.
 const markdown = new MarkdownIt({ html: false, linkify: false })
 markdown.renderer.rules.image = (tokens, index) => {
   const token = tokens[index]
@@ -40,13 +44,14 @@ markdown.core.ruler.after('inline', 'task-lists', state => {
 })
 markdown.renderer.rules.task_checkbox = (tokens, index) =>
   `<input class="task-box" type="checkbox" disabled${tokens[index].meta?.checked ? ' checked' : ''} aria-label="${tokens[index].meta?.checked ? 'Done' : 'Not done'}"> `
+installMarkdownTicketLinks(markdown)
 
 // Heading anchors: the DOM id carries a prefix so a heading can never take an id the
 // page itself uses; the link (and the URL hash) is the bare slug.
 interface AnchorEnv { [key: string]: unknown; anchors?: boolean; used?: Map<string, number>; headings?: Heading[] }
 const LINK_ICON = '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M6.6 9.4 9.4 6.6M7.2 4.4l1.2-1.2a2.6 2.6 0 0 1 3.7 3.7l-1.2 1.2M8.8 11.6l-1.2 1.2a2.6 2.6 0 0 1-3.7-3.7l1.2-1.2"/></svg>'
 const inlineText = (token: { children?: { type: string; content: string }[] | null } | undefined) =>
-  (token?.children ?? []).filter(child => child.type === 'text' || child.type === 'code_inline').map(child => child.content).join('').trim()
+  (token?.children ?? []).filter(child => child.type === 'text' || child.type === 'code_inline' || child.type === 'ticket_ref').map(child => child.content).join('').trim()
 markdown.renderer.rules.heading_open = (tokens, index, options, rawEnv, self) => {
   const env = rawEnv as AnchorEnv | undefined
   if (env?.anchors) {
@@ -88,6 +93,39 @@ const result = computed(() => {
 })
 const rendered = computed(() => result.value.html)
 watch(() => result.value.headings, headings => { if (props.anchors) emit('headings', headings) }, { immediate: true })
+
+// TicketLink cannot live inside v-html. Each key is a placeholder; the same
+// component the release history uses is mounted there, so peek and URL behaviour match.
+const host = ref<HTMLElement>()
+// render() has no parent, so inject would miss provides from App (the peek).
+// The instance chain still reaches them; pinia and the router stay on its prototype.
+const instance = getCurrentInstance()
+const appContext: AppContext | null = instance
+  ? { ...instance.appContext, provides: (instance as unknown as { provides: AppContext['provides'] }).provides }
+  : null
+const slots = new Set<HTMLElement>()
+function unmountTickets() {
+  for (const el of slots) render(null, el)
+  slots.clear()
+}
+function mountTickets() {
+  unmountTickets()
+  const root = host.value
+  if (!root || !appContext) return
+  for (const el of root.querySelectorAll<HTMLElement>('[data-ticket-key]')) {
+    const key = el.dataset.ticketKey
+    if (!key) continue
+    // v-html left the key as text. Mounting adds the link beside it unless that text goes first.
+    el.replaceChildren()
+    const vnode = createVNode(TicketLink, { ticketKey: key, variant: 'inline' })
+    vnode.appContext = appContext
+    render(vnode, el)
+    slots.add(el)
+  }
+}
+onMounted(mountTickets)
+watch(rendered, () => { mountTickets() }, { flush: 'post' })
+onBeforeUnmount(unmountTickets)
 function click(event: MouseEvent) {
   const target = event.target as HTMLElement
   const button = target.closest<HTMLElement>('.md-attachment')
@@ -99,7 +137,7 @@ function click(event: MouseEvent) {
   if (link) { event.preventDefault(); emit('jump', decodeURIComponent(link.getAttribute('href')!.slice(1))) }
 }
 </script>
-<template><div class="markdown-body" :class="{ anchored: anchors }" v-html="rendered" @click="click" /></template>
+<template><div ref="host" class="markdown-body" :class="{ anchored: anchors }" v-html="rendered" @click="click" /></template>
 <style scoped>
 .markdown-body { overflow-wrap: anywhere; font-size: 14px; line-height: 1.65; color: var(--ink); }
 .markdown-body > :deep(:first-child) { margin-top: 0; }
@@ -134,7 +172,8 @@ function click(event: MouseEvent) {
 .markdown-body :deep(table) { display: block; overflow: auto; margin: 0 0 1em; border-collapse: collapse; font-size: 13px; }
 .markdown-body :deep(td), .markdown-body :deep(th) { padding: 6px 10px; border: 1px solid var(--line); text-align: left; }
 .markdown-body :deep(th) { font: 500 10.5px var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--ink-3); }
-.markdown-body :deep(a) { color: var(--teal); text-decoration: underline; text-decoration-color: var(--gold); text-underline-offset: 3px; }
+.markdown-body :deep(.md-ticket) { display: contents; }
+.markdown-body :deep(a:not(.ticket-link)) { color: var(--teal); text-decoration: underline; text-decoration-color: var(--gold); text-underline-offset: 3px; }
 .markdown-body :deep(.md-attachment) { display: block; max-width: 100%; margin: .4em 0 1em; padding: 0; border: 0; border-radius: 10px; overflow: hidden; background: var(--surface-sunken, var(--code-bg)); box-shadow: inset 0 0 0 1px var(--line), 0 10px 26px -18px rgba(16, 35, 39, .5); cursor: zoom-in; }
 .markdown-body :deep(.md-attachment img) { display: block; max-width: 100%; height: auto; }
 .markdown-body :deep(.md-attachment:focus-visible) { box-shadow: var(--focus-ring); }
