@@ -7,6 +7,7 @@ import { getRun, listAccounts, listAllSessions, listModels, message, type AgentA
 import { listPrincipals, type Principal } from '../../lib/business'
 import { dispatchHint, launchState, startAgent } from '../../lib/startAgent'
 import { useAgents } from '../../stores/agents'
+import { usePoller } from '../../lib/usePolledData'
 import AppIcon from '../AppIcon.vue'
 
 // Shared by /agents and TicketWorkspace. Open with a ticket to preselect it.
@@ -41,7 +42,7 @@ let opener: HTMLElement | null = null
 let generation = 0
 let searchGeneration = 0
 let searchTimer: ReturnType<typeof setTimeout> | undefined
-let poll: ReturnType<typeof setInterval> | undefined
+const poll = usePoller(() => { now.value = Date.now(); if (run.value) return refresh() }, 3000, { enabled: () => visible.value && !!run.value })
 const profile = computed(() => profiles.value.find(p => p.id === profileId.value))
 const matchingAccounts = computed(() => accounts.value.filter(a => a.registered_by_principal_id === agentId.value && a.harness === profile.value?.harness))
 const hint = computed(() => dispatchHint(accounts.value, agentId.value, profile.value, now.value, accountId.value))
@@ -88,8 +89,7 @@ async function open(initial?: WorkNode) {
   dialog.value?.showModal()
   void loadOptions()
   if (!initial) void search()
-  clearInterval(poll)
-  poll = setInterval(() => { now.value = Date.now(); if (run.value) void refresh() }, 3000)
+  poll.start()
   await nextTick()
   if (initial) dialog.value?.querySelector<HTMLSelectElement>('select')?.focus()
   else searchInput.value?.focus()
@@ -97,7 +97,7 @@ async function open(initial?: WorkNode) {
 function close() {
   if (busy.value) return
   generation++; searchGeneration++; visible.value = false
-  clearInterval(poll); clearTimeout(searchTimer)
+  poll.stop(); clearTimeout(searchTimer)
   dialog.value?.close(); opener?.focus({ preventScroll: true })
 }
 function changeTicket() { ticket.value = null; void search(); void nextTick(() => searchInput.value?.focus()) }
@@ -128,7 +128,7 @@ async function refresh() {
   } catch { if (turn === generation) checkError.value = 'Status could not be refreshed. The last reported state is shown.' }
   finally { checking.value = false }
 }
-onBeforeUnmount(() => { generation++; searchGeneration++; clearInterval(poll); clearTimeout(searchTimer) })
+onBeforeUnmount(() => { generation++; searchGeneration++; poll.stop(); clearTimeout(searchTimer) })
 defineExpose({ open })
 </script>
 

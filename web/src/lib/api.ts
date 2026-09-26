@@ -18,21 +18,61 @@ import { learnPictures } from './avatar.ts'
 
 export interface Version { version: string; scheme: string; brand?: import('./brand').Brand }
 
+export class StaleRequestError extends Error {}
+export class RequestFailure extends Error {
+  readonly kind: 'timeout' | 'network'
+  constructor(kind: 'timeout' | 'network') {
+    super(kind === 'timeout' ? 'The server did not answer within 10 s' : 'No connection')
+    this.kind = kind
+  }
+}
+
+export const retryDelay = (attempt: number, random = Math.random) => 250 * 2 ** attempt * (0.75 + random() * 0.5)
+export const retryable = (method: string, error: unknown) => method.toUpperCase() === 'GET' && error instanceof RequestFailure
+const pause = (ms: number, signal?: AbortSignal) => new Promise<void>((resolve, reject) => {
+  if (signal?.aborted) { reject(signal.reason); return }
+  const timer = setTimeout(done, ms)
+  function done() { signal?.removeEventListener('abort', cancelled); resolve() }
+  function cancelled() { clearTimeout(timer); reject(signal?.reason) }
+  signal?.addEventListener('abort', cancelled, { once: true })
+})
+
+// Public reads can use this without adding cookies or weakening their referrer policy.
+export async function resilientFetch(url: string, init: RequestInit = {}) {
+  const method = init.method ?? 'GET'
+  const invocationStarted = Date.now()
+  for (let attempt = 0; ; attempt++) {
+    if (Date.now() - invocationStarted > 30_000) throw new StaleRequestError('Request crossed a long timer gap')
+    const started = Date.now()
+    const timeout = AbortSignal.timeout(10_000)
+    const signal = init.signal ? AbortSignal.any([init.signal, timeout]) : timeout
+    try {
+      const response = await fetch(url, { ...init, signal })
+      if (Date.now() - started > 30_000) throw new StaleRequestError('Request crossed a long timer gap')
+      return response
+    } catch (error) {
+      if (Date.now() - started > 30_000) throw new StaleRequestError('Request crossed a long timer gap')
+      if (init.signal?.aborted) throw error
+      const failure = new RequestFailure(timeout.aborted ? 'timeout' : 'network')
+      if (!retryable(method, failure) || attempt >= 2 || error instanceof StaleRequestError) {
+        throw error instanceof StaleRequestError ? error : failure
+      }
+      await pause(retryDelay(attempt), init.signal ?? undefined)
+    }
+  }
+}
+
 export async function api(path: string, init: RequestInit = {}) {
   // A revoked tab stays readable, but must not send another protected request.
   // Sign-in and public resources remain available to recover in a new tab.
   if (sessionEnded.blocked && path !== '/auth/dev-login' && !path.startsWith('/public/') && path !== '/version') {
     return new Response(null, { status: 401 })
   }
-  const response = await fetch(`/api${path}`, {
-    credentials: 'same-origin',
-    cache: 'no-store',
-    signal: AbortSignal.timeout(10_000),
-    ...init,
+  const response = await resilientFetch(`/api${path}`, {
+    credentials: 'same-origin', cache: 'no-store', ...init,
     headers: { Accept: 'application/json', ...init.headers },
   })
-  // Every caller, including those that handle Response themselves, must revoke a
-  // session on 401. Do this before returning the response to the caller.
+  // Every caller, including those that handle Response themselves, revokes on 401.
   if (response.status === 401) { sessionEnded.blocked = true; sessionEnded.handler?.(path) }
   return response
 }
@@ -82,8 +122,7 @@ export class APIError extends Error {
 async function json<T>(path: string, method = 'GET', body?: unknown, headers: Record<string, string> = {}, signal?: AbortSignal): Promise<T> {
   const response = await api(path, {
     method,
-    // A caller's signal (stale palette requests) combines with the usual timeout.
-    ...(signal ? { signal: AbortSignal.any([signal, AbortSignal.timeout(10_000)]) } : {}),
+    ...(signal ? { signal } : {}),
     ...(body === undefined ? { headers } : { headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify(body) }),
   })
   if (!response.ok) {
@@ -217,4 +256,3 @@ export interface NodePreview { id: string; key: string; title: string; state: st
 export const lookupNodes = (ids: string[]) => json<{ items: NodePreview[] }>(`/nodes/lookup${query({ ids })}`)
 // At most 100 keys per request; absent keys are left out of the answer.
 export const lookupNodeKeys = (keys: string[]) => json<{ items: NodePreview[] }>(`/nodes/lookup${query({ keys: keys.join(',') })}`)
-

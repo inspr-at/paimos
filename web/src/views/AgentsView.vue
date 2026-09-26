@@ -7,6 +7,7 @@ import { message, subscribeAgents, type AgentAccount, type Approval, type Sessio
 import { canDecideApproval as allowedToDecide, controlBlocked, decidedApprovals, type Resource } from '../lib/agentState'
 import { confirmAction } from '../lib/confirm'
 import { toast } from '../lib/toast'
+import { usePoller } from '../lib/usePolledData'
 import { useAgents, type HeldRequest, type SessionView } from '../stores/agents'
 import { useProjects } from '../stores/projects'
 import { useSession } from '../stores/session'
@@ -28,8 +29,9 @@ const route = useRoute()
 const router = useRouter()
 const cursor = ref('')
 const live = ref(false)
-const stale = computed(() => agents.sessionsState === 'error' || (agents.sessionsUpdatedAt !== null && agents.now - agents.sessionsUpdatedAt > 45_000))
+const stale = computed(() => agents.refreshStale || (agents.sessionsUpdatedAt !== null && agents.now - agents.sessionsUpdatedAt > 45_000))
 const updatedTime = computed(() => agents.sessionsUpdatedAt === null ? '' : new Date(agents.sessionsUpdatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }))
+const updatedAge = computed(() => agents.sessionsUpdatedAt === null ? '' : `${Math.max(0, Math.floor((agents.now - agents.sessionsUpdatedAt) / 1000))} s ago`)
 const queue = ref<InstanceType<typeof ApprovalQueue>>()
 const startDialog = ref<InstanceType<typeof StartAgentDialog>>()
 const canStart = computed(() => session.identity?.principal.kind === 'person' && can('work_orders.write') && can('run.create'))
@@ -189,7 +191,7 @@ function keydown(event: KeyboardEvent) {
 
 // ---------- Live ----------
 let stop: (() => void) | undefined
-let poll: ReturnType<typeof setInterval> | undefined
+const poller = usePoller(() => agents.loadAll(), 20_000, { invalidate: agents.invalidatePolls })
 let clock: ReturnType<typeof setInterval> | undefined
 let debounce: ReturnType<typeof setTimeout> | undefined
 function changed() {
@@ -197,24 +199,16 @@ function changed() {
   // A fixed batch window cannot be starved by a stream of new worker events.
   debounce = setTimeout(() => { debounce = undefined; void agents.loadAll() }, 400)
 }
-function visibilityChanged() {
-  if (document.visibilityState !== 'visible') return
-  clearTimeout(debounce); debounce = undefined
-  agents.tick()
-  void agents.loadAll()
-}
 onMounted(() => {
   void agents.loadAll()
   stop = subscribeAgents(changed, value => { live.value = value })
-  poll = setInterval(() => { if (document.visibilityState !== 'hidden') void agents.loadAll() }, 20_000)
+  poller.start()
   clock = setInterval(() => agents.tick(), 1000)
   window.addEventListener('keydown', keydown)
-  document.addEventListener('visibilitychange', visibilityChanged)
 })
 onBeforeUnmount(() => {
-  stop?.(); clearInterval(poll); clearInterval(clock); clearTimeout(debounce)
+  stop?.(); poller.stop(); clearInterval(clock); clearTimeout(debounce)
   window.removeEventListener('keydown', keydown)
-  document.removeEventListener('visibilitychange', visibilityChanged)
 })
 watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true })
 </script>
@@ -235,7 +229,7 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
             <span class="live-mark" aria-hidden="true" />{{ stale ? 'Update delayed' : live ? 'Live' : 'Polling' }}
           </p>
           <span class="last-updated" role="status">
-            <template v-if="agents.sessionsUpdatedAt !== null">Updated <time :datetime="new Date(agents.sessionsUpdatedAt).toISOString()">{{ updatedTime }}</time></template>
+            <template v-if="agents.sessionsUpdatedAt !== null">Updated <time :datetime="new Date(agents.sessionsUpdatedAt).toISOString()">{{ agents.refreshStale ? updatedAge : updatedTime }}</time><template v-if="agents.refreshStale"> · retrying</template></template>
             <template v-else>Waiting for first update</template>
           </span>
         </div>
@@ -253,20 +247,21 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
           :cursor="cursor" :can-decide="canDecide" :can-decide-approval="canDecideApproval" :can-resolve="canResolve" :can-revoke="canRevoke" :asker="agents.askerName" :resource="resource" :decide="decide" :revoke="agents.revoke" :resolve="resolveHeld"
           @focus-row="id => cursor = id" @open-agent="openAgent"
         />
-        <p v-if="agents.approvalsState === 'error'" class="inline-error" role="alert"><AppIcon name="alert" :size="14" />Permission requests could not be loaded: {{ agents.approvalsError }} <button type="button" class="btn sm" @click="agents.refreshApprovals()">Try again</button></p>
+        <p v-if="agents.approvalsHardError" class="inline-error" role="alert"><AppIcon name="alert" :size="14" />Permission requests could not be loaded: {{ agents.approvalsError }} <button type="button" class="btn sm" @click="agents.refreshApprovals()">Try again</button></p>
         <SessionList
           v-if="agents.loaded"
-          :groups="agents.grouped" :now="agents.now" :cursor="cursor" :selected="sessionId" :state="agents.sessionsState" :error="agents.sessionsError"
+          :groups="agents.grouped" :now="agents.now" :cursor="cursor" :selected="sessionId" :state="agents.sessionsUpdatedAt !== null ? 'ready' : agents.sessionsState" :error="agents.sessionsError"
           :loaded="agents.loaded" :controls="agents.controls" :can-control="writable" :can-start="canStart"
           @open="openSession" @control="control" @focus-row="id => cursor = id" @retry="agents.loadAll()" @start="startDialog?.open()"
         />
+        <p v-if="agents.sessionsUpdatedAt !== null && agents.sessionsState === 'error'" class="inline-error" role="alert"><AppIcon name="alert" :size="14" />Sessions could not be refreshed: {{ agents.sessionsError }} <button type="button" class="btn sm" @click="agents.loadAll()">Try again</button></p>
         <RunQueue v-if="agents.loaded" />
         <p v-if="agents.loaded && (agents.sessions.length || agents.pending.length)" class="hint" aria-hidden="true">
           <kbd class="keycap">j</kbd><kbd class="keycap">k</kbd> move · <kbd class="keycap"><AppIcon name="enter" /></kbd> open · <kbd class="keycap">a</kbd> approve · <kbd class="keycap">d</kbd> deny
         </p>
       </div>
       <aside v-if="agents.loaded" class="side-col" aria-label="Accounts">
-        <AccountsCard :accounts="agents.accounts" :state="agents.accountsState" :now="agents.now" :admin="agents.accountsState === 'ready'" :set="setAccount" />
+        <AccountsCard :accounts="agents.accounts" :state="agents.accountsUpdatedAt !== null ? 'ready' : agents.accountsState" :now="agents.now" :admin="agents.accountsState === 'ready'" :set="setAccount" />
       </aside>
     </div>
 

@@ -7,6 +7,8 @@ import { documentTotal } from '../lib/quotes/layout'
 import { COPY, documentLanguage, formatDay, formatMoment, formatMoney } from '../lib/quotes/publicCopy'
 import type { QuoteDocumentData } from '../lib/quotes/types'
 import { useVersion } from '../stores/version'
+import { resilientFetch } from '../lib/api'
+import { usePoller } from '../lib/usePolledData'
 
 // The page a customer opens from a quote link: the sender's name, the frozen
 // document exactly as issued, and, while it can be accepted, a short form to
@@ -60,17 +62,16 @@ const closedReason = computed(() => {
 })
 
 // Receipts follow an acceptance within a minute or so; the page checks a few times.
-let poll: number | undefined, polls = 0
+let polls = 0
+const poll = usePoller(() => { polls++; return load(true) }, 5000, { enabled: () => accepted.value && !quote.value?.receipt_ready && polls < 24 })
 async function load(quiet = false) {
   if (!quiet) { loading.value = true; error.value = ''; missing.value = false }
   try {
-    const response = await fetch(apiPath.value, { credentials: 'omit', cache: 'no-store', referrerPolicy: 'no-referrer' })
+    const response = await resilientFetch(apiPath.value, { credentials: 'omit', cache: 'no-store', referrerPolicy: 'no-referrer' })
     if (response.status === 404 || response.status === 410) { missing.value = true; quote.value = null; return }
     if (!response.ok) throw new Error(t.value.failedBody)
     quote.value = await response.json() as PublicQuote
     setPageTitle(t.value.pageTitle(quote.value.offer_no, sender.value))
-    window.clearTimeout(poll)
-    if (accepted.value && !quote.value.receipt_ready && polls < 24) { polls++; poll = window.setTimeout(() => { void load(true) }, 5000) }
   } catch (cause) {
     if (!quiet) error.value = cause instanceof Error && cause.message === t.value.failedBody ? cause.message : t.value.failedBody
   } finally { if (!quiet) loading.value = false }
@@ -126,11 +127,12 @@ const metas: HTMLMetaElement[] = []
 const pageLang = document.documentElement.lang
 watch(lang, value => { document.documentElement.lang = value }, { immediate: true })
 onMounted(() => {
+  poll.start()
   for (const [key, content] of [['robots', 'noindex, nofollow, noarchive'], ['referrer', 'no-referrer']] as const) {
     const meta = document.createElement('meta'); meta.name = key; meta.content = content; document.head.append(meta); metas.push(meta)
   }
 })
-onBeforeUnmount(() => { sizer?.disconnect(); cancelAnimationFrame(frame); window.clearTimeout(poll); for (const meta of metas) meta.remove(); document.documentElement.lang = pageLang })
+onBeforeUnmount(() => { sizer?.disconnect(); cancelAnimationFrame(frame); poll.stop(); for (const meta of metas) meta.remove(); document.documentElement.lang = pageLang })
 </script>
 
 <template>

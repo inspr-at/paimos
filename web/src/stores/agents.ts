@@ -3,13 +3,14 @@ import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { APIError, getNode } from '../lib/api'
 import {
-  decideApproval, getControl, listAccounts, listAllSessions, listApprovals, listMessages, listModels, listRuns, listTargets, message,
+  decideApproval, getControl, listAccounts, listAllSessions, listApprovals, listMessages, listModels, listRuns, listTargets,
   requestControl, resolveMessage, revokeApproval, sendMessage, setAccountState,
   type AgentAccount, type AgentRun, type Approval, type HarnessSession, type ModelProfile, type ProjectMessage, type SessionControl,
 } from '../lib/agents'
 import { agentName, groupSessions, harnessLabel, heldRequests, needsYou, pendingApprovals, runModel, sessionStatus, type SessionStatus } from '../lib/agentState'
 import { advanceActivity, type ActivityEvidence } from '../lib/liveAgents'
 import { toast } from '../lib/toast'
+import { usePolledData } from '../lib/usePolledData'
 import { useProjects } from './projects'
 
 // forbidden: not for this person; error: the read failed (any other status).
@@ -23,7 +24,6 @@ export type HeldRequest = ProjectMessage & { projectId: string }
 
 const FAN_OUT = 6
 const availability = (e: unknown): Availability => e instanceof APIError && e.status === 403 ? 'forbidden' : 'error'
-const describe = (e: unknown) => e instanceof APIError ? `The server answered “${e.message}” (${e.status}).` : message(e)
 async function all<T>(items: T[], work: (item: T) => Promise<void>) {
   let next = 0
   const worker = async () => { while (next < items.length) { const item = items[next++]; try { await work(item) } catch { /* optional detail */ } } }
@@ -33,21 +33,39 @@ async function all<T>(items: T[], work: (item: T) => Promise<void>) {
 export const useAgents = defineStore('agents', () => {
   const projects = useProjects()
   const now = ref(Date.now())
-  const sessions = ref<HarnessSession[]>([])
+  const sessionsRead = usePolledData(async () => {
+    const out = new Map<string, HarnessSession>()
+    const cursors = new Set<string>()
+    let cursor: string | undefined
+    do {
+      const result = await listAllSessions({ cursor })
+      for (const item of result.items) out.set(item.id, item)
+      cursor = result.next_cursor ?? undefined
+      if (cursor && cursors.has(cursor)) throw new Error('Session pagination did not advance. Please retry.')
+      if (cursor) cursors.add(cursor)
+    } while (cursor)
+    return [...out.values()]
+  }, [] as HarnessSession[], items => {
+    activityEvidence.value = new Map(items.map(item => [item.id, advanceActivity(activityEvidence.value.get(item.id), item)]))
+    now.value = Date.now()
+  })
+  const sessions = sessionsRead.data
   const activityEvidence = ref(new Map<string, ActivityEvidence>())
   const eventPulseFor = (sessionId: string) => activityEvidence.value.get(sessionId)?.pulse ?? 0
-  const sessionsState = ref<Availability>('idle')
-  const sessionsError = ref('')
-  const sessionsUpdatedAt = ref<number | null>(null)
-  let sessionsFlight: Promise<void> | undefined
-  let sessionsAgain = false
+  const sessionsState = computed(() => sessionsRead.status.value.state)
+  const sessionsError = computed(() => sessionsRead.status.value.error)
+  const sessionsUpdatedAt = computed(() => sessionsRead.status.value.updatedAt)
+  const sessionsStale = sessionsRead.stale
   let loadFlight: Promise<void> | undefined
-  let loadAgain = false
-  const approvals = ref<Approval[]>([])
-  const approvalsState = ref<Availability>('idle')
-  const approvalsError = ref('')
-  const accounts = ref<AgentAccount[]>([])
-  const accountsState = ref<Availability>('idle')
+  const approvalsRead = usePolledData(listApprovals, [] as Approval[])
+  const approvals = approvalsRead.data
+  const approvalsState = computed(() => approvalsRead.status.value.state)
+  const approvalsError = computed(() => approvalsRead.status.value.error)
+  const approvalsHardError = computed(() => approvalsRead.status.value.state === 'error')
+  const accountsRead = usePolledData(listAccounts, [] as AgentAccount[])
+  const accounts = accountsRead.data
+  const accountsState = computed(() => accountsRead.status.value.state)
+  const accountsUpdatedAt = computed(() => accountsRead.status.value.updatedAt)
   const messagingState = ref<Availability>('idle')
   const pendingHeld = ref<Record<string, ProjectMessage[]>>({})
   const threads = ref<Record<string, ProjectMessage[]>>({})
@@ -55,7 +73,8 @@ export const useAgents = defineStore('agents', () => {
   const runs = ref<Record<string, AgentRun>>({})
   const agentRuns = ref<Record<string, string[]>>({})
   const nodes = ref<Record<string, NodeRef>>({})
-  const models = ref<ModelProfile[]>([])
+  const modelsRead = usePolledData(listModels, [] as ModelProfile[])
+  const models = modelsRead.data
   const controls = ref<Record<string, SessionControl>>({})
   const loading = ref(false)
   const loaded = ref(false)
@@ -74,48 +93,17 @@ export const useAgents = defineStore('agents', () => {
   function mergeRuns(list: AgentRun[]) {
     if (list.length) runs.value = { ...runs.value, ...Object.fromEntries(list.map(run => [run.id, run])) }
   }
+  const runsRead = usePolledData(() => listRuns({ limit: 200 }), { items: [] as AgentRun[], next_cursor: null as string | null }, page => mergeRuns(page.items))
+  const refreshStale = computed(() => sessionsRead.stale.value || approvalsRead.stale.value || accountsRead.stale.value || modelsRead.stale.value || runsRead.stale.value)
 
   // ---------- Reads ----------
-  async function refreshApprovals() {
-    try { approvals.value = await listApprovals(); approvalsState.value = 'ready'; approvalsError.value = '' }
-    catch (e) { approvalsState.value = availability(e); approvalsError.value = message(e) }
-  }
-  async function refreshAccounts() {
-    try { accounts.value = await listAccounts(); accountsState.value = 'ready' }
-    catch (e) { accountsState.value = availability(e) }
-  }
-  async function refreshModels() { if (!models.value.length) try { models.value = await listModels() } catch { /* model names fall back to the run's */ } }
+  const refreshApprovals = approvalsRead.refresh
+  const refreshAccounts = accountsRead.refresh
+  const refreshModels = modelsRead.refresh
   // Tenant-wide, newest first, with project and ticket summaries.
-  function refreshSessions(): Promise<void> {
-    if (sessionsFlight) { sessionsAgain = true; return sessionsFlight }
-    sessionsFlight = (async () => {
-      do {
-        sessionsAgain = false
-        try {
-          const out = new Map<string, HarnessSession>()
-          const cursors = new Set<string>()
-          let cursor: string | undefined
-          do {
-            const result = await listAllSessions({ cursor })
-            for (const item of result.items) out.set(item.id, item)
-            cursor = result.next_cursor ?? undefined
-            if (cursor && cursors.has(cursor)) throw new Error('Session pagination did not advance. Please retry.')
-            if (cursor) cursors.add(cursor)
-          } while (cursor)
-          activityEvidence.value = new Map([...out.values()].map(item => [item.id, advanceActivity(activityEvidence.value.get(item.id), item)]))
-          sessions.value = [...out.values()]
-          sessionsUpdatedAt.value = Date.now()
-          now.value = Date.now()
-          sessionsState.value = 'ready'; sessionsError.value = ''
-        } catch (e) { sessionsState.value = availability(e); sessionsError.value = describe(e) }
-      } while (sessionsAgain)
-    })().finally(() => { sessionsFlight = undefined })
-    return sessionsFlight
-  }
+  const refreshSessions = sessionsRead.refresh
   // The newest runs cover the rows' account, model and telemetry in one read.
-  async function refreshRuns() {
-    try { mergeRuns((await listRuns({ limit: 200 })).items) } catch { /* rows fall back to "not reported" */ }
-  }
+  const refreshRuns = runsRead.refresh
   // Held action requests still waiting on a person, and message addresses for names.
   async function refreshMessaging(force = false) {
     if (!force && Date.now() - messagingAt < 30_000) return
@@ -146,17 +134,14 @@ export const useAgents = defineStore('agents', () => {
   function loadAll(): Promise<void> {
     // A slow optional detail read must never hold up a new session wake.
     const sessionRead = refreshSessions()
-    if (loadFlight) { loadAgain = true; return Promise.all([loadFlight, sessionRead]).then(() => {}) }
+    if (loadFlight) return loadFlight
     loading.value = true
     loadFlight = (async () => {
-      do {
-        loadAgain = false
         // Sessions do not wait for optional project or account metadata.
         await Promise.all([projects.load(), refreshApprovals(), sessionRead, refreshRuns(), refreshAccounts(), refreshModels()])
         await Promise.all([refreshMessaging(), resourceNodes()])
         loaded.value = true
         needsAt = Date.now()
-      } while (loadAgain)
     })().finally(() => { loadFlight = undefined; loading.value = false; now.value = Date.now() })
     return loadFlight
   }
@@ -289,10 +274,11 @@ export const useAgents = defineStore('agents', () => {
   function tick() { now.value = Date.now() }
 
   return {
-    now, sessions, sessionsState, sessionsError, sessionsUpdatedAt, approvals, approvalsState, approvalsError, accounts, accountsState, messagingState, runs, nodes, controls, eventPulseFor,
+    now, sessions, sessionsState, sessionsError, sessionsUpdatedAt, sessionsStale, refreshStale, approvals, approvalsState, approvalsError, approvalsHardError, accounts, accountsState, accountsUpdatedAt, messagingState, runs, nodes, controls, eventPulseFor,
     loading, loaded, pending, held, needsCount, views, grouped,
     loadAll, loadNeeds, ensureTicket, refreshApprovals, refreshSessions, refreshThread, refreshAgentRuns, tick,
     viewOf, byAgent, forTicket, recentRuns, askerName, thread, addressOf, decide, revoke, resolve, control, send, setAccount,
+    invalidatePolls: () => { sessionsRead.invalidate(); approvalsRead.invalidate(); accountsRead.invalidate(); modelsRead.invalidate(); runsRead.invalidate() },
     recordRun: (run: AgentRun) => mergeRuns([run]),
   }
 })
