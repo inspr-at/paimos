@@ -38,6 +38,7 @@ var ProjectFilteredRoutes = map[string]bool{
 	"GET /api/knowledge":                          true,
 	"GET /api/knowledge/graph":                    true,
 	"GET /api/knowledge/resolve":                  true,
+	"GET /api/tickets/graph":                      true,
 	"GET /api/relations":                          true,
 	"GET /api/views":                              true,
 	"GET /api/views/{viewId}":                     true,

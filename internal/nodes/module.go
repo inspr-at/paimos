@@ -23,10 +23,12 @@ type Module struct {
 
 var _ httpapi.Module = (*Module)(nil)
 
-// New returns the httpapi.Module for kinds, nodes and tag assignment mutations.
-// The coordinator mounts it on the server; this package does not edit cmd/aeon.
-// events records each mutation inside the tenant transaction. A nil events
-// value selects SQLWriter until internal/events exposes its writer.
+// New returns the httpapi.Module for kinds, nodes, tag assignment and
+// GET /api/tickets/graph. The coordinator mounts it; this package does not
+// edit cmd/aeon or register a plugin manifest. events records each mutation
+// inside the tenant transaction. The ticket graph is read-only and writes no
+// event. A nil events value selects SQLWriter until internal/events exposes
+// its writer.
 func New(pool *pgxpool.Pool, events Writer) httpapi.Module {
 	if events == nil {
 		events = SQLWriter{}
@@ -55,6 +57,7 @@ func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/nodes/{nodeId}", m.handleDeleteNode)
 	mux.HandleFunc("POST /api/nodes/{nodeId}/move", m.handleMoveNode)
 	mux.HandleFunc("POST /api/nodes/{nodeId}/project-move", m.handleProjectMove)
+	mux.HandleFunc("GET /api/tickets/graph", m.handleTicketGraph)
 	mux.HandleFunc("PATCH /api/tags/{tagId}", m.handleUpdateTag)
 	mux.HandleFunc("DELETE /api/tags/{tagId}", m.requirePermission("tags.manage", m.handleDeleteTag))
 }
