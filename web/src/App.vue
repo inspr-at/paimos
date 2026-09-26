@@ -21,6 +21,7 @@ import { brand } from './lib/brand'
 import { toast } from './lib/toast'
 import { displayHeadline, getRelease } from './lib/releases'
 import { headerFolded } from './lib/chrome'
+import { usePoller } from './lib/usePolledData'
 
 const ReleasesSheet = defineAsyncComponent(() => import('./components/releases/ReleasesSheet.vue'))
 const session = useSession()
@@ -99,15 +100,14 @@ watch(() => session.identity?.principal.id, id => {
   setTimeout(() => { if (session.identity) void releases.load() }, 2500)
 }, { immediate: true })
 function checkUpdate() { if (session.identity && document.visibilityState === 'visible') void releases.checkForUpdate() }
-let updateTimer: ReturnType<typeof setInterval> | undefined
+const updateTimer = usePoller(checkUpdate, 60_000, { enabled: () => !!session.identity })
 onMounted(() => {
   freezeObserver = new MutationObserver(freezePage)
   freezeObserver.observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ['disabled', 'readonly', 'contenteditable'] })
-  updateTimer = setInterval(checkUpdate, 60_000)
-  document.addEventListener('visibilitychange', checkUpdate)
+  updateTimer.start()
   window.addEventListener('focus', checkUpdate)
 })
-onBeforeUnmount(() => { freezeObserver?.disconnect(); clearInterval(updateTimer); document.removeEventListener('visibilitychange', checkUpdate); window.removeEventListener('focus', checkUpdate) })
+onBeforeUnmount(() => { freezeObserver?.disconnect(); updateTimer.stop(); window.removeEventListener('focus', checkUpdate) })
 watch(() => releases.available, async version => {
   if (!version) return
   // The new server knows what the release was about; say it in its reading form.

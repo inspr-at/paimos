@@ -13,6 +13,7 @@ import {
 } from '../../lib/knowledge'
 import type { KnowledgeState } from '../../lib/useKnowledge'
 import { toast } from '../../lib/toast'
+import { usePoller } from '../../lib/usePolledData'
 import { absoluteTime, relativeTime, statusMeta } from '../../lib/work'
 import { useProjects } from '../../stores/projects'
 import AppIcon from '../AppIcon.vue'
@@ -362,13 +363,16 @@ function useTheirs() {
   void nextTick(growTitle)
 }
 // While editing, a quiet look for someone else's save when the window comes back.
+let checkingNewer = false
 async function checkNewer() {
   const current = entry.value
-  if (!editing.value || !current || conflict.value || document.visibilityState !== 'visible') return
+  if (checkingNewer || !editing.value || !current || conflict.value || document.visibilityState !== 'visible') return
+  checkingNewer = true
   try {
     const latest = await getKnowledge(current.id)
-    if (editing.value && latest.updated_at !== stamp.value) conflict.value = latest
+    if (editing.value && entry.value?.id === current.id && latest.updated_at !== stamp.value) conflict.value = latest
   } catch { /* the save will tell */ }
+  finally { checkingNewer = false }
 }
 function editKeys(event: KeyboardEvent) {
   if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') { event.preventDefault(); event.stopPropagation(); void save() }
@@ -484,20 +488,20 @@ watch(entry, current => {
     void startEdit(wanted === 'body' ? 'body' : 'title')
   }
 })
-let poll: ReturnType<typeof setInterval> | undefined
+const poll = usePoller(checkNewer, 60_000, { enabled: () => editing.value && !!entry.value && !conflict.value })
 onMounted(() => {
   window.addEventListener('keydown', keydown)
   window.addEventListener('focus', checkNewer)
   wideQuery.addEventListener('change', onWide)
   listenScroll()
-  poll = setInterval(checkNewer, 60_000)
+  poll.start()
 })
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', keydown)
   window.removeEventListener('focus', checkNewer)
   wideQuery.removeEventListener('change', onWide)
   scrollListener?.removeEventListener('scroll', scrolledToEnd)
-  clearInterval(poll); spy?.disconnect()
+  poll.stop(); spy?.disconnect()
 })
 defineExpose({ isDirty: () => !skipGuard && dirty.value, startEdit, editing, entryId: () => entry.value?.id ?? null })
 const whoUpdated = computed(() => entry.value?.imported ? 'imported' : entry.value?.updated_by ? `by ${entry.value.updated_by.name}` : '')

@@ -10,6 +10,7 @@ import StatusIcon from './StatusIcon.vue'
 import LiveDot from '../agents/LiveDot.vue'
 import TicketHours from '../business/TicketHours.vue'
 import { useAgents } from '../../stores/agents'
+import { usePoller } from '../../lib/usePolledData'
 
 // Status, priority, assignee (editable popovers), type (read-only), the parent
 // epic, and estimate, dates and release only when they have values.
@@ -39,10 +40,10 @@ const release = computed(() => {
 // Agent sessions bound to this ticket, with their live state; refreshed while shown.
 const agents = useAgents()
 const bound = computed(() => agents.forTicket(props.item.id))
-let refresh: ReturnType<typeof setInterval> | undefined
+const refresh = usePoller(() => agents.ensureTicket(props.item.id), 20_000)
 watch(() => props.item.id, id => { void agents.ensureTicket(id) }, { immediate: true })
-onMounted(() => { refresh = setInterval(() => void agents.ensureTicket(props.item.id), 20_000) })
-onBeforeUnmount(() => clearInterval(refresh))
+onMounted(() => refresh.start())
+onBeforeUnmount(() => refresh.stop())
 const epicParent = computed(() => props.item.parent && props.item.parent.kind_slug !== 'project' ? props.item.parent : null)
 const target = (event: Event) => event.currentTarget as HTMLElement
 </script>
