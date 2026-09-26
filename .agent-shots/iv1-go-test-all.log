@@ -1,0 +1,73 @@
+?   	github.com/inspr-at/paimos	[no test files]
+ok  	github.com/inspr-at/paimos/cmd/aeon	46.758s
+ok  	github.com/inspr-at/paimos/cmd/aeon-agentd	1.168s
+ok  	github.com/inspr-at/paimos/internal/activity	64.572s
+ok  	github.com/inspr-at/paimos/internal/agentaccounts	8.452s
+ok  	github.com/inspr-at/paimos/internal/agentd	20.585s
+ok  	github.com/inspr-at/paimos/internal/agentdwire	0.232s
+ok  	github.com/inspr-at/paimos/internal/agentruns	62.695s
+?   	github.com/inspr-at/paimos/internal/agents	[no test files]
+ok  	github.com/inspr-at/paimos/internal/approvals	47.195s
+ok  	github.com/inspr-at/paimos/internal/attachments	13.021s
+ok  	github.com/inspr-at/paimos/internal/auth	47.155s
+ok  	github.com/inspr-at/paimos/internal/authz	41.807s
+ok  	github.com/inspr-at/paimos/internal/brand	0.442s
+ok  	github.com/inspr-at/paimos/internal/business	(cached)
+ok  	github.com/inspr-at/paimos/internal/business/costunits	(cached)
+ok  	github.com/inspr-at/paimos/internal/business/crm	(cached)
+ok  	github.com/inspr-at/paimos/internal/business/directory	(cached)
+ok  	github.com/inspr-at/paimos/internal/business/hours	(cached)
+ok  	github.com/inspr-at/paimos/internal/business/quotes	(cached)
+ok  	github.com/inspr-at/paimos/internal/business/quotes/collaboration	(cached)
+?   	github.com/inspr-at/paimos/internal/business/quotes/confirmation	[no test files]
+?   	github.com/inspr-at/paimos/internal/business/quotes/profiletar	[no test files]
+ok  	github.com/inspr-at/paimos/internal/business/quotes/public	(cached)
+ok  	github.com/inspr-at/paimos/internal/cli	6.863s
+ok  	github.com/inspr-at/paimos/internal/client	0.358s
+ok  	github.com/inspr-at/paimos/internal/config	0.237s
+ok  	github.com/inspr-at/paimos/internal/db	17.230s
+ok  	github.com/inspr-at/paimos/internal/dbtest	4.698s
+ok  	github.com/inspr-at/paimos/internal/demo	6.474s
+ok  	github.com/inspr-at/paimos/internal/embedding	2.791s
+ok  	github.com/inspr-at/paimos/internal/events	18.984s
+ok  	github.com/inspr-at/paimos/internal/fromclassic	0.968s
+ok  	github.com/inspr-at/paimos/internal/greetings	1.805s
+ok  	github.com/inspr-at/paimos/internal/harness	6.262s
+ok  	github.com/inspr-at/paimos/internal/httpapi	2.259s
+ok  	github.com/inspr-at/paimos/internal/importer	13.345s
+ok  	github.com/inspr-at/paimos/internal/importer/offers	1.869s
+ok  	github.com/inspr-at/paimos/internal/imports	0.938s
+ok  	github.com/inspr-at/paimos/internal/inbox	9.889s
+ok  	github.com/inspr-at/paimos/internal/intake	0.861s
+ok  	github.com/inspr-at/paimos/internal/journey	7.972s
+ok  	github.com/inspr-at/paimos/internal/knowledge	6.911s
+ok  	github.com/inspr-at/paimos/internal/linkvault	0.230s
+ok  	github.com/inspr-at/paimos/internal/localjournal	0.293s
+ok  	github.com/inspr-at/paimos/internal/modelregistry	1.027s
+ok  	github.com/inspr-at/paimos/internal/nodes	42.272s
+?   	github.com/inspr-at/paimos/internal/operatoractor	[no test files]
+ok  	github.com/inspr-at/paimos/internal/ownedprocess	0.219s
+ok  	github.com/inspr-at/paimos/internal/perf	0.283s
+ok  	github.com/inspr-at/paimos/internal/plugins	1.603s
+ok  	github.com/inspr-at/paimos/internal/plugins/fence	0.224s
+ok  	github.com/inspr-at/paimos/internal/plugins/janus	0.228s
+ok  	github.com/inspr-at/paimos/internal/plugins/pharos	0.225s
+ok  	github.com/inspr-at/paimos/internal/principallink	2.073s
+?   	github.com/inspr-at/paimos/internal/principallink/apply	[no test files]
+ok  	github.com/inspr-at/paimos/internal/profile	1.952s
+ok  	github.com/inspr-at/paimos/internal/projectgroups	2.019s
+ok  	github.com/inspr-at/paimos/internal/quotepdf	0.263s
+ok  	github.com/inspr-at/paimos/internal/relations	3.828s
+ok  	github.com/inspr-at/paimos/internal/releasehistory	0.691s
+?   	github.com/inspr-at/paimos/internal/releasehistory/generate	[no test files]
+ok  	github.com/inspr-at/paimos/internal/releases	2.804s
+ok  	github.com/inspr-at/paimos/internal/requirements	10.921s
+ok  	github.com/inspr-at/paimos/internal/search	8.464s
+ok  	github.com/inspr-at/paimos/internal/stagehandoff	14.683s
+ok  	github.com/inspr-at/paimos/internal/tenant	0.217s
+ok  	github.com/inspr-at/paimos/internal/tenantbootstrap	0.814s
+?   	github.com/inspr-at/paimos/internal/version	[no test files]
+ok  	github.com/inspr-at/paimos/internal/views	2.045s
+?   	github.com/inspr-at/paimos/internal/workorders	[no test files]
+ok  	github.com/inspr-at/paimos/scripts/pdf-visual-diff	0.689s
+?   	github.com/inspr-at/paimos/web	[no test files]
