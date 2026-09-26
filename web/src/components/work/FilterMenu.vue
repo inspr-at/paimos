@@ -1,13 +1,14 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { DIMENSIONS, type Dimension, type ListFilters } from '../../lib/ticketList'
 import AppIcon, { type IconName } from '../AppIcon.vue'
 import FloatingPanel from './FloatingPanel.vue'
 import StatusIcon from './StatusIcon.vue'
 
 // "Filter": every way to narrow the list, the quick ones included, then the date.
-defineProps<{ anchor: HTMLElement | null; filters: ListFilters }>()
+const props = withDefaults(defineProps<{ anchor: HTMLElement | null; filters: ListFilters; dimensions?: Dimension[]; showDate?: boolean }>(), { showDate: true })
+const dimensions = computed(() => DIMENSIONS.filter(d => !props.dimensions || props.dimensions.includes(d.key)))
 const emit = defineEmits<{ choose: [dimension: Dimension | 'date']; close: [restoreFocus: boolean] }>()
 const ICONS: Record<Dimension, IconName> = { status: 'check', priority: 'gauge', assignee: 'user', type: 'ticket', tag: 'tag', epic: 'epic', cost: 'coin', release: 'box' }
 const list = ref<HTMLElement>()
@@ -28,7 +29,7 @@ function move(event: KeyboardEvent) {
     <p class="eyebrow title">Filter by</p>
     <div ref="list" class="menu" role="menu" aria-label="Filter by" @keydown="move">
       <button
-        v-for="(dimension, index) in DIMENSIONS" :key="dimension.key" type="button" role="menuitem" class="menu-item"
+        v-for="(dimension, index) in dimensions" :key="dimension.key" type="button" role="menuitem" class="menu-item"
         :class="{ secondary: !dimension.primary }" :data-autofocus="index === 0 ? '' : undefined" @click="emit('choose', dimension.key)"
       >
         <StatusIcon v-if="dimension.key === 'status'" state="in_progress" :size="13" class="lead" />
@@ -37,8 +38,8 @@ function move(event: KeyboardEvent) {
         <span v-if="filters[dimension.key].length" class="on-count mono">{{ filters[dimension.key].length }}</span>
         <AppIcon name="chevron-right" :size="13" class="go" />
       </button>
-      <span class="divider" role="separator" />
-      <button type="button" role="menuitem" class="menu-item" @click="emit('choose', 'date')">
+      <span v-if="showDate" class="divider" role="separator" />
+      <button v-if="showDate" type="button" role="menuitem" class="menu-item" @click="emit('choose', 'date')">
         <AppIcon name="calendar" :size="14" class="lead" />
         <span class="label">Date</span>
         <span v-if="filters.date" class="on-count mono">1</span>

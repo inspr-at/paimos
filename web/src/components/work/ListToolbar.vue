@@ -2,6 +2,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { DIMENSION_BY_KEY, DIMENSIONS, activeDimensions, dateLabel, excluded, fieldLabel, included, type DateFilter, type Dimension, type FacetOption, type GroupBy, type ListFilters } from '../../lib/ticketList'
+import { TICKET_GRAPH_FILTERS } from '../../lib/ticketGraphRenderer'
 import { plural, type SortKey } from '../../lib/work'
 import AppIcon from '../AppIcon.vue'
 import ProjectTabs from './ProjectTabs.vue'
@@ -75,13 +76,16 @@ watch(draft, value => {
 })
 onBeforeUnmount(() => { clearTimeout(timer); resize?.disconnect() })
 
-const PRIMARY = DIMENSIONS.filter(d => d.primary)
-const active = computed(() => activeDimensions(props.filters))
-const secondaryActive = computed(() => active.value.filter(key => !DIMENSION_BY_KEY.get(key)!.primary).length + (props.filters.date ? 1 : 0))
-const filterCount = computed(() => active.value.reduce((sum, key) => sum + props.filters[key].length, 0) + (props.filters.q ? 1 : 0) + (props.filters.date ? 1 : 0))
-const chipCount = computed(() => active.value.length + (props.filters.date ? 1 : 0))
+const graph = computed(() => props.view === 'graph')
+const dimensions = computed(() => DIMENSIONS.filter(d => !graph.value || TICKET_GRAPH_FILTERS.includes(d.key)))
+const primary = computed(() => dimensions.value.filter(d => d.primary))
+const active = computed(() => activeDimensions(props.filters).filter(key => !graph.value || TICKET_GRAPH_FILTERS.includes(key)))
+const secondaryActive = computed(() => active.value.filter(key => !DIMENSION_BY_KEY.get(key)!.primary).length + (!graph.value && props.filters.date ? 1 : 0))
+const filterCount = computed(() => active.value.reduce((sum, key) => sum + props.filters[key].length, 0) + (props.filters.q ? 1 : 0) + (!graph.value && props.filters.date ? 1 : 0))
+const chipCount = computed(() => active.value.length + (!graph.value && props.filters.date ? 1 : 0))
 const groupWord = computed(() => props.filters.group === 'tag' ? 'label' : props.filters.group)
 const displayLabel = computed(() => props.view === 'outline' || props.filters.group === 'none' ? 'Display' : `Grouped by ${groupWord.value}`)
+watch(() => props.view, () => { open.value = null; menuAnchor.value = null; dateAnchor.value = null; displayAnchor.value = null })
 const displayText = computed(() => props.view === 'outline' || props.filters.group === 'none' ? 'Display' : `By ${groupWord.value}`)
 
 function title(dimension: Dimension) { return DIMENSION_BY_KEY.get(dimension)!.title }
@@ -143,7 +147,7 @@ defineExpose({ focusSearch, openFilterMenu, input })
 </script>
 
 <template>
-  <div ref="root" class="toolbar" :class="{ stuck, knowledge: view === 'knowledge' }" role="toolbar" :aria-label="view === 'knowledge' ? 'Knowledge controls' : view === 'journey' ? 'Journey controls' : 'Ticket list controls'">
+  <div ref="root" class="toolbar" :class="{ stuck, graph, knowledge: view === 'knowledge' }" role="toolbar" :aria-label="view === 'knowledge' ? 'Knowledge controls' : view === 'journey' ? 'Journey controls' : 'Ticket list controls'">
     <ProjectTabs v-if="view !== 'journey'" class="view-switch"
       :items="view === 'knowledge' ? KNOWLEDGE_VIEWS : TICKET_VIEWS"
       :selected="view === 'knowledge' ? knowledgeView ?? 'entries' : view"
@@ -151,14 +155,14 @@ defineExpose({ focusSearch, openFilterMenu, input })
     <template v-if="view !== 'knowledge' && view !== 'journey'">
     <label class="search-field list-search">
       <AppIcon name="search" :size="14" />
-      <input ref="input" v-model="draft" class="field" type="search" :placeholder="narrow ? 'Search' : 'Search this list'" aria-label="Search tickets in this project" aria-keyshortcuts="/" autocomplete="off" spellcheck="false" @keydown="searchKey" />
+      <input ref="input" v-model="draft" class="field" type="search" :placeholder="narrow ? 'Search' : graph ? 'Search tickets' : 'Search this list'" aria-label="Search tickets in this project" aria-keyshortcuts="/" autocomplete="off" spellcheck="false" @keydown="searchKey" />
       <kbd v-if="!draft && !narrow" class="keycap slash" aria-hidden="true">/</kbd>
       <button v-if="draft" type="button" class="clear-q" aria-label="Clear search" @click="clearSearch"><AppIcon name="close" :size="12" /></button>
     </label>
 
     <div class="facets">
       <button
-        v-for="dimension in PRIMARY" :key="dimension.key" type="button" class="btn sm facet-btn" :data-dim="dimension.key"
+        v-for="dimension in primary" :key="dimension.key" type="button" class="btn sm facet-btn" :data-dim="dimension.key"
         :class="{ on: filters[dimension.key].length }" :aria-expanded="open?.dimension === dimension.key && open.anchor.classList.contains('facet-btn')" aria-haspopup="dialog" @click="openMenu(dimension.key, $event.currentTarget as HTMLElement)"
       >
         {{ dimension.title }}
@@ -169,7 +173,7 @@ defineExpose({ focusSearch, openFilterMenu, input })
       </button>
       <button
         ref="filterButton" type="button" class="btn sm facet-btn more-btn" :class="{ on: secondaryActive }" aria-haspopup="menu" :aria-expanded="!!menuAnchor"
-        aria-label="Filter by more" aria-keyshortcuts="Shift+F" data-tip="Labels, epic, cost unit, release, date · Shift F" @click="menuAnchor = menuAnchor ? null : ($event.currentTarget as HTMLElement)"
+        aria-label="Filter by more" aria-keyshortcuts="Shift+F" :data-tip="graph ? 'Status, priority, type · Shift F' : 'Labels, epic, cost unit, release, date · Shift F'" @click="menuAnchor = menuAnchor ? null : ($event.currentTarget as HTMLElement)"
       >
         <AppIcon name="filter" :size="13" /><span class="more-label">Filter</span>
         <span v-if="secondaryActive" class="facet-count mono">{{ secondaryActive }}</span>
@@ -181,7 +185,7 @@ defineExpose({ focusSearch, openFilterMenu, input })
         <button type="button" class="chip-body" :aria-label="`Edit ${title(dimension)} filter: ${chipText(dimension)}`" @click="openMenu(dimension, $event.currentTarget as HTMLElement)" @keydown="chipKey($event, () => emit('clear', dimension))"><span class="chip-dim">{{ title(dimension) }}</span><span class="chip-text">{{ chipText(dimension) }}</span></button>
         <button type="button" class="chip-x" :aria-label="`Remove ${title(dimension)} filter`" @click="emit('clear', dimension)"><AppIcon name="close" :size="11" /></button>
       </span>
-      <span v-if="filters.date" class="filter-chip">
+      <span v-if="!graph && filters.date" class="filter-chip">
         <button type="button" class="chip-body" :aria-label="`Edit date filter: ${fieldLabel(filters.date.field)} ${dateLabel(filters.date)}`" @click="dateAnchor = $event.currentTarget as HTMLElement" @keydown="chipKey($event, () => emit('date', null))"><AppIcon name="calendar" :size="12" class="chip-icon" /><span class="chip-dim">{{ fieldLabel(filters.date.field) }}</span><span class="chip-text">{{ dateLabel(filters.date) }}</span></button>
         <button type="button" class="chip-x" aria-label="Remove date filter" @click="emit('date', null)"><AppIcon name="close" :size="11" /></button>
       </span>
@@ -199,11 +203,11 @@ defineExpose({ focusSearch, openFilterMenu, input })
       type="button" class="btn sm closed-pill" :class="{ on: !filters.showClosed }" :aria-pressed="!filters.showClosed" aria-label="Hide closed tickets"
       :data-tip="filters.showClosed ? 'Closed tickets are shown\nClick to hide them' : 'Closed tickets are hidden\nClick to show them'" @click="emit('showClosed', !filters.showClosed)"
     ><AppIcon :name="filters.showClosed ? 'eye' : 'eye-off'" :size="14" />Closed</button>
-    <button type="button" class="btn sm display-btn" :class="{ on: view === 'list' && filters.group !== 'none' }" aria-haspopup="dialog" :aria-expanded="!!displayAnchor" :aria-label="`Display: ${displayLabel}`" data-tip="Grouping, sort, row height and columns" @click="displayAnchor = displayAnchor ? null : ($event.currentTarget as HTMLElement)">
+    <button v-if="!graph" type="button" class="btn sm display-btn" :class="{ on: view === 'list' && filters.group !== 'none' }" aria-haspopup="dialog" :aria-expanded="!!displayAnchor" :aria-label="`Display: ${displayLabel}`" data-tip="Grouping, sort, row height and columns" @click="displayAnchor = displayAnchor ? null : ($event.currentTarget as HTMLElement)">
       <AppIcon name="layers" :size="13" /><span class="display-label">{{ displayText }}</span><AppIcon name="chevron" :size="12" class="facet-chevron" />
     </button>
 
-    <button type="button" class="btn primary new-btn" aria-label="New ticket" aria-keyshortcuts="n" data-tip="New ticket · n" @click="emit('create')"><AppIcon name="plus" :size="14" /><span class="new-label">New</span></button>
+    <button v-if="!graph" type="button" class="btn primary new-btn" aria-label="New ticket" aria-keyshortcuts="n" data-tip="New ticket · n" @click="emit('create')"><AppIcon name="plus" :size="14" /><span class="new-label">New</span></button>
     <button type="button" class="btn filters-btn" :class="{ on: filterCount }" aria-label="Filters" @click="emit('openSheet')">
       <AppIcon name="sliders" :size="14" /><span class="filters-label">Filters</span><span v-if="filterCount" class="facet-count mono">{{ filterCount }}</span>
     </button>
@@ -218,7 +222,7 @@ defineExpose({ focusSearch, openFilterMenu, input })
       v-if="open" :anchor="open.anchor" :dimension="open.dimension" :title="title(open.dimension)" :options="options(open.dimension)" :selected="filters[open.dimension]" :loading="facetLoading"
       @toggle="value => emit('toggle', open!.dimension, value)" @exclude="value => emit('exclude', open!.dimension, value)" @clear="emit('clear', open!.dimension)" @close="closeMenu"
     />
-    <FilterMenu v-if="menuAnchor" :anchor="menuAnchor" :filters="filters" @choose="chooseFilter" @close="restore => { const a = menuAnchor; menuAnchor = null; if (restore) a?.focus() }" />
+    <FilterMenu v-if="menuAnchor" :anchor="menuAnchor" :filters="filters" :dimensions="graph ? TICKET_GRAPH_FILTERS : undefined" :show-date="!graph" @choose="chooseFilter" @close="restore => { const a = menuAnchor; menuAnchor = null; if (restore) a?.focus() }" />
     <DateMenu v-if="dateAnchor" :anchor="dateAnchor" :value="filters.date" @change="value => emit('date', value)" @close="closeDate" />
     <FloatingPanel v-if="displayAnchor" :anchor="displayAnchor" :width="320" :tallest="760" align="end" label="Display options" @close="closeDisplay">
       <DisplayPanel

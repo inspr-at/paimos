@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Typed client for GET /api/tickets/graph. The graph view arrives in a later
-// package; this module only fetches the bounded, body-free projection.
+// Typed client for GET /api/tickets/graph. TG1's ticketGraphRenderer adapter and
+// TicketGraphView consume this bounded, body-free projection without writes.
 import { api } from './api.ts'
 
 export type TicketGraphType = 'ticket' | 'epic'

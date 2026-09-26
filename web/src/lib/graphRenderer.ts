@@ -12,7 +12,11 @@ export type GraphLabels = 'off' | 'smart' | 'all'
 export type GraphFPS = 30 | 60
 export type MotionPhase = 'paused' | 'interacting' | 'orbiting'
 export interface GraphNode { id: string; label: string; group: string; color: `--${string}`; weight: number; href?: string }
-export interface GraphLink { source: string; target: string; kind: string; directed: boolean }
+export interface GraphLink {
+  source: string; target: string; kind: string; directed: boolean
+  // Optional domain styling. Omission preserves the knowledge graph defaults.
+  color?: `--${string}`; width?: number; curvature?: number
+}
 export interface GraphData { nodes: readonly GraphNode[]; links: readonly GraphLink[] }
 export interface LayoutNode extends GraphNode { degree: number; x?: number; y?: number; z?: number; vx?: number; vy?: number; vz?: number }
 export interface LayoutEdge extends Omit<GraphLink, 'source' | 'target'> { source: string | LayoutNode; target: string | LayoutNode }
@@ -60,10 +64,10 @@ export function labelPosition(x: number, y: number, radius: number, w: number, h
     x: Math.max(w / 2 + 2, Math.min(width - w / 2 - 2, x)), y: Math.max(h / 2 + 2, Math.min(height - h / 2 - 2, y + dy)), w, h,
   } : undefined)
 }
-function graphPalette(nodes: LayoutNode[]) {
+function graphPalette(nodes: LayoutNode[], links: LayoutEdge[] = []) {
   const css = getComputedStyle(document.documentElement), read = (token: string) => css.getPropertyValue(token).trim()
   return { background: read('--canvas'), ink: read('--ink'), muted: read('--ink-3'), dark: css.colorScheme === 'dark',
-    colors: Object.fromEntries(nodes.map(n => [n.color, read(n.color) || read('--teal')])) }
+    colors: Object.fromEntries([...nodes.map(n => n.color), ...links.flatMap(l => l.color ? [l.color] : [])].map(token => [token, read(token) || read('--teal')])) }
 }
 
 export async function createGraphRenderer(host: HTMLElement, dimension: GraphDimension, options: GraphRendererOptions): Promise<GraphRenderer | null> {
@@ -88,7 +92,10 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
   const color = (n: LayoutNode) => palette.colors[n.color] ?? palette.muted
   const touches = (l: LayoutEdge) => !!emphasis.selected && [endpointID(l.source), endpointID(l.target)].includes(emphasis.selected)
   const particles = (l: LayoutEdge) => !paused && l.directed && touches(l) ? 1 : 0
-  const linkColor = (l: LayoutEdge) => /^#[\da-f]{6}$/i.test(palette.muted) ? palette.muted + (touches(l) ? 'aa' : emphasis.selected || emphasis.searching ? '18' : palette.dark ? '48' : '40') : palette.muted
+  const linkColor = (l: LayoutEdge) => {
+    const color = l.color ? palette.colors[l.color] ?? palette.muted : palette.muted
+    return /^#[\da-f]{6}$/i.test(color) ? color + (touches(l) ? 'aa' : emphasis.selected || emphasis.searching ? '18' : l.color ? '80' : palette.dark ? '48' : '40') : color
+  }
   const labelLayer = document.createElement('div')
   labelLayer.className = 'graph-labels'; labelLayer.setAttribute('aria-hidden', 'true')
   const labels = new Map<string, { el: HTMLSpanElement; w: number; h: number }>()
@@ -250,7 +257,7 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
         const shell = new three!.Mesh(geometry, material(n, true)); shell.scale.setScalar(radius)
         group.add(core, shell); objects.set(n.id, group)
         return group
-      }).linkOpacity(1).linkWidth(.55)
+      }).linkOpacity(1).linkWidth(l => l.width ?? .55)
       const controls = g3.controls() as OrbitControls
       controls.autoRotateSpeed = 1 // OrbitControls: one revolution per 60 seconds, using elapsed time.
       controls.enableDamping = !options.reduced
@@ -263,13 +270,13 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
     const { default: ForceGraph } = await import('force-graph')
     if (options.signal.aborted) return null
     g2 = new ForceGraph<LayoutNode, LayoutEdge>(host)
-    g2.backgroundColor(palette.background).nodeCanvasObject((n, ctx, scale) => draw2D(n, ctx, scale)).nodePointerAreaPaint(pointerArea).linkWidth(l => touches(l) ? 1 : .6)
+    g2.backgroundColor(palette.background).nodeCanvasObject((n, ctx, scale) => draw2D(n, ctx, scale)).nodePointerAreaPaint(pointerArea).linkWidth(l => l.width ?? (touches(l) ? 1 : .6))
   }
   host.append(labelLayer)
   const graph = (g3 ?? g2)!
   graph.nodeLabel(() => '').linkLabel(() => '').nodeRelSize(8).nodeVal(n => Math.pow(Math.max(0, n.weight) + 1, 1.5))
     .linkColor(linkColor).linkDirectionalParticles(particles).linkDirectionalParticleWidth(1.4).linkDirectionalParticleSpeed(.002)
-    .linkDirectionalArrowLength(l => l.directed ? 3 : 0).linkDirectionalArrowRelPos(1)
+    .linkDirectionalArrowLength(l => l.directed ? 3 : 0).linkDirectionalArrowRelPos(1).linkCurvature(l => l.curvature ?? 0)
     .warmupTicks(90).cooldownTicks(paused ? 0 : 140).d3VelocityDecay(.38)
     .onNodeClick((node, event) => {
       if (performance.now() - openedAt < 100) return
@@ -413,7 +420,7 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
       pointerNode = null; lastPick = null; cameraTaken = false; fitOnSettle = true
       objects.clear()
       const layout = graphLayout(value); nodes = layout.nodes; links = layout.links
-      palette = graphPalette(nodes)
+      palette = graphPalette(nodes, links)
       const names = [...new Set(nodes.map(n => n.group))].sort(), radius = names.length > 1 ? 35 + Math.sqrt(nodes.length) * 9 : 0
       groups = new Map(names.map((group, i) => { const angle = i * 2 * Math.PI / names.length; return [group, { x: Math.cos(angle) * radius, y: Math.sin(angle) * radius, z: Math.sin(angle * 2) * radius * .3 }] }))
       labelsWereSettled = undefined
@@ -425,7 +432,7 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
     },
     emphasis(value) { emphasis = value; redraw() },
     theme() {
-      palette = graphPalette(nodes); graph.backgroundColor(palette.background)
+      palette = graphPalette(nodes, links); graph.backgroundColor(palette.background)
       materials.forEach(m => m.dispose()); materials.clear(); redraw()
     },
     resize(width, height) {
