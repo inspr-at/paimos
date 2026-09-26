@@ -505,7 +505,6 @@ defineExpose({
 .ws-scroll { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; }
 .panel .ws-scroll { padding: 18px 24px 24px; }
 .ws-props { margin-top: 14px; }
-.panel .ws-props { min-height: 130px; }
 .meta { margin-top: 12px; font-size: 12.5px; color: var(--ink-3); }
 .meta time { color: var(--ink-2); }
 .divider { height: 1px; margin: 18px 0 20px; background: linear-gradient(90deg, var(--line-2), transparent); }
