@@ -15,7 +15,11 @@ import TicketWorkspace from '../work/TicketWorkspace.vue'
 // A ticket named in the release history, open beside it: the app's own ticket
 // side panel (same parts, same writes), resolved from the key. Links followed
 // inside the panel stay in it, with the panel's back trail.
-const props = defineProps<{ ticketKey: string; now: number }>()
+const props = withDefaults(defineProps<{
+  ticketKey: string; now: number
+  // inline sits in the release history's grid; dock is the app's fixed side panel.
+  layout?: 'inline' | 'dock'; openInProject?: boolean; backLabel?: string
+}>(), { layout: 'inline', openInProject: false, backLabel: '' })
 const emit = defineEmits<{ close: []; navigate: [path: string] }>()
 const projects = useProjects()
 const session = useSession()
@@ -121,6 +125,11 @@ function trailBack(steps: number) {
   current.value = key
 }
 function expand() { const path = href(current.value); if (path) emit('navigate', `${path}?view=full`) }
+async function goToProject() {
+  if (ws.value?.isDirty() && !(await confirmAction({ title: 'Discard your changes?', body: `Your edits to ${current.value} have not been saved.`, confirmLabel: 'Discard', danger: true }))) return
+  const path = href(current.value)
+  if (path) emit('navigate', path)
+}
 function newTab() { const path = href(current.value); if (path) window.open(path, '_blank', 'noopener') }
 
 const statusAnchor = ref<HTMLElement | null>(null)
@@ -151,15 +160,16 @@ defineExpose({
 </script>
 
 <template>
-  <div class="peek">
+  <div class="peek" :class="layout">
     <TicketWorkspace
       ref="ws" :item="item" :ticket-key="item?.key ?? ref_?.key ?? current" :resolving="resolving" :resolve-error="error" :position="null" :now="now" mode="panel"
       :project="{ id: projectId ?? '', routeKey: project?.routeKey ?? '' }" :names="list.names" :me="me" :people="people" :trail="trail"
       :can-write="can('nodes.write', scope)" :can-delete="can('nodes.delete', scope)" :can-move="can('nodes.move', scope)"
       :can-link="can('relations.write', scope)" :can-unlink="can('relations.delete', scope)" :can-comment="can('comments.write', scope)"
       :can-delete-comment="can('comments.delete', scope)" :can-attach="can('attachments.write', scope) && can('attachments.delete', scope)"
+      :open-in-project="openInProject" :back-label="backLabel"
       @close="requestClose" @expand="expand" @new-tab="newTab" @open-key="openKey" @trail-back="trailBack" @retry="resolve"
-      @status="anchor => { statusAnchor = anchor }" @removed="emit('close')"
+      @open-in-project="goToProject" @status="anchor => { statusAnchor = anchor }" @removed="emit('close')"
     />
     <StatusMenu v-if="statusAnchor && item" :anchor="statusAnchor" :current="item.state" :known-states="knownStates" :ticket-key="item.key" @choose="chooseStatus" @close="closeStatus" />
   </div>
@@ -167,13 +177,14 @@ defineExpose({
 
 <style scoped>
 /* The app's side panel, placed in the history's grid instead of floating over the page. */
-.peek { display: flex; min-width: 0; min-height: 0; padding: 2px 0 16px; }
-.peek :deep(.ticket-ws.panel) { position: relative; inset: auto; z-index: auto; flex: 1; width: auto; height: auto; min-width: 0; }
+.peek { display: flex; min-width: 0; min-height: 0; }
+.peek.inline { padding: 2px 0 16px; }
+.peek.inline :deep(.ticket-ws.panel) { position: relative; inset: auto; z-index: auto; flex: 1; width: auto; height: auto; min-width: 0; }
 /* No list to step through here: no previous and next arrows either. */
 .peek :deep(.panel-bar .nav) { display: none; }
 @media (max-width: 760px) {
-  /* Phones: the ticket takes the whole screen, over the history. */
-  .peek { position: fixed; inset: 0; z-index: 10; padding: 0; background: var(--canvas); }
-  .peek :deep(.ticket-ws.panel) { border: 0; border-radius: 0; background: var(--canvas); box-shadow: none; }
+  /* Phones: the ticket takes the whole screen, over the history. The app dock uses the panel's own sheet. */
+  .peek.inline { position: fixed; inset: 0; z-index: 10; padding: 0; background: var(--canvas); }
+  .peek.inline :deep(.ticket-ws.panel) { border: 0; border-radius: 0; background: var(--canvas); box-shadow: none; }
 }
 </style>

@@ -1,12 +1,13 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { can } from '../lib/authz'
 import { message, subscribeAgents, type AgentAccount, type Approval, type SessionControl } from '../lib/agents'
 import { canDecideApproval as allowedToDecide, controlBlocked, decidedApprovals, type Resource } from '../lib/agentState'
 import { confirmAction } from '../lib/confirm'
 import { toast } from '../lib/toast'
+import { TICKET_PEEK } from '../lib/ticketPeek'
 import { usePoller } from '../lib/usePolledData'
 import { useAgents, type HeldRequest, type SessionView } from '../stores/agents'
 import { useProjects } from '../stores/projects'
@@ -36,6 +37,8 @@ const queue = ref<InstanceType<typeof ApprovalQueue>>()
 const startDialog = ref<InstanceType<typeof StartAgentDialog>>()
 const canStart = computed(() => session.identity?.principal.kind === 'person' && can('work_orders.write') && can('run.create'))
 
+const ticketPeek = inject(TICKET_PEEK, null)
+const ticketPeekOpen = computed(() => !!ticketPeek?.openKey.value)
 const sessionId = computed(() => typeof route.params.sessionId === 'string' ? route.params.sessionId : '')
 const selected = computed(() => agents.views.find(v => v.session.id === sessionId.value))
 const writable = computed(() => can('harness.control'))
@@ -170,6 +173,7 @@ function typing(target: EventTarget | null) {
 function keydown(event: KeyboardEvent) {
   if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return
   if (document.querySelector('dialog[open], .floating') || typing(event.target)) return
+  if (event.target instanceof Node && document.querySelector('.ticket-peek-host')?.contains(event.target)) return
   const [kind, id] = [cursor.value.slice(0, 1), cursor.value.slice(2)]
   switch (event.key) {
     case 'j': case 'ArrowDown': event.preventDefault(); move(1); break
@@ -184,6 +188,7 @@ function keydown(event: KeyboardEvent) {
       else if (kind === 'm') { event.preventDefault(); const held = agents.held.find(m => m.id === id); if (held) openAgent(held.sender_principal_id) }
       break
     case 'Escape':
+      if (ticketPeekOpen.value) return
       if (sessionId.value) { event.preventDefault(); void closePanel() }
       break
   }
@@ -214,7 +219,7 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
 </script>
 
 <template>
-  <section class="agents-page" :class="{ 'panel-open': !!sessionId }" aria-labelledby="agents-title">
+  <section class="agents-page" :class="{ 'panel-open': !!sessionId && !ticketPeekOpen }" aria-labelledby="agents-title">
     <header class="page-head">
       <div class="head-main">
         <p class="eyebrow">{{ session.identity?.tenant.name ?? 'Workspace' }}</p>
@@ -266,7 +271,7 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
     </div>
 
     <SessionPanel
-      v-if="sessionId && agents.loaded" :view="selected" :loading="false" :now="agents.now" :can-write="writable" :control-block="controlBlock"
+      v-if="sessionId && agents.loaded && !ticketPeekOpen" :view="selected" :loading="false" :now="agents.now" :can-write="writable" :control-block="controlBlock"
       @close="closePanel" @control="control" @review="review"
     />
     <StartAgentDialog ref="startDialog" />

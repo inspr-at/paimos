@@ -6,6 +6,7 @@ import { GROUPS, controlBlocked, elapsed, sessionForest, type SessionBranch, typ
 import { relativeTime } from '../../lib/work'
 import type { Availability, SessionView } from '../../stores/agents'
 import AppIcon from '../AppIcon.vue'
+import TicketPeekLink from '../TicketPeekLink.vue'
 import FloatingPanel from '../work/FloatingPanel.vue'
 import ConnectHint from './ConnectHint.vue'
 import LiveDot from './LiveDot.vue'
@@ -168,7 +169,7 @@ function rowClick(event: MouseEvent, id: string) {
             </span>
           </span>
           <span role="cell" class="c-ticket">
-            <RouterLink v-if="view.ticket" class="ticket-chip" :to="view.ticket.href" :data-tip="view.ticket.title">{{ view.ticket.key }}</RouterLink>
+            <TicketPeekLink v-if="view.ticket" class="ticket-chip" :ticket-key="view.ticket.key" :href="view.ticket.href" :tip="view.ticket.title">{{ view.ticket.key }}</TicketPeekLink>
             <span v-else class="faint">{{ view.projectKey || '—' }}</span>
           </span>
           <span role="cell" class="right c-beat">

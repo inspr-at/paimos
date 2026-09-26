@@ -41,10 +41,12 @@ const props = defineProps<{
   canComment: boolean; canDeleteComment: boolean; canAttach: boolean; people: { id: string; name: string }[]
   // Tickets followed to get here, oldest first (the panel's back trail).
   trail?: string[]
+  // Set by a peek dock: a labeled jump to the project, and a return to the view underneath.
+  openInProject?: boolean; backLabel?: string
 }>()
 const emit = defineEmits<{
   close: []; prev: []; next: []; expand: []; collapse: []; newTab: []; openKey: [key: string, newTab: boolean]; status: [anchor: HTMLElement]; trailBack: [steps: number]
-  removed: [item: ListItem]; created: [item: ListItem]; moved: [item: ListItem, fromParent: string | null]; retry: []
+  removed: [item: ListItem]; created: [item: ListItem]; moved: [item: ListItem, fromParent: string | null]; retry: []; openInProject: []
 }>()
 
 const item = toRef(props, 'item')
@@ -325,9 +327,9 @@ defineExpose({
     <TicketHeaderBar
       :ticket-key="item?.key ?? ticketKey" :kind="item?.kind_slug ?? null" :position="position" :mode="mode" :can-write="editable"
       :can-delete="deletable" :can-move="movable && item?.kind_slug === 'ticket'" :trail="trail" :editing="editing" :saving="saving" :dirty="editDirty"
-      :can-start-agent="canStartAgent"
+      :can-start-agent="canStartAgent" :open-in-project="openInProject" :back-label="backLabel"
       @copy-key="copy(item?.key ?? ticketKey, item?.key ?? ticketKey)" @copy-link="copy(link(), 'link')" @prev="emit('prev')" @next="emit('next')"
-      @expand="emit('expand')" @collapse="emit('collapse')" @new-tab="emit('newTab')" @close="emit('close')"
+      @expand="emit('expand')" @collapse="emit('collapse')" @new-tab="emit('newTab')" @close="emit('close')" @open-in-project="emit('openInProject')"
       @move="anchor => openMenu('epic', anchor)" @delete="remove" @back="steps => emit('trailBack', steps)"
       @edit="startEdit()" @save="saveEdit" @cancel="cancelEdit"
       @start-agent="item && startDialog?.open(item)"

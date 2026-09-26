@@ -14,7 +14,7 @@ import ReleaseCompare from './ReleaseCompare.vue'
 import ReleaseDetail from './ReleaseDetail.vue'
 import ReleaseStats from './ReleaseStats.vue'
 import ReleaseTicketPanel from './ReleaseTicketPanel.vue'
-import { TICKET_PEEK } from './TicketLink.vue'
+import { TICKET_PEEK } from '../../lib/ticketPeek'
 
 // The release history: a full-screen sheet over the page. Releases by day on the
 // left, the selected one (or a comparison of two) on the right; on phones the
@@ -151,8 +151,8 @@ const peekKey = ref<string | null>(null)
 const peekPanel = ref<InstanceType<typeof ReleaseTicketPanel>>()
 const peekPane = ref<HTMLElement>()
 let peekOpener: HTMLElement | null = null
-async function openPeek(key: string, from: HTMLElement) {
-  peekOpener = from
+async function openPeek(key: string, from?: HTMLElement | null) {
+  peekOpener = from ?? null
   help.value = false
   peekKey.value = normalKey(key)
   await nextTick()
@@ -390,7 +390,7 @@ const KINDS = [
         </section>
 
         <div v-if="peekKey" ref="peekPane" class="peek-pane">
-          <ReleaseTicketPanel ref="peekPanel" :ticket-key="peekKey" :now="now" @close="closePeek" @navigate="path => emit('navigate', path)" />
+          <ReleaseTicketPanel ref="peekPanel" :ticket-key="peekKey" :now="now" open-in-project @close="closePeek" @navigate="path => emit('navigate', path)" />
         </div>
       </div>
 

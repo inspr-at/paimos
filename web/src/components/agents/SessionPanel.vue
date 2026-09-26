@@ -9,6 +9,7 @@ import { absoluteTime, relativeTime, statusMeta } from '../../lib/work'
 import { useAgents, type SessionView } from '../../stores/agents'
 import { useSession } from '../../stores/session'
 import AppIcon from '../AppIcon.vue'
+import TicketPeekLink from '../TicketPeekLink.vue'
 import KeyCap from '../KeyCap.vue'
 import Avatar from '../Avatar.vue'
 import LiveDot from './LiveDot.vue'
@@ -121,7 +122,7 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
         </template>
       </div>
       <p v-if="view && !loading" class="head-sub">
-        <span v-if="view.ticket" class="ticket-chip">{{ view.ticket.key }}</span>
+        <TicketPeekLink v-if="view.ticket" class="ticket-chip" :ticket-key="view.ticket.key" :href="view.ticket.href" :tip="view.ticket.title">{{ view.ticket.key }}</TicketPeekLink>
         <span v-if="view.ticket" class="head-ticket">{{ view.ticket.title }}</span>
         <span v-if="meta" class="head-account"><AppIcon name="gauge" :size="12" />{{ meta }}</span>
       </p>
@@ -162,7 +163,7 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
 
       <section v-if="view.ticket" class="ticket-card" aria-labelledby="ticket-title">
         <h3 id="ticket-title" class="eyebrow">Bound ticket</h3>
-        <RouterLink :to="view.ticket.href" class="ticket-detail"><span class="ticket-chip">{{ view.ticket.key }}</span><strong>{{ view.ticket.title }}</strong><span v-if="ticketState" class="ticket-status">{{ ticketState }}</span></RouterLink>
+        <TicketPeekLink :ticket-key="view.ticket.key" :href="view.ticket.href" :tip="view.ticket.title" class="ticket-detail"><span class="ticket-chip">{{ view.ticket.key }}</span><strong>{{ view.ticket.title }}</strong><span v-if="ticketState" class="ticket-status">{{ ticketState }}</span></TicketPeekLink>
       </section>
 
       <dl class="facts">
