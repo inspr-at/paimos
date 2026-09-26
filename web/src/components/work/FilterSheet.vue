@@ -1,17 +1,19 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { nextTick, ref } from 'vue'
+import { computed, nextTick, ref } from 'vue'
 import { DATE_FIELDS, DATE_PRESETS, DIMENSIONS, GROUPS, type DateField, type DateFilter, type Dimension, type FacetOption, type GroupBy, type ListFilters } from '../../lib/ticketList'
+import { TICKET_GRAPH_FILTERS } from '../../lib/ticketGraphRenderer'
 import { plural } from '../../lib/work'
 import AppIcon from '../AppIcon.vue'
 import FacetOptions from './FacetOptions.vue'
 
 // Phones: every filter in one sheet, and grouping; the same state as the toolbar.
-const props = withDefaults(defineProps<{ filters: ListFilters; options: (dimension: Dimension) => FacetOption[]; total: number | null; view?: 'list' | 'outline'; canSave?: boolean }>(), { view: 'list' })
+const props = withDefaults(defineProps<{ filters: ListFilters; options: (dimension: Dimension) => FacetOption[]; total: number | null; view?: 'list' | 'outline' | 'graph'; canSave?: boolean }>(), { view: 'list' })
 const emit = defineEmits<{
   toggle: [dimension: Dimension, value: string]; exclude: [dimension: Dimension, value: string]; clearAll: []; showClosed: [value: boolean]; group: [value: GroupBy]
   date: [value: DateFilter | null]; opened: []; expandAll: []; collapseAll: []; saveView: [anchor: HTMLElement]
 }>()
+const dimensions = computed(() => DIMENSIONS.filter(d => props.view !== 'graph' || TICKET_GRAPH_FILTERS.includes(d.key)))
 const dialog = ref<HTMLDialogElement>()
 const doneButton = ref<HTMLButtonElement>()
 const dateField = ref<DateField>('updated')
@@ -63,20 +65,20 @@ defineExpose({ open, close })
             <button type="button" class="btn" @click="emit('collapseAll'); close()"><AppIcon name="collapse-all" :size="14" />Collapse all</button>
           </div>
         </div>
-        <section v-else class="sheet-section">
+        <section v-else-if="view !== 'graph'" class="sheet-section">
           <p class="eyebrow">Group by</p>
           <div class="chip-grid" role="radiogroup" aria-label="Group by">
             <button v-for="option in GROUPS" :key="option.value" type="button" role="radio" class="choice" :aria-checked="filters.group === option.value" @click="emit('group', option.value)">{{ option.label }}</button>
           </div>
         </section>
-        <section v-for="dimension in DIMENSIONS" :key="dimension.key" class="sheet-section">
+        <section v-for="dimension in dimensions" :key="dimension.key" class="sheet-section">
           <p class="eyebrow">{{ dimension.title }}</p>
           <FacetOptions
             :dimension="dimension.key" :options="options(dimension.key)" :selected="filters[dimension.key]"
             @toggle="value => emit('toggle', dimension.key, value)" @exclude="value => emit('exclude', dimension.key, value)"
           />
         </section>
-        <section class="sheet-section">
+        <section v-if="view !== 'graph'" class="sheet-section">
           <p class="eyebrow">Date</p>
           <div class="chip-grid" role="radiogroup" aria-label="Which date">
             <button v-for="option in DATE_FIELDS" :key="option.value" type="button" role="radio" class="choice" :aria-checked="dateField === option.value" @click="dateField = option.value; filters.date && emit('date', { ...filters.date, field: option.value })">{{ option.label }}</button>

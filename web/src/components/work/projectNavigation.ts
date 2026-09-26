@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import type { Component } from 'vue'
+import { defineAsyncComponent, type Component } from 'vue'
 import type { RouteLocationNormalizedLoaded } from 'vue-router'
 import type { IconName } from '../AppIcon.vue'
 
@@ -12,14 +12,15 @@ export const PROJECT_SECTIONS = [
 export type ProjectSection = typeof PROJECT_SECTIONS[number]['id']
 
 export interface TicketViewDefinition extends ProjectTab {
-  // TG1: add one entry with id 'graph' and its lazy component here. Routing and
-  // the switch discover it automatically. The component receives project and
-  // filters, and emits open(ticketKey) to use the shared ticket side panel.
+  // Routing and the switch discover lazy renderers here. TicketGraphView takes
+  // project/filters, emits open(ticketKey) for the shared panel, and emits state
+  // with its loaded projection and visible subset for toolbar facets/counts.
   component?: Component
 }
 export const TICKET_VIEWS = [
   { id: 'list', label: 'List', icon: 'list' },
   { id: 'outline', label: 'Outline', icon: 'outline' },
+  { id: 'graph', label: 'Graph', icon: 'graph', component: defineAsyncComponent(() => import('./TicketGraphView.vue')) },
 ] as const satisfies readonly TicketViewDefinition[]
 export type TicketView = typeof TICKET_VIEWS[number]['id']
 export function ticketView(value: unknown): TicketViewDefinition {

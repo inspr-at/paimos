@@ -32,7 +32,7 @@ test('section tabs separate Tickets views, Journey and Knowledge views; each kee
   const errors = await setup(page)
   await page.goto('/p/PHAROS/tickets')
   await expect(sections(page).getByRole('tab')).toHaveText(['Tickets', 'Journey', 'Knowledge'])
-  await expect(ticketViews(page).getByRole('tab')).toHaveText(['List', 'Outline'])
+  await expect(ticketViews(page).getByRole('tab')).toHaveText(['List', 'Outline', 'Graph'])
   await expect(ticketViews(page).getByRole('tab', { name: 'List', exact: true })).toHaveAttribute('aria-selected', 'true')
   await expect(page.getByRole('button', { name: 'Display: Display' })).toBeVisible()
   await expect(page.getByRole('button', { name: 'New ticket', exact: true })).toBeVisible()
