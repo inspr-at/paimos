@@ -18,8 +18,8 @@ const live = computed(() => props.views.filter(view => view.status.group !== 'st
     <h2 id="live-now-title" class="eyebrow">Live now</h2>
     <div v-if="!loaded" class="tiles" role="status" aria-label="Loading live agents"><span v-for="n in 3" :key="n" class="tile skeleton" /></div>
     <div v-else-if="live.length" class="tiles">
-      <button v-for="(view, index) in live" :key="view.session.id" type="button" class="tile" :class="{ selected: selected === view.session.id }" :aria-label="`Open ${view.name}, ${currentStep(view)}`" @click="emit('open', view.session.id)">
-        <AgentGlyph :id="view.session.agent_principal_id" :size="43" :index="index" :lead="view.session.role === 'coordinator'" />
+      <button v-for="view in live" :key="view.session.id" type="button" class="tile" :class="{ selected: selected === view.session.id }" :aria-label="`Open ${view.name}, ${currentStep(view)}`" @click="emit('open', view.session.id)">
+        <AgentGlyph :view="view" :size="43" />
         <span class="tile-body"><strong>{{ view.name }}</strong><span v-if="view.ticket" class="ticket-key">{{ view.ticket.key }}</span><span class="step">{{ currentStep(view) }}</span><span class="elapsed"><AppIcon name="clock" :size="13" />{{ elapsed(view.session, now) }}</span></span>
       </button>
     </div>

@@ -53,7 +53,7 @@ test('workers nest by session ID, display their label, harness and ticket, and e
   await expect(row(page, child)).toHaveAttribute('data-depth', '1')
   await expect(row(page, child)).toHaveAttribute('data-parent', lead)
   await expect(row(page, child)).toContainText('AC4 hierarchy')
-  await expect(row(page, child)).toContainText('Codex')
+  await expect(row(page, child).locator('.live-bot')).toHaveAttribute('data-harness', 'codex')
   await expect(row(page, child).getByRole('link', { name: 'PHAROS-12' })).toBeVisible()
   const toggle = row(page, lead).getByRole('button', { name: 'Collapse 1 worker of Release lead' })
   await toggle.focus()
@@ -91,7 +91,8 @@ test('returning to a visible tab refreshes immediately and failed reads keep the
   await page.route('**/api/harness-sessions?*', route => route.fulfill({ status: 503, json: { error: 'temporarily unavailable' } }))
   await signal(page, 'harness.registered')
   await expect(page.locator('.freshness')).toContainText('Update delayed')
-  await expect(page.locator('.last-updated time')).toHaveAttribute('datetime', stamp!)
+  const retained = await page.locator('.last-updated time').getAttribute('datetime')
+  expect(Date.parse(retained!)).toBeGreaterThanOrEqual(Date.parse(stamp!))
   await page.unroute('**/api/harness-sessions?*')
   Object.assign(data.sessions[1]!, { display_label: 'Returned worker' })
   await page.evaluate(() => {

@@ -9,6 +9,7 @@ export type Harness = 'codex' | 'claude' | 'pi' | 'cursor' | 'grok'
 export interface HarnessSession {
   id: string; project_id: string; agent_principal_id: string
   display_label?: string | null
+  activity_note?: string | null; activity_note_id?: number; activity_history?: { note: string; at: string }[]
   run_id: string | null; ticket_node_id: string | null; work_order_id: string | null; parent_harness_session_id: string | null
   harness: Harness; host: string; management_mode: 'managed' | 'unmanaged'; role: 'coordinator' | 'worker'
   work_shape: 'unknown' | 'ship' | 'scout'; advertised_capabilities: string[]

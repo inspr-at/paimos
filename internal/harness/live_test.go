@@ -168,7 +168,9 @@ func TestLiveAgents(t *testing.T) {
 	want("admin", summary(admin), seen{f.project, "working", true, true}, seen{second, "starting", true, true})
 	for _, v := range admin {
 		if v.Phase == "working" {
-			if v.ActivityNote == nil || *v.ActivityNote != "Reviewing project changes" { t.Fatalf("admin note %+v", v.LiveAgent) }
+			if v.ActivityNote == nil || *v.ActivityNote != "Reviewing project changes" {
+				t.Fatalf("admin note %+v", v.LiveAgent)
+			}
 			if v.SessionID != working || v.PrincipalID != f.agent.ID || v.Name != "worker" || v.Harness != "claude" || v.Management != "unmanaged" || v.Activity != "busy" {
 				t.Fatalf("working agent %+v", v.LiveAgent)
 			}
@@ -184,7 +186,12 @@ func TestLiveAgents(t *testing.T) {
 	}
 	// A guest sees only its project, and that an agent works there, not which.
 	want("guest", summary(live(guest)), seen{f.project, "working", false, false})
-	if _, exposed := live(guest)[0].raw["activity_note"]; exposed { t.Fatal("guest read worker note") }
+	if _, exposed := live(guest)[0].raw["activity_note"]; exposed {
+		t.Fatal("guest read worker note")
+	}
+	if _, exposed := live(guest)[0].raw["activity_note_id"]; exposed {
+		t.Fatal("guest read worker activity entry")
+	}
 	if got := live(guest); got[0].Ticket == nil || got[0].Ticket.Key != "HTS-2" {
 		t.Fatalf("guest ticket %+v", got[0].Ticket)
 	}
@@ -192,7 +199,14 @@ func TestLiveAgents(t *testing.T) {
 	want("project member", summary(live(member)), seen{second, "starting", true, false})
 	want("viewer", summary(live(viewer)), seen{f.project, "working", true, true}, seen{second, "starting", true, true})
 	want("nodes reader", summary(live(reader)), seen{f.project, "working", false, false}, seen{second, "starting", false, false})
-	for _, item := range live(reader) { if _, exposed := item.raw["activity_note"]; exposed { t.Fatal("nodes reader read worker note") } }
+	for _, item := range live(reader) {
+		if _, exposed := item.raw["activity_note"]; exposed {
+			t.Fatal("nodes reader read worker note")
+		}
+		if _, exposed := item.raw["activity_note_id"]; exposed {
+			t.Fatal("nodes reader read worker activity entry")
+		}
+	}
 	if got := live(f.foreign); len(got) != 0 {
 		t.Fatalf("tenant leak %+v", got)
 	}

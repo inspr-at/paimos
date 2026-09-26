@@ -8,6 +8,7 @@ import {
   type AgentAccount, type AgentRun, type Approval, type HarnessSession, type ModelProfile, type ProjectMessage, type SessionControl,
 } from '../lib/agents'
 import { agentName, groupSessions, harnessLabel, heldRequests, needsYou, pendingApprovals, runModel, sessionStatus, type SessionStatus } from '../lib/agentState'
+import { advanceActivity, type ActivityEvidence } from '../lib/liveAgents'
 import { toast } from '../lib/toast'
 import { useProjects } from './projects'
 
@@ -33,6 +34,8 @@ export const useAgents = defineStore('agents', () => {
   const projects = useProjects()
   const now = ref(Date.now())
   const sessions = ref<HarnessSession[]>([])
+  const activityEvidence = ref(new Map<string, ActivityEvidence>())
+  const eventPulseFor = (sessionId: string) => activityEvidence.value.get(sessionId)?.pulse ?? 0
   const sessionsState = ref<Availability>('idle')
   const sessionsError = ref('')
   const sessionsUpdatedAt = ref<number | null>(null)
@@ -99,6 +102,7 @@ export const useAgents = defineStore('agents', () => {
             if (cursor && cursors.has(cursor)) throw new Error('Session pagination did not advance. Please retry.')
             if (cursor) cursors.add(cursor)
           } while (cursor)
+          activityEvidence.value = new Map([...out.values()].map(item => [item.id, advanceActivity(activityEvidence.value.get(item.id), item)]))
           sessions.value = [...out.values()]
           sessionsUpdatedAt.value = Date.now()
           now.value = Date.now()
@@ -285,7 +289,7 @@ export const useAgents = defineStore('agents', () => {
   function tick() { now.value = Date.now() }
 
   return {
-    now, sessions, sessionsState, sessionsError, sessionsUpdatedAt, approvals, approvalsState, approvalsError, accounts, accountsState, messagingState, runs, nodes, controls,
+    now, sessions, sessionsState, sessionsError, sessionsUpdatedAt, approvals, approvalsState, approvalsError, accounts, accountsState, messagingState, runs, nodes, controls, eventPulseFor,
     loading, loaded, pending, held, needsCount, views, grouped,
     loadAll, loadNeeds, ensureTicket, refreshApprovals, refreshSessions, refreshThread, refreshAgentRuns, tick,
     viewOf, byAgent, forTicket, recentRuns, askerName, thread, addressOf, decide, revoke, resolve, control, send, setAccount,

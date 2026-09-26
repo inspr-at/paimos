@@ -1892,7 +1892,7 @@ paths:
         contributes nothing. principal_id and name are present only with members.read or harness.read at that project
         (as approval agent names, AEON-171); session_id only with harness.read in the workspace. Needs nodes.read in
         the workspace or any project binding; an agent key also needs harness.read. One answer holds at most 500
-        sessions, freshest heartbeat first; truncated says more were live. activity_note is returned only where
+        sessions, freshest heartbeat first; truncated says more were live. activity_note and activity_note_id are returned only where
         the caller holds harness.read at the project.
       responses:
         '200':
@@ -4844,6 +4844,7 @@ components:
           required: [project, ticket, agent]
           properties:
             project: {$ref: '#/components/schemas/NodeSummary'}
+            activity_note_id: {type: integer, format: int64, description: Latest activity entry ID; absent until a note exists. Advances only for a new note.}
             ticket:
               oneOf:
                 - {$ref: '#/components/schemas/NodeSummary'}
@@ -4868,6 +4869,7 @@ components:
         phase: {type: string, enum: [starting, working, stopping]}
         activity: {type: string, enum: [busy, unknown]}
         activity_note: {type: [string, 'null'], maxLength: 120, description: Current step, present only with harness.read at the project}
+        activity_note_id: {type: integer, format: int64, description: Latest activity entry ID; present with the current step only where harness.read is granted.}
         ticket:
           description: The bound ticket and the project it lives in now
           oneOf:

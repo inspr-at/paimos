@@ -48,17 +48,39 @@ func TestActivityNotesValidationHistoryAndIsolation(t *testing.T) {
 			t.Fatal(*err)
 		}
 	}
+	latest := func(endpoint string) float64 {
+		t.Helper()
+		page := decode(t, f.call(f.person, "GET", endpoint, nil, ""))["items"].([]any)
+		if len(page) != 1 {
+			t.Fatalf("activity page: %#v", page)
+		}
+		return page[0].(map[string]any)["activity_note_id"].(float64)
+	}
+	listID := latest("/api/harness-sessions")
+	liveID := latest("/api/harness-sessions/live")
+	if listID != liveID || listID <= 0 {
+		t.Fatalf("latest note differs: list=%v live=%v", listID, liveID)
+	}
 	// Identical notes are a heartbeat, not another activity item.
 	if err := beat(24, "Step 23", lease); err != nil {
 		t.Fatal(*err)
 	}
+	if latest("/api/harness-sessions") != listID || latest("/api/harness-sessions/live") != liveID {
+		t.Fatal("plain heartbeat advanced latest activity entry")
+	}
+	if err := beat(25, "Step 24", lease); err != nil {
+		t.Fatal(*err)
+	}
+	if latest("/api/harness-sessions") <= listID || latest("/api/harness-sessions/live") <= liveID {
+		t.Fatal("new note did not advance latest activity entry")
+	}
 	detail := decode(t, f.call(f.person, "GET", path, nil, ""))
 	history := detail["activity_history"].([]any)
-	if len(history) != 20 || history[0].(map[string]any)["note"] != "Step 23" || history[19].(map[string]any)["note"] != "Step 04" {
+	if len(history) != 20 || history[0].(map[string]any)["note"] != "Step 24" || history[19].(map[string]any)["note"] != "Step 05" {
 		t.Fatalf("bounded history: %#v", history)
 	}
 	live := decode(t, f.call(f.person, "GET", "/api/harness-sessions/live", nil, ""))["items"].([]any)
-	if len(live) != 1 || live[0].(map[string]any)["activity_note"] != "Step 23" {
+	if len(live) != 1 || live[0].(map[string]any)["activity_note"] != "Step 24" {
 		t.Fatalf("live note: %#v", live)
 	}
 	expect(t, f.call(f.foreign, "GET", path, nil, ""), 404)
@@ -84,7 +106,7 @@ func TestActivityNotesValidationHistoryAndIsolation(t *testing.T) {
 		if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM events WHERE type='harness.heartbeat'`).Scan(&count); err != nil {
 			return err
 		}
-		if count != 24 {
+		if count != 25 {
 			t.Fatalf("heartbeat events: %d", count)
 		}
 		return nil

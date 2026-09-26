@@ -31,19 +31,20 @@ var maxLive = 500
 // (AEON-171). session_id, the key to the Agents workspace, is present only
 // with harness.read in the workspace, which that workspace requires.
 type LiveAgent struct {
-	ProjectID    string      `json:"project_id"`
-	SessionID    string      `json:"session_id,omitempty"`
-	PrincipalID  string      `json:"principal_id,omitempty"`
-	Name         string      `json:"name,omitempty"`
-	Harness      string      `json:"harness"`
-	Management   string      `json:"management_mode"`
-	Role         string      `json:"role"`
-	Phase        string      `json:"phase"`
-	Activity     string      `json:"activity"`
-	ActivityNote *string     `json:"activity_note,omitempty"`
-	Ticket       *LiveTicket `json:"ticket"`
-	Since        time.Time   `json:"since"`
-	HeartbeatAt  time.Time   `json:"heartbeat_at"`
+	ProjectID      string      `json:"project_id"`
+	SessionID      string      `json:"session_id,omitempty"`
+	PrincipalID    string      `json:"principal_id,omitempty"`
+	Name           string      `json:"name,omitempty"`
+	Harness        string      `json:"harness"`
+	Management     string      `json:"management_mode"`
+	Role           string      `json:"role"`
+	Phase          string      `json:"phase"`
+	Activity       string      `json:"activity"`
+	ActivityNote   *string     `json:"activity_note,omitempty"`
+	ActivityNoteID *int64      `json:"activity_note_id,omitempty"`
+	Ticket         *LiveTicket `json:"ticket"`
+	Since          time.Time   `json:"since"`
+	HeartbeatAt    time.Time   `json:"heartbeat_at"`
 }
 
 // LiveTicket is the bound ticket and the project it lives in now, so a link to
@@ -67,9 +68,10 @@ type LivePage struct {
 // down to the freshness window: now() is stable, so the window bounds the index
 // range itself, and the LIMIT ends the walk. The predicates match the partial
 // index's so the planner can use it.
-const liveQuery = `SELECT s.id::text,s.project_id::text,s.agent_principal_id::text,coalesce(a.name,''),s.harness,s.management,s.role,s.phase,s.activity,s.activity_note,
+const liveQuery = `SELECT s.id::text,s.project_id::text,s.agent_principal_id::text,coalesce(a.name,''),s.harness,s.management,s.role,s.phase,s.activity,s.activity_note,latest.id,
        t.id::text,t.key,t.title,t.project_id::text,s.created_at,s.heartbeat_at
   FROM harness_sessions s
+  LEFT JOIN LATERAL (SELECT id FROM harness_activity_notes WHERE session_id=s.id ORDER BY id DESC LIMIT 1) latest ON true
   LEFT JOIN principals a ON a.tenant_id=s.tenant_id AND a.id=s.agent_principal_id
   LEFT JOIN nodes t ON t.tenant_id=s.tenant_id AND t.id=s.ticket_node_id AND t.deleted_at IS NULL
  WHERE s.phase IN ('starting', 'working', 'stopping') AND s.activity <> 'idle' AND s.stopped_at IS NULL
@@ -96,7 +98,7 @@ func (m *Module) live(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, erro
 		var v LiveAgent
 		var ticketID, ticketKey, ticketTitle, ticketProject *string
 		var heartbeat *time.Time
-		if err = rows.Scan(&v.SessionID, &v.ProjectID, &v.PrincipalID, &v.Name, &v.Harness, &v.Management, &v.Role, &v.Phase, &v.Activity, &v.ActivityNote,
+		if err = rows.Scan(&v.SessionID, &v.ProjectID, &v.PrincipalID, &v.Name, &v.Harness, &v.Management, &v.Role, &v.Phase, &v.Activity, &v.ActivityNote, &v.ActivityNoteID,
 			&ticketID, &ticketKey, &ticketTitle, &ticketProject, &v.Since, &heartbeat); err != nil {
 			rows.Close()
 			return nil, err
@@ -138,6 +140,7 @@ func (m *Module) live(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, erro
 			agent.ProjectID = projectID
 			if !allowed("harness.read", projectID) {
 				agent.ActivityNote = nil
+				agent.ActivityNoteID = nil
 			}
 			if !allowed("harness.read", projectID) && !allowed("members.read", projectID) {
 				agent.PrincipalID, agent.Name = "", ""

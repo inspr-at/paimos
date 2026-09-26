@@ -154,7 +154,7 @@ function rowClick(event: MouseEvent, id: string) {
           <span role="cell" class="c-agent">
             <span v-if="depth" class="sr-only">Worker of {{ parent }}. </span>
             <RouterLink class="agent-link" :to="`/agents/${view.session.id}`" :aria-label="`${view.harness} ${view.name}, ${view.status.label}`">
-              <AgentGlyph :id="view.session.agent_principal_id" :size="30" :lead="view.session.role === 'coordinator'" />
+              <AgentGlyph :view="view" :size="30" />
               <span class="who"><span class="agent-name">{{ view.name }}</span><span class="step">{{ currentStep(view, branch.liveCount - 1) }}</span><span v-if="view.session.host && view.session.host !== view.name" class="host mono">on {{ view.session.host }}</span></span>
             </RouterLink>
             <span v-if="view.session.role === 'coordinator'" class="role" data-tip="Coordinates other sessions">Lead</span>
@@ -215,7 +215,7 @@ function rowClick(event: MouseEvent, id: string) {
 .card-head { display: flex; align-items: baseline; gap: 10px; padding: 14px 18px 10px; }
 .card-head h2 { font-size: 15px; font-weight: 650; }
 .sub { font-size: 12.5px; color: var(--ink-3); }
-.table { --state-width: 132px; --tree-step: 18px; display: grid; grid-template-columns: var(--state-width) minmax(200px, 1.5fr) minmax(90px, .8fr) 88px 76px 76px; padding: 0 0 8px; }
+.table { --state-width: 132px; --tree-step: 28px; display: grid; grid-template-columns: var(--state-width) minmax(200px, 1.5fr) minmax(90px, .8fr) 88px 76px 76px; padding: 0 0 8px; }
 .thead, .row, .group-row { display: grid; grid-template-columns: subgrid; grid-column: 1 / -1; align-items: center; column-gap: 0; }
 .thead { height: 32px; padding: 0 12px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); font: 500 10.5px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--ink-3); font-variant-ligatures: none; white-space: nowrap; }
 .thead > span, .row > span { padding: 0 8px; min-width: 0; }
@@ -228,7 +228,7 @@ function rowClick(event: MouseEvent, id: string) {
 .group-toggle:hover { background: var(--row-hover); color: var(--ink); }
 .group-toggle:focus-visible { box-shadow: var(--focus-ring); }
 .chev.turned { transform: rotate(90deg); }
-.row { --tree-joint: 24px; position: relative; min-height: 48px; margin: 0 6px; padding: 0 4px; border-radius: 10px; outline: none; cursor: pointer; font-size: 13px; }
+.row { --tree-joint: 28px; position: relative; min-height: 48px; margin: 0 6px; padding: 0 4px; border-radius: 10px; outline: none; cursor: pointer; font-size: 13px; }
 .row.family { background: var(--chip-bg); border-radius: 0; }
 .row.family-start { border-radius: 10px 10px 0 0; }
 .row.family-end { border-radius: 0 0 10px 10px; }
@@ -239,15 +239,16 @@ function rowClick(event: MouseEvent, id: string) {
 .row.stopped { color: var(--ink-2); background: var(--chip-bg); }
 .row.stopped .agent-name { font-weight: 450; color: var(--ink-2); }
 .row.worker .c-agent { padding-left: calc(8px + var(--depth) * var(--tree-step)); }
-/* Neutral one-pixel tree strokes, never state accents or text glyphs. The
-   ancestor tracks continue only while that ancestor has another visible sibling. */
-.row > .tree-lines { position: absolute; inset: 0 0 0 calc(var(--state-width) + 4px); padding: 0; pointer-events: none; color: var(--ink-3); }
+/* The track is anchored to the lead glyph's centre. Each visible descendant
+   carries its ancestors' tracks across row boundaries; the last child closes
+   its track at the badge. The toggle remains in the lead's text column. */
+.row > .tree-lines { position: absolute; inset: 0 0 0 calc(var(--state-width) + 17px); padding: 0; pointer-events: none; color: var(--ink-3); }
 .tree-guide, .tree-stem { position: absolute; left: calc(var(--level) * var(--tree-step)); top: 0; bottom: 0; width: var(--tree-step); }
 .tree-guide.continues::before, .tree-guide.elbow::before { content: ''; position: absolute; top: 0; bottom: 0; width: 1px; background: currentColor; }
-.tree-guide.last::before { bottom: auto; height: var(--tree-joint); }
-.tree-guide.elbow::after { content: ''; position: absolute; top: var(--tree-joint); width: calc(var(--tree-step) - 4px); height: 1px; background: currentColor; }
-.tree-stem { top: auto; height: 6px; width: 1px; background: currentColor; }
-.worker-tools { display: flex; align-items: center; flex-wrap: wrap; gap: 2px; flex-basis: 100%; padding: 2px 0 6px; color: var(--ink-2); font-size: 11.5px; }
+.tree-guide.last::before { bottom: auto; height: calc(var(--tree-joint) - 4px); }
+.tree-guide.elbow::after { content: ''; position: absolute; top: calc(var(--tree-joint) - 4px); left: 0; width: calc(var(--tree-step) - 15px); height: 5px; border: solid currentColor; border-width: 0 0 1px 1px; border-radius: 0 0 0 5px; }
+.tree-stem { top: calc(var(--tree-joint) + 15px); bottom: 0; width: 1px; background: currentColor; }
+.worker-tools { display: flex; align-items: center; flex-wrap: wrap; gap: 2px; flex-basis: 100%; padding: 2px 0 6px 38px; color: var(--ink-2); font-size: 11.5px; }
 .worker-toggle { display: inline-flex; align-items: center; justify-content: center; gap: 4px; min-height: 28px; padding: 2px 6px; border: 0; border-radius: 6px; background: transparent; color: var(--ink); font: inherit; font-weight: 550; white-space: nowrap; }
 .worker-toggle:hover:not(:disabled) { background: var(--row-hover); }
 .worker-toggle:disabled { cursor: default; }
@@ -311,14 +312,14 @@ function rowClick(event: MouseEvent, id: string) {
 }
 /* Phones: two lines per session, actions live in the session panel. */
 @container sessions (max-width: 560px) {
-  .table { --tree-step: 12px; display: block; }
+  .table { --tree-step: 20px; display: block; }
   .thead { display: none; }
   .group-row { display: block; margin: 12px 8px 2px; padding: 0 8px; }
-  .row { --tree-joint: 30px; display: grid; grid-template-columns: auto minmax(0, 1fr) auto 44px; grid-template-areas: "agent agent beat actions" "state ticket ticket actions"; row-gap: 6px; column-gap: 0; min-height: 64px; margin: 0 6px; padding: 10px 4px 10px calc(10px + var(--depth) * var(--tree-step)); }
+  .row { --tree-joint: 38px; display: grid; grid-template-columns: auto minmax(0, 1fr) auto 44px; grid-template-areas: "agent agent beat actions" "state ticket ticket actions"; row-gap: 6px; column-gap: 0; min-height: 64px; margin: 0 6px; padding: 10px 4px 10px calc(10px + var(--depth) * var(--tree-step)); }
   .row > span { padding: 0; }
   .c-agent { grid-area: agent; }
   .row.worker .c-agent { padding-left: 0; }
-  .row > .tree-lines { left: 10px; }
+  .row > .tree-lines { left: 25px; }
   .worker-toggle { min-height: 44px; padding-inline: 8px; }
   .c-state { grid-area: state; margin-right: 10px; }
   .c-ticket { grid-area: ticket; justify-self: start; }

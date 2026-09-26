@@ -102,7 +102,7 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
     <header class="panel-head">
       <div class="head-top">
         <template v-if="view && !loading">
-          <AgentGlyph :id="view.session.agent_principal_id" :size="36" :lead="view.session.role === 'coordinator'" />
+          <AgentGlyph :view="view" :size="36" />
           <h2 class="name">{{ view.name }}</h2>
           <LiveDot :tone="view.status.tone" />
           <span class="state-text" :class="view.status.group">{{ view.status.label }}</span>
