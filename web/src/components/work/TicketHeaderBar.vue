@@ -9,10 +9,12 @@ const props = defineProps<{
   mode: 'panel' | 'full'; canWrite: boolean; canMove: boolean; canDelete: boolean
   // Keys of the tickets followed to get here (oldest first), and the edit state.
   trail?: string[]; editing?: boolean; saving?: boolean; dirty?: boolean; canStartAgent?: boolean
+  // The peek dock: a labeled way into the project, and a way back to the view it covered.
+  openInProject?: boolean; backLabel?: string
 }>()
 const emit = defineEmits<{
   copyKey: []; copyLink: []; prev: []; next: []; expand: []; collapse: []; newTab: []; close: []; move: [anchor: HTMLElement]; delete: []
-  back: [steps: number]; edit: []; save: []; cancel: []; startAgent: []
+  back: [steps: number]; edit: []; save: []; cancel: []; startAgent: []; openInProject: []
 }>()
 const mac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)
 // The trail shows its last two steps; older ones fold into an ellipsis.
@@ -49,7 +51,8 @@ void props
 </script>
 
 <template>
-  <header class="panel-bar" :class="[mode, { 'has-trail': !!trail?.length }]">
+  <header class="panel-bar" :class="[mode, { 'has-trail': !!trail?.length, 'has-peek-actions': !!(openInProject || backLabel) }]">
+    <div class="panel-bar-main">
     <button v-if="mode === 'full'" type="button" class="icon-btn sm flat" aria-label="Back to the list" data-tip="Back to the list · Esc" @click="emit('close')"><AppIcon name="chevron-left" :size="16" /></button>
     <template v-if="trail?.length">
       <button type="button" class="icon-btn sm flat back-btn" :aria-label="`Back to ${trail[trail.length - 1]}`" aria-keyshortcuts="Alt+ArrowLeft" :data-tip="`Back to ${trail[trail.length - 1]} · ${mac ? 'Option' : 'Alt'} Left arrow`" @click="emit('back', 1)"><AppIcon name="arrow-left" :size="15" /></button>
@@ -100,12 +103,22 @@ void props
         <button v-if="canDelete" type="button" role="menuitem" class="menu-item danger" @click="pick('delete')"><AppIcon name="trash" :size="14" />Delete {{ kind === 'epic' ? 'epic' : kind === 'task' ? 'task' : 'ticket' }}…</button>
       </div>
     </FloatingPanel>
+    </div>
+    <div v-if="openInProject || backLabel" class="peek-actions">
+      <button v-if="backLabel" type="button" class="btn sm ghost" @click="emit('close')"><AppIcon name="arrow-left" :size="14" />{{ backLabel }}</button>
+      <button v-if="openInProject" type="button" class="btn sm" @click="emit('openInProject')"><AppIcon name="folder" :size="14" />Open in project</button>
+    </div>
   </header>
 </template>
 
 <style scoped>
-.panel-bar { container: panel-bar / inline-size; display: flex; align-items: center; gap: 6px; height: 52px; padding: 0 10px 0 14px; border-bottom: 1px solid var(--line); flex-shrink: 0; }
+.panel-bar { container: panel-bar / inline-size; display: flex; flex-direction: column; align-items: stretch; flex-shrink: 0; padding: 0 10px 0 14px; border-bottom: 1px solid var(--line); }
+.panel-bar-main { display: flex; align-items: center; gap: 6px; height: 52px; min-width: 0; }
 .panel-bar.full { padding-left: 8px; }
+.panel-bar.full .panel-bar-main { height: 44px; }
+.peek-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 0 0 8px; }
+.peek-actions .btn { min-width: 0; }
+.peek-actions .btn svg { flex: none; }
 .key-chip { display: inline-flex; flex-shrink: 0; align-items: center; gap: 6px; height: 26px; white-space: nowrap; padding: 0 9px 0 10px; border: 0; border-radius: 7px; background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); font: 600 12px/1 var(--mono); letter-spacing: .03em; font-variant-ligatures: none; }
 .key-chip:hover { box-shadow: inset 0 0 0 1px var(--teal); }
 .key-chip:active { filter: brightness(.97); }
@@ -142,8 +155,10 @@ void props
   .trail-more { display: inline; }
 }
 @media (max-width: 720px) {
-  .panel-bar { height: 56px; padding: 0 6px 0 12px; }
+  .panel-bar { padding: 0 6px 0 12px; }
+  .panel-bar-main { height: 56px; }
   .panel-bar .icon-btn { width: 44px; height: 44px; }
+  .peek-actions .btn { min-height: 40px; }
   .position { display: none; }
   .wide-only { display: none; }
   .nav { gap: 0; }

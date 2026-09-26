@@ -231,12 +231,13 @@ test('the UI audit lets a chip share its own link only in its slot', async ({ pa
   await page.addStyleTag({ content: '.project-item[data-project-id="p-hausv"] .row-live { right: auto !important; left: 0 !important; }' })
   const found = await overlaps()
   expect(found.length, JSON.stringify(found)).toBeGreaterThan(0)
-  // And on a card: over the time, not over the people it hides.
+  // Cards now give the chip its own footer outside the link. Moving it over
+  // the title must still be reported as an overlap.
   await page.getByRole('radio', { name: 'Cards view' }).click()
   await expect(card(page, 'p-hausv').locator('.live-chip')).toBeVisible()
   const cardOverlaps = async () => (await page.evaluate(domAudit)).filter(r => r.kind === 'interactive-overlap' && /live-chip|card-link/.test(`${r.selector} ${r.detail}`))
   expect(await cardOverlaps()).toEqual([])
-  await page.addStyleTag({ content: '.card[data-project-id="p-hausv"] .card-live { left: auto !important; right: 12px !important; max-width: none !important; }' })
+  await page.addStyleTag({ content: '.card[data-project-id="p-hausv"] .card-live { position: absolute !important; left: 18px !important; top: 42px !important; max-width: none !important; }' })
   expect((await cardOverlaps()).length).toBeGreaterThan(0)
 })
 
@@ -468,6 +469,9 @@ test.describe('screenshots', () => {
         const specimen = (state: string, label: string, extra = {}) => h('div', { style: 'display:grid;justify-items:center;gap:20px;font-size:12px' }, [h(Bot, { state, harness: 'codex', size: 48, ...extra }), label])
         createApp({ render: () => [specimen('working', 'Working'), specimen('waiting', 'Waiting for approval'), specimen('stale', 'No recent activity'), specimen('working', 'Real event', props)] }).mount(host)
       })
+      // Lazy artwork must be mounted before this new activity arrives; an
+      // initial counter deliberately never replays an event.
+      await expect(page.locator('#indicator-states .indicator')).toHaveCount(4)
       await indicatorProps(page, { eventPulse: 1 })
       await expect(page.locator('#indicator-states .glint')).toHaveCount(1)
       await page.evaluate(() => { for (const a of document.getAnimations()) { a.pause(); a.currentTime = 150 } })

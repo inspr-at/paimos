@@ -15,6 +15,7 @@ import { useJourneyData } from '../../lib/useJourneyData'
 import { usePlan } from '../../lib/usePlan'
 import { confirmAction } from '../../lib/confirm'
 import { toast } from '../../lib/toast'
+import { usePoller } from '../../lib/usePolledData'
 import { useAgents } from '../../stores/agents'
 import { StaleJourney, useJourney } from '../../stores/journey'
 import AppIcon from '../AppIcon.vue'
@@ -231,14 +232,14 @@ function keydown(event: KeyboardEvent) {
   else if (event.key === 'w' && data.walker.value.value?.tickets.length && ['plan', 'build', 'live'].includes(viewed.value)) { event.preventDefault(); walk() }
 }
 let clock: ReturnType<typeof setInterval> | undefined
-let poll: ReturnType<typeof setInterval> | undefined
+const poll = usePoller(refresh, 30_000, { enabled: () => !store.busy && !document.querySelector('dialog[open]') })
 onMounted(() => {
   window.addEventListener('keydown', keydown)
   clock = setInterval(() => { now.value = Date.now() }, 15_000)
   // The journey moves with agents and gates: refresh it while the page is visible.
-  poll = setInterval(() => { if (document.visibilityState === 'visible' && !store.busy && !document.querySelector('dialog[open]')) void refresh() }, 30_000)
+  poll.start()
 })
-onBeforeUnmount(() => { window.removeEventListener('keydown', keydown); clearInterval(clock); clearInterval(poll) })
+onBeforeUnmount(() => { window.removeEventListener('keydown', keydown); clearInterval(clock); poll.stop() })
 </script>
 
 <template>

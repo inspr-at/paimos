@@ -19,7 +19,7 @@ const props = withDefaults(defineProps<{
   matches?: Set<string>; searching?: boolean; fps?: GraphFPS; focusQuery?: string; canvasClass?: string
   openOnClick?: boolean; keyboardActive?: boolean; minStageHeight?: number
 }>(), { title: 'Graph', summary: '', selectedId: '', searching: false, fps: 60, focusQuery: 'focus', canvasClass: '', openOnClick: false, keyboardActive: true, minStageHeight: 480 })
-const emit = defineEmits<{ select: [node: GraphNode]; open: [node: GraphNode]; hover: [node: GraphNode | null]; clear: []; 'update:fps': [fps: GraphFPS]; pointer: [event: PointerEvent] }>()
+const emit = defineEmits<{ select: [node: GraphNode, via?: 'pointer' | 'key']; open: [node: GraphNode]; hover: [node: GraphNode | null]; clear: []; 'update:fps': [fps: GraphFPS]; pointer: [event: PointerEvent] }>()
 const route = useRoute(), router = useRouter()
 const root = ref<HTMLElement>(), host = ref<HTMLElement>(), stage = ref<HTMLElement>(), header = ref<HTMLElement>(), footer = ref<HTMLElement>()
 const media = window.matchMedia('(prefers-reduced-motion: reduce)'), scheme = window.matchMedia('(prefers-color-scheme: dark)')
@@ -77,7 +77,7 @@ async function start() {
   try {
     const next = await createGraphRenderer(host.value, dimension.value, {
       reduced: media.matches, signal: request.signal, fps: rate.value, labels: labels.value,
-      select: n => { select(n); if (props.openOnClick) emit('open', n) }, open: n => emit('open', n), clear: () => emit('clear'),
+      select: n => { select(n, 'pointer'); if (props.openOnClick) emit('open', n) }, open: n => emit('open', n), clear: () => emit('clear'),
       hover: n => { hovered.value = n?.id ?? ''; emit('hover', n); emphasis() }, motionState: value => { phase.value = value },
       labelsSettled: value => { if (request.signal.aborted || !mounted) return; labelsReady.value = value },
     })
@@ -89,7 +89,7 @@ async function start() {
     if (props.selectedId) renderer.focus(props.selectedId)
   } catch { if (!request.signal.aborted) error.value = 'The graph could not start. You can still explore every entry in the list.' }
 }
-function select(node: GraphNode) { renderer?.interact(); emit('select', node); renderer?.focus(node.id); host.value?.focus({ preventScroll: true }) }
+function select(node: GraphNode, via: 'pointer' | 'key' = 'key') { renderer?.interact(); emit('select', node, via); renderer?.focus(node.id); host.value?.focus({ preventScroll: true }) }
 function fit() { renderer?.interact(); renderer?.fit() }
 function setDimension(value: GraphDimension) { if (dimension.value !== value) { dimension.value = value; hovered.value = ''; emit('hover', null); void start() } }
 function toggleMotion() { paused.value = !paused.value; renderer?.motion(paused.value) }

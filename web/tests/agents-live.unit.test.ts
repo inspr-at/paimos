@@ -23,7 +23,7 @@ it('reads later pages so old leads and their workers are not silently dropped af
   expect(store.sessionsUpdatedAt).not.toBeNull()
 })
 
-it('a live hint during a slow fetch queues a fresh read without racing an older response', async () => {
+it('a live hint during a slow fetch does not stack another read', async () => {
   let complete!: (value: ReturnType<typeof page>) => void
   vi.mocked(listAllSessions).mockImplementationOnce(() => new Promise(resolve => { complete = resolve })).mockResolvedValueOnce(page(['lead', 'new-worker']))
   const store = useAgents()
@@ -32,7 +32,9 @@ it('a live hint during a slow fetch queues a fresh read without racing an older 
   expect(listAllSessions).toHaveBeenCalledTimes(1)
   complete(page(['lead']))
   await Promise.all([first, second])
-  expect(listAllSessions).toHaveBeenCalledTimes(2)
+  expect(listAllSessions).toHaveBeenCalledTimes(1)
+  expect(store.sessions.map(s => s.id)).toEqual(['lead'])
+  await store.refreshSessions()
   expect(store.sessions.map(s => s.id)).toEqual(['lead', 'new-worker'])
 })
 
@@ -46,7 +48,8 @@ it('a failed refresh preserves the last successful timestamp and recovers on the
   vi.setSystemTime(new Date('2026-09-26T12:01:00Z'))
   await store.refreshSessions()
   expect(store.sessionsUpdatedAt).toBe(previous)
-  expect(store.sessionsState).toBe('error')
+  expect(store.sessionsState).toBe('ready')
+  expect(store.sessionsStale).toBe(true)
   expect(store.sessions.map(s => s.id)).toEqual(['lead'])
   await store.refreshSessions()
   expect(store.sessionsUpdatedAt).toBeGreaterThan(previous!)
