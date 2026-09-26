@@ -61,7 +61,8 @@ function clear() {
 async function open(node: GraphNode) {
   if (!mounted) return
   if (node.kind === 'knowledge') {
-    await router.push({ path: entryPath(props.project.routeKey, node.type as KnowledgeType, node.slug), query: { ...route.query, entry: undefined, focus: undefined } })
+    const { entry: _entry, focus: _focus, mode: _mode, ...query } = route.query
+    await router.push({ path: entryPath(props.project.routeKey, node.type as KnowledgeType, node.slug), query })
     return
   }
   // A satellite can belong to another project. Resolve its project only when

@@ -11,6 +11,7 @@ import ProjectsView from './views/ProjectsView.vue'
 import SignInView from './views/SignInView.vue'
 import NotFoundView from './views/NotFoundView.vue'
 import { DOCK_MEDIA, isKnowledgeType, parseEntryParam } from './lib/knowledge'
+import { projectSection } from './components/work/projectNavigation'
 
 // Child records of the project page carry only the address; ProjectView renders
 // what they name, so they need a component that draws nothing.
@@ -26,17 +27,19 @@ export const router = createRouter({
     {
       path: '/p/:projectKey', component: () => import('./views/ProjectView.vue'), meta: { title: 'Project' },
       children: [
+        { path: 'tickets', component: RouteMarker, meta: { projectSection: 'tickets' } },
+        { path: 'journey', component: RouteMarker, meta: { title: 'Journey', projectSection: 'journey' } },
         // A docked entry (?entry=<type>/<slug>) on a screen too narrow to dock it opens the entry's own page.
-        { path: 'knowledge', component: RouteMarker, meta: { title: 'Knowledge' }, beforeEnter: to => {
+        { path: 'knowledge', component: RouteMarker, meta: { title: 'Knowledge', projectSection: 'knowledge' }, beforeEnter: to => {
           const entry = parseEntryParam(to.query.entry)
           // Narrow screens open a docked link as the entry's page; the graph shows its selection itself.
-          if (!entry || to.query.mode === 'graph' || window.matchMedia(DOCK_MEDIA).matches) return true
+          if (!entry || to.query.view === 'graph' || to.query.mode === 'graph' || window.matchMedia(DOCK_MEDIA).matches) return true
           const { entry: _entry, ...query } = to.query
           return { path: `/p/${encodeURIComponent(String(to.params.projectKey))}/knowledge/${entry.type}/${encodeURIComponent(entry.slug)}`, query, hash: to.hash, replace: true }
         } },
         // One kind: the tab filtered to it.
-        { path: 'knowledge/:knowledgeType', redirect: to => ({ path: `/p/${encodeURIComponent(String(to.params.projectKey))}/knowledge`, query: isKnowledgeType(to.params.knowledgeType) ? { type: to.params.knowledgeType } : {} }) },
-        { path: 'knowledge/:knowledgeType/:slug', component: RouteMarker, meta: { title: 'Knowledge' },
+        { path: 'knowledge/:knowledgeType', redirect: to => ({ path: `/p/${encodeURIComponent(String(to.params.projectKey))}/knowledge`, query: { ...to.query, ...(isKnowledgeType(to.params.knowledgeType) ? { type: to.params.knowledgeType } : {}) }, hash: to.hash, replace: true }) },
+        { path: 'knowledge/:knowledgeType/:slug', component: RouteMarker, meta: { title: 'Knowledge', projectSection: 'knowledge' },
           beforeEnter: to => isKnowledgeType(to.params.knowledgeType) ? true : { path: `/p/${encodeURIComponent(String(to.params.projectKey))}/knowledge`, replace: true } },
         { path: ':ticketKey?', component: RouteMarker },
       ],
@@ -45,7 +48,7 @@ export const router = createRouter({
     { path: '/knowledge', component: () => import('./views/KnowledgeView.vue'), meta: { title: 'Knowledge' } },
     // The earlier workspace tree and list are gone; the projects page replaces them.
     { path: '/workspace', redirect: '/' },
-    // The journey lives in the project page (?view=journey); earlier journey links lead there.
+    // Earlier journey links lead to the project's Journey section.
     {
       path: '/projects/:projectId/:rest(.*)*', component: NotFoundView, meta: { title: 'Journey' },
       beforeEnter: async to => {
@@ -54,7 +57,7 @@ export const router = createRouter({
         const project = projects.byId(String(to.params.projectId))
         const rest = Array.isArray(to.params.rest) ? to.params.rest : []
         const stage = rest[0] === 'journey' && rest[1] ? { stage: rest[1] } : {}
-        return project ? { path: `/p/${encodeURIComponent(project.routeKey)}`, query: { view: 'journey', ...stage }, replace: true } : true
+        return project ? { path: `/p/${encodeURIComponent(project.routeKey)}/journey`, query: { ...to.query, ...stage }, hash: to.hash, replace: true } : true
       },
     },
     // Business: Overview · Customers · Quotes · Hours · Rates.
@@ -111,6 +114,30 @@ function refreshSession() {
   return refreshing
 }
 router.beforeEach(async (to, from) => {
+  // Canonical section URLs replace bookmarks without adding a history step.
+  // Ticket addresses stay /p/KEY/TICKET; ?section= preserves a non-default background,
+  // including across reload, expand/collapse and links inside the side panel.
+  if (to.params.projectKey) {
+    const query = { ...to.query }
+    let section = projectSection(to)
+    let path = to.path
+    if (!to.meta.projectSection) {
+      if (query.view === 'journey' || query.view === 'knowledge') {
+        section = query.view
+        delete query.view
+      }
+      if (!to.params.ticketKey) {
+        path = `/p/${encodeURIComponent(String(to.params.projectKey))}/${section}`
+        delete query.section
+      } else if (section !== 'tickets') query.section = section
+      else delete query.section
+    }
+    if (section === 'knowledge' && query.mode !== undefined) {
+      if (query.view !== 'graph' && query.view !== 'entries' && query.mode === 'graph') query.view = 'graph'
+      delete query.mode
+    }
+    if (path !== to.path || JSON.stringify(query) !== JSON.stringify(to.query)) return { path, query, hash: to.hash, replace: true }
+  }
   if (to.meta.public) return true
   const session = useSession()
   // A 401 or sign-out is authoritative for this tab until an explicit sign-in.

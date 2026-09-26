@@ -1,8 +1,8 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { setPageTitle } from '../lib/brand'
-import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { isNavigationFailure, NavigationFailureType, onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from 'vue-router'
+import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, provide, reactive, ref, toRefs, watch } from 'vue'
+import { isNavigationFailure, NavigationFailureType, routeLocationKey, routerKey, type RouteLocationRaw, onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from 'vue-router'
 import { APIError, createNode, listNodes, type ListItem, type SavedView } from '../lib/api'
 import { can } from '../lib/authz'
 import { confirmAction } from '../lib/confirm'
@@ -25,6 +25,8 @@ import AppIcon from '../components/AppIcon.vue'
 import PanelSplitter from '../components/PanelSplitter.vue'
 import FilterSheet from '../components/work/FilterSheet.vue'
 import ListToolbar from '../components/work/ListToolbar.vue'
+import ProjectTabs from '../components/work/ProjectTabs.vue'
+import { PROJECT_SECTIONS, projectSection, ticketView, type ProjectSection, type TicketView } from '../components/work/projectNavigation'
 import StatusIcon from '../components/work/StatusIcon.vue'
 import StatusMenu from '../components/work/StatusMenu.vue'
 import TicketTable from '../components/work/TicketTable.vue'
@@ -63,8 +65,11 @@ const routeKey = computed(() => project.value?.routeKey ?? projectKey.value)
 const listPref = computed(() => projectId.value ? usePreference<ListPrefs>(`list:${projectId.value}`) : null)
 const listPrefs = computed(() => listPref.value?.value.value ?? null)
 // On the Knowledge tab the address's search and filters are the tab's own, not the ticket list's.
-const onKnowledge = () => route.matched.some(record => record.path.startsWith('/p/:projectKey/knowledge'))
-const filters = computed(() => filtersFromQuery(onKnowledge() ? {} : route.query))
+const section = computed(() => projectSection(route))
+const sectionPath = (value: ProjectSection = section.value) => `/p/${encodeURIComponent(routeKey.value)}/${value}`
+const ticketSectionQuery = (value: ProjectSection = section.value): Record<string, string> => value === 'tickets' ? {} : { section: value }
+const onKnowledge = () => section.value === 'knowledge'
+const filters = computed(() => filtersFromQuery(section.value !== 'tickets' ? {} : route.query))
 // A view (or a shared link) may carry its own column set; widths stay the person's.
 const tablePrefs = computed<ListPrefs | null>(() => {
   const cols = filters.value.cols
@@ -89,17 +94,34 @@ function saveWidths(widths: Partial<Record<ColumnId, number>>) { listPref.value?
 const { density, set: setDensity } = useDensity()
 const list = useTicketList(projectId, filters)
 const now = ref(Date.now())
-// List, Outline, Journey or Knowledge. The full page keeps whichever the ticket was opened from.
-type ViewMode = 'list' | 'outline' | 'journey' | 'knowledge'
-const modeOf = (view: unknown): ViewMode => view === 'outline' ? 'outline' : view === 'journey' ? 'journey' : 'list'
+// Sections own their views. The registry also supplies TG1's optional renderer.
+type ViewMode = TicketView | 'journey' | 'knowledge'
+const activeTicketView = computed(() => ticketView(route.query.view))
 // Knowledge has its own address: /p/KEY/knowledge, and /p/KEY/knowledge/<type>/<slug> for one entry.
 const knowledgeActive = computed(onKnowledge)
 const knowledgeType = computed(() => isKnowledgeType(route.params.knowledgeType) ? route.params.knowledgeType : null)
 const knowledgeSlug = computed(() => typeof route.params.slug === 'string' ? route.params.slug : '')
 const knowledgeEntryOpen = computed(() => knowledgeActive.value && !!knowledgeType.value && !!knowledgeSlug.value)
 const knowledgeFilters = computed(() => knowledgeFiltersFrom(route.query))
-// The display (?mode=graph) belongs to the list's place too: closing or leaving an entry returns to it.
-const knowledgeDisplay = computed((): Record<string, string> => route.query.mode === 'graph' ? { mode: 'graph' } : {})
+// Keep the chosen view when closing an entry or editing its filters.
+const knowledgeView = computed(() => route.query.view === 'graph' ? 'graph' : 'entries')
+const knowledgeDisplay = computed(() => ({ view: knowledgeView.value }))
+// KG2 owns the Knowledge implementation. Adapt its legacy route reads locally;
+// the actual address and all writes use ?view=entries|graph. Remove this bridge
+// when KnowledgeTab and its descendants consume the new query directly.
+provide(routeLocationKey, reactive({ ...toRefs(route), query: computed(() => knowledgeActive.value
+  ? { ...route.query, mode: knowledgeView.value === 'graph' ? 'graph' : null } : route.query) }))
+// Older child components open bare ticket links. Enrich their push only (never
+// browser Back/Forward or incoming bookmarks), preserving the current section.
+provide(routerKey, { ...router, push: (to: RouteLocationRaw) => {
+  const target = router.resolve(to)
+  const sameProject = target.params.projectKey === projectKey.value ||
+    projects.byRouteKey(String(target.params.projectKey))?.id === projectId.value
+  if (!target.params.ticketKey || !sameProject || target.query.section !== undefined || target.query.view !== undefined) return router.push(to)
+  const query: typeof route.query = { ...listQuery(), ...target.query, ...ticketSectionQuery() }
+  delete query.entry
+  return router.push({ ...(typeof to === 'string' ? { path: target.path, hash: target.hash } : to), query })
+} })
 const knowledgeListQuery = computed(() => ({ ...knowledgeDisplay.value, ...knowledgeQuery(knowledgeFilters.value) }))
 const knowledge = useKnowledge(projectId, knowledgeFilters, knowledgeActive)
 const knowledgeTab = ref<InstanceType<typeof KnowledgeTabType>>()
@@ -121,13 +143,11 @@ const shownEntry = computed<{ type: KnowledgeType; slug: string; mode: 'page' | 
 // The graph keeps its selection there instead, shown in its own card.
 watch([dockEntry, knowledgeWide], ([entry]) => {
   // The same width the route guard reads. The cached flag can lag a resize.
-  if (entry && !window.matchMedia(DOCK_MEDIA).matches && route.query.mode !== 'graph') void router.replace({ path: entryPath(routeKey.value, entry.type, entry.slug), query: knowledgeListQuery.value, hash: route.hash })
+  if (entry && !window.matchMedia(DOCK_MEDIA).matches && knowledgeView.value !== 'graph') void router.replace({ path: entryPath(routeKey.value, entry.type, entry.slug), query: knowledgeListQuery.value, hash: route.hash })
 }, { immediate: true })
-const fullViewQuery = computed(() => !!ticketKey.value && route.query.view === 'full')
-const lastListMode = ref<ViewMode>(modeOf(route.query.view))
-watch(() => route.query.view, view => { if (view !== 'full' && !knowledgeActive.value) lastListMode.value = modeOf(view) })
-const viewMode = computed<ViewMode>(() => knowledgeActive.value ? 'knowledge' : fullViewQuery.value ? lastListMode.value : modeOf(route.query.view))
-const journeyActive = computed(() => viewMode.value === 'journey')
+const fullViewQuery = computed(() => !!ticketKey.value && (route.query.panel === 'full' || route.query.view === 'full'))
+const viewMode = computed<ViewMode>(() => section.value === 'tickets' ? activeTicketView.value.id as TicketView : section.value)
+const journeyActive = computed(() => section.value === 'journey')
 // The journey's own place: the stage looked at, a chosen release and the walker's ticket.
 const JOURNEY_KEYS = ['stage', 'release', 'walk'] as const
 const queryText = (value: unknown) => typeof value === 'string' && value ? value : null
@@ -135,19 +155,19 @@ const journeyStage = computed(() => queryText(route.query.stage))
 const journeyRelease = computed(() => queryText(route.query.release))
 const journeyWalk = computed(() => queryText(route.query.walk))
 function journeyQuery(patch: Partial<Record<typeof JOURNEY_KEYS[number], string | null>> = {}) {
-  const query: Record<string, string> = { view: 'journey' }
+  const query: Record<string, string> = ticketKey.value ? { section: 'journey' } : {}
   for (const key of JOURNEY_KEYS) {
     const value = key in patch ? patch[key] : queryText(route.query[key])
     if (value) query[key] = value
   }
   return query
 }
-function journeyStageTo(stage: Stage) { void router.push({ path: `/p/${encodeURIComponent(routeKey.value)}`, query: journeyQuery({ stage, walk: null }) }) }
+function journeyStageTo(stage: Stage) { void router.push({ path: ticketKey.value ? route.path : sectionPath('journey'), query: journeyQuery({ stage, walk: null }) }) }
 function journeyReleaseTo(key: string | null) { void router.replace({ path: route.path, query: journeyQuery({ release: key }) }) }
 function journeyWalkTo(key: string | null, mode: 'open' | 'move' | 'close') {
   if (mode === 'open') { void router.push({ path: route.path, query: journeyQuery({ walk: key }) }); return }
   if (mode === 'move') { void router.replace({ path: route.path, query: journeyQuery({ walk: key }) }); return }
-  if (typeof window.history.state?.back === 'string' && window.history.state.back.includes('view=journey') && !window.history.state.back.includes('walk=')) router.back()
+  if (typeof window.history.state?.back === 'string' && /(?:\/journey|section=journey)/.test(window.history.state.back) && !window.history.state.back.includes('walk=')) router.back()
   else void router.replace({ path: route.path, query: journeyQuery({ walk: null }) })
 }
 const outlineActive = computed(() => viewMode.value === 'outline')
@@ -247,20 +267,41 @@ watch(() => filters.value.epic.length > 0 && !!projectId.value, on => { if (on) 
 
 // ---------- URL state ----------
 function modeQuery() {
-  return route.query.view === 'outline' || route.query.view === 'full' || route.query.view === 'journey' ? { view: route.query.view as string } : {}
+  return { view: route.query.view === 'full' && fullView.value ? 'full' : activeTicketView.value.id,
+    ...(ticketKey.value ? ticketSectionQuery() : {}), ...(route.query.panel === 'full' ? { panel: 'full' } : {}) }
 }
 function update(patch: Partial<ListFilters>) {
   void router.replace({ path: route.path, query: { ...filtersToQuery({ ...filters.value, ...patch }), ...modeQuery() } })
 }
-function setView(mode: ViewMode) {
-  if (mode === viewMode.value) return
-  creating.value = false
-  const { view: _view, stage: _stage, release: _release, walk: _walk, ...query } = route.query
-  if (mode === 'journey') { void router.push({ path: `/p/${encodeURIComponent(routeKey.value)}`, query: { view: 'journey' } }); return }
-  if (mode === 'knowledge') { void router.push({ path: `/p/${encodeURIComponent(routeKey.value)}/knowledge` }); return }
-  if (viewMode.value === 'knowledge') { void router.push({ path: `/p/${encodeURIComponent(routeKey.value)}`, query: mode === 'outline' ? { view: 'outline' } : {} }); return }
-  const path = viewMode.value === 'journey' ? `/p/${encodeURIComponent(routeKey.value)}` : route.path
-  void router.replace({ path, query: mode === 'outline' ? { ...query, view: 'outline' } : query })
+// Remember each section's filters and view while moving around this project.
+watch(section, () => { creating.value = false; openedFromList = false })
+const sectionQueries: Partial<Record<ProjectSection, typeof route.query>> = {}
+watch(projectKey, () => { for (const key of Object.keys(sectionQueries)) delete sectionQueries[key as ProjectSection] })
+function setSection(id: string) {
+  const target = PROJECT_SECTIONS.find(item => item.id === id)?.id
+  if (!target || target === section.value) return
+  const { section: _section, panel: _panel, entry: _entry, ...query } = route.query
+  sectionQueries[section.value] = query
+  const saved = sectionQueries[target] ?? {}
+  void router.push({ path: ticketKey.value ? ticketPath(ticketKey.value) : sectionPath(target),
+    query: { ...saved, ...(ticketKey.value ? ticketSectionQuery(target) : {}) } })
+}
+let viewIntent = 0
+async function setView(view: string) {
+  const intent = ++viewIntent, within = projectKey.value, sectionAtClick = section.value
+  // Filter writes can overlap the session guard. Retry a cancelled navigation
+  // against the settled query, retaining both the new filter and latest view.
+  while (intent === viewIntent && within === projectKey.value && sectionAtClick === section.value) {
+    const query: typeof route.query = { ...route.query, view }
+    // Entries cannot dock on a phone; a graph selection should not open a page.
+    if (knowledgeActive.value && view === 'entries' && !window.matchMedia(DOCK_MEDIA).matches) delete query.entry
+    const settled = settledNavigation(router)
+    let failure
+    try { failure = await router.replace({ path: route.path, query }) }
+    catch (error) { settled.stop(); throw error }
+    if (isNavigationFailure(failure, NavigationFailureType.cancelled)) await settled.promise
+    else { settled.stop(); return }
+  }
 }
 function toggleValue(dimension: Dimension, value: string) {
   const next = toggleIn(filters.value[dimension], value)
@@ -302,13 +343,13 @@ function viewQuery(view: SavedView | null): Record<string, string> {
 function hrefFor(id: string | null) {
   const view = id ? views.value.items.find(item => item.id === id) ?? null : null
   const query = new URLSearchParams({ ...viewQuery(view), ...(outlineActive.value ? { view: 'outline' } : {}) }).toString()
-  return `/p/${encodeURIComponent(routeKey.value)}${query ? `?${query}` : ''}`
+  return `${sectionPath('tickets')}${query ? `?${query}` : ''}`
 }
 function openView(id: string | null, replace = false) {
   const view = id ? views.value.items.find(item => item.id === id) ?? null : null
   collapsed.value = new Set()
   const query = { ...viewQuery(view), ...(outlineActive.value ? { view: 'outline' } : {}) }
-  const location = { path: `/p/${encodeURIComponent(routeKey.value)}`, query }
+  const location = { path: sectionPath('tickets'), query }
   if (replace) void router.replace(location); else void router.push(location)
 }
 // A link to a view someone cannot see (private, or deleted) keeps its filters.
@@ -322,9 +363,9 @@ let resolvedFor = ''
 watch(projectId, async id => {
   if (!id || resolvedFor === id) return
   resolvedFor = id
-  const plain = () => Object.keys(route.query).every(key => key === 'view') && (route.query.view === undefined || route.query.view === 'outline')
+  const plain = () => section.value === 'tickets' && Object.keys(route.query).every(key => key === 'view') && (route.query.view === undefined || route.query.view === 'list' || route.query.view === 'outline')
   // Knowledge has no ticket views: its address stays as it is.
-  if (!plain() || ticketKey.value || knowledgeActive.value) { entryResolved.value = true; void loadViews(id); return }
+  if (!plain() || ticketKey.value || section.value !== 'tickets') { entryResolved.value = true; void loadViews(id); return }
   entryResolved.value = false
   const pref = usePreference<ListPrefs>(`list:${id}`)
   await Promise.race([Promise.all([loadViews(id), pref.ready]), new Promise(resolve => setTimeout(resolve, 1500))])
@@ -421,17 +462,17 @@ function ticketPath(key: string) { return `/p/${encodeURIComponent(routeKey.valu
 // List navigation (open from the list, j/k, next/previous) replaces the open ticket
 // and clears the back trail; following a link inside the panel pushes a step.
 function openKey(key: string) {
-  const location = { path: ticketPath(key), query: route.query, state: { trail: [] } }
+  const location = { path: ticketPath(key), query: { ...route.query, ...ticketSectionQuery() }, state: { trail: [] } }
   if (ticketKey.value) { void router.replace(location); return }
   openedFromList = true
-  openedQuery = JSON.stringify(route.query)
+  openedQuery = JSON.stringify(location.query)
   void router.push(location)
 }
 function openRow(row: ListItem) { cursorId.value = row.id; openKey(row.key) }
 function listQuery() {
-  const { view, ...query } = route.query
-  if (view === 'journey' || (view === 'full' && lastListMode.value === 'journey')) return journeyQuery()
-  return view === 'outline' || (view === 'full' && lastListMode.value === 'outline') ? { ...query, view: 'outline' } : query
+  const { panel: _panel, section: _section, ...query } = route.query
+  if (ticketKey.value && query.view === 'full') delete query.view
+  return query
 }
 function closePanel() {
   if (!ticketKey.value) return
@@ -439,7 +480,7 @@ function closePanel() {
   openedFromList = false
   // Back past every followed link to the list entry the panel was opened from.
   if (back) router.go(-(trail.value.length + 1))
-  else void router.replace({ path: `/p/${encodeURIComponent(routeKey.value)}`, query: listQuery() })
+  else void router.replace({ path: sectionPath(), query: listQuery() })
   void nextTick(() => table.value?.focusGrid())
 }
 let expandedFromPanel = false
@@ -447,7 +488,10 @@ let listScroll = 0
 function expand() {
   if (!ticketKey.value || fullView.value) return
   expandedFromPanel = true
-  void router.push({ path: route.path, query: { ...route.query, view: 'full' } })
+  const query = section.value === 'tickets' && route.query.view === undefined
+    ? { ...route.query, view: 'full' }
+    : { ...route.query, panel: 'full' }
+  void router.push({ path: route.path, query })
 }
 // The full page starts at its top; going back returns to the same place in the list.
 watch(fullView, async (full, was) => {
@@ -459,7 +503,7 @@ watch(fullView, async (full, was) => {
 function collapse() {
   if (!fullView.value) return
   if (expandedFromPanel && typeof window.history.state?.back === 'string') router.back()
-  else void router.replace({ path: route.path, query: listQuery() })
+  else void router.replace({ path: route.path, query: { ...listQuery(), ...ticketSectionQuery() } })
   expandedFromPanel = false
 }
 // ---------- Back trail: links followed inside the panel ----------
@@ -471,7 +515,7 @@ function readTrail() {
 watch(() => route.fullPath, readTrail, { immediate: true })
 function follow(path: string) {
   const current = panelItem.value?.key ?? ticketKey.value.toUpperCase()
-  void router.push({ path, query: route.query, state: { trail: [...trail.value, current] } })
+  void router.push({ path, query: { ...route.query, ...ticketSectionQuery() }, state: { trail: [...trail.value, current] } })
 }
 function trailBack(steps = 1) { if (trail.value.length) router.go(-Math.min(steps, trail.value.length)) }
 // Related tickets can live in another project: open them where they belong.
@@ -496,7 +540,9 @@ function copyKey(key: string) {
 }
 function newTab(key: string) {
   const project = projects.projects.find(p => key.startsWith(`${p.routeKey}-`))
-  window.open(project ? `/p/${encodeURIComponent(project.routeKey)}/${encodeURIComponent(key)}` : ticketPath(key), '_blank', 'noopener')
+  const path = project ? `/p/${encodeURIComponent(project.routeKey)}/${encodeURIComponent(key)}` : ticketPath(key)
+  const query = !project || project.id === projectId.value ? { ...listQuery(), ...ticketSectionQuery() } : {}
+  window.open(router.resolve({ path, query }).href, '_blank', 'noopener')
 }
 function openStatus(row: ListItem, anchor: HTMLElement, from: 'list' | 'panel') {
   statusMenu.value = statusMenu.value?.row.id === row.id && statusMenu.value.from === from ? null : { row, anchor, from }
@@ -574,7 +620,7 @@ function removed(item: ListItem) {
   list.removeRow(item.id)
   void projects.load(true)
   skipGuard = true
-  void router.replace({ path: `/p/${encodeURIComponent(routeKey.value)}`, query: listQuery() }).finally(() => { skipGuard = false })
+  void router.replace({ path: sectionPath(), query: listQuery() }).finally(() => { skipGuard = false })
 }
 
 // Commands from the palette: New ticket in this project.
@@ -605,10 +651,10 @@ function updateKnowledge(patch: Partial<KnowledgeFilters>) {
   knowledgeWrite = knowledgeWrite.catch(() => undefined).then(async () => {
     const go = () => {
       const entry = typeof route.query.entry === 'string' ? { entry: route.query.entry } : {}
-      return router.replace({ path: route.path, query: { ...knowledgeDisplay.value, ...knowledgeQuery({ ...knowledgeFilters.value, ...patch }), ...entry } })
+      return router.replace({ path: route.path, query: { ...knowledgeDisplay.value, ...knowledgeQuery({ ...knowledgeFilters.value, ...patch }), ...entry, ...(ticketKey.value ? { section: 'knowledge' } : {}) } })
     }
     let retriedAbort = false
-    while (route.path.endsWith('/knowledge')) {
+    while (knowledgeActive.value && !knowledgeEntryOpen.value) {
       const settled = settledNavigation(router)
       let failure
       try { failure = await go() } catch (error) { settled.stop(); throw error }
@@ -907,6 +953,9 @@ function shownIn(location: { params: Record<string, unknown>; query: Record<stri
   return typeof location.query.entry === 'string' ? location.query.entry : ''
 }
 onBeforeRouteUpdate(async (to, from) => {
+  if (projectSection(to) !== projectSection(from) && table.value?.createDirty()) {
+    if (!await confirmAction({ title: 'Discard the new ticket?', body: 'Its title has not been created yet.', confirmLabel: 'Discard', danger: true })) return false
+  }
   if (to.params.ticketKey !== from.params.ticketKey || to.params.projectKey !== from.params.projectKey) return confirmDiscard()
   if (shownIn(from) && shownIn(to) !== shownIn(from)) return confirmDiscard()
 })
@@ -963,7 +1012,7 @@ function extendSelection(step: number) {
 function keydown(event: KeyboardEvent) {
   if (event.altKey && event.key === 'ArrowLeft' && ticketKey.value && trail.value.length && !typing(event.target as HTMLElement | null)) { event.preventDefault(); trailBack(); return }
   // The Knowledge tab and its entries have their own keys.
-  if (knowledgeActive.value) return
+  if (knowledgeActive.value && !ticketKey.value) return
   // Command or Control A in the list selects every loaded row.
   if ((event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'a' && selectable.value && !event.defaultPrevented
     && !typing(event.target) && !document.querySelector('dialog[open], .floating') && !panel.value?.el?.contains(document.activeElement)) {
@@ -979,7 +1028,7 @@ function keydown(event: KeyboardEvent) {
   }
   // The journey has its own keys; with a ticket open, the panel's keys still work.
   if (journeyActive.value && !ticketKey.value) return
-  if (journeyActive.value && ['j', 'k', 'ArrowDown', 'ArrowUp', 'Enter', 'o', '/', 'n'].includes(event.key)) return
+  if ((journeyActive.value || knowledgeActive.value) && ['j', 'k', 'ArrowDown', 'ArrowUp', 'Enter', 'o', '/', 'n'].includes(event.key)) return
   const row = sequence.value.find(item => item.id === cursorId.value)
   if (event.key === 'F') { event.preventDefault(); toolbar.value?.openFilterMenu(); return }
   if (selectable.value && !panel.value?.el?.contains(document.activeElement)) {
@@ -1100,7 +1149,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
             <span v-else-if="project.archived" class="chip state-chip">Archived</span>
           </div>
           <p class="description" :data-tip="project.description.length > 120 ? project.description : undefined">{{ project.description || 'No description yet.' }}</p>
-          <div :class="{ 'journey-chip-slot': journeyActive }"><JourneyChip :project-id="project.id" :active="journeyActive" @go="journeyActive ? journeyStageTo(journeyStage as Stage ?? 'inspire') : setView('journey')" /></div>
+          <div :class="{ 'journey-chip-slot': journeyActive }"><JourneyChip :project-id="project.id" :active="journeyActive" @go="journeyActive ? journeyStageTo(journeyStage as Stage ?? 'inspire') : setSection('journey')" /></div>
         </div>
         <div v-if="counts" class="head-stats" :aria-label="`${counts.open} open, ${counts.progress} in progress, ${counts.done} done of ${counts.total}`">
           <div class="stat-line">
@@ -1118,6 +1167,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
           <span class="skeleton stat-placeholder" /><span class="skeleton progress-placeholder" /><span class="skeleton activity-placeholder" />
         </div>
         </div>
+        <ProjectTabs :items="PROJECT_SECTIONS" :selected="section" label="Project sections" sections @select="setSection" />
       </header>
 
       <ViewBar
@@ -1126,14 +1176,14 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
         @rename="startRename" @duplicate="duplicate" @set-default="setDefaultView" @share="share" @copy-link="copyViewLink" @remove="remove"
       />
       <div ref="stickMark" class="stick-mark" aria-hidden="true" />
-      <div ref="toolbarWrap" class="toolbar-wrap" :class="{ stuck }">
+      <div v-if="!journeyActive" ref="toolbarWrap" class="toolbar-wrap" :class="{ stuck }">
         <ListToolbar
           ref="toolbar" :filters="filters" :options="options" :label="chipLabel" :total="total" :loading="list.loading.value" :density="density" :stuck="stuck"
           :facet-loading="facetLoading"
           @search="q => update({ q })" @toggle="toggleValue" @exclude="excludeValue" @clear="dimension => update({ [dimension]: [] })" @clear-all="clearFilters"
           @show-closed="value => update({ showClosed: value })" @group="setGroup" @sort="setSort" @density="setDensity" @date="setDate"
           @open-sheet="filterSheet?.open()" @need-options="needOptions" @create="startCreate()"
-          :view="viewMode" @view="setView" @expand-all="outline.expandAll()" @collapse-all="outline.collapseAll()"
+          :view="viewMode" :knowledge-view="knowledgeView" @view="setView" @expand-all="outline.expandAll()" @collapse-all="outline.collapseAll()"
           @expand-groups="setAllGroups(true)" @collapse-groups="setAllGroups(false)"
           :columns="toolbarColumns" @columns="saveColumns" @columns-reset="resetColumns"
         />
@@ -1146,8 +1196,10 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
       />
       <KnowledgeTab
         v-else-if="knowledgeActive" ref="knowledgeTab" :project="{ id: project.id, routeKey: project.routeKey, title: project.title }" :state="knowledge"
-        :filters="knowledgeFilters" :can-write="knowledgeWritable" :now="now" :paused="knowledgeEntryOpen" :dock="knowledgeWide" :open-entry="shownEntry?.mode === 'dock' ? shownEntry : null" @update="updateKnowledge"
+        :filters="knowledgeFilters" :can-write="knowledgeWritable" :now="now" :paused="knowledgeEntryOpen || !!ticketKey" :dock="knowledgeWide" :open-entry="shownEntry?.mode === 'dock' ? shownEntry : null" @update="updateKnowledge"
       />
+      <component :is="activeTicketView.component" v-else-if="activeTicketView.component"
+        :project="project" :filters="filters" @open="openKey" />
       <TicketTable
         v-else ref="table" :expected-rows="expectedRows" :groups="groups" :group="filters.group" :rows-by-id="rowsById" :cursor-id="cursorId" :open-id="panelItem?.id ?? null"
         :query="filters.q" :sort="filters.sort" :density="density"
@@ -1194,7 +1246,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
       />
       <StatusMenu v-if="statusMenu" :anchor="statusMenu.anchor" :current="statusMenu.row.state" :known-states="knownStates" :ticket-key="statusMenu.row.key" @choose="chooseStatus" @close="closeStatus" />
       <FilterSheet
-        ref="filterSheet" :filters="filters" :options="options" :total="total" :view="viewMode === 'journey' || viewMode === 'knowledge' ? 'list' : viewMode" :can-save="canSaveView"
+        ref="filterSheet" :filters="filters" :options="options" :total="total" :view="outlineActive ? 'outline' : 'list'" :can-save="canSaveView"
         @expand-all="outline.expandAll()" @collapse-all="outline.collapseAll()"
         @toggle="toggleValue" @exclude="excludeValue" @clear-all="clearFilters" @show-closed="value => update({ showClosed: value })" @group="setGroup" @date="setDate"
         @opened="sheetOpened" @save-view="anchor => startSave(viewBar?.$el ?? anchor)"

@@ -100,7 +100,7 @@ test('j, k and Enter open a project from the keyboard', async ({ page }) => {
   await page.keyboard.press('k')
   await expect(page.getByRole('link', { name: /^PHAROS/ })).toBeFocused()
   await page.keyboard.press('Enter')
-  await expect(page).toHaveURL('/p/PHAROS')
+  await expect(page).toHaveURL('/p/PHAROS/tickets')
   await expect(page.getByRole('heading', { name: 'Pharos', level: 1 })).toBeVisible()
   // The breadcrumb continues from the Projects place.
   await expect(page.getByRole('navigation', { name: 'Places' }).getByRole('link', { name: 'Projects' })).toHaveAttribute('aria-current', 'true')

@@ -13,6 +13,12 @@ just web-check    # web typecheck and build
 just dev          # run the server (API on :8080); `cd web && npm run dev` for the UI
 ```
 
+Project sections have their own URLs: `/p/KEY/tickets`, `/p/KEY/journey`, and
+`/p/KEY/knowledge`. A ticket uses `/p/KEY/TICKET`; `?section=journey` or
+`?section=knowledge` retains its background section. Tickets is the default,
+so its ticket links need no section query. Existing `?view=full` ticket links
+still open the full-page ticket at the same address.
+
 ## Command line
 
 `paimos` is the agent command line. `paimos serve` still runs the server. Existing doctrine commands keep their shape.

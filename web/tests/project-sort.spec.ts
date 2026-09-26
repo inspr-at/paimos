@@ -236,7 +236,7 @@ test('a cancelled pointer ends the drag and the next card click still opens its 
   await expect(display(page)).toHaveAttribute('data-sort', 'activity')
   await expect(names(page)).toHaveText(['Pharos', 'Aeon', 'Studio infrastructure'])
   await card(page, 'p-aeon').locator('.card-link').click()
-  await expect(page).toHaveURL('/p/AEON')
+  await expect(page).toHaveURL('/p/AEON/tickets')
 })
 
 test('a blur before the drag starts forgets the press, so the next drag works', async ({ page }) => {

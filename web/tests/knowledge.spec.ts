@@ -27,7 +27,7 @@ test('the Knowledge tab groups by kind, filters, searches the text and moves wit
   await page.setViewportSize({ width: 1100, height: 800 })
   const errors = watchErrors(page)
   const { calls } = await open(page, '/p/PHAROS')
-  await page.getByRole('radio', { name: 'Knowledge' }).click()
+  await page.getByRole('tablist', { name: 'Project sections' }).getByRole('tab', { name: 'Knowledge' }).click()
   await expect(page).toHaveURL('/p/PHAROS/knowledge')
   await expect(groupTitles(page)).toHaveText(['Runbooks', 'Guidelines', 'Memory', 'External systems', 'Related projects'])
   // Archived entries wait until someone asks for them.
@@ -39,6 +39,7 @@ test('the Knowledge tab groups by kind, filters, searches the text and moves wit
   await expect(page.getByRole('navigation', { name: 'Breadcrumb' })).toContainText('Knowledge')
 
   // j and k move through every group, Enter opens, Esc comes back to the same row.
+  await page.getByRole('heading', { name: 'Pharos' }).click()
   await page.keyboard.press('j')
   await expect(rows(page).first()).toHaveClass(/cursor/)
   await expect(rows(page).first()).toBeFocused()
@@ -56,7 +57,7 @@ test('the Knowledge tab groups by kind, filters, searches the text and moves wit
   const search = page.getByRole('searchbox', { name: 'Search knowledge in Pharos' })
   await expect(search).toBeFocused()
   await search.fill('previous tag')
-  await expect(page).toHaveURL('/p/PHAROS/knowledge?q=previous+tag')
+  await expect(page).toHaveURL('/p/PHAROS/knowledge?view=entries&q=previous+tag')
   await expect(rows(page)).toHaveCount(1)
   await expect(rows(page).first().locator('mark').first()).toBeVisible()
   expect(calls.some(call => call.query.get('q') === 'previous tag' && call.query.get('project_id') === 'p-pharos')).toBe(true)
@@ -68,12 +69,12 @@ test('the Knowledge tab groups by kind, filters, searches the text and moves wit
   // Status and kind live in the address.
   await page.getByRole('button', { name: 'Status: Current' }).click()
   await page.getByRole('radio', { name: /Archived/ }).click()
-  await expect(page).toHaveURL('/p/PHAROS/knowledge?status=archived')
+  await expect(page).toHaveURL('/p/PHAROS/knowledge?view=entries&status=archived')
   await expect(rows(page)).toHaveText([/Recover a host from backup/])
   await page.getByRole('button', { name: 'Status: Archived' }).click()
   await page.getByRole('radio', { name: /All/ }).click()
   await rail.getByRole('button', { name: /Memory/ }).click()
-  await expect(page).toHaveURL('/p/PHAROS/knowledge?type=memory&status=all')
+  await expect(page).toHaveURL('/p/PHAROS/knowledge?view=entries&type=memory&status=all')
   await expect(groupTitles(page)).toHaveText(['Memory'])
   await page.getByRole('button', { name: 'Sort: Recently updated' }).click()
   await page.getByRole('radio', { name: 'Title' }).click()
@@ -115,7 +116,7 @@ test('an entry reads with a table of contents, anchors, how agents read it and w
   await page.keyboard.press('k')
   await expect(page).toHaveURL('/p/PHAROS/knowledge/runbook/deploy-release')
   await linked.getByRole('link', { name: /PHAROS-11/ }).click()
-  await expect(page).toHaveURL('/p/PHAROS/PHAROS-11')
+  await expect(page).toHaveURL('/p/PHAROS/PHAROS-11?section=knowledge')
   expect(errors).toEqual([])
 })
 
@@ -269,7 +270,7 @@ test('deleting an entry asks, leaves and can be undone', async ({ page }) => {
   await page.getByRole('button', { name: 'More actions' }).click()
   await page.getByRole('menuitem', { name: /Delete guideline/ }).click()
   await page.getByRole('button', { name: 'Delete guideline' }).click()
-  await expect(page).toHaveURL('/p/PHAROS/knowledge')
+  await expect(page).toHaveURL('/p/PHAROS/knowledge?view=entries')
   await expect(page.getByText('Write for people, not for the log')).toHaveCount(0)
   await page.getByRole('button', { name: 'Undo' }).click()
   await expect(rows(page).filter({ hasText: 'Write for people, not for the log' })).toBeVisible()
