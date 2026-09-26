@@ -11,7 +11,7 @@ import { createGraphRenderer, type GraphData, type GraphDimension, type GraphFPS
 // fps defaults to 60; updates emit update:fps. focusQuery defaults to ?focus=1.
 // Ticket views opt into single-click opening, suspend canvas keys behind their
 // panel, and may lower minStageHeight. Knowledge keeps all existing defaults.
-// glimpse is a decorative crop: no chrome, labels, keyboard or pointer capture.
+// glimpse is a fitted decoration: no chrome, labels, keyboard or pointer capture.
 // The host page supplies the mask, the hit target and when to pause or dispose.
 // Like QuoteWorkspace, one mounted workspace serves normal/full-area layouts;
 // rarely used settings stay collapsed and all canvas/camera state survives.

@@ -1313,6 +1313,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
 .head-flex { display: flex; align-items: flex-end; justify-content: space-between; gap: 32px; }
 .head-flex.with-glimpse { display: grid; grid-template-columns: minmax(0, max-content) minmax(180px, 1fr) auto; align-items: stretch; column-gap: 28px; }
 .head-flex.with-glimpse .head-main, .head-flex.with-glimpse .head-stats { align-self: end; }
+.head-flex.with-glimpse .head-main { padding-top: 24px; }
 .head-main { min-width: 0; flex: 1; position: relative; z-index: 1; }
 .head-stats { position: relative; z-index: 1; }
 .journey-chip-slot { min-height: 40px; }
@@ -1367,6 +1368,10 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
 .sk-a { width: 320px; height: 26px; border-radius: 8px; } .sk-b { width: 520px; } .sk-c { width: 100%; height: 44px; border-radius: 12px; margin-top: 18px; }
 @media (max-width: 1080px) { .progress-line { width: 200px; } .stat-line { gap: 12px; } }
 @container projecthead (max-width: 760px) {
+  .head-flex.with-glimpse { display: flex; }
+  .head-flex.with-glimpse .head-main, .head-flex.with-glimpse .head-stats { align-self: stretch; }
+  .head-flex.with-glimpse .head-main { padding-top: 0; }
+  .head-flex.with-glimpse :deep(.glimpse-col) { display: none; }
   .head-flex { flex-direction: column; align-items: stretch; gap: 12px; }
   .head-stats { justify-items: start; }
   .head-stats-skeleton { width: 100%; min-height: 103px; }

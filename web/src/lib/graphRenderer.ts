@@ -18,7 +18,7 @@ export interface GraphLink {
   color?: `--${string}`; width?: number; curvature?: number
 }
 export interface GraphData { nodes: readonly GraphNode[]; links: readonly GraphLink[] }
-export interface LayoutNode extends GraphNode { degree: number; x?: number; y?: number; z?: number; vx?: number; vy?: number; vz?: number }
+export interface LayoutNode extends GraphNode { degree: number; x?: number; y?: number; z?: number; vx?: number; vy?: number; vz?: number; fx?: number; fy?: number; fz?: number }
 export interface LayoutEdge extends Omit<GraphLink, 'source' | 'target'> { source: string | LayoutNode; target: string | LayoutNode }
 export interface GraphEmphasis { selected: string; neighbours: Set<string>; matches: Set<string>; searching: boolean; hovered: string }
 export interface GraphRenderer {
@@ -37,8 +37,8 @@ export interface GraphRenderer {
 }
 export interface GraphRendererOptions {
   reduced: boolean; signal: AbortSignal; fps?: GraphFPS; labels?: GraphLabels
-  // Decorative crop: no labels, no pointer handling, a slower orbit and a
-  // transparent clear so a page can lay the graph under its own text.
+  // Fitted decoration: no labels or pointer handling, a slower orbit and a
+  // transparent clear. The host reserves a region clear of its text.
   glimpse?: boolean
   select(node: GraphNode): void; open(node: GraphNode): void; hover(node: GraphNode | null): void; clear(): void
   motionState?(phase: MotionPhase): void
@@ -47,6 +47,11 @@ type Graph3D = ForceGraph3DInstance<LayoutNode, LayoutEdge>
 type Graph2D = ForceGraph2D<LayoutNode, LayoutEdge>
 export const endpointID = (endpoint: string | LayoutNode) => typeof endpoint === 'string' ? endpoint : endpoint.id
 export const graphRadius = (node: GraphNode) => 8 * Math.sqrt(Math.max(0, Number.isFinite(node.weight) ? node.weight : 0) + 1)
+export const glimpseRadius = (node: GraphNode) => Math.min(5, Math.max(2, graphRadius(node) * .18))
+// A link is drawn only when both complete orbs fit inside the padded view.
+export function glimpsePointInside(x: number, y: number, radius: number, width: number, height: number): boolean {
+  return Number.isFinite(x) && Number.isFinite(y) && x - radius >= 8 && y - radius >= 8 && x + radius <= width - 8 && y + radius <= height - 8
+}
 export function graphLayout(data: GraphData): { nodes: LayoutNode[]; links: LayoutEdge[] } {
   const degrees = new Map<string, number>()
   for (const link of data.links) for (const id of [link.source, link.target]) degrees.set(id, (degrees.get(id) ?? 0) + 1)
@@ -87,15 +92,17 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
   let lastPhase: MotionPhase | undefined
   let settleTimer: ReturnType<typeof setTimeout> | undefined, pickTimer: ReturnType<typeof setTimeout> | undefined
   let cameraTaken = false, fitOnSettle = true
+  let glimpseLaidOut = false
   let pointerNode: LayoutNode | null = null, openedAt = -Infinity
   let lastPick: { node: LayoutNode; x: number; y: number; at: number } | null = null
-  const duration = () => options.reduced || paused ? 0 : 650
+  const duration = () => glimpse || options.reduced || paused ? 0 : 650
   const active = (n: LayoutNode) => (!emphasis.selected || emphasis.neighbours.has(n.id)) && (!emphasis.searching || emphasis.matches.has(n.id))
   const alpha = (n: LayoutNode) => active(n) ? 1 : .14
   const color = (n: LayoutNode) => palette.colors[n.color] ?? palette.muted
   const touches = (l: LayoutEdge) => !!emphasis.selected && [endpointID(l.source), endpointID(l.target)].includes(emphasis.selected)
   const particles = (l: LayoutEdge) => !paused && l.directed && touches(l) ? 1 : 0
   const linkColor = (l: LayoutEdge) => {
+    if (glimpse) return /^#[\da-f]{6}$/i.test(palette.muted) ? palette.muted + '38' : palette.muted
     const color = l.color ? palette.colors[l.color] ?? palette.muted : palette.muted
     return /^#[\da-f]{6}$/i.test(color) ? color + (touches(l) ? 'aa' : emphasis.selected || emphasis.searching ? '18' : l.color ? '80' : palette.dark ? '48' : '40') : color
   }
@@ -120,6 +127,24 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
   }
   function sceneColor() { return glimpse ? 'rgba(0,0,0,0)' : palette.background }
   function clearGlimpse() { if (glimpse) g3?.renderer().setClearAlpha(0) }
+  function glimpseLinkVisible(link: LayoutEdge) {
+    if (!glimpse) return true
+    if (!glimpseLaidOut) return false
+    return [link.source, link.target].every(n => {
+      if (typeof n === 'string') return false
+      const p = g3 ? g3.graph2ScreenCoords(n.x ?? 0, n.y ?? 0, n.z ?? 0) : g2!.graph2ScreenCoords(n.x ?? 0, n.y ?? 0)
+      return glimpsePointInside(p.x, p.y, glimpseRadius(n), graph.width(), graph.height())
+    })
+  }
+  function sizeGlimpseOrbs() {
+    if (!glimpse || !g3 || !three || !glimpseLaidOut) return
+    const camera = g3.camera() as PerspectiveCamera
+    const projection = g3.height() / (2 * Math.tan(camera.fov * Math.PI / 360))
+    for (const n of nodes) {
+      const depth = -new three.Vector3(n.x ?? 0, n.y ?? 0, n.z ?? 0).applyMatrix4(camera.matrixWorldInverse).z
+      objects.get(n.id)?.scale.setScalar(glimpseRadius(n) * depth / (projection * graphRadius(n)))
+    }
+  }
   function placeLabels() {
     if (glimpse) return
     const graph = g3 ?? g2
@@ -180,7 +205,7 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
     }
   }
   function draw2D(n: LayoutNode, ctx: CanvasRenderingContext2D, scale: number, picking?: string) {
-    const x = n.x ?? 0, y = n.y ?? 0, r = graphRadius(n)
+    const x = n.x ?? 0, y = n.y ?? 0, r = glimpse ? glimpseRadius(n) / scale : graphRadius(n)
     ctx.globalAlpha = picking ? 1 : alpha(n)
     ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2)
     if (picking) { ctx.fillStyle = picking; ctx.fill(); return }
@@ -226,6 +251,12 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
     try {
       g3 = new modules[0].default(host, { controlType: 'orbit', rendererConfig: { antialias: true, alpha: true, powerPreference: 'low-power' } }) as unknown as Graph3D
       g3.renderer().setPixelRatio(Math.min(window.devicePixelRatio, 1.5))
+      if (glimpse) {
+        // A long lens keeps the shallow cloud spacious without perspective
+        // enlarging the foreground orbs as it slowly turns.
+        const camera = g3.camera() as PerspectiveCamera
+        camera.fov = 8; camera.updateProjectionMatrix()
+      }
       geometry = new three.SphereGeometry(1, 20, 14)
       const key = new three.DirectionalLight('#fff5e9', 2.4); key.position.set(-180, 240, 320)
       const rim = new three.DirectionalLight('#c6e9ff', 2); rim.position.set(180, 40, -120)
@@ -236,7 +267,7 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
         const shell = new three!.Mesh(geometry, material(n, true)); shell.scale.setScalar(radius)
         group.add(core, shell); objects.set(n.id, group)
         return group
-      }).linkOpacity(1).linkWidth(l => l.width ?? .55)
+      }).linkOpacity(1).linkWidth(l => glimpse ? 0 : l.width ?? .55)
       const controls = g3.controls() as OrbitControls
       controls.autoRotateSpeed = orbitScale // 1 is one revolution per 60 seconds, using elapsed time.
       controls.enableDamping = !options.reduced
@@ -251,13 +282,13 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
     const { default: ForceGraph } = await import('force-graph')
     if (options.signal.aborted) return null
     g2 = new ForceGraph<LayoutNode, LayoutEdge>(host)
-    g2.backgroundColor(sceneColor()).nodeCanvasObject((n, ctx, scale) => draw2D(n, ctx, scale)).nodePointerAreaPaint(pointerArea).linkWidth(l => l.width ?? (touches(l) ? 1 : .6))
+    g2.backgroundColor(sceneColor()).nodeCanvasObject((n, ctx, scale) => draw2D(n, ctx, scale)).nodePointerAreaPaint(pointerArea).linkWidth(l => glimpse ? .5 : l.width ?? (touches(l) ? 1 : .6))
   }
   if (!glimpse) host.append(labelLayer)
   const graph = (g3 ?? g2)!
   graph.nodeLabel(() => '').linkLabel(() => '').nodeRelSize(8).nodeVal(n => Math.pow(Math.max(0, n.weight) + 1, 1.5))
-    .linkColor(linkColor).linkDirectionalParticles(particles).linkDirectionalParticleWidth(1.4).linkDirectionalParticleSpeed(.002)
-    .linkDirectionalArrowLength(l => l.directed ? 3 : 0).linkDirectionalArrowRelPos(1).linkCurvature(l => l.curvature ?? 0)
+    .linkColor(linkColor).linkVisibility(glimpseLinkVisible).linkDirectionalParticles(particles).linkDirectionalParticleWidth(1.4).linkDirectionalParticleSpeed(.002)
+    .linkDirectionalArrowLength(l => !glimpse && l.directed ? 3 : 0).linkDirectionalArrowRelPos(1).linkCurvature(l => glimpse ? 0 : l.curvature ?? 0)
     .warmupTicks(90).cooldownTicks(paused ? 0 : 140).d3VelocityDecay(.38)
     .onNodeClick((node, event) => {
       if (glimpse || performance.now() - openedAt < 100) return
@@ -299,22 +330,23 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
   function tick(now: number) {
     if (disposed) return
     frame = requestAnimationFrame(tick)
-    if (document.hidden || now - lastFrame < 1000 / fps - .5) return
+    if (document.hidden || (glimpse && (!nodes.length || nodes.some(n => n.x === undefined))) || now - lastFrame < 1000 / fps - .5) return
     const dt = Math.min(.1, (now - (lastFrame || now)) / 1000); lastFrame = now
     const phase: MotionPhase = paused ? 'paused' : dragging || now < resumeAt ? 'interacting' : 'orbiting'
     if (phase !== lastPhase) { lastPhase = phase; options.motionState?.(phase) }
     if (g3) (g3.controls() as OrbitControls).autoRotate = phase === 'orbiting'
     if (phase === 'orbiting') {
       driftTime += dt
-      if (g3) {
+      if (g3 && !glimpse) {
         const camera = g3.camera(), controls = g3.controls() as OrbitControls
         camera.position.y += Math.cos(driftTime / 7) * dt * camera.position.distanceTo(controls.target) * .003 * orbitScale
-      } else if (g2) {
+      } else if (g2 && !glimpse) {
         const center = g2.centerAt()
         g2.centerAt(center.x + Math.cos(driftTime / 9) * dt * .9 * orbitScale, center.y + Math.sin(driftTime / 7) * dt * .6 * orbitScale)
       }
     }
     if (disposed) return
+    sizeGlimpseOrbs()
     clearGlimpse(); graph.resumeAnimation(); if (disposed) return; graph.pauseAnimation(); placeLabels()
   }
   frame = requestAnimationFrame(tick)
@@ -323,6 +355,7 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
   const FILL = .8, MAX_ZOOM = 2.2
   function fit() {
     if (disposed || !nodes.length) return
+    if (glimpse && (!glimpseLaidOut || graph.width() < 24 || graph.height() < 24)) return
     if (g3 && three) {
       const camera = g3.camera() as PerspectiveCamera
       const right = new three.Vector3(1, 0, 0).applyQuaternion(camera.quaternion)
@@ -340,16 +373,27 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
         const v = new three.Vector3(n.x ?? 0, n.y ?? 0, n.z ?? 0).sub(centre), r = graphRadius(n), depth = v.dot(back)
         distance = Math.max(distance, depth + (Math.abs(v.dot(up)) + r) / (tan * FILL), depth + (Math.abs(v.dot(right)) + r) / (tan * aspect * FILL))
       }
-      // A header crop sits closer than a full fit; the page mask hides the overflow.
-      if (glimpse && g3.height() > 40) distance = Math.min(distance, g3.height() / (2 * tan * 0.95))
+      if (glimpse) {
+        // The shallow cloud orbits horizontally. Fit its cylindrical bounds,
+        // including the nearest possible depth, for every angle of the orbit.
+        let radial = 0, vertical = 0
+        for (const n of nodes) {
+          radial = Math.max(radial, Math.hypot((n.x ?? 0) - centre.x, (n.z ?? 0) - centre.z))
+          vertical = Math.max(vertical, Math.abs((n.y ?? 0) - centre.y))
+        }
+        const usableY = Math.max(.1, .68 - 10 / g3.height())
+        distance = Math.max(radial + vertical / (tan * usableY), radial / Math.sin(Math.atan(tan * aspect * .68)), 100)
+        back.y = 0; back.normalize()
+      }
       const at = centre.clone().add(back.multiplyScalar(distance))
       g3.cameraPosition({ x: at.x, y: at.y, z: at.z }, { x: centre.x, y: centre.y, z: centre.z }, duration())
     } else if (g2) {
       let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity
       for (const n of nodes) { const r = graphRadius(n), x = n.x ?? 0, y = n.y ?? 0; x0 = Math.min(x0, x - r); x1 = Math.max(x1, x + r); y0 = Math.min(y0, y - r); y1 = Math.max(y1, y + r) }
-      const zoom = Math.min(glimpse ? 4.5 : MAX_ZOOM, g2.width() * FILL / Math.max(1, x1 - x0), g2.height() * (glimpse ? 1.35 : FILL) / Math.max(1, y1 - y0))
+      const zoom = Math.min(glimpse ? .25 : MAX_ZOOM, g2.width() * (glimpse ? .68 : FILL) / Math.max(1, x1 - x0), g2.height() * (glimpse ? .68 : FILL) / Math.max(1, y1 - y0))
       g2.centerAt((x0 + x1) / 2, (y0 + y1) / 2, duration()); g2.zoom(zoom, duration()); refreshPicking(duration())
     }
+    if (glimpse) { sizeGlimpseOrbs(); graph.linkVisibility(glimpseLinkVisible); host.style.visibility = '' }
   }
   // A selection sits in the middle with its direct links in view (80% of the stage),
   // no closer than 1.8 screen pixels per graph unit.
@@ -398,6 +442,8 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
     dimension: g3 ? '3d' : '2d',
     data(value) {
       pointerNode = null; lastPick = null; cameraTaken = false; fitOnSettle = true
+      glimpseLaidOut = false
+      if (glimpse) host.style.visibility = 'hidden'
       objects.clear()
       const layout = graphLayout(value); nodes = layout.nodes; links = layout.links
       palette = graphPalette(nodes, links)
@@ -405,7 +451,16 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
       groups = new Map(names.map((group, i) => { const angle = i * 2 * Math.PI / names.length; return [group, { x: Math.cos(angle) * radius, y: Math.sin(angle) * radius, z: Math.sin(angle * 2) * radius * .3 }] }))
       graph.graphData({ nodes, links }); rebuildLabels(); redraw()
       clearTimeout(settleTimer)
-      whenLaidOut(() => { redraw(); if (emphasis.selected) focus(emphasis.selected); else if (!cameraTaken) fit() })
+      whenLaidOut(() => {
+        if (glimpse) {
+          // Keep the shared force layout's clusters and links, then flatten the
+          // decorative copy into the header's shallow space. Only the camera
+          // moves afterwards; simulation cannot throw an outlier off screen.
+          for (const n of nodes) { n.x = n.fx = (n.x ?? 0) * 2.3; n.y = n.fy = (n.y ?? 0) * .3; n.z = n.fz = (n.z ?? 0) * .55 }
+          glimpseLaidOut = true
+        }
+        redraw(); if (emphasis.selected) focus(emphasis.selected); else if (!cameraTaken) fit()
+      })
       if (!paused) settleTimer = setTimeout(() => { if (emphasis.selected) focus(emphasis.selected); else if (!cameraTaken) fit() }, 1200)
     },
     emphasis(value) { emphasis = value; redraw() },

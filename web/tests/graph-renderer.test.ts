@@ -1,7 +1,21 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { graphLayout, labelPosition, type GraphData } from '../src/lib/graphRenderer.ts'
+import { graphLayout, glimpsePointInside, glimpseRadius, labelPosition, type GraphData } from '../src/lib/graphRenderer.ts'
+
+test('glimpse orbs stay 4–10px across every node weight', () => {
+  for (const weight of [-1, 0, 1, 10, 1000, NaN, Infinity]) {
+    const radius = glimpseRadius({ id: 'orb', label: '', group: '', color: '--teal', weight })
+    assert.ok(radius >= 2 && radius <= 5)
+  }
+})
+
+test('glimpse links reject off-view endpoints including partial orbs and invalid coordinates', () => {
+  assert.equal(glimpsePointInside(150, 40, 5, 300, 80), true)
+  for (const [x, y] of [[0, 40], [300, 40], [150, 0], [150, 80], [10, 40], [150, 10], [-900, 40], [NaN, 40]]) {
+    assert.equal(glimpsePointInside(x, y, 5, 300, 80), false)
+  }
+})
 
 test('a ticket adapter needs no knowledge schema and engines cannot mutate the source', () => {
   const data: GraphData = { nodes: [

@@ -3,6 +3,7 @@ import { inflateSync } from 'node:zlib'
 import { mkdirSync } from 'node:fs'
 import { test, expect, type Page } from '@playwright/test'
 import { mockTicketGraph, ticketGraphWorld } from './ticket-graph-fixtures'
+import { journeyWorld } from './journey-fixtures'
 import type { TicketGraphLink } from '../src/lib/ticketGraph'
 
 test.use({
@@ -14,6 +15,26 @@ test.setTimeout(60_000)
 
 const surface = (page: Page) => page.locator('.header-glimpse-canvas')
 const ready = (page: Page) => expect(surface(page)).toHaveAttribute('data-ready', 'true', { timeout: 20_000 })
+
+async function expectClearOfText(page: Page) {
+  const region = (await page.locator('.glimpse-canvas').boundingBox())!
+  const header = (await page.locator('.project-head').boundingBox())!
+  expect(region.width).toBeGreaterThan(100)
+  expect(region.height).toBeGreaterThan(30)
+  expect(region.y).toBeGreaterThanOrEqual(header.y + 8)
+  expect(region.y + region.height).toBeLessThan(header.y + header.height - 8)
+  // The mask's visible ellipse is strictly smaller than this entire canvas.
+  // Checking the larger box proves even faint pixels cannot sit under text.
+  for (const selector of ['.title-line', '#project-title', '.description', '.journey-chip', '.head-stats']) {
+    const text = (await page.locator(selector).boundingBox())!
+    expect(text, selector).not.toBeNull()
+    const overlap = region.x < text.x + text.width && region.x + region.width > text.x && region.y < text.y + text.height && region.y + region.height > text.y
+    expect(overlap, `${selector} does not intersect the glimpse`).toBe(false)
+    if (selector === '.title-line') expect(Math.abs(region.y + region.height / 2 - text.y - text.height / 2)).toBeLessThan(1)
+    if (selector === '.head-stats') expect(region.x + region.width).toBeLessThanOrEqual(text.x - 28)
+  }
+  await expect(page.locator('html')).toHaveCSS('opacity', '1')
+}
 
 function sized(count: number, withLinks: boolean) {
   const world = ticketGraphWorld()
@@ -162,20 +183,51 @@ test('leaving the project releases the WebGL context', async ({ page }) => {
   await expect.poll(() => page.evaluate(() => [...(window as unknown as { __aeonLiveGL: Set<WebGLRenderingContext> }).__aeonLiveGL].filter(gl => !gl.isContextLost()).length)).toBe(0)
 })
 
+test('long title and description stay separate from the glimpse while resizing', async ({ page }) => {
+  const world = ticketGraphWorld(), project = world.work.projects[0]
+  project.title = 'Pharos fleet management and operator workspace for every environment'
+  project.description = 'Fleet management, service health, deployment history and host access across every environment in the INSPR family.'
+  await mockTicketGraph(page, world)
+  await page.route('**/api/projects/p-pharos/journey', route => route.fulfill({ json: journeyWorld('plan').journey }))
+  await page.goto('/p/PHAROS/tickets')
+  await ready(page)
+  for (const width of [1600, 1280, 1600]) {
+    await page.setViewportSize({ width, height: 1000 })
+    await expectClearOfText(page)
+  }
+})
+
+test('the 2D fallback also fits the entire graph with padded edges', async ({ page }) => {
+  await page.addInitScript(() => {
+    const original = HTMLCanvasElement.prototype.getContext
+    HTMLCanvasElement.prototype.getContext = function (this: HTMLCanvasElement, type: string, attributes?: CanvasRenderingContext2DSettings) {
+      return type.includes('webgl') ? null : original.call(this, type, attributes)
+    } as typeof original
+  })
+  await mockTicketGraph(page)
+  await page.route('**/api/projects/p-pharos/journey', route => route.fulfill({ json: journeyWorld('plan').journey }))
+  await page.goto('/p/PHAROS/tickets')
+  await ready(page)
+  await expect(surface(page)).toHaveAttribute('data-dimension', '2d')
+  await page.waitForTimeout(1600)
+  await expectClearOfText(page)
+  await expectSoftFittedGraph(page)
+})
+
 function pngPixels(buf: Buffer) {
-  let offset = 8, width = 0, height = 0
+  let offset = 8, width = 0, height = 0, channels = 4
   const idat: Buffer[] = []
   while (offset + 8 < buf.length) {
     const len = buf.readUInt32BE(offset)
     const type = buf.toString('ascii', offset + 4, offset + 8)
     const data = buf.subarray(offset + 8, offset + 8 + len)
-    if (type === 'IHDR') { width = data.readUInt32BE(0); height = data.readUInt32BE(4) }
+    if (type === 'IHDR') { width = data.readUInt32BE(0); height = data.readUInt32BE(4); channels = data[9] === 2 ? 3 : 4 }
     else if (type === 'IDAT') idat.push(data)
     else if (type === 'IEND') break
     offset += 12 + len
   }
   const raw = inflateSync(Buffer.concat(idat))
-  const stride = width * 4
+  const stride = width * channels
   const out = new Uint8Array(width * height * 4)
   const paeth = (a: number, b: number, c: number) => {
     const p = a + b - c, pa = Math.abs(p - a), pb = Math.abs(p - b), pc = Math.abs(p - c)
@@ -189,10 +241,13 @@ function pngPixels(buf: Buffer) {
     src += stride
     const cur = new Uint8Array(stride)
     for (let i = 0; i < stride; i++) {
-      const left = i >= 4 ? cur[i - 4] : 0, up = prev[i], ul = i >= 4 ? prev[i - 4] : 0, v = row[i]
+      const left = i >= channels ? cur[i - channels] : 0, up = prev[i], ul = i >= channels ? prev[i - channels] : 0, v = row[i]
       cur[i] = filter === 0 ? v : filter === 1 ? (v + left) & 255 : filter === 2 ? (v + up) & 255 : filter === 3 ? (v + ((left + up) >> 1)) & 255 : (v + paeth(left, up, ul)) & 255
     }
-    out.set(cur, y * stride)
+    for (let x = 0; x < width; x++) {
+      out.set(cur.subarray(x * channels, x * channels + 3), (y * width + x) * 4)
+      out[(y * width + x) * 4 + 3] = channels === 4 ? cur[x * channels + 3] : 255
+    }
     prev = cur
   }
   return { width, height, data: out }
@@ -219,11 +274,42 @@ async function textContrast(page: Page, selector: string) {
   return contrast(darkPx, lightPx)
 }
 
+async function expectSoftFittedGraph(page: Page) {
+  await page.locator('.glimpse-col').hover()
+  await page.getByRole('button', { name: 'Pause motion', exact: true }).click()
+  await page.mouse.move(0, 0)
+  await expect(surface(page)).toHaveAttribute('data-motion', 'still')
+  const layer = page.locator('.glimpse-canvas'), clip = (await layer.boundingBox())!
+  const masked = pngPixels(await page.screenshot({ clip }))
+  // Inspect the unmasked rendering as well: a mask must not conceal clipping.
+  const original = await layer.getAttribute('style')
+  await layer.evaluate(el => { (el as HTMLElement).style.maskImage = 'none'; (el as HTMLElement).style.opacity = '1' })
+  const unmasked = pngPixels(await page.screenshot({ clip }))
+  await layer.evaluate(el => { (el as HTMLElement).style.opacity = '0' })
+  const background = pngPixels(await page.screenshot({ clip }))
+  await layer.evaluate((el, style) => el.setAttribute('style', style ?? ''), original)
+  for (const [name, pixels] of [['masked', masked], ['unmasked', unmasked]] as const) {
+    const points: { x: number; y: number }[] = []
+    for (let y = 0; y < pixels.height; y++) for (let x = 0; x < pixels.width; x++) {
+      const i = (y * pixels.width + x) * 4
+      if ([0, 1, 2].some(c => Math.abs(pixels.data[i + c] - background.data[i + c]) > 2)) points.push({ x, y })
+    }
+    expect(points.length, `${name}: graph actually paints`).toBeGreaterThan(80)
+    expect(Math.min(...points.map(p => p.x)), `${name}: left padding`).toBeGreaterThanOrEqual(8)
+    expect(Math.max(...points.map(p => p.x)), `${name}: right padding`).toBeLessThan(pixels.width - 8)
+    expect(Math.min(...points.map(p => p.y)), `${name}: top padding`).toBeGreaterThanOrEqual(8)
+    expect(Math.max(...points.map(p => p.y)), `${name}: bottom padding`).toBeLessThan(pixels.height - 8)
+  }
+}
+
 for (const scheme of ['light', 'dark'] as const) {
   test.describe(`header shots ${scheme}`, () => {
     test.use({ colorScheme: scheme })
     test(`keeps AA contrast at 1600, 1280 and 390`, async ({ page }) => {
+      const errors: string[] = []
+      page.on('pageerror', error => errors.push(error.message))
       await mockTicketGraph(page)
+      await page.route('**/api/projects/p-pharos/journey', route => route.fulfill({ json: journeyWorld('plan').journey }))
       const dir = 'test-results/hg1-header'
       mkdirSync(dir, { recursive: true })
       for (const width of [1600, 1280, 390]) {
@@ -232,13 +318,20 @@ for (const scheme of ['light', 'dark'] as const) {
         if (width >= 1280) await ready(page)
         else await expect(page.getByRole('heading', { name: 'Pharos', exact: true })).toBeVisible()
         await page.waitForTimeout(width >= 1280 ? 3200 : 200)
+        await expect(page.locator('.journey-chip')).toBeVisible()
+        if (width >= 1280) {
+          await expectClearOfText(page)
+          await expect(page.locator('.glimpse-canvas')).toHaveCSS('opacity', scheme === 'light' ? '0.35' : '0.3')
+        }
         const header = page.locator('.project-head')
         await header.screenshot({ path: `${dir}/header-${width}-${scheme}.png` })
         await page.screenshot({ path: `${dir}/page-${width}-${scheme}.png` })
+        if (width >= 1280) await expectSoftFittedGraph(page)
         for (const selector of ['#project-title', '.description', '.stat b']) {
           expect(await textContrast(page, selector), `${selector} ${width} ${scheme}`).toBeGreaterThanOrEqual(4.5)
         }
       }
+      expect(errors).toEqual([])
     })
   })
 }

@@ -18,9 +18,21 @@ const wide = ref(wideQuery.matches), reduced = ref(reducedQuery.matches), idle =
 const paint = ref(false), userPaused = ref(false), occluded = ref(false)
 const data = shallowRef<GraphData>({ nodes: [], links: [] })
 const column = ref<HTMLElement>()
+const region = ref({ top: '0px', height: '0px' })
 const canvas = ref<{ setPaused: (value: boolean) => void } | null>(null)
 const allowed = computed(() => headerGlimpseAllowed({ enabled: props.enabled, reduced: reduced.value, wide: wide.value, tickets: props.ticketCount }))
-let request: AbortController | undefined, idleId = 0, seeing: IntersectionObserver | undefined, mounted = false
+let request: AbortController | undefined, idleId = 0, seeing: IntersectionObserver | undefined, sizing: ResizeObserver | undefined, mounted = false
+
+function measureRegion() {
+  const box = column.value?.getBoundingClientRect()
+  const title = column.value?.parentElement?.querySelector('.title-line')?.getBoundingClientRect()
+  if (!box || !title) return
+  const centre = title.top + title.height / 2 - box.top
+  // Follow the actual title row, including headers with a journey stage pill.
+  // The entire masked canvas stays inside its own empty grid column.
+  const height = Math.max(0, Math.min(88, (centre - 8) * 2, (box.height - centre - 8) * 2))
+  region.value = { top: `${centre - height / 2}px`, height: `${height}px` }
+}
 
 function applyMotion() { canvas.value?.setPaused(userPaused.value || occluded.value || document.hidden) }
 function openGraph() { void router.push({ path: `/p/${encodeURIComponent(props.projectKey)}/tickets`, query: { view: 'graph' } }) }
@@ -30,11 +42,15 @@ function onReduced() { reduced.value = reducedQuery.matches }
 function onVisibility() { applyMotion() }
 function watchHeader() {
   seeing?.disconnect()
+  sizing?.disconnect()
   const header = column.value?.closest('header')
   if (!header) return
   const root = document.getElementById('main')
   seeing = new IntersectionObserver(([entry]) => { occluded.value = !entry.isIntersecting; applyMotion() }, { root: root instanceof HTMLElement ? root : null, threshold: 0 })
   seeing.observe(header)
+  sizing = new ResizeObserver(measureRegion)
+  for (const el of [column.value, column.value?.parentElement?.querySelector('.head-main')]) if (el) sizing.observe(el)
+  measureRegion()
 }
 async function load() {
   request?.abort()
@@ -68,6 +84,7 @@ onBeforeUnmount(() => {
   request?.abort()
   if (idleId) window.cancelIdleCallback?.(idleId)
   seeing?.disconnect()
+  sizing?.disconnect()
   wideQuery.removeEventListener('change', onWide)
   reducedQuery.removeEventListener('change', onReduced)
   document.removeEventListener('visibilitychange', onVisibility)
@@ -77,7 +94,7 @@ onBeforeUnmount(() => {
 
 <template>
   <div v-if="paint" ref="column" class="glimpse-col" data-header-glimpse="on">
-    <div class="glimpse-canvas" aria-hidden="true">
+    <div class="glimpse-canvas" :style="region" aria-hidden="true">
       <GraphCanvas ref="canvas" glimpse :data="data" :fps="fps" canvas-class="header-glimpse-canvas" />
     </div>
     <div class="glimpse-hit" @click="openGraph" />
@@ -90,24 +107,18 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.glimpse-col { position: relative; min-width: 0; min-height: 96px; overflow: hidden; }
+.glimpse-col { position: relative; min-width: 0; min-height: 112px; overflow: hidden; }
 .glimpse-canvas {
-  position: absolute; inset: 0; opacity: .35; pointer-events: none;
-  -webkit-mask-image:
-    linear-gradient(90deg, transparent 0%, transparent 18%, #000 36%, #000 86%, transparent 100%),
-    linear-gradient(180deg, transparent 0%, transparent 10%, #000 24%, #000 84%, transparent 100%),
-    radial-gradient(ellipse at 62% 46%, #000 36%, transparent 74%);
-  -webkit-mask-composite: source-in, source-in;
+  position: absolute; left: 8px; right: 8px; max-width: 480px; margin-inline: auto; opacity: .35; pointer-events: none;
+  -webkit-mask-image: radial-gradient(ellipse 50% 50% at center, #000 25%, #0009 52%, transparent 86%);
   -webkit-mask-repeat: no-repeat;
   -webkit-mask-size: 100% 100%;
-  mask-image:
-    linear-gradient(90deg, transparent 0%, transparent 18%, #000 36%, #000 86%, transparent 100%),
-    linear-gradient(180deg, transparent 0%, transparent 10%, #000 24%, #000 84%, transparent 100%),
-    radial-gradient(ellipse at 62% 46%, #000 36%, transparent 74%);
-  mask-composite: intersect;
+  mask-image: radial-gradient(ellipse 50% 50% at center, #000 25%, #0009 52%, transparent 86%);
   mask-repeat: no-repeat;
   mask-size: 100% 100%;
 }
+:global(:root[data-theme="dark"] .glimpse-canvas) { opacity: .30; }
+@media (prefers-color-scheme: dark) { :global(:root:not([data-theme="light"]) .glimpse-canvas) { opacity: .30; } }
 .glimpse-hit { position: absolute; inset: 0; z-index: 1; cursor: pointer; }
 .glimpse-controls {
   position: absolute; z-index: 2; left: 50%; bottom: 6px; transform: translateX(-50%);
