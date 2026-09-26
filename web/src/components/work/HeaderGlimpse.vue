@@ -25,12 +25,13 @@ let request: AbortController | undefined, idleId = 0, seeing: IntersectionObserv
 
 function measureRegion() {
   const box = column.value?.getBoundingClientRect()
-  const title = column.value?.parentElement?.querySelector('.title-line')?.getBoundingClientRect()
-  if (!box || !title) return
-  const centre = title.top + title.height / 2 - box.top
-  // Follow the actual title row, including headers with a journey stage pill.
+  const text = column.value?.parentElement?.querySelector<HTMLElement>('.head-main')
+  if (!box || !text) return
+  const block = text.getBoundingClientRect(), padding = parseFloat(getComputedStyle(text).paddingTop) || 0
+  const centre = block.top + padding + (block.height - padding) / 2 - box.top
+  // Follow the full text block, including its description and journey pill.
   // The entire masked canvas stays inside its own empty grid column.
-  const height = Math.max(0, Math.min(88, (centre - 8) * 2, (box.height - centre - 8) * 2))
+  const height = Math.max(0, Math.min((centre - 4) * 2, (box.height - centre - 4) * 2))
   region.value = { top: `${centre - height / 2}px`, height: `${height}px` }
 }
 
@@ -95,7 +96,7 @@ onBeforeUnmount(() => {
 <template>
   <div v-if="paint" ref="column" class="glimpse-col" data-header-glimpse="on">
     <div class="glimpse-canvas" :style="region" aria-hidden="true">
-      <GraphCanvas ref="canvas" glimpse :data="data" :fps="fps" canvas-class="header-glimpse-canvas" />
+      <GraphCanvas ref="canvas" glimpse layout-bias="elliptic" :data="data" :fps="fps" canvas-class="header-glimpse-canvas" />
     </div>
     <div class="glimpse-hit" @click="openGraph" />
     <div class="glimpse-controls">
@@ -109,7 +110,7 @@ onBeforeUnmount(() => {
 <style scoped>
 .glimpse-col { position: relative; min-width: 0; min-height: 112px; overflow: hidden; }
 .glimpse-canvas {
-  position: absolute; left: 8px; right: 8px; max-width: 480px; margin-inline: auto; opacity: .35; pointer-events: none;
+  position: absolute; left: 8px; right: 8px; opacity: .35; pointer-events: none;
   -webkit-mask-image: radial-gradient(ellipse 50% 50% at center, #000 25%, #0009 52%, transparent 86%);
   -webkit-mask-repeat: no-repeat;
   -webkit-mask-size: 100% 100%;

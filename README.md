@@ -19,6 +19,13 @@ Project sections have their own URLs: `/p/KEY/tickets`, `/p/KEY/journey`, and
 so its ticket links need no section query. Existing `?view=full` ticket links
 still open the full-page ticket at the same address.
 
+Wide project headers can show an ambient ticket graph (Display → Graph in
+project header). It uses a tilted 3D cloud with an optional elliptic force bias,
+fits the densest 85% of nodes by height, and fades out inside the empty space
+between the text block and counts. Reduced motion, narrow screens and sparse
+graphs suppress it; hover exposes Open graph and Pause. Header framing and text
+separation are covered by `web/tests/header-glimpse.spec.ts`.
+
 ## Command line
 
 `paimos` is the agent command line. `paimos serve` still runs the server. Existing doctrine commands keep their shape.

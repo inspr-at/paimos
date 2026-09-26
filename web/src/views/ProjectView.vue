@@ -1312,8 +1312,8 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
 .project-head { padding: 4px 0 14px; container: projecthead / inline-size; }
 .head-flex { display: flex; align-items: flex-end; justify-content: space-between; gap: 32px; }
 .head-flex.with-glimpse { display: grid; grid-template-columns: minmax(0, max-content) minmax(180px, 1fr) auto; align-items: stretch; column-gap: 28px; }
-.head-flex.with-glimpse .head-main, .head-flex.with-glimpse .head-stats { align-self: end; }
-.head-flex.with-glimpse .head-main { padding-top: 24px; }
+.head-flex.with-glimpse .head-stats { align-self: end; }
+.head-flex.with-glimpse .head-main { align-self: center; }
 .head-main { min-width: 0; flex: 1; position: relative; z-index: 1; }
 .head-stats { position: relative; z-index: 1; }
 .journey-chip-slot { min-height: 40px; }

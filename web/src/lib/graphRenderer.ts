@@ -40,6 +40,9 @@ export interface GraphRendererOptions {
   // Fitted decoration: no labels or pointer handling, a slower orbit and a
   // transparent clear. The host reserves a region clear of its text.
   glimpse?: boolean
+  // Optional force anchors for a wide, volumetric cloud; normal graphs retain
+  // their existing clustered layout. This changes physics, never projection.
+  layoutBias?: 'elliptic'
   select(node: GraphNode): void; open(node: GraphNode): void; hover(node: GraphNode | null): void; clear(): void
   motionState?(phase: MotionPhase): void
 }
@@ -47,7 +50,26 @@ type Graph3D = ForceGraph3DInstance<LayoutNode, LayoutEdge>
 type Graph2D = ForceGraph2D<LayoutNode, LayoutEdge>
 export const endpointID = (endpoint: string | LayoutNode) => typeof endpoint === 'string' ? endpoint : endpoint.id
 export const graphRadius = (node: GraphNode) => 8 * Math.sqrt(Math.max(0, Number.isFinite(node.weight) ? node.weight : 0) + 1)
-export const glimpseRadius = (node: GraphNode) => Math.min(5, Math.max(2, graphRadius(node) * .18))
+export const glimpseRadius = (node: GraphNode) => Math.min(4, Math.max(2, graphRadius(node) * .22))
+// Trim the outer 15% in normalised 3D space. Medians resist distant satellites,
+// and per-axis spread preserves an ellipsoid rather than favouring its short axis.
+export function glimpseCore(nodes: readonly LayoutNode[]): LayoutNode[] {
+  if (!nodes.length) return []
+  const axes = ['x', 'y', 'z'] as const
+  const median = (values: number[]) => values.sort((a, b) => a - b)[Math.floor(values.length / 2)]
+  const centre = axes.map(axis => median(nodes.map(n => n[axis] ?? 0)))
+  const spread = axes.map((axis, i) => Math.max(1, median(nodes.map(n => Math.abs((n[axis] ?? 0) - centre[i])))))
+  const distance = (n: LayoutNode) => axes.reduce((sum, axis, i) => sum + ((n[axis] ?? 0) - centre[i]) ** 2 / spread[i] ** 2, 0)
+  return [...nodes].sort((a, b) => distance(a) - distance(b)).slice(0, Math.ceil(nodes.length * .85))
+}
+// A coprime stride scatters adjacent tickets through the cloud without dropping
+// or repeating anchors for particular node counts (including multiples of 37).
+export function cloudStride(count: number): number {
+  const gcd = (a: number, b: number): number => b ? gcd(b, a % b) : a
+  let stride = Math.max(1, Math.round(count * .618))
+  while (count > 1 && gcd(stride, count) !== 1) stride++
+  return stride
+}
 // A link is drawn only when both complete orbs fit inside the padded view.
 export function glimpsePointInside(x: number, y: number, radius: number, width: number, height: number): boolean {
   return Number.isFinite(x) && Number.isFinite(y) && x - radius >= 8 && y - radius >= 8 && x + radius <= width - 8 && y + radius <= height - 8
@@ -86,13 +108,12 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
   let emphasis: GraphEmphasis = { selected: '', neighbours: new Set(), matches: new Set(), searching: false, hovered: '' }
   const glimpse = options.glimpse === true
   let labelMode = glimpse ? 'off' : (options.labels ?? 'smart'), fps = options.fps ?? 60
-  // OrbitControls speed 1 is one turn per minute. A glimpse drifts more slowly.
-  const orbitScale = glimpse ? 0.22 : 1
   let paintFrame = 0, fitFrame = 0, frame = 0, lastFrame = 0, driftTime = 0, resumeAt = 0, dragging = false
   let lastPhase: MotionPhase | undefined
   let settleTimer: ReturnType<typeof setTimeout> | undefined, pickTimer: ReturnType<typeof setTimeout> | undefined
   let cameraTaken = false, fitOnSettle = true
   let glimpseLaidOut = false
+  let anchorStride = 1
   let pointerNode: LayoutNode | null = null, openedAt = -Infinity
   let lastPick: { node: LayoutNode; x: number; y: number; at: number } | null = null
   const duration = () => glimpse || options.reduced || paused ? 0 : 650
@@ -142,7 +163,8 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
     const projection = g3.height() / (2 * Math.tan(camera.fov * Math.PI / 360))
     for (const n of nodes) {
       const depth = -new three.Vector3(n.x ?? 0, n.y ?? 0, n.z ?? 0).applyMatrix4(camera.matrixWorldInverse).z
-      objects.get(n.id)?.scale.setScalar(glimpseRadius(n) * depth / (projection * graphRadius(n)))
+      const object = objects.get(n.id)
+      if (object) { object.visible = depth > camera.near; object.scale.setScalar(glimpseRadius(n) * Math.max(0, depth) / (projection * graphRadius(n))) }
     }
   }
   function placeLabels() {
@@ -252,10 +274,9 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
       g3 = new modules[0].default(host, { controlType: 'orbit', rendererConfig: { antialias: true, alpha: true, powerPreference: 'low-power' } }) as unknown as Graph3D
       g3.renderer().setPixelRatio(Math.min(window.devicePixelRatio, 1.5))
       if (glimpse) {
-        // A long lens keeps the shallow cloud spacious without perspective
-        // enlarging the foreground orbs as it slowly turns.
         const camera = g3.camera() as PerspectiveCamera
-        camera.fov = 8; camera.updateProjectionMatrix()
+        camera.fov = 36; camera.updateProjectionMatrix()
+        g3.cameraPosition({ x: 90, y: 150, z: 750 }, { x: 0, y: 0, z: 0 }, 0)
       }
       geometry = new three.SphereGeometry(1, 20, 14)
       const key = new three.DirectionalLight('#fff5e9', 2.4); key.position.set(-180, 240, 320)
@@ -269,7 +290,7 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
         return group
       }).linkOpacity(1).linkWidth(l => glimpse ? 0 : l.width ?? .55)
       const controls = g3.controls() as OrbitControls
-      controls.autoRotateSpeed = orbitScale // 1 is one revolution per 60 seconds, using elapsed time.
+      controls.autoRotateSpeed = 1 // One revolution per 60 seconds; glimpse uses a bounded orbit below.
       controls.enableDamping = !options.reduced
       if (glimpse) { controls.enableRotate = false; controls.enableZoom = false; controls.enablePan = false }
       clearGlimpse()
@@ -315,14 +336,31 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
   // each other without rigidly partitioning a strongly connected graph.
   let groups = new Map<string, { x: number; y: number; z: number }>()
   graph.d3Force('group-centre', (alpha: number) => {
+    const strength = options.layoutBias === 'elliptic' ? .015 : .045
     for (const n of nodes) {
       const at = groups.get(n.group) ?? { x: 0, y: 0, z: 0 }
-      n.vx = (n.vx ?? 0) + (at.x - (n.x ?? 0)) * .045 * alpha
-      n.vy = (n.vy ?? 0) + (at.y - (n.y ?? 0)) * .045 * alpha
-      if (g3) n.vz = (n.vz ?? 0) + (at.z - (n.z ?? 0)) * .045 * alpha
+      n.vx = (n.vx ?? 0) + (at.x - (n.x ?? 0)) * strength * alpha
+      n.vy = (n.vy ?? 0) + (at.y - (n.y ?? 0)) * strength * alpha
+      if (g3) n.vz = (n.vz ?? 0) + (at.z - (n.z ?? 0)) * strength * alpha
     }
   })
   graph.d3Force('link')?.distance((l: LayoutEdge) => 45 + (typeof l.source === 'object' ? graphRadius(l.source) : 5) + (typeof l.target === 'object' ? graphRadius(l.target) : 5))
+  if (options.layoutBias === 'elliptic') {
+    graph.d3Force('link')?.strength(.05)
+    graph.d3Force('elliptic', (alpha: number) => {
+      const radius = 55 + Math.sqrt(nodes.length) * 3
+      const aspect = Math.max(1.4, Math.min(12, graph.width() / Math.max(1, graph.height()) * 1.12))
+      nodes.forEach((n, i) => {
+        const index = (i * anchorStride) % nodes.length
+        const y = 1 - 2 * (index + .5) / nodes.length, angle = i * Math.PI * (3 - Math.sqrt(5))
+        const ring = Math.sqrt(1 - y * y)
+        const x = Math.cos(angle) * ring * radius * aspect, z = Math.sin(angle) * ring * radius
+        n.vx = (n.vx ?? 0) + (x - (n.x ?? 0)) * .12 * alpha
+        n.vy = (n.vy ?? 0) + (y * radius - (n.y ?? 0)) * .12 * alpha
+        if (g3) n.vz = (n.vz ?? 0) + (z - (n.z ?? 0)) * .12 * alpha
+      })
+    })
+  }
   // Both engines' public resume method draws one synchronous frame, then
   // schedules a RAF; pause cancels that RAF. Own just one clock so 30 FPS caps
   // physics, WebGL, labels and picking together, rather than only the camera.
@@ -334,15 +372,24 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
     const dt = Math.min(.1, (now - (lastFrame || now)) / 1000); lastFrame = now
     const phase: MotionPhase = paused ? 'paused' : dragging || now < resumeAt ? 'interacting' : 'orbiting'
     if (phase !== lastPhase) { lastPhase = phase; options.motionState?.(phase) }
-    if (g3) (g3.controls() as OrbitControls).autoRotate = phase === 'orbiting'
+    if (g3) (g3.controls() as OrbitControls).autoRotate = phase === 'orbiting' && !glimpse
     if (phase === 'orbiting') {
+      const before = driftTime
       driftTime += dt
-      if (g3 && !glimpse) {
+      if (g3 && three && glimpse) {
+        // A bounded orbit exposes parallax without ever turning a wide cloud
+        // end-on. Full revolutions would eventually make the glimpse a sliver.
+        const camera = g3.camera(), target = (g3.controls() as OrbitControls).target
+        const orbit = new three.Spherical().setFromVector3(camera.position.clone().sub(target))
+        orbit.theta += (Math.sin(driftTime / 18) - Math.sin(before / 18)) * .12
+        orbit.phi += (Math.cos(driftTime / 24) - Math.cos(before / 24)) * .025
+        camera.position.copy(target).add(new three.Vector3().setFromSpherical(orbit))
+      } else if (g3) {
         const camera = g3.camera(), controls = g3.controls() as OrbitControls
-        camera.position.y += Math.cos(driftTime / 7) * dt * camera.position.distanceTo(controls.target) * .003 * orbitScale
+        camera.position.y += Math.cos(driftTime / 7) * dt * camera.position.distanceTo(controls.target) * .003
       } else if (g2 && !glimpse) {
         const center = g2.centerAt()
-        g2.centerAt(center.x + Math.cos(driftTime / 9) * dt * .9 * orbitScale, center.y + Math.sin(driftTime / 7) * dt * .6 * orbitScale)
+        g2.centerAt(center.x + Math.cos(driftTime / 9) * dt * .9, center.y + Math.sin(driftTime / 7) * dt * .6)
       }
     }
     if (disposed) return
@@ -361,36 +408,31 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
       const right = new three.Vector3(1, 0, 0).applyQuaternion(camera.quaternion)
       const up = new three.Vector3(0, 1, 0).applyQuaternion(camera.quaternion)
       const back = new three.Vector3(0, 0, 1).applyQuaternion(camera.quaternion)
+      const fitted = glimpse ? glimpseCore(nodes) : nodes
       const span = (axis: import('three').Vector3) => {
         let low = Infinity, high = -Infinity
-        for (const n of nodes) { const d = axis.x * (n.x ?? 0) + axis.y * (n.y ?? 0) + axis.z * (n.z ?? 0), r = graphRadius(n); low = Math.min(low, d - r); high = Math.max(high, d + r) }
+        for (const n of fitted) { const d = axis.x * (n.x ?? 0) + axis.y * (n.y ?? 0) + axis.z * (n.z ?? 0), r = glimpse ? 0 : graphRadius(n); low = Math.min(low, d - r); high = Math.max(high, d + r) }
         return (low + high) / 2
       }
       const centre = right.clone().multiplyScalar(span(right)).add(up.clone().multiplyScalar(span(up))).add(back.clone().multiplyScalar(span(back)))
       const tan = Math.tan(camera.fov * Math.PI / 360), aspect = Math.max(1, g3.width()) / Math.max(1, g3.height())
-      let distance = g3.height() / (2 * tan * MAX_ZOOM)
-      for (const n of nodes) {
-        const v = new three.Vector3(n.x ?? 0, n.y ?? 0, n.z ?? 0).sub(centre), r = graphRadius(n), depth = v.dot(back)
-        distance = Math.max(distance, depth + (Math.abs(v.dot(up)) + r) / (tan * FILL), depth + (Math.abs(v.dot(right)) + r) / (tan * aspect * FILL))
-      }
-      if (glimpse) {
-        // The shallow cloud orbits horizontally. Fit its cylindrical bounds,
-        // including the nearest possible depth, for every angle of the orbit.
-        let radial = 0, vertical = 0
-        for (const n of nodes) {
-          radial = Math.max(radial, Math.hypot((n.x ?? 0) - centre.x, (n.z ?? 0) - centre.z))
-          vertical = Math.max(vertical, Math.abs((n.y ?? 0) - centre.y))
+      let distance = glimpse ? 1 : g3.height() / (2 * tan * MAX_ZOOM)
+      for (const n of fitted) {
+        const v = new three.Vector3(n.x ?? 0, n.y ?? 0, n.z ?? 0).sub(centre), depth = v.dot(back)
+        // Fit only the dense core's HEIGHT in a glimpse. Outliers and sides
+        // can enter the fade without shrinking the entire cloud into a strip.
+        if (glimpse) distance = Math.max(distance, depth + Math.abs(v.dot(up)) / (tan * (1.15 - 8 / g3.height())))
+        else {
+          const r = graphRadius(n)
+          distance = Math.max(distance, depth + (Math.abs(v.dot(up)) + r) / (tan * FILL), depth + (Math.abs(v.dot(right)) + r) / (tan * aspect * FILL))
         }
-        const usableY = Math.max(.1, .68 - 10 / g3.height())
-        distance = Math.max(radial + vertical / (tan * usableY), radial / Math.sin(Math.atan(tan * aspect * .68)), 100)
-        back.y = 0; back.normalize()
       }
       const at = centre.clone().add(back.multiplyScalar(distance))
       g3.cameraPosition({ x: at.x, y: at.y, z: at.z }, { x: centre.x, y: centre.y, z: centre.z }, duration())
     } else if (g2) {
       let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity
-      for (const n of nodes) { const r = graphRadius(n), x = n.x ?? 0, y = n.y ?? 0; x0 = Math.min(x0, x - r); x1 = Math.max(x1, x + r); y0 = Math.min(y0, y - r); y1 = Math.max(y1, y + r) }
-      const zoom = Math.min(glimpse ? .25 : MAX_ZOOM, g2.width() * (glimpse ? .68 : FILL) / Math.max(1, x1 - x0), g2.height() * (glimpse ? .68 : FILL) / Math.max(1, y1 - y0))
+      for (const n of glimpse ? glimpseCore(nodes) : nodes) { const r = glimpse ? 0 : graphRadius(n), x = n.x ?? 0, y = n.y ?? 0; x0 = Math.min(x0, x - r); x1 = Math.max(x1, x + r); y0 = Math.min(y0, y - r); y1 = Math.max(y1, y + r) }
+      const zoom = glimpse ? Math.max(1, g2.height() * 1.15 - 8) / Math.max(1, y1 - y0) : Math.min(MAX_ZOOM, g2.width() * FILL / Math.max(1, x1 - x0), g2.height() * FILL / Math.max(1, y1 - y0))
       g2.centerAt((x0 + x1) / 2, (y0 + y1) / 2, duration()); g2.zoom(zoom, duration()); refreshPicking(duration())
     }
     if (glimpse) { sizeGlimpseOrbs(); graph.linkVisibility(glimpseLinkVisible); host.style.visibility = '' }
@@ -446,19 +488,14 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
       if (glimpse) host.style.visibility = 'hidden'
       objects.clear()
       const layout = graphLayout(value); nodes = layout.nodes; links = layout.links
+      anchorStride = cloudStride(nodes.length)
       palette = graphPalette(nodes, links)
       const names = [...new Set(nodes.map(n => n.group))].sort(), radius = names.length > 1 ? 35 + Math.sqrt(nodes.length) * 9 : 0
       groups = new Map(names.map((group, i) => { const angle = i * 2 * Math.PI / names.length; return [group, { x: Math.cos(angle) * radius, y: Math.sin(angle) * radius, z: Math.sin(angle * 2) * radius * .3 }] }))
       graph.graphData({ nodes, links }); rebuildLabels(); redraw()
       clearTimeout(settleTimer)
       whenLaidOut(() => {
-        if (glimpse) {
-          // Keep the shared force layout's clusters and links, then flatten the
-          // decorative copy into the header's shallow space. Only the camera
-          // moves afterwards; simulation cannot throw an outlier off screen.
-          for (const n of nodes) { n.x = n.fx = (n.x ?? 0) * 2.3; n.y = n.fy = (n.y ?? 0) * .3; n.z = n.fz = (n.z ?? 0) * .55 }
-          glimpseLaidOut = true
-        }
+        if (glimpse) glimpseLaidOut = true
         redraw(); if (emphasis.selected) focus(emphasis.selected); else if (!cameraTaken) fit()
       })
       if (!paused) settleTimer = setTimeout(() => { if (emphasis.selected) focus(emphasis.selected); else if (!cameraTaken) fit() }, 1200)
@@ -469,7 +506,9 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
       materials.forEach(m => m.dispose()); materials.clear(); redraw()
     },
     resize(width, height) {
+      const changed = graph.width() !== width || graph.height() !== height
       graph.width(Math.max(1, width)).height(Math.max(1, height)); cancelAnimationFrame(fitFrame)
+      if (changed && options.layoutBias === 'elliptic' && glimpseLaidOut) { fitOnSettle = true; graph.d3ReheatSimulation() }
       const node = g2 && emphasis.selected ? nodes.find(n => n.id === emphasis.selected) : undefined
       if (node) fitFrame = requestAnimationFrame(() => { g2?.centerAt(node.x ?? 0, node.y ?? 0); refreshPicking(0) })
       else if (!cameraTaken && !emphasis.selected) fitFrame = requestAnimationFrame(fit)

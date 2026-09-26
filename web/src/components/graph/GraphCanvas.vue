@@ -18,7 +18,7 @@ import { createGraphRenderer, type GraphData, type GraphDimension, type GraphFPS
 const props = withDefaults(defineProps<{
   data: GraphData; viewerKey?: string; title?: string; summary?: string; selectedId?: string
   matches?: Set<string>; searching?: boolean; fps?: GraphFPS; focusQuery?: string; canvasClass?: string
-  openOnClick?: boolean; keyboardActive?: boolean; minStageHeight?: number; glimpse?: boolean
+  openOnClick?: boolean; keyboardActive?: boolean; minStageHeight?: number; glimpse?: boolean; layoutBias?: 'elliptic'
 }>(), { title: 'Graph', summary: '', selectedId: '', searching: false, fps: 60, focusQuery: 'focus', canvasClass: '', openOnClick: false, keyboardActive: true, minStageHeight: 480, glimpse: false })
 const emit = defineEmits<{ select: [node: GraphNode]; open: [node: GraphNode]; hover: [node: GraphNode | null]; clear: []; 'update:fps': [fps: GraphFPS]; pointer: [event: PointerEvent] }>()
 const route = useRoute(), router = useRouter()
@@ -72,7 +72,7 @@ async function start() {
   error.value = ''
   try {
     const next = await createGraphRenderer(host.value, dimension.value, {
-      reduced: media.matches, signal: request.signal, fps: rate.value, labels: props.glimpse ? 'off' : labels.value, glimpse: props.glimpse,
+      reduced: media.matches, signal: request.signal, fps: rate.value, labels: props.glimpse ? 'off' : labels.value, glimpse: props.glimpse, layoutBias: props.layoutBias,
       select: n => { if (props.glimpse) return; select(n); if (props.openOnClick) emit('open', n) }, open: n => { if (!props.glimpse) emit('open', n) }, clear: () => { if (!props.glimpse) emit('clear') },
       hover: n => { if (props.glimpse) return; hovered.value = n?.id ?? ''; emit('hover', n); emphasis() }, motionState: value => { phase.value = value },
     })

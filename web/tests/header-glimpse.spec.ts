@@ -30,9 +30,13 @@ async function expectClearOfText(page: Page) {
     expect(text, selector).not.toBeNull()
     const overlap = region.x < text.x + text.width && region.x + region.width > text.x && region.y < text.y + text.height && region.y + region.height > text.y
     expect(overlap, `${selector} does not intersect the glimpse`).toBe(false)
-    if (selector === '.title-line') expect(Math.abs(region.y + region.height / 2 - text.y - text.height / 2)).toBeLessThan(1)
     if (selector === '.head-stats') expect(region.x + region.width).toBeLessThanOrEqual(text.x - 28)
   }
+  const textCentre = await page.locator('.head-main').evaluate(el => {
+    const box = el.getBoundingClientRect(), padding = parseFloat(getComputedStyle(el).paddingTop) || 0
+    return box.top + padding + (box.height - padding) / 2
+  })
+  expect(Math.abs(region.y + region.height / 2 - textCentre)).toBeLessThan(1)
   await expect(page.locator('html')).toHaveCSS('opacity', '1')
 }
 
@@ -197,7 +201,7 @@ test('long title and description stay separate from the glimpse while resizing',
   }
 })
 
-test('the 2D fallback also fits the entire graph with padded edges', async ({ page }) => {
+test('the 2D fallback also frames the dense core with faded edges', async ({ page }) => {
   await page.addInitScript(() => {
     const original = HTMLCanvasElement.prototype.getContext
     HTMLCanvasElement.prototype.getContext = function (this: HTMLCanvasElement, type: string, attributes?: CanvasRenderingContext2DSettings) {
@@ -274,31 +278,40 @@ async function textContrast(page: Page, selector: string) {
   return contrast(darkPx, lightPx)
 }
 
-async function expectSoftFittedGraph(page: Page) {
+async function expectSoftFittedGraph(page: Page, checkExtent = false) {
   await page.locator('.glimpse-col').hover()
   await page.getByRole('button', { name: 'Pause motion', exact: true }).click()
   await page.mouse.move(0, 0)
+  await page.waitForTimeout(400)
   await expect(surface(page)).toHaveAttribute('data-motion', 'still')
   const layer = page.locator('.glimpse-canvas'), clip = (await layer.boundingBox())!
   const masked = pngPixels(await page.screenshot({ clip }))
-  // Inspect the unmasked rendering as well: a mask must not conceal clipping.
+  // Height-led framing intentionally lets outliers enter the surrounding fade.
   const original = await layer.getAttribute('style')
-  await layer.evaluate(el => { (el as HTMLElement).style.maskImage = 'none'; (el as HTMLElement).style.opacity = '1' })
-  const unmasked = pngPixels(await page.screenshot({ clip }))
   await layer.evaluate(el => { (el as HTMLElement).style.opacity = '0' })
   const background = pngPixels(await page.screenshot({ clip }))
   await layer.evaluate((el, style) => el.setAttribute('style', style ?? ''), original)
-  for (const [name, pixels] of [['masked', masked], ['unmasked', unmasked]] as const) {
+  for (const [name, pixels] of [['masked', masked]] as const) {
     const points: { x: number; y: number }[] = []
     for (let y = 0; y < pixels.height; y++) for (let x = 0; x < pixels.width; x++) {
       const i = (y * pixels.width + x) * 4
       if ([0, 1, 2].some(c => Math.abs(pixels.data[i + c] - background.data[i + c]) > 2)) points.push({ x, y })
     }
     expect(points.length, `${name}: graph actually paints`).toBeGreaterThan(80)
+    if (checkExtent) {
+      const free = (await page.locator('.glimpse-col').boundingBox())!
+      const width = Math.max(...points.map(p => p.x)) - Math.min(...points.map(p => p.x))
+      const height = Math.max(...points.map(p => p.y)) - Math.min(...points.map(p => p.y))
+      await test.info().attach(`cloud-${page.viewportSize()!.width}`, { body: JSON.stringify({ width, height, freeWidth: free.width, headerHeight: free.height }), contentType: 'application/json' })
+      expect(width / free.width, 'cloud fills 45–55% of free width').toBeGreaterThanOrEqual(.45)
+      expect(width / free.width, 'cloud fills 45–55% of free width').toBeLessThanOrEqual(.55)
+      expect(height / free.height, 'cloud fills 70–85% of header height').toBeGreaterThanOrEqual(.70)
+      expect(height / free.height, 'cloud fills 70–85% of header height').toBeLessThanOrEqual(.85)
+    }
     expect(Math.min(...points.map(p => p.x)), `${name}: left padding`).toBeGreaterThanOrEqual(8)
     expect(Math.max(...points.map(p => p.x)), `${name}: right padding`).toBeLessThan(pixels.width - 8)
-    expect(Math.min(...points.map(p => p.y)), `${name}: top padding`).toBeGreaterThanOrEqual(8)
-    expect(Math.max(...points.map(p => p.y)), `${name}: bottom padding`).toBeLessThan(pixels.height - 8)
+    expect(Math.min(...points.map(p => p.y)), `${name}: top fade`).toBeGreaterThanOrEqual(Math.floor(pixels.height * .07))
+    expect(Math.max(...points.map(p => p.y)), `${name}: bottom fade`).toBeLessThan(pixels.height - Math.floor(pixels.height * .07))
   }
 }
 
@@ -321,12 +334,12 @@ for (const scheme of ['light', 'dark'] as const) {
         await expect(page.locator('.journey-chip')).toBeVisible()
         if (width >= 1280) {
           await expectClearOfText(page)
+          await expect(surface(page)).toHaveAttribute('data-dimension', '3d')
           await expect(page.locator('.glimpse-canvas')).toHaveCSS('opacity', scheme === 'light' ? '0.35' : '0.3')
         }
         const header = page.locator('.project-head')
         await header.screenshot({ path: `${dir}/header-${width}-${scheme}.png` })
-        await page.screenshot({ path: `${dir}/page-${width}-${scheme}.png` })
-        if (width >= 1280) await expectSoftFittedGraph(page)
+        if (width >= 1280) await expectSoftFittedGraph(page, true)
         for (const selector of ['#project-title', '.description', '.stat b']) {
           expect(await textContrast(page, selector), `${selector} ${width} ${scheme}`).toBeGreaterThanOrEqual(4.5)
         }

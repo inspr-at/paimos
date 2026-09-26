@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { graphLayout, glimpsePointInside, glimpseRadius, labelPosition, type GraphData } from '../src/lib/graphRenderer.ts'
+import { graphLayout, glimpseCore, cloudStride, glimpsePointInside, glimpseRadius, labelPosition, type GraphData } from '../src/lib/graphRenderer.ts'
 
-test('glimpse orbs stay 4–10px across every node weight', () => {
+test('glimpse orbs stay 4–8px across every node weight', () => {
   for (const weight of [-1, 0, 1, 10, 1000, NaN, Infinity]) {
     const radius = glimpseRadius({ id: 'orb', label: '', group: '', color: '--teal', weight })
-    assert.ok(radius >= 2 && radius <= 5)
+    assert.ok(radius >= 2 && radius <= 4)
   }
 })
 
@@ -44,4 +44,24 @@ test('mandatory labels clamp to the viewport edge', () => {
   const box = labelPosition(4, 4, 40, 100, 20, [], 300, 300, true)!
   assert.ok(box.x - box.w / 2 >= 0 && box.y - box.h / 2 >= 0)
   assert.ok(box.x + box.w / 2 <= 300 && box.y + box.h / 2 <= 300)
+})
+
+test('the height fit ignores distant satellites without mutating the layout', () => {
+  const node = { id: 'orb', label: '', group: '', color: '--teal' as const, weight: 1, degree: 0 }
+  const cloud = Array.from({ length: 85 }, (_, i) => ({ ...node, id: String(i), x: Math.cos(i) * 300, y: Math.sin(i) * 60, z: Math.cos(i * 2) * 50 }))
+  const outliers = Array.from({ length: 15 }, (_, i) => ({ ...node, id: `outlier-${i}`, x: 9000 + i, y: -6000, z: 4000 }))
+  const nodes = [...cloud, ...outliers], original = structuredClone(nodes)
+  const core = glimpseCore(nodes)
+  assert.equal(core.length, 85)
+  assert.ok(core.every(n => !n.id.startsWith('outlier')))
+  assert.deepEqual(nodes, original)
+  assert.deepEqual(glimpseCore([]), [])
+  assert.equal(glimpseCore([node]).length, 1)
+})
+
+test('elliptic anchors stay distinct for small, prime and composite graph sizes', () => {
+  for (const count of [1, 8, 37, 60, 74, 100, 1000]) {
+    const stride = cloudStride(count)
+    assert.equal(new Set(Array.from({ length: count }, (_, i) => i * stride % count)).size, count)
+  }
 })
