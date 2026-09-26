@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { agentKey, byLead, chipText, elapsedFor, groupLive, liveChanges, liveSummary, phrase, sameLive, skewOf, who, type LiveAgent } from '../src/lib/liveAgents.ts'
+import { advanceActivity, liveState, agentKey, byLead, chipText, elapsedFor, groupLive, liveChanges, liveSummary, phrase, sameLive, skewOf, who, type LiveAgent } from '../src/lib/liveAgents.ts'
 
 const now = Date.parse('2026-09-26T12:00:00Z')
 const ago = (seconds: number) => new Date(now - seconds * 1000).toISOString()
@@ -12,17 +12,17 @@ function agent(fields: Partial<LiveAgent> = {}): LiveAgent {
   }
 }
 
-test('groupLive keeps fresh heartbeats on the server clock and puts the lead first', () => {
+test('groupLive marks stale heartbeats on the server clock and puts the lead first', () => {
   const coordinator = agent({ session_id: 's2', name: 'aeon-coordinator', role: 'coordinator', ticket: null, since: ago(3600) })
   const idleTicketless = agent({ session_id: 's3', name: 'scout', ticket: null, since: ago(60) })
   const early = agent({ session_id: 's4', name: 'early', since: ago(7200) })
   const stale = agent({ session_id: 's5', project_id: 'p2', heartbeat_at: ago(121) })
   const grouped = groupLive([coordinator, idleTicketless, agent(), early, stale], now)
-  assert.deepEqual([...grouped.keys()], ['p1'])
+  assert.deepEqual([...grouped.keys()], ['p1', 'p2'])
   assert.deepEqual(grouped.get('p1')!.map(a => a.session_id), ['s4', 's1', 's3', 's2'])
-  assert.equal(groupLive([stale], now + 0).size, 0)
-  assert.equal(groupLive([stale], now - 2000).size, 1, 'a server clock two seconds earlier still sees it fresh')
-  assert.equal(groupLive([agent({ heartbeat_at: 'not a time' })], now).size, 0)
+  assert.equal(groupLive([stale], now).get('p2')![0]!.state, 'stale')
+  assert.equal(groupLive([stale], now - 2000).get('p2')![0]!.state, 'working', 'a server clock two seconds earlier still sees it fresh')
+  assert.equal(groupLive([agent({ heartbeat_at: 'not a time' })], now).get('p1')![0]!.state, 'stale')
   assert.ok(byLead(agent(), coordinator) < 0)
 })
 
@@ -78,11 +78,52 @@ test('agents joining and leaving a project that stays busy are news too', () => 
   assert.equal(liveChanges(at(nameless), at(agent({ ...nameless, heartbeat_at: ago(2) })), title), '')
 })
 
-test('sameLive ignores heartbeats and notices what the page shows', () => {
+test('sameLive preserves evidence changes for glints and state changes for labels', () => {
   const a = new Map([['p1', [agent()]]])
-  assert.ok(sameLive(a, new Map([['p1', [agent({ heartbeat_at: ago(5) })]]])))
+  assert.ok(sameLive(a, new Map([['p1', [agent()]]])))
+  assert.ok(!sameLive(a, new Map([['p1', [agent({ heartbeat_at: ago(5) })]]])))
+  assert.ok(!sameLive(a, new Map([['p1', [agent({ activity_sequence: 2 })]]])))
+  assert.ok(!sameLive(a, new Map([['p1', [agent({ state: 'stale' })]]])))
   assert.ok(!sameLive(a, new Map([['p1', [agent({ ticket: { id: 't2', key: 'HAUSV-888', title: 'Other', project_id: 'p1' } })]]])))
   assert.ok(!sameLive(a, new Map([['p1', [agent(), agent({ session_id: 's2' })]]])))
   assert.ok(!sameLive(a, new Map([['p2', [agent()]]])))
   assert.ok(!sameLive(a, new Map()))
+})
+
+
+test('waiting is explicit evidence and stale overrides every claimed state', () => {
+  assert.equal(liveState(agent({ activity: 'unknown', phase: 'starting' }), now), 'working')
+  assert.equal(liveState(agent({ state: 'waiting' }), now), 'waiting')
+  assert.equal(liveState(agent({ state: 'waiting', heartbeat_at: ago(121) }), now), 'stale')
+  assert.equal(liveState(agent({ heartbeat_at: ago(20) }), now, 10_000), 'stale')
+  assert.equal(liveSummary([agent({ state: 'waiting' })]), '1 agent: hausv, waiting for approval on HAUSV-887')
+  assert.equal(liveSummary([agent({ state: 'stale' })]), '1 agent: hausv, no recent activity on HAUSV-887')
+})
+
+test('activity pulses only on an observed advance, with monotonic watermarks', () => {
+  const first = advanceActivity(undefined, agent({ activity_sequence: 4 }))
+  assert.equal(first.pulse, 0, 'initial data is a baseline')
+  assert.deepEqual(advanceActivity(first, agent({ activity_sequence: 4 })), first)
+  const heartbeat = advanceActivity(first, agent({ activity_sequence: 4, heartbeat_at: ago(20) }))
+  assert.equal(heartbeat.pulse, 1, 'heartbeat is real evidence even without a sequence change')
+  const sequence = advanceActivity(heartbeat, agent({ activity_sequence: 5, heartbeat_at: ago(20) }))
+  assert.equal(sequence.pulse, 2)
+  const both = advanceActivity(sequence, agent({ activity_sequence: 6, heartbeat_at: ago(10) }))
+  assert.equal(both.pulse, 3, 'coincident updates produce one pulse')
+  assert.deepEqual(advanceActivity(both, agent({ activity_sequence: 4 })), both, 'old response cannot roll back evidence')
+  assert.deepEqual(advanceActivity(both, agent({ activity_sequence: 6, heartbeat_at: ago(10) })), both, 'replayed evidence stays quiet')
+  assert.deepEqual(advanceActivity(both, agent({ activity_sequence: NaN, heartbeat_at: 'invalid' })), both)
+  const unknown = advanceActivity(undefined, agent({ heartbeat_at: 'invalid' }))
+  assert.equal(advanceActivity(unknown, agent({ activity_sequence: 6 })).pulse, 0, 'first valid evidence establishes a baseline')
+})
+
+test('stale evidence neither leads current work nor claims that a session stopped', () => {
+  const stale = agent({ state: 'stale' })
+  const waiting = agent({ state: 'waiting', session_id: 's2', ticket: null })
+  const working = agent({ session_id: 's3', ticket: null })
+  assert.deepEqual([stale, waiting, working].sort(byLead), [working, waiting, stale])
+  const at = (a: LiveAgent) => new Map([['p1', [a]]])
+  assert.equal(liveChanges(at(agent()), at(stale), () => 'Project'), 'No recent activity from hausv on Project.')
+  assert.equal(liveChanges(at(stale), at(agent()), () => 'Project'), 'Activity resumed for hausv on Project.')
+  assert.equal(liveChanges(new Map(), at(stale), () => 'Project'), '')
 })

@@ -111,8 +111,9 @@ const value = (project: Project, kind: StatKind) => kind === 'open' ? project.op
   .name { white-space: normal; }
   .project-desc { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
   .row-more { position: absolute; top: 4px; right: 2px; margin: 0; width: 44px; height: 44px; }
-  .row-live { top: auto; right: 8px; bottom: 9px; translate: none; }
+  .row-live { top: auto; right: 8px; bottom: 12px; translate: none; max-width: 66px; }
   .project-item.live .project-text { padding-right: 0; }
+  .project-item.live .stats-line { padding-right: 30px; min-height: 32px; align-items: center; }
   .stats-line { grid-area: stats; display: flex; flex-wrap: wrap; gap: 4px 16px; }
   .line-stat { display: inline-flex; align-items: center; gap: 5px; }
   .mini { gap: 5px; font-size: 11.5px; }

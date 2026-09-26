@@ -3,7 +3,7 @@ import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { APIError } from '../lib/api'
 import { getLiveAgents } from '../lib/agents'
-import { LIVE_FRESH_MS, LIVE_POLL_MS, groupLive, sameLive, skewOf, type LiveAgent } from '../lib/liveAgents'
+import { LIVE_FRESH_MS, LIVE_POLL_MS, advanceActivity, agentKey, groupLive, sameLive, skewOf, type ActivityEvidence, type LiveAgent } from '../lib/liveAgents'
 
 const NONE: LiveAgent[] = []
 // Elapsed times move on at this pace while someone is at work.
@@ -20,6 +20,9 @@ export const useLiveAgents = defineStore('liveAgents', () => {
   const fresh = ref(LIVE_FRESH_MS)
   const now = ref(Date.now())
   const state = ref<'idle' | 'ready' | 'unavailable'>('idle')
+  const evidence = ref(new Map<string, ActivityEvidence>())
+  const evidenceKey = (agent: LiveAgent) => `${agent.project_id}:${agentKey(agent)}`
+  const eventPulseFor = (agent: LiveAgent) => evidence.value.get(evidenceKey(agent))?.pulse ?? 0
   let watchers = 0
   let poll: ReturnType<typeof setTimeout> | undefined
   let ticker: ReturnType<typeof setInterval> | undefined
@@ -41,12 +44,13 @@ export const useLiveAgents = defineStore('liveAgents', () => {
         const page = await getLiveAgents()
         const at = Date.now()
         items.value = Array.isArray(page.items) ? page.items : []
+        evidence.value = new Map(items.value.map(agent => [evidenceKey(agent), advanceActivity(evidence.value.get(evidenceKey(agent)), agent)]))
         skew.value = skewOf(page, at)
-        if (page.fresh_seconds > 0) fresh.value = page.fresh_seconds * 1000
+        if (Number.isFinite(page.fresh_seconds) && page.fresh_seconds > 0) fresh.value = page.fresh_seconds * 1000
         state.value = 'ready'
         now.value = at
       } catch (e) {
-        if (e instanceof APIError && (e.status === 401 || e.status === 403 || e.status === 404)) { state.value = 'unavailable'; items.value = []; wait = 0 }
+        if (e instanceof APIError && (e.status === 401 || e.status === 403 || e.status === 404)) { state.value = 'unavailable'; items.value = []; evidence.value.clear(); wait = 0 }
         else wait = 60_000
       } finally {
         fetchedAt = Date.now()
@@ -93,5 +97,5 @@ export const useLiveAgents = defineStore('liveAgents', () => {
     }
   }
 
-  return { items, state, now, serverNow, byProject, forProject, refresh, watch }
+  return { items, state, now, serverNow, byProject, forProject, eventPulseFor, refresh, watch }
 })
