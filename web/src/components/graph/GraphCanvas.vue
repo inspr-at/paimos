@@ -9,12 +9,15 @@ import { createGraphRenderer, type GraphData, type GraphDimension, type GraphFPS
 // and open events return adapter node fields (href is advisory, never auto-
 // navigated). Slots add domain-specific toolbar, overlay and footer content.
 // fps defaults to 60; updates emit update:fps. focusQuery defaults to ?focus=1.
+// Ticket views opt into single-click opening, suspend canvas keys behind their
+// panel, and may lower minStageHeight. Knowledge keeps all existing defaults.
 // Like QuoteWorkspace, one mounted workspace serves normal/full-area layouts;
 // rarely used settings stay collapsed and all canvas/camera state survives.
 const props = withDefaults(defineProps<{
   data: GraphData; viewerKey?: string; title?: string; summary?: string; selectedId?: string
   matches?: Set<string>; searching?: boolean; fps?: GraphFPS; focusQuery?: string; canvasClass?: string
-}>(), { title: 'Graph', summary: '', selectedId: '', searching: false, fps: 60, focusQuery: 'focus', canvasClass: '' })
+  openOnClick?: boolean; keyboardActive?: boolean; minStageHeight?: number
+}>(), { title: 'Graph', summary: '', selectedId: '', searching: false, fps: 60, focusQuery: 'focus', canvasClass: '', openOnClick: false, keyboardActive: true, minStageHeight: 480 })
 const emit = defineEmits<{ select: [node: GraphNode]; open: [node: GraphNode]; hover: [node: GraphNode | null]; clear: []; 'update:fps': [fps: GraphFPS]; pointer: [event: PointerEvent] }>()
 const route = useRoute(), router = useRouter()
 const root = ref<HTMLElement>(), host = ref<HTMLElement>(), stage = ref<HTMLElement>(), header = ref<HTMLElement>(), footer = ref<HTMLElement>()
@@ -53,7 +56,7 @@ function measure() {
   if (!focused.value) {
     // Measure actual page chrome instead of a fixed project-header estimate.
     const bottom = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--footer-h')) || 0
-    height.value = Math.max(480, window.innerHeight - root.value.getBoundingClientRect().top - (header.value?.offsetHeight ?? 0) - (footer.value?.offsetHeight ?? 0) - bottom - 12)
+    height.value = Math.max(props.minStageHeight, window.innerHeight - root.value.getBoundingClientRect().top - (header.value?.offsetHeight ?? 0) - (footer.value?.offsetHeight ?? 0) - bottom - 12)
   }
   if (host.value) renderer?.resize(host.value.clientWidth, host.value.clientHeight)
 }
@@ -66,7 +69,7 @@ async function start() {
   try {
     const next = await createGraphRenderer(host.value, dimension.value, {
       reduced: media.matches, signal: request.signal, fps: rate.value, labels: labels.value,
-      select, open: n => emit('open', n), clear: () => emit('clear'),
+      select: n => { select(n); if (props.openOnClick) emit('open', n) }, open: n => emit('open', n), clear: () => emit('clear'),
       hover: n => { hovered.value = n?.id ?? ''; emit('hover', n); emphasis() }, motionState: value => { phase.value = value },
     })
     if (!next) return
@@ -101,7 +104,7 @@ async function syncFocus(value: boolean) {
   measure()
 }
 function keydown(event: KeyboardEvent) {
-  if (event.defaultPrevented) return
+  if (event.defaultPrevented || !props.keyboardActive) return
   if (event.key === 'Escape' && focused.value) {
     event.preventDefault(); event.stopImmediatePropagation(); toggleFocus(); return
   }
@@ -153,7 +156,7 @@ defineExpose({ focus: () => host.value?.focus({ preventScroll: true }), focusNod
   <Teleport to="body" :disabled="!focused">
     <section ref="root" class="graph-viewer" :class="{ 'graph-focus': focused }" :role="focused ? 'dialog' : undefined" :aria-modal="focused ? true : undefined" :aria-label="title" :data-focus="focused">
       <header ref="header" class="graph-header"><div class="graph-heading"><h2>{{ title }}</h2><p role="status">{{ summary }}</p></div><GraphControls :dimension="dimension" :paused="paused" :fallback="fallback" :labels="labels" :fps="rate" :focus="focused" @fit="fit" @dimension="setDimension" @pause="toggleMotion" @labels="setLabels" @fps="setFPS" @focus="toggleFocus"><slot name="controls" /></GraphControls></header>
-      <div ref="stage" class="graph-stage" @pointermove="emit('pointer', $event)" :style="focused ? undefined : { height: `${height}px` }">
+      <div ref="stage" class="graph-stage" @pointermove="emit('pointer', $event)" :style="focused ? undefined : { height: `${height}px`, minHeight: `${minStageHeight}px` }">
         <div ref="host" class="graph-surface" :class="canvasClass" role="img" tabindex="0" :aria-label="surfaceLabel" :data-dimension="dimension" :data-ready="ready" :data-motion="paused ? 'still' : 'on'" :data-motion-phase="phase" :data-labels="labels" :data-fps="rate" />
         <div v-if="error" class="graph-error" role="alert"><p>{{ error }}</p><button type="button" class="btn" @click="start">Try again</button></div>
         <slot :dimension="dimension" :focused="focused" />

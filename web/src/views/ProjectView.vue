@@ -17,6 +17,7 @@ import { settledNavigation } from '../lib/navigation'
 import { command, consume, run } from '../lib/commands'
 import { remember } from '../lib/recents'
 import { apiParams, clearedFilters, effectiveSort, facetOptions, filtersFromQuery, filtersFromView, filtersToQuery, groupFacet, groupRows, hasFilters, orderByStatus, rowTags, sameListState, suggestName, toggleIn, toggleOut, totalFrom, valueLabel, WORK_KINDS, type DateFilter, type Dimension, type EpicRef, type GroupBy, type ListFilters } from '../lib/ticketList'
+import { filterTicketGraph, type TicketGraphState } from '../lib/ticketGraphRenderer'
 import { useTicketList } from '../lib/useTicketList'
 import { absoluteTime, cycleSort, plural, PRIORITIES, priorityLabel, relativeTime, statusMeta, type SortField, type SortKey } from '../lib/work'
 import { useProjects } from '../stores/projects'
@@ -170,6 +171,9 @@ function journeyWalkTo(key: string | null, mode: 'open' | 'move' | 'close') {
   if (typeof window.history.state?.back === 'string' && /(?:\/journey|section=journey)/.test(window.history.state.back) && !window.history.state.back.includes('walk=')) router.back()
   else void router.replace({ path: route.path, query: journeyQuery({ walk: null }) })
 }
+const graphActive = computed(() => viewMode.value === 'graph')
+const graphState = ref<TicketGraphState>({ data: { nodes: [], links: [], truncated: false }, visible: { nodes: [], links: [], truncated: false }, loading: true })
+const ticketGraphView = ref<{ focus: () => void }>()
 const outlineActive = computed(() => viewMode.value === 'outline')
 const outline = useOutline(projectId, filters, outlineActive, list)
 
@@ -223,7 +227,7 @@ const sequence = computed(() => {
   }
   return out
 })
-const total = computed(() => totalFrom(list.facets.value))
+const total = computed(() => graphActive.value ? graphState.value.loading ? null : graphState.value.visible.nodes.length : totalFrom(list.facets.value))
 const showAssignee = computed(() => (outlineActive.value ? outline.rows.value : list.rows.value).some(row => row.assignee))
 
 // One source for the header: the project summary (work counts). It arrives with
@@ -244,6 +248,15 @@ const knownStates = computed(() => Object.keys(list.facets.value.state ?? {}))
 const filtered = computed(() => hasFilters(filters.value))
 
 function options(dimension: Dimension) {
+  if (graphActive.value) {
+    const nodes = filterTicketGraph(graphState.value.data, { ...filters.value, [dimension]: [] }).nodes
+    const counts: Record<string, number> = {}
+    for (const node of nodes) {
+      const value = dimension === 'status' ? node.status : dimension === 'priority' ? node.priority ?? 'none' : node.type
+      counts[value] = (counts[value] ?? 0) + 1
+    }
+    return facetOptions(dimension, counts, filters.value[dimension], list.names).filter(option => dimension !== 'type' || option.value !== 'task')
+  }
   return facetOptions(dimension, list.counts(dimension), filters.value[dimension], list.names, session.identity?.principal.id, { colors: list.colors, epics: list.epics.value })
 }
 function chipLabel(dimension: Dimension, value: string) {
@@ -258,6 +271,7 @@ function needOptions(dimension: Dimension) {
   if (facet && !filters.value[dimension].length) { facetLoading.value = true; void list.requestFacet(facet).finally(() => { facetLoading.value = false }) }
 }
 function sheetOpened() {
+  if (graphActive.value) return
   void list.resolveNames(options('assignee').map(o => o.value))
   void list.loadEpics()
   for (const facet of ['tag', 'cost_unit', 'release']) void list.requestFacet(facet)
@@ -379,12 +393,12 @@ watch(projectId, async id => {
 const queryKey = computed(() => projectId.value && entryResolved.value ? JSON.stringify(apiParams(projectId.value, filters.value)) : '')
 // The Outline without filters loads its own levels; the list query then only supplies
 // counts. With filters or Hide closed, the Outline needs the list's whole match set.
-const listLoadMode = computed(() => journeyActive.value || knowledgeActive.value ? 'counts' : !outlineActive.value ? 'list' : outline.matchMode.value ? 'all' : 'counts')
+const listLoadMode = computed(() => graphActive.value ? 'graph' : journeyActive.value || knowledgeActive.value ? 'counts' : !outlineActive.value ? 'list' : outline.matchMode.value ? 'all' : 'counts')
 watch([queryKey, listLoadMode], async ([value, mode], old) => {
-  if (!value) return
+  if (!value || mode === 'graph') return
   // Switching views on the same query reuses the rows already loaded.
   const sameQuery = !!old && old[0] === value
-  if (sameQuery && old![1] !== 'counts' && mode !== 'counts') { if (mode === 'all') void list.loadAll(); return }
+  if (sameQuery && old![1] !== 'counts' && old![1] !== 'graph' && mode !== 'counts') { if (mode === 'all') void list.loadAll(); return }
   const load = list.load({ pageSize: mode === 'counts' ? 1 : 200 })
   if (mode === 'all') void load.then(() => list.loadAll())
   if (sameQuery) return
@@ -405,6 +419,7 @@ const panelItem = computed(() => {
   return list.rows.value.find(row => row.key.toLowerCase() === key) ?? outline.findByKey(key) ?? (fetched.value?.key.toLowerCase() === key ? fetched.value : null)
 })
 const panelPosition = computed(() => {
+  if (graphActive.value) return null // Graph selection has no list-page order.
   const item = panelItem.value
   if (!item) return null
   const index = sequence.value.findIndex(row => row.id === item.id)
@@ -481,7 +496,7 @@ function closePanel() {
   // Back past every followed link to the list entry the panel was opened from.
   if (back) router.go(-(trail.value.length + 1))
   else void router.replace({ path: sectionPath(), query: listQuery() })
-  void nextTick(() => table.value?.focusGrid())
+  void nextTick(() => graphActive.value ? ticketGraphView.value?.focus() : table.value?.focusGrid())
 }
 let expandedFromPanel = false
 let listScroll = 0
@@ -803,7 +818,7 @@ async function remove(view: SavedView) {
 }
 
 // ---------- Selection and bulk changes ----------
-const selectable = computed(() => writable.value && !journeyActive.value && !knowledgeActive.value && !fullView.value)
+const selectable = computed(() => writable.value && !journeyActive.value && !knowledgeActive.value && !graphActive.value && !fullView.value)
 const selected = ref(new Set<string>())
 let selectAnchor: string | null = null
 function selectRow(row: ListItem, mode: 'toggle' | 'range') {
@@ -1023,11 +1038,12 @@ function keydown(event: KeyboardEvent) {
   const target = event.target as HTMLElement | null
   if (target?.closest?.('.floating') || document.querySelector('.floating')) return
   if (typing(target)) {
-    if (event.key === 'ArrowDown' && target === toolbar.value?.input) { event.preventDefault(); target.blur(); void move(cursorId.value ? 0 : 1) }
+    if (!graphActive.value && event.key === 'ArrowDown' && target === toolbar.value?.input) { event.preventDefault(); target.blur(); void move(cursorId.value ? 0 : 1) }
     return
   }
   // The journey has its own keys; with a ticket open, the panel's keys still work.
   if (journeyActive.value && !ticketKey.value) return
+  if (graphActive.value && ['j', 'k', 'ArrowDown', 'ArrowUp', 'Enter', 'o', 'n'].includes(event.key)) return
   if ((journeyActive.value || knowledgeActive.value) && ['j', 'k', 'ArrowDown', 'ArrowUp', 'Enter', 'o', '/', 'n'].includes(event.key)) return
   const row = sequence.value.find(item => item.id === cursorId.value)
   if (event.key === 'F') { event.preventDefault(); toolbar.value?.openFilterMenu(); return }
@@ -1171,14 +1187,14 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
       </header>
 
       <ViewBar
-        v-if="!journeyActive && !knowledgeActive" ref="viewBar" :views="views.items" :active-id="activeView?.id ?? null" :dirty="viewDirty" :default-id="defaultViewId" :can-save-new="canSaveView && !activeView"
+        v-if="!journeyActive && !knowledgeActive && !graphActive" ref="viewBar" :views="views.items" :active-id="activeView?.id ?? null" :dirty="viewDirty" :default-id="defaultViewId" :can-save-new="canSaveView && !activeView"
         :me="me?.id ?? null" :href-for="hrefFor" @open="id => openView(id)" @save="saveActive" @save-as="startSave" @reset="openView(activeView?.id ?? null, true)"
         @rename="startRename" @duplicate="duplicate" @set-default="setDefaultView" @share="share" @copy-link="copyViewLink" @remove="remove"
       />
       <div ref="stickMark" class="stick-mark" aria-hidden="true" />
       <div v-if="!journeyActive" ref="toolbarWrap" class="toolbar-wrap" :class="{ stuck }">
         <ListToolbar
-          ref="toolbar" :filters="filters" :options="options" :label="chipLabel" :total="total" :loading="list.loading.value" :density="density" :stuck="stuck"
+          ref="toolbar" :filters="filters" :options="options" :label="chipLabel" :total="total" :loading="graphActive ? graphState.loading : list.loading.value" :density="density" :stuck="stuck"
           :facet-loading="facetLoading"
           @search="q => update({ q })" @toggle="toggleValue" @exclude="excludeValue" @clear="dimension => update({ [dimension]: [] })" @clear-all="clearFilters"
           @show-closed="value => update({ showClosed: value })" @group="setGroup" @sort="setSort" @density="setDensity" @date="setDate"
@@ -1199,7 +1215,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
         :filters="knowledgeFilters" :can-write="knowledgeWritable" :now="now" :paused="knowledgeEntryOpen || !!ticketKey" :dock="knowledgeWide" :open-entry="shownEntry?.mode === 'dock' ? shownEntry : null" @update="updateKnowledge"
       />
       <component :is="activeTicketView.component" v-else-if="activeTicketView.component"
-        :project="project" :filters="filters" @open="openKey" />
+        :project="project" :filters="filters" ref="ticketGraphView" @open="openKey" @state="(value: TicketGraphState) => graphState = value" />
       <TicketTable
         v-else ref="table" :expected-rows="expectedRows" :groups="groups" :group="filters.group" :rows-by-id="rowsById" :cursor-id="cursorId" :open-id="panelItem?.id ?? null"
         :query="filters.q" :sort="filters.sort" :density="density"
@@ -1223,7 +1239,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
         @status="anchor => openBulk('status', anchor)" @assignee="anchor => openBulk('assignee', anchor)" @priority="anchor => openBulk('priority', anchor)"
         @labels="anchor => openBulk('labels', anchor)" @move="anchor => openBulk('move', anchor)" @archive="bulkArchive" @clear="clearSelection" @select-all="selectAllMatching"
       />
-      <p v-if="!journeyActive && !knowledgeActive" class="hint">
+      <p v-if="!journeyActive && !knowledgeActive && !graphActive" class="hint">
         <kbd class="keycap">j</kbd><kbd class="keycap">k</kbd> move · <kbd class="keycap"><AppIcon name="enter" /></kbd> open · <kbd class="keycap">/</kbd> search ·
         <button type="button" class="hint-link" @click="run({ name: 'shortcuts' })"><kbd class="keycap">?</kbd> all shortcuts</button>
       </p>
@@ -1246,7 +1262,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
       />
       <StatusMenu v-if="statusMenu" :anchor="statusMenu.anchor" :current="statusMenu.row.state" :known-states="knownStates" :ticket-key="statusMenu.row.key" @choose="chooseStatus" @close="closeStatus" />
       <FilterSheet
-        ref="filterSheet" :filters="filters" :options="options" :total="total" :view="outlineActive ? 'outline' : 'list'" :can-save="canSaveView"
+        ref="filterSheet" :filters="filters" :options="options" :total="total" :view="graphActive ? 'graph' : outlineActive ? 'outline' : 'list'" :can-save="!graphActive && canSaveView"
         @expand-all="outline.expandAll()" @collapse-all="outline.collapseAll()"
         @toggle="toggleValue" @exclude="excludeValue" @clear-all="clearFilters" @show-closed="value => update({ showClosed: value })" @group="setGroup" @date="setDate"
         @opened="sheetOpened" @save-view="anchor => startSave(viewBar?.$el ?? anchor)"
