@@ -141,6 +141,7 @@ var RoutePermissions = map[string]string{
 	// Readers, or the routed plugin agent holding that handoff's operation scope,
 	// can inspect attempt, supersession and current authority on the existing route.
 	"GET /api/stage-handoffs/{handoffId}":                                             "stage_handoffs.read|stage.prepare|stage.deploy|stage.verify|stage.apply",
+	"GET /api/tickets/graph":                                                          "nodes.read",
 	"GET /api/time-entries":                                                           "hours.read",
 	"GET /api/time-periods":                                                           "hours.read",
 	"GET /api/time-periods/{periodId}":                                                "hours.read",

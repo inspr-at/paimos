@@ -57,8 +57,11 @@
 // contract changes. Each builder consumes tenant.PrincipalFrom, db.InTenant,
 // and httpapi.Module from R0; no builder edits those shared packages.
 //
-// New returns an httpapi.Module for /api/kinds and /api/nodes. The coordinator
-// mounts that module; this package does not wire cmd/aeon. Every mutation calls
-// Writer.WriteEvent inside db.InTenant. A nil Writer selects SQLWriter, which
-// inserts the event row until internal/events exposes its writer.
+// New returns an httpapi.Module for /api/kinds, /api/nodes and
+// GET /api/tickets/graph (AEON-196). The coordinator mounts that module; this
+// package does not wire cmd/aeon and does not register a plugin manifest.
+// Every mutation calls Writer.WriteEvent inside db.InTenant. The ticket graph
+// is a read: one tenant transaction, no event, no ticket bodies. A nil Writer
+// selects SQLWriter, which inserts the event row until internal/events exposes
+// its writer.
 package nodes

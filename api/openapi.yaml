@@ -1245,6 +1245,36 @@ paths:
         '400': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
         '409': {$ref: '#/components/responses/Error'}
+  /tickets/graph:
+    get:
+      operationId: getTicketGraph
+      description: |
+        Read-only graph of one project's live tickets and epics. Closed work
+        (status category done: accepted, delivered, done, cancelled, archived)
+        is left out unless include_closed is true, and a link that would touch
+        a left-out node is left out with it. Relation links are blocks, relates,
+        implements and duplicates. blocks stays directed; relates keeps the
+        stored order, smaller id as source. A parent link points from a child
+        to its parent ticket or epic when that parent is also in the answer.
+        At most 1500 nodes, newest updated_at first. Bodies are not read.
+        Project visibility applies: a relation into a project the caller cannot
+        see does not appear, not even as an id.
+      security: *auth
+      parameters:
+        - {name: project_id, in: query, required: true, schema: {type: string, format: uuid}}
+        - {name: include_closed, in: query, schema: {type: boolean, default: false}}
+      responses:
+        '200':
+          description: Bounded graph, without ticket or epic bodies
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/TicketGraph'}
+        '400':
+          $ref: '#/components/responses/Error'
+        '401':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
   /relations:
     get:
       operationId: listRelations
@@ -5155,6 +5185,45 @@ components:
             token:
               type: string
               description: Returned once. Format aeon_<prefix>_<secret>.
+    TicketGraph:
+      type: object
+      required: [nodes, links, truncated]
+      properties:
+        truncated: {type: boolean}
+        nodes:
+          type: array
+          maxItems: 1500
+          items:
+            type: object
+            required: [id, key, title, type, status, status_category, priority, parent_id, release_id, updated_at, link_count]
+            properties:
+              id: {type: string, format: uuid}
+              key: {type: string}
+              title: {type: string}
+              type: {type: string, enum: [ticket, epic]}
+              status: {type: string, description: Stored workflow state}
+              status_category: {type: string, enum: [open, doing, done]}
+              priority:
+                type: [string, 'null']
+              parent_id:
+                type: [string, 'null']
+                format: uuid
+                description: Parent ticket or epic when that parent is visible. Null when the parent is a project, another kind, or not visible.
+              release_id:
+                type: [string, 'null']
+                format: uuid
+                description: Journey release of this ticket when that release node is visible.
+              updated_at: {type: string, format: date-time}
+              link_count: {type: integer, minimum: 0, description: Links in this answer that touch the node}
+        links:
+          type: array
+          items:
+            type: object
+            required: [source, target, kind]
+            properties:
+              source: {type: string, format: uuid}
+              target: {type: string, format: uuid}
+              kind: {type: string, enum: [blocks, relates, implements, duplicates, parent]}
     KnowledgeGraph:
       type: object
       required: [nodes, edges, truncated]

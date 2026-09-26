@@ -55,6 +55,8 @@ func TestAgentScopeSeparatesProjectSubpathsAndUnknownRoutes(t *testing.T) {
 		{"GET", project + "/requirements", "journey.read"},
 		{"GET", project + "/releases/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb/walker", "journey.read"},
 		{"GET", "/api/knowledge/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "knowledge.read"},
+		{"GET", "/api/tickets/graph", "nodes.read"},
+		{"GET", "/api/tickets", ""},
 		{"POST", "/api/knowledge", "knowledge.write"},
 		{"GET", "/api/models/resolve", "models.read"},
 		{"GET", "/api/plugins", "plugins.read"},
