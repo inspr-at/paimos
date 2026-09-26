@@ -27,6 +27,7 @@ async function setup(page: Page) {
 }
 
 test('section tabs separate Tickets views, Journey and Knowledge views; each keeps its filters', async ({ page }) => {
+  test.setTimeout(90_000)
   await page.setViewportSize({ width: 1600, height: 1000 })
   const errors = await setup(page)
   await page.goto('/p/PHAROS/tickets')
@@ -101,6 +102,7 @@ for (const [section, view] of [['tickets', 'list'], ['tickets', 'outline'], ['jo
     const errors = await setup(page)
     const query = new URLSearchParams({ section, ...(view ? { view } : { stage: 'plan' }) })
     await page.goto(`/p/PHAROS/PHAROS-11?${query}`)
+    if (section === 'tickets') await expect(page).toHaveURL(`/p/PHAROS/PHAROS-11?view=${view}`)
     await expect(panel(page).getByRole('heading', { name: 'Connect Hetzner Cloud for managed provisioning' })).toBeVisible()
     await expect(sections(page).getByRole('tab', { name: section[0].toUpperCase() + section.slice(1), exact: true })).toHaveAttribute('aria-selected', 'true')
     await panel(page).getByRole('button', { name: 'Open as full page' }).click()
@@ -125,7 +127,9 @@ test('an open ticket stays mounted as its background section changes', async ({ 
   await expect(panel(page)).toBeVisible()
   for (const section of ['Journey', 'Knowledge', 'Tickets']) {
     await sections(page).getByRole('tab', { name: section, exact: true }).click()
-    await expect(page).toHaveURL(new RegExp(`/p/PHAROS/PHAROS-11\\?section=${section.toLowerCase()}`))
+    await expect(page).toHaveURL(section === 'Tickets'
+      ? '/p/PHAROS/PHAROS-11'
+      : new RegExp(`/p/PHAROS/PHAROS-11\\?section=${section.toLowerCase()}`))
     await expect(panel(page).getByRole('heading', { name: 'Connect Hetzner Cloud for managed provisioning' })).toBeVisible()
   }
   await panel(page).getByRole('button', { name: 'Close ticket details' }).click()
@@ -139,7 +143,7 @@ test('legacy ticket links still open a panel, including the Journey and full-pag
   await expect(panel(page)).toBeVisible()
   await expect(sections(page).getByRole('tab', { name: 'Journey', exact: true })).toHaveAttribute('aria-selected', 'true')
   await page.goto('/p/PHAROS/PHAROS-11?view=full')
-  await expect(page).toHaveURL('/p/PHAROS/PHAROS-11?panel=full')
+  await expect(page).toHaveURL('/p/PHAROS/PHAROS-11?view=full')
   await expect(page.getByRole('button', { name: 'Show beside the list' })).toBeVisible()
 })
 

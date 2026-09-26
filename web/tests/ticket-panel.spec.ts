@@ -229,7 +229,7 @@ test('move to another epic uses a searchable picker; delete asks and then leaves
   const confirm = page.getByRole('dialog', { name: 'Delete PHAROS-14?' })
   await expect(confirm.getByRole('button', { name: 'Cancel' })).toBeFocused()
   await confirm.getByRole('button', { name: 'Delete ticket' }).click()
-  await expect(page).toHaveURL('/p/PHAROS')
+  await expect(page).toHaveURL('/p/PHAROS/tickets')
   await expect(panel(page)).toHaveCount(0)
   await expect(page.locator('tr.ticket-row').filter({ hasText: 'PHAROS-14' })).toHaveCount(0)
   expect(calls.some(call => call.method === 'DELETE' && call.path === '/api/nodes/n-4')).toBe(true)
@@ -345,7 +345,7 @@ test('Tab walks the panel in reading order; Esc closes a popover before the pane
   await expect(ws).toBeVisible()
   await expect(ws.getByRole('button', { name: /Status: Backlog/ })).toBeFocused()
   await page.keyboard.press('Escape')
-  await expect(page).toHaveURL('/p/PHAROS')
+  await expect(page).toHaveURL('/p/PHAROS/tickets')
 })
 
 test('quick create shows unset priority and epic as dimmed values', async ({ page }) => {
@@ -386,7 +386,7 @@ for (const colorScheme of ['light', 'dark'] as const) {
     expect(composer.y + composer.height).toBeGreaterThan(790)
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
     await ws.getByRole('button', { name: 'Close ticket details' }).click()
-    await expect(page).toHaveURL('/p/PHAROS')
+    await expect(page).toHaveURL('/p/PHAROS/tickets')
     expect(errors).toEqual([])
   })
 }

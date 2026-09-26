@@ -67,6 +67,7 @@ const listPrefs = computed(() => listPref.value?.value.value ?? null)
 // On the Knowledge tab the address's search and filters are the tab's own, not the ticket list's.
 const section = computed(() => projectSection(route))
 const sectionPath = (value: ProjectSection = section.value) => `/p/${encodeURIComponent(routeKey.value)}/${value}`
+const ticketSectionQuery = (value: ProjectSection = section.value): Record<string, string> => value === 'tickets' ? {} : { section: value }
 const onKnowledge = () => section.value === 'knowledge'
 const filters = computed(() => filtersFromQuery(section.value !== 'tickets' ? {} : route.query))
 // A view (or a shared link) may carry its own column set; widths stay the person's.
@@ -117,7 +118,7 @@ provide(routerKey, { ...router, push: (to: RouteLocationRaw) => {
   const sameProject = target.params.projectKey === projectKey.value ||
     projects.byRouteKey(String(target.params.projectKey))?.id === projectId.value
   if (!target.params.ticketKey || !sameProject || target.query.section !== undefined || target.query.view !== undefined) return router.push(to)
-  const query: typeof route.query = { ...listQuery(), ...target.query, section: section.value }
+  const query: typeof route.query = { ...listQuery(), ...target.query, ...ticketSectionQuery() }
   delete query.entry
   return router.push({ ...(typeof to === 'string' ? { path: target.path, hash: target.hash } : to), query })
 } })
@@ -144,7 +145,7 @@ watch([dockEntry, knowledgeWide], ([entry]) => {
   // The same width the route guard reads. The cached flag can lag a resize.
   if (entry && !window.matchMedia(DOCK_MEDIA).matches && knowledgeView.value !== 'graph') void router.replace({ path: entryPath(routeKey.value, entry.type, entry.slug), query: knowledgeListQuery.value, hash: route.hash })
 }, { immediate: true })
-const fullViewQuery = computed(() => !!ticketKey.value && route.query.panel === 'full')
+const fullViewQuery = computed(() => !!ticketKey.value && (route.query.panel === 'full' || route.query.view === 'full'))
 const viewMode = computed<ViewMode>(() => section.value === 'tickets' ? activeTicketView.value.id as TicketView : section.value)
 const journeyActive = computed(() => section.value === 'journey')
 // The journey's own place: the stage looked at, a chosen release and the walker's ticket.
@@ -266,7 +267,8 @@ watch(() => filters.value.epic.length > 0 && !!projectId.value, on => { if (on) 
 
 // ---------- URL state ----------
 function modeQuery() {
-  return { view: activeTicketView.value.id, ...(ticketKey.value ? { section: section.value } : {}), ...(fullView.value ? { panel: 'full' } : {}) }
+  return { view: route.query.view === 'full' && fullView.value ? 'full' : activeTicketView.value.id,
+    ...(ticketKey.value ? ticketSectionQuery() : {}), ...(route.query.panel === 'full' ? { panel: 'full' } : {}) }
 }
 function update(patch: Partial<ListFilters>) {
   void router.replace({ path: route.path, query: { ...filtersToQuery({ ...filters.value, ...patch }), ...modeQuery() } })
@@ -282,7 +284,7 @@ function setSection(id: string) {
   sectionQueries[section.value] = query
   const saved = sectionQueries[target] ?? {}
   void router.push({ path: ticketKey.value ? ticketPath(ticketKey.value) : sectionPath(target),
-    query: { ...saved, ...(ticketKey.value ? { section: target } : {}) } })
+    query: { ...saved, ...(ticketKey.value ? ticketSectionQuery(target) : {}) } })
 }
 let viewIntent = 0
 async function setView(view: string) {
@@ -460,7 +462,7 @@ function ticketPath(key: string) { return `/p/${encodeURIComponent(routeKey.valu
 // List navigation (open from the list, j/k, next/previous) replaces the open ticket
 // and clears the back trail; following a link inside the panel pushes a step.
 function openKey(key: string) {
-  const location = { path: ticketPath(key), query: { ...route.query, section: section.value }, state: { trail: [] } }
+  const location = { path: ticketPath(key), query: { ...route.query, ...ticketSectionQuery() }, state: { trail: [] } }
   if (ticketKey.value) { void router.replace(location); return }
   openedFromList = true
   openedQuery = JSON.stringify(location.query)
@@ -469,6 +471,7 @@ function openKey(key: string) {
 function openRow(row: ListItem) { cursorId.value = row.id; openKey(row.key) }
 function listQuery() {
   const { panel: _panel, section: _section, ...query } = route.query
+  if (ticketKey.value && query.view === 'full') delete query.view
   return query
 }
 function closePanel() {
@@ -485,7 +488,10 @@ let listScroll = 0
 function expand() {
   if (!ticketKey.value || fullView.value) return
   expandedFromPanel = true
-  void router.push({ path: route.path, query: { ...route.query, panel: 'full' } })
+  const query = section.value === 'tickets' && route.query.view === undefined
+    ? { ...route.query, view: 'full' }
+    : { ...route.query, panel: 'full' }
+  void router.push({ path: route.path, query })
 }
 // The full page starts at its top; going back returns to the same place in the list.
 watch(fullView, async (full, was) => {
@@ -497,7 +503,7 @@ watch(fullView, async (full, was) => {
 function collapse() {
   if (!fullView.value) return
   if (expandedFromPanel && typeof window.history.state?.back === 'string') router.back()
-  else void router.replace({ path: route.path, query: { ...listQuery(), section: section.value } })
+  else void router.replace({ path: route.path, query: { ...listQuery(), ...ticketSectionQuery() } })
   expandedFromPanel = false
 }
 // ---------- Back trail: links followed inside the panel ----------
@@ -509,7 +515,7 @@ function readTrail() {
 watch(() => route.fullPath, readTrail, { immediate: true })
 function follow(path: string) {
   const current = panelItem.value?.key ?? ticketKey.value.toUpperCase()
-  void router.push({ path, query: { ...route.query, section: section.value }, state: { trail: [...trail.value, current] } })
+  void router.push({ path, query: { ...route.query, ...ticketSectionQuery() }, state: { trail: [...trail.value, current] } })
 }
 function trailBack(steps = 1) { if (trail.value.length) router.go(-Math.min(steps, trail.value.length)) }
 // Related tickets can live in another project: open them where they belong.
@@ -535,7 +541,7 @@ function copyKey(key: string) {
 function newTab(key: string) {
   const project = projects.projects.find(p => key.startsWith(`${p.routeKey}-`))
   const path = project ? `/p/${encodeURIComponent(project.routeKey)}/${encodeURIComponent(key)}` : ticketPath(key)
-  const query = !project || project.id === projectId.value ? { ...listQuery(), section: section.value } : {}
+  const query = !project || project.id === projectId.value ? { ...listQuery(), ...ticketSectionQuery() } : {}
   window.open(router.resolve({ path, query }).href, '_blank', 'noopener')
 }
 function openStatus(row: ListItem, anchor: HTMLElement, from: 'list' | 'panel') {

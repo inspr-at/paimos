@@ -73,7 +73,7 @@ test('j and k move the selection and the pane follows; Esc closes it and keeps t
   await pane(page).getByRole('button', { name: 'Next entry' }).click()
   await expect(page).toHaveURL(`${list}?entry=guideline/no-edge-accents`)
   await page.keyboard.press('Escape')
-  await expect(page).toHaveURL(list)
+  await expect(page).toHaveURL(`${list}?view=entries`)
   await expect(pane(page)).toHaveCount(0)
   await expect(row(page, 'No coloured edge accents')).toBeFocused()
   await expect(row(page, 'No coloured edge accents')).toHaveClass(/cursor/)
@@ -106,7 +106,7 @@ test('the address restores the pane on reload, keeps it while the list is search
   await page.reload()
   await expect(pane(page).getByRole('heading', { level: 1 })).toHaveText('No coloured edge accents')
   await page.getByRole('searchbox', { name: 'Search knowledge in Pharos' }).fill('deploy')
-  await expect(page).toHaveURL(`${list}?q=deploy&entry=guideline/no-edge-accents`)
+  await expect(page).toHaveURL(`${list}?view=entries&q=deploy&entry=guideline/no-edge-accents`)
   await expect(pane(page)).toBeVisible()
   // An old slug lands on the entry that took its place.
   await page.goto(`${list}?entry=runbook/deploy-flow`)
@@ -115,14 +115,14 @@ test('the address restores the pane on reload, keeps it while the list is search
   await page.goto(`${list}?entry=runbook/nope`)
   await expect(pane(page).getByRole('heading', { name: 'No runbook called “nope” in Pharos' })).toBeVisible()
   await pane(page).getByRole('button', { name: 'Close', exact: true }).click()
-  await expect(page).toHaveURL(list)
+  await expect(page).toHaveURL(`${list}?view=entries`)
 })
 
 test('Expand opens the entry’s own page; Esc there returns to the list with the pane', async ({ page }) => {
   await open(page, `${list}?entry=runbook/deploy-release`)
   await expect(pane(page).locator('.e-body')).toBeVisible()
   await pane(page).getByRole('button', { name: 'Open as full page' }).click()
-  await expect(page).toHaveURL('/p/PHAROS/knowledge/runbook/deploy-release')
+  await expect(page).toHaveURL('/p/PHAROS/knowledge/runbook/deploy-release?view=entries')
   await expect(page.getByRole('navigation', { name: 'On this page' })).toBeVisible()
   await page.keyboard.press('Escape')
   await expect(page).toHaveURL(`${list}?entry=runbook/deploy-release`)
@@ -189,7 +189,7 @@ test('the docking edge: from 1200px the pane opens; at 1199px the page does', as
   await expect(pane(page)).toBeVisible()
   expect((await page.locator('.k-list').boundingBox())!.width).toBeGreaterThanOrEqual(520)
   await page.setViewportSize({ width: 1199, height: 900 })
-  await expect(page).toHaveURL('/p/PHAROS/knowledge/runbook/deploy-release')
+  await expect(page).toHaveURL('/p/PHAROS/knowledge/runbook/deploy-release?view=entries')
 })
 
 for (const scheme of ['light', 'dark'] as const) {

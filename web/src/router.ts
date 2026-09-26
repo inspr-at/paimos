@@ -115,7 +115,7 @@ function refreshSession() {
 }
 router.beforeEach(async (to, from) => {
   // Canonical section URLs replace bookmarks without adding a history step.
-  // Ticket addresses stay /p/KEY/TICKET; ?section= preserves their background,
+  // Ticket addresses stay /p/KEY/TICKET; ?section= preserves a non-default background,
   // including across reload, expand/collapse and links inside the side panel.
   if (to.params.projectKey) {
     const query = { ...to.query }
@@ -130,8 +130,8 @@ router.beforeEach(async (to, from) => {
         path = `/p/${encodeURIComponent(String(to.params.projectKey))}/${section}`
         delete query.section
       } else if (section !== 'tickets') query.section = section
+      else delete query.section
     }
-    if (to.params.ticketKey && query.view === 'full') { query.panel = 'full'; delete query.view }
     if (section === 'knowledge' && query.mode !== undefined) {
       if (query.view !== 'graph' && query.view !== 'entries' && query.mode === 'graph') query.view = 'graph'
       delete query.mode
