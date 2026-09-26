@@ -16,8 +16,9 @@ export interface LiveAgent {
   phase: 'starting' | 'working' | 'stopping'; activity: 'busy' | 'unknown'
   // The bound ticket and the project it lives in now (it may have moved on).
   ticket: (NodeSummary & { project_id: string }) | null; since: string; heartbeat_at: string
-  // Optional evidence for callers with richer telemetry (AM1). LA1's compact
-  // endpoint currently supplies heartbeat_at only; no sequence is fabricated.
+  // The last persisted activity entry, withheld with the note when harness.read
+  // is absent. Heartbeats and sequence changes do not advance it.
+  activity_note?: string | null; activity_note_id?: number
   activity_sequence?: number
   // Presentation state. Waiting must come from explicit approval evidence,
   // never from activity=unknown, starting, elapsed time or a missing heartbeat.
@@ -68,7 +69,7 @@ export function groupLive(items: LiveAgent[], serverNow: number, freshMs = LIVE_
 
 // Two readings that show the same thing, including event evidence, so a poll that
 // changes nothing re-renders nothing.
-const shown = (a: LiveAgent) => [a.project_id, a.session_id, a.principal_id, a.name, a.harness, a.role, a.phase, a.activity, a.state, a.ticket?.id, a.ticket?.key, a.ticket?.title, a.ticket?.project_id, a.since, a.heartbeat_at, a.activity_sequence].join('\u0000')
+const shown = (a: LiveAgent) => [a.project_id, a.session_id, a.principal_id, a.name, a.harness, a.role, a.phase, a.activity, a.state, a.ticket?.id, a.ticket?.key, a.ticket?.title, a.ticket?.project_id, a.since, a.heartbeat_at, a.activity_note, a.activity_note_id].join('\u0000')
 export function sameLive(a: Map<string, LiveAgent[]>, b: Map<string, LiveAgent[]>) {
   if (a.size !== b.size) return false
   for (const [id, list] of a) {
@@ -108,15 +109,13 @@ export function chipText(agents: LiveAgent[]) {
 // which agent it is) its harness and start, which a session never changes.
 export const agentKey = (agent: LiveAgent) => agent.session_id ?? `${agent.harness}@${agent.since}`
 
-export interface ActivityEvidence { sequence: number; heartbeat: number; pulse: number }
-// High-water marks prevent a delayed/duplicate poll from replaying a glint.
-// First sight is a baseline, not an event. Two fields advancing together = one pulse.
-export function advanceActivity(previous: ActivityEvidence | undefined, agent: Pick<LiveAgent, 'activity_sequence' | 'heartbeat_at'>): ActivityEvidence {
-  const sequence = Number.isSafeInteger(agent.activity_sequence) && agent.activity_sequence! >= 0 ? agent.activity_sequence! : -1
-  const heartbeat = Date.parse(agent.heartbeat_at)
-  const beat = Number.isFinite(heartbeat) ? heartbeat : -1
-  const advanced = previous && ((previous.sequence >= 0 && sequence > previous.sequence) || (previous.heartbeat >= 0 && beat > previous.heartbeat))
-  return { sequence: Math.max(previous?.sequence ?? -1, sequence), heartbeat: Math.max(previous?.heartbeat ?? -1, beat), pulse: (previous?.pulse ?? 0) + (advanced ? 1 : 0) }
+export interface ActivityEvidence { noteID: number; pulse: number }
+// First sight establishes the baseline. A delayed or repeated response can
+// never replay a glint, and ordinary heartbeat telemetry cannot create one.
+export function advanceActivity(previous: ActivityEvidence | undefined, agent: { activity_note_id?: number }): ActivityEvidence {
+  const id = Number.isSafeInteger(agent.activity_note_id) && agent.activity_note_id! > 0 ? agent.activity_note_id! : 0
+  const noteID = Math.max(previous?.noteID ?? 0, id)
+  return { noteID, pulse: (previous?.pulse ?? 0) + (previous && id > previous.noteID ? 1 : 0) }
 }
 
 // What the live region says when agents start or stop working: nothing on the

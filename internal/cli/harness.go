@@ -418,7 +418,7 @@ func (rt *runtime) harnessBind() *Command {
 	}}
 }
 func (rt *runtime) harnessWorker(kind string) *Command {
-	var project, session, agent, leaseFile, phase, activity, activityKind, deliveryID, level, reason string
+	var project, session, agent, leaseFile, phase, activity, activityKind, note, deliveryID, level, reason string
 	var sequence, cursor int
 	return &Command{Name: kind, Short: "Act as the attributed harness worker", Use: "harness " + kind + " --project KEY --session UUID --agent NAME --worker-lease-file PATH", addFlags: func(fs *flagSet) {
 		fs.string(&project, "project", 'p', "project key")
@@ -428,6 +428,7 @@ func (rt *runtime) harnessWorker(kind string) *Command {
 		switch kind {
 		case "heartbeat":
 			fs.string(&phase, "phase", 0, "starting, working, yielded or stopping")
+			fs.string(&note, "note", 0, "current step, at most 120 characters")
 			fs.string(&activity, "activity", 0, "unknown, busy or idle")
 			fs.string(&activityKind, "activity-kind", 0, "classic content-free adapter event kind")
 			fs.int(&sequence, "activity-sequence", "monotonic sequence")
@@ -480,6 +481,9 @@ func (rt *runtime) harnessWorker(kind string) *Command {
 				}
 			}
 			body = map[string]any{"phase": phase, "activity": activity, "activity_sequence": sequence}
+			if note != "" {
+				body["activity_note"] = note
+			}
 		case "complete-delivery":
 			if !validUUID(deliveryID) || cursor < 1 {
 				return usagef("delivery id and positive cursor required")

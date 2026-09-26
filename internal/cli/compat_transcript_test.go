@@ -279,7 +279,7 @@ func TestHarnessCompatTranscripts(t *testing.T) {
 		{"status", "GET", "/api/projects/" + transcriptProjectID + "/harness-sessions/" + transcriptSessionID, `{"ok":true}`, []string{"--project", "AEON", "--session", transcriptSessionID}},
 		{"orchestrator", "GET", "/api/projects/" + transcriptProjectID + "/harness-sessions/orchestrator", `{"ok":true}`, []string{"--project", "AEON"}},
 		{"bind", "PATCH", "/api/projects/" + transcriptProjectID + "/harness-sessions/" + transcriptSessionID + "/binding", `{"ok":true}`, []string{"--project", "AEON", "--session", transcriptSessionID, "--revision", "1", "--work-shape", "unknown"}},
-		{"heartbeat", "POST", "/api/projects/" + transcriptProjectID + "/harness-sessions/" + transcriptSessionID + "/heartbeat", `{"ok":true}`, append(append([]string{}, baseWorker...), "--phase", "working", "--activity-kind", "turn_started", "--activity-sequence", "1")},
+		{"heartbeat", "POST", "/api/projects/" + transcriptProjectID + "/harness-sessions/" + transcriptSessionID + "/heartbeat", `{"ok":true}`, append(append([]string{}, baseWorker...), "--phase", "working", "--activity-kind", "turn_started", "--activity-sequence", "1", "--note", "Running PDF tests")},
 		{"yield", "POST", "/api/projects/" + transcriptProjectID + "/harness-sessions/" + transcriptSessionID + "/yield", `{"ok":true}`, baseWorker},
 		{"drain", "POST", "/api/projects/" + transcriptProjectID + "/harness-sessions/" + transcriptSessionID + "/drain", `{"ok":true}`, baseWorker},
 		{"complete-delivery", "POST", "/api/projects/" + transcriptProjectID + "/harness-sessions/" + transcriptSessionID + "/complete-delivery", `{"ok":true}`, append(append([]string{}, baseWorker...), "--delivery-id", transcriptEntryID, "--cursor", "1")},
@@ -323,6 +323,9 @@ func TestHarnessCompatTranscripts(t *testing.T) {
 			}
 			if tc.name == "heartbeat" && last.body["activity"] != "busy" {
 				t.Fatalf("classic --activity-kind did not map: %+v", last.body)
+			}
+			if tc.name == "heartbeat" && last.body["activity_note"] != "Running PDF tests" {
+				t.Fatal("heartbeat --note did not reach the request")
 			}
 			if strings.Contains(out+stderr, "local-lease") || strings.Contains(out+stderr, "local-reference") {
 				t.Fatal("private harness input appeared in output")
