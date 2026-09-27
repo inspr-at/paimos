@@ -3,7 +3,7 @@
 import { brand } from '../../lib/brand'
 import { api, getNode } from '../../lib/api'
 import { computed, onMounted, ref, watch } from 'vue'
-import type { Approval, HarnessSession, ProjectMessage, SessionControl } from '../../lib/agents'
+import type { Approval, HarnessSessionDetail, ProjectMessage, SessionControl } from '../../lib/agents'
 import { RUN_OUTCOME, cost, elapsed, runDuration, runModel, scopeLabel, stopReasonLabel, tokens } from '../../lib/agentState'
 import { absoluteTime, relativeTime, statusMeta } from '../../lib/work'
 import { useAgents, type SessionView } from '../../stores/agents'
@@ -15,6 +15,7 @@ import Avatar from '../Avatar.vue'
 import AgentStateLabel from './AgentStateLabel.vue'
 import AgentGlyph from './AgentGlyph.vue'
 import { activityOf, currentStep, type ActivitySession } from './activity'
+import { metadataChangeText, metadataChanges } from './metadataHistory'
 
 // One session in the docked panel: who and where, the bound ticket, recent runs with
 // outcome and duration, telemetry, and the message thread with a composer.
@@ -30,7 +31,7 @@ const sending = ref(false)
 const sendError = ref('')
 const thread = ref<HTMLElement>()
 const composeInput = ref<HTMLTextAreaElement>()
-const detail = ref<(HarnessSession & ActivitySession) | null>(null)
+const detail = ref<(HarnessSessionDetail & ActivitySession) | null>(null)
 const ticketState = ref('')
 
 const s = computed(() => props.view?.session)
@@ -44,16 +45,29 @@ const activity = computed(() => detail.value?.id === s.value?.id ? detail.value 
 const reported = computed(() => detail.value?.id === s.value?.id ? detail.value : s.value)
 const hasWork = computed(() => !!(reported.value?.brief || reported.value?.worktree || reported.value?.branch || reported.value?.commits?.length))
 const timeline = computed(() => activity.value?.activity_history ?? [])
+const metadataHistory = computed(() => metadataChanges(detail.value?.id === s.value?.id ? detail.value?.metadata_history : undefined))
 const step = computed(() => props.view ? activity.value?.activity_note || currentStep(props.view) : '')
 const meta = computed(() => props.view ? [props.view.account, props.view.model].filter(Boolean).join(' · ') : '')
-watch(() => [s.value?.id, props.view ? activityOf(props.view).activity_note : ''], async () => {
+// Fetch only the selected session, and refresh when a heartbeat changes metadata
+// even if the activity note stays the same. The list does not carry history.
+watch([
+  () => s.value?.id,
+  () => s.value?.project_id,
+  () => s.value?.heartbeat_at,
+  () => s.value?.display_label,
+  () => s.value?.model,
+  () => s.value?.reasoning_effort,
+  () => props.view ? activityOf(props.view).activity_note : '',
+], async (_current, _previous, onCleanup) => {
   const current = s.value
   if (!current) return
+  const controller = new AbortController()
+  onCleanup(() => controller.abort())
   try {
-    const response = await api(`/projects/${encodeURIComponent(current.project_id)}/harness-sessions/${encodeURIComponent(current.id)}`)
+    const response = await api(`/projects/${encodeURIComponent(current.project_id)}/harness-sessions/${encodeURIComponent(current.id)}`, { signal: controller.signal })
     if (response.ok) {
-      const body = await response.json() as HarnessSession & ActivitySession
-      if (s.value?.id === current.id) detail.value = body
+      const body = await response.json() as HarnessSessionDetail & ActivitySession
+      if (!controller.signal.aborted && s.value?.id === current.id) detail.value = body
     }
   } catch { /* The list still shows the latest step if detail is unavailable. */ }
 }, { immediate: true })
@@ -192,6 +206,9 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
           <div v-if="reported?.account_label" class="fact"><dt>Subscription</dt><dd>{{ reported.account_label }}</dd></div>
           <div v-if="reported?.harness_version" class="fact"><dt>Version</dt><dd class="mono">{{ reported.harness_version }}</dd></div>
         </dl>
+        <ol v-if="metadataHistory.length" class="metadata-history" aria-label="Recent session changes">
+          <li v-for="(item, index) in metadataHistory" :key="`${item.field}-${item.at}-${index}`"><time :datetime="item.at">{{ relativeTime(item.at, { now }) }}</time><span>{{ metadataChangeText(item) }}</span></li>
+        </ol>
       </section>
 
       <section v-if="hasWork" class="block" aria-labelledby="work-title">
@@ -319,6 +336,10 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
 .activity-timeline li { display: grid; grid-template-columns: 65px minmax(0, 1fr); gap: 10px; align-items: baseline; padding: 8px 0; border-top: 1px solid var(--line); font-size: 12.5px; color: var(--ink); }
 .activity-timeline time { color: var(--ink-3); font-size: 11px; white-space: nowrap; }
 .activity-timeline span { overflow-wrap: anywhere; }
+.metadata-history { display: grid; gap: 0; margin: 12px 0 0; padding: 0; list-style: none; }
+.metadata-history li { display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: 10px; align-items: baseline; padding: 8px 0; border-top: 1px solid var(--line); font-size: 12.5px; color: var(--ink); }
+.metadata-history time { color: var(--ink-3); font-size: 11px; white-space: nowrap; }
+.metadata-history span { overflow-wrap: anywhere; }
 .ticket-detail { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; min-width: 0; color: var(--ink); text-decoration: none; }
 .ticket-detail strong { min-width: 0; flex: 1 1 160px; font-size: 13px; overflow-wrap: anywhere; }
 .ticket-status { padding: 4px 8px; border-radius: 999px; background: var(--chip-bg); color: var(--ink-2); font-size: 11px; white-space: nowrap; }
