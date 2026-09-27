@@ -445,8 +445,8 @@
     }
   },
   "journey": {
-    "version": "journey/1.1",
-    "sha256": "28d58e5082a9d6cd3ef16a14de9dbcd4d5c0fe3e8d88738b8f734649d1193b29",
+    "version": "journey/1.2",
+    "sha256": "70b5eeaaadac51687593bca949a160e1a4df34287785005d371030b1712437d1",
     "shape": {
       "GET /projects/{projectId}/journey 200": {
         "properties": {
@@ -513,6 +513,13 @@
                 "type": "string"
               },
               "reason": {
+                "type": "string"
+              },
+              "renewal_action": {
+                "enum": [
+                  "renew_candidate",
+                  "renew_deploy"
+                ],
                 "type": "string"
               },
               "stage": {

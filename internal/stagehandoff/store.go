@@ -99,7 +99,18 @@ func dependencySet(ctx context.Context, tx pgx.Tx, h Handoff, accessRequired boo
 		var state, outcome, dependencyPlan string
 		var expires time.Time
 		var seq int64
-		err := tx.QueryRow(ctx, `SELECT h.id::text,h.state,h.plan_digest,h.expires_at FROM stage_handoffs h WHERE h.release_node_id=$1::uuid AND h.stage=$2 AND h.operation=$3 ORDER BY h.attempt DESC LIMIT 1`, h.ReleaseNodeID, req.stage, req.operation).Scan(&id, &state, &dependencyPlan, &expires)
+		var renewed bool
+		// A renewal is an explicit new authority boundary. Ordinary journey
+		// transitions retain valid predecessor results; gate renewal requires
+		// evidence from at least the recorded renewal revision. Both the event
+		// and handoff revisions are server-written under the project lock.
+		err := tx.QueryRow(ctx, `SELECT h.id::text,h.state,h.plan_digest,h.expires_at,
+			EXISTS(SELECT 1 FROM events e WHERE e.tenant_id=h.tenant_id AND e.node_id=h.project_node_id
+			  AND e.after->>'current_release_id'=h.release_node_id::text
+			  AND e.type IN ('journey.candidate_renewed','journey.deploy_renewed')
+			  AND (e.after->>'revision')::bigint>h.journey_revision)
+			FROM stage_handoffs h WHERE h.project_node_id=$4::uuid AND h.release_node_id=$1::uuid AND h.stage=$2 AND h.operation=$3
+			ORDER BY h.attempt DESC LIMIT 1`, h.ReleaseNodeID, req.stage, req.operation, h.ProjectNodeID).Scan(&id, &state, &dependencyPlan, &expires, &renewed)
 		if err == nil && state == "succeeded" {
 			err = tx.QueryRow(ctx, `SELECT outcome,terminal_sequence FROM stage_handoff_results WHERE handoff_id=$1::uuid`, id).Scan(&outcome, &seq)
 		}
@@ -108,6 +119,9 @@ func dependencySet(ctx context.Context, tx pgx.Tx, h Handoff, accessRequired boo
 		}
 		if err != nil {
 			return nil, "", err
+		}
+		if renewed {
+			return nil, "", fail(409, "required predecessor predates gate renewal")
 		}
 		if state != "succeeded" || outcome != "succeeded" || dependencyPlan != h.PlanDigest || !expires.After(time.Now()) {
 			return nil, "", fail(409, "required predecessor failed")

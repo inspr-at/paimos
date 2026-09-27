@@ -31,10 +31,10 @@ export interface JourneyStage {
   gate_offer_id?: string; gate_offer_state?: GateOfferState; gate_offer_expires_at?: string
 }
 export type ActionKey = 'confirm_brief' | 'go' | 'reduce_scope' | 'park' | 'drop' | 'reopen' | 'open_first_release' | 'start_build' | 'mark_candidate'
-  | 'approve_candidate' | 'reject_candidate' | 'approve_deploy' | 'retry_deploy' | 'approve_permit' | 'plan_next_release'
+  | 'approve_candidate' | 'reject_candidate' | 'approve_deploy' | 'renew_candidate' | 'renew_deploy' | 'retry_deploy' | 'approve_permit' | 'plan_next_release'
 export type NextKey = 'continue_intake' | 'confirm_brief' | 'decide' | 'reopen' | 'approve_requirements' | 'open_first_release' | 'start_build' | 'wait_for_build'
   | 'mark_candidate' | 'approve_candidate' | 'approve_deploy' | 'retry_deploy' | 'approve_permit' | 'plan_next_release'
-export interface NextAction { key: NextKey; label: string; stage: Stage; available: boolean; reason?: string; approval_request_id: string | null }
+export interface NextAction { key: NextKey; renewal_action?: 'renew_candidate' | 'renew_deploy'; label: string; stage: Stage; available: boolean; reason?: string; approval_request_id: string | null }
 // Whether Pharos can admit a launch now; the reason is the current blocker (empty when it can).
 export interface LaunchReadiness { can_admit: boolean; reason: string }
 export interface Journey {
@@ -319,7 +319,7 @@ function decisionIdentity(journey: Journey): string {
   return JSON.stringify([
     journey.project_node_id, journey.revision, journey.profile, journey.stage, journey.current_release_id,
     journey.requirements_revision, journey.requirements_digest_sha256, journey.requirements_approval_scope,
-    journey.next_action.key, journey.next_action.stage, journey.next_action.approval_request_id,
+    journey.next_action.key, journey.next_action.renewal_action, journey.next_action.stage, journey.next_action.approval_request_id,
   ])
 }
 function requestIdentity(approval: Approval): string {
@@ -340,7 +340,7 @@ export function matchesJourneyConfirmation(confirmation: JourneyConfirmation, jo
 
 // ---------- Copy ----------
 // What each next action means, in the prototype's words.
-export const ACTION_LONG: Record<NextKey, string> = {
+export const ACTION_LONG: Record<NextKey | 'renew_candidate' | 'renew_deploy', string> = {
   continue_intake: 'Aithema turns the conversation and sources into the brief. Nothing is decided yet.',
   confirm_brief: 'Aithema drafted the brief from the sources. Confirm it; the lenses then check business, market, reuse, compliance and risk.',
   decide: 'Compare the estimate with the budget, then go, reduce scope, park or drop. The decision is recorded.',
@@ -352,6 +352,8 @@ export const ACTION_LONG: Record<NextKey, string> = {
   mark_candidate: 'Every ticket of the release is done. Marking it as the candidate hands it to review.',
   approve_candidate: 'Check the preview. Approving hands the release to deployment.',
   approve_deploy: 'Backup evidence and the build are recorded, then the host applies the release.',
+  renew_candidate: 'Apply a fresh candidate approval to this release. Preparation and deployment must report fresh evidence before deployment can resume.',
+  renew_deploy: 'Apply a fresh deployment approval to this release. Preparation and deployment must report fresh evidence before deployment can resume.',
   retry_deploy: 'The host refused the release. Retry with fresh evidence, or send the candidate back.',
   approve_permit: 'Grants the bounded permit to the people who use it. Every use is recorded. Then it is live.',
   plan_next_release: 'Backlog tickets and new input form the next release. The agreed requirements stay; tickets that revise them say so.',

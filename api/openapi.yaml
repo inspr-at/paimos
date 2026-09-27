@@ -3714,7 +3714,7 @@ components:
     StageEvidenceContract: {description: Stage evidence response contract, schema: {type: string, enum: ['stage-evidence/1.0']}}
     StageResultContract: {description: Stage result response contract, schema: {type: string, enum: ['stage-result/1.0']}}
     StageLaunchContract: {description: Stage launch response contract, schema: {type: string, enum: ['stage-launch/1.0']}}
-    JourneyContract: {description: Journey read response contract, schema: {type: string, enum: ['journey/1.1']}}
+    JourneyContract: {description: Journey read response contract, schema: {type: string, enum: ['journey/1.2']}}
     MeContract: {description: Acting principal response contract, schema: {type: string, enum: ['me/1.0']}}
     BaselineBatchesContract: {description: Classic-compatible baseline batch response contract, schema: {type: string, enum: ['baseline-batches/1.0']}}
     ApprovalsContract: {description: Approval response contract, schema: {type: string, enum: ['approvals/1.0']}}
@@ -4170,6 +4170,7 @@ components:
       required: [key, label, stage, available]
       properties:
         key: {type: string, enum: [continue_intake, confirm_brief, decide, reopen, approve_requirements, open_first_release, start_build, wait_for_build, mark_candidate, approve_candidate, approve_deploy, retry_deploy, approve_permit, plan_next_release]}
+        renewal_action: {type: string, enum: [renew_candidate, renew_deploy], description: Explicit action for replacing a nonlive standing gate. Requires the exact current release_id and a fresh approved request. Advances the journey revision and requires fresh preparation and deployment evidence. Older clients using key alone fail closed.}
         label: {type: string}
         stage: {type: string, enum: [inspire, shape, requirements, plan, build, deploy, access, live]}
         available: {type: boolean}
@@ -4187,7 +4188,7 @@ components:
       additionalProperties: false
       required: [action, expected_revision, idempotency_key]
       properties:
-        action: {type: string, enum: [confirm_brief, go, reduce_scope, park, drop, reopen, open_first_release, start_build, mark_candidate, approve_candidate, reject_candidate, approve_deploy, retry_deploy, approve_permit, plan_next_release]}
+        action: {type: string, enum: [confirm_brief, go, reduce_scope, park, drop, reopen, open_first_release, start_build, mark_candidate, approve_candidate, reject_candidate, approve_deploy, renew_candidate, renew_deploy, retry_deploy, approve_permit, plan_next_release]}
         expected_revision: {type: integer, minimum: 1}
         idempotency_key: {type: string, minLength: 1, maxLength: 128}
         approval_request_id: {type: string, format: uuid}

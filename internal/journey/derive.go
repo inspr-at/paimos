@@ -29,6 +29,8 @@ const (
 	actionMarkCandidate       = "mark_candidate"
 	actionApproveCandidate    = "approve_candidate"
 	actionApproveDeploy       = "approve_deploy"
+	actionRenewCandidate      = "renew_candidate"
+	actionRenewDeploy         = "renew_deploy"
 	actionRetryDeploy         = "retry_deploy"
 	actionApprovePermit       = "approve_permit"
 	actionPlanNext            = "plan_next_release"
@@ -360,6 +362,15 @@ func candidateProjection(f facts) (string, string, bool, string, string, bool) {
 
 func deployProjection(f facts) (string, string, bool, string, string, bool) {
 	phase := deployPhase(f)
+	// Historical gates remain evidence, but cannot authorize another launch.
+	// Repair candidate authority first without reopening the build stage.
+	if phase != outcomeSucceeded && f.CandidateGateID != "" && !f.GateLiveByID[f.CandidateGateID] {
+		_, _, ok, reason, id, _ := candidateProjection(f)
+		if !ok && reason == reasonCandidateGate {
+			reason = "The standing candidate gate is no longer live. A fresh approval is required."
+		}
+		return stageDeploy, actionRenewCandidate, ok, reason, id, true
+	}
 	if f.Release != nil && f.Release.State == "refused" && phase != outcomeSucceeded {
 		phase = outcomeFailed
 	}
@@ -386,6 +397,14 @@ func deployProjection(f facts) (string, string, bool, string, string, bool) {
 		return stageDeploy, actionRetryDeploy, ok, reason, id, true
 	default:
 		if f.DeployGateID != "" {
+			if !f.GateLiveByID[f.DeployGateID] {
+				ok, id := offer(f.Deploy)
+				reason := ""
+				if !ok {
+					reason = gateReason(f.Deploy, "The standing deployment gate is no longer live. A fresh approval is required.")
+				}
+				return stageDeploy, actionRenewDeploy, ok, reason, id, true
+			}
 			return stageDeploy, actionApproveDeploy, false, reasonDeployEvidence, "", true
 		}
 		ok, id := offer(f.Deploy)
@@ -498,9 +517,17 @@ func samePerson(decider string, ids ...string) bool {
 }
 
 func nextAction(f facts, stage, key string, available bool, reason, approvalID string) JourneyNextAction {
+	label := actionLabel(f, key)
+	renewal := ""
+	if key == actionRenewCandidate {
+		renewal, key = key, actionApproveCandidate
+	} else if key == actionRenewDeploy {
+		renewal, key = key, actionApproveDeploy
+	}
 	return JourneyNextAction{
 		Key:               key,
-		Label:             actionLabel(f, key),
+		RenewalAction:     renewal,
+		Label:             label,
 		Stage:             stage,
 		Available:         available,
 		Reason:            reason,
@@ -541,6 +568,10 @@ func actionLabel(f facts, key string) string {
 			return "Apply deployment approval"
 		}
 		return "Approve deployment"
+	case actionRenewCandidate:
+		return "Renew candidate approval"
+	case actionRenewDeploy:
+		return "Renew deployment approval"
 	case actionRetryDeploy:
 		return "Retry deployment"
 	case actionApprovePermit:

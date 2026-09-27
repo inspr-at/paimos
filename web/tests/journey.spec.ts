@@ -35,7 +35,7 @@ test('Journey is a third view of the project, with the stage and next action in 
   await expect(rail(page).getByRole('button', { name: '1. Inspire, done' })).toBeVisible()
   // The rail only navigates; the one primary button is on the decision card (the gate is requested, so it approves and starts).
   await expect(rail(page).locator('.btn.primary, .stage-cta')).toHaveCount(0)
-  await expect(page.locator('.btn.primary:visible')).toHaveText(['Approve and start build'])
+  await expect(page.locator('.journey-view .gate-btn:visible')).toHaveText(['Approve and start build'])
   await expect(page.getByRole('heading', { name: 'Plan release 2' })).toBeVisible()
   // [ and ] move between stages.
   await page.locator('body').click({ position: { x: 5, y: 400 } })
