@@ -161,12 +161,15 @@ func TestRemoteManagedHarnessContract(t *testing.T) {
 			_, _ = w.Write([]byte(`{"items":[{"key":"TASK-1","project_id":"project"}]}`))
 		case "/api/projects/project/harness-sessions":
 			var body struct {
-				RunID      string `json:"run_id"`
-				TicketID   string `json:"ticket_node_id"`
-				Management string `json:"management_mode"`
-				Lease      string `json:"worker_lease"`
+				RunID        string `json:"run_id"`
+				TicketID     string `json:"ticket_node_id"`
+				Management   string `json:"management_mode"`
+				Lease        string `json:"worker_lease"`
+				Model        string `json:"model"`
+				Effort       string `json:"reasoning_effort"`
+				AccountLabel string `json:"account_label"`
 			}
-			if json.NewDecoder(r.Body).Decode(&body) != nil || body.RunID != "run" || body.TicketID != "order" || body.Management != "managed" || body.Lease != "private-worker-lease-32-characters-minimum" {
+			if json.NewDecoder(r.Body).Decode(&body) != nil || body.RunID != "run" || body.TicketID != "order" || body.Management != "managed" || body.Lease != "private-worker-lease-32-characters-minimum" || body.Model != "model" || body.Effort != "high" || body.AccountLabel != "Work subscription" {
 				t.Error("managed registration body invalid")
 			}
 			_, _ = w.Write([]byte(`{"id":"session","project_id":"project"}`))
@@ -191,7 +194,7 @@ func TestRemoteManagedHarnessContract(t *testing.T) {
 	if err != nil || project != "project" {
 		t.Fatalf("project lookup: %v", err)
 	}
-	s, err := r.RegisterHarness(ctx, HarnessSession{ID: "generation/reference", ProjectID: project, Lease: "private-worker-lease-32-characters-minimum"},
+	s, err := r.RegisterHarness(ctx, HarnessSession{ID: "generation/reference", ProjectID: project, Lease: "private-worker-lease-32-characters-minimum", Model: "model", ReasoningEffort: "high", AccountLabel: "Work subscription"},
 		"agent", "run", "order", Codex, "host", []string{"status", "interrupt", "stop"})
 	if err != nil || s.ID != "session" {
 		t.Fatalf("registration: %v", err)

@@ -199,6 +199,37 @@ func TestCoordinatorScopesReachWorkRoutes(t *testing.T) {
 	}
 }
 
+func TestAccountMetadataScopeAtMiddleware(t *testing.T) {
+	reset(t)
+	tenantID := insertTenant(t, "account-metadata-scope", "Account metadata scope")
+	m := newMod(t, Config{})
+	handler := m.Middleware(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }))
+	for _, tc := range []struct {
+		name   string
+		scopes []string
+		status int
+	}{
+		{"manager", []string{"account.manage"}, http.StatusNoContent},
+		{"reader", []string{"account.read"}, http.StatusForbidden},
+		{"empty", []string{}, http.StatusForbidden},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			key, err := m.createAgentKey(t.Context(), tenant.Principal{TenantID: tenantID}, tc.name, "", tc.scopes, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			req := httptest.NewRequest(http.MethodPut, "/api/agent-accounts/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/metadata", nil)
+			setPolicyPattern(req)
+			req.Header.Set("Authorization", "Bearer "+key.Token)
+			res := httptest.NewRecorder()
+			handler.ServeHTTP(res, req)
+			if res.Code != tc.status {
+				t.Fatalf("metadata middleware: got %d want %d", res.Code, tc.status)
+			}
+		})
+	}
+}
+
 func TestServicePrincipalsCannotReceiveAgentKeys(t *testing.T) {
 	reset(t)
 	tenantID := insertTenant(t, "service-audit", "Service audit")

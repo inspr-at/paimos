@@ -19,19 +19,22 @@ import (
 
 // Account is an opaque local enrollment. AccountKey is not a vendor credential.
 type Account struct {
-	ID               string     `json:"id"`
-	AccountKey       string     `json:"account_key"`
-	Harness          string     `json:"harness"`
-	DaemonID         string     `json:"daemon_id"`
-	Label            string     `json:"label"`
-	MaxParallel      int        `json:"max_parallel_runs"`
-	RegisteredBy     string     `json:"registered_by_principal_id"`
-	State            string     `json:"state"`
-	LastProbeAt      *time.Time `json:"last_probe_at"`
-	LastProbeOK      *bool      `json:"last_probe_ok"`
-	CreatedAt        time.Time  `json:"created_at"`
-	Windows          []Window   `json:"windows"`
-	daemonGeneration *string
+	ID                string     `json:"id"`
+	AccountKey        string     `json:"account_key"`
+	Harness           string     `json:"harness"`
+	DaemonID          string     `json:"daemon_id"`
+	Label             string     `json:"label"`
+	Plan              string     `json:"plan"`
+	HostLabel         string     `json:"host_label"`
+	AllowedProfileIDs []string   `json:"allowed_model_profile_ids"`
+	MaxParallel       int        `json:"max_parallel_runs"`
+	RegisteredBy      string     `json:"registered_by_principal_id"`
+	State             string     `json:"state"`
+	LastProbeAt       *time.Time `json:"last_probe_at"`
+	LastProbeOK       *bool      `json:"last_probe_ok"`
+	CreatedAt         time.Time  `json:"created_at"`
+	Windows           []Window   `json:"windows"`
+	daemonGeneration  *string
 }
 
 // Window is one allowance bound for a single unit.
@@ -60,6 +63,7 @@ type Reservation struct {
 type RouteResult struct {
 	AccountID    string        `json:"account_id"`
 	AccountKey   string        `json:"account_key"`
+	AccountLabel string        `json:"account_label"`
 	DaemonID     string        `json:"daemon_id"`
 	Reservations []Reservation `json:"reservations"`
 }

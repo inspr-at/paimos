@@ -196,6 +196,9 @@ test('allowance windows: what is left, the pace and which window binds', () => {
   const binding = bindingWindow([window({ id: 'roomy', used: 100 }), window({ id: 'tight', used: 900 })], now)!
   assert.equal(binding.window.id, 'tight')
   assert.equal(bindingWindow(undefined, now), null)
+  const fresh = window({ id: 'fresh', used: 0, provisional: true })
+  assert.equal(bindingWindow([fresh, window({ id: 'tight', used: 900 })], now)!.window.id, 'tight')
+  assert.equal(bindingWindow([fresh], now)!.window.provisional, true)
 })
 
 test('numbers read short: durations, tokens and cost', () => {

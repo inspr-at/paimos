@@ -25,12 +25,13 @@ import (
 )
 
 type enrollment struct {
-	Harness   string              `json:"harness"`
-	Key       string              `json:"key"`
-	AccountID string              `json:"account_id"`
-	Home      string              `json:"home,omitempty"`
-	Identity  string              `json:"identity,omitempty"`
-	Grok      *agentd.GrokBinding `json:"grok,omitempty"`
+	Harness   string                  `json:"harness"`
+	Key       string                  `json:"key"`
+	AccountID string                  `json:"account_id"`
+	Home      string                  `json:"home,omitempty"`
+	Identity  string                  `json:"identity,omitempty"`
+	Grok      *agentd.GrokBinding     `json:"grok,omitempty"`
+	Metadata  *agentd.AccountMetadata `json:"metadata,omitempty"`
 }
 type registry struct {
 	Accounts []enrollment `json:"accounts"`
@@ -151,7 +152,7 @@ func serve(args []string) error {
 		if a.Key == "" || a.AccountID == "" {
 			return errors.New("account registry key missing")
 		}
-		accounts = append(accounts, agentd.EnrolledAccount{ID: a.AccountID, Key: a.Key, Harness: a.Harness})
+		accounts = append(accounts, agentd.EnrolledAccount{ID: a.AccountID, Key: a.Key, Harness: a.Harness, Metadata: a.Metadata})
 		switch a.Harness {
 		case agentd.Codex:
 			codexHomes[a.Key] = a.Home

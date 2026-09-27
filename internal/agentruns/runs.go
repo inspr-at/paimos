@@ -184,11 +184,11 @@ func (m *module) create(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, er
 	}
 	if in.Account != nil {
 		var matches bool
-		if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agent_accounts WHERE id=$1 AND registered_by_principal_id=$2 AND harness=$3)`, *in.Account, in.Agent, harness).Scan(&matches); err != nil {
+		if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agent_accounts WHERE id=$1 AND registered_by_principal_id=$2 AND harness=$3 AND (allowed_model_profile_ids IS NULL OR $4::uuid=ANY(allowed_model_profile_ids)))`, *in.Account, in.Agent, harness, in.Profile).Scan(&matches); err != nil {
 			return nil, err
 		}
 		if !matches {
-			return nil, workorders.Fail(409, "requested account must belong to the run agent and match the model harness")
+			return nil, workorders.Fail(409, "requested account must belong to the run agent and allow the model profile")
 		}
 	}
 	v, err := scan(tx.QueryRow(ctx, `INSERT INTO agent_runs(tenant_id,work_order_id,agent_principal_id,model_profile_id,requested_model,requested_account_id) VALUES($1,$2,$3,$4,$5,$6) RETURNING `+columns, p.TenantID, o.NodeID, in.Agent, in.Profile, model, in.Account))
@@ -269,7 +269,8 @@ func (m *module) claim(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
 	var compatible bool
 	err = tx.QueryRow(ctx, `SELECT a.registered_by_principal_id::text,a.daemon_id,a.state,a.last_daemon_generation,
 	 coalesce(a.last_probe_ok AND a.last_probe_at>clock_timestamp()-interval '2 minutes',false),
-	 EXISTS(SELECT 1 FROM model_profiles m WHERE m.id=$2 AND m.harness=a.harness)
+	 EXISTS(SELECT 1 FROM model_profiles m WHERE m.id=$2 AND m.harness=a.harness AND m.enabled
+         AND (a.allowed_model_profile_ids IS NULL OR m.id=ANY(a.allowed_model_profile_ids)))
 	 FROM agent_accounts a WHERE a.id=$1 FOR UPDATE`, *v.AccountID, v.ProfileID).Scan(&owner, &daemon, &state, &generation, &fresh, &compatible)
 	if err != nil {
 		return nil, err
