@@ -257,6 +257,7 @@ export const GATE_OF_ACTION: Partial<Record<NextKey, Gate>> = {
 export const GATE_OF_STAGE: Record<Stage, Gate | null> = {
   inspire: null, shape: 'shape', requirements: 'requirements', plan: 'build', build: 'candidate', deploy: 'deploy', access: 'access', live: null,
 }
+export const STAGE_OF_GATE: Record<Gate, Stage> = { shape: 'shape', requirements: 'requirements', build: 'plan', candidate: 'build', deploy: 'deploy', access: 'access' }
 export const GATE_LABEL: Record<Gate, string> = {
   shape: 'Shape gate', requirements: 'Requirements gate', build: 'Build gate', candidate: 'Candidate gate', deploy: 'Deployment gate', access: 'Access gate',
 }
@@ -271,24 +272,36 @@ export function gateApprovals(approvals: Approval[], gate: Gate, resourceId: str
     .filter(a => a.resource_kind === 'node' && a.resource_id === resourceId && (a.scope === scope || a.scope.startsWith(`${scope}.`)))
     .sort((a, b) => Date.parse(b.proposed_at) - Date.parse(a.proposed_at))
 }
-// The approval the next action uses: the one the projection offers, or for the
-// requirements gate the newest live one scoped to the revision being agreed.
+// A standing gate is an applied record, never another offer. Its liveness is
+// server evidence at read time; journey/1.1 exposes a deadline only for offers.
+export function gateApprovalState(approval: Approval, stage: JourneyStage | undefined, now: number): GateOfferState | 'applied' | 'unavailable' {
+  if (approval.decision === 'denied') return 'rejected'
+  if (stage?.gate_approval_id === approval.id) return approval.decision === 'approved' ? 'applied' : 'unavailable'
+  if (Date.parse(approval.expires_at) <= now) return 'expired'
+  if (stage?.gate_offer_id === approval.id && stage.gate_offer_state) {
+    if (['pending', 'approved_live'].includes(stage.gate_offer_state) && stage.gate_offer_expires_at) {
+      const expiry = Date.parse(stage.gate_offer_expires_at)
+      if (!Number.isFinite(expiry)) return 'unavailable'
+      if (expiry <= now) return 'expired'
+    }
+    if (stage.gate_offer_state === 'approved_live' && approval.decision !== 'approved') return 'unavailable'
+    return stage.gate_offer_state
+  }
+  return approval.decision === null ? 'pending' : 'unavailable'
+}
+
+// Only the exact projected request can be used. Missing details, a stale
+// requirements scope, or a consumed ID must never fall back to another grant.
 export function offeredApproval(approvals: Approval[], journey: Journey, gate: Gate, now: number): Approval | null {
   const resource = gateOnRelease(gate) ? journey.current_release_id : journey.project_node_id
-  const candidates = gateApprovals(approvals, gate, resource).filter(a => a.decision !== 'denied' && Date.parse(a.expires_at) > now)
-  if (gate === 'requirements') {
-    // The server names the exact scope (revision and content digest); older servers do not.
-    if (journey.requirements_approval_scope) {
-      const exact = candidates.filter(a => a.scope === journey.requirements_approval_scope)
-      return exact.find(a => a.decision === 'approved') ?? exact[0] ?? null
-    }
-    const refined = candidates.filter(a => a.scope.startsWith('journey.requirements.r'))
-    const exact = refined.filter(a => a.scope.startsWith(`journey.requirements.r${journey.revision}.`))
-    const pool = exact.length ? exact : refined
-    return pool.find(a => a.decision === 'approved') ?? pool[0] ?? null
-  }
-  const offered = journey.next_action.approval_request_id
-  return (offered ? candidates.find(a => a.id === offered) : null) ?? candidates.find(a => a.decision === 'approved') ?? candidates[0] ?? null
+  const stage = journey.stages.find(s => s.key === STAGE_OF_GATE[gate])
+  const offered = GATE_OF_ACTION[journey.next_action.key] === gate ? journey.next_action.approval_request_id : stage?.gate_offer_id
+  if (!offered || journey.stages.some(s => s.gate_approval_id === offered)) return null
+  const approval = gateApprovals(approvals, gate, resource).find(a => a.id === offered)
+  if (!approval || !(Date.parse(approval.expires_at) > now)) return null
+  if (gate === 'requirements' && approval.scope !== journey.requirements_approval_scope) return null
+  const state = gateApprovalState(approval, stage, now)
+  return (state === 'pending' && approval.decision === null) || (state === 'approved_live' && approval.decision === 'approved') ? approval : null
 }
 
 // ---------- Copy ----------

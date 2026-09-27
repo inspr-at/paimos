@@ -69,8 +69,7 @@ var stageOrder = []string{
 	stageBuild, stageDeploy, stageAccess, stageLive,
 }
 
-// gateOffer is the selected approval request for one gate, if any. A consumed
-// live request remains visible but cannot authorize another journey action.
+// gateOffer is the selected unconsumed approval request for one gate, if any.
 type gateOffer struct {
 	ID        string
 	DecidedBy string
@@ -131,7 +130,6 @@ type facts struct {
 	Candidate                  gateOffer
 	Deploy                     gateOffer
 	Access                     gateOffer
-	GateOfferByID              map[string]gateOffer
 	ShapeGateID                string
 	RequirementsGateID         string
 	BuildGateID                string
@@ -577,13 +575,9 @@ func stageRail(f facts, current string, blocked bool) []JourneyStage {
 			GateLive:       f.GateLiveByID[gateID],
 			HandoffID:      strPtr(handoff.ID),
 		}
-		// A standing live gate displays the request that actually established it.
-		// The selected unconsumed offer remains separate for a human retry action.
-		displayOffer := gateOfferForStage(f, key)
-		if st.GateLive {
-			displayOffer = f.GateOfferByID[gateID]
-		}
-		if offer := displayOffer; offer.ID != "" {
+		// Standing gate evidence and fresh action authority have separate IDs.
+		// journey/1.1 promises that an offer is never a consumed gate.
+		if offer := gateOfferForStage(f, key); offer.ID != "" && !offer.Consumed {
 			st.GateOfferID = strPtr(offer.ID)
 			st.GateOfferState = offer.State
 			st.GateOfferExpiresAt = offer.ExpiresAt

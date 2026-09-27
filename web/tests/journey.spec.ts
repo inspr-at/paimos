@@ -5,7 +5,7 @@
 import { test, expect, type Page } from '@playwright/test'
 import { join } from 'node:path'
 import { fixtures, me, mockWork, watchErrors } from './work-fixtures'
-import { journeyWorld, mockJourney, type JourneyStart, type WorldOptions } from './journey-fixtures'
+import { journeyWorld, retryJourneyWorld, mockJourney, type JourneyStart, type WorldOptions } from './journey-fixtures'
 import { mockEffectivePermissions } from './authz-fixtures'
 
 async function open(page: Page, start: JourneyStart = 'plan', path = '/p/PHAROS?view=journey', options: WorldOptions & { failPlan?: boolean; kind?: 'person' | 'agent'; noTicketRoute?: boolean } = {}) {
@@ -325,7 +325,7 @@ for (const [label, available, description] of [
     world.handoffs = {}
     world.journey.stages = world.journey.stages.map(stage => stage.key === 'deploy' ? {
       ...stage, state: 'current', handoff_id: null, gate_approval_id: available ? null : request.id,
-      gate_live: !available, gate_offer_id: request.id, gate_offer_state: 'approved_live', gate_offer_expires_at: request.expires_at,
+      gate_live: !available, gate_offer_id: available ? request.id : undefined, gate_offer_state: available ? 'approved_live' : undefined, gate_offer_expires_at: available ? request.expires_at : undefined,
     } : stage)
     world.journey.next_action = {
       key: 'approve_deploy', label, stage: 'deploy', available,
@@ -352,6 +352,101 @@ for (const [label, available, description] of [
     }
   })
 }
+
+for (const width of [1600, 390]) for (const theme of ['light', 'dark'] as const) {
+  test(`distinct deployment retry keeps pending and applied authority separate at ${width} ${theme}`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 })
+    await page.emulateMedia({ colorScheme: theme })
+    await mockWork(page, fixtures())
+    const world = retryJourneyWorld()
+    const calls = await mockJourney(page, world)
+    await page.goto('/p/PHAROS?view=journey')
+    const card = page.getByRole('region', { name: 'Decision: The host did not apply it' })
+    const shot = async (state: string) => {
+      if (process.env.EG2_SHOTS) {
+        await page.screenshot({ path: join(process.env.EG2_SHOTS, `retry-${state}-${width}-${theme}.png`), fullPage: true, animations: 'disabled' })
+        await card.screenshot({ path: join(process.env.EG2_SHOTS, `retry-${state}-${width}-${theme}-card.png`), animations: 'disabled' })
+      }
+    }
+    await expect(card).toContainText('Applied by you')
+    await expect(card.getByRole('button', { name: 'Approve and retry deployment' })).toBeEnabled()
+    await expect(page.getByRole('region', { name: 'Blocked: Launch admission is closed' })).toContainText('Retrying records a new handoff')
+    await shot('pending')
+    // Decide the fresh request separately, then apply it with the primary control.
+    await card.getByRole('button', { name: 'Approve', exact: true }).click()
+    await card.getByRole('button', { name: 'Approve gate', exact: true }).click()
+    await expect(card).toContainText('Approved by you')
+    await expect(card).toContainText('Applied by you')
+    await expect(card).not.toContainText('Approval no longer available')
+    await expect(card.getByRole('button', { name: 'Retry deployment', exact: true })).toBeEnabled()
+    await shot('approved')
+    await card.getByRole('button', { name: 'Retry deployment', exact: true }).click()
+    await page.getByRole('dialog', { name: 'Retry deployment?' }).getByRole('button', { name: 'Retry deployment', exact: true }).click()
+    await expect.poll(() => writes(calls, '/journey/actions').length).toBe(1)
+    expect(writes(calls, '/journey/actions')[0].body.approval_request_id).toBe('ap-fresh-retry')
+    expect(writes(calls, '/decision').map(c => c.path)).toEqual(['/api/approvals/ap-fresh-retry/decision'])
+    await expect(page.getByRole('region', { name: 'Decision: Await deployment evidence' })).toContainText('Applied by you')
+    expect(calls.some(c => c.body.approval_request_id === 'ap-standing-consumed')).toBe(false)
+  })
+}
+
+test('distinct deployment retry primary control decides and applies only the fresh pending ID', async ({ page }) => {
+  await mockWork(page, fixtures())
+  const calls = await mockJourney(page, retryJourneyWorld())
+  await page.goto('/p/PHAROS?view=journey')
+  await page.getByRole('region', { name: 'Decision: The host did not apply it' }).getByRole('button', { name: 'Approve and retry deployment' }).click()
+  await page.getByRole('dialog', { name: 'Retry deployment?' }).getByRole('button', { name: 'Approve and retry deployment' }).click()
+  await expect.poll(() => writes(calls, '/journey/actions').length).toBe(1)
+  expect(writes(calls, '/decision').map(c => c.path)).toEqual(['/api/approvals/ap-fresh-retry/decision'])
+  expect(writes(calls, '/journey/actions')[0].body.approval_request_id).toBe('ap-fresh-retry')
+})
+
+for (const state of ['expired', 'revoked', 'missing'] as const) {
+  test(`distinct deployment retry fails closed with ${state} action evidence`, async ({ page }) => {
+    await mockWork(page, fixtures())
+    const world = retryJourneyWorld(state)
+    const calls = await mockJourney(page, world)
+    await page.goto('/p/PHAROS?view=journey')
+    const card = page.getByRole('region', { name: 'Decision: The host did not apply it' })
+    await expect(card).toContainText('Applied by you')
+    await expect(card.getByRole('button', { name: 'Retry deployment', exact: true })).toBeDisabled()
+    await expect(card).not.toContainText('Approved by you')
+    await expect(card).toContainText(state === 'missing' ? 'details' : state === 'revoked' ? 'Approval revoked' : 'Approval expired at')
+    // The server can later revoke the standing grant without converting it to an offer.
+    world.journey.stages.find(s => s.key === 'deploy')!.gate_live = false
+    await page.reload()
+    await expect(card).toContainText('Applied by you · no longer live')
+    await expect(card.getByRole('button', { name: 'Retry deployment', exact: true })).toBeDisabled()
+    expect(writes(calls, '/journey/actions')).toHaveLength(0)
+    expect(writes(calls, '/decision')).toHaveLength(0)
+  })
+}
+
+test('distinct deployment retry expires at the grant deadline on screen and inside confirmation', async ({ page }) => {
+  const start = Date.now()
+  await page.clock.install({ time: start })
+  await mockWork(page, fixtures())
+  const world = retryJourneyWorld('approved')
+  world.journey.stages.find(s => s.key === 'deploy')!.gate_offer_expires_at = new Date(start + 20_000).toISOString()
+  const calls = await mockJourney(page, world)
+  await page.goto('/p/PHAROS?view=journey')
+  const card = page.getByRole('region', { name: 'Decision: The host did not apply it' })
+  const action = card.getByRole('button', { name: 'Retry deployment', exact: true })
+  await expect(action).toBeEnabled()
+  await action.click()
+  const dialog = page.getByRole('dialog', { name: 'Retry deployment?' })
+  // The grant expires between 15-second display ticks; do not wait for polling.
+  await page.clock.fastForward(15_000)
+  await expect(action).toBeEnabled()
+  await page.clock.fastForward(5_000)
+  await expect(action).toBeDisabled()
+  await expect(card).toContainText('Approval expired at')
+  await expect(card).not.toContainText('Approved by you')
+  await dialog.getByRole('button', { name: 'Retry deployment', exact: true }).click()
+  await expect(page.getByText('The gate is no longer available. Refresh before taking this step.')).toBeVisible()
+  expect(writes(calls, '/journey/actions')).toHaveLength(0)
+  expect(writes(calls, '/decision')).toHaveLength(0)
+})
 
 test('a member sees the deploy gate without an approval action', async ({ page }) => {
   const { calls } = await open(page, 'deploy')

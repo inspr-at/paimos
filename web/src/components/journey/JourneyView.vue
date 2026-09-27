@@ -125,6 +125,19 @@ const plan = usePlan(data, editable, () => { void store.load(projectId.value, tr
 // ---------- The one next action ----------
 const gate = computed(() => journey.value ? GATE_OF_ACTION[journey.value.next_action.key] ?? null : null)
 const approval = computed(() => journey.value && gate.value ? offeredApproval(agents.approvals, journey.value, gate.value, now.value) : null)
+const actionDeadline = computed(() => {
+  const id = journey.value?.next_action.approval_request_id
+  if (!id) return Infinity
+  const offer = journey.value?.stages.find(stage => stage.gate_offer_id === id)
+  const details = agents.approvals.find(item => item.id === id)
+  return Math.min(...[offer?.gate_offer_expires_at, details?.expires_at].map(value => Date.parse(value ?? '')).filter(Number.isFinite))
+})
+// Disable at the effective deadline, even between the ordinary clock ticks.
+let expiryClock: ReturnType<typeof setTimeout> | undefined
+watch([actionDeadline, now], ([deadline]) => {
+  clearTimeout(expiryClock)
+  if (Number.isFinite(deadline) && deadline > now.value) expiryClock = setTimeout(() => { now.value = Date.now() }, Math.min(2_147_483_647, Math.max(0, deadline - Date.now())))
+}, { immediate: true })
 const next = computed<NextState>(() => {
   const j = journey.value
   if (!j) return { label: '', disabled: true, tip: '', busy: false }
@@ -133,12 +146,13 @@ const next = computed<NextState>(() => {
   let disabled = !canAct.value || action.key === 'wait_for_build' || (!action.available && !waitingForGate && action.key !== 'continue_intake' && action.key !== 'decide')
   let tip = !canAct.value ? (props.person ? 'You can read this journey; changing it needs write access.' : 'Only a person can move the journey.') : action.available || waitingForGate ? '' : action.reason ?? ''
   const offeredStage = j.stages.find(stage => stage.gate_offer_id && stage.gate_offer_id === action.approval_request_id)
-  if (offeredStage?.gate_offer_expires_at && Date.parse(offeredStage.gate_offer_expires_at) <= now.value) {
+  const actionDetails = agents.approvals.find(item => item.id === action.approval_request_id)
+  if (offeredStage?.gate_offer_state === 'expired' || (offeredStage?.gate_offer_expires_at && Date.parse(offeredStage.gate_offer_expires_at) <= now.value) || (actionDetails && Date.parse(actionDetails.expires_at) <= now.value)) {
     disabled = true
     tip = 'Gate approval expired. The agent asks again for a fresh one.'
   }
   if (approval.value?.decision === null && !canDecideApproval(approval.value, can)) { disabled = true; tip = 'Deciding this gate requires approval and action permissions.' }
-  if (gate.value && !approval.value && action.key !== 'decide') { disabled = true; tip = tip || `Waiting for the ${gate.value} gate: an agent asks for it, you approve it here.` }
+  if (gate.value && !approval.value && action.key !== 'decide') { disabled = true; tip = tip || (action.approval_request_id ? 'The action gate is unavailable or its details are missing. Refresh to check it.' : `Waiting for the ${gate.value} gate: an agent asks for it, you approve it here.`) }
   // A pending gate is approved by the same click; labels that already say "Approve" stay as they are.
   const label = gate.value && approval.value?.decision === null && action.key !== 'decide' && !/^Approve /.test(action.label) ? `Approve and ${action.label.charAt(0).toLowerCase()}${action.label.slice(1)}` : action.label
   return { label, disabled, tip, busy: store.busy }
@@ -146,6 +160,9 @@ const next = computed<NextState>(() => {
 async function act(action: ActionKey, options: { approval?: Approval | null; reason?: string; done?: string } = {}) {
   try {
     if (!canAct.value || (options.approval?.decision === null && !canDecideApproval(options.approval, can))) throw new Error('You do not have permission to take this step.')
+    // Confirmations can stay open past the effective grant deadline. Recheck
+    // the exact request immediately before deciding or applying it.
+    if (options.approval && (!journey.value || !gate.value || offeredApproval(agents.approvals, journey.value, gate.value, Date.now())?.id !== options.approval.id)) throw new Error('The gate is no longer available. Refresh before taking this step.')
     const before = journey.value?.stage
     // The person who decides the gate is the one who takes the step (the server checks it).
     if (options.approval && options.approval.decision === null) await agents.decide(options.approval, 'approved', '')
@@ -171,6 +188,7 @@ const DONE: Partial<Record<string, (n: string) => string>> = {
   plan_next_release: () => 'The next release is open for planning.',
 }
 async function runNext() {
+  now.value = Date.now()
   const j = journey.value
   if (!j || next.value.disabled && j.next_action.key !== 'continue_intake') return
   const action = j.next_action
@@ -180,8 +198,10 @@ async function runNext() {
   if (action.key === 'wait_for_build') return
   if (action.key === 'approve_requirements') {
     if (!approval.value) return
+    const requested = approval.value
     const ok = await confirmAction({ title: 'Agree the requirements?', body: `${approval.value.decision === null ? 'This approves the requirements gate and agrees' : 'This agrees'} revision ${j.requirements_revision}: features and tickets are generated from it.`, confirmLabel: next.value.label })
     if (!ok) return
+    if (offeredApproval(agents.approvals, j, 'requirements', Date.now())?.id !== requested.id) { toast('The gate is no longer available. Refresh before taking this step.', { tone: 'error' }); return }
     try { await store.agree(projectId.value, approval.value); toast('Requirements agreed. Plan the release next.'); void data.loadRequirements(true); void data.loadReleases(true); void data.loadWork(true); void agents.refreshApprovals() }
     catch (e) { toast(e instanceof Error ? e.message : 'The requirements were not agreed.', { tone: 'error' }) }
     return
@@ -244,7 +264,7 @@ onMounted(() => {
   // The journey moves with agents and gates: refresh it while the page is visible.
   poll.start()
 })
-onBeforeUnmount(() => { window.removeEventListener('keydown', keydown); clearInterval(clock); poll.stop() })
+onBeforeUnmount(() => { window.removeEventListener('keydown', keydown); clearInterval(clock); clearTimeout(expiryClock); poll.stop() })
 </script>
 
 <template>

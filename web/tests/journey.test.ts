@@ -2,8 +2,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  gateApprovals, nextPick, nextPickLabel, offeredApproval, orderedTickets, planWrite, releaseRefs, selectionOf, ticketGroups, walkOrder,
-  type Journey, type Walker, type WalkerTicket,
+  gateApprovals, gateApprovalState, nextPick, nextPickLabel, offeredApproval, orderedTickets, planWrite, releaseRefs, selectionOf, ticketGroups, walkOrder,
+  type Journey, type JourneyStage, type Walker, type WalkerTicket,
 } from '../src/lib/journey.ts'
 import type { Approval } from '../src/lib/agents.ts'
 import type { WorkNode } from '../src/lib/api.ts'
@@ -73,9 +73,36 @@ test('gate approvals match the gate and its resource; requirements need the revi
     approval('b4444', 'journey.build', 'rel', { decision: 'denied' }), approval('b55555', 'journey.build', 'rel', { expires_at: '2026-09-24T09:00:00Z' }),
   ]
   assert.deepEqual(gateApprovals(approvals, 'build', 'rel').map(a => a.id).sort(), ['b1', 'b4444', 'b55555'])
-  const journey = { project_node_id: 'proj', current_release_id: 'rel', revision: 12, next_action: { approval_request_id: 'b1' } } as Journey
+  const journey = { project_node_id: 'proj', current_release_id: 'rel', revision: 12, stages: [], next_action: { key: 'start_build', approval_request_id: 'b1' } } as unknown as Journey
   assert.equal(offeredApproval(approvals, journey, 'build', now)?.id, 'b1')
-  assert.equal(offeredApproval(approvals, journey, 'requirements', now)?.id, 'q22')
-  assert.equal(offeredApproval(approvals, { ...journey, revision: 13 }, 'requirements', now)?.id, 'q333')
+  const requirements = { ...journey, requirements_approval_scope: 'journey.requirements.r12.dabc', next_action: { ...journey.next_action, key: 'approve_requirements' as const, approval_request_id: 'q22' } }
+  assert.equal(offeredApproval(approvals, requirements, 'requirements', now)?.id, 'q22')
+  assert.equal(offeredApproval(approvals, { ...requirements, revision: 13, requirements_approval_scope: 'journey.requirements.r13.dabc' }, 'requirements', now), null)
   assert.equal(offeredApproval([], journey, 'build', now), null)
+})
+
+test('distinct standing and retry IDs retain applied evidence and exact fresh authority', () => {
+  const now = Date.parse('2026-09-27T12:00:00Z')
+  const standing: Approval = { id: 'standing', agent_principal_id: 'agent', scope: 'journey.deploy', resource_kind: 'node', resource_id: 'release', rationale: '', expires_at: '2026-09-27T14:00:00Z', proposed_at: '2026-09-27T10:00:00Z', decision: 'approved' }
+  const retry = { ...standing, id: 'retry', decision: null }
+  const stage = { key: 'deploy', gate_approval_id: standing.id, gate_live: true, gate_offer_id: retry.id, gate_offer_state: 'pending', gate_offer_expires_at: '2026-09-27T12:30:00Z' } as JourneyStage
+  const journey = { project_node_id: 'project', current_release_id: 'release', stages: [stage], next_action: { key: 'retry_deploy', approval_request_id: retry.id } } as Journey
+  assert.equal(gateApprovalState(standing, stage, now), 'applied')
+  assert.equal(offeredApproval([standing, retry], journey, 'deploy', now)?.id, retry.id)
+  assert.equal(offeredApproval([standing], journey, 'deploy', now), null, 'missing exact details cannot borrow the consumed grant')
+  assert.equal(offeredApproval([standing, retry], { ...journey, next_action: { ...journey.next_action, approval_request_id: null } }, 'deploy', now), null)
+  assert.equal(offeredApproval([standing, retry], { ...journey, next_action: { ...journey.next_action, approval_request_id: standing.id } }, 'deploy', now), null)
+  const approved = { ...retry, decision: 'approved' as const }
+  stage.gate_offer_state = 'approved_live'
+  assert.equal(gateApprovalState(approved, stage, now), 'approved_live')
+  assert.equal(offeredApproval([standing, approved], journey, 'deploy', now)?.id, retry.id)
+  const expired = Date.parse(stage.gate_offer_expires_at!)
+  assert.equal(gateApprovalState(approved, stage, expired), 'expired')
+  assert.equal(offeredApproval([standing, approved], journey, 'deploy', expired), null, 'grant deadline precedes request deadline')
+  for (const state of ['revoked', 'grant_missing', 'expired', 'rejected'] as const) {
+    stage.gate_offer_state = state
+    assert.equal(offeredApproval([standing, approved], journey, 'deploy', now), null, state)
+  }
+  stage.gate_live = false
+  assert.equal(gateApprovalState(standing, stage, now), 'applied', 'revocation does not erase the applied historical record')
 })

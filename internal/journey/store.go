@@ -572,7 +572,6 @@ func loadOffers(ctx context.Context, tx pgx.Tx, f *facts) error {
 	}
 	defer rows.Close()
 	seen := map[string]int{}
-	f.GateOfferByID = make(map[string]gateOffer)
 	for rows.Next() {
 		var scope, resource, id, decision, decider string
 		var requestExpiry time.Time
@@ -581,6 +580,11 @@ func loadOffers(ctx context.Context, tx pgx.Tx, f *facts) error {
 		if err := rows.Scan(&scope, &resource, &id, &decision, &decider, &requestExpiry, &grantExpiry, &open, &grantExists, &revoked, &grantLive, &consumed); err != nil {
 			return err
 		}
+		// loadGates owns consumed standing evidence. It must never hide a
+		// pending retry or be published as fresh journey/1.1 offer authority.
+		if consumed {
+			continue
+		}
 		key := scope + "\x00" + resource
 		state := gateOfferState(decision, open, grantExists, revoked, grantLive)
 		expires := requestExpiry
@@ -588,13 +592,9 @@ func loadOffers(ctx context.Context, tx pgx.Tx, f *facts) error {
 			expires = *grantExpiry
 		}
 		offer := gateOffer{ID: id, DecidedBy: decider, Live: state == "approved_live", Consumed: consumed, State: state, ExpiresAt: expires.UTC().Format(time.RFC3339)}
-		f.GateOfferByID[id] = offer
-		// The newest request wins within each class for action selection. Stage
-		// display uses the exact standing gate request from GateOfferByID.
+		// The newest unconsumed request wins within each class.
 		rank := 1
 		switch {
-		case offer.Live && !consumed:
-			rank = 4
 		case offer.Live:
 			rank = 3
 		case state == "pending":

@@ -113,8 +113,8 @@ export function journeyWorld(start: JourneyStart = 'plan', options: WorldOptions
     world.journey.next_action = { key, label: LABEL[key], stage, available: true, approval_request_id: null, ...extra }
   }
   if (start === 'inspire') { set('inspire', 'continue_intake'); world.journey.current_release_id = null; world.requirements = [] }
-  if (start === 'shape') { set('shape', 'decide', { available: false, reason: 'Shape needs an approved gate before go, reduce scope, park or drop.' }); world.journey.current_release_id = null; world.intake.drafts[0].status = 'accepted'; world.intake.drafts[0].accepted_at = ago(60 * 19); world.approvals = options.noGate ? [] : [approval('ap-shape', 'journey.shape', PROJECT, 'The brief is confirmed; the estimate fits the cap.')] }
-  if (start === 'requirements') { set('requirements', 'approve_requirements', { available: false, reason: 'Requirements need an approved gate.' }); world.requirements = world.requirements.map(r => ({ ...r, status: 'draft', revision: 0, generated_ticket_ids: [] })); world.approvals = options.noGate ? [] : [approval('ap-req-old', 'journey.requirements.r11.dold', PROJECT, 'An earlier revision.'), approval('ap-req', world.journey.requirements_approval_scope, PROJECT, 'Three requirements are drafted with their sources.')] }
+  if (start === 'shape') { set('shape', 'decide', { available: false, reason: 'Shape needs an approved gate before go, reduce scope, park or drop.', approval_request_id: options.noGate ? null : 'ap-shape' }); world.journey.current_release_id = null; world.intake.drafts[0].status = 'accepted'; world.intake.drafts[0].accepted_at = ago(60 * 19); world.approvals = options.noGate ? [] : [approval('ap-shape', 'journey.shape', PROJECT, 'The brief is confirmed; the estimate fits the cap.')] }
+  if (start === 'requirements') { set('requirements', 'approve_requirements', { available: false, reason: 'Requirements need an approved gate.', approval_request_id: options.noGate ? null : 'ap-req' }); world.requirements = world.requirements.map(r => ({ ...r, status: 'draft', revision: 0, generated_ticket_ids: [] })); world.approvals = options.noGate ? [] : [approval('ap-req-old', 'journey.requirements.r11.dold', PROJECT, 'An earlier revision.'), approval('ap-req', world.journey.requirements_approval_scope, PROJECT, 'Three requirements are drafted with their sources.')] }
   if (start === 'open') { set('plan', 'open_first_release'); world.journey.current_release_id = null; world.releases = []; world.approvals = [] }
   if (start === 'mark') {
     set('build', 'mark_candidate', { available: false, reason: 'Marking a candidate needs an approved build gate.', approval_request_id: options.noGate ? null : 'ap-mark' })
@@ -123,7 +123,7 @@ export function journeyWorld(start: JourneyStart = 'plan', options: WorldOptions
   }
   if (start === 'build') { set('build', 'wait_for_build', { available: false, reason: 'The build is still in progress.' }); world.walkers['r-2'].state = 'building' }
   if (start === 'deploy') {
-    set('deploy', 'retry_deploy', { available: false, reason: 'Deployment retry needs an approved gate.' })
+    set('deploy', 'retry_deploy', { available: false, reason: 'Deployment retry needs an approved gate.', approval_request_id: options.noGate ? null : 'ap-deploy' })
     world.journey.launch_readiness = { can_admit: false, reason: 'Pharos launch checks are unavailable.' }
     world.journey.stages = world.journey.stages.map(s => s.key === 'deploy' ? { ...s, state: 'blocked', handoff_id: 'h-1' } : s)
     world.walkers['r-2'].state = 'refused'
@@ -140,6 +140,26 @@ export function journeyWorld(start: JourneyStart = 'plan', options: WorldOptions
   }
   if (options.noIntake) world.intake = { sources: [], turns: [], drafts: [] }
   if (options.readiness !== undefined) world.journey.launch_readiness = options.readiness
+  const offered = world.approvals.find(a => a.id === world.journey.next_action.approval_request_id)
+  if (offered) {
+    const key = offered.scope === 'journey.build' ? 'plan' : world.journey.stage
+    Object.assign(world.journey.stages.find(s => s.key === key)!, { gate_offer_id: offered.id, gate_offer_state: 'pending', gate_offer_expires_at: offered.expires_at })
+  }
+  return world
+}
+
+// journey/1.1 keeps consumed evidence separate from the fresh retry offer.
+export function retryJourneyWorld(state: 'pending' | 'approved' | 'expired' | 'revoked' | 'missing' = 'pending') {
+  const world = journeyWorld('deploy')
+  const standing = approval('ap-standing-consumed', 'journey.deploy', 'r-2', 'The applied deployment gate.', { decision: 'approved', decided_by_principal_id: me.id })
+  const retry = approval('ap-fresh-retry', 'journey.deploy', 'r-2', 'A fresh human retry after the host refused deployment.', { decision: state === 'pending' ? null : 'approved', decided_by_principal_id: state === 'pending' ? null : me.id, risk: 'high' })
+  world.approvals = state === 'missing' ? [standing] : [retry, standing]
+  Object.assign(world.journey.stages.find(s => s.key === 'deploy')!, {
+    gate_approval_id: standing.id, gate_live: true,
+    gate_offer_id: retry.id, gate_offer_state: state === 'pending' ? 'pending' : state === 'expired' || state === 'revoked' ? state : 'approved_live',
+    gate_offer_expires_at: ahead(state === 'expired' ? -1 : 30),
+  })
+  Object.assign(world.journey.next_action, { approval_request_id: retry.id, available: state === 'approved' || state === 'missing', reason: state === 'revoked' ? 'Gate approval was revoked. The agent asks again for a fresh one.' : state === 'expired' ? 'Gate approval expired. The agent asks again for a fresh one.' : state === 'pending' ? 'Deployment retry needs an approved gate.' : '' })
   return world
 }
 
@@ -179,6 +199,8 @@ export async function mockJourney(page: Page, world: JourneyWorld, options: { fa
       const found = world.approvals.find(a => a.id === decision[1])
       if (!found) return route.fulfill({ status: 404, json: { error: 'approval not found' } })
       found.decision = body.decision as 'approved' | 'denied'; found.decided_by_principal_id = me.id
+      const stage = world.journey.stages.find(s => s.gate_offer_id === found.id)
+      if (stage) stage.gate_offer_state = found.decision === 'approved' ? 'approved_live' : 'rejected'
       // An approved gate makes the offered action available.
       if (found.decision === 'approved' && world.journey.next_action.approval_request_id === found.id) { world.journey.next_action.available = true; delete world.journey.next_action.reason }
       return route.fulfill({ json: found })
@@ -203,12 +225,19 @@ export async function mockJourney(page: Page, world: JourneyWorld, options: { fa
       const next = world.journey.next_action
       if (body.action !== next.key && !(next.key === 'decide' && ['go', 'reduce_scope', 'park', 'drop'].includes(String(body.action))) && body.action !== 'reject_candidate') return route.fulfill({ status: 409, json: { error: 'that action is not available' } })
       const gate = world.approvals.find(a => a.id === body.approval_request_id)
+      if (world.journey.stages.some(s => s.gate_approval_id && s.gate_approval_id === body.approval_request_id)) return route.fulfill({ status: 409, json: { error: 'approval already consumed' } })
       if (!['confirm_brief', 'plan_next_release', 'open_first_release'].includes(next.key) && (!gate || gate.decision !== 'approved')) return route.fulfill({ status: 403, json: { error: 'approval does not grant this action' } })
       bump()
       if (body.action === 'start_build') {
         world.walkers['r-2'].state = 'building'
         world.journey.stage = 'build'; world.journey.stages = rail('build')
         world.journey.next_action = { key: 'wait_for_build', label: 'Building', stage: 'build', available: false, reason: 'The build is still in progress.', approval_request_id: null }
+      } else if (body.action === 'retry_deploy') {
+        world.walkers['r-2'].state = 'deploying'
+        const stage = world.journey.stages.find(s => s.key === 'deploy')!
+        stage.gate_approval_id = gate!.id; stage.gate_live = true
+        delete stage.gate_offer_id; delete stage.gate_offer_state; delete stage.gate_offer_expires_at
+        world.journey.next_action = { key: 'approve_deploy', label: 'Await deployment evidence', stage: 'deploy', available: false, reason: 'Deployment evidence is not terminal.', approval_request_id: null }
       } else if (body.action === 'mark_candidate') {
         world.walkers['r-2'].state = 'candidate'
         world.journey.next_action = { key: 'approve_candidate', label: 'Approve candidate', stage: 'build', available: false, reason: 'Candidate review needs an approved gate.', approval_request_id: null }

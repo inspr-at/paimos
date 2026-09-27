@@ -190,11 +190,11 @@ func TestJourneyStageGateLiveTracksRevocationAndExpiry(t *testing.T) {
 	newer := f.grant(t, f.agent.ID, f.person.ID, journey.ScopeDeploy, release)
 	change(`INSERT INTO journey_gates(tenant_id,project_node_id,release_node_id,gate,approval_request_id) VALUES($1::uuid,$2::uuid,$3::uuid,'deploy',$4::uuid)`, f.tenant, project, release, newer)
 	change(`UPDATE agent_permission_grants SET revoked_at=now() WHERE approval_request_id=$1::uuid`, newer)
-	if got := stage(t); got.GateApprovalID == nil || *got.GateApprovalID != approval || !got.GateLive || testPtr(got.GateOfferID) != approval || got.GateOfferState != "approved_live" {
+	if got := stage(t); got.GateApprovalID == nil || *got.GateApprovalID != approval || !got.GateLive || got.GateOfferID != nil {
 		t.Fatalf("older live gate with newer revoked history: %+v", got)
 	}
 	change(`UPDATE agent_permission_grants SET valid_until=now()-interval '1 second' WHERE approval_request_id=$1::uuid`, approval)
-	if got := stage(t); got.GateApprovalID == nil || *got.GateApprovalID != newer || got.GateLive || testPtr(got.GateOfferID) != newer || got.GateOfferState != "revoked" {
+	if got := stage(t); got.GateApprovalID == nil || *got.GateApprovalID != newer || got.GateLive || got.GateOfferID != nil {
 		t.Fatalf("expired gate: %+v", got)
 	}
 }
@@ -241,8 +241,8 @@ func TestJourneyMultiOfferProjectionKeepsConsumedAuthoritySeparate(t *testing.T)
 	change(`INSERT INTO journey_gates(tenant_id,project_node_id,release_node_id,gate,approval_request_id)
 		VALUES($1::uuid,$2::uuid,$3::uuid,'candidate',$4::uuid)`, f.tenant, project, release, liveCandidate)
 	view := get()
-	if got := stage(view, "build"); !got.GateLive || testPtr(got.GateApprovalID) != liveCandidate || testPtr(got.GateOfferID) != liveCandidate || got.GateOfferState != "approved_live" {
-		t.Fatalf("consumed live candidate must outrank expired offer: %+v", got)
+	if got := stage(view, "build"); !got.GateLive || testPtr(got.GateApprovalID) != liveCandidate || testPtr(got.GateOfferID) != oldCandidate || got.GateOfferState != "expired" {
+		t.Fatalf("standing candidate evidence must remain distinct from expired unconsumed history: %+v", got)
 	}
 	if view.NextAction.Key != "approve_deploy" || view.NextAction.Available {
 		t.Fatalf("deploy still awaits its own gate: %+v", view.NextAction)
@@ -261,33 +261,80 @@ func TestJourneyMultiOfferProjectionKeepsConsumedAuthoritySeparate(t *testing.T)
 	change(`INSERT INTO journey_gates(tenant_id,project_node_id,release_node_id,gate,approval_request_id)
 		VALUES($1::uuid,$2::uuid,$3::uuid,'deploy',$4::uuid)`, f.tenant, project, release, liveDeploy)
 	view = get()
-	if got := stage(view, "deploy"); !got.GateLive || testPtr(got.GateOfferID) != liveDeploy || got.GateOfferState != "approved_live" {
-		t.Fatalf("consumed live deploy gate must remain displayed: %+v", got)
+	if got := stage(view, "deploy"); !got.GateLive || testPtr(got.GateApprovalID) != liveDeploy || testPtr(got.GateOfferID) != oldDeploy || got.GateOfferState != "expired" {
+		t.Fatalf("standing deploy gate must never be published as an offer: %+v", got)
 	}
 	if view.NextAction.Available || view.NextAction.ApprovalRequestID != nil || view.NextAction.Label != "Await deployment evidence" {
 		t.Fatalf("consumed gate must not be offered for reuse: %+v", view.NextAction)
 	}
 	// The older request becomes live again while the newer consumed gate is
 	// standing. It may be an action candidate, but cannot replace that gate's
-	// displayed identity or evidence.
+	// standing identity or evidence.
 	change(`UPDATE agent_permission_grants SET valid_until=now()+interval '2 hours' WHERE approval_request_id=$1::uuid`, oldDeploy)
 	view = get()
-	if got := stage(view, "deploy"); !got.GateLive || testPtr(got.GateApprovalID) != liveDeploy || testPtr(got.GateOfferID) != liveDeploy || got.GateOfferState != "approved_live" {
-		t.Fatalf("standing gate must outrank older unconsumed live offer in display: %+v", got)
+	if got := stage(view, "deploy"); !got.GateLive || testPtr(got.GateApprovalID) != liveDeploy || testPtr(got.GateOfferID) != oldDeploy || got.GateOfferState != "approved_live" {
+		t.Fatalf("standing gate and older unconsumed offer must retain separate identities: %+v", got)
 	}
 	if view.NextAction.Available || view.NextAction.ApprovalRequestID != nil || view.NextAction.Label != "Await deployment evidence" {
 		t.Fatalf("standing gate awaits evidence despite older live offer: %+v", view.NextAction)
 	}
 	// A new request remains available to an explicit human retry after failure.
 	change(`UPDATE agent_permission_grants SET valid_until=now()-interval '1 second' WHERE approval_request_id=$1::uuid`, oldDeploy)
-	freshRetry := f.grant(t, f.agent.ID, f.person.ID, journey.ScopeDeploy, release)
+	var freshRetry string
+	if err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.tenant, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `INSERT INTO approval_requests(tenant_id,proposed_by_principal_id,agent_principal_id,scope,resource_kind,resource_id,rationale,expires_at)
+			VALUES($1::uuid,$2::uuid,$2::uuid,$3,'node',$4::uuid,'Fresh human retry',now()+interval '2 hours') RETURNING id::text`, f.tenant, f.agent.ID, journey.ScopeDeploy, release).Scan(&freshRetry)
+	}); err != nil {
+		t.Fatal(err)
+	}
 	f.setReleaseState(t, release, "refused")
 	view = get()
-	if got := stage(view, "deploy"); !got.GateLive || testPtr(got.GateApprovalID) != liveDeploy || testPtr(got.GateOfferID) != liveDeploy || got.GateOfferState != "approved_live" {
+	if got := stage(view, "deploy"); !got.GateLive || testPtr(got.GateApprovalID) != liveDeploy || testPtr(got.GateOfferID) != freshRetry || got.GateOfferState != "pending" {
+		t.Fatalf("pending retry must outrank consumed live gate and expired history: %+v", got)
+	}
+	if view.NextAction.Key != "retry_deploy" || view.NextAction.Available || testPtr(view.NextAction.ApprovalRequestID) != freshRetry || !strings.Contains(view.NextAction.Reason, "needs an approved gate") {
+		t.Fatalf("pending retry must be bound to the human approval action: %+v", view.NextAction)
+	}
+	change(`INSERT INTO approval_decisions(tenant_id,request_id,decided_by_principal_id,decision) VALUES($1::uuid,$2::uuid,$3::uuid,'approved')`, f.tenant, freshRetry, f.person.ID)
+	change(`INSERT INTO agent_permission_grants(tenant_id,approval_request_id,agent_principal_id,scope,resource_kind,resource_id,valid_until)
+		SELECT tenant_id,id,agent_principal_id,scope,resource_kind,resource_id,expires_at FROM approval_requests WHERE id=$1::uuid`, freshRetry)
+	change(`UPDATE agent_permission_grants SET valid_until=now()+interval '30 minutes' WHERE approval_request_id=$1::uuid`, freshRetry)
+	view = get()
+	if got := stage(view, "deploy"); !got.GateLive || testPtr(got.GateApprovalID) != liveDeploy || testPtr(got.GateOfferID) != freshRetry || got.GateOfferState != "approved_live" {
 		t.Fatalf("retry offer must not displace standing gate evidence: %+v", got)
 	}
 	if view.NextAction.Key != "retry_deploy" || !view.NextAction.Available || testPtr(view.NextAction.ApprovalRequestID) != freshRetry {
 		t.Fatalf("fresh retry must remain available for human apply: %+v", view.NextAction)
+	}
+	var grantExpiry time.Time
+	if err := db.InTenant(t.Context(), f.db.App, f.tenant, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `SELECT valid_until FROM agent_permission_grants WHERE approval_request_id=$1::uuid`, freshRetry).Scan(&grantExpiry)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got := stage(view, "deploy"); got.GateOfferExpiresAt != grantExpiry.UTC().Format(time.RFC3339) {
+		t.Fatalf("retry deadline must use the earlier grant expiry: %+v", got)
+	}
+	// A pending newer request cannot hide an approved live retry either.
+	change(`INSERT INTO approval_requests(tenant_id,proposed_by_principal_id,agent_principal_id,scope,resource_kind,resource_id,rationale,expires_at)
+		VALUES($1::uuid,$2::uuid,$2::uuid,$3,'node',$4::uuid,'Newer pending retry',now()+interval '2 hours')`, f.tenant, f.agent.ID, journey.ScopeDeploy, release)
+	if got := get(); testPtr(got.NextAction.ApprovalRequestID) != freshRetry || !got.NextAction.Available {
+		t.Fatalf("approved unconsumed retry must outrank newer pending: %+v", got.NextAction)
+	}
+	// Revocation/expiry of the fresh offer must not borrow the standing grant.
+	for _, state := range []string{"revoked", "expired"} {
+		if state == "revoked" {
+			change(`UPDATE agent_permission_grants SET revoked_at=now() WHERE approval_request_id=$1::uuid`, freshRetry)
+		} else {
+			change(`UPDATE agent_permission_grants SET revoked_at=NULL,valid_until=now()-interval '1 second' WHERE approval_request_id=$1::uuid`, freshRetry)
+		}
+		view = get()
+		if got := stage(view, "deploy"); !got.GateLive || testPtr(got.GateApprovalID) != liveDeploy || got.GateOfferState != "pending" {
+			t.Fatalf("%s retry must yield to unconsumed pending request, retaining standing evidence: %+v", state, got)
+		}
+		if view.NextAction.Available || testPtr(view.NextAction.ApprovalRequestID) == liveDeploy || testPtr(view.NextAction.ApprovalRequestID) == freshRetry {
+			t.Fatalf("%s retry cannot authorize another action: %+v", state, view.NextAction)
+		}
 	}
 }
 
@@ -324,7 +371,7 @@ func TestJourneyRequirementsGateUsesCurrentRevisionScope(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if got := stage(get()); !got.GateLive || testPtr(got.GateOfferID) != approval {
+	if got := stage(get()); !got.GateLive || testPtr(got.GateApprovalID) != approval || got.GateOfferID != nil {
 		t.Fatalf("current revision gate should be live: %+v", got)
 	}
 	if _, err := f.db.Admin.Exec(t.Context(), `UPDATE journey_projects SET revision=revision+1 WHERE project_node_id=$1::uuid`, project); err != nil {
