@@ -542,6 +542,26 @@ test('a lost allowance response is reconciled and is not posted again', async ()
   assert.equal(await matchOngoingLimit(ACCOUNT, body), 'unknown')
 })
 
+test('a session reset stops the allowance batch before reconciliation or another write', async () => {
+  const body = {
+    starts_at: '2026-09-27T18:00:00Z', ends_at: '2026-09-27T23:00:00Z',
+    unit: 'requests' as const, allowance: 4, pace_model: 'unrestricted' as const, burst_ratio: 0,
+  }
+  for (const status of [200, 503]) {
+    const calls: string[] = []
+    let release: (response: Response) => void = () => {}
+    globalThis.fetch = (url) => {
+      calls.push(String(url))
+      return new Promise(resolve => { release = resolve })
+    }
+    const pending = createOngoingLimits([{ accountId: ACCOUNT, body }, { accountId: ACCOUNT_2, body }], person)
+    discardPairingReads()
+    release(jsonResponse({ id: 'window', ...body }, status))
+    await assert.rejects(pending, (error: PairingError) => error.code === 'session_reset')
+    assert.deepEqual(calls, [`/api/agent-accounts/${ACCOUNT}/windows`])
+  }
+})
+
 test('disconnect scope includes the revision and enrollments that were reviewed', () => {
   const first = view({
     revision: 3, computer_state: 'connected',
