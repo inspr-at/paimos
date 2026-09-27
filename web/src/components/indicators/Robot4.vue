@@ -3,6 +3,7 @@
 <script setup lang="ts">
 import type { AgentState } from '../../lib/agentSignals'
 import AgentStateMark from './AgentStateMark.vue'
+import RobotExpression from './parts/RobotExpression.vue'
 import { computed, ref, watch } from 'vue'
 
 // Self-contained IV1 variant. The wrapper supplies event evidence and owns
@@ -37,7 +38,7 @@ watch(() => props.state, state => { if (state !== 'working') glint.value = 0 })
     </g>
     <circle class="antenna-halo" cx="18.5" cy="4.5" r="2.4" />
     <circle class="antenna" cx="18.5" cy="4.5" r="1.4" />
-    <g class="look">
+    <g v-if="state === 'working'" class="look">
       <g :key="glint" class="expression" :class="{ celebrating: glint && lead && state === 'working' }">
         <g class="eyes">
           <rect x="11.4" y="12.3" width="2.2" height="3.4" rx="1.1" />
@@ -46,11 +47,12 @@ watch(() => props.state, state => { if (state !== 'working') glint.value = 0 })
         <path class="pleased" d="M11.2 14.3q1.3-1.7 2.6 0M18.2 14.3q1.3-1.7 2.6 0" />
       </g>
     </g>
-    <path class="smile" d="M13.4 18q2.6 2.3 5.2 0" />
+    <path v-if="state === 'working'" class="smile" d="M13.4 18q2.6 2.3 5.2 0" />
     <rect class="keyboard" x="10" y="25" width="12" height="1.8" rx="1.1" />
     <path class="keys" d="M13 25.9h2M17 25.9h2" />
     <g class="hand hand-left"><path d="m9 20-1 2.5 3 1" /><rect x="10" y="22.3" width="3" height="2.4" rx="1.2" /></g>
     <g class="hand hand-right"><path d="m23 20 1 2.5-3 1" /><rect x="19" y="22.3" width="3" height="2.4" rx="1.2" /></g>
+    <RobotExpression v-if="state !== 'working'" :state="state" :eye-y="14" :mouth-y="18" />
     <AgentStateMark :state="state" x="21" y="0" :size="11" />
     <path v-if="glint && state === 'working'" :key="glint" class="glint" d="m6 3 1.1 2.9L10 7 7.1 8.1 6 11 4.9 8.1 2 7l2.9-1.1Z" @animationend="glint = 0" />
   </svg>

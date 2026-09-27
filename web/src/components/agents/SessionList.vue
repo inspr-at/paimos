@@ -155,7 +155,7 @@ function rowClick(event: MouseEvent, id: string) {
             <span v-for="(continues, level) in guides" :key="level" class="tree-guide" :class="{ continues, elbow: level === depth - 1, last: level === depth - 1 && !continues }" :style="{ '--level': level }" />
             <span v-if="open" class="tree-stem" :style="{ '--level': depth }" />
           </span>
-          <span role="cell" class="c-state"><AgentStateLabel :state="view.status.state" :detail="pendingLabel(view)" /></span>
+          <span role="cell" class="c-state"><AgentStateLabel :state="view.status.state" :label="view.status.label" :detail="pendingLabel(view)" /></span>
           <span role="cell" class="c-agent">
             <span v-if="depth" class="sr-only">Worker of {{ parent }}. </span>
             <RouterLink class="agent-link" :to="`/agents/${view.session.id}`" :aria-label="`${view.harness} ${view.name}, ${view.status.label}`">

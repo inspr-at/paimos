@@ -5,10 +5,11 @@ import { useRoute, useRouter } from 'vue-router'
 import GraphCanvas from '../graph/GraphCanvas.vue'
 import AppIcon from '../AppIcon.vue'
 import { useSession } from '../../stores/session'
-import { fetchTicketGraph, type TicketGraph, type TicketGraphNode } from '../../lib/ticketGraph'
-import { filterTicketGraph, ticketGraphData, ticketLinkStyles, ticketStatusTokens, type TicketGraphState } from '../../lib/ticketGraphRenderer'
+import { type TicketGraph, type TicketGraphNode } from '../../lib/ticketGraph'
+import { ticketGraphData, ticketLinkStyles, ticketStatusTokens, type TicketGraphState } from '../../lib/ticketGraphRenderer'
 import type { GraphNode } from '../../lib/graphRenderer'
-import type { ListFilters } from '../../lib/ticketList'
+import { filtersToQuery, type ListFilters } from '../../lib/ticketList'
+import { loadTicketGraphContext } from '../../lib/headerGlimpse'
 import { TICKET_PEEK } from '../../lib/ticketPeek'
 import { plural, statusMeta } from '../../lib/work'
 
@@ -21,14 +22,10 @@ const empty: TicketGraph = { nodes: [], links: [], truncated: false }
 const data = shallowRef<TicketGraph>(empty), loading = ref(true), error = ref(''), selection = ref('')
 const hovered = shallowRef<TicketGraphNode | null>(null)
 const viewer = computed(() => session.identity ? `${session.identity.tenant.id}:${session.identity.principal.id}` : undefined)
-const visible = computed<TicketGraph>(previous => {
-  const next = filterTicketGraph(data.value, props.filters)
-  // A panel URL changes the route object, not the graph. Keep the same input
-  // identity so the core retains its layout/camera while the panel resizes it.
-  return previous && previous.truncated === next.truncated
-    && previous.nodes.length === next.nodes.length && previous.nodes.every((node, i) => node === next.nodes[i])
-    && previous.links.length === next.links.length && previous.links.every((link, i) => link === next.links[i]) ? previous : next
-})
+const visible = shallowRef<TicketGraph>(empty)
+// Panel and focus routes do not change the Tickets query, so their graph
+// layout and camera stay mounted while the shell resizes around them.
+const contextKey = computed(() => JSON.stringify({ project: props.project.id, ...filtersToQuery(props.filters) }))
 const adapted = computed(() => ticketGraphData(visible.value, props.project.routeKey))
 const panelOpen = computed(() => !!route.params.ticketKey)
 const selected = computed(() => visible.value.nodes.find(node => panelOpen.value ? node.key.toLowerCase() === String(route.params.ticketKey).toLowerCase() : node.id === selection.value))
@@ -37,10 +34,10 @@ let request: AbortController | undefined
 async function load() {
   request?.abort()
   const controller = request = new AbortController()
-  loading.value = true; error.value = ''; data.value = empty; hovered.value = null
+  loading.value = true; error.value = ''; data.value = empty; visible.value = empty; hovered.value = null
   try {
-    const result = await fetchTicketGraph(props.project.id, props.filters.showClosed, controller.signal)
-    if (!controller.signal.aborted) data.value = result
+    const result = await loadTicketGraphContext(props.project.id, props.filters, controller.signal)
+    if (!controller.signal.aborted) { data.value = result.data; visible.value = result.visible }
   } catch (e) { if (!controller.signal.aborted) error.value = e instanceof Error ? e.message : 'The ticket graph could not be loaded.' }
   finally { if (!controller.signal.aborted) loading.value = false }
 }
@@ -61,7 +58,7 @@ async function open(node: GraphNode) {
   }
   emit('open', ticket.key)
 }
-watch([() => props.project.id, () => props.filters.showClosed, viewer], load, { immediate: true })
+watch([contextKey, viewer], load, { immediate: true })
 watch([data, visible, loading], () => emit('state', { data: data.value, visible: visible.value, loading: loading.value }), { immediate: true })
 watch(panelOpen, async (open, wasOpen) => { if (!open && wasOpen) { await nextTick(); canvas.value?.focus() } })
 onBeforeUnmount(() => request?.abort())
