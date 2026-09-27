@@ -189,6 +189,22 @@ func NewSupervisor(ctx context.Context, c Config) (*Supervisor, error) {
 		}
 		s.runs[rec.RunID] = &owned{record: rec}
 	}
+	// Publish configured public metadata once per daemon generation. Probe
+	// polling must not overwrite a person's subsequent display/grant edits.
+	for _, account := range c.Accounts {
+		if account.Metadata == nil {
+			continue
+		}
+		reporter, ok := c.API.(interface {
+			PublishAccountMetadata(context.Context, string, AccountMetadata) error
+		})
+		if !ok {
+			return nil, errors.New("account metadata API unavailable")
+		}
+		if err := reporter.PublishAccountMetadata(ctx, account.ID, *account.Metadata); err != nil {
+			return nil, err
+		}
+	}
 	keepLock = true
 	return s, nil
 }
@@ -391,7 +407,8 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) error {
 	if entry.inboxCapable {
 		caps = append(caps, "inbox", "steer")
 	}
-	entry.harness, err = s.api.RegisterHarness(ctx, HarnessSession{ID: s.generation + "/" + ref, ProjectID: projectID, Lease: leaseA + leaseB},
+	entry.harness, err = s.api.RegisterHarness(ctx, HarnessSession{ID: s.generation + "/" + ref, ProjectID: projectID, Lease: leaseA + leaseB,
+		Model: profile.Model, ReasoningEffort: profile.Effort, AccountLabel: route.AccountLabel},
 		s.principalID, run.ID, run.WorkOrderID, profile.Harness, host, caps)
 	if err != nil {
 		_ = s.update(ctx, entry, Telemetry{Kind: "finished", Status: "failed", ErrorCode: "child_exit_failed"})

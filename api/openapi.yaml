@@ -2173,6 +2173,30 @@ paths:
       responses:
         '201': {description: Account, content: {application/json: {schema: {$ref: '#/components/schemas/AgentAccount'}}}}
         '403': {$ref: '#/components/responses/Error'}
+  /agent-accounts/catalog:
+    get:
+      operationId: getAgentAccountCatalog
+      description: Tenant-scoped host → harness → account → model → effort cascade derived from enrolled accounts, owner probes, allowance windows and the existing model registry. Availability is advisory; routing reserves atomically. Legacy null account profile policy inherits the tenant harness catalog, not provider entitlements. Empty explicit grants offer no models.
+      security: [{session: []}]
+      parameters:
+        - {name: role, in: query, schema: {type: string, default: build, enum: [scout, mechanical, build, build-hard, review-gate]}}
+        - {name: author_family, in: query, description: Required for review-gate; that family is excluded., schema: {type: string, enum: [openai, anthropic, xai, cursor]}}
+      responses:
+        '200': {description: Cascade and defaults, content: {application/json: {schema: {$ref: '#/components/schemas/AgentAccountCatalog'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+  /agent-accounts/{accountId}/metadata:
+    put:
+      operationId: replaceAgentAccountMetadata
+      description: Replace display metadata and explicit model-profile grants. Requires account.manage for a person or a scoped registering agent key. IDs must reference this tenant's enabled profiles for the account harness. No credentials, home paths or provider identities. Audited and idempotent.
+      security: *auth
+      parameters: [{name: accountId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/AgentAccountMetadataWrite'}}}}
+      responses:
+        '200': {description: Account, content: {application/json: {schema: {$ref: '#/components/schemas/AgentAccount'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
   /agent-accounts/{accountId}/windows:
     post:
       operationId: createAccountWindow
@@ -4838,7 +4862,7 @@ components:
         requested_account_id:
           type: [string, 'null']
           format: uuid
-          description: Optional strict account choice. Must belong to the selected agent and match the model harness. The daemon still reserves allowance and claims; an unavailable chosen account leaves the run queued without fallback. Omit or null for automatic routing.
+          description: Optional strict account choice. Must belong to the selected agent, match the model harness and allow the selected model profile. The daemon still reserves allowance and claims; an unavailable chosen account leaves the run queued without fallback. Omit or null for automatic routing.
     RunClaim:
       type: object
       required: [daemon_id, daemon_generation, reservation_ids]
@@ -4960,9 +4984,9 @@ components:
       properties:
         note: {type: string, maxLength: 120}
         at: {type: string, format: date-time}
-    HarnessModel: {type: [string, 'null'], maxLength: 120, description: Optional trimmed plain text; control characters stripped.}
+    HarnessModel: {type: [string, 'null'], maxLength: 128, description: Optional trimmed plain text; control characters stripped.}
     HarnessEffort: {type: [string, 'null'], maxLength: 40, description: Optional trimmed plain text; control characters stripped.}
-    HarnessAccountLabel: {type: [string, 'null'], maxLength: 60, description: Subscription or account display name, never a credential. Trimmed plain text; control characters stripped.}
+    HarnessAccountLabel: {type: [string, 'null'], maxLength: 128, description: Subscription or account display name, never a credential. Trimmed plain text; control characters stripped.}
     HarnessVersion: {type: [string, 'null'], maxLength: 80, description: Optional trimmed plain text; control characters stripped.}
     HarnessBrief: {type: [string, 'null'], maxLength: 240, description: Short prompt file name or ticket key; trimmed plain text.}
     HarnessWorktree: {type: [string, 'null'], maxLength: 512, description: Worktree path; trimmed plain text.}
@@ -5169,6 +5193,87 @@ components:
             last_probe_at: {type: [string, 'null'], format: date-time}
             last_probe_ok: {type: [boolean, 'null']}
             created_at: {type: string, format: date-time}
+            plan: {type: string}
+            host_label: {type: string}
+            allowed_model_profile_ids:
+              type: [array, 'null']
+              description: Null preserves legacy tenant-harness catalog policy. Explicit arrays restrict model/effort pins; empty blocks new reservations.
+              items: {type: string, format: uuid}
+            windows: {type: array, items: {$ref: '#/components/schemas/AllowanceWindow'}}
+    AgentAccountMetadataWrite:
+      type: object
+      additionalProperties: false
+      required: [label, plan, host_label, allowed_model_profile_ids]
+      properties:
+        label: {type: string, minLength: 1, maxLength: 128}
+        plan: {type: string, maxLength: 128}
+        host_label: {type: string, maxLength: 128}
+        allowed_model_profile_ids: {type: array, maxItems: 256, uniqueItems: true, items: {type: string, format: uuid}}
+    AgentAccountCatalog:
+      type: object
+      required: [as_of, role, hosts]
+      properties:
+        as_of: {type: string, format: date-time}
+        role: {type: string}
+        hosts:
+          type: array
+          items:
+            type: object
+            required: [daemon_id, label, harnesses]
+            properties:
+              daemon_id: {type: string, description: Stable opaque daemon enrollment identifies the host; never a hostname supplied at launch.}
+              label: {type: string}
+              harnesses:
+                type: array
+                items:
+                  type: object
+                  required: [harness, accounts, default_account_id]
+                  properties:
+                    harness: {type: string}
+                    default_account_id: {type: [string, 'null'], format: uuid, description: Eligible account with greatest minimum remaining fraction; UUID breaks ties.}
+                    accounts: {type: array, items: {$ref: '#/components/schemas/AccountCatalogChoice'}}
+    AccountCatalogChoice:
+      type: object
+      required: [id, label, plan, registered_by_principal_id, state, last_probe_at, last_probe_ok, available, unavailable_reasons, remaining_fraction, windows, models, default_model_profile_id]
+      properties:
+        id: {type: string, format: uuid}
+        label: {type: string}
+        plan: {type: string}
+        registered_by_principal_id: {type: string, format: uuid}
+        state: {type: string, enum: [available, draining, unavailable]}
+        last_probe_at: {type: [string, 'null'], format: date-time}
+        last_probe_ok: {type: [boolean, 'null']}
+        available: {type: boolean}
+        unavailable_reasons: {type: array, items: {type: string, enum: [state, probe, capacity, allowance, models]}}
+        remaining_fraction: {type: [number, 'null'], minimum: 0, maximum: 1}
+        default_model_profile_id: {type: [string, 'null'], format: uuid, description: First eligible existing role route; null when the role has no eligible route.}
+        windows:
+          type: array
+          items:
+            allOf:
+              - {$ref: '#/components/schemas/AllowanceWindow'}
+              - type: object
+                required: [remaining, pace_remaining]
+                properties:
+                  remaining: {type: integer, format: int64, minimum: 0}
+                  pace_remaining: {type: integer, format: int64, minimum: 0}
+        models:
+          type: array
+          items:
+            type: object
+            required: [model, family, efforts]
+            properties:
+              model: {type: string}
+              family: {type: string}
+              efforts:
+                type: array
+                items:
+                  type: object
+                  required: [effort, model_profile_id, version]
+                  properties:
+                    effort: {type: string}
+                    model_profile_id: {type: string, format: uuid}
+                    version: {type: string}
     AccountProbe:
       type: object
       required: [daemon_id, daemon_generation, available]
@@ -5176,6 +5281,7 @@ components:
         daemon_id: {type: string, minLength: 1, maxLength: 128}
         daemon_generation: {type: string, minLength: 1, maxLength: 128}
         available: {type: boolean}
+        host_label: {type: string, maxLength: 128, description: Optional display-only host name reported by the owner daemon; fills an empty label without overwriting configured metadata.}
     AllowanceWindowWrite:
       type: object
       required: [starts_at, ends_at, unit, allowance, pace_model]
@@ -5216,10 +5322,11 @@ components:
           additionalProperties: {type: integer, format: int64, minimum: 1}
     AccountRoute:
       type: object
-      required: [account_id, account_key, daemon_id, reservations]
+      required: [account_id, account_key, account_label, daemon_id, reservations]
       properties:
         account_id: {type: string, format: uuid}
         account_key: {type: string}
+        account_label: {type: string}
         daemon_id: {type: string}
         reservations:
           type: array

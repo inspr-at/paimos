@@ -31,6 +31,7 @@ type fakeAPI struct {
 	harnessStops               []string
 	routeDaemon                string
 	routeAccounts              []string
+	metadataReports            []AccountMetadata
 }
 
 func (*fakeAPI) Identity(context.Context) (string, string, error) { return "tenant", "agent", nil }
@@ -46,7 +47,7 @@ func (*fakeAPI) WorkOrder(context.Context, string) (WorkOrder, error) {
 func (a *fakeAPI) Route(_ context.Context, _ string, daemonID string, accountIDs []string, _ map[string]int64) (Route, error) {
 	a.routeDaemon = daemonID
 	a.routeAccounts = append([]string(nil), accountIDs...)
-	return Route{AccountID: "account", AccountKey: "local", DaemonID: "daemon", Reservations: []Reservation{{ID: "reservation"}}}, nil
+	return Route{AccountID: "account", AccountKey: "local", AccountLabel: "Work subscription", DaemonID: "daemon", Reservations: []Reservation{{ID: "reservation"}}}, nil
 }
 func (a *fakeAPI) Claim(context.Context, string, string, string, []string) error {
 	a.mu.Lock()
@@ -146,7 +147,7 @@ func (p *fakeProcess) Control(_ context.Context, _, _ string) error {
 }
 func (p *fakeProcess) Stop(context.Context) error { p.once.Do(func() { close(p.stopped) }); return nil }
 
-func testSupervisor(t *testing.T) (*Supervisor, *fakeAPI, *fakeProcess) {
+func testSupervisor(t *testing.T, metadata ...*AccountMetadata) (*Supervisor, *fakeAPI, *fakeProcess) {
 	t.Helper()
 	root, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
@@ -162,8 +163,12 @@ func testSupervisor(t *testing.T) (*Supervisor, *fakeAPI, *fakeProcess) {
 	}
 	a := &fakeAPI{run: Run{ID: "run", WorkOrderID: "order", AgentPrincipalID: "agent", ModelProfileID: "profile", Status: "queued"}, profile: Profile{ID: "profile", Harness: Codex, Model: "model", Effort: "high"}}
 	p := &fakeProcess{stopped: make(chan struct{})}
+	var publicMetadata *AccountMetadata
+	if len(metadata) > 0 {
+		publicMetadata = metadata[0]
+	}
 	s, err := NewSupervisor(context.Background(), Config{API: a, StateRoot: state, DaemonID: "daemon", Workspace: workspace,
-		Adapters: []Adapter{&fakeAdapter{proc: p}}, EstimatedUnits: map[string]int64{"requests": 1}, Accounts: []EnrolledAccount{{ID: "account", Key: "local", Harness: Codex}}})
+		Adapters: []Adapter{&fakeAdapter{proc: p}}, EstimatedUnits: map[string]int64{"requests": 1}, Accounts: []EnrolledAccount{{ID: "account", Key: "local", Harness: Codex, Metadata: publicMetadata}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -184,6 +189,9 @@ func TestManagedHarnessLifecycleAndControls(t *testing.T) {
 	a.mu.Unlock()
 	if registration.ID != "session" || registration.ProjectID != "project" || len(registration.Lease) < 32 || len(caps) != 5 {
 		t.Fatalf("managed registration binding or capabilities invalid: %v", caps)
+	}
+	if registration.Model != a.profile.Model || registration.ReasoningEffort != a.profile.Effort || registration.AccountLabel != "Work subscription" {
+		t.Fatal("managed registration lost chosen model, effort or account label")
 	}
 	if err := s.serviceHarness(t.Context(), s.runs["run"]); err != nil {
 		t.Fatal(err)

@@ -41,7 +41,7 @@ func TestSessionMetadataValidationStorageAndLiveIsolation(t *testing.T) {
 	registration["model"] = "other-model"
 	expect(t, f.call(f.person, "POST", base, registration, ""), 409)
 	registration["harness_session_ref"] = "metadata-ref-000000000000000002"
-	registration["account_label"] = strings.Repeat("界", 61)
+	registration["account_label"] = strings.Repeat("界", 129)
 	expect(t, f.call(f.person, "POST", base, registration, ""), 400)
 
 	path := base + "/" + id
@@ -110,11 +110,31 @@ func TestSessionMetadataValidationStorageAndLiveIsolation(t *testing.T) {
 	})
 
 	for _, update := range []map[string]any{
-		{"account_label": strings.Repeat("界", 61)},
+		{"account_label": strings.Repeat("界", 129)},
 		{"commits": []map[string]string{{"sha": "bad", "subject": "invalid"}}},
 		{"commits": []map[string]string{{"sha": "1234567", "subject": " \n "}}},
 	} {
 		update["phase"], update["activity_sequence"] = "working", 1
 		expect(t, f.call(f.agent, "POST", path+"/heartbeat", update, lease), 400)
 	}
+}
+
+// The account and model registry source bounds must fit session reporting.
+func TestSessionAcceptsFullAccountCatalogLabels(t *testing.T) {
+	f := fixture(t)
+	label, model := strings.Repeat("a", 128), strings.Repeat("m", 128)
+	registration := map[string]any{
+		"agent_principal_id": f.agent.ID, "harness": "codex", "host": "host",
+		"harness_session_ref": "catalog-metadata-reference", "worker_lease": "catalog-metadata-worker-lease-00000001",
+		"management_mode": "unmanaged", "role": "worker", "model": model, "account_label": label,
+	}
+	w := f.call(f.person, "POST", "/api/projects/"+f.project+"/harness-sessions", registration, "")
+	expect(t, w, 201)
+	got := decode(t, w)
+	if got["account_label"] != label || got["model"] != model {
+		t.Fatal("registry metadata was truncated")
+	}
+	registration["model"] = model + "x"
+	registration["harness_session_ref"] = "catalog-metadata-reference-too-long"
+	expect(t, f.call(f.person, "POST", "/api/projects/"+f.project+"/harness-sessions", registration, ""), 400)
 }

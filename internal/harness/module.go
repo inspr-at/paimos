@@ -166,8 +166,8 @@ func (m *sessionText) normalize() error {
 		max   int
 		name  string
 	}{
-		{&m.Model, 120, "model"}, {&m.ReasoningEffort, 40, "reasoning effort"},
-		{&m.AccountLabel, 60, "account label"}, {&m.HarnessVersion, 80, "harness version"},
+		{&m.Model, 128, "model"}, {&m.ReasoningEffort, 40, "reasoning effort"},
+		{&m.AccountLabel, 128, "account label"}, {&m.HarnessVersion, 80, "harness version"},
 		{&m.Brief, 240, "brief"}, {&m.Worktree, 512, "worktree"}, {&m.Branch, 200, "branch"},
 	} {
 		if *field.value == nil {

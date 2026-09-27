@@ -12,6 +12,31 @@
 // registered by the calling agent. A reservation requires a successful probe
 // newer than ProbeFreshness. The coordinator mounts New as an httpapi.Module.
 //
+// GET /api/agent-accounts/catalog is an account.read person-only projection:
+// daemon enrollment -> harness -> account -> registry model -> effort/profile.
+// It contains display labels, active allowance and pacing headroom, owner probe
+// freshness, capacity, and advisory defaults. It never exposes local routing
+// keys. The first eligible role route chooses a profile; the eligible account
+// with greatest minimum remaining fraction wins, with UUID tie-breaking.
+// No role route means no default model, and absent allowance means unavailable.
+// Registry initialization remains with /api/models; the catalog is read-only.
+//
+// PUT /api/agent-accounts/{id}/metadata replaces label, plan, host_label and
+// allowed_model_profile_ids. A person needs account.manage; the registering
+// agent needs an account.manage key. Profile UUIDs must be enabled tenant
+// profiles for that harness. An empty array denies every profile. Legacy NULL
+// retains the existing tenant-harness catalog policy; it does not assert a
+// provider entitlement. Plan names are display metadata, never inferred model
+// grants. Explicit grants are checked at run creation, reservation and claim.
+// A grant change does not stop already owned runs. Metadata is audited and an
+// identical retry is a no-op. Credentials, home paths and identities stay local.
+//
+// Agentd's local account enrollment accepts an optional metadata object with
+// exactly those four fields and publishes it once on daemon startup. Owner
+// probes can fill a missing host label; configured labels take precedence.
+// Route responses include account_label, which agentd forwards with model and
+// reasoning_effort to the existing harness session metadata contract.
+//
 // Pace for elapsed window fraction f in [0,1] is f (steady),
 // 1-(1-f)^2 (frontload) or 1 (unrestricted). The cumulative allowed fraction
 // is min(1, pace+burst_ratio), and the estimate must also fit the hard
