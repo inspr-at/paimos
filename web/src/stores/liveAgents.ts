@@ -18,7 +18,7 @@ const TICK_MS = 10_000
 // the read ends the polling quietly; a failed read retries a minute later.
 export const useLiveAgents = defineStore('liveAgents', () => {
   const items = ref<LiveAgent[]>([])
-  const { choice: statePreferences } = useAgentAppearance()
+  const { choice: statePreferences, ready: preferencesReady } = useAgentAppearance()
   const skew = ref(0)
   const now = ref(Date.now())
   const unavailable = ref(false)
@@ -28,7 +28,7 @@ export const useLiveAgents = defineStore('liveAgents', () => {
   let watchers = 0
   let ticker: ReturnType<typeof setInterval> | undefined
   const reading = usePolledData(async () => {
-    try { return await getLiveAgents() }
+    try { await preferencesReady; return await getLiveAgents() }
     catch (e) {
       if (e instanceof APIError && [401, 403, 404].includes(e.status)) { unavailable.value = true; items.value = []; evidence.value = new Map() }
       throw e
