@@ -6,6 +6,10 @@ on:
     tags:
       - "v*"
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 permissions:
   # write: attach paimos-agentd and aeon-cli binaries and SHA256SUMS to the GitHub release
   contents: write
@@ -43,6 +47,23 @@ jobs:
           got=$(node scripts/verify-release.mjs --release)
           node --input-type=module -e 'const got = JSON.parse(process.argv[1]); if (got.version !== process.env.VERSION) { console.error("version.json " + got.version + " does not match tag " + process.env.VERSION); process.exit(1); }' "$got"
 
+      # A rerun must never replace a published coordinate or its release assets.
+      - name: Reject an existing GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
+            --header "Authorization: Bearer ${GH_TOKEN}" \
+            --header 'Accept: application/vnd.github+json' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/tags/v${VERSION}")"
+          case "$status" in
+            404) ;;
+            200) echo "Release v${VERSION} is already published; reserve a new coordinate" >&2; exit 1 ;;
+            *) echo "Cannot establish release immutability (HTTP ${status})" >&2; exit 1 ;;
+          esac
+
       - uses: actions/setup-go@v7
         with:
           go-version: "1.26"
@@ -61,7 +82,7 @@ jobs:
           fi
           mkdir -p dist
           ldflags="-X github.com/inspr-at/paimos/internal/version.Version=${version}"
-          for pair in darwin/arm64 darwin/amd64 linux/amd64; do
+          for pair in darwin/arm64 darwin/amd64 linux/arm64 linux/amd64; do
             goos="${pair%/*}"
             goarch="${pair#*/}"
             CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" go build \
@@ -84,6 +105,7 @@ jobs:
             sha256sum \
               paimos-agentd-darwin-arm64 \
               paimos-agentd-darwin-amd64 \
+              paimos-agentd-linux-arm64 \
               paimos-agentd-linux-amd64 \
               aeon-cli-darwin-arm64 \
               aeon-cli-darwin-amd64 \
@@ -112,6 +134,20 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
+      # A previous partial run may have pushed the image before release creation.
+      - name: Reject an existing image tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          tags="$(gh api --paginate 'orgs/inspr-at/packages/container/aeon/versions?per_page=100' \
+            --jq '.[].metadata.container.tags[]?')"
+          if printf '%s\n' "$tags" | grep -Fxq "$VERSION"; then
+            echo "Image tag ${VERSION} is already published; reserve a new coordinate" >&2
+            exit 1
+          fi
 
       # The only published tag is the calendar version. Never push a latest tag.
       - name: Build and push
@@ -144,34 +180,22 @@ jobs:
           set -euo pipefail
           tag="v${VERSION}"
           notes="$(printf '%s\n' \
-            "paimos-agentd ${VERSION} for darwin-arm64, darwin-amd64 and linux-amd64." \
+            "paimos-agentd ${VERSION} for darwin-arm64, darwin-amd64, linux-arm64 and linux-amd64." \
             "aeon-cli ${VERSION} for darwin-arm64, darwin-amd64, linux-amd64 and linux-arm64." \
             "Install aeon-cli as aeon. A symlink named paimos selects the paimos-compatible CLI (PAIMOS_URL)." \
             "Verify SHA256SUMS before installing." \
             "" \
             "Container: ghcr.io/inspr-at/aeon:${VERSION}" \
             "Digest: ${DIGEST}")"
-          if gh release view "$tag" >/dev/null 2>&1; then
-            gh release upload "$tag" \
-              dist/paimos-agentd-darwin-arm64 \
-              dist/paimos-agentd-darwin-amd64 \
-              dist/paimos-agentd-linux-amd64 \
-              dist/aeon-cli-darwin-arm64 \
-              dist/aeon-cli-darwin-amd64 \
-              dist/aeon-cli-linux-amd64 \
-              dist/aeon-cli-linux-arm64 \
-              dist/SHA256SUMS \
-              --clobber
-          else
-            gh release create "$tag" \
-              dist/paimos-agentd-darwin-arm64 \
-              dist/paimos-agentd-darwin-amd64 \
-              dist/paimos-agentd-linux-amd64 \
-              dist/aeon-cli-darwin-arm64 \
-              dist/aeon-cli-darwin-amd64 \
-              dist/aeon-cli-linux-amd64 \
-              dist/aeon-cli-linux-arm64 \
-              dist/SHA256SUMS \
-              --title "$tag" \
-              --notes "$notes"
-          fi
+          gh release create "$tag" \
+            dist/paimos-agentd-darwin-arm64 \
+            dist/paimos-agentd-darwin-amd64 \
+            dist/paimos-agentd-linux-arm64 \
+            dist/paimos-agentd-linux-amd64 \
+            dist/aeon-cli-darwin-arm64 \
+            dist/aeon-cli-darwin-amd64 \
+            dist/aeon-cli-linux-amd64 \
+            dist/aeon-cli-linux-arm64 \
+            dist/SHA256SUMS \
+            --title "$tag" \
+            --notes "$notes"

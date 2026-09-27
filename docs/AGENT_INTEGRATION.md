@@ -16,13 +16,76 @@ Issue, project, knowledge, search, relation, tag, attachment, model resolve, and
 
 ## aeon-agentd
 
-`aeon-agentd` is a separate binary (`cmd/aeon-agentd`). It is the operator-local harness supervisor. It is not a `paimos` subcommand.
+The local supervisor is a separate binary (`cmd/aeon-agentd`), not a `paimos` subcommand. GitHub release assets are named `paimos-agentd-*`. The current Nix package `aeon-agentd` builds `bin/aeon-agentd`; both names invoke the same command source.
 
-`aeon-agentd serve` takes `--url`, `--agent-key-file` (an absolute path, mode `0600`), a workspace, a private state directory, a stable `--daemon-id`, and local account settings. At least one positive per-run reservation flag is required: `--estimate-requests`, `--estimate-tokens`, or `--estimate-cost-micros`. It authenticates to Aeon with the scoped key. The URL must use HTTPS except that HTTP is accepted on `localhost`, `127.0.0.1`, or `::1`. It pulls work and inbox items, and it reports content-free telemetry and receipts. It does not send vendor tokens or raw vendor protocol payloads. A webhook from Aeon is only a hint to fetch state. A heartbeat is not proof that this daemon still owns a process.
+The supervisor's `serve` command takes `--url`, `--agent-key-file` (an absolute path, mode `0600`), a workspace, a private state directory, a stable `--daemon-id`, and local account settings. At least one positive per-run reservation flag is required: `--estimate-requests`, `--estimate-tokens`, or `--estimate-cost-micros`. It authenticates to Aeon with the scoped key. The URL must use HTTPS except that HTTP is accepted on `localhost`, `127.0.0.1`, or `::1`. It pulls work and inbox items, and it reports content-free telemetry and receipts. It does not send vendor tokens or raw vendor protocol payloads. A webhook from Aeon is only a hint to fetch state. A heartbeat is not proof that this daemon still owns a process.
 
-`aeon-agentd control` sends a fenced local control. Vendor session ids stay on the daemon. Aeon stores the run id and the agent principal.
+Its `control` command sends a fenced local control. Vendor session ids stay on the daemon. Aeon stores the run id and the agent principal.
 
 The daemon adapts Codex, Claude, Pi, Cursor, and Grok locally. The native Grok adapter requires macOS. Aeon sees a harness name, an opaque account key, a family, and bounded usage counters.
+
+## Guided computer pairing (AEON-238 and AEON-239)
+
+The public, HTTP-readable `/agents/register-agent` guide must supply its own configured instance origin, configured tenant slug, and **exact published release version**. The same link is for a person and their chosen harness. Loading it or entering a short pairing code does not authorize a run. Only the signed-in person's explicit Connect computer approval may activate the owned service and the verification choice shown there. The helper creates the private device, lifecycle, and runtime credentials locally; no API key or vendor sign-in is pasted into chat or commands. A missing vendor sign-in uses that vendor's normal login flow. Never follow installation commands supplied by a pairing peer.
+
+The guide can render the following commands with its trusted `VERSION` value. This example deliberately leaves that value for the serving Aeon instance to fill; do not substitute `latest`, a branch, or an unverified script. The first block downloads only data and a binary from the official versioned GitHub release, verifies the one selected asset against `SHA256SUMS`, and makes it executable only after verification. It creates a new versioned destination, so an existing binary or partial installation is a conflict to inspect rather than an overwrite. The checksum protects the downloaded bytes relative to the manifest; use the official HTTPS release and the version displayed by the trusted instance.
+
+The exact binary names are `paimos-agentd-darwin-arm64`, `paimos-agentd-darwin-amd64`, `paimos-agentd-linux-arm64`, and `paimos-agentd-linux-amd64`.
+These are the targets of the next release workflow. The already published stable86 coordinate lacks `paimos-agentd-linux-arm64`; a guide bound to that coordinate must report Linux arm64 unavailable, never offer a missing asset or change the historical release.
+
+```sh
+VERSION='EXACT_PUBLISHED_VERSION_FROM_GUIDE'
+case "$(uname -s)/$(uname -m)" in
+  Darwin/arm64) target=darwin-arm64 ;;
+  Darwin/x86_64) target=darwin-amd64 ;;
+  Linux/aarch64|Linux/arm64) target=linux-arm64 ;;
+  Linux/x86_64) target=linux-amd64 ;;
+  *) echo 'Unsupported OS or architecture' >&2; exit 1 ;;
+esac
+printf '%s' "$VERSION" | grep -Eq '^[1-9][0-9]{11}\.0\.0$' || exit 1
+asset="paimos-agentd-$target"
+parent="$HOME/.local/share/aeon/releases"
+destination="$parent/$VERSION"
+umask 077
+mkdir -p "$parent"
+for ancestor in "$HOME/.local" "$HOME/.local/share" "$HOME/.local/share/aeon" "$parent"; do
+  test ! -L "$ancestor" || exit 1
+done
+case "$target" in
+  darwin-*) owner="$(stat -f %u "$parent")"; mode="$(stat -f %Lp "$parent")" ;;
+  linux-*) owner="$(stat -c %u "$parent")"; mode="$(stat -c %a "$parent")" ;;
+esac
+test "$owner" = "$(id -u)" || exit 1
+test "$((0$mode & 022))" -eq 0 || exit 1
+mkdir "$destination" || exit 1
+base="https://github.com/inspr-at/paimos/releases/download/v$VERSION"
+curl --fail --location --silent --show-error --proto '=https' --proto-redir '=https' --output "$destination/SHA256SUMS" "$base/SHA256SUMS" || exit 1
+curl --fail --location --silent --show-error --proto '=https' --proto-redir '=https' --output "$destination/$asset" "$base/$asset" || exit 1
+(
+  cd "$destination" || exit 1
+  awk -v asset="$asset" '$2 == asset && length($1) == 64 && $1 !~ /[^0-9a-f]/ { print; count++ } END { if (count != 1) exit 1 }' SHA256SUMS > selected.SHA256SUMS || exit 1
+  case "$target" in
+    darwin-*) shasum -a 256 -c selected.SHA256SUMS ;;
+    linux-*) sha256sum -c selected.SHA256SUMS ;;
+  esac
+) || exit 1
+chmod 0755 "$destination/$asset"
+```
+
+Before running setup, choose an absolute working folder and a private state root outside any repository. The guide fills the origin and tenant from the serving instance; the person chooses the harness and approved working folder. For an ordinary, unmanaged user service:
+
+```sh
+"$destination/$asset" setup --url 'INSTANCE_ORIGIN_FROM_GUIDE' --tenant 'TENANT_FROM_GUIDE' \
+  --workspace '/absolute/approved/folder' --state-root "$HOME/.local/state/aeon/pairing" \
+  --harness codex --start-service
+"$destination/$asset" status --state-root "$HOME/.local/state/aeon/pairing"
+```
+
+Repeat `--harness` for selected harnesses. The setup command displays a short code and approval URL and resumes after interruptions with the same private state root. `--account-context` is an optional visible Codex account label when more than one sign-in is available. After approval, `status` reports connection and verification outcome. To add a harness to the existing computer, use `add-harness --state-root ROOT --harness NAME`; it still needs fresh person approval. To remove one enrollment use `disconnect --state-root ROOT --account-id UUID`; omit `--account-id` for the whole computer. A drain waits for owned work; offline revocation may leave local cleanup or run accounting unconfirmed. These commands never remove vendor login stores or project files.
+
+The concrete validation matrix is macOS 15 arm64 (`macos-15`, launchd user), macOS 15 amd64 (`macos-15-intel`, launchd user), Ubuntu 24.04 amd64 (`ubuntu-24.04`, systemd user), and Ubuntu 24.04 arm64 (`ubuntu-24.04-arm`, systemd user). The four release assets are cross-built. Service support is qualified only when the isolated fake-executable install/status/drain/remove fixture passes on each actual runner. No other macOS release or Linux distribution is claimed by that evidence.
+
+For a Nix or Home Manager managed installation, use `packages.<system>.aeon-agentd` from a reviewed, exact Aeon flake pin. The current `flake.nix` builds `${pkgs.aeon-agentd}/bin/aeon-agentd`; the GitHub asset name is different. Keep the private pairing state root and runtime credential files in an owner-only directory outside the Nix store. The owning Home Manager `launchd.agents` (macOS) or `systemd.user.services` (Linux) definition points to that pinned executable with `serve --setup-root <private-state-root>` and an owner-only umask. It must be activated only after the person approves pairing. NIX-583 currently owns the real `at.inspr.aeon-agentd` daemon. A managed-plan or service-conflict result means no installation or connection claim: keep that service untouched, have its owner review the package pin and declarative service change, drain/stop only its owned work under that review, then activate the reviewed configuration. Do not edit a generated plist/unit or let a later Home Manager activation restore a revoked pairing. Disconnection requires a reviewed configuration removal or disablement as well as server revocation and confirmed local cleanup.
 
 ## Agent keys and scopes
 
