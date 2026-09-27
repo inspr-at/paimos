@@ -229,6 +229,7 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
       </div>
       <div class="head-side">
         <button v-if="canStart" type="button" class="btn primary start-agent" @click="startDialog?.open()"><AppIcon name="plus" :size="15" />Start agent</button>
+        <RouterLink class="context-link" to="/agents/usage">Usage<AppIcon name="arrow" :size="13" /></RouterLink>
         <RouterLink v-if="can('keys.manage')" class="context-link" to="/settings/access/agents">Agent keys<AppIcon name="arrow" :size="13" /></RouterLink>
         <div class="freshness">
           <p class="live" :class="{ on: live && !stale }" :data-tip="live ? 'Connected to live updates' : 'Refreshing every 20 seconds'">

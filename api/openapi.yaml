@@ -1967,6 +1967,52 @@ paths:
                   truncated: {type: boolean, description: More sessions were live than one answer holds; the freshest are listed}
         '401': {description: Authentication required}
         '403': {description: Scope required}
+  /usage/dashboard:
+    get:
+      operationId: getUsageDashboard
+      summary: Cost and usage by project, model and subscription (AEON-217)
+      description: >-
+        Sessions the caller can see that started in [from, to). Each harness_session_usage row is the lifetime
+        total for one session and model. The range selects sessions by start time and does not mean the tokens
+        or list estimate were consumed inside it. Null totals are unknown, not zero. estimated_cost_usd is the
+        exact USD list estimate, summed once; it is not a billed charge. billing_mode and subscription_label are
+        reported metadata, not verified coverage, and a subscription does not remove the estimate. Run telemetry
+        and agent-run totals are not added. More than 5000 sessions sets truncated and drops the rest. If the
+        usage relation is not installed the response is 503, not a dashboard of zeros. Allowance windows are the
+        caller's registered account windows and only when they hold account.read; the response has no account key.
+        Project visibility follows harness sessions. The most expensive tickets are a ranking, not a session list.
+      parameters:
+        - {name: from, in: query, schema: {type: string}, description: RFC3339 or YYYY-MM-DD. Both from and to, or neither (then the last 30 UTC days).}
+        - {name: to, in: query, schema: {type: string}, description: Exclusive end. Span at most 366 days.}
+        - {name: project, in: query, schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: Usage dashboard
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [from, to, generated_at, attribution, trend_basis, list_price_currency, truncated, totals, by_project, by_model, by_subscription, trend, tickets, tickets_cost_unknown, allowance]
+                properties:
+                  from: {type: string, format: date-time}
+                  to: {type: string, format: date-time}
+                  generated_at: {type: string, format: date-time}
+                  attribution: {type: string, enum: [lifetime_for_sessions_started_in_range]}
+                  trend_basis: {type: string, enum: [session_started_utc_day]}
+                  list_price_currency: {type: string, enum: [USD]}
+                  truncated: {type: boolean}
+                  totals: {$ref: '#/components/schemas/UsageGroup'}
+                  by_project: {type: array, items: {$ref: '#/components/schemas/UsageGroup'}}
+                  by_model: {type: array, items: {$ref: '#/components/schemas/UsageGroup'}}
+                  by_subscription: {type: array, items: {$ref: '#/components/schemas/UsageGroup'}}
+                  trend: {type: array, items: {$ref: '#/components/schemas/UsageTrend'}}
+                  tickets: {type: array, maxItems: 12, items: {$ref: '#/components/schemas/UsageTicket'}}
+                  tickets_cost_unknown: {type: integer, minimum: 0, description: Visible tickets whose list estimate is entirely unknown. They are not ranked.}
+                  allowance: {$ref: '#/components/schemas/UsageAllowance'}
+        '400': {description: Invalid range or project}
+        '401': {description: Authentication required}
+        '403': {description: Permission denied}
+        '503': {description: Session usage relation is not installed}
   /runs:
     get:
       operationId: listAgentRuns
@@ -3394,6 +3440,76 @@ components:
           additionalProperties: true
           properties:
             next_action: {type: string, enum: [operator_external_stage_cli]}
+    UsageGroup:
+      type: object
+      description: Distinct sessions, with token and list-estimate sums across current model rows. A null total is unknown, not zero. A known zero is the decimal zero string.
+      required: [label, sessions, usage_rows, unreported_sessions, input_tokens, input_known_rows, input_unknown_rows, output_tokens, output_known_rows, output_unknown_rows, cached_input_tokens, cached_input_known_rows, cached_input_unknown_rows, tokens_state, estimated_cost_usd, cost_known_rows, cost_unknown_rows, cost_state, provisional_rows, provisional_sessions]
+      properties:
+        id: {type: string}
+        key: {type: string}
+        label: {type: string}
+        billing_mode: {type: string, enum: [subscription, api, unknown, unreported, mixed], description: Present on subscription groups. Reported metadata, not verified coverage.}
+        sessions: {type: integer, minimum: 0, description: Distinct sessions. A session with several models counts once.}
+        usage_rows: {type: integer, minimum: 0, description: Current model rows. Several models on one session are several rows.}
+        unreported_sessions: {type: integer, minimum: 0}
+        input_tokens: {type: [string, 'null'], pattern: '^(0|[1-9][0-9]*)$', description: Sum of known input totals. Null when none are known.}
+        input_known_rows: {type: integer, minimum: 0}
+        input_unknown_rows: {type: integer, minimum: 0}
+        output_tokens: {type: [string, 'null'], pattern: '^(0|[1-9][0-9]*)$'}
+        output_known_rows: {type: integer, minimum: 0}
+        output_unknown_rows: {type: integer, minimum: 0}
+        cached_input_tokens: {type: [string, 'null'], pattern: '^(0|[1-9][0-9]*)$', description: Sum of known cached input, which is a subset of input.}
+        cached_input_known_rows: {type: integer, minimum: 0}
+        cached_input_unknown_rows: {type: integer, minimum: 0}
+        tokens_state: {type: string, enum: [known, partial, unknown]}
+        estimated_cost_usd: {type: [string, 'null'], pattern: '^(0|[1-9][0-9]*)\.[0-9]{12}$', description: Exact USD list estimate with 12 fractional digits. Null when no row has a price. Not a billed charge.}
+        cost_known_rows: {type: integer, minimum: 0}
+        cost_unknown_rows: {type: integer, minimum: 0}
+        cost_state: {type: string, enum: [known, provisional, unknown, partial]}
+        provisional_rows: {type: integer, minimum: 0}
+        provisional_sessions: {type: integer, minimum: 0}
+    UsageTrend:
+      type: object
+      required: [day, group]
+      properties:
+        day: {type: string, format: date}
+        group: {$ref: '#/components/schemas/UsageGroup'}
+    UsageTicket:
+      allOf:
+        - {$ref: '#/components/schemas/UsageGroup'}
+        - type: object
+          required: [project_id, project_key]
+          properties:
+            project_id: {type: string, format: uuid}
+            project_key: {type: string}
+    UsageAllowance:
+      type: object
+      required: [state, windows]
+      properties:
+        state: {type: string, enum: [visible, withheld, none]}
+        windows:
+          type: array
+          items:
+            type: object
+            required: [account_id, label, harness, account_state, window_id, unit, allowance, used, reserved, pace_model, burst_ratio, starts_at, ends_at, provisional, pace_cap, headroom, hard_remaining]
+            properties:
+              account_id: {type: string, format: uuid}
+              label: {type: string}
+              harness: {type: string}
+              account_state: {type: string}
+              window_id: {type: string, format: uuid}
+              unit: {type: string, enum: [requests, tokens, cost_micros]}
+              allowance: {type: integer, format: int64, minimum: 1}
+              used: {type: integer, format: int64, minimum: 0}
+              reserved: {type: integer, format: int64, minimum: 0}
+              pace_model: {type: string, enum: [steady, frontload, unrestricted]}
+              burst_ratio: {type: string}
+              starts_at: {type: string, format: date-time}
+              ends_at: {type: string, format: date-time}
+              provisional: {type: boolean}
+              pace_cap: {type: [integer, 'null'], format: int64}
+              headroom: {type: [integer, 'null'], format: int64}
+              hard_remaining: {type: integer, format: int64}
     AuthzPermission:
       type: object
       required: [key, group, description, risk, grantable_at, agent_grantable]
