@@ -22,37 +22,6 @@ import (
 	"github.com/inspr-at/paimos/internal/usagedashboard"
 )
 
-const usageDDL = `
-CREATE TABLE harness_session_usage (
-    tenant_id uuid NOT NULL REFERENCES tenants(id),
-    session_id uuid NOT NULL,
-    model text NOT NULL CHECK (length(model) BETWEEN 1 AND 120),
-    sequence bigint NOT NULL CHECK (sequence BETWEEN 1 AND 1000000000000),
-    input_tokens bigint CHECK (input_tokens BETWEEN 0 AND 1000000000000),
-    output_tokens bigint CHECK (output_tokens BETWEEN 0 AND 1000000000000),
-    cached_input_tokens bigint CHECK (cached_input_tokens BETWEEN 0 AND 1000000000000),
-    provisional boolean NOT NULL,
-    price_version bigint,
-    estimated_cost_usd numeric(30,12) CHECK (estimated_cost_usd >= 0),
-    account_id uuid,
-    account_label text,
-    billing_mode text NOT NULL CHECK (billing_mode IN ('unknown','api','subscription')),
-    subscription_label text CHECK (subscription_label IS NULL OR char_length(subscription_label) BETWEEN 1 AND 120),
-    reported_at timestamptz NOT NULL DEFAULT clock_timestamp(),
-    PRIMARY KEY (tenant_id, session_id, model),
-    FOREIGN KEY (tenant_id, session_id) REFERENCES harness_sessions(tenant_id, id),
-    CHECK (cached_input_tokens IS NULL OR input_tokens IS NULL OR cached_input_tokens <= input_tokens),
-    CHECK (provisional OR (input_tokens IS NOT NULL AND output_tokens IS NOT NULL AND cached_input_tokens IS NOT NULL)),
-    CHECK ((estimated_cost_usd IS NOT NULL) = (price_version IS NOT NULL AND input_tokens IS NOT NULL AND output_tokens IS NOT NULL AND cached_input_tokens IS NOT NULL)),
-    CHECK (subscription_label IS NULL OR billing_mode = 'subscription')
-);
-ALTER TABLE harness_session_usage ENABLE ROW LEVEL SECURITY;
-ALTER TABLE harness_session_usage FORCE ROW LEVEL SECURITY;
-CREATE POLICY harness_session_usage_tenant ON harness_session_usage
-    USING (tenant_id = NULLIF(current_setting('aeon.tenant_id', true), '')::uuid)
-    WITH CHECK (tenant_id = NULLIF(current_setting('aeon.tenant_id', true), '')::uuid);
-`
-
 func uid() string {
 	var b [16]byte
 	if _, err := rand.Read(b[:]); err != nil {
@@ -77,7 +46,7 @@ func (w *world) tx(t *testing.T, p tenant.Principal, fn func(pgx.Tx) error) {
 	}
 }
 
-func newWorld(t *testing.T, withUsage bool) *world {
+func newWorld(t *testing.T) *world {
 	t.Helper()
 	w := &world{db: dbtest.Open(t), mux: http.NewServeMux()}
 	w.home = tenant.Principal{ID: uid(), TenantID: uid(), Kind: tenant.Person}
@@ -106,11 +75,6 @@ func newWorld(t *testing.T, withUsage bool) *world {
 	})
 	dbtest.BindRole(t, w.db, w.home.TenantID, w.home.ID, "owner")
 	dbtest.BindRole(t, w.db, w.foreign.TenantID, w.foreign.ID, "owner")
-	if withUsage {
-		if _, err := w.db.App.Exec(t.Context(), usageDDL); err != nil {
-			t.Fatal(err)
-		}
-	}
 	usagedashboard.New(w.db.App).Mount(w.mux)
 	return w
 }
@@ -169,6 +133,13 @@ func (w *world) session(t *testing.T, p tenant.Principal, project string, ticket
 			price = 1
 		}
 		w.tx(t, p, func(tx pgx.Tx) error {
+			if report.cost != nil {
+				if _, err := tx.Exec(t.Context(), `INSERT INTO model_prices(tenant_id,model,version,input_usd_per_million,output_usd_per_million,cached_input_usd_per_million)
+					VALUES($1,$2,1,1,1,1)
+					ON CONFLICT (tenant_id, model, version) DO NOTHING`, p.TenantID, report.model); err != nil {
+					return err
+				}
+			}
 			_, err := tx.Exec(t.Context(), `INSERT INTO harness_session_usage(tenant_id,session_id,model,sequence,input_tokens,output_tokens,cached_input_tokens,provisional,price_version,estimated_cost_usd,billing_mode,subscription_label,reported_at)
 				VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
 				p.TenantID, id, report.model, i+1, report.in, report.out, report.cached, report.provisional, price, report.cost, report.billing, report.subscription, at)
@@ -237,7 +208,7 @@ func usd(t *testing.T, value *string) string {
 }
 
 func TestDashboardAggregatesVisibleSessionsOnly(t *testing.T) {
-	w := newWorld(t, true)
+	w := newWorld(t)
 	visible := w.project(t, w.home, "VIS-1", "Visible project")
 	hidden := w.project(t, w.home, "HID-1", "Hidden beacon")
 	known := w.ticket(t, w.home, visible, "VIS-2", "Known ticket")
@@ -381,7 +352,12 @@ func TestDashboardAggregatesVisibleSessionsOnly(t *testing.T) {
 }
 
 func TestDashboardMissingUsageIsAnError(t *testing.T) {
-	w := newWorld(t, false)
+	w := newWorld(t)
+	// Migration 0884 creates the relation. Dropping it here checks the
+	// unavailable response, which must not become an empty dashboard.
+	if _, err := w.db.App.Exec(t.Context(), `DROP TABLE harness_usage_receipts, harness_session_usage`); err != nil {
+		t.Fatal(err)
+	}
 	project := w.project(t, w.home, "VIS-1", "Visible project")
 	w.session(t, w.home, project, nil, time.Date(2026, 9, 10, 8, 0, 0, 0, time.UTC), "session-model-decoy", nil, nil, 1)
 	code, _, body := w.get(t, w.home, "/api/usage/dashboard?from=2026-09-10&to=2026-09-11")
@@ -394,7 +370,7 @@ func TestDashboardMissingUsageIsAnError(t *testing.T) {
 }
 
 func TestDashboardRejectsBadRange(t *testing.T) {
-	w := newWorld(t, false)
+	w := newWorld(t)
 	for _, raw := range []string{
 		"/api/usage/dashboard?from=2026-09-11&to=2026-09-10",
 		"/api/usage/dashboard?from=2026-01-01&to=2027-02-01",

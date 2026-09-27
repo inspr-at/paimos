@@ -93,6 +93,123 @@ test('usage shows lifetime list estimate, unknown, and allowance without turning
   await expect.poll(() => calls.at(-1) ?? '').toContain('project=p-pharos')
 })
 
+function isolated(cost: string, sessions: number, from: string, label: string): UsageDashboard {
+  const row = group(label, sessions, cost)
+  return {
+    ...dashboard,
+    from, to: '2026-09-28T00:00:00Z',
+    totals: { ...row, label: 'All visible sessions' },
+    by_project: [row],
+    by_model: [group('gpt-4.1', sessions, cost)],
+    by_subscription: [group('Codex Pro', sessions, cost, { billing_mode: 'subscription' })],
+    trend: [{ day: from.slice(0, 10), group: group('', sessions, cost) }],
+    tickets: [],
+    tickets_cost_unknown: 0,
+    allowance: { state: 'none', windows: [] },
+  }
+}
+
+test('an older usage response cannot replace the selection that followed it', async ({ page }) => {
+  const pageErrors: string[] = []
+  page.on('pageerror', error => pageErrors.push(error.message))
+  await page.addInitScript(() => {
+    const original = window.fetch.bind(window)
+    const held: { url: string; signal: AbortSignal | undefined; finish: (value: { status: number; body: unknown }) => void }[] = []
+    ;(window as unknown as { __usageHeld: typeof held }).__usageHeld = held
+    window.fetch = (input, init) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
+      if (!url.includes('/api/usage/dashboard')) return original(input, init)
+      return new Promise(resolve => {
+        held.push({
+          url,
+          signal: init?.signal ?? undefined,
+          finish: value => resolve(new Response(JSON.stringify(value.body), { status: value.status, headers: { 'Content-Type': 'application/json' } })),
+        })
+      })
+    }
+  })
+  const data = fixtures()
+  data.preferences.theme = { choice: 'light' }
+  await mockWork(page, data)
+  const heldCount = () => page.evaluate(() => (window as unknown as { __usageHeld: unknown[] }).__usageHeld.length)
+  const aborted = (index: number) => page.evaluate(index => (window as unknown as { __usageHeld: { signal?: AbortSignal }[] }).__usageHeld[index]?.signal?.aborted ?? false, index)
+  const finish = (index: number, status: number, body: unknown) => page.evaluate(({ index, status, body }) => {
+    ;(window as unknown as { __usageHeld: { finish: (value: { status: number; body: unknown }) => void }[] }).__usageHeld[index].finish({ status, body })
+  }, { index, status, body })
+  const kept = isolated('77.000000000000', 3, '2026-09-21T00:00:00Z', 'Kept range')
+  const stale = isolated('999.000000000000', 9, '2026-08-29T00:00:00Z', 'Stale project')
+  const status = page.locator('.state-line')
+  const summary = page.locator('.summary-card')
+
+  await page.goto('/agents/usage?days=7')
+  await expect.poll(heldCount).toBe(1)
+  await finish(0, 200, kept)
+  await expect(summary).toContainText('3 sessions started')
+  await expect(summary).toContainText('77.00 USD')
+  await expect(page.locator('.range')).toContainText('21 Sept 2026')
+  await expect(page.locator('.usage-page')).toHaveAttribute('aria-busy', 'false')
+
+  await page.getByRole('combobox', { name: 'Project', exact: true }).selectOption({ label: 'Pharos' })
+  await expect.poll(heldCount).toBe(2)
+  await expect.poll(() => aborted(0)).toBe(true)
+  await expect(summary).toHaveCount(0)
+  await expect(page.getByText('77.00 USD')).toHaveCount(0)
+  await expect(page.getByText('21 Sept 2026')).toHaveCount(0)
+  await expect(status).toHaveText('Loading usage')
+  await expect(page.locator('.usage-page')).toHaveAttribute('aria-busy', 'true')
+  await expect(page.getByRole('button', { name: '7 days' })).toHaveAttribute('aria-pressed', 'true')
+
+  await page.getByRole('combobox', { name: 'Project', exact: true }).selectOption({ label: 'All visible projects' })
+  await expect.poll(heldCount).toBe(3)
+  await expect.poll(() => aborted(1)).toBe(true)
+  await expect(summary).toContainText('77.00 USD')
+  await expect(summary).toContainText('3 sessions started')
+  await expect(page.locator('.range')).toContainText('21 Sept 2026')
+  await expect(status).toHaveText('Updating usage')
+
+  await finish(1, 200, stale)
+  await expect(page.getByText('999.00 USD')).toHaveCount(0)
+  await expect(page.getByText('Stale project')).toHaveCount(0)
+  await expect(page.getByText('9 sessions started')).toHaveCount(0)
+  await expect(page.getByText(/29 Aug/)).toHaveCount(0)
+  await expect(summary).toContainText('77.00 USD')
+  await expect(status).toHaveText('Updating usage')
+  await expect(page.locator('.usage-page')).toHaveAttribute('aria-busy', 'true')
+
+  await page.getByRole('combobox', { name: 'Project', exact: true }).selectOption({ label: 'Pharos' })
+  await expect.poll(heldCount).toBe(4)
+  await page.getByRole('combobox', { name: 'Project', exact: true }).selectOption({ label: 'All visible projects' })
+  await expect.poll(heldCount).toBe(5)
+  await expect.poll(() => aborted(3)).toBe(true)
+  await expect(summary).toContainText('77.00 USD')
+  await expect(status).toHaveText('Updating usage')
+  await finish(3, 503, { error: 'The old project range failed' })
+  await expect(page.getByText('The old project range failed')).toHaveCount(0)
+  await expect(summary).toContainText('77.00 USD')
+  await expect(summary).toContainText('3 sessions started')
+  await expect(status).toHaveText('Updating usage')
+  await expect(page.getByRole('alert')).toHaveCount(0)
+
+  await finish(4, 503, { error: 'The selected range could not be loaded' })
+  await expect(page.getByRole('alert')).toContainText('The selected range could not be loaded')
+  await expect(summary).toContainText('77.00 USD')
+  await expect(summary).toContainText('3 sessions started')
+  await expect(page.getByText('999.00 USD')).toHaveCount(0)
+  await expect(page.getByText('The old project range failed')).toHaveCount(0)
+  await expect(status).toHaveCount(0)
+  await expect(page.locator('.usage-page')).toHaveAttribute('aria-busy', 'false')
+
+  await page.getByRole('combobox', { name: 'Project', exact: true }).selectOption({ label: 'Pharos' })
+  await expect.poll(heldCount).toBe(6)
+  await page.getByRole('region', { name: 'Usage' }).getByRole('link', { name: 'Agents' }).click()
+  await expect(page).toHaveURL(/\/agents$/)
+  await expect.poll(() => aborted(5)).toBe(true)
+  await finish(5, 200, stale)
+  await expect(page.getByText('999.00 USD')).toHaveCount(0)
+  await expect(page.getByText('Stale project')).toHaveCount(0)
+  expect(pageErrors).toEqual([])
+})
+
 test('usage screenshots at 1600 and 390, light and dark', async ({ browser }) => {
   test.setTimeout(120_000)
   mkdirSync(shots, { recursive: true })

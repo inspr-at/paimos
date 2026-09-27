@@ -1,6 +1,6 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import AppIcon from '../components/AppIcon.vue'
 import { loadUsageDashboard } from '../lib/usageDashboard'
@@ -12,7 +12,9 @@ const route = useRoute()
 const router = useRouter()
 const projects = useProjects()
 const session = useSession()
-const page = ref<UsageDashboard | null>(null)
+const dashboard = ref<UsageDashboard | null>(null)
+const loadedDays = ref<number | null>(null)
+const loadedProject = ref<string | null>(null)
 const loading = ref(true)
 const error = ref('')
 const ranges = [7, 30, 90] as const
@@ -20,6 +22,8 @@ const ranges = [7, 30, 90] as const
 const days = computed(() => ranges.find(value => String(value) === route.query.days) ?? 30)
 const projectId = computed(() => typeof route.query.project === 'string' ? route.query.project : '')
 const openProjects = computed(() => projects.projects.filter(project => !project.archived))
+// Figures stay visible only for the selection they were loaded with.
+const visible = computed(() => dashboard.value && loadedDays.value === days.value && loadedProject.value === projectId.value ? dashboard.value : null)
 
 function setQuery(patch: { days?: number; project?: string }) {
   const next: Record<string, string> = {}
@@ -30,21 +34,43 @@ function setQuery(patch: { days?: number; project?: string }) {
   void router.replace({ path: '/agents/usage', query: next })
 }
 
+// A slower read for an earlier project or range must not paint, fail, or
+// finish over the selection the user has now. Leaving the page cancels it.
+let generation = 0
+let controller: AbortController | null = null
+function stale(request: number, signal: AbortSignal, cause?: unknown) {
+  return request !== generation || signal.aborted || (cause instanceof Error && cause.name === 'AbortError')
+}
 async function load() {
+  const request = ++generation
+  const previous = controller
+  previous?.abort()
+  const current = controller = new AbortController()
+  const requestedDays = days.value
+  const requestedProject = projectId.value
   loading.value = true
   error.value = ''
-  const bounds = rangeBounds(days.value, new Date())
+  const bounds = rangeBounds(requestedDays, new Date())
   try {
-    page.value = await loadUsageDashboard({ ...bounds, project: projectId.value || undefined })
+    const next = await loadUsageDashboard({ ...bounds, project: requestedProject || undefined }, current.signal)
+    if (stale(request, current.signal)) return
+    dashboard.value = next
+    loadedDays.value = requestedDays
+    loadedProject.value = requestedProject
   } catch (cause) {
-    page.value = null
+    if (stale(request, current.signal, cause)) return
     error.value = cause instanceof Error ? cause.message : 'Usage could not be loaded.'
   } finally {
-    loading.value = false
+    if (!stale(request, current.signal)) loading.value = false
   }
 }
 
 onMounted(() => { void projects.load() })
+onBeforeUnmount(() => {
+  generation++
+  controller?.abort()
+  controller = null
+})
 watch([days, projectId], () => { void load() }, { immediate: true })
 
 function ticketHref(ticket: UsageTicket) {
@@ -58,7 +84,7 @@ function tokenLine(group: UsageGroup, which: 'input' | 'output' | 'cached') {
   return formatTokens(group.cached_input_tokens, group.cached_input_known_rows, group.cached_input_unknown_rows)
 }
 const maxTrend = computed(() => {
-  const amounts = page.value?.trend.map(point => usdUnits(point.group.estimated_cost_usd)) ?? []
+  const amounts = visible.value?.trend.map(point => usdUnits(point.group.estimated_cost_usd)) ?? []
   return amounts.reduce((max, value) => value > max ? value : max, 1n)
 })
 function meterWidth(value: string | null) {
@@ -67,15 +93,15 @@ function meterWidth(value: string | null) {
   const width = Number((amount * 100n) / maxTrend.value)
   return Math.max(4, Math.min(100, width))
 }
-const groups = computed(() => page.value ? [
-  { id: 'project', title: 'By project', rows: page.value.by_project },
-  { id: 'model', title: 'By model', rows: page.value.by_model },
-  { id: 'subscription', title: 'By subscription', rows: page.value.by_subscription },
+const groups = computed(() => visible.value ? [
+  { id: 'project', title: 'By project', rows: visible.value.by_project },
+  { id: 'model', title: 'By model', rows: visible.value.by_model },
+  { id: 'subscription', title: 'By subscription', rows: visible.value.by_subscription },
 ] : [])
 </script>
 
 <template>
-  <section class="usage-page" aria-labelledby="usage-title">
+  <section class="usage-page" :aria-busy="loading" aria-labelledby="usage-title">
     <header class="page-head">
       <div class="head-main">
         <p class="eyebrow">{{ session.identity?.tenant.name ?? 'Workspace' }}</p>
@@ -98,47 +124,48 @@ const groups = computed(() => page.value ? [
           <option v-for="project in openProjects" :key="project.id" :value="project.id">{{ project.title }}</option>
         </select>
       </label>
-      <p v-if="page" class="range">{{ formatWhen(page.from) }} – {{ formatWhen(page.to) }} <span>UTC</span></p>
+      <p v-if="visible" class="range">{{ formatWhen(visible.from) }} – {{ formatWhen(visible.to) }} <span>UTC</span></p>
     </div>
 
-    <p v-if="loading" class="state-line" role="status"><span class="skeleton" />Loading usage</p>
-    <div v-else-if="error" class="notice" role="alert">
+    <p v-if="loading && !visible" class="state-line" role="status"><span class="skeleton" />Loading usage</p>
+    <p v-else-if="loading" class="state-line" role="status">Updating usage</p>
+    <div v-if="error" class="notice" role="alert">
       <AppIcon name="alert" :size="16" />
       <p>{{ error }}</p>
       <button type="button" class="btn sm" @click="load()">Try again</button>
     </div>
-    <template v-else-if="page">
-      <p v-if="page.truncated" class="notice">
+    <template v-if="visible">
+      <p v-if="visible.truncated" class="notice">
         <AppIcon name="alert" :size="16" />
         <span>This range has more sessions than one read holds. The totals are incomplete.</span>
       </p>
 
       <section class="glass-card summary-card" aria-labelledby="usage-summary-title">
-        <h2 id="usage-summary-title">{{ formatCount(page.totals.sessions) }} {{ page.totals.sessions === 1 ? 'session' : 'sessions' }} started</h2>
+        <h2 id="usage-summary-title">{{ formatCount(visible.totals.sessions) }} {{ visible.totals.sessions === 1 ? 'session' : 'sessions' }} started</h2>
         <dl class="facts">
-          <div><dt>Input tokens</dt><dd>{{ tokenLine(page.totals, 'input') }}</dd></div>
-          <div><dt>Output tokens</dt><dd>{{ tokenLine(page.totals, 'output') }}</dd></div>
-          <div><dt>Cached input</dt><dd>{{ tokenLine(page.totals, 'cached') }}</dd></div>
-          <div><dt>List estimate</dt><dd>{{ formatUSD(page.totals.estimated_cost_usd) }}</dd></div>
+          <div><dt>Input tokens</dt><dd>{{ tokenLine(visible.totals, 'input') }}</dd></div>
+          <div><dt>Output tokens</dt><dd>{{ tokenLine(visible.totals, 'output') }}</dd></div>
+          <div><dt>Cached input</dt><dd>{{ tokenLine(visible.totals, 'cached') }}</dd></div>
+          <div><dt>List estimate</dt><dd>{{ formatUSD(visible.totals.estimated_cost_usd) }}</dd></div>
         </dl>
         <p class="flags">
-          <span class="chip">{{ costStateLabel[page.totals.cost_state] }}</span>
-          <span v-if="page.totals.provisional_rows">{{ formatCount(page.totals.provisional_rows) }} provisional</span>
-          <span v-if="page.totals.cost_unknown_rows">{{ formatCount(page.totals.cost_unknown_rows) }} unknown cost</span>
-          <span v-if="page.totals.unreported_sessions">{{ formatCount(page.totals.unreported_sessions) }} unreported</span>
+          <span class="chip">{{ costStateLabel[visible.totals.cost_state] }}</span>
+          <span v-if="visible.totals.provisional_rows">{{ formatCount(visible.totals.provisional_rows) }} provisional</span>
+          <span v-if="visible.totals.cost_unknown_rows">{{ formatCount(visible.totals.cost_unknown_rows) }} unknown cost</span>
+          <span v-if="visible.totals.unreported_sessions">{{ formatCount(visible.totals.unreported_sessions) }} unreported</span>
         </p>
       </section>
 
       <section class="block" aria-labelledby="trend-title">
         <h2 id="trend-title">Sessions started</h2>
         <p class="hint">Lifetime usage of the sessions that started on each UTC day. Not spend during that day.</p>
-        <p v-if="!page.trend.length" class="empty">No sessions started in this range.</p>
+        <p v-if="!visible.trend.length" class="empty">No sessions started in this range.</p>
         <div v-else class="scroll">
           <table class="grid">
             <caption class="sr-only">Lifetime usage of sessions started each UTC day</caption>
             <thead><tr><th>Day</th><th>Sessions</th><th>List estimate</th><th>State</th></tr></thead>
             <tbody>
-              <tr v-for="point in page.trend" :key="point.day">
+              <tr v-for="point in visible.trend" :key="point.day">
                 <td>{{ formatWhen(point.day) }}</td>
                 <td class="num">{{ formatCount(point.group.sessions) }}</td>
                 <td>
@@ -176,13 +203,13 @@ const groups = computed(() => page.value ? [
       <section class="block" aria-labelledby="tickets-title">
         <h2 id="tickets-title">Most expensive tickets</h2>
         <p class="hint">Ranked by the known list estimate for sessions that started in this range. A ticket whose estimate is entirely unknown is counted and not ranked.</p>
-        <p v-if="!page.tickets.length" class="empty">No ticket in this range has a known list estimate.</p>
+        <p v-if="!visible.tickets.length" class="empty">No ticket in this range has a known list estimate.</p>
         <div v-else class="scroll">
           <table class="grid">
             <caption class="sr-only">Tickets with the highest known list estimate</caption>
             <thead><tr><th>Ticket</th><th>Sessions</th><th>List estimate</th><th>Tokens</th><th>State</th></tr></thead>
             <tbody>
-              <tr v-for="ticket in page.tickets" :key="ticket.id">
+              <tr v-for="ticket in visible.tickets" :key="ticket.id">
                 <td><RouterLink class="ticket-link" :to="ticketHref(ticket)"><span class="key">{{ ticket.key }}</span> {{ ticket.label }}</RouterLink></td>
                 <td class="num">{{ formatCount(ticket.sessions) }}</td>
                 <td>{{ formatUSD(ticket.estimated_cost_usd) }}</td>
@@ -192,19 +219,19 @@ const groups = computed(() => page.value ? [
             </tbody>
           </table>
         </div>
-        <p v-if="page.tickets_cost_unknown" class="hint">{{ formatCount(page.tickets_cost_unknown) }} with unknown cost.</p>
+        <p v-if="visible.tickets_cost_unknown" class="hint">{{ formatCount(visible.tickets_cost_unknown) }} with unknown cost.</p>
       </section>
 
       <section class="block" aria-labelledby="allowance-title">
         <h2 id="allowance-title">Allowance</h2>
-        <p v-if="page.allowance.state === 'withheld'" class="empty">Registered allowance windows are visible to workspace admins.</p>
-        <p v-else-if="page.allowance.state === 'none'" class="empty">No registered allowance window is open.</p>
+        <p v-if="visible.allowance.state === 'withheld'" class="empty">Registered allowance windows are visible to workspace admins.</p>
+        <p v-else-if="visible.allowance.state === 'none'" class="empty">No registered allowance window is open.</p>
         <div v-else class="scroll">
           <table class="grid">
             <caption class="sr-only">Open registered allowance windows</caption>
             <thead><tr><th>Account</th><th>Unit</th><th>Allowance</th><th>Used</th><th>Reserved</th><th>Pace cap</th><th>Headroom</th><th>Hard left</th><th>Pace</th></tr></thead>
             <tbody>
-              <tr v-for="window in page.allowance.windows" :key="window.window_id">
+              <tr v-for="window in visible.allowance.windows" :key="window.window_id">
                 <td>{{ window.label }} <span class="quiet">{{ window.harness }}</span></td>
                 <td>{{ unitLabel[window.unit] }}</td>
                 <td class="num">{{ formatCount(window.allowance) }}</td>
