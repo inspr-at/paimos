@@ -205,12 +205,12 @@ test('working and lost-heartbeat agents: polls every 20 seconds and says what ch
   await page.clock.fastForward(23_100)
   await expect(card(page, 'p-janus').locator('.live')).toHaveCount(0)
   await expect(news).toHaveText('No agent is working on Janus any more.')
-  // A working session past the red threshold stays visible as a problem.
+  // A working session past the red threshold stays visible with an honest heartbeat warning.
   data.live.push(liveAgent({ project_id: 'p-site', name: 'late', heartbeat_at: new Date(Date.parse('2026-09-23T12:00:00Z') - 660_000).toISOString() }))
   await page.clock.fastForward(20_500)
   await expect.poll(reads).toBe(6)
-  await expect(card(page, 'p-site').locator('.live-bot')).toHaveAttribute('data-state', 'problem')
-  await expect(card(page, 'p-site').locator('.live-chip')).toHaveAccessibleName(/problem/)
+  await expect(card(page, 'p-site').locator('.live-bot')).toHaveAttribute('data-state', 'unresponsive')
+  await expect(card(page, 'p-site').locator('.live-chip')).toHaveAccessibleName(/no heartbeat/)
   // A hidden tab asks nothing and catches up when shown again.
   await page.evaluate(() => { Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true }); document.dispatchEvent(new Event('visibilitychange')) })
   await page.clock.fastForward(65_000)

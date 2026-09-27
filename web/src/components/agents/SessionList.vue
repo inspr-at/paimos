@@ -13,7 +13,9 @@ import AgentStateLabel from './AgentStateLabel.vue'
 import { useAgentAppearance } from '../../lib/agentAppearance'
 const { appearance } = useAgentAppearance()
 import AgentGlyph from './AgentGlyph.vue'
-import { currentStep } from './activity'
+import HarnessBadge from './HarnessBadge.vue'
+import ProviderMark from './ProviderMark.vue'
+import { intendedResult, sessionContext, sessionExecution } from './sessionRow'
 
 // Session families stay together across status groups. Each lead's history is
 // opt-in for this mounted list only; refreshes never open it or persist it.
@@ -49,10 +51,11 @@ const workingChildren = (branch: Branch) => branch.children.reduce((sum, child) 
 const otherChildren = (branch: Branch) => branch.children.reduce((sum, child) => sum + child.liveCount - child.workingCount, 0)
 const workerLabel = (branch: Branch) => `${branch.count - 1} ${branch.count === 2 ? 'worker' : 'workers'}`
 const visible = (group: SessionGroup) => {
-  const out: { view: SessionView; branch: Branch; depth: number; parent: string; open: boolean; guides: boolean[]; family: boolean; familyEnd: boolean }[] = []
+  const out: { view: SessionView; branch: Branch; depth: number; parent: string; open: boolean; guides: boolean[]; family: boolean; familyEnd: boolean; primary: string; context: string; exec: ReturnType<typeof sessionExecution> }[] = []
   function walk(branch: Branch, guides: boolean[], parent = '') {
     const open = isExpanded(branch)
-    out.push({ view: branch.view, branch, depth: guides.length, parent, open, guides, family: guides.length > 0 || open, familyEnd: false })
+    const primary = intendedResult(branch.view)
+    out.push({ view: branch.view, branch, depth: guides.length, parent, open, guides, family: guides.length > 0 || open, familyEnd: false, primary, context: sessionContext(branch.view, primary), exec: sessionExecution(branch.view) })
     if (open) {
       const children = candidates(branch)
       children.forEach((child, index) => walk(child, [...guides, index < children.length - 1], branch.view.name))
@@ -103,7 +106,6 @@ function pendingLabel(view: SessionView) {
   if (!c || c.state === 'completed') return ''
   return c.kind === 'stop' ? (c.state === 'claimed' ? 'Stopping…' : 'Stop sent') : (c.state === 'claimed' ? 'Interrupting…' : 'Interrupt sent')
 }
-const rowMeta = (view: SessionView) => [view.harness, view.session.model, view.session.reasoning_effort, view.session.account_label].filter(Boolean).join(' · ')
 function rowClick(event: MouseEvent, id: string) {
   if ((event.target as HTMLElement).closest('a, button')) return
   emit('open', id)
@@ -135,8 +137,9 @@ function rowClick(event: MouseEvent, id: string) {
 
     <div v-else class="table" role="table" aria-label="Agent sessions">
       <div class="thead" role="row">
-        <span role="columnheader">State</span><span role="columnheader">Agent &amp; work</span><span role="columnheader">Ticket</span>
-        <span role="columnheader" class="right">Heartbeat</span><span role="columnheader" class="right c-elapsed">Running</span><span role="columnheader"><span class="sr-only">Actions</span></span>
+        <span role="columnheader">State</span><span role="columnheader">Intended result</span><span role="columnheader">Ticket</span>
+        <span role="columnheader" class="c-exec">Execution</span>
+        <span role="columnheader" class="right c-beat">Heartbeat</span><span role="columnheader" class="right c-elapsed">Running</span><span role="columnheader"><span class="sr-only">Actions</span></span>
       </div>
       <template v-for="group in GROUPS" :key="group.id">
         <div v-if="roots(group.id).length" class="group-row" :class="group.id" role="row">
@@ -148,21 +151,29 @@ function rowClick(event: MouseEvent, id: string) {
           </span>
         </div>
         <div
-          v-for="{ view, branch, depth, parent, open, guides, family, familyEnd } in visible(group.id)" :key="view.session.id" class="row agent-state-surface" :data-state="view.status.state" role="row" :data-row="`s:${view.session.id}`" :data-parent="view.session.parent_harness_session_id || undefined" :data-depth="depth" :style="{ '--depth': depth, ...appearance(view.status.state) }" tabindex="-1" @focusin="emit('focusRow', `s:${view.session.id}`)"
+          v-for="{ view, branch, depth, parent, open, guides, family, familyEnd, primary, context, exec } in visible(group.id)" :key="view.session.id" class="row agent-state-surface" :data-state="view.status.state" role="row" :data-row="`s:${view.session.id}`" :data-parent="view.session.parent_harness_session_id || undefined" :data-depth="depth" :style="{ '--depth': depth, ...appearance(view.status.state) }" tabindex="-1" @focusin="emit('focusRow', `s:${view.session.id}`)"
           :class="[view.status.group, { worker: depth > 0, family, 'family-start': family && !depth, 'family-end': family && familyEnd, active: cursor === `s:${view.session.id}`, selected: selected === view.session.id }]" @click="rowClick($event, view.session.id)"
         >
           <span v-if="depth || open" class="tree-lines" aria-hidden="true">
             <span v-for="(continues, level) in guides" :key="level" class="tree-guide" :class="{ continues, elbow: level === depth - 1, last: level === depth - 1 && !continues }" :style="{ '--level': level }" />
             <span v-if="open" class="tree-stem" :style="{ '--level': depth }" />
           </span>
-          <span role="cell" class="c-state"><AgentStateLabel :state="view.status.state" :detail="pendingLabel(view)" /></span>
+          <span role="cell" class="c-state"><AgentStateLabel :state="view.status.state" :label="view.status.label" :detail="pendingLabel(view)" /></span>
           <span role="cell" class="c-agent">
             <span v-if="depth" class="sr-only">Worker of {{ parent }}. </span>
-            <RouterLink class="agent-link" :to="`/agents/${view.session.id}`" :aria-label="`${view.harness} ${view.name}, ${view.status.label}`">
-              <AgentGlyph :view="view" :size="30" />
-              <span class="who"><span class="agent-name">{{ view.name }}</span><span class="step">{{ currentStep(view, branch.liveCount - 1) }}</span><span class="session-meta">{{ rowMeta(view) }}</span><span v-if="view.session.host && view.session.host !== view.name" class="host mono">on {{ view.session.host }}</span></span>
+            <RouterLink class="agent-link" :to="`/agents/${view.session.id}`" :aria-label="`${view.harness} ${view.name}, ${view.status.label}${view.session.role === 'coordinator' ? ', lead' : ''}. ${primary}. ${context}`">
+              <span class="bot">
+                <AgentGlyph :view="view" :size="30" />
+                <HarnessBadge :harness="view.session.harness" />
+              </span>
+              <span class="who">
+                <span class="result" :title="primary">{{ primary }}</span>
+                <span class="session-context">
+                  <span class="session-name" :title="context">{{ context }}</span>
+                  <span v-if="view.session.role === 'coordinator'" class="role" data-tip="Coordinates other sessions">Lead</span>
+                </span>
+              </span>
             </RouterLink>
-            <span v-if="view.session.role === 'coordinator'" class="role" data-tip="Coordinates other sessions">Lead</span>
             <span v-if="branch.children.length" class="worker-tools">
               <button type="button" class="worker-toggle" :disabled="!candidates(branch).length" :aria-expanded="open" :aria-label="`${open ? 'Collapse' : 'Expand'} ${workerLabel(branch)} of ${view.name}: ${workingChildren(branch)} working`" @click="toggle(branch)">
                 <AppIcon name="chevron-right" :size="12" class="chev" :class="{ turned: open }" />{{ workingChildren(branch) }} working
@@ -175,6 +186,16 @@ function rowClick(event: MouseEvent, id: string) {
           <span role="cell" class="c-ticket">
             <TicketPeekLink v-if="view.ticket" class="ticket-chip" :ticket-key="view.ticket.key" :href="view.ticket.href" :tip="view.ticket.title">{{ view.ticket.key }}</TicketPeekLink>
             <span v-else class="faint">{{ view.projectKey || '—' }}</span>
+          </span>
+          <span role="cell" class="c-exec" :aria-label="`${exec.providerLabel}. ${exec.modelLine}. ${exec.accountLine}`">
+            <ProviderMark :provider="exec.provider" />
+            <span class="exec-copy">
+              <span class="exec-model" :title="exec.modelLine">
+                <template v-if="exec.model">{{ exec.model }} · <span :class="{ missing: exec.effort === 'effort unknown' }">{{ exec.effort }}</span></template>
+                <span v-else class="missing">Model unknown</span>
+              </span>
+              <span class="exec-account" :title="exec.accountLine">{{ view.harness }} · <span :class="{ missing: !exec.account }">{{ exec.account || 'Account unknown' }}</span></span>
+            </span>
           </span>
           <span role="cell" class="right c-beat">
             <time v-if="view.session.heartbeat_at" :datetime="view.session.heartbeat_at">{{ relativeTime(view.session.heartbeat_at, { now }) }}</time>
@@ -214,13 +235,11 @@ function rowClick(event: MouseEvent, id: string) {
 </template>
 
 <style scoped>
-/* The machine a session runs on, secondary to the agent's name. */
-.host { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 11px; color: var(--ink-3); font-variant-ligatures: none; }
 .sessions { overflow: clip; container: sessions / inline-size; }
 .card-head { display: flex; align-items: baseline; gap: 10px; padding: 14px 18px 10px; }
 .card-head h2 { font-size: 15px; font-weight: 650; }
 .sub { font-size: 12.5px; color: var(--ink-3); }
-.table { --state-width: 158px; --tree-step: 28px; display: grid; grid-template-columns: var(--state-width) minmax(200px, 1.5fr) minmax(90px, .8fr) 88px 76px 76px; padding: 0 0 8px; }
+.table { --state-width: 158px; --tree-step: 28px; display: grid; grid-template-columns: var(--state-width) minmax(140px, 1.45fr) minmax(72px, .48fr) minmax(128px, .82fr) 80px 68px 76px; padding: 0 0 8px; }
 .thead, .row, .group-row { display: grid; grid-template-columns: subgrid; grid-column: 1 / -1; align-items: center; column-gap: 0; }
 .thead { height: 32px; padding: 0 12px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); font: 500 10.5px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--ink-3); font-variant-ligatures: none; white-space: nowrap; }
 .thead > span, .row > span { padding: 0 8px; min-width: 0; }
@@ -233,9 +252,8 @@ function rowClick(event: MouseEvent, id: string) {
 .group-toggle:hover { background: var(--row-hover); color: var(--ink); }
 .group-toggle:focus-visible { box-shadow: var(--focus-ring); }
 .chev.turned { transform: rotate(90deg); }
-/* The glyph is centred beside name, activity, metadata and host. The metadata
-   line adds half its 13.75px height to the tree joint; phones add 10px padding. */
-.row { --tree-joint: 35px; position: relative; min-height: 48px; margin: 0 6px; padding: 0 4px; border-radius: 10px; outline: none; cursor: pointer; font-size: 13px; }
+/* Two label lines keep the glyph centre near the tree joint. Phones add padding. */
+.row { --tree-joint: 22px; position: relative; min-height: 48px; margin: 0 6px; padding: 0 4px; border-radius: 10px; outline: none; cursor: pointer; font-size: 13px; }
 .row.family { border-radius: 0; }
 .row.family-start { border-radius: 10px 10px 0 0; }
 .row.family-end { border-radius: 0 0 10px 10px; }
@@ -269,15 +287,21 @@ function rowClick(event: MouseEvent, id: string) {
 .state-label { font-size: 12.5px; color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .row.needs .state-label { color: var(--gold-ink); font-weight: 600; }
 .row > .c-agent { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; min-width: 0; padding-block: 6px; }
-.agent-link { display: inline-flex; align-items: center; gap: 8px; min-width: 0; color: var(--ink); text-decoration: none; }
+.agent-link { display: inline-flex; align-items: center; gap: 8px; min-width: 0; max-width: 100%; color: var(--ink); text-decoration: none; }
 .agent-link:focus-visible { box-shadow: var(--focus-ring); border-radius: 6px; }
+.bot { position: relative; display: inline-grid; width: 30px; height: 30px; flex: none; }
 .who { display: grid; min-width: 0; line-height: 1.25; }
-.agent-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.step { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-2); font-size: 12px; }
-.session-meta { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-3); font-size: 11px; }
-.row:hover .agent-name { color: var(--teal-ink); }
-.harness { flex-shrink: 0; display: inline-flex; align-items: center; height: 20px; padding: 0 7px; border-radius: 6px; background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); font: 500 10.5px/1 var(--mono); letter-spacing: .03em; color: var(--ink-2); font-variant-ligatures: none; }
-.role { flex-shrink: 0; height: 18px; padding: 0 6px; border-radius: 999px; background: var(--gold-wash); color: var(--gold-ink); font: 600 10px/18px var(--mono); letter-spacing: .06em; text-transform: uppercase; font-variant-ligatures: none; }
+.result { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-context { display: flex; align-items: center; gap: 6px; min-width: 0; color: var(--ink-3); font-size: 12px; font-weight: 450; }
+.session-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row:hover .result { color: var(--teal-ink); }
+.role { flex: none; height: 16px; padding: 0 5px; border-radius: 999px; background: var(--gold-wash); color: var(--gold-ink); font: 600 9px/16px var(--mono); letter-spacing: .06em; text-transform: uppercase; font-variant-ligatures: none; }
+.c-exec { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.exec-copy { display: grid; min-width: 0; line-height: 1.25; }
+.exec-model, .exec-account { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.exec-model { font-size: 12.5px; color: var(--ink); }
+.exec-account { font-size: 11.5px; color: var(--ink-3); }
+.missing { color: var(--ink-3); font-weight: 450; }
 .ticket-chip { display: inline-flex; align-items: center; height: 22px; padding: 0 8px; border-radius: 6px; background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); font: 600 11.5px/1 var(--mono); text-decoration: none; font-variant-ligatures: none; white-space: nowrap; }
 .ticket-chip:hover { filter: brightness(1.04); text-decoration: underline; }
 .ticket-chip:focus-visible { box-shadow: var(--focus-ring); }
@@ -311,29 +335,31 @@ function rowClick(event: MouseEvent, id: string) {
 .sk-row { display: flex; align-items: center; gap: 18px; height: 40px; }
 .sk-row .dot { width: 10px; height: 10px; border-radius: 50%; }
 .sk-row .key { width: 70px; height: 20px; border-radius: 6px; }
-@container sessions (max-width: 920px) {
-  .table { --state-width: 150px; grid-template-columns: var(--state-width) minmax(150px, 1.3fr) minmax(90px, .8fr) 80px 64px 76px; }
-}
-@container sessions (max-width: 760px) {
-  .table { --state-width: 150px; grid-template-columns: var(--state-width) minmax(140px, 1fr) minmax(90px, auto) 78px 76px; }
+@container sessions (max-width: 980px) {
+  .table { --state-width: 142px; grid-template-columns: var(--state-width) minmax(120px, 1.35fr) minmax(68px, .42fr) minmax(116px, .75fr) 72px 76px; }
   .c-elapsed { display: none; }
 }
-/* Phones: two lines per session, actions live in the session panel. */
+@container sessions (max-width: 760px) {
+  .table { --state-width: 136px; grid-template-columns: var(--state-width) minmax(100px, 1.2fr) minmax(64px, auto) minmax(108px, .7fr) 68px; }
+  .c-beat, .c-elapsed { display: none; }
+}
+/* Phones: identity, execution and state stack; actions stay in the overflow menu. */
 @container sessions (max-width: 560px) {
   .table { --tree-step: 20px; display: block; }
   .thead { display: none; }
   .group-row { display: block; margin: 12px 8px 2px; padding: 0 8px; }
-  .row { --tree-joint: 45px; display: grid; grid-template-columns: auto minmax(0, 1fr) auto 44px; grid-template-areas: "agent agent beat actions" "state ticket ticket actions"; row-gap: 6px; column-gap: 0; min-height: 64px; margin: 0 6px; padding: 10px 4px 10px calc(10px + var(--depth) * var(--tree-step)); }
+  .row { --tree-joint: 32px; display: grid; grid-template-columns: auto minmax(0, 1fr) auto 44px; grid-template-areas: "agent agent beat actions" "exec exec exec actions" "state ticket ticket actions"; row-gap: 4px; column-gap: 8px; align-items: center; min-height: 72px; margin: 0 6px; padding: 10px 4px 10px calc(10px + var(--depth) * var(--tree-step)); }
   .row > span { padding: 0; }
-  .c-agent { grid-area: agent; }
+  .c-agent { grid-area: agent; min-width: 0; }
   .row.worker .c-agent { padding-left: 0; }
   .row > .tree-lines { left: 25px; }
   .worker-toggle { min-height: 44px; padding-inline: 8px; }
-  .c-state { grid-area: state; margin-right: 10px; }
-  .c-ticket { grid-area: ticket; justify-self: start; }
-  .c-beat { grid-area: beat; }
+  .c-state { grid-area: state; min-width: 0; }
+  .c-ticket { grid-area: ticket; justify-self: start; min-width: 0; overflow: hidden; }
+  .c-exec { grid-area: exec; min-width: 0; }
+  .c-beat { display: block; grid-area: beat; }
   .c-elapsed { display: none; }
-  .c-actions { grid-area: actions; align-self: center; justify-content: center; }
+  .c-actions { grid-area: actions; grid-row: 1 / span 3; align-self: center; justify-content: center; }
   .act { display: none; }
   .more { display: grid; width: 44px; height: 44px; }
 }
