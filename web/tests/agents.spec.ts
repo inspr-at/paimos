@@ -77,7 +77,9 @@ test('session setup and work context appear from the mocked harness API', async 
     commits: [{ sha: 'abc1234', subject: 'Store session setup' }, { sha: 'def5678', subject: 'Show work context' }],
   })
   await openAgents(page)
-  await expect(row(page, nova).locator('.session-meta')).toHaveText('Codex · gpt-6-sol · xhigh · Codex Pro')
+  await expect(row(page, nova).locator('.exec-model')).toHaveText('gpt-6-sol · xhigh')
+  await expect(row(page, nova).locator('.exec-account')).toHaveText('Codex · Codex Pro')
+  await expect(row(page, nova).locator('.result')).toHaveText('Add an Oracle Cloud connector')
   await row(page, nova).locator('.agent-link').click()
   const setupBlock = panel(page).locator('section[aria-labelledby="setup-title"]')
   const workBlock = panel(page).locator('section[aria-labelledby="work-title"]')
