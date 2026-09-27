@@ -267,6 +267,28 @@ func TestJourneyMultiOfferProjectionKeepsConsumedAuthoritySeparate(t *testing.T)
 	if view.NextAction.Available || view.NextAction.ApprovalRequestID != nil || view.NextAction.Label != "Await deployment evidence" {
 		t.Fatalf("consumed gate must not be offered for reuse: %+v", view.NextAction)
 	}
+	// The older request becomes live again while the newer consumed gate is
+	// standing. It may be an action candidate, but cannot replace that gate's
+	// displayed identity or evidence.
+	change(`UPDATE agent_permission_grants SET valid_until=now()+interval '2 hours' WHERE approval_request_id=$1::uuid`, oldDeploy)
+	view = get()
+	if got := stage(view, "deploy"); !got.GateLive || testPtr(got.GateApprovalID) != liveDeploy || testPtr(got.GateOfferID) != liveDeploy || got.GateOfferState != "approved_live" {
+		t.Fatalf("standing gate must outrank older unconsumed live offer in display: %+v", got)
+	}
+	if view.NextAction.Available || view.NextAction.ApprovalRequestID != nil || view.NextAction.Label != "Await deployment evidence" {
+		t.Fatalf("standing gate awaits evidence despite older live offer: %+v", view.NextAction)
+	}
+	// A new request remains available to an explicit human retry after failure.
+	change(`UPDATE agent_permission_grants SET valid_until=now()-interval '1 second' WHERE approval_request_id=$1::uuid`, oldDeploy)
+	freshRetry := f.grant(t, f.agent.ID, f.person.ID, journey.ScopeDeploy, release)
+	f.setReleaseState(t, release, "refused")
+	view = get()
+	if got := stage(view, "deploy"); !got.GateLive || testPtr(got.GateApprovalID) != liveDeploy || testPtr(got.GateOfferID) != liveDeploy || got.GateOfferState != "approved_live" {
+		t.Fatalf("retry offer must not displace standing gate evidence: %+v", got)
+	}
+	if view.NextAction.Key != "retry_deploy" || !view.NextAction.Available || testPtr(view.NextAction.ApprovalRequestID) != freshRetry {
+		t.Fatalf("fresh retry must remain available for human apply: %+v", view.NextAction)
+	}
 }
 
 func TestJourneyRequirementsGateUsesCurrentRevisionScope(t *testing.T) {

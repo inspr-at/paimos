@@ -20,7 +20,7 @@ export type JourneyStart = 'inspire' | 'shape' | 'requirements' | 'open' | 'plan
 export interface JourneyWorld {
   journey: {
     project_node_id: string; profile: string; revision: number; stage: Stage; next_action: { key: string; label: string; stage: Stage; available: boolean; reason?: string; approval_request_id: string | null }
-    requirements_revision: number; current_release_id: string | null; stages: { key: Stage; state: string; gate_approval_id: string | null; handoff_id: string | null; gate_offer_id?: string; gate_offer_state?: string; gate_offer_expires_at?: string }[]
+    requirements_revision: number; current_release_id: string | null; stages: { key: Stage; state: string; gate_approval_id: string | null; gate_live?: boolean; handoff_id: string | null; gate_offer_id?: string; gate_offer_state?: string; gate_offer_expires_at?: string }[]
     requirements_digest_sha256: string; requirements_approval_scope: string
     launch_readiness: { can_admit: boolean; reason: string }
     stage_source?: 'journey' | 'derived'

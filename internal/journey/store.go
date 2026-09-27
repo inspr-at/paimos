@@ -572,6 +572,7 @@ func loadOffers(ctx context.Context, tx pgx.Tx, f *facts) error {
 	}
 	defer rows.Close()
 	seen := map[string]int{}
+	f.GateOfferByID = make(map[string]gateOffer)
 	for rows.Next() {
 		var scope, resource, id, decision, decider string
 		var requestExpiry time.Time
@@ -587,8 +588,9 @@ func loadOffers(ctx context.Context, tx pgx.Tx, f *facts) error {
 			expires = *grantExpiry
 		}
 		offer := gateOffer{ID: id, DecidedBy: decider, Live: state == "approved_live", Consumed: consumed, State: state, ExpiresAt: expires.UTC().Format(time.RFC3339)}
-		// The newest request wins within each class. A consumed live request is
-		// still the gate people see, but it cannot authorize another action.
+		f.GateOfferByID[id] = offer
+		// The newest request wins within each class for action selection. Stage
+		// display uses the exact standing gate request from GateOfferByID.
 		rank := 1
 		switch {
 		case offer.Live && !consumed:

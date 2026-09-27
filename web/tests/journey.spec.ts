@@ -3,6 +3,7 @@
 // action, gates as approvals, the plan with tri-state features, the release walker
 // (A3), intake, the blocked deploy gate and the header's compact stage.
 import { test, expect, type Page } from '@playwright/test'
+import { join } from 'node:path'
 import { fixtures, me, mockWork, watchErrors } from './work-fixtures'
 import { journeyWorld, mockJourney, type JourneyStart, type WorldOptions } from './journey-fixtures'
 import { mockEffectivePermissions } from './authz-fixtures'
@@ -309,6 +310,48 @@ test('Deploy follows launch readiness: ready shows a check, blocked shows its re
   await expect(page.getByText('Launch admission · ready')).toBeVisible()
   await expect(page.getByRole('region', { name: /Blocked: Launch admission/ })).toHaveCount(0)
 })
+
+for (const [label, available, description] of [
+  ['Apply deployment approval', true, 'The gate is approved. Apply that decision to hand the release to Pharos for deployment.'],
+  ['Await deployment evidence', false, 'The approved gate was applied. Pharos now reports the deployment and verification outcome here.'],
+] as const) {
+  test(`Deploy decision card follows the ${label} action`, async ({ page }) => {
+    await mockWork(page, fixtures())
+    const world = journeyWorld('deploy')
+    const request = world.approvals[0]
+    request.decision = 'approved'
+    request.decided_by_principal_id = me.id
+    world.walkers['r-2'].state = 'deploying'
+    world.handoffs = {}
+    world.journey.stages = world.journey.stages.map(stage => stage.key === 'deploy' ? {
+      ...stage, state: 'current', handoff_id: null, gate_approval_id: available ? null : request.id,
+      gate_live: !available, gate_offer_id: request.id, gate_offer_state: 'approved_live', gate_offer_expires_at: request.expires_at,
+    } : stage)
+    world.journey.next_action = {
+      key: 'approve_deploy', label, stage: 'deploy', available,
+      reason: available ? '' : 'Deployment evidence is not terminal.', approval_request_id: available ? request.id : null,
+    }
+    await mockJourney(page, world)
+    for (const width of [1600, 390]) {
+      for (const theme of ['light', 'dark'] as const) {
+        await page.setViewportSize({ width, height: 900 })
+        await page.emulateMedia({ colorScheme: theme })
+        await page.goto('/p/PHAROS?view=journey')
+        const card = page.getByRole('region', { name: `Decision: ${label}` })
+        await expect(card).toContainText(description)
+        await expect(card.getByRole('button', { name: label })).toBeEnabled({ enabled: available })
+        if (!available) {
+          await expect(page.getByRole('region', { name: 'Blocked: Launch admission is closed' })).toContainText('The approval is already applied.')
+          await expect(page.getByText('Pharos has not reported a deployment attempt yet.')).toBeVisible()
+        }
+        if (process.env.EG2_SHOTS) {
+          await page.screenshot({ path: join(process.env.EG2_SHOTS, `${available ? 'apply' : 'await'}-${width}-${theme}.png`), fullPage: true, animations: 'disabled' })
+          await card.screenshot({ path: join(process.env.EG2_SHOTS, `${available ? 'apply' : 'await'}-${width}-${theme}-card.png`), animations: 'disabled' })
+        }
+      }
+    }
+  })
+}
 
 test('a member sees the deploy gate without an approval action', async ({ page }) => {
   const { calls } = await open(page, 'deploy')

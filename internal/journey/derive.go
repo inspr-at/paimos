@@ -131,6 +131,7 @@ type facts struct {
 	Candidate                  gateOffer
 	Deploy                     gateOffer
 	Access                     gateOffer
+	GateOfferByID              map[string]gateOffer
 	ShapeGateID                string
 	RequirementsGateID         string
 	BuildGateID                string
@@ -576,7 +577,13 @@ func stageRail(f facts, current string, blocked bool) []JourneyStage {
 			GateLive:       f.GateLiveByID[gateID],
 			HandoffID:      strPtr(handoff.ID),
 		}
-		if offer := gateOfferForStage(f, key); offer.ID != "" {
+		// A standing live gate displays the request that actually established it.
+		// The selected unconsumed offer remains separate for a human retry action.
+		displayOffer := gateOfferForStage(f, key)
+		if st.GateLive {
+			displayOffer = f.GateOfferByID[gateID]
+		}
+		if offer := displayOffer; offer.ID != "" {
 			st.GateOfferID = strPtr(offer.ID)
 			st.GateOfferState = offer.State
 			st.GateOfferExpiresAt = offer.ExpiresAt
