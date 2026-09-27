@@ -22,6 +22,7 @@ export const useLiveAgents = defineStore('liveAgents', () => {
   const skew = ref(0)
   const now = ref(Date.now())
   const unavailable = ref(false)
+  const truncated = ref(false)
   const evidence = ref(new Map<string, ActivityEvidence>())
   const evidenceKey = (agent: LiveAgent) => `${agent.project_id}:${agentKey(agent)}`
   const eventPulseFor = (agent: LiveAgent) => evidence.value.get(evidenceKey(agent))?.pulse ?? 0
@@ -30,12 +31,13 @@ export const useLiveAgents = defineStore('liveAgents', () => {
   const reading = usePolledData(async () => {
     try { await preferencesReady; return await getLiveAgents() }
     catch (e) {
-      if (e instanceof APIError && [401, 403, 404].includes(e.status)) { unavailable.value = true; items.value = []; evidence.value = new Map() }
+      if (e instanceof APIError && [401, 403, 404].includes(e.status)) { unavailable.value = true; items.value = []; evidence.value = new Map(); truncated.value = false }
       throw e
     }
   }, { items: [], at: '', fresh_seconds: 120 }, page => {
     const at = Date.now()
     items.value = Array.isArray(page.items) ? page.items : []
+    truncated.value = page.truncated === true
     evidence.value = new Map(items.value.map(agent => [evidenceKey(agent), advanceActivity(evidence.value.get(evidenceKey(agent)), agent)]))
     skew.value = skewOf(page, at)
     now.value = at
@@ -77,5 +79,5 @@ export const useLiveAgents = defineStore('liveAgents', () => {
     }
   }
 
-  return { items, state, now, serverNow, byProject, forProject, eventPulseFor, refresh, watch }
+  return { items, state, now, serverNow, byProject, forProject, eventPulseFor, refresh, watch, truncated, pollStale: reading.stale }
 })

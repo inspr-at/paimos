@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { advanceActivity, liveState, agentKey, byLead, chipText, elapsedFor, groupLive, liveChanges, liveSummary, phrase, sameLive, skewOf, who, type LiveAgent } from '../src/lib/liveAgents.ts'
+import { advanceActivity, liveState, agentKey, byLead, chipText, elapsedFor, groupLive, isListedTicketWorker, liveChanges, liveSummary, phrase, sameLive, skewOf, ticketWorkers, who, type LiveAgent } from '../src/lib/liveAgents.ts'
 import { DEFAULT_AGENT_STATE } from '../src/lib/agentSignals.ts'
 
 const now = Date.parse('2026-09-26T12:00:00Z')
@@ -124,4 +124,38 @@ test('stale evidence neither leads current work nor claims that a session stoppe
   assert.equal(liveChanges(at(agent()), at(stale), () => 'Project'), 'No recent activity from hausv on Project.')
   assert.equal(liveChanges(at(stale), at(agent()), () => 'Project'), 'Activity resumed for hausv on Project.')
   assert.equal(liveChanges(new Map(), at(stale), () => 'Project'), '')
+})
+
+test('ticket workers match this project and ticket, and omit stopped or archived sessions', () => {
+  const ticket = { id: 't1', key: 'PHAROS-14', title: 'Pill', project_id: 'p1' }
+  const working = agent({ session_id: 'work', ticket })
+  const waiting = agent({ session_id: 'wait', name: 'wren', needs_attention: true, since: ago(60), ticket })
+  const problem = agent({ session_id: 'bad', name: 'fault', has_problem: true, ticket })
+  const stale = agent({ session_id: 'quiet', name: 'quiet', activity: 'idle', heartbeat_at: ago(10 * 60), ticket })
+  const heartbeatOnly = agent({ session_id: 'beat', name: 'beat', activity: 'idle', heartbeat_at: ago(20), ticket })
+  const stopped = agent({ session_id: 'stop', name: 'retired', phase: 'stopped', activity: 'idle', stopped_at: ago(30), stop_reason: 'completed', ticket })
+  const failedStop = agent({ session_id: 'fail', name: 'crashed', phase: 'stopped', activity: 'idle', stopped_at: ago(30), has_problem: true, stop_reason: 'error: failed', ticket })
+  const archived = agent({ session_id: 'arch', name: 'old', phase: 'stopped', activity: 'idle', stopped_at: ago(30), stop_reason: 'archived_process_unknown', ticket })
+  const moved = agent({ session_id: 'moved', project_id: 'p1', ticket: { ...ticket, project_id: 'p2' } })
+  const otherProject = agent({ session_id: 'other', project_id: 'p2', ticket: { ...ticket, project_id: 'p2' } })
+  const duplicate = agent({ session_id: 'work', ticket })
+  const nameless = agent({ session_id: undefined, principal_id: undefined, name: undefined, harness: 'codex', ticket })
+  const grouped = groupLive([working, waiting, problem, stale, heartbeatOnly, stopped, failedStop, archived, moved, otherProject, duplicate, nameless], now)
+  assert.equal(liveState(heartbeatOnly, now), 'idle')
+  assert.equal(liveState(stale, now), 'stale')
+  assert.equal(liveState(problem, now), 'problem')
+  assert.equal(liveState(stopped, now), 'stopped')
+  assert.equal(isListedTicketWorker(grouped.get('p1')!.find(a => a.session_id === 'stop')!), false)
+  assert.equal(isListedTicketWorker(grouped.get('p1')!.find(a => a.session_id === 'fail')!), false)
+  assert.equal(isListedTicketWorker(grouped.get('p1')!.find(a => a.session_id === 'arch')!), false)
+  const listed = ticketWorkers(grouped.get('p1')!, 'p1')
+  assert.deepEqual(listed.get('t1')!.map(a => a.session_id ?? a.harness), ['bad', 'wait', 'codex', 'work', 'beat', 'quiet'])
+  assert.equal(listed.get('t1')!.find(a => a.session_id === 'quiet')!.state, 'stale')
+  assert.equal(listed.get('t1')!.find(a => a.session_id === 'beat')!.state, 'idle')
+  assert.equal(who(listed.get('t1')!.find(a => a.harness === 'codex' && !a.session_id)!), 'Codex agent')
+  assert.equal(ticketWorkers(grouped.get('p1')!, 'p2').size, 0)
+  assert.equal(ticketWorkers(grouped.get('p2') ?? [], 'p1').size, 0)
+  const rebound = ticketWorkers(groupLive([agent({ session_id: 'work', ticket: { id: 't2', key: 'PHAROS-11', title: 'Other', project_id: 'p1' } })], now).get('p1')!, 'p1')
+  assert.equal(rebound.get('t1'), undefined)
+  assert.equal(rebound.get('t2')![0]!.session_id, 'work')
 })

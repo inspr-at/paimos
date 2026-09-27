@@ -10,6 +10,8 @@ test('automatic columns follow the table width and the data', () => {
   assert.deepEqual(automaticColumns(700, { assigned: true }), ['key', 'title', 'status', 'priority'])
   assert.deepEqual(automaticColumns(800, { assigned: true }), ['key', 'title', 'status', 'priority', 'updated'])
   assert.deepEqual(automaticColumns(1200, { assigned: true }), ['key', 'title', 'status', 'priority', 'assignee', 'updated'])
+  assert.deepEqual(automaticColumns(1200, { workers: true }), ['key', 'title', 'status', 'priority', 'assignee', 'updated'])
+  assert.deepEqual(automaticColumns(800, { workers: true }), ['key', 'title', 'status', 'priority', 'updated'])
   assert.deepEqual(automaticColumns(1200, {}), ['key', 'title', 'status', 'priority', 'updated'])
   // Wide tables show Assignee even when nobody is assigned yet.
   assert.deepEqual(automaticColumns(1600, {}), ['key', 'title', 'status', 'priority', 'assignee', 'epic', 'created', 'updated'])
@@ -30,6 +32,9 @@ test('a saved choice fixes order and visibility; what cannot fit steps aside', (
   assert.deepEqual(ids(700, { phone: false, prefs: p }), ['key', 'title', 'updated', 'status'])
   assert.equal(visibleColumns(2000, { phone: false, prefs: p }).customised, true)
   assert.deepEqual(ids(390, { phone: true, prefs: p }), ['key', 'title', 'status', 'priority', 'updated'])
+  // A saved choice that hides Assignee stays hidden when a live worker is present.
+  assert.deepEqual(ids(1600, { phone: false, present: { workers: true }, prefs: { visible: ['status', 'updated'] } }), ['key', 'title', 'status', 'updated'])
+  assert.deepEqual(ids(390, { phone: true, present: { workers: true }, prefs: p }), ['key', 'title', 'status', 'priority', 'updated'])
 })
 
 test('order keeps Key and Title first and appends unknown or missing columns', () => {

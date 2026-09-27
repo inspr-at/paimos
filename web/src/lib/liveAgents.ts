@@ -108,6 +108,36 @@ export function chipText(agents: LiveAgent[]) {
 // which agent it is) its harness and start, which a session never changes.
 export const agentKey = (agent: LiveAgent) => agent.session_id ?? `${agent.harness}@${agent.since}`
 
+// A session bound to this ticket that the list may name. Stopped and archived
+// sessions are not current work. State is the shared derivation: a heartbeat
+// with no productive phase stays idle or stale and is never treated as working.
+export function isListedTicketWorker(agent: LiveAgent): boolean {
+  if (!agent.ticket) return false
+  if (/archived/i.test(agent.stop_reason ?? '')) return false
+  if (agent.phase === 'stopped' || agent.stopped_at || agent.state === 'stopped') return false
+  return true
+}
+
+// Workers for the project on screen, keyed by the bound ticket. A session whose
+// ticket now lives in another project is left out, and the same session is kept
+// once. Order matches the project chips: attention first, then who started.
+export function ticketWorkers(agents: LiveAgent[], projectId: string): Map<string, LiveAgent[]> {
+  const out = new Map<string, LiveAgent[]>()
+  const seen = new Set<string>()
+  for (const agent of agents) {
+    const ticket = agent.ticket
+    if (!ticket || agent.project_id !== projectId || ticket.project_id !== projectId || !isListedTicketWorker(agent)) continue
+    const id = `${ticket.id}\u0000${agentKey(agent)}`
+    if (seen.has(id)) continue
+    seen.add(id)
+    const list = out.get(ticket.id)
+    if (list) list.push(agent)
+    else out.set(ticket.id, [agent])
+  }
+  for (const list of out.values()) list.sort(byLead)
+  return out
+}
+
 export interface ActivityEvidence { noteID: number; pulse: number }
 // First sight establishes the baseline. A delayed or repeated response can
 // never replay a glint, and ordinary heartbeat telemetry cannot create one.

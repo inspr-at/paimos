@@ -42,6 +42,8 @@ export interface MockOptions {
   admin?: boolean
   // GET /api/harness-sessions/live answers with this status instead (AEON-184).
   liveStatus?: number
+  // The live answer names more sessions than it lists (AEON-233).
+  liveTruncated?: boolean
 }
 
 const CLOSED = ['done', 'cancelled', 'archived', 'delivered', 'accepted']
@@ -118,8 +120,9 @@ export type Fixtures = ReturnType<typeof fixtures>
 export interface LiveAgentMock {
   project_id: string; session_id?: string; principal_id?: string; name?: string
   harness: 'codex' | 'claude' | 'pi' | 'cursor' | 'grok'; management_mode: 'managed' | 'unmanaged'; role: 'worker' | 'coordinator'
-  phase: 'starting' | 'working' | 'stopping'; activity: 'busy' | 'unknown'
-  ticket: { id: string; key: string; title: string; project_id: string } | null; since: string; heartbeat_at: string
+  phase: 'starting' | 'working' | 'stopping' | 'yielded' | 'stopped'; activity: 'busy' | 'unknown' | 'idle' | 'throttled'
+  ticket: { id: string; key: string; title: string; project_id: string } | null; since: string; heartbeat_at: string | null
+  stopped_at?: string | null; stop_reason?: string | null; run_status?: string | null; needs_attention?: boolean; has_problem?: boolean
 }
 // One live agent on the fixture clock: started `minutes` ago, heartbeat half a minute ago.
 export function liveAgent(fields: Partial<LiveAgentMock> & Pick<LiveAgentMock, 'project_id'>, minutes = 12): LiveAgentMock {
@@ -411,7 +414,7 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
     if (path === '/api/harness-sessions/live') {
       if (options.liveStatus) return route.fulfill({ status: options.liveStatus, json: { error: 'not here' } })
       // The server's clock follows the fixture clock from the moment the mock starts.
-      return route.fulfill({ json: { items: data.live, at: new Date(now + (Date.now() - started)).toISOString(), fresh_seconds: 120 } })
+      return route.fulfill({ json: { items: data.live, at: new Date(now + (Date.now() - started)).toISOString(), fresh_seconds: 120, truncated: options.liveTruncated === true } })
     }
     if (path === '/api/projects') {
       if (options.failProjects) return route.fulfill({ status: 503, json: { error: 'Projects are resting' } })

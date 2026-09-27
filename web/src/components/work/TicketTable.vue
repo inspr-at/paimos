@@ -3,6 +3,8 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { ListItem } from '../../lib/api'
 import { COLUMN_BY_ID, costUnitLabel, layoutWidths, releaseLabel, tagList, titleRoom, visibleColumns, type ColumnId, type ListPrefs, type TagRef } from '../../lib/columns'
+import { ticketWorkers, type LiveAgent } from '../../lib/liveAgents'
+import { useLiveAgents } from '../../stores/liveAgents'
 import type { GroupBy, RowGroup, EpicRef } from '../../lib/ticketList'
 import type { OutlineEntry, TreeMeta } from '../../lib/outline'
 import { absoluteTime, highlight, kindLabel, plural, priorityLabel, relativeTime, statusMeta, type SortField, type SortKey } from '../../lib/work'
@@ -10,7 +12,10 @@ import AppIcon from '../AppIcon.vue'
 import PersonAvatar from './PersonAvatar.vue'
 import PriorityIcon from './PriorityIcon.vue'
 import StatusIcon from './StatusIcon.vue'
+import TicketWorkers from './TicketWorkers.vue'
 import QuickCreateRow, { type QuickDraft } from './QuickCreateRow.vue'
+
+const NO_WORKERS: LiveAgent[] = []
 
 const props = defineProps<{
   // How many rows the first page will likely show, so the skeleton holds that height.
@@ -84,10 +89,22 @@ const CLS: Record<ColumnId, string> = { key: 'c-key', title: 'c-title', status: 
 // every colspan matches the visible columns.
 const width = ref(1200)
 const phone = ref(false)
+// One live feed for the whole list (AEON-233). Workers are matched to loaded rows;
+// a ticket with a worker earns Assignee even when nobody is the stored owner.
+const live = useLiveAgents()
+const workersById = computed(() => ticketWorkers(live.forProject(props.projectId), props.projectId))
+function workersOf(row: ListItem) { return workersById.value.get(row.id) ?? NO_WORKERS }
 // Release, Tags and Estimate earn their automatic columns only when some loaded row has one.
 const present = computed(() => {
   const rows = [...props.rowsById.values()]
-  return { assigned: props.showAssignee, estimate: rows.some(row => !!estimate(row)), release: rows.some(row => !!releaseLabel(row.fields)), tags: rows.some(row => tagList(row.fields).length > 0) }
+  const listed = props.outline ? props.outline.flatMap(entry => entry.type === 'row' ? [entry.row] : []) : rows
+  return {
+    assigned: props.showAssignee,
+    workers: listed.some(row => workersOf(row).length > 0),
+    estimate: rows.some(row => !!estimate(row)),
+    release: rows.some(row => !!releaseLabel(row.fields)),
+    tags: rows.some(row => tagList(row.fields).length > 0),
+  }
 })
 const layout = computed(() => visibleColumns(width.value, { phone: phone.value, present: present.value, prefs: props.prefs }))
 const columns = computed(() => layout.value.columns.map(def => ({ ...def, field: def.sort, cls: CLS[def.id] })))
@@ -315,7 +332,7 @@ const TAG_SHOWN = 3
 function tagTip(tags: TagRef[]) { return tags.map(tag => tag.name).join(', ') }
 function statusClick(event: MouseEvent, row: ListItem) { emit('status', row, event.currentTarget as HTMLElement) }
 function rowClick(event: MouseEvent, row: ListItem) {
-  if ((event.target as HTMLElement).closest('button, input')) return
+  if ((event.target as HTMLElement).closest('button, input, .ticket-workers')) return
   if (event.metaKey || event.ctrlKey) { emit('newTab', row); return }
   // Shift-click selects the range from the last chosen row; while a selection
   // exists on a phone, a tap adds or removes the row instead of opening it.
@@ -355,9 +372,10 @@ function observe() {
   }, { root: props.scrollRoot, rootMargin: '0px 0px 800px 0px' })
   observer.observe(sentinel.value)
 }
-onMounted(observe)
+let stopLive: (() => void) | undefined
+onMounted(() => { stopLive = live.watch(); observe() })
 watch(() => [props.scrollRoot, props.hasMore, props.loadingMore], observe)
-onBeforeUnmount(() => observer?.disconnect())
+onBeforeUnmount(() => { stopLive?.(); observer?.disconnect() })
 defineExpose({
   focusGrid, scrollToRow, el: grid,
   focusCreate: () => (inlineQuick.value[0] ?? quick.value)?.focus(),
@@ -561,6 +579,7 @@ defineExpose({
                   <span v-if="epicChip(entry.row)!.kind_slug === 'epic'" class="parent-title">{{ epicChip(entry.row)!.title }}</span>
                   <span v-else class="parent-title mono">{{ epicChip(entry.row)!.key }}</span>
                 </span>
+                <TicketWorkers v-if="!has('assignee') && workersOf(entry.row).length" class="title-workers" variant="cue" :workers="workersOf(entry.row)" :ticket-key="entry.row.key" />
                 <span v-if="dropTarget === entry.row.id" class="drop-pill"><AppIcon name="arrow" :size="11" />Move into {{ entry.row.key }}</span>
                 <span v-else-if="entry.tree?.stats && entry.tree.stats.scope" class="epic-progress" :data-tip="`${entry.tree.stats.done} of ${entry.tree.stats.scope} done${entry.tree.stats.total - entry.tree.stats.scope ? ` · ${entry.tree.stats.total - entry.tree.stats.scope} cancelled` : ''}`">
                   <span class="bar"><i :style="{ width: `${Math.round(entry.tree.stats.done / entry.tree.stats.scope * 100)}%` }" /></span>
@@ -587,8 +606,9 @@ defineExpose({
               </td>
               <td v-else-if="column.id === 'assignee'" class="c-assignee">
                 <div class="cell">
-                  <template v-if="entry.row.assignee"><PersonAvatar :id="entry.row.assignee.id" :name="entry.row.assignee.name" :size="20" /><span class="person-name">{{ entry.row.assignee.name }}</span></template>
-                  <span v-else class="empty" aria-label="Unassigned">—</span>
+                  <span v-if="entry.row.assignee" class="owner" :data-tip="entry.row.assignee.name"><PersonAvatar :id="entry.row.assignee.id" :name="entry.row.assignee.name" :size="20" /><span class="person-name">{{ entry.row.assignee.name }}</span></span>
+                  <TicketWorkers v-if="workersOf(entry.row).length" :workers="workersOf(entry.row)" :ticket-key="entry.row.key" />
+                  <span v-else-if="!entry.row.assignee" class="empty" aria-label="Unassigned">—</span>
                 </div>
               </td>
               <td v-else-if="column.id === 'epic'" class="c-epic">
@@ -733,7 +753,7 @@ tbody:last-of-type .ticket-row:last-child td { border-bottom: 0; }
 .ticket-row.tree-row.epic .title-link { font-weight: 650; }
 .ticket-row.top td { border-top: 1px solid var(--line); }
 tbody .ticket-row.top:first-child td { border-top: 0; }
-.ticket-row.dimmed .key, .ticket-row.dimmed .title-link, .ticket-row.dimmed .kind-glyph, .ticket-row.dimmed .c-status .cell, .ticket-row.dimmed .c-prio .cell, .ticket-row.dimmed .c-assignee .cell, .ticket-row.dimmed time { opacity: .5; }
+.ticket-row.dimmed .key, .ticket-row.dimmed .title-link, .ticket-row.dimmed .kind-glyph, .ticket-row.dimmed .c-status .cell, .ticket-row.dimmed .c-prio .cell, .ticket-row.dimmed .c-assignee .cell, .ticket-row.dimmed .ticket-workers, .ticket-row.dimmed time { opacity: .5; }
 .epic-progress { display: inline-flex; align-items: center; gap: 8px; flex-shrink: 0; margin-left: auto; padding-left: 12px; }
 .epic-progress .bar { width: 64px; height: 5px; }
 .epic-progress .mono { min-width: 38px; font-size: 11px; color: var(--ink-2); text-align: right; }
@@ -792,6 +812,11 @@ td.c-title { position: relative; overflow: hidden; }
 .c-prio .cell, .c-assignee .cell { color: var(--ink-2); font-size: 13px; }
 .prio-label, .person-name { overflow: hidden; text-overflow: ellipsis; }
 .person-name { color: var(--ink); }
+.owner { display: inline-flex; align-items: center; gap: 8px; min-width: 0; flex: 1 1 auto; }
+.owner .person-name { min-width: 0; }
+.c-assignee .ticket-workers { flex: 1 1 auto; min-width: 0; }
+.c-assignee .cell:has(.owner) .ticket-workers { flex: 0 0 auto; max-width: 70%; }
+.title-workers { flex: 0 1 auto; min-width: 0; max-width: 148px; }
 .empty { color: var(--ink-3); }
 .c-updated time, .c-created time { color: var(--ink-2); font-size: 12.5px; font-variant-numeric: tabular-nums; }
 .c-estimate .mono { font-size: 12px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
