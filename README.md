@@ -96,6 +96,18 @@ sign-in, and 404 screenshots in both themes at 1280×720 and 390×844 to
 
 Licence: AGPL-3.0-only.
 
+### Session metadata
+
+`scripts/session-metadata.py --codex-index` requires an explicit `session_index.jsonl`
+and canonical source session UUID, and supplies names only. Linux and Darwin open
+each path component relative to its parent descriptor without following symlinks;
+Darwin's exact root `/var` and `/tmp` system aliases are supported. Custom symlinks,
+private-store components and unsupported platforms are refused. The opened file
+must be regular and at most 64 KiB; content reads remain bounded if it grows.
+Fixture mode retains its stricter private-directory exclusions. Unmanaged capture
+remains unavailable until the exact owning source is bound; live model and effort
+capture remain unimplemented.
+
 ### Session recovery
 
 People with `harness.recover` permission can open **Recover** in a session’s details and archive its registration after confirming the exact session and host. Archive preserves ticket links, outcomes and audit history, revokes the old worker generation, and records process state as unknown. It never signals a process. Late heartbeats, control completions and registration replays cannot reopen an archived generation; a new session needs a new reference and lease. The recovery dialog refreshes on stale observations. Recovery-aware daemons detach their harness registration without stopping the run. Active older managed daemons must stop normally before archive is available, because they cannot detach safely. Archive waits for any already-authorized force request to finish or expire.

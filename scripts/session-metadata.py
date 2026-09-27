@@ -6,6 +6,8 @@ The live mode reads one explicitly supplied Codex session_index.jsonl and one
 explicit source session UUID. That index supplies names only; model, effort and
 account stay unknown. Fixture mode exercises adapter logic with synthetic data.
 Neither mode reads transcripts or auth stores.
+Live reads require physical paths on Linux or Darwin; only Darwin's exact
+root /var and /tmp system aliases are supported. Other platforms fail closed.
 
 stdout is one JSON object:
   harness, optional thread_title, model, reasoning_effort,
@@ -18,6 +20,7 @@ Fixture heartbeat_args uses --model and --effort. Live index mode emits only
 from __future__ import annotations
 
 import argparse
+import errno
 import json
 import os
 import stat
@@ -43,7 +46,7 @@ MAX_DEPTH = 4
 
 
 class Refusal(Exception):
-    """The fixture is outside the allowlist. Nothing from it is printed."""
+    """The source is outside the allowlist. Nothing from it is printed."""
 
 
 def clean(value: str, limit: int) -> str:
@@ -185,6 +188,53 @@ def read_previous(path: Path | None) -> dict[str, str]:
     return {key: value for key, value in fields_from(document).items()}
 
 
+def open_codex_index(path: Path) -> int:
+    """Pin the explicit live index; the caller owns and must fstat the fd.
+
+    This live-only policy permits .codex. Fixture paths retain assert_safe's
+    stricter policy. Never resolve caller symlinks, even seemingly benign ones.
+    """
+    if (sys.platform not in {"linux", "darwin"}
+            or os.open not in os.supports_dir_fd
+            or (sys.platform == "darwin" and os.readlink not in os.supports_dir_fd)
+            or not all(getattr(os, flag, 0) for flag in
+                       ("O_NOFOLLOW", "O_DIRECTORY", "O_NONBLOCK", "O_CLOEXEC"))):
+        raise Refusal("safe live index reads require Linux or Darwin descriptor support")
+    absolute = path.expanduser().absolute()
+    if absolute.name != "session_index.jsonl":
+        raise Refusal("live source must be the explicit session_index.jsonl")
+    if any(part.casefold() in FORBIDDEN_COMPONENTS - {".codex"}
+           or part.casefold().startswith(".env") for part in absolute.parts):
+        raise Refusal("refusing a private store as the live index source")
+    if absolute.anchor != "/" or ".." in absolute.parts or "\0" in str(absolute):
+        raise Refusal("live index requires a physical path without parent traversal")
+    parts = absolute.parts[1:]
+    flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC
+    parent = os.open("/", flags | os.O_DIRECTORY)
+    try:
+        if sys.platform == "darwin" and parts[0] in {"var", "tmp"}:
+            # Inspect only the root alias itself, relative to the pinned root.
+            # Substitute an exact known spelling; never open through the link.
+            # A later alias swap cannot redirect the walk, and /private must
+            # itself pass O_DIRECTORY|O_NOFOLLOW just like every other ancestor.
+            try:
+                target = os.readlink(parts[0], dir_fd=parent)
+            except OSError as exc:
+                if exc.errno != errno.EINVAL:  # A real directory needs no alias.
+                    raise
+            else:
+                if target not in {"private/" + parts[0], "/private/" + parts[0]}:
+                    raise Refusal("refusing a custom root alias in the live index path")
+                parts = ("private", *parts)
+        for part in parts[:-1]:
+            child = os.open(part, flags | os.O_DIRECTORY, dir_fd=parent)
+            os.close(parent)
+            parent = child
+        return os.open(parts[-1], flags, dir_fd=parent)
+    finally:
+        os.close(parent)
+
+
 def codex_index(path: Path, session_id: str) -> dict[str, str]:
     """Read a bounded name index, never a rollout or global model default."""
     try:
@@ -192,26 +242,27 @@ def codex_index(path: Path, session_id: str) -> dict[str, str]:
             raise ValueError
     except ValueError as exc:
         raise Refusal("live metadata requires an explicit canonical source session UUID") from exc
-    absolute = path.expanduser().absolute()
-    if absolute.name != "session_index.jsonl":
-        raise Refusal("live source must be the explicit session_index.jsonl")
-    if any(part in FORBIDDEN_COMPONENTS - {".codex"} or part.startswith(".env") for part in absolute.parts):
-        raise Refusal("refusing a private store as the live index source")
-    # A caller may select an alternate local Codex home, but may not follow a
-    # link into another file or store. The only file opened is this exact index.
-    if any(part.is_symlink() for part in (absolute, *absolute.parents)):
-        raise Refusal("refusing a symlink in the live index path")
     try:
-        fd = os.open(absolute, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
-        with os.fdopen(fd, "r", encoding="utf-8") as source:
-            info = os.fstat(source.fileno())
-            if not stat.S_ISREG(info.st_mode) or info.st_size > MAX_BYTES:
+        fd = open_codex_index(path)
+        try:
+            info = os.fstat(fd)
+            if not stat.S_ISREG(info.st_mode) or not 0 <= info.st_size <= MAX_BYTES:
                 raise Refusal("live index must be a bounded regular file")
-            text = source.read(MAX_BYTES + 1)
-    except (OSError, UnicodeError) as exc:
+            # Bound bytes, including growth after fstat and short reads. A text
+            # wrapper's character limit can consume more than MAX_BYTES bytes.
+            body = bytearray()
+            while len(body) <= MAX_BYTES:
+                chunk = os.read(fd, MAX_BYTES + 1 - len(body))
+                if not chunk:
+                    break
+                body.extend(chunk)
+        finally:
+            os.close(fd)
+        if len(body) > MAX_BYTES:
+            raise Refusal("live name index exceeds the byte limit")
+        text = body.decode("utf-8")
+    except (OSError, UnicodeError, NotImplementedError) as exc:
         raise Refusal("live name index is unavailable or unreadable") from exc
-    if len(text.encode("utf-8")) > MAX_BYTES:
-        raise Refusal("live name index exceeds the byte limit")
     lines = text.splitlines()
     if len(lines) > MAX_LINES:
         raise Refusal("live name index exceeds the record limit")
