@@ -2,6 +2,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, watch } from 'vue'
 import type { ListItem } from '../../lib/api'
+import { releaseCell, type NativeReleaseView } from '../../lib/releaseMembership'
 import { absoluteTime, kindLabel, priorityLabel, relativeTime, statusMeta } from '../../lib/work'
 import AppIcon from '../AppIcon.vue'
 import PersonAvatar from './PersonAvatar.vue'
@@ -12,10 +13,10 @@ import TicketHours from '../business/TicketHours.vue'
 import { useAgents } from '../../stores/agents'
 import { usePoller } from '../../lib/usePolledData'
 
-// Status, priority, assignee (editable popovers), type (read-only), the parent
-// epic, and estimate, dates and release only when they have values.
-const props = defineProps<{ item: ListItem; editable: boolean; layout: 'row' | 'column'; now: number }>()
-const emit = defineEmits<{ status: [anchor: HTMLElement]; priority: [anchor: HTMLElement]; assignee: [anchor: HTMLElement]; epic: [anchor: HTMLElement]; openParent: [key: string] }>()
+// Status, priority, assignee and release (editable popovers), type (read-only),
+// the parent epic, and estimate and dates only when they have values.
+const props = defineProps<{ item: ListItem; editable: boolean; layout: 'row' | 'column'; now: number; releaseView?: NativeReleaseView; releaseEditable?: boolean }>()
+const emit = defineEmits<{ status: [anchor: HTMLElement]; priority: [anchor: HTMLElement]; assignee: [anchor: HTMLElement]; epic: [anchor: HTMLElement]; release: [anchor: HTMLElement]; openParent: [key: string] }>()
 
 function text(value: unknown): string { return typeof value === 'string' ? value.trim() : '' }
 function day(value: unknown): string {
@@ -33,10 +34,8 @@ const estimate = computed(() => {
 })
 const start = computed(() => day(props.item.fields.start_date))
 const due = computed(() => day(props.item.fields.end_date))
-const release = computed(() => {
-  const value = props.item.fields.release
-  return value && typeof value === 'object' && typeof (value as { label?: unknown }).label === 'string' ? (value as { label: string }).label : ''
-})
+const releaseInfo = computed(() => releaseCell(props.releaseView))
+const release = computed(() => releaseInfo.value.kind === 'member' ? releaseInfo.value.text : '')
 // Agent sessions bound to this ticket, with their live state; refreshed while shown.
 const agents = useAgents()
 const bound = computed(() => agents.forTicket(props.item.id))
@@ -88,7 +87,13 @@ const target = (event: Event) => event.currentTarget as HTMLElement
     <div v-if="estimate" class="prop"><dt>Estimate</dt><dd><span class="prop-static"><span v-if="layout === 'row'" class="inline-label">Estimate</span><span class="mono">{{ estimate }}</span></span></dd></div>
     <div v-if="start" class="prop"><dt>Start</dt><dd><span class="prop-static"><span v-if="layout === 'row'" class="inline-label">Start</span>{{ start }}</span></dd></div>
     <div v-if="due" class="prop"><dt>Due</dt><dd><span class="prop-static"><span v-if="layout === 'row'" class="inline-label">Due</span>{{ due }}</span></dd></div>
-    <div v-if="release" class="prop"><dt>Release</dt><dd><span class="prop-static"><span v-if="layout === 'row'" class="inline-label">Release</span><span class="mono">{{ release }}</span></span></dd></div>
+    <div v-if="item.kind_slug !== 'epic'" class="prop">
+      <dt>Release</dt>
+      <dd>
+        <button v-if="releaseEditable" type="button" class="prop-btn" :class="{ ghost: releaseInfo.kind !== 'member' }" aria-haspopup="menu" aria-keyshortcuts="g" :aria-label="releaseInfo.kind === 'unknown' ? 'Release unknown. Change release' : `Release: ${release || 'none'}. Change release`" @click="emit('release', target($event))"><AppIcon name="layers" :size="13" /><span :class="{ unset: releaseInfo.kind !== 'member' }">{{ releaseInfo.kind === 'unknown' ? '—' : (release || 'No release') }}</span><AppIcon name="chevron" :size="12" class="chev" /></button>
+        <span v-else class="prop-static" :class="{ faint: releaseInfo.kind !== 'member' }"><span v-if="layout === 'row'" class="inline-label">Release</span><AppIcon name="layers" :size="13" class="faint" /><span class="mono">{{ releaseInfo.kind === 'unknown' ? '—' : (release || 'No release') }}</span></span>
+      </dd>
+    </div>
     <div v-if="layout === 'column'" class="prop"><dt>Updated</dt><dd><time class="prop-static" :datetime="item.updated_at" :data-tip="absoluteTime(item.updated_at)">{{ relativeTime(item.updated_at, { now, long: true }) }}</time></dd></div>
     <div v-if="layout === 'column'" class="prop"><dt>Created</dt><dd><time class="prop-static" :datetime="item.created_at" :data-tip="absoluteTime(item.created_at)">{{ relativeTime(item.created_at, { now, long: true }) }}</time></dd></div>
     <!-- Last: logged hours arrive after the ticket, and nothing moves when they do. -->

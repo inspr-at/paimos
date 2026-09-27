@@ -38,6 +38,10 @@ import BulkBar from '../components/work/BulkBar.vue'
 import LabelMenu, { type LabelChoice } from '../components/work/LabelMenu.vue'
 import OptionMenu from '../components/work/OptionMenu.vue'
 import EpicPicker from '../components/work/EpicPicker.vue'
+import ReleasePicker from '../components/work/ReleasePicker.vue'
+import { AssignCancelled, assignToRelease, type ReleaseTarget } from '../lib/releaseAssign'
+import { listNativeMemberships, openedMembershipMessage, type NativeReleaseView } from '../lib/releaseMembership'
+import { useJourney } from '../stores/journey'
 import JourneyChip from '../components/journey/JourneyChip.vue'
 import HeaderGlimpse from '../components/work/HeaderGlimpse.vue'
 import type KnowledgeEntryPageType from '../components/knowledge/KnowledgeEntryPage.vue'
@@ -458,6 +462,36 @@ watch(panelItem, item => {
     if (!fullView.value) void nextTick(() => table.value?.scrollToRow(item.id))
   }
 })
+const nativeReleases = ref(new Map<string, NativeReleaseView>())
+const membershipIds = computed(() => {
+  const ids: string[] = []
+  const seen = new Set<string>()
+  const project = projectId.value
+  const push = (row: { id: string; kind_slug: string; project?: { id: string } | null } | null | undefined) => {
+    if (!row || row.kind_slug === 'epic' || seen.has(row.id)) return
+    // A project change can render before the previous list is replaced.
+    if (project && row.project?.id && row.project.id !== project) return
+    seen.add(row.id)
+    ids.push(row.id)
+  }
+  for (const row of sequence.value) push(row)
+  push(panelItem.value)
+  return ids
+})
+let membershipGeneration = 0
+async function refreshMemberships() {
+  const project = projectId.value
+  const ids = membershipIds.value
+  const request = ++membershipGeneration
+  if (!project || !ids.length) {
+    if (request === membershipGeneration) nativeReleases.value = new Map()
+    return
+  }
+  const views = await listNativeMemberships(project, ids)
+  if (request !== membershipGeneration || projectId.value !== project) return
+  nativeReleases.value = views
+}
+watch(membershipIds, () => { void refreshMemberships() }, { immediate: true })
 
 // People who can be assigned: everyone assigned somewhere in this project, and you.
 const projectPeople = ref<string[]>([])
@@ -876,10 +910,12 @@ watch(() => selected.value.size > 0, on => {
 })
 onBeforeUnmount(() => { frameObserver?.disconnect(); window.removeEventListener('resize', measureFrame) })
 const bulkBusy = ref(false)
-const bulkMenu = ref<{ kind: 'status' | 'assignee' | 'priority' | 'labels' | 'move'; anchor: HTMLElement } | null>(null)
+const bulkMenu = ref<{ kind: 'status' | 'assignee' | 'priority' | 'labels' | 'move' | 'release'; anchor: HTMLElement } | null>(null)
+const releaseIds = ref<string[]>([])
 function openBulk(kind: NonNullable<typeof bulkMenu.value>['kind'], anchor?: HTMLElement | null) {
-  const at = anchor ?? document.querySelector<HTMLElement>(`.bulk-bar [aria-keyshortcuts="${{ status: 's', assignee: 'a', priority: 'p', labels: 'l', move: 'm' }[kind]}"]`)
+  const at = anchor ?? document.querySelector<HTMLElement>(`.bulk-bar [aria-keyshortcuts="${{ status: 's', assignee: 'a', priority: 'p', labels: 'l', move: 'm', release: 'g' }[kind]}"]`)
   if (!at) return
+  if (kind === 'release') { openRelease(at, [...selected.value]); return }
   if (kind === 'labels') void list.requestFacet('tag')
   if (kind === 'move') void list.loadEpics()
   bulkMenu.value = { kind, anchor: at }
@@ -935,7 +971,7 @@ async function undoBulk(eventId: number) {
   try {
     await list.undoBulk(eventId)
     toast('Undone: the tickets are as they were')
-    void list.load(); void projects.load(true)
+    void list.load(); void projects.load(true); void refreshMemberships()
   } catch (e) {
     toast(e instanceof APIError && e.status === 409 ? 'Some of them changed since, so nothing was undone.' : `Undo did not work: ${problem(e)}`, { tone: 'error' })
   }
@@ -955,6 +991,64 @@ function bulkMove(epic: { id: string; key: string; title: string } | null) {
   const target = epic?.id ?? project.value?.id
   if (!target) return
   void runBulk({ parent_id: target }, n => epic ? `Moved ${count(n)} to ${epic.title}` : `Took ${count(n)} out of their epic`)
+}
+function openRelease(anchor: HTMLElement, ids: string[]) {
+  if (!ids.length || !can('releases.write', project.value?.id)) return
+  releaseIds.value = ids
+  bulkMenu.value = { kind: 'release', anchor }
+}
+let releaseAttempt = 0
+async function chooseRelease(target: ReleaseTarget) {
+  const projectId = project.value?.id
+  if (!projectId || bulkBusy.value) return
+  const ids = [...releaseIds.value]
+  const rows = list.rows.value.filter(row => ids.includes(row.id))
+  const tickets = ids.map(id => {
+    const row = rows.find(item => item.id === id)
+    return { id, key: row?.key ?? id, title: row?.title ?? '', state: row?.state, kind: row?.kind_slug }
+  })
+  bulkMenu.value = null
+  const attempt = ++releaseAttempt
+  bulkBusy.value = true
+  const here = () => attempt === releaseAttempt && project.value?.id === projectId
+  try {
+    const outcome = await assignToRelease(projectId, tickets, target)
+    if (outcome.journey) useJourney().set(projectId, outcome.journey)
+    if (!here()) return
+    const changed = outcome.opened ? openedMembershipMessage(outcome.opened) : null
+    if (changed) {
+      toast(changed)
+      void refreshMemberships()
+      return
+    }
+    const joined = outcome.opened?.status === 'added'
+      ? outcome.opened.count
+      : outcome.result?.walker.tickets.filter(ticket => ids.includes(ticket.ticket_node_id) && ticket.included).length ?? 0
+    if (!joined) {
+      toast('Nothing was added to the release.')
+      void refreshMemberships()
+      return
+    }
+    const title = outcome.opened?.status === 'added' ? outcome.opened.releaseTitle : outcome.releaseTitle
+    const leftOut = outcome.skipped.length ? ` · ${plural(outcome.skipped.length, 'ticket')} left out` : ''
+    const eventId = outcome.result?.event_id
+    toast(`Added ${plural(joined, 'ticket')} to ${title}${leftOut}`, {
+      timeout: 8000,
+      action: eventId ? { label: 'Undo', run: () => void undoBulk(eventId) } : undefined,
+    })
+    clearSelection()
+    void list.load()
+    void refreshMemberships()
+  } catch (error) {
+    if (!here()) return
+    if (error instanceof AssignCancelled) return
+    toast(problem(error), { tone: 'error' })
+  } finally {
+    if (attempt === releaseAttempt) {
+      bulkBusy.value = false
+      if (project.value?.id === projectId) table.value?.focusGrid()
+    }
+  }
 }
 
 // ---------- Unsaved changes ----------
@@ -1055,7 +1149,7 @@ function keydown(event: KeyboardEvent) {
       if (event.key === 'x' && row) { event.preventDefault(); selectRow(row, 'toggle'); return }
       if (event.key === 'J' || (event.key === 'ArrowDown' && event.shiftKey)) { event.preventDefault(); extendSelection(1); return }
       if (event.key === 'K' || (event.key === 'ArrowUp' && event.shiftKey)) { event.preventDefault(); extendSelection(-1); return }
-      const bulkKey = ({ s: 'status', a: 'assignee', p: 'priority', l: 'labels', m: 'move' } as const)[event.key as 's']
+      const bulkKey = ({ s: 'status', a: 'assignee', p: 'priority', l: 'labels', m: 'move', g: 'release' } as const)[event.key as 's']
       if (selected.value.size && bulkKey) { event.preventDefault(); openBulk(bulkKey); return }
     }
   }
@@ -1081,6 +1175,7 @@ function keydown(event: KeyboardEvent) {
     case 'p': if (ticketKey.value) { event.preventDefault(); panel.value?.openPriority() } break
     case 'a': if (ticketKey.value) { event.preventDefault(); panel.value?.openAssignee() } break
     case 'r': if (ticketKey.value) { event.preventDefault(); panel.value?.openLink() } break
+    case 'g': if (ticketKey.value) { event.preventDefault(); panel.value?.openRelease() } break
     case 'c': if (ticketKey.value) { event.preventDefault(); panel.value?.focusComposer() } break
     case 'f': if (ticketKey.value) { event.preventDefault(); if (fullView.value) collapse(); else expand() } break
   }
@@ -1229,19 +1324,19 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
         :collapsed="collapsed" :total="total" :project-key="routeKey" :scroll-root="scrollRoot" :now="now" :show-assignee="showAssignee"
         :creating="creating" :project-id="project.id" :known-states="knownStates" :create="quickCreate" @close-create="closeCreate"
         :outline="outlineActive ? outline.entries.value : null" :can-drag="outlineActive && writable" :prefs="tablePrefs"
-        :selectable="selectable" :selected="selected" @select="selectRow" @select-all="selectAll"
+        :selectable="selectable" :selected="selected" :can-assign-release="can('releases.write', project.id)" :native-releases="nativeReleases" @select="selectRow" @select-all="selectAll"
         @layout="(visible, customised) => tableLayout = { visible, customised }" @widths="saveWidths"
         @toggle-row="outline.toggle" @toggle-no-epic="outline.noEpicCollapsed.value = !outline.noEpicCollapsed.value"
         @more-children="id => id === project!.id ? outline.loadMoreRoot() : outline.loadChildren(id, true)" @move="moveRow"
-        @open="openRow" @cursor="id => cursorId = id" @sort="sortBy" @status="(row, anchor) => openStatus(row, anchor, 'list')"
+        @open="openRow" @cursor="id => cursorId = id" @sort="sortBy" @status="(row, anchor) => openStatus(row, anchor, 'list')" @release="(row, anchor) => openRelease(anchor, [row.id])"
         @copy="row => copyKey(row.key)" @new-tab="row => newTab(row.key)" @toggle-group="toggleGroup" @open-epic="openEpic"
         @retry="outlineActive ? outline.reload() : list.load()" @more="outlineActive ? outline.loadMoreRoot() : list.loadMore()" @grid-focus="focusFirst" @clear-filters="clearFilters" @show-closed="update({ showClosed: true })"
       />
 
       <BulkBar
-        v-if="selectable && selected.size" :count="selected.size" :loaded="sequence.length" :total="total" :busy="bulkBusy" :can-write="writable" :frame="listFrame"
+        v-if="selectable && selected.size" :count="selected.size" :loaded="sequence.length" :total="total" :busy="bulkBusy" :can-write="writable" :can-release="can('releases.write', project.id)" :frame="listFrame"
         @status="anchor => openBulk('status', anchor)" @assignee="anchor => openBulk('assignee', anchor)" @priority="anchor => openBulk('priority', anchor)"
-        @labels="anchor => openBulk('labels', anchor)" @move="anchor => openBulk('move', anchor)" @archive="bulkArchive" @clear="clearSelection" @select-all="selectAllMatching"
+        @labels="anchor => openBulk('labels', anchor)" @move="anchor => openBulk('move', anchor)" @release="anchor => openRelease(anchor, [...selected])" @archive="bulkArchive" @clear="clearSelection" @select-all="selectAllMatching"
       />
       <p v-if="!journeyActive && !knowledgeActive && !graphActive" class="hint">
         <kbd class="keycap">j</kbd><kbd class="keycap">k</kbd> move · <kbd class="keycap"><AppIcon name="enter" /></kbd> open · <kbd class="keycap">/</kbd> search ·
@@ -1260,9 +1355,9 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
         v-if="ticketKey" ref="panel" :item="panelItem" :ticket-key="ticketKey.toUpperCase()" :resolving="panelLoading" :resolve-error="panelError"
         :position="panelPosition" :now="now" :mode="fullView ? 'full' : 'panel'" :project="{ id: project.id, routeKey: project.routeKey }"
         :names="list.names" :me="me" :can-write="writable" :can-delete="nodeDeletable" :can-move="nodeMovable" :can-link="relationLinkable" :can-unlink="relationUnlinkable"
-        :can-comment="commentable" :can-delete-comment="commentDeletable" :can-attach="attachable" :people="people"
+        :can-comment="commentable" :can-delete-comment="commentDeletable" :can-attach="attachable" :people="people" :native-releases="nativeReleases"
         @close="closePanel" @prev="move(-1)" @next="move(1)" @expand="expand" @collapse="collapse" @new-tab="newTab(panelItem?.key ?? ticketKey)"
-        @status="anchor => panelItem && openStatus(panelItem, anchor, 'panel')" @open-key="openRelated" :trail="trail" @trail-back="trailBack" @removed="removed" @created="childCreated" @moved="childMoved" @retry="resolvePanel"
+        @status="anchor => panelItem && openStatus(panelItem, anchor, 'panel')" @open-key="openRelated" :trail="trail" @trail-back="trailBack" @removed="removed" @created="childCreated" @moved="childMoved" @assigned="() => { void list.load(); void refreshMemberships() }" @retry="resolvePanel"
       />
       <StatusMenu v-if="statusMenu" :anchor="statusMenu.anchor" :current="statusMenu.row.state" :known-states="knownStates" :ticket-key="statusMenu.row.key" @choose="chooseStatus" @close="closeStatus" />
       <FilterSheet
@@ -1283,6 +1378,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
       <OptionMenu v-else-if="bulkMenu?.kind === 'priority'" :anchor="bulkMenu.anchor" title="Priority" :subject="plural(selected.size, 'ticket')" kind="priority" :options="bulkPriorities" current="-" @choose="bulkPriority" @close="closeBulk" />
       <LabelMenu v-else-if="bulkMenu?.kind === 'labels'" :anchor="bulkMenu.anchor" :labels="bulkLabels" :count="selectedRows.length" :busy="bulkBusy" @apply="bulkLabelsApply" @close="closeBulk" />
       <EpicPicker v-else-if="bulkMenu?.kind === 'move'" :anchor="bulkMenu.anchor" :project-id="project.id" current="-" :subject="plural(selected.size, 'ticket')" allow-none @choose="bulkMove" @close="closeBulk" />
+      <ReleasePicker v-else-if="bulkMenu?.kind === 'release'" :anchor="bulkMenu.anchor" :project-id="project.id" :subject="plural(releaseIds.length, 'ticket')" @choose="chooseRelease" @close="closeBulk" />
     </template>
 
     <div v-else-if="projects.error && !projects.loaded" class="page-state" role="alert">

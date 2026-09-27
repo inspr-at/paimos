@@ -3,6 +3,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { ListItem } from '../../lib/api'
 import { COLUMN_BY_ID, costUnitLabel, layoutWidths, releaseLabel, tagList, titleRoom, visibleColumns, type ColumnId, type ListPrefs, type TagRef } from '../../lib/columns'
+import { releaseCell, type NativeReleaseView } from '../../lib/releaseMembership'
 import type { GroupBy, RowGroup, EpicRef } from '../../lib/ticketList'
 import type { OutlineEntry, TreeMeta } from '../../lib/outline'
 import { absoluteTime, highlight, kindLabel, plural, priorityLabel, relativeTime, statusMeta, type SortField, type SortKey } from '../../lib/work'
@@ -48,6 +49,9 @@ const props = defineProps<{
   // Multi-select for bulk changes: checkboxes lead each row.
   selectable?: boolean
   selected?: Set<string>
+  canAssignRelease?: boolean
+  // Native journey membership for the visible tickets. Imported fields.release is not this.
+  nativeReleases?: Map<string, NativeReleaseView>
 }>()
 // Unfiltered loads hold the expected height (so nothing below jumps); 1..28 rows.
 const skeletonRows = computed(() => Math.max(1, Math.min(28, props.expectedRows ?? 14)))
@@ -76,6 +80,7 @@ const emit = defineEmits<{
   // toggle: one row on or off; range: from the last row chosen to this one.
   select: [row: ListItem, mode: 'toggle' | 'range']
   selectAll: [on: boolean]
+  release: [row: ListItem, anchor: HTMLElement]
 }>()
 
 const CLS: Record<ColumnId, string> = { key: 'c-key', title: 'c-title', status: 'c-status', priority: 'c-prio', assignee: 'c-assignee', epic: 'c-epic', release: 'c-release', tags: 'c-tags', cost: 'c-cost', estimate: 'c-estimate', created: 'c-created', updated: 'c-updated' }
@@ -87,7 +92,7 @@ const phone = ref(false)
 // Release, Tags and Estimate earn their automatic columns only when some loaded row has one.
 const present = computed(() => {
   const rows = [...props.rowsById.values()]
-  return { assigned: props.showAssignee, estimate: rows.some(row => !!estimate(row)), release: rows.some(row => !!releaseLabel(row.fields)), tags: rows.some(row => tagList(row.fields).length > 0) }
+  return { assigned: props.showAssignee, estimate: rows.some(row => !!estimate(row)), release: rows.some(row => !!releaseLabel(row.fields) || props.nativeReleases?.get(row.id)?.status === 'member'), tags: rows.some(row => tagList(row.fields).length > 0) }
 })
 const layout = computed(() => visibleColumns(width.value, { phone: phone.value, present: present.value, prefs: props.prefs }))
 const columns = computed(() => layout.value.columns.map(def => ({ ...def, field: def.sort, cls: CLS[def.id] })))
@@ -102,6 +107,10 @@ const dragWidths = ref<Partial<Record<ColumnId, number>>>({})
 // min and max, so a fixed column never collapses.
 const widths = computed(() => layoutWidths(ids.value, width.value, props.prefs, dragWidths.value))
 function colWidth(id: ColumnId) { return id === 'title' ? null : widths.value[id] ?? null }
+function nativeRelease(row: ListItem) {
+  if (row.kind_slug === 'epic') return releaseCell({ status: 'none' })
+  return releaseCell(props.nativeReleases?.get(row.id))
+}
 const titleWidth = computed(() => Math.max(0, Math.round(width.value - Object.values(widths.value).reduce((sum, w) => sum + (w ?? 0), 0))))
 const shownWidth = (id: ColumnId) => id === 'title' ? titleWidth.value : colWidth(id) ?? 0
 function bounds(id: ColumnId) {
@@ -602,8 +611,13 @@ defineExpose({
               </td>
               <td v-else-if="column.id === 'release'" class="c-release">
                 <div class="cell">
-                  <span v-if="releaseLabel(entry.row.fields)" class="release-chip mono" :data-tip="`Release ${releaseLabel(entry.row.fields)}`">{{ releaseLabel(entry.row.fields) }}</span>
-                  <span v-else class="empty" aria-label="No release">—</span>
+                  <button
+                    v-if="canAssignRelease && entry.row.kind_slug !== 'epic'" type="button" class="release-chip mono" :class="{ bare: nativeRelease(entry.row).kind !== 'member' }"
+                    :aria-label="nativeRelease(entry.row).kind === 'member' ? `${nativeRelease(entry.row).label}. Change release of ${entry.row.key}` : nativeRelease(entry.row).kind === 'none' ? `No release. Add ${entry.row.key} to a release` : `Release unknown. Add ${entry.row.key} to a release`"
+                    @click.stop="emit('release', entry.row, $event.currentTarget as HTMLElement)"
+                  >{{ nativeRelease(entry.row).text }}</button>
+                  <span v-else-if="nativeRelease(entry.row).kind === 'member'" class="release-chip mono">{{ nativeRelease(entry.row).text }}</span>
+                  <span v-else class="empty" :aria-label="nativeRelease(entry.row).label">{{ nativeRelease(entry.row).text }}</span>
                 </div>
               </td>
               <td v-else-if="column.id === 'tags'" class="c-tags">
@@ -801,7 +815,10 @@ td.c-title { position: relative; overflow: hidden; }
 .cost-glyph { flex-shrink: 0; color: var(--ink-3); }
 .cost-name { overflow: hidden; text-overflow: ellipsis; }
 .group-dot { width: 8px; height: 8px; margin: 0 3px; }
-.release-chip { overflow: hidden; text-overflow: ellipsis; padding: 2px 7px; border-radius: 6px; background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); color: var(--ink-2); font-size: 11.5px; font-variant-ligatures: none; }
+.release-chip { overflow: hidden; text-overflow: ellipsis; max-width: 100%; padding: 2px 7px; border: 0; border-radius: 6px; background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); color: var(--ink-2); font: inherit; font-size: 11.5px; font-variant-ligatures: none; cursor: pointer; }
+button.release-chip { display: inline-flex; align-items: center; height: 22px; }
+button.release-chip.bare { background: transparent; box-shadow: none; color: var(--ink-3); }
+button.release-chip:focus-visible { box-shadow: var(--focus-ring); }
 .tag-cell { gap: 4px; overflow: hidden; }
 .tag-chip { display: inline-flex; flex-shrink: 1; align-items: center; gap: 5px; min-width: 0; max-width: 100%; height: 20px; padding: 0 7px; border-radius: 999px; background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); color: var(--ink-2); font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* The classic tag colours as a small dot; the name carries the meaning. */

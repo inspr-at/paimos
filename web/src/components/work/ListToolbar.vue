@@ -153,6 +153,7 @@ defineExpose({ focusSearch, openFilterMenu, input })
     <ProjectTabs v-if="view !== 'journey'" class="view-switch"
       :items="view === 'knowledge' ? KNOWLEDGE_VIEWS : TICKET_VIEWS"
       :selected="view === 'knowledge' ? knowledgeView ?? 'entries' : view"
+      :tips="view !== 'knowledge'"
       :label="view === 'knowledge' ? 'Knowledge views' : 'Ticket views'" @select="value => emit('view', value)" />
     <template v-if="view !== 'knowledge' && view !== 'journey'">
     <label class="search-field list-search">
@@ -284,6 +285,21 @@ defineExpose({ focusSearch, openFilterMenu, input })
 .knowledge-controls { display: contents; }
 /* PN1 supplies the accessible view switch; KG2 retains its own controls and graph. */
 .knowledge-controls :deep(.k-mode), .knowledge-controls :deep(.k-mode-sep) { display: none; }
+/* Ticket views reclaim the row as the toolbar narrows. The open view keeps its
+   name until 1300px; the others show their icon. Names stay on aria-label and
+   the tip. Project sections and Knowledge are not this switch. Phones keep the
+   full names on their own row. */
+@media (min-width: 601px) {
+  @container toolbar (max-width: 1500px) { .more-label { display: none; } .more-btn { padding: 0 9px; } .list-search { width: 208px; } }
+  @container toolbar (max-width: 1420px) {
+    .toolbar:not(.knowledge) :deep(.view-switch button:not([aria-selected="true"]) .tab-label) { display: none; }
+    .toolbar:not(.knowledge) :deep(.view-switch button:not([aria-selected="true"])) { padding: 0 8px; }
+  }
+  @container toolbar (max-width: 1300px) {
+    .toolbar:not(.knowledge) :deep(.view-switch button .tab-label) { display: none; }
+    .toolbar:not(.knowledge) :deep(.view-switch button) { padding: 0 8px; }
+  }
+}
 @container toolbar (max-width: 1300px) { .more-label { display: none; } .more-btn { padding: 0 9px; } .list-search { width: 190px; } }
 @container toolbar (max-width: 1000px) { .list-search { width: 190px; } .count { display: none; } .new-btn { width: 32px; padding: 0; } .new-label { display: none; } .facet-btn[data-dim="type"]:not(.on) { display: none; } .display-label { display: none; } .display-btn { padding: 0 9px; } }
 @container toolbar (max-width: 920px) { .list-search { width: 150px; } .facet-btn { padding: 0 11px; } .facet-btn:not(.on) .facet-end { display: none; } }

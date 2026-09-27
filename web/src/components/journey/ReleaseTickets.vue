@@ -39,7 +39,7 @@ const stateOf = (ticket: WalkerTicket) => props.workById.get(ticket.ticket_node_
       <p v-if="!group.tickets.length" class="empty">No tickets yet · ask Aithema to break this feature down</p>
       <ul class="tks">
         <li
-          v-for="ticket in visible(group)" :key="ticket.ticket_node_id" class="tk" :class="{ faded: editable && !plan.included.value.has(ticket.ticket_node_id) }"
+          v-for="ticket in visible(group)" :id="`release-ticket-${ticket.ticket_node_id}`" :key="ticket.ticket_node_id" class="tk" :class="{ faded: editable && !plan.included.value.has(ticket.ticket_node_id) }"
           @click="emit('walk', ticket)"
         >
           <label v-if="editable" class="inrel" @click.stop>

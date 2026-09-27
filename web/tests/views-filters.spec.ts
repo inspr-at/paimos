@@ -63,7 +63,7 @@ test('Shift F opens every filter: labels, epic, cost unit and release by name, a
   await page.keyboard.press('Shift+F')
   const more = page.getByRole('menu', { name: 'Filter by' })
   await expect(more).toBeVisible()
-  await expect(more.getByRole('menuitem')).toHaveText(['Status', 'Priority', 'Assignee', 'Type', 'Labels', 'Epic', 'Cost unit', 'Release', 'Date'])
+  await expect(more.getByRole('menuitem')).toHaveText(['Status', 'Priority', 'Assignee', 'Type', 'Labels', 'Epic', 'Cost unit', 'Imported release', 'Date'])
   await more.getByRole('menuitem', { name: 'Labels' }).click()
   const labels = page.getByRole('dialog', { name: 'Filter by Labels' })
   // Label counts are asked for when the menu opens.
@@ -108,7 +108,7 @@ test('Shift F opens every filter: labels, epic, cost unit and release by name, a
   await expect(page.getByLabel('Applied filters')).toContainText('Updatedtoday')
   // Clear all takes every filter and the date.
   await page.getByRole('button', { name: /Remove date filter/ }).click()
-  await expect(page).toHaveURL('/p/PHAROS?closed=1')
+  await expect(page).toHaveURL('/p/PHAROS/tickets?closed=1&view=list')
 })
 
 test('a custom date range filters imported start dates by day', async ({ page }) => {
@@ -166,7 +166,7 @@ test('saving a view: named from its filters, shared, then the bar shows it and c
   expect(calls.filter(call => call.method === 'PATCH' && call.path === `/api/views/${id}`).at(-1)!.body).toMatchObject({ filters: { priority: 'high,medium' } })
   // All tickets goes back to the plain list.
   await bar(page).getByRole('link', { name: 'All tickets' }).click()
-  await expect(page).toHaveURL('/p/PHAROS')
+  await expect(page).toHaveURL('/p/PHAROS/tickets')
   await expect(rows(page)).toHaveCount(5)
   expect(errors).toEqual([])
 })
@@ -276,7 +276,7 @@ test('the sort editor adds, reverses, reorders and removes keys, the same as Shi
   await display.getByRole('button', { name: 'Sort by' }).click()
   await expect(display.getByRole('combobox', { name: 'Sort key 1' })).toBeFocused()
   await display.getByRole('combobox', { name: 'Sort key 1' }).selectOption('priority')
-  await expect(page).toHaveURL(/sort=priority$/)
+  await expect(page).toHaveURL(/[?&]sort=priority(?:&|$)/)
   await display.getByRole('button', { name: 'Then by' }).click()
   await display.getByRole('combobox', { name: 'Sort key 2' }).selectOption('assignee')
   await expect.poll(() => lastList(calls).query.get('sort')).toBe('priority,assignee,-updated_at')
@@ -288,7 +288,7 @@ test('the sort editor adds, reverses, reorders and removes keys, the same as Shi
   await expect(page).toHaveURL(/sort=assignee,-priority/)
   await expect(page.getByRole('columnheader', { name: 'Assignee' }).locator('.sort-index')).toHaveText('1')
   await display.getByRole('button', { name: 'Remove Assignee from the sort' }).click()
-  await expect(page).toHaveURL(/sort=-priority$/)
+  await expect(page).toHaveURL(/[?&]sort=-priority(?:&|$)/)
   await display.getByRole('button', { name: 'Default' }).click()
   await expect(page).not.toHaveURL(/sort=/)
 })
@@ -322,7 +322,7 @@ test('a link to a view someone cannot see keeps its filters and drops the view',
   await mockWork(page, world())
   await page.goto(`/p/PHAROS?priority=high&v=${SHARED}`)
   await expect(rows(page)).toHaveCount(2)
-  await expect(page).toHaveURL('/p/PHAROS?priority=high')
+  await expect(page).toHaveURL('/p/PHAROS/tickets?priority=high&view=list')
   await expect(bar(page).getByRole('link', { name: 'All tickets' })).toHaveAttribute('aria-current', 'page')
 })
 
@@ -389,8 +389,9 @@ for (const width of [1920, 1440, 1280, 1024, 390]) {
     expect(await main.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true)
     // The controls keep to one line on desktop widths; applied filters get their own.
     if (width >= 1024) {
-      const top = async (selector: string) => (await toolbar(page).locator(selector).boundingBox())!.y
-      expect(Math.abs(await top('.view-seg') - await top('.new-btn'))).toBeLessThan(6)
+      const viewsBox = await toolbar(page).getByRole('tablist', { name: 'Ticket views' }).boundingBox()
+      const createBox = await toolbar(page).getByRole('button', { name: 'New ticket', exact: true }).boundingBox()
+      expect(Math.abs(viewsBox!.y - createBox!.y)).toBeLessThan(6)
     }
   })
 }
