@@ -245,31 +245,115 @@ func TestReadyProbeDeadlineAndDrain(t *testing.T) {
 		t.Fatalf("readyProbeTimeout %s must be below the 1s load-balancer timeout", readyProbeTimeout)
 	}
 
-	t.Run("cancelled caller", func(t *testing.T) {
+	t.Run("caller cancel propagates", func(t *testing.T) {
+		s := servingReadyServer(t)
+		s.readyProbe = func(ctx context.Context) error {
+			if ctx.Err() != context.Canceled {
+				t.Fatalf("probe err %v, want canceled", ctx.Err())
+			}
+			return ctx.Err()
+		}
+		reqCtx, cancel := context.WithCancel(context.Background())
+		cancel()
+		start := time.Now()
+		rec := serveReady(t, s, reqCtx)
+		if time.Since(start) >= readyProbeTimeout {
+			t.Fatalf("cancelled caller waited %s", time.Since(start))
+		}
+		assertUnavailable(t, rec)
+
+		live := servingReadyServer(t)
+		liveCtx, stop := context.WithCancel(context.Background())
+		defer stop()
+		live.readyProbe = func(ctx context.Context) error {
+			if ctx.Err() != nil {
+				t.Fatalf("probe started done: %v", ctx.Err())
+			}
+			stop()
+			select {
+			case <-ctx.Done():
+			case <-time.After(readyProbeTimeout):
+				t.Fatal("caller cancel did not reach the probe before the cap")
+			}
+			if ctx.Err() != context.Canceled {
+				t.Fatalf("probe err %v, want canceled", ctx.Err())
+			}
+			return ctx.Err()
+		}
+		start = time.Now()
+		rec = serveReady(t, live, liveCtx)
+		if time.Since(start) >= readyProbeTimeout {
+			t.Fatalf("in-flight cancel waited %s", time.Since(start))
+		}
+		assertUnavailable(t, rec)
+	})
+
+	t.Run("earlier deadline retained", func(t *testing.T) {
+		const callerBudget = 200 * time.Millisecond
+		s := servingReadyServer(t)
+		reqCtx, cancel := context.WithTimeout(context.Background(), callerBudget)
+		defer cancel()
+		callerDeadline, ok := reqCtx.Deadline()
+		if !ok {
+			t.Fatal("caller deadline missing")
+		}
+		var probeErr error
+		var waited time.Duration
+		s.readyProbe = func(ctx context.Context) error {
+			deadline, hasDeadline := ctx.Deadline()
+			if !hasDeadline {
+				t.Fatal("probe context has no deadline")
+			}
+			if !deadline.Equal(callerDeadline) {
+				t.Fatalf("probe deadline %s, caller deadline %s", deadline, callerDeadline)
+			}
+			start := time.Now()
+			<-ctx.Done()
+			waited = time.Since(start)
+			probeErr = ctx.Err()
+			return probeErr
+		}
+		rec := serveReady(t, s, reqCtx)
+		if probeErr != context.DeadlineExceeded {
+			t.Fatalf("probe err %v, want deadline exceeded", probeErr)
+		}
+		assertUnavailable(t, rec)
+		if waited >= readyProbeTimeout {
+			t.Fatalf("earlier deadline waited %s for the %s cap", waited, readyProbeTimeout)
+		}
+	})
+
+	t.Run("unbounded caller capped", func(t *testing.T) {
 		s := servingReadyServer(t)
 		s.readyProbe = func(ctx context.Context) error {
 			assertProbeContext(t, ctx)
 			return nil
 		}
-		reqCtx, cancel := context.WithCancel(context.Background())
-		cancel()
-		rec := serveReady(t, s, reqCtx)
+		rec := serveReady(t, s, context.Background())
 		if rec.Code != http.StatusOK || !bytes.Contains(rec.Body.Bytes(), []byte(`"status":"ready"`)) {
 			t.Fatalf("ready %d %s", rec.Code, rec.Body.Bytes())
 		}
 	})
 
-	t.Run("short caller deadline", func(t *testing.T) {
+	t.Run("blocked probe exits by timeout", func(t *testing.T) {
 		s := servingReadyServer(t)
+		var probeErr error
+		var waited time.Duration
 		s.readyProbe = func(ctx context.Context) error {
 			assertProbeContext(t, ctx)
-			return nil
+			start := time.Now()
+			<-ctx.Done()
+			waited = time.Since(start)
+			probeErr = ctx.Err()
+			return probeErr
 		}
-		reqCtx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
-		defer cancel()
-		rec := serveReady(t, s, reqCtx)
-		if rec.Code != http.StatusOK || !bytes.Contains(rec.Body.Bytes(), []byte(`"status":"ready"`)) {
-			t.Fatalf("ready %d %s", rec.Code, rec.Body.Bytes())
+		rec := serveReady(t, s, context.Background())
+		if probeErr != context.DeadlineExceeded {
+			t.Fatalf("probe err %v, want deadline exceeded", probeErr)
+		}
+		assertUnavailable(t, rec)
+		if waited < 150*time.Millisecond || waited > readyProbeTimeout+250*time.Millisecond {
+			t.Fatalf("blocked probe returned after %s, want about %s", waited, readyProbeTimeout)
 		}
 	})
 
@@ -281,9 +365,7 @@ func TestReadyProbeDeadlineAndDrain(t *testing.T) {
 			return nil
 		}
 		rec := serveReady(t, s, context.Background())
-		if rec.Code != http.StatusServiceUnavailable || !bytes.Contains(rec.Body.Bytes(), []byte(`"status":"unavailable"`)) {
-			t.Fatalf("ready %d %s", rec.Code, rec.Body.Bytes())
-		}
+		assertUnavailable(t, rec)
 		health := get(t, s.Handler(), "/api/health", "")
 		if health.Code != http.StatusOK || !bytes.Contains(health.Body.Bytes(), []byte(`"status":"ok"`)) {
 			t.Fatalf("health while draining %d %s", health.Code, health.Body.Bytes())
@@ -310,10 +392,11 @@ func serveReady(t *testing.T, s *Server, ctx context.Context) *httptest.Response
 	return rec
 }
 
+// assertProbeContext checks the 500ms cap on a caller that has no deadline.
 func assertProbeContext(t *testing.T, ctx context.Context) {
 	t.Helper()
 	if err := ctx.Err(); err != nil {
-		t.Fatalf("probe followed caller context: %v", err)
+		t.Fatalf("probe context already done: %v", err)
 	}
 	deadline, ok := ctx.Deadline()
 	if !ok {
@@ -322,6 +405,13 @@ func assertProbeContext(t *testing.T, ctx context.Context) {
 	remain := time.Until(deadline)
 	if remain <= 200*time.Millisecond || remain > readyProbeTimeout || remain >= time.Second {
 		t.Fatalf("probe remaining %s, want within %s and below 1s", remain, readyProbeTimeout)
+	}
+}
+
+func assertUnavailable(t *testing.T, rec *httptest.ResponseRecorder) {
+	t.Helper()
+	if rec.Code != http.StatusServiceUnavailable || !bytes.Contains(rec.Body.Bytes(), []byte(`"status":"unavailable"`)) {
+		t.Fatalf("ready %d %s", rec.Code, rec.Body.Bytes())
 	}
 }
 

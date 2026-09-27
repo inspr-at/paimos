@@ -234,8 +234,9 @@ paths:
       summary: Readiness for new requests
       description: >-
         Load-balancer probe. 200 only while this process is accepting HTTP,
-        is not draining, and the database ping succeeds. The ping has its own
-        deadline, shorter than 1s, and does not follow the caller context.
+        is not draining, and the database ping succeeds. The ping is capped
+        at 500ms so an unbounded caller cannot hold it open. A cancelled
+        request or an earlier caller deadline still cancels or shortens it.
         A drain that starts during the ping still returns 503. GET /health
         stays liveness and still returns 200 while this endpoint returns 503.
       responses:
