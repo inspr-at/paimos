@@ -147,6 +147,8 @@ function clearSignedInPreview() {
   limitsOpen.value = false
   message.value = ''
   nextStep.value = ''
+  busy.value = ''
+  pollStarted = 0
   permissionsReady.value = false
   if (pollTimer) window.clearTimeout(pollTimer)
 }
@@ -242,6 +244,7 @@ async function connect() {
     grantedKeys.value = keys
     current.value = approved
     if (limitsWhen.value === 'now') await saveLimits(approved, keys)
+    if (started !== pairingReadGeneration()) return
     armPoll(approved)
   } catch (error) {
     if (error instanceof PairingError && error.code === 'session_reset') return
@@ -250,6 +253,7 @@ async function connect() {
 }
 
 async function saveLimits(pairing: PairingView, keys = grantedKeys.value ?? []) {
+  const started = pairingReadGeneration()
   const plan = planOngoingLimits({
     choice: 'ongoing_limits', drafts: keys.map(draftFor), selectedAccountKeys: keys,
     enrollments: pairing.enrollments, permissions: permissions.value,
@@ -260,10 +264,12 @@ async function saveLimits(pairing: PairingView, keys = grantedKeys.value ?? []) 
   if (!windows.length) return
   try {
     const result = await createOngoingLimits(windows, permissions.value)
+    if (started !== pairingReadGeneration()) return
     const next = { ...limitState.value }
     for (const id of [...result.created, ...result.reconciled]) next[id] = 'saved'
     limitState.value = next
   } catch (error) {
+    if (started !== pairingReadGeneration()) return
     if (error instanceof PairingError) {
       const next = { ...limitState.value }
       for (const id of error.savedAccountIds) next[id] = 'saved'
@@ -279,6 +285,7 @@ async function saveLimits(pairing: PairingView, keys = grantedKeys.value ?? []) 
 }
 
 async function checkLimit(accountId: string, key: string) {
+  const started = pairingReadGeneration()
   const draft = draftFor(key)
   if (draft.allowance == null || simpleRequestLimitError(draft)) {
     message.value = simpleRequestLimitError(draft) ?? 'Enter the requests and the period.'
@@ -290,6 +297,7 @@ async function checkLimit(accountId: string, key: string) {
     starts_at: new Date(draft.starts_at).toISOString(), ends_at: new Date(draft.ends_at).toISOString(),
     unit: 'requests', allowance: draft.allowance, pace_model: 'unrestricted', burst_ratio: 0,
   })
+  if (started !== pairingReadGeneration()) return
   limitState.value = { ...limitState.value, [accountId]: match === 'saved' ? 'saved' : match === 'absent' ? 'absent' : 'uncertain' }
   if (match === 'unknown') {
     message.value = 'The allowance may already be saved.'
@@ -306,6 +314,7 @@ async function checkLimit(accountId: string, key: string) {
 
 async function saveOne(accountId: string, key: string) {
   if (!current.value || busy.value) return
+  const started = pairingReadGeneration()
   const problem = simpleRequestLimitError(draftFor(key))
   if (problem) { message.value = problem; nextStep.value = 'Send the allowance for this account only. Do not approve the pairing again.'; return }
   busy.value = `save:${accountId}`
@@ -319,8 +328,10 @@ async function saveOne(accountId: string, key: string) {
   if (plan.action === 'send') {
     try {
       const result = await createOngoingLimits(plan.windows.filter(item => item.accountId === accountId), permissions.value)
+      if (started !== pairingReadGeneration()) return
       if (result.created.includes(accountId) || result.reconciled.includes(accountId)) limitState.value = { ...limitState.value, [accountId]: 'saved' }
     } catch (error) {
+      if (started !== pairingReadGeneration()) return
       if (error instanceof PairingError) {
         limitState.value = { ...limitState.value, [accountId]: error.code === 'allowance_uncertain' ? 'uncertain' : 'failed' }
         message.value = error.message
@@ -333,15 +344,20 @@ async function saveOne(accountId: string, key: string) {
 
 async function deny() {
   if (!current.value || busy.value) return
+  const started = pairingReadGeneration()
   busy.value = 'deny'
   message.value = ''
   nextStep.value = ''
-  try { current.value = await denyPairing(current.value, permissions.value) }
+  try {
+    const denied = await denyPairing(current.value, permissions.value)
+    if (started === pairingReadGeneration()) current.value = denied
+  }
   catch (error) {
+    if (started !== pairingReadGeneration()) return
     if (error instanceof PairingError && error.code === 'session_reset') return
     assignError(error, 'The request was not denied.')
   }
-  finally { busy.value = '' }
+  finally { if (started === pairingReadGeneration()) busy.value = '' }
 }
 
 function resetCode() {
@@ -349,6 +365,7 @@ function resetCode() {
   grantedKeys.value = null
   message.value = ''
   nextStep.value = ''
+  pollStarted = 0
   if (pollTimer) window.clearTimeout(pollTimer)
 }
 
@@ -359,7 +376,10 @@ function reviewAsNewComputer() {
   void router.replace({ path: route.path, query })
 }
 
-function connectOnly() { verify.value = false }
+function connectOnly() {
+  verify.value = false
+  limitsWhen.value = 'later'
+}
 
 function leaveOutUnsupported() {
   if (!current.value) return
@@ -425,7 +445,7 @@ async function refreshComputer(computerId: string) {
   try {
     const started = pairingReadGeneration()
     const pairing = await getPairingComputer(computerId)
-    if (started !== pairingReadGeneration()) return
+    if (started !== pairingReadGeneration() || current.value?.computer_id !== computerId) return
     current.value = pairing
     armPoll(pairing)
   } catch (error) {
@@ -523,7 +543,7 @@ function capability(value: string) {
           <h2>{{ adding && pendingReview ? 'Add a harness' : pendingReview ? 'Review this computer' : progress.title }}</h2>
           <p>{{ pendingReview ? 'Confirm the details and choose which harnesses to connect.' : progress.detail }}</p>
         </div>
-        <button type="button" class="btn sm" @click="resetCode">Use a different code</button>
+        <button type="button" class="btn sm" :disabled="!!busy" @click="resetCode">Use a different code</button>
       </header>
       <p v-if="targetProblem" class="problem" role="alert">{{ targetProblem.message }} {{ targetProblem.next }}</p>
       <button v-if="targetProblem" type="button" class="btn sm" @click="reviewAsNewComputer">Review as a new computer</button>
@@ -573,7 +593,7 @@ function capability(value: string) {
 
         <fieldset>
           <legend>After connecting</legend>
-          <label class="radio"><input v-model="limitsWhen" type="radio" value="later" /> <span><strong>Connect only</strong><span class="sub">You can set request limits later.</span></span></label>
+          <label class="radio"><input v-model="limitsWhen" type="radio" value="later" /> <span><strong>Keep ongoing runs paused</strong><span class="sub">You can set request limits later.</span></span></label>
           <label class="radio"><input v-model="limitsWhen" type="radio" value="now" /> <span><strong>Set ongoing limits</strong><span class="sub">Requests for a period, saved by you after approval.</span></span></label>
         </fieldset>
       </template>

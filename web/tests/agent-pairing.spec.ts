@@ -38,8 +38,10 @@ test('a person reviews real accounts, can leave a harness out, and does not trea
   await expect(review.getByText('studio', { exact: true })).toBeVisible()
   await expect(review.getByText('INSPR', { exact: true })).toBeVisible()
   await expect(review.getByText('/Users/markus/work', { exact: true })).toBeVisible()
-  await expect(review.getByText('Cursor work', { exact: true })).toBeVisible()
-  await expect(review.getByText('Codex work', { exact: true })).toBeVisible()
+  await expect(review.getByLabel('Account for Cursor')).toHaveValue('cursor-1')
+  await expect(review.getByLabel('Account for Cursor').locator('option:checked')).toHaveText('Cursor work')
+  await expect(review.getByLabel('Account for Codex')).toHaveValue('codex-1')
+  await expect(review.getByLabel('Account for Codex').locator('option:checked')).toHaveText('Codex work')
   await expect(review.getByRole('checkbox', { name: 'Verify selected harnesses' })).toBeChecked()
   const expiry = review.locator('time')
   await expect(expiry).toHaveAttribute('datetime', '2026-09-27T20:30:00.000Z')
@@ -52,8 +54,11 @@ test('a person reviews real accounts, can leave a harness out, and does not trea
   await page.getByRole('radio', { name: /Set ongoing limits/ }).check()
   await expect(page.getByText('Cost in micros')).toHaveCount(0)
   await expect(page.getByText('Tokens')).toHaveCount(0)
-  await expect(page.getByLabel('Requests')).toBeVisible()
-  await page.getByRole('radio', { name: /Connect only/ }).check()
+  await expect(page.getByRole('spinbutton', { name: 'Requests', exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Connect computer', exact: true })).toBeDisabled()
+  await review.getByRole('button', { name: 'Connect only', exact: true }).click()
+  await expect(review.getByRole('checkbox', { name: 'Verify selected harnesses' })).not.toBeChecked()
+  await expect(review.getByRole('radio', { name: /Keep ongoing runs paused/ })).toBeChecked()
 
   await page.getByRole('button', { name: 'Connect computer', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'Setting up' })).toBeVisible()
@@ -61,7 +66,7 @@ test('a person reviews real accounts, can leave a harness out, and does not trea
   const approval = calls.find(call => call.path.endsWith('/approve'))
   expect(approval?.body).toEqual({
     request_digest: 'ab'.repeat(32),
-    verification: 'one_per_harness',
+    verification: 'connect_only',
     selected_account_keys: ['codex-1'],
   })
   expect(JSON.stringify(approval?.body)).not.toMatch(/device_secret|expected_revision|allowance/)
@@ -72,6 +77,20 @@ test('a person reviews real accounts, can leave a harness out, and does not trea
   const disconnect = calls.find(call => call.path.endsWith('/disconnect'))
   expect(disconnect?.body).toEqual({ mode: 'drain', expected_revision: 4 })
   expect(errors).toEqual([])
+})
+
+test('an expired session clears computer details and leaves the code ready for sign-in', async ({ page }) => {
+  await mockWork(page, fixtures())
+  await mockPairing(page)
+  await page.route('**/api/agent-pairing/lookup', route => route.fulfill({ status: 401, json: { error: 'sign in required' } }))
+  await page.goto('/agents/register-agent')
+  await expect(page.getByRole('heading', { name: 'Connected computers' })).toBeVisible()
+  await page.getByLabel('Pairing code').fill('123-456-789')
+  await page.getByRole('button', { name: 'Look up code' }).click()
+  await expect(page.getByRole('heading', { name: 'Connected computers' })).toHaveCount(0)
+  await expect(page.getByText('studio', { exact: true })).toHaveCount(0)
+  await expect(page.getByLabel('Pairing code')).toHaveValue('123-456-789')
+  await expect(page.getByRole('button', { name: 'Sign in to review the code' })).toBeEnabled()
 })
 
 test('add harness is labeled from the request, and an agent cannot approve', async ({ page }) => {

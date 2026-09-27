@@ -1150,8 +1150,10 @@ async function oneFlight(key: string, run: () => Promise<PairingView>): Promise<
   }
   flightBusy = true
   const promise = run().finally(() => {
-    flightBusy = false
-    flights.delete(key)
+    if (flights.get(key) === promise) {
+      flightBusy = false
+      flights.delete(key)
+    }
   })
   flights.set(key, promise)
   return promise

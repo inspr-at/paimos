@@ -45,8 +45,8 @@ function base(overrides: Record<string, unknown> = {}) {
     ],
     verification: verification(),
     verification_capabilities: {
-      cursor: { supported: true, policy: 'no_tools', reason: '' },
-      codex: { supported: true, policy: 'no_tools', reason: '' },
+      cursor: { supported: false, policy: 'unavailable', reason: 'Cursor verification cannot isolate inherited tools.' },
+      codex: { supported: false, policy: 'unavailable', reason: 'Codex verification cannot isolate inherited tools.' },
     },
     verification_helper_version: '260927181849.0.0',
     computer_id: null, computer_state: null, principal_id: null, daemon_id: null,
@@ -87,7 +87,7 @@ export async function mockPairing(page: Page) {
     if (path.endsWith('/approve') && method === 'POST') {
       return route.fulfill({ json: base({
         state: 'approved', computer_id: COMPUTER, computer_state: 'connected', revision: 2, setup_state: 'approved',
-        verification: verification('one_per_harness'),
+        verification: verification((body as { verification: string }).verification),
         enrollments: [enrollment(ACCOUNT_2, 'codex-1', 'codex', 'Codex work')],
       }) })
     }

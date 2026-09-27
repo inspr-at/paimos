@@ -74,6 +74,7 @@ function dropSignedInList() {
   message.value = ''
   nextStep.value = ''
   openId.value = ''
+  busy.value = ''
   loadTurn += 1
   closeDialog()
 }
@@ -132,11 +133,13 @@ function closeDialog() {
 async function commit(mode: DisconnectMode) {
   const request = pending.value
   if (!request?.view.computer_id || busy.value) return
+  const started = pairingReadGeneration()
   busy.value = mode
   message.value = ''
   nextStep.value = ''
   try {
     const fresh = await getPairingComputer(request.view.computer_id)
+    if (started !== pairingReadGeneration()) return
     if (pairingScopeKey(fresh) !== pairingScopeKey(request.view)) {
       replace(fresh)
       pending.value = { ...request, view: fresh }
@@ -147,14 +150,16 @@ async function commit(mode: DisconnectMode) {
     const next = request.scope === 'enrollment' && request.accountId
       ? await disconnectEnrollment(fresh, request.accountId, mode, props.permissions)
       : await disconnectComputer(fresh, mode, props.permissions)
+    if (started !== pairingReadGeneration()) return
     replace(next)
     closeDialog()
   } catch (error) {
+    if (started !== pairingReadGeneration()) return
     assign(error, 'The computer was not disconnected.')
     if (error instanceof PairingError && error.code === 'conflict' && request.view.computer_id) {
       try { replace(await getPairingComputer(request.view.computer_id)) } catch { /* The conflict message already asks for a fresh review. */ }
     }
-  } finally { busy.value = '' }
+  } finally { if (started === pairingReadGeneration()) busy.value = '' }
 }
 
 function replace(next: PairingView) {
