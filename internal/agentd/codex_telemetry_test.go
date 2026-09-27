@@ -117,6 +117,9 @@ func TestCodexModelUsageThroughSupervisorAndTelemetryHTTP(t *testing.T) {
 	var mu sync.Mutex
 	var usage []sessionusage.UsageReport
 	var statuses []int
+	receipts := make(map[string][]byte)
+	attempts, replays := 0, 0
+	firstAccepted, releaseFirst := make(chan struct{}), make(chan struct{})
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/projects/project/harness-sessions/session/usage" {
 			base.mu.Lock()
@@ -128,11 +131,43 @@ func TestCodexModelUsageThroughSupervisorAndTelemetryHTTP(t *testing.T) {
 			var report sessionusage.UsageReport
 			if json.NewDecoder(r.Body).Decode(&report) != nil {
 				t.Error("invalid usage request")
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			payload, err := json.Marshal(report)
+			if err != nil {
+				t.Error("invalid normalized usage payload")
+				w.WriteHeader(http.StatusBadRequest)
+				return
 			}
 			mu.Lock()
-			usage = append(usage, report)
+			attempts++
+			prior, replayed := receipts[report.ReportID]
+			if replayed && !bytes.Equal(prior, payload) {
+				mu.Unlock()
+				t.Error("usage receipt replay changed payload")
+				w.WriteHeader(http.StatusConflict)
+				return
+			}
+			if replayed {
+				replays++
+			} else {
+				// Match the public endpoint's receipt identity and payload check.
+				receipts[report.ReportID] = payload
+				usage = append(usage, report)
+			}
+			first := attempts == 1
 			mu.Unlock()
-			_, _ = w.Write([]byte(`{"usage":{},"replayed":false}`))
+			if first {
+				// Commit before losing the response: finish must retry this receipt.
+				close(firstAccepted)
+				select {
+				case <-r.Context().Done():
+				case <-releaseFirst:
+				}
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"usage": map[string]any{}, "replayed": replayed})
 			return
 		}
 		recorder := httptest.NewRecorder()
@@ -147,6 +182,7 @@ func TestCodexModelUsageThroughSupervisorAndTelemetryHTTP(t *testing.T) {
 		_, _ = w.Write(recorder.Body.Bytes())
 	}))
 	defer server.Close()
+	defer close(releaseFirst) // Release the handler before server.Close on any fatal.
 	remote := NewRemote(server.URL, token)
 	remote.daemonID, remote.generation = "daemon", s.generation
 	s.api = &codexTelemetryAPI{usageTestAPI: &usageTestAPI{fakeAPI: base, remote: remote}, runID: run.ID}
@@ -163,6 +199,11 @@ func TestCodexModelUsageThroughSupervisorAndTelemetryHTTP(t *testing.T) {
 	frame := json.RawMessage(strings.ReplaceAll(lifecycleUsage, "model-a", "model"))
 	cp.notification(frame)
 	cp.notification(frame) // Cumulative replay cannot count twice.
+	select {
+	case <-firstAccepted:
+	case <-time.After(3 * time.Second):
+		t.Fatal("first usage receipt was not accepted")
+	}
 	if err := finishUsageTest(t, entry.usage); err != nil {
 		t.Fatal(err)
 	}
@@ -180,8 +221,12 @@ func TestCodexModelUsageThroughSupervisorAndTelemetryHTTP(t *testing.T) {
 			t.Errorf("telemetry rejected: %d", status)
 		}
 	}
-	if len(usage) != 1 || usage[0].Model != "model" || *usage[0].InputTokens != 100 || *usage[0].OutputTokens != 20 || !usage[0].Provisional {
-		t.Error("normalized session usage missing or double-counted")
+	if attempts != 2 || replays != 1 {
+		t.Errorf("interrupted response: transport attempts=%d replays=%d; want 2 and 1", attempts, replays)
+	}
+	if len(usage) != 1 || usage[0].ReportID == "" || usage[0].Sequence != 1 || usage[0].Model != "model" ||
+		usage[0].InputTokens == nil || *usage[0].InputTokens != 100 || usage[0].OutputTokens == nil || *usage[0].OutputTokens != 20 || !usage[0].Provisional {
+		t.Errorf("normalized session usage missing or double-counted: applied receipts=%d", len(usage))
 	}
 	mu.Unlock()
 	seed(func(tx pgx.Tx) error {
