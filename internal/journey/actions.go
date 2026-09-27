@@ -108,7 +108,8 @@ func (m *Module) actWithMode(ctx context.Context, p tenant.Principal, projectID 
 	var out Journey
 	err = m.inTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
 		if seed {
-			if in.Action != "open_first_release" && in.Action != "start_build" && in.Action != "mark_candidate" {
+			brief, _ := ctx.Value(briefContextKey{}).(string)
+			if in.Action != "open_first_release" && in.Action != "start_build" && in.Action != "mark_candidate" && !(brief != "" && in.Action == "confirm_brief") {
 				return fail(http.StatusForbidden, "operator seed cannot perform a person decision")
 			}
 			var operator bool

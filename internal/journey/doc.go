@@ -196,15 +196,23 @@
 // AEON-188 adds an explicit read-only disposable flag to the Journey document.
 // The coordinator wires RunOperator into `aeon journey`; the host-only commands
 // are `mark-disposable --tenant SLUG --project KEY` and
-// `seed --tenant SLUG --project KEY --to-stage build|candidate|deploy`.
+// `seed --tenant SLUG --project KEY --to-stage build|candidate|deploy
+// [--brief 1|2|3]`. AEON-208's fixed Host status page, Release notes digest
+// and Maintenance window planner briefs are host-only synthetic intake for
+// disposable projects. The seed accepts and confirms the selected brief, then
+// creates an agreed minimal requirement, feature and completed release ticket.
+// It records revision-fenced action receipts and operator events with the brief
+// number on every step; replaying the same brief is a no-op, and changing the
+// brief after intake is refused.
 // Development is the default; production host runs require --production and
 // --confirm-project equal to --project. Production events record production:true
 // and the Access operator. MarkDisposable appends an operator event and
 // refuses deployed or released projects. SeedDisposable uses the normal
 // journey revision, receipt and transition path for release opening, build
 // start and candidate marking, with an explicit audited build-gate waiver on
-// disposable projects. It cannot create requirements, complete tickets or
-// decide candidate/deploy gates. A person still approves those gates through
-// the normal UI. An unmet work prerequisite rolls the seed transaction back;
+// disposable projects. Without --brief it does not create requirements or
+// complete tickets. It never decides candidate/deploy gates. A person approves
+// those gates through the normal UI. An unmet work prerequisite rolls the seed
+// transaction back;
 // a pending human gate commits preparation and reports the pending action.
 package journey
