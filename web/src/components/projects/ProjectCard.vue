@@ -108,7 +108,6 @@ const agentState = computed(() => leadingState(agents.value.map(a => a.state)))
 .card-more:hover, .card.menu .card-more { color: var(--teal-ink); }
 @media (hover: none) { .card-more { opacity: 1; } .card-grip { display: none; } }
 @media (max-width: 600px) { .card-link { padding: 14px 16px 0; } .card-foot { margin: 18px 16px 12px; } .card-top { padding-right: 40px; } .card-more { top: 6px; right: 6px; width: 44px; height: 44px; } }
-.card[data-agent-state] { background: color-mix(in srgb, var(--agent-state-color) 5%, var(--surface-raised)); }
 </style>
 
 <style>

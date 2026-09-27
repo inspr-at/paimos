@@ -13,6 +13,9 @@ import (
 )
 
 func TestUnsupportedPlatformWithholdsGroupOwnership(t *testing.T) {
+	if TrackingSupported() {
+		t.Fatal("unsupported platform advertised safe lifetime observation")
+	}
 	cmd := exec.Command("not-started")
 	if Configure(cmd) {
 		t.Fatal("unsupported platform configured process-group ownership")
