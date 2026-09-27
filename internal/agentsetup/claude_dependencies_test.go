@@ -78,6 +78,29 @@ func TestClaudeDependencyFailuresAreSetupBlockers(t *testing.T) {
 	}
 }
 
+func TestClaudeDependenciesRejectReplaceableAncestors(t *testing.T) {
+	root, node, sdk := claudeFixture(t)
+	workspace := physicalTemp(t)
+	pins := ClaudeDependencies{NodePath: node, SDKPath: sdk}
+	for _, parent := range []string{filepath.Dir(node), filepath.Join(root, "lib", "node_modules")} {
+		if err := os.Chmod(parent, 0777); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := (Discovery{}).ResolveClaudeDependencies(pins, workspace); err == nil {
+			t.Fatal("accepted dependency beneath a replaceable ancestor")
+		}
+		if err := os.Chmod(parent, 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Chmod(root, os.ModeSticky|0777); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := (Discovery{}).ResolveClaudeDependencies(pins, workspace); err != nil {
+		t.Fatal("rejected sticky parent protecting owned children", err)
+	}
+}
+
 func TestClaudeSetupPinsSurviveResumeAndOtherHarness(t *testing.T) {
 	e, a, _, o, _ := engineFixture(t)
 	_, node, sdk := claudeFixture(t)

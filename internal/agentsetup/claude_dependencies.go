@@ -88,6 +88,21 @@ func pinnedRegular(path, workspace string, executable bool) (string, error) {
 	if !ok || owner.Uid != 0 && int(owner.Uid) != os.Getuid() {
 		return "", ErrUnsafePath
 	}
+	// A pinned file can still be replaced through a writable ancestor. Root-
+	// or user-owned sticky shared directories protect the owned child below.
+	for parent := filepath.Dir(physical); ; parent = filepath.Dir(parent) {
+		dir, err := os.Stat(parent)
+		if err != nil || !dir.IsDir() {
+			return "", ErrUnsafePath
+		}
+		owner, ok := dir.Sys().(*syscall.Stat_t)
+		if !ok || owner.Uid != 0 && int(owner.Uid) != os.Getuid() || dir.Mode().Perm()&0022 != 0 && dir.Mode()&os.ModeSticky == 0 {
+			return "", ErrUnsafePath
+		}
+		if parent == filepath.Dir(parent) {
+			break
+		}
+	}
 	return physical, nil
 }
 
