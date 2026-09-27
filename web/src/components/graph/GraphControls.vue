@@ -21,15 +21,23 @@ const emit = defineEmits<{ fit: []; dimension: [value: GraphDimension]; pause: [
 </template>
 <style scoped>
 .graph-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.graph-controls .btn, :slotted(.btn), .graph-menu summary { height: 34px; }
+.graph-menu summary { width: 34px; }
 .seg button { min-width: 34px; height: 28px; justify-content: center; padding: 0 9px; }
 .seg button[aria-pressed="true"] { background: var(--seg-on); box-shadow: var(--shadow-btn); color: var(--teal-ink); }
 .btn[aria-pressed="true"] { background: var(--row-selected); box-shadow: inset 0 0 0 1px var(--chip-teal-line); }
 .graph-label-control { display: flex; align-items: center; gap: 5px; color: var(--ink-2); font-size: 11px; }
-select { border: 1px solid var(--line); border-radius: 6px; background: var(--surface-raised); color: var(--ink); padding: 5px; font: inherit; }
+select { height: 34px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface-raised); color: var(--ink); padding: 0 8px; font: inherit; }
 .graph-menu { position: relative; }
 .graph-menu summary { list-style: none; cursor: pointer; }
 .graph-menu summary::-webkit-details-marker { display: none; }
 .graph-menu-panel { position: absolute; top: calc(100% + 10px); right: 0; width: 185px; padding: 14px; border-radius: 12px; background: var(--surface-raised); box-shadow: var(--shadow-pop); border: 1px solid var(--line); z-index: 10; }
 .graph-menu-panel label { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 12px; }
-@media (max-width: 600px) { .graph-controls { gap: 6px; } .graph-controls .btn, .seg button, select, .graph-menu summary { min-height: 40px; } .graph-motion span { display: none; } }
+@media (max-width: 600px) {
+  .graph-controls { gap: 6px; }
+  .graph-controls .btn, :slotted(.btn), select, .graph-menu summary { height: 44px; min-height: 44px; }
+  .graph-menu summary { width: 44px; }
+  .seg button { height: 38px; min-height: 38px; }
+  .graph-motion span { display: none; }
+}
 </style>

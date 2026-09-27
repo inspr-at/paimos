@@ -266,7 +266,7 @@ async function link(personId: string) {
   .people td { display: block; padding: 0; border: 0; }
   .people td.c-id, .people td.c-proj, .people td.c-last { display: none; }
   .c-person { grid-area: who; }
-  .c-role { grid-area: role; padding-left: 32px !important; }
+  .c-role { grid-area: role; padding-left: 40px !important; }
   .c-status { grid-area: status; justify-self: end; }
   .c-act { grid-area: act; width: auto; }
   .more { width: 44px; height: 44px; }

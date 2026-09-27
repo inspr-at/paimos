@@ -638,10 +638,8 @@ defineExpose({
       <span class="state-icon"><AppIcon :name="filtered ? 'filter' : 'inbox'" :size="18" /></span>
       <template v-if="filtered">
         <h2>No tickets match these filters</h2>
-        <p>{{ query ? `Nothing with “${query}” in its key or title` : 'Try fewer filters' }}{{ hidingClosed ? ', or include closed tickets.' : '.' }}</p>
         <div class="state-actions">
           <button type="button" class="btn" @click="emit('clearFilters')">Clear filters</button>
-          <button v-if="hidingClosed" type="button" class="btn ghost" @click="emit('showClosed')">Show closed</button>
         </div>
       </template>
       <template v-else-if="hidingClosed">

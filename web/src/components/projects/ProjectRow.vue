@@ -101,11 +101,11 @@ const value = (project: Project, kind: StatKind) => kind === 'open' ? project.op
   .project-row {
     display: grid; grid-template-columns: auto minmax(0, 1fr) auto;
     grid-template-areas: "key key time" "text text text" "bar bar bar" "stats stats stats";
-    row-gap: 6px; padding: 12px 48px 12px 10px; min-height: 44px;
+    row-gap: 6px; padding: 12px 10px; min-height: 44px;
   }
   .project-row .key-badge { grid-area: key; }
   .project-text { grid-area: text; }
-  .activity { display: block; grid-area: time; font-size: 12px; }
+  .activity { display: block; grid-area: time; margin-right: 38px; font-size: 12px; }
   .progress { grid-area: bar; }
   .project-row > .stat, .people-cell { display: none; }
   .name { white-space: normal; }
