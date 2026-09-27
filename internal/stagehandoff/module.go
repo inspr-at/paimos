@@ -60,6 +60,8 @@ func New(pool *pgxpool.Pool, registry *plugins.Registry, checks ...LaunchChecks)
 	return &Module{pool: pool, registry: registry, launchChecks: guard}
 }
 func (m *Module) Mount(mux *http.ServeMux) {
+	mux.HandleFunc("GET /api/projects/{projectId}/releases/{releaseId}/candidate-artifact", m.getCandidateArtifact)
+	mux.HandleFunc("PUT /api/projects/{projectId}/releases/{releaseId}/candidate-artifact", m.putCandidateArtifact)
 	mux.HandleFunc("POST /api/stage-handoffs", reportercontract.WithHeader(reportercontract.StageHandoffs, m.request))
 	mux.HandleFunc("GET /api/stage-handoffs/{handoffId}", reportercontract.WithHeader(reportercontract.StageHandoffs, m.get))
 	mux.HandleFunc("POST /api/stage-handoffs/{handoffId}/classic-batch-alias", reportercontract.WithHeader(reportercontract.BaselineBatches, m.bindClassicBatchAlias))
