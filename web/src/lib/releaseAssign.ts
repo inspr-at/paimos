@@ -3,14 +3,16 @@
 // A ticket that already sits in another planning release is moved only after a yes.
 // A new release is one journey action. A definite rejection rolls it back.
 // A lost response stays unconfirmed: the same tickets replay that action and
-// do not send a membership write, even if the picker now lists the release.
+// do not send a membership write. The action response is the current journey,
+// so the tickets' native membership decides which release, if any, to name.
 
 import { APIError } from './api.ts'
 import { confirmAction } from './confirm.ts'
-import { getWalker, type Journey, type Walker } from './journey.ts'
+import { getWalker, type Journey } from './journey.ts'
 import {
-  addReleaseMembership, assertReleaseOpen, isMoveConflict, isStaleRevision, newReleaseFailure, openReleaseWithTickets, ReleaseUnconfirmed,
-  type MembershipResult, type MembershipTicket,
+  addReleaseMembership, assertReleaseOpen, isMoveConflict, isStaleRevision, listNativeMemberships, newReleaseFailure, openReleaseWithTickets,
+  reconcileOpenedMembership, ReleaseUnconfirmed,
+  type MembershipResult, type MembershipTicket, type OpenedMembership,
 } from './releaseMembership.ts'
 import { statusMeta } from './work.ts'
 
@@ -26,6 +28,8 @@ export interface AssignOutcome {
   result: MembershipResult | null
   journey: Journey | null
   skipped: { key: string; reason: string }[]
+  // Set when the journey action is confirmed. Absent for an existing release.
+  opened?: OpenedMembership
 }
 
 function closed(ticket: AssignTicket): boolean {
@@ -61,9 +65,15 @@ export async function assignToRelease(projectId: string, tickets: AssignTicket[]
     if (target.kind === 'new' && open !== 'replay' && knownMoves.length) throw new Error(newReleaseFailure(new APIError(409, 'confirm_move required to move a ticket from another release', {})))
     try {
       const opened = await openReleaseWithTickets(projectId, ids)
-      let walker: Walker | null = null
-      try { walker = await getWalker(projectId, opened.releaseId) } catch { walker = null }
-      return { releaseId: opened.releaseId, releaseTitle: target.title, result: walker ? { walker, event_id: 0 } : null, journey: opened.journey, skipped }
+      const membership = reconcileOpenedMembership(ids, await listNativeMemberships(projectId, ids))
+      return {
+        releaseId: membership.status === 'added' ? membership.releaseId : '',
+        releaseTitle: membership.status === 'added' ? membership.releaseTitle : target.title,
+        result: null,
+        journey: opened.journey,
+        skipped,
+        opened: membership,
+      }
     } catch (error) {
       if (error instanceof ReleaseUnconfirmed) throw error
       throw new Error(newReleaseFailure(error))

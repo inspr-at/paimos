@@ -40,7 +40,7 @@ import OptionMenu from '../components/work/OptionMenu.vue'
 import EpicPicker from '../components/work/EpicPicker.vue'
 import ReleasePicker from '../components/work/ReleasePicker.vue'
 import { AssignCancelled, assignToRelease, type ReleaseTarget } from '../lib/releaseAssign'
-import { listNativeMemberships, type NativeReleaseView } from '../lib/releaseMembership'
+import { listNativeMemberships, openedMembershipMessage, type NativeReleaseView } from '../lib/releaseMembership'
 import { useJourney } from '../stores/journey'
 import JourneyChip from '../components/journey/JourneyChip.vue'
 import HeaderGlimpse from '../components/work/HeaderGlimpse.vue'
@@ -466,8 +466,11 @@ const nativeReleases = ref(new Map<string, NativeReleaseView>())
 const membershipIds = computed(() => {
   const ids: string[] = []
   const seen = new Set<string>()
-  const push = (row: { id: string; kind_slug: string } | null | undefined) => {
+  const project = projectId.value
+  const push = (row: { id: string; kind_slug: string; project?: { id: string } | null } | null | undefined) => {
     if (!row || row.kind_slug === 'epic' || seen.has(row.id)) return
+    // A project change can render before the previous list is replaced.
+    if (project && row.project?.id && row.project.id !== project) return
     seen.add(row.id)
     ids.push(row.id)
   }
@@ -485,7 +488,7 @@ async function refreshMemberships() {
     return
   }
   const views = await listNativeMemberships(project, ids)
-  if (request !== membershipGeneration) return
+  if (request !== membershipGeneration || projectId.value !== project) return
   nativeReleases.value = views
 }
 watch(membershipIds, () => { void refreshMemberships() }, { immediate: true })
@@ -994,24 +997,42 @@ function openRelease(anchor: HTMLElement, ids: string[]) {
   releaseIds.value = ids
   bulkMenu.value = { kind: 'release', anchor }
 }
+let releaseAttempt = 0
 async function chooseRelease(target: ReleaseTarget) {
-  const ids = releaseIds.value
+  const projectId = project.value?.id
+  if (!projectId || bulkBusy.value) return
+  const ids = [...releaseIds.value]
   const rows = list.rows.value.filter(row => ids.includes(row.id))
   const tickets = ids.map(id => {
     const row = rows.find(item => item.id === id)
     return { id, key: row?.key ?? id, title: row?.title ?? '', state: row?.state, kind: row?.kind_slug }
   })
   bulkMenu.value = null
-  if (!project.value || bulkBusy.value) return
+  const attempt = ++releaseAttempt
   bulkBusy.value = true
+  const here = () => attempt === releaseAttempt && project.value?.id === projectId
   try {
-    const outcome = await assignToRelease(project.value.id, tickets, target)
-    if (outcome.journey) useJourney().set(project.value.id, outcome.journey)
-    const joined = outcome.result?.walker.tickets.filter(ticket => ids.includes(ticket.ticket_node_id) && ticket.included).length ?? 0
-    const added = joined || Math.max(0, ids.length - outcome.skipped.length)
+    const outcome = await assignToRelease(projectId, tickets, target)
+    if (outcome.journey) useJourney().set(projectId, outcome.journey)
+    if (!here()) return
+    const changed = outcome.opened ? openedMembershipMessage(outcome.opened) : null
+    if (changed) {
+      toast(changed)
+      void refreshMemberships()
+      return
+    }
+    const joined = outcome.opened?.status === 'added'
+      ? outcome.opened.count
+      : outcome.result?.walker.tickets.filter(ticket => ids.includes(ticket.ticket_node_id) && ticket.included).length ?? 0
+    if (!joined) {
+      toast('Nothing was added to the release.')
+      void refreshMemberships()
+      return
+    }
+    const title = outcome.opened?.status === 'added' ? outcome.opened.releaseTitle : outcome.releaseTitle
     const leftOut = outcome.skipped.length ? ` · ${plural(outcome.skipped.length, 'ticket')} left out` : ''
     const eventId = outcome.result?.event_id
-    toast(`Added ${plural(added, 'ticket')} to ${outcome.releaseTitle}${leftOut}`, {
+    toast(`Added ${plural(joined, 'ticket')} to ${title}${leftOut}`, {
       timeout: 8000,
       action: eventId ? { label: 'Undo', run: () => void undoBulk(eventId) } : undefined,
     })
@@ -1019,11 +1040,14 @@ async function chooseRelease(target: ReleaseTarget) {
     void list.load()
     void refreshMemberships()
   } catch (error) {
+    if (!here()) return
     if (error instanceof AssignCancelled) return
     toast(problem(error), { tone: 'error' })
   } finally {
-    bulkBusy.value = false
-    table.value?.focusGrid()
+    if (attempt === releaseAttempt) {
+      bulkBusy.value = false
+      if (project.value?.id === projectId) table.value?.focusGrid()
+    }
   }
 }
 

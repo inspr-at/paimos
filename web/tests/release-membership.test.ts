@@ -5,8 +5,8 @@ import { APIError, RequestFailure } from '../src/lib/api.ts'
 import type { Journey, ReleaseRef } from '../src/lib/journey.ts'
 import {
   assertReleaseOpen, availabilityMark, canOpenRelease, canSelectTicket, isMoveConflict, isStaleRevision, listNativeMemberships, membershipQuery, nativeViews,
-  newReleaseAction, newReleaseFailure, nextReleaseTitle, openReleaseWithTickets, parseMembership, parseNativeMemberships, parseTicketOptions,
-  planningRelease, releaseCell, ReleaseUnconfirmed, resetReleaseOpenForTests, ticketOptionQuery,
+  newReleaseAction, newReleaseFailure, nextReleaseTitle, openedMembershipMessage, openReleaseWithTickets, parseMembership, parseNativeMemberships, parseTicketOptions,
+  planningRelease, reconcileOpenedMembership, releaseCell, ReleaseUnconfirmed, resetReleaseOpenForTests, ticketOptionQuery,
   type ReleaseOpenClient,
 } from '../src/lib/releaseMembership.ts'
 
@@ -144,8 +144,64 @@ test('a lost response after commit retries the same key and does not write membe
   const opened = await openReleaseWithTickets('p', ids, client)
   assert.equal(committed.size, 1)
   assert.deepEqual(keys, [keys[0], keys[0]])
-  assert.equal(opened.releaseId, 'r-new')
+  assert.equal(opened.journey.current_release_id, 'r-new')
   assert.equal(keys[0], 'key-1')
+  assert.equal(assertReleaseOpen('p', ids), 'clear')
+})
+
+test('a denial after a lost create keeps the same key until the replay', async () => {
+  for (const status of [401, 403, 429]) {
+    resetReleaseOpenForTests()
+    const committed = new Map<string, Journey>()
+    const keys: string[] = []
+    let phase: 'lose' | 'deny' | 'replay' = 'lose'
+    const client = openClient(async (_project, action) => {
+      keys.push(action.idempotency_key)
+      if (phase === 'lose') {
+        phase = 'deny'
+        committed.set(action.idempotency_key, openedJourney())
+        throw new RequestFailure('network')
+      }
+      if (phase === 'deny') {
+        phase = 'replay'
+        throw new APIError(status, 'project access required', {})
+      }
+      const saved = committed.get(action.idempotency_key)
+      if (!saved) throw new Error('a second release was opened')
+      return journey({ ...saved, current_release_id: 'r-4', revision: 30, stage: 'live' })
+    })
+    const ids = ['n-1']
+    await assert.rejects(() => openReleaseWithTickets('p', ids, client), ReleaseUnconfirmed)
+    await assert.rejects(() => openReleaseWithTickets('p', ids, client), (error: unknown) => {
+      assert.ok(error instanceof ReleaseUnconfirmed)
+      assert.match(newReleaseFailure(error), /not confirmed/)
+      assert.doesNotMatch(newReleaseFailure(error), /not opened/)
+      return true
+    })
+    assert.equal(assertReleaseOpen('p', ids), 'replay')
+    const opened = await openReleaseWithTickets('p', ids, client)
+    assert.equal(committed.size, 1)
+    assert.deepEqual(keys, ['key-1', 'key-1', 'key-1'])
+    assert.equal(opened.journey.current_release_id, 'r-4')
+    assert.equal('releaseId' in opened, false)
+    assert.equal(assertReleaseOpen('p', ids), 'clear')
+  }
+})
+
+test('the first denial is a rejection and the next try uses a new key', async () => {
+  const keys: string[] = []
+  let n = 0
+  const client = openClient(async (_project, action) => {
+    keys.push(action.idempotency_key)
+    throw new APIError(403, 'project access required', {})
+  }, { newKey: () => `key-${++n}` })
+  await assert.rejects(() => openReleaseWithTickets('p', ['n-1'], client), (error: unknown) => {
+    assert.match(newReleaseFailure(error), /The new release was not opened\. project access required/)
+    return true
+  })
+  assert.equal(assertReleaseOpen('p', ['n-1']), 'clear')
+  await assert.rejects(() => openReleaseWithTickets('p', ['n-1'], client), (error: unknown) => error instanceof APIError)
+  assert.deepEqual(keys, ['key-1', 'key-2'])
 })
 
 test('a 200 that does not name the release keeps the same key', async () => {
@@ -160,7 +216,7 @@ test('a 200 that does not name the release keeps the same key', async () => {
   await assert.rejects(() => openReleaseWithTickets('p', ['n-1'], client), /not confirmed/)
   const opened = await openReleaseWithTickets('p', ['n-1'], client)
   assert.deepEqual(keys, ['key-1', 'key-1'])
-  assert.equal(opened.releaseId, 'r-new')
+  assert.equal(opened.journey.current_release_id, 'r-new')
 })
 
 test('a definite rejection is not retried with the same key', async () => {
@@ -188,8 +244,31 @@ test('two clicks share one create', async () => {
   const ids = ['n-1', 'n-2']
   const [first, second] = await Promise.all([openReleaseWithTickets('p', ids, client), openReleaseWithTickets('p', ids, client)])
   assert.equal(calls, 1)
-  assert.equal(first.releaseId, 'r-new')
-  assert.equal(second.releaseId, 'r-new')
+  assert.equal(first.journey.current_release_id, 'r-new')
+  assert.equal(second.journey.current_release_id, 'r-new')
+})
+
+test('replay membership is the tickets’ release, not the journey’s current release', () => {
+  const member = nativeViews(['n-1', 'n-2'], [
+    { ticket_node_id: 'n-1', release_node_id: 'r-3', release_title: 'Release 3', release_state: 'planning' },
+    { ticket_node_id: 'n-2', release_node_id: 'r-3', release_title: 'Release 3', release_state: 'planning' },
+  ])
+  assert.deepEqual(reconcileOpenedMembership(['n-1', 'n-2'], member), { status: 'added', releaseId: 'r-3', releaseTitle: 'Release 3', count: 2 })
+  const moved = nativeViews(['n-1'], [{ ticket_node_id: 'n-1', release_node_id: null, release_title: null, release_state: null }])
+  const changed = reconcileOpenedMembership(['n-1'], moved)
+  assert.equal(changed.status, 'changed')
+  assert.equal(openedMembershipMessage(changed), 'The release action is confirmed, but those tickets are not all in one release.')
+  assert.equal('count' in changed, false)
+  const split = nativeViews(['n-1', 'n-2'], [
+    { ticket_node_id: 'n-1', release_node_id: 'r-3', release_title: 'Release 3', release_state: 'planning' },
+    { ticket_node_id: 'n-2', release_node_id: 'r-4', release_title: 'Release 4', release_state: 'planning' },
+  ])
+  assert.equal(reconcileOpenedMembership(['n-1', 'n-2'], split).status, 'changed')
+  const missing = nativeViews(['n-1'], [])
+  const unknown = reconcileOpenedMembership(['n-1'], missing)
+  assert.equal(unknown.status, 'unknown')
+  assert.match(openedMembershipMessage(unknown) ?? '', /could not be read/)
+  assert.equal(openedMembershipMessage({ status: 'added', releaseId: 'r-3', releaseTitle: 'Release 3', count: 1 }), null)
 })
 
 test('native membership rows stay separate from an omitted ticket and an imported label', () => {

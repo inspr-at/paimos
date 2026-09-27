@@ -174,8 +174,9 @@ export async function addReleaseMembership(project: string, release: string, bod
 }
 
 // One journey action. ticket_node_ids travel with it. release_id, when the next
-// release is planned, is the release that is current now. The response names the
-// new release as current_release_id. There is no confirm_move on this action.
+// release is planned, is the release that is current now. A fresh response's
+// current_release_id is the release just opened. An exact replay returns the
+// project's current journey, which may have moved on. There is no confirm_move.
 export function newReleaseAction(journey: Pick<Journey, 'current_release_id' | 'revision'>, ticketIds: string[], idempotencyKey: string): ActionWrite {
   if (journey.current_release_id) {
     return {
@@ -195,10 +196,16 @@ export class ReleaseUnconfirmed extends Error {
   }
 }
 
-// A 4xx from the journey action is a finished rejection: the transaction rolled
-// back. A lost response, a 5xx, or a 200 that does not name the release is not.
+// A 4xx on the first try is a finished rejection: the transaction rolled back.
+// A lost response, a 5xx, a 408, or a 200 that does not name a release is not.
+// Once that outcome is already unknown, a later 401, 403 or 429 still cannot
+// prove the first try failed, so the same request has to be kept.
 export function isDefiniteReleaseRejection(error: unknown): error is APIError {
   return error instanceof APIError && error.status >= 400 && error.status < 500 && error.status !== 408
+}
+
+export function denialCannotDisprove(error: unknown): boolean {
+  return error instanceof APIError && (error.status === 401 || error.status === 403 || error.status === 429)
 }
 
 export function newReleaseFailure(error: unknown): string {
@@ -209,7 +216,11 @@ export function newReleaseFailure(error: unknown): string {
   return `The new release was not opened. ${error.message}`
 }
 
-export interface OpenedRelease { journey: Journey; releaseId: string }
+// The journey in the response is the project's current journey. On an exact
+// replay that can be a later release than the one this action created.
+export interface OpenedRelease { journey: Journey }
+
+interface PendingOpen { action: ActionWrite; ambiguous: boolean }
 
 export interface ReleaseOpenClient {
   getJourney(projectId: string): Promise<Journey>
@@ -222,7 +233,7 @@ const liveOpenClient: ReleaseOpenClient = {
   getJourney, postAction, listReleases, newKey: () => crypto.randomUUID(),
 }
 
-const pendingOpen = new Map<string, ActionWrite>()
+const pendingOpen = new Map<string, PendingOpen>()
 const opening = new Map<string, { ids: string; promise: Promise<OpenedRelease> }>()
 
 export function resetReleaseOpenForTests() {
@@ -241,32 +252,41 @@ function namedRelease(value: unknown): Journey | null {
   return journey
 }
 
-async function postExact(client: ReleaseOpenClient, projectId: string, action: ActionWrite): Promise<Journey> {
+function rememberUnknown(projectId: string, action: ActionWrite) {
+  const pending = pendingOpen.get(projectId)
+  if (pending?.action === action) pending.ambiguous = true
+  else pendingOpen.set(projectId, { action, ambiguous: true })
+}
+
+async function postExact(client: ReleaseOpenClient, projectId: string, action: ActionWrite, alreadyAmbiguous: boolean): Promise<Journey> {
   let body: unknown
   try {
     body = await client.postAction(projectId, action)
   } catch (error) {
     if (isStaleRevision(error)) throw error
-    if (isDefiniteReleaseRejection(error)) {
-      if (pendingOpen.get(projectId) === action) pendingOpen.delete(projectId)
+    // A denial or throttle after an unknown try does not prove the first try
+    // rolled back. The first try's own 401, 403 or 429 still does.
+    if (isDefiniteReleaseRejection(error) && !(alreadyAmbiguous && denialCannotDisprove(error))) {
+      if (pendingOpen.get(projectId)?.action === action) pendingOpen.delete(projectId)
       throw error
     }
-    pendingOpen.set(projectId, action)
+    rememberUnknown(projectId, action)
     throw new ReleaseUnconfirmed(action)
   }
   const journey = namedRelease(body)
   if (!journey) {
-    pendingOpen.set(projectId, action)
+    rememberUnknown(projectId, action)
     throw new ReleaseUnconfirmed(action)
   }
-  if (pendingOpen.get(projectId) === action) pendingOpen.delete(projectId)
+  if (pendingOpen.get(projectId)?.action === action) pendingOpen.delete(projectId)
   return journey
 }
 
 async function openOnce(projectId: string, ticketIds: string[], client: ReleaseOpenClient): Promise<OpenedRelease> {
   const pending = pendingOpen.get(projectId)
-  if (pending && ticketSet(pending.ticket_node_ids ?? []) !== ticketSet(ticketIds)) throw new ReleaseUnconfirmed(pending)
-  let action = pending ?? null
+  if (pending && ticketSet(pending.action.ticket_node_ids ?? []) !== ticketSet(ticketIds)) throw new ReleaseUnconfirmed(pending.action)
+  let action = pending?.action ?? null
+  let ambiguous = pending?.ambiguous ?? false
   if (!action) {
     let journey: Journey
     try {
@@ -275,11 +295,12 @@ async function openOnce(projectId: string, ticketIds: string[], client: ReleaseO
       throw new Error(`The new release was not opened. ${error instanceof Error ? error.message : 'The journey could not be read.'}`)
     }
     action = newReleaseAction(journey, ticketIds, client.newKey())
-    pendingOpen.set(projectId, action)
+    pendingOpen.set(projectId, { action, ambiguous: false })
+    ambiguous = false
   }
   let next: Journey
   try {
-    next = await postExact(client, projectId, action)
+    next = await postExact(client, projectId, action, ambiguous)
   } catch (error) {
     if (!isStaleRevision(error)) throw error
     // That 409 committed nothing, so the next attempt is a new request.
@@ -294,10 +315,10 @@ async function openOnce(projectId: string, ticketIds: string[], client: ReleaseO
       throw new Error(`The new release was not opened. ${refreshError instanceof Error ? refreshError.message : 'The journey could not be read again.'}`)
     }
     action = newReleaseAction(journey, ticketIds, client.newKey())
-    pendingOpen.set(projectId, action)
-    next = await postExact(client, projectId, action)
+    pendingOpen.set(projectId, { action, ambiguous: false })
+    next = await postExact(client, projectId, action, false)
   }
-  return { journey: next, releaseId: next.current_release_id! }
+  return { journey: next }
 }
 
 // Same tickets as an unconfirmed create must replay that action. A different
@@ -305,14 +326,15 @@ async function openOnce(projectId: string, ticketIds: string[], client: ReleaseO
 export function assertReleaseOpen(projectId: string, ticketIds: string[]): 'replay' | 'clear' {
   const pending = pendingOpen.get(projectId)
   if (!pending) return 'clear'
-  if (ticketSet(pending.ticket_node_ids ?? []) !== ticketSet(ticketIds)) throw new ReleaseUnconfirmed(pending)
+  if (ticketSet(pending.action.ticket_node_ids ?? []) !== ticketSet(ticketIds)) throw new ReleaseUnconfirmed(pending.action)
   return 'replay'
 }
 
 // One journey action, never a follow-up membership write. A stale revision is
 // the only case that mints a new idempotency key. A lost or unusable response
-// keeps the exact action and replays it. A second click joins the attempt in
-// flight instead of starting another.
+// keeps the exact action and replays it, including after a later 401, 403 or
+// 429. A second click joins the attempt in flight instead of starting another.
+// The returned journey is not proof of which release received the tickets.
 export async function openReleaseWithTickets(projectId: string, ticketIds: string[], client: ReleaseOpenClient = liveOpenClient): Promise<OpenedRelease> {
   const ids = ticketSet(ticketIds)
   const current = opening.get(projectId)
@@ -387,6 +409,36 @@ export function nativeViews(requested: string[], rows: NativeMembership[]): Map<
     out.set(id, { status: 'member', title: row.release_title, releaseId: row.release_node_id ?? '', releaseState: row.release_state })
   }
   return out
+}
+
+export type OpenedMembership =
+  | { status: 'added'; releaseId: string; releaseTitle: string; count: number }
+  | { status: 'changed' }
+  | { status: 'unknown' }
+
+// current_release_id on a replay can be a later release. The tickets' own
+// membership rows are the only identity that can be reported. A missing row
+// stays unknown. An empty or split membership is a change, not a selected count.
+export function reconcileOpenedMembership(ticketIds: string[], views: Map<string, NativeReleaseView>): OpenedMembership {
+  if (!ticketIds.length) return { status: 'changed' }
+  let releaseId = ''
+  let releaseTitle = ''
+  for (const id of ticketIds) {
+    const view = views.get(id)
+    if (!view || view.status === 'unknown' || view.status === 'pending') return { status: 'unknown' }
+    if (view.status !== 'member' || !view.releaseId || !view.title) return { status: 'changed' }
+    if (!releaseId) {
+      releaseId = view.releaseId
+      releaseTitle = view.title
+    } else if (releaseId !== view.releaseId) return { status: 'changed' }
+  }
+  return { status: 'added', releaseId, releaseTitle, count: ticketIds.length }
+}
+
+export function openedMembershipMessage(outcome: OpenedMembership): string | null {
+  if (outcome.status === 'added') return null
+  if (outcome.status === 'unknown') return 'The release action is confirmed, but release membership could not be read.'
+  return 'The release action is confirmed, but those tickets are not all in one release.'
 }
 
 export function releaseCell(view: NativeReleaseView | undefined): { text: string; label: string; kind: 'unknown' | 'none' | 'member' } {

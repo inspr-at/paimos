@@ -30,7 +30,7 @@ import TicketHeaderBar from './TicketHeaderBar.vue'
 import TicketProperties from './TicketProperties.vue'
 import { can } from '../../lib/authz'
 import { AssignCancelled, assignToRelease, type ReleaseTarget } from '../../lib/releaseAssign'
-import { type NativeReleaseView } from '../../lib/releaseMembership'
+import { openedMembershipMessage, type NativeReleaseView } from '../../lib/releaseMembership'
 import ReleasePicker from './ReleasePicker.vue'
 import { useJourney } from '../../stores/journey'
 import StartAgentDialog from '../agents/StartAgentDialog.vue'
@@ -93,7 +93,8 @@ onMounted(() => {
   wideQuery.addEventListener('change', onWide)
   if (root.value) { sizer = new ResizeObserver(([entry]) => { width.value = entry.contentRect.width }); sizer.observe(root.value) }
 })
-onBeforeUnmount(() => { wideQuery.removeEventListener('change', onWide); sizer?.disconnect() })
+let releaseChoiceAlive = true
+onBeforeUnmount(() => { releaseChoiceAlive = false; wideQuery.removeEventListener('change', onWide); sizer?.disconnect() })
 const contextColumn = computed(() => props.mode === 'full' ? wideScreen.value : width.value >= 860)
 
 // ---------- Edit mode: title, text and properties together, one Save ----------
@@ -263,19 +264,30 @@ function openMenu(kind: 'priority' | 'assignee' | 'epic' | 'release', anchor: HT
 }
 async function chooseRelease(target: ReleaseTarget) {
   const it = props.item
+  const projectId = props.project.id
   if (!it || !canRelease.value) return
+  const ticket = { id: it.id, key: it.key, title: it.title, state: it.state, kind: it.kind_slug }
   menu.value = null
   try {
-    const outcome = await assignToRelease(props.project.id, [{ id: it.id, key: it.key, title: it.title, state: it.state, kind: it.kind_slug }], target)
-    if (outcome.journey) journeys.set(props.project.id, outcome.journey)
+    const outcome = await assignToRelease(projectId, [ticket], target)
+    if (outcome.journey) journeys.set(projectId, outcome.journey)
+    if (!releaseChoiceAlive || props.project.id !== projectId || props.item?.id !== ticket.id) return
+    const changed = outcome.opened ? openedMembershipMessage(outcome.opened) : null
+    if (changed) {
+      toast(changed)
+      emit('assigned')
+      return
+    }
     emit('assigned')
+    const title = outcome.opened?.status === 'added' ? outcome.opened.releaseTitle : outcome.releaseTitle
     const skipped = outcome.skipped.length ? ` ${outcome.skipped[0].reason}` : ''
     const eventId = outcome.result?.event_id
-    toast(`Added ${it.key} to ${outcome.releaseTitle}.${skipped}`, {
+    toast(`Added ${ticket.key} to ${title}.${skipped}`, {
       timeout: 8000,
-      action: eventId ? { label: 'Undo', run: () => void undoRelease(eventId, it.key) } : undefined,
+      action: eventId ? { label: 'Undo', run: () => void undoRelease(eventId, ticket.key) } : undefined,
     })
   } catch (error) {
+    if (!releaseChoiceAlive || props.project.id !== projectId || props.item?.id !== ticket.id) return
     if (error instanceof AssignCancelled) return
     toast(error instanceof Error ? error.message : 'The ticket was not added to a release.', { tone: 'error' })
   }

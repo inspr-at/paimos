@@ -11,12 +11,13 @@ const shots = resolve('..', '.agent-shots')
 type Option = {
   ticket_node_id: string; key: string; title: string; status: string; type: string
   feature_node_id: string | null; release_node_id: string | null; release_title: string | null
-  availability: 'addable' | 'included' | 'closed' | 'released' | 'other_release' | 'active_release'
+  availability: 'addable' | 'included' | 'closed' | 'released' | 'other_release' | 'active_release' | 'unsupported'
 }
 const OPTIONS: Option[] = [
   { ticket_node_id: 'n-21', key: 'PHAROS-21', title: 'Publish the status page', status: 'backlog', type: 'ticket', feature_node_id: 'n-epic', release_node_id: null, release_title: null, availability: 'addable' },
-  { ticket_node_id: 'n-22', key: 'PHAROS-22', title: 'Page the on-call rotation', status: 'new', type: 'task', feature_node_id: 'n-epic', release_node_id: null, release_title: null, availability: 'addable' },
+  { ticket_node_id: 'n-22', key: 'PHAROS-22', title: 'Page the on-call rotation', status: 'new', type: 'ticket', feature_node_id: 'n-epic', release_node_id: null, release_title: null, availability: 'addable' },
   { ticket_node_id: 'n-23', key: 'PHAROS-23', title: 'Write the deploy runbook', status: 'backlog', type: 'ticket', feature_node_id: null, release_node_id: null, release_title: null, availability: 'addable' },
+  { ticket_node_id: 'n-19', key: 'PHAROS-19', title: 'Rotate the on-call roster', status: 'backlog', type: 'task', feature_node_id: 'n-epic', release_node_id: null, release_title: null, availability: 'unsupported' },
   { ticket_node_id: 'n-5', key: 'PHAROS-15', title: 'Beacon health probes', status: 'done', type: 'ticket', feature_node_id: 'n-epic', release_node_id: 'r-1', release_title: '260901120000.0.0', availability: 'released' },
   { ticket_node_id: 'n-6', key: 'PHAROS-16', title: 'Retire the old dashboard', status: 'cancelled', type: 'ticket', feature_node_id: null, release_node_id: null, release_title: null, availability: 'closed' },
   { ticket_node_id: 'n-24', key: 'PHAROS-24', title: 'Move the billing epic', status: 'backlog', type: 'ticket', feature_node_id: 'n-epic-2', release_node_id: 'r-9', release_title: 'Release 9', availability: 'other_release' },
@@ -37,11 +38,17 @@ function catalog(id: string): Option {
   }
 }
 
-async function install(page: Page, world: JourneyWorld, hooks: { rejectCreate?: string; loseCreate?: boolean } = {}) {
+function requestHash(body: Record<string, unknown>): string {
+  const ids = Array.isArray(body.ticket_node_ids) ? body.ticket_node_ids.map(String).sort() : []
+  return JSON.stringify({ action: body.action ?? null, expected_revision: body.expected_revision ?? null, release_id: body.release_id ?? null, ticket_node_ids: ids })
+}
+
+async function install(page: Page, world: JourneyWorld, hooks: { rejectCreate?: string; loseCreate?: boolean; createScript?: Array<'lose' | number>; holdCreate?: Promise<void>; native?: Map<string, { release_node_id: string | null; release_title: string | null; release_state: string | null }> } = {}) {
   const calls: Call[] = []
-  const native = new Map<string, { release_node_id: string | null; release_title: string | null; release_state: string | null }>()
-  const receipts = new Map<string, unknown>()
+  const native = hooks.native ?? new Map<string, { release_node_id: string | null; release_title: string | null; release_state: string | null }>()
+  const receipts = new Map<string, string>()
   const lose = { create: hooks.loseCreate === true }
+  const script = hooks.createScript ? [...hooks.createScript] : []
   const remember = (ids: string[], releaseId: string, title: string) => {
     for (const id of ids) native.set(id, { release_node_id: releaseId, release_title: title, release_state: 'planning' })
   }
@@ -111,8 +118,17 @@ async function install(page: Page, world: JourneyWorld, hooks: { rejectCreate?: 
     }
     if (path === `/api/projects/${PROJECT}/journey/actions` && method === 'POST' && (body.action === 'plan_next_release' || body.action === 'open_first_release') && Array.isArray(body.ticket_node_ids)) {
       record()
-      const replay = receipts.get(String(body.idempotency_key ?? ''))
-      if (replay) return route.fulfill({ json: replay })
+      const key = String(body.idempotency_key ?? '')
+      const hash = requestHash(body)
+      const step = script.shift()
+      // A denial can arrive before the handler reads the receipt, so it does not
+      // prove an earlier lost response failed and it does not create another release.
+      if (typeof step === 'number') return route.fulfill({ status: step, json: { error: step === 429 ? 'too many requests' : 'project access required' } })
+      const known = key ? receipts.get(key) : undefined
+      if (known) {
+        if (known !== hash) return route.fulfill({ status: 409, json: { error: 'idempotency key was used for a different action' } })
+        return route.fulfill({ json: JSON.parse(JSON.stringify(world.journey)) })
+      }
       if (body.expected_revision !== world.journey.revision) return route.fulfill({ status: 409, json: { error: 'journey revision is stale' } })
       if (body.action === 'plan_next_release' && body.release_id && body.release_id !== world.journey.current_release_id) return route.fulfill({ status: 409, json: { error: 'release does not match the current release' } })
       if (body.action === 'open_first_release' && body.release_id) return route.fulfill({ status: 409, json: { error: 'release does not match the current release' } })
@@ -137,9 +153,9 @@ async function install(page: Page, world: JourneyWorld, hooks: { rejectCreate?: 
       world.journey.next_action = { key: 'start_build', label: 'Start build', stage: 'plan', available: false, reason: 'Build start needs an approved gate.', approval_request_id: null }
       world.journey.stages = world.journey.stages.map(stage => ({ ...stage, state: stage.key === 'plan' ? 'current' : ['inspire', 'shape', 'requirements'].includes(stage.key) ? 'done' : 'later' }))
       remember(ids, releaseId, title)
-      const saved = JSON.parse(JSON.stringify(world.journey))
-      receipts.set(String(body.idempotency_key), saved)
-      if (lose.create) { lose.create = false; return route.abort('failed') }
+      if (key) receipts.set(key, hash)
+      if (lose.create || step === 'lose') { lose.create = false; return route.abort('failed') }
+      if (hooks.holdCreate) await hooks.holdCreate
       return route.fulfill({ json: world.journey })
     }
     return route.fallback()
@@ -174,14 +190,17 @@ test('Plan adds three existing tickets in one go and Start build counts them', a
   await expect(dialog.getByText('Closed')).toBeVisible()
   await expect(dialog.getByRole('checkbox', { name: 'Select PHAROS-25' })).toBeDisabled()
   await expect(dialog.getByText('In Release 4 · not planning')).toBeVisible()
+  await expect(dialog.getByRole('checkbox', { name: 'Select PHAROS-19' })).toBeDisabled()
+  await expect(dialog.getByText('Not a release ticket')).toBeVisible()
   await search.fill('page')
   await expect(options).toHaveCount(2)
   await search.fill('')
   await expect(options).toHaveCount(OPTIONS.length)
   await dialog.getByLabel('Status').selectOption('backlog')
-  await expect(options).toHaveCount(3)
+  await expect(options).toHaveCount(4)
   await dialog.getByLabel('Type').selectOption('ticket')
-  await expect(dialog.getByText('Page the on-call rotation')).toHaveCount(0)
+  await expect(options).toHaveCount(3)
+  await expect(dialog.getByText('Rotate the on-call roster')).toHaveCount(0)
   await dialog.getByLabel('Status').selectOption('')
   await dialog.getByLabel('Type').selectOption('')
   for (const key of ['PHAROS-21', 'PHAROS-22', 'PHAROS-23']) {
@@ -353,6 +372,169 @@ test('a lost new-release response is retried with the same key and no membership
   expect(action[0].body.idempotency_key).toEqual(action[1].body.idempotency_key)
   expect(calls.filter(call => call.method === 'POST' && call.path.endsWith('/membership'))).toHaveLength(0)
   expect(world.releases.filter(release => release.id === 'r-3')).toHaveLength(1)
+})
+
+function advanceCurrentRelease(world: JourneyWorld) {
+  const created = new Date().toISOString()
+  world.releases.push({ id: 'r-4', key: 'PHAROS-41', kind_id: 'k-release', title: 'Release 4', body: '', fields: {}, state: 'backlog', parent_id: PROJECT, position: '3', created_at: created, updated_at: created, deleted_at: null })
+  world.walkers['r-4'] = { release_node_id: 'r-4', project_node_id: PROJECT, state: 'planning', revision: 1, features: [], tickets: [] }
+  world.journey.current_release_id = 'r-4'
+  world.journey.stage = 'plan'
+  world.journey.revision += 2
+}
+
+async function storedJourneys(page: Page) {
+  return page.evaluate(() => {
+    const root = document.querySelector('#app') as { __vue_app__?: { config: { globalProperties: { $pinia?: { state: { value: { journey?: { journeys?: Record<string, { current_release_id?: string | null; project_node_id?: string }> } } } } } } } } | null
+    const journeys = root?.__vue_app__?.config.globalProperties.$pinia?.state.value.journey?.journeys ?? {}
+    return {
+      aeon: journeys['p-aeon']?.project_node_id ?? null,
+      pharos: journeys['p-pharos']?.current_release_id ?? null,
+    }
+  })
+}
+
+test('a lost create stays unconfirmed through a denial and replays the same key', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await mockWork(page, fixtures())
+  const world = journeyWorld('live')
+  await mockJourney(page, world)
+  const calls = await install(page, world, { createScript: ['lose', 403] })
+  await page.goto('/p/PHAROS')
+  const row = page.locator('tr.ticket-row').filter({ has: page.locator('.key', { hasText: /^PHAROS-12$/ }) })
+  await row.hover()
+  await row.getByRole('checkbox', { name: 'Select PHAROS-12' }).check()
+  const add = page.getByRole('toolbar', { name: /selected ticket/ }).getByRole('button', { name: 'Add to release' })
+  const openNew = async () => {
+    await add.click()
+    await page.getByRole('dialog', { name: 'Release for 1 ticket' }).getByRole('option', { name: /^Release 3/ }).click()
+  }
+  await openNew()
+  await expect(page.locator('.toast').filter({ hasText: 'not confirmed' })).toBeVisible()
+  await expect(page.locator('.toast').filter({ hasText: 'was not opened' })).toHaveCount(0)
+  await openNew()
+  await expect(page.locator('.toast').filter({ hasText: 'was not opened' })).toHaveCount(0)
+  await expect(page.locator('.toast').filter({ hasText: 'not confirmed' })).toBeVisible()
+  await openNew()
+  await expect(page.locator('.toast').filter({ hasText: 'Added 1 ticket to Release 3' })).toBeVisible()
+  await expect(page.locator('.toast').filter({ hasText: 'Release 4' })).toHaveCount(0)
+  const action = calls.filter(call => call.path.endsWith('/journey/actions'))
+  expect(action).toHaveLength(3)
+  expect(action[1].body).toEqual(action[0].body)
+  expect(action[2].body).toEqual(action[0].body)
+  expect(world.releases.filter(release => release.id === 'r-3')).toHaveLength(1)
+  expect(calls.filter(call => call.method === 'POST' && call.path.endsWith('/membership'))).toHaveLength(0)
+})
+
+test('a replay after the project moved on names the tickets’ release, not the later one', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await mockWork(page, fixtures())
+  const world = journeyWorld('live')
+  await mockJourney(page, world)
+  const calls = await install(page, world, { loseCreate: true })
+  await page.goto('/p/PHAROS')
+  const row = page.locator('tr.ticket-row').filter({ has: page.locator('.key', { hasText: /^PHAROS-12$/ }) })
+  await row.hover()
+  await row.getByRole('checkbox', { name: 'Select PHAROS-12' }).check()
+  const add = page.getByRole('toolbar', { name: /selected ticket/ }).getByRole('button', { name: 'Add to release' })
+  await add.click()
+  await page.getByRole('dialog', { name: 'Release for 1 ticket' }).getByRole('option', { name: /^Release 3/ }).click()
+  await expect(page.locator('.toast').filter({ hasText: 'not confirmed' })).toBeVisible()
+  advanceCurrentRelease(world)
+  const before = calls.filter(call => call.path.endsWith('/release-memberships')).length
+  await add.click()
+  await page.getByRole('dialog', { name: 'Release for 1 ticket' }).getByRole('option', { name: /^Release 4/ }).click()
+  await expect(page.locator('.toast').filter({ hasText: 'Added 1 ticket to Release 3' })).toBeVisible()
+  await expect(page.locator('.toast').filter({ hasText: 'Release 4' })).toHaveCount(0)
+  const action = calls.filter(call => call.path.endsWith('/journey/actions'))
+  expect(action).toHaveLength(2)
+  expect(action[1].body).toEqual(action[0].body)
+  expect(world.journey.current_release_id).toBe('r-4')
+  expect(world.releases.filter(release => release.id === 'r-3')).toHaveLength(1)
+  expect(calls.filter(call => call.path.includes('/releases/r-4/walker'))).toHaveLength(0)
+  expect(calls.filter(call => call.method === 'POST' && call.path.endsWith('/membership'))).toHaveLength(0)
+  const reads = calls.filter(call => call.path.endsWith('/release-memberships'))
+  expect(reads.length).toBeGreaterThan(before)
+  expect(reads.at(-1)?.query.getAll('ticket_node_id')).toContain('n-2')
+})
+
+test('a replay does not invent a count when membership no longer matches', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await mockWork(page, fixtures())
+  const world = journeyWorld('live')
+  await mockJourney(page, world)
+  const native = new Map<string, { release_node_id: string | null; release_title: string | null; release_state: string | null }>()
+  const calls = await install(page, world, { loseCreate: true, native })
+  await page.goto('/p/PHAROS')
+  const row = page.locator('tr.ticket-row').filter({ has: page.locator('.key', { hasText: /^PHAROS-12$/ }) })
+  await row.hover()
+  await row.getByRole('checkbox', { name: 'Select PHAROS-12' }).check()
+  const add = page.getByRole('toolbar', { name: /selected ticket/ }).getByRole('button', { name: 'Add to release' })
+  await add.click()
+  await page.getByRole('dialog', { name: 'Release for 1 ticket' }).getByRole('option', { name: /^Release 3/ }).click()
+  await expect(page.locator('.toast').filter({ hasText: 'not confirmed' })).toBeVisible()
+  native.clear()
+  advanceCurrentRelease(world)
+  await add.click()
+  await page.getByRole('dialog', { name: 'Release for 1 ticket' }).getByRole('option', { name: /^Release 4/ }).click()
+  await expect(page.locator('.toast').filter({ hasText: 'not all in one release' })).toBeVisible()
+  await expect(page.locator('.toast').filter({ hasText: /^Added / })).toHaveCount(0)
+  await expect(page.locator('.toast').filter({ hasText: 'Release 4' })).toHaveCount(0)
+  const action = calls.filter(call => call.path.endsWith('/journey/actions'))
+  expect(action).toHaveLength(2)
+  expect(action[1].body).toEqual(action[0].body)
+  expect(world.releases.filter(release => release.id === 'r-3')).toHaveLength(1)
+})
+
+test('a delayed create on one project does not update the project opened meanwhile', async ({ page }) => {
+  let releaseHold!: () => void
+  const holdCreate = new Promise<void>(resolve => { releaseHold = resolve })
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await mockWork(page, fixtures())
+  const world = journeyWorld('live')
+  await mockJourney(page, world)
+  const calls = await install(page, world, { holdCreate })
+  await page.goto('/p/PHAROS')
+  const row = page.locator('tr.ticket-row').filter({ has: page.locator('.key', { hasText: /^PHAROS-12$/ }) })
+  await row.hover()
+  await row.getByRole('checkbox', { name: 'Select PHAROS-12' }).check()
+  await page.getByRole('toolbar', { name: /selected ticket/ }).getByRole('button', { name: 'Add to release' }).click()
+  await page.getByRole('dialog', { name: 'Release for 1 ticket' }).getByRole('option', { name: /^Release 3/ }).click()
+  await expect.poll(() => calls.filter(call => call.path.endsWith('/journey/actions')).length).toBe(1)
+  await page.evaluate(async () => {
+    const root = document.querySelector('#app') as { __vue_app__?: { config: { globalProperties: { $router?: { push: (path: string) => Promise<unknown> } } } } } | null
+    await root?.__vue_app__?.config.globalProperties.$router?.push('/p/AEON')
+  })
+  await expect(page.getByText('Aeon foundation')).toBeVisible()
+  releaseHold()
+  await expect.poll(() => storedJourneys(page)).toEqual({ aeon: null, pharos: 'r-3' })
+  await expect(page.locator('.toast').filter({ hasText: 'Added' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: /Journey:/ })).toHaveCount(0)
+  expect(calls.filter(call => call.path.startsWith('/api/projects/p-aeon/release-memberships') && call.query.getAll('ticket_node_id').includes('n-2'))).toHaveLength(0)
+})
+
+test('a delayed create from the ticket panel does not update the project opened meanwhile', async ({ page }) => {
+  let releaseHold!: () => void
+  const holdCreate = new Promise<void>(resolve => { releaseHold = resolve })
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await mockWork(page, fixtures())
+  const world = journeyWorld('live')
+  await mockJourney(page, world)
+  const calls = await install(page, world, { holdCreate })
+  await page.goto('/p/PHAROS/PHAROS-12')
+  const panel = page.getByRole('complementary', { name: 'Ticket details' })
+  await panel.getByRole('button', { name: 'Release: none. Change release' }).click()
+  await page.getByRole('dialog', { name: 'Release for PHAROS-12' }).getByRole('option', { name: /^Release 3/ }).click()
+  await expect.poll(() => calls.filter(call => call.path.endsWith('/journey/actions')).length).toBe(1)
+  await page.evaluate(async () => {
+    const root = document.querySelector('#app') as { __vue_app__?: { config: { globalProperties: { $router?: { push: (path: string) => Promise<unknown> } } } } } | null
+    await root?.__vue_app__?.config.globalProperties.$router?.push('/p/AEON')
+  })
+  await expect(page.getByText('Aeon foundation')).toBeVisible()
+  releaseHold()
+  await expect.poll(() => storedJourneys(page)).toEqual({ aeon: null, pharos: 'r-3' })
+  await expect(page.locator('.toast').filter({ hasText: 'Added PHAROS-12' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: /Journey:/ })).toHaveCount(0)
 })
 
 test('the ticket panel release field offers the same new release', async ({ page }) => {
