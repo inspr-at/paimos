@@ -3,7 +3,7 @@
 import AppIcon from '../AppIcon.vue'
 import type { ProjectTab } from './projectNavigation'
 
-defineProps<{ items: readonly ProjectTab[]; selected: string; label: string; sections?: boolean }>()
+defineProps<{ items: readonly ProjectTab[]; selected: string; label: string; sections?: boolean; tips?: boolean }>()
 const emit = defineEmits<{ select: [id: string] }>()
 function move(event: KeyboardEvent) {
   if (event.altKey || event.ctrlKey || event.metaKey) return
@@ -21,8 +21,9 @@ function move(event: KeyboardEvent) {
 <template>
   <div class="project-tabs" :class="{ sections }" role="tablist" :aria-label="label" @keydown.stop="move">
     <button v-for="item in items" :key="item.id" type="button" role="tab" :aria-selected="selected === item.id"
+      :aria-label="item.label" :data-tip="tips ? item.label : undefined"
       :tabindex="selected === item.id ? 0 : -1" @click="emit('select', item.id)">
-      <AppIcon :name="item.icon" :size="15" /><span>{{ item.label }}</span>
+      <AppIcon :name="item.icon" :size="15" /><span class="tab-label">{{ item.label }}</span>
     </button>
   </div>
 </template>
