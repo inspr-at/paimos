@@ -1,0 +1,1566 @@
+{
+  "approvals": {
+    "version": "approvals/1.0",
+    "sha256": "bea6efc9464dd03f4b924c35b7c661f5e05ea645a50443efbf5203d71892066b",
+    "shape": {
+      "GET /approvals 200": {
+        "items": {
+          "allOf": [
+            {
+              "properties": {
+                "expires_at": {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                "rationale": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "resource_id": {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                "resource_kind": {
+                  "enum": [
+                    "tenant",
+                    "node",
+                    "run"
+                  ],
+                  "type": "string"
+                },
+                "run_id": {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                "scope": {
+                  "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "scope",
+                "resource_kind",
+                "rationale",
+                "expires_at"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "agent_name": {
+                  "type": "string"
+                },
+                "agent_principal_id": {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                "decided_by_principal_id": {
+                  "format": "uuid",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "decision": {
+                  "enum": [
+                    "approved",
+                    "denied",
+                    null
+                  ],
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "id": {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                "proposed_at": {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                "risk": {
+                  "enum": [
+                    "low",
+                    "medium",
+                    "high"
+                  ],
+                  "readOnly": true,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "agent_principal_id",
+                "proposed_at",
+                "decision",
+                "risk"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "type": "array"
+      },
+      "POST /approvals 201": {
+        "allOf": [
+          {
+            "properties": {
+              "expires_at": {
+                "format": "date-time",
+                "type": "string"
+              },
+              "rationale": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "resource_id": {
+                "format": "uuid",
+                "type": "string"
+              },
+              "resource_kind": {
+                "enum": [
+                  "tenant",
+                  "node",
+                  "run"
+                ],
+                "type": "string"
+              },
+              "run_id": {
+                "format": "uuid",
+                "type": "string"
+              },
+              "scope": {
+                "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$",
+                "type": "string"
+              }
+            },
+            "required": [
+              "scope",
+              "resource_kind",
+              "rationale",
+              "expires_at"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "agent_name": {
+                "type": "string"
+              },
+              "agent_principal_id": {
+                "format": "uuid",
+                "type": "string"
+              },
+              "decided_by_principal_id": {
+                "format": "uuid",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "decision": {
+                "enum": [
+                  "approved",
+                  "denied",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "id": {
+                "format": "uuid",
+                "type": "string"
+              },
+              "proposed_at": {
+                "format": "date-time",
+                "type": "string"
+              },
+              "risk": {
+                "enum": [
+                  "low",
+                  "medium",
+                  "high"
+                ],
+                "readOnly": true,
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "agent_principal_id",
+              "proposed_at",
+              "decision",
+              "risk"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "POST /approvals/{approvalId}/decision 200": {
+        "allOf": [
+          {
+            "properties": {
+              "expires_at": {
+                "format": "date-time",
+                "type": "string"
+              },
+              "rationale": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "resource_id": {
+                "format": "uuid",
+                "type": "string"
+              },
+              "resource_kind": {
+                "enum": [
+                  "tenant",
+                  "node",
+                  "run"
+                ],
+                "type": "string"
+              },
+              "run_id": {
+                "format": "uuid",
+                "type": "string"
+              },
+              "scope": {
+                "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$",
+                "type": "string"
+              }
+            },
+            "required": [
+              "scope",
+              "resource_kind",
+              "rationale",
+              "expires_at"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "agent_name": {
+                "type": "string"
+              },
+              "agent_principal_id": {
+                "format": "uuid",
+                "type": "string"
+              },
+              "decided_by_principal_id": {
+                "format": "uuid",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "decision": {
+                "enum": [
+                  "approved",
+                  "denied",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "id": {
+                "format": "uuid",
+                "type": "string"
+              },
+              "proposed_at": {
+                "format": "date-time",
+                "type": "string"
+              },
+              "risk": {
+                "enum": [
+                  "low",
+                  "medium",
+                  "high"
+                ],
+                "readOnly": true,
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "agent_principal_id",
+              "proposed_at",
+              "decision",
+              "risk"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "POST /approvals/{approvalId}/revoke 200": {
+        "allOf": [
+          {
+            "properties": {
+              "expires_at": {
+                "format": "date-time",
+                "type": "string"
+              },
+              "rationale": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "resource_id": {
+                "format": "uuid",
+                "type": "string"
+              },
+              "resource_kind": {
+                "enum": [
+                  "tenant",
+                  "node",
+                  "run"
+                ],
+                "type": "string"
+              },
+              "run_id": {
+                "format": "uuid",
+                "type": "string"
+              },
+              "scope": {
+                "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$",
+                "type": "string"
+              }
+            },
+            "required": [
+              "scope",
+              "resource_kind",
+              "rationale",
+              "expires_at"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "agent_name": {
+                "type": "string"
+              },
+              "agent_principal_id": {
+                "format": "uuid",
+                "type": "string"
+              },
+              "decided_by_principal_id": {
+                "format": "uuid",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "decision": {
+                "enum": [
+                  "approved",
+                  "denied",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "id": {
+                "format": "uuid",
+                "type": "string"
+              },
+              "proposed_at": {
+                "format": "date-time",
+                "type": "string"
+              },
+              "risk": {
+                "enum": [
+                  "low",
+                  "medium",
+                  "high"
+                ],
+                "readOnly": true,
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "agent_principal_id",
+              "proposed_at",
+              "decision",
+              "risk"
+            ],
+            "type": "object"
+          }
+        ]
+      }
+    }
+  },
+  "baseline-batches": {
+    "version": "baseline-batches/1.0",
+    "sha256": "e181107a852d0279bbf93a3cade24bf132779b4010f327d8d50d1f33e5ba2aca",
+    "shape": {
+      "POST /projects/{projectId}/baseline-batches/batches/{batchId}/built-receipt 200": {
+        "additionalProperties": true,
+        "properties": {
+          "progress": {
+            "additionalProperties": true,
+            "properties": {
+              "next_action": {
+                "enum": [
+                  "operator_external_stage_cli"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "next_action"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "progress"
+        ],
+        "type": "object"
+      },
+      "POST /stage-handoffs/{handoffId}/classic-batch-alias 201": {
+        "additionalProperties": false,
+        "properties": {
+          "classic_batch_id": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "handoff_id": {
+            "format": "uuid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "handoff_id",
+          "classic_batch_id"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  "journey": {
+    "version": "journey/1.0",
+    "sha256": "315e2cab5b70ee2b8f9bf64bbe5702c530e51ac69e1b910feda96152c4645a1b",
+    "shape": {
+      "GET /projects/{projectId}/journey 200": {
+        "properties": {
+          "current_release_id": {
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "disposable": {
+            "type": "boolean"
+          },
+          "imported": {
+            "type": "boolean"
+          },
+          "launch_readiness": {
+            "properties": {
+              "can_admit": {
+                "type": "boolean"
+              },
+              "reason": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "can_admit",
+              "reason"
+            ],
+            "type": "object"
+          },
+          "next_action": {
+            "properties": {
+              "approval_request_id": {
+                "format": "uuid",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "available": {
+                "type": "boolean"
+              },
+              "key": {
+                "enum": [
+                  "continue_intake",
+                  "confirm_brief",
+                  "decide",
+                  "reopen",
+                  "approve_requirements",
+                  "open_first_release",
+                  "start_build",
+                  "wait_for_build",
+                  "mark_candidate",
+                  "approve_candidate",
+                  "approve_deploy",
+                  "retry_deploy",
+                  "approve_permit",
+                  "plan_next_release"
+                ],
+                "type": "string"
+              },
+              "label": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              },
+              "stage": {
+                "enum": [
+                  "inspire",
+                  "shape",
+                  "requirements",
+                  "plan",
+                  "build",
+                  "deploy",
+                  "access",
+                  "live"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "key",
+              "label",
+              "stage",
+              "available"
+            ],
+            "type": "object"
+          },
+          "node_key": {
+            "pattern": "^[A-Z][A-Z0-9]{1,9}-[1-9][0-9]*$",
+            "type": "string"
+          },
+          "profile": {
+            "enum": [
+              "personal",
+              "professional",
+              "enterprise"
+            ],
+            "type": "string"
+          },
+          "project_key": {
+            "type": "string"
+          },
+          "project_node_id": {
+            "format": "uuid",
+            "read from the node. Not taken from the client.": null,
+            "type": "string"
+          },
+          "requirements_approval_scope": {
+            "type": "string"
+          },
+          "requirements_digest_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "requirements_revision": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "revision": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "stage": {
+            "enum": [
+              "inspire",
+              "shape",
+              "requirements",
+              "plan",
+              "build",
+              "deploy",
+              "access",
+              "live"
+            ],
+            "type": "string"
+          },
+          "stage_source": {
+            "enum": [
+              "journey",
+              "derived"
+            ],
+            "type": "string"
+          },
+          "stages": {
+            "items": {
+              "properties": {
+                "gate_approval_id": {
+                  "format": "uuid",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "gate_live": {
+                  "type": "boolean"
+                },
+                "gate_scope": {
+                  "type": "string"
+                },
+                "handoff_attempt": {
+                  "minimum": 1,
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "handoff_authority_epoch": {
+                  "minimum": 1,
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "handoff_id": {
+                  "format": "uuid",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "key": {
+                  "enum": [
+                    "inspire",
+                    "shape",
+                    "requirements",
+                    "plan",
+                    "build",
+                    "deploy",
+                    "access",
+                    "live"
+                  ],
+                  "type": "string"
+                },
+                "state": {
+                  "enum": [
+                    "done",
+                    "current",
+                    "later",
+                    "skipped",
+                    "blocked"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "key",
+                "state",
+                "gate_scope",
+                "gate_live",
+                "handoff_id",
+                "handoff_attempt",
+                "handoff_authority_epoch"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "tenant_slug": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "project_node_id",
+          "project_key",
+          "tenant_slug",
+          "profile",
+          "revision",
+          "stage",
+          "stage_source",
+          "disposable",
+          "stages",
+          "next_action",
+          "requirements_revision",
+          "requirements_digest_sha256",
+          "requirements_approval_scope",
+          "launch_readiness"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  "me": {
+    "version": "me/1.0",
+    "sha256": "465ed2c221370e2964ee074fe4955f02fe13562b3faf3e8074867f8cf7856141",
+    "shape": {
+      "GET /me 200": {
+        "properties": {
+          "dev_mode": {
+            "type": "boolean"
+          },
+          "identity": {
+            "oneOf": [
+              {
+                "properties": {
+                  "display_name": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "email": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "id": {
+                    "format": "uuid",
+                    "type": "string"
+                  },
+                  "issuer": {
+                    "type": "string"
+                  },
+                  "subject": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "id",
+                  "issuer",
+                  "subject"
+                ],
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "principal": {
+            "properties": {
+              "email": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "id": {
+                "format": "uuid",
+                "type": "string"
+              },
+              "kind": {
+                "enum": [
+                  "person",
+                  "agent"
+                ],
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "roles": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "tenant_id": {
+                "format": "uuid",
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "tenant_id",
+              "kind",
+              "name",
+              "roles"
+            ],
+            "type": "object"
+          },
+          "tenant": {
+            "properties": {
+              "id": {
+                "format": "uuid",
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "slug": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "slug",
+              "name"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "principal",
+          "tenant",
+          "identity",
+          "dev_mode"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  "stage-evidence": {
+    "version": "stage-evidence/1.0",
+    "sha256": "a63db0d0d535a21c5a2691cc9dc45207e4d892ca2c90cc3272b2a55b3f4c00e3",
+    "shape": {
+      "POST /stage-handoffs/{handoffId}/evidence 201": {
+        "allOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "all_host_eval_passed": {
+                "type": "boolean"
+              },
+              "artifact": {
+                "additionalProperties": false,
+                "properties": {
+                  "commit_digest": {
+                    "type": "string"
+                  },
+                  "digest_sha256": {
+                    "pattern": "^[0-9a-f]{64}$",
+                    "type": "string"
+                  },
+                  "manifest_coordinate": {
+                    "type": "string"
+                  },
+                  "manifest_digest_sha256": {
+                    "pattern": "^[0-9a-f]{64}$",
+                    "type": "string"
+                  },
+                  "release_channel": {
+                    "type": "string"
+                  },
+                  "release_sequence": {
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "version": {
+                    "type": "string"
+                  },
+                  "version_scheme": {
+                    "enum": [
+                      "legacy",
+                      "inspr-calendar-v1",
+                      "inspr-calendar-v2"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "version_scheme",
+                  "version",
+                  "release_channel",
+                  "release_sequence",
+                  "digest_sha256",
+                  "commit_digest",
+                  "manifest_coordinate",
+                  "manifest_digest_sha256"
+                ],
+                "type": "object"
+              },
+              "authority_epoch": {
+                "minimum": 1,
+                "type": "integer"
+              },
+              "authorized": {
+                "type": "boolean"
+              },
+              "backup_observed_at": {
+                "format": "date-time",
+                "type": "string"
+              },
+              "backup_ready": {
+                "type": "boolean"
+              },
+              "credential_ready": {
+                "type": "boolean"
+              },
+              "environment": {
+                "type": "string"
+              },
+              "expected_kernel": {
+                "maxLength": 128,
+                "minLength": 1,
+                "type": "string"
+              },
+              "host": {
+                "maxLength": 256,
+                "minLength": 1,
+                "type": "string"
+              },
+              "kind": {
+                "enum": [
+                  "deployment",
+                  "verification",
+                  "authorization",
+                  "credential_handoff",
+                  "launch_readiness"
+                ],
+                "type": "string"
+              },
+              "observed_at": {
+                "format": "date-time",
+                "type": "string"
+              },
+              "outcome": {
+                "enum": [
+                  "succeeded",
+                  "failed",
+                  "satisfied",
+                  "blocked"
+                ],
+                "type": "string"
+              },
+              "restart_required": {
+                "and not an admission input.": null,
+                "type": "boolean"
+              },
+              "reviewed_plan_digest": {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              "running_kernel": {
+                "maxLength": 128,
+                "minLength": 1,
+                "type": "string"
+              },
+              "sequence": {
+                "minimum": 1,
+                "type": "integer"
+              },
+              "target_build_passed": {
+                "type": "boolean"
+              },
+              "workflow": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "sequence",
+              "kind",
+              "outcome",
+              "observed_at",
+              "authority_epoch"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "handoff_id": {
+                "format": "uuid",
+                "type": "string"
+              },
+              "received_at": {
+                "format": "date-time",
+                "type": "string"
+              }
+            },
+            "required": [
+              "handoff_id",
+              "received_at"
+            ],
+            "type": "object"
+          }
+        ]
+      }
+    }
+  },
+  "stage-handoffs": {
+    "version": "stage-handoffs/1.0",
+    "sha256": "15ca943d8910a3ab2b41fbc839ab68e80506875bbbf0ae590b1af34276134c52",
+    "shape": {
+      "GET /stage-handoffs/{handoffId} 200": {
+        "properties": {
+          "admission": {
+            "properties": {
+              "admission_id": {
+                "format": "uuid",
+                "type": "string"
+              },
+              "consumed_at": {
+                "format": "date-time",
+                "type": "string"
+              },
+              "consumed_by_principal_id": {
+                "format": "uuid",
+                "type": "string"
+              },
+              "epoch": {
+                "minimum": 1,
+                "type": "integer"
+              },
+              "expires_at": {
+                "format": "date-time",
+                "type": "string"
+              }
+            },
+            "required": [
+              "admission_id",
+              "epoch",
+              "expires_at"
+            ],
+            "type": "object"
+          },
+          "attempt": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "authority_epoch": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "authority_open": {
+            "not a grant": null,
+            "type": "boolean"
+          },
+          "context_digest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "evidence_ceiling": {
+            "items": {
+              "enum": [
+                "deployment",
+                "verification",
+                "authorization",
+                "credential_handoff",
+                "launch_readiness"
+              ],
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "operation": {
+            "enum": [
+              "prepare",
+              "apply",
+              "deploy",
+              "verify"
+            ],
+            "type": "string"
+          },
+          "plan_digest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "plugin_id": {
+            "type": "string"
+          },
+          "predecessor_digest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "prerequisite_seal_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "project_node_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "release_node_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "result": {
+            "allOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "authority_epoch": {
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "blocker_code": {
+                    "enum": [
+                      "dependency_pending",
+                      "dependency_failed",
+                      "reporter_stale",
+                      "external_waiting",
+                      "policy_refused"
+                    ],
+                    "type": "string"
+                  },
+                  "outcome": {
+                    "enum": [
+                      "succeeded",
+                      "failed"
+                    ],
+                    "type": "string"
+                  },
+                  "prerequisite_seal_sha256": {
+                    "pattern": "^[0-9a-f]{64}$",
+                    "type": "string"
+                  },
+                  "terminal_sequence": {
+                    "minimum": 1,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "outcome",
+                  "terminal_sequence",
+                  "authority_epoch",
+                  "prerequisite_seal_sha256"
+                ],
+                "type": "object"
+              },
+              {
+                "properties": {
+                  "completed_at": {
+                    "format": "date-time",
+                    "type": "string"
+                  },
+                  "handoff_id": {
+                    "format": "uuid",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "handoff_id",
+                  "completed_at"
+                ],
+                "type": "object"
+              }
+            ]
+          },
+          "stage": {
+            "enum": [
+              "deploy",
+              "access"
+            ],
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "requested",
+              "active",
+              "blocked",
+              "succeeded",
+              "failed",
+              "revoked"
+            ],
+            "type": "string"
+          },
+          "superseded_by": {
+            "format": "uuid",
+            "stage and operation": null,
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "project_node_id",
+          "release_node_id",
+          "stage",
+          "operation",
+          "plugin_id",
+          "attempt",
+          "authority_epoch",
+          "superseded_by",
+          "authority_open",
+          "state",
+          "expires_at",
+          "evidence_ceiling",
+          "plan_digest",
+          "predecessor_digest",
+          "context_digest",
+          "prerequisite_seal_sha256"
+        ],
+        "type": "object"
+      },
+      "POST /stage-handoffs 201": {
+        "properties": {
+          "admission": {
+            "properties": {
+              "admission_id": {
+                "format": "uuid",
+                "type": "string"
+              },
+              "consumed_at": {
+                "format": "date-time",
+                "type": "string"
+              },
+              "consumed_by_principal_id": {
+                "format": "uuid",
+                "type": "string"
+              },
+              "epoch": {
+                "minimum": 1,
+                "type": "integer"
+              },
+              "expires_at": {
+                "format": "date-time",
+                "type": "string"
+              }
+            },
+            "required": [
+              "admission_id",
+              "epoch",
+              "expires_at"
+            ],
+            "type": "object"
+          },
+          "attempt": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "authority_epoch": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "authority_open": {
+            "not a grant": null,
+            "type": "boolean"
+          },
+          "context_digest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "evidence_ceiling": {
+            "items": {
+              "enum": [
+                "deployment",
+                "verification",
+                "authorization",
+                "credential_handoff",
+                "launch_readiness"
+              ],
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "operation": {
+            "enum": [
+              "prepare",
+              "apply",
+              "deploy",
+              "verify"
+            ],
+            "type": "string"
+          },
+          "plan_digest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "plugin_id": {
+            "type": "string"
+          },
+          "predecessor_digest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "prerequisite_seal_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "project_node_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "release_node_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "result": {
+            "allOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "authority_epoch": {
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "blocker_code": {
+                    "enum": [
+                      "dependency_pending",
+                      "dependency_failed",
+                      "reporter_stale",
+                      "external_waiting",
+                      "policy_refused"
+                    ],
+                    "type": "string"
+                  },
+                  "outcome": {
+                    "enum": [
+                      "succeeded",
+                      "failed"
+                    ],
+                    "type": "string"
+                  },
+                  "prerequisite_seal_sha256": {
+                    "pattern": "^[0-9a-f]{64}$",
+                    "type": "string"
+                  },
+                  "terminal_sequence": {
+                    "minimum": 1,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "outcome",
+                  "terminal_sequence",
+                  "authority_epoch",
+                  "prerequisite_seal_sha256"
+                ],
+                "type": "object"
+              },
+              {
+                "properties": {
+                  "completed_at": {
+                    "format": "date-time",
+                    "type": "string"
+                  },
+                  "handoff_id": {
+                    "format": "uuid",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "handoff_id",
+                  "completed_at"
+                ],
+                "type": "object"
+              }
+            ]
+          },
+          "stage": {
+            "enum": [
+              "deploy",
+              "access"
+            ],
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "requested",
+              "active",
+              "blocked",
+              "succeeded",
+              "failed",
+              "revoked"
+            ],
+            "type": "string"
+          },
+          "superseded_by": {
+            "format": "uuid",
+            "stage and operation": null,
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "project_node_id",
+          "release_node_id",
+          "stage",
+          "operation",
+          "plugin_id",
+          "attempt",
+          "authority_epoch",
+          "superseded_by",
+          "authority_open",
+          "state",
+          "expires_at",
+          "evidence_ceiling",
+          "plan_digest",
+          "predecessor_digest",
+          "context_digest",
+          "prerequisite_seal_sha256"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  "stage-launch": {
+    "version": "stage-launch/1.0",
+    "sha256": "d2af09482f13577b1123b09897a3cf1edd2da07b1ce6368311f37863243d5f65",
+    "shape": {
+      "POST /stage-handoffs/{handoffId}/launch/admit 200": {
+        "properties": {
+          "artifact_digest_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "authority_epoch": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "authority_open": {
+            "type": "boolean"
+          },
+          "binding_digest_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "consumed_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "expires_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "handoff_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "handoff_id",
+          "binding_digest_sha256",
+          "artifact_digest_sha256",
+          "authority_epoch",
+          "authority_open",
+          "expires_at"
+        ],
+        "type": "object"
+      },
+      "POST /stage-handoffs/{handoffId}/launch/consume 200": {
+        "additionalProperties": false,
+        "properties": {
+          "admission_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "authority_open": {
+            "type": "boolean"
+          },
+          "consumed": {
+            "enum": [
+              true
+            ],
+            "type": "boolean"
+          },
+          "consumed_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "handoff_id": {
+            "format": "uuid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "handoff_id",
+          "admission_id",
+          "consumed",
+          "consumed_at",
+          "authority_open"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  "stage-result": {
+    "version": "stage-result/1.0",
+    "sha256": "8106322ceb84375e668e68719c82218fb6899cd4c594cdc29a613d9c2c349ef9",
+    "shape": {
+      "POST /stage-handoffs/{handoffId}/result 200": {
+        "allOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "authority_epoch": {
+                "minimum": 1,
+                "type": "integer"
+              },
+              "blocker_code": {
+                "enum": [
+                  "dependency_pending",
+                  "dependency_failed",
+                  "reporter_stale",
+                  "external_waiting",
+                  "policy_refused"
+                ],
+                "type": "string"
+              },
+              "outcome": {
+                "enum": [
+                  "succeeded",
+                  "failed"
+                ],
+                "type": "string"
+              },
+              "prerequisite_seal_sha256": {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              "terminal_sequence": {
+                "minimum": 1,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "outcome",
+              "terminal_sequence",
+              "authority_epoch",
+              "prerequisite_seal_sha256"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "completed_at": {
+                "format": "date-time",
+                "type": "string"
+              },
+              "handoff_id": {
+                "format": "uuid",
+                "type": "string"
+              }
+            },
+            "required": [
+              "handoff_id",
+              "completed_at"
+            ],
+            "type": "object"
+          }
+        ]
+      }
+    }
+  }
+}

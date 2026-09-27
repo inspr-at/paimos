@@ -68,4 +68,12 @@
 // nor a stored receipt grants permission for a new write. The coordinator
 // mounts New or NewService as httpapi.Module and supplies the Pharos launch
 // checks.
+// Reporter responses carry Aeon-Contract headers: stage-handoffs/1.0 for
+// create/read, stage-evidence/1.0, stage-result/1.0, stage-launch/1.0 for
+// admit/consume, and baseline-batches/1.0 for classic alias/built receipt.
+// The version stays out of JSON for strict Pharos parsers. An optional
+// response addition requires a minor bump; a removal, type change or newly
+// required field requires a major bump. internal/reportercontract pins the
+// OpenAPI response schemas; scripts/reporter-contract.go since <git-ref>
+// reports changes for release announcements.
 package stagehandoff

@@ -19,6 +19,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/httpapi"
+	"github.com/inspr-at/paimos/internal/reportercontract"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
 
@@ -56,7 +57,7 @@ func New(pool *pgxpool.Pool) httpapi.Module {
 
 // Mount registers the journey routes.
 func (m *Module) Mount(mux *http.ServeMux) {
-	mux.HandleFunc("GET /api/projects/{projectId}/journey", m.handleGet)
+	mux.HandleFunc("GET /api/projects/{projectId}/journey", reportercontract.WithHeader(reportercontract.Journey, m.handleGet))
 	mux.HandleFunc("PUT /api/projects/{projectId}/journey/profile", m.handleProfile)
 	mux.HandleFunc("POST /api/projects/{projectId}/journey/actions", m.handleAction)
 }

@@ -5,6 +5,9 @@
 // the executable handoff. This package intentionally has no handlers or shared
 // server wiring. The coordinator mounts builders' httpapi.Module values and
 // reconciles shared contract changes.
+// GET /api/projects/{projectId}/journey emits Aeon-Contract: journey/1.0.
+// Additive optional response fields require a minor bump; breaking changes
+// require a major bump. internal/reportercontract pins its response schema.
 //
 // Journey face (accepted INSPR Flow prototype, read-only source
 // /Users/markus/Code/inspr-flow-next-20260922) is the Journey view of the

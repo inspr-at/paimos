@@ -348,6 +348,7 @@ paths:
       responses:
         "200":
           description: Caller
+          headers: {Aeon-Contract: {$ref: '#/components/headers/MeContract'}}
           content:
             application/json:
               schema:
@@ -2063,14 +2064,14 @@ paths:
       security: *auth
       parameters: [{$ref: '#/components/parameters/Limit'}]
       responses:
-        '200': {description: Approval requests, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/Approval'}}}}}
+        '200': {description: Approval requests, headers: {Aeon-Contract: {$ref: '#/components/headers/ApprovalsContract'}}, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/Approval'}}}}}
     post:
       operationId: proposeApproval
       description: An agent may propose only for itself. Writes approval.proposed event without granting authority.
       security: [{agentKey: []}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ApprovalProposal'}}}}
       responses:
-        '201': {description: Proposal, content: {application/json: {schema: {$ref: '#/components/schemas/Approval'}}}}
+        '201': {description: Proposal, headers: {Aeon-Contract: {$ref: '#/components/headers/ApprovalsContract'}}, content: {application/json: {schema: {$ref: '#/components/schemas/Approval'}}}}
         '403': {$ref: '#/components/responses/Error'}
   /approvals/{approvalId}/decision:
     post:
@@ -2080,7 +2081,7 @@ paths:
       parameters: [{name: approvalId, in: path, required: true, schema: {type: string, format: uuid}}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ApprovalDecisionWrite'}}}}
       responses:
-        '200': {description: Decision, content: {application/json: {schema: {$ref: '#/components/schemas/Approval'}}}}
+        '200': {description: Decision, headers: {Aeon-Contract: {$ref: '#/components/headers/ApprovalsContract'}}, content: {application/json: {schema: {$ref: '#/components/schemas/Approval'}}}}
         '403': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
         '409': {$ref: '#/components/responses/Error'}
@@ -2091,7 +2092,7 @@ paths:
       security: [{session: []}]
       parameters: [{name: approvalId, in: path, required: true, schema: {type: string, format: uuid}}]
       responses:
-        '200': {description: Revoked grant, content: {application/json: {schema: {$ref: '#/components/schemas/Approval'}}}}
+        '200': {description: Revoked grant, headers: {Aeon-Contract: {$ref: '#/components/headers/ApprovalsContract'}}, content: {application/json: {schema: {$ref: '#/components/schemas/Approval'}}}}
         '403': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
   /models:
@@ -2196,7 +2197,7 @@ paths:
       security: *auth
       parameters: [{name: projectId, in: path, required: true, schema: {type: string, format: uuid}}]
       responses:
-        '200': {description: Journey projection, content: {application/json: {schema: {$ref: '#/components/schemas/Journey'}}}}
+        '200': {description: Journey projection, headers: {Aeon-Contract: {$ref: '#/components/headers/JourneyContract'}}, content: {application/json: {schema: {$ref: '#/components/schemas/Journey'}}}}
         '404': {$ref: '#/components/responses/Error'}
   /projects/{projectId}/journey/profile:
     put:
@@ -2359,7 +2360,7 @@ paths:
       security: *auth
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/StageHandoffWrite'}}}}
       responses:
-        '201': {description: Handoff, content: {application/json: {schema: {$ref: '#/components/schemas/StageHandoff'}}}}
+        '201': {description: Handoff, headers: {Aeon-Contract: {$ref: '#/components/headers/StageHandoffsContract'}}, content: {application/json: {schema: {$ref: '#/components/schemas/StageHandoff'}}}}
         '403': {$ref: '#/components/responses/Error'}
         '409': {$ref: '#/components/responses/Error'}
   /stage-handoffs/{handoffId}:
@@ -2380,7 +2381,7 @@ paths:
       security: *auth
       parameters: [{name: handoffId, in: path, required: true, schema: {type: string, format: uuid}}]
       responses:
-        '200': {description: Safe handoff projection, content: {application/json: {schema: {$ref: '#/components/schemas/StageHandoff'}}}}
+        '200': {description: Safe handoff projection, headers: {Aeon-Contract: {$ref: '#/components/headers/StageHandoffsContract'}}, content: {application/json: {schema: {$ref: '#/components/schemas/StageHandoff'}}}}
         '403': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
   /stage-handoffs/{handoffId}/classic-batch-alias:
@@ -2407,7 +2408,7 @@ paths:
                 account_key: {type: string}
                 runtime_generation: {type: string}
       responses:
-        '201': {description: Alias bound to the handoff, content: {application/json: {schema: {type: object}}}}
+        '201': {description: Alias bound to the handoff, headers: {Aeon-Contract: {$ref: '#/components/headers/BaselineBatchesContract'}}, content: {application/json: {schema: {$ref: '#/components/schemas/ClassicBatchAliasResponse'}}}}
         '403': {$ref: '#/components/responses/Error'}
         '409': {$ref: '#/components/responses/Error'}
   /projects/{projectId}/baseline-batches/batches/{batchId}/built-receipt:
@@ -2420,7 +2421,7 @@ paths:
         - {name: batchId, in: path, required: true, schema: {type: integer, minimum: 1}}
       requestBody: {required: true, content: {application/json: {schema: {type: object}}}}
       responses:
-        '200': {description: Classic batch projection from imported provenance, content: {application/json: {schema: {type: object}}}}
+        '200': {description: Classic batch projection from imported provenance, headers: {Aeon-Contract: {$ref: '#/components/headers/BaselineBatchesContract'}}, content: {application/json: {schema: {$ref: '#/components/schemas/ClassicBatchBuiltResponse'}}}}
         '400': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
         '409': {$ref: '#/components/responses/Error'}
@@ -2441,7 +2442,7 @@ paths:
       parameters: [{name: handoffId, in: path, required: true, schema: {type: string, format: uuid}}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/StageEvidenceWrite'}}}}
       responses:
-        '201': {description: Evidence, content: {application/json: {schema: {$ref: '#/components/schemas/StageEvidence'}}}}
+        '201': {description: Evidence, headers: {Aeon-Contract: {$ref: '#/components/headers/StageEvidenceContract'}}, content: {application/json: {schema: {$ref: '#/components/schemas/StageEvidence'}}}}
         '403': {$ref: '#/components/responses/Error'}
         '409': {$ref: '#/components/responses/Error'}
   /stage-handoffs/{handoffId}/result:
@@ -2453,7 +2454,7 @@ paths:
       parameters: [{name: handoffId, in: path, required: true, schema: {type: string, format: uuid}}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/StageResultWrite'}}}}
       responses:
-        '200': {description: Result, content: {application/json: {schema: {$ref: '#/components/schemas/StageResult'}}}}
+        '200': {description: Result, headers: {Aeon-Contract: {$ref: '#/components/headers/StageResultContract'}}, content: {application/json: {schema: {$ref: '#/components/schemas/StageResult'}}}}
         '403': {$ref: '#/components/responses/Error'}
         '409': {$ref: '#/components/responses/Error'}
   /stage-handoffs/{handoffId}/launch/admit:
@@ -2489,7 +2490,7 @@ paths:
         - {name: Idempotency-Key, in: header, required: true, schema: {type: string, format: uuid}}
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/StageArtifact'}}}}
       responses:
-        '200': {description: Original launch admission, content: {application/json: {schema: {$ref: '#/components/schemas/StageLaunchAdmission'}}}}
+        '200': {description: Original launch admission, headers: {Aeon-Contract: {$ref: '#/components/headers/StageLaunchContract'}}, content: {application/json: {schema: {$ref: '#/components/schemas/StageLaunchAdmission'}}}}
         '403': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
         '409': {$ref: '#/components/responses/Error'}
@@ -2517,7 +2518,7 @@ paths:
         - {name: Idempotency-Key, in: header, required: true, schema: {type: string, format: uuid}}
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/StageLaunchConsume'}}}}
       responses:
-        '200': {description: Consumption receipt, content: {application/json: {schema: {$ref: '#/components/schemas/StageLaunchConsumption'}}}}
+        '200': {description: Consumption receipt, headers: {Aeon-Contract: {$ref: '#/components/headers/StageLaunchContract'}}, content: {application/json: {schema: {$ref: '#/components/schemas/StageLaunchConsumption'}}}}
         '403': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
         '409': {$ref: '#/components/responses/Error'}
@@ -3331,10 +3332,41 @@ paths:
         '200': {description: Totals, content: {application/json: {schema: {$ref: '#/components/schemas/TimeTotals'}}}}
         '404': {$ref: '#/components/responses/Error'}
 components:
+  # Reporter-facing versions are independent of the product release coordinate.
+  # Additive optional response fields require a minor bump; removals, type changes,
+  # and newly required fields require a major bump. Never add a version body field.
+  headers:
+    StageHandoffsContract: {description: Stage handoff response contract, schema: {type: string, enum: ['stage-handoffs/1.0']}}
+    StageEvidenceContract: {description: Stage evidence response contract, schema: {type: string, enum: ['stage-evidence/1.0']}}
+    StageResultContract: {description: Stage result response contract, schema: {type: string, enum: ['stage-result/1.0']}}
+    StageLaunchContract: {description: Stage launch response contract, schema: {type: string, enum: ['stage-launch/1.0']}}
+    JourneyContract: {description: Journey read response contract, schema: {type: string, enum: ['journey/1.0']}}
+    MeContract: {description: Acting principal response contract, schema: {type: string, enum: ['me/1.0']}}
+    BaselineBatchesContract: {description: Classic-compatible baseline batch response contract, schema: {type: string, enum: ['baseline-batches/1.0']}}
+    ApprovalsContract: {description: Approval response contract, schema: {type: string, enum: ['approvals/1.0']}}
   securitySchemes:
     session: {type: apiKey, in: cookie, name: aeon_session}
     agentKey: {type: http, scheme: bearer, description: Bearer token aeon_<prefix>_<secret>}
   schemas:
+    ClassicBatchAliasResponse:
+      type: object
+      additionalProperties: false
+      required: [handoff_id, classic_batch_id]
+      properties:
+        handoff_id: {type: string, format: uuid}
+        classic_batch_id: {type: integer, minimum: 1}
+    ClassicBatchBuiltResponse:
+      type: object
+      description: Imported classic batch fields are preserved dynamically; Aeon guarantees the progress.next_action override.
+      required: [progress]
+      additionalProperties: true
+      properties:
+        progress:
+          type: object
+          required: [next_action]
+          additionalProperties: true
+          properties:
+            next_action: {type: string, enum: [operator_external_stage_cli]}
     AuthzPermission:
       type: object
       required: [key, group, description, risk, grantable_at, agent_grantable]

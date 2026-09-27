@@ -20,6 +20,7 @@ import (
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/httpapi"
+	"github.com/inspr-at/paimos/internal/reportercontract"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
 
@@ -74,7 +75,7 @@ func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/auth/login", m.handleLogin)
 	mux.HandleFunc("GET /api/auth/callback", m.handleCallback)
 	mux.HandleFunc("POST /api/auth/logout", m.handleLogout)
-	mux.HandleFunc("GET /api/me", m.handleMe)
+	mux.HandleFunc("GET /api/me", reportercontract.WithHeader(reportercontract.Me, m.handleMe))
 	mux.HandleFunc("POST /api/agent-keys", m.handleCreateAgentKey)
 	mux.HandleFunc("GET /api/agent-keys", m.handleListAgentKeys)
 	mux.HandleFunc("DELETE /api/agent-keys/{id}", m.handleRevokeAgentKey)

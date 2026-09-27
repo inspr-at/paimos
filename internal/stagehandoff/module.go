@@ -23,6 +23,7 @@ import (
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/plugins"
+	"github.com/inspr-at/paimos/internal/reportercontract"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
 
@@ -59,14 +60,14 @@ func New(pool *pgxpool.Pool, registry *plugins.Registry, checks ...LaunchChecks)
 	return &Module{pool: pool, registry: registry, launchChecks: guard}
 }
 func (m *Module) Mount(mux *http.ServeMux) {
-	mux.HandleFunc("POST /api/stage-handoffs", m.request)
-	mux.HandleFunc("GET /api/stage-handoffs/{handoffId}", m.get)
-	mux.HandleFunc("POST /api/stage-handoffs/{handoffId}/classic-batch-alias", m.bindClassicBatchAlias)
-	mux.HandleFunc("POST /api/projects/{projectId}/baseline-batches/batches/{batchId}/built-receipt", m.reportClassicBuilt)
-	mux.HandleFunc("POST /api/stage-handoffs/{handoffId}/evidence", m.evidence)
-	mux.HandleFunc("POST /api/stage-handoffs/{handoffId}/launch/admit", m.admitLaunch)
-	mux.HandleFunc("POST /api/stage-handoffs/{handoffId}/launch/consume", m.consumeLaunch)
-	mux.HandleFunc("POST /api/stage-handoffs/{handoffId}/result", m.result)
+	mux.HandleFunc("POST /api/stage-handoffs", reportercontract.WithHeader(reportercontract.StageHandoffs, m.request))
+	mux.HandleFunc("GET /api/stage-handoffs/{handoffId}", reportercontract.WithHeader(reportercontract.StageHandoffs, m.get))
+	mux.HandleFunc("POST /api/stage-handoffs/{handoffId}/classic-batch-alias", reportercontract.WithHeader(reportercontract.BaselineBatches, m.bindClassicBatchAlias))
+	mux.HandleFunc("POST /api/projects/{projectId}/baseline-batches/batches/{batchId}/built-receipt", reportercontract.WithHeader(reportercontract.BaselineBatches, m.reportClassicBuilt))
+	mux.HandleFunc("POST /api/stage-handoffs/{handoffId}/evidence", reportercontract.WithHeader(reportercontract.StageEvidence, m.evidence))
+	mux.HandleFunc("POST /api/stage-handoffs/{handoffId}/launch/admit", reportercontract.WithHeader(reportercontract.StageLaunch, m.admitLaunch))
+	mux.HandleFunc("POST /api/stage-handoffs/{handoffId}/launch/consume", reportercontract.WithHeader(reportercontract.StageLaunch, m.consumeLaunch))
+	mux.HandleFunc("POST /api/stage-handoffs/{handoffId}/result", reportercontract.WithHeader(reportercontract.StageResult, m.result))
 }
 
 type RequestWrite struct {
