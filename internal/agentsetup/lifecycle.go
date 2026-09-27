@@ -408,6 +408,13 @@ func (e *Engine) AddHarness(ctx context.Context, candidates []Candidate) (Progre
 	if err != nil {
 		return Progress{}, err
 	}
+	addingClaude := false
+	for _, c := range candidates {
+		addingClaude = addingClaude || c.Harness == "claude"
+	}
+	if err := e.checkSavedClaudeDependencies(s, e.ClaudeDependencies, addingClaude); err != nil {
+		return Progress{Stage: "blocked", Action: err.Error()}, err
+	}
 	if s.Request.ExistingComputerID != "" && (s.Phase == "awaiting_approval" || s.Phase == "requesting" || s.Phase == "provisioning") {
 		return e.Step(ctx)
 	}
@@ -428,6 +435,13 @@ func (e *Engine) AddHarness(ctx context.Context, candidates []Candidate) (Progre
 				return e.progress(s), errors.New("this harness account is already connected; no new request was created")
 			}
 		}
+	}
+	if addingClaude && s.NodePath == "" {
+		deps, err := (Discovery{}).ResolveClaudeDependencies(e.ClaudeDependencies, s.Request.Workspace)
+		if err != nil {
+			return Progress{Stage: "blocked", Action: err.Error()}, err
+		}
+		s.NodePath, s.ClaudeSDKPath = deps.NodePath, deps.SDKPath
 	}
 	id, err := uuid()
 	if err != nil {

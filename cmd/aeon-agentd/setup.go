@@ -168,7 +168,21 @@ func setupCommand(command string, args []string, out io.Writer) error {
 			}
 			candidates = append(candidates, c)
 		}
+		if command == "setup" || command == "add-harness" {
+			for _, c := range candidates {
+				if c.Harness == "claude" && (savedErr != nil || saved.NodePath == "" && saved.ClaudeSDKPath == "") {
+					deps, e := d.ResolveClaudeDependencies(agentsetup.ClaudeDependencies{NodePath: nodePath, SDKPath: sdkPath}, workspace)
+					if e != nil {
+						_ = printSetupProgress(out, jsonOutput, agentsetup.Progress{Schema: "aeon.agent-setup.v1", Stage: "blocked", Action: e.Error()})
+						return e
+					}
+					nodePath, sdkPath = deps.NodePath, deps.SDKPath
+					break
+				}
+			}
+		}
 	}
+	engine.ClaudeDependencies = agentsetup.ClaudeDependencies{NodePath: nodePath, SDKPath: sdkPath}
 	if computer == "" {
 		computer, _ = os.Hostname()
 	}
