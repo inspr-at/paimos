@@ -61,7 +61,7 @@ func checkBriefSeed(ctx context.Context, tx pgx.Tx, projectID, brief string) err
 	return nil
 }
 
-func prepareBriefSeed(ctx context.Context, pool *pgxpool.Pool, m *Module, p tenant.Principal, projectID, brief string) (bool, error) {
+func prepareBriefSeed(ctx context.Context, pool *pgxpool.Pool, m *Module, p tenant.Principal, projectID, brief, target string) (bool, error) {
 	selected := disposableBriefs[brief]
 	var present bool
 	err := db.InTenant(ctx, pool, p.TenantID, func(tx pgx.Tx) error {
@@ -132,26 +132,41 @@ func prepareBriefSeed(ctx context.Context, pool *pgxpool.Pool, m *Module, p tena
 		return false, fmt.Errorf("disposable brief cannot be confirmed: %s", view.NextAction.Key)
 	}
 	if _, err := m.actWithMode(ctx, p, projectID, actionWrite{Action: "confirm_brief", ExpectedRevision: view.Revision, IdempotencyKey: "operator-brief:" + brief + ":confirm"}, true); err != nil {
-		return false, err
+		return false, fmt.Errorf("confirm disposable brief: %w", err)
 	}
 	if err := seedBriefSpecification(ctx, pool, p, projectID, brief); err != nil {
-		return false, err
+		return false, fmt.Errorf("seed disposable specification: %w", err)
 	}
 	view, err = m.read(ctx, p, projectID)
 	if err != nil {
 		return false, err
 	}
-	if view.NextAction.Key != "open_first_release" {
-		return false, fmt.Errorf("disposable specification did not reach plan: %s", view.NextAction.Key)
-	}
-	view, err = m.actWithMode(ctx, p, projectID, actionWrite{Action: "open_first_release", ExpectedRevision: view.Revision, IdempotencyKey: "operator-brief:" + brief + ":release"}, true)
-	if err != nil {
-		return false, err
+	switch view.NextAction.Key {
+	case "open_first_release":
+		view, err = m.actWithMode(ctx, p, projectID, actionWrite{Action: "open_first_release", ExpectedRevision: view.Revision, IdempotencyKey: "operator-brief:" + brief + ":release"}, true)
+		if err != nil {
+			return false, err
+		}
+	case "mark_candidate":
+		// An existing building release can already be past Plan.
+	case "approve_candidate":
+		if target != "candidate" && target != "deploy" {
+			return false, fmt.Errorf("disposable specification reached approve_candidate, which is not a pending gate for --to-stage %s", target)
+		}
+	case "approve_deploy":
+		if target != "deploy" {
+			return false, fmt.Errorf("disposable specification reached approve_deploy, which is not a pending gate for --to-stage %s", target)
+		}
+	default:
+		return false, fmt.Errorf("disposable specification cannot continue to %s: next action %s (expected open_first_release, mark_candidate, or a pending human gate)", target, view.NextAction.Key)
 	}
 	if view.CurrentReleaseID == nil {
-		return false, errors.New("disposable seed did not open a release")
+		return false, fmt.Errorf("disposable specification reached %s without a release", view.NextAction.Key)
 	}
-	return true, seedBriefTicket(ctx, pool, p, projectID, *view.CurrentReleaseID, brief)
+	if err := seedBriefTicket(ctx, pool, p, projectID, *view.CurrentReleaseID, brief); err != nil {
+		return false, fmt.Errorf("seed disposable release ticket: %w", err)
+	}
+	return true, nil
 }
 
 func seedBriefSpecification(ctx context.Context, pool *pgxpool.Pool, p tenant.Principal, projectID, brief string) error {
@@ -162,7 +177,7 @@ func seedBriefSpecification(ctx context.Context, pool *pgxpool.Pool, p tenant.Pr
 		}
 		reqID, err := seedNode(ctx, tx, p, projectID, "requirement", selected.title, selected.body)
 		if err != nil {
-			return err
+			return fmt.Errorf("create brief requirement: %w", err)
 		}
 		var revision, reqRevision int64
 		if err := tx.QueryRow(ctx, `UPDATE journey_projects SET revision=revision+1,requirements_revision=requirements_revision+1,updated_at=clock_timestamp()
@@ -182,11 +197,11 @@ func seedBriefSpecification(ctx context.Context, pool *pgxpool.Pool, p tenant.Pr
 		}
 		digest, err := requirements.Digest(ctx, tx, projectID)
 		if err != nil {
-			return err
+			return fmt.Errorf("digest brief requirements: %w", err)
 		}
 		featureID, err := seedNode(ctx, tx, p, projectID, "epic", selected.title, selected.body)
 		if err != nil {
-			return err
+			return fmt.Errorf("create brief feature: %w", err)
 		}
 		if _, err := tx.Exec(ctx, `INSERT INTO journey_features(tenant_id,feature_node_id,project_node_id,requirement_node_id)
 			VALUES($1::uuid,$2::uuid,$3::uuid,$4::uuid)`, p.TenantID, featureID, projectID, reqID); err != nil {
