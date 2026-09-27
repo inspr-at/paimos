@@ -93,7 +93,7 @@ func TestFakeVendorProcess(t *testing.T) {
 			time.Sleep(500 * time.Millisecond)
 			result = map[string]string{"stopReason": "end_turn"}
 		case "initialize":
-			if vendor == "cursor" {
+			if strings.HasPrefix(vendor, "cursor") {
 				result = map[string]int{"protocolVersion": 1}
 			}
 		}

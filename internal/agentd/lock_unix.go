@@ -4,26 +4,16 @@
 package agentd
 
 import (
-	"errors"
 	"os"
-	"path/filepath"
-	"syscall"
+
+	"github.com/inspr-at/paimos/internal/agentsetup"
 )
 
 func acquireInstanceLock(root, id string) (*os.File, error) {
-	path := filepath.Join(root, "aeon-agentd-"+id+".lock")
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0600)
+	s, err := agentsetup.OpenStore(root, false)
 	if err != nil {
 		return nil, err
 	}
-	info, err := f.Stat()
-	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm() != 0600 {
-		_ = f.Close()
-		return nil, errors.New("agentd instance lock is unsafe")
-	}
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
-		_ = f.Close()
-		return nil, errors.New("agentd instance is already owned")
-	}
-	return f, nil
+	defer s.Close()
+	return s.LockNamed("aeon-agentd-" + id + ".lock")
 }

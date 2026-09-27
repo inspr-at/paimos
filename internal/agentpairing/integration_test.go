@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -150,13 +151,16 @@ func decodeResult(t *testing.T, w *httptest.ResponseRecorder, v any) {
 	}
 }
 func (f *fixture) propose(harnesses ...string) *proposal {
+	return f.proposePlatform("darwin", "arm64", harnesses...)
+}
+func (f *fixture) proposePlatform(platform, arch string, harnesses ...string) *proposal {
 	f.t.Helper()
 	p := &proposal{id: uuid(f.t, f.db), device: nonce(), runtime: nonce(), lifecycle: nonce()}
 	accounts := []map[string]string{}
 	for _, h := range harnesses {
 		accounts = append(accounts, map[string]string{"account_key": h + "-local", "harness": h, "label": h + " personal test", "model_profile_id": f.profiles[h]})
 	}
-	p.request = map[string]any{"request_id": p.id, "tenant_id": f.tenantID, "device_hash": hash(p.device), "runtime_hash": hash(p.runtime), "lifecycle_hash": hash(p.lifecycle), "computer_name": "Test workstation", "platform": "darwin", "arch": "arm64", "workspace_path": "/tmp/pairing-fixture", "capabilities": []string{"managed_runs"}, "accounts": accounts}
+	p.request = map[string]any{"request_id": p.id, "tenant_id": f.tenantID, "device_hash": hash(p.device), "runtime_hash": hash(p.runtime), "lifecycle_hash": hash(p.lifecycle), "computer_name": "Test workstation", "platform": platform, "arch": arch, "workspace_path": "/tmp/pairing-fixture", "capabilities": []string{"managed_runs"}, "accounts": accounts}
 	f.submit(p)
 	return p
 }
@@ -762,7 +766,7 @@ func TestPairingGuideReleaseContract(t *testing.T) {
 		if !strings.HasPrefix(target.ArtifactURL, "https://github.com/inspr-at/paimos/releases/download/v260927160212.0.0/paimos-agentd-") || !strings.Contains(target.Command, "mkdir \"$aeon_pairing_dir\"") || !strings.Contains(target.Command, "if (n != 1) exit 1") || strings.Contains(target.Command, "attacker.invalid") {
 			t.Fatalf("unsafe install contract: %+v", target)
 		}
-		check := strings.Index(target.Command, " -c pairing-checksum.txt")
+		check := strings.Index(target.Command, " -c selected.SHA256SUMS")
 		install := strings.Index(target.Command, "install -m 0700")
 		if check < 0 || install < check {
 			t.Fatal("artifact becomes executable before checksum verification")
@@ -940,7 +944,7 @@ func TestPairingExpiryClaimRaceKeepsClaimedAccounting(t *testing.T) {
 
 func TestPairingVerificationCapabilitiesEnforcedAndProgressTruthful(t *testing.T) {
 	f := newFixture(t)
-	for _, h := range []string{"codex", "cursor", "grok"} {
+	for _, h := range []string{"codex", "cursor"} {
 		p := f.propose(h, "claude")
 		if p.review.VerificationCapabilities[h].Supported || !p.review.VerificationCapabilities["claude"].Supported || p.review.VerificationCapabilities["claude"].Policy != "no_tools" {
 			t.Fatal("wrong preapproval qualification")
@@ -978,6 +982,78 @@ func TestPairingVerificationCapabilitiesEnforcedAndProgressTruthful(t *testing.T
 	decodeResult(t, f.call("POST", "/api/agent-pairing/requests/"+p.id+"/approve", map[string]any{"request_digest": p.review.Digest, "verification": "one_per_harness", "selected_account_keys": []string{"claude-local"}}, true, "", 200), &approved)
 	if len(approved.Enrollments) != 1 || approved.Enrollments[0].Harness != "claude" || approved.Enrollments[0].VerificationRunID == nil {
 		t.Fatal("explicit supported subset not honored")
+	}
+}
+
+func TestNativeGrokVerificationQualifiedOnlyOnMacOSArm64(t *testing.T) {
+	f := newFixture(t)
+	var guide struct {
+		Capabilities map[string]agentpairing.VerificationCapability `json:"verification_capabilities"`
+	}
+	decodeResult(t, f.call("GET", "/api/agent-pairing/guide", nil, false, "", 200), &guide)
+	if c := guide.Capabilities["grok"]; c.Supported || c.Policy != "unavailable" || !strings.Contains(c.Reason, "macOS arm64") {
+		t.Fatal("global guide falsely advertises native Grok verification")
+	}
+	targets := agentpairing.VerificationTargets()
+	if !slices.Contains(targets, "darwin/arm64/grok") || slices.Contains(targets, "darwin/amd64/grok") || slices.Contains(targets, "linux/arm64/grok") || slices.Contains(targets, "linux/amd64/grok") {
+		t.Fatal("dispatch targets differ from Grok platform qualification")
+	}
+	qualified := f.proposePlatform("darwin", "arm64", "grok")
+	if c := qualified.review.VerificationCapabilities["grok"]; !c.Supported || c.Policy != "no_tools" || c.Reason != "" {
+		t.Fatal("qualified platform did not advertise enforced no-tools Grok verification")
+	}
+	v := f.approve(qualified, "one_per_harness")
+	if len(v.Enrollments) != 1 || v.Enrollments[0].VerificationRunID == nil || v.Verification.Mode == nil || *v.Verification.Mode != "one_per_harness" ||
+		v.Verification.RunsPerAccount != 1 || v.Verification.MaxParallel != 1 || v.Verification.MaxDuration != agentpairing.VerificationSeconds || v.Verification.Allowance != 1 || v.Verification.Unit != "requests" {
+		t.Fatal("qualified approval did not create exactly one bounded verification")
+	}
+	var runs, allowance, duration int
+	var unit, purpose string
+	if err := f.db.Admin.QueryRow(t.Context(), `SELECT count(*) FROM agent_pairing_enrollments e JOIN agent_runs r ON r.id=e.verification_run_id WHERE e.request_id=$1`, qualified.id).Scan(&runs); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.db.Admin.QueryRow(t.Context(), `SELECT allowance,unit FROM account_allowance_windows WHERE account_id=$1 AND pairing_verification`, v.Enrollments[0].AccountID).Scan(&allowance, &unit); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.db.Admin.QueryRow(t.Context(), `SELECT r.purpose,w.max_duration_seconds FROM agent_runs r JOIN work_orders w ON w.node_id=r.work_order_id WHERE r.id=$1`, *v.Enrollments[0].VerificationRunID).Scan(&purpose, &duration); err != nil {
+		t.Fatal(err)
+	}
+	if runs != 1 || allowance != 1 || unit != "requests" || purpose != "pairing_verification" || duration != agentpairing.VerificationSeconds {
+		t.Fatal("qualified Grok grant escaped the one-run, one-request, 60-second bounds")
+	}
+
+	resources := []string{"agent_pairing_computers", "agent_pairing_enrollments", "agent_accounts", "agent_keys", "agent_runs", "account_allowance_windows", "work_orders", "nodes"}
+	counts := func(t *testing.T) []int {
+		t.Helper()
+		out := make([]int, len(resources))
+		for i, table := range resources {
+			if err := f.db.Admin.QueryRow(t.Context(), "SELECT count(*) FROM "+table+" WHERE tenant_id=$1", f.tenantID).Scan(&out[i]); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return out
+	}
+	for _, target := range []struct{ platform, arch string }{{"darwin", "amd64"}, {"linux", "arm64"}, {"linux", "amd64"}} {
+		t.Run(target.platform+"/"+target.arch, func(t *testing.T) {
+			p := f.proposePlatform(target.platform, target.arch, "grok")
+			if c := p.review.VerificationCapabilities["grok"]; c.Supported || c.Policy != "unavailable" || !strings.Contains(c.Reason, "macOS arm64") {
+				t.Fatal("unsupported platform advertised Grok verification")
+			}
+			before := counts(t)
+			w := f.call("POST", "/api/agent-pairing/requests/"+p.id+"/approve", map[string]any{"request_digest": p.review.Digest, "verification": "one_per_harness", "selected_account_keys": []string{"grok-local"}}, true, "", 409)
+			if !strings.Contains(w.Body.String(), `"code":"verification_unavailable"`) {
+				t.Fatal("unsupported Grok approval lacked typed rejection")
+			}
+			if f.redeem(p).State != "pending" {
+				t.Fatal("unsupported Grok approval advanced pairing state")
+			}
+			after := counts(t)
+			for i := range resources {
+				if before[i] != after[i] {
+					t.Fatalf("unsupported Grok approval created %s", resources[i])
+				}
+			}
+		})
 	}
 }
 

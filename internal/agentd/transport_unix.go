@@ -82,6 +82,35 @@ func ServeLocal(s *Supervisor, socket string) (*LocalServer, error) {
 		return nil, err
 	}
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /v1/lifecycle", func(w http.ResponseWriter, r *http.Request) {
+		if !authorized(r, token) {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(s.Lifecycle(r.URL.Query().Get("account_id")))
+	})
+	mux.HandleFunc("POST /v1/drain", func(w http.ResponseWriter, r *http.Request) {
+		if !authorized(r, token) {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		r.Body = http.MaxBytesReader(w, r.Body, 4096)
+		d := json.NewDecoder(r.Body)
+		d.DisallowUnknownFields()
+		var req DrainRequest
+		if d.Decode(&req) != nil || d.Decode(&struct{}{}) != io.EOF {
+			http.Error(w, "invalid drain", http.StatusBadRequest)
+			return
+		}
+		status, err := s.Drain(req)
+		if err != nil {
+			http.Error(w, "drain rejected", http.StatusConflict)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(status)
+	})
 	mux.HandleFunc("GET /v1/status", func(w http.ResponseWriter, r *http.Request) {
 		if !authorized(r, token) {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)

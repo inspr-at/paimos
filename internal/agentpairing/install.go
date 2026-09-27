@@ -31,9 +31,11 @@ func installTargets() []InstallTarget {
 	targets := []InstallTarget{}
 	for _, p := range []struct{ os, arch, service string }{{"darwin", "arm64", "launchd-user"}, {"darwin", "amd64", "launchd-user"}, {"linux", "arm64", "systemd-user"}, {"linux", "amd64", "systemd-user"}} {
 		asset := "paimos-agentd-" + p.os + "-" + p.arch
-		checksum := "sha256sum -c pairing-checksum.txt"
+		checksum := "sha256sum -c selected.SHA256SUMS"
+		statOwner, statMode := "stat -c %u", "stat -c %a"
 		if p.os == "darwin" {
-			checksum = "shasum -a 256 -c pairing-checksum.txt"
+			checksum = "shasum -a 256 -c selected.SHA256SUMS"
+			statOwner, statMode = "stat -f %u", "stat -f %Lp"
 		}
 		// An exclusive versioned directory prevents overwrite and keeps downloaded
 		// bytes non-executable until the exact manifest entry verifies successfully.
@@ -44,21 +46,53 @@ if command -v paimos-agentd >/dev/null 2>&1 || command -v nix >/dev/null 2>&1; t
   exit 1
 fi
 umask 077
+case "$HOME" in
+  /*) ;;
+  *) printf 'HOME must be an absolute directory.\n' >&2; exit 1 ;;
+esac
+case "$HOME" in
+  */|*/./*|*/../*|*/.|*/..|*//*) printf 'HOME must not contain ambiguous path components.\n' >&2; exit 1 ;;
+esac
+check_private_dir() {
+  if [ -L "$1" ] || [ ! -d "$1" ]; then
+    printf 'Unsafe installation directory.\n' >&2
+    exit 1
+  fi
+  aeon_owner=$(%s "$1")
+  aeon_mode=$(%s "$1")
+  case "$aeon_mode" in
+    ''|*[!0-7]*) printf 'Unsafe installation permissions.\n' >&2; exit 1 ;;
+  esac
+  if [ "$aeon_owner" != "$(id -u)" ] || [ "$((0$aeon_mode & 022))" -ne 0 ]; then
+    printf 'Installation directory must be owned by you and not writable by others.\n' >&2
+    exit 1
+  fi
+}
+ensure_private_dir() {
+  if [ ! -e "$1" ] && [ ! -L "$1" ]; then
+    mkdir "$1"
+  fi
+  check_private_dir "$1"
+}
+check_private_dir "$HOME"
+ensure_private_dir "$HOME/.local"
+ensure_private_dir "$HOME/.local/lib"
+ensure_private_dir "$HOME/.local/lib/aeon"
+ensure_private_dir "$HOME/.local/lib/aeon/%s"
 aeon_pairing_dir="$HOME/.local/lib/aeon/%s/%s-%s"
 if [ -e "$aeon_pairing_dir" ] || [ -L "$aeon_pairing_dir" ]; then
   printf 'Versioned destination already exists; inspect/reuse it, never overwrite.\n' >&2
   exit 1
 fi
-mkdir -p "$HOME/.local/lib/aeon/%s"
 mkdir "$aeon_pairing_dir"
 cd "$aeon_pairing_dir"
 curl --fail --location --proto '=https' --proto-redir '=https' --tlsv1.2 --output %s %s
 curl --fail --location --proto '=https' --proto-redir '=https' --tlsv1.2 --output SHA256SUMS %s
-awk '$2 == "%s" { print; n++ } END { if (n != 1) exit 1 }' SHA256SUMS > pairing-checksum.txt
+awk -v asset=%s '$2 == asset && length($1) == 64 && $1 !~ /[^0-9a-f]/ { print; n++ } END { if (n != 1) exit 1 }' SHA256SUMS > selected.SHA256SUMS
 %s
 install -m 0700 %s "$aeon_pairing_dir/paimos-agentd"
 printf 'Verified binary: %%s/paimos-agentd\n' "$aeon_pairing_dir"
-)`, version.Version, p.os, p.arch, version.Version, asset, shellQuote(base+asset), shellQuote(base+"SHA256SUMS"), asset, checksum, asset)
+)`, statOwner, statMode, version.Version, version.Version, p.os, p.arch, asset, shellQuote(base+asset), shellQuote(base+"SHA256SUMS"), shellQuote(asset), checksum, asset)
 		targets = append(targets, InstallTarget{p.os, p.arch, p.service, "candidate; consult this exact release's service qualification evidence", base + asset, base + "SHA256SUMS", cmd})
 	}
 	return targets

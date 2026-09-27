@@ -11,13 +11,17 @@ type VerificationCapability struct {
 }
 
 // Empty platform/arch is the guide's conservative global capability view.
-// Any future platform-only qualification belongs here, never in client input.
+// Native Grok's two qualified variants are pinned again by the local runtime.
 func verificationCapabilities(platform, arch string) map[string]VerificationCapability {
+	grok := VerificationCapability{false, "unavailable", "Native Grok verification is qualified only on macOS arm64 with a pinned native build."}
+	if platform == "darwin" && arch == "arm64" {
+		grok = VerificationCapability{true, "no_tools", ""}
+	}
 	return map[string]VerificationCapability{
 		"claude": {true, "no_tools", ""},
 		"codex":  {false, "unavailable", "Codex verification cannot yet guarantee external/MCP isolation."},
 		"cursor": {false, "unavailable", "Cursor external/MCP isolation is awaiting qualification."},
-		"grok":   {false, "unavailable", "Native Grok guided account identity is unavailable."},
+		"grok":   grok,
 	}
 }
 
