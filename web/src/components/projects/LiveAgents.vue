@@ -268,5 +268,4 @@ a.agent-line:hover .go { color: var(--teal-ink); }
   .as-card .chip-state { grid-column: 1 / -1; }
 }
 .as-row .key, .as-row .row-name { display: none; }
-.pop-agent.agent-state-surface { background: color-mix(in srgb, var(--agent-state-color) 6%, var(--surface-sunken)); }
 </style>
