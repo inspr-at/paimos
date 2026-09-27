@@ -810,7 +810,8 @@ func requirePerson(ctx context.Context, tx pgx.Tx, p tenant.Principal) error {
 
 func writeEvent(ctx context.Context, tx pgx.Tx, p tenant.Principal, projectID, eventType string, before, after any) (int64, error) {
 	production, _ := ctx.Value(productionContextKey{}).(bool)
-	if production {
+	brief, _ := ctx.Value(briefContextKey{}).(string)
+	if production || brief != "" {
 		encoded, err := json.Marshal(after)
 		if err != nil {
 			return 0, err
@@ -820,9 +821,15 @@ func writeEvent(ctx context.Context, tx pgx.Tx, p tenant.Principal, projectID, e
 			return 0, err
 		}
 		if fields == nil {
-			return 0, errors.New("production event requires an object snapshot")
+			return 0, errors.New("operator event requires an object snapshot")
 		}
-		fields["production"] = json.RawMessage("true")
+		if production {
+			fields["production"] = json.RawMessage("true")
+		}
+		if brief != "" {
+			fields["disposable"] = json.RawMessage("true")
+			fields["brief"] = json.RawMessage(brief)
+		}
 		after = fields
 	}
 	ev, err := events.Append(ctx, tx, p, events.Change{

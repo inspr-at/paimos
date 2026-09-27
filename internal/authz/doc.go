@@ -41,6 +41,13 @@
 // New returns an httpapi.Module for /api/authz/permissions, /api/roles,
 // /api/members (including invites, deactivation and aliases), /api/audit,
 // /api/me/permissions and /api/projects/{id}/members; cmd/aeon mounts it.
+// NewWithProvisioner injects the config-selected internal identity.Provisioner
+// for optional invite account creation; nil retains existing invite behavior.
+// The coordinator owns server configuration and module wiring. Provisioning
+// is advertised and accepted only for the adapter's configured Aeon tenant.
+// It occurs only after the Aeon invite commits; its outcome appends a separate
+// credential-free event. Retry accepts only failed, pending invites and requires
+// members.manage again.
 // Project binding changes append binding.set and binding.removed events on the
 // project node, so they are visible exactly with the project.
 // Every authorizing route must use Handle or Require with a declared registry

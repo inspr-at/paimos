@@ -184,6 +184,32 @@ test('invite by email: checked fields, a one-time join link to copy, then revoke
   await expect(page.getByRole('list', { name: 'Invites' })).toContainText('nora@studio.at')
 })
 
+test('configured identity provider can create a sign-in account and retry a failed setup', async ({ page }) => {
+  const world = await open(page, '/settings/access/invites', { provisioner: 'Zitadel', provisionFailures: 1 })
+  await page.getByRole('button', { name: 'Invite people' }).click()
+  const sheet = page.getByRole('dialog', { name: 'Invite people' })
+  await sheet.getByLabel('Email').fill('new@studio.at')
+  await sheet.getByLabel('Also create their sign-in account (Zitadel)').check()
+  await expect(sheet).toContainText('Zitadel emails them a link to set up sign-in.')
+  await sheet.getByRole('button', { name: 'Create invite link' }).click()
+  await expect(sheet.getByText('Enter their name for the sign-in account.')).toBeVisible()
+  await sheet.getByLabel('Their name').fill('Nora Example')
+  await sheet.getByRole('button', { name: 'Create invite link' }).click()
+  const ready = page.getByRole('dialog', { name: 'Invite ready' })
+  await expect(ready).toContainText('The sign-in account could not be set up.')
+  await expect(ready.getByLabel('Join link')).toHaveValue(/tok_inv-/)
+  expect(calls(world, 'POST', /\/members\/invites$/).at(-1)?.body).toMatchObject({ provision_account: true, display_name: 'Nora Example' })
+  await ready.getByRole('button', { name: 'Retry account setup' }).click()
+  await expect(ready).toContainText('Zitadel has emailed them a sign-in setup link.')
+  expect(calls(world, 'POST', /\/members\/invites\/[^/]+\/provision$/)).toHaveLength(1)
+})
+
+test('invite account checkbox stays hidden when no provisioner is configured', async ({ page }) => {
+  await open(page, '/settings/access/invites')
+  await page.getByRole('button', { name: 'Invite people' }).click()
+  await expect(page.getByLabel(/Also create their sign-in account/)).toHaveCount(0)
+})
+
 test('custom roles: duplicate, compose without escalation, see the diff, save; delete with reassignment', async ({ page }) => {
   const world = await open(page, '/settings/access/roles', { role: 'admin' })
   await page.getByRole('link', { name: /^Member/ }).click()

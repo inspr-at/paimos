@@ -178,6 +178,7 @@ var RoutePermissions = map[string]string{
 	"POST /api/agent-accounts/{accountId}/windows":                                    "account.manage",
 	"POST /api/agent-keys":                                                            "keys.manage",
 	"POST /api/members/invites":                                                       "members.manage",
+	"POST /api/members/invites/{id}/provision":                                        "members.manage",
 	"POST /api/members/{principal_id}/aliases":                                        "members.manage",
 	"POST /api/members/{principal_id}/deactivate":                                     "members.manage",
 	"POST /api/members/{principal_id}/reactivate":                                     "members.manage",

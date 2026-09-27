@@ -158,6 +158,9 @@ func TestDisposableOperatorGuards(t *testing.T) {
 	if _, err := journey.SeedDisposable(t.Context(), f.db.App, "journey-a", "PRJ-362", "build"); err == nil || !strings.Contains(err.Error(), "not disposable") {
 		t.Fatalf("unmarked project seeded: %v", err)
 	}
+	if _, err := journey.SeedDisposableBrief(t.Context(), f.db.App, "journey-a", "PRJ-362", "deploy", "1"); err == nil || !strings.Contains(err.Error(), "not disposable") {
+		t.Fatalf("unmarked project accepted fixed brief: %v", err)
+	}
 	var marks int
 	if err := db.InTenant(dbtest.Seed(context.Background()), f.db.App, f.tenant, func(tx pgx.Tx) error {
 		return tx.QueryRow(context.Background(), `SELECT count(*) FROM journey_disposable_projects WHERE project_node_id=$1::uuid`, project).Scan(&marks)
@@ -171,5 +174,116 @@ func TestDisposableOperatorGuards(t *testing.T) {
 	}
 	if _, err := journey.MarkDisposable(t.Context(), f.db.App, "journey-a", "PRJ-362"); err == nil {
 		t.Fatal("production marker allowed")
+	}
+}
+
+func TestDisposableFixedBriefsReachPendingCandidateGate(t *testing.T) {
+	briefs := []struct{ number, title, body string }{
+		{"1", "Host status page", "A read-only status page for a small fleet of hosts: current state per host, last deploy, open incidents. Success: one page, loads under a second, no write actions."},
+		{"2", "Release notes digest", "A weekly digest of released tickets per project: groups by feature and fix, links each ticket, sent nowhere (rendered page only). Success: the digest for last week matches the release history."},
+		{"3", "Maintenance window planner", "Plan maintenance windows for hosts: propose a window, check it against the release calendar, record the decision. Success: a window can be proposed, checked and recorded; conflicts are shown."},
+	}
+	for _, brief := range briefs {
+		t.Run(brief.number, func(t *testing.T) {
+			t.Setenv("AEON_ENV", "dev")
+			f := newFixture(t)
+			project := f.node(t, "project", "PRJ-801", "Disposable brief fixture")
+			if _, err := journey.MarkDisposable(t.Context(), f.db.App, "journey-a", "PRJ-801"); err != nil {
+				t.Fatal(err)
+			}
+			args := []string{"seed", "--tenant", "journey-a", "--project", "PRJ-801", "--to-stage", "deploy", "--brief", brief.number}
+			if brief.number == "1" {
+				t.Setenv("AEON_ENV", "prod")
+				args = append(args, "--production", "--confirm-project", "PRJ-801")
+			}
+			var out bytes.Buffer
+			if err := journey.RunOperator(t.Context(), f.db.App, args, &out); err != nil {
+				t.Fatalf("seed brief %s: %v", brief.number, err)
+			}
+			if !strings.Contains(out.String(), `"pending_action":"approve_candidate"`) {
+				t.Fatalf("seed crossed or missed candidate gate: %s", out.String())
+			}
+			view := f.journey(t, f.person, "GET", "/api/projects/"+project+"/journey", "")
+			if view.NextAction.Key != "approve_candidate" || view.NextAction.Available || view.CurrentReleaseID == nil {
+				t.Fatalf("candidate gate: %+v", view)
+			}
+			var title, body, state string
+			var count, bad, productionBad, gateDecisions, receipts, allBad, personDecisions int
+			ctx := t.Context()
+			if err := db.InTenant(dbtest.Seed(ctx), f.db.App, f.tenant, func(tx pgx.Tx) error {
+				if err := tx.QueryRow(ctx, `SELECT title,body FROM nodes WHERE id=$1::uuid`, project).Scan(&title, &body); err != nil {
+					return err
+				}
+				if err := tx.QueryRow(ctx, `SELECT state FROM journey_releases WHERE release_node_id=$1::uuid`, *view.CurrentReleaseID).Scan(&state); err != nil {
+					return err
+				}
+				if err := tx.QueryRow(ctx, `SELECT count(*),count(*) FILTER (WHERE after->>'brief' IS DISTINCT FROM $2 OR after->>'disposable' IS DISTINCT FROM 'true'),
+					count(*) FILTER (WHERE $3::bool AND after->>'production' IS DISTINCT FROM 'true')
+					FROM events WHERE type LIKE 'journey.seed_%' AND node_id=$1::uuid`, project, brief.number, brief.number == "1").Scan(&count, &bad, &productionBad); err != nil {
+					return err
+				}
+				if err := tx.QueryRow(ctx, `SELECT count(*) FROM events WHERE id >=
+					(SELECT min(id) FROM events WHERE node_id=$1::uuid AND type='journey.seed_brief_proposed')
+					AND (after->>'brief' IS DISTINCT FROM $2 OR after->>'disposable' IS DISTINCT FROM 'true'
+					OR ($3::bool AND after->>'production' IS DISTINCT FROM 'true'))`, project, brief.number, brief.number == "1").Scan(&allBad); err != nil {
+					return err
+				}
+				if err := tx.QueryRow(ctx, `SELECT count(*) FROM journey_action_receipts WHERE project_node_id=$1::uuid AND idempotency_key LIKE $2`, project, "operator-brief:"+brief.number+":%").Scan(&receipts); err != nil {
+					return err
+				}
+				if err := tx.QueryRow(ctx, `SELECT count(*) FROM events WHERE node_id=$1::uuid AND type IN ('journey.candidate_approved','journey.deploy_approved')`, project).Scan(&gateDecisions); err != nil {
+					return err
+				}
+				return tx.QueryRow(ctx, `SELECT count(*) FROM approval_decisions d JOIN approval_requests a ON a.tenant_id=d.tenant_id AND a.id=d.request_id
+					WHERE a.resource_id=$1::uuid AND a.scope IN ('journey.candidate','journey.deploy')`, *view.CurrentReleaseID).Scan(&personDecisions)
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if title != brief.title || body != brief.body || state != "candidate" || count < 7 || bad != 0 || allBad != 0 || productionBad != 0 || gateDecisions != 0 || personDecisions != 0 || receipts < 4 {
+				t.Fatalf("title=%q body=%q state=%q seed events=%d bad=%d all bad=%d production bad=%d receipts=%d gate decisions=%d person decisions=%d", title, body, state, count, bad, allBad, productionBad, receipts, gateDecisions, personDecisions)
+			}
+			out.Reset()
+			if err := journey.RunOperator(ctx, f.db.App, args, &out); err != nil || !strings.Contains(out.String(), `"pending_action":"approve_candidate"`) || !strings.Contains(out.String(), `"already":true`) {
+				t.Fatalf("brief replay: %v %s", err, out.String())
+			}
+			if err := db.InTenant(dbtest.Seed(ctx), f.db.App, f.tenant, func(tx pgx.Tx) error {
+				var replayCount int
+				if err := tx.QueryRow(ctx, `SELECT count(*) FROM events WHERE type LIKE 'journey.seed_%' AND node_id=$1::uuid`, project).Scan(&replayCount); err != nil {
+					return err
+				}
+				if replayCount != count {
+					t.Fatalf("replay added events: %d -> %d", count, replayCount)
+				}
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+			other := "1"
+			if brief.number == "1" {
+				other = "2"
+			}
+			otherArgs := []string{"seed", "--tenant", "journey-a", "--project", "PRJ-801", "--to-stage", "deploy", "--brief", other}
+			if brief.number == "1" {
+				otherArgs = append(otherArgs, "--production", "--confirm-project", "PRJ-801")
+			}
+			if err := journey.RunOperator(ctx, f.db.App, otherArgs, &out); err == nil || !strings.Contains(err.Error(), "different brief") {
+				t.Fatalf("different brief accepted: %v", err)
+			}
+			if brief.number == "1" || brief.number == "2" {
+				nextState := "deploying"
+				if brief.number == "2" {
+					nextState = "released"
+				}
+				if err := db.InTenant(dbtest.Seed(ctx), f.db.App, f.tenant, func(tx pgx.Tx) error {
+					_, err := tx.Exec(ctx, `UPDATE journey_releases SET state=$2,released_at=CASE WHEN $2='released' THEN now() ELSE NULL END WHERE release_node_id=$1::uuid`, *view.CurrentReleaseID, nextState)
+					return err
+				}); err != nil {
+					t.Fatal(err)
+				}
+				if err := journey.RunOperator(ctx, f.db.App, args, &out); err == nil || !strings.Contains(err.Error(), "deployed or released") {
+					t.Fatalf("%s project was seeded: %v", nextState, err)
+				}
+			}
+		})
 	}
 }
