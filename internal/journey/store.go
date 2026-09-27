@@ -993,9 +993,16 @@ func artifactVersion(ctx context.Context, tx pgx.Tx, releaseID string) (string, 
 }
 
 func settleReleased(ctx context.Context, tx pgx.Tx, projectID, releaseID string) ([]string, error) {
+	var pinnedScheme, pinnedVersion *string
+	if err := tx.QueryRow(ctx, `SELECT version_scheme,version FROM journey_releases WHERE project_node_id=$1::uuid AND release_node_id=$2::uuid FOR UPDATE`, projectID, releaseID).Scan(&pinnedScheme, &pinnedVersion); err != nil {
+		return nil, err
+	}
 	scheme, version, err := artifactVersion(ctx, tx, releaseID)
 	if err != nil {
 		return nil, err
+	}
+	if (pinnedScheme == nil) != (pinnedVersion == nil) || pinnedScheme != nil && scheme != "" && (*pinnedScheme != scheme || *pinnedVersion != version) {
+		return nil, fail(409, "deployment artifact does not match pinned release version")
 	}
 	var schemeArg, versionArg any
 	if scheme != "" && version != "" {
@@ -1004,7 +1011,7 @@ func settleReleased(ctx context.Context, tx pgx.Tx, projectID, releaseID string)
 	tag, err := tx.Exec(ctx, `
 		UPDATE journey_releases
 		SET state = 'released', released_at = clock_timestamp(), revision = revision + 1,
-		    version_scheme = $2, version = $3
+		    version_scheme = coalesce(version_scheme, $2), version = coalesce(version, $3)
 		WHERE release_node_id = $1::uuid AND state NOT IN ('released', 'superseded')`,
 		releaseID, schemeArg, versionArg)
 	if err != nil {
