@@ -152,7 +152,7 @@
           "grok": {
             "supported": false,
             "policy": "unavailable",
-            "reason": "Native Grok guided account identity is unavailable."
+            "reason": "Native Grok verification is qualified only on macOS arm64 with a pinned native build."
           }
         },
         "verification_helper_version": "exact server-supported helper release coordinate"
@@ -307,7 +307,7 @@
       "grok": {
         "supported": false,
         "policy": "unavailable",
-        "reason": "Native Grok guided account identity is unavailable."
+        "reason": "Native Grok verification is qualified only on macOS arm64 with a pinned native build."
       }
     },
     "verification_helper_version": "exact server-supported helper release coordinate"
@@ -353,6 +353,9 @@
   },
   "verification_capabilities_contract": {
     "fields": "GET guide and every PairingView add verification_capabilities map keyed by harness plus verification_helper_version (exact server-supported helper release). Server-derived; clients cannot claim support.",
+    "global_guide": "The unscoped GET guide has no approved computer platform/architecture and therefore reports Grok unavailable. PairingView and approval derive the map from the immutable device request platform/architecture.",
+    "qualified_grok": "Only darwin/arm64 reports supported=true, policy=no_tools for Grok. The local trusted runtime independently accepts only pinned grok-native npm-grok-1.0.30 or xai-grok-pager source-xai-grok-pager-1.0.32, verified subject and seatbelt no-tools confinement. No variant or bearer is sent in the device request.",
+    "unsupported_grok": "All other platform/architecture combinations, including an empty unscoped guide view, report supported=false, policy=unavailable with the macOS arm64 limitation reason. Codex and Cursor remain unavailable.",
     "current": {
       "claude": {
         "supported": true,
@@ -372,12 +375,12 @@
       "grok": {
         "supported": false,
         "policy": "unavailable",
-        "reason": "Native Grok guided account identity is unavailable."
+        "reason": "Native Grok verification is qualified only on macOS arm64 with a pinned native build."
       }
     },
     "approval": "one_per_harness with any unsupported selected account returns HTTP 409 code verification_unavailable, no grants/accounts/runs created. Person must explicitly choose connect_only or exclude that account; no silent downgrade. Existing identical approvals remain idempotent.",
     "progress": "Reconcile progress accepts state=connected,error_code=verification_unavailable. Enrollment projection uses verification_state=unavailable and verification_error=verification_unavailable only for unclaimed queued unsupported verification; does not change computer authority/connectivity or infer process death.",
     "expiry": "Unclaimed queued verification is cancelled and its owned reservation released transactionally at expiry under tenant claim/lifecycle fence. Claimed live/uncertain work is never expired this way. No replacement run/allowance/refill.",
-    "implementation_seam": "internal/agentpairing/capabilities.go verificationCapabilities(platform, arch). Empty platform/arch means conservative global guide. PairingView and approval use immutable request platform/arch; RunFence and VerificationTargets dispatch use the same function. Future darwin-only qualification can be added here after root supplies evidence; no capability widening via client input."
+    "implementation_seam": "internal/agentpairing/capabilities.go verificationCapabilities(platform, arch). Empty platform/arch means conservative global guide. PairingView and approval use immutable request platform/arch; RunFence and VerificationTargets dispatch use the same function. The darwin/arm64 Grok qualification does not widen through client input."
   }
 }
