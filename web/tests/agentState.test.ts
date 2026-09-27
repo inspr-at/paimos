@@ -99,6 +99,17 @@ test('session states share words and shapes with project indicators', () => {
   assert.match(sessionStatus(session(), now, true).reasons![0]!.detail, /outstanding/)
 })
 
+test('heartbeat waiting has its own group while real requests still need a person', () => {
+  const fresh = session({ id: 'new', phase: 'starting', heartbeat_at: null, created_at: ago(0), needs_attention: false })
+  const overdue = session({ id: 'overdue', heartbeat_at: ago(4), needs_attention: false })
+  const request = session({ ...fresh, id: 'request', needs_attention: true })
+  const groups = groupSessions([fresh, overdue, request], now, () => false)
+  assert.deepEqual(groups.awaiting.map(view => view.session.id), ['new', 'overdue'])
+  assert.deepEqual(groups.needs.map(view => view.session.id), ['request'])
+  assert.equal(sessionStatus(session({ ...fresh, heartbeat_at: ago(0) }), now).group, 'working')
+  assert.equal(sessionStatus(session({ ...fresh, created_at: ago(10) }), now).group, 'unresponsive')
+})
+
 test('a session needs Markus for its agent’s pending approval or held request', () => {
   const s = session()
   assert.equal(needsYou(s, [approval()], []), true)
