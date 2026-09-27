@@ -3,7 +3,7 @@
 -- No default vendor prices: absent pricing is unknown, never zero.
 CREATE TABLE model_prices (
     tenant_id uuid NOT NULL REFERENCES tenants(id),
-    model text NOT NULL CHECK (length(model) BETWEEN 1 AND 120 AND model ~ '^[A-Za-z0-9][A-Za-z0-9._:/-]*$'),
+    model text NOT NULL CHECK (length(model) BETWEEN 1 AND 128 AND model ~ '^[A-Za-z0-9][A-Za-z0-9._:/-]*$'),
     version bigint NOT NULL CHECK (version BETWEEN 1 AND 1000000000000),
     input_usd_per_million numeric(13,6) NOT NULL CHECK (input_usd_per_million BETWEEN 0 AND 1000000),
     output_usd_per_million numeric(13,6) NOT NULL CHECK (output_usd_per_million BETWEEN 0 AND 1000000),
@@ -23,7 +23,7 @@ CREATE TRIGGER model_prices_immutable BEFORE UPDATE OR DELETE ON model_prices
 CREATE TABLE harness_session_usage (
     tenant_id uuid NOT NULL REFERENCES tenants(id),
     session_id uuid NOT NULL,
-    model text NOT NULL CHECK (length(model) BETWEEN 1 AND 120 AND model ~ '^[A-Za-z0-9][A-Za-z0-9._:/-]*$'),
+    model text NOT NULL CHECK (length(model) BETWEEN 1 AND 128 AND model ~ '^[A-Za-z0-9][A-Za-z0-9._:/-]*$'),
     sequence bigint NOT NULL CHECK (sequence BETWEEN 1 AND 1000000000000),
     input_tokens bigint CHECK (input_tokens BETWEEN 0 AND 1000000000000),
     output_tokens bigint CHECK (output_tokens BETWEEN 0 AND 1000000000000),
@@ -32,7 +32,7 @@ CREATE TABLE harness_session_usage (
     price_version bigint,
     estimated_cost_usd numeric(30,12) CHECK (estimated_cost_usd >= 0),
     account_id uuid,
-    account_label text CHECK (char_length(account_label) BETWEEN 1 AND 60),
+    account_label text CHECK (char_length(account_label) BETWEEN 1 AND 128),
     billing_mode text NOT NULL CHECK (billing_mode IN ('unknown','api','subscription')),
     subscription_label text CHECK (char_length(subscription_label) BETWEEN 1 AND 120),
     reported_at timestamptz NOT NULL DEFAULT clock_timestamp(),

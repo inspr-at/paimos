@@ -93,44 +93,52 @@ func (m *Module) Mount(mux *http.ServeMux) {
 
 type Session struct {
 	StateEvidence
-	ID                                             string         `json:"id"`
-	ProjectID                                      string         `json:"project_id"`
-	AgentPrincipalID                               string         `json:"agent_principal_id"`
-	RunID                                          *string        `json:"run_id"`
-	TicketNodeID                                   *string        `json:"ticket_node_id"`
-	WorkOrderID                                    *string        `json:"work_order_id"`
-	ParentID                                       *string        `json:"parent_harness_session_id"`
-	Harness                                        string         `json:"harness"`
-	Host                                           string         `json:"host"`
-	DisplayLabel                                   *string        `json:"display_label"`
-	Model                                          *string        `json:"model"`
-	ReasoningEffort                                *string        `json:"reasoning_effort"`
-	AccountLabel                                   *string        `json:"account_label"`
-	HarnessVersion                                 *string        `json:"harness_version"`
-	Brief                                          *string        `json:"brief"`
-	Worktree                                       *string        `json:"worktree"`
-	Branch                                         *string        `json:"branch"`
-	Commits                                        []Commit       `json:"commits"`
-	ActivityNote                                   *string        `json:"activity_note"`
-	ActivityHistory                                []ActivityNote `json:"activity_history,omitempty"`
-	Management                                     string         `json:"management_mode"`
-	Role                                           string         `json:"role"`
-	WorkShape                                      string         `json:"work_shape"`
-	Capabilities                                   []string       `json:"advertised_capabilities"`
-	Phase                                          string         `json:"phase"`
-	Activity                                       string         `json:"activity"`
-	ActivitySequence                               int64          `json:"activity_sequence"`
-	Revision                                       int64          `json:"revision"`
-	HeartbeatAt                                    *time.Time     `json:"heartbeat_at"`
-	StoppedAt                                      *time.Time     `json:"stopped_at"`
-	StopReason                                     *string        `json:"stop_reason"`
-	CreatedAt                                      time.Time      `json:"created_at"`
+	ID                                             string            `json:"id"`
+	ProjectID                                      string            `json:"project_id"`
+	AgentPrincipalID                               string            `json:"agent_principal_id"`
+	RunID                                          *string           `json:"run_id"`
+	TicketNodeID                                   *string           `json:"ticket_node_id"`
+	WorkOrderID                                    *string           `json:"work_order_id"`
+	ParentID                                       *string           `json:"parent_harness_session_id"`
+	Harness                                        string            `json:"harness"`
+	Host                                           string            `json:"host"`
+	DisplayLabel                                   *string           `json:"display_label"`
+	Model                                          *string           `json:"model"`
+	ReasoningEffort                                *string           `json:"reasoning_effort"`
+	AccountLabel                                   *string           `json:"account_label"`
+	HarnessVersion                                 *string           `json:"harness_version"`
+	Brief                                          *string           `json:"brief"`
+	Worktree                                       *string           `json:"worktree"`
+	Branch                                         *string           `json:"branch"`
+	Commits                                        []Commit          `json:"commits"`
+	ActivityNote                                   *string           `json:"activity_note"`
+	ActivityHistory                                []ActivityNote    `json:"activity_history,omitempty"`
+	MetadataHistory                                *[]MetadataChange `json:"metadata_history,omitempty"`
+	Management                                     string            `json:"management_mode"`
+	Role                                           string            `json:"role"`
+	WorkShape                                      string            `json:"work_shape"`
+	Capabilities                                   []string          `json:"advertised_capabilities"`
+	Phase                                          string            `json:"phase"`
+	Activity                                       string            `json:"activity"`
+	ActivitySequence                               int64             `json:"activity_sequence"`
+	Revision                                       int64             `json:"revision"`
+	HeartbeatAt                                    *time.Time        `json:"heartbeat_at"`
+	StoppedAt                                      *time.Time        `json:"stopped_at"`
+	StopReason                                     *string           `json:"stop_reason"`
+	CreatedAt                                      time.Time         `json:"created_at"`
 	refDigest, leaseDigest, registrationMetaDigest []byte
 }
 
 type ActivityNote struct {
 	Note string    `json:"note"`
 	At   time.Time `json:"at"`
+}
+
+type MetadataChange struct {
+	Field         string    `json:"field"`
+	PreviousValue *string   `json:"previous_value"`
+	Value         *string   `json:"value"`
+	At            time.Time `json:"at"`
 }
 
 type Commit struct {
@@ -621,6 +629,25 @@ func (m *Module) status(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, er
 	if err != nil {
 		return nil, err
 	}
+	changeRows, err := tx.Query(r.Context(), `SELECT field,previous_value,value,created_at FROM harness_metadata_changes WHERE session_id=$1 ORDER BY id DESC LIMIT 20`, s.ID)
+	if err != nil {
+		return nil, err
+	}
+	history := []MetadataChange{}
+	for changeRows.Next() {
+		var change MetadataChange
+		if err = changeRows.Scan(&change.Field, &change.PreviousValue, &change.Value, &change.At); err != nil {
+			changeRows.Close()
+			return nil, err
+		}
+		history = append(history, change)
+	}
+	err = changeRows.Err()
+	changeRows.Close()
+	if err != nil {
+		return nil, err
+	}
+	s.MetadataHistory = &history
 	evidence, err := readStateEvidence(r.Context(), tx, []string{s.ID})
 	s.StateEvidence = evidence[s.ID]
 	return s, err
@@ -709,10 +736,11 @@ func (m *Module) bind(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, erro
 }
 func (m *Module) heartbeat(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
 	var in struct {
-		Phase            string  `json:"phase"`
-		Activity         string  `json:"activity"`
-		ActivitySequence int64   `json:"activity_sequence"`
-		ActivityNote     *string `json:"activity_note"`
+		Phase            string          `json:"phase"`
+		Activity         string          `json:"activity"`
+		ActivitySequence int64           `json:"activity_sequence"`
+		ActivityNote     *string         `json:"activity_note"`
+		DisplayLabel     json.RawMessage `json:"display_label"`
 		sessionText
 		Commits []Commit `json:"commits"`
 	}
@@ -749,6 +777,25 @@ func (m *Module) heartbeat(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 	if err := in.sessionText.normalize(); err != nil {
 		return nil, err
 	}
+	label := s.DisplayLabel
+	if in.DisplayLabel != nil {
+		if string(in.DisplayLabel) == "null" {
+			label = nil
+		} else {
+			var raw string
+			if err := json.Unmarshal(in.DisplayLabel, &raw); err != nil {
+				return nil, workorders.Fail(400, "invalid display label")
+			}
+			clean := strings.TrimSpace(raw)
+			if !utf8.ValidString(raw) || utf8.RuneCountInString(clean) > 128 || strings.ContainsFunc(raw, unicode.IsControl) {
+				return nil, workorders.Fail(400, "display label must be at most 128 characters without control characters")
+			}
+			label = nil
+			if clean != "" {
+				label = &clean
+			}
+		}
+	}
 	if err := validCommits(in.Commits); err != nil {
 		return nil, err
 	}
@@ -762,8 +809,11 @@ func (m *Module) heartbeat(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 	if err != nil {
 		return nil, err
 	}
-	s, err = scanSession(tx.QueryRow(ctx, `UPDATE harness_sessions SET phase=$2,activity=$3,activity_sequence=$4,heartbeat_at=clock_timestamp(),activity_note=$5,model=coalesce($6,model),reasoning_effort=coalesce($7,reasoning_effort),account_label=coalesce($8,account_label),harness_version=coalesce($9,harness_version),brief=coalesce($10,brief),worktree=coalesce($11,worktree),branch=coalesce($12,branch),commits=$13::jsonb WHERE id=$1 RETURNING `+sessionColumns, s.ID, in.Phase, in.Activity, in.ActivitySequence, note, in.Model, in.ReasoningEffort, in.AccountLabel, in.HarnessVersion, in.Brief, in.Worktree, in.Branch, string(commits)))
+	s, err = scanSession(tx.QueryRow(ctx, `UPDATE harness_sessions SET phase=$2,activity=$3,activity_sequence=$4,heartbeat_at=clock_timestamp(),activity_note=$5,model=coalesce($6,model),reasoning_effort=coalesce($7,reasoning_effort),account_label=coalesce($8,account_label),harness_version=coalesce($9,harness_version),brief=coalesce($10,brief),worktree=coalesce($11,worktree),branch=coalesce($12,branch),commits=$13::jsonb,display_label=$14 WHERE id=$1 RETURNING `+sessionColumns, s.ID, in.Phase, in.Activity, in.ActivitySequence, note, in.Model, in.ReasoningEffort, in.AccountLabel, in.HarnessVersion, in.Brief, in.Worktree, in.Branch, string(commits), label))
 	if err != nil {
+		return nil, err
+	}
+	if err := recordMetadataChanges(ctx, tx, p.TenantID, before, s); err != nil {
 		return nil, err
 	}
 	if changed && note != nil {

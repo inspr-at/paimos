@@ -56,6 +56,51 @@ func usageResult(t *testing.T, w *httptest.ResponseRecorder) (harness.SessionMod
 	return out.Usage, out.Replayed
 }
 
+func TestUsageModelAndAccountLabelLimits(t *testing.T) {
+	f := fixture(t)
+	path, _, lease := usageSession(t, f, "unmanaged")
+	model := strings.Repeat("m", 128)
+	label := strings.Repeat("界", 128) // Limit is Unicode code points, as for session metadata.
+	price := map[string]any{"model": model, "version": 1,
+		"input_usd_per_million": "1", "output_usd_per_million": "1", "cached_input_usd_per_million": "1"}
+	expect(t, f.call(f.person, "POST", "/api/model-prices", price, ""), 201)
+	expect(t, f.call(f.person, "GET", "/api/model-prices?model="+model, nil, ""), 200)
+	report := usagePayload()
+	report["model"], report["account_label"] = model, label
+	out, _ := usageResult(t, f.call(f.agent, "POST", path+"/usage", report, lease))
+	if out.Model != model || out.AccountLabel == nil || *out.AccountLabel != label || out.PriceVersion == nil || *out.PriceVersion != 1 {
+		t.Fatalf("128-character model/account label or price was lost: %+v", out)
+	}
+	w := f.call(f.person, "GET", path+"/usage", nil, "")
+	expect(t, w, 200)
+	items := decode(t, w)["items"].([]any)
+	if len(items) != 1 || items[0].(map[string]any)["account_label"] != label {
+		t.Fatal("stored 128-character account label was not returned")
+	}
+	for _, tc := range []struct {
+		name  string
+		field string
+		value string
+	}{
+		{"model 129", "model", model + "m"},
+		{"model invalid character", "model", "valid@model"},
+		{"account label 129 code points", "account_label", label + "界"},
+		{"account label control", "account_label", "public\nlabel"},
+		{"account label untrimmed", "account_label", " public"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			invalid := usagePayload()
+			invalid[tc.field] = tc.value
+			expect(t, f.call(f.agent, "POST", path+"/usage", invalid, lease), 400)
+		})
+	}
+	for _, invalidModel := range []string{model + "m", "valid@model"} {
+		price["model"] = invalidModel
+		expect(t, f.call(f.person, "POST", "/api/model-prices", price, ""), 400)
+		expect(t, f.call(f.person, "GET", "/api/model-prices?model="+invalidModel, nil, ""), 400)
+	}
+}
+
 func TestUsageReportingLifecycle(t *testing.T) {
 	f := fixture(t)
 	expect(t, usagePrice(t, f, 1, "2.5"), 201)

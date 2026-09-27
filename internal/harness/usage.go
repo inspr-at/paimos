@@ -68,7 +68,7 @@ type usageReportResult struct {
 }
 
 func validUsageModel(model string) bool {
-	return len(model) <= 120 && usageModelRE.MatchString(model)
+	return len(model) <= 128 && usageModelRE.MatchString(model)
 }
 
 func usageLabel(label *string, max int) bool {
@@ -99,7 +99,7 @@ func (in *usageReport) validate() error {
 		normalized := strings.ToLower(*in.AccountID)
 		in.AccountID = &normalized
 	}
-	if !usageLabel(in.AccountLabel, 60) || !usageLabel(in.SubscriptionLabel, 120) {
+	if !usageLabel(in.AccountLabel, 128) || !usageLabel(in.SubscriptionLabel, 120) {
 		return workorders.Fail(400, "invalid public account or subscription label")
 	}
 	if in.BillingMode != "unknown" && in.BillingMode != "api" && in.BillingMode != "subscription" {
