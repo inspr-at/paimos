@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { advanceActivity, liveState, agentKey, byLead, chipText, elapsedFor, groupLive, liveChanges, liveSummary, phrase, sameLive, skewOf, who, type LiveAgent } from '../src/lib/liveAgents.ts'
+import { advanceActivity, liveState, agentKey, byLead, chipText, elapsedFor, groupLive, isListedTicketWorker, liveChanges, liveSummary, phrase, sameLive, skewOf, ticketWorkers, who, type LiveAgent } from '../src/lib/liveAgents.ts'
 import { DEFAULT_AGENT_STATE } from '../src/lib/agentSignals.ts'
 
 const now = Date.parse('2026-09-26T12:00:00Z')
@@ -85,6 +85,7 @@ test('sameLive preserves evidence changes for glints and state changes for label
   assert.ok(!sameLive(a, new Map([['p1', [agent({ heartbeat_at: ago(5) })]]])))
   assert.ok(!sameLive(a, new Map([['p1', [agent({ activity_note_id: 2 })]]])))
   assert.ok(!sameLive(a, new Map([['p1', [agent({ state: 'stale' })]]])))
+  assert.ok(!sameLive(a, new Map([['p1', [agent({ display_label: 'grok-ta1' })]]])))
   assert.ok(!sameLive(a, new Map([['p1', [agent({ ticket: { id: 't2', key: 'HAUSV-888', title: 'Other', project_id: 'p1' } })]]])))
   assert.ok(!sameLive(a, new Map([['p1', [agent(), agent({ session_id: 's2' })]]])))
   assert.ok(!sameLive(a, new Map([['p2', [agent()]]])))
@@ -124,4 +125,58 @@ test('stale evidence neither leads current work nor claims that a session stoppe
   assert.equal(liveChanges(at(agent()), at(stale), () => 'Project'), 'No recent activity from hausv on Project.')
   assert.equal(liveChanges(at(stale), at(agent()), () => 'Project'), 'Activity resumed for hausv on Project.')
   assert.equal(liveChanges(new Map(), at(stale), () => 'Project'), '')
+})
+
+test('ticket workers match this project and ticket, and omit stopped or archived sessions', () => {
+  const ticket = { id: 't1', key: 'PHAROS-14', title: 'Pill', project_id: 'p1' }
+  const working = agent({ session_id: 'work', ticket })
+  const waiting = agent({ session_id: 'wait', name: 'wren', needs_attention: true, since: ago(60), ticket })
+  const problem = agent({ session_id: 'bad', name: 'fault', has_problem: true, ticket })
+  const stale = agent({ session_id: 'quiet', name: 'quiet', activity: 'idle', heartbeat_at: ago(10 * 60), ticket })
+  const heartbeatOnly = agent({ session_id: 'beat', name: 'beat', activity: 'idle', heartbeat_at: ago(20), ticket })
+  const stopped = agent({ session_id: 'stop', name: 'retired', phase: 'stopped', activity: 'idle', stopped_at: ago(30), stop_reason: 'completed', ticket })
+  const failedStop = agent({ session_id: 'fail', name: 'crashed', phase: 'stopped', activity: 'idle', stopped_at: ago(30), has_problem: true, stop_reason: 'error: failed', ticket })
+  const archived = agent({ session_id: 'arch', name: 'old', phase: 'stopped', activity: 'idle', stopped_at: ago(30), stop_reason: 'archived_process_unknown', ticket })
+  const moved = agent({ session_id: 'moved', project_id: 'p1', ticket: { ...ticket, project_id: 'p2' } })
+  const otherProject = agent({ session_id: 'other', project_id: 'p2', ticket: { ...ticket, project_id: 'p2' } })
+  const duplicate = agent({ session_id: 'work', ticket })
+  const nameless = agent({ session_id: undefined, principal_id: undefined, name: undefined, harness: 'codex', ticket })
+  const grouped = groupLive([working, waiting, problem, stale, heartbeatOnly, stopped, failedStop, archived, moved, otherProject, duplicate, nameless], now)
+  assert.equal(liveState(heartbeatOnly, now), 'idle')
+  assert.equal(liveState(stale, now), 'stale')
+  assert.equal(liveState(problem, now), 'problem')
+  assert.equal(liveState(stopped, now), 'stopped')
+  assert.equal(isListedTicketWorker(grouped.get('p1')!.find(a => a.session_id === 'stop')!), false)
+  assert.equal(isListedTicketWorker(grouped.get('p1')!.find(a => a.session_id === 'fail')!), false)
+  assert.equal(isListedTicketWorker(grouped.get('p1')!.find(a => a.session_id === 'arch')!), false)
+  const listed = ticketWorkers(grouped.get('p1')!, 'p1')
+  assert.deepEqual(listed.get('t1')!.map(a => a.session_id ?? a.harness), ['bad', 'wait', 'codex', 'work', 'beat', 'quiet'])
+  assert.equal(listed.get('t1')!.find(a => a.session_id === 'quiet')!.state, 'stale')
+  assert.equal(listed.get('t1')!.find(a => a.session_id === 'beat')!.state, 'idle')
+  assert.equal(who(listed.get('t1')!.find(a => a.harness === 'codex' && !a.session_id)!), 'Codex agent')
+  assert.equal(ticketWorkers(grouped.get('p1')!, 'p2').size, 0)
+  assert.equal(ticketWorkers(grouped.get('p2') ?? [], 'p1').size, 0)
+  const rebound = ticketWorkers(groupLive([agent({ session_id: 'work', ticket: { id: 't2', key: 'PHAROS-11', title: 'Other', project_id: 'p1' } })], now).get('p1')!, 'p1')
+  assert.equal(rebound.get('t1'), undefined)
+  assert.equal(rebound.get('t2')![0]!.session_id, 'work')
+})
+
+test('shared principal keeps distinct session labels and does not invent a withheld one', () => {
+  const shared = { principal_id: 'coord', name: 'aeon-coordinator' }
+  const ticket = { id: 't1', key: 'AEON-233', title: 'Workers', project_id: 'p1' }
+  const first = agent({ ...shared, session_id: 's-a', display_label: 'grok-ta1', ticket })
+  const second = agent({ ...shared, session_id: 's-b', display_label: 'grok-ta2', since: ago(60), ticket })
+  const unlabeled = agent({ ...shared, session_id: 's-c', ticket })
+  const withheld = agent({ session_id: undefined, principal_id: undefined, name: undefined, display_label: undefined, harness: 'codex', ticket })
+  assert.equal(who(first), 'grok-ta1')
+  assert.equal(who(second), 'grok-ta2')
+  assert.equal(unlabeled.display_label, undefined)
+  assert.equal(who(unlabeled), 'aeon-coordinator')
+  assert.equal(who(agent({ ...shared, display_label: '   ' })), 'aeon-coordinator')
+  assert.equal(who(withheld), 'Codex agent')
+  assert.equal(withheld.display_label, undefined)
+  const listed = ticketWorkers(groupLive([first, second, unlabeled, withheld], now).get('p1')!, 'p1').get('t1')!
+  assert.deepEqual(listed.map(who).sort(), ['Codex agent', 'aeon-coordinator', 'grok-ta1', 'grok-ta2'])
+  assert.equal(listed.find(worker => worker.session_id === 's-c')!.display_label, undefined)
+  assert.deepEqual(listed.filter(worker => worker.principal_id === 'coord').map(worker => worker.session_id).sort(), ['s-a', 's-b', 's-c'])
 })

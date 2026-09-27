@@ -42,8 +42,9 @@ const DROP_ORDER: ColumnId[] = ['estimate', 'cost', 'tags', 'release', 'created'
 const WIDE_EXTRAS: ColumnId[] = ['estimate', 'tags', 'release', 'created', 'epic', 'assignee']
 // The text columns that take spare width on wide tables (their text gets room).
 const GROWS: ColumnId[] = ['epic', 'tags', 'assignee', 'release', 'cost']
-// Which optional values any loaded row has.
-export interface Present { assigned?: boolean; estimate?: boolean; release?: boolean; tags?: boolean }
+// Which optional values any loaded row has. `workers` is live ticket work with
+// no stored assignee; it earns the Assignee column the same way a person does.
+export interface Present { assigned?: boolean; workers?: boolean; estimate?: boolean; release?: boolean; tags?: boolean }
 
 export function orderOf(prefs: ListPrefs | null | undefined): ColumnId[] {
   const valid = (prefs?.order ?? []).filter((id): id is ColumnId => COLUMN_BY_ID.has(id as ColumnId) && !PINNED.includes(id as ColumnId))
@@ -52,14 +53,15 @@ export function orderOf(prefs: ListPrefs | null | undefined): ColumnId[] {
 }
 
 // Wide tables add Assignee, Epic and Created, and Release, Tags and Estimate when
-// some row has one; narrower ones show Assignee only when someone is assigned.
+// some row has one; narrower ones show Assignee when someone is assigned or a
+// live worker is on a loaded ticket.
 export function automaticColumns(tableWidth: number, present: Present = {}): ColumnId[] {
   const out: ColumnId[] = ['key', 'title', 'status', 'priority']
   if (tableWidth >= WIDE_TABLE) {
     const optional: ColumnId[] = [...(present.release ? ['release' as const] : []), ...(present.tags ? ['tags' as const] : []), ...(present.estimate ? ['estimate' as const] : [])]
     return [...out, 'assignee', 'epic', ...optional, 'created', 'updated']
   }
-  if (tableWidth > 900 && present.assigned) out.push('assignee')
+  if (tableWidth > 900 && (present.assigned || present.workers)) out.push('assignee')
   if (tableWidth > 740) out.push('updated')
   return out
 }

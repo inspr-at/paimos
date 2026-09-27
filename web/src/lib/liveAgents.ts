@@ -13,6 +13,9 @@ export interface LiveAgent {
   project_id: string
   // Present only when the caller may open the session / know the agent (AEON-171).
   session_id?: string; principal_id?: string; name?: string
+  // Session label when harness.read at the project included it. Omitted means
+  // withheld or unlabeled; never copy name into it.
+  display_label?: string
   harness: Harness; management_mode: 'managed' | 'unmanaged'; role: 'worker' | 'coordinator'
   phase: 'starting' | 'working' | 'stopping' | 'yielded' | 'stopped'; activity: 'busy' | 'unknown' | 'idle' | 'throttled'
   stopped_at?: string | null; stop_reason?: string | null; run_status?: string | null; needs_attention?: boolean; has_problem?: boolean
@@ -68,7 +71,7 @@ export function groupLive(items: LiveAgent[], serverNow: number, preferences: Ag
 
 // Two readings that show the same thing, including event evidence, so a poll that
 // changes nothing re-renders nothing.
-const shown = (a: LiveAgent) => [a.project_id, a.session_id, a.principal_id, a.name, a.harness, a.role, a.phase, a.activity, a.state, a.ticket?.id, a.ticket?.key, a.ticket?.title, a.ticket?.project_id, a.since, a.heartbeat_at, a.activity_note, a.activity_note_id, a.run_status, a.stop_reason, a.stopped_at, a.needs_attention, a.has_problem].join('\u0000')
+const shown = (a: LiveAgent) => [a.project_id, a.session_id, a.principal_id, a.name, a.display_label, a.harness, a.role, a.phase, a.activity, a.state, a.ticket?.id, a.ticket?.key, a.ticket?.title, a.ticket?.project_id, a.since, a.heartbeat_at, a.activity_note, a.activity_note_id, a.run_status, a.stop_reason, a.stopped_at, a.needs_attention, a.has_problem].join('\u0000')
 export function sameLive(a: Map<string, LiveAgent[]>, b: Map<string, LiveAgent[]>) {
   if (a.size !== b.size) return false
   for (const [id, list] of a) {
@@ -78,9 +81,10 @@ export function sameLive(a: Map<string, LiveAgent[]>, b: Map<string, LiveAgent[]
   return true
 }
 
-// Who: the agent's name, else its harness ("Claude agent") when the caller may
-// not know which agent it is.
-export const who = (agent: LiveAgent) => agent.name || `${harnessLabel(agent.harness)} agent`
+// Who is on screen: the session label when this feed included one, then the
+// principal name the server already permitted. An omitted label is not filled
+// in from the principal, and a withheld identity stays the harness.
+export const who = (agent: LiveAgent) => agent.display_label?.trim() || agent.name?.trim() || `${harnessLabel(agent.harness)} agent`
 export const phaseLabel = (agent: Pick<LiveAgent, 'phase' | 'state'>) => STATE_LABEL[agent.state ?? (agent.phase === 'stopped' ? 'stopped' : 'working')]
 export const elapsedFor = (agent: Pick<LiveAgent, 'since'>, serverNow: number) => duration(serverNow - Date.parse(agent.since))
 
@@ -107,6 +111,36 @@ export function chipText(agents: LiveAgent[]) {
 // One agent across readings: its session, else (a caller who may not know
 // which agent it is) its harness and start, which a session never changes.
 export const agentKey = (agent: LiveAgent) => agent.session_id ?? `${agent.harness}@${agent.since}`
+
+// A session bound to this ticket that the list may name. Stopped and archived
+// sessions are not current work. State is the shared derivation: a heartbeat
+// with no productive phase stays idle or stale and is never treated as working.
+export function isListedTicketWorker(agent: LiveAgent): boolean {
+  if (!agent.ticket) return false
+  if (/archived/i.test(agent.stop_reason ?? '')) return false
+  if (agent.phase === 'stopped' || agent.stopped_at || agent.state === 'stopped') return false
+  return true
+}
+
+// Workers for the project on screen, keyed by the bound ticket. A session whose
+// ticket now lives in another project is left out, and the same session is kept
+// once. Order matches the project chips: attention first, then who started.
+export function ticketWorkers(agents: LiveAgent[], projectId: string): Map<string, LiveAgent[]> {
+  const out = new Map<string, LiveAgent[]>()
+  const seen = new Set<string>()
+  for (const agent of agents) {
+    const ticket = agent.ticket
+    if (!ticket || agent.project_id !== projectId || ticket.project_id !== projectId || !isListedTicketWorker(agent)) continue
+    const id = `${ticket.id}\u0000${agentKey(agent)}`
+    if (seen.has(id)) continue
+    seen.add(id)
+    const list = out.get(ticket.id)
+    if (list) list.push(agent)
+    else out.set(ticket.id, [agent])
+  }
+  for (const list of out.values()) list.sort(byLead)
+  return out
+}
 
 export interface ActivityEvidence { noteID: number; pulse: number }
 // First sight establishes the baseline. A delayed or repeated response can
