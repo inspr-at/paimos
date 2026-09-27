@@ -138,10 +138,11 @@ func (p *codexProcess) waitForTurn(stop func(context.Context) error, timeout tim
 	}
 	if cleanDrain {
 		cleanDrain = p.readErr == nil
-	} else if p.stdout != nil {
+	} else {
 		// A descendant holding stdout open cannot keep a detached reader alive.
 		// Closing locally is loss of evidence, never equivalent to source EOF.
-		_ = p.stdout.Close()
+		p.closeReader()
+		_ = p.finishReader()
 	}
 	p.eventMu.Lock()
 	defer p.eventMu.Unlock()

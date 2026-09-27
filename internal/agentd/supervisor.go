@@ -485,12 +485,18 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) error {
 	if saveErr != nil {
 		_ = entry.tools.Close()
 		_ = proc.Stop(ctx)
+		if stream, ok := proc.(interface{ discardReader() }); ok {
+			stream.discardReader()
+		}
 		closeHarness("process_failed")
 		return saveErr
 	}
 	if err := s.update(ctx, entry, Telemetry{Kind: "started", Status: "running"}); err != nil {
 		_ = entry.tools.Close()
 		_ = proc.Stop(ctx)
+		if stream, ok := proc.(interface{ discardReader() }); ok {
+			stream.discardReader()
+		}
 		closeHarness("process_failed")
 		return err
 	}

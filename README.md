@@ -72,6 +72,11 @@ terminal candidate can wait for the start acknowledgement; duplicate terminals
 or usage after a terminal invalidate completion. Failed start, stream loss or
 drain timeout cannot publish final receipts. An archived generation (410) detaches
 the reporter without signalling the process; existing run settlement continues.
+Managed adapter completion and failed starts release their owned stdout reader
+even when another writer keeps the pipe open. Cleanup suppresses further stream
+callbacks and bounds the wait for an in-flight callback; local closure never proves EOF
+for a final Codex receipt. `Stop` keeps its process-only role so an observer can
+call it without waiting on itself.
 The reporter retains bounded normalized state in memory, never raw output or
 worker leases on disk. Restart/crash recovery and external worker capture remain
 separate work; an unavailable endpoint can leave the last snapshot provisional.

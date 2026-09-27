@@ -42,7 +42,7 @@ func newCodexLifecycleFixture(t *testing.T) *codexLifecycleFixture {
 	}
 	input := codexSyntheticInput{requests: make(chan []byte, 1)}
 	f := &codexLifecycleFixture{output: writer, processed: make(chan struct{}, 32), start: make(chan error, 1)}
-	wire := &wireProcess{stdin: input, pending: map[string]chan json.RawMessage{}, threadID: "synthetic-thread", protocol: "jsonrpc", readDone: make(chan struct{}), waitDone: make(chan struct{})}
+	wire := &wireProcess{stdin: input, stdout: reader, pending: map[string]chan json.RawMessage{}, threadID: "synthetic-thread", protocol: "jsonrpc", readDone: make(chan struct{}), waitDone: make(chan struct{})}
 	wire.observe = func(e AdapterEvent) {
 		if e.SessionUsage != nil {
 			f.mu.Lock()
@@ -257,7 +257,14 @@ func TestCodexDrainRequiresEOFAndOwnedExit(t *testing.T) {
 			f.assertProvisional(t)
 			// Timeout seals provisional exactly once; a delayed frame cannot revise it.
 			if mode == "drain_timeout" {
-				f.emit(t, lifecycleTerminal)
+				select {
+				case <-f.proc.readDone:
+				default:
+					t.Fatal("timed out reader was not joined")
+				}
+				if _, err := io.WriteString(f.output, lifecycleTerminal+"\n"); err == nil {
+					t.Fatal("timed out reader still accepts frames")
+				}
 				f.assertProvisional(t)
 				_ = f.output.Close()
 				if err := f.proc.waitForTurn(func(context.Context) error { return nil }, time.Second); err == nil {

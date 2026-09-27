@@ -145,7 +145,7 @@ func (a *CodexAdapter) Start(ctx context.Context, r StartRequest, observe func(A
 	}
 	cp := &codexProcess{wireProcess: p, done: make(chan bool, 1)}
 	p.setOnEvent(cp.notification)
-	fail := func(e error) (Process, error) { _ = p.Stop(context.Background()); return nil, e }
+	fail := p.failStart
 	op, cancel := operationContext(ctx)
 	defer cancel()
 	if _, err := p.request(op, "jsonrpc", "initialize", map[string]any{"clientInfo": map[string]string{"name": "aeon-agentd", "title": "AEON agentd", "version": "1"}, "capabilities": map[string]any{"experimentalApi": true}}); err != nil {
@@ -347,12 +347,10 @@ func (a *PiAdapter) Start(ctx context.Context, r StartRequest, observe func(Adap
 	op, cancel := operationContext(ctx)
 	defer cancel()
 	if err := pp.verify(op); err != nil {
-		_ = p.Stop(context.Background())
-		return nil, err
+		return p.failStart(err)
 	}
 	if _, err := p.request(op, "pi", "prompt", map[string]any{"message": r.Prompt}); err != nil {
-		_ = p.Stop(context.Background())
-		return nil, err
+		return p.failStart(err)
 	}
 	observe(AdapterEvent{Kind: "turn", TurnCountDelta: 1, EffectiveModel: r.Profile.Model, ModelEvidence: "vendor_reported"})
 	return pp, nil
@@ -382,7 +380,8 @@ func (p *cursorProcess) finish(err error) {
 	p.doneOnce.Do(func() { p.terminalErr = err; close(p.done) })
 }
 
-func (p *cursorProcess) Wait() error {
+func (p *cursorProcess) Wait() (err error) {
+	defer func() { err = errors.Join(err, p.finishReader()) }()
 	select {
 	case <-p.done:
 	case <-p.waitDone:
@@ -480,7 +479,7 @@ func (a *CursorAdapter) Start(ctx context.Context, r StartRequest, observe func(
 			}()
 		}
 	})
-	fail := func(e error) (Process, error) { _ = p.Stop(context.Background()); return nil, e }
+	fail := p.failStart
 	raw, err := p.request(op, "jsonrpc", "initialize", map[string]any{"protocolVersion": 1, "clientCapabilities": map[string]any{"fs": map[string]bool{"readTextFile": false, "writeTextFile": false}, "terminal": false}, "clientInfo": map[string]string{"name": "aeon-agentd", "title": "AEON agentd", "version": "1"}})
 	var init struct {
 		ProtocolVersion int `json:"protocolVersion"`
@@ -666,8 +665,7 @@ func (a *ClaudeAdapter) Start(ctx context.Context, r StartRequest, observe func(
 		}
 	})
 	if err := p.send(map[string]any{"op": "start", "prompt": r.Prompt, "model": r.Profile.Model, "effort": r.Profile.Effort, "correlation_id": "initial", "tools": r.Tools}); err != nil {
-		_ = p.Stop(context.Background())
-		return nil, err
+		return p.failStart(err)
 	}
 	op, cancel := operationContext(ctx)
 	defer cancel()
@@ -676,9 +674,8 @@ func (a *ClaudeAdapter) Start(ctx context.Context, r StartRequest, observe func(
 		started = true
 		return cp, nil
 	case <-op.Done():
-		_ = p.Stop(context.Background())
-		return nil, fmt.Errorf("Claude bridge readiness: %w", op.Err())
+		return p.failStart(fmt.Errorf("Claude bridge readiness: %w", op.Err()))
 	case <-p.readDone:
-		return nil, errors.New("Claude bridge ended before readiness")
+		return p.failStart(errors.New("Claude bridge ended before readiness"))
 	}
 }
