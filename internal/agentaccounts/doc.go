@@ -30,6 +30,7 @@
 // grants. Explicit grants are checked at run creation, reservation and claim.
 // A grant change does not stop already owned runs. Metadata is audited and an
 // identical retry is a no-op. Credentials, home paths and identities stay local.
+// Display labels accept up to 128 Unicode characters, matching session metadata.
 //
 // Agentd's local account enrollment accepts an optional metadata object with
 // exactly those four fields and publishes it once on daemon startup. Owner
@@ -43,7 +44,9 @@
 // allowance. Eligible accounts are ordered by projected
 // (used+reserved+estimate)/allowance, then by account id. Reservations for
 // every active window commit with run.account_id or not at all. A repeated
-// route returns that same choice.
+// route returns that same choice. While a run is queued, retries recheck its
+// account state, probe, profile and grants; revoked eligibility returns conflict
+// without rerouting or releasing the held reservation.
 //
 // Settle and Release run inside the caller's db.InTenant transaction. Settle
 // turns monotonic telemetry sums into used units and is idempotent per

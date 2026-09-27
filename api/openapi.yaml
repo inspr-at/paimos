@@ -2234,7 +2234,7 @@ paths:
   /agent-accounts/route:
     post:
       operationId: reserveAgentAccount
-      description: Atomically select an eligible account enrolled on the requesting daemon for a queued run and reserve allowance. Routing uses remaining allowance, recent usage, pace target and active run count; fail closed when estimates are absent or no account fits. The daemon resolves the opaque key to its local credential.
+      description: Atomically select an eligible account enrolled on the requesting daemon for a queued run and reserve allowance. Routing uses remaining allowance, recent usage, pace target and active run count; fail closed when estimates are absent or no account fits. Queued retries recheck account state, probe, enabled profile and grants, returning conflict without changing a held reservation or falling back. The daemon resolves the opaque key to its local credential.
       security: [{agentKey: []}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/AccountRouteRequest'}}}}
       responses:

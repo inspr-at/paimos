@@ -27,14 +27,18 @@ func TestCatalogCascadeMetadataAndRouting(t *testing.T) {
 	foreignProfile := codexProfile(t, foreign)
 	token := issueKey(t, runner, []string{"account.manage"})
 	mod := accountsMod()
+	callStatus(t, mod, &runner, token, "GET", "/api/agent-accounts/catalog", "", 403, nil)
 	seed := func(fn func(pgx.Tx) error) {
 		t.Helper()
 		if err := db.InTenant(dbtest.Seed(t.Context()), appPool, admin.TenantID, fn); err != nil {
 			t.Fatal(err)
 		}
 	}
-	var otherProfile, wrongHarness string
+	var otherProfile, wrongHarness, disabled string
 	seed(func(tx pgx.Tx) error {
+		if err := tx.QueryRow(t.Context(), `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier,enabled) VALUES($1,'disabled','1','codex','openai','disabled-model','high','standard',false) RETURNING id::text`, admin.TenantID).Scan(&disabled); err != nil {
+			return err
+		}
 		if err := tx.QueryRow(t.Context(), `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier) VALUES($1,'second','1','codex','openai','second-model','high','standard') RETURNING id::text`, admin.TenantID).Scan(&otherProfile); err != nil {
 			return err
 		}
@@ -61,7 +65,7 @@ func TestCatalogCascadeMetadataAndRouting(t *testing.T) {
 		return string(b)
 	}
 	path := "/api/agent-accounts/" + a.ID + "/metadata"
-	for _, ids := range [][]string{nil, {profile, profile}, {foreignProfile}, {wrongHarness}, {"invalid"}} {
+	for _, ids := range [][]string{nil, {profile, profile}, {foreignProfile}, {wrongHarness}, {disabled}, {"invalid"}} {
 		callStatus(t, mod, &admin, "", "PUT", path, metadata(ids), 400, nil)
 	}
 	callStatus(t, mod, &admin, "", "PUT", path, strings.Replace(metadata([]string{profile}), `"plan":"Pro"`, `"plan":"sk-synthetic-rejected"`, 1), 400, nil)
@@ -105,6 +109,9 @@ func TestCatalogCascadeMetadataAndRouting(t *testing.T) {
 	if strings.Contains(string(raw), "account_key") || strings.Contains(string(raw), "local-a") {
 		t.Fatal("local routing key leaked into UI catalog")
 	}
+	if strings.Contains(string(raw), disabled) || strings.Contains(string(raw), "disabled-model") {
+		t.Fatal("disabled profile offered in catalog")
+	}
 	callStatus(t, mod, &member, "", "GET", "/api/agent-accounts/catalog", "", 403, nil)
 	callStatus(t, mod, nil, "", "GET", "/api/agent-accounts/catalog", "", 401, nil)
 	for _, query := range []string{"?role=invalid", "?role=review-gate", "?author_family=invalid"} {
@@ -119,7 +126,12 @@ func TestCatalogCascadeMetadataAndRouting(t *testing.T) {
 		t.Fatal("catalog crossed tenant boundary")
 	}
 	// A forbidden profile cannot reserve even with fresh probes and free allowance.
-	run := insertRun(t, admin, runner, otherProfile)
+	run := insertRun(t, admin, runner, disabled)
+	callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts/route", routeBody(t, run, "daemon-a", []Account{a, b}, map[string]int64{"requests": 1}), 409, nil)
+	if scalar(t, admin, `SELECT count(*) FROM account_reservations WHERE run_id=$1`, run) != 0 {
+		t.Fatal("disabled model silently fell back or reserved allowance")
+	}
+	run = insertRun(t, admin, runner, otherProfile)
 	callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts/route", routeBody(t, run, "daemon-a", []Account{a}, map[string]int64{"requests": 1}), 409, nil)
 	if scalar(t, admin, `SELECT count(*) FROM account_reservations WHERE run_id=$1`, run) != 0 {
 		t.Fatal("denied profile reserved")
@@ -159,6 +171,53 @@ func TestCatalogCascadeMetadataAndRouting(t *testing.T) {
 	for _, item := range catalog.Hosts[0].Harnesses[0].Accounts {
 		if item.ID == a.ID && len(item.Models) != 1 {
 			t.Fatal("expired suppression still applied")
+		}
+	}
+	fullLabel := strings.Repeat("界", 128)
+	body := strings.Replace(metadata([]string{profile}), "Work subscription", fullLabel, 1)
+	callStatus(t, mod, &admin, "", "PUT", path, body, 200, &a)
+	if a.Label != fullLabel {
+		t.Fatal("full-length label did not survive storage")
+	}
+	callStatus(t, mod, &admin, "", "PUT", path, strings.Replace(body, fullLabel, fullLabel+"x", 1), 400, nil)
+}
+
+func TestCatalogDefaultUsesOfferedProfileAndDeterministicAccount(t *testing.T) {
+	now := time.Now()
+	yes, priority := true, 1
+	base := Account{DaemonID: "host", Harness: "codex", State: "available", MaxParallel: 1, LastProbeAt: &now, LastProbeOK: &yes,
+		Windows: []Window{{Allowance: 100, StartsAt: now.Add(-time.Hour), EndsAt: now.Add(time.Hour), PaceModel: "unrestricted"}}}
+	first, second := base, base
+	first.ID, first.AllowedProfileIDs = "a", []string{"allowed"}
+	second.ID, second.AllowedProfileIDs = "b", []string{"allowed"}
+	profiles := []catalogProfile{
+		{ID: "denied", Harness: "codex", Model: "denied-model", Effort: "high", Priority: &priority},
+		{ID: "allowed", Harness: "codex", Model: "allowed-model", Effort: "high"},
+	}
+	got := buildCatalog([]Account{second, first}, profiles, nil, "build", now).Hosts[0].Harnesses[0]
+	if got.DefaultAccountID == nil || *got.DefaultAccountID != first.ID {
+		t.Fatal("equal allowances did not use deterministic account ID tie-break")
+	}
+	for _, a := range got.Accounts {
+		if a.DefaultProfileID != nil || len(a.Models) != 1 || a.Models[0].Efforts[0].ProfileID != "allowed" {
+			t.Fatal("catalog invented a default or offered an ungranted profile")
+		}
+	}
+	profiles[1].Priority = &priority
+	got = buildCatalog([]Account{second, first}, profiles, map[string]int{"a": 1}, "build", now).Hosts[0].Harnesses[0]
+	if got.DefaultAccountID == nil || *got.DefaultAccountID != second.ID || got.Accounts[1].DefaultProfileID == nil || *got.Accounts[1].DefaultProfileID != "allowed" {
+		t.Fatal("catalog default ignored capacity or the account's eligible role route")
+	}
+}
+
+func TestAccountMetadataCharacterBoundary(t *testing.T) {
+	for _, value := range []string{strings.Repeat("a", 128), strings.Repeat("界", 128)} {
+		got, err := metadataText(value, false)
+		if err != nil || got != value {
+			t.Fatal("128-character metadata was rejected or changed")
+		}
+		if _, err := metadataText(value+"x", false); err == nil {
+			t.Fatal("129-character metadata accepted")
 		}
 	}
 }

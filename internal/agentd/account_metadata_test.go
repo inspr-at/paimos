@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -51,6 +52,14 @@ func TestAccountMetadataPublishesOnlyExplicitProjection(t *testing.T) {
 	}
 	if requests != 1 {
 		t.Fatal("invalid metadata left the daemon")
+	}
+	metadata.Label, metadata.Plan, metadata.HostLabel = strings.Repeat("界", 128), strings.Repeat("界", 128), strings.Repeat("界", 128)
+	if err := r.PublishAccountMetadata(t.Context(), "account", metadata); err != nil {
+		t.Fatal("full-length Unicode metadata was rejected")
+	}
+	metadata.Label += "x"
+	if err := r.PublishAccountMetadata(t.Context(), "account", metadata); err == nil || requests != 2 {
+		t.Fatal("overlong metadata reached the server")
 	}
 }
 

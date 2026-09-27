@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 )
 
 // PublishAccountMetadata accepts only an explicit display/grant projection.
@@ -18,7 +19,7 @@ func (r *Remote) PublishAccountMetadata(ctx context.Context, accountID string, m
 		return errors.New("invalid account metadata")
 	}
 	for _, value := range []string{metadata.Label, metadata.Plan, metadata.HostLabel} {
-		if len(value) > 128 || strings.ContainsFunc(value, unicode.IsControl) {
+		if !utf8.ValidString(value) || utf8.RuneCountInString(value) > 128 || strings.ContainsFunc(value, unicode.IsControl) {
 			return errors.New("invalid account metadata")
 		}
 	}

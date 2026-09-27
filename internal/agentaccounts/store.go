@@ -171,7 +171,7 @@ func registerAccount(ctx context.Context, tx pgx.Tx, p tenant.Principal, in acco
 	if err != nil {
 		return Account{}, fail(http.StatusBadRequest, "invalid daemon id")
 	}
-	label, err := cleanText(in.Label, 128)
+	label, err := metadataText(in.Label, false)
 	if err != nil {
 		return Account{}, fail(http.StatusBadRequest, "invalid label")
 	}

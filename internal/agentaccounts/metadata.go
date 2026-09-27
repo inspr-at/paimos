@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 
@@ -24,7 +25,7 @@ type metadataWrite struct {
 
 func metadataText(value string, empty bool) (string, error) {
 	value = strings.TrimSpace(value)
-	if (!empty && value == "") || len(value) > 128 || strings.ContainsFunc(value, unicode.IsControl) || looksLikeCredential(value) {
+	if (!empty && value == "") || !utf8.ValidString(value) || utf8.RuneCountInString(value) > 128 || strings.ContainsFunc(value, unicode.IsControl) || looksLikeCredential(value) {
 		return "", fail(http.StatusBadRequest, "invalid display metadata")
 	}
 	return value, nil

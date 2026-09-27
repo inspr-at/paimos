@@ -122,7 +122,7 @@ func TestSessionMetadataValidationStorageAndLiveIsolation(t *testing.T) {
 // The account and model registry source bounds must fit session reporting.
 func TestSessionAcceptsFullAccountCatalogLabels(t *testing.T) {
 	f := fixture(t)
-	label, model := strings.Repeat("a", 128), strings.Repeat("m", 128)
+	label, model := strings.Repeat("界", 128), strings.Repeat("m", 128)
 	registration := map[string]any{
 		"agent_principal_id": f.agent.ID, "harness": "codex", "host": "host",
 		"harness_session_ref": "catalog-metadata-reference", "worker_lease": "catalog-metadata-worker-lease-00000001",
@@ -134,7 +134,19 @@ func TestSessionAcceptsFullAccountCatalogLabels(t *testing.T) {
 	if got["account_label"] != label || got["model"] != model {
 		t.Fatal("registry metadata was truncated")
 	}
+	path := "/api/projects/" + f.project + "/harness-sessions/" + got["id"].(string)
+	update := map[string]any{"phase": "working", "activity_sequence": 1, "model": strings.Repeat("n", 128), "account_label": strings.Repeat("é", 128)}
+	expect(t, f.call(f.agent, "POST", path+"/heartbeat", update, registration["worker_lease"].(string)), 200)
+	w = f.call(f.person, "GET", path, nil, "")
+	expect(t, w, 200)
+	detail := decode(t, w)
+	history := detail["metadata_history"].([]any)
+	if detail["account_label"] != update["account_label"] || detail["model"] != update["model"] || len(history) != 1 || history[0].(map[string]any)["value"] != update["model"] {
+		t.Fatal("128-character metadata did not survive heartbeat, detail and model history")
+	}
 	registration["model"] = model + "x"
 	registration["harness_session_ref"] = "catalog-metadata-reference-too-long"
+	expect(t, f.call(f.person, "POST", "/api/projects/"+f.project+"/harness-sessions", registration, ""), 400)
+	registration["model"], registration["account_label"] = model, label+"x"
 	expect(t, f.call(f.person, "POST", "/api/projects/"+f.project+"/harness-sessions", registration, ""), 400)
 }

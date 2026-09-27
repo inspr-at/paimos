@@ -5,6 +5,7 @@ package agentaccounts
 import (
 	"context"
 	"net/http"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -75,6 +76,11 @@ func reserve(ctx context.Context, tx pgx.Tx, r *http.Request, p tenant.Principal
 		enrolled = map[string]bool{*run.RequestedAccountID: true}
 	}
 	if existing, ok, err := activeRoute(ctx, tx, run.ID, p.ID, daemonID, enrolled); err != nil || ok {
+		// A held reservation is not authority to launch after a grant, profile
+		// or account becomes unavailable. Preserve replay for already owned runs.
+		if err == nil && run.Status == "queued" {
+			err = validateReservedAccount(ctx, tx, run, existing.AccountID)
+		}
 		return existing, err
 	}
 	if run.Status != "queued" || (run.AccountID != nil && *run.AccountID != "") {
@@ -140,6 +146,29 @@ func reserve(ctx context.Context, tx pgx.Tx, r *http.Request, p tenant.Principal
 		return RouteResult{}, err
 	}
 	return result, nil
+}
+
+func validateReservedAccount(ctx context.Context, tx pgx.Tx, run runRow, accountID string) error {
+	a, err := lockAccount(ctx, tx, accountID)
+	if err != nil {
+		return err
+	}
+	now, err := dbNow(ctx, tx)
+	if err != nil {
+		return err
+	}
+	if run.ProfileID == nil || a.State != "available" || !probeFresh(a, now) ||
+		(a.AllowedProfileIDs != nil && !slices.Contains(a.AllowedProfileIDs, *run.ProfileID)) {
+		return fail(http.StatusConflict, "reserved account is not eligible")
+	}
+	var enabled bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM model_profiles WHERE id=$1::uuid AND harness=$2 AND enabled)`, *run.ProfileID, a.Harness).Scan(&enabled); err != nil {
+		return err
+	}
+	if !enabled {
+		return fail(http.StatusConflict, "reserved model profile is not eligible")
+	}
+	return nil
 }
 
 func validateEstimates(estimates map[string]int64) error {
