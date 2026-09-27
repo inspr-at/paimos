@@ -6,7 +6,7 @@ import { mockSettings, settingsData } from './settings-fixtures'
 import { STATE_LABEL, type AgentState } from '../src/lib/agentSignals'
 
 export const stateNow = Date.parse('2026-09-23T12:00:00Z')
-export const states: AgentState[] = ['working', 'waiting', 'throttled', 'problem', 'idle', 'stale', 'stopped']
+export const states: AgentState[] = ['working', 'waiting', 'throttled', 'problem', 'idle', 'stale', 'stopped', 'awaiting', 'unresponsive']
 export async function mockStateColours(page: Page, theme: 'light' | 'dark' = 'light') {
   await page.clock.setSystemTime(stateNow)
   const data = fixtures()
@@ -26,9 +26,9 @@ export async function mockStateColours(page: Page, theme: 'light' | 'dark' = 'li
       brief: 'AEON-221', worktree: '/Code/aeon-sc1', branch: 'sc1.state-colours',
       commits: [{ sha: 'abc1234', subject: 'Integrate session states' }],
       phase: state === 'stopped' ? 'stopped' : 'working', activity: state === 'throttled' ? 'throttled' : ['idle', 'stale'].includes(state) ? 'idle' : 'busy',
-      heartbeat_at: new Date(stateNow - (state === 'problem' ? 600_000 : state === 'stale' ? 300_000 : 10_000)).toISOString(),
-      stopped_at: state === 'stopped' ? new Date(stateNow).toISOString() : null, stop_reason: state === 'stopped' ? 'process_exited' : null,
-      needs_attention: state === 'waiting', created_at: new Date(stateNow - 1200_000).toISOString(),
+      heartbeat_at: state === 'awaiting' ? null : new Date(stateNow - (state === 'unresponsive' ? 600_000 : state === 'stale' ? 300_000 : 10_000)).toISOString(),
+      stopped_at: state === 'stopped' ? new Date(stateNow).toISOString() : null, stop_reason: state === 'problem' ? 'worker failed: exit 2' : state === 'stopped' ? 'process_exited' : null,
+      has_problem: state === 'problem', run_status: null, needs_attention: state === 'waiting', created_at: new Date(stateNow - (state === 'awaiting' ? 60_000 : 1200_000)).toISOString(),
     })
   }
   agents.sessions.splice(states.length)

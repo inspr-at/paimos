@@ -30,6 +30,8 @@ for (const theme of ['light', 'dark'] as const) {
     await page.goto('/')
     for (const layout of ['Cards', 'List']) {
       await page.getByRole('radio', { name: `${layout} view`, exact: true }).click()
+      await page.mouse.move(0, 0)
+      expect(new Set(await page.locator('[data-project-id]').evaluateAll(elements => elements.map(el => getComputedStyle(el).backgroundColor))).size).toBe(1)
       for (const state of states) {
         const project = page.locator(`[data-project-id="p-sc1-${state}"]`)
         await expect(project).toHaveAttribute('data-agent-state', state)
@@ -85,7 +87,7 @@ test('per-viewer palettes, opacity and heartbeat thresholds persist and reach ev
   await page.goto('/')
   await expect(page.locator('[data-project-id="p-sc1-stopped"] .live-chip')).toHaveCSS('opacity', '0.7')
   // The ten-minute heartbeat is amber with the saved twelve-minute red threshold.
-  await expect(page.locator('[data-project-id="p-sc1-problem"] .live-bot')).toHaveAttribute('data-state', 'waiting')
+  await expect(page.locator('[data-project-id="p-sc1-unresponsive"] .live-bot')).toHaveAttribute('data-state', 'awaiting')
   await page.goto('/settings/personal#agents')
   await page.getByRole('switch', { name: 'Dim inactive' }).uncheck()
   await expect.poll(() => data.preferences['agent-state']?.dimInactive).toBe(false)
@@ -97,7 +99,8 @@ test('per-viewer palettes, opacity and heartbeat thresholds persist and reach ev
   await expect(page.locator('.row[data-state="stopped"]')).toHaveCSS('opacity', '1')
 })
 
-test('all nine variants render every mark and stop problem/inactive motion', async ({ page }) => {
+test('all nine variants render every mark and stop problem/inactive motion', async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 1600, height: 1100 })
   await page.emulateMedia({ reducedMotion: 'no-preference' })
   await page.goto('/tests/state-colours-gallery.html')
   for (const variant of indicatorVariants) {
@@ -110,4 +113,63 @@ test('all nine variants render every mark and stop problem/inactive motion', asy
   }
   await page.emulateMedia({ reducedMotion: 'reduce' })
   expect(await page.locator('main').evaluate(el => el.getAnimations({ subtree: true }).length)).toBe(0)
+  for (const theme of ['light', 'dark']) {
+    await page.goto(`/tests/state-colours-gallery.html?theme=${theme}`)
+    await expect(page.locator('.sample .live-bot')).toHaveCount(states.length * indicatorVariants.length)
+    await expect(page.locator('.sample[data-variant="robot-5"][data-state="problem"] [data-expression="problem"]')).toBeVisible()
+    await page.screenshot({ path: testInfo.outputPath(`sc2-${theme}-all-states.png`), fullPage: true })
+  }
+})
+
+for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390]) {
+  test(`SC2 ${theme} ${width}: neutral surfaces and grounded state detail`, async ({ page }, testInfo) => {
+    const { data, agents } = await mockStateColours(page, theme)
+    data.preferences['agent-indicator'] = { style: 'robot-5', hovering: false }
+    await page.setViewportSize({ width, height: width === 1600 ? 1000 : 844 })
+    await page.goto('/agents')
+    const tiles = page.locator('.live-now .tile')
+    await expect(tiles).toHaveCount(6)
+    await page.mouse.move(0, 0)
+    const surfaces = await tiles.evaluateAll(elements => elements.map(el => getComputedStyle(el).backgroundColor))
+    expect(new Set(surfaces).size).toBe(1)
+    const rows = page.locator('.row[data-state]:not(.active):not(.selected)')
+    expect(new Set(await rows.evaluateAll(elements => elements.map(el => getComputedStyle(el).backgroundColor))).size).toBe(1)
+    const problem = page.locator('.tile[data-state="problem"]')
+    await expect(problem.locator('[data-expression="problem"]')).toBeVisible()
+    await expect(problem.locator('.smile')).toHaveCount(0)
+    await page.screenshot({ path: testInfo.outputPath(`sc2-${theme}-${width}-agents.png`), fullPage: true })
+    await problem.locator('.tile-open').click()
+    const panel = page.getByRole('complementary', { name: 'Session details' })
+    await expect(panel.locator('.now-step')).toHaveText('Reported stop reason: worker failed: exit 2')
+    await expect(panel.getByRole('region', { name: 'Session state evidence' })).toContainText('Last heartbeat:')
+    await page.screenshot({ path: testInfo.outputPath(`sc2-${theme}-${width}-problem.png`), fullPage: true })
+    await page.getByRole('button', { name: 'Close session details' }).click()
+    const missing = agents.sessions.find(item => item.display_label === 'SC1 unresponsive')!
+    missing.heartbeat_at = null
+    await page.goto(`/agents/${missing.id}`)
+    const evidence = panel.getByRole('region', { name: 'Session state evidence' })
+    await expect(panel.locator('.head-top .agent-state-label')).toHaveText('No heartbeat')
+    await expect(panel.locator('.now-step')).toHaveText('No heartbeat has been received since this session registered.')
+    await expect(evidence).toContainText('does not establish that the worker failed')
+    await expect(evidence).toContainText('Registered')
+    await expect(evidence).toContainText('flagged at 10m')
+    await expect(panel.locator('.now-step')).not.toHaveText('Check the session details')
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+    await page.screenshot({ path: testInfo.outputPath(`sc2-${theme}-${width}-no-heartbeat.png`), fullPage: true })
+  })
+}
+
+test('saved thresholds load before sessions can flash a default heartbeat warning', async ({ page }) => {
+  const { agents } = await mockStateColours(page)
+  const delayed = agents.sessions.find(item => item.display_label === 'SC1 unresponsive')!
+  let release!: () => void
+  const ready = new Promise<void>(resolve => { release = resolve })
+  await page.route('**/api/preferences/agent-state', async route => {
+    await ready
+    await route.fulfill({ json: { value: { yellowMinutes: 15, redMinutes: 20 } } })
+  })
+  await page.goto('/agents')
+  await expect(page.locator(`[data-row="s:${delayed.id}"]`)).toHaveCount(0)
+  release()
+  await expect(page.locator(`[data-row="s:${delayed.id}"]`)).toHaveAttribute('data-state', 'working')
 })
