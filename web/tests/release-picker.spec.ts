@@ -32,6 +32,7 @@ const KNOWN: Record<string, { key: string; title: string; feature: string | null
   'n-21': { key: 'PHAROS-21', title: 'Publish the status page', feature: 'n-epic', type: 'ticket', status: 'backlog' },
 }
 const CLOSED_STATE = new Set(['accepted', 'delivered', 'done', 'cancelled', 'canceled', 'archived', 'closed'])
+type NativeMember = { release_node_id: string | null; release_title: string | null; release_state: string | null }
 
 function epicOf(node: MockNode, nodes: MockNode[]): string | null {
   const parent = nodes.find(item => item.id === node.parent_id)
@@ -44,23 +45,16 @@ function epicOf(node: MockNode, nodes: MockNode[]): string | null {
 // A node the fixture already typed wins. Unknown ids are not silently retitled as tickets.
 function catalog(id: string, nodes: MockNode[] = []): Option {
   const preset = OPTIONS.find(option => option.ticket_node_id === id)
-  if (preset) return preset
   const node = nodes.find(item => item.id === id)
   const known = KNOWN[id]
-  const type = node?.kind_slug ?? known?.type ?? 'ticket'
-  const status = node?.state ?? known?.status ?? 'backlog'
-  const availability = type !== 'ticket' ? 'unsupported' : CLOSED_STATE.has(status) || CLOSED_STATE.has(status.replaceAll('-', '_')) ? 'closed' : 'addable'
+  const type = node?.kind_slug ?? preset?.type ?? known?.type ?? 'unknown'
+  const status = node?.state ?? preset?.status ?? known?.status ?? 'backlog'
+  const availability = type !== 'ticket' ? 'unsupported' : CLOSED_STATE.has(status) || CLOSED_STATE.has(status.replaceAll('-', '_')) ? 'closed' : preset?.availability ?? 'addable'
   return {
-    ticket_node_id: id, key: node?.key ?? known?.key ?? id, title: node?.title ?? known?.title ?? id, status, type,
-    feature_node_id: node ? epicOf(node, nodes) : known?.feature ?? null, release_node_id: null, release_title: null, availability,
+    ticket_node_id: id, key: node?.key ?? preset?.key ?? known?.key ?? id, title: node?.title ?? preset?.title ?? known?.title ?? id, status, type,
+    feature_node_id: node ? epicOf(node, nodes) : preset?.feature_node_id ?? known?.feature ?? null,
+    release_node_id: preset?.release_node_id ?? null, release_title: preset?.release_title ?? null, availability,
   }
-}
-
-function unsupportedKind(ids: string[], nodes: MockNode[]): boolean {
-  return ids.some(id => {
-    const option = catalog(id, nodes)
-    return option.type !== 'ticket' || option.availability === 'unsupported'
-  })
 }
 
 function requestHash(body: Record<string, unknown>): string {
@@ -68,15 +62,50 @@ function requestHash(body: Record<string, unknown>): string {
   return JSON.stringify({ action: body.action ?? null, expected_revision: body.expected_revision ?? null, release_id: body.release_id ?? null, ticket_node_ids: ids })
 }
 
-async function install(page: Page, world: JourneyWorld, hooks: { rejectCreate?: string; loseCreate?: boolean; createScript?: Array<'lose' | number>; holdCreate?: Promise<void>; nodes?: MockNode[]; native?: Map<string, { release_node_id: string | null; release_title: string | null; release_state: string | null }> } = {}) {
+async function install(page: Page, world: JourneyWorld, hooks: { rejectCreate?: string; loseCreate?: boolean; createScript?: Array<'lose' | number>; holdCreate?: Promise<void>; nodes?: MockNode[]; native?: Map<string, NativeMember> } = {}) {
   const calls: Call[] = []
-  const native = hooks.native ?? new Map<string, { release_node_id: string | null; release_title: string | null; release_state: string | null }>()
+  const native = hooks.native ?? new Map<string, NativeMember>()
+  // Reads and both writes begin with the same memberships as the seeded walkers.
+  for (const walker of Object.values(world.walkers)) {
+    const release = world.releases.find(item => item.id === walker.release_node_id)
+    for (const ticket of walker.tickets.filter(item => item.included)) {
+      native.set(ticket.ticket_node_id, { release_node_id: walker.release_node_id, release_title: release?.title ?? 'Release', release_state: walker.state })
+    }
+  }
+  // These picker-only rows explicitly model other releases outside the current walker.
+  for (const option of OPTIONS) {
+    if (!option.release_node_id || native.has(option.ticket_node_id)) continue
+    native.set(option.ticket_node_id, {
+      release_node_id: option.release_node_id, release_title: option.release_title,
+      release_state: option.availability === 'released' ? 'released' : option.availability === 'active_release' ? 'building' : 'planning',
+    })
+  }
   const receipts = new Map<string, string>()
   const nodes = hooks.nodes ?? []
   const lose = { create: hooks.loseCreate === true }
   const script = hooks.createScript ? [...hooks.createScript] : []
+  let undoMembership: (() => void) | null = null
+  const membershipError = (ids: string[], target: string, confirmMove: boolean): { status: number; error: string } | null => {
+    for (const id of ids) {
+      const option = catalog(id, nodes)
+      if (option.type !== 'ticket') return { status: 404, error: 'ticket not found in project' }
+      if (CLOSED_STATE.has(option.status)) return { status: 409, error: 'closed tickets cannot be added' }
+      const member = native.get(id)
+      if (!member?.release_node_id) continue
+      if (member.release_node_id === target) return { status: 409, error: 'ticket is already included' }
+      const state = world.walkers[member.release_node_id]?.state ?? member.release_state
+      if (state !== 'planning') return { status: 409, error: 'released or active tickets cannot move' }
+      if (!confirmMove) return { status: 409, error: 'confirm_move required to move a ticket from another release' }
+    }
+    return null
+  }
   const remember = (ids: string[], releaseId: string, title: string) => {
-    for (const id of ids) native.set(id, { release_node_id: releaseId, release_title: title, release_state: 'planning' })
+    for (const id of ids) {
+      native.set(id, { release_node_id: releaseId, release_title: title, release_state: 'planning' })
+      for (const walker of Object.values(world.walkers)) {
+        for (const ticket of walker.tickets.filter(item => item.ticket_node_id === id)) ticket.included = walker.release_node_id === releaseId
+      }
+    }
   }
   await page.route('**/api/**', async (route: Route) => {
     const request = route.request()
@@ -98,7 +127,8 @@ async function install(page: Page, world: JourneyWorld, hooks: { rejectCreate?: 
     }
     if (path === '/api/events/81/undo' && method === 'POST') {
       record()
-      for (const id of native.keys()) native.set(id, { release_node_id: null, release_title: null, release_state: null })
+      undoMembership?.()
+      undoMembership = null
       return route.fulfill({ status: 201, json: { id: 82, type: 'journey.release_membership_changed' } })
     }
     const options = path.match(/^\/api\/projects\/([^/]+)\/releases\/([^/]+)\/ticket-options$/)
@@ -127,12 +157,17 @@ async function install(page: Page, world: JourneyWorld, hooks: { rejectCreate?: 
       if (!walker || walker.state !== 'planning') return route.fulfill({ status: 409, json: { error: 'only a planning release can take tickets' } })
       if (body.expected_revision !== walker.revision) return route.fulfill({ status: 409, json: { error: 'release revision changed' } })
       const ids = body.ticket_node_ids as string[]
-      // addExisting rejects a non-ticket before it writes, and the transaction rolls back.
-      if (unsupportedKind(ids, nodes)) return route.fulfill({ status: 404, json: { error: 'ticket not found in project' } })
-      const blocked = ids.map(id => catalog(id, nodes)).filter(option => option.availability === 'closed' || option.availability === 'released')
-      if (blocked.length) return route.fulfill({ status: 409, json: { error: 'closed or released tickets cannot be added' } })
-      const moving = ids.map(id => catalog(id, nodes)).filter(option => option.availability === 'other_release')
-      if (moving.length && body.confirm_move !== true) return route.fulfill({ status: 409, json: { error: 'ticket belongs to another open release', code: 'other_release' } })
+      const rejection = membershipError(ids, releaseId, body.confirm_move === true)
+      if (rejection) return route.fulfill({ status: rejection.status, json: { error: rejection.error } })
+      const before = new Map(ids.map(id => [id, native.get(id)]))
+      const walkersBefore = structuredClone(world.walkers)
+      undoMembership = () => {
+        for (const [id, member] of before) {
+          if (member) native.set(id, member)
+          else native.delete(id)
+        }
+        world.walkers = walkersBefore
+      }
       for (const id of ids) {
         const option = catalog(id, nodes)
         const found = walker.tickets.find(ticket => ticket.ticket_node_id === id)
@@ -168,13 +203,10 @@ async function install(page: Page, world: JourneyWorld, hooks: { rejectCreate?: 
       if (hooks.rejectCreate) return route.fulfill({ status: 409, json: { error: hooks.rejectCreate } })
       const ids = body.ticket_node_ids as string[]
       const chosen = ids.map(id => catalog(id, nodes))
-      // Kind is checked inside the same transaction as release creation. One
-      // non-ticket rejects the batch and leaves no release, receipt, or membership.
-      if (unsupportedKind(ids, nodes)) return route.fulfill({ status: 404, json: { error: 'ticket not found in project' } })
-      if (chosen.some(option => option.availability === 'closed')) return route.fulfill({ status: 409, json: { error: 'closed tickets cannot be added' } })
-      if (chosen.some(option => option.availability === 'released')) return route.fulfill({ status: 409, json: { error: 'released or active tickets cannot move' } })
-      if (chosen.some(option => option.availability === 'other_release')) return route.fulfill({ status: 409, json: { error: 'confirm_move required to move a ticket from another release' } })
       const releaseId = body.action === 'open_first_release' ? 'r-1' : 'r-3'
+      // A rejected member rolls the entire action back, including its receipt.
+      const rejection = membershipError(ids, releaseId, false)
+      if (rejection) return route.fulfill({ status: rejection.status, json: { error: rejection.error } })
       const title = body.action === 'open_first_release' ? 'Release 1' : 'Release 3'
       const created = new Date().toISOString()
       world.releases.push({ id: releaseId, key: 'PHAROS-40', kind_id: 'k-release', title, body: '', fields: {}, state: 'backlog', parent_id: PROJECT, position: '2', created_at: created, updated_at: created, deleted_at: null })
@@ -282,18 +314,19 @@ test('five selected tickets open a new release and land in its plan', async ({ p
   await page.setViewportSize({ width: 1440, height: 900 })
   const data = fixtures()
   const stamp = data.nodes[0].created_at
-  data.nodes.push(
-    { id: 'n-21', key: 'PHAROS-21', kind_slug: 'ticket', title: 'Publish the status page', body: '', state: 'backlog', fields: {}, parent_id: 'p-pharos', project: 'p-pharos', created_at: stamp, updated_at: stamp },
-    { id: 'n-26', key: 'PHAROS-26', kind_slug: 'ticket', title: 'Ship the release notes', body: '', state: 'backlog', fields: {}, parent_id: 'p-pharos', project: 'p-pharos', created_at: stamp, updated_at: stamp },
-  )
+  const fresh: MockNode[] = [61, 62, 63, 64, 65].map(number => ({
+    id: `n-${number}`, key: `PHAROS-${number}`, kind_slug: 'ticket', title: `Fresh release ticket ${number}`,
+    body: '', state: 'backlog', fields: {}, parent_id: 'p-pharos', project: 'p-pharos', created_at: stamp, updated_at: stamp,
+  }))
+  data.nodes.push(...fresh)
   await mockWork(page, data)
   const world = journeyWorld('live')
   await mockJourney(page, world)
   const calls = await install(page, world, { nodes: data.nodes })
   await page.goto('/p/PHAROS')
   const row = (key: string) => page.locator('tr.ticket-row').filter({ has: page.locator('.key', { hasText: new RegExp(`^${key}$`) }) })
-  // PHAROS-13 is a task. These five are tickets, matching addExisting's kind check.
-  for (const key of ['PHAROS-11', 'PHAROS-12', 'PHAROS-14', 'PHAROS-21', 'PHAROS-26']) {
+  // All five are real tickets with no membership in the existing released walkers.
+  for (const { key } of fresh) {
     await row(key).hover()
     await row(key).getByRole('checkbox', { name: `Select ${key}` }).check()
   }
@@ -306,14 +339,14 @@ test('five selected tickets open a new release and land in its plan', async ({ p
   expect(action).toHaveLength(1)
   expect(action[0].body).toMatchObject({
     action: 'plan_next_release', expected_revision: 12, release_id: 'r-2',
-    ticket_node_ids: ['n-1', 'n-2', 'n-4', 'n-21', 'n-26'],
+    ticket_node_ids: fresh.map(ticket => ticket.id),
   })
   expect(action[0].body.idempotency_key).toEqual(expect.any(String))
   expect(action[0].body).not.toHaveProperty('confirm_move')
   expect(calls.filter(call => call.method === 'POST' && call.path.endsWith('/membership'))).toHaveLength(0)
   await page.goto('/p/PHAROS/journey')
   await expect(page.getByRole('region', { name: 'Decision: Release 3' }).locator('.j-stat').first()).toContainText('5')
-  for (const key of ['PHAROS-11', 'PHAROS-12', 'PHAROS-14', 'PHAROS-21', 'PHAROS-26']) {
+  for (const { key } of fresh) {
     await expect(page.getByRole('checkbox', { name: `${key} in the release` })).toBeChecked()
   }
   expect(errors).toEqual([])
@@ -329,7 +362,7 @@ test('a task in the batch rolls the new release back and keeps the tickets out',
   const calls = await install(page, world, { nodes: data.nodes })
   await page.goto('/p/PHAROS')
   const row = (key: string) => page.locator('tr.ticket-row').filter({ has: page.locator('.key', { hasText: new RegExp(`^${key}$`) }) })
-  for (const key of ['PHAROS-11', 'PHAROS-13']) {
+  for (const key of ['PHAROS-12', 'PHAROS-13']) {
     await row(key).hover()
     await row(key).getByRole('checkbox', { name: `Select ${key}` }).check()
   }
@@ -340,14 +373,14 @@ test('a task in the batch rolls the new release back and keeps the tickets out',
   await expect(page.locator('.toast').filter({ hasText: /^Added / })).toHaveCount(0)
   const action = calls.filter(call => call.path.endsWith('/journey/actions'))
   expect(action).toHaveLength(1)
-  expect(action[0].body).toMatchObject({ action: 'plan_next_release', ticket_node_ids: ['n-1', 'n-3'] })
+  expect(action[0].body).toMatchObject({ action: 'plan_next_release', ticket_node_ids: ['n-2', 'n-3'] })
   expect(catalog('n-3', data.nodes).type).toBe('task')
   expect(calls.filter(call => call.method === 'POST' && call.path.endsWith('/membership'))).toHaveLength(0)
   expect(world.releases.map(release => release.id)).not.toContain('r-3')
   expect(world.journey.current_release_id).toBe('r-2')
   expect(world.journey.revision).toBe(12)
   expect(world.journey.stage).toBe('live')
-  await page.goto('/p/PHAROS/PHAROS-11')
+  await page.goto('/p/PHAROS/PHAROS-12')
   await expect(page.getByRole('complementary', { name: 'Ticket details' }).getByRole('button', { name: 'Release: none. Change release' })).toBeVisible()
   await page.goto('/p/PHAROS/journey')
   await expect(page.getByRole('region', { name: 'Decision: Release 3' })).toHaveCount(0)
@@ -387,41 +420,77 @@ test('a rejected new release is not left open', async ({ page }) => {
   expect(errors).toEqual([])
 })
 
+for (const sourceState of ['released', 'building']) for (const target of ['new', 'existing']) {
+  test(`${target} release rejects a ${sourceState} member and preserves the whole batch`, async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 })
+    const data = fixtures()
+    await mockWork(page, data)
+    const world = journeyWorld(target === 'new' ? 'live' : 'plan')
+    const original = world.walkers['r-2'].tickets.find(ticket => ticket.ticket_node_id === 'n-1')!
+    world.walkers['r-2'].tickets = world.walkers['r-2'].tickets.filter(ticket => ticket.ticket_node_id !== original.ticket_node_id)
+    world.releases.push({ ...world.releases[0], id: 'r-held', key: 'PHAROS-900', title: 'Held release' })
+    world.walkers['r-held'] = { ...world.walkers['r-2'], release_node_id: 'r-held', state: sourceState, tickets: [original] }
+    const before = structuredClone({ journey: world.journey, releases: world.releases, walkers: world.walkers })
+    await mockJourney(page, world)
+    const calls = await install(page, world, { nodes: data.nodes })
+    await page.goto('/p/PHAROS')
+    // The unassigned ticket comes first: rejection must still roll back the batch.
+    for (const key of ['PHAROS-12', 'PHAROS-11']) {
+      const row = page.locator('tr.ticket-row').filter({ has: page.locator('.key', { hasText: new RegExp(`^${key}$`) }) })
+      await row.hover()
+      await row.getByRole('checkbox', { name: `Select ${key}` }).check()
+    }
+    await page.getByRole('toolbar', { name: /selected ticket/ }).getByRole('button', { name: 'Add to release' }).click()
+    await page.getByRole('dialog', { name: 'Release for 2 tickets' }).getByRole('option', { name: target === 'new' ? /^Release 3/ : /^Release 2/ }).click()
+    await expect(page.locator('.toast').filter({ hasText: 'released or active tickets cannot move' })).toBeVisible()
+    await expect(page.locator('.toast').filter({ hasText: /^Added / })).toHaveCount(0)
+    expect(calls.filter(call => call.method === 'POST' && call.path.endsWith(target === 'new' ? '/journey/actions' : '/membership'))).toHaveLength(1)
+    expect({ journey: world.journey, releases: world.releases, walkers: world.walkers }).toEqual(before)
+    await page.goto('/p/PHAROS/PHAROS-11')
+    await expect(page.getByRole('complementary', { name: 'Ticket details' }).getByRole('button', { name: 'Release: Held release. Change release' })).toBeVisible()
+    await page.goto('/p/PHAROS/PHAROS-12')
+    await expect(page.getByRole('complementary', { name: 'Ticket details' }).getByRole('button', { name: 'Release: none. Change release' })).toBeVisible()
+  })
+}
+
 test('the ticket release field follows native membership after reload, reopen and undo', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
   const data = fixtures()
+  data.nodes.find(node => node.id === 'n-2')!.fields.release = { id: 5668, label: 'v4.7.8' }
   await mockWork(page, data)
   const world = journeyWorld('plan')
   await mockJourney(page, world)
   const calls = await install(page, world)
   const panel = page.getByRole('complementary', { name: 'Ticket details' })
-  await page.goto('/p/PHAROS/PHAROS-11')
+  await page.goto('/p/PHAROS/PHAROS-12')
   await expect(panel.getByRole('button', { name: 'Release: none. Change release' })).toBeVisible()
   await expect(panel.getByText('v4.7.8')).toHaveCount(0)
   await page.goto('/p/PHAROS')
-  const row = page.locator('tr.ticket-row').filter({ has: page.locator('.key', { hasText: /^PHAROS-11$/ }) })
+  const row = page.locator('tr.ticket-row').filter({ has: page.locator('.key', { hasText: /^PHAROS-12$/ }) })
   await row.hover()
-  await row.getByRole('checkbox', { name: 'Select PHAROS-11' }).check()
+  await row.getByRole('checkbox', { name: 'Select PHAROS-12' }).check()
   await page.getByRole('toolbar', { name: /selected ticket/ }).getByRole('button', { name: 'Add to release' }).click()
   await page.getByRole('dialog', { name: 'Release for 1 ticket' }).getByRole('option', { name: /^Release 2/ }).click()
   await expect(page.locator('.toast').filter({ hasText: 'Added 1 ticket to Release 2' })).toBeVisible()
-  await row.getByText('Connect Hetzner Cloud for managed provisioning').click()
+  await row.getByText('Add an Oracle Cloud connector').click()
   await expect(panel.getByRole('button', { name: 'Release: Release 2. Change release' })).toBeVisible()
   await page.getByRole('button', { name: 'Undo' }).click()
   await expect(panel.getByRole('button', { name: 'Release: none. Change release' })).toBeVisible()
+  await page.goto('/p/PHAROS/PHAROS-11')
+  await expect(panel.getByRole('button', { name: 'Release: Release 2. Change release' })).toBeVisible()
   await page.goto('/p/PHAROS')
   await row.hover()
-  await row.getByRole('checkbox', { name: 'Select PHAROS-11' }).check()
+  await row.getByRole('checkbox', { name: 'Select PHAROS-12' }).check()
   await page.getByRole('toolbar', { name: /selected ticket/ }).getByRole('button', { name: 'Add to release' }).click()
   await page.getByRole('dialog', { name: 'Release for 1 ticket' }).getByRole('option', { name: /^Release 2/ }).click()
   await expect(page.locator('.toast').filter({ hasText: 'Added 1 ticket to Release 2' })).toBeVisible()
-  await page.goto('/p/PHAROS/PHAROS-11')
+  await page.goto('/p/PHAROS/PHAROS-12')
   await expect(panel.getByRole('button', { name: 'Release: Release 2. Change release' })).toBeVisible()
-  await page.goto('/p/PHAROS/PHAROS-11')
+  await page.goto('/p/PHAROS/PHAROS-12')
   await expect(panel.getByRole('button', { name: 'Release: Release 2. Change release' })).toBeVisible()
   await expect(panel.getByText('v4.7.8')).toHaveCount(0)
   expect(calls.filter(call => call.method === 'PATCH')).toHaveLength(0)
-  expect(data.nodes.find(node => node.id === 'n-1')?.fields.release).toMatchObject({ label: 'v4.7.8' })
+  expect(data.nodes.find(node => node.id === 'n-2')?.fields.release).toMatchObject({ label: 'v4.7.8' })
 })
 
 test('a lost new-release response is retried with the same key and no membership write', async ({ page }) => {
@@ -571,7 +640,7 @@ test('a replay does not invent a count when membership no longer matches', async
   await mockWork(page, fixtures())
   const world = journeyWorld('live')
   await mockJourney(page, world)
-  const native = new Map<string, { release_node_id: string | null; release_title: string | null; release_state: string | null }>()
+  const native = new Map<string, NativeMember>()
   const calls = await install(page, world, { loseCreate: true, native })
   await page.goto('/p/PHAROS')
   const row = page.locator('tr.ticket-row').filter({ has: page.locator('.key', { hasText: /^PHAROS-12$/ }) })
@@ -581,7 +650,8 @@ test('a replay does not invent a count when membership no longer matches', async
   await add.click()
   await page.getByRole('dialog', { name: 'Release for 1 ticket' }).getByRole('option', { name: /^Release 3/ }).click()
   await expect(page.locator('.toast').filter({ hasText: 'not confirmed' })).toBeVisible()
-  native.clear()
+  native.delete('n-2')
+  world.walkers['r-3'].tickets.find(ticket => ticket.ticket_node_id === 'n-2')!.included = false
   advanceCurrentRelease(world)
   await add.click()
   await page.getByRole('dialog', { name: 'Release for 1 ticket' }).getByRole('option', { name: /^Release 4/ }).click()
@@ -703,7 +773,7 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390])
     const world = journeyWorld('live')
     await mockJourney(page, world)
     await install(page, world)
-    await page.goto('/p/PHAROS/PHAROS-11')
+    await page.goto('/p/PHAROS/PHAROS-12')
     await page.getByRole('complementary', { name: 'Ticket details' }).getByRole('button', { name: /Release:/ }).click()
     await expect(page.getByRole('option', { name: /Release 3/ })).toBeVisible()
     await shot(page, 'rpu1-release-field', theme, width)
