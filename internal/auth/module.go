@@ -258,6 +258,10 @@ func coreAgentScope(r *http.Request) (string, bool) {
 			break
 		}
 		switch parts[2] {
+		case "release-memberships":
+			if len(parts) == 3 && read {
+				return "releases.read", true
+			}
 		case "messages", "message-targets", "message-deliveries":
 			if read {
 				return "inbox.read", true

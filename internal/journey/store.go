@@ -87,6 +87,12 @@ type nodeSnap struct {
 }
 
 func ensureJourney(ctx context.Context, tx pgx.Tx, p tenant.Principal, projectID string) error {
+	// Match release membership/plan and node-tree mutations: tenant advisory
+	// lock first, then journey project, release and ticket rows. recordDerivation
+	// already locks the project, before act reaches its explicit lockJourney.
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended(current_setting('aeon.tenant_id',true),0))`); err != nil {
+		return err
+	}
 	var one int
 	err := tx.QueryRow(ctx, `
 		SELECT 1
@@ -899,12 +905,13 @@ func snapFrom(f facts, view Journey, action, approvalID, cap, reason string, sup
 
 func canonicalHash(in actionWrite) (string, error) {
 	body, err := json.Marshal(struct {
-		Action            string `json:"action"`
-		ExpectedRevision  int64  `json:"expected_revision"`
-		IdempotencyKey    string `json:"idempotency_key"`
-		ApprovalRequestID string `json:"approval_request_id"`
-		ReleaseID         string `json:"release_id"`
-		Reason            string `json:"reason"`
+		Action            string   `json:"action"`
+		ExpectedRevision  int64    `json:"expected_revision"`
+		IdempotencyKey    string   `json:"idempotency_key"`
+		ApprovalRequestID string   `json:"approval_request_id"`
+		ReleaseID         string   `json:"release_id"`
+		Reason            string   `json:"reason"`
+		TicketNodeIDs     []string `json:"ticket_node_ids,omitempty"`
 	}{
 		Action:            in.Action,
 		ExpectedRevision:  in.ExpectedRevision,
@@ -912,6 +919,7 @@ func canonicalHash(in actionWrite) (string, error) {
 		ApprovalRequestID: ptrVal(in.ApprovalRequestID),
 		ReleaseID:         ptrVal(in.ReleaseID),
 		Reason:            ptrVal(in.Reason),
+		TicketNodeIDs:     in.TicketNodeIDs,
 	})
 	if err != nil {
 		return "", err
