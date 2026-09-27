@@ -66,9 +66,9 @@ export function agentData(world: AgentWorld) {
     approval(7, { agent_principal_id: agent(5), scope: 'work_orders.write', resource_kind: 'node', resource_id: pharos, rationale: 'Record scout findings on the work order.', expires_at: ago(30), proposed_at: ago(90) }),
   ]
   const window = (unit: string, allowance: number, used: number, started: number, length: number, pace = 'steady') => ({ id: `${unit}-${allowance}`, starts_at: ago(started), ends_at: ahead(length - started), unit, allowance, used, reserved: 0, pace_model: pace, burst_ratio: 0.05 })
-  const acct = (key: keyof typeof account, label: string, state: string, windows: unknown[]) => ({ id: account[key], account_key: `${key}-studio`, harness: key, daemon_id: 'imac0', label, registered_by_principal_id: world.me, state, max_parallel_runs: 2, last_probe_at: ago(2), last_probe_ok: state !== 'unavailable', created_at: ago(60 * 24 * 30), windows })
+  const acct = (key: keyof typeof account, label: string, state: string, windows: unknown[], plan = '') => ({ id: account[key], account_key: `${key}-studio`, harness: key, daemon_id: 'imac0', label, plan, host_label: 'imac0', registered_by_principal_id: world.me, state, max_parallel_runs: 2, last_probe_at: ago(2), last_probe_ok: state !== 'unavailable', created_at: ago(60 * 24 * 30), windows })
   const accounts = [
-    acct('claude', 'Claude Max', 'available', [window('tokens', 5_000_000, 3_600_000, 150, 300)]),
+    acct('claude', 'Claude Max', 'available', [window('tokens', 5_000_000, 3_600_000, 150, 300)], 'Team'),
     acct('codex', 'Codex Pro', 'available', [window('requests', 1500, 450, 60 * 14, 60 * 24)]),
     acct('cursor', 'Cursor Business', 'available', [window('cost_micros', 200_000_000, 96_000_000, 60 * 24 * 15, 60 * 24 * 30, 'frontload')]),
     acct('pi', 'Pi on hsb1', 'draining', []),

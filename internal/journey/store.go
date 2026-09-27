@@ -87,6 +87,12 @@ type nodeSnap struct {
 }
 
 func ensureJourney(ctx context.Context, tx pgx.Tx, p tenant.Principal, projectID string) error {
+	// Match release membership/plan and node-tree mutations: tenant advisory
+	// lock first, then journey project, release and ticket rows. recordDerivation
+	// already locks the project, before act reaches its explicit lockJourney.
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended(current_setting('aeon.tenant_id',true),0))`); err != nil {
+		return err
+	}
 	var one int
 	err := tx.QueryRow(ctx, `
 		SELECT 1
@@ -244,11 +250,11 @@ func loadFacts(ctx context.Context, tx pgx.Tx, projectID string, lockRelease boo
 	if err := loadPeople(ctx, tx, &f); err != nil {
 		return facts{}, err
 	}
-	if err := loadGates(ctx, tx, &f); err != nil {
-		return facts{}, err
-	}
 	f.RequirementsDigest, err = requirements.Digest(ctx, tx, projectID)
 	if err != nil {
+		return facts{}, err
+	}
+	if err := loadGates(ctx, tx, &f); err != nil {
 		return facts{}, err
 	}
 	if err := loadOffers(ctx, tx, &f); err != nil {
@@ -467,7 +473,8 @@ func loadPeople(ctx context.Context, tx pgx.Tx, f *facts) error {
 
 func loadGates(ctx context.Context, tx pgx.Tx, f *facts) error {
 	// Keep this liveness predicate aligned with stagehandoff.gateLive: approved
-	// decision, unexpired request, and an unrevoked, unexpired grant.
+	// decision, unexpired request, and an unrevoked, unexpired grant. Prefer the
+	// live gate's identity over newer expired or revoked history.
 	rows, err := tx.Query(ctx, `
 		SELECT g.gate, coalesce(g.release_node_id::text, ''), g.approval_request_id::text,
 		       EXISTS (
@@ -476,14 +483,16 @@ func loadGates(ctx context.Context, tx pgx.Tx, f *facts) error {
 		         JOIN approval_decisions d ON d.tenant_id=a.tenant_id AND d.request_id=a.id
 		         JOIN agent_permission_grants grant_row ON grant_row.tenant_id=a.tenant_id AND grant_row.approval_request_id=a.id
 		         WHERE live_gate.tenant_id=g.tenant_id AND live_gate.project_node_id=g.project_node_id
+		           AND live_gate.approval_request_id=g.approval_request_id
 		           AND live_gate.gate=g.gate AND live_gate.release_node_id IS NOT DISTINCT FROM g.release_node_id
 		           AND a.resource_kind='node' AND a.resource_id=coalesce(live_gate.release_node_id,live_gate.project_node_id)
+		           AND (g.gate<>'requirements' OR a.scope=$2)
 		           AND d.decision='approved' AND a.expires_at>now()
 		           AND grant_row.revoked_at IS NULL AND grant_row.valid_until>now()
-		       )
+		       ) AS live
 		FROM journey_gates g
 		WHERE g.project_node_id = $1::uuid
-		ORDER BY g.created_at DESC`, f.ProjectID)
+		ORDER BY g.gate, g.release_node_id, live DESC, g.created_at DESC, g.id DESC`, f.ProjectID, requirementsScope(f.Revision, f.RequirementsDigest))
 	if err != nil {
 		return err
 	}
@@ -550,7 +559,9 @@ func loadOffers(ctx context.Context, tx pgx.Tx, f *facts) error {
 		       r.expires_at, g.valid_until,
 		       r.expires_at > now(),
 		       g.approval_request_id IS NOT NULL, g.revoked_at IS NOT NULL,
-		       (g.approval_request_id IS NOT NULL AND g.revoked_at IS NULL AND g.valid_until > now())
+		       (g.approval_request_id IS NOT NULL AND g.revoked_at IS NULL AND g.valid_until > now()),
+		       EXISTS (SELECT 1 FROM journey_gates jg
+		               WHERE jg.tenant_id = r.tenant_id AND jg.approval_request_id = r.id)
 		FROM approval_requests r
 		LEFT JOIN approval_decisions d
 		  ON d.tenant_id = r.tenant_id AND d.request_id = r.id
@@ -559,47 +570,46 @@ func loadOffers(ctx context.Context, tx pgx.Tx, f *facts) error {
 		WHERE r.resource_kind = 'node'
 		  AND r.resource_id = ANY($1::uuid[])
 		  AND r.scope = ANY($2::text[])
-		  AND NOT EXISTS (
-		    SELECT 1 FROM journey_gates jg
-		    WHERE jg.tenant_id = r.tenant_id AND jg.approval_request_id = r.id)
-		ORDER BY r.proposed_at DESC`, ids, []string{
+		ORDER BY r.proposed_at DESC, r.id DESC`, ids, []string{
 		ScopeShape, requirementsScope(f.Revision, f.RequirementsDigest), ScopeBuild, ScopeCandidate, ScopeDeploy, ScopeAccess,
 	})
 	if err != nil {
 		return err
 	}
 	defer rows.Close()
-	type picked struct {
-		live, pending, fallback bool
-	}
-	seen := map[string]picked{}
+	seen := map[string]int{}
 	for rows.Next() {
 		var scope, resource, id, decision, decider string
 		var requestExpiry time.Time
 		var grantExpiry *time.Time
-		var open, grantExists, revoked, grantLive bool
-		if err := rows.Scan(&scope, &resource, &id, &decision, &decider, &requestExpiry, &grantExpiry, &open, &grantExists, &revoked, &grantLive); err != nil {
+		var open, grantExists, revoked, grantLive, consumed bool
+		if err := rows.Scan(&scope, &resource, &id, &decision, &decider, &requestExpiry, &grantExpiry, &open, &grantExists, &revoked, &grantLive, &consumed); err != nil {
 			return err
 		}
+		// loadGates owns consumed standing evidence. It must never hide a
+		// pending retry or be published as fresh journey/1.1 offer authority.
+		if consumed {
+			continue
+		}
 		key := scope + "\x00" + resource
-		picked := seen[key]
 		state := gateOfferState(decision, open, grantExists, revoked, grantLive)
 		expires := requestExpiry
 		if grantExpiry != nil && grantExpiry.Before(expires) {
 			expires = *grantExpiry
 		}
-		offer := gateOffer{ID: id, DecidedBy: decider, Live: state == "approved_live", State: state, ExpiresAt: expires.UTC().Format(time.RFC3339)}
-		if offer.Live && !picked.live {
-			assignOffer(f, scope, resource, offer, true)
-			picked.live = true
-		} else if state == "pending" && !picked.live && !picked.pending {
-			assignOffer(f, scope, resource, offer, false)
-			picked.pending = true
-		} else if !picked.live && !picked.pending && !picked.fallback {
-			assignOffer(f, scope, resource, offer, false)
-			picked.fallback = true
+		offer := gateOffer{ID: id, DecidedBy: decider, Live: state == "approved_live", Consumed: consumed, State: state, ExpiresAt: expires.UTC().Format(time.RFC3339)}
+		// The newest unconsumed request wins within each class.
+		rank := 1
+		switch {
+		case offer.Live:
+			rank = 3
+		case state == "pending":
+			rank = 2
 		}
-		seen[key] = picked
+		if rank > seen[key] {
+			assignOffer(f, scope, resource, offer, true)
+			seen[key] = rank
+		}
 	}
 	return rows.Err()
 }
@@ -899,12 +909,13 @@ func snapFrom(f facts, view Journey, action, approvalID, cap, reason string, sup
 
 func canonicalHash(in actionWrite) (string, error) {
 	body, err := json.Marshal(struct {
-		Action            string `json:"action"`
-		ExpectedRevision  int64  `json:"expected_revision"`
-		IdempotencyKey    string `json:"idempotency_key"`
-		ApprovalRequestID string `json:"approval_request_id"`
-		ReleaseID         string `json:"release_id"`
-		Reason            string `json:"reason"`
+		Action            string   `json:"action"`
+		ExpectedRevision  int64    `json:"expected_revision"`
+		IdempotencyKey    string   `json:"idempotency_key"`
+		ApprovalRequestID string   `json:"approval_request_id"`
+		ReleaseID         string   `json:"release_id"`
+		Reason            string   `json:"reason"`
+		TicketNodeIDs     []string `json:"ticket_node_ids,omitempty"`
 	}{
 		Action:            in.Action,
 		ExpectedRevision:  in.ExpectedRevision,
@@ -912,6 +923,7 @@ func canonicalHash(in actionWrite) (string, error) {
 		ApprovalRequestID: ptrVal(in.ApprovalRequestID),
 		ReleaseID:         ptrVal(in.ReleaseID),
 		Reason:            ptrVal(in.Reason),
+		TicketNodeIDs:     in.TicketNodeIDs,
 	})
 	if err != nil {
 		return "", err

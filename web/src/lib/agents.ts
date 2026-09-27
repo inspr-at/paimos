@@ -39,11 +39,19 @@ export interface AllowanceWrite {
   starts_at: string; ends_at: string; unit: 'requests' | 'tokens' | 'cost_micros'
   allowance: number; pace_model: 'steady' | 'frontload' | 'unrestricted'; burst_ratio: number
 }
-export interface AllowanceWindow extends AllowanceWrite { id: string; account_id: string; used: number; reserved: number }
+export interface AllowanceWindow extends AllowanceWrite {
+  id: string; account_id: string; used: number; reserved: number
+  provisional?: boolean
+}
 export interface AgentAccount {
   id: string; account_key: string; harness: string; daemon_id: string; label: string
   registered_by_principal_id: string; state: 'available' | 'draining' | 'unavailable'
   max_parallel_runs?: number; last_probe_at?: string | null; last_probe_ok?: boolean | null; created_at: string
+  // Display metadata only. Callers must not render account_key. Null grants mean
+  // the legacy tenant catalog; the start dialog does not expand them itself.
+  plan?: string
+  host_label?: string
+  allowed_model_profile_ids?: string[] | null
   windows?: AllowanceWindow[]
 }
 export interface AgentRun {
@@ -62,6 +70,7 @@ export interface Approval {
   risk?: 'low' | 'medium' | 'high'
 }
 export interface ModelProfile { id: string; slug: string; harness: string; family: string; model: string; effort: string; tier: string; enabled: boolean }
+export interface ModelResolution { role: string; profile: ModelProfile | null; owner_required: boolean; source: string }
 export interface MessageTarget { id: string; principal_id: string; address: string; adapter: string; target_kind: string; maximum_level: string; role: string; enabled: boolean }
 export interface ProjectMessage {
   id: string; sender_principal_id: string; recipient_principal_id: string; to: string; body: string; reply_to?: string | null
@@ -109,6 +118,16 @@ export const decideApproval = (id: string, decision: 'approved' | 'denied', reas
 export const revokeApproval = (id: string) => request<Approval>(`/approvals/${enc(id)}/revoke`, 'POST')
 export const createWindow = (id: string, body: AllowanceWrite) => request<AllowanceWindow>(`/agent-accounts/${enc(id)}/windows`, 'POST', body)
 export const listModels = () => request<ModelProfile[]>('/models')
+// Task-appropriate profile for a work role on one harness. A miss is "routing did not answer", not a guessed model.
+// The start cascade must not call this to fill models an account did not grant.
+export async function resolveModelRole(role: string, harness: string): Promise<ModelProfile | null> {
+  try {
+    const data = await request<ModelResolution>(`/models/resolve${query({ role, harness })}`)
+    return data?.profile?.id ? data.profile : null
+  } catch {
+    return null
+  }
+}
 export const listTargets = (projectId: string) => request<MessageTarget[]>(`/projects/${enc(projectId)}/message-targets`)
 export const listMessages = (projectId: string, params: { newest_first?: boolean; pending?: boolean; address?: string; thread?: string; after?: number; limit?: number } = {}) =>
   request<MessagePage>(`/projects/${enc(projectId)}/messages${query({ limit: 200, newest_first: true, ...params })}`)

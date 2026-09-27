@@ -383,7 +383,11 @@ test('accounts show what is left and the pace; admins can drain and resume', asy
   const accounts = page.getByRole('region', { name: 'Accounts and pacing' })
   const claude = accounts.locator('.account').filter({ hasText: 'Claude Max' })
   await expect(claude).toContainText('28% tokens left')
+  await expect(claude).toContainText('5-hour')
+  await expect(claude).toContainText('Team')
   await expect(claude).toContainText('Ahead of pace')
+  await expect(accounts.locator('.account').filter({ hasText: 'Codex Pro' })).toContainText('Daily')
+  await expect(accounts.locator('.account').filter({ hasText: 'Cursor Business' })).toContainText('Monthly')
   await expect(claude.getByRole('meter')).toHaveAttribute('aria-valuenow', '28')
   await expect(accounts.locator('.account').filter({ hasText: 'Codex Pro' })).toContainText('Room to spare')
   const codex = accounts.locator('.account').filter({ hasText: 'Codex Pro' })
@@ -394,14 +398,16 @@ test('accounts show what is left and the pace; admins can drain and resume', asy
   expect(calls.find(c => c.method === 'PATCH')?.body).toEqual({ state: 'draining' })
 })
 
-test('an unmeasured allowance is labeled provisional', async ({ page }) => {
+test('an unmeasured allowance is unknown, not a percentage left', async ({ page }) => {
   const { data } = await setup(page)
   ;(data.accounts[0].windows[0] as Record<string, unknown>).provisional = true
   await openAgents(page)
   await page.getByText('Accounts and pacing', { exact: true }).first().click()
   const claude = page.getByRole('region', { name: 'Accounts and pacing' }).locator('.account').filter({ hasText: 'Claude Max' })
-  await expect(claude).toContainText('Provisional')
-  await expect(claude.getByRole('meter')).toHaveAttribute('aria-label', /provisional/)
+  await expect(claude).toContainText('Unmeasured')
+  await expect(claude).toContainText('allowance unknown')
+  await expect(claude).not.toContainText('%')
+  await expect(claude.getByRole('meter')).toHaveCount(0)
 })
 
 test('accounts explain themselves when the person may not see them', async ({ page }) => {

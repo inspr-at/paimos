@@ -745,6 +745,15 @@ func tamperCookie(raw string) string {
 	return strings.Join(parts, ";")
 }
 
+func TestReadinessProbeIsPublic(t *testing.T) {
+	if !isPublicAPI("/api/ready") || isProtectedAPI("/api/ready") {
+		t.Fatal("GET /api/ready must be public")
+	}
+	if !isPublicAPI("/api/health") || isProtectedAPI("/api/health") {
+		t.Fatal("GET /api/health must stay public")
+	}
+}
+
 func scalar(t *testing.T, pool *pgxpool.Pool, query string) int {
 	t.Helper()
 	var n int

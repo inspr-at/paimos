@@ -85,8 +85,8 @@ func (m *Module) Mount(mux *http.ServeMux) {
 }
 
 // Middleware resolves a session cookie or an agent bearer token onto the
-// request context. Unauthenticated /api requests, other than health, version
-// and /api/auth/* and /api/public/quotes/*, get 401 JSON.
+// request context. Unauthenticated /api requests, other than health, readiness,
+// version and /api/auth/* and /api/public/quotes/*, get 401 JSON.
 func (m *Module) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p, kind, err := m.authenticate(r)
@@ -258,6 +258,10 @@ func coreAgentScope(r *http.Request) (string, bool) {
 			break
 		}
 		switch parts[2] {
+		case "release-memberships":
+			if len(parts) == 3 && read {
+				return "releases.read", true
+			}
 		case "messages", "message-targets", "message-deliveries":
 			if read {
 				return "inbox.read", true
@@ -428,7 +432,7 @@ func agentHasScope(have []string, want string) bool {
 
 func isPublicAPI(path string) bool {
 	switch path {
-	case "/api/health", "/api/version":
+	case "/api/health", "/api/ready", "/api/version":
 		return true
 	default:
 		return strings.HasPrefix(path, "/api/auth/") || strings.HasPrefix(path, "/api/public/quotes/")

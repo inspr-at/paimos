@@ -5,6 +5,7 @@ package agentaccounts
 import (
 	"context"
 	"net/http"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -75,6 +76,11 @@ func reserve(ctx context.Context, tx pgx.Tx, r *http.Request, p tenant.Principal
 		enrolled = map[string]bool{*run.RequestedAccountID: true}
 	}
 	if existing, ok, err := activeRoute(ctx, tx, run.ID, p.ID, daemonID, enrolled); err != nil || ok {
+		// A held reservation is not authority to launch after a grant, profile
+		// or account becomes unavailable. Preserve replay for already owned runs.
+		if err == nil && run.Status == "queued" {
+			err = validateReservedAccount(ctx, tx, run, existing.AccountID)
+		}
 		return existing, err
 	}
 	if run.Status != "queued" || (run.AccountID != nil && *run.AccountID != "") {
@@ -84,7 +90,7 @@ func reserve(ctx context.Context, tx pgx.Tx, r *http.Request, p tenant.Principal
 		return RouteResult{}, fail(http.StatusConflict, "run has no model profile")
 	}
 	var harness string
-	err = tx.QueryRow(ctx, `SELECT harness FROM model_profiles WHERE id = $1::uuid`, *run.ProfileID).Scan(&harness)
+	err = tx.QueryRow(ctx, `SELECT harness FROM model_profiles WHERE id = $1::uuid AND enabled`, *run.ProfileID).Scan(&harness)
 	if isNoRows(err) {
 		return RouteResult{}, fail(http.StatusConflict, "run has no model profile")
 	}
@@ -95,7 +101,7 @@ func reserve(ctx context.Context, tx pgx.Tx, r *http.Request, p tenant.Principal
 	if err != nil {
 		return RouteResult{}, err
 	}
-	account, windows, err := selectAccount(ctx, tx, p.ID, harness, daemonID, accountIDs, estimates, now)
+	account, windows, err := selectAccount(ctx, tx, p.ID, harness, *run.ProfileID, daemonID, accountIDs, estimates, now)
 	if err != nil {
 		return RouteResult{}, err
 	}
@@ -108,7 +114,7 @@ func reserve(ctx context.Context, tx pgx.Tx, r *http.Request, p tenant.Principal
 	if tag.RowsAffected() != 1 {
 		return RouteResult{}, fail(http.StatusConflict, "run is not awaiting an account")
 	}
-	result := RouteResult{AccountID: account.ID, AccountKey: account.AccountKey, DaemonID: account.DaemonID, Reservations: []Reservation{}}
+	result := RouteResult{AccountID: account.ID, AccountKey: account.AccountKey, AccountLabel: account.Label, DaemonID: account.DaemonID, Reservations: []Reservation{}}
 	sort.Slice(windows, func(i, j int) bool {
 		if windows[i].Unit != windows[j].Unit {
 			return windows[i].Unit < windows[j].Unit
@@ -140,6 +146,29 @@ func reserve(ctx context.Context, tx pgx.Tx, r *http.Request, p tenant.Principal
 		return RouteResult{}, err
 	}
 	return result, nil
+}
+
+func validateReservedAccount(ctx context.Context, tx pgx.Tx, run runRow, accountID string) error {
+	a, err := lockAccount(ctx, tx, accountID)
+	if err != nil {
+		return err
+	}
+	now, err := dbNow(ctx, tx)
+	if err != nil {
+		return err
+	}
+	if run.ProfileID == nil || a.State != "available" || !probeFresh(a, now) ||
+		(a.AllowedProfileIDs != nil && !slices.Contains(a.AllowedProfileIDs, *run.ProfileID)) {
+		return fail(http.StatusConflict, "reserved account is not eligible")
+	}
+	var enabled bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM model_profiles WHERE id=$1::uuid AND harness=$2 AND enabled)`, *run.ProfileID, a.Harness).Scan(&enabled); err != nil {
+		return err
+	}
+	if !enabled {
+		return fail(http.StatusConflict, "reserved model profile is not eligible")
+	}
+	return nil
 }
 
 func validateEstimates(estimates map[string]int64) error {
@@ -180,7 +209,7 @@ func authorizeRoute(ctx context.Context, tx pgx.Tx, r *http.Request, p tenant.Pr
 func activeRoute(ctx context.Context, tx pgx.Tx, runID, principalID, daemonID string, enrolled map[string]bool) (RouteResult, bool, error) {
 	rows, err := tx.Query(ctx, `
 		SELECT r.id::text, r.window_id::text, w.unit, a.id::text, a.account_key, a.daemon_id,
-		       a.registered_by_principal_id::text
+		       a.registered_by_principal_id::text, a.label
 		FROM account_reservations r
 		JOIN account_allowance_windows w ON w.tenant_id = r.tenant_id AND w.id = r.window_id
 		JOIN agent_accounts a ON a.tenant_id = w.tenant_id AND a.id = w.account_id
@@ -193,8 +222,8 @@ func activeRoute(ctx context.Context, tx pgx.Tx, runID, principalID, daemonID st
 	var result RouteResult
 	for rows.Next() {
 		var item Reservation
-		var accountID, key, ownerDaemonID, ownerID string
-		if err := rows.Scan(&item.ReservationID, &item.WindowID, &item.Unit, &accountID, &key, &ownerDaemonID, &ownerID); err != nil {
+		var accountID, key, ownerDaemonID, ownerID, label string
+		if err := rows.Scan(&item.ReservationID, &item.WindowID, &item.Unit, &accountID, &key, &ownerDaemonID, &ownerID, &label); err != nil {
 			return RouteResult{}, false, err
 		}
 		if ownerDaemonID != daemonID || ownerID != principalID || !enrolled[accountID] {
@@ -203,6 +232,7 @@ func activeRoute(ctx context.Context, tx pgx.Tx, runID, principalID, daemonID st
 		if result.AccountID == "" {
 			result.AccountID = accountID
 			result.AccountKey = key
+			result.AccountLabel = label
 			result.DaemonID = ownerDaemonID
 		} else if result.AccountID != accountID {
 			return RouteResult{}, false, fail(http.StatusConflict, "run reservations span accounts")
@@ -224,16 +254,17 @@ type ranked struct {
 	ratio   float64
 }
 
-func selectAccount(ctx context.Context, tx pgx.Tx, principalID, harness, daemonID string, accountIDs []string, estimates map[string]int64, now time.Time) (Account, []Window, error) {
+func selectAccount(ctx context.Context, tx pgx.Tx, principalID, harness, profileID, daemonID string, accountIDs []string, estimates map[string]int64, now time.Time) (Account, []Window, error) {
 	rows, err := tx.Query(ctx, `
 		SELECT id::text, account_key, harness, daemon_id, label, max_parallel_runs,
 		       registered_by_principal_id::text, state, last_probe_at, last_probe_ok,
-		       last_daemon_generation, created_at
+		       last_daemon_generation, created_at, plan, host_label, allowed_model_profile_ids::text[]
 		FROM agent_accounts
 		WHERE harness = $1 AND daemon_id = $2 AND registered_by_principal_id = $3::uuid
 		  AND id::text = ANY($4::text[]) AND state = 'available'
+          AND (allowed_model_profile_ids IS NULL OR $5::uuid = ANY(allowed_model_profile_ids))
 		ORDER BY id
-		FOR UPDATE`, harness, daemonID, principalID, accountIDs)
+		FOR UPDATE`, harness, daemonID, principalID, accountIDs, profileID)
 	if err != nil {
 		return Account{}, nil, err
 	}

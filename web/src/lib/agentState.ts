@@ -234,7 +234,9 @@ export function windowSummary(window: AllowanceWindow, now: number): WindowSumma
 }
 // The window that binds first: the active one with the least left.
 export function bindingWindow(windows: AllowanceWindow[] | undefined, now: number) {
-  return (windows ?? []).map(w => windowSummary(w, now)).filter((w): w is WindowSummary => !!w).sort((a, b) => a.left - b.left)[0] ?? null
+  const summaries = (windows ?? []).map(w => windowSummary(w, now)).filter((w): w is WindowSummary => !!w)
+  const measured = summaries.filter(w => !w.window.provisional)
+  return (measured.length ? measured : summaries).sort((a, b) => a.left - b.left)[0] ?? null
 }
 export const PACE_LABEL: Record<Pace, string> = { ahead: 'Ahead of pace', on: 'On pace', under: 'Room to spare' }
 export const UNIT_LABEL: Record<AllowanceWindow['unit'], string> = { requests: 'requests', tokens: 'tokens', cost_micros: 'spend' }
