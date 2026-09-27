@@ -7,9 +7,8 @@ import type { TicketGraph, TicketGraphLinkKind, TicketStatusCategory } from './t
 import { excluded, included, type Dimension, type ListFilters } from './ticketList.ts'
 import { normaliseState } from './work.ts'
 
-// The graph API has no assignee, labels or date-range projection. This local
-// helper supplies graph facet previews; visible membership comes from the
-// shared server-filtered context in headerGlimpse.ts.
+// The graph API has no assignee, labels or date-range projection. Visible
+// membership comes from the shared server-filtered context in headerGlimpse.ts.
 export const TICKET_GRAPH_FILTERS: Dimension[] = ['status', 'priority', 'type']
 export const ticketStatusTokens = { open: '--st-new', doing: '--st-progress', done: '--st-closed' } as const satisfies Record<TicketStatusCategory, `--${string}`>
 export const ticketLinkStyles = {

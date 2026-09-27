@@ -134,6 +134,8 @@ test('saved assignee, type, priority, status and body search match the header co
   await ready(page)
   await expect(canvas(page)).toHaveAttribute('aria-label', /12 tickets/)
   await expect(page).toHaveURL(/v=11111111-1111-4111-8111-111111111111/)
+  await page.locator('.facet-btn[data-dim="status"]').click()
+  await expect(page.locator('.facet-option').filter({ has: page.getByRole('checkbox', { name: /^In progress/ }) }).locator('.count')).toHaveText('12')
 })
 
 test('mobile filters contain only supported dimensions and Hide closed', async ({ page }) => {
