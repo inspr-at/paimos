@@ -3,6 +3,9 @@
 // Package auth authenticates people and agent keys. The middleware applies an
 // outer, deny-by-default key-scope ceiling before any module handler runs.
 // Module handlers still check principal kind, resource ownership and live grants.
+// GET /api/me emits Aeon-Contract: me/1.0 without changing the strict JSON
+// body. Additive optional response fields require a minor bump; breaking
+// changes require a major bump. internal/reportercontract pins its schema.
 //
 // KX1 key expiry/rotation uses the existing New(cfg, pool) httpapi.Module;
 // no new plugin manifest or coordinator wiring is needed. POST /api/agent-keys

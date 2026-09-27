@@ -16,6 +16,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/httpapi"
+	"github.com/inspr-at/paimos/internal/reportercontract"
 )
 
 // Module serves the approval routes.
@@ -36,10 +37,10 @@ func New(pool *pgxpool.Pool) httpapi.Module {
 
 // Mount registers the approval routes on mux.
 func (m *Module) Mount(mux *http.ServeMux) {
-	mux.HandleFunc("GET /api/approvals", m.handleList)
-	mux.HandleFunc("POST /api/approvals", m.handlePropose)
-	mux.HandleFunc("POST /api/approvals/{approvalId}/decision", m.handleDecide)
-	mux.HandleFunc("POST /api/approvals/{approvalId}/revoke", m.handleRevoke)
+	mux.HandleFunc("GET /api/approvals", reportercontract.WithHeader(reportercontract.Approvals, m.handleList))
+	mux.HandleFunc("POST /api/approvals", reportercontract.WithHeader(reportercontract.Approvals, m.handlePropose))
+	mux.HandleFunc("POST /api/approvals/{approvalId}/decision", reportercontract.WithHeader(reportercontract.Approvals, m.handleDecide))
+	mux.HandleFunc("POST /api/approvals/{approvalId}/revoke", reportercontract.WithHeader(reportercontract.Approvals, m.handleRevoke))
 }
 
 type httpError struct {
