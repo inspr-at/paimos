@@ -170,7 +170,7 @@ watch(() => [route.path, route.params.projectKey, route.params.ticketKey, route.
       </div>
       <div class="page-flow" :class="{ fill: route.meta.fill && !session.error && !fatal, 'peek-open': !!ticketPeek.openKey.value && !releasesOpen }">
         <ErrorPage v-if="fatal" :error="fatal" />
-        <StatusPage v-else-if="session.error && !bare" eyebrow="Connection interrupted" title="Let’s try that again." tone="problem">
+        <StatusPage v-else-if="session.error && !bare && !route.meta.public" eyebrow="Connection interrupted" title="Let’s try that again." tone="problem">
           <p role="alert">{{ session.error }}</p>
           <template #actions>
             <button class="btn primary" type="button" :disabled="retrying" @click="retry"><AppIcon name="refresh" :size="14" />{{ retrying ? 'Connecting…' : 'Try again' }}</button>

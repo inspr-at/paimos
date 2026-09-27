@@ -10,7 +10,8 @@ import {
   ongoingLimitError, pairingPermissions, planApproval, planLookup, planOngoingLimits, planPoll,
   registerAgentUrl, sessionFreezeApplies, submitApproval, verificationWarning, defaultSelectedAccountKeys,
   peekPairingCode, publicGuideSections, rememberPairingCode, takePairingCode,
-  type OngoingLimitDraft, type PairingView, type RequestedAccount,
+  isAddHarness, matchOngoingLimit, pairingScopeKey, setHarnessAccount,
+  type OngoingLimitDraft, type PairingGuide, type PairingView, type RequestedAccount,
 } from '../src/lib/agentPairing.ts'
 
 const originalFetch = globalThis.fetch
@@ -45,7 +46,7 @@ function view(overrides: Record<string, unknown> = {}): PairingView {
     tenant_name: 'INSPR',
     state: 'pending',
     request_digest: DIGEST,
-    expires_at: '2026-09-27T20:00:00Z',
+    expires_at: '2099-01-01T00:00:00Z',
     computer_name: 'studio',
     platform: 'darwin',
     arch: 'arm64',
@@ -79,6 +80,21 @@ function jsonResponse(body: unknown, status = 200, headers: Record<string, strin
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json', ...headers } })
 }
 
+function guidePayload(overrides: Record<string, unknown> = {}): PairingGuide {
+  return {
+    instance_url: 'https://aeon.example/ignored',
+    default_tenant_slug: 'inspr',
+    protocol: 'pairing-v1',
+    platforms: ['darwin/arm64', 'linux/amd64'],
+    version: '260927181849.0.0',
+    platform_qualification: 'candidate; consult the exact release service qualification evidence',
+    setup_command: "<verified absolute paimos-agentd path> setup --url 'https://aeon.example' --workspace <absolute approved folder> --state-root <absolute private folder outside repos> --harness <codex|claude|cursor|grok> --start-service",
+    install_available: false,
+    install_targets: [],
+    ...overrides,
+  }
+}
+
 test('the public guide is not a session route and stays usable after sign-out', () => {
   assert.equal(agentRouteKind('/agents/register-agent'), 'register-agent')
   assert.equal(agentRouteKind('/agents/usage'), 'usage')
@@ -94,26 +110,13 @@ test('the guide uses the server origin and stays available when the session is f
   const urls: string[] = []
   globalThis.fetch = async url => {
     urls.push(String(url))
-    return jsonResponse({
-      instance_url: 'https://aeon.example/ignored',
-      default_tenant_slug: 'inspr',
-      protocol: 'pairing-v1',
-      platforms: ['darwin/arm64', 'linux/amd64'],
-      version: '260927181849.0.0',
-      device_secret: SECRET,
-    })
+    return jsonResponse({ ...guidePayload(), device_secret: SECRET })
   }
   await assert.rejects(getPairingGuide(), (error: PairingError) => error instanceof PairingError && !error.message.includes(SECRET) && !String(error.next).includes(SECRET))
   assert.deepEqual(urls, ['/api/agent-pairing/guide'])
   assert.equal(sessionEnded.blocked, true)
 
-  globalThis.fetch = async () => jsonResponse({
-    instance_url: 'https://aeon.example/ignored',
-    default_tenant_slug: 'inspr',
-    protocol: 'pairing-v1',
-    platforms: ['darwin/arm64'],
-    version: '260927181849.0.0',
-  })
+  globalThis.fetch = async () => jsonResponse(guidePayload({ platforms: ['darwin/arm64'] }))
   const guide = await getPairingGuide()
   assert.equal(registerAgentUrl(guide), 'https://aeon.example/agents/register-agent')
   assert.equal(JSON.stringify(guide).includes('aeon.barta.cm'), false)
@@ -345,10 +348,14 @@ test('disconnect defaults to finishing runs, and revoke is a separate confirmati
   await disconnectComputer(connected, 'drain', person)
   await disconnectEnrollment(connected, ACCOUNT, 'revoke_now', person)
   assert.deepEqual(bodies, [
-    { mode: 'drain' },
-    { mode: 'revoke_now' },
+    { mode: 'drain', expected_revision: 7 },
+    { mode: 'revoke_now', expected_revision: 7 },
   ])
-  assert.equal(JSON.stringify(bodies).includes('expected_revision'), false)
+  clearPairingClientState()
+  let extra = 0
+  globalThis.fetch = async () => { extra += 1; return jsonResponse(connected) }
+  await assert.rejects(disconnectComputer(view({ computer_id: COMPUTER, computer_state: 'connected', revision: undefined }), 'drain', person), (error: PairingError) => error.code === 'stale_revision')
+  assert.equal(extra, 0)
 })
 
 test('revocation does not claim that an offline process has stopped', () => {
@@ -433,13 +440,14 @@ test('approval alone is not a connected computer', () => {
 })
 
 test('the public guide uses the server address and stores only a human code', () => {
-  const text = publicGuideSections({
-    instance_url: 'https://aeon.example', default_tenant_slug: 'inspr', protocol: 'pairing-v1',
-    platforms: ['darwin/arm64'], version: '260927181849.0.0',
-  }).flatMap(section => section.paragraphs).join('\n')
+  const published = guidePayload({ platforms: ['darwin/arm64'], instance_url: 'https://aeon.example' })
+  const text = publicGuideSections(published).flatMap(section => section.paragraphs).join('\n')
   assert.match(text, /https:\/\/aeon\.example\/agents\/register-agent/)
+  assert.match(text, /setup --url 'https:\/\/aeon\.example'/)
+  assert.match(text, /not published a verified installer/)
   assert.equal(text.includes('aeon.barta.cm'), false)
   assert.equal(text.includes('curl'), false)
+  assert.equal(text.includes('inspr-at/paimos/releases'), false)
   assert.match(text, /does not grant access/)
   assert.match(text, /darwin\/arm64/)
   const memory = new Map<string, string>()
@@ -460,6 +468,78 @@ test('the public guide uses the server address and stores only a human code', ()
   } finally {
     Object.defineProperty(globalThis, 'sessionStorage', { configurable: true, value: previous })
   }
+})
+
+test('add harness follows existing_computer_id, and a harness can be left out', () => {
+  assert.equal(isAddHarness(view({ computer_id: COMPUTER })), false)
+  assert.equal(isAddHarness(view({ state: 'pending', existing_computer_id: COMPUTER, computer_id: null })), true)
+  assert.match(describeProgress(view({ existing_computer_id: COMPUTER })).detail, /adds a harness/)
+  const accounts = [account(), account({ account_key: 'codex-1', harness: 'codex', label: 'Codex work' })]
+  const both = ['cursor-1', 'codex-1']
+  assert.deepEqual(setHarnessAccount(accounts, both, 'cursor', null), ['codex-1'])
+  const plan = planApproval({ view: view({ requested_accounts: accounts }), choice: 'one_per_harness', selectedAccountKeys: ['codex-1'], permissions: person })
+  assert.equal(plan.ok, true)
+  if (plan.ok) assert.deepEqual(plan.body.selected_account_keys, ['codex-1'])
+})
+
+test('a lost allowance response is reconciled and is not posted again', async () => {
+  const draft: OngoingLimitDraft = {
+    account_key: 'cursor-1', starts_at: '2026-09-27T18:00:00.000Z', ends_at: '2026-09-27T23:00:00.000Z',
+    unit: 'requests', allowance: 4, pace_model: 'unrestricted', burst_ratio: 0,
+  }
+  const body = {
+    starts_at: '2026-09-27T18:00:00.000Z', ends_at: '2026-09-27T23:00:00.000Z',
+    unit: 'requests' as const, allowance: 4, pace_model: 'unrestricted' as const, burst_ratio: 0,
+  }
+  const posts: string[] = []
+  globalThis.fetch = async (url, init) => {
+    const path = String(url)
+    if (path.endsWith('/windows')) {
+      posts.push(path)
+      return jsonResponse({ error: 'gateway' }, 503)
+    }
+    assert.equal(path, '/api/agent-accounts')
+    assert.equal(init?.method ?? 'GET', 'GET')
+    return jsonResponse([{ id: ACCOUNT, windows: [{ id: 'window', account_id: ACCOUNT, used: 0, reserved: 0, ...body }] }])
+  }
+  const saved = await createOngoingLimits([{ accountId: ACCOUNT, body }], person)
+  assert.deepEqual(saved, { created: [], reconciled: [ACCOUNT] })
+  assert.deepEqual(posts, [`/api/agent-accounts/${ACCOUNT}/windows`])
+  clearPairingClientState()
+  globalThis.fetch = async () => { throw new TypeError('network down') }
+  await assert.rejects(createOngoingLimits([{ accountId: ACCOUNT, body }], person), (error: PairingError) => {
+    assert.equal(error.code, 'allowance_uncertain')
+    assert.equal(error.message.includes('Set allowance again'), false)
+    assert.match(error.next, /lost response is not the same as an unsaved allowance/)
+    return true
+  })
+  assert.equal(await matchOngoingLimit(ACCOUNT, body), 'unknown')
+})
+
+test('disconnect scope includes the revision and enrollments that were reviewed', () => {
+  const first = view({
+    revision: 3, computer_state: 'connected',
+    enrollments: [enrollment()],
+  })
+  const added = view({
+    revision: 4, computer_state: 'connected',
+    enrollments: [enrollment(), enrollment({ account_id: ACCOUNT_2, account_key: 'codex-1', harness: 'codex', label: 'Codex' })],
+  })
+  assert.notEqual(pairingScopeKey(first), pairingScopeKey(added))
+  const open = describeComputerStatus(view({
+    computer_state: 'revoked', local_cleanup: 'confirmed', local_processes: 'drained', accounting_state: 'unconfirmed',
+    enrollments: [enrollment({ local_processes: 'drained', accounting_state: 'unconfirmed', active_run_ids: [RUN] })],
+  }))
+  assert.match(open.detail, /Run accounting is unconfirmed/)
+  assert.equal(open.detail.includes('settled'), false)
+})
+
+test('a redeemed approval says setup is underway until the computer reports it finished', () => {
+  const redeemed = describeProgress(view({ state: 'redeemed', computer_state: 'connected' }))
+  assert.equal(redeemed.phase, 'setup')
+  assert.match(redeemed.title, /consumed/)
+  assert.match(redeemed.detail, /Setup is underway/)
+  assert.equal(redeemed.detail.includes('already finished pairing'), false)
 })
 
 function enrollment(overrides: Record<string, unknown> = {}) {

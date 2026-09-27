@@ -77,7 +77,7 @@ export const router = createRouter({
     { path: '/crm', redirect: '/business/customers' },
     { path: '/agents/usage', component: () => import('./views/UsageDashboardView.vue'), meta: { title: 'Usage' } },
     // Before :sessionId, or that param captures the public guide. Anonymous readers stay on this route.
-    { path: '/agents/register-agent', component: () => import('./views/RegisterAgentView.vue'), meta: { title: 'Connect a computer', bare: true, public: true } },
+    { path: '/agents/register-agent', component: () => import('./views/RegisterAgentView.vue'), meta: { title: 'Connect a computer', public: true } },
     // One record for the overview and its open session, so opening the panel never remounts the page.
     { path: '/agents/:sessionId?', component: () => import('./views/AgentsView.vue'), meta: { title: 'Agents', fill: false } },
     // Earlier separate pages now live inside Agents.

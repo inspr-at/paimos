@@ -4,8 +4,8 @@
 // one enrollment. Device, runtime and lifecycle secrets never enter this module.
 // Setup, redemption and tombstone reconciliation stay on the computer.
 
-import { api, resilientFetch } from './api.ts'
-import { createWindow, type AllowanceWrite } from './agents.ts'
+import { api, APIError, resilientFetch } from './api.ts'
+import { createWindow, listAccounts, type AllowanceWindow, type AllowanceWrite } from './agents.ts'
 
 export const PUBLIC_PAIRING_GUIDE_PATH = '/agents/register-agent'
 export const LOOKUP_DEBOUNCE_MS = 400
@@ -36,11 +36,13 @@ export type ProcessState = (typeof PROCESS_STATES)[number]
 export type VerificationMode = (typeof VERIFICATION_MODES)[number]
 export type DisconnectMode = (typeof DISCONNECT_MODES)[number]
 export type ReviewChoice = VerificationMode | 'ongoing_limits'
-export type SetupState = 'approved' | 'provisioning' | 'login_required' | 'service_conflict' | 'connected' | 'setup_failed'
+export type SetupState = 'not_started' | 'approved' | 'provisioning' | 'login_required' | 'service_conflict' | 'connected' | 'setup_failed'
 export type VerificationState = 'not_selected' | 'queued' | 'starting' | 'running' | 'waiting' | 'completed' | 'failed' | 'cancelled' | 'ownership_lost' | 'expired'
 export type Connectivity = 'online' | 'offline' | 'unknown'
+export type AccountingState = 'settled' | 'unconfirmed'
+export type LimitMatch = 'saved' | 'absent' | 'unknown'
 
-const SETUP_STATES: readonly SetupState[] = ['approved', 'provisioning', 'login_required', 'service_conflict', 'connected', 'setup_failed']
+const SETUP_STATES: readonly SetupState[] = ['not_started', 'approved', 'provisioning', 'login_required', 'service_conflict', 'connected', 'setup_failed']
 const VERIFICATION_STATES: readonly VerificationState[] = ['not_selected', 'queued', 'starting', 'running', 'waiting', 'completed', 'failed', 'cancelled', 'ownership_lost', 'expired']
 const CONNECTIVITY: readonly Connectivity[] = ['online', 'offline', 'unknown']
 const VERIFICATION_ACTIVE: readonly VerificationState[] = ['queued', 'starting', 'running', 'waiting']
@@ -79,6 +81,10 @@ export interface PairingEnrollment {
   /** Actual run result. A verification_run_id alone is not success. */
   verification_state?: VerificationState
   verification_error?: string | null
+  /** Drained only after the computer acknowledges cleanup. Revoke does not infer it. */
+  local_processes?: ProcessState
+  /** Open run accounting stays unconfirmed after revoke, even when local cleanup is acknowledged. */
+  accounting_state?: AccountingState
 }
 
 /** Public pairing projection. Secret-bearing keys are not part of this type. */
@@ -113,14 +119,34 @@ export interface PairingView {
   last_seen_at?: string | null
   /** Recent probe evidence. Unknown and offline do not prove that local work stopped. */
   connectivity?: Connectivity
+  /** Open run accounting. Unconfirmed means revoke did not settle it. */
+  accounting_state?: AccountingState
+  /** Set on a pending Add harness request, before this request's computer is provisioned. */
+  existing_computer_id?: string
 }
 
+export interface InstallTarget {
+  platform: string
+  arch: string
+  service: string
+  qualification: string
+  artifact_url: string
+  checksums_url: string
+  command: string
+}
+
+/** Published by this Aeon's guide. Commands are displayed, never invented or run here. */
 export interface PairingGuide {
   instance_url: string
   default_tenant_slug: string
   protocol: string
   platforms: string[]
-  version?: string
+  version: string
+  platform_qualification: string
+  setup_command: string
+  install_available: boolean
+  install_targets: InstallTarget[]
+  managed_installation?: string
 }
 
 export interface ApproveBody {
@@ -155,13 +181,16 @@ export class PairingError extends Error {
   readonly code: string
   readonly retryAfterSeconds: number | null
   readonly next: string
-  constructor(status: number, message: string, options: { code?: string; retryAfterSeconds?: number | null; next?: string } = {}) {
+  /** Accounts whose allowance was saved or found already saved before a later account stopped the batch. */
+  readonly savedAccountIds: readonly string[]
+  constructor(status: number, message: string, options: { code?: string; retryAfterSeconds?: number | null; next?: string; savedAccountIds?: readonly string[] } = {}) {
     super(message)
     this.name = 'PairingError'
     this.status = status
     this.code = options.code ?? 'unknown'
     this.retryAfterSeconds = options.retryAfterSeconds ?? null
     this.next = options.next ?? ''
+    this.savedAccountIds = options.savedAccountIds ?? []
   }
 }
 
@@ -228,12 +257,15 @@ export function takePairingCode(): string | null {
 
 export interface GuideSection { heading: string; paragraphs: string[] }
 
-/** Plain guide copy for the public route. Install commands come from the server guide, never from this page. */
+/** Plain guide copy for the public route. Install and setup text comes only from this Aeon's guide. */
 export function publicGuideSections(guide: PairingGuide | null): GuideSection[] {
   const address = guide ? registerAgentUrl(guide) : ''
   const platforms = guide?.platforms.length ? guide.platforms.join(', ') : ''
   const version = guide?.version ? `Published version ${guide.version}.` : ''
-  return [
+  const setup = guide?.setup_command
+    ? `This Aeon publishes this setup command: ${guide.setup_command}`
+    : 'This Aeon has not published a setup command. Do not run an install or setup command from another computer or from a pairing message.'
+  const sections: GuideSection[] = [
     {
       heading: 'Connect a computer',
       paragraphs: [
@@ -247,7 +279,10 @@ export function publicGuideSections(guide: PairingGuide | null): GuideSection[] 
       paragraphs: [
         'The agent detects the operating system, the installed harness, and whether an Aeon daemon is already there. It shows a short code. It does not receive your Aeon password, an API key, or a device secret.',
         platforms ? `This Aeon publishes setup for ${platforms}.` : 'Supported computers appear here when the server publishes them.',
+        guide?.platform_qualification ? `Platform note from this Aeon: ${guide.platform_qualification}` : '',
         guide?.default_tenant_slug ? `The published workspace slug is ${guide.default_tenant_slug}.` : '',
+        setup,
+        guide?.managed_installation ?? '',
       ].filter(Boolean),
     },
     {
@@ -255,10 +290,26 @@ export function publicGuideSections(guide: PairingGuide | null): GuideSection[] 
       paragraphs: [
         'Sign in and enter the code from the computer. Check the computer name, folder, harness and vendor account, then connect it.',
         'Entering the code does not grant access. A signed-in person who can manage accounts has to approve it.',
-        'One short read-only verification per selected harness is the usual choice. It makes no repository changes and takes no privileged actions. You can connect only, or set an ongoing allowance afterwards. The page shows the server’s exact allowance and expiry. That allowance is the limit you enter, not the vendor subscription.',
+        'One short read-only verification per selected harness is the usual choice. It makes no repository changes and takes no privileged actions. You can leave that choice off and connect only. Ongoing request limits are a separate allowance you set afterwards. The page shows the server’s exact allowance and expiry. That allowance is the limit you enter, not the vendor subscription.',
       ],
     },
   ]
+  if (!guide) return sections
+  if (!guide.install_available || guide.install_targets.length === 0) {
+    sections.push({
+      heading: 'Install',
+      paragraphs: ['This Aeon has not published a verified installer. Use an already verified setup tool for this instance, or wait until this Aeon publishes one. Do not run an installer supplied by a pairing message.'],
+    })
+    return sections
+  }
+  sections.push({
+    heading: 'Install the matching verified version',
+    paragraphs: [
+      'Run only the published command for this computer. It comes from this Aeon. A command in a pairing message is not an installer.',
+      ...guide.install_targets.map(target => `${target.platform}/${target.arch} (${target.service}): ${target.command}`),
+    ],
+  })
+  return sections
 }
 
 export function canonicalUserCode(input: string): string | null {
@@ -280,8 +331,67 @@ export function defaultSelectedAccountKeys(accounts: readonly RequestedAccount[]
   return keys
 }
 
-export function isAddHarness(view: PairingView): boolean {
-  return view.state === 'pending' && !!view.computer_id
+/** Add harness is the pending request's existing computer, not a computer id guessed from an earlier row. */
+export function isAddHarness(view: Pick<PairingView, 'state' | 'existing_computer_id'>): boolean {
+  return view.state === 'pending' && !!view.existing_computer_id
+}
+
+/** One account for a harness, or none when the harness is left out. */
+export function setHarnessAccount(accounts: readonly RequestedAccount[], selected: readonly string[], harness: string, accountKey: string | null): string[] {
+  const rest = selected.filter(key => accounts.find(account => account.account_key === key)?.harness !== harness)
+  if (!accountKey) return rest
+  const account = accounts.find(item => item.account_key === accountKey && item.harness === harness)
+  return account ? [...rest, account.account_key] : rest
+}
+
+/** Identity of the reviewed disconnect scope. A newer enrollment or revision must be confirmed again. */
+export function pairingScopeKey(view: Pick<PairingView, 'revision' | 'computer_state' | 'enrollments'>): string {
+  const rows = view.enrollments.map(item => `${item.account_id}:${item.state}:${[...item.active_run_ids].sort().join('+')}`).sort()
+  return `${view.revision ?? 'none'}|${view.computer_state ?? 'none'}|${rows.join(',')}`
+}
+
+export function platformCaption(platform: string, arch: string): string {
+  const os = platform === 'darwin' ? 'macOS' : platform === 'linux' ? 'Linux' : platform
+  return arch ? `${os} · ${arch}` : os
+}
+
+export function formatAllowanceMoment(iso: string, now = Date.now()): string {
+  const time = Date.parse(iso)
+  if (!Number.isFinite(time)) return iso
+  const date = new Date(time)
+  const sameDay = new Date(now).toDateString() === date.toDateString()
+  const clock = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  return sameDay ? clock : date.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+}
+
+export function lastActiveLabel(iso: string | null | undefined, now = Date.now()): string {
+  if (!iso) return 'Not reported'
+  const time = Date.parse(iso)
+  if (!Number.isFinite(time)) return 'Not reported'
+  const delta = now - time
+  if (delta < 0) return 'Not reported'
+  if (delta < 60_000) return 'Just now'
+  if (delta < 3_600_000) return `${Math.floor(delta / 60_000)} min ago`
+  if (delta < 86_400_000) return `${Math.floor(delta / 3_600_000)} h ago`
+  return new Date(time).toLocaleDateString([], { month: 'short', day: 'numeric' })
+}
+
+export function emptyRequestLimit(accountKey: string): OngoingLimitDraft {
+  return { account_key: accountKey, starts_at: '', ends_at: '', unit: 'requests', allowance: null, pace_model: 'unrestricted', burst_ratio: 0 }
+}
+
+/** Requests and a period. Other units are outside this setup flow. */
+export function simpleRequestLimitError(draft: OngoingLimitDraft | null): string | null {
+  if (!draft || draft.unit !== 'requests' || draft.pace_model !== 'unrestricted' || draft.burst_ratio !== 0) {
+    return 'Ongoing limits here are a number of requests for a period.'
+  }
+  const starts = new Date(draft.starts_at)
+  const ends = new Date(draft.ends_at)
+  if (!Number.isFinite(starts.getTime()) || !Number.isFinite(ends.getTime()) || ends <= starts
+    || !Number.isSafeInteger(draft.allowance) || Number(draft.allowance) < 1) {
+    return 'Enter a positive whole number of requests and a period that ends after it starts.'
+  }
+  return null
 }
 
 export function activeRunIds(view: Pick<PairingView, 'enrollments'>): string[] {
@@ -380,7 +490,7 @@ export function planApproval(input: {
     return { ok: false, message: 'This computer is already disconnected.', next: 'Pair it again with a new approval if you want to reconnect. Old access stays revoked.' }
   }
   if (input.view.state === 'redeemed') {
-    return { ok: false, message: 'This computer already finished pairing.', next: 'Connecting again does not start another verification or refill its allowance.' }
+    return { ok: false, message: 'This approval is already consumed.', next: 'Setup is underway or already recorded. Connecting again does not start another verification or refill its allowance.' }
   }
   const verification = input.choice === 'one_per_harness' ? 'one_per_harness' : 'connect_only'
   if (input.view.state === 'approved' && input.view.verification?.mode && input.view.verification.mode !== verification) {
@@ -519,8 +629,17 @@ function setupProgress(view: PairingView): PairingProgress {
   if (view.enrollments.some(item => item.verification_state != null && (VERIFICATION_ACTIVE as readonly string[]).includes(item.verification_state) || item.active_run_ids.length > 0)) {
     return { phase: 'verify', title: 'Verification is running', detail: 'One short read-only run was approved for each selected account. A run id alone is not a finished verification.', next: 'Further work needs a separate ongoing allowance. This page will not start another run.', renewsAuthority: false }
   }
-  if (progress === 'provisioning' || progress === 'approved') {
-    return { phase: 'setup', title: 'Setting up', detail: 'Approval is recorded. The computer has not confirmed that setup finished.', next: 'Wait for the computer. Looking the code up again does not grant a second approval.', renewsAuthority: false }
+  if (progress === 'provisioning' || progress === 'approved' || progress === 'not_started') {
+    const consumed = view.state === 'redeemed'
+    return {
+      phase: 'setup',
+      title: consumed ? 'Approval already consumed' : 'Setting up',
+      detail: consumed
+        ? 'This approval is already consumed. Setup is underway. The computer has not confirmed that setup finished.'
+        : 'Approval is recorded. The computer has not confirmed that setup finished.',
+      next: 'Wait for the computer. Looking the code up again does not grant a second approval.',
+      renewsAuthority: false,
+    }
   }
   const verificationAsked = view.verification?.mode === 'one_per_harness'
   const verificationDone = !verificationAsked || (view.enrollments.length > 0 && view.enrollments.every(item => item.state === 'revoked' || item.verification_state === 'completed'))
@@ -533,14 +652,29 @@ function setupProgress(view: PairingView): PairingProgress {
   if (progress === 'connected') {
     return { phase: 'verify', title: 'The computer reported in', detail: 'Setup was confirmed. The verification result is not a success yet.', next: 'Wait for the verification result. A run id does not refill or repeat the allowance.', renewsAuthority: false }
   }
-  if (view.state === 'approved' || view.state === 'redeemed' || view.computer_state === 'connected') {
+  if (view.state === 'redeemed') {
+    return { phase: 'setup', title: 'Approval already consumed', detail: `${view.computer_name} already used this approval. Setup is underway. That does not show the daemon is connected or that setup finished.`, next: 'Wait for the computer to report setup. This page will not start another verification.', renewsAuthority: false }
+  }
+  if (view.state === 'approved' || view.computer_state === 'connected') {
     return { phase: 'setup', title: 'Approved', detail: `${view.computer_name} is approved. That does not show the daemon is connected or that setup finished.`, next: 'Wait for the computer to report setup. This page will not start another verification.', renewsAuthority: false }
   }
   return { phase: 'setup', title: 'Approved, waiting for the computer', detail: `${view.computer_name} can finish setup with the approval it already has.`, next: 'Keep this approval. Looking the code up again does not grant a second one.', renewsAuthority: false }
 }
 
+const SETUP_ERROR_COPY: Record<string, string> = {
+  login_required: 'Vendor sign-in is needed on the computer. Aeon does not take the vendor password.',
+  service_conflict: 'Setup found another service using this pairing.',
+  unsupported_platform: 'This computer’s platform is not supported for setup.',
+  managed_installation: 'This computer is managed by Nix or Home Manager. Change the owning configuration instead of overwriting it.',
+  connectivity_failed: 'The computer could not confirm a connection.',
+  private_storage_failed: 'Private setup storage could not be prepared.',
+  installation_failed: 'The verified setup tool could not be installed.',
+}
+
 function setupErrorText(view: PairingView): string {
-  return view.setup_error?.trim() || ''
+  const code = view.setup_error?.trim() || ''
+  if (!code) return ''
+  return SETUP_ERROR_COPY[code] ?? `Setup reported ${code}.`
 }
 
 function localProcessSentence(view: Pick<PairingView, 'local_processes' | 'enrollments'>): string {
@@ -559,10 +693,11 @@ export interface ComputerStatusCopy {
   next: string
 }
 
-export function describeComputerStatus(view: Pick<PairingView, 'computer_state' | 'local_cleanup' | 'local_processes' | 'enrollments' | 'setup_state' | 'connectivity'>, hints: { httpStatus?: number; heartbeatMissing?: boolean } = {}): ComputerStatusCopy {
+export function describeComputerStatus(view: Pick<PairingView, 'computer_state' | 'local_cleanup' | 'local_processes' | 'enrollments' | 'setup_state' | 'connectivity' | 'accounting_state'>, hints: { httpStatus?: number; heartbeatMissing?: boolean } = {}): ComputerStatusCopy {
   let stateLabel = view.computer_state === 'connected' ? 'Connected' : view.computer_state === 'draining' ? 'Draining' : view.computer_state === 'revoked' ? 'Revoked' : 'Not connected yet'
   const cleanupLabel = view.local_cleanup === 'confirmed' ? 'Local cleanup confirmed' : 'Local cleanup pending'
-  const processesUnconfirmed = view.local_processes !== 'drained' || hints.heartbeatMissing === true || hints.httpStatus === 401
+  const enrollmentUnconfirmed = view.enrollments.some(item => item.local_processes === 'unconfirmed')
+  const processesUnconfirmed = view.local_processes !== 'drained' || enrollmentUnconfirmed || hints.heartbeatMissing === true || hints.httpStatus === 401
   const processLabel = processesUnconfirmed ? 'Local processes unconfirmed' : 'Local processes drained'
   const claimsProcessStopped = !processesUnconfirmed
   let detail = `${stateLabel}. ${cleanupLabel}. ${processLabel}.`
@@ -596,7 +731,15 @@ export function describeComputerStatus(view: Pick<PairingView, 'computer_state' 
     detail = `${detail} A rejected sign-in or a missing heartbeat does not show that local work has stopped.`
     next = 'Treat local processes as unconfirmed until the computer confirms cleanup.'
   }
+  if (accountingUnconfirmed(view)) {
+    detail = `${detail} Run accounting is unconfirmed.`
+    next = 'Cleanup and revocation do not settle run accounting. Local processes stay unconfirmed until the computer says otherwise.'
+  }
   return { stateLabel, cleanupLabel, processLabel, claimsProcessStopped, detail, next }
+}
+
+function accountingUnconfirmed(view: Pick<PairingView, 'accounting_state' | 'enrollments'>): boolean {
+  return view.accounting_state === 'unconfirmed' || view.enrollments.some(item => item.accounting_state === 'unconfirmed')
 }
 
 export interface DisconnectConfirm {
@@ -711,7 +854,8 @@ export async function getPairingComputer(computerId: string, signal?: AbortSigna
 
 export async function disconnectComputer(view: PairingView, mode: DisconnectMode, permissions: PairingPermissions, signal?: AbortSignal): Promise<PairingView> {
   assertDisconnect(view.computer_id, mode, permissions, view.computer_state)
-  return oneFlight(`disconnect:${view.computer_id}:${mode}`, () => personJson(`/agent-pairing/computers/${pathId(view.computer_id!)}/disconnect`, 'POST', { mode }, signal).then(parseView))
+  const body = disconnectBody(view, mode)
+  return oneFlight(`disconnect:${view.computer_id}:${mode}:${body.expected_revision}`, () => personJson(`/agent-pairing/computers/${pathId(view.computer_id!)}/disconnect`, 'POST', body, signal).then(parseView))
 }
 
 export async function disconnectEnrollment(view: PairingView, accountId: string, mode: DisconnectMode, permissions: PairingPermissions, signal?: AbortSignal): Promise<PairingView> {
@@ -719,30 +863,77 @@ export async function disconnectEnrollment(view: PairingView, accountId: string,
   const enrollment = view.enrollments.find(item => item.account_id === accountId)
   if (!enrollment) throw new PairingError(0, 'That harness is not on this computer.', { code: 'not_found', next: 'Refresh the computer and choose the harness again.' })
   assertDisconnect(view.computer_id, mode, permissions, enrollment.state)
+  const body = disconnectBody(view, mode)
   const path = `/agent-pairing/computers/${pathId(view.computer_id)}/enrollments/${pathId(accountId)}/disconnect`
-  return oneFlight(`disconnect:${view.computer_id}:${accountId}:${mode}`, () => personJson(path, 'POST', { mode }, signal).then(parseView))
+  return oneFlight(`disconnect:${view.computer_id}:${accountId}:${mode}:${body.expected_revision}`, () => personJson(path, 'POST', body, signal).then(parseView))
 }
 
-export async function createOngoingLimits(windows: readonly { accountId: string; body: AllowanceWrite }[], permissions: PairingPermissions): Promise<{ created: string[] }> {
+export async function matchOngoingLimit(accountId: string, body: AllowanceWrite): Promise<LimitMatch> {
+  try {
+    const accounts = await listAccounts()
+    const account = accounts.find(item => item.id === accountId)
+    if (!account) return 'unknown'
+    return (account.windows ?? []).some(window => sameAllowance(window, body)) ? 'saved' : 'absent'
+  } catch {
+    return 'unknown'
+  }
+}
+
+export async function createOngoingLimits(windows: readonly { accountId: string; body: AllowanceWrite }[], permissions: PairingPermissions): Promise<{ created: string[]; reconciled: string[] }> {
   if (!permissions.canSetOngoingLimits) {
     throw new PairingError(0, 'Only a signed-in person who can manage accounts can set ongoing limits.', { code: 'forbidden', next: 'The paired computer cannot create its own allowance.' })
   }
   const created: string[] = []
+  const reconciled: string[] = []
   for (const item of windows) {
     try {
       await createWindow(item.accountId, item.body)
       created.push(item.accountId)
     } catch (error) {
+      const saved = [...created, ...reconciled]
+      const match = await matchOngoingLimit(item.accountId, item.body)
+      if (match === 'saved') { reconciled.push(item.accountId); continue }
+      const uncertain = match === 'unknown' || allowanceUncertain(error)
       const reason = error instanceof Error ? error.message : 'The allowance was not saved.'
-      throw new PairingError(0, reason, {
-        code: 'allowance_failed',
-        next: created.length
-          ? `Saved limits for ${created.length} account${created.length === 1 ? '' : 's'}. The remaining accounts still need an allowance. Do not approve the pairing again.`
-          : 'The computer stays connected. Set the allowance again for this account. Do not approve the pairing again.',
+      throw new PairingError(error instanceof APIError ? error.status : 0, uncertain ? 'The allowance may already be saved.' : reason, {
+        code: uncertain ? 'allowance_uncertain' : 'allowance_failed',
+        savedAccountIds: saved,
+        next: uncertain
+          ? `${savedPhrase(saved)} Refresh this account before sending the allowance again. A lost response is not the same as an unsaved allowance. Do not approve the pairing again.`
+          : `${savedPhrase(saved)} This account was not saved. You can send its allowance again. Do not approve the pairing again.`,
       })
     }
   }
-  return { created }
+  return { created, reconciled }
+}
+
+function savedPhrase(saved: readonly string[]): string {
+  if (!saved.length) return 'No allowance in this batch was confirmed.'
+  return `Confirmed for ${saved.length} account${saved.length === 1 ? '' : 's'}.`
+}
+
+function allowanceUncertain(error: unknown): boolean {
+  if (error instanceof APIError) return error.status === 0 || error.status === 408 || error.status === 429 || error.status >= 500
+  return true
+}
+
+function sameAllowance(window: AllowanceWindow, body: AllowanceWrite): boolean {
+  return window.unit === body.unit
+    && window.allowance === body.allowance
+    && window.pace_model === body.pace_model
+    && window.burst_ratio === body.burst_ratio
+    && Math.abs(Date.parse(window.starts_at) - Date.parse(body.starts_at)) < 1000
+    && Math.abs(Date.parse(window.ends_at) - Date.parse(body.ends_at)) < 1000
+}
+
+function disconnectBody(view: PairingView, mode: DisconnectMode): { mode: DisconnectMode; expected_revision: number } {
+  if (typeof view.revision !== 'number' || !Number.isSafeInteger(view.revision) || view.revision < 1) {
+    throw new PairingError(0, 'This computer needs a fresh review before it can be disconnected.', {
+      code: 'stale_revision',
+      next: 'Refresh the computer and confirm the harnesses again. Disconnecting without the current revision could include a harness you have not reviewed.',
+    })
+  }
+  return { mode, expected_revision: view.revision }
 }
 
 function assertDisconnect(computerId: string | null, mode: DisconnectMode, permissions: PairingPermissions, state: ComputerState | null): void {
@@ -860,9 +1051,38 @@ function parseGuide(data: unknown): PairingGuide {
   if (!SLUG.test(slug)) invalid('default_tenant_slug')
   const protocol = asString(record.protocol, 'protocol')
   if (!Array.isArray(record.platforms) || record.platforms.length === 0 || record.platforms.some(item => typeof item !== 'string' || !item)) invalid('platforms')
-  const guide: PairingGuide = { instance_url: instance, default_tenant_slug: slug, protocol, platforms: record.platforms.map(String) }
-  if (typeof record.version === 'string' && record.version) guide.version = record.version
+  if (!Array.isArray(record.install_targets)) invalid('install_targets')
+  if (typeof record.install_available !== 'boolean') invalid('install_available')
+  const guide: PairingGuide = {
+    instance_url: instance,
+    default_tenant_slug: slug,
+    protocol,
+    platforms: record.platforms.map(String),
+    version: bounded(record.version, 'version', 64),
+    platform_qualification: bounded(record.platform_qualification, 'platform_qualification', 500),
+    setup_command: bounded(record.setup_command, 'setup_command', 4000),
+    install_available: record.install_available,
+    install_targets: record.install_targets.map(parseInstallTarget),
+  }
+  if (typeof record.managed_installation === 'string' && record.managed_installation) guide.managed_installation = record.managed_installation.slice(0, 500)
   return guide
+}
+
+function parseInstallTarget(value: unknown): InstallTarget {
+  const record = asRecord(value, 'install_targets')
+  const platform = asString(record.platform, 'install_targets.platform')
+  const arch = asString(record.arch, 'install_targets.arch')
+  const service = asString(record.service, 'install_targets.service')
+  if (!['darwin', 'linux'].includes(platform) || !['arm64', 'amd64'].includes(arch) || !['launchd-user', 'systemd-user'].includes(service)) invalid('install_targets')
+  return {
+    platform,
+    arch,
+    service,
+    qualification: bounded(record.qualification, 'install_targets.qualification', 500),
+    artifact_url: httpsUrl(record.artifact_url, 'install_targets.artifact_url'),
+    checksums_url: httpsUrl(record.checksums_url, 'install_targets.checksums_url'),
+    command: bounded(record.command, 'install_targets.command', 8000),
+  }
 }
 
 function parseView(data: unknown): PairingView {
@@ -900,6 +1120,9 @@ function parseView(data: unknown): PairingView {
   else if (typeof record.last_seen_at === 'string' && Number.isFinite(Date.parse(record.last_seen_at))) view.last_seen_at = record.last_seen_at
   const connectivity = optionalEnum(record.connectivity, CONNECTIVITY)
   if (connectivity) view.connectivity = connectivity
+  const accounting = readAccounting(record.accounting_state, 'accounting_state')
+  if (accounting) view.accounting_state = accounting
+  if (typeof record.existing_computer_id === 'string' && record.existing_computer_id) view.existing_computer_id = uuid(record.existing_computer_id, 'existing_computer_id')
   return view
 }
 
@@ -921,7 +1144,7 @@ function enrollments(value: unknown): PairingEnrollment[] {
   if (!Array.isArray(value)) invalid('enrollments')
   return value.map(item => {
     const record = asRecord(item, 'enrollments')
-    return {
+    const enrollment: PairingEnrollment = {
       account_id: uuid(record.account_id, 'account_id'),
       account_key: bounded(record.account_key, 'account_key', 128),
       harness: token(record.harness, 'harness'),
@@ -933,6 +1156,11 @@ function enrollments(value: unknown): PairingEnrollment[] {
       active_run_ids: uuidList(record.active_run_ids, 'active_run_ids'),
       ...optionalVerification(record),
     }
+    const processes = readProcess(record.local_processes, 'enrollment.local_processes')
+    if (processes) enrollment.local_processes = processes
+    const accounting = readAccounting(record.accounting_state, 'enrollment.accounting_state')
+    if (accounting) enrollment.accounting_state = accounting
+    return enrollment
   })
 }
 
@@ -1052,6 +1280,20 @@ function finite(value: unknown, field: string): number {
   if (typeof value !== 'number' || !Number.isFinite(value)) invalid(field)
   return value
 }
+function readAccounting(value: unknown, field: string): AccountingState | undefined {
+  if (value == null || value === '') return undefined
+  if (value === 'settled' || value === 'unconfirmed') return value
+  if (typeof value === 'string') return 'unconfirmed'
+  invalid(field)
+}
+
+function readProcess(value: unknown, field: string): ProcessState | undefined {
+  if (value == null || value === '') return undefined
+  if (value === 'unconfirmed' || value === 'drained') return value
+  if (typeof value === 'string') return 'unconfirmed'
+  invalid(field)
+}
+
 function optionalEnum<T extends string>(value: unknown, allowed: readonly T[]): T | undefined {
   if (typeof value !== 'string' || !value) return undefined
   return (allowed as readonly string[]).includes(value) ? value as T : undefined
@@ -1073,6 +1315,14 @@ function publicPrefix(value: unknown): string | null {
   if (typeof value !== 'string' || !PREFIX.test(value)) return null
   return value
 }
+function httpsUrl(value: unknown, field: string): string {
+  const text = asString(value, field)
+  let url: URL
+  try { url = new URL(text) } catch { invalid(field) }
+  if (url.protocol !== 'https:') invalid(field)
+  return text
+}
+
 function httpOrigin(value: unknown, field: string): string {
   const text = asString(value, field)
   let url: URL
