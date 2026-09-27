@@ -102,10 +102,11 @@ export async function mockAgents(page: Page, data: AgentData, options: AgentMock
     const request = route.request(), url = new URL(request.url()), path = url.pathname, method = request.method()
     let body: unknown = null
     try { body = request.postDataJSON() } catch { body = null }
+    const provenancePath = /^\/api\/projects\/([^/]+)\/harness-sessions\/([^/]+)\/provenance$/.exec(path)
     const sessionsPath = /^\/api\/projects\/([^/]+)\/harness-sessions(?:\/([^/]+)(?:\/controls\/([^/]+))?)?$/.exec(path)
     const messagesPath = /^\/api\/projects\/([^/]+)\/(messages|message-targets)$/.exec(path)
     const resolutionPath = /^\/api\/projects\/([^/]+)\/messages\/([^/]+)\/resolution$/.exec(path)
-    const known = sessionsPath || messagesPath || resolutionPath || path === '/api/harness-sessions' || path === '/api/runs' || path === '/api/approvals' || path.startsWith('/api/approvals/') || path.startsWith('/api/agent-accounts') || path.startsWith('/api/runs/')
+    const known = provenancePath || sessionsPath || messagesPath || resolutionPath || path === '/api/harness-sessions' || path === '/api/runs' || path === '/api/approvals' || path.startsWith('/api/approvals/') || path.startsWith('/api/agent-accounts') || path.startsWith('/api/runs/')
     if (!known) return route.fallback()
     calls.push({ path, method, body, query: url.searchParams })
     const q = url.searchParams
@@ -129,6 +130,9 @@ export async function mockAgents(page: Page, data: AgentData, options: AgentMock
       const decision = (body as { decision: string }).decision
       found.human_resolution_outcome = decision
       return route.fulfill({ json: { message_id: found.id, decision, created_at: new Date().toISOString() } })
+    }
+    if (provenancePath) {
+      return route.fulfill({ json: { session_id: provenancePath[2], revisions: [], truncated: false } })
     }
     if (sessionsPath) {
       if (options.sessionsMissing) return route.fulfill({ status: 404, json: { error: 'not found' } })

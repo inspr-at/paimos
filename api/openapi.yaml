@@ -2079,6 +2079,31 @@ paths:
         '400': {description: Invalid note or heartbeat}
         '403': {description: Worker proof rejected}
         '410': {description: Authenticated archived generation; detach harness servicing without signaling the process}
+  /projects/{projectId}/harness-sessions/{sessionId}/provenance:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: getHarnessInstructionProvenance
+      description: Newest instruction-provenance revisions for a visible session. Each item is an allowlisted logical name, a hash_kind, and an optional version. content_sha256 is present only when hash_kind is content. A prompt template recorded without an explicit template digest uses hash_kind absent and a null digest; the version identifier is not hashed. Contents, secrets and local paths are not stored.
+      responses:
+        '200': {description: Provenance revisions, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessProvenancePage'}}}}
+        '404': {description: Session is not visible}
+    post:
+      operationId: recordHarnessInstructionProvenance
+      description: The attributed worker appends one provenance revision, or replays the latest revision when the canonical set digest matches. Separate from registration and heartbeat. Requires harness.worker and X-Aeon-Worker-Lease.
+      parameters:
+        - {name: X-Aeon-Worker-Lease, in: header, required: true, schema: {type: string}, description: Private per-generation proof; never returned or logged}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/HarnessProvenanceWrite'}
+      responses:
+        '200': {description: Created or replayed revision, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessProvenanceRecorded'}}}}
+        '400': {description: Item is not an allowlisted name, digest or version}
+        '403': {description: Worker proof rejected}
+        '410': {description: Authenticated archived generation; existing provenance remains readable}
   /harness-sessions:
     get:
       operationId: listHarnessSessions
@@ -5613,6 +5638,46 @@ components:
         previous_value: {type: [string, 'null']}
         value: {type: [string, 'null']}
         at: {type: string, format: date-time}
+    HarnessProvenanceWrite:
+      type: object
+      required: [items]
+      properties:
+        items: {type: array, minItems: 1, maxItems: 16, items: {$ref: '#/components/schemas/HarnessProvenanceItem'}}
+    HarnessProvenanceItem:
+      type: object
+      required: [kind, logical_name, hash_kind]
+      properties:
+        kind: {type: string, enum: [agents, claude, skill, prompt_template]}
+        logical_name: {type: string, maxLength: 80, description: AGENTS.md, CLAUDE.md, one skill slug plus /SKILL.md, or prompt-template. Not a filesystem path.}
+        hash_kind: {type: string, enum: [content, absent], description: content means content_sha256 is a digest of the instruction or template bytes. absent is only valid for a prompt template recorded with a version and no template digest.}
+        content_sha256: {type: [string, 'null'], pattern: '^[0-9a-f]{64}$', description: Required when hash_kind is content. Null when hash_kind is absent. Never a hash of the version identifier.}
+        version: {type: [string, 'null'], maxLength: 80, description: Required for prompt_template. A version identifier, not prompt text.}
+        byte_size: {type: [integer, 'null'], minimum: 0, maximum: 1048576, description: Present for instruction files. Absent for a prompt template.}
+    HarnessProvenanceRevision:
+      type: object
+      required: [id, session_id, revision, set_sha256, recorded_by_principal_id, recorded_at, items]
+      properties:
+        id: {type: string, format: uuid}
+        session_id: {type: string, format: uuid}
+        revision: {type: integer, minimum: 1}
+        set_sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
+        recorded_by_principal_id: {type: string, format: uuid}
+        recorded_at: {type: string, format: date-time}
+        items: {type: array, items: {$ref: '#/components/schemas/HarnessProvenanceItem'}}
+    HarnessProvenanceRecorded:
+      allOf:
+        - {$ref: '#/components/schemas/HarnessProvenanceRevision'}
+        - type: object
+          required: [replayed]
+          properties:
+            replayed: {type: boolean, description: True when the latest revision already had this set digest.}
+    HarnessProvenancePage:
+      type: object
+      required: [session_id, revisions, truncated]
+      properties:
+        session_id: {type: string, format: uuid}
+        revisions: {type: array, maxItems: 32, items: {$ref: '#/components/schemas/HarnessProvenanceRevision'}}
+        truncated: {type: boolean}
     HarnessModel: {type: [string, 'null'], maxLength: 128, description: Optional trimmed plain text; control characters stripped.}
     HarnessEffort: {type: [string, 'null'], maxLength: 40, description: Optional trimmed plain text; control characters stripped.}
     HarnessAccountLabel: {type: [string, 'null'], maxLength: 128, description: Subscription or account display name, never a credential. Trimmed plain text; control characters stripped.}
