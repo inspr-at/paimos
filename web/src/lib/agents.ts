@@ -6,10 +6,17 @@ import { api, APIError } from './api.ts'
 import type { LivePage } from './liveAgents.ts'
 
 export type Harness = 'codex' | 'claude' | 'pi' | 'cursor' | 'grok'
+export interface MetadataChange {
+  field: 'display_label' | 'model' | 'reasoning_effort'
+  previous_value: string | null
+  value: string | null
+  at: string
+}
 export interface HarnessSession {
   id: string; project_id: string; agent_principal_id: string
   display_label?: string | null
   model?: string | null; reasoning_effort?: string | null; account_label?: string | null; harness_version?: string | null
+  metadata_history?: MetadataChange[]
   brief?: string | null; worktree?: string | null; branch?: string | null; commits?: { sha: string; subject: string }[]
   activity_note?: string | null; activity_note_id?: number; activity_history?: { note: string; at: string }[]
   run_id: string | null; ticket_node_id: string | null; work_order_id: string | null; parent_harness_session_id: string | null

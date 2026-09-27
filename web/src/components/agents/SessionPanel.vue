@@ -15,6 +15,7 @@ import Avatar from '../Avatar.vue'
 import AgentStateLabel from './AgentStateLabel.vue'
 import AgentGlyph from './AgentGlyph.vue'
 import { activityOf, currentStep, type ActivitySession } from './activity'
+import { metadataChangeText, metadataChanges } from './metadataHistory'
 
 // One session in the docked panel: who and where, the bound ticket, recent runs with
 // outcome and duration, telemetry, and the message thread with a composer.
@@ -44,6 +45,7 @@ const activity = computed(() => detail.value?.id === s.value?.id ? detail.value 
 const reported = computed(() => detail.value?.id === s.value?.id ? detail.value : s.value)
 const hasWork = computed(() => !!(reported.value?.brief || reported.value?.worktree || reported.value?.branch || reported.value?.commits?.length))
 const timeline = computed(() => activity.value?.activity_history ?? [])
+const metadataHistory = computed(() => metadataChanges(reported.value?.metadata_history))
 const step = computed(() => props.view ? activity.value?.activity_note || currentStep(props.view) : '')
 const meta = computed(() => props.view ? [props.view.account, props.view.model].filter(Boolean).join(' · ') : '')
 watch(() => [s.value?.id, props.view ? activityOf(props.view).activity_note : ''], async () => {
@@ -192,6 +194,9 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
           <div v-if="reported?.account_label" class="fact"><dt>Subscription</dt><dd>{{ reported.account_label }}</dd></div>
           <div v-if="reported?.harness_version" class="fact"><dt>Version</dt><dd class="mono">{{ reported.harness_version }}</dd></div>
         </dl>
+        <ol v-if="metadataHistory.length" class="metadata-history" aria-label="Recent session changes">
+          <li v-for="(item, index) in metadataHistory" :key="`${item.field}-${item.at}-${index}`"><time :datetime="item.at">{{ relativeTime(item.at, { now }) }}</time><span>{{ metadataChangeText(item) }}</span></li>
+        </ol>
       </section>
 
       <section v-if="hasWork" class="block" aria-labelledby="work-title">
@@ -319,6 +324,10 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
 .activity-timeline li { display: grid; grid-template-columns: 65px minmax(0, 1fr); gap: 10px; align-items: baseline; padding: 8px 0; border-top: 1px solid var(--line); font-size: 12.5px; color: var(--ink); }
 .activity-timeline time { color: var(--ink-3); font-size: 11px; white-space: nowrap; }
 .activity-timeline span { overflow-wrap: anywhere; }
+.metadata-history { display: grid; gap: 0; margin: 12px 0 0; padding: 0; list-style: none; }
+.metadata-history li { display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: 10px; align-items: baseline; padding: 8px 0; border-top: 1px solid var(--line); font-size: 12.5px; color: var(--ink); }
+.metadata-history time { color: var(--ink-3); font-size: 11px; white-space: nowrap; }
+.metadata-history span { overflow-wrap: anywhere; }
 .ticket-detail { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; min-width: 0; color: var(--ink); text-decoration: none; }
 .ticket-detail strong { min-width: 0; flex: 1 1 160px; font-size: 13px; overflow-wrap: anywhere; }
 .ticket-status { padding: 4px 8px; border-radius: 999px; background: var(--chip-bg); color: var(--ink-2); font-size: 11px; white-space: nowrap; }
