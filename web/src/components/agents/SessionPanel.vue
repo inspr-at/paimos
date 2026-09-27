@@ -14,6 +14,7 @@ import KeyCap from '../KeyCap.vue'
 import Avatar from '../Avatar.vue'
 import AgentStateLabel from './AgentStateLabel.vue'
 import AgentGlyph from './AgentGlyph.vue'
+import SessionRecovery from './SessionRecovery.vue'
 import SessionStateEvidence from './SessionStateEvidence.vue'
 import { activityOf, currentStep, type ActivitySession } from './activity'
 import { metadataChangeText, metadataChanges } from './metadataHistory'
@@ -139,6 +140,7 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
           <button type="button" class="btn sm" :aria-disabled="!!controlBlock(view, 'interrupt')" :data-tip="controlBlock(view, 'interrupt') || 'Stop the current turn'" @click="control('interrupt')"><AppIcon name="interrupt" :size="14" />Interrupt</button>
           <button type="button" class="btn sm stop" :aria-disabled="!!controlBlock(view, 'stop')" :data-tip="controlBlock(view, 'stop') || 'End this session'" @click="control('stop')"><AppIcon name="halt" :size="14" />Stop</button>
         </template>
+        <SessionRecovery :session="view.session" />
       </div>
       <p v-if="view && !loading" class="head-sub">
         <TicketPeekLink v-if="view.ticket" class="ticket-chip" :ticket-key="view.ticket.key" :href="view.ticket.href" :tip="view.ticket.title">{{ view.ticket.key }}</TicketPeekLink>
@@ -173,6 +175,7 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
 
       <section class="now-block" aria-labelledby="now-title">
         <h3 id="now-title" class="eyebrow">Now</h3>
+        <p v-if="view.session.archived_at" class="now-meta">Archived registration · process state unknown. No process was stopped by recovery.</p>
         <strong class="now-step">{{ step }}</strong>
         <p class="now-meta">Started {{ absoluteTime(view.session.created_at) }} · elapsed {{ elapsed(view.session, now) }}</p>
         <SessionStateEvidence :view="view" :now="now" />
