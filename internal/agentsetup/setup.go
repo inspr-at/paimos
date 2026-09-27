@@ -1,0 +1,669 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
+package agentsetup
+
+import (
+	"context"
+	"crypto/rand"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strings"
+	"time"
+
+	"github.com/inspr-at/paimos/internal/grokprobe"
+)
+
+const snapshotName = "pairing.json"
+const RuntimeName = "runtime.json"
+
+type LocalCandidate struct {
+	Candidate Candidate `json:"candidate"`
+	Path      string    `json:"path"`
+	Home      string    `json:"home,omitempty"`
+	Identity  string    `json:"identity"`
+	Version   string    `json:"version"`
+}
+
+func (c LocalCandidate) MarshalJSON() ([]byte, error) {
+	type plain LocalCandidate
+	return json.Marshal(struct {
+		plain
+		Grok grokprobe.Binding `json:"grok,omitempty"`
+	}{plain(c), c.Candidate.Grok})
+}
+func (c *LocalCandidate) UnmarshalJSON(raw []byte) error {
+	type plain LocalCandidate
+	var v struct {
+		plain
+		Grok grokprobe.Binding `json:"grok"`
+	}
+	if err := json.Unmarshal(raw, &v); err != nil {
+		return err
+	}
+	*c = LocalCandidate(v.plain)
+	c.Candidate.Grok = v.Grok
+	return nil
+}
+
+type RuntimeAccount struct {
+	Harness   string            `json:"harness"`
+	Key       string            `json:"key"`
+	AccountID string            `json:"account_id"`
+	Home      string            `json:"home,omitempty"`
+	Identity  string            `json:"identity,omitempty"`
+	Path      string            `json:"path"`
+	Grok      grokprobe.Binding `json:"grok,omitempty"`
+}
+type RuntimeConfig struct {
+	Schema        string           `json:"schema"`
+	Origin        string           `json:"origin"`
+	TenantID      string           `json:"tenant_id"`
+	PrincipalID   string           `json:"principal_id"`
+	DaemonID      string           `json:"daemon_id"`
+	ComputerID    string           `json:"computer_id"`
+	Workspace     string           `json:"workspace"`
+	Accounts      []RuntimeAccount `json:"accounts"`
+	NodePath      string           `json:"node_path,omitempty"`
+	ClaudeSDKPath string           `json:"claude_sdk_path,omitempty"`
+}
+
+type snapshot struct {
+	BoundComputer      string           `json:"bound_computer_id,omitempty"`
+	BoundDaemon        string           `json:"bound_daemon_id,omitempty"`
+	BoundPrincipal     string           `json:"bound_principal_id,omitempty"`
+	Schema             string           `json:"schema"`
+	Origin             string           `json:"origin"`
+	Request            DeviceRequest    `json:"request"`
+	Device             secret           `json:"device_secret"`
+	Runtime            secret           `json:"runtime_secret"`
+	Lifecycle          secret           `json:"lifecycle_secret"`
+	LifecycleRequestID string           `json:"lifecycle_request_id"`
+	Response           DeviceResponse   `json:"response"`
+	View               View             `json:"view"`
+	Candidates         []LocalCandidate `json:"candidates"`
+	StartService       bool             `json:"start_service"`
+	Service            *ServiceReceipt  `json:"service,omitempty"`
+	NodePath           string           `json:"node_path,omitempty"`
+	ClaudeSDKPath      string           `json:"claude_sdk_path,omitempty"`
+	Phase              string           `json:"phase"`
+	DisconnectAll      bool             `json:"disconnect_all"`
+	Removed            map[string]bool  `json:"removed"`
+	Cleaned            []string         `json:"cleaned"`
+	ComputerCleaned    bool             `json:"computer_cleaned"`
+	NextPoll           time.Time        `json:"next_poll"`
+}
+
+// Only Progress is printable. The snapshot and HTTP request bodies contain
+// private capabilities and must never be returned as status or diagnostics.
+type Progress struct {
+	AccountingState   string       `json:"accounting_state,omitempty"`
+	Schema            string       `json:"schema"`
+	Stage             string       `json:"stage"`
+	RequestID         string       `json:"request_id,omitempty"`
+	ComputerID        string       `json:"computer_id,omitempty"`
+	UserCode          string       `json:"user_code,omitempty"`
+	VerificationURI   string       `json:"verification_uri,omitempty"`
+	Accounts          []Enrollment `json:"accounts,omitempty"`
+	LocalProcesses    string       `json:"local_processes"`
+	ServerRevocation  string       `json:"server_revocation,omitempty"`
+	Action            string       `json:"action,omitempty"`
+	RetryAfterSeconds int          `json:"retry_after_seconds,omitempty"`
+}
+type LocalStatus struct {
+	LoginRequired                          bool
+	VerificationUnavailable                []string
+	Ready                                  bool
+	DaemonID, State                        string
+	Active, Unconfirmed, SettlementPending []string
+	VerificationResults                    map[string]string
+}
+
+// SavedOptions exposes only noncredential choices to resume the local command.
+func (e *Engine) SavedOptions() (Options, error) {
+	s, err := e.load()
+	if err != nil {
+		return Options{}, err
+	}
+	o := Options{Origin: s.Origin, TenantID: s.Response.TenantID, ComputerName: s.Request.ComputerName, Workspace: s.Request.Workspace, Platform: Platform{OS: s.Request.Platform, Arch: s.Request.Arch}, StartService: s.StartService, NodePath: s.NodePath, ClaudeSDKPath: s.ClaudeSDKPath}
+	for _, c := range s.Candidates {
+		v := c.Candidate
+		v.Path = c.Path
+		v.Home = c.Home
+		v.Identity = c.Identity
+		v.Version = c.Version
+		v.Login = "signed_in"
+		v.Grok = c.Candidate.Grok
+		o.Candidates = append(o.Candidates, v)
+	}
+	return o, nil
+}
+
+type LocalDaemon interface {
+	Fence(context.Context, string, string) (LocalStatus, error)
+	Status(context.Context, string) (LocalStatus, error)
+}
+type Engine struct {
+	Store     *Store
+	API       PairingAPI
+	Services  *ServiceManager
+	Local     LocalDaemon
+	Now       func() time.Time
+	GrokProbe func(context.Context, grokprobe.Binding) (grokprobe.Identity, error)
+}
+type Options struct {
+	Origin, TenantID, TenantSlug, ComputerName, Workspace string
+	Platform                                              Platform
+	Candidates                                            []Candidate
+	StartService                                          bool
+	NodePath, ClaudeSDKPath                               string
+}
+
+func (e *Engine) now() time.Time {
+	if e.Now != nil {
+		return e.Now().UTC()
+	}
+	return time.Now().UTC()
+}
+func uuid() (string, error) {
+	var b [16]byte
+	if _, e := rand.Read(b[:]); e != nil {
+		return "", errors.New("secure request identity unavailable")
+	}
+	b[6] = (b[6] & 15) | 64
+	b[8] = (b[8] & 63) | 128
+	return fmt.Sprintf("%x-%x-%x-%x-%x", b[:4], b[4:6], b[6:8], b[8:10], b[10:]), nil
+}
+func (e *Engine) load() (*snapshot, error) {
+	raw, err := e.Store.Read(snapshotName, 1<<20)
+	if err != nil {
+		return nil, err
+	}
+	var s snapshot
+	if json.Unmarshal(raw, &s) != nil || s.Schema != "aeon.agent-setup.private.v1" || !uuidPattern.MatchString(s.Request.RequestID) || (!s.ComputerCleaned && (!hashPattern.MatchString(string(s.Device)) || !hashPattern.MatchString(string(s.Runtime)))) || !hashPattern.MatchString(string(s.Lifecycle)) {
+		return nil, errors.New("private pairing state corrupt; no authority was restored")
+	}
+	if s.Removed == nil {
+		s.Removed = map[string]bool{}
+	}
+	return &s, nil
+}
+func (e *Engine) save(s *snapshot, first bool) error {
+	raw, err := json.Marshal(s)
+	if err != nil {
+		return errors.New("private pairing state invalid")
+	}
+	return e.Store.Write(snapshotName, raw, first)
+}
+func (e *Engine) progress(s *snapshot) Progress {
+	p := Progress{Schema: "aeon.agent-setup.v1", Stage: s.Phase, RequestID: s.Request.RequestID, ComputerID: s.View.ComputerID, Accounts: s.View.Enrollments, LocalProcesses: "unconfirmed"}
+	if s.Phase == "awaiting_approval" {
+		p.UserCode = s.Response.UserCode
+		p.VerificationURI = s.Response.VerificationURI
+		p.Action = "Enter this code at the same Aeon instance, review the selected accounts and choices, then Connect computer."
+	}
+	if e.now().Before(s.NextPoll) {
+		p.RetryAfterSeconds = int(s.NextPoll.Sub(e.now()).Seconds()) + 1
+	}
+	return p
+}
+
+func validateOptions(o Options) error {
+	if err := ValidateOrigin(o.Origin); err != nil {
+		return err
+	}
+	if _, err := SupportedPlatform(o.Platform.OS, o.Platform.Arch); err != nil {
+		return err
+	}
+	if o.TenantID != "" && o.TenantSlug != "" || o.TenantID != "" && !uuidPattern.MatchString(o.TenantID) {
+		return errors.New("choose exactly one valid tenant ID or slug")
+	}
+	p, err := filepath.EvalSymlinks(o.Workspace)
+	if err != nil || !filepath.IsAbs(o.Workspace) || p != o.Workspace {
+		return ErrUnsafePath
+	}
+	if info, err := os.Stat(p); err != nil || !info.IsDir() {
+		return ErrUnsafePath
+	}
+	if !safeLabel.MatchString(o.ComputerName) || len(o.Candidates) < 1 || len(o.Candidates) > 4 {
+		return errors.New("select one to four signed-in harness accounts and a computer name")
+	}
+	seen := map[string]bool{}
+	for _, c := range o.Candidates {
+		if seen[c.Harness] || c.Login != "signed_in" || !safeLabel.MatchString(c.Label) || !filepath.IsAbs(c.Path) || !safeLabel.MatchString(c.Identity) {
+			return errors.New("one explicitly identified signed-in account is required per harness")
+		}
+		seen[c.Harness] = true
+		if c.Managed {
+			return ErrDeclarative
+		}
+		if c.Harness == "claude" && (!filepath.IsAbs(o.NodePath) || !filepath.IsAbs(o.ClaudeSDKPath)) {
+			return errors.New("Claude requires pinned Node and Agent SDK paths")
+		}
+		if c.Harness == "grok" {
+			if o.Platform.OS != "darwin" || o.Platform.Arch != "arm64" {
+				return errors.New("native Grok guided setup requires macOS arm64")
+			}
+			if err := validGuidedGrok(c, o.Workspace); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// Begin persists all three secrets and the request ID before any device POST.
+// Repeating Begin with the same choices resumes the same request.
+func (e *Engine) Begin(ctx context.Context, o Options) (Progress, error) {
+	if err := e.Store.Lock(); err != nil {
+		return Progress{}, err
+	}
+	if s, err := e.load(); err == nil {
+		if s.Origin != strings.TrimRight(o.Origin, "/") || s.Request.Workspace != o.Workspace {
+			return Progress{}, ErrCollision
+		}
+		for _, local := range s.Candidates {
+			if local.Candidate.Harness == "grok" {
+				candidate := local.Candidate
+				candidate.Path, candidate.Home, candidate.Identity, candidate.Grok = local.Path, local.Home, local.Identity, local.Candidate.Grok
+				if err := e.verifyGuidedGrok(ctx, candidate, s.Request.Workspace); err != nil {
+					return e.progress(s), err
+				}
+			}
+		}
+		if s.DisconnectAll || s.View.ComputerState == "revoked" {
+			return e.progress(s), errors.New("this enrollment is revoked; fresh pairing requires a new private state directory and fresh approval")
+		}
+		return e.Step(ctx)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return Progress{}, err
+	}
+	entries, err := os.ReadDir(e.Store.Path())
+	if err != nil {
+		return Progress{}, ErrUnsafePath
+	}
+	for _, entry := range entries {
+		if entry.Name() != "setup.lock" {
+			return Progress{}, ErrCollision
+		}
+	}
+	if err := validateOptions(o); err != nil {
+		stage := "blocked"
+		if errors.Is(err, ErrDeclarative) {
+			stage = "managed_plan"
+		}
+		return Progress{Stage: stage, Action: err.Error()}, err
+	}
+	if within(o.Workspace, e.Store.Path()) || repositoryPath(e.Store.Path()) {
+		return Progress{}, errors.New("private setup state must be outside project repositories")
+	}
+	if e.Services == nil {
+		return Progress{}, errors.New("service ownership preflight unavailable")
+	}
+	if err := e.Services.Preflight(ctx, e.Store.Path(), nil); err != nil {
+		stage := "service_conflict"
+		if errors.Is(err, ErrDeclarative) {
+			stage = "managed_plan"
+		}
+		return Progress{Stage: stage, Action: err.Error()}, err
+	}
+	if o.TenantID == "" && o.TenantSlug == "" {
+		g, err := e.API.Guide(ctx)
+		if err != nil {
+			return Progress{}, err
+		}
+		if strings.TrimRight(g.InstanceURL, "/") != strings.TrimRight(o.Origin, "/") || g.Protocol != "pairing-v1" || g.DefaultTenantSlug == "" {
+			return Progress{}, errors.New("instance guide binding unavailable")
+		}
+		o.TenantSlug = g.DefaultTenantSlug
+	}
+	id, err := uuid()
+	if err != nil {
+		return Progress{}, err
+	}
+	device, err := randomSecret()
+	if err != nil {
+		return Progress{}, err
+	}
+	runtimeSecret, err := randomSecret()
+	if err != nil {
+		return Progress{}, err
+	}
+	life, err := randomSecret()
+	if err != nil {
+		return Progress{}, err
+	}
+	s := &snapshot{Schema: "aeon.agent-setup.private.v1", Origin: strings.TrimRight(o.Origin, "/"), Device: device, Runtime: runtimeSecret, Lifecycle: life, LifecycleRequestID: id, StartService: o.StartService, NodePath: o.NodePath, ClaudeSDKPath: o.ClaudeSDKPath, Phase: "requesting", Removed: map[string]bool{}}
+	s.Request = DeviceRequest{RequestID: id, TenantID: o.TenantID, TenantSlug: o.TenantSlug, DeviceHash: Hash([]byte(device)), RuntimeHash: Hash([]byte(runtimeSecret)), LifecycleHash: Hash([]byte(life)), Details: Details{ComputerName: o.ComputerName, Platform: o.Platform.OS, Arch: o.Platform.Arch, Workspace: o.Workspace, Capabilities: []string{"managed_runs"}}}
+	for _, c := range o.Candidates {
+		key, err := uuid()
+		if err != nil {
+			return Progress{}, err
+		}
+		c.Key = key
+		s.Request.Accounts = append(s.Request.Accounts, c)
+		s.Candidates = append(s.Candidates, LocalCandidate{c, c.Path, c.Home, c.Identity, c.Version})
+	}
+	if err = e.save(s, true); err != nil {
+		return Progress{}, err
+	}
+	return e.Step(ctx)
+}
+
+func (e *Engine) Step(ctx context.Context) (Progress, error) {
+	if err := e.Store.Lock(); err != nil {
+		return Progress{}, err
+	}
+	s, err := e.load()
+	if err != nil {
+		return Progress{}, err
+	}
+	if s.DisconnectAll || s.Phase == "draining" || s.Phase == "server_unconfirmed" || s.Phase == "disconnected" {
+		return e.reconcile(ctx, s)
+	}
+	if s.Phase == "connected" || s.Phase == "verification_pending" {
+		return e.reconcile(ctx, s)
+	}
+	if s.Phase == "denied" || s.Phase == "expired" || s.Phase == "revoked" {
+		return e.progress(s), errors.New("pairing request ended; fresh approval requires a fresh enrollment request")
+	}
+	if e.now().Before(s.NextPoll) {
+		return e.progress(s), nil
+	}
+	if s.Response.RequestID == "" {
+		r, err := e.API.Create(ctx, s.Request)
+		if err != nil {
+			return e.progress(s), e.rateLimit(s, err)
+		}
+		if r.RequestID != s.Request.RequestID || !uuidPattern.MatchString(r.TenantID) || !hashPattern.MatchString(r.Digest) || r.VerificationURI != s.Origin+"/agents/register-agent" || !regexp.MustCompile(`^[0-9]{3}-[0-9]{3}-[0-9]{3}$`).MatchString(r.UserCode) {
+			return e.progress(s), errors.New("device response does not match this instance/request")
+		}
+		s.Response = r
+		s.Phase = "awaiting_approval"
+		s.NextPoll = e.now().Add(5 * time.Second)
+		if err = e.save(s, false); err != nil {
+			return Progress{}, err
+		}
+		return e.progress(s), nil
+	}
+	v, err := e.API.Redeem(ctx, ProofRequest{TenantID: s.Response.TenantID, RequestID: s.Request.RequestID, DeviceSecret: s.Device})
+	if err != nil {
+		return e.progress(s), e.rateLimit(s, err)
+	}
+	if err = validateView(s, v, true); err != nil {
+		return e.progress(s), err
+	}
+	// A pending/denied Add harness request has no new computer projection.
+	// Preserve the healthy shared computer while this separate request waits.
+	if s.Request.ExistingComputerID == "" || v.ComputerID != "" {
+		s.View = v
+	}
+	s.NextPoll = e.now().Add(5 * time.Second)
+	switch v.State {
+	case "pending":
+		s.Phase = "awaiting_approval"
+	case "denied", "expired", "revoked":
+		s.Phase = v.State
+	case "redeemed":
+		s.Phase = "provisioning"
+	default:
+		return e.progress(s), errors.New("unrecognized pairing state; execution blocked")
+	}
+	if err = e.save(s, false); err != nil {
+		return Progress{}, err
+	}
+	if s.Phase == "provisioning" {
+		return e.provision(ctx, s)
+	}
+	return e.progress(s), nil
+}
+func (e *Engine) rateLimit(s *snapshot, err error) error {
+	var a *APIError
+	if errors.As(err, &a) && a.Code == "rate_limited" {
+		s.NextPoll = e.now().Add(a.RetryAfter)
+		if saveErr := e.save(s, false); saveErr != nil {
+			return saveErr
+		}
+	}
+	return err
+}
+
+func validateView(s *snapshot, v View, request bool) error {
+	if v.TenantID != s.Response.TenantID || v.ComputerName != s.Request.ComputerName || v.Platform != s.Request.Platform || v.Arch != s.Request.Arch || v.Workspace != s.Request.Workspace {
+		return errors.New("pairing response scope mismatch")
+	}
+	if request && (v.RequestID != s.Request.RequestID || v.Digest != s.Response.Digest || !sameChoices(v.Requested, s.Request.Accounts)) {
+		return errors.New("approved choices do not match local request")
+	}
+	seen := map[string]bool{}
+	for _, a := range v.Enrollments {
+		if !uuidPattern.MatchString(a.AccountID) || seen[a.AccountID] {
+			return errors.New("invalid enrollment identity")
+		}
+		seen[a.AccountID] = true
+		known := false
+		for _, c := range s.Candidates {
+			if c.Candidate.Key == a.AccountKey && c.Candidate.Harness == a.Harness && c.Candidate.Label == a.Label {
+				known = true
+				break
+			}
+		}
+		if !known {
+			return errors.New("response contains an unapproved account")
+		}
+		if a.State != "connected" && a.State != "draining" && a.State != "revoked" {
+			return errors.New("unknown enrollment lifecycle state")
+		}
+	}
+	if request && v.ExistingComputerID != s.Request.ExistingComputerID {
+		return errors.New("existing computer preview binding changed")
+	}
+	if v.State == "redeemed" || v.ComputerID != "" {
+		if s.BoundComputer != "" && (v.ComputerID != s.BoundComputer || v.DaemonID != s.BoundDaemon || v.PrincipalID != s.BoundPrincipal) {
+			return errors.New("immutable enrollment binding changed")
+		}
+		if s.Request.ExistingComputerID != "" && v.ComputerID != s.Request.ExistingComputerID {
+			return errors.New("Add harness computer binding changed")
+		}
+		if !uuidPattern.MatchString(v.ComputerID) || !uuidPattern.MatchString(v.PrincipalID) || v.DaemonID == "" || strings.ContainsAny(v.DaemonID, "/\\\x00\r\n") {
+			return errors.New("approved computer identity unavailable")
+		}
+		if s.View.ComputerID != "" && (s.View.ComputerID != v.ComputerID || s.View.DaemonID != v.DaemonID || s.View.PrincipalID != v.PrincipalID) {
+			return errors.New("existing computer binding changed")
+		}
+		if v.Revision < s.View.Revision {
+			return errors.New("stale computer revision")
+		}
+	}
+	return nil
+}
+
+func (e *Engine) provision(ctx context.Context, s *snapshot) (result Progress, resultErr error) {
+	if s.View.State != "redeemed" || s.View.ComputerState != "connected" || s.DisconnectAll {
+		return e.progress(s), errors.New("approved connected enrollment required")
+	}
+	defer func() {
+		if resultErr == nil {
+			return
+		}
+		state, code := "setup_failed", "installation_failed"
+		if errors.Is(resultErr, ErrServiceConflict) {
+			state, code = "service_conflict", "service_conflict"
+		}
+		if errors.Is(resultErr, ErrDeclarative) {
+			code = "managed_installation"
+		}
+		if errors.Is(resultErr, ErrUnsafePath) {
+			code = "private_storage_failed"
+		}
+		proof := e.proof(s)
+		proof.Progress = &SetupProgress{State: state, ErrorCode: code}
+		_, _ = e.API.Reconcile(ctx, proof)
+	}()
+	proof := e.proof(s)
+	proof.Progress = &SetupProgress{State: "provisioning"}
+	observed, err := e.API.Reconcile(ctx, proof)
+	if err != nil {
+		return e.progress(s), err
+	}
+	if err = validateView(s, observed, false); err != nil {
+		return e.progress(s), err
+	}
+	if observed.ComputerState != "connected" {
+		return e.reconcile(ctx, s)
+	}
+	if !regexp.MustCompile(`^[a-zA-Z0-9_-]{1,64}$`).MatchString(s.View.RuntimePrefix) {
+		return e.progress(s), errors.New("runtime prefix unavailable")
+	}
+	s.BoundComputer, s.BoundDaemon, s.BoundPrincipal = s.View.ComputerID, s.View.DaemonID, s.View.PrincipalID
+	if err := e.save(s, false); err != nil {
+		return e.progress(s), err
+	}
+	config := RuntimeConfig{Schema: "aeon.agent-runtime.v1", Origin: s.Origin, TenantID: s.View.TenantID, PrincipalID: s.View.PrincipalID, DaemonID: s.View.DaemonID, ComputerID: s.View.ComputerID, Workspace: s.Request.Workspace, NodePath: s.NodePath, ClaudeSDKPath: s.ClaudeSDKPath, Accounts: []RuntimeAccount{}}
+	seen := map[string]bool{}
+	for _, a := range s.View.Enrollments {
+		if a.State != "connected" || s.Removed[a.AccountID] {
+			continue
+		}
+		if !uuidPattern.MatchString(a.AccountID) || seen[a.AccountID] {
+			return e.progress(s), errors.New("invalid enrollment binding")
+		}
+		seen[a.AccountID] = true
+		found := false
+		for _, c := range s.Candidates {
+			if c.Candidate.Key == a.AccountKey && c.Candidate.Harness == a.Harness && c.Candidate.Label == a.Label {
+				if a.Harness == "grok" {
+					v := c.Candidate
+					v.Path, v.Home, v.Identity, v.Grok = c.Path, c.Home, c.Identity, c.Candidate.Grok
+					if err := e.verifyGuidedGrok(ctx, v, s.Request.Workspace); err != nil {
+						return e.progress(s), err
+					}
+				}
+				config.Accounts = append(config.Accounts, RuntimeAccount{a.Harness, a.AccountKey, a.AccountID, c.Home, c.Identity, c.Path, c.Candidate.Grok})
+				found = true
+				break
+			}
+		}
+		if !found {
+			return e.progress(s), errors.New("server selected an account absent from local approval")
+		}
+	}
+	if len(config.Accounts) == 0 {
+		return e.progress(s), errors.New("no approved local accounts")
+	}
+	key := []byte("aeon_" + s.View.RuntimePrefix + "_" + string(s.Runtime))
+	if err := e.Store.Write("runtime.key", key, true); err != nil {
+		if !errors.Is(err, ErrCollision) {
+			return e.progress(s), err
+		}
+		old, e2 := e.Store.Read("runtime.key", 4096)
+		if e2 != nil || string(old) != string(key) {
+			return e.progress(s), ErrCollision
+		}
+	}
+	raw, _ := json.Marshal(config)
+	if err := e.Store.Write(RuntimeName, raw, false); err != nil {
+		return e.progress(s), err
+	}
+	if s.StartService {
+		if e.Services == nil {
+			return e.progress(s), errors.New("service manager unavailable")
+		}
+		receipt, err := e.Services.Install(ctx, e.Store, s.View.ComputerID, true, s.Service)
+		s.Service = receipt
+		if saveErr := e.save(s, false); saveErr != nil {
+			return Progress{}, saveErr
+		}
+		if err != nil {
+			return e.progress(s), err
+		}
+	}
+	s.Phase = "connected"
+	if s.View.Verification.Mode == "one_per_harness" {
+		s.Phase = "verification_pending"
+	}
+	if err := e.save(s, false); err != nil {
+		return Progress{}, err
+	}
+	p := e.progress(s)
+	if e.Local == nil {
+		p.Stage = "provisioning"
+		p.Action = "Start the approved daemon to verify connectivity."
+		return p, nil
+	}
+	local, err := e.Local.Status(ctx, "")
+	if err != nil || local.DaemonID != s.View.DaemonID || !local.Ready {
+		p.Stage = "provisioning"
+		p.Action = "Daemon connectivity is unconfirmed; resume setup after the approved service starts."
+		return p, nil
+	}
+	p.LocalProcesses = local.State
+	return p, nil
+}
+
+func ReadRuntimeConfig(root string) (RuntimeConfig, error) {
+	s, err := OpenStore(root, false)
+	if err != nil {
+		return RuntimeConfig{}, err
+	}
+	defer s.Close()
+	raw, err := s.Read(RuntimeName, 128<<10)
+	if err != nil {
+		return RuntimeConfig{}, err
+	}
+	var c RuntimeConfig
+	if json.Unmarshal(raw, &c) != nil || c.Schema != "aeon.agent-runtime.v1" || ValidateOrigin(c.Origin) != nil || !uuidPattern.MatchString(c.TenantID) || !uuidPattern.MatchString(c.PrincipalID) || !uuidPattern.MatchString(c.ComputerID) || c.DaemonID == "" || len(c.DaemonID) > 128 || strings.ContainsAny(c.DaemonID, "/\\\x00\r\n") {
+		return RuntimeConfig{}, errors.New("private runtime configuration invalid")
+	}
+	return c, nil
+}
+func ReadRuntime(root string) (RuntimeConfig, secret, error) {
+	c, err := ReadRuntimeConfig(root)
+	if err != nil {
+		return c, "", err
+	}
+	s, err := OpenStore(root, false)
+	if err != nil {
+		return c, "", err
+	}
+	defer s.Close()
+	key, err := s.Read("runtime.key", 4096)
+	if err != nil {
+		return c, "", err
+	}
+	if !regexp.MustCompile(`^aeon_[A-Za-z0-9_-]{1,64}_[0-9a-f]{64}$`).Match(key) {
+		return c, "", errors.New("private runtime credential invalid")
+	}
+	return c, secret(key), nil
+}
+
+// DispatchPermitted is consulted only after a successful tombstone reconciliation.
+// It is not execution authority; normal runtime authentication/claim still apply.
+func (e *Engine) DispatchPermitted() (bool, error) {
+	s, err := e.load()
+	if err != nil {
+		return false, err
+	}
+	return !s.DisconnectAll && !s.ComputerCleaned && s.View.ComputerState == "connected", nil
+}
+
+func sameChoices(a, b []Candidate) bool {
+	left, _ := json.Marshal(a)
+	right, _ := json.Marshal(b)
+	return string(left) == string(right)
+}
+func within(root, path string) bool {
+	rel, err := filepath.Rel(root, path)
+	return err == nil && (rel == "." || rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
+}
+func repositoryPath(path string) bool {
+	for p := path; p != "/" && p != "."; p = filepath.Dir(p) {
+		if _, err := os.Lstat(filepath.Join(p, ".git")); err == nil {
+			return true
+		}
+	}
+	return false
+}

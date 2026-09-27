@@ -17,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"golang.org/x/oauth2"
 
+	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/httpapi"
@@ -90,7 +91,7 @@ func (m *Module) Mount(mux *http.ServeMux) {
 func (m *Module) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p, kind, err := m.authenticate(r)
-		if err != nil && !isPublicAPI(r.URL.Path) {
+		if err != nil && !publicRequest(r) {
 			writeInternal(w)
 			return
 		}
@@ -112,7 +113,7 @@ func (m *Module) Middleware(next http.Handler) http.Handler {
 		case credAgent:
 			r = r.WithContext(tenant.WithPrincipal(r.Context(), p))
 		}
-		if kind != credSession && kind != credAgent && isProtectedAPI(r.URL.Path) {
+		if kind != credSession && kind != credAgent && protectedRequest(r) {
 			if r.URL.Path == "/api/me" {
 				m.writeMeUnauthorized(w)
 			} else {
@@ -121,6 +122,10 @@ func (m *Module) Middleware(next http.Handler) http.Handler {
 			return
 		}
 		if kind == credAgent {
+			if err := m.pairingBoundary(r, p); err != nil {
+				agentpairing.WriteError(w, err)
+				return
+			}
 			if scope, controlled := coreAgentScope(r); !controlled || scope == "" || r.URL.Path == "/api/me" && !agentHasScope(p.Scopes, scope) {
 				if receiptRoute(r) {
 					writeReceiptNotFound(w)
@@ -130,7 +135,7 @@ func (m *Module) Middleware(next http.Handler) http.Handler {
 				return
 			}
 		}
-		if (kind == credSession || kind == credAgent) && isProtectedAPI(r.URL.Path) {
+		if (kind == credSession || kind == credAgent) && protectedRequest(r) {
 			// SEC4's route table remains the outer agent allowlist. The binding
 			// and the exact route permission are checked inside the tenant.
 			if kind != credAgent || r.Method != http.MethodGet || r.URL.Path != "/api/me" {
@@ -396,7 +401,20 @@ func coreAgentScope(r *http.Request) (string, bool) {
 		}
 	case "harness-sessions":
 		return harnessScope(parts[1:], read), true
+	case "agent-pairing":
+		if r.Method == "GET" && r.URL.Path == "/api/agent-pairing/self" || r.Method == "POST" && r.URL.Path == "/api/agent-pairing/self/disconnect" {
+			return "run.claim", true
+		}
 	case "agent-accounts":
+		if read {
+			return "account.read", true
+		}
+		if r.Method == "POST" && len(parts) == 2 && parts[1] == "route" {
+			return "account.route", true
+		}
+		if r.Method == "POST" && len(parts) == 3 && parts[2] == "probe" {
+			return "account.probe", true
+		}
 		return "account.manage", true
 	case "stage-handoffs":
 		return "stage.<op>", true
@@ -445,6 +463,13 @@ func agentHasScope(have []string, want string) bool {
 		return false
 	}
 	return hasScope(have, want)
+}
+
+func publicRequest(r *http.Request) bool {
+	return isPublicAPI(r.URL.Path) || agentpairing.PublicRoute(r.Method, r.URL.Path)
+}
+func protectedRequest(r *http.Request) bool {
+	return strings.HasPrefix(r.URL.Path, "/api/") && !publicRequest(r)
 }
 
 func isPublicAPI(path string) bool {

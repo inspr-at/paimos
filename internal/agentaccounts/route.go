@@ -12,6 +12,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
 
@@ -43,6 +44,9 @@ func lockRun(ctx context.Context, tx pgx.Tx, id string) (runRow, error) {
 }
 
 func reserve(ctx context.Context, tx pgx.Tx, r *http.Request, p tenant.Principal, runID, daemonID string, accountIDs []string, estimates map[string]int64) (RouteResult, error) {
+	if err := agentpairing.Lock(ctx, tx); err != nil {
+		return RouteResult{}, err
+	}
 	if err := validateEstimates(estimates); err != nil {
 		return RouteResult{}, err
 	}
@@ -58,6 +62,9 @@ func reserve(ctx context.Context, tx pgx.Tx, r *http.Request, p tenant.Principal
 		id = strings.ToLower(id)
 		accountIDs[i] = id
 		enrolled[id] = true
+	}
+	if err := agentpairing.ExpireUnclaimedVerifications(ctx, tx); err != nil {
+		return RouteResult{}, err
 	}
 	run, err := lockRun(ctx, tx, runID)
 	if err != nil {
@@ -78,8 +85,14 @@ func reserve(ctx context.Context, tx pgx.Tx, r *http.Request, p tenant.Principal
 	if existing, ok, err := activeRoute(ctx, tx, run.ID, p.ID, daemonID, enrolled); err != nil || ok {
 		// A held reservation is not authority to launch after a grant, profile
 		// or account becomes unavailable. Preserve replay for already owned runs.
+		if err == nil {
+			err = agentpairing.AccountFence(ctx, tx, existing.AccountID, run.Status != "queued")
+		}
 		if err == nil && run.Status == "queued" {
-			err = validateReservedAccount(ctx, tx, run, existing.AccountID)
+			err = agentpairing.RunFence(ctx, tx, existing.AccountID, run.ID, false)
+			if err == nil {
+				err = validateReservedAccount(ctx, tx, run, existing.AccountID)
+			}
 		}
 		return existing, err
 	}
@@ -103,6 +116,9 @@ func reserve(ctx context.Context, tx pgx.Tx, r *http.Request, p tenant.Principal
 	}
 	account, windows, err := selectAccount(ctx, tx, p.ID, harness, *run.ProfileID, daemonID, accountIDs, estimates, now)
 	if err != nil {
+		return RouteResult{}, err
+	}
+	if err = agentpairing.RunFence(ctx, tx, account.ID, run.ID, false); err != nil {
 		return RouteResult{}, err
 	}
 	tag, err := tx.Exec(ctx, `

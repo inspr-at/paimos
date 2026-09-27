@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net/http"
 	"net/url"
 	"os"
 	"strings"
@@ -25,7 +26,11 @@ type Remote struct {
 	daemonID, generation string
 }
 
-func NewRemote(baseURL, token string) *Remote { return &Remote{Client: client.New(baseURL, token)} }
+func NewRemote(baseURL, token string) *Remote {
+	c := client.New(baseURL, token)
+	c.HTTP.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	return &Remote{Client: c}
+}
 
 // runCredential derives a local capability without exposing the daemon key to
 // a vendor process. Its scope is also checked by the owning supervisor.
@@ -223,26 +228,53 @@ func (r *Remote) Route(ctx context.Context, runID, daemonID string, accountIDs [
 }
 
 func (r *Remote) Claim(ctx context.Context, runID, daemonID, generation string, reservations []string) error {
+	// Retain the attempted binding even if the HTTP response is lost. It is
+	// only a header hint; the server remains the authority for claim ownership.
+	r.mu.Lock()
+	r.daemonID, r.generation = daemonID, generation
+	r.mu.Unlock()
 	err := r.Client.Do(ctx, "POST", "/api/runs/"+url.PathEscape(runID)+"/claim", map[string]any{
 		"daemon_id": daemonID, "daemon_generation": generation, "reservation_ids": reservations,
 	}, nil)
-	if err == nil {
-		r.mu.Lock()
-		r.daemonID, r.generation = daemonID, generation
-		r.mu.Unlock()
-	}
 	return err
 }
+
+// ErrTelemetryProtocol means the server rejected the telemetry itself. It does
+// not include authentication, enrollment fences, or uncertain delivery errors.
+var ErrTelemetryProtocol = errors.New("telemetry protocol violation")
 
 func (r *Remote) Report(ctx context.Context, runID string, t Telemetry) error {
 	r.mu.RLock()
 	daemon, generation := r.daemonID, r.generation
 	r.mu.RUnlock()
+	return r.ReportForClaim(ctx, runID, daemon, generation, t)
+}
+
+// ReportForClaim preserves the durable run's fencing identity across restart
+// or another claim. Possession of these public strings grants no authority.
+func (r *Remote) ReportForClaim(ctx context.Context, runID, daemon, generation string, t Telemetry) error {
 	if daemon == "" || generation == "" {
 		return errors.New("run has no daemon claim")
 	}
-	return r.Client.DoWithHeaders(ctx, "POST", "/api/runs/"+url.PathEscape(runID)+"/telemetry", t, nil,
+	err := r.Client.DoWithHeaders(ctx, "POST", "/api/runs/"+url.PathEscape(runID)+"/telemetry", t, nil,
 		map[string]string{"X-Aeon-Daemon-ID": daemon, "X-Aeon-Daemon-Generation": generation})
+	var status *client.StatusError
+	if errors.As(err, &status) {
+		protocol := status.Status == http.StatusBadRequest || status.Status == http.StatusRequestEntityTooLarge || status.Status == http.StatusUnprocessableEntity
+		if status.Status == http.StatusConflict {
+			// Other conflicts include generation changes and enrollment drain.
+			// Only the telemetry endpoint's explicit protocol errors are fatal.
+			switch status.Message {
+			case "divergent telemetry replay", "telemetry sequence is not monotonic", "run cannot return to starting":
+				protocol = true
+			}
+		}
+		if protocol {
+			// Do not propagate arbitrary server response text as diagnostics.
+			return fmt.Errorf("%w (HTTP %d)", ErrTelemetryProtocol, status.Status)
+		}
+	}
+	return err
 }
 
 func (r *Remote) Inbox(ctx context.Context, after int64) (InboxPage, error) {

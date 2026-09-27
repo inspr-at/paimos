@@ -11,6 +11,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
@@ -163,6 +164,11 @@ type accountWrite struct {
 }
 
 func registerAccount(ctx context.Context, tx pgx.Tx, p tenant.Principal, in accountWrite) (Account, error) {
+	if paired, err := agentpairing.PairedPrincipal(ctx, tx, p.ID); err != nil {
+		return Account{}, err
+	} else if paired {
+		return Account{}, fail(403, "paired accounts require fresh person approval")
+	}
 	key, err := cleanText(in.AccountKey, 128)
 	if err != nil || !accountKeyRE.MatchString(key) {
 		return Account{}, fail(http.StatusBadRequest, "invalid account key")
@@ -266,6 +272,9 @@ func reportProbe(ctx context.Context, tx pgx.Tx, p tenant.Principal, accountID s
 		}
 		in.HostLabel = &label
 	}
+	if err := agentpairing.AccountFence(ctx, tx, accountID, false); err != nil {
+		return Account{}, err
+	}
 	before, err := lockAccount(ctx, tx, accountID)
 	if err != nil {
 		return Account{}, err
@@ -323,6 +332,9 @@ func updateState(ctx context.Context, tx pgx.Tx, p tenant.Principal, accountID s
 	if !validState(state) {
 		return Account{}, fail(http.StatusBadRequest, "invalid state")
 	}
+	if err := agentpairing.AccountFence(ctx, tx, accountID, false); err != nil {
+		return Account{}, err
+	}
 	before, err := lockAccount(ctx, tx, accountID)
 	if err != nil {
 		return Account{}, err
@@ -370,6 +382,9 @@ func createWindow(ctx context.Context, tx pgx.Tx, p tenant.Principal, accountID 
 		return Window{}, fail(http.StatusBadRequest, "invalid burst ratio")
 	}
 	burst = math.Round(burst*10000) / 10000
+	if err := agentpairing.AccountFence(ctx, tx, accountID, false); err != nil {
+		return Window{}, err
+	}
 	if _, err := lockAccount(ctx, tx, accountID); err != nil {
 		return Window{}, err
 	}
@@ -395,6 +410,9 @@ func createWindow(ctx context.Context, tx pgx.Tx, p tenant.Principal, accountID 
 		p.TenantID, accountID, in.StartsAt, in.EndsAt, in.Unit, in.Allowance, in.PaceModel, burst).
 		Scan(&w.ID, &w.AccountID, &w.StartsAt, &w.EndsAt, &w.Unit, &w.Allowance, &w.Used, &w.Reserved, &w.PaceModel, &w.BurstRatio)
 	if err != nil {
+		return Window{}, err
+	}
+	if _, err := tx.Exec(ctx, `UPDATE agent_pairing_enrollments SET ongoing_approved_at=clock_timestamp() WHERE account_id=$1 AND state='connected'`, accountID); err != nil {
 		return Window{}, err
 	}
 	w.Provisional = true // No reservation has measured usage in a new window.
