@@ -253,7 +253,7 @@ func seedDisposableWithBrief(ctx context.Context, pool *pgxpool.Pool, slug, key,
 		m := &Module{pool: pool, inTenant: db.InTenant}
 		changed := false
 		if brief != "" {
-			changed, err = prepareBriefSeed(ctx, pool, m, p, id, brief)
+			changed, err = prepareBriefSeed(ctx, pool, m, p, id, brief, target)
 			if err != nil {
 				return err
 			}
@@ -267,6 +267,10 @@ func seedDisposableWithBrief(ctx context.Context, pool *pgxpool.Pool, slug, key,
 			if err != nil {
 				return err
 			}
+			if view.NextAction.Key == "approve_candidate" && pendingSeedGate(view.NextAction.Key, target) {
+				out = OperatorResult{ProjectKey: key, Disposable: true, Stage: view.Stage, ReleaseID: view.CurrentReleaseID, PendingAction: view.NextAction.Key, Already: !changed}
+				return nil
+			}
 			reached := targetReached(state, view.Stage, target)
 			if reached && target == "deploy" {
 				reached, err = deployGatesLive(ctx, pool, tid, id)
@@ -278,12 +282,12 @@ func seedDisposableWithBrief(ctx context.Context, pool *pgxpool.Pool, slug, key,
 				out = OperatorResult{ProjectKey: key, Disposable: true, Stage: view.Stage, ReleaseID: view.CurrentReleaseID, TargetReached: true, Already: !changed}
 				return nil
 			}
+			if pendingSeedGate(view.NextAction.Key, target) {
+				out = OperatorResult{ProjectKey: key, Disposable: true, Stage: view.Stage, ReleaseID: view.CurrentReleaseID, PendingAction: view.NextAction.Key, Already: !changed}
+				return nil
+			}
 			action := seedNextAction(view, target)
 			if action == "" {
-				if view.NextAction.Key == "approve_candidate" || view.NextAction.Key == "approve_deploy" {
-					out = OperatorResult{ProjectKey: key, Disposable: true, Stage: view.Stage, ReleaseID: view.CurrentReleaseID, PendingAction: view.NextAction.Key, Already: !changed}
-					return nil
-				}
 				return fmt.Errorf("cannot seed to %s: %s (%s)", target, view.NextAction.Key, view.NextAction.Reason)
 			}
 			if step == 3 {
@@ -298,6 +302,11 @@ func seedDisposableWithBrief(ctx context.Context, pool *pgxpool.Pool, slug, key,
 		return errors.New("journey seed exceeded three actions")
 	})
 	return out, err
+}
+
+func pendingSeedGate(action, target string) bool {
+	return action == "approve_candidate" && (target == "candidate" || target == "deploy") ||
+		action == "approve_deploy" && target == "deploy"
 }
 
 func releaseState(ctx context.Context, pool *pgxpool.Pool, tid string, id *string) (string, error) {
