@@ -55,14 +55,15 @@ func (row approvalRow) live() bool {
 }
 
 type handoffRow struct {
-	ID        string
-	Stage     string
-	Operation string
-	State     string
-	Result    string
-	Attempt   int
-	Epoch     int64
-	At        time.Time
+	ID         string
+	Stage      string
+	Operation  string
+	State      string
+	Result     string
+	Attempt    int
+	Epoch      int64
+	At         time.Time
+	Historical bool
 }
 
 type handoffIdentity struct {
@@ -664,20 +665,22 @@ func assignOffer(f *facts, scope, resource string, offer gateOffer, replace bool
 
 func loadHandoffs(ctx context.Context, tx pgx.Tx, f *facts) error {
 	var deployWindow, accessWindow *time.Time
+	var renewalRevision int64
 	err := tx.QueryRow(ctx, `
 		SELECT max(at) FILTER (WHERE type IN ('journey.candidate_approved', 'journey.deploy_retried')),
-		       max(at) FILTER (WHERE type = 'journey.permit_approved')
+		       max(at) FILTER (WHERE type = 'journey.permit_approved'),
+		       coalesce(max((after->>'revision')::bigint) FILTER (WHERE type IN ('journey.candidate_renewed', 'journey.deploy_renewed')),0)
 		FROM events
-		WHERE node_id = $1::uuid AND after->>'current_release_id' = $2`, f.ProjectID, f.Release.ID).Scan(&deployWindow, &accessWindow)
+		WHERE node_id = $1::uuid AND after->>'current_release_id' = $2`, f.ProjectID, f.Release.ID).Scan(&deployWindow, &accessWindow, &renewalRevision)
 	if err != nil {
 		return err
 	}
 	rows, err := tx.Query(ctx, `
-		SELECT h.id::text, h.stage, h.operation, h.state, coalesce(r.outcome, ''), h.attempt, h.authority_epoch, h.created_at
+		SELECT h.id::text, h.stage, h.operation, h.state, coalesce(r.outcome, ''), h.attempt, h.authority_epoch, h.created_at, h.journey_revision < $2
 		FROM stage_handoffs h
 		LEFT JOIN stage_handoff_results r
 		  ON r.tenant_id = h.tenant_id AND r.handoff_id = h.id
-		WHERE h.release_node_id = $1::uuid AND h.stage IN ('deploy', 'access')`, f.Release.ID)
+		WHERE h.release_node_id = $1::uuid AND h.stage IN ('deploy', 'access')`, f.Release.ID, renewalRevision)
 	if err != nil {
 		return err
 	}
@@ -685,7 +688,7 @@ func loadHandoffs(ctx context.Context, tx pgx.Tx, f *facts) error {
 	var all []handoffRow
 	for rows.Next() {
 		var row handoffRow
-		if err := rows.Scan(&row.ID, &row.Stage, &row.Operation, &row.State, &row.Result, &row.Attempt, &row.Epoch, &row.At); err != nil {
+		if err := rows.Scan(&row.ID, &row.Stage, &row.Operation, &row.State, &row.Result, &row.Attempt, &row.Epoch, &row.At, &row.Historical); err != nil {
 			return err
 		}
 		all = append(all, row)
@@ -714,6 +717,9 @@ func foldHandoffs(rows []handoffRow, deployWindow, accessWindow time.Time) (depl
 	for _, row := range rows {
 		if prev, ok := latest[row.Stage]; !ok || row.At.After(prev.At) || (row.At.Equal(prev.At) && row.ID > prev.ID) {
 			latest[row.Stage] = row
+		}
+		if row.Historical {
+			continue
 		}
 		window := deployWindow
 		if row.Stage == "access" {
@@ -762,8 +768,8 @@ func loadApproval(ctx context.Context, tx pgx.Tx, id string) (approvalRow, error
 	err := tx.QueryRow(ctx, `
 		SELECT r.scope, r.resource_kind, r.resource_id::text,
 		       coalesce(d.decision, ''), coalesce(d.decided_by_principal_id::text, ''),
-		       r.expires_at > now(),
-		       (g.approval_request_id IS NOT NULL AND g.revoked_at IS NULL AND g.valid_until > now()),
+		       r.expires_at > clock_timestamp(),
+		       (g.approval_request_id IS NOT NULL AND g.revoked_at IS NULL AND g.valid_until > clock_timestamp()),
 		       EXISTS (
 		         SELECT 1 FROM journey_gates jg
 		         WHERE jg.tenant_id = r.tenant_id AND jg.approval_request_id = r.id)

@@ -70,6 +70,7 @@ type JourneyStage struct {
 // JourneyNextAction is the single call to action for the project.
 type JourneyNextAction struct {
 	Key               string  `json:"key"`
+	RenewalAction     string  `json:"renewal_action,omitempty"`
 	Label             string  `json:"label"`
 	Stage             string  `json:"stage"`
 	Available         bool    `json:"available"`

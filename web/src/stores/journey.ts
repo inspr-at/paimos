@@ -8,7 +8,7 @@ import { useAgents } from './agents'
 // The journey projection per project (the header's compact stage and the
 // Journey view share it). Every write carries the revision it was made on; a
 // stale revision reloads the projection and says so instead of retrying.
-const RELEASE_ACTIONS: ActionKey[] = ['start_build', 'mark_candidate', 'approve_candidate', 'reject_candidate', 'approve_deploy', 'retry_deploy', 'approve_permit', 'plan_next_release']
+const RELEASE_ACTIONS: ActionKey[] = ['start_build', 'mark_candidate', 'approve_candidate', 'reject_candidate', 'approve_deploy', 'renew_candidate', 'renew_deploy', 'retry_deploy', 'approve_permit', 'plan_next_release']
 export class StaleJourney extends Error {}
 
 export const useJourney = defineStore('journey', () => {

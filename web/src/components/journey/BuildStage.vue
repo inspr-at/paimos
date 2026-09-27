@@ -39,7 +39,7 @@ const segments = computed(() => { const n = Math.min(24, Math.max(scope.value, 1
 const percent = computed(() => scope.value ? Math.round(counts.value.done / scope.value * 100) : 0)
 const next = computed(() => journey.value.next_action)
 const building = computed(() => next.value.key === 'wait_for_build')
-const candidate = computed(() => next.value.key === 'approve_candidate')
+const candidate = computed(() => next.value.key === 'approve_candidate' && next.value.stage === 'build')
 const marking = computed(() => next.value.key === 'mark_candidate')
 const buildApprovals = computed(() => gateApprovals(ctx.approvals.value, 'build', journey.value.current_release_id))
 const buildApproval = computed(() => offeredApproval(ctx.approvals.value, journey.value, 'build', ctx.now.value))
@@ -134,7 +134,7 @@ async function reject() {
         </div>
       </GateCard>
       <GateCard v-else-if="!building && journey.stages.find(s => s.key === 'build')?.state === 'done'" eyebrow="Done" :title="`${ctx.releaseLabel.value} candidate`" tone="record">
-        <p>The candidate is approved. <button type="button" class="linkish" @click="ctx.view('deploy')">Deploy <AppIcon name="arrow" :size="12" /></button></p>
+        <p>{{ next.renewal_action === 'renew_candidate' ? 'The candidate approval is no longer live. Renew it in Deploy.' : 'The candidate is approved.' }} <button type="button" class="linkish" @click="ctx.view('deploy')">Deploy <AppIcon name="arrow" :size="12" /></button></p>
       </GateCard>
       <LaterCard v-else-if="!here" stage="build" />
     </div>

@@ -246,6 +246,7 @@ func TestDeriveStagesAndNextAction(t *testing.T) {
 				Profile: "personal", BriefConfirmed: true,
 				RequirementsRevision: 1, AgreedRequirementsRevision: 1,
 				Release: release("deploying", false), DeployGateID: "dep",
+				GateLiveByID: map[string]bool{"dep": true},
 			},
 			stage: stageDeploy, next: actionApproveDeploy, reason: reasonDeployEvidence, blocked: true,
 			shape: "skipped", access: "skipped", live: "later",

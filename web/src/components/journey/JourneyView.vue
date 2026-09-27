@@ -182,6 +182,8 @@ const DONE: Partial<Record<string, (n: string) => string>> = {
   start_build: n => `${n} build started · ${plan.stats.value.inRelease} tickets.`,
   approve_candidate: () => 'Release candidate approved. Deployment is next.',
   approve_deploy: () => 'Deployment approved.',
+  renew_candidate: () => 'Candidate approval renewed. Fresh preparation and deployment evidence are required.',
+  renew_deploy: () => 'Deployment approval renewed. Fresh preparation and deployment evidence are required.',
   retry_deploy: () => 'Deployment retried with fresh evidence.',
   approve_permit: () => 'Permit approved.',
   plan_next_release: () => 'The next release is open for planning.',
@@ -208,10 +210,10 @@ async function runNext() {
     catch (e) { toast(e instanceof Error ? e.message : 'The requirements were not agreed.', { tone: 'error' }) }
     return
   }
-  const key = action.key as ActionKey
+  const key = action.renewal_action ?? action.key as ActionKey
   const confirmation = captureJourneyConfirmation(j, key, approval.value)
   const withGate = confirmation.approval
-  const body = `${withGate && withGate.decision === null ? `This approves the ${gate.value} gate that ${agents.askerName(withGate.agent_principal_id, withGate.agent_name).name} asked for. ` : ''}${ACTION_LONG[action.key]}`
+  const body = `${withGate && withGate.decision === null ? `This approves the ${gate.value} gate that ${agents.askerName(withGate.agent_principal_id, withGate.agent_name).name} asked for. ` : ''}${ACTION_LONG[action.renewal_action ?? action.key]}`
   const ok = await confirmAction({ title: `${action.label}?`, body, confirmLabel: next.value.label })
   if (!ok) return
   await act(key, { confirmation, done: DONE[key]?.(releaseLabel.value) })
