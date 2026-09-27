@@ -41,6 +41,9 @@ func NewGrokAdapter(bindings ...map[string]GrokBinding) *GrokAdapter {
 }
 func (*GrokAdapter) Name() string { return Grok }
 func (a *GrokAdapter) Start(ctx context.Context, r StartRequest, observe func(AdapterEvent)) (Process, error) {
+	if err := validExecutionMode(r.Run, a); err != nil {
+		return nil, err
+	}
 	if r.Profile.Harness != Grok || r.Profile.Model != grokModel || r.Profile.Effort != grokEffort || r.AccountKey == "" {
 		return nil, errors.New("native Grok profile or account unavailable")
 	}
