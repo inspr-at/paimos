@@ -203,11 +203,32 @@ func TestManagedForceStopHumanConfirmationAndGenerationFences(t *testing.T) {
 	if len(claimed) != 1 {
 		t.Fatal("force command missing or duplicated")
 	}
+
+	claimedPreview := preview()
+	expect(t, f.call(f.person, "POST", path+"/archive", map[string]any{"expected_revision": claimedPreview["observed_revision"], "confirmation": claimedPreview["confirmation"], "request_id": uid(), "reason": "Claimed force still active"}, ""), 409)
 	completePath := path + "/controls/" + control["id"].(string) + "/complete"
 	expect(t, f.call(f.agent, "POST", completePath, map[string]any{"outcome": "applied", "reason": "accepted"}, lease), 400)
 	expect(t, f.call(f.agent, "POST", completePath, map[string]any{"outcome": "applied", "reason": "owned_group_signalled_root_exited"}, lease), 200)
-	// Offline ownership cannot authorize another force, even while the public
-	// registration is active and the process snapshot is still stored.
+
+	next := preview()
+	secondBody := map[string]any{"expected_revision": next["observed_revision"], "confirmation": next["force_confirmation"], "request_id": uid(), "reason": "Second exact force authorization"}
+	w = f.call(f.person, "POST", path+"/controls/force-stop", secondBody, "")
+	expect(t, w, 201)
+	secondControl := decode(t, w)["id"].(string)
+	expect(t, f.call(f.agent, "POST", path+"/yield", map[string]any{}, lease), 200)
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE harness_controls SET expires_at=clock_timestamp()-interval '1 minute' WHERE id=$1`, secondControl)
+		return err
+	})
+	expiredPreview := preview()
+	w = f.call(f.person, "POST", path+"/archive", map[string]any{"expected_revision": expiredPreview["observed_revision"], "confirmation": expiredPreview["confirmation"], "request_id": uid(), "reason": "Expired force never confirmed exit"}, "")
+	expect(t, w, 200)
+	if decode(t, w)["recovery_process_state"] != "unknown" {
+		t.Fatal("expired force invented a process exit")
+	}
+	expect(t, f.call(f.agent, "POST", path+"/controls/"+secondControl+"/complete", map[string]any{"outcome": "applied", "reason": "owned_group_signalled_root_exited"}, lease), 410)
+	// Offline or archived ownership cannot authorize another force, even while its
+	// process snapshot is still stored.
 	f.tx(t, f.person, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `UPDATE harness_sessions SET process_observed_at=clock_timestamp()-interval '2 minutes' WHERE id=$1`, id)
 		return err
@@ -258,4 +279,44 @@ func TestRecoveryProjectPermissionDoesNotReachAnotherProject(t *testing.T) {
 			expect(t, f.call(recoveryPerson, "POST", path+"/archive", body, ""), 200)
 		}
 	}
+}
+
+func TestRecoveryRevokesUsageWithoutErasingStoppedSettlement(t *testing.T) {
+	f := fixture(t)
+	path, id, lease := usageSession(t, f, "managed")
+	report := usagePayload()
+	usageResult(t, f.call(f.agent, "POST", path+"/usage", report, lease))
+	expect(t, f.call(f.agent, "POST", path+"/stop", map[string]any{"reason": "process_exited"}, lease), 200)
+	report["report_id"], report["sequence"], report["provisional"] = uid(), 2, false
+	settled, _ := usageResult(t, f.call(f.agent, "POST", path+"/usage", report, lease))
+	if settled.Provisional {
+		t.Fatal("normal stop blocked final settlement")
+	}
+	preview := decode(t, f.call(f.person, "GET", path+"/recovery", nil, ""))
+	expect(t, f.call(f.person, "POST", path+"/archive", map[string]any{"expected_revision": preview["observed_revision"], "confirmation": preview["confirmation"], "request_id": uid(), "reason": "Archive completed registration"}, ""), 200)
+	// Even an exact old receipt cannot bypass revocation.
+	expect(t, f.call(f.agent, "POST", path+"/usage", report, lease), 410)
+	report["report_id"], report["sequence"] = uid(), 3
+	expect(t, f.call(f.agent, "POST", path+"/usage", report, lease), 410)
+	detail := decode(t, f.call(f.person, "GET", path, nil, ""))
+	if detail["stop_reason"] != "process_exited" {
+		t.Fatal("archive overwrote known closure history")
+	}
+	usages := decode(t, f.call(f.person, "GET", path+"/usage", nil, ""))["items"].([]any)
+	if len(usages) != 1 || usages[0].(map[string]any)["sequence"] != float64(2) || usages[0].(map[string]any)["input_tokens"] != float64(100) {
+		t.Fatal("archive changed retained usage")
+	}
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		var receipts, events int
+		if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM harness_usage_receipts WHERE session_id=$1`, id).Scan(&receipts); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM events WHERE type='harness.usage_reported' AND after->>'session_id'=$1`, id).Scan(&events); err != nil {
+			return err
+		}
+		if receipts != 2 || events != 2 {
+			t.Fatalf("usage history receipts=%d events=%d", receipts, events)
+		}
+		return nil
+	})
 }

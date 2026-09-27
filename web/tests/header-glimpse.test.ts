@@ -46,7 +46,7 @@ test('the shared context pages the Tickets query and drops links outside its mem
   globalThis.fetch = async url => {
     const parsed = new URL(String(url), 'http://local.test'); calls.push(parsed)
     if (parsed.pathname === '/api/tickets/graph') return Response.json({ nodes: [{ id: 'a' }, { id: 'b' }, { id: 'c' }], links: [{ source: 'a', target: 'b' }, { source: 'b', target: 'c' }], truncated: true })
-    return Response.json(parsed.searchParams.has('cursor') ? { items: [{ id: 'b' }], next_cursor: null } : { items: [{ id: 'a' }], next_cursor: 'next' })
+    return Response.json(parsed.searchParams.has('cursor') ? { items: [{ id: 'b' }, { id: 'outside-graph' }], next_cursor: null } : { items: [{ id: 'a' }], next_cursor: 'next' })
   }
   try {
     const filters = filtersFromQuery({ assignee: 'person', status: 'in_progress', priority: 'high', type: 'ticket', q: 'body match', closed: '1' })
