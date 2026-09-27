@@ -287,3 +287,90 @@ func TestDisposableFixedBriefsReachPendingCandidateGate(t *testing.T) {
 		})
 	}
 }
+
+func TestDisposableBriefsUseExistingBuildingRelease(t *testing.T) {
+	for _, tc := range []struct{ brief, target string }{
+		{"1", "deploy"},
+		{"2", "candidate"},
+		{"3", "deploy"},
+	} {
+		t.Run(tc.brief, func(t *testing.T) {
+			t.Setenv("AEON_ENV", "dev")
+			f := newFixture(t)
+			project := f.node(t, "project", "PRJ-36", "Existing disposable project")
+			if _, err := journey.MarkDisposable(t.Context(), f.db.App, "journey-a", "PRJ-36"); err != nil {
+				t.Fatal(err)
+			}
+			release := f.node(t, "release", "REL-1", "Existing release")
+			ticket := f.node(t, "ticket", "TKT-1", "Earlier completed ticket")
+			ctx := t.Context()
+			if err := db.InTenant(dbtest.Seed(ctx), f.db.App, f.tenant, func(tx pgx.Tx) error {
+				if _, err := tx.Exec(ctx, `SELECT aeon_seed_requirement_kind($1::uuid)`, f.tenant); err != nil {
+					return err
+				}
+				if _, err := tx.Exec(ctx, `INSERT INTO journey_projects(tenant_id,project_node_id,current_release_node_id)
+					VALUES($1::uuid,$2::uuid,$3::uuid)`, f.tenant, project, release); err != nil {
+					return err
+				}
+				if _, err := tx.Exec(ctx, `INSERT INTO journey_releases(tenant_id,release_node_id,project_node_id,number,state)
+					VALUES($1::uuid,$2::uuid,$3::uuid,1,'building')`, f.tenant, release, project); err != nil {
+					return err
+				}
+				if _, err := tx.Exec(ctx, `UPDATE nodes SET state='done' WHERE id=$1::uuid`, ticket); err != nil {
+					return err
+				}
+				_, err := tx.Exec(ctx, `INSERT INTO journey_tickets(tenant_id,ticket_node_id,project_node_id,release_node_id,walker_position,source)
+					VALUES($1::uuid,$2::uuid,$3::uuid,$4::uuid,0,'manual')`, f.tenant, ticket, project, release)
+				return err
+			}); err != nil {
+				t.Fatal(err)
+			}
+			before := f.journey(t, f.person, "GET", "/api/projects/"+project+"/journey", "")
+			if before.NextAction.Key != "continue_intake" {
+				t.Fatalf("expected unaccepted brief before seed, got %+v", before.NextAction)
+			}
+			args := []string{"seed", "--tenant", "journey-a", "--project", "PRJ-36", "--to-stage", tc.target, "--brief", tc.brief}
+			if tc.brief == "1" {
+				t.Setenv("AEON_ENV", "prod")
+				args = append(args, "--production", "--confirm-project", "PRJ-36")
+			}
+			var out bytes.Buffer
+			if err := journey.RunOperator(ctx, f.db.App, args, &out); err != nil {
+				t.Fatalf("seed existing building release: %v", err)
+			}
+			if !strings.Contains(out.String(), `"pending_action":"approve_candidate"`) {
+				t.Fatalf("seed did not stop at candidate gate: %s", out.String())
+			}
+			view := f.journey(t, f.person, "GET", "/api/projects/"+project+"/journey", "")
+			if view.NextAction.Key != "approve_candidate" || view.NextAction.Available || view.CurrentReleaseID == nil || *view.CurrentReleaseID != release {
+				t.Fatalf("existing release or human gate changed: %+v", view)
+			}
+			var releaseCount, accepted, selected, decisions int
+			var state string
+			if err := db.InTenant(dbtest.Seed(ctx), f.db.App, f.tenant, func(tx pgx.Tx) error {
+				if err := tx.QueryRow(ctx, `SELECT count(*) FROM journey_releases WHERE project_node_id=$1::uuid`, project).Scan(&releaseCount); err != nil {
+					return err
+				}
+				if err := tx.QueryRow(ctx, `SELECT state FROM journey_releases WHERE release_node_id=$1::uuid`, release).Scan(&state); err != nil {
+					return err
+				}
+				if err := tx.QueryRow(ctx, `SELECT count(*) FROM intake_draft_acceptances WHERE project_node_id=$1::uuid`, project).Scan(&accepted); err != nil {
+					return err
+				}
+				if err := tx.QueryRow(ctx, `SELECT count(*) FROM journey_tickets WHERE project_node_id=$1::uuid AND release_node_id=$2::uuid`, project, release).Scan(&selected); err != nil {
+					return err
+				}
+				return tx.QueryRow(ctx, `SELECT count(*) FROM events WHERE node_id=$1::uuid AND type IN ('journey.candidate_approved','journey.deploy_approved')`, project).Scan(&decisions)
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if releaseCount != 1 || state != "candidate" || accepted != 1 || selected != 2 || decisions != 0 {
+				t.Fatalf("release count=%d state=%s accepted=%d selected=%d decisions=%d", releaseCount, state, accepted, selected, decisions)
+			}
+			out.Reset()
+			if err := journey.RunOperator(ctx, f.db.App, args, &out); err != nil || !strings.Contains(out.String(), `"already":true`) || !strings.Contains(out.String(), `"pending_action":"approve_candidate"`) {
+				t.Fatalf("seed replay: %v %s", err, out.String())
+			}
+		})
+	}
+}
