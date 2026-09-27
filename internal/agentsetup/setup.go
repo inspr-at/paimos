@@ -75,6 +75,7 @@ type snapshot struct {
 // Only Progress is printable. The snapshot and HTTP request bodies contain
 // private capabilities and must never be returned as status or diagnostics.
 type Progress struct {
+	AccountingState   string       `json:"accounting_state,omitempty"`
 	Schema            string       `json:"schema"`
 	Stage             string       `json:"stage"`
 	RequestID         string       `json:"request_id,omitempty"`
@@ -88,6 +89,8 @@ type Progress struct {
 	RetryAfterSeconds int          `json:"retry_after_seconds,omitempty"`
 }
 type LocalStatus struct {
+	LoginRequired                          bool
+	VerificationUnavailable                []string
 	Ready                                  bool
 	DaemonID, State                        string
 	Active, Unconfirmed, SettlementPending []string
@@ -244,7 +247,11 @@ func (e *Engine) Begin(ctx context.Context, o Options) (Progress, error) {
 		}
 	}
 	if err := validateOptions(o); err != nil {
-		return Progress{Stage: "blocked", Action: err.Error()}, err
+		stage := "blocked"
+		if errors.Is(err, ErrDeclarative) {
+			stage = "managed_plan"
+		}
+		return Progress{Stage: stage, Action: err.Error()}, err
 	}
 	if within(o.Workspace, e.Store.Path()) || repositoryPath(e.Store.Path()) {
 		return Progress{}, errors.New("private setup state must be outside project repositories")
@@ -253,7 +260,11 @@ func (e *Engine) Begin(ctx context.Context, o Options) (Progress, error) {
 		return Progress{}, errors.New("service ownership preflight unavailable")
 	}
 	if err := e.Services.Preflight(ctx, e.Store.Path(), nil); err != nil {
-		return Progress{Stage: "service_conflict", Action: err.Error()}, err
+		stage := "service_conflict"
+		if errors.Is(err, ErrDeclarative) {
+			stage = "managed_plan"
+		}
+		return Progress{Stage: stage, Action: err.Error()}, err
 	}
 	if o.TenantID == "" && o.TenantSlug == "" {
 		g, err := e.API.Guide(ctx)
@@ -341,7 +352,11 @@ func (e *Engine) Step(ctx context.Context) (Progress, error) {
 	if err = validateView(s, v, true); err != nil {
 		return e.progress(s), err
 	}
-	s.View = v
+	// A pending/denied Add harness request has no new computer projection.
+	// Preserve the healthy shared computer while this separate request waits.
+	if s.Request.ExistingComputerID == "" || v.ComputerID != "" {
+		s.View = v
+	}
 	s.NextPoll = e.now().Add(5 * time.Second)
 	switch v.State {
 	case "pending":
@@ -422,9 +437,39 @@ func validateView(s *snapshot, v View, request bool) error {
 	return nil
 }
 
-func (e *Engine) provision(ctx context.Context, s *snapshot) (Progress, error) {
+func (e *Engine) provision(ctx context.Context, s *snapshot) (result Progress, resultErr error) {
 	if s.View.State != "redeemed" || s.View.ComputerState != "connected" || s.DisconnectAll {
 		return e.progress(s), errors.New("approved connected enrollment required")
+	}
+	defer func() {
+		if resultErr == nil {
+			return
+		}
+		state, code := "setup_failed", "installation_failed"
+		if errors.Is(resultErr, ErrServiceConflict) {
+			state, code = "service_conflict", "service_conflict"
+		}
+		if errors.Is(resultErr, ErrDeclarative) {
+			code = "managed_installation"
+		}
+		if errors.Is(resultErr, ErrUnsafePath) {
+			code = "private_storage_failed"
+		}
+		proof := e.proof(s)
+		proof.Progress = &SetupProgress{State: state, ErrorCode: code}
+		_, _ = e.API.Reconcile(ctx, proof)
+	}()
+	proof := e.proof(s)
+	proof.Progress = &SetupProgress{State: "provisioning"}
+	observed, err := e.API.Reconcile(ctx, proof)
+	if err != nil {
+		return e.progress(s), err
+	}
+	if err = validateView(s, observed, false); err != nil {
+		return e.progress(s), err
+	}
+	if observed.ComputerState != "connected" {
+		return e.reconcile(ctx, s)
 	}
 	if !regexp.MustCompile(`^[a-zA-Z0-9_-]{1,64}$`).MatchString(s.View.RuntimePrefix) {
 		return e.progress(s), errors.New("runtime prefix unavailable")

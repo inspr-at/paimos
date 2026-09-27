@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/agentsetup"
@@ -61,6 +62,7 @@ type Record struct {
 }
 
 type owned struct {
+	deadlineExpired atomic.Bool
 	mu              sync.Mutex
 	harnessMu       sync.Mutex
 	record          Record
@@ -85,6 +87,7 @@ type Supervisor struct {
 	closing           bool
 	blockedAccounts   map[string]bool
 	probedAccounts    map[string]bool
+	loginRequired     map[string]bool
 	mu                sync.Mutex
 	api               API
 	journal           *localjournal.Journal[Record]
@@ -207,7 +210,7 @@ func NewSupervisor(ctx context.Context, c Config) (*Supervisor, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &Supervisor{state: state, blockedAccounts: map[string]bool{}, probedAccounts: map[string]bool{}, api: c.API, journal: j, lock: lock, adapters: adapters, runs: map[string]*owned{}, tenantID: tenantID,
+	s := &Supervisor{state: state, blockedAccounts: map[string]bool{}, probedAccounts: map[string]bool{}, loginRequired: map[string]bool{}, api: c.API, journal: j, lock: lock, adapters: adapters, runs: map[string]*owned{}, tenantID: tenantID,
 		principalID: principalID, daemonID: c.DaemonID, generation: gen, workspace: physical, estimates: c.EstimatedUnits, accounts: c.Accounts,
 		heartbeatInterval: heartbeat, maxRunDuration: maxRun}
 	for _, rec := range j.Snapshot() {
@@ -300,6 +303,7 @@ func (s *Supervisor) PollOnce(ctx context.Context) error {
 		s.mu.Lock()
 		s.blockedAccounts[account.ID] = err != nil || !available
 		s.probedAccounts[account.ID] = err == nil && available
+		s.loginRequired[account.ID] = !available
 		s.mu.Unlock()
 		if err != nil {
 			failures = append(failures, errors.New("account probe unavailable"))
@@ -364,7 +368,7 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) error {
 		s.mu.Unlock()
 		for _, entry := range entries {
 			entry.mu.Lock()
-			busy := entry.record.ExecutionMode == VerificationPurpose && !entry.record.ExitObserved && (entry.record.State == "running" || entry.record.State == "starting" || entry.record.State == "ownership_lost")
+			busy := entry.record.ExecutionMode == VerificationPurpose && !entry.record.ExitObserved && (entry.record.State == "running" || entry.record.State == "starting" || entry.record.State == "waiting" || entry.record.State == "ownership_lost")
 			entry.mu.Unlock()
 			if busy {
 				return ErrDraining
@@ -564,6 +568,7 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) error {
 		}
 	}
 	observe := func(ev AdapterEvent) { s.observe(entry, ev) }
+	launchedAt := time.Now()
 	proc, err := adapter.Start(ctx, StartRequest{TenantID: s.tenantID, PrincipalID: s.principalID, Run: run, Profile: profile,
 		AccountKey: route.AccountKey, Workspace: runWorkspace, StateRoot: filepath.Dir(s.journal.JournalPath()), Prompt: prompt, Generation: s.generation, Tools: runTools}, observe)
 	if err != nil {
@@ -580,7 +585,9 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) error {
 	entry.mu.Unlock()
 	entry.mu.Lock()
 	entry.monitorDone = make(chan struct{})
+	done := entry.monitorDone
 	entry.mu.Unlock()
+	go s.runDeadline(entry, proc, done, time.Until(launchedAt.Add(duration)))
 	var startedErr error
 	if saveErr == nil {
 		startedErr = s.update(ctx, entry, Telemetry{Kind: "started", Status: "running"})
@@ -596,7 +603,7 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) error {
 		heartbeatErr = nil
 	}
 	go s.monitor(entry)
-	go s.heartbeat(entry, duration)
+	go s.heartbeat(entry)
 	if err := errors.Join(saveErr, startedErr, heartbeatErr); err != nil {
 		s.freezeOnError(route.AccountID)
 		return err
@@ -604,11 +611,9 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) error {
 	return nil
 }
 
-func (s *Supervisor) heartbeat(entry *owned, duration time.Duration) {
+func (s *Supervisor) heartbeat(entry *owned) {
 	ticker := time.NewTicker(s.heartbeatInterval)
 	defer ticker.Stop()
-	deadline := time.NewTimer(duration)
-	defer deadline.Stop()
 	entry.mu.Lock()
 	done := entry.monitorDone
 	entry.mu.Unlock()
@@ -630,19 +635,24 @@ func (s *Supervisor) heartbeat(entry *owned, duration time.Duration) {
 				s.freezeOnError(entry.record.AccountID)
 			}
 
-		case <-deadline.C:
-			entry.mu.Lock()
-			proc := entry.process
-			entry.stopRequested = true
-			entry.mu.Unlock()
-			if proc != nil {
-				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-				_ = proc.Stop(ctx)
-				cancel()
-			}
-			return
 		}
 	}
+}
+
+// The approved process deadline is independent of API/entry locks. A revoked
+// key or slow telemetry must not extend the approved verification duration.
+func (s *Supervisor) runDeadline(entry *owned, proc Process, done <-chan struct{}, remaining time.Duration) {
+	timer := time.NewTimer(remaining)
+	defer timer.Stop()
+	select {
+	case <-done:
+		return
+	case <-timer.C:
+	}
+	entry.deadlineExpired.Store(true)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_ = proc.Stop(ctx)
 }
 
 func (s *Supervisor) observe(entry *owned, ev AdapterEvent) {
@@ -697,7 +707,7 @@ func (s *Supervisor) monitor(entry *owned) {
 	entry.harnessMu.Lock()
 	defer entry.harnessMu.Unlock()
 	entry.mu.Lock()
-	stopped := entry.stopRequested
+	stopped := entry.stopRequested || entry.deadlineExpired.Load()
 	forced := entry.forceRequested
 	entry.mu.Unlock()
 	if err == nil {

@@ -18,12 +18,13 @@ import (
 )
 
 type Command struct {
-	Path         string
-	Args         []string
-	Input        []byte
-	Env          []string
-	StatusStderr bool
-	OutputLimit  int
+	DiscardOutput bool
+	Path          string
+	Args          []string
+	Input         []byte
+	Env           []string
+	StatusStderr  bool
+	OutputLimit   int
 }
 type Executor interface {
 	Run(context.Context, Command) ([]byte, error)
@@ -63,6 +64,9 @@ func (OSExecutor) Run(ctx context.Context, c Command) ([]byte, error) {
 	}
 	b := &boundedBuffer{max: limit}
 	cmd.Stdout = b
+	if c.DiscardOutput {
+		cmd.Stdout = io.Discard
+	}
 	cmd.Stderr = io.Discard
 	stderr := &boundedBuffer{}
 	if c.StatusStderr {

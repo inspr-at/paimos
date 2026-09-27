@@ -96,7 +96,11 @@ func (e *Engine) Disconnect(ctx context.Context, accountID string) (Progress, er
 }
 
 func (e *Engine) proof(s *snapshot) ProofRequest {
-	return ProofRequest{TenantID: s.Response.TenantID, RequestID: s.LifecycleRequestID, LifecycleSecret: s.Lifecycle}
+	tenant := s.Response.TenantID
+	if tenant == "" {
+		tenant = s.Request.TenantID
+	}
+	return ProofRequest{TenantID: tenant, RequestID: s.LifecycleRequestID, LifecycleSecret: s.Lifecycle}
 }
 
 func (e *Engine) applyFences(ctx context.Context, s *snapshot, v View) error {
@@ -136,8 +140,8 @@ func (e *Engine) SyncFences(ctx context.Context) error {
 	proof := e.proof(s)
 	proof.Progress = &SetupProgress{State: "provisioning"}
 	if e.Local != nil {
-		if local, err := e.Local.Status(ctx, ""); err == nil && local.DaemonID == s.View.DaemonID && local.Ready {
-			proof.Progress.State = "connected"
+		if local, err := e.Local.Status(ctx, ""); err == nil && local.DaemonID == s.View.DaemonID {
+			proof.Progress = observedProgress(s.View, local)
 		}
 	}
 	v, err := e.API.Reconcile(ctx, proof)
@@ -179,6 +183,7 @@ func (e *Engine) reconcile(ctx context.Context, s *snapshot) (Progress, error) {
 		return Progress{}, err
 	}
 	p := e.progress(s)
+	p.AccountingState = v.AccountingState
 	if s.ComputerCleaned {
 		proof := e.proof(s)
 		proof.Cleaned = s.Cleaned
@@ -196,7 +201,13 @@ func (e *Engine) reconcile(ctx context.Context, s *snapshot) (Progress, error) {
 		p.Action = "Disconnected; any retained accounting journal remains available for authorized recovery."
 		return p, nil
 	}
-	if s.DisconnectAll || len(s.Removed) > 0 {
+	cleanupPending := s.DisconnectAll
+	for _, a := range v.Enrollments {
+		if s.Removed[a.AccountID] && (a.Cleanup != "confirmed" || a.State != "revoked") {
+			cleanupPending = true
+		}
+	}
+	if cleanupPending {
 		p.Stage = "draining"
 		p.ServerRevocation = "pending"
 		if s.DisconnectAll && v.ComputerState == "revoked" {
@@ -294,6 +305,18 @@ func (e *Engine) reconcile(ctx context.Context, s *snapshot) (Progress, error) {
 				allRemoved = false
 			}
 		}
+		acknowledged := map[string]bool{}
+		for _, a := range ack.Enrollments {
+			if a.Cleanup == "confirmed" && a.State == "revoked" {
+				acknowledged[a.AccountID] = true
+			}
+		}
+		for id := range s.Removed {
+			if !acknowledged[id] {
+				allRemoved = false
+			}
+		}
+		p.Accounts = ack.Enrollments
 		if !s.DisconnectAll && allRemoved {
 			p.Stage = "connected"
 			p.Action = "Selected enrollment removed; shared daemon and other accounts remain connected."
@@ -302,6 +325,19 @@ func (e *Engine) reconcile(ctx context.Context, s *snapshot) (Progress, error) {
 	}
 	if e.Local != nil {
 		local, err := e.Local.Status(ctx, "")
+		if err == nil && local.DaemonID == v.DaemonID {
+			observed := observedProgress(v, local)
+			if observed.State == "login_required" {
+				p.Stage = "login_required"
+				p.Action = "An approved vendor account is no longer signed in with its approved identity. Use normal vendor login, then resume setup."
+				return p, nil
+			}
+			if observed.State == "setup_failed" {
+				p.Stage = "blocked"
+				p.Action = "This installed harness cannot enforce safe verification, so its verification was not launched. The computer remains paired. Use a qualified harness version, or choose Connect only during a fresh authenticated pairing approval."
+				return p, nil
+			}
+		}
 		if err == nil && local.DaemonID == v.DaemonID && local.Ready {
 			p.LocalProcesses = local.State
 		} else {
@@ -419,4 +455,29 @@ func (e *Engine) AddHarness(ctx context.Context, candidates []Candidate) (Progre
 		return Progress{}, err
 	}
 	return e.Step(ctx)
+}
+
+func observedProgress(v View, local LocalStatus) *SetupProgress {
+	p := &SetupProgress{State: "provisioning"}
+	if local.LoginRequired {
+		p.State = "login_required"
+		p.ErrorCode = "login_required"
+		return p
+	}
+	for _, a := range v.Enrollments {
+		if a.State != "connected" || a.VerificationRunID == "" || a.VerificationState == "completed" {
+			continue
+		}
+		for _, id := range local.VerificationUnavailable {
+			if a.AccountID == id {
+				p.State = "setup_failed"
+				p.ErrorCode = "installation_failed"
+				return p
+			}
+		}
+	}
+	if local.Ready {
+		p.State = "connected"
+	}
+	return p
 }
