@@ -5,7 +5,7 @@ import {
   agentName, bindingWindow, controlBlocked, cost, decidedApprovals, duration, expiresIn, groupSessions, heldRequests, needsYou,
   pendingApprovals, riskFor, riskOf, runDuration, scopeLabel, sessionStatus, sessionForest, tokens, windowSummary,
 } from '../src/lib/agentState.ts'
-import type { AllowanceWindow, Approval, HarnessSession, ProjectMessage } from '../src/lib/agents.ts'
+import type { AgentRun, AllowanceWindow, Approval, HarnessSession, ProjectMessage } from '../src/lib/agents.ts'
 
 const now = Date.parse('2026-09-24T12:00:00Z')
 const ago = (minutes: number) => new Date(now - minutes * 60_000).toISOString()
@@ -88,14 +88,26 @@ test('invalid cyclic session bindings remain visible instead of recursing or dis
 
 test('session states share words and shapes with project indicators', () => {
   assert.deepEqual(sessionStatus(session(), now), { state: 'working', group: 'working', tone: 'busy', label: 'Working' })
-  assert.equal(sessionStatus(session({ phase: 'starting', heartbeat_at: null, created_at: ago(0) }), now).state, 'working')
+  assert.equal(sessionStatus(session({ phase: 'starting', heartbeat_at: null, created_at: ago(0) }), now).state, 'awaiting')
   assert.equal(sessionStatus(session({ phase: 'stopping' }), now).state, 'working')
   assert.equal(sessionStatus(session({ phase: 'yielded', activity: 'idle' }), now).state, 'waiting')
   assert.equal(sessionStatus(session({ activity: 'idle' }), now).state, 'idle')
-  assert.equal(sessionStatus(session({ heartbeat_at: ago(3) }), now).state, 'waiting')
-  assert.equal(sessionStatus(session({ heartbeat_at: ago(10) }), now).state, 'problem')
+  assert.equal(sessionStatus(session({ heartbeat_at: ago(3) }), now).state, 'awaiting')
+  assert.equal(sessionStatus(session({ heartbeat_at: ago(10) }), now).state, 'unresponsive')
   assert.equal(sessionStatus(session({ phase: 'stopped', stopped_at: ago(1) }), now, true).state, 'stopped')
-  assert.deepEqual(sessionStatus(session(), now, true), { state: 'waiting', group: 'needs', tone: 'attention', label: 'Needs something' })
+  assert.equal(sessionStatus(session(), now, true).state, 'waiting')
+  assert.match(sessionStatus(session(), now, true).reasons![0]!.detail, /outstanding/)
+})
+
+test('heartbeat waiting has its own group while real requests still need a person', () => {
+  const fresh = session({ id: 'new', phase: 'starting', heartbeat_at: null, created_at: ago(0), needs_attention: false })
+  const overdue = session({ id: 'overdue', heartbeat_at: ago(4), needs_attention: false })
+  const request = session({ ...fresh, id: 'request', needs_attention: true })
+  const groups = groupSessions([fresh, overdue, request], now, () => false)
+  assert.deepEqual(groups.awaiting.map(view => view.session.id), ['new', 'overdue'])
+  assert.deepEqual(groups.needs.map(view => view.session.id), ['request'])
+  assert.equal(sessionStatus(session({ ...fresh, heartbeat_at: ago(0) }), now).group, 'working')
+  assert.equal(sessionStatus(session({ ...fresh, created_at: ago(10) }), now).group, 'unresponsive')
 })
 
 test('a session needs Markus for its agent’s pending approval or held request', () => {
@@ -190,4 +202,11 @@ test('numbers read short: durations, tokens and cost', () => {
   assert.deepEqual([duration(45_000), duration(12 * 60_000), duration(134 * 60_000), duration(60 * 60_000), duration(28 * 3_600_000)], ['45s', '12m', '2h 14m', '1h', '1d 4h'])
   assert.deepEqual([tokens(950), tokens(4200), tokens(184_300), tokens(2_500_000)], ['950', '4.2k', '184k', '2.5M'])
   assert.deepEqual([cost(3_840_000), cost(0), cost(123_000_000)], ['$3.84', '$0.00', '$123'])
+})
+
+test('fresh session projection cannot be changed by a stale optional run or request cache', () => {
+  const current = session({ run_status: null, has_problem: false, needs_attention: false })
+  for (const status of ['failed', 'ownership_lost', 'waiting'] as const) {
+    assert.equal(sessionStatus(current, now, true, undefined, { status } as AgentRun).state, 'working')
+  }
 })

@@ -14,6 +14,7 @@ import KeyCap from '../KeyCap.vue'
 import Avatar from '../Avatar.vue'
 import AgentStateLabel from './AgentStateLabel.vue'
 import AgentGlyph from './AgentGlyph.vue'
+import SessionStateEvidence from './SessionStateEvidence.vue'
 import { activityOf, currentStep, type ActivitySession } from './activity'
 import { metadataChangeText, metadataChanges } from './metadataHistory'
 
@@ -46,7 +47,10 @@ const reported = computed(() => detail.value?.id === s.value?.id ? detail.value 
 const hasWork = computed(() => !!(reported.value?.brief || reported.value?.worktree || reported.value?.branch || reported.value?.commits?.length))
 const timeline = computed(() => activity.value?.activity_history ?? [])
 const metadataHistory = computed(() => metadataChanges(detail.value?.id === s.value?.id ? detail.value?.metadata_history : undefined))
-const step = computed(() => props.view ? activity.value?.activity_note || currentStep(props.view) : '')
+const step = computed(() => {
+  if (!props.view) return ''
+  return props.view.status.reasons?.length ? currentStep(props.view) : activity.value?.activity_note || currentStep(props.view)
+})
 const meta = computed(() => props.view ? [props.view.account, props.view.model].filter(Boolean).join(' · ') : '')
 // Fetch only the selected session, and refresh when a heartbeat changes metadata
 // even if the activity note stays the same. The list does not carry history.
@@ -121,7 +125,7 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
         <template v-if="view && !loading">
           <AgentGlyph :view="view" :size="36" />
           <h2 class="name">{{ view.name }}</h2>
-          <AgentStateLabel :state="view.status.state" />
+          <AgentStateLabel :state="view.status.state" :label="view.status.label" />
         </template>
         <span class="spacer" />
         <button type="button" class="icon-btn sm flat" aria-label="Close session details" aria-keyshortcuts="Escape" data-tip="Close · Esc" @click="emit('close')"><AppIcon name="close" :size="15" /></button>
@@ -170,7 +174,8 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
       <section class="now-block" aria-labelledby="now-title">
         <h3 id="now-title" class="eyebrow">Now</h3>
         <strong class="now-step">{{ step }}</strong>
-        <p class="now-meta">Started {{ absoluteTime(view.session.created_at) }} · active {{ elapsed(view.session, now) }}</p>
+        <p class="now-meta">Started {{ absoluteTime(view.session.created_at) }} · elapsed {{ elapsed(view.session, now) }}</p>
+        <SessionStateEvidence :view="view" :now="now" />
         <ol v-if="timeline.length" class="activity-timeline" aria-label="Recent activity">
           <li v-for="(item, index) in timeline.slice(0, 6)" :key="`${item.at}-${index}`"><time :datetime="item.at">{{ relativeTime(item.at, { now }) }}</time><span>{{ item.note }}</span></li>
         </ol>

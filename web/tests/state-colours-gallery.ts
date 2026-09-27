@@ -21,7 +21,7 @@ main { max-width: 1280px; margin: auto; } h1 { margin: 0 0 6px; font-size: 24px;
 .sample { display: grid; place-items: center; min-height: 83px; padding: 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-raised); }
 .state-name { display: flex; align-items: center; }`
 document.head.append(css)
-const states: AgentState[] = ['working', 'waiting', 'throttled', 'problem', 'idle', 'stale', 'stopped']
+const states: AgentState[] = ['working', 'waiting', 'throttled', 'problem', 'idle', 'stale', 'stopped', 'awaiting', 'unresponsive']
 createApp({ render: () => h('main', [
   h('h1', `Agent states · ${document.documentElement.dataset.theme} · ${params.get('palette') ?? 'standard'}`),
   h('p', 'One state system. Working · Needs something · Throttled · Problem · Idle · Stopped.'),
