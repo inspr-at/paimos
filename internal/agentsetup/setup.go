@@ -661,17 +661,24 @@ func ReadRuntimeConfig(root string) (RuntimeConfig, error) {
 	if json.Unmarshal(raw, &c) != nil || c.Schema != "aeon.agent-runtime.v1" || ValidateOrigin(c.Origin) != nil || !uuidPattern.MatchString(c.TenantID) || !uuidPattern.MatchString(c.PrincipalID) || !uuidPattern.MatchString(c.ComputerID) || c.DaemonID == "" || len(c.DaemonID) > 128 || strings.ContainsAny(c.DaemonID, "/\\\x00\r\n") {
 		return RuntimeConfig{}, errors.New("private runtime configuration invalid")
 	}
-	claude := c.NodePath != "" || c.ClaudeSDKPath != ""
+	return c, nil
+}
+
+// ValidateRuntimeDependencies gates execution, never access to recovery metadata
+// or the credential needed to revoke this computer. Removed harnesses do not
+// block the remaining accounts merely because their old dependency pins remain.
+func ValidateRuntimeDependencies(c RuntimeConfig) error {
+	claude := false
 	for _, a := range c.Accounts {
 		claude = claude || a.Harness == "claude"
 	}
 	if claude {
 		valid, err := (Discovery{}).ResolveClaudeDependencies(ClaudeDependencies{NodePath: c.NodePath, SDKPath: c.ClaudeSDKPath}, c.Workspace)
 		if err != nil || valid.NodePath != c.NodePath || valid.SDKPath != c.ClaudeSDKPath {
-			return RuntimeConfig{}, errors.New("pinned Claude runtime dependencies are unavailable or unsafe")
+			return errors.New("pinned Claude runtime dependencies are unavailable or unsafe")
 		}
 	}
-	return c, nil
+	return nil
 }
 func ReadRuntime(root string) (RuntimeConfig, secret, error) {
 	c, err := ReadRuntimeConfig(root)

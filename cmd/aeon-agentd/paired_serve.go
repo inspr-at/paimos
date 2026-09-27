@@ -18,6 +18,9 @@ import (
 )
 
 func pairedAdapters(c agentsetup.RuntimeConfig) ([]agentd.EnrolledAccount, []agentd.Adapter, error) {
+	if err := agentsetup.ValidateRuntimeDependencies(c); err != nil {
+		return nil, nil, err
+	}
 	codexHomes, emails, claudeHomes, cursorIDs := map[string]string{}, map[string]string{}, map[string]string{}, map[string]string{}
 	claudeEmails := map[string]string{}
 	grokBindings := map[string]agentd.GrokBinding{}
@@ -136,6 +139,9 @@ func servePaired(root string) error {
 			err = syncPairing(op, root, c.Origin, s)
 			if err == nil {
 				next, _, readErr := agentsetup.ReadRuntime(root)
+				if readErr == nil {
+					readErr = agentsetup.ValidateRuntimeDependencies(next)
+				}
 				if readErr == nil && !reflect.DeepEqual(c, next) {
 					if next.Origin != c.Origin || next.TenantID != c.TenantID || next.PrincipalID != c.PrincipalID || next.DaemonID != c.DaemonID || next.Workspace != c.Workspace || next.ComputerID != c.ComputerID {
 						readErr = errors.New("pairing configuration identity changed")

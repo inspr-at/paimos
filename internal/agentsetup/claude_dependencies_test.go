@@ -121,8 +121,8 @@ func TestClaudeSetupPinsSurviveResumeAndOtherHarness(t *testing.T) {
 	if err := os.Chmod(sdk, 0622); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := ReadRuntimeConfig(e.Store.Path()); err == nil {
-		t.Fatal("restart accepted unsafe SDK module")
+	if metadata, err := ReadRuntimeConfig(e.Store.Path()); err != nil || ValidateRuntimeDependencies(metadata) == nil {
+		t.Fatal("unsafe SDK must block execution while preserving recovery metadata")
 	}
 	if err := os.Chmod(sdk, 0600); err != nil {
 		t.Fatal(err)
@@ -152,6 +152,23 @@ func TestClaudeSetupPinsSurviveResumeAndOtherHarness(t *testing.T) {
 	after, _ = e.load()
 	if after.NodePath != node || after.ClaudeSDKPath != sdk {
 		t.Fatal("adding another harness repinned Claude")
+	}
+}
+
+func TestDisconnectRemainsAvailableAfterClaudeDependencyBreaks(t *testing.T) {
+	e, a, _, o, _ := engineFixture(t)
+	_, node, sdk := claudeFixture(t)
+	o.Candidates[0].Harness = "claude"
+	o.NodePath, o.ClaudeSDKPath = node, sdk
+	approveFixture(t, e, a, o)
+	if err := os.Chmod(sdk, 0622); err != nil {
+		t.Fatal(err)
+	}
+	if p, err := e.Disconnect(t.Context(), ""); err != nil || p.Stage != "disconnected" || !a.computerCleaned {
+		t.Fatalf("broken vendor dependency prevented owned disconnect: %s %v", p.Stage, err)
+	}
+	if err := ValidateRuntimeDependencies(RuntimeConfig{NodePath: node, ClaudeSDKPath: sdk, Accounts: []RuntimeAccount{{Harness: "cursor"}}}); err != nil {
+		t.Fatal("unused Claude pins blocked another harness", err)
 	}
 }
 
