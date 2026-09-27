@@ -83,12 +83,13 @@ type profileWrite struct {
 }
 
 type actionWrite struct {
-	Action            string  `json:"action"`
-	ExpectedRevision  int64   `json:"expected_revision"`
-	IdempotencyKey    string  `json:"idempotency_key"`
-	ApprovalRequestID *string `json:"approval_request_id"`
-	ReleaseID         *string `json:"release_id"`
-	Reason            *string `json:"reason"`
+	Action            string   `json:"action"`
+	ExpectedRevision  int64    `json:"expected_revision"`
+	IdempotencyKey    string   `json:"idempotency_key"`
+	ApprovalRequestID *string  `json:"approval_request_id"`
+	ReleaseID         *string  `json:"release_id"`
+	Reason            *string  `json:"reason"`
+	TicketNodeIDs     []string `json:"ticket_node_ids,omitempty"`
 }
 
 type httpError struct {

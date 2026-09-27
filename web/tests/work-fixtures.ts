@@ -483,6 +483,22 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
       const pageRows = rows.slice(offset, offset + limit)
       return route.fulfill({ json: { items: pageRows.map(n => item(n, data)), next_cursor: offset + limit < rows.length ? `o:${offset + limit}` : null, ...(Object.keys(facets).length ? { facets } : {}) } })
     }
+    const agentWorkPath = /^\/api\/nodes\/([^/]+)\/agent-work$/.exec(path)
+    if (agentWorkPath && method === 'GET') {
+      const id = decodeURIComponent(agentWorkPath[1])
+      const node = data.nodes.find(n => n.id === id)
+      const kind = node?.kind_slug === 'epic' || node?.kind_slug === 'task' ? node.kind_slug : 'ticket'
+      return route.fulfill({ json: {
+        node_id: id, kind, currency: 'USD', usage_available: true, includes_descendants: kind === 'epic',
+        scope_truncated: false, list_truncated: false, sessions: [],
+        totals: {
+          session_count: 0, input_tokens: null, output_tokens: null, cached_input_tokens: null,
+          tokens_state: 'unknown', cached_state: 'unknown', estimated_cost_usd: null,
+          cost_state: 'unknown', currency: 'USD', duration_seconds: null, duration_state: 'unknown',
+          unknown_token_sessions: 0, unknown_cost_sessions: 0, unknown_token_models: 0, unknown_cost_models: 0,
+        },
+      } })
+    }
     if (path.startsWith('/api/nodes/')) {
       const id = decodeURIComponent(path.split('/')[3]), node = data.nodes.find(n => n.id === id)
       if (!node) return route.fulfill({ status: 404, json: { error: 'Not found' } })

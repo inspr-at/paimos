@@ -40,7 +40,7 @@ func listAccounts(ctx context.Context, tx pgx.Tx) ([]Account, error) {
 	rows, err := tx.Query(ctx, `
 		SELECT id::text, account_key, harness, daemon_id, label, max_parallel_runs,
 		       registered_by_principal_id::text, state, last_probe_at, last_probe_ok,
-		       last_daemon_generation, created_at
+		       last_daemon_generation, created_at, plan, host_label, allowed_model_profile_ids::text[]
 		FROM agent_accounts
 		ORDER BY created_at, id`)
 	if err != nil {
@@ -65,7 +65,7 @@ func getAccount(ctx context.Context, tx pgx.Tx, id string) (Account, error) {
 	row := tx.QueryRow(ctx, `
 		SELECT id::text, account_key, harness, daemon_id, label, max_parallel_runs,
 		       registered_by_principal_id::text, state, last_probe_at, last_probe_ok,
-		       last_daemon_generation, created_at
+		       last_daemon_generation, created_at, plan, host_label, allowed_model_profile_ids::text[]
 		FROM agent_accounts WHERE id = $1::uuid`, id)
 	account, err := scanAccount(row)
 	if err != nil {
@@ -84,7 +84,7 @@ func scanAccount(row scanner) (Account, error) {
 	var account Account
 	err := row.Scan(&account.ID, &account.AccountKey, &account.Harness, &account.DaemonID, &account.Label,
 		&account.MaxParallel, &account.RegisteredBy, &account.State, &account.LastProbeAt, &account.LastProbeOK,
-		&account.daemonGeneration, &account.CreatedAt)
+		&account.daemonGeneration, &account.CreatedAt, &account.Plan, &account.HostLabel, &account.AllowedProfileIDs)
 	account.Windows = []Window{}
 	return account, err
 }
@@ -171,7 +171,7 @@ func registerAccount(ctx context.Context, tx pgx.Tx, p tenant.Principal, in acco
 	if err != nil {
 		return Account{}, fail(http.StatusBadRequest, "invalid daemon id")
 	}
-	label, err := cleanText(in.Label, 128)
+	label, err := metadataText(in.Label, false)
 	if err != nil {
 		return Account{}, fail(http.StatusBadRequest, "invalid label")
 	}
@@ -222,7 +222,7 @@ func findAccount(ctx context.Context, tx pgx.Tx, daemonID, harness, key string) 
 	row := tx.QueryRow(ctx, `
 		SELECT id::text, account_key, harness, daemon_id, label, max_parallel_runs,
 		       registered_by_principal_id::text, state, last_probe_at, last_probe_ok,
-		       last_daemon_generation, created_at
+		       last_daemon_generation, created_at, plan, host_label, allowed_model_profile_ids::text[]
 		FROM agent_accounts
 		WHERE daemon_id = $1 AND harness = $2 AND account_key = $3`, daemonID, harness, key)
 	account, err := scanAccount(row)
@@ -241,9 +241,10 @@ func isNoRows(err error) bool {
 }
 
 type probeWrite struct {
-	DaemonID         string `json:"daemon_id"`
-	DaemonGeneration string `json:"daemon_generation"`
-	Available        bool   `json:"available"`
+	DaemonID         string  `json:"daemon_id"`
+	DaemonGeneration string  `json:"daemon_generation"`
+	Available        bool    `json:"available"`
+	HostLabel        *string `json:"host_label"`
 }
 
 func reportProbe(ctx context.Context, tx pgx.Tx, p tenant.Principal, accountID string, in probeWrite) (Account, error) {
@@ -258,6 +259,13 @@ func reportProbe(ctx context.Context, tx pgx.Tx, p tenant.Principal, accountID s
 	if err != nil {
 		return Account{}, fail(http.StatusBadRequest, "invalid daemon generation")
 	}
+	if in.HostLabel != nil {
+		label, err := metadataText(*in.HostLabel, true)
+		if err != nil {
+			return Account{}, err
+		}
+		in.HostLabel = &label
+	}
 	before, err := lockAccount(ctx, tx, accountID)
 	if err != nil {
 		return Account{}, err
@@ -270,8 +278,8 @@ func reportProbe(ctx context.Context, tx pgx.Tx, p tenant.Principal, accountID s
 	}
 	if _, err := tx.Exec(ctx, `
 		UPDATE agent_accounts
-		SET last_probe_at = now(), last_probe_ok = $2, last_daemon_generation = $3
-		WHERE id = $1::uuid`, accountID, in.Available, generation); err != nil {
+		SET last_probe_at = now(), last_probe_ok = $2, last_daemon_generation = $3, host_label = CASE WHEN host_label = '' THEN COALESCE($4, '') ELSE host_label END
+		WHERE id = $1::uuid`, accountID, in.Available, generation, in.HostLabel); err != nil {
 		return Account{}, err
 	}
 	after, err := getAccount(ctx, tx, accountID)
@@ -288,7 +296,7 @@ func lockAccount(ctx context.Context, tx pgx.Tx, id string) (Account, error) {
 	row := tx.QueryRow(ctx, `
 		SELECT id::text, account_key, harness, daemon_id, label, max_parallel_runs,
 		       registered_by_principal_id::text, state, last_probe_at, last_probe_ok,
-		       last_daemon_generation, created_at
+		       last_daemon_generation, created_at, plan, host_label, allowed_model_profile_ids::text[]
 		FROM agent_accounts WHERE id = $1::uuid FOR UPDATE`, id)
 	account, err := scanAccount(row)
 	if isNoRows(err) {

@@ -14,8 +14,9 @@ import KeyCap from '../KeyCap.vue'
 import Avatar from '../Avatar.vue'
 import AgentStateLabel from './AgentStateLabel.vue'
 import AgentGlyph from './AgentGlyph.vue'
-import SessionRecovery from './SessionRecovery.vue'
+import ProvenanceDetail from './ProvenanceDetail.vue'
 import SessionStateEvidence from './SessionStateEvidence.vue'
+import SessionRecovery from './SessionRecovery.vue'
 import { activityOf, currentStep, type ActivitySession } from './activity'
 import { metadataChangeText, metadataChanges } from './metadataHistory'
 
@@ -218,6 +219,8 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
           <li v-for="(item, index) in metadataHistory" :key="`${item.field}-${item.at}-${index}`"><time :datetime="item.at">{{ relativeTime(item.at, { now }) }}</time><span>{{ metadataChangeText(item) }}</span></li>
         </ol>
       </section>
+
+      <ProvenanceDetail v-if="s" :project-id="s.project_id" :session-id="s.id" :now="now" />
 
       <section v-if="hasWork" class="block" aria-labelledby="work-title">
         <h3 id="work-title" class="eyebrow">Work</h3>

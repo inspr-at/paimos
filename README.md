@@ -78,6 +78,15 @@ used. Pricing stays in the API: `GET`/`HEAD /api/model-prices` requires
 prices nor infer subscription/account coverage. Aggregate readers must not add
 session usage to the overlapping managed-run token telemetry.
 
+`paimos harness provenance` records hashes and version identifiers for explicitly
+provided `--instruction` files (`AGENTS.md`, `CLAUDE.md`, or a skill's `SKILL.md`),
+never file contents or full paths. Files must be regular, at most 1 MiB, and outside
+private stores. On Linux and Darwin, supply a physical path: symlinks in any path
+component are rejected. Darwin's root `/var` and `/tmp` aliases to `/private/var`
+and `/private/tmp` are supported through a checked descriptor walk. A custom
+symlinked checkout must be named by its physical path. Other platforms refuse
+file hashing; `--show` and explicit prompt-template versions/digests do not read instruction files.
+
 ## UI shell (P0.5 / AEON-10)
 
 The Vue shell includes an authenticated workspace, sign-in, a 404, an account

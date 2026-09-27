@@ -59,10 +59,13 @@ type Node struct {
 // HarnessSession is the public binding plus the private worker lease held only
 // by this daemon generation. The lease is never persisted in the run journal.
 type HarnessSession struct {
-	Ownership *ownedprocess.Identity `json:"-"`
-	ID        string                 `json:"id"`
-	ProjectID string                 `json:"project_id"`
-	Lease     string                 `json:"-"`
+	Ownership       *ownedprocess.Identity `json:"-"`
+	ID              string                 `json:"id"`
+	ProjectID       string                 `json:"project_id"`
+	Lease           string                 `json:"-"`
+	Model           string                 `json:"model,omitempty"`
+	ReasoningEffort string                 `json:"reasoning_effort,omitempty"`
+	AccountLabel    string                 `json:"account_label,omitempty"`
 }
 
 type HarnessControl struct {
@@ -127,6 +130,7 @@ type Reservation struct {
 type Route struct {
 	AccountID    string        `json:"account_id"`
 	AccountKey   string        `json:"account_key"`
+	AccountLabel string        `json:"account_label"`
 	DaemonID     string        `json:"daemon_id"`
 	Reservations []Reservation `json:"reservations"`
 }
@@ -224,7 +228,19 @@ type AccountProber interface {
 	Probe(context.Context, string) bool
 }
 
-type EnrolledAccount struct{ ID, Key, Harness string }
+// AccountMetadata is the only publishable part of local enrollment. Home,
+// provider identity and CodexBar account selectors must never be added here.
+type AccountMetadata struct {
+	Label             string   `json:"label"`
+	Plan              string   `json:"plan"`
+	HostLabel         string   `json:"host_label"`
+	AllowedProfileIDs []string `json:"allowed_model_profile_ids"`
+}
+
+type EnrolledAccount struct {
+	ID, Key, Harness string
+	Metadata         *AccountMetadata
+}
 
 type ControlRequest struct {
 	ExpiresAt         *time.Time             `json:"expires_at,omitempty"`

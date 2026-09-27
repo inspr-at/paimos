@@ -229,6 +229,35 @@ paths:
                 properties:
                   status: {type: string, enum: [ok]}
                   db: {type: string, enum: [ok, down]}
+  /ready:
+    get:
+      summary: Readiness for new requests
+      description: >-
+        Load-balancer probe. 200 only while this process is accepting HTTP,
+        is not draining, and the database ping succeeds. The ping is capped
+        at 500ms so an unbounded caller cannot hold it open. A cancelled
+        request or an earlier caller deadline still cancels or shortens it.
+        A drain that starts during the ping still returns 503. GET /health
+        stays liveness and still returns 200 while this endpoint returns 503.
+      responses:
+        "200":
+          description: Accept new requests
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status: {type: string, enum: [ready]}
+        "503":
+          description: Do not send new requests
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status: {type: string, enum: [unavailable]}
   /version:
     get:
       summary: Calendar version of this build
@@ -2050,6 +2079,31 @@ paths:
         '400': {description: Invalid note or heartbeat}
         '403': {description: Worker proof rejected}
         '410': {description: Authenticated archived generation; detach harness servicing without signaling the process}
+  /projects/{projectId}/harness-sessions/{sessionId}/provenance:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: getHarnessInstructionProvenance
+      description: Newest instruction-provenance revisions for a visible session. Each item is an allowlisted logical name, a hash_kind, and an optional version. content_sha256 is present only when hash_kind is content. A prompt template recorded without an explicit template digest uses hash_kind absent and a null digest; the version identifier is not hashed. Contents, secrets and local paths are not stored.
+      responses:
+        '200': {description: Provenance revisions, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessProvenancePage'}}}}
+        '404': {description: Session is not visible}
+    post:
+      operationId: recordHarnessInstructionProvenance
+      description: The attributed worker appends one provenance revision, or replays the latest revision when the canonical set digest matches. Separate from registration and heartbeat. Requires harness.worker and X-Aeon-Worker-Lease.
+      parameters:
+        - {name: X-Aeon-Worker-Lease, in: header, required: true, schema: {type: string}, description: Private per-generation proof; never returned or logged}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/HarnessProvenanceWrite'}
+      responses:
+        '200': {description: Created or replayed revision, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessProvenanceRecorded'}}}}
+        '400': {description: Item is not an allowlisted name, digest or version}
+        '403': {description: Worker proof rejected}
+        '410': {description: Authenticated archived generation; existing provenance remains readable}
   /harness-sessions:
     get:
       operationId: listHarnessSessions
@@ -2366,6 +2420,30 @@ paths:
       responses:
         '201': {description: Account, content: {application/json: {schema: {$ref: '#/components/schemas/AgentAccount'}}}}
         '403': {$ref: '#/components/responses/Error'}
+  /agent-accounts/catalog:
+    get:
+      operationId: getAgentAccountCatalog
+      description: Tenant-scoped host → harness → account → model → effort cascade derived from enrolled accounts, owner probes, allowance windows and the existing model registry. Availability is advisory; routing reserves atomically. Legacy null account profile policy inherits the tenant harness catalog, not provider entitlements. Empty explicit grants offer no models.
+      security: [{session: []}]
+      parameters:
+        - {name: role, in: query, schema: {type: string, default: build, enum: [scout, mechanical, build, build-hard, review-gate]}}
+        - {name: author_family, in: query, description: Required for review-gate; that family is excluded., schema: {type: string, enum: [openai, anthropic, xai, cursor]}}
+      responses:
+        '200': {description: Cascade and defaults, content: {application/json: {schema: {$ref: '#/components/schemas/AgentAccountCatalog'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+  /agent-accounts/{accountId}/metadata:
+    put:
+      operationId: replaceAgentAccountMetadata
+      description: Replace display metadata and explicit model-profile grants. Requires account.manage for a person or a scoped registering agent key. IDs must reference this tenant's enabled profiles for the account harness. No credentials, home paths or provider identities. Audited and idempotent.
+      security: *auth
+      parameters: [{name: accountId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/AgentAccountMetadataWrite'}}}}
+      responses:
+        '200': {description: Account, content: {application/json: {schema: {$ref: '#/components/schemas/AgentAccount'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
   /agent-accounts/{accountId}/windows:
     post:
       operationId: createAccountWindow
@@ -2402,7 +2480,7 @@ paths:
   /agent-accounts/route:
     post:
       operationId: reserveAgentAccount
-      description: Atomically select an eligible account enrolled on the requesting daemon for a queued run and reserve allowance. Routing uses remaining allowance, recent usage, pace target and active run count; fail closed when estimates are absent or no account fits. The daemon resolves the opaque key to its local credential.
+      description: Atomically select an eligible account enrolled on the requesting daemon for a queued run and reserve allowance. Routing uses remaining allowance, recent usage, pace target and active run count; fail closed when estimates are absent or no account fits. Queued retries recheck account state, probe, enabled profile and grants, returning conflict without changing a held reservation or falling back. The daemon resolves the opaque key to its local credential.
       security: [{agentKey: []}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/AccountRouteRequest'}}}}
       responses:
@@ -2489,7 +2567,7 @@ paths:
     put:
       operationId: replaceReleasePlan
       summary: Replace ticket selection and order
-      description: While planning, atomically replaces the selected ticket set and walker order. Feature tri-state, partial-pick memory, and arrow navigation are client projections; no client may move a ticket after build starts.
+      description: While planning, atomically replaces the selected ticket set and walker order. Selection changes emit an undoable membership event; Undo restores the complete prior order and membership, fenced against intervening project/release revisions and changes to any ordered ticket. Feature tri-state, partial-pick memory, and arrow navigation are client projections; no client may move a ticket after build starts.
       security: [{session: []}]
       parameters:
         - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -2512,6 +2590,59 @@ paths:
         '200': {description: Updated walker projection, content: {application/json: {schema: {$ref: '#/components/schemas/ReleaseWalker'}}}}
         '400': {$ref: '#/components/responses/Error'}
         '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /projects/{projectId}/release-memberships:
+    get:
+      operationId: readReleaseMemberships
+      summary: Read native release membership for visible project tickets
+      description: Returns up to 100 requested ticket or task nodes in request order. Membership comes from journey_tickets and live release nodes, never fields.release. Null release values mean no live native membership (including backlog and unprojected tickets); missing, deleted or foreign nodes are omitted. No journey initialization or writes. Clients refresh this projection for list/detail loads and after membership changes or Undo; imported release metadata remains separate. Requires releases.read.
+      security: [{session: []}, {agentKey: []}]
+      parameters:
+        - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+        - name: ticket_node_id
+          in: query
+          required: true
+          style: form
+          explode: true
+          schema: {type: array, minItems: 1, maxItems: 100, uniqueItems: true, items: {type: string, format: uuid}}
+      responses:
+        '200': {description: Native membership projection (Cache-Control no-store), content: {application/json: {schema: {$ref: '#/components/schemas/ReleaseMemberships'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+  /projects/{projectId}/releases/{releaseId}/ticket-options:
+    get:
+      operationId: listReleaseTicketOptions
+      summary: Find existing project tickets eligible for release planning
+      description: Returns at most 100 project tickets, including unprojected ticket nodes. Only addable and other_release are selectable; other_release means a live planning source and requires confirm_move. active_release covers nonplanning or unavailable sources and cannot move. The target must be the current planning release.
+      security: [{session: []}]
+      parameters:
+        - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: releaseId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: q, in: query, schema: {type: string, maxLength: 256}}
+        - {name: status, in: query, schema: {type: string}}
+        - {name: epic, in: query, schema: {type: string, format: uuid}}
+        - {name: type, in: query, schema: {type: string, enum: [ticket, task]}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 50}}
+      responses:
+        '200': {description: Ticket options, content: {application/json: {schema: {$ref: '#/components/schemas/ReleaseTicketOptions'}}}}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /projects/{projectId}/releases/{releaseId}/membership:
+    post:
+      operationId: addReleaseMembership
+      summary: Add or explicitly move existing tickets into the current planning release
+      description: Adds 1–100 project tickets atomically. Closed tickets and tickets in active or released releases are excluded. Moving from another planning release requires confirm_move. The event_id can be undone through the events API while the result remains current.
+      security: [{session: []}]
+      parameters:
+        - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: releaseId, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ReleaseMembershipWrite'}}}}
+      responses:
+        '200': {description: Updated walker and undoable event, content: {application/json: {schema: {$ref: '#/components/schemas/ReleaseMembershipResult'}}}}
+        '400': {$ref: '#/components/responses/Error'}
         '403': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
         '409': {$ref: '#/components/responses/Error'}
@@ -3539,6 +3670,27 @@ paths:
         '404': {$ref: '#/components/responses/Error'}
         '409': {$ref: '#/components/responses/Error'}
         '412': {description: Entry changed, content: {application/json: {schema: {$ref: '#/components/schemas/TimeEntryPreconditionFailed'}}}}
+  /nodes/{nodeId}/agent-work:
+    get:
+      operationId: getTicketAgentWork
+      summary: Agent sessions, tokens, estimated cost and time for a ticket or epic
+      description: >
+        Sessions whose ticket is this live ticket, epic or task, or a visible descendant.
+        Filtered by the caller's tenant and visible projects. Each session is listed once.
+        Token counts and list-price estimates are summed from the current
+        harness_session_usage rows for that session, one row per model. Cost is an exact
+        USD decimal string. Missing figures are null, never zero and never a JSON float.
+        Unknown rows stay in the unknown counts. Managed-run telemetry is not added.
+        Totals cover only the bounded session list. Duration is counted once per session.
+      security: *auth
+      parameters:
+        - {name: nodeId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 80, default: 40}}
+      responses:
+        '200': {description: Agent work for the node, content: {application/json: {schema: {$ref: '#/components/schemas/TicketAgentWork'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
   /nodes/{nodeId}/time-totals:
     get:
       operationId: getNodeTimeTotals
@@ -4005,8 +4157,8 @@ components:
         gate_scope: {type: string, description: 'Exact approval scope reported by this stage. Empty for Inspire and Live. Plan reports journey.build; Build reports journey.candidate even before its gate exists.'}
         gate_approval_id: {type: [string, 'null'], format: uuid}
         gate_live: {type: boolean, description: Whether any approval and grant for the stage gate are currently valid; false when no gate is recorded}
-        gate_offer_id: {type: string, format: uuid, description: 'Current unconsumed request for this stage gate, when one exists; unlike gate_approval_id this is an offer, not a consumed gate'}
-        gate_offer_state: {type: string, enum: [pending, approved_live, expired, revoked, rejected, grant_missing], description: Server-classified validity of gate_offer_id; approved_live alone counts as a live offer}
+        gate_offer_id: {type: string, format: uuid, description: 'Selected unconsumed request for this stage gate, when one exists; distinct from the standing gate_approval_id'}
+        gate_offer_state: {type: string, enum: [pending, approved_live, expired, revoked, rejected, grant_missing], description: 'Server-classified validity of gate_offer_id only; approved_live counts as a live unconsumed offer. gate_live separately describes the standing gate_approval_id'}
         gate_offer_expires_at: {type: string, format: date-time, description: Effective deadline of the offer (the earlier of request and grant expiry); for a pending request this is its request expiry}
         handoff_id: {type: [string, 'null'], format: uuid}
         handoff_attempt: {type: [integer, 'null'], minimum: 1}
@@ -4039,6 +4191,7 @@ components:
         approval_request_id: {type: string, format: uuid}
         release_id: {type: string, format: uuid}
         reason: {type: string, maxLength: 2048}
+        ticket_node_ids: {type: array, minItems: 1, maxItems: 100, uniqueItems: true, items: {type: string, format: uuid}, description: Optional existing project tickets to add atomically with open_first_release or plan_next_release.}
     JourneyRequirement:
       type: object
       required: [node_id, project_node_id, kind, revision, status, title]
@@ -4119,6 +4272,54 @@ components:
         expected_revision: {type: integer, minimum: 1}
         ordered_ticket_ids: {type: array, uniqueItems: true, items: {type: string, format: uuid}}
         included_ticket_ids: {type: array, uniqueItems: true, items: {type: string, format: uuid}}
+    ReleaseMemberships:
+      type: object
+      required: [tickets]
+      properties:
+        tickets:
+          type: array
+          maxItems: 100
+          items:
+            type: object
+            required: [ticket_node_id, release_node_id, release_title, release_state]
+            properties:
+              ticket_node_id: {type: string, format: uuid}
+              release_node_id: {type: [string, 'null'], format: uuid}
+              release_title: {type: [string, 'null']}
+              release_state: {type: [string, 'null'], enum: [planning, building, candidate, deploying, refused, access, released, superseded, null]}
+    ReleaseTicketOptions:
+      type: object
+      required: [expected_revision, tickets]
+      properties:
+        expected_revision: {type: integer, minimum: 1}
+        tickets: {type: array, items: {$ref: '#/components/schemas/ReleaseTicketOption'}}
+    ReleaseTicketOption:
+      type: object
+      required: [ticket_node_id, key, title, status, type, feature_node_id, release_node_id, release_title, availability]
+      properties:
+        ticket_node_id: {type: string, format: uuid}
+        key: {type: string}
+        title: {type: string}
+        status: {type: string}
+        type: {type: string, enum: [ticket, task]}
+        feature_node_id: {type: [string, 'null'], format: uuid}
+        release_node_id: {type: [string, 'null'], format: uuid}
+        release_title: {type: [string, 'null']}
+        availability: {type: string, enum: [addable, included, closed, released, other_release, active_release, unsupported]}
+    ReleaseMembershipWrite:
+      type: object
+      additionalProperties: false
+      required: [expected_revision, ticket_node_ids]
+      properties:
+        expected_revision: {type: integer, minimum: 1}
+        ticket_node_ids: {type: array, minItems: 1, maxItems: 100, uniqueItems: true, items: {type: string, format: uuid}}
+        confirm_move: {type: boolean, default: false}
+    ReleaseMembershipResult:
+      type: object
+      required: [walker, event_id]
+      properties:
+        walker: {$ref: '#/components/schemas/ReleaseWalker'}
+        event_id: {type: integer, minimum: 1}
     IntakeSourceWrite:
       type: object
       additionalProperties: false
@@ -4972,6 +5173,94 @@ components:
         node_id: {type: string, format: uuid}
         duration_seconds: {type: integer, minimum: 0}
         amounts: {type: array, items: {type: object, required: [currency, amount], properties: {currency: {type: string, pattern: '^[A-Z]{3}$'}, amount: {type: number, minimum: 0}}}}
+    TicketAgentWork:
+      type: object
+      required: [node_id, kind, currency, usage_available, includes_descendants, scope_truncated, list_truncated, sessions, totals]
+      properties:
+        node_id: {type: string, format: uuid}
+        kind: {type: string, enum: [ticket, epic, task]}
+        currency: {type: string, enum: [USD]}
+        usage_available: {type: boolean, description: True when harness_session_usage was read. A missing relation is an error, not an empty cost. Null figures are unreported, not zero.}
+        includes_descendants: {type: boolean}
+        scope_truncated: {type: boolean}
+        list_truncated: {type: boolean}
+        sessions: {type: array, items: {$ref: '#/components/schemas/TicketAgentSession'}}
+        totals: {$ref: '#/components/schemas/TicketAgentWorkTotals'}
+    TicketAgentUsageModel:
+      type: object
+      description: One current usage row for a session and model. estimated_cost_usd is a list price, not a billed charge. billing_mode is reported metadata, not verified coverage.
+      required: [model, input_tokens, output_tokens, cached_input_tokens, tokens_state, cached_state, estimated_cost_usd, cost_state, provisional, price_version, billing_mode, subscription_label]
+      properties:
+        model: {type: string}
+        input_tokens: {$ref: '#/components/schemas/NonNegativeIntString'}
+        output_tokens: {$ref: '#/components/schemas/NonNegativeIntString'}
+        cached_input_tokens: {$ref: '#/components/schemas/NonNegativeIntString'}
+        tokens_state: {type: string, enum: [known, unknown]}
+        cached_state: {type: string, enum: [known, unknown]}
+        estimated_cost_usd: {$ref: '#/components/schemas/NonNegativeDecimalString'}
+        cost_state: {type: string, enum: [estimated, unknown]}
+        provisional: {type: boolean}
+        price_version: {$ref: '#/components/schemas/NonNegativeIntString'}
+        billing_mode: {type: string, enum: [unknown, api, subscription]}
+        subscription_label: {type: [string, 'null']}
+    TicketAgentSession:
+      type: object
+      required: [id, ticket_node_id, ticket_key, ticket_title, harness, label, model, model_state, effort, effort_state, phase, started_at, ended_at, duration_seconds, duration_state, usage_reported, models, models_truncated, input_tokens, output_tokens, cached_input_tokens, tokens_state, cached_state, estimated_cost_usd, cost_state, unknown_token_models, unknown_cost_models]
+      properties:
+        id: {type: string, format: uuid}
+        ticket_node_id: {type: string, format: uuid}
+        ticket_key: {type: string}
+        ticket_title: {type: string}
+        harness: {type: string}
+        label: {type: [string, 'null']}
+        model: {type: [string, 'null'], description: Model recorded on the harness session. Priced models are in models.}
+        model_state: {type: string, enum: [known, missing]}
+        effort: {type: [string, 'null']}
+        effort_state: {type: string, enum: [known, missing]}
+        phase: {type: string}
+        started_at: {type: string, format: date-time}
+        ended_at: {type: [string, 'null'], format: date-time}
+        duration_seconds: {type: [integer, 'null'], minimum: 0}
+        duration_state: {type: string, enum: [known, ongoing, unknown]}
+        usage_reported: {type: boolean}
+        models: {type: array, items: {$ref: '#/components/schemas/TicketAgentUsageModel'}}
+        models_truncated: {type: boolean}
+        input_tokens: {$ref: '#/components/schemas/NonNegativeIntString'}
+        output_tokens: {$ref: '#/components/schemas/NonNegativeIntString'}
+        cached_input_tokens: {$ref: '#/components/schemas/NonNegativeIntString'}
+        tokens_state: {type: string, enum: [known, partial, unknown]}
+        cached_state: {type: string, enum: [known, partial, unknown]}
+        estimated_cost_usd: {$ref: '#/components/schemas/NonNegativeDecimalString'}
+        cost_state: {type: string, enum: [estimated, provisional, partial, unknown]}
+        unknown_token_models: {type: integer, minimum: 0}
+        unknown_cost_models: {type: integer, minimum: 0}
+    TicketAgentWorkTotals:
+      type: object
+      required: [session_count, input_tokens, output_tokens, cached_input_tokens, tokens_state, cached_state, estimated_cost_usd, cost_state, currency, duration_seconds, duration_state, unknown_token_sessions, unknown_cost_sessions, unknown_token_models, unknown_cost_models]
+      properties:
+        session_count: {type: integer, minimum: 0}
+        input_tokens: {$ref: '#/components/schemas/NonNegativeIntString'}
+        output_tokens: {$ref: '#/components/schemas/NonNegativeIntString'}
+        cached_input_tokens: {$ref: '#/components/schemas/NonNegativeIntString'}
+        tokens_state: {type: string, enum: [known, partial, unknown]}
+        cached_state: {type: string, enum: [known, partial, unknown]}
+        estimated_cost_usd: {$ref: '#/components/schemas/NonNegativeDecimalString'}
+        cost_state: {type: string, enum: [estimated, provisional, partial, unknown]}
+        currency: {type: string, enum: [USD]}
+        duration_seconds: {type: [integer, 'null'], minimum: 0}
+        duration_state: {type: string, enum: [known, ongoing, partial, unknown]}
+        unknown_token_sessions: {type: integer, minimum: 0}
+        unknown_cost_sessions: {type: integer, minimum: 0}
+        unknown_token_models: {type: integer, minimum: 0}
+        unknown_cost_models: {type: integer, minimum: 0}
+    NonNegativeIntString:
+      type: [string, 'null']
+      pattern: '^(0|[1-9][0-9]{0,18})$'
+      description: Nonnegative integer as a decimal string, or null when unknown. Never a JSON number.
+    NonNegativeDecimalString:
+      type: [string, 'null']
+      pattern: '^(0|[1-9][0-9]{0,17})(\.[0-9]{1,12})?$'
+      description: Exact nonnegative decimal string with at most 12 fractional places, or null when unknown. Never a JSON number. USD list prices use this.
     InboxSend:
       type: object
       required: [recipient_principal_id, body, idempotency_key]
@@ -5102,7 +5391,7 @@ components:
         requested_account_id:
           type: [string, 'null']
           format: uuid
-          description: Optional strict account choice. Must belong to the selected agent and match the model harness. The daemon still reserves allowance and claims; an unavailable chosen account leaves the run queued without fallback. Omit or null for automatic routing.
+          description: Optional strict account choice. Must belong to the selected agent, match the model harness and allow the selected model profile. The daemon still reserves allowance and claims; an unavailable chosen account leaves the run queued without fallback. Omit or null for automatic routing.
     RunClaim:
       type: object
       required: [daemon_id, daemon_generation, reservation_ids]
@@ -5349,9 +5638,49 @@ components:
         previous_value: {type: [string, 'null']}
         value: {type: [string, 'null']}
         at: {type: string, format: date-time}
-    HarnessModel: {type: [string, 'null'], maxLength: 120, description: Optional trimmed plain text; control characters stripped.}
+    HarnessProvenanceWrite:
+      type: object
+      required: [items]
+      properties:
+        items: {type: array, minItems: 1, maxItems: 16, items: {$ref: '#/components/schemas/HarnessProvenanceItem'}}
+    HarnessProvenanceItem:
+      type: object
+      required: [kind, logical_name, hash_kind]
+      properties:
+        kind: {type: string, enum: [agents, claude, skill, prompt_template]}
+        logical_name: {type: string, maxLength: 80, description: AGENTS.md, CLAUDE.md, one skill slug plus /SKILL.md, or prompt-template. Not a filesystem path.}
+        hash_kind: {type: string, enum: [content, absent], description: content means content_sha256 is a digest of the instruction or template bytes. absent is only valid for a prompt template recorded with a version and no template digest.}
+        content_sha256: {type: [string, 'null'], pattern: '^[0-9a-f]{64}$', description: Required when hash_kind is content. Null when hash_kind is absent. Never a hash of the version identifier.}
+        version: {type: [string, 'null'], maxLength: 80, description: Required for prompt_template. A version identifier, not prompt text.}
+        byte_size: {type: [integer, 'null'], minimum: 0, maximum: 1048576, description: Present for instruction files. Absent for a prompt template.}
+    HarnessProvenanceRevision:
+      type: object
+      required: [id, session_id, revision, set_sha256, recorded_by_principal_id, recorded_at, items]
+      properties:
+        id: {type: string, format: uuid}
+        session_id: {type: string, format: uuid}
+        revision: {type: integer, minimum: 1}
+        set_sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
+        recorded_by_principal_id: {type: string, format: uuid}
+        recorded_at: {type: string, format: date-time}
+        items: {type: array, items: {$ref: '#/components/schemas/HarnessProvenanceItem'}}
+    HarnessProvenanceRecorded:
+      allOf:
+        - {$ref: '#/components/schemas/HarnessProvenanceRevision'}
+        - type: object
+          required: [replayed]
+          properties:
+            replayed: {type: boolean, description: True when the latest revision already had this set digest.}
+    HarnessProvenancePage:
+      type: object
+      required: [session_id, revisions, truncated]
+      properties:
+        session_id: {type: string, format: uuid}
+        revisions: {type: array, maxItems: 32, items: {$ref: '#/components/schemas/HarnessProvenanceRevision'}}
+        truncated: {type: boolean}
+    HarnessModel: {type: [string, 'null'], maxLength: 128, description: Optional trimmed plain text; control characters stripped.}
     HarnessEffort: {type: [string, 'null'], maxLength: 40, description: Optional trimmed plain text; control characters stripped.}
-    HarnessAccountLabel: {type: [string, 'null'], maxLength: 60, description: Subscription or account display name, never a credential. Trimmed plain text; control characters stripped.}
+    HarnessAccountLabel: {type: [string, 'null'], maxLength: 128, description: Subscription or account display name, never a credential. Trimmed plain text; control characters stripped.}
     HarnessVersion: {type: [string, 'null'], maxLength: 80, description: Optional trimmed plain text; control characters stripped.}
     HarnessBrief: {type: [string, 'null'], maxLength: 240, description: Short prompt file name or ticket key; trimmed plain text.}
     HarnessWorktree: {type: [string, 'null'], maxLength: 512, description: Worktree path; trimmed plain text.}
@@ -5558,6 +5887,87 @@ components:
             last_probe_at: {type: [string, 'null'], format: date-time}
             last_probe_ok: {type: [boolean, 'null']}
             created_at: {type: string, format: date-time}
+            plan: {type: string}
+            host_label: {type: string}
+            allowed_model_profile_ids:
+              type: [array, 'null']
+              description: Null preserves legacy tenant-harness catalog policy. Explicit arrays restrict model/effort pins; empty blocks new reservations.
+              items: {type: string, format: uuid}
+            windows: {type: array, items: {$ref: '#/components/schemas/AllowanceWindow'}}
+    AgentAccountMetadataWrite:
+      type: object
+      additionalProperties: false
+      required: [label, plan, host_label, allowed_model_profile_ids]
+      properties:
+        label: {type: string, minLength: 1, maxLength: 128}
+        plan: {type: string, maxLength: 128}
+        host_label: {type: string, maxLength: 128}
+        allowed_model_profile_ids: {type: array, maxItems: 256, uniqueItems: true, items: {type: string, format: uuid}}
+    AgentAccountCatalog:
+      type: object
+      required: [as_of, role, hosts]
+      properties:
+        as_of: {type: string, format: date-time}
+        role: {type: string}
+        hosts:
+          type: array
+          items:
+            type: object
+            required: [daemon_id, label, harnesses]
+            properties:
+              daemon_id: {type: string, description: Stable opaque daemon enrollment identifies the host; never a hostname supplied at launch.}
+              label: {type: string}
+              harnesses:
+                type: array
+                items:
+                  type: object
+                  required: [harness, accounts, default_account_id]
+                  properties:
+                    harness: {type: string}
+                    default_account_id: {type: [string, 'null'], format: uuid, description: 'Eligible account with greatest known minimum remaining fraction; UUID breaks ties. Null when no eligible account has fully measured active windows. Provisional accounts remain manually selectable under existing queue policy, but are not ranked as measured allowance.'}
+                    accounts: {type: array, items: {$ref: '#/components/schemas/AccountCatalogChoice'}}
+    AccountCatalogChoice:
+      type: object
+      required: [id, label, plan, registered_by_principal_id, state, last_probe_at, last_probe_ok, available, unavailable_reasons, remaining_fraction, windows, models, default_model_profile_id]
+      properties:
+        id: {type: string, format: uuid}
+        label: {type: string}
+        plan: {type: string}
+        registered_by_principal_id: {type: string, format: uuid}
+        state: {type: string, enum: [available, draining, unavailable]}
+        last_probe_at: {type: [string, 'null'], format: date-time}
+        last_probe_ok: {type: [boolean, 'null']}
+        available: {type: boolean, description: 'Advisory state, probe, capacity, model and ledger headroom eligibility; not proof of measured usage. A provisional account may be available under existing queue policy.'}
+        unavailable_reasons: {type: array, items: {type: string, enum: [state, probe, capacity, allowance, models]}}
+        remaining_fraction: {type: [number, 'null'], minimum: 0, maximum: 1, description: 'Minimum (allowance-used-reserved)/allowance across active windows, clamped at zero. Null if any active window is provisional, has no positive allowance, or no active windows exist. Unknown usage is never measured zero or 100 percent remaining.'}
+        default_model_profile_id: {type: [string, 'null'], format: uuid, description: First eligible existing role route; null when the role has no eligible route.}
+        windows:
+          type: array
+          items:
+            allOf:
+              - {$ref: '#/components/schemas/AllowanceWindow'}
+              - type: object
+                required: [remaining, pace_remaining]
+                properties:
+                  remaining: {type: integer, format: int64, minimum: 0, description: 'Ledger headroom max(0, allowance-used-reserved). When provisional, this is not measured provider allowance remaining.'}
+                  pace_remaining: {type: integer, format: int64, minimum: 0, description: 'Nonnegative paced ledger headroom. When provisional, this does not establish measured usage or remaining allowance.'}
+        models:
+          type: array
+          items:
+            type: object
+            required: [model, family, efforts]
+            properties:
+              model: {type: string}
+              family: {type: string}
+              efforts:
+                type: array
+                items:
+                  type: object
+                  required: [effort, model_profile_id, version]
+                  properties:
+                    effort: {type: string}
+                    model_profile_id: {type: string, format: uuid}
+                    version: {type: string}
     AccountProbe:
       type: object
       required: [daemon_id, daemon_generation, available]
@@ -5565,6 +5975,7 @@ components:
         daemon_id: {type: string, minLength: 1, maxLength: 128}
         daemon_generation: {type: string, minLength: 1, maxLength: 128}
         available: {type: boolean}
+        host_label: {type: string, maxLength: 128, description: Optional display-only host name reported by the owner daemon; fills an empty label without overwriting configured metadata.}
     AllowanceWindowWrite:
       type: object
       required: [starts_at, ends_at, unit, allowance, pace_model]
@@ -5605,10 +6016,11 @@ components:
           additionalProperties: {type: integer, format: int64, minimum: 1}
     AccountRoute:
       type: object
-      required: [account_id, account_key, daemon_id, reservations]
+      required: [account_id, account_key, account_label, daemon_id, reservations]
       properties:
         account_id: {type: string, format: uuid}
         account_key: {type: string}
+        account_label: {type: string}
         daemon_id: {type: string}
         reservations:
           type: array

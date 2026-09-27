@@ -26,7 +26,10 @@
 // when the Candidate gate is absent. Gate_live is false when none is live,
 // without erasing history.
 // Optional gate_offer_id, gate_offer_state and gate_offer_expires_at describe
-// the current unconsumed request separately from the consumed gate identity.
+// the selected unconsumed request, never the standing consumed gate. A pending
+// retry stays offered even while gate_approval_id names a live consumed gate.
+// Clients display that standing identity as an applied record, not fresh action
+// authority. Only the offer's effective deadline governs a new human action.
 // Preserve history when a later release starts; Live becomes the prior release
 // state while Plan is current. Park/drop retains the Shape stage with Reopen.
 // Personal skips Shape after a brief; Access is skipped only when the release

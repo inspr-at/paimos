@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"os"
 	"strings"
 	"sync"
 
@@ -149,6 +150,7 @@ func (r *Remote) RegisterHarness(ctx context.Context, s HarnessSession, agentID,
 		"agent_principal_id": agentID, "run_id": runID, "ticket_node_id": orderID,
 		"work_order_id": orderID, "harness": harness, "host": host,
 		"management_mode": "managed", "role": "worker", "work_shape": "ship",
+		"model": s.Model, "reasoning_effort": s.ReasoningEffort, "account_label": s.AccountLabel,
 		"advertised_capabilities": caps, "harness_session_ref": s.ID, "worker_lease": s.Lease,
 	}, &result)
 	if err != nil {
@@ -262,8 +264,11 @@ func (r *Remote) AddEvidence(ctx context.Context, workOrderID, runID, answer str
 }
 
 func (r *Remote) Probe(ctx context.Context, accountID, daemonID, generation string, available bool) error {
-	return r.Client.Do(ctx, "POST", "/api/agent-accounts/"+url.PathEscape(accountID)+"/probe",
-		map[string]any{"daemon_id": daemonID, "daemon_generation": generation, "available": available}, nil)
+	body := map[string]any{"daemon_id": daemonID, "daemon_generation": generation, "available": available}
+	if host, err := os.Hostname(); err == nil && host != "" && len(host) <= 128 {
+		body["host_label"] = host
+	}
+	return r.Client.Do(ctx, "POST", "/api/agent-accounts/"+url.PathEscape(accountID)+"/probe", body, nil)
 }
 
 // ValidateBaseURL rejects credential-bearing and remote cleartext endpoints.

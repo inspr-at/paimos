@@ -70,6 +70,9 @@ func TestRouteDeclarationsFailClosed(t *testing.T) {
 	if err := RequirePattern(context.Background(), "GET /api/health", Scope{}); err != nil {
 		t.Fatalf("public health: %v", err)
 	}
+	if err := RequirePattern(context.Background(), "GET /api/ready", Scope{}); err != nil {
+		t.Fatalf("public readiness: %v", err)
+	}
 }
 
 // Every current module declares literal ServeMux patterns. This source walk
