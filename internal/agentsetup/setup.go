@@ -13,6 +13,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/inspr-at/paimos/internal/grokprobe"
 )
 
 const snapshotName = "pairing.json"
@@ -25,13 +27,36 @@ type LocalCandidate struct {
 	Identity  string    `json:"identity"`
 	Version   string    `json:"version"`
 }
+
+func (c LocalCandidate) MarshalJSON() ([]byte, error) {
+	type plain LocalCandidate
+	return json.Marshal(struct {
+		plain
+		Grok grokprobe.Binding `json:"grok,omitempty"`
+	}{plain(c), c.Candidate.Grok})
+}
+func (c *LocalCandidate) UnmarshalJSON(raw []byte) error {
+	type plain LocalCandidate
+	var v struct {
+		plain
+		Grok grokprobe.Binding `json:"grok"`
+	}
+	if err := json.Unmarshal(raw, &v); err != nil {
+		return err
+	}
+	*c = LocalCandidate(v.plain)
+	c.Candidate.Grok = v.Grok
+	return nil
+}
+
 type RuntimeAccount struct {
-	Harness   string `json:"harness"`
-	Key       string `json:"key"`
-	AccountID string `json:"account_id"`
-	Home      string `json:"home,omitempty"`
-	Identity  string `json:"identity,omitempty"`
-	Path      string `json:"path"`
+	Harness   string            `json:"harness"`
+	Key       string            `json:"key"`
+	AccountID string            `json:"account_id"`
+	Home      string            `json:"home,omitempty"`
+	Identity  string            `json:"identity,omitempty"`
+	Path      string            `json:"path"`
+	Grok      grokprobe.Binding `json:"grok,omitempty"`
 }
 type RuntimeConfig struct {
 	Schema        string           `json:"schema"`
@@ -111,6 +136,7 @@ func (e *Engine) SavedOptions() (Options, error) {
 		v.Identity = c.Identity
 		v.Version = c.Version
 		v.Login = "signed_in"
+		v.Grok = c.Candidate.Grok
 		o.Candidates = append(o.Candidates, v)
 	}
 	return o, nil
@@ -121,11 +147,13 @@ type LocalDaemon interface {
 	Status(context.Context, string) (LocalStatus, error)
 }
 type Engine struct {
-	Store    *Store
-	API      PairingAPI
-	Services *ServiceManager
-	Local    LocalDaemon
-	Now      func() time.Time
+	Store              *Store
+	API                PairingAPI
+	Services           *ServiceManager
+	Local              LocalDaemon
+	ClaudeDependencies ClaudeDependencies
+	Now                func() time.Time
+	GrokProbe          func(context.Context, grokprobe.Binding) (grokprobe.Identity, error)
 }
 type Options struct {
 	Origin, TenantID, TenantSlug, ComputerName, Workspace string
@@ -216,6 +244,14 @@ func validateOptions(o Options) error {
 		if c.Harness == "claude" && (!filepath.IsAbs(o.NodePath) || !filepath.IsAbs(o.ClaudeSDKPath)) {
 			return errors.New("Claude requires pinned Node and Agent SDK paths")
 		}
+		if c.Harness == "grok" {
+			if o.Platform.OS != "darwin" || o.Platform.Arch != "arm64" {
+				return errors.New("native Grok guided setup requires macOS arm64")
+			}
+			if err := validGuidedGrok(c, o.Workspace); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }
@@ -229,6 +265,18 @@ func (e *Engine) Begin(ctx context.Context, o Options) (Progress, error) {
 	if s, err := e.load(); err == nil {
 		if s.Origin != strings.TrimRight(o.Origin, "/") || s.Request.Workspace != o.Workspace {
 			return Progress{}, ErrCollision
+		}
+		if err := e.checkSavedClaudeDependencies(s, ClaudeDependencies{NodePath: o.NodePath, SDKPath: o.ClaudeSDKPath}, false); err != nil {
+			return e.progress(s), err
+		}
+		for _, local := range s.Candidates {
+			if local.Candidate.Harness == "grok" {
+				candidate := local.Candidate
+				candidate.Path, candidate.Home, candidate.Identity, candidate.Grok = local.Path, local.Home, local.Identity, local.Candidate.Grok
+				if err := e.verifyGuidedGrok(ctx, candidate, s.Request.Workspace); err != nil {
+					return e.progress(s), err
+				}
+			}
 		}
 		if s.DisconnectAll || s.View.ComputerState == "revoked" {
 			return e.progress(s), errors.New("this enrollment is revoked; fresh pairing requires a new private state directory and fresh approval")
@@ -244,6 +292,16 @@ func (e *Engine) Begin(ctx context.Context, o Options) (Progress, error) {
 	for _, entry := range entries {
 		if entry.Name() != "setup.lock" {
 			return Progress{}, ErrCollision
+		}
+	}
+	for _, c := range o.Candidates {
+		if c.Harness == "claude" {
+			deps, err := (Discovery{}).ResolveClaudeDependencies(ClaudeDependencies{NodePath: o.NodePath, SDKPath: o.ClaudeSDKPath}, o.Workspace)
+			if err != nil {
+				return Progress{Stage: "blocked", Action: err.Error()}, err
+			}
+			o.NodePath, o.ClaudeSDKPath = deps.NodePath, deps.SDKPath
+			break
 		}
 	}
 	if err := validateOptions(o); err != nil {
@@ -307,6 +365,35 @@ func (e *Engine) Begin(ctx context.Context, o Options) (Progress, error) {
 		return Progress{}, err
 	}
 	return e.Step(ctx)
+}
+
+func (e *Engine) checkSavedClaudeDependencies(s *snapshot, requested ClaudeDependencies, addingClaude bool) error {
+	if s.NodePath == "" && s.ClaudeSDKPath == "" {
+		if !addingClaude && (requested.NodePath != "" || requested.SDKPath != "") {
+			return errors.New("Claude dependency overrides differ from existing pairing; use Add harness for a new Claude enrollment")
+		}
+		return nil
+	}
+	if s.NodePath == "" || s.ClaudeSDKPath == "" {
+		return errors.New("saved Claude dependencies are incomplete; no enrollment was changed")
+	}
+	valid, err := (Discovery{}).ResolveClaudeDependencies(ClaudeDependencies{NodePath: s.NodePath, SDKPath: s.ClaudeSDKPath}, s.Request.Workspace)
+	if err != nil {
+		return errors.New("saved Claude dependencies are unavailable or unsafe; restore the pinned installation before resuming")
+	}
+	if requested.NodePath != "" {
+		p, err := pinnedRegular(requested.NodePath, s.Request.Workspace, true)
+		if err != nil || p != valid.NodePath {
+			return errors.New("--node-path conflicts with saved Claude dependency; no enrollment was changed")
+		}
+	}
+	if requested.SDKPath != "" {
+		p, err := pinnedRegular(requested.SDKPath, s.Request.Workspace, false)
+		if err != nil || p != valid.SDKPath {
+			return errors.New("--claude-sdk-path conflicts with saved Claude dependency; no enrollment was changed")
+		}
+	}
+	return nil
 }
 
 func (e *Engine) Step(ctx context.Context) (Progress, error) {
@@ -491,7 +578,14 @@ func (e *Engine) provision(ctx context.Context, s *snapshot) (result Progress, r
 		found := false
 		for _, c := range s.Candidates {
 			if c.Candidate.Key == a.AccountKey && c.Candidate.Harness == a.Harness && c.Candidate.Label == a.Label {
-				config.Accounts = append(config.Accounts, RuntimeAccount{a.Harness, a.AccountKey, a.AccountID, c.Home, c.Identity, c.Path})
+				if a.Harness == "grok" {
+					v := c.Candidate
+					v.Path, v.Home, v.Identity, v.Grok = c.Path, c.Home, c.Identity, c.Candidate.Grok
+					if err := e.verifyGuidedGrok(ctx, v, s.Request.Workspace); err != nil {
+						return e.progress(s), err
+					}
+				}
+				config.Accounts = append(config.Accounts, RuntimeAccount{a.Harness, a.AccountKey, a.AccountID, c.Home, c.Identity, c.Path, c.Candidate.Grok})
 				found = true
 				break
 			}
@@ -568,6 +662,23 @@ func ReadRuntimeConfig(root string) (RuntimeConfig, error) {
 		return RuntimeConfig{}, errors.New("private runtime configuration invalid")
 	}
 	return c, nil
+}
+
+// ValidateRuntimeDependencies gates execution, never access to recovery metadata
+// or the credential needed to revoke this computer. Removed harnesses do not
+// block the remaining accounts merely because their old dependency pins remain.
+func ValidateRuntimeDependencies(c RuntimeConfig) error {
+	claude := false
+	for _, a := range c.Accounts {
+		claude = claude || a.Harness == "claude"
+	}
+	if claude {
+		valid, err := (Discovery{}).ResolveClaudeDependencies(ClaudeDependencies{NodePath: c.NodePath, SDKPath: c.ClaudeSDKPath}, c.Workspace)
+		if err != nil || valid.NodePath != c.NodePath || valid.SDKPath != c.ClaudeSDKPath {
+			return errors.New("pinned Claude runtime dependencies are unavailable or unsafe")
+		}
+	}
+	return nil
 }
 func ReadRuntime(root string) (RuntimeConfig, secret, error) {
 	c, err := ReadRuntimeConfig(root)

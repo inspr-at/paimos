@@ -22,8 +22,6 @@ func TestFakeVendorProcess(t *testing.T) {
 	if vendor == "" {
 		return
 	}
-	verification := strings.HasPrefix(vendor, "cursor-verify")
-	askSet := false
 	read := bufio.NewScanner(os.Stdin)
 	write := json.NewEncoder(os.Stdout)
 	for read.Scan() {
@@ -86,51 +84,7 @@ func TestFakeVendorProcess(t *testing.T) {
 			result = map[string]string{"turnId": "turn-1"}
 		case "session/new":
 			result = map[string]any{"sessionId": "session-1", "modes": map[string]string{"currentModeId": "default"}, "models": map[string]string{"currentModelId": "test-model"}}
-			if verification {
-				var request struct {
-					Params struct {
-						MCP []any `json:"mcpServers"`
-					} `json:"params"`
-				}
-				_ = json.Unmarshal(read.Bytes(), &request)
-				if request.Params.MCP == nil || len(request.Params.MCP) != 0 {
-					os.Exit(4)
-				}
-				modes := []map[string]string{{"id": "ask"}}
-				if vendor == "cursor-verify-no-ask" {
-					modes = nil
-				}
-				result = map[string]any{"sessionId": "session-1", "modes": map[string]any{"currentModeId": "agent", "availableModes": modes}, "models": map[string]string{"currentModelId": "test-model"}}
-			}
-		case "session/set_mode":
-			var request struct {
-				Params struct {
-					Mode    string `json:"modeId"`
-					Session string `json:"sessionId"`
-				} `json:"params"`
-			}
-			_ = json.Unmarshal(read.Bytes(), &request)
-			if !verification || request.Params.Mode != "ask" || request.Params.Session != "session-1" {
-				os.Exit(4)
-			}
-			askSet = true
-			if vendor != "cursor-verify-no-ack" {
-				result = map[string]string{"currentModeId": "ask"}
-			}
 		case "session/prompt":
-			if verification {
-				if !askSet {
-					os.Exit(4)
-				}
-				if vendor == "cursor-verify-permission" {
-					_ = write.Encode(map[string]any{"jsonrpc": "2.0", "id": 900, "method": "session/request_permission", "params": map[string]string{"sessionId": "session-1"}})
-					continue
-				}
-				if vendor == "cursor-verify-drift" {
-					_ = write.Encode(map[string]any{"jsonrpc": "2.0", "method": "session/update", "params": map[string]any{"sessionId": "session-1", "update": map[string]string{"sessionUpdate": "current_mode_update", "currentModeId": "agent"}}})
-					continue
-				}
-			}
 			for i := 0; i < 2; i++ {
 				_ = write.Encode(map[string]any{"jsonrpc": "2.0", "method": "session/update", "params": map[string]any{
 					"sessionId": "session-1", "update": map[string]any{"sessionUpdate": "usage_update", "used": 100,

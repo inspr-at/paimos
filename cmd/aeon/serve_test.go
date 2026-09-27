@@ -136,6 +136,25 @@ func TestServeShutdownAndBootstrap(t *testing.T) {
 		t.Fatalf("ready %d %s", ready.StatusCode, readyBody)
 	}
 
+	guide, err := http.Get(base + "/agents/register-agent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	guideBody, _ := io.ReadAll(guide.Body)
+	guide.Body.Close()
+	if guide.StatusCode != http.StatusOK || !bytes.Contains(guideBody, []byte("Connect a computer")) || !bytes.Contains(guideBody, []byte("setup --url")) || !bytes.Contains(guideBody, []byte("short code")) {
+		t.Fatalf("pairing guide is not readable without JavaScript: %d", guide.StatusCode)
+	}
+	metadata, err := http.Get(base + "/api/agent-pairing/guide")
+	if err != nil {
+		t.Fatal(err)
+	}
+	metadataBody, _ := io.ReadAll(metadata.Body)
+	metadata.Body.Close()
+	if metadata.StatusCode != http.StatusOK || !bytes.Contains(metadataBody, []byte(`"protocol":"pairing-v1"`)) || !bytes.Contains(metadataBody, []byte(`"default_tenant_slug":"p02-boot"`)) {
+		t.Fatalf("public pairing metadata: %d", metadata.StatusCode)
+	}
+
 	var name string
 	if err := fresh.Admin.QueryRow(context.Background(), `SELECT name FROM tenants WHERE slug = 'p02-boot'`).Scan(&name); err != nil {
 		t.Fatal(err)

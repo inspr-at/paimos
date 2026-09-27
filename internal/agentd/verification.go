@@ -19,7 +19,23 @@ var ErrVerificationUnavailable = errors.New("verification blocked: this adapter 
 type VerificationAdapter interface{ VerificationSupported() bool }
 
 func (*ClaudeAdapter) VerificationSupported() bool { return true }
-func (*CursorAdapter) VerificationSupported() bool { return true }
+
+// Cursor ACP inherits the shared MCP lease when session/new receives an empty
+// mcpServers array (CLI 2026.09.18-9a7762b, 1006.index.js). Ask mode does not bind
+// an empty tool inventory, and ACP exposes no supported override for that lease.
+// See https://cursor.com/docs/cli/acp#MCP-servers. Block before the account probe
+// or session startup until a qualified isolation mechanism is available.
+func (*CursorAdapter) VerificationSupported() bool { return false }
+
+// Codex intentionally has no VerificationSupported capability. In codex-cli
+// 0.157.1, thread/start cannot set the immutable ToolPolicy.allowed_tools ceiling
+// (codex-rs/ext/extension-api/src/tool_policy.rs). Read-only sandboxing does not
+// constrain inherited MCP actions, and even mcpServerStatus/list creates eager
+// connections (codex-rs/codex-mcp/src/mcp/mod.rs). Checking a separate config
+// snapshot before thread creation cannot enforce this run's no-mutation promise.
+// Keep verification blocked before any vendor process until the public protocol
+// can bind a no-tools/no-hooks policy before startup, or an equivalent qualified
+// execution boundary exists. Source: github.com/openai/codex/tree/rust-v0.157.1.
 
 func validExecutionMode(r Run, adapter Adapter) error {
 	if r.Purpose == "" || r.Purpose == "managed" {

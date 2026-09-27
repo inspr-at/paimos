@@ -4,38 +4,45 @@ package agentruns
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
 )
 
 type Run struct {
-	ID                 string     `json:"id"`
-	OrderID            string     `json:"work_order_id"`
-	AgentID            string     `json:"agent_principal_id"`
-	ProfileID          *string    `json:"model_profile_id"`
-	AccountID          *string    `json:"account_id"`
-	RequestedAccountID *string    `json:"requested_account_id"`
-	Outcome            *string    `json:"outcome"`
-	DurationMS         *int64     `json:"duration_ms"`
-	Status             string     `json:"status"`
-	RequestedModel     *string    `json:"requested_model"`
-	EffectiveModel     *string    `json:"effective_model"`
-	ModelEvidence      string     `json:"model_evidence"`
-	InputTokens        int64      `json:"input_tokens"`
-	OutputTokens       int64      `json:"output_tokens"`
-	Cost               int64      `json:"cost_micros"`
-	StartedAt          *time.Time `json:"started_at"`
-	EndedAt            *time.Time `json:"ended_at"`
-	CreatedAt          time.Time  `json:"created_at"`
-	DaemonID           *string    `json:"-"`
-	Generation         *string    `json:"-"`
+	Purpose                   string     `json:"purpose"`
+	VerificationTask          string     `json:"verification_task,omitempty"`
+	MaxDurationSeconds        int        `json:"max_duration_seconds,omitempty"`
+	VerificationPolicy        string     `json:"verification_policy,omitempty"`
+	RepositoryMutationAllowed bool       `json:"repository_mutation_allowed"`
+	ID                        string     `json:"id"`
+	OrderID                   string     `json:"work_order_id"`
+	AgentID                   string     `json:"agent_principal_id"`
+	ProfileID                 *string    `json:"model_profile_id"`
+	AccountID                 *string    `json:"account_id"`
+	RequestedAccountID        *string    `json:"requested_account_id"`
+	Outcome                   *string    `json:"outcome"`
+	DurationMS                *int64     `json:"duration_ms"`
+	Status                    string     `json:"status"`
+	RequestedModel            *string    `json:"requested_model"`
+	EffectiveModel            *string    `json:"effective_model"`
+	ModelEvidence             string     `json:"model_evidence"`
+	InputTokens               int64      `json:"input_tokens"`
+	OutputTokens              int64      `json:"output_tokens"`
+	Cost                      int64      `json:"cost_micros"`
+	StartedAt                 *time.Time `json:"started_at"`
+	EndedAt                   *time.Time `json:"ended_at"`
+	CreatedAt                 time.Time  `json:"created_at"`
+	DaemonID                  *string    `json:"-"`
+	Generation                *string    `json:"-"`
 }
 
 // UsageRecorder lets the account module settle its own allowance projections
@@ -74,16 +81,34 @@ func (m *module) Mount(mux *http.ServeMux) {
 		{"POST /api/runs/{runId}/claim", "run.claim", true, 200, m.claim},
 		{"POST /api/runs/{runId}/telemetry", "run.telemetry", true, 200, m.telemetry},
 	} {
-		mux.HandleFunc(route.pattern, workorders.Endpoint(m.pool, route.scope, route.agent, route.status, route.fn))
+		mux.HandleFunc(route.pattern, workorders.Endpoint(m.pool, route.scope, route.agent, route.status, func(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
+			if err := agentpairing.Lock(r.Context(), tx); err != nil {
+				return nil, err
+			}
+			v, err := route.fn(r, tx, p)
+			var pe *agentpairing.Error
+			if errors.As(err, &pe) {
+				return nil, workorders.Fail(pe.Status, pe.Code)
+			}
+			return v, err
+		}))
 	}
 }
 
 const columns = `id::text,work_order_id::text,agent_principal_id::text,model_profile_id::text,account_id::text,status,
- requested_model,effective_model,model_evidence,input_tokens,output_tokens,cost_micros,started_at,ended_at,created_at,daemon_id,daemon_generation,requested_account_id::text`
+ requested_model,effective_model,model_evidence,input_tokens,output_tokens,cost_micros,started_at,ended_at,created_at,daemon_id,daemon_generation,requested_account_id::text,purpose`
 
 func scan(row pgx.Row) (Run, error) {
 	var v Run
-	err := row.Scan(&v.ID, &v.OrderID, &v.AgentID, &v.ProfileID, &v.AccountID, &v.Status, &v.RequestedModel, &v.EffectiveModel, &v.ModelEvidence, &v.InputTokens, &v.OutputTokens, &v.Cost, &v.StartedAt, &v.EndedAt, &v.CreatedAt, &v.DaemonID, &v.Generation, &v.RequestedAccountID)
+	err := row.Scan(&v.ID, &v.OrderID, &v.AgentID, &v.ProfileID, &v.AccountID, &v.Status, &v.RequestedModel, &v.EffectiveModel, &v.ModelEvidence, &v.InputTokens, &v.OutputTokens, &v.Cost, &v.StartedAt, &v.EndedAt, &v.CreatedAt, &v.DaemonID, &v.Generation, &v.RequestedAccountID, &v.Purpose)
+
+	v.RepositoryMutationAllowed = true
+	if v.Purpose == "pairing_verification" {
+		v.VerificationTask = agentpairing.VerificationTask
+		v.MaxDurationSeconds = agentpairing.VerificationSeconds
+		v.VerificationPolicy = "read_only"
+		v.RepositoryMutationAllowed = false
+	}
 	if terminal(v.Status) {
 		outcome := v.Status
 		v.Outcome = &outcome
@@ -127,14 +152,29 @@ func (m *module) get(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error
 	return v, nil
 }
 func (m *module) queued(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
+	if err := agentpairing.ExpireUnclaimedVerifications(r.Context(), tx); err != nil {
+		return nil, err
+	}
 	limit, err := workorders.Limit(r)
 	if err != nil {
 		return nil, err
 	}
 	rows, err := tx.Query(r.Context(), `SELECT `+columns+` FROM agent_runs WHERE agent_principal_id=$1 AND status='queued'
+
+ AND (NOT EXISTS(SELECT 1 FROM agent_pairing_computers WHERE principal_id=$1) OR EXISTS(
+  SELECT 1 FROM agent_pairing_computers c
+  JOIN agent_pairing_enrollments e ON e.tenant_id=c.tenant_id AND e.computer_id=c.id
+  JOIN agent_pairing_requests q ON q.tenant_id=e.tenant_id AND q.id=e.request_id
+  JOIN agent_accounts a ON a.tenant_id=e.tenant_id AND a.id=e.account_id
+  WHERE c.principal_id=$1 AND c.state='connected' AND e.state='connected' AND q.state='redeemed'
+  AND (agent_runs.requested_account_id IS NULL OR e.account_id=agent_runs.requested_account_id)
+  AND (((q.details->>'platform')||'/'||(q.details->>'arch')||'/'||a.harness=ANY($3::text[]) AND e.verification_run_id=agent_runs.id AND e.verification_claimed_at IS NULL AND e.verification_expires_at>clock_timestamp())
+   OR (agent_runs.purpose='managed' AND e.ongoing_approved_at IS NOT NULL AND EXISTS(
+    SELECT 1 FROM account_allowance_windows w WHERE w.account_id=e.account_id AND NOT w.pairing_verification
+     AND w.starts_at<=clock_timestamp() AND w.ends_at>clock_timestamp())))))
 	 AND EXISTS(SELECT 1 FROM work_orders w JOIN nodes n ON n.tenant_id=w.tenant_id AND n.id=w.node_id
 	 WHERE w.node_id=agent_runs.work_order_id AND w.status IN ('ready','running') AND n.deleted_at IS NULL)
-	 ORDER BY created_at,id LIMIT $2`, p.ID, limit)
+	 ORDER BY created_at,id LIMIT $2`, p.ID, limit, agentpairing.VerificationTargets())
 	if err != nil {
 		return nil, err
 	}
@@ -310,6 +350,9 @@ func (m *module) claim(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
 	if !valid || count != len(seen) {
 		return nil, workorders.Fail(409, "reservation set mismatch")
 	}
+	if err = agentpairing.AccountFence(ctx, tx, *v.AccountID, v.Status != "queued"); err != nil {
+		return nil, err
+	}
 	if v.Status != "queued" {
 		if v.DaemonID != nil && v.Generation != nil {
 			return v, nil
@@ -323,6 +366,9 @@ func (m *module) claim(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
 		return nil, workorders.Fail(409, "work-order assignment changed")
 	}
 	if err = dispatchable(ctx, tx, o); err != nil {
+		return nil, err
+	}
+	if err = agentpairing.RunFence(ctx, tx, *v.AccountID, v.ID, true); err != nil {
 		return nil, err
 	}
 	before := v
