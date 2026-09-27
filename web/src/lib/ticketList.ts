@@ -47,7 +47,8 @@ export const DIMENSIONS: DimensionDef[] = [
   { key: 'tag', title: 'Labels', facet: 'tag', primary: false, none: 'No labels' },
   { key: 'epic', title: 'Epic', facet: null, primary: false, none: 'No epic' },
   { key: 'cost', title: 'Cost unit', facet: 'cost_unit', primary: false, none: 'No cost unit' },
-  { key: 'release', title: 'Release', facet: 'release', primary: false, none: 'No release' },
+  // Imported fields.release only. The ticket Release column reads native journey membership.
+  { key: 'release', title: 'Imported release', facet: 'release', primary: false, none: 'No imported release' },
 ]
 export const DIMENSION_BY_KEY = new Map(DIMENSIONS.map(d => [d.key, d]))
 export const DIMENSION_KEYS = DIMENSIONS.map(d => d.key)

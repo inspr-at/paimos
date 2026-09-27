@@ -1,13 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Putting tickets into a release: an open planning release, or a new one.
-// A ticket that already sits in another open release is moved only after a yes.
-// A new release is one journey action; if that action fails, no release is left open.
+// A ticket that already sits in another planning release is moved only after a yes.
+// A new release is one journey action. A definite rejection rolls it back.
+// A lost response stays unconfirmed: the same tickets replay that action and
+// do not send a membership write, even if the picker now lists the release.
 
 import { APIError } from './api.ts'
 import { confirmAction } from './confirm.ts'
 import { getWalker, type Journey, type Walker } from './journey.ts'
 import {
-  addReleaseMembership, isMoveConflict, isStaleRevision, newReleaseFailure, openReleaseWithTickets,
+  addReleaseMembership, assertReleaseOpen, isMoveConflict, isStaleRevision, newReleaseFailure, openReleaseWithTickets, ReleaseUnconfirmed,
   type MembershipResult, type MembershipTicket,
 } from './releaseMembership.ts'
 import { statusMeta } from './work.ts'
@@ -21,7 +23,7 @@ export type ReleaseTarget = { kind: 'existing'; id: string; title: string } | { 
 export interface AssignOutcome {
   releaseId: string
   releaseTitle: string
-  result: MembershipResult
+  result: MembershipResult | null
   journey: Journey | null
   skipped: { key: string; reason: string }[]
 }
@@ -49,26 +51,21 @@ export async function confirmOptionMoves(tickets: MembershipTicket[], into: stri
   return confirmMoves(moves.map(ticket => ({ key: ticket.key, title: ticket.title, releaseTitle: ticket.release_title })), into)
 }
 
-function includedWalker(projectId: string, releaseId: string, ids: string[]): Walker {
-  return {
-    release_node_id: releaseId, project_node_id: projectId, state: 'planning', revision: 1, features: [],
-    tickets: ids.map((id, position) => ({ ticket_node_id: id, key: '', title: '', feature_node_id: null, included: true, position, estimated_hours: null, screen_node_ids: [] })),
-  }
-}
-
 export async function assignToRelease(projectId: string, tickets: AssignTicket[], target: ReleaseTarget, knownMoves: { key: string; title: string; releaseTitle: string | null }[] = []): Promise<AssignOutcome> {
   const skipped = tickets.filter(closed).map(ticket => ({ key: ticket.key, reason: ticket.kind === 'epic' ? 'An epic is not a release ticket.' : 'Closed tickets cannot join a release.' }))
   const ids = [...new Set(tickets.filter(ticket => !closed(ticket)).map(ticket => ticket.id))]
   if (!ids.length) throw new Error(skipped[0]?.reason ?? 'Choose a ticket to add.')
   if (ids.length > 100) throw new Error('Add up to 100 tickets at a time.')
-  if (target.kind === 'new') {
-    if (knownMoves.length) throw new Error(newReleaseFailure(new APIError(409, 'confirm_move required to move a ticket from another release', {})))
+  const open = assertReleaseOpen(projectId, ids)
+  if (target.kind === 'new' || open === 'replay') {
+    if (target.kind === 'new' && open !== 'replay' && knownMoves.length) throw new Error(newReleaseFailure(new APIError(409, 'confirm_move required to move a ticket from another release', {})))
     try {
       const opened = await openReleaseWithTickets(projectId, ids)
-      let walker: Walker
-      try { walker = await getWalker(projectId, opened.releaseId) } catch { walker = includedWalker(projectId, opened.releaseId, ids) }
-      return { releaseId: opened.releaseId, releaseTitle: target.title, result: { walker, event_id: 0 }, journey: opened.journey, skipped }
+      let walker: Walker | null = null
+      try { walker = await getWalker(projectId, opened.releaseId) } catch { walker = null }
+      return { releaseId: opened.releaseId, releaseTitle: target.title, result: walker ? { walker, event_id: 0 } : null, journey: opened.journey, skipped }
     } catch (error) {
+      if (error instanceof ReleaseUnconfirmed) throw error
       throw new Error(newReleaseFailure(error))
     }
   }

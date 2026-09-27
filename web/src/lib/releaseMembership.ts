@@ -3,13 +3,13 @@
 // existing tickets through ticket-options and one membership write. A new release
 // takes its tickets on the journey action itself; a rejected ticket leaves no release.
 
-import { api, APIError } from './api.ts'
+import { api, APIError, type WorkNode } from './api.ts'
 import {
   getJourney, listReleases, postAction, releaseName, releaseRefs,
   type ActionWrite, type Journey, type ReleaseRef, type Walker,
 } from './journey.ts'
 
-export type TicketAvailability = 'addable' | 'included' | 'closed' | 'released' | 'other_release' | 'unsupported'
+export type TicketAvailability = 'addable' | 'included' | 'closed' | 'released' | 'other_release' | 'active_release' | 'unsupported' | 'unavailable'
 
 export interface MembershipTicket {
   ticket_node_id: string
@@ -47,8 +47,10 @@ export interface MembershipResult {
   event_id: number
 }
 
-const AVAILABILITY = new Set<TicketAvailability>(['addable', 'included', 'closed', 'released', 'other_release', 'unsupported'])
+const AVAILABILITY = new Set<TicketAvailability>(['addable', 'included', 'closed', 'released', 'other_release', 'active_release', 'unsupported'])
 
+// other_release is a planning source and may move after confirmation.
+// active_release is any other live source; the write would refuse it.
 export function canSelectTicket(ticket: Pick<MembershipTicket, 'availability'>): boolean {
   return ticket.availability === 'addable' || ticket.availability === 'other_release'
 }
@@ -58,8 +60,10 @@ export function availabilityMark(ticket: Pick<MembershipTicket, 'availability' |
     case 'included': return 'In this release'
     case 'closed': return 'Closed'
     case 'released': return 'Already released'
-    case 'other_release': return ticket.release_title ? `In ${ticket.release_title}` : 'In another open release'
+    case 'other_release': return ticket.release_title ? `In ${ticket.release_title}` : 'In another planning release'
+    case 'active_release': return ticket.release_title ? `In ${ticket.release_title} · not planning` : 'Not in a planning release'
     case 'unsupported': return 'Not a release ticket'
+    case 'unavailable': return 'Cannot be added'
     default: return ''
   }
 }
@@ -128,7 +132,7 @@ export function parseTicketOptions(data: unknown): TicketOptions {
     const id = text(ticket.ticket_node_id)
     const key = text(ticket.key)
     if (!id || !key) continue
-    const availability = AVAILABILITY.has(ticket.availability as TicketAvailability) ? ticket.availability as TicketAvailability : 'closed'
+    const availability = AVAILABILITY.has(ticket.availability as TicketAvailability) ? ticket.availability as TicketAvailability : 'unavailable'
     tickets.push({
       ticket_node_id: id, key, title: text(ticket.title), status: text(ticket.status), type: text(ticket.type),
       feature_node_id: nullable(ticket.feature_node_id), release_node_id: nullable(ticket.release_node_id),
@@ -182,31 +186,226 @@ export function newReleaseAction(journey: Pick<Journey, 'current_release_id' | '
   return { action: 'open_first_release', expected_revision: journey.revision, idempotency_key: idempotencyKey, ticket_node_ids: ticketIds }
 }
 
+export class ReleaseUnconfirmed extends Error {
+  readonly action: ActionWrite
+  constructor(action: ActionWrite) {
+    super('The new release is not confirmed yet. Try the same request again.')
+    this.name = 'ReleaseUnconfirmed'
+    this.action = action
+  }
+}
+
+// A 4xx from the journey action is a finished rejection: the transaction rolled
+// back. A lost response, a 5xx, or a 200 that does not name the release is not.
+export function isDefiniteReleaseRejection(error: unknown): error is APIError {
+  return error instanceof APIError && error.status >= 400 && error.status < 500 && error.status !== 408
+}
+
 export function newReleaseFailure(error: unknown): string {
+  if (error instanceof ReleaseUnconfirmed) return error.message
+  if (error instanceof Error && error.message.startsWith('The new release was not opened.')) return error.message
+  if (!isDefiniteReleaseRejection(error)) return 'The new release is not confirmed yet. Try the same request again.'
   if (isMoveConflict(error)) return 'The new release was not opened. A ticket is already in another open release, and creating a release cannot move it.'
-  const message = error instanceof Error ? error.message : 'The tickets were not added.'
-  if (message.startsWith('The new release was not opened.')) return message
-  return `The new release was not opened. ${message}`
+  return `The new release was not opened. ${error.message}`
 }
 
 export interface OpenedRelease { journey: Journey; releaseId: string }
 
-// The action is the only write. A stale journey revision is retried once, with a
-// new idempotency key, because that 409 committed nothing. Any other rejection
-// is returned as-is so the caller can say that no release was opened.
-export async function openReleaseWithTickets(projectId: string, ticketIds: string[]): Promise<OpenedRelease> {
-  const send = (journey: Journey) => postAction(projectId, newReleaseAction(journey, ticketIds, crypto.randomUUID()))
-  let journey = await getJourney(projectId)
+export interface ReleaseOpenClient {
+  getJourney(projectId: string): Promise<Journey>
+  postAction(projectId: string, body: ActionWrite): Promise<Journey>
+  listReleases(projectId: string): Promise<WorkNode[]>
+  newKey(): string
+}
+
+const liveOpenClient: ReleaseOpenClient = {
+  getJourney, postAction, listReleases, newKey: () => crypto.randomUUID(),
+}
+
+const pendingOpen = new Map<string, ActionWrite>()
+const opening = new Map<string, { ids: string; promise: Promise<OpenedRelease> }>()
+
+export function resetReleaseOpenForTests() {
+  pendingOpen.clear()
+  opening.clear()
+}
+
+function ticketSet(ids: string[]): string {
+  return [...ids].map(id => id.toLowerCase()).sort().join('\n')
+}
+
+function namedRelease(value: unknown): Journey | null {
+  if (!value || typeof value !== 'object') return null
+  const journey = value as Journey
+  if (typeof journey.revision !== 'number' || typeof journey.current_release_id !== 'string' || !journey.current_release_id) return null
+  return journey
+}
+
+async function postExact(client: ReleaseOpenClient, projectId: string, action: ActionWrite): Promise<Journey> {
+  let body: unknown
+  try {
+    body = await client.postAction(projectId, action)
+  } catch (error) {
+    if (isStaleRevision(error)) throw error
+    if (isDefiniteReleaseRejection(error)) {
+      if (pendingOpen.get(projectId) === action) pendingOpen.delete(projectId)
+      throw error
+    }
+    pendingOpen.set(projectId, action)
+    throw new ReleaseUnconfirmed(action)
+  }
+  const journey = namedRelease(body)
+  if (!journey) {
+    pendingOpen.set(projectId, action)
+    throw new ReleaseUnconfirmed(action)
+  }
+  if (pendingOpen.get(projectId) === action) pendingOpen.delete(projectId)
+  return journey
+}
+
+async function openOnce(projectId: string, ticketIds: string[], client: ReleaseOpenClient): Promise<OpenedRelease> {
+  const pending = pendingOpen.get(projectId)
+  if (pending && ticketSet(pending.ticket_node_ids ?? []) !== ticketSet(ticketIds)) throw new ReleaseUnconfirmed(pending)
+  let action = pending ?? null
+  if (!action) {
+    let journey: Journey
+    try {
+      journey = await client.getJourney(projectId)
+    } catch (error) {
+      throw new Error(`The new release was not opened. ${error instanceof Error ? error.message : 'The journey could not be read.'}`)
+    }
+    action = newReleaseAction(journey, ticketIds, client.newKey())
+    pendingOpen.set(projectId, action)
+  }
   let next: Journey
   try {
-    next = await send(journey)
+    next = await postExact(client, projectId, action)
   } catch (error) {
     if (!isStaleRevision(error)) throw error
-    journey = await getJourney(projectId)
-    const open = canOpenRelease(journey, planningRelease(journey, releaseRefs(await listReleases(projectId))))
-    if (!open.ok) throw new Error(open.reason)
-    next = await send(journey)
+    // That 409 committed nothing, so the next attempt is a new request.
+    pendingOpen.delete(projectId)
+    let journey: Journey
+    try {
+      journey = await client.getJourney(projectId)
+      const open = canOpenRelease(journey, planningRelease(journey, releaseRefs(await client.listReleases(projectId))))
+      if (!open.ok) throw new Error(`The new release was not opened. ${open.reason}`)
+    } catch (refreshError) {
+      if (refreshError instanceof Error && refreshError.message.startsWith('The new release was not opened.')) throw refreshError
+      throw new Error(`The new release was not opened. ${refreshError instanceof Error ? refreshError.message : 'The journey could not be read again.'}`)
+    }
+    action = newReleaseAction(journey, ticketIds, client.newKey())
+    pendingOpen.set(projectId, action)
+    next = await postExact(client, projectId, action)
   }
-  if (!next.current_release_id) throw new Error('The journey did not name the new release.')
-  return { journey: next, releaseId: next.current_release_id }
+  return { journey: next, releaseId: next.current_release_id! }
+}
+
+// Same tickets as an unconfirmed create must replay that action. A different
+// set must not start a second create or a membership write beside it.
+export function assertReleaseOpen(projectId: string, ticketIds: string[]): 'replay' | 'clear' {
+  const pending = pendingOpen.get(projectId)
+  if (!pending) return 'clear'
+  if (ticketSet(pending.ticket_node_ids ?? []) !== ticketSet(ticketIds)) throw new ReleaseUnconfirmed(pending)
+  return 'replay'
+}
+
+// One journey action, never a follow-up membership write. A stale revision is
+// the only case that mints a new idempotency key. A lost or unusable response
+// keeps the exact action and replays it. A second click joins the attempt in
+// flight instead of starting another.
+export async function openReleaseWithTickets(projectId: string, ticketIds: string[], client: ReleaseOpenClient = liveOpenClient): Promise<OpenedRelease> {
+  const ids = ticketSet(ticketIds)
+  const current = opening.get(projectId)
+  if (current) {
+    if (current.ids === ids) return current.promise
+    return current.promise.then(
+      () => openReleaseWithTickets(projectId, ticketIds, client),
+      () => openReleaseWithTickets(projectId, ticketIds, client),
+    )
+  }
+  const promise = openOnce(projectId, ticketIds, client).finally(() => {
+    if (opening.get(projectId)?.promise === promise) opening.delete(projectId)
+  })
+  opening.set(projectId, { ids, promise })
+  return promise
+}
+
+export const MEMBERSHIP_BATCH = 100
+
+export interface NativeMembership {
+  ticket_node_id: string
+  release_node_id: string | null
+  release_title: string | null
+  release_state: string | null
+}
+
+export type NativeReleaseView =
+  | { status: 'pending' }
+  | { status: 'unknown' }
+  | { status: 'none' }
+  | { status: 'member'; title: string; releaseId: string; releaseState: string | null }
+
+export function membershipQuery(ids: string[]): string {
+  const params = new URLSearchParams()
+  for (const id of ids) params.append('ticket_node_id', id)
+  const text = params.toString()
+  return text ? `?${text}` : ''
+}
+
+export function parseNativeMemberships(data: unknown): NativeMembership[] {
+  if (!data || typeof data !== 'object' || !Array.isArray((data as { tickets?: unknown }).tickets)) {
+    throw new Error('The release membership did not answer.')
+  }
+  const tickets: NativeMembership[] = []
+  for (const row of (data as { tickets: unknown[] }).tickets) {
+    if (!row || typeof row !== 'object') continue
+    const ticket = row as Record<string, unknown>
+    const id = text(ticket.ticket_node_id)
+    if (!id) continue
+    tickets.push({
+      ticket_node_id: id,
+      release_node_id: nullable(ticket.release_node_id),
+      release_title: nullable(ticket.release_title),
+      release_state: nullable(ticket.release_state),
+    })
+  }
+  return tickets
+}
+
+// A returned row with no release is no membership. A requested id with no row
+// is unknown: it is not the same as an empty membership, and it is not the
+// imported fields.release label.
+export function nativeViews(requested: string[], rows: NativeMembership[]): Map<string, NativeReleaseView> {
+  const byId = new Map(rows.map(row => [row.ticket_node_id, row]))
+  const out = new Map<string, NativeReleaseView>()
+  for (const id of requested) {
+    const row = byId.get(id)
+    if (!row || !row.release_title) {
+      out.set(id, row ? { status: 'none' } : { status: 'unknown' })
+      continue
+    }
+    out.set(id, { status: 'member', title: row.release_title, releaseId: row.release_node_id ?? '', releaseState: row.release_state })
+  }
+  return out
+}
+
+export function releaseCell(view: NativeReleaseView | undefined): { text: string; label: string; kind: 'unknown' | 'none' | 'member' } {
+  if (!view || view.status === 'pending' || view.status === 'unknown') return { text: '—', label: 'Release unknown', kind: 'unknown' }
+  if (view.status === 'none') return { text: '—', label: 'No release', kind: 'none' }
+  return { text: view.title, label: `Release ${view.title}`, kind: 'member' }
+}
+
+export async function listNativeMemberships(project: string, ids: string[], fetcher: (path: string) => Promise<unknown> = request): Promise<Map<string, NativeReleaseView>> {
+  const unique = [...new Set(ids.map(id => id.trim()).filter(Boolean))]
+  const out = new Map<string, NativeReleaseView>()
+  for (let index = 0; index < unique.length; index += MEMBERSHIP_BATCH) {
+    const batch = unique.slice(index, index + MEMBERSHIP_BATCH)
+    try {
+      const data = await fetcher(`/projects/${enc(project)}/release-memberships${membershipQuery(batch)}`)
+      for (const [id, view] of nativeViews(batch, parseNativeMemberships(data))) out.set(id, view)
+    } catch {
+      for (const id of batch) out.set(id, { status: 'unknown' })
+    }
+  }
+  return out
 }

@@ -29,8 +29,8 @@ import RelationPicker from './RelationPicker.vue'
 import TicketHeaderBar from './TicketHeaderBar.vue'
 import TicketProperties from './TicketProperties.vue'
 import { can } from '../../lib/authz'
-import { releaseLabel } from '../../lib/columns'
 import { AssignCancelled, assignToRelease, type ReleaseTarget } from '../../lib/releaseAssign'
+import { type NativeReleaseView } from '../../lib/releaseMembership'
 import ReleasePicker from './ReleasePicker.vue'
 import { useJourney } from '../../stores/journey'
 import StartAgentDialog from '../agents/StartAgentDialog.vue'
@@ -43,6 +43,7 @@ const props = defineProps<{
   project: { id: string; routeKey: string }; names: Map<string, string>
   me: { id: string; name: string } | null; canWrite: boolean; canDelete: boolean; canMove: boolean; canLink: boolean; canUnlink: boolean
   canComment: boolean; canDeleteComment: boolean; canAttach: boolean; people: { id: string; name: string }[]
+  nativeReleases?: Map<string, NativeReleaseView>
   // Tickets followed to get here, oldest first (the panel's back trail).
   trail?: string[]
   // Set by a peek dock: a labeled jump to the project, and a return to the view underneath.
@@ -74,9 +75,7 @@ const lightbox = ref<InstanceType<typeof AttachmentLightbox>>()
 const startDialog = ref<InstanceType<typeof StartAgentDialog>>()
 const canStartAgent = computed(() => props.item?.kind_slug === 'ticket' && !ticket.gone.value && can('work_orders.write') && can('run.create'))
 const canRelease = computed(() => editable.value && !!props.item && props.item.kind_slug !== 'epic' && can('releases.write', props.project.id))
-const releaseOverride = ref<string | null>(null)
-watch(() => props.item?.id, () => { releaseOverride.value = null })
-const shownRelease = computed(() => releaseOverride.value !== null ? releaseOverride.value : releaseLabel(props.item?.fields))
+const releaseView = computed(() => props.item?.kind_slug === 'epic' ? { status: 'none' as const } : props.nativeReleases?.get(props.item?.id ?? ''))
 const journeys = useJourney()
 
 // ---------- Following links: a modified click opens a new tab ----------
@@ -269,12 +268,12 @@ async function chooseRelease(target: ReleaseTarget) {
   try {
     const outcome = await assignToRelease(props.project.id, [{ id: it.id, key: it.key, title: it.title, state: it.state, kind: it.kind_slug }], target)
     if (outcome.journey) journeys.set(props.project.id, outcome.journey)
-    releaseOverride.value = outcome.releaseTitle
     emit('assigned')
     const skipped = outcome.skipped.length ? ` ${outcome.skipped[0].reason}` : ''
+    const eventId = outcome.result?.event_id
     toast(`Added ${it.key} to ${outcome.releaseTitle}.${skipped}`, {
       timeout: 8000,
-      action: outcome.result.event_id ? { label: 'Undo', run: () => void undoRelease(outcome.result.event_id, it.key) } : undefined,
+      action: eventId ? { label: 'Undo', run: () => void undoRelease(eventId, it.key) } : undefined,
     })
   } catch (error) {
     if (error instanceof AssignCancelled) return
@@ -284,7 +283,6 @@ async function chooseRelease(target: ReleaseTarget) {
 async function undoRelease(eventId: number, key: string) {
   try {
     await undoEvent(eventId)
-    releaseOverride.value = null
     emit('assigned')
     toast(`Undone: ${key} left the release.`)
   } catch (error) {
@@ -439,7 +437,7 @@ defineExpose({
           <InlineTitle ref="title" :value="item.title" :editable="editable" :large="mode === 'full'" :save="ticket.setTitle" />
           <TicketProperties
             class="ws-props" :class="{ 'only-narrow': mode === 'full' }" :item="item" :editable="editable" layout="row" :now="now"
-            :release-label="shownRelease" :release-editable="canRelease"
+            :release-view="releaseView" :release-editable="canRelease"
             @status="anchor => emit('status', anchor)" @priority="anchor => openMenu('priority', anchor)" @assignee="anchor => openMenu('assignee', anchor)"
             @epic="anchor => openMenu('epic', anchor)" @release="anchor => openMenu('release', anchor)" @open-parent="openLinked"
           />
@@ -505,7 +503,7 @@ defineExpose({
           <div class="side-card">
             <TicketProperties
               :item="item" :editable="editable" layout="column" :now="now"
-              :release-label="shownRelease" :release-editable="canRelease"
+              :release-view="releaseView" :release-editable="canRelease"
               @status="anchor => emit('status', anchor)" @priority="anchor => openMenu('priority', anchor)" @assignee="anchor => openMenu('assignee', anchor)"
               @epic="anchor => openMenu('epic', anchor)" @release="anchor => openMenu('release', anchor)" @open-parent="openLinked"
             />

@@ -21,7 +21,8 @@ test.describe('wide lists', () => {
     await expect(headers(page)).toHaveText(['Key', 'Title', 'Status', 'Priority', 'Assignee', 'Epic', 'Release', 'Tags', 'Created', 'Updated'])
     const row = (key: string) => rows(page).filter({ has: page.locator('.key', { hasText: new RegExp(`^${key}$`) }) })
     await expect(row('PHAROS-11').locator('.c-epic')).toHaveText('Guarded multi-cloud provisioning')
-    await expect(row('PHAROS-11').locator('.c-release')).toHaveText('v4.7.8')
+    await expect(row('PHAROS-11').locator('.c-release')).toHaveText('—')
+    await expect(row('PHAROS-11').locator('.c-release')).not.toHaveText('v4.7.8')
     await expect(row('PHAROS-11').locator('.c-tags .tag-chip')).toHaveText(['CUSTOMERPORTAL', 'hsb8'])
     // A task shows its ticket's epic in the column and its ticket as the chip by the title.
     await expect(row('PHAROS-13').locator('.c-epic')).toHaveText('Guarded multi-cloud provisioning')

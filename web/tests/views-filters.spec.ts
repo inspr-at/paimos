@@ -63,7 +63,7 @@ test('Shift F opens every filter: labels, epic, cost unit and release by name, a
   await page.keyboard.press('Shift+F')
   const more = page.getByRole('menu', { name: 'Filter by' })
   await expect(more).toBeVisible()
-  await expect(more.getByRole('menuitem')).toHaveText(['Status', 'Priority', 'Assignee', 'Type', 'Labels', 'Epic', 'Cost unit', 'Release', 'Date'])
+  await expect(more.getByRole('menuitem')).toHaveText(['Status', 'Priority', 'Assignee', 'Type', 'Labels', 'Epic', 'Cost unit', 'Imported release', 'Date'])
   await more.getByRole('menuitem', { name: 'Labels' }).click()
   const labels = page.getByRole('dialog', { name: 'Filter by Labels' })
   // Label counts are asked for when the menu opens.

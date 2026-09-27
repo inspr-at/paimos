@@ -40,6 +40,7 @@ import OptionMenu from '../components/work/OptionMenu.vue'
 import EpicPicker from '../components/work/EpicPicker.vue'
 import ReleasePicker from '../components/work/ReleasePicker.vue'
 import { AssignCancelled, assignToRelease, type ReleaseTarget } from '../lib/releaseAssign'
+import { listNativeMemberships, type NativeReleaseView } from '../lib/releaseMembership'
 import { useJourney } from '../stores/journey'
 import JourneyChip from '../components/journey/JourneyChip.vue'
 import HeaderGlimpse from '../components/work/HeaderGlimpse.vue'
@@ -461,6 +462,33 @@ watch(panelItem, item => {
     if (!fullView.value) void nextTick(() => table.value?.scrollToRow(item.id))
   }
 })
+const nativeReleases = ref(new Map<string, NativeReleaseView>())
+const membershipIds = computed(() => {
+  const ids: string[] = []
+  const seen = new Set<string>()
+  const push = (row: { id: string; kind_slug: string } | null | undefined) => {
+    if (!row || row.kind_slug === 'epic' || seen.has(row.id)) return
+    seen.add(row.id)
+    ids.push(row.id)
+  }
+  for (const row of sequence.value) push(row)
+  push(panelItem.value)
+  return ids
+})
+let membershipGeneration = 0
+async function refreshMemberships() {
+  const project = projectId.value
+  const ids = membershipIds.value
+  const request = ++membershipGeneration
+  if (!project || !ids.length) {
+    if (request === membershipGeneration) nativeReleases.value = new Map()
+    return
+  }
+  const views = await listNativeMemberships(project, ids)
+  if (request !== membershipGeneration) return
+  nativeReleases.value = views
+}
+watch(membershipIds, () => { void refreshMemberships() }, { immediate: true })
 
 // People who can be assigned: everyone assigned somewhere in this project, and you.
 const projectPeople = ref<string[]>([])
@@ -940,7 +968,7 @@ async function undoBulk(eventId: number) {
   try {
     await list.undoBulk(eventId)
     toast('Undone: the tickets are as they were')
-    void list.load(); void projects.load(true)
+    void list.load(); void projects.load(true); void refreshMemberships()
   } catch (e) {
     toast(e instanceof APIError && e.status === 409 ? 'Some of them changed since, so nothing was undone.' : `Undo did not work: ${problem(e)}`, { tone: 'error' })
   }
@@ -979,15 +1007,17 @@ async function chooseRelease(target: ReleaseTarget) {
   try {
     const outcome = await assignToRelease(project.value.id, tickets, target)
     if (outcome.journey) useJourney().set(project.value.id, outcome.journey)
-    const joined = outcome.result.walker.tickets.filter(ticket => ids.includes(ticket.ticket_node_id) && ticket.included).length
+    const joined = outcome.result?.walker.tickets.filter(ticket => ids.includes(ticket.ticket_node_id) && ticket.included).length ?? 0
     const added = joined || Math.max(0, ids.length - outcome.skipped.length)
     const leftOut = outcome.skipped.length ? ` · ${plural(outcome.skipped.length, 'ticket')} left out` : ''
+    const eventId = outcome.result?.event_id
     toast(`Added ${plural(added, 'ticket')} to ${outcome.releaseTitle}${leftOut}`, {
       timeout: 8000,
-      action: outcome.result.event_id ? { label: 'Undo', run: () => void undoBulk(outcome.result.event_id) } : undefined,
+      action: eventId ? { label: 'Undo', run: () => void undoBulk(eventId) } : undefined,
     })
     clearSelection()
     void list.load()
+    void refreshMemberships()
   } catch (error) {
     if (error instanceof AssignCancelled) return
     toast(problem(error), { tone: 'error' })
@@ -1270,7 +1300,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
         :collapsed="collapsed" :total="total" :project-key="routeKey" :scroll-root="scrollRoot" :now="now" :show-assignee="showAssignee"
         :creating="creating" :project-id="project.id" :known-states="knownStates" :create="quickCreate" @close-create="closeCreate"
         :outline="outlineActive ? outline.entries.value : null" :can-drag="outlineActive && writable" :prefs="tablePrefs"
-        :selectable="selectable" :selected="selected" :can-assign-release="can('releases.write', project.id)" @select="selectRow" @select-all="selectAll"
+        :selectable="selectable" :selected="selected" :can-assign-release="can('releases.write', project.id)" :native-releases="nativeReleases" @select="selectRow" @select-all="selectAll"
         @layout="(visible, customised) => tableLayout = { visible, customised }" @widths="saveWidths"
         @toggle-row="outline.toggle" @toggle-no-epic="outline.noEpicCollapsed.value = !outline.noEpicCollapsed.value"
         @more-children="id => id === project!.id ? outline.loadMoreRoot() : outline.loadChildren(id, true)" @move="moveRow"
@@ -1301,9 +1331,9 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
         v-if="ticketKey" ref="panel" :item="panelItem" :ticket-key="ticketKey.toUpperCase()" :resolving="panelLoading" :resolve-error="panelError"
         :position="panelPosition" :now="now" :mode="fullView ? 'full' : 'panel'" :project="{ id: project.id, routeKey: project.routeKey }"
         :names="list.names" :me="me" :can-write="writable" :can-delete="nodeDeletable" :can-move="nodeMovable" :can-link="relationLinkable" :can-unlink="relationUnlinkable"
-        :can-comment="commentable" :can-delete-comment="commentDeletable" :can-attach="attachable" :people="people"
+        :can-comment="commentable" :can-delete-comment="commentDeletable" :can-attach="attachable" :people="people" :native-releases="nativeReleases"
         @close="closePanel" @prev="move(-1)" @next="move(1)" @expand="expand" @collapse="collapse" @new-tab="newTab(panelItem?.key ?? ticketKey)"
-        @status="anchor => panelItem && openStatus(panelItem, anchor, 'panel')" @open-key="openRelated" :trail="trail" @trail-back="trailBack" @removed="removed" @created="childCreated" @moved="childMoved" @assigned="() => { void list.load() }" @retry="resolvePanel"
+        @status="anchor => panelItem && openStatus(panelItem, anchor, 'panel')" @open-key="openRelated" :trail="trail" @trail-back="trailBack" @removed="removed" @created="childCreated" @moved="childMoved" @assigned="() => { void list.load(); void refreshMemberships() }" @retry="resolvePanel"
       />
       <StatusMenu v-if="statusMenu" :anchor="statusMenu.anchor" :current="statusMenu.row.state" :known-states="knownStates" :ticket-key="statusMenu.row.key" @choose="chooseStatus" @close="closeStatus" />
       <FilterSheet

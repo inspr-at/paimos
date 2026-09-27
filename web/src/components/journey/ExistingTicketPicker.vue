@@ -182,10 +182,12 @@ function backdrop(event: MouseEvent) { if (event.target === dialog.value) close(
           <input type="checkbox" :checked="selected.has(ticket.ticket_node_id)" :disabled="!canSelectTicket(ticket)" :aria-label="`Select ${ticket.key}`" tabindex="-1" @click.stop @change="toggle(ticket)" />
           <StatusIcon :state="ticket.status" :size="13" />
           <span class="key mono">{{ ticket.key }}</span>
-          <span class="title"><template v-for="(part, i) in highlight(ticket.title, term)" :key="i"><mark v-if="part.match">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></span>
+          <span class="copy">
+            <span class="title"><template v-for="(part, i) in highlight(ticket.title, term)" :key="i"><mark v-if="part.match">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></span>
+            <span v-if="availabilityMark(ticket)" class="mark">{{ availabilityMark(ticket) }}</span>
+            <span v-else class="mark faint">{{ statusMeta(ticket.status).label }}</span>
+          </span>
           <span class="type">{{ kindLabel(ticket.type) }}</span>
-          <span v-if="availabilityMark(ticket)" class="mark">{{ availabilityMark(ticket) }}</span>
-          <span v-else class="mark faint">{{ statusMeta(ticket.status).label }}</span>
         </div>
         <p v-if="loading && !tickets.length" class="empty" role="status">Looking for tickets…</p>
         <p v-else-if="failed" class="empty error" role="alert">{{ failed }}</p>
@@ -213,17 +215,20 @@ h2 { font-size: 18px; }
 .field { height: 36px; }
 .filters { display: flex; gap: 8px; }
 .filters .field { flex: 1; min-width: 0; }
-.options { display: grid; align-content: start; gap: 2px; min-height: 160px; max-height: 420px; overflow: auto; outline: none; }
+.options { display: flex; flex-direction: column; align-items: stretch; gap: 2px; min-height: 160px; max-height: 420px; overflow: auto; outline: none; }
 .options:focus-visible { box-shadow: var(--focus-ring); border-radius: 10px; }
-.option { display: flex; align-items: center; gap: 8px; min-height: 40px; padding: 4px 8px; border-radius: 10px; cursor: pointer; }
+.option { display: flex; flex-shrink: 0; align-items: center; gap: 8px; min-height: 40px; padding: 4px 8px; border-radius: 10px; cursor: pointer; }
 .option.active { background: var(--row-hover); }
 .option.picked { background: color-mix(in oklab, var(--teal) 10%, transparent); }
 .option[aria-disabled="true"] { cursor: default; color: var(--ink-3); }
 .option input { width: 16px; height: 16px; margin: 0; accent-color: var(--teal); flex-shrink: 0; }
 .key { flex-shrink: 0; width: 92px; font-size: 11.5px; color: var(--ink-3); }
+.copy { display: contents; }
 .title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
 .title :deep(mark) { background: color-mix(in oklab, var(--gold) 35%, transparent); color: inherit; }
 .type, .mark { flex-shrink: 0; font-size: 11.5px; color: var(--ink-3); }
+.type { order: 1; }
+.mark { order: 2; }
 .faint { color: var(--ink-3); }
 .empty, .note { padding: 8px 4px; font-size: 13px; color: var(--ink-3); }
 .error { color: var(--danger); }
@@ -235,8 +240,13 @@ footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: s
   .picker, .card { width: calc(100vw - 16px); max-height: calc(100dvh - 16px); }
   .filters, footer, .actions { flex-wrap: wrap; }
   .filters .field, .actions .btn { flex-basis: 100%; }
-  .title, .key { white-space: normal; overflow: visible; width: auto; }
-  .option { align-items: flex-start; padding-block: 8px; }
+  .options { gap: 4px; }
+  .option { align-items: flex-start; height: auto; padding: 8px 8px 10px; }
+  .key { width: auto; }
+  .copy { display: flex; flex: 1 1 auto; flex-direction: column; gap: 2px; min-width: 0; }
+  .title { flex: 0 0 auto; white-space: normal; overflow: visible; text-overflow: unset; }
+  .type, .mark { order: 0; }
+  .mark { white-space: normal; }
   .option input { margin-top: 2px; }
 }
 </style>

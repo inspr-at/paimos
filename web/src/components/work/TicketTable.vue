@@ -3,6 +3,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { ListItem } from '../../lib/api'
 import { COLUMN_BY_ID, costUnitLabel, layoutWidths, releaseLabel, tagList, titleRoom, visibleColumns, type ColumnId, type ListPrefs, type TagRef } from '../../lib/columns'
+import { releaseCell, type NativeReleaseView } from '../../lib/releaseMembership'
 import type { GroupBy, RowGroup, EpicRef } from '../../lib/ticketList'
 import type { OutlineEntry, TreeMeta } from '../../lib/outline'
 import { absoluteTime, highlight, kindLabel, plural, priorityLabel, relativeTime, statusMeta, type SortField, type SortKey } from '../../lib/work'
@@ -49,6 +50,8 @@ const props = defineProps<{
   selectable?: boolean
   selected?: Set<string>
   canAssignRelease?: boolean
+  // Native journey membership for the visible tickets. Imported fields.release is not this.
+  nativeReleases?: Map<string, NativeReleaseView>
 }>()
 // Unfiltered loads hold the expected height (so nothing below jumps); 1..28 rows.
 const skeletonRows = computed(() => Math.max(1, Math.min(28, props.expectedRows ?? 14)))
@@ -89,7 +92,7 @@ const phone = ref(false)
 // Release, Tags and Estimate earn their automatic columns only when some loaded row has one.
 const present = computed(() => {
   const rows = [...props.rowsById.values()]
-  return { assigned: props.showAssignee, estimate: rows.some(row => !!estimate(row)), release: rows.some(row => !!releaseLabel(row.fields)), tags: rows.some(row => tagList(row.fields).length > 0) }
+  return { assigned: props.showAssignee, estimate: rows.some(row => !!estimate(row)), release: rows.some(row => !!releaseLabel(row.fields) || props.nativeReleases?.get(row.id)?.status === 'member'), tags: rows.some(row => tagList(row.fields).length > 0) }
 })
 const layout = computed(() => visibleColumns(width.value, { phone: phone.value, present: present.value, prefs: props.prefs }))
 const columns = computed(() => layout.value.columns.map(def => ({ ...def, field: def.sort, cls: CLS[def.id] })))
@@ -104,6 +107,10 @@ const dragWidths = ref<Partial<Record<ColumnId, number>>>({})
 // min and max, so a fixed column never collapses.
 const widths = computed(() => layoutWidths(ids.value, width.value, props.prefs, dragWidths.value))
 function colWidth(id: ColumnId) { return id === 'title' ? null : widths.value[id] ?? null }
+function nativeRelease(row: ListItem) {
+  if (row.kind_slug === 'epic') return releaseCell({ status: 'none' })
+  return releaseCell(props.nativeReleases?.get(row.id))
+}
 const titleWidth = computed(() => Math.max(0, Math.round(width.value - Object.values(widths.value).reduce((sum, w) => sum + (w ?? 0), 0))))
 const shownWidth = (id: ColumnId) => id === 'title' ? titleWidth.value : colWidth(id) ?? 0
 function bounds(id: ColumnId) {
@@ -605,12 +612,12 @@ defineExpose({
               <td v-else-if="column.id === 'release'" class="c-release">
                 <div class="cell">
                   <button
-                    v-if="canAssignRelease && entry.row.kind_slug !== 'epic'" type="button" class="release-chip mono" :class="{ bare: !releaseLabel(entry.row.fields) }"
-                    :aria-label="releaseLabel(entry.row.fields) ? `Release ${releaseLabel(entry.row.fields)}. Change release of ${entry.row.key}` : `No release. Add ${entry.row.key} to a release`"
+                    v-if="canAssignRelease && entry.row.kind_slug !== 'epic'" type="button" class="release-chip mono" :class="{ bare: nativeRelease(entry.row).kind !== 'member' }"
+                    :aria-label="nativeRelease(entry.row).kind === 'member' ? `${nativeRelease(entry.row).label}. Change release of ${entry.row.key}` : nativeRelease(entry.row).kind === 'none' ? `No release. Add ${entry.row.key} to a release` : `Release unknown. Add ${entry.row.key} to a release`"
                     @click.stop="emit('release', entry.row, $event.currentTarget as HTMLElement)"
-                  >{{ releaseLabel(entry.row.fields) || '—' }}</button>
-                  <span v-else-if="releaseLabel(entry.row.fields)" class="release-chip mono">{{ releaseLabel(entry.row.fields) }}</span>
-                  <span v-else class="empty" aria-label="No release">—</span>
+                  >{{ nativeRelease(entry.row).text }}</button>
+                  <span v-else-if="nativeRelease(entry.row).kind === 'member'" class="release-chip mono">{{ nativeRelease(entry.row).text }}</span>
+                  <span v-else class="empty" :aria-label="nativeRelease(entry.row).label">{{ nativeRelease(entry.row).text }}</span>
                 </div>
               </td>
               <td v-else-if="column.id === 'tags'" class="c-tags">
