@@ -1,4 +1,6 @@
 .agent-status.json
+.agent-interface.json
+.agent-result.txt
 /bin/
 /dist/
 /web/dist/

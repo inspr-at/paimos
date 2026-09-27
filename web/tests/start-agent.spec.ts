@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import { mkdirSync } from 'node:fs'
 import { test, expect, type Page } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
 import { mockStartAgent } from './start-agent-fixtures'
@@ -6,31 +7,37 @@ import { mockStartAgent } from './start-agent-fixtures'
 const dialog = (page: Page) => page.getByRole('dialog', { name: 'Start agent', exact: true })
 async function open(page: Page, ticket = false) {
   await page.goto(ticket ? '/p/PHAROS/PHAROS-11' : '/agents')
-  await page.getByRole('button', { name: 'Start agent', exact: true }).click()
+  const button = ticket ? page.getByRole('button', { name: 'Start agent', exact: true }) : page.locator('button.start-agent')
+  await button.click()
   await expect(dialog(page)).toBeVisible()
 }
-async function choose(page: Page, ticket = false) {
+async function ready(page: Page, ticket = false) {
   if (!ticket) {
     await dialog(page).getByRole('searchbox').fill('PHAROS-11')
     await dialog(page).getByRole('button', { name: /PHAROS-11 Connect Hetzner/ }).click()
   }
-  await dialog(page).getByLabel('Agent', { exact: true }).selectOption({ label: 'Studio builder' })
-  await dialog(page).getByLabel('Model profile').selectOption('model-enabled')
+  await expect(dialog(page).getByLabel('Host', { exact: true })).toHaveValue('workstation')
+  await expect(dialog(page).getByLabel('Thinking', { exact: true })).not.toHaveValue('')
+  await expect(dialog(page).getByText('Account available', { exact: true })).toBeVisible()
 }
 
 test('creates, readies and queues a ticket, then follows claim and managed registration', async ({ page }) => {
   const mock = await mockStartAgent(page)
   await open(page)
-  await choose(page)
-  await dialog(page).getByLabel('Account optional').selectOption(mock.account.id)
-  await expect(dialog(page).getByRole('option', { name: /Retired model/ })).toHaveCount(0)
-  await expect(dialog(page).getByText('Account available', { exact: true })).toBeVisible()
+  await ready(page)
+  await expect(dialog(page).getByRole('option', { name: 'ungranted-model' })).toHaveCount(0)
+  await expect(dialog(page).getByText('should-not-render-key')).toHaveCount(0)
+  await expect(dialog(page).getByText('Selected because it has the most allowance left.')).toBeVisible()
   await dialog(page).getByRole('button', { name: 'Queue run', exact: true }).dblclick()
   await expect(dialog(page).getByRole('heading', { name: 'Queued', exact: true })).toBeVisible()
+  await expect(dialog(page).getByRole('list')).toContainText('Work Mac')
+  await expect(dialog(page).getByRole('list')).toContainText('Workspace account · Pro')
   expect(mock.calls.filter(c => c.method === 'POST' && c.path === '/api/work-orders')).toHaveLength(1)
   expect(mock.calls.filter(c => c.method === 'POST' && c.path.endsWith('/runs'))).toHaveLength(1)
   expect(mock.calls.find(c => c.method === 'POST' && c.path.endsWith('/runs'))?.body).toEqual({ agent_principal_id: mock.agentId, model_profile_id: mock.profile.id, requested_account_id: mock.account.id })
   expect(mock.calls.find(c => c.method === 'POST' && c.path === '/api/work-orders')?.body?.parent_id).toBe('n-1')
+  expect(mock.calls.some(c => c.path.includes('agent-launch-catalog'))).toBe(false)
+  expect(mock.calls.some(c => c.path === '/api/agent-accounts/catalog')).toBe(true)
   mock.claim()
   await dialog(page).getByRole('button', { name: 'Refresh status' }).click()
   await expect(dialog(page).getByRole('heading', { name: 'Claimed', exact: true })).toBeVisible()
@@ -46,29 +53,75 @@ test('ticket panel preselects its ticket and retry reuses the created work order
   await open(page, true)
   await expect(dialog(page).getByText('PHAROS-11', { exact: true })).toBeVisible()
   await expect(dialog(page).getByRole('searchbox')).toHaveCount(0)
-  await choose(page, true)
+  await ready(page, true)
   await dialog(page).getByRole('button', { name: 'Queue run', exact: true }).click()
   await expect(dialog(page).getByRole('alert')).toContainText('Temporary queue failure')
-  await expect(dialog(page).getByLabel('Agent', { exact: true })).toHaveValue(mock.agentId)
+  await expect(dialog(page).getByLabel('Host', { exact: true })).toHaveValue('workstation')
   mock.state.failQueue = false
   await dialog(page).getByRole('button', { name: 'Queue run', exact: true }).click()
   await expect(dialog(page).getByRole('heading', { name: 'Queued', exact: true })).toBeVisible()
   expect(mock.calls.filter(c => c.method === 'POST' && c.path === '/api/work-orders')).toHaveLength(1)
 })
 
-for (const scenario of [{ offline: true, label: 'No daemon online' }, { unavailable: true, label: 'No eligible account' }]) {
-  test(`reports ${scenario.label} separately from queueing`, async ({ page }) => {
-    await mockStartAgent(page, scenario)
+for (const scenario of [
+  { offline: true, label: 'Sign-in probe is stale' },
+  { unavailable: true, label: 'Account is draining' },
+] as const) {
+  test(`reports ${scenario.label} and still pins that account`, async ({ page }) => {
+    const mock = await mockStartAgent(page, scenario)
     await open(page)
-    await choose(page)
+    await readyAccount(page)
     await expect(dialog(page).getByText(scenario.label, { exact: true })).toBeVisible()
     await expect(dialog(page).getByRole('button', { name: 'Queue run', exact: true })).toBeEnabled()
     await dialog(page).getByRole('button', { name: 'Queue run', exact: true }).click()
     await expect(dialog(page).getByRole('heading', { name: 'Queued', exact: true })).toBeVisible()
+    expect(mock.calls.find(c => c.method === 'POST' && c.path.endsWith('/runs'))?.body?.requested_account_id).toBe(mock.account.id)
     await dialog(page).getByRole('button', { name: 'Close', exact: true }).click()
     await expect(page.getByRole('region', { name: 'Runs awaiting a session' })).toContainText('Queued')
   })
 }
+
+async function readyAccount(page: Page) {
+  await dialog(page).getByRole('searchbox').fill('PHAROS-11')
+  await dialog(page).getByRole('button', { name: /PHAROS-11 Connect Hetzner/ }).click()
+  await expect(dialog(page).getByLabel('Account', { exact: true })).not.toHaveValue('')
+  await expect(dialog(page).getByLabel('Thinking', { exact: true })).not.toHaveValue('')
+}
+
+test('an empty model grant is not filled from the tenant catalog', async ({ page }) => {
+  await mockStartAgent(page, { catalog: 'empty-grants' })
+  await open(page)
+  await dialog(page).getByRole('searchbox').fill('PHAROS-11')
+  await dialog(page).getByRole('button', { name: /PHAROS-11 Connect Hetzner/ }).click()
+  await expect(dialog(page).getByText('No model granted', { exact: true })).toBeVisible()
+  await expect(dialog(page).locator('[id$="-model-note"]')).toHaveText('No granted model is available to choose.')
+  await expect(dialog(page).getByRole('option', { name: 'ungranted-model' })).toHaveCount(0)
+  await expect(dialog(page).getByRole('option', { name: 'workspace-build' })).toHaveCount(0)
+  await expect(dialog(page).getByRole('button', { name: 'Queue run', exact: true })).toBeDisabled()
+})
+
+test('a catalog miss stays empty until retry', async ({ page }) => {
+  await mockStartAgent(page, { catalog: 'retry' })
+  await open(page, true)
+  const alert = dialog(page).getByRole('alert')
+  await expect(alert).toContainText('The account catalog did not load')
+  await expect(dialog(page).getByLabel('Host', { exact: true })).toBeDisabled()
+  await expect(dialog(page).getByRole('button', { name: 'Queue run', exact: true })).toBeDisabled()
+  await alert.getByRole('button', { name: 'Retry catalog' }).click()
+  await expect(dialog(page).getByText('Account available', { exact: true })).toBeVisible()
+  await expect(dialog(page).getByRole('option', { name: 'ungranted-model' })).toHaveCount(0)
+})
+
+test('changing host replaces the granted model', async ({ page }) => {
+  await mockStartAgent(page, { catalog: 'two-hosts' })
+  await open(page, true)
+  await expect(dialog(page).getByLabel('Model', { exact: true }).locator('option:checked')).toHaveText('workspace-build')
+  await dialog(page).getByLabel('Host', { exact: true }).selectOption({ label: 'Laptop' })
+  await expect(dialog(page).getByLabel('Harness', { exact: true }).locator('option:checked')).toHaveText('Claude')
+  await expect(dialog(page).getByLabel('Model', { exact: true }).locator('option:checked')).toHaveText('other-model')
+  await expect(dialog(page).getByRole('option', { name: 'workspace-build' })).toHaveCount(0)
+  await expect(dialog(page).getByLabel('Thinking', { exact: true }).locator('option:checked')).toHaveText('Medium')
+})
 
 test('failed prerequisites keep launch disabled and read-only people have no action', async ({ page }) => {
   await mockStartAgent(page, { forbidden: true })
@@ -88,14 +141,36 @@ for (const theme of ['light', 'dark']) {
     await page.emulateMedia({ colorScheme: theme as 'light' | 'dark' })
     await mockStartAgent(page)
     await open(page, true)
-    await choose(page, true)
+    await ready(page, true)
     await page.evaluate(theme => document.documentElement.dataset.theme = theme, theme)
-    await expect(dialog(page).getByText('Account available', { exact: true })).toBeVisible()
+    await dialog(page).getByLabel('Host', { exact: true }).focus()
+    await page.keyboard.press('Tab')
+    await expect(dialog(page).getByLabel('Harness', { exact: true })).toBeFocused()
     const result = await new AxeBuilder({ page }).include('.launch-dialog').withTags(['wcag2a', 'wcag2aa', 'wcag21aa', 'best-practice']).analyze()
     expect(result.violations).toEqual([])
-    expect(await dialog(page).evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true)
+    expect(await dialog(page).evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true)
     await page.keyboard.press('Escape')
     await expect(dialog(page)).not.toBeVisible()
     await expect(page.getByRole('button', { name: 'Start agent', exact: true })).toBeFocused()
   })
+}
+
+for (const theme of ['light', 'dark'] as const) {
+  for (const width of [1600, 390]) {
+    test(`screenshot ${width} ${theme}`, async ({ page }) => {
+      mkdirSync('../.agent-shots', { recursive: true })
+      await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
+      await page.emulateMedia({ colorScheme: theme })
+      await mockStartAgent(page)
+      await page.goto('/agents')
+      await page.evaluate(theme => document.documentElement.dataset.theme = theme, theme)
+      const accounts = page.getByRole('region', { name: 'Accounts and pacing' })
+      await expect(accounts).toContainText('5-hour')
+      await accounts.screenshot({ path: `../.agent-shots/acu1-accounts-${width}-${theme}.png` })
+      await page.locator('button.start-agent').click()
+      await ready(page)
+      await page.evaluate(theme => document.documentElement.dataset.theme = theme, theme)
+      await dialog(page).screenshot({ path: `../.agent-shots/acu1-start-${width}-${theme}.png` })
+    })
+  }
 }

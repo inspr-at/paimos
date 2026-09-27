@@ -380,7 +380,11 @@ test('accounts show what is left and the pace; admins can drain and resume', asy
   const accounts = page.getByRole('region', { name: 'Accounts and pacing' })
   const claude = accounts.locator('.account').filter({ hasText: 'Claude Max' })
   await expect(claude).toContainText('28% tokens left')
+  await expect(claude).toContainText('5-hour')
+  await expect(claude).toContainText('Team')
   await expect(claude).toContainText('Ahead of pace')
+  await expect(accounts.locator('.account').filter({ hasText: 'Codex Pro' })).toContainText('Daily')
+  await expect(accounts.locator('.account').filter({ hasText: 'Cursor Business' })).toContainText('Monthly')
   await expect(claude.getByRole('meter')).toHaveAttribute('aria-valuenow', '28')
   await expect(accounts.locator('.account').filter({ hasText: 'Codex Pro' })).toContainText('Room to spare')
   const codex = accounts.locator('.account').filter({ hasText: 'Codex Pro' })
@@ -397,7 +401,7 @@ test('an unmeasured allowance is labeled provisional', async ({ page }) => {
   await openAgents(page)
   const claude = page.getByRole('region', { name: 'Accounts and pacing' }).locator('.account').filter({ hasText: 'Claude Max' })
   await expect(claude).toContainText('Provisional')
-  await expect(claude.getByRole('meter')).toHaveAttribute('aria-label', /provisional/)
+  await expect(claude.getByRole('meter')).toHaveAttribute('aria-label', /5-hour tokens left, provisional/)
 })
 
 test('accounts explain themselves when the person may not see them', async ({ page }) => {

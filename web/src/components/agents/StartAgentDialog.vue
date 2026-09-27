@@ -3,35 +3,40 @@
 import { computed, nextTick, onBeforeUnmount, ref, useId, watch } from 'vue'
 import { listNodes, type WorkNode } from '../../lib/api'
 import { can } from '../../lib/authz'
-import { getRun, listAccounts, listAllSessions, listModels, message, type AgentAccount, type AgentRun, type HarnessSession, type ModelProfile } from '../../lib/agents'
-import { listPrincipals, type Principal } from '../../lib/business'
-import { dispatchHint, launchState, startAgent } from '../../lib/startAgent'
+import { getRun, listAllSessions, message, type AgentRun, type HarnessSession } from '../../lib/agents'
+import {
+  AUTHOR_FAMILIES, authorFamilyFor, chooseStep, emptyChoice, emptyTouch, familyLabel, fetchAccountCatalog, fillDefaults, presentCascade, workRoleFor,
+  type AgentAccountCatalog, type AuthorFamily, type CascadeChoice, type CascadeStep, type CascadeTouch, type CatalogGap, type RequestedRun,
+} from '../../lib/accountCascade'
+import { launchState, startAgent } from '../../lib/startAgent'
 import { useAgents } from '../../stores/agents'
 import { usePoller } from '../../lib/usePolledData'
 import AppIcon from '../AppIcon.vue'
 
-// Shared by /agents and TicketWorkspace. Open with a ticket to preselect it.
-// Queueing is separate from claiming: never synthesize a managed session.
+// Shared by /agents and TicketWorkspace. The cascade is host, harness, account,
+// model, then thinking. Each later step is filled only from the catalog grant.
 const agents = useAgents()
 const uid = useId()
 const dialog = ref<HTMLDialogElement>()
 const searchInput = ref<HTMLInputElement>()
+const hostSelect = ref<HTMLSelectElement>()
 const tickets = ref<WorkNode[]>([])
 const ticket = ref<WorkNode | null>(null)
 const query = ref('')
 const searching = ref(false)
 const searchError = ref('')
 const nextCursor = ref<string | null>(null)
-const principals = ref<Principal[]>([])
-const profiles = ref<ModelProfile[]>([])
-const accounts = ref<AgentAccount[]>([])
-const agentId = ref('')
-const profileId = ref('')
-const accountId = ref('')
+const catalog = ref<AgentAccountCatalog | null>(null)
+const catalogGap = ref<CatalogGap>(null)
+const catalogMessage = ref('')
+const authorFamily = ref<AuthorFamily | ''>('')
+const choice = ref<CascadeChoice>(emptyChoice())
+const touch = ref<CascadeTouch>(emptyTouch())
 const loading = ref(false)
 const busy = ref(false)
 const error = ref('')
 const run = ref<AgentRun | null>(null)
+const requested = ref<RequestedRun | null>(null)
 const managed = ref<HarnessSession | null>(null)
 const reused = ref(false)
 const checking = ref(false)
@@ -41,16 +46,16 @@ const visible = ref(false)
 let opener: HTMLElement | null = null
 let generation = 0
 let searchGeneration = 0
+let catalogGeneration = 0
 let searchTimer: ReturnType<typeof setTimeout> | undefined
 const poll = usePoller(() => { now.value = Date.now(); if (run.value) return refresh() }, 3000, { enabled: () => visible.value && !!run.value })
-const profile = computed(() => profiles.value.find(p => p.id === profileId.value))
-const matchingAccounts = computed(() => accounts.value.filter(a => a.registered_by_principal_id === agentId.value && a.harness === profile.value?.harness))
-const hint = computed(() => dispatchHint(accounts.value, agentId.value, profile.value, now.value, accountId.value))
-watch([agentId, profileId], () => { accountId.value = '' })
+const role = computed(() => workRoleFor(ticket.value))
+const view = computed(() => presentCascade({ catalog: catalog.value, role: role.value, authorFamily: authorFamily.value }, choice.value, touch.value))
+const cascadeLocked = computed(() => loading.value || catalogGap.value === 'failed' || catalogGap.value === 'forbidden' || catalogGap.value === 'family')
 const state = computed(() => run.value ? launchState(run.value) : null)
 const sessionConnected = computed(() => !!managed.value && managed.value.phase !== 'stopped')
 const permitted = computed(() => can('work_orders.write') && can('run.create'))
-const canSubmit = computed(() => permitted.value && !loading.value && !busy.value && !run.value && !!ticket.value && !!agentId.value && !!profile.value)
+const canSubmit = computed(() => permitted.value && !loading.value && !busy.value && !run.value && !!ticket.value && !catalogGap.value && !!view.value.agentId && !!view.value.profileId && !!choice.value.accountId)
 
 async function search(more = false) {
   const turn = ++searchGeneration
@@ -64,49 +69,78 @@ async function search(more = false) {
   finally { if (turn === searchGeneration) searching.value = false }
 }
 watch(query, () => { clearTimeout(searchTimer); searchTimer = setTimeout(() => void search(), 200) })
-async function loadOptions() {
-  const turn = generation
-  loading.value = true; error.value = ''
-  try {
-    const [people, models, pool] = await Promise.all([listPrincipals(), listModels(), listAccounts()])
-    if (turn !== generation || !visible.value) return
-    principals.value = people.filter(p => p.kind === 'agent' && !p.roles.includes('system'))
-    profiles.value = models.filter(p => p.enabled)
-    accounts.value = pool
-    if (!principals.value.some(p => p.id === agentId.value)) agentId.value = ''
-    if (!profiles.value.some(p => p.id === profileId.value)) profileId.value = ''
-  } catch (e) { if (turn === generation) error.value = message(e) }
-  finally { if (turn === generation) loading.value = false }
+async function loadCatalog() {
+  const turn = ++catalogGeneration
+  loading.value = true
+  catalogGap.value = null
+  catalogMessage.value = ''
+  const result = await fetchAccountCatalog(role.value.role, authorFamily.value)
+  if (turn !== catalogGeneration || !visible.value) return
+  catalog.value = result.catalog
+  catalogGap.value = result.gap
+  catalogMessage.value = result.message
+  if (!result.catalog) touch.value = emptyTouch()
+  choice.value = fillDefaults(result.catalog, result.catalog ? choice.value : emptyChoice(), touch.value)
+  loading.value = false
+}
+function pick(step: CascadeStep, value: string) {
+  const next = chooseStep(choice.value, touch.value, step, value)
+  touch.value = next.touch
+  choice.value = fillDefaults(catalog.value, next.choice, next.touch)
+}
+function setFamily(value: string) {
+  authorFamily.value = (AUTHOR_FAMILIES as readonly string[]).includes(value) ? value as AuthorFamily : ''
+  touch.value = emptyTouch()
+  choice.value = emptyChoice()
+  void loadCatalog()
+}
+function selectTicket(item: WorkNode) {
+  ticket.value = item
+  authorFamily.value = authorFamilyFor(item)
+  touch.value = emptyTouch()
+  choice.value = emptyChoice()
+  void loadCatalog()
 }
 async function open(initial?: WorkNode) {
   if (busy.value) return
   opener = document.activeElement as HTMLElement
   generation++; visible.value = true
   ticket.value = initial ?? null; query.value = ''; tickets.value = []; nextCursor.value = null
-  agentId.value = ''; profileId.value = ''; accountId.value = ''; run.value = null; managed.value = null; reused.value = false
+  authorFamily.value = authorFamilyFor(initial ?? null)
+  catalog.value = null; catalogGap.value = null; catalogMessage.value = ''
+  choice.value = emptyChoice(); touch.value = emptyTouch()
+  run.value = null; requested.value = null; managed.value = null; reused.value = false
   error.value = ''; checkError.value = ''; searchError.value = ''
-  principals.value = []; profiles.value = []; accounts.value = []
   dialog.value?.showModal()
-  void loadOptions()
+  void loadCatalog()
   if (!initial) void search()
   poll.start()
   await nextTick()
-  if (initial) dialog.value?.querySelector<HTMLSelectElement>('select')?.focus()
+  if (initial) hostSelect.value?.focus()
   else searchInput.value?.focus()
 }
 function close() {
   if (busy.value) return
-  generation++; searchGeneration++; visible.value = false
+  generation++; searchGeneration++; catalogGeneration++; visible.value = false
   poll.stop(); clearTimeout(searchTimer)
   dialog.value?.close(); opener?.focus({ preventScroll: true })
 }
-function changeTicket() { ticket.value = null; void search(); void nextTick(() => searchInput.value?.focus()) }
+function changeTicket() {
+  ticket.value = null
+  authorFamily.value = ''
+  touch.value = emptyTouch()
+  choice.value = emptyChoice()
+  void loadCatalog()
+  void search()
+  void nextTick(() => searchInput.value?.focus())
+}
 async function submit() {
   if (!canSubmit.value || !ticket.value) return
   busy.value = true; error.value = ''
+  const pinned = { ...view.value.requested }
   try {
-    const result = await startAgent({ ticket: ticket.value, agentId: agentId.value, profileId: profileId.value, accountId: accountId.value || undefined })
-    run.value = result.run; reused.value = result.reused
+    const result = await startAgent({ ticket: ticket.value, agentId: view.value.agentId, profileId: view.value.profileId, accountId: choice.value.accountId })
+    run.value = result.run; reused.value = result.reused; requested.value = pinned
     agents.recordRun(result.run)
     await refresh()
     await nextTick(); dialog.value?.querySelector<HTMLElement>('[data-result]')?.focus()
@@ -128,7 +162,7 @@ async function refresh() {
   } catch { if (turn === generation) checkError.value = 'Status could not be refreshed. The last reported state is shown.' }
   finally { checking.value = false }
 }
-onBeforeUnmount(() => { generation++; searchGeneration++; poll.stop(); clearTimeout(searchTimer) })
+onBeforeUnmount(() => { generation++; searchGeneration++; catalogGeneration++; poll.stop(); clearTimeout(searchTimer) })
 defineExpose({ open })
 </script>
 
@@ -160,32 +194,66 @@ defineExpose({ open })
                 <p v-else-if="!tickets.length" :id="`${uid}-results`" class="note">No tickets found. Try another key or title.</p>
                 <template v-else>
                   <p :id="`${uid}-results`" class="sr-only">Choose a ticket from the results.</p>
-                  <button v-for="item in tickets" :key="item.id" type="button" class="ticket-result" @click="ticket = item"><span class="mono">{{ item.key }}</span><span>{{ item.title }}</span><AppIcon name="arrow" :size="14" /></button>
+                  <button v-for="item in tickets" :key="item.id" type="button" class="ticket-result" @click="selectTicket(item)"><span class="mono">{{ item.key }}</span><span>{{ item.title }}</span><AppIcon name="arrow" :size="14" /></button>
                   <button v-if="nextCursor" type="button" class="btn sm more" @click="search(true)">More tickets</button>
                 </template>
               </div>
             </template>
           </div>
-          <div class="select-field">
-            <label :for="`${uid}-agent`">Agent</label>
-            <select :id="`${uid}-agent`" v-model="agentId" class="field" :disabled="loading || !principals.length"><option value="">{{ loading ? 'Loading agents…' : 'Choose an agent' }}</option><option v-for="person in principals" :key="person.id" :value="person.id">{{ person.name }}</option></select>
-            <p v-if="!loading && !principals.length && !error" class="note">No agent principals available. Set up an agent in Access first.</p>
+          <p v-if="view.roleNote" class="note role-note">{{ view.roleNote }}</p>
+          <div v-if="role.role === 'review-gate'" class="select-field">
+            <label :for="`${uid}-family`">Author family</label>
+            <select :id="`${uid}-family`" class="field" :value="authorFamily" @change="setFamily(($event.target as HTMLSelectElement).value)">
+              <option value="">Choose the author family</option>
+              <option v-for="family in AUTHOR_FAMILIES" :key="family" :value="family">{{ familyLabel(family) }}</option>
+            </select>
+            <p class="note">Review work excludes this family. Accounts load after it is chosen.</p>
           </div>
           <div class="select-field">
-            <label :for="`${uid}-model`">Model profile</label>
-            <select :id="`${uid}-model`" v-model="profileId" class="field" :disabled="loading || !profiles.length"><option value="">{{ loading ? 'Loading profiles…' : 'Choose a model profile' }}</option><option v-for="model in profiles" :key="model.id" :value="model.id">{{ model.slug }} · {{ model.harness }}</option></select>
-            <p v-if="profile" class="note">{{ profile.model }} · {{ profile.effort }} effort</p>
-            <p v-if="!loading && !profiles.length && !error" class="note">No enabled model profiles. Enable one in model settings first.</p>
+            <label :for="`${uid}-host`">Host</label>
+            <select :id="`${uid}-host`" ref="hostSelect" class="field" :value="choice.hostId" :disabled="cascadeLocked || !view.hosts.length" :aria-describedby="view.notes.host ? `${uid}-host-note` : undefined" @change="pick('host', ($event.target as HTMLSelectElement).value)">
+              <option value="">{{ loading ? 'Loading accounts…' : 'Choose a host' }}</option>
+              <option v-for="host in view.hosts" :key="host.value" :value="host.value">{{ host.label }}</option>
+            </select>
+            <p v-if="view.notes.host" :id="`${uid}-host-note`" class="note">{{ view.notes.host }}</p>
           </div>
           <div class="select-field">
-            <label :for="`${uid}-account`">Account <span class="optional">optional</span></label>
-            <select :id="`${uid}-account`" v-model="accountId" class="field" :disabled="loading || !agentId || !profileId" :aria-describedby="`${uid}-account-note`"><option value="">Automatic · daemon chooses</option><option v-for="account in matchingAccounts" :key="account.id" :value="account.id">{{ account.label }} · {{ account.daemon_id }}{{ account.state === 'available' ? '' : ` · ${account.state}` }}</option></select>
-            <p :id="`${uid}-account-note`" class="note">{{ accountId ? 'Only this account will be used. The run waits if it has no capacity.' : 'The daemon chooses from its matching enrolled accounts.' }}</p>
+            <label :for="`${uid}-harness`">Harness</label>
+            <select :id="`${uid}-harness`" class="field" :value="choice.harness" :disabled="cascadeLocked || !choice.hostId" :aria-describedby="view.notes.harness ? `${uid}-harness-note` : undefined" @change="pick('harness', ($event.target as HTMLSelectElement).value)">
+              <option value="">Choose a harness</option>
+              <option v-for="item in view.harnesses" :key="item.value" :value="item.value">{{ item.label }}</option>
+            </select>
+            <p v-if="view.notes.harness" :id="`${uid}-harness-note`" class="note">{{ view.notes.harness }}</p>
+          </div>
+          <div class="select-field">
+            <label :for="`${uid}-account`">Account</label>
+            <select :id="`${uid}-account`" class="field" :value="choice.accountId" :disabled="cascadeLocked || !choice.harness" :aria-describedby="view.notes.account ? `${uid}-account-note` : undefined" @change="pick('account', ($event.target as HTMLSelectElement).value)">
+              <option value="">Choose an account</option>
+              <option v-for="account in view.accounts" :key="account.value" :value="account.value">{{ account.label }}</option>
+            </select>
+            <p v-if="view.notes.account" :id="`${uid}-account-note`" class="note">{{ view.notes.account }}</p>
+          </div>
+          <div class="select-field">
+            <label :for="`${uid}-model`">Model</label>
+            <select :id="`${uid}-model`" class="field" :value="choice.modelKey" :disabled="cascadeLocked || !choice.accountId" :aria-describedby="view.notes.model ? `${uid}-model-note` : undefined" @change="pick('model', ($event.target as HTMLSelectElement).value)">
+              <option value="">Choose a model</option>
+              <option v-for="model in view.models" :key="model.value" :value="model.value">{{ model.label }}</option>
+            </select>
+            <p v-if="view.notes.model" :id="`${uid}-model-note`" class="note">{{ view.notes.model }}</p>
+          </div>
+          <div class="select-field">
+            <label :for="`${uid}-effort`">Thinking</label>
+            <select :id="`${uid}-effort`" class="field" :value="choice.profileId" :disabled="cascadeLocked || !choice.modelKey" :aria-describedby="view.notes.effort ? `${uid}-effort-note` : undefined" @change="pick('effort', ($event.target as HTMLSelectElement).value)">
+              <option value="">Choose a thinking level</option>
+              <option v-for="effort in view.efforts" :key="effort.value" :value="effort.value">{{ effort.label }}</option>
+            </select>
+            <p v-if="view.notes.effort" :id="`${uid}-effort-note`" class="note">{{ view.notes.effort }}</p>
           </div>
         </fieldset>
 
-        <div v-if="!loading && !error" class="dispatch-status" :class="{ warn: hint.tone === 'warn' }" role="status"><AppIcon :name="hint.tone === 'warn' ? 'clock' : 'info'" :size="17" /><div><strong>{{ hint.label }}</strong><p>{{ hint.detail }}</p></div></div>
-        <div v-if="error" class="error" role="alert"><p>{{ error }}</p><button v-if="!principals.length || !profiles.length" type="button" class="btn sm" @click="loadOptions">Reload options</button></div>
+        <div v-if="!loading && !catalogGap && catalog" class="dispatch-status" :class="{ warn: view.status.tone === 'warn' }" role="status"><AppIcon :name="view.status.tone === 'warn' ? 'clock' : 'info'" :size="17" /><div><strong>{{ view.status.label }}</strong><p>{{ view.status.detail }}</p></div></div>
+        <div v-if="catalogGap === 'failed' || catalogGap === 'forbidden'" class="error" role="alert"><p>{{ catalogMessage }}</p><button v-if="catalogGap === 'failed'" type="button" class="btn sm" @click="loadCatalog">Retry catalog</button></div>
+        <div v-if="error" class="error" role="alert"><p>{{ error }}</p></div>
         <p v-if="!permitted" class="note">Starting an agent requires work-order write and run-create permission.</p>
         <footer><p>The run is queued first.<br />You can follow it in Agents.</p><button type="button" class="btn" :disabled="busy" @click="close">Cancel</button><button type="submit" class="btn primary" :disabled="!canSubmit"><AppIcon :name="busy ? 'clock' : 'arrow'" :size="15" />{{ busy ? 'Queueing…' : 'Queue run' }}</button></footer>
       </template>
@@ -197,6 +265,13 @@ defineExpose({ open })
           <h3>{{ sessionConnected ? 'Managed session connected' : state?.label }}</h3>
           <p>{{ sessionConnected ? 'The daemon registered this session. Open it to follow progress and send controls.' : state?.detail }}</p>
           <div v-if="ticket" class="result-ticket"><span class="mono">{{ ticket.key }}</span><strong>{{ ticket.title }}</strong></div>
+          <ul v-if="requested" class="requested">
+            <li><span>Host</span><strong>{{ requested.host }}</strong></li>
+            <li><span>Harness</span><strong>{{ requested.harness }}</strong></li>
+            <li><span>Account</span><strong>{{ requested.account }}</strong></li>
+            <li><span>Model</span><strong>{{ requested.model }}</strong></li>
+            <li><span>Thinking</span><strong>{{ requested.thinking }}</strong></li>
+          </ul>
           <p class="note mono">Run {{ run.id.slice(0, 8) }}</p>
         </div>
         <p v-if="checkError" class="error" role="alert">{{ checkError }}</p>
@@ -207,7 +282,7 @@ defineExpose({ open })
 </template>
 
 <style scoped>
-.launch-dialog { width: min(600px, calc(100vw - 24px)); max-height: calc(100dvh - 32px); padding: 0; border: 1px solid var(--line-2); border-radius: 22px; background: var(--surface-raised); color: var(--ink); box-shadow: 0 24px 80px var(--scrim); }
+.launch-dialog { width: min(600px, calc(100vw - 24px)); max-height: calc(100dvh - 32px); padding: 0; border: 1px solid var(--line-2); border-radius: 22px; background: var(--surface-raised); color: var(--ink); box-shadow: 0 24px 80px var(--scrim); overflow: auto; }
 .launch-dialog::backdrop { background: var(--scrim); backdrop-filter: blur(5px); }
 .launch-card { padding: 26px; }
 .launch-head { display: flex; gap: 12px; align-items: center; }
@@ -233,7 +308,7 @@ label { display: block; margin-bottom: 7px; font-size: 12px; font-weight: 650; c
 .ticket-results > .note { padding: 12px; }
 .more { margin: 8px 12px; }
 .note { font-size: 12px; line-height: 1.5; color: var(--ink-2); margin-top: 6px; }
-.optional { margin-left: 4px; font-weight: 400; color: var(--ink-3); }
+.role-note { margin-top: 0; }
 .dispatch-status { display: flex; gap: 10px; align-items: flex-start; font-size: 13px; line-height: 1.5; }
 .dispatch-status > svg { margin-top: 2px; flex-shrink: 0; }
 .dispatch-status { margin-top: 22px; padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-sunken); }
@@ -252,6 +327,10 @@ footer .btn { min-height: 44px; }
 .result-ticket { width: 100%; padding: 14px; border-radius: 12px; background: var(--surface-sunken); }
 .result-ticket span { display: block; font-size: 11px; color: var(--teal-ink); margin-bottom: 6px; }
 .result-ticket strong { font-size: 14px; overflow-wrap: anywhere; }
+.requested { list-style: none; width: 100%; margin: 0; padding: 12px 14px; display: grid; gap: 8px; text-align: left; background: var(--surface-sunken); border-radius: 12px; }
+.requested li { display: flex; justify-content: space-between; gap: 12px; font-size: 13px; }
+.requested span { color: var(--ink-3); flex-shrink: 0; }
+.requested strong { font-weight: 600; text-align: right; overflow-wrap: anywhere; }
 @media (max-width: 600px) {
   .launch-dialog { max-height: calc(100dvh - 16px); width: calc(100vw - 16px); border-radius: 18px; }
   .launch-card { padding: 20px 16px; }

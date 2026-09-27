@@ -2,6 +2,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import type { AgentAccount } from '../../lib/agents'
+import { accountName, accountPlan, allowanceWindowLabel } from '../../lib/accountCascade'
 import { PACE_LABEL, UNIT_LABEL, bindingWindow, duration, harnessLabel } from '../../lib/agentState'
 import type { Availability } from '../../stores/agents'
 import AppIcon from '../AppIcon.vue'
@@ -36,19 +37,20 @@ const stateLabel: Record<AgentAccount['state'], string> = { available: 'Availabl
       <li v-for="{ account, window } in rows" :key="account.id" class="account" :class="account.state">
         <div class="top">
           <span class="dot" :class="account.state" aria-hidden="true" />
-          <span class="label">{{ account.label }}</span>
+          <span class="label">{{ accountName(account) }}</span>
+          <span v-if="accountPlan(account)" class="plan">{{ accountPlan(account) }}</span>
           <span class="harness">{{ harnessLabel(account.harness) }}</span>
           <span class="spacer" />
           <span v-if="account.state !== 'available'" class="state-text">{{ stateLabel[account.state] }}</span>
           <button v-if="admin && account.state !== 'unavailable'" type="button" class="btn sm ghost toggle" :disabled="busy === account.id" @click="toggle(account)">{{ account.state === 'draining' ? 'Resume' : 'Drain' }}</button>
         </div>
         <template v-if="window">
-          <div class="meter" role="meter" :aria-valuenow="Math.round(window.left * 100)" aria-valuemin="0" aria-valuemax="100" :aria-label="`${account.label}: ${Math.round(window.left * 100)}% of ${UNIT_LABEL[window.window.unit]} left${'provisional' in window.window && window.window.provisional ? ', provisional' : ''}`">
+          <div class="meter" role="meter" :aria-valuenow="Math.round(window.left * 100)" aria-valuemin="0" aria-valuemax="100" :aria-label="`${accountName(account)}: ${Math.round(window.left * 100)}% of ${allowanceWindowLabel(window.window)} ${UNIT_LABEL[window.window.unit]} left${window.window.provisional ? ', provisional' : ''}`">
             <span class="fill" :class="window.pace" :style="{ width: `${Math.max(2, window.left * 100)}%` }" />
             <span class="pace-mark" :style="{ left: `${Math.min(100, (1 - window.expected) * 100)}%` }" :data-tip="`Pace allows ${Math.round(window.expected * 100)}% used by now`" />
           </div>
           <p class="facts">
-            <span class="left"><b>{{ Math.round(window.left * 100) }}%</b> {{ UNIT_LABEL[window.window.unit] }} left</span>
+            <span class="left"><b>{{ Math.round(window.left * 100) }}%</b> {{ UNIT_LABEL[window.window.unit] }} left · {{ allowanceWindowLabel(window.window) }}</span>
             <span class="pace" :class="window.pace">{{ PACE_LABEL[window.pace] }}</span>
             <span v-if="'provisional' in window.window && window.window.provisional" class="provisional" title="Measured usage is unavailable for this allowance window">Provisional</span>
             <span class="reset">resets in {{ duration(window.resetsIn) }}</span>
@@ -74,12 +76,13 @@ const stateLabel: Record<AgentAccount['state'], string> = { available: 'Availabl
 .account { padding: 10px 8px 10px; border-radius: 10px; }
 .account + .account { box-shadow: inset 0 1px 0 var(--line); border-radius: 0; }
 .account.unavailable .label { color: var(--ink-2); }
-.top { display: flex; align-items: center; gap: 8px; min-height: 24px; }
+.top { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; min-height: 24px; }
 .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); flex-shrink: 0; }
 .dot.draining { background: var(--gold); }
 .dot.unavailable { background: var(--st-closed); }
-.label { font-size: 13px; font-weight: 600; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.harness { flex-shrink: 0; height: 18px; padding: 0 6px; border-radius: 5px; background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); font: 500 10px/18px var(--mono); color: var(--ink-2); font-variant-ligatures: none; }
+.label { font-size: 13px; font-weight: 600; color: var(--ink); min-width: 0; overflow-wrap: anywhere; }
+.harness, .plan { flex-shrink: 0; height: 18px; padding: 0 6px; border-radius: 5px; background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); font: 500 10px/18px var(--mono); color: var(--ink-2); font-variant-ligatures: none; }
+.plan { font-family: var(--font); letter-spacing: 0; }
 .spacer { flex: 1; }
 .state-text { font-size: 11.5px; color: var(--gold-ink); font-weight: 600; }
 .account.unavailable .state-text { color: var(--ink-3); }
