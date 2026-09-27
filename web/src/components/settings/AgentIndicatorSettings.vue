@@ -12,7 +12,7 @@ import type { AgentPalette, AgentState } from '../../lib/agentSignals'
 
 const { choice, setStyle, setHovering } = useAgentIndicator()
 const { choice: states, save: saveStates } = useAgentAppearance()
-const previewStates: AgentState[] = ['working', 'waiting', 'throttled', 'problem', 'idle', 'stopped']
+const previewStates: AgentState[] = ['working', 'awaiting', 'waiting', 'throttled', 'problem', 'unresponsive', 'idle', 'stopped']
 const stateFailed = ref(false)
 onBeforeUnmount(onPreferenceFailure(key => { if (key === AGENT_STATE_KEY) stateFailed.value = true }))
 function saveState(patch: Parameters<typeof saveStates>[0]) { stateFailed.value = false; saveStates(patch) }
@@ -99,7 +99,7 @@ function move(event: KeyboardEvent, index: number) {
       <label class="state-field">Inactive opacity · {{ states.inactiveOpacity }}%
         <input type="range" min="40" max="80" step="1" :disabled="!states.dimInactive" :value="states.inactiveOpacity" aria-label="Inactive opacity" @input="saveState({ inactiveOpacity: Number(($event.target as HTMLInputElement).value) })" />
       </label>
-      <p class="hint">Heartbeat warnings for sessions that were working. A normal stop never becomes a problem.</p>
+      <p class="hint">Heartbeat warnings for sessions that were working. No heartbeat means activity is unconfirmed; Problem means a reported failure.</p>
       <div class="thresholds">
         <label class="state-field">Yellow after (minutes)<input class="field" type="number" min="1" max="1439" step="1" :value="states.yellowMinutes" @change="saveState({ yellowMinutes: Number(($event.target as HTMLInputElement).value) })" /></label>
         <label class="state-field">Red after (minutes)<input class="field" type="number" :min="states.yellowMinutes + 1" max="1440" step="1" :value="states.redMinutes" @change="saveState({ redMinutes: Number(($event.target as HTMLInputElement).value) })" /></label>

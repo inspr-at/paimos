@@ -50,7 +50,7 @@ export function byLead(a: LiveAgent, b: LiveAgent) {
 }
 
 export function liveState(agent: LiveAgent, serverNow: number, preferences: AgentStatePreference = DEFAULT_AGENT_STATE): LiveBotState {
-  return deriveAgentState({ ...agent, needs_attention: agent.needs_attention || agent.state === 'waiting' }, serverNow, preferences)
+  return deriveAgentState({ ...agent, needs_attention: agent.needs_attention ?? agent.state === 'waiting' }, serverNow, preferences)
 }
 
 // State-aware reads retain quiet and failed sessions. A failed poll ages the

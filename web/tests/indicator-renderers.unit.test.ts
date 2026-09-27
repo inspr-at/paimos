@@ -17,6 +17,7 @@ function component(filename: string): Component {
   const exports: { default?: Component } = {}
   new Function('require', 'exports', outputText)((id: string) => {
     if (id === '../../lib/avatar') return Avatar
+    if (id === './parts/RobotExpression.vue') return component('parts/RobotExpression')
     if (id === './AgentStateMark.vue') return component('AgentStateMark')
     if (id.endsWith('.css')) return {}
     if (id !== 'vue') throw new Error(`Unexpected renderer dependency: ${id}`)
@@ -96,4 +97,26 @@ it.each<[string, Component]>([['Pulse', Pulse], ['Robot 1', Robot1], ['Robot 5',
     expect(count(root, 'glint')).toBe(1)
   } finally { app.unmount() }
   expect(vi.getTimerCount()).toBe(0)
+})
+
+it.each(['Robot1', 'Robot2', 'Robot3', 'Robot4', 'Robot5', 'Sprite'])('%s has distinct nonworking expressions and never smiles during a problem', async name => {
+  const props = reactive({ state: 'problem', pulse: 0, seed: 'test', lead: true })
+  const root = node('root')
+  const art = component(name)
+  const app = renderer.createApp({ render: () => h(art, props) })
+  app.mount(root)
+  try {
+    const shapes = new Set<string>()
+    const geometry = (n: Node): string => JSON.stringify([n.tag, n.props.d, n.props.cx, n.props.cy, n.props.r, n.props.rx, n.props.ry, n.children.map(geometry)])
+    for (const state of ['problem', 'unresponsive', 'waiting', 'awaiting', 'idle', 'stopped']) {
+      props.state = state
+      await nextTick()
+      expect(count(root, 'smile')).toBe(0)
+      expect(count(root, 'happy')).toBe(0)
+      expect(count(root, 'state-expression')).toBe(1)
+      if (state === 'problem') expect(count(root, 'frown')).toBe(1)
+      shapes.add(geometry(root))
+    }
+    expect(shapes.size).toBe(6)
+  } finally { app.unmount() }
 })

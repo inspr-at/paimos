@@ -3,6 +3,7 @@
 <script setup lang="ts">
 import type { AgentState } from '../../lib/agentSignals'
 import AgentStateMark from './AgentStateMark.vue'
+import RobotExpression from './parts/RobotExpression.vue'
 import { computed, ref, watch } from 'vue'
 
 // IV1 discovers this presentational SFC by filename; its wrapper owns labels,
@@ -37,13 +38,14 @@ watch(() => props.state, state => { if (state !== 'working') glint.value = 0 })
       <path d="M16 10V7.5M14.5 7h3M8.5 15H7v4h1.5M23.5 15H25v4h-1.5" />
       <rect class="head" x="8.5" y="10" width="15" height="12.5" rx="3" />
       <path d="M16 22.5V25M12.5 25h7" />
-      <g class="eyes">
+      <g v-if="state === 'working'" class="eyes">
         <path d="M12 15.5h2M18 15.5h2" />
       </g>
     </g>
-    <rect class="screen" x="11.5" y="18" width="9" height="2.5" rx="1.25" />
-    <path class="typing" d="M13 19.25h2.5" />
-    <path class="cursor" d="M18 18.8v.9" />
+    <rect v-if="state === 'working'" class="screen" x="11.5" y="18" width="9" height="2.5" rx="1.25" />
+    <path v-if="state === 'working'" class="typing" d="M13 19.25h2.5" />
+    <path v-if="state === 'working'" class="cursor" d="M18 18.8v.9" />
+    <RobotExpression v-if="state !== 'working'" :state="state" />
     <AgentStateMark :state="state" x="21" y="0" :size="11" />
     <path v-if="glint && state === 'working'" :key="glint" class="glint" d="m6 3 1.1 2.9L10 7 7.1 8.1 6 11 4.9 8.1 2 7l2.9-1.1Z" @animationend="glint = 0" />
   </svg>
