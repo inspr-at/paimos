@@ -39,9 +39,10 @@ func RunFence(ctx context.Context, tx pgx.Tx, account, run string, claim bool) e
 	}
 	var verification *string
 	var claimed, expired, ongoing bool
-	err := tx.QueryRow(ctx, `SELECT verification_run_id::text,verification_claimed_at IS NOT NULL,verification_expires_at<=clock_timestamp(),
+	var harness, platform, arch string
+	err := tx.QueryRow(ctx, `SELECT q.details->>'platform',q.details->>'arch',(SELECT harness FROM agent_accounts WHERE id=e.account_id),verification_run_id::text,verification_claimed_at IS NOT NULL,e.verification_expires_at<=clock_timestamp(),
   ongoing_approved_at IS NOT NULL AND EXISTS(SELECT 1 FROM account_allowance_windows w WHERE w.account_id=e.account_id AND NOT w.pairing_verification AND w.starts_at<=clock_timestamp() AND w.ends_at>clock_timestamp())
-  FROM agent_pairing_enrollments e WHERE account_id=$1`, account).Scan(&verification, &claimed, &expired, &ongoing)
+  FROM agent_pairing_enrollments e JOIN agent_pairing_requests q ON q.tenant_id=e.tenant_id AND q.id=e.request_id WHERE account_id=$1`, account).Scan(&platform, &arch, &harness, &verification, &claimed, &expired, &ongoing)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil
 	}
@@ -53,6 +54,9 @@ func RunFence(ctx context.Context, tx pgx.Tx, account, run string, claim bool) e
 			return fail(409, "verification_only", "separately approved ongoing limits required")
 		}
 		return nil
+	}
+	if !verificationCapabilities(platform, arch)[harness].Supported {
+		return fail(409, "verification_unavailable", "this helper release has no qualified verification mode for the selected harness")
 	}
 	if expired {
 		return fail(409, "verification_expired", "verification expired; setup never replenishes it")

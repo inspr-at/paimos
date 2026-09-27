@@ -152,6 +152,9 @@ func (m *module) get(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error
 	return v, nil
 }
 func (m *module) queued(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
+	if err := agentpairing.ExpireUnclaimedVerifications(r.Context(), tx); err != nil {
+		return nil, err
+	}
 	limit, err := workorders.Limit(r)
 	if err != nil {
 		return nil, err
@@ -162,15 +165,16 @@ func (m *module) queued(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, er
   SELECT 1 FROM agent_pairing_computers c
   JOIN agent_pairing_enrollments e ON e.tenant_id=c.tenant_id AND e.computer_id=c.id
   JOIN agent_pairing_requests q ON q.tenant_id=e.tenant_id AND q.id=e.request_id
+  JOIN agent_accounts a ON a.tenant_id=e.tenant_id AND a.id=e.account_id
   WHERE c.principal_id=$1 AND c.state='connected' AND e.state='connected' AND q.state='redeemed'
   AND (agent_runs.requested_account_id IS NULL OR e.account_id=agent_runs.requested_account_id)
-  AND ((e.verification_run_id=agent_runs.id AND e.verification_claimed_at IS NULL AND e.verification_expires_at>clock_timestamp())
+  AND (((q.details->>'platform')||'/'||(q.details->>'arch')||'/'||a.harness=ANY($3::text[]) AND e.verification_run_id=agent_runs.id AND e.verification_claimed_at IS NULL AND e.verification_expires_at>clock_timestamp())
    OR (agent_runs.purpose='managed' AND e.ongoing_approved_at IS NOT NULL AND EXISTS(
     SELECT 1 FROM account_allowance_windows w WHERE w.account_id=e.account_id AND NOT w.pairing_verification
      AND w.starts_at<=clock_timestamp() AND w.ends_at>clock_timestamp())))))
 	 AND EXISTS(SELECT 1 FROM work_orders w JOIN nodes n ON n.tenant_id=w.tenant_id AND n.id=w.node_id
 	 WHERE w.node_id=agent_runs.work_order_id AND w.status IN ('ready','running') AND n.deleted_at IS NULL)
-	 ORDER BY created_at,id LIMIT $2`, p.ID, limit)
+	 ORDER BY created_at,id LIMIT $2`, p.ID, limit, agentpairing.VerificationTargets())
 	if err != nil {
 		return nil, err
 	}

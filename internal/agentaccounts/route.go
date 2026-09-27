@@ -63,6 +63,9 @@ func reserve(ctx context.Context, tx pgx.Tx, r *http.Request, p tenant.Principal
 		accountIDs[i] = id
 		enrolled[id] = true
 	}
+	if err := agentpairing.ExpireUnclaimedVerifications(ctx, tx); err != nil {
+		return RouteResult{}, err
+	}
 	run, err := lockRun(ctx, tx, runID)
 	if err != nil {
 		return RouteResult{}, err
