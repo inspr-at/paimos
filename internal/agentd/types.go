@@ -44,7 +44,17 @@ type Run struct {
 	AgentPrincipalID          string `json:"agent_principal_id"`
 	ModelProfileID            string `json:"model_profile_id"`
 	AccountID                 string `json:"account_id"`
+	RequestedAccountID        string `json:"requested_account_id"`
 	Status                    string `json:"status"`
+}
+
+// requestedAccount retains the approved enrollment before Route fills AccountID.
+// Older/already-routed projections may carry only AccountID.
+func (r Run) requestedAccount() string {
+	if r.RequestedAccountID != "" {
+		return r.RequestedAccountID
+	}
+	return r.AccountID
 }
 
 type Profile struct {

@@ -297,6 +297,10 @@ func (s *Supervisor) PollOnce(ctx context.Context) error {
 	if !s.dispatchAllowed("") {
 		return nil
 	}
+	runs, err := s.api.Queued(ctx)
+	if err != nil {
+		return err
+	}
 	failures := []error{recoveryErr}
 	s.mu.Lock()
 	accounts := append([]EnrolledAccount(nil), s.accounts...)
@@ -314,6 +318,18 @@ func (s *Supervisor) PollOnce(ctx context.Context) error {
 		if fenced || fenceErr != nil {
 			continue
 		}
+		// Account probes can start vendor executables. A refused verification
+		// must not reach one merely because health probing precedes dispatch.
+		probeBlocked := false
+		for _, run := range runs {
+			if run.AgentPrincipalID == s.principalID && run.Purpose == VerificationPurpose && run.requestedAccount() == account.ID && validQueuedExecutionMode(run, adapters[account.Harness]) != nil {
+				probeBlocked = true
+				break
+			}
+		}
+		if probeBlocked {
+			continue
+		}
 		probe := adapters[account.Harness].(AccountProber)
 		available := probe.Probe(ctx, account.Key)
 		err := s.api.Probe(ctx, account.ID, s.daemonID, s.generation, available)
@@ -325,10 +341,6 @@ func (s *Supervisor) PollOnce(ctx context.Context) error {
 		if err != nil {
 			failures = append(failures, errors.New("account probe unavailable"))
 		}
-	}
-	runs, err := s.api.Queued(ctx)
-	if err != nil {
-		return err
 	}
 	for _, run := range runs {
 		if run.AgentPrincipalID != s.principalID {
@@ -345,7 +357,7 @@ func (s *Supervisor) PollOnce(ctx context.Context) error {
 func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 	s.dispatchMu.Lock()
 	defer s.dispatchMu.Unlock()
-	if !s.dispatchAllowed(run.AccountID) {
+	if !s.dispatchAllowed(run.requestedAccount()) {
 		return ErrDraining
 	}
 	if run.ID == "" || run.WorkOrderID == "" || run.AgentPrincipalID != s.principalID || run.Status != "queued" {
@@ -386,7 +398,7 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 	if adapter == nil || profile.ID == "" {
 		return ErrUnsupported
 	}
-	if err := validExecutionMode(run, adapter); err != nil {
+	if err := validQueuedExecutionMode(run, adapter); err != nil {
 		if errors.Is(err, ErrVerificationUnavailable) && entry == nil {
 			if saveErr := s.refuseVerification(run); saveErr != nil {
 				return saveErr
@@ -467,7 +479,7 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 	}
 	accountIDs := make([]string, 0, len(s.accounts))
 	for _, account := range s.accounts {
-		if account.Harness == profile.Harness && s.accountAvailable(account.ID) && (run.AccountID == "" || run.AccountID == account.ID) {
+		if account.Harness == profile.Harness && s.accountAvailable(account.ID) && (run.AccountID == "" || run.AccountID == account.ID) && (run.RequestedAccountID == "" || run.RequestedAccountID == account.ID) {
 			accountIDs = append(accountIDs, account.ID)
 		}
 	}
@@ -485,7 +497,7 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 			return err
 		}
 	}
-	if route.DaemonID != s.daemonID || route.AccountKey == "" || len(route.Reservations) == 0 || run.AccountID != "" && route.AccountID != run.AccountID {
+	if route.DaemonID != s.daemonID || route.AccountKey == "" || len(route.Reservations) == 0 || run.AccountID != "" && route.AccountID != run.AccountID || run.RequestedAccountID != "" && route.AccountID != run.RequestedAccountID {
 		return errors.New("account route is not bound to daemon")
 	}
 	localBinding := false
@@ -507,6 +519,12 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 	}
 	if !s.accountAvailable(route.AccountID) {
 		return ErrDraining
+	}
+	// Only the validated server route can fill the execution account. Preserve
+	// all approval terms and require the same strict binding as adapter.Start.
+	run.AccountID = route.AccountID
+	if err := validExecutionMode(run, adapter); err != nil {
+		return err
 	}
 	if entry == nil {
 		rec := Record{LaunchState: launchPrepared, ClaimRoute: &route, AccountID: route.AccountID, ExecutionMode: run.Purpose, TenantID: s.tenantID, PrincipalID: s.principalID, RunID: run.ID, WorkOrderID: run.WorkOrderID, Generation: s.generation, Workspace: s.workspace, State: "claim_pending", Controls: map[string]replay{}}
