@@ -118,7 +118,8 @@ test('force stop shows the exact group and waits for verified daemon outcome', a
   await expect(result).toContainText('Process exit has not been confirmed')
   expect(body?.confirmation).toBe(preview.force_confirmation)
   outcome = 'applied'
-  await expect(result).toContainText('verified that its root process exited')
+  await expect(page).toHaveURL(/\/agents$/)
+  await expect(page.getByText('The daemon signalled the owned process group and verified that its root process exited. Processes outside that group were not targeted.')).toBeVisible()
 })
 
 for (const theme of ['light', 'dark']) for (const width of [1600, 390]) {
@@ -139,7 +140,9 @@ test('offline force request expires with an unconfirmed outcome and stops pollin
   let polls = 0
   const control = { id: 'offline-force', state: 'claimed', outcome: null, reason: null, expires_at: new Date(Date.now() + 45000).toISOString() }
   await page.route('**/controls/force-stop', route => route.fulfill({ status: 201, json: control }))
-  await page.route('**/controls/offline-force', route => { polls++; return route.fulfill({ json: control }) })
+  let releasePoll!: () => void
+  const unreachable = new Promise<void>(resolve => { releasePoll = resolve })
+  await page.route('**/controls/offline-force', async route => { polls++; await unreachable; await route.fulfill({ json: control }) })
   await dialog(page).getByLabel('Reason for recovery').fill('Host stopped responding')
   await dialog(page).getByLabel('Type the exact confirmation').fill(preview.force_confirmation)
   await dialog(page).getByRole('button', { name: 'Force stop session' }).click()
@@ -147,10 +150,23 @@ test('offline force request expires with an unconfirmed outcome and stops pollin
   await expect(result).toContainText('Process exit has not been confirmed')
   await page.clock.fastForward(46000)
   await expect(result).toContainText('Process exit is unconfirmed')
+  releasePoll()
   const stoppedPolls = polls
   await page.clock.fastForward(120000)
   expect(polls).toBe(stoppedPolls)
   await result.getByRole('button', { name: 'Refresh details' }).click()
   await expect(dialog(page).getByLabel('Type the exact confirmation')).toHaveValue('')
   await expect(dialog(page).getByRole('button', { name: 'Force stop session' })).toBeDisabled()
+})
+
+
+test('completed force retry retains its verified outcome after authorization expiry', async ({ page }) => {
+ const { preview } = await managed(page)
+ await page.route('**/controls/force-stop', route => route.fulfill({status:201,json:{id:'completed-force',state:'completed',outcome:'applied',reason:'owned_group_signalled_root_exited',expires_at:'2020-01-01T00:00:00Z'}}))
+ await dialog(page).getByLabel('Reason for recovery').fill('Retry exact accepted command')
+ await dialog(page).getByLabel('Type the exact confirmation').fill(preview.force_confirmation)
+ await dialog(page).getByRole('button',{name:'Force stop session'}).click()
+ await expect(page).toHaveURL(/\/agents$/)
+ await expect(page.getByText('The daemon signalled the owned process group and verified that its root process exited. Processes outside that group were not targeted.')).toBeVisible()
+ await expect(page.getByText('The confirmation expired before a verified result was received.',{exact:false})).toHaveCount(0)
 })

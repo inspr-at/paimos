@@ -21,6 +21,7 @@ const action = ref<'archive' | 'force'>('archive')
 let epoch = 0, requestId = ''
 let opener: HTMLElement | null = null
 let timer: ReturnType<typeof setTimeout> | undefined
+let expiryTimer: ReturnType<typeof setTimeout> | undefined
 let forceDeadline = 0
 const forceExpired = ref(false)
 interface Ownership { daemon_id: string; generation: string; process_id: string; root_pid: number; group_id: number; started_at: string }
@@ -54,7 +55,7 @@ async function json<T>(url: string, body?: unknown): Promise<T> {
 }
 async function refresh() {
   const turn = ++epoch
-  clearTimeout(timer); forceControl.value = null; forceExpired.value = false
+  clearTimeout(timer); clearTimeout(expiryTimer); forceControl.value = null; forceExpired.value = false
   loading.value = true; error.value = ''; confirmation.value = ''; preview.value = null
   requestId = crypto.randomUUID()
   try {
@@ -75,21 +76,28 @@ async function open() {
 }
 function close() {
   if (busy.value) return
-  epoch++; clearTimeout(timer); visible.value = false; dialog.value?.close(); opener?.focus({ preventScroll: true })
+  epoch++; clearTimeout(timer); clearTimeout(expiryTimer); visible.value = false; dialog.value?.close(); opener?.focus({ preventScroll: true })
 }
-watch(() => props.session.id, () => { epoch++; clearTimeout(timer); visible.value = false; busy.value = false; dialog.value?.close(); preview.value = null })
+watch(() => props.session.id, () => { epoch++; clearTimeout(timer); clearTimeout(expiryTimer); visible.value = false; busy.value = false; dialog.value?.close(); preview.value = null })
 watch(action, () => { confirmation.value = ''; requestId = crypto.randomUUID(); error.value = '' })
-onBeforeUnmount(() => { epoch++; clearTimeout(timer) })
+onBeforeUnmount(() => { epoch++; clearTimeout(timer); clearTimeout(expiryTimer) })
+async function finishForce() {
+  toast(forceResult.value, { sticky: true, key: `session-force-${props.session.id}` })
+  busy.value = false; close()
+  await router.replace('/agents')
+  await agents.loadAll()
+}
 async function checkForce(turn = epoch) {
   if (!forceControl.value || turn !== epoch || !visible.value) return
+  if (forceControl.value.state === 'completed') { await finishForce(); return }
   if (Date.now() >= forceDeadline) { forceExpired.value = true; return }
   try {
     const result = await json<ForceControl>(`${path()}/controls/${encodeURIComponent(forceControl.value.id)}`)
     if (turn !== epoch) return
     forceControl.value = result; error.value = ''
-    if (result.state === 'completed') { await agents.loadAll(); return }
+    if (result.state === 'completed') { forceExpired.value = false; await finishForce(); return }
   } catch { if (turn === epoch) error.value = 'The control result could not be checked. Process exit is unconfirmed.' }
-  if (turn === epoch && visible.value) timer = setTimeout(() => void checkForce(turn), Math.max(0, Math.min(2000, forceDeadline - Date.now())))
+  if (turn === epoch && visible.value && !forceExpired.value) timer = setTimeout(() => void checkForce(turn), Math.max(0, Math.min(2000, forceDeadline - Date.now())))
 }
 async function submit() {
   if (!canSubmit.value || !preview.value) return
@@ -102,6 +110,11 @@ async function submit() {
       forceControl.value = result
       const expiry = result.expires_at ? Date.parse(result.expires_at) : NaN
       forceDeadline = Number.isFinite(expiry) ? Math.min(expiry, Date.now() + 45000) : Date.now() + 45000
+      expiryTimer = setTimeout(() => {
+        if (turn === epoch && visible.value && forceControl.value?.state !== 'completed') {
+          forceExpired.value = true; clearTimeout(timer)
+        }
+      }, Math.max(0, forceDeadline - Date.now()))
       void checkForce(turn)
     } else {
       done.value = true

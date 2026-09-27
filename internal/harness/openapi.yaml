@@ -95,6 +95,7 @@ paths:
         - $ref: '#/components/parameters/sessionId'
         - $ref: '#/components/parameters/workerLease'
       responses:
+        '410': {description: Authenticated archived generation; detach harness servicing without signaling a process}
         '200': {description: Updated heartbeat and phase}
   /api/projects/{projectId}/harness-sessions/{sessionId}/yield:
     post:
@@ -104,6 +105,7 @@ paths:
         - $ref: '#/components/parameters/sessionId'
         - $ref: '#/components/parameters/workerLease'
       responses:
+        '410': {description: Authenticated archived generation; detach harness servicing without signaling a process}
         '200': {description: Claimed typed owned controls}
   /api/projects/{projectId}/harness-sessions/{sessionId}/drain:
     post:
@@ -113,6 +115,7 @@ paths:
         - $ref: '#/components/parameters/sessionId'
         - $ref: '#/components/parameters/workerLease'
       responses:
+        '410': {description: Authenticated archived generation; detach harness servicing without signaling a process}
         '200': {description: Leased FIFO inbox message}
   /api/projects/{projectId}/harness-sessions/{sessionId}/complete-delivery:
     post:
@@ -122,6 +125,7 @@ paths:
         - $ref: '#/components/parameters/sessionId'
         - $ref: '#/components/parameters/workerLease'
       responses:
+        '410': {description: Authenticated archived generation; detach harness servicing without signaling a process}
         '200': {description: Exact leased delivery acknowledged}
   /api/projects/{projectId}/harness-sessions/{sessionId}/controls/interrupt:
     post:
@@ -157,6 +161,7 @@ paths:
         - $ref: '#/components/parameters/controlId'
         - $ref: '#/components/parameters/workerLease'
       responses:
+        '410': {description: Authenticated archived generation; detach harness servicing without signaling a process}
         '200': {description: Exact claimed control completion}
   /api/projects/{projectId}/harness-sessions/{sessionId}/stop:
     post:
@@ -166,6 +171,7 @@ paths:
         - $ref: '#/components/parameters/sessionId'
         - $ref: '#/components/parameters/workerLease'
       responses:
+        '410': {description: Authenticated archived generation; detach harness servicing without signaling a process}
         '200': {description: Closed immutable generation}
 components:
   parameters:

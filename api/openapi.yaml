@@ -1957,6 +1957,7 @@ paths:
         - {name: X-Aeon-Worker-Lease, in: header, required: true, schema: {type: string, minLength: 32, maxLength: 256}}
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessUsageReport'}}}}
       responses:
+        '410': {description: Authenticated archived generation; usage proof revoked, existing usage retained}
         '200':
           description: Accepted cumulative report or exact replay
           content:
