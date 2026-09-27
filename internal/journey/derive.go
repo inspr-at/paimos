@@ -74,6 +74,8 @@ type gateOffer struct {
 	ID        string
 	DecidedBy string
 	Live      bool
+	State     string
+	ExpiresAt string
 }
 
 // releaseFacts is the current journey release, not a client-supplied stage.
@@ -226,14 +228,14 @@ func project(f facts) (stage, key string, available bool, reason, approvalID str
 			ok, id := offer(f.Shape)
 			reason = ""
 			if !ok {
-				reason = reasonReopenGate
+				reason = gateReason(f.Shape, reasonReopenGate)
 			}
 			return stageShape, actionReopen, ok, reason, id, false
 		}
 		ok, id := offer(f.Shape)
 		reason = ""
 		if !ok {
-			reason = reasonShapeGate
+			reason = gateReason(f.Shape, reasonShapeGate)
 		}
 		return stageShape, actionDecide, ok, reason, id, false
 	}
@@ -291,7 +293,7 @@ func requirementsProjection(f facts) (string, string, bool, string, string, bool
 	ok, id := offer(f.Requirements)
 	reason := ""
 	if !ok {
-		reason = reasonReqGate
+		reason = gateReason(f.Requirements, reasonReqGate)
 	}
 	return stageRequirements, actionApproveRequirements, ok, reason, id, false
 }
@@ -316,7 +318,7 @@ func planProjection(f facts) (string, string, bool, string, string, bool) {
 	ok, id := offer(f.Build)
 	reason := ""
 	if !ok {
-		reason = reasonBuildGate
+		reason = gateReason(f.Build, reasonBuildGate)
 	}
 	return stagePlan, actionStartBuild, ok, reason, id, false
 }
@@ -330,7 +332,7 @@ func buildProjection(f facts) (string, string, bool, string, string, bool) {
 	}
 	ok, id := offer(f.Build)
 	if !ok {
-		return stageBuild, actionMarkCandidate, false, reasonCompletionGate, id, false
+		return stageBuild, actionMarkCandidate, false, gateReason(f.Build, reasonCompletionGate), id, false
 	}
 	return stageBuild, actionMarkCandidate, true, "", id, false
 }
@@ -350,7 +352,7 @@ func candidateProjection(f facts) (string, string, bool, string, string, bool) {
 	ok, id := offer(f.Candidate)
 	reason := ""
 	if !ok {
-		reason = reasonCandidateGate
+		reason = gateReason(f.Candidate, reasonCandidateGate)
 	}
 	return stageBuild, actionApproveCandidate, ok, reason, id, false
 }
@@ -366,7 +368,7 @@ func deployProjection(f facts) (string, string, bool, string, string, bool) {
 			ok, id := offer(f.Deploy)
 			reason := ""
 			if !ok {
-				reason = reasonDeployGate
+				reason = gateReason(f.Deploy, reasonDeployGate)
 			}
 			return stageDeploy, actionApproveDeploy, ok, reason, id, false
 		}
@@ -378,7 +380,7 @@ func deployProjection(f facts) (string, string, bool, string, string, bool) {
 		ok, id := offer(f.Deploy)
 		reason := ""
 		if !ok {
-			reason = reasonRetryGate
+			reason = gateReason(f.Deploy, reasonRetryGate)
 		}
 		return stageDeploy, actionRetryDeploy, ok, reason, id, true
 	default:
@@ -388,7 +390,7 @@ func deployProjection(f facts) (string, string, bool, string, string, bool) {
 		ok, id := offer(f.Deploy)
 		reason := ""
 		if !ok {
-			reason = reasonDeployGate
+			reason = gateReason(f.Deploy, reasonDeployGate)
 		}
 		return stageDeploy, actionApproveDeploy, ok, reason, id, false
 	}
@@ -401,7 +403,7 @@ func accessProjection(f facts) (string, string, bool, string, string, bool) {
 			ok, id := offer(f.Access)
 			reason := ""
 			if !ok {
-				reason = reasonPermitGate
+				reason = gateReason(f.Access, reasonPermitGate)
 			}
 			return stageAccess, actionApprovePermit, ok, reason, id, false
 		}
@@ -420,7 +422,7 @@ func accessProjection(f facts) (string, string, bool, string, string, bool) {
 		ok, id := offer(f.Access)
 		reason := ""
 		if !ok {
-			reason = reasonPermitGate
+			reason = gateReason(f.Access, reasonPermitGate)
 		}
 		return stageAccess, actionApprovePermit, ok, reason, id, false
 	}
@@ -455,6 +457,25 @@ func offer(g gateOffer) (bool, string) {
 		return false, g.ID
 	}
 	return true, g.ID
+}
+
+func gateReason(g gateOffer, fallback string) string {
+	if g.State == "expired" {
+		if g.DecidedBy == "" {
+			return "Gate request expired. The agent asks again for a fresh one."
+		}
+		return "Gate approval expired. The agent asks again for a fresh one."
+	}
+	if g.State == "revoked" {
+		return "Gate approval was revoked. The agent asks again for a fresh one."
+	}
+	if g.State == "rejected" {
+		return "Gate request was rejected. The agent asks again for a fresh one."
+	}
+	if g.State == "grant_missing" {
+		return "Gate approval has no grant. The agent asks again for a fresh one."
+	}
+	return fallback
 }
 
 func samePerson(decider string, ids ...string) bool {
@@ -538,6 +559,11 @@ func stageRail(f facts, current string, blocked bool) []JourneyStage {
 			GateLive:       f.GateLiveByID[gateID],
 			HandoffID:      strPtr(handoff.ID),
 		}
+		if offer := gateOfferForStage(f, key); offer.ID != "" {
+			st.GateOfferID = strPtr(offer.ID)
+			st.GateOfferState = offer.State
+			st.GateOfferExpiresAt = offer.ExpiresAt
+		}
 		if handoff.ID != "" {
 			st.HandoffAttempt = &handoff.Attempt
 			st.HandoffAuthorityEpoch = &handoff.Epoch
@@ -579,6 +605,25 @@ func gateScopeFor(f facts, stage string) string {
 		return ScopeAccess
 	default:
 		return ""
+	}
+}
+
+func gateOfferForStage(f facts, stage string) gateOffer {
+	switch stage {
+	case stageShape:
+		return f.Shape
+	case stageRequirements:
+		return f.Requirements
+	case stagePlan:
+		return f.Build
+	case stageBuild:
+		return f.Candidate
+	case stageDeploy:
+		return f.Deploy
+	case stageAccess:
+		return f.Access
+	default:
+		return gateOffer{}
 	}
 }
 

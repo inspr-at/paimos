@@ -3,7 +3,7 @@
 // action, gates as approvals, the plan with tri-state features, the release walker
 // (A3), intake, the blocked deploy gate and the header's compact stage.
 import { test, expect, type Page } from '@playwright/test'
-import { fixtures, mockWork, watchErrors } from './work-fixtures'
+import { fixtures, me, mockWork, watchErrors } from './work-fixtures'
 import { journeyWorld, mockJourney, type JourneyStart, type WorldOptions } from './journey-fixtures'
 import { mockEffectivePermissions } from './authz-fixtures'
 
@@ -332,6 +332,51 @@ test('Build: marking the candidate approves the build gate and sends mark_candid
   expect(writes(calls, '/journey/actions')[0].body).toMatchObject({ action: 'mark_candidate', approval_request_id: 'ap-mark', release_id: 'r-2' })
   await expect(page.getByRole('region', { name: 'Decision: Approve the release candidate' })).toBeVisible()
 })
+
+for (const state of ['expired', 'pending', 'approved_live'] as const) {
+  test(`candidate decision card reflects a ${state} gate offer and its deadline`, async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await mockWork(page, fixtures())
+    const world = journeyWorld('mark')
+    const expiry = new Date(Date.now() + (state === 'expired' ? -30 : 90) * 60_000).toISOString()
+    const gate = world.approvals[0]
+    gate.id = 'ap-candidate'
+    gate.scope = 'journey.candidate'
+    gate.expires_at = expiry
+    gate.decision = state === 'pending' ? null : 'approved'
+    gate.decided_by_principal_id = gate.decision ? me.id : null
+    world.walkers['r-2'].state = 'candidate'
+    world.journey.next_action = {
+      key: 'approve_candidate', label: 'Approve candidate', stage: 'build', available: state === 'approved_live',
+      reason: state === 'expired' ? 'Gate approval expired. The agent asks again for a fresh one.' : state === 'pending' ? 'Candidate review needs an approved gate.' : '',
+      approval_request_id: state === 'expired' ? null : gate.id,
+    }
+    const build = world.journey.stages.find(s => s.key === 'build')!
+    build.gate_offer_id = gate.id
+    build.gate_offer_state = state
+    build.gate_offer_expires_at = expiry
+    await mockJourney(page, world)
+    await page.goto('/p/PHAROS?view=journey')
+    const card = page.getByRole('region', { name: 'Decision: Approve the release candidate' })
+    await expect(card).toBeVisible()
+    const button = card.getByRole('button', { name: 'Approve candidate' })
+    if (state === 'expired') {
+      const localExpiry = await page.evaluate(value => new Date(value).toLocaleString(), expiry)
+      await expect(card).toContainText(`Approval expired at ${localExpiry}`)
+      await expect(card).toContainText('The agent asks again for a fresh gate request.')
+      await expect(card).not.toContainText('Approved by you')
+      await expect(button).toBeDisabled()
+      await expect(button).toHaveAttribute('data-tip', /approval expired/i)
+    } else if (state === 'pending') {
+      await expect(card.locator('time.expiry')).toHaveAttribute('datetime', expiry)
+      await expect(card.locator('time.expiry')).toContainText('Expires in')
+      await expect(card).not.toContainText('Approved by you')
+    } else {
+      await expect(card).toContainText('Approved by you')
+      await expect(button).toBeEnabled()
+    }
+  })
+}
 
 test('Plan: a project without a release opens release 1 with one click', async ({ page }) => {
   const { calls } = await open(page, 'open')

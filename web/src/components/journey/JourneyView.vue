@@ -129,9 +129,14 @@ const next = computed<NextState>(() => {
   const j = journey.value
   if (!j) return { label: '', disabled: true, tip: '', busy: false }
   const action = j.next_action
-  const waitingForGate = !action.available && /gate/i.test(action.reason ?? '') && !!approval.value
+  const waitingForGate = !action.available && /gate/i.test(action.reason ?? '') && approval.value?.decision === null
   let disabled = !canAct.value || action.key === 'wait_for_build' || (!action.available && !waitingForGate && action.key !== 'continue_intake' && action.key !== 'decide')
   let tip = !canAct.value ? (props.person ? 'You can read this journey; changing it needs write access.' : 'Only a person can move the journey.') : action.available || waitingForGate ? '' : action.reason ?? ''
+  const offeredStage = j.stages.find(stage => stage.gate_offer_id && stage.gate_offer_id === action.approval_request_id)
+  if (offeredStage?.gate_offer_expires_at && Date.parse(offeredStage.gate_offer_expires_at) <= now.value) {
+    disabled = true
+    tip = 'Gate approval expired. The agent asks again for a fresh one.'
+  }
   if (approval.value?.decision === null && !canDecideApproval(approval.value, can)) { disabled = true; tip = 'Deciding this gate requires approval and action permissions.' }
   if (gate.value && !approval.value && action.key !== 'decide') { disabled = true; tip = tip || `Waiting for the ${gate.value} gate: an agent asks for it, you approve it here.` }
   // A pending gate is approved by the same click; labels that already say "Approve" stay as they are.

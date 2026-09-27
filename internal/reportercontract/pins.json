@@ -445,8 +445,8 @@
     }
   },
   "journey": {
-    "version": "journey/1.0",
-    "sha256": "315e2cab5b70ee2b8f9bf64bbe5702c530e51ac69e1b910feda96152c4645a1b",
+    "version": "journey/1.1",
+    "sha256": "28d58e5082a9d6cd3ef16a14de9dbcd4d5c0fe3e8d88738b8f734649d1193b29",
     "shape": {
       "GET /projects/{projectId}/journey 200": {
         "properties": {
@@ -604,6 +604,25 @@
                 },
                 "gate_live": {
                   "type": "boolean"
+                },
+                "gate_offer_expires_at": {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                "gate_offer_id": {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                "gate_offer_state": {
+                  "enum": [
+                    "pending",
+                    "approved_live",
+                    "expired",
+                    "revoked",
+                    "rejected",
+                    "grant_missing"
+                  ],
+                  "type": "string"
                 },
                 "gate_scope": {
                   "type": "string"

@@ -42,6 +42,52 @@ func TestStageRailReportsExactGate(t *testing.T) {
 	}
 }
 
+func TestGateOfferStatesInJourneyProjection(t *testing.T) {
+	const expiry = "2026-09-27T09:30:00Z"
+	for _, tc := range []struct {
+		name, decision, want                                    string
+		requestOpen, grantExists, revoked, grantLive, available bool
+	}{
+		{"pending", "", "pending", true, false, false, false, false},
+		{"approved_live", "approved", "approved_live", true, true, false, true, true},
+		{"expired pending request", "", "expired", false, false, false, false, false},
+		{"expired request", "approved", "expired", false, true, false, true, false},
+		{"expired grant", "approved", "expired", true, true, false, false, false},
+		{"revoked", "approved", "revoked", true, true, true, false, false},
+		{"rejected", "denied", "rejected", true, false, false, false, false},
+		{"grant missing", "approved", "grant_missing", true, false, false, false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			state := gateOfferState(tc.decision, tc.requestOpen, tc.grantExists, tc.revoked, tc.grantLive)
+			if state != tc.want {
+				t.Fatalf("state = %q, want %q", state, tc.want)
+			}
+			f := facts{
+				Profile: "personal", ImportedStage: stageBuild,
+				Release:   &releaseFacts{ID: "release", Number: 1, State: "candidate"},
+				Candidate: gateOffer{ID: "request", State: state, Live: state == "approved_live", ExpiresAt: expiry, DecidedBy: tc.decision},
+			}
+			projection := derive(f)
+			stage := projection.Stages[stageIndex(stageBuild)]
+			if stage.GateOfferState != tc.want || ptrVal(stage.GateOfferID) != "request" || stage.GateOfferExpiresAt != expiry {
+				t.Fatalf("build gate offer = %+v", stage)
+			}
+			if projection.NextAction.Available != tc.available {
+				t.Fatalf("next action = %+v", projection.NextAction)
+			}
+			if state == "expired" {
+				want := "Gate approval expired. The agent asks again for a fresh one."
+				if tc.decision == "" {
+					want = "Gate request expired. The agent asks again for a fresh one."
+				}
+				if projection.NextAction.Reason != want {
+					t.Fatalf("expired reason = %q, want %q", projection.NextAction.Reason, want)
+				}
+			}
+		})
+	}
+}
+
 func TestDeriveStagesAndNextAction(t *testing.T) {
 	release := func(state string, access bool) *releaseFacts {
 		return &releaseFacts{ID: "rel", Number: 1, State: state, AccessRequired: access}
