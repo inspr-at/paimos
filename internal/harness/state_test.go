@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5"
+
+	"github.com/inspr-at/paimos/internal/tenant"
 )
 
 func TestThrottledHeartbeatAndStateEvidence(t *testing.T) {
@@ -205,4 +207,226 @@ func TestStateEvidenceTracksRunOutcomeAndApprovalResolution(t *testing.T) {
 		return err
 	})
 	check(false, false, "running")
+}
+
+func TestThrottledCoordinatorResolution(t *testing.T) {
+	f := fixture(t)
+	base := "/api/projects/" + f.project + "/harness-sessions"
+	lease := "sc1-coordinator-lease-" + uid()
+	w := f.call(f.person, "POST", base, map[string]any{
+		"agent_principal_id": f.agent.ID, "harness": "codex", "host": "test-host",
+		"harness_session_ref": "sc1-coordinator-" + uid(), "worker_lease": lease,
+		"management_mode": "managed", "role": "coordinator",
+	}, "")
+	expect(t, w, 201)
+	id := decode(t, w)["id"].(string)
+	path := base + "/" + id
+	check := func(want string) {
+		t.Helper()
+		w := f.call(f.person, "GET", base+"/orchestrator", nil, "")
+		expect(t, w, 200)
+		data := decode(t, w)
+		if data["state"] != want {
+			t.Fatalf("orchestrator: got %v, want %s", data, want)
+		}
+		if want == "resolved" {
+			s := data["session"].(map[string]any)
+			if s["id"] != id || s["activity"] != "throttled" || s["needs_attention"] != false || s["has_problem"] != false {
+				t.Fatalf("resolved coordinator lost state evidence: %v", s)
+			}
+		}
+	}
+	check("unset")
+	for _, phase := range []string{"starting", "working", "yielded"} {
+		w = f.call(f.agent, "POST", path+"/heartbeat", map[string]any{"phase": phase, "activity": "throttled", "activity_sequence": 1}, lease)
+		expect(t, w, 200)
+		if phase == "starting" {
+			check("unset")
+		} else {
+			check("resolved")
+		}
+	}
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE harness_sessions SET heartbeat_at=now()-interval '3 minutes' WHERE id=$1`, id)
+		return err
+	})
+	check("unset")
+	expect(t, f.call(f.agent, "POST", path+"/heartbeat", map[string]any{"phase": "working", "activity": "throttled", "activity_sequence": 1}, lease), 200)
+	check("resolved")
+	expect(t, f.call(f.agent, "POST", path+"/stop", map[string]any{"reason": "stopped"}, lease), 200)
+	check("unset")
+}
+
+func stateRun(t *testing.T, f *harnessFixture, project, status, key string) (order, run string) {
+	t.Helper()
+	order, run = uid(), uid()
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `INSERT INTO nodes(tenant_id,id,key,kind_id,title,parent_id)
+            SELECT $1,$2,$4,id,'State work order',$3 FROM node_kinds WHERE slug='work_order'`, f.person.TenantID, order, project, key); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `INSERT INTO work_orders(tenant_id,node_id,requested_by_principal_id) VALUES($1,$2,$3)`, f.person.TenantID, order, f.person.ID); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `INSERT INTO agent_runs(tenant_id,id,work_order_id,agent_principal_id,status) VALUES($1,$2,$3,$4,$5)`, f.person.TenantID, run, order, f.agent.ID, status)
+		return err
+	})
+	return order, run
+}
+
+func TestSessionMutationsOmitUnloadedStateEvidence(t *testing.T) {
+	for _, scenario := range []string{"pending approval", "failed run"} {
+		t.Run(scenario, func(t *testing.T) {
+			f := fixture(t)
+			base := "/api/projects/" + f.project + "/harness-sessions"
+			lease := "sc1-mutation-lease-" + uid()
+			registration := map[string]any{
+				"agent_principal_id": f.agent.ID, "harness": "codex", "host": "test-host",
+				"harness_session_ref": "sc1-mutation-" + uid(), "worker_lease": lease,
+				"management_mode": "managed", "role": "worker",
+			}
+			if scenario == "failed run" {
+				order, run := stateRun(t, f, f.project, "failed", "SC1-10")
+				registration["work_order_id"], registration["run_id"] = order, run
+			} else {
+				f.tx(t, f.person, func(tx pgx.Tx) error {
+					_, err := tx.Exec(t.Context(), `INSERT INTO approval_requests(tenant_id,proposed_by_principal_id,agent_principal_id,scope,resource_kind,resource_id,rationale,expires_at)
+                        VALUES($1,$2,$2,'nodes.write','node',$3,'Continue work',now()+interval '1 hour')`, f.person.TenantID, f.agent.ID, f.ticket)
+					return err
+				})
+			}
+			unknown := func(data map[string]any) {
+				t.Helper()
+				for _, field := range []string{"run_status", "needs_attention", "has_problem"} {
+					if value, present := data[field]; present {
+						t.Fatalf("unloaded %s reported as %v", field, value)
+					}
+				}
+			}
+			w := f.call(f.person, "POST", base, registration, "")
+			expect(t, w, 201)
+			s := decode(t, w)
+			unknown(s)
+			path := base + "/" + s["id"].(string)
+			w = f.call(f.person, "POST", base, registration, "")
+			expect(t, w, 201)
+			unknown(decode(t, w)) // exact registration replay
+			for _, mutation := range []struct {
+				method, suffix string
+				body           map[string]any
+			}{
+				{"PATCH", "/binding", map[string]any{"expected_revision": s["revision"], "ticket_node_id": f.ticket, "work_shape": "ship"}},
+				{"POST", "/heartbeat", map[string]any{"phase": "working", "activity": "busy", "activity_sequence": 1}},
+				{"POST", "/yield", map[string]any{}},
+				{"POST", "/yield", map[string]any{}}, // already-yielded replay
+				{"POST", "/stop", map[string]any{"reason": "process_failed"}},
+			} {
+				w = f.call(f.agent, mutation.method, path+mutation.suffix, mutation.body, lease)
+				expect(t, w, 200)
+				data := decode(t, w)
+				if nested, ok := data["session"].(map[string]any); ok {
+					data = nested
+				}
+				unknown(data)
+				w = f.call(f.person, "GET", path, nil, "")
+				expect(t, w, 200)
+				data = decode(t, w)
+				stopped := mutation.suffix == "/stop"
+				if data["needs_attention"] != (scenario == "pending approval" && !stopped) || data["has_problem"] != (scenario == "failed run" || stopped) {
+					t.Fatalf("read after %s lost evidence: %v", mutation.suffix, data)
+				}
+				if scenario == "failed run" && data["run_status"] != "failed" {
+					t.Fatalf("read after %s lost run status: %v", mutation.suffix, data)
+				}
+			}
+			f.tx(t, f.person, func(tx pgx.Tx) error {
+				var n int
+				err := tx.QueryRow(t.Context(), `SELECT count(*) FROM events WHERE type LIKE 'harness.%'
+                    AND ("before" ?| ARRAY['run_status','needs_attention','has_problem'] OR "after" ?| ARRAY['run_status','needs_attention','has_problem'])`).Scan(&n)
+				if n != 0 {
+					t.Errorf("%d event snapshots contain unloaded evidence", n)
+				}
+				return err
+			})
+		})
+	}
+}
+
+func TestPendingApprovalStateRespectsProjectVisibility(t *testing.T) {
+	f := fixture(t)
+	second, unassigned := uid(), uid()
+	reader := tenant.Principal{ID: uid(), TenantID: f.person.TenantID, Kind: tenant.Person}
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `INSERT INTO nodes(tenant_id,id,key,kind_id,title)
+            SELECT $1,$2,'SC1-3',kind_id,'Hidden project' FROM nodes WHERE id=$3`, f.person.TenantID, second, f.project); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `INSERT INTO nodes(tenant_id,id,key,kind_id,title)
+            SELECT $1,$2,'SC1-4',id,'Unassigned resource' FROM node_kinds WHERE slug='ticket'`, f.person.TenantID, unassigned); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `INSERT INTO principals(tenant_id,id,kind,name) VALUES($1,$2,'person','Project reader')`, reader.TenantID, reader.ID); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,scope_id)
+            SELECT $1,$2,id,'project',$3 FROM roles WHERE key='member'`, reader.TenantID, reader.ID, f.project)
+		return err
+	})
+	_, sameRun := stateRun(t, f, f.project, "running", "SC1-10")
+	_, otherRun := stateRun(t, f, second, "running", "SC1-11")
+	base := "/api/projects/" + f.project + "/harness-sessions"
+	lease := "sc1-project-lease-" + uid()
+	w := f.call(f.person, "POST", base, map[string]any{
+		"agent_principal_id": f.agent.ID, "harness": "codex", "host": "test-host",
+		"harness_session_ref": "sc1-project-" + uid(), "worker_lease": lease,
+		"management_mode": "managed", "role": "worker",
+	}, "")
+	expect(t, w, 201)
+	path := base + "/" + decode(t, w)["id"].(string)
+	expect(t, f.call(f.agent, "POST", path+"/heartbeat", map[string]any{"phase": "working", "activity": "busy", "activity_sequence": 1}, lease), 200)
+	check := func(t *testing.T, p tenant.Principal, want bool) {
+		t.Helper()
+		for _, endpoint := range []string{path, "/api/harness-sessions/live", "/api/harness-sessions/live?include_inactive=true"} {
+			w := f.call(p, "GET", endpoint, nil, "")
+			expect(t, w, 200)
+			data := decode(t, w)
+			if items, ok := data["items"].([]any); ok {
+				if len(items) != 1 {
+					t.Fatalf("expected one visible session from %s: %v", endpoint, items)
+				}
+				data = items[0].(map[string]any)
+			}
+			if data["needs_attention"] != want || data["has_problem"] != false {
+				t.Fatalf("approval evidence from %s: got %v, want attention=%v", endpoint, data, want)
+			}
+		}
+	}
+	for _, scenario := range []struct {
+		name, kind        string
+		resource          any
+		reader, workspace bool
+	}{
+		{"other project node", "node", second, false, false},
+		{"other project run", "run", otherRun, false, false},
+		{"tenant proposal", "tenant", nil, false, true},
+		{"unassigned node", "node", unassigned, false, true},
+		{"same project node without run", "node", f.ticket, true, true},
+		{"same project run resource", "run", sameRun, true, true},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			approval := uid()
+			f.tx(t, f.person, func(tx pgx.Tx) error {
+				_, err := tx.Exec(t.Context(), `INSERT INTO approval_requests(tenant_id,id,proposed_by_principal_id,agent_principal_id,scope,resource_kind,resource_id,rationale,expires_at)
+                    VALUES($1,$2,$3,$3,'nodes.write',$4,$5,'Continue work',now()+interval '1 hour')`, f.person.TenantID, approval, f.agent.ID, scenario.kind, scenario.resource)
+				return err
+			})
+			check(t, reader, scenario.reader)
+			check(t, f.person, scenario.workspace)
+			f.tx(t, f.person, func(tx pgx.Tx) error {
+				_, err := tx.Exec(t.Context(), `INSERT INTO approval_decisions(tenant_id,request_id,decided_by_principal_id,decision) VALUES($1,$2,$3,'approved')`, f.person.TenantID, approval, f.person.ID)
+				return err
+			})
+			check(t, reader, false)
+		})
+	}
 }

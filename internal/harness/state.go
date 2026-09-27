@@ -14,10 +14,12 @@ import (
 // and held actions use their immutable resolution events. No message body or
 // approval rationale leaves this projection. All reads use the caller's InTenant
 // transaction and its project visibility. No mutation, event or plugin is added.
+// Nil booleans mean evidence was not loaded (mutation responses and snapshots),
+// not that attention or problems are absent.
 type StateEvidence struct {
 	RunStatus      *string `json:"run_status,omitempty"`
-	NeedsAttention bool    `json:"needs_attention"`
-	HasProblem     bool    `json:"has_problem"`
+	NeedsAttention *bool   `json:"needs_attention,omitempty"`
+	HasProblem     *bool   `json:"has_problem,omitempty"`
 }
 
 func readStateEvidence(ctx context.Context, tx pgx.Tx, ids []string) (map[string]StateEvidence, error) {
@@ -25,10 +27,19 @@ func readStateEvidence(ctx context.Context, tx pgx.Tx, ids []string) (map[string
 	if len(ids) == 0 {
 		return out, nil
 	}
+	// Resolve approval scope through its resource, as approvals.approvalFrom
+	// does. A principal's no-run proposal is not evidence for another project;
+	// workspace/unassigned resources require workspace visibility.
 	rows, err := tx.Query(ctx, `SELECT s.id::text,r.status,
     (s.stopped_at IS NULL AND (
-      coalesce(r.status='waiting',false) OR EXISTS(SELECT 1 FROM approval_requests a WHERE a.tenant_id=s.tenant_id
+      coalesce(r.status='waiting',false) OR EXISTS(SELECT 1 FROM approval_requests a
+        LEFT JOIN nodes n ON n.tenant_id=a.tenant_id AND n.id=a.resource_id AND a.resource_kind='node'
+        LEFT JOIN agent_runs ar ON ar.tenant_id=a.tenant_id AND ar.id=a.resource_id AND a.resource_kind='run'
+        LEFT JOIN nodes wn ON wn.tenant_id=ar.tenant_id AND wn.id=ar.work_order_id
+        WHERE a.tenant_id=s.tenant_id
         AND a.agent_principal_id=s.agent_principal_id
+        AND (coalesce(n.project_id,wn.project_id)=s.project_id
+          OR (coalesce(n.project_id,wn.project_id) IS NULL AND (SELECT aeon_visible_all())))
         AND (a.run_id IS NULL OR a.run_id=s.run_id) AND a.expires_at>now()
         AND NOT EXISTS(SELECT 1 FROM approval_decisions d WHERE d.tenant_id=a.tenant_id AND d.request_id=a.id))
       OR EXISTS(SELECT 1 FROM inbox_compat_messages m

@@ -626,7 +626,7 @@ func (m *Module) orchestrator(r *http.Request, tx pgx.Tx, p tenant.Principal) (a
 	if err := project(r.Context(), tx, id); err != nil {
 		return nil, err
 	}
-	rows, err := tx.Query(r.Context(), `SELECT `+sessionColumns+` FROM harness_sessions WHERE project_id=$1 AND role='coordinator' AND management='managed' AND phase IN ('working','yielded') AND activity IN ('busy','idle') AND heartbeat_at>clock_timestamp()-interval '2 minutes' AND stopped_at IS NULL`, id)
+	rows, err := tx.Query(r.Context(), `SELECT `+sessionColumns+` FROM harness_sessions WHERE project_id=$1 AND role='coordinator' AND management='managed' AND phase IN ('working','yielded') AND activity IN ('busy','idle','throttled') AND heartbeat_at>clock_timestamp()-interval '2 minutes' AND stopped_at IS NULL`, id)
 	if err != nil {
 		return nil, err
 	}
@@ -643,6 +643,11 @@ func (m *Module) orchestrator(r *http.Request, tx pgx.Tx, p tenant.Principal) (a
 		return nil, err
 	}
 	if len(found) == 1 {
+		evidence, err := readStateEvidence(r.Context(), tx, []string{found[0].ID})
+		if err != nil {
+			return nil, err
+		}
+		found[0].StateEvidence = evidence[found[0].ID]
 		return map[string]any{"state": "resolved", "session": found[0]}, nil
 	}
 	if len(found) > 1 {

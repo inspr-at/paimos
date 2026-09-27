@@ -4916,11 +4916,12 @@ components:
         worker_lease: {type: string, minLength: 32, maxLength: 256, writeOnly: true}
     HarnessSession:
       type: object
+      description: State evidence is populated on reads and omitted when unknown in mutation responses and event snapshots.
       required: [id, project_id, agent_principal_id, harness, host, management_mode, role, work_shape, advertised_capabilities, phase, activity, activity_sequence, revision, created_at]
       properties:
         run_status: {type: [string, 'null'], description: Status of the bound run when visible to the caller.}
-        needs_attention: {type: boolean, description: Waiting run, pending approval or unresolved action/reply request; content-free evidence.}
-        has_problem: {type: boolean, description: Bound run failed or lost ownership, or the stop reason reports an error or block. Normal stops are false.}
+        needs_attention: {type: boolean, description: "Waiting run, visible pending approval for this project or workspace, or unresolved action/reply request; content-free evidence. Omitted when not loaded."}
+        has_problem: {type: boolean, description: "Bound run failed or lost ownership, or the stop reason reports an error or block. Normal stops are false. Omitted when not loaded."}
         id: {type: string, format: uuid}
         project_id: {type: string, format: uuid}
         agent_principal_id: {type: string, format: uuid}
@@ -4995,7 +4996,7 @@ components:
       required: [project_id, harness, management_mode, role, phase, activity, ticket, since, heartbeat_at]
       properties:
         run_status: {type: [string, 'null'], description: Status of the bound run when visible to the caller.}
-        needs_attention: {type: boolean, description: Waiting run, pending approval or unresolved action/reply request; content-free evidence.}
+        needs_attention: {type: boolean, description: "Waiting run, visible pending approval for this project or workspace, or unresolved action/reply request; content-free evidence."}
         has_problem: {type: boolean, description: Bound run failed or lost ownership, or the stop reason reports an error or block. Normal stops are false.}
         stopped_at: {type: [string, 'null'], format: date-time}
         stop_reason: {type: [string, 'null'], description: Present only with harness.read at the project.}
