@@ -191,3 +191,123 @@ func TestPlanRemovalEmitsUndoableMembershipAndFreshScope(t *testing.T) {
 		return err
 	})
 }
+
+func TestTicketOptionsMatchSourceReleaseWriteEligibility(t *testing.T) {
+	f := ticketSetup(t)
+	for i, state := range []string{"planning", "building", "candidate", "deploying", "refused", "access", "released", "superseded", "deleted"} {
+		t.Run(state, func(t *testing.T) {
+			sub := *f
+			sub.t = t
+			f := &sub
+			id := f.existing("ticket", f.project, "Source "+state, "open")
+			var source string
+			f.tx(func(tx pgx.Tx) error {
+				if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,parent_id,title) SELECT $1,id,aeon_next_node_key($1,short_prefix),$2,'Source release' FROM node_kinds WHERE slug='release' RETURNING nodes.id::text`, f.person.TenantID, f.project).Scan(&source); err != nil {
+					return err
+				}
+				stored := state
+				if stored == "deleted" {
+					stored = "planning"
+				}
+				if _, err := tx.Exec(t.Context(), `INSERT INTO journey_releases(tenant_id,release_node_id,project_node_id,number,state,released_at) VALUES($1,$2,$3,$4,$5,CASE WHEN $5 IN ('released','superseded') THEN now() END)`, f.person.TenantID, source, f.project, i+2, stored); err != nil {
+					return err
+				}
+				if _, err := tx.Exec(t.Context(), `INSERT INTO journey_tickets(tenant_id,ticket_node_id,project_node_id,release_node_id,walker_position,source) VALUES($1,$2,$3,$4,$5,'manual')`, f.person.TenantID, id, f.project, source, i); err != nil {
+					return err
+				}
+				if state == "deleted" {
+					_, err := tx.Exec(t.Context(), `UPDATE nodes SET deleted_at=now() WHERE id=$1`, source)
+					return err
+				}
+				return nil
+			})
+			var revision int
+			f.tx(func(tx pgx.Tx) error {
+				return tx.QueryRow(t.Context(), `SELECT revision FROM journey_releases WHERE release_node_id=$1`, f.release).Scan(&revision)
+			})
+			w := f.request(f.person, http.MethodGet, "/api/projects/"+f.project+"/releases/"+f.release+"/ticket-options", "")
+			var options optionsResult
+			if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &options) != nil {
+				t.Fatalf("options %d %s", w.Code, w.Body.String())
+			}
+			want := "active_release"
+			if state == "planning" {
+				want = "other_release"
+			} else if state == "released" || state == "superseded" {
+				want = "released"
+			}
+			availability := "missing option"
+			for _, option := range options.Tickets {
+				if option.NodeID == id {
+					availability = option.Availability
+				}
+			}
+			if availability != want {
+				t.Fatalf("availability %q want %q", availability, want)
+			}
+			before := f.counts()
+			w = f.addExisting([]string{id}, revision, false)
+			if w.Code != 409 || f.counts() != before {
+				t.Fatalf("unconfirmed %d %s", w.Code, w.Body.String())
+			}
+			w = f.addExisting([]string{id}, revision, true)
+			if state == "planning" {
+				membershipOK(t, w)
+			} else if w.Code != 409 || f.counts() != before {
+				t.Fatalf("disabled source accepted or changed: %d %s", w.Code, w.Body.String())
+			}
+		})
+	}
+}
+
+func TestMixedPlanReorderMembershipUndoRestoresAllPositions(t *testing.T) {
+	f := ticketSetup(t)
+	a := f.existing("ticket", f.project, "A", "open")
+	b := f.existing("ticket", f.project, "B", "open")
+	added := membershipOK(t, f.addExisting([]string{a, b}, 1, false))
+	if added.Walker.Tickets[0].NodeID != a || added.Walker.Tickets[0].Position != 0 || added.Walker.Tickets[1].NodeID != b || added.Walker.Tickets[1].Position != 1 {
+		t.Fatalf("initial %+v", added.Walker.Tickets)
+	}
+	path := "/api/projects/" + f.project + "/releases/" + f.release
+	plan := fmt.Sprintf(`{"expected_revision":2,"ordered_ticket_ids":[%q,%q],"included_ticket_ids":[%q]}`, b, a, b)
+	changed := ticketPlan(t, f.request(f.person, http.MethodPut, path+"/plan", plan))
+	if changed.Tickets[0].NodeID != b || changed.Tickets[0].Position != 0 || !changed.Tickets[0].Included || changed.Tickets[1].NodeID != a || changed.Tickets[1].Included {
+		t.Fatalf("changed %+v", changed.Tickets)
+	}
+	var eventID int64
+	f.tx(func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `SELECT id FROM events WHERE node_id=$1 AND type='journey.release_membership_changed' ORDER BY id DESC LIMIT 1`, f.release).Scan(&eventID)
+	})
+	events.New(f.db.App, events.WithUndoHandlers(UndoHandlers())).Mount(f.mux)
+	undo := fmt.Sprintf("/api/events/%d/undo", eventID)
+	// Even B, whose membership did not change, must be fenced for its position.
+	f.tx(func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE journey_tickets SET walker_position=9 WHERE ticket_node_id=$1`, b)
+		return err
+	})
+	if w := f.request(f.person, http.MethodPost, undo, ""); w.Code != 409 {
+		t.Fatalf("unfenced other position: %d %s", w.Code, w.Body.String())
+	}
+	f.tx(func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE journey_tickets SET walker_position=0 WHERE ticket_node_id=$1`, b)
+		return err
+	})
+	if w := f.request(f.person, http.MethodPost, undo, ""); w.Code != 201 {
+		t.Fatalf("undo %d %s", w.Code, w.Body.String())
+	}
+	restored := ticketPlan(t, f.request(f.person, http.MethodGet, path+"/walker", ""))
+	if len(restored.Tickets) != 2 || restored.Tickets[0].NodeID != a || restored.Tickets[0].Position != 0 || !restored.Tickets[0].Included || restored.Tickets[1].NodeID != b || restored.Tickets[1].Position != 1 || !restored.Tickets[1].Included {
+		t.Fatalf("undo order/membership %+v", restored.Tickets)
+	}
+	// A later plan revision cannot be overwritten by a stale Undo.
+	plan = fmt.Sprintf(`{"expected_revision":%d,"ordered_ticket_ids":[%q,%q],"included_ticket_ids":[%q]}`, restored.Revision, b, a, b)
+	changed = ticketPlan(t, f.request(f.person, http.MethodPut, path+"/plan", plan))
+	f.tx(func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `SELECT id FROM events WHERE node_id=$1 AND type='journey.release_membership_changed' ORDER BY id DESC LIMIT 1`, f.release).Scan(&eventID)
+	})
+	plan = fmt.Sprintf(`{"expected_revision":%d,"ordered_ticket_ids":[%q,%q],"included_ticket_ids":[%q]}`, changed.Revision, a, b, b)
+	ticketPlan(t, f.request(f.person, http.MethodPut, path+"/plan", plan))
+	if w := f.request(f.person, http.MethodPost, fmt.Sprintf("/api/events/%d/undo", eventID), ""); w.Code != 409 {
+		t.Fatalf("stale undo %d %s", w.Code, w.Body.String())
+	}
+}

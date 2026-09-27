@@ -74,11 +74,12 @@ func replace(ctx context.Context, tx pgx.Tx, p tenant.Principal, project, releas
 	for _, ticket := range before.Tickets {
 		oldIncluded[ticket.NodeID] = ticket.Included
 	}
+	membershipChanged := false
 	for _, id := range in.Order {
-		if oldIncluded[id] == included[id] {
-			continue
+		if oldIncluded[id] != included[id] {
+			membershipChanged = true
 		}
-		if included[id] {
+		if !oldIncluded[id] && included[id] {
 			var ticketState string
 			if err := tx.QueryRow(ctx, `SELECT state FROM nodes WHERE id=$1 AND deleted_at IS NULL`, id).Scan(&ticketState); err != nil {
 				return out, err
@@ -87,6 +88,8 @@ func replace(ctx context.Context, tx pgx.Tx, p tenant.Principal, project, releas
 				return out, fail(409, "closed tickets cannot be added")
 			}
 		}
+		// A combined selection/reorder is one undoable plan. Snapshot every
+		// ordered row so restoring membership also restores a consistent order.
 		var old memberState
 		old.TicketID, old.Exists = id, true
 		if err := tx.QueryRow(ctx, `SELECT release_node_id::text,walker_position,scope_revision_required FROM journey_tickets WHERE project_node_id=$1 AND ticket_node_id=$2`, project, id).Scan(&old.ReleaseID, &old.Position, &old.ScopeRequired); err != nil {
@@ -118,7 +121,7 @@ func replace(ctx context.Context, tx pgx.Tx, p tenant.Principal, project, releas
 	if err != nil {
 		return out, err
 	}
-	if len(changesBefore.Members) > 0 {
+	if membershipChanged {
 		for _, old := range changesBefore.Members {
 			var next memberState
 			next.TicketID, next.Exists = old.TicketID, true

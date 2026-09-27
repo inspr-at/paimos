@@ -62,6 +62,7 @@ func (m *module) ticketOptions(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	project, release := strings.ToLower(r.PathValue("projectId")), strings.ToLower(r.PathValue("releaseId"))
 	q := strings.TrimSpace(r.URL.Query().Get("q"))
 	status := strings.TrimSpace(r.URL.Query().Get("status"))
 	epic := strings.TrimSpace(r.URL.Query().Get("epic"))
@@ -81,11 +82,11 @@ func (m *module) ticketOptions(w http.ResponseWriter, r *http.Request) {
 	}
 	out := optionsResult{Tickets: []ticketOption{}}
 	err := db.InTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
-		if authz.RequireTx(r.Context(), tx, p, "releases.read", authz.Scope{ProjectID: r.PathValue("projectId")}) != nil {
+		if authz.RequireTx(r.Context(), tx, p, "releases.read", authz.Scope{ProjectID: project}) != nil {
 			return fail(403, "project access required")
 		}
 		var state string
-		if err := tx.QueryRow(r.Context(), `SELECT r.state,r.revision FROM journey_releases r JOIN journey_projects j ON j.tenant_id=r.tenant_id AND j.project_node_id=r.project_node_id JOIN nodes rn ON rn.tenant_id=r.tenant_id AND rn.id=r.release_node_id JOIN nodes pn ON pn.tenant_id=r.tenant_id AND pn.id=r.project_node_id WHERE r.project_node_id=$1 AND r.release_node_id=$2 AND j.current_release_node_id=r.release_node_id AND rn.deleted_at IS NULL AND pn.deleted_at IS NULL`, r.PathValue("projectId"), r.PathValue("releaseId")).Scan(&state, &out.Revision); err != nil {
+		if err := tx.QueryRow(r.Context(), `SELECT r.state,r.revision FROM journey_releases r JOIN journey_projects j ON j.tenant_id=r.tenant_id AND j.project_node_id=r.project_node_id JOIN nodes rn ON rn.tenant_id=r.tenant_id AND rn.id=r.release_node_id JOIN nodes pn ON pn.tenant_id=r.tenant_id AND pn.id=r.project_node_id WHERE r.project_node_id=$1 AND r.release_node_id=$2 AND j.current_release_node_id=r.release_node_id AND rn.deleted_at IS NULL AND pn.deleted_at IS NULL`, project, release).Scan(&state, &out.Revision); err != nil {
 			return err
 		}
 		if state != "planning" {
@@ -97,13 +98,13 @@ func (m *module) ticketOptions(w http.ResponseWriter, r *http.Request) {
    LEFT JOIN journey_tickets j ON j.tenant_id=n.tenant_id AND j.ticket_node_id=n.id
    LEFT JOIN nodes e ON e.tenant_id=n.tenant_id AND e.id=n.parent_id AND e.deleted_at IS NULL
     AND EXISTS(SELECT 1 FROM node_kinds ek WHERE ek.tenant_id=e.tenant_id AND ek.id=e.kind_id AND ek.slug='epic')
-   LEFT JOIN journey_releases other ON other.tenant_id=j.tenant_id AND other.release_node_id=j.release_node_id
-   LEFT JOIN nodes rn ON rn.tenant_id=other.tenant_id AND rn.id=other.release_node_id
+   LEFT JOIN nodes rn ON rn.tenant_id=j.tenant_id AND rn.id=j.release_node_id AND rn.deleted_at IS NULL
+   LEFT JOIN journey_releases other ON other.tenant_id=j.tenant_id AND other.project_node_id=j.project_node_id AND other.release_node_id=rn.id
    WHERE n.project_id=$1 AND n.deleted_at IS NULL AND k.slug IN ('ticket','task')
     AND ($2='' OR n.key ILIKE '%'||$2||'%' OR n.title ILIKE '%'||$2||'%')
     AND ($3='' OR n.state=$3) AND ($4='' OR coalesce(j.feature_node_id,e.id)=nullif($4,'')::uuid)
     AND ($5='' OR k.slug=$5)
-   ORDER BY n.key,n.id LIMIT $6`, r.PathValue("projectId"), q, status, epic, kind, limit)
+   ORDER BY n.key,n.id LIMIT $6`, project, q, status, epic, kind, limit)
 		if err != nil {
 			return err
 		}
@@ -121,12 +122,14 @@ func (m *module) ticketOptions(w http.ResponseWriter, r *http.Request) {
 				t.Availability = "closed"
 			case t.ReleaseID == nil:
 				t.Availability = "addable"
-			case *t.ReleaseID == r.PathValue("releaseId"):
+			case *t.ReleaseID == release:
 				t.Availability = "included"
 			case releaseState != nil && (*releaseState == "released" || *releaseState == "superseded"):
 				t.Availability = "released"
-			default:
+			case releaseState != nil && *releaseState == "planning":
 				t.Availability = "other_release"
+			default:
+				t.Availability = "active_release"
 			}
 			out.Tickets = append(out.Tickets, t)
 		}
@@ -236,7 +239,9 @@ func addExisting(ctx context.Context, tx pgx.Tx, p tenant.Principal, project, re
 				return result, fail(409, "ticket is already included")
 			}
 			var oldState string
-			if err := tx.QueryRow(ctx, `SELECT state FROM journey_releases WHERE project_node_id=$1 AND release_node_id=$2 FOR UPDATE`, project, *old.ReleaseID).Scan(&oldState); err != nil {
+			if err := tx.QueryRow(ctx, `SELECT r.state FROM journey_releases r JOIN nodes n ON n.tenant_id=r.tenant_id AND n.id=r.release_node_id AND n.deleted_at IS NULL WHERE r.project_node_id=$1 AND r.release_node_id=$2 FOR UPDATE OF r`, project, *old.ReleaseID).Scan(&oldState); err == pgx.ErrNoRows {
+				return result, fail(409, "source release is unavailable")
+			} else if err != nil {
 				return result, err
 			}
 			if oldState != "planning" {

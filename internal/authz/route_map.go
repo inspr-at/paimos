@@ -110,6 +110,7 @@ var RoutePermissions = map[string]string{
 	"GET /api/projects/{projectId}/messages":                                          "inbox.manage",
 	"GET /api/projects/{projectId}/messages/listen":                                   "inbox.read",
 	"GET /api/projects/{projectId}/releases/{releaseId}/walker":                       "releases.read",
+	"GET /api/projects/{projectId}/release-memberships":                              "releases.read",
 	"GET /api/projects/{projectId}/releases/{releaseId}/ticket-options":               "releases.read",
 	"GET /api/projects/{projectId}/requirements":                                      "requirements.read",
 	"GET /api/public/quotes/{publicTenant}/{token}":                                   "public",

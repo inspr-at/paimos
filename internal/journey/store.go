@@ -87,6 +87,12 @@ type nodeSnap struct {
 }
 
 func ensureJourney(ctx context.Context, tx pgx.Tx, p tenant.Principal, projectID string) error {
+	// Match release membership/plan and node-tree mutations: tenant advisory
+	// lock first, then journey project, release and ticket rows. recordDerivation
+	// already locks the project, before act reaches its explicit lockJourney.
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended(current_setting('aeon.tenant_id',true),0))`); err != nil {
+		return err
+	}
 	var one int
 	err := tx.QueryRow(ctx, `
 		SELECT 1

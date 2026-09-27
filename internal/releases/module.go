@@ -32,6 +32,7 @@ type module struct{ pool *pgxpool.Pool }
 func New(pool *pgxpool.Pool) httpapi.Module { return &module{pool} }
 func (m *module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/projects/{projectId}/releases/{releaseId}/walker", m.get)
+	mux.HandleFunc("GET /api/projects/{projectId}/release-memberships", m.readMemberships)
 	mux.HandleFunc("PUT /api/projects/{projectId}/releases/{releaseId}/plan", m.put)
 	mux.HandleFunc("POST /api/projects/{projectId}/releases/{releaseId}/tickets", m.createTicket)
 	mux.HandleFunc("GET /api/projects/{projectId}/releases/{releaseId}/ticket-options", m.ticketOptions)
@@ -97,7 +98,7 @@ func respond(w http.ResponseWriter, out any, err error) {
 	slog.Error("releases", "err", err)
 	httpapi.WriteError(w, 500, "internal")
 }
-func principal(w http.ResponseWriter, r *http.Request, write bool) (tenant.Principal, bool) {
+func projectPrincipal(w http.ResponseWriter, r *http.Request, write bool) (tenant.Principal, bool) {
 	p, ok := tenant.PrincipalFrom(r.Context())
 	if !ok {
 		httpapi.WriteError(w, 401, "authentication required")
@@ -107,8 +108,19 @@ func principal(w http.ResponseWriter, r *http.Request, write bool) (tenant.Princ
 		httpapi.WriteError(w, 403, "person required")
 		return p, false
 	}
-	if !uuid.MatchString(r.PathValue("projectId")) || !uuid.MatchString(r.PathValue("releaseId")) {
-		httpapi.WriteError(w, 400, "invalid project or release id")
+	if !uuid.MatchString(r.PathValue("projectId")) {
+		httpapi.WriteError(w, 400, "invalid project id")
+		return p, false
+	}
+	return p, true
+}
+func principal(w http.ResponseWriter, r *http.Request, write bool) (tenant.Principal, bool) {
+	p, ok := projectPrincipal(w, r, write)
+	if !ok {
+		return p, false
+	}
+	if !uuid.MatchString(r.PathValue("releaseId")) {
+		httpapi.WriteError(w, 400, "invalid release id")
 		return p, false
 	}
 	return p, true
