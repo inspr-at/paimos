@@ -228,14 +228,14 @@ func (r *Remote) Route(ctx context.Context, runID, daemonID string, accountIDs [
 }
 
 func (r *Remote) Claim(ctx context.Context, runID, daemonID, generation string, reservations []string) error {
+	// Retain the attempted binding even if the HTTP response is lost. It is
+	// only a header hint; the server remains the authority for claim ownership.
+	r.mu.Lock()
+	r.daemonID, r.generation = daemonID, generation
+	r.mu.Unlock()
 	err := r.Client.Do(ctx, "POST", "/api/runs/"+url.PathEscape(runID)+"/claim", map[string]any{
 		"daemon_id": daemonID, "daemon_generation": generation, "reservation_ids": reservations,
 	}, nil)
-	if err == nil {
-		r.mu.Lock()
-		r.daemonID, r.generation = daemonID, generation
-		r.mu.Unlock()
-	}
 	return err
 }
 
@@ -247,6 +247,12 @@ func (r *Remote) Report(ctx context.Context, runID string, t Telemetry) error {
 	r.mu.RLock()
 	daemon, generation := r.daemonID, r.generation
 	r.mu.RUnlock()
+	return r.ReportForClaim(ctx, runID, daemon, generation, t)
+}
+
+// ReportForClaim preserves the durable run's fencing identity across restart
+// or another claim. Possession of these public strings grants no authority.
+func (r *Remote) ReportForClaim(ctx context.Context, runID, daemon, generation string, t Telemetry) error {
 	if daemon == "" || generation == "" {
 		return errors.New("run has no daemon claim")
 	}

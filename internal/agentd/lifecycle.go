@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"slices"
 	"sort"
 	"time"
 
@@ -158,17 +159,20 @@ func (s *Supervisor) Lifecycle(accountID string) LifecycleStatus {
 			e.mu.Unlock()
 			continue
 		}
-		if e.record.State == "ownership_lost" && !e.record.ExitObserved {
+		if (e.record.State == "ownership_lost" || e.process == nil) && !noLocalProcess(e.record) {
 			v.UnconfirmedRunIDs = append(v.UnconfirmedRunIDs, e.record.RunID)
 		} else if e.process != nil && !e.record.ExitObserved {
 			v.ActiveRunIDs = append(v.ActiveRunIDs, e.record.RunID)
 		}
-		if len(e.record.Pending) > 0 || e.record.SettlementGap {
+		if len(e.record.Pending) > 0 || e.record.SettlementGap || e.record.State == "claim_pending" {
 			v.SettlementPendingRunIDs = append(v.SettlementPendingRunIDs, e.record.RunID)
 		}
 		if e.record.ExecutionMode == VerificationPurpose {
 			state := e.record.State
-			if !e.record.ExitObserved && (state == "completed" || state == "failed" || state == "cancelled") {
+			if e.record.LaunchState == launchRefused && !slices.Contains(v.VerificationUnavailable, e.record.AccountID) {
+				v.VerificationUnavailable = append(v.VerificationUnavailable, e.record.AccountID)
+			}
+			if !noLocalProcess(e.record) && (state == "completed" || state == "failed" || state == "cancelled") {
 				state = "unconfirmed"
 			}
 			if len(e.record.Pending) > 0 || e.record.SettlementGap {
@@ -251,7 +255,15 @@ func (s *Supervisor) settlePending(ctx context.Context) {
 func (s *Supervisor) flushReports(ctx context.Context, e *owned) error {
 	for len(e.record.Pending) > 0 {
 		t := e.record.Pending[0]
-		if err := s.api.Report(ctx, e.record.RunID, t); err != nil {
+		var err error
+		if reporter, ok := s.api.(interface {
+			ReportForClaim(context.Context, string, string, string, Telemetry) error
+		}); ok {
+			err = reporter.ReportForClaim(ctx, e.record.RunID, s.daemonID, e.record.Generation, t)
+		} else {
+			err = s.api.Report(ctx, e.record.RunID, t)
+		}
+		if err != nil {
 			return err
 		}
 		e.record.Pending = e.record.Pending[1:]

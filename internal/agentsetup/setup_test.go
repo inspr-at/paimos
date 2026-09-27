@@ -30,6 +30,7 @@ type setupAPI struct {
 	view            View
 	cleaned         []string
 	computerCleaned bool
+	progress        *SetupProgress
 }
 
 func (*setupAPI) Guide(context.Context) (Guide, error) {
@@ -83,6 +84,7 @@ func (a *setupAPI) Reconcile(_ context.Context, p ProofRequest) (View, error) {
 	if Hash([]byte(p.LifecycleSecret)) != a.request.LifecycleHash {
 		return View{}, errors.New("lifecycle proof mismatch")
 	}
+	a.progress = p.Progress
 	a.cleaned = append([]string(nil), p.Cleaned...)
 	a.computerCleaned = p.ComputerCleaned
 	v := a.view

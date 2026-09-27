@@ -332,8 +332,9 @@ func (e *Engine) reconcile(ctx context.Context, s *snapshot) (Progress, error) {
 				p.Action = "An approved vendor account is no longer signed in with its approved identity. Use normal vendor login, then resume setup."
 				return p, nil
 			}
-			if observed.State == "setup_failed" {
-				p.Stage = "blocked"
+			if observed.State == "connected" && observed.ErrorCode == "verification_unavailable" {
+				p.Stage = "verification_unavailable"
+				p.LocalProcesses = local.State
 				p.Action = "This installed harness cannot enforce safe verification, so its verification was not launched. The computer remains paired. Use a qualified harness version, or choose Connect only during a fresh authenticated pairing approval."
 				return p, nil
 			}
@@ -346,13 +347,15 @@ func (e *Engine) reconcile(ctx context.Context, s *snapshot) (Progress, error) {
 		}
 	}
 	if p.Stage != "provisioning" {
-		pending, failed := false, false
+		pending, failed, unavailable := false, false, false
 		for _, a := range v.Enrollments {
 			if a.VerificationRunID == "" || a.State != "connected" {
 				continue
 			}
 			switch a.VerificationState {
 			case "completed":
+			case "unavailable":
+				unavailable = true
 			case "failed", "cancelled", "ownership_lost", "expired":
 				failed = true
 			default:
@@ -360,6 +363,9 @@ func (e *Engine) reconcile(ctx context.Context, s *snapshot) (Progress, error) {
 			}
 		}
 		switch {
+		case unavailable:
+			p.Stage = "verification_unavailable"
+			p.Action = "Computer remains paired; the selected verification mode is unavailable. No run or allowance was retried."
 		case failed:
 			p.Stage = "verification_failed"
 			p.Action = "Verification did not complete. No automatic retry or allowance refill was performed."
@@ -464,20 +470,23 @@ func observedProgress(v View, local LocalStatus) *SetupProgress {
 		p.ErrorCode = "login_required"
 		return p
 	}
+	if local.Ready {
+		p.State = "connected"
+	}
 	for _, a := range v.Enrollments {
-		if a.State != "connected" || a.VerificationRunID == "" || a.VerificationState == "completed" {
+		if a.State != "connected" || a.VerificationRunID == "" || (a.VerificationState != "queued" && a.VerificationState != "unavailable") {
 			continue
+		}
+		if a.VerificationState == "unavailable" {
+			p.ErrorCode = "verification_unavailable"
+			return p
 		}
 		for _, id := range local.VerificationUnavailable {
 			if a.AccountID == id {
-				p.State = "setup_failed"
-				p.ErrorCode = "installation_failed"
+				p.ErrorCode = "verification_unavailable"
 				return p
 			}
 		}
-	}
-	if local.Ready {
-		p.State = "connected"
 	}
 	return p
 }

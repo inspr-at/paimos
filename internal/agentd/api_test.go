@@ -54,6 +54,42 @@ func TestRemoteTelemetryErrorClassification(t *testing.T) {
 	}
 }
 
+func TestRemoteLostClaimAndPerRunTelemetryBinding(t *testing.T) {
+	var mu sync.Mutex
+	var reported []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/runs/run/claim" {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		if r.URL.Path == "/api/runs/run/telemetry" {
+			mu.Lock()
+			reported = append(reported, r.Header.Get("X-Aeon-Daemon-ID")+"/"+r.Header.Get("X-Aeon-Daemon-Generation"))
+			mu.Unlock()
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+	remote := NewRemote(server.URL, "test-key")
+	if err := remote.Claim(t.Context(), "run", "daemon", "original", []string{"reservation"}); err == nil {
+		t.Fatal("claim failure hidden")
+	}
+	if err := remote.Report(t.Context(), "run", Telemetry{Sequence: 1, Kind: "finished", Status: "failed"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := remote.Claim(t.Context(), "other-run", "daemon", "new-generation", []string{"other-reservation"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := remote.ReportForClaim(t.Context(), "run", "daemon", "original", Telemetry{Sequence: 1, Kind: "finished", Status: "failed"}); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(reported) != 2 || reported[0] != "daemon/original" || reported[1] != "daemon/original" {
+		t.Fatal("terminal retry lost the exact prior claim generation")
+	}
+}
+
 func TestRemoteUsesAeonRunAndInboxContract(t *testing.T) {
 	seen := map[string]bool{}
 	var mu sync.Mutex
