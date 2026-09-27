@@ -136,6 +136,8 @@ const imported = computed(() => isImported(journey.value) && past.value && !brie
 .decide { display: grid; gap: 6px; }
 .decide-btn { justify-content: flex-start; gap: 8px; width: 100%; height: 40px; }
 .decide-btn .sub { margin-left: auto; font-size: 12px; font-weight: 500; opacity: .75; }
+/* Keep helper text aligned with Go's helper, which has a trailing arrow. */
+.decide-btn:not(:has(svg))::after { content: ''; flex: 0 0 14px; }
 .reason { display: grid; gap: 6px; }
 .reason label { font-size: 12.5px; color: var(--ink-2); }
 .reason-actions { display: flex; justify-content: flex-end; gap: 6px; }

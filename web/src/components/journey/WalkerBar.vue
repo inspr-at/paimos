@@ -292,7 +292,8 @@ defineExpose({ reveal })
   .walker-bar { flex-wrap: wrap; gap: 6px 8px; padding: 6px 10px; }
   .rt2 { order: 1; }
   .tools { order: 2; margin-left: auto; }
-  .tool { width: 32px; height: 32px; padding: 0; justify-content: center; border-radius: 50%; }
+  .gic, .xbtn, .tool { width: 44px; height: 44px; }
+  .tool { padding: 0; justify-content: center; border-radius: 50%; }
   .tool-icon { display: block; }
   .tool-label { display: none; }
   .nav { order: 3; flex-basis: 100%; }

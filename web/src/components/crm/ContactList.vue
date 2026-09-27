@@ -194,7 +194,8 @@ defineExpose({ add: () => start(null) })
 @media (max-width: 600px) {
   .contact { flex-wrap: wrap; }
   .row-actions { width: 100%; justify-content: flex-end; margin-top: -4px; }
-  .row-actions .icon-btn { width: 40px; height: 40px; }
+  .add-contact { height: 44px; }
+  .row-actions .icon-btn { width: 44px; height: 44px; }
   .form-actions .btn { flex: 1; height: 44px; }
 }
 </style>

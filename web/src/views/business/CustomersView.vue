@@ -292,7 +292,8 @@ watch(() => business.open.crm, on => { if (on) void store.load(true) })
   .list-search .field { height: 44px; font-size: 16px; }
   .slash { display: none; }
   .seg { flex: 1 1 100%; }
-  .seg button { flex: 1; height: 36px; white-space: nowrap; }
+  .seg button { flex: 1; height: 38px; white-space: nowrap; }
+  .toolbar :deep(.btn) { height: 44px; }
   .keys-hint { display: none; }
   .state { padding: 32px 18px; }
 }
