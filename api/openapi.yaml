@@ -68,7 +68,7 @@ paths:
     post:
       operationId: createMemberInvite
       summary: Create an invite and return its join link once
-      description: No email is sent. The join URL contains a token that is stored only as a hash. The invited email must be verified by the identity provider before the invite can be accepted.
+      description: Aeon sends no email. With provision_account, the configured identity provider sends a sign-in setup email after the Aeon invite commits. The join URL contains a token stored only as a hash. The invited email must be verified by the identity provider before acceptance.
       requestBody:
         required: true
         content:
@@ -85,7 +85,8 @@ paths:
                 properties:
                   invite: {$ref: '#/components/schemas/Invite'}
                   join_url: {type: string}
-        '400': {description: Invalid email, expiry, role or project}
+                  account: {$ref: '#/components/schemas/InviteAccountResult'}
+        '400': {description: Invalid email, expiry, role or project, or provisioning requested without a configured provisioner}
         '403': {description: Permission denied or the role exceeds the inviter}
         '409': {description: Email already belongs to an active member}
   /members/invites/{id}:
@@ -97,6 +98,18 @@ paths:
         '204': {description: Invite revoked}
         '404': {description: No such invite}
         '409': {description: Invite was already accepted}
+  /members/invites/{id}/provision:
+    post:
+      operationId: retryMemberInviteProvision
+      summary: Retry sign-in account provisioning for a pending invite
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: Provisioning outcome, content: {application/json: {schema: {$ref: '#/components/schemas/InviteAccountResult'}}}}
+        '400': {description: No provisioner configured}
+        '403': {description: Permission denied}
+        '404': {description: Invite not found}
+        '409': {description: Invite is closed or provisioning already succeeded}
   /members/{principal_id}/deactivate:
     post:
       operationId: deactivateMember
@@ -3496,6 +3509,8 @@ components:
       required: [email]
       properties:
         email: {type: string, format: email}
+        display_name: {type: string, maxLength: 200, description: Invitee name for a newly created sign-in account. Required when provision_account is true.}
+        provision_account: {type: boolean, default: false, description: Ask the configured provider to create a sign-in account and send its setup email after the invite commits.}
         workspace_role_id: {type: string, format: uuid}
         project_roles:
           type: array
@@ -3506,6 +3521,12 @@ components:
               project_id: {type: string, format: uuid}
               role_id: {type: string, format: uuid}
         expires_in_days: {type: integer, minimum: 1, maximum: 90, default: 14}
+    InviteAccountResult:
+      type: object
+      required: [status]
+      properties:
+        status: {type: string, enum: [invited, exists, failed]}
+        reason: {type: string, description: Safe generic failure text; never includes provider responses or credentials.}
     AccessAuditPage:
       type: object
       required: [items, next_after]
@@ -3525,7 +3546,7 @@ components:
         data: {type: object}
     MemberDirectory:
       type: object
-      required: [people, agents, invites, imported, owner_count]
+      required: [people, agents, invites, imported, owner_count, provisioner]
       properties:
         people: {type: array, items: {$ref: '#/components/schemas/Member'}}
         agents:
@@ -3544,6 +3565,10 @@ components:
         invites: {type: array, items: {$ref: '#/components/schemas/Invite'}}
         imported: {type: array, items: {type: object}}
         owner_count: {type: integer}
+        provisioner:
+          oneOf:
+            - {type: 'null'}
+            - {type: object, required: [name], properties: {name: {type: string}}}
     Greeting:
       type: object
       additionalProperties: false

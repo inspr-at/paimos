@@ -45,6 +45,7 @@ import (
 	"github.com/inspr-at/paimos/internal/greetings"
 	"github.com/inspr-at/paimos/internal/harness"
 	"github.com/inspr-at/paimos/internal/httpapi"
+	"github.com/inspr-at/paimos/internal/identity"
 	"github.com/inspr-at/paimos/internal/imports"
 	"github.com/inspr-at/paimos/internal/inbox"
 	"github.com/inspr-at/paimos/internal/intake"
@@ -197,6 +198,12 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 	if err != nil {
 		return fmt.Errorf("release history: %w", err)
 	}
+	// AEON-178: invites can create the sign-in account through a configured identity
+	// provisioner (none by default). A misconfigured provisioner stops startup.
+	provisioner, err := identity.FromEnv()
+	if err != nil {
+		return fmt.Errorf("identity provisioner: %w", err)
+	}
 	// R2: webhook wake for inbox deliveries.
 	go inbox.NewWorker(pool, inbox.WorkerOptions{}).Run(ctx)
 	api := &httpapi.Server{
@@ -207,7 +214,7 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 			authMod,
 			// ADR-003: permissions, roles, members, project members, invites and
 			// access audit. P1 shipped with it unmounted, so /api/me/permissions answered 403.
-			authz.New(pool),
+			authz.NewWithProvisioner(pool, provisioner),
 			nodes.New(pool, nodes.SQLWriter{}),
 			fromclassic.New(pool),
 			relations.New(pool),

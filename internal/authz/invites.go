@@ -17,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/identity"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
 
@@ -67,10 +68,12 @@ func (e roleMissing) Error() string { return "role missing" }
 func (m *Module) createInvite(w http.ResponseWriter, r *http.Request) {
 	p := actor(r)
 	var body struct {
-		Email           string          `json:"email"`
-		WorkspaceRoleID *string         `json:"workspace_role_id"`
-		ProjectRoles    []inviteProject `json:"project_roles"`
-		ExpiresInDays   *int            `json:"expires_in_days"`
+		Email            string          `json:"email"`
+		DisplayName      string          `json:"display_name"`
+		ProvisionAccount bool            `json:"provision_account"`
+		WorkspaceRoleID  *string         `json:"workspace_role_id"`
+		ProjectRoles     []inviteProject `json:"project_roles"`
+		ExpiresInDays    *int            `json:"expires_in_days"`
 	}
 	if err := decode(r, &body); err != nil {
 		apiFail(w, 400, "invalid", "body", "Request body must be one JSON object")
@@ -79,6 +82,15 @@ func (m *Module) createInvite(w http.ResponseWriter, r *http.Request) {
 	email := strings.TrimSpace(body.Email)
 	if !emailPattern.MatchString(email) || len(email) > 320 {
 		apiFail(w, 400, "invalid", "email", "Enter an email address")
+		return
+	}
+	name := strings.TrimSpace(body.DisplayName)
+	if body.ProvisionAccount && m.provisionerFor(p.TenantID) == nil {
+		apiFail(w, 400, "not_configured", "provision_account", "Account provisioning is not configured")
+		return
+	}
+	if len(name) > 200 || (body.ProvisionAccount && name == "") {
+		apiFail(w, 400, "invalid", "display_name", "Enter the invitee's name (up to 200 characters)")
 		return
 	}
 	days := inviteDaysDefault
@@ -155,9 +167,9 @@ func (m *Module) createInvite(w http.ResponseWriter, r *http.Request) {
 			workspace = *body.WorkspaceRoleID
 		}
 		var id string
-		if err := tx.QueryRow(r.Context(), `INSERT INTO invites(tenant_id,email,workspace_role_id,token_hash,expires_at,created_by)
-			VALUES($1::uuid,$2,$3::uuid,$4,now() + make_interval(days => $5),$6::uuid)
-			RETURNING id::text`, p.TenantID, email, workspace, sum[:], days, p.ID).Scan(&id); err != nil {
+		if err := tx.QueryRow(r.Context(), `INSERT INTO invites(tenant_id,email,workspace_role_id,token_hash,expires_at,created_by,account_display_name)
+			VALUES($1::uuid,$2,$3::uuid,$4,now() + make_interval(days => $5),$6::uuid,$7)
+			RETURNING id::text`, p.TenantID, email, workspace, sum[:], days, p.ID, optionalName(body.ProvisionAccount, name)).Scan(&id); err != nil {
 			return err
 		}
 		for _, item := range body.ProjectRoles {
@@ -177,8 +189,120 @@ func (m *Module) createInvite(w http.ResponseWriter, r *http.Request) {
 		writeInviteErr(w, err)
 		return
 	}
-	reply(w, http.StatusCreated, map[string]any{"invite": created, "join_url": joinURL(r, slug, token)})
+	out := map[string]any{"invite": created, "join_url": joinURL(r, slug, token)}
+	if body.ProvisionAccount {
+		out["account"] = m.provisionAccount(r.Context(), p, created.ID, email, name, "")
+	}
+	reply(w, http.StatusCreated, out)
 }
+
+func optionalName(enabled bool, name string) any {
+	if !enabled {
+		return nil
+	}
+	return name
+}
+
+type accountResult struct {
+	Status string `json:"status"`
+	Reason string `json:"reason,omitempty"`
+}
+
+// provisionAccount is called only after createInvite commits, or after retry
+// has checked the invite and the actor in a tenant transaction.
+func (m *Module) provisionAccount(ctx context.Context, p tenant.Principal, id, email, name, subject string) accountResult {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
+	defer cancel()
+	out := accountResult{Status: "failed", Reason: "The sign-in account could not be set up. Retry the invite or ask an administrator."}
+	if subject != "" {
+		if sender, ok := m.provisioner.(identity.InviteSender); ok && sender.SendInvite(ctx, subject) == nil {
+			out = accountResult{Status: "invited"}
+		}
+	} else {
+		result, err := m.provisioner.EnsureUser(ctx, email, name)
+		if err == nil && (result.Status == "invited" || result.Status == "exists") {
+			out = accountResult{Status: result.Status}
+			subject = result.Subject
+		} else {
+			var pe *identity.ProvisionError
+			if errors.As(err, &pe) {
+				subject = pe.Subject
+			}
+		}
+	}
+	// Store only status and a subject needed to finish our own created user.
+	// Provider responses and the credential never enter this event.
+	err := db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `UPDATE invites SET account_status=$1,account_subject=$2,account_started_at=NULL
+			WHERE tenant_id=$3::uuid AND id=$4::uuid`, out.Status, nullText(subject), p.TenantID, id); err != nil {
+			return err
+		}
+		typ := "invite.account_provision_failed"
+		if out.Status != "failed" {
+			typ = "invite.account_provisioned"
+		}
+		return appendEvent(ctx, tx, p, typ, nil, map[string]string{"invite_id": id, "status": out.Status})
+	})
+	if err != nil {
+		return accountResult{Status: "failed", Reason: "The sign-in account status could not be saved. Ask an administrator."}
+	}
+	return out
+}
+
+func nullText(value string) any {
+	if value == "" {
+		return nil
+	}
+	return value
+}
+
+func (m *Module) retryInviteProvision(w http.ResponseWriter, r *http.Request) {
+	p := actor(r)
+	id := r.PathValue("id")
+	if !uuidPattern.MatchString(id) {
+		apiFail(w, 400, "invalid", "id", "Invite ID must be a UUID")
+		return
+	}
+	if m.provisionerFor(p.TenantID) == nil {
+		apiFail(w, 400, "not_configured", "", "Account provisioning is not configured")
+		return
+	}
+	var email, name, subject string
+	err := db.InTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
+		if err := m.authorizeMutation(r.Context(), tx, p, "members.manage", nil); err != nil {
+			return err
+		}
+		var status, savedSubject, savedName *string
+		var startedAt *time.Time
+		err := tx.QueryRow(r.Context(), `SELECT email,account_display_name,account_status,account_subject,account_started_at
+			FROM invites WHERE tenant_id=$1::uuid AND id=$2::uuid AND accepted_at IS NULL AND revoked_at IS NULL AND expires_at>now() FOR UPDATE`, p.TenantID, id).Scan(&email, &savedName, &status, &savedSubject, &startedAt)
+		if err != nil {
+			return err
+		}
+		if status == nil || savedName == nil || (*status != "failed" && (*status != "processing" || startedAt == nil || time.Since(*startedAt) < 30*time.Second)) {
+			return errInviteProvisionClosed
+		}
+		name = *savedName
+		if savedSubject != nil {
+			subject = *savedSubject
+		}
+		if _, err := tx.Exec(r.Context(), `UPDATE invites SET account_status='processing',account_started_at=now() WHERE tenant_id=$1::uuid AND id=$2::uuid`, p.TenantID, id); err != nil {
+			return err
+		}
+		return appendEvent(r.Context(), tx, p, "invite.account_provision_started", nil, map[string]string{"invite_id": id, "status": "processing"})
+	})
+	if errors.Is(err, errInviteProvisionClosed) {
+		apiFail(w, 409, "conflict", "id", "This invite cannot be provisioned again")
+		return
+	}
+	if err != nil {
+		internalFail(w, err)
+		return
+	}
+	reply(w, 200, m.provisionAccount(r.Context(), p, id, email, name, subject))
+}
+
+var errInviteProvisionClosed = errors.New("invite provisioning closed")
 
 func (m *Module) revokeInvite(w http.ResponseWriter, r *http.Request) {
 	p := actor(r)
