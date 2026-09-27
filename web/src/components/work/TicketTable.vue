@@ -2,7 +2,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { ListItem } from '../../lib/api'
-import { COLUMN_BY_ID, costUnitLabel, layoutWidths, releaseLabel, tagList, visibleColumns, type ColumnId, type ListPrefs, type TagRef } from '../../lib/columns'
+import { COLUMN_BY_ID, costUnitLabel, layoutWidths, releaseLabel, tagList, titleRoom, visibleColumns, type ColumnId, type ListPrefs, type TagRef } from '../../lib/columns'
 import type { GroupBy, RowGroup, EpicRef } from '../../lib/ticketList'
 import type { OutlineEntry, TreeMeta } from '../../lib/outline'
 import { absoluteTime, highlight, kindLabel, plural, priorityLabel, relativeTime, statusMeta, type SortField, type SortKey } from '../../lib/work'
@@ -96,12 +96,23 @@ const has = (id: ColumnId) => ids.value.includes(id)
 watch(ids, value => emit('layout', value, layout.value.customised), { immediate: true })
 // Live widths while dragging a column edge; saved when the drag ends.
 const dragWidths = ref<Partial<Record<ColumnId, number>>>({})
-// Every column but Title has a width; Title takes the rest (about 960px at most on
-// wide tables, where the spare width widens the text columns instead).
+// Every column but Title has a col width; Title takes the rest (about 960px at most
+// on wide tables, where the spare width widens the text columns instead). Dragging
+// Title's edge gives it a width of its own. The columns beside it move within their
+// min and max, so a fixed column never collapses.
 const widths = computed(() => layoutWidths(ids.value, width.value, props.prefs, dragWidths.value))
 function colWidth(id: ColumnId) { return id === 'title' ? null : widths.value[id] ?? null }
 const titleWidth = computed(() => Math.max(0, Math.round(width.value - Object.values(widths.value).reduce((sum, w) => sum + (w ?? 0), 0))))
 const shownWidth = (id: ColumnId) => id === 'title' ? titleWidth.value : colWidth(id) ?? 0
+function bounds(id: ColumnId) {
+  if (id === 'title') return titleRoom(ids.value, width.value, props.prefs, dragWidths.value)
+  const def = COLUMN_BY_ID.get(id)!
+  return { min: def.min, max: def.max }
+}
+function clampColumn(id: ColumnId, value: number) {
+  const range = bounds(id)
+  return Math.max(range.min, Math.min(range.max, Math.round(value)))
+}
 // Status, priority and epic line up in the quick-create row when they keep their default places.
 const quickAligned = computed(() => ids.value[2] === 'status' && ids.value[3] === 'priority')
 const card = ref<HTMLElement>()
@@ -118,38 +129,61 @@ onMounted(() => {
   }
 })
 onBeforeUnmount(() => { phoneQuery.removeEventListener('change', phoneChange); sizer?.disconnect() })
-// ---------- Column widths: drag a header edge, double-click to fit the content ----------
+// ---------- Column widths: drag a header edge; double-click fits, or resets Title ----------
 let resizing: { id: ColumnId; startX: number; startWidth: number } | null = null
 // Two presses within 350ms on the same edge fit the column (pointerdown's
-// preventDefault keeps the browser from reporting dblclick reliably).
+// preventDefault keeps the browser from reporting dblclick reliably). Title
+// returns to automatic instead of fitting its content.
 let lastPress = { id: '' as ColumnId | '', at: 0 }
 function resizeStart(event: PointerEvent, id: ColumnId) {
   if (event.button !== 0) return
   event.preventDefault(); event.stopPropagation()
-  if (lastPress.id === id && event.timeStamp - lastPress.at < 350) { lastPress = { id: '', at: 0 }; autofit(id); return }
+  if (lastPress.id === id && event.timeStamp - lastPress.at < 350) {
+    lastPress = { id: '', at: 0 }
+    resizing = null
+    if (id === 'title') resetTitle()
+    else autofit(id)
+    return
+  }
   lastPress = { id, at: event.timeStamp }
   resizing = { id, startX: event.clientX, startWidth: shownWidth(id) }
   ;(event.currentTarget as HTMLElement).setPointerCapture(event.pointerId)
 }
 function resizeMove(event: PointerEvent) {
   if (!resizing) return
-  const def = COLUMN_BY_ID.get(resizing.id)!
-  dragWidths.value = { ...dragWidths.value, [resizing.id]: Math.max(def.min, Math.min(def.max, Math.round(resizing.startWidth + event.clientX - resizing.startX))) }
+  dragWidths.value = { ...dragWidths.value, [resizing.id]: clampColumn(resizing.id, resizing.startWidth + event.clientX - resizing.startX) }
 }
 function resizeEnd() {
   if (!resizing) return
   const id = resizing.id
+  const start = resizing.startWidth
   resizing = null
   const value = dragWidths.value[id]
-  if (value !== undefined) emit('widths', { ...(props.prefs?.widths ?? {}), [id]: value })
+  // A click on Title's edge, without a drag, leaves it automatic.
+  if (value === undefined || (id === 'title' && Math.abs(value - start) < 1)) {
+    if (id === 'title' && typeof props.prefs?.widths?.title !== 'number') {
+      const { title: _title, ...rest } = dragWidths.value
+      dragWidths.value = rest
+    }
+    return
+  }
+  emit('widths', { ...(props.prefs?.widths ?? {}), [id]: value })
 }
 function resizeKey(event: KeyboardEvent, id: ColumnId) {
   if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
   event.preventDefault()
-  const def = COLUMN_BY_ID.get(id)!
-  const next = Math.max(def.min, Math.min(def.max, shownWidth(id) + (event.key === 'ArrowRight' ? 16 : -16)))
+  const next = clampColumn(id, shownWidth(id) + (event.key === 'ArrowRight' ? 16 : -16))
   dragWidths.value = { ...dragWidths.value, [id]: next }
   emit('widths', { ...(props.prefs?.widths ?? {}), [id]: next })
+}
+// Title goes back to taking the spare width. Other columns keep the widths the person set.
+function resetTitle() {
+  const { title: _title, ...rest } = dragWidths.value
+  dragWidths.value = rest
+  if (typeof props.prefs?.widths?.title !== 'number') return
+  const next = { ...(props.prefs?.widths ?? {}) }
+  delete next.title
+  emit('widths', next)
 }
 // Fit: the widest content in the column (header included), within the column's bounds.
 function autofit(id: ColumnId) {
@@ -358,8 +392,8 @@ defineExpose({
             <span v-else class="th-label">{{ column.label }}</span>
             <span
               v-if="!phone" class="col-resize" role="separator" aria-orientation="vertical" tabindex="0"
-              :aria-label="`Resize ${column.label} column`" :aria-valuenow="shownWidth(column.id)" :aria-valuemin="column.min" :aria-valuemax="column.max"
-              data-tip="Drag to resize · double-click to fit" @pointerdown="resizeStart($event, column.id)" @pointermove="resizeMove" @pointerup="resizeEnd" @pointercancel="resizeEnd"
+              :aria-label="`Resize ${column.label} column`" :aria-valuenow="shownWidth(column.id)" :aria-valuemin="bounds(column.id).min" :aria-valuemax="bounds(column.id).max"
+              :data-tip="column.id === 'title' ? 'Drag to resize · double-click to reset' : 'Drag to resize · double-click to fit'" @pointerdown="resizeStart($event, column.id)" @pointermove="resizeMove" @pointerup="resizeEnd" @pointercancel="resizeEnd"
               @keydown="resizeKey($event, column.id)" @click.stop
             />
           </th>

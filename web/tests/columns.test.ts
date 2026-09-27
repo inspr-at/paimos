@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { automaticColumns, layoutWidths, moveColumn, orderOf, releaseLabel, tagList, TITLE_TARGET, visibleColumns, widthOf } from '../src/lib/columns.ts'
+import { automaticColumns, COLUMN_BY_ID, layoutWidths, moveColumn, orderOf, releaseLabel, tagList, TITLE_TARGET, titleRoom, visibleColumns, widthOf } from '../src/lib/columns.ts'
 import { byPosition, positionBetween, positionOf, type Attachment } from '../src/lib/attachments.ts'
 
 const ids = (width: number, options: Parameters<typeof visibleColumns>[1]) => visibleColumns(width, options).columns.map(c => c.id)
@@ -70,6 +70,33 @@ test('wide tables stop Title near 960px and give the spare width to the text col
   assert.ok(Math.abs(2000 - sum(sized) - 700) <= 2 || sized.assignee === 320)
   // Live drag widths count as sized too.
   assert.equal(layoutWidths([...wide], 2000, null, { assignee: 180 }).assignee, 180)
+})
+
+test('an explicit title width resizes its neighbours and never collapses a fixed column', () => {
+  const ids = ['key', 'title', 'status', 'priority', 'assignee', 'updated'] as const
+  const table = 1200
+  const sum = (w: Partial<Record<string, number>>) => Object.values(w).reduce((a: number, b) => a + (b ?? 0), 0)
+  const wideTitle = layoutWidths([...ids], table, { widths: { title: 700 } })
+  assert.ok(Math.abs(table - sum(wideTitle) - 700) <= 1)
+  // The next column gives way first, and stops at its minimum.
+  assert.equal(wideTitle.status, COLUMN_BY_ID.get('status')!.min)
+  for (const id of ids) if (id !== 'title') {
+    const def = COLUMN_BY_ID.get(id)!
+    assert.ok(wideTitle[id]! >= def.min && wideTitle[id]! <= def.max, `${id} ${wideTitle[id]}`)
+  }
+  const narrow = layoutWidths([...ids], table, { widths: { title: 320 } })
+  assert.ok(Math.abs(table - sum(narrow) - 320) <= 1)
+  assert.equal(narrow.status, COLUMN_BY_ID.get('status')!.max)
+  // A column the person already sized stays put; the slack comes from the others.
+  const locked = layoutWidths([...ids], table, { widths: { title: 700, status: 200 } })
+  assert.equal(locked.status, 200)
+  for (const id of ['key', 'priority', 'assignee', 'updated'] as const) {
+    const def = COLUMN_BY_ID.get(id)!
+    assert.ok(locked[id]! >= def.min && locked[id]! <= def.max, `${id} ${locked[id]}`)
+  }
+  const room = titleRoom([...ids], table, null)
+  assert.equal(room.min, COLUMN_BY_ID.get('title')!.min)
+  assert.equal(room.max, table - ids.filter(id => id !== 'title').reduce((total, id) => total + COLUMN_BY_ID.get(id)!.min, 0))
 })
 
 test('release and tags read the classic fields', () => {
