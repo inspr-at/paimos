@@ -20,6 +20,19 @@ const deployGates = computed(() => pharos.value?.workflow_steps?.find(s => s.key
 const handoffs = computed(() => ctx.data.handoffs.value.value.filter(h => h.stage === 'deploy'))
 const deployed = computed(() => handoffs.value.some(h => h.operation === 'deploy' && h.state === 'succeeded'))
 const deciding = computed(() => next.value.key === 'approve_deploy' || next.value.key === 'retry_deploy')
+const decisionDescription = computed(() => {
+  if (next.value.key === 'approve_deploy' && next.value.label === 'Apply deployment approval') return 'The gate is approved. Apply that decision to hand the release to Pharos for deployment.'
+  if (next.value.key === 'approve_deploy' && next.value.label === 'Await deployment evidence') return 'The approved gate was applied. Pharos now reports the deployment and verification outcome here.'
+  return ACTION_LONG[next.value.key]
+})
+const awaitingEvidence = computed(() => next.value.key === 'approve_deploy' && next.value.label === 'Await deployment evidence')
+const handoffEmpty = computed(() => awaitingEvidence.value ? 'Pharos has not reported a deployment attempt yet.' : 'No deployment was handed to Pharos yet. After you apply the deployment approval, Pharos reports each attempt here.')
+const launchBlockedNote = computed(() => {
+  if (next.value.key === 'retry_deploy') return 'Retrying records a new handoff after a fresh approval; the host applies the release once admission can succeed.'
+  if (awaitingEvidence.value) return 'The approval is already applied. The host applies the release once admission can succeed.'
+  if (next.value.label === 'Apply deployment approval') return 'The gate is approved. Applying it records the handoff; the host applies the release once admission can succeed.'
+  return 'Approving the deployment still records your decision; the host applies the release once admission can succeed.'
+})
 const approvals = computed(() => gateApprovals(ctx.approvals.value, 'deploy', journey.value.current_release_id))
 const approval = computed(() => offeredApproval(ctx.approvals.value, journey.value, 'deploy', ctx.now.value))
 const state = computed(() => journey.value.stages.find(s => s.key === 'deploy')?.state ?? 'later')
@@ -52,26 +65,26 @@ const launchNote = computed(() => launchReady.value ? 'ready' : atDeploy.value ?
       </section>
       <section v-if="handoffs.length || state !== 'later'" class="j-card" aria-labelledby="deploy-handoffs">
         <header class="j-card-head"><p id="deploy-handoffs" class="eyebrow">Handoffs · deploy and verify</p></header>
-        <HandoffList :handoffs="handoffs" :now="ctx.now.value" empty="No deployment was handed to Pharos yet. After you approve the deployment, Pharos reports each attempt here." />
+        <HandoffList :handoffs="handoffs" :now="ctx.now.value" :empty="handoffEmpty" />
       </section>
     </div>
     <div class="j-col">
       <GateCard v-if="!launchReady && atDeploy" eyebrow="Blocked" title="Launch admission is closed" tone="blocked">
         <p>{{ launch.reason || 'Pharos did not say why.' }}</p>
-        <p class="j-note">Approving the deployment still records your decision; the host applies the release once admission can succeed.</p>
+        <p class="j-note">{{ launchBlockedNote }}</p>
       </GateCard>
       <section v-else-if="launchReady" class="j-card ready" aria-label="Launch admission is ready">
         <p class="eyebrow ok-eyebrow"><AppIcon name="check" :size="11" />Launch admission</p>
         <p>Pharos can admit this release.</p>
       </section>
       <GateCard
-        v-if="deciding" eyebrow="Decision" :title="next.key === 'retry_deploy' ? 'The host did not apply it' : 'Approve deployment'"
+        v-if="deciding" eyebrow="Decision" :title="next.key === 'retry_deploy' ? 'The host did not apply it' : next.label"
         :action="{ label: ctx.next.value.label, disabled: ctx.next.value.disabled, busy: ctx.next.value.busy, tip: ctx.next.value.tip }" @act="ctx.runNext()"
       >
-        <p>{{ ACTION_LONG[next.key] }}</p>
+        <p>{{ decisionDescription }}</p>
         <p v-if="!next.available && next.reason" class="j-note">{{ next.reason }}</p>
         <GateApprovals gate="deploy" :approvals="approvals" :on="ctx.releaseLabel.value" :can-decide="ctx.canAct.value" :now="ctx.now.value" :me="ctx.me.value" />
-        <p v-if="!approval" class="j-note">An agent asks for the deployment gate; it appears here for you to approve.</p>
+        <p v-if="!approval && !awaitingEvidence" class="j-note">{{ next.approval_request_id ? 'The action needs the current gate details. Refresh to check its availability.' : 'An agent asks for a fresh deployment gate; it appears here for you to approve.' }}</p>
       </GateCard>
       <GateCard v-else-if="state === 'done' || deployed" eyebrow="Deployed" :title="ctx.releaseLabel.value" tone="record"><p>Pharos applied and verified the release.</p></GateCard>
       <LaterCard v-else stage="deploy" :detail="ctx.release.value && !launchReady && launch.reason ? `Launch admission: ${launch.reason.charAt(0).toLowerCase()}${launch.reason.slice(1)}` : ''" />
