@@ -11,14 +11,14 @@ export const HEARTBEAT_STALE_MS = 3 * 60_000
 export const HARNESS_LABEL: Record<string, string> = { codex: 'Codex', claude: 'Claude', pi: 'Pi', cursor: 'Cursor', grok: 'Grok' }
 export const harnessLabel = (harness: string) => HARNESS_LABEL[harness] ?? harness.charAt(0).toUpperCase() + harness.slice(1)
 
-export type SessionGroup = 'needs' | 'working' | 'throttled' | 'problem' | 'unresponsive' | 'idle' | 'stopped'
+export type SessionGroup = 'needs' | 'awaiting' | 'working' | 'throttled' | 'problem' | 'unresponsive' | 'idle' | 'stopped'
 export type LiveTone = 'busy' | 'idle' | 'attention' | 'quiet' | 'stopped' | 'throttled' | 'problem'
 export interface SessionStatus { group: SessionGroup; tone: LiveTone; label: string; state: AgentState; reasons?: StateReason[] }
 export const GROUPS: { id: SessionGroup; label: string }[] = [
-  { id: 'problem', label: 'Problem' }, { id: 'unresponsive', label: 'No heartbeat' }, { id: 'needs', label: 'Needs something' }, { id: 'throttled', label: 'Throttled' },
+  { id: 'problem', label: 'Problem' }, { id: 'unresponsive', label: 'No heartbeat' }, { id: 'needs', label: 'Needs something' }, { id: 'awaiting', label: 'Awaiting heartbeat' }, { id: 'throttled', label: 'Throttled' },
   { id: 'working', label: 'Working' }, { id: 'idle', label: 'Idle' }, { id: 'stopped', label: 'Stopped' },
 ]
-const STATE_GROUP: Record<AgentState, SessionGroup> = { working: 'working', awaiting: 'needs', unresponsive: 'unresponsive', waiting: 'needs', throttled: 'throttled', problem: 'problem', idle: 'idle', stale: 'idle', stopped: 'stopped' }
+const STATE_GROUP: Record<AgentState, SessionGroup> = { working: 'working', awaiting: 'awaiting', unresponsive: 'unresponsive', waiting: 'needs', throttled: 'throttled', problem: 'problem', idle: 'idle', stale: 'idle', stopped: 'stopped' }
 const STATE_TONE: Record<AgentState, LiveTone> = { working: 'busy', awaiting: 'attention', unresponsive: 'attention', waiting: 'attention', throttled: 'throttled', problem: 'problem', idle: 'idle', stale: 'quiet', stopped: 'stopped' }
 export function heartbeatStale(session: HarnessSession, now: number, preferences = DEFAULT_AGENT_STATE) {
   return !session.heartbeat_at || now - Date.parse(session.heartbeat_at) >= preferences.yellowMinutes * 60_000
@@ -116,13 +116,13 @@ export function needsYou(session: HarnessSession, pending: Approval[], held: (Pr
 }
 
 export function groupSessions(sessions: HarnessSession[], now: number, needs: (session: HarnessSession) => boolean) {
-  const buckets: Record<SessionGroup, { session: HarnessSession; status: SessionStatus }[]> = { problem: [], unresponsive: [], needs: [], throttled: [], working: [], idle: [], stopped: [] }
+  const buckets: Record<SessionGroup, { session: HarnessSession; status: SessionStatus }[]> = { problem: [], unresponsive: [], needs: [], awaiting: [], throttled: [], working: [], idle: [], stopped: [] }
   for (const session of sessions) {
     const status = sessionStatus(session, now, needs(session))
     buckets[status.group].push({ session, status })
   }
   const beat = (s: HarnessSession) => Date.parse(s.heartbeat_at ?? s.created_at)
-  for (const group of ['problem', 'unresponsive', 'needs', 'throttled', 'working', 'idle'] as const) buckets[group].sort((a, b) => beat(b.session) - beat(a.session))
+  for (const group of ['problem', 'unresponsive', 'needs', 'awaiting', 'throttled', 'working', 'idle'] as const) buckets[group].sort((a, b) => beat(b.session) - beat(a.session))
   buckets.stopped.sort((a, b) => Date.parse(b.session.stopped_at ?? b.session.created_at) - Date.parse(a.session.stopped_at ?? a.session.created_at))
   return buckets
 }

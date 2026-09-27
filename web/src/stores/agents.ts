@@ -215,7 +215,7 @@ export const useAgents = defineStore('agents', () => {
   }
   const views = computed(() => sessions.value.map(viewOf))
   const grouped = computed(() => {
-    const out: Record<SessionStatus['group'], SessionView[]> = { problem: [], unresponsive: [], needs: [], throttled: [], working: [], idle: [], stopped: [] }
+    const out: Record<SessionStatus['group'], SessionView[]> = { problem: [], unresponsive: [], needs: [], awaiting: [], throttled: [], working: [], idle: [], stopped: [] }
     for (const view of views.value) out[view.status.group].push(view)
     for (const [group, list] of Object.entries(out)) {
       const at = (v: SessionView) => Date.parse((group === 'stopped' ? v.session.stopped_at : v.session.heartbeat_at) ?? v.session.created_at)
