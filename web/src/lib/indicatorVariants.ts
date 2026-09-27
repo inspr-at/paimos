@@ -12,7 +12,11 @@ export interface IndicatorVariant {
 
 // Add the named SFC to components/indicators to enable a tile. LiveBot discovers
 // files at build time; parallel packages need no router or builtin wiring.
-// Every renderer accepts only state, size (default 26), pulse, seed and lead.
+// Every renderer accepts state (AgentState: working/waiting/throttled/problem/
+// idle/stale/stopped), size (default 26), pulse, seed and lead. LiveBot supplies
+// --agent-state-color and viewer dimming, plus the accessible state word; each
+// renderer supplies AgentStateMark and stops motion outside working. Never use
+// a brand accent for a state. SC1 needs no router/module/plugin registration.
 export const indicatorVariants: readonly IndicatorVariant[] = [
   { id: 'pulse', name: 'Pulse', description: 'A precise, quiet sweep', family: 'indicator', rank: 0, file: 'Pulse.vue' },
   { id: 'robot-1', name: 'Robot 1', description: 'Calm and composed', family: 'robot', rank: 1, file: 'Robot1.vue' },

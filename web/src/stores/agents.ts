@@ -7,11 +7,12 @@ import {
   requestControl, resolveMessage, revokeApproval, sendMessage, setAccountState,
   type AgentAccount, type AgentRun, type Approval, type HarnessSession, type ModelProfile, type ProjectMessage, type SessionControl,
 } from '../lib/agents'
-import { agentName, groupSessions, harnessLabel, heldRequests, needsYou, pendingApprovals, runModel, sessionStatus, type SessionStatus } from '../lib/agentState'
+import { agentName, harnessLabel, heldRequests, needsYou, pendingApprovals, runModel, sessionStatus, type SessionStatus } from '../lib/agentState'
 import { advanceActivity, type ActivityEvidence } from '../lib/liveAgents'
 import { toast } from '../lib/toast'
 import { usePolledData } from '../lib/usePolledData'
 import { useProjects } from './projects'
+import { useAgentAppearance } from '../lib/agentAppearance'
 
 // forbidden: not for this person; error: the read failed (any other status).
 export type Availability = 'idle' | 'ready' | 'forbidden' | 'error'
@@ -32,6 +33,7 @@ async function all<T>(items: T[], work: (item: T) => Promise<void>) {
 
 export const useAgents = defineStore('agents', () => {
   const projects = useProjects()
+  const { choice: statePreferences } = useAgentAppearance()
   const now = ref(Date.now())
   const sessionsRead = usePolledData(async () => {
     const out = new Map<string, HarnessSession>()
@@ -192,7 +194,7 @@ export const useAgents = defineStore('agents', () => {
     const routeKey = project?.routeKey ?? session.project?.key ?? ''
     const node = session.ticket ?? (session.ticket_node_id ? nodes.value[session.ticket_node_id] : undefined)
     return {
-      session, status: sessionStatus(session, now.value, needsYou(session, pending.value, held.value)), name: agentName(session, addresses.value), harness: harnessLabel(session.harness),
+      session, status: sessionStatus(session, now.value, needsYou(session, pending.value, held.value), statePreferences.value, run), name: agentName(session, addresses.value), harness: harnessLabel(session.harness),
       account: run?.account_id ? accountById.value.get(run.account_id)?.label ?? '' : '',
       model: (run?.model_profile_id ? modelById.value.get(run.model_profile_id)?.slug : '') || runModel(run),
       run, projectKey: routeKey, projectTitle: project?.title ?? session.project?.title ?? '',
@@ -201,10 +203,12 @@ export const useAgents = defineStore('agents', () => {
   }
   const views = computed(() => sessions.value.map(viewOf))
   const grouped = computed(() => {
-    const out: Record<SessionStatus['group'], SessionView[]> = { needs: [], working: [], idle: [], stopped: [] }
-    const buckets = groupSessions(sessions.value, now.value, s => needsYou(s, pending.value, held.value))
-    const byId = new Map(views.value.map(v => [v.session.id, v]))
-    for (const group of ['needs', 'working', 'idle', 'stopped'] as const) out[group] = buckets[group].map(entry => byId.get(entry.session.id)!).filter(Boolean)
+    const out: Record<SessionStatus['group'], SessionView[]> = { problem: [], needs: [], throttled: [], working: [], idle: [], stopped: [] }
+    for (const view of views.value) out[view.status.group].push(view)
+    for (const [group, list] of Object.entries(out)) {
+      const at = (v: SessionView) => Date.parse((group === 'stopped' ? v.session.stopped_at : v.session.heartbeat_at) ?? v.session.created_at)
+      list.sort((a, b) => at(b) - at(a))
+    }
     return out
   })
   const byAgent = (principalId: string) => views.value.filter(v => v.session.agent_principal_id === principalId)

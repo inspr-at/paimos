@@ -1,12 +1,14 @@
 <!-- Robot 2 · calm-friendly: softened linework, rare blinks and a quiet typing cursor.
      SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
+import type { AgentState } from '../../lib/agentSignals'
+import AgentStateMark from './AgentStateMark.vue'
 import { computed, ref, watch } from 'vue'
 
 // IV1 discovers this presentational SFC by filename; its wrapper owns labels,
 // event evidence, viewer preferences and hovering. No API or settings access.
 const props = withDefaults(defineProps<{
-  state: 'working' | 'waiting' | 'stale'
+  state: AgentState
   size?: number
   pulse: number
   seed: string
@@ -22,13 +24,13 @@ let sequence = 0
 // A pre-existing count on mount is history, not a new event. A keyed path
 // restarts one 600 ms glint even when another event arrives during the last.
 watch(() => props.pulse, (value, previous) => {
-  if (Number.isFinite(value) && value > previous && props.state !== 'stale') glint.value = ++sequence
+  if (Number.isFinite(value) && value > previous && props.state === 'working') glint.value = ++sequence
 })
-watch(() => props.state, state => { if (state === 'stale') glint.value = 0 })
+watch(() => props.state, state => { if (state !== 'working') glint.value = 0 })
 </script>
 
 <template>
-  <svg class="robot-indicator robot-2" :class="[state, { lead }]" :style="style" :width="size" :height="size" viewBox="0 0 32 32" aria-hidden="true" focusable="false">
+  <svg class="agent-indicator-art robot-indicator robot-2" :class="[state, { lead }]" :style="style" :width="size" :height="size" viewBox="0 0 32 32" aria-hidden="true" focusable="false">
     <circle class="disk" cx="16" cy="16" r="14.5" />
     <circle class="rim" cx="16" cy="16" r="14" />
     <g class="linework">
@@ -42,20 +44,16 @@ watch(() => props.state, state => { if (state === 'stale') glint.value = 0 })
     <rect class="screen" x="11.5" y="18" width="9" height="2.5" rx="1.25" />
     <path class="typing" d="M13 19.25h2.5" />
     <path class="cursor" d="M18 18.8v.9" />
-    <g v-if="state === 'waiting'" class="clock">
-      <circle cx="26" cy="6" r="4.5" /><path d="M26 3.7V6l1.7 1.1" />
-    </g>
-    <path v-if="glint && state !== 'stale'" :key="glint" class="glint" d="m6 3 1.1 2.9L10 7 7.1 8.1 6 11 4.9 8.1 2 7l2.9-1.1Z" @animationend="glint = 0" />
+    <AgentStateMark :state="state" x="21" y="0" :size="11" />
+    <path v-if="glint && state === 'working'" :key="glint" class="glint" d="m6 3 1.1 2.9L10 7 7.1 8.1 6 11 4.9 8.1 2 7l2.9-1.1Z" @animationend="glint = 0" />
   </svg>
 </template>
 
 <style scoped>
 .robot-indicator {
-  --signal: color-mix(in srgb, var(--accent, #2f8f86) 70%, var(--teal, #2f8f86));
+
   display: inline-block; flex: none; width: var(--size); height: var(--size); vertical-align: middle; overflow: visible;
 }
-.waiting { --signal: var(--warn, #9a6b12); }
-.stale { --signal: var(--ink-3, #7b8585); }
 .disk { fill: var(--surface-raised, #fffefa); }
 .rim { fill: none; stroke: var(--signal); stroke-width: 1.25; opacity: .38; }
 .linework { fill: none; stroke: var(--ink, #203c3d); stroke-width: 1.35; stroke-linecap: round; stroke-linejoin: round; }

@@ -11,7 +11,7 @@ const longKey = 'AEON-LONG-PROJECT-202'
 async function contained(chip: Locator, labels = true) {
   const geometry = await chip.evaluate(element => {
     const box = element.getBoundingClientRect()
-    const children = [...element.querySelectorAll('.face, .count, .name, .key, .elapsed')].filter(el => el.getBoundingClientRect().width)
+    const children = [...element.querySelectorAll('.face, .count, .name, .key, .chip-state')].filter(el => el.getBoundingClientRect().width)
     return {
       width: box.width,
       children: children.map(el => {
@@ -23,7 +23,7 @@ async function contained(chip: Locator, labels = true) {
   for (const child of geometry.children) {
     expect(child.left, `${child.kind} inside left inset`).toBeGreaterThanOrEqual(5)
     expect(child.right, `${child.kind} inside right inset`).toBeGreaterThanOrEqual(7)
-    if (child.kind.includes('elapsed')) expect(child.clipped).toBe(false)
+    if (child.kind.includes('chip-state')) expect(child.clipped).toBe(false)
     if (child.kind.includes('name') || child.kind.includes('key')) {
       expect(child.width).toBeGreaterThan(12)
       expect(child.ellipsis).toBe('ellipsis')
@@ -32,7 +32,7 @@ async function contained(chip: Locator, labels = true) {
   if (labels) {
     await expect(chip.locator('.name')).toContainText(longName)
     await expect(chip.locator('.key')).toContainText(longKey)
-    await expect(chip.locator('.elapsed')).toHaveText('10m')
+    await expect(chip.locator('.chip-state')).toHaveText('Working')
   }
   return geometry
 }

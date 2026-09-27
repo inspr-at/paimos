@@ -18,6 +18,11 @@
 // replays them with tenant/project visibility. Clients treat them as read hints.
 // AEON-184 adds GET /api/harness-sessions/live: the agents actively working
 // in each visible project right now, for the Projects page (live.go).
+// SC1/AEON-221 accepts heartbeat activity=throttled with the existing event and
+// lease/sequence fencing. New(pool) and Plugin() remain the module and manifest
+// constructors; no new coordinator wiring is required. Migration 0881 extends
+// the activity constraint. Read endpoints attach content-free StateEvidence.
+//
 // AEON-192 adds activity_note on heartbeat. New(pool) remains the coordinator's
 // httpapi.Module constructor and Plugin() remains its compiled manifest.
 package harness
@@ -78,6 +83,7 @@ func (m *Module) Mount(mux *http.ServeMux) {
 }
 
 type Session struct {
+	StateEvidence
 	ID                     string         `json:"id"`
 	ProjectID              string         `json:"project_id"`
 	AgentPrincipalID       string         `json:"agent_principal_id"`
@@ -436,7 +442,23 @@ func (m *Module) list(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, erro
 		}
 		out = append(out, s)
 	}
-	return out, rows.Err()
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]string, len(out))
+	for i := range out {
+		ids[i] = out[i].ID
+	}
+	evidence, err := readStateEvidence(r.Context(), tx, ids)
+	if err != nil {
+		return nil, err
+	}
+	for i := range out {
+		out[i].StateEvidence = evidence[out[i].ID]
+	}
+	return out, nil
 }
 func (m *Module) status(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
 	s, err := load(r.Context(), tx, r.PathValue("projectId"), r.PathValue("sessionId"), false)
@@ -458,6 +480,11 @@ func (m *Module) status(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, er
 	}
 	err = rows.Err()
 	rows.Close()
+	if err != nil {
+		return nil, err
+	}
+	evidence, err := readStateEvidence(r.Context(), tx, []string{s.ID})
+	s.StateEvidence = evidence[s.ID]
 	return s, err
 }
 func (m *Module) orchestrator(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
@@ -558,7 +585,7 @@ func (m *Module) heartbeat(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 	if in.Activity == "" {
 		in.Activity = s.Activity
 	}
-	if in.Activity != "unknown" && in.Activity != "busy" && in.Activity != "idle" {
+	if in.Activity != "unknown" && in.Activity != "busy" && in.Activity != "idle" && in.Activity != "throttled" {
 		return nil, workorders.Fail(400, "invalid activity")
 	}
 	if in.ActivitySequence < s.ActivitySequence {

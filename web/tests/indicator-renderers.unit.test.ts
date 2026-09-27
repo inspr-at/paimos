@@ -17,6 +17,8 @@ function component(filename: string): Component {
   const exports: { default?: Component } = {}
   new Function('require', 'exports', outputText)((id: string) => {
     if (id === '../../lib/avatar') return Avatar
+    if (id === './AgentStateMark.vue') return component('AgentStateMark')
+    if (id.endsWith('.css')) return {}
     if (id !== 'vue') throw new Error(`Unexpected renderer dependency: ${id}`)
     return Vue
   }, exports)
@@ -79,7 +81,7 @@ it.each<[string, Component]>([['Pulse', Pulse], ['Robot 1', Robot1], ['Robot 5',
     expect(count(root, 'glint')).toBe(0)
     props.pulse = 11
     await nextTick()
-    expect(count(root, 'glint')).toBe(1)
+    expect(count(root, 'glint')).toBe(0)
     props.state = 'stale'
     await nextTick()
     expect(count(root, 'glint')).toBe(0)

@@ -12,7 +12,7 @@ import AppIcon from '../AppIcon.vue'
 import TicketPeekLink from '../TicketPeekLink.vue'
 import KeyCap from '../KeyCap.vue'
 import Avatar from '../Avatar.vue'
-import LiveDot from './LiveDot.vue'
+import AgentStateLabel from './AgentStateLabel.vue'
 import AgentGlyph from './AgentGlyph.vue'
 import { activityOf, currentStep, type ActivitySession } from './activity'
 
@@ -105,8 +105,7 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
         <template v-if="view && !loading">
           <AgentGlyph :view="view" :size="36" />
           <h2 class="name">{{ view.name }}</h2>
-          <LiveDot :tone="view.status.tone" />
-          <span class="state-text" :class="view.status.group">{{ view.status.label }}</span>
+          <AgentStateLabel :state="view.status.state" />
         </template>
         <span class="spacer" />
         <button type="button" class="icon-btn sm flat" aria-label="Close session details" aria-keyshortcuts="Escape" data-tip="Close · Esc" @click="emit('close')"><AppIcon name="close" :size="15" /></button>
@@ -116,7 +115,7 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
         <span v-if="view.session.host" class="host-meta">on {{ view.session.host }}</span>
         <span class="spacer" />
         <button v-if="address && canWrite" type="button" class="btn sm" @click="focusComposer"><AppIcon name="inbox" :size="14" />Message</button>
-        <template v-if="view.status.group !== 'stopped'">
+        <template v-if="view.session.phase !== 'stopped'">
           <button type="button" class="btn sm" :aria-disabled="!!controlBlock(view, 'interrupt')" :data-tip="controlBlock(view, 'interrupt') || 'Stop the current turn'" @click="control('interrupt')"><AppIcon name="interrupt" :size="14" />Interrupt</button>
           <button type="button" class="btn sm stop" :aria-disabled="!!controlBlock(view, 'stop')" :data-tip="controlBlock(view, 'stop') || 'End this session'" @click="control('stop')"><AppIcon name="halt" :size="14" />Stop</button>
         </template>

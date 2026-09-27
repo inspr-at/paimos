@@ -47,11 +47,12 @@ const canRevoke = computed(() => session.identity?.principal.kind === 'person' &
 const canDecide = computed(() => session.identity?.principal.kind === 'person' && (can('approvals.decide') || canResolve.value))
 const canDecideApproval = (approval: Approval) => session.identity?.principal.kind === 'person' && allowedToDecide(approval, can)
 const history = computed(() => decidedApprovals(agents.approvals, agents.now))
-const counts = computed(() => ({ working: agents.grouped.working.length, idle: agents.grouped.idle.length }))
+const counts = computed(() => ([['working', 'working'], ['needs', 'need something'], ['throttled', 'throttled'], ['problem', 'with a problem'], ['idle', 'idle'], ['stopped', 'stopped']] as const)
+  .filter(([group]) => agents.grouped[group].length).map(([group, label]) => `${agents.grouped[group].length} ${group === 'needs' && agents.grouped[group].length === 1 ? 'needs something' : label}`))
 const summary = computed(() => {
   const parts: string[] = []
   if (agents.needsCount) parts.push(`${agents.needsCount} ${agents.needsCount === 1 ? 'needs' : 'need'} you`)
-  if (agents.sessionsState === 'ready' && agents.loaded) parts.push(...(agents.sessions.length ? [`${counts.value.working} working`, `${counts.value.idle} idle`] : ['No agent connected yet']))
+  if (agents.sessionsState === 'ready' && agents.loaded) parts.push(...(agents.sessions.length ? counts.value : ['No agent connected yet']))
   return parts.join(' · ') || (agents.loaded ? 'Nothing waits on you' : '')
 })
 

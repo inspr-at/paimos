@@ -1,0 +1,46 @@
+/* SPDX-License-Identifier: AGPL-3.0-only */
+/* State colours are independent of brand/button accents. */
+:root {
+  --agent-standard-working: #287b2c; --agent-standard-waiting: #916400;
+  --agent-standard-throttled: #7945b7; --agent-standard-problem: #c33532;
+  --agent-colour-blind-working: #2163ae; --agent-colour-blind-waiting: #a34c00;
+  --agent-colour-blind-throttled: #7745b5; --agent-colour-blind-problem: #b32c7a;
+  --agent-standard-inactive: #687078; --agent-colour-blind-inactive: var(--agent-standard-inactive);
+  --agent-monochrome-working: var(--ink); --agent-monochrome-waiting: var(--ink);
+  --agent-monochrome-throttled: var(--ink); --agent-monochrome-problem: var(--ink);
+  --agent-monochrome-inactive: var(--ink-2);
+}
+:root[data-theme="dark"] {
+  --agent-standard-working: #89d875; --agent-standard-waiting: #edc351;
+  --agent-standard-throttled: #bf9af3; --agent-standard-problem: #ff8b82;
+  --agent-colour-blind-working: #82baff; --agent-colour-blind-waiting: #ffb16c;
+  --agent-colour-blind-throttled: #bf9af3; --agent-colour-blind-problem: #f28dca;
+  --agent-standard-inactive: #a4aab0;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --agent-standard-working: #89d875; --agent-standard-waiting: #edc351;
+    --agent-standard-throttled: #bf9af3; --agent-standard-problem: #ff8b82;
+    --agent-colour-blind-working: #82baff; --agent-colour-blind-waiting: #ffb16c;
+    --agent-colour-blind-throttled: #bf9af3; --agent-colour-blind-problem: #f28dca;
+    --agent-standard-inactive: #a4aab0;
+  }
+}
+.agent-state-surface {
+  background: color-mix(in srgb, var(--agent-state-color) 6%, var(--surface-raised));
+  opacity: var(--agent-state-opacity, 1);
+}
+.agent-indicator-art, .live-bot, .agent-state-label { opacity: var(--agent-state-opacity, 1); }
+.agent-indicator-art { filter: saturate(var(--agent-state-saturation, 1)); }
+.live-bot .agent-indicator-art,
+.agent-state-surface .live-bot,
+.agent-state-surface .agent-indicator-art,
+.agent-state-surface .agent-state-label { opacity: 1; }
+.agent-indicator-art:not(.working) *, .live-bot:not(.working) * { animation: none !important; }
+
+.agent-indicator-art { --signal: var(--agent-state-color, var(--agent-standard-working)); }
+.agent-indicator-art.waiting { --signal: var(--agent-state-color, var(--agent-standard-waiting)); }
+.agent-indicator-art.throttled { --signal: var(--agent-state-color, var(--agent-standard-throttled)); }
+.agent-indicator-art.problem { --signal: var(--agent-state-color, var(--agent-standard-problem)); }
+.agent-indicator-art:is(.idle, .stale, .stopped) { --signal: var(--agent-state-color, var(--agent-standard-inactive)); filter: grayscale(1); }
+.agent-indicator-art .agent-state-mark { color: var(--signal); }

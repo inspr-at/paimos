@@ -429,7 +429,7 @@ func (rt *runtime) harnessWorker(kind string) *Command {
 		case "heartbeat":
 			fs.string(&phase, "phase", 0, "starting, working, yielded or stopping")
 			fs.string(&note, "note", 0, "current step, at most 120 characters")
-			fs.string(&activity, "activity", 0, "unknown, busy or idle")
+			fs.string(&activity, "activity", 0, "unknown, busy, idle or throttled")
 			fs.string(&activityKind, "activity-kind", 0, "classic content-free adapter event kind")
 			fs.int(&sequence, "activity-sequence", "monotonic sequence")
 		case "complete-delivery":

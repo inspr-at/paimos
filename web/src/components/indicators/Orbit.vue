@@ -1,12 +1,14 @@
 <!-- Orbit · creative calm · a precise satellite circles a stationary faceted core.
      SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
+import type { AgentState } from '../../lib/agentSignals'
+import AgentStateMark from './AgentStateMark.vue'
 import { computed, ref, watch } from 'vue'
 
 // IV1 discovers this default SFC export by filename. The wrapper owns labels,
 // viewer preferences and hovering; only real event counter advances flash.
 const props = withDefaults(defineProps<{
-  state: 'working' | 'waiting' | 'stale'
+  state: AgentState
   size?: number
   pulse: number
   seed: string
@@ -23,13 +25,13 @@ let lastPulse = props.pulse
 watch(() => props.pulse, value => {
   if (!Number.isFinite(value) || value <= lastPulse) return
   lastPulse = value
-  if (props.state !== 'stale') glint.value = ++sequence
+  if (props.state === 'working') glint.value = ++sequence
 })
-watch(() => props.state, state => { if (state === 'stale') glint.value = 0 })
+watch(() => props.state, state => { if (state !== 'working') glint.value = 0 })
 </script>
 
 <template>
-  <svg class="indicator-orbit" :class="[state, { lead }]" :style="style" :width="size" :height="size"
+  <svg class="agent-indicator-art indicator-orbit" :class="[state, { lead }]" :style="style" :width="size" :height="size"
     :data-state="state" viewBox="0 0 32 32" aria-hidden="true" focusable="false">
     <circle class="orbit-track" cx="16" cy="16" r="12" />
     <path class="core" d="m16 8 7 4v8l-7 4-7-4v-8Z" />
@@ -38,23 +40,19 @@ watch(() => props.state, state => { if (state === 'stale') glint.value = 0 })
     <g class="satellite idle">
       <path class="trail" d="M7.5 7.5A12 12 0 0 1 16 4" />
       <circle class="point" cx="16" cy="4" r="1.8" />
-      <path v-if="glint && state !== 'stale'" :key="glint" class="glint"
+      <path v-if="glint && state === 'working'" :key="glint" class="glint"
         d="m16 .8.9 2.3 2.3.9-2.3.9-.9 2.3-.9-2.3-2.3-.9 2.3-.9Z" @animationend="glint = 0" />
     </g>
-    <g v-if="state === 'waiting'" class="clock">
-      <circle cx="25.5" cy="6.5" r="4.5" /><path d="M25.5 4v2.5l1.7 1" />
-    </g>
+    <AgentStateMark :state="state" x="21" y="0" :size="11" />
   </svg>
 </template>
 
 <style scoped>
 .indicator-orbit {
-  --signal: var(--accent, var(--teal, #2f8f86));
+
   display: inline-block; flex: none; width: var(--size); height: var(--size); vertical-align: middle;
-  color: var(--signal); overflow: hidden;
+  color: var(--signal); overflow: visible;
 }
-.waiting { --signal: var(--warn, #9a6b12); }
-.stale { --signal: var(--st-backlog, #889397); }
 .orbit-track, .core, .facet, .trail { stroke: currentColor; stroke-width: 1.5; stroke-linejoin: round; fill: none; }
 .orbit-track { opacity: .3; stroke-width: 1; }
 .core { fill: color-mix(in srgb, currentColor 9%, var(--surface-raised, #fffefa)); }

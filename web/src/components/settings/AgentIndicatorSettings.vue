@@ -6,8 +6,16 @@ import { indicatorVariants, resolveIndicatorStyle } from '../../lib/indicatorVar
 import { onPreferenceFailure } from '../../lib/preferences'
 import LiveBot, { availableVariants } from '../projects/LiveBot.vue'
 import AppIcon from '../AppIcon.vue'
+import AgentStateLabel from '../agents/AgentStateLabel.vue'
+import { AGENT_STATE_KEY, useAgentAppearance } from '../../lib/agentAppearance'
+import type { AgentPalette, AgentState } from '../../lib/agentSignals'
 
 const { choice, setStyle, setHovering } = useAgentIndicator()
+const { choice: states, save: saveStates } = useAgentAppearance()
+const previewStates: AgentState[] = ['working', 'waiting', 'throttled', 'problem', 'idle', 'stopped']
+const stateFailed = ref(false)
+onBeforeUnmount(onPreferenceFailure(key => { if (key === AGENT_STATE_KEY) stateFailed.value = true }))
+function saveState(patch: Parameters<typeof saveStates>[0]) { stateFailed.value = false; saveStates(patch) }
 const id = useId()
 const available = new Set(availableVariants.map(variant => variant.id))
 const selected = computed(() => resolveIndicatorStyle(choice.value.style, availableVariants))
@@ -71,6 +79,34 @@ function move(event: KeyboardEvent, index: number) {
       </label>
     </div>
     <p v-if="failed" class="save-error" role="alert">Your agent indicator setting could not be saved.<button class="btn sm" type="button" @click="retry">Try again</button></p>
+    <fieldset class="state-settings">
+      <legend>Agent states</legend>
+      <p class="hint">The same colours, marks and words everywhere. Saved for your account.</p>
+      <label class="state-field">Palette
+        <select class="field" aria-label="Palette" :value="states.palette" @change="saveState({ palette: ($event.target as HTMLSelectElement).value as AgentPalette })">
+          <option value="standard">Standard</option><option value="colour-blind">Colour-blind friendly</option><option value="monochrome">Monochrome</option>
+        </select>
+      </label>
+      <div class="state-preview" aria-label="Agent state preview">
+        <span v-for="state in previewStates" :key="state" class="state-example">
+          <LiveBot :state="state" :size="32" /><AgentStateLabel :state="state" />
+        </span>
+      </div>
+      <div class="hovering-setting">
+        <div><p :id="`${id}-dim`" class="hovering-label">Dim inactive</p><p class="hint">Idle and normally stopped agents stay grey.</p></div>
+        <label class="switch"><input type="checkbox" role="switch" :checked="states.dimInactive" :aria-labelledby="`${id}-dim`" @change="saveState({ dimInactive: ($event.target as HTMLInputElement).checked })" /><span>{{ states.dimInactive ? 'On' : 'Off' }}</span></label>
+      </div>
+      <label class="state-field">Inactive opacity · {{ states.inactiveOpacity }}%
+        <input type="range" min="40" max="80" step="1" :disabled="!states.dimInactive" :value="states.inactiveOpacity" aria-label="Inactive opacity" @input="saveState({ inactiveOpacity: Number(($event.target as HTMLInputElement).value) })" />
+      </label>
+      <p class="hint">Heartbeat warnings for sessions that were working. A normal stop never becomes a problem.</p>
+      <div class="thresholds">
+        <label class="state-field">Yellow after (minutes)<input class="field" type="number" min="1" max="1439" step="1" :value="states.yellowMinutes" @change="saveState({ yellowMinutes: Number(($event.target as HTMLInputElement).value) })" /></label>
+        <label class="state-field">Red after (minutes)<input class="field" type="number" :min="states.yellowMinutes + 1" max="1440" step="1" :value="states.redMinutes" @change="saveState({ redMinutes: Number(($event.target as HTMLInputElement).value) })" /></label>
+      </div>
+      <p class="hint">Red must follow yellow. Changing yellow moves red forward when needed.</p>
+      <p v-if="stateFailed" class="save-error" role="alert">Your agent state settings could not be saved.<button class="btn sm" type="button" @click="saveState({})">Try again</button></p>
+    </fieldset>
   </div>
 </template>
 
@@ -97,6 +133,12 @@ legend, .hovering-label { padding: 0; font-size: 13.5px; font-weight: 600; color
 .hovering-setting { display: flex; align-items: center; gap: 16px; justify-content: space-between; margin-top: 18px; }
 .switch { flex-shrink: 0; }
 .save-error { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 12px; font-size: 12.5px; color: var(--danger); }
+.state-settings { margin-top: 26px; }
+.state-field { display: grid; gap: 6px; margin-block: 14px; font-size: 12.5px; font-weight: 550; color: var(--ink); }
+.state-field .field { width: 100%; min-height: 36px; padding: 6px 10px; }
+.state-preview { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px 10px; padding: 14px 10px; border-radius: 10px; background: var(--surface-sunken); }
+.state-example { display: grid; justify-items: center; gap: 8px; text-align: center; }
+.thresholds { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 @media (max-width: 600px) {
   .indicator-choices { gap: 7px; }
   .indicator-choice { padding: 14px 6px 10px; gap: 8px; border-radius: 10px; }

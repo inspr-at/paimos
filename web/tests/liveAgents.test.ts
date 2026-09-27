@@ -2,6 +2,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { advanceActivity, liveState, agentKey, byLead, chipText, elapsedFor, groupLive, liveChanges, liveSummary, phrase, sameLive, skewOf, who, type LiveAgent } from '../src/lib/liveAgents.ts'
+import { DEFAULT_AGENT_STATE } from '../src/lib/agentSignals.ts'
 
 const now = Date.parse('2026-09-26T12:00:00Z')
 const ago = (seconds: number) => new Date(now - seconds * 1000).toISOString()
@@ -12,17 +13,17 @@ function agent(fields: Partial<LiveAgent> = {}): LiveAgent {
   }
 }
 
-test('groupLive marks stale heartbeats on the server clock and puts the lead first', () => {
+test('groupLive derives heartbeat warnings on the server clock and puts the lead first', () => {
   const coordinator = agent({ session_id: 's2', name: 'aeon-coordinator', role: 'coordinator', ticket: null, since: ago(3600) })
   const idleTicketless = agent({ session_id: 's3', name: 'scout', ticket: null, since: ago(60) })
   const early = agent({ session_id: 's4', name: 'early', since: ago(7200) })
-  const stale = agent({ session_id: 's5', project_id: 'p2', heartbeat_at: ago(121) })
+  const stale = agent({ session_id: 's5', project_id: 'p2', heartbeat_at: ago(181) })
   const grouped = groupLive([coordinator, idleTicketless, agent(), early, stale], now)
   assert.deepEqual([...grouped.keys()], ['p1', 'p2'])
   assert.deepEqual(grouped.get('p1')!.map(a => a.session_id), ['s4', 's1', 's3', 's2'])
-  assert.equal(groupLive([stale], now).get('p2')![0]!.state, 'stale')
+  assert.equal(groupLive([stale], now).get('p2')![0]!.state, 'waiting')
   assert.equal(groupLive([stale], now - 2000).get('p2')![0]!.state, 'working', 'a server clock two seconds earlier still sees it fresh')
-  assert.equal(groupLive([agent({ heartbeat_at: 'not a time' })], now).get('p1')![0]!.state, 'stale')
+  assert.equal(groupLive([agent({ heartbeat_at: 'not a time' })], now).get('p1')![0]!.state, 'problem')
   assert.ok(byLead(agent(), coordinator) < 0)
 })
 
@@ -38,8 +39,8 @@ test('words for chips, labels and screen readers', () => {
   assert.equal(who(nameless), 'Codex agent')
   assert.equal(phrase(agent()), 'hausv on HAUSV-887')
   assert.equal(phrase(agent({ ticket: null })), 'hausv')
-  assert.equal(phrase(agent({ phase: 'starting', ticket: null })), 'hausv, starting')
-  assert.equal(phrase(agent({ phase: 'stopping' })), 'hausv, stopping on HAUSV-887')
+  assert.equal(phrase(agent({ phase: 'starting', ticket: null })), 'hausv, working')
+  assert.equal(phrase(agent({ phase: 'stopping' })), 'hausv, working on HAUSV-887')
   assert.equal(liveSummary([]), '')
   assert.equal(liveSummary([agent()]), '1 agent working: hausv on HAUSV-887')
   assert.equal(liveSummary([agent(), nameless]), '2 agents working: hausv on HAUSV-887, Codex agent on HAUSV-887')
@@ -91,13 +92,13 @@ test('sameLive preserves evidence changes for glints and state changes for label
 })
 
 
-test('waiting is explicit evidence and stale overrides every claimed state', () => {
+test('waiting evidence and age thresholds use the same state contract', () => {
   assert.equal(liveState(agent({ activity: 'unknown', phase: 'starting' }), now), 'working')
   assert.equal(liveState(agent({ state: 'waiting' }), now), 'waiting')
-  assert.equal(liveState(agent({ state: 'waiting', heartbeat_at: ago(121) }), now), 'stale')
-  assert.equal(liveState(agent({ heartbeat_at: ago(20) }), now, 10_000), 'stale')
-  assert.equal(liveSummary([agent({ state: 'waiting' })]), '1 agent: hausv, waiting for approval on HAUSV-887')
-  assert.equal(liveSummary([agent({ state: 'stale' })]), '1 agent: hausv, no recent activity on HAUSV-887')
+  assert.equal(liveState(agent({ state: 'waiting', heartbeat_at: ago(600) }), now), 'problem')
+  assert.equal(liveState(agent({ heartbeat_at: ago(120) }), now, { ...DEFAULT_AGENT_STATE, yellowMinutes: 1, redMinutes: 2 }), 'problem')
+  assert.equal(liveSummary([agent({ state: 'waiting' })]), '1 agent: hausv, needs something on HAUSV-887')
+  assert.equal(liveSummary([agent({ state: 'stale' })]), '1 agent: hausv, idle · no heartbeat on HAUSV-887')
 })
 
 test('activity pulses only for new notes, with monotonic watermarks', () => {
@@ -118,7 +119,7 @@ test('stale evidence neither leads current work nor claims that a session stoppe
   const stale = agent({ state: 'stale' })
   const waiting = agent({ state: 'waiting', session_id: 's2', ticket: null })
   const working = agent({ session_id: 's3', ticket: null })
-  assert.deepEqual([stale, waiting, working].sort(byLead), [working, waiting, stale])
+  assert.deepEqual([stale, waiting, working].sort(byLead), [waiting, working, stale])
   const at = (a: LiveAgent) => new Map([['p1', [a]]])
   assert.equal(liveChanges(at(agent()), at(stale), () => 'Project'), 'No recent activity from hausv on Project.')
   assert.equal(liveChanges(at(stale), at(agent()), () => 'Project'), 'Activity resumed for hausv on Project.')

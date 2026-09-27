@@ -74,8 +74,12 @@ const KEYS: { keys: string[][]; label: string }[] = [
           </button>
         </div>
       </template>
-      <AgentIndicatorSettings />
       <GraphMotionSettings />
+    </SettingsCard>
+
+    <SettingsCard v-if="profile || profileError" title="Agents" icon="agent" anchor="agents">
+      <template #lead>Your indicator style, state palette and heartbeat warnings.</template>
+      <AgentIndicatorSettings />
     </SettingsCard>
 
     <SettingsCard v-if="profile || profileError" title="Greeting" icon="sparkle" anchor="greeting">

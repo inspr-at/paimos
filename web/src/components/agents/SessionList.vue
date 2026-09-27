@@ -9,7 +9,9 @@ import AppIcon from '../AppIcon.vue'
 import TicketPeekLink from '../TicketPeekLink.vue'
 import FloatingPanel from '../work/FloatingPanel.vue'
 import ConnectHint from './ConnectHint.vue'
-import LiveDot from './LiveDot.vue'
+import AgentStateLabel from './AgentStateLabel.vue'
+import { useAgentAppearance } from '../../lib/agentAppearance'
+const { appearance } = useAgentAppearance()
 import AgentGlyph from './AgentGlyph.vue'
 import { currentStep } from './activity'
 
@@ -22,7 +24,8 @@ const props = defineProps<{
 const emit = defineEmits<{ open: [id: string]; control: [view: SessionView, kind: SessionControl['kind']]; focusRow: [id: string]; retry: []; start: [] }>()
 const showStopped = ref(false)
 const total = computed(() => GROUPS.reduce((sum, g) => sum + props.groups[g.id].length, 0))
-const live = computed(() => total.value - props.groups.stopped.length)
+const stopped = computed(() => GROUPS.flatMap(g => props.groups[g.id]).filter(v => v.session.phase === 'stopped' || v.session.stopped_at).length)
+const live = computed(() => total.value - stopped.value)
 type Branch = SessionBranch<SessionView>
 const forest = computed(() => sessionForest(GROUPS.flatMap(g => props.groups[g.id]), props.now))
 const roots = (group: SessionGroup) => forest.value.filter(branch => branch.group === group)
@@ -43,7 +46,7 @@ function toggleHistory(branch: Branch) {
 }
 const stoppedChildren = (branch: Branch) => branch.children.reduce((sum, child) => sum + child.count - child.liveCount, 0)
 const workingChildren = (branch: Branch) => branch.children.reduce((sum, child) => sum + child.workingCount, 0)
-const idleChildren = (branch: Branch) => branch.children.reduce((sum, child) => sum + child.liveCount - child.workingCount, 0)
+const otherChildren = (branch: Branch) => branch.children.reduce((sum, child) => sum + child.liveCount - child.workingCount, 0)
 const workerLabel = (branch: Branch) => `${branch.count - 1} ${branch.count === 2 ? 'worker' : 'workers'}`
 const visible = (group: SessionGroup) => {
   const out: { view: SessionView; branch: Branch; depth: number; parent: string; open: boolean; guides: boolean[]; family: boolean; familyEnd: boolean }[] = []
@@ -110,7 +113,7 @@ function rowClick(event: MouseEvent, id: string) {
   <section class="sessions glass-card" aria-labelledby="sessions-title">
     <header class="card-head">
       <h2 id="sessions-title">Sessions</h2>
-      <span v-if="state === 'ready' && loaded && total" class="sub">{{ live }} live{{ groups.stopped.length ? ` · ${groups.stopped.length} stopped` : '' }}</span>
+      <span v-if="state === 'ready' && loaded && total" class="sub">{{ live }} live{{ stopped ? ` · ${stopped} stopped` : '' }}</span>
     </header>
 
     <div v-if="state === 'forbidden'" class="state">
@@ -144,14 +147,14 @@ function rowClick(event: MouseEvent, id: string) {
           </span>
         </div>
         <div
-          v-for="{ view, branch, depth, parent, open, guides, family, familyEnd } in visible(group.id)" :key="view.session.id" class="row" role="row" :data-row="`s:${view.session.id}`" :data-parent="view.session.parent_harness_session_id || undefined" :data-depth="depth" :style="{ '--depth': depth }" tabindex="-1" @focusin="emit('focusRow', `s:${view.session.id}`)"
+          v-for="{ view, branch, depth, parent, open, guides, family, familyEnd } in visible(group.id)" :key="view.session.id" class="row agent-state-surface" :data-state="view.status.state" role="row" :data-row="`s:${view.session.id}`" :data-parent="view.session.parent_harness_session_id || undefined" :data-depth="depth" :style="{ '--depth': depth, ...appearance(view.status.state) }" tabindex="-1" @focusin="emit('focusRow', `s:${view.session.id}`)"
           :class="[view.status.group, { worker: depth > 0, family, 'family-start': family && !depth, 'family-end': family && familyEnd, active: cursor === `s:${view.session.id}`, selected: selected === view.session.id }]" @click="rowClick($event, view.session.id)"
         >
           <span v-if="depth || open" class="tree-lines" aria-hidden="true">
             <span v-for="(continues, level) in guides" :key="level" class="tree-guide" :class="{ continues, elbow: level === depth - 1, last: level === depth - 1 && !continues }" :style="{ '--level': level }" />
             <span v-if="open" class="tree-stem" :style="{ '--level': depth }" />
           </span>
-          <span role="cell" class="c-state"><LiveDot :tone="view.status.tone" /><span class="state-label">{{ pendingLabel(view) || view.status.label }}</span></span>
+          <span role="cell" class="c-state"><AgentStateLabel :state="view.status.state" :detail="pendingLabel(view)" /></span>
           <span role="cell" class="c-agent">
             <span v-if="depth" class="sr-only">Worker of {{ parent }}. </span>
             <RouterLink class="agent-link" :to="`/agents/${view.session.id}`" :aria-label="`${view.harness} ${view.name}, ${view.status.label}`">
@@ -163,7 +166,7 @@ function rowClick(event: MouseEvent, id: string) {
               <button type="button" class="worker-toggle" :disabled="!candidates(branch).length" :aria-expanded="open" :aria-label="`${open ? 'Collapse' : 'Expand'} ${workerLabel(branch)} of ${view.name}: ${workingChildren(branch)} working`" @click="toggle(branch)">
                 <AppIcon name="chevron-right" :size="12" class="chev" :class="{ turned: open }" />{{ workingChildren(branch) }} working
               </button>
-              <template v-if="idleChildren(branch)"><span aria-hidden="true"> · </span><span class="idle-count">{{ idleChildren(branch) }} idle</span></template>
+              <template v-if="otherChildren(branch)"><span aria-hidden="true"> · </span><span class="idle-count">{{ otherChildren(branch) }} other active</span></template>
               <span aria-hidden="true"> · </span>
               <button type="button" class="worker-toggle history-toggle" :disabled="!stoppedChildren(branch)" :aria-expanded="!!history[view.session.id]" :aria-label="`${history[view.session.id] ? 'Hide' : 'Show'} stopped workers of ${view.name}: ${stoppedChildren(branch)} stopped`" @click="toggleHistory(branch)">{{ stoppedChildren(branch) }} stopped</button>
             </span>
@@ -178,7 +181,7 @@ function rowClick(event: MouseEvent, id: string) {
           </span>
           <span role="cell" class="right c-elapsed mono-cell">{{ elapsed(view.session, now) }}</span>
           <span role="cell" class="c-actions">
-            <template v-if="view.status.group !== 'stopped'">
+            <template v-if="view.session.phase !== 'stopped'">
               <button
                 type="button" class="icon-btn sm flat act" :aria-label="`Interrupt ${view.name}`" :data-tip="controlBlock(view, 'interrupt') || 'Interrupt: stop the current turn, keep the session'"
                 :aria-disabled="!!controlBlock(view, 'interrupt')" @click="!controlBlock(view, 'interrupt') && emit('control', view, 'interrupt')"
@@ -216,7 +219,7 @@ function rowClick(event: MouseEvent, id: string) {
 .card-head { display: flex; align-items: baseline; gap: 10px; padding: 14px 18px 10px; }
 .card-head h2 { font-size: 15px; font-weight: 650; }
 .sub { font-size: 12.5px; color: var(--ink-3); }
-.table { --state-width: 132px; --tree-step: 28px; display: grid; grid-template-columns: var(--state-width) minmax(200px, 1.5fr) minmax(90px, .8fr) 88px 76px 76px; padding: 0 0 8px; }
+.table { --state-width: 158px; --tree-step: 28px; display: grid; grid-template-columns: var(--state-width) minmax(200px, 1.5fr) minmax(90px, .8fr) 88px 76px 76px; padding: 0 0 8px; }
 .thead, .row, .group-row { display: grid; grid-template-columns: subgrid; grid-column: 1 / -1; align-items: center; column-gap: 0; }
 .thead { height: 32px; padding: 0 12px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); font: 500 10.5px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--ink-3); font-variant-ligatures: none; white-space: nowrap; }
 .thead > span, .row > span { padding: 0 8px; min-width: 0; }
@@ -230,14 +233,14 @@ function rowClick(event: MouseEvent, id: string) {
 .group-toggle:focus-visible { box-shadow: var(--focus-ring); }
 .chev.turned { transform: rotate(90deg); }
 .row { --tree-joint: 28px; position: relative; min-height: 48px; margin: 0 6px; padding: 0 4px; border-radius: 10px; outline: none; cursor: pointer; font-size: 13px; }
-.row.family { background: var(--chip-bg); border-radius: 0; }
+.row.family { border-radius: 0; }
 .row.family-start { border-radius: 10px 10px 0 0; }
 .row.family-end { border-radius: 0 0 10px 10px; }
 @media (hover: hover) { .row:hover { background: var(--row-hover); } }
 .row.active { background: var(--row-selected); box-shadow: inset 0 0 0 1px var(--chip-teal-line); }
 .row.selected { background: var(--row-selected); }
 .row { transition: background-color .3s ease, color .3s ease; }
-.row.stopped { color: var(--ink-2); background: var(--chip-bg); }
+.row.stopped { color: var(--ink-2); }
 .row.stopped .agent-name { font-weight: 450; color: var(--ink-2); }
 .row.worker .c-agent { padding-left: calc(8px + var(--depth) * var(--tree-step)); }
 /* The track is anchored to the lead glyph's centre. Each visible descendant
@@ -305,10 +308,10 @@ function rowClick(event: MouseEvent, id: string) {
 .sk-row .dot { width: 10px; height: 10px; border-radius: 50%; }
 .sk-row .key { width: 70px; height: 20px; border-radius: 6px; }
 @container sessions (max-width: 920px) {
-  .table { --state-width: 118px; grid-template-columns: var(--state-width) minmax(150px, 1.3fr) minmax(90px, .8fr) 80px 64px 76px; }
+  .table { --state-width: 150px; grid-template-columns: var(--state-width) minmax(150px, 1.3fr) minmax(90px, .8fr) 80px 64px 76px; }
 }
 @container sessions (max-width: 760px) {
-  .table { --state-width: 112px; grid-template-columns: var(--state-width) minmax(140px, 1fr) minmax(90px, auto) 78px 76px; }
+  .table { --state-width: 150px; grid-template-columns: var(--state-width) minmax(140px, 1fr) minmax(90px, auto) 78px 76px; }
   .c-elapsed { display: none; }
 }
 /* Phones: two lines per session, actions live in the session panel. */

@@ -1,10 +1,12 @@
 <!-- Pulse · professional (0/5). A measured radial sweep and a steady centre signal, with no character. -->
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
+import type { AgentState } from '../../lib/agentSignals'
+import AgentStateMark from './AgentStateMark.vue'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 
 const props = withDefaults(defineProps<{
-  state: 'working' | 'waiting' | 'stale'; size?: number; pulse: number; seed: string; lead: boolean
+  state: AgentState; size?: number; pulse: number; seed: string; lead: boolean
 }>(), { size: 26 })
 const style = computed(() => ({
   '--lag': `${-(Array.from(props.seed).reduce((hash, char) => (hash * 31 + char.charCodeAt(0)) >>> 0, 0) % 700) / 100}s`,
@@ -17,40 +19,34 @@ let clear: ReturnType<typeof setTimeout> | undefined
 watch(() => props.pulse, value => {
   if (!Number.isFinite(value) || value <= lastPulse) return
   lastPulse = value
-  if (props.state === 'stale') return
+  if (props.state !== 'working') return
   clearTimeout(clear)
   glint.value = ++serial
   clear = setTimeout(() => { glint.value = 0 }, 600)
 })
 watch(() => props.state, state => {
-  if (state === 'stale') { clearTimeout(clear); glint.value = 0 }
+  if (state !== 'working') { clearTimeout(clear); glint.value = 0 }
 })
 onBeforeUnmount(() => clearTimeout(clear))
 </script>
 
 <template>
-  <svg class="indicator pulse" :class="[state, { lead }]" :style="style" viewBox="0 0 32 32" :width="size" :height="size" aria-hidden="true" focusable="false">
+  <svg class="agent-indicator-art indicator pulse" :class="[state, { lead }]" :style="style" viewBox="0 0 32 32" :width="size" :height="size" aria-hidden="true" focusable="false">
     <circle class="disk" cx="16" cy="16" r="14" />
     <circle class="track" cx="16" cy="16" r="11" />
     <path class="ticks" d="M16 2v2M28 16h2M16 28v2M2 16h2" />
     <circle class="sweep" cx="16" cy="16" r="11" pathLength="100" />
     <circle class="centre-halo" cx="16" cy="16" r="5" />
     <circle class="centre" cx="16" cy="16" r="3" />
-    <g v-if="state === 'waiting'" class="clock">
-      <circle cx="26" cy="6" r="5" /><path d="M26 3.5V6l1.8 1.2" />
-    </g>
-    <path v-if="glint && state !== 'stale'" :key="glint" class="glint" d="m26 1 1.5 3.5L31 6l-3.5 1.5L26 11l-1.5-3.5L21 6l3.5-1.5Z" />
+    <AgentStateMark :state="state" x="21" y="0" :size="11" />
+    <path v-if="glint && state === 'working'" :key="glint" class="glint" d="m26 1 1.5 3.5L31 6l-3.5 1.5L26 11l-1.5-3.5L21 6l3.5-1.5Z" />
   </svg>
 </template>
 
 <style scoped>
 
-.indicator { --signal: var(--accent, #2f8f86); display: block; overflow: visible; }
-.indicator.waiting { --signal: var(--warn); }
-.indicator.stale { --signal: var(--ink-3); }
-:global(:root[data-theme="dark"] .pulse.working) { --signal: var(--accent, var(--teal)); }
+.indicator {  display: block; overflow: visible; }
 @media (prefers-color-scheme: dark) {
-  :global(:root:not([data-theme="light"]) .pulse.working) { --signal: var(--accent, var(--teal)); }
 }
 .clock { fill: var(--surface-raised); stroke: var(--signal); stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; }
 .clock path { fill: none; }

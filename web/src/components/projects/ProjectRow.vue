@@ -7,6 +7,9 @@ import { useLiveAgents } from '../../stores/liveAgents'
 import { absoluteTime, highlight, relativeTime } from '../../lib/work'
 import AppIcon from '../AppIcon.vue'
 import LiveAgents from './LiveAgents.vue'
+import { leadingState } from '../../lib/agentSignals'
+import { useAgentAppearance } from '../../lib/agentAppearance'
+const { appearance } = useAgentAppearance()
 import PeopleStack from './PeopleStack.vue'
 import StatCount, { STATS, type StatKind } from './StatCount.vue'
 
@@ -22,12 +25,13 @@ const props = defineProps<{
 const emit = defineEmits<{ menu: [anchor: HTMLElement] }>()
 const live = useLiveAgents()
 const agents = computed(() => live.forProject(props.project.id))
+const agentState = computed(() => leadingState(agents.value.map(a => a.state)))
 const stat = (id: ProjectColumnId): StatKind | null => id === 'open' || id === 'doing' || id === 'done' ? id : null
 const value = (project: Project, kind: StatKind) => kind === 'open' ? project.open : kind === 'doing' ? project.in_progress : project.done
 </script>
 
 <template>
-  <li class="project-item" :class="{ selected, dragging, menu: menuOpen, archived: project.archived, live: agents.length }" :data-project-id="project.id" draggable="true">
+  <li class="project-item" :data-agent-state="agents.length ? agentState : undefined" :style="agents.length ? appearance(agentState) : undefined" :class="{ selected, dragging, menu: menuOpen, archived: project.archived, live: agents.length }" :data-project-id="project.id" draggable="true">
     <RouterLink class="project-row item-link" :to="to" :aria-label="label" aria-describedby="arrange-hint" aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown" draggable="false">
       <span class="key-badge"><template v-for="(part, i) in highlight(project.routeKey, term)" :key="i"><mark v-if="part.match">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></span>
       <span class="project-text">
@@ -120,4 +124,5 @@ const value = (project: Project, kind: StatKind) => kind === 'open' ? project.op
   .mini :deep(.stat-num) { margin-left: 0; }
   .word { font: 500 11.5px/1.4 var(--mono); color: var(--ink-2); font-variant-ligatures: none; }
 }
+.project-item[data-agent-state] { background: color-mix(in srgb, var(--agent-state-color) 5%, var(--surface-raised)); }
 </style>

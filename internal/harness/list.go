@@ -107,6 +107,17 @@ func (m *Module) listAll(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, e
 		next := base64.RawURLEncoding.EncodeToString(b)
 		out.NextCursor = &next
 	}
+	stateIDs := make([]string, len(out.Items))
+	for i := range out.Items {
+		stateIDs[i] = out.Items[i].ID
+	}
+	evidence, err := readStateEvidence(r.Context(), tx, stateIDs)
+	if err != nil {
+		return nil, err
+	}
+	for i := range out.Items {
+		out.Items[i].StateEvidence = evidence[out.Items[i].ID]
+	}
 	// The latest entry ID is stable across ordinary heartbeats and monotonically
 	// increases only when a new note is recorded. Fetch once for the bounded page.
 	sessionIDs := make([]string, 0, len(out.Items))

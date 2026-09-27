@@ -10,14 +10,17 @@ import { useProjects } from '../../stores/projects'
 import AppIcon from '../AppIcon.vue'
 import { useAgentIndicator } from '../../lib/agentIndicator'
 import LiveBot from './LiveBot.vue'
+import AgentStateLabel from '../agents/AgentStateLabel.vue'
+import { STATE_LABEL, leadingState } from '../../lib/agentSignals'
+import { useAgentAppearance } from '../../lib/agentAppearance'
+const { appearance } = useAgentAppearance()
 
 // The agents working in one project right now (AEON-184), as a small living
 // chip: their robots at work, the lead's name and ticket, and for how long.
 // It sits beside the card's or row's link (never inside it), so it can be a
 // button: hover, focus or a click shows who works on what; each agent opens
 // its session in Agents, each ticket its page. Status only: nothing here acts.
-// Variants: `card` (name, ticket key, elapsed) and `row` (robots and key; on
-// a phone robots only).
+// Cards show identity above the state; compact rows show robots and the state word.
 const props = withDefaults(defineProps<{ agents: LiveAgent[]; project: { title: string; routeKey: string }; variant?: 'card' | 'row' }>(), { variant: 'card' })
 const live = useLiveAgents()
 const { choice: indicator } = useAgentIndicator()
@@ -35,12 +38,8 @@ const asleep = ref(false)
 const faces = computed(() => props.agents.slice(0, props.variant === 'card' ? 3 : 2))
 const chip = computed(() => chipText(props.agents))
 const summary = computed(() => liveSummary(props.agents))
-const lead = computed(() => props.agents[0])
-const state = computed(() => props.agents.some(a => !a.state || a.state === 'working') ? 'working' : props.agents.some(a => a.state === 'waiting') ? 'waiting' : 'stale')
-const groupLabel = computed(() => state.value === 'working' ? 'working' : state.value === 'waiting' ? 'waiting for approval' : 'with no recent activity')
-const elapsed = computed(() => lead.value ? elapsedFor(lead.value, live.serverNow) : '')
-// Without a ticket, a lead that is still starting (or stopping) says so.
-const leadPhase = computed(() => lead.value && (lead.value.phase !== 'working' || (lead.value.state && lead.value.state !== 'working')) ? phaseLabel(lead.value).toLowerCase() : '')
+const state = computed(() => leadingState(props.agents.map(a => a.state)))
+const groupLabel = computed(() => STATE_LABEL[state.value].toLowerCase())
 const clockFormat = new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit' })
 const clock = (iso: string) => clockFormat.format(Date.parse(iso))
 const agePrefix = (agent: LiveAgent) => agent.state === 'stale' || agent.state === 'waiting' ? 'session age' : 'for'
@@ -140,7 +139,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <span v-if="agents.length" ref="root" class="live" :class="[`as-${variant}`, state, { open, asleep, playful: indicator.style === 'robot-5' }]" @keydown="keydown">
+  <span v-if="agents.length" ref="root" class="live" :style="appearance(state)" :class="[`as-${variant}`, state, { open, asleep, playful: indicator.style === 'robot-5' }]" @keydown="keydown">
     <button
       ref="trigger" type="button" class="live-chip" :aria-expanded="open" :aria-controls="open ? id : undefined"
       :aria-label="`${summary}. Who works on what`" @click="toggle" @pointerenter="enter" @pointerleave="leave" @focusin="focusIn" @focusout="focusOut"
@@ -152,11 +151,10 @@ onBeforeUnmount(() => {
       <span v-if="variant === 'card'" class="words">
         <span class="name" :title="chip.name">{{ chip.name }}</span>
         <template v-if="chip.key"><span class="dot" /><span class="key mono" :title="chip.key">{{ chip.key }}</span></template>
-        <template v-else-if="leadPhase"><span class="dot" /><span class="phase-word" :title="leadPhase">{{ leadPhase }}</span></template>
       </span>
       <span v-else-if="chip.key" class="key mono">{{ chip.key }}</span>
       <span v-else class="row-name">{{ chip.name }}</span>
-      <span v-if="variant === 'card'" class="elapsed mono">{{ elapsed }}</span>
+      <AgentStateLabel class="chip-state" :state="state" />
 
     </button>
     <Teleport to="body">
@@ -165,12 +163,12 @@ onBeforeUnmount(() => {
         :style="{ left: `${x}px`, top: `${y}px` }" @pointerenter="enter" @pointerleave="leave" @focusout="focusOut" @keydown="keydown"
       >
         <p class="pop-head">
-          <span class="status-dot" :class="state" aria-hidden="true" />
+          <AgentStateLabel :state="state" />
           <span>{{ agents.length }} {{ agents.length === 1 ? 'agent' : 'agents' }} {{ groupLabel }}</span>
           <span class="pop-project">{{ project.title }}</span>
         </p>
         <ul class="pop-list">
-          <li v-for="(agent, i) in agents" :key="agent.session_id ?? `${agent.since}${i}`" class="pop-agent">
+          <li v-for="(agent, i) in agents" :key="agent.session_id ?? `${agent.since}${i}`" class="pop-agent agent-state-surface" :style="appearance(agent.state ?? 'working')">
             <component
               :is="agent.session_id ? RouterLink : 'div'" class="agent-line" :to="agent.session_id ? `/agents/${encodeURIComponent(agent.session_id)}` : undefined"
               :aria-label="agent.session_id ? `${who(agent)}, ${harnessLabel(agent.harness)}, ${phaseLabel(agent).toLowerCase()} ${agePrefix(agent)} ${elapsedFor(agent, live.serverNow)}. Open the session` : undefined"
@@ -178,7 +176,7 @@ onBeforeUnmount(() => {
               <LiveBot :id="agent.principal_id" :index="i" :state="agent.state" :harness="agent.harness" :event-pulse="live.eventPulseFor(agent)" :size="indicator.style === 'robot-5' ? 30 : 32" />
               <span class="agent-text">
                 <span class="agent-name">{{ who(agent) }}<span class="harness">{{ harnessLabel(agent.harness) }}</span></span>
-                <span class="agent-meta"><span class="phase" :class="agent.state ?? agent.phase">{{ phaseLabel(agent) }}</span><span class="sep" />{{ agePrefix(agent) }} <time class="mono" :datetime="agent.since" :title="absoluteTime(agent.since)">{{ elapsedFor(agent, live.serverNow) }}</time><span class="sep" /><span class="since">since {{ clock(agent.since) }}</span></span>
+                <span class="agent-meta"><AgentStateLabel :state="agent.state ?? 'working'" /><span class="sep" />{{ agePrefix(agent) }} <time class="mono" :datetime="agent.since" :title="absoluteTime(agent.since)">{{ elapsedFor(agent, live.serverNow) }}</time><span class="sep" /><span class="since">since {{ clock(agent.since) }}</span></span>
               </span>
               <AppIcon v-if="agent.session_id" class="go" name="chevron-right" :size="14" />
             </component>
@@ -194,18 +192,16 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.live { --signal: var(--teal); position: relative; display: inline-flex; min-width: 0; max-width: 100%; }
-.live.waiting { --signal: var(--warn); }
-.live.stale { --signal: var(--ink-3); }
+.live { --signal: var(--agent-state-color); position: relative; display: inline-flex; min-width: 0; max-width: 100%; }
+
+
 .live-chip {
-  position: relative; display: inline-flex; align-items: center; gap: 6px; min-width: 0; width: max-content; max-width: 100%; height: 36px; padding: 0 10px 0 6px;
+  position: relative; display: inline-flex; align-items: center; gap: 6px; min-width: 0; width: max-content; max-width: 100%; min-height: 36px; padding: 0 10px 0 6px;
   border: 0; border-radius: 999px; background: color-mix(in oklab, var(--signal) 5%, var(--surface-raised)); box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--signal) 18%, transparent);
   color: var(--ink); font: 500 12px/1 var(--font); cursor: pointer; -webkit-user-select: none; user-select: none; transition: none;
 }
 .live-chip:hover, .live.open .live-chip { box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--signal) 40%, transparent); }
-/* LA1's warm chip accompanies its original robot. */
-.playful.working .live-chip { background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line), 0 1px 2px rgba(14, 111, 108, .08); }
-.playful.working .live-chip:hover, .playful.working.open .live-chip { box-shadow: inset 0 0 0 1px var(--chip-teal-line), 0 6px 16px -8px rgba(14, 111, 108, .55); }
+/* State tints are independent of the selected artwork. */
 /* A finger's reach: the chip answers a little beyond its edge (44px tall, and wide on a phone row). */
 .live-chip::before { content: ''; position: absolute; inset: -6px -2px; border-radius: 999px; }
 .live-chip:focus-visible { outline: none; box-shadow: inset 0 0 0 1px var(--chip-teal-line), var(--focus-ring); }
@@ -216,26 +212,17 @@ onBeforeUnmount(() => {
 .count { position: relative; z-index: 4; display: grid; place-items: center; flex-shrink: 0; min-width: 16px; height: 16px; margin-left: 3px; padding: 0 3px; border-radius: 999px; background: var(--surface-sunken); color: var(--ink-2); font-size: 10px; font-weight: 600; }
 .words { display: inline-flex; flex: 0 1 auto; align-items: center; gap: 5px; min-width: 0; }
 .name, .row-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 650; letter-spacing: -.005em; }
-.words .name, .words .key, .words .phase-word { flex: 0 1 auto; }
+.words .name, .words .key { flex: 0 1 auto; }
 .row-name { font-weight: 600; font-size: 11.5px; }
 .dot { flex-shrink: 0; width: 3px; height: 3px; border-radius: 50%; background: var(--ink-3); }
 .key { min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: 11px; font-weight: 600; letter-spacing: .04em; color: var(--teal-ink); white-space: nowrap; }
-.phase-word { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-2); }
-.elapsed { flex: 0 0 auto; white-space: nowrap; font-size: 11px; color: var(--ink-2); }
-.as-row .live-chip { height: 34px; padding: 0 8px 0 6px; }
+.as-row .live-chip { min-height: 34px; padding: 0 8px 0 6px; }
 /* Keep two overlapping robots and the total in the phone row's gutter. */
 @media (max-width: 760px) {
   .as-row .key, .as-row .row-name { display: none; }
   .as-row .live-chip { gap: 0; }
   .as-row .live-chip::before { inset: -6px -2px; }
 }
-/* In narrow cards, give both labels their own truncation line. The elapsed
-   time and face stack keep their full width at every card size. */
-@container live-card (max-width: 340px) {
-  .as-card .words { display: grid; gap: 2px; line-height: 1.1; }
-  .as-card .words .dot { display: none; }
-}
-
 /* ---------- The popover ---------- */
 /* Placed by left and top (set once when it opens or the page moves); it arrives
    by transform and opacity only. */
@@ -248,9 +235,6 @@ onBeforeUnmount(() => {
 @keyframes live-pop-in-below { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
 .pop-head { display: flex; align-items: center; gap: 8px; padding: 4px 8px 8px; font: 600 11px/1.2 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--ink-2); font-variant-ligatures: none; }
 .pop-project { margin-left: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 50%; font: 500 12px/1.2 var(--font); letter-spacing: 0; text-transform: none; color: var(--ink-3); }
-.status-dot { flex-shrink: 0; width: 6px; height: 6px; border-radius: 50%; background: var(--teal); }
-.status-dot.waiting { background: var(--warn); }
-.status-dot.stale { background: var(--ink-3); }
 .pop-list { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; }
 .pop-agent { display: grid; gap: 2px; padding: 4px; border-radius: 10px; background: var(--surface-sunken); }
 /* Hover answers at once: no colour or shadow transitions (only the compositor moves things here). */
@@ -262,10 +246,6 @@ a.agent-line:focus-visible, .ticket-line:focus-visible { outline: none; box-shad
 .agent-name { display: flex; align-items: center; gap: 7px; min-width: 0; font-size: 13.5px; font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .harness { flex-shrink: 0; padding: 2px 6px; border-radius: 999px; background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); font: 500 10.5px/1.2 var(--font); color: var(--ink-2); }
 .agent-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 12px; color: var(--ink-2); }
-.phase { font-weight: 600; color: var(--teal-ink); }
-.phase.waiting { color: var(--warn); }
-.phase.stale { color: var(--ink-3); }
-.phase.starting, .phase.stopping { color: var(--teal-ink); }
 .sep { width: 3px; height: 3px; border-radius: 50%; background: var(--ink-3); }
 .agent-meta time { color: var(--ink); font-size: 11.5px; }
 .since { white-space: nowrap; color: var(--ink-3); }
@@ -276,4 +256,12 @@ a.agent-line:hover .go { color: var(--teal-ink); }
 .ticket-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ticket-line.none { color: var(--ink-3); font-size: 12px; }
 @media (max-width: 760px) { .ticket-line { align-items: center; min-height: 44px; } }
+.chip-state { flex: none; font-size: 11px; }
+.live-chip { opacity: var(--agent-state-opacity, 1); }
+.live-chip :deep(.live-bot), .live-chip :deep(.agent-state-label) { opacity: 1; }
+.as-card .live-chip { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 7px; min-height: 46px; padding: 6px 12px 6px 7px; border-radius: 14px; }
+.as-card .faces { grid-row: 1 / 3; }
+.as-card .chip-state { grid-column: 2; }
+.as-row .key, .as-row .row-name { display: none; }
+.pop-agent.agent-state-surface { background: color-mix(in srgb, var(--agent-state-color) 6%, var(--surface-sunken)); }
 </style>

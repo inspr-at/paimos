@@ -14,7 +14,7 @@ const agent = (overrides: Partial<LiveAgent> = {}): LiveAgent => ({
 function answer(items: LiveAgent[], clock = at) {
   vi.mocked(getLiveAgents).mockResolvedValue({ items, at: new Date(clock).toISOString(), fresh_seconds: 120 })
 }
-beforeEach(() => { setActivePinia(createPinia()); vi.useFakeTimers(); vi.setSystemTime(at); vi.mocked(getLiveAgents).mockReset() })
+beforeEach(() => { vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ value: null })))); setActivePinia(createPinia()); vi.useFakeTimers(); vi.setSystemTime(at); vi.mocked(getLiveAgents).mockReset() })
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers() })
 
 it('keeps polls quiet until a new activity note is recorded', async () => {
@@ -40,16 +40,18 @@ it('keeps polls quiet until a new activity note is recorded', async () => {
   expect(store.eventPulseFor(agent())).toBe(1)
 })
 
-it('ages a failed read to stale, recovers, and removes ended sessions on a successful read', async () => {
+it('ages a failed read through waiting and problem, recovers, and removes ended sessions on a successful read', async () => {
   const store = useLiveAgents()
   answer([agent()])
   await store.refresh()
   vi.mocked(getLiveAgents).mockRejectedValue(new Error('offline'))
-  store.now = at + 121_000
+  store.now = at + 181_000
   await store.refresh()
-  expect(store.forProject('p1')[0]?.state).toBe('stale')
+  expect(store.forProject('p1')[0]?.state).toBe('waiting')
   expect(store.eventPulseFor(agent())).toBe(0)
-  answer([agent({ heartbeat_at: new Date(at + 121_000).toISOString() })], at + 121_000)
+  store.now = at + 600_000
+  expect(store.forProject('p1')[0]?.state).toBe('problem')
+  answer([agent({ heartbeat_at: new Date(at + 181_000).toISOString() })], at + 181_000)
   await store.refresh()
   expect(store.forProject('p1')[0]?.state).toBe('working')
   expect(store.eventPulseFor(agent())).toBe(0)
@@ -59,10 +61,10 @@ it('ages a failed read to stale, recovers, and removes ended sessions on a succe
   expect(store.eventPulseFor(agent())).toBe(0)
 })
 
-it('uses the server freshness window and does not pulse a newly appearing session', async () => {
+it('uses viewer thresholds rather than the legacy server freshness window', async () => {
   const store = useLiveAgents()
   vi.mocked(getLiveAgents).mockResolvedValue({ items: [agent()], at: new Date(at + 16_000).toISOString(), fresh_seconds: 15 })
   await store.refresh()
-  expect(store.forProject('p1')[0]?.state).toBe('stale')
+  expect(store.forProject('p1')[0]?.state).toBe('working')
   expect(store.eventPulseFor(agent())).toBe(0)
 })

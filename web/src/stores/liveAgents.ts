@@ -3,7 +3,8 @@ import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { APIError } from '../lib/api'
 import { getLiveAgents } from '../lib/agents'
-import { LIVE_FRESH_MS, LIVE_POLL_MS, advanceActivity, agentKey, groupLive, sameLive, skewOf, type ActivityEvidence, type LiveAgent } from '../lib/liveAgents'
+import { LIVE_POLL_MS, advanceActivity, agentKey, groupLive, sameLive, skewOf, type ActivityEvidence, type LiveAgent } from '../lib/liveAgents'
+import { useAgentAppearance } from '../lib/agentAppearance'
 import { usePolledData, usePoller } from '../lib/usePolledData'
 
 const NONE: LiveAgent[] = []
@@ -17,8 +18,8 @@ const TICK_MS = 10_000
 // the read ends the polling quietly; a failed read retries a minute later.
 export const useLiveAgents = defineStore('liveAgents', () => {
   const items = ref<LiveAgent[]>([])
+  const { choice: statePreferences } = useAgentAppearance()
   const skew = ref(0)
-  const fresh = ref(LIVE_FRESH_MS)
   const now = ref(Date.now())
   const unavailable = ref(false)
   const evidence = ref(new Map<string, ActivityEvidence>())
@@ -37,7 +38,6 @@ export const useLiveAgents = defineStore('liveAgents', () => {
     items.value = Array.isArray(page.items) ? page.items : []
     evidence.value = new Map(items.value.map(agent => [evidenceKey(agent), advanceActivity(evidence.value.get(evidenceKey(agent)), agent)]))
     skew.value = skewOf(page, at)
-    if (Number.isFinite(page.fresh_seconds) && page.fresh_seconds > 0) fresh.value = page.fresh_seconds * 1000
     now.value = at
   })
   const state = computed<'idle' | 'ready' | 'unavailable'>(() => unavailable.value ? 'unavailable' : reading.status.value.updatedAt === null ? 'idle' : 'ready')
@@ -45,7 +45,7 @@ export const useLiveAgents = defineStore('liveAgents', () => {
   const serverNow = computed(() => now.value - skew.value)
   // The same Map while nothing visible changed: cards and labels stay put between polls and ticks.
   const byProject = computed<Map<string, LiveAgent[]>>(previous => {
-    const next = groupLive(items.value, serverNow.value, fresh.value)
+    const next = groupLive(items.value, serverNow.value, statePreferences.value)
     return previous && sameLive(previous, next) ? previous : next
   })
   const forProject = (projectId: string) => byProject.value.get(projectId) ?? NONE

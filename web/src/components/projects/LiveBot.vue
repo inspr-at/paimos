@@ -16,6 +16,8 @@ const renderers = Object.fromEntries(availableVariants.map(variant => [
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import type { Harness } from '../../lib/agents'
 import type { LiveBotState } from '../../lib/liveAgents'
+import { STATE_LABEL } from '../../lib/agentSignals'
+import { useAgentAppearance } from '../../lib/agentAppearance'
 import { normalizeAgentIndicator, useAgentIndicator, type AgentIndicatorStyle } from '../../lib/agentIndicator'
 
 // Public LA1/LA2 props stay stable for cards, rows and /agents. Artwork is
@@ -27,6 +29,7 @@ const props = withDefaults(defineProps<{
 }>(), { state: 'working', size: 28, eventPulse: 0, eventCaption: '', id: '', index: 0, lead: true })
 const { choice } = useAgentIndicator()
 const indicator = computed(() => resolveIndicatorStyle(normalizeAgentIndicator({ style: props.indicatorStyle ?? choice.value.style }).style, availableVariants))
+const { appearance } = useAgentAppearance()
 const seed = computed(() => `${props.id}:${props.index}`)
 const style = computed(() => ({ '--size': `${props.size}px`, '--lag': `${-(props.index * .53 + ((parseInt(props.id.slice(0, 2), 16) || 0) % 7) * .31).toFixed(2)}s` }))
 const pulse = ref(0)
@@ -35,19 +38,19 @@ let clear: ReturnType<typeof setTimeout> | undefined
 watch(() => props.eventPulse, value => {
   if (!Number.isFinite(value) || value <= lastPulse) return
   lastPulse = value
-  if (props.state === 'stale') return
+  if (props.state !== 'working') return
   clearTimeout(clear)
   pulse.value++
   clear = setTimeout(() => { pulse.value = 0 }, 600)
 })
 watch(() => props.state, state => {
-  if (state === 'stale') { clearTimeout(clear); pulse.value = 0 }
+  if (state !== 'working') { clearTimeout(clear); pulse.value = 0 }
 })
 onBeforeUnmount(() => clearTimeout(clear))
 </script>
 
 <template>
-  <span class="live-bot" :class="[state, { hovering: choice.hovering, lead }]" :style="style" :data-style="indicator" :data-state="state" :data-harness="harness" aria-hidden="true">
+  <span class="live-bot" :class="[state, { hovering: choice.hovering, lead }]" :style="[style, appearance(state)]" :data-style="indicator" :data-state="state" :data-harness="harness" :aria-label="STATE_LABEL[state]" role="img">
     <span class="indicator-art">
       <component :is="renderers[indicator]" :state="state" :size="size" :pulse="eventPulse" :seed="seed" :lead="lead" />
     </span>

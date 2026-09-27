@@ -10,7 +10,7 @@ const available = indicatorVariants.filter(v => existsSync(new URL(`../src/compo
 const missing = indicatorVariants.filter(v => !available.includes(v))
 const project = '[data-project-id="p-aeon"]'
 async function settings(page: Page) {
-  await page.goto('/settings/personal#appearance')
+  await page.goto('/settings/personal#agents')
   await expect(page.getByRole('radiogroup', { name: 'Agent indicator' })).toBeVisible()
 }
 const radio = (page: Page, name: string) => page.getByRole('radio', { name, exact: true })
@@ -91,7 +91,7 @@ for (const option of available) {
       await page.mouse.move(0, 0)
     }
     await page.goto('/agents')
-    for (const state of ['working', 'waiting', 'stale']) {
+    for (const state of ['working', 'waiting', 'problem']) {
       const bot = page.locator(`.agents-page .live-bot[data-state="${state}"]`).first()
       await expect(bot).toHaveAttribute('data-style', option.id)
       await expect(bot.locator('svg').first()).toBeVisible()
@@ -160,12 +160,12 @@ test('IV1 renderers: event-only glints, paused states, quiet stacks and reduced 
   expect(quiet.every((count, i) => count <= full[i]!)).toBe(true)
   expect(quiet[2]).toBeLessThan(full[2]!)
   await page.getByRole('button', { name: 'Real event' }).click()
-  await expect(sheet.locator('.glint')).toHaveCount(12)
+  await expect(sheet.locator('.glint')).toHaveCount(6)
   await expect(sheet.locator('[data-state="stale"] .glint')).toHaveCount(0)
   await page.clock.fastForward(650)
   await expect(sheet.locator('.glint')).toHaveCount(0)
   await page.getByRole('button', { name: 'Real event' }).click()
-  await expect(sheet.locator('.glint')).toHaveCount(12)
+  await expect(sheet.locator('.glint')).toHaveCount(6)
   await page.emulateMedia({ reducedMotion: 'reduce' })
   expect(await loops(sheet)).toBe(0)
   await expect(sheet.locator('.glint').first()).toHaveCSS('animation-name', /event-opacity/)
