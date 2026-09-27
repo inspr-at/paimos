@@ -22,7 +22,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -54,8 +54,7 @@ type Module struct {
 	store         *attachments.Store
 	publicBaseURL string
 	linkKey       []byte
-	mu            sync.Mutex
-	attempts      map[string][]time.Time
+	limitCalls    atomic.Uint64
 }
 
 var _ httpapi.Module = (*Module)(nil)
@@ -92,7 +91,7 @@ func newModule(pool *pgxpool.Pool, registry *plugins.Registry, assets fs.FS, sto
 	if err != nil {
 		return nil, err
 	}
-	return &Module{pool: pool, registry: registry, assets: assets, store: store, publicBaseURL: strings.TrimRight(publicBaseURL, "/"), linkKey: key, attempts: make(map[string][]time.Time)}, nil
+	return &Module{pool: pool, registry: registry, assets: assets, store: store, publicBaseURL: strings.TrimRight(publicBaseURL, "/"), linkKey: key}, nil
 }
 
 func (m *Module) Mount(mux *http.ServeMux) {
@@ -537,44 +536,6 @@ func sameSite(r *http.Request) bool {
 		}
 	}
 	return true
-}
-func (m *Module) allow(key string, limit int) bool {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	now := time.Now()
-	if len(m.attempts) >= 10000 {
-		for k, times := range m.attempts {
-			if len(times) == 0 || now.Sub(times[len(times)-1]) >= time.Minute {
-				delete(m.attempts, k)
-			}
-		}
-		if len(m.attempts) >= 10000 && m.attempts[key] == nil {
-			return false
-		}
-	}
-	seen := m.attempts[key][:0]
-	for _, at := range m.attempts[key] {
-		if now.Sub(at) < time.Minute {
-			seen = append(seen, at)
-		}
-	}
-	if len(seen) >= limit {
-		m.attempts[key] = seen
-		return false
-	}
-	m.attempts[key] = append(seen, now)
-	return true
-}
-func (m *Module) limitPublic(w http.ResponseWriter, r *http.Request, operation string, limit int) bool {
-	remote, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		remote = r.RemoteAddr
-	}
-	if m.allow(operation+":"+remote, limit) {
-		return true
-	}
-	fail(w, 429, "too many attempts")
-	return false
 }
 func evidence(in acceptanceWrite, linkID string) string {
 	value, _ := json.Marshal([]any{linkID, in.Version, in.ExpectedContentSHA256, in.Name, in.Company, in.Note, in.Confirm})
