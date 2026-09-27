@@ -1874,6 +1874,66 @@ paths:
       description: Session detail, including at most 20 recent activity notes and metadata changes, newest first.
       responses:
         '200': {description: Session detail, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessSession'}}}}
+  /projects/{projectId}/harness-sessions/{sessionId}/recovery:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: previewHarnessRecovery
+      description: Human-only harness.recover or harness.force_stop permission in the target project. Returns an exact observed revision and confirmation for record recovery. Missing heartbeat is not proof of process exit.
+      responses:
+        '200': {description: Recovery preview, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessRecovery'}}}}
+        '403': {description: Human recovery permission required}
+        '404': {description: Session not visible}
+  /projects/{projectId}/harness-sessions/{sessionId}/controls/force-stop:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: forceStopHarnessSession
+      description: Human-only harness.force_stop permission. Exact current session/process confirmation, freshness and generation are checked before queueing. The owning daemon rechecks its in-memory process identity and unreaped process group before signaling. Children outside that process group are never targeted. An offline or unverified generation is unavailable; queued does not mean terminated.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expected_revision, confirmation, request_id, reason]
+              properties:
+                expected_revision: {type: string, pattern: '^[0-9a-f]{64}$'}
+                confirmation: {type: string, maxLength: 300}
+                request_id: {type: string, format: uuid}
+                reason: {type: string, minLength: 1, maxLength: 240}
+      responses:
+        '201': {description: Idempotent typed force control; inspect its state and outcome, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessRecoveryControl'}}}}
+        '403': {description: Human force permission required}
+        '409': {description: Stale confirmation, offline host or unverified process generation}
+  /projects/{projectId}/harness-sessions/{sessionId}/archive:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: archiveHarnessSession
+      description: Human-only harness.recover operation. Archives the registration, revokes its worker generation, and retains history. Does not signal any process or claim remote exit. Exact retry is idempotent; any changed observation requires a fresh confirmation.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expected_revision, confirmation, request_id, reason]
+              properties:
+                expected_revision: {type: string, pattern: '^[0-9a-f]{64}$'}
+                confirmation: {type: string, minLength: 1, maxLength: 256}
+                request_id: {type: string, format: uuid}
+                reason: {type: string, minLength: 1, maxLength: 240}
+      responses:
+        '200': {description: Archived session, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessSession'}}}}
+        '400': {description: Invalid confirmation or request}
+        '403': {description: Human recovery permission required}
+        '409': {description: Stale observation, divergent retry, active force authorization or legacy managed daemon without safe detachment}
   /projects/{projectId}/harness-sessions/{sessionId}/usage:
     parameters:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -1883,7 +1943,7 @@ paths:
       security: *auth
       description: >-
         Requires harness.worker and the owning agent's generation lease. Accepts managed and unmanaged
-        sessions, including final reporting after stop. Counters are cumulative per exact model within
+        sessions, including final reporting after normal stop. Archived generations are rejected before receipt replay. Counters are cumulative per exact model within
         the entire session, never deltas or source-local totals. Input includes cached input. Known
         counters and uncached input cannot decrease or become unknown. Sequences must increase.
         Exact report_id replay returns the current row without another event; reuse with different
@@ -1897,6 +1957,7 @@ paths:
         - {name: X-Aeon-Worker-Lease, in: header, required: true, schema: {type: string, minLength: 32, maxLength: 256}}
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessUsageReport'}}}}
       responses:
+        '410': {description: Authenticated archived generation; usage proof revoked, existing usage retained}
         '200':
           description: Accepted cumulative report or exact replay
           content:
@@ -1970,6 +2031,7 @@ paths:
               type: object
               required: [phase, activity_sequence]
               properties:
+                process_ownership: {$ref: '#/components/schemas/HarnessProcessOwnership'}
                 phase: {type: string, enum: [starting, working, yielded, stopping]}
                 activity: {type: string, enum: [unknown, busy, idle, throttled]}
                 activity_sequence: {type: integer, format: int64, minimum: 0}
@@ -1987,6 +2049,7 @@ paths:
         '200': {description: Updated session, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessSession'}}}}
         '400': {description: Invalid note or heartbeat}
         '403': {description: Worker proof rejected}
+        '410': {description: Authenticated archived generation; detach harness servicing without signaling the process}
   /harness-sessions:
     get:
       operationId: listHarnessSessions
@@ -5098,6 +5161,50 @@ components:
         advertised_capabilities: {type: array, items: {type: string, enum: [inbox, status, steer, interrupt, stop]}}
         harness_session_ref: {type: string, minLength: 16, maxLength: 4096, writeOnly: true}
         worker_lease: {type: string, minLength: 32, maxLength: 256, writeOnly: true}
+    HarnessProcessOwnership:
+      type: object
+      description: Content-free current daemon ownership. Never sufficient by itself; the daemon verifies its live Process before signaling.
+      required: [daemon_id, generation, process_id, root_pid, group_id, started_at]
+      properties:
+        daemon_id: {type: string, maxLength: 128}
+        generation: {type: string, pattern: '^[0-9a-f]{32}$'}
+        process_id: {type: string, pattern: '^[0-9a-f]{32}$'}
+        root_pid: {type: integer, minimum: 2}
+        group_id: {type: integer, minimum: 2}
+        started_at: {type: string, format: date-time}
+    HarnessRecoveryControl:
+      type: object
+      required: [id, session_id, kind, state, sequence, outcome, reason, created_at, expected_ownership, expires_at]
+      properties:
+        id: {type: string, format: uuid}
+        session_id: {type: string, format: uuid}
+        kind: {type: string, enum: [force_stop]}
+        state: {type: string, enum: [pending, claimed, completed]}
+        sequence: {type: integer, format: int64}
+        outcome: {type: [string, 'null'], enum: [applied, rejected, null]}
+        reason: {type: [string, 'null'], description: Applied requires owned_group_signalled_root_exited; queued alone never proves exit.}
+        expected_ownership: {$ref: '#/components/schemas/HarnessProcessOwnership'}
+        expires_at: {type: string, format: date-time}
+        created_at: {type: string, format: date-time}
+        claimed_at: {type: [string, 'null'], format: date-time}
+        completed_at: {type: [string, 'null'], format: date-time}
+    HarnessRecovery:
+      type: object
+      required: [session_id, host, observed_revision, confirmation, process_state, process_scope, can_archive, force_stop_available, force_stop_reason]
+      properties:
+        session_id: {type: string, format: uuid}
+        host: {type: string}
+        display_label: {type: [string, 'null']}
+        observed_revision: {type: string}
+        confirmation: {type: string}
+        process_state: {type: string, enum: [unknown]}
+        process_scope: {type: string}
+        can_archive: {type: boolean}
+        archive_unavailable_reason: {type: string}
+        force_stop_available: {type: boolean}
+        force_stop_reason: {type: string}
+        force_confirmation: {type: string}
+        process_ownership: {$ref: '#/components/schemas/HarnessProcessOwnership'}
     UsageTokenCount:
       type: [integer, 'null']
       format: int64
@@ -5206,6 +5313,10 @@ components:
         heartbeat_at: {type: [string, 'null'], format: date-time}
         stopped_at: {type: [string, 'null'], format: date-time}
         stop_reason: {type: [string, 'null']}
+        process_ownership: {$ref: '#/components/schemas/HarnessProcessOwnership'}
+        process_observed_at: {type: [string, 'null'], format: date-time}
+        archived_at: {type: [string, 'null'], format: date-time}
+        recovery_process_state: {type: [string, 'null'], enum: [unknown, null]}
         created_at: {type: string, format: date-time}
     HarnessActivityNote:
       type: object

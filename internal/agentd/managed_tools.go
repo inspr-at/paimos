@@ -225,6 +225,13 @@ func runTerminal(ctx context.Context, workspace, branch string, in terminalArgs)
 	if !allowedTerminal(in.Command, in.Args) {
 		return "", errors.New("terminal command denied")
 	}
+	// Reject unsupported execution before even launching toolchain probes.
+	if runtime.GOOS != "darwin" {
+		return "", errors.New("bounded terminal requires the macOS sandbox")
+	}
+	if !ownedprocess.TrackingSupported() {
+		return "", errors.New("safe child lifetime observation unsupported")
+	}
 	physicalWorkspace, err := filepath.EvalSymlinks(workspace)
 	if err != nil || !filepath.IsAbs(workspace) {
 		return "", errors.New("terminal workspace unavailable")
@@ -258,9 +265,6 @@ func runTerminal(ctx context.Context, workspace, branch string, in terminalArgs)
 	// Tests and package scripts execute repository code. On the local macOS
 	// daemon they run under an OS network fence, including subprocesses. Package
 	// dependencies must already be cached; only loopback test services work.
-	if runtime.GOOS != "darwin" {
-		return "", errors.New("bounded terminal requires the macOS sandbox")
-	}
 	home, err := os.UserHomeDir()
 	if err != nil || !filepath.IsAbs(home) {
 		return "", errors.New("terminal home unavailable")
@@ -382,7 +386,9 @@ func runTerminal(ctx context.Context, workspace, branch string, in terminalArgs)
 		cmd.Dir = web
 	}
 	cmd.Env = terminalEnvironment(physicalTmp, moduleProxy, goRoot)
-	configured := ownedprocess.Configure(cmd)
+	if !ownedprocess.Configure(cmd) {
+		return "", errors.New("owned process groups are unsupported")
+	}
 	// CombinedOutput is capped by a pipe reader so a noisy child cannot grow
 	// memory indefinitely. Closing the pipe kills the owned process on overflow.
 	pipeR, pipeW, err := os.Pipe()
@@ -396,34 +402,54 @@ func runTerminal(ctx context.Context, workspace, branch string, in terminalArgs)
 		return "", err
 	}
 	_ = pipeW.Close()
-	if err := ownedprocess.Verify(cmd, configured); err != nil {
-		_ = ownedprocess.Signal(cmd, true)
-		_ = cmd.Wait()
+	lifetime := ownedprocess.Track(cmd)
+	if err := lifetime.Verify(); err != nil {
+		// No waiter or cancellation worker exists yet. If group verification
+		// fails, clean up only the exact unreaped child returned by Start.
+		_ = cmd.Process.Kill()
+		_ = lifetime.Wait()
 		return "", err
 	}
+	return collectTerminal(deadline, pipeR, lifetime)
+}
+
+// terminalLifetime permits deterministic scheduling of the signal/reap race in
+// tests. Production always supplies the verified ownedprocess.Lifetime above.
+type terminalLifetime interface {
+	Signal(force bool) error
+	Wait() error
+}
+
+func collectTerminal(ctx context.Context, output io.Reader, lifetime terminalLifetime) (string, error) {
 	finished := make(chan struct{})
+	cancelDone := make(chan struct{})
 	go func() {
+		defer close(cancelDone)
 		select {
-		case <-deadline.Done():
-			_ = ownedprocess.Signal(cmd, true)
+		case <-ctx.Done():
+			_ = lifetime.Signal(true)
 		case <-finished:
 		}
 	}()
-	out, readErr := io.ReadAll(io.LimitReader(pipeR, (64<<10)+1))
-	if len(out) > 64<<10 {
-		_ = ownedprocess.Signal(cmd, true)
-		_ = cmd.Wait()
+	defer func() {
 		close(finished)
+		<-cancelDone
+	}()
+	// Keep cancellation active through Wait: EOF does not imply child exit.
+	// Lifetime fences a delayed signal against reaping; joining the worker
+	// also prevents it escaping this invocation on any return path.
+	out, readErr := io.ReadAll(io.LimitReader(output, (64<<10)+1))
+	if len(out) > 64<<10 {
+		_ = lifetime.Signal(true)
+		_ = lifetime.Wait()
 		return "", errors.New("terminal output exceeds 64 KiB")
 	}
 	if readErr != nil {
-		_ = ownedprocess.Signal(cmd, true)
-		_ = cmd.Wait()
-		close(finished)
+		_ = lifetime.Signal(true)
+		_ = lifetime.Wait()
 		return "", readErr
 	}
-	err = cmd.Wait()
-	close(finished)
+	err := lifetime.Wait()
 	if err != nil {
 		return string(out), fmt.Errorf("terminal command failed: %w", err)
 	}
