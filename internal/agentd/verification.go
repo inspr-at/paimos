@@ -38,6 +38,19 @@ func (*CursorAdapter) VerificationSupported() bool { return false }
 // execution boundary exists. Source: github.com/openai/codex/tree/rust-v0.157.1.
 
 func validExecutionMode(r Run, adapter Adapter) error {
+	if err := validQueuedExecutionMode(r, adapter); err != nil {
+		return err
+	}
+	if r.Purpose == VerificationPurpose && (r.AccountID == "" || r.RequestedAccountID != "" && r.AccountID != r.RequestedAccountID) {
+		return errors.New("verification account binding is incomplete or unsafe")
+	}
+	return nil
+}
+
+// A queued verification is deliberately unbound until the server reserves its
+// approved account. Check immutable policy/capability before probing or routing;
+// adapters still require the strict, routed binding in validExecutionMode.
+func validQueuedExecutionMode(r Run, adapter Adapter) error {
 	if r.Purpose == "" || r.Purpose == "managed" {
 		return nil
 	}
@@ -48,7 +61,7 @@ func validExecutionMode(r Run, adapter Adapter) error {
 	if !ok || !a.VerificationSupported() {
 		return ErrVerificationUnavailable
 	}
-	if r.AccountID == "" || r.VerificationTask != VerificationTask || r.MaxDurationSeconds == nil || *r.MaxDurationSeconds < 1 || *r.MaxDurationSeconds > 60 || r.VerificationPolicy != "read_only" || r.RepositoryMutationAllowed == nil || *r.RepositoryMutationAllowed {
+	if r.VerificationTask != VerificationTask || r.MaxDurationSeconds == nil || *r.MaxDurationSeconds < 1 || *r.MaxDurationSeconds > 60 || r.VerificationPolicy != "read_only" || r.RepositoryMutationAllowed == nil || *r.RepositoryMutationAllowed {
 		return errors.New("verification binding is incomplete or unsafe")
 	}
 	return nil

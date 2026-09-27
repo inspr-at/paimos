@@ -36,7 +36,7 @@ func validateLaunchRecord(r Record) error {
 }
 
 func (s *Supervisor) refuseVerification(run Run) error {
-	r := Record{LaunchState: launchRefused, AccountID: run.AccountID, ExecutionMode: run.Purpose,
+	r := Record{LaunchState: launchRefused, AccountID: run.requestedAccount(), ExecutionMode: run.Purpose,
 		TenantID: s.tenantID, PrincipalID: s.principalID, RunID: run.ID, WorkOrderID: run.WorkOrderID,
 		Generation: s.generation, State: "verification_unavailable"}
 	if err := s.journal.Put(r); err != nil {
