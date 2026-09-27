@@ -34,6 +34,8 @@ func (m *module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/projects/{projectId}/releases/{releaseId}/walker", m.get)
 	mux.HandleFunc("PUT /api/projects/{projectId}/releases/{releaseId}/plan", m.put)
 	mux.HandleFunc("POST /api/projects/{projectId}/releases/{releaseId}/tickets", m.createTicket)
+	mux.HandleFunc("GET /api/projects/{projectId}/releases/{releaseId}/ticket-options", m.ticketOptions)
+	mux.HandleFunc("POST /api/projects/{projectId}/releases/{releaseId}/membership", m.addMembership)
 }
 
 type Walker struct {

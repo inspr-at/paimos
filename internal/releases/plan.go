@@ -43,6 +43,10 @@ func replace(ctx context.Context, tx pgx.Tx, p tenant.Principal, project, releas
 	if err != nil {
 		return out, err
 	}
+	var projectRevision int64
+	if err := tx.QueryRow(ctx, `SELECT revision FROM journey_projects WHERE project_node_id=$1`, project).Scan(&projectRevision); err != nil {
+		return out, err
+	}
 	eligible := map[string]bool{}
 	for _, t := range before.Tickets {
 		eligible[t.NodeID] = true
@@ -64,6 +68,32 @@ func replace(ctx context.Context, tx pgx.Tx, p tenant.Principal, project, releas
 		}
 		included[id] = true
 	}
+	oldIncluded := map[string]bool{}
+	changesBefore := membershipSnapshot{ProjectID: project, ReleaseID: release, ProjectRevision: projectRevision, ReleaseRevision: revision, Members: []memberState{}}
+	changesAfter := membershipSnapshot{ProjectID: project, ReleaseID: release, ProjectRevision: projectRevision + 1, ReleaseRevision: revision + 1, Members: []memberState{}}
+	for _, ticket := range before.Tickets {
+		oldIncluded[ticket.NodeID] = ticket.Included
+	}
+	for _, id := range in.Order {
+		if oldIncluded[id] == included[id] {
+			continue
+		}
+		if included[id] {
+			var ticketState string
+			if err := tx.QueryRow(ctx, `SELECT state FROM nodes WHERE id=$1 AND deleted_at IS NULL`, id).Scan(&ticketState); err != nil {
+				return out, err
+			}
+			if closedTicketState(ticketState) {
+				return out, fail(409, "closed tickets cannot be added")
+			}
+		}
+		var old memberState
+		old.TicketID, old.Exists = id, true
+		if err := tx.QueryRow(ctx, `SELECT release_node_id::text,walker_position,scope_revision_required FROM journey_tickets WHERE project_node_id=$1 AND ticket_node_id=$2`, project, id).Scan(&old.ReleaseID, &old.Position, &old.ScopeRequired); err != nil {
+			return out, err
+		}
+		changesBefore.Members = append(changesBefore.Members, old)
+	}
 	// Apply order and membership together; a validation/event failure rolls back
 	// the entire plan. Positions belonging to prior releases remain untouched.
 	for pos, id := range in.Order {
@@ -71,7 +101,7 @@ func replace(ctx context.Context, tx pgx.Tx, p tenant.Principal, project, releas
 		if included[id] {
 			assigned = &release
 		}
-		if _, err = tx.Exec(ctx, `UPDATE journey_tickets SET release_node_id=$2,walker_position=$3 WHERE ticket_node_id=$1`, id, assigned, pos); err != nil {
+		if _, err = tx.Exec(ctx, `UPDATE journey_tickets SET release_node_id=$2,walker_position=$3,scope_revision_required=scope_revision_required OR ($2::uuid IS NOT NULL AND release_node_id IS DISTINCT FROM $2::uuid) WHERE ticket_node_id=$1`, id, assigned, pos); err != nil {
 			return out, err
 		}
 	}
@@ -87,6 +117,19 @@ func replace(ctx context.Context, tx pgx.Tx, p tenant.Principal, project, releas
 	out, err = load(ctx, tx, project, release)
 	if err != nil {
 		return out, err
+	}
+	if len(changesBefore.Members) > 0 {
+		for _, old := range changesBefore.Members {
+			var next memberState
+			next.TicketID, next.Exists = old.TicketID, true
+			if err := tx.QueryRow(ctx, `SELECT release_node_id::text,walker_position,scope_revision_required FROM journey_tickets WHERE project_node_id=$1 AND ticket_node_id=$2`, project, old.TicketID).Scan(&next.ReleaseID, &next.Position, &next.ScopeRequired); err != nil {
+				return out, err
+			}
+			changesAfter.Members = append(changesAfter.Members, next)
+		}
+		if _, err := events.Append(ctx, tx, p, events.Change{NodeID: &release, Type: "journey.release_membership_changed", Before: changesBefore, After: changesAfter}); err != nil {
+			return out, err
+		}
 	}
 	_, err = events.Append(ctx, tx, p, events.Change{NodeID: &release, Type: "journey.release_planned", Before: before, After: out})
 	return out, err

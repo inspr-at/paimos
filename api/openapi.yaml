@@ -2322,6 +2322,40 @@ paths:
         '403': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
         '409': {$ref: '#/components/responses/Error'}
+  /projects/{projectId}/releases/{releaseId}/ticket-options:
+    get:
+      operationId: listReleaseTicketOptions
+      summary: Find existing project tickets eligible for release planning
+      description: Returns at most 100 project tickets, including unprojected ticket nodes. Availability distinguishes included, closed, released, and movable tickets; the release must be planning.
+      security: [{session: []}]
+      parameters:
+        - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: releaseId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: q, in: query, schema: {type: string, maxLength: 256}}
+        - {name: status, in: query, schema: {type: string}}
+        - {name: epic, in: query, schema: {type: string, format: uuid}}
+        - {name: type, in: query, schema: {type: string, enum: [ticket, task]}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 50}}
+      responses:
+        '200': {description: Ticket options, content: {application/json: {schema: {$ref: '#/components/schemas/ReleaseTicketOptions'}}}}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /projects/{projectId}/releases/{releaseId}/membership:
+    post:
+      operationId: addReleaseMembership
+      summary: Add or explicitly move existing tickets into the current planning release
+      description: Adds 1–100 project tickets atomically. Closed tickets and tickets in active or released releases are excluded. Moving from another planning release requires confirm_move. The event_id can be undone through the events API while the result remains current.
+      security: [{session: []}]
+      parameters:
+        - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: releaseId, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ReleaseMembershipWrite'}}}}
+      responses:
+        '200': {description: Updated walker and undoable event, content: {application/json: {schema: {$ref: '#/components/schemas/ReleaseMembershipResult'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
   /projects/{projectId}/intake/sources:
     post:
       operationId: addIntakeSource
@@ -3775,6 +3809,7 @@ components:
         approval_request_id: {type: string, format: uuid}
         release_id: {type: string, format: uuid}
         reason: {type: string, maxLength: 2048}
+        ticket_node_ids: {type: array, minItems: 1, maxItems: 100, uniqueItems: true, items: {type: string, format: uuid}, description: Optional existing project tickets to add atomically with open_first_release or plan_next_release.}
     JourneyRequirement:
       type: object
       required: [node_id, project_node_id, kind, revision, status, title]
@@ -3855,6 +3890,39 @@ components:
         expected_revision: {type: integer, minimum: 1}
         ordered_ticket_ids: {type: array, uniqueItems: true, items: {type: string, format: uuid}}
         included_ticket_ids: {type: array, uniqueItems: true, items: {type: string, format: uuid}}
+    ReleaseTicketOptions:
+      type: object
+      required: [expected_revision, tickets]
+      properties:
+        expected_revision: {type: integer, minimum: 1}
+        tickets: {type: array, items: {$ref: '#/components/schemas/ReleaseTicketOption'}}
+    ReleaseTicketOption:
+      type: object
+      required: [ticket_node_id, key, title, status, type, feature_node_id, release_node_id, release_title, availability]
+      properties:
+        ticket_node_id: {type: string, format: uuid}
+        key: {type: string}
+        title: {type: string}
+        status: {type: string}
+        type: {type: string, enum: [ticket, task]}
+        feature_node_id: {type: [string, 'null'], format: uuid}
+        release_node_id: {type: [string, 'null'], format: uuid}
+        release_title: {type: [string, 'null']}
+        availability: {type: string, enum: [addable, included, closed, released, other_release, unsupported]}
+    ReleaseMembershipWrite:
+      type: object
+      additionalProperties: false
+      required: [expected_revision, ticket_node_ids]
+      properties:
+        expected_revision: {type: integer, minimum: 1}
+        ticket_node_ids: {type: array, minItems: 1, maxItems: 100, uniqueItems: true, items: {type: string, format: uuid}}
+        confirm_move: {type: boolean, default: false}
+    ReleaseMembershipResult:
+      type: object
+      required: [walker, event_id]
+      properties:
+        walker: {$ref: '#/components/schemas/ReleaseWalker'}
+        event_id: {type: integer, minimum: 1}
     IntakeSourceWrite:
       type: object
       additionalProperties: false

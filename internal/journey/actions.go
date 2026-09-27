@@ -6,10 +6,12 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/inspr-at/paimos/internal/releases"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
 
@@ -180,6 +182,18 @@ func (m *Module) actWithMode(ctx context.Context, p tenant.Principal, projectID 
 		if err != nil {
 			return err
 		}
+		if len(in.TicketNodeIDs) > 0 {
+			var newRelease string
+			if err := tx.QueryRow(ctx, `SELECT current_release_node_id::text FROM journey_projects WHERE project_node_id=$1`, projectID).Scan(&newRelease); err != nil {
+				return err
+			}
+			if err := releases.AddExistingToNewRelease(ctx, tx, p, projectID, newRelease, in.TicketNodeIDs); err != nil {
+				if code, message, ok := releases.MembershipFailure(err); ok {
+					return fail(code, message)
+				}
+				return err
+			}
+		}
 		after, err := loadFacts(ctx, tx, projectID, false)
 		if err != nil {
 			return err
@@ -221,6 +235,23 @@ func validateAction(in actionWrite) error {
 	}
 	if ptrVal(in.ReleaseID) != "" && !uuidOK(ptrVal(in.ReleaseID)) {
 		return fail(http.StatusBadRequest, "invalid release_id")
+	}
+	if len(in.TicketNodeIDs) > 0 {
+		if in.Action != "open_first_release" && in.Action != "plan_next_release" {
+			return fail(http.StatusBadRequest, "ticket_node_ids requires a release creation action")
+		}
+		if len(in.TicketNodeIDs) > 100 {
+			return fail(http.StatusBadRequest, "too many ticket_node_ids")
+		}
+		seen := map[string]bool{}
+		for i, id := range in.TicketNodeIDs {
+			id = strings.ToLower(id)
+			if !uuidOK(id) || seen[id] {
+				return fail(http.StatusBadRequest, "ticket_node_ids must be unique UUIDs")
+			}
+			seen[id] = true
+			in.TicketNodeIDs[i] = id
+		}
 	}
 	return nil
 }
