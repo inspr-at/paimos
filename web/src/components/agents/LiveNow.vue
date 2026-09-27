@@ -24,7 +24,7 @@ const live = computed(() => props.views.filter(view => !view.session.stopped_at 
       <article v-for="view in live" :key="view.session.id" class="tile agent-state-surface" :data-state="view.status.state" :style="appearance(view.status.state)" :class="{ selected: selected === view.session.id }">
         <button type="button" class="tile-open" :aria-label="`Open ${view.name}, ${view.status.label}, ${currentStep(view)}`" @click="emit('open', view.session.id)" />
         <AgentGlyph class="glyph" :view="view" :size="43" />
-        <span class="tile-body"><strong>{{ view.name }}</strong><TicketPeekLink v-if="view.ticket" class="ticket-key" :ticket-key="view.ticket.key" :href="view.ticket.href" :tip="view.ticket.title">{{ view.ticket.key }}</TicketPeekLink><AgentStateLabel :state="view.status.state" /><span class="step">{{ currentStep(view) }}</span><span class="elapsed"><AppIcon name="clock" :size="13" />{{ elapsed(view.session, now) }}</span></span>
+        <span class="tile-body"><strong>{{ view.name }}</strong><TicketPeekLink v-if="view.ticket" class="ticket-key" :ticket-key="view.ticket.key" :href="view.ticket.href" :tip="view.ticket.title">{{ view.ticket.key }}</TicketPeekLink><AgentStateLabel :state="view.status.state" :label="view.status.label" /><span class="step">{{ currentStep(view) }}</span><span class="elapsed"><AppIcon name="clock" :size="13" />{{ elapsed(view.session, now) }}</span></span>
       </article>
     </div>
     <p v-else class="quiet">No agents are working now. <button type="button" @click="emit('open', '')">Start an agent</button></p>
@@ -35,7 +35,7 @@ const live = computed(() => props.views.filter(view => !view.session.stopped_at 
 .live-now { min-width: 0; }
 .live-now h2 { margin: 0 0 10px 2px; color: var(--ink-2); }
 .tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 235px), 1fr)); gap: 10px; }
-.tile { position: relative; display: flex; align-items: flex-start; gap: 13px; min-width: 0; min-height: 122px; padding: 16px; border-radius: 13px; background: color-mix(in srgb, var(--agent-state-color) 6%, var(--surface-raised)); box-shadow: inset 0 0 0 1px var(--glass-edge), var(--shadow); color: var(--ink); text-align: left; }
+.tile { position: relative; display: flex; align-items: flex-start; gap: 13px; min-width: 0; min-height: 122px; padding: 16px; border-radius: 13px; background: var(--surface-raised); box-shadow: inset 0 0 0 1px var(--glass-edge), var(--shadow); color: var(--ink); text-align: left; }
 .tile-open { position: absolute; inset: 0; border: 0; border-radius: inherit; background: transparent; cursor: pointer; }
 .tile:hover { background: var(--row-hover); }
 .tile.selected, .tile:has(.tile-open:focus-visible) { background: var(--row-selected); box-shadow: inset 0 0 0 1px var(--chip-teal-line), var(--shadow); }
