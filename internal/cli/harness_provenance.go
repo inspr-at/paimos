@@ -18,7 +18,7 @@ func (rt *runtime) harnessProvenance() *Command {
 		fs.string(&session, "session", 0, "public session UUID")
 		fs.string(&agent, "agent", 0, "attributed agent name")
 		fs.string(&leaseFile, "worker-lease-file", 0, "private generation lease file")
-		fs.strings(&instructions, "instruction", "explicit AGENTS.md, CLAUDE.md or SKILL.md file")
+		fs.strings(&instructions, "instruction", "explicit AGENTS.md, CLAUDE.md or SKILL.md physical path on Linux/Darwin; no symlinks except Darwin root /var and /tmp aliases")
 		fs.strings(&versions, "instruction-version", "LOGICAL=VERSION for a file named by --instruction")
 		fs.string(&promptVersion, "prompt-template-version", 0, "prompt template version identifier")
 		fs.string(&promptSHA, "prompt-template-sha256", 0, "explicit lowercase sha256 of the template bytes; omit to record the version with no content digest")

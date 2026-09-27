@@ -13,7 +13,9 @@ import (
 )
 
 // CollectInstructionFiles hashes explicit allowlisted instruction files.
-// It does not walk directories, follow symlinks, or read private stores.
+// It does not enumerate directories or follow user symlinks. Linux and Darwin
+// require physical paths; Darwin's root /var and /tmp aliases are also supported.
+// Other platforms fail closed. Private-store path components are refused.
 // The result carries a logical name, digest and byte size, never a path or contents.
 func CollectInstructionFiles(paths []string) ([]ProvenanceItem, error) {
 	if len(paths) > maxProvenanceItems {
@@ -79,6 +81,13 @@ func SetProvenanceVersion(items []ProvenanceItem, logicalName, version string) (
 }
 
 func hashInstructionFile(path string) (ProvenanceItem, error) {
+	return hashInstructionFileWithIO(path, openInstructionFile, io.ReadAll)
+}
+
+// The per-call seams let tests replace a name exactly at open time and prove
+// that rejected targets never reach a content read. Production uses only the
+// descriptor-relative opener; there is no mutable global hook or path fallback.
+func hashInstructionFileWithIO(path string, open func(string) (*os.File, error), readAll func(io.Reader) ([]byte, error)) (ProvenanceItem, error) {
 	if refusedInstructionPath(path) {
 		return ProvenanceItem{}, errInstructionPath
 	}
@@ -90,19 +99,20 @@ func hashInstructionFile(path string) (ProvenanceItem, error) {
 	if !ok || refusedInstructionPath(logical) {
 		return ProvenanceItem{}, errInstructionPath
 	}
-	info, err := os.Lstat(abs)
-	if err != nil || info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+	f, err := open(abs)
+	if err != nil {
+		return ProvenanceItem{}, errInstructionPath
+	}
+	defer f.Close()
+	// Check the very descriptor we will read, never a prior pathname snapshot.
+	info, err := f.Stat()
+	if err != nil || !info.Mode().IsRegular() {
 		return ProvenanceItem{}, errInstructionPath
 	}
 	if info.Size() < 0 || info.Size() > maxProvenanceBytes {
 		return ProvenanceItem{}, errors.New("instruction file is too large")
 	}
-	f, err := os.Open(abs)
-	if err != nil {
-		return ProvenanceItem{}, errInstructionPath
-	}
-	defer f.Close()
-	body, err := io.ReadAll(io.LimitReader(f, maxProvenanceBytes+1))
+	body, err := readAll(io.LimitReader(f, maxProvenanceBytes+1))
 	if err != nil || int64(len(body)) != info.Size() {
 		return ProvenanceItem{}, errInstructionPath
 	}
@@ -112,7 +122,7 @@ func hashInstructionFile(path string) (ProvenanceItem, error) {
 	return ProvenanceItem{Kind: kind, LogicalName: logical, HashKind: "content", ContentSHA256: &digest, ByteSize: &size}, nil
 }
 
-var errInstructionPath = errors.New("instruction file must be an explicit allowlisted AGENTS.md, CLAUDE.md or SKILL.md outside private stores")
+var errInstructionPath = errors.New("instruction file must be an explicit allowlisted AGENTS.md, CLAUDE.md or SKILL.md outside private stores; use a physical path on Linux or Darwin (Darwin /var and /tmp aliases are supported)")
 
 func instructionIdentity(abs string) (kind, logical string, ok bool) {
 	base := filepath.Base(abs)

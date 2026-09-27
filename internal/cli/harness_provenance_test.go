@@ -176,3 +176,37 @@ func TestHarnessProvenanceShowReads(t *testing.T) {
 		t.Fatal("show did not read provenance")
 	}
 }
+
+func TestHarnessProvenanceRejectsAncestorLinksBeforeRequests(t *testing.T) {
+	isolate(t)
+	var calls []transcriptRequest
+	srv := transcriptFixture(t, "memory", "note", &calls)
+	defer srv.Close()
+	t.Setenv("PAIMOS_URL", srv.URL)
+	t.Setenv("PAIMOS_API_KEY", testKey)
+	for _, tc := range []struct{ store, suffix string }{
+		{".ssh", "AGENTS.md"}, {"agent-transcripts", "nested/CLAUDE.md"}, {".inspr", "demo/SKILL.md"},
+	} {
+		t.Run(tc.store, func(t *testing.T) {
+			dir := t.TempDir()
+			private := filepath.Join(dir, tc.store)
+			target := filepath.Join(private, tc.suffix)
+			if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			body := []byte("synthetic forbidden body")
+			if err := os.WriteFile(target, body, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			alias := filepath.Join(dir, "public")
+			if err := os.Symlink(private, alias); err != nil {
+				t.Fatal(err)
+			}
+			code, stdout, stderr := runCLI([]string{"paimos", "--config", filepath.Join(dir, "missing"), "harness", "provenance", "--project", "AEON", "--session", transcriptSessionID, "--agent", "worker", "--worker-lease-file", filepath.Join(dir, "missing-lease"), "--instruction", filepath.Join(alias, tc.suffix)}, "")
+			sum := sha256.Sum256(body)
+			if code == 0 || !strings.Contains(stderr, "physical path") || strings.Contains(stdout+stderr, dir) || strings.Contains(stdout+stderr, string(body)) || strings.Contains(stdout+stderr, hex.EncodeToString(sum[:])) || len(calls) != 0 {
+				t.Fatal("ancestor link was not refused before output or API requests")
+			}
+		})
+	}
+}
