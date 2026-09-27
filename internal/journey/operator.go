@@ -21,7 +21,7 @@ import (
 	"github.com/inspr-at/paimos/internal/tenantbootstrap"
 )
 
-const operatorUsage = "usage: aeon journey mark-disposable --tenant SLUG --project KEY | aeon journey seed --tenant SLUG --project KEY --to-stage build|candidate|deploy [--production --confirm-project KEY]"
+const operatorUsage = "usage: aeon journey mark-disposable --tenant SLUG --project KEY | aeon journey seed --tenant SLUG --project KEY --to-stage build|candidate|deploy [--brief 1|2|3] [--production --confirm-project KEY]"
 
 // OperatorResult is the value-free result of a host-only journey command.
 type OperatorResult struct {
@@ -47,7 +47,7 @@ func RunOperator(ctx context.Context, pool *pgxpool.Pool, args []string, stdout 
 	if opts.command == "mark-disposable" {
 		out, err = markDisposable(ctx, pool, opts.slug, opts.project, opts.production)
 	} else {
-		out, err = seedDisposable(ctx, pool, opts.slug, opts.project, opts.toStage, opts.production)
+		out, err = seedDisposableWithBrief(ctx, pool, opts.slug, opts.project, opts.toStage, opts.brief, opts.production)
 	}
 	if err != nil {
 		return err
@@ -56,8 +56,8 @@ func RunOperator(ctx context.Context, pool *pgxpool.Pool, args []string, stdout 
 }
 
 type operatorOptions struct {
-	command, slug, project, toStage string
-	production                      bool
+	command, slug, project, toStage, brief string
+	production                             bool
 }
 
 // ValidateOperator checks the host CLI before it opens a database connection.
@@ -79,12 +79,13 @@ func parseOperator(args []string) (operatorOptions, error) {
 	project := fs.String("project", "", "project node key")
 	production := fs.Bool("production", false, "allow production operator command")
 	confirm := fs.String("confirm-project", "", "exact project node key confirmation")
-	var toStage *string
+	var toStage, brief *string
 	if args[0] == "seed" {
 		toStage = fs.String("to-stage", "", "target stage")
+		brief = fs.String("brief", "", "fixed disposable intake brief: 1, 2 or 3")
 	}
 	if err := fs.Parse(args[1:]); err != nil || fs.NArg() != 0 || *slug == "" || *project == "" ||
-		args[0] == "seed" && (*toStage != "build" && *toStage != "candidate" && *toStage != "deploy") {
+		args[0] == "seed" && ((*toStage != "build" && *toStage != "candidate" && *toStage != "deploy") || (*brief != "" && *brief != "1" && *brief != "2" && *brief != "3")) {
 		return operatorOptions{}, errors.New(operatorUsage)
 	}
 	if os.Getenv("AEON_ENV") == "prod" && (!*production || *confirm == "") {
@@ -97,10 +98,12 @@ func parseOperator(args []string) (operatorOptions, error) {
 		return operatorOptions{}, errors.New("production flags require AEON_ENV=prod")
 	}
 	stage := ""
+	briefNumber := ""
 	if toStage != nil {
 		stage = *toStage
+		briefNumber = *brief
 	}
-	return operatorOptions{args[0], *slug, *project, stage, *production}, nil
+	return operatorOptions{args[0], *slug, *project, stage, briefNumber, *production}, nil
 }
 
 type productionContextKey struct{}
@@ -193,12 +196,28 @@ func SeedDisposable(ctx context.Context, pool *pgxpool.Pool, slug, key, target s
 }
 
 func seedDisposable(ctx context.Context, pool *pgxpool.Pool, slug, key, target string, production bool) (OperatorResult, error) {
+	return seedDisposableWithBrief(ctx, pool, slug, key, target, "", production)
+}
+
+// SeedDisposableBrief completes one fixed intake on a disposable project and
+// advances to the requested stage without deciding candidate or deploy gates.
+func SeedDisposableBrief(ctx context.Context, pool *pgxpool.Pool, slug, key, target, brief string) (OperatorResult, error) {
+	return seedDisposableWithBrief(ctx, pool, slug, key, target, brief, false)
+}
+
+func seedDisposableWithBrief(ctx context.Context, pool *pgxpool.Pool, slug, key, target, brief string, production bool) (OperatorResult, error) {
 	ctx, err := operatorContext(ctx, production)
 	if err != nil {
 		return OperatorResult{}, err
 	}
 	if pool == nil || target != "build" && target != "candidate" && target != "deploy" {
 		return OperatorResult{}, errors.New("database pool and build|candidate|deploy target are required")
+	}
+	if brief != "" {
+		if _, ok := disposableBriefs[brief]; !ok {
+			return OperatorResult{}, errors.New("brief must be 1, 2 or 3")
+		}
+		ctx = context.WithValue(ctx, briefContextKey{}, brief)
 	}
 	var out OperatorResult
 	err = db.InTransaction(ctx, pool, func(ctx context.Context) error {
@@ -220,6 +239,11 @@ func seedDisposable(ctx context.Context, pool *pgxpool.Pool, slug, key, target s
 			if !disposable {
 				return errors.New("project is not disposable")
 			}
+			if brief != "" {
+				if err := checkBriefSeed(ctx, tx, id, brief); err != nil {
+					return err
+				}
+			}
 			actorID, err = operatoractor.EnsureWithProduction(ctx, tx, tid, production)
 			return err
 		}); err != nil {
@@ -228,6 +252,12 @@ func seedDisposable(ctx context.Context, pool *pgxpool.Pool, slug, key, target s
 		p := tenant.Principal{ID: actorID, TenantID: tid, Kind: tenant.Agent}
 		m := &Module{pool: pool, inTenant: db.InTenant}
 		changed := false
+		if brief != "" {
+			changed, err = prepareBriefSeed(ctx, pool, m, p, id, brief)
+			if err != nil {
+				return err
+			}
+		}
 		for step := 0; step <= 3; step++ {
 			view, err := m.read(ctx, p, id)
 			if err != nil {
@@ -251,7 +281,7 @@ func seedDisposable(ctx context.Context, pool *pgxpool.Pool, slug, key, target s
 			action := seedNextAction(view, target)
 			if action == "" {
 				if view.NextAction.Key == "approve_candidate" || view.NextAction.Key == "approve_deploy" {
-					out = OperatorResult{ProjectKey: key, Disposable: true, Stage: view.Stage, ReleaseID: view.CurrentReleaseID, PendingAction: view.NextAction.Key}
+					out = OperatorResult{ProjectKey: key, Disposable: true, Stage: view.Stage, ReleaseID: view.CurrentReleaseID, PendingAction: view.NextAction.Key, Already: !changed}
 					return nil
 				}
 				return fmt.Errorf("cannot seed to %s: %s (%s)", target, view.NextAction.Key, view.NextAction.Reason)
