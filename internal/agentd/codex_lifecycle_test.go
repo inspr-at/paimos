@@ -35,6 +35,11 @@ type codexLifecycleFixture struct {
 
 func newCodexLifecycleFixture(t *testing.T) *codexLifecycleFixture {
 	t.Helper()
+	return newCodexLifecycleFixtureWithStream(t, iotest.OneByteReader)
+}
+
+func newCodexLifecycleFixtureWithStream(t *testing.T, stream func(io.Reader) io.Reader) *codexLifecycleFixture {
+	t.Helper()
 	reader, writer := io.Pipe()
 	capture, err := sessionusage.NewManagedCodex("synthetic-thread", "model-a")
 	if err != nil {
@@ -52,7 +57,7 @@ func newCodexLifecycleFixture(t *testing.T) *codexLifecycleFixture {
 	}
 	f.proc = &codexProcess{wireProcess: wire, usage: capture, done: make(chan bool, 1)}
 	wire.setOnEvent(func(raw json.RawMessage) { f.proc.notification(raw); f.processed <- struct{}{} })
-	go wire.read(iotest.OneByteReader(reader))
+	go wire.read(stream(reader))
 	t.Cleanup(func() { _ = writer.Close(); _ = reader.Close(); <-wire.readDone })
 	go func() { f.start <- f.proc.startTurn(t.Context(), StartRequest{Profile: Profile{Model: "model-a"}}) }()
 	select {
@@ -270,6 +275,120 @@ func TestCodexDrainRequiresEOFAndOwnedExit(t *testing.T) {
 				if err := f.proc.waitForTurn(func(context.Context) error { return nil }, time.Second); err == nil {
 					t.Fatal("later EOF upgraded a failed completion boundary")
 				}
+			}
+		})
+	}
+}
+
+func TestCodexWaitAbandonsBlockedObserver(t *testing.T) {
+	for _, kind := range []string{"usage", "tool"} {
+		t.Run(kind, func(t *testing.T) {
+			// Use Scanner's normal buffering so a second frame is already admitted
+			// to its buffer when the first observer stalls under eventMu.
+			f := newCodexLifecycleFixtureWithStream(t, func(r io.Reader) io.Reader { return r })
+			if err := f.ack(t, lifecycleAck); err != nil {
+				t.Fatal(err)
+			}
+			f.emit(t, lifecycleUsage)
+			f.emit(t, lifecycleTerminal)
+			entered, release := make(chan struct{}), make(chan struct{})
+			var releaseOnce sync.Once
+			defer releaseOnce.Do(func() { close(release) })
+			f.proc.eventMu.Lock()
+			observe := f.proc.observe
+			calls := 0 // read only after readDone joins the observer
+			f.proc.observe = func(e AdapterEvent) {
+				if kind == "usage" && e.SessionUsage != nil || kind == "tool" && e.Kind == "tool" {
+					calls++
+					if calls == 1 {
+						close(entered)
+						<-release
+					}
+				}
+				observe(e)
+			}
+			f.proc.eventMu.Unlock()
+			tail := `{"method":"item/started"}`
+			if kind == "usage" {
+				tail = strings.NewReplacer(":100", ":200", ":20", ":40", ":30", ":60").Replace(lifecycleUsage)
+			}
+			// Pipe.Write returns only after Scanner has consumed both frames.
+			if _, err := io.WriteString(f.output, tail+"\n"+tail+"\n"); err != nil {
+				t.Fatal(err)
+			}
+			select {
+			case <-entered:
+			case <-time.After(time.Second):
+				t.Fatal("observer did not enter")
+			}
+			if f.proc.eventMu.TryLock() {
+				f.proc.eventMu.Unlock()
+				t.Fatal("observer does not hold eventMu")
+			}
+			result := make(chan error, 1)
+			go func() {
+				result <- f.proc.waitForTurn(func(context.Context) error {
+					close(f.proc.waitDone)
+					return f.output.Close()
+				}, 20*time.Millisecond)
+			}()
+			// Keep the real two-second cleanup bound; only shorten the drain.
+			select {
+			case err := <-result:
+				if err == nil {
+					t.Fatal("unjoined observer accepted as clean completion")
+				}
+			case <-time.After(readerCleanupTimeout + time.Second):
+				t.Fatal("Wait exceeded cleanup boundary while observer remained held")
+			}
+			select {
+			case <-f.proc.readDone:
+				t.Fatal("reader claimed completion while callback was held")
+			default:
+			}
+			f.assertProvisional(t)
+			// Repeat the public Wait while eventMu is still held. It must not
+			// start another drain, lock eventMu, or touch process ownership.
+			go func() { result <- f.proc.Wait() }()
+			select {
+			case err := <-result:
+				if err == nil {
+					t.Fatal("abandoned Wait returned success")
+				}
+			case <-time.After(time.Second):
+				t.Fatal("later Wait blocked behind the abandoned observer")
+			}
+			releaseOnce.Do(func() { close(release) })
+			select {
+			case <-f.proc.readDone:
+			case <-time.After(time.Second):
+				t.Fatal("released reader did not finish")
+			}
+			if f.proc.readErr == nil {
+				t.Fatal("local close became true EOF")
+			}
+			if calls != 1 {
+				t.Fatal("abandoned reader dispatched another buffered callback")
+			}
+			if err := f.proc.Wait(); err == nil {
+				t.Fatal("late reader completion resurrected success")
+			}
+			f.proc.eventMu.Lock()
+			// Even an independently delivered notification/finalization attempt
+			// cannot resurrect an abandoned capture after the reader releases it.
+			f.proc.notification(json.RawMessage(lifecycleTerminal))
+			f.proc.sealUsage(true)
+			f.proc.eventMu.Unlock()
+			f.assertProvisional(t)
+			f.mu.Lock()
+			defer f.mu.Unlock()
+			last := f.reports[len(f.reports)-1]
+			wantInput := int64(100)
+			if kind == "usage" {
+				wantInput = 200
+			}
+			if last.InputTokens == nil || *last.InputTokens != wantInput {
+				t.Fatal("admitted callback lost bounded provisional accounting")
 			}
 		})
 	}

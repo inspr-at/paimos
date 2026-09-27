@@ -13,7 +13,7 @@ import (
 
 // notification is serialized with binding changes by wireProcess.eventMu.
 func (p *codexProcess) notification(raw json.RawMessage) {
-	if p.sealed {
+	if p.sealed || p.abandoned.Load() {
 		return
 	}
 	method, _, model := eventProbe(raw)
@@ -120,6 +120,9 @@ func (p *codexProcess) startTurn(ctx context.Context, r StartRequest) error {
 // active through stop, including buffered frames; no quiet-time heuristic or
 // detached goroutine may upgrade a receipt later. Stop/drain errors fail closed.
 func (p *codexProcess) waitForTurn(stop func(context.Context) error, timeout time.Duration) error {
+	if p.abandoned.Load() {
+		return errors.New("Codex turn completion unconfirmed")
+	}
 	select {
 	case <-p.done:
 	case <-p.waitDone:
@@ -139,14 +142,20 @@ func (p *codexProcess) waitForTurn(stop func(context.Context) error, timeout tim
 	if cleanDrain {
 		cleanDrain = p.readErr == nil
 	} else {
+		// Publish failure without eventMu: an admitted observer may still hold
+		// it past both deadlines. Neither its eventual return nor another Wait
+		// may turn this lost completion boundary into a final receipt.
+		p.abandoned.Store(true)
 		// A descendant holding stdout open cannot keep a detached reader alive.
 		// Closing locally is loss of evidence, never equivalent to source EOF.
 		p.closeReader()
-		_ = p.finishReader()
+		if err := p.finishReader(); err != nil {
+			return errors.New("Codex turn completion unconfirmed")
+		}
 	}
 	p.eventMu.Lock()
 	defer p.eventMu.Unlock()
-	clean := stopErr == nil && ctx.Err() == nil && cleanDrain && p.acknowledged && !p.invalid && p.terminal != nil && p.terminal.Clean && p.terminal.ThreadID == p.threadID && p.terminal.TurnID == p.turnID
+	clean := !p.abandoned.Load() && stopErr == nil && ctx.Err() == nil && cleanDrain && p.acknowledged && !p.invalid && p.terminal != nil && p.terminal.Clean && p.terminal.ThreadID == p.threadID && p.terminal.TurnID == p.turnID
 	p.sealUsage(clean)
 	if !clean {
 		return errors.New("Codex turn completion unconfirmed")
@@ -160,6 +169,7 @@ func (p *codexProcess) sealUsage(clean bool) {
 		return
 	}
 	p.sealed = true
+	clean = clean && !p.abandoned.Load()
 	p.invalid = p.invalid || !clean
 	if p.usage != nil {
 		for _, report := range p.usage.Finish(clean) {

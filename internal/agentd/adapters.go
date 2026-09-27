@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/localjournal"
@@ -106,6 +107,7 @@ type codexProcess struct {
 	terminal                  *sessionusage.CodexTerminal
 	terminalSeen, invalid     bool
 	acknowledged, sealed      bool
+	abandoned                 atomic.Bool // drain failure; never needs eventMu to publish
 }
 
 func (p *codexProcess) Wait() error {
