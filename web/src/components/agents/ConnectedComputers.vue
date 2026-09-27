@@ -1,19 +1,22 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import AppIcon from '../AppIcon.vue'
 import {
-  PairingError, activeRunIds, describeComputerStatus, disconnectComputer, disconnectConfirm, disconnectEnrollment,
-  getPairingComputer, lastActiveLabel, listPairingComputers, pairingScopeKey, platformCaption,
-  type DisconnectMode, type PairingPermissions, type PairingView,
+  PairingError, activeRunIds, applyComputerListRefresh, describeComputerStatus, disconnectComputer, disconnectConfirm,
+  disconnectEnrollment, getPairingComputer, lastActiveLabel, listPairingComputers, pairingReadGeneration, pairingScopeKey,
+  platformCaption, type DisconnectMode, type PairingPermissions, type PairingView,
 } from '../../lib/agentPairing'
+import { onAccessChange } from '../../lib/authz'
 import { harnessLabel } from '../../lib/agentState'
+import { usePoller } from '../../lib/usePolledData'
 import HarnessMark from './HarnessMark.vue'
 
 const props = defineProps<{ permissions: PairingPermissions; compactEmpty?: boolean }>()
 
 const computers = ref<PairingView[]>([])
 const state = ref<'idle' | 'loading' | 'ready' | 'error'>('idle')
+const refreshing = ref(false)
 const message = ref('')
 const nextStep = ref('')
 const openId = ref('')
@@ -57,18 +60,49 @@ const accountingOpen = computed(() => {
   return view.accounting_state === 'unconfirmed' || view.enrollments.some(item => item.accounting_state === 'unconfirmed')
 })
 
-watch(() => props.permissions.canListComputers, can => { if (can) void load() }, { immediate: true })
+let loadTurn = 0
+watch(() => props.permissions.canListComputers, can => { if (can) void load(); else dropSignedInList() }, { immediate: true })
+const stopAccess = onAccessChange(change => { if (change === 'reset') dropSignedInList() })
+const poller = usePoller(() => load(), 20_000, { enabled: () => props.permissions.canListComputers })
+onMounted(() => poller.start())
+onBeforeUnmount(() => { stopAccess(); poller.stop() })
+
+function dropSignedInList() {
+  computers.value = []
+  state.value = 'idle'
+  refreshing.value = false
+  message.value = ''
+  nextStep.value = ''
+  openId.value = ''
+  loadTurn += 1
+  closeDialog()
+}
 
 async function load() {
-  if (!props.permissions.canListComputers) return
-  state.value = computers.value.length ? 'ready' : 'loading'
-  message.value = ''
+  if (!props.permissions.canListComputers) { dropSignedInList(); return }
+  const started = pairingReadGeneration()
+  const turn = ++loadTurn
+  const had = computers.value.length > 0
+  if (!had) state.value = 'loading'
+  refreshing.value = true
   try {
-    computers.value = await listPairingComputers()
+    const rows = await listPairingComputers()
+    if (turn !== loadTurn || started !== pairingReadGeneration() || !props.permissions.canListComputers) return
+    const next = applyComputerListRefresh(computers.value, { ok: true, computers: rows })
+    computers.value = next.computers
     state.value = 'ready'
+    message.value = ''
+    nextStep.value = ''
   } catch (error) {
-    state.value = 'error'
-    assign(error, 'Paired computers could not be loaded.')
+    if (error instanceof PairingError && error.code === 'session_reset') return
+    if (turn !== loadTurn || started !== pairingReadGeneration() || !props.permissions.canListComputers) return
+    const next = applyComputerListRefresh(computers.value, { ok: false })
+    computers.value = next.computers
+    state.value = had ? 'ready' : 'error'
+    assign(error, had ? 'Paired computers could not be refreshed.' : 'Paired computers could not be loaded.')
+    if (had) nextStep.value = 'The list stays as it was. A failed refresh does not show that a computer disconnected or that local cleanup finished.'
+  } finally {
+    if (turn === loadTurn && started === pairingReadGeneration()) refreshing.value = false
   }
 }
 
@@ -91,7 +125,7 @@ function openDialog(computer: PairingView, scope: 'computer' | 'enrollment', acc
   queueMicrotask(() => drainButton.value?.focus())
 }
 function closeDialog() {
-  dialog.value?.close()
+  if (dialog.value?.open) dialog.value.close()
   pending.value = null
 }
 
@@ -146,7 +180,10 @@ function assign(error: unknown, fallback: string) {
         <h2 id="computers-title">Connected computers</h2>
         <p>Computers paired with Aeon in this workspace.</p>
       </div>
-      <RouterLink v-if="permissions.canApprove" class="btn sm" to="/agents/register-agent"><AppIcon name="plus" :size="14" />Add computer</RouterLink>
+      <div class="head-actions">
+        <button v-if="permissions.canListComputers" type="button" class="btn sm" :disabled="refreshing" @click="load"><AppIcon name="refresh" :size="14" />{{ refreshing ? 'Refreshing…' : 'Refresh' }}</button>
+        <RouterLink v-if="permissions.canApprove" class="btn sm" to="/agents/register-agent"><AppIcon name="plus" :size="14" />Add computer</RouterLink>
+      </div>
     </header>
 
     <p v-if="state === 'loading'" class="muted">Loading paired computers…</p>
@@ -183,7 +220,8 @@ function assign(error: unknown, fallback: string) {
             <li v-for="enrollment in computer.enrollments" :key="enrollment.account_id">
               <HarnessMark :harness="enrollment.harness" :size="14" />
               <span>{{ harnessLabel(enrollment.harness) }} · {{ enrollment.label }} · {{ enrollment.state }}</span>
-              <span v-if="enrollment.verification_state">Verification {{ enrollment.verification_state.replace(/_/g, ' ') }}</span>
+              <span v-if="enrollment.verification_state && enrollment.verification_state !== 'not_selected'">Verification {{ enrollment.verification_state === 'unavailable' ? 'unavailable' : enrollment.verification_state.replace(/_/g, ' ') }}</span>
+              <span v-if="enrollment.verification_error && enrollment.verification_error !== 'verification_unavailable'">{{ enrollment.verification_error }}</span>
               <span v-if="enrollment.local_processes">Local processes {{ enrollment.local_processes }}</span>
               <span v-if="enrollment.accounting_state === 'unconfirmed'">Accounting unconfirmed</span>
               <button v-if="canChange(computer) && enrollment.state !== 'revoked'" type="button" class="btn sm" @click="openDialog(computer, 'enrollment', enrollment.account_id)">Remove {{ enrollment.label }} from Aeon</button>
@@ -222,6 +260,7 @@ function assign(error: unknown, fallback: string) {
 .head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
 .head h2 { font: 600 16px/1.3 var(--font); letter-spacing: 0; }
 .head p, .meta, .fine { color: var(--ink-2); font-size: 13px; }
+.head-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .head .btn { flex-shrink: 0; }
 .problem { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 8px 0; color: var(--danger); }
 .sheet, .computer { display: grid; grid-template-columns: minmax(140px, 1.6fr) minmax(96px, 1fr) minmax(96px, .8fr) minmax(72px, .6fr) auto; gap: 8px 14px; align-items: center; }

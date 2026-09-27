@@ -1,22 +1,23 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import AppIcon from '../components/AppIcon.vue'
 import ConnectedComputers from '../components/agents/ConnectedComputers.vue'
 import HarnessMark from '../components/agents/HarnessMark.vue'
 import { resilientFetch } from '../lib/api'
 import { harnessLabel } from '../lib/agentState'
-import { myPermissions, refreshPermissions } from '../lib/authz'
+import { myPermissions, onAccessChange, refreshPermissions } from '../lib/authz'
 import { rememberSignInReturn } from '../lib/signInReturn'
 import { useSession } from '../stores/session'
 import {
   DEFAULT_REVIEW_CHOICE, PUBLIC_PAIRING_GUIDE_PATH, PairingError,
-  createOngoingLimits, defaultSelectedAccountKeys, denyPairing, describeProgress,
+  addHarnessTargetProblem, createOngoingLimits, defaultSelectedAccountKeys, denyPairing, describeProgress,
   emptyRequestLimit, formatAllowanceMoment, formatVerification, getPairingComputer, getPairingGuide,
-  isAddHarness, lookupPairing, matchOngoingLimit, ongoingLimitError, pairingPermissions, peekPairingCode,
-  planOngoingLimits, planPoll, platformCaption, publicGuideSections, rememberPairingCode, setHarnessAccount,
-  simpleRequestLimitError, submitApproval, takePairingCode, verificationWarning,
+  isAddHarness, lookupPairing, matchOngoingLimit, ongoingLimitAccounts, ongoingLimitError, pairingPermissions,
+  pairingReadGeneration, peekPairingCode, planOngoingLimits, planPoll, platformCaption, presentPublicGuide,
+  rememberPairingCode, setHarnessAccount, simpleRequestLimitError, submitApproval, takePairingCode,
+  unsupportedVerification, verificationWarning,
   type OngoingLimitDraft, type PairingGuide, type PairingView, type ReviewChoice,
 } from '../lib/agentPairing'
 
@@ -40,10 +41,17 @@ const limitState = ref<Record<string, 'saved' | 'uncertain' | 'failed' | 'absent
 const permissionsReady = ref(false)
 const online = ref(typeof navigator === 'undefined' ? true : navigator.onLine)
 const addTarget = ref<PairingView | null>(null)
+const grantedKeys = ref<string[] | null>(null)
+const platformKey = ref('')
+const copied = ref('')
 const busy = ref('')
 const message = ref('')
 const nextStep = ref('')
-const sections = computed(() => guideLoaded.value ? publicGuideSections(guide.value) : [])
+const presentation = computed(() => guideLoaded.value ? presentPublicGuide(guide.value) : null)
+const selectedTarget = computed(() => {
+  const targets = presentation.value?.targets ?? []
+  return targets.find(item => `${item.platform}/${item.arch}` === platformKey.value) ?? targets[0] ?? null
+})
 const progress = computed(() => current.value ? describeProgress(current.value) : null)
 const permissions = computed(() => pairingPermissions({
   permissions: [...myPermissions()],
@@ -73,13 +81,33 @@ const accountGroups = computed(() => {
 const terms = computed(() => verify.value ? current.value?.verification ?? null : null)
 const pendingReview = computed(() => current.value?.state === 'pending')
 const showLimitForm = computed(() => limitsWhen.value === 'now' || limitsOpen.value || Object.values(limitState.value).some(item => item !== 'saved'))
-const limitAccounts = computed(() => {
-  if (!current.value) return []
-  if (pendingReview.value) return selected.value.map(key => ({ key, id: '', label: current.value?.requested_accounts.find(account => account.account_key === key)?.label ?? key }))
-  return current.value.enrollments.filter(item => item.state !== 'revoked').map(item => ({ key: item.account_key, id: item.account_id, label: item.label }))
+const limitAccounts = computed(() => current.value ? ongoingLimitAccounts({
+  pending: pendingReview.value,
+  selectedKeys: selected.value,
+  grantedKeys: grantedKeys.value,
+  limitsNow: limitsWhen.value === 'now',
+  showAll: limitsOpen.value && limitsWhen.value !== 'now',
+  requested: current.value.requested_accounts,
+  enrollments: current.value.enrollments,
+}) : [])
+const targetProblem = computed(() => current.value ? addHarnessTargetProblem({
+  view: current.value,
+  requestedComputerId: requestedComputer.value,
+  targetName: addTarget.value?.computer_name ?? null,
+}) : null)
+const verificationBlocked = computed(() => {
+  if (!current.value || !pendingReview.value || !verify.value) return []
+  return unsupportedVerification(current.value, selected.value)
 })
 let pollTimer = 0
 let pollStarted = 0
+
+watch(guide, value => {
+  const first = value?.install_targets[0]
+  platformKey.value = first ? `${first.platform}/${first.arch}` : ''
+})
+const stopAccess = onAccessChange(change => { if (change === 'reset') clearSignedInPreview() })
+watch(() => session.requiresSignIn, ended => { if (ended) clearSignedInPreview() })
 
 onMounted(async () => {
   window.addEventListener('online', onLine)
@@ -87,7 +115,13 @@ onMounted(async () => {
   await loadGuide()
   await prepareSession()
   if (requestedComputer.value && session.identity && permissions.value.canListComputers) {
-    try { addTarget.value = await getPairingComputer(requestedComputer.value) } catch { addTarget.value = null }
+    const started = pairingReadGeneration()
+    try {
+      const target = await getPairingComputer(requestedComputer.value)
+      if (started === pairingReadGeneration()) addTarget.value = target
+    } catch (error) {
+      if (!(error instanceof PairingError && error.code === 'session_reset')) addTarget.value = null
+    }
   }
   const stored = peekPairingCode()
   if (!stored) return
@@ -97,10 +131,25 @@ onMounted(async () => {
   await lookup()
 })
 onBeforeUnmount(() => {
+  stopAccess()
   if (pollTimer) window.clearTimeout(pollTimer)
   window.removeEventListener('online', onLine)
   window.removeEventListener('offline', onLine)
 })
+
+function clearSignedInPreview() {
+  current.value = null
+  addTarget.value = null
+  selected.value = []
+  grantedKeys.value = null
+  drafts.value = {}
+  limitState.value = {}
+  limitsOpen.value = false
+  message.value = ''
+  nextStep.value = ''
+  permissionsReady.value = false
+  if (pollTimer) window.clearTimeout(pollTimer)
+}
 
 function onLine() { online.value = navigator.onLine }
 
@@ -141,18 +190,24 @@ async function lookup() {
     return
   }
   busy.value = 'lookup'
+  const started = pairingReadGeneration()
   try {
-    current.value = await lookupPairing(code.value)
-    selected.value = defaultSelectedAccountKeys(current.value.requested_accounts)
+    const found = await lookupPairing(code.value)
+    if (started !== pairingReadGeneration()) return
+    current.value = found
+    selected.value = defaultSelectedAccountKeys(found.requested_accounts)
+    grantedKeys.value = null
     verify.value = true
     limitsWhen.value = 'later'
     limitsOpen.value = false
     limitState.value = {}
-    armPoll(current.value)
+    armPoll(found)
   } catch (error) {
+    if (error instanceof PairingError && error.code === 'session_reset') return
+    if (started !== pairingReadGeneration()) return
     current.value = null
     assignError(error, 'The code could not be looked up.')
-  } finally { busy.value = '' }
+  } finally { if (started === pairingReadGeneration()) busy.value = '' }
 }
 
 function choice(): ReviewChoice {
@@ -174,20 +229,27 @@ async function connect() {
     }
   }
   busy.value = 'approve'
+  const started = pairingReadGeneration()
+  const keys = [...selected.value]
   try {
     const approved = await submitApproval({
-      view: current.value, choice: choice(), selectedAccountKeys: selected.value,
+      view: current.value, choice: choice(), selectedAccountKeys: keys,
       permissions: permissions.value, drafts: Object.values(drafts.value),
+      requestedComputerId: requestedComputer.value,
+      targetComputerName: addTarget.value?.computer_name ?? null,
     })
+    if (started !== pairingReadGeneration()) return
+    grantedKeys.value = keys
     current.value = approved
-    if (limitsWhen.value === 'now') await saveLimits(approved)
+    if (limitsWhen.value === 'now') await saveLimits(approved, keys)
     armPoll(approved)
-  } catch (error) { assignError(error, 'The computer was not connected.') }
-  finally { busy.value = '' }
+  } catch (error) {
+    if (error instanceof PairingError && error.code === 'session_reset') return
+    if (started === pairingReadGeneration()) assignError(error, 'The computer was not connected.')
+  } finally { if (started === pairingReadGeneration()) busy.value = '' }
 }
 
-async function saveLimits(pairing: PairingView) {
-  const keys = limitAccounts.value.map(item => item.key)
+async function saveLimits(pairing: PairingView, keys = grantedKeys.value ?? []) {
   const plan = planOngoingLimits({
     choice: 'ongoing_limits', drafts: keys.map(draftFor), selectedAccountKeys: keys,
     enrollments: pairing.enrollments, permissions: permissions.value,
@@ -275,15 +337,53 @@ async function deny() {
   message.value = ''
   nextStep.value = ''
   try { current.value = await denyPairing(current.value, permissions.value) }
-  catch (error) { assignError(error, 'The request was not denied.') }
+  catch (error) {
+    if (error instanceof PairingError && error.code === 'session_reset') return
+    assignError(error, 'The request was not denied.')
+  }
   finally { busy.value = '' }
 }
 
 function resetCode() {
   current.value = null
+  grantedKeys.value = null
   message.value = ''
   nextStep.value = ''
   if (pollTimer) window.clearTimeout(pollTimer)
+}
+
+function reviewAsNewComputer() {
+  const query = { ...route.query }
+  delete query.computer
+  addTarget.value = null
+  void router.replace({ path: route.path, query })
+}
+
+function connectOnly() { verify.value = false }
+
+function leaveOutUnsupported() {
+  if (!current.value) return
+  let next = selected.value
+  for (const item of unsupportedVerification(current.value, next)) {
+    next = setHarnessAccount(current.value.requested_accounts, next, item.harness, null)
+  }
+  selected.value = next
+}
+
+function harnessCapability(harness: string) {
+  return current.value ? unsupportedVerification(current.value, current.value.requested_accounts.filter(account => account.harness === harness).map(account => account.account_key)) : []
+}
+
+async function copyText(value: string, label: string) {
+  if (!value) return
+  try {
+    await navigator.clipboard.writeText(value)
+    copied.value = label
+  } catch {
+    copied.value = ''
+    message.value = `${label} could not be copied.`
+    nextStep.value = 'Select the text and copy it from the page.'
+  }
 }
 
 function selectedKey(harness: string) {
@@ -323,10 +423,13 @@ function armPoll(pairing: PairingView) {
 
 async function refreshComputer(computerId: string) {
   try {
+    const started = pairingReadGeneration()
     const pairing = await getPairingComputer(computerId)
+    if (started !== pairingReadGeneration()) return
     current.value = pairing
     armPoll(pairing)
   } catch (error) {
+    if (error instanceof PairingError && error.code === 'session_reset') return
     if (error instanceof PairingError && error.code === 'rate_limited') {
       const plan = planPoll({ startedAt: pollStarted, now: Date.now(), rateLimited: true, retryAfterSeconds: error.retryAfterSeconds, state: current.value?.state })
       if (plan.action === 'wait') pollTimer = window.setTimeout(() => void refreshComputer(computerId), plan.delayMs)
@@ -363,18 +466,23 @@ function capability(value: string) {
     </ol>
 
     <p v-if="!online" class="banner" role="status"><AppIcon name="alert" :size="15" />You appear to be offline. The guide can still be read. Lookup, approval and disconnect need a connection.</p>
-    <p v-if="addTarget" class="banner">Adding a harness on {{ addTarget.computer_name }}. Start that on the computer, then enter the new code here. This page does not send a lifecycle secret.</p>
-    <p v-else-if="requestedComputer && session.identity" class="banner">Enter the code from the computer you are adding a harness to.</p>
+    <p v-if="addRequest && !targetProblem" class="banner">Adding a harness on {{ current?.computer_name }}. It keeps the same daemon. This page does not send a lifecycle secret.</p>
+    <p v-else-if="addTarget && !current" class="banner">Adding a harness on {{ addTarget.computer_name }}. Start that on the computer, then enter the new code here. This page does not send a lifecycle secret.</p>
+    <p v-else-if="requestedComputer && session.identity && !current" class="banner">Enter the code from the computer you are adding a harness to.</p>
 
     <section v-if="!current" class="card">
-      <template v-if="!guideLoaded">
+      <template v-if="!guideLoaded || !presentation">
         <p class="muted">Loading the guide for this Aeon…</p>
       </template>
       <template v-else>
-        <section v-for="(section, index) in sections" :key="section.heading">
-          <h2 v-if="index > 0">{{ section.heading }}</h2>
-          <p v-for="paragraph in section.paragraphs" :key="paragraph" class="copy">{{ paragraph }}</p>
-        </section>
+        <p class="k">Page address</p>
+        <div class="address">
+          <code>{{ presentation.address || 'This Aeon has not published its address yet.' }}</code>
+          <button v-if="presentation.address" type="button" class="btn sm" @click="copyText(presentation.address, 'Address')">{{ copied === 'Address' ? 'Copied' : 'Copy' }}</button>
+        </div>
+        <ol class="howto">
+          <li v-for="stepText in presentation.steps" :key="stepText">{{ stepText }}</li>
+        </ol>
       </template>
       <p v-if="guideError" class="problem" role="alert">{{ guideError }} <button type="button" class="btn sm" @click="loadGuide">Try again</button></p>
 
@@ -384,11 +492,32 @@ function capability(value: string) {
           <input v-model="code" class="field" name="user-code" autocomplete="one-time-code" inputmode="numeric" spellcheck="false" />
         </label>
         <button class="btn primary go" type="submit" :disabled="!!busy">{{ busy === 'lookup' ? 'Looking up…' : session.identity ? 'Look up code' : 'Sign in to review the code' }}</button>
+        <p v-if="presentation" class="note">{{ presentation.note }}</p>
         <p v-if="permissionsReady && session.identity && !permissions.canLookup" class="note">Only a signed-in person who can manage accounts can review a pairing code. An agent session cannot approve it.</p>
       </form>
+      <details v-if="presentation" class="manual">
+        <summary>Manual and agent setup</summary>
+        <p v-for="paragraph in presentation.manualParagraphs" :key="paragraph" class="copy">{{ paragraph }}</p>
+        <p class="copy">{{ presentation.installNote }}</p>
+        <label v-if="presentation.targets.length > 1">Platform
+          <select v-model="platformKey" class="field" aria-label="Install platform">
+            <option v-for="target in presentation.targets" :key="`${target.platform}/${target.arch}`" :value="`${target.platform}/${target.arch}`">{{ platformCaption(target.platform, target.arch) }}</option>
+          </select>
+        </label>
+        <template v-if="selectedTarget">
+          <p class="k">{{ platformCaption(selectedTarget.platform, selectedTarget.arch) }}</p>
+          <pre class="command"><code>{{ selectedTarget.command }}</code></pre>
+          <button type="button" class="btn sm" @click="copyText(selectedTarget.command, 'Command')">{{ copied === 'Command' ? 'Copied' : 'Copy command' }}</button>
+        </template>
+        <template v-else-if="presentation.setupCommand">
+          <p class="k">Setup command</p>
+          <pre class="command"><code>{{ presentation.setupCommand }}</code></pre>
+          <button type="button" class="btn sm" @click="copyText(presentation.setupCommand, 'Command')">{{ copied === 'Command' ? 'Copied' : 'Copy command' }}</button>
+        </template>
+      </details>
     </section>
 
-    <section v-else-if="progress" class="card" aria-live="polite">
+    <section v-else-if="progress" class="card" aria-live="polite" aria-label="Pairing review">
       <header class="review-head">
         <div>
           <h2>{{ adding && pendingReview ? 'Add a harness' : pendingReview ? 'Review this computer' : progress.title }}</h2>
@@ -396,8 +525,8 @@ function capability(value: string) {
         </div>
         <button type="button" class="btn sm" @click="resetCode">Use a different code</button>
       </header>
-      <p v-if="current && requestedComputer && current.existing_computer_id && current.existing_computer_id !== requestedComputer" class="problem" role="alert">This code is not an add-harness request for the computer you opened.</p>
-      <p v-else-if="requestedComputer && pendingReview && !current.existing_computer_id" class="problem" role="alert">This code starts a new computer. It does not add a harness to the computer you opened.</p>
+      <p v-if="targetProblem" class="problem" role="alert">{{ targetProblem.message }} {{ targetProblem.next }}</p>
+      <button v-if="targetProblem" type="button" class="btn sm" @click="reviewAsNewComputer">Review as a new computer</button>
 
       <div class="facts">
         <div><span class="glyph"><AppIcon name="monitor" :size="16" /></span><div><p class="k">Computer</p><p>{{ current.computer_name }}</p><p class="sub">{{ platformCaption(current.platform, current.arch) }}</p></div></div>
@@ -422,19 +551,25 @@ function capability(value: string) {
               <option v-for="account in group.accounts" :key="account.account_key" :value="account.account_key">{{ account.label }}</option>
             </select>
           </label>
+          <p v-if="verify && harnessCapability(group.harness).length" class="problem harness-note">{{ harnessLabel(group.harness) }}: {{ harnessCapability(group.harness)[0]?.reason }}</p>
         </div>
 
         <label class="verify">
           <input v-model="verify" type="checkbox" />
           <span>
             <strong>Verify selected harnesses</strong>
-            <span class="sub">One short read-only verification per selected harness. One at a time. No repository changes or privileged actions.</span>
+            <span v-if="terms" class="sub">{{ formatVerification(terms) }}</span>
           </span>
-          <span v-if="terms" class="expiry"><AppIcon name="clock" :size="14" />{{ terms.allowance }} {{ terms.unit }} · until {{ formatAllowanceMoment(terms.expires_at) }}</span>
+          <time v-if="terms" class="expiry" :datetime="terms.expires_at"><AppIcon name="clock" :size="14" />until {{ formatAllowanceMoment(terms.expires_at) }}</time>
         </label>
-        <p v-if="terms" class="sub exact">Server allowance: {{ formatVerification(terms) }}</p>
         <p v-if="terms && verificationWarning(terms)" class="problem" role="alert">{{ verificationWarning(terms) }}</p>
         <p v-if="verify && !current.verification" class="problem">The server did not include verification terms. Leave verification off, or look the code up again.</p>
+        <div v-if="verificationBlocked.length" class="problem" role="alert">
+          <p v-if="current.verification_capabilities">Verification is unavailable for {{ verificationBlocked.map(item => harnessLabel(item.harness)).join(', ') }}. Connect only still pairs the computer. Leaving a harness out skips it.</p>
+          <p v-else>This Aeon has not said which harnesses can be verified. Connect only still pairs the computer.</p>
+          <button type="button" class="btn sm" @click="connectOnly">Connect only</button>
+          <button v-if="current.verification_capabilities" type="button" class="btn sm" @click="leaveOutUnsupported">Leave out unsupported harnesses</button>
+        </div>
 
         <fieldset>
           <legend>After connecting</legend>
@@ -449,8 +584,8 @@ function capability(value: string) {
           <li v-for="enrollment in current.enrollments" :key="enrollment.account_id">
             <HarnessMark :harness="enrollment.harness" :size="14" />
             <span>{{ harnessLabel(enrollment.harness) }} · {{ enrollment.label }} · {{ enrollment.state }}</span>
-            <span v-if="enrollment.verification_state">Verification {{ enrollment.verification_state.replace(/_/g, ' ') }}</span>
-            <span v-if="enrollment.verification_error">{{ enrollment.verification_error }}</span>
+            <span v-if="enrollment.verification_state && enrollment.verification_state !== 'not_selected'">Verification {{ enrollment.verification_state === 'unavailable' ? 'unavailable' : enrollment.verification_state.replace(/_/g, ' ') }}</span>
+            <span v-if="enrollment.verification_error && enrollment.verification_error !== 'verification_unavailable'">{{ enrollment.verification_error }}</span>
             <span v-if="enrollment.local_processes">Local processes {{ enrollment.local_processes }}</span>
             <span v-if="enrollment.accounting_state === 'unconfirmed'">Accounting unconfirmed</span>
           </li>
@@ -459,8 +594,8 @@ function capability(value: string) {
       </div>
 
       <div v-if="showLimitForm && limitAccounts.length" class="limits">
-        <h3>Ongoing limits</h3>
-        <p class="sub">A number of requests for a period. This is an Aeon allowance, not the vendor subscription. The paired computer estimates one request at a time.</p>
+        <h3>{{ limitsOpen && limitsWhen !== 'now' && !pendingReview ? 'Ongoing limits for connected accounts' : 'Ongoing limits for this request' }}</h3>
+        <p class="sub">{{ limitsOpen && limitsWhen !== 'now' && !pendingReview ? 'Every connected account on this computer is listed here, including accounts this request did not select.' : 'A number of requests for a period, only for the accounts selected on this request. This is an Aeon allowance, not the vendor subscription.' }}</p>
         <div v-for="account in limitAccounts" :key="account.key" class="limit">
           <h4>{{ account.label }}</h4>
           <p v-if="account.id && limitState[account.id] === 'saved'">Requests for this period are saved.</p>
@@ -485,7 +620,7 @@ function capability(value: string) {
       </div>
 
       <div v-if="pendingReview" class="actions">
-        <button class="btn primary go" type="button" :disabled="!!busy || !permissions.canApprove || !selected.length" @click="connect">{{ busy === 'approve' ? (addRequest ? 'Adding…' : 'Connecting…') : addRequest ? 'Add harness' : 'Connect computer' }}</button>
+        <button class="btn primary go" type="button" :disabled="!!busy || !permissions.canApprove || !selected.length || !!targetProblem || verificationBlocked.length > 0" @click="connect">{{ busy === 'approve' ? (addRequest ? 'Adding…' : 'Connecting…') : addRequest ? 'Add harness' : 'Connect computer' }}</button>
         <button class="btn" type="button" :disabled="!!busy || !permissions.canDeny" @click="deny">Deny</button>
         <p class="keep"><AppIcon name="shield" :size="14" />Vendor sign-ins and project files stay on the computer.</p>
       </div>
@@ -529,10 +664,18 @@ form label, .limit label { display: grid; gap: 6px; margin: 10px 0; }
 .path, .copy { overflow-wrap: anywhere; }
 .caps { margin-top: 8px; }
 .harness, .verify, .radio { display: flex; align-items: center; gap: 10px; min-height: 52px; margin-top: 8px; padding: 10px 12px; border-radius: 12px; background: var(--surface-sunken); }
-.harness { justify-content: space-between; }
+.harness { justify-content: space-between; flex-wrap: wrap; }
 .check, .verify, .radio { cursor: pointer; }
 .check { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .check input, .verify input, .radio input { width: 16px; height: 16px; margin: 0; accent-color: var(--teal); }
+.address { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 8px 0 12px; }
+.address code, .command { font-family: var(--mono); font-size: 13px; }
+.address code { overflow-wrap: anywhere; }
+.howto { display: grid; gap: 6px; margin: 0 0 8px; padding-left: 1.2rem; color: var(--ink-2); }
+.manual { margin-top: 16px; }
+.manual summary { cursor: pointer; font-weight: 650; }
+.command { display: block; margin: 8px 0; padding: 12px; overflow-x: auto; white-space: pre-wrap; border-radius: 12px; background: var(--surface-sunken); }
+.harness-note { flex-basis: 100%; margin: 0; }
 .account-pick { flex: 0 1 220px; }
 .account-pick .field { height: 36px; }
 .verify { align-items: flex-start; }
