@@ -84,6 +84,7 @@ type Supervisor struct {
 	state             *agentsetup.Store
 	closing           bool
 	blockedAccounts   map[string]bool
+	probedAccounts    map[string]bool
 	mu                sync.Mutex
 	api               API
 	journal           *localjournal.Journal[Record]
@@ -182,6 +183,11 @@ func NewSupervisor(ctx context.Context, c Config) (*Supervisor, error) {
 			_ = lock.Close()
 		}
 	}()
+	for _, suffix := range []string{".journal", ".checkpoint.json"} {
+		if _, e := state.Read("aeon-agentd-"+c.DaemonID+suffix, 4<<20); e != nil && !errors.Is(e, os.ErrNotExist) {
+			return nil, e
+		}
+	}
 	j, err := localjournal.Open(localjournal.Config[Record]{
 		Directory: c.StateRoot, Prefix: "aeon-agentd-" + c.DaemonID, Version: 2,
 		MaxBytes: 4 << 20, MaxRecords: 4096,
@@ -201,7 +207,7 @@ func NewSupervisor(ctx context.Context, c Config) (*Supervisor, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &Supervisor{state: state, blockedAccounts: map[string]bool{}, api: c.API, journal: j, lock: lock, adapters: adapters, runs: map[string]*owned{}, tenantID: tenantID,
+	s := &Supervisor{state: state, blockedAccounts: map[string]bool{}, probedAccounts: map[string]bool{}, api: c.API, journal: j, lock: lock, adapters: adapters, runs: map[string]*owned{}, tenantID: tenantID,
 		principalID: principalID, daemonID: c.DaemonID, generation: gen, workspace: physical, estimates: c.EstimatedUnits, accounts: c.Accounts,
 		heartbeatInterval: heartbeat, maxRunDuration: maxRun}
 	for _, rec := range j.Snapshot() {
@@ -250,9 +256,13 @@ func (s *Supervisor) PrincipalID() string { return s.principalID }
 
 func (s *Supervisor) Status() []Record {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	out := make([]Record, 0, len(s.runs))
+	entries := make([]*owned, 0, len(s.runs))
 	for _, entry := range s.runs {
+		entries = append(entries, entry)
+	}
+	s.mu.Unlock()
+	out := make([]Record, 0, len(entries))
+	for _, entry := range entries {
 		entry.mu.Lock()
 		view := entry.record
 		view.Workspace = ""
@@ -272,16 +282,24 @@ func (s *Supervisor) PollOnce(ctx context.Context) error {
 		return nil
 	}
 	var failures []error
-	for _, account := range s.accounts {
+	s.mu.Lock()
+	accounts := append([]EnrolledAccount(nil), s.accounts...)
+	adapters := map[string]Adapter{}
+	for k, v := range s.adapters {
+		adapters[k] = v
+	}
+	s.mu.Unlock()
+	for _, account := range accounts {
 		fenced, fenceErr := s.readFence(account.ID)
 		if fenced || fenceErr != nil {
 			continue
 		}
-		probe := s.adapters[account.Harness].(AccountProber)
+		probe := adapters[account.Harness].(AccountProber)
 		available := probe.Probe(ctx, account.Key)
 		err := s.api.Probe(ctx, account.ID, s.daemonID, s.generation, available)
 		s.mu.Lock()
 		s.blockedAccounts[account.ID] = err != nil || !available
+		s.probedAccounts[account.ID] = err == nil && available
 		s.mu.Unlock()
 		if err != nil {
 			failures = append(failures, errors.New("account probe unavailable"))
@@ -338,7 +356,13 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) error {
 	}
 	verification := run.Purpose == VerificationPurpose
 	if verification {
+		s.mu.Lock()
+		entries := make([]*owned, 0, len(s.runs))
 		for _, entry := range s.runs {
+			entries = append(entries, entry)
+		}
+		s.mu.Unlock()
+		for _, entry := range entries {
 			entry.mu.Lock()
 			busy := entry.record.ExecutionMode == VerificationPurpose && !entry.record.ExitObserved && (entry.record.State == "running" || entry.record.State == "starting" || entry.record.State == "ownership_lost")
 			entry.mu.Unlock()
@@ -395,12 +419,6 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) error {
 		prompt = VerificationTask
 	}
 	runWorkspace := s.workspace
-	if verification {
-		runWorkspace, err = verificationScratch(s.workspace)
-		if err != nil {
-			return err
-		}
-	}
 	if len(prompt) > 256<<10 {
 		return errors.New("work order prompt exceeds local bound")
 	}
@@ -420,7 +438,7 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) error {
 	if err != nil {
 		return err
 	}
-	if route.DaemonID != s.daemonID || route.AccountKey == "" || len(route.Reservations) == 0 {
+	if route.DaemonID != s.daemonID || route.AccountKey == "" || len(route.Reservations) == 0 || run.AccountID != "" && route.AccountID != run.AccountID {
 		return errors.New("account route is not bound to daemon")
 	}
 	localBinding := false
@@ -453,6 +471,12 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) error {
 	s.mu.Unlock()
 	if err := s.api.Claim(ctx, run.ID, s.daemonID, s.generation, ids); err != nil {
 		return err
+	}
+	if verification {
+		runWorkspace, err = verificationScratch(s.workspace)
+		if err != nil {
+			return err
+		}
 	}
 	projectID, err := s.api.ProjectForNode(ctx, node.Key)
 	if err != nil {
@@ -557,26 +581,25 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) error {
 	entry.mu.Lock()
 	entry.monitorDone = make(chan struct{})
 	entry.mu.Unlock()
-	go s.monitor(entry)
-	go s.heartbeat(entry, duration)
-	if saveErr != nil {
-		s.freezeOnError(route.AccountID)
-		return saveErr
+	var startedErr error
+	if saveErr == nil {
+		startedErr = s.update(ctx, entry, Telemetry{Kind: "started", Status: "running"})
 	}
-	if err := s.update(ctx, entry, Telemetry{Kind: "started", Status: "running"}); err != nil {
-		s.freezeOnError(route.AccountID)
-		return err
+	var heartbeatErr error
+	if saveErr == nil && startedErr == nil {
+		heartbeatErr = s.heartbeatHarness(ctx, entry)
 	}
-	heartbeatErr := s.heartbeatHarness(ctx, entry)
 	if errors.Is(heartbeatErr, ErrHarnessArchived) {
 		entry.mu.Lock()
 		entry.harnessArchived = true
 		entry.mu.Unlock()
-		return nil
+		heartbeatErr = nil
 	}
-	if heartbeatErr != nil {
+	go s.monitor(entry)
+	go s.heartbeat(entry, duration)
+	if err := errors.Join(saveErr, startedErr, heartbeatErr); err != nil {
 		s.freezeOnError(route.AccountID)
-		return heartbeatErr
+		return err
 	}
 	return nil
 }
@@ -662,6 +685,12 @@ func (s *Supervisor) monitor(entry *owned) {
 	}
 	if saveErr := s.journal.Put(entry.record); saveErr != nil {
 		entry.record.SettlementGap = true
+	}
+	if !entry.record.ExitObserved {
+		entry.record.State = "ownership_lost"
+		_ = s.journal.Put(entry.record)
+		entry.mu.Unlock()
+		return
 	}
 	entry.mu.Unlock()
 	s.finishSessionUsage(entry)

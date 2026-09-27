@@ -10,15 +10,16 @@ import (
 )
 
 const VerificationPurpose = "pairing_verification"
-const VerificationTask = "Reply exactly AEON_VERIFIED. Do not use tools, read or modify files, execute commands, or access the network."
+const VerificationTask = "Reply exactly AEON_VERIFIED. Do not modify files, perform privileged actions, access external networks, or use external/MCP tools. Use the enforced read-only verification mode."
 
-var ErrVerificationUnavailable = errors.New("verification blocked: this adapter has no qualified no-tools execution mode")
+var ErrVerificationUnavailable = errors.New("verification blocked: this adapter has no qualified harmless execution mode")
 
 // VerificationAdapter is an explicit execution capability, not a prompt hint.
 // Unknown/future adapters cannot accidentally inherit the managed tool path.
 type VerificationAdapter interface{ VerificationSupported() bool }
 
 func (*ClaudeAdapter) VerificationSupported() bool { return true }
+func (*CursorAdapter) VerificationSupported() bool { return true }
 
 func validExecutionMode(r Run, adapter Adapter) error {
 	if r.Purpose == "" || r.Purpose == "managed" {
@@ -31,7 +32,7 @@ func validExecutionMode(r Run, adapter Adapter) error {
 	if !ok || !a.VerificationSupported() {
 		return ErrVerificationUnavailable
 	}
-	if r.AccountID == "" || r.VerificationTask != VerificationTask || r.MaxDurationSeconds == nil || *r.MaxDurationSeconds < 1 || *r.MaxDurationSeconds > 60 || r.ToolsAllowed == nil || *r.ToolsAllowed || r.RepositoryMutationAllowed == nil || *r.RepositoryMutationAllowed {
+	if r.AccountID == "" || r.VerificationTask != VerificationTask || r.MaxDurationSeconds == nil || *r.MaxDurationSeconds < 1 || *r.MaxDurationSeconds > 60 || r.VerificationPolicy != "read_only" || r.RepositoryMutationAllowed == nil || *r.RepositoryMutationAllowed {
 		return errors.New("verification binding is incomplete or unsafe")
 	}
 	return nil

@@ -45,6 +45,20 @@ func OpenStore(path string, create bool) (*Store, error) {
 	return openDirectory(path, create, true)
 }
 
+// ReadPrivateFile protects legacy explicit file flags too, without requiring
+// a formerly public ancestor to be changed or adopted by guided setup.
+func ReadPrivateFile(path string, max int64) ([]byte, error) {
+	if !filepath.IsAbs(path) || filepath.Clean(path) != path {
+		return nil, ErrUnsafePath
+	}
+	s, err := openDirectory(filepath.Dir(path), false, false)
+	if err != nil {
+		return nil, err
+	}
+	defer s.Close()
+	return s.Read(filepath.Base(path), max)
+}
+
 // openDirectory also anchors user-service directories, which may conventionally
 // be 0755. Their ancestors still cannot be writable by any other user.
 func openDirectory(path string, create, private bool) (*Store, error) {
@@ -104,16 +118,30 @@ func (s *Store) Lock() error {
 	if s.lock != nil {
 		return nil
 	}
-	f, err := s.open("setup.lock", unix.O_RDWR|unix.O_CREAT)
+	f, err := s.lockNamed("setup.lock")
 	if err != nil {
 		return err
 	}
-	if unix.Flock(int(f.Fd()), unix.LOCK_EX|unix.LOCK_NB) != nil {
-		f.Close()
-		return ErrBusy
-	}
 	s.lock = f
 	return nil
+}
+
+// LockNamed returns an owned descriptor; closing it releases only this lock.
+func (s *Store) LockNamed(name string) (*os.File, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.lockNamed(name)
+}
+func (s *Store) lockNamed(name string) (*os.File, error) {
+	f, err := s.open(name, unix.O_RDWR|unix.O_CREAT)
+	if err != nil {
+		return nil, err
+	}
+	if unix.Flock(int(f.Fd()), unix.LOCK_EX|unix.LOCK_NB) != nil {
+		f.Close()
+		return nil, ErrBusy
+	}
+	return f, nil
 }
 
 func (s *Store) open(name string, flags int) (*os.File, error) {
@@ -235,6 +263,15 @@ func (s *Store) Close() error {
 	err := s.root.Close()
 	s.root = nil
 	return err
+}
+
+func (s *Store) Unlock() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.lock != nil {
+		s.lock.Close()
+		s.lock = nil
+	}
 }
 
 func Hash(b []byte) string { h := sha256.Sum256(b); return hex.EncodeToString(h[:]) }

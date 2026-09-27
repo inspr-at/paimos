@@ -380,10 +380,12 @@ func (*CursorAdapter) Name() string { return Cursor }
 
 type cursorProcess struct {
 	*wireProcess
-	promptID    string
-	done        chan struct{}
-	doneOnce    sync.Once
-	terminalErr error
+	promptID        string
+	done            chan struct{}
+	doneOnce        sync.Once
+	terminalErr     error
+	verification    bool
+	askAcknowledged bool
 }
 
 func (p *cursorProcess) finish(err error) {
@@ -438,11 +440,15 @@ func (a *CursorAdapter) Start(ctx context.Context, r StartRequest, observe func(
 	}
 	op, cancel := operationContext(ctx)
 	defer cancel()
-	p, err := launchWire(path, []string{"--trust", "--model", r.Profile.Model, "acp"}, r.Workspace, nil, "jsonrpc", observe)
+	args := []string{"--trust", "--model", r.Profile.Model, "acp"}
+	if r.Run.Purpose == VerificationPurpose {
+		args = []string{"--model", r.Profile.Model, "acp"}
+	}
+	p, err := launchWire(path, args, r.Workspace, nil, "jsonrpc", observe)
 	if err != nil {
 		return nil, err
 	}
-	cp := &cursorProcess{wireProcess: p, done: make(chan struct{})}
+	cp := &cursorProcess{wireProcess: p, done: make(chan struct{}), verification: r.Run.Purpose == VerificationPurpose}
 	var costMicros int64
 	p.setOnEvent(func(raw json.RawMessage) {
 		var frame struct {
@@ -454,6 +460,7 @@ func (a *CursorAdapter) Start(ctx context.Context, r StartRequest, observe func(
 				SessionID string `json:"sessionId"`
 				Update    struct {
 					SessionUpdate string `json:"sessionUpdate"`
+					CurrentModeID string `json:"currentModeId"`
 					Cost          *struct {
 						Amount   json.RawMessage `json:"amount"`
 						Currency string          `json:"currency"`
@@ -476,6 +483,14 @@ func (a *CursorAdapter) Start(ctx context.Context, r StartRequest, observe func(
 			return
 		}
 		method := frame.Method
+		if cp.verification && method == "session/update" && frame.Params.SessionID == p.sessionID && frame.Params.Update.SessionUpdate == "current_mode_update" {
+			if frame.Params.Update.CurrentModeID == "ask" {
+				cp.askAcknowledged = true
+			} else {
+				cp.finish(errors.New("Cursor verification mode changed"))
+				go p.Stop(context.Background())
+			}
+		}
 		if method == "session/update" && frame.Params.SessionID == p.sessionID &&
 			frame.Params.Update.SessionUpdate == "usage_update" && frame.Params.Update.Cost != nil &&
 			frame.Params.Update.Cost.Currency == "USD" {
@@ -485,6 +500,9 @@ func (a *CursorAdapter) Start(ctx context.Context, r StartRequest, observe func(
 				}
 			}
 		} else if method == "session/request_permission" {
+			if cp.verification && len(frame.ID) > 0 {
+				_ = p.send(map[string]any{"jsonrpc": "2.0", "id": frame.ID, "result": map[string]any{"outcome": map[string]string{"outcome": "cancelled"}}})
+			}
 			cp.finish(errors.New("Cursor ACP decision requires local operator"))
 			go func() {
 				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -513,7 +531,10 @@ func (a *CursorAdapter) Start(ctx context.Context, r StartRequest, observe func(
 			Current string `json:"currentModelId"`
 		} `json:"models"`
 		Modes struct {
-			Current string `json:"currentModeId"`
+			Current   string `json:"currentModeId"`
+			Available []struct {
+				ID string `json:"id"`
+			} `json:"availableModes"`
 		} `json:"modes"`
 	}
 	expectedModel := r.Profile.Model
@@ -523,7 +544,41 @@ func (a *CursorAdapter) Start(ctx context.Context, r StartRequest, observe func(
 	if err != nil || json.Unmarshal(raw, &session) != nil || session.SessionID == "" || session.Models.Current != expectedModel || session.Modes.Current == "" {
 		return fail(errors.New("Cursor ACP session failed"))
 	}
+	p.eventMu.Lock()
 	p.sessionID = session.SessionID
+	p.eventMu.Unlock()
+	if cp.verification {
+		advertised := false
+		for _, mode := range session.Modes.Available {
+			if mode.ID == "ask" {
+				advertised = true
+			}
+		}
+		if !advertised || r.Tools != nil {
+			return fail(ErrVerificationUnavailable)
+		}
+		raw, err = p.request(op, "jsonrpc", "session/set_mode", map[string]string{"sessionId": session.SessionID, "modeId": "ask"})
+		var ack struct {
+			Current string `json:"currentModeId"`
+		}
+		if err != nil || json.Unmarshal(raw, &ack) != nil {
+			return fail(ErrVerificationUnavailable)
+		}
+		p.eventMu.Lock()
+		if ack.Current == "ask" {
+			cp.askAcknowledged = true
+		}
+		ready := cp.askAcknowledged
+		p.eventMu.Unlock()
+		if !ready {
+			return fail(ErrVerificationUnavailable)
+		}
+		select {
+		case <-cp.done:
+			return fail(ErrVerificationUnavailable)
+		default:
+		}
+	}
 	cp.promptID = strconv.FormatInt(p.next.Add(1), 10)
 	id, _ := strconv.ParseInt(cp.promptID, 10, 64)
 	if err := p.send(map[string]any{"jsonrpc": "2.0", "id": id, "method": "session/prompt", "params": map[string]any{"sessionId": p.sessionID, "prompt": []map[string]string{{"type": "text", "text": r.Prompt}}}}); err != nil {
@@ -539,12 +594,14 @@ var claudeAssets embed.FS
 type ClaudeAdapter struct {
 	NodePath, SDKPath, ClaudePath string
 	Homes                         map[string]string
+	Emails                        map[string]string
 }
 
 func NewClaudeAdapter(nodePath, sdkPath, claudePath string, homes map[string]string) *ClaudeAdapter {
 	return &ClaudeAdapter{NodePath: nodePath, SDKPath: sdkPath, ClaudePath: claudePath, Homes: homes}
 }
-func (*ClaudeAdapter) Name() string { return Claude }
+func (*ClaudeAdapter) Name() string                                 { return Claude }
+func (a *ClaudeAdapter) SetExpectedEmails(emails map[string]string) { a.Emails = emails }
 
 type claudeProcess struct {
 	*wireProcess

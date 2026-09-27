@@ -138,7 +138,7 @@ func TestVerificationOneShotNoRepoToolsAndNoDuplicate(t *testing.T) {
 	run.AccountID = "account"
 	run.VerificationTask = VerificationTask
 	run.MaxDurationSeconds = &duration
-	run.ToolsAllowed = &no
+	run.VerificationPolicy = "read_only"
 	run.RepositoryMutationAllowed = &no
 	if err := s.StartRun(t.Context(), run); err != nil {
 		t.Fatal(err)
@@ -160,7 +160,7 @@ func TestVerificationOneShotNoRepoToolsAndNoDuplicate(t *testing.T) {
 	}
 }
 func TestUnqualifiedVerificationNeverLaunches(t *testing.T) {
-	for _, adapter := range []Adapter{NewCodexAdapter("/unused", nil), NewCursorAdapter("/unused", nil), NewPiAdapter("/unused", nil), NewGrokAdapter()} {
+	for _, adapter := range []Adapter{NewCodexAdapter("/unused", nil), NewPiAdapter("/unused", nil), NewGrokAdapter()} {
 		if _, err := adapter.Start(t.Context(), StartRequest{Run: Run{Purpose: VerificationPurpose}}, func(AdapterEvent) {}); !errors.Is(err, ErrVerificationUnavailable) {
 			t.Fatalf("%s did not fail before launch", adapter.Name())
 		}

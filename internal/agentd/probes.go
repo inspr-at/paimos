@@ -104,9 +104,11 @@ func (a *ClaudeAdapter) Probe(ctx context.Context, key string) bool {
 		return false
 	}
 	var status struct {
-		LoggedIn bool `json:"loggedIn"`
+		LoggedIn   bool   `json:"loggedIn"`
+		Email      string `json:"email"`
+		AuthMethod string `json:"authMethod"`
 	}
-	return json.Unmarshal(raw, &status) == nil && status.LoggedIn
+	return json.Unmarshal(raw, &status) == nil && status.LoggedIn && (a.Emails == nil || status.AuthMethod != "api_key" && strings.EqualFold(status.Email, a.Emails[key]) && a.Emails[key] != "")
 }
 
 func (a *GrokAdapter) Probe(ctx context.Context, key string) bool {

@@ -221,6 +221,7 @@ let queryHandle;
 let input;
 let controlInput;
 let stopping = false;
+let verificationSucceeded = false;
 let sessionStarted = false;
 let sessionID = "";
 let effectiveModel = "";
@@ -483,7 +484,7 @@ try {
   for await (const message of queryHandle) {
     if (message?.type === "system" && message.subtype === "init") {
       if (!validID(message.session_id) || !Array.isArray(message.capabilities) ||
-          !message.capabilities.includes("interrupt_receipt_v1")) {
+          (start.purpose !== "pairing_verification" && !message.capabilities.includes("interrupt_receipt_v1"))) {
         fail("app_server_protocol", "", "interrupt_receipt_v1_missing");
         queryHandle.close();
         break;
@@ -526,6 +527,11 @@ try {
       turnActive = false;
       observeUsage(message);
       emit({ kind: "turn_completed" });
+      if (start.purpose === "pairing_verification") {
+        verificationSucceeded = message.subtype === "success" && message.is_error !== true;
+        controlInput.close(); input.close(); queryHandle.close();
+        break;
+      }
     }
   }
   queryEndedResolve();
@@ -534,7 +540,7 @@ try {
   input.close();
   queryHandle.close();
   await controlChain;
-  if (!stopping) {
+  if (!stopping && !verificationSucceeded) {
     fail("child_exit_failed");
     process.exitCode = 1;
   }
@@ -545,7 +551,7 @@ try {
   input?.close();
   queryHandle?.close();
   await controlChain.catch(() => {});
-  if (!stopping) {
+  if (!stopping && !verificationSucceeded) {
     fail("child_exit_failed");
     process.exitCode = 1;
   }

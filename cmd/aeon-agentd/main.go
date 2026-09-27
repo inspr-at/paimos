@@ -22,6 +22,8 @@ import (
 
 	"github.com/inspr-at/paimos/internal/agentd"
 	"github.com/inspr-at/paimos/internal/agentdwire"
+	"github.com/inspr-at/paimos/internal/agentsetup"
+	"github.com/inspr-at/paimos/internal/version"
 )
 
 type enrollment struct {
@@ -46,15 +48,20 @@ func main() {
 
 func run(args []string, out io.Writer) error {
 	if len(args) == 0 {
-		return errors.New("usage: paimos-agentd serve|control")
+		return errors.New("usage: paimos-agentd setup|status|disconnect|add-harness|serve|control")
 	}
 	switch args[0] {
+	case "--version", "version":
+		_, err := fmt.Fprintln(out, "paimos-agentd "+version.Version)
+		return err
+	case "setup", "status", "disconnect", "add-harness":
+		return setupCommand(args[0], args[1:], out)
 	case "serve":
 		return serve(args[1:])
 	case "control":
 		return control(args[1:], out)
 	default:
-		return errors.New("usage: paimos-agentd serve|control")
+		return errors.New("usage: paimos-agentd setup|status|disconnect|add-harness|serve|control")
 	}
 }
 
@@ -62,11 +69,7 @@ func privateFile(path string, maximum int64) ([]byte, error) {
 	if !filepath.IsAbs(path) {
 		return nil, errors.New("private file path must be absolute")
 	}
-	info, err := os.Lstat(path)
-	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm() != 0600 || info.Size() > maximum {
-		return nil, errors.New("private file unavailable or unsafe")
-	}
-	return os.ReadFile(path)
+	return agentsetup.ReadPrivateFile(path, maximum)
 }
 
 func serve(args []string) error {
@@ -74,6 +77,8 @@ func serve(args []string) error {
 	f.SetOutput(io.Discard)
 	var base, keyFile, workspace, state, daemonID, accountsPath, codexPath, claudePath, nodePath, sdkPath, piPath, cursorPath string
 	var estimateRequests, estimateTokens, estimateCost int64
+	var setupRoot string
+	f.StringVar(&setupRoot, "setup-root", "", "private approved pairing state")
 	f.StringVar(&base, "url", "", "AEON URL")
 	f.StringVar(&keyFile, "agent-key-file", "", "private scoped API key file")
 	f.StringVar(&workspace, "workspace", "", "physical workspace path")
@@ -91,6 +96,12 @@ func serve(args []string) error {
 	f.Int64Var(&estimateCost, "estimate-cost-micros", 0, "per-run cost reservation; 0 omits this unit")
 	if err := f.Parse(args); err != nil {
 		return err
+	}
+	if setupRoot != "" {
+		if f.NFlag() != 1 || len(f.Args()) != 0 {
+			return errors.New("paired serve does not accept runtime overrides")
+		}
+		return servePaired(setupRoot)
 	}
 	if len(f.Args()) != 0 || agentd.ValidateBaseURL(base) != nil {
 		return errors.New("invalid AEON URL or arguments")
@@ -126,13 +137,11 @@ func serve(args []string) error {
 	if !filepath.IsAbs(state) {
 		return errors.New("state root must be absolute")
 	}
-	if err := os.MkdirAll(state, 0700); err != nil {
+	stateStore, err := agentsetup.OpenStore(state, true)
+	if err != nil {
 		return err
 	}
-	info, err := os.Lstat(state)
-	if err != nil || !info.IsDir() || info.Mode().Perm() != 0700 {
-		return errors.New("state root is not private")
-	}
+	stateStore.Close()
 	rawAccounts, err := privateFile(accountsPath, 64<<10)
 	if err != nil {
 		return err

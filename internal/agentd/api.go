@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net/http"
 	"net/url"
 	"os"
 	"strings"
@@ -25,7 +26,11 @@ type Remote struct {
 	daemonID, generation string
 }
 
-func NewRemote(baseURL, token string) *Remote { return &Remote{Client: client.New(baseURL, token)} }
+func NewRemote(baseURL, token string) *Remote {
+	c := client.New(baseURL, token)
+	c.HTTP.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	return &Remote{Client: c}
+}
 
 // runCredential derives a local capability without exposing the daemon key to
 // a vendor process. Its scope is also checked by the owning supervisor.

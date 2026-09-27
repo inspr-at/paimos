@@ -23,6 +23,7 @@ type DrainRequest struct {
 // LifecycleStatus does not conflate telemetry acceptance with observed exit.
 // Only a drained status permits removing a pairing-owned service or credential.
 type LifecycleStatus struct {
+	Ready                   bool              `json:"ready"`
 	DaemonID                string            `json:"daemon_id"`
 	Generation              string            `json:"generation"`
 	State                   string            `json:"state"`
@@ -96,9 +97,12 @@ func (s *Supervisor) Drain(req DrainRequest) (LifecycleStatus, error) {
 	if req.DaemonID != s.daemonID {
 		return LifecycleStatus{}, ErrScope
 	}
+	s.mu.Lock()
+	accounts := append([]EnrolledAccount(nil), s.accounts...)
+	s.mu.Unlock()
 	if req.AccountID != "" {
 		found := false
-		for _, a := range s.accounts {
+		for _, a := range accounts {
 			if a.ID == req.AccountID {
 				found = true
 				break
@@ -121,16 +125,23 @@ func (s *Supervisor) Drain(req DrainRequest) (LifecycleStatus, error) {
 
 func (s *Supervisor) Lifecycle(accountID string) LifecycleStatus {
 	v := LifecycleStatus{DaemonID: s.daemonID, Generation: s.generation, State: "drained", ActiveRunIDs: []string{}, UnconfirmedRunIDs: []string{}, SettlementPendingRunIDs: []string{}, FencedAccountIDs: []string{}, VerificationResults: map[string]string{}}
+	s.mu.Lock()
+	v.Ready = len(s.accounts) > 0
 	v.AllFenced, _ = s.readFence("")
 	for _, a := range s.accounts {
 		fenced, e := s.readFence(a.ID)
 		if fenced || e != nil {
 			v.FencedAccountIDs = append(v.FencedAccountIDs, a.ID)
+		} else if !s.probedAccounts[a.ID] || s.blockedAccounts[a.ID] {
+			v.Ready = false
 		}
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	entries := make([]*owned, 0, len(s.runs))
 	for _, e := range s.runs {
+		entries = append(entries, e)
+	}
+	s.mu.Unlock()
+	for _, e := range entries {
 		e.mu.Lock()
 		if accountID != "" && e.record.AccountID != accountID && e.record.AccountID != "" {
 			e.mu.Unlock()
@@ -210,5 +221,52 @@ func (s *Supervisor) flushReports(ctx context.Context, e *owned) error {
 			return err
 		}
 	}
+	return nil
+}
+
+// RefreshAccounts adds approved accounts without restarting the shared daemon.
+// Removed accounts remain known locally so their tombstones can keep draining.
+func (s *Supervisor) RefreshAccounts(accounts []EnrolledAccount, adapters []Adapter) error {
+	s.dispatchMu.Lock()
+	defer s.dispatchMu.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	configured := map[string]Adapter{}
+	for name, a := range s.adapters {
+		configured[name] = a
+	}
+	for _, a := range adapters {
+		if a == nil || a.Name() == "" {
+			return ErrScope
+		}
+		if _, ok := a.(AccountProber); !ok {
+			return ErrScope
+		}
+		configured[a.Name()] = a
+	}
+	merged := append([]EnrolledAccount(nil), s.accounts...)
+	for _, a := range accounts {
+		if a.ID == "" || a.Key == "" || configured[a.Harness] == nil {
+			return ErrScope
+		}
+		found := false
+		for _, old := range merged {
+			if old.ID == a.ID {
+				if old.Key != a.Key || old.Harness != a.Harness {
+					return ErrScope
+				}
+				found = true
+				break
+			}
+			if old.Key == a.Key {
+				return ErrScope
+			}
+		}
+		if !found {
+			merged = append(merged, a)
+		}
+	}
+	s.accounts = merged
+	s.adapters = configured
 	return nil
 }
