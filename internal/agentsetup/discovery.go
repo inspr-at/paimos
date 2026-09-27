@@ -14,7 +14,10 @@ import (
 	"regexp"
 	"runtime"
 	"strings"
+	"syscall"
 	"time"
+
+	"github.com/inspr-at/paimos/internal/grokprobe"
 )
 
 type Command struct {
@@ -107,16 +110,17 @@ func SupportedPlatform(goos, arch string) (Platform, error) {
 func CurrentPlatform() (Platform, error) { return SupportedPlatform(runtime.GOOS, runtime.GOARCH) }
 
 type Candidate struct {
-	Key       string `json:"account_key"`
-	Harness   string `json:"harness"`
-	Label     string `json:"label"`
-	ProfileID string `json:"model_profile_id,omitempty"`
-	Path      string `json:"-"`
-	Home      string `json:"-"`
-	Version   string `json:"-"`
-	Identity  string `json:"-"`
-	Login     string `json:"-"`
-	Managed   bool   `json:"-"`
+	Key       string            `json:"account_key"`
+	Harness   string            `json:"harness"`
+	Label     string            `json:"label"`
+	ProfileID string            `json:"model_profile_id,omitempty"`
+	Path      string            `json:"-"`
+	Home      string            `json:"-"`
+	Version   string            `json:"-"`
+	Identity  string            `json:"-"`
+	Login     string            `json:"-"`
+	Managed   bool              `json:"-"`
+	Grok      grokprobe.Binding `json:"-"`
 }
 
 type Discovery struct {
@@ -124,6 +128,7 @@ type Discovery struct {
 	LookPath      func(string) (string, error)
 	Home          string
 	CodexIdentity func(context.Context, string, string) (string, error)
+	GrokProbe     func(context.Context, grokprobe.Binding) (grokprobe.Identity, error)
 }
 
 var safeLabel = regexp.MustCompile(`^[^\x00-\x1f\x7f]{1,128}$`)
@@ -143,9 +148,7 @@ func (d Discovery) Detect(ctx context.Context, harness, accountContext string) (
 		name = "cursor-agent"
 		authArgs = []string{"status", "--format", "json"}
 	case "grok":
-		// Native Grok's existing probe opens its auth store. Guided enrollment
-		// cannot use it; an authenticated, value-free status API is required.
-		return c, errors.New("Grok guided enrollment blocked: safe account identity probe unavailable; vendor login stores are not read")
+		return d.detectGrok(ctx, accountContext)
 	default:
 		return c, errors.New("unsupported guided harness")
 	}
@@ -231,6 +234,76 @@ func (d Discovery) Detect(ctx context.Context, harness, accountContext string) (
 	}
 	c.Login = "signed_in"
 	return c, nil
+}
+
+func (d Discovery) detectGrok(ctx context.Context, accountContext string) (Candidate, error) {
+	c := Candidate{Harness: "grok", Login: "missing"}
+	if runtime.GOOS != "darwin" || runtime.GOARCH != "arm64" {
+		return c, errors.New("native Grok guided setup requires macOS arm64")
+	}
+	if !filepath.IsAbs(d.Home) || filepath.Clean(d.Home) != d.Home || d.Home == "/" {
+		return c, errors.New("user home unavailable")
+	}
+	physicalHome, err := filepath.EvalSymlinks(d.Home)
+	if err != nil || physicalHome != d.Home {
+		return c, errors.New("user home must be physical")
+	}
+	info, err := os.Stat(d.Home)
+	if err != nil || !info.IsDir() {
+		return c, errors.New("user home unavailable")
+	}
+	owner, ok := info.Sys().(*syscall.Stat_t)
+	if !ok || int(owner.Uid) != os.Getuid() {
+		return c, errors.New("user home is not owned by this user")
+	}
+	if d.LookPath == nil {
+		d.LookPath = exec.LookPath
+	}
+	probe := d.GrokProbe
+	if probe == nil {
+		probe = grokprobe.Probe
+	}
+	scratch := filepath.Join(d.Home, ".local", "share", "aeon", "grok-scratch")
+	var failure error
+	for _, option := range []struct{ name, variant string }{{"grok-native", "npm-grok-1.0.30"}, {"xai-grok-pager", "source-xai-grok-pager-1.0.32"}} {
+		path, err := d.LookPath(option.name)
+		if err != nil {
+			continue
+		}
+		physical, err := filepath.EvalSymlinks(path)
+		if err != nil || !filepath.IsAbs(physical) || filepath.Base(physical) != option.name {
+			failure = errors.New("qualified native Grok executable unavailable")
+			continue
+		}
+		if err := os.MkdirAll(scratch, 0700); err != nil {
+			return c, errors.New("private Grok scratch unavailable")
+		}
+		b := grokprobe.Binding{Variant: option.variant, BinaryPath: physical, AuthPath: filepath.Join(d.Home, ".grok", "auth.json"), ScratchRoot: scratch}
+		verified, err := probe(ctx, b)
+		if err != nil {
+			if strings.Contains(err.Error(), "account unavailable") {
+				failure = errors.New("Grok sign-in required; use the vendor's normal login, then resume setup")
+			} else {
+				failure = err
+			}
+			continue
+		}
+		if verified.Binding != (grokprobe.Binding{Variant: b.Variant, BinaryPath: b.BinaryPath, AuthPath: b.AuthPath, ScratchRoot: b.ScratchRoot, PrincipalSHA256: verified.Binding.PrincipalSHA256}) ||
+			!safeLabel.MatchString(verified.Label) {
+			return c, errors.New("native Grok identity unavailable")
+		}
+		if accountContext != "" && !strings.EqualFold(accountContext, verified.Label) && accountContext != verified.Binding.PrincipalSHA256 {
+			return c, errors.New("Grok signed-in identity differs from selected account context")
+		}
+		c.Path, c.Home, c.Version = physical, filepath.Join(d.Home, ".grok"), option.variant
+		c.Identity, c.Label, c.Grok = verified.Binding.PrincipalSHA256, verified.Label, verified.Binding
+		c.Login = "signed_in"
+		return c, nil
+	}
+	if failure != nil {
+		return c, failure
+	}
+	return c, errors.New("qualified native Grok executable missing; install a supported pinned build and sign in normally")
 }
 
 // ManagedPath uses metadata only. No vendor configuration or credentials are
