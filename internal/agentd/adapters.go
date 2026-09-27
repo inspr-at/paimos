@@ -13,9 +13,11 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/localjournal"
+	"github.com/inspr-at/paimos/internal/sessionusage"
 )
 
 func operationContext(ctx context.Context) (context.Context, context.CancelFunc) {
@@ -98,23 +100,18 @@ func (*CodexAdapter) Name() string                                 { return Code
 
 type codexProcess struct {
 	*wireProcess
-	done chan bool
-	once sync.Once
+	done                      chan bool
+	once                      sync.Once
+	usage                     *sessionusage.ManagedCodex
+	inputTokens, outputTokens int64
+	terminal                  *sessionusage.CodexTerminal
+	terminalSeen, invalid     bool
+	acknowledged, sealed      bool
+	abandoned                 atomic.Bool // drain failure; never needs eventMu to publish
 }
 
 func (p *codexProcess) Wait() error {
-	select {
-	case failed := <-p.done:
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		defer cancel()
-		_ = p.wireProcess.Stop(ctx)
-		if failed {
-			return errors.New("Codex turn failed")
-		}
-		return nil
-	case <-p.waitDone:
-		return errors.New("Codex child exited before turn completion")
-	}
+	return p.waitForTurn(p.wireProcess.Stop, 2*time.Second)
 }
 func (p *codexProcess) Control(ctx context.Context, op, text string) error {
 	ctx, cancel := operationContext(ctx)
@@ -149,45 +146,8 @@ func (a *CodexAdapter) Start(ctx context.Context, r StartRequest, observe func(A
 		return nil, err
 	}
 	cp := &codexProcess{wireProcess: p, done: make(chan bool, 1)}
-	var inputTokens, outputTokens int64
-	p.setOnEvent(func(raw json.RawMessage) {
-		method, _, model := eventProbe(raw)
-		if model != "" {
-			observe(AdapterEvent{Kind: "status", EffectiveModel: model, ModelEvidence: "vendor_reported"})
-		}
-		if method == "turn/completed" || method == "turn/failed" {
-			cp.once.Do(func() { cp.done <- method == "turn/failed" })
-		}
-		if method == "item/started" {
-			observe(AdapterEvent{Kind: "tool"})
-		}
-		if method == "thread/tokenUsage/updated" {
-			var frame struct {
-				Params struct {
-					ThreadID   string `json:"threadId"`
-					TokenUsage struct {
-						Total struct {
-							InputTokens  *int64 `json:"inputTokens"`
-							OutputTokens *int64 `json:"outputTokens"`
-						} `json:"total"`
-					} `json:"tokenUsage"`
-				} `json:"params"`
-			}
-			if json.Unmarshal(raw, &frame) == nil && frame.Params.ThreadID == p.threadID &&
-				frame.Params.TokenUsage.Total.InputTokens != nil && frame.Params.TokenUsage.Total.OutputTokens != nil {
-				input := *frame.Params.TokenUsage.Total.InputTokens
-				output := *frame.Params.TokenUsage.Total.OutputTokens
-				if input >= inputTokens && output >= outputTokens {
-					delta := AdapterEvent{Kind: "usage", InputTokensDelta: cumulativeDelta(input, &inputTokens),
-						OutputTokensDelta: cumulativeDelta(output, &outputTokens)}
-					if delta.InputTokensDelta != 0 || delta.OutputTokensDelta != 0 {
-						observe(delta)
-					}
-				}
-			}
-		}
-	})
-	fail := func(e error) (Process, error) { _ = p.Stop(context.Background()); return nil, e }
+	p.setOnEvent(cp.notification)
+	fail := p.failStart
 	op, cancel := operationContext(ctx)
 	defer cancel()
 	if _, err := p.request(op, "jsonrpc", "initialize", map[string]any{"clientInfo": map[string]string{"name": "aeon-agentd", "title": "AEON agentd", "version": "1"}, "capabilities": map[string]any{"experimentalApi": true}}); err != nil {
@@ -227,18 +187,15 @@ func (a *CodexAdapter) Start(ctx context.Context, r StartRequest, observe func(A
 	if err != nil || json.Unmarshal(raw, &thread) != nil || thread.Thread.ID == "" {
 		return fail(errors.New("Codex thread start failed"))
 	}
+	p.eventMu.Lock()
 	p.threadID = thread.Thread.ID
-	var turn struct {
-		Turn struct {
-			ID     string `json:"id"`
-			Status string `json:"status"`
-		} `json:"turn"`
-	}
-	raw, err = p.request(op, "jsonrpc", "turn/start", map[string]any{"threadId": p.threadID, "input": []map[string]string{{"type": "text", "text": r.Prompt}}, "model": r.Profile.Model, "effort": r.Profile.Effort})
-	if err != nil || json.Unmarshal(raw, &turn) != nil || turn.Turn.ID == "" || turn.Turn.Status != "inProgress" {
+	// An unsupported attribution leaves session tokens unreported; it must not
+	// prevent the existing run protocol and settlement from operating.
+	cp.usage, _ = sessionusage.NewManagedCodex(p.threadID, r.Profile.Model)
+	p.eventMu.Unlock()
+	if err := cp.startTurn(op, r); err != nil {
 		return fail(errors.New("Codex turn start failed"))
 	}
-	p.turnID = turn.Turn.ID
 	observe(AdapterEvent{Kind: "turn", TurnCountDelta: 1})
 	return cp, nil
 }
@@ -392,12 +349,10 @@ func (a *PiAdapter) Start(ctx context.Context, r StartRequest, observe func(Adap
 	op, cancel := operationContext(ctx)
 	defer cancel()
 	if err := pp.verify(op); err != nil {
-		_ = p.Stop(context.Background())
-		return nil, err
+		return p.failStart(err)
 	}
 	if _, err := p.request(op, "pi", "prompt", map[string]any{"message": r.Prompt}); err != nil {
-		_ = p.Stop(context.Background())
-		return nil, err
+		return p.failStart(err)
 	}
 	observe(AdapterEvent{Kind: "turn", TurnCountDelta: 1, EffectiveModel: r.Profile.Model, ModelEvidence: "vendor_reported"})
 	return pp, nil
@@ -427,7 +382,8 @@ func (p *cursorProcess) finish(err error) {
 	p.doneOnce.Do(func() { p.terminalErr = err; close(p.done) })
 }
 
-func (p *cursorProcess) Wait() error {
+func (p *cursorProcess) Wait() (err error) {
+	defer func() { err = errors.Join(err, p.finishReader()) }()
 	select {
 	case <-p.done:
 	case <-p.waitDone:
@@ -525,7 +481,7 @@ func (a *CursorAdapter) Start(ctx context.Context, r StartRequest, observe func(
 			}()
 		}
 	})
-	fail := func(e error) (Process, error) { _ = p.Stop(context.Background()); return nil, e }
+	fail := p.failStart
 	raw, err := p.request(op, "jsonrpc", "initialize", map[string]any{"protocolVersion": 1, "clientCapabilities": map[string]any{"fs": map[string]bool{"readTextFile": false, "writeTextFile": false}, "terminal": false}, "clientInfo": map[string]string{"name": "aeon-agentd", "title": "AEON agentd", "version": "1"}})
 	var init struct {
 		ProtocolVersion int `json:"protocolVersion"`
@@ -711,8 +667,7 @@ func (a *ClaudeAdapter) Start(ctx context.Context, r StartRequest, observe func(
 		}
 	})
 	if err := p.send(map[string]any{"op": "start", "prompt": r.Prompt, "model": r.Profile.Model, "effort": r.Profile.Effort, "correlation_id": "initial", "tools": r.Tools}); err != nil {
-		_ = p.Stop(context.Background())
-		return nil, err
+		return p.failStart(err)
 	}
 	op, cancel := operationContext(ctx)
 	defer cancel()
@@ -721,9 +676,8 @@ func (a *ClaudeAdapter) Start(ctx context.Context, r StartRequest, observe func(
 		started = true
 		return cp, nil
 	case <-op.Done():
-		_ = p.Stop(context.Background())
-		return nil, fmt.Errorf("Claude bridge readiness: %w", op.Err())
+		return p.failStart(fmt.Errorf("Claude bridge readiness: %w", op.Err()))
 	case <-p.readDone:
-		return nil, errors.New("Claude bridge ended before readiness")
+		return p.failStart(errors.New("Claude bridge ended before readiness"))
 	}
 }

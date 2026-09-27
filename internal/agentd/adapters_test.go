@@ -236,6 +236,9 @@ func TestCursorACPAndAccountBinding(t *testing.T) {
 	for turns < 1 || cost < 8 {
 		select {
 		case ev := <-events:
+			if ev.SessionUsage != nil || ev.InputTokensDelta != 0 || ev.OutputTokensDelta != 0 {
+				t.Fatal("Cursor ACP cost was converted to tokens")
+			}
 			turns += ev.TurnCountDelta
 			cost += ev.CostMicrosDelta
 		case <-ctx.Done():

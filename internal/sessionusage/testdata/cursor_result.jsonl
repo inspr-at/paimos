@@ -1,0 +1,2 @@
+{"type":"assistant","message":{"content":"MUST_NOT_LEAK tool text"}}
+{"type":"result","subtype":"success","is_error":false,"duration_ms":5,"result":"MUST_NOT_LEAK answer","session_id":"session-secret-value","request_id":"request-secret-value","model":"composer-2.5[fast=true]","usage":{"inputTokens":30,"outputTokens":8,"cacheReadTokens":10,"cacheWriteTokens":2}}

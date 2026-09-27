@@ -25,6 +25,7 @@ type wireProcess struct {
 	lifetime    *ownedprocess.Lifetime
 	cmd         *exec.Cmd
 	stdin       io.WriteCloser
+	stdout      io.ReadCloser
 	writeMu     sync.Mutex
 	mu          sync.Mutex
 	eventMu     sync.Mutex
@@ -32,6 +33,7 @@ type wireProcess struct {
 	readDone    chan struct{}
 	waitDone    chan struct{}
 	waitErr     error
+	readErr     error // published before readDone closes; nil means actual EOF
 	next        atomic.Int64
 	observe     func(AdapterEvent)
 	onEvent     func(json.RawMessage)
@@ -40,6 +42,9 @@ type wireProcess struct {
 	sessionID   string
 	turnID      string
 	protocol    string
+
+	readerClose  sync.Once
+	readerClosed atomic.Bool
 }
 
 func pinnedExecutable(path string) (string, error) {
@@ -65,6 +70,11 @@ func launchWire(path string, args []string, workspace string, environment []stri
 	if err != nil {
 		return nil, err
 	}
+	// Allocate identity before creating a child or reader to own on failure.
+	processID, err := randomID()
+	if err != nil {
+		return nil, err
+	}
 	cmd := exec.Command(path, args...)
 	cmd.Dir = workspace
 	if environment != nil {
@@ -74,44 +84,113 @@ func launchWire(path string, args []string, workspace string, environment []stri
 	if err != nil {
 		return nil, err
 	}
-	stdout, err := cmd.StdoutPipe()
+	// Own the read descriptor: exec.Cmd.Wait must not close it while buffered
+	// terminal/usage frames are still draining after the child exits.
+	stdout, childStdout, err := os.Pipe()
 	if err != nil {
 		_ = stdin.Close()
 		return nil, err
 	}
+	cmd.Stdout = childStdout
+	defer childStdout.Close()
 	cmd.Stderr = io.Discard
 	configured := ownedprocess.Configure(cmd)
 	if err := cmd.Start(); err != nil {
 		_ = stdin.Close()
+		_ = stdout.Close()
 		return nil, errors.New("adapter child start failed")
 	}
 	if err := ownedprocess.Verify(cmd, configured); err != nil {
 		_ = ownedprocess.Signal(cmd, true)
 		_ = cmd.Wait()
+		_ = stdin.Close()
+		_ = stdout.Close()
 		return nil, err
 	}
-	p := &wireProcess{cmd: cmd, stdin: stdin, pending: map[string]chan json.RawMessage{}, readDone: make(chan struct{}), waitDone: make(chan struct{}), observe: observe, protocol: protocol}
-	go p.read(stdout)
-	processID, err := randomID()
-	if err != nil {
-		_ = ownedprocess.Signal(cmd, true)
-		_ = cmd.Wait()
-		return nil, err
-	}
+	p := &wireProcess{cmd: cmd, stdin: stdin, stdout: stdout, pending: map[string]chan json.RawMessage{}, readDone: make(chan struct{}), waitDone: make(chan struct{}), observe: observe, protocol: protocol}
 	p.identity = ownedprocess.Identity{ProcessID: processID, RootPID: cmd.Process.Pid, GroupID: cmd.Process.Pid, StartedAt: time.Now().UTC()}
 	p.lifetime = ownedprocess.Track(cmd)
 	go func() { p.waitErr = p.lifetime.Wait(); close(p.waitDone) }()
+	go p.read(stdout)
 	return p, nil
 }
 
-func (p *wireProcess) PID() int    { return p.cmd.Process.Pid }
-func (p *wireProcess) Wait() error { <-p.waitDone; return p.waitErr }
+func (p *wireProcess) PID() int { return p.cmd.Process.Pid }
+func (p *wireProcess) Wait() error {
+	<-p.waitDone
+	return errors.Join(p.waitErr, p.finishReader())
+}
+
+const readerCleanupTimeout = 2 * time.Second
+
+// closeReader discards this owner's stream, not the process or any descendant.
+// It never joins: an observer running on the reader may itself call Stop.
+// Atomic suppression also covers frames already buffered in Scanner.
+func (p *wireProcess) closeReader() {
+	p.readerClose.Do(func() {
+		p.readerClosed.Store(true)
+		if p.stdout != nil {
+			_ = p.stdout.Close()
+		}
+	})
+}
+
+// finishReader belongs to final owners only, never the root waiter or Stop.
+// Allow buffered accounting to drain, then release a pipe held by another
+// writer. A callback already in flight gets a bounded join; no later callback
+// is dispatched after closeReader. Normal EOF closes the descriptor in read.
+func (p *wireProcess) finishReader() error {
+	timer := time.NewTimer(readerCleanupTimeout)
+	defer timer.Stop()
+	if !p.readerClosed.Load() {
+		select {
+		case <-p.readDone:
+			return nil
+		case <-timer.C:
+		}
+		p.closeReader()
+		timer.Reset(readerCleanupTimeout)
+	}
+	select {
+	case <-p.readDone:
+		return nil
+	case <-timer.C:
+		return errors.New("adapter reader cleanup unconfirmed")
+	}
+}
+
+// A failed Start transfers no Process to the monitor. It must release the
+// reader itself, including when Stop finds the root already reaped.
+func (p *wireProcess) failStart(err error) (Process, error) {
+	p.closeReader()
+	_ = p.Stop(context.Background())
+	_ = p.finishReader()
+	return nil, err
+}
+
+// discardReader is also available to the supervisor if startup fails after
+// Start succeeds but before a monitor takes ownership of Wait.
+func (p *wireProcess) discardReader() {
+	p.closeReader()
+	_ = p.finishReader()
+}
 
 func (p *wireProcess) read(src io.Reader) {
-	defer close(p.readDone)
+	defer func() {
+		if p.readerClosed.Load() && p.readErr == nil {
+			p.readErr = errors.New("adapter event stream locally closed")
+		}
+		if p.stdout != nil {
+			_ = p.stdout.Close()
+		}
+		close(p.readDone)
+	}()
 	scanner := bufio.NewScanner(src)
 	scanner.Buffer(make([]byte, 4096), 8<<20)
 	for scanner.Scan() {
+		if p.readerClosed.Load() {
+			break
+		}
 		raw := append(json.RawMessage(nil), scanner.Bytes()...)
 		var frame struct {
 			ID     json.RawMessage `json:"id"`
@@ -120,6 +199,7 @@ func (p *wireProcess) read(src io.Reader) {
 			Kind   string          `json:"kind"`
 		}
 		if json.Unmarshal(raw, &frame) != nil {
+			p.readErr = errors.New("adapter event stream malformed")
 			break
 		}
 		id := strings.Trim(string(frame.ID), "\"")
@@ -136,8 +216,13 @@ func (p *wireProcess) read(src io.Reader) {
 			}
 		}
 		p.eventMu.Lock()
+		if p.readerClosed.Load() {
+			p.eventMu.Unlock()
+			break
+		}
 		if p.onEvent == nil {
 			if len(p.earlyEvents) >= 32 {
+				p.readErr = errors.New("adapter early event bound")
 				p.eventMu.Unlock()
 				break
 			}
@@ -147,8 +232,11 @@ func (p *wireProcess) read(src io.Reader) {
 		}
 		p.eventMu.Unlock()
 	}
-	if scanner.Err() != nil && p.observe != nil {
-		p.observe(AdapterEvent{Kind: "status", ErrorCode: "event_stream_bound"})
+	if scanner.Err() != nil {
+		p.readErr = errors.New("adapter event stream incomplete")
+		if p.observe != nil && !p.readerClosed.Load() {
+			p.observe(AdapterEvent{Kind: "status", ErrorCode: "event_stream_bound"})
+		}
 	}
 }
 
@@ -171,12 +259,19 @@ func (p *wireProcess) send(v any) error {
 
 func (p *wireProcess) setOnEvent(fn func(json.RawMessage)) {
 	p.eventMu.Lock()
+	defer p.eventMu.Unlock()
+	if p.readerClosed.Load() {
+		p.earlyEvents = nil
+		return
+	}
 	p.onEvent = fn
 	for _, raw := range p.earlyEvents {
+		if p.readerClosed.Load() {
+			break
+		}
 		fn(raw)
 	}
 	p.earlyEvents = nil
-	p.eventMu.Unlock()
 }
 
 func (p *wireProcess) request(ctx context.Context, protocol, method string, params any) (json.RawMessage, error) {
@@ -202,32 +297,38 @@ func (p *wireProcess) request(ctx context.Context, protocol, method string, para
 	if err := p.send(frame); err != nil {
 		return nil, err
 	}
+	var raw json.RawMessage
 	select {
-	case raw := <-ch:
-		var response struct {
-			Result  json.RawMessage `json:"result"`
-			Error   json.RawMessage `json:"error"`
-			Success *bool           `json:"success"`
-			Data    json.RawMessage `json:"data"`
-		}
-		if json.Unmarshal(raw, &response) != nil || len(response.Error) > 0 && string(response.Error) != "null" {
-			return nil, errors.New("adapter protocol rejected request")
-		}
-		if protocol == "pi" {
-			if response.Success == nil || !*response.Success {
-				return nil, errors.New("Pi RPC rejected request")
-			}
-			return response.Data, nil
-		}
-		if response.Result == nil {
-			return nil, errors.New("adapter protocol response missing result")
-		}
-		return response.Result, nil
+	case raw = <-ch:
 	case <-p.readDone:
-		return nil, errors.New("adapter protocol closed")
+		// EOF can race a response already delivered by the same reader.
+		select {
+		case raw = <-ch:
+		default:
+			return nil, errors.New("adapter protocol closed")
+		}
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
+	var response struct {
+		Result  json.RawMessage `json:"result"`
+		Error   json.RawMessage `json:"error"`
+		Success *bool           `json:"success"`
+		Data    json.RawMessage `json:"data"`
+	}
+	if json.Unmarshal(raw, &response) != nil || len(response.Error) > 0 && string(response.Error) != "null" {
+		return nil, errors.New("adapter protocol rejected request")
+	}
+	if protocol == "pi" {
+		if response.Success == nil || !*response.Success {
+			return nil, errors.New("Pi RPC rejected request")
+		}
+		return response.Data, nil
+	}
+	if response.Result == nil {
+		return nil, errors.New("adapter protocol response missing result")
+	}
+	return response.Result, nil
 }
 
 // GracefulStop sends TERM only. A timeout is a visible rejected control, never

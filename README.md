@@ -57,6 +57,36 @@ GitHub release assets, next to `aeon-agentd` and listed in the same `SHA256SUMS`
 
 Invoking the binary as `paimos` gives the paimos-compatible CLI. `PAIMOS_URL` (with `PAIMOS_API_KEY` or `PAIMOS_API_KEY_FILE`) is the process-only target.
 
+Managed `aeon-agentd` Codex runs report fresh app-server thread usage to
+`POST /api/projects/{projectId}/harness-sessions/{sessionId}/usage` with the
+registered session's worker lease (`harness.worker`). Input includes cached
+input; missing cache remains unknown. Thread totals become per-model cumulative
+snapshots, with exact receipt retries and a five-second final flush. A model
+change needs explicit usage-model or `model/rerouted` evidence and a matching
+last-usage interval. Reroutes bind to the same turn; subsequent usage needs fresh
+model evidence because reroutes apply to individual requests;
+ambiguous or malformed captures remain provisional. Final usage requires the
+acknowledged turn ID, one matching completed terminal, all counters known, and
+owned child stop plus stdout EOF within a two-second drain deadline. One bounded
+terminal candidate can wait for the start acknowledgement; duplicate terminals
+or usage after a terminal invalidate completion. Failed start, stream loss or
+drain timeout cannot publish final receipts. An archived generation (410) detaches
+the reporter without signalling the process; existing run settlement continues.
+Managed adapter completion and failed starts release their owned stdout reader
+even when another writer keeps the pipe open. Cleanup suppresses further stream
+callbacks and bounds the wait for an in-flight callback; local closure never proves EOF
+for a final Codex receipt. `Stop` keeps its process-only role so an observer can
+call it without waiting on itself.
+The reporter retains bounded normalized state in memory, never raw output or
+worker leases on disk. Restart/crash recovery and external worker capture remain
+separate work; an unavailable endpoint can leave the last snapshot provisional.
+Cursor's managed ACP usage currently supplies cost only to run settlement, so
+its session tokens remain unreported. No second CLI or transcript backfill is
+used. Pricing stays in the API: `GET`/`HEAD /api/model-prices` requires
+`harness.read`; price creation remains person-only. Reporters neither fetch
+prices nor infer subscription/account coverage. Aggregate readers must not add
+session usage to the overlapping managed-run token telemetry.
+
 `paimos harness provenance` records hashes and version identifiers for explicitly
 provided `--instruction` files (`AGENTS.md`, `CLAUDE.md`, or a skill's `SKILL.md`),
 never file contents or full paths. Files must be regular, at most 1 MiB, and outside
