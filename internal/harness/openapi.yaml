@@ -194,6 +194,7 @@ paths:
             schema: {$ref: '#/components/schemas/HarnessProvenanceWrite'}
       responses:
         '200': {description: Created or replayed provenance revision}
+        '410': {description: Authenticated archived generation; existing provenance remains readable}
 components:
   parameters:
     projectId: {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}

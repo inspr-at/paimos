@@ -165,6 +165,77 @@ func TestProvenanceVisibilityIdempotencyAndTamper(t *testing.T) {
 	expect(t, f.call(f.person, "GET", path, nil, ""), 200)
 }
 
+func TestArchivedSessionRejectsProvenanceReplayAndNewRevision(t *testing.T) {
+	f := fixture(t)
+	const hashA = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	const hashB = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	lease := "archived-provenance-lease-00000000000001"
+	base := "/api/projects/" + f.project + "/harness-sessions"
+	w := f.call(f.person, "POST", base, map[string]any{
+		"agent_principal_id": f.agent.ID, "harness": "codex", "host": "offline-host",
+		"harness_session_ref": "archived-provenance-ref-" + uid(), "worker_lease": lease,
+		"management_mode": "unmanaged", "role": "worker",
+	}, "")
+	expect(t, w, 201)
+	id := decode(t, w)["id"].(string)
+	path := base + "/" + id
+	provenancePath := path + "/provenance"
+	report := func(hash string) map[string]any {
+		return map[string]any{"items": []any{map[string]any{
+			"kind": "agents", "logical_name": "AGENTS.md", "hash_kind": "content",
+			"content_sha256": hash, "byte_size": 12,
+		}}}
+	}
+	w = f.call(f.agent, "POST", provenancePath, report(hashA), lease)
+	expect(t, w, 200)
+	first := decode(t, w)
+	if first["revision"] != float64(1) || first["replayed"] != false {
+		t.Fatalf("initial provenance: %s", w.Body.String())
+	}
+	preview := decode(t, f.call(f.person, "GET", path+"/recovery", nil, ""))
+	w = f.call(f.person, "POST", path+"/archive", map[string]any{
+		"expected_revision": preview["observed_revision"], "confirmation": preview["confirmation"],
+		"request_id": uid(), "reason": "Retire offline registration with unknown process state",
+	}, "")
+	expect(t, w, 200)
+	if decode(t, w)["archived_at"] == nil {
+		t.Fatal("session was not archived")
+	}
+
+	// The old lease is authenticated, then fenced before either the identical
+	// receipt lookup or an append. Bad proof must not reveal archive state.
+	expect(t, f.call(f.agent, "POST", provenancePath, report(hashA), lease), 410)
+	expect(t, f.call(f.agent, "POST", provenancePath, report(hashB), lease), 410)
+	expect(t, f.call(f.agent, "POST", provenancePath, report(hashA), "wrong-archived-provenance-lease-0001"), 403)
+	hidden := tenant.Principal{ID: uid(), TenantID: f.person.TenantID, Kind: tenant.Person}
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO principals(tenant_id,id,kind,name) VALUES($1,$2,'person','no project access')`, hidden.TenantID, hidden.ID)
+		return err
+	})
+	expect(t, f.call(hidden, "GET", provenancePath, nil, ""), 404)
+	expect(t, f.call(f.foreign, "GET", provenancePath, nil, ""), 404)
+	w = f.call(f.person, "GET", provenancePath, nil, "")
+	expect(t, w, 200)
+	revisions := decode(t, w)["revisions"].([]any)
+	if len(revisions) != 1 || revisions[0].(map[string]any)["id"] != first["id"] ||
+		revisions[0].(map[string]any)["items"].([]any)[0].(map[string]any)["content_sha256"] != hashA {
+		t.Fatalf("archived provenance history changed: %s", w.Body.String())
+	}
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		var revisions, events int
+		if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM harness_instruction_provenance WHERE session_id=$1`, id).Scan(&revisions); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM events WHERE type='harness.provenance_recorded' AND after->>'session_id'=$1`, id).Scan(&events); err != nil {
+			return err
+		}
+		if revisions != 1 || events != 1 {
+			t.Fatalf("archived provenance mutated: revisions=%d events=%d", revisions, events)
+		}
+		return nil
+	})
+}
+
 func mintKey(t *testing.T, f *harnessFixture, p tenant.Principal, scopes []string) string {
 	t.Helper()
 	secret := uid()
