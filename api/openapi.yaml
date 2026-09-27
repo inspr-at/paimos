@@ -5389,7 +5389,7 @@ components:
                   required: [harness, accounts, default_account_id]
                   properties:
                     harness: {type: string}
-                    default_account_id: {type: [string, 'null'], format: uuid, description: Eligible account with greatest minimum remaining fraction; UUID breaks ties.}
+                    default_account_id: {type: [string, 'null'], format: uuid, description: 'Eligible account with greatest known minimum remaining fraction; UUID breaks ties. Null when no eligible account has fully measured active windows. Provisional accounts remain manually selectable under existing queue policy, but are not ranked as measured allowance.'}
                     accounts: {type: array, items: {$ref: '#/components/schemas/AccountCatalogChoice'}}
     AccountCatalogChoice:
       type: object
@@ -5402,9 +5402,9 @@ components:
         state: {type: string, enum: [available, draining, unavailable]}
         last_probe_at: {type: [string, 'null'], format: date-time}
         last_probe_ok: {type: [boolean, 'null']}
-        available: {type: boolean}
+        available: {type: boolean, description: 'Advisory state, probe, capacity, model and ledger headroom eligibility; not proof of measured usage. A provisional account may be available under existing queue policy.'}
         unavailable_reasons: {type: array, items: {type: string, enum: [state, probe, capacity, allowance, models]}}
-        remaining_fraction: {type: [number, 'null'], minimum: 0, maximum: 1}
+        remaining_fraction: {type: [number, 'null'], minimum: 0, maximum: 1, description: 'Minimum (allowance-used-reserved)/allowance across active windows, clamped at zero. Null if any active window is provisional, has no positive allowance, or no active windows exist. Unknown usage is never measured zero or 100 percent remaining.'}
         default_model_profile_id: {type: [string, 'null'], format: uuid, description: First eligible existing role route; null when the role has no eligible route.}
         windows:
           type: array
@@ -5414,8 +5414,8 @@ components:
               - type: object
                 required: [remaining, pace_remaining]
                 properties:
-                  remaining: {type: integer, format: int64, minimum: 0}
-                  pace_remaining: {type: integer, format: int64, minimum: 0}
+                  remaining: {type: integer, format: int64, minimum: 0, description: 'Ledger headroom max(0, allowance-used-reserved). When provisional, this is not measured provider allowance remaining.'}
+                  pace_remaining: {type: integer, format: int64, minimum: 0, description: 'Nonnegative paced ledger headroom. When provisional, this does not establish measured usage or remaining allowance.'}
         models:
           type: array
           items:

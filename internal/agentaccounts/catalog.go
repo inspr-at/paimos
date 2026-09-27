@@ -214,16 +214,24 @@ func catalogAccount(a Account, profiles []catalogProfile, usedSlots int, now tim
 			out.DefaultProfileID = &id
 		}
 	}
+	remainingKnown := true
 	for _, w := range activeWindows(a.Windows, now) {
 		remaining := max(int64(0), w.Allowance-w.Used-w.Reserved)
 		paceRemaining := max(int64(0), allowedUnits(w.Allowance, paceFraction(w.PaceModel, elapsedFraction(now, w.StartsAt, w.EndsAt), w.BurstRatio))-w.Used-w.Reserved)
 		out.Windows = append(out.Windows, CatalogWindow{Window: w, Remaining: remaining, PaceRemaining: paceRemaining})
-		if w.Allowance > 0 {
-			ratio := float64(remaining) / float64(w.Allowance)
-			if out.RemainingFraction == nil || ratio < *out.RemainingFraction {
-				out.RemainingFraction = &ratio
-			}
+		if w.Provisional || w.Allowance <= 0 {
+			remainingKnown = false
+			continue
 		}
+		ratio := float64(remaining) / float64(w.Allowance)
+		if out.RemainingFraction == nil || ratio < *out.RemainingFraction {
+			out.RemainingFraction = &ratio
+		}
+	}
+	// Ledger headroom still governs queue eligibility, but one unknown window
+	// prevents a measured aggregate or an allowance-ranked catalog default.
+	if !remainingKnown {
+		out.RemainingFraction = nil
 	}
 	if a.State != "available" {
 		out.UnavailableReasons = append(out.UnavailableReasons, "state")

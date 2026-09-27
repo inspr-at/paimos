@@ -17,8 +17,14 @@
 // It contains display labels, active allowance and pacing headroom, owner probe
 // freshness, capacity, and advisory defaults. It never exposes local routing
 // keys. The first eligible role route chooses a profile; the eligible account
-// with greatest minimum remaining fraction wins, with UUID tie-breaking.
-// No role route means no default model, and absent allowance means unavailable.
+// with greatest known minimum remaining fraction wins, with UUID tie-breaking.
+// Any provisional active window makes the aggregate fraction unknown (null),
+// including mixed measured/provisional windows. With no eligible measured
+// account there is no default. Provisional accounts can still be selected under
+// existing queue policy: available and per-window remaining/pace_remaining
+// describe ledger headroom, not proof of measured provider allowance. Unknown
+// usage is never measured zero. No role route means no default model, and absent
+// allowance means unavailable.
 // Registry initialization remains with /api/models; the catalog is read-only.
 //
 // PUT /api/agent-accounts/{id}/metadata replaces label, plan, host_label and

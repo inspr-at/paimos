@@ -82,9 +82,17 @@ func TestCatalogCascadeMetadataAndRouting(t *testing.T) {
 	if a.Plan != "Pro" || a.Label != "Work subscription" || !slices.Equal(a.AllowedProfileIDs, []string{profile}) {
 		t.Fatal("metadata projection lost fields")
 	}
-	// The grant denies the first role route and preserves the second route's pin.
+	// A fresh window is unknown, not measured zero. Only b has settled usage.
+	measuredRun := insertRun(t, admin, runner, profile)
+	mustRoute(t, mod, runner, token, measuredRun, "daemon-a", []Account{b}, map[string]int64{"requests": 70})
 	seed(func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `UPDATE account_allowance_windows SET used=70 WHERE account_id=$1`, b.ID)
+		if _, err := tx.Exec(t.Context(), `INSERT INTO run_telemetry(tenant_id,run_id,sequence,kind,turn_count_delta) VALUES($1,$2,1,'usage',70)`, admin.TenantID, measuredRun); err != nil {
+			return err
+		}
+		if err := Settle(t.Context(), tx, runner, measuredRun); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `UPDATE agent_runs SET status='completed' WHERE id=$1`, measuredRun)
 		return err
 	})
 	var catalog Catalog
@@ -93,7 +101,7 @@ func TestCatalogCascadeMetadataAndRouting(t *testing.T) {
 		t.Fatalf("host cascade: %+v", catalog.Hosts)
 	}
 	h := catalog.Hosts[0].Harnesses[0]
-	if h.Harness != "codex" || h.DefaultAccountID == nil || *h.DefaultAccountID != a.ID || len(h.Accounts) != 2 {
+	if h.Harness != "codex" || h.DefaultAccountID == nil || *h.DefaultAccountID != b.ID || len(h.Accounts) != 2 {
 		t.Fatalf("harness cascade: %+v", h)
 	}
 	var choice CatalogAccount
@@ -101,9 +109,16 @@ func TestCatalogCascadeMetadataAndRouting(t *testing.T) {
 		if v.ID == a.ID {
 			choice = v
 		}
+		if v.ID == b.ID && (v.RemainingFraction == nil || *v.RemainingFraction != 0.3 || v.Windows[0].Provisional) {
+			t.Fatalf("settled measurement missing: %+v", v)
+		}
 	}
+	// The grant denies the first role route and preserves the second route's pin.
 	if !choice.Available || choice.DefaultProfileID == nil || *choice.DefaultProfileID != profile || len(choice.Models) != 1 || choice.Models[0].Efforts[0].ProfileID != profile || choice.Windows[0].Remaining != 100 || choice.Windows[0].PaceRemaining != 100 {
 		t.Fatalf("account cascade: %+v", choice)
+	}
+	if choice.RemainingFraction != nil || !choice.Windows[0].Provisional {
+		t.Fatalf("fresh window invented measured allowance: %+v", choice)
 	}
 	_, raw := call(t, mod, &admin, "", "GET", "/api/agent-accounts/catalog", "")
 	if strings.Contains(string(raw), "account_key") || strings.Contains(string(raw), "local-a") {
@@ -111,6 +126,9 @@ func TestCatalogCascadeMetadataAndRouting(t *testing.T) {
 	}
 	if strings.Contains(string(raw), disabled) || strings.Contains(string(raw), "disabled-model") {
 		t.Fatal("disabled profile offered in catalog")
+	}
+	if !strings.Contains(string(raw), `"remaining_fraction":null`) {
+		t.Fatal("unknown allowance was not serialized as null")
 	}
 	callStatus(t, mod, &member, "", "GET", "/api/agent-accounts/catalog", "", 403, nil)
 	callStatus(t, mod, nil, "", "GET", "/api/agent-accounts/catalog", "", 401, nil)
@@ -180,6 +198,18 @@ func TestCatalogCascadeMetadataAndRouting(t *testing.T) {
 		t.Fatal("full-length label did not survive storage")
 	}
 	callStatus(t, mod, &admin, "", "PUT", path, strings.Replace(body, fullLabel, fullLabel+"x", 1), 400, nil)
+	// A second, unmeasured unit makes even b's aggregate unknown.
+	callStatus(t, mod, &admin, "", "POST", "/api/agent-accounts/"+b.ID+"/windows", windowBody(time.Now().Add(-time.Hour), time.Now().Add(time.Hour), "tokens", 100, "unrestricted"), 201, nil)
+	callStatus(t, mod, &admin, "", "GET", "/api/agent-accounts/catalog", "", 200, &catalog)
+	h = catalog.Hosts[0].Harnesses[0]
+	if h.DefaultAccountID != nil {
+		t.Fatal("unknown aggregate was recommended as measured allowance")
+	}
+	for _, v := range h.Accounts {
+		if v.ID == b.ID && (!v.Available || v.RemainingFraction != nil || len(v.Windows) != 2) {
+			t.Fatalf("mixed measured/unknown account lost queue eligibility or claimed a measured fraction: %+v", v)
+		}
+	}
 }
 
 func TestCatalogDefaultUsesOfferedProfileAndDeterministicAccount(t *testing.T) {
@@ -219,6 +249,69 @@ func TestAccountMetadataCharacterBoundary(t *testing.T) {
 		if _, err := metadataText(value+"x", false); err == nil {
 			t.Fatal("129-character metadata accepted")
 		}
+	}
+}
+
+func TestCatalogProvisionalAllowanceIsUnknown(t *testing.T) {
+	now := time.Date(2026, 9, 27, 12, 0, 0, 0, time.UTC)
+	yes := true
+	measured := Window{Allowance: 100, Used: 20, Reserved: 10, StartsAt: now.Add(-time.Hour), EndsAt: now.Add(time.Hour), PaceModel: "unrestricted"}
+	fresh := measured
+	fresh.Used, fresh.Reserved, fresh.Provisional = 0, 0, true
+	partial := measured
+	partial.Provisional = true
+	expired, future := fresh, fresh
+	expired.EndsAt, future.StartsAt = now, now.Add(time.Second)
+	tight := measured
+	tight.Used = 70
+	invalid := measured
+	invalid.Allowance = 0
+	base := Account{ID: "a", DaemonID: "host", Harness: "codex", State: "available", MaxParallel: 1, LastProbeAt: &now, LastProbeOK: &yes}
+	profiles := []catalogProfile{{ID: "p", Harness: "codex", Model: "model", Effort: "high"}}
+	for _, tc := range []struct {
+		name      string
+		windows   []Window
+		known     bool
+		fraction  float64
+		available bool
+	}{
+		{"fresh-provisional", []Window{fresh}, false, 0, true},
+		{"partially-measured-provisional", []Window{partial}, false, 0, true},
+		{"known-then-unknown", []Window{measured, fresh}, false, 0, true},
+		{"unknown-then-known", []Window{fresh, measured}, false, 0, true},
+		{"unknown-and-exhausted", []Window{fresh, {Allowance: 100, Used: 100, StartsAt: measured.StartsAt, EndsAt: measured.EndsAt, PaceModel: "unrestricted"}}, false, 0, false},
+		{"no-active-windows", []Window{expired, future}, false, 0, false},
+		{"nonpositive-allowance", []Window{measured, invalid}, false, 0, false},
+		{"expired-unknown-excluded", []Window{measured, expired}, true, 0.7, true},
+		{"future-unknown-excluded", []Window{future, measured}, true, 0.7, true},
+		{"all-measured-minimum", []Window{measured, tight}, true, 0.2, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a := base
+			a.Windows = tc.windows
+			got := catalogAccount(a, profiles, 0, now)
+			if (got.RemainingFraction != nil) != tc.known || (tc.known && *got.RemainingFraction != tc.fraction) {
+				t.Fatalf("known=%v fraction=%v: %+v", tc.known, tc.fraction, got)
+			}
+			if got.Available != tc.available {
+				t.Fatalf("ledger eligibility changed: %+v", got)
+			}
+			// An unknown account stays unranked even when it sorts first by ID.
+			other := base
+			other.ID, other.Windows = "b", []Window{tight}
+			h := buildCatalog([]Account{other, a}, profiles, nil, "build", now).Hosts[0].Harnesses[0]
+			want := other.ID
+			if tc.known && tc.available {
+				want = a.ID
+			}
+			if h.DefaultAccountID == nil || *h.DefaultAccountID != want {
+				t.Fatalf("default must rank measured allowance, then ID: %+v", h)
+			}
+			h = buildCatalog([]Account{a}, profiles, nil, "build", now).Hosts[0].Harnesses[0]
+			if (h.DefaultAccountID != nil) != (tc.known && tc.available) {
+				t.Fatalf("unknown or ineligible account got a default: %+v", h)
+			}
+		})
 	}
 }
 
