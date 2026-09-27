@@ -65,7 +65,7 @@ test('a card comes alive while its agents work, says who and on what, and idle c
   await expect(chip).toBeVisible()
   await expect(chip).toContainText('hausv')
   await expect(chip).toContainText('HAUSV-887')
-  await expect(chip).toContainText('16m')
+  await expect(chip.locator('.chip-state')).toHaveText('Working')
   // The card's own link says it too, for whoever walks the cards.
   await expect(hausv.getByRole('link')).toHaveAccessibleName(/HAUSV Hausverwaltung, .*1 agent working: hausv on HAUSV-887/)
   // The lead is the agent on a ticket; the coordinator follows.
@@ -156,13 +156,13 @@ test('without permission to know the agent the chip still says an agent works', 
   await expect(pop.getByRole('link')).toHaveAttribute('href', '/p/HAUSV/HAUSV-887')
 })
 
-test('list rows carry a compact live chip: robots and the ticket key', async ({ page }) => {
+test('list rows carry a compact live chip: robots and the state word', async ({ page }) => {
   const data = world()
   data.preferences.projects = { view: 'list' }
   await mockWork(page, data)
   await page.goto('/')
   const hausv = row(page, 'p-hausv')
-  await expect(hausv.getByRole('button', { name: /^1 agent working: hausv on HAUSV-887/ })).toContainText('HAUSV-887')
+  await expect(hausv.getByRole('button', { name: /^1 agent working: hausv on HAUSV-887/ }).locator('.chip-state')).toHaveText('Working')
   await expect(row(page, 'p-ops').locator('.live-bot')).toHaveCount(2)
   await expect(row(page, 'p-ops').locator('.live-chip .count')).toHaveText('3')
   await expect(row(page, 'p-pharos').locator('.live')).toHaveCount(0)
@@ -174,7 +174,7 @@ test('list rows carry a compact live chip: robots and the ticket key', async ({ 
   expect(chip.y).toBeGreaterThanOrEqual(text.y - 6)
 })
 
-test('starting, stopping and stale agents: polls every 20 seconds and says what changed', async ({ page }) => {
+test('working and lost-heartbeat agents: polls every 20 seconds and says what changed', async ({ page }) => {
   const data = world('none')
   const calls = await cards(page, data)
   const reads = () => calls.filter(c => c.path === '/api/harness-sessions/live').length
@@ -205,12 +205,12 @@ test('starting, stopping and stale agents: polls every 20 seconds and says what 
   await page.clock.fastForward(23_100)
   await expect(card(page, 'p-janus').locator('.live')).toHaveCount(0)
   await expect(news).toHaveText('No agent is working on Janus any more.')
-  // A stale reading remains visible but never claims it is working.
-  data.live.push(liveAgent({ project_id: 'p-site', name: 'late', heartbeat_at: new Date(Date.parse('2026-09-23T12:00:00Z') - 150_000).toISOString() }))
+  // A working session past the red threshold stays visible as a problem.
+  data.live.push(liveAgent({ project_id: 'p-site', name: 'late', heartbeat_at: new Date(Date.parse('2026-09-23T12:00:00Z') - 660_000).toISOString() }))
   await page.clock.fastForward(20_500)
   await expect.poll(reads).toBe(6)
-  await expect(card(page, 'p-site').locator('.live-bot')).toHaveAttribute('data-state', 'stale')
-  await expect(card(page, 'p-site').locator('.live-chip')).toHaveAccessibleName(/no recent activity/)
+  await expect(card(page, 'p-site').locator('.live-bot')).toHaveAttribute('data-state', 'problem')
+  await expect(card(page, 'p-site').locator('.live-chip')).toHaveAccessibleName(/problem/)
   // A hidden tab asks nothing and catches up when shown again.
   await page.evaluate(() => { Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true }); document.dispatchEvent(new Event('visibilitychange')) })
   await page.clock.fastForward(65_000)
@@ -404,10 +404,11 @@ for (const reducedMotion of ['reduce', 'no-preference'] as const) {
       const ring = fixture.locator('.ring-sweep')
       await expect(fixture.locator('.clock')).toBeVisible()
       await expect(fixture.locator('.glint')).toHaveCount(0)
-      const style = await ring.evaluate(el => ({ name: getComputedStyle(el).animationName, play: getComputedStyle(el).animationPlayState }))
-      expect(reducedMotion === 'reduce' ? style.name === 'none' : style.play === 'paused').toBe(true)
+      // SC1 removes non-working animations entirely in both motion modes.
+      expect(await ring.evaluate(el => getComputedStyle(el).animationName)).toBe('none')
+      expect(await fixture.evaluate(el => el.getAnimations({ subtree: true }).length)).toBe(0)
       await indicatorProps(page, { eventPulse: 13 })
-      await expect(fixture.locator('.glint')).toHaveCount(1)
+      await expect(fixture.locator('.glint')).toHaveCount(0)
       await page.clock.fastForward(650)
       await expect(fixture.locator('.glint')).toHaveCount(0)
       await indicatorProps(page, { eventPulse: 12 })

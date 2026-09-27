@@ -445,7 +445,7 @@ func (rt *runtime) harnessWorker(kind string) *Command {
 			fs.string(&worktree, "worktree", 0, "worktree path")
 			fs.string(&branch, "branch", 0, "branch name")
 			fs.strings(&commits, "commit", "commit SHA:subject (repeatable, up to 20 per heartbeat)")
-			fs.string(&activity, "activity", 0, "unknown, busy or idle")
+			fs.string(&activity, "activity", 0, "unknown, busy, idle or throttled")
 			fs.string(&activityKind, "activity-kind", 0, "classic content-free adapter event kind")
 			fs.int(&sequence, "activity-sequence", "monotonic sequence")
 		case "complete-delivery":

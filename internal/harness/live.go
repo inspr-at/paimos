@@ -12,18 +12,19 @@ import (
 	"github.com/inspr-at/paimos/internal/tenant"
 )
 
-// LiveWindow is how fresh a heartbeat must be for a session to count as live:
-// the same two minutes the orchestrator resolution and the web app's
-// HEARTBEAT_STALE_MS use.
+// LiveWindow preserves the legacy live-only API filter. State-aware viewers
+// opt into inactive sessions and apply their own heartbeat thresholds.
 const LiveWindow = 2 * time.Minute
 
 // maxLive bounds one answer; a workspace has a handful of live sessions. More
 // than this answers the freshest and says it is truncated.
 var maxLive = 500
 
-// LiveAgent is one agent actively working in a project right now (AEON-184):
-// a session that is not stopped, heartbeated within LiveWindow, is starting,
-// working or stopping, and has not reported itself idle. The project is the
+// LiveAgent describes session evidence in a visible project. The default
+// live-only view requires a heartbeat within LiveWindow. include_inactive
+// also returns idle/aging sessions and stops from the last 24 hours, bounded
+// by maxLive; state-aware viewers can distinguish errors from quiet stops.
+// The project is the
 // session's own project, or the project its bound ticket belongs to now.
 //
 // Who it is (principal_id and name) is present only when the caller holds
@@ -31,6 +32,9 @@ var maxLive = 500
 // (AEON-171). session_id, the key to the Agents workspace, is present only
 // with harness.read in the workspace, which that workspace requires.
 type LiveAgent struct {
+	StateEvidence
+	StoppedAt       *time.Time  `json:"stopped_at,omitempty"`
+	StopReason      *string     `json:"stop_reason,omitempty"`
 	ProjectID       string      `json:"project_id"`
 	SessionID       string      `json:"session_id,omitempty"`
 	PrincipalID     string      `json:"principal_id,omitempty"`
@@ -48,7 +52,7 @@ type LiveAgent struct {
 	ActivityNoteID  *int64      `json:"activity_note_id,omitempty"`
 	Ticket          *LiveTicket `json:"ticket"`
 	Since           time.Time   `json:"since"`
-	HeartbeatAt     time.Time   `json:"heartbeat_at"`
+	HeartbeatAt     *time.Time  `json:"heartbeat_at"`
 }
 
 // LiveTicket is the bound ticket and the project it lives in now, so a link to
@@ -72,12 +76,14 @@ type LivePage struct {
 // down to the freshness window: now() is stable, so the window bounds the index
 // range itself, and the LIMIT ends the walk. The predicates match the partial
 // index's so the planner can use it.
-const liveQuery = `SELECT s.id::text,s.project_id::text,s.agent_principal_id::text,coalesce(a.name,''),s.harness,s.model,s.reasoning_effort,s.account_label,s.harness_version,s.management,s.role,s.phase,s.activity,s.activity_note,latest.id,
-       t.id::text,t.key,t.title,t.project_id::text,s.created_at,s.heartbeat_at
+const liveSelect = `SELECT s.id::text,s.project_id::text,s.agent_principal_id::text,coalesce(a.name,''),s.harness,s.model,s.reasoning_effort,s.account_label,s.harness_version,s.management,s.role,s.phase,s.activity,s.activity_note,latest.id,
+       t.id::text,t.key,t.title,t.project_id::text,s.created_at,s.heartbeat_at,s.stopped_at,s.stop_reason
   FROM harness_sessions s
   LEFT JOIN LATERAL (SELECT id FROM harness_activity_notes WHERE session_id=s.id ORDER BY id DESC LIMIT 1) latest ON true
   LEFT JOIN principals a ON a.tenant_id=s.tenant_id AND a.id=s.agent_principal_id
-  LEFT JOIN nodes t ON t.tenant_id=s.tenant_id AND t.id=s.ticket_node_id AND t.deleted_at IS NULL
+  LEFT JOIN nodes t ON t.tenant_id=s.tenant_id AND t.id=s.ticket_node_id AND t.deleted_at IS NULL`
+
+const liveQuery = liveSelect + `
  WHERE s.phase IN ('starting', 'working', 'stopping') AND s.activity <> 'idle' AND s.stopped_at IS NULL
    AND s.heartbeat_at > now()-make_interval(secs=>$1)
  ORDER BY s.heartbeat_at DESC,s.id DESC LIMIT $2`
@@ -93,7 +99,16 @@ func (m *Module) live(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, erro
 		return nil, err
 	}
 	out.At = out.At.UTC()
-	rows, err := tx.Query(ctx, liveQuery, LiveWindow.Seconds(), maxLive+1)
+	// Explicit opt-in preserves the legacy live filter and its partial index.
+	query := liveQuery
+	args := []any{LiveWindow.Seconds(), maxLive + 1}
+	if r.URL.Query().Get("include_inactive") == "true" {
+		query = liveSelect + `
+ WHERE s.stopped_at IS NULL OR s.stopped_at > now()-interval '24 hours'
+ ORDER BY coalesce(s.stopped_at,s.heartbeat_at,s.created_at) DESC,s.id DESC LIMIT $1`
+		args = []any{maxLive + 1}
+	}
+	rows, err := tx.Query(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -103,12 +118,12 @@ func (m *Module) live(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, erro
 		var ticketID, ticketKey, ticketTitle, ticketProject *string
 		var heartbeat *time.Time
 		if err = rows.Scan(&v.SessionID, &v.ProjectID, &v.PrincipalID, &v.Name, &v.Harness, &v.Model, &v.ReasoningEffort, &v.AccountLabel, &v.HarnessVersion, &v.Management, &v.Role, &v.Phase, &v.Activity, &v.ActivityNote, &v.ActivityNoteID,
-			&ticketID, &ticketKey, &ticketTitle, &ticketProject, &v.Since, &heartbeat); err != nil {
+			&ticketID, &ticketKey, &ticketTitle, &ticketProject, &v.Since, &heartbeat, &v.StoppedAt, &v.StopReason); err != nil {
 			rows.Close()
 			return nil, err
 		}
 		if heartbeat != nil {
-			v.HeartbeatAt = *heartbeat
+			v.HeartbeatAt = heartbeat
 		}
 		if ticketID != nil && ticketKey != nil && ticketTitle != nil && ticketProject != nil {
 			v.Ticket = &LiveTicket{NodeSummary: NodeSummary{ID: *ticketID, Key: *ticketKey, Title: *ticketTitle}, ProjectID: *ticketProject}
@@ -125,6 +140,17 @@ func (m *Module) live(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, erro
 	}
 	if len(found) == 0 {
 		return out, nil
+	}
+	ids := make([]string, len(found))
+	for i := range found {
+		ids[i] = found[i].SessionID
+	}
+	evidence, err := readStateEvidence(ctx, tx, ids)
+	if err != nil {
+		return nil, err
+	}
+	for i := range found {
+		found[i].StateEvidence = evidence[found[i].SessionID]
 	}
 	allowed, err := authz.ProjectsTx(ctx, tx, p)
 	if err != nil {
@@ -143,6 +169,8 @@ func (m *Module) live(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, erro
 			agent := v
 			agent.ProjectID = projectID
 			if !allowed("harness.read", projectID) {
+				agent.StopReason = nil
+				agent.RunStatus = nil
 				agent.ActivityNote = nil
 				agent.ActivityNoteID = nil
 				agent.Model, agent.ReasoningEffort, agent.AccountLabel, agent.HarnessVersion = nil, nil, nil, nil

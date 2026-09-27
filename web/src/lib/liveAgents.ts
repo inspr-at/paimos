@@ -7,21 +7,22 @@
 import { duration, harnessLabel } from './agentState.ts'
 import type { Harness, NodeSummary } from './agents.ts'
 
-export type LiveBotState = 'working' | 'waiting' | 'stale'
+import { DEFAULT_AGENT_STATE, STATE_LABEL, STATE_PRIORITY, deriveAgentState, type AgentState, type AgentStatePreference } from './agentSignals.ts'
+export type LiveBotState = AgentState
 export interface LiveAgent {
   project_id: string
   // Present only when the caller may open the session / know the agent (AEON-171).
   session_id?: string; principal_id?: string; name?: string
   harness: Harness; management_mode: 'managed' | 'unmanaged'; role: 'worker' | 'coordinator'
-  phase: 'starting' | 'working' | 'stopping'; activity: 'busy' | 'unknown'
+  phase: 'starting' | 'working' | 'stopping' | 'yielded' | 'stopped'; activity: 'busy' | 'unknown' | 'idle' | 'throttled'
+  stopped_at?: string | null; stop_reason?: string | null; run_status?: string | null; needs_attention?: boolean; has_problem?: boolean
   // The bound ticket and the project it lives in now (it may have moved on).
-  ticket: (NodeSummary & { project_id: string }) | null; since: string; heartbeat_at: string
+  ticket: (NodeSummary & { project_id: string }) | null; since: string; heartbeat_at: string | null
   // The last persisted activity entry, withheld with the note when harness.read
   // is absent. Heartbeats and sequence changes do not advance it.
   activity_note?: string | null; activity_note_id?: number
   activity_sequence?: number
-  // Presentation state. Waiting must come from explicit approval evidence,
-  // never from activity=unknown, starting, elapsed time or a missing heartbeat.
+  // Derived presentation state; shared evidence and viewer thresholds decide it.
   state?: LiveBotState
 }
 // truncated: more sessions were live than one answer holds (the freshest are listed).
@@ -38,28 +39,26 @@ export const skewOf = (page: Pick<LivePage, 'at'>, receivedAt: number) => {
   return Number.isNaN(at) ? 0 : receivedAt - at
 }
 
-// Current activity leads waiting and stale readings so a stale ticket owner
-// cannot hide a working agent. Within each state: ticket, worker, then start.
+// Problems and requests lead so work cannot hide a session needing attention.
+// Within each state: ticket, worker, then start.
 export function byLead(a: LiveAgent, b: LiveAgent) {
-  const rank = (agent: LiveAgent) => agent.state === 'stale' ? 2 : agent.state === 'waiting' ? 1 : 0
+  const rank = (agent: LiveAgent) => STATE_PRIORITY[agent.state ?? 'working']
   return rank(a) - rank(b) || Number(!a.ticket) - Number(!b.ticket)
     || Number(a.role === 'coordinator') - Number(b.role === 'coordinator')
     || Date.parse(a.since) - Date.parse(b.since)
     || (a.session_id ?? a.since).localeCompare(b.session_id ?? b.since)
 }
 
-export function liveState(agent: LiveAgent, serverNow: number, freshMs = LIVE_FRESH_MS): LiveBotState {
-  const beat = Date.parse(agent.heartbeat_at)
-  if (!Number.isFinite(beat) || serverNow - beat > freshMs) return 'stale'
-  return agent.state ?? 'working'
+export function liveState(agent: LiveAgent, serverNow: number, preferences: AgentStatePreference = DEFAULT_AGENT_STATE): LiveBotState {
+  return deriveAgentState({ ...agent, needs_attention: agent.needs_attention || agent.state === 'waiting' }, serverNow, preferences)
 }
 
-// Keep the last reading visible but grey when it ages (e.g. a failed poll).
-// A successful response removing a session removes it immediately.
-export function groupLive(items: LiveAgent[], serverNow: number, freshMs = LIVE_FRESH_MS) {
+// State-aware reads retain quiet and failed sessions. A failed poll ages the
+// last heartbeat through the same thresholds as /agents, on the server clock.
+export function groupLive(items: LiveAgent[], serverNow: number, preferences: AgentStatePreference = DEFAULT_AGENT_STATE) {
   const out = new Map<string, LiveAgent[]>()
   for (const item of items) {
-    const agent = { ...item, state: liveState(item, serverNow, freshMs) }
+    const agent = { ...item, state: liveState(item, serverNow, preferences) }
     const list = out.get(item.project_id)
     if (list) list.push(agent); else out.set(item.project_id, [agent])
   }
@@ -69,7 +68,7 @@ export function groupLive(items: LiveAgent[], serverNow: number, freshMs = LIVE_
 
 // Two readings that show the same thing, including event evidence, so a poll that
 // changes nothing re-renders nothing.
-const shown = (a: LiveAgent) => [a.project_id, a.session_id, a.principal_id, a.name, a.harness, a.role, a.phase, a.activity, a.state, a.ticket?.id, a.ticket?.key, a.ticket?.title, a.ticket?.project_id, a.since, a.heartbeat_at, a.activity_note, a.activity_note_id].join('\u0000')
+const shown = (a: LiveAgent) => [a.project_id, a.session_id, a.principal_id, a.name, a.harness, a.role, a.phase, a.activity, a.state, a.ticket?.id, a.ticket?.key, a.ticket?.title, a.ticket?.project_id, a.since, a.heartbeat_at, a.activity_note, a.activity_note_id, a.run_status, a.stop_reason, a.stopped_at, a.needs_attention, a.has_problem].join('\u0000')
 export function sameLive(a: Map<string, LiveAgent[]>, b: Map<string, LiveAgent[]>) {
   if (a.size !== b.size) return false
   for (const [id, list] of a) {
@@ -82,7 +81,7 @@ export function sameLive(a: Map<string, LiveAgent[]>, b: Map<string, LiveAgent[]
 // Who: the agent's name, else its harness ("Claude agent") when the caller may
 // not know which agent it is.
 export const who = (agent: LiveAgent) => agent.name || `${harnessLabel(agent.harness)} agent`
-export const phaseLabel = (agent: Pick<LiveAgent, 'phase' | 'state'>) => agent.state === 'stale' ? 'No recent activity' : agent.state === 'waiting' ? 'Waiting for approval' : agent.phase === 'starting' ? 'Starting' : agent.phase === 'stopping' ? 'Stopping' : 'Working'
+export const phaseLabel = (agent: Pick<LiveAgent, 'phase' | 'state'>) => STATE_LABEL[agent.state ?? (agent.phase === 'stopped' ? 'stopped' : 'working')]
 export const elapsedFor = (agent: Pick<LiveAgent, 'since'>, serverNow: number) => duration(serverNow - Date.parse(agent.since))
 
 // One agent as a phrase: "hausv on HAUSV-887", "hausv, starting".
@@ -131,16 +130,18 @@ export function liveChanges(before: Map<string, LiveAgent[]> | null, after: Map<
     if (!name) continue
     const was = before.get(id) ?? [], now = after.get(id) ?? []
     const wasKeys = new Set(was.map(agentKey)), nowKeys = new Set(now.map(agentKey))
-    const started = now.filter(agent => agent.state !== 'stale' && !wasKeys.has(agentKey(agent)))
+    const started = now.filter(agent => (!agent.state || agent.state === 'working') && !wasKeys.has(agentKey(agent)))
     const stopped = was.filter(agent => !nowKeys.has(agentKey(agent)))
     const previous = new Map(was.map(agent => [agentKey(agent), agent]))
     const stale = now.filter(agent => agent.state === 'stale' && previous.has(agentKey(agent)) && previous.get(agentKey(agent))!.state !== 'stale')
     const resumed = now.filter(agent => agent.state !== 'stale' && previous.get(agentKey(agent))?.state === 'stale')
-    if (started.length || stopped.length || stale.length || resumed.length) changed++
+    const transitions = now.filter(agent => agent.state && !['stale'].includes(agent.state) && !started.includes(agent) && !resumed.includes(agent) && (previous.get(agentKey(agent))?.state ?? 'working') !== agent.state)
+    if (started.length || stopped.length || stale.length || resumed.length || transitions.length) changed++
     if (started.length) lines.push(`${names(started)} started working on ${name}.`)
     if (stopped.length) lines.push(now.length ? `${names(stopped)} stopped working on ${name}.` : `No agent is working on ${name} any more.`)
     if (stale.length) lines.push(`No recent activity from ${names(stale)} on ${name}.`)
     if (resumed.length) lines.push(`Activity resumed for ${names(resumed)} on ${name}.`)
+    for (const agent of transitions) lines.push(`${who(agent)}: ${phaseLabel(agent)} on ${name}.`)
   }
   if (lines.length > 3) return `Agents changed in ${changed} projects.`
   return lines.join(' ')

@@ -5,35 +5,27 @@
 import { brand } from './brand.ts'
 import { paceFraction, type AgentRun, type AllowanceWindow, type Approval, type HarnessSession, type ProjectMessage } from './agents.ts'
 
-export const HEARTBEAT_STALE_MS = 2 * 60_000
+import { DEFAULT_AGENT_STATE, STATE_LABEL, deriveAgentState, type AgentState, type AgentStatePreference } from './agentSignals.ts'
+
+export const HEARTBEAT_STALE_MS = 3 * 60_000
 export const HARNESS_LABEL: Record<string, string> = { codex: 'Codex', claude: 'Claude', pi: 'Pi', cursor: 'Cursor', grok: 'Grok' }
 export const harnessLabel = (harness: string) => HARNESS_LABEL[harness] ?? harness.charAt(0).toUpperCase() + harness.slice(1)
 
-export type SessionGroup = 'needs' | 'working' | 'idle' | 'stopped'
-export type LiveTone = 'busy' | 'idle' | 'attention' | 'quiet' | 'stopped'
-export interface SessionStatus { group: SessionGroup; tone: LiveTone; label: string }
+export type SessionGroup = 'needs' | 'working' | 'throttled' | 'problem' | 'idle' | 'stopped'
+export type LiveTone = 'busy' | 'idle' | 'attention' | 'quiet' | 'stopped' | 'throttled' | 'problem'
+export interface SessionStatus { group: SessionGroup; tone: LiveTone; label: string; state: AgentState }
 export const GROUPS: { id: SessionGroup; label: string }[] = [
-  { id: 'needs', label: 'Needs you' }, { id: 'working', label: 'Working' }, { id: 'idle', label: 'Idle' }, { id: 'stopped', label: 'Stopped' },
+  { id: 'problem', label: 'Problem' }, { id: 'needs', label: 'Needs something' }, { id: 'throttled', label: 'Throttled' },
+  { id: 'working', label: 'Working' }, { id: 'idle', label: 'Idle' }, { id: 'stopped', label: 'Stopped' },
 ]
-
-export function heartbeatStale(session: HarnessSession, now: number) {
-  return !session.heartbeat_at || now - Date.parse(session.heartbeat_at) > HEARTBEAT_STALE_MS
+const STATE_GROUP: Record<AgentState, SessionGroup> = { working: 'working', waiting: 'needs', throttled: 'throttled', problem: 'problem', idle: 'idle', stale: 'idle', stopped: 'stopped' }
+const STATE_TONE: Record<AgentState, LiveTone> = { working: 'busy', waiting: 'attention', throttled: 'throttled', problem: 'problem', idle: 'idle', stale: 'quiet', stopped: 'stopped' }
+export function heartbeatStale(session: HarnessSession, now: number, preferences = DEFAULT_AGENT_STATE) {
+  return !session.heartbeat_at || now - Date.parse(session.heartbeat_at) >= preferences.yellowMinutes * 60_000
 }
-
-// A stopped generation is history; anything waiting on Markus leads (keeping what it
-// is doing as its label); a missing heartbeat is not work. Starting and stopping count as working.
-export function sessionStatus(session: HarnessSession, now: number, needsYou = false): SessionStatus {
-  if (session.phase === 'stopped' || session.stopped_at) return { group: 'stopped', tone: 'stopped', label: 'Stopped' }
-  const status = activityStatus(session, now)
-  return needsYou ? { group: 'needs', tone: 'attention', label: status.label } : status
-}
-function activityStatus(session: HarnessSession, now: number): SessionStatus {
-  if (session.phase === 'stopping') return { group: 'working', tone: 'busy', label: 'Stopping' }
-  if (session.phase === 'starting') return { group: 'working', tone: 'busy', label: 'Starting' }
-  if (heartbeatStale(session, now)) return { group: 'idle', tone: 'quiet', label: 'No heartbeat' }
-  if (session.phase === 'yielded') return { group: 'idle', tone: 'idle', label: 'Waiting' }
-  if (session.activity === 'idle') return { group: 'idle', tone: 'idle', label: 'Idle' }
-  return { group: 'working', tone: 'busy', label: 'Working' }
+export function sessionStatus(session: HarnessSession, now: number, needsYou = false, preferences: AgentStatePreference = DEFAULT_AGENT_STATE, run?: AgentRun): SessionStatus {
+  const state = deriveAgentState({ ...session, run_status: run?.outcome ?? run?.status ?? session.run_status }, now, preferences, needsYou)
+  return { state, group: STATE_GROUP[state], tone: STATE_TONE[state], label: STATE_LABEL[state] }
 }
 
 export function stopReasonLabel(reason: string | null | undefined) {
@@ -57,7 +49,7 @@ export interface SessionBranch<T> {
 // Parent UUIDs, never shared principals or names, establish the tree. A missing
 // or invalid parent leaves a visible root; even malformed cycles lose no rows.
 // Group by the most urgent member so a stopped lead cannot hide working children.
-export function sessionForest<T extends { session: HarnessSession; status: SessionStatus }>(views: T[], now: number): SessionBranch<T>[] {
+export function sessionForest<T extends { session: HarnessSession; status: SessionStatus }>(views: T[], _now: number): SessionBranch<T>[] {
   const branches = new Map(views.map(view => [view.session.id, { view, children: [], group: view.status.group, liveCount: 0, workingCount: 0, count: 0 } as SessionBranch<T>]))
   const roots: SessionBranch<T>[] = []
   for (const branch of branches.values()) {
@@ -79,8 +71,8 @@ export function sessionForest<T extends { session: HarnessSession; status: Sessi
   const beat = (s: HarnessSession) => Date.parse(s.heartbeat_at ?? s.created_at)
   const summarize = (branch: SessionBranch<T>) => {
     const s = branch.view.session
-    branch.liveCount = branch.view.status.group === 'stopped' ? 0 : 1
-    branch.workingCount = branch.liveCount && activityStatus(s, now).group === 'working' ? 1 : 0
+    branch.liveCount = s.phase === 'stopped' || s.stopped_at ? 0 : 1
+    branch.workingCount = branch.liveCount && !['idle', 'throttled'].includes(s.activity) && ['working', 'starting', 'stopping'].includes(s.phase) && !['problem', 'idle'].includes(branch.view.status.state) ? 1 : 0
     branch.count = 1
     for (const child of branch.children) {
       summarize(child)
@@ -98,20 +90,20 @@ export function sessionForest<T extends { session: HarnessSession; status: Sessi
   return roots
 }
 
-export function needsYou(session: HarnessSession, pending: Approval[], held: ProjectMessage[]) {
+export function needsYou(session: HarnessSession, pending: Approval[], held: (ProjectMessage & { projectId?: string })[]) {
   if (session.phase === 'stopped') return false
-  return pending.some(a => a.agent_principal_id === session.agent_principal_id && (!a.run_id || !session.run_id || a.run_id === session.run_id))
-    || held.some(m => m.sender_principal_id === session.agent_principal_id)
+  return pending.some(a => a.agent_principal_id === session.agent_principal_id && (!a.run_id || a.run_id === session.run_id))
+    || held.some(m => (!m.projectId || m.projectId === session.project_id) && m.sender_principal_id === session.agent_principal_id)
 }
 
 export function groupSessions(sessions: HarnessSession[], now: number, needs: (session: HarnessSession) => boolean) {
-  const buckets: Record<SessionGroup, { session: HarnessSession; status: SessionStatus }[]> = { needs: [], working: [], idle: [], stopped: [] }
+  const buckets: Record<SessionGroup, { session: HarnessSession; status: SessionStatus }[]> = { problem: [], needs: [], throttled: [], working: [], idle: [], stopped: [] }
   for (const session of sessions) {
     const status = sessionStatus(session, now, needs(session))
     buckets[status.group].push({ session, status })
   }
   const beat = (s: HarnessSession) => Date.parse(s.heartbeat_at ?? s.created_at)
-  for (const group of ['needs', 'working', 'idle'] as const) buckets[group].sort((a, b) => beat(b.session) - beat(a.session))
+  for (const group of ['problem', 'needs', 'throttled', 'working', 'idle'] as const) buckets[group].sort((a, b) => beat(b.session) - beat(a.session))
   buckets.stopped.sort((a, b) => Date.parse(b.session.stopped_at ?? b.session.created_at) - Date.parse(a.session.stopped_at ?? a.session.created_at))
   return buckets
 }

@@ -6,6 +6,10 @@ import { RISK_LABEL, expiresIn, expiresSoon, riskFor, scopeLabel, type Asker, ty
 import { confirmAction } from '../../lib/confirm'
 import { relativeTime } from '../../lib/work'
 import AppIcon from '../AppIcon.vue'
+import AgentStateLabel from './AgentStateLabel.vue'
+import AgentStateMark from '../indicators/AgentStateMark.vue'
+import { useAgentAppearance } from '../../lib/agentAppearance'
+const { appearance } = useAgentAppearance()
 
 // What waits on Markus: permission requests (approve or deny, with a reason the agent
 // sees) and held action requests. Decided and expired requests fold into a history.
@@ -83,7 +87,7 @@ defineExpose({ begin, cancel, isOpen: () => !!open.value })
 </script>
 
 <template>
-  <section class="queue glass-card" aria-labelledby="needs-title">
+  <section class="queue glass-card" :style="appearance('waiting')" aria-labelledby="needs-title">
     <header class="card-head">
       <h2 id="needs-title">Needs you</h2>
       <span v-if="count" class="count-badge">{{ count }}</span>
@@ -98,18 +102,18 @@ defineExpose({ begin, cancel, isOpen: () => !!open.value })
 
     <ul v-else class="items" aria-label="Requests waiting for you">
       <li
-        v-for="approval in pending" :key="approval.id" class="item" :class="[riskFor(approval), { active: cursor === `a:${approval.id}`, open: open?.id === approval.id }]"
+        v-for="approval in pending" :key="approval.id" class="item agent-state-surface" :class="[riskFor(approval), { active: cursor === `a:${approval.id}`, open: open?.id === approval.id }]"
         :data-row="`a:${approval.id}`" tabindex="-1" :aria-label="`${scopeLabel(approval.scope)}, asked by ${named(approval).name}`"
         @click="emit('focusRow', `a:${approval.id}`)" @focusin="emit('focusRow', `a:${approval.id}`)"
       >
-        <span class="mark"><AppIcon name="shield" :size="15" /></span>
+        <span class="mark"><AgentStateMark state="waiting" :size="18" /></span>
         <div class="body">
           <p class="line1">
             <strong class="what">{{ scopeLabel(approval.scope) }}</strong>
             <span class="risk-chip" :class="riskFor(approval)">{{ RISK_LABEL[riskFor(approval)] }}</span>
             <time class="expiry" :class="{ soon: expiresSoon(approval, now) }" :datetime="approval.expires_at" :title="new Date(approval.expires_at).toLocaleString()"><AppIcon name="clock" :size="12" />{{ expiresIn(approval, now) }} · {{ new Date(approval.expires_at).toLocaleString() }}</time>
           </p>
-          <p class="line2">
+          <p class="line2"><AgentStateLabel state="waiting" />
             <button type="button" class="who" @click.stop="emit('openAgent', approval.agent_principal_id)">
               <span v-if="named(approval).harness" class="harness">{{ named(approval).harness }}</span>
               <span v-else class="who-icon" aria-hidden="true"><AppIcon name="agent" :size="12" /></span>
@@ -149,13 +153,13 @@ defineExpose({ begin, cancel, isOpen: () => !!open.value })
         </div>
       </li>
       <li
-        v-for="request in held" :key="request.id" class="item held" :class="{ active: cursor === `m:${request.id}`, open: open?.id === request.id }" :data-row="`m:${request.id}`" tabindex="-1"
+        v-for="request in held" :key="request.id" class="item held agent-state-surface" :class="{ active: cursor === `m:${request.id}`, open: open?.id === request.id }" :data-row="`m:${request.id}`" tabindex="-1"
         :aria-label="`Action request from ${asker(request.sender_principal_id).name}`" @click="emit('focusRow', `m:${request.id}`)" @focusin="emit('focusRow', `m:${request.id}`)"
       >
-        <span class="mark"><AppIcon name="inbox" :size="15" /></span>
+        <span class="mark"><AgentStateMark state="waiting" :size="18" /></span>
         <div class="body">
           <p class="line1"><strong class="what">Action request</strong><span class="risk-chip held-chip">Held for you</span></p>
-          <p class="line2">
+          <p class="line2"><AgentStateLabel state="waiting" />
             <button type="button" class="who" @click.stop="emit('openAgent', request.sender_principal_id)">
               <span v-if="asker(request.sender_principal_id).harness" class="harness">{{ asker(request.sender_principal_id).harness }}</span>{{ asker(request.sender_principal_id).name }}
             </button>
@@ -317,4 +321,6 @@ defineExpose({ begin, cancel, isOpen: () => !!open.value })
   .past-who, .past-time { display: none; }
   .revoke { grid-column: 2 / -1; justify-self: start; }
 }
+.item .mark { color: var(--agent-state-color); background: color-mix(in srgb, var(--agent-state-color) 10%, var(--surface-raised)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--agent-state-color) 25%, transparent); }
+.count-badge { background: var(--agent-state-color); }
 </style>

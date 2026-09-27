@@ -101,7 +101,7 @@ test('idle follows working; newly stopped workers hide immediately and histories
   Object.assign(data.sessions.find(s => s.id === id(4))!, { activity: 'idle', heartbeat_at: ago(0) })
   await page.goto('/agents')
   await expect.poll(() => order(page)).toEqual([id(3), id(5), id(2), id(4)])
-  await expect(row(page, lead).locator('.idle-count')).toHaveText('1 idle')
+  await expect(row(page, lead).locator('.idle-count')).toHaveText('1 other active')
   await history(page).click()
   await expect(children(page, id(90))).toHaveCount(0)
   await history(page, id(90)).click()

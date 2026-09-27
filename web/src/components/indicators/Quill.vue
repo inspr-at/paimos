@@ -1,12 +1,14 @@
 <!-- Quill · creative friendly · a fountain nib flexes as it draws a looping flourish.
      SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
+import type { AgentState } from '../../lib/agentSignals'
+import AgentStateMark from './AgentStateMark.vue'
 import { computed, ref, watch } from 'vue'
 
 // IV1 discovers this default SFC export by filename. No fetching, preferences,
 // inferred progress or hovering: the wrapper supplies the shared five props.
 const props = withDefaults(defineProps<{
-  state: 'working' | 'waiting' | 'stale'
+  state: AgentState
   size?: number
   pulse: number
   seed: string
@@ -23,13 +25,13 @@ let lastPulse = props.pulse
 watch(() => props.pulse, value => {
   if (!Number.isFinite(value) || value <= lastPulse) return
   lastPulse = value
-  if (props.state !== 'stale') glint.value = ++sequence
+  if (props.state === 'working') glint.value = ++sequence
 })
-watch(() => props.state, state => { if (state === 'stale') glint.value = 0 })
+watch(() => props.state, state => { if (state !== 'working') glint.value = 0 })
 </script>
 
 <template>
-  <svg class="indicator-quill" :class="[state, { lead }]" :style="style" :width="size" :height="size"
+  <svg class="agent-indicator-art indicator-quill" :class="[state, { lead }]" :style="style" :width="size" :height="size"
     :data-state="state" viewBox="0 0 32 32" aria-hidden="true" focusable="false">
     <path class="ink-track" d="M7.5 22.5C3 24 4 28 10 27S17 23 23 25.5" />
     <path class="ink-line idle" d="M7.5 22.5C3 24 4 28 10 27S17 23 23 25.5" pathLength="100" />
@@ -39,22 +41,18 @@ watch(() => props.state, state => { if (state === 'stale') glint.value = 0 })
       <path class="engraving" d="m7.5 22.5 8-8m2-6 6 6" />
       <circle class="breather" cx="16.5" cy="13.5" r="1.35" />
     </g>
-    <path v-if="glint && state !== 'stale'" :key="glint" class="glint"
+    <path v-if="glint && state === 'working'" :key="glint" class="glint"
       d="m7.5 19 1 2.5 2.5 1-2.5 1-1 2.5-1-2.5-2.5-1 2.5-1Z" @animationend="glint = 0" />
-    <g v-if="state === 'waiting'" class="clock">
-      <circle cx="25.5" cy="6.5" r="4.5" /><path d="M25.5 4v2.5l1.7 1" />
-    </g>
+    <AgentStateMark :state="state" x="21" y="0" :size="11" />
   </svg>
 </template>
 
 <style scoped>
 .indicator-quill {
-  --signal: var(--accent, var(--teal, #2f8f86));
+
   display: inline-block; flex: none; width: var(--size); height: var(--size); vertical-align: middle;
-  color: var(--signal); overflow: hidden;
+  color: var(--signal); overflow: visible;
 }
-.waiting { --signal: var(--warn, #9a6b12); }
-.stale { --signal: var(--st-backlog, #889397); }
 .nib, .engraving, .ink-track, .ink-line { fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
 .nib { fill: color-mix(in srgb, currentColor 7%, var(--surface-raised, #fffefa)); }
 .nib-shade { fill: currentColor; opacity: .13; }

@@ -86,16 +86,16 @@ test('invalid cyclic session bindings remain visible instead of recursing or dis
   assert.deepEqual(tree.map(n => n.view.session.id), ['a', 'b', 'self'])
 })
 
-test('session states: working, starting, stopping, waiting, idle, no heartbeat, stopped', () => {
-  assert.deepEqual(sessionStatus(session(), now), { group: 'working', tone: 'busy', label: 'Working' })
-  assert.equal(sessionStatus(session({ phase: 'starting', heartbeat_at: null }), now).label, 'Starting')
-  assert.equal(sessionStatus(session({ phase: 'stopping' }), now).label, 'Stopping')
-  assert.deepEqual(sessionStatus(session({ phase: 'yielded', activity: 'idle' }), now), { group: 'idle', tone: 'idle', label: 'Waiting' })
-  assert.deepEqual(sessionStatus(session({ activity: 'idle' }), now), { group: 'idle', tone: 'idle', label: 'Idle' })
-  assert.deepEqual(sessionStatus(session({ heartbeat_at: ago(3) }), now), { group: 'idle', tone: 'quiet', label: 'No heartbeat' })
-  assert.deepEqual(sessionStatus(session({ phase: 'stopped', stopped_at: ago(1) }), now, true), { group: 'stopped', tone: 'stopped', label: 'Stopped' })
-  // Waiting on Markus leads, and keeps what the session is doing as its label.
-  assert.deepEqual(sessionStatus(session(), now, true), { group: 'needs', tone: 'attention', label: 'Working' })
+test('session states share words and shapes with project indicators', () => {
+  assert.deepEqual(sessionStatus(session(), now), { state: 'working', group: 'working', tone: 'busy', label: 'Working' })
+  assert.equal(sessionStatus(session({ phase: 'starting', heartbeat_at: null, created_at: ago(0) }), now).state, 'working')
+  assert.equal(sessionStatus(session({ phase: 'stopping' }), now).state, 'working')
+  assert.equal(sessionStatus(session({ phase: 'yielded', activity: 'idle' }), now).state, 'waiting')
+  assert.equal(sessionStatus(session({ activity: 'idle' }), now).state, 'idle')
+  assert.equal(sessionStatus(session({ heartbeat_at: ago(3) }), now).state, 'waiting')
+  assert.equal(sessionStatus(session({ heartbeat_at: ago(10) }), now).state, 'problem')
+  assert.equal(sessionStatus(session({ phase: 'stopped', stopped_at: ago(1) }), now, true).state, 'stopped')
+  assert.deepEqual(sessionStatus(session(), now, true), { state: 'waiting', group: 'needs', tone: 'attention', label: 'Needs something' })
 })
 
 test('a session needs Markus for its agent’s pending approval or held request', () => {
@@ -103,6 +103,8 @@ test('a session needs Markus for its agent’s pending approval or held request'
   assert.equal(needsYou(s, [approval()], []), true)
   assert.equal(needsYou(s, [approval({ run_id: 'other' })], []), false)
   assert.equal(needsYou(s, [approval({ run_id: null })], []), true)
+  assert.equal(needsYou(session({ run_id: null }), [approval({ run_id: 'other' })], []), false)
+  assert.equal(needsYou(s, [], [{ ...message({ sender_principal_id: 'a1', is_action_request: true }), projectId: 'other-project' }]), false)
   assert.equal(needsYou(s, [], [message({ sender_principal_id: 'a1', is_action_request: true })]), true)
   assert.equal(needsYou(session({ phase: 'stopped', stopped_at: ago(1) }), [approval()], []), false)
 })

@@ -18,6 +18,11 @@
 // replays them with tenant/project visibility. Clients treat them as read hints.
 // AEON-184 adds GET /api/harness-sessions/live: the agents actively working
 // in each visible project right now, for the Projects page (live.go).
+// SC1/AEON-221 accepts heartbeat activity=throttled with the existing event and
+// lease/sequence fencing. New(pool) and Plugin() remain the module and manifest
+// constructors; no new coordinator wiring is required. Migration 0882 extends
+// the activity constraint. Read endpoints attach content-free StateEvidence.
+//
 // AEON-192 adds activity_note on heartbeat. New(pool) remains the coordinator's
 // httpapi.Module constructor and Plugin() remains its compiled manifest.
 // TM1 adds optional --model, --effort, --account-label, --harness-version,
@@ -83,6 +88,7 @@ func (m *Module) Mount(mux *http.ServeMux) {
 }
 
 type Session struct {
+	StateEvidence
 	ID                                             string         `json:"id"`
 	ProjectID                                      string         `json:"project_id"`
 	AgentPrincipalID                               string         `json:"agent_principal_id"`
@@ -570,7 +576,23 @@ func (m *Module) list(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, erro
 		}
 		out = append(out, s)
 	}
-	return out, rows.Err()
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]string, len(out))
+	for i := range out {
+		ids[i] = out[i].ID
+	}
+	evidence, err := readStateEvidence(r.Context(), tx, ids)
+	if err != nil {
+		return nil, err
+	}
+	for i := range out {
+		out[i].StateEvidence = evidence[out[i].ID]
+	}
+	return out, nil
 }
 func (m *Module) status(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
 	s, err := load(r.Context(), tx, r.PathValue("projectId"), r.PathValue("sessionId"), false)
@@ -592,6 +614,11 @@ func (m *Module) status(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, er
 	}
 	err = rows.Err()
 	rows.Close()
+	if err != nil {
+		return nil, err
+	}
+	evidence, err := readStateEvidence(r.Context(), tx, []string{s.ID})
+	s.StateEvidence = evidence[s.ID]
 	return s, err
 }
 func (m *Module) orchestrator(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
@@ -599,7 +626,7 @@ func (m *Module) orchestrator(r *http.Request, tx pgx.Tx, p tenant.Principal) (a
 	if err := project(r.Context(), tx, id); err != nil {
 		return nil, err
 	}
-	rows, err := tx.Query(r.Context(), `SELECT `+sessionColumns+` FROM harness_sessions WHERE project_id=$1 AND role='coordinator' AND management='managed' AND phase IN ('working','yielded') AND activity IN ('busy','idle') AND heartbeat_at>clock_timestamp()-interval '2 minutes' AND stopped_at IS NULL`, id)
+	rows, err := tx.Query(r.Context(), `SELECT `+sessionColumns+` FROM harness_sessions WHERE project_id=$1 AND role='coordinator' AND management='managed' AND phase IN ('working','yielded') AND activity IN ('busy','idle','throttled') AND heartbeat_at>clock_timestamp()-interval '2 minutes' AND stopped_at IS NULL`, id)
 	if err != nil {
 		return nil, err
 	}
@@ -616,6 +643,11 @@ func (m *Module) orchestrator(r *http.Request, tx pgx.Tx, p tenant.Principal) (a
 		return nil, err
 	}
 	if len(found) == 1 {
+		evidence, err := readStateEvidence(r.Context(), tx, []string{found[0].ID})
+		if err != nil {
+			return nil, err
+		}
+		found[0].StateEvidence = evidence[found[0].ID]
 		return map[string]any{"state": "resolved", "session": found[0]}, nil
 	}
 	if len(found) > 1 {
@@ -694,7 +726,7 @@ func (m *Module) heartbeat(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 	if in.Activity == "" {
 		in.Activity = s.Activity
 	}
-	if in.Activity != "unknown" && in.Activity != "busy" && in.Activity != "idle" {
+	if in.Activity != "unknown" && in.Activity != "busy" && in.Activity != "idle" && in.Activity != "throttled" {
 		return nil, workorders.Fail(400, "invalid activity")
 	}
 	if in.ActivitySequence < s.ActivitySequence {

@@ -6,6 +6,9 @@ import { useLiveAgents } from '../../stores/liveAgents'
 import { absoluteTime, highlight, relativeTime } from '../../lib/work'
 import AppIcon from '../AppIcon.vue'
 import LiveAgents from './LiveAgents.vue'
+import { leadingState } from '../../lib/agentSignals'
+import { useAgentAppearance } from '../../lib/agentAppearance'
+const { appearance } = useAgentAppearance()
 import PeopleStack from './PeopleStack.vue'
 import ProgressRing from './ProgressRing.vue'
 import StatCount from './StatCount.vue'
@@ -22,10 +25,11 @@ const props = defineProps<{ project: Project; term: string; now: number; to: str
 const emit = defineEmits<{ menu: [anchor: HTMLElement] }>()
 const live = useLiveAgents()
 const agents = computed(() => live.forProject(props.project.id))
+const agentState = computed(() => leadingState(agents.value.map(a => a.state)))
 </script>
 
 <template>
-  <li class="card" :class="{ selected, dragging, menu: menuOpen, archived: project.archived, live: agents.length }" :data-project-id="project.id">
+  <li class="card" :data-agent-state="agents.length ? agentState : undefined" :style="agents.length ? appearance(agentState) : undefined" :class="{ selected, dragging, menu: menuOpen, archived: project.archived, live: agents.length }" :data-project-id="project.id">
     <RouterLink class="card-link item-link" :to="to" :aria-label="label" aria-describedby="arrange-hint" aria-keyshortcuts="Alt+ArrowLeft Alt+ArrowRight Alt+ArrowUp Alt+ArrowDown" draggable="false">
       <span class="card-top">
         <span class="key-badge"><template v-for="(part, i) in highlight(project.routeKey, term)" :key="i"><mark v-if="part.match">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></span>
@@ -88,10 +92,11 @@ const agents = computed(() => live.forProject(props.project.id))
 .ring-wrap { display: inline-flex; }
 .counts { display: grid; gap: 7px; width: min(100%, 176px); }
 .counts :deep(.stat-count) { gap: 8px; }
-/* Always as tall as a row of faces, so the live chip sits on the same line in every card. */
-.card-foot { display: flex; align-items: center; gap: 10px; height: 49px; margin: 18px 18px 14px; padding-top: 12px; border-top: 1px solid var(--line); }
+/* Reserve the 46px state chip plus padding and border, even before agents arrive. */
+.card-foot { display: flex; align-items: center; gap: 10px; min-height: 60px; margin: 18px 18px 14px; padding-top: 12px; border-top: 1px solid var(--line); }
 /* The actual timestamp width determines how much room the chip can use. */
 .card { container: live-card / inline-size; }
+@container live-card (max-width: 320px) { .card-foot { min-height: 74px; } }
 .card-live { flex: 0 1 auto; min-width: 0; }
 .activity { flex: 0 0 auto; margin-left: auto; font-size: 12.5px; color: var(--ink-2); white-space: nowrap; }
 .card-more { position: absolute; top: 12px; right: 12px; width: 30px; height: 30px; color: var(--ink-3); opacity: 0; }
@@ -103,6 +108,7 @@ const agents = computed(() => live.forProject(props.project.id))
 .card-more:hover, .card.menu .card-more { color: var(--teal-ink); }
 @media (hover: none) { .card-more { opacity: 1; } .card-grip { display: none; } }
 @media (max-width: 600px) { .card-link { padding: 14px 16px 0; } .card-foot { margin: 18px 16px 12px; } .card-top { padding-right: 40px; } .card-more { top: 6px; right: 6px; width: 44px; height: 44px; } }
+.card[data-agent-state] { background: color-mix(in srgb, var(--agent-state-color) 5%, var(--surface-raised)); }
 </style>
 
 <style>

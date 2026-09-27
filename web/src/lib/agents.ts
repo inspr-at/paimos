@@ -15,8 +15,8 @@ export interface HarnessSession {
   run_id: string | null; ticket_node_id: string | null; work_order_id: string | null; parent_harness_session_id: string | null
   harness: Harness; host: string; management_mode: 'managed' | 'unmanaged'; role: 'coordinator' | 'worker'
   work_shape: 'unknown' | 'ship' | 'scout'; advertised_capabilities: string[]
-  phase: 'starting' | 'working' | 'yielded' | 'stopping' | 'stopped'; activity: 'unknown' | 'busy' | 'idle'
-  activity_sequence: number; revision: number; heartbeat_at: string | null; stopped_at: string | null; stop_reason: string | null; created_at: string
+  phase: 'starting' | 'working' | 'yielded' | 'stopping' | 'stopped'; activity: 'unknown' | 'busy' | 'idle' | 'throttled'
+  run_status?: string | null; needs_attention?: boolean; has_problem?: boolean; activity_sequence: number; revision: number; heartbeat_at: string | null; stopped_at: string | null; stop_reason: string | null; created_at: string
   // The tenant-wide list adds node summaries (B7) and the agent principal's name (U13).
   project?: NodeSummary; ticket?: NodeSummary | null; agent?: { id: string; name: string } | null
 }
@@ -87,7 +87,7 @@ const query = (params: Record<string, string | number | boolean | undefined>) =>
 export const listAllSessions = (params: { ticket?: string; agent?: string; project?: string; state?: string; cursor?: string; limit?: number } = {}) =>
   request<Paged<HarnessSession>>(`/harness-sessions${query({ limit: 200, ...params })}`)
 // Agents working right now in every visible project, in one read (AEON-184).
-export const getLiveAgents = () => request<LivePage>('/harness-sessions/live')
+export const getLiveAgents = () => request<LivePage>('/harness-sessions/live?include_inactive=true')
 export const listRuns = (params: { session?: string; agent?: string; work_order?: string; cursor?: string; limit?: number } = {}) =>
   request<Paged<AgentRun>>(`/runs${query({ limit: 50, ...params })}`)
 export const requestControl = (projectId: string, sessionId: string, kind: SessionControl['kind']) => request<SessionControl>(`${sessionPath(projectId, sessionId)}/controls/${kind}`, 'POST', {})

@@ -1890,7 +1890,7 @@ paths:
               required: [phase, activity_sequence]
               properties:
                 phase: {type: string, enum: [starting, working, yielded, stopping]}
-                activity: {type: string, enum: [unknown, busy, idle]}
+                activity: {type: string, enum: [unknown, busy, idle, throttled]}
                 activity_sequence: {type: integer, format: int64, minimum: 0}
                 activity_note: {type: string, minLength: 1, maxLength: 120, description: Plain text; whitespace trimmed and control characters stripped.}
                 model: {$ref: '#/components/schemas/HarnessModel'}
@@ -1935,6 +1935,11 @@ paths:
   /harness-sessions/live:
     get:
       operationId: listLiveAgents
+      parameters:
+        - name: include_inactive
+          in: query
+          schema: {type: boolean, default: false}
+          description: SC1 state view includes all unfinished sessions and stops from the last 24 hours (up to 500). Heartbeat age is interpreted using viewer thresholds; false retains the existing freshness filter.
       summary: Agents actively working right now, per visible project (AEON-184)
       description: >-
         One compact read for the Projects page. A session is live while it is not stopped, its heartbeat is at most
@@ -1945,7 +1950,8 @@ paths:
         (as approval agent names, AEON-171); session_id only with harness.read in the workspace. Needs nodes.read in
         the workspace or any project binding; an agent key also needs harness.read. One answer holds at most 500
         sessions, freshest heartbeat first; truncated says more were live. activity_note and activity_note_id are returned only where
-        the caller holds harness.read at the project.
+        the caller holds harness.read at the project. With include_inactive=true, heartbeat_at may be null.
+        State evidence includes pending requests/replies, run outcome, and error stops; no request contents are exposed.
       responses:
         '200':
           description: Live agents, freshest heartbeat first
@@ -4910,8 +4916,12 @@ components:
         worker_lease: {type: string, minLength: 32, maxLength: 256, writeOnly: true}
     HarnessSession:
       type: object
+      description: State evidence is populated on reads and omitted when unknown in mutation responses and event snapshots.
       required: [id, project_id, agent_principal_id, harness, host, management_mode, role, work_shape, advertised_capabilities, phase, activity, activity_sequence, revision, created_at]
       properties:
+        run_status: {type: [string, 'null'], description: Status of the bound run when visible to the caller.}
+        needs_attention: {type: boolean, description: "Waiting run, visible pending approval for this project or workspace, or unresolved action/reply request; content-free evidence. Omitted when not loaded."}
+        has_problem: {type: boolean, description: "Bound run failed or lost ownership, or the stop reason reports an error or block. Normal stops are false. Omitted when not loaded."}
         id: {type: string, format: uuid}
         project_id: {type: string, format: uuid}
         agent_principal_id: {type: string, format: uuid}
@@ -4937,7 +4947,7 @@ components:
         work_shape: {type: string, enum: [unknown, ship, scout]}
         advertised_capabilities: {type: array, items: {type: string}}
         phase: {type: string, enum: [starting, working, yielded, stopping, stopped]}
-        activity: {type: string, enum: [unknown, busy, idle]}
+        activity: {type: string, enum: [unknown, busy, idle, throttled]}
         activity_sequence: {type: integer, format: int64}
         revision: {type: integer, format: int64}
         heartbeat_at: {type: [string, 'null'], format: date-time}
@@ -4985,6 +4995,11 @@ components:
       type: object
       required: [project_id, harness, management_mode, role, phase, activity, ticket, since, heartbeat_at]
       properties:
+        run_status: {type: [string, 'null'], description: Status of the bound run when visible to the caller.}
+        needs_attention: {type: boolean, description: "Waiting run, visible pending approval for this project or workspace, or unresolved action/reply request; content-free evidence."}
+        has_problem: {type: boolean, description: Bound run failed or lost ownership, or the stop reason reports an error or block. Normal stops are false.}
+        stopped_at: {type: [string, 'null'], format: date-time}
+        stop_reason: {type: [string, 'null'], description: Present only with harness.read at the project.}
         project_id: {type: string, format: uuid}
         session_id: {type: string, format: uuid, description: Present only with harness.read in the workspace}
         principal_id: {type: string, format: uuid, description: Present only with members.read or harness.read at the project}
@@ -4992,12 +5007,12 @@ components:
         harness: {type: string, enum: [codex, claude, pi, cursor, grok]}
         management_mode: {type: string, enum: [managed, unmanaged]}
         role: {type: string, enum: [worker, coordinator]}
-        phase: {type: string, enum: [starting, working, stopping]}
+        phase: {type: string, enum: [starting, working, stopping, yielded, stopped]}
+        activity: {type: string, enum: [busy, unknown, idle, throttled]}
         model: {$ref: '#/components/schemas/HarnessModel'}
         reasoning_effort: {$ref: '#/components/schemas/HarnessEffort'}
         account_label: {$ref: '#/components/schemas/HarnessAccountLabel'}
         harness_version: {$ref: '#/components/schemas/HarnessVersion'}
-        activity: {type: string, enum: [busy, unknown]}
         activity_note: {type: [string, 'null'], maxLength: 120, description: Current step, present only with harness.read at the project}
         activity_note_id: {type: integer, format: int64, description: Latest activity entry ID; present with the current step only where harness.read is granted.}
         ticket:
@@ -5011,7 +5026,7 @@ components:
                     project_id: {type: string, format: uuid}
             - {type: 'null'}
         since: {type: string, format: date-time, description: When the session started}
-        heartbeat_at: {type: string, format: date-time}
+        heartbeat_at: {type: [string, 'null'], format: date-time}
     ProjectMessage:
       allOf:
         - {$ref: './openapi-messaging.yaml#/components/schemas/Message'}
