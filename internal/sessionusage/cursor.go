@@ -30,7 +30,7 @@ func classifyCursor(fields map[string]json.RawMessage) (usageRecord, int, error)
 		return usageRecord{}, outcomeIgnore, nil
 	}
 	if _, ok := fields["usage"]; !ok {
-		return usageRecord{}, outcomeIgnore, nil
+		return usageRecord{}, outcomeIgnore, fmt.Errorf("%w: terminal result has no usage", ErrRejected)
 	}
 	rec, err := cursorResult(fields)
 	return rec, outcomeUse, err
@@ -55,7 +55,23 @@ func cursorResult(fields map[string]json.RawMessage) (usageRecord, error) {
 	if err != nil {
 		return usageRecord{}, err
 	}
-	return usageRecord{accounting: accountingDelta, model: model, delta: &snap}, nil
+	id := ""
+	if raw, ok := fields["request_id"]; ok {
+		id, err = parseString(raw)
+		if err != nil || !validSourceID(id) {
+			return usageRecord{}, fmt.Errorf("%w: invalid request identity", ErrRejected)
+		}
+	}
+	if raw, ok := fields["is_error"]; ok && string(raw) != "false" {
+		return usageRecord{}, fmt.Errorf("%w: unsuccessful Cursor result", ErrRejected)
+	}
+	if raw, ok := fields["subtype"]; ok {
+		s, err := parseString(raw)
+		if err != nil || s != "success" {
+			return usageRecord{}, fmt.Errorf("%w: unsuccessful Cursor result", ErrRejected)
+		}
+	}
+	return usageRecord{accounting: accountingDelta, model: model, id: id, delta: &snap}, nil
 }
 
 func cursorUpdate(fields map[string]json.RawMessage) (usageRecord, int, error) {
@@ -85,73 +101,66 @@ func cursorUpdate(fields map[string]json.RawMessage) (usageRecord, int, error) {
 	return usageRecord{}, outcomeSkip, nil
 }
 
+// Cursor's result usage covers the whole turn. inputTokens excludes both
+// cache categories; US1 input includes them. Cache writes are ordinary input,
+// not cache reads. Source: Cursor staff clarification, 2026-06-30:
+// https://forum.cursor.com/t/discrepancies-between-cursor-cli-usage-and-billing/164471/7
 func parseCursorUsage(fields map[string]json.RawMessage) (snapshot, error) {
-	_, camelIn := fields["inputTokens"]
-	_, snakeIn := fields["input_tokens"]
-	if camelIn && snakeIn {
-		return snapshot{}, fmt.Errorf("%w: mixed token field spellings", ErrAmbiguous)
-	}
-	if camelIn {
-		return parseCursorPair(fields, "inputTokens", "outputTokens", "cacheReadTokens", "cacheWriteTokens", "totalTokens")
-	}
-	if snakeIn {
-		return parseCursorPair(fields, "input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens", "total_tokens")
-	}
-	return snapshot{}, fmt.Errorf("%w: Cursor usage has no input tokens", ErrMalformed)
-}
-
-func parseCursorPair(fields map[string]json.RawMessage, inputKey, outputKey, readKey, writeKey, totalKey string) (snapshot, error) {
 	for key := range fields {
 		switch key {
-		case inputKey, outputKey, readKey, writeKey, totalKey, "model", "modelId", "model_id":
+		case "inputTokens", "outputTokens", "cacheReadTokens", "cacheWriteTokens", "totalTokens", "reasoningTokens", "model", "modelId", "model_id":
 		default:
-			return snapshot{}, fmt.Errorf("%w: unknown counter field %q", ErrAmbiguous, key)
+			return snapshot{}, fmt.Errorf("%w: unsupported Cursor usage field", ErrAmbiguous)
 		}
 	}
-	inputRaw, ok := fields[inputKey]
-	outputRaw, okOut := fields[outputKey]
-	if !ok || !okOut {
-		return snapshot{}, fmt.Errorf("%w: input and output tokens are required", ErrMalformed)
-	}
-	input, err := parseCount(inputRaw)
+	input, err := parseCount(fields["inputTokens"])
 	if err != nil {
 		return snapshot{}, err
 	}
-	output, err := parseCount(outputRaw)
+	output, err := parseCount(fields["outputTokens"])
 	if err != nil {
 		return snapshot{}, err
 	}
-	_, hasRead := fields[readKey]
-	_, hasWrite := fields[writeKey]
-	snap := snapshot{input: input, output: output}
-	switch {
-	case hasRead && hasWrite:
-		read, err := parseCount(fields[readKey])
+	snap := snapshot{output: output}
+	readRaw, hasRead := fields["cacheReadTokens"]
+	writeRaw, hasWrite := fields["cacheWriteTokens"]
+	var read, write int64
+	if hasRead {
+		read, err = parseCount(readRaw)
 		if err != nil {
 			return snapshot{}, err
 		}
-		write, err := parseCount(fields[writeKey])
-		if err != nil {
-			return snapshot{}, err
-		}
-		if read > maxToken-write {
-			return snapshot{}, fmt.Errorf("%w: cached tokens overflow", ErrRejected)
-		}
-		cached := read + write
-		if cached > input {
-			return snapshot{}, fmt.Errorf("%w: cached tokens exceed input", ErrRejected)
-		}
-		snap.cached, snap.cachedKnown = cached, true
-	case hasRead || hasWrite:
-		return snapshot{}, fmt.Errorf("%w: partial Cursor cache pair", ErrAmbiguous)
+		snap.cached, snap.cachedKnown = read, true
 	}
-	if raw, ok := fields[totalKey]; ok {
+	if hasWrite {
+		write, err = parseCount(writeRaw)
+		if err != nil {
+			return snapshot{}, err
+		}
+	}
+	if input > maxToken-read || input+read > maxToken-write {
+		return snapshot{}, fmt.Errorf("%w: inclusive input overflow", ErrRejected)
+	}
+	snap.input = input + read + write // known subtotal, even when full input is unknown
+	snap.inputKnown = hasRead && hasWrite
+	if raw, ok := fields["totalTokens"]; ok {
 		total, err := parseCount(raw)
 		if err != nil {
 			return snapshot{}, err
 		}
-		if total != input+output {
-			return snapshot{}, fmt.Errorf("%w: total_tokens is not input plus output", ErrAmbiguous)
+		// totalTokens cannot recover a missing category: that would hide an
+		// unsupported or changed vendor accounting convention.
+		if snap.inputKnown && total != snap.input+output {
+			return snapshot{}, fmt.Errorf("%w: total tokens mismatch", ErrAmbiguous)
+		}
+	}
+	if raw, ok := fields["reasoningTokens"]; ok {
+		n, err := parseCount(raw)
+		if err != nil {
+			return snapshot{}, err
+		}
+		if n > output {
+			return snapshot{}, fmt.Errorf("%w: reasoning exceeds output", ErrRejected)
 		}
 	}
 	return snap, nil

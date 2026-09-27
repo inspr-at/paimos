@@ -48,11 +48,11 @@ func decodeObject(raw json.RawMessage, allowed map[string]struct{}) (map[string]
 			return nil, fmt.Errorf("%w: invalid object key", ErrMalformed)
 		}
 		if _, dup := fields[key]; dup {
-			return nil, fmt.Errorf("%w: duplicate key %q", ErrAmbiguous, key)
+			return nil, fmt.Errorf("%w: duplicate key", ErrAmbiguous)
 		}
 		if allowed != nil {
 			if _, ok := allowed[key]; !ok {
-				return nil, fmt.Errorf("%w: unknown counter field %q", ErrAmbiguous, key)
+				return nil, fmt.Errorf("%w: unknown counter field", ErrAmbiguous)
 			}
 		}
 		var value json.RawMessage

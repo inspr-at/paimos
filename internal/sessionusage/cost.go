@@ -3,7 +3,6 @@
 package sessionusage
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 )
@@ -43,22 +42,23 @@ func validateCostObject(raw json.RawMessage) error {
 	return nil
 }
 
-func hasUsageSignal(fields map[string]json.RawMessage) bool {
-	return signalWalk(fields, 0)
-}
-
-func signalWalk(fields map[string]json.RawMessage, depth int) bool {
-	for key, raw := range fields {
+// Inspect only known metadata containers, never arbitrary prompt/tool content.
+func hasUsageSignal(fields map[string]json.RawMessage) bool { return signalAt(fields, 0) }
+func signalAt(fields map[string]json.RawMessage, depth int) bool {
+	for key := range fields {
 		if usageSignal[key] {
 			return true
 		}
-		raw = bytes.TrimSpace(raw)
-		if depth >= 3 || len(raw) == 0 || raw[0] != '{' {
-			continue
-		}
-		nested, err := decodeObject(raw, nil)
-		if err != nil || signalWalk(nested, depth+1) {
-			return true
+	}
+	if depth == 4 {
+		return false
+	}
+	for _, key := range []string{"params", "payload", "info", "update"} {
+		if raw, ok := fields[key]; ok {
+			nested, err := decodeObject(raw, nil)
+			if err != nil || signalAt(nested, depth+1) {
+				return true
+			}
 		}
 	}
 	return false

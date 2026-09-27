@@ -3,179 +3,136 @@
 package sessionusage
 
 import (
-	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
-	"time"
 )
 
-const submitTimeout = 30 * time.Second
-
-// Run parses usage records from in and writes the normalized document to out.
-// When --submit is set, that absolute command receives each report on stdin.
+// Run reads only stdin and an optional explicit local checkpoint. It performs no
+// submissions and launches no processes. Save the complete result before POSTing
+// individual reports; retry those exact report bodies after an uncertain result.
 func Run(args []string, in io.Reader, out, errOut io.Writer) error {
-	opt, submit, submitArgs, priorPath, err := parseArgs(args)
+	opt, path, err := parseArgs(args)
 	if err != nil {
 		return err
 	}
-	if priorPath != "" {
-		priors, err := readPriors(priorPath)
+	if path != "" {
+		opt.Previous, err = readCheckpoint(path)
 		if err != nil {
 			return err
 		}
-		opt.Priors = priors
 	}
-	raw, err := io.ReadAll(io.LimitReader(in, maxInput+1))
+	result, err := Parse(in, opt)
 	if err != nil {
 		return err
-	}
-	if len(raw) > maxInput {
-		return fmt.Errorf("%w: input exceeds %d bytes", ErrMalformed, maxInput)
-	}
-	result, err := Parse(bytes.NewReader(raw), opt)
-	if err != nil {
-		return err
-	}
-	if submit != "" {
-		if err := submitReports(submit, submitArgs, result.Reports, errOut); err != nil {
-			return err
-		}
 	}
 	enc := json.NewEncoder(out)
-	enc.SetEscapeHTML(false)
 	enc.SetIndent("", "  ")
-	return enc.Encode(result)
-}
-
-func parseArgs(args []string) (Options, string, []string, string, error) {
-	var opt Options
-	var submit string
-	var submitArgs []string
-	var prior string
-	for i := 0; i < len(args); i++ {
-		take := func(name string) (string, error) {
-			if i+1 >= len(args) || args[i+1] == "" {
-				return "", &UsageError{Msg: name + " requires a value"}
-			}
-			i++
-			if len(args[i]) > 1024 || strings.ContainsAny(args[i], "\r\n") {
-				return "", &UsageError{Msg: name + " is invalid"}
-			}
-			return args[i], nil
-		}
-		switch args[i] {
-		case "--help", "-h":
-			return Options{}, "", nil, "", &UsageError{Msg: "session-usage-parse --source codex|cursor [--model ID] [--billing-mode unknown|api|subscription] [--subscription-label TEXT] [--account-id UUID] [--account-label TEXT] [--prior-file PATH] [--submit ABS] [--submit-arg ARG]"}
-		case "--source":
-			v, err := take("--source")
-			if err != nil {
-				return Options{}, "", nil, "", err
-			}
-			opt.Source = v
-		case "--model":
-			v, err := take("--model")
-			if err != nil {
-				return Options{}, "", nil, "", err
-			}
-			opt.Model = v
-		case "--billing-mode":
-			v, err := take("--billing-mode")
-			if err != nil {
-				return Options{}, "", nil, "", err
-			}
-			opt.BillingMode = v
-		case "--subscription-label":
-			v, err := take("--subscription-label")
-			if err != nil {
-				return Options{}, "", nil, "", err
-			}
-			opt.SubscriptionLabel = v
-		case "--account-id":
-			v, err := take("--account-id")
-			if err != nil {
-				return Options{}, "", nil, "", err
-			}
-			opt.AccountID = v
-		case "--account-label":
-			v, err := take("--account-label")
-			if err != nil {
-				return Options{}, "", nil, "", err
-			}
-			opt.AccountLabel = v
-		case "--prior-file":
-			v, err := take("--prior-file")
-			if err != nil {
-				return Options{}, "", nil, "", err
-			}
-			prior = v
-		case "--submit":
-			v, err := take("--submit")
-			if err != nil {
-				return Options{}, "", nil, "", err
-			}
-			submit = v
-		case "--submit-arg":
-			v, err := take("--submit-arg")
-			if err != nil {
-				return Options{}, "", nil, "", err
-			}
-			if len(submitArgs) == 8 {
-				return Options{}, "", nil, "", &UsageError{Msg: "too many --submit-arg values"}
-			}
-			submitArgs = append(submitArgs, v)
-		default:
-			return Options{}, "", nil, "", &UsageError{Msg: "unknown argument " + args[i]}
-		}
-	}
-	if opt.Source != "codex" && opt.Source != "cursor" {
-		return Options{}, "", nil, "", &UsageError{Msg: "--source must be codex or cursor"}
-	}
-	if submit != "" {
-		if !filepath.IsAbs(submit) {
-			return Options{}, "", nil, "", &UsageError{Msg: "--submit must be an absolute path"}
-		}
-		info, err := os.Stat(submit)
-		if err != nil || !info.Mode().IsRegular() {
-			return Options{}, "", nil, "", &UsageError{Msg: "--submit must be a regular file"}
-		}
-	}
-	return opt, submit, submitArgs, prior, nil
-}
-
-func readPriors(path string) ([]Prior, error) {
-	info, err := os.Lstat(path)
-	if err != nil || !info.Mode().IsRegular() || info.Size() > 64*1024 {
-		return nil, &UsageError{Msg: "--prior-file must be a regular file of at most 64KiB"}
-	}
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	return ParsePriors(raw)
-}
-
-func submitReports(path string, args []string, reports []UsageReport, errOut io.Writer) error {
-	for _, report := range reports {
-		body, err := json.Marshal(report)
-		if err != nil {
-			return err
-		}
-		ctx, cancel := context.WithTimeout(context.Background(), submitTimeout)
-		cmd := exec.CommandContext(ctx, path, args...)
-		cmd.Stdin = bytes.NewReader(body)
-		cmd.Stdout = errOut
-		cmd.Stderr = errOut
-		err = cmd.Run()
-		cancel()
-		if err != nil {
-			return fmt.Errorf("submit usage report: %w", err)
-		}
+	if err := enc.Encode(result); err != nil {
+		return fmt.Errorf("write normalized usage failed")
 	}
 	return nil
+}
+
+const help = "session-usage-parse --source codex|cursor --session-id UUID --source-session-id ID (--from-start | --checkpoint-file PATH) [--model ID] [--final] [--billing-mode unknown|api|subscription] [--subscription-label TEXT] [--account-id UUID] [--account-label TEXT]; stdin is a complete metadata-only capture from session start; deltas require stable record identities"
+
+func parseArgs(args []string) (Options, string, error) {
+	var opt Options
+	var path string
+	seen := map[string]bool{}
+	for i := 0; i < len(args); i++ {
+		flag := args[i]
+		if seen[flag] {
+			return opt, "", &UsageError{Msg: "duplicate argument"}
+		}
+		seen[flag] = true
+		switch flag {
+		case "--help", "-h":
+			return opt, "", &UsageError{Msg: help}
+		case "--from-start":
+			opt.FromStart = true
+			continue
+		case "--final":
+			opt.Final = true
+			continue
+		}
+		var dest *string
+		switch flag {
+		case "--source":
+			dest = &opt.Source
+		case "--session-id":
+			dest = &opt.SessionID
+		case "--source-session-id":
+			dest = &opt.SourceSessionID
+		case "--model":
+			dest = &opt.Model
+		case "--billing-mode":
+			dest = &opt.BillingMode
+		case "--subscription-label":
+			dest = &opt.SubscriptionLabel
+		case "--account-id":
+			dest = &opt.AccountID
+		case "--account-label":
+			dest = &opt.AccountLabel
+		case "--checkpoint-file":
+			dest = &path
+		default:
+			return opt, "", &UsageError{Msg: "unsupported argument"}
+		}
+		i++
+		if i >= len(args) || args[i] == "" || len(args[i]) > 1024 || strings.ContainsAny(args[i], "\r\n\x00") {
+			return opt, "", &UsageError{Msg: "argument requires a valid value"}
+		}
+		*dest = args[i]
+	}
+	if opt.Source != "codex" && opt.Source != "cursor" {
+		return opt, "", &UsageError{Msg: "--source must be codex or cursor"}
+	}
+	return opt, path, nil
+}
+
+func readCheckpoint(path string) (*Checkpoint, error) {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return nil, &UsageError{Msg: "checkpoint path invalid"}
+	}
+	// No vendor/auth stores, encrypted files, symlink components or special files.
+	for p := abs; ; p = filepath.Dir(p) {
+		name := strings.ToLower(filepath.Base(p))
+		if strings.HasPrefix(name, ".env") || strings.HasPrefix(name, "id_") {
+			return nil, &UsageError{Msg: "checkpoint path forbidden"}
+		}
+		for _, suffix := range []string{".env", ".key", ".age", ".gpg"} {
+			if strings.HasSuffix(name, suffix) {
+				return nil, &UsageError{Msg: "checkpoint path forbidden"}
+			}
+		}
+		switch name {
+		case ".ssh", ".inspr", ".codex", ".cursor", ".aws", ".gnupg", "secrets", "credentials", "auth.json":
+			return nil, &UsageError{Msg: "checkpoint path forbidden"}
+		}
+		info, err := os.Lstat(p)
+		if err != nil || info.Mode()&os.ModeSymlink != 0 {
+			return nil, &UsageError{Msg: "checkpoint path unavailable or symlink"}
+		}
+		if p == abs && (!info.Mode().IsRegular() || info.Size() > 1024) {
+			return nil, &UsageError{Msg: "checkpoint must be a regular file of at most 1KiB"}
+		}
+		if filepath.Dir(p) == p {
+			break
+		}
+	}
+	f, err := os.Open(abs)
+	if err != nil {
+		return nil, &UsageError{Msg: "checkpoint unreadable"}
+	}
+	defer f.Close()
+	raw, err := io.ReadAll(io.LimitReader(f, 1025))
+	if err != nil {
+		return nil, &UsageError{Msg: "checkpoint unreadable"}
+	}
+	return ParseCheckpoint(raw)
 }

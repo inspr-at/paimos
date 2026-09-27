@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 // Command session-usage-parse normalizes Codex or Cursor usage records.
-// It does not call a model CLI. --submit runs an absolute command, once per
-// report, with the US1 usage body on stdin.
+// It reads stdin and an optional local checkpoint; no CLI or network calls.
+// Persist stdout before posting its reports through the coordinator transport.
 package main
 
 import (

@@ -12,69 +12,67 @@ import (
 	"testing"
 )
 
-func TestRunSubmitsOneReport(t *testing.T) {
-	dir := t.TempDir()
-	dest := filepath.Join(dir, "body.json")
-	var stdout, stderr bytes.Buffer
-	err := Run([]string{
-		"--source", "cursor", "--model", "composer-2.5",
-		"--submit", "/usr/bin/tee", "--submit-arg", dest,
-	}, strings.NewReader(`{"type":"result","usage":{"inputTokens":4,"outputTokens":1,"cacheReadTokens":1,"cacheWriteTokens":0}}`), &stdout, &stderr)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var doc Result
-	if err := json.Unmarshal(stdout.Bytes(), &doc); err != nil {
-		t.Fatal(err)
-	}
-	if len(doc.Reports) != 1 || doc.Reports[0].Model != "composer-2.5" || *doc.Reports[0].InputTokens != 4 {
-		t.Fatalf("stdout: %s", stdout.String())
-	}
-	if !uuidRE.MatchString(doc.Reports[0].ReportID) {
-		t.Fatalf("report id: %s", doc.Reports[0].ReportID)
-	}
-	submitted, err := os.ReadFile(dest)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var posted UsageReport
-	if err := json.Unmarshal(submitted, &posted); err != nil {
-		t.Fatal(err)
-	}
-	if posted.ReportID != doc.Reports[0].ReportID || *posted.CachedInputTokens != 1 {
-		t.Fatalf("submitted: %s", submitted)
-	}
+func cliArgs() []string {
+	return []string{"--source", "codex", "--model", "gpt-6-luna", "--session-id", testSession, "--source-session-id", "thread-1", "--from-start"}
 }
-
-func TestRunPriorFile(t *testing.T) {
-	dir := t.TempDir()
-	prior := filepath.Join(dir, "prior.json")
-	body := `[{"model":"gpt-6-luna","sequence":2,"input_tokens":10,"output_tokens":1,"cached_input_tokens":0}]`
-	if err := os.WriteFile(prior, []byte(body), 0o644); err != nil {
-		t.Fatal(err)
+func TestRunRetryAndCheckpoint(t *testing.T) {
+	body := wrapDeltas(`{"type":"turn.completed","usage":{"input_tokens":3,"cached_input_tokens":1,"output_tokens":1}}`)
+	var first, retry, stderr bytes.Buffer
+	for _, out := range []*bytes.Buffer{&first, &retry} {
+		if err := Run(cliArgs(), strings.NewReader(body), out, &stderr); err != nil {
+			t.Fatal(err)
+		}
 	}
-	var stdout, stderr bytes.Buffer
-	err := Run([]string{"--source", "codex", "--prior-file", prior}, strings.NewReader(`{"type":"turn.completed","usage":{"input_tokens":3,"cached_input_tokens":1,"output_tokens":1}}`), &stdout, &stderr)
-	if err != nil {
-		t.Fatal(err)
+	if first.String() != retry.String() || stderr.Len() != 0 {
+		t.Fatal("retry changed output")
 	}
 	var doc Result
-	if err := json.Unmarshal(stdout.Bytes(), &doc); err != nil {
+	if err := json.Unmarshal(first.Bytes(), &doc); err != nil {
 		t.Fatal(err)
 	}
-	if doc.Reports[0].Sequence != 3 || *doc.Reports[0].InputTokens != 13 || *doc.Reports[0].CachedInputTokens != 1 {
+	if !doc.Reports[0].Provisional || !uuidRE.MatchString(doc.Reports[0].ReportID) {
 		t.Fatalf("report: %+v", doc.Reports[0])
 	}
-}
-
-func TestRunUsageError(t *testing.T) {
-	err := Run(nil, strings.NewReader(""), ioDiscard{}, ioDiscard{})
-	var usage *UsageError
-	if !errors.As(err, &usage) {
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
 		t.Fatal(err)
 	}
+	checkpoint := filepath.Join(dir, "checkpoint.json")
+	b, _ := json.Marshal(doc.Checkpoint)
+	if err := os.WriteFile(checkpoint, b, 0600); err != nil {
+		t.Fatal(err)
+	}
+	var resumed bytes.Buffer
+	if err := Run(append(cliArgs(), "--checkpoint-file", checkpoint), strings.NewReader(body), &resumed, &stderr); err != nil {
+		t.Fatal(err)
+	}
+	if first.String() != resumed.String() {
+		t.Fatal("checkpoint retry changed output")
+	}
 }
-
-type ioDiscard struct{}
-
-func (ioDiscard) Write(p []byte) (int, error) { return len(p), nil }
+func TestRunRejectsRemovedUnsafeModesAndBadArgs(t *testing.T) {
+	for _, args := range [][]string{nil, {"--submit", "/usr/bin/true"}, {"--prior-file", "MUST_NOT_LEAK"}, {"MUST_NOT_LEAK"}, append(cliArgs(), "--source", "codex")} {
+		var out, errOut bytes.Buffer
+		err := Run(args, strings.NewReader(""), &out, &errOut)
+		var usage *UsageError
+		if !errors.As(err, &usage) || strings.Contains(err.Error(), "MUST_NOT_LEAK") || out.Len() != 0 || errOut.Len() != 0 {
+			t.Fatalf("error: %v", err)
+		}
+	}
+}
+func TestCheckpointPathSafetyAndSchema(t *testing.T) {
+	dir := t.TempDir()
+	good := filepath.Join(dir, "checkpoint.json")
+	if err := os.WriteFile(good, []byte(`{}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "link.json")
+	if err := os.Symlink(good, link); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{link, dir, filepath.Join(dir, ".env"), filepath.Join(dir, ".codex", "checkpoint.json"), good} {
+		if _, err := readCheckpoint(path); err == nil {
+			t.Fatalf("accepted %s", path)
+		}
+	}
+}

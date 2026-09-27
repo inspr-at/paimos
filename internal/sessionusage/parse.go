@@ -3,60 +3,63 @@
 package sessionusage
 
 import (
-	"bufio"
 	"bytes"
-	"crypto/rand"
+	"crypto/sha256"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"regexp"
 	"slices"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 )
 
 var uuidRE = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 
-// Parse reads Codex or Cursor usage JSONL and returns cumulative reports.
-// Non-usage lines are ignored. Prompt and tool text is not retained.
+// Parse consumes a bounded, offline metadata capture, never opens a vendor file
+// or executes a process. Deltas need a durable capture envelope {record_id: UUID,
+// event: vendorRecord}, or Cursor's native request_id. Full prefixes are replayed
+// from zero; previously reported totals are never added a second time.
 func Parse(r io.Reader, opt Options) (Result, error) {
-	norm, err := normalizeOptions(opt)
+	opt, err := normalizeOptions(opt)
 	if err != nil {
 		return Result{}, err
 	}
-	p := &parser{model: norm.Model, models: map[string]*modelState{}, opt: norm}
-	for _, prior := range norm.Priors {
-		if _, ok := p.models[prior.Model]; ok {
-			return Result{}, fmt.Errorf("%w: duplicate prior model", ErrAmbiguous)
-		}
-		p.models[prior.Model] = stateFromPrior(prior)
+	raw, err := io.ReadAll(io.LimitReader(r, maxInput+1))
+	if err != nil {
+		return Result{}, fmt.Errorf("%w: capture read failed", ErrMalformed)
 	}
-	br := bufio.NewReaderSize(r, 4096)
-	read, usage := 0, 0
-	for {
-		line, err := readLine(br)
-		if errors.Is(err, io.EOF) {
-			break
-		}
-		if err != nil {
-			return Result{}, err
-		}
-		read += len(line) + 1
-		if read > maxInput {
-			return Result{}, fmt.Errorf("%w: input exceeds %d bytes", ErrMalformed, maxInput)
+	if len(raw) > maxInput {
+		return Result{}, fmt.Errorf("%w: capture too large", ErrMalformed)
+	}
+	binding := captureBinding(opt)
+	if err := checkPrefix(raw, opt, binding); err != nil {
+		return Result{}, err
+	}
+	p := &parser{models: map[string]*modelState{}, seen: map[string]usageRecord{}, opt: opt}
+	for _, line := range bytes.Split(raw, []byte{'\n'}) {
+		if len(line) > maxLine {
+			return Result{}, fmt.Errorf("%w: record too large", ErrMalformed)
 		}
 		if len(bytes.TrimSpace(line)) == 0 {
 			continue
 		}
 		if bytes.IndexByte(line, 0) >= 0 || !utf8.Valid(line) {
-			return Result{}, fmt.Errorf("%w: usage record is not UTF-8 text", ErrMalformed)
+			return Result{}, fmt.Errorf("%w: invalid text", ErrMalformed)
 		}
 		fields, err := decodeLine(line)
 		if err != nil {
 			return Result{}, err
 		}
-		rec, outcome, err := classify(norm.Source, fields)
+		fields, id, err := unwrapRecord(fields)
+		if err != nil {
+			return Result{}, err
+		}
+		if err := checkSourceIdentity(fields, opt); err != nil {
+			return Result{}, err
+		}
+		rec, outcome, err := classify(opt.Source, fields)
 		if err != nil {
 			return Result{}, err
 		}
@@ -67,458 +70,256 @@ func Parse(r io.Reader, opt Options) (Result, error) {
 				return Result{}, fmt.Errorf("%w: unrecognized usage record", ErrAmbiguous)
 			}
 		case outcomeUse:
-			usage++
-			if usage > maxUsage {
-				return Result{}, fmt.Errorf("%w: too many usage records", ErrRejected)
+			if id != "" {
+				if rec.id != "" {
+					return Result{}, fmt.Errorf("%w: competing record identities", ErrAmbiguous)
+				}
+				rec.id = id
 			}
 			if err := p.add(rec); err != nil {
 				return Result{}, err
 			}
 		default:
-			return Result{}, fmt.Errorf("%w: unrecognized usage record", ErrAmbiguous)
+			return Result{}, ErrAmbiguous
 		}
 	}
-	return p.result()
+	out := p.result()
+	out.Checkpoint = Checkpoint{Binding: binding, Bytes: len(raw), Digest: digest(raw), Final: opt.Final}
+	// Recompute the accepted prefix to enforce US1's known-counter monotonicity
+	// and final immutability. Checkpoints are not arbitrary token baselines.
+	if prev := opt.Previous; prev != nil {
+		priorOpt := opt
+		priorOpt.Previous, priorOpt.FromStart, priorOpt.Final = nil, true, prev.Final
+		before, err := Parse(bytes.NewReader(raw[:prev.Bytes]), priorOpt)
+		if err != nil {
+			return Result{}, err
+		}
+		if err := checkReports(before.Reports, out.Reports); err != nil {
+			return Result{}, err
+		}
+	}
+	return out, nil
 }
 
 func classify(source string, fields map[string]json.RawMessage) (usageRecord, int, error) {
-	switch source {
-	case "codex":
-		return classifyCodex(fields)
-	case "cursor":
-		return classifyCursor(fields)
-	default:
-		return usageRecord{}, outcomeIgnore, fmt.Errorf("%w: source must be codex or cursor", ErrRejected)
+	if fields["method"] != nil && fields["type"] != nil {
+		return usageRecord{}, outcomeIgnore, fmt.Errorf("%w: competing record formats", ErrAmbiguous)
 	}
+	if source == "codex" {
+		return classifyCodex(fields)
+	}
+	return classifyCursor(fields)
 }
 
 type parser struct {
-	model      string
 	accounting string
 	models     map[string]*modelState
+	seen       map[string]usageRecord
+	count      int64
 	opt        Options
 }
-
 type modelState struct {
-	sequence   int64
-	seen       bool
 	accounting string
 	input      counter
 	output     counter
 	cached     counter
 }
 
-func stateFromPrior(prior Prior) *modelState {
-	return &modelState{
-		sequence: prior.Sequence,
-		input:    counterFrom(prior.InputTokens, prior.Sequence > 0),
-		output:   counterFrom(prior.OutputTokens, prior.Sequence > 0),
-		cached:   counterFrom(prior.CachedInputTokens, prior.Sequence > 0),
-	}
-}
-
-func counterFrom(value *int64, marked bool) counter {
-	if value != nil {
-		return counter{set: true, known: true, value: *value}
-	}
-	if marked {
-		return counter{set: true, known: false}
-	}
-	return counter{}
-}
-
 func (p *parser) add(rec usageRecord) error {
-	if p.accounting == "" {
-		p.accounting = rec.accounting
-	} else if p.accounting != rec.accounting {
+	if p.accounting != "" && p.accounting != rec.accounting {
 		return fmt.Errorf("%w: mixed cumulative and delta usage", ErrAmbiguous)
 	}
-	model := rec.model
-	if model == "" {
-		model = p.model
-	} else if p.model != "" && model != p.model {
-		return fmt.Errorf("%w: model does not match reporter model", ErrAmbiguous)
+	p.accounting = rec.accounting
+	if rec.model == "" {
+		rec.model = p.opt.Model
 	}
-	if model == "" && len(p.models) == 1 {
-		for name := range p.models {
-			model = name
+	if rec.model == "" {
+		return fmt.Errorf("%w: model unknown; explicit model binding required", ErrRejected)
+	}
+	if p.opt.Model != "" && rec.model != p.opt.Model {
+		return fmt.Errorf("%w: model does not match capture binding", ErrAmbiguous)
+	}
+	if rec.cumulative != nil && p.opt.Model == "" {
+		return fmt.Errorf("%w: thread totals require fixed model binding", ErrAmbiguous)
+	}
+	if rec.cumulative == nil && rec.id == "" {
+		return fmt.Errorf("%w: delta requires durable record identity", ErrAmbiguous)
+	}
+	if rec.id != "" {
+		if old, ok := p.seen[rec.id]; ok {
+			if !sameRecord(old, rec) {
+				return fmt.Errorf("%w: record identity reused with different usage", ErrAmbiguous)
+			}
+			return nil
 		}
+		p.seen[rec.id] = rec
 	}
-	if model == "" {
-		return fmt.Errorf("%w: model unknown", ErrRejected)
+	p.count++
+	if p.count > maxUsage {
+		return fmt.Errorf("%w: too many usage records", ErrRejected)
 	}
-	st := p.models[model]
+	st := p.models[rec.model]
 	if st == nil {
-		st = &modelState{}
-		p.models[model] = st
+		st = &modelState{accounting: rec.accounting}
+		p.models[rec.model] = st
 	}
-	st.seen = true
-	st.accounting = rec.accounting
 	if rec.cumulative != nil {
 		return applyCumulative(st, rec)
 	}
 	if rec.delta == nil {
-		return fmt.Errorf("%w: usage record has no counters", ErrMalformed)
+		return ErrMalformed
 	}
-	return applyDelta(st, *rec.delta)
+	st.input.add(rec.delta.input, rec.delta.inputKnown)
+	st.output.add(rec.delta.output, true)
+	st.cached.add(rec.delta.cached, rec.delta.cachedKnown)
+	for _, c := range []counter{st.input, st.output, st.cached} {
+		if c.value > maxToken {
+			return fmt.Errorf("%w: token overflow", ErrRejected)
+		}
+	}
+	return nil
+}
+
+func sameRecord(a, b usageRecord) bool {
+	return a.model == b.model && a.accounting == b.accounting && sameSnapshot(a.cumulative, b.cumulative) && sameSnapshot(a.delta, b.delta)
+}
+func sameSnapshot(a, b *snapshot) bool {
+	return a == nil && b == nil || a != nil && b != nil && *a == *b
 }
 
 func applyCumulative(st *modelState, rec usageRecord) error {
 	total := *rec.cumulative
-	var last snapshot
-	hasLast := rec.delta != nil
-	if hasLast {
-		last = *rec.delta
+	// 'last' describes the latest vendor call, not necessarily the difference
+	// since a previous notification. Duplicate and coalesced notifications exist.
+	if last := rec.delta; last != nil {
+		if last.input > total.input || last.output > total.output || last.cachedKnown && total.cachedKnown && last.cached > total.cached {
+			return fmt.Errorf("%w: last usage exceeds total", ErrRejected)
+		}
 	}
-	if err := checkStep(st.input, total.input, hasLast, last.input); err != nil {
+	if st.input.known && st.cached.known && total.cachedKnown && total.input-total.cached < st.input.value-st.cached.value {
+		return fmt.Errorf("%w: uncached cumulative usage decreased", ErrRejected)
+	}
+	if err := st.input.replace(total.input, total.inputKnown); err != nil {
 		return err
 	}
-	if err := checkStep(st.output, total.output, hasLast, last.output); err != nil {
+	if err := st.output.replace(total.output, true); err != nil {
 		return err
 	}
-	if err := checkStep(st.cached, total.cached, hasLast && last.cachedKnown, last.cached); err != nil {
-		return err
-	}
-	if err := st.input.applyCumulative(total.input, true); err != nil {
-		return err
-	}
-	if err := st.output.applyCumulative(total.output, true); err != nil {
-		return err
-	}
-	return st.cached.applyCumulative(total.cached, total.cachedKnown)
+	return st.cached.replace(total.cached, total.cachedKnown)
 }
-
-func applyDelta(st *modelState, delta snapshot) error {
-	if err := st.input.applyDelta(delta.input, true); err != nil {
-		return err
+func (c *counter) replace(value int64, known bool) error {
+	if c.set && c.known && (!known || value < c.value) {
+		return fmt.Errorf("%w: cumulative counter decreased or became unknown", ErrRejected)
 	}
-	if err := st.output.applyDelta(delta.output, true); err != nil {
-		return err
-	}
-	return st.cached.applyDelta(delta.cached, delta.cachedKnown)
-}
-
-func checkStep(prev counter, total int64, hasLast bool, last int64) error {
-	if !hasLast {
-		return nil
-	}
-	if last > total {
-		return fmt.Errorf("%w: delta exceeds cumulative", ErrRejected)
-	}
-	if !prev.set || !prev.known {
-		return nil
-	}
-	if total < prev.value {
-		return fmt.Errorf("%w: cumulative usage decreased", ErrRejected)
-	}
-	if total-prev.value != last {
-		return fmt.Errorf("%w: delta does not match cumulative step", ErrAmbiguous)
-	}
+	*c = counter{set: true, known: known, value: value}
 	return nil
 }
-
-func (c *counter) applyCumulative(value int64, present bool) error {
-	if !present {
-		if c.set && c.known {
-			return fmt.Errorf("%w: known counter became unknown", ErrRejected)
-		}
-		c.set, c.known = true, false
-		return nil
-	}
-	if c.set && c.known && value < c.value {
-		return fmt.Errorf("%w: cumulative usage decreased", ErrRejected)
-	}
-	c.set, c.known, c.value = true, true, value
-	return nil
+func (c *counter) add(value int64, known bool) {
+	// Once any summand is unknown the sum stays unknown. Still bound the known
+	// subtotal to catch overflow; maxUsage * maxToken fits in int64.
+	c.known = known && (!c.set || c.known)
+	c.set = true
+	c.value += value
 }
 
-func (c *counter) applyDelta(value int64, present bool) error {
-	if !present {
-		if c.set && c.known {
-			return fmt.Errorf("%w: known counter became unknown", ErrRejected)
-		}
-		c.set, c.known = true, false
-		return nil
-	}
-	if c.set && !c.known {
-		return fmt.Errorf("%w: delta against unknown cumulative baseline", ErrAmbiguous)
-	}
-	base := int64(0)
-	if c.set && c.known {
-		base = c.value
-	}
-	if value > maxToken-base {
-		return fmt.Errorf("%w: token overflow", ErrRejected)
-	}
-	c.set, c.known, c.value = true, true, base+value
-	return nil
-}
-
-func (p *parser) result() (Result, error) {
-	models := make([]string, 0)
-	for model, st := range p.models {
-		if st.seen {
-			models = append(models, model)
-		}
+func (p *parser) result() Result {
+	models := make([]string, 0, len(p.models))
+	for m := range p.models {
+		models = append(models, m)
 	}
 	slices.Sort(models)
 	out := Result{Reports: []UsageReport{}, Observations: []Observation{}}
-	var accountID, accountLabel, subscription *string
-	if p.opt.AccountID != "" {
-		accountID = &p.opt.AccountID
-	}
-	if p.opt.AccountLabel != "" {
-		accountLabel = &p.opt.AccountLabel
-	}
-	if p.opt.SubscriptionLabel != "" {
-		subscription = &p.opt.SubscriptionLabel
+	seq := p.count * 2
+	if p.opt.Final {
+		seq++
 	}
 	for _, model := range models {
 		st := p.models[model]
-		if st.sequence >= maxToken {
-			return Result{}, fmt.Errorf("%w: sequence overflow", ErrRejected)
+		measure := statusKnown
+		if !st.input.known || !st.cached.known {
+			measure = statusProvisional
 		}
-		id, err := p.opt.NewReportID()
-		if err != nil {
-			return Result{}, err
-		}
-		measure, provisional := measurementOf(st.input, st.output, st.cached)
+		provisional := !p.opt.Final || measure != statusKnown
 		out.Reports = append(out.Reports, UsageReport{
-			ReportID: id, Model: model, Sequence: st.sequence + 1,
+			ReportID: reportID(p.opt.SessionID, model, seq), Model: model, Sequence: seq,
 			InputTokens: st.input.pointer(), OutputTokens: st.output.pointer(), CachedInputTokens: st.cached.pointer(),
-			Provisional: provisional, AccountID: accountID, AccountLabel: accountLabel,
-			BillingMode: p.opt.BillingMode, SubscriptionLabel: subscription,
+			Provisional: provisional, AccountID: optional(p.opt.AccountID), AccountLabel: optional(p.opt.AccountLabel),
+			BillingMode: p.opt.BillingMode, SubscriptionLabel: optional(p.opt.SubscriptionLabel),
 		})
-		out.Observations = append(out.Observations, Observation{
-			Source: p.opt.Source, Model: model, ModelStatus: statusKnown,
-			InputStatus: st.input.status(), OutputStatus: st.output.status(), CachedStatus: st.cached.status(),
-			Measurement: measure, Accounting: st.accounting, Provisional: provisional,
-		})
+		out.Observations = append(out.Observations, Observation{Source: p.opt.Source, Model: model, ModelStatus: statusKnown,
+			InputStatus: st.input.status(), OutputStatus: st.output.status(), CachedStatus: st.cached.status(), Measurement: measure, Accounting: st.accounting, Provisional: provisional})
 	}
-	return out, nil
+	return out
 }
-
-func measurementOf(input, output, cached counter) (string, bool) {
-	if input.status() == statusKnown && output.status() == statusKnown && cached.status() == statusKnown {
-		return statusKnown, false
+func optional(s string) *string {
+	if s == "" {
+		return nil
 	}
-	if input.status() == statusKnown && output.status() == statusKnown {
-		return statusProvisional, true
-	}
-	return statusUnknown, true
+	return &s
+}
+func reportID(session, model string, seq int64) string {
+	// Body intentionally excluded: changing a payload under the same identity
+	// must conflict at US1 rather than quietly acquiring a fresh receipt.
+	b := sha256.Sum256([]byte(fmt.Sprintf("aeon-usage-v2\x00%s\x00%s\x00%d", session, model, seq)))
+	b[6] = (b[6] & 0x0f) | 0x80
+	b[8] = (b[8] & 0x3f) | 0x80
+	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
 }
 
 func normalizeOptions(opt Options) (Options, error) {
-	switch opt.Source {
-	case "codex", "cursor":
-	default:
+	if opt.Source != "codex" && opt.Source != "cursor" {
 		return Options{}, fmt.Errorf("%w: source must be codex or cursor", ErrRejected)
 	}
+	if !opt.FromStart && opt.Previous == nil {
+		return Options{}, fmt.Errorf("%w: explicit from-start assertion or checkpoint required", ErrRejected)
+	}
+	id, err := canonicalUUID(opt.SessionID)
+	if err != nil || id == "" {
+		return Options{}, fmt.Errorf("%w: Aeon session UUID required", ErrRejected)
+	}
+	opt.SessionID = id
+	if !validSourceID(opt.SourceSessionID) {
+		return Options{}, fmt.Errorf("%w: source session identity required", ErrRejected)
+	}
 	if opt.Model != "" {
-		model, err := canonicalModel(opt.Model)
+		opt.Model, err = canonicalModel(opt.Model)
 		if err != nil {
 			return Options{}, err
 		}
-		opt.Model = model
 	}
 	if opt.BillingMode == "" {
 		opt.BillingMode = "unknown"
 	}
-	switch opt.BillingMode {
-	case "unknown", "api", "subscription":
-	default:
-		return Options{}, fmt.Errorf("%w: billing_mode", ErrRejected)
+	if opt.BillingMode != "unknown" && opt.BillingMode != "api" && opt.BillingMode != "subscription" {
+		return Options{}, fmt.Errorf("%w: billing mode", ErrRejected)
 	}
-	label, err := canonicalLabel(opt.SubscriptionLabel, 120)
+	opt.SubscriptionLabel, err = canonicalLabel(opt.SubscriptionLabel, 120)
 	if err != nil {
 		return Options{}, err
 	}
-	opt.SubscriptionLabel = label
-	if label != "" && opt.BillingMode != "subscription" {
-		return Options{}, fmt.Errorf("%w: subscription label requires billing_mode subscription", ErrAmbiguous)
+	if opt.SubscriptionLabel != "" && opt.BillingMode != "subscription" {
+		return Options{}, fmt.Errorf("%w: subscription label requires subscription mode", ErrAmbiguous)
 	}
-	account, err := canonicalLabel(opt.AccountLabel, 60)
+	opt.AccountLabel, err = canonicalLabel(opt.AccountLabel, 128)
 	if err != nil {
 		return Options{}, err
 	}
-	opt.AccountLabel = account
-	id, err := canonicalUUID(opt.AccountID)
-	if err != nil {
-		return Options{}, err
-	}
-	opt.AccountID = id
-	if opt.NewReportID == nil {
-		opt.NewReportID = newReportID
-	}
-	for i := range opt.Priors {
-		prior, err := normalizePrior(opt.Priors[i])
-		if err != nil {
-			return Options{}, err
-		}
-		opt.Priors[i] = prior
-	}
-	return opt, nil
+	opt.AccountID, err = canonicalUUID(opt.AccountID)
+	return opt, err
 }
-
-func normalizePrior(prior Prior) (Prior, error) {
-	model, err := canonicalModel(prior.Model)
-	if err != nil {
-		return Prior{}, err
-	}
-	prior.Model = model
-	if prior.Sequence < 0 || prior.Sequence > maxToken {
-		return Prior{}, fmt.Errorf("%w: prior sequence", ErrRejected)
-	}
-	for _, value := range []*int64{prior.InputTokens, prior.OutputTokens, prior.CachedInputTokens} {
-		if value != nil && (*value < 0 || *value > maxToken) {
-			return Prior{}, fmt.Errorf("%w: prior token", ErrRejected)
-		}
-	}
-	if prior.CachedInputTokens != nil && prior.InputTokens != nil && *prior.CachedInputTokens > *prior.InputTokens {
-		return Prior{}, fmt.Errorf("%w: prior cached tokens exceed input", ErrRejected)
-	}
-	known := prior.InputTokens != nil || prior.OutputTokens != nil || prior.CachedInputTokens != nil
-	if prior.Sequence == 0 && known {
-		return Prior{}, fmt.Errorf("%w: prior sequence", ErrRejected)
-	}
-	return prior, nil
-}
-
 func canonicalUUID(raw string) (string, error) {
-	s := strings.ToLower(strings.TrimSpace(raw))
+	s := strings.ToLower(raw)
 	if s == "" {
 		return "", nil
 	}
 	if !uuidRE.MatchString(s) || s == "00000000-0000-0000-0000-000000000000" {
-		return "", fmt.Errorf("%w: account_id", ErrRejected)
+		return "", fmt.Errorf("%w: invalid UUID", ErrRejected)
 	}
 	return s, nil
 }
-
-func canonicalLabel(raw string, max int) (string, error) {
-	if strings.TrimSpace(raw) == "" {
-		if strings.TrimSpace(raw) != raw && raw != "" {
-			return "", fmt.Errorf("%w: label", ErrRejected)
-		}
-		return "", nil
-	}
-	s := strings.TrimSpace(raw)
-	if len(s) > max || !utf8.ValidString(s) {
-		return "", fmt.Errorf("%w: label", ErrRejected)
-	}
-	for _, r := range s {
-		if r < 0x20 || r == 0x7f {
-			return "", fmt.Errorf("%w: label", ErrRejected)
-		}
+func canonicalLabel(s string, max int) (string, error) {
+	if !utf8.ValidString(s) || utf8.RuneCountInString(s) > max || strings.TrimSpace(s) != s || strings.ContainsFunc(s, unicode.IsControl) {
+		return "", fmt.Errorf("%w: public label", ErrRejected)
 	}
 	return s, nil
-}
-
-func newReportID() (string, error) {
-	var b [16]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		return "", err
-	}
-	b[6] = (b[6] & 0x0f) | 0x40
-	b[8] = (b[8] & 0x3f) | 0x80
-	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16]), nil
-}
-
-func readLine(r *bufio.Reader) ([]byte, error) {
-	var buf []byte
-	for {
-		chunk, err := r.ReadSlice('\n')
-		buf = append(buf, chunk...)
-		if len(buf) > maxLine {
-			return nil, fmt.Errorf("%w: record exceeds %d bytes", ErrMalformed, maxLine)
-		}
-		if errors.Is(err, bufio.ErrBufferFull) {
-			continue
-		}
-		if errors.Is(err, io.EOF) {
-			if len(buf) == 0 {
-				return nil, io.EOF
-			}
-			return buf, nil
-		}
-		if err != nil {
-			return nil, err
-		}
-		return buf, nil
-	}
-}
-
-// ParsePriors reads a JSON array of prior cumulative snapshots.
-func ParsePriors(raw []byte) ([]Prior, error) {
-	dec := json.NewDecoder(bytes.NewReader(bytes.TrimSpace(raw)))
-	dec.UseNumber()
-	tok, err := dec.Token()
-	if err != nil || tok != json.Delim('[') {
-		return nil, fmt.Errorf("%w: priors must be a JSON array", ErrMalformed)
-	}
-	var out []Prior
-	for dec.More() {
-		var obj json.RawMessage
-		if err := dec.Decode(&obj); err != nil {
-			return nil, fmt.Errorf("%w: prior", ErrMalformed)
-		}
-		prior, err := decodePrior(obj)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, prior)
-	}
-	tok, err = dec.Token()
-	if err != nil || tok != json.Delim(']') {
-		return nil, fmt.Errorf("%w: priors must be a JSON array", ErrMalformed)
-	}
-	var extra any
-	if err := dec.Decode(&extra); !isEOF(err) {
-		return nil, fmt.Errorf("%w: trailing JSON", ErrMalformed)
-	}
-	return out, nil
-}
-
-func decodePrior(raw json.RawMessage) (Prior, error) {
-	fields, err := decodeObject(raw, allow("model", "sequence", "input_tokens", "output_tokens", "cached_input_tokens"))
-	if err != nil {
-		return Prior{}, err
-	}
-	for _, key := range []string{"model", "sequence", "input_tokens", "output_tokens", "cached_input_tokens"} {
-		if _, ok := fields[key]; !ok {
-			return Prior{}, fmt.Errorf("%w: prior missing %s", ErrMalformed, key)
-		}
-	}
-	model, err := parseString(fields["model"])
-	if err != nil {
-		return Prior{}, err
-	}
-	seq, err := parseCount(fields["sequence"])
-	if err != nil {
-		return Prior{}, err
-	}
-	input, err := parseNullableCount(fields["input_tokens"])
-	if err != nil {
-		return Prior{}, err
-	}
-	output, err := parseNullableCount(fields["output_tokens"])
-	if err != nil {
-		return Prior{}, err
-	}
-	cached, err := parseNullableCount(fields["cached_input_tokens"])
-	if err != nil {
-		return Prior{}, err
-	}
-	return Prior{Model: model, Sequence: seq, InputTokens: input, OutputTokens: output, CachedInputTokens: cached}, nil
-}
-
-func parseNullableCount(raw json.RawMessage) (*int64, error) {
-	if string(bytes.TrimSpace(raw)) == "null" {
-		return nil, nil
-	}
-	n, err := parseCount(raw)
-	if err != nil {
-		return nil, err
-	}
-	return &n, nil
 }

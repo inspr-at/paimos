@@ -5,59 +5,63 @@ package sessionusage
 import "errors"
 
 const (
-	maxToken = 1_000_000_000_000
-	maxLine  = 64 * 1024
-	maxInput = 1 << 20
-	maxUsage = 128
-
-	accountingVendor = "vendor_cumulative"
-	accountingDelta  = "delta_sum"
-
+	maxToken          = 1_000_000_000_000
+	maxLine           = 64 * 1024
+	maxInput          = 1 << 20
+	maxUsage          = 128
+	accountingVendor  = "vendor_cumulative"
+	accountingDelta   = "delta_sum"
 	statusKnown       = "known"
 	statusUnknown     = "unknown"
 	statusProvisional = "provisional"
 )
 
-// ErrMalformed means a usage record is not valid vendor JSON.
+// ErrMalformed means a record violates its JSON/counter schema.
 var ErrMalformed = errors.New("malformed usage record")
 
-// ErrAmbiguous means the capture can be read as more than one usage total.
+// ErrAmbiguous means attribution or accounting has competing interpretations.
 var ErrAmbiguous = errors.New("ambiguous usage record")
 
-// ErrRejected means the counters are negative, decreasing, overflowing, or
-// otherwise unsafe to report.
+// ErrRejected means a capture is unsafe or unsupported to report.
 var ErrRejected = errors.New("rejected usage record")
 
-// UsageError is a command-line usage mistake.
 type UsageError struct{ Msg string }
 
 func (e *UsageError) Error() string { return e.Msg }
 
-// Prior is the last cumulative snapshot already stored for a model.
-// A null counter is unknown. Sequence 0 is allowed only when every counter
-// is null.
-type Prior struct {
-	Model             string
-	Sequence          int64
-	InputTokens       *int64
-	OutputTokens      *int64
-	CachedInputTokens *int64
-}
-
-// Options selects the vendor and the reporter metadata that vendor logs do
-// not carry. Account and subscription fields are taken only from Options.
+// Options binds one source session to one Aeon session. FromStart explicitly
+// asserts a lossless capture beginning at zero usage for that entire session.
+// Every Parse receives the complete prefix, including when Previous is supplied.
+// Never use a transcript tail, a resumed pre-existing thread, or multiple source
+// sessions. Previous verifies append-only continuity, not the truth of the initial
+// assertion. The reporter must serialize capture and persist reports before POST.
 type Options struct {
-	Source            string
-	Model             string
+	Source          string
+	SessionID       string
+	SourceSessionID string
+	FromStart       bool
+	Previous        *Checkpoint
+	// Model asserts one fixed exact model for the whole capture. Required for
+	// thread-cumulative records and any delta that omits its actual model.
+	Model string
+	// Final seals the entire session. Known tokens alone do not imply finality.
+	Final             bool
 	BillingMode       string
 	SubscriptionLabel string
 	AccountID         string
 	AccountLabel      string
-	Priors            []Prior
-	NewReportID       func() (string, error)
 }
 
-// UsageReport is the US1 session-usage request body.
+// Checkpoint is local continuity evidence, never an endpoint request. It contains
+// only hashes and a byte count; source text and source IDs are not exported.
+type Checkpoint struct {
+	Binding string `json:"binding"`
+	Bytes   int    `json:"bytes"`
+	Digest  string `json:"digest"`
+	Final   bool   `json:"final"`
+}
+
+// UsageReport matches the US1 per-session/model cumulative request body.
 type UsageReport struct {
 	ReportID          string  `json:"report_id"`
 	Model             string  `json:"model"`
@@ -72,7 +76,7 @@ type UsageReport struct {
 	SubscriptionLabel *string `json:"subscription_label"`
 }
 
-// Observation records how the counters were measured. It is not posted.
+// Observation describes measurement independently of session finality; not POSTed.
 type Observation struct {
 	Source       string `json:"source"`
 	Model        string `json:"model"`
@@ -85,22 +89,24 @@ type Observation struct {
 	Provisional  bool   `json:"provisional"`
 }
 
-// Result is the parser stdout document.
 type Result struct {
 	Reports      []UsageReport `json:"reports"`
 	Observations []Observation `json:"observations"`
+	Checkpoint   Checkpoint    `json:"checkpoint"`
 }
 
 type snapshot struct {
 	input       int64
 	output      int64
 	cached      int64
+	inputKnown  bool
 	cachedKnown bool
 }
 
 type usageRecord struct {
 	accounting string
 	model      string
+	id         string
 	cumulative *snapshot
 	delta      *snapshot
 }
@@ -118,7 +124,6 @@ func (c counter) pointer() *int64 {
 	v := c.value
 	return &v
 }
-
 func (c counter) status() string {
 	if c.set && c.known {
 		return statusKnown

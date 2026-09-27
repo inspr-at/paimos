@@ -14,11 +14,11 @@ import (
 const composerFastAlias = "composer-2.5[fast=true]"
 
 func canonicalModel(raw string) (string, error) {
-	s := strings.TrimSpace(raw)
+	s := raw
 	if s == composerFastAlias {
 		s = "composer-2.5"
 	}
-	if s == "" || len(s) > 120 || !utf8.ValidString(s) {
+	if s == "" || len(s) > 128 || !utf8.ValidString(s) {
 		return "", fmt.Errorf("%w: model is not an exact identifier", ErrRejected)
 	}
 	for i, r := range s {

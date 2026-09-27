@@ -5,7 +5,11 @@ package sessionusage
 import (
 	"encoding/json"
 	"math/big"
+	"regexp"
+	"strconv"
 )
+
+var costNumberRE = regexp.MustCompile(`^-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE]([+-]?[0-9]{1,2}))?$`)
 
 // vendorMicros converts a vendor JSON decimal to integer microdollars.
 // It matches internal/agentd usdMicros, including half-up rounding. The
@@ -14,6 +18,17 @@ import (
 func vendorMicros(raw json.RawMessage) (int64, bool) {
 	if len(raw) == 0 || len(raw) > 64 || raw[0] == '"' || string(raw) == "null" {
 		return 0, false
+	}
+	// Bound exponent magnitude before big.Rat can allocate for hostile inputs.
+	match := costNumberRE.FindStringSubmatch(string(raw))
+	if match == nil {
+		return 0, false
+	}
+	if match[1] != "" {
+		n, _ := strconv.Atoi(match[1])
+		if n < -64 || n > 64 {
+			return 0, false
+		}
 	}
 	value, ok := new(big.Rat).SetString(string(raw))
 	if !ok || value.Sign() < 0 {

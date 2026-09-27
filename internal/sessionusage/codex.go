@@ -51,9 +51,11 @@ func classifyCodex(fields map[string]json.RawMessage) (usageRecord, int, error) 
 	case "token_count":
 		rec, err := codexInfoUsage(fields, fields)
 		return rec, outcomeUse, err
+	case "turn.failed", "error":
+		return usageRecord{}, outcomeIgnore, fmt.Errorf("%w: failed or incomplete source turn", ErrRejected)
 	case "turn.completed":
 		if _, ok := fields["usage"]; !ok {
-			return usageRecord{}, outcomeIgnore, nil
+			return usageRecord{}, outcomeIgnore, fmt.Errorf("%w: completed turn has no usage", ErrRejected)
 		}
 		rec, err := codexTurn(fields)
 		return rec, outcomeUse, err
@@ -87,9 +89,6 @@ func codexInfoUsage(holder, modelHolder map[string]json.RawMessage) (usageRecord
 		snap, err := parseSnakeUsage(lastRaw)
 		if err != nil {
 			return usageRecord{}, err
-		}
-		if snap.cachedKnown != total.cachedKnown {
-			return usageRecord{}, fmt.Errorf("%w: cumulative and delta cached flags disagree", ErrAmbiguous)
 		}
 		last = &snap
 	}
@@ -161,9 +160,6 @@ func codexTokenUsage(fields map[string]json.RawMessage) (usageRecord, error) {
 		if err != nil {
 			return usageRecord{}, err
 		}
-		if snap.cachedKnown != total.cachedKnown {
-			return usageRecord{}, fmt.Errorf("%w: cumulative and delta cached flags disagree", ErrAmbiguous)
-		}
 		last = &snap
 	}
 	model, err := modelFields(fields, params, tokenUsage)
@@ -206,7 +202,7 @@ func parseUsage(fields map[string]json.RawMessage, inputKey, outputKey, cachedKe
 		return snapshot{}, err
 	}
 	var snap snapshot
-	snap.input, snap.output = input, output
+	snap.input, snap.output, snap.inputKnown = input, output, true
 	if raw, ok := fields[cachedKey]; ok {
 		cached, err := parseCount(raw)
 		if err != nil {
