@@ -19,7 +19,13 @@ var ErrVerificationUnavailable = errors.New("verification blocked: this adapter 
 type VerificationAdapter interface{ VerificationSupported() bool }
 
 func (*ClaudeAdapter) VerificationSupported() bool { return true }
-func (*CursorAdapter) VerificationSupported() bool { return true }
+
+// Cursor ACP inherits the shared MCP lease when session/new receives an empty
+// mcpServers array (CLI 2026.09.18-9a7762b, 1006.index.js). Ask mode does not bind
+// an empty tool inventory, and ACP exposes no supported override for that lease.
+// See https://cursor.com/docs/cli/acp#MCP-servers. Block before the account probe
+// or session startup until a qualified isolation mechanism is available.
+func (*CursorAdapter) VerificationSupported() bool { return false }
 
 // Codex intentionally has no VerificationSupported capability. In codex-cli
 // 0.157.1, thread/start cannot set the immutable ToolPolicy.allowed_tools ceiling

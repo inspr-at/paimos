@@ -29,10 +29,20 @@ func verificationRequest(t *testing.T) StartRequest {
 }
 
 func TestCodexVerificationBlocksBeforeAnyVendorProcess(t *testing.T) {
+	testUnsupportedVerificationBlocksBeforeAnyVendorProcess(t, Codex)
+}
+
+func TestCursorVerificationBlocksBeforeAnyVendorProcess(t *testing.T) {
+	testUnsupportedVerificationBlocksBeforeAnyVendorProcess(t, Cursor)
+}
+
+func testUnsupportedVerificationBlocksBeforeAnyVendorProcess(t *testing.T, harness string) {
+	t.Helper()
 	// This fixture models a vendor startup hook or an inherited stdio MCP
 	// command. Merely launching it mutates an unrelated file; waiting to inspect
 	// thread settings or the MCP inventory afterward would already be too late.
 	r := verificationRequest(t)
+	r.Profile.Harness = harness
 	home, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -51,8 +61,14 @@ func TestCodexVerificationBlocksBeforeAnyVendorProcess(t *testing.T) {
 	if err := os.WriteFile(path, []byte(script), 0700); err != nil {
 		t.Fatal(err)
 	}
-	a := NewCodexAdapter(path, map[string]string{"account": home})
-	a.SetExpectedEmails(map[string]string{"account": "agent@example.test"})
+	var a Adapter
+	if harness == Codex {
+		codex := NewCodexAdapter(path, map[string]string{"account": home})
+		codex.SetExpectedEmails(map[string]string{"account": "agent@example.test"})
+		a = codex
+	} else {
+		a = NewCursorAdapter(path, map[string]string{"account": "42"})
+	}
 	observed := false
 	p, err := a.Start(t.Context(), r, func(AdapterEvent) { observed = true })
 	if p != nil {
@@ -68,39 +84,6 @@ func TestCodexVerificationBlocksBeforeAnyVendorProcess(t *testing.T) {
 	data, err := os.ReadFile(sentinel)
 	if err != nil || string(data) != "unchanged" {
 		t.Fatal("blocked verification launched a vendor process")
-	}
-}
-
-func TestCursorVerificationRequiresAskBeforePrompt(t *testing.T) {
-	for _, variant := range []string{"cursor-verify", "cursor-verify-no-ask", "cursor-verify-no-ack", "cursor-verify-drift", "cursor-verify-permission"} {
-		t.Run(variant, func(t *testing.T) {
-			r := verificationRequest(t)
-			r.Profile.Harness = Cursor
-			a := NewCursorAdapter(fakeVendorPath(t, variant), map[string]string{"account": "42"})
-			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-			defer cancel()
-			p, err := a.Start(ctx, r, func(AdapterEvent) {})
-			if strings.Contains(variant, "no-") {
-				if err == nil {
-					_ = p.Stop(ctx)
-					t.Fatal("verification launched without enforced ask acknowledgement")
-				}
-				return
-			}
-			if err != nil {
-				t.Fatal(err)
-			}
-			err = p.Wait()
-			if variant == "cursor-verify" && err != nil {
-				t.Fatal(err)
-			}
-			if variant != "cursor-verify" && err == nil {
-				t.Fatal("permission/mode drift accepted")
-			}
-			if !p.(*cursorProcess).ProcessExited() {
-				t.Fatal("fixture process did not exit")
-			}
-		})
 	}
 }
 
