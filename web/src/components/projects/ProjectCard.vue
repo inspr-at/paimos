@@ -92,10 +92,11 @@ const agentState = computed(() => leadingState(agents.value.map(a => a.state)))
 .ring-wrap { display: inline-flex; }
 .counts { display: grid; gap: 7px; width: min(100%, 176px); }
 .counts :deep(.stat-count) { gap: 8px; }
-/* Always as tall as a row of faces, so the live chip sits on the same line in every card. */
-.card-foot { display: flex; align-items: center; gap: 10px; min-height: 58px; margin: 18px 18px 14px; padding-top: 12px; border-top: 1px solid var(--line); }
+/* Reserve the 46px state chip plus padding and border, even before agents arrive. */
+.card-foot { display: flex; align-items: center; gap: 10px; min-height: 60px; margin: 18px 18px 14px; padding-top: 12px; border-top: 1px solid var(--line); }
 /* The actual timestamp width determines how much room the chip can use. */
 .card { container: live-card / inline-size; }
+@container live-card (max-width: 320px) { .card-foot { min-height: 74px; } }
 .card-live { flex: 0 1 auto; min-width: 0; }
 .activity { flex: 0 0 auto; margin-left: auto; font-size: 12.5px; color: var(--ink-2); white-space: nowrap; }
 .card-more { position: absolute; top: 12px; right: 12px; width: 30px; height: 30px; color: var(--ink-3); opacity: 0; }

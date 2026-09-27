@@ -16,8 +16,8 @@ import StatCount, { STATS, type StatKind } from './StatCount.vue'
 // One project in the list: a link across the row's columns (subgrid of the
 // list), and its … button beside it. Phones stack the row into a small card.
 // Agents at work (AEON-184) show as a compact live chip at the end of the
-// project column (robots and the ticket key; robots only on a phone), beside
-// the link rather than in it, over room the name gives up while they work.
+// project column (robots and the state word), beside the project link.
+// Phones reserve a separate line below the statistics for the complete state.
 const props = defineProps<{
   project: Project; columns: ProjectColumnId[]; term: string; now: number; to: string; label: string
   selected: boolean; dragging: boolean; menuOpen: boolean; showArchived?: boolean
@@ -82,8 +82,8 @@ const value = (project: Project, kind: StatKind) => kind === 'open' ? project.op
 .project-text { display: grid; gap: 1px; min-width: 0; }
 /* The live chip's place: the end of the project column (an absolutely placed
    grid child takes its grid area as containing block). */
-.row-live { position: absolute; grid-column: 2 / 3; grid-row: 1; top: 50%; right: 0; translate: 0 -50%; z-index: 1; max-width: 150px; }
-.project-item.live .project-text { padding-right: 158px; }
+.row-live { position: absolute; grid-column: 2 / 3; grid-row: 1; top: 50%; right: 0; translate: 0 -50%; z-index: 1; max-width: 200px; }
+.project-item.live .project-text { padding-right: 208px; }
 .project-name { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .name { font-size: 14.5px; font-weight: 650; letter-spacing: -.005em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .project-desc { font-size: 13px; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -115,9 +115,9 @@ const value = (project: Project, kind: StatKind) => kind === 'open' ? project.op
   .name { white-space: normal; }
   .project-desc { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
   .row-more { position: absolute; top: 4px; right: 2px; margin: 0; width: 44px; height: 44px; }
-  .row-live { top: auto; right: 8px; bottom: 12px; translate: none; max-width: 78px; }
+  .row-live { top: auto; right: 10px; bottom: 12px; translate: none; max-width: calc(100% - 20px); }
+  .project-item.live .project-row { padding-bottom: 56px; }
   .project-item.live .project-text { padding-right: 0; }
-  .project-item.live .stats-line { padding-right: 42px; min-height: 34px; align-items: center; }
   .stats-line { grid-area: stats; display: flex; flex-wrap: wrap; gap: 4px 16px; }
   .line-stat { display: inline-flex; align-items: center; gap: 5px; }
   .mini { gap: 5px; font-size: 11.5px; }

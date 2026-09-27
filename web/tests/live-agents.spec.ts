@@ -404,8 +404,9 @@ for (const reducedMotion of ['reduce', 'no-preference'] as const) {
       const ring = fixture.locator('.ring-sweep')
       await expect(fixture.locator('.clock')).toBeVisible()
       await expect(fixture.locator('.glint')).toHaveCount(0)
-      const style = await ring.evaluate(el => ({ name: getComputedStyle(el).animationName, play: getComputedStyle(el).animationPlayState }))
-      expect(reducedMotion === 'reduce' ? style.name === 'none' : style.play === 'paused').toBe(true)
+      // SC1 removes non-working animations entirely in both motion modes.
+      expect(await ring.evaluate(el => getComputedStyle(el).animationName)).toBe('none')
+      expect(await fixture.evaluate(el => el.getAnimations({ subtree: true }).length)).toBe(0)
       await indicatorProps(page, { eventPulse: 13 })
       await expect(fixture.locator('.glint')).toHaveCount(0)
       await page.clock.fastForward(650)

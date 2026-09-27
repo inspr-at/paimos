@@ -17,11 +17,22 @@ func TestThrottledHeartbeatAndStateEvidence(t *testing.T) {
 		"agent_principal_id": f.agent.ID, "harness": "codex", "host": "test-host",
 		"harness_session_ref": "sc1-generation-0000000001", "worker_lease": lease,
 		"management_mode": "managed", "role": "worker",
+		"model": "integration-model", "reasoning_effort": "high", "account_label": "Test account",
+		"harness_version": "1.2.3", "brief": "AEON-221", "worktree": "/Code/aeon-sc1", "branch": "sc1.state-colours",
 	}, "")
 	expect(t, w, 201)
 	id := decode(t, w)["id"].(string)
 	path := base + "/" + id
-	beat := map[string]any{"phase": "working", "activity": "throttled", "activity_sequence": 1}
+	// TM1 metadata and SC1 evidence must share the live scan, including a
+	// registered session that has not sent its first heartbeat yet.
+	unstarted := decode(t, f.call(f.person, "GET", "/api/harness-sessions/live?include_inactive=true", nil, ""))["items"].([]any)
+	if len(unstarted) != 1 || unstarted[0].(map[string]any)["heartbeat_at"] != nil || unstarted[0].(map[string]any)["model"] != "integration-model" {
+		t.Fatalf("unstarted metadata/state scan: %v", unstarted)
+	}
+	beat := map[string]any{
+		"phase": "working", "activity": "throttled", "activity_sequence": 1,
+		"reasoning_effort": "xhigh", "commits": []map[string]string{{"sha": "abc1234", "subject": "Integrate session states"}},
+	}
 	expect(t, f.call(f.agent, "POST", path+"/heartbeat", beat, "wrong-lease-00000000000000000000001"), 403)
 	w = f.call(f.agent, "POST", path+"/heartbeat", beat, lease)
 	expect(t, w, 200)
@@ -42,6 +53,22 @@ func TestThrottledHeartbeatAndStateEvidence(t *testing.T) {
 		}
 		if data["activity"] != "throttled" || data["has_problem"] != false || data["needs_attention"] != false {
 			t.Fatalf("state evidence from %s: %v", endpoint, data)
+		}
+		for key, want := range map[string]string{"model": "integration-model", "reasoning_effort": "xhigh", "account_label": "Test account", "harness_version": "1.2.3"} {
+			if data[key] != want {
+				t.Fatalf("%s lost %s alongside throttled state: %v", endpoint, key, data[key])
+			}
+		}
+		if endpoint == path || endpoint == "/api/harness-sessions" {
+			for key, want := range map[string]string{"brief": "AEON-221", "worktree": "/Code/aeon-sc1", "branch": "sc1.state-colours"} {
+				if data[key] != want {
+					t.Fatalf("%s lost work context %s: %v", endpoint, key, data[key])
+				}
+			}
+			commits, ok := data["commits"].([]any)
+			if !ok || len(commits) != 1 || commits[0].(map[string]any)["sha"] != "abc1234" {
+				t.Fatalf("%s lost heartbeat commit: %v", endpoint, data["commits"])
+			}
 		}
 	}
 	f.tx(t, f.person, func(tx pgx.Tx) error {
@@ -67,6 +94,10 @@ func TestThrottledHeartbeatAndStateEvidence(t *testing.T) {
 	state := decode(t, f.call(f.person, "GET", "/api/harness-sessions/live?include_inactive=true", nil, ""))["items"].([]any)
 	if len(state) != 1 || state[0].(map[string]any)["phase"] != "stopped" {
 		t.Fatal("state view lost recent stop")
+	}
+	stopped := state[0].(map[string]any)
+	if stopped["model"] != "integration-model" || stopped["reasoning_effort"] != "xhigh" || stopped["stop_reason"] != "process_exited" || stopped["stopped_at"] == nil {
+		t.Fatalf("stopped scan lost metadata or stop evidence: %v", stopped)
 	}
 	expect(t, f.call(f.foreign, "GET", path, nil, ""), 404)
 	foreign := decode(t, f.call(f.foreign, "GET", "/api/harness-sessions/live?include_inactive=true", nil, ""))["items"].([]any)

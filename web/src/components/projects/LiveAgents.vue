@@ -248,13 +248,13 @@ a.agent-line:focus-visible, .ticket-line:focus-visible { outline: none; box-shad
 .agent-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 12px; color: var(--ink-2); }
 .sep { width: 3px; height: 3px; border-radius: 50%; background: var(--ink-3); }
 .agent-meta time { color: var(--ink); font-size: 11.5px; }
-.since { white-space: nowrap; color: var(--ink-3); }
+.since { white-space: nowrap; color: var(--ink-2); }
 .go { flex-shrink: 0; color: var(--ink-3); }
 a.agent-line:hover .go { color: var(--teal-ink); }
 .ticket-line { display: flex; align-items: baseline; gap: 8px; min-width: 0; margin: 0; padding: 6px 8px 7px 46px; border-radius: 8px; color: var(--ink-2); font-size: 12.5px; text-decoration: none; }
 .ticket-key { flex-shrink: 0; font-size: 11px; font-weight: 600; letter-spacing: .04em; color: var(--teal-ink); }
 .ticket-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ticket-line.none { color: var(--ink-3); font-size: 12px; }
+.ticket-line.none { color: var(--ink-2); font-size: 12px; }
 @media (max-width: 760px) { .ticket-line { align-items: center; min-height: 44px; } }
 .chip-state { flex: none; font-size: 11px; }
 .live-chip { opacity: var(--agent-state-opacity, 1); }
@@ -262,6 +262,11 @@ a.agent-line:hover .go { color: var(--teal-ink); }
 .as-card .live-chip { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 7px; min-height: 46px; padding: 6px 12px 6px 7px; border-radius: 14px; }
 .as-card .faces { grid-row: 1 / 3; }
 .as-card .chip-state { grid-column: 2; }
+/* At narrow card widths, give the state word its own full-width line. */
+@container live-card (max-width: 320px) {
+  .as-card .faces { grid-row: 1; }
+  .as-card .chip-state { grid-column: 1 / -1; }
+}
 .as-row .key, .as-row .row-name { display: none; }
 .pop-agent.agent-state-surface { background: color-mix(in srgb, var(--agent-state-color) 6%, var(--surface-sunken)); }
 </style>

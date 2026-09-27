@@ -432,11 +432,12 @@ test('a failing sessions read is a real error with a retry, and approvals keep w
   await expect(queue(page).locator('.item')).toHaveCount(3)
 })
 
-test('the ticket panel shows the agents working on it and links to their session', async ({ page }) => {
+test('the ticket panel shows the bound agent’s attention state and links to its session', async ({ page }) => {
   await setup(page)
   await page.goto('/p/PHAROS/PHAROS-11')
   const details = page.getByRole('complementary', { name: 'Ticket details' })
-  const chip = details.getByRole('link', { name: 'Claude camy: Working. Open the session' })
+  // The fixture has a pending approval; the ticket and Agents use the same state.
+  const chip = details.getByRole('link', { name: 'Claude camy: Needs something. Open the session' })
   await expect(chip).toBeVisible()
   await chip.click()
   await expect(page).toHaveURL(`/agents/${camy}`)

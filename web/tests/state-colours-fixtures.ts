@@ -22,6 +22,9 @@ export async function mockStateColours(page: Page, theme: 'light' | 'dark' = 'li
     Object.assign(agents.sessions[index]!, {
       project_id: `p-sc1-${state}`, project: { id: `p-sc1-${state}`, key: `SC${index + 1}`, title: `${STATE_LABEL[state]} team` },
       display_label: `SC1 ${state}`, ticket: null, ticket_node_id: null, run_id: null, parent_harness_session_id: null,
+      model: 'integration-model', reasoning_effort: 'xhigh', account_label: 'Test account', harness_version: '1.2.3',
+      brief: 'AEON-221', worktree: '/Code/aeon-sc1', branch: 'sc1.state-colours',
+      commits: [{ sha: 'abc1234', subject: 'Integrate session states' }],
       phase: state === 'stopped' ? 'stopped' : 'working', activity: state === 'throttled' ? 'throttled' : ['idle', 'stale'].includes(state) ? 'idle' : 'busy',
       heartbeat_at: new Date(stateNow - (state === 'problem' ? 600_000 : state === 'stale' ? 300_000 : 10_000)).toISOString(),
       stopped_at: state === 'stopped' ? new Date(stateNow).toISOString() : null, stop_reason: state === 'stopped' ? 'process_exited' : null,

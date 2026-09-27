@@ -15,8 +15,14 @@ for (const theme of ['light', 'dark'] as const) {
       await expect(row).toHaveAttribute('data-state', state)
       await expect(row.locator('.agent-state-label')).toHaveText(STATE_LABEL[state])
       await expect(row.locator('.agent-state-mark').first()).toHaveAttribute('data-mark', state)
+      await expect(row.locator('.session-meta')).toContainText('integration-model · xhigh · Test account')
       await row.locator('.agent-link').click()
-      await expect(page.getByRole('complementary', { name: 'Session details' }).locator('.head-top .agent-state-label')).toHaveText(STATE_LABEL[state])
+      const panel = page.getByRole('complementary', { name: 'Session details' })
+      await expect(panel.locator('.head-top .agent-state-label')).toHaveText(STATE_LABEL[state])
+      const setup = panel.locator('[aria-labelledby="setup-title"]')
+      for (const value of ['integration-model', 'xhigh', 'Test account', '1.2.3']) await expect(setup).toContainText(value)
+      const work = panel.locator('[aria-labelledby="work-title"]')
+      for (const value of ['AEON-221', '/Code/aeon-sc1', 'sc1.state-colours', 'abc1234', 'Integrate session states']) await expect(work).toContainText(value)
       await page.getByRole('button', { name: 'Close session details' }).click()
     }
     for (const state of ['working', 'waiting', 'throttled', 'problem']) await expect(page.locator(`.live-now .tile[data-state="${state}"]`)).toBeVisible()
@@ -30,6 +36,29 @@ for (const theme of ['light', 'dark'] as const) {
         await expect(project.locator('.chip-state')).toHaveText(STATE_LABEL[state])
         await expect(project.locator('.live-bot')).toHaveAttribute('aria-label', STATE_LABEL[state])
         if (state !== 'working') expect(await project.locator('.live-bot').evaluate(el => el.getAnimations({ subtree: true }).length)).toBe(0)
+      }
+    }
+  })
+
+  test(`${theme}: all state words fit narrow cards and phone list rows`, async ({ page }) => {
+    await mockStateColours(page, theme)
+    await page.goto('/')
+    for (const width of [320, 390]) {
+      await page.setViewportSize({ width, height: 844 })
+      for (const layout of ['Cards', 'List']) {
+        await page.getByRole('radio', { name: `${layout} view`, exact: true }).click()
+        for (const state of states) {
+          const project = page.locator(`[data-project-id="p-sc1-${state}"]`)
+          const label = project.locator('.chip-state')
+          await expect(label).toHaveText(STATE_LABEL[state])
+          const bounds = (await project.boundingBox())!, chip = (await project.locator('.live-chip').boundingBox())!
+          const word = (await label.boundingBox())!
+          expect(word.x).toBeGreaterThanOrEqual(chip.x)
+          expect(word.x + word.width).toBeLessThanOrEqual(chip.x + chip.width)
+          expect(chip.x + chip.width).toBeLessThanOrEqual(bounds.x + bounds.width)
+          expect(await label.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true)
+        }
+        expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
       }
     }
   })
