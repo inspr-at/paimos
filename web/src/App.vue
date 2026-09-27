@@ -22,6 +22,7 @@ import { toast } from './lib/toast'
 import { displayHeadline, getRelease } from './lib/releases'
 import { headerFolded } from './lib/chrome'
 import { usePoller } from './lib/usePolledData'
+import { sessionFreezeApplies } from './lib/agentPairing'
 
 const ReleasesSheet = defineAsyncComponent(() => import('./components/releases/ReleasesSheet.vue'))
 const session = useSession()
@@ -33,7 +34,7 @@ const shortcuts = ref<InstanceType<typeof ShortcutSheet>>()
 const retrying = ref(false)
 // Sign-in is bare: it has no header or footer and shows connection problems itself.
 const bare = computed(() => !!route.meta.bare && !fatal.value)
-const sessionEndedHere = computed(() => session.requiresSignIn && route.path !== '/signin')
+const sessionEndedHere = computed(() => sessionFreezeApplies(route.path, session.requiresSignIn))
 // Keep the mounted page readable and copyable after a 401, while every editor
 // and action control becomes inert. The observer covers controls rendered after
 // an in-flight request settles.

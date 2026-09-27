@@ -1,0 +1,478 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+import { afterEach, test } from 'node:test'
+import assert from 'node:assert/strict'
+import { sessionEnded } from '../src/lib/api.ts'
+import {
+  DEFAULT_REVIEW_CHOICE, LOOKUP_DEBOUNCE_MS, MIN_POLL_INTERVAL_MS, PUBLIC_PAIRING_GUIDE_PATH, PairingError,
+  agentRouteKind, canonicalUserCode, clearPairingClientState, createOngoingLimits, denyPairing,
+  describeComputerStatus, describeProgress, disconnectComputer, disconnectConfirm, disconnectEnrollment,
+  formatVerification, getPairingGuide, isPublicPairingGuide, listPairingComputers, lookupPairing,
+  ongoingLimitError, pairingPermissions, planApproval, planLookup, planOngoingLimits, planPoll,
+  registerAgentUrl, sessionFreezeApplies, submitApproval, verificationWarning, defaultSelectedAccountKeys,
+  peekPairingCode, publicGuideSections, rememberPairingCode, takePairingCode,
+  type OngoingLimitDraft, type PairingView, type RequestedAccount,
+} from '../src/lib/agentPairing.ts'
+
+const originalFetch = globalThis.fetch
+afterEach(() => {
+  globalThis.fetch = originalFetch
+  sessionEnded.blocked = false
+  clearPairingClientState()
+})
+
+const REQUEST = '11111111-1111-4111-8111-111111111111'
+const TENANT = '22222222-2222-4222-8222-222222222222'
+const COMPUTER = '33333333-3333-4333-8333-333333333333'
+const ACCOUNT = '44444444-4444-4444-8444-444444444444'
+const ACCOUNT_2 = '55555555-5555-4555-8555-555555555555'
+const MODEL = '66666666-6666-4666-8666-666666666666'
+const RUN = '77777777-7777-4777-8777-777777777777'
+const DIGEST = 'ab'.repeat(32)
+const SECRET = 'device-secret-must-not-appear'
+
+const person = pairingPermissions({ permissions: ['account.manage', 'account.read'], principalKind: 'person' })
+const reader = pairingPermissions({ permissions: ['account.read'], principalKind: 'person' })
+const agent = pairingPermissions({ permissions: ['account.manage', 'run.claim'], principalKind: 'agent' })
+
+function account(overrides: Partial<RequestedAccount> = {}): RequestedAccount {
+  return { account_key: 'cursor-1', harness: 'cursor', label: 'Cursor work', model_profile_id: MODEL, ...overrides }
+}
+
+function view(overrides: Record<string, unknown> = {}): PairingView {
+  return {
+    request_id: REQUEST,
+    tenant_id: TENANT,
+    tenant_name: 'INSPR',
+    state: 'pending',
+    request_digest: DIGEST,
+    expires_at: '2026-09-27T20:00:00Z',
+    computer_name: 'studio',
+    platform: 'darwin',
+    arch: 'arm64',
+    workspace_path: '/Users/markus/work',
+    capabilities: ['managed_runs'],
+    requested_accounts: [account()],
+    verification: {
+      mode: null,
+      policy: 'read_only',
+      runs_per_account: 1,
+      max_parallel_runs: 1,
+      max_duration_seconds: 60,
+      allowance: 1,
+      unit: 'requests',
+      expires_at: '2026-09-27T20:30:00Z',
+      task: 'Reply exactly AEON_VERIFIED.',
+    },
+    computer_id: null,
+    computer_state: null,
+    principal_id: null,
+    daemon_id: null,
+    runtime_prefix: 'k1',
+    local_cleanup: 'pending',
+    local_processes: 'unconfirmed',
+    enrollments: [],
+    ...overrides,
+  } as PairingView
+}
+
+function jsonResponse(body: unknown, status = 200, headers: Record<string, string> = {}) {
+  return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json', ...headers } })
+}
+
+test('the public guide is not a session route and stays usable after sign-out', () => {
+  assert.equal(agentRouteKind('/agents/register-agent'), 'register-agent')
+  assert.equal(agentRouteKind('/agents/usage'), 'usage')
+  assert.notEqual(agentRouteKind(PUBLIC_PAIRING_GUIDE_PATH), 'session')
+  assert.equal(isPublicPairingGuide('/agents/register-agent'), true)
+  assert.equal(sessionFreezeApplies('/agents/register-agent', true), false)
+  assert.equal(sessionFreezeApplies('/agents', true), true)
+  assert.equal(sessionFreezeApplies('/signin', true), false)
+})
+
+test('the guide uses the server origin and stays available when the session is frozen', async () => {
+  sessionEnded.blocked = true
+  const urls: string[] = []
+  globalThis.fetch = async url => {
+    urls.push(String(url))
+    return jsonResponse({
+      instance_url: 'https://aeon.example/ignored',
+      default_tenant_slug: 'inspr',
+      protocol: 'pairing-v1',
+      platforms: ['darwin/arm64', 'linux/amd64'],
+      version: '260927181849.0.0',
+      device_secret: SECRET,
+    })
+  }
+  await assert.rejects(getPairingGuide(), (error: PairingError) => error instanceof PairingError && !error.message.includes(SECRET) && !String(error.next).includes(SECRET))
+  assert.deepEqual(urls, ['/api/agent-pairing/guide'])
+  assert.equal(sessionEnded.blocked, true)
+
+  globalThis.fetch = async () => jsonResponse({
+    instance_url: 'https://aeon.example/ignored',
+    default_tenant_slug: 'inspr',
+    protocol: 'pairing-v1',
+    platforms: ['darwin/arm64'],
+    version: '260927181849.0.0',
+  })
+  const guide = await getPairingGuide()
+  assert.equal(registerAgentUrl(guide), 'https://aeon.example/agents/register-agent')
+  assert.equal(JSON.stringify(guide).includes('aeon.barta.cm'), false)
+  assert.equal(guide.version, '260927181849.0.0')
+})
+
+test('lookup sends only the code and does not approve', async () => {
+  assert.equal(canonicalUserCode('123 456 789'), '123-456-789')
+  assert.equal(canonicalUserCode('123456789'), '123-456-789')
+  assert.equal(canonicalUserCode('12-345-678'), null)
+  assert.equal(canonicalUserCode('code 123-456-789'), null)
+  const calls: { url: string; body: unknown }[] = []
+  globalThis.fetch = async (url, init) => {
+    calls.push({ url: String(url), body: init?.body ? JSON.parse(String(init.body)) : undefined })
+    assert.equal(init?.credentials, 'same-origin')
+    return jsonResponse(view())
+  }
+  const found = await lookupPairing('123456789')
+  assert.equal(found.computer_name, 'studio')
+  assert.deepEqual(calls, [{ url: '/api/agent-pairing/lookup', body: { user_code: '123-456-789' } }])
+  await assert.rejects(lookupPairing('nope'), (error: PairingError) => error instanceof PairingError && error.next.includes('does not grant'))
+  assert.equal(calls.length, 1)
+})
+
+test('a frozen session cannot look up a code, and the public guide is the exception', async () => {
+  const urls: string[] = []
+  globalThis.fetch = async url => { urls.push(String(url)); return jsonResponse(view()) }
+  sessionEnded.blocked = true
+  await assert.rejects(lookupPairing('123-456-789'), (error: PairingError) => error instanceof PairingError && error.status === 401 && error.next.includes('does not grant'))
+  assert.deepEqual(urls, [])
+})
+
+test('lookup waits out a 429 and does not send another request', async () => {
+  let calls = 0
+  globalThis.fetch = async () => {
+    calls += 1
+    return jsonResponse({ error: 'Slow down', code: 'rate_limited' }, 429, { 'Retry-After': '30' })
+  }
+  await assert.rejects(lookupPairing('123-456-789'), (error: PairingError) => {
+    assert.ok(error instanceof PairingError)
+    assert.equal(error.code, 'rate_limited')
+    assert.equal(error.retryAfterSeconds, 30)
+    assert.match(error.next, /Wait 30 seconds/)
+    assert.match(error.next, /will not start a new pairing/)
+    return true
+  })
+  assert.equal(calls, 1)
+  const blocked = planLookup({ raw: '123-456-789', explicit: true, now: 1_000, typedAt: 0, inFlight: false, retryAfterUntil: 31_000 })
+  assert.equal(blocked.action, 'blocked')
+})
+
+test('debounced lookup does not repeat itself or fire while a character is still being typed', () => {
+  const waiting = planLookup({ raw: '123', explicit: false, now: 1_000, typedAt: 1_000, inFlight: false })
+  assert.equal(waiting.action, 'wait')
+  if (waiting.action === 'wait') assert.equal(waiting.delayMs, LOOKUP_DEBOUNCE_MS)
+  const send = planLookup({ raw: '123-456-789', explicit: false, now: 1_000 + LOOKUP_DEBOUNCE_MS, typedAt: 1_000, inFlight: false })
+  assert.deepEqual(send, { action: 'send', code: '123-456-789' })
+  const repeat = planLookup({ raw: '123-456-789', explicit: false, now: 9_000, typedAt: 1_000, inFlight: false, lastSentCode: '123-456-789' })
+  assert.equal(repeat.action, 'idle')
+  const again = planLookup({ raw: '123-456-789', explicit: true, now: 9_000, typedAt: 1_000, inFlight: false, lastSentCode: '123-456-789' })
+  assert.deepEqual(again, { action: 'send', code: '123-456-789' })
+  const busy = planLookup({ raw: '123-456-789', explicit: true, now: 9_000, typedAt: 1_000, inFlight: true })
+  assert.equal(busy.action, 'wait')
+})
+
+test('verification stays on the server terms and is selected by default', () => {
+  assert.equal(DEFAULT_REVIEW_CHOICE, 'one_per_harness')
+  const terms = view().verification!
+  assert.equal(verificationWarning(terms), null)
+  assert.match(formatVerification(terms), /1 requests/)
+  assert.match(formatVerification(terms), /60 seconds/)
+  assert.match(formatVerification(terms), /2026-09-27T20:30:00Z/)
+  assert.match(formatVerification(terms), /Read-only verification/)
+  assert.match(formatVerification(terms), /No repository changes or privileged actions/)
+  assert.match(formatVerification(terms), /not the vendor subscription quota/)
+  const mocked = { ...terms, max_duration_seconds: 900, expires_at: '2026-09-27T19:15:00Z' }
+  assert.match(formatVerification(mocked), /900 seconds/)
+  assert.match(formatVerification(mocked), /19:15:00Z/)
+  assert.doesNotMatch(formatVerification(mocked), /60 seconds/)
+  assert.ok(verificationWarning(mocked))
+})
+
+test('one account is preselected per harness, and a second candidate stays unselected', () => {
+  const accounts = [account(), account({ account_key: 'cursor-2', label: 'Cursor personal' }), account({ account_key: 'codex-1', harness: 'codex', label: 'Codex work' })]
+  assert.deepEqual(defaultSelectedAccountKeys(accounts), ['codex-1'])
+  const missing = planApproval({ view: view({ requested_accounts: accounts }), choice: 'one_per_harness', selectedAccountKeys: ['codex-1', 'cursor-1', 'cursor-2'], permissions: person })
+  assert.equal(missing.ok, false)
+  const chosen = planApproval({ view: view({ requested_accounts: accounts }), choice: 'one_per_harness', selectedAccountKeys: ['cursor-2', 'codex-1'], permissions: person })
+  assert.equal(chosen.ok, true)
+  if (chosen.ok) assert.deepEqual(chosen.body.selected_account_keys, ['cursor-2', 'codex-1'])
+})
+
+test('approval sends the reviewed digest and choice, never a secret or an allowance', async () => {
+  const bodies: unknown[] = []
+  globalThis.fetch = async (_url, init) => {
+    bodies.push(JSON.parse(String(init?.body)))
+    return jsonResponse(view({ state: 'approved', verification: { ...view().verification, mode: 'one_per_harness' } }))
+  }
+  await submitApproval({ view: view(), choice: 'one_per_harness', selectedAccountKeys: ['cursor-1'], permissions: person })
+  assert.deepEqual(bodies, [{
+    request_digest: DIGEST,
+    verification: 'one_per_harness',
+    selected_account_keys: ['cursor-1'],
+  }])
+  assert.equal(JSON.stringify(bodies).includes('device_secret'), false)
+  assert.equal(JSON.stringify(bodies).includes('allowance'), false)
+})
+
+test('a second click joins the same approval, and a different choice waits', async () => {
+  let calls = 0
+  let release: (response: Response) => void = () => {}
+  globalThis.fetch = () => {
+    calls += 1
+    return new Promise(resolve => { release = resolve })
+  }
+  const current = view()
+  const first = submitApproval({ view: current, choice: 'one_per_harness', selectedAccountKeys: ['cursor-1'], permissions: person })
+  const second = submitApproval({ view: current, choice: 'one_per_harness', selectedAccountKeys: ['cursor-1'], permissions: person })
+  await assert.rejects(
+    submitApproval({ view: current, choice: 'connect_only', selectedAccountKeys: ['cursor-1'], permissions: person }),
+    (error: PairingError) => error instanceof PairingError && error.code === 'busy',
+  )
+  assert.equal(calls, 1)
+  release(jsonResponse(view({ state: 'approved', verification: { ...view().verification, mode: 'one_per_harness' } })))
+  const [a, b] = await Promise.all([first, second])
+  assert.equal(a.state, 'approved')
+  assert.equal(b.state, 'approved')
+})
+
+test('expiry, denial and a changed approval do not renew authority', async () => {
+  let calls = 0
+  globalThis.fetch = async () => { calls += 1; return jsonResponse(view()) }
+  const expired = view({ state: 'expired' })
+  await assert.rejects(submitApproval({ view: expired, choice: 'one_per_harness', selectedAccountKeys: ['cursor-1'], permissions: person }), (error: PairingError) => error.next.includes('will not renew'))
+  const stale = view({ expires_at: '2020-01-01T00:00:00Z' })
+  await assert.rejects(submitApproval({ view: stale, choice: 'one_per_harness', selectedAccountKeys: ['cursor-1'], permissions: person, now: Date.parse('2026-09-27T20:00:00Z') }))
+  const denied = view({ state: 'denied' })
+  await assert.rejects(submitApproval({ view: denied, choice: 'one_per_harness', selectedAccountKeys: ['cursor-1'], permissions: person }), (error: PairingError) => error.next.includes('will not reverse'))
+  const approved = view({ state: 'approved', verification: { ...view().verification!, mode: 'connect_only' } })
+  await assert.rejects(submitApproval({ view: approved, choice: 'one_per_harness', selectedAccountKeys: ['cursor-1'], permissions: person }), (error: PairingError) => error.message.includes('different choice'))
+  assert.equal(calls, 0)
+  assert.equal(describeProgress(expired).renewsAuthority, false)
+  assert.equal(describeProgress(denied).renewsAuthority, false)
+})
+
+test('a conflict is not retried and a revision is not sent as an unknown field', async () => {
+  let calls = 0
+  const bodies: unknown[] = []
+  globalThis.fetch = async (_url, init) => {
+    calls += 1
+    bodies.push(JSON.parse(String(init?.body)))
+    return jsonResponse({ error: 'Revision changed', code: 'conflict' }, 409)
+  }
+  const current = view({ revision: 4 })
+  await assert.rejects(submitApproval({ view: current, choice: 'one_per_harness', selectedAccountKeys: ['cursor-1'], permissions: person }), (error: PairingError) => {
+    assert.equal(error.code, 'conflict')
+    assert.match(error.next, /not retried/)
+    return true
+  })
+  assert.equal(calls, 1)
+  assert.deepEqual(Object.keys(bodies[0] as object).sort(), ['request_digest', 'selected_account_keys', 'verification'])
+})
+
+test('ongoing limits are a separate person allowance and are not part of approval', async () => {
+  const draft: OngoingLimitDraft = {
+    account_key: 'cursor-1', starts_at: '2026-09-27T18:00:00Z', ends_at: '2026-09-27T23:00:00Z',
+    unit: 'requests', allowance: 4, pace_model: 'unrestricted', burst_ratio: 0,
+  }
+  assert.equal(ongoingLimitError({ ...draft, allowance: 1.5 }), 'Enter valid start and end times, a positive whole allowance, and a burst ratio from 0 to 1.')
+  const plan = planApproval({ view: view(), choice: 'ongoing_limits', selectedAccountKeys: ['cursor-1'], permissions: person, drafts: [draft] })
+  assert.equal(plan.ok, true)
+  if (plan.ok) {
+    assert.equal(plan.body.verification, 'connect_only')
+    assert.equal('allowance' in plan.body, false)
+    assert.equal('expected_revision' in plan.body, false)
+  }
+  const calls: { url: string; body: unknown }[] = []
+  globalThis.fetch = async (url, init) => {
+    calls.push({ url: String(url), body: init?.body ? JSON.parse(String(init.body)) : undefined })
+    if (String(url).endsWith('/approve')) return jsonResponse(view({ state: 'approved', computer_id: COMPUTER, enrollments: [enrollment()] }))
+    return jsonResponse({ id: 'window' })
+  }
+  await submitApproval({ view: view(), choice: 'ongoing_limits', selectedAccountKeys: ['cursor-1'], permissions: person, drafts: [draft] })
+  assert.deepEqual(calls.map(call => call.url), ['/api/agent-pairing/requests/11111111-1111-4111-8111-111111111111/approve'])
+  const windows = planOngoingLimits({
+    choice: 'ongoing_limits', drafts: [draft], selectedAccountKeys: ['cursor-1'], enrollments: [enrollment()], permissions: person,
+  })
+  assert.equal(windows.action, 'send')
+  if (windows.action === 'send') {
+    await createOngoingLimits(windows.windows, person)
+    assert.equal(calls[1]?.url, `/api/agent-accounts/${ACCOUNT}/windows`)
+    assert.equal((calls[1]?.body as { allowance: number }).allowance, 4)
+    assert.equal(JSON.stringify(calls[1]?.body).includes('quota'), false)
+  }
+  await assert.rejects(createOngoingLimits([{ accountId: ACCOUNT, body: { starts_at: draft.starts_at, ends_at: draft.ends_at, unit: 'requests', allowance: 4, pace_model: 'unrestricted', burst_ratio: 0 } }], agent))
+})
+
+test('an agent cannot approve, deny, disconnect or set limits', async () => {
+  let calls = 0
+  globalThis.fetch = async () => { calls += 1; return jsonResponse(view()) }
+  assert.equal(agent.canApprove, false)
+  assert.equal(agent.canForceStop, false)
+  assert.equal(reader.canApprove, false)
+  assert.equal(reader.canListComputers, true)
+  await assert.rejects(submitApproval({ view: view(), choice: 'one_per_harness', selectedAccountKeys: ['cursor-1'], permissions: agent }))
+  await assert.rejects(denyPairing(view(), agent))
+  await assert.rejects(disconnectComputer(view({ computer_id: COMPUTER, computer_state: 'connected' }), 'drain', agent))
+  assert.equal(calls, 0)
+})
+
+test('disconnect defaults to finishing runs, and revoke is a separate confirmation', async () => {
+  const connected = view({
+    computer_id: COMPUTER, computer_state: 'connected', state: 'redeemed', revision: 7,
+    enrollments: [enrollment(), enrollment({ account_id: ACCOUNT_2, account_key: 'codex-1', harness: 'codex', label: 'Codex work' })],
+  })
+  const finish = disconnectConfirm({ scope: 'computer', computerName: 'studio', mode: 'drain', activeRunCount: 2, otherConnectedCount: 0 })
+  assert.equal(finish.confirmLabel, 'Finish runs and disconnect')
+  assert.equal(finish.danger, false)
+  assert.match(finish.points.join(' '), /Vendor sign-in/)
+  const revoke = disconnectConfirm({ scope: 'enrollment', computerName: 'studio', mode: 'revoke_now', activeRunCount: 1, otherConnectedCount: 1, enrollment: { harness: 'cursor', label: 'Cursor work' } })
+  assert.equal(revoke.confirmLabel, 'Revoke access now')
+  assert.match(revoke.points.join(' '), /unconfirmed/)
+  assert.match(revoke.points.join(' '), /Other harnesses/)
+  const bodies: unknown[] = []
+  globalThis.fetch = async (_url, init) => {
+    bodies.push(JSON.parse(String(init?.body)))
+    return jsonResponse({ ...connected, computer_state: 'draining' })
+  }
+  await disconnectComputer(connected, 'drain', person)
+  await disconnectEnrollment(connected, ACCOUNT, 'revoke_now', person)
+  assert.deepEqual(bodies, [
+    { mode: 'drain' },
+    { mode: 'revoke_now' },
+  ])
+  assert.equal(JSON.stringify(bodies).includes('expected_revision'), false)
+})
+
+test('revocation does not claim that an offline process has stopped', () => {
+  const revoked = view({ computer_state: 'revoked', state: 'revoked', local_cleanup: 'pending', local_processes: 'unconfirmed', enrollments: [] })
+  const status = describeComputerStatus(revoked, { httpStatus: 401, heartbeatMissing: true })
+  assert.equal(status.claimsProcessStopped, false)
+  assert.match(status.detail, /unconfirmed/)
+  assert.match(status.detail, /does not show that local work has stopped/)
+  assert.match(status.next, /unconfirmed/)
+  const drained = describeComputerStatus(view({ computer_state: 'revoked', local_cleanup: 'confirmed', local_processes: 'drained' }))
+  assert.equal(drained.claimsProcessStopped, true)
+  assert.match(drained.detail, /Local cleanup confirmed/)
+  const pendingCleanup = describeComputerStatus(view({ computer_state: 'revoked', local_cleanup: 'pending', local_processes: 'drained' }))
+  assert.match(pendingCleanup.detail, /Local cleanup pending/)
+  assert.equal(pendingCleanup.claimsProcessStopped, true)
+  assert.equal(describeProgress(revoked).renewsAuthority, false)
+})
+
+test('polling honours the minimum interval, Retry-After and terminal states', () => {
+  const started = 0
+  assert.deepEqual(planPoll({ startedAt: started, now: 1_000, intervalSeconds: 1, state: 'pending' }), { action: 'wait', delayMs: MIN_POLL_INTERVAL_MS, reason: 'interval' })
+  assert.deepEqual(planPoll({ startedAt: started, now: 1_000, rateLimited: true, retryAfterSeconds: 30, state: 'pending' }), { action: 'wait', delayMs: 30_000, reason: 'retry_after' })
+  assert.equal(planPoll({ startedAt: started, now: 1_000, state: 'expired' }).action, 'stop')
+  assert.equal(planPoll({ startedAt: started, now: 1_000, state: 'denied' }).reason, 'terminal')
+  assert.equal(planPoll({ startedAt: started, now: 10 * 60 * 1000, state: 'pending' }).reason, 'lifetime')
+})
+
+test('a response secret is refused and computer lists stay on the person projection', async () => {
+  globalThis.fetch = async () => jsonResponse({ ...view(), device_secret: SECRET, runtime_token: 'aeon_k1_' + SECRET })
+  await assert.rejects(lookupPairing('123-456-789'), (error: PairingError) => error instanceof PairingError && !`${error.message} ${error.next}`.includes(SECRET))
+  globalThis.fetch = async (url, init) => {
+    assert.equal(String(url), '/api/agent-pairing/computers')
+    assert.equal(init?.method ?? 'GET', 'GET')
+    return jsonResponse({ computers: [view({ computer_id: COMPUTER, computer_state: 'connected', state: 'redeemed' })] })
+  }
+  const computers = await listPairingComputers()
+  assert.equal(computers.length, 1)
+  assert.equal(JSON.stringify(computers).includes(SECRET), false)
+  assert.equal(computers[0]?.runtime_prefix, 'k1')
+})
+
+test('deny is person-only and does not call the server once the request is already denied', async () => {
+  let calls = 0
+  globalThis.fetch = async (url, init) => {
+    calls += 1
+    assert.equal(String(url), `/api/agent-pairing/requests/${REQUEST}/deny`)
+    assert.equal(init?.method, 'POST')
+    return jsonResponse(view({ state: 'denied' }))
+  }
+  await denyPairing(view(), person)
+  assert.equal(calls, 1)
+  clearPairingClientState()
+  await denyPairing(view({ state: 'denied' }), person)
+  assert.equal(calls, 1)
+})
+
+test('approval alone is not a connected computer', () => {
+  const approved = view({ state: 'redeemed', computer_state: 'connected', enrollments: [enrollment()] })
+  const progress = describeProgress(approved)
+  assert.equal(progress.phase, 'setup')
+  assert.match(progress.detail, /does not show the daemon is connected/)
+  assert.equal(progress.renewsAuthority, false)
+  const reported = view({
+    state: 'redeemed', computer_state: 'connected', setup_state: 'connected', connectivity: 'online',
+    verification: { ...view().verification!, mode: 'connect_only' },
+  })
+  assert.equal(describeProgress(reported).phase, 'connected')
+  const unverified = view({
+    state: 'redeemed', computer_state: 'connected', setup_state: 'connected', connectivity: 'online',
+    verification: { ...view().verification!, mode: 'one_per_harness' },
+    enrollments: [enrollment()],
+  })
+  assert.notEqual(describeProgress(unverified).phase, 'connected')
+  const failed = describeProgress(view({
+    setup_state: 'connected', connectivity: 'online', state: 'redeemed', computer_state: 'connected',
+    enrollments: [enrollment({ verification_state: 'failed', verification_error: 'timed out' })],
+  }))
+  assert.equal(failed.phase, 'verify')
+  assert.match(failed.detail, /timed out/)
+  assert.match(failed.next, /not refilled/)
+  assert.equal(describeComputerStatus(approved).stateLabel, 'Setup unconfirmed')
+})
+
+test('the public guide uses the server address and stores only a human code', () => {
+  const text = publicGuideSections({
+    instance_url: 'https://aeon.example', default_tenant_slug: 'inspr', protocol: 'pairing-v1',
+    platforms: ['darwin/arm64'], version: '260927181849.0.0',
+  }).flatMap(section => section.paragraphs).join('\n')
+  assert.match(text, /https:\/\/aeon\.example\/agents\/register-agent/)
+  assert.equal(text.includes('aeon.barta.cm'), false)
+  assert.equal(text.includes('curl'), false)
+  assert.match(text, /does not grant access/)
+  assert.match(text, /darwin\/arm64/)
+  const memory = new Map<string, string>()
+  const previous = globalThis.sessionStorage
+  Object.defineProperty(globalThis, 'sessionStorage', { configurable: true, value: {
+    getItem: (key: string) => memory.get(key) ?? null,
+    setItem: (key: string, value: string) => { memory.set(key, value) },
+    removeItem: (key: string) => { memory.delete(key) },
+    clear: () => memory.clear(), key: () => null, length: 0,
+  } })
+  try {
+    assert.equal(rememberPairingCode('not-a-code'), false)
+    assert.equal(rememberPairingCode('123456789'), true)
+    assert.equal(peekPairingCode(), '123-456-789')
+    assert.equal([...memory.values()].join(','), '123-456-789')
+    assert.equal(takePairingCode(), '123-456-789')
+    assert.equal(peekPairingCode(), null)
+  } finally {
+    Object.defineProperty(globalThis, 'sessionStorage', { configurable: true, value: previous })
+  }
+})
+
+function enrollment(overrides: Record<string, unknown> = {}) {
+  return {
+    account_id: ACCOUNT,
+    account_key: 'cursor-1',
+    harness: 'cursor',
+    label: 'Cursor work',
+    model_profile_id: MODEL,
+    state: 'connected',
+    local_cleanup: 'pending',
+    verification_run_id: RUN,
+    active_run_ids: [],
+    ...overrides,
+  }
+}

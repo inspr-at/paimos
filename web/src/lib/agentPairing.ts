@@ -1,0 +1,1092 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Person pairing review for AEON-238 and AEON-239. The website looks up a code,
+// approves or denies with the signed-in person, and disconnects a computer or
+// one enrollment. Device, runtime and lifecycle secrets never enter this module.
+// Setup, redemption and tombstone reconciliation stay on the computer.
+
+import { api, resilientFetch } from './api.ts'
+import { createWindow, type AllowanceWrite } from './agents.ts'
+
+export const PUBLIC_PAIRING_GUIDE_PATH = '/agents/register-agent'
+export const LOOKUP_DEBOUNCE_MS = 400
+export const MIN_POLL_INTERVAL_MS = 5_000
+export const MAX_REQUEST_POLL_MS = 10 * 60 * 1000
+export const DEFAULT_REVIEW_CHOICE = 'one_per_harness' as const
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+const DIGEST = /^[0-9a-f]{64}$/i
+const USER_CODE = /^(\d{3})-(\d{3})-(\d{3})$/
+const SLUG = /^[a-z0-9][a-z0-9-]{0,62}$/
+const TOKEN = /^[a-z0-9][a-z0-9_-]{0,31}$/
+const PREFIX = /^[A-Za-z0-9]{1,32}$/
+
+const REQUEST_STATES = ['pending', 'approved', 'denied', 'expired', 'redeemed', 'revoked'] as const
+const COMPUTER_STATES = ['connected', 'draining', 'revoked'] as const
+const CLEANUP_STATES = ['pending', 'confirmed'] as const
+const PROCESS_STATES = ['unconfirmed', 'drained'] as const
+const VERIFICATION_MODES = ['one_per_harness', 'connect_only'] as const
+const DISCONNECT_MODES = ['drain', 'revoke_now'] as const
+const UNITS = ['requests', 'tokens', 'cost_micros'] as const
+const PACES = ['steady', 'frontload', 'unrestricted'] as const
+
+export type RequestState = (typeof REQUEST_STATES)[number]
+export type ComputerState = (typeof COMPUTER_STATES)[number]
+export type CleanupState = (typeof CLEANUP_STATES)[number]
+export type ProcessState = (typeof PROCESS_STATES)[number]
+export type VerificationMode = (typeof VERIFICATION_MODES)[number]
+export type DisconnectMode = (typeof DISCONNECT_MODES)[number]
+export type ReviewChoice = VerificationMode | 'ongoing_limits'
+export type SetupState = 'approved' | 'provisioning' | 'login_required' | 'service_conflict' | 'connected' | 'setup_failed'
+export type VerificationState = 'not_selected' | 'queued' | 'starting' | 'running' | 'waiting' | 'completed' | 'failed' | 'cancelled' | 'ownership_lost' | 'expired'
+export type Connectivity = 'online' | 'offline' | 'unknown'
+
+const SETUP_STATES: readonly SetupState[] = ['approved', 'provisioning', 'login_required', 'service_conflict', 'connected', 'setup_failed']
+const VERIFICATION_STATES: readonly VerificationState[] = ['not_selected', 'queued', 'starting', 'running', 'waiting', 'completed', 'failed', 'cancelled', 'ownership_lost', 'expired']
+const CONNECTIVITY: readonly Connectivity[] = ['online', 'offline', 'unknown']
+const VERIFICATION_ACTIVE: readonly VerificationState[] = ['queued', 'starting', 'running', 'waiting']
+const VERIFICATION_FAILED: readonly VerificationState[] = ['failed', 'cancelled', 'ownership_lost', 'expired']
+const PAIRING_CODE_KEY = 'aeon.pairingUserCode'
+
+export interface RequestedAccount {
+  account_key: string
+  harness: string
+  label: string
+  model_profile_id?: string
+}
+
+export interface VerificationTerms {
+  mode: VerificationMode | null
+  policy?: string
+  runs_per_account: number
+  max_parallel_runs: number
+  max_duration_seconds: number
+  allowance: number
+  unit: string
+  expires_at: string
+  task: string
+}
+
+export interface PairingEnrollment {
+  account_id: string
+  account_key: string
+  harness: string
+  label: string
+  model_profile_id: string
+  state: ComputerState
+  local_cleanup: CleanupState
+  verification_run_id: string | null
+  active_run_ids: string[]
+  /** Actual run result. A verification_run_id alone is not success. */
+  verification_state?: VerificationState
+  verification_error?: string | null
+}
+
+/** Public pairing projection. Secret-bearing keys are not part of this type. */
+export interface PairingView {
+  request_id: string
+  tenant_id: string
+  tenant_name: string
+  state: RequestState
+  request_digest: string
+  expires_at: string
+  computer_name: string
+  platform: string
+  arch: string
+  workspace_path: string
+  capabilities: string[]
+  requested_accounts: RequestedAccount[]
+  verification: VerificationTerms | null
+  computer_id: string | null
+  computer_state: ComputerState | null
+  principal_id: string | null
+  daemon_id: string | null
+  runtime_prefix: string | null
+  local_cleanup: CleanupState
+  local_processes: ProcessState
+  enrollments: PairingEnrollment[]
+  /** Present only when the server sends a revision the next mutation must echo. */
+  revision?: number
+  interval_seconds?: number
+  /** Local setup report. Absent or any value other than connected does not mean the daemon is connected. */
+  setup_state?: SetupState
+  setup_error?: string | null
+  last_seen_at?: string | null
+  /** Recent probe evidence. Unknown and offline do not prove that local work stopped. */
+  connectivity?: Connectivity
+}
+
+export interface PairingGuide {
+  instance_url: string
+  default_tenant_slug: string
+  protocol: string
+  platforms: string[]
+  version?: string
+}
+
+export interface ApproveBody {
+  request_digest: string
+  verification: VerificationMode
+  selected_account_keys: string[]
+}
+
+export interface OngoingLimitDraft {
+  account_key: string
+  starts_at: string
+  ends_at: string
+  unit: AllowanceWrite['unit']
+  allowance: number | null
+  pace_model: AllowanceWrite['pace_model']
+  burst_ratio: number
+}
+
+export interface PairingPermissions {
+  canLookup: boolean
+  canApprove: boolean
+  canDeny: boolean
+  canDisconnect: boolean
+  canListComputers: boolean
+  canSetOngoingLimits: boolean
+  /** The runtime daemon never receives person approval or force-stop authority. */
+  canForceStop: false
+}
+
+export class PairingError extends Error {
+  readonly status: number
+  readonly code: string
+  readonly retryAfterSeconds: number | null
+  readonly next: string
+  constructor(status: number, message: string, options: { code?: string; retryAfterSeconds?: number | null; next?: string } = {}) {
+    super(message)
+    this.name = 'PairingError'
+    this.status = status
+    this.code = options.code ?? 'unknown'
+    this.retryAfterSeconds = options.retryAfterSeconds ?? null
+    this.next = options.next ?? ''
+  }
+}
+
+const flights = new Map<string, Promise<PairingView>>()
+let flightBusy = false
+
+export function clearPairingClientState(): void {
+  flights.clear()
+  flightBusy = false
+}
+
+export function pairingPermissions(input: { permissions: readonly string[]; principalKind?: string }): PairingPermissions {
+  const person = input.principalKind === undefined || input.principalKind === 'person'
+  const manage = person && input.permissions.includes('account.manage')
+  const read = person && (manage || input.permissions.includes('account.read'))
+  return {
+    canLookup: manage,
+    canApprove: manage,
+    canDeny: manage,
+    canDisconnect: manage,
+    canListComputers: read,
+    canSetOngoingLimits: manage,
+    canForceStop: false,
+  }
+}
+
+export function isPublicPairingGuide(path: string): boolean {
+  return path === PUBLIC_PAIRING_GUIDE_PATH || path.startsWith(`${PUBLIC_PAIRING_GUIDE_PATH}/`)
+}
+
+/** Paths that must be registered before `/agents/:sessionId`, or that param captures them. */
+export function agentRouteKind(path: string): 'index' | 'usage' | 'register-agent' | 'session' | 'other' {
+  if (path === '/agents' || path === '/agents/') return 'index'
+  if (path === '/agents/usage' || path.startsWith('/agents/usage/')) return 'usage'
+  if (isPublicPairingGuide(path)) return 'register-agent'
+  if (path.startsWith('/agents/')) return 'session'
+  return 'other'
+}
+
+/** The signed-out freeze keeps protected drafts. The anonymous guide stays usable. */
+export function sessionFreezeApplies(path: string, requiresSignIn: boolean): boolean {
+  if (!requiresSignIn || path === '/signin' || isPublicPairingGuide(path)) return false
+  return true
+}
+
+export function rememberPairingCode(input: string): boolean {
+  const code = canonicalUserCode(input)
+  if (!code) return false
+  try { sessionStorage.setItem(PAIRING_CODE_KEY, code); return true } catch { return false }
+}
+
+export function peekPairingCode(): string | null {
+  try {
+    const stored = sessionStorage.getItem(PAIRING_CODE_KEY)
+    return stored && canonicalUserCode(stored) === stored ? stored : null
+  } catch { return null }
+}
+
+export function takePairingCode(): string | null {
+  const code = peekPairingCode()
+  try { sessionStorage.removeItem(PAIRING_CODE_KEY) } catch { /* Storage may be disabled. */ }
+  return code
+}
+
+export interface GuideSection { heading: string; paragraphs: string[] }
+
+/** Plain guide copy for the public route. Install commands come from the server guide, never from this page. */
+export function publicGuideSections(guide: PairingGuide | null): GuideSection[] {
+  const address = guide ? registerAgentUrl(guide) : ''
+  const platforms = guide?.platforms.length ? guide.platforms.join(', ') : ''
+  const version = guide?.version ? `Published version ${guide.version}.` : ''
+  return [
+    {
+      heading: 'Connect a computer',
+      paragraphs: [
+        'Open this page in a browser, and give the same address to the coding agent that should set the computer up.',
+        address ? `The address for this Aeon is ${address}.` : 'This Aeon has not published its address yet.',
+        version,
+      ].filter(Boolean),
+    },
+    {
+      heading: 'What the agent sets up',
+      paragraphs: [
+        'The agent detects the operating system, the installed harness, and whether an Aeon daemon is already there. It shows a short code. It does not receive your Aeon password, an API key, or a device secret.',
+        platforms ? `This Aeon publishes setup for ${platforms}.` : 'Supported computers appear here when the server publishes them.',
+        guide?.default_tenant_slug ? `The published workspace slug is ${guide.default_tenant_slug}.` : '',
+      ].filter(Boolean),
+    },
+    {
+      heading: 'What you do',
+      paragraphs: [
+        'Sign in and enter the code from the computer. Check the computer name, folder, harness and vendor account, then connect it.',
+        'Entering the code does not grant access. A signed-in person who can manage accounts has to approve it.',
+        'One short read-only verification per selected harness is the usual choice. It makes no repository changes and takes no privileged actions. You can connect only, or set an ongoing allowance afterwards. The page shows the server’s exact allowance and expiry. That allowance is the limit you enter, not the vendor subscription.',
+      ],
+    },
+  ]
+}
+
+export function canonicalUserCode(input: string): string | null {
+  const compact = input.trim().replace(/[\s-]/g, '')
+  if (!/^\d{9}$/.test(compact)) return null
+  const code = `${compact.slice(0, 3)}-${compact.slice(3, 6)}-${compact.slice(6)}`
+  return USER_CODE.test(code) ? code : null
+}
+
+export function registerAgentUrl(guide: PairingGuide): string {
+  return `${guide.instance_url}${PUBLIC_PAIRING_GUIDE_PATH}`
+}
+
+export function defaultSelectedAccountKeys(accounts: readonly RequestedAccount[]): string[] {
+  const keys: string[] = []
+  for (const group of groupAccounts(accounts).values()) {
+    if (group.length === 1) keys.push(group[0]!.account_key)
+  }
+  return keys
+}
+
+export function isAddHarness(view: PairingView): boolean {
+  return view.state === 'pending' && !!view.computer_id
+}
+
+export function activeRunIds(view: Pick<PairingView, 'enrollments'>): string[] {
+  const ids: string[] = []
+  for (const enrollment of view.enrollments) {
+    for (const id of enrollment.active_run_ids) if (!ids.includes(id)) ids.push(id)
+  }
+  return ids
+}
+
+export function verificationWarning(terms: VerificationTerms | null): string | null {
+  if (!terms) return 'The server did not include verification terms. A verification run cannot be approved until it does.'
+  const expected = terms.allowance === 1 && terms.unit === 'requests' && terms.runs_per_account === 1
+    && terms.max_parallel_runs === 1 && terms.max_duration_seconds === 60
+  return expected ? null : 'These verification limits differ from one request, one run at a time, and a 60 second maximum. Review the server values before connecting.'
+}
+
+/** Renders the server's terms. Missing numbers stay missing; nothing is filled in locally. */
+export function formatVerification(terms: VerificationTerms): string {
+  const policy = terms.policy === 'read_only' ? 'Read-only verification. ' : ''
+  return `${policy}${terms.allowance} ${terms.unit}, ${terms.runs_per_account} run per account, at most ${terms.max_parallel_runs} at a time, at most ${terms.max_duration_seconds} seconds, until ${terms.expires_at}. No repository changes or privileged actions. This is an Aeon allowance, not the vendor subscription quota.`
+}
+
+export function ongoingLimitError(draft: OngoingLimitDraft | null): string | null {
+  if (!draft) return 'Enter the ongoing allowance for each selected account.'
+  const starts = new Date(draft.starts_at)
+  const ends = new Date(draft.ends_at)
+  const unitOk = (UNITS as readonly string[]).includes(draft.unit)
+  const paceOk = (PACES as readonly string[]).includes(draft.pace_model)
+  if (!Number.isFinite(starts.getTime()) || !Number.isFinite(ends.getTime()) || ends <= starts
+    || !Number.isSafeInteger(draft.allowance) || Number(draft.allowance) < 1
+    || !unitOk || !paceOk
+    || !Number.isFinite(draft.burst_ratio) || draft.burst_ratio < 0 || draft.burst_ratio > 1) {
+    return 'Enter valid start and end times, a positive whole allowance, and a burst ratio from 0 to 1.'
+  }
+  return null
+}
+
+export function planLookup(input: {
+  raw: string
+  explicit: boolean
+  now: number
+  typedAt: number
+  inFlight: boolean
+  retryAfterUntil?: number | null
+  lastSentCode?: string | null
+}): { action: 'send'; code: string } | { action: 'wait'; delayMs: number } | { action: 'idle' } | { action: 'blocked'; message: string; next: string } {
+  if (input.inFlight) return { action: 'wait', delayMs: 0 }
+  if (input.retryAfterUntil != null && input.now < input.retryAfterUntil) {
+    const seconds = Math.max(1, Math.ceil((input.retryAfterUntil - input.now) / 1000))
+    return {
+      action: 'blocked',
+      message: 'Too many attempts.',
+      next: `Wait ${seconds} seconds, then look up the same code. Do not start a new pairing from this page.`,
+    }
+  }
+  const code = canonicalUserCode(input.raw)
+  if (!code) {
+    if (!input.explicit && input.now - input.typedAt < LOOKUP_DEBOUNCE_MS) {
+      return { action: 'wait', delayMs: LOOKUP_DEBOUNCE_MS - (input.now - input.typedAt) }
+    }
+    if (!input.explicit && input.raw.trim() === '') return { action: 'idle' }
+    return {
+      action: 'blocked',
+      message: 'Enter the 9-digit code from the computer, with or without dashes.',
+      next: 'A code match does not grant access. Review the request after you are signed in, then connect the computer.',
+    }
+  }
+  if (!input.explicit && input.now - input.typedAt < LOOKUP_DEBOUNCE_MS) {
+    return { action: 'wait', delayMs: input.typedAt + LOOKUP_DEBOUNCE_MS - input.now }
+  }
+  if (!input.explicit && input.lastSentCode === code) return { action: 'idle' }
+  return { action: 'send', code }
+}
+
+export function planApproval(input: {
+  view: PairingView
+  choice: ReviewChoice
+  selectedAccountKeys: readonly string[]
+  permissions: PairingPermissions
+  now?: number
+  drafts?: readonly OngoingLimitDraft[]
+}): { ok: true; body: ApproveBody } | { ok: false; message: string; next: string } {
+  if (!input.permissions.canApprove) {
+    return { ok: false, message: 'Only a signed-in person who can manage accounts can connect a computer.', next: 'Ask a workspace admin. An agent session cannot approve this request.' }
+  }
+  const now = input.now ?? Date.now()
+  const expired = Number.isFinite(Date.parse(input.view.expires_at)) && Date.parse(input.view.expires_at) <= now
+  if (input.view.state === 'expired' || expired && input.view.state === 'pending') {
+    return { ok: false, message: 'This code has expired.', next: 'Start setup again on the computer and enter the new code. This page will not renew the old request.' }
+  }
+  if (input.view.state === 'denied') {
+    return { ok: false, message: 'This request was denied.', next: 'Start a new pairing on the computer if you still want to connect it. This page will not reverse the denial.' }
+  }
+  if (input.view.state === 'revoked' || input.view.computer_state === 'revoked') {
+    return { ok: false, message: 'This computer is already disconnected.', next: 'Pair it again with a new approval if you want to reconnect. Old access stays revoked.' }
+  }
+  if (input.view.state === 'redeemed') {
+    return { ok: false, message: 'This computer already finished pairing.', next: 'Connecting again does not start another verification or refill its allowance.' }
+  }
+  const verification = input.choice === 'one_per_harness' ? 'one_per_harness' : 'connect_only'
+  if (input.view.state === 'approved' && input.view.verification?.mode && input.view.verification.mode !== verification) {
+    return { ok: false, message: 'This request was already approved with a different choice.', next: 'Look it up again. Changing the choice now conflicts with the approval already recorded.' }
+  }
+  if (input.view.state !== 'pending' && input.view.state !== 'approved') {
+    return { ok: false, message: 'This request can no longer be approved.', next: 'Look it up again and review the current details.' }
+  }
+  const selected = orderedSelection(input.view.requested_accounts, input.selectedAccountKeys)
+  if (!selected.ok) return selected
+  if (verification === 'one_per_harness') {
+    if (!input.view.verification) {
+      return { ok: false, message: 'The server did not include verification terms.', next: 'Choose Connect only, or look the code up again. This page will not invent a verification allowance.' }
+    }
+  }
+  if (input.choice === 'ongoing_limits') {
+    for (const key of selected.keys) {
+      const draft = input.drafts?.find(item => item.account_key === key) ?? null
+      const problem = ongoingLimitError(draft)
+      if (problem) return { ok: false, message: problem, next: 'Ongoing limits are saved separately, by you, after the computer is approved. They are not part of the pairing grant.' }
+    }
+  }
+  const body: ApproveBody = {
+    request_digest: input.view.request_digest,
+    verification,
+    selected_account_keys: selected.keys,
+  }
+  return { ok: true, body }
+}
+
+export function planOngoingLimits(input: {
+  choice: ReviewChoice
+  drafts: readonly OngoingLimitDraft[]
+  selectedAccountKeys: readonly string[]
+  enrollments: readonly PairingEnrollment[]
+  permissions: PairingPermissions
+}): { action: 'skip' } | { action: 'send'; windows: { accountId: string; body: AllowanceWrite }[] } | { action: 'blocked'; message: string; next: string } {
+  if (input.choice !== 'ongoing_limits') return { action: 'skip' }
+  if (!input.permissions.canSetOngoingLimits) {
+    return { action: 'blocked', message: 'Only a signed-in person who can manage accounts can set ongoing limits.', next: 'The paired computer cannot create its own allowance.' }
+  }
+  const windows: { accountId: string; body: AllowanceWrite }[] = []
+  for (const key of input.selectedAccountKeys) {
+    const enrollment = input.enrollments.find(item => item.account_key === key && item.state !== 'revoked')
+    if (!enrollment) {
+      return { action: 'blocked', message: 'The approved account is not available yet.', next: 'Wait until setup finishes, then set the allowance. Do not approve the pairing again.' }
+    }
+    const draft = input.drafts.find(item => item.account_key === key) ?? null
+    const problem = ongoingLimitError(draft)
+    if (problem || !draft || draft.allowance == null) return { action: 'blocked', message: problem ?? 'Enter the ongoing allowance.', next: 'Set the allowance you intend. Aeon does not infer it from the vendor subscription.' }
+    windows.push({
+      accountId: enrollment.account_id,
+      body: {
+        starts_at: new Date(draft.starts_at).toISOString(),
+        ends_at: new Date(draft.ends_at).toISOString(),
+        unit: draft.unit,
+        allowance: draft.allowance,
+        pace_model: draft.pace_model,
+        burst_ratio: draft.burst_ratio,
+      },
+    })
+  }
+  if (!windows.length) return { action: 'blocked', message: 'Choose at least one account before setting limits.', next: 'Ongoing limits apply only to accounts you selected for this pairing.' }
+  return { action: 'send', windows }
+}
+
+export function planPoll(input: {
+  startedAt: number
+  now: number
+  intervalSeconds?: number | null
+  retryAfterSeconds?: number | null
+  state?: string | null
+  rateLimited?: boolean
+}): { action: 'wait' | 'stop'; delayMs: number; reason: 'interval' | 'retry_after' | 'lifetime' | 'terminal' } {
+  if (input.state === 'denied' || input.state === 'expired' || input.state === 'revoked') {
+    return { action: 'stop', delayMs: 0, reason: 'terminal' }
+  }
+  if (input.now - input.startedAt >= MAX_REQUEST_POLL_MS) return { action: 'stop', delayMs: 0, reason: 'lifetime' }
+  if (input.rateLimited) {
+    const seconds = input.retryAfterSeconds ?? MIN_POLL_INTERVAL_MS / 1000
+    return { action: 'wait', delayMs: Math.max(MIN_POLL_INTERVAL_MS, seconds * 1000), reason: 'retry_after' }
+  }
+  const seconds = input.intervalSeconds ?? MIN_POLL_INTERVAL_MS / 1000
+  return { action: 'wait', delayMs: Math.max(MIN_POLL_INTERVAL_MS, seconds * 1000), reason: 'interval' }
+}
+
+export interface PairingProgress {
+  phase: 'enter_code' | 'review' | 'setup' | 'verify' | 'connected' | 'draining' | 'denied' | 'expired' | 'revoked'
+  title: string
+  detail: string
+  next: string
+  renewsAuthority: false
+}
+
+export function describeProgress(view: PairingView | null, now = Date.now()): PairingProgress {
+  if (!view) {
+    return { phase: 'enter_code', title: 'Enter the code from the computer', detail: 'The code identifies the request. It does not connect the computer.', next: 'Sign in, look up the code, and review the computer before connecting it.', renewsAuthority: false }
+  }
+  const expired = view.state === 'expired' || (view.state === 'pending' && Number.isFinite(Date.parse(view.expires_at)) && Date.parse(view.expires_at) <= now)
+  if (expired) {
+    return { phase: 'expired', title: 'This code has expired', detail: `${view.computer_name} was not connected.`, next: 'Start setup again on the computer. This page will not renew the expired request.', renewsAuthority: false }
+  }
+  if (view.state === 'denied') {
+    return { phase: 'denied', title: 'The request was denied', detail: `${view.computer_name} was not connected.`, next: 'Start a new pairing on the computer if you still want to connect it.', renewsAuthority: false }
+  }
+  if (view.state === 'revoked' || view.computer_state === 'revoked') {
+    const status = describeComputerStatus(view)
+    return { phase: 'revoked', title: 'Access is revoked', detail: status.detail, next: status.next, renewsAuthority: false }
+  }
+  if (view.state === 'pending') {
+    const adding = isAddHarness(view) ? ' This adds a harness on the existing computer.' : ''
+    return { phase: 'review', title: 'Review this computer', detail: `${view.computer_name} · ${view.platform}/${view.arch} · ${view.workspace_path}.${adding}`, next: 'Connect the computer only after the tenant, folder, harnesses and accounts match what you expect.', renewsAuthority: false }
+  }
+  if (view.computer_state === 'draining' || view.enrollments.some(item => item.state === 'draining')) {
+    const runs = activeRunIds(view)
+    return { phase: 'draining', title: 'Finishing current work', detail: runs.length ? `${runs.length} run${runs.length === 1 ? '' : 's'} still active. New work is not accepted.` : 'New work is not accepted. No active runs were reported.', next: 'Disconnect completes after those runs finish. This page will not stop them.', renewsAuthority: false }
+  }
+  return setupProgress(view)
+}
+
+function setupProgress(view: PairingView): PairingProgress {
+  const progress = view.setup_state
+  if (view.connectivity === 'offline' && progress !== 'login_required' && progress !== 'service_conflict' && progress !== 'setup_failed') {
+    return { phase: 'setup', title: 'The computer is offline', detail: `${localProcessSentence(view)} Being offline does not show that work has stopped.`, next: 'Server access follows the pairing record. Accounting for runs that have not settled stays unconfirmed.', renewsAuthority: false }
+  }
+  if (progress === 'login_required') {
+    return { phase: 'setup', title: 'Vendor sign-in is needed', detail: setupErrorText(view) || 'Use that vendor’s own login on the computer. Aeon does not take the vendor password.', next: 'Finish the vendor sign-in, then let setup continue. This page will not approve the pairing again.', renewsAuthority: false }
+  }
+  if (progress === 'service_conflict' || progress === 'setup_failed') {
+    return { phase: 'setup', title: progress === 'service_conflict' ? 'Setup found a conflict' : 'Setup did not finish', detail: setupErrorText(view) || 'The computer reported that setup did not finish.', next: 'Resolve it on the computer. Approving again does not replace another service or refill a verification.', renewsAuthority: false }
+  }
+  if (view.enrollments.some(item => item.verification_state != null && (VERIFICATION_FAILED as readonly string[]).includes(item.verification_state))) {
+    const reason = view.enrollments.find(item => item.verification_error)?.verification_error
+    return { phase: 'verify', title: 'Verification did not succeed', detail: reason || 'The verification run did not succeed.', next: 'The one-time allowance was not refilled. A new verification needs a new pairing approval.', renewsAuthority: false }
+  }
+  if (view.enrollments.some(item => item.verification_state != null && (VERIFICATION_ACTIVE as readonly string[]).includes(item.verification_state) || item.active_run_ids.length > 0)) {
+    return { phase: 'verify', title: 'Verification is running', detail: 'One short read-only run was approved for each selected account. A run id alone is not a finished verification.', next: 'Further work needs a separate ongoing allowance. This page will not start another run.', renewsAuthority: false }
+  }
+  if (progress === 'provisioning' || progress === 'approved') {
+    return { phase: 'setup', title: 'Setting up', detail: 'Approval is recorded. The computer has not confirmed that setup finished.', next: 'Wait for the computer. Looking the code up again does not grant a second approval.', renewsAuthority: false }
+  }
+  const verificationAsked = view.verification?.mode === 'one_per_harness'
+  const verificationDone = !verificationAsked || (view.enrollments.length > 0 && view.enrollments.every(item => item.state === 'revoked' || item.verification_state === 'completed'))
+  if (progress === 'connected' && verificationDone && view.connectivity === 'online') {
+    return { phase: 'connected', title: 'Connected', detail: 'The computer reported that setup finished, and a recent probe succeeded.', next: 'Add another harness from this computer, or set an ongoing allowance when you want more work.', renewsAuthority: false }
+  }
+  if (progress === 'connected' && verificationDone) {
+    return { phase: 'setup', title: 'Setup finished', detail: 'The computer reported that setup finished. Current connectivity is unknown.', next: 'Wait for a probe before treating the daemon as online. This page will not start another verification.', renewsAuthority: false }
+  }
+  if (progress === 'connected') {
+    return { phase: 'verify', title: 'The computer reported in', detail: 'Setup was confirmed. The verification result is not a success yet.', next: 'Wait for the verification result. A run id does not refill or repeat the allowance.', renewsAuthority: false }
+  }
+  if (view.state === 'approved' || view.state === 'redeemed' || view.computer_state === 'connected') {
+    return { phase: 'setup', title: 'Approved', detail: `${view.computer_name} is approved. That does not show the daemon is connected or that setup finished.`, next: 'Wait for the computer to report setup. This page will not start another verification.', renewsAuthority: false }
+  }
+  return { phase: 'setup', title: 'Approved, waiting for the computer', detail: `${view.computer_name} can finish setup with the approval it already has.`, next: 'Keep this approval. Looking the code up again does not grant a second one.', renewsAuthority: false }
+}
+
+function setupErrorText(view: PairingView): string {
+  return view.setup_error?.trim() || ''
+}
+
+function localProcessSentence(view: Pick<PairingView, 'local_processes' | 'enrollments'>): string {
+  const runs = activeRunIds(view).length
+  if (view.local_processes === 'drained' && runs) return 'Local processes are reported drained. Server accounting for the remaining runs is still unconfirmed.'
+  if (view.local_processes === 'drained') return 'Local processes are reported drained.'
+  return 'Local processes are unconfirmed.'
+}
+
+export interface ComputerStatusCopy {
+  stateLabel: string
+  cleanupLabel: string
+  processLabel: string
+  claimsProcessStopped: boolean
+  detail: string
+  next: string
+}
+
+export function describeComputerStatus(view: Pick<PairingView, 'computer_state' | 'local_cleanup' | 'local_processes' | 'enrollments' | 'setup_state' | 'connectivity'>, hints: { httpStatus?: number; heartbeatMissing?: boolean } = {}): ComputerStatusCopy {
+  let stateLabel = view.computer_state === 'connected' ? 'Connected' : view.computer_state === 'draining' ? 'Draining' : view.computer_state === 'revoked' ? 'Revoked' : 'Not connected yet'
+  const cleanupLabel = view.local_cleanup === 'confirmed' ? 'Local cleanup confirmed' : 'Local cleanup pending'
+  const processesUnconfirmed = view.local_processes !== 'drained' || hints.heartbeatMissing === true || hints.httpStatus === 401
+  const processLabel = processesUnconfirmed ? 'Local processes unconfirmed' : 'Local processes drained'
+  const claimsProcessStopped = !processesUnconfirmed
+  let detail = `${stateLabel}. ${cleanupLabel}. ${processLabel}.`
+  let next = 'Review the computer and try the action again.'
+  if (view.computer_state === 'draining') {
+    const count = activeRunIds(view).length
+    detail = count ? `Draining. ${count} run${count === 1 ? '' : 's'} still active. ${cleanupLabel}.` : `Draining. No active runs were reported. ${cleanupLabel}.`
+    next = 'New work stays stopped. Current runs are left to finish.'
+  } else if (view.computer_state === 'revoked') {
+    detail = `Access is revoked on the server. ${cleanupLabel}. ${processLabel}. ${localProcessSentence(view)}`
+    next = processesUnconfirmed || activeRunIds(view).length
+      ? 'Revoking server access does not show that work on the computer has stopped, and it does not settle accounting for runs that are still open.'
+      : 'Pair the computer again only with a new approval. The old grant stays revoked.'
+  } else if (view.computer_state === 'connected') {
+    if (view.setup_state === 'connected' && view.connectivity === 'online') {
+      detail = 'Connected. The computer confirmed that setup finished, and a recent probe succeeded.'
+      next = 'Disconnect the computer or remove one harness when you want to unpair it.'
+    } else if (view.setup_state === 'connected') {
+      stateLabel = view.connectivity === 'offline' ? 'Offline' : 'Setup finished'
+      detail = view.connectivity === 'offline'
+        ? `Setup was reported complete. The computer is offline. ${localProcessSentence(view)}`
+        : 'The computer reported that setup finished. Current connectivity is unknown.'
+      next = 'A finished setup report is not a live probe. Local processes stay unconfirmed until the computer says otherwise.'
+    } else {
+      stateLabel = 'Setup unconfirmed'
+      detail = 'The pairing record is open. The computer has not confirmed that setup finished.'
+      next = 'Wait for a setup report. Approval alone does not mean the daemon is connected.'
+    }
+  }
+  if (hints.httpStatus === 401 || hints.heartbeatMissing) {
+    detail = `${detail} A rejected sign-in or a missing heartbeat does not show that local work has stopped.`
+    next = 'Treat local processes as unconfirmed until the computer confirms cleanup.'
+  }
+  return { stateLabel, cleanupLabel, processLabel, claimsProcessStopped, detail, next }
+}
+
+export interface DisconnectConfirm {
+  title: string
+  body: string
+  points: string[]
+  confirmLabel: string
+  cancelLabel: string
+  danger: boolean
+}
+
+export function disconnectConfirm(input: {
+  scope: 'computer' | 'enrollment'
+  computerName: string
+  mode: DisconnectMode
+  activeRunCount: number
+  otherConnectedCount: number
+  enrollment?: { harness: string; label: string }
+}): DisconnectConfirm {
+  const target = input.scope === 'computer'
+    ? input.computerName
+    : `${input.enrollment?.label ?? 'This harness'} on ${input.computerName}`
+  const points = [
+    'Vendor sign-in, the vendor subscription, and project files stay on the computer.',
+  ]
+  if (input.mode === 'drain') {
+    points.push(input.activeRunCount
+      ? `${input.activeRunCount} active run${input.activeRunCount === 1 ? '' : 's'} will finish. No new work is accepted.`
+      : 'No active runs were reported. No new work is accepted.')
+  } else {
+    points.push('Server access ends now, including when the computer is offline.')
+    points.push('Local processes stay unconfirmed. This does not show that they have stopped.')
+  }
+  if (input.scope === 'enrollment' && input.otherConnectedCount > 0) {
+    points.push('Other harnesses on this computer stay connected.')
+  }
+  if (input.scope === 'enrollment' && input.otherConnectedCount === 0) {
+    points.push('This is the last harness still connected. The Aeon service is removed only after its own work has drained.')
+  }
+  return {
+    title: input.mode === 'drain' ? `Disconnect ${target}` : `Revoke access for ${target}`,
+    body: input.mode === 'drain'
+      ? 'Aeon stops new work and disconnects after current runs finish.'
+      : 'Aeon revokes this access now. Use this only when the computer is lost or must lose access before its work finishes.',
+    points,
+    confirmLabel: input.mode === 'drain' ? 'Finish runs and disconnect' : 'Revoke access now',
+    cancelLabel: 'Cancel',
+    danger: input.mode === 'revoke_now',
+  }
+}
+
+export function retryAfterSeconds(header: string | null, now = Date.now()): number {
+  if (!header) return MIN_POLL_INTERVAL_MS / 1000
+  const seconds = Number(header)
+  if (Number.isFinite(seconds) && seconds >= 0) return Math.max(MIN_POLL_INTERVAL_MS / 1000, seconds)
+  const when = Date.parse(header)
+  if (Number.isFinite(when)) return Math.max(MIN_POLL_INTERVAL_MS / 1000, Math.ceil((when - now) / 1000))
+  return MIN_POLL_INTERVAL_MS / 1000
+}
+
+export async function getPairingGuide(signal?: AbortSignal): Promise<PairingGuide> {
+  const response = await resilientFetch('/api/agent-pairing/guide', {
+    method: 'GET', credentials: 'same-origin', cache: 'no-store', signal,
+    headers: { Accept: 'application/json' },
+  })
+  const data = await readBody(response)
+  if (!response.ok) throw httpError(response, data)
+  assertNoSecrets(data)
+  return parseGuide(data)
+}
+
+export async function lookupPairing(userCode: string, signal?: AbortSignal): Promise<PairingView> {
+  const code = canonicalUserCode(userCode)
+  if (!code) throw new PairingError(0, 'Enter the 9-digit code from the computer, with or without dashes.', {
+    code: 'invalid_request', next: 'A code match does not grant access.',
+  })
+  return personJson('/agent-pairing/lookup', 'POST', { user_code: code }, signal).then(parseView)
+}
+
+export async function submitApproval(input: {
+  view: PairingView
+  choice: ReviewChoice
+  selectedAccountKeys: readonly string[]
+  permissions: PairingPermissions
+  now?: number
+  drafts?: readonly OngoingLimitDraft[]
+  signal?: AbortSignal
+}): Promise<PairingView> {
+  const plan = planApproval(input)
+  if (!plan.ok) throw new PairingError(0, plan.message, { code: 'blocked', next: plan.next })
+  const key = `approve:${input.view.request_id}:${JSON.stringify(plan.body)}`
+  return oneFlight(key, () => personJson(`/agent-pairing/requests/${pathId(input.view.request_id)}/approve`, 'POST', plan.body, input.signal).then(parseView))
+}
+
+export async function denyPairing(view: PairingView, permissions: PairingPermissions, signal?: AbortSignal): Promise<PairingView> {
+  if (!permissions.canDeny) throw new PairingError(0, 'Only a signed-in person who can manage accounts can deny a pairing.', { code: 'forbidden', next: 'An agent session cannot deny it either.' })
+  if (view.state === 'denied') return view
+  if (view.state !== 'pending') throw new PairingError(0, 'This request can no longer be denied.', { code: 'blocked', next: 'Look it up again and review the current state.' })
+  return oneFlight(`deny:${view.request_id}`, () => personJson(`/agent-pairing/requests/${pathId(view.request_id)}/deny`, 'POST', {}, signal).then(parseView))
+}
+
+export async function listPairingComputers(signal?: AbortSignal): Promise<PairingView[]> {
+  const data = await personJson('/agent-pairing/computers', 'GET', undefined, signal)
+  const record = asRecord(data, 'computers')
+  if (!Array.isArray(record.computers)) invalid('computers')
+  return record.computers.map(parseView)
+}
+
+export async function getPairingComputer(computerId: string, signal?: AbortSignal): Promise<PairingView> {
+  return personJson(`/agent-pairing/computers/${pathId(computerId)}`, 'GET', undefined, signal).then(parseView)
+}
+
+export async function disconnectComputer(view: PairingView, mode: DisconnectMode, permissions: PairingPermissions, signal?: AbortSignal): Promise<PairingView> {
+  assertDisconnect(view.computer_id, mode, permissions, view.computer_state)
+  return oneFlight(`disconnect:${view.computer_id}:${mode}`, () => personJson(`/agent-pairing/computers/${pathId(view.computer_id!)}/disconnect`, 'POST', { mode }, signal).then(parseView))
+}
+
+export async function disconnectEnrollment(view: PairingView, accountId: string, mode: DisconnectMode, permissions: PairingPermissions, signal?: AbortSignal): Promise<PairingView> {
+  if (!view.computer_id) throw new PairingError(0, 'This enrollment is not on a connected computer.', { code: 'invalid_request', next: 'Refresh the computer list and choose the enrollment again.' })
+  const enrollment = view.enrollments.find(item => item.account_id === accountId)
+  if (!enrollment) throw new PairingError(0, 'That harness is not on this computer.', { code: 'not_found', next: 'Refresh the computer and choose the harness again.' })
+  assertDisconnect(view.computer_id, mode, permissions, enrollment.state)
+  const path = `/agent-pairing/computers/${pathId(view.computer_id)}/enrollments/${pathId(accountId)}/disconnect`
+  return oneFlight(`disconnect:${view.computer_id}:${accountId}:${mode}`, () => personJson(path, 'POST', { mode }, signal).then(parseView))
+}
+
+export async function createOngoingLimits(windows: readonly { accountId: string; body: AllowanceWrite }[], permissions: PairingPermissions): Promise<{ created: string[] }> {
+  if (!permissions.canSetOngoingLimits) {
+    throw new PairingError(0, 'Only a signed-in person who can manage accounts can set ongoing limits.', { code: 'forbidden', next: 'The paired computer cannot create its own allowance.' })
+  }
+  const created: string[] = []
+  for (const item of windows) {
+    try {
+      await createWindow(item.accountId, item.body)
+      created.push(item.accountId)
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : 'The allowance was not saved.'
+      throw new PairingError(0, reason, {
+        code: 'allowance_failed',
+        next: created.length
+          ? `Saved limits for ${created.length} account${created.length === 1 ? '' : 's'}. The remaining accounts still need an allowance. Do not approve the pairing again.`
+          : 'The computer stays connected. Set the allowance again for this account. Do not approve the pairing again.',
+      })
+    }
+  }
+  return { created }
+}
+
+function assertDisconnect(computerId: string | null, mode: DisconnectMode, permissions: PairingPermissions, state: ComputerState | null): void {
+  if (!permissions.canDisconnect) throw new PairingError(0, 'Only a signed-in person who can manage accounts can disconnect a computer.', { code: 'forbidden', next: 'An agent session cannot force this to stop.' })
+  if (!computerId) throw new PairingError(0, 'This request has no computer to disconnect yet.', { code: 'invalid_request', next: 'Deny the pending request, or wait until the computer is connected.' })
+  if (!(DISCONNECT_MODES as readonly string[]).includes(mode)) throw new PairingError(0, 'Choose finish-and-disconnect, or revoke access now.', { code: 'invalid_request', next: 'Those are separate confirmations.' })
+  if (state === 'revoked') throw new PairingError(0, 'Access is already revoked.', { code: 'blocked', next: 'Local cleanup stays pending until the computer confirms it. Revoking again does not stop unconfirmed processes.' })
+}
+
+async function oneFlight(key: string, run: () => Promise<PairingView>): Promise<PairingView> {
+  const existing = flights.get(key)
+  if (existing) return existing
+  if (flightBusy) {
+    throw new PairingError(0, 'Another pairing change is still being sent.', { code: 'busy', next: 'Wait for it to finish, then review the result before trying again.' })
+  }
+  flightBusy = true
+  const promise = run().finally(() => {
+    flightBusy = false
+    flights.delete(key)
+  })
+  flights.set(key, promise)
+  return promise
+}
+
+async function personJson(path: string, method: string, body?: unknown, signal?: AbortSignal): Promise<unknown> {
+  if (body !== undefined) assertNoSecrets(body)
+  const response = await api(path, {
+    method, ...(signal ? { signal } : {}),
+    ...(body === undefined ? {} : { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
+  })
+  const data = await readBody(response)
+  if (!response.ok) throw httpError(response, data)
+  assertNoSecrets(data)
+  return data
+}
+
+async function readBody(response: Response): Promise<unknown> {
+  return response.json().catch(() => ({}))
+}
+
+function httpError(response: Response, data: unknown): PairingError {
+  const body = data && typeof data === 'object' ? data as Record<string, unknown> : {}
+  const code = typeof body.code === 'string' && body.code ? body.code : codeForStatus(response.status)
+  const serverMessage = typeof body.error === 'string' && body.error ? body.error : typeof body.message === 'string' && body.message ? body.message : ''
+  const retry = response.status === 429 ? retryAfterSeconds(response.headers.get('Retry-After')) : null
+  const explained = explain(response.status, code, serverMessage, retry)
+  return new PairingError(response.status, explained.message, { code, retryAfterSeconds: retry, next: explained.next })
+}
+
+function codeForStatus(status: number): string {
+  if (status === 401) return 'forbidden'
+  if (status === 403) return 'forbidden'
+  if (status === 404) return 'not_found'
+  if (status === 409) return 'conflict'
+  if (status === 429) return 'rate_limited'
+  return 'internal_error'
+}
+
+function explain(status: number, code: string, serverMessage: string, retryAfter: number | null): { message: string; next: string } {
+  const fallback: Record<string, { message: string; next: string }> = {
+    rate_limited: {
+      message: 'Too many attempts.',
+      next: `Wait ${retryAfter ?? MIN_POLL_INTERVAL_MS / 1000} seconds, then try the same code again. This page will not start a new pairing.`,
+    },
+    expired_token: {
+      message: 'This code has expired.',
+      next: 'Start setup again on the computer and enter the new code. This page will not renew the old request.',
+    },
+    access_denied: {
+      message: 'This request was denied.',
+      next: 'Start a new pairing on the computer if you still want to connect it. This page will not reverse the denial.',
+    },
+    forbidden: {
+      message: status === 401 ? 'Your session has ended.' : 'You do not have permission to manage accounts.',
+      next: status === 401
+        ? 'Sign in again. Entering the code does not grant access.'
+        : 'Ask a workspace admin. An agent session cannot approve, deny or disconnect.',
+    },
+    not_found: {
+      message: 'No pairing request uses that code.',
+      next: 'Check the code on the computer. Looking it up does not create a request.',
+    },
+    conflict: {
+      message: 'This pairing changed.',
+      next: 'Look it up again and review the current details. The previous action was not retried.',
+    },
+    pairing_revoked: {
+      message: 'This computer is already disconnected.',
+      next: 'Pair it again with a new approval if you want to reconnect. Old access stays revoked.',
+    },
+    enrollment_revoked: {
+      message: 'That harness is already removed.',
+      next: 'The other harnesses stay as they are. Add a harness only with a new approval.',
+    },
+    enrollment_draining: {
+      message: 'That harness is finishing current work.',
+      next: 'Wait for its runs to finish. This page will not stop them.',
+    },
+    authorization_pending: {
+      message: 'The computer is still waiting for approval.',
+      next: 'Review the request and connect it explicitly. Entering the code again does not approve it.',
+    },
+  }
+  const known = fallback[code]
+  return {
+    message: serverMessage || known?.message || `The pairing request failed (${status || 'local'}).`,
+    next: known?.next || 'Review the details and try again. This page will not renew an expired or denied request.',
+  }
+}
+
+function parseGuide(data: unknown): PairingGuide {
+  const record = asRecord(data, 'guide')
+  const instance = httpOrigin(record.instance_url, 'instance_url')
+  const slug = asString(record.default_tenant_slug, 'default_tenant_slug')
+  if (!SLUG.test(slug)) invalid('default_tenant_slug')
+  const protocol = asString(record.protocol, 'protocol')
+  if (!Array.isArray(record.platforms) || record.platforms.length === 0 || record.platforms.some(item => typeof item !== 'string' || !item)) invalid('platforms')
+  const guide: PairingGuide = { instance_url: instance, default_tenant_slug: slug, protocol, platforms: record.platforms.map(String) }
+  if (typeof record.version === 'string' && record.version) guide.version = record.version
+  return guide
+}
+
+function parseView(data: unknown): PairingView {
+  const record = asRecord(data, 'pairing')
+  const view: PairingView = {
+    request_id: uuid(record.request_id, 'request_id'),
+    tenant_id: uuid(record.tenant_id, 'tenant_id'),
+    tenant_name: bounded(record.tenant_name, 'tenant_name', 200),
+    state: oneOf(record.state, REQUEST_STATES, 'state'),
+    request_digest: digest(record.request_digest),
+    expires_at: timestamp(record.expires_at, 'expires_at'),
+    computer_name: bounded(record.computer_name, 'computer_name', 128),
+    platform: token(record.platform, 'platform'),
+    arch: token(record.arch, 'arch'),
+    workspace_path: bounded(record.workspace_path, 'workspace_path', 1024),
+    capabilities: stringList(record.capabilities, 'capabilities'),
+    requested_accounts: accounts(record.requested_accounts),
+    verification: record.verification == null ? null : verification(record.verification),
+    computer_id: optionalUuid(record.computer_id, 'computer_id'),
+    computer_state: record.computer_state == null ? null : oneOf(record.computer_state, COMPUTER_STATES, 'computer_state'),
+    principal_id: optionalUuid(record.principal_id, 'principal_id'),
+    daemon_id: optionalBounded(record.daemon_id, 'daemon_id', 128),
+    runtime_prefix: publicPrefix(record.runtime_prefix),
+    local_cleanup: oneOf(record.local_cleanup, CLEANUP_STATES, 'local_cleanup'),
+    local_processes: oneOf(record.local_processes, PROCESS_STATES, 'local_processes'),
+    enrollments: enrollments(record.enrollments),
+  }
+  if (typeof record.revision === 'number' && Number.isSafeInteger(record.revision) && record.revision >= 0) view.revision = record.revision
+  if (typeof record.interval_seconds === 'number' && record.interval_seconds > 0) view.interval_seconds = record.interval_seconds
+  const setup = optionalEnum(record.setup_state, SETUP_STATES)
+  if (setup) view.setup_state = setup
+  if (typeof record.setup_error === 'string' && record.setup_error) view.setup_error = record.setup_error.slice(0, 500)
+  else if (record.setup_error === null || record.setup_error === '') view.setup_error = null
+  if (record.last_seen_at === null) view.last_seen_at = null
+  else if (typeof record.last_seen_at === 'string' && Number.isFinite(Date.parse(record.last_seen_at))) view.last_seen_at = record.last_seen_at
+  const connectivity = optionalEnum(record.connectivity, CONNECTIVITY)
+  if (connectivity) view.connectivity = connectivity
+  return view
+}
+
+function accounts(value: unknown): RequestedAccount[] {
+  if (!Array.isArray(value)) invalid('requested_accounts')
+  return value.map(item => {
+    const record = asRecord(item, 'requested_accounts')
+    const account: RequestedAccount = {
+      account_key: bounded(record.account_key, 'account_key', 128),
+      harness: token(record.harness, 'harness'),
+      label: bounded(record.label, 'label', 128),
+    }
+    if (record.model_profile_id != null) account.model_profile_id = uuid(record.model_profile_id, 'model_profile_id')
+    return account
+  })
+}
+
+function enrollments(value: unknown): PairingEnrollment[] {
+  if (!Array.isArray(value)) invalid('enrollments')
+  return value.map(item => {
+    const record = asRecord(item, 'enrollments')
+    return {
+      account_id: uuid(record.account_id, 'account_id'),
+      account_key: bounded(record.account_key, 'account_key', 128),
+      harness: token(record.harness, 'harness'),
+      label: bounded(record.label, 'label', 128),
+      model_profile_id: uuid(record.model_profile_id, 'model_profile_id'),
+      state: oneOf(record.state, COMPUTER_STATES, 'enrollment.state'),
+      local_cleanup: oneOf(record.local_cleanup, CLEANUP_STATES, 'enrollment.local_cleanup'),
+      verification_run_id: optionalUuid(record.verification_run_id, 'verification_run_id'),
+      active_run_ids: uuidList(record.active_run_ids, 'active_run_ids'),
+      ...optionalVerification(record),
+    }
+  })
+}
+
+function optionalVerification(record: Record<string, unknown>): { verification_state?: VerificationState; verification_error?: string | null } {
+  const extra: { verification_state?: VerificationState; verification_error?: string | null } = {}
+  const state = optionalEnum(record.verification_state, VERIFICATION_STATES)
+  if (state) extra.verification_state = state
+  if (typeof record.verification_error === 'string' && record.verification_error) extra.verification_error = record.verification_error.slice(0, 500)
+  else if (record.verification_error === null || record.verification_error === '') extra.verification_error = null
+  return extra
+}
+
+function verification(value: unknown): VerificationTerms {
+  const record = asRecord(value, 'verification')
+  return {
+    mode: record.mode == null ? null : oneOf(record.mode, VERIFICATION_MODES, 'verification.mode'),
+    ...(typeof record.policy === 'string' && record.policy ? { policy: record.policy.slice(0, 64) } : {}),
+    runs_per_account: finite(record.runs_per_account, 'runs_per_account'),
+    max_parallel_runs: finite(record.max_parallel_runs, 'max_parallel_runs'),
+    max_duration_seconds: finite(record.max_duration_seconds, 'max_duration_seconds'),
+    allowance: finite(record.allowance, 'allowance'),
+    unit: bounded(record.unit, 'unit', 32),
+    expires_at: timestamp(record.expires_at, 'verification.expires_at'),
+    task: bounded(record.task, 'task', 2000),
+  }
+}
+
+function groupAccounts(accounts: readonly RequestedAccount[]): Map<string, RequestedAccount[]> {
+  const groups = new Map<string, RequestedAccount[]>()
+  for (const account of accounts) {
+    const list = groups.get(account.harness) ?? []
+    list.push(account)
+    groups.set(account.harness, list)
+  }
+  return groups
+}
+
+function orderedSelection(accounts: readonly RequestedAccount[], selected: readonly string[]): { ok: true; keys: string[] } | { ok: false; message: string; next: string } {
+  const known = new Map(accounts.map(account => [account.account_key, account]))
+  const keys: string[] = []
+  const harnesses = new Set<string>()
+  for (const account of accounts) {
+    if (!selected.includes(account.account_key) || keys.includes(account.account_key)) continue
+    const match = known.get(account.account_key)
+    if (!match) continue
+    if (harnesses.has(match.harness)) {
+      return { ok: false, message: `Choose one ${match.harness} account.`, next: 'A pairing approves one account for each harness you include.' }
+    }
+    harnesses.add(match.harness)
+    keys.push(account.account_key)
+  }
+  if (selected.some(key => !known.has(key))) {
+    return { ok: false, message: 'One of the selected accounts is not part of this request.', next: 'Look the code up again and choose from the accounts the computer asked for.' }
+  }
+  if (!keys.length) return { ok: false, message: 'Choose at least one harness to connect.', next: 'Deselected harnesses are not enrolled.' }
+  return { ok: true, keys }
+}
+
+function assertNoSecrets(value: unknown): void {
+  if (!value || typeof value !== 'object') return
+  for (const [key, child] of Object.entries(value)) {
+    if (SECRET_KEYS.has(key)) {
+      throw new PairingError(0, 'A pairing secret was blocked before it left the browser.', { code: 'invalid_request', next: 'Reload the page. The website never sends a device, runtime or lifecycle secret.' })
+    }
+    assertNoSecrets(child)
+  }
+}
+
+const SECRET_KEYS = new Set([
+  'device_secret', 'runtime_secret', 'lifecycle_secret', 'existing_lifecycle_secret',
+  'device_hash', 'runtime_hash', 'lifecycle_hash', 'runtime_token', 'runtime_key',
+  'device_secret_hash', 'runtime_key_hash', 'runtime_credential', 'device_credential',
+])
+
+function asRecord(value: unknown, field: string): Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) invalid(field)
+  return value as Record<string, unknown>
+}
+function asString(value: unknown, field: string): string {
+  if (typeof value !== 'string' || !value.trim()) invalid(field)
+  return value
+}
+function bounded(value: unknown, field: string, max: number): string {
+  const text = asString(value, field)
+  if (text.length > max) invalid(field)
+  return text
+}
+function optionalBounded(value: unknown, field: string, max: number): string | null {
+  if (value == null) return null
+  return bounded(value, field, max)
+}
+function uuid(value: unknown, field: string): string {
+  const text = asString(value, field)
+  if (!UUID.test(text)) invalid(field)
+  return text
+}
+function optionalUuid(value: unknown, field: string): string | null {
+  if (value == null) return null
+  return uuid(value, field)
+}
+function digest(value: unknown): string {
+  const text = asString(value, 'request_digest')
+  if (!DIGEST.test(text)) invalid('request_digest')
+  return text.toLowerCase()
+}
+function timestamp(value: unknown, field: string): string {
+  const text = asString(value, field)
+  if (!Number.isFinite(Date.parse(text))) invalid(field)
+  return text
+}
+function token(value: unknown, field: string): string {
+  const text = asString(value, field)
+  if (!TOKEN.test(text)) invalid(field)
+  return text
+}
+function finite(value: unknown, field: string): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) invalid(field)
+  return value
+}
+function optionalEnum<T extends string>(value: unknown, allowed: readonly T[]): T | undefined {
+  if (typeof value !== 'string' || !value) return undefined
+  return (allowed as readonly string[]).includes(value) ? value as T : undefined
+}
+function oneOf<T extends string>(value: unknown, allowed: readonly T[], field: string): T {
+  if (typeof value !== 'string' || !(allowed as readonly string[]).includes(value)) invalid(field)
+  return value as T
+}
+function stringList(value: unknown, field: string): string[] {
+  if (!Array.isArray(value) || value.some(item => typeof item !== 'string' || !TOKEN.test(item))) invalid(field)
+  return value as string[]
+}
+function uuidList(value: unknown, field: string): string[] {
+  if (!Array.isArray(value)) invalid(field)
+  return value.map(item => uuid(item, field))
+}
+function publicPrefix(value: unknown): string | null {
+  if (value == null) return null
+  if (typeof value !== 'string' || !PREFIX.test(value)) return null
+  return value
+}
+function httpOrigin(value: unknown, field: string): string {
+  const text = asString(value, field)
+  let url: URL
+  try { url = new URL(text) } catch { invalid(field) }
+  if (url.protocol !== 'https:' && url.protocol !== 'http:') invalid(field)
+  return url.origin
+}
+function pathId(id: string): string {
+  if (!UUID.test(id)) throw new PairingError(0, 'That pairing id is not valid.', { code: 'invalid_request', next: 'Refresh the page and choose the computer again.' })
+  return encodeURIComponent(id)
+}
+function invalid(field: string): never {
+  throw new PairingError(0, `The pairing response was incomplete (${field}).`, {
+    code: 'invalid_response',
+    next: 'Reload the page. If this continues, start a new pairing code on the computer.',
+  })
+}
