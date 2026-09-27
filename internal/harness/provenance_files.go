@@ -1,0 +1,171 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
+package harness
+
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
+	"io"
+	"os"
+	"path/filepath"
+	"strings"
+)
+
+// CollectInstructionFiles hashes explicit allowlisted instruction files.
+// It does not walk directories, follow symlinks, or read private stores.
+// The result carries a logical name, digest and byte size, never a path or contents.
+func CollectInstructionFiles(paths []string) ([]ProvenanceItem, error) {
+	if len(paths) > maxProvenanceItems {
+		return nil, errors.New("at most 16 instruction files can be recorded")
+	}
+	items := make([]ProvenanceItem, 0, len(paths))
+	seen := map[string]bool{}
+	for _, path := range paths {
+		item, err := hashInstructionFile(path)
+		if err != nil {
+			return nil, err
+		}
+		if seen[item.LogicalName] {
+			return nil, errors.New("duplicate instruction logical name")
+		}
+		seen[item.LogicalName] = true
+		items = append(items, item)
+	}
+	return items, nil
+}
+
+// PromptTemplateProvenance records a version identifier and a digest.
+// digest may be a caller-supplied lowercase sha256. When it is empty the
+// digest is sha256 of the domain-separated version, not of prompt text.
+// This function does not open a file.
+func PromptTemplateProvenance(version, digest string) (ProvenanceItem, error) {
+	version = strings.TrimSpace(version)
+	if !validProvenanceVersion(&version, true) {
+		return ProvenanceItem{}, errors.New("prompt template version is not a version identifier")
+	}
+	if digest == "" {
+		sum := sha256.Sum256([]byte("aeon.harness.provenance.prompt-template\x00" + version))
+		digest = hex.EncodeToString(sum[:])
+	} else if !provenanceSHA256.MatchString(digest) {
+		return ProvenanceItem{}, errors.New("prompt template digest must be lowercase sha256")
+	}
+	return ProvenanceItem{Kind: "prompt_template", LogicalName: "prompt-template", ContentSHA256: digest, Version: &version}, nil
+}
+
+// SetProvenanceVersion attaches a version identifier to an allowlisted item
+// already collected. It does not accept a new path.
+func SetProvenanceVersion(items []ProvenanceItem, logicalName, version string) ([]ProvenanceItem, error) {
+	version = strings.TrimSpace(version)
+	if !validProvenanceVersion(&version, true) {
+		return nil, errors.New("instruction version is not a version identifier")
+	}
+	found := false
+	out := append([]ProvenanceItem(nil), items...)
+	for i := range out {
+		if out[i].LogicalName != logicalName {
+			continue
+		}
+		out[i].Version = &version
+		found = true
+	}
+	if !found {
+		return nil, errors.New("instruction version does not match a recorded file")
+	}
+	return out, nil
+}
+
+func hashInstructionFile(path string) (ProvenanceItem, error) {
+	if refusedInstructionPath(path) {
+		return ProvenanceItem{}, errInstructionPath
+	}
+	abs, err := filepath.Abs(filepath.Clean(path))
+	if err != nil || refusedInstructionPath(abs) {
+		return ProvenanceItem{}, errInstructionPath
+	}
+	kind, logical, ok := instructionIdentity(abs)
+	if !ok || refusedInstructionPath(logical) {
+		return ProvenanceItem{}, errInstructionPath
+	}
+	info, err := os.Lstat(abs)
+	if err != nil || info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+		return ProvenanceItem{}, errInstructionPath
+	}
+	if info.Size() < 0 || info.Size() > maxProvenanceBytes {
+		return ProvenanceItem{}, errors.New("instruction file is too large")
+	}
+	f, err := os.Open(abs)
+	if err != nil {
+		return ProvenanceItem{}, errInstructionPath
+	}
+	defer f.Close()
+	body, err := io.ReadAll(io.LimitReader(f, maxProvenanceBytes+1))
+	if err != nil || int64(len(body)) != info.Size() {
+		return ProvenanceItem{}, errInstructionPath
+	}
+	sum := sha256.Sum256(body)
+	size := info.Size()
+	return ProvenanceItem{Kind: kind, LogicalName: logical, ContentSHA256: hex.EncodeToString(sum[:]), ByteSize: &size}, nil
+}
+
+var errInstructionPath = errors.New("instruction file must be an explicit allowlisted AGENTS.md, CLAUDE.md or SKILL.md outside private stores")
+
+func instructionIdentity(abs string) (kind, logical string, ok bool) {
+	base := filepath.Base(abs)
+	switch base {
+	case "AGENTS.md":
+		return "agents", "AGENTS.md", true
+	case "CLAUDE.md":
+		return "claude", "CLAUDE.md", true
+	case "SKILL.md":
+		parent := filepath.Base(filepath.Dir(abs))
+		if !provenanceSkillSlug(parent) {
+			return "", "", false
+		}
+		return "skill", parent + "/SKILL.md", true
+	default:
+		return "", "", false
+	}
+}
+
+func provenanceSkillSlug(name string) bool {
+	if name == "" || name == "." || name == ".." || privatePathComponent(name) || strings.ContainsAny(name, `/\:`) {
+		return false
+	}
+	for i, r := range name {
+		switch {
+		case r >= 'A' && r <= 'Z', r >= 'a' && r <= 'z', r >= '0' && r <= '9':
+		case i > 0 && (r == '.' || r == '_' || r == '-'):
+		default:
+			return false
+		}
+	}
+	return len(name) <= 64
+}
+
+func refusedInstructionPath(path string) bool {
+	if path == "" || strings.Contains(path, "\x00") || strings.HasPrefix(path, "~") || strings.Contains(path, `\`) {
+		return true
+	}
+	cleaned := filepath.Clean(path)
+	for _, part := range strings.Split(cleaned, string(os.PathSeparator)) {
+		if part == "" || part == "." {
+			continue
+		}
+		if part == ".." || privatePathComponent(part) {
+			return true
+		}
+	}
+	return false
+}
+
+func privatePathComponent(name string) bool {
+	switch strings.ToLower(name) {
+	case ".ssh", ".inspr", ".aws", ".gnupg", ".age", ".kube", ".docker", ".npm", ".config",
+		".secrets", "secrets", "credentials", "keychains", "cookies",
+		".netrc", "id_rsa", "id_ed25519", ".env":
+		return true
+	}
+	lower := strings.ToLower(name)
+	return strings.HasSuffix(lower, ".env") || strings.HasSuffix(lower, ".key") || strings.HasSuffix(lower, ".pem") || strings.Contains(lower, "secret")
+}

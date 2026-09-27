@@ -1,0 +1,103 @@
+<!-- SPDX-License-Identifier: AGPL-3.0-only -->
+<script setup lang="ts">
+import { ref, watch } from 'vue'
+import { api } from '../../lib/api'
+import { absoluteTime, relativeTime } from '../../lib/work'
+import AppIcon from '../AppIcon.vue'
+
+// Instruction versions recorded for one session: logical names, digests and
+// version identifiers. The payload has no file contents or local paths.
+const props = defineProps<{ projectId: string; sessionId: string; now?: number }>()
+
+interface ProvenanceItem {
+  kind: 'agents' | 'claude' | 'skill' | 'prompt_template'
+  logical_name: string
+  content_sha256: string
+  version?: string | null
+}
+interface ProvenanceRevision {
+  id: string
+  revision: number
+  recorded_at: string
+  items: ProvenanceItem[]
+}
+interface ProvenancePage {
+  revisions: ProvenanceRevision[]
+  truncated: boolean
+}
+
+const state = ref<'loading' | 'ready' | 'error'>('loading')
+const page = ref<ProvenancePage>({ revisions: [], truncated: false })
+const labels: Record<ProvenanceItem['kind'], string> = {
+  agents: 'Agents',
+  claude: 'Claude',
+  skill: 'Skill',
+  prompt_template: 'Prompt template',
+}
+
+watch(() => [props.projectId, props.sessionId], async () => {
+  const projectId = props.projectId
+  const sessionId = props.sessionId
+  state.value = 'loading'
+  page.value = { revisions: [], truncated: false }
+  try {
+    const response = await api(`/projects/${encodeURIComponent(projectId)}/harness-sessions/${encodeURIComponent(sessionId)}/provenance`)
+    if (!response.ok) throw new Error('unavailable')
+    const body = await response.json() as ProvenancePage
+    if (props.projectId !== projectId || props.sessionId !== sessionId) return
+    page.value = { revisions: body.revisions ?? [], truncated: body.truncated === true }
+    state.value = 'ready'
+  } catch {
+    if (props.projectId === projectId && props.sessionId === sessionId) state.value = 'error'
+  }
+}, { immediate: true })
+
+function shortHash(value: string) {
+  return value.length > 12 ? value.slice(0, 12) : value
+}
+</script>
+
+<template>
+  <section class="provenance" aria-labelledby="provenance-title">
+    <h3 id="provenance-title" class="head eyebrow"><span class="mark"><AppIcon name="hash" :size="13" /></span>Instructions</h3>
+    <p v-if="state === 'loading'" class="line">Loading instruction versions…</p>
+    <p v-else-if="state === 'error'" class="line" role="alert">Instruction versions could not be loaded.</p>
+    <p v-else-if="!page.revisions.length" class="line">No instruction versions recorded for this session.</p>
+    <ol v-else class="revisions">
+      <li v-for="rev in page.revisions" :key="rev.id" class="revision">
+        <p class="rev-meta"><span>Revision {{ rev.revision }}</span><time :datetime="rev.recorded_at" :data-tip="absoluteTime(rev.recorded_at)">{{ relativeTime(rev.recorded_at, { now }) }}</time></p>
+        <ul class="items">
+          <li v-for="item in rev.items" :key="`${rev.id}-${item.logical_name}`">
+            <span class="kind">{{ labels[item.kind] || item.kind }}</span>
+            <span class="name">{{ item.logical_name }}</span>
+            <code class="hash" :data-tip="item.content_sha256">{{ shortHash(item.content_sha256) }}</code>
+            <span v-if="item.version" class="version">{{ item.version }}</span>
+          </li>
+        </ul>
+      </li>
+    </ol>
+    <p v-if="state === 'ready' && page.truncated" class="line">Older revisions are kept and are not all shown here.</p>
+  </section>
+</template>
+
+<style scoped>
+.provenance { margin-top: 26px; min-width: 0; max-width: 100%; }
+.head { display: flex; align-items: center; gap: 8px; margin: 0 0 10px; }
+.mark { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 7px; background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); color: var(--ink-2); }
+.line { margin: 0; font-size: 13px; color: var(--ink-3); }
+.revisions, .items { margin: 0; padding: 0; list-style: none; }
+.revision { padding: 10px 0; border-top: 1px solid var(--line); }
+.revision:first-child { border-top: 0; padding-top: 0; }
+.rev-meta { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin: 0 0 8px; font-size: 12px; color: var(--ink-2); }
+.rev-meta time { color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.items { display: grid; gap: 6px; min-width: 0; }
+.items li { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px; min-width: 0; max-width: 100%; }
+.items li > * { min-width: 0; max-width: 100%; }
+.kind { flex-shrink: 0; font: 500 10px/1.4 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); }
+.name { min-width: 0; color: var(--ink); font-size: 13px; overflow-wrap: anywhere; }
+.hash { font: 12px var(--mono); color: var(--ink-2); font-variant-ligatures: none; overflow-wrap: anywhere; }
+.version { color: var(--ink-2); font-size: 12px; overflow-wrap: anywhere; }
+@media (max-width: 720px) {
+  .version { flex-basis: 100%; }
+}
+</style>

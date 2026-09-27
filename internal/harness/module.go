@@ -29,6 +29,8 @@
 // --brief, --worktree and --branch to paimos harness register|heartbeat,
 // plus repeated --commit SHA:subject on heartbeat. The coordinator can pass
 // these flags from worker scripts without changing server wiring.
+// PV1/AEON-219 records instruction provenance on its own route. Registration
+// and heartbeat schemas are unchanged. Writes use the existing worker lease.
 package harness
 
 import (
@@ -74,6 +76,8 @@ func (m *Module) Mount(mux *http.ServeMux) {
 		{"GET /api/projects/{projectId}/harness-sessions/{sessionId}", "harness.read", false, 200, m.status},
 		{"PATCH /api/projects/{projectId}/harness-sessions/{sessionId}/binding", "harness.write", false, 200, m.bind},
 		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/heartbeat", "harness.worker", true, 200, m.heartbeat},
+		{"GET /api/projects/{projectId}/harness-sessions/{sessionId}/provenance", "harness.read", false, 200, m.readProvenance},
+		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/provenance", "harness.worker", true, 200, m.recordProvenance},
 		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/yield", "harness.worker", true, 200, m.yield},
 		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/drain", "harness.worker", true, 200, m.drain},
 		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/complete-delivery", "harness.worker", true, 200, m.completeDelivery},

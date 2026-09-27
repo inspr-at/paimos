@@ -14,6 +14,7 @@ import KeyCap from '../KeyCap.vue'
 import Avatar from '../Avatar.vue'
 import AgentStateLabel from './AgentStateLabel.vue'
 import AgentGlyph from './AgentGlyph.vue'
+import ProvenanceDetail from './ProvenanceDetail.vue'
 import { activityOf, currentStep, type ActivitySession } from './activity'
 
 // One session in the docked panel: who and where, the bound ticket, recent runs with
@@ -193,6 +194,8 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
           <div v-if="reported?.harness_version" class="fact"><dt>Version</dt><dd class="mono">{{ reported.harness_version }}</dd></div>
         </dl>
       </section>
+
+      <ProvenanceDetail v-if="s" :project-id="s.project_id" :session-id="s.id" :now="now" />
 
       <section v-if="hasWork" class="block" aria-labelledby="work-title">
         <h3 id="work-title" class="eyebrow">Work</h3>

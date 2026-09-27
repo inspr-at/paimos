@@ -129,6 +129,27 @@ paths:
         - $ref: '#/components/parameters/workerLease'
       responses:
         '200': {description: Closed immutable generation}
+  /api/projects/{projectId}/harness-sessions/{sessionId}/provenance:
+    get:
+      operationId: getHarnessInstructionProvenance
+      parameters:
+        - $ref: '#/components/parameters/projectId'
+        - $ref: '#/components/parameters/sessionId'
+      responses:
+        '200': {description: Newest instruction provenance revisions}
+    post:
+      operationId: recordHarnessInstructionProvenance
+      parameters:
+        - $ref: '#/components/parameters/projectId'
+        - $ref: '#/components/parameters/sessionId'
+        - $ref: '#/components/parameters/workerLease'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/HarnessProvenanceWrite'}
+      responses:
+        '200': {description: Created or replayed provenance revision}
 components:
   parameters:
     projectId: {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -162,3 +183,17 @@ components:
         parent_harness_session_id: {type: [string, 'null'], format: uuid}
         ticket_node_id: {type: [string, 'null'], format: uuid}
         work_shape: {type: string, enum: [unknown, ship, scout]}
+    HarnessProvenanceWrite:
+      type: object
+      required: [items]
+      properties:
+        items: {type: array, minItems: 1, maxItems: 16, items: {$ref: '#/components/schemas/HarnessProvenanceItem'}}
+    HarnessProvenanceItem:
+      type: object
+      required: [kind, logical_name, content_sha256]
+      properties:
+        kind: {type: string, enum: [agents, claude, skill, prompt_template]}
+        logical_name: {type: string, maxLength: 80}
+        content_sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
+        version: {type: [string, 'null'], maxLength: 80}
+        byte_size: {type: [integer, 'null'], minimum: 0, maximum: 1048576}
