@@ -29,7 +29,7 @@ func makeRegistry() []Permission {
 		{"attachments", "read write delete"}, {"knowledge", "read write delete"},
 		{"journey", "read act manage"}, {"requirements", "read write agree"},
 		{"releases", "read write deploy"}, {"intake", "read write decide"},
-		{"stage_handoffs", "read write decide"}, {"harness", "read write worker control manage"},
+		{"stage_handoffs", "read write decide"}, {"harness", "read write worker control manage recover force_stop"},
 		{"work_orders", "read write assign"}, {"runs", "read write control claim"},
 		{"run", "create read claim telemetry"}, {"account", "read manage route probe"},
 		{"approvals", "read request propose decide decide_high revoke"}, {"inbox", "read send manage receipt"},
@@ -51,7 +51,7 @@ func makeRegistry() []Permission {
 			if action == "read" || strings.HasSuffix(action, "_read") || action == "resolve" {
 				risk = "low"
 			}
-			if action == "delete" || action == "deploy" || action == "apply" || action == "decide" || action == "decide_high" || action == "manage" || action == "issue" || action == "approve" || action == "undo" || action == "undo_other" || action == "control" || action == "configure" || action == "revoke" {
+			if action == "delete" || action == "deploy" || action == "apply" || action == "decide" || action == "decide_high" || action == "manage" || action == "issue" || action == "approve" || action == "undo" || action == "undo_other" || action == "control" || action == "configure" || action == "revoke" || action == "recover" || action == "force_stop" {
 				risk = "high"
 			}
 			at := []string{"workspace", "project"}
@@ -72,7 +72,7 @@ func makeRegistry() []Permission {
 // customer portal. Those permissions never belong on an agent key.
 func agentGrantable(key string) bool {
 	switch key {
-	case "members.manage", "roles.manage", "keys.manage", "keys.read", "settings.manage", "audit.read",
+	case "harness.force_stop", "harness.recover", "members.manage", "roles.manage", "keys.manage", "keys.read", "settings.manage", "audit.read",
 		"approvals.decide", "approvals.decide_high",
 		"profile.portal_read", "profile.portal_write", "quotes.portal_read", "quotes.portal_accept":
 		return false
@@ -120,7 +120,7 @@ func builtinPermissions(key string) []string {
 				allow = p.Key == resource+".read"
 			case "imports", "settings", "roles", "keys", "audit", "account", "ownership":
 			default:
-				allow = !strings.HasSuffix(p.Key, ".manage") && p.Key != "nodes.configure" && p.Key != "releases.deploy" && p.Key != "approvals.decide_high" && p.Key != "hours.approve" && p.Key != "quotes.issue" && p.Key != "quotes.accept" && p.Key != "quotes.delete" && p.Key != "quotes.portal_accept" && p.Key != "stage_handoffs.decide" && p.Key != "stage.deploy" && p.Key != "stage.apply" && p.Key != "intake.decide" && p.Key != "project_groups.write" && p.Key != "runs.control" && p.Key != "events.undo_other"
+				allow = !strings.HasSuffix(p.Key, ".manage") && p.Key != "nodes.configure" && p.Key != "releases.deploy" && p.Key != "approvals.decide_high" && p.Key != "hours.approve" && p.Key != "quotes.issue" && p.Key != "quotes.accept" && p.Key != "quotes.delete" && p.Key != "quotes.portal_accept" && p.Key != "stage_handoffs.decide" && p.Key != "stage.deploy" && p.Key != "stage.apply" && p.Key != "intake.decide" && p.Key != "project_groups.write" && p.Key != "runs.control" && p.Key != "events.undo_other" && p.Key != "harness.recover" && p.Key != "harness.force_stop"
 			}
 		case "viewer":
 			allow = p.Key == "authz.read" || p.Key == "quotes.portal_read" || (p.Risk == "low" && strings.HasSuffix(p.Key, ".read") && productReadGroup(resource))
