@@ -34,21 +34,36 @@ func TestProvenanceVisibilityIdempotencyAndTamper(t *testing.T) {
 	sessionID := decode(t, w)["id"].(string)
 	path := base + "/" + sessionID + "/provenance"
 	item := func(hash string) map[string]any {
-		return map[string]any{"kind": "agents", "logical_name": "AGENTS.md", "content_sha256": hash, "byte_size": 12}
+		return map[string]any{"kind": "agents", "logical_name": "AGENTS.md", "hash_kind": "content", "content_sha256": hash, "byte_size": 12}
 	}
-	prompt := map[string]any{"kind": "prompt_template", "logical_name": "prompt-template", "content_sha256": hashA, "version": "260927120000.0.0"}
+	prompt := map[string]any{"kind": "prompt_template", "logical_name": "prompt-template", "hash_kind": "absent", "version": "260927120000.0.0"}
+	contentPrompt := map[string]any{"kind": "prompt_template", "logical_name": "prompt-template", "hash_kind": "content", "content_sha256": hashA, "version": "260927120000.0.0"}
 	body := map[string]any{"items": []any{prompt, item(hashA)}}
 
 	expect(t, f.call(f.person, "POST", path, body, lease), 403)
 	expect(t, f.call(f.agent, "POST", path, body, "wrong-provenance-lease-000000000000"), 403)
 	expect(t, f.call(f.agent, "POST", path, map[string]any{"items": []any{map[string]any{"kind": "agents", "logical_name": "/Users/hidden/.ssh/id_rsa", "content_sha256": hashA, "byte_size": 12, "content": "secret prompt"}}}, lease), 400)
-	expect(t, f.call(f.agent, "POST", path, map[string]any{"items": []any{map[string]any{"kind": "prompt_template", "logical_name": "prompt-template", "content_sha256": hashA, "version": "v1", "byte_size": 40}}}, lease), 400)
+	expect(t, f.call(f.agent, "POST", path, map[string]any{"items": []any{map[string]any{"kind": "prompt_template", "logical_name": "prompt-template", "hash_kind": "content", "content_sha256": hashA, "version": "v1", "byte_size": 40}}}, lease), 400)
+	expect(t, f.call(f.agent, "POST", path, map[string]any{"items": []any{map[string]any{"kind": "prompt_template", "logical_name": "prompt-template", "hash_kind": "absent", "content_sha256": hashA, "version": "260927120000.0.0"}}}, lease), 400)
+	expect(t, f.call(f.agent, "POST", path, map[string]any{"items": []any{map[string]any{"kind": "prompt_template", "logical_name": "prompt-template", "hash_kind": "content", "version": "260927120000.0.0"}}}, lease), 400)
 
 	w = f.call(f.agent, "POST", path, body, lease)
 	expect(t, w, 200)
 	first := decode(t, w)
-	if first["replayed"] != false || first["revision"].(float64) != 1 || strings.Contains(w.Body.String(), lease) || strings.Contains(w.Body.String(), "/Users") || strings.Contains(w.Body.String(), "secret prompt") {
+	versionHash := sha256.Sum256([]byte("aeon.harness.provenance.prompt-template\x00" + "260927120000.0.0"))
+	if first["replayed"] != false || first["revision"].(float64) != 1 || strings.Contains(w.Body.String(), lease) || strings.Contains(w.Body.String(), "/Users") || strings.Contains(w.Body.String(), "secret prompt") || strings.Contains(w.Body.String(), hex.EncodeToString(versionHash[:])) {
 		t.Fatalf("first record %s", w.Body.String())
+	}
+	sawAbsent := false
+	for _, raw := range first["items"].([]any) {
+		got := raw.(map[string]any)
+		if got["logical_name"] != "prompt-template" {
+			continue
+		}
+		sawAbsent = got["hash_kind"] == "absent" && got["content_sha256"] == nil && got["version"] == "260927120000.0.0"
+	}
+	if !sawAbsent {
+		t.Fatalf("absent prompt digest %s", w.Body.String())
 	}
 	w = f.call(f.agent, "POST", path, map[string]any{"items": []any{item(hashA), prompt}}, lease)
 	expect(t, w, 200)
@@ -56,10 +71,10 @@ func TestProvenanceVisibilityIdempotencyAndTamper(t *testing.T) {
 	if replay["replayed"] != true || replay["id"] != first["id"] || replay["revision"].(float64) != 1 {
 		t.Fatalf("replay %s", w.Body.String())
 	}
-	w = f.call(f.agent, "POST", path, map[string]any{"items": []any{item(hashB), prompt}}, lease)
+	w = f.call(f.agent, "POST", path, map[string]any{"items": []any{item(hashB), contentPrompt}}, lease)
 	expect(t, w, 200)
 	second := decode(t, w)
-	if second["replayed"] != false || second["revision"].(float64) != 2 || second["id"] == first["id"] {
+	if second["replayed"] != false || second["revision"].(float64) != 2 || second["id"] == first["id"] || !strings.Contains(w.Body.String(), `"hash_kind":"content"`) {
 		t.Fatalf("append %s", w.Body.String())
 	}
 
@@ -119,7 +134,7 @@ func TestProvenanceVisibilityIdempotencyAndTamper(t *testing.T) {
 		t.Fatalf("update err %v", err)
 	}
 	err = db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.person.TenantID, func(tx pgx.Tx) error {
-		_, e := tx.Exec(t.Context(), `INSERT INTO harness_instruction_provenance_items(tenant_id, provenance_id, ordinal, kind, logical_name, content_sha256, byte_size) SELECT tenant_id, id, 2, 'agents', '/Users/hidden/.ssh/id_rsa', $1, 1 FROM harness_instruction_provenance WHERE revision=1`, hashB)
+		_, e := tx.Exec(t.Context(), `INSERT INTO harness_instruction_provenance_items(tenant_id, provenance_id, ordinal, kind, logical_name, hash_kind, content_sha256, byte_size) SELECT tenant_id, id, 2, 'agents', '/Users/hidden/.ssh/id_rsa', 'content', $1, 1 FROM harness_instruction_provenance WHERE revision=1`, hashB)
 		return e
 	})
 	if err == nil {

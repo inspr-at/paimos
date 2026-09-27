@@ -21,7 +21,7 @@ func (rt *runtime) harnessProvenance() *Command {
 		fs.strings(&instructions, "instruction", "explicit AGENTS.md, CLAUDE.md or SKILL.md file")
 		fs.strings(&versions, "instruction-version", "LOGICAL=VERSION for a file named by --instruction")
 		fs.string(&promptVersion, "prompt-template-version", 0, "prompt template version identifier")
-		fs.string(&promptSHA, "prompt-template-sha256", 0, "optional lowercase sha256; never prompt text")
+		fs.string(&promptSHA, "prompt-template-sha256", 0, "explicit lowercase sha256 of the template bytes; omit to record the version with no content digest")
 		fs.bool(&show, "show", 0, "print recorded provenance")
 	}, run: func([]string) error {
 		if show && (len(instructions) > 0 || len(versions) > 0 || promptVersion != "" || promptSHA != "") {

@@ -23,8 +23,10 @@ import (
 )
 
 // Instruction provenance is a separate record from registration and heartbeat.
-// Each revision stores allowlisted logical names, sha256 digests and version
-// identifiers. It never stores file contents, secrets or local paths.
+// Each revision stores allowlisted logical names, a hash kind, sha256 digests
+// of instruction or template bytes, and version identifiers. A prompt template
+// with no supplied digest stores hash kind absent and a null digest. Rows never
+// store file contents, secrets, local paths, or a hash of a version identifier.
 
 const maxProvenanceItems = 16
 const maxProvenanceRevisions = 32
@@ -36,10 +38,14 @@ var (
 )
 
 // ProvenanceItem is one allowlisted instruction or prompt-template identity.
+// HashKind is content when ContentSHA256 is a digest of the file or template
+// bytes. It is absent for a prompt template recorded with a version and no
+// template digest. A version identifier is never stored as that digest.
 type ProvenanceItem struct {
 	Kind          string  `json:"kind"`
 	LogicalName   string  `json:"logical_name"`
-	ContentSHA256 string  `json:"content_sha256"`
+	HashKind      string  `json:"hash_kind"`
+	ContentSHA256 *string `json:"content_sha256"`
 	Version       *string `json:"version"`
 	ByteSize      *int64  `json:"byte_size"`
 }
@@ -127,7 +133,7 @@ func (m *Module) recordProvenance(r *http.Request, tx pgx.Tx, p tenant.Principal
 	out.SessionID = s.ID
 	out.Items = items
 	for i, item := range items {
-		if _, err = tx.Exec(ctx, `INSERT INTO harness_instruction_provenance_items(tenant_id, provenance_id, ordinal, kind, logical_name, content_sha256, version, byte_size) VALUES($1,$2,$3,$4,$5,$6,$7,$8)`, p.TenantID, out.ID, i, item.Kind, item.LogicalName, item.ContentSHA256, item.Version, item.ByteSize); err != nil {
+		if _, err = tx.Exec(ctx, `INSERT INTO harness_instruction_provenance_items(tenant_id, provenance_id, ordinal, kind, logical_name, hash_kind, content_sha256, version, byte_size) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`, p.TenantID, out.ID, i, item.Kind, item.LogicalName, item.HashKind, item.ContentSHA256, item.Version, item.ByteSize); err != nil {
 			return nil, err
 		}
 	}
@@ -166,7 +172,7 @@ func provenanceRevision(ctx context.Context, tx pgx.Tx, sessionID, id string) (P
 }
 
 func queryProvenance(ctx context.Context, tx pgx.Tx, sessionID, onlyID string, limit int) ([]ProvenanceRevision, error) {
-	q := `SELECT p.id::text, p.revision, encode(p.set_digest, 'hex'), p.recorded_by::text, p.created_at, i.kind, i.logical_name, i.content_sha256, i.version, i.byte_size
+	q := `SELECT p.id::text, p.revision, encode(p.set_digest, 'hex'), p.recorded_by::text, p.created_at, i.kind, i.logical_name, i.hash_kind, i.content_sha256, i.version, i.byte_size
 		FROM (SELECT id, tenant_id, revision, set_digest, recorded_by, created_at FROM harness_instruction_provenance WHERE session_id=$1`
 	args := []any{sessionID}
 	if onlyID != "" {
@@ -187,7 +193,7 @@ func queryProvenance(ctx context.Context, tx pgx.Tx, sessionID, onlyID string, l
 	for rows.Next() {
 		var rev ProvenanceRevision
 		var item ProvenanceItem
-		if err = rows.Scan(&rev.ID, &rev.Revision, &rev.SetSHA256, &rev.RecordedBy, &rev.RecordedAt, &item.Kind, &item.LogicalName, &item.ContentSHA256, &item.Version, &item.ByteSize); err != nil {
+		if err = rows.Scan(&rev.ID, &rev.Revision, &rev.SetSHA256, &rev.RecordedBy, &rev.RecordedAt, &item.Kind, &item.LogicalName, &item.HashKind, &item.ContentSHA256, &item.Version, &item.ByteSize); err != nil {
 			return nil, err
 		}
 		rev.SessionID = sessionID
@@ -226,7 +232,7 @@ func normalizeProvenanceItems(in []ProvenanceItem) ([]ProvenanceItem, error) {
 }
 
 func validProvenanceItem(item *ProvenanceItem) bool {
-	if !provenanceSHA256.MatchString(item.ContentSHA256) || !validProvenanceVersion(item.Version, item.Kind == "prompt_template") {
+	if !validProvenanceVersion(item.Version, item.Kind == "prompt_template") || !validProvenanceDigest(item) {
 		return false
 	}
 	switch item.Kind {
@@ -238,6 +244,17 @@ func validProvenanceItem(item *ProvenanceItem) bool {
 		return provenanceSkill.MatchString(item.LogicalName) && validProvenanceSize(item.ByteSize)
 	case "prompt_template":
 		return item.LogicalName == "prompt-template" && item.ByteSize == nil
+	default:
+		return false
+	}
+}
+
+func validProvenanceDigest(item *ProvenanceItem) bool {
+	switch item.HashKind {
+	case "content":
+		return item.ContentSHA256 != nil && provenanceSHA256.MatchString(*item.ContentSHA256)
+	case "absent":
+		return item.Kind == "prompt_template" && item.ContentSHA256 == nil
 	default:
 		return false
 	}
@@ -282,7 +299,11 @@ func provenanceSetDigest(items []ProvenanceItem) []byte {
 		if item.ByteSize != nil {
 			size = strconv.FormatInt(*item.ByteSize, 10)
 		}
-		_, _ = h.Write([]byte(item.Kind + "\x1f" + item.LogicalName + "\x1f" + item.ContentSHA256 + "\x1f" + version + "\x1f" + size))
+		digest := ""
+		if item.ContentSHA256 != nil {
+			digest = *item.ContentSHA256
+		}
+		_, _ = h.Write([]byte(item.Kind + "\x1f" + item.LogicalName + "\x1f" + item.HashKind + "\x1f" + digest + "\x1f" + version + "\x1f" + size))
 	}
 	return h.Sum(nil)
 }

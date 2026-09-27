@@ -190,10 +190,11 @@ components:
         items: {type: array, minItems: 1, maxItems: 16, items: {$ref: '#/components/schemas/HarnessProvenanceItem'}}
     HarnessProvenanceItem:
       type: object
-      required: [kind, logical_name, content_sha256]
+      required: [kind, logical_name, hash_kind]
       properties:
         kind: {type: string, enum: [agents, claude, skill, prompt_template]}
         logical_name: {type: string, maxLength: 80}
-        content_sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
+        hash_kind: {type: string, enum: [content, absent]}
+        content_sha256: {type: [string, 'null'], pattern: '^[0-9a-f]{64}$', description: Present only for hash_kind content. Null when absent. Never a hash of the version identifier.}
         version: {type: [string, 'null'], maxLength: 80}
         byte_size: {type: [integer, 'null'], minimum: 0, maximum: 1048576}

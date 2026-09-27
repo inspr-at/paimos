@@ -35,22 +35,25 @@ func CollectInstructionFiles(paths []string) ([]ProvenanceItem, error) {
 	return items, nil
 }
 
-// PromptTemplateProvenance records a version identifier and a digest.
-// digest may be a caller-supplied lowercase sha256. When it is empty the
-// digest is sha256 of the domain-separated version, not of prompt text.
-// This function does not open a file.
+// PromptTemplateProvenance records a version identifier. digest is an
+// explicit lowercase sha256 of the template bytes when the caller has one.
+// An empty digest stores hash_kind absent and a null content digest. This
+// function does not hash the version and does not open a file.
 func PromptTemplateProvenance(version, digest string) (ProvenanceItem, error) {
 	version = strings.TrimSpace(version)
 	if !validProvenanceVersion(&version, true) {
 		return ProvenanceItem{}, errors.New("prompt template version is not a version identifier")
 	}
+	item := ProvenanceItem{Kind: "prompt_template", LogicalName: "prompt-template", HashKind: "absent", Version: &version}
 	if digest == "" {
-		sum := sha256.Sum256([]byte("aeon.harness.provenance.prompt-template\x00" + version))
-		digest = hex.EncodeToString(sum[:])
-	} else if !provenanceSHA256.MatchString(digest) {
+		return item, nil
+	}
+	if !provenanceSHA256.MatchString(digest) {
 		return ProvenanceItem{}, errors.New("prompt template digest must be lowercase sha256")
 	}
-	return ProvenanceItem{Kind: "prompt_template", LogicalName: "prompt-template", ContentSHA256: digest, Version: &version}, nil
+	item.HashKind = "content"
+	item.ContentSHA256 = &digest
+	return item, nil
 }
 
 // SetProvenanceVersion attaches a version identifier to an allowlisted item
@@ -105,7 +108,8 @@ func hashInstructionFile(path string) (ProvenanceItem, error) {
 	}
 	sum := sha256.Sum256(body)
 	size := info.Size()
-	return ProvenanceItem{Kind: kind, LogicalName: logical, ContentSHA256: hex.EncodeToString(sum[:]), ByteSize: &size}, nil
+	digest := hex.EncodeToString(sum[:])
+	return ProvenanceItem{Kind: kind, LogicalName: logical, HashKind: "content", ContentSHA256: &digest, ByteSize: &size}, nil
 }
 
 var errInstructionPath = errors.New("instruction file must be an explicit allowlisted AGENTS.md, CLAUDE.md or SKILL.md outside private stores")
@@ -163,7 +167,8 @@ func privatePathComponent(name string) bool {
 	switch strings.ToLower(name) {
 	case ".ssh", ".inspr", ".aws", ".gnupg", ".age", ".kube", ".docker", ".npm", ".config",
 		".secrets", "secrets", "credentials", "keychains", "cookies",
-		".netrc", "id_rsa", "id_ed25519", ".env":
+		".netrc", "id_rsa", "id_ed25519", ".env",
+		"transcripts", "agent-transcripts", ".agent-transcripts":
 		return true
 	}
 	lower := strings.ToLower(name)

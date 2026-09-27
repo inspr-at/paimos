@@ -12,7 +12,8 @@ const props = defineProps<{ projectId: string; sessionId: string; now?: number }
 interface ProvenanceItem {
   kind: 'agents' | 'claude' | 'skill' | 'prompt_template'
   logical_name: string
-  content_sha256: string
+  hash_kind: 'content' | 'absent'
+  content_sha256?: string | null
   version?: string | null
 }
 interface ProvenanceRevision {
@@ -70,7 +71,8 @@ function shortHash(value: string) {
           <li v-for="item in rev.items" :key="`${rev.id}-${item.logical_name}`">
             <span class="kind">{{ labels[item.kind] || item.kind }}</span>
             <span class="name">{{ item.logical_name }}</span>
-            <code class="hash" :data-tip="item.content_sha256">{{ shortHash(item.content_sha256) }}</code>
+            <code v-if="item.hash_kind === 'content' && item.content_sha256" class="hash" :data-tip="item.content_sha256">{{ shortHash(item.content_sha256) }}</code>
+            <span v-else class="absent">No content digest</span>
             <span v-if="item.version" class="version">{{ item.version }}</span>
           </li>
         </ul>
@@ -96,8 +98,8 @@ function shortHash(value: string) {
 .kind { flex-shrink: 0; font: 500 10px/1.4 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); }
 .name { min-width: 0; color: var(--ink); font-size: 13px; overflow-wrap: anywhere; }
 .hash { font: 12px var(--mono); color: var(--ink-2); font-variant-ligatures: none; overflow-wrap: anywhere; }
-.version { color: var(--ink-2); font-size: 12px; overflow-wrap: anywhere; }
+.absent, .version { color: var(--ink-2); font-size: 12px; overflow-wrap: anywhere; }
 @media (max-width: 720px) {
-  .version { flex-basis: 100%; }
+  .absent, .version { flex-basis: 100%; }
 }
 </style>

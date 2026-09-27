@@ -1,7 +1,9 @@
 -- SPDX-License-Identifier: AGPL-3.0-only
 -- AEON-219: append-only instruction provenance for one harness session.
--- Rows store an allowlisted logical name, a sha256 digest and an optional
--- version identifier. They do not store file contents, secrets or local paths.
+-- Rows store an allowlisted logical name, a hash kind, a sha256 digest when
+-- the kind is content, and an optional version identifier. A prompt template
+-- with no supplied template digest stores hash_kind absent and a null digest.
+-- They do not store file contents, secrets, local paths, or a hash of a version.
 CREATE FUNCTION aeon_instruction_provenance_append_only() RETURNS trigger
 LANGUAGE plpgsql AS $$
 BEGIN
@@ -47,6 +49,7 @@ CREATE TABLE harness_instruction_provenance_items (
     provenance_id uuid NOT NULL,
     ordinal smallint NOT NULL CHECK (ordinal >= 0 AND ordinal < 16),
     kind text NOT NULL CHECK (kind IN ('agents', 'claude', 'skill', 'prompt_template')),
+    hash_kind text NOT NULL CHECK (hash_kind IN ('content', 'absent')),
     logical_name text NOT NULL CHECK (
         char_length(logical_name) BETWEEN 1 AND 80
         AND logical_name = btrim(logical_name)
@@ -61,7 +64,10 @@ CREATE TABLE harness_instruction_provenance_items (
             OR (kind = 'prompt_template' AND logical_name = 'prompt-template' AND version IS NOT NULL AND byte_size IS NULL)
         )
     ),
-    content_sha256 text NOT NULL CHECK (content_sha256 ~ '^[0-9a-f]{64}$'),
+    content_sha256 text CHECK (
+        (hash_kind = 'content' AND content_sha256 ~ '^[0-9a-f]{64}$')
+        OR (hash_kind = 'absent' AND content_sha256 IS NULL AND kind = 'prompt_template')
+    ),
     version text CHECK (
         version IS NULL OR (
             char_length(version) BETWEEN 1 AND 80

@@ -50,12 +50,16 @@ func TestInstructionFilesStayAllowlisted(t *testing.T) {
 	want := hex.EncodeToString(sum[:])
 	found := false
 	for _, item := range items {
-		if strings.Contains(item.LogicalName, dir) || strings.Contains(item.ContentSHA256, "super-secret") {
+		digest := ""
+		if item.ContentSHA256 != nil {
+			digest = *item.ContentSHA256
+		}
+		if strings.Contains(item.LogicalName, dir) || strings.Contains(digest, "super-secret") {
 			t.Fatalf("provenance kept a path or neighbor: %#v", item)
 		}
 		if item.LogicalName == "AGENTS.md" {
 			found = true
-			if item.Kind != "agents" || item.ContentSHA256 != want || item.ByteSize == nil || *item.ByteSize != int64(len(body)) {
+			if item.Kind != "agents" || item.HashKind != "content" || digest != want || item.ByteSize == nil || *item.ByteSize != int64(len(body)) {
 				t.Fatalf("agents item %#v", item)
 			}
 		}
@@ -68,7 +72,7 @@ func TestInstructionFilesStayAllowlisted(t *testing.T) {
 	}
 	neighborSum := sha256.Sum256(neighbor)
 	for _, item := range items {
-		if item.ContentSHA256 == hex.EncodeToString(neighborSum[:]) {
+		if item.ContentSHA256 != nil && *item.ContentSHA256 == hex.EncodeToString(neighborSum[:]) {
 			t.Fatal("neighbor file was hashed")
 		}
 	}
@@ -111,8 +115,38 @@ func TestInstructionFilesStayAllowlisted(t *testing.T) {
 		t.Fatal(err)
 	}
 	ident := sha256.Sum256([]byte("aeon.harness.provenance.prompt-template\x00" + "260927120000.0.0"))
-	if item.ContentSHA256 != hex.EncodeToString(ident[:]) || item.ByteSize != nil || item.LogicalName != "prompt-template" {
+	if item.HashKind != "absent" || item.ContentSHA256 != nil || item.ByteSize != nil || item.LogicalName != "prompt-template" {
 		t.Fatalf("prompt identity %#v", item)
+	}
+	given := strings.Repeat("c", 64)
+	explicit, err := harness.PromptTemplateProvenance("260927120000.0.0", given)
+	if err != nil || explicit.HashKind != "content" || explicit.ContentSHA256 == nil || *explicit.ContentSHA256 != given || *explicit.ContentSHA256 == hex.EncodeToString(ident[:]) {
+		t.Fatalf("explicit template digest %#v %v", explicit, err)
+	}
+	big := filepath.Join(dir, "wide", "AGENTS.md")
+	if err := os.Mkdir(filepath.Dir(big), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.Create(big)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Truncate(1<<20 + 1); err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+	if _, err := harness.CollectInstructionFiles([]string{big}); err == nil || !strings.Contains(err.Error(), "too large") {
+		t.Fatalf("oversized file err %v", err)
+	}
+	transcript := filepath.Join(dir, "agent-transcripts", "AGENTS.md")
+	if err := os.Mkdir(filepath.Dir(transcript), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(transcript, []byte("transcript-secret"), 0o000); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := harness.CollectInstructionFiles([]string{transcript}); err == nil || strings.Contains(err.Error(), "transcript-secret") || strings.Contains(err.Error(), transcript) {
+		t.Fatalf("transcript path err %v", err)
 	}
 	if _, err := harness.PromptTemplateProvenance("run the secret prompt now", ""); err == nil {
 		t.Fatal("prompt text accepted as a version")
