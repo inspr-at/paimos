@@ -196,16 +196,15 @@ export class ReleaseUnconfirmed extends Error {
   }
 }
 
-// A 4xx on the first try is a finished rejection: the transaction rolled back.
-// A lost response, a 5xx, a 408, or a 200 that does not name a release is not.
-// Once that outcome is already unknown, a later 401, 403 or 429 still cannot
-// prove the first try failed, so the same request has to be kept.
+// A 4xx on the first try is a finished rejection: that response was received and
+// the transaction rolled back. A lost response, a 5xx, a 408, or a 200 that
+// does not name a release is not. Once the outcome is already unknown, a later
+// status is not proof by itself. ensureJourney and the person check run before
+// lookupReceipt, so a deleted project is a 404, and 401, 403 or 429 can arrive,
+// before the receipt is read. Those keep the exact action. A stale revision is
+// different: the receipt was absent, so that try committed nothing.
 export function isDefiniteReleaseRejection(error: unknown): error is APIError {
   return error instanceof APIError && error.status >= 400 && error.status < 500 && error.status !== 408
-}
-
-export function denialCannotDisprove(error: unknown): boolean {
-  return error instanceof APIError && (error.status === 401 || error.status === 403 || error.status === 429)
 }
 
 export function newReleaseFailure(error: unknown): string {
@@ -264,9 +263,10 @@ async function postExact(client: ReleaseOpenClient, projectId: string, action: A
     body = await client.postAction(projectId, action)
   } catch (error) {
     if (isStaleRevision(error)) throw error
-    // A denial or throttle after an unknown try does not prove the first try
-    // rolled back. The first try's own 401, 403 or 429 still does.
-    if (isDefiniteReleaseRejection(error) && !(alreadyAmbiguous && denialCannotDisprove(error))) {
+    // The first received 4xx finished the attempt. After the outcome is unknown,
+    // a 4xx that can be returned before the receipt is read does not prove the
+    // first try failed, and it must not mint another create.
+    if (!alreadyAmbiguous && isDefiniteReleaseRejection(error)) {
       if (pendingOpen.get(projectId)?.action === action) pendingOpen.delete(projectId)
       throw error
     }
@@ -332,9 +332,11 @@ export function assertReleaseOpen(projectId: string, ticketIds: string[]): 'repl
 
 // One journey action, never a follow-up membership write. A stale revision is
 // the only case that mints a new idempotency key. A lost or unusable response
-// keeps the exact action and replays it, including after a later 401, 403 or
-// 429. A second click joins the attempt in flight instead of starting another.
-// The returned journey is not proof of which release received the tickets.
+// keeps the exact action and replays it. A later response that can arrive
+// before receipt reconciliation, including a deleted project's 404 and a 401,
+// 403 or 429, keeps that same key. A second click joins the attempt in flight
+// instead of starting another. The returned journey is not proof of which
+// release received the tickets.
 export async function openReleaseWithTickets(projectId: string, ticketIds: string[], client: ReleaseOpenClient = liveOpenClient): Promise<OpenedRelease> {
   const ids = ticketSet(ticketIds)
   const current = opening.get(projectId)

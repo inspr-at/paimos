@@ -188,6 +188,64 @@ test('a denial after a lost create keeps the same key until the replay', async (
   }
 })
 
+test('a lost commit stays ambiguous through project 404 and reconciles on the same key', async () => {
+  const committed = new Map<string, Journey>()
+  const keys: string[] = []
+  let phase: 'lose' | 'missing' | 'replay' = 'lose'
+  const client = openClient(async (_project, action) => {
+    keys.push(action.idempotency_key)
+    if (phase === 'lose') {
+      phase = 'missing'
+      committed.set(action.idempotency_key, openedJourney())
+      throw new RequestFailure('network')
+    }
+    if (phase === 'missing') {
+      phase = 'replay'
+      throw new APIError(404, 'project not found', {})
+    }
+    const saved = committed.get(action.idempotency_key)
+    if (!saved) throw new Error('a second release was opened')
+    return journey({ ...saved, current_release_id: 'r-4', revision: 30, stage: 'live' })
+  })
+  const ids = ['n-1', 'n-2', 'n-4', 'n-21', 'n-26']
+  await assert.rejects(() => openReleaseWithTickets('p', ids, client), ReleaseUnconfirmed)
+  await assert.rejects(() => openReleaseWithTickets('p', ids, client), (error: unknown) => {
+    assert.ok(error instanceof ReleaseUnconfirmed)
+    assert.equal(error.action.idempotency_key, 'key-1')
+    assert.deepEqual(error.action.ticket_node_ids, ids)
+    assert.match(newReleaseFailure(error), /not confirmed/)
+    assert.doesNotMatch(newReleaseFailure(error), /not opened/)
+    return true
+  })
+  assert.equal(assertReleaseOpen('p', ids), 'replay')
+  const opened = await openReleaseWithTickets('p', ids, client)
+  assert.equal(committed.size, 1)
+  assert.deepEqual(keys, ['key-1', 'key-1', 'key-1'])
+  assert.equal(opened.journey.current_release_id, 'r-4')
+  assert.equal('releaseId' in opened, false)
+  const views = nativeViews(ids, ids.map(id => ({
+    ticket_node_id: id, release_node_id: 'r-3', release_title: 'Release 3', release_state: 'planning',
+  })))
+  assert.deepEqual(reconcileOpenedMembership(ids, views), { status: 'added', releaseId: 'r-3', releaseTitle: 'Release 3', count: 5 })
+  assert.equal(assertReleaseOpen('p', ids), 'clear')
+})
+
+test('the first project 404 is a rejection and the next try uses a new key', async () => {
+  const keys: string[] = []
+  let n = 0
+  const client = openClient(async (_project, action) => {
+    keys.push(action.idempotency_key)
+    throw new APIError(404, 'project not found', {})
+  }, { newKey: () => `key-${++n}` })
+  await assert.rejects(() => openReleaseWithTickets('p', ['n-1'], client), (error: unknown) => {
+    assert.match(newReleaseFailure(error), /The new release was not opened\. project not found/)
+    return true
+  })
+  assert.equal(assertReleaseOpen('p', ['n-1']), 'clear')
+  await assert.rejects(() => openReleaseWithTickets('p', ['n-1'], client), (error: unknown) => error instanceof APIError)
+  assert.deepEqual(keys, ['key-1', 'key-2'])
+})
+
 test('the first denial is a rejection and the next try uses a new key', async () => {
   const keys: string[] = []
   let n = 0

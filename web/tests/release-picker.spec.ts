@@ -4,7 +4,7 @@
 import { mkdirSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { expect, test, type Page, type Route } from '@playwright/test'
-import { fixtures, mockWork, watchErrors, type Call } from './work-fixtures'
+import { fixtures, mockWork, watchErrors, type Call, type MockNode } from './work-fixtures'
 import { journeyWorld, mockJourney, PROJECT, type JourneyWorld } from './journey-fixtures'
 
 const shots = resolve('..', '.agent-shots')
@@ -23,19 +23,44 @@ const OPTIONS: Option[] = [
   { ticket_node_id: 'n-24', key: 'PHAROS-24', title: 'Move the billing epic', status: 'backlog', type: 'ticket', feature_node_id: 'n-epic-2', release_node_id: 'r-9', release_title: 'Release 9', availability: 'other_release' },
   { ticket_node_id: 'n-25', key: 'PHAROS-25', title: 'Keep the building release', status: 'in_progress', type: 'ticket', feature_node_id: null, release_node_id: 'r-4', release_title: 'Release 4', availability: 'active_release' },
 ]
-const KNOWN: Record<string, { key: string; title: string; feature: string | null }> = {
-  'n-1': { key: 'PHAROS-11', title: 'Connect Hetzner Cloud for managed provisioning', feature: 'n-epic' },
-  'n-2': { key: 'PHAROS-12', title: 'Add an Oracle Cloud connector', feature: 'n-epic' },
-  'n-3': { key: 'PHAROS-13', title: 'Run the disposable Hetzner end-to-end check', feature: 'n-epic' },
-  'n-4': { key: 'PHAROS-14', title: 'Visual acceptance of the version pill', feature: null },
-  'n-21': { key: 'PHAROS-21', title: 'Publish the status page', feature: 'n-epic' },
+const KNOWN: Record<string, { key: string; title: string; feature: string | null; type: string; status: string }> = {
+  'n-1': { key: 'PHAROS-11', title: 'Connect Hetzner Cloud for managed provisioning', feature: 'n-epic', type: 'ticket', status: 'in-progress' },
+  'n-2': { key: 'PHAROS-12', title: 'Add an Oracle Cloud connector', feature: 'n-epic', type: 'ticket', status: 'backlog' },
+  // PHAROS-13 is a task in work-fixtures. Membership rejects that kind.
+  'n-3': { key: 'PHAROS-13', title: 'Run the disposable Hetzner end-to-end check', feature: 'n-epic', type: 'task', status: 'qa' },
+  'n-4': { key: 'PHAROS-14', title: 'Visual acceptance of the version pill', feature: null, type: 'ticket', status: 'new' },
+  'n-21': { key: 'PHAROS-21', title: 'Publish the status page', feature: 'n-epic', type: 'ticket', status: 'backlog' },
+}
+const CLOSED_STATE = new Set(['accepted', 'delivered', 'done', 'cancelled', 'canceled', 'archived', 'closed'])
+
+function epicOf(node: MockNode, nodes: MockNode[]): string | null {
+  const parent = nodes.find(item => item.id === node.parent_id)
+  if (!parent || parent.kind_slug === 'project') return null
+  if (parent.kind_slug === 'epic') return parent.id
+  const above = nodes.find(item => item.id === parent.parent_id)
+  return above?.kind_slug === 'epic' ? above.id : null
 }
 
-function catalog(id: string): Option {
-  return OPTIONS.find(option => option.ticket_node_id === id) ?? {
-    ticket_node_id: id, key: KNOWN[id]?.key ?? id, title: KNOWN[id]?.title ?? id, status: 'backlog', type: 'ticket',
-    feature_node_id: KNOWN[id]?.feature ?? null, release_node_id: null, release_title: null, availability: 'addable',
+// A node the fixture already typed wins. Unknown ids are not silently retitled as tickets.
+function catalog(id: string, nodes: MockNode[] = []): Option {
+  const preset = OPTIONS.find(option => option.ticket_node_id === id)
+  if (preset) return preset
+  const node = nodes.find(item => item.id === id)
+  const known = KNOWN[id]
+  const type = node?.kind_slug ?? known?.type ?? 'ticket'
+  const status = node?.state ?? known?.status ?? 'backlog'
+  const availability = type !== 'ticket' ? 'unsupported' : CLOSED_STATE.has(status) || CLOSED_STATE.has(status.replaceAll('-', '_')) ? 'closed' : 'addable'
+  return {
+    ticket_node_id: id, key: node?.key ?? known?.key ?? id, title: node?.title ?? known?.title ?? id, status, type,
+    feature_node_id: node ? epicOf(node, nodes) : known?.feature ?? null, release_node_id: null, release_title: null, availability,
   }
+}
+
+function unsupportedKind(ids: string[], nodes: MockNode[]): boolean {
+  return ids.some(id => {
+    const option = catalog(id, nodes)
+    return option.type !== 'ticket' || option.availability === 'unsupported'
+  })
 }
 
 function requestHash(body: Record<string, unknown>): string {
@@ -43,10 +68,11 @@ function requestHash(body: Record<string, unknown>): string {
   return JSON.stringify({ action: body.action ?? null, expected_revision: body.expected_revision ?? null, release_id: body.release_id ?? null, ticket_node_ids: ids })
 }
 
-async function install(page: Page, world: JourneyWorld, hooks: { rejectCreate?: string; loseCreate?: boolean; createScript?: Array<'lose' | number>; holdCreate?: Promise<void>; native?: Map<string, { release_node_id: string | null; release_title: string | null; release_state: string | null }> } = {}) {
+async function install(page: Page, world: JourneyWorld, hooks: { rejectCreate?: string; loseCreate?: boolean; createScript?: Array<'lose' | number>; holdCreate?: Promise<void>; nodes?: MockNode[]; native?: Map<string, { release_node_id: string | null; release_title: string | null; release_state: string | null }> } = {}) {
   const calls: Call[] = []
   const native = hooks.native ?? new Map<string, { release_node_id: string | null; release_title: string | null; release_state: string | null }>()
   const receipts = new Map<string, string>()
+  const nodes = hooks.nodes ?? []
   const lose = { create: hooks.loseCreate === true }
   const script = hooks.createScript ? [...hooks.createScript] : []
   const remember = (ids: string[], releaseId: string, title: string) => {
@@ -101,12 +127,14 @@ async function install(page: Page, world: JourneyWorld, hooks: { rejectCreate?: 
       if (!walker || walker.state !== 'planning') return route.fulfill({ status: 409, json: { error: 'only a planning release can take tickets' } })
       if (body.expected_revision !== walker.revision) return route.fulfill({ status: 409, json: { error: 'release revision changed' } })
       const ids = body.ticket_node_ids as string[]
-      const blocked = ids.map(catalog).filter(option => option.availability === 'closed' || option.availability === 'released')
+      // addExisting rejects a non-ticket before it writes, and the transaction rolls back.
+      if (unsupportedKind(ids, nodes)) return route.fulfill({ status: 404, json: { error: 'ticket not found in project' } })
+      const blocked = ids.map(id => catalog(id, nodes)).filter(option => option.availability === 'closed' || option.availability === 'released')
       if (blocked.length) return route.fulfill({ status: 409, json: { error: 'closed or released tickets cannot be added' } })
-      const moving = ids.map(catalog).filter(option => option.availability === 'other_release')
+      const moving = ids.map(id => catalog(id, nodes)).filter(option => option.availability === 'other_release')
       if (moving.length && body.confirm_move !== true) return route.fulfill({ status: 409, json: { error: 'ticket belongs to another open release', code: 'other_release' } })
       for (const id of ids) {
-        const option = catalog(id)
+        const option = catalog(id, nodes)
         const found = walker.tickets.find(ticket => ticket.ticket_node_id === id)
         if (found) found.included = true
         else walker.tickets.push({ ticket_node_id: id, key: option.key, title: option.title, feature_node_id: option.feature_node_id, included: true, position: walker.tickets.length, estimated_hours: null, screen_node_ids: [] })
@@ -121,9 +149,13 @@ async function install(page: Page, world: JourneyWorld, hooks: { rejectCreate?: 
       const key = String(body.idempotency_key ?? '')
       const hash = requestHash(body)
       const step = script.shift()
-      // A denial can arrive before the handler reads the receipt, so it does not
-      // prove an earlier lost response failed and it does not create another release.
-      if (typeof step === 'number') return route.fulfill({ status: step, json: { error: step === 429 ? 'too many requests' : 'project access required' } })
+      // ensureJourney runs before lookupReceipt. A deleted project is 404, and a
+      // denial or throttle can arrive there too. None of those read the receipt,
+      // so none of them prove an earlier lost response failed or create another release.
+      if (typeof step === 'number') {
+        const error = step === 429 ? 'too many requests' : step === 404 ? 'project not found' : step === 401 ? 'sign in required' : 'project access required'
+        return route.fulfill({ status: step, json: { error } })
+      }
       const known = key ? receipts.get(key) : undefined
       if (known) {
         if (known !== hash) return route.fulfill({ status: 409, json: { error: 'idempotency key was used for a different action' } })
@@ -135,7 +167,10 @@ async function install(page: Page, world: JourneyWorld, hooks: { rejectCreate?: 
       if (typeof body.idempotency_key !== 'string' || !body.idempotency_key) return route.fulfill({ status: 400, json: { error: 'invalid idempotency key' } })
       if (hooks.rejectCreate) return route.fulfill({ status: 409, json: { error: hooks.rejectCreate } })
       const ids = body.ticket_node_ids as string[]
-      const chosen = ids.map(catalog)
+      const chosen = ids.map(id => catalog(id, nodes))
+      // Kind is checked inside the same transaction as release creation. One
+      // non-ticket rejects the batch and leaves no release, receipt, or membership.
+      if (unsupportedKind(ids, nodes)) return route.fulfill({ status: 404, json: { error: 'ticket not found in project' } })
       if (chosen.some(option => option.availability === 'closed')) return route.fulfill({ status: 409, json: { error: 'closed tickets cannot be added' } })
       if (chosen.some(option => option.availability === 'released')) return route.fulfill({ status: 409, json: { error: 'released or active tickets cannot move' } })
       if (chosen.some(option => option.availability === 'other_release')) return route.fulfill({ status: 409, json: { error: 'confirm_move required to move a ticket from another release' } })
@@ -246,14 +281,19 @@ test('five selected tickets open a new release and land in its plan', async ({ p
   const errors = watchErrors(page)
   await page.setViewportSize({ width: 1440, height: 900 })
   const data = fixtures()
-  data.nodes.push({ id: 'n-21', key: 'PHAROS-21', kind_slug: 'ticket', title: 'Publish the status page', body: '', state: 'backlog', fields: {}, parent_id: 'p-pharos', project: 'p-pharos', created_at: data.nodes[0].created_at, updated_at: data.nodes[0].updated_at })
+  const stamp = data.nodes[0].created_at
+  data.nodes.push(
+    { id: 'n-21', key: 'PHAROS-21', kind_slug: 'ticket', title: 'Publish the status page', body: '', state: 'backlog', fields: {}, parent_id: 'p-pharos', project: 'p-pharos', created_at: stamp, updated_at: stamp },
+    { id: 'n-26', key: 'PHAROS-26', kind_slug: 'ticket', title: 'Ship the release notes', body: '', state: 'backlog', fields: {}, parent_id: 'p-pharos', project: 'p-pharos', created_at: stamp, updated_at: stamp },
+  )
   await mockWork(page, data)
   const world = journeyWorld('live')
   await mockJourney(page, world)
-  const calls = await install(page, world)
+  const calls = await install(page, world, { nodes: data.nodes })
   await page.goto('/p/PHAROS')
   const row = (key: string) => page.locator('tr.ticket-row').filter({ has: page.locator('.key', { hasText: new RegExp(`^${key}$`) }) })
-  for (const key of ['PHAROS-11', 'PHAROS-12', 'PHAROS-13', 'PHAROS-14', 'PHAROS-21']) {
+  // PHAROS-13 is a task. These five are tickets, matching addExisting's kind check.
+  for (const key of ['PHAROS-11', 'PHAROS-12', 'PHAROS-14', 'PHAROS-21', 'PHAROS-26']) {
     await row(key).hover()
     await row(key).getByRole('checkbox', { name: `Select ${key}` }).check()
   }
@@ -266,16 +306,52 @@ test('five selected tickets open a new release and land in its plan', async ({ p
   expect(action).toHaveLength(1)
   expect(action[0].body).toMatchObject({
     action: 'plan_next_release', expected_revision: 12, release_id: 'r-2',
-    ticket_node_ids: ['n-1', 'n-2', 'n-3', 'n-4', 'n-21'],
+    ticket_node_ids: ['n-1', 'n-2', 'n-4', 'n-21', 'n-26'],
   })
   expect(action[0].body.idempotency_key).toEqual(expect.any(String))
   expect(action[0].body).not.toHaveProperty('confirm_move')
   expect(calls.filter(call => call.method === 'POST' && call.path.endsWith('/membership'))).toHaveLength(0)
   await page.goto('/p/PHAROS/journey')
   await expect(page.getByRole('region', { name: 'Decision: Release 3' }).locator('.j-stat').first()).toContainText('5')
-  for (const key of ['PHAROS-11', 'PHAROS-12', 'PHAROS-13', 'PHAROS-14', 'PHAROS-21']) {
+  for (const key of ['PHAROS-11', 'PHAROS-12', 'PHAROS-14', 'PHAROS-21', 'PHAROS-26']) {
     await expect(page.getByRole('checkbox', { name: `${key} in the release` })).toBeChecked()
   }
+  expect(errors).toEqual([])
+})
+
+test('a task in the batch rolls the new release back and keeps the tickets out', async ({ page }) => {
+  const errors = watchErrors(page)
+  await page.setViewportSize({ width: 1440, height: 900 })
+  const data = fixtures()
+  await mockWork(page, data)
+  const world = journeyWorld('live')
+  await mockJourney(page, world)
+  const calls = await install(page, world, { nodes: data.nodes })
+  await page.goto('/p/PHAROS')
+  const row = (key: string) => page.locator('tr.ticket-row').filter({ has: page.locator('.key', { hasText: new RegExp(`^${key}$`) }) })
+  for (const key of ['PHAROS-11', 'PHAROS-13']) {
+    await row(key).hover()
+    await row(key).getByRole('checkbox', { name: `Select ${key}` }).check()
+  }
+  await page.getByRole('toolbar', { name: /selected ticket/ }).getByRole('button', { name: 'Add to release' }).click()
+  await page.getByRole('dialog', { name: 'Release for 2 tickets' }).getByRole('option', { name: /Release 3/ }).click()
+  const toast = page.locator('.toast').filter({ hasText: 'The new release was not opened' })
+  await expect(toast).toContainText('ticket not found in project')
+  await expect(page.locator('.toast').filter({ hasText: /^Added / })).toHaveCount(0)
+  const action = calls.filter(call => call.path.endsWith('/journey/actions'))
+  expect(action).toHaveLength(1)
+  expect(action[0].body).toMatchObject({ action: 'plan_next_release', ticket_node_ids: ['n-1', 'n-3'] })
+  expect(catalog('n-3', data.nodes).type).toBe('task')
+  expect(calls.filter(call => call.method === 'POST' && call.path.endsWith('/membership'))).toHaveLength(0)
+  expect(world.releases.map(release => release.id)).not.toContain('r-3')
+  expect(world.journey.current_release_id).toBe('r-2')
+  expect(world.journey.revision).toBe(12)
+  expect(world.journey.stage).toBe('live')
+  await page.goto('/p/PHAROS/PHAROS-11')
+  await expect(page.getByRole('complementary', { name: 'Ticket details' }).getByRole('button', { name: 'Release: none. Change release' })).toBeVisible()
+  await page.goto('/p/PHAROS/journey')
+  await expect(page.getByRole('region', { name: 'Decision: Release 3' })).toHaveCount(0)
+  await expect(page.getByRole('list', { name: 'Releases, newest first' }).getByRole('button', { name: /^Release 3\b/ })).toHaveCount(0)
   expect(errors).toEqual([])
 })
 
@@ -400,6 +476,38 @@ test('a lost create stays unconfirmed through a denial and replays the same key'
   const world = journeyWorld('live')
   await mockJourney(page, world)
   const calls = await install(page, world, { createScript: ['lose', 403] })
+  await page.goto('/p/PHAROS')
+  const row = page.locator('tr.ticket-row').filter({ has: page.locator('.key', { hasText: /^PHAROS-12$/ }) })
+  await row.hover()
+  await row.getByRole('checkbox', { name: 'Select PHAROS-12' }).check()
+  const add = page.getByRole('toolbar', { name: /selected ticket/ }).getByRole('button', { name: 'Add to release' })
+  const openNew = async () => {
+    await add.click()
+    await page.getByRole('dialog', { name: 'Release for 1 ticket' }).getByRole('option', { name: /^Release 3/ }).click()
+  }
+  await openNew()
+  await expect(page.locator('.toast').filter({ hasText: 'not confirmed' })).toBeVisible()
+  await expect(page.locator('.toast').filter({ hasText: 'was not opened' })).toHaveCount(0)
+  await openNew()
+  await expect(page.locator('.toast').filter({ hasText: 'was not opened' })).toHaveCount(0)
+  await expect(page.locator('.toast').filter({ hasText: 'not confirmed' })).toBeVisible()
+  await openNew()
+  await expect(page.locator('.toast').filter({ hasText: 'Added 1 ticket to Release 3' })).toBeVisible()
+  await expect(page.locator('.toast').filter({ hasText: 'Release 4' })).toHaveCount(0)
+  const action = calls.filter(call => call.path.endsWith('/journey/actions'))
+  expect(action).toHaveLength(3)
+  expect(action[1].body).toEqual(action[0].body)
+  expect(action[2].body).toEqual(action[0].body)
+  expect(world.releases.filter(release => release.id === 'r-3')).toHaveLength(1)
+  expect(calls.filter(call => call.method === 'POST' && call.path.endsWith('/membership'))).toHaveLength(0)
+})
+
+test('a lost create stays unconfirmed through a deleted project and replays the same key', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await mockWork(page, fixtures())
+  const world = journeyWorld('live')
+  await mockJourney(page, world)
+  const calls = await install(page, world, { createScript: ['lose', 404] })
   await page.goto('/p/PHAROS')
   const row = page.locator('tr.ticket-row').filter({ has: page.locator('.key', { hasText: /^PHAROS-12$/ }) })
   await row.hover()
