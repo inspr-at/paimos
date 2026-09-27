@@ -8,6 +8,8 @@ import (
 	"context"
 	"errors"
 	"time"
+
+	"github.com/inspr-at/paimos/internal/ownedprocess"
 )
 
 const (
@@ -19,11 +21,14 @@ const (
 )
 
 var (
-	ErrScope       = errors.New("run control scope mismatch")
-	ErrGeneration  = errors.New("run generation mismatch")
-	ErrReplay      = errors.New("control correlation replay conflict")
-	ErrNotOwned    = errors.New("run is not owned by this daemon generation")
-	ErrUnsupported = errors.New("adapter operation unsupported")
+	ErrScope                = errors.New("run control scope mismatch")
+	ErrGeneration           = errors.New("run generation mismatch")
+	ErrReplay               = errors.New("control correlation replay conflict")
+	ErrNotOwned             = errors.New("run is not owned by this daemon generation")
+	ErrUnsupported          = errors.New("adapter operation unsupported")
+	ErrHarnessArchived      = errors.New("harness generation archived; detach without signaling")
+	ErrControlUnconfirmed   = errors.New("control outcome unconfirmed; reporting failure does not authorize termination")
+	ErrForceExitUnconfirmed = errors.New("owned group signalled; root exit unconfirmed")
 )
 
 // Run is the content-free AEON run projection returned by /runs endpoints.
@@ -53,14 +58,17 @@ type Node struct {
 // HarnessSession is the public binding plus the private worker lease held only
 // by this daemon generation. The lease is never persisted in the run journal.
 type HarnessSession struct {
-	ID        string `json:"id"`
-	ProjectID string `json:"project_id"`
-	Lease     string `json:"-"`
+	Ownership *ownedprocess.Identity `json:"-"`
+	ID        string                 `json:"id"`
+	ProjectID string                 `json:"project_id"`
+	Lease     string                 `json:"-"`
 }
 
 type HarnessControl struct {
-	ID   string `json:"id"`
-	Kind string `json:"kind"`
+	ExpiresAt         *time.Time             `json:"expires_at,omitempty"`
+	ExpectedOwnership *ownedprocess.Identity `json:"expected_ownership,omitempty"`
+	ID                string                 `json:"id"`
+	Kind              string                 `json:"kind"`
 }
 
 type HarnessDelivery struct {
@@ -180,6 +188,18 @@ type AdapterEvent struct {
 	ErrorCode         string
 }
 
+// RecoveryProcess exposes a live child identity and verifies it before force.
+type RecoveryProcess interface {
+	Ownership() (ownedprocess.Identity, error)
+	ForceStop(context.Context, ownedprocess.Identity, time.Time) error
+}
+
+// GracefulProcess is optional so a user stop never falls back to an adapter's
+// forceful cleanup operation. Unsupported adapters reject the user control.
+type GracefulProcess interface{ GracefulStop(context.Context) error }
+
+var ErrGracefulTimeout = errors.New("graceful stop timed out; process may still be running")
+
 type Process interface {
 	PID() int
 	Wait() error
@@ -205,13 +225,15 @@ type AccountProber interface {
 type EnrolledAccount struct{ ID, Key, Harness string }
 
 type ControlRequest struct {
-	TenantID      string `json:"tenant_id"`
-	PrincipalID   string `json:"principal_id"`
-	RunID         string `json:"run_id"`
-	Generation    string `json:"generation"`
-	CorrelationID string `json:"correlation_id"`
-	Operation     string `json:"operation"`
-	Text          string `json:"text,omitempty"`
+	ExpiresAt         *time.Time             `json:"expires_at,omitempty"`
+	ExpectedOwnership *ownedprocess.Identity `json:"expected_ownership,omitempty"`
+	TenantID          string                 `json:"tenant_id"`
+	PrincipalID       string                 `json:"principal_id"`
+	RunID             string                 `json:"run_id"`
+	Generation        string                 `json:"generation"`
+	CorrelationID     string                 `json:"correlation_id"`
+	Operation         string                 `json:"operation"`
+	Text              string                 `json:"text,omitempty"`
 }
 
 type Receipt struct {
