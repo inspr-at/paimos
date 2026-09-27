@@ -80,14 +80,18 @@ export interface AccessWorld {
   projects: Record<string, { key: string; title: string }>
   calls: { method: string; path: string; body: unknown }[]
   available: boolean
+  provisioner?: string
+  provisionFailures?: number
   // The session ended: every call answers 401, as the server does.
   sessionEnded?: boolean
   // Milliseconds before a create (invite, key) answers, to catch a sheet closed meanwhile.
   slow?: number
 }
-export function accessWorld(options: { role?: 'owner' | 'admin' | 'member' | 'viewer' | 'guest'; secondOwner?: boolean; available?: boolean } = {}): AccessWorld {
+export function accessWorld(options: { role?: 'owner' | 'admin' | 'member' | 'viewer' | 'guest'; secondOwner?: boolean; available?: boolean; provisioner?: string; provisionFailures?: number } = {}): AccessWorld {
   const role = (key: string) => `role-${key}`
   const world: AccessWorld = {
+    provisioner: options.provisioner,
+    provisionFailures: options.provisionFailures,
     me: ME,
     roles: roles(),
     people: [
@@ -154,6 +158,7 @@ const mine = (world: AccessWorld) => new Set(world.roles.find(r => r.id === worl
 // whole app (the UI audit passes P1's admin set so non-Access screens stay reachable).
 export async function mockAccess(page: Page, world: AccessWorld, options: { also?: string[] } = {}) {
   let nextId = 1000
+  const accountByInvite = new Map<string, 'failed' | 'invited' | 'exists'>()
   const event = (type: string, before: unknown, after: unknown) => world.events.push({ id: world.events.length + 1, actor_principal_id: world.me, type, before, after, at: new Date(now + world.events.length * 1000).toISOString() })
   const fail = (route: Route, status: number, code: string, reason: string, field?: string) => route.fulfill({ status, json: { error: reason, code, reason, ...(field ? { field } : {}) } })
   const roleRef = (id: string | null) => { const role = world.roles.find(r => r.id === id); return role ? ref(role) : null }
@@ -236,7 +241,7 @@ export async function mockAccess(page: Page, world: AccessWorld, options: { also
       if (!need('members.read')) return fail(route, 403, 'forbidden', 'You need See members to see who is here.')
       // Like internal/authz/members.go: imported classic identities appear in people as well as in imported.
       const importedPeople = world.imported.map(i => ({ principal_id: i.principal_id, name: i.name, avatar_url: null, has_avatar: false, email: null, status: 'active', identity: null, workspace_role: null, project_roles: [], aliases: [], classic_role: i.classic_role, last_active_at: null, last_owner: false }))
-      return route.fulfill({ json: { people: [...world.people.map(person), ...importedPeople], agents: world.agents.map(agent), invites: world.invites.map(invite), imported: world.imported, owner_count: activeOwners().length } })
+      return route.fulfill({ json: { people: [...world.people.map(person), ...importedPeople], agents: world.agents.map(agent), invites: world.invites.map(invite), imported: world.imported, owner_count: activeOwners().length, provisioner: world.provisioner ? { name: world.provisioner } : null } })
     }
     const roleOf = /^\/api\/members\/([^/]+)\/workspace-role$/.exec(path)
     if (roleOf && method === 'PUT') {
@@ -296,6 +301,8 @@ export async function mockAccess(page: Page, world: AccessWorld, options: { also
     if (world.slow && method === 'POST' && (path === '/api/members/invites' || path === '/api/agent-keys')) await new Promise(resolve => setTimeout(resolve, world.slow))
     if (path === '/api/members/invites' && method === 'POST') {
       if (!need('members.manage')) return fail(route, 403, 'forbidden', 'You need Manage members to invite people.')
+      if (body.provision_account && !world.provisioner) return fail(route, 400, 'not_configured', 'Account provisioning is not configured', 'provision_account')
+      if (body.provision_account && !String(body.display_name ?? '').trim()) return fail(route, 400, 'invalid', "Enter the invitee's name", 'display_name')
       const email = String(body.email ?? '').trim().toLowerCase()
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return fail(route, 400, 'invalid', 'Enter an email address', 'email')
       if (body.workspace_role_id === 'role-guest') return fail(route, 400, 'project_only_role', 'Guest is a project role; grant it on a project instead', 'workspace_role_id')
@@ -306,7 +313,27 @@ export async function mockAccess(page: Page, world: AccessWorld, options: { also
       const created = { id: `inv-${nextId++}`, email, workspace_role: (body.workspace_role_id as string | undefined) ?? null, project_roles: (body.project_roles as { project_id: string; role_id: string }[] | undefined) ?? [], status: 'pending' as const, created_by: world.me, created_at: new Date(now).toISOString(), expires_at: new Date(now + days * 86_400_000).toISOString() }
       world.invites.unshift(created)
       event('invite.created', null, { id: created.id, email })
-      return route.fulfill({ status: 201, json: { invite: invite(created), join_url: `https://aeon.inspr.at/join/tok_${created.id}_s3cr3t` } })
+      let account: { status: 'failed' | 'invited'; reason?: string } | undefined
+      if (body.provision_account) {
+        const failed = (world.provisionFailures ?? 0) > 0
+        if (failed) world.provisionFailures = (world.provisionFailures ?? 0) - 1
+        account = failed ? { status: 'failed', reason: 'The sign-in account could not be set up. Retry the invite or ask an administrator.' } : { status: 'invited' }
+        accountByInvite.set(created.id, account.status)
+        event(failed ? 'invite.account_provision_failed' : 'invite.account_provisioned', null, { invite_id: created.id, status: account.status })
+      }
+      return route.fulfill({ status: 201, json: { invite: invite(created), join_url: `https://aeon.inspr.at/join/tok_${created.id}_s3cr3t`, ...(account ? { account } : {}) } })
+    }
+    const provisionMatch = /^\/api\/members\/invites\/([^/]+)\/provision$/.exec(path)
+    if (provisionMatch && method === 'POST') {
+      if (!need('members.manage')) return fail(route, 403, 'forbidden', 'Permission denied')
+      if (!world.provisioner) return fail(route, 400, 'not_configured', 'Account provisioning is not configured')
+      if (accountByInvite.get(provisionMatch[1]) !== 'failed') return fail(route, 409, 'conflict', 'This invite cannot be provisioned again')
+      const failed = (world.provisionFailures ?? 0) > 0
+      if (failed) world.provisionFailures = (world.provisionFailures ?? 0) - 1
+      const account = failed ? { status: 'failed', reason: 'The sign-in account could not be set up. Retry the invite or ask an administrator.' } : { status: 'invited' }
+      accountByInvite.set(provisionMatch[1], account.status as 'failed' | 'invited')
+      event(failed ? 'invite.account_provision_failed' : 'invite.account_provisioned', null, { invite_id: provisionMatch[1], status: account.status })
+      return route.fulfill({ json: account })
     }
     const inviteMatch = /^\/api\/members\/invites\/([^/]+)$/.exec(path)
     if (inviteMatch && method === 'DELETE') {

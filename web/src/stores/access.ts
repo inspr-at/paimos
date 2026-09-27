@@ -80,6 +80,7 @@ export const useAccess = defineStore('access', () => {
   async function linkAlias(principalId: string, fromId: string) { await wire.linkAlias(principalId, fromId); await settle() }
   async function unlinkAlias(principalId: string, fromId: string) { await wire.unlinkAlias(principalId, fromId); await settle() }
   async function invite(body: Parameters<typeof wire.createInvite>[0]) { const out = await wire.createInvite(body); await settle(); return out }
+  async function retryInviteProvision(id: string) { return wire.retryInviteProvision(id) }
   async function revokeInvite(id: string) { await wire.revokeInvite(id); await settle() }
   async function createRole(body: Parameters<typeof wire.createRole>[0]) { const role = await wire.createRole(body); await settle(); return role }
   async function updateRole(id: string, body: Parameters<typeof wire.updateRole>[1]) { const role = await wire.updateRole(id, body); await settle(); return role }
@@ -92,7 +93,7 @@ export const useAccess = defineStore('access', () => {
 
   return {
     registry, roles, members, state, error, people, agents, invites, imported, roleById, names,
-    load, settle, person, agent, setWorkspaceRole, deactivate, reactivate, linkAlias, unlinkAlias, invite, revokeInvite,
+    load, settle, person, agent, setWorkspaceRole, deactivate, reactivate, linkAlias, unlinkAlias, invite, retryInviteProvision, revokeInvite,
     createRole, updateRole, deleteRole, setProjectRole, removeProjectMember,
   }
 })

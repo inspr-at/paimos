@@ -19,14 +19,36 @@ import (
 
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/httpapi"
+	"github.com/inspr-at/paimos/internal/identity"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
 
 var uuidPattern = regexp.MustCompile(`(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 
-type Module struct{ pool *pgxpool.Pool }
+type Module struct {
+	pool        *pgxpool.Pool
+	provisioner identity.Provisioner
+}
 
 func New(pool *pgxpool.Pool) httpapi.Module { return &Module{pool: pool} }
+
+// NewWithProvisioner lets the coordinator inject the config-selected identity
+// adapter without giving authz access to server environment or credentials.
+// The adapter must also implement identity.TenantScoped; otherwise it is not
+// advertised and provisioning fails closed.
+func NewWithProvisioner(pool *pgxpool.Pool, provisioner identity.Provisioner) httpapi.Module {
+	return &Module{pool: pool, provisioner: provisioner}
+}
+func (m *Module) provisionerFor(tenantID string) identity.Provisioner {
+	if m.provisioner == nil {
+		return nil
+	}
+	scoped, ok := m.provisioner.(identity.TenantScoped)
+	if !ok || scoped.TenantID() != tenantID {
+		return nil
+	}
+	return m.provisioner
+}
 func (m *Module) Mount(mux *http.ServeMux) {
 	Handle(mux, m.pool, "GET /api/authz/permissions", "roles.read", m.permissions)
 	Handle(mux, m.pool, "GET /api/me/permissions", "authz.read", m.mePermissions)
@@ -37,6 +59,7 @@ func (m *Module) Mount(mux *http.ServeMux) {
 	Handle(mux, m.pool, "GET /api/members", "members.read", m.members)
 	Handle(mux, m.pool, "PUT /api/members/{principal_id}/workspace-role", "members.manage", m.putWorkspaceRole)
 	Handle(mux, m.pool, "POST /api/members/invites", "members.manage", m.createInvite)
+	Handle(mux, m.pool, "POST /api/members/invites/{id}/provision", "members.manage", m.retryInviteProvision)
 	Handle(mux, m.pool, "DELETE /api/members/invites/{id}", "members.manage", m.revokeInvite)
 	Handle(mux, m.pool, "POST /api/members/{principal_id}/deactivate", "members.manage", m.deactivate)
 	Handle(mux, m.pool, "POST /api/members/{principal_id}/reactivate", "members.manage", m.reactivate)

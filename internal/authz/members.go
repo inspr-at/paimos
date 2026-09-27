@@ -57,16 +57,23 @@ type ImportedMember struct {
 	ClassicRole *string `json:"classic_role"`
 }
 type MemberDirectory struct {
-	People     []Member         `json:"people"`
-	Agents     []AgentMember    `json:"agents"`
-	Invites    []Invite         `json:"invites"`
-	Imported   []ImportedMember `json:"imported"`
-	OwnerCount int              `json:"owner_count"`
+	People      []Member               `json:"people"`
+	Agents      []AgentMember          `json:"agents"`
+	Invites     []Invite               `json:"invites"`
+	Imported    []ImportedMember       `json:"imported"`
+	OwnerCount  int                    `json:"owner_count"`
+	Provisioner *provisionerCapability `json:"provisioner"`
+}
+type provisionerCapability struct {
+	Name string `json:"name"`
 }
 
 func (m *Module) members(w http.ResponseWriter, r *http.Request) {
 	p := actor(r)
 	out := MemberDirectory{People: []Member{}, Agents: []AgentMember{}, Invites: []Invite{}, Imported: []ImportedMember{}}
+	if provisioner := m.provisionerFor(p.TenantID); provisioner != nil {
+		out.Provisioner = &provisionerCapability{Name: provisioner.Name()}
+	}
 	err := db.InTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
 		rows, err := tx.Query(r.Context(), `SELECT p.id::text,p.kind,p.name,p.email,p.status,p.roles,
           i.issuer,coalesce(pp.avatar_original_hash,''),br.id::text,br.key,br.name,
