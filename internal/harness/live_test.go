@@ -180,6 +180,9 @@ func TestLiveAgents(t *testing.T) {
 			if v.Since.IsZero() || v.HeartbeatAt.IsZero() {
 				t.Fatalf("times %+v", v.LiveAgent)
 			}
+			if _, exposed := v.raw["display_label"]; exposed {
+				t.Fatal("unlabeled session invented a display_label")
+			}
 		} else if v.SessionID != starting || v.Ticket != nil || v.raw["ticket"] != nil {
 			t.Fatalf("starting agent %+v", v.raw)
 		}
@@ -191,6 +194,9 @@ func TestLiveAgents(t *testing.T) {
 	}
 	if _, exposed := live(guest)[0].raw["activity_note_id"]; exposed {
 		t.Fatal("guest read worker activity entry")
+	}
+	if _, exposed := live(guest)[0].raw["display_label"]; exposed {
+		t.Fatal("guest read session display label")
 	}
 	if got := live(guest); got[0].Ticket == nil || got[0].Ticket.Key != "HTS-2" {
 		t.Fatalf("guest ticket %+v", got[0].Ticket)
@@ -262,6 +268,181 @@ func TestLiveAgents(t *testing.T) {
 	expect(t, f.call(tenant.Principal{}, "GET", "/api/harness-sessions/live", nil, ""), 401)
 	f.key = "invalid"
 	expect(t, f.call(f.agent, "GET", "/api/harness-sessions/live", nil, ""), 403)
+}
+
+// Coordinator children share one agent principal. The live feed must keep that
+// principal name and still return each session's own display_label, and it must
+// withhold the label from anyone who lacks harness.read at the project.
+func TestLiveDisplayLabelIsNotThePrincipalName(t *testing.T) {
+	f := fixture(t)
+	ctx := t.Context()
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `UPDATE principals SET name='aeon-coordinator' WHERE id=$1`, f.agent.ID)
+		return err
+	})
+	register := func(label string) string {
+		t.Helper()
+		body := map[string]any{"agent_principal_id": f.agent.ID, "harness": "cursor", "host": "studio-mac", "management_mode": "unmanaged", "role": "worker", "harness_session_ref": "label-generation-" + uid(), "worker_lease": "label-worker-lease-" + uid(), "ticket_node_id": f.ticket, "work_shape": "ship"}
+		if label != "" {
+			body["display_label"] = label
+		}
+		w := f.call(f.person, "POST", "/api/projects/"+f.project+"/harness-sessions", body, "")
+		expect(t, w, 201)
+		id := decode(t, w)["id"].(string)
+		f.tx(t, f.person, func(tx pgx.Tx) error {
+			_, err := tx.Exec(ctx, `UPDATE harness_sessions SET phase='working', activity='busy', heartbeat_at=clock_timestamp()-interval '20 seconds' WHERE id=$1`, id)
+			return err
+		})
+		return id
+	}
+	first := register("grok-ta1")
+	second := register("grok-ta2")
+	unlabeled := register("")
+
+	person := func(name string) tenant.Principal {
+		t.Helper()
+		p := tenant.Principal{ID: uid(), TenantID: f.person.TenantID, Kind: tenant.Person}
+		f.tx(t, p, func(tx pgx.Tx) error {
+			_, err := tx.Exec(ctx, `INSERT INTO principals(tenant_id,id,kind,name) VALUES($1,$2,'person',$3)`, p.TenantID, p.ID, name)
+			return err
+		})
+		return p
+	}
+	grant := func(p tenant.Principal, permissions ...string) {
+		t.Helper()
+		var roleID string
+		if err := f.db.Admin.QueryRow(ctx, `INSERT INTO roles(tenant_id,key,name) VALUES($1::uuid,'members_only','Members only') RETURNING id::text`, p.TenantID).Scan(&roleID); err != nil {
+			t.Fatal(err)
+		}
+		for _, permission := range permissions {
+			if _, err := f.db.Admin.Exec(ctx, `INSERT INTO role_permissions(tenant_id,role_id,permission) VALUES($1::uuid,$2::uuid,$3)`, p.TenantID, roleID, permission); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if _, err := f.db.Admin.Exec(ctx, `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type) VALUES($1::uuid,$2::uuid,$3::uuid,'workspace')`, p.TenantID, p.ID, roleID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	membersOnly := person("members reader")
+	grant(membersOnly, "nodes.read", "members.read")
+	guest := person("project guest")
+	if _, err := f.db.Admin.Exec(ctx, `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,scope_id) SELECT $1::uuid,$2::uuid,id,'project',$3::uuid FROM roles WHERE tenant_id=$1::uuid AND key='guest'`, guest.TenantID, guest.ID, f.project); err != nil {
+		t.Fatal(err)
+	}
+	member := person("project member")
+	if _, err := f.db.Admin.Exec(ctx, `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,scope_id) SELECT $1::uuid,$2::uuid,id,'project',$3::uuid FROM roles WHERE tenant_id=$1::uuid AND key='member'`, member.TenantID, member.ID, f.project); err != nil {
+		t.Fatal(err)
+	}
+
+	type item struct {
+		harness.LiveAgent
+		raw map[string]any
+	}
+	live := func(p tenant.Principal) []item {
+		t.Helper()
+		w := f.call(p, "GET", "/api/harness-sessions/live", nil, "")
+		expect(t, w, 200)
+		var page struct {
+			Items []json.RawMessage `json:"items"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &page); err != nil {
+			t.Fatal(err)
+		}
+		out := []item{}
+		for _, raw := range page.Items {
+			var v item
+			if err := json.Unmarshal(raw, &v.LiveAgent); err != nil {
+				t.Fatal(err)
+			}
+			if err := json.Unmarshal(raw, &v.raw); err != nil {
+				t.Fatal(err)
+			}
+			out = append(out, v)
+		}
+		return out
+	}
+	bySession := func(items []item) map[string]item {
+		t.Helper()
+		out := map[string]item{}
+		for _, v := range items {
+			out[v.SessionID] = v
+		}
+		return out
+	}
+	admin := bySession(live(f.person))
+	if len(admin) != 3 {
+		t.Fatalf("admin sessions %d", len(admin))
+	}
+	for _, id := range []string{first, second, unlabeled} {
+		got := admin[id]
+		if got.Name != "aeon-coordinator" || got.PrincipalID != f.agent.ID {
+			t.Fatalf("principal identity changed %+v", got.LiveAgent)
+		}
+	}
+	if admin[first].DisplayLabel == nil || *admin[first].DisplayLabel != "grok-ta1" || admin[second].DisplayLabel == nil || *admin[second].DisplayLabel != "grok-ta2" {
+		t.Fatalf("session labels %+v %+v", admin[first].DisplayLabel, admin[second].DisplayLabel)
+	}
+	if _, exposed := admin[unlabeled].raw["display_label"]; exposed || admin[unlabeled].DisplayLabel != nil {
+		t.Fatalf("unlabeled session grew a label %v", admin[unlabeled].raw["display_label"])
+	}
+	if admin[first].Name == *admin[first].DisplayLabel {
+		t.Fatal("principal name was replaced by the session label")
+	}
+
+	members := live(membersOnly)
+	if len(members) != 3 {
+		t.Fatalf("members-only sessions %d", len(members))
+	}
+	for _, v := range members {
+		if v.Name != "aeon-coordinator" || v.PrincipalID != f.agent.ID {
+			t.Fatalf("members.read lost the principal %+v", v.LiveAgent)
+		}
+		if _, exposed := v.raw["display_label"]; exposed || v.DisplayLabel != nil {
+			t.Fatalf("members.read revealed a session label %v", v.raw)
+		}
+		if _, exposed := v.raw["session_id"]; exposed {
+			t.Fatal("members.read opened the session")
+		}
+	}
+	guests := live(guest)
+	if len(guests) != 3 {
+		t.Fatalf("guest sessions %d", len(guests))
+	}
+	for _, v := range guests {
+		if _, exposed := v.raw["display_label"]; exposed || v.Name != "" || v.PrincipalID != "" {
+			t.Fatalf("guest saw identity %+v", v.raw)
+		}
+	}
+	agents := live(f.agent)
+	if len(agents) != 3 {
+		t.Fatalf("agent sessions %d", len(agents))
+	}
+	for _, v := range agents {
+		if _, exposed := v.raw["display_label"]; exposed || v.Name != "" {
+			t.Fatalf("agent key saw a session label %+v", v.raw)
+		}
+	}
+	// A project member holds harness.read there, so the label is visible, while
+	// the Agents workspace session id stays withheld.
+	memberItems := live(member)
+	if len(memberItems) != 3 {
+		t.Fatalf("member sessions %d", len(memberItems))
+	}
+	labels := map[string]bool{}
+	for _, v := range memberItems {
+		if _, exposed := v.raw["session_id"]; exposed {
+			t.Fatal("project member opened the workspace session")
+		}
+		if v.Name != "aeon-coordinator" {
+			t.Fatalf("member principal %+v", v.LiveAgent)
+		}
+		if v.DisplayLabel != nil {
+			labels[*v.DisplayLabel] = true
+		}
+	}
+	if !labels["grok-ta1"] || !labels["grok-ta2"] || len(labels) != 2 {
+		t.Fatalf("member labels %v", labels)
+	}
 }
 
 // The live read walks its partial index from the freshest heartbeat down to the

@@ -4,6 +4,7 @@ package harness
 
 import (
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -31,6 +32,9 @@ var maxLive = 500
 // members.read or harness.read at that project, like approval agent names
 // (AEON-171). session_id, the key to the Agents workspace, is present only
 // with harness.read in the workspace, which that workspace requires.
+// DisplayLabel is the session's own public label. It is present only with
+// harness.read at that project, and omitted when unlabeled. Name stays the
+// agent principal; members.read does not reveal the session label.
 type LiveAgent struct {
 	StateEvidence
 	StoppedAt       *time.Time  `json:"stopped_at,omitempty"`
@@ -39,6 +43,7 @@ type LiveAgent struct {
 	SessionID       string      `json:"session_id,omitempty"`
 	PrincipalID     string      `json:"principal_id,omitempty"`
 	Name            string      `json:"name,omitempty"`
+	DisplayLabel    *string     `json:"display_label,omitempty"`
 	Harness         string      `json:"harness"`
 	Model           *string     `json:"model,omitempty"`
 	ReasoningEffort *string     `json:"reasoning_effort,omitempty"`
@@ -76,7 +81,7 @@ type LivePage struct {
 // down to the freshness window: now() is stable, so the window bounds the index
 // range itself, and the LIMIT ends the walk. The predicates match the partial
 // index's so the planner can use it.
-const liveSelect = `SELECT s.id::text,s.project_id::text,s.agent_principal_id::text,coalesce(a.name,''),s.harness,s.model,s.reasoning_effort,s.account_label,s.harness_version,s.management,s.role,s.phase,s.activity,s.activity_note,latest.id,
+const liveSelect = `SELECT s.id::text,s.project_id::text,s.agent_principal_id::text,coalesce(a.name,''),s.display_label,s.harness,s.model,s.reasoning_effort,s.account_label,s.harness_version,s.management,s.role,s.phase,s.activity,s.activity_note,latest.id,
        t.id::text,t.key,t.title,t.project_id::text,s.created_at,s.heartbeat_at,s.stopped_at,s.stop_reason
   FROM harness_sessions s
   LEFT JOIN LATERAL (SELECT id FROM harness_activity_notes WHERE session_id=s.id ORDER BY id DESC LIMIT 1) latest ON true
@@ -117,13 +122,16 @@ func (m *Module) live(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, erro
 		var v LiveAgent
 		var ticketID, ticketKey, ticketTitle, ticketProject *string
 		var heartbeat *time.Time
-		if err = rows.Scan(&v.SessionID, &v.ProjectID, &v.PrincipalID, &v.Name, &v.Harness, &v.Model, &v.ReasoningEffort, &v.AccountLabel, &v.HarnessVersion, &v.Management, &v.Role, &v.Phase, &v.Activity, &v.ActivityNote, &v.ActivityNoteID,
+		if err = rows.Scan(&v.SessionID, &v.ProjectID, &v.PrincipalID, &v.Name, &v.DisplayLabel, &v.Harness, &v.Model, &v.ReasoningEffort, &v.AccountLabel, &v.HarnessVersion, &v.Management, &v.Role, &v.Phase, &v.Activity, &v.ActivityNote, &v.ActivityNoteID,
 			&ticketID, &ticketKey, &ticketTitle, &ticketProject, &v.Since, &heartbeat, &v.StoppedAt, &v.StopReason); err != nil {
 			rows.Close()
 			return nil, err
 		}
 		if heartbeat != nil {
 			v.HeartbeatAt = heartbeat
+		}
+		if v.DisplayLabel != nil && strings.TrimSpace(*v.DisplayLabel) == "" {
+			v.DisplayLabel = nil
 		}
 		if ticketID != nil && ticketKey != nil && ticketTitle != nil && ticketProject != nil {
 			v.Ticket = &LiveTicket{NodeSummary: NodeSummary{ID: *ticketID, Key: *ticketKey, Title: *ticketTitle}, ProjectID: *ticketProject}
@@ -174,6 +182,7 @@ func (m *Module) live(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, erro
 				agent.ActivityNote = nil
 				agent.ActivityNoteID = nil
 				agent.Model, agent.ReasoningEffort, agent.AccountLabel, agent.HarnessVersion = nil, nil, nil, nil
+				agent.DisplayLabel = nil
 			}
 			if !allowed("harness.read", projectID) && !allowed("members.read", projectID) {
 				agent.PrincipalID, agent.Name = "", ""

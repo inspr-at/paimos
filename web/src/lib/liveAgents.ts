@@ -13,6 +13,9 @@ export interface LiveAgent {
   project_id: string
   // Present only when the caller may open the session / know the agent (AEON-171).
   session_id?: string; principal_id?: string; name?: string
+  // Session label when harness.read at the project included it. Omitted means
+  // withheld or unlabeled; never copy name into it.
+  display_label?: string
   harness: Harness; management_mode: 'managed' | 'unmanaged'; role: 'worker' | 'coordinator'
   phase: 'starting' | 'working' | 'stopping' | 'yielded' | 'stopped'; activity: 'busy' | 'unknown' | 'idle' | 'throttled'
   stopped_at?: string | null; stop_reason?: string | null; run_status?: string | null; needs_attention?: boolean; has_problem?: boolean
@@ -68,7 +71,7 @@ export function groupLive(items: LiveAgent[], serverNow: number, preferences: Ag
 
 // Two readings that show the same thing, including event evidence, so a poll that
 // changes nothing re-renders nothing.
-const shown = (a: LiveAgent) => [a.project_id, a.session_id, a.principal_id, a.name, a.harness, a.role, a.phase, a.activity, a.state, a.ticket?.id, a.ticket?.key, a.ticket?.title, a.ticket?.project_id, a.since, a.heartbeat_at, a.activity_note, a.activity_note_id, a.run_status, a.stop_reason, a.stopped_at, a.needs_attention, a.has_problem].join('\u0000')
+const shown = (a: LiveAgent) => [a.project_id, a.session_id, a.principal_id, a.name, a.display_label, a.harness, a.role, a.phase, a.activity, a.state, a.ticket?.id, a.ticket?.key, a.ticket?.title, a.ticket?.project_id, a.since, a.heartbeat_at, a.activity_note, a.activity_note_id, a.run_status, a.stop_reason, a.stopped_at, a.needs_attention, a.has_problem].join('\u0000')
 export function sameLive(a: Map<string, LiveAgent[]>, b: Map<string, LiveAgent[]>) {
   if (a.size !== b.size) return false
   for (const [id, list] of a) {
@@ -78,9 +81,10 @@ export function sameLive(a: Map<string, LiveAgent[]>, b: Map<string, LiveAgent[]
   return true
 }
 
-// Who: the agent's name, else its harness ("Claude agent") when the caller may
-// not know which agent it is.
-export const who = (agent: LiveAgent) => agent.name || `${harnessLabel(agent.harness)} agent`
+// Who is on screen: the session label when this feed included one, then the
+// principal name the server already permitted. An omitted label is not filled
+// in from the principal, and a withheld identity stays the harness.
+export const who = (agent: LiveAgent) => agent.display_label?.trim() || agent.name?.trim() || `${harnessLabel(agent.harness)} agent`
 export const phaseLabel = (agent: Pick<LiveAgent, 'phase' | 'state'>) => STATE_LABEL[agent.state ?? (agent.phase === 'stopped' ? 'stopped' : 'working')]
 export const elapsedFor = (agent: Pick<LiveAgent, 'since'>, serverNow: number) => duration(serverNow - Date.parse(agent.since))
 

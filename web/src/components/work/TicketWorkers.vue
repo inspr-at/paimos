@@ -54,21 +54,28 @@ function place() {
 function show(focusInside = false) {
   if (!props.workers.length) return
   open.value = true
-  void nextTick(() => { place(); if (focusInside) panel.value?.querySelector<HTMLElement>('a[href], button')?.focus() })
+  void nextTick(() => { place(); if (focusInside) panel.value?.querySelector<HTMLElement>('a[href]')?.focus() })
 }
 function hide(restore = false) {
   if (!open.value) return
   open.value = false
   if (restore) trigger.value?.focus()
 }
-function leadClick() { if (!leadTo.value) show() }
+function leadClick(event: MouseEvent) { if (event.detail === 0 || leadTo.value) return; show() }
 function setLeadTrigger(el: unknown) {
   if (more.value) return
   trigger.value = el instanceof HTMLElement ? el : undefined
 }
-function toggle() { if (open.value) hide(); else show() }
+function toggle(event: MouseEvent) { if (event.detail === 0) return; if (open.value) hide(); else show() }
 function onKey(event: KeyboardEvent) {
-  if (event.key === 'Escape' && open.value) { event.preventDefault(); event.stopPropagation(); hide(true) }
+  if (event.key === 'Escape' && open.value) { event.preventDefault(); event.stopPropagation(); hide(true); return }
+  if (event.key !== 'Enter' && event.key !== ' ') return
+  const target = event.target
+  if (!(target instanceof Element) || target.closest('.worker-pop')) return
+  if (!target.closest('button.worker-lead, .worker-more')) return
+  event.preventDefault()
+  event.stopPropagation()
+  if (open.value) hide(); else show(true)
 }
 const within = (node: EventTarget | null) => node instanceof Node && (!!root.value?.contains(node) || !!panel.value?.contains(node))
 function outside(event: PointerEvent) { if (open.value && !within(event.target)) hide() }

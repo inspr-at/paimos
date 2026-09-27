@@ -85,6 +85,7 @@ test('sameLive preserves evidence changes for glints and state changes for label
   assert.ok(!sameLive(a, new Map([['p1', [agent({ heartbeat_at: ago(5) })]]])))
   assert.ok(!sameLive(a, new Map([['p1', [agent({ activity_note_id: 2 })]]])))
   assert.ok(!sameLive(a, new Map([['p1', [agent({ state: 'stale' })]]])))
+  assert.ok(!sameLive(a, new Map([['p1', [agent({ display_label: 'grok-ta1' })]]])))
   assert.ok(!sameLive(a, new Map([['p1', [agent({ ticket: { id: 't2', key: 'HAUSV-888', title: 'Other', project_id: 'p1' } })]]])))
   assert.ok(!sameLive(a, new Map([['p1', [agent(), agent({ session_id: 's2' })]]])))
   assert.ok(!sameLive(a, new Map([['p2', [agent()]]])))
@@ -158,4 +159,24 @@ test('ticket workers match this project and ticket, and omit stopped or archived
   const rebound = ticketWorkers(groupLive([agent({ session_id: 'work', ticket: { id: 't2', key: 'PHAROS-11', title: 'Other', project_id: 'p1' } })], now).get('p1')!, 'p1')
   assert.equal(rebound.get('t1'), undefined)
   assert.equal(rebound.get('t2')![0]!.session_id, 'work')
+})
+
+test('shared principal keeps distinct session labels and does not invent a withheld one', () => {
+  const shared = { principal_id: 'coord', name: 'aeon-coordinator' }
+  const ticket = { id: 't1', key: 'AEON-233', title: 'Workers', project_id: 'p1' }
+  const first = agent({ ...shared, session_id: 's-a', display_label: 'grok-ta1', ticket })
+  const second = agent({ ...shared, session_id: 's-b', display_label: 'grok-ta2', since: ago(60), ticket })
+  const unlabeled = agent({ ...shared, session_id: 's-c', ticket })
+  const withheld = agent({ session_id: undefined, principal_id: undefined, name: undefined, display_label: undefined, harness: 'codex', ticket })
+  assert.equal(who(first), 'grok-ta1')
+  assert.equal(who(second), 'grok-ta2')
+  assert.equal(unlabeled.display_label, undefined)
+  assert.equal(who(unlabeled), 'aeon-coordinator')
+  assert.equal(who(agent({ ...shared, display_label: '   ' })), 'aeon-coordinator')
+  assert.equal(who(withheld), 'Codex agent')
+  assert.equal(withheld.display_label, undefined)
+  const listed = ticketWorkers(groupLive([first, second, unlabeled, withheld], now).get('p1')!, 'p1').get('t1')!
+  assert.deepEqual(listed.map(who).sort(), ['Codex agent', 'aeon-coordinator', 'grok-ta1', 'grok-ta2'])
+  assert.equal(listed.find(worker => worker.session_id === 's-c')!.display_label, undefined)
+  assert.deepEqual(listed.filter(worker => worker.principal_id === 'coord').map(worker => worker.session_id).sort(), ['s-a', 's-b', 's-c'])
 })

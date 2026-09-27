@@ -2146,8 +2146,10 @@ paths:
         its own project and, when its bound ticket has since moved, under the ticket's project as well. Row-level
         security and project visibility (ADR-003 P2) decide what exists for the caller: an invisible project
         contributes nothing. principal_id and name are present only with members.read or harness.read at that project
-        (as approval agent names, AEON-171); session_id only with harness.read in the workspace. Needs nodes.read in
-        the workspace or any project binding; an agent key also needs harness.read. One answer holds at most 500
+        (as approval agent names, AEON-171); session_id only with harness.read in the workspace. display_label is
+        the session's own public label, present only with harness.read at that project, and omitted when unlabeled
+        or withheld. name stays the agent principal and is not replaced by the session label; members.read does not
+        grant display_label. Needs nodes.read in the workspace or any project binding; an agent key also needs harness.read. One answer holds at most 500
         sessions, freshest heartbeat first; truncated says more were live. activity_note and activity_note_id are returned only where
         the caller holds harness.read at the project. With include_inactive=true, heartbeat_at may be null.
         State evidence includes pending requests/replies, run outcome, and error stops; no request contents are exposed.
@@ -5721,7 +5723,8 @@ components:
         project_id: {type: string, format: uuid}
         session_id: {type: string, format: uuid, description: Present only with harness.read in the workspace}
         principal_id: {type: string, format: uuid, description: Present only with members.read or harness.read at the project}
-        name: {type: string, description: The agent principal's name; present with principal_id}
+        name: {type: string, description: The agent principal's name; present with principal_id. Not the session display label.}
+        display_label: {type: string, maxLength: 128, description: Public per-session label. Present only with harness.read at the project. Omitted when the session is unlabeled or the caller lacks that permission. members.read does not reveal it.}
         harness: {type: string, enum: [codex, claude, pi, cursor, grok]}
         management_mode: {type: string, enum: [managed, unmanaged]}
         role: {type: string, enum: [worker, coordinator]}

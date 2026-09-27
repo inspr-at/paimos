@@ -11,15 +11,19 @@ const grid = (page: Page) => page.getByRole('grid', { name: 'Tickets' })
 const row = (page: Page, key: string) => grid(page).locator('tr.ticket-row').filter({ has: page.locator('.key', { hasText: new RegExp(`^${key}$`) }) })
 const liveCalls = (calls: Call[]) => calls.filter(call => call.path === '/api/harness-sessions/live')
 
+const shared = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee'
+function namedWorker(label: string, fields: Parameters<typeof liveAgent>[0]) {
+  return liveAgent({ principal_id: shared, name: 'aeon-coordinator', display_label: label, ...fields })
+}
 function withWorkers(data: Fixtures = fixtures()) {
   data.live.push(
-    liveAgent({ project_id: 'p-pharos', session_id: 's-fault', principal_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', name: 'fault', has_problem: true, ticket: ticket('n-epic', 'PHAROS-10', 'Guarded multi-cloud provisioning') }),
-    liveAgent({ project_id: 'p-pharos', session_id: 's-hausv', principal_id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', name: 'hausv', ticket: ticket('n-1', 'PHAROS-11', 'Connect Hetzner Cloud for managed provisioning') }),
-    liveAgent({ project_id: 'p-pharos', session_id: 's-wren', principal_id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', name: 'wren', needs_attention: true, ticket: ticket('n-2', 'PHAROS-12', 'Add an Oracle Cloud connector') }),
+    namedWorker('fault', { project_id: 'p-pharos', session_id: 's-fault', has_problem: true, ticket: ticket('n-epic', 'PHAROS-10', 'Guarded multi-cloud provisioning') }),
+    namedWorker('hausv', { project_id: 'p-pharos', session_id: 's-hausv', ticket: ticket('n-1', 'PHAROS-11', 'Connect Hetzner Cloud for managed provisioning') }),
+    namedWorker('wren', { project_id: 'p-pharos', session_id: 's-wren', needs_attention: true, ticket: ticket('n-2', 'PHAROS-12', 'Add an Oracle Cloud connector') }),
     liveAgent({ project_id: 'p-pharos', name: undefined, harness: 'codex', ticket: ticket('n-2', 'PHAROS-12', 'Add an Oracle Cloud connector') }),
     liveAgent({ project_id: 'p-pharos', session_id: 's-retired', name: 'retired', phase: 'stopped', activity: 'idle', stopped_at: new Date(at - 60_000).toISOString(), stop_reason: 'completed', ticket: ticket('n-2', 'PHAROS-12', 'Add an Oracle Cloud connector') }),
-    liveAgent({ project_id: 'p-pharos', session_id: 's-quiet', name: 'quiet', activity: 'idle', heartbeat_at: new Date(at - 10 * 60_000).toISOString(), ticket: ticket('n-3', 'PHAROS-13', 'Run the disposable Hetzner end-to-end check') }),
-    liveAgent({ project_id: 'p-pharos', session_id: 's-nova', principal_id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd', name: 'nova', ticket: ticket('n-4', 'PHAROS-14', 'Visual acceptance of the version pill') }),
+    namedWorker('quiet', { project_id: 'p-pharos', session_id: 's-quiet', activity: 'idle', heartbeat_at: new Date(at - 10 * 60_000).toISOString(), ticket: ticket('n-3', 'PHAROS-13', 'Run the disposable Hetzner end-to-end check') }),
+    namedWorker('nova', { project_id: 'p-pharos', session_id: 's-nova', ticket: ticket('n-4', 'PHAROS-14', 'Visual acceptance of the version pill') }),
     liveAgent({ project_id: 'p-aeon', session_id: 's-leak', name: 'aeon-leak', ticket: ticket('n-4', 'PHAROS-14', 'Visual acceptance of the version pill') }),
     liveAgent({ project_id: 'p-pharos', session_id: 's-moved', name: 'moved-off', ticket: ticket('n-a1', 'AEON-1', 'Aeon foundation', 'p-aeon') }),
   )
@@ -31,12 +35,12 @@ test('assignee shows the live worker beside a human owner, and one feed serves e
   const calls = await mockWork(page, withWorkers())
   await page.setViewportSize({ width: 1600, height: 1000 })
   await page.goto('/p/PHAROS')
-  await expect(row(page, 'PHAROS-14').locator('.c-assignee')).toContainText('nova')
+  await expect(row(page, 'PHAROS-14').locator('.c-assignee .worker-name')).toHaveText('nova')
   await expect(row(page, 'PHAROS-14').locator('.c-assignee .empty')).toHaveCount(0)
   await expect(row(page, 'PHAROS-14').getByRole('button', { name: /more workers/ })).toHaveCount(0)
   const owned = row(page, 'PHAROS-11').locator('.c-assignee')
   await expect(owned).toContainText('Markus Barta')
-  await expect(owned).toContainText('hausv')
+  await expect(owned.locator('.worker-name')).toHaveText('hausv')
   await expect(row(page, 'PHAROS-10').getByRole('link', { name: /fault/ })).toHaveAccessibleName(/problem/i)
   await expect(row(page, 'PHAROS-13').locator('.live-bot')).toHaveAttribute('data-state', 'stale')
   await expect(row(page, 'PHAROS-13').getByRole('link', { name: /quiet/ })).toHaveAccessibleName(/idle/i)
@@ -57,7 +61,7 @@ test('several workers disclose each state, and the control does not open the tic
   await page.setViewportSize({ width: 1600, height: 1000 })
   await page.goto('/p/PHAROS')
   const line = row(page, 'PHAROS-12')
-  await expect(line.locator('.c-assignee')).toContainText('wren')
+  await expect(line.locator('.c-assignee .worker-name')).toHaveText('wren')
   await line.getByRole('button', { name: '1 more worker on PHAROS-12. Show each worker' }).click()
   await expect(page).toHaveURL(/\/p\/PHAROS(\/tickets)?\/?$/)
   await expect(page).not.toHaveURL(/PHAROS-12/)
@@ -73,6 +77,30 @@ test('several workers disclose each state, and the control does not open the tic
   await dialog.getByRole('link', { name: /wren/ }).click()
   await expect(page).toHaveURL(/\/agents\/s-wren$/)
   expect(liveCalls(calls)).toHaveLength(1)
+})
+
+test('keyboard opens each worker link and Escape returns to the trigger', async ({ page }) => {
+  await mockWork(page, withWorkers())
+  await page.setViewportSize({ width: 1600, height: 1000 })
+  await page.goto('/p/PHAROS')
+  const more = row(page, 'PHAROS-12').getByRole('button', { name: '1 more worker on PHAROS-12. Show each worker' })
+  await more.focus()
+  await page.keyboard.press('Enter')
+  const dialog = page.getByRole('dialog', { name: 'Workers on PHAROS-12' })
+  const link = dialog.getByRole('link', { name: /wren/ })
+  await expect(link).toBeFocused()
+  await expect(page).toHaveURL(/\/p\/PHAROS(\/tickets)?\/?$/)
+  await expect(page).not.toHaveURL(/PHAROS-12/)
+  await expect(page.locator('tr.ticket-row.open')).toHaveCount(0)
+  await page.keyboard.press('Escape')
+  await expect(dialog).toHaveCount(0)
+  await expect(more).toBeFocused()
+  await expect(page).toHaveURL(/\/p\/PHAROS(\/tickets)?\/?$/)
+  await page.keyboard.press('Enter')
+  await expect(link).toBeFocused()
+  await page.keyboard.press('Enter')
+  await expect(page).toHaveURL(/\/agents\/s-wren$/)
+  await expect(page).not.toHaveURL(/PHAROS-12/)
 })
 
 test('a single worker opens its session and leaves the ticket row alone', async ({ page }) => {

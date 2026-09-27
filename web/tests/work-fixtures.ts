@@ -118,7 +118,7 @@ export const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAA
 
 export type Fixtures = ReturnType<typeof fixtures>
 export interface LiveAgentMock {
-  project_id: string; session_id?: string; principal_id?: string; name?: string
+  project_id: string; session_id?: string; principal_id?: string; name?: string; display_label?: string
   harness: 'codex' | 'claude' | 'pi' | 'cursor' | 'grok'; management_mode: 'managed' | 'unmanaged'; role: 'worker' | 'coordinator'
   phase: 'starting' | 'working' | 'stopping' | 'yielded' | 'stopped'; activity: 'busy' | 'unknown' | 'idle' | 'throttled'
   ticket: { id: string; key: string; title: string; project_id: string } | null; since: string; heartbeat_at: string | null
