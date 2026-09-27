@@ -5,7 +5,7 @@ export interface InvitePrefill { email: string; workspaceRoleId: string | null; 
 <script setup lang="ts">
 import { brand } from '../../lib/brand'
 import { computed, nextTick, onMounted, ref } from 'vue'
-import { beyond, defaultProjectRole, defaultWorkspaceRole, effectLine, EXPIRY_DAYS, type Invite, lostPermission, permissionLabel, projectRolesOf, validEmail, workspaceRolesOf } from '../../lib/access'
+import { beyond, defaultProjectRole, defaultWorkspaceRole, effectLine, EXPIRY_DAYS, type InviteCreated, lostPermission, permissionLabel, projectRolesOf, validEmail, workspaceRolesOf } from '../../lib/access'
 import { can, myPermissions } from '../../lib/authz'
 import { absoluteTime } from '../../lib/work'
 import { useAccess } from '../../stores/access'
@@ -16,13 +16,16 @@ import AccessSheet from './AccessSheet.vue'
 import { fieldOf, problem } from './accessText'
 
 // Invite someone by email with a workspace role, project roles, or both. Aeon
-// never sends email: the join link is shown once, here, to copy and send
-// yourself. It works once, for that address, until it expires.
+// supplies a one-time join link; the configured provider may separately send
+// a sign-in setup email for a newly created account.
 const props = defineProps<{ prefill?: InvitePrefill | null }>()
 const emit = defineEmits<{ close: [] }>()
 const access = useAccess()
 const projects = useProjects()
 const email = ref(props.prefill?.email ?? '')
+const displayName = ref('')
+const provisionAccount = ref(false)
+const provisioner = computed(() => access.members?.provisioner?.name ?? null)
 const mine = computed(() => myPermissions())
 const grantable = (roleId: string) => !beyond(access.roleById.get(roleId)?.permissions ?? [], mine.value).length
 const projectRoles = computed(() => projectRolesOf(access.roles, access.registry))
@@ -40,7 +43,8 @@ const projectRows = ref<{ project_id: string; role_id: string }[]>(props.prefill
 const days = ref<number>(14)
 const errors = ref<Record<string, string>>({})
 const saving = ref(false)
-const result = ref<{ invite: Invite; join_url: string } | null>(null)
+const result = ref<InviteCreated | null>(null)
+const retrying = ref(false)
 const copied = ref(false)
 const whyNot = (roleId: string) => { const missing = beyond(access.roleById.get(roleId)?.permissions ?? [], mine.value); return missing.length ? `needs ${missing.slice(0, 2).map(permissionLabel).join(', ')}${missing.length > 2 ? ' and more' : ''}, which you do not hold` : '' }
 const effect = computed(() => { const role = access.roleById.get(workspaceRole.value); return role ? effectLine(role.permissions, access.registry) : 'No workspace access: only the projects below.' })
@@ -57,6 +61,7 @@ function addProject() {
 function validate(): boolean {
   const out: Record<string, string> = {}
   if (!validEmail(email.value)) out.email = email.value.trim() ? 'Enter an email address like name@example.com.' : 'Enter the email address they sign in with.'
+  if (provisionAccount.value && !displayName.value.trim()) out.display_name = 'Enter their name for the sign-in account.'
   if (!workspaceRole.value && !projectRows.value.length) out.access = 'Give a workspace role or at least one project, or they could not see anything.'
   else if (workspaceRole.value && !okWorkspace(workspaceRole.value)) out.access = 'Choose a workspace role you can give.'
   else if (projectRows.value.some(r => !okProject(r.role_id))) out.access = 'Choose a project role you can give for every project.'
@@ -69,12 +74,12 @@ async function submit() {
   if (saving.value || !validate()) { void nextTick(() => document.querySelector<HTMLElement>('.invite-form [aria-invalid="true"]')?.focus()); return }
   saving.value = true
   try {
-    result.value = await access.invite({ email: email.value.trim(), ...(workspaceRole.value ? { workspace_role_id: workspaceRole.value } : {}), ...(projectRows.value.length ? { project_roles: projectRows.value } : {}), expires_in_days: days.value })
+    result.value = await access.invite({ email: email.value.trim(), ...(workspaceRole.value ? { workspace_role_id: workspaceRole.value } : {}), ...(projectRows.value.length ? { project_roles: projectRows.value } : {}), expires_in_days: days.value, ...(provisionAccount.value ? { provision_account: true, display_name: displayName.value.trim() } : {}) })
     await nextTick()
     document.querySelector<HTMLElement>('.join-copy')?.focus()
   } catch (e) {
     const field = fieldOf(e)
-    const key = field === 'workspace_role_id' || field === 'project_roles' ? 'access' : field === 'expires_in_days' ? 'days' : field === 'email' ? 'email' : 'form'
+    const key = field === 'workspace_role_id' || field === 'project_roles' ? 'access' : field === 'expires_in_days' ? 'days' : field === 'email' ? 'email' : field === 'display_name' ? 'display_name' : 'form'
     errors.value = { [key]: problem(e, 'The invite was not created').replace(/^The invite was not created: /, '') }
   } finally { saving.value = false }
 }
@@ -82,18 +87,34 @@ async function copy() {
   if (!result.value) return
   try { await navigator.clipboard.writeText(result.value.join_url); copied.value = true } catch { copied.value = false }
 }
-function another() { result.value = null; copied.value = false; email.value = ''; errors.value = {}; void nextTick(() => document.getElementById('invite-email')?.focus()) }
+async function retryProvision() {
+  if (!result.value || retrying.value || !allowed.value) return
+  retrying.value = true
+  try { result.value.account = await access.retryInviteProvision(result.value.invite.id) }
+  catch { result.value.account = { status: 'failed', reason: 'The sign-in account could not be set up. Ask an administrator.' } }
+  finally { retrying.value = false }
+}
+function another() { result.value = null; copied.value = false; email.value = ''; displayName.value = ''; provisionAccount.value = false; errors.value = {}; void nextTick(() => document.getElementById('invite-email')?.focus()) }
 onMounted(() => { void projects.load() })
 </script>
 
 <template>
   <AccessSheet :title="result ? 'Invite ready' : 'Invite people'" size="center" wide @close="saving || emit('close')">
     <form v-if="!result" class="invite-form" novalidate @submit.prevent="submit">
-      <p class="intro"><BizIcon name="mail" :size="14" /><span>{{ brand.short_name }} never sends email. You get a link to send yourself; it works once, for this address.</span></p>
+      <p class="intro"><BizIcon name="mail" :size="14" /><span>{{ brand.short_name }} never sends email. You get a link to send yourself. If you create a sign-in account, the provider sends a separate setup email.</span></p>
       <div class="field-row">
         <label class="label" for="invite-email">Email</label>
         <input id="invite-email" v-model="email" class="field" type="email" autocomplete="off" spellcheck="false" placeholder="name@example.com" data-autofocus :aria-invalid="!!errors.email" :aria-describedby="errors.email ? 'email-error' : undefined" @input="errors.email = ''" />
         <span v-if="errors.email" id="email-error" class="error"><AppIcon name="alert" :size="12" />{{ errors.email }}</span>
+      </div>
+      <div v-if="provisioner" class="field-row">
+        <label class="provision-choice"><input v-model="provisionAccount" type="checkbox" /> Also create their sign-in account ({{ provisioner }})</label>
+        <span class="hint">{{ provisioner }} emails them a link to set up sign-in.</span>
+      </div>
+      <div v-if="provisionAccount" class="field-row">
+        <label class="label" for="invite-display-name">Their name</label>
+        <input id="invite-display-name" v-model="displayName" class="field" autocomplete="off" maxlength="200" :aria-invalid="!!errors.display_name" :aria-describedby="errors.display_name ? 'display-name-error' : undefined" @input="errors.display_name = ''" />
+        <span v-if="errors.display_name" id="display-name-error" class="error"><AppIcon name="alert" :size="12" />{{ errors.display_name }}</span>
       </div>
       <div class="field-row">
         <label class="label" for="invite-role">Workspace role</label>
@@ -131,11 +152,17 @@ onMounted(() => { void projects.load() })
     <div v-else class="result">
       <p class="done"><AppIcon name="check" :size="16" /><span>The invite for <b>{{ result.invite.email }}</b> is ready.</span></p>
       <p class="once"><AppIcon name="info" :size="14" /><span>This link is shown only now. Copy it and send it yourself: {{ brand.short_name }} sends no email. It works once, for {{ result.invite.email }}, until {{ absoluteTime(result.invite.expires_at) }}.</span></p>
+      <p v-if="result.account?.status === 'invited'" class="hint">{{ provisioner }} has emailed them a sign-in setup link.</p>
+      <p v-else-if="result.account?.status === 'exists'" class="hint">They already have a sign-in account with this email.</p>
+      <div v-else-if="result.account?.status === 'failed'" class="account-failed" role="alert">
+        <span>{{ result.account.reason }}</span>
+        <button type="button" class="btn sm" :disabled="retrying || !allowed" @click="retryProvision">{{ retrying ? 'Retrying…' : 'Retry account setup' }}</button>
+      </div>
       <div class="join">
         <input class="field mono join-url" readonly :value="result.join_url" aria-label="Join link" @focus="($event.target as HTMLInputElement).select()" />
         <button type="button" class="btn primary join-copy" data-session-keep @click="copy"><AppIcon :name="copied ? 'check' : 'copy'" :size="14" />{{ copied ? 'Copied' : 'Copy link' }}</button>
       </div>
-      <p class="hint">After they sign in with this address, they appear under People with the roles you chose.</p>
+      <p class="hint">{{ result.account?.status === 'invited' ? 'Once they finish sign-in setup and use the join link, they appear under People with the roles you chose.' : result.account?.status === 'exists' ? 'After they sign in with this address and use the join link, they appear under People with the roles you chose.' : 'They need a sign-in account with this email before they can use the join link.' }}</p>
     </div>
     <template #foot>
       <template v-if="!result">
@@ -157,6 +184,9 @@ onMounted(() => { void projects.load() })
 .intro svg, .once svg { margin-top: 3px; color: var(--teal-ink); }
 .field-row { display: grid; gap: 6px; margin: 0; padding: 0; border: 0; min-width: 0; }
 .field-row.short select { max-width: 200px; }
+.provision-choice { display: flex; align-items: center; gap: 9px; font-size: 13px; color: var(--ink); }
+.provision-choice input { width: 16px; height: 16px; accent-color: var(--teal-ink); }
+.account-failed { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; color: var(--danger); font-size: 12.5px; }
 .label { font: 500 10.5px/1.4 var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--ink-3); font-variant-ligatures: none; padding: 0; }
 select.field { appearance: auto; padding-right: 8px; }
 .hint { font-size: 12.5px; line-height: 1.45; color: var(--ink-2); }

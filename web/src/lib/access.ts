@@ -28,10 +28,12 @@ export interface Invite {
   id: string; email: string; workspace_role: RoleRef | null; project_roles: ProjectRole[]; status: InviteStatus
   created_by: PrincipalRef; created_at: string; expires_at: string; accepted_by: PrincipalRef | null; accepted_at: string | null
 }
+export interface InviteAccountResult { status: 'invited' | 'exists' | 'failed'; reason?: string }
+export interface InviteCreated { invite: Invite; join_url: string; account?: InviteAccountResult }
 export interface Imported { principal_id: string; name: string; classic_role: string | null }
 export interface PrincipalRef { principal_id: string; name: string }
 // people also lists the imported classic identities; the UI shows those only in their own group.
-export interface Members { people: Person[]; agents: Agent[]; invites: Invite[]; imported: Imported[]; owner_count: number }
+export interface Members { people: Person[]; agents: Agent[]; invites: Invite[]; imported: Imported[]; owner_count: number; provisioner?: { name: string } | null }
 // One row per person or agent: role is the project binding's role when there is one (via project), else the workspace role.
 export interface ProjectMember { principal_id: string; name: string; avatar_url: string | null; has_avatar: boolean; kind: 'person' | 'agent'; via: 'workspace' | 'project'; role: RoleRef; workspace_role: RoleRef | null }
 export interface ProjectBinding { id: string; principal_id: string; project_id: string; scope_type: 'project'; role: RoleRef; created_at: string }
@@ -71,8 +73,9 @@ export const setWorkspaceRole = (principalId: string, roleId: string | null) => 
 export const getProjectMembers = (projectId: string) => call<ProjectMember[]>(`/projects/${id(projectId)}/members`).then(members => { pictureHints(members); return members })
 export const setProjectRole = (projectId: string, principalId: string, roleId: string) => call<ProjectBinding>(`/projects/${id(projectId)}/members/${id(principalId)}`, 'PUT', { role_id: roleId })
 export const removeProjectMember = (projectId: string, principalId: string) => call<void>(`/projects/${id(projectId)}/members/${id(principalId)}`, 'DELETE')
-export const createInvite = (body: { email: string; workspace_role_id?: string; project_roles?: { project_id: string; role_id: string }[]; expires_in_days?: number }) =>
-  call<{ invite: Invite; join_url: string }>('/members/invites', 'POST', body)
+export const createInvite = (body: { email: string; workspace_role_id?: string; project_roles?: { project_id: string; role_id: string }[]; expires_in_days?: number; provision_account?: boolean; display_name?: string }) =>
+  call<InviteCreated>('/members/invites', 'POST', body)
+export const retryInviteProvision = (inviteId: string) => call<InviteAccountResult>(`/members/invites/${id(inviteId)}/provision`, 'POST')
 export const revokeInvite = (inviteId: string) => call<void>(`/members/invites/${id(inviteId)}`, 'DELETE')
 export const deactivate = (principalId: string) => call<Person>(`/members/${id(principalId)}/deactivate`, 'POST')
 export const reactivate = (principalId: string) => call<Person>(`/members/${id(principalId)}/reactivate`, 'POST')
