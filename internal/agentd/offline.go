@@ -57,7 +57,7 @@ func OfflineLifecycle(root, daemon, tenant, principal, account string) (Lifecycl
 		if r.TenantID != tenant || r.PrincipalID != principal || r.Generation == "" {
 			return ErrScope
 		}
-		return nil
+		return validateLaunchRecord(r)
 	}})
 	if err != nil {
 		return LifecycleStatus{}, err
@@ -70,11 +70,11 @@ func OfflineLifecycle(root, daemon, tenant, principal, account string) (Lifecycl
 		if account != "" && r.AccountID != "" && r.AccountID != account {
 			continue
 		}
-		if !r.ExitObserved {
+		if !noLocalProcess(r) {
 			v.State = "unconfirmed"
 			v.UnconfirmedRunIDs = append(v.UnconfirmedRunIDs, r.RunID)
 		}
-		if len(r.Pending) > 0 || r.SettlementGap {
+		if len(r.Pending) > 0 || r.SettlementGap || r.State == "claim_pending" {
 			v.SettlementPendingRunIDs = append(v.SettlementPendingRunIDs, r.RunID)
 		}
 	}

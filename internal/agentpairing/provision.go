@@ -11,6 +11,7 @@ import (
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/inspr-at/paimos/internal/version"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -74,6 +75,13 @@ func (m *Module) approve(w http.ResponseWriter, r *http.Request, p tenant.Princi
 		if rec.State != "pending" {
 			out, err = view(ctx, tx, rec, false)
 			return err
+		}
+		if in.Verification == "one_per_harness" {
+			for _, a := range chosen {
+				if capability := verificationCapabilities(rec.Details.Platform, rec.Details.Arch)[a.Harness]; !capability.Supported {
+					return fail(409, "verification_unavailable", capability.Reason+" Choose Connect only or exclude this account explicitly.")
+				}
+			}
 		}
 		for _, scope := range RuntimePermissions {
 			if err = authz.RequireTx(ctx, tx, p, scope, authz.Scope{}); err != nil {
@@ -282,10 +290,15 @@ func expire(ctx context.Context, tx pgx.Tx, rec *record) error {
 	return err
 }
 func view(ctx context.Context, tx pgx.Tx, rec record, prefix bool) (View, error) {
+	if err := ExpireUnclaimedVerifications(ctx, tx); err != nil {
+		return View{}, err
+	}
 	v := View{RequestID: rec.ID, TenantID: rec.TenantID, State: rec.State, Digest: rec.Digest, ExpiresAt: rec.ExpiresAt, ComputerName: rec.Details.ComputerName, Platform: rec.Details.Platform, Arch: rec.Details.Arch, Workspace: rec.Details.Workspace, Capabilities: rec.Details.Capabilities, Requested: rec.Details.Accounts, ComputerID: rec.ComputerID, Cleanup: "pending", Processes: "unconfirmed", Enrollments: []Enrollment{}, Verification: Verification{"read_only", rec.Mode, 1, 1, VerificationSeconds, 1, "requests", rec.VerificationExpiresAt, VerificationTask}}
 	if err := tx.QueryRow(ctx, `SELECT name FROM tenants WHERE id=$1`, rec.TenantID).Scan(&v.TenantName); err != nil {
 		return v, err
 	}
+	v.VerificationCapabilities = verificationCapabilities(rec.Details.Platform, rec.Details.Arch)
+	v.VerificationHelperVersion = version.Version
 	v.ExistingComputerID = rec.Details.ExistingComputerID
 	v.SetupState = "not_started"
 	v.Connectivity = "unknown"
@@ -309,7 +322,7 @@ func view(ctx context.Context, tx pgx.Tx, rec record, prefix bool) (View, error)
 	}
 	rows, err := tx.Query(ctx, `SELECT e.account_id::text,a.account_key,a.harness,a.label,e.model_profile_id::text,e.state,e.local_cleanup,e.verification_run_id::text,
   ARRAY(SELECT r.id::text FROM agent_runs r WHERE r.account_id=e.account_id AND r.status IN ('starting','running','waiting') ORDER BY r.id),
- CASE WHEN e.verification_run_id IS NULL THEN 'not_selected' WHEN e.verification_expires_at<=clock_timestamp() AND (SELECT status FROM agent_runs WHERE id=e.verification_run_id)='queued' THEN 'expired' ELSE (SELECT status FROM agent_runs WHERE id=e.verification_run_id) END,
+ CASE WHEN e.verification_run_id IS NULL THEN 'not_selected' WHEN e.verification_expired_at IS NOT NULL THEN 'expired' WHEN e.verification_expires_at<=clock_timestamp() AND (SELECT status FROM agent_runs WHERE id=e.verification_run_id)='queued' THEN 'expired' ELSE (SELECT status FROM agent_runs WHERE id=e.verification_run_id) END,
  coalesce((SELECT error_code FROM run_telemetry WHERE run_id=e.verification_run_id AND error_code IS NOT NULL ORDER BY sequence DESC LIMIT 1),'')
   FROM agent_pairing_enrollments e JOIN agent_accounts a ON a.tenant_id=e.tenant_id AND a.id=e.account_id WHERE e.computer_id=$1 ORDER BY a.created_at,a.id`, *rec.ComputerID)
 	if err != nil {
@@ -320,6 +333,10 @@ func view(ctx context.Context, tx pgx.Tx, rec record, prefix bool) (View, error)
 		var e Enrollment
 		if err = rows.Scan(&e.AccountID, &e.AccountKey, &e.Harness, &e.Label, &e.ProfileID, &e.State, &e.Cleanup, &e.VerificationRunID, &e.ActiveRunIDs, &e.VerificationState, &e.VerificationError); err != nil {
 			return v, err
+		}
+		if e.VerificationState == "queued" && !v.VerificationCapabilities[e.Harness].Supported {
+			e.VerificationState = "unavailable"
+			e.VerificationError = "verification_unavailable"
 		}
 		e.LocalProcesses = "unconfirmed"
 		if e.Cleanup == "confirmed" {

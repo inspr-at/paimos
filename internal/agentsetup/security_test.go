@@ -268,7 +268,26 @@ func TestTypedProgressDistinguishesMissingLoginAndUnsafeVerification(t *testing.
 	a.view.Enrollments[0].VerificationState = "queued"
 	l.states[""] = LocalStatus{DaemonID: "paired-daemon", State: "drained", Ready: true, VerificationUnavailable: []string{testAccount}}
 	p, err = e.Status(t.Context())
-	if err != nil || p.Stage != "blocked" {
+	if err != nil || p.Stage != "verification_unavailable" {
 		t.Fatal("unsafe adapter presented as verifying")
+	}
+	progress := observedProgress(a.view, l.states[""])
+	if progress.State != "connected" || progress.ErrorCode != "verification_unavailable" {
+		t.Fatal("verification refusal masqueraded as installation failure")
+	}
+	if err = e.SyncFences(t.Context()); err != nil || a.progress == nil || a.progress.State != "connected" || a.progress.ErrorCode != "verification_unavailable" {
+		t.Fatal("daemon reconciliation lost typed unavailable status")
+	}
+	local := l.states[""]
+	local.Ready = false
+	progress = observedProgress(a.view, local)
+	if progress.State != "provisioning" || progress.ErrorCode != "verification_unavailable" {
+		t.Fatal("verification refusal claimed unconfirmed connectivity")
+	}
+	a.view.Enrollments[0].VerificationState = "unavailable"
+	l.states[""] = LocalStatus{DaemonID: "paired-daemon", State: "drained", Ready: true}
+	p, err = e.Status(t.Context())
+	if err != nil || p.Stage != "verification_unavailable" {
+		t.Fatal("server-reported unavailable verification was hidden")
 	}
 }

@@ -135,7 +135,8 @@ func TestLocalSetupHTTPPairingAddHarnessAndSelectiveDrain(t *testing.T) {
 		Services: &agentsetup.ServiceManager{FixtureLabel: "cm.aeon.fixture.pair5-integration", Platform: agentsetup.Platform{OS: "darwin", Arch: "arm64"}, Home: home, UID: os.Getuid(), Executable: serviceExe, Executor: localSetupExecutor{serviceExe}},
 		Now:      func() time.Time { return now },
 	}
-	o := agentsetup.Options{Origin: origin, ComputerName: "integration computer", Workspace: workspace, Platform: agentsetup.Platform{OS: "darwin", Arch: "arm64"}, Candidates: []agentsetup.Candidate{setupAccount(t, f, "codex", home)}}
+	// Use a qualified verification harness; no vendor process is launched by this fixture.
+	o := agentsetup.Options{Origin: origin, ComputerName: "integration computer", Workspace: workspace, Platform: agentsetup.Platform{OS: "darwin", Arch: "arm64"}, Candidates: []agentsetup.Candidate{setupAccount(t, f, "claude", home)}, NodePath: serviceExe, ClaudeSDKPath: serviceExe}
 	p, err := e.Begin(t.Context(), o)
 	if err != nil || p.Stage != "awaiting_approval" || p.UserCode == "" {
 		t.Fatalf("initial code request: stage=%s err=%v", p.Stage, err)

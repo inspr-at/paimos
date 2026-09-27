@@ -9,8 +9,10 @@ import {
   formatVerification, getPairingGuide, isPublicPairingGuide, listPairingComputers, lookupPairing,
   ongoingLimitError, pairingPermissions, planApproval, planLookup, planOngoingLimits, planPoll,
   registerAgentUrl, sessionFreezeApplies, submitApproval, verificationWarning, defaultSelectedAccountKeys,
-  peekPairingCode, publicGuideSections, rememberPairingCode, takePairingCode,
+  peekPairingCode, presentPublicGuide, rememberPairingCode, takePairingCode,
   isAddHarness, matchOngoingLimit, pairingScopeKey, setHarnessAccount,
+  addHarnessTargetProblem, applyComputerListRefresh, discardPairingReads, formatAllowanceMoment,
+  ongoingLimitAccounts, pairingReadGeneration, unsupportedVerification,
   type OngoingLimitDraft, type PairingGuide, type PairingView, type RequestedAccount,
 } from '../src/lib/agentPairing.ts'
 
@@ -63,6 +65,12 @@ function view(overrides: Record<string, unknown> = {}): PairingView {
       unit: 'requests',
       expires_at: '2026-09-27T20:30:00Z',
       task: 'Reply exactly AEON_VERIFIED.',
+    },
+    verification_capabilities: {
+      cursor: { supported: true, policy: 'no_tools', reason: '' },
+      codex: { supported: true, policy: 'no_tools', reason: '' },
+      claude: { supported: true, policy: 'no_tools', reason: '' },
+      grok: { supported: true, policy: 'no_tools', reason: '' },
     },
     computer_id: null,
     computer_state: null,
@@ -184,18 +192,23 @@ test('debounced lookup does not repeat itself or fire while a character is still
 
 test('verification stays on the server terms and is selected by default', () => {
   assert.equal(DEFAULT_REVIEW_CHOICE, 'one_per_harness')
+  const now = Date.parse('2026-09-27T20:00:00Z')
   const terms = view().verification!
   assert.equal(verificationWarning(terms), null)
-  assert.match(formatVerification(terms), /1 requests/)
-  assert.match(formatVerification(terms), /60 seconds/)
-  assert.match(formatVerification(terms), /2026-09-27T20:30:00Z/)
-  assert.match(formatVerification(terms), /Read-only verification/)
-  assert.match(formatVerification(terms), /No repository changes or privileged actions/)
-  assert.match(formatVerification(terms), /not the vendor subscription quota/)
+  const text = formatVerification(terms, now)
+  assert.match(text, /1 request per selected harness/)
+  assert.match(text, /1 run at a time on that harness/)
+  assert.match(text, /60 seconds/)
+  assert.doesNotMatch(text, /1 requests/)
+  assert.doesNotMatch(text, /One at a time/)
+  assert.equal(text.includes('2026-09-27T20:30:00'), false)
+  assert.match(text, new RegExp(formatAllowanceMoment(terms.expires_at, now).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
+  assert.match(text, /Read-only/)
+  assert.match(text, /No repository changes or privileged actions/)
+  assert.match(text, /not the vendor subscription/)
   const mocked = { ...terms, max_duration_seconds: 900, expires_at: '2026-09-27T19:15:00Z' }
-  assert.match(formatVerification(mocked), /900 seconds/)
-  assert.match(formatVerification(mocked), /19:15:00Z/)
-  assert.doesNotMatch(formatVerification(mocked), /60 seconds/)
+  assert.match(formatVerification(mocked, now), /900 seconds/)
+  assert.doesNotMatch(formatVerification(mocked, now), /60 seconds/)
   assert.ok(verificationWarning(mocked))
 })
 
@@ -441,15 +454,28 @@ test('approval alone is not a connected computer', () => {
 
 test('the public guide uses the server address and stores only a human code', () => {
   const published = guidePayload({ platforms: ['darwin/arm64'], instance_url: 'https://aeon.example' })
-  const text = publicGuideSections(published).flatMap(section => section.paragraphs).join('\n')
-  assert.match(text, /https:\/\/aeon\.example\/agents\/register-agent/)
-  assert.match(text, /setup --url 'https:\/\/aeon\.example'/)
-  assert.match(text, /not published a verified installer/)
-  assert.equal(text.includes('aeon.barta.cm'), false)
-  assert.equal(text.includes('curl'), false)
-  assert.equal(text.includes('inspr-at/paimos/releases'), false)
-  assert.match(text, /does not grant access/)
-  assert.match(text, /darwin\/arm64/)
+  const presented = presentPublicGuide(published)
+  const lead = [...presented.steps, presented.address, presented.note].join('\n')
+  assert.match(presented.address, /https:\/\/aeon\.example\/agents\/register-agent/)
+  assert.match(presented.setupCommand, /setup --url 'https:\/\/aeon\.example'/)
+  assert.match(presented.installNote, /not published a verified installer/)
+  assert.equal(lead.includes(presented.setupCommand), false)
+  assert.equal(lead.includes('aeon.barta.cm'), false)
+  assert.equal(lead.includes('curl'), false)
+  assert.equal(JSON.stringify(presented).includes('inspr-at/paimos/releases'), false)
+  assert.match(presented.note, /does not grant access/)
+  assert.match(presented.manualParagraphs.join('\n'), /darwin\/arm64/)
+  const four = ['darwin/arm64', 'darwin/amd64', 'linux/arm64', 'linux/amd64'].map(item => {
+    const [platform, arch] = item.split('/')
+    return {
+      platform: platform!, arch: arch!, service: platform === 'darwin' ? 'launchd-user' as const : 'systemd-user' as const,
+      qualification: 'candidate', artifact_url: `https://example.com/${item}`, checksums_url: 'https://example.com/SHA256SUMS',
+      command: `install-${item}-only`,
+    }
+  })
+  const manual = presentPublicGuide(guidePayload({ install_available: true, install_targets: four }))
+  assert.equal(manual.targets.length, 4)
+  for (const target of manual.targets) assert.equal(manual.steps.join('\n').includes(target.command), false)
   const memory = new Map<string, string>()
   const previous = globalThis.sessionStorage
   Object.defineProperty(globalThis, 'sessionStorage', { configurable: true, value: {
@@ -540,6 +566,160 @@ test('a redeemed approval says setup is underway until the computer reports it f
   assert.match(redeemed.title, /consumed/)
   assert.match(redeemed.detail, /Setup is underway/)
   assert.equal(redeemed.detail.includes('already finished pairing'), false)
+})
+
+test('a session reset drops an in-flight lookup and keeps the human code', async () => {
+  const memory = new Map<string, string>()
+  const previous = globalThis.sessionStorage
+  Object.defineProperty(globalThis, 'sessionStorage', { configurable: true, value: {
+    getItem: (key: string) => memory.get(key) ?? null,
+    setItem: (key: string, value: string) => { memory.set(key, value) },
+    removeItem: (key: string) => { memory.delete(key) },
+    clear: () => memory.clear(), key: () => null, length: 0,
+  } })
+  try {
+    assert.equal(rememberPairingCode('123-456-789'), true)
+    let release: (response: Response) => void = () => {}
+    globalThis.fetch = () => new Promise(resolve => { release = resolve })
+    const pending = lookupPairing('123-456-789')
+    const before = pairingReadGeneration()
+    discardPairingReads()
+    assert.notEqual(pairingReadGeneration(), before)
+    assert.equal(peekPairingCode(), '123-456-789')
+    release(jsonResponse(view({ tenant_name: 'Other studio' })))
+    await assert.rejects(pending, (error: PairingError) => error instanceof PairingError && error.code === 'session_reset' && !String(error.message).includes('Other studio'))
+    assert.equal(peekPairingCode(), '123-456-789')
+    takePairingCode()
+  } finally {
+    Object.defineProperty(globalThis, 'sessionStorage', { configurable: true, value: previous })
+  }
+})
+
+test('the first allowance save uses only this request’s selected accounts', () => {
+  const oldAccount = enrollment({ account_id: ACCOUNT, account_key: 'cursor-old', harness: 'cursor', label: 'Old Cursor' })
+  const selected = enrollment({ account_id: ACCOUNT_2, account_key: 'claude-1', harness: 'claude', label: 'Claude work' })
+  const rows = ongoingLimitAccounts({
+    pending: false,
+    selectedKeys: ['claude-1'],
+    grantedKeys: ['claude-1'],
+    limitsNow: true,
+    showAll: false,
+    requested: [account({ account_key: 'claude-1', harness: 'claude', label: 'Claude work' })],
+    enrollments: [oldAccount, selected],
+  })
+  assert.deepEqual(rows.map(item => item.key), ['claude-1'])
+  const later = ongoingLimitAccounts({
+    pending: false,
+    selectedKeys: ['claude-1'],
+    grantedKeys: ['claude-1'],
+    limitsNow: false,
+    showAll: true,
+    requested: [],
+    enrollments: [oldAccount, selected],
+  })
+  assert.deepEqual(later.map(item => item.key).sort(), ['claude-1', 'cursor-old'])
+  const plan = planOngoingLimits({
+    choice: 'ongoing_limits',
+    drafts: [{ account_key: 'claude-1', starts_at: '2026-09-27T18:00:00Z', ends_at: '2026-09-27T23:00:00Z', unit: 'requests', allowance: 2, pace_model: 'unrestricted', burst_ratio: 0 }],
+    selectedAccountKeys: rows.map(item => item.key),
+    enrollments: [oldAccount, selected],
+    permissions: person,
+  })
+  assert.equal(plan.action, 'send')
+  if (plan.action === 'send') assert.deepEqual(plan.windows.map(item => item.accountId), [ACCOUNT_2])
+})
+
+test('add harness connect stays blocked until the code matches the opened computer', () => {
+  const opened = view({ state: 'pending', existing_computer_id: ACCOUNT, computer_name: 'studio' })
+  const mismatch = addHarnessTargetProblem({ view: opened, requestedComputerId: COMPUTER, targetName: 'laptop' })
+  assert.equal(mismatch?.code, 'mismatch')
+  const fresh = addHarnessTargetProblem({ view: view({ computer_name: 'studio' }), requestedComputerId: COMPUTER, targetName: 'laptop' })
+  assert.equal(fresh?.code, 'missing')
+  const renamed = addHarnessTargetProblem({ view: opened, requestedComputerId: ACCOUNT, targetName: 'laptop' })
+  assert.equal(renamed?.code, 'name')
+  assert.match(renamed?.message ?? '', /laptop/)
+  assert.match(renamed?.message ?? '', /studio/)
+  const plan = planApproval({
+    view: opened, choice: 'connect_only', selectedAccountKeys: ['cursor-1'], permissions: person,
+    requestedComputerId: COMPUTER, targetComputerName: 'laptop',
+  })
+  assert.equal(plan.ok, false)
+  const matched = planApproval({
+    view: opened, choice: 'connect_only', selectedAccountKeys: ['cursor-1'], permissions: person,
+    requestedComputerId: ACCOUNT, targetComputerName: 'studio',
+  })
+  assert.equal(matched.ok, true)
+})
+
+test('unsupported verification blocks the selected harness and connect only does not', () => {
+  const published = {
+    claude: { supported: true, policy: 'no_tools', reason: '' },
+    codex: { supported: false, policy: 'unavailable', reason: 'Codex verification cannot yet guarantee external/MCP isolation.' },
+    cursor: { supported: false, policy: 'unavailable', reason: 'Cursor external/MCP isolation is awaiting qualification.' },
+    grok: { supported: false, policy: 'unavailable', reason: 'Native Grok guided account identity is unavailable.' },
+  }
+  const current = view({
+    verification_capabilities: published,
+    requested_accounts: [
+      account({ account_key: 'claude-1', harness: 'claude', label: 'Claude work' }),
+      account({ account_key: 'codex-1', harness: 'codex', label: 'Codex work' }),
+      account(),
+    ],
+  })
+  const blocked = unsupportedVerification(current, ['claude-1', 'codex-1', 'cursor-1'])
+  assert.deepEqual(blocked.map(item => item.harness), ['codex', 'cursor'])
+  assert.match(blocked[0]?.reason ?? '', /Codex/)
+  assert.doesNotMatch(blocked.map(item => item.reason).join(' '), /installation failed/i)
+  const denied = planApproval({ view: current, choice: 'one_per_harness', selectedAccountKeys: ['codex-1'], permissions: person })
+  assert.equal(denied.ok, false)
+  if (!denied.ok) assert.match(denied.next, /Connect only/)
+  const allowed = planApproval({ view: current, choice: 'one_per_harness', selectedAccountKeys: ['claude-1'], permissions: person })
+  assert.equal(allowed.ok, true)
+  const connectOnly = planApproval({ view: current, choice: 'connect_only', selectedAccountKeys: ['codex-1', 'cursor-1'], permissions: person })
+  assert.equal(connectOnly.ok, true)
+  if (connectOnly.ok) assert.equal(connectOnly.body.verification, 'connect_only')
+  const unspoken = view({ verification_capabilities: undefined })
+  const quiet = planApproval({ view: unspoken, choice: 'one_per_harness', selectedAccountKeys: ['cursor-1'], permissions: person })
+  assert.equal(quiet.ok, false)
+})
+
+test('old connect-only enrollment does not block a new verified harness, and a later run is not verification', () => {
+  const oldOnly = enrollment({ account_id: ACCOUNT, account_key: 'codex-1', harness: 'codex', verification_state: 'not_selected', verification_run_id: null, active_run_ids: [RUN] })
+  const verified = enrollment({ account_id: ACCOUNT_2, account_key: 'claude-1', harness: 'claude', label: 'Claude work', verification_state: 'completed', verification_run_id: RUN, active_run_ids: [] })
+  const added = view({
+    state: 'redeemed', computer_state: 'connected', setup_state: 'connected', connectivity: 'online',
+    verification: { ...view().verification!, mode: 'one_per_harness' },
+    enrollments: [oldOnly, verified],
+  })
+  assert.equal(describeProgress(added).phase, 'connected')
+  assert.equal(describeProgress(added).title, 'Connected')
+  const unavailable = describeProgress(view({
+    state: 'redeemed', computer_state: 'connected', setup_state: 'connected', connectivity: 'online',
+    setup_error: 'verification_unavailable',
+    enrollments: [enrollment({ verification_state: 'unavailable', verification_error: 'verification_unavailable' })],
+  }))
+  assert.equal(unavailable.title, 'Verification unavailable')
+  assert.equal(unavailable.detail.toLowerCase().includes('installation'), false)
+  assert.match(unavailable.detail, /stays paired/)
+  const later = describeProgress(view({
+    state: 'redeemed', computer_state: 'connected', setup_state: 'connected', connectivity: 'online',
+    verification: { ...view().verification!, mode: 'connect_only' },
+    enrollments: [enrollment({ verification_state: 'not_selected', active_run_ids: [RUN] })],
+  }))
+  assert.notEqual(later.title, 'Verification is running')
+  assert.equal(later.phase, 'connected')
+})
+
+test('a failed computer refresh keeps the list and does not claim cleanup', () => {
+  const current = [view({ computer_id: COMPUTER, computer_state: 'connected', local_cleanup: 'pending', local_processes: 'unconfirmed' })]
+  const failed = applyComputerListRefresh(current, { ok: false })
+  assert.equal(failed.failed, true)
+  assert.equal(failed.computers[0]?.local_cleanup, 'pending')
+  assert.equal(failed.computers[0]?.local_processes, 'unconfirmed')
+  assert.equal(failed.computers.length, 1)
+  const replaced = applyComputerListRefresh(current, { ok: true, computers: [] })
+  assert.equal(replaced.failed, false)
+  assert.equal(replaced.computers.length, 0)
 })
 
 function enrollment(overrides: Record<string, unknown> = {}) {
