@@ -8,6 +8,8 @@ import (
 	"embed"
 	"encoding/hex"
 	"errors"
+
+	"github.com/inspr-at/paimos/internal/grokprobe"
 )
 
 const (
@@ -22,13 +24,7 @@ var grokAssets embed.FS
 
 // GrokBinding is operator-local. AEON receives only its opaque account key.
 // The native adapter executes an isolated conversation without workspace I/O.
-type GrokBinding struct {
-	Variant         string `json:"variant"`
-	BinaryPath      string `json:"binary_path"`
-	AuthPath        string `json:"auth_path"`
-	ScratchRoot     string `json:"scratch_root"`
-	PrincipalSHA256 string `json:"principal_sha256"`
-}
+type GrokBinding = grokprobe.Binding
 
 type GrokAdapter struct{ Bindings map[string]GrokBinding }
 
