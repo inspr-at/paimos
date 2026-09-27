@@ -124,5 +124,4 @@ const value = (project: Project, kind: StatKind) => kind === 'open' ? project.op
   .mini :deep(.stat-num) { margin-left: 0; }
   .word { font: 500 11.5px/1.4 var(--mono); color: var(--ink-2); font-variant-ligatures: none; }
 }
-.project-item[data-agent-state] { background: color-mix(in srgb, var(--agent-state-color) 5%, var(--surface-raised)); }
 </style>

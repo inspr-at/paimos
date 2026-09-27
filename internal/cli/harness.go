@@ -426,6 +426,9 @@ func (rt *runtime) harnessBind() *Command {
 }
 func (rt *runtime) harnessWorker(kind string) *Command {
 	var project, session, agent, leaseFile, phase, activity, activityKind, note, model, effort, accountLabel, harnessVersion, brief, worktree, branch, deliveryID, level, reason string
+	// The sentinel distinguishes an omitted flag from --label "", which clears a label.
+	const omittedLabel = "\x00"
+	label := omittedLabel
 	var sequence, cursor int
 	var commits []string
 	return &Command{Name: kind, Short: "Act as the attributed harness worker", Use: "harness " + kind + " --project KEY --session UUID --agent NAME --worker-lease-file PATH", addFlags: func(fs *flagSet) {
@@ -436,6 +439,7 @@ func (rt *runtime) harnessWorker(kind string) *Command {
 		switch kind {
 		case "heartbeat":
 			fs.string(&phase, "phase", 0, "starting, working, yielded or stopping")
+			fs.string(&label, "label", 0, "current session display name (empty clears it)")
 			fs.string(&note, "note", 0, "current step, at most 120 characters")
 			fs.string(&model, "model", 0, "model name")
 			fs.string(&effort, "effort", 0, "reasoning effort")
@@ -497,6 +501,9 @@ func (rt *runtime) harnessWorker(kind string) *Command {
 				}
 			}
 			body = map[string]any{"phase": phase, "activity": activity, "activity_sequence": sequence}
+			if label != omittedLabel {
+				body["display_label"] = label
+			}
 			if note != "" {
 				body["activity_note"] = note
 			}

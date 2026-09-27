@@ -29,6 +29,7 @@ it('a live hint during a slow fetch does not stack another read', async () => {
   const store = useAgents()
   const first = store.refreshSessions()
   const second = store.refreshSessions()
+  await vi.waitFor(() => expect(listAllSessions).toHaveBeenCalledTimes(1))
   expect(listAllSessions).toHaveBeenCalledTimes(1)
   complete(page(['lead']))
   await Promise.all([first, second])
@@ -112,4 +113,57 @@ it('consumes registered/stopped signals and refreshes when the existing stream r
   expect(connection.mock.calls).toEqual([[true], [false], [true]])
   stop()
   expect(stream.close).toHaveBeenCalledOnce()
+})
+
+const currentSession = (fields: Partial<HarnessSession> = {}) => ({
+  id: 's1', project_id: 'p1', agent_principal_id: 'a1', run_id: 'r1', revision: 3, harness: 'codex', host: 'workstation',
+  phase: 'working', activity: 'busy', heartbeat_at: new Date().toISOString(), created_at: new Date().toISOString(),
+  stopped_at: null, stop_reason: null, has_problem: false, needs_attention: false, run_status: null, ...fields,
+}) as HarnessSession
+
+it('retains known false evidence across partial responses and stale run-cache arrivals', async () => {
+  const session = currentSession()
+  vi.mocked(listAllSessions).mockResolvedValue({ items: [session], next_cursor: null })
+  const store = useAgents()
+  await store.refreshSessions()
+  store.recordRun({ id: 'r1', status: 'failed' } as never)
+  expect(store.views[0]?.status.state).toBe('working')
+  const { has_problem, needs_attention, run_status, ...partial } = session
+  vi.mocked(listAllSessions).mockResolvedValue({ items: [{ ...partial, revision: 4 } as HarnessSession], next_cursor: null })
+  await store.refreshSessions()
+  expect(store.sessions[0]).toMatchObject({ has_problem: false, needs_attention: false, run_status: null })
+  expect(store.views[0]?.status.state).toBe('working')
+  // A genuinely new failure reason is allowed through even without projections.
+  vi.mocked(listAllSessions).mockResolvedValue({ items: [{ ...partial, revision: 5, stop_reason: 'worker crashed' } as HarnessSession], next_cursor: null })
+  await store.refreshSessions()
+  expect(store.views[0]?.status.state).toBe('problem')
+})
+
+it('an older ticket response and lower revision cannot replace a fresh list projection', async () => {
+  const store = useAgents()
+  let finish!: (value: { items: HarnessSession[]; next_cursor: null }) => void
+  vi.mocked(listAllSessions).mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+  const ticketRead = store.ensureTicket('ticket')
+  vi.mocked(listAllSessions).mockResolvedValueOnce({ items: [currentSession()], next_cursor: null })
+  await store.refreshSessions()
+  finish({ items: [currentSession({ has_problem: true })], next_cursor: null })
+  await ticketRead
+  expect(store.views[0]?.status.state).toBe('working')
+  vi.mocked(listAllSessions).mockResolvedValueOnce({ items: [currentSession({ revision: 2, has_problem: true })], next_cursor: null })
+  await store.refreshSessions()
+  expect(store.views[0]?.status.state).toBe('working')
+})
+
+it('clock correction backwards cannot oscillate a threshold warning', async () => {
+  vi.useFakeTimers()
+  const at = Date.parse('2026-09-27T12:00:00Z')
+  vi.setSystemTime(at)
+  vi.mocked(listAllSessions).mockResolvedValue({ items: [currentSession({ heartbeat_at: new Date(at - 599_999).toISOString() })], next_cursor: null })
+  const store = useAgents()
+  await store.refreshSessions()
+  expect(store.views[0]?.status.state).toBe('awaiting')
+  vi.setSystemTime(at + 1); store.tick()
+  expect(store.views[0]?.status.state).toBe('unresponsive')
+  vi.setSystemTime(at - 1_000); store.tick()
+  expect(store.views[0]?.status.state).toBe('unresponsive')
 })

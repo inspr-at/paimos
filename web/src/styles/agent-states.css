@@ -27,7 +27,6 @@
   }
 }
 .agent-state-surface {
-  background: color-mix(in srgb, var(--agent-state-color) 6%, var(--surface-raised));
   opacity: var(--agent-state-opacity, 1);
 }
 .agent-indicator-art, .live-bot, .agent-state-label { opacity: var(--agent-state-opacity, 1); }
@@ -39,8 +38,8 @@
 .agent-indicator-art:not(.working) *, .live-bot:not(.working) * { animation: none !important; }
 
 .agent-indicator-art { --signal: var(--agent-state-color, var(--agent-standard-working)); }
-.agent-indicator-art.waiting { --signal: var(--agent-state-color, var(--agent-standard-waiting)); }
+.agent-indicator-art:is(.waiting, .awaiting) { --signal: var(--agent-state-color, var(--agent-standard-waiting)); }
 .agent-indicator-art.throttled { --signal: var(--agent-state-color, var(--agent-standard-throttled)); }
-.agent-indicator-art.problem { --signal: var(--agent-state-color, var(--agent-standard-problem)); }
+.agent-indicator-art:is(.problem, .unresponsive) { --signal: var(--agent-state-color, var(--agent-standard-problem)); }
 .agent-indicator-art:is(.idle, .stale, .stopped) { --signal: var(--agent-state-color, var(--agent-standard-inactive)); filter: grayscale(1); }
 .agent-indicator-art .agent-state-mark { color: var(--signal); }
