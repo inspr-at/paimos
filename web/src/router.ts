@@ -75,6 +75,7 @@ export const router = createRouter({
     { path: '/business/quotes/:quoteId/:rest(.*)+', redirect: '/business/quotes' },
     { path: '/business/:parked(organisations|crm)/:rest(.*)*', redirect: '/business/customers' },
     { path: '/crm', redirect: '/business/customers' },
+    { path: '/agents/usage', component: () => import('./views/UsageDashboardView.vue'), meta: { title: 'Usage' } },
     // One record for the overview and its open session, so opening the panel never remounts the page.
     { path: '/agents/:sessionId?', component: () => import('./views/AgentsView.vue'), meta: { title: 'Agents', fill: false } },
     // Earlier separate pages now live inside Agents.

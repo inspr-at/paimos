@@ -48,6 +48,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/inspr-at/paimos/internal/httpapi"
+	"github.com/inspr-at/paimos/internal/ownedprocess"
 	"github.com/inspr-at/paimos/internal/plugins"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
@@ -73,6 +74,10 @@ func (m *Module) Mount(mux *http.ServeMux) {
 		{"GET /api/projects/{projectId}/harness-sessions/orchestrator", "harness.read", false, 200, m.orchestrator},
 		{"GET /api/projects/{projectId}/harness-sessions/{sessionId}", "harness.read", false, 200, m.status},
 		{"PATCH /api/projects/{projectId}/harness-sessions/{sessionId}/binding", "harness.write", false, 200, m.bind},
+		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/usage", "harness.worker", true, 200, m.reportUsage},
+		{"GET /api/projects/{projectId}/harness-sessions/{sessionId}/usage", "harness.read", false, 200, m.sessionUsage},
+		{"POST /api/model-prices", "models.manage", false, 201, m.createUsagePrice},
+		{"GET /api/model-prices", "harness.read", false, 200, m.listUsagePrices},
 		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/heartbeat", "harness.worker", true, 200, m.heartbeat},
 		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/yield", "harness.worker", true, 200, m.yield},
 		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/drain", "harness.worker", true, 200, m.drain},
@@ -82,51 +87,66 @@ func (m *Module) Mount(mux *http.ServeMux) {
 		{"GET /api/projects/{projectId}/harness-sessions/{sessionId}/controls/{controlId}", "harness.read", false, 200, m.control},
 		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/controls/{controlId}/complete", "harness.worker", true, 200, m.completeControl},
 		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/stop", "harness.worker", true, 200, m.markStopped},
+		{"GET /api/projects/{projectId}/harness-sessions/{sessionId}/recovery", "harness.read", false, 200, m.recovery},
+		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/archive", "harness.recover", false, 200, m.archive},
+		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/controls/force-stop", "harness.force_stop", false, 201, m.forceStop},
 	} {
 		mux.HandleFunc(route.pattern, workorders.Endpoint(m.pool, route.scope, route.agent, route.status, route.fn))
 	}
 }
 
 type Session struct {
+	ProcessOwnership     *ownedprocess.Identity `json:"process_ownership,omitempty"`
+	ProcessObservedAt    *time.Time             `json:"process_observed_at,omitempty"`
+	ArchivedAt           *time.Time             `json:"archived_at"`
+	RecoveryProcessState *string                `json:"recovery_process_state"`
 	StateEvidence
-	ID                                             string         `json:"id"`
-	ProjectID                                      string         `json:"project_id"`
-	AgentPrincipalID                               string         `json:"agent_principal_id"`
-	RunID                                          *string        `json:"run_id"`
-	TicketNodeID                                   *string        `json:"ticket_node_id"`
-	WorkOrderID                                    *string        `json:"work_order_id"`
-	ParentID                                       *string        `json:"parent_harness_session_id"`
-	Harness                                        string         `json:"harness"`
-	Host                                           string         `json:"host"`
-	DisplayLabel                                   *string        `json:"display_label"`
-	Model                                          *string        `json:"model"`
-	ReasoningEffort                                *string        `json:"reasoning_effort"`
-	AccountLabel                                   *string        `json:"account_label"`
-	HarnessVersion                                 *string        `json:"harness_version"`
-	Brief                                          *string        `json:"brief"`
-	Worktree                                       *string        `json:"worktree"`
-	Branch                                         *string        `json:"branch"`
-	Commits                                        []Commit       `json:"commits"`
-	ActivityNote                                   *string        `json:"activity_note"`
-	ActivityHistory                                []ActivityNote `json:"activity_history,omitempty"`
-	Management                                     string         `json:"management_mode"`
-	Role                                           string         `json:"role"`
-	WorkShape                                      string         `json:"work_shape"`
-	Capabilities                                   []string       `json:"advertised_capabilities"`
-	Phase                                          string         `json:"phase"`
-	Activity                                       string         `json:"activity"`
-	ActivitySequence                               int64          `json:"activity_sequence"`
-	Revision                                       int64          `json:"revision"`
-	HeartbeatAt                                    *time.Time     `json:"heartbeat_at"`
-	StoppedAt                                      *time.Time     `json:"stopped_at"`
-	StopReason                                     *string        `json:"stop_reason"`
-	CreatedAt                                      time.Time      `json:"created_at"`
+	ID                                             string            `json:"id"`
+	ProjectID                                      string            `json:"project_id"`
+	AgentPrincipalID                               string            `json:"agent_principal_id"`
+	RunID                                          *string           `json:"run_id"`
+	TicketNodeID                                   *string           `json:"ticket_node_id"`
+	WorkOrderID                                    *string           `json:"work_order_id"`
+	ParentID                                       *string           `json:"parent_harness_session_id"`
+	Harness                                        string            `json:"harness"`
+	Host                                           string            `json:"host"`
+	DisplayLabel                                   *string           `json:"display_label"`
+	Model                                          *string           `json:"model"`
+	ReasoningEffort                                *string           `json:"reasoning_effort"`
+	AccountLabel                                   *string           `json:"account_label"`
+	HarnessVersion                                 *string           `json:"harness_version"`
+	Brief                                          *string           `json:"brief"`
+	Worktree                                       *string           `json:"worktree"`
+	Branch                                         *string           `json:"branch"`
+	Commits                                        []Commit          `json:"commits"`
+	ActivityNote                                   *string           `json:"activity_note"`
+	ActivityHistory                                []ActivityNote    `json:"activity_history,omitempty"`
+	MetadataHistory                                *[]MetadataChange `json:"metadata_history,omitempty"`
+	Management                                     string            `json:"management_mode"`
+	Role                                           string            `json:"role"`
+	WorkShape                                      string            `json:"work_shape"`
+	Capabilities                                   []string          `json:"advertised_capabilities"`
+	Phase                                          string            `json:"phase"`
+	Activity                                       string            `json:"activity"`
+	ActivitySequence                               int64             `json:"activity_sequence"`
+	Revision                                       int64             `json:"revision"`
+	HeartbeatAt                                    *time.Time        `json:"heartbeat_at"`
+	StoppedAt                                      *time.Time        `json:"stopped_at"`
+	StopReason                                     *string           `json:"stop_reason"`
+	CreatedAt                                      time.Time         `json:"created_at"`
 	refDigest, leaseDigest, registrationMetaDigest []byte
 }
 
 type ActivityNote struct {
 	Note string    `json:"note"`
 	At   time.Time `json:"at"`
+}
+
+type MetadataChange struct {
+	Field         string    `json:"field"`
+	PreviousValue *string   `json:"previous_value"`
+	Value         *string   `json:"value"`
+	At            time.Time `json:"at"`
 }
 
 type Commit struct {
@@ -240,11 +260,11 @@ func normalizeActivityNote(raw string) (string, bool) {
 	return clean, clean != "" && utf8.RuneCountInString(clean) <= 120
 }
 
-const sessionColumns = `id::text,project_id::text,agent_principal_id::text,run_id::text,ticket_node_id::text,work_order_id::text,parent_id::text,harness,host,management,role,work_shape,capabilities,phase,activity,activity_sequence,revision,heartbeat_at,stopped_at,stop_reason,created_at,ref_digest,lease_digest,display_label,activity_note,model,reasoning_effort,account_label,harness_version,brief,worktree,branch,commits,registration_metadata_digest`
+const sessionColumns = `id::text,project_id::text,agent_principal_id::text,run_id::text,ticket_node_id::text,work_order_id::text,parent_id::text,harness,host,management,role,work_shape,capabilities,phase,activity,activity_sequence,revision,heartbeat_at,stopped_at,stop_reason,created_at,ref_digest,lease_digest,display_label,activity_note,model,reasoning_effort,account_label,harness_version,brief,worktree,branch,commits,registration_metadata_digest,archived_at,recovery_process_state,process_ownership,process_observed_at`
 
 func scanSession(row pgx.Row) (Session, error) {
 	var s Session
-	err := row.Scan(&s.ID, &s.ProjectID, &s.AgentPrincipalID, &s.RunID, &s.TicketNodeID, &s.WorkOrderID, &s.ParentID, &s.Harness, &s.Host, &s.Management, &s.Role, &s.WorkShape, &s.Capabilities, &s.Phase, &s.Activity, &s.ActivitySequence, &s.Revision, &s.HeartbeatAt, &s.StoppedAt, &s.StopReason, &s.CreatedAt, &s.refDigest, &s.leaseDigest, &s.DisplayLabel, &s.ActivityNote, &s.Model, &s.ReasoningEffort, &s.AccountLabel, &s.HarnessVersion, &s.Brief, &s.Worktree, &s.Branch, &s.Commits, &s.registrationMetaDigest)
+	err := row.Scan(&s.ID, &s.ProjectID, &s.AgentPrincipalID, &s.RunID, &s.TicketNodeID, &s.WorkOrderID, &s.ParentID, &s.Harness, &s.Host, &s.Management, &s.Role, &s.WorkShape, &s.Capabilities, &s.Phase, &s.Activity, &s.ActivitySequence, &s.Revision, &s.HeartbeatAt, &s.StoppedAt, &s.StopReason, &s.CreatedAt, &s.refDigest, &s.leaseDigest, &s.DisplayLabel, &s.ActivityNote, &s.Model, &s.ReasoningEffort, &s.AccountLabel, &s.HarnessVersion, &s.Brief, &s.Worktree, &s.Branch, &s.Commits, &s.registrationMetaDigest, &s.ArchivedAt, &s.RecoveryProcessState, &s.ProcessOwnership, &s.ProcessObservedAt)
 	return s, err
 }
 func project(ctx context.Context, tx pgx.Tx, id string) error {
@@ -277,7 +297,13 @@ func digest(domain, value string) []byte {
 }
 func proof(s Session, r *http.Request, p tenant.Principal) error {
 	lease := r.Header.Get("X-Aeon-Worker-Lease")
-	if p.Kind != tenant.Agent || p.ID != s.AgentPrincipalID || len(lease) < 32 || subtle.ConstantTimeCompare(digest("lease", lease), s.leaseDigest) != 1 || s.StoppedAt != nil {
+	if p.Kind != tenant.Agent || p.ID != s.AgentPrincipalID || len(lease) < 32 || subtle.ConstantTimeCompare(digest("lease", lease), s.leaseDigest) != 1 {
+		return workorders.Fail(403, "harness worker proof rejected")
+	}
+	if s.ArchivedAt != nil {
+		return workorders.Fail(410, "harness generation archived")
+	}
+	if s.StoppedAt != nil {
 		return workorders.Fail(403, "harness worker proof rejected")
 	}
 	return nil
@@ -515,6 +541,14 @@ func (m *Module) register(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, 
 	if !errors.Is(err, pgx.ErrNoRows) {
 		return nil, err
 	}
+	// An archived worker generation cannot resurrect by replaying registration.
+	var revoked bool
+	if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM harness_sessions WHERE project_id=$1 AND agent_principal_id=$2 AND archived_at IS NOT NULL AND (ref_digest=$3 OR lease_digest=$4))`, projectID, in.AgentPrincipalID, ref, lease).Scan(&revoked); err != nil {
+		return nil, err
+	}
+	if revoked {
+		return nil, workorders.Fail(409, "archived generation revoked; use a new session reference and worker lease")
+	}
 	if in.ParentID != nil {
 		if err = validateParent(ctx, tx, projectID, *in.ParentID, ""); err != nil {
 			return nil, err
@@ -617,6 +651,25 @@ func (m *Module) status(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, er
 	if err != nil {
 		return nil, err
 	}
+	changeRows, err := tx.Query(r.Context(), `SELECT field,previous_value,value,created_at FROM harness_metadata_changes WHERE session_id=$1 ORDER BY id DESC LIMIT 20`, s.ID)
+	if err != nil {
+		return nil, err
+	}
+	history := []MetadataChange{}
+	for changeRows.Next() {
+		var change MetadataChange
+		if err = changeRows.Scan(&change.Field, &change.PreviousValue, &change.Value, &change.At); err != nil {
+			changeRows.Close()
+			return nil, err
+		}
+		history = append(history, change)
+	}
+	err = changeRows.Err()
+	changeRows.Close()
+	if err != nil {
+		return nil, err
+	}
+	s.MetadataHistory = &history
 	evidence, err := readStateEvidence(r.Context(), tx, []string{s.ID})
 	s.StateEvidence = evidence[s.ID]
 	return s, err
@@ -705,10 +758,12 @@ func (m *Module) bind(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, erro
 }
 func (m *Module) heartbeat(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
 	var in struct {
-		Phase            string  `json:"phase"`
-		Activity         string  `json:"activity"`
-		ActivitySequence int64   `json:"activity_sequence"`
-		ActivityNote     *string `json:"activity_note"`
+		ProcessOwnership *ownedprocess.Identity `json:"process_ownership"`
+		Phase            string                 `json:"phase"`
+		Activity         string                 `json:"activity"`
+		ActivitySequence int64                  `json:"activity_sequence"`
+		ActivityNote     *string                `json:"activity_note"`
+		DisplayLabel     json.RawMessage        `json:"display_label"`
 		sessionText
 		Commits []Commit `json:"commits"`
 	}
@@ -722,6 +777,11 @@ func (m *Module) heartbeat(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 	s, err := worker(ctx, tx, r, p)
 	if err != nil {
 		return nil, err
+	}
+	if in.ProcessOwnership != nil {
+		if err := reportOwnership(ctx, tx, s, *in.ProcessOwnership); err != nil {
+			return nil, err
+		}
 	}
 	if in.Activity == "" {
 		in.Activity = s.Activity
@@ -745,6 +805,25 @@ func (m *Module) heartbeat(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 	if err := in.sessionText.normalize(); err != nil {
 		return nil, err
 	}
+	label := s.DisplayLabel
+	if in.DisplayLabel != nil {
+		if string(in.DisplayLabel) == "null" {
+			label = nil
+		} else {
+			var raw string
+			if err := json.Unmarshal(in.DisplayLabel, &raw); err != nil {
+				return nil, workorders.Fail(400, "invalid display label")
+			}
+			clean := strings.TrimSpace(raw)
+			if !utf8.ValidString(raw) || utf8.RuneCountInString(clean) > 128 || strings.ContainsFunc(raw, unicode.IsControl) {
+				return nil, workorders.Fail(400, "display label must be at most 128 characters without control characters")
+			}
+			label = nil
+			if clean != "" {
+				label = &clean
+			}
+		}
+	}
 	if err := validCommits(in.Commits); err != nil {
 		return nil, err
 	}
@@ -758,8 +837,11 @@ func (m *Module) heartbeat(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 	if err != nil {
 		return nil, err
 	}
-	s, err = scanSession(tx.QueryRow(ctx, `UPDATE harness_sessions SET phase=$2,activity=$3,activity_sequence=$4,heartbeat_at=clock_timestamp(),activity_note=$5,model=coalesce($6,model),reasoning_effort=coalesce($7,reasoning_effort),account_label=coalesce($8,account_label),harness_version=coalesce($9,harness_version),brief=coalesce($10,brief),worktree=coalesce($11,worktree),branch=coalesce($12,branch),commits=$13::jsonb WHERE id=$1 RETURNING `+sessionColumns, s.ID, in.Phase, in.Activity, in.ActivitySequence, note, in.Model, in.ReasoningEffort, in.AccountLabel, in.HarnessVersion, in.Brief, in.Worktree, in.Branch, string(commits)))
+	s, err = scanSession(tx.QueryRow(ctx, `UPDATE harness_sessions SET phase=$2,activity=$3,activity_sequence=$4,heartbeat_at=clock_timestamp(),activity_note=$5,model=coalesce($6,model),reasoning_effort=coalesce($7,reasoning_effort),account_label=coalesce($8,account_label),harness_version=coalesce($9,harness_version),brief=coalesce($10,brief),worktree=coalesce($11,worktree),branch=coalesce($12,branch),commits=$13::jsonb,display_label=$14 WHERE id=$1 RETURNING `+sessionColumns, s.ID, in.Phase, in.Activity, in.ActivitySequence, note, in.Model, in.ReasoningEffort, in.AccountLabel, in.HarnessVersion, in.Brief, in.Worktree, in.Branch, string(commits), label))
 	if err != nil {
+		return nil, err
+	}
+	if err := recordMetadataChanges(ctx, tx, p.TenantID, before, s); err != nil {
 		return nil, err
 	}
 	if changed && note != nil {
@@ -783,7 +865,7 @@ func (m *Module) markStopped(r *http.Request, tx pgx.Tx, p tenant.Principal) (an
 		return nil, err
 	}
 	switch in.Reason {
-	case "stopped", "process_exited", "process_failed", "ownership_lost":
+	case "stopped", "process_exited", "process_failed", "ownership_lost", "force_stopped":
 	default:
 		return nil, workorders.Fail(400, "invalid stop reason")
 	}
@@ -792,41 +874,45 @@ func (m *Module) markStopped(r *http.Request, tx pgx.Tx, p tenant.Principal) (an
 	if err != nil {
 		return nil, err
 	}
+	return closeGeneration(ctx, tx, p, s, in.Reason)
+}
+
+func closeGeneration(ctx context.Context, tx pgx.Tx, p tenant.Principal, s Session, reason string) (Session, error) {
 	before := s
 	rows, err := tx.Query(ctx, `SELECT id::text FROM harness_controls WHERE session_id=$1 AND state<>'completed' ORDER BY sequence FOR UPDATE`, s.ID)
 	if err != nil {
-		return nil, err
+		return Session{}, err
 	}
 	ids := []string{}
 	for rows.Next() {
 		var id string
 		if err = rows.Scan(&id); err != nil {
 			rows.Close()
-			return nil, err
+			return Session{}, err
 		}
 		ids = append(ids, id)
 	}
 	err = rows.Err()
 	rows.Close()
 	if err != nil {
-		return nil, err
+		return Session{}, err
 	}
 	for _, id := range ids {
 		beforeControl, e := scanControl(tx.QueryRow(ctx, `SELECT `+controlColumns+` FROM harness_controls WHERE id=$1`, id))
 		if e != nil {
-			return nil, e
+			return Session{}, e
 		}
 		afterControl, e := scanControl(tx.QueryRow(ctx, `UPDATE harness_controls SET state='completed',outcome='rejected',reason='ownership_lost',claimed_at=coalesce(claimed_at,clock_timestamp()),completed_at=clock_timestamp() WHERE id=$1 RETURNING `+controlColumns, id))
 		if e != nil {
-			return nil, e
+			return Session{}, e
 		}
 		if e = record(ctx, tx, p, s, "control_completed", beforeControl, afterControl); e != nil {
-			return nil, e
+			return Session{}, e
 		}
 	}
 	leaseRows, err := tx.Query(ctx, `SELECT id::text,message_id::text,cursor FROM harness_deliveries WHERE session_id=$1 AND completed_at IS NULL AND released_at IS NULL FOR UPDATE`, s.ID)
 	if err != nil {
-		return nil, err
+		return Session{}, err
 	}
 	type leaseRef struct {
 		id, message string
@@ -837,26 +923,26 @@ func (m *Module) markStopped(r *http.Request, tx pgx.Tx, p tenant.Principal) (an
 		var v leaseRef
 		if err = leaseRows.Scan(&v.id, &v.message, &v.cursor); err != nil {
 			leaseRows.Close()
-			return nil, err
+			return Session{}, err
 		}
 		leases = append(leases, v)
 	}
 	err = leaseRows.Err()
 	leaseRows.Close()
 	if err != nil {
-		return nil, err
+		return Session{}, err
 	}
 	for _, v := range leases {
 		if _, err = tx.Exec(ctx, `UPDATE harness_deliveries SET released_at=clock_timestamp() WHERE id=$1`, v.id); err != nil {
-			return nil, err
+			return Session{}, err
 		}
 		if err = record(ctx, tx, p, s, "delivery_released", map[string]any{"delivery_id": v.id, "message_id": v.message, "cursor": v.cursor}, map[string]any{"delivery_id": v.id, "message_id": v.message, "cursor": v.cursor, "released": true}); err != nil {
-			return nil, err
+			return Session{}, err
 		}
 	}
-	s, err = scanSession(tx.QueryRow(ctx, `UPDATE harness_sessions SET phase='stopped',stopped_at=clock_timestamp(),stop_reason=$2 WHERE id=$1 RETURNING `+sessionColumns, s.ID, in.Reason))
+	s, err = scanSession(tx.QueryRow(ctx, `UPDATE harness_sessions SET phase='stopped',stopped_at=coalesce(stopped_at,clock_timestamp()),stop_reason=coalesce(stop_reason,$2) WHERE id=$1 RETURNING `+sessionColumns, s.ID, reason))
 	if err != nil {
-		return nil, err
+		return Session{}, err
 	}
 	return s, record(ctx, tx, p, s, "stopped", before, s)
 }

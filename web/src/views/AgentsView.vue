@@ -22,7 +22,7 @@ import StartAgentDialog from '../components/agents/StartAgentDialog.vue'
 import RunQueue from '../components/agents/RunQueue.vue'
 
 // Markus's desk for agents: what waits on him first, then every live session grouped
-// by state, with accounts and pacing beside them. A session opens in the docked panel.
+// by state, with accounts and pacing folded below them. A session opens in the docked panel.
 const agents = useAgents()
 const projects = useProjects()
 const session = useSession()
@@ -47,7 +47,7 @@ const canRevoke = computed(() => session.identity?.principal.kind === 'person' &
 const canDecide = computed(() => session.identity?.principal.kind === 'person' && (can('approvals.decide') || canResolve.value))
 const canDecideApproval = (approval: Approval) => session.identity?.principal.kind === 'person' && allowedToDecide(approval, can)
 const history = computed(() => decidedApprovals(agents.approvals, agents.now))
-const counts = computed(() => ([['working', 'working'], ['needs', 'need something'], ['throttled', 'throttled'], ['problem', 'with a problem'], ['idle', 'idle'], ['stopped', 'stopped']] as const)
+const counts = computed(() => ([['working', 'working'], ['needs', 'need something'], ['awaiting', 'awaiting a heartbeat'], ['throttled', 'throttled'], ['problem', 'with a problem'], ['unresponsive', 'without a heartbeat'], ['idle', 'idle'], ['stopped', 'stopped']] as const)
   .filter(([group]) => agents.grouped[group].length).map(([group, label]) => `${agents.grouped[group].length} ${group === 'needs' && agents.grouped[group].length === 1 ? 'needs something' : label}`))
 const summary = computed(() => {
   const parts: string[] = []
@@ -184,7 +184,7 @@ function keydown(event: KeyboardEvent) {
       else if (kind === 'm') { event.preventDefault(); void queue.value?.begin(id, event.key === 'a' ? 'resolve' : 'dismiss') }
       break
     case 'Enter': case 'o':
-      if ((event.target as HTMLElement).closest('a, button')) return
+      if ((event.target as HTMLElement).closest('a, button, summary')) return
       if (kind === 's') { event.preventDefault(); openSession(id) }
       else if (kind === 'm') { event.preventDefault(); const held = agents.held.find(m => m.id === id); if (held) openAgent(held.sender_principal_id) }
       break
@@ -229,6 +229,7 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
       </div>
       <div class="head-side">
         <button v-if="canStart" type="button" class="btn primary start-agent" @click="startDialog?.open()"><AppIcon name="plus" :size="15" />Start agent</button>
+        <RouterLink class="context-link" to="/agents/usage">Usage<AppIcon name="arrow" :size="13" /></RouterLink>
         <RouterLink v-if="can('keys.manage')" class="context-link" to="/settings/access/agents">Agent keys<AppIcon name="arrow" :size="13" /></RouterLink>
         <div class="freshness">
           <p class="live" :class="{ on: live && !stale }" :data-tip="live ? 'Connected to live updates' : 'Refreshing every 20 seconds'">
@@ -261,14 +262,15 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
           @open="openSession" @control="control" @focus-row="id => cursor = id" @retry="agents.loadAll()" @start="startDialog?.open()"
         />
         <p v-if="agents.sessionsUpdatedAt !== null && agents.sessionsState === 'error'" class="inline-error" role="alert"><AppIcon name="alert" :size="14" />Sessions could not be refreshed: {{ agents.sessionsError }} <button type="button" class="btn sm" @click="agents.loadAll()">Try again</button></p>
+        <details v-if="agents.loaded" class="accounts-disclosure">
+          <summary class="accounts-summary"><AppIcon name="gauge" :size="15" /><span>Accounts and pacing</span><AppIcon class="disclosure-chev" name="chevron-right" :size="15" /></summary>
+          <AccountsCard :accounts="agents.accounts" :state="agents.accountsUpdatedAt !== null ? 'ready' : agents.accountsState" :now="agents.now" :admin="agents.accountsState === 'ready'" :set="setAccount" />
+        </details>
         <RunQueue v-if="agents.loaded" />
         <p v-if="agents.loaded && (agents.sessions.length || agents.pending.length)" class="hint" aria-hidden="true">
           <kbd class="keycap">j</kbd><kbd class="keycap">k</kbd> move · <kbd class="keycap"><AppIcon name="enter" /></kbd> open · <kbd class="keycap">a</kbd> approve · <kbd class="keycap">d</kbd> deny
         </p>
       </div>
-      <aside v-if="agents.loaded" class="side-col" aria-label="Accounts">
-        <AccountsCard :accounts="agents.accounts" :state="agents.accountsUpdatedAt !== null ? 'ready' : agents.accountsState" :now="agents.now" :admin="agents.accountsState === 'ready'" :set="setAccount" />
-      </aside>
     </div>
 
     <SessionPanel
@@ -301,9 +303,13 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
 .live { display: inline-flex; align-items: center; gap: 8px; height: 28px; padding: 0 12px; border-radius: 999px; background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); font-size: 12px; color: var(--ink-2); }
 .live-mark { width: 7px; height: 7px; border-radius: 50%; background: var(--st-backlog); }
 .live.on .live-mark { background: var(--ok); box-shadow: 0 0 0 3px rgba(47, 122, 90, .16); }
-.layout { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 20px; align-items: start; container: agents-layout / inline-size; }
+.layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; align-items: start; container: agents-layout / inline-size; }
 .main-col { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; min-width: 0; }
-.side-col { position: sticky; top: 16px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; min-width: 0; }
+.accounts-summary { display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 10px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-raised); color: var(--ink-2); font-size: 13px; font-weight: 550; cursor: pointer; }
+.accounts-summary .disclosure-chev { margin-left: auto; }
+.accounts-summary:hover { background: var(--row-hover); color: var(--ink); }
+.accounts-summary:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.accounts-disclosure[open] > .accounts-summary { margin-bottom: 8px; }
 .inline-error { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 10px 14px; border-radius: 12px; background: var(--danger-bg); box-shadow: inset 0 0 0 1px var(--danger-line); font-size: 13px; color: var(--danger); }
 .hint { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 5px; padding: 4px 0; font-size: 12px; color: var(--ink-3); }
 .hint .keycap + .keycap { margin-left: 2px; }
@@ -311,10 +317,6 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
 @media (min-width: 1100px) {
   .agents-page.panel-open { margin: 0; padding-right: calc(var(--panel-w) + 22px); }
 }
-/* Beside the panel the page is narrow: accounts move below the sessions. */
-.agents-page.panel-open .layout { grid-template-columns: minmax(0, 1fr); }
-.agents-page.panel-open .side-col { position: static; }
-@media (max-width: 1080px) { .layout { grid-template-columns: minmax(0, 1fr); } .side-col { position: static; } }
 @media (max-width: 720px) {
   .agents-page { padding: 16px 12px 20px; }
   .page-head { align-items: flex-start; }

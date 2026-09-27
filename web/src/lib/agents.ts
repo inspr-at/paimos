@@ -6,8 +6,15 @@ import { api, APIError } from './api.ts'
 import type { LivePage } from './liveAgents.ts'
 
 export type Harness = 'codex' | 'claude' | 'pi' | 'cursor' | 'grok'
+export interface MetadataChange {
+  field: 'display_label' | 'model' | 'reasoning_effort'
+  previous_value: string | null
+  value: string | null
+  at: string
+}
 export interface HarnessSession {
   id: string; project_id: string; agent_principal_id: string
+  archived_at?: string | null; recovery_process_state?: 'unknown' | null
   display_label?: string | null
   model?: string | null; reasoning_effort?: string | null; account_label?: string | null; harness_version?: string | null
   brief?: string | null; worktree?: string | null; branch?: string | null; commits?: { sha: string; subject: string }[]
@@ -20,6 +27,8 @@ export interface HarnessSession {
   // The tenant-wide list adds node summaries (B7) and the agent principal's name (U13).
   project?: NodeSummary; ticket?: NodeSummary | null; agent?: { id: string; name: string } | null
 }
+// SN1 returns bounded history only on GET session detail, never on list rows.
+export interface HarnessSessionDetail extends HarnessSession { metadata_history?: MetadataChange[] }
 export interface NodeSummary { id: string; key: string; title: string }
 export interface Paged<T> { items: T[]; next_cursor: string | null }
 export interface SessionControl {

@@ -3,12 +3,12 @@
 import { STATE_LABEL, type AgentState } from '../../lib/agentSignals'
 import { useAgentAppearance } from '../../lib/agentAppearance'
 import AgentStateMark from '../indicators/AgentStateMark.vue'
-defineProps<{ state: AgentState; detail?: string }>()
+defineProps<{ state: AgentState; label?: string; detail?: string }>()
 const { appearance } = useAgentAppearance()
 </script>
 <template>
-  <span class="agent-state-label" :data-state="state" :style="appearance(state)" :aria-label="detail ? `${STATE_LABEL[state]}: ${detail}` : STATE_LABEL[state]">
-    <AgentStateMark :state="state" /><span class="state-word">{{ STATE_LABEL[state] }}<small v-if="detail" class="state-detail">{{ detail }}</small></span>
+  <span class="agent-state-label" :data-state="state" :style="appearance(state)" :aria-label="detail ? `${label || STATE_LABEL[state]}: ${detail}` : label || STATE_LABEL[state]">
+    <AgentStateMark :state="state" /><span class="state-word">{{ label || STATE_LABEL[state] }}<small v-if="detail" class="state-detail">{{ detail }}</small></span>
   </span>
 </template>
 <style scoped>

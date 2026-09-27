@@ -1899,16 +1899,158 @@ paths:
       - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
     get:
       operationId: getHarnessSession
-      description: Session detail, including at most 20 recent activity notes, newest first.
+      description: Session detail, including at most 20 recent activity notes and metadata changes, newest first.
       responses:
         '200': {description: Session detail, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessSession'}}}}
+  /projects/{projectId}/harness-sessions/{sessionId}/recovery:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: previewHarnessRecovery
+      description: Human-only harness.recover or harness.force_stop permission in the target project. Returns an exact observed revision and confirmation for record recovery. Missing heartbeat is not proof of process exit.
+      responses:
+        '200': {description: Recovery preview, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessRecovery'}}}}
+        '403': {description: Human recovery permission required}
+        '404': {description: Session not visible}
+  /projects/{projectId}/harness-sessions/{sessionId}/controls/force-stop:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: forceStopHarnessSession
+      description: Human-only harness.force_stop permission. Exact current session/process confirmation, freshness and generation are checked before queueing. The owning daemon rechecks its in-memory process identity and unreaped process group before signaling. Children outside that process group are never targeted. An offline or unverified generation is unavailable; queued does not mean terminated.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expected_revision, confirmation, request_id, reason]
+              properties:
+                expected_revision: {type: string, pattern: '^[0-9a-f]{64}$'}
+                confirmation: {type: string, maxLength: 300}
+                request_id: {type: string, format: uuid}
+                reason: {type: string, minLength: 1, maxLength: 240}
+      responses:
+        '201': {description: Idempotent typed force control; inspect its state and outcome, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessRecoveryControl'}}}}
+        '403': {description: Human force permission required}
+        '409': {description: Stale confirmation, offline host or unverified process generation}
+  /projects/{projectId}/harness-sessions/{sessionId}/archive:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: archiveHarnessSession
+      description: Human-only harness.recover operation. Archives the registration, revokes its worker generation, and retains history. Does not signal any process or claim remote exit. Exact retry is idempotent; any changed observation requires a fresh confirmation.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expected_revision, confirmation, request_id, reason]
+              properties:
+                expected_revision: {type: string, pattern: '^[0-9a-f]{64}$'}
+                confirmation: {type: string, minLength: 1, maxLength: 256}
+                request_id: {type: string, format: uuid}
+                reason: {type: string, minLength: 1, maxLength: 240}
+      responses:
+        '200': {description: Archived session, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessSession'}}}}
+        '400': {description: Invalid confirmation or request}
+        '403': {description: Human recovery permission required}
+        '409': {description: Stale observation, divergent retry, active force authorization or legacy managed daemon without safe detachment}
+  /projects/{projectId}/harness-sessions/{sessionId}/usage:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: reportHarnessSessionUsage
+      security: *auth
+      description: >-
+        Requires harness.worker and the owning agent's generation lease. Accepts managed and unmanaged
+        sessions, including final reporting after normal stop. Archived generations are rejected before receipt replay. Counters are cumulative per exact model within
+        the entire session, never deltas or source-local totals. Input includes cached input. Known
+        counters and uncached input cannot decrease or become unknown. Sequences must increase.
+        Exact report_id replay returns the current row without another event; reuse with different
+        normalized input conflicts. Final counters and metadata are immutable. Null counters mean
+        unknown and force provisional=true. Latest available tenant model pricing is pinned once;
+        subsequent price versions never reprice a row. An unpriced row may acquire pricing on a later
+        report. Subscription metadata is self-reported and never reduces the list-price estimate.
+        No run telemetry, budgets or account settlement are modified. Consumers must not add managed
+        run totals to reported session totals. reported_at is observation time, not token spend time.
+      parameters:
+        - {name: X-Aeon-Worker-Lease, in: header, required: true, schema: {type: string, minLength: 32, maxLength: 256}}
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessUsageReport'}}}}
+      responses:
+        '410': {description: Authenticated archived generation; usage proof revoked, existing usage retained}
+        '200':
+          description: Accepted cumulative report or exact replay
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [usage, replayed]
+                properties:
+                  usage: {$ref: '#/components/schemas/SessionModelUsage'}
+                  replayed: {type: boolean}
+        '400': {description: Invalid or out-of-bounds report}
+        '403': {description: Worker proof or scope rejected}
+        '409': {description: Conflicting replay, stale sequence, decreasing counters or changed final report}
+    get:
+      operationId: getHarnessSessionUsage
+      security: *auth
+      description: Requires harness.read and project visibility. Empty items means unreported, never measured zero. Only current cumulative rows are returned; no aggregation or inferred billing.
+      responses:
+        '200':
+          description: Current per-model session usage
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [session_id, reported, items]
+                properties:
+                  session_id: {type: string, format: uuid}
+                  reported: {type: boolean}
+                  items: {type: array, items: {$ref: '#/components/schemas/SessionModelUsage'}}
+        '403': {description: Scope rejected}
+        '404': {description: Session not visible}
+  /model-prices:
+    get:
+      operationId: listModelPrices
+      security: *auth
+      description: Latest immutable price version per model for the tenant. Requires harness.read. No seeded or inferred vendor prices.
+      parameters:
+        - {name: model, in: query, schema: {type: string, minLength: 1, maxLength: 128}}
+      responses:
+        '200':
+          description: Latest tenant prices
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: {type: array, items: {$ref: '#/components/schemas/ModelPrice'}}
+    post:
+      operationId: createModelPrice
+      security: *auth
+      description: A person with models.manage creates an immutable, increasing version for an exact model identifier. Exact version/value retry is idempotent; conflicting or older new versions return 409. USD decimal strings have at most six fractional places.
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ModelPriceWrite'}}}}
+      responses:
+        '201': {description: Immutable tenant price version, content: {application/json: {schema: {$ref: '#/components/schemas/ModelPrice'}}}}
+        '400': {description: Invalid price}
+        '403': {description: models.manage person permission required}
+        '409': {description: Conflicting or out-of-order version}
   /projects/{projectId}/harness-sessions/{sessionId}/heartbeat:
     parameters:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
       - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
     post:
       operationId: heartbeatHarnessSession
-      description: The attributed worker reports liveness and optionally a current step. Changed nonempty notes append bounded activity history in the same transaction.
+      description: The attributed worker reports liveness and optionally a current step or display label. Changed nonempty notes and changed label/model/effort values append bounded histories in the same transaction.
       requestBody:
         required: true
         content:
@@ -1917,10 +2059,12 @@ paths:
               type: object
               required: [phase, activity_sequence]
               properties:
+                process_ownership: {$ref: '#/components/schemas/HarnessProcessOwnership'}
                 phase: {type: string, enum: [starting, working, yielded, stopping]}
                 activity: {type: string, enum: [unknown, busy, idle, throttled]}
                 activity_sequence: {type: integer, format: int64, minimum: 0}
                 activity_note: {type: string, minLength: 1, maxLength: 120, description: Plain text; whitespace trimmed and control characters stripped.}
+                display_label: {type: [string, 'null'], maxLength: 128, description: Optional current session name; omission preserves the label; trimmed empty or null clears it; control characters rejected.}
                 model: {$ref: '#/components/schemas/HarnessModel'}
                 reasoning_effort: {$ref: '#/components/schemas/HarnessEffort'}
                 account_label: {$ref: '#/components/schemas/HarnessAccountLabel'}
@@ -1933,6 +2077,7 @@ paths:
         '200': {description: Updated session, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessSession'}}}}
         '400': {description: Invalid note or heartbeat}
         '403': {description: Worker proof rejected}
+        '410': {description: Authenticated archived generation; detach harness servicing without signaling the process}
   /harness-sessions:
     get:
       operationId: listHarnessSessions
@@ -1995,6 +2140,54 @@ paths:
                   truncated: {type: boolean, description: More sessions were live than one answer holds; the freshest are listed}
         '401': {description: Authentication required}
         '403': {description: Scope required}
+  /usage/dashboard:
+    get:
+      operationId: getUsageDashboard
+      summary: Cost and usage by project, model and subscription (AEON-217)
+      description: >-
+        Sessions the caller can see that started in [from, to). Each harness_session_usage row is the lifetime
+        total for one session and model. The range selects sessions by start time and does not mean the tokens
+        or list estimate were consumed inside it. Null totals are unknown, not zero. estimated_cost_usd is the
+        exact USD list estimate, summed once; it is not a billed charge. billing_mode and subscription_label are
+        reported metadata, not verified coverage, and a subscription does not remove the estimate. Run telemetry
+        and agent-run totals are not added. More than 5000 sessions sets truncated and drops the rest. If the
+        usage relation is not installed the response is 503, not a dashboard of zeros. Allowance windows are the
+        caller's registered account windows and only when they hold account.read; the response has no account key.
+        A provisional window, including mixed settled evidence, returns null used, headroom and hard remaining.
+        Declared allowance, explicit reservations and the pace-cap schedule stay numbers. Null is unknown, not zero.
+        Project visibility follows harness sessions. The most expensive tickets are a ranking, not a session list.
+      parameters:
+        - {name: from, in: query, schema: {type: string}, description: RFC3339 or YYYY-MM-DD. Both from and to, or neither (then the last 30 UTC days).}
+        - {name: to, in: query, schema: {type: string}, description: Exclusive end. Span at most 366 days.}
+        - {name: project, in: query, schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: Usage dashboard
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [from, to, generated_at, attribution, trend_basis, list_price_currency, truncated, totals, by_project, by_model, by_subscription, trend, tickets, tickets_cost_unknown, allowance]
+                properties:
+                  from: {type: string, format: date-time}
+                  to: {type: string, format: date-time}
+                  generated_at: {type: string, format: date-time}
+                  attribution: {type: string, enum: [lifetime_for_sessions_started_in_range]}
+                  trend_basis: {type: string, enum: [session_started_utc_day]}
+                  list_price_currency: {type: string, enum: [USD]}
+                  truncated: {type: boolean}
+                  totals: {$ref: '#/components/schemas/UsageGroup'}
+                  by_project: {type: array, items: {$ref: '#/components/schemas/UsageGroup'}}
+                  by_model: {type: array, items: {$ref: '#/components/schemas/UsageGroup'}}
+                  by_subscription: {type: array, items: {$ref: '#/components/schemas/UsageGroup'}}
+                  trend: {type: array, items: {$ref: '#/components/schemas/UsageTrend'}}
+                  tickets: {type: array, maxItems: 12, items: {$ref: '#/components/schemas/UsageTicket'}}
+                  tickets_cost_unknown: {type: integer, minimum: 0, description: Visible tickets whose list estimate is entirely unknown. They are not ranked.}
+                  allowance: {$ref: '#/components/schemas/UsageAllowance'}
+        '400': {description: Invalid range or project}
+        '401': {description: Authentication required}
+        '403': {description: Permission denied}
+        '503': {description: Session usage relation is not installed}
   /runs:
     get:
       operationId: listAgentRuns
@@ -3422,6 +3615,77 @@ components:
           additionalProperties: true
           properties:
             next_action: {type: string, enum: [operator_external_stage_cli]}
+    UsageGroup:
+      type: object
+      description: Distinct sessions, with token and list-estimate sums across current model rows. A null total is unknown, not zero. A known zero is the decimal zero string.
+      required: [label, sessions, usage_rows, unreported_sessions, input_tokens, input_known_rows, input_unknown_rows, output_tokens, output_known_rows, output_unknown_rows, cached_input_tokens, cached_input_known_rows, cached_input_unknown_rows, tokens_state, estimated_cost_usd, cost_known_rows, cost_unknown_rows, cost_state, provisional_rows, provisional_sessions]
+      properties:
+        id: {type: string}
+        key: {type: string}
+        label: {type: string}
+        billing_mode: {type: string, enum: [subscription, api, unknown, unreported, mixed], description: Present on subscription groups. Reported metadata, not verified coverage.}
+        sessions: {type: integer, minimum: 0, description: Distinct sessions. A session with several models counts once.}
+        usage_rows: {type: integer, minimum: 0, description: Current model rows. Several models on one session are several rows.}
+        unreported_sessions: {type: integer, minimum: 0}
+        input_tokens: {type: [string, 'null'], pattern: '^(0|[1-9][0-9]*)$', description: Sum of known input totals. Null when none are known.}
+        input_known_rows: {type: integer, minimum: 0}
+        input_unknown_rows: {type: integer, minimum: 0}
+        output_tokens: {type: [string, 'null'], pattern: '^(0|[1-9][0-9]*)$'}
+        output_known_rows: {type: integer, minimum: 0}
+        output_unknown_rows: {type: integer, minimum: 0}
+        cached_input_tokens: {type: [string, 'null'], pattern: '^(0|[1-9][0-9]*)$', description: Sum of known cached input, which is a subset of input.}
+        cached_input_known_rows: {type: integer, minimum: 0}
+        cached_input_unknown_rows: {type: integer, minimum: 0}
+        tokens_state: {type: string, enum: [known, partial, unknown]}
+        estimated_cost_usd: {type: [string, 'null'], pattern: '^(0|[1-9][0-9]*)\.[0-9]{12}$', description: Exact USD list estimate with 12 fractional digits. Null when no row has a price. Not a billed charge.}
+        cost_known_rows: {type: integer, minimum: 0}
+        cost_unknown_rows: {type: integer, minimum: 0}
+        cost_state: {type: string, enum: [known, provisional, unknown, partial]}
+        provisional_rows: {type: integer, minimum: 0}
+        provisional_sessions: {type: integer, minimum: 0}
+    UsageTrend:
+      type: object
+      required: [day, group]
+      properties:
+        day: {type: string, format: date}
+        group: {$ref: '#/components/schemas/UsageGroup'}
+    UsageTicket:
+      allOf:
+        - {$ref: '#/components/schemas/UsageGroup'}
+        - type: object
+          required: [project_id, project_key]
+          properties:
+            project_id: {type: string, format: uuid}
+            project_key: {type: string}
+    UsageAllowance:
+      type: object
+      description: Declared allowance, explicit reservations and schedule capacity stay numbers. Used, headroom and hard remaining are null while a window is provisional, including mixed settled evidence. Null and overflow are never zero.
+      required: [state, windows]
+      properties:
+        state: {type: string, enum: [visible, withheld, none]}
+        windows:
+          type: array
+          items:
+            type: object
+            required: [account_id, label, harness, account_state, window_id, unit, allowance, used, reserved, pace_model, burst_ratio, starts_at, ends_at, provisional, pace_cap, headroom, hard_remaining]
+            properties:
+              account_id: {type: string, format: uuid}
+              label: {type: string}
+              harness: {type: string}
+              account_state: {type: string}
+              window_id: {type: string, format: uuid}
+              unit: {type: string, enum: [requests, tokens, cost_micros]}
+              allowance: {type: integer, format: int64, minimum: 1, description: Declared window size.}
+              used: {type: [integer, 'null'], format: int64, description: Measured ledger usage. Null while provisional. A present zero is measured zero.}
+              reserved: {type: integer, format: int64, minimum: 0, description: Explicit reservations. A hold, not measured usage.}
+              pace_model: {type: string, enum: [steady, frontload, unrestricted]}
+              burst_ratio: {type: string}
+              starts_at: {type: string, format: date-time}
+              ends_at: {type: string, format: date-time}
+              provisional: {type: boolean, description: True when the window has no settled measurement, or any settled reservation recorded zero actual units.}
+              pace_cap: {type: [integer, 'null'], format: int64, description: Schedule capacity at the read. Independent of measured usage.}
+              headroom: {type: [integer, 'null'], format: int64, description: Schedule capacity minus measured used and reserved. Null when usage or the cap is unknown, or the difference overflows.}
+              hard_remaining: {type: [integer, 'null'], format: int64, description: Declared allowance minus measured used and reserved. Null when usage is unknown or the difference overflows.}
     AuthzPermission:
       type: object
       required: [key, group, description, risk, grantable_at, agent_grantable]
@@ -4942,6 +5206,118 @@ components:
         advertised_capabilities: {type: array, items: {type: string, enum: [inbox, status, steer, interrupt, stop]}}
         harness_session_ref: {type: string, minLength: 16, maxLength: 4096, writeOnly: true}
         worker_lease: {type: string, minLength: 32, maxLength: 256, writeOnly: true}
+    HarnessProcessOwnership:
+      type: object
+      description: Content-free current daemon ownership. Never sufficient by itself; the daemon verifies its live Process before signaling.
+      required: [daemon_id, generation, process_id, root_pid, group_id, started_at]
+      properties:
+        daemon_id: {type: string, maxLength: 128}
+        generation: {type: string, pattern: '^[0-9a-f]{32}$'}
+        process_id: {type: string, pattern: '^[0-9a-f]{32}$'}
+        root_pid: {type: integer, minimum: 2}
+        group_id: {type: integer, minimum: 2}
+        started_at: {type: string, format: date-time}
+    HarnessRecoveryControl:
+      type: object
+      required: [id, session_id, kind, state, sequence, outcome, reason, created_at, expected_ownership, expires_at]
+      properties:
+        id: {type: string, format: uuid}
+        session_id: {type: string, format: uuid}
+        kind: {type: string, enum: [force_stop]}
+        state: {type: string, enum: [pending, claimed, completed]}
+        sequence: {type: integer, format: int64}
+        outcome: {type: [string, 'null'], enum: [applied, rejected, null]}
+        reason: {type: [string, 'null'], description: Applied requires owned_group_signalled_root_exited; queued alone never proves exit.}
+        expected_ownership: {$ref: '#/components/schemas/HarnessProcessOwnership'}
+        expires_at: {type: string, format: date-time}
+        created_at: {type: string, format: date-time}
+        claimed_at: {type: [string, 'null'], format: date-time}
+        completed_at: {type: [string, 'null'], format: date-time}
+    HarnessRecovery:
+      type: object
+      required: [session_id, host, observed_revision, confirmation, process_state, process_scope, can_archive, force_stop_available, force_stop_reason]
+      properties:
+        session_id: {type: string, format: uuid}
+        host: {type: string}
+        display_label: {type: [string, 'null']}
+        observed_revision: {type: string}
+        confirmation: {type: string}
+        process_state: {type: string, enum: [unknown]}
+        process_scope: {type: string}
+        can_archive: {type: boolean}
+        archive_unavailable_reason: {type: string}
+        force_stop_available: {type: boolean}
+        force_stop_reason: {type: string}
+        force_confirmation: {type: string}
+        process_ownership: {$ref: '#/components/schemas/HarnessProcessOwnership'}
+    UsageTokenCount:
+      type: [integer, 'null']
+      format: int64
+      minimum: 0
+      maximum: 1000000000000
+      description: Null or omitted on input means unknown, not zero.
+    HarnessUsageReport:
+      type: object
+      additionalProperties: false
+      required: [report_id, model, sequence, provisional, billing_mode]
+      properties:
+        report_id: {type: string, format: uuid}
+        model: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9][A-Za-z0-9._:/-]*$'}
+        sequence: {type: integer, format: int64, minimum: 1, maximum: 1000000000000}
+        input_tokens: {$ref: '#/components/schemas/UsageTokenCount'}
+        output_tokens: {$ref: '#/components/schemas/UsageTokenCount'}
+        cached_input_tokens: {$ref: '#/components/schemas/UsageTokenCount'}
+        provisional: {type: boolean}
+        account_id: {type: [string, 'null'], format: uuid}
+        account_label: {type: [string, 'null'], minLength: 1, maxLength: 128, description: Public self-reported label; trimmed, valid Unicode without control characters.}
+        billing_mode: {type: string, enum: [unknown, api, subscription]}
+        subscription_label: {type: [string, 'null'], minLength: 1, maxLength: 120, description: Allowed only with billing_mode subscription. Public self-reported label, not a credential.}
+    SessionModelUsage:
+      type: object
+      required: [session_id, model, sequence, input_tokens, output_tokens, cached_input_tokens, provisional, price_version, estimated_cost_usd, cost_status, currency, account_id, account_label, billing_mode, subscription_label, metadata_source, reported_at]
+      properties:
+        session_id: {type: string, format: uuid}
+        model: {type: string, maxLength: 128}
+        sequence: {type: integer, format: int64}
+        input_tokens: {$ref: '#/components/schemas/UsageTokenCount'}
+        output_tokens: {$ref: '#/components/schemas/UsageTokenCount'}
+        cached_input_tokens: {$ref: '#/components/schemas/UsageTokenCount'}
+        provisional: {type: boolean, description: True when the reporter marks partial or any counter is unknown. Cost remains an estimate even when false.}
+        price_version: {type: [integer, 'null'], format: int64}
+        estimated_cost_usd: {type: [string, 'null'], pattern: '^[0-9]+\.[0-9]{12}$', description: 'Exact ((input-cached)*input_rate + cached*cached_rate + output*output_rate)/1000000, with no binary floats or intermediate rounding. Null if any counter or pricing is unknown; never actual billed cost.'}
+        cost_status: {type: string, enum: [estimated, unknown]}
+        currency: {type: string, const: USD}
+        account_id: {type: [string, 'null'], format: uuid}
+        account_label: {type: [string, 'null'], maxLength: 128}
+        billing_mode: {type: string, enum: [unknown, api, subscription]}
+        subscription_label: {type: [string, 'null']}
+        metadata_source: {type: string, const: reported}
+        reported_at: {type: string, format: date-time}
+    ModelPriceRate:
+      type: string
+      pattern: '^(?:(?:0|[1-9][0-9]{0,5})(?:\.[0-9]{1,6})?|1000000(?:\.0{1,6})?)$'
+      description: USD per million tokens, nonnegative and at most 1000000, at most six fractional places.
+    ModelPriceWrite:
+      type: object
+      additionalProperties: false
+      required: [model, version, input_usd_per_million, output_usd_per_million, cached_input_usd_per_million]
+      properties:
+        model: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9][A-Za-z0-9._:/-]*$'}
+        version: {type: integer, format: int64, minimum: 1, maximum: 1000000000000}
+        input_usd_per_million: {$ref: '#/components/schemas/ModelPriceRate'}
+        output_usd_per_million: {$ref: '#/components/schemas/ModelPriceRate'}
+        cached_input_usd_per_million: {$ref: '#/components/schemas/ModelPriceRate'}
+    ModelPrice:
+      type: object
+      required: [model, version, input_usd_per_million, output_usd_per_million, cached_input_usd_per_million, currency, created_at]
+      properties:
+        model: {type: string}
+        version: {type: integer, format: int64}
+        input_usd_per_million: {$ref: '#/components/schemas/ModelPriceRate'}
+        output_usd_per_million: {$ref: '#/components/schemas/ModelPriceRate'}
+        cached_input_usd_per_million: {$ref: '#/components/schemas/ModelPriceRate'}
+        currency: {type: string, const: USD}
+        created_at: {type: string, format: date-time}
     HarnessSession:
       type: object
       description: State evidence is populated on reads and omitted when unknown in mutation responses and event snapshots.
@@ -4957,7 +5333,7 @@ components:
         ticket_node_id: {type: [string, 'null'], format: uuid}
         work_order_id: {type: [string, 'null'], format: uuid}
         parent_harness_session_id: {type: [string, 'null'], format: uuid}
-        display_label: {type: [string, 'null'], maxLength: 128, description: Public per-session label; null for generations registered without a label.}
+        display_label: {type: [string, 'null'], maxLength: 128, description: Public current per-session label; null for unlabeled generations.}
         model: {$ref: '#/components/schemas/HarnessModel'}
         reasoning_effort: {$ref: '#/components/schemas/HarnessEffort'}
         account_label: {$ref: '#/components/schemas/HarnessAccountLabel'}
@@ -4968,6 +5344,7 @@ components:
         commits: {type: array, maxItems: 20, items: {$ref: '#/components/schemas/HarnessCommit'}}
         activity_note: {type: [string, 'null'], maxLength: 120, description: Current step reported by the worker.}
         activity_history: {type: array, description: Up to 20 changed notes, newest first; present on session detail., items: {$ref: '#/components/schemas/HarnessActivityNote'}}
+        metadata_history: {type: array, description: Up to 20 display label, model, and reasoning effort changes, newest first; present on session detail., items: {$ref: '#/components/schemas/HarnessMetadataChange'}}
         harness: {type: string, enum: [codex, claude, pi, cursor, grok]}
         host: {type: string}
         management_mode: {type: string, enum: [managed, unmanaged]}
@@ -4981,12 +5358,24 @@ components:
         heartbeat_at: {type: [string, 'null'], format: date-time}
         stopped_at: {type: [string, 'null'], format: date-time}
         stop_reason: {type: [string, 'null']}
+        process_ownership: {$ref: '#/components/schemas/HarnessProcessOwnership'}
+        process_observed_at: {type: [string, 'null'], format: date-time}
+        archived_at: {type: [string, 'null'], format: date-time}
+        recovery_process_state: {type: [string, 'null'], enum: [unknown, null]}
         created_at: {type: string, format: date-time}
     HarnessActivityNote:
       type: object
       required: [note, at]
       properties:
         note: {type: string, maxLength: 120}
+        at: {type: string, format: date-time}
+    HarnessMetadataChange:
+      type: object
+      required: [field, previous_value, value, at]
+      properties:
+        field: {type: string, enum: [display_label, model, reasoning_effort]}
+        previous_value: {type: [string, 'null']}
+        value: {type: [string, 'null']}
         at: {type: string, format: date-time}
     HarnessModel: {type: [string, 'null'], maxLength: 120, description: Optional trimmed plain text; control characters stripped.}
     HarnessEffort: {type: [string, 'null'], maxLength: 40, description: Optional trimmed plain text; control characters stripped.}
