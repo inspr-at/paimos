@@ -124,9 +124,9 @@ func (m ServiceManager) runner() Executor {
 }
 func (m ServiceManager) control(args ...string) Command {
 	if m.Platform.OS == "darwin" {
-		return Command{Path: "/bin/launchctl", Args: args}
+		return Command{Path: "/bin/launchctl", Args: args, DiscardOutput: true}
 	}
-	return Command{Path: m.Systemctl, Args: append([]string{"--user"}, args...)}
+	return Command{Path: m.Systemctl, Args: append([]string{"--user"}, args...), DiscardOutput: true}
 }
 
 // Preflight never adopts a PID, process name or unrecorded loaded service.

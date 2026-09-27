@@ -125,3 +125,22 @@ func TestDaemonLockRejectsSymlinkAndHardlink(t *testing.T) {
 		t.Fatal("unrelated inode modified")
 	}
 }
+
+func TestApprovedDeadlineDoesNotWaitForTelemetryLock(t *testing.T) {
+	s, _, p := testSupervisor(t)
+	entry := &owned{}
+	entry.mu.Lock() // model a stalled journal/report operation
+	done := make(chan struct{})
+	go s.runDeadline(entry, p, done, 20*time.Millisecond)
+	select {
+	case <-p.stopped:
+	case <-time.After(time.Second):
+		entry.mu.Unlock()
+		t.Fatal("API lock extended approved execution deadline")
+	}
+	if !entry.deadlineExpired.Load() {
+		entry.mu.Unlock()
+		t.Fatal("deadline lacked truthful stop attribution")
+	}
+	entry.mu.Unlock()
+}

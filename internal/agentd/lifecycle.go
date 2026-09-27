@@ -23,6 +23,8 @@ type DrainRequest struct {
 // LifecycleStatus does not conflate telemetry acceptance with observed exit.
 // Only a drained status permits removing a pairing-owned service or credential.
 type LifecycleStatus struct {
+	LoginRequired           bool              `json:"login_required"`
+	VerificationUnavailable []string          `json:"verification_unavailable_account_ids"`
 	Ready                   bool              `json:"ready"`
 	DaemonID                string            `json:"daemon_id"`
 	Generation              string            `json:"generation"`
@@ -132,8 +134,16 @@ func (s *Supervisor) Lifecycle(accountID string) LifecycleStatus {
 		fenced, e := s.readFence(a.ID)
 		if fenced || e != nil {
 			v.FencedAccountIDs = append(v.FencedAccountIDs, a.ID)
-		} else if !s.probedAccounts[a.ID] || s.blockedAccounts[a.ID] {
-			v.Ready = false
+		} else {
+			if !s.probedAccounts[a.ID] || s.blockedAccounts[a.ID] {
+				v.Ready = false
+			}
+			if s.loginRequired[a.ID] {
+				v.LoginRequired = true
+			}
+			if adapter, ok := s.adapters[a.Harness].(VerificationAdapter); !ok || !adapter.VerificationSupported() {
+				v.VerificationUnavailable = append(v.VerificationUnavailable, a.ID)
+			}
 		}
 	}
 	entries := make([]*owned, 0, len(s.runs))

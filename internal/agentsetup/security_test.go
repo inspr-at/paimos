@@ -175,3 +175,100 @@ func TestAddHarnessPendingBindingCannotMoveComputer(t *testing.T) {
 		t.Fatal("safe progress contained capability")
 	}
 }
+
+func TestAddHarnessApprovalReusesDaemonAndNeverRotatesAuthority(t *testing.T) {
+	e, a, _, o, x := engineFixture(t)
+	o.StartService = true
+	approveFixture(t, e, a, o)
+	before, err := e.load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidate := Candidate{Harness: "cursor", Label: "selected@example.test", Identity: "42", Path: o.Candidates[0].Path, Login: "signed_in", Version: "1.0.0"}
+	a.approved = false
+	p, err := e.AddHarness(t.Context(), []Candidate{candidate})
+	if err != nil || p.Stage != "awaiting_approval" {
+		t.Fatal("add request failed")
+	}
+	pending, err := e.load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pending.Device == before.Device || pending.Request.RequestID == before.Request.RequestID || pending.Runtime != before.Runtime || pending.Lifecycle != before.Lifecycle || pending.LifecycleRequestID != before.LifecycleRequestID {
+		t.Fatal("Add harness authority binding changed")
+	}
+
+	// Poll a still-pending request, then let the original daemon reconcile.
+	pending.NextPoll = e.now()
+	if err = e.save(pending, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = e.Step(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if err = e.SyncFences(t.Context()); err != nil {
+		t.Fatal("pending Add harness disrupted original computer")
+	}
+	if permitted, err := e.DispatchPermitted(); err != nil || !permitted {
+		t.Fatal("healthy shared daemon was disabled")
+	}
+	pending, err = e.load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.approved = true
+	pending.NextPoll = e.now()
+	if err = e.save(pending, false); err != nil {
+		t.Fatal(err)
+	}
+	if p, err = e.Step(t.Context()); err != nil || p.Stage != "connected" {
+		t.Fatal("Add harness did not provision same computer")
+	}
+	config, _, err := ReadRuntime(e.Store.Path())
+	if err != nil || len(config.Accounts) != 2 || config.ComputerID != testComputer {
+		t.Fatal("existing enrollment replaced")
+	}
+	if _, err = e.Step(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	starts := 0
+	for _, c := range x.calls {
+		if len(c.Args) > 0 && c.Args[0] == "bootstrap" {
+			starts++
+		}
+	}
+	if starts != 1 {
+		t.Fatal("shared daemon restarted for Add harness")
+	}
+}
+
+func TestSetupRefusesExistingUnrelatedRuntimeFile(t *testing.T) {
+	e, a, _, o, _ := engineFixture(t)
+	if err := e.Store.Write(RuntimeName, []byte("unrelated"), true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.Begin(t.Context(), o); !errors.Is(err, ErrCollision) {
+		t.Fatal("adopted unrelated state")
+	}
+	raw, _ := e.Store.Read(RuntimeName, 4096)
+	if string(raw) != "unrelated" || a.createCount != 0 {
+		t.Fatal("unrelated state or server changed")
+	}
+}
+
+func TestTypedProgressDistinguishesMissingLoginAndUnsafeVerification(t *testing.T) {
+	e, a, l, o, _ := engineFixture(t)
+	approveFixture(t, e, a, o)
+	l.states[""] = LocalStatus{DaemonID: "paired-daemon", State: "drained", LoginRequired: true}
+	p, err := e.Status(t.Context())
+	if err != nil || p.Stage != "login_required" {
+		t.Fatal("missing login hidden")
+	}
+	a.view.Enrollments[0].VerificationRunID = otherAccount
+	a.view.Enrollments[0].VerificationState = "queued"
+	l.states[""] = LocalStatus{DaemonID: "paired-daemon", State: "drained", Ready: true, VerificationUnavailable: []string{testAccount}}
+	p, err = e.Status(t.Context())
+	if err != nil || p.Stage != "blocked" {
+		t.Fatal("unsafe adapter presented as verifying")
+	}
+}

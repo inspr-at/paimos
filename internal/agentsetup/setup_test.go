@@ -21,6 +21,7 @@ const testAccount = "44444444-4444-4444-8444-444444444444"
 const otherAccount = "55555555-5555-4555-8555-555555555555"
 
 type setupAPI struct {
+	prior           View
 	request         DeviceRequest
 	createCount     int
 	lostCreate      bool
@@ -37,7 +38,10 @@ func (*setupAPI) Guide(context.Context) (Guide, error) {
 func (a *setupAPI) Create(_ context.Context, r DeviceRequest) (DeviceResponse, error) {
 	a.createCount++
 	if a.request.RequestID != "" && (a.request.RequestID != r.RequestID || a.request.DeviceHash != r.DeviceHash || a.request.RuntimeHash != r.RuntimeHash || a.request.LifecycleHash != r.LifecycleHash) {
-		return DeviceResponse{}, errors.New("identity changed")
+		if r.ExistingComputerID != testComputer || Hash([]byte(r.ExistingProof)) != a.request.LifecycleHash || r.RuntimeHash != a.request.RuntimeHash || r.LifecycleHash != a.request.LifecycleHash {
+			return DeviceResponse{}, errors.New("identity changed")
+		}
+		a.prior = a.view
 	}
 	a.request = r
 	if a.lostCreate && a.createCount == 1 {
@@ -50,6 +54,7 @@ func (a *setupAPI) Redeem(_ context.Context, r ProofRequest) (View, error) {
 		return View{}, errors.New("proof mismatch")
 	}
 	v := View{RequestID: a.request.RequestID, TenantID: testTenant, State: "pending", Digest: Hash([]byte("approved details")), ComputerName: a.request.ComputerName, Platform: a.request.Platform, Arch: a.request.Arch, Workspace: a.request.Workspace, Requested: a.request.Accounts, Capabilities: a.request.Capabilities}
+	v.ExistingComputerID = a.request.ExistingComputerID
 	if a.approved {
 		v.State = "redeemed"
 		v.ComputerID = testComputer
@@ -59,9 +64,10 @@ func (a *setupAPI) Redeem(_ context.Context, r ProofRequest) (View, error) {
 		v.RuntimePrefix = "test"
 		v.Revision = 1
 		v.Verification = Verification{Mode: "connect_only"}
+		v.Enrollments = append([]Enrollment(nil), a.prior.Enrollments...)
 		for i, c := range a.request.Accounts {
 			id := testAccount
-			if i > 0 {
+			if i > 0 || a.request.ExistingComputerID != "" {
 				id = otherAccount
 			}
 			v.Enrollments = append(v.Enrollments, Enrollment{AccountID: id, AccountKey: c.Key, Harness: c.Harness, Label: c.Label, State: "connected", VerificationState: "not_selected"})
@@ -80,7 +86,19 @@ func (a *setupAPI) Reconcile(_ context.Context, p ProofRequest) (View, error) {
 	a.cleaned = append([]string(nil), p.Cleaned...)
 	a.computerCleaned = p.ComputerCleaned
 	v := a.view
+	if v.ComputerID == "" && a.prior.ComputerID != "" {
+		v = a.prior
+	}
 	v.RuntimePrefix = ""
+	v.Enrollments = append([]Enrollment(nil), v.Enrollments...)
+	for i := range v.Enrollments {
+		for _, id := range p.Cleaned {
+			if v.Enrollments[i].AccountID == id {
+				v.Enrollments[i].Cleanup = "confirmed"
+			}
+		}
+	}
+	a.view.Enrollments = append([]Enrollment(nil), v.Enrollments...)
 	if p.ComputerCleaned {
 		v.Cleanup = "confirmed"
 		v.Processes = "drained"
@@ -133,8 +151,12 @@ type fixtureExecutor struct {
 
 func (x *fixtureExecutor) Run(_ context.Context, c Command) ([]byte, error) {
 	x.calls = append(x.calls, c)
-	if len(c.Args)>0 && c.Args[0]=="bootstrap" { x.active=true }
-	if len(c.Args)>0 && c.Args[0]=="bootout" { x.active=false }
+	if len(c.Args) > 0 && c.Args[0] == "bootstrap" {
+		x.active = true
+	}
+	if len(c.Args) > 0 && c.Args[0] == "bootout" {
+		x.active = false
+	}
 	if c.Path == "/bin/ps" {
 		return []byte(fmt.Sprintf("%d %s\n900 /other/classic/paimos-agentd\n", os.Getpid(), x.self)), nil
 	}
