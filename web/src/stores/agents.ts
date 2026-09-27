@@ -261,6 +261,7 @@ export const useAgents = defineStore('agents', () => {
       if (current.state === 'completed') {
         const what = current.kind === 'stop' ? 'stop' : 'interrupt'
         if (current.outcome === 'applied') toast(`${name} applied the ${what}.`)
+        else if (current.reason === 'graceful_stop_timeout') toast(`${name} did not exit after normal stop. Open Recover to review a force stop.`, { tone: 'error' })
         else toast(`${name} refused the ${what}${current.reason ? `: ${current.reason}` : '.'}`, { tone: 'error' })
         void refreshSessions()
         return

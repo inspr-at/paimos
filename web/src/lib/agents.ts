@@ -8,6 +8,7 @@ import type { LivePage } from './liveAgents.ts'
 export type Harness = 'codex' | 'claude' | 'pi' | 'cursor' | 'grok'
 export interface HarnessSession {
   id: string; project_id: string; agent_principal_id: string
+  archived_at?: string | null; recovery_process_state?: 'unknown' | null
   display_label?: string | null
   model?: string | null; reasoning_effort?: string | null; account_label?: string | null; harness_version?: string | null
   brief?: string | null; worktree?: string | null; branch?: string | null; commits?: { sha: string; subject: string }[]
