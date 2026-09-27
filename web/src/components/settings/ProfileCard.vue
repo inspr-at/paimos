@@ -296,6 +296,7 @@ const name = computed(() => [p.value?.first_name, p.value?.last_name].filter(Boo
 @media (max-width: 900px) { .profile { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 600px) {
   .fields { grid-template-columns: minmax(0, 1fr); }
+  .note:empty { display: none; }
   .input-wrap .field, .pick, .static, .sk-field { height: 44px; min-height: 44px; }
   .sk-button { height: 40px; }
   .pick { height: auto; padding-block: 8px; flex-wrap: wrap; }

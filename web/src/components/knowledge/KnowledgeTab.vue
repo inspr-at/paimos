@@ -432,7 +432,7 @@ const who = (item: KnowledgeItem) => item.imported ? 'imported' : item.updated_b
 .k-command .tok { white-space: nowrap; }
 
 /* ---------- Groups and rows ---------- */
-.k-list { display: grid; gap: 18px; min-width: 0; container: klist / inline-size; }
+.k-list { display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; min-width: 0; container: klist / inline-size; }
 .k-list.stale .k-group { opacity: .62; }
 @media (prefers-reduced-motion: no-preference) { .k-group { transition: opacity .12s ease; } }
 .k-group { overflow: clip; }

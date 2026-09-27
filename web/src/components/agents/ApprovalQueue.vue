@@ -264,7 +264,7 @@ defineExpose({ begin, cancel, isOpen: () => !!open.value })
 .res-label { color: var(--ink); }
 .why { font-size: 13px; color: var(--ink-2); line-height: 1.45; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; }
 .body-text { -webkit-line-clamp: 3; line-clamp: 3; color: var(--ink); }
-.row-actions { display: flex; align-items: center; gap: 6px; align-self: center; }
+.row-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; align-self: center; min-width: 0; max-width: 100%; }
 .decision { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; margin-top: 8px; }
 .decision label { font-size: 12px; font-weight: 600; color: var(--ink-2); }
 .decision textarea { width: 100%; min-height: 58px; resize: vertical; padding: 8px 10px; font: inherit; font-size: 13.5px; line-height: 1.4; }

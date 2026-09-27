@@ -452,7 +452,8 @@ watch(openId, id => { if (id) store.cursor = id })
   .list-search { flex: 1 1 100%; width: auto; }
   .list-search .field { height: 44px; font-size: 16px; }
   .slash { display: none; }
-  .facets { flex: 1 1 100%; row-gap: 20px; }
+  .facets { flex: 1 1 100%; row-gap: 8px; }
+  .facets :deep(.btn) { height: 44px; }
   .keys-hint { display: none; }
   .state { padding: 32px 18px; }
 }

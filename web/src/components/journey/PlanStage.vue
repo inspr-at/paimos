@@ -143,9 +143,13 @@ async function addTicket() {
 <style scoped>
 .list-skel { height: 560px; border-radius: 10px; }
 .add-row { display: flex; gap: 8px; }
-.add-row .field { height: 36px; }
+.add-row .field, .add-row .btn { height: 36px; }
 .add-row .feature { width: 220px; flex-shrink: 0; }
 @media (max-width: 720px) { .add-row { flex-wrap: wrap; } .add-row .feature { width: 100%; } }
+@media (max-width: 600px) {
+  .add-row .field, .add-row .btn { height: 44px; }
+  .add-row .btn { flex-basis: 100%; }
+}
 .saving { font-size: 12px; color: var(--ink-3); }
 .linkish { display: inline-flex; align-items: center; gap: 4px; padding: 0; border: 0; background: transparent; color: var(--teal-ink); font-weight: 600; cursor: pointer; }
 .linkish:focus-visible { border-radius: 4px; box-shadow: var(--focus-ring); }

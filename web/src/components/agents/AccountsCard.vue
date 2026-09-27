@@ -73,7 +73,7 @@ const stateLabel: Record<AgentAccount['state'], string> = { available: 'Availabl
 .list { margin: 0; padding: 0 8px 8px; list-style: none; display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; }
 .account { padding: 10px 8px 10px; border-radius: 10px; }
 .account + .account { box-shadow: inset 0 1px 0 var(--line); border-radius: 0; }
-.account.unavailable { opacity: .6; }
+.account.unavailable .label { color: var(--ink-2); }
 .top { display: flex; align-items: center; gap: 8px; min-height: 24px; }
 .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); flex-shrink: 0; }
 .dot.draining { background: var(--gold); }
