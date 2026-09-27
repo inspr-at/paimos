@@ -106,6 +106,7 @@ func attachWindows(ctx context.Context, tx pgx.Tx, accounts []Account) ([]Accoun
 		             AND r.state = 'settled' AND r.actual_units = 0
 		       ) AS provisional
 		FROM account_allowance_windows w
+		WHERE NOT w.pairing_verification
 		ORDER BY w.account_id, w.starts_at, w.id`)
 	if err != nil {
 		return nil, err

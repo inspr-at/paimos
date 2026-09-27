@@ -100,6 +100,32 @@ func TestPairingVerificationAndOngoingBudgetsAreIsolated(t *testing.T) {
 	if !unexpired {
 		t.Fatal("test must route ongoing before verification expiry")
 	}
+	// The launcher catalog and normal account health must use the same ordinary
+	// budgets as managed routing, not the exhausted internal verification cap.
+	var catalog agentaccounts.Catalog
+	decodeResult(t, f.call("GET", "/api/agent-accounts/catalog", nil, true, "", 200), &catalog)
+	found := false
+	for _, host := range catalog.Hosts {
+		for _, harness := range host.Harnesses {
+			for _, account := range harness.Accounts {
+				if account.ID != e.AccountID {
+					continue
+				}
+				found = true
+				if !account.Available || len(account.Windows) != 2 {
+					t.Fatal("verification cap blocked the regular-work launcher catalog")
+				}
+				for _, window := range account.Windows {
+					if window.ID == verificationWindow {
+						t.Fatal("internal verification window leaked into ongoing account budgets")
+					}
+				}
+			}
+		}
+	}
+	if !found {
+		t.Fatal("paired account missing from launcher catalog")
+	}
 	ongoing := routeWithUnits(t, f, v, e, key, managed.ID, map[string]int{"requests": 2, "tokens": 3}, 200)
 	if len(ongoing.Reservations) != 2 {
 		t.Fatal("ordinary additive windows were dropped")
