@@ -19,7 +19,7 @@ export const PROJECT = 'p-pharos'
 export type JourneyStart = 'inspire' | 'shape' | 'requirements' | 'open' | 'plan' | 'build' | 'mark' | 'deploy' | 'live'
 export interface JourneyWorld {
   journey: {
-    project_node_id: string; profile: string; revision: number; stage: Stage; next_action: { key: string; label: string; stage: Stage; available: boolean; reason?: string; approval_request_id: string | null }
+    project_node_id: string; profile: string; revision: number; stage: Stage; next_action: { key: string; renewal_action?: 'renew_candidate' | 'renew_deploy'; label: string; stage: Stage; available: boolean; reason?: string; approval_request_id: string | null }
     requirements_revision: number; current_release_id: string | null; stages: { key: Stage; state: string; gate_approval_id: string | null; gate_live?: boolean; handoff_id: string | null; gate_offer_id?: string; gate_offer_state?: string; gate_offer_expires_at?: string }[]
     requirements_digest_sha256: string; requirements_approval_scope: string
     launch_readiness: { can_admit: boolean; reason: string }
@@ -223,7 +223,7 @@ export async function mockJourney(page: Page, world: JourneyWorld, options: { fa
     if (what === 'journey/actions') {
       if (body.expected_revision !== world.journey.revision) return route.fulfill({ status: 409, json: { error: 'journey revision is stale' } })
       const next = world.journey.next_action
-      if (body.action !== next.key && !(next.key === 'decide' && ['go', 'reduce_scope', 'park', 'drop'].includes(String(body.action))) && body.action !== 'reject_candidate') return route.fulfill({ status: 409, json: { error: 'that action is not available' } })
+      if (body.action !== (next.renewal_action ?? next.key) && !(next.key === 'decide' && ['go', 'reduce_scope', 'park', 'drop'].includes(String(body.action))) && body.action !== 'reject_candidate') return route.fulfill({ status: 409, json: { error: 'that action is not available' } })
       const gate = world.approvals.find(a => a.id === body.approval_request_id)
       if (world.journey.stages.some(s => s.gate_approval_id && s.gate_approval_id === body.approval_request_id)) return route.fulfill({ status: 409, json: { error: 'approval already consumed' } })
       if (!['confirm_brief', 'plan_next_release', 'open_first_release'].includes(next.key) && (!gate || gate.decision !== 'approved')) return route.fulfill({ status: 403, json: { error: 'approval does not grant this action' } })
@@ -232,7 +232,12 @@ export async function mockJourney(page: Page, world: JourneyWorld, options: { fa
         world.walkers['r-2'].state = 'building'
         world.journey.stage = 'build'; world.journey.stages = rail('build')
         world.journey.next_action = { key: 'wait_for_build', label: 'Building', stage: 'build', available: false, reason: 'The build is still in progress.', approval_request_id: null }
-      } else if (body.action === 'retry_deploy') {
+      } else if (body.action === 'renew_candidate') {
+        const stage = world.journey.stages.find(s => s.key === 'build')!
+        stage.gate_approval_id = gate!.id; stage.gate_live = true
+        delete stage.gate_offer_id; delete stage.gate_offer_state; delete stage.gate_offer_expires_at
+        world.journey.next_action = { key: 'approve_deploy', renewal_action: 'renew_deploy', label: 'Renew deployment approval', stage: 'deploy', available: false, reason: 'The standing deployment gate is no longer live. A fresh approval is required.', approval_request_id: 'fresh-deploy' }
+      } else if (body.action === 'retry_deploy' || body.action === 'renew_deploy') {
         world.walkers['r-2'].state = 'deploying'
         const stage = world.journey.stages.find(s => s.key === 'deploy')!
         stage.gate_approval_id = gate!.id; stage.gate_live = true

@@ -19,6 +19,19 @@ Project sections have their own URLs: `/p/KEY/tickets`, `/p/KEY/journey`, and
 so its ticket links need no section query. Existing `?view=full` ticket links
 still open the full-page ticket at the same address.
 
+If a standing candidate or deployment gate expires or is revoked before
+deployment finishes, Journey offers renewal on the Deploy stage. An agent
+requests a fresh release-bound approval; its person decider applies it with
+`renew_candidate` or `renew_deploy` through the journey actions API, including
+the current `release_id` and `expected_revision`. Candidate renewal precedes
+deployment renewal and preserves enterprise reviewer independence. Each renewal
+appends gate history and advances the journey revision without changing the
+release identity. Existing handoffs lose authority; terminal evidence from
+before either renewal is historical, so rerun preparation after both renewals,
+then request a new deployment. Journey contract `journey/1.2` adds the optional
+`next_action.renewal_action`; clients must use it when present. Existing action
+keys and reporter major versions remain unchanged.
+
 Wide project headers can show an ambient ticket graph (Display → Graph in
 project header). It uses a tilted 3D cloud with an optional elliptic force bias,
 fits the densest 85% of nodes by height, and fades out inside the empty space

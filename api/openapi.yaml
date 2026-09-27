@@ -2737,6 +2737,31 @@ paths:
         '200': {description: Safe handoff projection, headers: {Aeon-Contract: {$ref: '#/components/headers/StageHandoffsContract'}}, content: {application/json: {schema: {$ref: '#/components/schemas/StageHandoff'}}}}
         '403': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
+  /projects/{projectId}/releases/{releaseId}/candidate-artifact:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: releaseId, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: getNativeCandidateArtifact
+      summary: Read a release's immutable candidate artifact and version pin
+      description: Requires stage_handoffs.read in the project. Registration is null before any built artifact is recorded. Recorded metadata is historical evidence, never launch authority.
+      security: *auth
+      responses:
+        '200': {description: Release identity and recorded candidate, content: {application/json: {schema: {$ref: '#/components/schemas/NativeCandidateArtifact'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+    put:
+      operationId: registerNativeCandidateArtifact
+      summary: Pin a built artifact for a current native deployment handoff
+      description: Requires stage_handoffs.write in the project and the handoff requester or stage_handoffs.decide in that project. Fences the exact release, handoff, attempt, epoch and journey revision. Requires live candidate and deploy gates. Pins a null release version without changing journey or release revision; existing version and full artifact identity across attempts must match. Exact same-principal receipt replay has no side effects, including after authority closes. Divergent replay conflicts. Registration records provenance without approving gates, admitting launch or deploying a host.
+      security: *auth
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/NativeCandidateArtifactWrite'}}}}
+      responses:
+        '200': {description: Recorded candidate or exact replay, content: {application/json: {schema: {$ref: '#/components/schemas/NativeCandidateArtifact'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
   /stage-handoffs/{handoffId}/classic-batch-alias:
     post:
       operationId: bindClassicBatchAlias
@@ -3714,7 +3739,7 @@ components:
     StageEvidenceContract: {description: Stage evidence response contract, schema: {type: string, enum: ['stage-evidence/1.0']}}
     StageResultContract: {description: Stage result response contract, schema: {type: string, enum: ['stage-result/1.0']}}
     StageLaunchContract: {description: Stage launch response contract, schema: {type: string, enum: ['stage-launch/1.0']}}
-    JourneyContract: {description: Journey read response contract, schema: {type: string, enum: ['journey/1.1']}}
+    JourneyContract: {description: Journey read response contract, schema: {type: string, enum: ['journey/1.2']}}
     MeContract: {description: Acting principal response contract, schema: {type: string, enum: ['me/1.0']}}
     BaselineBatchesContract: {description: Classic-compatible baseline batch response contract, schema: {type: string, enum: ['baseline-batches/1.0']}}
     ApprovalsContract: {description: Approval response contract, schema: {type: string, enum: ['approvals/1.0']}}
@@ -4170,6 +4195,7 @@ components:
       required: [key, label, stage, available]
       properties:
         key: {type: string, enum: [continue_intake, confirm_brief, decide, reopen, approve_requirements, open_first_release, start_build, wait_for_build, mark_candidate, approve_candidate, approve_deploy, retry_deploy, approve_permit, plan_next_release]}
+        renewal_action: {type: string, enum: [renew_candidate, renew_deploy], description: Explicit action for replacing a nonlive standing gate. Requires the exact current release_id and a fresh approved request. Advances the journey revision and requires fresh preparation and deployment evidence. Older clients using key alone fail closed.}
         label: {type: string}
         stage: {type: string, enum: [inspire, shape, requirements, plan, build, deploy, access, live]}
         available: {type: boolean}
@@ -4187,7 +4213,7 @@ components:
       additionalProperties: false
       required: [action, expected_revision, idempotency_key]
       properties:
-        action: {type: string, enum: [confirm_brief, go, reduce_scope, park, drop, reopen, open_first_release, start_build, mark_candidate, approve_candidate, reject_candidate, approve_deploy, retry_deploy, approve_permit, plan_next_release]}
+        action: {type: string, enum: [confirm_brief, go, reduce_scope, park, drop, reopen, open_first_release, start_build, mark_candidate, approve_candidate, reject_candidate, approve_deploy, renew_candidate, renew_deploy, retry_deploy, approve_permit, plan_next_release]}
         expected_revision: {type: integer, minimum: 1}
         idempotency_key: {type: string, minLength: 1, maxLength: 128}
         approval_request_id: {type: string, format: uuid}
@@ -4488,6 +4514,44 @@ components:
       allOf:
         - {$ref: '#/components/schemas/StageEvidenceWrite'}
         - {type: object, required: [handoff_id, received_at], properties: {handoff_id: {type: string, format: uuid}, received_at: {type: string, format: date-time}}}
+    NativeCandidateArtifactWrite:
+      type: object
+      additionalProperties: false
+      required: [handoff_id, expected_attempt, expected_authority_epoch, expected_journey_revision, idempotency_key, artifact, qa_digest]
+      properties:
+        handoff_id: {type: string, format: uuid}
+        expected_attempt: {type: integer, minimum: 1}
+        expected_authority_epoch: {type: integer, minimum: 1}
+        expected_journey_revision: {type: integer, minimum: 1}
+        idempotency_key: {type: string, minLength: 8, maxLength: 80, pattern: '^[A-Za-z0-9][A-Za-z0-9._:/-]{7,79}$'}
+        artifact: {$ref: '#/components/schemas/StageArtifact'}
+        qa_digest: {type: string, pattern: '^[0-9a-f]{64}$'}
+    NativeCandidateArtifact:
+      type: object
+      additionalProperties: false
+      required: [project_node_id, release_node_id, version_scheme, version, release_sequence, registration]
+      properties:
+        project_node_id: {type: string, format: uuid}
+        release_node_id: {type: string, format: uuid}
+        version_scheme: {type: [string, 'null'], enum: [legacy, inspr-calendar-v1, inspr-calendar-v2, null]}
+        version: {type: [string, 'null']}
+        release_sequence: {type: integer, minimum: 1}
+        registration:
+          oneOf:
+            - {type: 'null'}
+            - {$ref: '#/components/schemas/NativeCandidateRegistration'}
+    NativeCandidateRegistration:
+      type: object
+      additionalProperties: false
+      required: [handoff_id, attempt, authority_epoch, journey_revision, artifact, qa_digest, recorded_at]
+      properties:
+        handoff_id: {type: string, format: uuid}
+        attempt: {type: integer, minimum: 1}
+        authority_epoch: {type: integer, minimum: 1}
+        journey_revision: {type: integer, minimum: 1}
+        artifact: {$ref: '#/components/schemas/StageArtifact'}
+        qa_digest: {type: string, pattern: '^[0-9a-f]{64}$'}
+        recorded_at: {type: string, format: date-time}
     StageArtifact:
       type: object
       additionalProperties: false

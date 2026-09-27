@@ -230,6 +230,15 @@ func (m *Module) reportClassicBuilt(w http.ResponseWriter, r *http.Request) {
 			if scheme != nil && (*scheme != in.VersionScheme || version == nil || *version != in.Version) || sequence != in.ReleaseSequence {
 				return fail(409, "built artifact does not match release version")
 			}
+			configDigest, _ := classicDigest(in.OCIConfigDigest)
+			manifestDigest, _ := classicDigest(in.ReleaseManifestDigest)
+			if err := pinReleaseArtifact(r.Context(), tx, h.ReleaseNodeID, Artifact{
+				VersionScheme: in.VersionScheme, Version: in.Version, ReleaseChannel: in.ReleaseChannel,
+				ReleaseSequence: in.ReleaseSequence, DigestSHA256: configDigest, CommitDigest: in.Commit,
+				ManifestCoordinate: in.ReleaseManifestCoordinate, ManifestDigestSHA256: manifestDigest,
+			}); err != nil {
+				return err
+			}
 			raw, _ := json.Marshal(in)
 			config, _ := classicDigest(in.OCIConfigDigest)
 			manifest, _ := classicDigest(in.ReleaseManifestDigest)

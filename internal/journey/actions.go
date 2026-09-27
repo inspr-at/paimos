@@ -20,6 +20,7 @@ var actionNames = map[string]bool{
 	"reopen": true, "start_build": true, "approve_candidate": true, "reject_candidate": true,
 	"open_first_release": true, "mark_candidate": true,
 	"approve_deploy": true, "retry_deploy": true, "approve_permit": true, "plan_next_release": true,
+	"renew_candidate": true, "renew_deploy": true,
 }
 
 func (m *Module) read(ctx context.Context, p tenant.Principal, projectID string) (Journey, error) {
@@ -140,6 +141,15 @@ func (m *Module) actWithMode(ctx context.Context, p tenant.Principal, projectID 
 			if prev != hash {
 				return fail(http.StatusConflict, "idempotency key was used for a different action")
 			}
+			if in.Action == actionRenewCandidate || in.Action == actionRenewDeploy {
+				approval, err := loadApproval(ctx, tx, ptrVal(in.ApprovalRequestID))
+				if err != nil {
+					return err
+				}
+				if approval.DecidedBy != p.ID {
+					return fail(http.StatusForbidden, "approval was decided by someone else")
+				}
+			}
 			f, err := loadFacts(ctx, tx, projectID, false)
 			if err != nil {
 				return err
@@ -161,7 +171,11 @@ func (m *Module) actWithMode(ctx context.Context, p tenant.Principal, projectID 
 			return err
 		}
 		view := derive(before)
-		if !actionMatches(view.NextAction.Key, in.Action) {
+		nextAction := view.NextAction.Key
+		if view.NextAction.RenewalAction != "" {
+			nextAction = view.NextAction.RenewalAction
+		}
+		if !actionMatches(nextAction, in.Action) {
 			return fail(http.StatusConflict, "that action is not available")
 		}
 		if scope, resource, gated := gateTarget(before, in.Action); gated && ptrVal(in.ApprovalRequestID) != "" {
@@ -270,12 +284,12 @@ func gateTarget(f facts, action string) (string, string, bool) {
 			return "", "", false
 		}
 		return ScopeBuild, f.Release.ID, true
-	case "approve_candidate", "reject_candidate":
+	case "approve_candidate", "reject_candidate", "renew_candidate":
 		if f.Release == nil {
 			return "", "", false
 		}
 		return ScopeCandidate, f.Release.ID, true
-	case "approve_deploy", "retry_deploy":
+	case "approve_deploy", "retry_deploy", "renew_deploy":
 		if f.Release == nil {
 			return "", "", false
 		}
@@ -293,6 +307,9 @@ func gateTarget(f facts, action string) (string, string, bool) {
 func pinRelease(f facts, in actionWrite) error {
 	id := ptrVal(in.ReleaseID)
 	if id == "" {
+		if in.Action == actionRenewCandidate || in.Action == actionRenewDeploy {
+			return fail(http.StatusBadRequest, "release_id is required for gate renewal")
+		}
 		return nil
 	}
 	switch in.Action {
@@ -326,6 +343,8 @@ func applyAction(ctx context.Context, tx pgx.Tx, p tenant.Principal, f facts, in
 		return "", nil, decideCandidate(ctx, tx, p, f, in, "building")
 	case "approve_deploy":
 		return "", nil, approveDeploy(ctx, tx, p, f, in)
+	case actionRenewCandidate, actionRenewDeploy:
+		return "", nil, renewGate(ctx, tx, p, f, in)
 	case "retry_deploy":
 		return "", nil, retryDeploy(ctx, tx, p, f, in)
 	case "approve_permit":
@@ -514,15 +533,9 @@ func decideCandidate(ctx context.Context, tx pgx.Tx, p tenant.Principal, f facts
 	if err := requireGate(ctx, tx, p.ID, ptrVal(in.ApprovalRequestID), ScopeCandidate, f.Release.ID); err != nil {
 		return err
 	}
-	if in.Action == "approve_candidate" && f.Profile == "enterprise" {
-		if f.BuildStarter == "" || f.BriefAuthor == "" {
-			return fail(http.StatusForbidden, reasonReviewerUnknown)
-		}
-		if f.DraftCount > 0 {
-			return fail(http.StatusForbidden, reasonDrafts)
-		}
-		if samePerson(p.ID, f.BuildStarter, f.BriefAuthor, f.RequirementsDecider) {
-			return fail(http.StatusForbidden, reasonReviewer)
+	if in.Action == "approve_candidate" {
+		if err := requireCandidateReviewer(p.ID, f); err != nil {
+			return err
 		}
 	}
 	if in.Action == "reject_candidate" {
@@ -544,6 +557,60 @@ func decideCandidate(ctx context.Context, tx pgx.Tx, p tenant.Principal, f facts
 		return err
 	}
 	return insertGate(ctx, tx, p.TenantID, f.ProjectID, f.Release.ID, GateCandidate, ptrVal(in.ApprovalRequestID))
+}
+
+func requireCandidateReviewer(actor string, f facts) error {
+	if f.Profile == "enterprise" {
+		if f.BuildStarter == "" || f.BriefAuthor == "" {
+			return fail(http.StatusForbidden, reasonReviewerUnknown)
+		}
+		if f.DraftCount > 0 {
+			return fail(http.StatusForbidden, reasonDrafts)
+		}
+		if samePerson(actor, f.BuildStarter, f.BriefAuthor, f.RequirementsDecider) {
+			return fail(http.StatusForbidden, reasonReviewer)
+		}
+	}
+	return nil
+}
+
+// renewGate appends new authority without changing the release or old grants.
+// The project revision invalidates existing handoffs; renewal events also fence
+// terminal predecessor evidence, which otherwise survives revision changes.
+func renewGate(ctx context.Context, tx pgx.Tx, p tenant.Principal, f facts, in actionWrite) error {
+	if f.Release == nil || (f.Release.State != "deploying" && f.Release.State != "refused") || deployPhase(f) == outcomeSucceeded {
+		return fail(http.StatusConflict, "the release is not waiting for deployment")
+	}
+	gate, scope, standing := GateDeploy, ScopeDeploy, f.DeployGateID
+	if in.Action == actionRenewCandidate {
+		gate, scope, standing = GateCandidate, ScopeCandidate, f.CandidateGateID
+		if err := requireCandidateReviewer(p.ID, f); err != nil {
+			return err
+		}
+	}
+	if standing == "" || f.GateLiveByID[standing] {
+		return fail(http.StatusConflict, "the standing gate does not need renewal")
+	}
+	if ptrVal(in.ApprovalRequestID) == "" {
+		return fail(http.StatusBadRequest, "approval_request_id is required")
+	}
+	// Serialize application with grant revocation, then recheck its authority.
+	// An approval that was revoked while the action was starting cannot become
+	// a new standing gate. This lock never changes or extends the old grant.
+	var locked int
+	err := tx.QueryRow(ctx, `SELECT 1 FROM approval_requests r
+		JOIN agent_permission_grants g ON g.tenant_id=r.tenant_id AND g.approval_request_id=r.id
+		WHERE r.id=$1::uuid FOR SHARE OF r,g`, ptrVal(in.ApprovalRequestID)).Scan(&locked)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return err
+	}
+	if err := requireGate(ctx, tx, p.ID, ptrVal(in.ApprovalRequestID), scope, f.Release.ID); err != nil {
+		return err
+	}
+	if _, err := bumpProject(ctx, tx, f.ProjectID, f.Revision); err != nil {
+		return err
+	}
+	return insertGate(ctx, tx, p.TenantID, f.ProjectID, f.Release.ID, gate, ptrVal(in.ApprovalRequestID))
 }
 
 func approveDeploy(ctx context.Context, tx pgx.Tx, p tenant.Principal, f facts, in actionWrite) error {
@@ -666,7 +733,7 @@ func planNext(ctx context.Context, tx pgx.Tx, p tenant.Principal, f facts, in ac
 
 func adjustFacts(f *facts, action string) {
 	switch action {
-	case "approve_candidate", "retry_deploy":
+	case "approve_candidate", "retry_deploy", actionRenewCandidate, actionRenewDeploy:
 		f.DeployOutcome = ""
 		f.VerifyOutcome = ""
 		if action == "approve_candidate" && f.Release != nil {
@@ -702,6 +769,10 @@ func eventType(action string) string {
 		return "journey.candidate_rejected"
 	case "approve_deploy":
 		return "journey.deploy_approved"
+	case actionRenewCandidate:
+		return "journey.candidate_renewed"
+	case actionRenewDeploy:
+		return "journey.deploy_renewed"
 	case "retry_deploy":
 		return "journey.deploy_retried"
 	case "approve_permit":

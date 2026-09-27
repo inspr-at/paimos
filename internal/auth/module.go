@@ -273,7 +273,20 @@ func coreAgentScope(r *http.Request) (string, bool) {
 			return "inbox.send", true
 		case "intake":
 			return scope("intake")
-		case "journey", "requirements", "releases":
+		case "releases":
+			if len(parts) == 5 && parts[4] == "candidate-artifact" {
+				if read {
+					return "stage_handoffs.read", true
+				}
+				if r.Method == http.MethodPut {
+					return "stage_handoffs.write", true
+				}
+				break
+			}
+			if read {
+				return "journey.read", true
+			}
+		case "journey", "requirements":
 			if read {
 				return "journey.read", true
 			}

@@ -8,6 +8,21 @@
 // agent's scoped key and live grant. Each write checks the principal while
 // holding the handoff lock in the same tenant transaction.
 //
+// # Native candidate artifacts
+//
+// PUT /api/projects/{projectId}/releases/{releaseId}/candidate-artifact records
+// a typed built artifact without classic batch provenance. The active requester
+// (or an authorized project stage_handoffs.decide holder) also needs project
+// stage_handoffs.write; keys carry that same ceiling. Exact attempt, epoch and
+// journey revision, current authority, release state and live gates are checked.
+// The first registration pins a null release scheme/version without incrementing
+// revisions. Every later native or compatibility receipt for the release must
+// preserve the complete artifact identity. The existing immutable build-evidence
+// row carries the native receipt and QA digest; exact same-principal replay is
+// historical and creates no authority or event. GET at the same path requires
+// stage_handoffs.read and returns the version pin plus the latest recorded
+// artifact metadata, or a null registration before the first receipt.
+//
 // # Launch readiness
 //
 // Kind launch_readiness is Pharos observation posted by the routed principal

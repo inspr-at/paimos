@@ -301,3 +301,16 @@ func TestServicePrincipalsCannotReceiveAgentKeys(t *testing.T) {
 		t.Fatalf("promoted service key authenticated: %v, %v", authenticated, err)
 	}
 }
+
+func TestNativeCandidateArtifactAgentCeiling(t *testing.T) {
+	path := "/api/projects/11111111-1111-4111-8111-111111111111/releases/22222222-2222-4222-8222-222222222222/candidate-artifact"
+	for _, tc := range []struct{ method, want string }{{"GET", "stage_handoffs.read"}, {"PUT", "stage_handoffs.write"}} {
+		got, controlled := coreAgentScope(httptest.NewRequest(tc.method, path, nil))
+		if !controlled || got != tc.want {
+			t.Fatalf("%s: %s %v", tc.method, got, controlled)
+		}
+		if agentHasScope([]string{"journey.read", "stage.deploy"}, got) {
+			t.Fatalf("unrelated scopes allow %s", tc.method)
+		}
+	}
+}
