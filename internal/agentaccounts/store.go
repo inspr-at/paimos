@@ -392,7 +392,7 @@ func createWindow(ctx context.Context, tx pgx.Tx, p tenant.Principal, accountID 
 	if err := tx.QueryRow(ctx, `
 		SELECT EXISTS (
 			SELECT 1 FROM account_allowance_windows
-			WHERE account_id = $1::uuid AND unit = $2
+			WHERE account_id = $1::uuid AND unit = $2 AND NOT pairing_verification
 			  AND starts_at < $4 AND ends_at > $3
 		)`, accountID, in.Unit, in.StartsAt, in.EndsAt).Scan(&overlap); err != nil {
 		return Window{}, err

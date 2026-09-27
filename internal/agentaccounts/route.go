@@ -17,14 +17,17 @@ import (
 )
 
 type runRow struct {
-	ID                 string
-	AgentID            string
-	ProfileID          *string
-	AccountID          *string
-	RequestedAccountID *string
-	Status             string
-	DaemonID           *string
-	Generation         *string
+	Purpose               string
+	VerificationAccountID *string
+	VerificationExpiresAt *time.Time
+	ID                    string
+	AgentID               string
+	ProfileID             *string
+	AccountID             *string
+	RequestedAccountID    *string
+	Status                string
+	DaemonID              *string
+	Generation            *string
 }
 
 func lockRun(ctx context.Context, tx pgx.Tx, id string) (runRow, error) {
@@ -33,10 +36,13 @@ func lockRun(ctx context.Context, tx pgx.Tx, id string) (runRow, error) {
 	}
 	var run runRow
 	err := tx.QueryRow(ctx, `
-		SELECT id::text, agent_principal_id::text, model_profile_id::text, account_id::text,
-		       status, daemon_id, daemon_generation, requested_account_id::text
-		FROM agent_runs WHERE id = $1::uuid FOR UPDATE`, id).
-		Scan(&run.ID, &run.AgentID, &run.ProfileID, &run.AccountID, &run.Status, &run.DaemonID, &run.Generation, &run.RequestedAccountID)
+		SELECT r.id::text, r.agent_principal_id::text, r.model_profile_id::text, r.account_id::text,
+         r.status, r.daemon_id, r.daemon_generation, r.requested_account_id::text,
+         r.purpose, e.account_id::text, e.verification_expires_at
+  FROM agent_runs r LEFT JOIN agent_pairing_enrollments e
+   ON e.tenant_id=r.tenant_id AND e.verification_run_id=r.id
+  WHERE r.id = $1::uuid FOR UPDATE OF r`, id).
+		Scan(&run.ID, &run.AgentID, &run.ProfileID, &run.AccountID, &run.Status, &run.DaemonID, &run.Generation, &run.RequestedAccountID, &run.Purpose, &run.VerificationAccountID, &run.VerificationExpiresAt)
 	if isNoRows(err) {
 		return runRow{}, fail(http.StatusNotFound, "run not found")
 	}
@@ -82,7 +88,7 @@ func reserve(ctx context.Context, tx pgx.Tx, r *http.Request, p tenant.Principal
 		accountIDs = []string{*run.RequestedAccountID}
 		enrolled = map[string]bool{*run.RequestedAccountID: true}
 	}
-	if existing, ok, err := activeRoute(ctx, tx, run.ID, p.ID, daemonID, enrolled); err != nil || ok {
+	if existing, ok, err := activeRoute(ctx, tx, run, p.ID, daemonID, enrolled); err != nil || ok {
 		// A held reservation is not authority to launch after a grant, profile
 		// or account becomes unavailable. Preserve replay for already owned runs.
 		if err == nil {
@@ -114,7 +120,7 @@ func reserve(ctx context.Context, tx pgx.Tx, r *http.Request, p tenant.Principal
 	if err != nil {
 		return RouteResult{}, err
 	}
-	account, windows, err := selectAccount(ctx, tx, p.ID, harness, *run.ProfileID, daemonID, accountIDs, estimates, now)
+	account, windows, err := selectAccount(ctx, tx, run, p.ID, harness, *run.ProfileID, daemonID, accountIDs, estimates, now)
 	if err != nil {
 		return RouteResult{}, err
 	}
@@ -222,15 +228,15 @@ func authorizeRoute(ctx context.Context, tx pgx.Tx, r *http.Request, p tenant.Pr
 	return nil
 }
 
-func activeRoute(ctx context.Context, tx pgx.Tx, runID, principalID, daemonID string, enrolled map[string]bool) (RouteResult, bool, error) {
+func activeRoute(ctx context.Context, tx pgx.Tx, run runRow, principalID, daemonID string, enrolled map[string]bool) (RouteResult, bool, error) {
 	rows, err := tx.Query(ctx, `
 		SELECT r.id::text, r.window_id::text, w.unit, a.id::text, a.account_key, a.daemon_id,
-		       a.registered_by_principal_id::text, a.label
+		       a.registered_by_principal_id::text, a.label, w.pairing_verification, w.ends_at, w.allowance
 		FROM account_reservations r
 		JOIN account_allowance_windows w ON w.tenant_id = r.tenant_id AND w.id = r.window_id
 		JOIN agent_accounts a ON a.tenant_id = w.tenant_id AND a.id = w.account_id
 		WHERE r.run_id = $1::uuid AND r.state = 'active'
-		ORDER BY w.unit, r.id`, runID)
+		ORDER BY w.unit, r.id`, run.ID)
 	if err != nil {
 		return RouteResult{}, false, err
 	}
@@ -239,11 +245,18 @@ func activeRoute(ctx context.Context, tx pgx.Tx, runID, principalID, daemonID st
 	for rows.Next() {
 		var item Reservation
 		var accountID, key, ownerDaemonID, ownerID, label string
-		if err := rows.Scan(&item.ReservationID, &item.WindowID, &item.Unit, &accountID, &key, &ownerDaemonID, &ownerID, &label); err != nil {
+		var window Window
+		if err := rows.Scan(&item.ReservationID, &item.WindowID, &item.Unit, &accountID, &key, &ownerDaemonID, &ownerID, &label, &window.pairingVerification, &window.EndsAt, &window.Allowance); err != nil {
 			return RouteResult{}, false, err
 		}
 		if ownerDaemonID != daemonID || ownerID != principalID || !enrolled[accountID] {
 			return RouteResult{}, false, fail(http.StatusConflict, "run is routed outside daemon enrollment")
+		}
+		window.AccountID, window.Unit = accountID, item.Unit
+		// Never replay a queued reservation against a different budget family.
+		// Already-claimed work retains its original ledger for truthful settlement.
+		if run.Status == "queued" && !windowForRun(window, run) {
+			return RouteResult{}, false, fail(http.StatusConflict, "reservation window does not match run purpose")
 		}
 		if result.AccountID == "" {
 			result.AccountID = accountID
@@ -261,6 +274,9 @@ func activeRoute(ctx context.Context, tx pgx.Tx, runID, principalID, daemonID st
 	if len(result.Reservations) == 0 {
 		return RouteResult{}, false, nil
 	}
+	if run.Status == "queued" && run.Purpose == "pairing_verification" && len(result.Reservations) != 1 {
+		return RouteResult{}, false, fail(http.StatusConflict, "verification requires its sole pairing reservation")
+	}
 	return result, true, nil
 }
 
@@ -270,7 +286,7 @@ type ranked struct {
 	ratio   float64
 }
 
-func selectAccount(ctx context.Context, tx pgx.Tx, principalID, harness, profileID, daemonID string, accountIDs []string, estimates map[string]int64, now time.Time) (Account, []Window, error) {
+func selectAccount(ctx context.Context, tx pgx.Tx, run runRow, principalID, harness, profileID, daemonID string, accountIDs []string, estimates map[string]int64, now time.Time) (Account, []Window, error) {
 	rows, err := tx.Query(ctx, `
 		SELECT id::text, account_key, harness, daemon_id, label, max_parallel_runs,
 		       registered_by_principal_id::text, state, last_probe_at, last_probe_ok,
@@ -315,6 +331,17 @@ func selectAccount(ctx context.Context, tx pgx.Tx, principalID, harness, profile
 			continue
 		}
 		active := activeWindows(windows[account.ID], now)
+		eligible := active[:0]
+		for _, w := range active {
+			if windowForRun(w, run) {
+				eligible = append(eligible, w)
+			}
+		}
+		active = eligible
+		// The one-shot grant has exactly one window, never a choice among budgets.
+		if run.Purpose == "pairing_verification" && len(active) != 1 {
+			continue
+		}
 		if len(active) == 0 {
 			continue
 		}
@@ -356,7 +383,7 @@ func selectAccount(ctx context.Context, tx pgx.Tx, principalID, harness, profile
 func lockAccountWindows(ctx context.Context, tx pgx.Tx, accountIDs []string) (map[string][]Window, error) {
 	rows, err := tx.Query(ctx, `
 		SELECT id::text, account_id::text, starts_at, ends_at, unit, allowance, used, reserved,
-		       pace_model, burst_ratio::float8
+		       pace_model, burst_ratio::float8, pairing_verification
 		FROM account_allowance_windows
 		WHERE account_id::text = ANY($1::text[])
 		ORDER BY id
@@ -368,10 +395,25 @@ func lockAccountWindows(ctx context.Context, tx pgx.Tx, accountIDs []string) (ma
 	out := map[string][]Window{}
 	for rows.Next() {
 		var w Window
-		if err := rows.Scan(&w.ID, &w.AccountID, &w.StartsAt, &w.EndsAt, &w.Unit, &w.Allowance, &w.Used, &w.Reserved, &w.PaceModel, &w.BurstRatio); err != nil {
+		if err := rows.Scan(&w.ID, &w.AccountID, &w.StartsAt, &w.EndsAt, &w.Unit, &w.Allowance, &w.Used, &w.Reserved, &w.PaceModel, &w.BurstRatio, &w.pairingVerification); err != nil {
 			return nil, err
 		}
 		out[w.AccountID] = append(out[w.AccountID], w)
 	}
 	return out, rows.Err()
+}
+
+// A pairing account is an immutable per-enrollment identity. Its verification
+// run and fixed expiry bind the sole generated one-request window; another
+// enrollment/request window cannot substitute, even when it has spare budget.
+func windowForRun(w Window, run runRow) bool {
+	switch run.Purpose {
+	case "managed":
+		return !w.pairingVerification
+	case "pairing_verification":
+		return w.pairingVerification && run.VerificationAccountID != nil && run.VerificationExpiresAt != nil &&
+			w.AccountID == *run.VerificationAccountID && w.EndsAt.Equal(*run.VerificationExpiresAt) && w.Unit == "requests" && w.Allowance == 1
+	default:
+		return false
+	}
 }

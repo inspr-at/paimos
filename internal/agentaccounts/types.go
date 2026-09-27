@@ -40,6 +40,9 @@ type Account struct {
 
 // Window is one allowance bound for a single unit.
 type Window struct {
+	// Internal routing metadata; never accepted from or serialized to user APIs.
+	pairingVerification bool
+
 	ID          string    `json:"id"`
 	AccountID   string    `json:"account_id"`
 	StartsAt    time.Time `json:"starts_at"`
