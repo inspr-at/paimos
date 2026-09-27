@@ -126,6 +126,24 @@ func TestLocalSetupHTTPPairingAddHarnessAndSelectiveDrain(t *testing.T) {
 	if err := os.WriteFile(serviceExe, []byte("fixture"), 0700); err != nil {
 		t.Fatal(err)
 	}
+	nodePath := filepath.Join(home, "bin", "node")
+	if err := os.MkdirAll(filepath.Dir(nodePath), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(nodePath, []byte("synthetic Node fixture"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	packageDir := filepath.Join(home, "lib", "node_modules", "@anthropic-ai", "claude-agent-sdk")
+	if err := os.MkdirAll(packageDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(packageDir, "package.json"), []byte(`{"name":"@anthropic-ai/claude-agent-sdk","main":"sdk.mjs"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	sdkEntry := filepath.Join(packageDir, "sdk.mjs")
+	if err := os.WriteFile(sdkEntry, []byte("synthetic SDK fixture"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	local := &localSetupDaemon{root: store.Path(), active: map[string]bool{}, fenced: map[string]bool{}}
 	now := time.Now().UTC()
 	e := &agentsetup.Engine{
@@ -136,7 +154,7 @@ func TestLocalSetupHTTPPairingAddHarnessAndSelectiveDrain(t *testing.T) {
 		Now:      func() time.Time { return now },
 	}
 	// Use a qualified verification harness; no vendor process is launched by this fixture.
-	o := agentsetup.Options{Origin: origin, ComputerName: "integration computer", Workspace: workspace, Platform: agentsetup.Platform{OS: "darwin", Arch: "arm64"}, Candidates: []agentsetup.Candidate{setupAccount(t, f, "claude", home)}, NodePath: serviceExe, ClaudeSDKPath: serviceExe}
+	o := agentsetup.Options{Origin: origin, ComputerName: "integration computer", Workspace: workspace, Platform: agentsetup.Platform{OS: "darwin", Arch: "arm64"}, Candidates: []agentsetup.Candidate{setupAccount(t, f, "claude", home)}, NodePath: nodePath, ClaudeSDKPath: sdkEntry}
 	p, err := e.Begin(t.Context(), o)
 	if err != nil || p.Stage != "awaiting_approval" || p.UserCode == "" {
 		t.Fatalf("initial code request: stage=%s err=%v", p.Stage, err)
