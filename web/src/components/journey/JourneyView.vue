@@ -4,8 +4,8 @@ import { brand } from '../../lib/brand'
 import { computed, onBeforeUnmount, onMounted, provide, ref, watch, type Component } from 'vue'
 import '../../styles/journey.css'
 import {
-  ACTION_LONG, GATE_OF_ACTION, isImported, isStage, listPlugins, offeredApproval, releaseName, releaseStateLabel, STAGE_LABEL, STAGE_LATER, STAGE_OWNER, STAGES,
-  type ActionKey, type PluginInfo, type Stage,
+  ACTION_LONG, captureJourneyConfirmation, GATE_OF_ACTION, isImported, isStage, listPlugins, offeredApproval, releaseName, releaseStateLabel, STAGE_LABEL, STAGE_LATER, STAGE_OWNER, STAGES,
+  type ActionKey, type JourneyConfirmation, type PluginInfo, type Stage,
 } from '../../lib/journey'
 import type { Approval } from '../../lib/agents'
 import { canDecideApproval } from '../../lib/agentState'
@@ -157,16 +157,15 @@ const next = computed<NextState>(() => {
   const label = gate.value && approval.value?.decision === null && action.key !== 'decide' && !/^Approve /.test(action.label) ? `Approve and ${action.label.charAt(0).toLowerCase()}${action.label.slice(1)}` : action.label
   return { label, disabled, tip, busy: store.busy }
 })
-async function act(action: ActionKey, options: { approval?: Approval | null; reason?: string; done?: string } = {}) {
+async function act(action: ActionKey, options: { approval?: Approval | null; reason?: string; done?: string; confirmation?: JourneyConfirmation<ActionKey> } = {}) {
   try {
-    if (!canAct.value || (options.approval?.decision === null && !canDecideApproval(options.approval, can))) throw new Error('You do not have permission to take this step.')
-    // Confirmations can stay open past the effective grant deadline. Recheck
-    // the exact request immediately before deciding or applying it.
-    if (options.approval && (!journey.value || !gate.value || offeredApproval(agents.approvals, journey.value, gate.value, Date.now())?.id !== options.approval.id)) throw new Error('The gate is no longer available. Refresh before taking this step.')
+    if (!journey.value) return false
+    const confirmation = options.confirmation ?? captureJourneyConfirmation(journey.value, action, options.approval ?? null)
+    if (confirmation.projectId !== projectId.value) throw new StaleJourney('The project changed while you were confirming. Review the current decision and confirm again.')
+    if (!canAct.value || (confirmation.approval?.decision === null && !canDecideApproval(confirmation.approval, can))) throw new Error('You do not have permission to take this step.')
     const before = journey.value?.stage
     // The person who decides the gate is the one who takes the step (the server checks it).
-    if (options.approval && options.approval.decision === null) await agents.decide(options.approval, 'approved', '')
-    await store.act(projectId.value, action, { approval: options.approval, reason: options.reason })
+    await store.act(confirmation, { reason: options.reason })
     toast(options.done ?? `${journey.value ? STAGE_LABEL[journey.value.stage] : 'Journey'}: done.`)
     void agents.refreshApprovals()
     if (journey.value && journey.value.stage !== before) emit('stage', journey.value.stage)
@@ -198,20 +197,24 @@ async function runNext() {
   if (action.key === 'wait_for_build') return
   if (action.key === 'approve_requirements') {
     if (!approval.value) return
-    const requested = approval.value
-    const ok = await confirmAction({ title: 'Agree the requirements?', body: `${approval.value.decision === null ? 'This approves the requirements gate and agrees' : 'This agrees'} revision ${j.requirements_revision}: features and tickets are generated from it.`, confirmLabel: next.value.label })
+    const confirmation = captureJourneyConfirmation(j, action.key, approval.value)
+    const ok = await confirmAction({ title: 'Agree the requirements?', body: `${confirmation.approval!.decision === null ? 'This approves the requirements gate and agrees' : 'This agrees'} revision ${j.requirements_revision}: features and tickets are generated from it.`, confirmLabel: next.value.label })
     if (!ok) return
-    if (offeredApproval(agents.approvals, j, 'requirements', Date.now())?.id !== requested.id) { toast('The gate is no longer available. Refresh before taking this step.', { tone: 'error' }); return }
-    try { await store.agree(projectId.value, approval.value); toast('Requirements agreed. Plan the release next.'); void data.loadRequirements(true); void data.loadReleases(true); void data.loadWork(true); void agents.refreshApprovals() }
+    try {
+      if (confirmation.projectId !== projectId.value) throw new StaleJourney('The project changed while you were confirming. Review the current decision and confirm again.')
+      if (!canAct.value || (confirmation.approval!.decision === null && !canDecideApproval(confirmation.approval!, can))) throw new Error('You do not have permission to take this step.')
+      await store.agree(confirmation); toast('Requirements agreed. Plan the release next.'); void data.loadRequirements(true); void data.loadReleases(true); void data.loadWork(true); void agents.refreshApprovals()
+    }
     catch (e) { toast(e instanceof Error ? e.message : 'The requirements were not agreed.', { tone: 'error' }) }
     return
   }
   const key = action.key as ActionKey
-  const withGate = approval.value
+  const confirmation = captureJourneyConfirmation(j, key, approval.value)
+  const withGate = confirmation.approval
   const body = `${withGate && withGate.decision === null ? `This approves the ${gate.value} gate that ${agents.askerName(withGate.agent_principal_id, withGate.agent_name).name} asked for. ` : ''}${ACTION_LONG[action.key]}`
   const ok = await confirmAction({ title: `${action.label}?`, body, confirmLabel: next.value.label })
   if (!ok) return
-  await act(key, { approval: withGate, done: DONE[key]?.(releaseLabel.value) })
+  await act(key, { confirmation, done: DONE[key]?.(releaseLabel.value) })
 }
 
 // ---------- Navigation ----------

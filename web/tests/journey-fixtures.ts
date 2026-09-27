@@ -257,8 +257,9 @@ export async function mockJourney(page: Page, world: JourneyWorld, options: { fa
     }
     if (what === 'requirements') return route.fulfill({ json: world.requirements })
     if (what === 'requirements/agree') {
+      if (body.expected_revision !== world.journey.revision) return route.fulfill({ status: 409, json: { error: 'journey revision is stale' } })
       const gate = world.approvals.find(a => a.id === body.approval_request_id)
-      if (!gate || gate.decision !== 'approved' || !gate.scope.startsWith('journey.requirements.r')) return route.fulfill({ status: 403, json: { error: 'live person approval for the current requirements digest and revision required' } })
+      if (!gate || gate.decision !== 'approved' || gate.scope !== world.journey.requirements_approval_scope) return route.fulfill({ status: 403, json: { error: 'live person approval for the current requirements digest and revision required' } })
       world.requirements = world.requirements.map(r => ({ ...r, status: 'agreed', revision: 3 })); bump()
       world.journey.stage = 'plan'; world.journey.stages = rail('plan'); world.journey.next_action = { key: 'start_build', label: 'Start build', stage: 'plan', available: false, reason: 'Build start needs an approved gate.', approval_request_id: null }
       return route.fulfill({ json: world.requirements })

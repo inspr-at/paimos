@@ -2,8 +2,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { APIError } from '../lib/api'
-import type { Approval } from '../lib/agents'
-import { agreeRequirements, getJourney, postAction, putProfile, type ActionKey, type Journey, type Profile } from '../lib/journey'
+import { agreeRequirements, getJourney, GATE_OF_ACTION, matchesJourneyConfirmation, offeredApproval, postAction, putProfile, type ActionKey, type Journey, type JourneyConfirmation, type Profile } from '../lib/journey'
 import { useAgents } from './agents'
 
 // The journey projection per project (the header's compact stage and the
@@ -55,23 +54,46 @@ export const useJourney = defineStore('journey', () => {
   }
   function set(projectId: string, journey: Journey) { journeys.value = { ...journeys.value, [projectId]: journey } }
 
-  async function act(projectId: string, action: ActionKey, options: { approval?: Approval | null; reason?: string } = {}) {
-    const journey = journeys.value[projectId]
-    if (!journey) throw new Error('The journey is not loaded yet.')
-    const next = await guard(projectId, () => postAction(projectId, {
-      action, expected_revision: journey.revision, idempotency_key: crypto.randomUUID(),
-      approval_request_id: options.approval?.id ?? null,
-      ...(RELEASE_ACTIONS.includes(action) ? { release_id: journey.current_release_id } : {}),
-      ...(options.reason ? { reason: options.reason } : {}),
-    }))
+  function assertConfirmation(confirmation: JourneyConfirmation) {
+    if (!matchesJourneyConfirmation(confirmation, journeys.value[confirmation.projectId], agents.approvals)) {
+      throw new StaleJourney('The journey or gate changed while you were confirming. Review the current decision and confirm again.')
+    }
+  }
+  async function prepareConfirmation(confirmation: JourneyConfirmation) {
+    assertConfirmation(confirmation)
+    const requested = confirmation.approval
+    if (!requested) return
+    const gate = GATE_OF_ACTION[confirmation.nextKey]
+    const current = gate && offeredApproval(agents.approvals, journeys.value[confirmation.projectId], gate, Date.now())
+    if (!current || current.id !== requested.id) throw new Error('The gate is no longer available. Refresh before taking this step.')
+    if (current.decision !== requested.decision) throw new StaleJourney('The gate decision changed while you were confirming. Review the current decision and confirm again.')
+    if (requested.decision === null) await agents.decide(requested, 'approved', '')
+  }
+  async function act(confirmation: JourneyConfirmation<ActionKey>, options: { reason?: string } = {}) {
+    const { projectId, action, revision, releaseId, approval } = confirmation
+    const next = await guard(projectId, async () => {
+      await prepareConfirmation(confirmation)
+      // An in-flight refresh may finish during approval; recheck before the
+      // action and always submit the revision the person actually confirmed.
+      assertConfirmation(confirmation)
+      return postAction(projectId, {
+        action, expected_revision: revision, idempotency_key: crypto.randomUUID(),
+        approval_request_id: approval?.id ?? null,
+        ...(RELEASE_ACTIONS.includes(action) ? { release_id: releaseId } : {}),
+        ...(options.reason ? { reason: options.reason } : {}),
+      })
+    })
     set(projectId, next)
     return next
   }
-  async function agree(projectId: string, approval: Approval) {
-    const journey = journeys.value[projectId]
-    if (!journey) throw new Error('The journey is not loaded yet.')
-    if (approval.decision === null) await agents.decide(approval, 'approved', '')
-    const result = await guard(projectId, () => agreeRequirements(projectId, { expected_revision: journey.revision, approval_request_id: approval.id, idempotency_key: crypto.randomUUID() }))
+  async function agree(confirmation: JourneyConfirmation<'approve_requirements'>) {
+    const { projectId, revision, approval } = confirmation
+    if (!approval) throw new Error('The requirements gate is not available.')
+    const result = await guard(projectId, async () => {
+      await prepareConfirmation(confirmation)
+      assertConfirmation(confirmation)
+      return agreeRequirements(projectId, { expected_revision: revision, approval_request_id: approval.id, idempotency_key: crypto.randomUUID() })
+    })
     await load(projectId, true)
     return result
   }

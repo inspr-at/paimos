@@ -2,7 +2,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  gateApprovals, gateApprovalState, nextPick, nextPickLabel, offeredApproval, orderedTickets, planWrite, releaseRefs, selectionOf, ticketGroups, walkOrder,
+  captureJourneyConfirmation, matchesJourneyConfirmation, gateApprovals, gateApprovalState, nextPick, nextPickLabel, offeredApproval, orderedTickets, planWrite, releaseRefs, selectionOf, ticketGroups, walkOrder,
   type Journey, type JourneyStage, type Walker, type WalkerTicket,
 } from '../src/lib/journey.ts'
 import type { Approval } from '../src/lib/agents.ts'
@@ -105,4 +105,35 @@ test('distinct standing and retry IDs retain applied evidence and exact fresh au
   }
   stage.gate_live = false
   assert.equal(gateApprovalState(standing, stage, now), 'applied', 'revocation does not erase the applied historical record')
+})
+
+test('confirmation binds journey, requirements, release, action and request identities by value', () => {
+  const approval: Approval = { id: 'request-a', scope: 'journey.requirements.r12.da', resource_kind: 'node', resource_id: 'project', agent_principal_id: 'agent', run_id: null, decision: null, expires_at: '2026-09-27T14:00:00Z', proposed_at: '2026-09-27T12:00:00Z', rationale: '' }
+  const journey = {
+    project_node_id: 'project', revision: 12, profile: 'professional', stage: 'requirements', current_release_id: 'release',
+    requirements_revision: 3, requirements_digest_sha256: 'a', requirements_approval_scope: approval.scope,
+    next_action: { key: 'approve_requirements', stage: 'requirements', approval_request_id: approval.id, available: false }, stages: [],
+  } as unknown as Journey
+  const captured = captureJourneyConfirmation(journey, 'approve_requirements', approval)
+  assert.equal(matchesJourneyConfirmation(captured, structuredClone(journey), [{ ...approval }]), true, 'unchanged refreshed objects still match')
+  for (const changed of [
+    { ...journey, project_node_id: 'other' }, { ...journey, revision: 13 }, { ...journey, profile: 'enterprise' as const },
+    { ...journey, stage: 'plan' as const }, { ...journey, current_release_id: 'other-release' },
+    { ...journey, requirements_revision: 4 }, { ...journey, requirements_digest_sha256: 'b' }, { ...journey, requirements_approval_scope: 'other-scope' },
+    { ...journey, next_action: { ...journey.next_action, key: 'start_build' as const } },
+    { ...journey, next_action: { ...journey.next_action, stage: 'plan' as const } },
+    { ...journey, next_action: { ...journey.next_action, approval_request_id: 'request-b' } },
+  ]) assert.equal(matchesJourneyConfirmation(captured, changed, [approval]), false)
+  for (const changed of [
+    { ...approval, id: 'request-b' }, { ...approval, scope: 'other-scope' }, { ...approval, resource_id: 'other-project' },
+    { ...approval, agent_principal_id: 'other-agent' }, { ...approval, run_id: 'other-run' },
+  ]) assert.equal(matchesJourneyConfirmation(captured, journey, [changed]), false)
+  assert.equal(matchesJourneyConfirmation(captured, journey, []), false)
+  // Own approval may update the decision and availability before the action
+  // write; neither change substitutes another request or journey revision.
+  assert.equal(matchesJourneyConfirmation(captured, { ...journey, next_action: { ...journey.next_action, available: true } }, [{ ...approval, decision: 'approved' }]), true)
+  journey.revision = 13
+  approval.scope = 'mutated'
+  assert.equal(captured.revision, 12)
+  assert.equal(captured.approval!.scope, 'journey.requirements.r12.da')
 })

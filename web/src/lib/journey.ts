@@ -304,6 +304,35 @@ export function offeredApproval(approvals: Approval[], journey: Journey, gate: G
   return (state === 'pending' && approval.decision === null) || (state === 'approved_live' && approval.decision === 'approved') ? approval : null
 }
 
+// Confirmation is for the decision displayed when it opened, not whatever a
+// previously started refresh returns while the person is reading the modal.
+export interface JourneyConfirmation<Action extends ActionKey | 'approve_requirements' = ActionKey | 'approve_requirements'> {
+  projectId: string; revision: number; releaseId: string | null; action: Action; nextKey: NextKey
+  identity: string; approval: Approval | null
+}
+function decisionIdentity(journey: Journey): string {
+  return JSON.stringify([
+    journey.project_node_id, journey.revision, journey.profile, journey.stage, journey.current_release_id,
+    journey.requirements_revision, journey.requirements_digest_sha256, journey.requirements_approval_scope,
+    journey.next_action.key, journey.next_action.stage, journey.next_action.approval_request_id,
+  ])
+}
+function requestIdentity(approval: Approval): string {
+  return JSON.stringify([approval.id, approval.scope, approval.resource_kind, approval.resource_id, approval.agent_principal_id, approval.run_id ?? null])
+}
+export function captureJourneyConfirmation<Action extends ActionKey | 'approve_requirements'>(journey: Journey, action: Action, approval: Approval | null): JourneyConfirmation<Action> {
+  return {
+    projectId: journey.project_node_id, revision: journey.revision, releaseId: journey.current_release_id,
+    action, nextKey: journey.next_action.key, identity: decisionIdentity(journey), approval: approval ? { ...approval } : null,
+  }
+}
+export function matchesJourneyConfirmation(confirmation: JourneyConfirmation, journey: Journey | null | undefined, approvals: Approval[]): boolean {
+  if (!journey || decisionIdentity(journey) !== confirmation.identity) return false
+  if (!confirmation.approval) return true
+  const current = approvals.find(a => a.id === confirmation.approval!.id)
+  return !!current && requestIdentity(current) === requestIdentity(confirmation.approval)
+}
+
 // ---------- Copy ----------
 // What each next action means, in the prototype's words.
 export const ACTION_LONG: Record<NextKey, string> = {
