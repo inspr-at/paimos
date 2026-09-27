@@ -134,6 +134,10 @@ func (p *codexProcess) Control(ctx context.Context, op, text string) error {
 	return ErrUnsupported
 }
 func (a *CodexAdapter) Start(ctx context.Context, r StartRequest, observe func(AdapterEvent)) (Process, error) {
+	if err := validExecutionMode(r.Run, a); err != nil {
+		return nil, err
+	}
+
 	if !a.Probe(ctx, r.AccountKey) {
 		return nil, errors.New("Codex account probe unavailable")
 	}
@@ -309,6 +313,10 @@ func (p *piProcess) verify(ctx context.Context) error {
 	return nil
 }
 func (a *PiAdapter) Start(ctx context.Context, r StartRequest, observe func(AdapterEvent)) (Process, error) {
+	if err := validExecutionMode(r.Run, a); err != nil {
+		return nil, err
+	}
+
 	if !a.Probe(ctx, r.AccountKey) {
 		return nil, errors.New("Pi account context unavailable")
 	}
@@ -417,6 +425,10 @@ func (p *cursorProcess) Control(ctx context.Context, op, text string) error {
 	}
 }
 func (a *CursorAdapter) Start(ctx context.Context, r StartRequest, observe func(AdapterEvent)) (Process, error) {
+	if err := validExecutionMode(r.Run, a); err != nil {
+		return nil, err
+	}
+
 	if !a.Probe(ctx, r.AccountKey) {
 		return nil, errors.New("Cursor account identity unavailable")
 	}
@@ -426,7 +438,8 @@ func (a *CursorAdapter) Start(ctx context.Context, r StartRequest, observe func(
 	}
 	op, cancel := operationContext(ctx)
 	defer cancel()
-	p, err := launchWire(path, []string{"--trust", "--model", r.Profile.Model, "acp"}, r.Workspace, nil, "jsonrpc", observe)
+	args := []string{"--trust", "--model", r.Profile.Model, "acp"}
+	p, err := launchWire(path, args, r.Workspace, nil, "jsonrpc", observe)
 	if err != nil {
 		return nil, err
 	}
@@ -511,7 +524,9 @@ func (a *CursorAdapter) Start(ctx context.Context, r StartRequest, observe func(
 	if err != nil || json.Unmarshal(raw, &session) != nil || session.SessionID == "" || session.Models.Current != expectedModel || session.Modes.Current == "" {
 		return fail(errors.New("Cursor ACP session failed"))
 	}
+	p.eventMu.Lock()
 	p.sessionID = session.SessionID
+	p.eventMu.Unlock()
 	cp.promptID = strconv.FormatInt(p.next.Add(1), 10)
 	id, _ := strconv.ParseInt(cp.promptID, 10, 64)
 	if err := p.send(map[string]any{"jsonrpc": "2.0", "id": id, "method": "session/prompt", "params": map[string]any{"sessionId": p.sessionID, "prompt": []map[string]string{{"type": "text", "text": r.Prompt}}}}); err != nil {
@@ -527,12 +542,14 @@ var claudeAssets embed.FS
 type ClaudeAdapter struct {
 	NodePath, SDKPath, ClaudePath string
 	Homes                         map[string]string
+	Emails                        map[string]string
 }
 
 func NewClaudeAdapter(nodePath, sdkPath, claudePath string, homes map[string]string) *ClaudeAdapter {
 	return &ClaudeAdapter{NodePath: nodePath, SDKPath: sdkPath, ClaudePath: claudePath, Homes: homes}
 }
-func (*ClaudeAdapter) Name() string { return Claude }
+func (*ClaudeAdapter) Name() string                                 { return Claude }
+func (a *ClaudeAdapter) SetExpectedEmails(emails map[string]string) { a.Emails = emails }
 
 type claudeProcess struct {
 	*wireProcess
@@ -577,6 +594,10 @@ func (p *claudeProcess) Control(ctx context.Context, op, text string) error {
 	}
 }
 func (a *ClaudeAdapter) Start(ctx context.Context, r StartRequest, observe func(AdapterEvent)) (Process, error) {
+	if err := validExecutionMode(r.Run, a); err != nil {
+		return nil, err
+	}
+
 	if !a.Probe(ctx, r.AccountKey) {
 		return nil, errors.New("Claude account probe unavailable")
 	}
@@ -666,7 +687,7 @@ func (a *ClaudeAdapter) Start(ctx context.Context, r StartRequest, observe func(
 			}
 		}
 	})
-	if err := p.send(map[string]any{"op": "start", "prompt": r.Prompt, "model": r.Profile.Model, "effort": r.Profile.Effort, "correlation_id": "initial", "tools": r.Tools}); err != nil {
+	if err := p.send(map[string]any{"op": "start", "prompt": r.Prompt, "model": r.Profile.Model, "effort": r.Profile.Effort, "correlation_id": "initial", "tools": r.Tools, "purpose": r.Run.Purpose}); err != nil {
 		return p.failStart(err)
 	}
 	op, cancel := operationContext(ctx)

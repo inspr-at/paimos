@@ -17,6 +17,20 @@ const PublicRoute = "public"
 // verifies the recipient binding. Authentication and public capability routes
 // remain explicit entries so route coverage can detect new unreviewed paths.
 var RoutePermissions = map[string]string{
+	"GET /api/agent-pairing/guide":                                                      "public",
+	"POST /api/agent-pairing/device":                                                    "public",
+	"POST /api/agent-pairing/redeem":                                                    "public",
+	"POST /api/agent-pairing/reconcile":                                                 "public",
+	"POST /api/agent-pairing/lookup":                                                    "account.manage",
+	"POST /api/agent-pairing/requests/{requestId}/approve":                              "account.manage",
+	"POST /api/agent-pairing/requests/{requestId}/deny":                                 "account.manage",
+	"GET /api/agent-pairing/computers":                                                  "account.read",
+	"GET /api/agent-pairing/computers/{computerId}":                                     "account.read",
+	"POST /api/agent-pairing/computers/{computerId}/disconnect":                         "account.manage",
+	"POST /api/agent-pairing/computers/{computerId}/enrollments/{accountId}/disconnect": "account.manage",
+	"GET /api/agent-pairing/self":                                                       "run.claim",
+	"POST /api/agent-pairing/self/disconnect":                                           "run.claim",
+
 	"DELETE /api/agent-keys/{id}":                                    "keys.manage",
 	"DELETE /api/members/invites/{id}":                               "members.manage",
 	"DELETE /api/members/{principal_id}/aliases/{from_principal_id}": "members.manage",

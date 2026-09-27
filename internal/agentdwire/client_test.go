@@ -22,6 +22,10 @@ func TestAuthenticatedLocalControl(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer os.RemoveAll(root)
+	root, err = filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
 	socket := filepath.Join(root, "agentd.sock")
 	tokenFile := socket + ".token"
 	if err := os.WriteFile(tokenFile, []byte("12345678901234567890123456789012"), 0600); err != nil {

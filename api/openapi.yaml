@@ -6,6 +6,159 @@ info:
 servers:
   - url: /api
 paths:
+  /agent-pairing/guide:
+    get:
+      operationId: pairingGuide
+      security: []
+      responses:
+        '200': {description: Instance-bound bootstrap guide and candidate release targets, content: {application/json: {schema: {$ref: '#/components/schemas/PairingGuide'}}}}
+        '400': {description: Invalid or mismatched request}
+        '403': {description: Person permission and same-origin approval required}
+        '404': {description: Request or proof not found}
+        '409': {description: Immutable choice or lifecycle conflict}
+        '429': {description: Rate or attempt limit reached; honor Retry-After}
+  /agent-pairing/device:
+    post:
+      operationId: requestDevicePairing
+      security: []
+      requestBody: {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PairingDeviceRequest"}}}}
+      responses:
+        '200': {"description": "Pairing result; see state and cleanup fields", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PairingDeviceResponse"}}}}
+        '400': {description: Invalid or mismatched request}
+        '403': {description: Person permission and same-origin approval required}
+        '404': {description: Request or proof not found}
+        '409': {description: Immutable choice or lifecycle conflict}
+        '429': {description: Rate or attempt limit reached; honor Retry-After}
+  /agent-pairing/redeem:
+    post:
+      operationId: redeemDevicePairing
+      security: []
+      requestBody: {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PairingRedeemRequest"}}}}
+      responses:
+        '200': {"description": "Pairing result; see state and cleanup fields", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PairingView"}}}}
+        '400': {description: Invalid or mismatched request}
+        '403': {description: Person permission and same-origin approval required}
+        '404': {description: Request or proof not found}
+        '409': {description: Immutable choice or lifecycle conflict}
+        '429': {description: Rate or attempt limit reached; honor Retry-After}
+  /agent-pairing/reconcile:
+    post:
+      operationId: reconcileDevicePairing
+      security: []
+      requestBody: {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PairingReconcileRequest"}}}}
+      responses:
+        '200': {"description": "Pairing result; see state and cleanup fields", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PairingView"}}}}
+        '400': {description: Invalid or mismatched request}
+        '403': {description: Person permission and same-origin approval required}
+        '404': {description: Request or proof not found}
+        '409': {description: Immutable choice or lifecycle conflict}
+        '429': {description: Rate or attempt limit reached; honor Retry-After}
+  /agent-pairing/lookup:
+    post:
+      operationId: lookupPairingCode
+      requestBody: {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PairingLookup"}}}}
+      responses:
+        '200': {"description": "Pairing result; see state and cleanup fields", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PairingView"}}}}
+        '400': {description: Invalid or mismatched request}
+        '403': {description: Person permission and same-origin approval required}
+        '404': {description: Request or proof not found}
+        '409': {description: Immutable choice or lifecycle conflict}
+        '429': {description: Rate or attempt limit reached; honor Retry-After}
+  /agent-pairing/requests/{requestId}/approve:
+    post:
+      operationId: approvePairing
+      parameters:
+        - {"name": "requestId", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}
+      requestBody: {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PairingApproval"}}}}
+      responses:
+        '200': {"description": "Pairing result; see state and cleanup fields", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PairingView"}}}}
+        '400': {description: Invalid or mismatched request}
+        '403': {description: Person permission and same-origin approval required}
+        '404': {description: Request or proof not found}
+        '409': {description: Immutable choice or lifecycle conflict}
+        '429': {description: Rate or attempt limit reached; honor Retry-After}
+  /agent-pairing/requests/{requestId}/deny:
+    post:
+      operationId: denyPairing
+      parameters:
+        - {"name": "requestId", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}
+      responses:
+        '200': {"description": "Pairing result; see state and cleanup fields", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PairingView"}}}}
+        '400': {description: Invalid or mismatched request}
+        '403': {description: Person permission and same-origin approval required}
+        '404': {description: Request or proof not found}
+        '409': {description: Immutable choice or lifecycle conflict}
+        '429': {description: Rate or attempt limit reached; honor Retry-After}
+  /agent-pairing/computers:
+    get:
+      operationId: listPairedComputers
+      responses:
+        '200': {"description": "Pairing result; see state and cleanup fields", "content": {"application/json": {"schema": {"type": "object"}}}}
+        '400': {description: Invalid or mismatched request}
+        '403': {description: Person permission and same-origin approval required}
+        '404': {description: Request or proof not found}
+        '409': {description: Immutable choice or lifecycle conflict}
+        '429': {description: Rate or attempt limit reached; honor Retry-After}
+  /agent-pairing/computers/{computerId}:
+    get:
+      operationId: getPairedComputer
+      parameters:
+        - {"name": "computerId", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}
+      responses:
+        '200': {"description": "Pairing result; see state and cleanup fields", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PairingView"}}}}
+        '400': {description: Invalid or mismatched request}
+        '403': {description: Person permission and same-origin approval required}
+        '404': {description: Request or proof not found}
+        '409': {description: Immutable choice or lifecycle conflict}
+        '429': {description: Rate or attempt limit reached; honor Retry-After}
+  /agent-pairing/computers/{computerId}/disconnect:
+    post:
+      operationId: disconnectPairedComputer
+      parameters:
+        - {"name": "computerId", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}
+      requestBody: {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PairingDisconnect"}}}}
+      responses:
+        '200': {"description": "Pairing result; see state and cleanup fields", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PairingView"}}}}
+        '400': {description: Invalid or mismatched request}
+        '403': {description: Person permission and same-origin approval required}
+        '404': {description: Request or proof not found}
+        '409': {description: Immutable choice or lifecycle conflict}
+        '429': {description: Rate or attempt limit reached; honor Retry-After}
+  /agent-pairing/computers/{computerId}/enrollments/{accountId}/disconnect:
+    post:
+      operationId: disconnectPairedEnrollment
+      parameters:
+        - {"name": "computerId", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}
+        - {"name": "accountId", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}
+      requestBody: {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PairingDisconnect"}}}}
+      responses:
+        '200': {"description": "Pairing result; see state and cleanup fields", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PairingView"}}}}
+        '400': {description: Invalid or mismatched request}
+        '403': {description: Person permission and same-origin approval required}
+        '404': {description: Request or proof not found}
+        '409': {description: Immutable choice or lifecycle conflict}
+        '429': {description: Rate or attempt limit reached; honor Retry-After}
+  /agent-pairing/self:
+    get:
+      operationId: getOwnPairing
+      responses:
+        '200': {"description": "Pairing result; see state and cleanup fields", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PairingView"}}}}
+        '400': {description: Invalid or mismatched request}
+        '403': {description: Person permission and same-origin approval required}
+        '404': {description: Request or proof not found}
+        '409': {description: Immutable choice or lifecycle conflict}
+        '429': {description: Rate or attempt limit reached; honor Retry-After}
+  /agent-pairing/self/disconnect:
+    post:
+      operationId: disconnectOwnPairing
+      requestBody: {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PairingSelfDisconnect"}}}}
+      responses:
+        '200': {"description": "Pairing result; see state and cleanup fields", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PairingView"}}}}
+        '400': {description: Invalid or mismatched request}
+        '403': {description: Person permission and same-origin approval required}
+        '404': {description: Request or proof not found}
+        '409': {description: Immutable choice or lifecycle conflict}
+        '429': {description: Rate or attempt limit reached; honor Retry-After}
   /authz/permissions:
     get:
       operationId: listAuthzPermissions
@@ -3747,6 +3900,43 @@ components:
     session: {type: apiKey, in: cookie, name: aeon_session}
     agentKey: {type: http, scheme: bearer, description: Bearer token aeon_<prefix>_<secret>}
   schemas:
+    PairingGuide:
+      type: object
+      required: [protocol, version, instance_url, default_tenant_slug, platforms, platform_qualification, setup_command, install_targets, install_available]
+      properties:
+        protocol: {type: string, const: pairing-v1}
+        version: {type: string}
+        instance_url: {type: string, format: uri}
+        default_tenant_slug: {type: string}
+        platforms: {type: array, items: {type: string}}
+        platform_qualification: {type: string, description: Candidate builds require exact-release service qualification evidence}
+        setup_command: {type: string, description: CLI template with explicit approved folder and private state directory placeholders}
+        managed_installation: {type: string}
+        install_available: {type: boolean}
+        install_targets:
+          type: array
+          items:
+            type: object
+            required: [platform, arch, service, qualification, artifact_url, checksums_url, command]
+            properties:
+              platform: {type: string, enum: [darwin, linux]}
+              arch: {type: string, enum: [arm64, amd64]}
+              service: {type: string, enum: [launchd-user, systemd-user]}
+              qualification: {type: string}
+              artifact_url: {type: string, format: uri}
+              checksums_url: {type: string, format: uri}
+              command: {type: string}
+    PairingAccountChoice: {"type": "object", "additionalProperties": false, "required": ["account_key", "harness", "label"], "properties": {"account_key": {"type": "string", "minLength": 1, "maxLength": 128}, "harness": {"type": "string", "enum": ["claude", "codex", "cursor", "grok"]}, "label": {"type": "string", "minLength": 1, "maxLength": 128}, "model_profile_id": {"type": "string", "format": "uuid"}}}
+    PairingDeviceRequest: {"type": "object", "additionalProperties": false, "required": ["request_id", "device_hash", "runtime_hash", "lifecycle_hash", "computer_name", "platform", "arch", "workspace_path", "capabilities", "accounts"], "properties": {"request_id": {"type": "string", "format": "uuid"}, "tenant_id": {"type": "string", "format": "uuid"}, "tenant_slug": {"type": "string"}, "device_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "runtime_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "lifecycle_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "computer_name": {"type": "string", "minLength": 1, "maxLength": 128}, "platform": {"type": "string", "enum": ["darwin", "linux"]}, "arch": {"type": "string", "enum": ["arm64", "amd64"]}, "workspace_path": {"type": "string", "maxLength": 1024}, "capabilities": {"type": "array", "minItems": 1, "maxItems": 1, "items": {"const": "managed_runs"}}, "accounts": {"type": "array", "minItems": 1, "maxItems": 4, "items": {"$ref": "#/components/schemas/PairingAccountChoice"}}, "existing_computer_id": {"type": "string", "format": "uuid"}, "existing_lifecycle_secret": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}, "oneOf": [{"required": ["tenant_id"], "not": {"required": ["tenant_slug"]}}, {"required": ["tenant_slug"], "not": {"required": ["tenant_id"]}}], "dependentRequired": {"existing_computer_id": ["existing_lifecycle_secret"], "existing_lifecycle_secret": ["existing_computer_id"]}}
+    PairingRedeemRequest: {"type": "object", "additionalProperties": false, "required": ["tenant_id", "request_id", "device_secret"], "properties": {"tenant_id": {"type": "string", "format": "uuid"}, "request_id": {"type": "string", "format": "uuid"}, "device_secret": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}}
+    PairingReconcileRequest: {"type": "object", "additionalProperties": false, "required": ["tenant_id", "request_id", "lifecycle_secret"], "properties": {"tenant_id": {"type": "string", "format": "uuid"}, "request_id": {"type": "string", "format": "uuid"}, "lifecycle_secret": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "cleanup_confirmed_account_ids": {"type": "array", "maxItems": 256, "items": {"type": "string", "format": "uuid"}}, "computer_cleanup_confirmed": {"type": "boolean"}, "progress": {"type": "object", "additionalProperties": false, "required": ["state"], "properties": {"state": {"type": "string", "enum": ["provisioning", "login_required", "service_conflict", "connected", "setup_failed"]}, "error_code": {"type": "string", "enum": ["", "login_required", "service_conflict", "unsupported_platform", "managed_installation", "connectivity_failed", "private_storage_failed", "installation_failed"]}}}}}
+    PairingLookup: {"type": "object", "additionalProperties": false, "required": ["user_code"], "properties": {"user_code": {"type": "string"}}}
+    PairingApproval: {"type": "object", "additionalProperties": false, "required": ["request_digest", "verification", "selected_account_keys"], "properties": {"request_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "verification": {"type": "string", "enum": ["one_per_harness", "connect_only"]}, "selected_account_keys": {"type": "array", "minItems": 1, "maxItems": 4, "uniqueItems": true, "items": {"type": "string", "maxLength": 128}}}}
+    PairingSelfDisconnect: {"type": "object", "additionalProperties": false, "required": ["mode"], "properties": {"mode": {"type": "string", "enum": ["drain", "revoke_now"]}, "account_id": {"type": "string", "format": "uuid"}, "expected_revision": {"type": "integer", "minimum": 1, "description": "Required for person disconnect/remove from a reviewed PairingView. Optional for self-disconnect."}}}
+    PairingDisconnect: {"type": "object", "additionalProperties": false, "required": ["mode", "expected_revision"], "properties": {"mode": {"type": "string", "enum": ["drain", "revoke_now"]}, "expected_revision": {"type": "integer", "minimum": 1, "description": "Required for person disconnect/remove from a reviewed PairingView. Optional for self-disconnect."}}}
+    PairingError: {"type": "object", "additionalProperties": false, "required": ["error", "code"], "properties": {"error": {"type": "string"}, "code": {"type": "string"}}}
+    PairingView: {"type": "object", "description": "Immutable request review and current lifecycle. Runtime prefix is returned only to initiating proof on successful redemption; never a token. Each verification has exactly one immutable run. Disconnect never asserts process termination.", "properties": {"request_id": {"type": "string"}, "tenant_id": {"type": "string"}, "tenant_name": {"type": "string"}, "state": {"type": "string", "enum": ["pending", "approved", "denied", "expired", "redeemed", "revoked"]}, "request_digest": {"type": "string"}, "expires_at": {"type": "string", "format": "date-time"}, "computer_name": {"type": "string"}, "platform": {"type": "string"}, "arch": {"type": "string"}, "workspace_path": {"type": "string"}, "capabilities": {"type": "array", "items": {"type": "string"}}, "requested_accounts": {"type": "array", "items": {"$ref": "#/components/schemas/PairingAccountChoice"}}, "verification": {"type": "object", "properties": {"mode": {"type": ["string", "null"], "enum": ["one_per_harness", "connect_only", null]}, "policy": {"const": "read_only"}, "runs_per_account": {"const": 1}, "max_parallel_runs": {"const": 1}, "allowance": {"const": 1}, "unit": {"const": "requests"}, "max_duration_seconds": {"const": 60}, "expires_at": {"type": "string", "format": "date-time"}, "task": {"const": "Reply exactly AEON_VERIFIED. Do not modify files, perform privileged actions, access external networks, or use external/MCP tools. Use the enforced read-only verification mode."}}}, "computer_id": {"type": ["string", "null"]}, "computer_state": {"type": ["string", "null"], "enum": ["connected", "draining", "revoked", null]}, "principal_id": {"type": ["string", "null"]}, "daemon_id": {"type": ["string", "null"]}, "runtime_prefix": {"type": "string"}, "local_cleanup": {"type": "string"}, "local_processes": {"type": "string"}, "enrollments": {"type": "array", "items": {"type": "object", "properties": {"account_id": {"type": "string"}, "account_key": {"type": "string"}, "harness": {"type": "string"}, "label": {"type": "string"}, "model_profile_id": {"type": "string"}, "state": {"type": "string"}, "local_cleanup": {"type": "string"}, "verification_run_id": {"type": ["string", "null"]}, "active_run_ids": {"type": "array", "items": {"type": "string", "format": "uuid"}}, "verification_state": {"type": "string"}, "verification_error": {"type": "string"}, "local_processes": {"type": "string", "enum": ["unconfirmed", "drained"]}, "accounting_state": {"type": "string", "enum": ["settled", "unconfirmed"]}}}}, "setup_state": {"type": "string", "enum": ["not_started", "approved", "provisioning", "login_required", "service_conflict", "connected", "setup_failed"]}, "setup_error": {"type": "string"}, "last_seen_at": {"type": ["string", "null"], "format": "date-time"}, "connectivity": {"type": "string", "enum": ["online", "offline", "unknown"]}, "revision": {"type": "integer"}, "accounting_state": {"type": "string", "enum": ["settled", "unconfirmed"]}, "existing_computer_id": {"type": "string", "format": "uuid"}}, "required": ["request_id", "tenant_id", "tenant_name", "state", "request_digest", "expires_at", "computer_name", "platform", "arch", "workspace_path", "capabilities", "requested_accounts", "verification", "computer_id", "computer_state", "principal_id", "daemon_id", "local_cleanup", "local_processes", "enrollments", "setup_state", "setup_error", "last_seen_at", "connectivity", "revision", "accounting_state"]}
+    PairingDeviceResponse: {"type": "object", "additionalProperties": false, "required": ["request_id", "tenant_id", "user_code", "state", "expires_at", "interval_seconds", "verification_uri", "request_digest"], "properties": {"request_id": {"type": "string", "format": "uuid"}, "tenant_id": {"type": "string", "format": "uuid"}, "user_code": {"type": "string"}, "state": {"type": "string"}, "expires_at": {"type": "string", "format": "date-time"}, "interval_seconds": {"const": 5}, "verification_uri": {"type": "string"}, "request_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}}
     ClassicBatchAliasResponse:
       type: object
       additionalProperties: false
@@ -5831,6 +6021,11 @@ components:
       type: object
       required: [id, work_order_id, agent_principal_id, status, model_evidence, input_tokens, output_tokens, cost_micros, created_at]
       properties:
+        purpose: {type: string, enum: [managed, pairing_verification]}
+        verification_policy: {type: string, enum: [read_only], description: Present only for pairing_verification; local adapter must enforce this policy.}
+        verification_task: {type: string, description: Fixed harmless server task for pairing verification.}
+        max_duration_seconds: {type: integer, const: 60, description: Present only for pairing verification.}
+        repository_mutation_allowed: {type: boolean}
         id: {type: string, format: uuid}
         work_order_id: {type: string, format: uuid}
         agent_principal_id: {type: string, format: uuid}

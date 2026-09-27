@@ -1,0 +1,60 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+name: Pairing platform lifecycle
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/pairing-platform.yml"
+      - "cmd/aeon-agentd/**"
+      - "internal/agentsetup/**"
+      - "scripts/onboarding-platform/**"
+      - "go.mod"
+      - "go.sum"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lifecycle:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            os: darwin
+            arch: arm64
+            service: launchd
+          - runner: macos-15-intel
+            os: darwin
+            arch: amd64
+            service: launchd
+          - runner: ubuntu-24.04
+            os: linux
+            arch: amd64
+            service: systemd-user
+          - runner: ubuntu-24.04-arm
+            os: linux
+            arch: arm64
+            service: systemd-user
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.26"
+      - name: Check actual runner architecture
+        env:
+          EXPECT_OS: ${{ matrix.os }}
+          EXPECT_ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          actual_os="$(go env GOOS)"
+          actual_arch="$(go env GOARCH)"
+          test "$actual_os/$actual_arch" = "$EXPECT_OS/$EXPECT_ARCH"
+      - name: Real isolated user-service lifecycle with fake executables
+        env:
+          AEON_DISPOSABLE_SERVICE_FIXTURE: "1"
+          GOMAXPROCS: "2"
+        run: go run -p 2 ./scripts/onboarding-platform

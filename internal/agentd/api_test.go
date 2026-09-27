@@ -5,11 +5,54 @@ package agentd
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"sync"
 	"testing"
 )
+
+func TestRemoteTelemetryErrorClassification(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		status   int
+		message  string
+		protocol bool
+	}{
+		{"malformed", 400, "status report requires status", true},
+		{"too_large", 413, "payload too large", true},
+		{"unprocessable", 422, "invalid report", true},
+		{"divergent_replay", 409, "divergent telemetry replay", true},
+		{"sequence", 409, "telemetry sequence is not monotonic", true},
+		{"state_transition", 409, "run cannot return to starting", true},
+		{"unauthorized", 401, "invalid key", false},
+		{"forbidden", 403, "enrollment revoked", false},
+		{"missing", 404, "run not found", false},
+		{"timeout", 408, "request timeout", false},
+		{"generation", 409, "daemon generation conflict", false},
+		{"not_live", 409, "run is not live", false},
+		{"draining", 409, "enrollment_draining", false},
+		{"pairing_revoked", 409, "pairing_revoked", false},
+		{"unknown_conflict", 409, "unknown conflict", false},
+		{"revoked", 410, "enrollment_revoked", false},
+		{"rate_limited", 429, "slow down", false},
+		{"unavailable", 503, "unavailable", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(tc.status)
+				_ = json.NewEncoder(w).Encode(map[string]string{"error": tc.message})
+			}))
+			defer server.Close()
+			remote := NewRemote(server.URL, "test-key")
+			remote.daemonID, remote.generation = "daemon", "generation"
+			err := remote.Report(t.Context(), "run", Telemetry{Sequence: 1, Kind: "status"})
+			if err == nil || errors.Is(err, ErrTelemetryProtocol) != tc.protocol {
+				t.Fatalf("HTTP %d classified incorrectly: %v", tc.status, err)
+			}
+		})
+	}
+}
 
 func TestRemoteUsesAeonRunAndInboxContract(t *testing.T) {
 	seen := map[string]bool{}

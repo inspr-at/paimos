@@ -13,6 +13,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgconn"
 
+	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
@@ -121,6 +122,11 @@ func decodeJSON(w http.ResponseWriter, r *http.Request, dst any) error {
 }
 
 func writeErr(w http.ResponseWriter, err error) {
+	var pairingErr *agentpairing.Error
+	if errors.As(err, &pairingErr) {
+		agentpairing.WriteError(w, err)
+		return
+	}
 	var he *httpError
 	if errors.As(err, &he) {
 		httpapi.WriteError(w, he.status, he.msg)

@@ -236,7 +236,7 @@ func (a *rejectStartedAPI) Report(ctx context.Context, id string, report Telemet
 	return a.fakeAPI.Report(ctx, id, report)
 }
 
-func TestWireSupervisorFailedOwnershipTransferClosesReader(t *testing.T) {
+func TestWireSupervisorReportFailureKeepsOwnerUntilExit(t *testing.T) {
 	s, api, _ := testSupervisor(t)
 	defer s.Close(context.Background())
 	p, r, w := heldWire(t)
@@ -245,6 +245,13 @@ func TestWireSupervisorFailedOwnershipTransferClosesReader(t *testing.T) {
 	s.adapters[Codex] = &heldWireAdapter{proc: &piProcess{wireProcess: p}}
 	if err := s.PollOnce(t.Context()); err == nil {
 		t.Fatal("startup report rejection ignored")
+	}
+	// The reporting failure does not end process ownership. This fixture's
+	// root has already exited; the monitor independently drains its reader.
+	select {
+	case <-s.runs[api.run.ID].monitorDone:
+	case <-time.After(4 * time.Second):
+		t.Fatal("exited root was not drained")
 	}
 	assertReaderReleased(t, p, r, w)
 }
