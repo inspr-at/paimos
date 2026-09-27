@@ -1,0 +1,405 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+package agentpairing
+
+import (
+	"context"
+	"net/http"
+	"slices"
+	"strings"
+	"time"
+
+	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/events"
+	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/jackc/pgx/v5"
+)
+
+type approval struct {
+	Digest       string   `json:"request_digest"`
+	Verification string   `json:"verification"`
+	Selected     []string `json:"selected_account_keys"`
+}
+
+func (m *Module) approve(w http.ResponseWriter, r *http.Request, p tenant.Principal) {
+	var in approval
+	if err := decode(w, r, &in); err != nil {
+		WriteError(w, err)
+		return
+	}
+	if !hashRE.MatchString(in.Digest) || (in.Verification != "one_per_harness" && in.Verification != "connect_only") || len(in.Selected) < 1 || len(in.Selected) > 4 {
+		WriteError(w, fail(400, "invalid_request", "review digest, selected accounts and verification choice required"))
+		return
+	}
+	slices.Sort(in.Selected)
+	if len(slices.Compact(slices.Clone(in.Selected))) != len(in.Selected) {
+		WriteError(w, fail(400, "invalid_request", "duplicate selection"))
+		return
+	}
+	var out View
+	err := m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
+		ctx := r.Context()
+		rec, err := load(ctx, tx, r.PathValue("requestId"))
+		if err != nil {
+			return notFound(err)
+		}
+		if rec.Digest != in.Digest {
+			return fail(409, "conflict", "review details changed")
+		}
+		chosen := []Choice{}
+		for _, a := range rec.Details.Accounts {
+			if slices.Contains(in.Selected, a.AccountKey) {
+				chosen = append(chosen, a)
+			}
+		}
+		if len(chosen) != len(in.Selected) {
+			return fail(400, "invalid_request", "selection must match reviewed accounts")
+		}
+		if err = authz.RequireTx(ctx, tx, p, "account.manage", authz.Scope{}); err != nil {
+			return fail(403, "forbidden", "person account management required")
+		}
+		if err = expire(ctx, tx, &rec); err != nil {
+			return err
+		}
+		if rec.State == "approved" || rec.State == "redeemed" {
+			var selected []string
+			if err = tx.QueryRow(ctx, `SELECT selected_account_keys FROM agent_pairing_requests WHERE id=$1`, rec.ID).Scan(&selected); err != nil {
+				return err
+			}
+			if rec.Mode == nil || *rec.Mode != in.Verification || !slices.Equal(selected, in.Selected) {
+				return fail(409, "conflict", "approval is immutable")
+			}
+			out, err = view(ctx, tx, rec, false)
+			return err
+		}
+		if rec.State != "pending" {
+			out, err = view(ctx, tx, rec, false)
+			return err
+		}
+		for _, scope := range RuntimePermissions {
+			if err = authz.RequireTx(ctx, tx, p, scope, authz.Scope{}); err != nil {
+				return fail(403, "forbidden", "approver cannot delegate required runtime permission: "+scope)
+			}
+		}
+		// Revalidate profile scope under the same lock as issuance. A submitted UUID
+		// or local account label is never a request to adopt another identity.
+		for _, a := range chosen {
+			var ok bool
+			if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM model_profiles WHERE id=$1 AND harness=$2 AND enabled)`, a.ProfileID, a.Harness).Scan(&ok); err != nil {
+				return err
+			}
+			if !ok {
+				return fail(409, "conflict", "reviewed model profile is no longer available")
+			}
+		}
+		computer, principal, daemon := "", "", ""
+		if rec.Details.ExistingComputerID != "" {
+			computer = rec.Details.ExistingComputerID
+			var state string
+			if err = tx.QueryRow(ctx, `SELECT principal_id::text,daemon_id,state FROM agent_pairing_computers WHERE id=$1 FOR UPDATE`, computer).Scan(&principal, &daemon, &state); err != nil {
+				return notFound(err)
+			}
+			if state != "connected" {
+				return fail(409, "pairing_revoked", "computer is disconnecting or revoked; pair afresh")
+			}
+			// Do not expand the original creator ceiling during Add harness.
+			var creator string
+			if err = tx.QueryRow(ctx, `SELECT q.approved_by::text FROM agent_pairing_computers c JOIN agent_pairing_requests q ON q.tenant_id=c.tenant_id AND q.id=c.request_id WHERE c.id=$1`, computer).Scan(&creator); err != nil {
+				return err
+			}
+			original := tenant.Principal{ID: creator, TenantID: p.TenantID, Kind: tenant.Person}
+			for _, scope := range RuntimePermissions {
+				if authz.RequireTx(ctx, tx, original, scope, authz.Scope{}) != nil {
+					return fail(403, "forbidden", "original runtime delegation is no longer valid")
+				}
+			}
+		} else {
+			computer = rec.ID
+			daemon = "paired-" + computer
+			if err = tx.QueryRow(ctx, `INSERT INTO principals(tenant_id,kind,name,roles) VALUES($1,'agent',$2,'{}') RETURNING id::text`, p.TenantID, rec.Details.ComputerName).Scan(&principal); err != nil {
+				return err
+			}
+			var role string
+			if err = tx.QueryRow(ctx, `INSERT INTO roles(tenant_id,key,name) VALUES($1,$2,'Paired computer runtime') RETURNING id::text`, p.TenantID, "paired_"+strings.ReplaceAll(principal, "-", "")).Scan(&role); err != nil {
+				return err
+			}
+			for _, scope := range RuntimePermissions {
+				if _, err = tx.Exec(ctx, `INSERT INTO role_permissions(tenant_id,role_id,permission) VALUES($1,$2,$3)`, p.TenantID, role, scope); err != nil {
+					return err
+				}
+			}
+			if _, err = tx.Exec(ctx, `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type) VALUES($1,$2,$3,'workspace')`, p.TenantID, principal, role); err != nil {
+				return err
+			}
+			suffix, err := randomHex(8)
+			if err != nil {
+				return err
+			}
+			prefix := strings.ReplaceAll(p.TenantID, "-", "") + suffix
+			var key string
+			if err = tx.QueryRow(ctx, `INSERT INTO agent_keys(tenant_id,principal_id,name,prefix,hash,scopes,created_by_principal_id) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING id::text`, p.TenantID, principal, rec.Details.ComputerName, prefix, rec.RuntimeHash, RuntimePermissions, p.ID).Scan(&key); err != nil {
+				return err
+			}
+			if _, err = tx.Exec(ctx, `INSERT INTO agent_pairing_computers(tenant_id,id,request_id,principal_id,key_id,daemon_id,lifecycle_hash) VALUES($1,$2,$2,$3,$4,$5,$6)`, p.TenantID, computer, principal, key, daemon, rec.LifecycleHash); err != nil {
+				return err
+			}
+		}
+		for _, a := range chosen {
+			// A revoked account key remains reserved forever in this daemon. Re-pair
+			// must choose a new local opaque key; stale setup cannot revive a tombstone.
+			var exists bool
+			if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agent_accounts WHERE daemon_id=$1 AND harness=$2 AND account_key=$3)`, daemon, a.Harness, a.AccountKey).Scan(&exists); err != nil {
+				return err
+			}
+			if exists {
+				return fail(409, "conflict", "account key was already enrolled; use a fresh local enrollment key")
+			}
+			var account string
+			if err = tx.QueryRow(ctx, `INSERT INTO agent_accounts(tenant_id,account_key,harness,daemon_id,registered_by_principal_id,label,max_parallel_runs,host_label,allowed_model_profile_ids) VALUES($1,$2,$3,$4,$5,$6,1,$7,ARRAY[$8::uuid]) RETURNING id::text`, p.TenantID, a.AccountKey, a.Harness, daemon, principal, a.Label, rec.Details.ComputerName, a.ProfileID).Scan(&account); err != nil {
+				return err
+			}
+			if _, err = tx.Exec(ctx, `INSERT INTO agent_pairing_enrollments(tenant_id,account_id,computer_id,request_id,model_profile_id,verification_expires_at) VALUES($1,$2,$3,$4,$5,$6)`, p.TenantID, account, computer, rec.ID, a.ProfileID, rec.VerificationExpiresAt); err != nil {
+				return err
+			}
+			if in.Verification == "one_per_harness" {
+				if err = verificationJob(ctx, tx, p, computer, principal, account, a, rec.VerificationExpiresAt); err != nil {
+					return err
+				}
+			}
+		}
+		rec.State = "approved"
+		rec.Mode = &in.Verification
+		rec.ComputerID = &computer
+		rec.ApprovedBy = &p.ID
+		if _, err = tx.Exec(ctx, `UPDATE agent_pairing_requests SET state='approved',verification=$2,approved_by=$3,computer_id=$4,selected_account_keys=$5 WHERE id=$1`, rec.ID, in.Verification, p.ID, computer, in.Selected); err != nil {
+			return err
+		}
+		if _, err = tx.Exec(ctx, `UPDATE agent_pairing_computers SET revision=revision+1 WHERE id=$1`, computer); err != nil {
+			return err
+		}
+		out, err = view(ctx, tx, rec, false)
+		if err != nil {
+			return err
+		}
+		return audit(ctx, tx, p, "agent_pairing.approved", out)
+	})
+	if err != nil {
+		WriteError(w, err)
+		return
+	}
+	reply(w, out)
+}
+func verificationJob(ctx context.Context, tx pgx.Tx, p tenant.Principal, computer, principal, account string, a Choice, expires time.Time) error {
+	var project *string
+	if err := tx.QueryRow(ctx, `SELECT verification_project_id::text FROM agent_pairing_computers WHERE id=$1`, computer).Scan(&project); err != nil {
+		return err
+	}
+	if project == nil {
+		var id string
+		if err := tx.QueryRow(ctx, `INSERT INTO nodes(tenant_id,key,kind_id,title) SELECT $1,aeon_next_node_key($1,k.short_prefix),k.id,'Computer connection checks' FROM node_kinds k WHERE k.slug='project' RETURNING id::text`, p.TenantID).Scan(&id); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `UPDATE agent_pairing_computers SET verification_project_id=$2 WHERE id=$1`, computer, id); err != nil {
+			return err
+		}
+		project = &id
+	}
+	var order, run string
+	err := tx.QueryRow(ctx, `INSERT INTO nodes(tenant_id,key,kind_id,title,body,parent_id) SELECT $1,aeon_next_node_key($1,k.short_prefix),k.id,$2,$3,$4 FROM node_kinds k WHERE k.slug='work_order' RETURNING id::text`, p.TenantID, "Verify "+a.Harness+" connection", VerificationTask, project).Scan(&order)
+	if err != nil {
+		return err
+	}
+	if _, err = tx.Exec(ctx, `INSERT INTO work_orders(tenant_id,node_id,requested_by_principal_id,assignee_principal_id,status,max_duration_seconds) VALUES($1,$2,$3,$4,'ready',$5)`, p.TenantID, order, p.ID, principal, VerificationSeconds); err != nil {
+		return err
+	}
+	if _, err = tx.Exec(ctx, `INSERT INTO work_criteria(tenant_id,work_order_id,position,description) VALUES($1,$2,0,'Return AEON_VERIFIED in enforced read-only mode without privileged actions')`, p.TenantID, order); err != nil {
+		return err
+	}
+	if err = tx.QueryRow(ctx, `INSERT INTO agent_runs(tenant_id,work_order_id,agent_principal_id,model_profile_id,requested_model,requested_account_id,purpose) SELECT $1,$2,$3,m.id,m.model,$4,'pairing_verification' FROM model_profiles m WHERE m.id=$5 RETURNING id::text`, p.TenantID, order, principal, account, a.ProfileID).Scan(&run); err != nil {
+		return err
+	}
+	if _, err = tx.Exec(ctx, `UPDATE agent_pairing_enrollments SET verification_run_id=$2 WHERE account_id=$1`, account, run); err != nil {
+		return err
+	}
+	if _, err = tx.Exec(ctx, `INSERT INTO account_allowance_windows(tenant_id,account_id,starts_at,ends_at,unit,allowance,pace_model,burst_ratio,pairing_verification) VALUES($1,$2,clock_timestamp(),$3,'requests',1,'unrestricted',0,true)`, p.TenantID, account, expires); err != nil {
+		return err
+	}
+	return audit(ctx, tx, p, "agent_pairing.verification_created", map[string]any{"account_id": account, "run_id": run, "work_order_id": order, "allowance": 1, "unit": "requests", "expires_at": expires, "max_duration_seconds": VerificationSeconds})
+}
+func audit(ctx context.Context, tx pgx.Tx, p tenant.Principal, kind string, after any) error {
+	_, err := events.Append(ctx, tx, p, events.Change{Type: kind, After: after})
+	return err
+}
+func (m *Module) deny(w http.ResponseWriter, r *http.Request, p tenant.Principal) {
+	var out View
+	err := m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
+		rec, err := load(r.Context(), tx, r.PathValue("requestId"))
+		if err != nil {
+			return notFound(err)
+		}
+		if err = authz.RequireTx(r.Context(), tx, p, "account.manage", authz.Scope{}); err != nil {
+			return err
+		}
+		if err = expire(r.Context(), tx, &rec); err != nil {
+			return err
+		}
+		if rec.State == "approved" || rec.State == "redeemed" {
+			return fail(409, "conflict", "approved pairing must be disconnected")
+		}
+		if rec.State == "pending" {
+			rec.State = "denied"
+			if _, err = tx.Exec(r.Context(), `UPDATE agent_pairing_requests SET state='denied' WHERE id=$1`, rec.ID); err != nil {
+				return err
+			}
+			if err = audit(r.Context(), tx, p, "agent_pairing.denied", map[string]string{"request_id": rec.ID}); err != nil {
+				return err
+			}
+		}
+		out, err = view(r.Context(), tx, rec, false)
+		return err
+	})
+	if err != nil {
+		WriteError(w, err)
+		return
+	}
+	reply(w, out)
+}
+func expire(ctx context.Context, tx pgx.Tx, rec *record) error {
+	var expired bool
+	if err := tx.QueryRow(ctx, `SELECT expires_at<=clock_timestamp() OR attempts>=10 FROM agent_pairing_requests WHERE id=$1`, rec.ID).Scan(&expired); err != nil {
+		return err
+	}
+	if (rec.State != "pending" && rec.State != "approved") || !expired {
+		return nil
+	}
+	if rec.ComputerID != nil {
+		// An expired Add harness grant affects only its new enrollments.
+		if err := disconnectRequest(ctx, tx, *rec); err != nil {
+			return err
+		}
+	}
+	rec.State = "expired"
+	_, err := tx.Exec(ctx, `UPDATE agent_pairing_requests SET state='expired' WHERE id=$1`, rec.ID)
+	return err
+}
+func view(ctx context.Context, tx pgx.Tx, rec record, prefix bool) (View, error) {
+	v := View{RequestID: rec.ID, TenantID: rec.TenantID, State: rec.State, Digest: rec.Digest, ExpiresAt: rec.ExpiresAt, ComputerName: rec.Details.ComputerName, Platform: rec.Details.Platform, Arch: rec.Details.Arch, Workspace: rec.Details.Workspace, Capabilities: rec.Details.Capabilities, Requested: rec.Details.Accounts, ComputerID: rec.ComputerID, Cleanup: "pending", Processes: "unconfirmed", Enrollments: []Enrollment{}, Verification: Verification{"read_only", rec.Mode, 1, 1, VerificationSeconds, 1, "requests", rec.VerificationExpiresAt, VerificationTask}}
+	if err := tx.QueryRow(ctx, `SELECT name FROM tenants WHERE id=$1`, rec.TenantID).Scan(&v.TenantName); err != nil {
+		return v, err
+	}
+	v.ExistingComputerID = rec.Details.ExistingComputerID
+	v.SetupState = "not_started"
+	v.Connectivity = "unknown"
+	v.AccountingState = "settled"
+	if rec.ComputerID == nil {
+		return v, nil
+	}
+	if err := finalizeDrain(ctx, tx, *rec.ComputerID); err != nil {
+		return v, err
+	}
+	var keyPrefix string
+	err := tx.QueryRow(ctx, `SELECT c.state,c.principal_id::text,c.daemon_id,c.local_cleanup,c.local_processes,c.revision,k.prefix,c.setup_state,c.setup_error,c.last_seen_at,
+ CASE WHEN EXISTS(SELECT 1 FROM agent_accounts a JOIN agent_pairing_enrollments e ON e.tenant_id=a.tenant_id AND e.account_id=a.id WHERE e.computer_id=c.id AND e.state='connected' AND a.last_probe_ok AND a.last_probe_at>clock_timestamp()-interval '2 minutes') THEN 'online' WHEN c.last_seen_at IS NULL THEN 'unknown' ELSE 'offline' END FROM agent_pairing_computers c JOIN agent_keys k ON k.tenant_id=c.tenant_id AND k.id=c.key_id WHERE c.id=$1`, *rec.ComputerID).Scan(&v.ComputerState, &v.PrincipalID, &v.DaemonID, &v.Cleanup, &v.Processes, &v.Revision, &keyPrefix, &v.SetupState, &v.SetupError, &v.LastSeenAt, &v.Connectivity)
+	if err != nil {
+		return v, err
+	}
+	if *v.ComputerState == "revoked" {
+		v.State = "revoked"
+	} else if prefix && *v.ComputerState == "connected" {
+		v.RuntimePrefix = keyPrefix
+	}
+	rows, err := tx.Query(ctx, `SELECT e.account_id::text,a.account_key,a.harness,a.label,e.model_profile_id::text,e.state,e.local_cleanup,e.verification_run_id::text,
+  ARRAY(SELECT r.id::text FROM agent_runs r WHERE r.account_id=e.account_id AND r.status IN ('starting','running','waiting') ORDER BY r.id),
+ CASE WHEN e.verification_run_id IS NULL THEN 'not_selected' WHEN e.verification_expires_at<=clock_timestamp() AND (SELECT status FROM agent_runs WHERE id=e.verification_run_id)='queued' THEN 'expired' ELSE (SELECT status FROM agent_runs WHERE id=e.verification_run_id) END,
+ coalesce((SELECT error_code FROM run_telemetry WHERE run_id=e.verification_run_id AND error_code IS NOT NULL ORDER BY sequence DESC LIMIT 1),'')
+  FROM agent_pairing_enrollments e JOIN agent_accounts a ON a.tenant_id=e.tenant_id AND a.id=e.account_id WHERE e.computer_id=$1 ORDER BY a.created_at,a.id`, *rec.ComputerID)
+	if err != nil {
+		return v, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var e Enrollment
+		if err = rows.Scan(&e.AccountID, &e.AccountKey, &e.Harness, &e.Label, &e.ProfileID, &e.State, &e.Cleanup, &e.VerificationRunID, &e.ActiveRunIDs, &e.VerificationState, &e.VerificationError); err != nil {
+			return v, err
+		}
+		e.LocalProcesses = "unconfirmed"
+		if e.Cleanup == "confirmed" {
+			e.LocalProcesses = "drained"
+		}
+		e.AccountingState = "settled"
+		if len(e.ActiveRunIDs) > 0 {
+			e.AccountingState = "unconfirmed"
+			v.AccountingState = "unconfirmed"
+		}
+		v.Enrollments = append(v.Enrollments, e)
+	}
+	return v, rows.Err()
+}
+func (m *Module) list(w http.ResponseWriter, r *http.Request, p tenant.Principal) {
+	out := []View{}
+	err := m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
+		rows, err := tx.Query(r.Context(), `SELECT request_id::text FROM agent_pairing_computers ORDER BY created_at DESC,id LIMIT 100`)
+		if err != nil {
+			return err
+		}
+		var ids []string
+		for rows.Next() {
+			var id string
+			if err = rows.Scan(&id); err != nil {
+				rows.Close()
+				return err
+			}
+			ids = append(ids, id)
+		}
+		rows.Close()
+		if err = rows.Err(); err != nil {
+			return err
+		}
+		for _, id := range ids {
+			rec, err := load(r.Context(), tx, id)
+			if err != nil {
+				return err
+			}
+			v, err := view(r.Context(), tx, rec, false)
+			if err != nil {
+				return err
+			}
+			out = append(out, v)
+		}
+		return nil
+	})
+	if err != nil {
+		WriteError(w, err)
+		return
+	}
+	reply(w, map[string]any{"computers": out})
+}
+func computerRecord(ctx context.Context, tx pgx.Tx, id string) (record, error) {
+	if !uuidRE.MatchString(id) {
+		return record{}, fail(404, "not_found", "computer not found")
+	}
+	var request string
+	if err := tx.QueryRow(ctx, `SELECT request_id::text FROM agent_pairing_computers WHERE id=$1`, id).Scan(&request); err != nil {
+		return record{}, notFound(err)
+	}
+	rec, err := load(ctx, tx, request)
+	return rec, notFound(err)
+}
+func (m *Module) get(w http.ResponseWriter, r *http.Request, p tenant.Principal) {
+	var out View
+	err := m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
+		rec, err := computerRecord(r.Context(), tx, r.PathValue("computerId"))
+		if err != nil {
+			return err
+		}
+		if err = expire(r.Context(), tx, &rec); err != nil {
+			return err
+		}
+		out, err = view(r.Context(), tx, rec, false)
+		return err
+	})
+	if err != nil {
+		WriteError(w, err)
+		return
+	}
+	reply(w, out)
+}

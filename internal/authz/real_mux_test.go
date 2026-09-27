@@ -15,6 +15,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/activity"
 	"github.com/inspr-at/paimos/internal/agentaccounts"
+	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/agentruns"
 	"github.com/inspr-at/paimos/internal/approvals"
 	"github.com/inspr-at/paimos/internal/attachments"
@@ -74,7 +75,7 @@ func TestRealMuxRouteCoverage(t *testing.T) {
 		attachments.New(nil, attachments.Store{}), &greetings.Module{}, knowledge.New(nil),
 		projectgroups.New(nil), &releasehistory.Module{}, profile.New(nil, attachments.Store{}),
 		imports.New(nil), inbox.New(nil), messaging, harness.New(nil), ticketwork.New(nil), usagedashboard.New(nil), workorders.New(nil),
-		agentruns.New(nil), approvals.New(nil), modelregistry.New(nil), agentaccounts.New(nil),
+		agentruns.New(nil), agentpairing.New(nil, "https://pairing.test", "test"), approvals.New(nil), modelregistry.New(nil), agentaccounts.New(nil),
 		journey.New(nil), requirements.New(nil), releases.New(nil), intake.New(nil),
 		plugins.New(nil), stagehandoff.New(nil, nil), costunits.New(nil, nil), crm.New(nil, nil),
 		&quotes.Module{}, &collaboration.Module{}, &publicquotes.Module{}, &confirmation.Module{},

@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/httpapi"
@@ -42,7 +43,12 @@ func (m *Module) Mount(mux *http.ServeMux) {
 }
 
 func (m *Module) in(ctx context.Context, tenantID string, fn func(pgx.Tx) error) error {
-	return db.InTenant(ctx, m.pool, tenantID, fn)
+	return db.InTenant(ctx, m.pool, tenantID, func(tx pgx.Tx) error {
+		if err := agentpairing.Lock(ctx, tx); err != nil {
+			return err
+		}
+		return fn(tx)
+	})
 }
 
 func (m *Module) list(w http.ResponseWriter, r *http.Request) {
@@ -50,14 +56,23 @@ func (m *Module) list(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if err := m.requirePermission(r, p, "account.read"); err != nil {
-		writeErr(w, err)
+	if err := authz.Require(authz.BindPool(r.Context(), m.pool), "account.read", authz.Scope{}); err != nil {
+		writeErr(w, fail(http.StatusForbidden, "permission denied"))
 		return
 	}
 	var items []Account
 	err := m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
 		var err error
 		items, err = listAccounts(r.Context(), tx)
+		if p.Kind == tenant.Agent {
+			own := []Account{}
+			for _, a := range items {
+				if a.RegisteredBy == p.ID {
+					own = append(own, a)
+				}
+			}
+			items = own
+		}
 		return err
 	})
 	if err != nil {
