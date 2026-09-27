@@ -1871,16 +1871,97 @@ paths:
       - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
     get:
       operationId: getHarnessSession
-      description: Session detail, including at most 20 recent activity notes, newest first.
+      description: Session detail, including at most 20 recent activity notes and metadata changes, newest first.
       responses:
         '200': {description: Session detail, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessSession'}}}}
+  /projects/{projectId}/harness-sessions/{sessionId}/usage:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: reportHarnessSessionUsage
+      security: *auth
+      description: >-
+        Requires harness.worker and the owning agent's generation lease. Accepts managed and unmanaged
+        sessions, including final reporting after stop. Counters are cumulative per exact model within
+        the entire session, never deltas or source-local totals. Input includes cached input. Known
+        counters and uncached input cannot decrease or become unknown. Sequences must increase.
+        Exact report_id replay returns the current row without another event; reuse with different
+        normalized input conflicts. Final counters and metadata are immutable. Null counters mean
+        unknown and force provisional=true. Latest available tenant model pricing is pinned once;
+        subsequent price versions never reprice a row. An unpriced row may acquire pricing on a later
+        report. Subscription metadata is self-reported and never reduces the list-price estimate.
+        No run telemetry, budgets or account settlement are modified. Consumers must not add managed
+        run totals to reported session totals. reported_at is observation time, not token spend time.
+      parameters:
+        - {name: X-Aeon-Worker-Lease, in: header, required: true, schema: {type: string, minLength: 32, maxLength: 256}}
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessUsageReport'}}}}
+      responses:
+        '200':
+          description: Accepted cumulative report or exact replay
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [usage, replayed]
+                properties:
+                  usage: {$ref: '#/components/schemas/SessionModelUsage'}
+                  replayed: {type: boolean}
+        '400': {description: Invalid or out-of-bounds report}
+        '403': {description: Worker proof or scope rejected}
+        '409': {description: Conflicting replay, stale sequence, decreasing counters or changed final report}
+    get:
+      operationId: getHarnessSessionUsage
+      security: *auth
+      description: Requires harness.read and project visibility. Empty items means unreported, never measured zero. Only current cumulative rows are returned; no aggregation or inferred billing.
+      responses:
+        '200':
+          description: Current per-model session usage
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [session_id, reported, items]
+                properties:
+                  session_id: {type: string, format: uuid}
+                  reported: {type: boolean}
+                  items: {type: array, items: {$ref: '#/components/schemas/SessionModelUsage'}}
+        '403': {description: Scope rejected}
+        '404': {description: Session not visible}
+  /model-prices:
+    get:
+      operationId: listModelPrices
+      security: *auth
+      description: Latest immutable price version per model for the tenant. Requires harness.read. No seeded or inferred vendor prices.
+      parameters:
+        - {name: model, in: query, schema: {type: string, minLength: 1, maxLength: 128}}
+      responses:
+        '200':
+          description: Latest tenant prices
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: {type: array, items: {$ref: '#/components/schemas/ModelPrice'}}
+    post:
+      operationId: createModelPrice
+      security: *auth
+      description: A person with models.manage creates an immutable, increasing version for an exact model identifier. Exact version/value retry is idempotent; conflicting or older new versions return 409. USD decimal strings have at most six fractional places.
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ModelPriceWrite'}}}}
+      responses:
+        '201': {description: Immutable tenant price version, content: {application/json: {schema: {$ref: '#/components/schemas/ModelPrice'}}}}
+        '400': {description: Invalid price}
+        '403': {description: models.manage person permission required}
+        '409': {description: Conflicting or out-of-order version}
   /projects/{projectId}/harness-sessions/{sessionId}/heartbeat:
     parameters:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
       - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
     post:
       operationId: heartbeatHarnessSession
-      description: The attributed worker reports liveness and optionally a current step. Changed nonempty notes append bounded activity history in the same transaction.
+      description: The attributed worker reports liveness and optionally a current step or display label. Changed nonempty notes and changed label/model/effort values append bounded histories in the same transaction.
       requestBody:
         required: true
         content:
@@ -1893,6 +1974,7 @@ paths:
                 activity: {type: string, enum: [unknown, busy, idle, throttled]}
                 activity_sequence: {type: integer, format: int64, minimum: 0}
                 activity_note: {type: string, minLength: 1, maxLength: 120, description: Plain text; whitespace trimmed and control characters stripped.}
+                display_label: {type: [string, 'null'], maxLength: 128, description: Optional current session name; omission preserves the label; trimmed empty or null clears it; control characters rejected.}
                 model: {$ref: '#/components/schemas/HarnessModel'}
                 reasoning_effort: {$ref: '#/components/schemas/HarnessEffort'}
                 account_label: {$ref: '#/components/schemas/HarnessAccountLabel'}
@@ -5030,6 +5112,74 @@ components:
         advertised_capabilities: {type: array, items: {type: string, enum: [inbox, status, steer, interrupt, stop]}}
         harness_session_ref: {type: string, minLength: 16, maxLength: 4096, writeOnly: true}
         worker_lease: {type: string, minLength: 32, maxLength: 256, writeOnly: true}
+    UsageTokenCount:
+      type: [integer, 'null']
+      format: int64
+      minimum: 0
+      maximum: 1000000000000
+      description: Null or omitted on input means unknown, not zero.
+    HarnessUsageReport:
+      type: object
+      additionalProperties: false
+      required: [report_id, model, sequence, provisional, billing_mode]
+      properties:
+        report_id: {type: string, format: uuid}
+        model: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9][A-Za-z0-9._:/-]*$'}
+        sequence: {type: integer, format: int64, minimum: 1, maximum: 1000000000000}
+        input_tokens: {$ref: '#/components/schemas/UsageTokenCount'}
+        output_tokens: {$ref: '#/components/schemas/UsageTokenCount'}
+        cached_input_tokens: {$ref: '#/components/schemas/UsageTokenCount'}
+        provisional: {type: boolean}
+        account_id: {type: [string, 'null'], format: uuid}
+        account_label: {type: [string, 'null'], minLength: 1, maxLength: 128, description: Public self-reported label; trimmed, valid Unicode without control characters.}
+        billing_mode: {type: string, enum: [unknown, api, subscription]}
+        subscription_label: {type: [string, 'null'], minLength: 1, maxLength: 120, description: Allowed only with billing_mode subscription. Public self-reported label, not a credential.}
+    SessionModelUsage:
+      type: object
+      required: [session_id, model, sequence, input_tokens, output_tokens, cached_input_tokens, provisional, price_version, estimated_cost_usd, cost_status, currency, account_id, account_label, billing_mode, subscription_label, metadata_source, reported_at]
+      properties:
+        session_id: {type: string, format: uuid}
+        model: {type: string, maxLength: 128}
+        sequence: {type: integer, format: int64}
+        input_tokens: {$ref: '#/components/schemas/UsageTokenCount'}
+        output_tokens: {$ref: '#/components/schemas/UsageTokenCount'}
+        cached_input_tokens: {$ref: '#/components/schemas/UsageTokenCount'}
+        provisional: {type: boolean, description: True when the reporter marks partial or any counter is unknown. Cost remains an estimate even when false.}
+        price_version: {type: [integer, 'null'], format: int64}
+        estimated_cost_usd: {type: [string, 'null'], pattern: '^[0-9]+\.[0-9]{12}$', description: 'Exact ((input-cached)*input_rate + cached*cached_rate + output*output_rate)/1000000, with no binary floats or intermediate rounding. Null if any counter or pricing is unknown; never actual billed cost.'}
+        cost_status: {type: string, enum: [estimated, unknown]}
+        currency: {type: string, const: USD}
+        account_id: {type: [string, 'null'], format: uuid}
+        account_label: {type: [string, 'null'], maxLength: 128}
+        billing_mode: {type: string, enum: [unknown, api, subscription]}
+        subscription_label: {type: [string, 'null']}
+        metadata_source: {type: string, const: reported}
+        reported_at: {type: string, format: date-time}
+    ModelPriceRate:
+      type: string
+      pattern: '^(?:(?:0|[1-9][0-9]{0,5})(?:\.[0-9]{1,6})?|1000000(?:\.0{1,6})?)$'
+      description: USD per million tokens, nonnegative and at most 1000000, at most six fractional places.
+    ModelPriceWrite:
+      type: object
+      additionalProperties: false
+      required: [model, version, input_usd_per_million, output_usd_per_million, cached_input_usd_per_million]
+      properties:
+        model: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9][A-Za-z0-9._:/-]*$'}
+        version: {type: integer, format: int64, minimum: 1, maximum: 1000000000000}
+        input_usd_per_million: {$ref: '#/components/schemas/ModelPriceRate'}
+        output_usd_per_million: {$ref: '#/components/schemas/ModelPriceRate'}
+        cached_input_usd_per_million: {$ref: '#/components/schemas/ModelPriceRate'}
+    ModelPrice:
+      type: object
+      required: [model, version, input_usd_per_million, output_usd_per_million, cached_input_usd_per_million, currency, created_at]
+      properties:
+        model: {type: string}
+        version: {type: integer, format: int64}
+        input_usd_per_million: {$ref: '#/components/schemas/ModelPriceRate'}
+        output_usd_per_million: {$ref: '#/components/schemas/ModelPriceRate'}
+        cached_input_usd_per_million: {$ref: '#/components/schemas/ModelPriceRate'}
+        currency: {type: string, const: USD}
+        created_at: {type: string, format: date-time}
     HarnessSession:
       type: object
       description: State evidence is populated on reads and omitted when unknown in mutation responses and event snapshots.
@@ -5045,7 +5195,7 @@ components:
         ticket_node_id: {type: [string, 'null'], format: uuid}
         work_order_id: {type: [string, 'null'], format: uuid}
         parent_harness_session_id: {type: [string, 'null'], format: uuid}
-        display_label: {type: [string, 'null'], maxLength: 128, description: Public per-session label; null for generations registered without a label.}
+        display_label: {type: [string, 'null'], maxLength: 128, description: Public current per-session label; null for unlabeled generations.}
         model: {$ref: '#/components/schemas/HarnessModel'}
         reasoning_effort: {$ref: '#/components/schemas/HarnessEffort'}
         account_label: {$ref: '#/components/schemas/HarnessAccountLabel'}
@@ -5056,6 +5206,7 @@ components:
         commits: {type: array, maxItems: 20, items: {$ref: '#/components/schemas/HarnessCommit'}}
         activity_note: {type: [string, 'null'], maxLength: 120, description: Current step reported by the worker.}
         activity_history: {type: array, description: Up to 20 changed notes, newest first; present on session detail., items: {$ref: '#/components/schemas/HarnessActivityNote'}}
+        metadata_history: {type: array, description: Up to 20 display label, model, and reasoning effort changes, newest first; present on session detail., items: {$ref: '#/components/schemas/HarnessMetadataChange'}}
         harness: {type: string, enum: [codex, claude, pi, cursor, grok]}
         host: {type: string}
         management_mode: {type: string, enum: [managed, unmanaged]}
@@ -5075,6 +5226,14 @@ components:
       required: [note, at]
       properties:
         note: {type: string, maxLength: 120}
+        at: {type: string, format: date-time}
+    HarnessMetadataChange:
+      type: object
+      required: [field, previous_value, value, at]
+      properties:
+        field: {type: string, enum: [display_label, model, reasoning_effort]}
+        previous_value: {type: [string, 'null']}
+        value: {type: [string, 'null']}
         at: {type: string, format: date-time}
     HarnessModel: {type: [string, 'null'], maxLength: 120, description: Optional trimmed plain text; control characters stripped.}
     HarnessEffort: {type: [string, 'null'], maxLength: 40, description: Optional trimmed plain text; control characters stripped.}

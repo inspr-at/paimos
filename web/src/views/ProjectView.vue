@@ -17,7 +17,7 @@ import { settledNavigation } from '../lib/navigation'
 import { command, consume, run } from '../lib/commands'
 import { remember } from '../lib/recents'
 import { apiParams, clearedFilters, effectiveSort, facetOptions, filtersFromQuery, filtersFromView, filtersToQuery, groupFacet, groupRows, hasFilters, orderByStatus, rowTags, sameListState, suggestName, toggleIn, toggleOut, totalFrom, valueLabel, WORK_KINDS, type DateFilter, type Dimension, type EpicRef, type GroupBy, type ListFilters } from '../lib/ticketList'
-import { filterTicketGraph, type TicketGraphState } from '../lib/ticketGraphRenderer'
+import type { TicketGraphState } from '../lib/ticketGraphRenderer'
 import { useTicketList } from '../lib/useTicketList'
 import { absoluteTime, cycleSort, plural, PRIORITIES, priorityLabel, relativeTime, statusMeta, type SortField, type SortKey } from '../lib/work'
 import { useProjects } from '../stores/projects'
@@ -252,9 +252,8 @@ const filtered = computed(() => hasFilters(filters.value))
 
 function options(dimension: Dimension) {
   if (graphActive.value) {
-    const nodes = filterTicketGraph(graphState.value.data, { ...filters.value, [dimension]: [] }).nodes
     const counts: Record<string, number> = {}
-    for (const node of nodes) {
+    for (const node of graphState.value.visible.nodes) {
       const value = dimension === 'status' ? node.status : dimension === 'priority' ? node.priority ?? 'none' : node.type
       counts[value] = (counts[value] ?? 0) + 1
     }
