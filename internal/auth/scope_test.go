@@ -67,6 +67,7 @@ func TestAgentScopeSeparatesProjectSubpathsAndUnknownRoutes(t *testing.T) {
 		{"GET", "/api/plugins", "plugins.read"},
 		{"POST", project + "/harness-sessions/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb/heartbeat", "harness.worker"},
 		{"GET", "/api/harness-sessions/live", "harness.read"},
+		{"GET", "/api/usage/dashboard", "harness.read"},
 		{"GET", "/api/nodes/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/time-totals", "hours.read"},
 		{"POST", "/api/time-entries", "hours.write"},
 		{"POST", "/api/approvals/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/decision", ""},

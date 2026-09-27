@@ -83,6 +83,9 @@ func TestEffectiveRouteMatrix(t *testing.T) {
 	// project-only guest may ask; a customer never may.
 	checkIn("guest", guest, "GET /api/harness-sessions/live", Scope{AnyProject: true}, true)
 	checkIn("customer", people["customer"], "GET /api/harness-sessions/live", Scope{AnyProject: true}, false)
+	check("member", people["member"], "GET /api/usage/dashboard", true)
+	checkIn("guest", guest, "GET /api/usage/dashboard", Scope{AnyProject: true}, false)
+	check("customer", people["customer"], "GET /api/usage/dashboard", false)
 	checkIn("guest", guest, "GET /api/me/permissions", Scope{AnyProject: true}, true)
 	checkIn("guest", guest, "POST /api/nodes/{nodeId}/comments", Scope{ProjectID: projectID}, true)
 	checkIn("guest", guest, "PATCH /api/nodes/{nodeId}", Scope{ProjectID: projectID}, false)

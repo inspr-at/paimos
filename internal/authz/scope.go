@@ -27,6 +27,7 @@ import (
 var ProjectFilteredRoutes = map[string]bool{
 	"GET /api/approvals":                          true,
 	"GET /api/harness-sessions/live":              true,
+	"GET /api/usage/dashboard":                    true,
 	"GET /api/projects":                           true,
 	"GET /api/nodes":                              true,
 	"GET /api/nodes/lookup":                       true,

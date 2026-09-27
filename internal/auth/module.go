@@ -305,6 +305,10 @@ func coreAgentScope(r *http.Request) (string, bool) {
 		if read && len(parts) == 2 && parts[1] == "graph" {
 			return "nodes.read", true
 		}
+	case "usage":
+		if read && len(parts) == 2 && parts[1] == "dashboard" {
+			return "harness.read", true
+		}
 	case "attachments":
 		return scope("nodes")
 	case "kinds":
