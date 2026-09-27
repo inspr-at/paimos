@@ -8,6 +8,7 @@ import (
 	"errors"
 	"os"
 	"sort"
+	"time"
 
 	"github.com/inspr-at/paimos/internal/agentsetup"
 )
@@ -196,6 +197,32 @@ func (s *Supervisor) freezeOnError(account string) {
 	s.mu.Unlock()
 }
 
+// handleRunError fences dispatch on uncertain delivery or authority loss, but
+// stops the exact owned child only for a confirmed telemetry protocol failure.
+// Keep the rejected outbox intact: observing exit does not settle server usage.
+func (s *Supervisor) handleRunError(entry *owned, err error) {
+	if err == nil {
+		return
+	}
+	entry.mu.Lock()
+	account := entry.record.AccountID
+	var proc Process
+	if errors.Is(err, ErrTelemetryProtocol) && entry.record.Generation == s.generation {
+		entry.protocolFailed = true
+		if entry.process != nil && !entry.record.ExitObserved && !entry.protocolStopped {
+			entry.protocolStopped = true
+			proc = entry.process
+		}
+	}
+	entry.mu.Unlock()
+	s.freezeOnError(account)
+	if proc != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_ = proc.Stop(ctx)
+	}
+}
+
 func (s *Supervisor) accountAvailable(account string) bool {
 	if !s.dispatchAllowed(account) {
 		return false
@@ -215,8 +242,9 @@ func (s *Supervisor) settlePending(ctx context.Context) {
 	s.mu.Unlock()
 	for _, e := range entries {
 		e.mu.Lock()
-		_ = s.flushReports(ctx, e)
+		err := s.flushReports(ctx, e)
 		e.mu.Unlock()
+		s.handleRunError(e, err)
 	}
 }
 
