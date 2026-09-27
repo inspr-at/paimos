@@ -171,6 +171,46 @@ func (w *world) managedRun(t *testing.T, p tenant.Principal, project string) str
 	return run
 }
 
+func (w *world) allowanceWindow(t *testing.T, key, label string, allowance, used, reserved int64) (string, string) {
+	t.Helper()
+	var account, window string
+	w.tx(t, w.home, func(tx pgx.Tx) error {
+		if err := tx.QueryRow(t.Context(), `INSERT INTO agent_accounts(tenant_id,account_key,harness,daemon_id,registered_by_principal_id,label)
+			VALUES($1,$2,'codex','daemon-ud1',$3,$4) RETURNING id::text`, w.home.TenantID, key, w.agent, label).Scan(&account); err != nil {
+			return err
+		}
+		return tx.QueryRow(t.Context(), `INSERT INTO account_allowance_windows(tenant_id,account_id,starts_at,ends_at,unit,allowance,used,reserved,pace_model,burst_ratio)
+			VALUES($1,$2,now()-interval '1 hour',now()+interval '1 hour','tokens',$3,$4,$5,'unrestricted',0.1) RETURNING id::text`,
+			w.home.TenantID, account, allowance, used, reserved).Scan(&window)
+	})
+	return account, window
+}
+
+func (w *world) settleWindow(t *testing.T, project, accountID, windowID string, actual int64) {
+	t.Helper()
+	orderNode, runID := uid(), uid()
+	reserved := actual
+	if reserved < 1 {
+		reserved = 1
+	}
+	w.tx(t, w.home, func(tx pgx.Tx) error {
+		orderKey := "WOR" + strings.ToUpper(strings.ReplaceAll(orderNode, "-", ""))[:4] + "-1"
+		if _, err := tx.Exec(t.Context(), `INSERT INTO nodes(tenant_id,id,key,kind_id,title,parent_id) SELECT $1,$2,$3,id,$4,$5 FROM node_kinds WHERE slug='work_order'`, w.home.TenantID, orderNode, orderKey, "Order", project); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `INSERT INTO work_orders(tenant_id,node_id,requested_by_principal_id,status) VALUES($1,$2,$3,'done')`, w.home.TenantID, orderNode, w.home.ID); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `INSERT INTO agent_runs(tenant_id,id,work_order_id,agent_principal_id,account_id,status,started_at,ended_at)
+			VALUES($1,$2,$3,$4,$5,'completed',$6,$6)`, w.home.TenantID, runID, orderNode, w.agent, accountID, time.Date(2026, 9, 10, 12, 0, 0, 0, time.UTC)); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `INSERT INTO account_reservations(tenant_id,run_id,window_id,reserved_units,actual_units,state,settled_at)
+			VALUES($1,$2,$3,$4,$5,'settled',now())`, w.home.TenantID, runID, windowID, reserved, actual)
+		return err
+	})
+}
+
 func (w *world) get(t *testing.T, p tenant.Principal, raw string) (int, usagedashboard.Dashboard, string) {
 	t.Helper()
 	r := httptest.NewRequest(http.MethodGet, raw, nil).WithContext(tenant.WithPrincipal(context.Background(), p))
@@ -256,16 +296,12 @@ func TestDashboardAggregatesVisibleSessionsOnly(t *testing.T) {
 			SELECT $1,$2,id,'project',$3 FROM roles WHERE tenant_id=$1 AND key='member'`, w.home.TenantID, w.member.ID, visible)
 		return err
 	})
-	w.tx(t, w.home, func(tx pgx.Tx) error {
-		var account string
-		if err := tx.QueryRow(t.Context(), `INSERT INTO agent_accounts(tenant_id,account_key,harness,daemon_id,registered_by_principal_id,label)
-			VALUES($1,'ud1-opaque-key','codex','daemon-ud1',$2,'Pacing window') RETURNING id::text`, w.home.TenantID, w.agent).Scan(&account); err != nil {
-			return err
-		}
-		_, err := tx.Exec(t.Context(), `INSERT INTO account_allowance_windows(tenant_id,account_id,starts_at,ends_at,unit,allowance,used,reserved,pace_model,burst_ratio)
-			VALUES($1,$2,now()-interval '1 hour',now()+interval '1 hour','tokens',1000,100,50,'unrestricted',0.1)`, w.home.TenantID, account)
-		return err
-	})
+	w.allowanceWindow(t, "ud1-opaque-key", "Pacing window", 1000, 100, 50)
+	measuredAccount, measuredWindow := w.allowanceWindow(t, "ud1-measured-key", "Measured window", 1000, 100, 50)
+	mixedAccount, mixedWindow := w.allowanceWindow(t, "ud1-mixed-key", "Mixed window", 800, 40, 10)
+	w.settleWindow(t, visible, measuredAccount, measuredWindow, 100)
+	w.settleWindow(t, visible, mixedAccount, mixedWindow, 40)
+	w.settleWindow(t, visible, mixedAccount, mixedWindow, 0)
 	dbtest.BindRole(t, w.db, w.home.TenantID, w.admin.ID, "admin")
 
 	code, page, body := w.get(t, w.member, "/api/usage/dashboard?from=2026-09-10T00:00:00Z&to=2026-09-11T00:00:00Z")
@@ -318,7 +354,7 @@ func TestDashboardAggregatesVisibleSessionsOnly(t *testing.T) {
 	if page.Tickets[0].Key != "VIS-2" || page.Tickets[0].Sessions != 2 || usd(t, page.Tickets[0].EstimatedCostUSD) != "1.500000000000" || page.Tickets[0].CostState != "partial" || page.Tickets[1].Key != "VIS-3" || usd(t, page.Tickets[1].EstimatedCostUSD) != "0.000000000001" {
 		t.Fatalf("rank %+v", page.Tickets)
 	}
-	for _, forbidden := range []string{"Hidden beacon", "HID-2", "Foreign spend", "FOR-2", "Foreign Sub", "ud1-opaque-key", "Pacing window", "session-model-decoy", "ghost-model", "session-account-decoy", "99.000000000000", "9.000000000000", "8.000000000000", "list_cost_micros", "covered"} {
+	for _, forbidden := range []string{"Hidden beacon", "HID-2", "Foreign spend", "FOR-2", "Foreign Sub", "ud1-opaque-key", "ud1-measured-key", "ud1-mixed-key", "Pacing window", "Measured window", "Mixed window", "session-model-decoy", "ghost-model", "session-account-decoy", "99.000000000000", "9.000000000000", "8.000000000000", "list_cost_micros", "covered"} {
 		if bytes.Contains([]byte(body), []byte(forbidden)) {
 			t.Fatalf("member response leaked %s", forbidden)
 		}
@@ -339,12 +375,27 @@ func TestDashboardAggregatesVisibleSessionsOnly(t *testing.T) {
 	if admin.Totals.Sessions != 6 || admin.Totals.InputTokens == nil || *admin.Totals.InputTokens != "1121" || usd(t, admin.Totals.EstimatedCostUSD) != "10.500000000001" {
 		t.Fatalf("admin totals %+v", admin.Totals)
 	}
-	if admin.Allowance.State != "visible" || len(admin.Allowance.Windows) != 1 {
+	if admin.Allowance.State != "visible" || len(admin.Allowance.Windows) != 3 {
 		t.Fatalf("windows %+v", admin.Allowance)
 	}
-	window := admin.Allowance.Windows[0]
-	if window.Label != "Pacing window" || window.Unit != "tokens" || window.Allowance != 1000 || window.Used != 100 || window.Reserved != 50 || window.PaceCap == nil || *window.PaceCap != 1000 || window.Headroom == nil || *window.Headroom != 850 || window.HardRemaining != 850 || !window.Provisional {
-		t.Fatalf("pace %+v", window)
+	byLabel := map[string]usagedashboard.AllowanceWindow{}
+	for _, window := range admin.Allowance.Windows {
+		byLabel[window.Label] = window
+	}
+	provisional := byLabel["Pacing window"]
+	if provisional.Unit != "tokens" || provisional.Allowance != 1000 || provisional.Reserved != 50 || !provisional.Provisional || provisional.Used != nil || provisional.Headroom != nil || provisional.HardRemaining != nil || provisional.PaceCap == nil || *provisional.PaceCap != 1000 {
+		t.Fatalf("provisional pace %+v", provisional)
+	}
+	measured := byLabel["Measured window"]
+	if measured.Provisional || measured.Allowance != 1000 || measured.Reserved != 50 || measured.Used == nil || *measured.Used != 100 || measured.PaceCap == nil || *measured.PaceCap != 1000 || measured.Headroom == nil || *measured.Headroom != 850 || measured.HardRemaining == nil || *measured.HardRemaining != 850 {
+		t.Fatalf("measured pace %+v", measured)
+	}
+	mixed := byLabel["Mixed window"]
+	if !mixed.Provisional || mixed.Allowance != 800 || mixed.Reserved != 10 || mixed.Used != nil || mixed.Headroom != nil || mixed.HardRemaining != nil || mixed.PaceCap == nil || *mixed.PaceCap != 800 {
+		t.Fatalf("mixed pace %+v", mixed)
+	}
+	if bytes.Count([]byte(body), []byte(`"used":null`)) < 2 || bytes.Contains([]byte(body), []byte(`"used":0`)) || bytes.Contains([]byte(body), []byte(`"hard_remaining":0`)) {
+		t.Fatalf("unknown allowance was zero or omitted: %s", body)
 	}
 	if admin.Tickets[0].Key != "HID-2" || usd(t, admin.Tickets[0].EstimatedCostUSD) != "9.000000000000" {
 		t.Fatalf("admin rank %+v", admin.Tickets)

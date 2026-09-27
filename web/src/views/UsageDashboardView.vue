@@ -4,7 +4,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import AppIcon from '../components/AppIcon.vue'
 import { loadUsageDashboard } from '../lib/usageDashboard'
-import { billingLabel, costStateLabel, formatCount, formatTokens, formatUSD, formatWhen, paceLabel, rangeBounds, unitLabel, usdUnits, type UsageDashboard, type UsageGroup, type UsageTicket } from '../lib/usageFormat'
+import { billingLabel, costStateLabel, formatCount, formatOptionalCount, formatTokens, formatUSD, formatWhen, paceLabel, rangeBounds, unitLabel, usdUnits, type UsageDashboard, type UsageGroup, type UsageTicket } from '../lib/usageFormat'
 import { useProjects } from '../stores/projects'
 import { useSession } from '../stores/session'
 
@@ -226,25 +226,28 @@ const groups = computed(() => visible.value ? [
         <h2 id="allowance-title">Allowance</h2>
         <p v-if="visible.allowance.state === 'withheld'" class="empty">Registered allowance windows are visible to workspace admins.</p>
         <p v-else-if="visible.allowance.state === 'none'" class="empty">No registered allowance window is open.</p>
-        <div v-else class="scroll">
-          <table class="grid">
-            <caption class="sr-only">Open registered allowance windows</caption>
-            <thead><tr><th>Account</th><th>Unit</th><th>Allowance</th><th>Used</th><th>Reserved</th><th>Pace cap</th><th>Headroom</th><th>Hard left</th><th>Pace</th></tr></thead>
-            <tbody>
-              <tr v-for="window in visible.allowance.windows" :key="window.window_id">
-                <td>{{ window.label }} <span class="quiet">{{ window.harness }}</span></td>
-                <td>{{ unitLabel[window.unit] }}</td>
-                <td class="num">{{ formatCount(window.allowance) }}</td>
-                <td class="num">{{ formatCount(window.used) }}</td>
-                <td class="num">{{ formatCount(window.reserved) }}</td>
-                <td class="num">{{ window.pace_cap === null ? 'Unknown' : formatCount(window.pace_cap) }}</td>
-                <td class="num">{{ window.headroom === null ? 'Unknown' : formatCount(window.headroom) }}</td>
-                <td class="num">{{ formatCount(window.hard_remaining) }}</td>
-                <td>{{ paceLabel[window.pace_model] }}<template v-if="window.provisional"> · Provisional</template></td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
+        <template v-else>
+          <p class="hint">Declared allowance, explicit reservations and the pace cap stay visible. Used, headroom and hard left are unknown while a window is provisional, including mixed settled evidence.</p>
+          <div class="scroll">
+            <table class="grid">
+              <caption class="sr-only">Open registered allowance windows</caption>
+              <thead><tr><th>Account</th><th>Unit</th><th>Allowance</th><th>Used</th><th>Reserved</th><th>Pace cap</th><th>Headroom</th><th>Hard left</th><th>Pace</th></tr></thead>
+              <tbody>
+                <tr v-for="window in visible.allowance.windows" :key="window.window_id">
+                  <td>{{ window.label }} <span class="quiet">{{ window.harness }}</span></td>
+                  <td>{{ unitLabel[window.unit] }}</td>
+                  <td class="num">{{ formatCount(window.allowance) }}</td>
+                  <td class="num">{{ formatOptionalCount(window.used) }}</td>
+                  <td class="num">{{ formatCount(window.reserved) }}</td>
+                  <td class="num">{{ formatOptionalCount(window.pace_cap) }}</td>
+                  <td class="num">{{ formatOptionalCount(window.headroom) }}</td>
+                  <td class="num">{{ formatOptionalCount(window.hard_remaining) }}</td>
+                  <td>{{ paceLabel[window.pace_model] }}<template v-if="window.provisional"> · Provisional</template></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </template>
       </section>
     </template>
   </section>

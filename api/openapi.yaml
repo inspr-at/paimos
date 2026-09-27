@@ -2125,6 +2125,8 @@ paths:
         and agent-run totals are not added. More than 5000 sessions sets truncated and drops the rest. If the
         usage relation is not installed the response is 503, not a dashboard of zeros. Allowance windows are the
         caller's registered account windows and only when they hold account.read; the response has no account key.
+        A provisional window, including mixed settled evidence, returns null used, headroom and hard remaining.
+        Declared allowance, explicit reservations and the pace-cap schedule stay numbers. Null is unknown, not zero.
         Project visibility follows harness sessions. The most expensive tickets are a ranking, not a session list.
       parameters:
         - {name: from, in: query, schema: {type: string}, description: RFC3339 or YYYY-MM-DD. Both from and to, or neither (then the last 30 UTC days).}
@@ -3629,6 +3631,7 @@ components:
             project_key: {type: string}
     UsageAllowance:
       type: object
+      description: Declared allowance, explicit reservations and schedule capacity stay numbers. Used, headroom and hard remaining are null while a window is provisional, including mixed settled evidence. Null and overflow are never zero.
       required: [state, windows]
       properties:
         state: {type: string, enum: [visible, withheld, none]}
@@ -3644,17 +3647,17 @@ components:
               account_state: {type: string}
               window_id: {type: string, format: uuid}
               unit: {type: string, enum: [requests, tokens, cost_micros]}
-              allowance: {type: integer, format: int64, minimum: 1}
-              used: {type: integer, format: int64, minimum: 0}
-              reserved: {type: integer, format: int64, minimum: 0}
+              allowance: {type: integer, format: int64, minimum: 1, description: Declared window size.}
+              used: {type: [integer, 'null'], format: int64, description: Measured ledger usage. Null while provisional. A present zero is measured zero.}
+              reserved: {type: integer, format: int64, minimum: 0, description: Explicit reservations. A hold, not measured usage.}
               pace_model: {type: string, enum: [steady, frontload, unrestricted]}
               burst_ratio: {type: string}
               starts_at: {type: string, format: date-time}
               ends_at: {type: string, format: date-time}
-              provisional: {type: boolean}
-              pace_cap: {type: [integer, 'null'], format: int64}
-              headroom: {type: [integer, 'null'], format: int64}
-              hard_remaining: {type: integer, format: int64}
+              provisional: {type: boolean, description: True when the window has no settled measurement, or any settled reservation recorded zero actual units.}
+              pace_cap: {type: [integer, 'null'], format: int64, description: Schedule capacity at the read. Independent of measured usage.}
+              headroom: {type: [integer, 'null'], format: int64, description: Schedule capacity minus measured used and reserved. Null when usage or the cap is unknown, or the difference overflows.}
+              hard_remaining: {type: [integer, 'null'], format: int64, description: Declared allowance minus measured used and reserved. Null when usage is unknown or the difference overflows.}
     AuthzPermission:
       type: object
       required: [key, group, description, risk, grantable_at, agent_grantable]

@@ -45,11 +45,18 @@ const dashboard: UsageDashboard = {
   tickets_cost_unknown: 1,
   allowance: {
     state: 'visible',
-    windows: [{
-      account_id: 'a-1', label: 'Codex Pro', harness: 'codex', account_state: 'available', window_id: 'w-1', unit: 'tokens',
-      allowance: 1000, used: 100, reserved: 50, pace_model: 'unrestricted', burst_ratio: '0.1000',
-      starts_at: '2026-09-27T09:00:00Z', ends_at: '2026-09-27T11:00:00Z', provisional: true, pace_cap: 1000, headroom: 850, hard_remaining: 850,
-    }],
+    windows: [
+      {
+        account_id: 'a-1', label: 'Codex Pro', harness: 'codex', account_state: 'available', window_id: 'w-1', unit: 'tokens',
+        allowance: 1000, used: null, reserved: 50, pace_model: 'unrestricted', burst_ratio: '0.1000',
+        starts_at: '2026-09-27T09:00:00Z', ends_at: '2026-09-27T11:00:00Z', provisional: true, pace_cap: 1000, headroom: null, hard_remaining: null,
+      },
+      {
+        account_id: 'a-2', label: 'Measured pool', harness: 'codex', account_state: 'available', window_id: 'w-2', unit: 'tokens',
+        allowance: 1000, used: 120, reserved: 30, pace_model: 'unrestricted', burst_ratio: '0.1000',
+        starts_at: '2026-09-27T09:00:00Z', ends_at: '2026-09-27T11:00:00Z', provisional: false, pace_cap: 1000, headroom: 850, hard_remaining: 850,
+      },
+    ],
   },
 }
 
@@ -84,8 +91,22 @@ test('usage shows lifetime list estimate, unknown, and allowance without turning
   await expect(page.getByRole('row', { name: /11 Sep/ })).toContainText('Unknown')
   await expect(page.getByRole('region', { name: 'By subscription' })).toContainText('Reported subscription')
   await expect(page.getByRole('link', { name: /PHAROS-11/ })).toHaveAttribute('href', '/p/PHAROS/PHAROS-11')
-  await expect(page.getByRole('region', { name: 'Allowance' })).toContainText('Codex Pro')
-  await expect(page.getByRole('region', { name: 'Allowance' })).toContainText('Provisional')
+  const allowance = page.getByRole('region', { name: 'Allowance' })
+  await expect(allowance).toContainText('Codex Pro')
+  await expect(allowance).toContainText('Provisional')
+  await expect(allowance).toContainText('mixed settled evidence')
+  const unknownWindow = allowance.getByRole('row', { name: /Codex Pro/ }).getByRole('cell')
+  await expect(unknownWindow.nth(2)).toHaveText('1,000')
+  await expect(unknownWindow.nth(3)).toHaveText('Unknown')
+  await expect(unknownWindow.nth(4)).toHaveText('50')
+  await expect(unknownWindow.nth(5)).toHaveText('1,000')
+  await expect(unknownWindow.nth(6)).toHaveText('Unknown')
+  await expect(unknownWindow.nth(7)).toHaveText('Unknown')
+  const measuredWindow = allowance.getByRole('row', { name: /Measured pool/ }).getByRole('cell')
+  await expect(measuredWindow.nth(3)).toHaveText('120')
+  await expect(measuredWindow.nth(6)).toHaveText('850')
+  await expect(measuredWindow.nth(7)).toHaveText('850')
+  await expect(measuredWindow.nth(8)).not.toContainText('Provisional')
   await page.getByRole('button', { name: '7 days' }).click()
   await expect.poll(() => calls.at(-1) ?? '').toContain('from=2026-')
   await expect(page).toHaveURL(/days=7/)

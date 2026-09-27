@@ -15,4 +15,7 @@
 // subscription label is metadata, not verified coverage, and it does not
 // remove the list estimate. Allowance pacing uses registered
 // account_allowance_windows and only for callers who hold account.read.
+// A provisional window, including mixed settled evidence, leaves used,
+// headroom and hard remaining null. Declared allowance, explicit
+// reservations and schedule capacity stay numbers. Overflow is null, not zero.
 package usagedashboard

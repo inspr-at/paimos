@@ -74,6 +74,34 @@ func allowedUnits(allowance int64, fraction float64) int64 {
 	return int64(math.Floor(fraction*float64(allowance) + 1e-9))
 }
 
+// applyMeasuredAvailability publishes declared allowance, explicit
+// reservations, and schedule capacity. Measured usage and the availability
+// derived from it stay null while the window is provisional, including mixed
+// settled evidence. A failed subtraction stays null; it does not become zero.
+func applyMeasuredAvailability(w *AllowanceWindow, used int64, now time.Time) {
+	if cap, ok := paceCap(w.PaceModel, w.StartsAt, w.EndsAt, now, w.Allowance, w.BurstRatio); ok {
+		w.PaceCap = &cap
+	}
+	if w.Provisional {
+		return
+	}
+	measured := used
+	w.Used = &measured
+	if remaining, ok := subInt(w.Allowance, used); ok {
+		if remaining, ok = subInt(remaining, w.Reserved); ok {
+			w.HardRemaining = &remaining
+		}
+	}
+	if w.PaceCap == nil {
+		return
+	}
+	if head, ok := subInt(*w.PaceCap, used); ok {
+		if head, ok = subInt(head, w.Reserved); ok {
+			w.Headroom = &head
+		}
+	}
+}
+
 func subInt(a, b int64) (int64, bool) {
 	if b > 0 && a < math.MinInt64+b {
 		return 0, false

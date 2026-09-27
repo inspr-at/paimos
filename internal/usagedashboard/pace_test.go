@@ -31,6 +31,31 @@ func TestPaceCapMatchesRegisteredModels(t *testing.T) {
 	}
 }
 
+func TestAllowanceAvailabilityKeepsUnknownNull(t *testing.T) {
+	now := time.Date(2026, 9, 27, 10, 0, 0, 0, time.UTC)
+	start, end := now.Add(-time.Hour), now.Add(time.Hour)
+	provisional := AllowanceWindow{Allowance: 1000, Reserved: 50, PaceModel: "unrestricted", BurstRatio: "0.1000", StartsAt: start, EndsAt: end, Provisional: true}
+	applyMeasuredAvailability(&provisional, 0, now)
+	if provisional.Used != nil || provisional.Headroom != nil || provisional.HardRemaining != nil || provisional.PaceCap == nil || *provisional.PaceCap != 1000 || provisional.Allowance != 1000 || provisional.Reserved != 50 {
+		t.Fatalf("provisional zero became measured: %+v", provisional)
+	}
+	measured := AllowanceWindow{Allowance: 1000, Reserved: 50, PaceModel: "unrestricted", BurstRatio: "0.1000", StartsAt: start, EndsAt: end}
+	applyMeasuredAvailability(&measured, 100, now)
+	if measured.Used == nil || *measured.Used != 100 || measured.HardRemaining == nil || *measured.HardRemaining != 850 || measured.Headroom == nil || *measured.Headroom != 850 {
+		t.Fatalf("measured %+v", measured)
+	}
+	genuineZero := AllowanceWindow{Allowance: 1000, Reserved: 0, PaceModel: "unrestricted", BurstRatio: "0", StartsAt: start, EndsAt: end}
+	applyMeasuredAvailability(&genuineZero, 0, now)
+	if genuineZero.Used == nil || *genuineZero.Used != 0 || genuineZero.HardRemaining == nil || *genuineZero.HardRemaining != 1000 {
+		t.Fatalf("measured zero %+v", genuineZero)
+	}
+	overflow := AllowanceWindow{Allowance: math.MinInt64, Reserved: 1, PaceModel: "unrestricted", BurstRatio: "0", StartsAt: start, EndsAt: end}
+	applyMeasuredAvailability(&overflow, 1, now)
+	if overflow.Used == nil || *overflow.Used != 1 || overflow.HardRemaining != nil {
+		t.Fatalf("overflow defaulted: %+v", overflow)
+	}
+}
+
 func TestParseRange(t *testing.T) {
 	now := time.Date(2026, 9, 27, 15, 4, 0, 0, time.UTC)
 	from, to, err := parseRange("", "", now)

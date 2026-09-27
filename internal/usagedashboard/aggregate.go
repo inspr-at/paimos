@@ -105,7 +105,7 @@ type AllowanceWindow struct {
 	WindowID      string    `json:"window_id"`
 	Unit          string    `json:"unit"`
 	Allowance     int64     `json:"allowance"`
-	Used          int64     `json:"used"`
+	Used          *int64    `json:"used"`
 	Reserved      int64     `json:"reserved"`
 	PaceModel     string    `json:"pace_model"`
 	BurstRatio    string    `json:"burst_ratio"`
@@ -114,7 +114,7 @@ type AllowanceWindow struct {
 	Provisional   bool      `json:"provisional"`
 	PaceCap       *int64    `json:"pace_cap"`
 	Headroom      *int64    `json:"headroom"`
-	HardRemaining int64     `json:"hard_remaining"`
+	HardRemaining *int64    `json:"hard_remaining"`
 }
 
 type sessionRow struct {
@@ -663,25 +663,12 @@ func loadAllowance(ctx context.Context, tx pgx.Tx, p tenant.Principal, now time.
 	defer rows.Close()
 	for rows.Next() {
 		var w AllowanceWindow
-		if err := rows.Scan(&w.AccountID, &w.Label, &w.Harness, &w.AccountState, &w.WindowID, &w.StartsAt, &w.EndsAt, &w.Unit, &w.Allowance, &w.Used, &w.Reserved, &w.PaceModel, &w.BurstRatio, &w.Provisional); err != nil {
+		var used int64
+		if err := rows.Scan(&w.AccountID, &w.Label, &w.Harness, &w.AccountState, &w.WindowID, &w.StartsAt, &w.EndsAt, &w.Unit, &w.Allowance, &used, &w.Reserved, &w.PaceModel, &w.BurstRatio, &w.Provisional); err != nil {
 			return out, err
 		}
 		w.StartsAt, w.EndsAt = w.StartsAt.UTC(), w.EndsAt.UTC()
-		remaining, ok := subInt(w.Allowance, w.Used)
-		if ok {
-			remaining, ok = subInt(remaining, w.Reserved)
-		}
-		if ok {
-			w.HardRemaining = remaining
-		}
-		if cap, ok := paceCap(w.PaceModel, w.StartsAt, w.EndsAt, now, w.Allowance, w.BurstRatio); ok {
-			w.PaceCap = &cap
-			if head, ok := subInt(cap, w.Used); ok {
-				if head, ok = subInt(head, w.Reserved); ok {
-					w.Headroom = &head
-				}
-			}
-		}
+		applyMeasuredAvailability(&w, used, now)
 		out.Windows = append(out.Windows, w)
 	}
 	if err := rows.Err(); err != nil {

@@ -41,7 +41,7 @@ export interface AllowanceWindow {
   window_id: string
   unit: 'requests' | 'tokens' | 'cost_micros'
   allowance: number
-  used: number
+  used: number | null
   reserved: number
   pace_model: 'steady' | 'frontload' | 'unrestricted'
   burst_ratio: string
@@ -50,7 +50,7 @@ export interface AllowanceWindow {
   provisional: boolean
   pace_cap: number | null
   headroom: number | null
-  hard_remaining: number
+  hard_remaining: number | null
 }
 export interface UsageDashboard {
   from: string
@@ -135,6 +135,11 @@ export function usdUnits(value: string | null): bigint {
 
 export function formatCount(n: number): string {
   return n.toLocaleString('en-US')
+}
+
+export function formatOptionalCount(value: number | null): string {
+  if (value === null || !Number.isSafeInteger(value)) return 'Unknown'
+  return formatCount(value)
 }
 
 export function formatWhen(iso: string): string {
