@@ -3,7 +3,8 @@
 import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { accountName } from '../lib/accountCascade'
-import { can } from '../lib/authz'
+import { can, myPermissions } from '../lib/authz'
+import { pairingPermissions } from '../lib/agentPairing'
 import { message, subscribeAgents, type AgentAccount, type Approval, type SessionControl } from '../lib/agents'
 import { canDecideApproval as allowedToDecide, controlBlocked, decidedApprovals, type Resource } from '../lib/agentState'
 import { confirmAction } from '../lib/confirm'
@@ -21,6 +22,7 @@ import SessionPanel from '../components/agents/SessionPanel.vue'
 import LiveNow from '../components/agents/LiveNow.vue'
 import StartAgentDialog from '../components/agents/StartAgentDialog.vue'
 import RunQueue from '../components/agents/RunQueue.vue'
+import ConnectedComputers from '../components/agents/ConnectedComputers.vue'
 
 // Markus's desk for agents: what waits on him first, then every live session grouped
 // by state, with accounts and pacing folded below them. A session opens in the docked panel.
@@ -37,6 +39,11 @@ const updatedAge = computed(() => agents.sessionsUpdatedAt === null ? '' : `${Ma
 const queue = ref<InstanceType<typeof ApprovalQueue>>()
 const startDialog = ref<InstanceType<typeof StartAgentDialog>>()
 const canStart = computed(() => session.identity?.principal.kind === 'person' && can('work_orders.write') && can('run.create'))
+const pairingAccess = computed(() => pairingPermissions({
+  permissions: [...myPermissions()],
+  principalKind: session.identity?.principal.kind,
+}))
+const showConnect = computed(() => !!session.identity && session.identity.principal.kind !== 'agent')
 
 const ticketPeek = inject(TICKET_PEEK, null)
 const ticketPeekOpen = computed(() => !!ticketPeek?.openKey.value)
@@ -230,6 +237,7 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
       </div>
       <div class="head-side">
         <button v-if="canStart" type="button" class="btn primary start-agent" @click="startDialog?.open()"><AppIcon name="plus" :size="15" />Start agent</button>
+        <RouterLink v-if="showConnect" class="btn" to="/agents/register-agent"><AppIcon name="monitor" :size="15" />Connect computer</RouterLink>
         <RouterLink class="context-link" to="/agents/usage">Usage<AppIcon name="arrow" :size="13" /></RouterLink>
         <RouterLink v-if="can('keys.manage')" class="context-link" to="/settings/access/agents">Agent keys<AppIcon name="arrow" :size="13" /></RouterLink>
         <div class="freshness">
@@ -263,6 +271,7 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
           @open="openSession" @control="control" @focus-row="id => cursor = id" @retry="agents.loadAll()" @start="startDialog?.open()"
         />
         <p v-if="agents.sessionsUpdatedAt !== null && agents.sessionsState === 'error'" class="inline-error" role="alert"><AppIcon name="alert" :size="14" />Sessions could not be refreshed: {{ agents.sessionsError }} <button type="button" class="btn sm" @click="agents.loadAll()">Try again</button></p>
+        <ConnectedComputers v-if="agents.loaded" :permissions="pairingAccess" compact-empty />
         <details v-if="agents.loaded" class="accounts-disclosure">
           <summary class="accounts-summary"><AppIcon name="gauge" :size="15" /><span>Accounts and pacing</span><AppIcon class="disclosure-chev" name="chevron-right" :size="15" /></summary>
           <AccountsCard :accounts="agents.accounts" :state="agents.accountsUpdatedAt !== null ? 'ready' : agents.accountsState" :now="agents.now" :admin="agents.accountsState === 'ready'" :set="setAccount" />
