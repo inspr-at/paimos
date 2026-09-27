@@ -127,6 +127,25 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390])
     data.preferences['agent-indicator'] = { style: 'robot-5', hovering: false }
     await page.setViewportSize({ width, height: width === 1600 ? 1000 : 844 })
     await page.goto('/agents')
+    const accounts = page.locator('.accounts-disclosure')
+    const toggle = accounts.locator('summary')
+    await expect(accounts).not.toHaveAttribute('open', '')
+    await expect(accounts.locator('.accounts')).not.toBeVisible()
+    const main = (await page.locator('.main-col').boundingBox())!
+    const layout = (await page.locator('.layout').boundingBox())!
+    expect(Math.abs(main.width - layout.width)).toBeLessThan(2)
+    const sessions = (await page.locator('.sessions').boundingBox())!
+    const disclosure = (await accounts.boundingBox())!
+    expect(disclosure.y).toBeGreaterThanOrEqual(sessions.y + sessions.height)
+    await toggle.scrollIntoViewIfNeeded()
+    await page.screenshot({ path: testInfo.outputPath(`sc2-${theme}-${width}-accounts-collapsed.png`), fullPage: true })
+    await toggle.focus()
+    await page.keyboard.press('Enter')
+    await expect(accounts.locator('.accounts')).toBeVisible()
+    await page.screenshot({ path: testInfo.outputPath(`sc2-${theme}-${width}-accounts-expanded.png`), fullPage: true })
+    await page.keyboard.press('Space')
+    await expect(accounts.locator('.accounts')).not.toBeVisible()
+    await page.locator('h1').scrollIntoViewIfNeeded()
     const tiles = page.locator('.live-now .tile')
     await expect(tiles).toHaveCount(6)
     await page.mouse.move(0, 0)
@@ -141,6 +160,13 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390])
     await problem.locator('.tile-open').click()
     const panel = page.getByRole('complementary', { name: 'Session details' })
     await expect(panel.locator('.now-step')).toHaveText('Reported stop reason: worker failed: exit 2')
+    if (width === 1600) {
+      const listBounds = (await page.locator('.main-col').boundingBox())!
+      const panelBounds = (await panel.boundingBox())!
+      expect(listBounds.x + listBounds.width).toBeLessThanOrEqual(panelBounds.x)
+      expect(panelBounds.x - listBounds.x - listBounds.width).toBeLessThan(40)
+    }
+    await expect(accounts.locator('.accounts')).not.toBeVisible()
     await expect(panel.getByRole('region', { name: 'Session state evidence' })).toContainText('Last heartbeat:')
     await page.screenshot({ path: testInfo.outputPath(`sc2-${theme}-${width}-problem.png`), fullPage: true })
     await page.getByRole('button', { name: 'Close session details' }).click()

@@ -56,7 +56,7 @@ test('sessions are grouped by what they need, with ticket and heartbeat; details
   await expect(lead).toContainText('Lead')
   await expect(lead.getByRole('link', { name: 'PHAROS-11' })).toHaveAttribute('href', '/p/PHAROS/PHAROS-11')
   await expect(lead.locator('.agent-state-label')).toHaveText('Needs something')
-  await expect(row(page, session(5)).locator('.agent-state-label')).toHaveText('Needs something')
+  await expect(row(page, session(5)).locator('.agent-state-label')).toHaveText('Heartbeat overdue')
   await expect(row(page, session(6)).locator('.agent-state-label')).toHaveText('Working')
   // Stopped sessions fold away until asked for.
   await expect(row(page, session(7))).toHaveCount(0)
@@ -377,6 +377,7 @@ test('held action requests resolve or dismiss with an optional note, by button o
 test('accounts show what is left and the pace; admins can drain and resume', async ({ page }) => {
   const { calls } = await setup(page)
   await openAgents(page)
+  await page.getByText('Accounts and pacing', { exact: true }).first().click()
   const accounts = page.getByRole('region', { name: 'Accounts and pacing' })
   const claude = accounts.locator('.account').filter({ hasText: 'Claude Max' })
   await expect(claude).toContainText('28% tokens left')
@@ -395,6 +396,7 @@ test('an unmeasured allowance is labeled provisional', async ({ page }) => {
   const { data } = await setup(page)
   ;(data.accounts[0].windows[0] as Record<string, unknown>).provisional = true
   await openAgents(page)
+  await page.getByText('Accounts and pacing', { exact: true }).first().click()
   const claude = page.getByRole('region', { name: 'Accounts and pacing' }).locator('.account').filter({ hasText: 'Claude Max' })
   await expect(claude).toContainText('Provisional')
   await expect(claude.getByRole('meter')).toHaveAttribute('aria-label', /provisional/)
@@ -403,6 +405,7 @@ test('an unmeasured allowance is labeled provisional', async ({ page }) => {
 test('accounts explain themselves when the person may not see them', async ({ page }) => {
   await setup(page, { accountsForbidden: true })
   await openAgents(page)
+  await page.getByText('Accounts and pacing', { exact: true }).first().click()
   await expect(page.getByRole('region', { name: 'Accounts and pacing' })).toContainText('visible to workspace admins')
 })
 
@@ -475,5 +478,26 @@ for (const colorScheme of ['light', 'dark'] as const) {
     await row(page, camy).locator('.c-agent a').click()
     expect(await panel(page).boundingBox()).toEqual({ x: 0, y: 0, width: 390, height: 844 })
     expect(errors).toEqual([])
+  })
+}
+
+for (const colorScheme of ['light', 'dark'] as const) for (const width of [1600, 390]) {
+  test(`SC2 ticket detail uses the available width at ${width} in ${colorScheme}`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
+    await page.emulateMedia({ colorScheme })
+    await setup(page)
+    await openAgents(page)
+    await row(page, camy).getByRole('link', { name: 'PHAROS-11', exact: true }).click()
+    const ticket = page.getByRole('complementary', { name: 'Ticket details' })
+    await expect(ticket).toBeVisible()
+    const box = (await ticket.boundingBox())!
+    if (width === 1600) {
+      const list = (await page.locator('.main-col').boundingBox())!
+      expect(list.x + list.width).toBeLessThanOrEqual(box.x)
+      expect(box.x - list.x - list.width).toBeLessThan(80)
+    } else expect(box.width).toBe(390)
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+    await expect(page.locator('.accounts-disclosure .accounts')).not.toBeVisible()
+    await page.screenshot({ path: testInfo.outputPath(`sc2-${colorScheme}-${width}-ticket.png`), fullPage: true })
   })
 }
