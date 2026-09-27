@@ -44,6 +44,10 @@ type replay struct {
 // Record contains only local process provenance and bounded control digests.
 // The journal is AEON v2; classic journals are never opened implicitly.
 type Record struct {
+	// Only launchPrepared proves that adapter.Start has never been called.
+	// Empty is a legacy record, never evidence that no child was forked.
+	LaunchState   string            `json:"launch_state,omitempty"`
+	ClaimRoute    *Route            `json:"claim_route,omitempty"`
 	AccountID     string            `json:"account_id,omitempty"`
 	ExecutionMode string            `json:"execution_mode,omitempty"`
 	ExitObserved  bool              `json:"exit_observed,omitempty"`
@@ -105,6 +109,8 @@ type Supervisor struct {
 	accounts          []EnrolledAccount
 	heartbeatInterval time.Duration
 	maxRunDuration    time.Duration
+	prepareScratch    func(string) (string, error)
+	newHarnessID      func() (string, error)
 }
 
 func NewSupervisor(ctx context.Context, c Config) (*Supervisor, error) {
@@ -206,6 +212,9 @@ func NewSupervisor(ctx context.Context, c Config) (*Supervisor, error) {
 			if r.TenantID != tenantID || r.PrincipalID != principalID || r.Generation == "" || r.RunID == "" || r.Sequence < 0 || len(r.Controls) > 256 {
 				return errors.New("invalid AEON journal binding")
 			}
+			if err := validateLaunchRecord(r); err != nil {
+				return err
+			}
 			return nil
 		},
 	})
@@ -214,10 +223,10 @@ func NewSupervisor(ctx context.Context, c Config) (*Supervisor, error) {
 	}
 	s := &Supervisor{state: state, blockedAccounts: map[string]bool{}, probedAccounts: map[string]bool{}, loginRequired: map[string]bool{}, api: c.API, journal: j, lock: lock, adapters: adapters, runs: map[string]*owned{}, tenantID: tenantID,
 		principalID: principalID, daemonID: c.DaemonID, generation: gen, workspace: physical, estimates: c.EstimatedUnits, accounts: c.Accounts,
-		heartbeatInterval: heartbeat, maxRunDuration: maxRun}
+		heartbeatInterval: heartbeat, maxRunDuration: maxRun, prepareScratch: verificationScratch, newHarnessID: randomID}
 	for _, rec := range j.Snapshot() {
 		// A persisted PID is never proof of ownership after a restart.
-		if rec.State == "running" || rec.State == "starting" || rec.State == "waiting" {
+		if !noLocalProcess(rec) && rec.State != "ownership_lost" {
 			rec.State = "ownership_lost"
 			if err := j.Put(rec); err != nil {
 				return nil, err
@@ -282,11 +291,13 @@ func (s *Supervisor) Status() []Record {
 // harness session, so they cannot race a separate principal-wide inbox poll.
 // A missing or stale reservation fails closed and leaves the run queued.
 func (s *Supervisor) PollOnce(ctx context.Context) error {
+	// Recover no-launch claims before a fresh probe changes account generation.
+	recoveryErr := s.recoverUnlaunched(ctx)
 	s.settlePending(ctx)
 	if !s.dispatchAllowed("") {
 		return nil
 	}
-	var failures []error
+	failures := []error{recoveryErr}
 	s.mu.Lock()
 	accounts := append([]EnrolledAccount(nil), s.accounts...)
 	adapters := map[string]Adapter{}
@@ -295,6 +306,10 @@ func (s *Supervisor) PollOnce(ctx context.Context) error {
 	}
 	s.mu.Unlock()
 	for _, account := range accounts {
+		if s.hasUnresolvedOldClaim(account.ID) {
+			s.freezeOnError(account.ID)
+			continue
+		}
 		fenced, fenceErr := s.readFence(account.ID)
 		if fenced || fenceErr != nil {
 			continue
@@ -327,7 +342,7 @@ func (s *Supervisor) PollOnce(ctx context.Context) error {
 	return errors.Join(failures...)
 }
 
-func (s *Supervisor) StartRun(ctx context.Context, run Run) error {
+func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 	s.dispatchMu.Lock()
 	defer s.dispatchMu.Unlock()
 	if !s.dispatchAllowed(run.AccountID) {
@@ -337,11 +352,25 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) error {
 		return ErrScope
 	}
 	s.mu.Lock()
-	if s.runs[run.ID] != nil {
-		s.mu.Unlock()
-		return nil
-	}
+	entry := s.runs[run.ID]
 	s.mu.Unlock()
+	if entry != nil {
+		entry.mu.Lock()
+		retry := entry.record.LaunchState == launchPrepared && entry.record.State == "claim_pending" && entry.record.Generation == s.generation
+		entry.mu.Unlock()
+		if !retry {
+			return nil
+		}
+		if err := s.reconcileUnlaunched(ctx, entry); err != nil {
+			return err
+		}
+		entry.mu.Lock()
+		retry = entry.record.State == "claim_pending"
+		entry.mu.Unlock()
+		if !retry {
+			return nil
+		}
+	}
 	profiles, err := s.api.Profiles(ctx)
 	if err != nil {
 		return err
@@ -358,6 +387,11 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) error {
 		return ErrUnsupported
 	}
 	if err := validExecutionMode(run, adapter); err != nil {
+		if errors.Is(err, ErrVerificationUnavailable) && entry == nil {
+			if saveErr := s.refuseVerification(run); saveErr != nil {
+				return saveErr
+			}
+		}
 		return err
 	}
 	verification := run.Purpose == VerificationPurpose
@@ -370,7 +404,7 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) error {
 		s.mu.Unlock()
 		for _, entry := range entries {
 			entry.mu.Lock()
-			busy := entry.record.ExecutionMode == VerificationPurpose && !entry.record.ExitObserved && (entry.record.State == "running" || entry.record.State == "starting" || entry.record.State == "waiting" || entry.record.State == "ownership_lost")
+			busy := entry.record.RunID != run.ID && entry.record.ExecutionMode == VerificationPurpose && !noLocalProcess(entry.record) && (entry.record.State == "running" || entry.record.State == "starting" || entry.record.State == "waiting" || entry.record.State == "ownership_lost")
 			entry.mu.Unlock()
 			if busy {
 				return ErrDraining
@@ -440,9 +474,16 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) error {
 	if len(accountIDs) == 0 {
 		return errors.New("no local account enrollment for harness")
 	}
-	route, err := s.api.Route(ctx, run.ID, s.daemonID, accountIDs, s.estimates)
-	if err != nil {
-		return err
+	var route Route
+	if entry != nil {
+		entry.mu.Lock()
+		route = *entry.record.ClaimRoute
+		entry.mu.Unlock()
+	} else {
+		route, err = s.api.Route(ctx, run.ID, s.daemonID, accountIDs, s.estimates)
+		if err != nil {
+			return err
+		}
 	}
 	if route.DaemonID != s.daemonID || route.AccountKey == "" || len(route.Reservations) == 0 || run.AccountID != "" && route.AccountID != run.AccountID {
 		return errors.New("account route is not bound to daemon")
@@ -467,42 +508,54 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) error {
 	if !s.accountAvailable(route.AccountID) {
 		return ErrDraining
 	}
-	rec := Record{AccountID: route.AccountID, ExecutionMode: run.Purpose, TenantID: s.tenantID, PrincipalID: s.principalID, RunID: run.ID, WorkOrderID: run.WorkOrderID, Generation: s.generation, Workspace: s.workspace, State: "starting", Controls: map[string]replay{}}
-	if err := s.journal.Put(rec); err != nil {
-		return err
+	if entry == nil {
+		rec := Record{LaunchState: launchPrepared, ClaimRoute: &route, AccountID: route.AccountID, ExecutionMode: run.Purpose, TenantID: s.tenantID, PrincipalID: s.principalID, RunID: run.ID, WorkOrderID: run.WorkOrderID, Generation: s.generation, Workspace: s.workspace, State: "claim_pending", Controls: map[string]replay{}}
+		if err := s.journal.Put(rec); err != nil {
+			return err
+		}
+		entry = &owned{record: rec, replies: map[string]string{}}
+		s.mu.Lock()
+		s.runs[run.ID] = entry
+		s.mu.Unlock()
 	}
-	entry := &owned{record: rec, replies: map[string]string{}}
-	s.mu.Lock()
-	s.runs[run.ID] = entry
-	s.mu.Unlock()
 	if err := s.api.Claim(ctx, run.ID, s.daemonID, s.generation, ids); err != nil {
-		return err
+		return errors.Join(err, s.reconcileUnlaunched(ctx, entry))
 	}
+	// Every error before launch intent must settle this claimed, never-launched
+	// run. A failed report stays in the durable outbox with the same sequence.
+	defer func() {
+		entry.mu.Lock()
+		neverLaunched := entry.record.LaunchState == launchPrepared
+		entry.mu.Unlock()
+		if resultErr != nil && neverLaunched {
+			cleanup, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			resultErr = errors.Join(resultErr, s.finishUnlaunched(cleanup, entry))
+		}
+	}()
 	if verification {
-		runWorkspace, err = verificationScratch(s.workspace)
+		runWorkspace, err = s.prepareScratch(s.workspace)
 		if err != nil {
 			return err
 		}
 	}
 	projectID, err := s.api.ProjectForNode(ctx, node.Key)
 	if err != nil {
-		_ = s.update(ctx, entry, Telemetry{Kind: "finished", Status: "failed", ErrorCode: "child_exit_failed"})
 		return err
 	}
 	host, err := os.Hostname()
 	if err != nil || host == "" || len(host) > 128 {
-		_ = s.update(ctx, entry, Telemetry{Kind: "finished", Status: "failed", ErrorCode: "child_exit_failed"})
 		return errors.New("valid harness host unavailable")
 	}
-	ref, err := randomID()
+	ref, err := s.newHarnessID()
 	if err != nil {
 		return err
 	}
-	leaseA, err := randomID()
+	leaseA, err := s.newHarnessID()
 	if err != nil {
 		return err
 	}
-	leaseB, err := randomID()
+	leaseB, err := s.newHarnessID()
 	if err != nil {
 		return err
 	}
@@ -518,7 +571,6 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) error {
 		Model: profile.Model, ReasoningEffort: profile.Effort, AccountLabel: route.AccountLabel},
 		s.principalID, run.ID, run.WorkOrderID, profile.Harness, host, caps)
 	if err != nil {
-		_ = s.update(ctx, entry, Telemetry{Kind: "finished", Status: "failed", ErrorCode: "child_exit_failed"})
 		return err
 	}
 	if usageAPI, ok := s.api.(sessionUsageAPI); ok && profile.Harness == Codex {
@@ -562,7 +614,6 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) error {
 			entry.tools, err = startManagedTools(signer.runCredential(s.tenantID, s.principalID, run.ID, s.generation),
 				toolBinding{api: toolAPI, workOrderID: run.WorkOrderID, runID: run.ID, workspace: s.workspace, branch: branch, active: active, replySender: replySender, requestDone: requestDone})
 			if err != nil {
-				_ = s.update(ctx, entry, Telemetry{Kind: "finished", Status: "failed", ErrorCode: "child_exit_failed"})
 				closeHarness("process_failed")
 				return err
 			}
@@ -570,13 +621,33 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) error {
 		}
 	}
 	observe := func(ev AdapterEvent) { s.observe(entry, ev) }
+	// Commit the possible-fork boundary before handing control to an adapter.
+	// On a journal failure Start is never invoked; after success a crash is
+	// unconfirmed, even if no PID was subsequently persisted.
+	entry.mu.Lock()
+	intent := entry.record
+	intent.LaunchState, intent.State = launchAttempted, "starting"
+	err = s.journal.Put(intent)
+	if err == nil {
+		entry.record = intent
+	}
+	entry.mu.Unlock()
+	if err != nil {
+		_ = entry.tools.Close()
+		closeHarness("process_failed")
+		return err
+	}
 	launchedAt := time.Now()
 	proc, err := adapter.Start(ctx, StartRequest{TenantID: s.tenantID, PrincipalID: s.principalID, Run: run, Profile: profile,
 		AccountKey: route.AccountKey, Workspace: runWorkspace, StateRoot: filepath.Dir(s.journal.JournalPath()), Prompt: prompt, Generation: s.generation, Tools: runTools}, observe)
 	if err != nil {
 		_ = entry.tools.Close()
-		_ = s.update(ctx, entry, Telemetry{Kind: "finished", Status: "failed", ErrorCode: "child_exit_failed"})
-		closeHarness("process_failed")
+		// A generic Start error does not prove that a child was never forked.
+		entry.mu.Lock()
+		entry.record.State = "ownership_lost"
+		_ = s.journal.Put(entry.record)
+		entry.mu.Unlock()
+		s.freezeOnError(route.AccountID)
 		return err
 	}
 	entry.mu.Lock()
@@ -895,7 +966,7 @@ func (s *Supervisor) serviceHarness(ctx context.Context, entry *owned) (result e
 func (s *Supervisor) update(ctx context.Context, entry *owned, t Telemetry) error {
 	entry.mu.Lock()
 	defer entry.mu.Unlock()
-	if entry.record.Generation != s.generation {
+	if entry.record.Generation != s.generation && entry.record.LaunchState != launchPrepared {
 		return ErrGeneration
 	}
 	if t.Kind == "heartbeat" && (entry.record.State == "completed" || entry.record.State == "failed" || entry.record.State == "cancelled" || entry.record.State == "ownership_lost") {
