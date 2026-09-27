@@ -12,6 +12,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
@@ -96,6 +97,9 @@ func replaceMetadata(ctx context.Context, tx pgx.Tx, p tenant.Principal, id stri
 	slices.Sort(ids)
 	if len(slices.Compact(slices.Clone(ids))) != len(ids) {
 		return Account{}, fail(http.StatusBadRequest, "duplicate model profile")
+	}
+	if err := agentpairing.AccountFence(ctx, tx, id, false); err != nil {
+		return Account{}, err
 	}
 	before, err := lockAccount(ctx, tx, id)
 	if err != nil {

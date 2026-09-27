@@ -23,6 +23,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/activity"
 	"github.com/inspr-at/paimos/internal/agentaccounts"
+	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/agentruns"
 	"github.com/inspr-at/paimos/internal/approvals"
 	"github.com/inspr-at/paimos/internal/attachments"
@@ -253,6 +254,7 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 			approvals.New(pool),
 			modelregistry.New(pool),
 			agentaccounts.New(pool),
+			agentpairing.New(pool, cfg.PublicURL, cfg.BootstrapTenantSlug),
 			// R3: journey
 			journey.New(pool),
 			requirements.New(pool),
@@ -285,7 +287,7 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 		ln = listened
 	}
 	srv := &http.Server{
-		Handler:           api.Handler(),
+		Handler:           agentpairing.GuidePage(api.Handler(), webFS, cfg.PublicURL),
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       time.Minute,
 	}

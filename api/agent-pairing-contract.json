@@ -4,10 +4,10 @@
   "companion": "AEON-239",
   "contract": "pairing-v1",
   "crypto": {
-    "generation": "Before device request privately persist independent device_secret and runtime_secret: 32 random bytes each encoded as 64 lowercase hex characters. Never print either.",
+    "generation": "Before first device request privately persist three independent 32-byte random secrets (64 lowercase hex): device_secret, runtime_secret, lifecycle_secret. Never print them.",
     "commitment": "lowercase hex SHA256 of UTF-8 secret string (NOT decoded bytes and NOT full prefixed token).",
     "runtime_token": "aeon_<runtime_prefix>_<runtime_secret>. Existing auth hashes secret component only. Server returns prefix, never secret.",
-    "proof": "device_secret only in JSON HTTPS request body for redeem/reconcile; never URL, query, argv or logs. Persistent device proof authorizes only this request/tombstone, never general APIs."
+    "proof": "device_secret redeems only the initiating request. Separate lifecycle_secret reads and acknowledges only own lifecycle/tombstone; never general APIs. Both travel only in JSON HTTPS body."
   },
   "request_states": [
     "pending",
@@ -48,7 +48,10 @@
       "enrollment_revoked",
       "enrollment_draining",
       "conflict",
-      "internal_error"
+      "internal_error",
+      "verification_only",
+      "verification_expired",
+      "verification_consumed"
     ]
   },
   "public_endpoints": {
@@ -56,7 +59,7 @@
       "request": {
         "tenant_id": "canonical tenant UUID from signed-in guide; no tenant enumeration",
         "device_hash": "SHA256(device_secret)",
-        "runtime_hash": "SHA256(runtime_secret)",
+        "runtime_hash": "SHA256(runtime_secret); Add harness must match original runtime commitment",
         "computer_name": "1..128 display chars",
         "platform": "darwin|linux",
         "arch": "arm64|amd64",
@@ -71,7 +74,12 @@
             "label": "visible vendor account identity <=128",
             "model_profile_id": "enabled tenant model UUID, or omitted for server choice"
           }
-        ]
+        ],
+        "request_id": "client-persisted UUID, idempotency key",
+        "tenant_slug": "alternative to tenant_id; exactly one required",
+        "lifecycle_hash": "SHA256(lifecycle_secret); Add harness retains original lifecycle commitment",
+        "existing_computer_id": "optional connected computer UUID for Add harness",
+        "existing_lifecycle_secret": "required only with existing_computer_id; original lifecycle proof, no new daemon or key"
       },
       "response": {
         "request_id": "UUID",
@@ -80,7 +88,8 @@
         "expires_at": "RFC3339",
         "interval_seconds": 5,
         "verification_uri": "instance URL /agents/register-agent",
-        "request_digest": "SHA256 of immutable request details"
+        "request_digest": "SHA256 of immutable request details",
+        "tenant_id": "resolved canonical tenant UUID"
       }
     },
     "POST /api/agent-pairing/redeem": {
@@ -95,13 +104,35 @@
       "request": {
         "tenant_id": "UUID",
         "request_id": "original redeemed request UUID",
-        "device_secret": "proof",
         "cleanup_confirmed_account_ids": [
           "only locally cleaned enrolled account UUIDs"
         ],
-        "computer_cleanup_confirmed": "bool; only after owned work drains and safe local cleanup"
+        "computer_cleanup_confirmed": "bool; only after owned work drains and safe local cleanup",
+        "lifecycle_secret": "independent original lifecycle proof",
+        "progress": {
+          "state": "optional provisioning|login_required|service_conflict|connected|setup_failed",
+          "error_code": "optional empty|login_required|service_conflict|unsupported_platform|managed_installation|connectivity_failed|private_storage_failed|installation_failed"
+        }
       },
       "response": "PairingView; tombstone-only, cannot issue keys, reset grants, dispatch, settle active work or resurrect pairing"
+    },
+    "GET /api/agent-pairing/guide": {
+      "response": {
+        "instance_url": "configured origin",
+        "default_tenant_slug": "configured bootstrap slug only",
+        "protocol": "pairing-v1",
+        "platforms": [
+          "darwin/arm64",
+          "darwin/amd64",
+          "linux/arm64",
+          "linux/amd64"
+        ],
+        "version": "exact current server version",
+        "install_targets": "release-only per-platform artifact_url, checksums_url, verified download/check/install command; [] in dev",
+        "install_available": "boolean",
+        "platform_qualification": "candidate; consult exact release service qualification evidence",
+        "setup_command": "verified absolute binary path setup --url configured origin --workspace approved absolute folder --state-root private absolute folder outside repos --harness chosen harness --start-service; default tenant slug from guide"
+      }
     }
   },
   "person_endpoints": {
@@ -116,7 +147,10 @@
       "permission": "person account.manage; same-origin Origin required",
       "request": {
         "request_digest": "echo reviewed digest",
-        "verification": "one_per_harness|connect_only"
+        "verification": "one_per_harness|connect_only",
+        "selected_account_keys": [
+          "required, nonempty subset of reviewed requested_accounts.account_key; one per harness, duplicates rejected"
+        ]
       },
       "response": "PairingView; repeat identical approval is idempotent; altered choice conflicts"
     },
@@ -140,14 +174,16 @@
     "POST /api/agent-pairing/computers/{computerId}/disconnect": {
       "permission": "person account.manage; same-origin Origin required",
       "request": {
-        "mode": "drain|revoke_now"
+        "mode": "drain|revoke_now",
+        "expected_revision": "required integer from reviewed PairingView; stale scope 409, identical completed retry succeeds"
       },
       "response": "PairingView"
     },
     "POST /api/agent-pairing/computers/{computerId}/enrollments/{accountId}/disconnect": {
       "permission": "person account.manage; same-origin Origin required",
       "request": {
-        "mode": "drain|revoke_now"
+        "mode": "drain|revoke_now",
+        "expected_revision": "required integer from reviewed PairingView; stale scope 409, identical completed retry succeeds"
       },
       "response": "PairingView"
     }
@@ -161,7 +197,8 @@
       "permission": "own paired agent with run.claim; no other computer IDs accepted",
       "request": {
         "mode": "drain|revoke_now",
-        "account_id": "optional UUID of own enrollment; omitted means whole computer"
+        "account_id": "optional UUID of own enrollment; omitted means whole computer",
+        "expected_revision": "optional current revision; omitted binds to own current enrollment/computer scope"
       },
       "response": "PairingView"
     }
@@ -191,7 +228,8 @@
       "allowance": 1,
       "unit": "requests",
       "expires_at": "fixed RFC3339, request created + 30 minutes",
-      "task": "Reply exactly AEON_VERIFIED. Do not use tools, read or modify files, execute commands, or access the network."
+      "task": "Reply exactly AEON_VERIFIED. Do not modify files, perform privileged actions, access external networks, or use external/MCP tools. Use the enforced read-only verification mode.",
+      "policy": "read_only"
     },
     "computer_id": "UUID or null",
     "computer_state": "enum or null",
@@ -212,17 +250,32 @@
         "verification_run_id": "UUID or null",
         "active_run_ids": [
           "UUID"
-        ]
+        ],
+        "verification_state": "not_selected|queued|starting|running|waiting|completed|failed|cancelled|ownership_lost|expired",
+        "verification_error": "latest bounded telemetry error code or empty",
+        "local_processes": "unconfirmed|drained; drained means device cleanup acknowledged, not inferred from server revoke",
+        "accounting_state": "settled|unconfirmed"
       }
-    ]
+    ],
+    "setup_state": "not_started|approved|provisioning|login_required|service_conflict|connected|setup_failed",
+    "setup_error": "bounded error code or empty",
+    "last_seen_at": "RFC3339 or null",
+    "connectivity": "online|offline|unknown; recent account probe evidence",
+    "revision": "monotonic integer lifecycle revision",
+    "accounting_state": "settled|unconfirmed; active run accounting remains unconfirmed after revoke and local cleanup acknowledgement",
+    "existing_computer_id": "present only for Add harness; available during pending review, before computer_id is provisioned"
   },
   "runtime_permissions": [
     "run.read",
     "run.claim",
     "run.telemetry",
     "work_orders.read",
+    "work_orders.write",
+    "nodes.read",
     "models.read",
     "account.read",
+    "account.route",
+    "account.probe",
     "harness.read",
     "harness.write",
     "harness.worker"
@@ -235,8 +288,20 @@
     "drain": "Immediately fence dispatch/reservation/claim; allow only already-active telemetry settlement. Reconcile/self/get completes drain once no active runs remain.",
     "revoke_now": "Immediate server fence; full removal revokes runtime key. Local processes remain unconfirmed and cleanup pending. Device proof permits tombstone reconciliation only.",
     "selective": "A removed enrollment cannot be probed, reserved, claimed or resurrected by manual registration; other accounts keep working.",
-    "metadata": "Owned probe/metadata and route use run.claim; list uses account.read. Paired runtime cannot widen approved model profiles via metadata.",
-    "ongoing_limits": "Separately authenticated person via existing allowance API; no runtime authority.",
-    "add_harness": "Fresh device approval required; existing computer extension contract will be finalized before implementation if supported."
+    "metadata": "Server provisions metadata. Paired daemon skips PUT metadata (account.manage); probe uses account.probe, route account.route, list account.read.",
+    "ongoing_limits": "Connect only followed by existing separately authenticated person allowance UI/API. New non-verification window explicitly enables ongoing execution; runtime cannot create it.",
+    "add_harness": "Same device endpoint with existing_computer_id and existing_lifecycle_secret. Fresh request_id/device_secret and explicit person approval; identical original runtime_hash/lifecycle_hash/workspace/computer details. Adds new accounts to same daemon/principal without rotating healthy runtime key. Old revoked enrollments remain tombstones.",
+    "run_projection": {
+      "purpose": "pairing_verification on immutable verification run, managed otherwise",
+      "verification_task": "Reply exactly AEON_VERIFIED. Do not modify files, perform privileged actions, access external networks, or use external/MCP tools. Use the enforced read-only verification mode.",
+      "max_duration_seconds": 60,
+      "repository_mutation_allowed": false,
+      "verification_policy": "read_only (no blanket claim all tools disabled)"
+    },
+    "offline_cleanup": "After observed local exit, lifecycle proof may acknowledge safe owned cleanup while retaining immutable pending usage journal locally. Server keeps active run/reservation accounting unconfirmed, never settles via proof.",
+    "run_errors": "Existing claim/telemetry error envelope retains error field containing stable pairing code; pairing and account endpoints additionally return code.",
+    "setup_command": "verified absolute binary path setup --url configured origin --workspace approved absolute folder --state-root private absolute folder outside repos --harness chosen harness --start-service; default tenant slug from guide",
+    "installation": "PAIR4 exact official GitHub inspr-at/paimos release artifact and SHA256SUMS (OCI image inspr-at/aeon is a different repository). Verify exact filename before executable permissions. Install only into new versioned user-owned directory; refuse existing destination and Nix/existing tool. Crossbuild target is not service qualification.",
+    "distribution_evidence": "Read-only gh release view v260927160212.0.0 --repo inspr-at/paimos verified current macOS arm64/amd64, Linux amd64 and SHA256SUMS artifact URLs. Linux arm64 is a candidate added by PAIR4 for the forthcoming release."
   }
 }

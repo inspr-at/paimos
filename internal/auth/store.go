@@ -396,6 +396,8 @@ func (m *Module) authenticateAgent(ctx context.Context, prefix, secret string) (
 			SET last_used_at = now()
 			WHERE k.prefix = $1 AND k.hash = $2
 			  AND k.revoked_at IS NULL
+     AND NOT EXISTS(SELECT 1 FROM agent_pairing_computers c JOIN agent_pairing_requests q ON q.tenant_id=c.tenant_id AND q.id=c.request_id
+      WHERE c.principal_id=k.principal_id AND (c.state='revoked' OR q.state<>'redeemed'))
 			  AND (k.expires_at IS NULL OR k.expires_at > now())
 			  AND EXISTS (
 			    SELECT 1 FROM principals p
@@ -535,6 +537,9 @@ func (m *Module) createAgentKeyTx(ctx context.Context, tx pgx.Tx, p tenant.Princ
 			if err != nil {
 				return err
 			}
+		}
+		if err := pairedIdentity(ctx, tx, principalID); err != nil {
+			return err
 		}
 		if err := ensureAgentBinding(ctx, tx, p, actorID, principalID, name, scopes); err != nil {
 			return err
