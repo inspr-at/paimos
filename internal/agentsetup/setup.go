@@ -147,12 +147,13 @@ type LocalDaemon interface {
 	Status(context.Context, string) (LocalStatus, error)
 }
 type Engine struct {
-	Store     *Store
-	API       PairingAPI
-	Services  *ServiceManager
-	Local     LocalDaemon
-	Now       func() time.Time
-	GrokProbe func(context.Context, grokprobe.Binding) (grokprobe.Identity, error)
+	Store              *Store
+	API                PairingAPI
+	Services           *ServiceManager
+	Local              LocalDaemon
+	ClaudeDependencies ClaudeDependencies
+	Now                func() time.Time
+	GrokProbe          func(context.Context, grokprobe.Binding) (grokprobe.Identity, error)
 }
 type Options struct {
 	Origin, TenantID, TenantSlug, ComputerName, Workspace string
@@ -265,6 +266,9 @@ func (e *Engine) Begin(ctx context.Context, o Options) (Progress, error) {
 		if s.Origin != strings.TrimRight(o.Origin, "/") || s.Request.Workspace != o.Workspace {
 			return Progress{}, ErrCollision
 		}
+		if err := e.checkSavedClaudeDependencies(s, ClaudeDependencies{NodePath: o.NodePath, SDKPath: o.ClaudeSDKPath}, false); err != nil {
+			return e.progress(s), err
+		}
 		for _, local := range s.Candidates {
 			if local.Candidate.Harness == "grok" {
 				candidate := local.Candidate
@@ -288,6 +292,16 @@ func (e *Engine) Begin(ctx context.Context, o Options) (Progress, error) {
 	for _, entry := range entries {
 		if entry.Name() != "setup.lock" {
 			return Progress{}, ErrCollision
+		}
+	}
+	for _, c := range o.Candidates {
+		if c.Harness == "claude" {
+			deps, err := (Discovery{}).ResolveClaudeDependencies(ClaudeDependencies{NodePath: o.NodePath, SDKPath: o.ClaudeSDKPath}, o.Workspace)
+			if err != nil {
+				return Progress{Stage: "blocked", Action: err.Error()}, err
+			}
+			o.NodePath, o.ClaudeSDKPath = deps.NodePath, deps.SDKPath
+			break
 		}
 	}
 	if err := validateOptions(o); err != nil {
@@ -351,6 +365,35 @@ func (e *Engine) Begin(ctx context.Context, o Options) (Progress, error) {
 		return Progress{}, err
 	}
 	return e.Step(ctx)
+}
+
+func (e *Engine) checkSavedClaudeDependencies(s *snapshot, requested ClaudeDependencies, addingClaude bool) error {
+	if s.NodePath == "" && s.ClaudeSDKPath == "" {
+		if !addingClaude && (requested.NodePath != "" || requested.SDKPath != "") {
+			return errors.New("Claude dependency overrides differ from existing pairing; use Add harness for a new Claude enrollment")
+		}
+		return nil
+	}
+	if s.NodePath == "" || s.ClaudeSDKPath == "" {
+		return errors.New("saved Claude dependencies are incomplete; no enrollment was changed")
+	}
+	valid, err := (Discovery{}).ResolveClaudeDependencies(ClaudeDependencies{NodePath: s.NodePath, SDKPath: s.ClaudeSDKPath}, s.Request.Workspace)
+	if err != nil {
+		return errors.New("saved Claude dependencies are unavailable or unsafe; restore the pinned installation before resuming")
+	}
+	if requested.NodePath != "" {
+		p, err := pinnedRegular(requested.NodePath, s.Request.Workspace, true)
+		if err != nil || p != valid.NodePath {
+			return errors.New("--node-path conflicts with saved Claude dependency; no enrollment was changed")
+		}
+	}
+	if requested.SDKPath != "" {
+		p, err := pinnedRegular(requested.SDKPath, s.Request.Workspace, false)
+		if err != nil || p != valid.SDKPath {
+			return errors.New("--claude-sdk-path conflicts with saved Claude dependency; no enrollment was changed")
+		}
+	}
+	return nil
 }
 
 func (e *Engine) Step(ctx context.Context) (Progress, error) {
@@ -619,6 +662,23 @@ func ReadRuntimeConfig(root string) (RuntimeConfig, error) {
 		return RuntimeConfig{}, errors.New("private runtime configuration invalid")
 	}
 	return c, nil
+}
+
+// ValidateRuntimeDependencies gates execution, never access to recovery metadata
+// or the credential needed to revoke this computer. Removed harnesses do not
+// block the remaining accounts merely because their old dependency pins remain.
+func ValidateRuntimeDependencies(c RuntimeConfig) error {
+	claude := false
+	for _, a := range c.Accounts {
+		claude = claude || a.Harness == "claude"
+	}
+	if claude {
+		valid, err := (Discovery{}).ResolveClaudeDependencies(ClaudeDependencies{NodePath: c.NodePath, SDKPath: c.ClaudeSDKPath}, c.Workspace)
+		if err != nil || valid.NodePath != c.NodePath || valid.SDKPath != c.ClaudeSDKPath {
+			return errors.New("pinned Claude runtime dependencies are unavailable or unsafe")
+		}
+	}
+	return nil
 }
 func ReadRuntime(root string) (RuntimeConfig, secret, error) {
 	c, err := ReadRuntimeConfig(root)

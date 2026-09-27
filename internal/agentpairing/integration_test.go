@@ -766,7 +766,7 @@ func TestPairingGuideReleaseContract(t *testing.T) {
 		if !strings.HasPrefix(target.ArtifactURL, "https://github.com/inspr-at/paimos/releases/download/v260927160212.0.0/paimos-agentd-") || !strings.Contains(target.Command, "mkdir \"$aeon_pairing_dir\"") || !strings.Contains(target.Command, "if (n != 1) exit 1") || strings.Contains(target.Command, "attacker.invalid") {
 			t.Fatalf("unsafe install contract: %+v", target)
 		}
-		check := strings.Index(target.Command, " -c pairing-checksum.txt")
+		check := strings.Index(target.Command, " -c selected.SHA256SUMS")
 		install := strings.Index(target.Command, "install -m 0700")
 		if check < 0 || install < check {
 			t.Fatal("artifact becomes executable before checksum verification")

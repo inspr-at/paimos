@@ -1084,13 +1084,18 @@ export async function createOngoingLimits(windows: readonly { accountId: string;
   }
   const created: string[] = []
   const reconciled: string[] = []
+  const started = readEpoch
   for (const item of windows) {
+    if (started !== readEpoch) throw sessionResetError()
     try {
       await createWindow(item.accountId, item.body)
+      if (started !== readEpoch) throw sessionResetError()
       created.push(item.accountId)
     } catch (error) {
+      if (started !== readEpoch) throw sessionResetError()
       const saved = [...created, ...reconciled]
       const match = await matchOngoingLimit(item.accountId, item.body)
+      if (started !== readEpoch) throw sessionResetError()
       if (match === 'saved') { reconciled.push(item.accountId); continue }
       const uncertain = match === 'unknown' || allowanceUncertain(error)
       const reason = error instanceof Error ? error.message : 'The allowance was not saved.'
