@@ -274,12 +274,12 @@ func TestHarnessCompatTranscripts(t *testing.T) {
 		name, method, path, output string
 		args                       []string
 	}{
-		{"register", "POST", "/api/projects/" + transcriptProjectID + "/harness-sessions", `{"ok":true}`, []string{"--project", "AEON", "--agent", "worker", "--harness", "codex", "--host", "local", "--harness-session-file", ref, "--worker-lease-file", lease, "--ticket-id", "7", "--work-shape", "ship"}},
+		{"register", "POST", "/api/projects/" + transcriptProjectID + "/harness-sessions", `{"ok":true}`, []string{"--project", "AEON", "--agent", "worker", "--harness", "codex", "--host", "local", "--harness-session-file", ref, "--worker-lease-file", lease, "--ticket-id", "7", "--work-shape", "ship", "--model", "gpt-6-sol", "--effort", "xhigh", "--account-label", "Codex Pro", "--harness-version", "1.2.3", "--brief", "AEON-213", "--worktree", "/Code/aeon", "--branch", "tm1.session-metadata"}},
 		{"list", "GET", "/api/projects/" + transcriptProjectID + "/harness-sessions", `[{"id":"` + transcriptSessionID + `"}]`, []string{"--project", "AEON"}},
 		{"status", "GET", "/api/projects/" + transcriptProjectID + "/harness-sessions/" + transcriptSessionID, `{"ok":true}`, []string{"--project", "AEON", "--session", transcriptSessionID}},
 		{"orchestrator", "GET", "/api/projects/" + transcriptProjectID + "/harness-sessions/orchestrator", `{"ok":true}`, []string{"--project", "AEON"}},
 		{"bind", "PATCH", "/api/projects/" + transcriptProjectID + "/harness-sessions/" + transcriptSessionID + "/binding", `{"ok":true}`, []string{"--project", "AEON", "--session", transcriptSessionID, "--revision", "1", "--work-shape", "unknown"}},
-		{"heartbeat", "POST", "/api/projects/" + transcriptProjectID + "/harness-sessions/" + transcriptSessionID + "/heartbeat", `{"ok":true}`, append(append([]string{}, baseWorker...), "--phase", "working", "--activity-kind", "turn_started", "--activity-sequence", "1", "--note", "Running PDF tests")},
+		{"heartbeat", "POST", "/api/projects/" + transcriptProjectID + "/harness-sessions/" + transcriptSessionID + "/heartbeat", `{"ok":true}`, append(append([]string{}, baseWorker...), "--phase", "working", "--activity-kind", "turn_started", "--activity-sequence", "1", "--note", "Running PDF tests", "--model", "gpt-6-sol", "--effort", "xhigh", "--account-label", "Codex Pro", "--harness-version", "1.2.3", "--brief", "AEON-214", "--worktree", "/Code/aeon", "--branch", "tm1.session-metadata", "--commit", "abc1234:Store session setup")},
 		{"yield", "POST", "/api/projects/" + transcriptProjectID + "/harness-sessions/" + transcriptSessionID + "/yield", `{"ok":true}`, baseWorker},
 		{"drain", "POST", "/api/projects/" + transcriptProjectID + "/harness-sessions/" + transcriptSessionID + "/drain", `{"ok":true}`, baseWorker},
 		{"complete-delivery", "POST", "/api/projects/" + transcriptProjectID + "/harness-sessions/" + transcriptSessionID + "/complete-delivery", `{"ok":true}`, append(append([]string{}, baseWorker...), "--delivery-id", transcriptEntryID, "--cursor", "1")},
@@ -320,6 +320,19 @@ func TestHarnessCompatTranscripts(t *testing.T) {
 			}
 			if tc.name == "register" && last.body["ticket_node_id"] != transcriptEntryID {
 				t.Fatalf("classic --ticket-id did not resolve: %+v", last.body)
+			}
+			if tc.name == "register" || tc.name == "heartbeat" {
+				for key, want := range map[string]string{"model": "gpt-6-sol", "reasoning_effort": "xhigh", "account_label": "Codex Pro", "harness_version": "1.2.3", "worktree": "/Code/aeon", "branch": "tm1.session-metadata"} {
+					if last.body[key] != want {
+						t.Fatalf("%s: %s = %v, want %s", tc.name, key, last.body[key], want)
+					}
+				}
+			}
+			if tc.name == "heartbeat" {
+				commits, ok := last.body["commits"].([]any)
+				if !ok || len(commits) != 1 || commits[0].(map[string]any)["sha"] != "abc1234" {
+					t.Fatalf("heartbeat commits missing: %+v", last.body["commits"])
+				}
 			}
 			if tc.name == "heartbeat" && last.body["activity"] != "busy" {
 				t.Fatalf("classic --activity-kind did not map: %+v", last.body)

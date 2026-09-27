@@ -20,12 +20,17 @@
 // in each visible project right now, for the Projects page (live.go).
 // AEON-192 adds activity_note on heartbeat. New(pool) remains the coordinator's
 // httpapi.Module constructor and Plugin() remains its compiled manifest.
+// TM1 adds optional --model, --effort, --account-label, --harness-version,
+// --brief, --worktree and --branch to paimos harness register|heartbeat,
+// plus repeated --commit SHA:subject on heartbeat. The coordinator can pass
+// these flags from worker scripts without changing server wiring.
 package harness
 
 import (
 	"context"
 	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"sort"
@@ -78,36 +83,142 @@ func (m *Module) Mount(mux *http.ServeMux) {
 }
 
 type Session struct {
-	ID                     string         `json:"id"`
-	ProjectID              string         `json:"project_id"`
-	AgentPrincipalID       string         `json:"agent_principal_id"`
-	RunID                  *string        `json:"run_id"`
-	TicketNodeID           *string        `json:"ticket_node_id"`
-	WorkOrderID            *string        `json:"work_order_id"`
-	ParentID               *string        `json:"parent_harness_session_id"`
-	Harness                string         `json:"harness"`
-	Host                   string         `json:"host"`
-	DisplayLabel           *string        `json:"display_label"`
-	ActivityNote           *string        `json:"activity_note"`
-	ActivityHistory        []ActivityNote `json:"activity_history,omitempty"`
-	Management             string         `json:"management_mode"`
-	Role                   string         `json:"role"`
-	WorkShape              string         `json:"work_shape"`
-	Capabilities           []string       `json:"advertised_capabilities"`
-	Phase                  string         `json:"phase"`
-	Activity               string         `json:"activity"`
-	ActivitySequence       int64          `json:"activity_sequence"`
-	Revision               int64          `json:"revision"`
-	HeartbeatAt            *time.Time     `json:"heartbeat_at"`
-	StoppedAt              *time.Time     `json:"stopped_at"`
-	StopReason             *string        `json:"stop_reason"`
-	CreatedAt              time.Time      `json:"created_at"`
-	refDigest, leaseDigest []byte
+	ID                                             string         `json:"id"`
+	ProjectID                                      string         `json:"project_id"`
+	AgentPrincipalID                               string         `json:"agent_principal_id"`
+	RunID                                          *string        `json:"run_id"`
+	TicketNodeID                                   *string        `json:"ticket_node_id"`
+	WorkOrderID                                    *string        `json:"work_order_id"`
+	ParentID                                       *string        `json:"parent_harness_session_id"`
+	Harness                                        string         `json:"harness"`
+	Host                                           string         `json:"host"`
+	DisplayLabel                                   *string        `json:"display_label"`
+	Model                                          *string        `json:"model"`
+	ReasoningEffort                                *string        `json:"reasoning_effort"`
+	AccountLabel                                   *string        `json:"account_label"`
+	HarnessVersion                                 *string        `json:"harness_version"`
+	Brief                                          *string        `json:"brief"`
+	Worktree                                       *string        `json:"worktree"`
+	Branch                                         *string        `json:"branch"`
+	Commits                                        []Commit       `json:"commits"`
+	ActivityNote                                   *string        `json:"activity_note"`
+	ActivityHistory                                []ActivityNote `json:"activity_history,omitempty"`
+	Management                                     string         `json:"management_mode"`
+	Role                                           string         `json:"role"`
+	WorkShape                                      string         `json:"work_shape"`
+	Capabilities                                   []string       `json:"advertised_capabilities"`
+	Phase                                          string         `json:"phase"`
+	Activity                                       string         `json:"activity"`
+	ActivitySequence                               int64          `json:"activity_sequence"`
+	Revision                                       int64          `json:"revision"`
+	HeartbeatAt                                    *time.Time     `json:"heartbeat_at"`
+	StoppedAt                                      *time.Time     `json:"stopped_at"`
+	StopReason                                     *string        `json:"stop_reason"`
+	CreatedAt                                      time.Time      `json:"created_at"`
+	refDigest, leaseDigest, registrationMetaDigest []byte
 }
 
 type ActivityNote struct {
 	Note string    `json:"note"`
 	At   time.Time `json:"at"`
+}
+
+type Commit struct {
+	SHA     string `json:"sha"`
+	Subject string `json:"subject"`
+}
+
+type sessionText struct {
+	Model           *string `json:"model"`
+	ReasoningEffort *string `json:"reasoning_effort"`
+	AccountLabel    *string `json:"account_label"`
+	HarnessVersion  *string `json:"harness_version"`
+	Brief           *string `json:"brief"`
+	Worktree        *string `json:"worktree"`
+	Branch          *string `json:"branch"`
+}
+
+func cleanText(raw string, max int, name string) (string, error) {
+	if !utf8.ValidString(raw) {
+		return "", workorders.Fail(400, "invalid "+name)
+	}
+	clean := strings.TrimSpace(strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return -1
+		}
+		return r
+	}, raw))
+	if utf8.RuneCountInString(clean) > max {
+		return "", workorders.Fail(400, name+" is too long")
+	}
+	return clean, nil
+}
+
+func (m *sessionText) normalize() error {
+	for _, field := range []struct {
+		value **string
+		max   int
+		name  string
+	}{
+		{&m.Model, 120, "model"}, {&m.ReasoningEffort, 40, "reasoning effort"},
+		{&m.AccountLabel, 60, "account label"}, {&m.HarnessVersion, 80, "harness version"},
+		{&m.Brief, 240, "brief"}, {&m.Worktree, 512, "worktree"}, {&m.Branch, 200, "branch"},
+	} {
+		if *field.value == nil {
+			continue
+		}
+		clean, err := cleanText(**field.value, field.max, field.name)
+		if err != nil {
+			return err
+		}
+		*field.value = nil
+		if clean != "" {
+			*field.value = &clean
+		}
+	}
+	return nil
+}
+
+func validCommits(commits []Commit) error {
+	if len(commits) > 20 {
+		return workorders.Fail(400, "too many commits")
+	}
+	for i := range commits {
+		c := &commits[i]
+		if len(c.SHA) < 7 || len(c.SHA) > 40 || strings.Trim(c.SHA, "0123456789abcdefABCDEF") != "" {
+			return workorders.Fail(400, "invalid commit SHA")
+		}
+		c.SHA = strings.ToLower(c.SHA)
+		var err error
+		c.Subject, err = cleanText(c.Subject, 200, "commit subject")
+		if err != nil {
+			return err
+		}
+		if c.Subject == "" {
+			return workorders.Fail(400, "commit subject required")
+		}
+	}
+	return nil
+}
+
+func appendCommits(existing, incoming []Commit) []Commit {
+	out := append([]Commit{}, existing...)
+	for _, c := range incoming {
+		found := false
+		for _, old := range out {
+			if old.SHA == c.SHA {
+				found = true
+				break
+			}
+		}
+		if !found {
+			out = append(out, c)
+		}
+	}
+	if len(out) > 20 {
+		out = out[len(out)-20:]
+	}
+	return out
 }
 
 func normalizeActivityNote(raw string) (string, bool) {
@@ -123,11 +234,11 @@ func normalizeActivityNote(raw string) (string, bool) {
 	return clean, clean != "" && utf8.RuneCountInString(clean) <= 120
 }
 
-const sessionColumns = `id::text,project_id::text,agent_principal_id::text,run_id::text,ticket_node_id::text,work_order_id::text,parent_id::text,harness,host,management,role,work_shape,capabilities,phase,activity,activity_sequence,revision,heartbeat_at,stopped_at,stop_reason,created_at,ref_digest,lease_digest,display_label,activity_note`
+const sessionColumns = `id::text,project_id::text,agent_principal_id::text,run_id::text,ticket_node_id::text,work_order_id::text,parent_id::text,harness,host,management,role,work_shape,capabilities,phase,activity,activity_sequence,revision,heartbeat_at,stopped_at,stop_reason,created_at,ref_digest,lease_digest,display_label,activity_note,model,reasoning_effort,account_label,harness_version,brief,worktree,branch,commits,registration_metadata_digest`
 
 func scanSession(row pgx.Row) (Session, error) {
 	var s Session
-	err := row.Scan(&s.ID, &s.ProjectID, &s.AgentPrincipalID, &s.RunID, &s.TicketNodeID, &s.WorkOrderID, &s.ParentID, &s.Harness, &s.Host, &s.Management, &s.Role, &s.WorkShape, &s.Capabilities, &s.Phase, &s.Activity, &s.ActivitySequence, &s.Revision, &s.HeartbeatAt, &s.StoppedAt, &s.StopReason, &s.CreatedAt, &s.refDigest, &s.leaseDigest, &s.DisplayLabel, &s.ActivityNote)
+	err := row.Scan(&s.ID, &s.ProjectID, &s.AgentPrincipalID, &s.RunID, &s.TicketNodeID, &s.WorkOrderID, &s.ParentID, &s.Harness, &s.Host, &s.Management, &s.Role, &s.WorkShape, &s.Capabilities, &s.Phase, &s.Activity, &s.ActivitySequence, &s.Revision, &s.HeartbeatAt, &s.StoppedAt, &s.StopReason, &s.CreatedAt, &s.refDigest, &s.leaseDigest, &s.DisplayLabel, &s.ActivityNote, &s.Model, &s.ReasoningEffort, &s.AccountLabel, &s.HarnessVersion, &s.Brief, &s.Worktree, &s.Branch, &s.Commits, &s.registrationMetaDigest)
 	return s, err
 }
 func project(ctx context.Context, tx pgx.Tx, id string) error {
@@ -286,20 +397,21 @@ func validateParent(ctx context.Context, tx pgx.Tx, projectID, parentID, childID
 }
 
 type registration struct {
-	AgentPrincipalID string   `json:"agent_principal_id"`
-	RunID            *string  `json:"run_id"`
-	TicketNodeID     *string  `json:"ticket_node_id"`
-	WorkOrderID      *string  `json:"work_order_id"`
-	ParentID         *string  `json:"parent_harness_session_id"`
-	Harness          string   `json:"harness"`
-	Host             string   `json:"host"`
-	DisplayLabel     *string  `json:"display_label"`
-	Management       string   `json:"management_mode"`
-	Role             string   `json:"role"`
-	WorkShape        string   `json:"work_shape"`
-	Capabilities     []string `json:"advertised_capabilities"`
-	SessionRef       string   `json:"harness_session_ref"`
-	WorkerLease      string   `json:"worker_lease"`
+	AgentPrincipalID string  `json:"agent_principal_id"`
+	RunID            *string `json:"run_id"`
+	TicketNodeID     *string `json:"ticket_node_id"`
+	WorkOrderID      *string `json:"work_order_id"`
+	ParentID         *string `json:"parent_harness_session_id"`
+	Harness          string  `json:"harness"`
+	Host             string  `json:"host"`
+	DisplayLabel     *string `json:"display_label"`
+	sessionText
+	Management   string   `json:"management_mode"`
+	Role         string   `json:"role"`
+	WorkShape    string   `json:"work_shape"`
+	Capabilities []string `json:"advertised_capabilities"`
+	SessionRef   string   `json:"harness_session_ref"`
+	WorkerLease  string   `json:"worker_lease"`
 }
 
 func (m *Module) register(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
@@ -324,6 +436,9 @@ func (m *Module) register(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, 
 		if label != "" {
 			in.DisplayLabel = &label
 		}
+	}
+	if err := in.sessionText.normalize(); err != nil {
+		return nil, err
 	}
 	if p.Kind == tenant.Agent && p.ID != in.AgentPrincipalID {
 		return nil, workorders.Fail(403, "agent may register only itself")
@@ -379,10 +494,14 @@ func (m *Module) register(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, 
 			return nil, err
 		}
 	}
+	metaDigest, err := registrationMetadataDigest(in.sessionText)
+	if err != nil {
+		return nil, err
+	}
 	ref, lease := digest("ref", in.SessionRef), digest("lease", in.WorkerLease)
 	existing, err := scanSession(tx.QueryRow(ctx, `SELECT `+sessionColumns+` FROM harness_sessions WHERE project_id=$1 AND ref_digest=$2 AND stopped_at IS NULL FOR UPDATE`, projectID, ref))
 	if err == nil {
-		if subtle.ConstantTimeCompare(existing.leaseDigest, lease) != 1 || existing.AgentPrincipalID != in.AgentPrincipalID || existing.Harness != in.Harness || existing.Host != in.Host || existing.Management != in.Management || existing.Role != in.Role || existing.WorkShape != in.WorkShape || !same(existing.DisplayLabel, in.DisplayLabel) || !same(existing.ParentID, in.ParentID) || !same(existing.TicketNodeID, in.TicketNodeID) || !same(existing.RunID, in.RunID) || !same(existing.WorkOrderID, in.WorkOrderID) || !sameCaps(existing.Capabilities, caps) {
+		if subtle.ConstantTimeCompare(existing.leaseDigest, lease) != 1 || existing.AgentPrincipalID != in.AgentPrincipalID || existing.Harness != in.Harness || existing.Host != in.Host || existing.Management != in.Management || existing.Role != in.Role || existing.WorkShape != in.WorkShape || !same(existing.DisplayLabel, in.DisplayLabel) || !sameRegistrationMetadata(existing, in.sessionText, metaDigest) || !same(existing.ParentID, in.ParentID) || !same(existing.TicketNodeID, in.TicketNodeID) || !same(existing.RunID, in.RunID) || !same(existing.WorkOrderID, in.WorkOrderID) || !sameCaps(existing.Capabilities, caps) {
 			return nil, workorders.Fail(409, "active generation conflicts with registration")
 		}
 		return existing, nil
@@ -395,7 +514,7 @@ func (m *Module) register(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, 
 			return nil, err
 		}
 	}
-	s, err := scanSession(tx.QueryRow(ctx, `INSERT INTO harness_sessions(tenant_id,project_id,agent_principal_id,run_id,ticket_node_id,work_order_id,parent_id,harness,host,management,role,work_shape,capabilities,ref_digest,lease_digest,display_label) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING `+sessionColumns, p.TenantID, projectID, in.AgentPrincipalID, in.RunID, in.TicketNodeID, in.WorkOrderID, in.ParentID, in.Harness, in.Host, in.Management, in.Role, in.WorkShape, caps, ref, lease, in.DisplayLabel))
+	s, err := scanSession(tx.QueryRow(ctx, `INSERT INTO harness_sessions(tenant_id,project_id,agent_principal_id,run_id,ticket_node_id,work_order_id,parent_id,harness,host,management,role,work_shape,capabilities,ref_digest,lease_digest,display_label,model,reasoning_effort,account_label,harness_version,brief,worktree,branch,registration_metadata_digest) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24) RETURNING `+sessionColumns, p.TenantID, projectID, in.AgentPrincipalID, in.RunID, in.TicketNodeID, in.WorkOrderID, in.ParentID, in.Harness, in.Host, in.Management, in.Role, in.WorkShape, caps, ref, lease, in.DisplayLabel, in.Model, in.ReasoningEffort, in.AccountLabel, in.HarnessVersion, in.Brief, in.Worktree, in.Branch, metaDigest))
 	if err != nil {
 		return nil, err
 	}
@@ -417,6 +536,21 @@ func sameCaps(a, b []string) bool {
 		}
 	}
 	return true
+}
+func registrationMetadataDigest(in sessionText) ([]byte, error) {
+	raw, err := json.Marshal(in)
+	if err != nil {
+		return nil, err
+	}
+	return digest("registration-metadata", string(raw)), nil
+}
+func sameRegistrationMetadata(existing Session, in sessionText, expectedDigest []byte) bool {
+	if existing.registrationMetaDigest != nil {
+		return subtle.ConstantTimeCompare(existing.registrationMetaDigest, expectedDigest) == 1
+	}
+	// Rows created before 0881 registered without these fields. A later
+	// heartbeat can fill them, so only an empty registration is their replay.
+	return in.Model == nil && in.ReasoningEffort == nil && in.AccountLabel == nil && in.HarnessVersion == nil && in.Brief == nil && in.Worktree == nil && in.Branch == nil
 }
 func (m *Module) list(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
 	id := r.PathValue("projectId")
@@ -531,7 +665,7 @@ func (m *Module) bind(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, erro
 		}
 	}
 	before := s
-	err = tx.QueryRow(ctx, `UPDATE harness_sessions SET parent_id=$2,ticket_node_id=$3,work_shape=$4,revision=revision+1 WHERE id=$1 RETURNING `+sessionColumns, s.ID, in.ParentID, in.TicketNodeID, in.WorkShape).Scan(&s.ID, &s.ProjectID, &s.AgentPrincipalID, &s.RunID, &s.TicketNodeID, &s.WorkOrderID, &s.ParentID, &s.Harness, &s.Host, &s.Management, &s.Role, &s.WorkShape, &s.Capabilities, &s.Phase, &s.Activity, &s.ActivitySequence, &s.Revision, &s.HeartbeatAt, &s.StoppedAt, &s.StopReason, &s.CreatedAt, &s.refDigest, &s.leaseDigest, &s.DisplayLabel, &s.ActivityNote)
+	s, err = scanSession(tx.QueryRow(ctx, `UPDATE harness_sessions SET parent_id=$2,ticket_node_id=$3,work_shape=$4,revision=revision+1 WHERE id=$1 RETURNING `+sessionColumns, s.ID, in.ParentID, in.TicketNodeID, in.WorkShape))
 	if err != nil {
 		return nil, err
 	}
@@ -543,6 +677,8 @@ func (m *Module) heartbeat(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 		Activity         string  `json:"activity"`
 		ActivitySequence int64   `json:"activity_sequence"`
 		ActivityNote     *string `json:"activity_note"`
+		sessionText
+		Commits []Commit `json:"commits"`
 	}
 	if err := workorders.Decode(r, &in); err != nil {
 		return nil, err
@@ -574,13 +710,23 @@ func (m *Module) heartbeat(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 		}
 		in.ActivityNote = &note
 	}
+	if err := in.sessionText.normalize(); err != nil {
+		return nil, err
+	}
+	if err := validCommits(in.Commits); err != nil {
+		return nil, err
+	}
 	note := s.ActivityNote
 	changed := in.ActivityNote != nil && (note == nil || *note != *in.ActivityNote)
 	if in.ActivityNote != nil {
 		note = in.ActivityNote
 	}
 	before := s
-	err = tx.QueryRow(ctx, `UPDATE harness_sessions SET phase=$2,activity=$3,activity_sequence=$4,heartbeat_at=clock_timestamp(),activity_note=$5 WHERE id=$1 RETURNING `+sessionColumns, s.ID, in.Phase, in.Activity, in.ActivitySequence, note).Scan(&s.ID, &s.ProjectID, &s.AgentPrincipalID, &s.RunID, &s.TicketNodeID, &s.WorkOrderID, &s.ParentID, &s.Harness, &s.Host, &s.Management, &s.Role, &s.WorkShape, &s.Capabilities, &s.Phase, &s.Activity, &s.ActivitySequence, &s.Revision, &s.HeartbeatAt, &s.StoppedAt, &s.StopReason, &s.CreatedAt, &s.refDigest, &s.leaseDigest, &s.DisplayLabel, &s.ActivityNote)
+	commits, err := json.Marshal(appendCommits(s.Commits, in.Commits))
+	if err != nil {
+		return nil, err
+	}
+	s, err = scanSession(tx.QueryRow(ctx, `UPDATE harness_sessions SET phase=$2,activity=$3,activity_sequence=$4,heartbeat_at=clock_timestamp(),activity_note=$5,model=coalesce($6,model),reasoning_effort=coalesce($7,reasoning_effort),account_label=coalesce($8,account_label),harness_version=coalesce($9,harness_version),brief=coalesce($10,brief),worktree=coalesce($11,worktree),branch=coalesce($12,branch),commits=$13::jsonb WHERE id=$1 RETURNING `+sessionColumns, s.ID, in.Phase, in.Activity, in.ActivitySequence, note, in.Model, in.ReasoningEffort, in.AccountLabel, in.HarnessVersion, in.Brief, in.Worktree, in.Branch, string(commits)))
 	if err != nil {
 		return nil, err
 	}

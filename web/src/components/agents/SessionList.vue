@@ -100,6 +100,7 @@ function pendingLabel(view: SessionView) {
   if (!c || c.state === 'completed') return ''
   return c.kind === 'stop' ? (c.state === 'claimed' ? 'Stopping…' : 'Stop sent') : (c.state === 'claimed' ? 'Interrupting…' : 'Interrupt sent')
 }
+const rowMeta = (view: SessionView) => [view.harness, view.session.model, view.session.reasoning_effort, view.session.account_label].filter(Boolean).join(' · ')
 function rowClick(event: MouseEvent, id: string) {
   if ((event.target as HTMLElement).closest('a, button')) return
   emit('open', id)
@@ -156,7 +157,7 @@ function rowClick(event: MouseEvent, id: string) {
             <span v-if="depth" class="sr-only">Worker of {{ parent }}. </span>
             <RouterLink class="agent-link" :to="`/agents/${view.session.id}`" :aria-label="`${view.harness} ${view.name}, ${view.status.label}`">
               <AgentGlyph :view="view" :size="30" />
-              <span class="who"><span class="agent-name">{{ view.name }}</span><span class="step">{{ currentStep(view, branch.liveCount - 1) }}</span><span v-if="view.session.host && view.session.host !== view.name" class="host mono">on {{ view.session.host }}</span></span>
+              <span class="who"><span class="agent-name">{{ view.name }}</span><span class="step">{{ currentStep(view, branch.liveCount - 1) }}</span><span class="session-meta">{{ rowMeta(view) }}</span><span v-if="view.session.host && view.session.host !== view.name" class="host mono">on {{ view.session.host }}</span></span>
             </RouterLink>
             <span v-if="view.session.role === 'coordinator'" class="role" data-tip="Coordinates other sessions">Lead</span>
             <span v-if="branch.children.length" class="worker-tools">
@@ -229,7 +230,9 @@ function rowClick(event: MouseEvent, id: string) {
 .group-toggle:hover { background: var(--row-hover); color: var(--ink); }
 .group-toggle:focus-visible { box-shadow: var(--focus-ring); }
 .chev.turned { transform: rotate(90deg); }
-.row { --tree-joint: 28px; position: relative; min-height: 48px; margin: 0 6px; padding: 0 4px; border-radius: 10px; outline: none; cursor: pointer; font-size: 13px; }
+/* The glyph is centred beside name, activity, metadata and host. The metadata
+   line adds half its 13.75px height to the tree joint; phones add 10px padding. */
+.row { --tree-joint: 35px; position: relative; min-height: 48px; margin: 0 6px; padding: 0 4px; border-radius: 10px; outline: none; cursor: pointer; font-size: 13px; }
 .row.family { background: var(--chip-bg); border-radius: 0; }
 .row.family-start { border-radius: 10px 10px 0 0; }
 .row.family-end { border-radius: 0 0 10px 10px; }
@@ -268,6 +271,7 @@ function rowClick(event: MouseEvent, id: string) {
 .who { display: grid; min-width: 0; line-height: 1.25; }
 .agent-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .step { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-2); font-size: 12px; }
+.session-meta { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-3); font-size: 11px; }
 .row:hover .agent-name { color: var(--teal-ink); }
 .harness { flex-shrink: 0; display: inline-flex; align-items: center; height: 20px; padding: 0 7px; border-radius: 6px; background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); font: 500 10.5px/1 var(--mono); letter-spacing: .03em; color: var(--ink-2); font-variant-ligatures: none; }
 .role { flex-shrink: 0; height: 18px; padding: 0 6px; border-radius: 999px; background: var(--gold-wash); color: var(--gold-ink); font: 600 10px/18px var(--mono); letter-spacing: .06em; text-transform: uppercase; font-variant-ligatures: none; }
@@ -316,7 +320,7 @@ function rowClick(event: MouseEvent, id: string) {
   .table { --tree-step: 20px; display: block; }
   .thead { display: none; }
   .group-row { display: block; margin: 12px 8px 2px; padding: 0 8px; }
-  .row { --tree-joint: 38px; display: grid; grid-template-columns: auto minmax(0, 1fr) auto 44px; grid-template-areas: "agent agent beat actions" "state ticket ticket actions"; row-gap: 6px; column-gap: 0; min-height: 64px; margin: 0 6px; padding: 10px 4px 10px calc(10px + var(--depth) * var(--tree-step)); }
+  .row { --tree-joint: 45px; display: grid; grid-template-columns: auto minmax(0, 1fr) auto 44px; grid-template-areas: "agent agent beat actions" "state ticket ticket actions"; row-gap: 6px; column-gap: 0; min-height: 64px; margin: 0 6px; padding: 10px 4px 10px calc(10px + var(--depth) * var(--tree-step)); }
   .row > span { padding: 0; }
   .c-agent { grid-area: agent; }
   .row.worker .c-agent { padding-left: 0; }

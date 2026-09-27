@@ -237,7 +237,7 @@ func (rt *runtime) harnessTicket(projectID, key string, classicID int) (*string,
 }
 
 func (rt *runtime) harnessRegister() *Command {
-	var project, agent, harness, host, label, refFile, leaseFile, registrationFile, management, role, parent, ticket, shape, runID, orderID string
+	var project, agent, harness, host, label, model, effort, accountLabel, harnessVersion, brief, worktree, branch, refFile, leaseFile, registrationFile, management, role, parent, ticket, shape, runID, orderID string
 	var ticketIDFlag int
 	var caps []string
 	return &Command{Name: "register", Short: "Register one public harness generation", Use: "harness register --project KEY --agent NAME --harness KIND --host HOST --harness-session-file PATH --worker-lease-file PATH", addFlags: func(fs *flagSet) {
@@ -246,6 +246,13 @@ func (rt *runtime) harnessRegister() *Command {
 		fs.string(&harness, "harness", 0, "adapter family")
 		fs.string(&host, "host", 0, "non-secret host label")
 		fs.string(&label, "label", 0, "public session display label (up to 128 characters)")
+		fs.string(&model, "model", 0, "model name")
+		fs.string(&effort, "effort", 0, "reasoning effort")
+		fs.string(&accountLabel, "account-label", 0, "subscription or account display name (never a credential)")
+		fs.string(&harnessVersion, "harness-version", 0, "harness version")
+		fs.string(&brief, "brief", 0, "short prompt file name or ticket key")
+		fs.string(&worktree, "worktree", 0, "worktree path")
+		fs.string(&branch, "branch", 0, "branch name")
 		fs.string(&refFile, "harness-session-file", 0, "private external reference file")
 		fs.string(&leaseFile, "worker-lease-file", 0, "private generation lease file")
 		fs.string(&registrationFile, "registration-file", 0, "private JSON with both registration secrets, or - for stdin")
@@ -339,7 +346,7 @@ func (rt *runtime) harnessRegister() *Command {
 			order = &orderID
 		}
 		var out any
-		err = rt.harnessDo(http.MethodPost, harnessPath(projectID, ""), "", map[string]any{"agent_principal_id": me.Principal.ID, "harness": harness, "host": host, "display_label": label, "harness_session_ref": ref, "worker_lease": lease, "management_mode": management, "role": role, "parent_harness_session_id": parentID, "ticket_node_id": ticketID, "work_shape": shape, "work_order_id": order, "run_id": run, "advertised_capabilities": caps}, &out)
+		err = rt.harnessDo(http.MethodPost, harnessPath(projectID, ""), "", map[string]any{"agent_principal_id": me.Principal.ID, "harness": harness, "host": host, "display_label": label, "model": model, "reasoning_effort": effort, "account_label": accountLabel, "harness_version": harnessVersion, "brief": brief, "worktree": worktree, "branch": branch, "harness_session_ref": ref, "worker_lease": lease, "management_mode": management, "role": role, "parent_harness_session_id": parentID, "ticket_node_id": ticketID, "work_shape": shape, "work_order_id": order, "run_id": run, "advertised_capabilities": caps}, &out)
 		if err != nil {
 			return err
 		}
@@ -418,8 +425,9 @@ func (rt *runtime) harnessBind() *Command {
 	}}
 }
 func (rt *runtime) harnessWorker(kind string) *Command {
-	var project, session, agent, leaseFile, phase, activity, activityKind, note, deliveryID, level, reason string
+	var project, session, agent, leaseFile, phase, activity, activityKind, note, model, effort, accountLabel, harnessVersion, brief, worktree, branch, deliveryID, level, reason string
 	var sequence, cursor int
+	var commits []string
 	return &Command{Name: kind, Short: "Act as the attributed harness worker", Use: "harness " + kind + " --project KEY --session UUID --agent NAME --worker-lease-file PATH", addFlags: func(fs *flagSet) {
 		fs.string(&project, "project", 'p', "project key")
 		fs.string(&session, "session", 0, "public session UUID")
@@ -429,6 +437,14 @@ func (rt *runtime) harnessWorker(kind string) *Command {
 		case "heartbeat":
 			fs.string(&phase, "phase", 0, "starting, working, yielded or stopping")
 			fs.string(&note, "note", 0, "current step, at most 120 characters")
+			fs.string(&model, "model", 0, "model name")
+			fs.string(&effort, "effort", 0, "reasoning effort")
+			fs.string(&accountLabel, "account-label", 0, "subscription or account display name (never a credential)")
+			fs.string(&harnessVersion, "harness-version", 0, "harness version")
+			fs.string(&brief, "brief", 0, "short prompt file name or ticket key")
+			fs.string(&worktree, "worktree", 0, "worktree path")
+			fs.string(&branch, "branch", 0, "branch name")
+			fs.strings(&commits, "commit", "commit SHA:subject (repeatable, up to 20 per heartbeat)")
 			fs.string(&activity, "activity", 0, "unknown, busy or idle")
 			fs.string(&activityKind, "activity-kind", 0, "classic content-free adapter event kind")
 			fs.int(&sequence, "activity-sequence", "monotonic sequence")
@@ -483,6 +499,25 @@ func (rt *runtime) harnessWorker(kind string) *Command {
 			body = map[string]any{"phase": phase, "activity": activity, "activity_sequence": sequence}
 			if note != "" {
 				body["activity_note"] = note
+			}
+			for key, value := range map[string]string{"model": model, "reasoning_effort": effort, "account_label": accountLabel, "harness_version": harnessVersion, "brief": brief, "worktree": worktree, "branch": branch} {
+				if value != "" {
+					body[key] = value
+				}
+			}
+			if len(commits) > 20 {
+				return usagef("at most 20 --commit flags are allowed")
+			}
+			if len(commits) > 0 {
+				items := make([]map[string]string, 0, len(commits))
+				for _, value := range commits {
+					sha, subject, ok := strings.Cut(value, ":")
+					if !ok || sha == "" || subject == "" {
+						return usagef("--commit must be SHA:subject")
+					}
+					items = append(items, map[string]string{"sha": sha, "subject": subject})
+				}
+				body["commits"] = items
 			}
 		case "complete-delivery":
 			if !validUUID(deliveryID) || cursor < 1 {
