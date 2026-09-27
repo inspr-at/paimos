@@ -39,7 +39,7 @@ import LabelMenu, { type LabelChoice } from '../components/work/LabelMenu.vue'
 import OptionMenu from '../components/work/OptionMenu.vue'
 import EpicPicker from '../components/work/EpicPicker.vue'
 import ReleasePicker from '../components/work/ReleasePicker.vue'
-import { AssignCancelled, ReleaseOpenedWithoutTickets, assignToRelease, type ReleaseTarget } from '../lib/releaseAssign'
+import { AssignCancelled, assignToRelease, type ReleaseTarget } from '../lib/releaseAssign'
 import { useJourney } from '../stores/journey'
 import JourneyChip from '../components/journey/JourneyChip.vue'
 import HeaderGlimpse from '../components/work/HeaderGlimpse.vue'
@@ -991,7 +991,6 @@ async function chooseRelease(target: ReleaseTarget) {
     void list.load()
   } catch (error) {
     if (error instanceof AssignCancelled) return
-    if (error instanceof ReleaseOpenedWithoutTickets && project.value) useJourney().set(project.value.id, error.journey)
     toast(problem(error), { tone: 'error' })
   } finally {
     bulkBusy.value = false

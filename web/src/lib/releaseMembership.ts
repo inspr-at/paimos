@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Release membership (AEON-227), as published by RM1. A planning release accepts
-// existing tickets through ticket-options and one membership write. Creating a
-// release stays the journey action; this module does not decide who may join.
+// Release membership (AEON-227), as implemented by RM1. A planning release accepts
+// existing tickets through ticket-options and one membership write. A new release
+// takes its tickets on the journey action itself; a rejected ticket leaves no release.
 
 import { api, APIError } from './api.ts'
 import {
-  getJourney, getWalker, listReleases, postAction, releaseName, releaseRefs,
-  type Journey, type ReleaseRef, type Walker,
+  getJourney, listReleases, postAction, releaseName, releaseRefs,
+  type ActionWrite, type Journey, type ReleaseRef, type Walker,
 } from './journey.ts'
 
-export type TicketAvailability = 'addable' | 'included' | 'closed' | 'released' | 'other_release'
+export type TicketAvailability = 'addable' | 'included' | 'closed' | 'released' | 'other_release' | 'unsupported'
 
 export interface MembershipTicket {
   ticket_node_id: string
@@ -47,7 +47,7 @@ export interface MembershipResult {
   event_id: number
 }
 
-const AVAILABILITY = new Set<TicketAvailability>(['addable', 'included', 'closed', 'released', 'other_release'])
+const AVAILABILITY = new Set<TicketAvailability>(['addable', 'included', 'closed', 'released', 'other_release', 'unsupported'])
 
 export function canSelectTicket(ticket: Pick<MembershipTicket, 'availability'>): boolean {
   return ticket.availability === 'addable' || ticket.availability === 'other_release'
@@ -59,6 +59,7 @@ export function availabilityMark(ticket: Pick<MembershipTicket, 'availability' |
     case 'closed': return 'Closed'
     case 'released': return 'Already released'
     case 'other_release': return ticket.release_title ? `In ${ticket.release_title}` : 'In another open release'
+    case 'unsupported': return 'Not a release ticket'
     default: return ''
   }
 }
@@ -100,8 +101,10 @@ export function isStaleRevision(error: unknown): boolean {
   return error instanceof APIError && error.status === 409 && /revision/i.test(error.message)
 }
 
-// RM1: another open release is a 409 until confirm_move is true. Closed and
-// released tickets are a different 409 and must not be retried as a move.
+// RM1 membership: another open release is a 409 whose error text asks for
+// confirm_move. The body is {"error"} with no code. Closed and released tickets
+// are a different 409 and must not be retried as a move. A new release cannot
+// send confirm_move; that 409 rolls the release back.
 export function isMoveConflict(error: unknown): boolean {
   if (!(error instanceof APIError) || error.status !== 409 || isStaleRevision(error)) return false
   const code = error.body.code
@@ -166,19 +169,44 @@ export async function addReleaseMembership(project: string, release: string, bod
   return parseMembership(data)
 }
 
-export interface OpenedRelease { journey: Journey; releaseId: string; revision: number; title: string }
+// One journey action. ticket_node_ids travel with it. release_id, when the next
+// release is planned, is the release that is current now. The response names the
+// new release as current_release_id. There is no confirm_move on this action.
+export function newReleaseAction(journey: Pick<Journey, 'current_release_id' | 'revision'>, ticketIds: string[], idempotencyKey: string): ActionWrite {
+  if (journey.current_release_id) {
+    return {
+      action: 'plan_next_release', expected_revision: journey.revision, idempotency_key: idempotencyKey,
+      release_id: journey.current_release_id, ticket_node_ids: ticketIds,
+    }
+  }
+  return { action: 'open_first_release', expected_revision: journey.revision, idempotency_key: idempotencyKey, ticket_node_ids: ticketIds }
+}
 
-// Journey action first, then the new walker's revision. The caller adds tickets.
-export async function openNewRelease(projectId: string): Promise<OpenedRelease> {
-  const journey = await getJourney(projectId)
-  const releases = releaseRefs(await listReleases(projectId))
-  const title = nextReleaseTitle(releases)
-  const action = journey.current_release_id ? 'plan_next_release' : 'open_first_release'
-  const next = await postAction(projectId, {
-    action, expected_revision: journey.revision, idempotency_key: crypto.randomUUID(),
-    ...(action === 'plan_next_release' && journey.current_release_id ? { release_id: journey.current_release_id } : {}),
-  })
-  if (!next.current_release_id) throw new Error('The new release was not opened.')
-  const walker = await getWalker(projectId, next.current_release_id)
-  return { journey: next, releaseId: next.current_release_id, revision: walker.revision, title }
+export function newReleaseFailure(error: unknown): string {
+  if (isMoveConflict(error)) return 'The new release was not opened. A ticket is already in another open release, and creating a release cannot move it.'
+  const message = error instanceof Error ? error.message : 'The tickets were not added.'
+  if (message.startsWith('The new release was not opened.')) return message
+  return `The new release was not opened. ${message}`
+}
+
+export interface OpenedRelease { journey: Journey; releaseId: string }
+
+// The action is the only write. A stale journey revision is retried once, with a
+// new idempotency key, because that 409 committed nothing. Any other rejection
+// is returned as-is so the caller can say that no release was opened.
+export async function openReleaseWithTickets(projectId: string, ticketIds: string[]): Promise<OpenedRelease> {
+  const send = (journey: Journey) => postAction(projectId, newReleaseAction(journey, ticketIds, crypto.randomUUID()))
+  let journey = await getJourney(projectId)
+  let next: Journey
+  try {
+    next = await send(journey)
+  } catch (error) {
+    if (!isStaleRevision(error)) throw error
+    journey = await getJourney(projectId)
+    const open = canOpenRelease(journey, planningRelease(journey, releaseRefs(await listReleases(projectId))))
+    if (!open.ok) throw new Error(open.reason)
+    next = await send(journey)
+  }
+  if (!next.current_release_id) throw new Error('The journey did not name the new release.')
+  return { journey: next, releaseId: next.current_release_id }
 }

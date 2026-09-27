@@ -36,7 +36,7 @@ function catalog(id: string): Option {
   }
 }
 
-async function install(page: Page, world: JourneyWorld) {
+async function install(page: Page, world: JourneyWorld, hooks: { rejectCreate?: string } = {}) {
   const calls: Call[] = []
   await page.route('**/api/**', async (route: Route) => {
     const request = route.request()
@@ -85,14 +85,29 @@ async function install(page: Page, world: JourneyWorld) {
       walker.revision += 1
       return route.fulfill({ json: { walker, event_id: 81 } })
     }
-    if (path === `/api/projects/${PROJECT}/journey/actions` && method === 'POST' && body.action === 'plan_next_release') {
+    if (path === `/api/projects/${PROJECT}/journey/actions` && method === 'POST' && (body.action === 'plan_next_release' || body.action === 'open_first_release') && Array.isArray(body.ticket_node_ids)) {
       record()
       if (body.expected_revision !== world.journey.revision) return route.fulfill({ status: 409, json: { error: 'journey revision is stale' } })
-      world.releases.push({ id: 'r-3', key: 'PHAROS-40', kind_id: 'k-release', title: 'Release 3', body: '', fields: {}, state: 'backlog', parent_id: PROJECT, position: '2', created_at: new Date().toISOString(), updated_at: new Date().toISOString(), deleted_at: null })
-      world.walkers['r-3'] = { release_node_id: 'r-3', project_node_id: PROJECT, state: 'planning', revision: 1, features: world.walkers['r-2']?.features ?? [], tickets: [] }
-      world.journey.current_release_id = 'r-3'
+      if (body.action === 'plan_next_release' && body.release_id && body.release_id !== world.journey.current_release_id) return route.fulfill({ status: 409, json: { error: 'release does not match the current release' } })
+      if (body.action === 'open_first_release' && body.release_id) return route.fulfill({ status: 409, json: { error: 'release does not match the current release' } })
+      if (typeof body.idempotency_key !== 'string' || !body.idempotency_key) return route.fulfill({ status: 400, json: { error: 'invalid idempotency key' } })
+      if (hooks.rejectCreate) return route.fulfill({ status: 409, json: { error: hooks.rejectCreate } })
+      const ids = body.ticket_node_ids as string[]
+      const chosen = ids.map(catalog)
+      if (chosen.some(option => option.availability === 'closed')) return route.fulfill({ status: 409, json: { error: 'closed tickets cannot be added' } })
+      if (chosen.some(option => option.availability === 'released')) return route.fulfill({ status: 409, json: { error: 'released or active tickets cannot move' } })
+      if (chosen.some(option => option.availability === 'other_release')) return route.fulfill({ status: 409, json: { error: 'confirm_move required to move a ticket from another release' } })
+      const releaseId = body.action === 'open_first_release' ? 'r-1' : 'r-3'
+      const title = body.action === 'open_first_release' ? 'Release 1' : 'Release 3'
+      const created = new Date().toISOString()
+      world.releases.push({ id: releaseId, key: 'PHAROS-40', kind_id: 'k-release', title, body: '', fields: {}, state: 'backlog', parent_id: PROJECT, position: '2', created_at: created, updated_at: created, deleted_at: null })
+      world.walkers[releaseId] = {
+        release_node_id: releaseId, project_node_id: PROJECT, state: 'planning', revision: 2, features: world.walkers['r-2']?.features ?? [],
+        tickets: chosen.map((option, position) => ({ ticket_node_id: option.ticket_node_id, key: option.key, title: option.title, feature_node_id: option.feature_node_id, included: true, position, estimated_hours: null, screen_node_ids: [] })),
+      }
+      world.journey.current_release_id = releaseId
       world.journey.stage = 'plan'
-      world.journey.revision += 1
+      world.journey.revision += 2
       world.journey.next_action = { key: 'start_build', label: 'Start build', stage: 'plan', available: false, reason: 'Build start needs an approved gate.', approval_request_id: null }
       world.journey.stages = world.journey.stages.map(stage => ({ ...stage, state: stage.key === 'plan' ? 'current' : ['inspire', 'shape', 'requirements'].includes(stage.key) ? 'done' : 'later' }))
       return route.fulfill({ json: world.journey })
@@ -198,16 +213,50 @@ test('five selected tickets open a new release and land in its plan', async ({ p
   await expect(page.locator('.toast').filter({ hasText: 'Added 5 tickets to Release 3' })).toBeVisible()
   const action = calls.filter(call => call.path.endsWith('/journey/actions'))
   expect(action).toHaveLength(1)
-  expect(action[0].body).toMatchObject({ action: 'plan_next_release' })
-  const write = calls.filter(call => call.method === 'POST' && call.path.endsWith('/membership'))
-  expect(write).toHaveLength(1)
-  expect(write[0].path).toContain('/releases/r-3/membership')
-  expect(write[0].body).toMatchObject({ expected_revision: 1, confirm_move: false, ticket_node_ids: ['n-1', 'n-2', 'n-3', 'n-4', 'n-21'] })
+  expect(action[0].body).toMatchObject({
+    action: 'plan_next_release', expected_revision: 12, release_id: 'r-2',
+    ticket_node_ids: ['n-1', 'n-2', 'n-3', 'n-4', 'n-21'],
+  })
+  expect(action[0].body.idempotency_key).toEqual(expect.any(String))
+  expect(action[0].body).not.toHaveProperty('confirm_move')
+  expect(calls.filter(call => call.method === 'POST' && call.path.endsWith('/membership'))).toHaveLength(0)
   await page.goto('/p/PHAROS/journey')
   await expect(page.getByRole('region', { name: 'Decision: Release 3' }).locator('.j-stat').first()).toContainText('5')
   for (const key of ['PHAROS-11', 'PHAROS-12', 'PHAROS-13', 'PHAROS-14', 'PHAROS-21']) {
     await expect(page.getByRole('checkbox', { name: `${key} in the release` })).toBeChecked()
   }
+  expect(errors).toEqual([])
+})
+
+test('a rejected new release is not left open', async ({ page }) => {
+  const errors = watchErrors(page)
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await mockWork(page, fixtures())
+  const world = journeyWorld('live')
+  await mockJourney(page, world)
+  const calls = await install(page, world, { rejectCreate: 'closed tickets cannot be added' })
+  await page.goto('/p/PHAROS')
+  const row = page.locator('tr.ticket-row').filter({ has: page.locator('.key', { hasText: /^PHAROS-12$/ }) })
+  await row.hover()
+  await row.getByRole('checkbox', { name: 'Select PHAROS-12' }).check()
+  await page.getByRole('toolbar', { name: /selected ticket/ }).getByRole('button', { name: 'Add to release' }).click()
+  await page.getByRole('dialog', { name: 'Release for 1 ticket' }).getByRole('option', { name: /Release 3/ }).click()
+  const toast = page.locator('.toast').filter({ hasText: 'The new release was not opened' })
+  await expect(toast).toContainText('closed tickets cannot be added')
+  await expect(page.locator('.toast').filter({ hasText: 'is open, but' })).toHaveCount(0)
+  await expect(page.locator('.toast').filter({ hasText: /^Added / })).toHaveCount(0)
+  const action = calls.filter(call => call.path.endsWith('/journey/actions'))
+  expect(action).toHaveLength(1)
+  expect(action[0].body).toMatchObject({ action: 'plan_next_release', expected_revision: 12, release_id: 'r-2', ticket_node_ids: ['n-2'] })
+  expect(calls.filter(call => call.method === 'POST' && call.path.endsWith('/membership'))).toHaveLength(0)
+  expect(world.releases.map(release => release.id)).not.toContain('r-3')
+  expect(world.journey.current_release_id).toBe('r-2')
+  expect(world.journey.stage).toBe('live')
+  expect(world.journey.revision).toBe(12)
+  await page.goto('/p/PHAROS/journey')
+  await expect(page.getByRole('region', { name: 'Next: Release 3' })).toBeVisible()
+  await expect(page.getByRole('region', { name: 'Decision: Release 3' })).toHaveCount(0)
+  await expect(page.getByRole('list', { name: 'Releases, newest first' }).getByRole('button', { name: /^Release 3\b/ })).toHaveCount(0)
   expect(errors).toEqual([])
 })
 

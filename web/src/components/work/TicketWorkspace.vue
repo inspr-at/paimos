@@ -30,7 +30,7 @@ import TicketHeaderBar from './TicketHeaderBar.vue'
 import TicketProperties from './TicketProperties.vue'
 import { can } from '../../lib/authz'
 import { releaseLabel } from '../../lib/columns'
-import { AssignCancelled, ReleaseOpenedWithoutTickets, assignToRelease, type ReleaseTarget } from '../../lib/releaseAssign'
+import { AssignCancelled, assignToRelease, type ReleaseTarget } from '../../lib/releaseAssign'
 import ReleasePicker from './ReleasePicker.vue'
 import { useJourney } from '../../stores/journey'
 import StartAgentDialog from '../agents/StartAgentDialog.vue'
@@ -278,7 +278,6 @@ async function chooseRelease(target: ReleaseTarget) {
     })
   } catch (error) {
     if (error instanceof AssignCancelled) return
-    if (error instanceof ReleaseOpenedWithoutTickets) journeys.set(props.project.id, error.journey)
     toast(error instanceof Error ? error.message : 'The ticket was not added to a release.', { tone: 'error' })
   }
 }

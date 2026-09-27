@@ -4,7 +4,7 @@ import { test } from 'node:test'
 import { APIError } from '../src/lib/api.ts'
 import type { Journey, ReleaseRef } from '../src/lib/journey.ts'
 import {
-  availabilityMark, canOpenRelease, canSelectTicket, isMoveConflict, isStaleRevision, nextReleaseTitle,
+  availabilityMark, canOpenRelease, canSelectTicket, isMoveConflict, isStaleRevision, newReleaseAction, newReleaseFailure, nextReleaseTitle,
   parseMembership, parseTicketOptions, planningRelease, ticketOptionQuery,
 } from '../src/lib/releaseMembership.ts'
 
@@ -67,12 +67,38 @@ test('a new release waits until the current one is live', () => {
 
 test('another open release is a confirmable conflict; a stale revision is not', () => {
   const move = new APIError(409, 'ticket belongs to another open release', {})
+  const producer = new APIError(409, 'confirm_move required to move a ticket from another release', {})
   const coded = new APIError(409, 'conflict', { code: 'other_release' })
   const stale = new APIError(409, 'release revision changed', {})
-  const closed = new APIError(409, 'closed or released tickets cannot be added', {})
+  const journeyStale = new APIError(409, 'journey revision is stale', {})
+  const closed = new APIError(409, 'closed tickets cannot be added', {})
   assert.equal(isMoveConflict(move), true)
+  assert.equal(isMoveConflict(producer), true)
   assert.equal(isMoveConflict(coded), true)
   assert.equal(isMoveConflict(stale), false)
+  assert.equal(isMoveConflict(journeyStale), false)
   assert.equal(isStaleRevision(stale), true)
+  assert.equal(isStaleRevision(journeyStale), true)
   assert.equal(isMoveConflict(closed), false)
+})
+
+test('a task is unsupported and not addable', () => {
+  const page = parseTicketOptions({ expected_revision: 4, tickets: [{ ticket_node_id: 'n-9', key: 'PHAROS-19', title: 'A task', type: 'task', availability: 'unsupported' }] })
+  assert.equal(page.tickets[0].availability, 'unsupported')
+  assert.equal(canSelectTicket(page.tickets[0]), false)
+  assert.equal(availabilityMark(page.tickets[0]), 'Not a release ticket')
+})
+
+test('a new release carries its tickets on the journey action', () => {
+  const ids = ['11111111-1111-4111-8111-111111111111', '22222222-2222-4222-8222-222222222222']
+  const next = newReleaseAction(journey({ stage: 'live', current_release_id: 'r-2', revision: 12, next_action: { key: 'plan_next_release', label: 'Plan release 3', stage: 'live', available: true, approval_request_id: null } }), ids, 'next-with-tickets')
+  assert.deepEqual(next, { action: 'plan_next_release', expected_revision: 12, idempotency_key: 'next-with-tickets', release_id: 'r-2', ticket_node_ids: ids })
+  assert.equal('confirm_move' in next, false)
+  const first = newReleaseAction(journey({ current_release_id: null, revision: 4, next_action: { key: 'open_first_release', label: 'Open release 1', stage: 'plan', available: true, approval_request_id: null } }), ids, 'first-with-tickets')
+  assert.deepEqual(first, { action: 'open_first_release', expected_revision: 4, idempotency_key: 'first-with-tickets', ticket_node_ids: ids })
+  assert.equal('release_id' in first, false)
+  const rejected = new APIError(409, 'closed tickets cannot be added', {})
+  assert.match(newReleaseFailure(rejected), /^The new release was not opened\. closed tickets cannot be added$/)
+  assert.match(newReleaseFailure(new APIError(409, 'confirm_move required to move a ticket from another release', {})), /cannot move it/)
+  assert.doesNotMatch(newReleaseFailure(rejected), /is open, but/)
 })

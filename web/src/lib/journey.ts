@@ -100,7 +100,12 @@ const root = (project: string) => `/projects/${enc(project)}`
 const releaseRoot = (project: string, release: string) => `${root(project)}/releases/${enc(release)}`
 export const getJourney = (project: string) => request<Journey>(`${root(project)}/journey`)
 export const putProfile = (project: string, profile: Profile, expected_revision: number) => request<Journey>(`${root(project)}/journey/profile`, 'PUT', { profile, expected_revision })
-export interface ActionWrite { action: ActionKey; expected_revision: number; idempotency_key: string; approval_request_id?: string | null; release_id?: string | null; reason?: string | null }
+export interface ActionWrite {
+  action: ActionKey; expected_revision: number; idempotency_key: string; approval_request_id?: string | null; release_id?: string | null; reason?: string | null
+  // Set only for open_first_release and plan_next_release. The server adds these
+  // tickets in the same transaction and rolls the new release back if any is rejected.
+  ticket_node_ids?: string[]
+}
 export const postAction = (project: string, body: ActionWrite) => request<Journey>(`${root(project)}/journey/actions`, 'POST', body)
 export const getRequirements = (project: string) => request<Requirement[]>(`${root(project)}/requirements`)
 export const addRequirement = (project: string, body: { kind: Requirement['kind']; title: string; body: string; expected_revision: number; idempotency_key: string }) =>
