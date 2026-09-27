@@ -16,33 +16,34 @@ test.setTimeout(60_000)
 const surface = (page: Page) => page.locator('.header-glimpse-canvas')
 const ready = (page: Page) => expect(surface(page)).toHaveAttribute('data-ready', 'true', { timeout: 20_000 })
 
+const protectedSelectors = ['.title-line > *', '.description', '.journey-chip', '.head-stats', '.project-tabs', '.view-bar .view-tab', '.view-bar .tab', '.view-bar .changes', '.toolbar-wrap']
+async function protectedBoxes(page: Page) {
+  return page.locator(protectedSelectors.join(', ')).evaluateAll(elements => elements.filter(el => el.getClientRects().length).map(el => {
+    const box = el.getBoundingClientRect()
+    return { x: box.x, y: box.y, width: box.width, height: box.height }
+  }))
+}
 async function expectClearOfText(page: Page) {
+  await expect(page.locator('.glimpse-col')).toHaveAttribute('data-measured', 'true')
+  await expect(page.locator('.glimpse-canvas')).toBeVisible()
   const region = (await page.locator('.glimpse-canvas').boundingBox())!
   const header = (await page.locator('.project-head').boundingBox())!
-  expect(region.width).toBeGreaterThan(100)
-  expect(region.height).toBeGreaterThan(30)
-  expect(region.y).toBeGreaterThanOrEqual(header.y + 8)
-  expect(region.y + region.height).toBeLessThan(header.y + header.height - 8)
-  // The mask's visible ellipse is strictly smaller than this entire canvas.
-  // Checking the larger box proves even faint pixels cannot sit under text.
-  for (const selector of ['.title-line', '#project-title', '.description', '.journey-chip', '.head-stats']) {
-    const text = (await page.locator(selector).boundingBox())!
-    expect(text, selector).not.toBeNull()
-    const overlap = region.x < text.x + text.width && region.x + region.width > text.x && region.y < text.y + text.height && region.y + region.height > text.y
-    expect(overlap, `${selector} does not intersect the glimpse`).toBe(false)
-    if (selector === '.head-stats') expect(region.x + region.width).toBeLessThanOrEqual(text.x - 28)
+  const toolbar = (await page.locator('.toolbar-wrap').boundingBox())!
+  const main = (await page.locator('#main').boundingBox())!
+  expect(Math.abs(region.x - header.x)).toBeLessThan(1)
+  expect(Math.abs(region.width - header.width)).toBeLessThan(1)
+  expect(Math.abs(region.y - main.y)).toBeLessThan(2)
+  expect(Math.abs(region.y + region.height - toolbar.y)).toBeLessThan(1)
+  const controls = (await page.locator('.glimpse-controls').boundingBox())!
+  for (const box of await protectedBoxes(page)) {
+    const overlap = controls.x < box.x + box.width && controls.x + controls.width > box.x && controls.y < box.y + box.height && controls.y + controls.height > box.y
+    expect(overlap, 'hover controls stay clear of text and toolbar').toBe(false)
   }
-  const textCentre = await page.locator('.head-main').evaluate(el => {
-    const box = el.getBoundingClientRect(), padding = parseFloat(getComputedStyle(el).paddingTop) || 0
-    return box.top + padding + (box.height - padding) / 2
-  })
-  expect(Math.abs(region.y + region.height / 2 - textCentre)).toBeLessThan(1)
-  await expect(page.locator('html')).toHaveCSS('opacity', '1')
 }
 
 function sized(count: number, withLinks: boolean) {
   const world = ticketGraphWorld()
-  world.graph.nodes = world.graph.nodes.slice(0, count)
+  world.graph.nodes = world.graph.nodes.slice(0, count).map(node => ({ ...node, status: 'backlog', status_category: 'open' }))
   const ids = new Set(world.graph.nodes.map(node => node.id))
   const linked = world.graph.links.filter(link => ids.has(link.source) && ids.has(link.target))
   const links: TicketGraphLink[] = withLinks ? (linked.length ? linked : [{ source: world.graph.nodes[0].id, target: world.graph.nodes[1].id, kind: 'relates' }]) : []
@@ -85,10 +86,9 @@ test('hover shows Open graph and Pause; clicking the glimpse opens the graph', a
   await mockTicketGraph(page)
   await page.goto('/p/PHAROS/tickets')
   await ready(page)
-  const column = page.locator('[data-header-glimpse="on"]')
   const controls = page.locator('.glimpse-controls')
   await expect.poll(() => controls.evaluate(el => getComputedStyle(el).opacity)).toBe('0')
-  await column.hover()
+  await page.locator('.project-head').hover()
   await expect.poll(() => controls.evaluate(el => getComputedStyle(el).opacity)).toBe('1')
   await expect(page.getByRole('button', { name: 'Open graph', exact: true })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Pause motion', exact: true })).toBeVisible()
@@ -96,8 +96,7 @@ test('hover shows Open graph and Pause; clicking the glimpse opens the graph', a
   await expect(page).not.toHaveURL(/view=graph/)
   await expect(surface(page)).toHaveAttribute('data-motion', 'still')
   await expect(page.getByRole('button', { name: 'Resume motion', exact: true })).toBeVisible()
-  const box = (await column.boundingBox())!
-  await page.mouse.click(box.x + box.width / 2, box.y + 10)
+  await page.getByRole('button', { name: 'Open graph', exact: true }).click()
   await expect(page).toHaveURL('/p/PHAROS/tickets?view=graph')
   await expect(page.locator('[data-header-glimpse="on"]')).toHaveCount(0)
 })
@@ -290,18 +289,23 @@ async function textContrast(page: Page, selector: string) {
 }
 
 async function expectSoftFittedGraph(page: Page, checkExtent = false) {
-  await page.locator('.glimpse-col').hover()
+  await page.locator('.project-head').hover()
   await page.getByRole('button', { name: 'Pause motion', exact: true }).click()
   await page.mouse.move(0, 0)
   await page.waitForTimeout(400)
   await expect(surface(page)).toHaveAttribute('data-motion', 'still')
   const layer = page.locator('.glimpse-canvas'), clip = (await layer.boundingBox())!
+  // Isolate painted graph pixels from browser text antialiasing: hiding an
+  // opacity layer can change the rasterization of otherwise identical text.
+  // Visibility preserves every measured exclusion box and the current mask.
+  const hiddenText = await page.addStyleTag({ content: `${protectedSelectors.join(', ')} { visibility: hidden !important; }` })
   const masked = pngPixels(await page.screenshot({ clip }))
   // Height-led framing intentionally lets outliers enter the surrounding fade.
   const original = await layer.getAttribute('style')
   await layer.evaluate(el => { (el as HTMLElement).style.opacity = '0' })
   const background = pngPixels(await page.screenshot({ clip }))
   await layer.evaluate((el, style) => el.setAttribute('style', style ?? ''), original)
+  await hiddenText.evaluate(el => el.remove())
   for (const [name, pixels] of [['masked', masked]] as const) {
     const points: { x: number; y: number }[] = []
     for (let y = 0; y < pixels.height; y++) for (let x = 0; x < pixels.width; x++) {
@@ -314,46 +318,46 @@ async function expectSoftFittedGraph(page: Page, checkExtent = false) {
       const width = Math.max(...points.map(p => p.x)) - Math.min(...points.map(p => p.x))
       const height = Math.max(...points.map(p => p.y)) - Math.min(...points.map(p => p.y))
       await test.info().attach(`cloud-${page.viewportSize()!.width}`, { body: JSON.stringify({ width, height, freeWidth: free.width, headerHeight: free.height }), contentType: 'application/json' })
-      expect(width / free.width, 'cloud fills 45–55% of free width').toBeGreaterThanOrEqual(.45)
-      expect(width / free.width, 'cloud fills 45–55% of free width').toBeLessThanOrEqual(.55)
-      expect(height / free.height, 'cloud fills 70–85% of header height').toBeGreaterThanOrEqual(.70)
-      expect(height / free.height, 'cloud fills 70–85% of header height').toBeLessThanOrEqual(.85)
+      expect.soft(width / free.width, 'cloud spans the header width').toBeGreaterThanOrEqual(.80)
+      expect.soft(height / free.height, 'cloud spans the header height').toBeGreaterThanOrEqual(.65)
     }
     expect(Math.min(...points.map(p => p.x)), `${name}: left padding`).toBeGreaterThanOrEqual(8)
     expect(Math.max(...points.map(p => p.x)), `${name}: right padding`).toBeLessThan(pixels.width - 8)
-    expect(Math.min(...points.map(p => p.y)), `${name}: top fade`).toBeGreaterThanOrEqual(Math.floor(pixels.height * .07))
-    expect(Math.max(...points.map(p => p.y)), `${name}: bottom fade`).toBeLessThan(pixels.height - Math.floor(pixels.height * .07))
+    const boxes = await protectedBoxes(page)
+    const intrusions = points.filter(point => boxes.some(box => point.x + clip.x >= box.x && point.x + clip.x < box.x + box.width && point.y + clip.y >= box.y && point.y + clip.y < box.y + box.height))
+    expect(intrusions, 'no graph pixels inside a protected bounding box').toHaveLength(0)
   }
 }
 
 for (const scheme of ['light', 'dark'] as const) {
   test.describe(`header shots ${scheme}`, () => {
     test.use({ colorScheme: scheme })
-    test(`keeps AA contrast at 1600, 1280 and 390`, async ({ page }) => {
+    for (const width of [1600, 1280, 390]) test(`keeps AA contrast at ${width}`, async ({ page }) => {
       const errors: string[] = []
       page.on('pageerror', error => errors.push(error.message))
       await mockTicketGraph(page)
       await page.route('**/api/projects/p-pharos/journey', route => route.fulfill({ json: journeyWorld('plan').journey }))
-      const dir = 'test-results/hg1-header'
+      const dir = `../.agent-shots/${process.env.HG2_SHOT_PASS ?? 'pass-1'}`
       mkdirSync(dir, { recursive: true })
-      for (const width of [1600, 1280, 390]) {
-        await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
-        await page.goto('/p/PHAROS/tickets')
-        if (width >= 1280) await ready(page)
-        else await expect(page.getByRole('heading', { name: 'Pharos', exact: true })).toBeVisible()
-        await page.waitForTimeout(width >= 1280 ? 3200 : 200)
-        await expect(page.locator('.journey-chip')).toBeVisible()
-        if (width >= 1280) {
-          await expectClearOfText(page)
-          await expect(surface(page)).toHaveAttribute('data-dimension', '3d')
-          await expect(page.locator('.glimpse-canvas')).toHaveCSS('opacity', scheme === 'light' ? '0.35' : '0.3')
-        }
-        const header = page.locator('.project-head')
-        await header.screenshot({ path: `${dir}/header-${width}-${scheme}.png` })
-        if (width >= 1280) await expectSoftFittedGraph(page, true)
-        for (const selector of ['#project-title', '.description', '.stat b']) {
-          expect(await textContrast(page, selector), `${selector} ${width} ${scheme}`).toBeGreaterThanOrEqual(4.5)
-        }
+      await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
+      await page.goto('/p/PHAROS/tickets')
+      if (width >= 1280) await ready(page)
+      else await expect(page.getByRole('heading', { name: 'Pharos', exact: true })).toBeVisible()
+      await page.waitForTimeout(width >= 1280 ? 3200 : 200)
+      await expect(page.locator('.journey-chip')).toBeVisible()
+      if (width >= 1280) {
+        await expectClearOfText(page)
+        await expect(surface(page)).toHaveAttribute('data-dimension', '3d')
+        await expect(page.locator('.glimpse-canvas')).toHaveCSS('opacity', scheme === 'light' ? '0.35' : '0.3')
+      }
+      await page.screenshot({ path: `${dir}/header-${width}-${scheme}.png` })
+      if (width >= 1280) {
+        await expectSoftFittedGraph(page, true)
+        await page.locator('.project-head').hover()
+        await page.screenshot({ path: `${dir}/header-${width}-${scheme}-hover.png` })
+      }
+      for (const selector of ['#project-title', '.description', '.stat b']) {
+        expect(await textContrast(page, selector), `${selector} ${width} ${scheme}`).toBeGreaterThanOrEqual(4.5)
       }
       expect(errors).toEqual([])
     })
