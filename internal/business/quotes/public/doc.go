@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-// Package public serves quote capability links. Its rate limiter keeps state
-// in each process, so a multi-replica deployment must enforce a shared limit
-// at ingress or in the application before exposing the public routes.
+// Package public serves quote capability links. New and NewWithStore expose
+// httpapi.Module values for the coordinator to mount. Its Postgres-backed
+// sliding rate limiter shares state across replicas under tenant RLS.
 package public

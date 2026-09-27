@@ -12,7 +12,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/jackc/pgx/v5"
 
@@ -93,6 +92,7 @@ func TestPublicSelectorResolverObeysForceRLS(t *testing.T) {
 }
 
 func TestPublicRateLimitCoversReadPDFAndAcceptanceAcrossTokens(t *testing.T) {
+	database := dbtest.Open(t)
 	for _, operation := range []struct {
 		method, suffix string
 		limit          int
@@ -101,7 +101,7 @@ func TestPublicRateLimitCoversReadPDFAndAcceptanceAcrossTokens(t *testing.T) {
 		{http.MethodGet, "/pdf", 20},
 		{http.MethodPost, "/accept", 10},
 	} {
-		m := &Module{attempts: make(map[string][]time.Time)}
+		m := &Module{pool: database.App}
 		mux := http.NewServeMux()
 		m.Mount(mux)
 		for i := 0; i <= operation.limit; i++ {
@@ -112,6 +112,9 @@ func TestPublicRateLimitCoversReadPDFAndAcceptanceAcrossTokens(t *testing.T) {
 			mux.ServeHTTP(rec, req)
 			if i == operation.limit && rec.Code != http.StatusTooManyRequests {
 				t.Fatalf("%s%s request %d: got %d", operation.method, operation.suffix, i, rec.Code)
+			}
+			if i == operation.limit && rec.Header().Get("Retry-After") != "60" && rec.Header().Get("Retry-After") != "59" {
+				t.Fatalf("%s%s request %d: Retry-After = %q", operation.method, operation.suffix, i, rec.Header().Get("Retry-After"))
 			}
 			if i < operation.limit && rec.Code == http.StatusTooManyRequests {
 				t.Fatalf("%s%s request %d limited early", operation.method, operation.suffix, i)
