@@ -21,9 +21,9 @@ test('groupLive derives heartbeat warnings on the server clock and puts the lead
   const grouped = groupLive([coordinator, idleTicketless, agent(), early, stale], now)
   assert.deepEqual([...grouped.keys()], ['p1', 'p2'])
   assert.deepEqual(grouped.get('p1')!.map(a => a.session_id), ['s4', 's1', 's3', 's2'])
-  assert.equal(groupLive([stale], now).get('p2')![0]!.state, 'waiting')
+  assert.equal(groupLive([stale], now).get('p2')![0]!.state, 'awaiting')
   assert.equal(groupLive([stale], now - 2000).get('p2')![0]!.state, 'working', 'a server clock two seconds earlier still sees it fresh')
-  assert.equal(groupLive([agent({ heartbeat_at: 'not a time' })], now).get('p1')![0]!.state, 'problem')
+  assert.equal(groupLive([agent({ heartbeat_at: 'not a time' })], now).get('p1')![0]!.state, 'unresponsive')
   assert.ok(byLead(agent(), coordinator) < 0)
 })
 
@@ -95,8 +95,8 @@ test('sameLive preserves evidence changes for glints and state changes for label
 test('waiting evidence and age thresholds use the same state contract', () => {
   assert.equal(liveState(agent({ activity: 'unknown', phase: 'starting' }), now), 'working')
   assert.equal(liveState(agent({ state: 'waiting' }), now), 'waiting')
-  assert.equal(liveState(agent({ state: 'waiting', heartbeat_at: ago(600) }), now), 'problem')
-  assert.equal(liveState(agent({ heartbeat_at: ago(120) }), now, { ...DEFAULT_AGENT_STATE, yellowMinutes: 1, redMinutes: 2 }), 'problem')
+  assert.equal(liveState(agent({ state: 'waiting', heartbeat_at: ago(600) }), now), 'unresponsive')
+  assert.equal(liveState(agent({ heartbeat_at: ago(120) }), now, { ...DEFAULT_AGENT_STATE, yellowMinutes: 1, redMinutes: 2 }), 'unresponsive')
   assert.equal(liveSummary([agent({ state: 'waiting' })]), '1 agent: hausv, needs something on HAUSV-887')
   assert.equal(liveSummary([agent({ state: 'stale' })]), '1 agent: hausv, idle · no heartbeat on HAUSV-887')
 })

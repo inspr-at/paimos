@@ -2,6 +2,7 @@
 <script setup lang="ts">
 import type { AgentState } from '../../lib/agentSignals'
 import AgentStateMark from './AgentStateMark.vue'
+import RobotExpression from './parts/RobotExpression.vue'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 
 // Preserve LA1's artwork and working motion; SC1 supplies state colours. LiveBot encodes the
@@ -54,16 +55,17 @@ onBeforeUnmount(() => clearTimeout(clear))
         <rect class="ear" x="2.3" y="11.7" width="2.3" height="4.8" rx="1.15" />
         <rect class="ear" x="19.4" y="11.7" width="2.3" height="4.8" rx="1.15" />
         <rect class="head" x="4.4" y="7.6" width="15.2" height="12.6" rx="4.8" />
-        <g class="look">
+        <g v-if="state === 'working'" class="look">
           <g class="blink">
             <rect class="eye" x="8.2" y="11.9" width="2.4" height="3.3" rx="1.2" />
             <rect class="eye" x="13.4" y="11.9" width="2.4" height="3.3" rx="1.2" />
           </g>
         </g>
-        <path class="happy" d="M8.1 14.2q1.3-1.9 2.6 0M13.3 14.2q1.3-1.9 2.6 0" />
-        <circle class="cheek" cx="7.3" cy="16.6" r="1.05" />
-        <circle class="cheek" cx="16.7" cy="16.6" r="1.05" />
-        <path class="smile" d="M10.5 17.1q1.5 1 3 0" />
+        <path v-if="state === 'working'" class="happy" d="M8.1 14.2q1.3-1.9 2.6 0M13.3 14.2q1.3-1.9 2.6 0" />
+        <circle v-if="state === 'working'" class="cheek" cx="7.3" cy="16.6" r="1.05" />
+        <circle v-if="state === 'working'" class="cheek" cx="16.7" cy="16.6" r="1.05" />
+        <RobotExpression v-if="state !== 'working'" :state="state" :cx="12" :eye-y="13.5" :mouth-y="17.1" :spread="2.6" />
+        <path v-if="state === 'working'" class="smile" d="M10.5 17.1q1.5 1 3 0" />
       </g>
     </svg>
     <AgentStateMark class="state-mark" :state="state" :size="12" />

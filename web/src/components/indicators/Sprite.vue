@@ -3,6 +3,7 @@
 <script setup lang="ts">
 import type { AgentState } from '../../lib/agentSignals'
 import AgentStateMark from './AgentStateMark.vue'
+import RobotExpression from './parts/RobotExpression.vue'
 import { computed, ref, watch } from 'vue'
 
 // IV1 discovers this default SFC export by filename. This companion stays
@@ -39,13 +40,14 @@ watch(() => props.state, state => { if (state !== 'working') glint.value = 0 })
     <path class="antennae" d="M13 9Q12 4 9.5 5M19 9Q20 4 22.5 5" />
     <path class="body" d="M16 7C12 7 10.5 10 10.5 14C10.5 19.5 12 26 16 27C20 26 21.5 19.5 21.5 14C21.5 10 20 7 16 7Z" />
     <path class="lantern idle" d="M11.4 19Q16 21 20.6 19C20 23 18.5 26.4 16 27C13.5 26.4 12 23 11.4 19Z" />
-    <g class="eyes idle"><ellipse cx="14" cy="12.7" rx=".85" ry="1.2" /><ellipse cx="18" cy="12.7" rx=".85" ry="1.2" /></g>
-    <path class="smile" d="M14.8 16q1.2 1 2.4 0" />
-    <path class="joy" d="M12.8 13.3q1.2-1.7 2.4 0M16.8 13.3q1.2-1.7 2.4 0" />
+    <g v-if="state === 'working'" class="eyes idle"><ellipse cx="14" cy="12.7" rx=".85" ry="1.2" /><ellipse cx="18" cy="12.7" rx=".85" ry="1.2" /></g>
+    <path v-if="state === 'working'" class="smile" d="M14.8 16q1.2 1 2.4 0" />
+    <path v-if="state === 'working'" class="joy" d="M12.8 13.3q1.2-1.7 2.4 0M16.8 13.3q1.2-1.7 2.4 0" />
     <g v-if="glint && state === 'working'" :key="glint" class="glint" @animationend.self="glint = 0">
       <path class="lit-tail" d="M11.4 19Q16 21 20.6 19C20 23 18.5 26.4 16 27C13.5 26.4 12 23 11.4 19Z" />
       <path class="sparks" d="m27 19 .8 2.2L30 22l-2.2.8L27 25l-.8-2.2L24 22l2.2-.8ZM5 20l.6 1.4L7 22l-1.4.6L5 24l-.6-1.4L3 22l1.4-.6Z" />
     </g>
+    <RobotExpression v-if="state !== 'working'" :state="state" :eye-y="12.7" :mouth-y="16" :spread="2" />
     <AgentStateMark :state="state" x="21" y="0" :size="11" />
   </svg>
 </template>
