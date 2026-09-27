@@ -92,16 +92,73 @@ export function visibleColumns(tableWidth: number, options: { phone: boolean; pr
   return { columns: ids.map(id => COLUMN_BY_ID.get(id)!), customised }
 }
 
-// Widths for every visible column except Title (which takes the rest). Title aims
-// for TITLE_TARGET, or the width the person gave it; spare width beyond that widens
+const sumWidths = (widths: Partial<Record<ColumnId, number>>) => Object.values(widths).reduce((sum, w) => sum + (w ?? 0), 0)
+// The column after Title first, then the rest toward the left, so Title's edge
+// resizes its neighbour before it touches a column further away.
+function besideTitle(ids: ColumnId[]): ColumnId[] {
+  const at = ids.indexOf('title')
+  const after = at < 0 ? [] : ids.slice(at + 1)
+  const before = at < 0 ? ids : ids.slice(0, at)
+  return [...after, ...before].filter(id => id !== 'title')
+}
+function sizedWidth(id: ColumnId, prefs: ListPrefs | null | undefined, live: Partial<Record<ColumnId, number>>): boolean {
+  return live[id] !== undefined || typeof prefs?.widths?.[id] === 'number'
+}
+// Move flexible columns by `amount` px, never past min or max. Sized columns stay:
+// a width the person set is not spent to satisfy Title.
+function shiftColumns(ids: ColumnId[], out: Partial<Record<ColumnId, number>>, amount: number, dir: 'grow' | 'shrink', flexible: (id: ColumnId) => boolean) {
+  let left = Math.max(0, Math.round(amount))
+  for (const id of besideTitle(ids)) {
+    if (left <= 0 || !flexible(id)) continue
+    const def = COLUMN_BY_ID.get(id)!
+    const current = out[id]!
+    const next = dir === 'shrink' ? Math.max(def.min, current - left) : Math.min(def.max, current + left)
+    left -= Math.abs(next - current)
+    out[id] = next
+  }
+}
+
+// How wide Title can be while every other column stays inside its min and max.
+// Columns the person already sized keep that width, so they never collapse.
+export function titleRoom(ids: ColumnId[], tableWidth: number, prefs?: ListPrefs | null, live: Partial<Record<ColumnId, number>> = {}): { min: number; max: number } {
+  const def = COLUMN_BY_ID.get('title')!
+  let fixed = 0, flexMin = 0, flexMax = 0
+  for (const id of ids) {
+    if (id === 'title') continue
+    const col = COLUMN_BY_ID.get(id)!
+    if (sizedWidth(id, prefs, live)) fixed += live[id] ?? widthOf(id, prefs)
+    else { flexMin += col.min; flexMax += col.max }
+  }
+  const fitMax = Math.floor(tableWidth - fixed - flexMin)
+  const fitMin = Math.ceil(tableWidth - fixed - flexMax)
+  const max = Math.min(def.max, fitMax)
+  const min = Math.max(def.min, fitMin)
+  if (min <= max) return { min, max }
+  const left = Math.max(0, fitMax)
+  return { min: left, max: left }
+}
+
+// Widths for every visible column except Title (which takes the rest). Without a
+// saved title width, Title aims for TITLE_TARGET and spare width beyond that widens
 // Epic, Tags, Assignee and Release (not ones the person sized) up to their maximum,
 // in proportion to their normal width. What is still left goes back to Title.
+// A width the person gives Title is kept: the unsized columns beside it grow or
+// shrink, the next column first, and stop at their own min and max.
 export function layoutWidths(ids: ColumnId[], tableWidth: number, prefs?: ListPrefs | null, live: Partial<Record<ColumnId, number>> = {}): Partial<Record<ColumnId, number>> {
   const out: Partial<Record<ColumnId, number>> = {}
   for (const id of ids) if (id !== 'title') out[id] = live[id] ?? widthOf(id, prefs)
-  const sized = (id: ColumnId) => live[id] !== undefined || typeof prefs?.widths?.[id] === 'number'
-  const titleTarget = sized('title') ? live.title ?? widthOf('title', prefs) : TITLE_TARGET
-  let spare = tableWidth - Object.values(out).reduce((sum, w) => sum + (w ?? 0), 0) - titleTarget
+  const sized = (id: ColumnId) => sizedWidth(id, prefs, live)
+  if (sized('title')) {
+    const target = live.title ?? widthOf('title', prefs)
+    const spare = tableWidth - sumWidths(out) - target
+    const flexible = (id: ColumnId) => !sized(id)
+    if (spare < -0.5) shiftColumns(ids, out, -spare, 'shrink', flexible)
+    else if (spare > 0.5) shiftColumns(ids, out, spare, 'grow', flexible)
+    for (const id of Object.keys(out) as ColumnId[]) out[id] = Math.floor(out[id]!)
+    return out
+  }
+  const titleTarget = TITLE_TARGET
+  let spare = tableWidth - sumWidths(out) - titleTarget
   const growing = GROWS.filter(id => ids.includes(id) && !sized(id))
   while (spare >= 1 && growing.length) {
     const weight = growing.reduce((sum, id) => sum + COLUMN_BY_ID.get(id)!.width, 0)
