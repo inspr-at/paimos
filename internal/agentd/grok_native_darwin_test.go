@@ -8,7 +8,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net"
+	"os"
+	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 	"time"
 )
@@ -28,6 +33,57 @@ func TestGrokAssetsStayPinned(t *testing.T) {
 	if _, err := NewGrokAdapter(map[string]GrokBinding{"account": {Variant: "invalid"}}).Start(context.Background(), StartRequest{
 		Profile: Profile{Harness: Grok, Model: grokModel, Effort: grokEffort}, AccountKey: "account"}, func(AdapterEvent) {}); err == nil {
 		t.Fatal("unknown native variant accepted")
+	}
+}
+
+func TestGrokQualifiedVerificationReachesPinnedNativePreflight(t *testing.T) {
+	if runtime.GOARCH != "arm64" {
+		t.Skip("native Grok verification is qualified only on darwin/arm64")
+	}
+	r := verificationRequest(t)
+	r.Profile = Profile{Harness: Grok, Model: grokModel, Effort: grokEffort}
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	binary := filepath.Join(root, "node_modules", "@xai-official", "grok", "bin", "grok-native")
+	if err := os.MkdirAll(filepath.Dir(binary), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(binary, []byte("synthetic native executable; never launch"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	scratch := filepath.Join(root, "private-scratch")
+	if err := os.Mkdir(scratch, 0700); err != nil {
+		t.Fatal(err)
+	}
+	binding := GrokBinding{
+		Variant:         "npm-grok-1.0.30",
+		BinaryPath:      binary,
+		AuthPath:        filepath.Join(root, "missing-synthetic-auth.json"),
+		ScratchRoot:     scratch,
+		PrincipalSHA256: strings.Repeat("a", 64),
+	}
+	a := NewGrokAdapter(map[string]GrokBinding{"account": binding})
+	if !a.VerificationSupported() {
+		t.Fatal("qualified native Grok verification unavailable")
+	}
+	if err := validExecutionMode(r.Run, a); err != nil {
+		t.Fatalf("qualified verification refused by execution mode: %v", err)
+	}
+	observed := false
+	p, err := a.Start(t.Context(), r, func(AdapterEvent) { observed = true })
+	if p != nil || observed || err == nil || err.Error() != "native Grok binary hash mismatch" {
+		t.Fatalf("verification did not reach pinned native preflight: process=%t observed=%t err=%v", p != nil, observed, err)
+	}
+	if errors.Is(err, ErrVerificationUnavailable) {
+		t.Fatal("qualified Grok was stopped by execution mode gate")
+	}
+	if _, err := os.Stat(binding.AuthPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("synthetic auth path unexpectedly appeared: %v", err)
+	}
+	if p, err := NewGrokAdapter().Start(t.Context(), r, func(AdapterEvent) {}); p != nil || err == nil || err.Error() != "native Grok account unavailable" {
+		t.Fatalf("missing private binding did not fail closed: process=%t err=%v", p != nil, err)
 	}
 }
 

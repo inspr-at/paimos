@@ -8,6 +8,7 @@ import (
 	"embed"
 	"encoding/hex"
 	"errors"
+	"runtime"
 
 	"github.com/inspr-at/paimos/internal/grokprobe"
 )
@@ -36,6 +37,17 @@ func NewGrokAdapter(bindings ...map[string]GrokBinding) *GrokAdapter {
 	return a
 }
 func (*GrokAdapter) Name() string { return Grok }
+
+// VerificationSupported matches the server's native Grok qualification. The
+// account-specific binary, subject and confinement checks remain in startNative.
+func (*GrokAdapter) VerificationSupported() bool {
+	return grokVerificationSupported(runtime.GOOS, runtime.GOARCH)
+}
+
+func grokVerificationSupported(goos, goarch string) bool {
+	return goos == "darwin" && goarch == "arm64"
+}
+
 func (a *GrokAdapter) Start(ctx context.Context, r StartRequest, observe func(AdapterEvent)) (Process, error) {
 	if err := validExecutionMode(r.Run, a); err != nil {
 		return nil, err

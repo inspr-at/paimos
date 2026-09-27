@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -34,6 +35,33 @@ func TestCodexVerificationBlocksBeforeAnyVendorProcess(t *testing.T) {
 
 func TestCursorVerificationBlocksBeforeAnyVendorProcess(t *testing.T) {
 	testUnsupportedVerificationBlocksBeforeAnyVendorProcess(t, Cursor)
+}
+
+func TestGrokVerificationPlatformGate(t *testing.T) {
+	for _, tc := range []struct {
+		goos, goarch string
+		want         bool
+	}{
+		{"darwin", "arm64", true},
+		{"darwin", "amd64", false},
+		{"linux", "arm64", false},
+		{"linux", "amd64", false},
+	} {
+		if got := grokVerificationSupported(tc.goos, tc.goarch); got != tc.want {
+			t.Errorf("Grok verification on %s/%s: got %t, want %t", tc.goos, tc.goarch, got, tc.want)
+		}
+	}
+	a := NewGrokAdapter()
+	if got, want := a.VerificationSupported(), grokVerificationSupported(runtime.GOOS, runtime.GOARCH); got != want {
+		t.Fatalf("Grok adapter capability: got %t, want %t", got, want)
+	}
+	if !a.VerificationSupported() {
+		r := verificationRequest(t)
+		r.Profile = Profile{Harness: Grok, Model: grokModel, Effort: grokEffort}
+		if _, err := a.Start(t.Context(), r, func(AdapterEvent) {}); !errors.Is(err, ErrVerificationUnavailable) {
+			t.Fatalf("unsupported platform reached Grok account or process: %v", err)
+		}
+	}
 }
 
 func testUnsupportedVerificationBlocksBeforeAnyVendorProcess(t *testing.T, harness string) {
