@@ -192,14 +192,11 @@ func cancelQueued(ctx context.Context, tx pgx.Tx, computer, account string, all 
 		return err
 	}
 	for _, id := range ids {
-		if _, err = tx.Exec(ctx, `WITH released AS (UPDATE account_reservations SET state='released',settled_at=clock_timestamp() WHERE run_id=$1 AND state='active' RETURNING window_id,reserved_units), totals AS (SELECT window_id,sum(reserved_units)::bigint AS units FROM released GROUP BY window_id)
-   UPDATE account_allowance_windows w SET reserved=w.reserved-t.units FROM totals t WHERE w.id=t.window_id`, id); err != nil {
-			return err
-		}
-		if _, err = tx.Exec(ctx, `UPDATE agent_runs SET status='cancelled',ended_at=clock_timestamp() WHERE id=$1 AND status='queued'`, id); err != nil {
+		if err = cancelQueuedRun(ctx, tx, id); err != nil {
 			return err
 		}
 	}
+
 	return nil
 }
 func revokeComputer(ctx context.Context, tx pgx.Tx, id string) error {
@@ -262,7 +259,7 @@ func cleanup(ctx context.Context, tx pgx.Tx, computer string, in proofRequest) e
 			return fail(400, "invalid_request", "unknown setup state")
 		}
 		switch in.Progress.ErrorCode {
-		case "", "login_required", "service_conflict", "unsupported_platform", "managed_installation", "connectivity_failed", "private_storage_failed", "installation_failed":
+		case "", "login_required", "service_conflict", "unsupported_platform", "managed_installation", "connectivity_failed", "private_storage_failed", "installation_failed", "verification_unavailable":
 		default:
 			return fail(400, "invalid_request", "unknown setup error")
 		}

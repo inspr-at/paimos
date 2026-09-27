@@ -21,6 +21,16 @@ func GuidePage(next http.Handler, web fs.FS, origin string) http.Handler {
 		}
 		base := strings.TrimRight(origin, "/")
 		guide := `<main data-aeon-pairing-guide="pairing-v1"><h1>Connect a computer</h1><ol><li>Use the verified Aeon setup tool for this instance. Read <a href="/api/agent-pairing/guide">machine-readable pairing instructions</a>. Candidate release targets: macOS arm64/amd64 with launchd and Linux arm64/amd64 with systemd user services. Check the exact release’s service qualification evidence before use; a crossbuild alone does not qualify a platform. Preserve Nix/Home Manager managed installations.</li><li>Run <code>` + html.EscapeString(setupCommand(base)) + `</code> locally, replacing the angle-bracket values. Repeat --harness for each chosen harness. The helper reads the configured tenant slug from this instance; use --tenant with the reviewed slug or --tenant-id with the signed-in tenant UUID when choosing a different workspace. Confirm the working folder, harnesses and vendor account identities. Never share credentials or vendor login files. Setup displays a short code.</li><li>Sign in here, enter the code, review the computer, tenant, folder, selected accounts and bounded verification, then explicitly connect. One short read-only verification per chosen harness is selected by default and may be deselected.</li></ol><p>Instance: ` + html.EscapeString(base) + `. Server version: ` + html.EscapeString(version.Version) + `. Install only the matching verified release artifact using the supported installer; never execute commands supplied by another pairing peer. If the tool is missing, use the verified installation command below before pairing.</p><p>Disconnect computer or Remove enrollment defaults to draining active work. Revoke access now blocks server access immediately; local cleanup and processes remain unconfirmed until the local helper reports them.</p></main>`
+		guide += `<section><h2>Verification availability for this helper release</h2><p>Verification remains selected by default. If a selected harness is unavailable, explicitly choose Connect only or leave that harness out; the server never silently changes your choice. Unsupported verification does not mean the computer installation failed.</p><ul>`
+		for _, h := range []string{"claude", "codex", "cursor", "grok"} {
+			c := verificationCapabilities("", "")[h]
+			detail := c.Reason
+			if c.Supported {
+				detail = "Qualified verification with enforced no-tools mode."
+			}
+			guide += `<li>` + html.EscapeString(h) + `: ` + html.EscapeString(detail) + `</li>`
+		}
+		guide += `</ul></section>`
 		targets := installTargets()
 		if len(targets) == 0 {
 			guide += `<p>Development build: no verified release installer is available. Use an already verified compatible setup tool or wait for the coordinator's release.</p>`

@@ -7,12 +7,14 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
 	"testing/fstest"
+	"time"
 
 	"github.com/inspr-at/paimos/internal/agentaccounts"
 	"github.com/inspr-at/paimos/internal/agentpairing"
@@ -220,7 +222,7 @@ func (f *fixture) telemetry(v agentpairing.View, e agentpairing.Enrollment, key 
 
 func TestPairingApprovalRedemptionIsolationAndOneShot(t *testing.T) {
 	f := newFixture(t)
-	p := f.propose("codex", "cursor")
+	p := f.propose("claude")
 	if p.review.State != "pending" || p.review.Verification.Allowance != 1 || p.review.Verification.MaxParallel != 1 || p.review.Verification.MaxDuration != 60 {
 		t.Fatal("wrong preapproval terms")
 	}
@@ -234,7 +236,7 @@ func TestPairingApprovalRedemptionIsolationAndOneShot(t *testing.T) {
 	if p.code != old {
 		t.Fatal("request replay changed code")
 	}
-	r := f.request("POST", "/api/agent-pairing/requests/"+p.id+"/approve", map[string]any{"request_digest": p.review.Digest, "verification": "connect_only", "selected_account_keys": []string{"codex-local"}}, true, "")
+	r := f.request("POST", "/api/agent-pairing/requests/"+p.id+"/approve", map[string]any{"request_digest": p.review.Digest, "verification": "connect_only", "selected_account_keys": []string{"claude-local"}}, true, "")
 	r.Header.Del("Origin")
 	w := httptest.NewRecorder()
 	f.h.ServeHTTP(w, r)
@@ -247,7 +249,7 @@ func TestPairingApprovalRedemptionIsolationAndOneShot(t *testing.T) {
 	}
 	v := f.redeem(p)
 	key := "aeon_" + v.RuntimePrefix + "_" + p.runtime
-	if v.State != "redeemed" || len(v.Enrollments) != 2 {
+	if v.State != "redeemed" || len(v.Enrollments) != 1 {
 		t.Fatal("missing redemption bindings")
 	}
 	retry := f.redeem(p)
@@ -261,7 +263,7 @@ func TestPairingApprovalRedemptionIsolationAndOneShot(t *testing.T) {
 	f.call("GET", "/api/agent-pairing/self", nil, false, key, 200)
 	var runs []agentruns.Run
 	decodeResult(t, f.call("GET", "/api/runs/queued", nil, false, key, 200), &runs)
-	if len(runs) != 2 || runs[0].Purpose != "pairing_verification" || runs[0].VerificationPolicy != "read_only" || runs[0].RepositoryMutationAllowed || runs[0].MaxDurationSeconds != 60 || runs[0].VerificationTask != agentpairing.VerificationTask {
+	if len(runs) != 1 || runs[0].Purpose != "pairing_verification" || runs[0].VerificationPolicy != "read_only" || runs[0].RepositoryMutationAllowed || runs[0].MaxDurationSeconds != 60 || runs[0].VerificationTask != agentpairing.VerificationTask {
 		t.Fatal("verification launch contract missing")
 	}
 	for _, e := range v.Enrollments {
@@ -286,7 +288,7 @@ func TestPairingApprovalRedemptionIsolationAndOneShot(t *testing.T) {
 	if err := f.db.Admin.QueryRow(t.Context(), `SELECT count(*) FROM agent_runs`).Scan(&n); err != nil {
 		t.Fatal(err)
 	}
-	if n != 2 {
+	if n != 1 {
 		t.Fatal("retry created extra verification")
 	}
 	// Foreign tenant cannot lookup or redeem this request under its own RLS.
@@ -299,9 +301,7 @@ func TestPairingApprovalRedemptionIsolationAndOneShot(t *testing.T) {
 
 func TestPairingDrainSelectiveRevocationAndTombstone(t *testing.T) {
 	f := newFixture(t)
-	p := f.propose("codex", "cursor")
-	f.approve(p, "one_per_harness")
-	v := f.redeem(p)
+	p, v := f.twoQualifiedEnrollments()
 	key := "aeon_" + v.RuntimePrefix + "_" + p.runtime
 	a, b := v.Enrollments[0], v.Enrollments[1]
 	f.probe(v, a, key, 200)
@@ -347,7 +347,7 @@ func TestPairingDrainSelectiveRevocationAndTombstone(t *testing.T) {
 
 func TestPairingImmediateRevokeRetainsActiveAccounting(t *testing.T) {
 	f := newFixture(t)
-	p := f.propose("codex")
+	p := f.propose("claude")
 	f.approve(p, "one_per_harness")
 	v := f.redeem(p)
 	key := "aeon_" + v.RuntimePrefix + "_" + p.runtime
@@ -369,7 +369,7 @@ func TestPairingImmediateRevokeRetainsActiveAccounting(t *testing.T) {
 
 func TestPairingAddHarnessAndFreshRepair(t *testing.T) {
 	f := newFixture(t)
-	p := f.propose("codex")
+	p := f.propose("claude")
 	f.approve(p, "connect_only")
 	v := f.redeem(p)
 	q := &proposal{id: uuid(t, f.db), device: nonce(), runtime: p.runtime, lifecycle: p.lifecycle}
@@ -381,7 +381,7 @@ func TestPairingAddHarnessAndFreshRepair(t *testing.T) {
 	q.request["device_hash"] = hash(q.device)
 	q.request["existing_computer_id"] = *v.ComputerID
 	q.request["existing_lifecycle_secret"] = p.lifecycle
-	q.request["accounts"] = []map[string]string{{"account_key": "cursor-add", "harness": "cursor", "label": "Second chosen account", "model_profile_id": f.profiles["cursor"]}}
+	q.request["accounts"] = []map[string]string{{"account_key": "claude-add", "harness": "claude", "label": "Second chosen account", "model_profile_id": f.profiles["claude"]}}
 	f.submit(q)
 	if q.review.ExistingComputerID != *v.ComputerID {
 		t.Fatal("existing computer not identified before approval")
@@ -406,14 +406,14 @@ func TestPairingAddHarnessAndFreshRepair(t *testing.T) {
 
 func TestPairingExpiryAttemptsAndRateLimit(t *testing.T) {
 	f := newFixture(t)
-	p := f.propose("codex")
+	p := f.propose("claude")
 	for i := 0; i < 10; i++ {
 		f.call("POST", "/api/agent-pairing/redeem", map[string]string{"tenant_id": f.tenantID, "request_id": p.id, "device_secret": nonce()}, false, "", 404)
 	}
 	if f.redeem(p).State != "expired" {
 		t.Fatal("attempt bound not enforced")
 	}
-	q := f.propose("cursor")
+	q := f.propose("claude")
 	f.approve(q, "one_per_harness")
 	if _, err := f.db.Admin.Exec(t.Context(), `UPDATE agent_pairing_requests SET expires_at=clock_timestamp()-interval '1 second' WHERE id=$1`, q.id); err != nil {
 		t.Fatal(err)
@@ -437,8 +437,8 @@ func TestPairingExpiryAttemptsAndRateLimit(t *testing.T) {
 
 func TestPairingConcurrentApprovalAndRedemption(t *testing.T) {
 	f := newFixture(t)
-	p := f.propose("codex")
-	body := map[string]any{"request_digest": p.review.Digest, "verification": "one_per_harness", "selected_account_keys": []string{"codex-local"}}
+	p := f.propose("claude")
+	body := map[string]any{"request_digest": p.review.Digest, "verification": "one_per_harness", "selected_account_keys": []string{"claude-local"}}
 	var wg sync.WaitGroup
 	codes := make(chan int, 10)
 	for i := 0; i < 10; i++ {
@@ -486,7 +486,7 @@ func TestPairingGuideIsAgentReadableAndPublicRoutesExact(t *testing.T) {
 	r.Host = "attacker.invalid"
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, r)
-	for _, want := range []string{"Connect a computer", "paimos-agentd path&gt; setup --url ", "/assets/pinned.js", "short code", "Server version:"} {
+	for _, want := range []string{"Connect a computer", "paimos-agentd path&gt; setup --url ", "/assets/pinned.js", "short code", "Server version:", "Cursor external/MCP isolation is awaiting qualification.", "Qualified verification with enforced no-tools mode."} {
 		if !strings.Contains(w.Body.String(), want) {
 			t.Fatalf("guide lacks %s", want)
 		}
@@ -524,7 +524,7 @@ func TestPairingCustomApproverAndProgress(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	p := f.propose("codex")
+	p := f.propose("claude")
 	f.approve(p, "connect_only")
 	v := f.redeem(p)
 	if v.RuntimePrefix == "" {
@@ -541,7 +541,7 @@ func slicesClone(s []string) []string { return append([]string{}, s...) }
 
 func TestPairingClaimDisconnectRaceAndVerificationExpiry(t *testing.T) {
 	f := newFixture(t)
-	p := f.propose("codex")
+	p := f.propose("claude")
 	f.approve(p, "one_per_harness")
 	v := f.redeem(p)
 	key := "aeon_" + v.RuntimePrefix + "_" + p.runtime
@@ -586,7 +586,7 @@ func TestPairingClaimDisconnectRaceAndVerificationExpiry(t *testing.T) {
 	f.claim(v, e, key, res, 410)
 	f.call("PATCH", "/api/agent-accounts/"+e.AccountID, map[string]string{"state": "available"}, true, "", 410)
 	f.call("POST", "/api/agent-accounts/"+e.AccountID+"/windows", map[string]any{"starts_at": "2030-01-01T00:00:00Z", "ends_at": "2030-01-02T00:00:00Z", "unit": "requests", "allowance": 5, "pace_model": "unrestricted"}, true, "", 410)
-	q := f.propose("cursor")
+	q := f.propose("claude")
 	f.approve(q, "one_per_harness")
 	fresh := f.redeem(q)
 	next := fresh.Enrollments[0]
@@ -605,7 +605,7 @@ func TestPairingClaimDisconnectRaceAndVerificationExpiry(t *testing.T) {
 
 func TestPairingZeroUsageCannotRefillOrSubstituteAccount(t *testing.T) {
 	f := newFixture(t)
-	p := f.propose("codex")
+	p := f.propose("claude")
 	f.approve(p, "one_per_harness")
 	v := f.redeem(p)
 	key := "aeon_" + v.RuntimePrefix + "_" + p.runtime
@@ -648,7 +648,7 @@ func TestPairingZeroUsageCannotRefillOrSubstituteAccount(t *testing.T) {
 
 func TestPairingTenantAndInputValidation(t *testing.T) {
 	f := newFixture(t)
-	p := f.propose("codex")
+	p := f.propose("claude")
 	foreign, err := tenantbootstrap.Create(t.Context(), f.db.App, "foreign-person", "Foreign")
 	if err != nil {
 		t.Fatal(err)
@@ -662,7 +662,7 @@ func TestPairingTenantAndInputValidation(t *testing.T) {
 	login := other.call("POST", "/api/auth/dev-login", map[string]string{"email": "foreign@example.test"}, false, "", 200)
 	other.cookie = login.Result().Cookies()[0]
 	other.call("POST", "/api/agent-pairing/lookup", map[string]string{"user_code": p.code}, true, "", 404)
-	other.call("POST", "/api/agent-pairing/requests/"+p.id+"/approve", map[string]any{"request_digest": p.review.Digest, "verification": "one_per_harness", "selected_account_keys": []string{"codex-local"}}, true, "", 404)
+	other.call("POST", "/api/agent-pairing/requests/"+p.id+"/approve", map[string]any{"request_digest": p.review.Digest, "verification": "one_per_harness", "selected_account_keys": []string{"claude-local"}}, true, "", 404)
 	f.call("POST", "/api/agent-pairing/requests/"+p.id+"/approve", map[string]any{"request_digest": p.review.Digest, "verification": "one_per_harness", "selected_account_keys": []string{"unknown-local"}}, true, "", 400)
 	changed := map[string]any{}
 	for k, v := range p.request {
@@ -684,9 +684,7 @@ func TestPairingTenantAndInputValidation(t *testing.T) {
 
 func TestPairingRevokedCleanupPreservesUnconfirmedAccounting(t *testing.T) {
 	f := newFixture(t)
-	p := f.propose("codex", "cursor")
-	f.approve(p, "one_per_harness")
-	v := f.redeem(p)
+	p, v := f.twoQualifiedEnrollments()
 	key := "aeon_" + v.RuntimePrefix + "_" + p.runtime
 	for _, e := range v.Enrollments {
 		f.probe(v, e, key, 200)
@@ -723,7 +721,7 @@ func TestPairingRevokedCleanupPreservesUnconfirmedAccounting(t *testing.T) {
 
 func TestPairingDisconnectRequiresFreshScopePreview(t *testing.T) {
 	f := newFixture(t)
-	p := f.propose("codex")
+	p := f.propose("claude")
 	f.approve(p, "connect_only")
 	v := f.redeem(p)
 	if _, err := f.db.Admin.Exec(t.Context(), `UPDATE agent_pairing_computers SET revision=revision+1 WHERE id=$1`, *v.ComputerID); err != nil {
@@ -746,16 +744,18 @@ func TestPairingGuideReleaseContract(t *testing.T) {
 	r.Host = "attacker.invalid"
 	mux.ServeHTTP(w, r)
 	var guide struct {
-		Instance      string                       `json:"instance_url"`
-		Tenant        string                       `json:"default_tenant_slug"`
-		Command       string                       `json:"setup_command"`
-		Qualification string                       `json:"platform_qualification"`
-		Targets       []agentpairing.InstallTarget `json:"install_targets"`
+		Capabilities  map[string]agentpairing.VerificationCapability `json:"verification_capabilities"`
+		HelperVersion string                                         `json:"verification_helper_version"`
+		Instance      string                                         `json:"instance_url"`
+		Tenant        string                                         `json:"default_tenant_slug"`
+		Command       string                                         `json:"setup_command"`
+		Qualification string                                         `json:"platform_qualification"`
+		Targets       []agentpairing.InstallTarget                   `json:"install_targets"`
 	}
 	if err := json.Unmarshal(w.Body.Bytes(), &guide); err != nil {
 		t.Fatal(err)
 	}
-	if guide.Instance != origin || guide.Tenant != "reviewed-tenant" || len(guide.Targets) != 4 || !strings.Contains(guide.Command, " setup --url '") || !strings.Contains(guide.Qualification, "candidate") {
+	if guide.HelperVersion != version.Version || !guide.Capabilities["claude"].Supported || guide.Capabilities["codex"].Supported || guide.Capabilities["cursor"].Supported || guide.Capabilities["grok"].Supported || guide.Instance != origin || guide.Tenant != "reviewed-tenant" || len(guide.Targets) != 4 || !strings.Contains(guide.Command, " setup --url '") || !strings.Contains(guide.Qualification, "candidate") {
 		t.Fatalf("guide release contract mismatch: %s", w.Body.String())
 	}
 	for _, target := range guide.Targets {
@@ -767,5 +767,279 @@ func TestPairingGuideReleaseContract(t *testing.T) {
 		if check < 0 || install < check {
 			t.Fatal("artifact becomes executable before checksum verification")
 		}
+	}
+}
+
+func (f *fixture) twoQualifiedEnrollments() (*proposal, agentpairing.View) {
+	f.t.Helper()
+	p := f.propose("claude")
+	f.approve(p, "one_per_harness")
+	v := f.redeem(p)
+	q := &proposal{id: uuid(f.t, f.db), device: nonce(), runtime: p.runtime, lifecycle: p.lifecycle, request: map[string]any{}}
+	for k, x := range p.request {
+		q.request[k] = x
+	}
+	q.request["request_id"] = q.id
+	q.request["device_hash"] = hash(q.device)
+	q.request["existing_computer_id"] = *v.ComputerID
+	q.request["existing_lifecycle_secret"] = p.lifecycle
+	q.request["accounts"] = []map[string]string{{"account_key": "claude-second", "harness": "claude", "label": "Second selected account", "model_profile_id": f.profiles["claude"]}}
+	f.submit(q)
+	f.approve(q, "one_per_harness")
+	f.redeem(q)
+	return p, f.redeem(p)
+}
+
+func expireVerification(t *testing.T, f *fixture, e agentpairing.Enrollment) {
+	t.Helper()
+	err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.tenantID, func(tx pgx.Tx) error {
+		if err := agentpairing.Lock(t.Context(), tx); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `UPDATE agent_pairing_enrollments SET verification_expires_at=clock_timestamp()-interval '1 second' WHERE account_id=$1`, e.AccountID)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPairingExpiredReservationReleasesSlotAndAllowsOngoing(t *testing.T) {
+	f := newFixture(t)
+	p := f.propose("claude")
+	f.approve(p, "one_per_harness")
+	v := f.redeem(p)
+	e := v.Enrollments[0]
+	key := "aeon_" + v.RuntimePrefix + "_" + p.runtime
+	f.probe(v, e, key, 200)
+	ids := f.reserve(v, e, key, 200)
+	expireVerification(t, f, e)
+	for i := 0; i < 2; i++ {
+		var queue []agentruns.Run
+		decodeResult(t, f.call("GET", "/api/runs/queued", nil, false, key, 200), &queue)
+		if len(queue) != 0 {
+			t.Fatal("expired queued verification dispatched")
+		}
+	}
+	var state, holdState string
+	var held int64
+	var started, claimed, expired bool
+	err := f.db.Admin.QueryRow(t.Context(), `SELECT r.status,res.state,w.reserved,r.started_at IS NOT NULL,e.verification_claimed_at IS NOT NULL,e.verification_expired_at IS NOT NULL FROM agent_runs r JOIN agent_pairing_enrollments e ON e.verification_run_id=r.id JOIN account_reservations res ON res.run_id=r.id JOIN account_allowance_windows w ON w.id=res.window_id WHERE r.id=$1`, *e.VerificationRunID).Scan(&state, &holdState, &held, &started, &claimed, &expired)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state != "cancelled" || holdState != "released" || held != 0 || started || claimed || !expired {
+		t.Fatalf("expiry leaked reservation or invented process: %s %s held=%d started=%v claimed=%v expired=%v", state, holdState, held, started, claimed, expired)
+	}
+	retry := f.redeem(p)
+	if retry.Enrollments[0].VerificationState != "expired" || *retry.Enrollments[0].VerificationRunID != *e.VerificationRunID {
+		t.Fatal("expiry projection/retry binding wrong")
+	}
+	f.claim(v, e, key, ids, 409)
+	f.reserve(v, e, key, 409)
+	var counts struct{ runs, windows int }
+	if err = f.db.Admin.QueryRow(t.Context(), `SELECT (SELECT count(*) FROM agent_runs),(SELECT count(*) FROM account_allowance_windows)`).Scan(&counts.runs, &counts.windows); err != nil {
+		t.Fatal(err)
+	}
+	if counts.runs != 1 || counts.windows != 1 {
+		t.Fatal("expiry/refusal refilled verification")
+	}
+	// Move the existing verification window into the past, as the real clock
+	// would do. A separately approved current window must recover the slot.
+	if _, err = f.db.Admin.Exec(t.Context(), `UPDATE account_allowance_windows SET starts_at=clock_timestamp()-interval '1 minute',ends_at=clock_timestamp()-interval '1 second' WHERE account_id=$1`, e.AccountID); err != nil {
+		t.Fatal(err)
+	}
+	f.call("POST", "/api/agent-accounts/"+e.AccountID+"/windows", map[string]any{"starts_at": time.Now(), "ends_at": time.Now().Add(time.Hour), "unit": "requests", "allowance": 2, "pace_model": "unrestricted"}, true, "", 201)
+	var old, ongoing agentruns.Run
+	decodeResult(t, f.call("GET", "/api/runs/"+*e.VerificationRunID, nil, false, key, 200), &old)
+	decodeResult(t, f.call("POST", "/api/work-orders/"+old.OrderID+"/runs", map[string]string{"agent_principal_id": *v.PrincipalID, "model_profile_id": e.ProfileID, "requested_account_id": e.AccountID}, true, "", 201), &ongoing)
+	next := e
+	next.VerificationRunID = &ongoing.ID
+	f.claim(v, next, key, f.reserve(v, next, key, 200), 200)
+	f.telemetry(v, next, key, 200)
+	var drained agentpairing.View
+	decodeResult(t, f.call("POST", "/api/agent-pairing/computers/"+*v.ComputerID+"/disconnect", map[string]string{"mode": "drain"}, true, "", 200), &drained)
+	if *drained.ComputerState != "revoked" || drained.AccountingState != "settled" {
+		t.Fatal("expired row blocked completed drain")
+	}
+}
+
+func TestPairingExpiryClaimRaceKeepsClaimedAccounting(t *testing.T) {
+	for _, claimedFirst := range []bool{false, true} {
+		t.Run(fmt.Sprintf("claimed_first_%v", claimedFirst), func(t *testing.T) {
+			f := newFixture(t)
+			p := f.propose("claude")
+			f.approve(p, "one_per_harness")
+			v := f.redeem(p)
+			e := v.Enrollments[0]
+			key := "aeon_" + v.RuntimePrefix + "_" + p.runtime
+			f.probe(v, e, key, 200)
+			ids := f.reserve(v, e, key, 200)
+			if claimedFirst {
+				f.claim(v, e, key, ids, 200)
+			}
+			start := make(chan struct{})
+			codes := make(chan int, 1)
+			errs := make(chan error, 1)
+			go func() {
+				<-start
+				w := httptest.NewRecorder()
+				f.h.ServeHTTP(w, f.request("POST", "/api/runs/"+*e.VerificationRunID+"/claim", map[string]any{"daemon_id": *v.DaemonID, "daemon_generation": "test-generation", "reservation_ids": ids}, false, key))
+				codes <- w.Code
+			}()
+			go func() {
+				<-start
+				errs <- db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.tenantID, func(tx pgx.Tx) error {
+					if err := agentpairing.Lock(t.Context(), tx); err != nil {
+						return err
+					}
+					if _, err := tx.Exec(t.Context(), `UPDATE agent_pairing_enrollments SET verification_expires_at=clock_timestamp()-interval '1 second' WHERE account_id=$1`, e.AccountID); err != nil {
+						return err
+					}
+					return agentpairing.ExpireUnclaimedVerifications(t.Context(), tx)
+				})
+			}()
+			close(start)
+			code := <-codes
+			if err := <-errs; err != nil {
+				t.Fatal(err)
+			}
+			if code != 200 && code != 409 {
+				t.Fatalf("claim/expiry race status %d", code)
+			}
+			f.call("GET", "/api/runs/queued", nil, false, key, 200)
+			var state string
+			var held int64
+			var claimed bool
+			if err := f.db.Admin.QueryRow(t.Context(), `SELECT r.status,w.reserved,e.verification_claimed_at IS NOT NULL FROM agent_pairing_enrollments e JOIN agent_runs r ON r.id=e.verification_run_id JOIN account_allowance_windows w ON w.account_id=e.account_id WHERE e.account_id=$1`, e.AccountID).Scan(&state, &held, &claimed); err != nil {
+				t.Fatal(err)
+			}
+			if code == 200 {
+				if state != "starting" || held != 1 || !claimed {
+					t.Fatal("expiry cancelled claimed work or lost uncertain usage")
+				}
+				var drain agentpairing.View
+				decodeResult(t, f.call("POST", "/api/agent-pairing/computers/"+*v.ComputerID+"/disconnect", map[string]string{"mode": "drain"}, true, "", 200), &drain)
+				if *drain.ComputerState != "draining" || drain.AccountingState != "unconfirmed" {
+					t.Fatal("claim uncertainty incorrectly treated as process exit")
+				}
+				f.telemetry(v, e, key, 200)
+			} else {
+				if state != "cancelled" || held != 0 || claimed {
+					t.Fatal("expiry winner leaked hold or claim marker")
+				}
+				var drain agentpairing.View
+				decodeResult(t, f.call("POST", "/api/agent-pairing/computers/"+*v.ComputerID+"/disconnect", map[string]string{"mode": "drain"}, true, "", 200), &drain)
+				if *drain.ComputerState != "revoked" {
+					t.Fatal("unclaimed expired run blocked drain")
+				}
+			}
+		})
+	}
+}
+
+func TestPairingVerificationCapabilitiesEnforcedAndProgressTruthful(t *testing.T) {
+	f := newFixture(t)
+	for _, h := range []string{"codex", "cursor", "grok"} {
+		p := f.propose(h, "claude")
+		if p.review.VerificationCapabilities[h].Supported || !p.review.VerificationCapabilities["claude"].Supported || p.review.VerificationCapabilities["claude"].Policy != "no_tools" {
+			t.Fatal("wrong preapproval qualification")
+		}
+		w := f.call("POST", "/api/agent-pairing/requests/"+p.id+"/approve", map[string]any{"request_digest": p.review.Digest, "verification": "one_per_harness", "selected_account_keys": []string{h + "-local", "claude-local"}}, true, "", 409)
+		if !strings.Contains(w.Body.String(), `"code":"verification_unavailable"`) {
+			t.Fatal("missing typed unsupported result")
+		}
+		var count int
+		if err := f.db.Admin.QueryRow(t.Context(), `SELECT count(*) FROM agent_pairing_enrollments WHERE request_id=$1`, p.id).Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		if count != 0 || f.redeem(p).State != "pending" {
+			t.Fatal("unsupported verification silently changed selection or granted authority")
+		}
+		// Explicit Connect only still pairs these accounts; no verification is minted.
+		f.approve(p, "connect_only")
+		v := f.redeem(p)
+		key := "aeon_" + v.RuntimePrefix + "_" + p.runtime
+		for _, e := range v.Enrollments {
+			if e.VerificationRunID != nil {
+				t.Fatal("connect only created run")
+			}
+			f.probe(v, e, key, 200)
+		}
+		var progress agentpairing.View
+		decodeResult(t, f.call("POST", "/api/agent-pairing/reconcile", map[string]any{"tenant_id": f.tenantID, "request_id": p.id, "lifecycle_secret": p.lifecycle, "progress": map[string]string{"state": "connected", "error_code": "verification_unavailable"}}, false, "", 200), &progress)
+		if progress.SetupState != "connected" || progress.SetupError != "verification_unavailable" || *progress.ComputerState != "connected" || progress.Connectivity != "online" {
+			t.Fatal("verification unavailable falsely reports installation/disconnection failure")
+		}
+	}
+	// A person may instead explicitly leave the unavailable account out.
+	p := f.propose("claude", "codex")
+	var approved agentpairing.View
+	decodeResult(t, f.call("POST", "/api/agent-pairing/requests/"+p.id+"/approve", map[string]any{"request_digest": p.review.Digest, "verification": "one_per_harness", "selected_account_keys": []string{"claude-local"}}, true, "", 200), &approved)
+	if len(approved.Enrollments) != 1 || approved.Enrollments[0].Harness != "claude" || approved.Enrollments[0].VerificationRunID == nil {
+		t.Fatal("explicit supported subset not honored")
+	}
+}
+
+func TestPairingLegacyUnsupportedVerificationRemainsPairedUntilExpiry(t *testing.T) {
+	f := newFixture(t)
+	p := f.propose("codex")
+	f.approve(p, "connect_only")
+	v := f.redeem(p)
+	e := v.Enrollments[0]
+	key := "aeon_" + v.RuntimePrefix + "_" + p.runtime
+	// Historical releases issued Codex verification before the qualification
+	// restriction. Seed that durable shape; production has no capability override.
+	var run string
+	err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.tenantID, func(tx pgx.Tx) error {
+		var project, order string
+		if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,key,kind_id,title) SELECT $1,aeon_next_node_key($1,k.short_prefix),k.id,'Historical connection check' FROM node_kinds k WHERE k.slug='project' RETURNING id::text`, f.tenantID).Scan(&project); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,key,kind_id,title,parent_id) SELECT $1,aeon_next_node_key($1,k.short_prefix),k.id,'Historical Codex verification',$2 FROM node_kinds k WHERE k.slug='work_order' RETURNING id::text`, f.tenantID, project).Scan(&order); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `INSERT INTO work_orders(tenant_id,node_id,requested_by_principal_id,assignee_principal_id,status,max_duration_seconds) VALUES($1,$2,$3,$4,'ready',60)`, f.tenantID, order, f.person, *v.PrincipalID); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(t.Context(), `INSERT INTO agent_runs(tenant_id,work_order_id,agent_principal_id,model_profile_id,requested_account_id,purpose) VALUES($1,$2,$3,$4,$5,'pairing_verification') RETURNING id::text`, f.tenantID, order, *v.PrincipalID, e.ProfileID, e.AccountID).Scan(&run); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `UPDATE agent_pairing_enrollments SET verification_run_id=$2 WHERE account_id=$1`, e.AccountID, run); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `INSERT INTO account_allowance_windows(tenant_id,account_id,starts_at,ends_at,unit,allowance,pace_model,pairing_verification) VALUES($1,$2,clock_timestamp(),$3,'requests',1,'unrestricted',true)`, f.tenantID, e.AccountID, v.Verification.ExpiresAt); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `UPDATE agent_pairing_requests SET verification='one_per_harness' WHERE id=$1`, p.id)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.VerificationRunID = &run
+	f.probe(v, e, key, 200)
+	var view agentpairing.View
+	decodeResult(t, f.call("POST", "/api/agent-pairing/reconcile", map[string]any{"tenant_id": f.tenantID, "request_id": p.id, "lifecycle_secret": p.lifecycle, "progress": map[string]string{"state": "connected", "error_code": "verification_unavailable"}}, false, "", 200), &view)
+	if view.Enrollments[0].VerificationState != "unavailable" || view.Enrollments[0].VerificationError != "verification_unavailable" || view.Connectivity != "online" || view.SetupState != "connected" || *view.ComputerState != "connected" {
+		t.Fatal("legacy unsupported verification misreported")
+	}
+	var queue []agentruns.Run
+	decodeResult(t, f.call("GET", "/api/runs/queued", nil, false, key, 200), &queue)
+	if len(queue) != 0 {
+		t.Fatal("unsupported legacy verification dispatched")
+	}
+	w := f.call("POST", "/api/agent-accounts/route", map[string]any{"run_id": run, "daemon_id": *v.DaemonID, "account_ids": []string{e.AccountID}, "estimated_units": map[string]int{"requests": 1}}, false, key, 409)
+	if !strings.Contains(w.Body.String(), "verification_unavailable") {
+		t.Fatal("unsupported legacy route did not fail closed")
+	}
+	expireVerification(t, f, e)
+	f.call("GET", "/api/runs/queued", nil, false, key, 200)
+	var status string
+	if err = f.db.Admin.QueryRow(t.Context(), `SELECT status FROM agent_runs WHERE id=$1`, run).Scan(&status); err != nil {
+		t.Fatal(err)
+	}
+	if status != "cancelled" {
+		t.Fatal("unavailable legacy verification never expires")
 	}
 }
