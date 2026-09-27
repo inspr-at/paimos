@@ -303,7 +303,9 @@ try {
   const physicalWorkspace = realpathSync(workspace);
   if (!isAbsolute(workspace) || physicalWorkspace !== workspace) throw new Error("workspace is not physical");
   const { query } = await import(pathToFileURL(sdkPath));
-  const toolBinding = start.tools;
+  const verification = start.purpose === "pairing_verification";
+  if (verification && start.tools != null) throw new Error("verification cannot have tools");
+  const toolBinding = start.tools ?? undefined;
   if (toolBinding !== undefined &&
       (typeof toolBinding?.url !== "string" || !/^http:\/\/127\.0\.0\.1:[0-9]+$/u.test(toolBinding.url) ||
        typeof toolBinding?.token !== "string" || !/^[0-9a-f]{64}$/u.test(toolBinding.token))) {
@@ -311,7 +313,7 @@ try {
   }
   const mcpServers = toolBinding ? { aeon: { type: "http", url: toolBinding.url,
     headers: { Authorization: `Bearer ${toolBinding.token}` } } } : {};
-  const allowedTools = toolBinding ? [...DEFAULT_TOOLS, ...AEON_TOOLS.map((name) => `mcp__aeon__${name}`)] : DEFAULT_TOOLS;
+  const allowedTools = verification ? [] : toolBinding ? [...DEFAULT_TOOLS, ...AEON_TOOLS.map((name) => `mcp__aeon__${name}`)] : DEFAULT_TOOLS;
   start.tools = undefined;
   input = new InputStream(userMessage(start.prompt));
   start.prompt = "";
@@ -326,9 +328,10 @@ try {
     includePartialMessages: true,
     permissionMode: "dontAsk",
     additionalDirectories: [],
-    hooks: { PreToolUse: [{ matcher: "Edit|Write", hooks: [workspaceEditHook(physicalWorkspace)] }] },
+    hooks: verification ? { PreToolUse: [{ matcher: ".*", hooks: [async () => ({ hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: "Verification has no tools" } })] }] } : { PreToolUse: [{ matcher: "Edit|Write", hooks: [workspaceEditHook(physicalWorkspace)] }] },
     allowedTools,
-    tools: DEFAULT_TOOLS,
+    tools: verification ? [] : DEFAULT_TOOLS,
+    ...(verification ? { maxTurns: 1, canUseTool: async () => ({ behavior: "deny", message: "Verification has no tools" }) } : {}),
     systemPrompt: { type: "preset", preset: "claude_code" },
     ...(start.model ? { model: start.model, effort: start.effort } : {})
   };
@@ -386,6 +389,10 @@ const handleControlLine = (line) => {
     let fatal = false;
     let failureReason = "control_failed";
     try {
+      if (start.purpose === "pairing_verification" && request.op !== "stop") {
+        fail("app_server_protocol", correlationID, "verification_control_forbidden");
+        return;
+      }
       if (request.op === "steer" || request.op === "inbox") {
         expireCorrelations();
         if (typeof request.text !== "string" || request.text.length === 0 ||

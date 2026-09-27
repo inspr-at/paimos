@@ -134,6 +134,10 @@ func (p *codexProcess) Control(ctx context.Context, op, text string) error {
 	return ErrUnsupported
 }
 func (a *CodexAdapter) Start(ctx context.Context, r StartRequest, observe func(AdapterEvent)) (Process, error) {
+	if err := validExecutionMode(r.Run, a); err != nil {
+		return nil, err
+	}
+
 	if !a.Probe(ctx, r.AccountKey) {
 		return nil, errors.New("Codex account probe unavailable")
 	}
@@ -309,6 +313,10 @@ func (p *piProcess) verify(ctx context.Context) error {
 	return nil
 }
 func (a *PiAdapter) Start(ctx context.Context, r StartRequest, observe func(AdapterEvent)) (Process, error) {
+	if err := validExecutionMode(r.Run, a); err != nil {
+		return nil, err
+	}
+
 	if !a.Probe(ctx, r.AccountKey) {
 		return nil, errors.New("Pi account context unavailable")
 	}
@@ -417,6 +425,10 @@ func (p *cursorProcess) Control(ctx context.Context, op, text string) error {
 	}
 }
 func (a *CursorAdapter) Start(ctx context.Context, r StartRequest, observe func(AdapterEvent)) (Process, error) {
+	if err := validExecutionMode(r.Run, a); err != nil {
+		return nil, err
+	}
+
 	if !a.Probe(ctx, r.AccountKey) {
 		return nil, errors.New("Cursor account identity unavailable")
 	}
@@ -577,6 +589,10 @@ func (p *claudeProcess) Control(ctx context.Context, op, text string) error {
 	}
 }
 func (a *ClaudeAdapter) Start(ctx context.Context, r StartRequest, observe func(AdapterEvent)) (Process, error) {
+	if err := validExecutionMode(r.Run, a); err != nil {
+		return nil, err
+	}
+
 	if !a.Probe(ctx, r.AccountKey) {
 		return nil, errors.New("Claude account probe unavailable")
 	}
@@ -666,7 +682,7 @@ func (a *ClaudeAdapter) Start(ctx context.Context, r StartRequest, observe func(
 			}
 		}
 	})
-	if err := p.send(map[string]any{"op": "start", "prompt": r.Prompt, "model": r.Profile.Model, "effort": r.Profile.Effort, "correlation_id": "initial", "tools": r.Tools}); err != nil {
+	if err := p.send(map[string]any{"op": "start", "prompt": r.Prompt, "model": r.Profile.Model, "effort": r.Profile.Effort, "correlation_id": "initial", "tools": r.Tools, "purpose": r.Run.Purpose}); err != nil {
 		return p.failStart(err)
 	}
 	op, cancel := operationContext(ctx)

@@ -173,6 +173,18 @@ func testSupervisor(t *testing.T, metadata ...*AccountMetadata) (*Supervisor, *f
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() {
+		_ = p.Stop(context.Background())
+		for _, e := range s.runs {
+			e.mu.Lock()
+			done := e.monitorDone
+			e.mu.Unlock()
+			if done != nil {
+				<-done
+			}
+		}
+		_ = s.Close(context.Background())
+	})
 	return s, a, p
 }
 
@@ -365,6 +377,7 @@ func TestHeartbeatAndChildDeadline(t *testing.T) {
 	}
 	select {
 	case <-p.stopped:
+		<-s.runs[a.run.ID].monitorDone
 	case <-time.After(3 * time.Second):
 		t.Fatal("child exceeded deadline")
 	}

@@ -205,16 +205,29 @@ func serve(args []string) error {
 	defer local.Close()
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
+	stopping := false
 	for {
-		pollCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+		if stopping {
+			closeCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			closeErr := s.Close(closeCtx)
+			cancel()
+			if closeErr == nil {
+				return nil
+			}
+		}
+		pollCtx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		err := s.PollOnce(pollCtx)
 		cancel()
 		if err != nil && ctx.Err() == nil {
 			fmt.Fprintln(os.Stderr, "agentd poll failed; inspect AEON availability and account bindings")
 		}
+		if stopping {
+			<-ticker.C
+			continue
+		}
 		select {
 		case <-ctx.Done():
-			return nil
+			stopping = true
 		case <-ticker.C:
 		}
 	}

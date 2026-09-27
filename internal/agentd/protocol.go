@@ -116,6 +116,14 @@ func launchWire(path string, args []string, workspace string, environment []stri
 }
 
 func (p *wireProcess) PID() int { return p.cmd.Process.Pid }
+func (p *wireProcess) ProcessExited() bool {
+	select {
+	case <-p.waitDone:
+		return true
+	default:
+		return false
+	}
+}
 func (p *wireProcess) Wait() error {
 	<-p.waitDone
 	return errors.Join(p.waitErr, p.finishReader())
