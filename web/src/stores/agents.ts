@@ -7,7 +7,7 @@ import {
   requestControl, resolveMessage, revokeApproval, sendMessage, setAccountState,
   type AgentAccount, type AgentRun, type Approval, type HarnessSession, type ModelProfile, type ProjectMessage, type SessionControl,
 } from '../lib/agents'
-import { agentName, harnessLabel, heldRequests, needsYou, pendingApprovals, runModel, sessionStatus, type SessionStatus } from '../lib/agentState'
+import { agentName, harnessLabel, heldRequests, mergeSessionEvidence, needsYou, pendingApprovals, runModel, sessionStatus, type SessionStatus } from '../lib/agentState'
 import { advanceActivity, type ActivityEvidence } from '../lib/liveAgents'
 import { toast } from '../lib/toast'
 import { usePolledData } from '../lib/usePolledData'
@@ -33,9 +33,13 @@ async function all<T>(items: T[], work: (item: T) => Promise<void>) {
 
 export const useAgents = defineStore('agents', () => {
   const projects = useProjects()
-  const { choice: statePreferences } = useAgentAppearance()
+  const { choice: statePreferences, ready: preferencesReady } = useAgentAppearance()
   const now = ref(Date.now())
-  const sessionsRead = usePolledData(async () => {
+  let sessionReadOrder = 0
+  let appliedSessionRead = 0
+  const sessionsRead = usePolledData<HarnessSession[]>(async (): Promise<HarnessSession[]> => {
+    const order = ++sessionReadOrder
+    await preferencesReady
     const out = new Map<string, HarnessSession>()
     const cursors = new Set<string>()
     let cursor: string | undefined
@@ -46,10 +50,14 @@ export const useAgents = defineStore('agents', () => {
       if (cursor && cursors.has(cursor)) throw new Error('Session pagination did not advance. Please retry.')
       if (cursor) cursors.add(cursor)
     } while (cursor)
-    return [...out.values()]
+    // A newer ticket-scoped read may have completed while pagination was open.
+    const previous = new Map(sessions.value.map(item => [item.id, item]))
+    if (order < appliedSessionRead) return sessions.value
+    appliedSessionRead = order
+    return [...out.values()].map(item => mergeSessionEvidence(previous.get(item.id), item))
   }, [] as HarnessSession[], items => {
     activityEvidence.value = new Map(items.map(item => [item.id, advanceActivity(activityEvidence.value.get(item.id), item)]))
-    now.value = Date.now()
+    now.value = Math.max(now.value, Date.now())
   })
   const sessions = sessionsRead.data
   const activityEvidence = ref(new Map<string, ActivityEvidence>())
@@ -144,7 +152,7 @@ export const useAgents = defineStore('agents', () => {
         await Promise.all([refreshMessaging(), resourceNodes()])
         loaded.value = true
         needsAt = Date.now()
-    })().finally(() => { loadFlight = undefined; loading.value = false; now.value = Date.now() })
+    })().finally(() => { loadFlight = undefined; loading.value = false; now.value = Math.max(now.value, Date.now()) })
     return loadFlight
   }
   // The header badge: approvals and held action requests, at most every 30 seconds.
@@ -153,16 +161,20 @@ export const useAgents = defineStore('agents', () => {
     needsAt = Date.now()
     await Promise.all([projects.load(), refreshApprovals(), refreshSessions()])
     await refreshMessaging(force)
-    now.value = Date.now()
+    now.value = Math.max(now.value, Date.now())
   }
   // Sessions bound to one ticket, for the ticket panel; cached for 20 seconds.
   async function ensureTicket(nodeId: string) {
     if (Date.now() - (ticketLoadedAt.get(nodeId) ?? 0) < 20_000) return
     ticketLoadedAt.set(nodeId, Date.now())
+    const order = ++sessionReadOrder
     try {
       const { items } = await listAllSessions({ ticket: nodeId, limit: 50 })
+      if (order < appliedSessionRead) return
+      appliedSessionRead = order
       const ids = new Set(items.map(s => s.id))
-      sessions.value = [...sessions.value.filter(s => !ids.has(s.id)), ...items]
+      const previous = new Map(sessions.value.map(item => [item.id, item]))
+      sessions.value = [...sessions.value.filter(s => !ids.has(s.id)), ...items.map(item => mergeSessionEvidence(previous.get(item.id), item))]
     } catch { /* the ticket panel simply shows no sessions */ }
   }
   // One project's messages, newest first; the panel shows the agent's side of it.
@@ -203,7 +215,7 @@ export const useAgents = defineStore('agents', () => {
   }
   const views = computed(() => sessions.value.map(viewOf))
   const grouped = computed(() => {
-    const out: Record<SessionStatus['group'], SessionView[]> = { problem: [], needs: [], throttled: [], working: [], idle: [], stopped: [] }
+    const out: Record<SessionStatus['group'], SessionView[]> = { problem: [], unresponsive: [], needs: [], awaiting: [], throttled: [], working: [], idle: [], stopped: [] }
     for (const view of views.value) out[view.status.group].push(view)
     for (const [group, list] of Object.entries(out)) {
       const at = (v: SessionView) => Date.parse((group === 'stopped' ? v.session.stopped_at : v.session.heartbeat_at) ?? v.session.created_at)
@@ -275,7 +287,7 @@ export const useAgents = defineStore('agents', () => {
     const updated = await setAccountState(account.id, state)
     accounts.value = accounts.value.map(a => a.id === account.id ? { ...a, ...updated } : a)
   }
-  function tick() { now.value = Date.now() }
+  function tick() { now.value = Math.max(now.value, Date.now()) }
 
   return {
     now, sessions, sessionsState, sessionsError, sessionsUpdatedAt, sessionsStale, refreshStale, approvals, approvalsState, approvalsError, approvalsHardError, accounts, accountsState, accountsUpdatedAt, messagingState, runs, nodes, controls, eventPulseFor,
