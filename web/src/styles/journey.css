@@ -62,6 +62,7 @@
 @media (max-width: 1080px) { .j-grid { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 720px) {
   .j-card { padding: 12px 12px 14px; }
+  .j-card .btn.sm { min-height: 44px; }
   .j-card-head { flex-wrap: wrap; row-gap: 6px; }
   .j-card-head .eyebrow { flex-basis: 100%; white-space: normal; }
   .j-kv { grid-template-columns: minmax(0, 1fr); gap: 2px; }

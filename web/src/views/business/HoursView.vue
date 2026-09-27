@@ -482,7 +482,7 @@ const waitingCount = computed(() => allPeriods.value.filter(p => p.state === 'op
 
         <div v-if="weekState === 'loading'" class="grid-skeleton" aria-hidden="true"><span v-for="i in 4" :key="i" class="skeleton" /></div>
         <p v-else-if="weekState === 'error'" class="inline-error" role="alert"><AppIcon name="alert" :size="14" />{{ weekError }} <button type="button" class="btn sm" @click="loadWeek">Try again</button></p>
-        <div v-else class="grid-scroll">
+        <div v-else class="grid-scroll" tabindex="0" role="region" aria-label="Weekly hours, scroll for all days" @keydown.left.stop @keydown.right.stop>
           <table class="week-grid" aria-label="Hours per ticket and day">
             <thead>
               <tr>
@@ -684,7 +684,8 @@ tfoot th.c-ticket { font: 500 10px/1 var(--mono); letter-spacing: .12em; text-tr
 .e-time { font-size: 12px; color: var(--ink-2); }
 .e-text { display: grid; min-width: 0; }
 .e-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.e-meta { display: flex; align-items: center; gap: 5px; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 12px; color: var(--ink-3); }
+.e-meta { display: block; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 12px; color: var(--ink-3); }
+.e-meta svg { display: inline-block; vertical-align: -1px; margin-right: 5px; }
 .agent-chip { height: 18px; padding: 0 7px; border-radius: 999px; background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); color: var(--ink-2); font: 600 9.5px/18px var(--mono); letter-spacing: .06em; text-transform: uppercase; }
 .e-dur { text-align: right; font-size: 12.5px; }
 .e-amount { text-align: right; font-size: 12.5px; }
@@ -713,11 +714,11 @@ tfoot th.c-ticket { font: 500 10px/1 var(--mono); letter-spacing: .12em; text-tr
   .week-label { min-width: 0; flex-direction: column; align-items: center; gap: 0; }
   .person-btn { height: 40px; }
   .log-wrap { padding: 12px; }
-  .week-grid { min-width: 0; }
+  .week-grid { min-width: 420px; }
   .week-grid .c-ticket { width: 84px; padding-left: 10px; }
   .week-grid thead .c-ticket { font-size: 0; }
   .t-cell .t-title { display: none; }
-  .c-day { width: auto; padding: 0 4px !important; font-size: 11.5px; }
+  .c-day { width: auto; padding: 0 2px !important; font-size: 11.5px; }
   .d-date { font-size: 10.5px; }
   .c-total { width: 56px; padding-right: 10px !important; }
   .day-group { padding: 0 12px 8px; }

@@ -152,7 +152,8 @@ async function approve() {
 .scroll { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 18px 22px 24px; }
 .metrics { display: grid; grid-template-columns: 1fr 1fr 2fr; gap: 8px; }
 .metric { display: grid; gap: 4px; padding: 10px 12px; border-radius: 10px; background: var(--code-bg); }
-.metric-label { font-size: 11.5px; color: var(--ink-3); }
+.metric-label { font-size: 11.5px; color: var(--ink-2); }
+.metric :deep(.money .cur) { color: var(--ink-2); }
 .metric b { display: flex; flex-wrap: wrap; gap: 4px 10px; font: 600 15px/1.2 var(--mono); color: var(--ink); font-variant-numeric: tabular-nums; }
 .approved-line { display: flex; align-items: center; gap: 8px; margin-top: 12px; padding: 8px 12px; border-radius: 10px; background: rgba(47, 122, 90, .08); color: var(--ok); font-size: 12.5px; }
 .block { margin-top: 22px; }

@@ -40,7 +40,10 @@ function commitNumber(id: string, kind: 'quantity' | 'unit_price_cents', event: 
 table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 9pt; }
 th { text-align: left; font-size: 7pt; text-transform: uppercase; letter-spacing: .06em; border-bottom: 1px solid var(--line-2); padding: 2mm 1mm; }
 th:first-child { width: 10mm; }th:nth-child(2) { width: 55mm; }th:nth-child(3) { width: 18mm; }th:nth-child(4) { width: 18mm; }th:nth-child(5),th:nth-child(6) { width: 27mm; }
-td { vertical-align: top; padding: 3mm 1mm; overflow-wrap: anywhere; }td:nth-child(n+3) { text-align: right; }tbody { break-inside: avoid; border-bottom: 1px solid var(--line); }.quote-long td { padding-top: 0; color: var(--ink-2); }
+td { vertical-align: top; padding: 3mm 1mm; overflow-wrap: anywhere; }
+th:nth-child(3), td:nth-child(3), th:nth-child(n+5), td:nth-child(n+5) { text-align: right; }
+td:nth-child(4) { text-align: left; }
+tbody { break-inside: avoid; border-bottom: 1px solid var(--line); }.quote-long td { padding-top: 0; color: var(--ink-2); }
 input { width: 100%; min-width: 0; font: inherit; text-align: right; background: var(--field-bg); color: var(--ink); border: 1px solid var(--line); }
 :global(.quote-document.classic-v1 .quote-positions h2) { font-family: var(--quote-display-font, var(--quote-body-font, var(--font))); font-size: var(--quote-section-size); font-weight: 400; letter-spacing: .14em; text-transform: var(--quote-heading-transform); color: var(--teal); }
 :global(.quote-document.classic-v1 .quote-positions h2) { display: none; }

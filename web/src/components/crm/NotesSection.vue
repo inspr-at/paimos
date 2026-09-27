@@ -210,8 +210,9 @@ function backdrop(event: MouseEvent) { if (event.target === dialog.value) closeR
 .apply-card > p { font-size: 13.5px; color: var(--ink-2); }
 .apply-actions { display: flex; justify-content: flex-end; gap: 8px; }
 @media (max-width: 600px) {
+  .note-actions .btn { height: 44px; }
   .apply-card { padding: 16px; }
-  .apply-actions .btn, .proposal-actions .btn { height: 40px; }
+  .apply-actions .btn, .proposal-actions .btn { height: 44px; }
   .proposal-actions { flex-wrap: wrap; }
 }
 </style>
