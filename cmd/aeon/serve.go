@@ -68,6 +68,16 @@ import (
 	"github.com/inspr-at/paimos/web"
 )
 
+// shutdownBudget is the wall clock from SIGTERM to the end of Shutdown.
+// The container stop grace must be longer than this. Docker's default 10s
+// sends SIGKILL while handlers, including SSE, are still running.
+const shutdownBudget = 15 * time.Second
+
+// drainFor is how long readiness stays false while the listener still accepts,
+// so a load balancer probing once a second can observe 503 and stop sending
+// new requests before Shutdown closes the port. It is included in shutdownBudget.
+const drainFor = 2 * time.Second
+
 func serve() error {
 	cfg, err := config.FromEnv()
 	if err != nil {
@@ -75,48 +85,50 @@ func serve() error {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
-
-	ln, err := net.Listen("tcp", cfg.Addr)
-	if err != nil {
-		return fmt.Errorf("listen: %w", err)
-	}
-	return serveListener(ctx, cfg, ln)
+	// Bind after init. A port open during migrations accepts TCP that nothing
+	// reads until Serve, which is a hung backend rather than "not ready".
+	return serveListener(ctx, cfg, nil)
 }
 
 func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) error {
+	closeListener := func() {
+		if ln != nil {
+			_ = ln.Close()
+		}
+	}
 	setupLogger(cfg.Env)
 	pdfConcurrency, err := pdfRenderConcurrency(os.Getenv("AEON_PDF_CONCURRENCY"))
 	if err != nil {
-		_ = ln.Close()
+		closeListener()
 		return err
 	}
 
 	pool, err := db.Open(ctx, cfg.DatabaseURL)
 	if err != nil {
-		_ = ln.Close()
+		closeListener()
 		return err
 	}
 	defer pool.Close()
 
 	if err := db.EnsureTenant(ctx, pool, cfg.BootstrapTenantSlug, cfg.BootstrapTenantName); err != nil {
-		_ = ln.Close()
+		closeListener()
 		return err
 	}
 
 	webFS, err := resolveWeb(cfg)
 	if err != nil {
-		_ = ln.Close()
+		closeListener()
 		return err
 	}
 
 	authCfg, err := auth.FromEnv()
 	if err != nil {
-		_ = ln.Close()
+		closeListener()
 		return err
 	}
 	authMod, err := auth.New(authCfg, pool)
 	if err != nil {
-		_ = ln.Close()
+		closeListener()
 		return err
 	}
 	// R1: embeddings are optional; without AEON_EMBEDDING_URL search is lexical only.
@@ -125,7 +137,7 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 	if cfg.MessagingKey != nil {
 		m, err := inbox.NewMessaging(pool, cfg.MessagingKey)
 		if err != nil {
-			_ = ln.Close()
+			closeListener()
 			return fmt.Errorf("messaging: %w", err)
 		}
 		messagingMod = m
@@ -133,7 +145,7 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 		// CP1: receiver-owned grok_bot_routine webhook wakes, one runner per tenant.
 		dispatcher, err := inbox.NewRoutineDispatcher(pool, cfg.MessagingKey)
 		if err != nil {
-			_ = ln.Close()
+			closeListener()
 			return fmt.Errorf("routine dispatcher: %w", err)
 		}
 		go runRoutineDispatchers(ctx, pool, dispatcher)
@@ -162,27 +174,27 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 		return reg.Register(plugin)
 	}, extraPlugins...)
 	if err != nil {
-		_ = ln.Close()
+		closeListener()
 		return fmt.Errorf("plugins: %w", err)
 	}
 	quotesMod, err := quotes.New(pool, pluginRegistry)
 	if err != nil {
-		_ = ln.Close()
+		closeListener()
 		return fmt.Errorf("quotes: %w", err)
 	}
 	collaborationMod, err := collaboration.New(pool, pluginRegistry)
 	if err != nil {
-		_ = ln.Close()
+		closeListener()
 		return fmt.Errorf("quote collaboration: %w", err)
 	}
 	publicQuotesMod, err := publicquotes.NewWithStore(pool, pluginRegistry, webFS, fileStore, cfg.PublicURL)
 	if err != nil {
-		_ = ln.Close()
+		closeListener()
 		return fmt.Errorf("public quotes: %w", err)
 	}
 	embedProvider, err := embedding.FromEnv()
 	if err != nil {
-		_ = ln.Close()
+		closeListener()
 		return err
 	}
 	if embedProvider != nil {
@@ -261,6 +273,13 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 	if messagingMod != nil {
 		api.Modules = append(api.Modules, messagingMod)
 	}
+	if ln == nil {
+		listened, lerr := net.Listen("tcp", cfg.Addr)
+		if lerr != nil {
+			return fmt.Errorf("listen: %w", lerr)
+		}
+		ln = listened
+	}
 	srv := &http.Server{
 		Handler:           api.Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
@@ -269,7 +288,9 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 
 	errCh := make(chan error, 1)
 	go func() {
+		api.SetServing(true)
 		err := srv.Serve(ln)
+		api.SetServing(false)
 		if errors.Is(err, http.ErrServerClosed) {
 			errCh <- nil
 			return
@@ -283,14 +304,33 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 	case err := <-errCh:
 		return err
 	case <-ctx.Done():
-		slog.Info("shutting down")
-		sctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		defer cancel()
-		if err := srv.Shutdown(sctx); err != nil {
+		slog.Info("draining")
+		if err := stopServing(srv, api.Drain, shutdownBudget, drainFor); err != nil {
 			return err
 		}
 		return <-errCh
 	}
+}
+
+// stopServing fails readiness, keeps the listener open for drainFor so a load
+// balancer can observe 503, then shuts down within the rest of budget.
+// Shutdown does not cancel in-flight handler contexts, so SSE streams continue
+// until the client leaves or the budget expires and the process exits.
+func stopServing(srv *http.Server, markUnready func(), budget, drainFor time.Duration) error {
+	if markUnready != nil {
+		markUnready()
+	}
+	if drainFor > 0 {
+		timer := time.NewTimer(drainFor)
+		<-timer.C
+	}
+	remain := budget - drainFor
+	if remain < 0 {
+		remain = 0
+	}
+	sctx, cancel := context.WithTimeout(context.Background(), remain)
+	defer cancel()
+	return srv.Shutdown(sctx)
 }
 
 func pdfRenderConcurrency(raw string) (int, error) {

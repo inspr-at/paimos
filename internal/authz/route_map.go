@@ -64,6 +64,7 @@ var RoutePermissions = map[string]string{
 	"GET /api/harness-sessions":                                      "harness.read",
 	"GET /api/harness-sessions/live":                                 "nodes.read",
 	"GET /api/health":                                                "public",
+	"GET /api/ready":                                                 "public",
 	"GET /api/imports":                                               "imports.read",
 	"GET /api/imports/{importId}":                                    "imports.read",
 	"GET /api/inbox/messages":                                        "inbox.read",

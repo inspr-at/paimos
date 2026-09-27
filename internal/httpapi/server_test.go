@@ -212,6 +212,52 @@ func TestHealthDatabase(t *testing.T) {
 	}
 }
 
+func TestReadyGate(t *testing.T) {
+	s := &Server{}
+	h := s.Handler()
+	assertReady(t, h, http.StatusServiceUnavailable)
+	health := get(t, h, "/api/health", "")
+	if health.Code != http.StatusOK || !bytes.Contains(health.Body.Bytes(), []byte(`"db":"down"`)) {
+		t.Fatalf("health %d %s", health.Code, health.Body.Bytes())
+	}
+	s.SetServing(true)
+	assertReady(t, h, http.StatusServiceUnavailable)
+	s.Drain()
+	assertReady(t, h, http.StatusServiceUnavailable)
+
+	pool := dbtest.Open(t).Admin
+	live := &Server{Pool: pool}
+	lh := live.Handler()
+	live.SetServing(true)
+	assertReady(t, lh, http.StatusOK)
+	if got := get(t, lh, "/api/health", ""); got.Code != http.StatusOK || !bytes.Contains(got.Body.Bytes(), []byte(`"db":"ok"`)) {
+		t.Fatalf("health while ready %d %s", got.Code, got.Body.Bytes())
+	}
+	live.Drain()
+	assertReady(t, lh, http.StatusServiceUnavailable)
+	if got := get(t, lh, "/api/health", ""); got.Code != http.StatusOK || !bytes.Contains(got.Body.Bytes(), []byte(`"status":"ok"`)) {
+		t.Fatalf("health while draining %d %s", got.Code, got.Body.Bytes())
+	}
+}
+
+func assertReady(t *testing.T, h http.Handler, status int) {
+	t.Helper()
+	rec := get(t, h, "/api/ready", "")
+	if rec.Code != status {
+		t.Fatalf("ready %d body %s", rec.Code, rec.Body.Bytes())
+	}
+	if rec.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("cache %q", rec.Header().Get("Cache-Control"))
+	}
+	want := `"status":"unavailable"`
+	if status == http.StatusOK {
+		want = `"status":"ready"`
+	}
+	if !bytes.Contains(rec.Body.Bytes(), []byte(want)) {
+		t.Fatalf("body %s", rec.Body.Bytes())
+	}
+}
+
 func get(t *testing.T, h http.Handler, path, requestID string) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodGet, path, nil)

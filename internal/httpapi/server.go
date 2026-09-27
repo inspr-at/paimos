@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"net/http"
 	"sync"
+	"sync/atomic"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -32,8 +33,31 @@ type Server struct {
 	// nil serves the embedded brand.json.
 	Brand *brand.Brand
 
+	// serving is set when the process is in http.Server.Serve.
+	// draining is set on SIGTERM before Shutdown. Readiness is serving and
+	// not draining; liveness (GET /api/health) ignores both.
+	serving  atomic.Bool
+	draining atomic.Bool
+
 	once    sync.Once
 	handler http.Handler
+}
+
+// SetServing reports whether the process is inside Serve.
+// The zero value is not serving, so a handler built in tests is not ready
+// until the test opts in.
+func (s *Server) SetServing(on bool) {
+	s.serving.Store(on)
+}
+
+// Drain makes readiness fail while the listener still accepts. In-flight
+// handlers, including SSE, keep running until Shutdown.
+func (s *Server) Drain() {
+	s.draining.Store(true)
+}
+
+func (s *Server) accepting() bool {
+	return s.serving.Load() && !s.draining.Load()
 }
 
 // Handler composes routes. Mux is the /api mux; modules register full paths
@@ -50,6 +74,7 @@ func (s *Server) build() {
 		s.Mux = http.NewServeMux()
 	}
 	s.Mux.HandleFunc("GET /api/health", s.handleHealth)
+	s.Mux.HandleFunc("GET /api/ready", s.handleReady)
 	s.Mux.HandleFunc("GET /api/version", s.handleVersion)
 	for _, m := range s.Modules {
 		m.Mount(s.Mux)

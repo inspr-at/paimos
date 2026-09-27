@@ -80,6 +80,7 @@ func TestRealMuxRouteCoverage(t *testing.T) {
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/health", func(http.ResponseWriter, *http.Request) {})
+	mux.HandleFunc("GET /api/ready", func(http.ResponseWriter, *http.Request) {})
 	mux.HandleFunc("GET /api/version", func(http.ResponseWriter, *http.Request) {})
 	for _, module := range modules {
 		module.Mount(mux)

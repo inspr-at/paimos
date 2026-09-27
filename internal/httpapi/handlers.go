@@ -15,6 +15,10 @@ type healthBody struct {
 	DB     string `json:"db"`
 }
 
+type readyBody struct {
+	Status string `json:"status"`
+}
+
 type versionBody struct {
 	Version string      `json:"version"`
 	Scheme  string      `json:"scheme"`
@@ -31,6 +35,23 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	WriteJSON(w, http.StatusOK, healthBody{Status: "ok", DB: dbState})
+}
+
+// handleReady is the load-balancer probe. It is 200 only while this process
+// should receive new requests. GET /api/health stays a liveness report and
+// does not change during drain.
+func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	if !s.accepting() || s.Pool == nil {
+		WriteJSON(w, http.StatusServiceUnavailable, readyBody{Status: "unavailable"})
+		return
+	}
+	if err := s.Pool.Ping(r.Context()); err != nil {
+		slog.Error("readiness database ping failed", "err", err)
+		WriteJSON(w, http.StatusServiceUnavailable, readyBody{Status: "unavailable"})
+		return
+	}
+	WriteJSON(w, http.StatusOK, readyBody{Status: "ready"})
 }
 
 // handleVersion answers the build's calendar version and the product's names
