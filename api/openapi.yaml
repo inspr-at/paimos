@@ -1893,6 +1893,14 @@ paths:
                 activity: {type: string, enum: [unknown, busy, idle, throttled]}
                 activity_sequence: {type: integer, format: int64, minimum: 0}
                 activity_note: {type: string, minLength: 1, maxLength: 120, description: Plain text; whitespace trimmed and control characters stripped.}
+                model: {$ref: '#/components/schemas/HarnessModel'}
+                reasoning_effort: {$ref: '#/components/schemas/HarnessEffort'}
+                account_label: {$ref: '#/components/schemas/HarnessAccountLabel'}
+                harness_version: {$ref: '#/components/schemas/HarnessVersion'}
+                brief: {$ref: '#/components/schemas/HarnessBrief'}
+                worktree: {$ref: '#/components/schemas/HarnessWorktree'}
+                branch: {$ref: '#/components/schemas/HarnessBranch'}
+                commits: {type: array, maxItems: 20, description: New commits to append, oldest first; duplicate SHAs are ignored and only the latest 20 are retained., items: {$ref: '#/components/schemas/HarnessCommit'}}
       responses:
         '200': {description: Updated session, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessSession'}}}}
         '400': {description: Invalid note or heartbeat}
@@ -4891,6 +4899,13 @@ components:
           type: [string, 'null']
           maxLength: 128
           description: Optional public session label. Trimmed; empty becomes null. Control characters are rejected. Part of exact registration replay.
+        model: {$ref: '#/components/schemas/HarnessModel'}
+        reasoning_effort: {$ref: '#/components/schemas/HarnessEffort'}
+        account_label: {$ref: '#/components/schemas/HarnessAccountLabel'}
+        harness_version: {$ref: '#/components/schemas/HarnessVersion'}
+        brief: {$ref: '#/components/schemas/HarnessBrief'}
+        worktree: {$ref: '#/components/schemas/HarnessWorktree'}
+        branch: {$ref: '#/components/schemas/HarnessBranch'}
         harness: {type: string, enum: [codex, claude, pi, cursor, grok]}
         host: {type: string, minLength: 1, maxLength: 128}
         management_mode: {type: string, enum: [managed, unmanaged]}
@@ -4914,6 +4929,14 @@ components:
         work_order_id: {type: [string, 'null'], format: uuid}
         parent_harness_session_id: {type: [string, 'null'], format: uuid}
         display_label: {type: [string, 'null'], maxLength: 128, description: Public per-session label; null for generations registered without a label.}
+        model: {$ref: '#/components/schemas/HarnessModel'}
+        reasoning_effort: {$ref: '#/components/schemas/HarnessEffort'}
+        account_label: {$ref: '#/components/schemas/HarnessAccountLabel'}
+        harness_version: {$ref: '#/components/schemas/HarnessVersion'}
+        brief: {$ref: '#/components/schemas/HarnessBrief'}
+        worktree: {$ref: '#/components/schemas/HarnessWorktree'}
+        branch: {$ref: '#/components/schemas/HarnessBranch'}
+        commits: {type: array, maxItems: 20, items: {$ref: '#/components/schemas/HarnessCommit'}}
         activity_note: {type: [string, 'null'], maxLength: 120, description: Current step reported by the worker.}
         activity_history: {type: array, description: Up to 20 changed notes, newest first; present on session detail., items: {$ref: '#/components/schemas/HarnessActivityNote'}}
         harness: {type: string, enum: [codex, claude, pi, cursor, grok]}
@@ -4936,6 +4959,19 @@ components:
       properties:
         note: {type: string, maxLength: 120}
         at: {type: string, format: date-time}
+    HarnessModel: {type: [string, 'null'], maxLength: 120, description: Optional trimmed plain text; control characters stripped.}
+    HarnessEffort: {type: [string, 'null'], maxLength: 40, description: Optional trimmed plain text; control characters stripped.}
+    HarnessAccountLabel: {type: [string, 'null'], maxLength: 60, description: Subscription or account display name, never a credential. Trimmed plain text; control characters stripped.}
+    HarnessVersion: {type: [string, 'null'], maxLength: 80, description: Optional trimmed plain text; control characters stripped.}
+    HarnessBrief: {type: [string, 'null'], maxLength: 240, description: Short prompt file name or ticket key; trimmed plain text.}
+    HarnessWorktree: {type: [string, 'null'], maxLength: 512, description: Worktree path; trimmed plain text.}
+    HarnessBranch: {type: [string, 'null'], maxLength: 200, description: Branch name; trimmed plain text.}
+    HarnessCommit:
+      type: object
+      required: [sha, subject]
+      properties:
+        sha: {type: string, pattern: '^[0-9a-fA-F]{7,40}$'}
+        subject: {type: string, minLength: 1, maxLength: 200}
     HarnessSessionSummary:
       allOf:
         - {$ref: '#/components/schemas/HarnessSession'}
@@ -4972,6 +5008,10 @@ components:
         role: {type: string, enum: [worker, coordinator]}
         phase: {type: string, enum: [starting, working, stopping, yielded, stopped]}
         activity: {type: string, enum: [busy, unknown, idle, throttled]}
+        model: {$ref: '#/components/schemas/HarnessModel'}
+        reasoning_effort: {$ref: '#/components/schemas/HarnessEffort'}
+        account_label: {$ref: '#/components/schemas/HarnessAccountLabel'}
+        harness_version: {$ref: '#/components/schemas/HarnessVersion'}
         activity_note: {type: [string, 'null'], maxLength: 120, description: Current step, present only with harness.read at the project}
         activity_note_id: {type: integer, format: int64, description: Latest activity entry ID; present with the current step only where harness.read is granted.}
         ticket:

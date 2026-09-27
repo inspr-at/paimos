@@ -69,6 +69,33 @@ test('sessions are grouped by what they need, with ticket and heartbeat; details
   expect(errors).toEqual([])
 })
 
+test('session setup and work context appear from the mocked harness API', async ({ page }) => {
+  const { data } = await setup(page)
+  Object.assign(data.sessions[1]!, {
+    model: 'gpt-6-sol', reasoning_effort: 'xhigh', account_label: 'Codex Pro', harness_version: '1.2.3',
+    brief: 'AEON-213', worktree: '/Code/aeon-worktrees/tm1-session-metadata', branch: 'tm1.session-metadata',
+    commits: [{ sha: 'abc1234', subject: 'Store session setup' }, { sha: 'def5678', subject: 'Show work context' }],
+  })
+  await openAgents(page)
+  await expect(row(page, nova).locator('.session-meta')).toHaveText('Codex · gpt-6-sol · xhigh · Codex Pro')
+  await row(page, nova).locator('.agent-link').click()
+  const setupBlock = panel(page).locator('section[aria-labelledby="setup-title"]')
+  const workBlock = panel(page).locator('section[aria-labelledby="work-title"]')
+  await expect(setupBlock).toContainText('Codex')
+  await expect(setupBlock).toContainText('gpt-6-sol')
+  await expect(setupBlock).toContainText('xhigh')
+  await expect(setupBlock).toContainText('Codex Pro')
+  await expect(setupBlock).toContainText('1.2.3')
+  await expect(workBlock).toContainText('AEON-213')
+  await expect(workBlock).toContainText('/Code/aeon-worktrees/tm1-session-metadata')
+  await expect(workBlock).toContainText('tm1.session-metadata')
+  await expect(workBlock.getByRole('link', { name: 'PHAROS-12' })).toHaveAttribute('href', '/p/PHAROS/PHAROS-12')
+  await expect(workBlock.locator('.commits li')).toHaveText(['abc1234Store session setup', 'def5678Show work context'])
+  await row(page, session(3)).locator('.agent-link').click()
+  await expect(panel(page).locator('section[aria-labelledby="work-title"]')).toHaveCount(0)
+  await expect(panel(page)).not.toContainText('Not reported')
+})
+
 test('an approval from an agent with no session and no address shows its name', async ({ page }) => {
   const { data } = await setup(page)
   const principal = 'a0000000-0000-4000-8000-000000000099'

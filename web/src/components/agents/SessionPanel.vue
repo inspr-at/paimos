@@ -3,7 +3,7 @@
 import { brand } from '../../lib/brand'
 import { api, getNode } from '../../lib/api'
 import { computed, onMounted, ref, watch } from 'vue'
-import type { Approval, ProjectMessage, SessionControl } from '../../lib/agents'
+import type { Approval, HarnessSession, ProjectMessage, SessionControl } from '../../lib/agents'
 import { RUN_OUTCOME, cost, elapsed, runDuration, runModel, scopeLabel, stopReasonLabel, tokens } from '../../lib/agentState'
 import { absoluteTime, relativeTime, statusMeta } from '../../lib/work'
 import { useAgents, type SessionView } from '../../stores/agents'
@@ -30,7 +30,7 @@ const sending = ref(false)
 const sendError = ref('')
 const thread = ref<HTMLElement>()
 const composeInput = ref<HTMLTextAreaElement>()
-const detail = ref<(ActivitySession & { id: string }) | null>(null)
+const detail = ref<(HarnessSession & ActivitySession) | null>(null)
 const ticketState = ref('')
 
 const s = computed(() => props.view?.session)
@@ -41,6 +41,8 @@ const run = computed(() => props.view?.run)
 const messages = computed(() => s.value ? agents.thread(s.value).slice(-40) : [])
 const address = computed(() => s.value ? agents.addressOf(s.value.agent_principal_id) : '')
 const activity = computed(() => detail.value?.id === s.value?.id ? detail.value : props.view ? activityOf(props.view) : null)
+const reported = computed(() => detail.value?.id === s.value?.id ? detail.value : s.value)
+const hasWork = computed(() => !!(reported.value?.brief || reported.value?.worktree || reported.value?.branch || reported.value?.commits?.length))
 const timeline = computed(() => activity.value?.activity_history ?? [])
 const step = computed(() => props.view ? activity.value?.activity_note || currentStep(props.view) : '')
 const meta = computed(() => props.view ? [props.view.account, props.view.model].filter(Boolean).join(' · ') : '')
@@ -50,7 +52,7 @@ watch(() => [s.value?.id, props.view ? activityOf(props.view).activity_note : ''
   try {
     const response = await api(`/projects/${encodeURIComponent(current.project_id)}/harness-sessions/${encodeURIComponent(current.id)}`)
     if (response.ok) {
-      const body = await response.json() as ActivitySession & { id: string }
+      const body = await response.json() as HarnessSession & ActivitySession
       if (s.value?.id === current.id) detail.value = body
     }
   } catch { /* The list still shows the latest step if detail is unavailable. */ }
@@ -181,6 +183,28 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
         <div v-if="view.session.stopped_at" class="fact"><dt>Stopped</dt><dd>{{ stopReasonLabel(view.session.stop_reason) || 'Stopped' }} <span class="muted">{{ relativeTime(view.session.stopped_at, { now }) }}</span></dd></div>
       </dl>
 
+      <section class="block" aria-labelledby="setup-title">
+        <h3 id="setup-title" class="eyebrow">Setup</h3>
+        <dl class="facts">
+          <div class="fact"><dt>Harness</dt><dd>{{ view.harness }}</dd></div>
+          <div v-if="reported?.model" class="fact"><dt>Model</dt><dd class="mono">{{ reported.model }}</dd></div>
+          <div v-if="reported?.reasoning_effort" class="fact"><dt>Effort</dt><dd>{{ reported.reasoning_effort }}</dd></div>
+          <div v-if="reported?.account_label" class="fact"><dt>Subscription</dt><dd>{{ reported.account_label }}</dd></div>
+          <div v-if="reported?.harness_version" class="fact"><dt>Version</dt><dd class="mono">{{ reported.harness_version }}</dd></div>
+        </dl>
+      </section>
+
+      <section v-if="hasWork" class="block" aria-labelledby="work-title">
+        <h3 id="work-title" class="eyebrow">Work</h3>
+        <dl class="facts">
+          <div v-if="view.ticket" class="fact wide"><dt>Ticket</dt><dd><TicketPeekLink :ticket-key="view.ticket.key" :href="view.ticket.href" :tip="view.ticket.title" class="ticket-chip">{{ view.ticket.key }}</TicketPeekLink></dd></div>
+          <div v-if="reported?.brief" class="fact wide"><dt>Brief</dt><dd>{{ reported.brief }}</dd></div>
+          <div v-if="reported?.worktree" class="fact wide"><dt>Worktree</dt><dd class="mono">{{ reported.worktree }}</dd></div>
+          <div v-if="reported?.branch" class="fact wide"><dt>Branch</dt><dd class="mono">{{ reported.branch }}</dd></div>
+          <div v-if="reported?.commits?.length" class="fact wide"><dt>Commits</dt><dd><ol class="commits"><li v-for="commit in reported.commits" :key="commit.sha"><code>{{ commit.sha }}</code><span>{{ commit.subject }}</span></li></ol></dd></div>
+        </dl>
+      </section>
+
       <section v-if="run" class="block" aria-labelledby="telemetry-title">
         <h3 id="telemetry-title" class="eyebrow">Current run</h3>
         <div class="telemetry">
@@ -308,6 +332,9 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
 .fact dt { font: 500 10px/1.5 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--ink-3); font-variant-ligatures: none; }
 .fact dd { margin: 0; font-size: 13px; color: var(--ink); overflow-wrap: anywhere; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .fact dd.mono, .fact dd .mono { font-size: 12px; font-family: var(--mono); font-variant-ligatures: none; }
+.commits { display: grid; gap: 5px; margin: 0; padding: 0; list-style: none; }
+.commits li { display: flex; gap: 8px; flex-wrap: wrap; }
+.commits code { font: 12px var(--mono); color: var(--ink-2); }
 .muted { color: var(--ink-3); }
 .evidence { display: inline-grid; place-items: center; width: 16px; height: 16px; border-radius: 50%; background: var(--chip-teal-bg); color: var(--teal-ink); }
 .project-link { display: inline-flex; align-items: center; gap: 8px; min-width: 0; max-width: 100%; color: var(--ink); text-decoration: none; }

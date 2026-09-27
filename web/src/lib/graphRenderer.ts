@@ -477,8 +477,9 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
     graph.d3Force('link')?.strength(.05)
     graph.d3Force('elliptic', (alpha: number) => {
       const radius = 55 + Math.sqrt(nodes.length) * 3
-      const compact = Math.max(0, Math.min(1, (700 - graph.width()) / 176))
-      const aspect = Math.max(1.4, Math.min(12, graph.width() / Math.max(1, graph.height()) * (1.12 - .22 * compact)))
+      // The backdrop spans the whole header, including the masked text islands.
+      // Spread anchors to the content edges instead of the old middle column.
+      const aspect = Math.max(1.4, Math.min(12, graph.width() / Math.max(1, graph.height()) * 1.65))
       nodes.forEach((n, i) => {
         const index = (i * anchorStride) % nodes.length
         const y = 1 - 2 * (index + .5) / nodes.length, angle = i * Math.PI * (3 - Math.sqrt(5))
@@ -544,12 +545,6 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
     if (glimpse && (!glimpseLaidOut || graph.width() < 24 || graph.height() < 24)) return
     if (g3 && three) {
       const camera = g3.camera() as PerspectiveCamera
-      if (glimpse) {
-        // Keep the compact cloud clear of the stats without shrinking its height.
-        const compact = Math.max(0, Math.min(1, (700 - g3.width()) / 176))
-        camera.aspect = g3.width() / Math.max(1, g3.height()) * (1 + .04 * compact)
-        camera.updateProjectionMatrix()
-      }
       const right = new three.Vector3(1, 0, 0).applyQuaternion(camera.quaternion)
       const up = new three.Vector3(0, 1, 0).applyQuaternion(camera.quaternion)
       const back = new three.Vector3(0, 0, 1).applyQuaternion(camera.quaternion)
@@ -567,8 +562,7 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
         // Fit only the dense core's HEIGHT in a glimpse. Outliers and sides
         // can enter the fade without shrinking the entire cloud into a strip.
         if (glimpse) {
-          const compact = Math.max(0, Math.min(1, (700 - g3.width()) / 176))
-          distance = Math.max(distance, depth + Math.abs(v.dot(up)) / (tan * (1.20 + .32 * compact - 8 / g3.height())))
+          distance = Math.max(distance, depth + Math.abs(v.dot(up)) / (tan * (1.20 - 8 / g3.height())))
         }
         else {
           const r = graphRadius(n)

@@ -7,7 +7,7 @@ import { fixtures, me, mockWork } from './work-fixtures'
 import { agentData, mockAgents } from './agents-fixtures'
 
 const now = Date.parse('2026-09-26T16:00:00Z')
-async function setup(page: Page, theme: 'light' | 'dark' = 'light') {
+async function setup(page: Page, theme: 'light' | 'dark' = 'light', reportedMetadata = false) {
   await page.clock.install({ time: now })
   const work = fixtures()
   work.preferences.theme = { choice: theme }
@@ -22,6 +22,11 @@ async function setup(page: Page, theme: 'light' | 'dark' = 'light') {
     { note: 'Rebuilt worker image', at: new Date(now - 6 * 60_000).toISOString() },
   ] })
   Object.assign(stopped, { parent_harness_session_id: lead.id, display_label: 'past worker' })
+  if (reportedMetadata) Object.assign(worker, {
+    model: 'gpt-6-sol', reasoning_effort: 'xhigh', account_label: 'Codex Pro', harness_version: '1.2.3',
+    brief: 'AEON-213', worktree: '/Code/aeon-worktrees/tm1-session-metadata', branch: 'tm1.session-metadata',
+    commits: [{ sha: 'abc1234', subject: 'Store session setup' }, { sha: 'def5678', subject: 'Show work context' }],
+  })
   data.sessions.splice(0, data.sessions.length, lead, worker, stopped)
   data.runs.splice(0)
   data.approvals.splice(0)
@@ -58,9 +63,9 @@ test('detail shows now, activity, ticket status and hides unreported fields', as
   await expect(panel.getByRole('button', { name: /Stop/ })).toBeVisible()
 })
 
-for (const width of [1600, 390]) {
-  test(`tree guide meets the child glyph at ${width}px`, async ({ page }) => {
-    const { lead, worker } = await setup(page)
+for (const width of [1600, 390]) for (const reportedMetadata of [false, true]) {
+  test(`tree guide meets the child glyph at ${width}px${reportedMetadata ? ' with reported metadata' : ''}`, async ({ page }) => {
+    const { lead, worker } = await setup(page, 'light', reportedMetadata)
     await page.setViewportSize({ width, height: 1000 })
     await page.goto('/agents')
     await expect(page.locator(`[data-row="s:${worker.id}"]`)).toBeVisible()
@@ -96,20 +101,30 @@ for (const width of [1600, 390]) {
 
 for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390]) {
   test(`${theme} ${width}px fits without horizontal scroll and captures review image`, async ({ page }) => {
-    const { worker } = await setup(page, theme)
+    const { worker } = await setup(page, theme, true)
     await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
     await page.goto('/agents')
     await expect(page.locator('.live-now .tile')).toHaveCount(2)
+    await expect(page.locator(`[data-row="s:${worker.id}"] .session-meta`)).toHaveText('Codex · gpt-6-sol · xhigh · Codex Pro')
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
     const pass = process.env.AM1_CAPTURE_PASS
     if (pass) {
       const dir = resolve('..', '.agent-shots')
       mkdirSync(dir, { recursive: true })
       await page.screenshot({ path: resolve(dir, `am1-${pass}-${theme}-${width}-page.png`), fullPage: true })
+      await page.locator('.sessions').screenshot({ path: resolve(dir, `am1-${pass}-${theme}-${width}-sessions.png`) })
     }
     await page.goto(`/agents/${worker.id}`)
     await expect(page.locator('.activity-timeline li')).toHaveCount(2)
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
-    if (pass) await page.screenshot({ path: resolve('..', '.agent-shots', `am1-${pass}-${theme}-${width}-detail.png`), fullPage: true })
+    const panel = page.getByRole('complementary', { name: 'Session details' })
+    await expect(panel.locator('section[aria-labelledby="setup-title"]')).toContainText('Codex Pro')
+    await expect(panel.locator('section[aria-labelledby="work-title"]')).toContainText('tm1.session-metadata')
+    expect(await panel.locator('.scroll').evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true)
+    if (pass) {
+      await page.screenshot({ path: resolve('..', '.agent-shots', `am1-${pass}-${theme}-${width}-detail.png`), fullPage: true })
+      await panel.locator('section[aria-labelledby="setup-title"]').evaluate(el => el.scrollIntoView({ block: 'start' }))
+      await panel.screenshot({ path: resolve('..', '.agent-shots', `am1-${pass}-${theme}-${width}-setup-work.png`) })
+    }
   })
 }
