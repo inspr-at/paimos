@@ -239,6 +239,10 @@ func (r *Remote) Claim(ctx context.Context, runID, daemonID, generation string, 
 	return err
 }
 
+// ErrTelemetryProtocol means the server rejected the telemetry itself. It does
+// not include authentication, enrollment fences, or uncertain delivery errors.
+var ErrTelemetryProtocol = errors.New("telemetry protocol violation")
+
 func (r *Remote) Report(ctx context.Context, runID string, t Telemetry) error {
 	r.mu.RLock()
 	daemon, generation := r.daemonID, r.generation
@@ -246,8 +250,25 @@ func (r *Remote) Report(ctx context.Context, runID string, t Telemetry) error {
 	if daemon == "" || generation == "" {
 		return errors.New("run has no daemon claim")
 	}
-	return r.Client.DoWithHeaders(ctx, "POST", "/api/runs/"+url.PathEscape(runID)+"/telemetry", t, nil,
+	err := r.Client.DoWithHeaders(ctx, "POST", "/api/runs/"+url.PathEscape(runID)+"/telemetry", t, nil,
 		map[string]string{"X-Aeon-Daemon-ID": daemon, "X-Aeon-Daemon-Generation": generation})
+	var status *client.StatusError
+	if errors.As(err, &status) {
+		protocol := status.Status == http.StatusBadRequest || status.Status == http.StatusRequestEntityTooLarge || status.Status == http.StatusUnprocessableEntity
+		if status.Status == http.StatusConflict {
+			// Other conflicts include generation changes and enrollment drain.
+			// Only the telemetry endpoint's explicit protocol errors are fatal.
+			switch status.Message {
+			case "divergent telemetry replay", "telemetry sequence is not monotonic", "run cannot return to starting":
+				protocol = true
+			}
+		}
+		if protocol {
+			// Do not propagate arbitrary server response text as diagnostics.
+			return fmt.Errorf("%w (HTTP %d)", ErrTelemetryProtocol, status.Status)
+		}
+	}
+	return err
 }
 
 func (r *Remote) Inbox(ctx context.Context, after int64) (InboxPage, error) {

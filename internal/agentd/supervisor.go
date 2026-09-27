@@ -79,6 +79,8 @@ type owned struct {
 	stopRequested   bool
 	forceRequested  bool
 	harnessArchived bool
+	protocolFailed  bool
+	protocolStopped bool
 }
 
 type Supervisor struct {
@@ -602,13 +604,18 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) error {
 		entry.mu.Unlock()
 		heartbeatErr = nil
 	}
+	entry.mu.Lock()
+	protocolFailed := entry.protocolFailed
+	entry.mu.Unlock()
+	startErr := errors.Join(saveErr, startedErr, heartbeatErr)
+	if protocolFailed {
+		// An adapter can report before Start returns its owned Process.
+		startErr = errors.Join(startErr, ErrTelemetryProtocol)
+	}
+	s.handleRunError(entry, startErr)
 	go s.monitor(entry)
 	go s.heartbeat(entry)
-	if err := errors.Join(saveErr, startedErr, heartbeatErr); err != nil {
-		s.freezeOnError(route.AccountID)
-		return err
-	}
-	return nil
+	return startErr
 }
 
 func (s *Supervisor) heartbeat(entry *owned) {
@@ -632,7 +639,7 @@ func (s *Supervisor) heartbeat(entry *owned) {
 				continue
 			}
 			if err != nil {
-				s.freezeOnError(entry.record.AccountID)
+				s.handleRunError(entry, err)
 			}
 
 		}
@@ -671,7 +678,7 @@ func (s *Supervisor) observe(entry *owned, ev AdapterEvent) {
 	if err := s.update(ctx, entry, Telemetry{Kind: kind, InputTokensDelta: ev.InputTokensDelta,
 		OutputTokensDelta: ev.OutputTokensDelta, CostMicrosDelta: ev.CostMicrosDelta, TurnCountDelta: ev.TurnCountDelta,
 		EffectiveModel: ev.EffectiveModel, ModelEvidence: ev.ModelEvidence, ErrorCode: ev.ErrorCode}); err != nil {
-		s.freezeOnError(entry.record.AccountID)
+		s.handleRunError(entry, err)
 	}
 }
 
@@ -709,8 +716,9 @@ func (s *Supervisor) monitor(entry *owned) {
 	entry.mu.Lock()
 	stopped := entry.stopRequested || entry.deadlineExpired.Load()
 	forced := entry.forceRequested
+	protocolFailed := entry.protocolFailed
 	entry.mu.Unlock()
-	if err == nil {
+	if err == nil && !protocolFailed {
 		if evidence, ok := proc.(EvidenceProcess); ok {
 			answer := evidence.Evidence()
 			if answer == "" {
@@ -728,6 +736,9 @@ func (s *Supervisor) monitor(entry *owned) {
 	}
 	if stopped {
 		status, code = "cancelled", ""
+	}
+	if protocolFailed {
+		status, code = "failed", "app_server_protocol"
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
