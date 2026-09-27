@@ -14,7 +14,12 @@ const busy = ref('')
 const error = ref('')
 const rows = computed(() => [...props.accounts]
   .map(account => ({ account, window: bindingWindow(account.windows, props.now) }))
-  .sort((a, b) => (a.account.state === 'available' ? 0 : 1) - (b.account.state === 'available' ? 0 : 1) || (a.window?.left ?? 2) - (b.window?.left ?? 2)))
+  .sort((a, b) => (a.account.state === 'available' ? 0 : 1) - (b.account.state === 'available' ? 0 : 1) || allowanceRank(a.window) - allowanceRank(b.window)))
+function allowanceRank(window: ReturnType<typeof bindingWindow>) {
+  if (!window) return 2
+  if (window.window.provisional) return 1.5
+  return window.left
+}
 async function toggle(account: AgentAccount) {
   busy.value = account.id; error.value = ''
   try { await props.set(account, account.state === 'draining' ? 'available' : 'draining') }
@@ -44,15 +49,21 @@ const stateLabel: Record<AgentAccount['state'], string> = { available: 'Availabl
           <span v-if="account.state !== 'available'" class="state-text">{{ stateLabel[account.state] }}</span>
           <button v-if="admin && account.state !== 'unavailable'" type="button" class="btn sm ghost toggle" :disabled="busy === account.id" @click="toggle(account)">{{ account.state === 'draining' ? 'Resume' : 'Drain' }}</button>
         </div>
-        <template v-if="window">
-          <div class="meter" role="meter" :aria-valuenow="Math.round(window.left * 100)" aria-valuemin="0" aria-valuemax="100" :aria-label="`${accountName(account)}: ${Math.round(window.left * 100)}% of ${allowanceWindowLabel(window.window)} ${UNIT_LABEL[window.window.unit]} left${window.window.provisional ? ', provisional' : ''}`">
+        <template v-if="window?.window.provisional">
+          <p class="facts">
+            <span class="left">{{ allowanceWindowLabel(window.window) }} {{ UNIT_LABEL[window.window.unit] }} · allowance unknown</span>
+            <span class="provisional">Unmeasured</span>
+            <span class="reset">resets in {{ duration(window.resetsIn) }}</span>
+          </p>
+        </template>
+        <template v-else-if="window">
+          <div class="meter" role="meter" :aria-valuenow="Math.round(window.left * 100)" aria-valuemin="0" aria-valuemax="100" :aria-label="`${accountName(account)}: ${Math.round(window.left * 100)}% of ${allowanceWindowLabel(window.window)} ${UNIT_LABEL[window.window.unit]} left`">
             <span class="fill" :class="window.pace" :style="{ width: `${Math.max(2, window.left * 100)}%` }" />
             <span class="pace-mark" :style="{ left: `${Math.min(100, (1 - window.expected) * 100)}%` }" :data-tip="`Pace allows ${Math.round(window.expected * 100)}% used by now`" />
           </div>
           <p class="facts">
             <span class="left"><b>{{ Math.round(window.left * 100) }}%</b> {{ UNIT_LABEL[window.window.unit] }} left · {{ allowanceWindowLabel(window.window) }}</span>
             <span class="pace" :class="window.pace">{{ PACE_LABEL[window.pace] }}</span>
-            <span v-if="'provisional' in window.window && window.window.provisional" class="provisional" title="Measured usage is unavailable for this allowance window">Provisional</span>
             <span class="reset">resets in {{ duration(window.resetsIn) }}</span>
           </p>
         </template>

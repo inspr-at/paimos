@@ -396,14 +396,16 @@ test('accounts show what is left and the pace; admins can drain and resume', asy
   expect(calls.find(c => c.method === 'PATCH')?.body).toEqual({ state: 'draining' })
 })
 
-test('an unmeasured allowance is labeled provisional', async ({ page }) => {
+test('an unmeasured allowance is unknown, not a percentage left', async ({ page }) => {
   const { data } = await setup(page)
   ;(data.accounts[0].windows[0] as Record<string, unknown>).provisional = true
   await openAgents(page)
   await page.getByText('Accounts and pacing', { exact: true }).first().click()
   const claude = page.getByRole('region', { name: 'Accounts and pacing' }).locator('.account').filter({ hasText: 'Claude Max' })
-  await expect(claude).toContainText('Provisional')
-  await expect(claude.getByRole('meter')).toHaveAttribute('aria-label', /5-hour tokens left, provisional/)
+  await expect(claude).toContainText('Unmeasured')
+  await expect(claude).toContainText('allowance unknown')
+  await expect(claude).not.toContainText('%')
+  await expect(claude.getByRole('meter')).toHaveCount(0)
 })
 
 test('accounts explain themselves when the person may not see them', async ({ page }) => {

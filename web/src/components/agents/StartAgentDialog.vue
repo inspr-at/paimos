@@ -5,10 +5,10 @@ import { listNodes, type WorkNode } from '../../lib/api'
 import { can } from '../../lib/authz'
 import { getRun, listAllSessions, message, type AgentRun, type HarnessSession } from '../../lib/agents'
 import {
-  AUTHOR_FAMILIES, authorFamilyFor, chooseStep, emptyChoice, emptyTouch, familyLabel, fetchAccountCatalog, fillDefaults, presentCascade, workRoleFor,
+  AUTHOR_FAMILIES, authorFamilyFor, chooseStep, emptyChoice, emptyTouch, familyLabel, fetchAccountCatalog, fillDefaults, presentCascade, sessionReport, workRoleFor,
   type AgentAccountCatalog, type AuthorFamily, type CascadeChoice, type CascadeStep, type CascadeTouch, type CatalogGap, type RequestedRun,
 } from '../../lib/accountCascade'
-import { launchState, startAgent } from '../../lib/startAgent'
+import { launchState, staleGrantRejection, startAgent } from '../../lib/startAgent'
 import { useAgents } from '../../stores/agents'
 import { usePoller } from '../../lib/usePolledData'
 import AppIcon from '../AppIcon.vue'
@@ -39,6 +39,7 @@ const run = ref<AgentRun | null>(null)
 const requested = ref<RequestedRun | null>(null)
 const managed = ref<HarnessSession | null>(null)
 const reused = ref(false)
+const grantStale = ref(false)
 const checking = ref(false)
 const checkError = ref('')
 const now = ref(Date.now())
@@ -54,8 +55,10 @@ const view = computed(() => presentCascade({ catalog: catalog.value, role: role.
 const cascadeLocked = computed(() => loading.value || catalogGap.value === 'failed' || catalogGap.value === 'forbidden' || catalogGap.value === 'family')
 const state = computed(() => run.value ? launchState(run.value) : null)
 const sessionConnected = computed(() => !!managed.value && managed.value.phase !== 'stopped')
+const reported = computed(() => sessionConnected.value && managed.value && requested.value ? sessionReport(managed.value, requested.value) : null)
 const permitted = computed(() => can('work_orders.write') && can('run.create'))
-const canSubmit = computed(() => permitted.value && !loading.value && !busy.value && !run.value && !!ticket.value && !catalogGap.value && !!view.value.agentId && !!view.value.profileId && !!choice.value.accountId)
+const selectionVisible = computed(() => !!view.value.profileId && view.value.efforts.some(effort => effort.value === view.value.profileId) && view.value.models.some(model => model.value === choice.value.modelKey) && view.value.accounts.some(account => account.value === choice.value.accountId))
+const canSubmit = computed(() => permitted.value && !loading.value && !busy.value && !run.value && !!ticket.value && !catalogGap.value && !!view.value.agentId && selectionVisible.value)
 
 async function search(more = false) {
   const turn = ++searchGeneration
@@ -84,6 +87,8 @@ async function loadCatalog() {
   loading.value = false
 }
 function pick(step: CascadeStep, value: string) {
+  grantStale.value = false
+  error.value = ''
   const next = chooseStep(choice.value, touch.value, step, value)
   touch.value = next.touch
   choice.value = fillDefaults(catalog.value, next.choice, next.touch)
@@ -110,7 +115,7 @@ async function open(initial?: WorkNode) {
   catalog.value = null; catalogGap.value = null; catalogMessage.value = ''
   choice.value = emptyChoice(); touch.value = emptyTouch()
   run.value = null; requested.value = null; managed.value = null; reused.value = false
-  error.value = ''; checkError.value = ''; searchError.value = ''
+  error.value = ''; checkError.value = ''; searchError.value = ''; grantStale.value = false
   dialog.value?.showModal()
   void loadCatalog()
   if (!initial) void search()
@@ -144,7 +149,16 @@ async function submit() {
     agents.recordRun(result.run)
     await refresh()
     await nextTick(); dialog.value?.querySelector<HTMLElement>('[data-result]')?.focus()
-  } catch (e) { error.value = `${message(e)} Your selections are kept. Retrying checks for an existing work order and run first.` }
+  } catch (e) {
+    if (staleGrantRejection(e)) {
+      const next = chooseStep(choice.value, touch.value, 'model', '')
+      const pinned = { ...next.touch, account: true }
+      touch.value = pinned
+      choice.value = fillDefaults(catalog.value, next.choice, pinned)
+      grantStale.value = true
+      error.value = 'This account no longer allows that model. Nothing was queued, and another account was not used. Refresh the catalog, then choose a model it offers.'
+    } else error.value = `${message(e)} Your selections are kept. Retrying checks for an existing work order and run first.`
+  }
   finally { busy.value = false }
 }
 async function refresh() {
@@ -253,7 +267,7 @@ defineExpose({ open })
 
         <div v-if="!loading && !catalogGap && catalog" class="dispatch-status" :class="{ warn: view.status.tone === 'warn' }" role="status"><AppIcon :name="view.status.tone === 'warn' ? 'clock' : 'info'" :size="17" /><div><strong>{{ view.status.label }}</strong><p>{{ view.status.detail }}</p></div></div>
         <div v-if="catalogGap === 'failed' || catalogGap === 'forbidden'" class="error" role="alert"><p>{{ catalogMessage }}</p><button v-if="catalogGap === 'failed'" type="button" class="btn sm" @click="loadCatalog">Retry catalog</button></div>
-        <div v-if="error" class="error" role="alert"><p>{{ error }}</p></div>
+        <div v-if="error" class="error" role="alert"><p>{{ error }}</p><button v-if="grantStale" type="button" class="btn sm" @click="loadCatalog">Refresh catalog</button></div>
         <p v-if="!permitted" class="note">Starting an agent requires work-order write and run-create permission.</p>
         <footer><p>The run is queued first.<br />You can follow it in Agents.</p><button type="button" class="btn" :disabled="busy" @click="close">Cancel</button><button type="submit" class="btn primary" :disabled="!canSubmit"><AppIcon :name="busy ? 'clock' : 'arrow'" :size="15" />{{ busy ? 'Queueing…' : 'Queue run' }}</button></footer>
       </template>
@@ -265,13 +279,26 @@ defineExpose({ open })
           <h3>{{ sessionConnected ? 'Managed session connected' : state?.label }}</h3>
           <p>{{ sessionConnected ? 'The daemon registered this session. Open it to follow progress and send controls.' : state?.detail }}</p>
           <div v-if="ticket" class="result-ticket"><span class="mono">{{ ticket.key }}</span><strong>{{ ticket.title }}</strong></div>
-          <ul v-if="requested" class="requested">
-            <li><span>Host</span><strong>{{ requested.host }}</strong></li>
-            <li><span>Harness</span><strong>{{ requested.harness }}</strong></li>
-            <li><span>Account</span><strong>{{ requested.account }}</strong></li>
-            <li><span>Model</span><strong>{{ requested.model }}</strong></li>
-            <li><span>Thinking</span><strong>{{ requested.thinking }}</strong></li>
-          </ul>
+          <div v-if="requested" class="requested">
+            <p class="requested-title">Requested configuration</p>
+            <ul>
+              <li><span>Host</span><strong>{{ requested.host }}</strong></li>
+              <li><span>Harness</span><strong>{{ requested.harness }}</strong></li>
+              <li><span>Account</span><strong>{{ requested.account }}</strong></li>
+              <li><span>Model</span><strong>{{ requested.model }}</strong></li>
+              <li><span>Thinking</span><strong>{{ requested.thinking }}</strong></li>
+            </ul>
+          </div>
+          <div v-if="reported" class="requested">
+            <p class="requested-title">Reported by the session</p>
+            <ul>
+              <li><span>Account</span><strong>{{ reported.account }}</strong></li>
+              <li><span>Model</span><strong>{{ reported.model }}</strong></li>
+              <li><span>Thinking</span><strong>{{ reported.thinking }}</strong></li>
+            </ul>
+            <p v-if="reported.differs" class="note">This differs from the requested configuration.</p>
+            <p v-else-if="!reported.modelKnown || !reported.accountKnown || !reported.thinkingKnown" class="note">The session has not reported every field.</p>
+          </div>
           <p class="note mono">Run {{ run.id.slice(0, 8) }}</p>
         </div>
         <p v-if="checkError" class="error" role="alert">{{ checkError }}</p>
@@ -327,10 +354,13 @@ footer .btn { min-height: 44px; }
 .result-ticket { width: 100%; padding: 14px; border-radius: 12px; background: var(--surface-sunken); }
 .result-ticket span { display: block; font-size: 11px; color: var(--teal-ink); margin-bottom: 6px; }
 .result-ticket strong { font-size: 14px; overflow-wrap: anywhere; }
-.requested { list-style: none; width: 100%; margin: 0; padding: 12px 14px; display: grid; gap: 8px; text-align: left; background: var(--surface-sunken); border-radius: 12px; }
+.requested { width: 100%; margin: 0; padding: 12px 14px; text-align: left; background: var(--surface-sunken); border-radius: 12px; }
+.requested-title { margin: 0 0 8px; font-size: 12px; font-weight: 650; color: var(--ink-2); }
+.requested ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
 .requested li { display: flex; justify-content: space-between; gap: 12px; font-size: 13px; }
 .requested span { color: var(--ink-3); flex-shrink: 0; }
 .requested strong { font-weight: 600; text-align: right; overflow-wrap: anywhere; }
+.requested .note { margin-top: 8px; }
 @media (max-width: 600px) {
   .launch-dialog { max-height: calc(100dvh - 16px); width: calc(100vw - 16px); border-radius: 18px; }
   .launch-card { padding: 20px 16px; }

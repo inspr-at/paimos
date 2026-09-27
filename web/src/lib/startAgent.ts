@@ -116,3 +116,7 @@ export function launchState(run: AgentRun): { label: string; detail: string } {
   if (run.status === 'starting' || run.status === 'running' || run.status === 'waiting') return { label: 'Claimed', detail: 'The daemon claimed the run. Its managed session appears when registration is reported.' }
   return { label: ({ completed: 'Completed', failed: 'Failed', cancelled: 'Cancelled', ownership_lost: 'Ownership lost' })[run.status] ?? run.status, detail: 'This run has ended. Its reported outcome is available in Agents.' }
 }
+
+export function staleGrantRejection(error: unknown): boolean {
+  return error instanceof APIError && error.status === 409 && /allow the model profile|model profile is not eligible/i.test(error.message)
+}

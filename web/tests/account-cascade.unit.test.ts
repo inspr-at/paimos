@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
-  allowanceWindowLabel, authorFamilyFor, chooseStep, emptyChoice, emptyTouch, fetchAccountCatalog, fillDefaults, isAccountCatalog, presentCascade, workRoleFor,
+  allowanceWindowLabel, authorFamilyFor, chooseStep, displayText, emptyChoice, emptyTouch, fetchAccountCatalog, fillDefaults, isAccountCatalog, presentCascade, publicModelId, sessionReport, workRoleFor,
   type AgentAccountCatalog, type CatalogAccount, type CascadeChoice, type CascadeTouch,
 } from '../src/lib/accountCascade'
 
@@ -145,5 +145,107 @@ describe('account catalog contract', () => {
     expect(workRoleFor(null)).toEqual({ role: 'build', source: 'default' })
     expect(authorFamilyFor({ fields: { author_family: 'xai' } })).toBe('xai')
     expect(authorFamilyFor({ fields: { author_family: 'local' } })).toBe('')
+  })
+
+  it('offers pi registry model ids and drops a profile that is not a visible choice', () => {
+    expect(displayText('anthropic/claude-opus-5')).toBeNull()
+    expect(displayText('anthropic/claude-sonnet-5')).toBeNull()
+    expect(publicModelId('anthropic/claude-opus-5')).toBe('anthropic/claude-opus-5')
+    expect(publicModelId('anthropic/claude-sonnet-5')).toBe('anthropic/claude-sonnet-5')
+    expect(publicModelId('gpt-6-sol')).toBe('gpt-6-sol')
+    expect(publicModelId('/Users/hidden/model')).toBeNull()
+    expect(publicModelId('.. /secret')).toBeNull()
+    expect(publicModelId('sk-live-token')).toBeNull()
+    expect(displayText('CODEX_HOME=/secret')).toBeNull()
+    const pi = account({
+      models: [
+        { model: 'anthropic/claude-opus-5', family: 'anthropic', efforts: [{ effort: 'xhigh', model_profile_id: profileA, version: '2' }] },
+        { model: 'anthropic/claude-sonnet-5', family: 'anthropic', efforts: [{ effort: 'high', model_profile_id: profileB, version: '2' }] },
+        { model: 'sk-live-token', family: 'anthropic', efforts: [{ effort: 'high', model_profile_id: profileC, version: '2' }] },
+        { model: '/Users/hidden/model', family: 'openai', efforts: [{ effort: 'low', model_profile_id: 'b1000000-0000-4000-8000-000000000004', version: '2' }] },
+      ],
+      default_model_profile_id: profileA,
+    })
+    const offered = presented(catalog([pi]))
+    expect(offered.view.models.map(item => item.label)).toEqual(['anthropic/claude-opus-5', 'anthropic/claude-sonnet-5'])
+    expect(offered.view.profileId).toBe(profileA)
+    expect(offered.view.requested.model).toBe('anthropic/claude-opus-5')
+    const hidden = 'b1000000-0000-4000-8000-000000000099'
+    const removed = presentCascade(context(catalog([pi])), {
+      hostId: 'workstation', harness: 'codex', accountId: accountA, modelKey: 'anthropic\tanthropic/claude-opus-5', profileId: hidden,
+    }, { host: true, harness: true, account: true, model: true, effort: true })
+    expect(removed.profileId).toBe('')
+    expect(removed.efforts.some(item => item.value === hidden)).toBe(false)
+    const malformed = presented(catalog([account({
+      models: [{ model: 'sk-live-token', family: 'openai', efforts: [{ effort: 'high', model_profile_id: profileA, version: '1' }] }],
+      default_model_profile_id: profileA,
+    })]))
+    expect(malformed.view.models).toEqual([])
+    expect(malformed.view.profileId).toBe('')
+    expect(malformed.filled.profileId).toBe('')
+  })
+
+  it('treats provisional windows as unknown and does not rank unmeasured zero as the greatest allowance', () => {
+    const knownId = 'ac000000-0000-4000-8000-000000000011'
+    const freshId = 'ac000000-0000-4000-8000-000000000012'
+    const measured = window(5, 30, 100)
+    const unmeasured = { ...window(5, 100, 100), provisional: true, used: 0, remaining: 100, pace_remaining: 100 }
+    const nested: AgentAccountCatalog = {
+      as_of: new Date(NOW).toISOString(),
+      role: 'build',
+      hosts: [{
+        daemon_id: 'daemon-a',
+        label: 'Studio',
+        harnesses: [{
+          harness: 'pi',
+          default_account_id: knownId,
+          accounts: [
+            account({
+              id: knownId, label: 'Measured subscription', plan: 'Pro', remaining_fraction: 0.3, windows: [measured],
+              models: [{ model: 'anthropic/claude-sonnet-5', family: 'anthropic', efforts: [{ effort: 'high', model_profile_id: profileB, version: '2' }] }],
+              default_model_profile_id: profileB,
+            }),
+            account({
+              id: freshId, label: 'Fresh subscription', plan: 'Pro', remaining_fraction: null, windows: [unmeasured],
+              models: [{ model: 'anthropic/claude-opus-5', family: 'anthropic', efforts: [{ effort: 'xhigh', model_profile_id: profileA, version: '2' }] }],
+              default_model_profile_id: profileA,
+            }),
+          ],
+        }],
+      }],
+    }
+    const known = presented(nested)
+    expect(known.filled.accountId).toBe(knownId)
+    expect(known.view.notes.account).toContain('most allowance left')
+    expect(known.view.notes.account).toContain('30%')
+    expect(known.view.accounts.find(item => item.value === freshId)?.label).toContain('allowance unknown')
+    expect(known.view.accounts.find(item => item.value === freshId)?.label).not.toContain('100%')
+    const mixed = account({
+      remaining_fraction: null,
+      windows: [measured, unmeasured],
+    })
+    expect(presented(catalog([mixed])).view.notes.account).toContain('Allowance is unknown.')
+    expect(presented(catalog([mixed])).view.notes.account).not.toMatch(/100%|30%/)
+    const inflated = structuredClone(nested)
+    inflated.hosts[0].harnesses[0].default_account_id = null
+    inflated.hosts[0].harnesses[0].accounts[1].remaining_fraction = 1
+    const unranked = presented(inflated)
+    expect(unranked.filled.accountId).toBe('')
+    expect(unranked.view.notes.account).not.toContain('most allowance left')
+    expect(unranked.view.accounts.find(item => item.value === freshId)?.label).toContain('allowance unknown')
+    expect(unranked.view.accounts.find(item => item.value === freshId)?.label).not.toContain('100%')
+    const onlyFresh = presented(catalog([account({ remaining_fraction: 1, windows: [unmeasured] })]))
+    expect(onlyFresh.view.notes.account).toContain('Allowance is unknown.')
+    expect(onlyFresh.view.notes.account).not.toContain('most allowance left')
+    expect(onlyFresh.view.notes.account).not.toContain('100%')
+  })
+
+  it('labels the requested snapshot and reports a different or unknown session separately', () => {
+    const requested = { host: 'Studio', harness: 'Pi', account: 'Measured subscription · Pro', model: 'anthropic/claude-sonnet-5', thinking: 'High' }
+    expect(sessionReport({ model: 'anthropic/claude-sonnet-5', account_label: 'Measured subscription', reasoning_effort: 'high' }, requested).differs).toBe(false)
+    const different = sessionReport({ model: 'anthropic/claude-opus-5', account_label: 'Fresh subscription', reasoning_effort: 'xhigh' }, requested)
+    expect(different).toMatchObject({ model: 'anthropic/claude-opus-5', account: 'Fresh subscription', thinking: 'Extra high', differs: true })
+    const unknown = sessionReport({ model: null, account_label: 'CODEX_HOME=/secret', reasoning_effort: null }, requested)
+    expect(unknown).toMatchObject({ model: 'Unknown', account: 'Unknown', thinking: 'Unknown', modelKnown: false, accountKnown: false, differs: false })
   })
 })

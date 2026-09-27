@@ -76,6 +76,7 @@ export interface CascadeContext {
 export const emptyChoice = (): CascadeChoice => ({ hostId: '', harness: '', accountId: '', modelKey: '', profileId: '' })
 export const emptyTouch = (): CascadeTouch => ({ host: false, harness: false, account: false, model: false, effort: false })
 export const effortLabel = (effort: string) => EFFORT_LABEL[effort] ?? (displayText(effort) ?? 'Unrecognized thinking level')
+const MODEL_PART = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/
 export const familyLabel = (family: string) => (AUTHOR_FAMILIES as readonly string[]).includes(family) ? FAMILY_LABEL[family as AuthorFamily] : 'Unrecognized family'
 export const modelKey = (model: Pick<CatalogModel, 'family' | 'model'>) => `${model.family}\t${model.model}`
 
@@ -149,6 +150,21 @@ export function displayText(value: string | null | undefined, max = 128): string
   if (!text || text.length > max || SECRET.test(text) || /[/\\~]/.test(text)) return null
   return text
 }
+// Public registry ids such as anthropic/claude-opus-5. Separate from displayText,
+// which still hides paths and secrets in account, host and plan labels.
+export function publicModelId(value: string | null | undefined, max = 128): string | null {
+  const text = value?.trim() ?? ''
+  if (!text || text.length > max || SECRET.test(text) || text.includes('\\') || text.includes('~')) return null
+  const parts = text.split('/')
+  if (parts.some(part => part === '' || part === '.' || part === '..' || !MODEL_PART.test(part))) return null
+  return text
+}
+export function allowanceKnown(account: { remaining_fraction: number | null; windows: { provisional: boolean; allowance: number }[] }): boolean {
+  if (account.windows.length === 0 || account.windows.some(window => window.provisional)) return false
+  if (!account.windows.some(window => !window.provisional && window.allowance > 0)) return false
+  const fraction = account.remaining_fraction
+  return typeof fraction === 'number' && Number.isFinite(fraction) && fraction >= 0 && fraction <= 1
+}
 export function accountName(account: { label?: string | null }): string {
   return displayText(account.label) ?? 'Unlabeled account'
 }
@@ -196,11 +212,15 @@ function modelOf(account: CatalogAccount | undefined, key: string) {
 function defaultAccount(harness: CatalogHarness | undefined) {
   return harness?.accounts.find(account => account.id === harness.default_account_id && account.available)
 }
+function knownFraction(account: CatalogAccount | undefined) {
+  if (!account || !allowanceKnown(account) || account.remaining_fraction == null) return null
+  return account.remaining_fraction
+}
 function preferredHarness(host: CatalogHost | undefined) {
   let best: { harness: string; fraction: number; id: string } | null = null
   for (const item of host?.harnesses ?? []) {
     const account = defaultAccount(item)
-    const fraction = account?.remaining_fraction
+    const fraction = knownFraction(account)
     if (!account || fraction == null) continue
     if (!best || fraction > best.fraction || (fraction === best.fraction && account.id < best.id)) best = { harness: item.harness, fraction, id: account.id }
   }
@@ -211,7 +231,7 @@ function preferredHost(catalog: AgentAccountCatalog) {
   for (const host of catalog.hosts) {
     const harness = harnessOf(host, preferredHarness(host))
     const account = defaultAccount(harness)
-    const fraction = account?.remaining_fraction
+    const fraction = knownFraction(account)
     if (!account || fraction == null) continue
     if (!best || fraction > best.fraction || (fraction === best.fraction && account.id < best.id)) best = { host: host.daemon_id, fraction, id: account.id }
   }
@@ -242,12 +262,13 @@ export function fillDefaults(catalog: AgentAccountCatalog | null, choice: Cascad
     next.accountId = touch.account ? '' : (preferred || (accounts.length === 1 ? accounts[0].id : ''))
   }
   const account = accountOf(harness, next.accountId)
-  const models = (account?.models ?? []).filter(model => displayText(model.model))
+  const models = visibleModels(account)
   const routed = routedModel(account)
+  const routedVisible = routed && publicModelId(routed.model) ? routed : undefined
   if (!touch.model || !models.some(model => modelKey(model) === next.modelKey)) {
-    next.modelKey = touch.model ? '' : (routed ? modelKey(routed) : (models.length === 1 ? modelKey(models[0]) : ''))
+    next.modelKey = touch.model ? '' : (routedVisible ? modelKey(routedVisible) : (models.length === 1 ? modelKey(models[0]) : ''))
   }
-  const model = modelOf(account, next.modelKey)
+  const model = models.find(item => modelKey(item) === next.modelKey)
   const efforts = model?.efforts ?? []
   const routedEffort = efforts.find(effort => effort.model_profile_id === account?.default_model_profile_id)
   if (!touch.effort || !efforts.some(effort => effort.model_profile_id === next.profileId)) {
@@ -256,23 +277,26 @@ export function fillDefaults(catalog: AgentAccountCatalog | null, choice: Cascad
   return next
 }
 
+function visibleModels(account: CatalogAccount | undefined) {
+  return (account?.models ?? []).filter(model => publicModelId(model.model) && model.efforts.some(effort => effort.model_profile_id))
+}
 function tightestWindow(account: CatalogAccount) {
   let best: { window: CatalogWindow; ratio: number } | null = null
   for (const window of account.windows) {
-    if (!Number.isSafeInteger(window.allowance) || window.allowance <= 0 || !Number.isSafeInteger(window.remaining) || window.remaining < 0) continue
+    if (window.provisional || !Number.isSafeInteger(window.allowance) || window.allowance <= 0 || !Number.isSafeInteger(window.remaining) || window.remaining < 0) continue
     const ratio = window.remaining / window.allowance
     if (!best || ratio < best.ratio) best = { window, ratio }
   }
   return best?.window ?? null
 }
 function allowanceSentence(account: CatalogAccount) {
-  if (account.remaining_fraction == null) return 'Allowance is not reported.'
+  if (!allowanceKnown(account) || account.remaining_fraction == null) return 'Allowance is unknown.'
   const pct = Math.round(Math.min(1, Math.max(0, account.remaining_fraction)) * 100)
   const window = tightestWindow(account)
   return window ? `${pct}% of the ${allowanceWindowLabel(window)} window is left.` : `${pct}% is left.`
 }
 function allowancePhrase(account: CatalogAccount) {
-  if (account.remaining_fraction == null) return 'allowance not reported'
+  if (!allowanceKnown(account) || account.remaining_fraction == null) return 'allowance unknown'
   const pct = `${Math.round(Math.min(1, Math.max(0, account.remaining_fraction)) * 100)}%`
   const window = tightestWindow(account)
   return window ? `${pct} of ${allowanceWindowLabel(window)} left` : `${pct} left`
@@ -297,7 +321,7 @@ function hostLabel(host: CatalogHost) {
   return displayText(host.label) ?? displayText(host.daemon_id) ?? 'Unlabeled host'
 }
 function modelLabel(model: CatalogModel, models: CatalogModel[]) {
-  const name = displayText(model.model) ?? 'Unrecognized model'
+  const name = publicModelId(model.model) ?? 'Unrecognized model'
   const family = displayText(model.family)
   const duplicate = models.filter(item => item.model === model.model).length > 1
   return duplicate && family ? `${name} · ${family}` : name
@@ -314,8 +338,9 @@ export function presentCascade(input: CascadeContext, choice: CascadeChoice, tou
   const harness = harnessOf(host, choice.harness)
   const accounts = harness?.accounts ?? []
   const account = accountOf(harness, choice.accountId)
-  const models = (account?.models ?? []).filter(model => displayText(model.model))
-  const model = modelOf(account, choice.modelKey)
+  const models = visibleModels(account)
+  const modelVisible = models.some(item => modelKey(item) === choice.modelKey)
+  const model = modelVisible ? modelOf(account, choice.modelKey) : undefined
   const efforts = [...(model?.efforts ?? [])].sort((a, b) => {
     const rank = EFFORT_ORDER.indexOf(a.effort) - EFFORT_ORDER.indexOf(b.effort)
     return rank || a.effort.localeCompare(b.effort)
@@ -360,7 +385,11 @@ function hostNote(catalog: AgentAccountCatalog | null, hosts: CascadeOption[], c
   if (!catalog) return ''
   if (!hosts.length) return 'No host has an enrolled account for this work.'
   if (hosts.length === 1) return 'Only one host has an enrolled account.'
-  if (!touch.host && choice.hostId) return 'Chosen because it has the account with the most allowance left.'
+  if (!touch.host && choice.hostId) {
+    const account = accountOf(harnessOf(hostOf(catalog, choice.hostId), choice.harness), choice.accountId)
+    if (account && allowanceKnown(account)) return 'Chosen because it has the account with the most allowance left.'
+    return 'Allowance is unknown, so this host is not ranked by remaining allowance.'
+  }
   return ''
 }
 function harnessNote(choice: CascadeChoice, host: CatalogHost | undefined) {
@@ -376,7 +405,7 @@ function accountNote(choice: CascadeChoice, touch: CascadeTouch, accounts: Catal
   if (!account.available) return account.unavailable_reasons.map(reason => reasonText(account, reason)).join(' ')
   const allowance = allowanceSentence(account)
   if (accounts.length === 1) return `Only one account is enrolled here. ${allowance}`
-  if (!touch.account && account.id === defaultId) return `Selected because it has the most allowance left. ${allowance}`
+  if (!touch.account && account.id === defaultId && allowanceKnown(account)) return `Selected because it has the most allowance left. ${allowance}`
   return `Only this account will be used. ${allowance}`
 }
 function modelNote(choice: CascadeChoice, touch: CascadeTouch, account: CatalogAccount | undefined, models: CatalogModel[], role: WorkRole) {
@@ -402,4 +431,26 @@ function statusFor(account: CatalogAccount | undefined, accounts: CatalogAccount
     return { label: reasonLabel(account), detail: `${account.unavailable_reasons.map(reason => reasonText(account, reason)).join(' ')} The run can still queue. Routing rechecks this account and does not switch to another.`, tone: 'warn' }
   }
   return { label: 'Account available', detail: 'The daemon rechecks pacing and capacity, then uses only this account.', tone: 'neutral' }
+}
+
+export interface SessionReport {
+  model: string; account: string; thinking: string
+  modelKnown: boolean; accountKnown: boolean; thinkingKnown: boolean; differs: boolean
+}
+export function sessionReport(session: { model?: string | null; account_label?: string | null; reasoning_effort?: string | null }, requested: RequestedRun): SessionReport {
+  const model = publicModelId(session.model)
+  const account = displayText(session.account_label)
+  const effort = session.reasoning_effort?.trim() ?? ''
+  const thinkingKnown = effort !== '' && (!!EFFORT_LABEL[effort] || displayText(effort) !== null)
+  const thinking = thinkingKnown ? effortLabel(effort) : 'Unknown'
+  const sameAccount = !!account && (requested.account === account || requested.account.startsWith(`${account} · `))
+  return {
+    model: model ?? 'Unknown',
+    account: account ?? 'Unknown',
+    thinking,
+    modelKnown: model !== null,
+    accountKnown: account !== null,
+    thinkingKnown,
+    differs: (model !== null && requested.model !== model) || (account !== null && !sameAccount) || (thinkingKnown && requested.thinking !== thinking),
+  }
 }
