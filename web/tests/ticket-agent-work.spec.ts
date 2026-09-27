@@ -166,7 +166,37 @@ test('a ticket with no sessions says so without inventing a cost', async ({ page
   await page.goto('/p/PHAROS/PHAROS-11')
   const work = panel(page).getByRole('region', { name: 'Agent work' })
   await expect(work).toContainText('No agent sessions are recorded for this ticket.')
+  await expect(work.locator('li')).toHaveCount(0)
   await expect(work).not.toContainText('$')
+})
+
+test('a 128-character usage model keeps its figures in the ticket panel', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  const longModel = 'm'.repeat(128)
+  const report = structuredClone(agentWork)
+  report.sessions = [report.sessions[0]]
+  report.sessions[0].models = [{ ...report.sessions[0].models[0], model: longModel }]
+  await mockWork(page, fixtures())
+  await page.route('**/api/nodes/n-epic/agent-work', route => route.fulfill({ json: report }))
+  await page.goto('/p/PHAROS/PHAROS-10')
+  const work = panel(page).getByRole('region', { name: 'Agent work' })
+  await expect(work).toContainText(longModel)
+  await expect(work).toContainText('1,200 in')
+  await expect(work).toContainText('$1.50 provisional')
+  expect(await work.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true)
+})
+
+test('empty capped scope still warns that deeper sessions may exist', async ({ page }) => {
+  const report = structuredClone(agentWork)
+  report.sessions = []
+  report.scope_truncated = true
+  await mockWork(page, fixtures())
+  await page.route('**/api/nodes/n-epic/agent-work', route => route.fulfill({ json: report }))
+  await page.goto('/p/PHAROS/PHAROS-10')
+  const work = panel(page).getByRole('region', { name: 'Agent work' })
+  await expect(work).toContainText('No agent sessions are recorded in the included items.')
+  await expect(work).toContainText('Some items under this epic were left out of the query.')
+  await expect(work.locator('li')).toHaveCount(0)
 })
 
 for (const colorScheme of ['light', 'dark'] as const) for (const width of [1600, 390]) {

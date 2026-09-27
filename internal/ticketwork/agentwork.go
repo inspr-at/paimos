@@ -18,6 +18,7 @@ import (
 	"strings"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -243,47 +244,71 @@ func assertUsageRelation(ctx context.Context, tx pgx.Tx) error {
 }
 
 func scope(ctx context.Context, tx pgx.Tx, tenantID, nodeID string) ([]string, string, bool, error) {
-	rows, err := tx.Query(ctx, `
-		WITH RECURSIVE scope AS (
-			SELECT n.id, 0 AS depth, k.slug AS kind
-			FROM nodes n
-			JOIN node_kinds k ON k.tenant_id = n.tenant_id AND k.id = n.kind_id
-			WHERE n.tenant_id = $1::uuid AND n.id = $2::uuid AND n.deleted_at IS NULL
-				AND k.slug IN ('ticket', 'epic', 'task')
-				AND ((SELECT aeon_visible_all()) OR n.project_id = ANY ((SELECT aeon_visible_projects())::uuid[]))
-			UNION ALL
-			SELECT c.id, s.depth + 1, s.kind
-			FROM scope s
-			JOIN nodes c ON c.tenant_id = $1::uuid AND c.parent_id = s.id AND c.deleted_at IS NULL
-			WHERE s.depth < $3
-				AND ((SELECT aeon_visible_all()) OR c.project_id = ANY ((SELECT aeon_visible_projects())::uuid[]))
-		)
-		SELECT id::text, kind FROM scope ORDER BY depth, id LIMIT $4`,
-		tenantID, nodeID, maxDepth, maxScope+1)
+	// The primary-key lookup establishes both the root kind and its visibility.
+	var kind string
+	err := tx.QueryRow(ctx, `SELECT k.slug FROM nodes n
+		JOIN node_kinds k ON k.tenant_id = n.tenant_id AND k.id = n.kind_id
+		WHERE n.tenant_id = $1::uuid AND n.id = $2::uuid AND n.deleted_at IS NULL
+			AND k.slug IN ('ticket', 'epic', 'task')
+			AND ((SELECT aeon_visible_all()) OR n.project_id = ANY ((SELECT aeon_visible_projects())::uuid[]))`, tenantID, nodeID).Scan(&kind)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, "", false, nil
+	}
 	if err != nil {
 		return nil, "", false, err
 	}
-	defer rows.Close()
-	var ids []string
-	var kind string
-	for rows.Next() {
-		var id, rowKind string
-		if err := rows.Scan(&id, &rowKind); err != nil {
+	type item struct {
+		id    string
+		depth int
+	}
+	ids := []string{nodeID}
+	frontier := []item{{nodeID, 0}}
+	for len(frontier) > 0 {
+		parent := frontier[0]
+		frontier = frontier[1:]
+		// This uses nodes_siblings_idx and fetches at most the remaining
+		// capacity plus one. At depth eight the one-row probe tells us whether
+		// any visible descendant was omitted by the depth cap.
+		budget := maxScope + 1 - len(ids)
+		if parent.depth == maxDepth {
+			budget = 1
+		}
+		rows, err := tx.Query(ctx, `SELECT c.id::text FROM nodes c
+			WHERE c.tenant_id = $1::uuid AND c.parent_id = $2::uuid AND c.deleted_at IS NULL
+				AND ((SELECT aeon_visible_all()) OR c.project_id = ANY ((SELECT aeon_visible_projects())::uuid[]))
+			ORDER BY c.position, c.id LIMIT $3`, tenantID, parent.id, budget)
+		if err != nil {
 			return nil, "", false, err
 		}
-		if kind == "" {
-			kind = rowKind
+		var children []string
+		for rows.Next() {
+			var child string
+			if err := rows.Scan(&child); err != nil {
+				rows.Close()
+				return nil, "", false, err
+			}
+			children = append(children, child)
 		}
-		ids = append(ids, id)
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			return nil, "", false, err
+		}
+		if parent.depth == maxDepth {
+			if len(children) > 0 {
+				return ids, kind, true, nil
+			}
+			continue
+		}
+		for _, child := range children {
+			if len(ids) == maxScope {
+				return ids, kind, true, nil
+			}
+			ids = append(ids, child)
+			frontier = append(frontier, item{child, parent.depth + 1})
+		}
 	}
-	if err := rows.Err(); err != nil {
-		return nil, "", false, err
-	}
-	truncated := len(ids) > maxScope
-	if truncated {
-		ids = ids[:maxScope]
-	}
-	return ids, kind, truncated, nil
+	return ids, kind, false, nil
 }
 
 func sessions(ctx context.Context, tx pgx.Tx, tenantID string, ids []string, limit int) ([]Session, bool, error) {
@@ -363,21 +388,20 @@ func sessionIDs(sessions []Session) []string {
 }
 
 func readUsage(ctx context.Context, tx pgx.Tx, tenantID string, ids []string) (map[string][]usageRow, error) {
-	// One fetch per visible session. The window keeps the read bounded when a
-	// session has many models. Duration is not read here, so extra model rows
-	// cannot multiply it. Run telemetry is not joined.
+	// Each lateral lookup uses the (tenant_id, session_id, model) primary key
+	// and reads at most 33 rows. Duration is read separately, once per session.
 	rows, err := tx.Query(ctx, `
-		SELECT session_id::text, model, input_tokens::text, output_tokens::text, cached_input_tokens::text,
-			provisional, price_version::text, estimated_cost_usd::text, billing_mode, subscription_label
-		FROM (
-			SELECT session_id, model, input_tokens, output_tokens, cached_input_tokens, provisional,
-				price_version, estimated_cost_usd, billing_mode, subscription_label,
-				row_number() OVER (PARTITION BY session_id ORDER BY model) AS n
+		SELECT selected.session_id::text, u.model, u.input_tokens::text, u.output_tokens::text,
+			u.cached_input_tokens::text, u.provisional, u.price_version::text,
+			u.estimated_cost_usd::text, u.billing_mode, u.subscription_label
+		FROM unnest($2::text[]::uuid[]) AS selected(session_id)
+		CROSS JOIN LATERAL (
+			SELECT model, input_tokens, output_tokens, cached_input_tokens, provisional,
+				price_version, estimated_cost_usd, billing_mode, subscription_label
 			FROM harness_session_usage
-			WHERE tenant_id = $1::uuid AND session_id = ANY($2::text[]::uuid[])
-		) usage_rows
-		WHERE n <= $3
-		ORDER BY session_id, model`, tenantID, ids, maxModels+1)
+			WHERE tenant_id = $1::uuid AND session_id = selected.session_id
+			ORDER BY model LIMIT $3
+		) u`, tenantID, ids, maxModels+1)
 	if err != nil {
 		return nil, err
 	}
@@ -639,7 +663,7 @@ func normalizeModel(row usageRow) UsageModel {
 		BillingMode: "unknown",
 		Provisional: row.provisional,
 	}
-	if name := cleanText(&row.model, 120); name != nil {
+	if name := cleanText(&row.model, 128); name != nil {
 		m.Model = *name
 	}
 	if in, out, ok := tokenPair(row.input, row.output); ok {
@@ -738,7 +762,7 @@ func cleanText(s *string, max int) *string {
 		return nil
 	}
 	v := strings.TrimSpace(*s)
-	if v == "" || len(v) > max || strings.ContainsFunc(v, unicode.IsControl) {
+	if v == "" || utf8.RuneCountInString(v) > max || strings.ContainsFunc(v, unicode.IsControl) {
 		return nil
 	}
 	return &v

@@ -15,14 +15,17 @@ import (
 	"net/http/httptest"
 	"regexp"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/inspr-at/paimos/internal/auth"
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
 
@@ -86,6 +89,10 @@ func TestSummarizeAgentWork(t *testing.T) {
 }
 
 func TestApplyUsageGroupsModelsOnce(t *testing.T) {
+	unicodeModel := strings.Repeat("界", 128)
+	if got := normalizeModel(usageRow{model: unicodeModel}).Model; got != unicodeModel {
+		t.Fatal("128 Unicode characters were dropped by the display normalizer")
+	}
 	seconds := int64(150)
 	s := Session{DurationSeconds: &seconds, DurationState: "known", Models: []UsageModel{}}
 	applyUsage(&s, []usageRow{
@@ -160,7 +167,6 @@ func ptr(s string) *string { return &s }
 
 func TestTicketAgentWork(t *testing.T) {
 	f := newWorkFixture(t)
-	f.usageTable(t)
 	epic, ticket, task := uid(), uid(), uid()
 	epic2, ticket2 := uid(), uid()
 	hiddenProject, hiddenTicket := uid(), uid()
@@ -296,7 +302,6 @@ func TestTicketAgentWork(t *testing.T) {
 
 func TestTicketAgentWorkWithoutUsageRows(t *testing.T) {
 	f := newWorkFixture(t)
-	f.usageTable(t)
 	ticket := uid()
 	f.node(t, f.project, "project", "TW1-1", "Visible", "")
 	f.node(t, ticket, "ticket", "TW1-2", "Ticket", f.project)
@@ -315,23 +320,126 @@ func TestTicketAgentWorkWithoutUsageRows(t *testing.T) {
 	}
 }
 
-func TestTicketAgentWorkRequiresUsageRelation(t *testing.T) {
+func TestTicketAgentWorkDepthCapIsVisible(t *testing.T) {
 	f := newWorkFixture(t)
-	ticket := uid()
 	f.node(t, f.project, "project", "TW1-1", "Visible", "")
-	f.node(t, ticket, "ticket", "TW1-2", "Ticket", f.project)
-	w := f.call(f.person, ticket, "")
-	if w.Code != http.StatusInternalServerError || !bytes.Contains(w.Body.Bytes(), []byte("session usage relation is not available")) {
-		t.Fatalf("status %d body %s", w.Code, w.Body.String())
+	root := uid()
+	f.node(t, root, "epic", "TW1-2", "Epic", f.project)
+	f.bindGuest(t, f.project)
+	parent := root
+	for depth := 1; depth <= maxDepth; depth++ {
+		child := uid()
+		f.node(t, child, "task", fmt.Sprintf("TW1-%d", depth+2), "Child", parent)
+		parent = child
 	}
-	if bytes.Contains(w.Body.Bytes(), []byte("input_tokens")) || bytes.Contains(w.Body.Bytes(), []byte("estimated_cost_usd")) {
-		t.Fatalf("missing relation was reported as a total: %s", w.Body.String())
+	deep := uid()
+	f.node(t, deep, "task", "TW1-20", "Beyond cap", parent)
+	f.session(t, uid(), f.project, deep, "codex", "gpt-test", "high", time.Now().Add(-time.Minute), time.Time{}, time.Now(), "working")
+	report := f.get(t, f.guest, root, "")
+	if !report.ScopeTruncated || report.Totals.SessionCount != 0 || len(report.Sessions) != 0 {
+		t.Fatalf("visible depth-nine work must be disclosed as truncated: %+v", report)
+	}
+	// The same depth-nine child is invisible to this caller. Its existence
+	// must not leak through scope_truncated.
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE nodes SET kind_id=k.id FROM node_kinds k
+			WHERE nodes.tenant_id=$1 AND nodes.id=$2 AND k.tenant_id=$1 AND k.slug='project'`, f.person.TenantID, deep)
+		return err
+	})
+	report = f.get(t, f.guest, root, "")
+	if report.ScopeTruncated || report.Totals.SessionCount != 0 {
+		t.Fatalf("hidden depth-nine child leaked: %+v", report)
+	}
+}
+
+func TestTicketAgentWorkRealUsageModelLength(t *testing.T) {
+	f := newWorkFixture(t)
+	f.node(t, f.project, "project", "TW1-1", "Visible", "")
+	ticket, sid := uid(), uid()
+	f.node(t, ticket, "ticket", "TW1-2", "Ticket", f.project)
+	past := time.Date(2020, 1, 4, 0, 0, 0, 0, time.UTC)
+	f.session(t, sid, f.project, ticket, "codex", "short-model", "high", past, past.Add(time.Minute), past, "stopped")
+	model := strings.Repeat("m", 128)
+	f.usage(t, f.person, sid, model, "12", "3", "1", "0.010000000000", false, "1", "api", "")
+	report := f.get(t, f.person, ticket, "")
+	if len(report.Sessions) != 1 || len(report.Sessions[0].Models) != 1 || report.Sessions[0].Models[0].Model != model || str(report.Totals.InputTokens) != "12" || str(report.Totals.EstimatedCostUSD) != "0.010000000000" {
+		t.Fatalf("real US1 model length or price FK was lost: %+v", report)
+	}
+}
+
+func TestTicketAgentWorkProjectGrantAndAgentScope(t *testing.T) {
+	f := newWorkFixture(t)
+	f.node(t, f.project, "project", "TW1-1", "Visible", "")
+	ticket := uid()
+	f.node(t, ticket, "ticket", "TW1-2", "Ticket", f.project)
+	f.bindGuest(t, f.project)
+	const route = "GET /api/nodes/{nodeId}/agent-work"
+	for _, p := range []tenant.Principal{f.guest, f.agent} {
+		if p.Kind == tenant.Agent {
+			if _, err := f.db.Admin.Exec(t.Context(), `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,scope_id)
+				SELECT $1,$2,r.id,'project',$3 FROM roles r WHERE r.tenant_id=$1 AND r.key='guest'`, p.TenantID, p.ID, f.project); err != nil {
+				t.Fatal(err)
+			}
+		}
+		ctx := authz.BindPool(tenant.WithPrincipal(t.Context(), p), f.db.App)
+		if err := authz.RequirePattern(ctx, route, authz.Scope{}); err == nil {
+			t.Fatalf("%s was allowed without a project scope", p.Kind)
+		}
+		scope, ok, err := authz.ResolveRouteScope(ctx, f.db.App, route, "/api/nodes/"+ticket+"/agent-work")
+		if err != nil || !ok || scope.ProjectID != f.project {
+			t.Fatalf("project resolution for %s: %+v %v %v", p.Kind, scope, ok, err)
+		}
+		if p.Kind == tenant.Agent {
+			if err := authz.RequirePattern(ctx, route, scope); err == nil {
+				t.Fatal("unscoped agent key was allowed")
+			}
+			p.Scopes = []string{"nodes.read"}
+			ctx = authz.BindPool(tenant.WithPrincipal(t.Context(), p), f.db.App)
+		}
+		if err := authz.RequirePattern(ctx, route, scope); err != nil {
+			t.Fatalf("project-scoped %s should be allowed: %v", p.Kind, err)
+		}
+		if f.status(t, p, ticket, "") != http.StatusOK {
+			t.Fatalf("project-scoped %s could not load its ticket", p.Kind)
+		}
+	}
+}
+
+func TestTicketAgentWorkThroughAuthMiddleware(t *testing.T) {
+	f := newWorkFixture(t)
+	f.node(t, f.project, "project", "TW1-1", "Visible", "")
+	ticket := uid()
+	f.node(t, ticket, "ticket", "TW1-2", "Ticket", f.project)
+	_, _, emptyKey, err := auth.OperatorCreateAgentKey(t.Context(), f.db.App, f.person.TenantID, "tw1-empty", f.agent.ID, []string{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, readKey, err := auth.OperatorCreateAgentKey(t.Context(), f.db.App, f.person.TenantID, "tw1-reader", f.agent.ID, []string{"nodes.read"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	module, err := auth.New(auth.Config{Env: "dev", SessionKey: make([]byte, 32)}, f.db.App)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := &httpapi.Server{Pool: f.db.App, Modules: []httpapi.Module{New(f.db.App)}, Middleware: []func(http.Handler) http.Handler{module.Middleware}}
+	request := func(key string) int {
+		r := httptest.NewRequest(http.MethodGet, "/api/nodes/"+ticket+"/agent-work", nil)
+		r.Header.Set("Authorization", "Bearer "+key)
+		w := httptest.NewRecorder()
+		server.Handler().ServeHTTP(w, r)
+		return w.Code
+	}
+	if status := request(emptyKey); status != http.StatusForbidden {
+		t.Fatalf("empty key status = %d, want 403", status)
+	}
+	if status := request(readKey); status != http.StatusOK {
+		t.Fatalf("nodes.read key status = %d, want 200", status)
 	}
 }
 
 func TestTicketAgentWorkSkipsRunTelemetry(t *testing.T) {
 	f := newWorkFixture(t)
-	f.usageTable(t)
 	ticket, order := uid(), uid()
 	f.node(t, f.project, "project", "TW1-1", "Visible", "")
 	f.node(t, ticket, "ticket", "TW1-2", "Ticket", f.project)
@@ -370,7 +478,6 @@ type workFixture struct {
 	person, guest, agent tenant.Principal
 	foreign              tenant.Principal
 	project              string
-	priceTable           bool
 }
 
 func newWorkFixture(t *testing.T) *workFixture {
@@ -493,54 +600,6 @@ func (f *workFixture) insertSession(t *testing.T, p tenant.Principal, id, projec
 	})
 }
 
-func (f *workFixture) usageTable(t *testing.T) {
-	t.Helper()
-	var present bool
-	if err := f.db.App.QueryRow(context.Background(), `SELECT to_regclass('public.harness_session_usage') IS NOT NULL`).Scan(&present); err != nil {
-		t.Fatal(err)
-	}
-	if present {
-		if err := f.db.App.QueryRow(context.Background(), `SELECT to_regclass('public.model_prices') IS NOT NULL`).Scan(&f.priceTable); err != nil {
-			t.Fatal(err)
-		}
-		return
-	}
-	statements := []string{
-		`CREATE TABLE harness_session_usage (
-			tenant_id uuid NOT NULL REFERENCES tenants(id),
-			session_id uuid NOT NULL,
-			model text NOT NULL CHECK (length(model) BETWEEN 1 AND 120 AND model ~ '^[A-Za-z0-9][A-Za-z0-9._:/-]*$'),
-			sequence bigint NOT NULL CHECK (sequence BETWEEN 1 AND 1000000000000),
-			input_tokens bigint CHECK (input_tokens BETWEEN 0 AND 1000000000000),
-			output_tokens bigint CHECK (output_tokens BETWEEN 0 AND 1000000000000),
-			cached_input_tokens bigint CHECK (cached_input_tokens BETWEEN 0 AND 1000000000000),
-			provisional boolean NOT NULL,
-			price_version bigint,
-			estimated_cost_usd numeric(30,12) CHECK (estimated_cost_usd >= 0),
-			account_id uuid,
-			account_label text,
-			billing_mode text NOT NULL CHECK (billing_mode IN ('unknown','api','subscription')),
-			subscription_label text,
-			reported_at timestamptz NOT NULL DEFAULT clock_timestamp(),
-			PRIMARY KEY (tenant_id, session_id, model),
-			FOREIGN KEY (tenant_id, session_id) REFERENCES harness_sessions(tenant_id, id),
-			CHECK (cached_input_tokens <= input_tokens),
-			CHECK (provisional OR (input_tokens IS NOT NULL AND output_tokens IS NOT NULL AND cached_input_tokens IS NOT NULL)),
-			CHECK ((estimated_cost_usd IS NOT NULL) = (price_version IS NOT NULL AND input_tokens IS NOT NULL AND output_tokens IS NOT NULL AND cached_input_tokens IS NOT NULL)),
-			CHECK (subscription_label IS NULL OR billing_mode = 'subscription'))`,
-		`ALTER TABLE harness_session_usage ENABLE ROW LEVEL SECURITY`,
-		`ALTER TABLE harness_session_usage FORCE ROW LEVEL SECURITY`,
-		`CREATE POLICY harness_session_usage_tenant ON harness_session_usage
-			USING (tenant_id = NULLIF(current_setting('aeon.tenant_id', true), '')::uuid)
-			WITH CHECK (tenant_id = NULLIF(current_setting('aeon.tenant_id', true), '')::uuid)`,
-	}
-	for _, statement := range statements {
-		if _, err := f.db.App.Exec(context.Background(), statement); err != nil {
-			t.Fatal(err)
-		}
-	}
-}
-
 func (f *workFixture) usage(t *testing.T, p tenant.Principal, session, model, in, out, cached, cost string, provisional bool, price, billing, sub string) {
 	t.Helper()
 	if err := f.usageErr(t, p, session, model, in, out, cached, cost, provisional, price, billing, sub); err != nil {
@@ -551,7 +610,7 @@ func (f *workFixture) usage(t *testing.T, p tenant.Principal, session, model, in
 func (f *workFixture) usageErr(t *testing.T, p tenant.Principal, session, model, in, out, cached, cost string, provisional bool, price, billing, sub string) error {
 	t.Helper()
 	return f.txErr(t, p, func(tx pgx.Tx) error {
-		if f.priceTable && price != "" {
+		if price != "" {
 			if _, err := tx.Exec(t.Context(), `INSERT INTO model_prices(tenant_id,model,version,input_usd_per_million,output_usd_per_million,cached_input_usd_per_million)
 				VALUES($1,$2,$3::bigint,1,1,1) ON CONFLICT (tenant_id, model, version) DO NOTHING`, p.TenantID, model, price); err != nil {
 				return err

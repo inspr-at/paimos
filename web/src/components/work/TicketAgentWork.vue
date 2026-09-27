@@ -120,7 +120,10 @@ function rowName(session: TicketAgentSession): string {
     <p v-if="loading" class="note" role="status">Loading agent work…</p>
     <p v-else-if="error" class="note warn" role="alert">{{ error }} <button type="button" class="retry" @click="load(nodeId)">Try again</button></p>
     <template v-else-if="report">
-      <p v-if="!report.sessions.length" class="note">No agent sessions are recorded for this {{ noun }}.</p>
+      <template v-if="!report.sessions.length">
+        <p class="note">{{ report.scope_truncated ? 'No agent sessions are recorded in the included items.' : `No agent sessions are recorded for this ${noun}.` }}</p>
+        <p v-if="report.scope_truncated" class="note">Some items under this {{ noun }} were left out of the query.</p>
+      </template>
       <template v-else>
         <p class="summary">{{ summary }}</p>
         <p v-if="rollup" class="note">{{ rollup }}</p>
@@ -171,10 +174,10 @@ li { min-width: 0; padding: 10px 12px; border-radius: 10px; background: var(--ch
 @media (hover: hover) { .name:hover { color: var(--teal-ink); } }
 .name:focus-visible { box-shadow: var(--focus-ring); border-radius: 4px; }
 .ticket-key { flex: none; font-family: var(--mono); font-size: 11px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
-.meta { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; margin: 3px 0 0; font-size: 12.5px; line-height: 1.4; color: var(--ink-2); }
+.meta { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; margin: 3px 0 0; font-size: 12.5px; line-height: 1.4; color: var(--ink-2); overflow-wrap: anywhere; }
 .figures { color: var(--ink-3); }
 .price { font-family: var(--mono); font-size: 11px; }
 .models { gap: 6px; margin: 8px 0 0; }
 .models li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; margin: 0; padding: 0; background: transparent; box-shadow: none; border-radius: 0; font-size: 12px; line-height: 1.4; color: var(--ink-3); }
-.model-name { font-family: var(--mono); font-size: 11.5px; color: var(--ink-2); }
+.model-name { min-width: 0; overflow-wrap: anywhere; font-family: var(--mono); font-size: 11.5px; color: var(--ink-2); }
 </style>
