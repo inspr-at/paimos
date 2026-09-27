@@ -3,6 +3,7 @@
 <script setup lang="ts">
 import type { AgentState } from '../../lib/agentSignals'
 import AgentStateMark from './AgentStateMark.vue'
+import RobotExpression from './parts/RobotExpression.vue'
 import { computed, ref, watch } from 'vue'
 
 // Filename is the IV1 registration surface; state and real-event pulses come
@@ -37,13 +38,14 @@ watch(() => props.state, state => { if (state !== 'working') glint.value = 0 })
     </g>
     <circle class="antenna-halo" cx="16" cy="5.5" r="2.5" />
     <circle class="antenna" cx="16" cy="5.5" r="1.4" />
-    <g class="look">
+    <g v-if="state === 'working'" class="look">
       <g class="eyes">
         <rect x="11.5" y="13.5" width="2" height="3.2" rx="1" />
         <rect x="18.5" y="13.5" width="2" height="3.2" rx="1" />
       </g>
     </g>
-    <path class="smile" d="M13.5 19.3q2.5 1.7 5 0" />
+    <path v-if="state === 'working'" class="smile" d="M13.5 19.3q2.5 1.7 5 0" />
+    <RobotExpression v-if="state !== 'working'" :state="state" />
     <AgentStateMark :state="state" x="21" y="0" :size="11" />
     <path v-if="glint && state === 'working'" :key="glint" class="glint" d="m6 3 1.1 2.9L10 7 7.1 8.1 6 11 4.9 8.1 2 7l2.9-1.1Z" @animationend="glint = 0" />
   </svg>
