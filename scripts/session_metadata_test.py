@@ -173,6 +173,64 @@ class SessionMetadataTest(unittest.TestCase):
         self.assertEqual(result.returncode, 2)
         self.assertNotIn(SECRET, result.stdout + result.stderr)
 
+    def live(self, entries: list[dict], session_id: str = SESSION_A, extra: list[str] | None = None):
+        index = self.write("session_index.jsonl", "\n".join(json.dumps(entry) for entry in entries)).resolve()
+        return subprocess.run([sys.executable, str(SCRIPT), "--codex-index", str(index), "--harness", "codex", "--session-id", session_id, *(extra or [])], capture_output=True)
+
+    def test_live_index_binds_one_session_and_uses_last_name_without_inventing_configuration(self) -> None:
+        result = self.live([
+            {"id": SESSION_A, "thread_name": "Old name", "updated_at": "2026-09-27T10:00:00Z"},
+            {"id": SESSION_B, "thread_name": "Other name", "updated_at": "2026-09-27T10:01:00Z"},
+            {"id": SESSION_A, "thread_name": "Renamed worker", "updated_at": "2026-09-27T10:02:00Z"},
+        ])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        body = json.loads(result.stdout)
+        self.assertEqual(body["source_session_id"], SESSION_A)
+        self.assertEqual(body["heartbeat_args"], ["--label", "Renamed worker"])
+        self.assertEqual(body["capture_status"], "partial")
+        self.assertEqual(body["missing_fields"], ["model", "reasoning_effort"])
+        self.assertNotIn("account_label", body)
+
+    def test_live_index_missing_session_has_no_heartbeat_arguments(self) -> None:
+        result = self.live([{"id": SESSION_B, "thread_name": "Other"}])
+        body = json.loads(result.stdout)
+        self.assertEqual(body["capture_status"], "unavailable")
+        self.assertEqual(body["heartbeat_args"], [])
+
+    def test_live_index_requires_explicit_source_uuid(self) -> None:
+        result = self.live([{"id": SESSION_A, "thread_name": "Worker"}], "")
+        self.assertEqual(result.returncode, 3)
+        self.assertEqual(result.stdout, b"")
+
+    def test_live_index_rejects_transcript_shape_without_echoing_values(self) -> None:
+        result = self.live([{"id": SESSION_A, "thread_name": "Worker", "messages": [SECRET]}])
+        self.assertEqual(result.returncode, 3)
+        self.assertNotIn(SECRET.encode(), result.stdout + result.stderr)
+
+    def test_live_null_args_preserve_shell_metacharacters_as_data_and_allow_clear(self) -> None:
+        name = "Literal $(false) `false` 'quotes'"
+        result = self.live([{"id": SESSION_A, "thread_name": name}], extra=["--null-args"])
+        self.assertEqual(result.stdout.split(b"\0"), [b"--label", name.encode(), b""])
+        cleared = self.live([{"id": SESSION_A, "thread_name": ""}], extra=["--null-args"])
+        self.assertEqual(cleared.stdout, b"--label\0\0")
+
+    def test_live_index_refuses_symlink_and_oversize(self) -> None:
+        index = self.write("session_index.jsonl", "x" * 70000).resolve()
+        command = [sys.executable, str(SCRIPT), "--codex-index", str(index), "--harness", "codex", "--session-id", SESSION_A]
+        self.assertEqual(subprocess.run(command, capture_output=True).returncode, 3)
+        target = self.write("metadata.json", json.dumps({"id": SESSION_A, "thread_name": SECRET}))
+        index.unlink()
+        index.symlink_to(target)
+        result = subprocess.run(command, capture_output=True)
+        self.assertEqual(result.returncode, 3)
+        self.assertNotIn(SECRET.encode(), result.stdout + result.stderr)
+
+    def test_live_index_rejects_private_store_without_reading_it(self) -> None:
+        index = self.root.resolve() / ".ssh" / "session_index.jsonl"
+        result = subprocess.run([sys.executable, str(SCRIPT), "--codex-index", str(index), "--harness", "codex", "--session-id", SESSION_A], capture_output=True)
+        self.assertEqual(result.returncode, 3)
+        self.assertIn(b"private store", result.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()

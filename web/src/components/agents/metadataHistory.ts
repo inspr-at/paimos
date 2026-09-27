@@ -36,10 +36,3 @@ export function metadataChangeText(entry: MetadataChange): string {
   if (previous === next) return `${label} ${next}`
   return `${label} ${previous} to ${next}`
 }
-
-// The session list has no detail fetch. It shows the newest model or effort
-// change only when that array is already on the row.
-export function latestModelEffortChange(history: unknown): string {
-  const entry = metadataChanges(history, 20).find(item => item.field === 'model' || item.field === 'reasoning_effort')
-  return entry ? metadataChangeText(entry) : ''
-}

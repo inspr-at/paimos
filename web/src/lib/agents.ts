@@ -16,7 +16,6 @@ export interface HarnessSession {
   id: string; project_id: string; agent_principal_id: string
   display_label?: string | null
   model?: string | null; reasoning_effort?: string | null; account_label?: string | null; harness_version?: string | null
-  metadata_history?: MetadataChange[]
   brief?: string | null; worktree?: string | null; branch?: string | null; commits?: { sha: string; subject: string }[]
   activity_note?: string | null; activity_note_id?: number; activity_history?: { note: string; at: string }[]
   run_id: string | null; ticket_node_id: string | null; work_order_id: string | null; parent_harness_session_id: string | null
@@ -27,6 +26,8 @@ export interface HarnessSession {
   // The tenant-wide list adds node summaries (B7) and the agent principal's name (U13).
   project?: NodeSummary; ticket?: NodeSummary | null; agent?: { id: string; name: string } | null
 }
+// SN1 returns bounded history only on GET session detail, never on list rows.
+export interface HarnessSessionDetail extends HarnessSession { metadata_history?: MetadataChange[] }
 export interface NodeSummary { id: string; key: string; title: string }
 export interface Paged<T> { items: T[]; next_cursor: string | null }
 export interface SessionControl {

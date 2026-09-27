@@ -2,16 +2,17 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 """Read allowlisted harness metadata and print heartbeat fields.
 
-The command accepts a synthetic fixture directory only. It copies thread title,
-model, and reasoning effort from an allowlist of file names and keys. It does
-not read transcripts, auth stores, or live harness directories.
+The live mode reads one explicitly supplied Codex session_index.jsonl and one
+explicit source session UUID. That index supplies names only; model, effort and
+account stay unknown. Fixture mode exercises adapter logic with synthetic data.
+Neither mode reads transcripts or auth stores.
 
 stdout is one JSON object:
   harness, optional thread_title, model, reasoning_effort,
   changed, heartbeat_args
 
-heartbeat_args uses the existing CLI flags --model and --effort. thread_title
-is for the session-rename --label flag and is never placed in heartbeat_args.
+Fixture heartbeat_args uses --model and --effort. Live index mode emits only
+--label; it cannot establish the current model, reasoning effort or account.
 """
 
 from __future__ import annotations
@@ -19,7 +20,9 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import stat
 import sys
+import uuid
 from pathlib import Path
 
 HARNESS_FILES = {
@@ -182,6 +185,54 @@ def read_previous(path: Path | None) -> dict[str, str]:
     return {key: value for key, value in fields_from(document).items()}
 
 
+def codex_index(path: Path, session_id: str) -> dict[str, str]:
+    """Read a bounded name index, never a rollout or global model default."""
+    try:
+        if str(uuid.UUID(session_id)) != session_id:
+            raise ValueError
+    except ValueError as exc:
+        raise Refusal("live metadata requires an explicit canonical source session UUID") from exc
+    absolute = path.expanduser().absolute()
+    if absolute.name != "session_index.jsonl":
+        raise Refusal("live source must be the explicit session_index.jsonl")
+    if any(part in FORBIDDEN_COMPONENTS - {".codex"} or part.startswith(".env") for part in absolute.parts):
+        raise Refusal("refusing a private store as the live index source")
+    # A caller may select an alternate local Codex home, but may not follow a
+    # link into another file or store. The only file opened is this exact index.
+    if any(part.is_symlink() for part in (absolute, *absolute.parents)):
+        raise Refusal("refusing a symlink in the live index path")
+    try:
+        fd = os.open(absolute, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        with os.fdopen(fd, "r", encoding="utf-8") as source:
+            info = os.fstat(source.fileno())
+            if not stat.S_ISREG(info.st_mode) or info.st_size > MAX_BYTES:
+                raise Refusal("live index must be a bounded regular file")
+            text = source.read(MAX_BYTES + 1)
+    except (OSError, UnicodeError) as exc:
+        raise Refusal("live name index is unavailable or unreadable") from exc
+    if len(text.encode("utf-8")) > MAX_BYTES:
+        raise Refusal("live name index exceeds the byte limit")
+    lines = text.splitlines()
+    if len(lines) > MAX_LINES:
+        raise Refusal("live name index exceeds the record limit")
+    found: dict[str, str] = {}
+    for line in lines:
+        if not line.strip():
+            continue
+        if len(line) > MAX_LINE:
+            raise Refusal("live name index contains an oversized record")
+        try:
+            document = json.loads(line)
+        except json.JSONDecodeError as exc:
+            raise Refusal("live name index has an incomplete or invalid record; retry later") from exc
+        if not isinstance(document, dict) or set(document) - {"id", "thread_name", "updated_at"}:
+            raise Refusal("live name index has an unsupported record shape")
+        if document.get("id") == session_id and isinstance(document.get("thread_name"), str):
+            # The name index is append-only; the last matching entry is current.
+            found = {"thread_title": clean(document["thread_name"], LIMITS["thread_title"])}
+    return found
+
+
 def detect(root: Path, harness: str, session_id: str) -> dict[str, str]:
     names = HARNESS_FILES[harness]
     saw = {"ids": False, "matched": False}
@@ -234,22 +285,34 @@ def heartbeat_args(current: dict[str, str], previous: dict[str, str]) -> tuple[l
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Detect allowlisted harness session metadata")
-    parser.add_argument("--fixture", required=True, type=Path, help="synthetic metadata directory")
+    source = parser.add_mutually_exclusive_group(required=True)
+    source.add_argument("--fixture", type=Path, help="synthetic metadata directory")
+    source.add_argument("--codex-index", type=Path, help="one explicit live session_index.jsonl; names only")
     parser.add_argument("--harness", required=True, choices=sorted(HARNESS_FILES))
     parser.add_argument("--session-id", default="", help="select one indexed session")
     parser.add_argument("--previous", type=Path, help="earlier JSON output from this command")
+    parser.add_argument("--null-args", action="store_true", help="emit only safe NUL-delimited heartbeat arguments")
     return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(sys.argv[1:] if argv is None else argv)
     try:
-        root = assert_safe(args.fixture)
-        if not root.is_dir():
-            raise Refusal("fixture must be a directory")
-        current = detect(root, args.harness, args.session_id)
-        previous = read_previous(args.previous)
-        changed, args_out = heartbeat_args(current, previous)
+        if args.codex_index:
+            if args.harness != "codex" or args.previous:
+                raise Refusal("live index requires Codex; previous fixture state is not live evidence")
+            current = codex_index(args.codex_index, args.session_id)
+            changed = list(current)
+            # Send the current name every time. Aeon deduplicates changes and a
+            # failed heartbeat cannot suppress the next retry via a local cache.
+            args_out = ["--label", current["thread_title"]] if "thread_title" in current else []
+        else:
+            root = assert_safe(args.fixture)
+            if not root.is_dir():
+                raise Refusal("fixture must be a directory")
+            current = detect(root, args.harness, args.session_id)
+            previous = read_previous(args.previous)
+            changed, args_out = heartbeat_args(current, previous)
     except Refusal as exc:
         print(str(exc), file=sys.stderr)
         return 3
@@ -259,6 +322,14 @@ def main(argv: list[str] | None = None) -> int:
             document[key] = current[key]
     document["changed"] = changed
     document["heartbeat_args"] = args_out
+    if args.codex_index:
+        document.update(source="codex-name-index", source_session_id=args.session_id,
+                        capture_status="partial" if current else "unavailable",
+                        missing_fields=[key for key in FIELDS if key not in current])
+    if args.null_args:
+        for argument in args_out:
+            sys.stdout.buffer.write(argument.encode("utf-8") + b"\0")
+        return 0
     print(json.dumps(document, ensure_ascii=False, separators=(",", ":")))
     return 0
 

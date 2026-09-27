@@ -14,7 +14,6 @@ import { useAgentAppearance } from '../../lib/agentAppearance'
 const { appearance } = useAgentAppearance()
 import AgentGlyph from './AgentGlyph.vue'
 import { currentStep } from './activity'
-import { latestModelEffortChange } from './metadataHistory'
 
 // Session families stay together across status groups. Each lead's history is
 // opt-in for this mounted list only; refreshes never open it or persist it.
@@ -105,7 +104,6 @@ function pendingLabel(view: SessionView) {
   return c.kind === 'stop' ? (c.state === 'claimed' ? 'Stopping…' : 'Stop sent') : (c.state === 'claimed' ? 'Interrupting…' : 'Interrupt sent')
 }
 const rowMeta = (view: SessionView) => [view.harness, view.session.model, view.session.reasoning_effort, view.session.account_label].filter(Boolean).join(' · ')
-const latestChange = (view: SessionView) => latestModelEffortChange(view.session.metadata_history)
 function rowClick(event: MouseEvent, id: string) {
   if ((event.target as HTMLElement).closest('a, button')) return
   emit('open', id)
@@ -162,7 +160,7 @@ function rowClick(event: MouseEvent, id: string) {
             <span v-if="depth" class="sr-only">Worker of {{ parent }}. </span>
             <RouterLink class="agent-link" :to="`/agents/${view.session.id}`" :aria-label="`${view.harness} ${view.name}, ${view.status.label}`">
               <AgentGlyph :view="view" :size="30" />
-              <span class="who"><span class="agent-name">{{ view.name }}</span><span class="step">{{ currentStep(view, branch.liveCount - 1) }}</span><span class="session-meta">{{ rowMeta(view) }}</span><span v-if="latestChange(view)" class="meta-change">{{ latestChange(view) }}</span><span v-if="view.session.host && view.session.host !== view.name" class="host mono">on {{ view.session.host }}</span></span>
+              <span class="who"><span class="agent-name">{{ view.name }}</span><span class="step">{{ currentStep(view, branch.liveCount - 1) }}</span><span class="session-meta">{{ rowMeta(view) }}</span><span v-if="view.session.host && view.session.host !== view.name" class="host mono">on {{ view.session.host }}</span></span>
             </RouterLink>
             <span v-if="view.session.role === 'coordinator'" class="role" data-tip="Coordinates other sessions">Lead</span>
             <span v-if="branch.children.length" class="worker-tools">
@@ -277,7 +275,6 @@ function rowClick(event: MouseEvent, id: string) {
 .agent-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .step { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-2); font-size: 12px; }
 .session-meta { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-3); font-size: 11px; }
-.meta-change { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-2); font-size: 11px; }
 .row:hover .agent-name { color: var(--teal-ink); }
 .harness { flex-shrink: 0; display: inline-flex; align-items: center; height: 20px; padding: 0 7px; border-radius: 6px; background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); font: 500 10.5px/1 var(--mono); letter-spacing: .03em; color: var(--ink-2); font-variant-ligatures: none; }
 .role { flex-shrink: 0; height: 18px; padding: 0 6px; border-radius: 999px; background: var(--gold-wash); color: var(--gold-ink); font: 600 10px/18px var(--mono); letter-spacing: .06em; text-transform: uppercase; font-variant-ligatures: none; }
