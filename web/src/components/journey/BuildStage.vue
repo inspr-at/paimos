@@ -123,7 +123,7 @@ async function reject() {
       >
         <p>All {{ plural(tickets.length, 'ticket') }} of {{ ctx.releaseLabel.value }} are built. {{ ACTION_LONG.approve_candidate }}</p>
         <GateApprovals gate="candidate" :approvals="approvals" :on="ctx.releaseLabel.value" :can-decide="ctx.canAct.value" :now="ctx.now.value" :me="ctx.me.value" />
-        <p v-if="!approval" class="j-note">An agent asks for the candidate gate; it appears here for you to approve.</p>
+        <p v-if="!approval && !journey.stages.find(s => s.key === 'build')?.gate_offer_id" class="j-note">An agent asks for the candidate gate; it appears here for you to approve.</p>
         <div v-if="ctx.canAct.value" class="reject">
           <button v-if="!rejecting" type="button" class="btn sm ghost" :disabled="!approval || store.busy" @click="startReject">Send it back</button>
           <form v-else class="reason" @submit.prevent="reject">

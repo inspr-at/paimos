@@ -25,7 +25,11 @@ export const PROFILES: Record<Profile, { label: string; line: string }> = {
 }
 
 export type StageState = 'done' | 'current' | 'later' | 'skipped' | 'blocked'
-export interface JourneyStage { key: Stage; state: StageState; gate_scope: string; gate_approval_id: string | null; gate_live: boolean; handoff_id: string | null }
+export type GateOfferState = 'pending' | 'approved_live' | 'expired' | 'revoked' | 'rejected' | 'grant_missing'
+export interface JourneyStage {
+  key: Stage; state: StageState; gate_scope: string; gate_approval_id: string | null; gate_live: boolean; handoff_id: string | null
+  gate_offer_id?: string; gate_offer_state?: GateOfferState; gate_offer_expires_at?: string
+}
 export type ActionKey = 'confirm_brief' | 'go' | 'reduce_scope' | 'park' | 'drop' | 'reopen' | 'open_first_release' | 'start_build' | 'mark_candidate'
   | 'approve_candidate' | 'reject_candidate' | 'approve_deploy' | 'retry_deploy' | 'approve_permit' | 'plan_next_release'
 export type NextKey = 'continue_intake' | 'confirm_brief' | 'decide' | 'reopen' | 'approve_requirements' | 'open_first_release' | 'start_build' | 'wait_for_build'

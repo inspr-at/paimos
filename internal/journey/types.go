@@ -59,6 +59,9 @@ type JourneyStage struct {
 	GateScope             string  `json:"gate_scope"`
 	GateApprovalID        *string `json:"gate_approval_id"`
 	GateLive              bool    `json:"gate_live"`
+	GateOfferID           *string `json:"gate_offer_id,omitempty"`
+	GateOfferState        string  `json:"gate_offer_state,omitempty"`
+	GateOfferExpiresAt    string  `json:"gate_offer_expires_at,omitempty"`
 	HandoffID             *string `json:"handoff_id"`
 	HandoffAttempt        *int    `json:"handoff_attempt"`
 	HandoffAuthorityEpoch *int64  `json:"handoff_authority_epoch"`

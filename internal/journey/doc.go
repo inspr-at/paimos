@@ -5,7 +5,7 @@
 // the executable handoff. This package intentionally has no handlers or shared
 // server wiring. The coordinator mounts builders' httpapi.Module values and
 // reconciles shared contract changes.
-// GET /api/projects/{projectId}/journey emits Aeon-Contract: journey/1.0.
+// GET /api/projects/{projectId}/journey emits Aeon-Contract: journey/1.1.
 // Additive optional response fields require a minor bump; breaking changes
 // require a major bump. internal/reportercontract pins its response schema.
 //
@@ -25,6 +25,8 @@
 // validity check. Plan reports Build and Build reports Candidate, including
 // when the Candidate gate is absent. Gate_live is false when none is live,
 // without erasing history.
+// Optional gate_offer_id, gate_offer_state and gate_offer_expires_at describe
+// the current unconsumed request separately from the consumed gate identity.
 // Preserve history when a later release starts; Live becomes the prior release
 // state while Plan is current. Park/drop retains the Shape stage with Reopen.
 // Personal skips Shape after a brief; Access is skipped only when the release

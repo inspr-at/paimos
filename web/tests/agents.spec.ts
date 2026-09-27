@@ -91,6 +91,8 @@ test('an approval from an agent with no session and no address shows its name', 
   const card = queue(page).locator('.item', { hasText: 'Harbor Clerk' })
   await expect(card).toBeVisible()
   await expect(card).toContainText('Harbor Clerk')
+  await expect(card.locator('time.expiry')).toHaveAttribute('datetime', data.approvals[0].expires_at)
+  await expect(card.locator('time.expiry')).toContainText('Expires in')
   await expect(card).not.toContainText(`Agent ${principal.slice(0, 8)}`)
   // The asker pill carries an agent icon, centered on the name.
   const pill = card.locator('.who')

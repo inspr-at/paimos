@@ -5,7 +5,8 @@ import type { Approval } from '../../lib/agents'
 import { canDecideApproval } from '../../lib/agentState'
 import { can } from '../../lib/authz'
 import { expiresIn, expiresSoon, RISK_LABEL, riskFor } from '../../lib/agentState'
-import { GATE_LABEL, type Gate } from '../../lib/journey'
+import { GATE_LABEL, type Gate, type GateOfferState, type Stage } from '../../lib/journey'
+import { useJourneyContext } from '../../lib/journeyContext'
 import { relativeTime } from '../../lib/work'
 import { useAgents } from '../../stores/agents'
 import AppIcon from '../AppIcon.vue'
@@ -17,6 +18,9 @@ import AppIcon from '../AppIcon.vue'
 const props = defineProps<{ gate: Gate; approvals: Approval[]; on: string; canDecide: boolean; now: number; me: string | null }>()
 const emit = defineEmits<{ decided: [approval: Approval, decision: 'approved' | 'denied'] }>()
 const agents = useAgents()
+const ctx = useJourneyContext()
+const gateStage: Record<Gate, Stage> = { shape: 'shape', requirements: 'requirements', build: 'plan', candidate: 'build', deploy: 'deploy', access: 'access' }
+const stage = computed(() => ctx.journey.value.stages.find(s => s.key === gateStage[props.gate]))
 const live = computed(() => props.approvals.filter(a => a.decision === null && Date.parse(a.expires_at) > props.now))
 const mayDecide = (approval: Approval) => props.canDecide && canDecideApproval(approval, can)
 const past = computed(() => props.approvals.filter(a => !live.value.includes(a)).slice(0, 3))
@@ -48,6 +52,30 @@ function keys(event: KeyboardEvent, approval: Approval) {
 }
 const who = (approval: Approval) => agents.askerName(approval.agent_principal_id, approval.agent_name)
 const decidedBy = (approval: Approval) => approval.decided_by_principal_id && approval.decided_by_principal_id === props.me ? 'you' : 'someone else'
+function stateOf(approval: Approval): GateOfferState | 'unavailable' {
+  if (approval.decision === 'denied') return 'rejected'
+  if (stage.value?.gate_offer_id === approval.id && stage.value.gate_offer_state) {
+    if (stage.value.gate_offer_state === 'approved_live' && Date.parse(stage.value.gate_offer_expires_at ?? approval.expires_at) <= props.now) return 'expired'
+    return stage.value.gate_offer_state
+  }
+  if (stage.value?.gate_approval_id === approval.id && stage.value.gate_live) return 'approved_live'
+  if (Date.parse(approval.expires_at) <= props.now) return 'expired'
+  return approval.decision === null ? 'pending' : 'unavailable'
+}
+const timeOf = (approval: Approval) => new Date(stage.value?.gate_offer_id === approval.id ? stage.value.gate_offer_expires_at ?? approval.expires_at : approval.expires_at).toLocaleString()
+function outcome(approval: Approval) {
+  switch (stateOf(approval)) {
+    case 'approved_live': return `Approved by ${decidedBy(approval)}`
+    case 'expired': return `${approval.decision === null ? 'Request' : 'Approval'} expired at ${timeOf(approval)}`
+    case 'revoked': return 'Approval revoked'
+    case 'rejected': return `Denied by ${decidedBy(approval)}`
+    default: return 'Approval no longer available'
+  }
+}
+const needsFreshRequest = computed(() => {
+  const offer = props.approvals.find(a => a.id === stage.value?.gate_offer_id)
+  return offer ? ['expired', 'revoked', 'rejected', 'grant_missing'].includes(stateOf(offer)) : false
+})
 </script>
 
 <template>
@@ -59,7 +87,7 @@ const decidedBy = (approval: Approval) => approval.decided_by_principal_id && ap
           <p class="line1">
             <strong class="what">{{ GATE_LABEL[gate] }}</strong>
             <span class="risk-chip" :class="riskFor(approval)">{{ RISK_LABEL[riskFor(approval)] }}</span>
-            <span class="expiry" :class="{ soon: expiresSoon(approval, now) }"><AppIcon name="clock" :size="12" />{{ expiresIn(approval, now) }}</span>
+            <time class="expiry" :class="{ soon: expiresSoon(approval, now) }" :datetime="approval.expires_at"><AppIcon name="clock" :size="12" />{{ expiresIn(approval, now) }} · {{ new Date(approval.expires_at).toLocaleString() }}</time>
           </p>
           <p class="line2"><span v-if="who(approval).harness" class="harness mono">{{ who(approval).harness }}</span><strong>{{ who(approval).name }}</strong><span class="asks">asks for</span><code class="scope">{{ approval.scope }}</code><span class="asks">on</span><span class="on">{{ on }}</span></p>
           <p v-if="approval.rationale" class="why">“{{ approval.rationale }}”</p>
@@ -82,16 +110,18 @@ const decidedBy = (approval: Approval) => approval.decided_by_principal_id && ap
     </ul>
     <ul v-if="past.length" class="records" aria-label="Earlier gate decisions">
       <li v-for="approval in past" :key="approval.id" class="record">
-        <AppIcon :name="approval.decision === 'approved' ? 'check' : approval.decision === 'denied' ? 'close' : 'clock'" :size="12" :class="approval.decision ?? 'expired'" />
-        <span>{{ approval.decision === 'approved' ? `Approved by ${decidedBy(approval)}` : approval.decision === 'denied' ? `Denied by ${decidedBy(approval)}` : 'Expired unanswered' }}</span>
+        <AppIcon :name="stateOf(approval) === 'approved_live' ? 'check' : stateOf(approval) === 'rejected' || stateOf(approval) === 'revoked' ? 'close' : 'clock'" :size="12" :class="stateOf(approval)" />
+        <span>{{ outcome(approval) }}</span>
         <span class="faint">· {{ who(approval).name }} asked {{ relativeTime(approval.proposed_at, { now }) }}</span>
       </li>
     </ul>
+    <p v-if="needsFreshRequest" class="fresh-note">The agent asks again for a fresh gate request.</p>
   </div>
 </template>
 
 <style scoped>
 .gate-approvals { display: grid; gap: 8px; container: gate / inline-size; }
+.fresh-note { margin: 0; color: var(--ink-3); font-size: 12px; }
 .items, .records { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
 .item { display: grid; grid-template-columns: 30px minmax(0, 1fr) auto; gap: 10px; align-items: start; padding: 10px 10px 10px 8px; border-radius: 12px; background: var(--surface); box-shadow: 0 0 0 1px var(--line); }
 .mark { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 8px; background: var(--row-selected); color: var(--teal-ink); }

@@ -107,7 +107,7 @@ defineExpose({ begin, cancel, isOpen: () => !!open.value })
           <p class="line1">
             <strong class="what">{{ scopeLabel(approval.scope) }}</strong>
             <span class="risk-chip" :class="riskFor(approval)">{{ RISK_LABEL[riskFor(approval)] }}</span>
-            <span class="expiry" :class="{ soon: expiresSoon(approval, now) }"><AppIcon name="clock" :size="12" />{{ expiresIn(approval, now) }}</span>
+            <time class="expiry" :class="{ soon: expiresSoon(approval, now) }" :datetime="approval.expires_at" :title="new Date(approval.expires_at).toLocaleString()"><AppIcon name="clock" :size="12" />{{ expiresIn(approval, now) }} · {{ new Date(approval.expires_at).toLocaleString() }}</time>
           </p>
           <p class="line2">
             <button type="button" class="who" @click.stop="emit('openAgent', approval.agent_principal_id)">

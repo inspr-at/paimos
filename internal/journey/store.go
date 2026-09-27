@@ -547,8 +547,9 @@ func loadOffers(ctx context.Context, tx pgx.Tx, f *facts) error {
 	rows, err := tx.Query(ctx, `
 		SELECT r.scope, r.resource_id::text, r.id::text,
 		       coalesce(d.decision, ''), coalesce(d.decided_by_principal_id::text, ''),
+		       r.expires_at, g.valid_until,
 		       r.expires_at > now(),
-		       d.request_id IS NULL,
+		       g.approval_request_id IS NOT NULL, g.revoked_at IS NOT NULL,
 		       (g.approval_request_id IS NOT NULL AND g.revoked_at IS NULL AND g.valid_until > now())
 		FROM approval_requests r
 		LEFT JOIN approval_decisions d
@@ -569,30 +570,57 @@ func loadOffers(ctx context.Context, tx pgx.Tx, f *facts) error {
 	}
 	defer rows.Close()
 	type picked struct {
-		live, pending bool
+		live, pending, fallback bool
 	}
 	seen := map[string]picked{}
 	for rows.Next() {
 		var scope, resource, id, decision, decider string
-		var open, undecided, grant bool
-		if err := rows.Scan(&scope, &resource, &id, &decision, &decider, &open, &undecided, &grant); err != nil {
+		var requestExpiry time.Time
+		var grantExpiry *time.Time
+		var open, grantExists, revoked, grantLive bool
+		if err := rows.Scan(&scope, &resource, &id, &decision, &decider, &requestExpiry, &grantExpiry, &open, &grantExists, &revoked, &grantLive); err != nil {
 			return err
 		}
 		key := scope + "\x00" + resource
-		state := seen[key]
-		live := decision == "approved" && open && grant
-		pending := undecided && open
-		offer := gateOffer{ID: id, DecidedBy: decider, Live: live}
-		if live && !state.live {
-			assignOffer(f, scope, resource, offer, true)
-			state.live = true
-		} else if pending && !state.live && !state.pending {
-			assignOffer(f, scope, resource, offer, false)
-			state.pending = true
+		picked := seen[key]
+		state := gateOfferState(decision, open, grantExists, revoked, grantLive)
+		expires := requestExpiry
+		if grantExpiry != nil && grantExpiry.Before(expires) {
+			expires = *grantExpiry
 		}
-		seen[key] = state
+		offer := gateOffer{ID: id, DecidedBy: decider, Live: state == "approved_live", State: state, ExpiresAt: expires.UTC().Format(time.RFC3339)}
+		if offer.Live && !picked.live {
+			assignOffer(f, scope, resource, offer, true)
+			picked.live = true
+		} else if state == "pending" && !picked.live && !picked.pending {
+			assignOffer(f, scope, resource, offer, false)
+			picked.pending = true
+		} else if !picked.live && !picked.pending && !picked.fallback {
+			assignOffer(f, scope, resource, offer, false)
+			picked.fallback = true
+		}
+		seen[key] = picked
 	}
 	return rows.Err()
+}
+
+func gateOfferState(decision string, requestOpen, grantExists, revoked, grantLive bool) string {
+	if decision == "denied" {
+		return "rejected"
+	}
+	if revoked {
+		return "revoked"
+	}
+	if !requestOpen || (decision == "approved" && grantExists && !grantLive) {
+		return "expired"
+	}
+	if decision == "approved" {
+		if !grantExists {
+			return "grant_missing"
+		}
+		return "approved_live"
+	}
+	return "pending"
 }
 
 func assignOffer(f *facts, scope, resource string, offer gateOffer, replace bool) {
