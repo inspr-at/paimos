@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref } from 'vue'
-import { APIError } from '../../lib/api'
+import { APIError, undoEvent } from '../../lib/api'
 import { ACTION_LONG, gateApprovals, hours, offeredApproval, RELEASE_STATE_LABEL } from '../../lib/journey'
 import { toast } from '../../lib/toast'
 import { useJourneyContext } from '../../lib/journeyContext'
@@ -20,6 +20,8 @@ narrowQuery.addEventListener('change', onNarrow)
 onBeforeUnmount(() => narrowQuery.removeEventListener('change', onNarrow))
 import ReleaseList from './ReleaseList.vue'
 import ReleaseTickets from './ReleaseTickets.vue'
+import ExistingTicketPicker from './ExistingTicketPicker.vue'
+import type { MembershipResult } from '../../lib/releaseMembership'
 
 // Plan: the tickets of the release, grouped by feature. While the current
 // release is planning, ticked tickets form it and unticked ones stay in the
@@ -44,6 +46,8 @@ const features = computed(() => ctx.plan.groups.value.filter(g => g.feature && !
 const newTitle = ref('')
 const newFeature = ref<string>('')
 const adding = ref(false)
+const picking = ref(false)
+const epics = computed(() => ctx.plan.groups.value.flatMap(group => group.feature ? [{ id: group.feature.id, key: group.feature.key, title: group.feature.title }] : []))
 async function addTicket() {
   const title = newTitle.value.trim()
   if (!title || adding.value) return
@@ -59,6 +63,26 @@ async function addTicket() {
     const missing = e instanceof APIError && (e.status === 404 || e.status === 405)
     toast(missing ? 'This server cannot add tickets to a plan yet.' : `The ticket was not added: ${e instanceof Error ? e.message : 'unknown error'}`, { tone: 'error' })
   } finally { adding.value = false }
+}
+async function addedExisting(payload: { count: number; result: MembershipResult }) {
+  picking.value = false
+  ctx.data.patchWalker(payload.result.walker)
+  void ctx.data.loadWork(true)
+  void store.load(ctx.project.value.id, true)
+  const label = ctx.releaseLabel.value
+  toast(`Added ${plural(payload.count, 'ticket')} to ${label.toLowerCase()}.`, {
+    timeout: 8000,
+    action: payload.result.event_id ? { label: 'Undo', run: () => void undoAdded(payload.result.event_id) } : undefined,
+  })
+}
+async function undoAdded(eventId: number) {
+  try {
+    await undoEvent(eventId)
+    if (ctx.release.value) await ctx.data.loadWalker(ctx.release.value.id, true)
+    toast('Undone: those tickets left the release.')
+  } catch (e) {
+    toast(e instanceof APIError && e.status === 409 ? 'The release changed since, so nothing was undone.' : `Undo did not work: ${e instanceof Error ? e.message : 'unknown error'}`, { tone: 'error' })
+  }
 }
 </script>
 
@@ -84,8 +108,10 @@ async function addTicket() {
             <option value="">No feature</option>
             <option v-for="f in features" :key="f.id" :value="f.id">{{ f.title }}</option>
           </select>
-          <button type="submit" class="btn" :disabled="!newTitle.trim() || adding">{{ adding ? 'Adding…' : 'Add' }}</button>
+          <button type="button" class="btn" @click="picking = true"><AppIcon name="search" :size="14" />Add existing</button>
+          <button type="submit" class="btn primary" :disabled="!newTitle.trim() || adding">{{ adding ? 'Adding…' : 'Add' }}</button>
         </form>
+        <ExistingTicketPicker v-if="picking && ctx.release.value" :project-id="ctx.project.value.id" :release-id="ctx.release.value.id" :release-title="ctx.releaseLabel.value" :epics="epics" @close="picking = false" @added="addedExisting" />
         <ReleaseTickets v-if="walker && walker.tickets.length && status !== 'loading' && status !== 'error'" :plan="ctx.plan" :editable="ctx.editable.value" :project-key="ctx.project.value.routeKey" :work-by-id="ctx.data.workById.value" @walk="t => ctx.walk(t.key)" @open="ctx.open" />
       </section>
       <section v-if="releases.length" class="j-card" aria-labelledby="plan-releases">

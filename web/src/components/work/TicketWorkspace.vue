@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, toRef, useId, watch } from 'vue'
-import type { ListItem } from '../../lib/api'
+import { APIError, undoEvent, type ListItem } from '../../lib/api'
 import { confirmAction } from '../../lib/confirm'
 import { toast } from '../../lib/toast'
 import { useActivity } from '../../lib/useActivity'
@@ -29,6 +29,10 @@ import RelationPicker from './RelationPicker.vue'
 import TicketHeaderBar from './TicketHeaderBar.vue'
 import TicketProperties from './TicketProperties.vue'
 import { can } from '../../lib/authz'
+import { releaseLabel } from '../../lib/columns'
+import { AssignCancelled, ReleaseOpenedWithoutTickets, assignToRelease, type ReleaseTarget } from '../../lib/releaseAssign'
+import ReleasePicker from './ReleasePicker.vue'
+import { useJourney } from '../../stores/journey'
 import StartAgentDialog from '../agents/StartAgentDialog.vue'
 
 // The ticket workspace: the same parts in the docked side panel and in the
@@ -46,7 +50,7 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{
   close: []; prev: []; next: []; expand: []; collapse: []; newTab: []; openKey: [key: string, newTab: boolean]; status: [anchor: HTMLElement]; trailBack: [steps: number]
-  removed: [item: ListItem]; created: [item: ListItem]; moved: [item: ListItem, fromParent: string | null]; retry: []; openInProject: []
+  removed: [item: ListItem]; created: [item: ListItem]; moved: [item: ListItem, fromParent: string | null]; assigned: []; retry: []; openInProject: []
 }>()
 
 const item = toRef(props, 'item')
@@ -69,6 +73,11 @@ const attachments = useAttachments(computed(() => props.item?.id ?? null))
 const lightbox = ref<InstanceType<typeof AttachmentLightbox>>()
 const startDialog = ref<InstanceType<typeof StartAgentDialog>>()
 const canStartAgent = computed(() => props.item?.kind_slug === 'ticket' && !ticket.gone.value && can('work_orders.write') && can('run.create'))
+const canRelease = computed(() => editable.value && !!props.item && props.item.kind_slug !== 'epic' && can('releases.write', props.project.id))
+const releaseOverride = ref<string | null>(null)
+watch(() => props.item?.id, () => { releaseOverride.value = null })
+const shownRelease = computed(() => releaseOverride.value !== null ? releaseOverride.value : releaseLabel(props.item?.fields))
+const journeys = useJourney()
 
 // ---------- Following links: a modified click opens a new tab ----------
 let modifiedClick = false
@@ -218,7 +227,7 @@ const notesSection = ref<InstanceType<typeof MarkdownSection>>()
 const sections = computed(() => [descSection.value, acSection.value, notesSection.value].filter(section => !!section))
 const composer = ref<InstanceType<typeof CommentComposer>>()
 const timeline = ref<InstanceType<typeof ActivityTimeline>>()
-const menu = ref<{ kind: 'priority' | 'assignee' | 'epic'; anchor: HTMLElement } | null>(null)
+const menu = ref<{ kind: 'priority' | 'assignee' | 'epic' | 'release'; anchor: HTMLElement } | null>(null)
 const showAcceptance = ref(false)
 const showNotes = ref(false)
 
@@ -249,7 +258,40 @@ function copy(text: string, label: string) {
 function anchorFor(shortcut: string) {
   return [...(root.value?.querySelectorAll<HTMLElement>(`[aria-keyshortcuts="${shortcut}"]`) ?? [])].find(el => el.getClientRects().length) ?? null
 }
-function openMenu(kind: 'priority' | 'assignee' | 'epic', anchor: HTMLElement | null) { if (anchor && (kind === 'epic' ? movable.value : editable.value)) menu.value = { kind, anchor } }
+function openMenu(kind: 'priority' | 'assignee' | 'epic' | 'release', anchor: HTMLElement | null) {
+  if (!anchor) return
+  if (kind === 'release' ? canRelease.value : kind === 'epic' ? movable.value : editable.value) menu.value = { kind, anchor }
+}
+async function chooseRelease(target: ReleaseTarget) {
+  const it = props.item
+  if (!it || !canRelease.value) return
+  menu.value = null
+  try {
+    const outcome = await assignToRelease(props.project.id, [{ id: it.id, key: it.key, title: it.title, state: it.state, kind: it.kind_slug }], target)
+    if (outcome.journey) journeys.set(props.project.id, outcome.journey)
+    releaseOverride.value = outcome.releaseTitle
+    emit('assigned')
+    const skipped = outcome.skipped.length ? ` ${outcome.skipped[0].reason}` : ''
+    toast(`Added ${it.key} to ${outcome.releaseTitle}.${skipped}`, {
+      timeout: 8000,
+      action: outcome.result.event_id ? { label: 'Undo', run: () => void undoRelease(outcome.result.event_id, it.key) } : undefined,
+    })
+  } catch (error) {
+    if (error instanceof AssignCancelled) return
+    if (error instanceof ReleaseOpenedWithoutTickets) journeys.set(props.project.id, error.journey)
+    toast(error instanceof Error ? error.message : 'The ticket was not added to a release.', { tone: 'error' })
+  }
+}
+async function undoRelease(eventId: number, key: string) {
+  try {
+    await undoEvent(eventId)
+    releaseOverride.value = null
+    emit('assigned')
+    toast(`Undone: ${key} left the release.`)
+  } catch (error) {
+    toast(error instanceof APIError && error.status === 409 ? 'The release changed since, so nothing was undone.' : `Undo did not work: ${error instanceof Error ? error.message : 'unknown error'}`, { tone: 'error' })
+  }
+}
 function closeMenu(restore: boolean) { const anchor = menu.value?.anchor; menu.value = null; if (restore) anchor?.focus() }
 async function choosePriority(value: string) { const anchor = menu.value?.anchor; menu.value = null; anchor?.focus(); await ticket.setPriority(value || null) }
 async function chooseAssignee(value: string) {
@@ -314,6 +356,7 @@ defineExpose({
   openStatus: () => { const anchor = anchorFor('s'); if (anchor && editable.value) emit('status', anchor) },
   openPriority: () => openMenu('priority', anchorFor('p')),
   openAssignee: () => openMenu('assignee', anchorFor('a')),
+  openRelease: () => openMenu('release', anchorFor('g')),
   openLink: () => openLink(anchorFor('r')),
   focusComposer: () => composer.value?.focus(),
 })
@@ -397,8 +440,9 @@ defineExpose({
           <InlineTitle ref="title" :value="item.title" :editable="editable" :large="mode === 'full'" :save="ticket.setTitle" />
           <TicketProperties
             class="ws-props" :class="{ 'only-narrow': mode === 'full' }" :item="item" :editable="editable" layout="row" :now="now"
+            :release-label="shownRelease" :release-editable="canRelease"
             @status="anchor => emit('status', anchor)" @priority="anchor => openMenu('priority', anchor)" @assignee="anchor => openMenu('assignee', anchor)"
-            @epic="anchor => openMenu('epic', anchor)" @open-parent="openLinked"
+            @epic="anchor => openMenu('epic', anchor)" @release="anchor => openMenu('release', anchor)" @open-parent="openLinked"
           />
           <p class="meta" :class="{ 'only-narrow': mode === 'full' }">
             Updated <time :datetime="item.updated_at" :data-tip="absoluteTime(item.updated_at)">{{ relativeTime(item.updated_at, { now, long: true }) }}</time>
@@ -462,8 +506,9 @@ defineExpose({
           <div class="side-card">
             <TicketProperties
               :item="item" :editable="editable" layout="column" :now="now"
+              :release-label="shownRelease" :release-editable="canRelease"
               @status="anchor => emit('status', anchor)" @priority="anchor => openMenu('priority', anchor)" @assignee="anchor => openMenu('assignee', anchor)"
-              @epic="anchor => openMenu('epic', anchor)" @open-parent="openLinked"
+              @epic="anchor => openMenu('epic', anchor)" @release="anchor => openMenu('release', anchor)" @open-parent="openLinked"
             />
           </div>
           <div v-if="(ticket.related.value.length || linkable) && !contextColumn && ticket.relationsReady.value" class="side-card"><RelationList :related="ticket.related.value" :editable="linkable" :removable="unlinkable" :unlink="unlinkEntry" @open="openLinked" @link="openLink" /></div>
@@ -490,6 +535,7 @@ defineExpose({
       :related="ticket.related.value" :link="ticket.link" @close="closeLink"
     />
     <EpicPicker v-if="menu?.kind === 'epic' && item" :anchor="menu.anchor" :project-id="project.id" :current="item.parent?.kind_slug === 'epic' ? item.parent.id : null" :subject="item.key" @choose="chooseEpic" @close="closeMenu" />
+    <ReleasePicker v-if="menu?.kind === 'release' && item" :anchor="menu.anchor" :project-id="project.id" :subject="item.key" @choose="chooseRelease" @close="closeMenu" />
   </component>
 </template>
 

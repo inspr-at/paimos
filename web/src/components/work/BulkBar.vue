@@ -7,10 +7,10 @@ import KeyCap from '../KeyCap.vue'
 // What to do with the selected tickets. It floats over the list's lower edge,
 // changes nothing by itself, and every change it starts can be undone at once.
 // frame: the list's left edge and width, so the bar centres over the list, not the docked panel.
-defineProps<{ count: number; loaded: number; total: number | null; busy: boolean; canWrite: boolean; frame?: { left: number; width: number } | null }>()
+defineProps<{ count: number; loaded: number; total: number | null; busy: boolean; canWrite: boolean; canRelease?: boolean; frame?: { left: number; width: number } | null }>()
 const emit = defineEmits<{
   status: [anchor: HTMLElement]; assignee: [anchor: HTMLElement]; priority: [anchor: HTMLElement]; labels: [anchor: HTMLElement]
-  move: [anchor: HTMLElement]; archive: []; clear: []; selectAll: []
+  move: [anchor: HTMLElement]; release: [anchor: HTMLElement]; archive: []; clear: []; selectAll: []
 }>()
 const at = (event: MouseEvent) => event.currentTarget as HTMLElement
 </script>
@@ -27,6 +27,7 @@ const at = (event: MouseEvent) => event.currentTarget as HTMLElement
         <button type="button" class="act" aria-label="Priority" aria-keyshortcuts="p" data-tip="Priority · p" :disabled="busy" @click="emit('priority', at($event))"><AppIcon name="gauge" :size="14" /><span class="label">Priority</span></button>
         <button type="button" class="act" aria-label="Labels" aria-keyshortcuts="l" data-tip="Labels · l" :disabled="busy" @click="emit('labels', at($event))"><AppIcon name="tag" :size="14" /><span class="label">Labels</span></button>
         <button type="button" class="act" aria-label="Move" aria-keyshortcuts="m" data-tip="Move to an epic · m" :disabled="busy" @click="emit('move', at($event))"><AppIcon name="epic" :size="14" /><span class="label">Move</span></button>
+        <button v-if="canRelease" type="button" class="act" aria-label="Add to release" aria-keyshortcuts="g" data-tip="Add to release · g" :disabled="busy" @click="emit('release', at($event))"><AppIcon name="layers" :size="14" /><span class="label">Release</span></button>
         <button type="button" class="act" aria-label="Archive" data-tip="Archive · closed, and hidden with Hide closed" :disabled="busy" @click="emit('archive')"><AppIcon name="archive" :size="14" /><span class="label">Archive</span></button>
       </template>
       <span v-else class="read-only">Read only</span>

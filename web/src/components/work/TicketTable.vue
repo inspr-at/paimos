@@ -48,6 +48,7 @@ const props = defineProps<{
   // Multi-select for bulk changes: checkboxes lead each row.
   selectable?: boolean
   selected?: Set<string>
+  canAssignRelease?: boolean
 }>()
 // Unfiltered loads hold the expected height (so nothing below jumps); 1..28 rows.
 const skeletonRows = computed(() => Math.max(1, Math.min(28, props.expectedRows ?? 14)))
@@ -76,6 +77,7 @@ const emit = defineEmits<{
   // toggle: one row on or off; range: from the last row chosen to this one.
   select: [row: ListItem, mode: 'toggle' | 'range']
   selectAll: [on: boolean]
+  release: [row: ListItem, anchor: HTMLElement]
 }>()
 
 const CLS: Record<ColumnId, string> = { key: 'c-key', title: 'c-title', status: 'c-status', priority: 'c-prio', assignee: 'c-assignee', epic: 'c-epic', release: 'c-release', tags: 'c-tags', cost: 'c-cost', estimate: 'c-estimate', created: 'c-created', updated: 'c-updated' }
@@ -602,7 +604,12 @@ defineExpose({
               </td>
               <td v-else-if="column.id === 'release'" class="c-release">
                 <div class="cell">
-                  <span v-if="releaseLabel(entry.row.fields)" class="release-chip mono" :data-tip="`Release ${releaseLabel(entry.row.fields)}`">{{ releaseLabel(entry.row.fields) }}</span>
+                  <button
+                    v-if="canAssignRelease && entry.row.kind_slug !== 'epic'" type="button" class="release-chip mono" :class="{ bare: !releaseLabel(entry.row.fields) }"
+                    :aria-label="releaseLabel(entry.row.fields) ? `Release ${releaseLabel(entry.row.fields)}. Change release of ${entry.row.key}` : `No release. Add ${entry.row.key} to a release`"
+                    @click.stop="emit('release', entry.row, $event.currentTarget as HTMLElement)"
+                  >{{ releaseLabel(entry.row.fields) || '—' }}</button>
+                  <span v-else-if="releaseLabel(entry.row.fields)" class="release-chip mono">{{ releaseLabel(entry.row.fields) }}</span>
                   <span v-else class="empty" aria-label="No release">—</span>
                 </div>
               </td>
@@ -801,7 +808,10 @@ td.c-title { position: relative; overflow: hidden; }
 .cost-glyph { flex-shrink: 0; color: var(--ink-3); }
 .cost-name { overflow: hidden; text-overflow: ellipsis; }
 .group-dot { width: 8px; height: 8px; margin: 0 3px; }
-.release-chip { overflow: hidden; text-overflow: ellipsis; padding: 2px 7px; border-radius: 6px; background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); color: var(--ink-2); font-size: 11.5px; font-variant-ligatures: none; }
+.release-chip { overflow: hidden; text-overflow: ellipsis; max-width: 100%; padding: 2px 7px; border: 0; border-radius: 6px; background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); color: var(--ink-2); font: inherit; font-size: 11.5px; font-variant-ligatures: none; cursor: pointer; }
+button.release-chip { display: inline-flex; align-items: center; height: 22px; }
+button.release-chip.bare { background: transparent; box-shadow: none; color: var(--ink-3); }
+button.release-chip:focus-visible { box-shadow: var(--focus-ring); }
 .tag-cell { gap: 4px; overflow: hidden; }
 .tag-chip { display: inline-flex; flex-shrink: 1; align-items: center; gap: 5px; min-width: 0; max-width: 100%; height: 20px; padding: 0 7px; border-radius: 999px; background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); color: var(--ink-2); font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* The classic tag colours as a small dot; the name carries the meaning. */
