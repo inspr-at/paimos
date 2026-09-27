@@ -89,6 +89,7 @@ var RoutePermissions = map[string]string{
 	"GET /api/nodes/tree":                                            "nodes.read",
 	"GET /api/nodes/{nodeId}":                                        "nodes.read",
 	"GET /api/nodes/{nodeId}/activity":                               "events.read",
+	"GET /api/nodes/{nodeId}/agent-work":                             "nodes.read",
 	"GET /api/nodes/{nodeId}/attachments":                            "attachments.read",
 	"GET /api/nodes/{nodeId}/time-totals":                            "hours.read",
 	"GET /api/people/{principalId}/avatar/{size}":                    "profile.read",

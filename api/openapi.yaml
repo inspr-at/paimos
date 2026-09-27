@@ -3346,6 +3346,27 @@ paths:
         '404': {$ref: '#/components/responses/Error'}
         '409': {$ref: '#/components/responses/Error'}
         '412': {description: Entry changed, content: {application/json: {schema: {$ref: '#/components/schemas/TimeEntryPreconditionFailed'}}}}
+  /nodes/{nodeId}/agent-work:
+    get:
+      operationId: getTicketAgentWork
+      summary: Agent sessions, tokens, estimated cost and time for a ticket or epic
+      description: >
+        Sessions whose ticket is this live ticket, epic or task, or a visible descendant.
+        Filtered by the caller's tenant and visible projects. Each session is listed once.
+        Token counts and list-price estimates are summed from the current
+        harness_session_usage rows for that session, one row per model. Cost is an exact
+        USD decimal string. Missing figures are null, never zero and never a JSON float.
+        Unknown rows stay in the unknown counts. Managed-run telemetry is not added.
+        Totals cover only the bounded session list. Duration is counted once per session.
+      security: *auth
+      parameters:
+        - {name: nodeId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 80, default: 40}}
+      responses:
+        '200': {description: Agent work for the node, content: {application/json: {schema: {$ref: '#/components/schemas/TicketAgentWork'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
   /nodes/{nodeId}/time-totals:
     get:
       operationId: getNodeTimeTotals
@@ -4708,6 +4729,94 @@ components:
         node_id: {type: string, format: uuid}
         duration_seconds: {type: integer, minimum: 0}
         amounts: {type: array, items: {type: object, required: [currency, amount], properties: {currency: {type: string, pattern: '^[A-Z]{3}$'}, amount: {type: number, minimum: 0}}}}
+    TicketAgentWork:
+      type: object
+      required: [node_id, kind, currency, usage_available, includes_descendants, scope_truncated, list_truncated, sessions, totals]
+      properties:
+        node_id: {type: string, format: uuid}
+        kind: {type: string, enum: [ticket, epic, task]}
+        currency: {type: string, enum: [USD]}
+        usage_available: {type: boolean, description: True when harness_session_usage was read. A missing relation is an error, not an empty cost. Null figures are unreported, not zero.}
+        includes_descendants: {type: boolean}
+        scope_truncated: {type: boolean}
+        list_truncated: {type: boolean}
+        sessions: {type: array, items: {$ref: '#/components/schemas/TicketAgentSession'}}
+        totals: {$ref: '#/components/schemas/TicketAgentWorkTotals'}
+    TicketAgentUsageModel:
+      type: object
+      description: One current usage row for a session and model. estimated_cost_usd is a list price, not a billed charge. billing_mode is reported metadata, not verified coverage.
+      required: [model, input_tokens, output_tokens, cached_input_tokens, tokens_state, cached_state, estimated_cost_usd, cost_state, provisional, price_version, billing_mode, subscription_label]
+      properties:
+        model: {type: string}
+        input_tokens: {$ref: '#/components/schemas/NonNegativeIntString'}
+        output_tokens: {$ref: '#/components/schemas/NonNegativeIntString'}
+        cached_input_tokens: {$ref: '#/components/schemas/NonNegativeIntString'}
+        tokens_state: {type: string, enum: [known, unknown]}
+        cached_state: {type: string, enum: [known, unknown]}
+        estimated_cost_usd: {$ref: '#/components/schemas/NonNegativeDecimalString'}
+        cost_state: {type: string, enum: [estimated, unknown]}
+        provisional: {type: boolean}
+        price_version: {$ref: '#/components/schemas/NonNegativeIntString'}
+        billing_mode: {type: string, enum: [unknown, api, subscription]}
+        subscription_label: {type: [string, 'null']}
+    TicketAgentSession:
+      type: object
+      required: [id, ticket_node_id, ticket_key, ticket_title, harness, label, model, model_state, effort, effort_state, phase, started_at, ended_at, duration_seconds, duration_state, usage_reported, models, models_truncated, input_tokens, output_tokens, cached_input_tokens, tokens_state, cached_state, estimated_cost_usd, cost_state, unknown_token_models, unknown_cost_models]
+      properties:
+        id: {type: string, format: uuid}
+        ticket_node_id: {type: string, format: uuid}
+        ticket_key: {type: string}
+        ticket_title: {type: string}
+        harness: {type: string}
+        label: {type: [string, 'null']}
+        model: {type: [string, 'null'], description: Model recorded on the harness session. Priced models are in models.}
+        model_state: {type: string, enum: [known, missing]}
+        effort: {type: [string, 'null']}
+        effort_state: {type: string, enum: [known, missing]}
+        phase: {type: string}
+        started_at: {type: string, format: date-time}
+        ended_at: {type: [string, 'null'], format: date-time}
+        duration_seconds: {type: [integer, 'null'], minimum: 0}
+        duration_state: {type: string, enum: [known, ongoing, unknown]}
+        usage_reported: {type: boolean}
+        models: {type: array, items: {$ref: '#/components/schemas/TicketAgentUsageModel'}}
+        models_truncated: {type: boolean}
+        input_tokens: {$ref: '#/components/schemas/NonNegativeIntString'}
+        output_tokens: {$ref: '#/components/schemas/NonNegativeIntString'}
+        cached_input_tokens: {$ref: '#/components/schemas/NonNegativeIntString'}
+        tokens_state: {type: string, enum: [known, partial, unknown]}
+        cached_state: {type: string, enum: [known, partial, unknown]}
+        estimated_cost_usd: {$ref: '#/components/schemas/NonNegativeDecimalString'}
+        cost_state: {type: string, enum: [estimated, provisional, partial, unknown]}
+        unknown_token_models: {type: integer, minimum: 0}
+        unknown_cost_models: {type: integer, minimum: 0}
+    TicketAgentWorkTotals:
+      type: object
+      required: [session_count, input_tokens, output_tokens, cached_input_tokens, tokens_state, cached_state, estimated_cost_usd, cost_state, currency, duration_seconds, duration_state, unknown_token_sessions, unknown_cost_sessions, unknown_token_models, unknown_cost_models]
+      properties:
+        session_count: {type: integer, minimum: 0}
+        input_tokens: {$ref: '#/components/schemas/NonNegativeIntString'}
+        output_tokens: {$ref: '#/components/schemas/NonNegativeIntString'}
+        cached_input_tokens: {$ref: '#/components/schemas/NonNegativeIntString'}
+        tokens_state: {type: string, enum: [known, partial, unknown]}
+        cached_state: {type: string, enum: [known, partial, unknown]}
+        estimated_cost_usd: {$ref: '#/components/schemas/NonNegativeDecimalString'}
+        cost_state: {type: string, enum: [estimated, provisional, partial, unknown]}
+        currency: {type: string, enum: [USD]}
+        duration_seconds: {type: [integer, 'null'], minimum: 0}
+        duration_state: {type: string, enum: [known, ongoing, partial, unknown]}
+        unknown_token_sessions: {type: integer, minimum: 0}
+        unknown_cost_sessions: {type: integer, minimum: 0}
+        unknown_token_models: {type: integer, minimum: 0}
+        unknown_cost_models: {type: integer, minimum: 0}
+    NonNegativeIntString:
+      type: [string, 'null']
+      pattern: '^(0|[1-9][0-9]{0,18})$'
+      description: Nonnegative integer as a decimal string, or null when unknown. Never a JSON number.
+    NonNegativeDecimalString:
+      type: [string, 'null']
+      pattern: '^(0|[1-9][0-9]{0,17})(\.[0-9]{1,12})?$'
+      description: Exact nonnegative decimal string with at most 12 fractional places, or null when unknown. Never a JSON number. USD list prices use this.
     InboxSend:
       type: object
       required: [recipient_principal_id, body, idempotency_key]
