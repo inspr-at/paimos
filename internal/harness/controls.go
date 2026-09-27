@@ -8,28 +8,32 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/inspr-at/paimos/internal/ownedprocess"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
 )
 
 type Control struct {
-	ID          string     `json:"id"`
-	SessionID   string     `json:"session_id"`
-	Kind        string     `json:"kind"`
-	State       string     `json:"state"`
-	Sequence    int64      `json:"sequence"`
-	Outcome     *string    `json:"outcome"`
-	Reason      *string    `json:"reason"`
-	CreatedAt   time.Time  `json:"created_at"`
-	ClaimedAt   *time.Time `json:"claimed_at"`
-	CompletedAt *time.Time `json:"completed_at"`
+	ExpiresAt         *time.Time             `json:"expires_at,omitempty"`
+	ExpectedOwnership *ownedprocess.Identity `json:"expected_ownership,omitempty"`
+	requestDigest     []byte
+	ID                string     `json:"id"`
+	SessionID         string     `json:"session_id"`
+	Kind              string     `json:"kind"`
+	State             string     `json:"state"`
+	Sequence          int64      `json:"sequence"`
+	Outcome           *string    `json:"outcome"`
+	Reason            *string    `json:"reason"`
+	CreatedAt         time.Time  `json:"created_at"`
+	ClaimedAt         *time.Time `json:"claimed_at"`
+	CompletedAt       *time.Time `json:"completed_at"`
 }
 
-const controlColumns = `id::text,session_id::text,kind,state,sequence,outcome,reason,created_at,claimed_at,completed_at`
+const controlColumns = `id::text,session_id::text,kind,state,sequence,outcome,reason,created_at,claimed_at,completed_at,expected_ownership,request_digest,expires_at`
 
 func scanControl(row pgx.Row) (Control, error) {
 	var c Control
-	err := row.Scan(&c.ID, &c.SessionID, &c.Kind, &c.State, &c.Sequence, &c.Outcome, &c.Reason, &c.CreatedAt, &c.ClaimedAt, &c.CompletedAt)
+	err := row.Scan(&c.ID, &c.SessionID, &c.Kind, &c.State, &c.Sequence, &c.Outcome, &c.Reason, &c.CreatedAt, &c.ClaimedAt, &c.CompletedAt, &c.ExpectedOwnership, &c.requestDigest, &c.ExpiresAt)
 	return c, err
 }
 func (m *Module) interrupt(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
@@ -160,6 +164,9 @@ func (m *Module) completeControl(r *http.Request, tx pgx.Tx, p tenant.Principal)
 	c, err := scanControl(tx.QueryRow(ctx, `SELECT `+controlColumns+` FROM harness_controls WHERE session_id=$1 AND id=$2 FOR UPDATE`, s.ID, id))
 	if err != nil {
 		return nil, err
+	}
+	if c.Kind == "force_stop" && in.Outcome == "applied" && in.Reason != "owned_group_signalled_root_exited" {
+		return nil, workorders.Fail(400, "verified force-stop result required")
 	}
 	if c.State == "completed" {
 		if c.Outcome != nil && c.Reason != nil && *c.Outcome == in.Outcome && *c.Reason == in.Reason {
