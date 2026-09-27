@@ -13,6 +13,7 @@ import (
 // The caller must bind the requested exact model before starting the first turn.
 type ManagedCodex struct {
 	thread, model, requested  string
+	turn                      string
 	rerouteModel, rerouteTurn string
 	requireModel              bool
 	previous                  snapshot
@@ -26,6 +27,17 @@ func NewManagedCodex(thread, model string) (*ManagedCodex, error) {
 		return nil, fmt.Errorf("%w: managed thread/model binding", ErrRejected)
 	}
 	return &ManagedCodex{thread: thread, model: model, requested: model, previous: snapshot{cachedKnown: true}, models: map[string]UsageReport{}}, nil
+}
+
+// BindTurn checks any pre-ack usage identity against the acknowledged turn.
+// Thread totals without turnId remain bound to this fresh, single-turn thread.
+func (c *ManagedCodex) BindTurn(turn string) error {
+	if !validSourceID(turn) || c.turn != "" && c.turn != turn {
+		c.failed = true
+		return ErrRejected
+	}
+	c.turn = turn
+	return nil
 }
 
 // Observe accepts thread/tokenUsage/updated and model/rerouted. A model switch needs the
@@ -65,6 +77,12 @@ func (c *ManagedCodex) Observe(raw []byte) (report *UsageReport, err error) {
 	}
 	if err := checkSourceIdentity(fields, Options{SourceSessionID: c.thread}); err != nil {
 		return nil, err
+	}
+	if raw, ok := params["turnId"]; ok {
+		turn, err := parseString(raw)
+		if err != nil || c.BindTurn(turn) != nil {
+			return nil, ErrRejected
+		}
 	}
 	if method == "model/rerouted" {
 		from, err := parseString(params["fromModel"])

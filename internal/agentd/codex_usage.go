@@ -3,18 +3,31 @@
 package agentd
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"time"
 
 	"github.com/inspr-at/paimos/internal/sessionusage"
 )
 
 // notification is serialized with binding changes by wireProcess.eventMu.
 func (p *codexProcess) notification(raw json.RawMessage) {
+	if p.sealed {
+		return
+	}
 	method, _, model := eventProbe(raw)
 	if method == "item/started" {
 		p.observe(AdapterEvent{Kind: "tool"})
 	}
 	if method == "thread/tokenUsage/updated" || method == "model/rerouted" {
+		// Any usage/reroute after a terminal contradicts this single-turn
+		// capture, including an identical replay. Continue existing run accounting
+		// and normalized provisional snapshots, but never upgrade them to final.
+		if p.terminalSeen {
+			p.invalid = true
+			p.signalTerminal()
+		}
 		// The normalized session path shares UP1's strict schemas. Run accounting
 		// keeps its existing independent thread cumulative delta settlement.
 		if p.usage != nil {
@@ -23,7 +36,7 @@ func (p *codexProcess) notification(raw json.RawMessage) {
 				// Only an exact, parser-validated usage model is vendor evidence.
 				// Arbitrary model-like text on other notifications is not metadata.
 				if model != "" && model == report.Model {
-					ev.Kind, ev.EffectiveModel, ev.ModelEvidence = "status", report.Model, "vendor_reported"
+					ev.Kind, ev.EffectiveModel, ev.ModelEvidence = "usage", report.Model, "vendor_reported"
 				}
 				p.observe(ev)
 			}
@@ -53,23 +66,103 @@ func (p *codexProcess) notification(raw json.RawMessage) {
 		}
 	}
 	if method == "turn/completed" || method == "turn/failed" {
-		var frame struct {
-			Params struct {
-				ThreadID string `json:"threadId"`
-			} `json:"params"`
+		terminal, err := sessionusage.ParseCodexTerminal(raw)
+		if p.terminalSeen || err != nil || terminal.ThreadID != p.threadID || p.threadID == "" {
+			p.invalid = true
+		} else {
+			// One bounded normalized candidate, even before turn/start replies.
+			p.terminal = &terminal
 		}
-		if json.Unmarshal(raw, &frame) != nil || p.threadID == "" || frame.Params.ThreadID != p.threadID {
-			return
+		p.terminalSeen = true
+		p.signalTerminal()
+	}
+}
+
+// Called under eventMu. A notification alone never acknowledges turn/start.
+func (p *codexProcess) signalTerminal() {
+	if !p.acknowledged {
+		return
+	}
+	if p.terminal != nil && p.terminal.TurnID != p.turnID {
+		p.invalid = true
+	}
+	if p.terminalSeen || p.invalid {
+		p.once.Do(func() { p.done <- true })
+	}
+}
+
+func (p *codexProcess) startTurn(ctx context.Context, r StartRequest) error {
+	// This connection owns exactly one fresh thread and one turn/start RPC.
+	thread := p.threadID
+	raw, err := p.request(ctx, "jsonrpc", "turn/start", map[string]any{"threadId": thread, "input": []map[string]string{{"type": "text", "text": r.Prompt}}, "model": r.Profile.Model, "effort": r.Profile.Effort})
+	turn, parseErr := sessionusage.CodexStartedTurn(raw)
+	p.eventMu.Lock()
+	defer p.eventMu.Unlock()
+	if err != nil || parseErr != nil || thread == "" || p.threadID != thread {
+		p.invalid = true
+		p.sealUsage(false)
+		return errors.New("Codex turn start failed")
+	}
+	p.turnID, p.acknowledged = turn, true
+	if p.usage != nil {
+		// Usage with an explicit pre-ack turnId must agree with this result.
+		if err := p.usage.BindTurn(turn); err != nil {
+			p.invalid = true
 		}
-		p.once.Do(func() {
-			_, clean, err := sessionusage.CodexTerminalStatus(raw)
-			clean = clean && err == nil
-			if p.usage != nil {
-				for _, report := range p.usage.Finish(clean) {
-					p.observe(AdapterEvent{SessionUsage: &report})
-				}
-			}
-			p.done <- !clean
-		})
+	}
+	p.signalTerminal()
+	return nil
+}
+
+// waitForTurn defines the irreversible finality boundary. After an acknowledged
+// candidate (or child/stream exit), stop the owned child and join BOTH its exit
+// and the reader's actual EOF within one bounded interval. The reader remains
+// active through stop, including buffered frames; no quiet-time heuristic or
+// detached goroutine may upgrade a receipt later. Stop/drain errors fail closed.
+func (p *codexProcess) waitForTurn(stop func(context.Context) error, timeout time.Duration) error {
+	select {
+	case <-p.done:
+	case <-p.waitDone:
+	case <-p.readDone:
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	stopErr := stop(ctx)
+	cleanDrain := true
+	for _, done := range []chan struct{}{p.waitDone, p.readDone} {
+		select {
+		case <-done:
+		case <-ctx.Done():
+			cleanDrain = false
+		}
+	}
+	if cleanDrain {
+		cleanDrain = p.readErr == nil
+	} else if p.stdout != nil {
+		// A descendant holding stdout open cannot keep a detached reader alive.
+		// Closing locally is loss of evidence, never equivalent to source EOF.
+		_ = p.stdout.Close()
+	}
+	p.eventMu.Lock()
+	defer p.eventMu.Unlock()
+	clean := stopErr == nil && ctx.Err() == nil && cleanDrain && p.acknowledged && !p.invalid && p.terminal != nil && p.terminal.Clean && p.terminal.ThreadID == p.threadID && p.terminal.TurnID == p.turnID
+	p.sealUsage(clean)
+	if !clean {
+		return errors.New("Codex turn completion unconfirmed")
+	}
+	return nil
+}
+
+// Called under eventMu only after the boundary, or when turn/start failed.
+func (p *codexProcess) sealUsage(clean bool) {
+	if p.sealed {
+		return
+	}
+	p.sealed = true
+	p.invalid = p.invalid || !clean
+	if p.usage != nil {
+		for _, report := range p.usage.Finish(clean) {
+			p.observe(AdapterEvent{SessionUsage: &report})
+		}
 	}
 }

@@ -25,6 +25,7 @@ type wireProcess struct {
 	lifetime    *ownedprocess.Lifetime
 	cmd         *exec.Cmd
 	stdin       io.WriteCloser
+	stdout      io.ReadCloser
 	writeMu     sync.Mutex
 	mu          sync.Mutex
 	eventMu     sync.Mutex
@@ -32,6 +33,7 @@ type wireProcess struct {
 	readDone    chan struct{}
 	waitDone    chan struct{}
 	waitErr     error
+	readErr     error // published before readDone closes; nil means actual EOF
 	next        atomic.Int64
 	observe     func(AdapterEvent)
 	onEvent     func(json.RawMessage)
@@ -74,24 +76,31 @@ func launchWire(path string, args []string, workspace string, environment []stri
 	if err != nil {
 		return nil, err
 	}
-	stdout, err := cmd.StdoutPipe()
+	// Own the read descriptor: exec.Cmd.Wait must not close it while buffered
+	// terminal/usage frames are still draining after the child exits.
+	stdout, childStdout, err := os.Pipe()
 	if err != nil {
 		_ = stdin.Close()
 		return nil, err
 	}
+	cmd.Stdout = childStdout
+	defer childStdout.Close()
 	cmd.Stderr = io.Discard
 	configured := ownedprocess.Configure(cmd)
 	if err := cmd.Start(); err != nil {
 		_ = stdin.Close()
+		_ = stdout.Close()
 		return nil, errors.New("adapter child start failed")
 	}
 	if err := ownedprocess.Verify(cmd, configured); err != nil {
 		_ = ownedprocess.Signal(cmd, true)
 		_ = cmd.Wait()
+		_ = stdin.Close()
+		_ = stdout.Close()
 		return nil, err
 	}
-	p := &wireProcess{cmd: cmd, stdin: stdin, pending: map[string]chan json.RawMessage{}, readDone: make(chan struct{}), waitDone: make(chan struct{}), observe: observe, protocol: protocol}
-	go p.read(stdout)
+	p := &wireProcess{cmd: cmd, stdin: stdin, stdout: stdout, pending: map[string]chan json.RawMessage{}, readDone: make(chan struct{}), waitDone: make(chan struct{}), observe: observe, protocol: protocol}
+	go func() { defer stdout.Close(); p.read(stdout) }()
 	processID, err := randomID()
 	if err != nil {
 		_ = ownedprocess.Signal(cmd, true)
@@ -120,6 +129,7 @@ func (p *wireProcess) read(src io.Reader) {
 			Kind   string          `json:"kind"`
 		}
 		if json.Unmarshal(raw, &frame) != nil {
+			p.readErr = errors.New("adapter event stream malformed")
 			break
 		}
 		id := strings.Trim(string(frame.ID), "\"")
@@ -138,6 +148,7 @@ func (p *wireProcess) read(src io.Reader) {
 		p.eventMu.Lock()
 		if p.onEvent == nil {
 			if len(p.earlyEvents) >= 32 {
+				p.readErr = errors.New("adapter early event bound")
 				p.eventMu.Unlock()
 				break
 			}
@@ -147,8 +158,11 @@ func (p *wireProcess) read(src io.Reader) {
 		}
 		p.eventMu.Unlock()
 	}
-	if scanner.Err() != nil && p.observe != nil {
-		p.observe(AdapterEvent{Kind: "status", ErrorCode: "event_stream_bound"})
+	if scanner.Err() != nil {
+		p.readErr = errors.New("adapter event stream incomplete")
+		if p.observe != nil {
+			p.observe(AdapterEvent{Kind: "status", ErrorCode: "event_stream_bound"})
+		}
 	}
 }
 
@@ -202,32 +216,38 @@ func (p *wireProcess) request(ctx context.Context, protocol, method string, para
 	if err := p.send(frame); err != nil {
 		return nil, err
 	}
+	var raw json.RawMessage
 	select {
-	case raw := <-ch:
-		var response struct {
-			Result  json.RawMessage `json:"result"`
-			Error   json.RawMessage `json:"error"`
-			Success *bool           `json:"success"`
-			Data    json.RawMessage `json:"data"`
-		}
-		if json.Unmarshal(raw, &response) != nil || len(response.Error) > 0 && string(response.Error) != "null" {
-			return nil, errors.New("adapter protocol rejected request")
-		}
-		if protocol == "pi" {
-			if response.Success == nil || !*response.Success {
-				return nil, errors.New("Pi RPC rejected request")
-			}
-			return response.Data, nil
-		}
-		if response.Result == nil {
-			return nil, errors.New("adapter protocol response missing result")
-		}
-		return response.Result, nil
+	case raw = <-ch:
 	case <-p.readDone:
-		return nil, errors.New("adapter protocol closed")
+		// EOF can race a response already delivered by the same reader.
+		select {
+		case raw = <-ch:
+		default:
+			return nil, errors.New("adapter protocol closed")
+		}
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
+	var response struct {
+		Result  json.RawMessage `json:"result"`
+		Error   json.RawMessage `json:"error"`
+		Success *bool           `json:"success"`
+		Data    json.RawMessage `json:"data"`
+	}
+	if json.Unmarshal(raw, &response) != nil || len(response.Error) > 0 && string(response.Error) != "null" {
+		return nil, errors.New("adapter protocol rejected request")
+	}
+	if protocol == "pi" {
+		if response.Success == nil || !*response.Success {
+			return nil, errors.New("Pi RPC rejected request")
+		}
+		return response.Data, nil
+	}
+	if response.Result == nil {
+		return nil, errors.New("adapter protocol response missing result")
+	}
+	return response.Result, nil
 }
 
 // GracefulStop sends TERM only. A timeout is a visible rejected control, never

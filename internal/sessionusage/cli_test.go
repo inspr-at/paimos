@@ -60,19 +60,53 @@ func TestRunRejectsRemovedUnsafeModesAndBadArgs(t *testing.T) {
 		}
 	}
 }
+func checkpointJSON(t *testing.T, n int) []byte {
+	t.Helper()
+	b, err := json.Marshal(Checkpoint{Binding: strings.Repeat("a", 64), Bytes: n, Digest: strings.Repeat("b", 64)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ParseCheckpoint(b); err != nil {
+		t.Fatal(err)
+	}
+	return b
+}
+
 func TestCheckpointPathSafetyAndSchema(t *testing.T) {
-	dir := t.TempDir()
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
 	good := filepath.Join(dir, "checkpoint.json")
-	if err := os.WriteFile(good, []byte(`{}`), 0600); err != nil {
+	if err := os.WriteFile(good, checkpointJSON(t, 1), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readCheckpoint(good); err != nil {
 		t.Fatal(err)
 	}
 	link := filepath.Join(dir, "link.json")
 	if err := os.Symlink(good, link); err != nil {
 		t.Fatal(err)
 	}
-	for _, path := range []string{link, dir, filepath.Join(dir, ".env"), filepath.Join(dir, ".codex", "checkpoint.json"), good} {
+	for _, name := range []string{".env", "data.key", "id_test", ".codex", ".cursor", ".ssh", ".inspr", ".aws", ".gnupg", "secrets", "credentials", "auth.json"} {
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, checkpointJSON(t, 2), 0600); err != nil {
+			t.Fatal(err)
+		}
 		if _, err := readCheckpoint(path); err == nil {
-			t.Fatalf("accepted %s", path)
+			t.Fatal("forbidden path accepted")
+		}
+		if _, err := readCheckpoint(path + "/../checkpoint.json"); err == nil {
+			t.Fatal("cleaning erased forbidden component")
+		}
+	}
+	bad := filepath.Join(dir, "invalid.json")
+	if err := os.WriteFile(bad, []byte(`{}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{link, dir, bad} {
+		if _, err := readCheckpoint(path); err == nil {
+			t.Fatal("unsafe path or schema accepted")
 		}
 	}
 }

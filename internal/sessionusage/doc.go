@@ -10,6 +10,9 @@
 // Its caller binds the returned counters to the registered Aeon session, assigns
 // immutable receipts, retries HTTP and owns final settlement. Unlike the offline
 // path it retains bounded normalized state only for the current daemon lifetime.
+// Managed turn identity is checked against the correlated start acknowledgement;
+// only the caller's successful owned-process stop and complete stream drain can
+// seal usage. A terminal notification alone is not an irreversible receipt.
 // Cursor's managed ACP cost-only usage_update is not a terminal result.usage
 // record and does not supply tokens to this path.
 //
@@ -68,6 +71,10 @@
 // (the previous Result.checkpoint object). Save stdout durably before POST;
 // extract only Result.reports for the endpoint. Keep checkpoints local. These
 // commands consume existing metadata captures; they do not capture live usage.
+// Checkpoint paths must be physical: Linux/Darwin walk pinned descriptors with
+// no-follow/nonblocking opens, then check the opened regular file and its 1KiB
+// bound before reading at most 1025 bytes. Other platforms refuse file reads.
+// Forbidden vendor/auth path components are rejected even before path cleaning.
 //
 // Source format references:
 // https://developers.openai.com/codex/noninteractive

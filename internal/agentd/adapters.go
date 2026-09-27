@@ -103,21 +103,13 @@ type codexProcess struct {
 	once                      sync.Once
 	usage                     *sessionusage.ManagedCodex
 	inputTokens, outputTokens int64
+	terminal                  *sessionusage.CodexTerminal
+	terminalSeen, invalid     bool
+	acknowledged, sealed      bool
 }
 
 func (p *codexProcess) Wait() error {
-	select {
-	case failed := <-p.done:
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		defer cancel()
-		_ = p.wireProcess.Stop(ctx)
-		if failed {
-			return errors.New("Codex turn failed")
-		}
-		return nil
-	case <-p.waitDone:
-		return errors.New("Codex child exited before turn completion")
-	}
+	return p.waitForTurn(p.wireProcess.Stop, 2*time.Second)
 }
 func (p *codexProcess) Control(ctx context.Context, op, text string) error {
 	ctx, cancel := operationContext(ctx)
@@ -199,19 +191,9 @@ func (a *CodexAdapter) Start(ctx context.Context, r StartRequest, observe func(A
 	// prevent the existing run protocol and settlement from operating.
 	cp.usage, _ = sessionusage.NewManagedCodex(p.threadID, r.Profile.Model)
 	p.eventMu.Unlock()
-	var turn struct {
-		Turn struct {
-			ID     string `json:"id"`
-			Status string `json:"status"`
-		} `json:"turn"`
-	}
-	raw, err = p.request(op, "jsonrpc", "turn/start", map[string]any{"threadId": p.threadID, "input": []map[string]string{{"type": "text", "text": r.Prompt}}, "model": r.Profile.Model, "effort": r.Profile.Effort})
-	if err != nil || json.Unmarshal(raw, &turn) != nil || turn.Turn.ID == "" || turn.Turn.Status != "inProgress" {
+	if err := cp.startTurn(op, r); err != nil {
 		return fail(errors.New("Codex turn start failed"))
 	}
-	p.eventMu.Lock()
-	p.turnID = turn.Turn.ID
-	p.eventMu.Unlock()
 	observe(AdapterEvent{Kind: "turn", TurnCountDelta: 1})
 	return cp, nil
 }

@@ -199,7 +199,7 @@ func TestManagedCodexSplitStreamToSessionEndpoint(t *testing.T) {
 		t.Fatal(err)
 	}
 	var runInput, runOutput int64
-	wire := &wireProcess{readDone: make(chan struct{}), pending: map[string]chan json.RawMessage{}, threadID: "synthetic-thread", protocol: "jsonrpc"}
+	wire := &wireProcess{readDone: make(chan struct{}), pending: map[string]chan json.RawMessage{}, threadID: "synthetic-thread", protocol: "jsonrpc", turnID: "synthetic-turn", waitDone: make(chan struct{})}
 	wire.observe = func(ev AdapterEvent) {
 		if ev.SessionUsage != nil {
 			reporter.submit(*ev.SessionUsage)
@@ -207,7 +207,7 @@ func TestManagedCodexSplitStreamToSessionEndpoint(t *testing.T) {
 		runInput += ev.InputTokensDelta
 		runOutput += ev.OutputTokensDelta
 	}
-	proc := &codexProcess{wireProcess: wire, usage: capture, done: make(chan bool, 1)}
+	proc := &codexProcess{wireProcess: wire, usage: capture, done: make(chan bool, 1), acknowledged: true}
 	wire.setOnEvent(proc.notification)
 	stream := strings.Join([]string{
 		`{"method":"item/agentMessage/delta","params":{"delta":"synthetic private text"}}`,
@@ -215,9 +215,12 @@ func TestManagedCodexSplitStreamToSessionEndpoint(t *testing.T) {
 		`{"method":"thread/tokenUsage/updated","params":{"threadId":"synthetic-thread","tokenUsage":{"total":{"inputTokens":100,"outputTokens":20,"cachedInputTokens":30}}}}`,
 		`{"method":"model/rerouted","params":{"threadId":"synthetic-thread","turnId":"synthetic-turn","fromModel":"model-a","toModel":"model-b","reason":"synthetic private text"}}`,
 		`{"method":"thread/tokenUsage/updated","params":{"threadId":"synthetic-thread","turnId":"synthetic-turn","tokenUsage":{"total":{"inputTokens":150,"outputTokens":28,"cachedInputTokens":40},"last":{"inputTokens":50,"outputTokens":8,"cachedInputTokens":10}}}}`,
-		`{"method":"turn/completed","params":{"threadId":"synthetic-thread","turn":{"status":"completed"}}}`,
+		`{"method":"turn/completed","params":{"threadId":"synthetic-thread","turn":{"id":"synthetic-turn","status":"completed"}}}`,
 	}, "\n") + "\n"
 	wire.read(iotest.OneByteReader(strings.NewReader(stream)))
+	if err := proc.waitForTurn(func(context.Context) error { close(wire.waitDone); return nil }, time.Second); err != nil {
+		t.Fatal(err)
+	}
 	if err := finishUsageTest(t, reporter); err != nil {
 		t.Fatal(err)
 	}
@@ -241,7 +244,7 @@ func TestManagedCodexSplitStreamToSessionEndpoint(t *testing.T) {
 
 type terminalWaitProcess struct {
 	*fakeProcess
-	result <-chan bool
+	codex *codexProcess
 }
 
 type terminalFixtureAdapter struct{ process Process }
@@ -253,10 +256,7 @@ func (a *terminalFixtureAdapter) Start(_ context.Context, _ StartRequest, _ func
 }
 
 func (p *terminalWaitProcess) Wait() error {
-	if <-p.result {
-		return errors.New("Codex turn failed")
-	}
-	return nil
+	return p.codex.waitForTurn(func(context.Context) error { close(p.codex.waitDone); return nil }, time.Second)
 }
 
 func TestManagedCodexTerminalFailurePreventsCompletedRunAndFinalUsage(t *testing.T) {
@@ -264,11 +264,11 @@ func TestManagedCodexTerminalFailurePreventsCompletedRunAndFinalUsage(t *testing
 		name, method, turn string
 		clean              bool
 	}{
-		{"clean", "turn/completed", `{"status":"completed"}`, true},
-		{"failed_method", "turn/failed", `{"status":"failed","error":"PRIVATE_SENTINEL"}`, false},
-		{"failed_status", "turn/completed", `{"status":"failed","error":"PRIVATE_SENTINEL"}`, false},
-		{"interrupted", "turn/completed", `{"status":"interrupted","error":"PRIVATE_SENTINEL"}`, false},
-		{"missing_status", "turn/completed", `{"error":"PRIVATE_SENTINEL"}`, false},
+		{"clean", "turn/completed", `{"id":"synthetic-turn","status":"completed"}`, true},
+		{"failed_method", "turn/failed", `{"id":"synthetic-turn","status":"failed","error":"PRIVATE_SENTINEL"}`, false},
+		{"failed_status", "turn/completed", `{"id":"synthetic-turn","status":"failed","error":"PRIVATE_SENTINEL"}`, false},
+		{"interrupted", "turn/completed", `{"id":"synthetic-turn","status":"interrupted","error":"PRIVATE_SENTINEL"}`, false},
+		{"missing_status", "turn/completed", `{"id":"synthetic-turn","error":"PRIVATE_SENTINEL"}`, false},
 		{"malformed_turn", "turn/completed", `"PRIVATE_SENTINEL"`, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -281,13 +281,13 @@ func TestManagedCodexTerminalFailurePreventsCompletedRunAndFinalUsage(t *testing
 				t.Fatal(err)
 			}
 			var reports []sessionusage.UsageReport
-			wire := &wireProcess{threadID: "synthetic-thread", observe: func(ev AdapterEvent) {
+			wire := &wireProcess{threadID: "synthetic-thread", turnID: "synthetic-turn", readDone: make(chan struct{}), waitDone: make(chan struct{}), observe: func(ev AdapterEvent) {
 				if ev.SessionUsage != nil {
 					reports = append(reports, *ev.SessionUsage)
 				}
 			}}
-			codex := &codexProcess{wireProcess: wire, usage: capture, done: make(chan bool, 1)}
-			s.adapters[Codex] = &terminalFixtureAdapter{process: &terminalWaitProcess{fakeProcess: fake, result: codex.done}}
+			codex := &codexProcess{wireProcess: wire, usage: capture, done: make(chan bool, 1), acknowledged: true}
+			s.adapters[Codex] = &terminalFixtureAdapter{process: &terminalWaitProcess{fakeProcess: fake, codex: codex}}
 			if err := s.PollOnce(t.Context()); err != nil {
 				t.Fatal(err)
 			}
@@ -297,7 +297,10 @@ func TestManagedCodexTerminalFailurePreventsCompletedRunAndFinalUsage(t *testing
 			entry.mu.Unlock()
 			codex.notification(json.RawMessage(`{"jsonrpc":"2.0","method":"thread/tokenUsage/updated","params":{"threadId":"synthetic-thread","tokenUsage":{"total":{"inputTokens":12,"outputTokens":3,"cachedInputTokens":2}}}}`))
 			terminal := `{"jsonrpc":"2.0","method":"` + tc.method + `","params":{"threadId":"synthetic-thread","turn":` + tc.turn + `}}`
+			wire.eventMu.Lock()
 			codex.notification(json.RawMessage(terminal))
+			wire.eventMu.Unlock()
+			close(wire.readDone)
 			select {
 			case <-entry.monitorDone:
 			case <-time.After(3 * time.Second):

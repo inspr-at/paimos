@@ -95,14 +95,16 @@ func TestJSONRPCTerminalRequiresExplicitCleanCompletion(t *testing.T) {
 		name, terminal string
 		want           error
 	}{
-		{"failed_method", `{"jsonrpc":"2.0","method":"turn/failed","params":{"threadId":"thread-1","turn":{"status":"failed","error":"PRIVATE_SENTINEL"}}}`, ErrRejected},
-		{"interrupted", `{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thread-1","turn":{"status":"interrupted","error":"PRIVATE_SENTINEL"}}}`, ErrRejected},
-		{"failed_status", `{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thread-1","turn":{"status":"failed","error":"PRIVATE_SENTINEL"}}}`, ErrRejected},
-		{"missing_status", `{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thread-1","turn":{"error":"PRIVATE_SENTINEL"}}}`, ErrMalformed},
+		{"failed_method", `{"jsonrpc":"2.0","method":"turn/failed","params":{"threadId":"thread-1","turn":{"id":"turn-1","status":"failed","error":"PRIVATE_SENTINEL"}}}`, ErrRejected},
+		{"interrupted", `{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thread-1","turn":{"id":"turn-1","status":"interrupted","error":"PRIVATE_SENTINEL"}}}`, ErrRejected},
+		{"failed_status", `{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thread-1","turn":{"id":"turn-1","status":"failed","error":"PRIVATE_SENTINEL"}}}`, ErrRejected},
+		{"missing_turn_id", `{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thread-1","turn":{"status":"completed"}}}`, ErrMalformed},
+		{"duplicate_turn_id", `{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thread-1","turn":{"id":"turn-1","id":"turn-2","status":"completed"}}}`, ErrAmbiguous},
+		{"missing_status", `{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thread-1","turn":{"id":"turn-1","error":"PRIVATE_SENTINEL"}}}`, ErrMalformed},
 		{"malformed_turn", `{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thread-1","turn":"PRIVATE_SENTINEL"}}`, ErrMalformed},
-		{"missing_thread", `{"jsonrpc":"2.0","method":"turn/completed","params":{"turn":{"status":"completed","error":"PRIVATE_SENTINEL"}}}`, ErrMalformed},
-		{"competing_format", `{"jsonrpc":"2.0","type":"PRIVATE_SENTINEL","method":"turn/completed","params":{"threadId":"thread-1","turn":{"status":"completed"}}}`, ErrAmbiguous},
-		{"wrong_version", `{"jsonrpc":"1.0","method":"turn/completed","params":{"threadId":"thread-1","turn":{"status":"completed","error":"PRIVATE_SENTINEL"}}}`, ErrMalformed},
+		{"missing_thread", `{"jsonrpc":"2.0","method":"turn/completed","params":{"turn":{"id":"turn-1","status":"completed","error":"PRIVATE_SENTINEL"}}}`, ErrMalformed},
+		{"competing_format", `{"jsonrpc":"2.0","type":"PRIVATE_SENTINEL","method":"turn/completed","params":{"threadId":"thread-1","turn":{"id":"turn-1","status":"completed"}}}`, ErrAmbiguous},
+		{"wrong_version", `{"jsonrpc":"1.0","method":"turn/completed","params":{"threadId":"thread-1","turn":{"id":"turn-1","status":"completed","error":"PRIVATE_SENTINEL"}}}`, ErrMalformed},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := Parse(strings.NewReader(usage+"\n"+tc.terminal), opt)
@@ -111,7 +113,7 @@ func TestJSONRPCTerminalRequiresExplicitCleanCompletion(t *testing.T) {
 			}
 		})
 	}
-	clean := `{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thread-1","turn":{"status":"completed"}}}`
+	clean := `{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thread-1","turn":{"id":"turn-1","status":"completed"}}}`
 	res := mustParse(t, usage+"\n"+clean, opt)
 	if len(res.Reports) != 1 || res.Reports[0].Provisional || *res.Reports[0].InputTokens != 12 {
 		t.Fatalf("clean completion: %+v", res.Reports)

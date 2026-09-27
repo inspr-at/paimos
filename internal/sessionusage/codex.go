@@ -3,6 +3,7 @@
 package sessionusage
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 )
@@ -74,17 +75,65 @@ func classifyCodex(fields map[string]json.RawMessage) (usageRecord, int, error) 
 	}
 }
 
-// CodexTerminalStatus classifies only the bounded app-server terminal envelope.
-// It never includes source strings or error details in diagnostics.
-func CodexTerminalStatus(raw []byte) (terminal, clean bool, err error) {
+// CodexTerminal contains only bounded identity and outcome evidence. Raw items,
+// source errors and other terminal fields are never retained.
+type CodexTerminal struct {
+	ThreadID, TurnID string
+	Clean            bool
+}
+
+// ParseCodexTerminal validates the app-server envelope, including turn identity.
+func ParseCodexTerminal(raw []byte) (CodexTerminal, error) {
 	if len(raw) > maxLine {
-		return false, false, fmt.Errorf("%w: terminal record too large", ErrMalformed)
+		return CodexTerminal{}, ErrMalformed
 	}
 	fields, err := decodeLine(raw)
 	if err != nil {
-		return false, false, err
+		return CodexTerminal{}, err
 	}
-	return codexTerminalStatus(fields)
+	return parseCodexTerminal(fields)
+}
+
+func parseCodexTerminal(fields map[string]json.RawMessage) (CodexTerminal, error) {
+	var out CodexTerminal
+	method, err := parseString(fields["method"])
+	if err != nil || method != "turn/completed" && method != "turn/failed" {
+		return out, ErrRejected
+	}
+	if fields["type"] != nil {
+		return out, fmt.Errorf("%w: competing terminal formats", ErrAmbiguous)
+	}
+	if raw, ok := fields["jsonrpc"]; ok {
+		version, err := parseString(raw)
+		if err != nil || version != "2.0" {
+			return out, fmt.Errorf("%w: jsonrpc version", ErrMalformed)
+		}
+	}
+	params, err := objectField(fields, "params")
+	if err != nil {
+		return out, err
+	}
+	out.ThreadID, err = parseString(params["threadId"])
+	if err != nil || !validSourceID(out.ThreadID) {
+		return CodexTerminal{}, fmt.Errorf("%w: terminal thread identity missing", ErrMalformed)
+	}
+	turn, err := objectField(params, "turn")
+	if err != nil {
+		return CodexTerminal{}, err
+	}
+	out.TurnID, err = parseString(turn["id"])
+	if err != nil || !validSourceID(out.TurnID) {
+		return CodexTerminal{}, fmt.Errorf("%w: terminal turn identity missing", ErrMalformed)
+	}
+	status, err := parseString(turn["status"])
+	if err != nil || status == "" {
+		return CodexTerminal{}, fmt.Errorf("%w: terminal status missing", ErrMalformed)
+	}
+	out.Clean = method == "turn/completed" && status == "completed"
+	if raw := turn["error"]; out.Clean && raw != nil && !bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		return CodexTerminal{}, fmt.Errorf("%w: completed turn carries failure", ErrAmbiguous)
+	}
+	return out, nil
 }
 
 func codexTerminalStatus(fields map[string]json.RawMessage) (terminal, clean bool, err error) {
@@ -92,35 +141,37 @@ func codexTerminalStatus(fields map[string]json.RawMessage) (terminal, clean boo
 	if err != nil || method != "turn/completed" && method != "turn/failed" {
 		return false, false, nil
 	}
-	if fields["type"] != nil {
-		return true, false, fmt.Errorf("%w: competing terminal formats", ErrAmbiguous)
+	out, err := parseCodexTerminal(fields)
+	if err == nil && !out.Clean {
+		err = fmt.Errorf("%w: failed or incomplete source turn", ErrRejected)
 	}
-	if raw, ok := fields["jsonrpc"]; ok {
-		version, err := parseString(raw)
-		if err != nil || version != "2.0" {
-			return true, false, fmt.Errorf("%w: jsonrpc version", ErrMalformed)
-		}
+	return true, out.Clean, err
+}
+
+// CodexStartedTurn validates the result of this connection's turn/start request.
+// The protocol returns the initial turn, not another thread identity. The caller
+// binds it to the exact threadId it sent in that correlated request.
+func CodexStartedTurn(raw []byte) (string, error) {
+	if len(raw) > maxLine {
+		return "", ErrMalformed
 	}
-	params, err := objectField(fields, "params")
+	fields, err := decodeLine(raw)
 	if err != nil {
-		return true, false, err
+		return "", err
 	}
-	thread, err := parseString(params["threadId"])
-	if err != nil || !validSourceID(thread) {
-		return true, false, fmt.Errorf("%w: terminal thread identity missing", ErrMalformed)
-	}
-	turn, err := objectField(params, "turn")
+	turn, err := objectField(fields, "turn")
 	if err != nil {
-		return true, false, err
+		return "", err
+	}
+	id, err := parseString(turn["id"])
+	if err != nil || !validSourceID(id) {
+		return "", ErrMalformed
 	}
 	status, err := parseString(turn["status"])
-	if err != nil || status == "" {
-		return true, false, fmt.Errorf("%w: terminal status missing", ErrMalformed)
+	if err != nil || status != "inProgress" {
+		return "", ErrRejected
 	}
-	if method != "turn/completed" || status != "completed" {
-		return true, false, fmt.Errorf("%w: failed or incomplete source turn", ErrRejected)
-	}
-	return true, true, nil
+	return id, nil
 }
 
 func codexInfoUsage(holder, modelHolder map[string]json.RawMessage) (usageRecord, error) {

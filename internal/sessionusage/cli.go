@@ -95,44 +95,49 @@ func parseArgs(args []string) (Options, string, error) {
 }
 
 func readCheckpoint(path string) (*Checkpoint, error) {
+	return readCheckpointWithIO(path, openCheckpointFile, io.ReadAll)
+}
+
+func readCheckpointWithIO(path string, openFile func(string) (*os.File, error), readAll func(io.Reader) ([]byte, error)) (*Checkpoint, error) {
 	abs, err := filepath.Abs(path)
 	if err != nil {
 		return nil, &UsageError{Msg: "checkpoint path invalid"}
 	}
-	// No vendor/auth stores, encrypted files, symlink components or special files.
-	for p := abs; ; p = filepath.Dir(p) {
-		name := strings.ToLower(filepath.Base(p))
-		if strings.HasPrefix(name, ".env") || strings.HasPrefix(name, "id_") {
-			return nil, &UsageError{Msg: "checkpoint path forbidden"}
-		}
-		for _, suffix := range []string{".env", ".key", ".age", ".gpg"} {
-			if strings.HasSuffix(name, suffix) {
-				return nil, &UsageError{Msg: "checkpoint path forbidden"}
-			}
-		}
-		switch name {
-		case ".ssh", ".inspr", ".codex", ".cursor", ".aws", ".gnupg", "secrets", "credentials", "auth.json":
-			return nil, &UsageError{Msg: "checkpoint path forbidden"}
-		}
-		info, err := os.Lstat(p)
-		if err != nil || info.Mode()&os.ModeSymlink != 0 {
-			return nil, &UsageError{Msg: "checkpoint path unavailable or symlink"}
-		}
-		if p == abs && (!info.Mode().IsRegular() || info.Size() > 1024) {
-			return nil, &UsageError{Msg: "checkpoint must be a regular file of at most 1KiB"}
-		}
-		if filepath.Dir(p) == p {
-			break
-		}
+	if forbiddenCheckpointPath(path) || forbiddenCheckpointPath(abs) {
+		return nil, &UsageError{Msg: "checkpoint path forbidden"}
 	}
-	f, err := os.Open(abs)
+	f, err := openFile(abs)
 	if err != nil {
 		return nil, &UsageError{Msg: "checkpoint unreadable"}
 	}
 	defer f.Close()
-	raw, err := io.ReadAll(io.LimitReader(f, 1025))
-	if err != nil {
+	info, err := f.Stat()
+	if err != nil || !info.Mode().IsRegular() || info.Size() < 0 || info.Size() > 1024 {
+		return nil, &UsageError{Msg: "checkpoint must be a regular file of at most 1KiB"}
+	}
+	raw, err := readAll(io.LimitReader(f, 1025))
+	if err != nil || len(raw) > 1024 || int64(len(raw)) != info.Size() {
 		return nil, &UsageError{Msg: "checkpoint unreadable"}
 	}
 	return ParseCheckpoint(raw)
+}
+
+// Check the original spelling too: cleaning must not erase a forbidden component.
+func forbiddenCheckpointPath(path string) bool {
+	for _, part := range strings.Split(filepath.ToSlash(path), "/") {
+		name := strings.ToLower(part)
+		if strings.HasPrefix(name, ".env") || strings.HasPrefix(name, "id_") {
+			return true
+		}
+		for _, suffix := range []string{".env", ".key", ".age", ".gpg"} {
+			if strings.HasSuffix(name, suffix) {
+				return true
+			}
+		}
+		switch name {
+		case ".ssh", ".inspr", ".codex", ".cursor", ".aws", ".gnupg", "secrets", "credentials", "auth.json":
+			return true
+		}
+	}
+	return false
 }

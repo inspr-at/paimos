@@ -65,8 +65,12 @@ snapshots, with exact receipt retries and a five-second final flush. A model
 change needs explicit usage-model or `model/rerouted` evidence and a matching
 last-usage interval. Reroutes bind to the same turn; subsequent usage needs fresh
 model evidence because reroutes apply to individual requests;
-ambiguous or malformed captures remain provisional. Only a clean completed
-stream with all counters known is final. An archived generation (410) detaches
+ambiguous or malformed captures remain provisional. Final usage requires the
+acknowledged turn ID, one matching completed terminal, all counters known, and
+owned child stop plus stdout EOF within a two-second drain deadline. One bounded
+terminal candidate can wait for the start acknowledgement; duplicate terminals
+or usage after a terminal invalidate completion. Failed start, stream loss or
+drain timeout cannot publish final receipts. An archived generation (410) detaches
 the reporter without signalling the process; existing run settlement continues.
 The reporter retains bounded normalized state in memory, never raw output or
 worker leases on disk. Restart/crash recovery and external worker capture remain
