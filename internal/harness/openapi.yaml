@@ -49,6 +49,44 @@ paths:
             schema: {$ref: '#/components/schemas/HarnessBinding'}
       responses:
         '200': {description: Revisioned hierarchy and ticket binding}
+  /api/projects/{projectId}/harness-sessions/{sessionId}/recovery:
+    get:
+      operationId: previewHarnessRecovery
+      summary: Human-authorized recovery preview
+      parameters: [{$ref: '#/components/parameters/projectId'}, {$ref: '#/components/parameters/sessionId'}]
+      responses:
+        '200': {description: Exact session, host, observed revision and recovery confirmation; process state remains unknown}
+        '403': {description: Human harness.recover permission required}
+  /api/projects/{projectId}/harness-sessions/{sessionId}/controls/force-stop:
+    post:
+      operationId: forceStopHarnessSession
+      summary: Human-confirmed force stop of a verified live owned process group
+      parameters: [{$ref: '#/components/parameters/projectId'}, {$ref: '#/components/parameters/sessionId'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [expected_revision, confirmation, request_id, reason]
+              properties:
+                expected_revision: {type: string, pattern: '^[0-9a-f]{64}$'}
+                confirmation: {type: string, maxLength: 300}
+                request_id: {type: string, format: uuid}
+                reason: {type: string, minLength: 1, maxLength: 240}
+      responses:
+        '201': {description: Idempotent control with exact ownership and a 45-second expiry; pending is not confirmed exit}
+        '403': {description: Human harness.force_stop permission required}
+        '409': {description: Stale confirmation or unavailable ownership}
+  /api/projects/{projectId}/harness-sessions/{sessionId}/archive:
+    post:
+      operationId: archiveHarnessSession
+      summary: Archive a generation without claiming process exit
+      parameters: [{$ref: '#/components/parameters/projectId'}, {$ref: '#/components/parameters/sessionId'}]
+      responses:
+        '200': {description: Archived generation; old worker proofs and registration replays revoked; history retained}
+        '403': {description: Human harness.recover permission required}
+        '409': {description: Stale observation or divergent retry}
   /api/projects/{projectId}/harness-sessions/{sessionId}/heartbeat:
     post:
       operationId: heartbeatHarnessSession
@@ -57,6 +95,7 @@ paths:
         - $ref: '#/components/parameters/sessionId'
         - $ref: '#/components/parameters/workerLease'
       responses:
+        '410': {description: Authenticated archived generation; detach harness servicing without signaling a process}
         '200': {description: Updated heartbeat and phase}
   /api/projects/{projectId}/harness-sessions/{sessionId}/yield:
     post:
@@ -66,6 +105,7 @@ paths:
         - $ref: '#/components/parameters/sessionId'
         - $ref: '#/components/parameters/workerLease'
       responses:
+        '410': {description: Authenticated archived generation; detach harness servicing without signaling a process}
         '200': {description: Claimed typed owned controls}
   /api/projects/{projectId}/harness-sessions/{sessionId}/drain:
     post:
@@ -75,6 +115,7 @@ paths:
         - $ref: '#/components/parameters/sessionId'
         - $ref: '#/components/parameters/workerLease'
       responses:
+        '410': {description: Authenticated archived generation; detach harness servicing without signaling a process}
         '200': {description: Leased FIFO inbox message}
   /api/projects/{projectId}/harness-sessions/{sessionId}/complete-delivery:
     post:
@@ -84,6 +125,7 @@ paths:
         - $ref: '#/components/parameters/sessionId'
         - $ref: '#/components/parameters/workerLease'
       responses:
+        '410': {description: Authenticated archived generation; detach harness servicing without signaling a process}
         '200': {description: Exact leased delivery acknowledged}
   /api/projects/{projectId}/harness-sessions/{sessionId}/controls/interrupt:
     post:
@@ -119,6 +161,7 @@ paths:
         - $ref: '#/components/parameters/controlId'
         - $ref: '#/components/parameters/workerLease'
       responses:
+        '410': {description: Authenticated archived generation; detach harness servicing without signaling a process}
         '200': {description: Exact claimed control completion}
   /api/projects/{projectId}/harness-sessions/{sessionId}/stop:
     post:
@@ -128,6 +171,7 @@ paths:
         - $ref: '#/components/parameters/sessionId'
         - $ref: '#/components/parameters/workerLease'
       responses:
+        '410': {description: Authenticated archived generation; detach harness servicing without signaling a process}
         '200': {description: Closed immutable generation}
   /api/projects/{projectId}/harness-sessions/{sessionId}/provenance:
     get:

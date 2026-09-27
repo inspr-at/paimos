@@ -21,6 +21,8 @@ import (
 )
 
 type wireProcess struct {
+	identity    ownedprocess.Identity
+	lifetime    *ownedprocess.Lifetime
 	cmd         *exec.Cmd
 	stdin       io.WriteCloser
 	writeMu     sync.Mutex
@@ -56,6 +58,9 @@ func pinnedExecutable(path string) (string, error) {
 }
 
 func launchWire(path string, args []string, workspace string, environment []string, protocol string, observe func(AdapterEvent)) (*wireProcess, error) {
+	if !ownedprocess.TrackingSupported() {
+		return nil, errors.New("safe child lifetime observation unsupported")
+	}
 	path, err := pinnedExecutable(path)
 	if err != nil {
 		return nil, err
@@ -87,7 +92,15 @@ func launchWire(path string, args []string, workspace string, environment []stri
 	}
 	p := &wireProcess{cmd: cmd, stdin: stdin, pending: map[string]chan json.RawMessage{}, readDone: make(chan struct{}), waitDone: make(chan struct{}), observe: observe, protocol: protocol}
 	go p.read(stdout)
-	go func() { p.waitErr = cmd.Wait(); close(p.waitDone) }()
+	processID, err := randomID()
+	if err != nil {
+		_ = ownedprocess.Signal(cmd, true)
+		_ = cmd.Wait()
+		return nil, err
+	}
+	p.identity = ownedprocess.Identity{ProcessID: processID, RootPID: cmd.Process.Pid, GroupID: cmd.Process.Pid, StartedAt: time.Now().UTC()}
+	p.lifetime = ownedprocess.Track(cmd)
+	go func() { p.waitErr = p.lifetime.Wait(); close(p.waitDone) }()
 	return p, nil
 }
 
@@ -217,19 +230,13 @@ func (p *wireProcess) request(ctx context.Context, protocol, method string, para
 	}
 }
 
-func (p *wireProcess) Stop(ctx context.Context) error {
-	if p.cmd.Process == nil {
+// GracefulStop sends TERM only. A timeout is a visible rejected control, never
+// implicit authorization to forcefully terminate the process group.
+func (p *wireProcess) GracefulStop(ctx context.Context) error {
+	if err := p.lifetime.Verify(); err != nil {
 		return ErrNotOwned
 	}
-	if err := ownedprocess.Verify(p.cmd, true); err != nil {
-		select {
-		case <-p.waitDone:
-			return nil
-		default:
-			return ErrNotOwned
-		}
-	}
-	if err := ownedprocess.Signal(p.cmd, false); err != nil {
+	if err := p.lifetime.Signal(false); err != nil {
 		return err
 	}
 	select {
@@ -238,9 +245,59 @@ func (p *wireProcess) Stop(ctx context.Context) error {
 	case <-ctx.Done():
 		return ctx.Err()
 	case <-time.After(2 * time.Second):
-		if err := ownedprocess.Verify(p.cmd, true); err == nil {
-			return ownedprocess.Signal(p.cmd, true)
+		return ErrGracefulTimeout
+	}
+}
+
+func (p *wireProcess) Stop(ctx context.Context) error {
+	if p.cmd.Process == nil {
+		return ErrNotOwned
+	}
+	if err := p.lifetime.Verify(); err != nil {
+		select {
+		case <-p.waitDone:
+			return nil
+		default:
+			return ErrNotOwned
+		}
+	}
+	if err := p.lifetime.Signal(false); err != nil {
+		return err
+	}
+	select {
+	case <-p.waitDone:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(2 * time.Second):
+		if err := p.lifetime.Verify(); err == nil {
+			return p.lifetime.Signal(true)
 		}
 		return nil
+	}
+}
+
+// Ownership is available only while this exact, unreaped group leader is owned.
+func (p *wireProcess) Ownership() (ownedprocess.Identity, error) {
+	if err := p.lifetime.Verify(); err != nil {
+		return ownedprocess.Identity{}, ErrNotOwned
+	}
+	return p.identity, nil
+}
+func (p *wireProcess) ForceStop(ctx context.Context, expected ownedprocess.Identity, expiresAt time.Time) error {
+	if expected.ProcessID != p.identity.ProcessID || expected.RootPID != p.identity.RootPID || expected.GroupID != p.identity.GroupID || !expected.StartedAt.Equal(p.identity.StartedAt) {
+		return ErrNotOwned
+	}
+	if err := p.lifetime.SignalBefore(ctx, true, expiresAt); err != nil {
+		if errors.Is(err, ownedprocess.ErrAuthorizationExpired) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return err
+		}
+		return ErrNotOwned
+	}
+	select {
+	case <-p.waitDone:
+		return nil
+	case <-ctx.Done():
+		return ErrForceExitUnconfirmed
 	}
 }
