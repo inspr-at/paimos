@@ -250,6 +250,10 @@ func coreAgentScope(r *http.Request) (string, bool) {
 		return resource + ".write", true
 	}
 	switch parts[0] {
+	case "model-prices":
+		if len(parts) == 1 && read {
+			return "harness.read", true
+		}
 	case "projects":
 		if len(parts) == 1 && read {
 			return "nodes.read", true

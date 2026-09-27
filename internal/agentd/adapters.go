@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/localjournal"
+	"github.com/inspr-at/paimos/internal/sessionusage"
 )
 
 func operationContext(ctx context.Context) (context.Context, context.CancelFunc) {
@@ -98,8 +99,10 @@ func (*CodexAdapter) Name() string                                 { return Code
 
 type codexProcess struct {
 	*wireProcess
-	done chan bool
-	once sync.Once
+	done                      chan bool
+	once                      sync.Once
+	usage                     *sessionusage.ManagedCodex
+	inputTokens, outputTokens int64
 }
 
 func (p *codexProcess) Wait() error {
@@ -149,44 +152,7 @@ func (a *CodexAdapter) Start(ctx context.Context, r StartRequest, observe func(A
 		return nil, err
 	}
 	cp := &codexProcess{wireProcess: p, done: make(chan bool, 1)}
-	var inputTokens, outputTokens int64
-	p.setOnEvent(func(raw json.RawMessage) {
-		method, _, model := eventProbe(raw)
-		if model != "" {
-			observe(AdapterEvent{Kind: "status", EffectiveModel: model, ModelEvidence: "vendor_reported"})
-		}
-		if method == "turn/completed" || method == "turn/failed" {
-			cp.once.Do(func() { cp.done <- method == "turn/failed" })
-		}
-		if method == "item/started" {
-			observe(AdapterEvent{Kind: "tool"})
-		}
-		if method == "thread/tokenUsage/updated" {
-			var frame struct {
-				Params struct {
-					ThreadID   string `json:"threadId"`
-					TokenUsage struct {
-						Total struct {
-							InputTokens  *int64 `json:"inputTokens"`
-							OutputTokens *int64 `json:"outputTokens"`
-						} `json:"total"`
-					} `json:"tokenUsage"`
-				} `json:"params"`
-			}
-			if json.Unmarshal(raw, &frame) == nil && frame.Params.ThreadID == p.threadID &&
-				frame.Params.TokenUsage.Total.InputTokens != nil && frame.Params.TokenUsage.Total.OutputTokens != nil {
-				input := *frame.Params.TokenUsage.Total.InputTokens
-				output := *frame.Params.TokenUsage.Total.OutputTokens
-				if input >= inputTokens && output >= outputTokens {
-					delta := AdapterEvent{Kind: "usage", InputTokensDelta: cumulativeDelta(input, &inputTokens),
-						OutputTokensDelta: cumulativeDelta(output, &outputTokens)}
-					if delta.InputTokensDelta != 0 || delta.OutputTokensDelta != 0 {
-						observe(delta)
-					}
-				}
-			}
-		}
-	})
+	p.setOnEvent(cp.notification)
 	fail := func(e error) (Process, error) { _ = p.Stop(context.Background()); return nil, e }
 	op, cancel := operationContext(ctx)
 	defer cancel()
@@ -227,7 +193,12 @@ func (a *CodexAdapter) Start(ctx context.Context, r StartRequest, observe func(A
 	if err != nil || json.Unmarshal(raw, &thread) != nil || thread.Thread.ID == "" {
 		return fail(errors.New("Codex thread start failed"))
 	}
+	p.eventMu.Lock()
 	p.threadID = thread.Thread.ID
+	// An unsupported attribution leaves session tokens unreported; it must not
+	// prevent the existing run protocol and settlement from operating.
+	cp.usage, _ = sessionusage.NewManagedCodex(p.threadID, r.Profile.Model)
+	p.eventMu.Unlock()
 	var turn struct {
 		Turn struct {
 			ID     string `json:"id"`
@@ -238,7 +209,9 @@ func (a *CodexAdapter) Start(ctx context.Context, r StartRequest, observe func(A
 	if err != nil || json.Unmarshal(raw, &turn) != nil || turn.Turn.ID == "" || turn.Turn.Status != "inProgress" {
 		return fail(errors.New("Codex turn start failed"))
 	}
+	p.eventMu.Lock()
 	p.turnID = turn.Turn.ID
+	p.eventMu.Unlock()
 	observe(AdapterEvent{Kind: "turn", TurnCountDelta: 1})
 	return cp, nil
 }

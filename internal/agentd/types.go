@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/ownedprocess"
+	"github.com/inspr-at/paimos/internal/sessionusage"
 )
 
 const (
@@ -177,6 +178,7 @@ type RunTools struct {
 }
 
 type AdapterEvent struct {
+	SessionUsage      *sessionusage.UsageReport
 	Kind              string
 	VendorSessionID   string
 	EffectiveModel    string

@@ -1,10 +1,19 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-// Package sessionusage normalizes bounded OFFLINE usage captures into US1's
+// Package sessionusage normalizes bounded usage metadata into US1's
 // cumulative per-session/model reports. It opens no vendor stores, invokes no
 // harness, sends no HTTP, and estimates no prices. Fixtures are not live capture.
 //
-// Capture contract:
+// ManagedCodex is the incremental app-server path used by agentd for fresh
+// threads. It shares the strict counter/identity schemas below, retains no raw
+// stream and splits model changes only when last usage proves the full interval.
+// Its caller binds the returned counters to the registered Aeon session, assigns
+// immutable receipts, retries HTTP and owns final settlement. Unlike the offline
+// path it retains bounded normalized state only for the current daemon lifetime.
+// Cursor's managed ACP cost-only usage_update is not a terminal result.usage
+// record and does not supply tokens to this path.
+//
+// Offline Parse capture contract:
 //   - One Aeon session maps to one source session, beginning at zero usage. Set
 //     FromStart explicitly for the initial complete capture. A resumed thread,
 //     missing history, a rotated log, and multiple source sessions are unsupported.
@@ -28,7 +37,7 @@
 //     remain provisional even with known counters. Unknown counters stay
 //     provisional even at Final. Finalized captures cannot be extended.
 //
-// Transport contract (coordinator-owned): serialize one writer per Aeon session;
+// Offline transport contract (coordinator-owned): serialize one writer per Aeon session;
 // persist the full Result before sending any Reports; send each report body to
 // POST /api/projects/{projectId}/harness-sessions/{sessionId}/usage using the
 // existing worker-proof transport; after an uncertain response retry the EXACT
@@ -37,7 +46,7 @@
 // conflict, never a new randomly generated receipt. Do not mix these sequences
 // with another reporter or recover missing history by adding server totals.
 //
-// Capture hook proposal (not implemented here): at the already-running process's
+// External capture hook proposal (coordinator-owned): at the already-running process's
 // structured stdout/JSON-RPC decoder, project only usage counters, actual model,
 // and source/record identities. Discard text before persistence. Check identities
 // against dispatch metadata, attach/persist a stable event UUID when required,

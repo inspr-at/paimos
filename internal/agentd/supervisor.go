@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -58,6 +59,7 @@ type owned struct {
 	harnessMu       sync.Mutex
 	record          Record
 	harness         HarnessSession
+	usage           *sessionUsageReporter
 	inboxCapable    bool
 	pending         []HarnessControl
 	process         Process
@@ -400,10 +402,22 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) error {
 		_ = s.update(ctx, entry, Telemetry{Kind: "finished", Status: "failed", ErrorCode: "child_exit_failed"})
 		return err
 	}
+	if usageAPI, ok := s.api.(sessionUsageAPI); ok && profile.Harness == Codex {
+		entry.usage = newSessionUsageReporter(usageAPI, entry.harness, func() bool {
+			entry.mu.Lock()
+			defer entry.mu.Unlock()
+			return entry.harnessArchived || entry.record.Generation != s.generation
+		}, func() {
+			entry.mu.Lock()
+			entry.harnessArchived = true
+			entry.mu.Unlock()
+		})
+	}
 	closeHarness := func(reason string) {
+		s.finishSessionUsage(entry)
 		cleanup, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		_ = s.api.StopHarness(cleanup, entry.harness, reason)
+		s.stopHarness(cleanup, entry, reason)
 	}
 	var runTools *RunTools
 	if toolAPI, ok := s.api.(RunToolAPI); ok {
@@ -532,6 +546,9 @@ func (s *Supervisor) heartbeat(entry *owned, duration time.Duration) {
 }
 
 func (s *Supervisor) observe(entry *owned, ev AdapterEvent) {
+	if ev.SessionUsage != nil {
+		entry.usage.submit(*ev.SessionUsage)
+	}
 	if ev.Kind == "" {
 		return
 	}
@@ -566,6 +583,7 @@ func (s *Supervisor) monitor(entry *owned) {
 	}
 	defer entry.tools.Close()
 	err := proc.Wait()
+	s.finishSessionUsage(entry)
 	entry.harnessMu.Lock()
 	defer entry.harnessMu.Unlock()
 	entry.mu.Lock()
@@ -617,7 +635,25 @@ func (s *Supervisor) monitor(entry *owned) {
 			reason = "force_stopped"
 		}
 	}
-	_ = s.api.StopHarness(ctx, entry.harness, reason)
+	s.stopHarness(ctx, entry, reason)
+}
+
+func (s *Supervisor) finishSessionUsage(entry *owned) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := entry.usage.finish(ctx); err != nil && !errors.Is(err, ErrHarnessArchived) {
+		// No server errors, vendor fields, lease or account context in diagnostics.
+		slog.Warn("managed session usage settlement incomplete")
+	}
+}
+
+func (s *Supervisor) stopHarness(ctx context.Context, entry *owned, reason string) {
+	entry.mu.Lock()
+	archived := entry.harnessArchived
+	entry.mu.Unlock()
+	if !archived {
+		_ = s.api.StopHarness(ctx, entry.harness, reason)
+	}
 }
 
 // serviceHarness uses the harness module's yield claim queue and managed inbox
@@ -889,6 +925,10 @@ func (s *Supervisor) Close(ctx context.Context) error {
 // A restarted daemon has no in-memory Process and cannot re-adopt a journal PID.
 func (s *Supervisor) heartbeatHarness(ctx context.Context, entry *owned) error {
 	entry.mu.Lock()
+	if entry.harnessArchived {
+		entry.mu.Unlock()
+		return ErrHarnessArchived
+	}
 	session := entry.harness
 	if recovery, ok := entry.process.(RecoveryProcess); ok && entry.record.Generation == s.generation && entry.record.State == "running" {
 		if identity, err := recovery.Ownership(); err == nil {

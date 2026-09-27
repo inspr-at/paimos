@@ -57,6 +57,27 @@ GitHub release assets, next to `aeon-agentd` and listed in the same `SHA256SUMS`
 
 Invoking the binary as `paimos` gives the paimos-compatible CLI. `PAIMOS_URL` (with `PAIMOS_API_KEY` or `PAIMOS_API_KEY_FILE`) is the process-only target.
 
+Managed `aeon-agentd` Codex runs report fresh app-server thread usage to
+`POST /api/projects/{projectId}/harness-sessions/{sessionId}/usage` with the
+registered session's worker lease (`harness.worker`). Input includes cached
+input; missing cache remains unknown. Thread totals become per-model cumulative
+snapshots, with exact receipt retries and a five-second final flush. A model
+change needs explicit usage-model or `model/rerouted` evidence and a matching
+last-usage interval. Reroutes bind to the same turn; subsequent usage needs fresh
+model evidence because reroutes apply to individual requests;
+ambiguous or malformed captures remain provisional. Only a clean completed
+stream with all counters known is final. An archived generation (410) detaches
+the reporter without signalling the process; existing run settlement continues.
+The reporter retains bounded normalized state in memory, never raw output or
+worker leases on disk. Restart/crash recovery and external worker capture remain
+separate work; an unavailable endpoint can leave the last snapshot provisional.
+Cursor's managed ACP usage currently supplies cost only to run settlement, so
+its session tokens remain unreported. No second CLI or transcript backfill is
+used. Pricing stays in the API: `GET`/`HEAD /api/model-prices` requires
+`harness.read`; price creation remains person-only. Reporters neither fetch
+prices nor infer subscription/account coverage. Aggregate readers must not add
+session usage to the overlapping managed-run token telemetry.
+
 ## UI shell (P0.5 / AEON-10)
 
 The Vue shell includes an authenticated workspace, sign-in, a 404, an account
