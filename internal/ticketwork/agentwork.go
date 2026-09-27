@@ -348,7 +348,7 @@ func sessions(ctx context.Context, tx pgx.Tx, tenantID string, ids []string, lim
 			return nil, false, err
 		}
 		s.Label = cleanText(label, 128)
-		s.Model = cleanText(model, 120)
+		s.Model = cleanText(model, 128)
 		s.Effort = cleanText(effort, 40)
 		s.ModelState = missingState(s.Model)
 		s.EffortState = missingState(s.Effort)

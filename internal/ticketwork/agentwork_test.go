@@ -354,16 +354,23 @@ func TestTicketAgentWorkDepthCapIsVisible(t *testing.T) {
 
 func TestTicketAgentWorkRealUsageModelLength(t *testing.T) {
 	f := newWorkFixture(t)
+	// AR1 widens session metadata to match the 128-character usage model bound.
+	// Exercise that forward schema in this test's private database until it is merged.
+	if _, err := f.db.App.Exec(t.Context(), `ALTER TABLE harness_sessions DROP CONSTRAINT harness_sessions_model_check,
+		ADD CONSTRAINT harness_sessions_model_check CHECK (model IS NULL OR (char_length(model) BETWEEN 1 AND 128 AND model = btrim(model) AND model !~ '[[:cntrl:]]'))`); err != nil {
+		t.Fatal(err)
+	}
 	f.node(t, f.project, "project", "TW1-1", "Visible", "")
 	ticket, sid := uid(), uid()
 	f.node(t, ticket, "ticket", "TW1-2", "Ticket", f.project)
 	past := time.Date(2020, 1, 4, 0, 0, 0, 0, time.UTC)
-	f.session(t, sid, f.project, ticket, "codex", "short-model", "high", past, past.Add(time.Minute), past, "stopped")
+	sessionModel := strings.Repeat("s", 128)
+	f.session(t, sid, f.project, ticket, "codex", sessionModel, "high", past, past.Add(time.Minute), past, "stopped")
 	model := strings.Repeat("m", 128)
 	f.usage(t, f.person, sid, model, "12", "3", "1", "0.010000000000", false, "1", "api", "")
 	report := f.get(t, f.person, ticket, "")
-	if len(report.Sessions) != 1 || len(report.Sessions[0].Models) != 1 || report.Sessions[0].Models[0].Model != model || str(report.Totals.InputTokens) != "12" || str(report.Totals.EstimatedCostUSD) != "0.010000000000" {
-		t.Fatalf("real US1 model length or price FK was lost: %+v", report)
+	if len(report.Sessions) != 1 || len(report.Sessions[0].Models) != 1 || str(report.Sessions[0].Model) != sessionModel || report.Sessions[0].Models[0].Model != model || str(report.Totals.InputTokens) != "12" || str(report.Totals.EstimatedCostUSD) != "0.010000000000" {
+		t.Fatalf("128-character session/usage model or price FK was lost: %+v", report)
 	}
 }
 
