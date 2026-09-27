@@ -1,3 +1,5 @@
+//go:build ignore
+
 // SPDX-License-Identifier: AGPL-3.0-only
 
 // Command session-usage-parse normalizes Codex or Cursor usage records.
