@@ -145,7 +145,8 @@ func (p *fakeProcess) Control(_ context.Context, _, _ string) error {
 	p.calls++
 	return nil
 }
-func (p *fakeProcess) Stop(context.Context) error { p.once.Do(func() { close(p.stopped) }); return nil }
+func (p *fakeProcess) GracefulStop(ctx context.Context) error { return p.Stop(ctx) }
+func (p *fakeProcess) Stop(context.Context) error             { p.once.Do(func() { close(p.stopped) }); return nil }
 
 func testSupervisor(t *testing.T, metadata ...*AccountMetadata) (*Supervisor, *fakeAPI, *fakeProcess) {
 	t.Helper()

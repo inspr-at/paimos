@@ -1,0 +1,58 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+import assert from 'node:assert/strict'
+import { test } from 'node:test'
+import type { SessionView } from '../src/stores/agents.ts'
+import { explicitOutcome, intendedResult, modelProvider, sessionContext, sessionExecution } from '../src/components/agents/sessionRow.ts'
+
+function view(partial: Partial<SessionView> & { session?: Partial<SessionView['session']> } = {}): SessionView {
+  const session = {
+    id: 's1', harness: 'cursor', host: 'mba', model: null, reasoning_effort: null, account_label: null, brief: null,
+    role: 'worker', heartbeat_at: new Date().toISOString(), activity: 'busy', phase: 'working',
+    ...partial.session,
+  } as SessionView['session']
+  return {
+    session, status: { group: 'working', tone: 'busy', label: 'Working', state: 'working' },
+    name: 'hausv', harness: 'Cursor', account: '', model: '', projectKey: 'AEON', projectTitle: 'Aeon', ticket: null,
+    ...partial, session,
+  }
+}
+
+test('intended result prefers an explicit phrase, then the bound ticket title, then the existing label', () => {
+  const titled = view({ ticket: { id: 'n', key: 'AEON-211', title: 'Deploy approvals show the target server', href: '/p/AEON/AEON-211' }, session: { brief: 'AEON-211' } })
+  assert.equal(intendedResult(titled), 'Deploy approvals show the target server')
+  assert.equal(sessionContext(titled, intendedResult(titled)), 'hausv')
+  const phrase = view({ session: { brief: 'Release membership stays consistent' }, ticket: titled.ticket })
+  assert.equal(explicitOutcome(phrase.session.brief), 'Release membership stays consistent')
+  assert.equal(intendedResult(phrase), 'Release membership stays consistent')
+  const keyOnly = view({ session: { brief: 'AEON-221' }, name: 'SC1 working' })
+  assert.equal(intendedResult(keyOnly), 'AEON-221')
+  assert.equal(sessionContext(keyOnly, 'AEON-221'), 'SC1 working')
+  const plain = view({ name: 'amy', session: { host: 'csb1', activity_note: 'Quiet · heartbeat only' } as SessionView['session'] })
+  assert.equal(intendedResult(plain), 'amy')
+  assert.equal(sessionContext(plain, 'amy'), 'csb1')
+  assert.equal(intendedResult(plain).includes('heartbeat'), false)
+})
+
+test('execution names the reported model and effort, and does not invent an account or a provider', () => {
+  const known = view({ harness: 'Codex', session: { harness: 'codex', model: 'gpt-6-sol', reasoning_effort: 'xhigh', account_label: 'Codex Pro' } })
+  const exec = sessionExecution(known)
+  assert.equal(exec.modelLine, 'gpt-6-sol · xhigh')
+  assert.equal(exec.accountLine, 'Codex · Codex Pro')
+  assert.equal(exec.provider, 'openai')
+  const cursorGrok = view({ harness: 'Cursor', model: 'grok-4.7', session: { harness: 'cursor', model: 'grok-4.7', reasoning_effort: 'high' } })
+  assert.equal(sessionExecution(cursorGrok).provider, 'xai')
+  assert.equal(modelProvider('cursor-composer-2'), 'cursor')
+  assert.equal(modelProvider('pi-anthropic-sonnet-high'), 'anthropic')
+  assert.equal(modelProvider('integration-model'), 'unknown')
+  assert.equal(modelProvider('codex-astra-xhigh'), 'unknown')
+  const missing = view({ harness: 'Grok', model: 'claude-fable-high', account: 'Claude Max', session: { harness: 'grok' } })
+  const fallback = sessionExecution(missing)
+  assert.equal(fallback.modelLine, 'claude-fable-high · effort unknown')
+  assert.equal(fallback.accountLine, 'Grok · Claude Max')
+  assert.equal(fallback.provider, 'anthropic')
+  const none = view({ harness: 'Grok', session: { harness: 'grok', heartbeat_at: new Date().toISOString() } })
+  const empty = sessionExecution(none)
+  assert.equal(empty.modelLine, 'Model unknown')
+  assert.equal(empty.accountLine, 'Grok · Account unknown')
+  assert.equal(empty.provider, 'unknown')
+})

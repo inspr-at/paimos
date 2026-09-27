@@ -164,13 +164,18 @@ func (r *Remote) RegisterHarness(ctx context.Context, s HarnessSession, agentID,
 }
 
 func (r *Remote) harnessWorker(ctx context.Context, s HarnessSession, suffix string, body, dest any) error {
-	return r.Client.DoWithHeaders(ctx, "POST", harnessPath(s)+suffix, body, dest,
+	err := r.Client.DoWithHeaders(ctx, "POST", harnessPath(s)+suffix, body, dest,
 		map[string]string{"X-Aeon-Worker-Lease": s.Lease})
+	var status *client.StatusError
+	if errors.As(err, &status) && status.Status == 410 && status.Message == "harness generation archived" {
+		return ErrHarnessArchived
+	}
+	return err
 }
 
 func (r *Remote) HeartbeatHarness(ctx context.Context, s HarnessSession, phase string) error {
 	return r.harnessWorker(ctx, s, "/heartbeat", map[string]any{
-		"phase": phase, "activity": "busy", "activity_sequence": 1,
+		"phase": phase, "activity": "busy", "activity_sequence": 1, "process_ownership": s.Ownership,
 	}, nil)
 }
 

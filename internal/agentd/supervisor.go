@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/localjournal"
+	"github.com/inspr-at/paimos/internal/ownedprocess"
 )
 
 type Config struct {
@@ -53,19 +54,21 @@ type Record struct {
 }
 
 type owned struct {
-	mu            sync.Mutex
-	harnessMu     sync.Mutex
-	record        Record
-	harness       HarnessSession
-	inboxCapable  bool
-	pending       []HarnessControl
-	process       Process
-	tools         *managedToolServer
-	replies       map[string]string // delivered message ID -> sender principal
-	replyOrder    []string
-	doneRequested bool
-	monitorDone   chan struct{}
-	stopRequested bool
+	mu              sync.Mutex
+	harnessMu       sync.Mutex
+	record          Record
+	harness         HarnessSession
+	inboxCapable    bool
+	pending         []HarnessControl
+	process         Process
+	tools           *managedToolServer
+	replies         map[string]string // delivered message ID -> sender principal
+	replyOrder      []string
+	doneRequested   bool
+	monitorDone     chan struct{}
+	stopRequested   bool
+	forceRequested  bool
+	harnessArchived bool
 }
 
 type Supervisor struct {
@@ -477,9 +480,13 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) error {
 		closeHarness("process_failed")
 		return err
 	}
-	heartbeatErr := s.api.HeartbeatHarness(ctx, entry.harness, "working")
+	heartbeatErr := s.heartbeatHarness(ctx, entry)
 	entry.mu.Lock()
 	entry.monitorDone = make(chan struct{})
+	if errors.Is(heartbeatErr, ErrHarnessArchived) {
+		entry.harnessArchived = true
+		heartbeatErr = nil
+	}
 	if heartbeatErr != nil {
 		entry.stopRequested = true
 	}
@@ -512,6 +519,9 @@ func (s *Supervisor) heartbeat(entry *owned, duration time.Duration) {
 				err = s.serviceHarness(ctx, entry)
 			}
 			cancel()
+			if errors.Is(err, ErrControlUnconfirmed) {
+				continue
+			}
 			if err != nil {
 				entry.mu.Lock()
 				proc := entry.process
@@ -577,6 +587,7 @@ func (s *Supervisor) monitor(entry *owned) {
 	defer entry.harnessMu.Unlock()
 	entry.mu.Lock()
 	stopped := entry.stopRequested
+	forced := entry.forceRequested
 	entry.mu.Unlock()
 	if err == nil {
 		if evidence, ok := proc.(EvidenceProcess); ok {
@@ -619,17 +630,29 @@ func (s *Supervisor) monitor(entry *owned) {
 		reason = "process_failed"
 	} else if status == "cancelled" {
 		reason = "stopped"
+		if forced {
+			reason = "force_stopped"
+		}
 	}
 	_ = s.api.StopHarness(ctx, entry.harness, reason)
 }
 
 // serviceHarness uses the harness module's yield claim queue and managed inbox
 // drain. The harness lock keeps completion ahead of terminal session closure.
-func (s *Supervisor) serviceHarness(ctx context.Context, entry *owned) error {
+func (s *Supervisor) serviceHarness(ctx context.Context, entry *owned) (result error) {
 	entry.harnessMu.Lock()
 	defer entry.harnessMu.Unlock()
+	defer func() {
+		if errors.Is(result, ErrHarnessArchived) {
+			entry.mu.Lock()
+			entry.harnessArchived = true
+			entry.mu.Unlock()
+			entry.pending = nil
+			result = nil
+		}
+	}()
 	entry.mu.Lock()
-	running := entry.record.State == "running"
+	running := entry.record.State == "running" && !entry.harnessArchived
 	entry.mu.Unlock()
 	if !running {
 		return nil
@@ -642,15 +665,30 @@ func (s *Supervisor) serviceHarness(ctx context.Context, entry *owned) error {
 	for len(entry.pending) > 0 {
 		control := entry.pending[0]
 		outcome, reason := "applied", "agentd_applied"
-		_, err := s.Control(ctx, ControlRequest{TenantID: s.tenantID, PrincipalID: s.principalID,
-			RunID: entry.record.RunID, Generation: s.generation, CorrelationID: control.ID, Operation: control.Kind})
-		if errors.Is(err, ErrUnsupported) || errors.Is(err, ErrNotOwned) {
+		if control.Kind == "force_stop" {
+			reason = "owned_group_signalled_root_exited"
+		}
+		_, err := s.control(ctx, ControlRequest{TenantID: s.tenantID, PrincipalID: s.principalID,
+			RunID: entry.record.RunID, Generation: s.generation, CorrelationID: control.ID, Operation: control.Kind, ExpectedOwnership: control.ExpectedOwnership, ExpiresAt: control.ExpiresAt}, true)
+		if errors.Is(err, ErrUnsupported) || errors.Is(err, ErrNotOwned) || errors.Is(err, ErrGeneration) {
 			outcome, reason, err = "rejected", "child_unavailable", nil
 		}
+		if errors.Is(err, ErrGracefulTimeout) {
+			outcome, reason, err = "rejected", "graceful_stop_timeout", nil
+		}
+		if errors.Is(err, ErrForceExitUnconfirmed) {
+			outcome, reason, err = "rejected", "owned_group_signalled_root_exit_unconfirmed", nil
+		}
 		if err != nil {
+			if control.Kind == "force_stop" || control.Kind == "stop" {
+				return ErrControlUnconfirmed
+			}
 			return err
 		}
 		if err := s.api.CompleteHarnessControl(ctx, entry.harness, control.ID, outcome, reason); err != nil {
+			if !errors.Is(err, ErrHarnessArchived) && (control.Kind == "force_stop" || control.Kind == "stop") {
+				return ErrControlUnconfirmed
+			}
 			return err
 		}
 		entry.pending = entry.pending[1:]
@@ -701,7 +739,7 @@ func (s *Supervisor) serviceHarness(ctx context.Context, entry *owned) error {
 			}
 		}
 	}
-	return s.api.HeartbeatHarness(ctx, entry.harness, "working")
+	return s.heartbeatHarness(ctx, entry)
 }
 
 func (s *Supervisor) update(ctx context.Context, entry *owned, t Telemetry) error {
@@ -725,11 +763,20 @@ func (s *Supervisor) update(ctx context.Context, entry *owned, t Telemetry) erro
 }
 
 func (s *Supervisor) Control(ctx context.Context, req ControlRequest) (Receipt, error) {
+	return s.control(ctx, req, false)
+}
+
+// Force authorization originates only in the server's human-confirmed recovery
+// queue. Local transport credentials and inbox messages cannot mint that grant.
+func (s *Supervisor) control(ctx context.Context, req ControlRequest, fromRecoveryQueue bool) (Receipt, error) {
+	if req.Operation == "force_stop" && !fromRecoveryQueue {
+		return Receipt{}, ErrUnsupported
+	}
 	if req.TenantID != s.tenantID || req.PrincipalID != s.principalID || req.Generation != s.generation ||
 		req.RunID == "" || req.CorrelationID == "" || len(req.CorrelationID) > 128 {
 		return Receipt{}, ErrScope
 	}
-	if req.Operation != "steer" && req.Operation != "interrupt" && req.Operation != "resume" && req.Operation != "stop" {
+	if req.Operation != "steer" && req.Operation != "interrupt" && req.Operation != "resume" && req.Operation != "stop" && req.Operation != "force_stop" {
 		return Receipt{}, ErrUnsupported
 	}
 	if len(req.Text) > 64<<10 || (req.Operation != "steer" && req.Text != "") {
@@ -743,10 +790,12 @@ func (s *Supervisor) Control(ctx context.Context, req ControlRequest) (Receipt, 
 	}
 	entry.mu.Lock()
 	defer entry.mu.Unlock()
-	if entry.record.Generation != s.generation || entry.process == nil || entry.record.State != "running" {
-		return Receipt{}, ErrNotOwned
-	}
-	digest := sha256.Sum256([]byte(req.Operation + "\x00" + req.Text))
+
+	payload, _ := json.Marshal(struct {
+		Ownership *ownedprocess.Identity
+		ExpiresAt *time.Time
+	}{req.ExpectedOwnership, req.ExpiresAt})
+	digest := sha256.Sum256([]byte(req.Operation + "\x00" + req.Text + "\x00" + string(payload)))
 	key := hex.EncodeToString(digest[:])
 	if prior, ok := entry.record.Controls[req.CorrelationID]; ok {
 		if prior.Digest != key {
@@ -754,14 +803,44 @@ func (s *Supervisor) Control(ctx context.Context, req ControlRequest) (Receipt, 
 		}
 		return prior.Receipt, nil
 	}
+	if entry.record.Generation != s.generation || entry.process == nil || entry.record.State != "running" || entry.harnessArchived {
+		return Receipt{}, ErrNotOwned
+	}
 	if len(entry.record.Controls) >= 256 {
 		return Receipt{}, errors.New("control replay capacity reached")
 	}
 	var err error
-	if req.Operation == "stop" {
+	if req.Operation == "force_stop" {
+		recovery, ok := entry.process.(RecoveryProcess)
+		expected := req.ExpectedOwnership
+		if !ok || expected == nil || req.ExpiresAt == nil || !req.ExpiresAt.After(time.Now()) {
+			return Receipt{}, ErrUnsupported
+		}
+		if expected.DaemonID != s.daemonID || expected.Generation != s.generation {
+			return Receipt{}, ErrGeneration
+		}
+		current, e := recovery.Ownership()
+		if e != nil || current.ProcessID != expected.ProcessID || current.RootPID != expected.RootPID || current.GroupID != expected.GroupID || !current.StartedAt.Equal(expected.StartedAt) {
+			return Receipt{}, ErrNotOwned
+		}
 		entry.stopRequested = true
-		err = entry.process.Stop(ctx)
-		if err != nil {
+		entry.forceRequested = true
+		err = recovery.ForceStop(ctx, *expected, *req.ExpiresAt)
+		if err != nil && !errors.Is(err, ErrForceExitUnconfirmed) {
+			entry.forceRequested = false
+			entry.stopRequested = false
+			if errors.Is(err, ownedprocess.ErrAuthorizationExpired) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				err = ErrUnsupported
+			}
+		}
+	} else if req.Operation == "stop" {
+		graceful, ok := entry.process.(GracefulProcess)
+		if !ok {
+			return Receipt{}, ErrUnsupported
+		}
+		entry.stopRequested = true
+		err = graceful.GracefulStop(ctx)
+		if err != nil && !errors.Is(err, ErrGracefulTimeout) {
 			entry.stopRequested = false
 		}
 	} else {
@@ -821,4 +900,19 @@ func (s *Supervisor) Close(ctx context.Context) error {
 		s.lock = nil
 	}
 	return first
+}
+
+// heartbeatHarness publishes only the process the current daemon actually owns.
+// A restarted daemon has no in-memory Process and cannot re-adopt a journal PID.
+func (s *Supervisor) heartbeatHarness(ctx context.Context, entry *owned) error {
+	entry.mu.Lock()
+	session := entry.harness
+	if recovery, ok := entry.process.(RecoveryProcess); ok && entry.record.Generation == s.generation && entry.record.State == "running" {
+		if identity, err := recovery.Ownership(); err == nil {
+			identity.DaemonID, identity.Generation = s.daemonID, s.generation
+			session.Ownership = &identity
+		}
+	}
+	entry.mu.Unlock()
+	return s.api.HeartbeatHarness(ctx, session, "working")
 }

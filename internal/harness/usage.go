@@ -181,6 +181,9 @@ func (m *Module) reportUsage(r *http.Request, tx pgx.Tx, p tenant.Principal) (an
 		subtle.ConstantTimeCompare(digest("lease", lease), s.leaseDigest) != 1 {
 		return nil, workorders.Fail(403, "harness worker proof rejected")
 	}
+	if s.ArchivedAt != nil {
+		return nil, workorders.Fail(410, "harness generation archived")
+	}
 	var in usageReport
 	if err := workorders.Decode(r, &in); err != nil {
 		return nil, err
