@@ -69,11 +69,13 @@ var stageOrder = []string{
 	stageBuild, stageDeploy, stageAccess, stageLive,
 }
 
-// gateOffer is the newest unconsumed approval for one gate, if any.
+// gateOffer is the selected approval request for one gate, if any. A consumed
+// live request remains visible but cannot authorize another journey action.
 type gateOffer struct {
 	ID        string
 	DecidedBy string
 	Live      bool
+	Consumed  bool
 	State     string
 	ExpiresAt string
 }
@@ -385,7 +387,7 @@ func deployProjection(f facts) (string, string, bool, string, string, bool) {
 		return stageDeploy, actionRetryDeploy, ok, reason, id, true
 	default:
 		if f.DeployGateID != "" {
-			return stageDeploy, actionApproveDeploy, false, reasonDeployEvidence, f.DeployGateID, true
+			return stageDeploy, actionApproveDeploy, false, reasonDeployEvidence, "", true
 		}
 		ok, id := offer(f.Deploy)
 		reason := ""
@@ -417,7 +419,7 @@ func accessProjection(f facts) (string, string, bool, string, string, bool) {
 		return stageAccess, actionApprovePermit, ok, reason, id, true
 	default:
 		if f.AccessGateID != "" {
-			return stageAccess, actionApprovePermit, false, reasonAccessEvidence, f.AccessGateID, true
+			return stageAccess, actionApprovePermit, false, reasonAccessEvidence, "", true
 		}
 		ok, id := offer(f.Access)
 		reason := ""
@@ -453,6 +455,9 @@ func offer(g gateOffer) (bool, string) {
 	if g.ID == "" {
 		return false, ""
 	}
+	if g.Consumed {
+		return false, ""
+	}
 	if !g.Live {
 		return false, g.ID
 	}
@@ -460,6 +465,9 @@ func offer(g gateOffer) (bool, string) {
 }
 
 func gateReason(g gateOffer, fallback string) string {
+	if g.Consumed && g.Live {
+		return "This gate approval was already applied. The agent asks again for a fresh one."
+	}
 	if g.State == "expired" {
 		if g.DecidedBy == "" {
 			return "Gate request expired. The agent asks again for a fresh one."
@@ -522,8 +530,17 @@ func actionLabel(f facts, key string) string {
 	case actionWaitForBuild:
 		return "Building"
 	case actionApproveCandidate:
+		if f.Candidate.Live && !f.Candidate.Consumed {
+			return "Apply candidate approval"
+		}
 		return "Approve candidate"
 	case actionApproveDeploy:
+		if f.DeployGateID != "" && deployPhase(f) == outcomePending {
+			return "Await deployment evidence"
+		}
+		if f.Deploy.Live && !f.Deploy.Consumed {
+			return "Apply deployment approval"
+		}
 		return "Approve deployment"
 	case actionRetryDeploy:
 		return "Retry deployment"

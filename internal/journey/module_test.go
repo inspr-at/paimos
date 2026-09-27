@@ -27,6 +27,13 @@ import (
 
 const digest = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 
+func testPtr(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
+}
+
 func TestJourneyGateKeyPharosHandoffRoundtrip(t *testing.T) {
 	f := newFixture(t)
 	project := f.node(t, "project", "PRJ-36", "Disposable Pharos fixture")
@@ -183,12 +190,127 @@ func TestJourneyStageGateLiveTracksRevocationAndExpiry(t *testing.T) {
 	newer := f.grant(t, f.agent.ID, f.person.ID, journey.ScopeDeploy, release)
 	change(`INSERT INTO journey_gates(tenant_id,project_node_id,release_node_id,gate,approval_request_id) VALUES($1::uuid,$2::uuid,$3::uuid,'deploy',$4::uuid)`, f.tenant, project, release, newer)
 	change(`UPDATE agent_permission_grants SET revoked_at=now() WHERE approval_request_id=$1::uuid`, newer)
-	if got := stage(t); got.GateApprovalID == nil || *got.GateApprovalID != newer || !got.GateLive {
+	if got := stage(t); got.GateApprovalID == nil || *got.GateApprovalID != approval || !got.GateLive || testPtr(got.GateOfferID) != approval || got.GateOfferState != "approved_live" {
 		t.Fatalf("older live gate with newer revoked history: %+v", got)
 	}
 	change(`UPDATE agent_permission_grants SET valid_until=now()-interval '1 second' WHERE approval_request_id=$1::uuid`, approval)
-	if got := stage(t); got.GateApprovalID == nil || *got.GateApprovalID != newer || got.GateLive {
+	if got := stage(t); got.GateApprovalID == nil || *got.GateApprovalID != newer || got.GateLive || testPtr(got.GateOfferID) != newer || got.GateOfferState != "revoked" {
 		t.Fatalf("expired gate: %+v", got)
+	}
+}
+
+func TestJourneyMultiOfferProjectionKeepsConsumedAuthoritySeparate(t *testing.T) {
+	f := newFixture(t)
+	project := f.node(t, "project", "PRJ-210", "Multi-offer gate")
+	if err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.tenant, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO journey_projects(tenant_id,project_node_id,brief_confirmed_at,requirements_revision,agreed_requirements_revision,agreed_requirements_digest_sha256)
+			VALUES($1::uuid,$2::uuid,now(),1,1,$3)`, f.tenant, project, digest)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	release := f.release(t, project, "REL-210", 1)
+	f.setReleaseState(t, release, "deploying")
+	change := func(query string, args ...any) {
+		t.Helper()
+		if err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.tenant, func(tx pgx.Tx) error {
+			_, err := tx.Exec(t.Context(), query, args...)
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	stage := func(view journey.Journey, key string) journey.JourneyStage {
+		t.Helper()
+		for _, item := range view.Stages {
+			if item.Key == key {
+				return item
+			}
+		}
+		t.Fatalf("missing stage %s", key)
+		return journey.JourneyStage{}
+	}
+	get := func() journey.Journey {
+		t.Helper()
+		return f.journey(t, f.person, http.MethodGet, "/api/projects/"+project+"/journey", "")
+	}
+
+	oldCandidate := f.grant(t, f.agent.ID, f.person.ID, journey.ScopeCandidate, release)
+	change(`UPDATE agent_permission_grants SET valid_until=now()-interval '1 second' WHERE approval_request_id=$1::uuid`, oldCandidate)
+	liveCandidate := f.grant(t, f.agent.ID, f.person.ID, journey.ScopeCandidate, release)
+	change(`INSERT INTO journey_gates(tenant_id,project_node_id,release_node_id,gate,approval_request_id)
+		VALUES($1::uuid,$2::uuid,$3::uuid,'candidate',$4::uuid)`, f.tenant, project, release, liveCandidate)
+	view := get()
+	if got := stage(view, "build"); !got.GateLive || testPtr(got.GateApprovalID) != liveCandidate || testPtr(got.GateOfferID) != liveCandidate || got.GateOfferState != "approved_live" {
+		t.Fatalf("consumed live candidate must outrank expired offer: %+v", got)
+	}
+	if view.NextAction.Key != "approve_deploy" || view.NextAction.Available {
+		t.Fatalf("deploy still awaits its own gate: %+v", view.NextAction)
+	}
+
+	oldDeploy := f.grant(t, f.agent.ID, f.person.ID, journey.ScopeDeploy, release)
+	change(`UPDATE agent_permission_grants SET valid_until=now()-interval '1 second' WHERE approval_request_id=$1::uuid`, oldDeploy)
+	liveDeploy := f.grant(t, f.agent.ID, f.person.ID, journey.ScopeDeploy, release)
+	view = get()
+	if got := stage(view, "deploy"); got.GateLive || testPtr(got.GateOfferID) != liveDeploy || got.GateOfferState != "approved_live" {
+		t.Fatalf("unconsumed live deploy offer must outrank expired offer: %+v", got)
+	}
+	if !view.NextAction.Available || testPtr(view.NextAction.ApprovalRequestID) != liveDeploy || view.NextAction.Label != "Apply deployment approval" {
+		t.Fatalf("approved gate awaits human apply: %+v", view.NextAction)
+	}
+	change(`INSERT INTO journey_gates(tenant_id,project_node_id,release_node_id,gate,approval_request_id)
+		VALUES($1::uuid,$2::uuid,$3::uuid,'deploy',$4::uuid)`, f.tenant, project, release, liveDeploy)
+	view = get()
+	if got := stage(view, "deploy"); !got.GateLive || testPtr(got.GateOfferID) != liveDeploy || got.GateOfferState != "approved_live" {
+		t.Fatalf("consumed live deploy gate must remain displayed: %+v", got)
+	}
+	if view.NextAction.Available || view.NextAction.ApprovalRequestID != nil || view.NextAction.Label != "Await deployment evidence" {
+		t.Fatalf("consumed gate must not be offered for reuse: %+v", view.NextAction)
+	}
+}
+
+func TestJourneyRequirementsGateUsesCurrentRevisionScope(t *testing.T) {
+	f := newFixture(t)
+	project := f.node(t, "project", "PRJ-211", "Requirements revision gate")
+	if err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.tenant, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO journey_projects(tenant_id,project_node_id,brief_confirmed_at,requirements_revision)
+			VALUES($1::uuid,$2::uuid,now(),1)`, f.tenant, project)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	get := func() journey.Journey {
+		t.Helper()
+		return f.journey(t, f.person, http.MethodGet, "/api/projects/"+project+"/journey", "")
+	}
+	stage := func(view journey.Journey) journey.JourneyStage {
+		t.Helper()
+		for _, item := range view.Stages {
+			if item.Key == "requirements" {
+				return item
+			}
+		}
+		t.Fatal("requirements stage missing")
+		return journey.JourneyStage{}
+	}
+	view := get()
+	approval := f.grant(t, f.agent.ID, f.person.ID, view.RequirementsScope, project)
+	if err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.tenant, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO journey_gates(tenant_id,project_node_id,gate,approval_request_id)
+			VALUES($1::uuid,$2::uuid,'requirements',$3::uuid)`, f.tenant, project, approval)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got := stage(get()); !got.GateLive || testPtr(got.GateOfferID) != approval {
+		t.Fatalf("current revision gate should be live: %+v", got)
+	}
+	if _, err := f.db.Admin.Exec(t.Context(), `UPDATE journey_projects SET revision=revision+1 WHERE project_node_id=$1::uuid`, project); err != nil {
+		t.Fatal(err)
+	}
+	view = get()
+	if got := stage(view); got.GateLive || got.GateOfferID != nil || testPtr(got.GateApprovalID) != approval {
+		t.Fatalf("previous revision remains history, not current authority: %+v", got)
 	}
 }
 

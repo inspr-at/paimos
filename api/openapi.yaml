@@ -3742,8 +3742,8 @@ components:
         gate_scope: {type: string, description: 'Exact approval scope reported by this stage. Empty for Inspire and Live. Plan reports journey.build; Build reports journey.candidate even before its gate exists.'}
         gate_approval_id: {type: [string, 'null'], format: uuid}
         gate_live: {type: boolean, description: Whether any approval and grant for the stage gate are currently valid; false when no gate is recorded}
-        gate_offer_id: {type: string, format: uuid, description: 'Current unconsumed request for this stage gate, when one exists; unlike gate_approval_id this is an offer, not a consumed gate'}
-        gate_offer_state: {type: string, enum: [pending, approved_live, expired, revoked, rejected, grant_missing], description: Server-classified validity of gate_offer_id; approved_live alone counts as a live offer}
+        gate_offer_id: {type: string, format: uuid, description: 'Selected request for this stage gate, when one exists; a consumed live gate remains visible but cannot authorize another action'}
+        gate_offer_state: {type: string, enum: [pending, approved_live, expired, revoked, rejected, grant_missing], description: Server-classified validity of gate_offer_id; approved_live describes current approval validity, while action authority also requires an unconsumed request}
         gate_offer_expires_at: {type: string, format: date-time, description: Effective deadline of the offer (the earlier of request and grant expiry); for a pending request this is its request expiry}
         handoff_id: {type: [string, 'null'], format: uuid}
         handoff_attempt: {type: [integer, 'null'], minimum: 1}
