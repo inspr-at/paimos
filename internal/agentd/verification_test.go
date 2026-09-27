@@ -4,6 +4,8 @@ package agentd
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -24,6 +26,49 @@ func verificationRequest(t *testing.T) StartRequest {
 	r.Run.RepositoryMutationAllowed = &no
 	r.Prompt = VerificationTask
 	return r
+}
+
+func TestCodexVerificationBlocksBeforeAnyVendorProcess(t *testing.T) {
+	// This fixture models a vendor startup hook or an inherited stdio MCP
+	// command. Merely launching it mutates an unrelated file; waiting to inspect
+	// thread settings or the MCP inventory afterward would already be too late.
+	r := verificationRequest(t)
+	home, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(home, 0700); err != nil {
+		t.Fatal(err)
+	}
+	sentinel := filepath.Join(r.Workspace, "repository-sentinel")
+	if err := os.WriteFile(sentinel, []byte("unchanged"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(home, "vendor-startup-fixture")
+	// Paths come only from Go's private test directory; quote as shell literals.
+	quote := func(s string) string { return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'" }
+	script := fmt.Sprintf("#!/bin/sh\nprintf changed > %s\nexit 1\n", quote(sentinel))
+	if err := os.WriteFile(path, []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	a := NewCodexAdapter(path, map[string]string{"account": home})
+	a.SetExpectedEmails(map[string]string{"account": "agent@example.test"})
+	observed := false
+	p, err := a.Start(t.Context(), r, func(AdapterEvent) { observed = true })
+	if p != nil {
+		_ = p.Stop(t.Context())
+		t.Fatal("blocked verification returned a process")
+	}
+	if !errors.Is(err, ErrVerificationUnavailable) {
+		t.Fatalf("verification must fail before probe/startup: %v", err)
+	}
+	if observed {
+		t.Fatal("blocked verification reported vendor activity")
+	}
+	data, err := os.ReadFile(sentinel)
+	if err != nil || string(data) != "unchanged" {
+		t.Fatal("blocked verification launched a vendor process")
+	}
 }
 
 func TestCursorVerificationRequiresAskBeforePrompt(t *testing.T) {
