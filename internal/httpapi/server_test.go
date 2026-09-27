@@ -240,6 +240,91 @@ func TestReadyGate(t *testing.T) {
 	}
 }
 
+func TestReadyProbeDeadlineAndDrain(t *testing.T) {
+	if readyProbeTimeout <= 0 || readyProbeTimeout >= time.Second {
+		t.Fatalf("readyProbeTimeout %s must be below the 1s load-balancer timeout", readyProbeTimeout)
+	}
+
+	t.Run("cancelled caller", func(t *testing.T) {
+		s := servingReadyServer(t)
+		s.readyProbe = func(ctx context.Context) error {
+			assertProbeContext(t, ctx)
+			return nil
+		}
+		reqCtx, cancel := context.WithCancel(context.Background())
+		cancel()
+		rec := serveReady(t, s, reqCtx)
+		if rec.Code != http.StatusOK || !bytes.Contains(rec.Body.Bytes(), []byte(`"status":"ready"`)) {
+			t.Fatalf("ready %d %s", rec.Code, rec.Body.Bytes())
+		}
+	})
+
+	t.Run("short caller deadline", func(t *testing.T) {
+		s := servingReadyServer(t)
+		s.readyProbe = func(ctx context.Context) error {
+			assertProbeContext(t, ctx)
+			return nil
+		}
+		reqCtx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+		defer cancel()
+		rec := serveReady(t, s, reqCtx)
+		if rec.Code != http.StatusOK || !bytes.Contains(rec.Body.Bytes(), []byte(`"status":"ready"`)) {
+			t.Fatalf("ready %d %s", rec.Code, rec.Body.Bytes())
+		}
+	})
+
+	t.Run("drain during probe", func(t *testing.T) {
+		s := servingReadyServer(t)
+		s.readyProbe = func(ctx context.Context) error {
+			assertProbeContext(t, ctx)
+			s.Drain()
+			return nil
+		}
+		rec := serveReady(t, s, context.Background())
+		if rec.Code != http.StatusServiceUnavailable || !bytes.Contains(rec.Body.Bytes(), []byte(`"status":"unavailable"`)) {
+			t.Fatalf("ready %d %s", rec.Code, rec.Body.Bytes())
+		}
+		health := get(t, s.Handler(), "/api/health", "")
+		if health.Code != http.StatusOK || !bytes.Contains(health.Body.Bytes(), []byte(`"status":"ok"`)) {
+			t.Fatalf("health while draining %d %s", health.Code, health.Body.Bytes())
+		}
+	})
+}
+
+func servingReadyServer(t *testing.T) *Server {
+	t.Helper()
+	s := &Server{}
+	s.SetServing(true)
+	_ = s.Handler()
+	return s
+}
+
+func serveReady(t *testing.T, s *Server, ctx context.Context) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodGet, "/api/ready", nil).WithContext(ctx)
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, req)
+	if rec.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("cache %q", rec.Header().Get("Cache-Control"))
+	}
+	return rec
+}
+
+func assertProbeContext(t *testing.T, ctx context.Context) {
+	t.Helper()
+	if err := ctx.Err(); err != nil {
+		t.Fatalf("probe followed caller context: %v", err)
+	}
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		t.Fatal("probe context has no deadline")
+	}
+	remain := time.Until(deadline)
+	if remain <= 200*time.Millisecond || remain > readyProbeTimeout || remain >= time.Second {
+		t.Fatalf("probe remaining %s, want within %s and below 1s", remain, readyProbeTimeout)
+	}
+}
+
 func assertReady(t *testing.T, h http.Handler, status int) {
 	t.Helper()
 	rec := get(t, h, "/api/ready", "")
