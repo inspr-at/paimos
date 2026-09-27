@@ -239,6 +239,86 @@ func TestManagedCodexSplitStreamToSessionEndpoint(t *testing.T) {
 	}
 }
 
+type terminalWaitProcess struct {
+	*fakeProcess
+	result <-chan bool
+}
+
+type terminalFixtureAdapter struct{ process Process }
+
+func (*terminalFixtureAdapter) Name() string                       { return Codex }
+func (*terminalFixtureAdapter) Probe(context.Context, string) bool { return true }
+func (a *terminalFixtureAdapter) Start(_ context.Context, _ StartRequest, _ func(AdapterEvent)) (Process, error) {
+	return a.process, nil
+}
+
+func (p *terminalWaitProcess) Wait() error {
+	if <-p.result {
+		return errors.New("Codex turn failed")
+	}
+	return nil
+}
+
+func TestManagedCodexTerminalFailurePreventsCompletedRunAndFinalUsage(t *testing.T) {
+	for _, tc := range []struct {
+		name, method, turn string
+		clean              bool
+	}{
+		{"clean", "turn/completed", `{"status":"completed"}`, true},
+		{"failed_method", "turn/failed", `{"status":"failed","error":"PRIVATE_SENTINEL"}`, false},
+		{"failed_status", "turn/completed", `{"status":"failed","error":"PRIVATE_SENTINEL"}`, false},
+		{"interrupted", "turn/completed", `{"status":"interrupted","error":"PRIVATE_SENTINEL"}`, false},
+		{"missing_status", "turn/completed", `{"error":"PRIVATE_SENTINEL"}`, false},
+		{"malformed_turn", "turn/completed", `"PRIVATE_SENTINEL"`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, base, fake := testSupervisor(t)
+			defer s.Close(context.Background())
+			api := &doneToolAPI{fakeAPI: base}
+			s.api = api
+			capture, err := sessionusage.NewManagedCodex("synthetic-thread", "model")
+			if err != nil {
+				t.Fatal(err)
+			}
+			var reports []sessionusage.UsageReport
+			wire := &wireProcess{threadID: "synthetic-thread", observe: func(ev AdapterEvent) {
+				if ev.SessionUsage != nil {
+					reports = append(reports, *ev.SessionUsage)
+				}
+			}}
+			codex := &codexProcess{wireProcess: wire, usage: capture, done: make(chan bool, 1)}
+			s.adapters[Codex] = &terminalFixtureAdapter{process: &terminalWaitProcess{fakeProcess: fake, result: codex.done}}
+			if err := s.PollOnce(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			entry := s.runs["run"]
+			entry.mu.Lock()
+			entry.doneRequested = true
+			entry.mu.Unlock()
+			codex.notification(json.RawMessage(`{"jsonrpc":"2.0","method":"thread/tokenUsage/updated","params":{"threadId":"synthetic-thread","tokenUsage":{"total":{"inputTokens":12,"outputTokens":3,"cachedInputTokens":2}}}}`))
+			terminal := `{"jsonrpc":"2.0","method":"` + tc.method + `","params":{"threadId":"synthetic-thread","turn":` + tc.turn + `}}`
+			codex.notification(json.RawMessage(terminal))
+			select {
+			case <-entry.monitorDone:
+			case <-time.After(3 * time.Second):
+				t.Fatal("terminal did not settle run")
+			}
+			if len(reports) != 2 || reports[1].Provisional == tc.clean {
+				t.Fatalf("usage finality: %+v", reports)
+			}
+			base.mu.Lock()
+			last := base.reports[len(base.reports)-1]
+			base.mu.Unlock()
+			api.mu.Lock()
+			done := api.done
+			api.mu.Unlock()
+			if last.Status == "completed" != tc.clean || done != tc.clean {
+				t.Fatalf("run=%s done=%t clean=%t", last.Status, done, tc.clean)
+			}
+		})
+	}
+}
+
 // This adapter emits only synthetic protocol notifications; no vendor process,
 // transcript, credentials store or filesystem capture is used by this test.
 type usageTestAdapter struct{ proc *fakeProcess }

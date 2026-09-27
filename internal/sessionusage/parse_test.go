@@ -75,7 +75,9 @@ func TestCursorCanonicalModel(t *testing.T) {
 
 func TestJSONRPCCachedUnknownIsProvisional(t *testing.T) {
 	body := `{"jsonrpc":"2.0","method":"thread/tokenUsage/updated","params":{"threadId":"thread-1","tokenUsage":{"total":{"inputTokens":12,"outputTokens":3},"last":{"inputTokens":12,"outputTokens":3}}}}`
-	res := parseSource(t, "codex", "gpt-6-sol", body)
+	opt := testOptions("codex", "gpt-6-sol")
+	opt.Final = false
+	res := mustParse(t, body, opt)
 	got := res.Reports[0]
 	if *got.InputTokens != 12 || *got.OutputTokens != 3 || got.CachedInputTokens != nil || !got.Provisional {
 		t.Fatalf("report: %+v", got)
@@ -83,6 +85,38 @@ func TestJSONRPCCachedUnknownIsProvisional(t *testing.T) {
 	if res.Observations[0].CachedStatus != statusUnknown || res.Observations[0].Measurement != statusProvisional || res.Observations[0].Accounting != accountingVendor {
 		t.Fatalf("observation: %+v", res.Observations[0])
 	}
+}
+
+func TestJSONRPCTerminalRequiresExplicitCleanCompletion(t *testing.T) {
+	usage := `{"jsonrpc":"2.0","method":"thread/tokenUsage/updated","params":{"threadId":"thread-1","tokenUsage":{"total":{"inputTokens":12,"outputTokens":3,"cachedInputTokens":2}}}}`
+	opt := testOptions("codex", "model-a")
+	wantError(t, usage, opt, ErrRejected)
+	for _, tc := range []struct {
+		name, terminal string
+		want           error
+	}{
+		{"failed_method", `{"jsonrpc":"2.0","method":"turn/failed","params":{"threadId":"thread-1","turn":{"status":"failed","error":"PRIVATE_SENTINEL"}}}`, ErrRejected},
+		{"interrupted", `{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thread-1","turn":{"status":"interrupted","error":"PRIVATE_SENTINEL"}}}`, ErrRejected},
+		{"failed_status", `{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thread-1","turn":{"status":"failed","error":"PRIVATE_SENTINEL"}}}`, ErrRejected},
+		{"missing_status", `{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thread-1","turn":{"error":"PRIVATE_SENTINEL"}}}`, ErrMalformed},
+		{"malformed_turn", `{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thread-1","turn":"PRIVATE_SENTINEL"}}`, ErrMalformed},
+		{"missing_thread", `{"jsonrpc":"2.0","method":"turn/completed","params":{"turn":{"status":"completed","error":"PRIVATE_SENTINEL"}}}`, ErrMalformed},
+		{"competing_format", `{"jsonrpc":"2.0","type":"PRIVATE_SENTINEL","method":"turn/completed","params":{"threadId":"thread-1","turn":{"status":"completed"}}}`, ErrAmbiguous},
+		{"wrong_version", `{"jsonrpc":"1.0","method":"turn/completed","params":{"threadId":"thread-1","turn":{"status":"completed","error":"PRIVATE_SENTINEL"}}}`, ErrMalformed},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := Parse(strings.NewReader(usage+"\n"+tc.terminal), opt)
+			if !errors.Is(err, tc.want) || err != nil && strings.Contains(err.Error(), "PRIVATE_SENTINEL") {
+				t.Fatalf("terminal error class or diagnostic: %v", err)
+			}
+		})
+	}
+	clean := `{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thread-1","turn":{"status":"completed"}}}`
+	res := mustParse(t, usage+"\n"+clean, opt)
+	if len(res.Reports) != 1 || res.Reports[0].Provisional || *res.Reports[0].InputTokens != 12 {
+		t.Fatalf("clean completion: %+v", res.Reports)
+	}
+	wantError(t, usage+"\n"+clean+"\n"+usage, opt, ErrRejected)
 }
 
 func TestCumulativeKeepsTotalWhenLastIsSmaller(t *testing.T) {

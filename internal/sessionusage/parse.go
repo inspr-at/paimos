@@ -38,6 +38,7 @@ func Parse(r io.Reader, opt Options) (Result, error) {
 		return Result{}, err
 	}
 	p := &parser{models: map[string]*modelState{}, seen: map[string]usageRecord{}, opt: opt}
+	appServerUsage, appServerTerminal := false, false
 	for _, line := range bytes.Split(raw, []byte{'\n'}) {
 		if len(line) > maxLine {
 			return Result{}, fmt.Errorf("%w: record too large", ErrMalformed)
@@ -63,6 +64,21 @@ func Parse(r io.Reader, opt Options) (Result, error) {
 		if err != nil {
 			return Result{}, err
 		}
+		if opt.Source == "codex" {
+			method, _ := parseString(fields["method"])
+			if method == "thread/tokenUsage/updated" {
+				if appServerTerminal {
+					return Result{}, fmt.Errorf("%w: usage follows terminal turn", ErrRejected)
+				}
+				appServerUsage = true
+			}
+			if method == "turn/completed" {
+				if appServerTerminal {
+					return Result{}, fmt.Errorf("%w: duplicate terminal turn", ErrRejected)
+				}
+				appServerTerminal = true
+			}
+		}
 		switch outcome {
 		case outcomeSkip:
 		case outcomeIgnore:
@@ -82,6 +98,9 @@ func Parse(r io.Reader, opt Options) (Result, error) {
 		default:
 			return Result{}, ErrAmbiguous
 		}
+	}
+	if opt.Final && appServerUsage && !appServerTerminal {
+		return Result{}, fmt.Errorf("%w: app-server completion not observed", ErrRejected)
 	}
 	out := p.result()
 	out.Checkpoint = Checkpoint{Binding: binding, Bytes: len(raw), Digest: digest(raw), Final: opt.Final}

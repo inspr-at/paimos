@@ -23,6 +23,16 @@ func classifyCodex(fields map[string]json.RawMessage) (usageRecord, int, error) 
 			rec, err := codexTokenUsage(fields)
 			return rec, outcomeUse, err
 		}
+		if method == "turn/completed" || method == "turn/failed" {
+			_, clean, err := codexTerminalStatus(fields)
+			if err != nil {
+				return usageRecord{}, outcomeIgnore, err
+			}
+			if !clean {
+				return usageRecord{}, outcomeIgnore, fmt.Errorf("%w: failed source turn", ErrRejected)
+			}
+			return usageRecord{}, outcomeSkip, nil
+		}
 		return usageRecord{}, outcomeIgnore, nil
 	}
 	raw, ok := fields["type"]
@@ -62,6 +72,55 @@ func classifyCodex(fields map[string]json.RawMessage) (usageRecord, int, error) 
 	default:
 		return usageRecord{}, outcomeIgnore, nil
 	}
+}
+
+// CodexTerminalStatus classifies only the bounded app-server terminal envelope.
+// It never includes source strings or error details in diagnostics.
+func CodexTerminalStatus(raw []byte) (terminal, clean bool, err error) {
+	if len(raw) > maxLine {
+		return false, false, fmt.Errorf("%w: terminal record too large", ErrMalformed)
+	}
+	fields, err := decodeLine(raw)
+	if err != nil {
+		return false, false, err
+	}
+	return codexTerminalStatus(fields)
+}
+
+func codexTerminalStatus(fields map[string]json.RawMessage) (terminal, clean bool, err error) {
+	method, err := parseString(fields["method"])
+	if err != nil || method != "turn/completed" && method != "turn/failed" {
+		return false, false, nil
+	}
+	if fields["type"] != nil {
+		return true, false, fmt.Errorf("%w: competing terminal formats", ErrAmbiguous)
+	}
+	if raw, ok := fields["jsonrpc"]; ok {
+		version, err := parseString(raw)
+		if err != nil || version != "2.0" {
+			return true, false, fmt.Errorf("%w: jsonrpc version", ErrMalformed)
+		}
+	}
+	params, err := objectField(fields, "params")
+	if err != nil {
+		return true, false, err
+	}
+	thread, err := parseString(params["threadId"])
+	if err != nil || !validSourceID(thread) {
+		return true, false, fmt.Errorf("%w: terminal thread identity missing", ErrMalformed)
+	}
+	turn, err := objectField(params, "turn")
+	if err != nil {
+		return true, false, err
+	}
+	status, err := parseString(turn["status"])
+	if err != nil || status == "" {
+		return true, false, fmt.Errorf("%w: terminal status missing", ErrMalformed)
+	}
+	if method != "turn/completed" || status != "completed" {
+		return true, false, fmt.Errorf("%w: failed or incomplete source turn", ErrRejected)
+	}
+	return true, true, nil
 }
 
 func codexInfoUsage(holder, modelHolder map[string]json.RawMessage) (usageRecord, error) {

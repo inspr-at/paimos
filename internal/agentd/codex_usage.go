@@ -2,7 +2,11 @@
 
 package agentd
 
-import "encoding/json"
+import (
+	"encoding/json"
+
+	"github.com/inspr-at/paimos/internal/sessionusage"
+)
 
 // notification is serialized with binding changes by wireProcess.eventMu.
 func (p *codexProcess) notification(raw json.RawMessage) {
@@ -52,22 +56,20 @@ func (p *codexProcess) notification(raw json.RawMessage) {
 		var frame struct {
 			Params struct {
 				ThreadID string `json:"threadId"`
-				Turn     struct {
-					Status string `json:"status"`
-				} `json:"turn"`
 			} `json:"params"`
 		}
 		if json.Unmarshal(raw, &frame) != nil || p.threadID == "" || frame.Params.ThreadID != p.threadID {
 			return
 		}
 		p.once.Do(func() {
+			_, clean, err := sessionusage.CodexTerminalStatus(raw)
+			clean = clean && err == nil
 			if p.usage != nil {
-				clean := method == "turn/completed" && frame.Params.Turn.Status == "completed"
 				for _, report := range p.usage.Finish(clean) {
 					p.observe(AdapterEvent{SessionUsage: &report})
 				}
 			}
-			p.done <- method == "turn/failed"
+			p.done <- !clean
 		})
 	}
 }
