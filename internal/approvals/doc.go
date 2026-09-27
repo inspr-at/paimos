@@ -35,4 +35,7 @@
 // revocation and the acting key's ceiling; callers use it inside the
 // sensitive action's own tenant transaction. A grant matches one resource
 // exactly (a tenant grant does not cover a node or a run).
+// Every approval route emits Aeon-Contract: approvals/1.0. Additive optional
+// response fields require a minor bump; breaking changes require a major
+// bump. internal/reportercontract pins the approval response schema.
 package approvals
