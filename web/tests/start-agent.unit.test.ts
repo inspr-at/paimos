@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { dispatchHint, launchState, startAgent, type WorkOrder } from '../src/lib/startAgent'
+import { dispatchHint, launchState, staleGrantRejection, startAgent, type WorkOrder } from '../src/lib/startAgent'
+import { APIError } from '../src/lib/api'
 import type { AgentAccount, AgentRun, ModelProfile } from '../src/lib/agents'
 import type { WorkNode } from '../src/lib/api'
 
@@ -112,5 +113,12 @@ describe('honest launch state', () => {
     expect(launchState(queued).label).toBe('Queued')
     expect(launchState({ ...queued, status: 'starting' }).label).toBe('Claimed')
     expect(launchState({ ...queued, status: 'failed' }).label).toBe('Failed')
+  })
+  it('recognizes a stale model-grant rejection and leaves other conflicts alone', () => {
+    expect(staleGrantRejection(new APIError(409, 'requested account must belong to the run agent and allow the model profile'))).toBe(true)
+    expect(staleGrantRejection(new APIError(409, 'reserved model profile is not eligible'))).toBe(true)
+    expect(staleGrantRejection(new APIError(409, 'work order is not ready for dispatch'))).toBe(false)
+    expect(staleGrantRejection(new APIError(404, 'not found'))).toBe(false)
+    expect(staleGrantRejection(new Error('allow the model profile'))).toBe(false)
   })
 })

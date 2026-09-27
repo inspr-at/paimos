@@ -2,6 +2,7 @@
 <script setup lang="ts">
 import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { accountName } from '../lib/accountCascade'
 import { can } from '../lib/authz'
 import { message, subscribeAgents, type AgentAccount, type Approval, type SessionControl } from '../lib/agents'
 import { canDecideApproval as allowedToDecide, controlBlocked, decidedApprovals, type Resource } from '../lib/agentState'
@@ -114,7 +115,7 @@ async function control(view: SessionView, kind: SessionControl['kind']) {
 }
 async function setAccount(account: AgentAccount, state: AgentAccount['state']) {
   if (state === 'draining') {
-    const ok = await confirmAction({ title: `Drain ${account.label}?`, body: 'Running work finishes; no new runs start on this account until you resume it.', confirmLabel: 'Drain account' })
+    const ok = await confirmAction({ title: `Drain ${accountName(account)}?`, body: 'Running work finishes; no new runs start on this account until you resume it.', confirmLabel: 'Drain account' })
     if (!ok) return
   }
   await agents.setAccount(account, state)

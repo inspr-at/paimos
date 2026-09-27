@@ -6,6 +6,10 @@
 // POST /api/work-orders/{id}/runs queues it. Only agentd reserves and claims.
 // The additive requested_account_id field (migration 0851) pins an optional
 // choice without pretending an account was already reserved.
+// Host → harness → account → model → thinking maps onto this call.
+// model_profile_id is the enabled profile for that harness, model and effort.
+// The account's daemon is the host. Unknown JSON fields are rejected, so the
+// five choices are not sent as extra properties.
 import { api, APIError, getNode, listNodes, type WorkNode } from './api.ts'
 import { listRuns, type AgentAccount, type AgentRun, type ModelProfile } from './agents.ts'
 
@@ -86,6 +90,14 @@ const freshProbe = (a: AgentAccount, now: number) => {
   const at = Date.parse(a.last_probe_at ?? '')
   return Number.isFinite(at) && at <= now && now - at < 120_000
 }
+function accountHeadroom(account: AgentAccount, now: number): 'open' | 'unknown' | 'closed' {
+  const windows = (account.windows ?? []).filter(w => Date.parse(w.starts_at) <= now && now < Date.parse(w.ends_at))
+  if (!windows.length) return 'closed'
+  if (windows.some(w => w.provisional)) return 'unknown'
+  const open = windows.every(w => [w.allowance, w.used, w.reserved].every(Number.isSafeInteger)
+    && BigInt(w.allowance) - BigInt(w.used) - BigInt(w.reserved) > 0n)
+  return open ? 'open' : 'closed'
+}
 // This is an observed preflight hint, never a reservation. The daemon enforces
 // its enrollment, current parallel capacity, estimates and exact allowance pace.
 export function dispatchHint(accounts: AgentAccount[], agentId: string, profile: ModelProfile | undefined, now: number, accountId?: string): DispatchHint {
@@ -93,17 +105,18 @@ export function dispatchHint(accounts: AgentAccount[], agentId: string, profile:
   const owned = accounts.filter(a => a.registered_by_principal_id === agentId)
   if (!owned.some(a => freshProbe(a, now))) return { label: 'No daemon online', detail: 'No account probe from this agent in the last two minutes. A queued run waits until its daemon connects.', tone: 'warn' }
   const available = owned.filter(a => (!accountId || a.id === accountId) && a.harness === profile.harness && a.state === 'available' && a.last_probe_ok && freshProbe(a, now))
-  const headroom = available.some(a => {
-    const windows = (a.windows ?? []).filter(w => Date.parse(w.starts_at) <= now && now < Date.parse(w.ends_at))
-    return windows.length > 0 && windows.every(w => [w.allowance, w.used, w.reserved].every(Number.isSafeInteger)
-      && BigInt(w.allowance) - BigInt(w.used) - BigInt(w.reserved) > 0n)
-  })
-  if (!headroom) return { label: 'No eligible account', detail: 'No matching account reports a fresh sign-in and allowance headroom. The run can queue; dispatch waits for capacity.', tone: 'warn' }
-  return { label: 'Account available', detail: 'Recent account probe received. The daemon rechecks pacing and capacity, then runs in its configured workspace.', tone: 'neutral' }
+  const ranks = available.map(account => accountHeadroom(account, now))
+  if (ranks.includes('open')) return { label: 'Account available', detail: 'Recent account probe received. The daemon rechecks pacing and capacity, then runs in its configured workspace.', tone: 'neutral' }
+  if (ranks.includes('unknown')) return { label: 'Allowance unknown', detail: 'Measured usage is missing for an active window, so remaining allowance is unknown. The run can queue; the daemon rechecks before it claims.', tone: 'warn' }
+  return { label: 'No eligible account', detail: 'No matching account reports a fresh sign-in and allowance headroom. The run can queue; dispatch waits for capacity.', tone: 'warn' }
 }
 
 export function launchState(run: AgentRun): { label: string; detail: string } {
   if (run.status === 'queued') return { label: 'Queued', detail: 'Waiting for the daemon to reserve an account and claim this run.' }
   if (run.status === 'starting' || run.status === 'running' || run.status === 'waiting') return { label: 'Claimed', detail: 'The daemon claimed the run. Its managed session appears when registration is reported.' }
   return { label: ({ completed: 'Completed', failed: 'Failed', cancelled: 'Cancelled', ownership_lost: 'Ownership lost' })[run.status] ?? run.status, detail: 'This run has ended. Its reported outcome is available in Agents.' }
+}
+
+export function staleGrantRejection(error: unknown): boolean {
+  return error instanceof APIError && error.status === 409 && /allow the model profile|model profile is not eligible/i.test(error.message)
 }
