@@ -31,7 +31,7 @@ const at = (event: MouseEvent) => event.currentTarget as HTMLElement
         <button type="button" class="act" aria-label="Archive" data-tip="Archive · closed, and hidden with Hide closed" :disabled="busy" @click="emit('archive')"><AppIcon name="archive" :size="14" /><span class="label">Archive</span></button>
       </template>
       <span v-else class="read-only">Read only</span>
-      <button type="button" class="close" aria-label="Clear the selection" aria-keyshortcuts="Escape" @click="emit('clear')"><AppIcon name="close" :size="13" /><KeyCap k="esc" class="esc" /></button>
+      <button type="button" class="close" aria-label="Clear the selection" aria-keyshortcuts="Escape" @click="emit('clear')"><AppIcon name="close" :size="13" /><span class="clear-word">Clear</span><KeyCap k="esc" class="esc" /></button>
     </div>
   </div>
 </template>
@@ -59,12 +59,23 @@ const at = (event: MouseEvent) => event.currentTarget as HTMLElement
 .close { display: inline-flex; align-items: center; gap: 6px; height: 36px; margin-left: 4px; padding: 0 8px 0 10px; border: 0; border-radius: 999px; background: var(--chip-bg); color: var(--ink-2); }
 .close:hover { color: var(--ink); background: var(--row-selected); }
 .esc { font-size: 10px; }
+.clear-word { display: none; }
 @media (max-width: 1100px) { .act .label { display: none; } .act { width: 38px; padding: 0; justify-content: center; } }
-@media (max-width: 600px) {
-  .bulk-bar { height: 52px; padding: 0 4px 0 12px; }
-  .count-word, .esc, .rule, .link { display: none; }
-  .act { width: 40px; height: 40px; }
-  .close { width: 40px; height: 40px; padding: 0; justify-content: center; margin-left: 2px; }
+@media (max-width: 720px) {
+  .bulk-dock { padding: 0 10px; box-sizing: border-box; bottom: calc(var(--footer-h, 0px) + 8px + env(safe-area-inset-bottom)); }
+  .bulk-bar {
+    display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); left: 0; right: 0; width: auto; max-width: none; height: auto;
+    gap: 4px; padding: 6px; border-radius: 18px; box-sizing: border-box;
+  }
+  /* The list header already says how many. The toolbar keeps the count for its name. */
+  .count { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .esc, .rule, .link { display: none; }
+  .act, .close {
+    flex-direction: column; gap: 2px; width: 100%; height: 52px; min-width: 0; min-height: 44px; margin: 0; padding: 4px 2px;
+    justify-content: center; border-radius: 12px; background: transparent; color: var(--ink); font-size: 10px; font-weight: 600; line-height: 1;
+  }
+  .close:hover { background: var(--row-hover); }
+  .act .label, .clear-word { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 }
 @media (hover: none) { .esc { display: none; } }
 @media (prefers-reduced-motion: no-preference) {
