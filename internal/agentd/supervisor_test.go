@@ -30,6 +30,7 @@ type fakeAPI struct {
 	harnessBeatsAtStop         []int
 	harnessControls            []HarnessControl
 	harnessCompletions         []string
+	harnessCompletionFailures  int
 	harnessDeliveries          []HarnessDelivery
 	harnessDeliveryCompletions int
 	harnessStops               []string
@@ -111,6 +112,10 @@ func (a *fakeAPI) DrainHarness(context.Context, HarnessSession) ([]HarnessDelive
 func (a *fakeAPI) CompleteHarnessControl(_ context.Context, _ HarnessSession, id, outcome, reason string) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	if a.harnessCompletionFailures > 0 {
+		a.harnessCompletionFailures--
+		return errors.New("fixture completion outage")
+	}
 	a.harnessCompletions = append(a.harnessCompletions, id+":"+outcome+":"+reason)
 	return nil
 }

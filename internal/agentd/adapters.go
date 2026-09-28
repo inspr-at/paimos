@@ -571,7 +571,7 @@ func (p *claudeProcess) Wait() error {
 	return err
 }
 func (p *claudeProcess) Control(ctx context.Context, op, text string) error {
-	if op != "steer" && op != "interrupt" {
+	if op != "steer" && op != "interrupt" && op != "stop" {
 		return ErrUnsupported
 	}
 	correlation, err := randomID()
@@ -595,6 +595,15 @@ func (p *claudeProcess) Control(ctx context.Context, op, text string) error {
 	case <-ctx.Done():
 		return ctx.Err()
 	case <-p.readDone:
+		// A native close can acknowledge and reach EOF in the same reader pass.
+		// Preserve its already-read receipt instead of racing it against EOF.
+		select {
+		case ok := <-ch:
+			if ok {
+				return nil
+			}
+		default:
+		}
 		return errors.New("Claude bridge closed")
 	}
 }
@@ -650,6 +659,7 @@ func (a *ClaudeAdapter) Start(ctx context.Context, r StartRequest, observe func(
 	p.setOnEvent(func(raw json.RawMessage) {
 		var frame struct {
 			Kind           string          `json:"kind"`
+			Reason         string          `json:"reason"`
 			CorrelationID  string          `json:"correlation_id"`
 			EffectiveModel string          `json:"effective_model"`
 			ModelEvidence  string          `json:"model_evidence_status"`
@@ -667,6 +677,12 @@ func (a *ClaudeAdapter) Start(ctx context.Context, r StartRequest, observe func(
 			case cp.ready <- nil:
 			default:
 			}
+		case "budget_exhausted":
+			if frame.Reason == "token_budget_exhausted" || frame.Reason == "turn_budget_exhausted" {
+				observe(AdapterEvent{BudgetExhausted: frame.Reason})
+			}
+		case "turn_completed":
+			observe(AdapterEvent{BudgetTurnsDelta: 1})
 		case "turn_started":
 			observe(AdapterEvent{Kind: "turn", TurnCountDelta: 1})
 		case "usage":
@@ -692,7 +708,7 @@ func (a *ClaudeAdapter) Start(ctx context.Context, r StartRequest, observe func(
 			}
 		}
 	})
-	if err := p.send(map[string]any{"op": "start", "prompt": r.Prompt, "model": r.Profile.Model, "effort": r.Profile.Effort, "correlation_id": "initial", "tools": r.Tools, "purpose": r.Run.Purpose}); err != nil {
+	if err := p.send(map[string]any{"op": "start", "prompt": r.Prompt, "model": r.Profile.Model, "effort": r.Profile.Effort, "correlation_id": "initial", "tools": r.Tools, "purpose": r.Run.Purpose, "rules": r.Rules, "max_turns": r.MaxTurns, "max_tokens": r.MaxTokens}); err != nil {
 		return p.failStart(err)
 	}
 	op, cancel := operationContext(ctx)

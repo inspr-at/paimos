@@ -26,6 +26,8 @@ import (
 )
 
 type Config struct {
+	MaxTokens         int64
+	MaxTurns          int64
 	API               API
 	StateRoot         string
 	DaemonID          string
@@ -38,13 +40,16 @@ type Config struct {
 }
 
 type replay struct {
-	Digest  string  `json:"digest"`
-	Receipt Receipt `json:"receipt"`
+	Rejected bool    `json:"rejected,omitempty"`
+	Digest   string  `json:"digest"`
+	Receipt  Receipt `json:"receipt"`
 }
 
 // Record contains only local process provenance and bounded control digests.
 // The journal is AEON v2; classic journals are never opened implicitly.
 type Record struct {
+	BudgetStopReason      string `json:"budget_stop_reason,omitempty"`
+	BudgetStopUnconfirmed bool   `json:"budget_stop_unconfirmed,omitempty"`
 	// Only launchPrepared proves that adapter.Start has never been called.
 	// Empty is a legacy record, never evidence that no child was forked.
 	LaunchState   string            `json:"launch_state,omitempty"`
@@ -67,6 +72,15 @@ type Record struct {
 }
 
 type owned struct {
+	budgetMu                                       sync.Mutex
+	budgetProcess                                  Process
+	budgetTools                                    *managedToolServer
+	controlMu                                      sync.Mutex
+	managedPolicy                                  bool
+	tokenBudget, turnBudget, tokensUsed, turnsUsed int64
+	budgetReason                                   string
+	budgetStopStarted, budgetStopUnconfirmed       bool
+
 	deadlineExpired atomic.Bool
 	mu              sync.Mutex
 	harnessMu       sync.Mutex
@@ -97,6 +111,8 @@ type harnessMetadata struct {
 }
 
 type Supervisor struct {
+	maxTokens, maxTurns int64
+
 	dispatchMu        sync.Mutex
 	state             *agentsetup.Store
 	closing           bool
@@ -162,6 +178,15 @@ func NewSupervisor(ctx context.Context, c Config) (*Supervisor, error) {
 	}
 	if heartbeat < time.Second || heartbeat > time.Minute {
 		return nil, errors.New("invalid heartbeat interval")
+	}
+	if c.MaxTokens < 0 || c.MaxTurns < 0 {
+		return nil, errors.New("invalid managed budget")
+	}
+	if c.MaxTokens == 0 {
+		c.MaxTokens = defaultTokenBudget
+	}
+	if c.MaxTurns == 0 {
+		c.MaxTurns = defaultTurnBudget
 	}
 	maxRun := c.MaxRunDuration
 	if maxRun == 0 {
@@ -230,7 +255,7 @@ func NewSupervisor(ctx context.Context, c Config) (*Supervisor, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &Supervisor{state: state, blockedAccounts: map[string]bool{}, probedAccounts: map[string]bool{}, loginRequired: map[string]bool{}, api: c.API, journal: j, lock: lock, adapters: adapters, runs: map[string]*owned{}, tenantID: tenantID,
+	s := &Supervisor{maxTokens: c.MaxTokens, maxTurns: c.MaxTurns, state: state, blockedAccounts: map[string]bool{}, probedAccounts: map[string]bool{}, loginRequired: map[string]bool{}, api: c.API, journal: j, lock: lock, adapters: adapters, runs: map[string]*owned{}, tenantID: tenantID,
 		principalID: principalID, daemonID: c.DaemonID, generation: gen, workspace: physical, estimates: c.EstimatedUnits, accounts: c.Accounts,
 		heartbeatInterval: heartbeat, maxRunDuration: maxRun, prepareScratch: verificationScratch, newHarnessID: randomID}
 	for _, rec := range j.Snapshot() {
@@ -416,6 +441,8 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 		return err
 	}
 	verification := run.Purpose == VerificationPurpose
+	managedAdapter, managedOK := adapter.(ManagedControlAdapter)
+	managedPolicy := !verification && managedOK && managedAdapter.ManagedControlSupported()
 	if verification {
 		s.mu.Lock()
 		entries := make([]*owned, 0, len(s.runs))
@@ -586,11 +613,18 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 	if err != nil {
 		return err
 	}
+	entry.managedPolicy = managedPolicy
+	if managedPolicy {
+		entry.tokenBudget, entry.turnBudget = s.maxTokens, s.maxTurns
+	}
 	caps := []string{"status", "stop"}
+	if managedPolicy {
+		caps = append(caps, managedControlCapability, "steer")
+	}
 	if profile.Harness != Grok {
 		caps = append(caps, "interrupt")
 	}
-	entry.inboxCapable = !verification && (profile.Harness == Claude || profile.Harness == Codex || profile.Harness == Pi)
+	entry.inboxCapable = !verification && !managedPolicy && (profile.Harness == Claude || profile.Harness == Codex || profile.Harness == Pi)
 	if entry.inboxCapable {
 		caps = append(caps, "inbox", "steer")
 	}
@@ -628,7 +662,7 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 			active := func() bool {
 				entry.mu.Lock()
 				defer entry.mu.Unlock()
-				return entry.record.Generation == s.generation && (entry.record.State == "starting" || entry.record.State == "running")
+				return entry.budgetStopReason() == "" && entry.record.Generation == s.generation && (entry.record.State == "starting" || entry.record.State == "running")
 			}
 			replySender := func(messageID string) (string, bool) {
 				entry.mu.Lock()
@@ -650,6 +684,19 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 			runTools = &entry.tools.tools
 		}
 	}
+	ephemeralRules := ""
+	if managedPolicy {
+		if runTools == nil {
+			closeHarness("process_failed")
+			return errors.New("bound tools required for managed controls")
+		}
+		ephemeralRules, err = s.managedRules(ctx, entry, run, profile)
+		if err != nil {
+			_ = entry.tools.Close()
+			closeHarness("process_failed")
+			return err
+		}
+	}
 	observe := func(ev AdapterEvent) { s.observe(entry, ev) }
 	// Commit the possible-fork boundary before handing control to an adapter.
 	// On a journal failure Start is never invoked; after success a crash is
@@ -669,7 +716,7 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 	}
 	launchedAt := time.Now()
 	proc, err := adapter.Start(ctx, StartRequest{TenantID: s.tenantID, PrincipalID: s.principalID, Run: run, Profile: profile,
-		AccountKey: route.AccountKey, Workspace: runWorkspace, StateRoot: filepath.Dir(s.journal.JournalPath()), Prompt: prompt, Generation: s.generation, Tools: runTools}, observe)
+		AccountKey: route.AccountKey, Workspace: runWorkspace, StateRoot: filepath.Dir(s.journal.JournalPath()), Prompt: prompt, Generation: s.generation, Tools: runTools, Rules: ephemeralRules, MaxTurns: entry.turnBudget, MaxTokens: entry.tokenBudget}, observe)
 	if err != nil {
 		_ = entry.tools.Close()
 		// A generic Start error does not prove that a child was never forked.
@@ -690,6 +737,10 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 	entry.monitorDone = make(chan struct{})
 	done := entry.monitorDone
 	entry.mu.Unlock()
+	entry.budgetMu.Lock()
+	entry.budgetProcess, entry.budgetTools = proc, entry.tools
+	entry.budgetMu.Unlock()
+	s.observeBudget(entry, AdapterEvent{})
 	go s.runDeadline(entry, proc, done, time.Until(launchedAt.Add(duration)))
 	var startedErr error
 	if saveErr == nil {
@@ -764,6 +815,7 @@ func (s *Supervisor) runDeadline(entry *owned, proc Process, done <-chan struct{
 }
 
 func (s *Supervisor) observe(entry *owned, ev AdapterEvent) {
+	s.observeBudget(entry, ev)
 	if ev.SessionUsage != nil {
 		entry.usage.submit(*ev.SessionUsage)
 	}
@@ -834,6 +886,7 @@ func (s *Supervisor) monitor(entry *owned) {
 	defer entry.tools.Close()
 	err := proc.Wait()
 	entry.mu.Lock()
+	entry.record.BudgetStopReason = entry.budgetStopReason()
 	entry.record.ExitObserved = err == nil
 	if observer, ok := proc.(interface{ ProcessExited() bool }); ok {
 		entry.record.ExitObserved = observer.ProcessExited()
@@ -867,9 +920,10 @@ func (s *Supervisor) monitor(entry *owned) {
 		}
 	}
 	entry.mu.Lock()
-	stopped := entry.stopRequested || entry.deadlineExpired.Load()
+	stopped := entry.stopRequested || entry.deadlineExpired.Load() || entry.budgetStopReason() != ""
 	forced := entry.forceRequested
 	protocolFailed := entry.protocolFailed
+	budgetReason := entry.budgetStopReason()
 	entry.mu.Unlock()
 	if err == nil && !protocolFailed {
 		if evidence, ok := proc.(EvidenceProcess); ok {
@@ -918,6 +972,9 @@ func (s *Supervisor) monitor(entry *owned) {
 		if forced {
 			reason = "force_stopped"
 		}
+	}
+	if budgetReason != "" {
+		reason = budgetReason
 	}
 	s.stopHarness(ctx, entry, reason)
 }
@@ -972,7 +1029,25 @@ func (s *Supervisor) serviceHarness(ctx context.Context, entry *owned) (result e
 			reason = "owned_group_signalled_root_exited"
 		}
 		_, err := s.control(ctx, ControlRequest{TenantID: s.tenantID, PrincipalID: s.principalID,
-			RunID: entry.record.RunID, Generation: s.generation, CorrelationID: control.ID, Operation: control.Kind, ExpectedOwnership: control.ExpectedOwnership, ExpiresAt: control.ExpiresAt}, true)
+			RunID: entry.record.RunID, Generation: s.generation, CorrelationID: control.ID, Operation: control.Kind, Text: control.Text, ExpectedOwnership: control.ExpectedOwnership, ExpiresAt: control.ExpiresAt}, true)
+		if entry.managedPolicy && control.Kind != "force_stop" {
+			switch {
+			case errors.Is(err, ErrControlExpired):
+				outcome, reason, err = "rejected", "authorization_expired", nil
+			case errors.Is(err, ErrUnsupported), errors.Is(err, ErrNotOwned), errors.Is(err, ErrGeneration):
+				outcome, reason, err = "rejected", "child_unavailable", nil
+			case errors.Is(err, ErrBudgetExhausted):
+				outcome, reason, err = "rejected", "budget_exhausted", nil
+			case err != nil:
+				outcome, reason, err = "rejected", "outcome_unconfirmed", nil
+			case control.Kind == "steer":
+				reason = "queued_next_turn"
+			case control.Kind == "interrupt":
+				reason = "native_interrupt_acknowledged"
+			case control.Kind == "stop":
+				reason = "native_close_exited"
+			}
+		}
 		if errors.Is(err, ErrUnsupported) || errors.Is(err, ErrNotOwned) || errors.Is(err, ErrGeneration) {
 			outcome, reason, err = "rejected", "child_unavailable", nil
 		}
@@ -989,7 +1064,7 @@ func (s *Supervisor) serviceHarness(ctx context.Context, entry *owned) (result e
 			return err
 		}
 		if err := s.api.CompleteHarnessControl(ctx, entry.harness, control.ID, outcome, reason); err != nil {
-			if !errors.Is(err, ErrHarnessArchived) && (control.Kind == "force_stop" || control.Kind == "stop") {
+			if !errors.Is(err, ErrHarnessArchived) && (entry.managedPolicy || control.Kind == "force_stop" || control.Kind == "stop") {
 				return ErrControlUnconfirmed
 			}
 			return err
@@ -1100,8 +1175,13 @@ func (s *Supervisor) control(ctx context.Context, req ControlRequest, fromRecove
 	if entry.record.ExecutionMode == VerificationPurpose && (req.Operation == "steer" || req.Operation == "resume") {
 		return Receipt{}, ErrUnsupported
 	}
+	entry.controlMu.Lock()
+	defer entry.controlMu.Unlock()
 	entry.mu.Lock()
 	defer entry.mu.Unlock()
+	if entry.managedPolicy && !fromRecoveryQueue {
+		return Receipt{}, ErrUnsupported
+	}
 
 	payload, _ := json.Marshal(struct {
 		Ownership *ownedprocess.Identity
@@ -1113,6 +1193,9 @@ func (s *Supervisor) control(ctx context.Context, req ControlRequest, fromRecove
 		if prior.Digest != key {
 			return Receipt{}, ErrReplay
 		}
+		if prior.Rejected {
+			return Receipt{}, ErrControlUnconfirmed
+		}
 		return prior.Receipt, nil
 	}
 	if entry.record.Generation != s.generation || entry.process == nil || entry.record.State != "running" || entry.harnessArchived {
@@ -1120,6 +1203,32 @@ func (s *Supervisor) control(ctx context.Context, req ControlRequest, fromRecove
 	}
 	if len(entry.record.Controls) >= 256 {
 		return Receipt{}, errors.New("control replay capacity reached")
+	}
+	if req.Operation != "force_stop" && fromRecoveryQueue && (entry.managedPolicy || req.ExpectedOwnership != nil) {
+		if !entry.managedPolicy {
+			return Receipt{}, ErrUnsupported
+		}
+		if entry.budgetStopReason() != "" {
+			return Receipt{}, ErrBudgetExhausted
+		}
+		if req.ExpectedOwnership == nil || req.ExpiresAt == nil {
+			return Receipt{}, ErrUnsupported
+		}
+		if !req.ExpiresAt.After(time.Now()) {
+			return Receipt{}, ErrControlExpired
+		}
+		recovery, ok := entry.process.(RecoveryProcess)
+		if !ok {
+			return Receipt{}, ErrNotOwned
+		}
+		expected := req.ExpectedOwnership
+		if expected.DaemonID != s.daemonID || expected.Generation != s.generation {
+			return Receipt{}, ErrGeneration
+		}
+		current, e := recovery.Ownership()
+		if e != nil || current.ProcessID != expected.ProcessID || current.RootPID != expected.RootPID || current.GroupID != expected.GroupID || !current.StartedAt.Equal(expected.StartedAt) {
+			return Receipt{}, ErrNotOwned
+		}
 	}
 	var err error
 	if req.Operation == "force_stop" {
@@ -1137,7 +1246,9 @@ func (s *Supervisor) control(ctx context.Context, req ControlRequest, fromRecove
 		}
 		entry.stopRequested = true
 		entry.forceRequested = true
+		entry.mu.Unlock()
 		err = recovery.ForceStop(ctx, *expected, *req.ExpiresAt)
+		entry.mu.Lock()
 		if err != nil && !errors.Is(err, ErrForceExitUnconfirmed) {
 			entry.forceRequested = false
 			entry.stopRequested = false
@@ -1151,14 +1262,23 @@ func (s *Supervisor) control(ctx context.Context, req ControlRequest, fromRecove
 			return Receipt{}, ErrUnsupported
 		}
 		entry.stopRequested = true
+		entry.mu.Unlock()
 		err = graceful.GracefulStop(ctx)
+		entry.mu.Lock()
 		if err != nil && !errors.Is(err, ErrGracefulTimeout) {
 			entry.stopRequested = false
 		}
 	} else {
-		err = entry.process.Control(ctx, req.Operation, req.Text)
+		proc := entry.process
+		entry.mu.Unlock()
+		err = proc.Control(ctx, req.Operation, req.Text)
+		entry.mu.Lock()
 	}
 	if err != nil {
+		if entry.managedPolicy && fromRecoveryQueue {
+			entry.record.Controls[req.CorrelationID] = replay{Digest: key, Rejected: true}
+			_ = s.journal.Put(entry.record)
+		}
 		return Receipt{}, err
 	}
 	receipt := Receipt{RunID: req.RunID, Generation: s.generation, CorrelationID: req.CorrelationID, Operation: req.Operation, AppliedAt: time.Now().UTC()}

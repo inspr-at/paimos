@@ -85,6 +85,7 @@ type HarnessSession struct {
 }
 
 type HarnessControl struct {
+	Text              string                 `json:"text,omitempty"`
 	ExpiresAt         *time.Time             `json:"expires_at,omitempty"`
 	ExpectedOwnership *ownedprocess.Identity `json:"expected_ownership,omitempty"`
 	ID                string                 `json:"id"`
@@ -178,6 +179,9 @@ type API interface {
 }
 
 type StartRequest struct {
+	Rules       string // Ephemeral ADR-004 merge, never a repository instruction file.
+	MaxTurns    int64
+	MaxTokens   int64
 	TenantID    string
 	PrincipalID string
 	Run         Run
@@ -198,6 +202,8 @@ type RunTools struct {
 }
 
 type AdapterEvent struct {
+	BudgetExhausted   string
+	BudgetTurnsDelta  int64
 	SessionUsage      *sessionusage.UsageReport
 	Kind              string
 	VendorSessionID   string

@@ -208,7 +208,10 @@ try {
   fail();
   process.exit(1);
 }
-if (start?.op !== "start" || typeof start.prompt !== "string" || start.prompt.length === 0 ||
+if ((start?.rules !== undefined && (typeof start.rules !== "string" || Buffer.byteLength(start.rules) > 12000)) ||
+    (start?.max_turns !== undefined && (!Number.isSafeInteger(start.max_turns) || start.max_turns < 0)) ||
+    (start?.max_tokens !== undefined && (!Number.isSafeInteger(start.max_tokens) || start.max_tokens < 0)) ||
+    start?.op !== "start" || typeof start.prompt !== "string" || start.prompt.length === 0 ||
     Buffer.byteLength(start.prompt) > MAX_PROMPT_BYTES || start.prompt.includes("\0") ||
     ((start.model !== undefined || start.effort !== undefined) &&
      (!validDispatchValue(start.model) || !["low", "medium", "high", "xhigh", "max"].includes(start.effort))) ||
@@ -227,6 +230,7 @@ let sessionID = "";
 let effectiveModel = "";
 let modelEvidenceStatus = "";
 let initialTurnStarted = false;
+let completedTurns = 0;
 let turnActive = false;
 let interruptReceipt = false;
 const correlations = new Map();
@@ -296,7 +300,11 @@ function observeUsage(message) {
   if (typeof message.total_cost_usd === "number" && Number.isFinite(message.total_cost_usd) &&
       message.total_cost_usd >= 0) frame.cost_usd_total = message.total_cost_usd;
   if (Number.isSafeInteger(input) && Number.isSafeInteger(output) &&
-      (input > 0 || output > 0 || frame.cost_usd_total !== undefined)) emit(frame);
+      (input > 0 || output > 0 || frame.cost_usd_total !== undefined)) {
+    emit(frame);
+    return input + output;
+  }
+  return 0;
 }
 
 try {
@@ -333,7 +341,8 @@ try {
     allowedTools,
     tools: verification ? [] : DEFAULT_TOOLS,
     ...(verification ? { maxTurns: 1, canUseTool: async () => ({ behavior: "deny", message: "Verification has no tools" }) } : {}),
-    systemPrompt: { type: "preset", preset: "claude_code" },
+    systemPrompt: { type: "preset", preset: "claude_code", ...(start.rules ? { append: start.rules } : {}) },
+    ...(!verification && Number.isSafeInteger(start.max_turns) && start.max_turns > 0 ? { maxTurns: start.max_turns } : {}),
     ...(start.model ? { model: start.model, effort: start.effort } : {})
   };
   queryHandle = query({
@@ -525,7 +534,18 @@ try {
     observeTool(message);
     if (message?.type === "result") {
       turnActive = false;
-      observeUsage(message);
+      const tokens = observeUsage(message) || 0;
+      completedTurns++;
+      const reason = start.max_tokens > 0 && tokens >= start.max_tokens ? "token_budget_exhausted"
+        : message.subtype === "error_max_turns" || (start.max_turns > 0 && completedTurns >= start.max_turns) ? "turn_budget_exhausted" : "";
+      if (reason && start.purpose !== "pairing_verification") {
+        // Enforce inside the Query owner too: remote telemetry cannot delay close.
+        emit({ kind: "budget_exhausted", reason });
+        stopping = true;
+        controlInput.close(); input.close(); queryHandle.close();
+        emit({ kind: "turn_completed" });
+        break;
+      }
       emit({ kind: "turn_completed" });
       if (start.purpose === "pairing_verification") {
         verificationSucceeded = message.subtype === "success" && message.is_error !== true;

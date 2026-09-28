@@ -331,6 +331,26 @@ that session's tenant, project, key creator, agent and work order. Callers canno
 select another context. This is an execution-scoped read under the worker
 lease, not a general rules permission or a repository file installation.
 
+The qualifying adapter is currently the restricted Claude SDK bridge on macOS:
+explicit tools, no native Bash, workspace edit guard, strict MCP inventory and
+the existing bounded sandbox terminal. Codex and Cursor cannot yet enforce the
+required inherited-tool ceiling; they, Pi and Grok do not advertise this new
+capability. Unsupported platforms and missing bound tools/rules fail closed.
+The boundary does not isolate another process running as the same OS user.
+Claude steer queues the next input then interrupts the current turn. Interrupt
+requires the SDK receipt; stop requires native Query.close and observed exit.
+The managed panel replaces its legacy inbox composer with these exact-session
+controls, leaving older sessions on their existing interface.
+
+Qualified runs default to 100,000 reported input/output tokens (including cache
+usage) and 16 completed input turns, configured by agentd Config.MaxTokens and
+Config.MaxTurns. The SDK also receives maxTurns for its agent loop. Counters
+never reset on steering. Both the bridge and daemon close on exhaustion; the
+bridge closes even if remote telemetry stalls. Stop reasons and any unconfirmed
+exit are retained, tools close, and no force-stop fallback is implied. Token
+usage arrives at vendor reporting boundaries and may exceed the threshold;
+this is not a provider billing cap. Existing wall-clock deadlines remain.
+
 People with `harness.recover` permission can open **Recover** in a session’s details and archive its registration after confirming the exact session and host. Archive preserves ticket links, outcomes and audit history, revokes the old worker generation, and records process state as unknown. It never signals a process. Late heartbeats, control completions and registration replays cannot reopen an archived generation; a new session needs a new reference and lease. The recovery dialog refreshes on stale observations. Recovery-aware daemons detach their harness registration without stopping the run. Active older managed daemons must stop normally before archive is available, because they cannot detach safely. Archive waits for any already-authorized force request to finish or expire.
 
-Managed daemons report a per-launch process identity and generation. **Force stop** additionally requires human `harness.force_stop` permission, a fresh ownership report, and exact session/host/process-group confirmation. The daemon rejects a changed identity, restart, expired request or lost ownership; deadline and cancellation are rechecked under the final signal lock. Local transport and inbox credentials cannot authorize force stop. Expiry uses server and daemon wall clocks, which need normal host clock synchronization; archive cannot retract a signal that was already authorized or delivered, and always retains unknown process state. It signals only the owned process group (including children in that group), and reports root exit separately from queue acceptance; escaped descendants are outside its scope. Linux and macOS keep the group leader unreaped while signaling, preventing PID reuse. Unsupported adapters, legacy unmanaged sessions and offline ownership cannot be force stopped. Normal user **Stop** sends TERM and reports timeout without escalating; daemon cleanup retains its bounded force cleanup.
+Managed daemons report a per-launch process identity and generation. **Force stop** additionally requires human `harness.force_stop` permission, a fresh ownership report, and exact session/host/process-group confirmation. The daemon rejects a changed identity, restart, expired request or lost ownership; deadline and cancellation are rechecked under the final signal lock. Local transport and inbox credentials cannot authorize force stop. Expiry uses server and daemon wall clocks, which need normal host clock synchronization; archive cannot retract a signal that was already authorized or delivered, and always retains unknown process state. It signals only the owned process group (including children in that group), and reports root exit separately from queue acceptance; escaped descendants are outside its scope. Linux and macOS keep the group leader unreaped while signaling, preventing PID reuse. Unsupported adapters, legacy unmanaged sessions and offline ownership cannot be force stopped. Legacy normal user **Stop** sends TERM and reports timeout without escalating; the qualified Claude managed control uses native close as described above. Daemon cleanup retains its existing bounded force cleanup.
