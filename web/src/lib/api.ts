@@ -15,6 +15,7 @@ export function accountEmail(identity: Identity) {
 }
 
 import { learnPictures } from './avatar.ts'
+import type { TicketEta } from './eta.ts'
 
 export interface Version { version: string; scheme: string; brand?: import('./brand').Brand }
 
@@ -168,6 +169,7 @@ export interface ListItem extends WorkNode {
   parent: ListParent | null; children_count: number; project: ListProject | null
   // The nearest epic above the item (a task's is its ticket's epic); absent on older servers.
   epic?: ListProject | null
+  eta?: TicketEta
 }
 export type Facets = Record<string, Record<string, number>>
 export interface ListPage extends Page<ListItem> { facets?: Facets }

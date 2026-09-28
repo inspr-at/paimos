@@ -15,6 +15,8 @@ import PriorityIcon from './PriorityIcon.vue'
 import StatusIcon from './StatusIcon.vue'
 import TicketWorkers from './TicketWorkers.vue'
 import QuickCreateRow, { type QuickDraft } from './QuickCreateRow.vue'
+import EtaCell from './EtaCell.vue'
+import { etaFromTicket } from '../../lib/eta'
 
 const NO_WORKERS: LiveAgent[] = []
 
@@ -90,7 +92,7 @@ const emit = defineEmits<{
   release: [row: ListItem, anchor: HTMLElement]
 }>()
 
-const CLS: Record<ColumnId, string> = { key: 'c-key', title: 'c-title', status: 'c-status', priority: 'c-prio', assignee: 'c-assignee', epic: 'c-epic', release: 'c-release', tags: 'c-tags', cost: 'c-cost', estimate: 'c-estimate', created: 'c-created', updated: 'c-updated' }
+const CLS: Record<ColumnId, string> = { key: 'c-key', title: 'c-title', status: 'c-status', priority: 'c-prio', assignee: 'c-assignee', epic: 'c-epic', release: 'c-release', tags: 'c-tags', cost: 'c-cost', estimate: 'c-estimate', created: 'c-created', updated: 'c-updated', eta: 'c-eta' }
 // Columns follow the table's own width (the docked panel narrows it; wide screens
 // add columns) and the person's saved choice. Decided here rather than in CSS so
 // every colspan matches the visible columns.
@@ -112,6 +114,7 @@ const present = computed(() => {
     estimate: rows.some(row => !!estimate(row)),
     release: rows.some(row => !!releaseLabel(row.fields) || props.nativeReleases?.get(row.id)?.status === 'member'),
     tags: rows.some(row => tagList(row.fields).length > 0),
+    eta: listed.some(row => !!etaFromTicket(row.eta)),
   }
 })
 const layout = computed(() => visibleColumns(width.value, { phone: phone.value, present: present.value, prefs: props.prefs }))
@@ -713,6 +716,7 @@ defineExpose({
               <td v-else-if="column.id === 'estimate'" class="c-estimate"><div class="cell"><span v-if="estimate(entry.row)" class="mono">{{ estimate(entry.row) }}</span><span v-else class="empty" aria-label="No estimate">—</span></div></td>
               <td v-else-if="column.id === 'created'" class="c-created"><div class="cell"><time :datetime="entry.row.created_at" :data-tip="absoluteTime(entry.row.created_at)">{{ relativeTime(entry.row.created_at, { now }) }}</time></div></td>
               <td v-else-if="column.id === 'updated'" class="c-updated"><div class="cell"><time :datetime="entry.row.updated_at" :data-tip="absoluteTime(entry.row.updated_at)">{{ relativeTime(entry.row.updated_at, { now }) }}</time></div></td>
+              <td v-else-if="column.id === 'eta'" class="c-eta"><div class="cell"><EtaCell :eta="etaFromTicket(entry.row.eta)" :now="now" /></div></td>
             </template>
           </tr>
         </template>
@@ -1007,6 +1011,9 @@ button.release-chip:focus-visible { box-shadow: var(--focus-ring); }
   .ticket-row.cursor, .ticket-row.open { background: var(--row-selected); }
   .tickets colgroup { display: none; }
   .c-key { grid-area: key; } .c-status { grid-area: status; } .c-prio { grid-area: prio; } .c-updated { grid-area: updated; }
+  .ticket-row:not(:has(.eta-cell)) .c-eta { display: none !important; }
+  .ticket-row:has(.eta-cell) { grid-template-areas: "key status prio updated" "title title title title" "eta eta eta eta"; }
+  .c-eta { grid-area: eta; }
   .c-title { grid-area: title; }
   .ticket-row .c-assignee { display: none !important; }
   .title-cell { align-items: flex-start; flex-wrap: wrap; gap: 4px 8px; white-space: normal; }

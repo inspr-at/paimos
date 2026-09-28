@@ -11,15 +11,18 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/client"
+	"github.com/inspr-at/paimos/internal/eta"
 )
 
 // cmdHarnessV2 is the complete P5.3 harness command tree.
@@ -440,7 +443,7 @@ func (rt *runtime) harnessBind() *Command {
 	}}
 }
 func (rt *runtime) harnessWorker(kind string) *Command {
-	var project, session, agent, leaseFile, phase, activity, activityKind, note, model, effort, accountLabel, harnessVersion, brief, worktree, branch, deliveryID, level, reason string
+	var project, session, agent, leaseFile, phase, activity, activityKind, note, model, effort, accountLabel, harnessVersion, brief, worktree, branch, deliveryID, level, reason, etaReady, etaLive, progress string
 	// The sentinel distinguishes an omitted flag from --label "", which clears a label.
 	const omittedLabel = "\x00"
 	label := omittedLabel
@@ -467,6 +470,9 @@ func (rt *runtime) harnessWorker(kind string) *Command {
 			fs.string(&activity, "activity", 0, "unknown, busy, idle or throttled")
 			fs.string(&activityKind, "activity-kind", 0, "classic content-free adapter event kind")
 			fs.int(&sequence, "activity-sequence", "monotonic sequence")
+			fs.string(&etaReady, "eta-ready", 0, "RFC3339 or a relative duration such as +25m")
+			fs.string(&etaLive, "eta-live", 0, "RFC3339 or a relative duration; coordinator sessions only")
+			fs.string(&progress, "progress", 0, "percent done, 0 through 100")
 		case "complete-delivery":
 			fs.string(&deliveryID, "delivery-id", 0, "leased delivery UUID")
 			fs.int(&cursor, "cursor", "sent-event cursor")
@@ -540,6 +546,27 @@ func (rt *runtime) harnessWorker(kind string) *Command {
 					items = append(items, map[string]string{"sha": sha, "subject": subject})
 				}
 				body["commits"] = items
+			}
+			if etaReady != "" {
+				at, err := parseCLIETA(etaReady, "--eta-ready")
+				if err != nil {
+					return err
+				}
+				body["eta_ready_at"] = at
+			}
+			if etaLive != "" {
+				at, err := parseCLIETA(etaLive, "--eta-live")
+				if err != nil {
+					return err
+				}
+				body["eta_live_at"] = at
+			}
+			if progress != "" {
+				n, err := strconv.Atoi(progress)
+				if err != nil || n < 0 || n > 100 {
+					return usagef("--progress must be an integer from 0 to 100")
+				}
+				body["progress_pct"] = n
 			}
 		case "complete-delivery":
 			if !validUUID(deliveryID) || cursor < 1 {
@@ -713,4 +740,60 @@ func (rt *runtime) harnessSessionFull(project, agent, format, sid string) error 
 	safePath := "'" + strings.ReplaceAll(dir, "'", "'\\''") + "'"
 	fmt.Fprintf(rt.stdout, "export PAIMOS_AGENT_NAME=%s\nexport PAIMOS_SESSION_ID=%s\nexport PAIMOS_KNOWLEDGE_DIR=%s\n", agent, sid, safePath)
 	return nil
+}
+
+var relativeETA = regexp.MustCompile(`^([+-])(\d+)([smhd])$`)
+
+func relativeUnit(unit string) time.Duration {
+	switch unit {
+	case "s":
+		return time.Second
+	case "m":
+		return time.Minute
+	case "h":
+		return time.Hour
+	case "d":
+		return 24 * time.Hour
+	default:
+		return 0
+	}
+}
+
+// scaleDuration multiplies n by unit without wrapping. The bool is false when
+// the product does not fit in a time.Duration.
+func scaleDuration(n int64, unit time.Duration) (time.Duration, bool) {
+	if n < 0 || unit <= 0 {
+		return 0, false
+	}
+	if n > int64(math.MaxInt64/int64(unit)) {
+		return 0, false
+	}
+	return time.Duration(n) * unit, true
+}
+
+func parseCLIETA(raw, flag string) (string, error) {
+	if match := relativeETA.FindStringSubmatch(raw); match != nil {
+		negative := match[1] == "-"
+		limit := eta.MaxFuture
+		if negative {
+			limit = eta.MaxPast
+		}
+		n, err := strconv.ParseInt(match[2], 10, 64)
+		delta, ok := scaleDuration(n, relativeUnit(match[3]))
+		if err != nil || !ok || delta > limit {
+			delta = limit
+		}
+		if negative {
+			delta = -delta
+		}
+		return time.Now().Add(delta).UTC().Format(time.RFC3339), nil
+	}
+	at, err := time.Parse(time.RFC3339, raw)
+	if err != nil {
+		return "", usagef("%s must be RFC3339 or a relative duration like +25m", flag)
+	}
+	if !eta.Allowed(at, time.Now()) {
+		return "", usagef("%s must be within 30 days overdue and 365 days ahead", flag)
+	}
+	return at.UTC().Format(time.RFC3339), nil
 }

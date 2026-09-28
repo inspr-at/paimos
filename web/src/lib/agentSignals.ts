@@ -51,15 +51,18 @@ export function attentionReasonText(reason: AttentionReason): StateReason {
   const locations = { approvals: 'Review permission requests in Needs you.', messages: 'Review the shared principal inbox in Messages below.', session: 'Check the bound run and session activity below.' }
   return { code: `${reason.scope}-${reason.kind}-${reason.actor}`, detail: `${reason.scope === 'shared' ? 'Shared inbox · ' : ''}${details[reason.kind]}`, next: `${reason.scope === 'shared' ? 'No session ownership is recorded. ' : ''}${!reason.blocking && reason.scope !== 'shared' ? 'This does not block ongoing work. ' : ''}${locations[reason.location]}` }
 }
-export function waitingLabel(evidence: Pick<StateEvidence, 'attention_reasons'>) {
+export function waitingLabel(evidence: Pick<StateEvidence, 'attention_reasons' | 'eta_stale'>) {
   const reasons = evidence.attention_reasons
   if (reasons?.some(r => r.scope !== 'shared' && r.blocking && r.kind === 'approval')) return 'Awaiting approval'
+  const blocking = reasons?.some(r => r.blocking && r.scope !== 'shared')
+  if (evidence.eta_stale && !blocking) return 'Estimate stale'
   return reasons?.length ? 'Waiting' : STATE_LABEL.waiting
 }
 export interface StateEvidence {
   phase: string; activity: string; heartbeat_at?: string | null; created_at?: string; since?: string
   stopped_at?: string | null; stop_reason?: string | null; run_status?: string | null
   needs_attention?: boolean; has_problem?: boolean; attention_reasons?: AttentionReason[]
+  eta_stale?: boolean
 }
 // Stop reasons are free text. Match error words, not arbitrary nonempty reasons:
 // "user requested", "completed", "stopped", "cancelled" are normal stops.
@@ -96,9 +99,10 @@ export function assessAgentState(evidence: StateEvidence, now: number, preferenc
     next: 'Check the worker and its heartbeat reporter on the recorded host. A missing heartbeat does not establish that the worker failed.',
   }
   if (working && heartbeat.age >= preferences.redMinutes * 60_000) return result('unresponsive', [heartbeatReason])
-  if ((evidence.needs_attention ?? (needs || evidence.run_status === 'waiting')) || evidence.phase === 'yielded') {
-    const detail = evidence.phase === 'yielded' ? 'The session yielded and is waiting to continue.' : evidence.run_status === 'waiting' ? 'The bound run is waiting.' : 'An approval, held action or requested reply is outstanding.'
+  if ((evidence.needs_attention ?? (needs || evidence.run_status === 'waiting')) || evidence.phase === 'yielded' || evidence.eta_stale) {
+    const detail = evidence.phase === 'yielded' ? 'The session yielded and is waiting to continue.' : evidence.run_status === 'waiting' ? 'The bound run is waiting.' : evidence.eta_stale ? 'The estimate was not refreshed within two reporting intervals.' : 'An approval, held action or requested reply is outstanding.'
     const reasons = evidence.attention_reasons?.filter(r => r.scope !== 'shared' && r.blocking).sort((a, b) => Number(b.kind === 'approval') - Number(a.kind === 'approval')).map(attentionReasonText) ?? []
+    if (evidence.eta_stale) reasons.push({ code: 'eta-stale', detail: 'The estimate was not refreshed within two reporting intervals.', next: 'Refresh the estimate from the session working this ticket.' })
     return result('waiting', reasons.length ? reasons : [{ code: 'attention', detail, next: 'Review the session activity and bound run; who must act is not specified.' }], waitingLabel(evidence))
   }
   if (evidence.activity === 'throttled') return result('throttled', [{ code: 'throttled', detail: 'The session reports throttled activity.', next: 'Check its account allowance and pacing before resuming work.' }])

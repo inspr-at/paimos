@@ -52,6 +52,7 @@ import (
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/ownedprocess"
 	"github.com/inspr-at/paimos/internal/plugins"
+	"github.com/inspr-at/paimos/internal/reportercontract"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
 )
@@ -81,6 +82,9 @@ func (m *Module) Mount(mux *http.ServeMux) {
 		{"POST /api/model-prices", "models.manage", false, 201, m.createUsagePrice},
 		{"GET /api/model-prices", "harness.read", false, 200, m.listUsagePrices},
 		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/heartbeat", "harness.worker", true, 200, m.heartbeat},
+		{"GET /api/settings/eta-interval", "settings.manage", false, 200, m.getEtaInterval},
+		{"PUT /api/settings/eta-interval", "settings.manage", false, 200, m.putEtaInterval},
+		{"PUT /api/nodes/{nodeId}/live-eta", "harness.worker", true, 200, m.setLiveEta},
 		{"GET /api/projects/{projectId}/harness-sessions/{sessionId}/provenance", "harness.read", false, 200, m.readProvenance},
 		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/provenance", "harness.worker", true, 200, m.recordProvenance},
 		{"GET /api/projects/{projectId}/harness-sessions/{sessionId}/rules-receipts", "harness.read", false, 200, m.readRulesReceipts},
@@ -99,7 +103,11 @@ func (m *Module) Mount(mux *http.ServeMux) {
 		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/archive", "harness.recover", false, 200, m.archive},
 		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/controls/force-stop", "harness.force_stop", false, 201, m.forceStop},
 	} {
-		mux.HandleFunc(route.pattern, workorders.Endpoint(m.pool, route.scope, route.agent, route.status, route.fn))
+		handler := workorders.Endpoint(m.pool, route.scope, route.agent, route.status, route.fn)
+		if route.pattern == "GET /api/projects/{projectId}/harness-sessions/{sessionId}" || route.pattern == "POST /api/projects/{projectId}/harness-sessions/{sessionId}/heartbeat" {
+			handler = reportercontract.WithHeader(reportercontract.HarnessSession, handler)
+		}
+		mux.HandleFunc(route.pattern, handler)
 	}
 }
 
@@ -142,6 +150,11 @@ type Session struct {
 	StoppedAt                                      *time.Time        `json:"stopped_at"`
 	StopReason                                     *string           `json:"stop_reason"`
 	CreatedAt                                      time.Time         `json:"created_at"`
+	EtaReadyAt                                     *time.Time        `json:"eta_ready_at,omitempty"`
+	EtaLiveAt                                      *time.Time        `json:"eta_live_at,omitempty"`
+	ProgressPct                                    *int              `json:"progress_pct,omitempty"`
+	EtaReportedAt                                  *time.Time        `json:"eta_reported_at,omitempty"`
+	EtaStale                                       bool              `json:"eta_stale,omitempty"`
 	refDigest, leaseDigest, registrationMetaDigest []byte
 }
 
@@ -268,11 +281,16 @@ func normalizeActivityNote(raw string) (string, bool) {
 	return clean, clean != "" && utf8.RuneCountInString(clean) <= 120
 }
 
-const sessionColumns = `id::text,project_id::text,agent_principal_id::text,run_id::text,ticket_node_id::text,work_order_id::text,parent_id::text,harness,host,management,role,work_shape,capabilities,phase,activity,activity_sequence,revision,heartbeat_at,stopped_at,stop_reason,created_at,ref_digest,lease_digest,display_label,activity_note,model,reasoning_effort,account_label,harness_version,brief,worktree,branch,commits,registration_metadata_digest,archived_at,recovery_process_state,process_ownership,process_observed_at`
+const sessionColumns = `id::text,project_id::text,agent_principal_id::text,run_id::text,ticket_node_id::text,work_order_id::text,parent_id::text,harness,host,management,role,work_shape,capabilities,phase,activity,activity_sequence,revision,heartbeat_at,stopped_at,stop_reason,created_at,ref_digest,lease_digest,display_label,activity_note,model,reasoning_effort,account_label,harness_version,brief,worktree,branch,commits,registration_metadata_digest,archived_at,recovery_process_state,process_ownership,process_observed_at,eta_ready_at,eta_live_at,progress_pct,eta_reported_at`
 
 func scanSession(row pgx.Row) (Session, error) {
 	var s Session
-	err := row.Scan(&s.ID, &s.ProjectID, &s.AgentPrincipalID, &s.RunID, &s.TicketNodeID, &s.WorkOrderID, &s.ParentID, &s.Harness, &s.Host, &s.Management, &s.Role, &s.WorkShape, &s.Capabilities, &s.Phase, &s.Activity, &s.ActivitySequence, &s.Revision, &s.HeartbeatAt, &s.StoppedAt, &s.StopReason, &s.CreatedAt, &s.refDigest, &s.leaseDigest, &s.DisplayLabel, &s.ActivityNote, &s.Model, &s.ReasoningEffort, &s.AccountLabel, &s.HarnessVersion, &s.Brief, &s.Worktree, &s.Branch, &s.Commits, &s.registrationMetaDigest, &s.ArchivedAt, &s.RecoveryProcessState, &s.ProcessOwnership, &s.ProcessObservedAt)
+	var progress *int16
+	err := row.Scan(&s.ID, &s.ProjectID, &s.AgentPrincipalID, &s.RunID, &s.TicketNodeID, &s.WorkOrderID, &s.ParentID, &s.Harness, &s.Host, &s.Management, &s.Role, &s.WorkShape, &s.Capabilities, &s.Phase, &s.Activity, &s.ActivitySequence, &s.Revision, &s.HeartbeatAt, &s.StoppedAt, &s.StopReason, &s.CreatedAt, &s.refDigest, &s.leaseDigest, &s.DisplayLabel, &s.ActivityNote, &s.Model, &s.ReasoningEffort, &s.AccountLabel, &s.HarnessVersion, &s.Brief, &s.Worktree, &s.Branch, &s.Commits, &s.registrationMetaDigest, &s.ArchivedAt, &s.RecoveryProcessState, &s.ProcessOwnership, &s.ProcessObservedAt, &s.EtaReadyAt, &s.EtaLiveAt, &progress, &s.EtaReportedAt)
+	if progress != nil {
+		value := int(*progress)
+		s.ProgressPct = &value
+	}
 	return s, err
 }
 func project(ctx context.Context, tx pgx.Tx, id string) error {
@@ -634,8 +652,13 @@ func (m *Module) list(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, erro
 	if err != nil {
 		return nil, err
 	}
+	ptrs := make([]*Session, len(out))
 	for i := range out {
 		out[i].StateEvidence = evidence[out[i].ID]
+		ptrs[i] = &out[i]
+	}
+	if err = stampSessions(r.Context(), tx, ptrs); err != nil {
+		return nil, err
 	}
 	return out, nil
 }
@@ -682,8 +705,14 @@ func (m *Module) status(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, er
 	}
 	s.MetadataHistory = &history
 	evidence, err := readStateEvidence(r.Context(), tx, []string{s.ID})
+	if err != nil {
+		return nil, err
+	}
 	s.StateEvidence = evidence[s.ID]
-	return s, err
+	if err = stampSessions(r.Context(), tx, []*Session{&s}); err != nil {
+		return nil, err
+	}
+	return s, nil
 }
 func (m *Module) orchestrator(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
 	id := r.PathValue("projectId")
@@ -761,7 +790,12 @@ func (m *Module) bind(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, erro
 		}
 	}
 	before := s
-	s, err = scanSession(tx.QueryRow(ctx, `UPDATE harness_sessions SET parent_id=$2,ticket_node_id=$3,work_shape=$4,revision=revision+1 WHERE id=$1 RETURNING `+sessionColumns, s.ID, in.ParentID, in.TicketNodeID, in.WorkShape))
+	s, err = scanSession(tx.QueryRow(ctx, `UPDATE harness_sessions SET parent_id=$2,ticket_node_id=$3,work_shape=$4,
+		eta_ready_at=CASE WHEN ticket_node_id IS DISTINCT FROM $3::uuid THEN NULL ELSE eta_ready_at END,
+		eta_live_at=CASE WHEN ticket_node_id IS DISTINCT FROM $3::uuid THEN NULL ELSE eta_live_at END,
+		progress_pct=CASE WHEN ticket_node_id IS DISTINCT FROM $3::uuid THEN NULL ELSE progress_pct END,
+		eta_reported_at=CASE WHEN ticket_node_id IS DISTINCT FROM $3::uuid THEN NULL ELSE eta_reported_at END,
+		revision=revision+1 WHERE id=$1 RETURNING `+sessionColumns, s.ID, in.ParentID, in.TicketNodeID, in.WorkShape))
 	if err != nil {
 		return nil, err
 	}
@@ -775,6 +809,9 @@ func (m *Module) heartbeat(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 		ActivitySequence int64                  `json:"activity_sequence"`
 		ActivityNote     *string                `json:"activity_note"`
 		DisplayLabel     json.RawMessage        `json:"display_label"`
+		EtaReadyAt       json.RawMessage        `json:"eta_ready_at"`
+		EtaLiveAt        json.RawMessage        `json:"eta_live_at"`
+		ProgressPct      json.RawMessage        `json:"progress_pct"`
 		sessionText
 		Commits []Commit `json:"commits"`
 	}
@@ -863,7 +900,14 @@ func (m *Module) heartbeat(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 			return nil, err
 		}
 	}
+	s, err = applyEstimate(ctx, tx, p, s, in.EtaReadyAt, in.EtaLiveAt, in.ProgressPct)
+	if err != nil {
+		return nil, err
+	}
 	if err = record(ctx, tx, p, s, "heartbeat", before, s); err != nil {
+		return nil, err
+	}
+	if err = stampSessions(ctx, tx, []*Session{&s}); err != nil {
 		return nil, err
 	}
 	return s, nil

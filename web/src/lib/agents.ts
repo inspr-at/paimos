@@ -25,6 +25,7 @@ export interface HarnessSession {
   work_shape: 'unknown' | 'ship' | 'scout'; advertised_capabilities: string[]
   phase: 'starting' | 'working' | 'yielded' | 'stopping' | 'stopped'; activity: 'unknown' | 'busy' | 'idle' | 'throttled'
   run_status?: string | null; needs_attention?: boolean; has_problem?: boolean; attention_reasons?: AttentionReason[]; activity_sequence: number; revision: number; heartbeat_at: string | null; stopped_at: string | null; stop_reason: string | null; created_at: string
+  eta_ready_at?: string | null; eta_live_at?: string | null; progress_pct?: number | null; eta_reported_at?: string | null; eta_stale?: boolean
   // The tenant-wide list adds node summaries (B7) and the agent principal's name (U13).
   project?: NodeSummary; ticket?: NodeSummary | null; agent?: { id: string; name: string } | null
 }
