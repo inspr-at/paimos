@@ -448,6 +448,185 @@ func TestProhibitedSymlinkBoundsAndMixedContext(t *testing.T) {
 	}
 }
 
+func TestPrivatePathBoundaryAndCanonicalFiles(t *testing.T) {
+	const innocuous = "- Keep the synthetic boundary check.\n"
+	annotated := "<!-- aeon-context: template -->\n" + innocuous
+	sectioned := annotated + "\n## Kernel\n\n- Keep the synthetic kernel line.\n\n## Other\n\n- Keep the synthetic other line.\n"
+	dir := t.TempDir()
+
+	for _, rel := range []string{
+		"doctrine-private",
+		"Doctrine-Private",
+		"DOCTRINE-PRIVATE",
+		"inspr-doctrine-private",
+		"Inspr-Doctrine-Private",
+		"INSPR-DOCTRINE-PRIVATE",
+		"vendor/inspr-doctrine-private/docs",
+	} {
+		t.Run("dir/"+rel, func(t *testing.T) {
+			path := writeDoc(t, dir, filepath.Join(rel, "AGENTS-DOMAIN-DEV.md"), innocuous)
+			assertTemplateRefused(t, path, SectionAll)
+			assertTemplateRefused(t, path, SectionKernel)
+			assertTemplateRefused(t, path, SectionPersonal)
+			got := mustBuild(t, Request{Context: ContextPrivate, Files: []string{path}})
+			file := got.Files[0]
+			if file.Kind != "domain" || file.Layer != LayerCompany || file.Trust != ContextPrivate || file.Placement != PlacementOnDemand {
+				t.Fatalf("private domain file %+v", file)
+			}
+			if len(got.Rules) != 1 || got.Rules[0].Text != "Keep the synthetic boundary check." || got.Rules[0].Layer != LayerCompany || got.Rules[0].Placement != PlacementOnDemand {
+				t.Fatalf("private domain rule %+v", got.Rules)
+			}
+		})
+	}
+
+	for _, root := range []string{"doctrine-private", "inspr-doctrine-private"} {
+		t.Run("annotation/"+root, func(t *testing.T) {
+			domain := writeDoc(t, dir, filepath.Join(root, "annotated", "AGENTS-DOMAIN-OPS.md"), sectioned)
+			for _, section := range []string{SectionAll, SectionKernel, SectionPersonal} {
+				assertTemplateRefused(t, domain, section)
+			}
+			repo := writeDoc(t, dir, filepath.Join(root, "annotated", "AGENTS.md"), annotated)
+			for _, section := range []string{SectionAll, SectionKernel, SectionPersonal} {
+				assertTemplateRefused(t, repo, section)
+			}
+			local := mustBuild(t, Request{Context: ContextPrivate, Files: []string{domain}})
+			if local.Files[0].Trust != ContextPrivate || local.Files[0].Layer != LayerCompany || len(local.Rules) != 3 {
+				t.Fatalf("annotated private domain %+v rules %d", local.Files[0], len(local.Rules))
+			}
+			for _, rule := range local.Rules {
+				if rule.Layer != LayerCompany || rule.Placement != PlacementOnDemand {
+					t.Fatalf("annotated private rule %+v", rule)
+				}
+			}
+		})
+	}
+
+	for _, rel := range []string{
+		"private",
+		"Private",
+		"doctrine-private-notes",
+		"not-doctrine-private",
+		"pre-doctrine-private",
+		"inspr-doctrine",
+		"inspr-doctrine-private-backup",
+		"not-inspr-doctrine-private",
+		"my-inspr-doctrine-private",
+		"docs/doctrine-private.md",
+	} {
+		t.Run("unrelated/"+rel, func(t *testing.T) {
+			path := writeDoc(t, dir, filepath.Join(rel, "AGENTS-DOMAIN-DEV.md"), innocuous)
+			got := mustBuild(t, Request{Context: ContextTemplate, Files: []string{path}})
+			file := got.Files[0]
+			if file.Kind != "domain" || file.Layer != LayerCompany || file.Trust != ContextTemplate || file.Placement != PlacementOnDemand {
+				t.Fatalf("unrelated directory became private: %+v", file)
+			}
+			if len(got.Rules) != 1 || got.Rules[0].Identity == "" || !strings.HasPrefix(got.Rules[0].Identity, "company/preamble/-/t-") {
+				t.Fatalf("unrelated identity %+v", got.Rules)
+			}
+		})
+	}
+
+	core := writeDoc(t, dir, "canonical/AGENTS-CORE-PRIVATE.md", innocuous)
+	coreAnnotated := writeDoc(t, dir, "canonical/annotated/AGENTS-CORE-PRIVATE.md", sectioned)
+	for _, path := range []string{core, coreAnnotated} {
+		assertTemplateRefused(t, path, SectionAll)
+		assertTemplateRefused(t, path, SectionKernel)
+		assertTemplateRefused(t, path, SectionPersonal)
+	}
+	corePlan := mustBuild(t, Request{Context: ContextPrivate, Files: []string{core}})
+	if corePlan.Files[0].Kind != "core" || corePlan.Files[0].Layer != LayerCompany || corePlan.Files[0].Trust != ContextPrivate || corePlan.Files[0].Placement != PlacementOnDemand {
+		t.Fatalf("private core %+v", corePlan.Files[0])
+	}
+	publicCore := mustBuild(t, Request{Context: ContextTemplate, Files: []string{writeDoc(t, dir, "canonical/AGENTS-CORE.md", innocuous)}})
+	if publicCore.Files[0].Kind != "core" || publicCore.Files[0].Trust != ContextTemplate || publicCore.Files[0].Placement != PlacementOnDemand {
+		t.Fatalf("public core %+v", publicCore.Files[0])
+	}
+	if publicCore.Rules[0].ID != corePlan.Rules[0].ID || publicCore.Rules[0].Identity != corePlan.Rules[0].Identity || publicCore.PlanID == corePlan.PlanID {
+		t.Fatalf("core identity public %s/%s private %s/%s", publicCore.Rules[0].Identity, publicCore.PlanID, corePlan.Rules[0].Identity, corePlan.PlanID)
+	}
+
+	version := writeDoc(t, dir, "canonical/AGENTS-VERSIONING.md", innocuous)
+	versionPlan := mustBuild(t, Request{Context: ContextTemplate, Files: []string{version}})
+	if versionPlan.Files[0].Kind != "versioning" || versionPlan.Files[0].Layer != LayerCompany || versionPlan.Files[0].Trust != ContextTemplate || versionPlan.Files[0].Placement != PlacementOnDemand {
+		t.Fatalf("versioning %+v", versionPlan.Files[0])
+	}
+	if versionPlan.Rules[0].Layer != LayerCompany || versionPlan.Rules[0].Placement != PlacementOnDemand || !strings.HasPrefix(versionPlan.Rules[0].Identity, "company/preamble/-/t-") {
+		t.Fatalf("versioning rule %+v", versionPlan.Rules[0])
+	}
+	versionPrivate := writeDoc(t, dir, "inspr-doctrine-private/docs/AGENTS-VERSIONING.md", innocuous)
+	assertTemplateRefused(t, versionPrivate, SectionKernel)
+	versionLocal := mustBuild(t, Request{Context: ContextPrivate, Files: []string{versionPrivate}})
+	if versionLocal.Files[0].Kind != "versioning" || versionLocal.Files[0].Layer != LayerCompany || versionLocal.Files[0].Trust != ContextPrivate || versionLocal.Files[0].Placement != PlacementOnDemand {
+		t.Fatalf("private versioning %+v", versionLocal.Files[0])
+	}
+
+	marked := writeDoc(t, dir, "public/AGENTS-DOMAIN-DEV.md", "- A synthetic doctrine-private mention stays guarded.\n")
+	assertTemplateRefused(t, marked, SectionAll)
+	personal := writeDoc(t, dir, "public/AGENTS-DOMAIN-OPS.md", "- Reach synthetic@example.invalid for this fixture.\n")
+	assertTemplateRefused(t, personal, SectionKernel)
+
+	for _, name := range []string{"README.md", "agents-versioning.md", "AGENTS-FOO.md"} {
+		path := writeDoc(t, dir, filepath.Join("unknown", name), innocuous)
+		_, err := Build(context.Background(), Request{Context: ContextTemplate, Files: []string{path}})
+		if !errors.Is(err, ErrUnrecognizedFile) {
+			t.Fatalf("%s: %v", name, err)
+		}
+	}
+}
+
+func TestSupportedDoctrineIdentitiesStayStable(t *testing.T) {
+	const body = "- Keep commits small.\n"
+	dir := t.TempDir()
+	type want struct {
+		name, kind, placement, role string
+		layer                       Layer
+		trust, plan                 TrustContext
+	}
+	cases := []want{
+		{"AGENTS-KERNEL.md", "kernel", PlacementAlwaysOn, "", LayerCompany, ContextTemplate, ContextTemplate},
+		{"AGENTS-KERNEL-PRIVATE.md", "kernel", PlacementAlwaysOn, "", LayerCompany, ContextPrivate, ContextPrivate},
+		{"AGENTS-CORE.md", "core", PlacementOnDemand, "", LayerCompany, ContextTemplate, ContextTemplate},
+		{"AGENTS-DOMAIN-DEV.md", "domain", PlacementOnDemand, "", LayerCompany, ContextTemplate, ContextTemplate},
+		{"AGENTS-AGENT-SYSOP.md", "role", PlacementAlwaysOn, "sysop", LayerAgent, ContextTemplate, ContextTemplate},
+		{"AGENTS-PROFILE.md", "profile", PlacementOnDemand, "", LayerPerson, ContextPerson, ContextPerson},
+		{"AGENTS.md", "repo", PlacementAlwaysOn, "", LayerProject, ContextProject, ContextProject},
+		{"CLAUDE.md", "claude", PlacementAlwaysOn, "", LayerProject, ContextProject, ContextProject},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			path := writeDoc(t, dir, filepath.Join("stable", tc.name), body)
+			got := mustBuild(t, Request{Context: tc.plan, Files: []string{path}})
+			file := got.Files[0]
+			if file.Kind != tc.kind || file.Layer != tc.layer || file.Trust != tc.trust || file.Placement != tc.placement || file.Role != tc.role {
+				t.Fatalf("file %+v", file)
+			}
+			again := mustBuild(t, Request{Context: tc.plan, Files: []string{path}})
+			if again.PlanID != got.PlanID || again.Rules[0].ID != got.Rules[0].ID || again.Rules[0].Identity != got.Rules[0].Identity {
+				t.Fatal("replay changed a supported identity")
+			}
+		})
+	}
+
+	explicit := "# Synthetic kernel\n\n## Git\n\n<!-- aeon-rule: git.no-force -->\n- 🔴 Never force-push the default branch.\n  Why: shared history.\n"
+	path := writeDoc(t, dir, "stable/explicit/AGENTS-KERNEL.md", explicit)
+	got := mustBuild(t, Request{Context: ContextTemplate, Files: []string{path}})
+	if got.Rules[0].Identity != "company/git/-/git.no-force" || got.Rules[0].ExplicitID != "git.no-force" {
+		t.Fatalf("explicit identity %s", got.Rules[0].Identity)
+	}
+}
+
+func assertTemplateRefused(t *testing.T, path, section string) {
+	t.Helper()
+	var out bytes.Buffer
+	err := Run(context.Background(), Options{Request: Request{Context: ContextTemplate, Section: section, Files: []string{path}}}, &out, nil)
+	if !errors.Is(err, ErrMixedContext) || out.Len() != 0 {
+		t.Fatalf("template section %s: %v out=%q", section, err, out.String())
+	}
+	if strings.Contains(err.Error(), "synthetic") || strings.Contains(out.String(), "synthetic") {
+		t.Fatal("public-template refusal leaked fixture text")
+	}
+}
+
 func writeDoc(t *testing.T, dir, name, body string) string {
 	t.Helper()
 	path := filepath.Join(dir, name)

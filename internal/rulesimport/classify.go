@@ -24,8 +24,13 @@ func classify(path, section string, size int) (SourceFile, error) {
 		file.Layer = LayerCompany
 		file.Trust = ContextTemplate
 		file.Placement = PlacementAlwaysOn
-	case base == "AGENTS-CORE.md":
+	case base == "AGENTS-CORE.md" || base == "AGENTS-CORE-PRIVATE.md":
 		file.Kind = "core"
+		file.Layer = LayerCompany
+		file.Trust = ContextTemplate
+		file.Placement = PlacementOnDemand
+	case base == "AGENTS-VERSIONING.md":
+		file.Kind = "versioning"
 		file.Layer = LayerCompany
 		file.Trust = ContextTemplate
 		file.Placement = PlacementOnDemand
@@ -84,11 +89,17 @@ func privatePath(path string) (TrustContext, bool) {
 		return ContextPrivate, true
 	}
 	for _, component := range strings.Split(filepath.ToSlash(path), "/") {
-		if strings.EqualFold(component, "doctrine-private") {
+		if privateDirectory(component) {
 			return ContextPrivate, true
 		}
 	}
 	return "", false
+}
+
+// privateDirectory is an exact path component. Longer or shorter names, including
+// names that only contain one of these, stay ordinary directories.
+func privateDirectory(component string) bool {
+	return strings.EqualFold(component, "doctrine-private") || strings.EqualFold(component, "inspr-doctrine-private")
 }
 
 func contextAllowed(plan, file TrustContext) bool {
