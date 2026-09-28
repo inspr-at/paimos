@@ -134,7 +134,7 @@ async function submit() {
 </script>
 
 <template>
-  <button v-if="allowed && !session.archived_at" type="button" class="btn sm" @click="open"><AppIcon name="wrench" :size="14" />Recover</button>
+  <button v-if="allowed && !session.archived_at" type="button" class="btn sm ghost" @click="open"><AppIcon name="wrench" :size="14" />Recover</button>
   <dialog ref="dialog" class="recovery-dialog" :aria-labelledby="`${uid}-title`" :aria-describedby="`${uid}-intro`" @cancel.prevent="close">
     <div class="recovery-card">
       <div class="recovery-body">
@@ -142,34 +142,36 @@ async function submit() {
       <p v-if="done" :id="`${uid}-intro`" role="status">The registration is closed and its history is retained. Process state is unknown; no process was stopped.</p>
       <p v-else-if="forceControl" :id="`${uid}-intro`" role="status">{{ forceResult }}</p>
       <template v-else>
-        <p :id="`${uid}-intro`">Archive a registration or stop a verified owned process. Ticket links, outcomes and history remain available.</p>
-        <p v-if="loading" role="status">Loading current session…</p>
+        <p :id="`${uid}-intro`">Close a session that is stuck or gone. Its history and ticket links stay.</p>
+        <p v-if="loading" class="quiet" role="status">Loading current session…</p>
         <template v-if="preview">
-          <div v-if="preview.force_stop_available && preview.can_archive" class="seg" role="radiogroup" aria-label="Recovery action">
-            <button type="button" role="radio" :aria-checked="action === 'archive'" :disabled="busy" @click="action = 'archive'">Archive registration</button>
-            <button type="button" role="radio" :aria-checked="action === 'force'" :disabled="busy" @click="action = 'force'">Force stop process</button>
+          <div v-if="preview.force_stop_available && preview.can_archive" class="choices" role="radiogroup" aria-label="Recovery action">
+            <button type="button" role="radio" class="choice" :aria-checked="action === 'archive'" :aria-describedby="`${uid}-archive-desc`" :disabled="busy" @click="action = 'archive'">
+              <span class="choice-dot" aria-hidden="true" /><span class="choice-text"><strong>Archive registration</strong><small :id="`${uid}-archive-desc`">Closes the record only. No process is touched.</small></span>
+            </button>
+            <button type="button" role="radio" class="choice" :aria-checked="action === 'force'" :aria-describedby="`${uid}-force-desc`" :disabled="busy" @click="action = 'force'">
+              <span class="choice-dot" aria-hidden="true" /><span class="choice-text"><strong>Force stop process</strong><small :id="`${uid}-force-desc`">Kills its owned process group. Unsaved work may be lost.</small></span>
+            </button>
           </div>
           <dl class="recovery-facts">
-            <div><dt>Session</dt><dd>{{ preview.display_label || 'Unnamed session' }}<code>{{ preview.session_id }}</code></dd></div>
+            <div><dt>Session</dt><dd :title="preview.session_id">{{ preview.display_label || 'Unnamed session' }}</dd></div>
             <div><dt>Host</dt><dd>{{ preview.host }}</dd></div>
-            <div v-if="action === 'archive'"><dt>Process state</dt><dd>Unknown</dd></div>
-            <template v-else-if="preview.process_ownership">
-              <div><dt>Affected scope</dt><dd>Root PID {{ preview.process_ownership.root_pid }} and every process in its owned group {{ preview.process_ownership.group_id }}, including children that join it. Escaped descendants and other process groups are excluded.</dd></div>
-              <div><dt>Daemon</dt><dd>{{ preview.process_ownership.daemon_id }}<code>{{ preview.process_ownership.generation }}</code></dd></div>
-              <div><dt>Process identity</dt><dd><code>{{ preview.process_ownership.process_id }}</code>Started {{ preview.process_ownership.started_at }}</dd></div>
+            <template v-if="action === 'force' && preview.process_ownership">
+              <div><dt>Affected</dt><dd>Root PID {{ preview.process_ownership.root_pid }} and every process in its owned group {{ preview.process_ownership.group_id }}, including children that join it. Escaped descendants and other process groups are excluded.</dd></div>
+              <div><dt>Daemon</dt><dd :title="`Generation ${preview.process_ownership.generation} · process ${preview.process_ownership.process_id}`">{{ preview.process_ownership.daemon_id }} · started {{ preview.process_ownership.started_at }}</dd></div>
             </template>
           </dl>
-          <div class="recovery-note"><AppIcon :name="action === 'force' ? 'alert' : 'info'" :size="16" /><p>{{ action === 'force' ? 'Force stop immediately kills the owned process group. Unsaved work may be lost. The daemon must recheck this exact identity before acting.' : `${preview.process_scope} A missing heartbeat does not prove that a process exited.` }}</p></div>
-          <p v-if="!preview.force_stop_available" class="force-status"><strong>Force stop unavailable.</strong> {{ preview.force_stop_reason }}</p>
-          <p v-if="preview.archive_unavailable_reason" class="force-status"><strong>Archive unavailable.</strong> {{ preview.archive_unavailable_reason }}</p>
+          <p class="recovery-note" :class="{ danger: action === 'force' }"><AppIcon :name="action === 'force' ? 'alert' : 'info'" :size="15" /><span>{{ action === 'force' ? 'Force stop immediately kills the owned process group. Unsaved work may be lost. The daemon rechecks this exact identity first.' : preview.process_scope }}</span></p>
           <template v-if="available">
             <label :for="`${uid}-reason`">Reason for recovery</label>
-            <input :id="`${uid}-reason`" v-model="reason" class="field" maxlength="240" :disabled="busy" placeholder="Why is this action needed?" />
+            <input :id="`${uid}-reason`" v-model="reason" class="field" maxlength="240" :disabled="busy" placeholder="Why is this needed?" />
             <label :for="`${uid}-confirmation`">Type the exact confirmation</label>
             <code class="confirmation-text">{{ expectedConfirmation }}</code>
             <input :id="`${uid}-confirmation`" v-model="confirmation" class="field" autocomplete="off" spellcheck="false" :disabled="busy" />
           </template>
-          <p v-else>No recovery action is available for this registration.</p>
+          <p v-else class="quiet">No recovery action is available for this registration.</p>
+          <p v-if="!preview.force_stop_available" class="fine">No force stop: {{ preview.force_stop_reason.replace(/^Force stop /, '') }}</p>
+          <p v-if="preview.archive_unavailable_reason" class="fine">Archive unavailable: {{ preview.archive_unavailable_reason }}</p>
         </template>
       </template>
       <p v-if="error" class="recovery-error" role="alert">{{ error }}</p>
@@ -185,25 +187,36 @@ async function submit() {
 </template>
 
 <style scoped>
-.recovery-dialog { width: min(540px, calc(100vw - 28px)); max-height: calc(100dvh - 28px); padding: 0; border: 1px solid var(--glass-edge); border-radius: var(--radius); background: var(--surface-raised); color: var(--ink); box-shadow: var(--shadow-pop); overflow: hidden; }
+.recovery-dialog { width: min(520px, calc(100vw - 28px)); max-height: calc(100dvh - 28px); padding: 0; border: 1px solid var(--glass-edge); border-radius: var(--radius); background: var(--surface-raised); color: var(--ink); box-shadow: var(--shadow-pop); overflow: hidden; }
 .recovery-dialog::backdrop { background: var(--scrim); backdrop-filter: blur(2px); }
-.recovery-card { padding: 24px; display: flex; flex-direction: column; gap: 14px; max-height: calc(100dvh - 30px); }
-.recovery-body { display: grid; gap: 14px; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding-right: 2px; }
-h2 { font-size: 20px; line-height: 1.2; }
+.recovery-card { padding: 22px 24px 20px; display: flex; flex-direction: column; gap: 16px; max-height: calc(100dvh - 30px); }
+.recovery-body { display: grid; gap: 14px; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 2px; margin: -2px; }
+h2 { font-size: 19px; line-height: 1.2; }
 p { font-size: 13px; line-height: 1.5; color: var(--ink-2); }
-.recovery-facts { display: grid; gap: 12px; margin: 0; padding: 14px; background: var(--code-bg); border-radius: 10px; }
-.recovery-facts div { display: grid; grid-template-columns: 95px minmax(0, 1fr); gap: 12px; }
-dt { font-size: 12px; color: var(--ink-3); }
+.quiet { color: var(--ink-3); }
+.choices { display: grid; gap: 8px; }
+.choice { display: flex; align-items: flex-start; gap: 10px; width: 100%; padding: 11px 12px; border: 0; border-radius: 10px; background: var(--surface-sunken); box-shadow: inset 0 0 0 1px var(--line); color: var(--ink); text-align: left; cursor: pointer; }
+.choice[aria-checked="true"] { background: var(--row-selected); box-shadow: inset 0 0 0 1.5px var(--teal); }
+.choice:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.choice-dot { flex: none; width: 16px; height: 16px; margin-top: 1px; border-radius: 50%; box-shadow: inset 0 0 0 1.5px var(--ink-3); }
+.choice[aria-checked="true"] .choice-dot { box-shadow: inset 0 0 0 5px var(--teal); }
+.choice-text { display: grid; gap: 2px; }
+.choice-text strong { font-size: 13.5px; font-weight: 600; }
+.choice-text small { font-size: 12px; color: var(--ink-2); }
+.recovery-facts { display: grid; gap: 8px; margin: 0; }
+.recovery-facts div { display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: 12px; }
+dt { font-size: 12.5px; color: var(--ink-3); }
 dd { margin: 0; font-size: 13px; overflow-wrap: anywhere; }
-code { display: block; font: 11px/1.5 var(--mono); overflow-wrap: anywhere; color: var(--ink-2); }
-.recovery-note { display: flex; gap: 10px; align-items: flex-start; }
+.recovery-note { display: flex; gap: 8px; align-items: flex-start; }
 .recovery-note svg { flex-shrink: 0; margin-top: 2px; color: var(--ink-3); }
-.force-status { font-size: 12px; }
-label { font-size: 12px; font-weight: 600; margin-bottom: -8px; }
+.recovery-note.danger, .recovery-note.danger svg { color: var(--danger); }
+.fine { font-size: 12px; color: var(--ink-3); }
+label { font-size: 12px; font-weight: 600; margin-bottom: -8px; color: var(--ink-2); }
 .field { width: 100%; min-height: 40px; }
-.confirmation-text { padding: 10px; border-radius: 8px; background: var(--code-bg); user-select: all; }
+code { display: block; font: 11px/1.5 var(--mono); overflow-wrap: anywhere; color: var(--ink-2); }
+.confirmation-text { padding: 8px 10px; border-radius: 8px; background: var(--code-bg); user-select: all; }
 .recovery-error { color: var(--danger); }
-.recovery-actions { flex-shrink: 0; display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+.recovery-actions { flex-shrink: 0; display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; }
 .recovery-actions .btn { min-height: 40px; }
-@media (max-width: 500px) { .recovery-card { padding: 18px; gap: 12px; } .recovery-facts div { grid-template-columns: 78px minmax(0, 1fr); gap: 8px; } }
+@media (max-width: 500px) { .recovery-card { padding: 18px 16px 16px; gap: 14px; } .recovery-actions .btn { flex: 1; } }
 </style>

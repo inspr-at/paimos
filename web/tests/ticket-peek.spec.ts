@@ -61,10 +61,10 @@ test('cmd-click on an agents ticket keeps the real link', async ({ page }) => {
   expect(pathOf(page)).toBe('/agents')
 })
 
-test('a live-now ticket and a session ticket peek without covering the session text', async ({ page }) => {
+test('a session-row ticket and a panel ticket peek without covering the session text', async ({ page }) => {
   await page.setViewportSize({ width: 1600, height: 1000 })
   await openAgents(page)
-  const live = page.locator('.live-now').getByRole('link', { name: 'PHAROS-11' })
+  const live = page.locator(`[data-row="s:${session(1)}"]`).getByRole('link', { name: 'PHAROS-11' })
   await expect(live).toBeVisible()
   await live.click()
   await expect(peek(page).getByRole('heading', { name: 'Connect Hetzner Cloud for managed provisioning' })).toBeVisible()
@@ -73,7 +73,7 @@ test('a live-now ticket and a session ticket peek without covering the session t
   await expect(peek(page)).toHaveCount(0)
   await expect(live).toBeFocused()
 
-  await page.locator('.sessions').getByRole('link', { name: /Claude camy/ }).click()
+  await page.locator('.sessions').getByRole('link', { name: /Claude camy, Working/ }).click()
   await expect(page).toHaveURL(`/agents/${session(1)}`)
   await expect(page.getByRole('complementary', { name: 'Session details' })).toBeVisible()
   await page.getByRole('complementary', { name: 'Session details' }).locator('.ticket-detail').click()
@@ -158,7 +158,7 @@ test('release history still opens its own ticket panel', async ({ page }) => {
 test('ticket peek screenshots', async ({ page }) => {
   test.setTimeout(90_000)
   await openAgents(page)
-  await page.locator('.sessions').getByRole('link', { name: /Claude camy/ }).click()
+  await page.locator('.sessions').getByRole('link', { name: /Claude camy, Working/ }).click()
   await page.getByRole('complementary', { name: 'Session details' }).locator('.ticket-detail').click()
   await expect(peek(page).getByRole('heading', { name: 'Connect Hetzner Cloud for managed provisioning' })).toBeVisible()
   for (const colorScheme of ['light', 'dark'] as const) {

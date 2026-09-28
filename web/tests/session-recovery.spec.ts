@@ -33,7 +33,7 @@ test('archive requires exact confirmation and keeps unknown process status hones
   })
   await page.getByRole('button', { name: 'Recover', exact: true }).click()
   await expect(dialog(page)).toContainText('workstation-offline')
-  await expect(dialog(page)).toContainText('Force stop unavailable')
+  await expect(dialog(page)).toContainText('No force stop')
   await expect(dialog(page).getByRole('button', { name: 'Archive session' })).toBeDisabled()
   await dialog(page).getByLabel('Reason for recovery').fill('Heartbeat loop has exited; close the stale record')
   await dialog(page).getByLabel('Type the exact confirmation').fill('archive ops')

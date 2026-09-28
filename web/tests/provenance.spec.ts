@@ -55,8 +55,9 @@ test('an empty provenance record stays empty inside the open session', async ({ 
   await world(page, 'light')
   await page.goto(`/agents/${session(2)}`)
   const block = page.getByRole('complementary', { name: 'Session details' }).locator('.provenance')
-  await expect(block).toContainText('No instruction versions recorded for this session.')
-  await expect(block.locator('.items')).toHaveCount(0)
+  // Nothing recorded is not filler: the section is left out.
+  await expect(page.getByRole('complementary', { name: 'Session details' }).locator('.now-step')).toBeVisible()
+  await expect(block).toHaveCount(0)
 })
 
 test('a missing session shows an error and no instruction rows', async ({ page }) => {
@@ -96,7 +97,6 @@ test('a late provenance response does not attach to the session now open', async
   await page.goto('/agents')
   await page.locator(`[data-row="s:${older}"] .agent-link`).click()
   const block = page.getByRole('complementary', { name: 'Session details' }).locator('.provenance')
-  await expect(block).toContainText('Loading instruction versions')
   await page.locator(`[data-row="s:${current}"] .agent-link`).click()
   await expect(block).toContainText('live-marker')
   releaseOlder()

@@ -5,6 +5,7 @@ import { getNode } from '../../lib/api'
 import { activeRun, launchState } from '../../lib/startAgent'
 import { useAgents } from '../../stores/agents'
 import AppIcon from '../AppIcon.vue'
+import { relativeTime } from '../../lib/work'
 
 const agents = useAgents()
 const titles = ref<Record<string, string>>({})
@@ -18,28 +19,34 @@ watch(() => pending.value.map(r => r.work_order_id), async ids => {
 </script>
 
 <template>
-  <section v-if="pending.length" class="run-queue" aria-label="Runs awaiting a session">
-    <header><AppIcon name="clock" :size="16" /><h2>Awaiting a session</h2><span class="count mono">{{ pending.length }}</span></header>
-    <p>Queued work appears as a managed session after the daemon claims and registers it.</p>
+  <section v-if="pending.length" class="run-queue glass-card" aria-label="Runs awaiting a session">
+    <header>
+      <h2>Queued</h2><span class="count mono">{{ pending.length }}</span>
+      <span class="sub">Each becomes a session once its daemon picks it up.</span>
+    </header>
     <ul>
       <li v-for="run in pending" :key="run.id">
-        <div class="run-title"><strong>{{ titles[run.work_order_id] || `Run ${run.id.slice(0, 8)}` }}</strong><span>{{ run.requested_model || 'Model not reported' }}</span></div>
-        <span class="run-state"><AppIcon :name="run.status === 'queued' ? 'clock' : 'check'" :size="13" />{{ launchState(run).label }}</span>
+        <AppIcon :name="run.status === 'queued' ? 'clock' : 'check'" :size="14" class="run-icon" />
+        <strong class="run-title" :title="titles[run.work_order_id] ? undefined : `Run ${run.id}`">{{ titles[run.work_order_id] || 'Run' }}</strong>
+        <time class="run-when" :datetime="run.created_at">{{ relativeTime(run.created_at, { now: agents.now }) }}</time>
+        <span v-if="run.requested_model" class="run-model mono">{{ run.requested_model }}</span>
+        <span class="run-state">{{ launchState(run).label }}</span>
       </li>
     </ul>
   </section>
 </template>
 
 <style scoped>
-.run-queue { border: 1px solid var(--line); border-radius: 16px; background: var(--surface-raised); padding: 18px; }
-header { display: flex; align-items: center; gap: 8px; color: var(--ink-2); }
-h2 { font-size: 15px; color: var(--ink); }
-.count { margin-left: auto; font-size: 12px; }
-.run-queue > p { font-size: 12px; color: var(--ink-2); margin: 8px 0 12px; line-height: 1.5; }
-ul { list-style: none; padding: 0; margin: 0; }
-li { display: flex; align-items: center; gap: 16px; padding: 12px 0; border-top: 1px solid var(--line); }
-.run-title { flex: 1; min-width: 0; display: grid; gap: 4px; }
-.run-title strong { font-size: 13px; overflow-wrap: anywhere; }
-.run-title > span { font-size: 12px; color: var(--ink-2); overflow-wrap: anywhere; }
-.run-state { display: inline-flex; align-items: center; gap: 6px; padding: 5px 9px; border-radius: 999px; background: var(--surface-sunken); color: var(--ink-2); font-size: 12px; white-space: nowrap; }
+.run-queue { overflow: clip; }
+header { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 10px; padding: 14px 18px 10px; }
+h2 { font-size: 15px; font-weight: 650; color: var(--ink); }
+.count { font-size: 12px; color: var(--ink-3); }
+.sub { font-size: 12.5px; color: var(--ink-3); }
+ul { list-style: none; padding: 0 8px 8px; margin: 0; }
+li { display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 0 10px; border-top: 1px solid var(--line); font-size: 13px; }
+.run-icon { flex: none; color: var(--ink-3); }
+.run-title { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.run-model { flex: none; max-width: 30%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--ink-2); }
+.run-when { flex: none; margin-right: auto; font-size: 12px; color: var(--ink-3); white-space: nowrap; }
+.run-state { flex: none; font-size: 12px; color: var(--ink-2); white-space: nowrap; }
 </style>

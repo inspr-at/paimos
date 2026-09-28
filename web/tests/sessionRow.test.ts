@@ -33,7 +33,7 @@ test('intended result prefers an explicit phrase, then the bound ticket title, t
   assert.equal(intendedResult(plain).includes('heartbeat'), false)
 })
 
-test('execution names the reported model and effort, and does not invent an account or a provider', () => {
+test('execution names the reported model and effort, and omits what is not reported', () => {
   const known = view({ harness: 'Codex', session: { harness: 'codex', model: 'gpt-6-sol', reasoning_effort: 'xhigh', account_label: 'Codex Pro' } })
   const exec = sessionExecution(known)
   assert.equal(exec.modelLine, 'gpt-6-sol · xhigh')
@@ -47,12 +47,12 @@ test('execution names the reported model and effort, and does not invent an acco
   assert.equal(modelProvider('codex-astra-xhigh'), 'unknown')
   const missing = view({ harness: 'Grok', model: 'claude-fable-high', account: 'Claude Max', session: { harness: 'grok' } })
   const fallback = sessionExecution(missing)
-  assert.equal(fallback.modelLine, 'claude-fable-high · effort unknown')
+  assert.equal(fallback.modelLine, 'claude-fable-high')
   assert.equal(fallback.accountLine, 'Grok · Claude Max')
   assert.equal(fallback.provider, 'anthropic')
   const none = view({ harness: 'Grok', session: { harness: 'grok', heartbeat_at: new Date().toISOString() } })
   const empty = sessionExecution(none)
-  assert.equal(empty.modelLine, 'Model unknown')
-  assert.equal(empty.accountLine, 'Grok · Account unknown')
+  assert.equal(empty.modelLine, '')
+  assert.equal(empty.accountLine, 'Grok')
   assert.equal(empty.provider, 'unknown')
 })
