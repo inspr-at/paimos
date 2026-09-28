@@ -106,7 +106,12 @@ export function displayText(text: string, keys: Iterable<string>) {
   out = out.replace(/\s+([,.;:])/g, '$1').replace(/[,;:\s]+$/, '').replace(/\s{2,}/g, ' ').trim()
   return sentence(out || text)
 }
-export const displayHeadline = (r: Pick<Release, 'headline' | 'tickets' | 'changes' | 'notes'>) => r.notes ? (r.notes.items.map(item => item.pill_en).join(' · ') || (r.notes.gaps.length ? 'Release notes unavailable' : 'No public release notes')) : displayText(r.headline, ticketsOf(r as Release))
+// Regenerated archives without snapshots keep their historical display. A real
+// snapshot remains authoritative even when empty, hidden or incomplete.
+export function hasUsableNotes(r: Pick<Release, 'notes'>): r is Pick<Release, 'notes'> & { notes: ReleaseNotes } {
+  return !!r.notes && r.notes.source !== 'unavailable'
+}
+export const displayHeadline = (r: Pick<Release, 'headline' | 'tickets' | 'changes' | 'notes'>) => hasUsableNotes(r) ? (r.notes.items.map(item => item.pill_en).join(' · ') || (r.notes.gaps.length ? 'Release notes unavailable' : 'No public release notes')) : displayText(r.headline, ticketsOf(r as Release))
 // A subject without its conventional prefix ("feat(AEON-74): wide lists" reads "Wide lists").
 export function plainSubject(subject: string, tickets: string[] = []) {
   const m = /^[a-z]+(?:\([^)]*\))?!?:\s*(.+)$/.exec(subject)
@@ -162,7 +167,7 @@ export function naturalKey(a: string, b: string) { return a.localeCompare(b, 'en
 
 // ---------- Search and filters ----------
 export interface ReleaseFilter { q: string; features: boolean; fixes: boolean; tickets: boolean }
-export const ticketsOf = (r: Release) => [...new Set(r.notes ? r.notes.items.map(item => item.key) : [...r.tickets, ...r.changes.flatMap(c => c.tickets)])].sort(naturalKey)
+export const ticketsOf = (r: Release) => [...new Set(hasUsableNotes(r) ? r.notes.items.map(item => item.key) : [...r.tickets, ...r.changes.flatMap(c => c.tickets)])].sort(naturalKey)
 export function matches(r: Release, f: ReleaseFilter) {
   const groups = groupChanges(r.changes)
   if (f.features && !groups.features.length) return false

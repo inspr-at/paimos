@@ -4943,7 +4943,7 @@ components:
     ReleaseNotes:
       type: object
       required: [source, snapshot_sha256, captured_at, release_revision, items, gaps, hidden]
-      description: Additive v1 extension. Old manifests without notes remain archived Git history. New builds always record notes, including gaps. Snapshot digest binds the exact tagged file bytes. Git headlines never substitute for benefits.
+      description: Additive v1 extension. Old manifests without notes and regenerated records with source unavailable retain archived Git history display; regenerated records also show the benefit-data gap. New builds always record notes, including gaps. Snapshot digest binds the exact tagged file bytes. Git headlines never substitute for benefits.
       properties:
         source: {type: string}
         snapshot_sha256: {type: string}
@@ -7417,7 +7417,7 @@ components:
         updated_at: {type: string, format: date-time}
         deleted_at: {type: [string, 'null'], format: date-time}
     Node:
-      description: Ticket creation may return benefit warnings. Entering done requires both pills and benefits, including when hidden from release notes. Already-done records remain editable.
+      description: Ticket creation may return benefit warnings. Entering a built-in completed state (done, accepted, delivered) from outside that set requires both pills and benefits, including on creation and when hidden from release notes. Already-completed records remain editable, including transitions within that set.
       type: object
       required: [id, key, kind_id, title, body, fields, state, parent_id, position, created_at, updated_at]
       properties:
@@ -7462,7 +7462,7 @@ components:
     TicketBenefitFields:
       type: object
       additionalProperties: true
-      description: Tenant-default ticket fields. Drafts may be incomplete; entering done validates pills (2–4 whitespace-separated words) and nonblank benefits. One or two plain-language sentences and translation quality are editorial requirements, not inferred by software.
+      description: Tenant-default ticket fields. Drafts may be incomplete; entering a built-in completed state (done, accepted, delivered) from outside that set validates pills (2–4 whitespace-separated words) and nonblank benefits. One or two plain-language sentences and translation quality are editorial requirements, not inferred by software.
       properties:
         pill_en: {type: string, description: "English pill, 2–4 words"}
         pill_de: {type: string, description: "German pill, 2–4 words"}
