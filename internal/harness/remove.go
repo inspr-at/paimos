@@ -66,10 +66,16 @@ func (m *Module) remove(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, er
 	if err != nil {
 		return nil, err
 	}
-	return removeRegistration(r.Context(), tx, p, s, reason)
+	return removeRegistration(r.Context(), tx, p, s, reason, nil)
 }
 
-func removeRegistration(ctx context.Context, tx pgx.Tx, p tenant.Principal, s Session, reason string) (removeResult, error) {
+// removeStaleBatch bounds one batch request's row locks and response. The
+// client repeats while the response says more eligible records remain.
+var removeStaleBatch = 200
+
+// removeRegistration archives one record. audit adds request-level facts (the
+// batch id and cutoff) to the removal event.
+func removeRegistration(ctx context.Context, tx pgx.Tx, p tenant.Principal, s Session, reason string, audit map[string]any) (removeResult, error) {
 	result := func(s Session) removeResult {
 		return removeResult{Session: s, Message: "Record removed; process not stopped by removal.", ProcessState: "unknown"}
 	}
@@ -89,7 +95,11 @@ func removeRegistration(ctx context.Context, tx pgx.Tx, p tenant.Principal, s Se
 	if err != nil {
 		return removeResult{}, err
 	}
-	return result(s), record(ctx, tx, p, s, "removed", before, map[string]any{"session": s, "reason": reason, "process_state": "unknown", "processes_signalled": false})
+	after := map[string]any{"session": s, "reason": reason, "process_state": "unknown", "processes_signalled": false}
+	for k, v := range audit {
+		after[k] = v
+	}
+	return result(s), record(ctx, tx, p, s, "removed", before, after)
 }
 
 func (m *Module) removeStale(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
@@ -102,12 +112,15 @@ func (m *Module) removeStale(r *http.Request, tx pgx.Tx, p tenant.Principal) (an
 	}
 	ctx := r.Context()
 	var cutoff time.Time
-	if err = tx.QueryRow(ctx, `SELECT clock_timestamp()-interval '15 minutes'`).Scan(&cutoff); err != nil {
+	var batchID string
+	if err = tx.QueryRow(ctx, `SELECT clock_timestamp()-interval '15 minutes',gen_random_uuid()::text`).Scan(&cutoff, &batchID); err != nil {
 		return nil, err
 	}
 	// PostgreSQL rechecks the predicate after a concurrent heartbeat releases its
 	// row lock. Deterministic ordering also serializes overlapping batch requests.
-	rows, err := tx.Query(ctx, `SELECT `+sessionColumns+` FROM harness_sessions WHERE project_id=$1 AND archived_at IS NULL AND coalesce(heartbeat_at,created_at)<$2 ORDER BY id FOR UPDATE`, r.PathValue("projectId"), cutoff)
+	// One request locks and removes at most removeStaleBatch rows.
+	const eligible = ` FROM harness_sessions WHERE project_id=$1 AND archived_at IS NULL AND coalesce(heartbeat_at,created_at)<$2`
+	rows, err := tx.Query(ctx, `SELECT `+sessionColumns+eligible+` ORDER BY id LIMIT $3 FOR UPDATE`, r.PathValue("projectId"), cutoff, removeStaleBatch)
 	if err != nil {
 		return nil, err
 	}
@@ -125,16 +138,23 @@ func (m *Module) removeStale(r *http.Request, tx pgx.Tx, p tenant.Principal) (an
 	if err != nil {
 		return nil, err
 	}
+	audit := map[string]any{"batch_id": batchID, "cutoff": cutoff}
 	items := []removeResult{}
 	for _, s := range sessions {
-		item, e := removeRegistration(ctx, tx, p, s, reason)
+		item, e := removeRegistration(ctx, tx, p, s, reason, audit)
 		if e != nil {
 			return nil, e
 		}
 		items = append(items, item)
 	}
+	// Eligible rows beyond this batch stay unlocked; the client repeats the request.
+	var more bool
+	if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1`+eligible+`)`, r.PathValue("projectId"), cutoff).Scan(&more); err != nil {
+		return nil, err
+	}
 	return struct {
 		Items  []removeResult `json:"items"`
 		Cutoff time.Time      `json:"cutoff"`
-	}{items, cutoff}, nil
+		More   bool           `json:"more"`
+	}{items, cutoff, more}, nil
 }

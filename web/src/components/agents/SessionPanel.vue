@@ -427,7 +427,8 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
   .panel-head { padding: 6px 8px 10px 16px; }
   .head-actions { flex-wrap: wrap; }
   .head-actions .spacer { flex-basis: 100%; height: 0; }
-  .head-actions .btn { flex: 1; }
+  /* Up to four quiet controls share one row on phones. */
+  .head-actions .btn { flex: 1 1 0; min-width: 0; padding-inline: 4px; }
   .head-top .icon-btn { width: 40px; height: 40px; }
   .scroll { padding: 16px 18px 24px; }
   .telemetry { grid-template-columns: 1fr 1fr; }

@@ -11,3 +11,10 @@ func SetMaxLive(n int) (restore func()) {
 	maxLive = n
 	return func() { maxLive = old }
 }
+
+// SetRemoveStaleBatch lowers the batch removal bound for a test and returns the restore.
+func SetRemoveStaleBatch(n int) (restore func()) {
+	old := removeStaleBatch
+	removeStaleBatch = n
+	return func() { removeStaleBatch = old }
+}

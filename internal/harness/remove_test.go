@@ -3,11 +3,15 @@
 package harness_test
 
 import (
+	"os"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/harness"
 	"github.com/jackc/pgx/v5"
+	"gopkg.in/yaml.v3"
 )
 
 func TestRemoveAnyStateAndFenceGeneration(t *testing.T) {
@@ -153,9 +157,99 @@ func TestRemoveStaleUsesAcceptedHeartbeatAndIsIdempotent(t *testing.T) {
 			t.Fatal("removed a fresh session")
 		}
 	}
+	if first := decode(t, w); first["more"] != false || first["cutoff"] == nil {
+		t.Fatalf("batch facts: more=%v cutoff=%v", first["more"], first["cutoff"])
+	}
+	// Every removal event of one request carries the same server batch id and cutoff.
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		var events, batches, cutoffs int
+		err := tx.QueryRow(t.Context(), `SELECT count(*),count(DISTINCT "after"->>'batch_id'),count(DISTINCT "after"->>'cutoff') FROM events WHERE type='harness.removed' AND "after"->>'reason'='Batch ghost cleanup' AND "after"->>'batch_id' ~ '^[0-9a-f-]{36}$' AND "after"->>'cutoff' IS NOT NULL`).Scan(&events, &batches, &cutoffs)
+		if err == nil && (events != 3 || batches != 1 || cutoffs != 1) {
+			t.Fatalf("batch audit: events=%d batch ids=%d cutoffs=%d", events, batches, cutoffs)
+		}
+		return err
+	})
 	w = f.call(f.person, "POST", base+"/remove-stale", body, "")
 	expect(t, w, 200)
 	if len(decode(t, w)["items"].([]any)) != 0 {
 		t.Fatal("batch retry removed records twice")
+	}
+}
+
+func TestRemoveStaleCapsEachRequest(t *testing.T) {
+	defer harness.SetRemoveStaleBatch(2)()
+	f := fixture(t)
+	base := "/api/projects/" + f.project + "/harness-sessions"
+	for range 3 {
+		w := f.call(f.person, "POST", base, map[string]any{"agent_principal_id": f.agent.ID, "harness": "codex", "host": "test", "harness_session_ref": "cap-ref-" + uid(), "worker_lease": "cap-lease-" + uid(), "management_mode": "unmanaged", "role": "worker"}, "")
+		expect(t, w, 201)
+		id := decode(t, w)["id"].(string)
+		f.tx(t, f.person, func(tx pgx.Tx) error {
+			_, err := tx.Exec(t.Context(), `UPDATE harness_sessions SET created_at=clock_timestamp()-interval '1 hour',heartbeat_at=clock_timestamp()-interval '16 minutes' WHERE id=$1`, id)
+			return err
+		})
+	}
+	body := map[string]any{"reason": "Capped ghost cleanup"}
+	batch := map[string]bool{}
+	for i, want := range []struct {
+		items int
+		more  bool
+	}{{2, true}, {1, false}, {0, false}} {
+		w := f.call(f.person, "POST", base+"/remove-stale", body, "")
+		expect(t, w, 200)
+		out := decode(t, w)
+		if got := len(out["items"].([]any)); got != want.items || out["more"] != want.more {
+			t.Fatalf("request %d: items=%d more=%v, want %d %v", i, got, out["more"], want.items, want.more)
+		}
+	}
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		rows, err := tx.Query(t.Context(), `SELECT "after"->>'batch_id' FROM events WHERE type='harness.removed' AND "after"->>'reason'='Capped ghost cleanup'`)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				return err
+			}
+			batch[id] = true
+		}
+		return rows.Err()
+	})
+	if len(batch) != 2 {
+		t.Fatalf("each request needs its own batch id, got %d", len(batch))
+	}
+}
+
+func TestRemoveOpenAPIResponsesAgree(t *testing.T) {
+	read := func(path string) map[string]any {
+		t.Helper()
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var doc map[string]any
+		if err = yaml.Unmarshal(raw, &doc); err != nil {
+			t.Fatal(err)
+		}
+		return doc
+	}
+	api, module := read("../../api/openapi.yaml"), read("openapi.yaml")
+	for _, path := range []string{"/projects/{projectId}/harness-sessions/{sessionId}/remove", "/projects/{projectId}/harness-sessions/remove-stale"} {
+		ok := func(doc map[string]any, key string) any {
+			op, _ := doc["paths"].(map[string]any)[key].(map[string]any)["post"].(map[string]any)
+			return op["responses"].(map[string]any)["200"]
+		}
+		if want, got := ok(api, path), ok(module, "/api"+path); want == nil || !reflect.DeepEqual(want, got) {
+			t.Fatalf("%s 200 response diverges", path)
+		}
+	}
+	for _, name := range []string{"HarnessRemoveRequest", "HarnessRemoveResult", "HarnessRemoveStaleResult"} {
+		want := api["components"].(map[string]any)["schemas"].(map[string]any)[name]
+		got := module["components"].(map[string]any)["schemas"].(map[string]any)[name]
+		if want == nil || !reflect.DeepEqual(want, got) {
+			t.Fatalf("schema %s diverges", name)
+		}
 	}
 }

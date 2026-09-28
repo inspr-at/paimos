@@ -318,8 +318,9 @@ Managed daemons report a per-launch process identity and generation. **Force sto
 
 ### Removing ghost sessions (AEON-265)
 
-People with `harness.read` access to a project can use **Remove** on an Agents
-row, live card, or session panel, then confirm once. The record immediately leaves
+People with `harness.read` access to a project can remove a session from its
+row's overflow menu (**Remove from Agents…**) or with **Remove** in the session
+panel, then confirm once. The record immediately leaves
 active views and counts; the **Removed** filter retains its ticket links and
 history. `POST /projects/{projectId}/harness-sessions/{sessionId}/remove` takes
 `{"reason":"..."}` (1–240 characters), uses the current locked record without a
@@ -334,9 +335,13 @@ cannot be recalled; legacy daemons may independently react to the revoked lease.
 The existing verified force-stop action in **Recover** keeps its identity and
 confirmation checks; it cannot target an already revoked generation.
 
-**Remove all stopped/stale** calls the project-scoped
+**Clear stale** (shown in the Sessions header only when stale sessions exist)
+confirms once with the count, then calls the project-scoped
 `POST /projects/{projectId}/harness-sessions/remove-stale` with a reason. The server
 rechecks eligibility under row locks: the last accepted heartbeat must be older
 than 15 minutes, falling back to creation time for sessions with no heartbeat.
-A recently stopped record with a recent heartbeat is retained. The response lists
-removed sessions and the server cutoff; retries produce no duplicate removal audit.
+A recently stopped record with a recent heartbeat is retained. One request removes
+at most 200 records; the response lists them with the server cutoff and `more`,
+and the UI repeats while `more` is true. Every removal event of one request carries
+the same server-generated `batch_id` and the cutoff; retries produce no duplicate
+removal audit.

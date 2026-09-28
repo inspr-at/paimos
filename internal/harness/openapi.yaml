@@ -85,18 +85,18 @@ paths:
       parameters: [{$ref: '#/components/parameters/projectId'}, {$ref: '#/components/parameters/sessionId'}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessRemoveRequest'}}}}
       responses:
-        '200': {description: Idempotently removed record; session and unknown process state returned; old generation revoked, history retained, actor and reason audited}
+        '200': {description: Record removed; process state unknown, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessRemoveResult'}}}}
         '400': {description: Invalid reason}
         '403': {description: Human project access required}
         '404': {description: Session not visible}
   /api/projects/{projectId}/harness-sessions/remove-stale:
     post:
       operationId: removeStaleHarnessSessions
-      summary: Remove records whose last accepted heartbeat (or creation) is older than 15 minutes under row locks
+      summary: Remove up to 200 records per request whose last accepted heartbeat (or creation) is older than 15 minutes under row locks; events carry batch_id and cutoff
       parameters: [{$ref: '#/components/parameters/projectId'}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessRemoveRequest'}}}}
       responses:
-        '200': {description: Removed result items and server cutoff; no process signalled; repeated requests produce no duplicate removal events}
+        '200': {description: Removed records and server eligibility cutoff, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessRemoveStaleResult'}}}}
         '400': {description: Invalid reason}
         '403': {description: Human harness.read project access required}
         '404': {description: Project not visible}
@@ -270,6 +270,23 @@ components:
       required: [reason]
       properties:
         reason: {type: string, minLength: 1, maxLength: 240}
+    HarnessRemoveResult:
+      type: object
+      required: [session, message, processes_signalled, process_state]
+      properties:
+        session: {$ref: '#/components/schemas/HarnessSession'}
+        message: {type: string, const: 'Record removed; process not stopped by removal.'}
+        processes_signalled: {type: boolean, const: false}
+        process_state: {type: string, const: unknown}
+    HarnessRemoveStaleResult:
+      type: object
+      required: [items, cutoff, more]
+      properties:
+        items: {type: array, maxItems: 200, items: {$ref: '#/components/schemas/HarnessRemoveResult'}}
+        cutoff: {type: string, format: date-time}
+        more: {type: boolean, description: Eligible records remain after this batch; repeat the request}
+    # The session shape is owned by the product contract.
+    HarnessSession: {$ref: '../../api/openapi.yaml#/components/schemas/HarnessSession'}
     HarnessRulesReceiptContext:
       type: object
       additionalProperties: false

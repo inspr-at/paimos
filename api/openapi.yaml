@@ -2470,19 +2470,10 @@ paths:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
     post:
       operationId: removeStaleHarnessSessions
-      description: Human with harness.read project access only. Removes all unarchived records whose last accepted heartbeat is more than 15 minutes old, using creation time if none was accepted. Eligibility is checked under row locks against one server cutoff; stopped records with a recent heartbeat are retained. Each removal records actor and reason. Repeating the request never duplicates removal events. Does not signal processes.
+      description: Human with harness.read project access only. Removes unarchived records whose last accepted heartbeat is more than 15 minutes old, using creation time if none was accepted, at most 200 per request; `more` is true while eligible records remain and the client repeats. Eligibility is checked under row locks against one server cutoff; stopped records with a recent heartbeat are retained. Each removal event records actor, reason, the server-generated batch_id and the cutoff. Repeating the request never duplicates removal events. Does not signal processes.
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessRemoveRequest'}}}}
       responses:
-        '200':
-          description: Removed records and server eligibility cutoff
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [items, cutoff]
-                properties:
-                  items: {type: array, items: {$ref: '#/components/schemas/HarnessRemoveResult'}}
-                  cutoff: {type: string, format: date-time}
+        '200': {description: Removed records and server eligibility cutoff, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessRemoveStaleResult'}}}}
         '400': {description: Invalid reason}
         '403': {description: Human project access required}
         '404': {description: Project not visible}
@@ -6534,6 +6525,13 @@ components:
         message: {type: string, const: 'Record removed; process not stopped by removal.'}
         processes_signalled: {type: boolean, const: false}
         process_state: {type: string, const: unknown}
+    HarnessRemoveStaleResult:
+      type: object
+      required: [items, cutoff, more]
+      properties:
+        items: {type: array, maxItems: 200, items: {$ref: '#/components/schemas/HarnessRemoveResult'}}
+        cutoff: {type: string, format: date-time}
+        more: {type: boolean, description: Eligible records remain after this batch; repeat the request}
     HarnessRecovery:
       type: object
       required: [session_id, host, observed_revision, confirmation, process_state, process_scope, can_archive, force_stop_available, force_stop_reason]

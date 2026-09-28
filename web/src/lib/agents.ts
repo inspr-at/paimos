@@ -111,7 +111,7 @@ export const listRuns = (params: { session?: string; agent?: string; work_order?
   request<Paged<AgentRun>>(`/runs${query({ limit: 50, ...params })}`)
 export interface RemoveSessionResult { session: HarnessSession; message: string; processes_signalled: false; process_state: 'unknown' }
 export const removeSession = (session: HarnessSession, reason: string) => request<RemoveSessionResult>(`${sessionPath(session.project_id, session.id)}/remove`, 'POST', { reason })
-export const removeStaleSessions = (projectId: string, reason: string) => request<{ items: RemoveSessionResult[]; cutoff: string }>(`${sessionPath(projectId)}/remove-stale`, 'POST', { reason })
+export const removeStaleSessions = (projectId: string, reason: string) => request<{ items: RemoveSessionResult[]; cutoff: string; more: boolean }>(`${sessionPath(projectId)}/remove-stale`, 'POST', { reason })
 export const requestControl = (projectId: string, sessionId: string, kind: SessionControl['kind']) => request<SessionControl>(`${sessionPath(projectId, sessionId)}/controls/${kind}`, 'POST', {})
 export const getControl = (projectId: string, sessionId: string, controlId: string) => request<SessionControl>(`${sessionPath(projectId, sessionId)}/controls/${enc(controlId)}`)
 export const listAccounts = () => request<AgentAccount[]>('/agent-accounts')
