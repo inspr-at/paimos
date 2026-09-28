@@ -168,7 +168,7 @@ test('every LiveBot caller follows the viewer: cards, list rows, popovers and /a
     await page.getByRole('radio', { name: `${view} view`, exact: true }).click()
     await consistent(project.locator('.live-chip'))
     await project.locator('.live-chip').hover()
-    await consistent(page.getByRole('dialog', { name: 'Agents working on Aeon' }))
+    await consistent(page.getByRole('dialog', { name: 'Active agents on Aeon' }))
     await page.keyboard.press('Escape')
     await page.mouse.move(0, 0)
   }
@@ -279,6 +279,33 @@ test('inactive opacity is a styled native slider: keyboard, disabled with Dim in
   await page.getByRole('switch', { name: 'Dim inactive' }).uncheck()
   await expect(opacity).toBeDisabled()
   expect(await opacity.evaluate(el => getComputedStyle(el).appearance)).toBe('none')
+})
+
+for (const theme of ['light', 'dark'] as const) test(`${theme} phones: both switches keep the toggle and its whole word inside the row, On and Off`, async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'reduce', colorScheme: theme })
+  await mockIndicator(page)
+  await settings(page)
+  for (const width of [390, 320]) {
+    await page.setViewportSize({ width, height: 2400 })
+    for (const on of [true, false]) {
+      for (const name of ['Hovering', 'Dim inactive']) {
+        const control = page.getByRole('switch', { name })
+        await control.setChecked(on)
+        await expect(page.locator('.switch').filter({ has: control }).locator('span')).toHaveText(on ? 'On' : 'Off')
+        const fit = await control.evaluate(input => {
+          const toggle = input.closest('.switch')!, word = toggle.querySelector('span')!, row = toggle.closest('.setting-row')!, copy = row.querySelector('.setting-copy')!
+          const [t, w, r, c] = [toggle, word, row, copy].map(el => el.getBoundingClientRect())
+          return { word: word.textContent, toggleRight: t.right, wordRight: w.right, rowRight: r.right, clipped: word.scrollWidth > word.clientWidth, overlap: c.right > t.left, width: t.width, height: t.height }
+        })
+        expect(fit.clipped, `${name} ${fit.word} ${width}px is clipped`).toBe(false)
+        expect(fit.wordRight, `${name} ${fit.word} ${width}px`).toBeLessThanOrEqual(fit.toggleRight + .5)
+        expect(fit.toggleRight, `${name} ${fit.word} ${width}px`).toBeLessThanOrEqual(fit.rowRight + .5)
+        expect(fit.overlap, `${name} ${width}px copy runs under the toggle`).toBe(false)
+        expect(Math.min(fit.width, fit.height), `${name} ${width}px touch reach`).toBeGreaterThanOrEqual(44)
+      }
+      await page.locator('.indicator-settings').screenshot({ path: resolve(shots, `aeon242-switches-${theme}-${width}-${on ? 'on' : 'off'}.png`) })
+    }
+  }
 })
 
 test('a failed ring or size save is visible and can be retried', async ({ page }) => {

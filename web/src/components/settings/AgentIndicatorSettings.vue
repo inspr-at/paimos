@@ -198,6 +198,7 @@ legend, .setting-label { display: block; padding: 0; font-size: 13.5px; font-wei
 .setting-row.flush { margin-top: 4px; }
 .setting-copy { min-width: 0; }
 .seg { flex-shrink: 0; }
+.switch-row .switch { flex-shrink: 0; }
 .slider { display: grid; grid-template-columns: minmax(140px, 220px) 42px; align-items: center; gap: 4px 10px; flex-shrink: 0; }
 .slider-value { font-size: 12.5px; font-weight: 600; font-variant-numeric: tabular-nums; text-align: right; color: var(--ink); }
 .slider-note, .link-btn { grid-column: 1; justify-self: start; font-size: 12px; color: var(--ink-2); }
