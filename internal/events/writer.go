@@ -54,6 +54,10 @@ func Append(ctx context.Context, tx pgx.Tx, p tenant.Principal, c Change) (Event
 	if err != nil {
 		return Event{}, fmt.Errorf("event after: %w", err)
 	}
+	after, err = annotateOperator(ctx, after)
+	if err != nil {
+		return Event{}, err
+	}
 	if before == nil && after == nil {
 		return Event{}, fmt.Errorf("event requires a snapshot")
 	}

@@ -16,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/operatoractor"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/tenantbootstrap"
@@ -219,6 +220,7 @@ func seedDisposableWithBrief(ctx context.Context, pool *pgxpool.Pool, slug, key,
 		}
 		ctx = context.WithValue(ctx, briefContextKey{}, brief)
 	}
+	ctx = events.WithOperatorAnnotation(ctx, events.OperatorAnnotation{Production: production, Brief: brief})
 	var out OperatorResult
 	err = db.InTransaction(ctx, pool, func(ctx context.Context) error {
 		tid, err := tenantbootstrap.ResolveSlug(ctx, pool, slug)

@@ -81,9 +81,21 @@ func agree(ctx context.Context, tx pgx.Tx, p tenant.Principal, project string, i
 	if !ready {
 		return nil, fail(409, "journey is not ready for requirements agreement")
 	}
+	if err = commitAgreement(ctx, tx, p, project, rev, contentDigest, in.Key, requestDigest, in.ApprovalID, true); err != nil {
+		return nil, err
+	}
+	return load(ctx, tx, project)
+}
+
+// commitAgreement pins the digest, marks live requirements agreed, and writes
+// the normal requirements-agreed event and receipt. withTickets generates
+// accepted breakdowns in the same transaction. A non-empty approvalID records
+// the person gate; the disposable operator leaves it empty and does not invent
+// a decision.
+func commitAgreement(ctx context.Context, tx pgx.Tx, p tenant.Principal, project string, rev int64, contentDigest, key, requestDigest, approvalID string, withTickets bool) error {
 	items, err := load(ctx, tx, project)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	active := 0
 	for _, item := range items {
@@ -92,7 +104,7 @@ func agree(ctx context.Context, tx pgx.Tx, p tenant.Principal, project string, i
 		}
 	}
 	if active == 0 {
-		return nil, fail(409, "no requirements to agree")
+		return fail(409, "no requirements to agree")
 	}
 	// A direct R1 edit needs a new requirements revision even if it did not touch
 	// the projection. Keep monotonically increasing agreement revisions.
@@ -100,44 +112,46 @@ func agree(ctx context.Context, tx pgx.Tx, p tenant.Principal, project string, i
 	err = tx.QueryRow(ctx, `UPDATE journey_projects SET requirements_revision=greatest(requirements_revision,agreed_requirements_revision+1)
  WHERE project_node_id=$1 RETURNING requirements_revision`, project).Scan(&reqRev)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	for _, item := range items {
 		if item.Status == "superseded" {
 			continue
 		}
-		if err = generate(ctx, tx, p, project, item); err != nil {
-			return nil, err
+		if err = generateWork(ctx, tx, p, project, item, "", withTickets); err != nil {
+			return err
 		}
 		_, err = tx.Exec(ctx, `UPDATE journey_requirements SET status='agreed' WHERE requirement_node_id=$1`, item.NodeID)
 		if err != nil {
-			return nil, err
+			return err
 		}
 	}
 	// The pin records the agreed content, not mutable projection status.
 	_, err = tx.Exec(ctx, `UPDATE journey_projects SET revision=revision+1,agreed_requirements_revision=$2,agreed_requirements_digest_sha256=$3,updated_at=now() WHERE project_node_id=$1`, project, reqRev, contentDigest)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	_, err = tx.Exec(ctx, `UPDATE journey_tickets SET scope_revision_required=false WHERE project_node_id=$1 AND source='manual' AND scope_revision_required`, project)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	_, err = tx.Exec(ctx, `INSERT INTO journey_gates(tenant_id,project_node_id,gate,approval_request_id) VALUES($1,$2,'requirements',$3)`, p.TenantID, project, in.ApprovalID)
+	if approvalID != "" {
+		if _, err = tx.Exec(ctx, `INSERT INTO journey_gates(tenant_id,project_node_id,gate,approval_request_id) VALUES($1,$2,'requirements',$3)`, p.TenantID, project, approvalID); err != nil {
+			return err
+		}
+	}
+	after := map[string]any{"revision": rev + 1, "requirements_revision": reqRev, "digest_sha256": contentDigest}
+	if approvalID != "" {
+		after["approval_request_id"] = approvalID
+	}
+	ev, err := events.Append(ctx, tx, p, events.Change{NodeID: &project, Type: "journey.requirements_agreed", After: after})
 	if err != nil {
-		return nil, err
+		return err
 	}
-	ev, err := events.Append(ctx, tx, p, events.Change{NodeID: &project, Type: "journey.requirements_agreed", After: map[string]any{"revision": rev + 1, "requirements_revision": reqRev, "digest_sha256": contentDigest, "approval_request_id": in.ApprovalID}})
-	if err != nil {
-		return nil, err
-	}
-	if err = receipt(ctx, tx, p, project, in.Key, requestDigest, rev+1, ev.ID); err != nil {
-		return nil, err
-	}
-	return load(ctx, tx, project)
+	return receipt(ctx, tx, p, project, key, requestDigest, rev+1, ev.ID)
 }
 
-func generate(ctx context.Context, tx pgx.Tx, p tenant.Principal, project string, item Requirement) error {
+func generateWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, project string, item Requirement, bindRelease string, tickets bool) error {
 	var body string
 	var origin *string
 	if err := tx.QueryRow(ctx, `SELECT n.body,r.origin_draft_id::text FROM journey_requirements r JOIN nodes n ON n.tenant_id=r.tenant_id AND n.id=r.requirement_node_id WHERE r.requirement_node_id=$1`, item.NodeID).Scan(&body, &origin); err != nil {
@@ -171,7 +185,7 @@ func generate(ctx context.Context, tx pgx.Tx, p tenant.Principal, project string
 			return err
 		}
 	}
-	if origin == nil {
+	if !tickets || origin == nil {
 		return nil
 	}
 	// Suggestions are immutable, and only a matching explicit acceptance feeds
@@ -218,10 +232,21 @@ func generate(ctx context.Context, tx pgx.Tx, p tenant.Principal, project string
 		}
 		var release *string
 		if !s.later {
-			// Only an explicitly existing first planning release receives initial work.
-			// Creating releases and choosing versions belong to the journey module.
-			if err = tx.QueryRow(ctx, `SELECT (SELECT r.release_node_id::text FROM journey_releases r JOIN journey_projects j ON j.tenant_id=r.tenant_id AND j.current_release_node_id=r.release_node_id WHERE r.project_node_id=$1 AND r.number=1 AND r.state='planning')`, project).Scan(&release); err != nil {
-				return err
+			if bindRelease != "" {
+				var bound, state string
+				if err = tx.QueryRow(ctx, `SELECT release_node_id::text, state FROM journey_releases WHERE project_node_id=$1 AND release_node_id=$2::uuid`, project, bindRelease).Scan(&bound, &state); err != nil {
+					return err
+				}
+				if state != "planning" && state != "building" {
+					return fail(409, "release cannot take generated work")
+				}
+				release = &bound
+			} else {
+				// Only an explicitly existing first planning release receives initial work.
+				// Creating releases and choosing versions belong to the journey module.
+				if err = tx.QueryRow(ctx, `SELECT (SELECT r.release_node_id::text FROM journey_releases r JOIN journey_projects j ON j.tenant_id=r.tenant_id AND j.current_release_node_id=r.release_node_id WHERE r.project_node_id=$1 AND r.number=1 AND r.state='planning')`, project).Scan(&release); err != nil {
+					return err
+				}
 			}
 		}
 		var raw json.RawMessage
