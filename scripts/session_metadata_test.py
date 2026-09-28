@@ -18,6 +18,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
+sys.dont_write_bytecode = True
 SCRIPT = Path(__file__).resolve().parent / "session-metadata.py"
 SECRET = "synthetic-secret-value"
 SESSION_A = "11111111-1111-4111-8111-111111111111"
@@ -34,6 +35,8 @@ class IndexIOProbe:
         self.test = test
         self.root = root
         self.before_open = self.after_open = self.after_readlink = self.before_read = None
+        self.adjust_stat = None
+        self.leaf = None
         self.opened = set()
         self.checked = set()
         self.reads = []
@@ -57,6 +60,8 @@ class IndexIOProbe:
         fd = os.open(self.root if path == "/" and self.root else path, flags, dir_fd=dir_fd)
         self.opened.add(fd)
         self.checked.discard(fd)  # File descriptors can be reused within a walk.
+        if path == "session_index.jsonl":
+            self.leaf = fd
         if self.after_open:
             self.after_open(path)
         return fd
@@ -64,6 +69,8 @@ class IndexIOProbe:
     def fstat(self, fd):
         info = os.fstat(fd)
         self.checked.add(fd)
+        if self.adjust_stat and fd == self.leaf:
+            info = self.adjust_stat(info)
         return info
 
     def readlink(self, path, *, dir_fd):
@@ -93,7 +100,7 @@ class IndexIOProbe:
     @contextmanager
     def intercept(self):
         proxy = SimpleNamespace(**{name: getattr(os, name) for name in (
-            "O_RDONLY", "O_NOFOLLOW", "O_DIRECTORY", "O_NONBLOCK", "O_CLOEXEC", "close",
+            "O_RDONLY", "O_NOFOLLOW", "O_DIRECTORY", "O_NONBLOCK", "O_CLOEXEC", "close", "getuid",
         )})
         proxy.open, proxy.read, proxy.fstat, proxy.readlink = self.open, self.read, self.fstat, self.readlink
         proxy.supports_dir_fd = {proxy.open, proxy.readlink}
@@ -296,12 +303,18 @@ class SessionMetadataTest(unittest.TestCase):
         self.assertEqual(result.returncode, 3)
         self.assertNotIn(SECRET.encode(), result.stdout + result.stderr)
 
-    def test_live_null_args_preserve_shell_metacharacters_as_data_and_allow_clear(self) -> None:
+    def test_live_null_args_preserve_shell_metacharacters_as_data_and_never_clear(self) -> None:
         name = "Literal $(false) `false` 'quotes'"
         result = self.live([{"id": SESSION_A, "thread_name": name}], extra=["--null-args"])
         self.assertEqual(result.stdout.split(b"\0"), [b"--label", name.encode(), b""])
-        cleared = self.live([{"id": SESSION_A, "thread_name": ""}], extra=["--null-args"])
-        self.assertEqual(cleared.stdout, b"--label\0\0")
+        for blank in ("", "   ", "\u0001\u0002", "\u200b"):
+            with self.subTest(blank=repr(blank)):
+                cleared = self.live([{"id": SESSION_A, "thread_name": "Named"},
+                                     {"id": SESSION_A, "thread_name": blank}], extra=["--null-args"])
+                self.assertEqual(cleared.returncode, 0, cleared.stderr)
+                self.assertEqual(cleared.stdout, b"")
+        body = json.loads(self.live([{"id": SESSION_A, "thread_name": " "}]).stdout)
+        self.assertEqual((body["capture_status"], body["heartbeat_args"]), ("unavailable", []))
 
     def test_live_index_refuses_symlink_and_oversize(self) -> None:
         index = self.write("session_index.jsonl", "x" * 70000).resolve()
@@ -467,6 +480,37 @@ class IndexSafeOpenTest(unittest.TestCase):
                     else:
                         probe.before_open = grow
                 self.denied(path, probe)
+
+    def test_hard_linked_alias_of_a_private_file_never_reaches_content(self):
+        private = self.index(self.root / "private-store", SECRET)
+        public = self.root / "public"
+        public.mkdir()
+        os.link(private, public / "session_index.jsonl")
+        probe = IndexIOProbe(self)
+        probe.forbid(private)
+        self.denied(public / "session_index.jsonl", probe)
+        # A second name also disqualifies an otherwise ordinary index.
+        ordinary = self.index(self.root / "ordinary")
+        os.link(ordinary, self.root / "ordinary-copy")
+        self.denied(ordinary, IndexIOProbe(self))
+
+    def test_foreign_owner_and_other_device_are_refused_before_read(self):
+        path = self.index(self.root)
+
+        def foreign_owner(info):
+            return os.stat_result((info.st_mode, info.st_ino, info.st_dev, info.st_nlink, info.st_uid + 1,
+                                   info.st_gid, info.st_size, int(info.st_atime), int(info.st_mtime), int(info.st_ctime)))
+
+        def other_device(info):
+            return os.stat_result((info.st_mode, info.st_ino, info.st_dev + 1, info.st_nlink, info.st_uid,
+                                   info.st_gid, info.st_size, int(info.st_atime), int(info.st_mtime), int(info.st_ctime)))
+
+        for name, adjust in (("owner", foreign_owner), ("device", other_device)):
+            with self.subTest(name=name):
+                probe = IndexIOProbe(self)
+                probe.adjust_stat = adjust
+                self.denied(path, probe)
+                self.assertIsNotNone(probe.leaf)
 
     def test_growth_after_fstat_is_bounded_in_bytes(self):
         for content in (b"x", "\u20ac".encode("utf-8")):

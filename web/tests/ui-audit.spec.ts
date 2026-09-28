@@ -105,7 +105,7 @@ const scenarios: Scenario[] = [
   { state: 'projects cards', route: '/', setup: 'cards', act: visible('.card') },
   { state: 'projects live agents cards', route: '/', setup: 'live', act: visible('.card .live-chip') },
   { state: 'projects live agents list', route: '/', setup: 'live-list', act: visible('.project-item .live-chip') },
-  { state: 'projects live agents details', route: '/', setup: 'live', act: async page => { await visible('.card .live-chip')(page); await page.locator('.card .live-chip').first().click(); await expect(page.getByRole('dialog', { name: /^Agents working on/ })).toBeVisible() } },
+  { state: 'projects live agents details', route: '/', setup: 'live', act: async page => { await visible('.card .live-chip')(page); await page.locator('.card .live-chip').first().click(); await expect(page.getByRole('dialog', { name: /^Active agents on/ })).toBeVisible() } },
   { state: 'projects group menu', route: '/', setup: 'groups', act: async page => { await visible('.group-head')(page); await page.getByRole('button', { name: 'Actions for group Focus' }).click(); await expect(page.getByRole('menu')).toBeVisible() } },
   { state: 'projects display', route: '/', setup: 'groups', act: async page => { await visible('.group-head')(page); await page.getByRole('button', { name: /^Display/ }).click(); await expect(page.getByRole('dialog', { name: 'Display options' })).toBeVisible() } },
   { state: 'projects move dialog', route: '/', setup: 'cards', act: async page => { await visible('.card')(page); await page.locator('.card-link').first().focus(); await page.keyboard.press('m'); await expect(page.getByRole('dialog', { name: /^Move .* to a group$/ })).toBeVisible() } },

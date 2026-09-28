@@ -5,6 +5,7 @@ package journey_test
 import (
 	"bytes"
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -12,7 +13,10 @@ import (
 
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/events"
+	"github.com/inspr-at/paimos/internal/intake"
 	"github.com/inspr-at/paimos/internal/journey"
+	"github.com/inspr-at/paimos/internal/tenant"
 )
 
 func TestDisposableOperatorSeedUsesJourneyActions(t *testing.T) {
@@ -208,7 +212,8 @@ func TestDisposableFixedBriefsReachPendingCandidateGate(t *testing.T) {
 				t.Fatalf("candidate gate: %+v", view)
 			}
 			var title, body, state string
-			var count, bad, productionBad, gateDecisions, receipts, allBad, personDecisions int
+			var proposed, acceptedDrafts, agreed, seedActions, directSeed, bad, productionBad, gateDecisions, receipts, allBad, personDecisions, requirementGates int
+			var agreedStatus, origin string
 			ctx := t.Context()
 			if err := db.InTenant(dbtest.Seed(ctx), f.db.App, f.tenant, func(tx pgx.Tx) error {
 				if err := tx.QueryRow(ctx, `SELECT title,body FROM nodes WHERE id=$1::uuid`, project).Scan(&title, &body); err != nil {
@@ -217,21 +222,42 @@ func TestDisposableFixedBriefsReachPendingCandidateGate(t *testing.T) {
 				if err := tx.QueryRow(ctx, `SELECT state FROM journey_releases WHERE release_node_id=$1::uuid`, *view.CurrentReleaseID).Scan(&state); err != nil {
 					return err
 				}
-				if err := tx.QueryRow(ctx, `SELECT count(*),count(*) FILTER (WHERE after->>'brief' IS DISTINCT FROM $2 OR after->>'disposable' IS DISTINCT FROM 'true'),
-					count(*) FILTER (WHERE $3::bool AND after->>'production' IS DISTINCT FROM 'true')
-					FROM events WHERE type LIKE 'journey.seed_%' AND node_id=$1::uuid`, project, brief.number, brief.number == "1").Scan(&count, &bad, &productionBad); err != nil {
+				if err := tx.QueryRow(ctx, `SELECT count(*) FROM events WHERE type='intake.draft_proposed' AND after->>'project_node_id'=$1 AND after->>'brief'=$2`, project, brief.number).Scan(&proposed); err != nil {
+					return err
+				}
+				if err := tx.QueryRow(ctx, `SELECT count(*) FROM intake_draft_acceptances WHERE project_node_id=$1::uuid`, project).Scan(&acceptedDrafts); err != nil {
+					return err
+				}
+				if err := tx.QueryRow(ctx, `SELECT count(*) FROM events WHERE type='journey.requirements_agreed' AND node_id=$1::uuid AND after->>'approval_request_id' IS NULL`, project).Scan(&agreed); err != nil {
+					return err
+				}
+				if err := tx.QueryRow(ctx, `SELECT status, origin_draft_id::text FROM journey_requirements WHERE project_node_id=$1::uuid`, project).Scan(&agreedStatus, &origin); err != nil {
+					return err
+				}
+				if err := tx.QueryRow(ctx, `SELECT count(*) FROM events WHERE node_id=$1::uuid AND type IN ('journey.seed_confirm_brief','journey.seed_open_first_release','journey.seed_start_build','journey.seed_mark_candidate')`, project).Scan(&seedActions); err != nil {
+					return err
+				}
+				if err := tx.QueryRow(ctx, `SELECT count(*) FROM events WHERE node_id=$1::uuid AND type IN ('journey.seed_brief_proposed','journey.seed_brief_accepted','journey.seed_requirement_created','journey.seed_requirements_agreed','journey.seed_ticket_selected','journey.seed_ticket_completed')`, project).Scan(&directSeed); err != nil {
+					return err
+				}
+				if err := tx.QueryRow(ctx, `SELECT count(*) FILTER (WHERE after->>'brief' IS DISTINCT FROM $1 OR after->>'disposable' IS DISTINCT FROM 'true'),
+					count(*) FILTER (WHERE $2::bool AND after->>'production' IS DISTINCT FROM 'true')
+					FROM events WHERE after->>'brief'=$1`, brief.number, brief.number == "1").Scan(&bad, &productionBad); err != nil {
 					return err
 				}
 				if err := tx.QueryRow(ctx, `SELECT count(*) FROM events WHERE id >=
-					(SELECT min(id) FROM events WHERE node_id=$1::uuid AND type='journey.seed_brief_proposed')
+					(SELECT min(id) FROM events WHERE type='intake.source_recorded' AND after->>'idempotency_key'=$1)
 					AND (after->>'brief' IS DISTINCT FROM $2 OR after->>'disposable' IS DISTINCT FROM 'true'
-					OR ($3::bool AND after->>'production' IS DISTINCT FROM 'true'))`, project, brief.number, brief.number == "1").Scan(&allBad); err != nil {
+					OR ($3::bool AND after->>'production' IS DISTINCT FROM 'true'))`, "operator-brief:"+brief.number+":source", brief.number, brief.number == "1").Scan(&allBad); err != nil {
 					return err
 				}
-				if err := tx.QueryRow(ctx, `SELECT count(*) FROM journey_action_receipts WHERE project_node_id=$1::uuid AND idempotency_key LIKE $2`, project, "operator-brief:"+brief.number+":%").Scan(&receipts); err != nil {
+				if err := tx.QueryRow(ctx, `SELECT count(*) FROM journey_action_receipts WHERE project_node_id=$1::uuid AND idempotency_key IN ($2,$3,$4)`, project, "operator-brief:"+brief.number+":confirm", "operator-brief:"+brief.number+":agreement", "operator-brief:"+brief.number+":release").Scan(&receipts); err != nil {
 					return err
 				}
 				if err := tx.QueryRow(ctx, `SELECT count(*) FROM events WHERE node_id=$1::uuid AND type IN ('journey.candidate_approved','journey.deploy_approved')`, project).Scan(&gateDecisions); err != nil {
+					return err
+				}
+				if err := tx.QueryRow(ctx, `SELECT count(*) FROM journey_gates WHERE project_node_id=$1::uuid AND gate='requirements'`, project).Scan(&requirementGates); err != nil {
 					return err
 				}
 				return tx.QueryRow(ctx, `SELECT count(*) FROM approval_decisions d JOIN approval_requests a ON a.tenant_id=d.tenant_id AND a.id=d.request_id
@@ -239,20 +265,23 @@ func TestDisposableFixedBriefsReachPendingCandidateGate(t *testing.T) {
 			}); err != nil {
 				t.Fatal(err)
 			}
-			if title != brief.title || body != brief.body || state != "candidate" || count < 7 || bad != 0 || allBad != 0 || productionBad != 0 || gateDecisions != 0 || personDecisions != 0 || receipts < 4 {
-				t.Fatalf("title=%q body=%q state=%q seed events=%d bad=%d all bad=%d production bad=%d receipts=%d gate decisions=%d person decisions=%d", title, body, state, count, bad, allBad, productionBad, receipts, gateDecisions, personDecisions)
+			if title != brief.title || body != brief.body || state != "candidate" || proposed != 2 || acceptedDrafts != 2 || agreed != 1 || agreedStatus != "agreed" || origin == "" || seedActions != 4 || directSeed != 0 || bad != 0 || allBad != 0 || productionBad != 0 || gateDecisions != 0 || personDecisions != 0 || requirementGates != 0 || receipts != 3 {
+				t.Fatalf("title=%q body=%q state=%q proposed=%d accepted=%d agreed=%d status=%s origin=%s seed actions=%d direct=%d bad=%d all bad=%d production bad=%d receipts=%d gate decisions=%d person decisions=%d requirement gates=%d", title, body, state, proposed, acceptedDrafts, agreed, agreedStatus, origin, seedActions, directSeed, bad, allBad, productionBad, receipts, gateDecisions, personDecisions, requirementGates)
 			}
 			out.Reset()
 			if err := journey.RunOperator(ctx, f.db.App, args, &out); err != nil || !strings.Contains(out.String(), `"pending_action":"approve_candidate"`) || !strings.Contains(out.String(), `"already":true`) {
 				t.Fatalf("brief replay: %v %s", err, out.String())
 			}
 			if err := db.InTenant(dbtest.Seed(ctx), f.db.App, f.tenant, func(tx pgx.Tx) error {
-				var replayCount int
-				if err := tx.QueryRow(ctx, `SELECT count(*) FROM events WHERE type LIKE 'journey.seed_%' AND node_id=$1::uuid`, project).Scan(&replayCount); err != nil {
+				var replayProposed, replayAccepted int
+				if err := tx.QueryRow(ctx, `SELECT count(*) FROM events WHERE type='intake.draft_proposed' AND after->>'project_node_id'=$1`, project).Scan(&replayProposed); err != nil {
 					return err
 				}
-				if replayCount != count {
-					t.Fatalf("replay added events: %d -> %d", count, replayCount)
+				if err := tx.QueryRow(ctx, `SELECT count(*) FROM intake_draft_acceptances WHERE project_node_id=$1::uuid`, project).Scan(&replayAccepted); err != nil {
+					return err
+				}
+				if replayProposed != proposed || replayAccepted != acceptedDrafts {
+					t.Fatalf("replay added intake rows: proposed %d -> %d accepted %d -> %d", proposed, replayProposed, acceptedDrafts, replayAccepted)
 				}
 				return nil
 			}); err != nil {
@@ -364,7 +393,7 @@ func TestDisposableBriefsUseExistingBuildingRelease(t *testing.T) {
 			}); err != nil {
 				t.Fatal(err)
 			}
-			if releaseCount != 1 || state != "candidate" || accepted != 1 || selected != 2 || decisions != 0 {
+			if releaseCount != 1 || state != "candidate" || accepted != 2 || selected != 2 || decisions != 0 {
 				t.Fatalf("release count=%d state=%s accepted=%d selected=%d decisions=%d", releaseCount, state, accepted, selected, decisions)
 			}
 			out.Reset()
@@ -372,5 +401,89 @@ func TestDisposableBriefsUseExistingBuildingRelease(t *testing.T) {
 				t.Fatalf("seed replay: %v %s", err, out.String())
 			}
 		})
+	}
+}
+
+func TestDisposableBriefInterruptedSeedRetries(t *testing.T) {
+	t.Setenv("AEON_ENV", "dev")
+	f := newFixture(t)
+	project := f.node(t, "project", "PRJ-809", "Interrupted brief")
+	if _, err := journey.MarkDisposable(t.Context(), f.db.App, "journey-a", "PRJ-809"); err != nil {
+		t.Fatal(err)
+	}
+	ctx := t.Context()
+	var actor string
+	if err := db.InTenant(dbtest.Seed(ctx), f.db.App, f.tenant, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT id::text FROM principals WHERE name='Access operator'`).Scan(&actor)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	operator := tenant.Principal{ID: actor, TenantID: f.tenant, Kind: tenant.Agent}
+	brief := intake.DisposableBrief{
+		Title:          "Host status page",
+		Body:           "A read-only status page for a small fleet of hosts: current state per host, last deploy, open incidents. Success: one page, loads under a second, no write actions.",
+		IdempotencyKey: "operator-brief:1",
+	}
+	err := db.InTransaction(dbtest.Seed(ctx), f.db.App, func(ctx context.Context) error {
+		return db.InTenant(ctx, f.db.App, f.tenant, func(tx pgx.Tx) error {
+			if _, err := tx.Exec(ctx, `INSERT INTO journey_projects(tenant_id,project_node_id) VALUES($1::uuid,$2::uuid)`, f.tenant, project); err != nil {
+				return err
+			}
+			if _, err := events.Append(ctx, tx, operator, events.Change{NodeID: &project, Type: "journey.initialized", After: map[string]any{"project_node_id": project}}); err != nil {
+				return err
+			}
+			if err := intake.ApplyDisposableIntake(ctx, tx, operator, project, brief); err != nil {
+				return err
+			}
+			return errors.New("interrupted")
+		})
+	})
+	if err == nil || !strings.Contains(err.Error(), "interrupted") {
+		t.Fatalf("interrupted seed committed: %v", err)
+	}
+	var drafts int
+	if err := db.InTenant(dbtest.Seed(ctx), f.db.App, f.tenant, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT count(*) FROM intake_drafts WHERE project_node_id=$1::uuid`, project).Scan(&drafts)
+	}); err != nil || drafts != 0 {
+		t.Fatalf("rolled-back intake left %d drafts: %v", drafts, err)
+	}
+	var out bytes.Buffer
+	args := []string{"seed", "--tenant", "journey-a", "--project", "PRJ-809", "--to-stage", "candidate", "--brief", "1"}
+	if err := journey.RunOperator(ctx, f.db.App, args, &out); err != nil || !strings.Contains(out.String(), `"pending_action":"approve_candidate"`) {
+		t.Fatalf("retry after interruption: %v %s", err, out.String())
+	}
+	var accepted, requirements, features, tickets, gates int
+	if err := db.InTenant(dbtest.Seed(ctx), f.db.App, f.tenant, func(tx pgx.Tx) error {
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM intake_drafts WHERE project_node_id=$1::uuid`, project).Scan(&drafts); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM intake_draft_acceptances WHERE project_node_id=$1::uuid`, project).Scan(&accepted); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM journey_requirements WHERE project_node_id=$1::uuid AND status='agreed'`, project).Scan(&requirements); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM journey_features WHERE project_node_id=$1::uuid`, project).Scan(&features); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM journey_tickets WHERE project_node_id=$1::uuid AND source='requirements'`, project).Scan(&tickets); err != nil {
+			return err
+		}
+		return tx.QueryRow(ctx, `SELECT count(*) FROM approval_decisions`).Scan(&gates)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if drafts != 2 || accepted != 2 || requirements != 1 || features != 1 || tickets != 1 || gates != 0 {
+		t.Fatalf("retry counts drafts=%d accepted=%d requirements=%d features=%d tickets=%d decisions=%d", drafts, accepted, requirements, features, tickets, gates)
+	}
+	out.Reset()
+	if err := journey.RunOperator(ctx, f.db.App, args, &out); err != nil || !strings.Contains(out.String(), `"already":true`) {
+		t.Fatalf("second retry: %v %s", err, out.String())
+	}
+	var draftsAgain int
+	if err := db.InTenant(dbtest.Seed(ctx), f.db.App, f.tenant, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT count(*) FROM intake_drafts WHERE project_node_id=$1::uuid`, project).Scan(&draftsAgain)
+	}); err != nil || draftsAgain != drafts {
+		t.Fatalf("second retry duplicated drafts: %d -> %d %v", drafts, draftsAgain, err)
 	}
 }

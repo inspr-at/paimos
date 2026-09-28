@@ -65,7 +65,8 @@ test('motion belongs to working leads, with quiet followers and stationary waiti
     const full = await count('[data-size="26"] > svg')
     const quiet = await count('[data-quiet] > svg')
     expect(full).toBeGreaterThan(quiet)
-    expect(quiet).toBe(1)
+    // Robot 2's mouth is a still smile, so a quiet follower has no loop.
+    expect(quiet).toBe(variant === 2 ? 0 : 1)
     for (const state of ['waiting', 'stale']) {
       expect(await page.locator(`[data-variant="${variant}"][data-state="${state}"] > .sizes svg`).evaluateAll(nodes => nodes.flatMap(node => node.getAnimations({ subtree: true })).length)).toBe(0)
     }

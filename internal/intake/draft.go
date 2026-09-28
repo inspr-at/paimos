@@ -238,6 +238,15 @@ func (m *Module) acceptDraft(w http.ResponseWriter, r *http.Request) {
 }
 
 func acceptOne(ctx context.Context, tx pgx.Tx, p tenant.Principal, projectID, draftID string, expected int64) (draftView, error) {
+	return acceptOneMode(ctx, tx, p, projectID, draftID, expected, false)
+}
+
+func acceptOneMode(ctx context.Context, tx pgx.Tx, p tenant.Principal, projectID, draftID string, expected int64, disposable bool) (draftView, error) {
+	if disposable {
+		if err := requireDisposableOperator(ctx, tx, p, projectID); err != nil {
+			return draftView{}, err
+		}
+	}
 	stored, err := findDraftByID(ctx, tx, projectID, draftID)
 	if err != nil {
 		return draftView{}, err
@@ -255,7 +264,7 @@ func acceptOne(ctx context.Context, tx pgx.Tx, p tenant.Principal, projectID, dr
 	if stored.TargetNodeID == nil {
 		targetID, nodeEvent, err = createAcceptedNode(ctx, tx, p, projectID, stored)
 	} else {
-		targetID, nodeEvent, err = applyAcceptedNode(ctx, tx, p, projectID, stored)
+		targetID, nodeEvent, err = applyAcceptedNode(ctx, tx, p, projectID, stored, disposable)
 	}
 	if err != nil {
 		return draftView{}, err
@@ -328,7 +337,7 @@ func createAcceptedNode(ctx context.Context, tx pgx.Tx, p tenant.Principal, proj
 	return node.ID, ev.ID, nil
 }
 
-func applyAcceptedNode(ctx context.Context, tx pgx.Tx, p tenant.Principal, projectID string, stored draftRow) (string, int64, error) {
+func applyAcceptedNode(ctx context.Context, tx pgx.Tx, p tenant.Principal, projectID string, stored draftRow, disposable bool) (string, int64, error) {
 	targetID := *stored.TargetNodeID
 	node, err := loadNode(ctx, tx, targetID, true)
 	if err != nil {
@@ -364,13 +373,17 @@ func applyAcceptedNode(ctx context.Context, tx pgx.Tx, p tenant.Principal, proje
 		return "", 0, err
 	}
 	if content.missing {
-		return "", 0, fail(http.StatusConflict, "target has no recorded content")
-	}
-	if content.drifted || node.Title != content.title || node.Body != content.body {
-		return "", 0, fail(http.StatusConflict, "target changed")
-	}
-	if content.actor == string(tenant.Person) && (node.Title != stored.Title || node.Body != stored.Body) {
-		return "", 0, fail(http.StatusConflict, "person edit is preserved")
+		if !disposable {
+			return "", 0, fail(http.StatusConflict, "target has no recorded content")
+		}
+	} else if content.drifted || node.Title != content.title || node.Body != content.body {
+		if !disposable {
+			return "", 0, fail(http.StatusConflict, "target changed")
+		}
+	} else if content.actor == string(tenant.Person) && (node.Title != stored.Title || node.Body != stored.Body) {
+		if !disposable {
+			return "", 0, fail(http.StatusConflict, "person edit is preserved")
+		}
 	}
 	if node.Title == stored.Title && node.Body == stored.Body {
 		return targetID, 0, nil

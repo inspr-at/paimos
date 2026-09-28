@@ -43,6 +43,7 @@ export function mergeSessionEvidence(previous: HarnessSession | undefined, incom
     ...incoming,
     has_problem: incoming.has_problem ?? previous.has_problem,
     needs_attention: incoming.needs_attention ?? previous.needs_attention,
+    attention_reasons: incoming.attention_reasons ?? previous.attention_reasons,
     run_status: incoming.run_status !== undefined ? incoming.run_status : previous.run_status,
   }
 }
@@ -109,10 +110,14 @@ export function sessionForest<T extends { session: HarnessSession; status: Sessi
   return roots
 }
 
-export function needsYou(session: HarnessSession, pending: Approval[], held: (ProjectMessage & { projectId?: string })[]) {
-  if (session.phase === 'stopped') return false
-  return pending.some(a => a.agent_principal_id === session.agent_principal_id && (!a.run_id || a.run_id === session.run_id))
-    || held.some(m => (!m.projectId || m.projectId === session.project_id) && m.sender_principal_id === session.agent_principal_id)
+// Older servers may omit projected evidence. Even then, a shared principal or
+// held message cannot identify a sender generation. Only exact run evidence can.
+export function approvalRun(approval: Approval) {
+  return approval.run_id ?? (approval.resource_kind === 'run' ? approval.resource_id : null)
+}
+export function needsYou(session: HarnessSession, pending: Approval[], _held: (ProjectMessage & { projectId?: string })[]) {
+  if (session.phase === 'stopped' || session.stopped_at || !session.run_id) return false
+  return pending.some(a => a.agent_principal_id === session.agent_principal_id && approvalRun(a) === session.run_id)
 }
 
 export function groupSessions(sessions: HarnessSession[], now: number, needs: (session: HarnessSession) => boolean) {

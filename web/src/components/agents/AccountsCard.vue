@@ -1,17 +1,32 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed, ref } from 'vue'
-import type { AgentAccount } from '../../lib/agents'
+import { computed, ref, watch } from 'vue'
+import { createWindow, type AgentAccount, type AllowanceWrite } from '../../lib/agents'
+import { can } from '../../lib/authz'
 import { accountName, accountPlan, allowanceWindowLabel } from '../../lib/accountCascade'
 import { PACE_LABEL, UNIT_LABEL, bindingWindow, duration, harnessLabel } from '../../lib/agentState'
 import type { Availability } from '../../stores/agents'
+import { useSession } from '../../stores/session'
 import AppIcon from '../AppIcon.vue'
+import AllowanceWindowForm from './AllowanceWindowForm.vue'
+import { ABSENT_ALLOWANCE, allowanceFailure, beginSave, findSavedAllowance, holdUncertain, releaseHeld, settleSave, UNCERTAIN_ALLOWANCE, type HeldAllowance } from './allowanceWindow'
 
 // Per account: the window that binds first, how much of it is left and whether use
 // is running ahead of the pace the window allows. Admins can drain or resume.
+// A person with account.manage can add one allowance window for the open account.
 const props = defineProps<{ accounts: AgentAccount[]; state: Availability; now: number; admin: boolean; set: (account: AgentAccount, state: AgentAccount['state']) => Promise<void> }>()
+const emit = defineEmits<{ 'allowance-created': [] }>()
+const session = useSession()
+const mayManage = computed(() => session.identity?.principal.kind === 'person' && can('account.manage'))
 const busy = ref('')
 const error = ref('')
+const editingId = ref('')
+const flight = ref<number | null>(null)
+const serverMessage = ref('')
+const uncertain = ref(false)
+const allowanceStatus = ref('')
+const pending = ref<Record<string, HeldAllowance>>({})
+let generation = 0
 const rows = computed(() => [...props.accounts]
   .map(account => ({ account, window: bindingWindow(account.windows, props.now) }))
   .sort((a, b) => (a.account.state === 'available' ? 0 : 1) - (b.account.state === 'available' ? 0 : 1) || allowanceRank(a.window) - allowanceRank(b.window)))
@@ -26,6 +41,94 @@ async function toggle(account: AgentAccount) {
   catch (e) { error.value = e instanceof Error ? e.message : 'The account did not change. Please try again.' }
   finally { busy.value = '' }
 }
+function showPending(accountId: string) {
+  if (pending.value[accountId]) {
+    uncertain.value = true
+    serverMessage.value = UNCERTAIN_ALLOWANCE
+  } else {
+    uncertain.value = false
+    serverMessage.value = ''
+  }
+}
+function openAllowance(accountId: string) {
+  if (flight.value !== null || editingId.value === accountId) return
+  generation += 1
+  editingId.value = accountId
+  allowanceStatus.value = ''
+  showPending(accountId)
+}
+function closeAllowance() {
+  generation += 1
+  editingId.value = ''
+  serverMessage.value = ''
+  uncertain.value = false
+}
+function reviseAllowance(accountId: string) {
+  pending.value = releaseHeld(pending.value, accountId)
+  uncertain.value = false
+  serverMessage.value = ''
+}
+async function saveAllowance(account: AgentAccount, body: AllowanceWrite) {
+  const accountId = account.id
+  const name = accountName(account)
+  const started = generation
+  const decision = beginSave({ busy: flight.value !== null, editingId: editingId.value, accountId, generation: started, body, now: props.now })
+  if (decision.action === 'ignore') return
+  if (decision.action === 'invalid') { serverMessage.value = decision.message; uncertain.value = false; return }
+  flight.value = started
+  serverMessage.value = ''
+  try {
+    await createWindow(accountId, body)
+    applySettlement(settleSave({
+      outcome: 'saved', message: '', accountName: name, startedAccountId: accountId, startedGeneration: started,
+      currentAccountId: editingId.value, currentGeneration: generation,
+    }))
+  } catch (caught) {
+    const failure = allowanceFailure(caught)
+    if (failure.kind === 'uncertain') pending.value = holdUncertain(pending.value, accountId, name, body)
+    applySettlement(settleSave({
+      outcome: failure.kind === 'uncertain' ? 'uncertain' : 'rejected', message: failure.message, accountName: name,
+      startedAccountId: accountId, startedGeneration: started, currentAccountId: editingId.value, currentGeneration: generation,
+    }))
+  } finally {
+    if (flight.value === started) flight.value = null
+  }
+}
+function applySettlement(settled: ReturnType<typeof settleSave>) {
+  if (settled.clearAccountId) pending.value = releaseHeld(pending.value, settled.clearAccountId)
+  if (settled.refresh) emit('allowance-created')
+  if (settled.closeForm) editingId.value = ''
+  uncertain.value = settled.uncertain
+  serverMessage.value = settled.formMessage ?? ''
+  if (settled.status) allowanceStatus.value = settled.status
+}
+async function checkAllowance(account: AgentAccount) {
+  const held = pending.value[account.id]
+  if (!held || flight.value !== null || editingId.value !== account.id) return
+  const started = generation
+  flight.value = started
+  const match = await findSavedAllowance(account.id, held.body)
+  if (flight.value === started) flight.value = null
+  if (generation !== started || editingId.value !== account.id) return
+  if (match === 'saved') {
+    pending.value = releaseHeld(pending.value, account.id)
+    uncertain.value = false
+    serverMessage.value = ''
+    editingId.value = ''
+    allowanceStatus.value = `Allowance window saved for ${held.name}.`
+    emit('allowance-created')
+    return
+  }
+  if (match === 'absent') {
+    pending.value = releaseHeld(pending.value, account.id)
+    uncertain.value = false
+    serverMessage.value = ABSENT_ALLOWANCE
+    return
+  }
+  uncertain.value = true
+  serverMessage.value = UNCERTAIN_ALLOWANCE
+}
+watch(mayManage, allowed => { if (!allowed) closeAllowance() })
 const stateLabel: Record<AgentAccount['state'], string> = { available: 'Available', draining: 'Draining', unavailable: 'Unavailable' }
 </script>
 
@@ -68,8 +171,16 @@ const stateLabel: Record<AgentAccount['state'], string> = { available: 'Availabl
           </p>
         </template>
         <p v-else class="facts muted">No active allowance window</p>
+        <button v-if="mayManage && editingId !== account.id" type="button" class="btn sm add-window" :aria-label="`Add allowance window for ${accountName(account)}`" :disabled="flight !== null || busy === account.id" @click="openAllowance(account.id)">Add allowance window</button>
+        <AllowanceWindowForm
+          v-else-if="mayManage && editingId === account.id"
+          :account="account" :now="now" :busy="flight !== null" :server-message="serverMessage" :uncertain="uncertain"
+          :pending="pending[account.id]?.body ?? null"
+          @save="saveAllowance(account, $event)" @cancel="closeAllowance" @check="checkAllowance(account)" @revise="reviseAllowance(account.id)"
+        />
       </li>
     </ul>
+    <p v-if="allowanceStatus" class="note" role="status">{{ allowanceStatus }}</p>
     <p v-if="error" class="note error" role="alert"><AppIcon name="alert" :size="13" />{{ error }}</p>
   </section>
 </template>
@@ -97,7 +208,8 @@ const stateLabel: Record<AgentAccount['state'], string> = { available: 'Availabl
 .spacer { flex: 1; }
 .state-text { font-size: 11.5px; color: var(--gold-ink); font-weight: 600; }
 .account.unavailable .state-text { color: var(--ink-3); }
-.toggle { height: 24px; padding: 0 8px; font-size: 12px; }
+.toggle, .add-window { height: 24px; padding: 0 8px; font-size: 12px; }
+.add-window { margin-top: 8px; }
 @media (hover: hover) { .account .toggle { opacity: 0; } .account:hover .toggle, .account:focus-within .toggle { opacity: 1; } }
 .meter { position: relative; height: 6px; margin: 9px 0 7px; border-radius: 999px; background: var(--skeleton); }
 .fill { position: absolute; inset: 0 auto 0 0; border-radius: inherit; background: linear-gradient(90deg, var(--teal), var(--st-qa-fill)); }

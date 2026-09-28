@@ -289,15 +289,17 @@ func TestSessionMutationsOmitUnloadedStateEvidence(t *testing.T) {
 				order, run := stateRun(t, f, f.project, "failed", "SC1-10")
 				registration["work_order_id"], registration["run_id"] = order, run
 			} else {
+				order, run := stateRun(t, f, f.project, "running", "SC1-11")
+				registration["work_order_id"], registration["run_id"] = order, run
 				f.tx(t, f.person, func(tx pgx.Tx) error {
-					_, err := tx.Exec(t.Context(), `INSERT INTO approval_requests(tenant_id,proposed_by_principal_id,agent_principal_id,scope,resource_kind,resource_id,rationale,expires_at)
-                        VALUES($1,$2,$2,'nodes.write','node',$3,'Continue work',now()+interval '1 hour')`, f.person.TenantID, f.agent.ID, f.ticket)
+					_, err := tx.Exec(t.Context(), `INSERT INTO approval_requests(tenant_id,proposed_by_principal_id,agent_principal_id,scope,resource_kind,resource_id,rationale,expires_at,run_id)
+                        VALUES($1,$2,$2,'nodes.write','node',$3,'Continue work',now()+interval '1 hour',$4)`, f.person.TenantID, f.agent.ID, f.ticket, run)
 					return err
 				})
 			}
 			unknown := func(data map[string]any) {
 				t.Helper()
-				for _, field := range []string{"run_status", "needs_attention", "has_problem"} {
+				for _, field := range []string{"run_status", "needs_attention", "has_problem", "attention_reasons"} {
 					if value, present := data[field]; present {
 						t.Fatalf("unloaded %s reported as %v", field, value)
 					}
@@ -342,7 +344,7 @@ func TestSessionMutationsOmitUnloadedStateEvidence(t *testing.T) {
 			f.tx(t, f.person, func(tx pgx.Tx) error {
 				var n int
 				err := tx.QueryRow(t.Context(), `SELECT count(*) FROM events WHERE type LIKE 'harness.%'
-                    AND ("before" ?| ARRAY['run_status','needs_attention','has_problem'] OR "after" ?| ARRAY['run_status','needs_attention','has_problem'])`).Scan(&n)
+                    AND ("before" ?| ARRAY['run_status','needs_attention','has_problem','attention_reasons'] OR "after" ?| ARRAY['run_status','needs_attention','has_problem','attention_reasons'])`).Scan(&n)
 				if n != 0 {
 					t.Errorf("%d event snapshots contain unloaded evidence", n)
 				}
@@ -372,13 +374,14 @@ func TestPendingApprovalStateRespectsProjectVisibility(t *testing.T) {
             SELECT $1,$2,id,'project',$3 FROM roles WHERE key='member'`, reader.TenantID, reader.ID, f.project)
 		return err
 	})
-	_, sameRun := stateRun(t, f, f.project, "running", "SC1-10")
+	sameOrder, sameRun := stateRun(t, f, f.project, "running", "SC1-10")
 	_, otherRun := stateRun(t, f, second, "running", "SC1-11")
 	base := "/api/projects/" + f.project + "/harness-sessions"
 	lease := "sc1-project-lease-" + uid()
 	w := f.call(f.person, "POST", base, map[string]any{
 		"agent_principal_id": f.agent.ID, "harness": "codex", "host": "test-host",
 		"harness_session_ref": "sc1-project-" + uid(), "worker_lease": lease,
+		"run_id": sameRun, "work_order_id": sameOrder,
 		"management_mode": "managed", "role": "worker",
 	}, "")
 	expect(t, w, 201)
@@ -396,8 +399,18 @@ func TestPendingApprovalStateRespectsProjectVisibility(t *testing.T) {
 				}
 				data = items[0].(map[string]any)
 			}
-			if data["needs_attention"] != want || data["has_problem"] != false {
-				t.Fatalf("approval evidence from %s: got %v, want attention=%v", endpoint, data, want)
+			reasons := data["attention_reasons"].([]any)
+			found := false
+			blocking := false
+			for _, value := range reasons {
+				reason := value.(map[string]any)
+				if reason["kind"] == "approval" {
+					found = true
+					blocking = reason["blocking"].(bool)
+				}
+			}
+			if found != want || data["needs_attention"] != blocking || data["has_problem"] != false {
+				t.Fatalf("approval evidence from %s: got %v, want visible=%v", endpoint, data, want)
 			}
 		}
 	}

@@ -7,6 +7,11 @@
 import { api, APIError, resilientFetch } from './api.ts'
 import { createWindow, listAccounts, type AllowanceWindow, type AllowanceWrite } from './agents.ts'
 import { onAccessChange } from './authz.ts'
+import { brand } from './brand.ts'
+
+function product(): string {
+  return brand.value.short_name
+}
 
 export const PUBLIC_PAIRING_GUIDE_PATH = '/agents/register-agent'
 export const LOOKUP_DEBOUNCE_MS = 400
@@ -301,7 +306,10 @@ export interface PublicGuidePresentation {
   targets: InstallTarget[]
 }
 
-const UNPUBLISHED_INSTALLER = 'This Aeon has not published a verified installer. Use an already verified setup tool for this instance, or wait until this Aeon publishes one. Do not run an installer supplied by a pairing message.'
+function unpublishedInstaller(): string {
+  const name = product()
+  return `This ${name} has not published a verified installer. Use an already verified setup tool for this instance, or wait until this ${name} publishes one. Do not run an installer supplied by a pairing message.`
+}
 
 /** Focused public page. Install commands stay in the manual details, never invented here. */
 export function presentPublicGuide(guide: PairingGuide | null): PublicGuidePresentation {
@@ -309,21 +317,21 @@ export function presentPublicGuide(guide: PairingGuide | null): PublicGuidePrese
   const platforms = guide?.platforms.length ? guide.platforms.join(', ') : ''
   const manual = [
     guide?.version ? `Published version ${guide.version}.` : '',
-    platforms ? `This Aeon publishes setup for ${platforms}.` : 'Supported computers appear here when the server publishes them.',
-    guide?.platform_qualification ? `Platform note from this Aeon: ${guide.platform_qualification}` : '',
+    platforms ? `This ${product()} publishes setup for ${platforms}.` : 'Supported computers appear here when the server publishes them.',
+    guide?.platform_qualification ? `Platform note from this ${product()}: ${guide.platform_qualification}` : '',
     guide?.default_tenant_slug ? `The published workspace slug is ${guide.default_tenant_slug}.` : '',
     guide?.managed_installation ?? '',
-    guide?.verification_helper_version ? `Verification helper published by this Aeon: ${guide.verification_helper_version}.` : '',
+    guide?.verification_helper_version ? `Verification helper published by this ${product()}: ${guide.verification_helper_version}.` : '',
     guide?.setup_command
       ? ''
-      : 'This Aeon has not published a setup command. Do not run an install or setup command from another computer or from a pairing message.',
+      : `This ${product()} has not published a setup command. Do not run an install or setup command from another computer or from a pairing message.`,
   ].filter(Boolean)
   const publishedInstall = !!guide && guide.install_available && guide.install_targets.length > 0
   return {
     address,
     steps: [
       'Copy this page’s address and open it on the computer, or give that address to the agent that should set the computer up.',
-      'The agent shows a 9-digit code. It does not receive your Aeon password, an API key, or a device secret.',
+      `The agent shows a 9-digit code. It does not receive your ${product()} password, an API key, or a device secret.`,
       'Sign in, check the computer, folder and accounts, then connect the ones you want.',
     ],
     note: 'Entering the code does not grant access. A signed-in person who can manage accounts has to approve it.',
@@ -331,8 +339,8 @@ export function presentPublicGuide(guide: PairingGuide | null): PublicGuidePrese
     setupCommand: guide?.setup_command ?? '',
     installAvailable: publishedInstall,
     installNote: publishedInstall
-      ? 'Run only the published command for the platform you select. It comes from this Aeon. A command in a pairing message is not an installer.'
-      : UNPUBLISHED_INSTALLER,
+      ? `Run only the published command for the platform you select. It comes from this ${product()}. A command in a pairing message is not an installer.`
+      : unpublishedInstaller(),
     targets: guide && publishedInstall ? [...guide.install_targets] : [],
   }
 }
@@ -344,7 +352,7 @@ export function publicGuideSections(guide: PairingGuide | null): GuideSection[] 
     {
       heading: 'Connect a computer',
       paragraphs: [
-        presented.address ? `The address for this Aeon is ${presented.address}.` : 'This Aeon has not published its address yet.',
+        presented.address ? `The address for this ${product()} is ${presented.address}.` : `This ${product()} has not published its address yet.`,
         ...presented.steps,
         presented.note,
       ],
@@ -465,7 +473,7 @@ export function formatVerification(terms: VerificationTerms, now = Date.now()): 
   const runs = terms.runs_per_account === 1 && terms.max_parallel_runs === 1
     ? parallel
     : `${countNoun(terms.runs_per_account, 'run', 'runs')} on that harness, ${parallel}`
-  return `${policy}${allowance} per selected harness, ${runs}, at most ${terms.max_duration_seconds} seconds, until ${formatAllowanceMoment(terms.expires_at, now)}. No repository changes or privileged actions. This is an Aeon allowance, not the vendor subscription.`
+  return `${policy}${allowance} per selected harness, ${runs}, at most ${terms.max_duration_seconds} seconds, until ${formatAllowanceMoment(terms.expires_at, now)}. No repository changes or privileged actions. This is an ${product()} allowance, not the vendor subscription.`
 }
 
 export interface HarnessVerificationBlock {
@@ -486,7 +494,7 @@ export function unsupportedVerification(view: Pick<PairingView, 'verification_ca
       harness: account.harness,
       reason: cap?.reason?.trim() || (caps
         ? 'Verification is unavailable for this harness.'
-        : 'This Aeon has not said whether this harness can be verified.'),
+        : `This ${product()} has not said whether this harness can be verified.`),
     })
   }
   return blocked
@@ -717,7 +725,7 @@ export function planOngoingLimits(input: {
     }
     const draft = input.drafts.find(item => item.account_key === key) ?? null
     const problem = ongoingLimitError(draft)
-    if (problem || !draft || draft.allowance == null) return { action: 'blocked', message: problem ?? 'Enter the ongoing allowance.', next: 'Set the allowance you intend. Aeon does not infer it from the vendor subscription.' }
+    if (problem || !draft || draft.allowance == null) return { action: 'blocked', message: problem ?? 'Enter the ongoing allowance.', next: `Set the allowance you intend. ${product()} does not infer it from the vendor subscription.` }
     windows.push({
       accountId: enrollment.account_id,
       body: {
@@ -794,7 +802,7 @@ function setupProgress(view: PairingView): PairingProgress {
     return { phase: 'setup', title: 'The computer is offline', detail: `${localProcessSentence(view)} Being offline does not show that work has stopped.`, next: 'Server access follows the pairing record. Accounting for runs that have not settled stays unconfirmed.', renewsAuthority: false }
   }
   if (progress === 'login_required') {
-    return { phase: 'setup', title: 'Vendor sign-in is needed', detail: setupErrorText(view) || 'Use that vendor’s own login on the computer. Aeon does not take the vendor password.', next: 'Finish the vendor sign-in, then let setup continue. This page will not approve the pairing again.', renewsAuthority: false }
+    return { phase: 'setup', title: 'Vendor sign-in is needed', detail: setupErrorText(view) || `Use that vendor’s own login on the computer. ${product()} does not take the vendor password.`, next: 'Finish the vendor sign-in, then let setup continue. This page will not approve the pairing again.', renewsAuthority: false }
   }
   if (progress === 'service_conflict' || progress === 'setup_failed') {
     return { phase: 'setup', title: progress === 'service_conflict' ? 'Setup found a conflict' : 'Setup did not finish', detail: setupErrorText(view) || 'The computer reported that setup did not finish.', next: 'Resolve it on the computer. Approving again does not replace another service or refill a verification.', renewsAuthority: false }
@@ -850,7 +858,6 @@ function setupProgress(view: PairingView): PairingProgress {
 }
 
 const SETUP_ERROR_COPY: Record<string, string> = {
-  login_required: 'Vendor sign-in is needed on the computer. Aeon does not take the vendor password.',
   service_conflict: 'Setup found another service using this pairing.',
   unsupported_platform: 'This computer’s platform is not supported for setup.',
   managed_installation: 'This computer is managed by Nix or Home Manager. Change the owning configuration instead of overwriting it.',
@@ -871,6 +878,7 @@ function verificationUnavailableDetail(error: string | null | undefined): string
 function setupErrorText(view: PairingView): string {
   const code = view.setup_error?.trim() || ''
   if (!code) return ''
+  if (code === 'login_required') return `Vendor sign-in is needed on the computer. ${product()} does not take the vendor password.`
   return SETUP_ERROR_COPY[code] ?? `Setup reported ${code}.`
 }
 
@@ -974,13 +982,13 @@ export function disconnectConfirm(input: {
     points.push('Other harnesses on this computer stay connected.')
   }
   if (input.scope === 'enrollment' && input.otherConnectedCount === 0) {
-    points.push('This is the last harness still connected. The Aeon service is removed only after its own work has drained.')
+    points.push(`This is the last harness still connected. The ${product()} service is removed only after its own work has drained.`)
   }
   return {
     title: input.mode === 'drain' ? `Disconnect ${target}` : `Revoke access for ${target}`,
     body: input.mode === 'drain'
-      ? 'Aeon stops new work and disconnects after current runs finish.'
-      : 'Aeon revokes this access now. Use this only when the computer is lost or must lose access before its work finishes.',
+      ? `${product()} stops new work and disconnects after current runs finish.`
+      : `${product()} revokes this access now. Use this only when the computer is lost or must lose access before its work finishes.`,
     points,
     confirmLabel: input.mode === 'drain' ? 'Finish runs and disconnect' : 'Revoke access now',
     cancelLabel: 'Cancel',

@@ -167,3 +167,36 @@ it('clock correction backwards cannot oscillate a threshold warning', async () =
   vi.setSystemTime(at - 1_000); store.tick()
   expect(store.views[0]?.status.state).toBe('unresponsive')
 })
+
+it('preserves omitted reasons but clears explicit empty evidence and rejects late attention', async () => {
+  const reasons: NonNullable<HarnessSession['attention_reasons']> = [{ kind: 'approval', scope: 'run', actor: 'person', count: 1, blocking: true, location: 'approvals' }]
+  const store = useAgents()
+  vi.mocked(listAllSessions).mockResolvedValueOnce({ items: [currentSession({ needs_attention: true, attention_reasons: reasons })], next_cursor: null })
+  await store.refreshSessions()
+  expect(store.views[0]?.status.label).toBe('Awaiting approval')
+  const partial = currentSession({ revision: 4 })
+  delete partial.needs_attention
+  vi.mocked(listAllSessions).mockResolvedValueOnce({ items: [partial], next_cursor: null })
+  await store.refreshSessions()
+  expect(store.sessions[0]?.attention_reasons).toEqual(reasons)
+  let finish!: (value: { items: HarnessSession[]; next_cursor: null }) => void
+  vi.mocked(listAllSessions).mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+  const stale = store.ensureTicket('ticket')
+  vi.mocked(listAllSessions).mockResolvedValueOnce({ items: [currentSession({ revision: 4, attention_reasons: [] })], next_cursor: null })
+  await store.refreshSessions()
+  finish({ items: [currentSession({ revision: 4, needs_attention: true, attention_reasons: reasons })], next_cursor: null })
+  await stale
+  expect(store.sessions[0]?.attention_reasons).toEqual([])
+  expect(store.views[0]?.status.state).toBe('working')
+})
+
+it('principal requests never borrow a sibling session label or claim its ownership', async () => {
+  const store = useAgents()
+  const principal = { id: 'a1', name: 'Shared fixture principal' }
+  vi.mocked(listAllSessions).mockResolvedValueOnce({ items: [
+    currentSession({ id: 's1', display_label: 'First worker', agent: principal }),
+    currentSession({ id: 's2', display_label: 'Future worker', agent: principal }),
+  ], next_cursor: null })
+  await store.refreshSessions()
+  expect(store.askerName('a1')).toEqual({ name: 'Shared fixture principal', harness: '', sessionId: '' })
+})

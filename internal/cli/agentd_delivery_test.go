@@ -20,11 +20,18 @@ import (
 func TestManagedDeliveryUsesOwnedLocalControl(t *testing.T) {
 	// Unix socket paths are capped near 104 bytes, and macOS's default TMPDIR is
 	// long, so the socket lives under /tmp, which exists on macOS and Linux.
+	// Darwin's /tmp is a symlink to /private/tmp. Resolve that before creating
+	// the socket and token: the production client refuses a non-physical ancestor.
 	root, err := os.MkdirTemp("/tmp", "aeon-agentd-")
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(root) })
+	physical, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	root = physical
 	socket := filepath.Join(root, "agentd.sock")
 	listener, err := net.Listen("unix", socket)
 	if err != nil {
