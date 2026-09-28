@@ -5,6 +5,7 @@ package agentd
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
@@ -24,6 +25,9 @@ type fakeAPI struct {
 	harnessRegistration        HarnessSession
 	harnessCaps                []string
 	harnessBeats               int
+	harnessBeatSessions        []HarnessSession
+	harnessBeatPhases          []string
+	harnessBeatsAtStop         []int
 	harnessControls            []HarnessControl
 	harnessCompletions         []string
 	harnessDeliveries          []HarnessDelivery
@@ -84,10 +88,12 @@ func (a *fakeAPI) RegisterHarness(_ context.Context, s HarnessSession, _, _, _, 
 	a.mu.Unlock()
 	return s, nil
 }
-func (a *fakeAPI) HeartbeatHarness(context.Context, HarnessSession, string) error {
+func (a *fakeAPI) HeartbeatHarness(_ context.Context, session HarnessSession, phase string) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.harnessBeats++
+	a.harnessBeatSessions = append(a.harnessBeatSessions, session)
+	a.harnessBeatPhases = append(a.harnessBeatPhases, phase)
 	return nil
 }
 func (a *fakeAPI) YieldHarness(context.Context, HarnessSession) ([]HarnessControl, error) {
@@ -119,6 +125,7 @@ func (a *fakeAPI) StopHarness(_ context.Context, _ HarnessSession, reason string
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.harnessStops = append(a.harnessStops, reason)
+	a.harnessBeatsAtStop = append(a.harnessBeatsAtStop, a.harnessBeats)
 	return nil
 }
 
@@ -135,10 +142,17 @@ type fakeProcess struct {
 	calls   int
 	stopped chan struct{}
 	once    sync.Once
+	onExit  func()
 }
 
-func (*fakeProcess) PID() int      { return 3456 }
-func (p *fakeProcess) Wait() error { <-p.stopped; return nil }
+func (*fakeProcess) PID() int { return 3456 }
+func (p *fakeProcess) Wait() error {
+	<-p.stopped
+	if p.onExit != nil {
+		p.onExit()
+	}
+	return nil
+}
 func (p *fakeProcess) Control(_ context.Context, _, _ string) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -203,8 +217,8 @@ func TestManagedHarnessLifecycleAndControls(t *testing.T) {
 	if registration.ID != "session" || registration.ProjectID != "project" || len(registration.Lease) < 32 || len(caps) != 5 {
 		t.Fatalf("managed registration binding or capabilities invalid: %v", caps)
 	}
-	if registration.Model != a.profile.Model || registration.ReasoningEffort != a.profile.Effort || registration.AccountLabel != "Work subscription" {
-		t.Fatal("managed registration lost chosen model, effort or account label")
+	if registration.Model != "" || registration.ReasoningEffort != "" || registration.AccountLabel != "Work subscription" {
+		t.Fatal("Codex registration claimed unverified model or lost account label")
 	}
 	if err := s.serviceHarness(t.Context(), s.runs["run"]); err != nil {
 		t.Fatal(err)
@@ -401,3 +415,155 @@ func TestHeartbeatAndChildDeadline(t *testing.T) {
 }
 
 func (s *Supervisor) journalDir() string { return filepath.Dir(s.journal.JournalPath()) }
+
+type exitMetadataAdapter struct {
+	proc  *fakeProcess
+	event AdapterEvent
+}
+
+func (*exitMetadataAdapter) Name() string                       { return Codex }
+func (*exitMetadataAdapter) Probe(context.Context, string) bool { return true }
+func (a *exitMetadataAdapter) Start(_ context.Context, _ StartRequest, observe func(AdapterEvent)) (Process, error) {
+	a.proc.onExit = func() { observe(a.event) }
+	return a.proc, nil
+}
+
+func TestExitFlushesOwnedMetadataBeforeStop(t *testing.T) {
+	s, api, proc := testSupervisor(t)
+	s.adapters[Codex] = &exitMetadataAdapter{proc: proc, event: AdapterEvent{HarnessModel: "model-final", HarnessEffort: "xhigh"}}
+	if err := s.StartRun(t.Context(), api.run); err != nil {
+		t.Fatal(err)
+	}
+	if err := proc.Stop(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	<-s.runs[api.run.ID].monitorDone
+	api.mu.Lock()
+	defer api.mu.Unlock()
+	if len(api.harnessBeatSessions) != 2 || api.harnessBeatPhases[1] != "stopping" ||
+		api.harnessBeatSessions[1].Model != "model-final" || api.harnessBeatSessions[1].ReasoningEffort != "xhigh" ||
+		api.harnessBeatSessions[1].ActivitySequence != 2 || api.harnessBeatSessions[1].Ownership != nil ||
+		len(api.harnessBeatsAtStop) != 1 || api.harnessBeatsAtStop[0] != 2 {
+		t.Fatalf("exit metadata was not flushed before stop: phases=%v beats=%+v atStop=%v", api.harnessBeatPhases, api.harnessBeatSessions, api.harnessBeatsAtStop)
+	}
+	if len(api.harnessStops) != 1 || api.harnessStops[0] != "process_exited" {
+		t.Fatalf("normal exit did not stop registration: %v", api.harnessStops)
+	}
+	if len(api.reports) != 2 || api.reports[1].Kind != "finished" || api.reports[1].Status != "completed" {
+		t.Fatalf("normal exit did not settle run: %+v", api.reports)
+	}
+}
+
+type failingExitMetadataAPI struct{ *fakeAPI }
+
+func (a *failingExitMetadataAPI) HeartbeatHarness(ctx context.Context, session HarnessSession, phase string) error {
+	if phase == "stopping" {
+		return errors.New("synthetic metadata outage")
+	}
+	return a.fakeAPI.HeartbeatHarness(ctx, session, phase)
+}
+
+func TestExitMetadataFailureStillStopsHarness(t *testing.T) {
+	s, api, proc := testSupervisor(t)
+	s.api = &failingExitMetadataAPI{fakeAPI: api}
+	s.adapters[Codex] = &exitMetadataAdapter{proc: proc, event: AdapterEvent{HarnessModel: "model-final"}}
+	if err := s.StartRun(t.Context(), api.run); err != nil {
+		t.Fatal(err)
+	}
+	if err := proc.Stop(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	<-s.runs[api.run.ID].monitorDone
+	api.mu.Lock()
+	defer api.mu.Unlock()
+	if len(api.harnessStops) != 1 || len(api.harnessBeatsAtStop) != 1 || api.harnessBeatsAtStop[0] != 1 ||
+		len(api.reports) != 2 || api.reports[1].Status != "completed" {
+		t.Fatalf("metadata outage blocked cleanup: stops=%v atStop=%v reports=%+v", api.harnessStops, api.harnessBeatsAtStop, api.reports)
+	}
+}
+
+type archivedExitMetadataAPI struct{ *fakeAPI }
+
+func (a *archivedExitMetadataAPI) HeartbeatHarness(ctx context.Context, session HarnessSession, phase string) error {
+	if phase == "stopping" {
+		return ErrHarnessArchived
+	}
+	return a.fakeAPI.HeartbeatHarness(ctx, session, phase)
+}
+
+func TestExitMetadataArchivedSessionIsNotStoppedAgain(t *testing.T) {
+	s, api, proc := testSupervisor(t)
+	s.api = &archivedExitMetadataAPI{fakeAPI: api}
+	s.adapters[Codex] = &exitMetadataAdapter{proc: proc, event: AdapterEvent{HarnessModel: "model-final"}}
+	if err := s.StartRun(t.Context(), api.run); err != nil {
+		t.Fatal(err)
+	}
+	if err := proc.Stop(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	entry := s.runs[api.run.ID]
+	<-entry.monitorDone
+	if err := s.heartbeatHarness(t.Context(), entry); !errors.Is(err, ErrHarnessArchived) {
+		t.Fatalf("archived registration accepted another heartbeat: %v", err)
+	}
+	api.mu.Lock()
+	defer api.mu.Unlock()
+	if len(api.harnessStops) != 0 || api.harnessBeats != 1 || len(api.reports) != 2 || api.reports[1].Status != "completed" {
+		t.Fatalf("archived registration was reused or cleanup skipped: stops=%v beats=%d reports=%+v", api.harnessStops, api.harnessBeats, api.reports)
+	}
+}
+
+func TestMetadataOverflowRetainsConfirmedEffort(t *testing.T) {
+	api := &fakeAPI{}
+	s := &Supervisor{api: api, generation: "generation"}
+	entry := &owned{record: Record{Generation: s.generation, State: "running"}, harness: HarnessSession{ID: "owned-session"}}
+	s.observe(entry, AdapterEvent{HarnessModel: "model-head"})
+	s.observe(entry, AdapterEvent{HarnessEffort: "high"})
+	for i := range 25 {
+		s.observe(entry, AdapterEvent{HarnessModel: fmt.Sprintf("model-%02d", i)})
+	}
+	if len(entry.metadataPending) != 20 {
+		t.Fatalf("metadata queue grew beyond cap: %d", len(entry.metadataPending))
+	}
+	if err := s.heartbeatHarness(t.Context(), entry); err != nil {
+		t.Fatal(err)
+	}
+	api.mu.Lock()
+	defer api.mu.Unlock()
+	if len(api.harnessBeatSessions) != 21 || api.harnessBeatSessions[0].Model != "model-head" ||
+		api.harnessBeatSessions[1].ReasoningEffort != "high" {
+		t.Fatalf("confirmed effort was lost at queue cap: %+v", api.harnessBeatSessions)
+	}
+	for i := 1; i <= 19; i++ {
+		beat := api.harnessBeatSessions[i]
+		if beat.Model != fmt.Sprintf("model-%02d", i+5) || beat.ActivitySequence != int64(i+1) {
+			t.Fatalf("retained change %d lost order or model: %+v", i, beat)
+		}
+	}
+	last := api.harnessBeatSessions[20]
+	if last.Model != "" || last.ReasoningEffort != "" || last.ActivitySequence != 21 {
+		t.Fatalf("ordinary heartbeat replayed metadata: %+v", last)
+	}
+}
+
+func TestMetadataOverflowDoesNotInventEffort(t *testing.T) {
+	api := &fakeAPI{}
+	s := &Supervisor{api: api, generation: "generation"}
+	entry := &owned{record: Record{Generation: s.generation, State: "running"}, harness: HarnessSession{ID: "owned-session"}}
+	for i := range 25 {
+		s.observe(entry, AdapterEvent{HarnessModel: fmt.Sprintf("model-%02d", i)})
+	}
+	if err := s.heartbeatHarness(t.Context(), entry); err != nil {
+		t.Fatal(err)
+	}
+	api.mu.Lock()
+	defer api.mu.Unlock()
+	if len(api.harnessBeatSessions) != 21 || api.harnessBeatSessions[19].Model != "model-24" {
+		t.Fatalf("latest verified model was lost: %+v", api.harnessBeatSessions)
+	}
+	for _, beat := range api.harnessBeatSessions {
+		if beat.ReasoningEffort != "" {
+			t.Fatalf("missing vendor effort was invented: %+v", beat)
+		}
+	}
+}
