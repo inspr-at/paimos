@@ -1,0 +1,29 @@
+{
+  "schema": "aeon.quote-showcase.v1",
+  "key": "steinwender-metallbau",
+  "name": "Steinwender Metallbau GmbH",
+  "legal_name": "Steinwender Metallbau GmbH",
+  "industry": "Metallverarbeitung",
+  "website": "https://steinwender-metallbau.example",
+  "phone": "+43 7242 000000",
+  "vat_id": "ATU68123457",
+  "register_no": "FN 402915 x",
+  "description": "Fiktives Unternehmen. Vollständig anonymisierte Kopie eines echten Consulting-Angebots zur Veranschaulichung; alle Kundendaten sind erfunden.",
+  "currency": "EUR",
+  "billing_address": {
+    "street": "Industriestraße 14",
+    "postal_code": "4600",
+    "city": "Wels",
+    "country": "Österreich"
+  },
+  "contacts": [
+    {
+      "key": "steinwender-sabine-kofler",
+      "name": "Ing. Sabine Kofler, MSc",
+      "email": "s.kofler@steinwender-metallbau.example",
+      "phone": "+43 7242 000001",
+      "role": "Leitung Finanzen und IT",
+      "primary": true
+    }
+  ]
+}
