@@ -16,7 +16,7 @@ paths:
             schema: {$ref: '#/components/schemas/Send'}
       responses:
         '201': {description: Durable message, content: {application/json: {schema: {$ref: '#/components/schemas/Message'}}}}
-        '409': {description: Idempotency conflict}
+        '409': {description: Idempotency conflict or session ended}
     get:
       operationId: inspectCompatMessages
       description: Person administrator inspection, including held bodies. Never releases or executes an action request.
@@ -29,6 +29,7 @@ paths:
       operationId: listenCompatMessages
       description: Only the authenticated recipient, optionally selecting its own harness address. Pending accepted R2 messages only; at most ten, ordered by event ID. No target references or secrets. Reading and ACK never close reply obligations.
       parameters:
+        - {name: session, in: query, schema: {type: string, format: uuid}, description: 'Active caller session plus unbound principal broadcasts; absent retains the legacy principal inbox and JSON shape'}
         - {name: to, in: query, schema: {type: string}}
         - {name: after, in: query, schema: {type: integer, minimum: 0}}
         - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 10, default: 10}}
@@ -108,6 +109,8 @@ components:
       required: [to, body, idempotency_key]
       properties:
         to: {type: string, description: 'harness:agent or principal UUID'}
+        recipient_session_id: {type: string, format: uuid, description: Exact active generation belonging to the recipient in this project}
+        sender_session_id: {type: string, format: uuid, description: Exact active generation belonging to the authenticated sender in this project}
         body: {type: string, minLength: 1, maxLength: 65536}
         idempotency_key: {type: string, minLength: 1, maxLength: 128, writeOnly: true}
         reply_to: {type: string, format: uuid}
@@ -121,6 +124,9 @@ components:
         id: {type: string, format: uuid}
         sender_principal_id: {type: string, format: uuid}
         recipient_principal_id: {type: string, format: uuid}
+        recipient_session_id: {type: string, format: uuid}
+        sender_session_id: {type: string, format: uuid}
+        sender_label: {type: string, description: Frozen session label or principal name; legacy history falls back to its stored sender address. Omitted from legacy unbound send and listen responses.}
         from: {type: string, description: Sender address at send time}
         to: {type: string}
         body: {type: string}

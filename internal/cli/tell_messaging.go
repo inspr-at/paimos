@@ -18,7 +18,7 @@ import (
 
 // cmdMessagingTell is selected by the coordinator entry point RunMessaging.
 func (rt *runtime) cmdMessagingTell() *Command {
-	var project, message, messageFile, level, reply, thread, key string
+	var project, message, messageFile, level, reply, thread, key, recipientSession, senderSession string
 	var expectsReply, action bool
 	return &Command{Name: "tell", Short: "Send a durable message or inspect its receipt", Use: "tell <harness:agent|principal-uuid> --project KEY -m TEXT | tell status <message-uuid>", minArgs: 1, maxArgs: 1,
 		subs: []*Command{{Name: "status", Short: "Read your message's push receipt", Use: "tell status <message-uuid>", minArgs: 1, maxArgs: 1, run: func(args []string) error {
@@ -40,6 +40,8 @@ func (rt *runtime) cmdMessagingTell() *Command {
 			fs.string(&message, "message", 'm', "message text (required)")
 			fs.string(&messageFile, "message-file", 0, "message text file, or - for stdin")
 			fs.string(&level, "level", 0, "simple or steer")
+			fs.string(&recipientSession, "recipient-session", 0, "exact recipient session UUID")
+			fs.string(&senderSession, "sender-session", 0, "your session UUID for historical attribution")
 			fs.string(&reply, "reply-to", 0, "exact counterpart message UUID")
 			fs.string(&thread, "thread", 0, "conversation thread ID")
 			fs.string(&key, "idempotency-key", 0, "stable retry key (generated if omitted)")
@@ -66,6 +68,9 @@ func (rt *runtime) cmdMessagingTell() *Command {
 			if level != "simple" && level != "steer" {
 				return usagef("--level must be simple or steer")
 			}
+			if (recipientSession != "" && !validUUID(recipientSession)) || (senderSession != "" && !validUUID(senderSession)) {
+				return usagef("session IDs must be UUIDs")
+			}
 			if reply != "" && !validUUID(reply) {
 				return usagef("--reply-to must be a UUID")
 			}
@@ -87,6 +92,12 @@ func (rt *runtime) cmdMessagingTell() *Command {
 				}
 			}
 			req := map[string]any{"to": address, "body": body, "idempotency_key": key, "expects_reply": expectsReply, "is_action_request": action, "delivery_level": level}
+			if recipientSession != "" {
+				req["recipient_session_id"] = recipientSession
+			}
+			if senderSession != "" {
+				req["sender_session_id"] = senderSession
+			}
 			if reply != "" {
 				req["reply_to"] = reply
 			}
@@ -161,10 +172,11 @@ func tellReceiptState(receipt inbox.Receipt) string {
 	}
 }
 func (rt *runtime) cmdMessagingListen() *Command {
-	var as, project, deliver, after, poll string
+	var as, project, deliver, after, poll, sessionID string
 	var follow, ack bool
 	limit := 10
 	return &Command{Name: "listen", Short: "Read your project inbox", Use: "listen --project KEY [--as harness:agent] [--ack]", maxArgs: 0, addFlags: func(fs *flagSet) {
+		fs.string(&sessionID, "session", 0, "read only this session plus principal-wide broadcasts")
 		fs.string(&as, "as", 0, "own harness:agent, name or UUID")
 		fs.string(&project, "project", 'p', "project key (required)")
 		fs.string(&after, "after", 0, "last printed event cursor")
@@ -174,6 +186,12 @@ func (rt *runtime) cmdMessagingListen() *Command {
 		fs.bool(&follow, "follow", 0, "keep polling until interrupted")
 		fs.bool(&ack, "ack", 0, "acknowledge each successfully printed message")
 	}, run: func(args []string) error {
+		if sessionID != "" && !validUUID(sessionID) {
+			return usagef("--session must be a UUID")
+		}
+		if sessionID != "" && deliver != "" {
+			return usagef("--session uses the session inbox; --deliver targets a principal-wide adapter")
+		}
 		if project == "" {
 			return usagef("--project is required")
 		}
@@ -216,6 +234,9 @@ func (rt *runtime) cmdMessagingListen() *Command {
 		cursor := after
 		for {
 			q := url.Values{"limit": {fmt.Sprint(limit)}}
+			if sessionID != "" {
+				q.Set("session", sessionID)
+			}
 			if cursor != "" {
 				q.Set("after", cursor)
 			}

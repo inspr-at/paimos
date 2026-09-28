@@ -9,6 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/inspr-at/paimos/internal/inbox"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
 )
@@ -48,7 +49,7 @@ func (m *Module) drain(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
 	// another generation for the same principal continue independently.
 	var messageID, sender, body string
 	var cursor int64
-	err = tx.QueryRow(ctx, `SELECT m.id::text,m.sender_principal_id::text,m.body,m.sent_event_id FROM inbox_messages m WHERE m.recipient_principal_id=$1 AND m.acked_at IS NULL AND (m.expires_at IS NULL OR m.expires_at>clock_timestamp()) AND NOT EXISTS(SELECT 1 FROM harness_deliveries d WHERE d.message_id=m.id AND d.completed_at IS NULL AND d.released_at IS NULL) ORDER BY m.sent_event_id LIMIT 1 FOR UPDATE OF m SKIP LOCKED`, s.AgentPrincipalID).Scan(&messageID, &sender, &body, &cursor)
+	err = tx.QueryRow(ctx, `SELECT m.id::text,m.sender_principal_id::text,m.body,m.sent_event_id FROM inbox_messages m WHERE m.recipient_principal_id=$1 AND (m.recipient_session_id IS NULL OR m.recipient_session_id=$2::uuid) AND m.acked_at IS NULL AND (m.expires_at IS NULL OR m.expires_at>clock_timestamp()) AND NOT EXISTS(SELECT 1 FROM harness_deliveries d WHERE d.message_id=m.id AND d.completed_at IS NULL AND d.released_at IS NULL) ORDER BY m.sent_event_id LIMIT 1 FOR UPDATE OF m SKIP LOCKED`, s.AgentPrincipalID, s.ID).Scan(&messageID, &sender, &body, &cursor)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return []Delivery{}, nil
 	}
@@ -117,6 +118,9 @@ func (m *Module) completeDelivery(r *http.Request, tx pgx.Tx, p tenant.Principal
 		return nil, workorders.Fail(409, "message already acknowledged elsewhere")
 	}
 	if err != nil {
+		return nil, err
+	}
+	if err = inbox.ConfirmSessionMessage(ctx, tx, p, messageID); err != nil {
 		return nil, err
 	}
 	if err = record(ctx, tx, p, s, "delivery_acknowledged", nil, map[string]any{"message_id": messageID, "cursor": cursor}); err != nil {

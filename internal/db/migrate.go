@@ -7,7 +7,9 @@ import (
 	"embed"
 	"fmt"
 	"io/fs"
+	"regexp"
 	"sort"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -22,7 +24,8 @@ const migrationLock int64 = 780002
 //go:embed migrations/*.sql
 var migrationFiles embed.FS
 
-// migrate applies each unrecorded SQL file in its own transaction.
+// migrate applies each unrecorded SQL file in its own transaction, except
+// explicitly marked single concurrent index builds (see concurrentIndex).
 // A later call skips files already listed in schema_migrations.
 func migrate(ctx context.Context, pool *pgxpool.Pool) error {
 	return MigrateWithHook(ctx, pool, nil)
@@ -167,6 +170,13 @@ func applyFile(ctx context.Context, conn *pgxpool.Conn, name string) error {
 	if len(stmts) == 0 {
 		return fmt.Errorf("migration %s has no statements", name)
 	}
+	index, table, err := concurrentIndex(string(body), stmts)
+	if err != nil {
+		return fmt.Errorf("migration %s: %w", name, err)
+	}
+	if index != "" {
+		return applyConcurrentIndex(ctx, conn, name, stmts[0], index, table)
+	}
 	tx, err := conn.Begin(ctx)
 	if err != nil {
 		return err
@@ -183,6 +193,56 @@ func applyFile(ctx context.Context, conn *pgxpool.Conn, name string) error {
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit %s: %w", name, err)
+	}
+	return nil
+}
+
+// The first-line opt-out is deliberately narrow: exactly one CREATE INDEX
+// CONCURRENTLY with unqualified, lowercase identifiers. It is not a general
+// escape hatch for arbitrary nontransactional migration batches.
+func concurrentIndex(body string, stmts []string) (string, string, error) {
+	first, _, _ := strings.Cut(body, "\n")
+	if strings.TrimSuffix(first, "\r") != "-- aeon:no-transaction" {
+		return "", "", nil
+	}
+	if len(stmts) == 1 {
+		pattern := `^CREATE INDEX CONCURRENTLY ([a-z_][a-z0-9_]*) ON ([a-z_][a-z0-9_]*)\s*\(`
+		if match := regexp.MustCompile(pattern).FindStringSubmatch(stmts[0]); match != nil {
+			return match[1], match[2], nil
+		}
+	}
+	return "", "", fmt.Errorf("no-transaction requires one CREATE INDEX CONCURRENTLY statement")
+}
+
+func applyConcurrentIndex(ctx context.Context, conn *pgxpool.Conn, name, stmt, index, table string) error {
+	// The migration advisory lock remains held on this connection. A crash can
+	// leave either a valid index before recording, or an invalid partial build.
+	// Reuse only a valid index on the expected table; rebuild an invalid one.
+	var valid bool
+	var existingTable string
+	err := conn.QueryRow(ctx, `SELECT i.indisvalid, t.relname
+		FROM pg_index i JOIN pg_class c ON c.oid=i.indexrelid
+		JOIN pg_namespace n ON n.oid=c.relnamespace
+		JOIN pg_class t ON t.oid=i.indrelid
+		WHERE n.nspname=current_schema() AND c.relname=$1`, index).Scan(&valid, &existingTable)
+	if err != nil && err != pgx.ErrNoRows {
+		return fmt.Errorf("inspect %s: %w", name, err)
+	}
+	if err == nil && existingTable != table {
+		return fmt.Errorf("migrate %s: index %s belongs to unexpected table %s", name, index, existingTable)
+	}
+	if err == nil && !valid {
+		if _, err := conn.Exec(ctx, `DROP INDEX CONCURRENTLY `+pgx.Identifier{index}.Sanitize()); err != nil {
+			return fmt.Errorf("retry %s: %w", name, err)
+		}
+	}
+	if !valid {
+		if _, err := conn.Exec(ctx, stmt); err != nil {
+			return fmt.Errorf("migrate %s: %w", name, err)
+		}
+	}
+	if _, err := conn.Exec(ctx, `INSERT INTO schema_migrations (version) VALUES ($1)`, name); err != nil {
+		return fmt.Errorf("record %s: %w", name, err)
 	}
 	return nil
 }

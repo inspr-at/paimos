@@ -31,9 +31,14 @@ func (m *module) listen(w http.ResponseWriter, r *http.Request) {
 		failure(w, err)
 		return
 	}
+	sessionID, err := sessionQuery(r)
+	if err != nil {
+		failure(w, err)
+		return
+	}
 	ctx := r.Context()
 	if waitMS == 0 {
-		page, err := m.page(ctx, p, after, limit)
+		page, err := m.page(ctx, p, after, limit, sessionID)
 		if err != nil {
 			failure(w, err)
 			return
@@ -52,7 +57,7 @@ func (m *module) listen(w http.ResponseWriter, r *http.Request) {
 		failure(w, err)
 		return
 	}
-	page, err := m.page(ctx, p, after, limit)
+	page, err := m.page(ctx, p, after, limit, sessionID)
 	if err != nil {
 		failure(w, err)
 		return
@@ -67,7 +72,7 @@ func (m *module) listen(w http.ResponseWriter, r *http.Request) {
 			failure(w, waitErr)
 			return
 		}
-		page, err = m.page(ctx, p, after, limit)
+		page, err = m.page(ctx, p, after, limit, sessionID)
 		if err != nil {
 			if ctx.Err() != nil {
 				return
@@ -110,8 +115,8 @@ func parseListenQuery(r *http.Request) (after int64, waitMS int, limit int, err 
 	return after, waitMS, limit, nil
 }
 
-func (m *module) page(ctx context.Context, p tenant.Principal, after int64, limit int) (Page, error) {
-	items, err := m.pending(ctx, p, after, limit+1)
+func (m *module) page(ctx context.Context, p tenant.Principal, after int64, limit int, sessions ...*string) (Page, error) {
+	items, err := m.pending(ctx, p, after, limit+1, sessions...)
 	if err != nil {
 		return Page{}, err
 	}
@@ -127,17 +132,25 @@ func (m *module) page(ctx context.Context, p tenant.Principal, after int64, limi
 	return page, nil
 }
 
-func (m *module) pending(ctx context.Context, p tenant.Principal, after int64, limit int) ([]Message, error) {
+func (m *module) pending(ctx context.Context, p tenant.Principal, after int64, limit int, sessions ...*string) ([]Message, error) {
+	var sessionID *string
+	if len(sessions) > 0 {
+		sessionID = sessions[0]
+	}
 	var items []Message
 	err := db.InTenant(tenant.WithPrincipal(ctx, p), m.pool, p.TenantID, func(tx pgx.Tx) error {
+		if _, err := messageSession(ctx, tx, sessionID, p.ID, ""); err != nil {
+			return err
+		}
 		rows, err := tx.Query(ctx, `SELECT `+messageCols+`
 			FROM inbox_messages
 			WHERE recipient_principal_id = $1::uuid
-			  AND sent_event_id > $2
+			  AND (recipient_session_id IS NULL OR recipient_session_id=$4::uuid)
+              AND sent_event_id > $2
 			  AND acked_at IS NULL
 			  AND (expires_at IS NULL OR expires_at > clock_timestamp())
 			ORDER BY sent_event_id
-			LIMIT $3`, p.ID, after, limit)
+			LIMIT $3`, p.ID, after, limit, sessionID)
 		if err != nil {
 			return err
 		}
@@ -146,6 +159,13 @@ func (m *module) pending(ctx context.Context, p tenant.Principal, after int64, l
 			msg, err := scanMessage(rows)
 			if err != nil {
 				return err
+			}
+			if sessionID != nil {
+				msg.SenderLabel = msg.frozenSenderLabel
+			} else {
+				msg.RecipientSessionID = nil
+				msg.SenderSessionID = nil
+				msg.SenderLabel = ""
 			}
 			items = append(items, msg)
 		}

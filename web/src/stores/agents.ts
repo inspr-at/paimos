@@ -290,7 +290,7 @@ export const useAgents = defineStore('agents', () => {
     }
   }
   async function send(session: HarnessSession, to: string, body: string, level: 'simple' | 'steer', replyTo?: string) {
-    await sendMessage(session.project_id, { to, body, idempotency_key: crypto.randomUUID(), expects_reply: false, is_action_request: false, delivery_level: level, ...(replyTo ? { reply_to: replyTo } : {}) })
+    await sendMessage(session.project_id, { to, body, recipient_session_id: session.id, idempotency_key: crypto.randomUUID(), expects_reply: false, is_action_request: false, delivery_level: level, ...(replyTo ? { reply_to: replyTo } : {}) })
     await refreshThread(session.project_id)
   }
   async function setAccount(account: AgentAccount, state: AgentAccount['state']) {
