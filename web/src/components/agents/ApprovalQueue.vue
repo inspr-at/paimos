@@ -316,7 +316,8 @@ defineExpose({ begin, cancel, isOpen: () => !!open.value })
   .card-head { padding: 12px 14px 10px; }
   .item { grid-template-columns: 30px minmax(0, 1fr); padding: 12px 10px; }
   .row-actions { grid-column: 2; justify-self: start; }
-  .row-actions .btn { height: 40px; padding: 0 12px; }
+  .row-actions { flex-wrap: nowrap; gap: 4px; }
+  .row-actions .btn { height: 40px; padding: 0 10px; }
   .decision-actions .hint { display: none; }
   .decision-actions .btn { height: 40px; }
   .res-title { max-width: 100%; }

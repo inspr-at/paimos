@@ -240,7 +240,7 @@ function assign(error: unknown, fallback: string) {
       </article>
     </div>
     <p v-if="message && state !== 'error'" class="problem" role="alert">{{ message }}</p>
-    <p v-if="nextStep">{{ nextStep }}</p>
+    <p v-if="nextStep" class="next-step">{{ nextStep }}</p>
 
     <dialog ref="dialog" class="disconnect" aria-labelledby="disconnect-title" @cancel.prevent="closeDialog" @click="(event) => { if (event.target === dialog) closeDialog() }">
       <div v-if="confirm && revokeCopy && pending" class="panel">
@@ -275,6 +275,7 @@ function assign(error: unknown, fallback: string) {
 .muted { padding: 0 10px 10px; color: var(--ink-2); font-size: 13px; }
 .meta, .fine { color: var(--ink-2); font-size: 13px; }
 .problem { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 8px 10px; color: var(--danger); }
+.next-step { padding: 0 10px 8px; color: var(--ink-2); font-size: 13px; }
 .sheet, .computer { display: grid; grid-template-columns: minmax(160px, 1.8fr) minmax(110px, 1fr) minmax(96px, .8fr) minmax(72px, .6fr) auto; gap: 6px 14px; align-items: center; }
 .sheet span:nth-child(4), .last-active { min-width: 0; }
 @container computers (max-width: 760px) {
