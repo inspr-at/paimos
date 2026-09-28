@@ -45,7 +45,22 @@ func (rt *runtime) harnessSecret(path, label string) (string, error) {
 		if !stat.Mode().IsRegular() || stat.Mode().Perm()&0o077 != 0 || stat.Size() > 8192 {
 			return "", usagef("--%s must be a private regular file", label)
 		}
-		raw, err = os.ReadFile(path)
+		// Bound the descriptor read too: the file can change after Lstat.
+		f, openErr := os.Open(path)
+		if openErr != nil {
+			return "", openErr
+		}
+		opened, statErr := f.Stat()
+		if statErr != nil || !os.SameFile(stat, opened) || !opened.Mode().IsRegular() || opened.Mode().Perm()&0o077 != 0 {
+			f.Close()
+			return "", usagef("--%s changed while opening", label)
+		}
+		raw, err = io.ReadAll(io.LimitReader(f, 8193))
+		f.Close()
+		after, statErr := os.Lstat(path)
+		if statErr != nil || !os.SameFile(opened, after) || !after.Mode().IsRegular() || after.Mode().Perm()&0o077 != 0 {
+			return "", usagef("--%s changed while reading", label)
+		}
 	}
 	if err != nil {
 		return "", err

@@ -172,6 +172,50 @@ Preview output includes the exact body hash/version/size as
 an existing session's provenance; `provenance_recorded` and
 `execution_verified` remain false. Preview never submits a receipt.
 
+`paimos session start --rules-receive` is a separate, explicit receiving mode.
+Use the same exact rules selectors, cache and independently pinned floor as
+preview, plus `--session` with an **already registered public generation UUID**,
+`--worker-lease-file`, a lowercase `--rules-request-id UUID`, an explicit
+`--rules-expected-revision N` (receipt revision, initially `0`), a new
+`--rules-state attempt.json` and a new `--rules-out received.txt`. Register first
+with the existing `paimos harness register` flow; receiving never mints or switches
+identities. Online receiving also uses the existing `account.manage` (`/api/me`),
+`rules.read`, `harness.read` and `harness.worker` permissions; it grants none.
+The lease stays in the trusted client and is never printed or saved in state.
+
+Receiving writes the renderer's exact bytes as a private `.txt`, then explicitly
+POSTs only context/hash/version/size/source and request/CAS metadata to the distinct
+receipt endpoint. It never modifies active instructions or instruction provenance,
+and proves neither model loading, execution, obedience nor authority. Online
+floor changes (including additions), expiry, context/hash mismatches and HTTP
+401/403/404 fail closed. Only network unavailability permits the existing exact
+cache/independent-floor fallback: JSON reports `source: cache` or `floor-only`,
+`stale: true`, a `gap`, `receipt_recorded: false`, and `complete: false`. This local
+fallback exits successfully to make the retained bytes available; it is not a
+completed online receipt and cannot be replayed as one later.
+
+The immutable private checkpoint is saved before output/POST. After a partial
+failure or lost response, rerun **the identical command with `--rules-retry`**.
+Retry verifies the checkpoint, original context/instance/session/request/revision,
+current online read authorization and floor, original expiry, and exact existing
+output. It can create a missing output but never replace an existing one. It
+resubmits the original online metadata; the server returns the original receipt
+for an identical request ID, even if newer receipts/publications exist. No queue,
+background replay, automatic CAS adjustment or registration is performed.
+Keep the checkpoint and output until the result is resolved; local digests detect
+corruption and are not signatures against an attacker able to rewrite local state.
+
+The API verifies the lease only at POST, so rejection can leave bytes on disk.
+Receipt failure exits nonzero with `receipt_status: rejected` (HTTP 4xx) or
+`unconfirmed` (lost/invalid reply), `receipt_recorded: false`, and `complete: false`.
+An unconfirmed result may already exist on the server. A successful explicit retry
+confirms it without rewriting output. A 409 with a genuinely competing request,
+changed floor, expired original rules, revoked access, or stopped/archived generation
+requires operator inspection of receipt history; this CLI never changes the saved
+CAS or switches generations to make it pass. A new attempt requires fresh request
+ID/state/output and the explicitly inspected current receipt revision. Provisioning
+a reviewed floor and registering the public generation remain operator prerequisites.
+
 An explicit `POST /api/projects/{projectId}/harness-sessions/{sessionId}/rules-receipts`
 records a separate worker report; `GET` on that path reads its append-only history.
 Writes require `harness.worker`, the owning session agent and exact generation
@@ -196,7 +240,7 @@ Harness generation leases have no time-based expiry; heartbeat age is not proof
 of closure. History remains readable after closure, newest 32 first, with
 `before_revision` pagination. Recording requires a live API connection; cache
 and floor-only reports remain stale fallback evidence, never fresh authority.
-There is no automatic submission, offline queue or new CLI recording flag.
+There is no automatic submission or offline queue; the receiving mode above is explicit.
 Migration 0897 uses a distinct immutable table because event visibility can hide
 harness history from project readers; the audit event is transactional, not the
 CAS source of truth. No company rules are seeded or published.
