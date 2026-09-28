@@ -35,6 +35,7 @@ function backdrop(event: MouseEvent) { if (event.target === dialog.value) close(
         <button type="button" class="icon-btn sm flat" :aria-label="`Close ${title.toLowerCase()}`" data-tip="Close · Esc" :disabled="busy" @click="close"><AppIcon name="close" :size="16" /></button>
       </header>
       <div class="body"><slot /></div>
+      <div v-if="$slots.pinned" class="pinned"><slot name="pinned" /></div>
       <footer v-if="$slots.footer" class="foot"><slot name="footer" /></footer>
     </div>
   </dialog>
@@ -54,6 +55,7 @@ function backdrop(event: MouseEvent) { if (event.target === dialog.value) close(
 .head h2 { margin: 0; font-size: 17px; font-weight: 650; letter-spacing: -.01em; }
 .lede { margin: 4px 0 0; color: var(--ink-2); font-size: 13px; line-height: 1.45; }
 .body { flex: 1; min-height: 0; overflow: auto; padding: 4px 20px 16px; display: flex; flex-direction: column; gap: 14px; overscroll-behavior: contain; }
+.pinned { display: flex; flex-direction: column; gap: 10px; padding: 12px 20px 4px; border-top: 1px solid var(--line); }
 .foot :deep(.btn:disabled) { opacity: .5; filter: saturate(.3); box-shadow: none; cursor: not-allowed; }
 .foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; padding: 12px 20px 16px; border-top: 1px solid var(--line); background: var(--surface); }
 @media (max-width: 600px) {
@@ -62,6 +64,7 @@ function backdrop(event: MouseEvent) { if (event.target === dialog.value) close(
   .size-side .card { border-radius: 0; }
   .head { padding: 16px 16px 10px; }
   .body { padding: 4px 16px 14px; }
+  .pinned { padding: 10px 16px 2px; }
   .foot { padding: 10px 16px calc(12px + env(safe-area-inset-bottom)); }
 }
 @media (prefers-reduced-motion: no-preference) {

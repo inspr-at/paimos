@@ -60,11 +60,13 @@ const KIND = { added: 'Added', changed: 'Changed', removed: 'Removed' } as const
 
     <p v-if="over" class="error" role="alert"><BizIcon name="alert" :size="14" /><span>The session file would be {{ fmt(budget!.bytes) }} bytes, {{ fmt(budget!.bytes - RULES_BUDGET) }} over the {{ fmt(RULES_BUDGET) }}-byte budget. Shorten rule text or move explanations into details.</span></p>
 
-    <label class="note">Note <span class="opt">optional, kept with every published version</span>
-      <textarea v-model="note" class="field" rows="2" maxlength="500" placeholder="Why this goes live now"></textarea>
-    </label>
-    <p v-if="noteTooLong" class="error" role="alert">A note can be at most 500 bytes.</p>
-    <p v-if="error" class="error" role="alert"><BizIcon name="alert" :size="14" /><span>{{ error }}</span></p>
+    <template #pinned>
+      <label class="note"><span>Note <span class="opt">· optional, kept with every published version</span></span>
+        <textarea v-model="note" class="field" rows="2" maxlength="500" placeholder="Why this goes live now"></textarea>
+      </label>
+      <p v-if="noteTooLong" class="error" role="alert">A note can be at most 500 bytes.</p>
+      <p v-if="error" class="error" role="alert"><BizIcon name="alert" :size="14" /><span>{{ error }}</span></p>
+    </template>
 
     <template #footer>
       <div v-if="budget" class="budget" :class="{ over }" :data-tip="`Largest session file after publishing: ${budget.project}, ${ROLE_LABEL[budget.role]}, ${HARNESS_LABEL[budget.harness]}`">

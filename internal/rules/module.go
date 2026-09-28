@@ -89,6 +89,9 @@ func (m *Module) endpoint(permission string, fn endpoint) http.HandlerFunc {
 				if _, err = tx.Exec(r.Context(), `SELECT pg_advisory_xact_lock(hashtextextended(current_setting('aeon.tenant_id',true),0)),set_config('aeon.rules_write','on',true)`); err != nil {
 					return err
 				}
+				if err = lockAccess(r.Context(), tx, p.TenantID); err != nil {
+					return err
+				}
 				if err = ensureKinds(r.Context(), tx, p); err != nil {
 					return err
 				}
@@ -102,6 +105,17 @@ func (m *Module) endpoint(permission string, fn endpoint) http.HandlerFunc {
 		}
 		httpapi.WriteJSON(w, 200, out)
 	}
+}
+
+// lockAccess takes the tenant row lock that every access change takes (role,
+// binding, member and invite mutations in internal/authz) and holds it until
+// commit. Every permission decision of a rules write is made after it, so a
+// concurrent demotion either commits first and is seen, or waits for this
+// write. Order: the tenant advisory lock first, then the row, the same order as
+// authz.lockProjectMutation, so the two never deadlock.
+func lockAccess(ctx context.Context, tx pgx.Tx, tenantID string) error {
+	var id string
+	return tx.QueryRow(ctx, `SELECT id::text FROM tenants WHERE id=$1::uuid FOR UPDATE`, tenantID).Scan(&id)
 }
 func writeFailure(w http.ResponseWriter, err error) {
 	var e *Error

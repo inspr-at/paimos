@@ -85,6 +85,8 @@ test('review and publish is one confirmation for every waiting set', async ({ pa
   await expect(dialog.getByRole('list', { name: 'Sets to publish' }).locator('> li')).toHaveCount(12)
   await expect(dialog.getByText('1 added')).toBeVisible()
   await expect(dialog.getByText(/of 12,000 bytes/)).toBeVisible()
+  // The note sits above the footer, fully in view without scrolling the list.
+  await expect(dialog.getByRole('textbox', { name: /Note/ })).toBeInViewport({ ratio: 1 })
   await dialog.getByRole('textbox', { name: /Note/ }).fill('Adopt INSPR doctrine 0.14 for Aeon.')
   await dialog.getByRole('button', { name: 'Publish 12 sets' }).click()
   await expect(dialog).toHaveCount(0)
@@ -159,6 +161,7 @@ test('phone width has no horizontal scroll, with rules, the editor and the dialo
   await page.getByRole('button', { name: 'Review and publish (12 sets)' }).click()
   const dialog = page.getByRole('dialog', { name: 'Review and publish' })
   await expect(dialog.getByRole('button', { name: 'Publish 12 sets' })).toBeInViewport()
+  await expect(dialog.getByRole('textbox', { name: /Note/ })).toBeInViewport({ ratio: 1 })
   expect(await noHorizontalScroll(page)).toBe(true)
   const width = await dialog.evaluate(el => el.getBoundingClientRect().width)
   expect(width).toBeLessThanOrEqual(390)
