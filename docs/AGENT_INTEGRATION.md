@@ -122,3 +122,40 @@ German is neutral without direct address. Hidden tickets still require benefits.
 The proposal in `proposals/ticket-benefit-writing.json` is compatible with AR1's
 rule draft shape and is not a published company rule. See `RELEASE.md` for the
 exact membership source, snapshot capture and offline release-history behavior.
+
+
+## Read-only attached watches (AEON-258)
+
+The paired daemon uses only `POST /api/agent-pairing/attach` for requests,
+activation, polls and detachment. It requires the existing runtime key plus the
+computer lifecycle proof, kept inside agentd. The pairing fence permits exactly
+this additional route. The nine-digit code identifies a ten-minute request;
+owner lookup accepts at most ten attempts per tenant in ten minutes. Codes and
+proofs never go in URLs.
+
+The original pairing owner reviews the immutable host, harness, kernel process
+identity, physical cwd, transcript inode, project and ticket snapshot at the
+paired origin. Approval binds its digest; activation and each poll recheck the
+snapshot, owner delegation, pairing and project/ticket binding. The paired
+workspace is the explicit tenant/computer cwd allowlist. Outside paths fail.
+A one-minute lease cannot be renewed after expiry; a fresh attach needs fresh
+approval. Detached or unreachable means the watch ended, not that the process
+exited. Attached sessions are unmanaged and receive no inbox or controls.
+
+`harness.watch` is person-only, project-grantable and excluded from every
+built-in role. A workspace owner can explicitly add it to a custom role and
+assign that role; this does not itself give the owner conversation access.
+The owner consents to the audience of people explicitly granted this permission
+in the named project. No earlier turns are uploaded. The SSE watch endpoint
+has no replay and keeps only a bounded in-flight delivery per connected viewer;
+slow readers disconnect. Every delivery and idle second rechecks the permission
+and lease. Conversation bytes never enter events, heartbeat metadata or a
+server-side journal. The relay is process-local: multi-server deployments need
+sticky routing for live delivery (there is deliberately no durable broker).
+
+The mirror is agent-written, unverified text. Redaction cannot identify every
+form of confidential prose: owners must refuse mixed-trust-context sessions.
+Same-user hostile code is outside the current isolation boundary; file modes,
+local peer checks and owner prompts do not supply OS isolation. Installer
+signature verification and OS isolation remain separate rollout work under
+AEON-257; this implementation does not claim either.

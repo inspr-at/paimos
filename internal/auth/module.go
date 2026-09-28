@@ -428,6 +428,9 @@ func coreAgentScope(r *http.Request) (string, bool) {
 	case "harness-sessions":
 		return harnessScope(parts[1:], read), true
 	case "agent-pairing":
+		if r.Method == "POST" && r.URL.Path == "/api/agent-pairing/attach" {
+			return "harness.worker", true
+		}
 		if r.Method == "GET" && r.URL.Path == "/api/agent-pairing/self" || r.Method == "POST" && r.URL.Path == "/api/agent-pairing/self/disconnect" {
 			return "run.claim", true
 		}

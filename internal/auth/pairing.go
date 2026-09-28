@@ -39,6 +39,9 @@ func (m *Module) pairingBoundary(r *http.Request, p tenant.Principal) error {
 				return nil
 			}
 		case "agent-pairing":
+			if r.Method == "POST" && r.URL.Path == "/api/agent-pairing/attach" {
+				return nil
+			}
 			if r.URL.Path == "/api/agent-pairing/self" && r.Method == "GET" || r.URL.Path == "/api/agent-pairing/self/disconnect" && r.Method == "POST" {
 				return nil
 			}

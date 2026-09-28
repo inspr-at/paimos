@@ -29,6 +29,7 @@ type Module struct {
 	origin, defaultTenant string
 	mu                    sync.Mutex
 	clients               map[string]rate
+	watch                 watchRelay
 }
 type rate struct {
 	start time.Time
@@ -43,6 +44,7 @@ func New(pool *pgxpool.Pool, publicURL, defaultTenant string) *Module {
 	return &Module{pool: pool, origin: origin, defaultTenant: defaultTenant, clients: map[string]rate{}}
 }
 func (m *Module) Mount(mux *http.ServeMux) {
+	m.mountWatch(mux)
 	mux.HandleFunc("GET /api/agent-pairing/guide", m.guide)
 	mux.HandleFunc("POST /api/agent-pairing/device", m.device)
 	mux.HandleFunc("POST /api/agent-pairing/redeem", m.redeem)
