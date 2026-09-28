@@ -217,6 +217,14 @@ func (m *Module) attachDevice(w http.ResponseWriter, r *http.Request) {
 			out.SessionID = &sid
 			out.State = "active"
 		} else {
+			var bound bool
+			if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM harness_sessions WHERE id=$1 AND project_id=$2 AND ticket_node_id=$3 AND agent_principal_id=$4 AND harness=$5 AND host=$6 AND stopped_at IS NULL AND archived_at IS NULL)`, *out.SessionID, out.Snapshot.ProjectID, out.Snapshot.TicketID, p.ID, out.Snapshot.Harness, host).Scan(&bound); err != nil {
+				return err
+			}
+			if !bound {
+				rejected = fail(410, "attach_ended", "session binding changed or ended")
+				return attachEnd(ctx, tx, &out, "detached")
+			}
 			var previous int64
 			var ready bool
 			if err = tx.QueryRow(ctx, `SELECT sequence,last_poll<=clock_timestamp()-interval '1 second' FROM harness_attach_requests WHERE id=$1`, out.RequestID).Scan(&previous, &ready); err != nil {
@@ -232,6 +240,9 @@ func (m *Module) attachDevice(w http.ResponseWriter, r *http.Request) {
 		}
 		if in.Sequence < 1 {
 			return fail(400, "invalid_request", "poll sequence required")
+		}
+		if _, err = tx.Exec(ctx, `UPDATE harness_sessions SET heartbeat_at=clock_timestamp() WHERE id=$1`, *out.SessionID); err != nil {
+			return err
 		}
 		return tx.QueryRow(ctx, `UPDATE harness_attach_requests SET state='active',session_id=$2,sequence=$3,last_poll=clock_timestamp(),lease_until=clock_timestamp()+interval '60 seconds' WHERE id=$1 RETURNING lease_until`, out.RequestID, *out.SessionID, in.Sequence).Scan(&out.LeaseUntil)
 	})

@@ -52,7 +52,7 @@ func makeRegistry() []Permission {
 			if action == "read" || strings.HasSuffix(action, "_read") || action == "resolve" {
 				risk = "low"
 			}
-			if action == "publish" || action == "delete" || action == "deploy" || action == "apply" || action == "decide" || action == "decide_high" || action == "manage" || action == "issue" || action == "approve" || action == "undo" || action == "undo_other" || action == "control" || action == "configure" || action == "revoke" || action == "recover" || action == "force_stop" {
+			if action == "watch" || action == "publish" || action == "delete" || action == "deploy" || action == "apply" || action == "decide" || action == "decide_high" || action == "manage" || action == "issue" || action == "approve" || action == "undo" || action == "undo_other" || action == "control" || action == "configure" || action == "revoke" || action == "recover" || action == "force_stop" {
 				risk = "high"
 			}
 			at := []string{"workspace", "project"}

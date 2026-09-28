@@ -159,3 +159,29 @@ Same-user hostile code is outside the current isolation boundary; file modes,
 local peer checks and owner prompts do not supply OS isolation. Installer
 signature verification and OS isolation remain separate rollout work under
 AEON-257; this implementation does not claim either.
+
+Run from a separate owner terminal, with the paired daemon running:
+
+```sh
+aeon-agentd attach --setup-root /absolute/setup-root --pid 1234 --harness codex \
+  --project-id PROJECT_UUID --ticket-id TICKET_UUID --transcript /physical/session.jsonl
+```
+
+The local helper reads consent from its controlling terminal, never stdin or a
+flag. Type `WATCH`, then open the paired instance's Agents page and choose
+**Attach session**. Review the code and snapshot, then approve. Keep the terminal
+open; Ctrl-C detaches without signalling the harness. Missing helper polls,
+identity changes, replaced/truncated transcripts, network errors or revocation
+close the watch; reconnection requires a new approval. The kernel executable
+must match the enrolled harness path. Arbitrary interpreter wrappers are not
+accepted. macOS and Linux have kernel identity adapters; other platforms fail
+closed. The helper cannot supply a different server origin or device proof.
+
+The tailer opens each path component without following links and pins an
+owner-owned regular inode with one hard link. It starts at activation-time EOF,
+bounds reads and records, and never rewinds. Plain lines and recognized
+Claude/Codex JSONL text records are supported; unknown structured/tool records
+are dropped. JSON escapes are decoded before redacting secret patterns,
+environment assignments and private-key blocks. Control/format characters are
+rejected. The browser displays text only and clears it on disconnect, permission
+change, hidden tab or navigation; it never reconnects automatically.

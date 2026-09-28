@@ -95,7 +95,8 @@ func servePaired(root string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	state := filepath.Join(root, "daemon")
-	s, err := agentd.NewSupervisor(ctx, agentd.Config{API: agentd.NewRemote(c.Origin, string(key)), StateRoot: state, DaemonID: c.DaemonID, Workspace: c.Workspace, Accounts: accounts, Adapters: adapters, EstimatedUnits: map[string]int64{"requests": 1}})
+	remote := agentd.NewRemote(c.Origin, string(key))
+	s, err := agentd.NewSupervisor(ctx, agentd.Config{API: remote, StateRoot: state, DaemonID: c.DaemonID, Workspace: c.Workspace, Accounts: accounts, Adapters: adapters, EstimatedUnits: map[string]int64{"requests": 1}})
 	if err != nil {
 		return err
 	}
@@ -105,7 +106,16 @@ func servePaired(root string) error {
 	}
 	// Generation-specific sockets avoid unlinking or adopting stale listeners.
 	name := "agentd-" + s.Generation() + ".sock"
-	local, err := agentd.ServeLocal(s, filepath.Join(state, name))
+	watches, err := pairedAttach(root, c, remote)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		op, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		watches.Close(op)
+	}()
+	local, err := agentd.ServeLocal(s, filepath.Join(state, name), watches)
 	if err != nil {
 		return err
 	}
@@ -133,6 +143,7 @@ func servePaired(root string) error {
 			}
 		}
 		op, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		watches.Sweep(op)
 		if !stopping {
 			// Lifecycle reconciliation is required before every fresh dispatch;
 			// the independent tombstone proof still works after key revocation.

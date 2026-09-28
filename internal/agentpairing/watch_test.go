@@ -247,3 +247,21 @@ func TestAttachLiveStreamRevokesAndNeverStoresText(t *testing.T) {
 	}
 	next("event: end")
 }
+
+func TestAttachCannotRenewChangedSession(t *testing.T) {
+	for _, change := range []string{"archived_at=clock_timestamp(),phase='stopped',stopped_at=clock_timestamp(),recovery_process_state='unknown',recovery_request_id=gen_random_uuid(),recovery_request_digest='fixture',recovery_actor_id=(SELECT owner_id FROM harness_attach_requests WHERE session_id=harness_sessions.id),recovery_reason='fixture'", "phase='stopped',stopped_at=clock_timestamp()", "ticket_node_id=NULL,work_shape='unknown'"} {
+		t.Run(change, func(t *testing.T) {
+			f, key, in := watchFixture(t)
+			v := activateWatch(t, f, key, &in)
+			if _, err := f.db.Admin.Exec(t.Context(), "UPDATE harness_sessions SET "+change+" WHERE id=$1", *v.SessionID); err != nil {
+				t.Fatal(err)
+			}
+			in.Sequence++
+			f.call("POST", "/api/agent-pairing/attach", in, false, key, 410)
+			var state string
+			if err := f.db.Admin.QueryRow(t.Context(), "SELECT state FROM harness_attach_requests WHERE id=$1", in.RequestID).Scan(&state); err != nil || state != "detached" {
+				t.Fatal("changed session retained approval")
+			}
+		})
+	}
+}

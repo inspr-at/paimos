@@ -42,7 +42,7 @@ func (s Snapshot) Digest() string {
 	return hex.EncodeToString(h[:])
 }
 func Text(s string, max int) bool {
-	return s != "" && len(s) <= max && utf8.ValidString(s) && !strings.ContainsFunc(s, unicode.IsControl)
+	return s != "" && len(s) <= max && utf8.ValidString(s) && !strings.ContainsFunc(s, func(r rune) bool { return unicode.IsControl(r) || unicode.In(r, unicode.Cf) })
 }
 func PhysicalPath(s string) bool {
 	return Text(s, 1024) && path.IsAbs(s) && path.Clean(s) == s && s != "/"
