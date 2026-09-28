@@ -171,7 +171,7 @@ paths:
   /rules/sets/{setId}/publish:
     post:
       operationId: "publishRuleSet"
-      description: "rules.publish; person only; company requires workspace publisher; exact replay returns original snapshot"
+      description: "rules.publish; person only; company requires workspace publisher; exact replay of the same version and note returns the original snapshot"
       responses:
         "200":
           description: "Authorized rule resource"
@@ -202,7 +202,7 @@ paths:
   /rules/sets/{setId}/restore:
     post:
       operationId: "restoreRuleSet"
-      description: "rules.publish; person only; publishes previous rules at a NEW version"
+      description: "rules.publish; person only; publishes previous rules at a NEW version; optional note applies only to that new version"
       responses:
         "200":
           description: "Authorized rule resource"
@@ -4406,6 +4406,10 @@ components:
         published_at:
           type: "string"
           format: "date-time"
+        note:
+          type: "string"
+          maxLength: 500
+          description: "Optional publish note. Absent when empty. A non-empty note is part of the immutable snapshot and its sha256; an empty or omitted note does not change the digest of a snapshot that has no note."
       required: ["set_id", "scope", "name", "revision", "version", "sha256", "rules", "published_at"]
     RuleDraft:
       type: "object"
@@ -4434,6 +4438,10 @@ components:
           type: "string"
           pattern: "^[1-9][0-9]{11}\\.0\\.0$"
           description: "inspr-calendar-v2; valid Gregorian UTC coordinate, immutable within set"
+        note:
+          type: "string"
+          maxLength: 500
+          description: "Optional note stored on the new immutable snapshot. Empty or omitted stores no note."
       required: ["expected_revision", "version"]
     RuleRestore:
       type: "object"
@@ -4450,6 +4458,10 @@ components:
           type: "string"
           pattern: "^[1-9][0-9]{11}\\.0\\.0$"
           description: "inspr-calendar-v2; valid Gregorian UTC coordinate, immutable within set"
+        note:
+          type: "string"
+          maxLength: 500
+          description: "Optional note for the new version only. It does not rewrite the source version's note."
       required: ["expected_revision", "version", "new_version"]
     RuleContext:
       type: "object"

@@ -105,8 +105,10 @@ func Merge(c Context, snapshots []Snapshot, now time.Time) (Merged, error) {
 	return out, nil
 }
 
-// SnapshotDigest excludes the digest itself and publication timestamp; a retry
-// with the same version and revision resolves to the original stored snapshot.
+// SnapshotDigest excludes the digest itself and publication timestamp. An empty
+// note is omitted, so a snapshot stored before notes existed keeps its digest.
+// A non-empty note is part of the immutable bytes. A retry with the same
+// version, revision and note resolves to the original stored snapshot.
 func SnapshotDigest(s Snapshot) string {
 	s.SHA256 = ""
 	s.PublishedAt = time.Time{}

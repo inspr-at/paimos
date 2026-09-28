@@ -74,6 +74,8 @@ type Snapshot struct {
 	SHA256      string    `json:"sha256"`
 	Rules       []Rule    `json:"rules"`
 	PublishedAt time.Time `json:"published_at"`
+	// Note is omitted when empty so historical snapshots keep their digest.
+	Note string `json:"note,omitempty"`
 }
 type Context struct {
 	TenantID  string `json:"tenant_id"`
@@ -195,6 +197,29 @@ func validateName(s string) error {
 		return fail(400, "invalid_rule", "set name must be one line, 1..128 UTF-8 bytes")
 	}
 	return nil
+}
+
+const maxPublishNote = 500
+
+// normalizeNote trims an optional publish note. Empty stays empty so it is
+// omitted from the snapshot and does not change an existing digest.
+func normalizeNote(s string) (string, error) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return "", nil
+	}
+	if !utf8.ValidString(s) || len(s) > maxPublishNote {
+		return "", fail(400, "invalid_rule", "publish note must be at most 500 UTF-8 bytes")
+	}
+	for _, r := range s {
+		if r == '\n' || r == '\t' {
+			continue
+		}
+		if unicode.IsControl(r) || r == '\u2028' || r == '\u2029' {
+			return "", fail(400, "invalid_rule", "publish note must be plain text")
+		}
+	}
+	return s, nil
 }
 func (s Scope) rank() int {
 	switch s.Layer {

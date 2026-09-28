@@ -99,7 +99,8 @@ export async function mockRules(page: Page, options: { kind?: 'person' | 'agent'
     const publish = /^\/api\/rules\/sets\/([^/]+)\/publish$/.exec(path)
     if (publish && method === 'POST') {
       state.revision += 1
-      const snapshot = { set_id: publish[1], scope: { layer: 'company' }, name: state.companyName, revision: state.revision, version: body.version, sha256: 'cd'.repeat(32), rules: sets()[publish[1]]?.rules ?? [], published_at: '2026-09-28T11:00:00Z' }
+      const note = typeof body.note === 'string' ? body.note.trim() : ''
+      const snapshot = { set_id: publish[1], scope: { layer: 'company' }, name: state.companyName, revision: state.revision, version: body.version, sha256: 'cd'.repeat(32), rules: sets()[publish[1]]?.rules ?? [], published_at: '2026-09-28T11:00:00Z', ...(note ? { note } : {}) }
       versions.unshift(snapshot)
       if (publish[1] === COMPANY_SET) state.published = body.version
       return route.fulfill({ json: snapshot })
@@ -108,7 +109,9 @@ export async function mockRules(page: Page, options: { kind?: 'person' | 'agent'
     if (restore && method === 'POST') {
       state.revision += 1
       const prior = versions.find(version => version.version === body.version)
-      const snapshot = { set_id: restore[1], scope: { layer: 'company' }, name: prior?.name ?? 'Secrets', revision: state.revision, version: body.new_version, sha256: 'ef'.repeat(32), rules: prior?.rules ?? [], published_at: '2026-09-28T11:05:00Z' }
+      const note = typeof body.note === 'string' ? body.note.trim() : ''
+      const snapshot = { set_id: restore[1], scope: { layer: 'company' }, name: prior?.name ?? 'Secrets', revision: state.revision, version: body.new_version, sha256: 'ef'.repeat(32), rules: prior?.rules ?? [], published_at: '2026-09-28T11:05:00Z', ...(note ? { note } : {}) }
+      versions.unshift(snapshot)
       if (restore[1] === COMPANY_SET) { state.companyRules = snapshot.rules.map(item => ({ ...item })); state.published = body.new_version }
       return route.fulfill({ json: snapshot })
     }
