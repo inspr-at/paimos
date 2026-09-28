@@ -16,11 +16,10 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/client"
-	"github.com/inspr-at/paimos/internal/harness"
 	"github.com/inspr-at/paimos/internal/rules"
 )
 
-func TestRulesRendererAndExactProvenance(t *testing.T) {
+func TestRulesRendererPreservesExactBytes(t *testing.T) {
 	body := "# Aeon session rules\n\n- [safety] Preserve safety.\n"
 	sum := sha256.Sum256([]byte(body))
 	hash := hex.EncodeToString(sum[:])
@@ -30,15 +29,11 @@ func TestRulesRendererAndExactProvenance(t *testing.T) {
 		if err != nil || r.Body != body || r.Rev != hash {
 			t.Fatal("renderer changed exact bytes", err)
 		}
-		item := rulesProvenance(m)
-		if *item.ContentSHA256 != hash || *item.ByteSize != int64(len(body)) || *item.Version != m.Version || item.HashKind != "content" {
-			t.Fatal("provenance does not match output")
-		}
 		want := "AGENTS.md"
 		if h == "claude-code" {
 			want = "CLAUDE.md"
 		}
-		if item.LogicalName != want || r.SuggestedPath != want {
+		if r.SuggestedPath != want {
 			t.Fatal("harness mismatch")
 		}
 	}
@@ -75,26 +70,16 @@ func TestRulesPreviewOnlineOfflineAndRefusedCache(t *testing.T) {
 		t.Fatal(err)
 	}
 	floorHash := sha256.Sum256([]byte(m.Floor))
-	receipts := make(chan []harness.ProvenanceItem, 1)
+	writes := make(chan string, 8)
 	status := 200
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-
-		if r.URL.Path == "/api/me" {
-			json.NewEncoder(w).Encode(map[string]any{"principal": map[string]string{"id": c.AgentID, "name": "worker"}})
+		if r.Method != http.MethodGet {
+			writes <- r.Method + " " + r.URL.Path
+			w.WriteHeader(http.StatusMethodNotAllowed)
 			return
 		}
-		if strings.HasSuffix(r.URL.Path, "/provenance") {
-			if r.Method != "POST" || r.Header.Get("X-Aeon-Worker-Lease") != "fixture-worker-lease-0000000000000000001" {
-				t.Error("wrong provenance transport")
-			}
-			var body struct {
-				Items []harness.ProvenanceItem `json:"items"`
-			}
-			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-				t.Error(err)
-			}
-			receipts <- body.Items
-			json.NewEncoder(w).Encode(map[string]bool{"replayed": false})
+		if r.URL.Path == "/api/me" {
+			json.NewEncoder(w).Encode(map[string]any{"principal": map[string]string{"id": c.AgentID, "name": "worker"}})
 			return
 		}
 		if r.URL.Path != "/api/rules/merged" {
@@ -119,28 +104,36 @@ func TestRulesPreviewOnlineOfflineAndRefusedCache(t *testing.T) {
 	if code != 0 {
 		t.Fatal(stderr)
 	}
-	if !strings.Contains(out, `"stale":false`) || !strings.Contains(out, `"execution_verified":false`) {
+	if !strings.Contains(out, `"stale":false`) || !strings.Contains(out, `"execution_verified":false`) || !strings.Contains(out, `"provenance_recorded":false`) || strings.Contains(out, `"provenance_items"`) {
 		t.Fatal(out)
+	}
+	var preview struct {
+		Proposed struct {
+			BodySHA256 string `json:"body_sha256"`
+			Version    string `json:"version"`
+			ByteSize   int    `json:"byte_size"`
+		} `json:"proposed_received_payload"`
+	}
+	if err := json.Unmarshal([]byte(out), &preview); err != nil || preview.Proposed.BodySHA256 != m.SHA256 || preview.Proposed.Version != m.Version || preview.Proposed.ByteSize != len(m.Body) {
+		t.Fatal("proposed received payload differs from preview bytes", err, out)
 	}
 	assertNoSecret(t, out+stderr)
 
 	select {
-	case <-receipts:
-		t.Fatal("preview fabricated a provenance receipt")
+	case write := <-writes:
+		t.Fatal("preview wrote to server:", write)
 	default:
 	}
-	leasePath := filepath.Join(dir, "worker-lease")
-	if err = os.WriteFile(leasePath, []byte("fixture-worker-lease-0000000000000000001"), 0600); err != nil {
-		t.Fatal(err)
+	for _, flag := range []string{"--rules-record-received", "--rules-worker-lease-file"} {
+		obsolete := append(append([]string{}, args...), flag, "unused")
+		code, out, stderr = runCLI(obsolete, "")
+		if code != 2 || !strings.Contains(stderr, "unknown flag "+flag) || out != "" {
+			t.Fatal("obsolete flag was accepted", flag, code, stderr, out)
+		}
 	}
-	receiptArgs := append(append([]string{}, args...), "--rules-record-received", "10000000-0000-4000-8000-000000000006", "--rules-worker-lease-file", leasePath)
-	code, out, stderr = runCLI(receiptArgs, "")
-	if code != 0 || !strings.Contains(out, `"provenance_recorded":true`) || !strings.Contains(out, `"execution_verified":false`) {
-		t.Fatal("receipt", stderr, out)
-	}
-	items := <-receipts
-	if len(items) != 1 || items[0].ContentSHA256 == nil || *items[0].ContentSHA256 != m.SHA256 || items[0].ByteSize == nil || *items[0].ByteSize != int64(len(m.Body)) || items[0].Version == nil || *items[0].Version != m.Version {
-		t.Fatal("receipt differs from actual returned bytes")
+	code, out, stderr = runCLI([]string{"paimos", "session", "start", "--help"}, "")
+	if code != 0 || strings.Contains(out, "rules-record-received") || strings.Contains(out, "rules-worker-lease-file") {
+		t.Fatal("obsolete flag remains in help", code, stderr, out)
 	}
 	status = 403
 	code, _, _ = runCLI(args, "")
@@ -160,9 +153,9 @@ func TestRulesPreviewOnlineOfflineAndRefusedCache(t *testing.T) {
 		t.Fatal("floor lost", stderr, out)
 	}
 
-	offlineReceipt := append(append([]string{}, args...), "--rules-record-received", "10000000-0000-4000-8000-000000000006", "--rules-worker-lease-file", filepath.Join(dir, "missing-lease"))
-	code, out, stderr = runCLI(offlineReceipt, "")
-	if code != 0 || !strings.Contains(out, "floor-only") || !strings.Contains(out, `"provenance_recorded":false`) || !strings.Contains(out, "not recorded while offline") {
-		t.Fatal("offline receipt hid floor", stderr, out)
+	select {
+	case write := <-writes:
+		t.Fatal("preview or obsolete flag wrote to server:", write)
+	default:
 	}
 }

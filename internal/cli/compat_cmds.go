@@ -169,7 +169,7 @@ func (rt *runtime) cmdSessionStart() *Command {
 				return usagef("--agent is required")
 			}
 			if ruleOpts.Preview {
-				return rt.sessionRules(project, agent, ruleOpts)
+				return rt.sessionRules(project, ruleOpts)
 			}
 			bundle = strings.TrimSpace(strings.ToLower(bundle))
 			format = strings.TrimSpace(strings.ToLower(format))

@@ -167,12 +167,12 @@ retains only the independent floor and reports the gap. HTTP authorization and
 semantic failures never use the cache. Digests detect local corruption; the cache
 is not a signed authority against a local user able to replace both cache and pin.
 
-Preview output includes exact body hash/version/size and an AEON-219 provenance
-payload. `--rules-record-received SESSION_UUID --rules-worker-lease-file PATH`
-explicitly posts it to an existing owned harness generation. This records receipt,
-not execution; `execution_verified` remains false. It does not mint a registered
-harness session. Stub installation, automatic registration, rollout comparison,
-template import/export and UI are separate coordinator-owned work.
+Preview output includes the exact body hash/version/size as
+`proposed_received_payload`. It does not install an instruction file or update
+an existing session's provenance; `provenance_recorded` and
+`execution_verified` remain false. A distinct receipt with append/CAS semantics
+is still uncompleted AEON-249 work. Stub installation, automatic registration,
+rollout comparison, template import/export and UI are separate coordinator-owned work.
 
 ## UI shell (P0.5 / AEON-10)
 
