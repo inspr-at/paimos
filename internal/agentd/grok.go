@@ -10,6 +10,7 @@ import (
 	"errors"
 	"runtime"
 
+	"github.com/inspr-at/paimos/internal/agentverification"
 	"github.com/inspr-at/paimos/internal/grokprobe"
 )
 
@@ -45,7 +46,7 @@ func (*GrokAdapter) VerificationSupported() bool {
 }
 
 func grokVerificationSupported(goos, goarch string) bool {
-	return goos == "darwin" && goarch == "arm64"
+	return agentverification.For(Grok, goos, goarch).Supported
 }
 
 func (a *GrokAdapter) Start(ctx context.Context, r StartRequest, observe func(AdapterEvent)) (Process, error) {

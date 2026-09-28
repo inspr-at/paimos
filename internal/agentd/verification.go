@@ -4,9 +4,13 @@ package agentd
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
+
+	"github.com/inspr-at/paimos/internal/agentverification"
 )
 
 const VerificationPurpose = "pairing_verification"
@@ -18,16 +22,23 @@ var ErrVerificationUnavailable = errors.New("verification blocked: this adapter 
 // Unknown/future adapters cannot accidentally inherit the managed tool path.
 type VerificationAdapter interface{ VerificationSupported() bool }
 
-func (*ClaudeAdapter) VerificationSupported() bool { return true }
+func (*ClaudeAdapter) VerificationSupported() bool { return verificationSupported(Claude) }
+
+func verificationSupported(harness string) bool {
+	return agentverification.For(harness, runtime.GOOS, runtime.GOARCH).Supported
+}
 
 // Cursor ACP inherits the shared MCP lease when session/new receives an empty
 // mcpServers array (CLI 2026.09.18-9a7762b, 1006.index.js). Ask mode does not bind
 // an empty tool inventory, and ACP exposes no supported override for that lease.
 // See https://cursor.com/docs/cli/acp#MCP-servers. Block before the account probe
 // or session startup until a qualified isolation mechanism is available.
-func (*CursorAdapter) VerificationSupported() bool { return false }
+// The 2026.09.26-dd393fe package still resolves tools from mcpLease in ACP,
+// loads team hooks, and exposes only internal CLI tool-filter headers. Moving
+// CURSOR_CONFIG_DIR and selecting ask is not a qualified no-tools boundary.
+func (*CursorAdapter) VerificationSupported() bool { return verificationSupported(Cursor) }
 
-// Codex intentionally has no VerificationSupported capability. In codex-cli
+// Codex explicitly reports its unqualified capability. In codex-cli
 // 0.157.1, thread/start cannot set the immutable ToolPolicy.allowed_tools ceiling
 // (codex-rs/ext/extension-api/src/tool_policy.rs). Read-only sandboxing does not
 // constrain inherited MCP actions, and even mcpServerStatus/list creates eager
@@ -36,6 +47,7 @@ func (*CursorAdapter) VerificationSupported() bool { return false }
 // Keep verification blocked before any vendor process until the public protocol
 // can bind a no-tools/no-hooks policy before startup, or an equivalent qualified
 // execution boundary exists. Source: github.com/openai/codex/tree/rust-v0.157.1.
+func (*CodexAdapter) VerificationSupported() bool { return verificationSupported(Codex) }
 
 func validExecutionMode(r Run, adapter Adapter) error {
 	if err := validQueuedExecutionMode(r, adapter); err != nil {
@@ -59,7 +71,11 @@ func validQueuedExecutionMode(r Run, adapter Adapter) error {
 	}
 	a, ok := adapter.(VerificationAdapter)
 	if !ok || !a.VerificationSupported() {
-		return ErrVerificationUnavailable
+		reason := agentverification.For(adapter.Name(), runtime.GOOS, runtime.GOARCH).Reason
+		if reason == "" { // A locally unqualified variant may be stricter.
+			return ErrVerificationUnavailable
+		}
+		return fmt.Errorf("%w: %s", ErrVerificationUnavailable, reason)
 	}
 	if r.VerificationTask != VerificationTask || r.MaxDurationSeconds == nil || *r.MaxDurationSeconds < 1 || *r.MaxDurationSeconds > 60 || r.VerificationPolicy != "read_only" || r.RepositoryMutationAllowed == nil || *r.RepositoryMutationAllowed {
 		return errors.New("verification binding is incomplete or unsafe")

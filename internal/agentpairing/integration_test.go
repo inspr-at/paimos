@@ -493,7 +493,7 @@ func TestPairingGuideIsAgentReadableAndPublicRoutesExact(t *testing.T) {
 	r.Host = "attacker.invalid"
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, r)
-	for _, want := range []string{"Connect a computer", "paimos-agentd path&gt; setup --url ", "/assets/pinned.js", "short code", "Server version:", "Cursor external/MCP isolation is awaiting qualification.", "Qualified verification with enforced no-tools mode."} {
+	for _, want := range []string{"Connect a computer", "paimos-agentd path&gt; setup --url ", "/assets/pinned.js", "short code", "Server version:", "Cursor ask mode and an isolated config do not enforce a no-tools policy.", "Codex read-only sandboxing does not isolate inherited MCP tools and startup hooks.", "Qualified verification with enforced no-tools mode."} {
 		if !strings.Contains(w.Body.String(), want) {
 			t.Fatalf("guide lacks %s", want)
 		}
@@ -951,6 +951,10 @@ func TestPairingVerificationCapabilitiesEnforcedAndProgressTruthful(t *testing.T
 		p := f.propose(h, "claude")
 		if p.review.VerificationCapabilities[h].Supported || !p.review.VerificationCapabilities["claude"].Supported || p.review.VerificationCapabilities["claude"].Policy != "no_tools" {
 			t.Fatal("wrong preapproval qualification")
+		}
+		reason := p.review.VerificationCapabilities[h].Reason
+		if h == "codex" && !strings.Contains(reason, "startup hooks") || h == "cursor" && !strings.Contains(reason, "no-tools policy") {
+			t.Fatal("review lost the specific isolation blocker")
 		}
 		w := f.call("POST", "/api/agent-pairing/requests/"+p.id+"/approve", map[string]any{"request_digest": p.review.Digest, "verification": "one_per_harness", "selected_account_keys": []string{h + "-local", "claude-local"}}, true, "", 409)
 		if !strings.Contains(w.Body.String(), `"code":"verification_unavailable"`) {

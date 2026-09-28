@@ -1,28 +1,21 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 package agentpairing
 
+import "github.com/inspr-at/paimos/internal/agentverification"
+
 // VerificationCapability describes the trusted helper shipped with this server
 // release. Local capability claims cannot widen it. Platform/service readiness
 // remains separately qualified and the helper must still enforce its controls.
-type VerificationCapability struct {
-	Supported bool   `json:"supported"`
-	Policy    string `json:"policy"`
-	Reason    string `json:"reason"`
-}
+type VerificationCapability = agentverification.Capability
 
 // Empty platform/arch is the guide's conservative global capability view.
 // Native Grok's two qualified variants are pinned again by the local runtime.
 func verificationCapabilities(platform, arch string) map[string]VerificationCapability {
-	grok := VerificationCapability{false, "unavailable", "Native Grok verification is qualified only on macOS arm64 with a pinned native build."}
-	if platform == "darwin" && arch == "arm64" {
-		grok = VerificationCapability{true, "no_tools", ""}
+	capabilities := make(map[string]VerificationCapability, 4)
+	for _, harness := range []string{"claude", "codex", "cursor", "grok"} {
+		capabilities[harness] = agentverification.For(harness, platform, arch)
 	}
-	return map[string]VerificationCapability{
-		"claude": {true, "no_tools", ""},
-		"codex":  {false, "unavailable", "Codex verification cannot yet guarantee external/MCP isolation."},
-		"cursor": {false, "unavailable", "Cursor external/MCP isolation is awaiting qualification."},
-		"grok":   grok,
-	}
+	return capabilities
 }
 
 // VerificationTargets binds dispatch to immutable request OS/architecture and
