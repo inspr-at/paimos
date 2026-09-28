@@ -174,6 +174,19 @@ an existing session's provenance; `provenance_recorded` and
 is still uncompleted AEON-249 work. Stub installation, automatic registration,
 rollout comparison, template import/export and UI are separate coordinator-owned work.
 
+`aeon rules-compare` (the same verb on `paimos`) is a one-time offline check.
+Pass explicit instruction files with `--file` and `--context`. Optional
+`--merged` supplies AR1 merge metadata; `--provenance` supplies AEON-219
+revision or page JSON and needs `--session` to bind an expected session.
+Both JSON files are read as private `.json` files. The report compares exact
+raw file hashes and supplied merge lineage. Canonical, session-bound provenance
+is labelled supplied worker-reported metadata; bare arrays and preview
+`provenance_items` remain unverified comparisons. Offline JSON cannot prove
+API observation, snapshot publication, a trusted floor, runtime execution,
+model load or obedience. Expired or malformed merge metadata remains useful
+for historical differences only. Rollout stays unauthorized; the command
+never waits or replaces `AGENTS.md` or `CLAUDE.md`.
+
 ## UI shell (P0.5 / AEON-10)
 
 The Vue shell includes an authenticated workspace, sign-in, a 404, an account
