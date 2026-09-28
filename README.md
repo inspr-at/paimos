@@ -170,8 +170,38 @@ is not a signed authority against a local user able to replace both cache and pi
 Preview output includes the exact body hash/version/size as
 `proposed_received_payload`. It does not install an instruction file or update
 an existing session's provenance; `provenance_recorded` and
-`execution_verified` remain false. A distinct receipt with append/CAS semantics
-is still uncompleted AEON-249 work. Stub installation, automatic registration,
+`execution_verified` remain false. Preview never submits a receipt.
+
+An explicit `POST /api/projects/{projectId}/harness-sessions/{sessionId}/rules-receipts`
+records a separate worker report; `GET` on that path reads its append-only history.
+Writes require `harness.worker`, the owning session agent and exact generation
+lease. Reads use `harness.read` and project visibility. Supply a UUID `request_id`,
+`expected_revision` (zero initially; otherwise the latest receipt revision),
+`context` (tenant/project/person/agent/role/harness and optional task UUID),
+`body_sha256`, calendar `version`, `byte_size` (1..12000), and `source`
+(`online`, `cache`, or `floor-only`; the latter requires version `floor-only`).
+Use the exact metadata of bytes the caller reports receiving. No bodies or paths
+are accepted. The server checks tenant/project/agent, canonical key creator,
+registered harness and optional current ticket binding. Role, digest, version
+and source remain worker-reported; publication, model load and execution are
+unverified, and no authority is granted. This does not establish that the reported
+bytes came from a published merge. Existing instruction provenance stays intact.
+
+Identical request-ID/normalized-metadata retries return the original receipt even
+after later appends; divergent retries and competing stale revisions return 409.
+A new request ID with the current revision appends even for identical bytes. Current
+authorization, context binding and generation checks still precede replay.
+Stopped/archived generations and expired/revoked credentials cannot record.
+Harness generation leases have no time-based expiry; heartbeat age is not proof
+of closure. History remains readable after closure, newest 32 first, with
+`before_revision` pagination. Recording requires a live API connection; cache
+and floor-only reports remain stale fallback evidence, never fresh authority.
+There is no automatic submission, offline queue or new CLI recording flag.
+Migration 0897 uses a distinct immutable table because event visibility can hide
+harness history from project readers; the audit event is transactional, not the
+CAS source of truth. No company rules are seeded or published.
+
+Stub installation, automatic registration,
 rollout comparison, template import/export and UI are separate coordinator-owned work.
 
 ## UI shell (P0.5 / AEON-10)
