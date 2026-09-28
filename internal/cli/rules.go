@@ -12,13 +12,12 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/client"
-	"github.com/inspr-at/paimos/internal/harness"
 	"github.com/inspr-at/paimos/internal/rules"
 )
 
 type rulesOptions struct {
-	Preview                                                                                       bool
-	Tenant, Person, Agent, Role, Harness, Task, Cache, Floor, FloorSHA, Out, RecordSession, Lease string
+	Preview                                                                 bool
+	Tenant, Person, Agent, Role, Harness, Task, Cache, Floor, FloorSHA, Out string
 }
 
 func (o *rulesOptions) flags(fs *flagSet) {
@@ -33,8 +32,6 @@ func (o *rulesOptions) flags(fs *flagSet) {
 	fs.string(&o.Floor, "rules-floor", 0, "independently retained private locked-floor .txt file")
 	fs.string(&o.FloorSHA, "rules-floor-sha256", 0, "trusted exact SHA256 of the retained company floor")
 	fs.string(&o.Out, "rules-out", 0, "optional new .txt preview output (never overwrites)")
-	fs.string(&o.RecordSession, "rules-record-received", 0, "existing harness session UUID; explicitly record received bytes, not execution")
-	fs.string(&o.Lease, "rules-worker-lease-file", 0, "lease for the existing harness generation when recording receipt")
 }
 
 func networkUnavailable(err error) bool {
@@ -49,16 +46,13 @@ func networkUnavailable(err error) bool {
 // sessionRules does not call the old knowledge-bundle renderer or write its
 // active files. Offline operation requires exact UUID selectors, so it never
 // resolves a project key or person name from a different tenant's old cache.
-func (rt *runtime) sessionRules(project, agent string, o rulesOptions) error {
+func (rt *runtime) sessionRules(project string, o rulesOptions) error {
 	c := rules.Context{TenantID: o.Tenant, ProjectID: project, PersonID: o.Person, AgentID: o.Agent, Role: o.Role, Harness: o.Harness, TaskID: o.Task}
 	if err := rules.ValidateContext(c); err != nil {
 		return usagef("rules preview requires --project UUID and all exact rules selectors: %s", err)
 	}
 	if o.Cache == "" || o.Floor == "" || o.FloorSHA == "" {
 		return usagef("rules preview requires --rules-cache, --rules-floor and --rules-floor-sha256")
-	}
-	if o.RecordSession != "" && (!validUUID(o.RecordSession) || o.Lease == "") {
-		return usagef("recording receipt requires an existing harness session UUID and worker lease file")
 	}
 	raw, err := rules.ReadFile(o.Floor, rules.MaxBytes)
 	if err != nil {
@@ -127,38 +121,12 @@ func (rt *runtime) sessionRules(project, agent string, o rulesOptions) error {
 			return err
 		}
 	}
-	item := rulesProvenance(m)
-	recorded := false
-	if o.RecordSession != "" && stale {
-		gap = strings.TrimSpace(gap + " provenance receipt was not recorded while offline")
-	}
-	if o.RecordSession != "" && !stale {
-		me, err := rt.caller()
-		if err != nil {
-			return err
-		}
-		if me.Principal.Name != agent || me.Principal.ID != c.AgentID {
-			return usagef("receipt requires the authenticated named agent")
-		}
-		lease, err := rt.harnessSecret(o.Lease, "rules-worker-lease-file")
-		if err != nil {
-			return err
-		}
-		if err = rt.harnessDo(http.MethodPost, harnessPath(c.ProjectID, o.RecordSession)+"/provenance", lease, map[string]any{"items": []harness.ProvenanceItem{item}}, nil); err != nil {
-			return err
-		}
-		recorded = true
-	}
-	// Preview evidence distinguishes received content from harness execution.
-	return rt.printJSON(map[string]any{"rules": m, "stale": stale, "gap": gap, "suggested_name": rendered.SuggestedPath, "output_path": o.Out, "provenance_items": []harness.ProvenanceItem{item}, "provenance_recorded": recorded, "execution_verified": false})
-}
-func rulesProvenance(m rules.Merged) harness.ProvenanceItem {
-	logical, kind := "AGENTS.md", "agents"
-	if m.Context.Harness == "claude-code" {
-		logical, kind = "CLAUDE.md", "claude"
-	}
-	size := int64(m.ByteSize)
-	hash := m.SHA256
-	version := m.Version
-	return harness.ProvenanceItem{Kind: kind, LogicalName: logical, HashKind: "content", ContentSHA256: &hash, Version: &version, ByteSize: &size}
+	// A preview is only proposed received content. It is not an installed
+	// instruction file or a revision of the session's actual provenance.
+	return rt.printJSON(map[string]any{
+		"rules": m, "stale": stale, "gap": gap,
+		"suggested_name": rendered.SuggestedPath, "output_path": o.Out,
+		"proposed_received_payload": map[string]any{"body_sha256": m.SHA256, "version": m.Version, "byte_size": m.ByteSize},
+		"provenance_recorded":       false, "execution_verified": false,
+	})
 }
