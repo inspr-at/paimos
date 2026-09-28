@@ -525,7 +525,8 @@ export const IMPORT_MAX_RULES = 100
 export interface DraftImportSet { name: string; rules: AgentRule[] }
 export interface DraftImportLayer { scope: RuleScope; sets: DraftImportSet[] }
 export interface DraftImportPlan { tenantId: string; layers: DraftImportLayer[] }
-export interface ImportConfirmed { scope: RuleScope; layer: RuleLayer; set: RuleSet; rulesSaved: boolean }
+/** rulesSaved is true when the draft save was confirmed, false when the server rejected it, and null when the save reply was lost. */
+export interface ImportConfirmed { scope: RuleScope; layer: RuleLayer; set: RuleSet; rulesSaved: boolean | null }
 export type ImportOutcome =
   | { status: 'imported'; confirmed: ImportConfirmed[]; message: string }
   | { status: 'rejected'; confirmed: ImportConfirmed[]; message: string }
@@ -561,7 +562,9 @@ export function importBlock(caller: Caller | null): string | null {
 }
 
 export function replyUncertain(error: unknown): boolean {
-  return error instanceof RequestFailure || error instanceof StaleRequestError || error instanceof SyntaxError
+  if (error instanceof RequestFailure || error instanceof StaleRequestError || error instanceof SyntaxError) return true
+  // A 5xx can arrive after the write committed, including a reverse proxy 502.
+  return error instanceof RulesError && error.status >= 500 && error.status <= 599
 }
 
 function plainRecord(value: unknown): value is Record<string, unknown> {
@@ -710,11 +713,20 @@ function reviewDraftImport(plan: DraftImportPlan, tenantId: string, caller: Call
     const block = writeBlock(caller, layer.scope)
     if (block) return block
     const taken = new Set<string>()
+    const seenIds = new Map<string, string>()
     const present = existing.filter(row => scopeKey(row.scope) === key).flatMap(row => row.names)
     for (const set of layer.sets) {
       if (taken.has(set.name)) return `“${set.name}” is listed twice for ${scopeLabel(layer.scope)}.`
       taken.add(set.name)
       if (present.includes(set.name)) return `“${set.name}” already exists in ${scopeLabel(layer.scope)}. Import adds new sets and does not change existing ones.`
+      const local = new Set<string>()
+      for (const rule of set.rules) {
+        if (local.has(rule.identity)) return `“${rule.identity}” is already used in this set.`
+        const earlier = seenIds.get(rule.identity)
+        if (earlier) return `“${rule.identity}” is already used in “${earlier}” for ${scopeLabel(layer.scope)}. Two sets in one scope cannot share an identity.`
+        local.add(rule.identity)
+        seenIds.set(rule.identity, set.name)
+      }
       sets += 1
       rules += set.rules.length
     }
@@ -791,7 +803,10 @@ function rejected(message: string): ImportOutcome {
 
 function confirmedLine(confirmed: ImportConfirmed[]): string {
   if (!confirmed.length) return ''
-  const parts = confirmed.map(item => `“${item.set.name}” ${item.set.id} revision ${item.set.revision}${item.rulesSaved ? '' : ' (rules not saved)'}`)
+  const parts = confirmed.map(item => {
+    const rules = item.rulesSaved === true ? '' : item.rulesSaved === false ? ' (rules not saved)' : ' (rules outcome unknown)'
+    return `“${item.set.name}” ${item.set.id} revision ${item.set.revision}${rules}`
+  })
   return `Confirmed: ${parts.join('; ')}. `
 }
 
@@ -847,10 +862,11 @@ export async function runDraftImport(
         const saved = await io.saveDraft(created.id, { expected_revision: created.revision, name: set.name, rules: set.rules })
         confirmed.push({ scope: remote.scope, layer: remote, set: saved, rulesSaved: true })
       } catch (cause) {
-        confirmed.push({ scope: remote.scope, layer: remote, set: created, rulesSaved: false })
         if (replyUncertain(cause)) {
-          return { status: 'uncertain', confirmed, message: `The workspace did not confirm the rules for “${set.name}”. ${confirmedLine(confirmed)}Check the server before trying again. This import did not retry and did not roll anything back.` }
+          confirmed.push({ scope: remote.scope, layer: remote, set: created, rulesSaved: null })
+          return { status: 'uncertain', confirmed, message: `The workspace did not confirm the rules for “${set.name}”. The set “${set.name}” ${created.id} revision ${created.revision} exists; whether its rules were saved is unknown. ${confirmedLine(confirmed)}Check the server before trying again. This import did not retry and did not roll anything back.` }
         }
+        confirmed.push({ scope: remote.scope, layer: remote, set: created, rulesSaved: false })
         return { status: 'partial', confirmed, message: `${confirmedLine(confirmed)}“${set.name}” was created, but its rules were not saved. ${rulesMessage(cause)} Later sets were not started. Confirmed drafts stay on the server. Nothing was rolled back or published.` }
       }
     }

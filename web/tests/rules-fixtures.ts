@@ -17,10 +17,13 @@ const rule = (identity: string, text: string, strength: 'normal' | 'locked' = 'n
 
 export interface RulesMock {
   calls: { method: string; path: string; body?: unknown }[]
+  releaseDraftFailure: () => void
 }
 
-export async function mockRules(page: Page, options: { kind?: 'person' | 'agent'; conflict?: boolean; publish?: boolean; draftFailAt?: number; setAbortAt?: number } = {}): Promise<RulesMock> {
+export async function mockRules(page: Page, options: { kind?: 'person' | 'agent'; conflict?: boolean; publish?: boolean; draftFailAt?: number; draftFailStatus?: number; holdDraftFailure?: boolean; setAbortAt?: number } = {}): Promise<RulesMock> {
   const calls: RulesMock['calls'] = []
+  let releaseDraftFailure = () => {}
+  const draftGate = options.holdDraftFailure ? new Promise<void>(resolve => { releaseDraftFailure = () => resolve() }) : null
   let conflicted = false
   let layerPosts = 0
   let setPosts = 0
@@ -109,7 +112,10 @@ export async function mockRules(page: Page, options: { kind?: 'person' | 'agent'
       const created = createdSets.get(draft[1])
       if (created) {
         draftPuts += 1
-        if (options.draftFailAt && draftPuts === options.draftFailAt) return route.fulfill({ status: 500, json: { error: 'The draft was not saved.', code: 'unavailable' } })
+        if (options.draftFailAt && draftPuts === options.draftFailAt) {
+          if (draftGate) await draftGate
+          return route.fulfill({ status: options.draftFailStatus ?? 500, json: { error: 'The draft was not saved.', code: 'unavailable' } })
+        }
         created.revision += 1
         created.name = body.name
         created.rules = body.rules
@@ -155,5 +161,5 @@ export async function mockRules(page: Page, options: { kind?: 'person' | 'agent'
     }
     return route.fallback()
   })
-  return { calls }
+  return { calls, releaseDraftFailure }
 }

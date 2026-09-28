@@ -6,9 +6,9 @@ import { RULE_PERSON, mockRules } from './rules-fixtures'
 
 const TENANT = 't1'
 
-function rule(identity: string, text: string) {
+function rule(identity: string, text: string, details = '') {
   return {
-    identity, text, why: 'Synthetic reason for the import test.', strength: 'normal', enabled: true,
+    identity, text, why: 'Synthetic reason for the import test.', ...(details ? { details } : {}), strength: 'normal', enabled: true,
     roles: ['builder'], harnesses: ['cursor'], source: { reference: 'AEON-252', edited_here: false },
   }
 }
@@ -76,7 +76,7 @@ test('a file for another workspace is refused before any write', async ({ page }
 })
 
 test('a failed draft stops the import and does not publish', async ({ page }) => {
-  const rules = await setup(page, { draftFailAt: 2 })
+  const rules = await setup(page, { draftFailAt: 2, draftFailStatus: 422 })
   await page.goto('/settings/agent-rules')
   await expect(page.getByRole('checkbox', { name: 'Record the source.' })).toBeVisible()
   await page.getByRole('button', { name: 'Import drafts' }).click()
@@ -125,6 +125,81 @@ test('a lost reply stops the import and tells the person to check the server', a
   expect(rules.calls.filter(call => call.method === 'POST' && call.path === '/api/rules/sets')).toHaveLength(2)
   expect(rules.calls.filter(call => call.method === 'PUT' && call.path.includes('/draft'))).toHaveLength(1)
   expect(rules.calls.some(call => call.path.endsWith('/publish'))).toBe(false)
+})
+
+test('technical details stay collapsed until opened', async ({ page }) => {
+  const rules = await setup(page)
+  await page.goto('/settings/agent-rules')
+  await expect(page.getByRole('checkbox', { name: 'Record the source.' })).toBeVisible()
+  await page.getByRole('button', { name: 'Import drafts' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Import drafts' })
+  const details = `{"source":"bundle","meta":"${'x'.repeat(240)}"}`
+  await dialog.locator('#draft-import-file').setInputFiles(draftFile(personSets([
+    { name: 'Desk', rules: [rule('desk-clear', 'Keep the desk clear.', details)] },
+  ])))
+  await expect(dialog.getByText('Keep the desk clear.')).toBeVisible()
+  await expect(dialog.getByText('Synthetic reason for the import test.')).toBeVisible()
+  const folded = dialog.locator('.import-detail')
+  await expect(folded).toHaveJSProperty('open', false)
+  await expect(folded.locator('p')).toBeHidden()
+  await folded.getByText('Details', { exact: true }).click()
+  await expect(folded.locator('p')).toBeVisible()
+  await expect(folded.locator('p')).toHaveText(details)
+  expect(writes(rules.calls)).toHaveLength(0)
+})
+
+test('import stays off while unsaved edits remain', async ({ page }) => {
+  const rules = await setup(page)
+  await page.goto('/settings/agent-rules')
+  const box = page.getByRole('checkbox', { name: 'Record the source.' })
+  await expect(box).toBeVisible()
+  await box.uncheck()
+  await expect(page.getByText(/unsaved draft/)).toBeVisible()
+  const importButton = page.getByRole('button', { name: 'Import drafts' })
+  await expect(importButton).toBeDisabled()
+  await expect(importButton).toHaveAttribute('title', 'Save or discard unsaved drafts before importing.')
+  await expect(page.getByRole('dialog', { name: 'Import drafts' })).toHaveCount(0)
+  await expect(box).not.toBeChecked()
+  expect(writes(rules.calls)).toHaveLength(0)
+  await page.getByRole('button', { name: 'Discard' }).click()
+  await expect(box).toBeChecked()
+  await expect(importButton).toBeEnabled()
+})
+
+test('a lost save keeps unsaved edits and does not continue', async ({ page }) => {
+  const rules = await setup(page, { draftFailAt: 2, draftFailStatus: 503, holdDraftFailure: true })
+  await page.goto('/settings/agent-rules')
+  const box = page.getByRole('checkbox', { name: 'Record the source.' })
+  await expect(box).toBeVisible()
+  await page.getByRole('button', { name: 'Import drafts' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Import drafts' })
+  await dialog.locator('#draft-import-file').setInputFiles(draftFile(personSets([
+    { name: 'Desk', rules: [rule('desk-clear', 'Keep the desk clear.')] },
+    { name: 'Hours', rules: [rule('hours-log', 'Log the hours.')] },
+    { name: 'Later', rules: [rule('later-note', 'Leave a note.')] },
+  ])))
+  await dialog.getByRole('button', { name: 'Import drafts' }).click()
+  await expect(dialog.getByRole('button', { name: 'Importing…' })).toBeVisible()
+  await box.evaluate((input: HTMLInputElement) => {
+    input.checked = false
+    input.dispatchEvent(new Event('change', { bubbles: true }))
+  })
+  await expect(page.getByText(/unsaved draft/)).toBeVisible()
+  rules.releaseDraftFailure()
+  const alert = dialog.getByRole('alert')
+  await expect(alert).toContainText('did not confirm')
+  await expect(alert).toContainText('unknown')
+  await expect(alert).toContainText('Check the server')
+  await expect(alert).toContainText('Unsaved edits on this page were kept')
+  await expect(alert).not.toContainText('not saved')
+  await expect(alert).not.toContainText('not created')
+  await expect(alert).not.toContainText('reloaded from the server')
+  await expect(box).not.toBeChecked()
+  await expect(dialog.getByRole('button', { name: 'Import drafts' })).toBeDisabled()
+  expect(rules.calls.filter(call => call.method === 'POST' && call.path === '/api/rules/sets')).toHaveLength(2)
+  expect(rules.calls.filter(call => call.method === 'PUT' && call.path.includes('/draft'))).toHaveLength(2)
+  expect(rules.calls.some(call => call.path.endsWith('/publish'))).toBe(false)
+  expect(rules.calls.some(call => JSON.stringify(call.body ?? '').includes('later-note'))).toBe(false)
 })
 
 test('an agent cannot import drafts', async ({ page }) => {

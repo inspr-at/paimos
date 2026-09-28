@@ -4,7 +4,7 @@ import { test } from 'node:test'
 import { RequestFailure } from '../src/lib/api.ts'
 import {
   IMPORT_MAX_BYTES, RulesError, applyEnabled, blankRule, calendarVersion, diffRules, duplicateRule, groupState, heldIdentities,
-  identityFromText, layerInColumn, mergeQuery, parseDraftImport, publishBlock, resetAvailability, rulePayload, rulesEqual,
+  identityFromText, layerInColumn, mergeQuery, parseDraftImport, publishBlock, replyUncertain, resetAvailability, rulePayload, rulesEqual,
   runDraftImport, scopeFor, touchRule, validVersion, validateDraft, validateRule, writeBlock,
   type AgentRule, type Caller, type ImportIO, type RuleScope, type RuleSet,
 } from '../src/lib/rules.ts'
@@ -202,7 +202,23 @@ test('draft import accepts a person file and rejects anything it must not write'
   ] }]), 300, TENANT, admin)
   assert.match('error' in dupSet ? dupSet.error : '', /listed twice/)
   const dupId = parseDraftImport(draftFile([{ scope: { layer: 'person', owner_id: SELF }, sets: [{ name: 'Desk', rules: [importRule('same', 'One.'), importRule('same', 'Two.')] }] }]), 300, TENANT, admin)
-  assert.match('error' in dupId ? dupId.error : '', /already used/)
+  assert.match('error' in dupId ? dupId.error : '', /already used in this set/)
+  const dupAcross = parseDraftImport(draftFile([{ scope: { layer: 'person', owner_id: SELF }, sets: [
+    { name: 'Desk', rules: [importRule('same', 'One.')] },
+    { name: 'Hours', rules: [importRule('same', 'Two.')] },
+  ] }]), 300, TENANT, admin)
+  assert.match('error' in dupAcross ? dupAcross.error : '', /already used in “Desk”/)
+  assert.match('error' in dupAcross ? dupAcross.error : '', /one scope/)
+  const override = parseDraftImport(draftFile([
+    { scope: { layer: 'company' }, sets: [{ name: 'Floor', rules: [importRule('keep-secrets', 'Never print.')] }] },
+    { scope: { layer: 'person', owner_id: SELF }, sets: [{ name: 'Desk', rules: [importRule('keep-secrets', 'My copy.')] }] },
+  ]), 400, TENANT, admin)
+  assert.equal('plan' in override, true)
+  const projects = parseDraftImport(draftFile([
+    { scope: { layer: 'project', project_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' }, sets: [{ name: 'A', rules: [importRule('same', 'One.')] }] },
+    { scope: { layer: 'project', project_id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb' }, sets: [{ name: 'B', rules: [importRule('same', 'Two.')] }] },
+  ]), 400, TENANT, admin)
+  assert.equal('plan' in projects, true)
   const unknown = parseDraftImport(draftFile([{ scope: { layer: 'workspace' }, sets: [{ name: 'Desk', rules: [] }] }]), 80, TENANT, admin)
   assert.match('error' in unknown ? unknown.error : '', /layer/)
   const project = parseDraftImport(draftFile([{ scope: { layer: 'project' }, sets: [{ name: 'Desk', rules: [] }] }]), 80, TENANT, admin)
@@ -269,7 +285,7 @@ test('draft import writes new sets in order and stops without publishing', async
   const memory = memoryIO()
   memory.io.saveDraft = async (setId, body) => {
     memory.calls.push(`saveDraft:${body.name}`)
-    if (body.name === 'Hours') throw new RulesError(500, 'unavailable', 'The draft was not saved.')
+    if (body.name === 'Hours') throw new RulesError(422, 'invalid_rule', 'The draft was not saved.')
     return { id: setId, layer_id: 'bbbbbbbb-bbbb-4bbb-8bbb-000000000001', scope: { layer: 'person', owner_id: SELF }, name: body.name, revision: body.expected_revision + 1, rules: body.rules, published_version: '' }
   }
   const partial = await runDraftImport(parsed.plan, TENANT, admin, memory.io)
@@ -305,6 +321,83 @@ test('draft import writes new sets in order and stops without publishing', async
   const refused = await runDraftImport(company.plan, TENANT, admin, present.io)
   assert.equal(refused.status, 'rejected')
   assert.equal(present.calls.some(call => call.startsWith('create')), false)
+})
+
+test('a 5xx after a committed write is uncertain and does not continue', async () => {
+  for (const status of [500, 502, 503, 504]) {
+    assert.equal(replyUncertain(new RulesError(status, 'unavailable', 'lost')), true)
+  }
+  assert.equal(replyUncertain(new RulesError(409, 'revision_conflict', 'conflict')), false)
+  assert.equal(replyUncertain(new RulesError(422, 'invalid_rule', 'rejected')), false)
+
+  const parsed = parseDraftImport(draftFile([{ scope: { layer: 'person', owner_id: SELF }, sets: [
+    { name: 'Desk', rules: [importRule('desk-clear', 'Keep the desk clear.')] },
+    { name: 'Hours', rules: [importRule('hours-log', 'Log the hours.')] },
+    { name: 'Later', rules: [importRule('later-note', 'Leave a note.')] },
+  ] }]), 400, TENANT, admin)
+  assert.equal('plan' in parsed, true)
+  if (!('plan' in parsed)) return
+
+  for (const status of [502, 503]) {
+    const lost = memoryIO()
+    lost.io.saveDraft = async (setId, body) => {
+      lost.calls.push(`saveDraft:${body.name}`)
+      if (body.name === 'Hours') throw new RulesError(status, 'unavailable', 'The draft was not saved.')
+      return { id: setId, layer_id: 'bbbbbbbb-bbbb-4bbb-8bbb-000000000001', scope: { layer: 'person', owner_id: SELF }, name: body.name, revision: body.expected_revision + 1, rules: body.rules, published_version: '' }
+    }
+    const uncertain = await runDraftImport(parsed.plan, TENANT, admin, lost.io)
+    assert.equal(uncertain.status, 'uncertain')
+    assert.equal(uncertain.confirmed[0]?.rulesSaved, true)
+    assert.equal(uncertain.confirmed[1]?.rulesSaved, null)
+    assert.equal(uncertain.confirmed[1]?.set.revision, 1)
+    assert.match(uncertain.message, new RegExp(uncertain.confirmed[1]?.set.id ?? 'missing'))
+    assert.match(uncertain.message, /revision 1/)
+    assert.match(uncertain.message, /unknown/)
+    assert.match(uncertain.message, /Check the server/)
+    assert.match(uncertain.message, /did not retry/)
+    assert.doesNotMatch(uncertain.message, /not saved/)
+    assert.doesNotMatch(uncertain.message, /not created/)
+    assert.equal(lost.calls.includes('createSet:Later'), false)
+    assert.equal(lost.calls.filter(call => call.startsWith('saveDraft:')).length, 2)
+    assert.equal(lost.calls.some(call => call.includes('publish')), false)
+  }
+
+  const lostCreate = memoryIO()
+  let created = 0
+  lostCreate.io.createSet = async (layerId, name) => {
+    created += 1
+    lostCreate.calls.push(`createSet:${name}`)
+    if (created === 2) throw new RulesError(502, 'unavailable', 'bad gateway')
+    return { id: 'cccccccc-cccc-4ccc-8ccc-000000000001', layer_id: layerId, scope: { layer: 'person', owner_id: SELF }, name, revision: 1, rules: [], published_version: '' }
+  }
+  const createdUnknown = await runDraftImport(parsed.plan, TENANT, admin, lostCreate.io)
+  assert.equal(createdUnknown.status, 'uncertain')
+  assert.equal(createdUnknown.confirmed.length, 1)
+  assert.match(createdUnknown.message, /did not confirm/)
+  assert.doesNotMatch(createdUnknown.message, /not created/)
+  assert.doesNotMatch(createdUnknown.message, /not saved/)
+  assert.equal(lostCreate.calls.includes('createSet:Later'), false)
+  assert.equal(lostCreate.calls.filter(call => call.startsWith('saveDraft:')).length, 1)
+  assert.equal(lostCreate.calls.some(call => call.includes('publish')), false)
+})
+
+test('same-scope identity collisions are rejected before any write', async () => {
+  const memory = memoryIO()
+  const outcome = await runDraftImport({
+    tenantId: TENANT,
+    layers: [{
+      scope: { layer: 'person', owner_id: SELF },
+      sets: [
+        { name: 'Desk', rules: [rule({ identity: 'same', text: 'One.' })] },
+        { name: 'Hours', rules: [rule({ identity: 'same', text: 'Two.' })] },
+      ],
+    }],
+  }, TENANT, admin, memory.io)
+  assert.equal(outcome.status, 'rejected')
+  assert.match(outcome.message, /already used in “Desk”/)
+  assert.equal(memory.calls.some(call => call.startsWith('create')), false)
+  assert.equal(memory.calls.some(call => call.startsWith('saveDraft')), false)
+  assert.equal(memory.calls.some(call => call.includes('publish')), false)
 })
 
 test('publish diff lists added, changed and removed rules', () => {

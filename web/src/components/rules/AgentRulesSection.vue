@@ -99,6 +99,12 @@ function dirty(set: Working) {
   return !set.versionId && (set.name !== set.remote.name || !rulesEqual(set.rules, set.remote.rules))
 }
 const dirtyCount = computed(() => model.value.reduce((count, bundle) => count + bundle.sets.filter(dirty).length, 0))
+const importHold = computed(() => {
+  const blocked = importBlock(caller.value)
+  if (blocked) return blocked
+  if (dirtyCount.value) return 'Save or discard unsaved drafts before importing.'
+  return ''
+})
 function columnRank(column: LayerName) {
   if (column === 'agent') return mode.value === 'task' ? 5 : mode.value === 'named' ? 4 : 3
   return scopeRank({ layer: column })
@@ -498,7 +504,7 @@ async function reloadBoard(): Promise<boolean> {
   }
 }
 function openImport() {
-  if (importBlock(caller.value) || importing.value) return
+  if (importHold.value || importing.value || saving.value) return
   importPlan.value = null
   importError.value = ''
   importFileName.value = ''
@@ -543,7 +549,7 @@ async function onImportFile(event: Event) {
 }
 async function confirmImport() {
   if (importing.value || importLocked.value || !importPlan.value) return
-  const block = importBlock(caller.value)
+  const block = importHold.value
   if (block) { importError.value = block; return }
   const plan = importPlan.value
   importing.value = true
@@ -551,9 +557,14 @@ async function confirmImport() {
   try {
     const outcome = await runDraftImport(plan, tenantId.value, caller.value)
     if (outcome.status === 'uncertain') {
+      importLocked.value = true
+      if (dirtyCount.value) {
+        if (outcome.confirmed.length) showImported(outcome.confirmed)
+        importError.value = `${outcome.message} Unsaved edits on this page were kept.`
+        return
+      }
       const reloaded = await reloadBoard()
       if (!reloaded && outcome.confirmed.length) showImported(outcome.confirmed)
-      importLocked.value = true
       importError.value = `${outcome.message}${reloaded ? ' The board was reloaded from the server.' : ' The board could not be reloaded; check the server before trying again.'}`
       return
     }
@@ -600,7 +611,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
       <div class="actions">
         <button v-if="dirtyCount" type="button" class="btn sm ghost" @click="discard">Discard</button>
         <button type="button" class="btn sm" :disabled="!dirtyCount || saving" @click="save">Save</button>
-        <button type="button" class="btn sm ghost" :disabled="!!importBlock(caller) || saving || importing" :title="importBlock(caller) || undefined" @click="openImport"><AppIcon name="folder" :size="14" />Import drafts</button>
+        <button type="button" class="btn sm ghost" :disabled="!!importHold || saving || importing" :title="importHold || undefined" @click="openImport"><AppIcon name="folder" :size="14" />Import drafts</button>
         <button type="button" class="btn sm" @click="openPreview"><AppIcon name="book" :size="14" />Preview</button>
         <button type="button" class="btn sm primary" :disabled="!publishChoices.some(choice => !choice.reason) || saving" @click="openPublish"><AppIcon name="upload" :size="14" />Publish</button>
       </div>
@@ -738,11 +749,14 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
           <section v-for="layer in importPlan.layers" :key="scopeKey(layer.scope)" class="import-scope">
             <h3>{{ scopeLabel(layer.scope) }}</h3>
             <details v-for="set in layer.sets" :key="set.name" class="import-set" open>
-              <summary>{{ set.name }} · {{ set.rules.length }} {{ set.rules.length === 1 ? 'rule' : 'rules' }}</summary>
+              <summary><AppIcon name="chevron-right" :size="12" class="disclosure-chev" />{{ set.name }} · {{ set.rules.length }} {{ set.rules.length === 1 ? 'rule' : 'rules' }}</summary>
               <div v-for="rule in set.rules" :key="rule.identity" class="import-rule">
                 <p>{{ rule.text }}</p>
                 <p class="hint">{{ rule.why }}</p>
-                <p v-if="rule.details" class="hint">{{ rule.details }}</p>
+                <details v-if="rule.details" class="import-detail">
+                  <summary><AppIcon name="chevron-right" :size="12" class="disclosure-chev" />Details</summary>
+                  <p class="hint">{{ rule.details }}</p>
+                </details>
               </div>
             </details>
           </section>
@@ -793,6 +807,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
 .import-scope h3 { margin: 0; font-size: 13px; }
 .import-set { border-radius: 10px; background: var(--surface-2); padding: 8px 10px; }
 .import-set summary { cursor: pointer; font-weight: 650; }
+.import-detail { margin-top: 4px; }
 .import-rule { display: flex; flex-direction: column; gap: 2px; margin-top: 8px; min-width: 0; }
 .import-rule p { margin: 0; overflow-wrap: anywhere; }
 .drawer { width: min(520px, 100%); height: 100%; overflow: auto; padding: 16px; background: var(--surface); box-shadow: var(--shadow-pop); display: flex; flex-direction: column; gap: 12px; }
