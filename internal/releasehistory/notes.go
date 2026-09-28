@@ -20,6 +20,10 @@ const SnapshotSchema = "aeon.release-note-snapshot.v1"
 const MembershipSource = "journey_tickets.release_node_id"
 const FieldSource = "nodes.fields"
 
+// HistoricalFallback labels a git tag headline used only because member
+// benefits were never captured.
+const HistoricalFallback = "historical-tag-headline"
+
 type NoteSnapshot struct {
 	Schema           string       `json:"schema"`
 	TenantID         string       `json:"tenant_id"`
@@ -31,6 +35,7 @@ type NoteSnapshot struct {
 	CapturedAt       time.Time    `json:"captured_at"`
 	MembershipSource string       `json:"membership_source"`
 	FieldSource      string       `json:"field_source"`
+	Frozen           bool         `json:"frozen,omitempty"`
 	Tickets          []NoteTicket `json:"tickets"`
 }
 type NoteTicket struct {
@@ -51,6 +56,7 @@ type NoteItem struct {
 }
 type Notes struct {
 	Source     string     `json:"source"`
+	Fallback   string     `json:"fallback,omitempty"`
 	SHA256     string     `json:"snapshot_sha256"`
 	CapturedAt *time.Time `json:"captured_at"`
 	Revision   int64      `json:"release_revision"`
@@ -60,7 +66,7 @@ type Notes struct {
 }
 
 func MissingNotes() *Notes {
-	return &Notes{Source: "unavailable", Items: []NoteItem{}, Gaps: []string{"Release membership and bilingual ticket fields were not captured. Git mentions do not establish release membership."}}
+	return &Notes{Source: "unavailable", Fallback: HistoricalFallback, Items: []NoteItem{}, Gaps: []string{"Release membership and bilingual ticket fields were not captured. Git mentions do not establish release membership."}}
 }
 
 var noteUUID = regexp.MustCompile(`(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)

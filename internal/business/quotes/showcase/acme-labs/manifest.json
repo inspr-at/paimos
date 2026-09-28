@@ -1,0 +1,22 @@
+{
+  "schema": "aeon.quote-showcase.v1",
+  "add_files": "Add another quotes/*.json file, and an organisations/*.json file when the customer is new. Use schema aeon.quote-showcase.v1 and a new key. The loader reads every file in those directories and does not hard-code quote names.",
+  "features": {
+    "sections-numbering": "acme-platform uses decimal, upper-roman and lower-alpha. acme-fitout uses upper-alpha, lower-roman and none.",
+    "lists": "acme-platform uses disc, circle and a decimal outline with depth, list start, list continue and section binding. acme-fitout uses square, dash and a glyph.",
+    "inline-marks": "acme-platform marks Inbetriebnahme bold and vor Ort italic. That selects document writer 2.",
+    "section-layout": "acme-platform keeps a section together and sets spacing. acme-fitout starts a section on a new page.",
+    "positions": "acme-platform mixes units and decimal quantities. acme-fitout carries long position texts and a revised price in version 2.",
+    "optional-scope": "Optional and alternative scope is prose on acme-platform and acme-fitout. The document model has no optional or alternative position, so that scope is not priced and is not summed.",
+    "discount-note": "Every quote stores a discount note. The tenant default profile hides the discount line. ACME English shows the note as a line. No percent is calculated.",
+    "vat": "German quotes store a VAT note for a profile that renders the note. ACME English uses a VAT line.",
+    "payment-terms": "German quotes include a Zahlungsbedingungen section, because the default profile places payment terms in sections. ACME English renders the payment-terms field after the totals.",
+    "acceptance": "Every quote has accept text. The default profile uses two signature columns. ACME English uses one. acme-acceptance is accepted by the bound contact.",
+    "versions": "acme-fitout is issued, branched and issued again as version 2.",
+    "public-link": "acme-platform is issued with a public link when the host link key is present.",
+    "states": "acme-retainer stays a draft. acme-platform and acme-fitout are issued and open. acme-acceptance is accepted.",
+    "pagination": "acme-fitout is long and starts one section on a new page.",
+    "locales": "The German quotes use the tenant default profile, which is de-AT after the INSPR profile is applied with --default. acme-retainer uses the bundle profile ACME English, locale en, layout standard.",
+    "variables": "The only variables are the profile footer tokens {page} and {total}. Quote prose is not mail-merged."
+  }
+}

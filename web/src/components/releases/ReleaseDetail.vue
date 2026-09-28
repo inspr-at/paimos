@@ -1,14 +1,16 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { displayHeadline, groupChanges, hasUsableNotes, releasedAt, shortCommit, span, ticketsOf, type Release } from '../../lib/releases'
+import { displayHeadline, emptyNotesLine, groupChanges, hasUsableNotes, hiddenNoteLine, HISTORICAL_TAG_LABEL, historicalTagFallback, localizedNote, releasedAt, shortCommit, span, ticketsOf, type Release } from '../../lib/releases'
 import { absoluteTime, relativeTime } from '../../lib/work'
+import { useProfile } from '../../stores/profile'
 import AppIcon from '../AppIcon.vue'
 import CalendarVersion from '../CalendarVersion.vue'
 import ReleaseChanges from './ReleaseChanges.vue'
 import TicketChips from './TicketChips.vue'
 import TicketLink from './TicketLink.vue'
-const noteLanguage = ref<'en' | 'de'>('en')
+const profile = useProfile()
+const locale = computed(() => profile.profile?.locale ?? null)
 
 // One release: when it shipped, what changed, and the evidence behind it.
 const props = defineProps<{
@@ -76,22 +78,19 @@ defineExpose({ focus: () => heading.value?.focus({ preventScroll: false }) })
       <template v-if="reserved">Reserved {{ absoluteTime(at) }} · {{ relativeTime(at, { now, long: true }) }}. The version was taken{{ release.tag ? ' and tagged' : '' }}, but no release was published under it.</template>
       <template v-else>{{ release.published_at ? 'Published' : 'Tagged' }} {{ absoluteTime(at) }} · {{ relativeTime(at, { now, long: true }) }}</template>
     </p>
-    <p v-if="!hasUsableNotes(release) && release.headline" class="headline">{{ displayHeadline(release) }}</p>
+    <p v-if="historicalTagFallback(release)" class="eyebrow hist-label">{{ HISTORICAL_TAG_LABEL }}</p>
+    <p v-if="!hasUsableNotes(release) && release.headline" class="headline">{{ displayHeadline(release, locale) }}</p>
 
-    <TicketChips v-if="tickets.length" :tickets="tickets" class="tickets" />
+    <TicketChips v-if="tickets.length && !hasUsableNotes(release)" :tickets="tickets" class="tickets" />
 
-    <section v-if="hasUsableNotes(release)" class="changes-block" aria-label="Release notes">
-      <div class="badges" role="group" aria-label="Release note language">
-        <button type="button" class="chip" :aria-pressed="noteLanguage === 'en'" @click="noteLanguage = 'en'">English</button>
-        <button type="button" class="chip" :aria-pressed="noteLanguage === 'de'" @click="noteLanguage = 'de'">Deutsch</button>
-      </div>
-      <div v-for="note in release.notes.items" :key="note.id" :lang="noteLanguage" class="note-item">
-        <p><span class="chip">{{ noteLanguage === 'en' ? note.pill_en : note.pill_de }}</span> <TicketLink :ticket-key="note.key" /></p>
-        <p>{{ noteLanguage === 'en' ? note.benefit_en : note.benefit_de }}</p>
+    <section v-if="hasUsableNotes(release)" class="changes-block notes" aria-label="Release notes">
+      <div v-for="note in release.notes.items" :key="note.id" class="note-item">
+        <p class="note-line"><span class="chip note-pill" :lang="localizedNote(note, locale).pillLang">{{ localizedNote(note, locale).pill }}</span> <TicketLink :ticket-key="note.key" /></p>
+        <p class="note-benefit" :lang="localizedNote(note, locale).benefitLang">{{ localizedNote(note, locale).benefit }}</p>
       </div>
       <p v-for="gap in release.notes.gaps" :key="gap" class="none">{{ gap }}</p>
-      <p v-if="!release.notes.items.length && !release.notes.gaps.length" class="none">{{ noteLanguage === 'en' ? 'No public release notes.' : 'Keine öffentlichen Release Notes.' }}</p>
-      <p v-if="release.notes.hidden" class="none">{{ release.notes.hidden }} {{ noteLanguage === 'en' ? 'ticket(s) hidden from release notes.' : 'Ticket(s) in den Release Notes ausgeblendet.' }}</p>
+      <p v-if="!release.notes.items.length && !release.notes.gaps.length" class="none">{{ emptyNotesLine(locale) }}</p>
+      <p v-if="release.notes.hidden" class="none">{{ hiddenNoteLine(release.notes.hidden, locale) }}</p>
     </section>
     <div v-else class="changes-block">
       <p v-for="gap in release.notes?.gaps" :key="gap" class="none">{{ gap }}</p>
@@ -180,8 +179,12 @@ defineExpose({ focus: () => heading.value?.focus({ preventScroll: false }) })
 .reserved .headline, .reserved .version { color: var(--ink-2); }
 .tickets { margin-top: 2px; }
 .changes-block { display: grid; gap: 8px; margin-top: 10px; }
-.note-item { display: grid; gap: 6px; font-size: 14px; }
-.chip[aria-pressed="true"] { background: var(--row-selected); font-weight: 650; }
+.hist-label { margin: 8px 0 0; }
+.notes { gap: 0; }
+.note-item { display: grid; gap: 4px; min-width: 0; padding: 10px 0; }
+.note-item + .note-item { margin-top: 2px; }
+.note-line { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; min-width: 0; margin: 0; }
+.note-benefit { margin: 0; font-size: 14.5px; line-height: 1.45; color: var(--ink); text-wrap: pretty; overflow-wrap: anywhere; }
 .none { font-size: 13px; color: var(--ink-3); }
 .evidence { margin-top: 14px; border-radius: 14px; background: var(--glass); border: 1px solid var(--glass-edge); box-shadow: 0 0 0 1px var(--line); overflow: hidden; }
 .ev-toggle { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 48px; padding: 8px 14px; border: 0; background: transparent; color: var(--ink); text-align: left; }

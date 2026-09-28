@@ -81,3 +81,33 @@ func TestSplitCoreMigrations(t *testing.T) {
 		}
 	}
 }
+
+func TestConcurrentIndexOptOut(t *testing.T) {
+	for _, tc := range []struct {
+		name, body    string
+		marked, valid bool
+	}{
+		{"index", "-- aeon:no-transaction\n-- SPDX-License-Identifier: AGPL-3.0-only\nCREATE INDEX CONCURRENTLY pending ON messages(id) WHERE id IS NOT NULL;", true, true},
+		{"crlf", "-- aeon:no-transaction\r\nCREATE INDEX CONCURRENTLY pending ON messages(id);", true, true},
+		{"normal", "CREATE TABLE messages(id int);", false, true},
+		{"marker must be first", "-- license\n-- aeon:no-transaction\nCREATE TABLE messages(id int);", false, true},
+		{"empty", "-- aeon:no-transaction\n", true, false},
+		{"ddl", "-- aeon:no-transaction\nALTER TABLE messages ADD COLUMN body text;", true, false},
+		{"blocking index", "-- aeon:no-transaction\nCREATE INDEX pending ON messages(id);", true, false},
+		{"batch", "-- aeon:no-transaction\nCREATE INDEX CONCURRENTLY pending ON messages(id); SELECT 1;", true, false},
+		{"two indexes", "-- aeon:no-transaction\nCREATE INDEX CONCURRENTLY pending ON messages(id); CREATE INDEX CONCURRENTLY other ON messages(id);", true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			index, table, err := concurrentIndex(tc.body, splitSQL(tc.body))
+			if (err == nil) != tc.valid {
+				t.Fatalf("valid=%v: %v", tc.valid, err)
+			}
+			if tc.marked && tc.valid && (index != "pending" || table != "messages") {
+				t.Fatalf("wrong target %q %q", index, table)
+			}
+			if !tc.marked && index != "" {
+				t.Fatal("unmarked file opted out")
+			}
+		})
+	}
+}

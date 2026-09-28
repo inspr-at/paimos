@@ -248,11 +248,17 @@ test('read-only people see requests but cannot decide or control', async ({ page
   await openAgents(page)
   await expect(queue(page).locator('.item')).toHaveCount(4)
   await expect(queue(page).getByRole('button', { name: 'Approve' })).toHaveCount(0)
-  await expect(row(page, camy).getByRole('button', { name: 'Interrupt camy' })).toHaveAttribute('aria-disabled', 'true')
+  // Controls that can never work stay off the row; the menu says why.
+  await expect(row(page, camy).getByRole('button', { name: 'Interrupt camy' })).toHaveCount(0)
+  await row(page, camy).hover()
+  await row(page, camy).getByRole('button', { name: 'Actions for camy' }).click()
+  await expect(page.getByRole('menuitem', { name: 'Interrupt' })).toHaveAttribute('aria-disabled', 'true')
+  await expect(page.getByRole('menu')).toContainText('Only people who may write can control sessions')
 })
 
 test('the session panel shows the ticket, runs, telemetry and the thread, and sends messages', async ({ page }) => {
-  const { calls } = await setup(page)
+  const { calls, data } = await setup(page)
+  for (const m of data.messages.filter(m => m.project === 'p-pharos')) Object.assign(m, m.sender_principal_id === data.me ? { recipient_session_id: camy } : { sender_session_id: camy, sender_label: 'camy' })
   await openAgents(page, `/agents/${camy}`)
   const details = panel(page)
   await expect(details.getByRole('heading', { name: /camy/ })).toBeVisible()
@@ -276,7 +282,7 @@ test('the session panel shows the ticket, runs, telemetry and the thread, and se
   await page.keyboard.press('Control+Enter')
   await expect(details.locator('.msg')).toHaveCount(5)
   const sent = calls.find(c => c.method === 'POST' && c.path.endsWith('/messages'))?.body as Record<string, unknown>
-  expect(sent).toMatchObject({ to: 'claude:camy', body: 'Sort stale hosts last.', delivery_level: 'steer', expects_reply: false, is_action_request: false, reply_to: '3e000000-0000-4000-8000-000000000004' })
+  expect(sent).toMatchObject({ to: 'claude:camy', recipient_session_id: camy, body: 'Sort stale hosts last.', delivery_level: 'steer', expects_reply: false, is_action_request: false, reply_to: '3e000000-0000-4000-8000-000000000004' })
   expect(typeof sent.idempotency_key).toBe('string')
   // B7: runs by agent, messages newest first in one page, sessions tenant-wide.
   expect(calls.some(c => c.path === '/api/runs' && c.query?.get('agent') === 'a0000000-0000-4000-8000-000000000001')).toBe(true)
@@ -291,17 +297,23 @@ test('interrupt goes straight out, stop asks first, and sessions outside AEON ca
   await expect(page.locator('.toast').filter({ hasText: 'Interrupt sent to nova.' })).toBeVisible()
   expect(calls.some(c => c.method === 'POST' && c.path.endsWith(`/harness-sessions/${nova}/controls/interrupt`))).toBe(true)
   await expect(page.locator('.toast').filter({ hasText: 'nova applied the interrupt.' })).toBeVisible({ timeout: 8000 })
-  await row(page, camy).getByRole('button', { name: 'Stop camy' }).click()
+  // Stop asks first, so it sits in the row's overflow menu.
+  await expect(row(page, camy).getByRole('button', { name: 'Stop camy' })).toHaveCount(0)
+  await row(page, camy).getByRole('button', { name: 'Actions for camy' }).click()
+  await page.getByRole('menuitem', { name: /Stop session/ }).click()
   const dialog = page.getByRole('dialog', { name: 'Stop camy?' })
   await expect(dialog).toBeVisible()
   await dialog.getByRole('button', { name: 'Cancel' }).click()
   expect(calls.some(c => c.path.endsWith('/controls/stop'))).toBe(false)
-  await row(page, camy).getByRole('button', { name: 'Stop camy' }).click()
+  await row(page, camy).getByRole('button', { name: 'Actions for camy' }).click()
+  await page.getByRole('menuitem', { name: /Stop session/ }).click()
   await page.getByRole('dialog', { name: 'Stop camy?' }).getByRole('button', { name: 'Stop session' }).click()
   await expect.poll(() => calls.some(c => c.path.endsWith(`/harness-sessions/${camy}/controls/stop`))).toBe(true)
-  const unmanaged = row(page, session(5)).getByRole('button', { name: 'Interrupt amy' })
-  await expect(unmanaged).toHaveAttribute('aria-disabled', 'true')
-  await expect(unmanaged).toHaveAttribute('data-tip', /outside AEON/)
+  await expect(row(page, session(5)).getByRole('button', { name: 'Interrupt amy' })).toHaveCount(0)
+  await row(page, session(5)).hover()
+  await row(page, session(5)).getByRole('button', { name: 'Actions for amy' }).click()
+  await expect(page.getByRole('menuitem', { name: 'Interrupt' })).toHaveAttribute('aria-disabled', 'true')
+  await expect(page.getByRole('menu')).toContainText(/outside AEON/)
 })
 
 test('Enter opens a session, j and k move the panel along, Escape closes it', async ({ page }) => {

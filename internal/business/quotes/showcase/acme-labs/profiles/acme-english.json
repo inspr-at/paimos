@@ -1,0 +1,88 @@
+{
+  "name": "ACME English",
+  "definition": {
+    "schema": "inspr.document-profile.v1",
+    "layout_variant": "standard",
+    "locale": "en",
+    "fonts": [],
+    "colors": {
+      "ink": "#253335",
+      "muted": "#637477",
+      "soft": "#91a1a3",
+      "accent": "#287f78",
+      "rule": "#d5dfdf",
+      "paper": "#ffffff"
+    },
+    "typography": {
+      "body_pt": "10"
+    },
+    "page": {
+      "width_mm": "210",
+      "height_mm": "297",
+      "top_mm": "18",
+      "right_mm": "20",
+      "bottom_mm": "16",
+      "left_mm": "22"
+    },
+    "cover": {
+      "top_mm": "11"
+    },
+    "sections": {
+      "numbering": "decimal"
+    },
+    "positions_table": {
+      "columns": [
+        {
+          "key": "position",
+          "width_mm": "9"
+        },
+        {
+          "key": "description",
+          "width_mm": "71"
+        },
+        {
+          "key": "quantity",
+          "width_mm": "15"
+        },
+        {
+          "key": "unit",
+          "width_mm": "22"
+        },
+        {
+          "key": "unit_price",
+          "width_mm": "24"
+        },
+        {
+          "key": "total",
+          "width_mm": "27"
+        }
+      ],
+      "separator": "rule",
+      "repeat_header": true
+    },
+    "totals": {
+      "vat": "line",
+      "discount": "line",
+      "net_label": "Net"
+    },
+    "payment_terms": {
+      "position": "after-totals",
+      "heading": "Payment terms"
+    },
+    "acceptance": {
+      "signature_columns": 1,
+      "gap_mm": "14",
+      "lead_mm": "28"
+    },
+    "footer": {
+      "width_mm": "33",
+      "offset_mm": "0",
+      "page_number_format": "PAGE {page} OF {total}"
+    },
+    "labels": {
+      "quote": "QUOTE",
+      "date": "Date",
+      "valid": "Valid until"
+    }
+  }
+}

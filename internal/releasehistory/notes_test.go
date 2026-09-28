@@ -35,7 +35,7 @@ func TestNotesSnapshotLanguagesHiddenGapsAndDuplicates(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(notes.Items) != 1 || notes.Hidden != 1 || len(notes.Gaps) != 1 || len(notes.SHA256) != 64 || notes.Items[0].BenefitDE != "Tickets erklären den Nutzen." {
+	if len(notes.Items) != 1 || notes.Hidden != 1 || len(notes.Gaps) != 1 || len(notes.SHA256) != 64 || notes.Items[0].BenefitDE != "Tickets erklären den Nutzen." || notes.Fallback != "" {
 		t.Fatalf("notes: %+v", notes)
 	}
 	encoded, _ := json.Marshal(notes)
@@ -110,7 +110,7 @@ func TestBuildUsesOnlyTaggedSnapshotAndKeepsOfflineGaps(t *testing.T) {
 		t.Fatal(h.Releases[0])
 	}
 	for _, r := range h.Releases[1:] {
-		if r.Notes == nil || len(r.Notes.Gaps) == 0 || len(r.Notes.Items) != 0 {
+		if r.Notes == nil || r.Notes.Fallback != HistoricalFallback || len(r.Notes.Gaps) == 0 || len(r.Notes.Items) != 0 {
 			t.Fatal("invented historical notes", r)
 		}
 	}

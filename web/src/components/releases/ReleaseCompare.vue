@@ -2,6 +2,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { compare, displayHeadline, releasedAt, span, type Release } from '../../lib/releases'
+import { useProfile } from '../../stores/profile'
 import AppIcon from '../AppIcon.vue'
 import CalendarVersion from '../CalendarVersion.vue'
 import ReleaseChanges from './ReleaseChanges.vue'
@@ -11,6 +12,8 @@ import TicketChips from './TicketChips.vue'
 // and including the newer one.
 const props = defineProps<{ releases: Release[]; from: string; to: string | null; repository: string; query: string }>()
 const emit = defineEmits<{ swap: []; exit: [] }>()
+const profile = useProfile()
+const locale = computed(() => profile.profile?.locale ?? null)
 const result = computed(() => props.to && props.to !== props.from ? compare(props.releases, props.from, props.to) : null)
 const count = computed(() => result.value ? result.value.groups.features.length + result.value.groups.fixes.length + result.value.groups.other.length : 0)
 const between = computed(() => {
@@ -45,7 +48,7 @@ const between = computed(() => {
       <section class="included" aria-labelledby="compare-included">
         <h3 id="compare-included" class="included-h">Releases in this range</h3>
         <ul>
-          <li v-for="r in result.releases" :key="r.version"><CalendarVersion :value="r.version" class="inc-version" /><span class="inc-headline">{{ r.notes || r.headline ? displayHeadline(r) : 'No headline recorded' }}</span></li>
+          <li v-for="r in result.releases" :key="r.version"><CalendarVersion :value="r.version" class="inc-version" /><span class="inc-headline">{{ r.notes || r.headline ? displayHeadline(r, locale) : 'No headline recorded' }}</span></li>
         </ul>
       </section>
       <ReleaseChanges v-if="count" :groups="result.groups" :repository="repository" :query="query" class="changes" />

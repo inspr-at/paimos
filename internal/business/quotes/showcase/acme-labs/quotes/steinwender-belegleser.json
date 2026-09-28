@@ -1,0 +1,522 @@
+{
+  "schema": "aeon.quote-showcase.v1",
+  "key": "steinwender-belegleser",
+  "organisation": "steinwender-metallbau",
+  "contact": "steinwender-sabine-kofler",
+  "state": "issued",
+  "validity_days": 37,
+  "versions": [
+    {
+      "title": "Consulting: Belegleser für Nordwerk ERP",
+      "subtitle": "Projektstart und monatliche Consulting-Begleitung mit KI-Unterstützung",
+      "project_ref": "EST261099",
+      "currency": "EUR",
+      "legal": {
+        "intro": "Sehr geehrte Damen und Herren!\n\nAuf Grundlage des bereitgestellten Pflichtenhefts und der Unterlagen zur ERP-Importschnittstelle begleiten wir Sie beim Aufbau, der Einführung und der Weiterentwicklung Ihres KI-gestützten Beleglesers. Im Mittelpunkt stehen Ihre Abläufe und Ihr Wissen: Wir vermitteln das technische Verständnis, entwickeln mit Ihnen geeignete Lösungswege und unterstützen Ihr Team bei der praktischen Umsetzung. So entsteht eine dokumentierte Lösung, die Sie selbst betreiben und mit eigenen oder frei gewählten Partnern weiterentwickeln können.",
+        "accept_text": "Bitte nehmen Sie dieses Angebot durch firmenmäßige Unterzeichnung und Rücksendung oder über den Kundenlink online an. Mit der Annahme werden die genannten Bedingungen Vertragsbestandteil.",
+        "vat_note": "Alle Beträge netto zuzüglich 20 % USt. Ausgewiesene Nettosumme: Projektstart plus erster Consultingmonat.",
+        "discount_note": "",
+        "payment_terms": ""
+      },
+      "sections": [
+        {
+          "heading": "Vertragspartner",
+          "nodes": [
+            {
+              "kind": "paragraph",
+              "text": "Auftragnehmer ist der oben angeführte Absender, Auftraggeber ist der oben genannte Empfänger. Dieses Angebot richtet sich ausschließlich an Unternehmer im Sinne des UGB. Angaben zum Auftraggeber: UID ATU68123457; Firmenbuchnummer FN 402915 x."
+            }
+          ]
+        },
+        {
+          "heading": "Leistungsgegenstand und Vorgehen",
+          "nodes": [
+            {
+              "kind": "item",
+              "text": "Grundlage ist das übermittelte Pflichtenheft für einen intelligenten Belegleser für Nordwerk ERP. Der gemeinsam begleitete Aufbau erfolgt schrittweise nach gemeinsam vereinbarten Prioritäten: Dokumenteneingang, Textschicht-/OCR-Auswertung, Kopf- und Positionsdaten, Lieferanten- und Artikelabgleich, Kontierungs- und Kostenstellenvorschläge, Plausibilitäts- und Dublettenprüfung, menschliche Prüfung/Freigabe, Übertragung an das ERP sowie DMS-Ablage und Nachvollziehbarkeit.",
+              "marker": "decimal",
+              "numbering": "outline",
+              "section_bound": true
+            },
+            {
+              "kind": "item",
+              "text": "Die Zusammenarbeit ist als beratend begleiteter Eigenaufbau des Auftraggebers angelegt. Der Auftragnehmer übernimmt Beratung, Anleitung, Wissenstransfer und die jeweils vereinbarte technische Unterstützung; dazu können auch Konfigurationen, Code und KI-gestützte Ausarbeitungen gehören. Vorgehen, wesentliche Entscheidungen und Arbeitsergebnisse werden nachvollziehbar dokumentiert und mit den benannten Ansprechpartnern erläutert, damit das Wissen im Unternehmen des Auftraggebers verfügbar bleibt.",
+              "marker": "decimal",
+              "numbering": "outline",
+              "list_continue": true,
+              "section_bound": true
+            },
+            {
+              "kind": "item",
+              "text": "Der vollständige Umfang wird nach dem technischen Projektstart konkretisiert. Das Consultingpaket ist kein pauschaler Festpreis für die vollständige Umsetzung sämtlicher Anforderungen.",
+              "marker": "decimal",
+              "numbering": "outline",
+              "section_bound": true
+            }
+          ]
+        },
+        {
+          "heading": "Projektstart und praktischer Machbarkeitstest (PoC)",
+          "nodes": [
+            {
+              "kind": "item",
+              "text": "Das einmalige Projektstartpaket umfasst die gemeinsame Anforderungsklärung, repräsentative Testbelege und Sollwerte, Architektur, Feldzuordnung sowie erste ERP-/DMS-Integrationstests. Die Leistungen werden durch Beratung, Anleitung, technische Unterstützung sowie geeignete KI-gestützte oder automatisierte Ausarbeitungen erbracht; bei Bedarf sind bis zu 16 Stunden menschlicher Beratungs- und Umsetzungsleistung durch das eingesetzte Team enthalten.",
+              "marker": "decimal",
+              "numbering": "outline",
+              "section_bound": true
+            },
+            {
+              "kind": "item",
+              "text": "Im Projektstart wird gemeinsam mit den benannten Ansprechpartnern ein praktischer Machbarkeitstest (Proof of Concept, PoC) für ausgewählte Belege durchgeführt. Ziel ist ein durchgängiger Testablauf: Beleg übernehmen, Werte erkennen und prüfen, manuell bestätigen, Eingangsrechnung im ERP-Testmandanten anlegen und Originaldokument verknüpfen.",
+              "marker": "decimal",
+              "numbering": "outline",
+              "section_bound": true
+            },
+            {
+              "kind": "item",
+              "text": "Ergebnis ist eine dokumentierte technische Bewertung anhand der Testbelege und Schnittstellentests, einschließlich erreichter Ergebnisse, offener Voraussetzungen und einer Empfehlung für den weiteren Ausbau. Der Machbarkeitstest ist noch keine produktionsreife Lösung und garantiert nicht die Umsetzbarkeit sämtlicher Anforderungen. Automatische Zahlungsfreigabe und der vollständige Abgleich mit Bestellungen/Lieferscheinen sind nicht Teil der ersten Ausbaustufe.",
+              "marker": "decimal",
+              "numbering": "outline",
+              "section_bound": true
+            }
+          ]
+        },
+        {
+          "heading": "Monatliches Leistungspaket und Leistungserbringung",
+          "nodes": [
+            {
+              "kind": "item",
+              "text": "Die monatliche Pauschale vergütet die gemeinsam vereinbarten Beratungs-, Befähigungs- und Optimierungsleistungen einschließlich der abgestimmten technischen Unterstützung beim Aufbau und bei der Weiterentwicklung der Lösung.",
+              "marker": "decimal",
+              "numbering": "outline",
+              "section_bound": true
+            },
+            {
+              "kind": "item",
+              "text": "Je nach Aufgabe können diese durch den Auftragnehmer, qualifizierte Mitarbeiter oder hinzugezogene Kollegen sowie ganz oder teilweise durch KI und Prozessautomatisierung erbracht werden, soweit dies fachlich geeignet und mit den vereinbarten Vorgaben zur Datenverarbeitung vereinbar ist.",
+              "marker": "decimal",
+              "numbering": "outline",
+              "section_bound": true
+            },
+            {
+              "kind": "item",
+              "text": "Die fachgerechte Leistungserbringung bleibt in der Verantwortung des Auftragnehmers; die Leistungen sind nicht an eine bestimmte ausführende Person gebunden.",
+              "marker": "decimal",
+              "numbering": "outline",
+              "section_bound": true
+            },
+            {
+              "kind": "item",
+              "text": "Bei entsprechendem Bedarf sind insgesamt bis zu 8 Stunden  Beratungs- und Umsetzungs-leistung je Vertragsmonat enthalten. Die Pauschale ist unabhängig vom tatsächlichen  Zeitaufwand; eine Mindeststundenzahl oder Ausschöpfung der Kapazität wird nicht geschuldet.",
+              "marker": "decimal",
+              "numbering": "outline",
+              "section_bound": true
+            },
+            {
+              "kind": "item",
+              "text": "Nicht abgerufene Kapazitäten beziehen sich auf den jeweiligen Vertragsmonat und werden nicht übertragen; vereinbarte Leistungspflichten bleiben davon unberührt.",
+              "marker": "decimal",
+              "numbering": "outline",
+              "section_bound": true
+            },
+            {
+              "kind": "item",
+              "text": "Zusätzlich beauftragte menschliche Leistungen werden nach gesonderter Freigabe mit 240,00 EUR netto je Stunde verrechnet. Reine KI-/Maschinenlaufzeiten werden nicht als menschliche Arbeitsstunden angesetzt.",
+              "marker": "decimal",
+              "numbering": "outline",
+              "section_bound": true
+            },
+            {
+              "kind": "item",
+              "text": "Etwaige Termine werden vorab einvernehmlich und schriftlich abgestimmt. Rufbereitschaft und feste Vor-Ort-Präsenz sind nicht enthalten.",
+              "marker": "decimal",
+              "numbering": "outline",
+              "section_bound": true
+            }
+          ]
+        },
+        {
+          "heading": "Zeitplan und Planungsrahmen",
+          "nodes": [
+            {
+              "kind": "item",
+              "text": "Schritt 1- PoC (Machbarkeitstest): Er erfolgt im Projektstartpaket, sobald die vereinbarten Testdaten sowie der ERP-Testmandant und die erforderlichen Schnittstellenzugänge bereitstehen. Umfang und Termin des Testlaufs werden beim Projektstart  festgelegt.",
+              "marker": "decimal",
+              "numbering": "outline",
+              "section_bound": true
+            },
+            {
+              "kind": "item",
+              "text": "Schritt 2 - MVP  (Nutzbare Testversion): Auf Grundlage der Ergebnisse des Machbarkeitstests baut der Auftraggeber den Belegleser mit der vereinbarten Unterstützung des Auftragnehmers für ausgewählte Belegarten schrittweise aus und erprobt ihn mit den vorgesehenen Anwendern im Testbetrieb. Dieser Stand wird derzeit innerhalb von etwa zwei bis vier Vertragsmonaten ab technischer Startbereitschaft angestrebt.",
+              "marker": "decimal",
+              "numbering": "outline",
+              "section_bound": true
+            },
+            {
+              "kind": "item",
+              "text": "Maßgeblich sind die abgestimmten Prioritäten, verfügbare Zugänge und Referenzdaten, die Schnittstellenbedingungen sowie die geeignete Kombination aus Teamleistung und Automatisierung.",
+              "marker": "decimal",
+              "numbering": "outline",
+              "section_bound": true
+            },
+            {
+              "kind": "item",
+              "text": "Für Aufbau, Einführung und weitere Begleitung - auch weiterer Projekte - auf ein Jahr dient rund 31.200,00 EUR netto als vorläufiger Planungsrahmen. Dieser entspricht folgenden Leistungen:",
+              "marker": "decimal",
+              "numbering": "outline",
+              "section_bound": true
+            },
+            {
+              "kind": "item",
+              "text": "1x Projektstart: 4.800,00 EUR netto.",
+              "depth": 1,
+              "marker_x_mm": 3,
+              "text_start_mm": 1.5
+            },
+            {
+              "kind": "item",
+              "text": "12x Monatspauschale: jeweils 2.200,00 EUR netto.",
+              "depth": 1,
+              "marker_x_mm": 3,
+              "text_start_mm": 1.5
+            },
+            {
+              "kind": "item",
+              "text": "Der Planungsrahmen beschreibt die vorgesehenen Leistungen, kein persönliches Stundenguthaben. Er begründet weder eine verbindliche Mindestlaufzeit noch einen garantierten Festpreis oder eine Kostenobergrenze. Etwaige Fremdkosten sind ebenso nicht enthalten.",
+              "marker": "decimal",
+              "numbering": "outline",
+              "section_bound": true
+            }
+          ]
+        },
+        {
+          "heading": "Zusammenarbeit, Mitwirkung und Eigenbetrieb",
+          "nodes": [
+            {
+              "kind": "item",
+              "text": "Der Auftraggeber stellt repräsentative Belege mit bestätigten Sollwerten, relevante Stammdaten und Zuordnungsregeln, einen ERP-Testmandanten sowie freigegebene ERP-/DMS-Zugänge bereit. Er benennt fachliche Ansprechpartner und ermöglicht bei Bedarf die Abstimmung mit dem ERP-/DMS-Betreuer. Pflichtfelder, Zielstatus des Imports, Freigaberegeln und DMS-Verknüpfung werden gemeinsam geprüft.",
+              "marker": "decimal",
+              "numbering": "outline",
+              "section_bound": true
+            },
+            {
+              "kind": "item",
+              "text": "Fachliche Freigaben, Einsatzentscheidungen sowie die Prüfung und Freigabe erkannter Beleg- und Buchungsdaten verbleiben beim Auftraggeber. Produktive Schreibzugriffe erfolgen erst nach abgestimmtem Test und ausdrücklicher Freigabe durch den Auftraggeber; die vereinbarte Unterstützung bei Tests und Fehlerbehebung bleibt davon unberührt.",
+              "marker": "decimal",
+              "numbering": "outline",
+              "section_bound": true
+            },
+            {
+              "kind": "item",
+              "text": "Der laufende Betrieb von Hard- und Software liegt beim Auftraggeber bzw. bei dessen beauftragtem IT-Dienstleister, insbesondere Benutzer- und Berechtigungsverwaltung, Datensicherung und Wiederherstellung, Systemüberwachung, Updates sowie die organisatorische und technische Absicherung der Betriebsumgebung. Der Auftragnehmer unterstützt im vereinbarten Beratungsumfang bei der Planung dieser Maßnahmen und der Übergabe, übernimmt jedoch keine Betreiberrolle, fortlaufende Betriebsüberwachung oder eigenständige Betriebsführung.",
+              "marker": "decimal",
+              "numbering": "outline",
+              "section_bound": true
+            },
+            {
+              "kind": "item",
+              "text": "Werden vereinbarte Mitwirkungsleistungen nicht, nicht rechtzeitig oder nicht vollständig erbracht, verschieben sich davon abhängige Termine und Planungsziele entsprechend; die Monatspauschale bleibt davon unberührt. Dadurch entstehender Mehraufwand, etwa für Umplanungen, Wartezeiten oder wiederholte Tests, wird – soweit er nicht im monatlichen Leistungsumfang gemäß Punkt 4.4 aufgefangen werden kann – nach vorheriger Information des Auftraggebers mit 240,00 EUR netto je Stunde verrechnet.",
+              "marker": "decimal",
+              "numbering": "outline",
+              "section_bound": true
+            }
+          ]
+        },
+        {
+          "heading": "Synergien mit weiteren Projekten",
+          "nodes": [
+            {
+              "kind": "item",
+              "text": "Die technische Basis des Beleglesers wird mit Blick auf eine spätere Nutzung für weitere Anwendungen innerhalb der Unternehmensgruppe konzipiert. Ein konkreter Anwendungsfall ist die geplante Wissensplattform für Brunnhofer & Kreiner (B&K), die freigegebene Inhalte aus dem Dokumentenarchiv über eine einfach bedienbare Suche mit KI-gestützten Antworten und nachvollziehbaren Quellen zugänglich machen soll.",
+              "marker": "decimal",
+              "numbering": "outline",
+              "section_bound": true
+            },
+            {
+              "kind": "item",
+              "text": "Nach derzeitiger Einschätzung besteht bei rund 25-35 % der für den Belegleser vorgesehenen technischen Grundlagen und Umsetzungskomponenten Wiederverwendungspotenzial. Dazu zählen insbesondere der lokale Modellbetrieb, die Dokumentenaufbereitung sowie gemeinsame Betriebs- und Überwachungskomponenten. Der tatsächlich nutzbare Anteil wird im Zuge der technischen Konzeption konkretisiert - daraus lässt sich keine pauschale Kostenersparnis in gleicher Höhe ableiten.",
+              "marker": "decimal",
+              "numbering": "outline",
+              "section_bound": true
+            },
+            {
+              "kind": "item",
+              "text": "Die geplante Serverinfrastruktur soll beide Anwendungen gemeinsam unterstützen. Die Dimensionierung erfolgt anhand der eingesetzten Modelle, Datenmengen und gleichzeitigen Nutzung. Unternehmensbezogene Datenbestände, Suchindizes und Zugänge werden dabei getrennt geführt.",
+              "marker": "decimal",
+              "numbering": "outline",
+              "section_bound": true
+            },
+            {
+              "kind": "item",
+              "text": "Die Umsetzung der B&K-Wissensplattform einschließlich Schnittstellen und Anbindungen wird gesondert abgestimmt und beauftragt. Sie ist nicht Bestandteil dieses Angebots. Die Wiederverwendung geeigneter Grundlagen wird jedoch bei der weiteren Planung berücksichtigt.",
+              "marker": "decimal",
+              "numbering": "outline",
+              "section_bound": true
+            }
+          ]
+        },
+        {
+          "heading": "Nicht enthaltene Kosten und Leistungen",
+          "nodes": [
+            {
+              "kind": "paragraph",
+              "text": "Nicht enthalten sind Fremdleistungen sowie weitergehende Betriebs- oder Supportleistungen; diese werden bei Bedarf gesondert vereinbart. Dazu gehören insbesondere, aber nicht ausschließlich:"
+            },
+            {
+              "kind": "item",
+              "text": "Hardware, externe Software- und Modelllizenzen, Hosting sowie eine gegebenenfalls notwendige Einrichtung oder Anpassung durch den ERP-/DMS-Betreuer."
+            },
+            {
+              "kind": "item",
+              "text": "Cloud-Verbrauchsgebühren; diese werden direkt über Auftraggeber-Zahlungsmittel  abgerechnet."
+            },
+            {
+              "kind": "item",
+              "text": "Größere Sonderanpassungen, z. B. zusätzliche Mandanten oder erweiterte Schnittstellen."
+            },
+            {
+              "kind": "item",
+              "text": "Laufende Betriebsführung, Rufbereitschaft, garantierte Verfügbarkeiten oder Reaktionszeiten."
+            },
+            {
+              "kind": "paragraph",
+              "text": "Die Kosten der vom Auftragnehmer intern eingesetzten KI-Werkzeuge sind in den vereinbarten Pauschalen enthalten."
+            }
+          ]
+        },
+        {
+          "heading": "Übergabe, Nutzungsrechte und Eigenbetrieb",
+          "nodes": [
+            {
+              "kind": "item",
+              "text": "Der Auftraggeber erhält sämtliche projektspezifischen Arbeitsergebnisse einschließlich Quellcode, Konfigurationen, Dokumentation und der erforderlichen projektbezogenen administrativen Zugänge und betreibt die Lösung in eigener Verantwortung.",
+              "marker": "decimal",
+              "numbering": "outline",
+              "section_bound": true
+            },
+            {
+              "kind": "item",
+              "text": "An den projektspezifischen Arbeitsergebnissen räumt der Auftragnehmer dem Auftraggeber sämtliche ihm zustehenden und rechtlich einräumbaren Werknutzungsrechte ausschließlich sowie zeitlich und räumlich unbeschränkt ein, einschließlich Bearbeitung, Weiterentwicklung, Weitergabe sowie Betrieb und Betreuung durch beauftragte Dritte. Der Auftraggeber ist berechtigt, diese Rechte ganz oder teilweise auf verbundene Unternehmen seiner Unternehmensgruppe zu übertragen oder ihnen Nutzungsrechte daran einzuräumen.",
+              "marker": "decimal",
+              "numbering": "outline",
+              "section_bound": true
+            },
+            {
+              "kind": "item",
+              "text": "An vorbestehenden, generischen oder projektübergreifend verwendbaren Komponenten, Werkzeugen und Vorlagen des Auftragnehmers erhält der Auftraggeber eine nicht ausschließliche, zeitlich und räumlich unbeschränkte Werknutzungsbewilligung im für Nutzung, Betrieb und Weiterentwicklung der Lösung erforderlichen Umfang, einschließlich für verbundene Unternehmen. Der Auftragnehmer bleibt berechtigt, diese Komponenten sowie das  gewonnene  Know-how weiterhin zu verwenden; Vertraulichkeitspflichten bleiben unberührt.",
+              "marker": "decimal",
+              "numbering": "outline",
+              "section_bound": true
+            },
+            {
+              "kind": "item",
+              "text": "Für eingebundene Drittanbieter- und Open-Source-Komponenten gelten die offengelegten Lizenzbedingungen; die Übergabe umfasst sämtliche danach zulässigen Bestandteile und Rechte.",
+              "marker": "decimal",
+              "numbering": "outline",
+              "section_bound": true
+            },
+            {
+              "kind": "item",
+              "text": "Die Rechte gemäß 9.2 und 9.3 gehen jeweils mit vollständiger Bezahlung der zugrunde liegenden Leistung auf den Auftraggeber über.",
+              "marker": "decimal",
+              "numbering": "outline",
+              "section_bound": true
+            }
+          ]
+        },
+        {
+          "heading": "Vertragsbeginn, Laufzeit und Kündigung",
+          "nodes": [
+            {
+              "kind": "item",
+              "text": "Der Vertrag gilt ab rechtsverbindlicher Annahme durch Unterzeichnung oder Online-Annahme und wird auf unbestimmte Zeit geschlossen; eine Mindestlaufzeit besteht nicht.",
+              "marker": "decimal",
+              "numbering": "outline",
+              "section_bound": true
+            },
+            {
+              "kind": "item",
+              "text": "Beide Parteien können den Vertrag jederzeit in Textform, insbesondere per E-Mail, kündigen. Die Kündigung wird zum Ende jenes Vertragsmonats wirksam, der auf den Vertragsmonat ihres Zugangs folgt.",
+              "marker": "decimal",
+              "numbering": "outline",
+              "section_bound": true
+            },
+            {
+              "kind": "item",
+              "text": "Bereits fällige oder bezahlte Entgelte, insbesondere das Projektstartpaket, werden bei Kündigung nicht rückerstattet, sofern die Kündigung nicht aus einem wichtigen Grund erfolgt, den der Auftragnehmer zu vertreten hat.",
+              "marker": "decimal",
+              "numbering": "outline",
+              "section_bound": true
+            },
+            {
+              "kind": "item",
+              "text": "Das Recht zur außerordentlichen Kündigung aus wichtigem Grund bleibt unberührt.",
+              "marker": "decimal",
+              "numbering": "outline",
+              "section_bound": true
+            },
+            {
+              "kind": "item",
+              "text": "Ein Vertragsmonat beginnt am Tag des Vertragsbeginns und endet am Tag vor dem entsprechenden Tag des Folgemonats; fehlt dieser Tag, gilt der Monatsletzte.",
+              "marker": "decimal",
+              "numbering": "outline",
+              "section_bound": true
+            }
+          ]
+        },
+        {
+          "heading": "Zahlungsbedingungen",
+          "nodes": [
+            {
+              "kind": "item",
+              "text": "Das einmalige Projektstartpaket einschließlich des praktischen Machbarkeitstests beträgt 4.800,00 EUR netto und ist vor Leistungsbeginn fällig.",
+              "marker": "decimal",
+              "numbering": "outline",
+              "section_bound": true
+            },
+            {
+              "kind": "item",
+              "text": "Die monatliche Consulting-Pauschale beträgt 2.200,00 EUR netto und ist jeweils vor Beginn des vereinbarten Vertragsmonats fällig.",
+              "marker": "decimal",
+              "numbering": "outline",
+              "section_bound": true
+            },
+            {
+              "kind": "item",
+              "text": "Zu Projektbeginn sind somit zunächst 7.000,00 EUR netto fällig; anschließend 2.200,00 EUR netto monatlich.",
+              "marker": "decimal",
+              "numbering": "outline",
+              "section_bound": true
+            },
+            {
+              "kind": "item",
+              "text": "Das Projektstartpaket ist eine eigenständige Leistung und keine Vorauszahlung von zwei Monatspauschalen.",
+              "marker": "decimal",
+              "numbering": "outline",
+              "section_bound": true
+            },
+            {
+              "kind": "item",
+              "text": "Alle Preise zuzüglich 20 % Umsatzsteuer.",
+              "marker": "decimal",
+              "numbering": "outline",
+              "section_bound": true
+            },
+            {
+              "kind": "item",
+              "text": "Rechnungen sind sofort nach Erhalt ohne Abzug zur Zahlung fällig. Bei Zahlungsverzug ist der Auftragnehmer nach Mahnung berechtigt, weitere Leistungen bis zum Zahlungseingang auszusetzen.",
+              "marker": "decimal",
+              "numbering": "outline",
+              "section_bound": true
+            }
+          ]
+        },
+        {
+          "heading": "Gewährleistung und Haftung",
+          "nodes": [
+            {
+              "kind": "item",
+              "text": "Maßgeblich ist der schriftlich vereinbarte Leistungsumfang. Der Auftragnehmer schuldet die fachgerechte Erbringung seiner Beratungs- und Unterstützungsleistungen sowie die ausdrücklich vereinbarten Arbeitsergebnisse; gesetzliche Gewährleistungsrechte bleiben unberührt. Ein bestimmter wirtschaftlicher Erfolg, eine bestimmte Erkennungsquote oder eine jederzeit fehlerfreie und verfügbare Gesamtlösung wird nur geschuldet, wenn dies ausdrücklich gesondert vereinbart ist; konkret vereinbarte Leistungs- und Testkriterien bleiben verbindlich.",
+              "marker": "decimal",
+              "numbering": "outline",
+              "section_bound": true
+            },
+            {
+              "kind": "item",
+              "text": "Der Auftragnehmer haftet für Schäden nur bei Vorsatz oder grober Fahrlässigkeit. Die Haftung für leichte Fahrlässigkeit ist ausgeschlossen.",
+              "marker": "decimal",
+              "numbering": "outline",
+              "section_bound": true
+            },
+            {
+              "kind": "item",
+              "text": "Bei grober Fahrlässigkeit ist die Haftung mit der Summe der Nettoentgelte begrenzt, die der Auftraggeber in den zwölf Monaten vor dem schadensbegründenden Ereignis aus diesem Vertrag bezahlt hat.",
+              "marker": "decimal",
+              "numbering": "outline",
+              "section_bound": true
+            },
+            {
+              "kind": "item",
+              "text": "Für Nachteile, die ausschließlich auf eigenständige Änderungen oder Einsatzentscheidungen des Auftraggebers, auf dessen Betriebsführung oder auf Ausfälle fremder Systeme zurückgehen, haftet der Auftragnehmer nicht, soweit ihn keine eigene Pflichtverletzung trifft; seine vereinbarten Beratungs-, Prüf- und Hinweispflichten bleiben bestehen. Für Datenverlust haftet der Auftragnehmer nur im Umfang des Wiederherstellungsaufwands, der bei ordnungsgemäßer Datensicherung durch den Auftraggeber angefallen wäre.",
+              "marker": "decimal",
+              "numbering": "outline",
+              "section_bound": true
+            },
+            {
+              "kind": "item",
+              "text": "Das Vorliegen grober Fahrlässigkeit hat der Auftraggeber nachzuweisen.",
+              "marker": "decimal",
+              "numbering": "outline",
+              "section_bound": true
+            },
+            {
+              "kind": "item",
+              "text": "Die vorstehenden Haftungsbeschränkungen gelten nicht bei Vorsatz oder krass grober Fahrlässigkeit, für Personenschäden sowie für zwingende gesetzliche Haftung, insbesondere nach dem Produkthaftungsgesetz. Im Übrigen gelten die gesetzlichen Bestimmungen.",
+              "marker": "decimal",
+              "numbering": "outline",
+              "section_bound": true
+            }
+          ]
+        },
+        {
+          "heading": "Datenverarbeitung und Vertraulichkeit",
+          "nodes": [
+            {
+              "kind": "item",
+              "text": "Die KI-gestützte Verarbeitung von Belegen und Unternehmensdaten erfolgt vorrangig lokal in der Umgebung des Auftraggebers. Vor einer allfälligen Nutzung von Cloud-Modellen werden personenbezogene und vertrauliche Inhalte durch ein lokal betriebenes Modell  bereinigt; Kundendaten werden nicht automatisch an externe KI-Dienste weitergeleitet. Eine Cloud-Nutzung erfolgt nur in Abstimmung mit dem Auftraggeber und über dessen Konten.",
+              "marker": "decimal",
+              "numbering": "outline",
+              "section_bound": true
+            },
+            {
+              "kind": "item",
+              "text": "Der Auftraggeber stellt dem Auftragnehmer Testbelege, Referenz- und sonstige Daten ausschließlich in anonymisierter Form bereit; der Auftragnehmer verarbeitet keine personen-bezogenen Daten im Auftrag des Auftraggebers. Sollte ein solcher Zugriff dennoch  notwendig werden, schließen die Parteien vorher eine entsprechende Vereinbarung (AVV) ab. ",
+              "marker": "decimal",
+              "numbering": "outline",
+              "section_bound": true
+            },
+            {
+              "kind": "item",
+              "text": "Originalbelege bleiben unverändert; Zugriff und Aufbewahrung werden im Betriebskonzept festgelegt.",
+              "marker": "decimal",
+              "numbering": "outline",
+              "section_bound": true
+            },
+            {
+              "kind": "item",
+              "text": "Für die Vertraulichkeit gilt die zwischen den Parteien abgeschlossene Geheimhaltungsvereinbarung vom 02.03.2026. Sie erstreckt sich auf sämtliche im Rahmen dieses Vertrags ausgetauschten Informationen und gilt nach Maßgabe ihrer Bestimmungen auch über das Vertragsende hinaus.",
+              "marker": "decimal",
+              "numbering": "outline",
+              "section_bound": true
+            }
+          ]
+        },
+        {
+          "heading": "Bindefrist und anwendbares Recht",
+          "nodes": [
+            {
+              "kind": "paragraph",
+              "text": "Dieses Angebot ist bis zum oben genannten Datum gültig. Es gilt österreichisches Recht; Gerichtsstand ist der Sitz des Auftragnehmers."
+            }
+          ]
+        }
+      ],
+      "positions": [
+        {
+          "short_text": "Projektstart",
+          "long_text": "Einmaliges Projektstartpaket mit gemeinsamer Anforderungsklärung, Referenzdaten, Architektur und praktischem Machbarkeitstest (PoC) einschließlich erster Integrationstests. Dokumentierte technische Bewertung und Wissenstransfer als Grundlage für den weiteren Eigenaufbau. Erbringung durch qualifiziertes Team und geeignete KI-Unterstützung gemäß Leistungsbeschreibung.",
+          "quantity": "1",
+          "unit_label": "Pauschale",
+          "unit_price_cents": 480000
+        },
+        {
+          "short_text": "Consulting",
+          "long_text": "Laufende Beratung, Wissenstransfer, technische und KI-gestützte Unterstützung, Tests und gemeinsame Weiterentwicklung gemäß Leistungsbeschreibung. Ausgewiesen ist der erste Vertragsmonat. Für jeden weiteren Vertragsmonat während der Zusammenarbeit gilt eine Pauschale von 2.200,00 EUR netto.",
+          "quantity": "1",
+          "unit_label": "Monat",
+          "unit_price_cents": 220000
+        }
+      ]
+    }
+  ]
+}

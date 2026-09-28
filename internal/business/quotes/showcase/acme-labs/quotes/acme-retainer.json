@@ -1,0 +1,69 @@
+{
+  "schema": "aeon.quote-showcase.v1",
+  "key": "acme-retainer",
+  "organisation": "acme-labs",
+  "contact": "acme-jonas-berger",
+  "profile_name": "ACME English",
+  "state": "draft",
+  "validity_days": 60,
+  "versions": [
+    {
+      "title": "Analytical Support Retainer",
+      "subtitle": "Twelve months of method support for the Graz laboratory",
+      "project_ref": "ACME-RET-2026",
+      "currency": "EUR",
+      "legal": {
+        "intro": "This offer sets out a twelve-month retainer for method support at ACME Labs GmbH. It is still a draft and has not been issued.",
+        "accept_text": "ACME Labs GmbH accepts this retainer by signing below. Work starts on the first day of the agreed quarter.",
+        "vat_note": "Amounts are net. Value added tax is shown with the totals.",
+        "discount_note": "No discount is deducted from the positions. This note is shown with the totals.",
+        "payment_terms": "The retainer is billed quarterly in advance and is payable within 14 days of the invoice."
+      },
+      "sections": [
+        {
+          "heading": "Scope of the retainer",
+          "numbering_style": "decimal",
+          "nodes": [
+            {
+              "kind": "paragraph",
+              "text": "The retainer covers planned method reviews, a monthly office hour and a written note after each visit. It does not include instrument repair or a standby service outside office hours."
+            },
+            {
+              "kind": "item",
+              "text": "One on-site method review each quarter, prepared with the laboratory lead.",
+              "marker": "disc"
+            },
+            {
+              "kind": "item",
+              "text": "A short written note of findings, stored with the quote file.",
+              "marker": "dash"
+            }
+          ]
+        }
+      ],
+      "positions": [
+        {
+          "short_text": "Quarterly method review",
+          "long_text": "Preparation, one day on site in Graz, and the written note.",
+          "quantity": "4",
+          "unit_label": "visit",
+          "unit_price_cents": 145000
+        },
+        {
+          "short_text": "Monthly office hour",
+          "long_text": "A scheduled call with purchasing and the laboratory lead.",
+          "quantity": "12",
+          "unit_label": "hour",
+          "unit_price_cents": 18000
+        },
+        {
+          "short_text": "Retainer administration",
+          "long_text": "Scheduling, the quarterly invoice and the file of visit notes.",
+          "quantity": "1",
+          "unit_label": "year",
+          "unit_price_cents": 60000
+        }
+      ]
+    }
+  ]
+}

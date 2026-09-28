@@ -774,16 +774,19 @@ paths:
     get:
       operationId: releaseNoteSnapshot
       summary: Capture linked ticket benefit fields in one database snapshot
-      description: Read-only project-scoped export using journey_tickets membership, not Git mentions. Requires releases.read and node visibility (nodes.read). Save the response as release-notes/<version>.json before tagging for offline history generation. Does not publish or freeze a release.
+      description: Read-only project-scoped export using journey_tickets membership, not Git mentions. Requires releases.read and node visibility (nodes.read). A published release with a stored snapshot returns that snapshot (frozen true), so later ticket edits do not change it. A published release with no stored snapshot was published before snapshots existed and returns ReleaseNotes with fallback historical-tag-headline; current ticket fields are not read. The release sheet labels that fallback "Historical tag headline". Before publication the response is a live preview (frozen false). Save a ReleaseNoteSnapshot as release-notes/<version>.json before tagging for offline history generation; do not save the historical fallback as a snapshot. This request does not itself publish or freeze a release.
       parameters:
         - {in: path, name: projectId, required: true, schema: {type: string, format: uuid}}
         - {in: path, name: releaseId, required: true, schema: {type: string, format: uuid}}
       responses:
         '200':
-          description: Point-in-time membership and field snapshot (including hidden tickets for provenance)
+          description: Point-in-time membership and field snapshot (including hidden tickets for provenance), or ReleaseNotes with fallback historical-tag-headline when a published release has no stored snapshot
           content:
             application/json:
-              schema: {$ref: '#/components/schemas/ReleaseNoteSnapshot'}
+              schema:
+                oneOf:
+                  - {$ref: '#/components/schemas/ReleaseNoteSnapshot'}
+                  - {$ref: '#/components/schemas/ReleaseNotes'}
         '401': {$ref: '#/components/responses/Error'}
         '403': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
@@ -2243,11 +2246,13 @@ paths:
       security: *auth
       parameters:
         - {name: after, in: query, schema: {type: integer, format: int64, minimum: 0}}
+        - {name: session, in: query, description: 'Only this active session of the caller plus unbound principal broadcasts. Omit to retain the principal inbox.', schema: {type: string, format: uuid}}
         - {name: wait_ms, in: query, schema: {type: integer, minimum: 0, maximum: 30000, default: 0}}
         - {$ref: '#/components/parameters/Limit'}
       responses:
         '200': {description: Inbox page, content: {application/json: {schema: {$ref: '#/components/schemas/InboxPage'}}}}
         '400': {$ref: '#/components/responses/Error'}
+        '409': {description: 'session_ended — This session has ended.', content: {application/json: {schema: {$ref: '#/components/schemas/ApiError'}}}}
     post:
       operationId: sendInboxMessage
       summary: Send one durable message to a principal
@@ -2294,6 +2299,7 @@ paths:
         '200': {description: Acknowledged message, content: {application/json: {schema: {$ref: '#/components/schemas/InboxMessage'}}}}
         '403': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
+        '409': {description: 'session_ended — This session has ended.', content: {application/json: {schema: {$ref: '#/components/schemas/ApiError'}}}}
   /inbox/targets:
     get:
       operationId: listInboxTargets
@@ -2452,6 +2458,31 @@ paths:
         '201': {description: Idempotent typed force control; inspect its state and outcome, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessRecoveryControl'}}}}
         '403': {description: Human force permission required}
         '409': {description: Stale confirmation, offline host or unverified process generation}
+  /projects/{projectId}/harness-sessions/{sessionId}/remove:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: removeHarnessSession
+      description: Human with harness.read project access only. Archives any registration under a row lock, without a client revision or process-ownership precondition. Revokes the generation and rejects outstanding controls; authenticated late worker writes return 410. Repeated removal returns the retained record without another audit event. Keeps ticket links and history. No process is signalled; an already delivered force signal or legacy daemon reaction cannot be recalled or ruled out.
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessRemoveRequest'}}}}
+      responses:
+        '200': {description: Record removed; process state unknown, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessRemoveResult'}}}}
+        '400': {description: Invalid reason}
+        '403': {description: Human project access required}
+        '404': {description: Session not visible}
+  /projects/{projectId}/harness-sessions/remove-stale:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: removeStaleHarnessSessions
+      description: Human with harness.read project access only. Removes unarchived records whose last accepted heartbeat is more than 15 minutes old, using creation time if none was accepted, at most 200 per request; `more` is true while eligible records remain and the client repeats. Eligibility is checked under row locks against one server cutoff; stopped records with a recent heartbeat are retained. Each removal event records actor, reason, the server-generated batch_id and the cutoff. Repeating the request never duplicates removal events. Does not signal processes.
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessRemoveRequest'}}}}
+      responses:
+        '200': {description: Removed records and server eligibility cutoff, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessRemoveStaleResult'}}}}
+        '400': {description: Invalid reason}
+        '403': {description: Human project access required}
+        '404': {description: Project not visible}
   /projects/{projectId}/harness-sessions/{sessionId}/archive:
     parameters:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -2797,10 +2828,18 @@ paths:
   /projects/{projectId}/messages:
     parameters:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: sendProjectMessage
+      description: Optional session bindings are additive; unbound sends preserve principal-inbox behavior. Session-bound messages never use principal-wide transport targets.
+      requestBody: {required: true, content: {application/json: {schema: {$ref: './openapi-messaging.yaml#/components/schemas/Send'}}}}
+      responses:
+        '201': {description: Durable message, content: {application/json: {schema: {$ref: '#/components/schemas/ProjectMessage'}}}}
+        '409': {description: Session ended or idempotency conflict}
     get:
       operationId: inspectProjectMessages
       description: Person admin or super_admin inspection including held messages. Ascending by sent event ID by default. In newest_first mode after is an exclusive upper bound; zero starts at the newest. Thread selects the root and all descendants of the supplied message's reply_to chain within this project. Pending selects unresolved held action requests. Resolution never releases or delivers a held message.
       parameters:
+        - {name: session, in: query, schema: {type: string, format: uuid}, description: Exact sender or recipient session; omitting includes unbound history}
         - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 10}}
         - {name: after, in: query, schema: {type: integer, minimum: 0, default: 0}}
         - {name: newest_first, in: query, schema: {type: boolean, default: false}}
@@ -4118,6 +4157,55 @@ paths:
       responses:
         '200': {description: A4 PDF, content: {application/pdf: {schema: {type: string, format: binary}}}}
         '503': {$ref: '#/components/responses/Error'}
+  /portal/settings:
+    get:
+      operationId: readPortalSettings
+      summary: Read whether this tenant's public product portal is enabled
+      description: settings.manage. A missing row is off. Enabling does not publish nodes by itself.
+      security: [{session: []}]
+      responses:
+        '200': {description: Portal switch, content: {application/json: {schema: {$ref: '#/components/schemas/PortalSettings'}}}}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+    patch:
+      operationId: updatePortalSettings
+      summary: Turn this tenant's public product portal on or off
+      description: settings.manage. The portal stays off until this is true. The response is the stored switch.
+      security: [{session: []}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/PortalSettingsWrite'}}}}
+      responses:
+        '200': {description: Stored switch, content: {application/json: {schema: {$ref: '#/components/schemas/PortalSettings'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+  /public/portal/{tenantSlug}:
+    get:
+      operationId: readPublicPortal
+      summary: Read one tenant's published product catalog and wishes
+      description: Anonymous. A disabled portal and an unknown tenant both answer 404. The document is a whitelist of public fields; internal notes, ticket keys and voter identity are omitted. At most one published product is returned.
+      security: []
+      parameters: [{name: tenantSlug, in: path, required: true, schema: {type: string, pattern: '^[a-z][a-z0-9-]{0,62}$'}}]
+      responses:
+        '200': {description: Published catalog, headers: {Cache-Control: {schema: {type: string}}}, content: {application/json: {schema: {$ref: '#/components/schemas/PortalPublic'}}}}
+        '404': {$ref: '#/components/responses/Error'}
+        '429': {$ref: '#/components/responses/Error'}
+  /public/portal/{tenantSlug}/wishes/{wishKey}/votes:
+    post:
+      operationId: votePublicPortalWish
+      summary: Cast one anonymous vote on a published wish
+      description: No account and no identity fields. An empty JSON object is the whole body. The same HttpOnly ballot votes once per wish; further calls return the current count. Ten votes per address per minute, reusing the shared public limiter. A disabled portal, unknown tenant or unpublished wish is 404.
+      security: []
+      parameters:
+        - {name: tenantSlug, in: path, required: true, schema: {type: string, pattern: '^[a-z][a-z0-9-]{0,62}$'}}
+        - {name: wishKey, in: path, required: true, schema: {type: string, pattern: '^[A-Z][A-Z0-9]{1,9}-[1-9][0-9]*$'}}
+      requestBody: {required: false, content: {application/json: {schema: {type: object, additionalProperties: false}}}}
+      responses:
+        '201': {description: First vote from this ballot, content: {application/json: {schema: {$ref: '#/components/schemas/PortalVote'}}}}
+        '200': {description: This ballot already voted, content: {application/json: {schema: {$ref: '#/components/schemas/PortalVote'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '429': {$ref: '#/components/responses/Error'}
   /quotes/readiness:
     get:
       operationId: quoteConfirmationReadiness
@@ -4980,6 +5068,7 @@ components:
         captured_at: {type: string, format: date-time}
         membership_source: {type: string, const: journey_tickets.release_node_id}
         field_source: {type: string, const: nodes.fields}
+        frozen: {type: boolean, description: True when publication stored this snapshot and later ticket edits no longer change it. False on a live preview. Absent on snapshots exported before this field existed.}
         tickets:
           type: array
           items:
@@ -4995,9 +5084,10 @@ components:
     ReleaseNotes:
       type: object
       required: [source, snapshot_sha256, captured_at, release_revision, items, gaps, hidden]
-      description: Additive v1 extension. Old manifests without notes and regenerated records with source unavailable retain archived Git history display; regenerated records also show the benefit-data gap. New builds always record notes, including gaps. Snapshot digest binds the exact tagged file bytes. Git headlines never substitute for benefits.
+      description: Additive v1 extension. Captured member benefits are authoritative, including an empty or hidden-only membership. When no snapshot was captured, fallback is historical-tag-headline and the git tag headline is only a labelled historical fallback for that release. Old manifests without notes keep the same labelled headline display. New builds always record notes, including gaps. Snapshot digest binds the exact tagged file bytes. Git headlines never replace captured benefits.
       properties:
         source: {type: string}
+        fallback: {type: string, enum: [historical-tag-headline], description: Set only when member benefits were not captured and the git tag headline is the labelled historical fallback}
         snapshot_sha256: {type: string}
         captured_at: {type: [string, 'null'], format: date-time}
         release_revision: {type: integer}
@@ -6090,6 +6180,61 @@ components:
         content_sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
         accepted_at: {type: string, format: date-time}
         confirmation_state: {type: string, enum: [pending, rendering, ready, failed, uncertain]}
+    PortalSettings:
+      type: object
+      additionalProperties: false
+      required: [enabled]
+      properties:
+        enabled: {type: boolean}
+    PortalSettingsWrite:
+      type: object
+      additionalProperties: false
+      required: [enabled]
+      properties:
+        enabled: {type: boolean}
+    PortalProduct:
+      type: object
+      additionalProperties: false
+      required: [key, title, summary]
+      properties:
+        key: {type: string}
+        title: {type: string}
+        summary: {type: string}
+    PortalFeature:
+      type: object
+      additionalProperties: false
+      required: [key, title, summary, status]
+      properties:
+        key: {type: string}
+        title: {type: string}
+        summary: {type: string}
+        status: {type: string, enum: [idea, reviewed, planned, in_progress, live, declined]}
+        live_since: {type: string, description: Present only when status is live}
+        legal_basis: {type: string}
+        decline_reason: {type: string, description: Present only when status is declined}
+    PortalWish:
+      type: object
+      additionalProperties: false
+      required: [key, title, summary, votes]
+      properties:
+        key: {type: string}
+        title: {type: string}
+        summary: {type: string}
+        votes: {type: integer, minimum: 0}
+    PortalPublic:
+      type: object
+      additionalProperties: false
+      required: [product, catalog, wishes]
+      properties:
+        product: {oneOf: [{type: 'null'}, {$ref: '#/components/schemas/PortalProduct'}]}
+        catalog: {type: array, items: {$ref: '#/components/schemas/PortalFeature'}}
+        wishes: {type: array, items: {$ref: '#/components/schemas/PortalWish'}}
+    PortalVote:
+      type: object
+      additionalProperties: false
+      required: [votes]
+      properties:
+        votes: {type: integer, minimum: 0}
     QuoteConfirmationJob:
       type: object
       required: [quote_node_id, version, state, attempts, next_attempt_at, updated_at]
@@ -6258,6 +6403,8 @@ components:
       required: [recipient_principal_id, body, idempotency_key]
       properties:
         recipient_principal_id: {type: string, format: uuid}
+        recipient_session_id: {type: string, format: uuid, description: 'Optional exact active recipient generation; stopped or archived sessions return 409.'}
+        sender_session_id: {type: string, format: uuid, description: 'Optional active session owned by the authenticated sender; freezes its label.'}
         body: {type: string, minLength: 1, maxLength: 65536}
         idempotency_key: {type: string, minLength: 1, maxLength: 128}
         reply_to_id: {type: string, format: uuid}
@@ -6288,6 +6435,7 @@ components:
           properties:
             id: {type: string, format: uuid}
             sender_principal_id: {type: string, format: uuid}
+            sender_label: {type: string, description: Frozen at send time; returned for session-aware reads}
             sent_event_id: {type: integer, format: int64}
             created_at: {type: string, format: date-time}
             acked_at: {type: [string, 'null'], format: date-time}
@@ -6486,6 +6634,27 @@ components:
         created_at: {type: string, format: date-time}
         claimed_at: {type: [string, 'null'], format: date-time}
         completed_at: {type: [string, 'null'], format: date-time}
+    HarnessRemoveRequest:
+      type: object
+      additionalProperties: false
+      required: [reason]
+      properties:
+        reason: {type: string, minLength: 1, maxLength: 240}
+    HarnessRemoveResult:
+      type: object
+      required: [session, message, processes_signalled, process_state]
+      properties:
+        session: {$ref: '#/components/schemas/HarnessSession'}
+        message: {type: string, const: 'Record removed; process not stopped by removal.'}
+        processes_signalled: {type: boolean, const: false}
+        process_state: {type: string, const: unknown}
+    HarnessRemoveStaleResult:
+      type: object
+      required: [items, cutoff, more]
+      properties:
+        items: {type: array, maxItems: 200, items: {$ref: '#/components/schemas/HarnessRemoveResult'}}
+        cutoff: {type: string, format: date-time}
+        more: {type: boolean, description: Eligible records remain after this batch; repeat the request}
     HarnessRecovery:
       type: object
       required: [session_id, host, observed_revision, confirmation, process_state, process_scope, can_archive, force_stop_available, force_stop_reason]

@@ -159,8 +159,8 @@ export async function mockAgents(page: Page, data: AgentData, options: AgentMock
       const [, project, what] = messagesPath
       if (what === 'message-targets') return route.fulfill({ json: data.targets })
       if (method === 'POST') {
-        const input = body as { to: string; body: string; delivery_level: string; reply_to?: string }
-        const sent = { created_at: new Date().toISOString(), human_resolution_outcome: null, id: `5e${String(data.sent.length + 1).padStart(6, '0')}-0000-4000-8000-000000000000`, project, sender_principal_id: data.me, recipient_principal_id: data.targets.find(t => t.address === input.to)?.principal_id ?? '', to: input.to, body: input.body, reply_to: input.reply_to ?? null, sent_event_id: 1000 + data.sent.length, is_action_request: false, expects_reply: false, delivery_level: input.delivery_level, status: 'accepted', reply_obligation: 'none' }
+        const input = body as { to: string; body: string; delivery_level: string; reply_to?: string; recipient_session_id?: string }
+        const sent = { recipient_session_id: input.recipient_session_id, sender_label: 'Markus', created_at: new Date().toISOString(), human_resolution_outcome: null, id: `5e${String(data.sent.length + 1).padStart(6, '0')}-0000-4000-8000-000000000000`, project, sender_principal_id: data.me, recipient_principal_id: data.targets.find(t => t.address === input.to)?.principal_id ?? '', to: input.to, body: input.body, reply_to: input.reply_to ?? null, sent_event_id: 1000 + data.sent.length, is_action_request: false, expects_reply: false, delivery_level: input.delivery_level, status: 'accepted', reply_obligation: 'none' }
         data.sent.push(sent)
         return route.fulfill({ status: 201, json: sent })
       }

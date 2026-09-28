@@ -74,6 +74,7 @@ export interface ModelProfile { id: string; slug: string; harness: string; famil
 export interface ModelResolution { role: string; profile: ModelProfile | null; owner_required: boolean; source: string }
 export interface MessageTarget { id: string; principal_id: string; address: string; adapter: string; target_kind: string; maximum_level: string; role: string; enabled: boolean }
 export interface ProjectMessage {
+  recipient_session_id?: string; sender_session_id?: string; sender_label?: string; from?: string
   id: string; sender_principal_id: string; recipient_principal_id: string; to: string; body: string; reply_to?: string | null
   sent_event_id: number; is_action_request: boolean; expects_reply: boolean; delivery_level: 'simple' | 'steer'
   status: 'accepted' | 'held'; reply_obligation: 'none' | 'open' | 'closed'
@@ -81,7 +82,7 @@ export interface ProjectMessage {
 }
 export interface HeldResolution { message_id: string; decision: 'resolved' | 'dismissed'; created_at: string }
 export interface MessagePage { items: ProjectMessage[]; next_after: number; preamble?: string }
-export interface MessageSend { to: string; body: string; idempotency_key: string; reply_to?: string; expects_reply: boolean; is_action_request: boolean; delivery_level: 'simple' | 'steer' }
+export interface MessageSend { recipient_session_id?: string; sender_session_id?: string; to: string; body: string; idempotency_key: string; reply_to?: string; expects_reply: boolean; is_action_request: boolean; delivery_level: 'simple' | 'steer' }
 
 async function request<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
   const response = await api(path, { method, ...(body === undefined ? {} : {
@@ -89,7 +90,7 @@ async function request<T>(path: string, method = 'GET', body?: unknown): Promise
   }) })
   if (!response.ok) {
     const data = await response.json().catch(() => ({}))
-    throw new APIError(response.status, typeof data?.error === 'string' ? data.error : `Request failed (${response.status})`)
+    throw new APIError(response.status, typeof data?.error === 'string' ? data.error : `Request failed (${response.status})`, data)
   }
   return response.json()
 }
@@ -109,6 +110,9 @@ export const listAllSessions = (params: { ticket?: string; agent?: string; proje
 export const getLiveAgents = () => request<LivePage>('/harness-sessions/live?include_inactive=true')
 export const listRuns = (params: { session?: string; agent?: string; work_order?: string; cursor?: string; limit?: number } = {}) =>
   request<Paged<AgentRun>>(`/runs${query({ limit: 50, ...params })}`)
+export interface RemoveSessionResult { session: HarnessSession; message: string; processes_signalled: false; process_state: 'unknown' }
+export const removeSession = (session: HarnessSession, reason: string) => request<RemoveSessionResult>(`${sessionPath(session.project_id, session.id)}/remove`, 'POST', { reason })
+export const removeStaleSessions = (projectId: string, reason: string) => request<{ items: RemoveSessionResult[]; cutoff: string; more: boolean }>(`${sessionPath(projectId)}/remove-stale`, 'POST', { reason })
 export const requestControl = (projectId: string, sessionId: string, kind: SessionControl['kind']) => request<SessionControl>(`${sessionPath(projectId, sessionId)}/controls/${kind}`, 'POST', {})
 export const getControl = (projectId: string, sessionId: string, controlId: string) => request<SessionControl>(`${sessionPath(projectId, sessionId)}/controls/${enc(controlId)}`)
 export const listAccounts = () => request<AgentAccount[]>('/agent-accounts')
@@ -148,7 +152,7 @@ export function paceFraction(model: AllowanceWrite['pace_model'], elapsed: numbe
 // Named server events that change what the agents workspace shows. They are wake
 // hints only: the caller re-reads the authorized projections. Heartbeats use the
 // periodic refresh; registration/stop and reconnect wake the consumer immediately.
-const HARNESS_EVENTS = ['registered', 'bound', 'yielded', 'stopped', 'control_requested', 'control_claimed', 'control_completed']
+const HARNESS_EVENTS = ['registered', 'bound', 'yielded', 'stopped', 'removed', 'control_requested', 'control_claimed', 'control_completed']
 const OTHER_EVENTS = ['approval.proposed', 'approval.approved', 'approval.denied', 'approval.revoked', 'run.created', 'run.claimed', 'run.telemetry', 'work_order.started', 'work_order.updated', 'inbox.compat_sent', 'inbox.delivery_queued', 'inbox.reply_obligation_closed', 'inbox.action_resolved']
 export function subscribeAgents(changed: () => void, connection: (live: boolean) => void = () => {}): () => void {
   if (typeof EventSource === 'undefined') return () => {}

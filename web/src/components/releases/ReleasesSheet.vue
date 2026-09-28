@@ -3,7 +3,8 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, provide, reactive, ref, watch } from 'vue'
 import mark from '../../assets/brand/aeon-mark.svg'
 import { brand, generationLabel, setOverlayTitle } from '../../lib/brand'
-import { displayHeadline, groupByDay, groupChanges, hasUsableNotes, matches, releasedAt, stats as statsOf, ticketsOf, type Release } from '../../lib/releases'
+import { displayHeadline, groupByDay, groupChanges, hasUsableNotes, HISTORICAL_TAG_LABEL, historicalTagFallback, matches, releasedAt, stats as statsOf, ticketsOf, type Release } from '../../lib/releases'
+import { useProfile } from '../../stores/profile'
 import { normalKey } from '../../lib/ticketLinks'
 import { relativeTime } from '../../lib/work'
 import { isCalendar, useReleases } from '../../stores/releases'
@@ -25,6 +26,8 @@ const props = defineProps<{ target: string | null }>()
 const emit = defineEmits<{ select: [version: string]; close: []; home: []; navigate: [path: string] }>()
 const store = useReleases()
 const version = useVersion()
+const profile = useProfile()
+const locale = computed(() => profile.profile?.locale ?? null)
 
 const dialog = ref<HTMLDialogElement>()
 const listbox = ref<HTMLElement>()
@@ -361,7 +364,10 @@ const KINDS = [
                     <span v-if="r.version === compareTo" class="tag end-tag">To</span>
                   </span>
                   <span v-if="r.state === 'reserved'" class="headline">Reserved, never published</span>
-                  <span v-else class="headline"><template v-for="(p, i) in marked(hasUsableNotes(r) || r.headline ? displayHeadline(r) : 'No headline recorded')" :key="i"><mark v-if="p.hit">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template></span>
+                  <template v-else>
+                    <span v-if="historicalTagFallback(r)" class="eyebrow hist-label">{{ HISTORICAL_TAG_LABEL }}</span>
+                    <span class="headline"><template v-for="(p, i) in marked(hasUsableNotes(r) || r.headline ? displayHeadline(r, locale) : 'No headline recorded')" :key="i"><mark v-if="p.hit">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template></span>
+                  </template>
                   <span v-if="r.state === 'published'" class="counts">
                     <template v-for="k in KINDS" :key="k.key">
                       <span v-if="countsOf(r)[k.key]" class="count" role="img" :aria-label="k.label(countsOf(r)[k.key])" :data-tip="k.label(countsOf(r)[k.key])"><AppIcon :name="k.icon" :size="13" />{{ countsOf(r)[k.key] }}</span>
@@ -503,6 +509,7 @@ const KINDS = [
 .new-tag { background: var(--gold-2); color: #3a2804; }
 .end-tag { background: var(--teal); color: var(--surface); }
 .live-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--ok); }
+.hist-label { letter-spacing: .12em; }
 .headline { color: var(--ink); font-size: 13.5px; line-height: 1.4; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow-wrap: anywhere; }
 .reserved .headline { color: var(--ink-2); font-style: italic; }
 .counts { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; font-size: 11.5px; color: var(--ink-3); }

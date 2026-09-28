@@ -50,10 +50,16 @@
 // full inspection retains it, still held. Resolution never releases a message,
 // sends a delivery, acknowledges it, or closes an explicit reply obligation.
 //
+// Session-bound messages belong to the exact generation. Sending, listening,
+// and acknowledging return 409 session_ended after stop or archive, including
+// acknowledgment retries. Ending a generation atomically closes its open reply
+// obligations and appends inbox.reply_obligation_closed with message_id and
+// closed_reason=session_ended, attributed to System. No reply is fabricated.
+//
 // Every inbox read and write runs inside db.InTenant. The worker's tenant
 // list is the one exception, because tenants has no tenant_id and no RLS
-// (the same registry read as the embedding worker). Each mutation appends
-// one tenant event through events.Append in the same transaction. Event
+// (the same registry read as the embedding worker). Mutation events commit
+// in the same transaction as their state changes. Event
 // snapshots and webhook bodies never include the message text. A webhook
 // POST is only {"message_id","event_id"} and is never authority; listen and
 // SSE replay unacked rows after the sent event id. NOTIFY on aeon_events is

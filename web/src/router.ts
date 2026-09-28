@@ -95,6 +95,7 @@ export const router = createRouter({
     { path: '/signin', component: SignInView, meta: { title: 'Sign in', bare: true } },
     { path: '/from-classic/:rest(.*)*', component: () => import('./views/FromClassicView.vue'), meta: { title: 'Finding your page' } },
     { path: '/offers/:publicTenant/:token', component: () => import('./public/PublicQuoteView.vue'), props: true, meta: { title: 'Customer quote', bare: true, public: true } },
+    { path: '/portal/:tenantSlug', component: () => import('./public/PublicPortalView.vue'), props: true, meta: { title: 'Product portal', bare: true, public: true } },
     // quote-print.html is the separate Vite entry, served directly from webFS.
     { path: '/:pathMatch(.*)*', component: NotFoundView, meta: { title: 'Page not found' } },
   ],

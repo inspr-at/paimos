@@ -486,79 +486,9 @@ func (m *Module) create(w http.ResponseWriter, r *http.Request) {
 	}
 	var out quote
 	e = m.tx(r.Context(), p, fence.PermNodesContribute, true, func(tx pgx.Tx) error {
-		var exists bool
-		err := tx.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM nodes org JOIN node_kinds ok ON ok.tenant_id=org.tenant_id AND ok.id=org.kind_id WHERE org.id=$1::uuid AND org.deleted_at IS NULL AND ok.slug='organisation' AND ($2::text='' OR EXISTS (SELECT 1 FROM node_relations rel JOIN nodes prj ON prj.tenant_id=rel.tenant_id AND prj.id=rel.target_node_id JOIN node_kinds pk ON pk.tenant_id=prj.tenant_id AND pk.id=prj.kind_id WHERE rel.type='customer_of' AND rel.source_node_id=org.id AND rel.target_node_id=NULLIF($2,'')::uuid AND prj.deleted_at IS NULL AND pk.slug='project')))`, in.CustomerOrgNodeID, in.ProjectNodeID).Scan(&exists)
-		if err != nil {
-			return err
-		}
-		if !exists {
-			return bad("project must belong to a live customer organisation")
-		}
-		settings, err := readSettings(r.Context(), tx)
-		if err != nil {
-			return err
-		}
-		if settings.Revision == 0 && in.ProjectNodeID == "" {
-			return bad("quote settings must be configured for a customer-only draft")
-		}
-		var offerNo, customerNo string
-		var day time.Time
-		if settings.Revision > 0 {
-			day, err = quoteDay(settings, time.Now())
-			if err != nil {
-				return err
-			}
-			customerNo, err = ensureCustomerNumber(r.Context(), tx, p, in.CustomerOrgNodeID, day)
-			if err != nil {
-				return err
-			}
-			offerNo, err = allocateOfferNumber(r.Context(), tx, p, day)
-			if err != nil {
-				return err
-			}
-		}
-		err = tx.QueryRow(r.Context(), `INSERT INTO nodes(tenant_id,key,kind_id,title) SELECT $1::uuid,aeon_next_node_key($1::uuid,k.short_prefix),k.id,$2 FROM node_kinds k WHERE k.tenant_id=$1::uuid AND k.slug='quote' RETURNING id::text`, p.TenantID, in.Title).Scan(&out.QuoteNodeID)
-		if errors.Is(err, pgx.ErrNoRows) {
-			return conflict("quote kind is not configured")
-		}
-		if err != nil {
-			return err
-		}
-		_, err = tx.Exec(r.Context(), `INSERT INTO business_quotes(tenant_id,quote_node_id,project_node_id,customer_org_node_id,offer_no) VALUES($1::uuid,$2::uuid,NULLIF($3,'')::uuid,$4::uuid,NULLIF($5,''))`, p.TenantID, out.QuoteNodeID, in.ProjectNodeID, in.CustomerOrgNodeID, offerNo)
-		if err != nil {
-			return err
-		}
-		if settings.Revision > 0 {
-			doc, err := makeDocument(r.Context(), tx, settings, in.CustomerOrgNodeID, in.Title, customerNo, day)
-			if err != nil {
-				return err
-			}
-			profileID := in.ProfileID
-			if profileID == "" {
-				profileID = settings.DefaultProfileID
-			}
-			doc.Profile, err = readProfileSnapshot(r.Context(), tx, profileID)
-			if err != nil {
-				return err
-			}
-			raw, err := json.Marshal(doc)
-			if err != nil {
-				return err
-			}
-			_, err = tx.Exec(r.Context(), `INSERT INTO quote_drafts(tenant_id,quote_node_id,document,schema_version,minimum_writer_version,updated_by_principal_id) VALUES($1::uuid,$2::uuid,$3::jsonb,1,$4,$5::uuid)`, p.TenantID, out.QuoteNodeID, string(raw), doc.MinimumWriterVersion, p.ID)
-			if err != nil {
-				return err
-			}
-		}
-		_, err = tx.Exec(r.Context(), `INSERT INTO node_relations(tenant_id,source_node_id,target_node_id,type) VALUES($1::uuid,$2::uuid,$3::uuid,'customer_of')`, p.TenantID, in.CustomerOrgNodeID, out.QuoteNodeID)
-		if err != nil {
-			return err
-		}
-		out, err = readQuote(r.Context(), tx, out.QuoteNodeID, false)
-		if err != nil {
-			return err
-		}
-		return appendEvent(r.Context(), tx, p, out.QuoteNodeID, "quote.created", nil, out)
+		var err error
+		out, err = createCustomerQuote(r.Context(), tx, p, in.Title, in.ProjectNodeID, in.CustomerOrgNodeID, in.ProfileID, "")
+		return err
 	})
 	respond(w, 201, out, e)
 }

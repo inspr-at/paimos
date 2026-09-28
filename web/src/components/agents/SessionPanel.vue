@@ -1,22 +1,22 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { brand } from '../../lib/brand'
-import { api, getNode } from '../../lib/api'
+import { APIError, api, getNode } from '../../lib/api'
 import { computed, onMounted, ref, watch } from 'vue'
 import type { Approval, HarnessSessionDetail, ProjectMessage, SessionControl } from '../../lib/agents'
 import { RUN_OUTCOME, approvalRun, cost, elapsed, runDuration, runModel, scopeLabel, stopReasonLabel, tokens } from '../../lib/agentState'
 import { absoluteTime, relativeTime, statusMeta } from '../../lib/work'
 import { useAgents, type SessionView } from '../../stores/agents'
-import { useSession } from '../../stores/session'
 import AppIcon from '../AppIcon.vue'
 import TicketPeekLink from '../TicketPeekLink.vue'
 import KeyCap from '../KeyCap.vue'
-import Avatar from '../Avatar.vue'
+import SessionMessages from './SessionMessages.vue'
 import AgentStateLabel from './AgentStateLabel.vue'
 import AgentGlyph from './AgentGlyph.vue'
 import ProvenanceDetail from './ProvenanceDetail.vue'
 import SessionStateEvidence from './SessionStateEvidence.vue'
 import SessionRecovery from './SessionRecovery.vue'
+import RemoveSessionDialog from './RemoveSessionDialog.vue'
 import { activityOf, currentStep, type ActivitySession } from './activity'
 import { metadataChangeText, metadataChanges } from './metadataHistory'
 import { attentionReasonText } from '../../lib/agentSignals'
@@ -26,7 +26,6 @@ import { attentionReasonText } from '../../lib/agentSignals'
 const props = defineProps<{ view: SessionView | undefined; loading: boolean; now: number; canWrite: boolean; controlBlock: (view: SessionView, kind: SessionControl['kind']) => string }>()
 const emit = defineEmits<{ close: []; control: [view: SessionView, kind: SessionControl['kind']]; review: [approval: Approval] }>()
 const agents = useAgents()
-const session = useSession()
 const root = ref<HTMLElement>()
 const draft = ref('')
 const level = ref<'simple' | 'steer'>('simple')
@@ -38,11 +37,10 @@ const detail = ref<(HarnessSessionDetail & ActivitySession) | null>(null)
 const ticketState = ref('')
 
 const s = computed(() => props.view?.session)
-const me = computed(() => session.identity?.principal.id ?? '')
 const pending = computed(() => s.value?.run_id && s.value.phase !== 'stopped' && s.value.needs_attention !== false ? agents.pending.filter(a => a.agent_principal_id === s.value!.agent_principal_id && approvalRun(a) === s.value!.run_id) : [])
 const recentRuns = computed(() => s.value ? agents.recentRuns(s.value.agent_principal_id).slice(0, 8) : [])
 const run = computed(() => props.view?.run)
-const messages = computed(() => s.value ? agents.thread(s.value).slice(-40) : [])
+const messages = computed(() => s.value ? agents.thread(s.value) : [])
 const address = computed(() => s.value ? agents.addressOf(s.value.agent_principal_id) : '')
 const activity = computed(() => detail.value?.id === s.value?.id ? detail.value : props.view ? activityOf(props.view) : null)
 const reported = computed(() => detail.value?.id === s.value?.id ? detail.value : s.value)
@@ -96,14 +94,12 @@ watch(() => props.view?.ticket?.id, async id => {
 }, { immediate: true })
 const composeBlock = computed(() => {
   if (!s.value) return ''
+  if (s.value.phase === 'stopped' || s.value.stopped_at || s.value.archived_at || sendError.value === 'This session has ended.') return 'This session has ended.'
   if (agents.messagingState === 'error') return 'Messages could not be loaded right now. Close and reopen the session to try again.'
   if (agents.messagingState === 'forbidden') return 'Messages are open to workspace admins.'
   if (!address.value) return `${props.view!.name} has no message address yet. It gets one when it registers a message target.`
-  if (s.value.phase === 'stopped') return 'This session has stopped. Messages reach the agent’s next session.'
   return ''
 })
-const authorOf = (m: ProjectMessage) => m.sender_principal_id === me.value ? 'You' : m.sender_principal_id === s.value?.agent_principal_id ? props.view!.name : agents.askerName(m.sender_principal_id).name
-const fromAgent = (m: ProjectMessage) => m.sender_principal_id === s.value?.agent_principal_id
 
 watch(() => s.value?.id, async id => {
   if (!id || !s.value) return
@@ -119,7 +115,7 @@ async function send() {
   try {
     await agents.send(s.value, address.value, draft.value.trim(), level.value, replyTo.value?.id)
     draft.value = ''; replyTo.value = null
-  } catch (e) { sendError.value = e instanceof Error ? e.message : 'The message was not sent. Please try again.' }
+  } catch (e) { sendError.value = e instanceof APIError && e.status === 409 && e.body.code === 'session_ended' ? 'This session has ended.' : e instanceof Error ? e.message : 'The message was not sent. Please try again.' }
   finally { sending.value = false }
 }
 function composerKeys(event: KeyboardEvent) {
@@ -154,6 +150,7 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
           <button type="button" class="btn sm ghost stop" :aria-disabled="!!controlBlock(view, 'stop')" :data-tip="controlBlock(view, 'stop') || 'End this session'" @click="control('stop')"><AppIcon name="halt" :size="14" />Stop</button>
         </template>
         <SessionRecovery :session="view.session" />
+        <RemoveSessionDialog :session="view.session" :label="view.name" />
       </div>
     </header>
 
@@ -252,32 +249,10 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
       </section>
 
       <ProvenanceDetail v-if="s" :project-id="s.project_id" :session-id="s.id" :now="now" />
-
-      <section class="block" aria-labelledby="messages-title">
-        <h3 id="messages-title" class="eyebrow" data-tip="Messages belong to this agent across all its sessions">Messages</h3>
-        <section v-if="inboxNotes.length" class="inbox-note" aria-label="Inbox attention">
-          <p v-for="note in inboxNotes" :key="note.code"><AppIcon name="inbox" :size="13" />{{ note.text }}</p>
-        </section>
-        <p v-if="!messages.length && address" class="empty-line">No messages yet.</p>
-        <p v-else-if="!address" class="empty-line">Messages start once this agent registers a message target. <RouterLink to="/settings/access/agents">Agent setup</RouterLink></p>
-        <ol v-else class="thread" aria-label="Messages">
-          <li v-for="m in messages" :key="m.id" class="msg" :class="{ theirs: fromAgent(m), mine: m.sender_principal_id === me }">
-            <p class="msg-meta">
-              <Avatar v-if="m.sender_principal_id === me" :id="me" :name="session.identity?.principal.name ?? 'You'" :size="18" />
-              <Avatar v-else :name="authorOf(m)" kind="agent" :size="18" />
-              <span class="msg-author">{{ authorOf(m) }}</span>
-              <span v-if="!fromAgent(m) && m.sender_principal_id !== me" class="muted">to {{ m.to }}</span>
-              <span v-if="m.delivery_level === 'steer'" class="msg-chip steer"><AppIcon name="bolt" :size="10" />Steer</span>
-              <span v-if="m.is_action_request" class="msg-chip held">Action request</span>
-              <span v-if="m.reply_obligation === 'open'" class="msg-chip open">Awaiting reply</span>
-              <span v-if="m.human_resolution_outcome" class="msg-chip">{{ m.human_resolution_outcome === 'resolved' ? 'Resolved' : 'Dismissed' }}</span>
-              <time v-if="m.created_at" class="msg-time" :datetime="m.created_at" :data-tip="absoluteTime(m.created_at)">{{ relativeTime(m.created_at, { now }) }}</time>
-            </p>
-            <p class="msg-body">{{ m.body }}</p>
-            <button v-if="fromAgent(m) && canWrite && !composeBlock" type="button" class="reply" @click="replyTo = m">Reply</button>
-          </li>
-        </ol>
+      <section v-if="inboxNotes.length" class="inbox-note" aria-label="Inbox attention">
+        <p v-for="note in inboxNotes" :key="note.code"><AppIcon name="inbox" :size="13" />{{ note.text }}</p>
       </section>
+      <SessionMessages :messages="messages" :session-id="view.session.id" :principal-id="view.session.agent_principal_id" :address="address" :now="now" :can-reply="canWrite && !composeBlock" @reply="replyTo = $event" />
     </div>
 
     <footer v-if="view && !loading && address" class="composer">
@@ -425,7 +400,8 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
   .panel-head { padding: 6px 8px 10px 16px; }
   .head-actions { flex-wrap: wrap; }
   .head-actions .spacer { flex-basis: 100%; height: 0; }
-  .head-actions .btn { flex: 1; }
+  /* Up to four quiet controls share one row on phones. */
+  .head-actions .btn { flex: 1 1 0; min-width: 0; padding-inline: 4px; }
   .head-top .icon-btn { width: 40px; height: 40px; }
   .scroll { padding: 16px 18px 24px; }
   .telemetry { grid-template-columns: 1fr 1fr; }
