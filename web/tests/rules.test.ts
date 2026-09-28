@@ -485,4 +485,7 @@ test('budget refusals keep another person’s size private in the message', asyn
   assert.equal(rulesMessage(new RulesError(422, 'rules_budget_exceeded', 'x', 12345, 12000)), 'The merged file is 12345 bytes. The limit is 12000.')
   assert.equal(rulesMessage(new RulesError(422, 'rules_budget_exceeded', 'A session file for another person or agent would exceed the limit.')), 'A session file for another person or agent would exceed the limit.')
   assert.match(rulesMessage(new RulesError(503, 'busy', 'busy')), /Nothing was changed/)
+  assert.equal(replyUncertain(new RulesError(503, 'busy', 'busy')), false)
+  assert.equal(replyUncertain(new RulesError(503, 'outcome_unknown', 'unknown')), true)
+  assert.match(rulesMessage(new RulesError(503, 'outcome_unknown', 'unknown')), /did not confirm/)
 })

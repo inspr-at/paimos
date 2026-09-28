@@ -460,6 +460,7 @@ export function rulesMessage(error: unknown): string {
     if (error.actualBytes === undefined) return error.message || 'A session file for another person or agent would exceed the limit.'
     return `The merged file is ${error.actualBytes} bytes. The limit is ${error.maxBytes ?? RULES_BUDGET}.`
   }
+  if (error.code === 'outcome_unknown') return 'The server did not confirm whether this was saved. Reload to check; repeating the same request is safe.'
   if (error.code === 'busy') return 'The rules are busy right now. Nothing was changed; try again in a moment.'
   if (error.code === 'ambiguous_identity') return 'Two rules of the same rank share an identity, so the merge stops.'
   if (error.code === 'forbidden') return 'You do not have permission for that.'
@@ -637,7 +638,8 @@ export function importBlock(caller: Caller | null): string | null {
 export function replyUncertain(error: unknown): boolean {
   if (error instanceof RequestFailure || error instanceof StaleRequestError || error instanceof SyntaxError) return true
   // A 5xx can arrive after the write committed, including a reverse proxy 502.
-  return error instanceof RulesError && error.status >= 500 && error.status <= 599
+  // busy means the server rolled back before COMMIT: certainly nothing changed.
+  return error instanceof RulesError && error.status >= 500 && error.status <= 599 && error.code !== 'busy'
 }
 
 function plainRecord(value: unknown): value is Record<string, unknown> {

@@ -109,6 +109,9 @@ func (m *Module) publishBatch(r *http.Request, tx pgx.Tx, p tenant.Principal) (a
 		sets[i] = s
 	}
 	digest := requestDigest(p.TenantID, owner, in.Items, note)
+	onUncertain(r, func(ctx context.Context, tx pgx.Tx) (any, bool, error) {
+		return storedBatch(ctx, tx, p.TenantID, owner, digest)
+	})
 	if stored, found, err := storedBatch(ctx, tx, p.TenantID, owner, digest); err != nil || found {
 		return stored, err
 	}
@@ -212,15 +215,15 @@ func nextVersion(now time.Time, published string) string {
 // rendering) and enforced by the server (transaction_timeout); by the size of
 // the store it may load (maxBudgetRules rules, an empty set counting as one,
 // and maxBudgetBytes bytes of rule text across every snapshot it reads); and by
-// the number of session files it may render (maxBudgetContexts). The store
-// bound also bounds one render. Measured on the workstation: the whole check
-// over a store at the bound made of disabled rules (loading, digest
-// validation, authorization, rendering) takes about 83 ms
-// (BenchmarkBudgetCheck); the worst render repeated up to the render cap takes
-// about 3.8 s (TestBudgetCapFitsTheDeadline), inside the 30 s deadline. Past a
-// bound the publication is refused (422 budget_check_too_large); past the
-// deadline it answers 503 and nothing commits. Variables so tests can change
-// them; beforeRender and beforeStore are test hooks.
+// the number of session files it may render (maxBudgetContexts). The caps and
+// the server-side timeout are the protection; the measurements only show that
+// ordinary stores stay far from them. Render cost depends on the store (a
+// disabled-rule store measured ~1 ms per render at the bound here, an
+// enabled-rule store ~3 ms elsewhere), so a check that would outrun the
+// deadline answers 503 and commits nothing (BenchmarkBudgetCheck,
+// TestBudgetCapFitsTheDeadline). Past a bound the publication is refused (422
+// budget_check_too_large). Variables so tests can change them; beforeRender and
+// beforeStore are test hooks.
 var (
 	maxBudgetContexts       = 4000
 	maxBudgetRules          = 4000

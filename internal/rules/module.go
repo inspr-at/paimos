@@ -83,8 +83,10 @@ func (m *Module) endpoint(permission string, fn endpoint) http.HandlerFunc {
 		// work instead: lock and statement timeouts for SQL, explicit checks in
 		// the budget's CPU loops, and InTenant rolls back when fn fails.
 		deadline := time.Now().Add(txTimeout)
-		r = r.WithContext(withDeadline(context.WithoutCancel(r.Context()), deadline))
+		pending := &outcome{}
+		r = r.WithContext(context.WithValue(withDeadline(context.WithoutCancel(r.Context()), deadline), outcomeKey{}, pending))
 		var out any
+		committing := false
 		err = db.InTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
 			// Bounded waits and work: a lock that cannot be had in time fails the
 			// request (503) instead of queueing behind or ahead of access changes.
@@ -145,11 +147,22 @@ func (m *Module) endpoint(permission string, fn endpoint) http.HandlerFunc {
 			if time.Now().After(deadline.Add(-commitMargin)) {
 				return errStopped
 			}
+			committing = true
 			return nil
 		})
+		if err != nil && committing && !rolledBack(err) {
+			// COMMIT was sent and its answer did not arrive: the change may
+			// or may not be durable. Ask a fresh transaction what happened.
+			if out, err = m.reconcile(r, p, pending); err == nil {
+				httpapi.WriteJSON(w, 200, out)
+				return
+			}
+			writeFailure(w, err)
+			return
+		}
 		if err != nil {
-			// Past the deadline every failure is the deadline's: the server may
-			// have ended the session, and nothing was committed.
+			// Before COMMIT nothing is durable. Past the deadline every such
+			// failure is the deadline's: the server may have ended the session.
 			if time.Now().After(deadline.Add(-commitMargin)) {
 				err = errStopped
 			}
@@ -158,6 +171,83 @@ func (m *Module) endpoint(permission string, fn endpoint) http.HandlerFunc {
 		}
 		httpapi.WriteJSON(w, 200, out)
 	}
+}
+
+// errUnknown answers a write whose COMMIT may or may not have taken effect when
+// even the reconciliation could not tell. Every rules write is safe to repeat:
+// an identical batch returns its stored answer, a publication of the same
+// version returns that version, and a draft or restore meets its own revision.
+var errUnknown = &Error{Status: 503, Code: "outcome_unknown", Message: "the server did not confirm whether this change was saved; repeating the same request is safe, it cannot apply twice"}
+
+// outcome carries a write's own way to find out, after an unanswered COMMIT,
+// whether it took effect. Handlers register it once they know their request.
+type outcome struct {
+	reconcile func(ctx context.Context, tx pgx.Tx) (any, bool, error)
+}
+type outcomeKey struct{}
+
+// onUncertain registers how this request reconciles an unanswered COMMIT:
+// found reports the committed answer; not found means nothing was changed.
+func onUncertain(r *http.Request, fn func(ctx context.Context, tx pgx.Tx) (any, bool, error)) {
+	if o, ok := r.Context().Value(outcomeKey{}).(*outcome); ok {
+		o.reconcile = fn
+	}
+}
+
+// rolledBack reports whether a COMMIT failure is a confirmed rollback: the
+// server answered with an error, or pgx saw the transaction end in ROLLBACK.
+// Anything else (EOF, a reset, a timeout while waiting) leaves the outcome open.
+func rolledBack(err error) bool {
+	var pe *pgconn.PgError
+	return errors.As(err, &pe) || errors.Is(err, pgx.ErrTxCommitRollback)
+}
+
+// reconcileHook lets a test make the reconciliation itself fail.
+var reconcileHook = func() error { return nil }
+
+// reconcile asks a fresh transaction, on a fresh connection, whether this
+// request's write is durable: its stored answer when it is, 503 busy (nothing
+// changed) when it is not, and outcome_unknown when that cannot be told.
+func (m *Module) reconcile(r *http.Request, p tenant.Principal, pending *outcome) (any, error) {
+	if pending.reconcile == nil {
+		if r.Method == "GET" || r.Method == "HEAD" {
+			return nil, errStopped
+		}
+		return nil, errUnknown
+	}
+	deadline := time.Now().Add(reconcileTimeout)
+	ctx := withDeadline(r.Context(), deadline)
+	var out any
+	var found bool
+	err := db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
+		if err := reconcileHook(); err != nil {
+			return err
+		}
+		remaining := fmt.Sprintf("%dms", max(time.Until(deadline).Milliseconds(), 1))
+		if _, err := tx.Exec(ctx, `SELECT set_config('lock_timeout',$1,true),set_config('statement_timeout',$1,true),set_config('transaction_timeout',$1,true)`, remaining); err != nil {
+			return err
+		}
+		owner, err := actorOwner(ctx, tx, p)
+		if err != nil {
+			return err
+		}
+		agent := ""
+		if p.Kind == tenant.Agent {
+			agent = p.ID
+		}
+		if err = enterRules(ctx, tx, owner, agent); err != nil {
+			return err
+		}
+		out, found, err = pending.reconcile(ctx, tx)
+		return err
+	})
+	if err != nil {
+		return nil, errUnknown
+	}
+	if !found {
+		return nil, errStopped
+	}
+	return out, nil
 }
 
 // enterRules turns on rule visibility for this person or agent: it keeps the
@@ -210,6 +300,7 @@ var (
 	lockTimeout            = "5s"
 	statementTimeout       = "20s"
 	commitMargin           = 50 * time.Millisecond
+	reconcileTimeout       = 5 * time.Second
 )
 
 func writeFailure(w http.ResponseWriter, err error) {

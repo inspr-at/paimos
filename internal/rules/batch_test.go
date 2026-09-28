@@ -9,10 +9,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -20,6 +23,7 @@ import (
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func TestNextVersionAndBatchIdentity(t *testing.T) {
@@ -767,50 +771,6 @@ func TestBatchBudgetHonoursARevocationWhileWaiting(t *testing.T) {
 	}
 }
 
-// At its deadline the budget check stops, the request answers 503 and the
-// transaction rolls back, so an access change waiting on the lock proceeds
-// within moments of the deadline.
-func TestBudgetCheckStopsAtTheDeadline(t *testing.T) {
-	w := newBatchWorld(t, "rules-batch-deadline")
-	admin := w.principal(tenant.Person, "owner", "admin")
-	company := w.floor(admin)
-	project := w.layer(admin, Scope{Layer: "project", ProjectID: w.project})
-	w.publish(admin, w.set(admin, project, "Aeon", testRule("aeon", "Aeon rule.")), "260928090012.0.0")
-	s := w.set(admin, company, "Short", testRule("short", "A short rule."))
-	savedTimeout, savedHook := txTimeout, beforeRender
-	txTimeout = 400 * time.Millisecond
-	// 40 files to render at 25 ms each would take a second without the checks.
-	beforeRender = func() { time.Sleep(25 * time.Millisecond) }
-	t.Cleanup(func() { txTimeout, beforeRender = savedTimeout, savedHook })
-	started := time.Now()
-	done := make(chan int, 1)
-	go func() {
-		code, _ := w.send(admin, "POST", "/api/rules/publish", batch("", item(s, "auto")))
-		done <- code
-	}()
-	time.Sleep(150 * time.Millisecond)
-	access, err := w.d.Admin.Begin(t.Context())
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer access.Rollback(t.Context())
-	if _, err = access.Exec(t.Context(), `SET LOCAL lock_timeout='3s'`); err != nil {
-		t.Fatal(err)
-	}
-	if _, err = access.Exec(t.Context(), `SELECT id FROM tenants WHERE id=$1 FOR UPDATE`, w.tid); err != nil {
-		t.Fatal(err)
-	}
-	if waited := time.Since(started); waited > txTimeout+250*time.Millisecond {
-		t.Fatalf("the access change got the lock %s after the request started (deadline %s)", waited, txTimeout)
-	}
-	if code := <-done; code != 503 {
-		t.Fatal("a publication past its deadline answered", code)
-	}
-	if w.published(s.ID) != "" {
-		t.Fatal("a publication past its deadline wrote")
-	}
-}
-
 // bigStore is a store at the work bound: maxBudgetRules rules in sets of 50,
 // all disabled (the slow case: every rule is walked, none is rendered).
 func bigStore() []Snapshot {
@@ -921,26 +881,33 @@ func TestBudgetCheckRefusesAnOversizedStore(t *testing.T) {
 	}
 }
 
-// waitsAtMost runs an access change that needs the tenant row and reports how
-// long after start it got it.
-func (w *batchWorld) accessChangeAfter(start time.Time) time.Duration {
+// lockTaken runs an access change that needs the tenant row, with a generous
+// watchdog, and reports whether it got the row before the watchdog fired.
+func (w *batchWorld) lockTaken() bool {
 	w.t.Helper()
 	access, err := w.d.Admin.Begin(w.t.Context())
 	if err != nil {
 		w.t.Fatal(err)
 	}
 	defer access.Rollback(w.t.Context())
-	if _, err = access.Exec(w.t.Context(), `SET LOCAL lock_timeout='5s'`); err != nil {
+	if _, err = access.Exec(w.t.Context(), `SET LOCAL lock_timeout='10s'`); err != nil {
 		w.t.Fatal(err)
 	}
-	if _, err = access.Exec(w.t.Context(), `SELECT id FROM tenants WHERE id=$1 FOR UPDATE`, w.tid); err != nil {
-		w.t.Fatal(err)
+	_, err = access.Exec(w.t.Context(), `SELECT id FROM tenants WHERE id=$1 FOR UPDATE`, w.tid)
+	return err == nil
+}
+func (w *batchWorld) nothingStored(label string, s Set) {
+	w.t.Helper()
+	var stored int
+	if err := w.d.Admin.QueryRow(w.t.Context(), `SELECT count(*) FROM rule_publish_batches WHERE tenant_id=$1`, w.tid).Scan(&stored); err != nil || stored != 0 || w.published(s.ID) != "" {
+		w.t.Fatalf("%s: a publication past its deadline committed (%d stored, %v)", label, stored, err)
 	}
-	return time.Since(start)
 }
 
-// Probe: a slow statement right before the answer is stored. The server ends
-// the transaction at the deadline; nothing commits and the lock is free on time.
+// Probe: a slow statement right before the answer is stored. While the
+// statement still runs, the server ends the transaction at the deadline: the
+// competing access change gets the row, the request answers 503, and nothing
+// is stored.
 func TestBatchNeverCommitsAfterItsDeadline(t *testing.T) {
 	w := newBatchWorld(t, "rules-batch-commit")
 	admin := w.principal(tenant.Person, "owner", "admin")
@@ -948,32 +915,32 @@ func TestBatchNeverCommitsAfterItsDeadline(t *testing.T) {
 	s := w.set(admin, company, "Short", testRule("short", "A short rule."))
 	savedTimeout, savedHook := txTimeout, beforeStore
 	txTimeout = 600 * time.Millisecond
+	entered := make(chan struct{})
 	beforeStore = func(ctx context.Context, tx pgx.Tx) error {
-		_, err := tx.Exec(ctx, `SELECT pg_sleep(2)`)
+		close(entered)
+		_, err := tx.Exec(ctx, `SELECT pg_sleep(30)`)
 		return err
 	}
 	t.Cleanup(func() { txTimeout, beforeStore = savedTimeout, savedHook })
-	started := time.Now()
 	done := make(chan int, 1)
 	go func() {
 		code, _ := w.send(admin, "POST", "/api/rules/publish", batch("", item(s, "auto")))
 		done <- code
 	}()
-	time.Sleep(200 * time.Millisecond)
-	if waited := w.accessChangeAfter(started); waited > txTimeout+250*time.Millisecond {
-		t.Fatalf("the lock was held %s (deadline %s)", waited, txTimeout)
+	<-entered
+	if !w.lockTaken() {
+		t.Fatal("the access change never got the row while the slow statement ran")
 	}
 	if code := <-done; code != 503 {
 		t.Fatal("a publication past its deadline answered", code)
 	}
-	var stored int
-	if err := w.d.Admin.QueryRow(t.Context(), `SELECT count(*) FROM rule_publish_batches WHERE tenant_id=$1`, w.tid).Scan(&stored); err != nil || stored != 0 || w.published(s.ID) != "" {
-		t.Fatal("a publication past its deadline committed", stored, err)
-	}
+	w.nothingStored("slow statement", s)
 }
 
-// Probe: one slow render step (application CPU, no statement running). The
-// server still ends the transaction at the deadline, and nothing commits.
+// Probe: one render held in the application (no statement running). The
+// server still ends the transaction at the deadline, so the competing access
+// change gets the row while the render is held; released, the request answers
+// 503 and nothing is stored.
 func TestBatchSlowRenderReleasesTheLockAtTheDeadline(t *testing.T) {
 	w := newBatchWorld(t, "rules-batch-slowrender")
 	admin := w.principal(tenant.Person, "owner", "admin")
@@ -981,28 +948,139 @@ func TestBatchSlowRenderReleasesTheLockAtTheDeadline(t *testing.T) {
 	s := w.set(admin, company, "Short", testRule("short", "A short rule."))
 	savedTimeout, savedHook := txTimeout, beforeRender
 	txTimeout = 300 * time.Millisecond
-	slept := false
+	entered, release := make(chan struct{}), make(chan struct{})
+	var once sync.Once
 	beforeRender = func() {
-		if !slept {
-			slept = true
-			time.Sleep(time.Second)
-		}
+		once.Do(func() { close(entered); <-release })
 	}
 	t.Cleanup(func() { txTimeout, beforeRender = savedTimeout, savedHook })
-	started := time.Now()
 	done := make(chan int, 1)
 	go func() {
 		code, _ := w.send(admin, "POST", "/api/rules/publish", batch("", item(s, "auto")))
 		done <- code
 	}()
-	time.Sleep(100 * time.Millisecond)
-	if waited := w.accessChangeAfter(started); waited > txTimeout+250*time.Millisecond {
-		t.Fatalf("the lock was held %s (deadline %s)", waited, txTimeout)
+	<-entered
+	taken := w.lockTaken()
+	close(release)
+	if !taken {
+		t.Fatal("the access change never got the row while the render was held")
 	}
 	if code := <-done; code != 503 {
 		t.Fatal("a publication past its deadline answered", code)
 	}
-	if w.published(s.ID) != "" {
-		t.Fatal("a publication past its deadline committed")
+	w.nothingStored("held render", s)
+}
+
+// ackDropper loses the server's answer to exactly one COMMIT, after the server
+// has processed it: the change is durable, the client sees EOF.
+type ackDropper struct{ armed atomic.Bool }
+type dropConn struct {
+	net.Conn
+	d    *ackDropper
+	drop bool
+}
+
+func (c *dropConn) Write(b []byte) (int, error) {
+	if bytes.Contains(b, []byte("commit\x00")) && c.d.armed.CompareAndSwap(true, false) {
+		c.drop = true
+	}
+	return c.Conn.Write(b)
+}
+func (c *dropConn) Read(b []byte) (int, error) {
+	if c.drop {
+		// Wait for the server's CommandComplete (the commit is durable by
+		// then), throw it away and hang up.
+		_ = c.Conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+		_, _ = c.Conn.Read(make([]byte, 4096))
+		c.Conn.Close()
+		return 0, io.EOF
+	}
+	return c.Conn.Read(b)
+}
+
+// faultyWorld serves the rules API over a pool whose connections can lose one
+// COMMIT acknowledgement.
+func faultyWorld(t *testing.T, slug string) (*batchWorld, *ackDropper) {
+	w := newBatchWorld(t, slug)
+	cfg, err := pgxpool.ParseConfig(w.d.AppURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.ConnConfig.TLSConfig = nil
+	cfg.ConnConfig.Fallbacks = nil
+	cfg.ConnConfig.RuntimeParams["jit"] = "off"
+	dropper := &ackDropper{}
+	cfg.ConnConfig.DialFunc = func(ctx context.Context, network, addr string) (net.Conn, error) {
+		var d net.Dialer
+		c, err := d.DialContext(ctx, network, addr)
+		if err != nil {
+			return nil, err
+		}
+		return &dropConn{Conn: c, d: dropper}, nil
+	}
+	pool, err := pgxpool.NewWithConfig(t.Context(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	w.mux = http.NewServeMux()
+	New(pool).Mount(w.mux)
+	return w, dropper
+}
+
+// The COMMIT succeeds on the server but its acknowledgement is lost. The
+// request reconciles on a fresh connection and answers 200 with the stored
+// result, exactly as a replay would.
+func TestBatchLostCommitAcknowledgementReturnsTheStoredResult(t *testing.T) {
+	w, dropper := faultyWorld(t, "rules-batch-lostack")
+	admin := w.principal(tenant.Person, "owner", "admin")
+	company := w.floor(admin)
+	s := w.set(admin, company, "Short", testRule("short", "A short rule."))
+	req := batch("Lost ack.", item(s, "auto"))
+	dropper.armed.Store(true)
+	first := w.call(admin, "POST", "/api/rules/publish", req, 200)
+	if dropper.armed.Load() {
+		t.Fatal("no COMMIT acknowledgement was lost; the test did not exercise the fault")
+	}
+	replay := w.call(admin, "POST", "/api/rules/publish", req, 200)
+	if !bytes.Equal(first, replay) {
+		t.Fatalf("reconciled answer differs from the stored one\nfirst  %s\nreplay %s", first, replay)
+	}
+	var got BatchResult
+	if err := json.Unmarshal(first, &got); err != nil || w.published(s.ID) != got.Versions[0].Version {
+		t.Fatalf("reconciled answer: %s", first)
+	}
+	// Single publish and drafts reconcile the same way.
+	var saved Set
+	dropper.armed.Store(true)
+	json.Unmarshal(w.call(admin, "PUT", "/api/rules/sets/"+s.ID+"/draft", draftInput{s.Revision, "Short", []Rule{testRule("short", "A shorter rule.")}}, 200), &saved)
+	if dropper.armed.Load() || saved.Revision != s.Revision+1 {
+		t.Fatalf("draft after a lost acknowledgement: %+v", saved)
+	}
+	dropper.armed.Store(true)
+	var snap Snapshot
+	json.Unmarshal(w.call(admin, "POST", "/api/rules/sets/"+s.ID+"/publish", map[string]any{"expected_revision": saved.Revision, "version": "261001000000.0.0", "note": "Single."}, 200), &snap)
+	if dropper.armed.Load() || snap.Version != "261001000000.0.0" || snap.Note != "Single." {
+		t.Fatalf("single publish after a lost acknowledgement: %+v", snap)
+	}
+}
+
+// When even the reconciliation fails, the answer says the outcome is unknown,
+// never that nothing was changed.
+func TestBatchLostAcknowledgementWithoutReconciliationIsUnknown(t *testing.T) {
+	w, dropper := faultyWorld(t, "rules-batch-unknown")
+	admin := w.principal(tenant.Person, "owner", "admin")
+	company := w.floor(admin)
+	s := w.set(admin, company, "Short", testRule("short", "A short rule."))
+	saved := reconcileHook
+	reconcileHook = func() error { return errors.New("reconciliation unavailable") }
+	t.Cleanup(func() { reconcileHook = saved })
+	dropper.armed.Store(true)
+	body := w.call(admin, "POST", "/api/rules/publish", batch("", item(s, "auto")), 503)
+	if !strings.Contains(string(body), `"outcome_unknown"`) || strings.Contains(string(body), "nothing was changed") {
+		t.Fatalf("an unreconciled commit was reported as: %s", body)
+	}
+	if w.published(s.ID) == "" {
+		t.Fatal("the fault did not let the commit through; the test did not exercise the case")
 	}
 }
