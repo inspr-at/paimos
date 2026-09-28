@@ -9,7 +9,7 @@ import type { Availability } from '../../stores/agents'
 import { useSession } from '../../stores/session'
 import AppIcon from '../AppIcon.vue'
 import AllowanceWindowForm from './AllowanceWindowForm.vue'
-import { ABSENT_ALLOWANCE, allowanceFailure, beginSave, findSavedAllowance, settleSave, UNCERTAIN_ALLOWANCE } from './allowanceWindow'
+import { ABSENT_ALLOWANCE, allowanceFailure, beginSave, findSavedAllowance, holdUncertain, releaseHeld, settleSave, UNCERTAIN_ALLOWANCE, type HeldAllowance } from './allowanceWindow'
 
 // Per account: the window that binds first, how much of it is left and whether use
 // is running ahead of the pace the window allows. Admins can drain or resume.
@@ -25,7 +25,7 @@ const flight = ref<number | null>(null)
 const serverMessage = ref('')
 const uncertain = ref(false)
 const allowanceStatus = ref('')
-const pending = ref<{ accountId: string; name: string; body: AllowanceWrite } | null>(null)
+const pending = ref<Record<string, HeldAllowance>>({})
 let generation = 0
 const rows = computed(() => [...props.accounts]
   .map(account => ({ account, window: bindingWindow(account.windows, props.now) }))
@@ -42,7 +42,7 @@ async function toggle(account: AgentAccount) {
   finally { busy.value = '' }
 }
 function showPending(accountId: string) {
-  if (pending.value?.accountId === accountId) {
+  if (pending.value[accountId]) {
     uncertain.value = true
     serverMessage.value = UNCERTAIN_ALLOWANCE
   } else {
@@ -64,7 +64,7 @@ function closeAllowance() {
   uncertain.value = false
 }
 function reviseAllowance(accountId: string) {
-  if (pending.value?.accountId === accountId) pending.value = null
+  pending.value = releaseHeld(pending.value, accountId)
   uncertain.value = false
   serverMessage.value = ''
 }
@@ -85,7 +85,7 @@ async function saveAllowance(account: AgentAccount, body: AllowanceWrite) {
     }))
   } catch (caught) {
     const failure = allowanceFailure(caught)
-    if (failure.kind === 'uncertain') pending.value = { accountId, name, body }
+    if (failure.kind === 'uncertain') pending.value = holdUncertain(pending.value, accountId, name, body)
     applySettlement(settleSave({
       outcome: failure.kind === 'uncertain' ? 'uncertain' : 'rejected', message: failure.message, accountName: name,
       startedAccountId: accountId, startedGeneration: started, currentAccountId: editingId.value, currentGeneration: generation,
@@ -95,25 +95,23 @@ async function saveAllowance(account: AgentAccount, body: AllowanceWrite) {
   }
 }
 function applySettlement(settled: ReturnType<typeof settleSave>) {
-  if (settled.refresh) {
-    pending.value = null
-    emit('allowance-created')
-  }
+  if (settled.clearAccountId) pending.value = releaseHeld(pending.value, settled.clearAccountId)
+  if (settled.refresh) emit('allowance-created')
   if (settled.closeForm) editingId.value = ''
   uncertain.value = settled.uncertain
   serverMessage.value = settled.formMessage ?? ''
   if (settled.status) allowanceStatus.value = settled.status
 }
 async function checkAllowance(account: AgentAccount) {
-  const held = pending.value
-  if (!held || held.accountId !== account.id || flight.value !== null || editingId.value !== account.id) return
+  const held = pending.value[account.id]
+  if (!held || flight.value !== null || editingId.value !== account.id) return
   const started = generation
   flight.value = started
   const match = await findSavedAllowance(account.id, held.body)
   if (flight.value === started) flight.value = null
   if (generation !== started || editingId.value !== account.id) return
   if (match === 'saved') {
-    pending.value = null
+    pending.value = releaseHeld(pending.value, account.id)
     uncertain.value = false
     serverMessage.value = ''
     editingId.value = ''
@@ -122,7 +120,7 @@ async function checkAllowance(account: AgentAccount) {
     return
   }
   if (match === 'absent') {
-    pending.value = null
+    pending.value = releaseHeld(pending.value, account.id)
     uncertain.value = false
     serverMessage.value = ABSENT_ALLOWANCE
     return
@@ -177,7 +175,7 @@ const stateLabel: Record<AgentAccount['state'], string> = { available: 'Availabl
         <AllowanceWindowForm
           v-else-if="mayManage && editingId === account.id"
           :account="account" :now="now" :busy="flight !== null" :server-message="serverMessage" :uncertain="uncertain"
-          :pending="pending?.accountId === account.id ? pending.body : null"
+          :pending="pending[account.id]?.body ?? null"
           @save="saveAllowance(account, $event)" @cancel="closeAllowance" @check="checkAllowance(account)" @revise="reviseAllowance(account.id)"
         />
       </li>

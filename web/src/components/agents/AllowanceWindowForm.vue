@@ -54,7 +54,7 @@ function onSubmit() {
 <template>
   <form class="allowance" :aria-labelledby="`${account.id}-allowance-title`" @submit.prevent="onSubmit">
     <h3 :id="`${account.id}-allowance-title`">Allowance window for {{ name }}</h3>
-    <p class="hint">Enter an approved usage limit for this account. This does not infer the vendor subscription.</p>
+    <p class="hint">Enter the usage limit you want to allow for this account.</p>
     <dl class="preview">
       <div><dt>Account</dt><dd>{{ name }}</dd></div>
       <div><dt>Time zone</dt><dd>{{ zone }}</dd></div>
@@ -65,7 +65,7 @@ function onSubmit() {
     </dl>
     <p v-if="!review.ok" class="hint">The exact start and end appear here, in this time zone, before the window can be saved.</p>
     <p v-else-if="review.startsInPast" class="hint">The start is already in the past. It will be saved as shown, not moved forward.</p>
-    <p v-if="review.ok && review.overlap" class="hint">This overlaps an existing {{ review.body.unit.replace('_', ' ') }} window on this account. Saving still asks the server. An overlap is refused there and is not sent again.</p>
+    <p v-if="review.ok && review.overlap" class="hint">This overlaps an existing {{ review.body.unit.replace('_', ' ') }} window on this account. Saving sends it once. The server refuses the overlap, and it is not sent again.</p>
     <p v-if="problem" :id="`${account.id}-allowance-error`" ref="alertEl" class="problem" role="alert" tabindex="-1"><AppIcon name="alert" :size="13" />{{ problem }}</p>
     <template v-if="uncertain">
       <p v-if="pending" class="hint">Unconfirmed request: <time :datetime="pending.starts_at">{{ formatInstant(pending.starts_at, zone) }}</time> to <time :datetime="pending.ends_at">{{ formatInstant(pending.ends_at, zone) }}</time>, {{ pending.allowance }} {{ pending.unit.replace('_', ' ') }}.</p>
@@ -100,6 +100,7 @@ function onSubmit() {
           <input class="field" type="number" min="0" max="1" step="0.0001" :value="draft.burst ?? ''" required :aria-invalid="problem ? true : undefined" :aria-describedby="describedBy" @input="assign({ burst: ($event.target as HTMLInputElement).value === '' ? null : Number(($event.target as HTMLInputElement).value) })" />
         </label>
       </div>
+      <p class="hint">Cost in micros counts millionths of a US dollar: 1,000,000 is 1 USD. Burst ratio, from 0 to 1, is how far usage may run ahead of a steady or front-loaded pace.</p>
       <div class="actions">
         <button type="submit" class="btn sm primary" :disabled="busy" :aria-busy="busy">{{ busy ? 'Saving…' : 'Save allowance window' }}</button>
         <button type="button" class="btn sm ghost" @click="emit('cancel')">Cancel</button>

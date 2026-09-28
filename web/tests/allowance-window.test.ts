@@ -5,8 +5,8 @@ import { APIError, RequestFailure, sessionEnded } from '../src/lib/api.ts'
 import type { AllowanceWrite } from '../src/lib/agents.ts'
 import {
   ABSENT_ALLOWANCE, ENDED_WINDOW, IMPOSSIBLE_DATE, INVALID_ALLOWANCE, NORMALISED_DATE, UNCERTAIN_ALLOWANCE,
-  allowanceFailure, beginSave, emptyAllowanceDraft, findSavedAllowance, instantFromCivil, parseCivilTime,
-  reviewAllowance, settleSave, windowsOverlap, type CivilTime,
+  allowanceFailure, beginSave, emptyAllowanceDraft, findSavedAllowance, holdUncertain, instantFromCivil, parseCivilTime,
+  releaseHeld, reviewAllowance, settleSave, windowsOverlap, type CivilTime,
 } from '../src/components/agents/allowanceWindow.ts'
 
 const originalFetch = globalThis.fetch
@@ -107,6 +107,7 @@ test('a busy or switched account does not send, and a finished save does not lan
   })
   assert.equal(stale.closeForm, false)
   assert.equal(stale.refresh, true)
+  assert.equal(stale.clearAccountId, 'a')
   assert.equal(stale.formMessage, null)
   assert.match(stale.status ?? '', /Pi on hsb1/)
   const lost = settleSave({
@@ -114,14 +115,31 @@ test('a busy or switched account does not send, and a finished save does not lan
   })
   assert.equal(lost.refresh, false)
   assert.equal(lost.uncertain, false)
+  assert.equal(lost.clearAccountId, null)
   assert.equal(lost.formMessage, null)
   assert.match(lost.status ?? '', /not sent again/)
   const same = settleSave({
     outcome: 'uncertain', message: UNCERTAIN_ALLOWANCE, accountName: 'Pi on hsb1', startedAccountId: 'a', startedGeneration: 2, currentAccountId: 'a', currentGeneration: 2,
   })
   assert.equal(same.uncertain, true)
+  assert.equal(same.clearAccountId, null)
   assert.equal(same.formMessage, UNCERTAIN_ALLOWANCE)
   assert.equal(same.formMessage?.includes('Set allowance again'), false)
+})
+
+test('saving one account releases only that account from an uncertain request', () => {
+  const pi = draftBody()
+  const codex = { ...pi, allowance: 5 }
+  let held = holdUncertain({}, 'pi', 'Pi on hsb1', pi)
+  held = holdUncertain(held, 'codex', 'Codex Pro', codex)
+  const saved = settleSave({
+    outcome: 'saved', message: '', accountName: 'Codex Pro', startedAccountId: 'codex', startedGeneration: 4, currentAccountId: 'codex', currentGeneration: 4,
+  })
+  assert.equal(saved.clearAccountId, 'codex')
+  held = releaseHeld(held, saved.clearAccountId ?? '')
+  assert.equal(held.pi?.body.allowance, 1)
+  assert.equal(held.codex, undefined)
+  assert.equal(releaseHeld(held, 'missing'), held)
 })
 
 test('authorization and overlap stay server errors, and a lost response is not a silent retry', () => {

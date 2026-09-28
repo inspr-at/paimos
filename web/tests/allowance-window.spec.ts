@@ -74,7 +74,10 @@ test('a person with account.manage saves one window and keeps each draft on its 
   const form = await fillWindow(page, 'Pi on hsb1', times.start, times.end, '4')
   await expect(form).toContainText('Pi on hsb1')
   await expect(form).toContainText(times.zone)
-  await expect(form).toContainText('does not infer the vendor subscription')
+  await expect(form).toContainText('Enter the usage limit you want to allow for this account.')
+  await expect(form).toContainText('millionths of a US dollar')
+  await expect(form).not.toContainText('does not infer')
+  await expect(form).not.toContainText('Saving still asks the server')
   await expect(form.locator('time').first()).toBeVisible()
   const filled = {
     start: await form.getByLabel('Starts (your local time)').inputValue(),
@@ -158,6 +161,44 @@ test('invalid, ended, overlap, forbidden and uncertain results do not post twice
   expect(routes?.posts).toHaveLength(4)
 })
 
+test('an uncertain account keeps Check again after another account saves', async ({ page }) => {
+  const { data, routes } = await setup(page, { manage: true, mode: 'uncertain' })
+  await openAccounts(page)
+  const now = Date.now()
+  const times = await localRange(page, now + 3_600_000, now + 7_200_000)
+  const pi = data.accounts.find(account => account.label === 'Pi on hsb1')
+  const codex = data.accounts.find(account => account.label === 'Codex Pro')
+  let form = await fillWindow(page, 'Pi on hsb1', times.start, times.end, '3')
+  await form.getByRole('button', { name: 'Save allowance window' }).click()
+  await expect(form.getByRole('button', { name: 'Check again' })).toBeVisible()
+  expect(routes?.posts).toHaveLength(1)
+  await form.getByRole('button', { name: 'Cancel' }).click()
+
+  routes?.setMode('ok')
+  form = await fillWindow(page, 'Codex Pro', times.start, times.end, '5')
+  await form.getByRole('button', { name: 'Save allowance window' }).click()
+  await expect(page.getByRole('region', { name: 'Accounts and pacing' })).toContainText('Allowance window saved for Codex Pro.')
+  expect(routes?.posts).toHaveLength(2)
+  expect(routes?.posts.filter(post => post.path.includes(pi?.id ?? 'missing'))).toHaveLength(1)
+  expect(routes?.posts.filter(post => post.path.includes(codex?.id ?? 'missing'))).toHaveLength(1)
+
+  const reads: string[] = []
+  page.on('request', request => {
+    if (request.method() === 'GET' && request.url().includes('/agent-accounts')) reads.push(request.url())
+  })
+  await row(page, 'Pi on hsb1').getByRole('button', { name: 'Add allowance window for Pi on hsb1' }).click()
+  form = row(page, 'Pi on hsb1').locator('form')
+  await expect(form.getByRole('button', { name: 'Check again' })).toBeVisible()
+  await expect(form).toContainText('3 requests')
+  expect(routes?.posts).toHaveLength(2)
+  const before = reads.length
+  await form.getByRole('button', { name: 'Check again' }).click()
+  await expect(form.getByRole('alert')).toContainText('not on the account')
+  await expect.poll(() => reads.length).toBeGreaterThan(before)
+  expect(routes?.posts).toHaveLength(2)
+  expect(reads.every(url => !url.includes('/windows'))).toBe(true)
+})
+
 test('screenshots at 390 and 1600 in light and dark', async ({ page }) => {
   mkdirSync('../.agent-shots', { recursive: true })
   await setup(page, { manage: true })
@@ -173,6 +214,8 @@ test('screenshots at 390 and 1600 in light and dark', async ({ page }) => {
         const form = await fillWindow(page, 'Pi on hsb1', times.start, times.end, '1')
         const save = form.getByRole('button', { name: 'Save allowance window' })
         await save.scrollIntoViewIfNeeded()
+        await expect(form).toContainText('Enter the usage limit you want to allow for this account.')
+        await expect(form).toContainText('millionths of a US dollar')
         await expect(form).toContainText(times.zone)
         await expect(form.locator('time').first()).toBeVisible()
         await expect(save).toBeVisible()

@@ -221,6 +221,23 @@ export interface SaveSettlement {
   uncertain: boolean
   formMessage: string | null
   status: string | null
+  clearAccountId: string | null
+}
+
+export interface HeldAllowance {
+  name: string
+  body: AllowanceWrite
+}
+
+export function holdUncertain(held: Readonly<Record<string, HeldAllowance>>, accountId: string, name: string, body: AllowanceWrite): Record<string, HeldAllowance> {
+  return { ...held, [accountId]: { name, body } }
+}
+
+export function releaseHeld(held: Readonly<Record<string, HeldAllowance>>, accountId: string): Record<string, HeldAllowance> {
+  if (!Object.hasOwn(held, accountId)) return held
+  const next = { ...held }
+  delete next[accountId]
+  return next
 }
 
 export function settleSave(input: {
@@ -234,16 +251,19 @@ export function settleSave(input: {
 }): SaveSettlement {
   const same = input.startedAccountId === input.currentAccountId && input.startedGeneration === input.currentGeneration
   if (input.outcome === 'saved') {
-    return { refresh: true, closeForm: same, uncertain: false, formMessage: null, status: `Allowance window saved for ${input.accountName}.` }
+    return {
+      refresh: true, closeForm: same, uncertain: false, formMessage: null, clearAccountId: input.startedAccountId,
+      status: `Allowance window saved for ${input.accountName}.`,
+    }
   }
   if (!same) {
     return {
-      refresh: false, closeForm: false, uncertain: false, formMessage: null,
+      refresh: false, closeForm: false, uncertain: false, formMessage: null, clearAccountId: null,
       status: input.outcome === 'uncertain' ? `The allowance for ${input.accountName} may already be saved. Check that account before sending it again. It was not sent again.` : null,
     }
   }
   return {
-    refresh: false, closeForm: false, uncertain: input.outcome === 'uncertain',
+    refresh: false, closeForm: false, uncertain: input.outcome === 'uncertain', clearAccountId: null,
     formMessage: input.outcome === 'uncertain' ? UNCERTAIN_ALLOWANCE : input.message,
     status: null,
   }
