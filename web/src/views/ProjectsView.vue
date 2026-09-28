@@ -6,7 +6,7 @@ import { useProjects, type Project } from '../stores/projects'
 import { useProjectGroups } from '../stores/projectGroups'
 import { useSession } from '../stores/session'
 import { useLiveAgents } from '../stores/liveAgents'
-import { liveChanges, liveSummary, type LiveAgent } from '../lib/liveAgents'
+import { activeByProject, activeSessions, liveChanges, liveSummary, type LiveAgent } from '../lib/liveAgents'
 import { onPreferenceFailure, usePreference } from '../lib/preferences'
 import { plural } from '../lib/work'
 import { toast, type ToastAction } from '../lib/toast'
@@ -121,7 +121,7 @@ const openTotal = computed(() => active.value.reduce((sum, project) => sum + pro
 function groupName(id: string) { return groups.def(id)?.name ?? 'No group' }
 function to(project: Project) { return `/p/${encodeURIComponent(project.routeKey)}` }
 function label(project: Project) {
-  const working = liveSummary(live.forProject(project.id))
+  const working = liveSummary(activeSessions(live.forProject(project.id)))
   return `${project.routeKey} ${project.title}, ${project.open + project.in_progress} open, ${project.in_progress} in progress, ${project.done} done${working ? `, ${working}` : ''}${selected.value.has(project.id) ? ', selected' : ''}`
 }
 const validateName = (name: string, except?: string) => nameProblem(name, defs.value, except)
@@ -549,10 +549,11 @@ let liveSaid: Map<string, LiveAgent[]> | null = null
 let liveNewsTimer: ReturnType<typeof setTimeout> | undefined
 watch(() => live.state === 'ready' ? live.byProject : null, after => {
   if (!after) return
-  if (!liveSaid) { liveSaid = after; return }
+  const current = activeByProject(after)
+  if (!liveSaid) { liveSaid = current; return }
   clearTimeout(liveNewsTimer)
   liveNewsTimer = setTimeout(() => {
-    const now = live.byProject
+    const now = activeByProject(live.byProject)
     const news = liveChanges(liveSaid, now, id => store.byId(id)?.title)
     liveSaid = now
     if (news) announce(news)

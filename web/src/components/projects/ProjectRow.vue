@@ -7,6 +7,7 @@ import { useLiveAgents } from '../../stores/liveAgents'
 import { absoluteTime, highlight, relativeTime } from '../../lib/work'
 import AppIcon from '../AppIcon.vue'
 import LiveAgents from './LiveAgents.vue'
+import { activeSessions } from '../../lib/liveAgents'
 import { leadingState } from '../../lib/agentSignals'
 import { useAgentAppearance } from '../../lib/agentAppearance'
 const { appearance } = useAgentAppearance()
@@ -24,7 +25,7 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{ menu: [anchor: HTMLElement] }>()
 const live = useLiveAgents()
-const agents = computed(() => live.forProject(props.project.id))
+const agents = computed(() => activeSessions(live.forProject(props.project.id)))
 const agentState = computed(() => leadingState(agents.value.map(a => a.state)))
 const stat = (id: ProjectColumnId): StatKind | null => id === 'open' || id === 'doing' || id === 'done' ? id : null
 const value = (project: Project, kind: StatKind) => kind === 'open' ? project.open : kind === 'doing' ? project.in_progress : project.done

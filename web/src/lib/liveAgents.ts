@@ -112,13 +112,49 @@ export function chipText(agents: LiveAgent[]) {
 // which agent it is) its harness and start, which a session never changes.
 export const agentKey = (agent: LiveAgent) => agent.session_id ?? `${agent.harness}@${agent.since}`
 
+// Lifecycle, not the derived label. include_inactive keeps stopped and archived
+// sessions for history; a problem stop reason or a fresh heartbeat does not
+// make them live. Waiting, starting, yielded, throttled, idle and overdue
+// sessions stay, because they have not stopped.
+export function isActiveSession(agent: Pick<LiveAgent, 'phase' | 'stopped_at' | 'stop_reason'>): boolean {
+  if (agent.phase === 'stopped' || agent.stopped_at) return false
+  if (/archived/i.test(agent.stop_reason ?? '')) return false
+  return true
+}
+
+// The sessions a project pill, its summary and its popover may count. The same
+// session is kept once, in the order the caller already chose.
+export function activeSessions(agents: LiveAgent[]): LiveAgent[] {
+  const seen = new Set<string>()
+  const active: LiveAgent[] = []
+  for (const agent of agents) {
+    if (!isActiveSession(agent)) continue
+    const key = agentKey(agent)
+    if (seen.has(key)) continue
+    seen.add(key)
+    active.push(agent)
+  }
+  return active
+}
+
+// Projects with no session still in progress drop out, so a card of only
+// stopped history is quiet and the live region can say so.
+export function activeByProject(grouped: ReadonlyMap<string, LiveAgent[]>): Map<string, LiveAgent[]> {
+  const out = new Map<string, LiveAgent[]>()
+  for (const [id, list] of grouped) {
+    const active = activeSessions(list)
+    if (active.length) out.set(id, active)
+  }
+  return out
+}
+
+export const activeAgentLabel = (count: number) => `${count} active ${count === 1 ? 'agent' : 'agents'}`
+
 // A session bound to this ticket that the list may name. Stopped and archived
 // sessions are not current work. State is the shared derivation: a heartbeat
 // with no productive phase stays idle or stale and is never treated as working.
 export function isListedTicketWorker(agent: LiveAgent): boolean {
-  if (!agent.ticket) return false
-  if (/archived/i.test(agent.stop_reason ?? '')) return false
-  if (agent.phase === 'stopped' || agent.stopped_at || agent.state === 'stopped') return false
+  if (!agent.ticket || !isActiveSession(agent) || agent.state === 'stopped') return false
   return true
 }
 
