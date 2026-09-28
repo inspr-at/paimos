@@ -426,6 +426,23 @@ paths:
                   version: {type: string, description: "YYMMDDhhmmss.0.0 or dev"}
                   scheme: {type: string, enum: [inspr-calendar-v2]}
                   brand: {$ref: '#/components/schemas/Brand'}
+  /projects/{projectId}/releases/{releaseId}/note-snapshot:
+    get:
+      operationId: releaseNoteSnapshot
+      summary: Capture linked ticket benefit fields in one database snapshot
+      description: Read-only project-scoped export using journey_tickets membership, not Git mentions. Requires releases.read and node visibility (nodes.read). Save the response as release-notes/<version>.json before tagging for offline history generation. Does not publish or freeze a release.
+      parameters:
+        - {in: path, name: projectId, required: true, schema: {type: string, format: uuid}}
+        - {in: path, name: releaseId, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: Point-in-time membership and field snapshot (including hidden tickets for provenance)
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ReleaseNoteSnapshot'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
   /releases:
     get:
       operationId: listReleases
@@ -4293,6 +4310,55 @@ components:
         release_name: {type: string, maxLength: 48}
         wordmark: {type: string, maxLength: 48}
         short_name: {type: string, maxLength: 48}
+    ReleaseNoteSnapshot:
+      type: object
+      required: [schema, tenant_id, project_node_id, release_node_id, version, version_scheme, release_revision, captured_at, membership_source, field_source, tickets]
+      properties:
+        schema: {type: string, const: aeon.release-note-snapshot.v1}
+        tenant_id: {type: string, format: uuid}
+        project_node_id: {type: string, format: uuid}
+        release_node_id: {type: string, format: uuid}
+        version: {type: string, description: Empty until a version is assigned; tagged file path then declares the build binding and notes preserve that gap}
+        version_scheme: {type: string}
+        release_revision: {type: integer, minimum: 1}
+        captured_at: {type: string, format: date-time}
+        membership_source: {type: string, const: journey_tickets.release_node_id}
+        field_source: {type: string, const: nodes.fields}
+        tickets:
+          type: array
+          items:
+            type: object
+            required: [id, key, position, updated_at, fields, unavailable]
+            properties:
+              id: {type: string, format: uuid}
+              key: {type: string}
+              position: {type: integer}
+              updated_at: {type: [string, 'null'], format: date-time}
+              fields: {type: [object, 'null'], description: Exact values of the five benefit fields only; unavailable members retain only their hide flag when readable}
+              unavailable: {type: string}
+    ReleaseNotes:
+      type: object
+      required: [source, snapshot_sha256, captured_at, release_revision, items, gaps, hidden]
+      description: Additive v1 extension. Old manifests without notes remain archived Git history. New builds always record notes, including gaps. Snapshot digest binds the exact tagged file bytes. Git headlines never substitute for benefits.
+      properties:
+        source: {type: string}
+        snapshot_sha256: {type: string}
+        captured_at: {type: [string, 'null'], format: date-time}
+        release_revision: {type: integer}
+        hidden: {type: integer, minimum: 0}
+        gaps: {type: array, items: {type: string}}
+        items:
+          type: array
+          items:
+            type: object
+            required: [id, key, pill_en, pill_de, benefit_en, benefit_de]
+            properties:
+              id: {type: string, format: uuid}
+              key: {type: string}
+              pill_en: {type: string}
+              pill_de: {type: string}
+              benefit_en: {type: string}
+              benefit_de: {type: string}
     ReleaseHistory:
       description: inspr.release-history.v1 (see internal/releasehistory), newest release first, plus the running version.
       type: object
@@ -4319,8 +4385,9 @@ components:
         reserved_at: {type: [string, 'null'], format: date-time}
         tagged_at: {type: [string, 'null'], format: date-time}
         published_at: {type: [string, 'null'], format: date-time}
-        headline: {type: string}
-        tickets: {type: array, items: {type: string}}
+        headline: {type: string, description: Original Git headline; source evidence when notes is present}
+        notes: {$ref: "#/components/schemas/ReleaseNotes"}
+        tickets: {type: array, items: {type: string}, description: Legacy Git references; captured visible release members are in notes.items}
         changes:
           type: array
           items:
@@ -4456,6 +4523,7 @@ components:
       type: object
       required: [release_node_id, project_node_id, state, revision, features, tickets]
       properties:
+        warnings: {type: array, items: {type: string}, description: Non-blocking guidance returned by quick ticket creation}
         release_node_id: {type: string, format: uuid}
         project_node_id: {type: string, format: uuid}
         state: {type: string, enum: [planning, building, candidate, deploying, refused, access, released, superseded]}
@@ -6745,6 +6813,7 @@ components:
         updated_at: {type: string, format: date-time}
         deleted_at: {type: [string, 'null'], format: date-time}
     Node:
+      description: Ticket creation may return benefit warnings. Entering done requires both pills and benefits, including when hidden from release notes. Already-done records remain editable.
       type: object
       required: [id, key, kind_id, title, body, fields, state, parent_id, position, created_at, updated_at]
       properties:
@@ -6762,8 +6831,13 @@ components:
         body:
           type: string
           description: Markdown
+        warnings:
+          type: array
+          items: {type: string}
+          description: Non-blocking ticket benefit guidance returned on creation.
         fields:
           type: object
+          description: Tenant-configured fields. TicketBenefitFields describes the default ticket properties; other kinds retain their own schema.
         state:
           type: string
         parent_id:
@@ -6781,6 +6855,16 @@ components:
         deleted_at:
           type: [string, 'null']
           format: date-time
+    TicketBenefitFields:
+      type: object
+      additionalProperties: true
+      description: Tenant-default ticket fields. Drafts may be incomplete; entering done validates pills (2–4 whitespace-separated words) and nonblank benefits. One or two plain-language sentences and translation quality are editorial requirements, not inferred by software.
+      properties:
+        pill_en: {type: string, description: "English pill, 2–4 words"}
+        pill_de: {type: string, description: "German pill, 2–4 words"}
+        benefit_en: {type: string, description: "English benefit, one or two plain-language sentences"}
+        benefit_de: {type: string, description: "German benefit, one or two plain-language sentences, neutral without direct address"}
+        hide_from_release_notes: {type: boolean, default: false, description: Omit from public notes; does not waive completion requirements}
     NodeCreate:
       type: object
       required: [kind_id, title]
@@ -6802,6 +6886,7 @@ components:
           default: ''
         fields:
           type: object
+          description: Tenant-configured fields. TicketBenefitFields describes the default ticket properties; other kinds retain their own schema.
           default: {}
         state:
           type: string
@@ -6824,6 +6909,7 @@ components:
           type: string
         fields:
           type: object
+          description: Tenant-configured fields. TicketBenefitFields describes the default ticket properties; other kinds retain their own schema.
         state:
           type: string
     TagPatch:

@@ -363,7 +363,7 @@ func TestNodeKeysFieldsAndEvents(t *testing.T) {
 	if status != http.StatusBadRequest {
 		t.Fatalf("immutable key %d %s", status, body)
 	}
-	status, body = call(t, &p, http.MethodPatch, "/api/nodes/"+imported.ID, `{"title":"Alpha 2","state":"done"}`)
+	status, body = call(t, &p, http.MethodPatch, "/api/nodes/"+imported.ID, `{"title":"Alpha 2","state":"done","fields":`+benefitFields+`}`)
 	updated := decode[nodeJSON](t, status, body, http.StatusOK)
 	if updated.Key != "PAI-123" || updated.Title != "Alpha 2" || updated.State != "done" {
 		t.Fatalf("updated %#v", updated)
@@ -396,7 +396,7 @@ func TestListCursorFiltersAndTree(t *testing.T) {
 	other := mustNode(t, p, `{"kind_id":"`+project.ID+`","title":"Other"}`)
 	e2 := mustNode(t, p, `{"kind_id":"`+epic.ID+`","title":"E2","parent_id":"`+root.ID+`"}`)
 	e1 := mustNode(t, p, `{"kind_id":"`+epic.ID+`","title":"E1","parent_id":"`+root.ID+`","before_id":"`+e2.ID+`"}`)
-	task := mustNode(t, p, `{"kind_id":"`+ticket.ID+`","title":"Task","parent_id":"`+e1.ID+`","state":"done"}`)
+	task := mustNode(t, p, `{"kind_id":"`+ticket.ID+`","title":"Task","parent_id":"`+e1.ID+`","state":"done","fields":`+benefitFields+`}`)
 
 	status, body := call(t, &p, http.MethodGet, "/api/nodes?parent_id="+root.ID, "")
 	direct := decode[nodePage](t, status, body, http.StatusOK)

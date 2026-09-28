@@ -185,6 +185,24 @@ func TestCompatEndToEnd(t *testing.T) {
 		t.Fatalf("json get %+v", got)
 	}
 
+	// AEON-256: CLI uses the same server gate; hidden tickets cannot bypass it.
+	code, _, errOut = runCLI([]string{"paimos", "--config", missing, "issue", "update", key, "--status", "done", "--hide-from-release-notes", "true"}, "")
+	if code == 0 || !strings.Contains(errOut, "benefit_de") {
+		t.Fatalf("missing benefits accepted: %d %s", code, errOut)
+	}
+	code, _, errOut = runCLI([]string{"paimos", "--config", missing, "issue", "update", key, "--status", "done", "--pill-en", "Clear release notes", "--pill-de", "Verständliche Release Notes", "--benefit-en", "Tickets explain what you gain.", "--benefit-de", "Tickets erklären den Nutzen.", "--hide-from-release-notes", "true"}, "")
+	if code != 0 {
+		t.Fatalf("complete ticket rejected: %d %s", code, errOut)
+	}
+	code, out, errOut = runCLI([]string{"paimos", "--config", missing, "--json", "issue", "get", key}, "")
+	if code != 0 || json.Unmarshal([]byte(out), &got) != nil || got.BenefitDE != "Tickets erklären den Nutzen." || !got.Hide {
+		t.Fatalf("benefits lost: %d %s %s", code, out, errOut)
+	}
+	code, _, errOut = runCLI([]string{"paimos", "--config", missing, "issue", "update", key, "--status", "in-progress"}, "")
+	if code != 0 {
+		t.Fatal(errOut)
+	}
+
 	code, out, errOut = runCLI([]string{"paimos", "--config", missing, "issue", "search", "Calendar", "-p", "AEON"}, "")
 	if code != 0 || !strings.Contains(out, "KEY           TYPE     STATUS         TITLE") || !strings.Contains(out, key) || !strings.Contains(out, "ticket") {
 		t.Fatalf("search code %d out %q err %q", code, out, errOut)

@@ -75,6 +75,9 @@ func (m *module) createTicket(w http.ResponseWriter, r *http.Request) {
 		out, err = addTicket(r.Context(), tx, p, strings.ToLower(r.PathValue("projectId")), strings.ToLower(r.PathValue("releaseId")), in)
 		return err
 	})
+	if err == nil {
+		out.Warnings = []string{"Tickets need English and German pills and benefits before Done; edit them in ticket details."}
+	}
 	respond(w, out, err)
 }
 

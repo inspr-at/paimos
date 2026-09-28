@@ -184,6 +184,12 @@ func (s *seeder) tree() error {
 					body = richBody()
 				}
 				fields := map[string]any{}
+				// Authored fictional examples for newly seeded completed tickets.
+				// Completed demo tenants return before this path; no backfill.
+				if ticket.pillEN != "" {
+					fields["pill_en"], fields["pill_de"] = ticket.pillEN, ticket.pillDE
+					fields["benefit_en"], fields["benefit_de"] = ticket.benefitEN, ticket.benefitDE
+				}
 				if ticket.priority != "" {
 					fields["priority"] = ticket.priority
 				}

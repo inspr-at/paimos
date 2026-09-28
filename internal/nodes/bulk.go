@@ -18,6 +18,7 @@ import (
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/principallink"
 	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/inspr-at/paimos/internal/ticketbenefits"
 )
 
 // POST /api/nodes/bulk applies one change to many nodes in one tenant
@@ -367,6 +368,10 @@ func (m *Module) applyBulk(ctx context.Context, p tenant.Principal, plan bulkPla
 			if plan.state != nil {
 				state = *plan.state
 			}
+			if issues := ticketbenefits.Transition(target.kindSlug, current.State, state, fields); len(issues) > 0 {
+				skip("before done: " + strings.Join(issues, "; "))
+				continue
+			}
 			edit := state != current.State || !sameJSON(fields, current.Fields)
 			if !edit && !move {
 				result.Unchanged = append(result.Unchanged, current.ID)
@@ -554,8 +559,10 @@ func undoBulk(ctx context.Context, tx pgx.Tx, p tenant.Principal, e events.Event
 	// nodes.write in the node's project, a move nodes.move in every project it
 	// changes (ADR-003 P2).
 	projects := map[string]string{}
+	kinds := map[string]string{}
 	for _, t := range loaded {
 		projects[t.node.ID] = deref(t.projectID)
+		kinds[t.node.ID] = t.kindSlug
 	}
 	for i, want := range after.Items {
 		now, ok := current[want.ID]
@@ -563,6 +570,9 @@ func undoBulk(ctx context.Context, tx pgx.Tx, p tenant.Principal, e events.Event
 			return events.Change{}, events.ErrConflict
 		}
 		old := before.Items[i]
+		if len(ticketbenefits.Transition(kinds[now.ID], now.State, old.State, old.Fields)) > 0 {
+			return events.Change{}, events.ErrConflict
+		}
 		if old.State != now.State || !sameJSON(old.Fields, now.Fields) {
 			if err := authz.RequireInProjects(ctx, tx, p, "nodes.write", projects[now.ID]); err != nil {
 				return events.Change{}, events.ErrForbidden

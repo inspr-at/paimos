@@ -23,6 +23,7 @@ type epicSpec struct {
 
 type ticketSpec struct {
 	key, title, state, priority, comment string
+	pillEN, pillDE, benefitEN, benefitDE string
 	// assignee is 0 (none), 1 (Ivo Quill) or 2 (Nia Frost).
 	assignee int
 	rich     bool
@@ -64,7 +65,12 @@ func lumenReading() []ticketSpec {
 		{key: "LT-1", title: "Write the reading-room brief", state: "in_progress", priority: "high", assignee: 1, rich: true, comment: "Fictional note: the brief stays in the demo tenant."},
 		{key: "LT-2", title: "Mark the lantern hooks", state: "new", priority: "medium", assignee: 2},
 		{key: "LT-3", title: "Oil the oak desks", state: "backlog", priority: "low", assignee: 1, comment: "Wait for the hooks. This comment is fictional."},
-		{key: "LT-4", title: "Hang the dusk bell", state: "done", priority: "medium", assignee: 0},
+		{key: "LT-4", title: "Hang the dusk bell", state: "done", priority: "medium", assignee: 0,
+			pillEN:    "Clear closing signal",
+			pillDE:    "Klarer Hinweis zum Schließen",
+			benefitEN: "The dusk bell makes closing time easy to notice.",
+			benefitDE: "Die Abendglocke macht das Ende der Öffnungszeit leicht erkennbar.",
+		},
 	}
 }
 
@@ -79,7 +85,12 @@ func lumenLanterns() []ticketSpec {
 
 func lumenQuiet() []ticketSpec {
 	return []ticketSpec{
-		{key: "LT-9", title: "Post quiet-hour hours", state: "done", priority: "medium", assignee: 1},
+		{key: "LT-9", title: "Post quiet-hour hours", state: "done", priority: "medium", assignee: 1,
+			pillEN:    "Quiet hours visible",
+			pillDE:    "Ruhezeiten leicht finden",
+			benefitEN: "Visitors can see when the reading room is quiet.",
+			benefitDE: "Die Ruhezeiten im Leseraum sind leicht zu finden.",
+		},
 		{key: "LT-10", title: "Move the squeaky chair", state: "in_progress", priority: "low", assignee: 2},
 		{key: "LT-11", title: "Test the felt door", state: "new", priority: "medium", assignee: 0},
 		{key: "LT-12", title: "Write the whisper rule", state: "backlog", priority: "high", assignee: 1},
@@ -90,7 +101,12 @@ func lumenCards() []ticketSpec {
 	return []ticketSpec{
 		{key: "LT-13", title: "Reprint faded cards", state: "new", priority: "medium", assignee: 2},
 		{key: "LT-14", title: "Index the tide pamphlets", state: "in_progress", priority: "high", assignee: 1, comment: "Pamphlets are invented."},
-		{key: "LT-15", title: "Retire duplicate cards", state: "done", priority: "low", assignee: 0},
+		{key: "LT-15", title: "Retire duplicate cards", state: "done", priority: "low", assignee: 0,
+			pillEN:    "A clearer catalog",
+			pillDE:    "Ein übersichtlicher Katalog",
+			benefitEN: "Each title has one catalog card, making books easier to find.",
+			benefitDE: "Jeder Titel hat eine Katalogkarte, damit Bücher leichter zu finden sind.",
+		},
 		{key: "LT-16", title: "Stamp the fiction shelf", state: "backlog", priority: "medium", assignee: 2},
 	}
 }
@@ -100,7 +116,12 @@ func harborBerths() []ticketSpec {
 		{key: "HT-1", title: "Name the north berth", state: "new", priority: "high", assignee: 1},
 		{key: "HT-2", title: "Paint berth numbers", state: "in_progress", priority: "medium", assignee: 2, comment: "Numbers are not a real quay."},
 		{key: "HT-3", title: "Log a made-up tide", state: "backlog", priority: "low", assignee: 0},
-		{key: "HT-4", title: "Coil the spare line", state: "done", priority: "low", assignee: 1},
+		{key: "HT-4", title: "Coil the spare line", state: "done", priority: "low", assignee: 1,
+			pillEN:    "Rope ready nearby",
+			pillDE:    "Leine griffbereit verstaut",
+			benefitEN: "The spare rope is ready to use and keeps the walkway clear.",
+			benefitDE: "Die Ersatzleine ist griffbereit und der Gehweg bleibt frei.",
+		},
 		{key: "HT-5", title: "Check the gangway lamp", state: "new", priority: "medium", assignee: 2},
 		{key: "HT-6", title: "Close the storm book", state: "cancelled", priority: "low", assignee: 0},
 	}
@@ -111,7 +132,12 @@ func harborTabs() []ticketSpec {
 		{key: "HT-7", title: "Price fictional rope", state: "in_progress", priority: "high", assignee: 1},
 		{key: "HT-8", title: "File the lamp oil tab", state: "new", priority: "medium", assignee: 2},
 		{key: "HT-9", title: "Note a biscuit tin", state: "backlog", priority: "low", assignee: 0, comment: "The tin is not inventory."},
-		{key: "HT-10", title: "Balance the chalk slate", state: "done", priority: "medium", assignee: 1},
+		{key: "HT-10", title: "Balance the chalk slate", state: "done", priority: "medium", assignee: 1,
+			pillEN:    "Clear outstanding totals",
+			pillDE:    "Offene Beträge überblicken",
+			benefitEN: "The slate shows the amount still owed at a glance.",
+			benefitDE: "Die Tafel zeigt auf einen Blick, welcher Betrag noch offen ist.",
+		},
 		{key: "HT-11", title: "Archive last month's ink", state: "new", priority: "low", assignee: 2},
 		{key: "HT-12", title: "Stamp paid on a sample", state: "in_progress", priority: "medium", assignee: 0},
 	}
@@ -122,7 +148,12 @@ func glassFloor() []ticketSpec {
 		{key: "NT-1", title: "Heat the annealer", state: "in_progress", priority: "high", assignee: 2},
 		{key: "NT-2", title: "Sweep cullet into the bin", state: "new", priority: "low", assignee: 1},
 		{key: "NT-3", title: "Record a fictional pour", state: "backlog", priority: "medium", assignee: 0, comment: "No furnace was lit."},
-		{key: "NT-4", title: "Cool the sample pane", state: "done", priority: "medium", assignee: 2},
+		{key: "NT-4", title: "Cool the sample pane", state: "done", priority: "medium", assignee: 2,
+			pillEN:    "Sample ready safely",
+			pillDE:    "Muster sicher bereit",
+			benefitEN: "The cooled sample is ready for inspection.",
+			benefitDE: "Das abgekühlte Muster steht für die Prüfung bereit.",
+		},
 		{key: "NT-5", title: "Label the north rack", state: "new", priority: "low", assignee: 1},
 		{key: "NT-6", title: "Retire a cracked prop", state: "cancelled", priority: "low", assignee: 0},
 	}
@@ -133,7 +164,12 @@ func glassOrders() []ticketSpec {
 		{key: "NT-7", title: "Cut a pane for Lumen", state: "in_progress", priority: "high", assignee: 1},
 		{key: "NT-8", title: "Edge a harbor window", state: "new", priority: "medium", assignee: 2},
 		{key: "NT-9", title: "Pack straw for transit", state: "backlog", priority: "low", assignee: 0},
-		{key: "NT-10", title: "Write the pane ticket", state: "done", priority: "medium", assignee: 1},
+		{key: "NT-10", title: "Write the pane ticket", state: "done", priority: "medium", assignee: 1,
+			pillEN:    "Orders clearly identified",
+			pillDE:    "Aufträge eindeutig zuordnen",
+			benefitEN: "The label makes each pane easy to match to its order.",
+			benefitDE: "Die Beschriftung erleichtert die Zuordnung jeder Scheibe zum Auftrag.",
+		},
 		{key: "NT-11", title: "Match a green tint", state: "new", priority: "medium", assignee: 2, comment: "The tint is a story."},
 		{key: "NT-12", title: "Shelve the spare circle", state: "in_progress", priority: "low", assignee: 0},
 	}

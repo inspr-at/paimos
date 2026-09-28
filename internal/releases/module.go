@@ -31,6 +31,7 @@ type module struct{ pool *pgxpool.Pool }
 // persists only the complete eligible ticket order and selected ticket set.
 func New(pool *pgxpool.Pool) httpapi.Module { return &module{pool} }
 func (m *module) Mount(mux *http.ServeMux) {
+	mux.HandleFunc("GET /api/projects/{projectId}/releases/{releaseId}/note-snapshot", m.noteSnapshot)
 	mux.HandleFunc("GET /api/projects/{projectId}/releases/{releaseId}/walker", m.get)
 	mux.HandleFunc("GET /api/projects/{projectId}/release-memberships", m.readMemberships)
 	mux.HandleFunc("PUT /api/projects/{projectId}/releases/{releaseId}/plan", m.put)
@@ -40,6 +41,7 @@ func (m *module) Mount(mux *http.ServeMux) {
 }
 
 type Walker struct {
+	Warnings  []string  `json:"warnings,omitempty"`
 	ReleaseID string    `json:"release_node_id"`
 	ProjectID string    `json:"project_node_id"`
 	State     string    `json:"state"`

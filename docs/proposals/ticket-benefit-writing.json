@@ -1,0 +1,23 @@
+{
+  "ticket": "AEON-256",
+  "status": "proposal-only; human publication required",
+  "target_scope": {"layer": "company"},
+  "draft": {
+    "expected_revision": 1,
+    "name": "Plain-language ticket benefits",
+    "rules": [
+      {
+        "identity": "ticket-benefits-bilingual",
+        "text": "Draft pill_en, pill_de, benefit_en and benefit_de when creating a ticket; re-check all four before Done, even when hide_from_release_notes is true.",
+        "why": "Tickets explain what people gain, and the same words become release notes in English and German.",
+        "details": "Pills have 2–4 words. Benefits have one or two positive, plain-language sentences, with the benefit first and few technical terms. Describe the gain for a non-technical user, including work under the hood. German is neutral, without direct address (for example: Tickets lassen sich jetzt leichter finden.). Do not invent translations for old tickets. Hidden tickets still need both languages. Release notes use actual linked tickets and recorded field snapshots; missing evidence stays a gap.",
+        "strength": "normal",
+        "enabled": true,
+        "roles": [],
+        "harnesses": [],
+        "source": {"reference": "AEON-256; Markus decision 2026-09-28", "identity": "ticket-benefits-bilingual", "edited_here": false}
+      }
+    ]
+  },
+  "integration": "AR1 Rule/PUT draft DTO. Resolve an authorized layer and set, then replace expected_revision with the fetched revision. Import only draft, not this wrapper. Human rules.publish is a separate decision. This artifact publishes nothing and edits no effective AGENTS or CLAUDE files."
+}

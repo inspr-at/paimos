@@ -124,6 +124,24 @@ func Build(ctx context.Context, opts Options) (History, error) {
 			return History{}, err
 		}
 		r.Evidence = Evidence{SourceCommit: tag.commit, Unavailable: []string{}}
+		// The snapshot must be in the immutable tag, never today's live fields.
+		snapshotPath := "release-notes/" + tag.version + ".json"
+		r.Notes = MissingNotes()
+		present, listErr := git("ls-tree", "--name-only", tag.name, "--", snapshotPath)
+		if listErr != nil {
+			return History{}, listErr
+		}
+		if strings.TrimSpace(present) != "" {
+			raw, readErr := git("show", tag.name+":"+snapshotPath)
+			if readErr != nil {
+				return History{}, readErr
+			}
+			r.Notes, err = NotesFromSnapshot([]byte(raw), tag.version, tag.name+":"+snapshotPath)
+			if err != nil {
+				return History{}, fmt.Errorf("%s: %w", snapshotPath, err)
+			}
+		}
+
 		if opts.Repository != "" {
 			r.Evidence.SourceURL = "https://github.com/" + opts.Repository + "/commit/" + tag.commit
 		}
@@ -139,7 +157,7 @@ func Build(ctx context.Context, opts Options) (History, error) {
 			continue
 		}
 		h.Releases = append(h.Releases, Release{
-			Version: v, State: StateReserved, ReleaseChannel: "stable", ReservedAt: coordinateTime(v), Tickets: []string{}, Changes: []Change{},
+			Notes: MissingNotes(), Version: v, State: StateReserved, ReleaseChannel: "stable", ReservedAt: coordinateTime(v), Tickets: []string{}, Changes: []Change{},
 			Evidence: Evidence{Unavailable: []string{"This version was reserved but never tagged or published."}},
 		})
 	}
