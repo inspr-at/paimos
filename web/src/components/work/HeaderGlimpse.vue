@@ -85,8 +85,7 @@ async function load() {
   try {
     const { visible } = await loadTicketGraphContext(props.projectId, filters.value, controller.signal)
     if (controller.signal.aborted || !allowed.value) return
-    const linked = new Set(visible.links.flatMap(link => [link.source, link.target]))
-    if (!headerGlimpseGraphReady(linked.size, visible.links.length)) return
+    if (!headerGlimpseGraphReady(visible.nodes.length, visible.links.length)) return
     shown.value = visible.nodes.length; truncated.value = visible.truncated
     data.value = ticketGraphData(visible, props.projectKey)
     paint.value = true
