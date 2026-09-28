@@ -774,16 +774,19 @@ paths:
     get:
       operationId: releaseNoteSnapshot
       summary: Capture linked ticket benefit fields in one database snapshot
-      description: Read-only project-scoped export using journey_tickets membership, not Git mentions. Requires releases.read and node visibility (nodes.read). A published release returns the snapshot frozen at publication, so later ticket edits do not change it; before publication the response is a live preview (frozen false). Save the response as release-notes/<version>.json before tagging for offline history generation. This request does not itself publish or freeze a release.
+      description: Read-only project-scoped export using journey_tickets membership, not Git mentions. Requires releases.read and node visibility (nodes.read). A published release with a stored snapshot returns that snapshot (frozen true), so later ticket edits do not change it. A published release with no stored snapshot was published before snapshots existed and returns ReleaseNotes with fallback historical-tag-headline; current ticket fields are not read. The release sheet labels that fallback "Historical tag headline". Before publication the response is a live preview (frozen false). Save a ReleaseNoteSnapshot as release-notes/<version>.json before tagging for offline history generation; do not save the historical fallback as a snapshot. This request does not itself publish or freeze a release.
       parameters:
         - {in: path, name: projectId, required: true, schema: {type: string, format: uuid}}
         - {in: path, name: releaseId, required: true, schema: {type: string, format: uuid}}
       responses:
         '200':
-          description: Point-in-time membership and field snapshot (including hidden tickets for provenance)
+          description: Point-in-time membership and field snapshot (including hidden tickets for provenance), or ReleaseNotes with fallback historical-tag-headline when a published release has no stored snapshot
           content:
             application/json:
-              schema: {$ref: '#/components/schemas/ReleaseNoteSnapshot'}
+              schema:
+                oneOf:
+                  - {$ref: '#/components/schemas/ReleaseNoteSnapshot'}
+                  - {$ref: '#/components/schemas/ReleaseNotes'}
         '401': {$ref: '#/components/responses/Error'}
         '403': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}

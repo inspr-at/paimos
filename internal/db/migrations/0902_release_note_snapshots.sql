@@ -4,7 +4,9 @@
 -- empty membership before tickets are added. The deferred trigger runs at
 -- commit, so tickets linked in the same transaction as a published insert are
 -- part of the snapshot. A later edit of those tickets does not rewrite it.
--- Moving released to superseded does not capture again.
+-- Moving released to superseded does not capture again. A release already
+-- published before this migration has no row: readers must not rebuild it
+-- from ticket fields edited later.
 
 CREATE TABLE journey_release_note_snapshots (
     tenant_id uuid NOT NULL REFERENCES tenants(id),
@@ -20,6 +22,11 @@ ALTER TABLE journey_release_note_snapshots FORCE ROW LEVEL SECURITY;
 CREATE POLICY journey_release_note_snapshots_tenant ON journey_release_note_snapshots
     USING (tenant_id = NULLIF(current_setting('aeon.tenant_id', true), '')::uuid)
     WITH CHECK (tenant_id = NULLIF(current_setting('aeon.tenant_id', true), '')::uuid);
+-- Same restrictive project visibility as journey_releases (0821). A member of
+-- one project cannot read another project's frozen notes by selecting this table.
+CREATE POLICY journey_release_note_snapshots_project_visibility ON journey_release_note_snapshots AS RESTRICTIVE
+    USING ((SELECT aeon_visible_all()) OR project_node_id = ANY ((SELECT aeon_visible_projects())::uuid[]))
+    WITH CHECK ((SELECT aeon_visible_all()) OR project_node_id = ANY ((SELECT aeon_visible_projects())::uuid[]));
 
 CREATE FUNCTION aeon_release_note_snapshots_immutable() RETURNS trigger
 LANGUAGE plpgsql AS $$
@@ -32,6 +39,8 @@ CREATE TRIGGER journey_release_note_snapshots_immutable
     FOR EACH ROW EXECUTE FUNCTION aeon_release_note_snapshots_immutable();
 
 -- One statement, so membership, revision and fields share one MVCC snapshot.
+-- This is the live preview, and the capture at publication. A published
+-- release that has no stored row must not be filled by calling it.
 CREATE FUNCTION aeon_release_note_snapshot(p_project uuid, p_release uuid) RETURNS jsonb
 LANGUAGE sql STABLE AS $$
     SELECT jsonb_build_object(

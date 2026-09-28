@@ -2,15 +2,17 @@
 package releases
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"github.com/inspr-at/paimos/internal/db"
-	"github.com/inspr-at/paimos/internal/dbtest"
 	"net/http"
 	"strings"
 	"sync"
 	"testing"
 
+	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/releasehistory"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
@@ -209,6 +211,155 @@ func TestPublishedNoteSnapshotIgnoresLaterTicketEdits(t *testing.T) {
 	got := f.request(f.person, http.MethodGet, "/api/projects/"+f.project+"/releases/"+born+"/note-snapshot", "")
 	if got.Code != 200 || !strings.Contains(got.Body.String(), "The first text stays.") || strings.Contains(got.Body.String(), "Rewritten later.") {
 		t.Fatalf("created published: %d %s", got.Code, got.Body.String())
+	}
+}
+
+func TestPublishedBeforeSnapshotsDoesNotFollowTicketEdits(t *testing.T) {
+	f := ticketSetup(t)
+	visible := f.existing("ticket", f.project, "Historical member", "open")
+	membershipOK(t, f.addExisting([]string{visible}, 1, false))
+	original := `{"pill_en":"Original pill","pill_de":"Ursprüngliche Pille","benefit_en":"Benefit written before publication.","benefit_de":"Nutzen vor der Veröffentlichung.","hide_from_release_notes":false}`
+	f.tx(func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE nodes SET fields=$2::jsonb WHERE id=$1`, visible, original)
+		return err
+	})
+	if _, err := f.db.App.Exec(t.Context(), `ALTER TABLE journey_releases DISABLE TRIGGER journey_releases_freeze_note_snapshot`); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if _, err := f.db.App.Exec(context.Background(), `ALTER TABLE journey_releases ENABLE TRIGGER journey_releases_freeze_note_snapshot`); err != nil {
+			t.Errorf("re-enable snapshot trigger: %v", err)
+		}
+	})
+	// Publication before the snapshot trigger existed leaves no stored row.
+	// The count is after commit: the freeze trigger is deferred.
+	f.tx(func(tx pgx.Tx) error {
+		tag, err := tx.Exec(t.Context(), `UPDATE journey_releases SET state='released', released_at=clock_timestamp() WHERE release_node_id=$1`, f.release)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() != 1 {
+			return fmt.Errorf("publish affected %d", tag.RowsAffected())
+		}
+		return nil
+	})
+	var stored int
+	f.tx(func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `SELECT count(*) FROM journey_release_note_snapshots WHERE release_node_id=$1`, f.release).Scan(&stored)
+	})
+	if stored != 0 {
+		t.Fatalf("pre-migration release stored %d snapshots", stored)
+	}
+	if _, err := f.db.App.Exec(t.Context(), `ALTER TABLE journey_releases ENABLE TRIGGER journey_releases_freeze_note_snapshot`); err != nil {
+		t.Fatal(err)
+	}
+	path := "/api/projects/" + f.project + "/releases/" + f.release + "/note-snapshot"
+	before := f.request(f.person, http.MethodGet, path, "")
+	edited := strings.Replace(original, "Benefit written before publication.", "Benefit edited after publication.", 1)
+	f.tx(func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE nodes SET fields=$2::jsonb WHERE id=$1`, visible, edited)
+		return err
+	})
+	after := f.request(f.person, http.MethodGet, path, "")
+	if before.Code != 200 || after.Code != 200 || before.Body.String() != after.Body.String() {
+		t.Fatalf("notes changed: before %d %s after %d %s", before.Code, before.Body.String(), after.Code, after.Body.String())
+	}
+	if strings.Contains(after.Body.String(), "Benefit written before publication.") || strings.Contains(after.Body.String(), "Benefit edited after publication.") || strings.Contains(after.Body.String(), visible) {
+		t.Fatalf("historical notes rebuilt from tickets: %s", after.Body.String())
+	}
+	var notes releasehistory.Notes
+	if err := json.Unmarshal(after.Body.Bytes(), &notes); err != nil {
+		t.Fatal(err)
+	}
+	if notes.Fallback != releasehistory.HistoricalFallback || notes.Source != "unavailable" || len(notes.Items) != 0 || len(notes.Gaps) == 0 {
+		t.Fatalf("historical fallback: %+v", notes)
+	}
+}
+
+func TestProjectMemberCannotReadAnotherProjectsNoteSnapshot(t *testing.T) {
+	f := ticketSetup(t)
+	memberA := f.existing("ticket", f.project, "Visible member", "open")
+	membershipOK(t, f.addExisting([]string{memberA}, 1, false))
+	visibleBenefit := `{"pill_en":"Project A pill","pill_de":"Projekt A Pille","benefit_en":"Project A visible benefit.","benefit_de":"Projekt A sichtbarer Nutzen.","hide_from_release_notes":false}`
+	var projectB, releaseB, memberB, principal string
+	f.tx(func(tx pgx.Tx) error {
+		ctx := t.Context()
+		if _, err := tx.Exec(ctx, `UPDATE nodes SET fields=$2::jsonb WHERE id=$1`, memberA, visibleBenefit); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(ctx, `INSERT INTO nodes(tenant_id,kind_id,key,title) SELECT $1,id,aeon_next_node_key($1,short_prefix),'Other project' FROM node_kinds WHERE slug='project' RETURNING nodes.id::text`, f.person.TenantID).Scan(&projectB); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO journey_projects(tenant_id,project_node_id) VALUES($1,$2)`, f.person.TenantID, projectB); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(ctx, `INSERT INTO nodes(tenant_id,kind_id,key,parent_id,title) SELECT $1,id,aeon_next_node_key($1,short_prefix),$2,'Other release' FROM node_kinds WHERE slug='release' RETURNING nodes.id::text`, f.person.TenantID, projectB).Scan(&releaseB); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO journey_releases(tenant_id,release_node_id,project_node_id,number) VALUES($1,$2,$3,1)`, f.person.TenantID, releaseB, projectB); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(ctx, `INSERT INTO nodes(tenant_id,kind_id,key,parent_id,title,state) SELECT $1,id,aeon_next_node_key($1,short_prefix),$2,'Secret ticket','open' FROM node_kinds WHERE slug='ticket' RETURNING nodes.id::text`, f.person.TenantID, projectB).Scan(&memberB); err != nil {
+			return err
+		}
+		secret := `{"pill_en":"Project B pill","pill_de":"Projekt B Pille","benefit_en":"Project B secret benefit.","benefit_de":"Projekt B geheimer Nutzen.","hide_from_release_notes":false}`
+		if _, err := tx.Exec(ctx, `UPDATE nodes SET fields=$2::jsonb WHERE id=$1`, memberB, secret); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO journey_tickets(tenant_id,ticket_node_id,project_node_id,release_node_id,walker_position,source) VALUES($1,$2,$3,$4,0,'manual')`, f.person.TenantID, memberB, projectB, releaseB); err != nil {
+			return err
+		}
+		tag, err := tx.Exec(ctx, `UPDATE journey_releases SET state='released', released_at=clock_timestamp() WHERE release_node_id=ANY($1::uuid[])`, []string{f.release, releaseB})
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() != 2 {
+			return fmt.Errorf("publish affected %d", tag.RowsAffected())
+		}
+		return tx.QueryRow(ctx, `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'person','Project A member') RETURNING id::text`, f.person.TenantID).Scan(&principal)
+	})
+	f.tx(func(tx pgx.Tx) error {
+		tag, err := tx.Exec(t.Context(), `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,scope_id) SELECT $1,$2,id,'project',$3 FROM roles WHERE tenant_id=$1 AND key='member'`, f.person.TenantID, principal, f.project)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() != 1 {
+			return fmt.Errorf("project binding affected %d", tag.RowsAffected())
+		}
+		var stored int
+		if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM journey_release_note_snapshots`).Scan(&stored); err != nil {
+			return err
+		}
+		if stored != 2 {
+			return fmt.Errorf("stored snapshots %d", stored)
+		}
+		return nil
+	})
+	member := tenant.Principal{ID: principal, TenantID: f.person.TenantID, Kind: tenant.Person}
+	err := db.InTenant(tenant.WithPrincipal(t.Context(), member), f.db.App, member.TenantID, func(tx pgx.Tx) error {
+		var visibility, body string
+		var rows, hidden int
+		if err := tx.QueryRow(t.Context(), `SELECT coalesce(current_setting('aeon.visible_projects', true), '')`).Scan(&visibility); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(t.Context(), `SELECT count(*), coalesce(string_agg(snapshot::text, ''), '') FROM journey_release_note_snapshots`).Scan(&rows, &body); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM journey_release_note_snapshots WHERE project_node_id=$1 OR release_node_id=$2`, projectB, releaseB).Scan(&hidden); err != nil {
+			return err
+		}
+		var secret string
+		err := tx.QueryRow(t.Context(), `SELECT snapshot::text FROM journey_release_note_snapshots WHERE release_node_id=$1`, releaseB).Scan(&secret)
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("direct read of project B: %v %s", err, secret)
+		}
+		if rows != 1 || hidden != 0 || !strings.Contains(body, "Project A visible benefit.") || strings.Contains(body, "Project B secret benefit.") || strings.Contains(body, memberB) {
+			return fmt.Errorf("direct read visibility=%s rows=%d hidden=%d body=%s", visibility, rows, hidden, body)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 }
 
