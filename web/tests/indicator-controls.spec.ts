@@ -266,7 +266,7 @@ test('Activity ring and Icon size save independently of style and Hovering; ever
   await expect(option(page, 'Robot 4')).toBeChecked()
 })
 
-test('inactive opacity is a styled native slider: keyboard, disabled with Dim inactive off', async ({ page }) => {
+test('inactive opacity is a styled native slider: keyboard, hidden with Dim inactive off', async ({ page }) => {
   const { data } = await mockIndicator(page)
   await settings(page)
   const opacity = page.getByRole('slider', { name: 'Inactive opacity' })
@@ -276,9 +276,12 @@ test('inactive opacity is a styled native slider: keyboard, disabled with Dim in
   await expect(opacity).toHaveValue(String(Number(before) + 1))
   await expect(opacity).toHaveAttribute('aria-valuetext', `${Number(before) + 1}%`)
   await expect.poll(() => (data.preferences['agent-state'] as { inactiveOpacity?: number } | undefined)?.inactiveOpacity).toBe(Number(before) + 1)
-  await page.getByRole('switch', { name: 'Dim inactive' }).uncheck()
-  await expect(opacity).toBeDisabled()
   expect(await opacity.evaluate(el => getComputedStyle(el).appearance)).toBe('none')
+  // With Dim inactive off the opacity has nothing to do, so its slider steps aside.
+  await page.getByRole('switch', { name: 'Dim inactive' }).uncheck()
+  await expect(opacity).toHaveCount(0)
+  await page.getByRole('switch', { name: 'Dim inactive' }).check()
+  await expect(opacity).toBeEnabled()
 })
 
 for (const theme of ['light', 'dark'] as const) test(`${theme} phones: both switches keep the toggle and its whole word inside the row, On and Off`, async ({ page }) => {

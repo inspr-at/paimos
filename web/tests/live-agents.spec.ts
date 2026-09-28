@@ -108,7 +108,8 @@ test('hover and focus show who works on what; an agent opens its session', async
   await expect(pop.getByRole('link', { name: /AEON-184/ })).toHaveAttribute('href', '/p/AEON/AEON-184')
   await expect(pop.getByRole('link', { name: /AEON-184/ })).toContainText('Live agents on project cards and rows')
   await expect(pop.getByRole('link', { name: /^aeon-coordinator, Claude, working for 2h 20m/ })).toBeVisible()
-  await expect(pop.getByText('No ticket bound')).toBeVisible()
+  // An agent without a ticket has no ticket line (no filler).
+  await expect(pop.locator('.pop-agent', { hasText: 'aeon-coordinator' }).locator('.ticket-line')).toHaveCount(0)
   // Leaving closes it; the keyboard opens it on focus and walks into it with Enter.
   await page.mouse.move(5, 5)
   await expect(pop).toHaveCount(0)
@@ -343,7 +344,7 @@ for (const colorScheme of ['light', 'dark'] as const) {
     expect(chip.x + chip.width).toBeLessThan(time.x)
     await page.getByRole('radio', { name: 'List view' }).click()
     await expect(row(page, 'p-hausv').locator('.live-chip')).toBeVisible()
-    await expect(row(page, 'p-hausv').locator('.live-chip .key')).toBeHidden()
+    await expect(row(page, 'p-hausv').locator('.live-chip .row-name')).toHaveText('hausv')
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
   })
 }

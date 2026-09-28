@@ -38,7 +38,7 @@ const agentState = computed(() => leadingState(agents.value.map(a => a.state)))
         <span v-else-if="project.state === 'deleted'" class="chip state-chip">Deleted</span>
       </span>
       <span class="card-name"><template v-for="(part, i) in highlight(project.title, term)" :key="i"><mark v-if="part.match">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></span>
-      <span class="card-desc">{{ project.description || 'No description' }}</span>
+      <span class="card-desc" :data-tip="project.description.length > 48 ? project.description : undefined" :aria-hidden="project.description ? undefined : 'true'">{{ project.description }}</span>
       <span class="card-mid">
         <span class="ring-wrap" :data-tip="`${project.done.toLocaleString('en-GB')} of ${(project.total - project.cancelled).toLocaleString('en-GB')} done${project.cancelled ? ` · ${project.cancelled} cancelled` : ''}`">
           <ProgressRing :percent="project.percent" :empty="!project.total" :size="56" />
@@ -88,7 +88,7 @@ const agentState = computed(() => leadingState(agents.value.map(a => a.state)))
 .state-chip { height: 18px; padding: 0 7px; font-size: 10px; text-transform: uppercase; letter-spacing: .08em; }
 .state-chip.frozen { color: var(--gold-ink); box-shadow: inset 0 0 0 1px rgba(214, 155, 49, .45); }
 .card-name { margin-top: 12px; font-size: 16px; font-weight: 650; letter-spacing: -.01em; line-height: 1.3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.card-desc { margin-top: 3px; font-size: 13px; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.card-desc { min-height: 1.45em; margin-top: 3px; font-size: 13px; line-height: 1.45; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .card-mid { display: flex; align-items: center; gap: 20px; margin-top: 18px; }
 .ring-wrap { display: inline-flex; }
 .counts { display: grid; gap: 7px; width: min(100%, 176px); }
