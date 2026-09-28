@@ -10,8 +10,8 @@ import { getMembers } from '../../lib/access'
 import { toast } from '../../lib/toast'
 import { useSession } from '../../stores/session'
 import {
-  HARNESS_LABEL, HARNESSES, LAYER_LABEL, LAYERS, ROLE_LABEL, ROLES, RULES_BUDGET, RulesError,
-  applyEnabled, blankRule, calendarVersion, createLayer, createSet, diffRules, duplicateRule, getSet, validVersion,
+  HARNESS_LABEL, HARNESSES, LAYER_LABEL, LAYERS, PUBLISH_NOTE_MAX, ROLE_LABEL, ROLES, RULES_BUDGET, RulesError,
+  applyEnabled, blankRule, calendarVersion, createLayer, createSet, diffRules, duplicateRule, getSet, utf8Length, validVersion,
   groupState, heldIdentities, isUuid, layerInColumn, listLayers, listSets, listVersions, mergeQuery,
   mergeRules, normalizeRule, publishBlock, publishSet, resetAvailability, restoreSet, rulesEqual,
   rulesMessage, saveDraft, scopeFor, scopeRank, touchRule, validateDraft, writeBlock,
@@ -52,6 +52,8 @@ const selection = ref<{ setId: string; identity: string } | null>(null)
 const previewOpen = ref(false)
 const publishOpen = ref(false)
 const restoreOpen = ref(false)
+const publishNote = ref('')
+const restoreNote = ref('')
 const removeOpen = ref(false)
 const publishSetId = ref('')
 const merged = ref<MergedRules | null>(null)
@@ -113,7 +115,8 @@ function columnSets(column: LayerName): ColumnSet[] {
     readOnly: !!set.versionId,
     collapsed: set.collapsed,
     versionId: set.versionId,
-    versions: set.versions?.map(version => ({ version: version.version })) ?? null,
+    versionNote: set.versionId ? (set.versions?.find(version => version.version === set.versionId)?.note ?? '') : '',
+    versions: set.versions?.map(version => ({ version: version.version, note: version.note ?? '' })) ?? null,
     rules: displayRules(set),
     baseline: set.remote.rules,
     writable: !writeBlock(caller.value, bundle.layer.scope),
@@ -377,8 +380,18 @@ function openPublish() {
   const choice = publishChoices.value.find(item => item.id === selected.value?.set.remote.id && !item.reason) ?? publishChoices.value.find(item => !item.reason)
   if (!choice) return
   publishSetId.value = choice.id
+  publishNote.value = ''
   publishOpen.value = true
   void history(choice.id)
+}
+function noteOrStop(value: string): string | null {
+  const note = value.trim()
+  if (utf8Length(note) > PUBLISH_NOTE_MAX) {
+    error.value = 'A publish note can be at most 500 UTF-8 bytes.'
+    return null
+  }
+  error.value = ''
+  return note
 }
 async function confirmPublish() {
   const located = workingOf(publishSetId.value)
@@ -388,9 +401,11 @@ async function confirmPublish() {
   if (dirty(located.set)) { error.value = 'Save the draft before publishing. Publish uses the saved draft.'; return }
   const version = calendarVersion()
   if (!validVersion(version)) { error.value = 'Could not build a version.'; return }
+  const note = noteOrStop(publishNote.value)
+  if (note === null) return
   saving.value = true
   try {
-    await publishSet(located.set.remote.id, { expected_revision: located.set.remote.revision, version })
+    await publishSet(located.set.remote.id, { expected_revision: located.set.remote.revision, version, note })
     const fresh = await getSet(located.set.remote.id)
     located.set.remote = fresh
     located.set.name = fresh.name
@@ -407,9 +422,15 @@ async function confirmPublish() {
     error.value = rulesMessage(cause)
   } finally { saving.value = false }
 }
+const selectedSnapshot = computed(() => {
+  const current = selected.value
+  if (!current?.set.versionId) return null
+  return current.set.versions?.find(version => version.version === current.set.versionId) ?? null
+})
 function openRestore() {
   const current = selected.value
   if (!current?.set.versionId) return
+  restoreNote.value = ''
   restoreOpen.value = true
 }
 async function confirmRestore() {
@@ -419,9 +440,11 @@ async function confirmRestore() {
   if (block) { error.value = block; return }
   if (dirty(current.set)) { error.value = 'Save or discard the draft before restoring.'; return }
   const newVersion = calendarVersion()
+  const note = noteOrStop(restoreNote.value)
+  if (note === null) return
   saving.value = true
   try {
-    await restoreSet(current.set.remote.id, { expected_revision: current.set.remote.revision, version: current.set.versionId, new_version: newVersion })
+    await restoreSet(current.set.remote.id, { expected_revision: current.set.remote.revision, version: current.set.versionId, new_version: newVersion, note })
     const fresh = await getSet(current.set.remote.id)
     current.set.remote = fresh
     current.set.name = fresh.name
@@ -556,10 +579,10 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
           <li v-if="!publishChanges.length">No difference from the published version.</li>
           <li v-for="change in publishChanges" :key="change.kind + change.label"><span class="kind">{{ change.kind }}</span> {{ change.label }}</li>
         </ul>
-        <label class="fld">Note
-          <textarea class="field" rows="2" disabled placeholder="Not stored"></textarea>
+        <label class="fld">Publish note
+          <textarea v-model="publishNote" class="field" rows="2" maxlength="500" placeholder="Optional. Saved on this version."></textarea>
         </label>
-        <p class="hint">The publish request has no note, so a note cannot be saved.</p>
+        <p class="hint">Leave this empty to publish without a note. A note stays on this version.</p>
         <button type="button" class="btn primary" :disabled="saving || !!publishTarget?.reason || !!publishTarget?.dirty" @click="confirmPublish">Publish</button>
       </aside>
     </div>
@@ -568,6 +591,12 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
       <aside class="drawer" role="dialog" aria-modal="true" aria-label="Restore version">
         <header class="drawer-head"><h2>Restore</h2><button type="button" class="icon-btn sm flat" aria-label="Close restore" @click="restoreOpen = false"><AppIcon name="close" :size="16" /></button></header>
         <p>Publish the rules from {{ selected.set.versionId }} as a new version. The old version is not rewritten.</p>
+        <p v-if="selectedSnapshot?.note" class="version-note">Note on {{ selected.set.versionId }}: {{ selectedSnapshot.note }}</p>
+        <p v-else class="hint">{{ selected.set.versionId }} has no publish note. It stays that way.</p>
+        <label class="fld">New publish note
+          <textarea v-model="restoreNote" class="field" rows="2" maxlength="500" placeholder="Optional. Saved only on the new version."></textarea>
+        </label>
+        <p class="hint">This note is for the new version. The note on {{ selected.set.versionId }} is not rewritten.</p>
         <button type="button" class="btn primary" :disabled="saving" @click="confirmRestore">Restore</button>
       </aside>
     </div>
@@ -613,6 +642,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
 .changes { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 .kind { display: inline-block; min-width: 4.5em; color: var(--ink-3); font-size: 11px; font-weight: 700; text-transform: uppercase; }
 .fld textarea.field { height: auto; padding: 8px 12px; }
+.version-note { margin: 0; color: var(--ink-2); font-size: 13px; white-space: pre-wrap; overflow-wrap: anywhere; }
 @media (max-width: 1100px) {
   .layers { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .board.sided { grid-template-columns: minmax(0, 1fr); }

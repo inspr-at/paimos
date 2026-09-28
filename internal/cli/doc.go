@@ -26,7 +26,10 @@
 // call Aeon's server-fenced stage handoff API. Classic one-time credentials,
 // reporter registrations and launch admission cannot grant Aeon authority;
 // those commands return exit 3 and point to first-party plugins and journey
-// approvals. The coordinator wires the CLI constructor into cmd/aeon.
+// approvals. rules-compare is an offline one-time report of explicit doctrine
+// files, an optional saved AR1 merge document and optional AEON-219 receipt
+// hashes. It does not contact the network, wait, or replace instruction files.
+// The coordinator wires the CLI constructor into cmd/aeon.
 //
 // This package exports no httpapi.Module and no plugins.Plugin. The nine
 // starter kinds stay as they are. external_system and related_project are

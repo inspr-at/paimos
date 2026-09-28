@@ -11,7 +11,8 @@ export interface ColumnSet {
   readOnly: boolean
   collapsed: boolean
   versionId: string
-  versions: { version: string }[] | null
+  versionNote: string
+  versions: { version: string; note?: string }[] | null
   rules: AgentRule[]
   baseline: AgentRule[]
   writable: boolean
@@ -113,6 +114,7 @@ function addSet() {
       </header>
       <p v-if="set.readOnly" class="ro">Published version {{ set.versionId }} is read-only.</p>
       <p v-else-if="set.writeReason" class="ro">{{ set.writeReason }}</p>
+      <p v-if="set.readOnly && set.versionNote" class="version-note">Publish note: {{ set.versionNote }}</p>
       <label class="version">Version
         <select class="field" :value="set.versionId" :aria-label="`Versions of ${set.name}`" @focus="emit('history', set.id)" @change="emit('version', set.id, ($event.target as HTMLSelectElement).value)">
           <option value="">Current draft</option>
@@ -155,10 +157,11 @@ function addSet() {
 .hint { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .count { margin-left: auto; white-space: nowrap; }
 .set { display: flex; flex-direction: column; gap: 6px; min-width: 0; padding: 8px; border-radius: 12px; background: var(--surface); box-shadow: 0 0 0 1px var(--line); }
-.set.collapsed .rules, .set.collapsed .add, .set.collapsed .version, .set.collapsed .ro { display: none; }
+.set.collapsed .rules, .set.collapsed .add, .set.collapsed .version, .set.collapsed .ro, .set.collapsed .version-note { display: none; }
 .name-field { flex: 1 1 8em; width: auto; min-width: 0; height: 30px; font-weight: 650; }
 .set-head { flex-wrap: wrap; }
 .version { display: grid; gap: 4px; color: var(--ink-2); font-size: 12px; font-weight: 600; }
+.version-note { margin: 0; color: var(--ink-2); font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .rules { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
 .rule { display: grid; grid-template-columns: 18px minmax(0, 1fr); gap: 4px 8px; align-items: start; padding: 6px; border-radius: 8px; }
 .rule.on { background: color-mix(in srgb, var(--aqua) 28%, transparent); }

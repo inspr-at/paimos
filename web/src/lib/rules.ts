@@ -6,6 +6,7 @@ import { api } from './api.ts'
 import { sessionGone } from './authz.ts'
 
 export const RULES_BUDGET = 12000
+export const PUBLISH_NOTE_MAX = 500
 export const MAX_RULES = 100
 export const LAYERS = ['company', 'project', 'person', 'agent'] as const
 export const ROLES = ['coordinator', 'builder', 'reviewer', 'operator'] as const
@@ -69,6 +70,7 @@ export interface RuleSnapshot {
   sha256: string
   rules: AgentRule[]
   published_at: string
+  note?: string
 }
 export interface MergedRules {
   context: { tenant_id: string; project_id: string; person_id: string; agent_id?: string; role: string; harness: string; task_id?: string }
@@ -489,15 +491,26 @@ export const getSet = (setId: string) => send<RuleSet>(`/rules/sets/${encodeURIC
 export const saveDraft = (setId: string, body: { expected_revision: number; name: string; rules: AgentRule[] }) => send<RuleSet>(`/rules/sets/${encodeURIComponent(setId)}/draft`, 'PUT', {
   expected_revision: body.expected_revision, name: body.name, rules: body.rules.map(rulePayload),
 }).then(set => ({ ...set, rules: (set.rules ?? []).map(clean) }))
-export const publishSet = (setId: string, body: { expected_revision: number; version: string }) => send<RuleSnapshot>(`/rules/sets/${encodeURIComponent(setId)}/publish`, 'POST', body).then(cleanSnapshot)
+export const publishSet = (setId: string, body: { expected_revision: number; version: string; note?: string }) => send<RuleSnapshot>(`/rules/sets/${encodeURIComponent(setId)}/publish`, 'POST', withNote(body)).then(cleanSnapshot)
 export const listVersions = async (setId: string) => {
   const body = await send<{ versions: RuleSnapshot[] }>(`/rules/sets/${encodeURIComponent(setId)}/versions`)
   return { versions: (body.versions ?? []).map(cleanSnapshot) }
 }
 export const getVersion = (setId: string, version: string) => send<RuleSnapshot>(`/rules/sets/${encodeURIComponent(setId)}/versions/${encodeURIComponent(version)}`).then(cleanSnapshot)
-export const restoreSet = (setId: string, body: { expected_revision: number; version: string; new_version: string }) => send<RuleSnapshot>(`/rules/sets/${encodeURIComponent(setId)}/restore`, 'POST', body).then(cleanSnapshot)
+export const restoreSet = (setId: string, body: { expected_revision: number; version: string; new_version: string; note?: string }) => send<RuleSnapshot>(`/rules/sets/${encodeURIComponent(setId)}/restore`, 'POST', withNote(body)).then(cleanSnapshot)
 export const mergeRules = (query: string) => send<MergedRules>(`/rules/merged?${query}`)
 
+function withNote<T extends { note?: string }>(body: T): T {
+  const note = body.note?.trim()
+  if (!note) {
+    const rest = { ...body }
+    delete rest.note
+    return rest
+  }
+  return { ...body, note }
+}
+
 function cleanSnapshot(snapshot: RuleSnapshot): RuleSnapshot {
-  return { ...snapshot, rules: (snapshot.rules ?? []).map(clean) }
+  const note = snapshot.note?.trim()
+  return { ...snapshot, note: note || undefined, rules: (snapshot.rules ?? []).map(clean) }
 }
