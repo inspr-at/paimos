@@ -98,27 +98,37 @@ func (rt *runtime) cmdMessagingTell() *Command {
 				return err
 			}
 			receipt, receiptErr := rt.tellReceipt(sent.ID)
-			state := "receipt unavailable"
+			receiptState := "unavailable"
 			if receiptErr == nil {
+				switch receipt.State {
+				case "queued", "handed_off", "failed":
+					receiptState = receipt.State
+				}
+			}
+			state := "receipt unavailable"
+			if receiptState != "unavailable" {
 				state = tellReceiptState(receipt)
+			}
+			if sent.Status == "held" {
+				state = "held: action request - requires human approval"
 			}
 			if rt.jsonOut {
 				if rt.program == "paimos" {
 					view := messagingClassicView(sent, project)
-					view.Delivered = receiptErr == nil && receipt.State == "handed_off"
+					view.Delivered = sent.Status != "held" && receiptState == "handed_off"
 					return rt.printJSON(struct {
 						classicMessageView
 						Stored        bool   `json:"stored"`
 						ReceiptState  string `json:"receipt_state"`
 						FailureReason string `json:"failure_reason,omitempty"`
-					}{view, true, state, receipt.FailureReason})
+					}{view, true, receiptState, receipt.FailureReason})
 				}
 				return rt.printJSON(struct {
 					inbox.CompatMessage
 					Stored        bool   `json:"stored"`
 					ReceiptState  string `json:"receipt_state"`
 					FailureReason string `json:"failure_reason,omitempty"`
-				}{sent, true, state, receipt.FailureReason})
+				}{sent, true, receiptState, receipt.FailureReason})
 			}
 			if rt.program == "paimos" {
 				_, err = fmt.Fprintf(rt.stdout, "stored: %s → %s\npush: %s\nmessage: %s\nthread: %s · hop %d\n", messagingSender(sent), sent.To, state, sent.ID, sent.ThreadID, sent.Hop)
