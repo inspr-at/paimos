@@ -147,3 +147,53 @@ export function formatWhen(iso: string): string {
   if (Number.isNaN(date.getTime())) return iso
   return new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' }).format(date)
 }
+
+const compact = new Intl.NumberFormat('en-US', { notation: 'compact', maximumSignificantDigits: 3 })
+
+/** Short token count for dense places: 2.28M, 264k, 9,120. Unknown stays null, never zero. */
+export function compactCount(value: string | number | null): string | null {
+  if (value === null) return null
+  const text = String(value)
+  if (!intPattern.test(text)) return null
+  const n = Number(text)
+  if (n < 10_000) return formatCount(n)
+  return compact.format(n).replace(/K$/, 'k')
+}
+
+/** The day part of a trend point, whether it arrives as a date or a timestamp. */
+export function dayKey(value: string): string {
+  return value.slice(0, 10)
+}
+
+/** Every UTC day in [from, to), as YYYY-MM-DD. */
+export function rangeDays(from: string, to: string): string[] {
+  const start = Date.parse(`${dayKey(from)}T00:00:00Z`)
+  const end = Date.parse(to)
+  if (!Number.isFinite(start) || !Number.isFinite(end)) return []
+  const days: string[] = []
+  for (let t = start; t < end && days.length < 400; t += day) days.push(new Date(t).toISOString().slice(0, 10))
+  return days
+}
+
+export function formatDay(iso: string): string {
+  const date = new Date(`${dayKey(iso)}T00:00:00Z`)
+  if (Number.isNaN(date.getTime())) return iso
+  return new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' }).format(date)
+}
+
+/** USD as a plain number for chart geometry only; display keeps formatUSD. */
+export function usdNumber(value: string | null): number | null {
+  const match = value === null ? null : usdPattern.exec(value)
+  if (!match) return null
+  return Number(`${match[1]}.${match[2]}`)
+}
+
+/** Allowance amounts in their unit. Cost micros read as USD (1,000,000 is 1 USD). */
+export function formatAllowanceAmount(value: number | null, unit: AllowanceWindow['unit']): string | null {
+  if (value === null || !Number.isSafeInteger(value)) return null
+  if (unit === 'cost_micros') {
+    const usd = value / 1_000_000
+    return `${usd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD`
+  }
+  return compactCount(value)
+}

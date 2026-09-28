@@ -48,6 +48,10 @@ test('a person reviews real accounts, can leave a harness out, and does not trea
   await expect(expiry).not.toContainText('2026-09-27T20:30:00.000Z')
   await expect(review.getByText(/1 request per selected harness/)).toBeVisible()
   await expect(review.getByText('One at a time')).toHaveCount(0)
+  // Each harness row states its reason once, without repeating the harness name.
+  await expect(review.getByText('Verification cannot isolate inherited tools.')).toHaveCount(2)
+  await expect(review.getByText(/Cursor: Cursor/)).toHaveCount(0)
+  await expect(review.getByRole('alert')).toContainText('Cursor and Codex can’t be verified.')
   await expect(page.getByText(/15-minute|15 minutes/)).toHaveCount(0)
 
   await page.getByRole('checkbox', { name: 'Connect Cursor' }).uncheck()

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { formatInteger, formatOptionalCount, formatTokens, formatUSD, rangeBounds, usdUnits, type UsageGroup } from '../src/lib/usageFormat.ts'
+import { compactCount, formatAllowanceAmount, formatInteger, formatOptionalCount, formatTokens, formatUSD, rangeBounds, rangeDays, usdNumber, usdUnits, type UsageGroup } from '../src/lib/usageFormat.ts'
 
 const blank = (): UsageGroup => ({
   label: 'All', sessions: 2, usage_rows: 0, unreported_sessions: 2,
@@ -37,4 +37,26 @@ test('a day range is exclusive at the next UTC midnight', () => {
   const bounds = rangeBounds(30, new Date('2026-09-27T15:04:00Z'))
   assert.equal(bounds.from, '2026-08-29T00:00:00Z')
   assert.equal(bounds.to, '2026-09-28T00:00:00Z')
+})
+
+test('compact counts shorten dense places and keep unknown apart from zero', () => {
+  assert.equal(compactCount(null), null)
+  assert.equal(compactCount('nope'), null)
+  assert.equal(compactCount('0'), '0')
+  assert.equal(compactCount('9120'), '9,120')
+  assert.equal(compactCount('264000'), '264k')
+  assert.equal(compactCount('2280000'), '2.28M')
+  assert.equal(compactCount(48_960_000), '49M')
+  assert.equal(formatAllowanceAmount(null, 'tokens'), null)
+  assert.equal(formatAllowanceAmount(200_000_000, 'cost_micros'), '200.00 USD')
+  assert.equal(formatAllowanceAmount(1500, 'requests'), '1,500')
+  assert.equal(usdNumber('176.400000000000'), 176.4)
+  assert.equal(usdNumber(null), null)
+})
+
+test('the trend covers every UTC day of the range, end exclusive', () => {
+  const days = rangeDays('2026-09-21T00:00:00Z', '2026-09-28T00:00:00Z')
+  assert.equal(days.length, 7)
+  assert.equal(days[0], '2026-09-21')
+  assert.equal(days.at(-1), '2026-09-27')
 })
