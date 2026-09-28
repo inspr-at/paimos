@@ -113,8 +113,8 @@ function addSet() {
         <button type="button" class="icon-btn sm flat" :aria-expanded="!set.collapsed" :aria-label="set.collapsed ? `Expand ${set.name}` : `Collapse ${set.name}`" @click="emit('collapse', set.id)"><AppIcon name="chevron" :size="14" /></button>
       </header>
       <p v-if="set.readOnly" class="ro">Published version {{ set.versionId }} is read-only.</p>
-      <p v-if="set.readOnly && set.versionNote" class="version-note">Publish note: {{ set.versionNote }}</p>
       <p v-else-if="set.writeReason" class="ro">{{ set.writeReason }}</p>
+      <p v-if="set.readOnly && set.versionNote" class="version-note">Publish note: {{ set.versionNote }}</p>
       <label class="version">Version
         <select class="field" :value="set.versionId" :aria-label="`Versions of ${set.name}`" @focus="emit('history', set.id)" @change="emit('version', set.id, ($event.target as HTMLSelectElement).value)">
           <option value="">Current draft</option>
