@@ -302,7 +302,7 @@ func loadVersion(ctx context.Context, tx pgx.Tx, setID, version string) (Snapsho
 	}
 	return *f.Snapshot, nil
 }
-func publishSet(ctx context.Context, tx pgx.Tx, p tenant.Principal, s Set, revision int64, version string) (Snapshot, error) {
+func publishSet(ctx context.Context, tx pgx.Tx, p tenant.Principal, s Set, revision int64, version, note string) (Snapshot, error) {
 	if !releasehistory.ValidVersion(version) {
 		return Snapshot{}, fail(400, "invalid_version", "version must be a valid YYMMDDhhmmss.0.0 UTC calendar coordinate")
 	}
@@ -312,7 +312,7 @@ func publishSet(ctx context.Context, tx pgx.Tx, p tenant.Principal, s Set, revis
 	if err := ValidateRules(s.Rules); err != nil {
 		return Snapshot{}, err
 	}
-	snap := Snapshot{SetID: s.ID, Scope: s.Scope, Name: s.Name, Revision: s.Revision, Version: version, Rules: canonicalRules(s.Rules), PublishedAt: time.Now().UTC()}
+	snap := Snapshot{SetID: s.ID, Scope: s.Scope, Name: s.Name, Revision: s.Revision, Version: version, Rules: canonicalRules(s.Rules), PublishedAt: time.Now().UTC(), Note: note}
 	snap.SHA256 = SnapshotDigest(snap)
 	old, err := loadVersion(ctx, tx, s.ID, version)
 	if err == nil {
@@ -353,6 +353,7 @@ func (m *Module) publish(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, e
 	var in struct {
 		ExpectedRevision int64  `json:"expected_revision"`
 		Version          string `json:"version"`
+		Note             string `json:"note"`
 	}
 	if err := workorders.Decode(r, &in); err != nil {
 		return nil, err
@@ -361,18 +362,27 @@ func (m *Module) publish(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, e
 	if err != nil {
 		return nil, err
 	}
-	return publishSet(r.Context(), tx, p, s, in.ExpectedRevision, in.Version)
+	note, err := normalizeNote(in.Note)
+	if err != nil {
+		return nil, err
+	}
+	return publishSet(r.Context(), tx, p, s, in.ExpectedRevision, in.Version, note)
 }
 func (m *Module) restore(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
 	var in struct {
 		ExpectedRevision int64  `json:"expected_revision"`
 		Version          string `json:"version"`
 		NewVersion       string `json:"new_version"`
+		Note             string `json:"note"`
 	}
 	if err := workorders.Decode(r, &in); err != nil {
 		return nil, err
 	}
 	s, err := m.authorizedSet(r, tx, p, "rules.publish")
+	if err != nil {
+		return nil, err
+	}
+	note, err := normalizeNote(in.Note)
 	if err != nil {
 		return nil, err
 	}
@@ -390,11 +400,15 @@ func (m *Module) restore(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, e
 	if err != nil {
 		return nil, err
 	}
-	snap, err := publishSet(r.Context(), tx, p, s, s.Revision, in.NewVersion)
+	snap, err := publishSet(r.Context(), tx, p, s, s.Revision, in.NewVersion, note)
 	if err != nil {
 		return nil, err
 	}
-	if err = audit(r.Context(), tx, p, s.ID, "restored", map[string]string{"source_version": old.Version}, map[string]string{"version": snap.Version, "sha256": snap.SHA256}); err != nil {
+	restored := map[string]string{"version": snap.Version, "sha256": snap.SHA256}
+	if snap.Note != "" {
+		restored["note"] = snap.Note
+	}
+	if err = audit(r.Context(), tx, p, s.ID, "restored", map[string]string{"source_version": old.Version}, restored); err != nil {
 		return nil, err
 	}
 	return snap, nil
