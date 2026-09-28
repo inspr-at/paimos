@@ -315,3 +315,28 @@ capture remain unimplemented.
 People with `harness.recover` permission can open **Recover** in a session’s details and archive its registration after confirming the exact session and host. Archive preserves ticket links, outcomes and audit history, revokes the old worker generation, and records process state as unknown. It never signals a process. Late heartbeats, control completions and registration replays cannot reopen an archived generation; a new session needs a new reference and lease. The recovery dialog refreshes on stale observations. Recovery-aware daemons detach their harness registration without stopping the run. Active older managed daemons must stop normally before archive is available, because they cannot detach safely. Archive waits for any already-authorized force request to finish or expire.
 
 Managed daemons report a per-launch process identity and generation. **Force stop** additionally requires human `harness.force_stop` permission, a fresh ownership report, and exact session/host/process-group confirmation. The daemon rejects a changed identity, restart, expired request or lost ownership; deadline and cancellation are rechecked under the final signal lock. Local transport and inbox credentials cannot authorize force stop. Expiry uses server and daemon wall clocks, which need normal host clock synchronization; archive cannot retract a signal that was already authorized or delivered, and always retains unknown process state. It signals only the owned process group (including children in that group), and reports root exit separately from queue acceptance; escaped descendants are outside its scope. Linux and macOS keep the group leader unreaped while signaling, preventing PID reuse. Unsupported adapters, legacy unmanaged sessions and offline ownership cannot be force stopped. Normal user **Stop** sends TERM and reports timeout without escalating; daemon cleanup retains its bounded force cleanup.
+
+### Removing ghost sessions (AEON-265)
+
+People with `harness.read` access to a project can use **Remove** on an Agents
+row, live card, or session panel, then confirm once. The record immediately leaves
+active views and counts; the **Removed** filter retains its ticket links and
+history. `POST /projects/{projectId}/harness-sessions/{sessionId}/remove` takes
+`{"reason":"..."}` (1–240 characters), uses the current locked record without a
+client revision, and is idempotent even after another tab removed it. It accepts
+unmanaged, legacy managed, offline, stopped, and pending-force registrations.
+
+Removal revokes the generation: late heartbeat, mark-stopped, receipt and control
+completion writes return 410. It releases outstanding deliveries and rejects
+pending controls, recording `harness.removed` with actor, session and reason.
+It never signals a process or asserts remote exit. A force signal already delivered
+cannot be recalled; legacy daemons may independently react to the revoked lease.
+The existing verified force-stop action in **Recover** keeps its identity and
+confirmation checks; it cannot target an already revoked generation.
+
+**Remove all stopped/stale** calls the project-scoped
+`POST /projects/{projectId}/harness-sessions/remove-stale` with a reason. The server
+rechecks eligibility under row locks: the last accepted heartbeat must be older
+than 15 minutes, falling back to creation time for sessions with no heartbeat.
+A recently stopped record with a recent heartbeat is retained. The response lists
+removed sessions and the server cutoff; retries produce no duplicate removal audit.

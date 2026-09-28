@@ -213,7 +213,8 @@ export const useAgents = defineStore('agents', () => {
       ticket: node && routeKey ? { id: node.id, key: node.key, title: node.title, href: `/p/${encodeURIComponent(routeKey)}/${encodeURIComponent(node.key)}` } : null,
     }
   }
-  const views = computed(() => sessions.value.map(viewOf))
+  const views = computed(() => sessions.value.filter(s => !s.archived_at).map(viewOf))
+  const removedViews = computed(() => sessions.value.filter(s => s.archived_at).map(viewOf))
   const grouped = computed(() => {
     const out: Record<SessionStatus['group'], SessionView[]> = { problem: [], unresponsive: [], needs: [], awaiting: [], throttled: [], working: [], idle: [], stopped: [] }
     for (const view of views.value) out[view.status.group].push(view)
@@ -241,6 +242,15 @@ export const useAgents = defineStore('agents', () => {
     .filter(m => m.sender_principal_id === session.agent_principal_id || m.recipient_principal_id === session.agent_principal_id)
     .slice().reverse()
   const addressOf = (principalId: string) => addresses.value[principalId] ?? ''
+
+  // An accepted removal wins over any list or ticket read already in flight.
+  // Preserve summaries locally because the mutation response is a bare session.
+  function recordRemoval(removed: HarnessSession) {
+    sessionsRead.invalidate()
+    appliedSessionRead = ++sessionReadOrder
+    const known = sessions.value.some(s => s.id === removed.id)
+    sessions.value = known ? sessions.value.map(s => s.id === removed.id ? { ...s, ...removed } : s) : [...sessions.value, removed]
+  }
 
   // ---------- Writes ----------
   async function decide(approval: Approval, decision: 'approved' | 'denied', reason: string) {
@@ -291,7 +301,7 @@ export const useAgents = defineStore('agents', () => {
 
   return {
     now, sessions, sessionsState, sessionsError, sessionsUpdatedAt, sessionsStale, refreshStale, approvals, approvalsState, approvalsError, approvalsHardError, accounts, accountsState, accountsUpdatedAt, messagingState, runs, nodes, controls, eventPulseFor,
-    loading, loaded, pending, held, needsCount, views, grouped,
+    loading, loaded, pending, held, needsCount, views, removedViews, recordRemoval, grouped,
     loadAll, loadNeeds, ensureTicket, refreshApprovals, refreshSessions, refreshThread, refreshAgentRuns, tick,
     viewOf, byAgent, forTicket, recentRuns, askerName, thread, addressOf, decide, revoke, resolve, control, send, setAccount,
     invalidatePolls: () => { sessionsRead.invalidate(); approvalsRead.invalidate(); accountsRead.invalidate(); modelsRead.invalidate(); runsRead.invalidate() },

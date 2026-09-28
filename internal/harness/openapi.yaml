@@ -78,6 +78,28 @@ paths:
         '201': {description: Idempotent control with exact ownership and a 45-second expiry; pending is not confirmed exit}
         '403': {description: Human harness.force_stop permission required}
         '409': {description: Stale confirmation or unavailable ownership}
+  /api/projects/{projectId}/harness-sessions/{sessionId}/remove:
+    post:
+      operationId: removeHarnessSession
+      summary: Human with harness.read project access removes any registration without stopping its process
+      parameters: [{$ref: '#/components/parameters/projectId'}, {$ref: '#/components/parameters/sessionId'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessRemoveRequest'}}}}
+      responses:
+        '200': {description: Idempotently removed record; session and unknown process state returned; old generation revoked, history retained, actor and reason audited}
+        '400': {description: Invalid reason}
+        '403': {description: Human project access required}
+        '404': {description: Session not visible}
+  /api/projects/{projectId}/harness-sessions/remove-stale:
+    post:
+      operationId: removeStaleHarnessSessions
+      summary: Remove records whose last accepted heartbeat (or creation) is older than 15 minutes under row locks
+      parameters: [{$ref: '#/components/parameters/projectId'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessRemoveRequest'}}}}
+      responses:
+        '200': {description: Removed result items and server cutoff; no process signalled; repeated requests produce no duplicate removal events}
+        '400': {description: Invalid reason}
+        '403': {description: Human harness.read project access required}
+        '404': {description: Project not visible}
   /api/projects/{projectId}/harness-sessions/{sessionId}/archive:
     post:
       operationId: archiveHarnessSession
@@ -242,6 +264,12 @@ components:
     controlId: {name: controlId, in: path, required: true, schema: {type: string, format: uuid}}
     workerLease: {name: X-Aeon-Worker-Lease, in: header, required: true, schema: {type: string}, description: Private per-generation proof; never returned or logged}
   schemas:
+    HarnessRemoveRequest:
+      type: object
+      additionalProperties: false
+      required: [reason]
+      properties:
+        reason: {type: string, minLength: 1, maxLength: 240}
     HarnessRulesReceiptContext:
       type: object
       additionalProperties: false

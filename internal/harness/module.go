@@ -94,6 +94,8 @@ func (m *Module) Mount(mux *http.ServeMux) {
 		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/controls/{controlId}/complete", "harness.worker", true, 200, m.completeControl},
 		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/stop", "harness.worker", true, 200, m.markStopped},
 		{"GET /api/projects/{projectId}/harness-sessions/{sessionId}/recovery", "harness.read", false, 200, m.recovery},
+		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/remove", "harness.read", false, 200, m.remove},
+		{"POST /api/projects/{projectId}/harness-sessions/remove-stale", "harness.read", false, 200, m.removeStale},
 		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/archive", "harness.recover", false, 200, m.archive},
 		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/controls/force-stop", "harness.force_stop", false, 201, m.forceStop},
 	} {
