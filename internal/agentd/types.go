@@ -34,12 +34,27 @@ var (
 
 // Run is the content-free AEON run projection returned by /runs endpoints.
 type Run struct {
-	ID               string `json:"id"`
-	WorkOrderID      string `json:"work_order_id"`
-	AgentPrincipalID string `json:"agent_principal_id"`
-	ModelProfileID   string `json:"model_profile_id"`
-	AccountID        string `json:"account_id"`
-	Status           string `json:"status"`
+	Purpose                   string `json:"purpose,omitempty"`
+	VerificationTask          string `json:"verification_task,omitempty"`
+	MaxDurationSeconds        *int64 `json:"max_duration_seconds,omitempty"`
+	VerificationPolicy        string `json:"verification_policy,omitempty"`
+	RepositoryMutationAllowed *bool  `json:"repository_mutation_allowed,omitempty"`
+	ID                        string `json:"id"`
+	WorkOrderID               string `json:"work_order_id"`
+	AgentPrincipalID          string `json:"agent_principal_id"`
+	ModelProfileID            string `json:"model_profile_id"`
+	AccountID                 string `json:"account_id"`
+	RequestedAccountID        string `json:"requested_account_id"`
+	Status                    string `json:"status"`
+}
+
+// requestedAccount retains the approved enrollment before Route fills AccountID.
+// Older/already-routed projections may carry only AccountID.
+func (r Run) requestedAccount() string {
+	if r.RequestedAccountID != "" {
+		return r.RequestedAccountID
+	}
+	return r.AccountID
 }
 
 type Profile struct {

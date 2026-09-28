@@ -16,8 +16,10 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/agentsetup"
 	"github.com/inspr-at/paimos/internal/localjournal"
 	"github.com/inspr-at/paimos/internal/ownedprocess"
 )
@@ -42,19 +44,29 @@ type replay struct {
 // Record contains only local process provenance and bounded control digests.
 // The journal is AEON v2; classic journals are never opened implicitly.
 type Record struct {
-	TenantID    string            `json:"tenant_id"`
-	PrincipalID string            `json:"principal_id"`
-	RunID       string            `json:"run_id"`
-	WorkOrderID string            `json:"work_order_id,omitempty"`
-	Generation  string            `json:"generation"`
-	Workspace   string            `json:"workspace"`
-	PID         int               `json:"pid"`
-	State       string            `json:"state"`
-	Sequence    int64             `json:"sequence"`
-	Controls    map[string]replay `json:"controls,omitempty"`
+	// Only launchPrepared proves that adapter.Start has never been called.
+	// Empty is a legacy record, never evidence that no child was forked.
+	LaunchState   string            `json:"launch_state,omitempty"`
+	ClaimRoute    *Route            `json:"claim_route,omitempty"`
+	AccountID     string            `json:"account_id,omitempty"`
+	ExecutionMode string            `json:"execution_mode,omitempty"`
+	ExitObserved  bool              `json:"exit_observed,omitempty"`
+	Pending       []Telemetry       `json:"pending,omitempty"`
+	SettlementGap bool              `json:"settlement_gap,omitempty"`
+	TenantID      string            `json:"tenant_id"`
+	PrincipalID   string            `json:"principal_id"`
+	RunID         string            `json:"run_id"`
+	WorkOrderID   string            `json:"work_order_id,omitempty"`
+	Generation    string            `json:"generation"`
+	Workspace     string            `json:"workspace"`
+	PID           int               `json:"pid"`
+	State         string            `json:"state"`
+	Sequence      int64             `json:"sequence"`
+	Controls      map[string]replay `json:"controls,omitempty"`
 }
 
 type owned struct {
+	deadlineExpired atomic.Bool
 	mu              sync.Mutex
 	harnessMu       sync.Mutex
 	record          Record
@@ -71,9 +83,17 @@ type owned struct {
 	stopRequested   bool
 	forceRequested  bool
 	harnessArchived bool
+	protocolFailed  bool
+	protocolStopped bool
 }
 
 type Supervisor struct {
+	dispatchMu        sync.Mutex
+	state             *agentsetup.Store
+	closing           bool
+	blockedAccounts   map[string]bool
+	probedAccounts    map[string]bool
+	loginRequired     map[string]bool
 	mu                sync.Mutex
 	api               API
 	journal           *localjournal.Journal[Record]
@@ -89,6 +109,8 @@ type Supervisor struct {
 	accounts          []EnrolledAccount
 	heartbeatInterval time.Duration
 	maxRunDuration    time.Duration
+	prepareScratch    func(string) (string, error)
+	newHarnessID      func() (string, error)
 }
 
 func NewSupervisor(ctx context.Context, c Config) (*Supervisor, error) {
@@ -152,6 +174,16 @@ func NewSupervisor(ctx context.Context, c Config) (*Supervisor, error) {
 			return nil, errors.New("adapter has no account probe")
 		}
 	}
+	state, err := agentsetup.OpenStore(c.StateRoot, true)
+	if err != nil {
+		return nil, err
+	}
+	keepState := false
+	defer func() {
+		if !keepState {
+			state.Close()
+		}
+	}()
 	lock, err := acquireInstanceLock(c.StateRoot, c.DaemonID)
 	if err != nil {
 		return nil, err
@@ -162,6 +194,11 @@ func NewSupervisor(ctx context.Context, c Config) (*Supervisor, error) {
 			_ = lock.Close()
 		}
 	}()
+	for _, suffix := range []string{".journal", ".checkpoint.json"} {
+		if _, e := state.Read("aeon-agentd-"+c.DaemonID+suffix, 4<<20); e != nil && !errors.Is(e, os.ErrNotExist) {
+			return nil, e
+		}
+	}
 	j, err := localjournal.Open(localjournal.Config[Record]{
 		Directory: c.StateRoot, Prefix: "aeon-agentd-" + c.DaemonID, Version: 2,
 		MaxBytes: 4 << 20, MaxRecords: 4096,
@@ -175,18 +212,21 @@ func NewSupervisor(ctx context.Context, c Config) (*Supervisor, error) {
 			if r.TenantID != tenantID || r.PrincipalID != principalID || r.Generation == "" || r.RunID == "" || r.Sequence < 0 || len(r.Controls) > 256 {
 				return errors.New("invalid AEON journal binding")
 			}
+			if err := validateLaunchRecord(r); err != nil {
+				return err
+			}
 			return nil
 		},
 	})
 	if err != nil {
 		return nil, err
 	}
-	s := &Supervisor{api: c.API, journal: j, lock: lock, adapters: adapters, runs: map[string]*owned{}, tenantID: tenantID,
+	s := &Supervisor{state: state, blockedAccounts: map[string]bool{}, probedAccounts: map[string]bool{}, loginRequired: map[string]bool{}, api: c.API, journal: j, lock: lock, adapters: adapters, runs: map[string]*owned{}, tenantID: tenantID,
 		principalID: principalID, daemonID: c.DaemonID, generation: gen, workspace: physical, estimates: c.EstimatedUnits, accounts: c.Accounts,
-		heartbeatInterval: heartbeat, maxRunDuration: maxRun}
+		heartbeatInterval: heartbeat, maxRunDuration: maxRun, prepareScratch: verificationScratch, newHarnessID: randomID}
 	for _, rec := range j.Snapshot() {
 		// A persisted PID is never proof of ownership after a restart.
-		if rec.State == "running" || rec.State == "starting" || rec.State == "waiting" {
+		if !noLocalProcess(rec) && rec.State != "ownership_lost" {
 			rec.State = "ownership_lost"
 			if err := j.Put(rec); err != nil {
 				return nil, err
@@ -211,6 +251,7 @@ func NewSupervisor(ctx context.Context, c Config) (*Supervisor, error) {
 		}
 	}
 	keepLock = true
+	keepState = true
 	return s, nil
 }
 
@@ -229,9 +270,13 @@ func (s *Supervisor) PrincipalID() string { return s.principalID }
 
 func (s *Supervisor) Status() []Record {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	out := make([]Record, 0, len(s.runs))
+	entries := make([]*owned, 0, len(s.runs))
 	for _, entry := range s.runs {
+		entries = append(entries, entry)
+	}
+	s.mu.Unlock()
+	out := make([]Record, 0, len(entries))
+	for _, entry := range entries {
 		entry.mu.Lock()
 		view := entry.record
 		view.Workspace = ""
@@ -246,38 +291,98 @@ func (s *Supervisor) Status() []Record {
 // harness session, so they cannot race a separate principal-wide inbox poll.
 // A missing or stale reservation fails closed and leaves the run queued.
 func (s *Supervisor) PollOnce(ctx context.Context) error {
-	for _, account := range s.accounts {
-		probe := s.adapters[account.Harness].(AccountProber)
-		available := probe.Probe(ctx, account.Key)
-		if err := s.api.Probe(ctx, account.ID, s.daemonID, s.generation, available); err != nil {
-			return err
-		}
+	// Recover no-launch claims before a fresh probe changes account generation.
+	recoveryErr := s.recoverUnlaunched(ctx)
+	s.settlePending(ctx)
+	if !s.dispatchAllowed("") {
+		return nil
 	}
 	runs, err := s.api.Queued(ctx)
 	if err != nil {
 		return err
 	}
-	for _, run := range runs {
-		if run.AgentPrincipalID != s.principalID {
-			return ErrScope
+	failures := []error{recoveryErr}
+	s.mu.Lock()
+	accounts := append([]EnrolledAccount(nil), s.accounts...)
+	adapters := map[string]Adapter{}
+	for k, v := range s.adapters {
+		adapters[k] = v
+	}
+	s.mu.Unlock()
+	for _, account := range accounts {
+		if s.hasUnresolvedOldClaim(account.ID) {
+			s.freezeOnError(account.ID)
+			continue
 		}
-		if err := s.StartRun(ctx, run); err != nil {
-			return err
+		fenced, fenceErr := s.readFence(account.ID)
+		if fenced || fenceErr != nil {
+			continue
+		}
+		// Account probes can start vendor executables. A refused verification
+		// must not reach one merely because health probing precedes dispatch.
+		probeBlocked := false
+		for _, run := range runs {
+			if run.AgentPrincipalID == s.principalID && run.Purpose == VerificationPurpose && run.requestedAccount() == account.ID && validQueuedExecutionMode(run, adapters[account.Harness]) != nil {
+				probeBlocked = true
+				break
+			}
+		}
+		if probeBlocked {
+			continue
+		}
+		probe := adapters[account.Harness].(AccountProber)
+		available := probe.Probe(ctx, account.Key)
+		err := s.api.Probe(ctx, account.ID, s.daemonID, s.generation, available)
+		s.mu.Lock()
+		s.blockedAccounts[account.ID] = err != nil || !available
+		s.probedAccounts[account.ID] = err == nil && available
+		s.loginRequired[account.ID] = !available
+		s.mu.Unlock()
+		if err != nil {
+			failures = append(failures, errors.New("account probe unavailable"))
 		}
 	}
-	return nil
+	for _, run := range runs {
+		if run.AgentPrincipalID != s.principalID {
+			failures = append(failures, ErrScope)
+			continue
+		}
+		if err := s.StartRun(ctx, run); err != nil && !errors.Is(err, ErrDraining) {
+			failures = append(failures, err)
+		}
+	}
+	return errors.Join(failures...)
 }
 
-func (s *Supervisor) StartRun(ctx context.Context, run Run) error {
+func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
+	s.dispatchMu.Lock()
+	defer s.dispatchMu.Unlock()
+	if !s.dispatchAllowed(run.requestedAccount()) {
+		return ErrDraining
+	}
 	if run.ID == "" || run.WorkOrderID == "" || run.AgentPrincipalID != s.principalID || run.Status != "queued" {
 		return ErrScope
 	}
 	s.mu.Lock()
-	if s.runs[run.ID] != nil {
-		s.mu.Unlock()
-		return nil
-	}
+	entry := s.runs[run.ID]
 	s.mu.Unlock()
+	if entry != nil {
+		entry.mu.Lock()
+		retry := entry.record.LaunchState == launchPrepared && entry.record.State == "claim_pending" && entry.record.Generation == s.generation
+		entry.mu.Unlock()
+		if !retry {
+			return nil
+		}
+		if err := s.reconcileUnlaunched(ctx, entry); err != nil {
+			return err
+		}
+		entry.mu.Lock()
+		retry = entry.record.State == "claim_pending"
+		entry.mu.Unlock()
+		if !retry {
+			return nil
+		}
+	}
 	profiles, err := s.api.Profiles(ctx)
 	if err != nil {
 		return err
@@ -292,6 +397,31 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) error {
 	adapter := s.adapters[profile.Harness]
 	if adapter == nil || profile.ID == "" {
 		return ErrUnsupported
+	}
+	if err := validQueuedExecutionMode(run, adapter); err != nil {
+		if errors.Is(err, ErrVerificationUnavailable) && entry == nil {
+			if saveErr := s.refuseVerification(run); saveErr != nil {
+				return saveErr
+			}
+		}
+		return err
+	}
+	verification := run.Purpose == VerificationPurpose
+	if verification {
+		s.mu.Lock()
+		entries := make([]*owned, 0, len(s.runs))
+		for _, entry := range s.runs {
+			entries = append(entries, entry)
+		}
+		s.mu.Unlock()
+		for _, entry := range entries {
+			entry.mu.Lock()
+			busy := entry.record.RunID != run.ID && entry.record.ExecutionMode == VerificationPurpose && !noLocalProcess(entry.record) && (entry.record.State == "running" || entry.record.State == "starting" || entry.record.State == "waiting" || entry.record.State == "ownership_lost")
+			entry.mu.Unlock()
+			if busy {
+				return ErrDraining
+			}
+		}
 	}
 	node, err := s.api.Node(ctx, run.WorkOrderID)
 	if err != nil {
@@ -319,6 +449,9 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) error {
 			duration = time.Duration(*order.MaxDurationSeconds) * time.Second
 		}
 	}
+	if verification && time.Duration(*run.MaxDurationSeconds)*time.Second < duration {
+		duration = time.Duration(*run.MaxDurationSeconds) * time.Second
+	}
 	prompt := node.Title
 	if node.Body != "" {
 		prompt += "\n\n" + node.Body
@@ -328,10 +461,16 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) error {
 		prompt += "\n- " + criterion.ID + ": " + criterion.Description
 	}
 	branch := ""
-	if output, branchErr := exec.CommandContext(ctx, "git", "-C", s.workspace, "branch", "--show-current").Output(); branchErr == nil {
-		branch = strings.TrimSpace(string(output))
+	if !verification {
+		if output, branchErr := exec.CommandContext(ctx, "git", "-C", s.workspace, "branch", "--show-current").Output(); branchErr == nil {
+			branch = strings.TrimSpace(string(output))
+		}
+		prompt += "\n\nRun contract: You are bound to work order " + node.Key + " and run " + run.ID + ". Work only in this workspace. Current branch: " + branch + ". Use the Aeon tools to comment, check criteria, attach evidence, request approval, reply, and set status. Use aeon_terminal for tests and a local commit; never push without person approval. Report the commit ID and remaining blockers in your final reply."
 	}
-	prompt += "\n\nRun contract: You are bound to work order " + node.Key + " and run " + run.ID + ". Work only in this workspace. Current branch: " + branch + ". Use the Aeon tools to comment, check criteria, attach evidence, request approval, reply, and set status. Use aeon_terminal for tests and a local commit; never push without person approval. Report the commit ID and remaining blockers in your final reply."
+	if verification {
+		prompt = VerificationTask
+	}
+	runWorkspace := s.workspace
 	if len(prompt) > 256<<10 {
 		return errors.New("work order prompt exceeds local bound")
 	}
@@ -340,18 +479,25 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) error {
 	}
 	accountIDs := make([]string, 0, len(s.accounts))
 	for _, account := range s.accounts {
-		if account.Harness == profile.Harness {
+		if account.Harness == profile.Harness && s.accountAvailable(account.ID) && (run.AccountID == "" || run.AccountID == account.ID) && (run.RequestedAccountID == "" || run.RequestedAccountID == account.ID) {
 			accountIDs = append(accountIDs, account.ID)
 		}
 	}
 	if len(accountIDs) == 0 {
 		return errors.New("no local account enrollment for harness")
 	}
-	route, err := s.api.Route(ctx, run.ID, s.daemonID, accountIDs, s.estimates)
-	if err != nil {
-		return err
+	var route Route
+	if entry != nil {
+		entry.mu.Lock()
+		route = *entry.record.ClaimRoute
+		entry.mu.Unlock()
+	} else {
+		route, err = s.api.Route(ctx, run.ID, s.daemonID, accountIDs, s.estimates)
+		if err != nil {
+			return err
+		}
 	}
-	if route.DaemonID != s.daemonID || route.AccountKey == "" || len(route.Reservations) == 0 {
+	if route.DaemonID != s.daemonID || route.AccountKey == "" || len(route.Reservations) == 0 || run.AccountID != "" && route.AccountID != run.AccountID || run.RequestedAccountID != "" && route.AccountID != run.RequestedAccountID {
 		return errors.New("account route is not bound to daemon")
 	}
 	localBinding := false
@@ -371,36 +517,63 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) error {
 		}
 		ids = append(ids, reservation.ID)
 	}
+	if !s.accountAvailable(route.AccountID) {
+		return ErrDraining
+	}
+	// Only the validated server route can fill the execution account. Preserve
+	// all approval terms and require the same strict binding as adapter.Start.
+	run.AccountID = route.AccountID
+	if err := validExecutionMode(run, adapter); err != nil {
+		return err
+	}
+	if entry == nil {
+		rec := Record{LaunchState: launchPrepared, ClaimRoute: &route, AccountID: route.AccountID, ExecutionMode: run.Purpose, TenantID: s.tenantID, PrincipalID: s.principalID, RunID: run.ID, WorkOrderID: run.WorkOrderID, Generation: s.generation, Workspace: s.workspace, State: "claim_pending", Controls: map[string]replay{}}
+		if err := s.journal.Put(rec); err != nil {
+			return err
+		}
+		entry = &owned{record: rec, replies: map[string]string{}}
+		s.mu.Lock()
+		s.runs[run.ID] = entry
+		s.mu.Unlock()
+	}
 	if err := s.api.Claim(ctx, run.ID, s.daemonID, s.generation, ids); err != nil {
-		return err
+		return errors.Join(err, s.reconcileUnlaunched(ctx, entry))
 	}
-	rec := Record{TenantID: s.tenantID, PrincipalID: s.principalID, RunID: run.ID, WorkOrderID: run.WorkOrderID, Generation: s.generation, Workspace: s.workspace, State: "starting", Controls: map[string]replay{}}
-	if err := s.journal.Put(rec); err != nil {
-		return err
+	// Every error before launch intent must settle this claimed, never-launched
+	// run. A failed report stays in the durable outbox with the same sequence.
+	defer func() {
+		entry.mu.Lock()
+		neverLaunched := entry.record.LaunchState == launchPrepared
+		entry.mu.Unlock()
+		if resultErr != nil && neverLaunched {
+			cleanup, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			resultErr = errors.Join(resultErr, s.finishUnlaunched(cleanup, entry))
+		}
+	}()
+	if verification {
+		runWorkspace, err = s.prepareScratch(s.workspace)
+		if err != nil {
+			return err
+		}
 	}
-	entry := &owned{record: rec, replies: map[string]string{}}
-	s.mu.Lock()
-	s.runs[run.ID] = entry
-	s.mu.Unlock()
 	projectID, err := s.api.ProjectForNode(ctx, node.Key)
 	if err != nil {
-		_ = s.update(ctx, entry, Telemetry{Kind: "finished", Status: "failed", ErrorCode: "child_exit_failed"})
 		return err
 	}
 	host, err := os.Hostname()
 	if err != nil || host == "" || len(host) > 128 {
-		_ = s.update(ctx, entry, Telemetry{Kind: "finished", Status: "failed", ErrorCode: "child_exit_failed"})
 		return errors.New("valid harness host unavailable")
 	}
-	ref, err := randomID()
+	ref, err := s.newHarnessID()
 	if err != nil {
 		return err
 	}
-	leaseA, err := randomID()
+	leaseA, err := s.newHarnessID()
 	if err != nil {
 		return err
 	}
-	leaseB, err := randomID()
+	leaseB, err := s.newHarnessID()
 	if err != nil {
 		return err
 	}
@@ -408,7 +581,7 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) error {
 	if profile.Harness != Grok {
 		caps = append(caps, "interrupt")
 	}
-	entry.inboxCapable = profile.Harness == Claude || profile.Harness == Codex || profile.Harness == Pi
+	entry.inboxCapable = !verification && (profile.Harness == Claude || profile.Harness == Codex || profile.Harness == Pi)
 	if entry.inboxCapable {
 		caps = append(caps, "inbox", "steer")
 	}
@@ -416,7 +589,6 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) error {
 		Model: profile.Model, ReasoningEffort: profile.Effort, AccountLabel: route.AccountLabel},
 		s.principalID, run.ID, run.WorkOrderID, profile.Harness, host, caps)
 	if err != nil {
-		_ = s.update(ctx, entry, Telemetry{Kind: "finished", Status: "failed", ErrorCode: "child_exit_failed"})
 		return err
 	}
 	if usageAPI, ok := s.api.(sessionUsageAPI); ok && profile.Harness == Codex {
@@ -437,7 +609,7 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) error {
 		s.stopHarness(cleanup, entry, reason)
 	}
 	var runTools *RunTools
-	if toolAPI, ok := s.api.(RunToolAPI); ok {
+	if toolAPI, ok := s.api.(RunToolAPI); ok && !verification {
 		if signer, ok := s.api.(interface {
 			runCredential(string, string, string, string) string
 		}); ok {
@@ -460,7 +632,6 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) error {
 			entry.tools, err = startManagedTools(signer.runCredential(s.tenantID, s.principalID, run.ID, s.generation),
 				toolBinding{api: toolAPI, workOrderID: run.WorkOrderID, runID: run.ID, workspace: s.workspace, branch: branch, active: active, replySender: replySender, requestDone: requestDone})
 			if err != nil {
-				_ = s.update(ctx, entry, Telemetry{Kind: "finished", Status: "failed", ErrorCode: "child_exit_failed"})
 				closeHarness("process_failed")
 				return err
 			}
@@ -468,12 +639,33 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) error {
 		}
 	}
 	observe := func(ev AdapterEvent) { s.observe(entry, ev) }
-	proc, err := adapter.Start(ctx, StartRequest{TenantID: s.tenantID, PrincipalID: s.principalID, Run: run, Profile: profile,
-		AccountKey: route.AccountKey, Workspace: s.workspace, StateRoot: filepath.Dir(s.journal.JournalPath()), Prompt: prompt, Generation: s.generation, Tools: runTools}, observe)
+	// Commit the possible-fork boundary before handing control to an adapter.
+	// On a journal failure Start is never invoked; after success a crash is
+	// unconfirmed, even if no PID was subsequently persisted.
+	entry.mu.Lock()
+	intent := entry.record
+	intent.LaunchState, intent.State = launchAttempted, "starting"
+	err = s.journal.Put(intent)
+	if err == nil {
+		entry.record = intent
+	}
+	entry.mu.Unlock()
 	if err != nil {
 		_ = entry.tools.Close()
-		_ = s.update(ctx, entry, Telemetry{Kind: "finished", Status: "failed", ErrorCode: "child_exit_failed"})
 		closeHarness("process_failed")
+		return err
+	}
+	launchedAt := time.Now()
+	proc, err := adapter.Start(ctx, StartRequest{TenantID: s.tenantID, PrincipalID: s.principalID, Run: run, Profile: profile,
+		AccountKey: route.AccountKey, Workspace: runWorkspace, StateRoot: filepath.Dir(s.journal.JournalPath()), Prompt: prompt, Generation: s.generation, Tools: runTools}, observe)
+	if err != nil {
+		_ = entry.tools.Close()
+		// A generic Start error does not prove that a child was never forked.
+		entry.mu.Lock()
+		entry.record.State = "ownership_lost"
+		_ = s.journal.Put(entry.record)
+		entry.mu.Unlock()
+		s.freezeOnError(route.AccountID)
 		return err
 	}
 	entry.mu.Lock()
@@ -482,49 +674,42 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) error {
 	entry.record.State = "running"
 	saveErr := s.journal.Put(entry.record)
 	entry.mu.Unlock()
-	if saveErr != nil {
-		_ = entry.tools.Close()
-		_ = proc.Stop(ctx)
-		if stream, ok := proc.(interface{ discardReader() }); ok {
-			stream.discardReader()
-		}
-		closeHarness("process_failed")
-		return saveErr
-	}
-	if err := s.update(ctx, entry, Telemetry{Kind: "started", Status: "running"}); err != nil {
-		_ = entry.tools.Close()
-		_ = proc.Stop(ctx)
-		if stream, ok := proc.(interface{ discardReader() }); ok {
-			stream.discardReader()
-		}
-		closeHarness("process_failed")
-		return err
-	}
-	heartbeatErr := s.heartbeatHarness(ctx, entry)
 	entry.mu.Lock()
 	entry.monitorDone = make(chan struct{})
+	done := entry.monitorDone
+	entry.mu.Unlock()
+	go s.runDeadline(entry, proc, done, time.Until(launchedAt.Add(duration)))
+	var startedErr error
+	if saveErr == nil {
+		startedErr = s.update(ctx, entry, Telemetry{Kind: "started", Status: "running"})
+	}
+	var heartbeatErr error
+	if saveErr == nil && startedErr == nil {
+		heartbeatErr = s.heartbeatHarness(ctx, entry)
+	}
 	if errors.Is(heartbeatErr, ErrHarnessArchived) {
+		entry.mu.Lock()
 		entry.harnessArchived = true
+		entry.mu.Unlock()
 		heartbeatErr = nil
 	}
-	if heartbeatErr != nil {
-		entry.stopRequested = true
-	}
+	entry.mu.Lock()
+	protocolFailed := entry.protocolFailed
 	entry.mu.Unlock()
-	go s.monitor(entry)
-	if heartbeatErr != nil {
-		_ = proc.Stop(ctx)
-		return heartbeatErr
+	startErr := errors.Join(saveErr, startedErr, heartbeatErr)
+	if protocolFailed {
+		// An adapter can report before Start returns its owned Process.
+		startErr = errors.Join(startErr, ErrTelemetryProtocol)
 	}
-	go s.heartbeat(entry, duration)
-	return nil
+	s.handleRunError(entry, startErr)
+	go s.monitor(entry)
+	go s.heartbeat(entry)
+	return startErr
 }
 
-func (s *Supervisor) heartbeat(entry *owned, duration time.Duration) {
+func (s *Supervisor) heartbeat(entry *owned) {
 	ticker := time.NewTicker(s.heartbeatInterval)
 	defer ticker.Stop()
-	deadline := time.NewTimer(duration)
-	defer deadline.Stop()
 	entry.mu.Lock()
 	done := entry.monitorDone
 	entry.mu.Unlock()
@@ -543,29 +728,27 @@ func (s *Supervisor) heartbeat(entry *owned, duration time.Duration) {
 				continue
 			}
 			if err != nil {
-				entry.mu.Lock()
-				proc := entry.process
-				entry.mu.Unlock()
-				if proc != nil {
-					ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-					_ = proc.Stop(ctx)
-					cancel()
-				}
-				return
+				s.handleRunError(entry, err)
 			}
-		case <-deadline.C:
-			entry.mu.Lock()
-			proc := entry.process
-			entry.stopRequested = true
-			entry.mu.Unlock()
-			if proc != nil {
-				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-				_ = proc.Stop(ctx)
-				cancel()
-			}
-			return
+
 		}
 	}
+}
+
+// The approved process deadline is independent of API/entry locks. A revoked
+// key or slow telemetry must not extend the approved verification duration.
+func (s *Supervisor) runDeadline(entry *owned, proc Process, done <-chan struct{}, remaining time.Duration) {
+	timer := time.NewTimer(remaining)
+	defer timer.Stop()
+	select {
+	case <-done:
+		return
+	case <-timer.C:
+	}
+	entry.deadlineExpired.Store(true)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_ = proc.Stop(ctx)
 }
 
 func (s *Supervisor) observe(entry *owned, ev AdapterEvent) {
@@ -584,12 +767,7 @@ func (s *Supervisor) observe(entry *owned, ev AdapterEvent) {
 	if err := s.update(ctx, entry, Telemetry{Kind: kind, InputTokensDelta: ev.InputTokensDelta,
 		OutputTokensDelta: ev.OutputTokensDelta, CostMicrosDelta: ev.CostMicrosDelta, TurnCountDelta: ev.TurnCountDelta,
 		EffectiveModel: ev.EffectiveModel, ModelEvidence: ev.ModelEvidence, ErrorCode: ev.ErrorCode}); err != nil {
-		entry.mu.Lock()
-		proc := entry.process
-		entry.mu.Unlock()
-		if proc != nil {
-			_ = proc.Stop(ctx)
-		}
+		s.handleRunError(entry, err)
 	}
 }
 
@@ -606,14 +784,30 @@ func (s *Supervisor) monitor(entry *owned) {
 	}
 	defer entry.tools.Close()
 	err := proc.Wait()
+	entry.mu.Lock()
+	entry.record.ExitObserved = err == nil
+	if observer, ok := proc.(interface{ ProcessExited() bool }); ok {
+		entry.record.ExitObserved = observer.ProcessExited()
+	}
+	if saveErr := s.journal.Put(entry.record); saveErr != nil {
+		entry.record.SettlementGap = true
+	}
+	if !entry.record.ExitObserved {
+		entry.record.State = "ownership_lost"
+		_ = s.journal.Put(entry.record)
+		entry.mu.Unlock()
+		return
+	}
+	entry.mu.Unlock()
 	s.finishSessionUsage(entry)
 	entry.harnessMu.Lock()
 	defer entry.harnessMu.Unlock()
 	entry.mu.Lock()
-	stopped := entry.stopRequested
+	stopped := entry.stopRequested || entry.deadlineExpired.Load()
 	forced := entry.forceRequested
+	protocolFailed := entry.protocolFailed
 	entry.mu.Unlock()
-	if err == nil {
+	if err == nil && !protocolFailed {
 		if evidence, ok := proc.(EvidenceProcess); ok {
 			answer := evidence.Evidence()
 			if answer == "" {
@@ -631,6 +825,9 @@ func (s *Supervisor) monitor(entry *owned) {
 	}
 	if stopped {
 		status, code = "cancelled", ""
+	}
+	if protocolFailed {
+		status, code = "failed", "app_server_protocol"
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -787,21 +984,27 @@ func (s *Supervisor) serviceHarness(ctx context.Context, entry *owned) (result e
 func (s *Supervisor) update(ctx context.Context, entry *owned, t Telemetry) error {
 	entry.mu.Lock()
 	defer entry.mu.Unlock()
-	if entry.record.Generation != s.generation {
+	if entry.record.Generation != s.generation && entry.record.LaunchState != launchPrepared {
 		return ErrGeneration
 	}
 	if t.Kind == "heartbeat" && (entry.record.State == "completed" || entry.record.State == "failed" || entry.record.State == "cancelled" || entry.record.State == "ownership_lost") {
 		return nil
 	}
-	t.Sequence = entry.record.Sequence + 1
-	if err := s.api.Report(ctx, entry.record.RunID, t); err != nil {
-		return err
+	if len(entry.record.Pending) >= 512 {
+		entry.record.SettlementGap = true
+		_ = s.journal.Put(entry.record)
+		return errors.New("telemetry settlement backlog full")
 	}
+	t.Sequence = entry.record.Sequence + 1
 	entry.record.Sequence = t.Sequence
 	if t.Status != "" {
 		entry.record.State = t.Status
 	}
-	return s.journal.Put(entry.record)
+	entry.record.Pending = append(entry.record.Pending, t)
+	if err := s.journal.Put(entry.record); err != nil {
+		return err
+	}
+	return s.flushReports(ctx, entry)
 }
 
 func (s *Supervisor) Control(ctx context.Context, req ControlRequest) (Receipt, error) {
@@ -829,6 +1032,9 @@ func (s *Supervisor) control(ctx context.Context, req ControlRequest, fromRecove
 	s.mu.Unlock()
 	if entry == nil {
 		return Receipt{}, ErrNotOwned
+	}
+	if entry.record.ExecutionMode == VerificationPurpose && (req.Operation == "steer" || req.Operation == "resume") {
+		return Receipt{}, ErrUnsupported
 	}
 	entry.mu.Lock()
 	defer entry.mu.Unlock()
@@ -899,49 +1105,46 @@ func (s *Supervisor) control(ctx context.Context, req ControlRequest, fromRecove
 	return receipt, nil
 }
 
+// Close fences future dispatch but never signals a child. The caller must
+// keep the supervisor/service alive and retry after observed process exit.
 func (s *Supervisor) Close(ctx context.Context) error {
+	s.dispatchMu.Lock()
+	defer s.dispatchMu.Unlock()
+	s.mu.Lock()
+	s.closing = true
+	s.mu.Unlock()
+	status := s.Lifecycle("")
+	if len(status.ActiveRunIDs) > 0 {
+		return ErrDraining
+	}
+	if len(status.UnconfirmedRunIDs) > 0 {
+		return ErrProcessesUnconfirmed
+	}
 	s.mu.Lock()
 	entries := make([]*owned, 0, len(s.runs))
 	for _, e := range s.runs {
 		entries = append(entries, e)
 	}
 	s.mu.Unlock()
-	var first error
 	for _, e := range entries {
 		e.mu.Lock()
-		proc := e.process
 		done := e.monitorDone
 		e.mu.Unlock()
-		if proc != nil {
-			e.mu.Lock()
-			e.stopRequested = true
-			e.mu.Unlock()
-			if err := proc.Stop(ctx); err != nil {
-				e.mu.Lock()
-				e.stopRequested = false
-				e.mu.Unlock()
-				if first == nil {
-					first = err
-				}
-			}
-		}
 		if done != nil {
 			select {
 			case <-done:
 			case <-ctx.Done():
-				if first == nil {
-					first = ctx.Err()
-				}
+				return ctx.Err()
 			}
 		}
 	}
 	if s.lock != nil {
-		if err := s.lock.Close(); err != nil && first == nil {
-			first = err
+		if err := s.lock.Close(); err != nil {
+			return err
 		}
 		s.lock = nil
 	}
-	return first
+	return s.state.Close()
 }
 
 // heartbeatHarness publishes only the process the current daemon actually owns.

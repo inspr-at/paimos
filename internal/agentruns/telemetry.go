@@ -11,6 +11,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
 )
@@ -113,6 +114,11 @@ func (m *module) telemetry(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 	if err = claimPermission(ctx, tx, p, v); err != nil {
 		return nil, err
 	}
+	if v.AccountID != nil {
+		if err = agentpairing.AccountFence(ctx, tx, *v.AccountID, true); err != nil {
+			return nil, err
+		}
+	}
 	var owner, accountDaemon string
 	var accountGeneration *string
 	// Serialize against account probes and settlement. A generation change must
@@ -190,6 +196,11 @@ func (m *module) telemetry(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 	}
 	if m.usage != nil {
 		if err = m.usage(ctx, tx, p, v, t); err != nil {
+			return nil, err
+		}
+	}
+	if terminal(v.Status) && v.AccountID != nil {
+		if err = agentpairing.FinishDrain(ctx, tx, *v.AccountID); err != nil {
 			return nil, err
 		}
 	}
