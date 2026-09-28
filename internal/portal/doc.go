@@ -6,6 +6,8 @@
 // visitors receive no principal and no project visibility. The public handler
 // is a narrow service read: it returns a fixed column list for published
 // portal nodes only. Votes keep a ballot hash, never a name, address or
-// account. The tenant setting defaults off, and a closed portal answers the
-// same 404 as an unknown address.
+// account. A wish intake stores title and summary on a pending node and
+// nothing else; pending wishes stay out of the public catalog. The tenant
+// setting defaults off, and a closed portal answers the same 404 as an
+// unknown address.
 package portal

@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -81,14 +82,17 @@ func TestOnlyPublicQuoteCapabilityPathsBypassAuthentication(t *testing.T) {
 		{http.MethodGet, "/api/public/quotes/tenant/token/pdf"},
 		{http.MethodGet, "/api/public/portal/harbour"},
 		{http.MethodHead, "/api/public/portal/harbour"},
+		{http.MethodPost, "/api/public/portal/harbour/wishes"},
 		{http.MethodPost, "/api/public/portal/harbour/wishes/PWS-1/votes"},
 	} {
 		rec := httptest.NewRecorder()
 		req := httptest.NewRequest(route.method, route.path, nil)
-		if route.method == http.MethodHead || route.method == http.MethodGet && route.path == "/api/public/portal/harbour" {
+		switch {
+		case route.method == http.MethodHead || route.method == http.MethodGet && route.path == "/api/public/portal/harbour":
 			req.Pattern = portalCatalogPattern
-		}
-		if route.method == http.MethodPost {
+		case route.method == http.MethodPost && strings.HasSuffix(route.path, "/wishes"):
+			req.Pattern = portalWishPattern
+		case route.method == http.MethodPost:
 			req.Pattern = portalVotePattern
 		}
 		handler.ServeHTTP(rec, req)
@@ -111,6 +115,11 @@ func TestOnlyPublicQuoteCapabilityPathsBypassAuthentication(t *testing.T) {
 		{http.MethodGet, "/api/me"},
 		{http.MethodGet, "/api/events"},
 		{http.MethodGet, "/api/plugins"},
+		{http.MethodGet, "/api/public/portal/harbour/wishes"},
+		{http.MethodHead, "/api/public/portal/harbour/wishes"},
+		{http.MethodPut, "/api/public/portal/harbour/wishes"},
+		{http.MethodPost, "/api/public/portal/harbour/wishes/"},
+		{http.MethodPost, "/api/public/portal/harbour/wishes/PWS-1"},
 		{http.MethodPost, "/api/public/portal/harbour"},
 		{http.MethodPut, "/api/public/portal/harbour"},
 		{http.MethodPatch, "/api/public/portal/harbour"},

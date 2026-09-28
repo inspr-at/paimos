@@ -289,6 +289,7 @@ var RoutePermissions = map[string]string{
 	"POST /api/projects/{projectId}/releases/{releaseId}/membership":                            "releases.write",
 	"POST /api/projects/{projectId}/requirements":                                               "requirements.write",
 	"POST /api/projects/{projectId}/requirements/agree":                                         "requirements.agree",
+	"POST /api/public/portal/{tenantSlug}/wishes":                                               "public",
 	"POST /api/public/portal/{tenantSlug}/wishes/{wishKey}/votes":                               "public",
 	"POST /api/public/quotes/{publicTenant}/{token}/accept":                                     "public",
 	"POST /api/quote-profiles":                                                                  "quotes.write",
