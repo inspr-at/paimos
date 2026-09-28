@@ -4,13 +4,14 @@
 import { api } from './api.ts'
 import { sessionGone } from './authz.ts'
 
-export type SectionId = 'personal' | 'workspace' | 'access' | 'business' | 'projects'
+export type SectionId = 'personal' | 'agent-rules' | 'workspace' | 'access' | 'business' | 'projects'
 // permission: the section shows to whoever holds it (can()), instead of by role.
 // permission: one, or any of several (Access opens for See members or, alone, the access log).
-export interface SettingsSection { id: SectionId; label: string; summary: string; admin: boolean; permission?: string | string[] }
+export interface SettingsSection { id: SectionId; label: string; summary: string; admin: boolean; permission?: string | string[]; deniedTitle?: string; denied?: string }
 export const anyOf = (permission: string | string[], allowed: (permission: string) => boolean) => (Array.isArray(permission) ? permission : [permission]).some(allowed)
 export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
   { id: 'personal', label: 'Personal', summary: 'Theme, greeting and keys', admin: false },
+  { id: 'agent-rules', label: 'Agent rules', summary: 'Layers and publish', admin: false, permission: 'rules.read', deniedTitle: 'Agent rules need permission to read them', denied: 'Reading agent rules needs the rules read permission. Project membership alone does not open this page.' },
   { id: 'workspace', label: 'Workspace', summary: 'Name and your role', admin: true },
   { id: 'access', label: 'Access', summary: 'People, roles and agents', admin: true, permission: ['members.read', 'audit.read'] },
   { id: 'business', label: 'Business', summary: 'Parts and quote settings', admin: true },
