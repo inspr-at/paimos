@@ -11,8 +11,8 @@
         "codex",
         "cursor"
       ],
-      "sha256": "b98093decd2daf70c4f0c2a80a1f78d37e049454ed478349a3c590ddc06fa18d",
-      "byte_size": 2693
+      "sha256": "2ac84134c805e42df6cfc9a2f40a2f040286a273f4f6d2f5b8c0404de3e53f4c",
+      "byte_size": 3094
     },
     {
       "candidate": "scripts/rules-bootstrap/claude.txt",
@@ -20,8 +20,8 @@
       "harnesses": [
         "claude-code"
       ],
-      "sha256": "2de05fcde79bafc836f875205d2fa50c3e3b2e595b0b548612f342a6c9e4c2c9",
-      "byte_size": 2728
+      "sha256": "28a032fdf2a2f5379283d99db84908bfb8ecca8a1e232c2ed91db0e5c06dd8c4",
+      "byte_size": 3129
     }
   ]
 }

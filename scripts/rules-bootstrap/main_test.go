@@ -73,12 +73,15 @@ func newFixture(t *testing.T) *fixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	b := binding{Schema: "aeon.rules.bootstrap.v1", Workspace: root, Instance: "fixture", InstanceURL: "https://fixture.invalid", ConfigPath: filepath.Join(root, "client-reference.txt"), Session: testSession, Agent: "fixture-worker", Context: c, Request: testRequest, Floor: filepath.Join(dir, "floor.txt"), FloorSHA: digest([]byte(m.Floor)), Cache: filepath.Join(dir, "cache.json"), Output: filepath.Join(dir, "received.txt"), State: filepath.Join(dir, "state.json"), LeaseFile: filepath.Join(dir, "lease.txt")}
+	b := binding{Schema: "aeon.rules.bootstrap.v1", Workspace: root, Instance: "fixture", InstanceURL: "https://fixture.invalid", ConfigPath: filepath.Join(root, "client-reference.txt"), CLIPath: filepath.Join(root, "published-aeon"), Session: testSession, Agent: "fixture-worker", Context: c, Request: testRequest, Floor: filepath.Join(dir, "floor.txt"), FloorSHA: digest([]byte(m.Floor)), Cache: filepath.Join(dir, "cache.json"), Output: filepath.Join(dir, "received.txt"), State: filepath.Join(dir, "state.json"), LeaseFile: filepath.Join(dir, "lease.txt")}
 	f := &fixture{t: t, root: root, b: b, o: options{path: filepath.Join(dir, "binding.json"), session: testSession, harness: "codex"}, floor: []byte(m.Floor), bundle: m}
 	write(t, b.Floor, f.floor)
 	// Invalid credential contents intentionally: floor never opens/parses them.
 	write(t, b.ConfigPath, []byte("not a configuration; synthetic unread reference"))
 	write(t, b.LeaseFile, []byte("not a credential; synthetic unread reference"))
+	if err := os.WriteFile(b.CLIPath, []byte("synthetic executable; never run"), 0700); err != nil {
+		t.Fatal(err)
+	}
 	f.bind()
 	return f
 }
@@ -204,6 +207,11 @@ func TestBindingRejectsMalformedAndMismatchedInputs(t *testing.T) {
 		"revision":            func(f *fixture) { f.b.Revision = -1; f.bind() },
 		"duplicate-artifacts": func(f *fixture) { f.b.Cache = f.b.State; f.bind() },
 		"credential-alias":    func(f *fixture) { f.b.ConfigPath = f.o.path; f.bind() },
+		"missing-cli":         func(f *fixture) { f.b.CLIPath = ""; f.bind() },
+		"relative-cli":        func(f *fixture) { f.b.CLIPath = "published-aeon"; f.bind() },
+		"unclean-cli":         func(f *fixture) { f.b.CLIPath = f.root + "/./published-aeon"; f.bind() },
+		"shell-fragment-cli":  func(f *fixture) { f.b.CLIPath += ";true"; f.bind() },
+		"missing-file-cli":    func(f *fixture) { f.b.CLIPath += "-missing"; f.bind() },
 		"traversal":           func(f *fixture) { f.b.Floor = filepath.Dir(f.b.Floor) + "/../" + testSession + "/floor.txt"; f.bind() },
 		"outside-runtime":     func(f *fixture) { f.b.LeaseFile = f.b.ConfigPath; f.bind() },
 	}
@@ -219,7 +227,7 @@ func TestBindingRejectsMalformedAndMismatchedInputs(t *testing.T) {
 }
 
 func TestUnsafeFiles(t *testing.T) {
-	for _, kind := range []string{"floor-symlink", "floor-hardlink", "binding-hardlink", "lease-symlink", "fifo", "directory", "file-mode", "special-mode", "directory-mode", "workspace-mode", "ancestor-symlink", "floor-bound", "cache-bound", "state-bound", "output-bound", "lease-bound", "owner"} {
+	for _, kind := range []string{"floor-symlink", "floor-hardlink", "binding-hardlink", "lease-symlink", "cli-symlink", "cli-not-executable", "cli-world-writable", "cli-directory", "fifo", "directory", "file-mode", "special-mode", "directory-mode", "workspace-mode", "ancestor-symlink", "floor-bound", "cache-bound", "state-bound", "output-bound", "lease-bound", "owner"} {
 		t.Run(kind, func(t *testing.T) {
 			f := newFixture(t)
 			must := func(err error) {
@@ -229,6 +237,16 @@ func TestUnsafeFiles(t *testing.T) {
 				}
 			}
 			switch kind {
+			case "cli-symlink":
+				must(os.Rename(f.b.CLIPath, f.b.CLIPath+".saved"))
+				must(os.Symlink(f.b.CLIPath+".saved", f.b.CLIPath))
+			case "cli-not-executable":
+				must(os.Chmod(f.b.CLIPath, 0600))
+			case "cli-world-writable":
+				must(os.Chmod(f.b.CLIPath, 0702))
+			case "cli-directory":
+				must(os.Rename(f.b.CLIPath, f.b.CLIPath+".saved"))
+				must(os.Mkdir(f.b.CLIPath, 0700))
 			case "floor-symlink", "floor-hardlink", "binding-hardlink", "lease-symlink", "fifo", "directory":
 				p := f.b.Floor
 				if kind == "binding-hardlink" {
@@ -288,8 +306,8 @@ func TestReceiveArgvAndExactBytes(t *testing.T) {
 	t.Chdir(f.root)
 	var out, status bytes.Buffer
 	err := execute(f.args("receive"), &out, &status, func(cmd *exec.Cmd) error {
-		want := []string{"paimos", "--config", f.b.ConfigPath, "--instance", "fixture", "--json", "session", "start", "--rules-receive", "--project", f.b.Context.ProjectID, "--agent", f.b.Agent, "--session", testSession, "--worker-lease-file", f.b.LeaseFile, "--rules-request-id", testRequest, "--rules-expected-revision", "0", "--rules-state", f.b.State, "--rules-out", f.b.Output, "--rules-cache", f.b.Cache, "--rules-floor", f.b.Floor, "--rules-floor-sha256", f.b.FloorSHA, "--rules-tenant", f.b.Context.TenantID, "--rules-person", f.b.Context.PersonID, "--rules-agent", f.b.Context.AgentID, "--rules-role", "builder", "--rules-harness", "codex", "--rules-task", otherID}
-		if !reflect.DeepEqual(cmd.Args, want) || cmd.Dir != f.root || cmd.Env == nil || len(cmd.Env) != 0 || cmd.Stdin != nil {
+		want := []string{f.b.CLIPath, "--config", f.b.ConfigPath, "--instance", "fixture", "--json", "session", "start", "--rules-receive", "--project", f.b.Context.ProjectID, "--agent", f.b.Agent, "--session", testSession, "--worker-lease-file", f.b.LeaseFile, "--rules-request-id", testRequest, "--rules-expected-revision", "0", "--rules-state", f.b.State, "--rules-out", f.b.Output, "--rules-cache", f.b.Cache, "--rules-floor", f.b.Floor, "--rules-floor-sha256", f.b.FloorSHA, "--rules-tenant", f.b.Context.TenantID, "--rules-person", f.b.Context.PersonID, "--rules-agent", f.b.Context.AgentID, "--rules-role", "builder", "--rules-harness", "codex", "--rules-task", otherID}
+		if !reflect.DeepEqual(cmd.Args, want) || cmd.Path != f.b.CLIPath || cmd.Dir != f.root || cmd.Env == nil || len(cmd.Env) != 0 || cmd.Stdin != nil {
 			t.Fatal("command did not bind explicit argv/environment/workspace")
 		}
 		s := f.state("online")

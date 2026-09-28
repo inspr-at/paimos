@@ -41,17 +41,20 @@ var uuidRE = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4
 var shaRE = regexp.MustCompile(`^[0-9a-f]{64}$`)
 var nameRE = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,95}$`)
 var instanceRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$`)
+var cliPathRE = regexp.MustCompile(`^/[A-Za-z0-9._/-]+$`)
 
 // The coordinator delivers this privately for one actual generation, after a
 // separate approval of the FULL floor digest. Its independently supplied hash
 // authenticates all selectors; no field is inferred from home/current slots.
 // ConfigPath and LeaseFile are references only: this helper never opens them.
+// CLIPath names the coordinator-selected, independently validated published CLI.
 type binding struct {
 	Schema      string        `json:"schema"`
 	Workspace   string        `json:"workspace"`
 	Instance    string        `json:"instance"`
 	InstanceURL string        `json:"instance_url"`
 	ConfigPath  string        `json:"config_path"`
+	CLIPath     string        `json:"cli_path"`
 	Session     string        `json:"session_id"`
 	Agent       string        `json:"agent_name"`
 	Context     rules.Context `json:"context"`
@@ -226,6 +229,21 @@ func privateDir(path string) error {
 	return nil
 }
 
+// Validate metadata only. The coordinator's published-binary validation is
+// independent of this helper; a path check does not authenticate CLI bytes.
+func executable(path string) error {
+	if !absolute(path) || !cliPathRE.MatchString(path) || physical(filepath.Dir(path)) != nil {
+		return rejected
+	}
+	var st unix.Stat_t
+	if unix.Lstat(path, &st) != nil || st.Mode&unix.S_IFMT != unix.S_IFREG ||
+		(st.Uid != 0 && st.Uid != uint32(os.Geteuid())) || st.Mode&0022 != 0 ||
+		st.Mode&06000 != 0 || unix.Access(path, unix.X_OK) != nil {
+		return rejected
+	}
+	return nil
+}
+
 func workspace() (string, error) {
 	wd, err := os.Getwd()
 	if err != nil || physical(wd) != nil {
@@ -266,6 +284,9 @@ func loadBinding(root string, o options) (binding, []byte, error) {
 	// The explicit config is opened only by paimos, with no inherited instance
 	// environment. It must be a distinct private reference, never a rules input.
 	if b.ConfigPath == o.path || !absolute(b.ConfigPath) || privateFile(b.ConfigPath, 1<<20, false) != nil {
+		return b, nil, rejected
+	}
+	if executable(b.CLIPath) != nil {
 		return b, nil, rejected
 	}
 	seen := map[string]bool{o.path: true, b.ConfigPath: true}
@@ -405,7 +426,7 @@ func receiveCommand(ctx context.Context, b binding, retry bool) *exec.Cmd {
 	if retry {
 		args = append(args, "--rules-retry")
 	}
-	cmd := exec.CommandContext(ctx, "paimos", args...)
+	cmd := exec.CommandContext(ctx, b.CLIPath, args...)
 	cmd.Dir = b.Workspace
 	cmd.Env = []string{} // In particular, AEON/PAIMOS URL/key overrides cannot win.
 	cmd.WaitDelay = time.Second

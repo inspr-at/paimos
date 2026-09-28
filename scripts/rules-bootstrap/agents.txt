@@ -10,6 +10,11 @@ Before receive or material work, obtain the coordinator's private first brief
 for this actual generation: binding.json path, independently supplied binding
 SHA256, expected public session UUID, and codex or cursor harness. Never infer
 these from environment, configuration, current slots, or a previous generation.
+The private binding must contain the coordinator-selected absolute cli_path for
+an independently validated published Aeon CLI that supports rules-receive.
+The helper checks executable path metadata; that check does not authenticate
+the binary. The binding digest anchors the selection, and the coordinator's
+published-binary validation is separate. No CLI is resolved through PATH.
 The coordinator must separately approve the exact FULL company floor hash
 before creating the binding. Public files must never contain private rules,
 selectors, source paths, floor hashes, bindings, credentials or runtime output.
@@ -31,9 +36,9 @@ the checkpoint; do not overwrite, invent a new request, or retry silently.
 Only an explicitly authorized identical attempt adds --retry to receive.
 
 Private runtime belongs only below ignored tmp/aeon-rules/UUID with mode 700
-directories and mode 600 distinct files. Only paimos opens the referenced
+directories and mode 600 distinct files. Only the selected CLI opens the referenced
 configuration and worker lease. The helper never opens either credential
-source. The CLI must support session start --rules-receive; it must already
+source. The selected CLI must support session start --rules-receive; it must already
 have a registered generation and a correctly configured named instance.
 
 Receipt complete means bytes received, not publication, provenance, load or
