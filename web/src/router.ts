@@ -89,7 +89,7 @@ export const router = createRouter({
     // Settings: Personal for everyone; Workspace, Business and Projects for admins.
     { path: '/settings', redirect: '/settings/personal' },
     { path: '/settings/business/profiles/:profileId?', component: () => import('./views/settings/DocumentProfilesView.vue'), props: true, meta: { title: 'Document profiles', fill: true } },
-    { path: '/settings/:section(personal|workspace|business|projects)', component: () => import('./views/SettingsView.vue'), meta: { title: 'Settings' } },
+    { path: '/settings/:section(personal|agent-rules|workspace|business|projects)', component: () => import('./views/SettingsView.vue'), meta: { title: 'Settings' } },
     // Access: /settings/access/<tab>/<id> (a person, a role, a project).
     { path: '/settings/:section(access)/:tab(people|invites|roles|projects|agents|audit)?/:id?', component: () => import('./views/SettingsView.vue'), meta: { title: 'Access', keepsFocus: true } },
     { path: '/signin', component: SignInView, meta: { title: 'Sign in', bare: true } },
