@@ -4143,6 +4143,55 @@ paths:
       responses:
         '200': {description: A4 PDF, content: {application/pdf: {schema: {type: string, format: binary}}}}
         '503': {$ref: '#/components/responses/Error'}
+  /portal/settings:
+    get:
+      operationId: readPortalSettings
+      summary: Read whether this tenant's public product portal is enabled
+      description: settings.manage. A missing row is off. Enabling does not publish nodes by itself.
+      security: [{session: []}]
+      responses:
+        '200': {description: Portal switch, content: {application/json: {schema: {$ref: '#/components/schemas/PortalSettings'}}}}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+    patch:
+      operationId: updatePortalSettings
+      summary: Turn this tenant's public product portal on or off
+      description: settings.manage. The portal stays off until this is true. The response is the stored switch.
+      security: [{session: []}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/PortalSettingsWrite'}}}}
+      responses:
+        '200': {description: Stored switch, content: {application/json: {schema: {$ref: '#/components/schemas/PortalSettings'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+  /public/portal/{tenantSlug}:
+    get:
+      operationId: readPublicPortal
+      summary: Read one tenant's published product catalog and wishes
+      description: Anonymous. A disabled portal and an unknown tenant both answer 404. The document is a whitelist of public fields; internal notes, ticket keys and voter identity are omitted. At most one published product is returned.
+      security: []
+      parameters: [{name: tenantSlug, in: path, required: true, schema: {type: string, pattern: '^[a-z][a-z0-9-]{0,62}$'}}]
+      responses:
+        '200': {description: Published catalog, headers: {Cache-Control: {schema: {type: string}}}, content: {application/json: {schema: {$ref: '#/components/schemas/PortalPublic'}}}}
+        '404': {$ref: '#/components/responses/Error'}
+        '429': {$ref: '#/components/responses/Error'}
+  /public/portal/{tenantSlug}/wishes/{wishKey}/votes:
+    post:
+      operationId: votePublicPortalWish
+      summary: Cast one anonymous vote on a published wish
+      description: No account and no identity fields. An empty JSON object is the whole body. The same HttpOnly ballot votes once per wish; further calls return the current count. Ten votes per address per minute, reusing the shared public limiter. A disabled portal, unknown tenant or unpublished wish is 404.
+      security: []
+      parameters:
+        - {name: tenantSlug, in: path, required: true, schema: {type: string, pattern: '^[a-z][a-z0-9-]{0,62}$'}}
+        - {name: wishKey, in: path, required: true, schema: {type: string, pattern: '^[A-Z][A-Z0-9]{1,9}-[1-9][0-9]*$'}}
+      requestBody: {required: false, content: {application/json: {schema: {type: object, additionalProperties: false}}}}
+      responses:
+        '201': {description: First vote from this ballot, content: {application/json: {schema: {$ref: '#/components/schemas/PortalVote'}}}}
+        '200': {description: This ballot already voted, content: {application/json: {schema: {$ref: '#/components/schemas/PortalVote'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '429': {$ref: '#/components/responses/Error'}
   /quotes/readiness:
     get:
       operationId: quoteConfirmationReadiness
@@ -6115,6 +6164,61 @@ components:
         content_sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
         accepted_at: {type: string, format: date-time}
         confirmation_state: {type: string, enum: [pending, rendering, ready, failed, uncertain]}
+    PortalSettings:
+      type: object
+      additionalProperties: false
+      required: [enabled]
+      properties:
+        enabled: {type: boolean}
+    PortalSettingsWrite:
+      type: object
+      additionalProperties: false
+      required: [enabled]
+      properties:
+        enabled: {type: boolean}
+    PortalProduct:
+      type: object
+      additionalProperties: false
+      required: [key, title, summary]
+      properties:
+        key: {type: string}
+        title: {type: string}
+        summary: {type: string}
+    PortalFeature:
+      type: object
+      additionalProperties: false
+      required: [key, title, summary, status]
+      properties:
+        key: {type: string}
+        title: {type: string}
+        summary: {type: string}
+        status: {type: string, enum: [idea, reviewed, planned, in_progress, live, declined]}
+        live_since: {type: string, description: Present only when status is live}
+        legal_basis: {type: string}
+        decline_reason: {type: string, description: Present only when status is declined}
+    PortalWish:
+      type: object
+      additionalProperties: false
+      required: [key, title, summary, votes]
+      properties:
+        key: {type: string}
+        title: {type: string}
+        summary: {type: string}
+        votes: {type: integer, minimum: 0}
+    PortalPublic:
+      type: object
+      additionalProperties: false
+      required: [product, catalog, wishes]
+      properties:
+        product: {oneOf: [{type: 'null'}, {$ref: '#/components/schemas/PortalProduct'}]}
+        catalog: {type: array, items: {$ref: '#/components/schemas/PortalFeature'}}
+        wishes: {type: array, items: {$ref: '#/components/schemas/PortalWish'}}
+    PortalVote:
+      type: object
+      additionalProperties: false
+      required: [votes]
+      properties:
+        votes: {type: integer, minimum: 0}
     QuoteConfirmationJob:
       type: object
       required: [quote_node_id, version, state, attempts, next_attempt_at, updated_at]

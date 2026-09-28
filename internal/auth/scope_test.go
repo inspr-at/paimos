@@ -245,7 +245,7 @@ func TestServicePrincipalsCannotReceiveAgentKeys(t *testing.T) {
 	reset(t)
 	tenantID := insertTenant(t, "service-audit", "Service audit")
 	m := newMod(t, Config{})
-	for _, role := range []string{"system", "importer", "operator", "embedding", "quote_public_service", "quote_confirmation_service"} {
+	for _, role := range []string{"system", "importer", "operator", "embedding", "quote_public_service", "quote_confirmation_service", "portal_public_service"} {
 		t.Run(role, func(t *testing.T) {
 			name := "service-" + role
 			err := testInTenant(t.Context(), appPool, tenantID, func(tx pgx.Tx) error {

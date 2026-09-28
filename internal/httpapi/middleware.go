@@ -172,7 +172,7 @@ func redactedLogPath(path string) string {
 		return path
 	}
 	switch strings.ToLower(parts[0]) {
-	case "q", "offers", "invite", "invites", "link", "links", "confirm", "confirmation", "download", "downloads":
+	case "q", "offers", "portal", "invite", "invites", "link", "links", "confirm", "confirmation", "download", "downloads":
 		return "/" + strings.ToLower(parts[0]) + "/{redacted}"
 	default:
 		return "/{redacted}"
