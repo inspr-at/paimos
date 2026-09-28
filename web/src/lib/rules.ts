@@ -455,7 +455,12 @@ export function rulesMessage(error: unknown): string {
   if (!(error instanceof RulesError)) return error instanceof Error ? error.message : 'The rules request failed.'
   if (error.code === 'revision_conflict') return 'This set was saved elsewhere. Your draft is still here; save again to replace that version.'
   if (error.code === 'version_conflict') return 'That version is already used. Confirm again to take a new one.'
-  if (error.code === 'rules_budget_exceeded') return `The merged file is ${error.actualBytes ?? 'over'} bytes. The limit is ${error.maxBytes ?? RULES_BUDGET}.`
+  if (error.code === 'rules_budget_exceeded') {
+    // Without a size the file belongs to someone else; the server's words say so.
+    if (error.actualBytes === undefined) return error.message || 'A session file for another person or agent would exceed the limit.'
+    return `The merged file is ${error.actualBytes} bytes. The limit is ${error.maxBytes ?? RULES_BUDGET}.`
+  }
+  if (error.code === 'busy') return 'The rules are busy right now. Nothing was changed; try again in a moment.'
   if (error.code === 'ambiguous_identity') return 'Two rules of the same rank share an identity, so the merge stops.'
   if (error.code === 'forbidden') return 'You do not have permission for that.'
   if (error.code === 'not_found') return 'That rules record is no longer there.'

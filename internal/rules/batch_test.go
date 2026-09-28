@@ -6,8 +6,10 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -356,27 +358,77 @@ func TestBatchPublishWaitsForAConcurrentDemotion(t *testing.T) {
 	}
 }
 
-// The byte budget covers every context a publication changes, including ones
-// the publishing person cannot see.
+// budgetWorld adds the helpers the budget tests share.
+func (w *batchWorld) floor(admin tenant.Principal) Layer {
+	company := w.layer(admin, Scope{Layer: "company"})
+	w.publish(admin, w.set(admin, company, "Safety", lockedRule("safety", "Keep the locked company floor.")), "260928090000.0.0")
+	return company
+}
+func (w *batchWorld) agentFor(owner tenant.Principal, name string) tenant.Principal {
+	w.t.Helper()
+	a := w.principal(tenant.Agent, name, "member")
+	if _, err := w.d.Admin.Exec(w.t.Context(), `INSERT INTO agent_keys(tenant_id,principal_id,name,prefix,hash,created_by_principal_id) VALUES($1,$2,'rules-fixture',$3,'fixture-not-a-credential',$4)`, w.tid, a.ID, "rules-fixture-"+name, owner.ID); err != nil {
+		w.t.Fatal(err)
+	}
+	return a
+}
+func (w *batchWorld) task() string {
+	w.t.Helper()
+	var id string
+	err := db.InTenant(dbtest.Seed(w.t.Context()), w.d.App, w.tid, func(tx pgx.Tx) error {
+		return tx.QueryRow(w.t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,parent_id) SELECT $1,id,'RBT-1','A task',$2 FROM node_kinds WHERE tenant_id=$1 AND slug='task' RETURNING id::text`, w.tid, w.project).Scan(&id)
+	})
+	if err != nil {
+		w.t.Fatal(err)
+	}
+	return id
+}
+func noContent(t *testing.T, label string, body []byte) {
+	t.Helper()
+	for _, secret := range []string{"Explain every step", "person-", "agent-", "task-"} {
+		if strings.Contains(string(body), secret) {
+			t.Fatalf("%s: the answer leaks rule content: %s", label, body)
+		}
+	}
+}
+
+// Refusals for a file the caller may read say how big it would be.
+func (w *batchWorld) refusedOwn(admin tenant.Principal, label string, s Set) {
+	w.t.Helper()
+	body := w.call(admin, "POST", "/api/rules/publish", batch("", item(s, "auto")), 422)
+	var e Error
+	if err := json.Unmarshal(body, &e); err != nil || e.Code != "rules_budget_exceeded" || e.ActualBytes <= MaxBytes || e.MaxBytes != MaxBytes {
+		w.t.Fatalf("%s: %s", label, body)
+	}
+	noContent(w.t, label, body)
+	if v := w.published(s.ID); v != "" {
+		w.t.Fatalf("%s: published anyway as %s", label, v)
+	}
+}
+
+// Refusals for another person's or agent's file say neither size nor whose.
+func (w *batchWorld) refusedHidden(p tenant.Principal, label string, s Set) {
+	w.t.Helper()
+	body := w.call(p, "POST", "/api/rules/publish", batch("", item(s, "auto")), 422)
+	var e map[string]any
+	if err := json.Unmarshal(body, &e); err != nil || e["code"] != "rules_budget_exceeded" || e["error"] != errHiddenBudget.Message {
+		w.t.Fatalf("%s: %s", label, body)
+	}
+	if _, sized := e["actual_bytes"]; sized || strings.ContainsAny(e["error"].(string), "0123456789") {
+		w.t.Fatalf("%s: the refusal reveals a size: %s", label, body)
+	}
+	noContent(w.t, label, body)
+	if v := w.published(s.ID); v != "" {
+		w.t.Fatalf("%s: published anyway as %s", label, v)
+	}
+}
+
+// The byte budget covers every file a publication changes, with every
+// existing contribution, including layers the publishing person cannot see.
 func TestBatchBudgetCoversEveryAffectedContext(t *testing.T) {
 	w := newBatchWorld(t, "rules-batch-budget")
 	admin := w.principal(tenant.Person, "owner", "admin")
-	company := w.layer(admin, Scope{Layer: "company"})
-	w.publish(admin, w.set(admin, company, "Safety", lockedRule("safety", "Keep the locked company floor.")), "260928090000.0.0")
-	refused := func(label string, s Set) {
-		t.Helper()
-		body := w.call(admin, "POST", "/api/rules/publish", batch("", item(s, "auto")), 422)
-		var e Error
-		if err := json.Unmarshal(body, &e); err != nil || e.Code != "rules_budget_exceeded" || e.ActualBytes <= MaxBytes {
-			t.Fatalf("%s: %s", label, body)
-		}
-		if strings.Contains(string(body), "Explain every step") || strings.Contains(string(body), "person-") || strings.Contains(string(body), "agent-") {
-			t.Fatalf("%s: the refusal leaks rule content: %s", label, body)
-		}
-		if v := w.published(s.ID); v != "" {
-			t.Fatalf("%s: published anyway as %s", label, v)
-		}
-	}
+	company := w.floor(admin)
 
 	// (a) Aeon's project rules switch the big role rules off, but a project
 	// without project rules would receive all of them.
@@ -387,36 +439,253 @@ func TestBatchBudgetCoversEveryAffectedContext(t *testing.T) {
 	}
 	w.publish(admin, w.set(admin, project, "Quiet", off...), "260928090001.0.0")
 	role := w.layer(admin, Scope{Layer: "agent", Role: "builder"})
-	loud := w.set(admin, role, "Loud", bulky("role", 28)...)
-	refused("project without project rules", loud)
+	w.refusedOwn(admin, "project without project rules", w.set(admin, role, "Loud", bulky("role", 28)...))
 
 	// (b) An existing named-agent contribution counts although its set is not
 	// in the batch: 7 KB of agent rules plus 6 KB of new company rules.
-	agent := w.principal(tenant.Agent, "worker", "member")
-	if _, err := w.d.Admin.Exec(t.Context(), `INSERT INTO agent_keys(tenant_id,principal_id,name,prefix,hash,created_by_principal_id) VALUES($1,$2,'rules-fixture','rules-fixture-batch','fixture-not-a-credential',$3)`, w.tid, agent.ID, admin.ID); err != nil {
+	worker := w.agentFor(admin, "worker")
+	named := w.layer(admin, Scope{Layer: "agent", OwnerID: admin.ID, AgentID: worker.ID})
+	w.publish(admin, w.set(admin, named, "Persona", bulky("agent", 15)...), "260928090002.0.0")
+	w.refusedOwn(admin, "existing named agent", w.set(admin, company, "Six", bulky("company", 13)...))
+
+	// (b, task) A task contribution counts in its own project: 8 KB of task
+	// rules plus 4.5 KB of company rules. Without the task the file fits.
+	taskAgent := w.agentFor(admin, "tasker")
+	taskID := w.task()
+	taskLayer := w.layer(admin, Scope{Layer: "agent", OwnerID: admin.ID, AgentID: taskAgent.ID, ProjectID: w.project, TaskID: taskID})
+	w.publish(admin, w.set(admin, taskLayer, "Task", bulky("task", 17)...), "260928090003.0.0")
+	w.refusedOwn(admin, "existing task", w.set(admin, company, "FourHalf", bulky("companyt", 10)...))
+}
+
+// Other owners' private contributions count, but their sizes never reach the
+// caller, and they never veto a publication that does not touch their files.
+func TestBatchBudgetKeepsOtherOwnersPrivate(t *testing.T) {
+	w := newBatchWorld(t, "rules-batch-private")
+	admin := w.principal(tenant.Person, "owner", "admin")
+	company := w.floor(admin)
+	colleague := w.principal(tenant.Person, "colleague", "admin")
+	private := w.layer(colleague, Scope{Layer: "person", OwnerID: colleague.ID})
+	w.publish(colleague, w.set(colleague, private, "Mine", bulky("person", 19)...), "260928090004.0.0")
+
+	// Success: the colleague's 9 KB file still fits next to a short company
+	// rule, and the answer (and the stored replay) reports only the caller's sizes.
+	short := w.set(admin, company, "Short", testRule("short", "A short rule."))
+	req := batch("", item(short, "auto"))
+	first := w.call(admin, "POST", "/api/rules/publish", req, 200)
+	var ok BatchResult
+	if err := json.Unmarshal(first, &ok); err != nil || ok.MaxBytes <= 0 || ok.MaxBytes > 1000 {
+		t.Fatalf("max_bytes reflects someone else's file: %s", first)
+	}
+	if replay := w.call(admin, "POST", "/api/rules/publish", req, 200); !bytes.Equal(first, replay) {
+		t.Fatalf("stored answer differs: %s", replay)
+	}
+	var stored []byte
+	if err := w.d.Admin.QueryRow(t.Context(), `SELECT result::text FROM rule_publish_batches WHERE tenant_id=$1 AND batch_id=$2`, w.tid, ok.BatchID).Scan(&stored); err != nil || !strings.Contains(string(stored), fmt.Sprintf(`"max_bytes": %d`, ok.MaxBytes)) {
+		t.Fatalf("stored max_bytes: %s %v", stored, err)
+	}
+
+	// Failure: 3.5 KB more company rules push the colleague's file over; the
+	// caller learns only that some other file would not fit.
+	w.refusedHidden(admin, "another owner's private rules", w.set(admin, company, "ThreeHalf", bulky("companyp", 8)...))
+
+	// Another owner's named agent counts the same way.
+	helper := w.agentFor(colleague, "helper")
+	theirs := w.layer(colleague, Scope{Layer: "agent", OwnerID: colleague.ID, AgentID: helper.ID})
+	w.publish(colleague, w.set(colleague, theirs, "Helper", bulky("agent", 2)...), "260928090005.0.0")
+	w.refusedHidden(admin, "another owner's agent", w.set(admin, company, "Three", bulky("companya", 6)...))
+
+	// Unrelated: the colleague's own file is oversized already (single publish
+	// does not check the budget), yet the admin's person rules do not touch it.
+	w.publish(colleague, w.set(colleague, private, "More", bulky("more", 8)...), "260928090006.0.0")
+	own := w.layer(admin, Scope{Layer: "person", OwnerID: admin.ID})
+	w.call(admin, "POST", "/api/rules/publish", batch("", item(w.set(admin, own, "Pacing", testRule("pacing", "One step at a time.")), "auto")), 200)
+	// A company rule touches everyone's file, so it is refused, generically.
+	w.refusedHidden(admin, "company rule over an oversized private file", w.set(admin, company, "Tiny", testRule("tiny", "Tiny.")))
+}
+
+func TestBatchBudgetCheckIsBounded(t *testing.T) {
+	w := newBatchWorld(t, "rules-batch-bounded")
+	admin := w.principal(tenant.Person, "owner", "admin")
+	company := w.floor(admin)
+	saved := maxBudgetContexts
+	maxBudgetContexts = 5
+	t.Cleanup(func() { maxBudgetContexts = saved })
+	s := w.set(admin, company, "Short", testRule("short", "A short rule."))
+	body := w.call(admin, "POST", "/api/rules/publish", batch("", item(s, "auto")), 422)
+	if !strings.Contains(string(body), `"budget_check_too_large"`) || w.published(s.ID) != "" {
+		t.Fatalf("an oversized check was not refused cleanly: %s", body)
+	}
+}
+
+// The owner switch of the budget check is undone inside the same transaction:
+// right after it, the caller sees exactly what they saw before.
+func TestBudgetCheckRestoresVisibilityInTheTransaction(t *testing.T) {
+	w := newBatchWorld(t, "rules-batch-restore")
+	admin := w.principal(tenant.Person, "owner", "admin")
+	w.floor(admin)
+	colleague := w.principal(tenant.Person, "colleague", "admin")
+	private := w.layer(colleague, Scope{Layer: "person", OwnerID: colleague.ID})
+	hidden := w.set(colleague, private, "Mine", testRule("mine", "Private."))
+	w.publish(colleague, hidden, "260928090007.0.0")
+	err := db.InTenant(tenant.WithPrincipal(t.Context(), admin), w.d.App, w.tid, func(tx pgx.Tx) error {
+		projects := "{" + w.project + "}"
+		if _, err := tx.Exec(t.Context(), `SELECT set_config('aeon.rules_access','on',true),set_config('aeon.rules_owner',$1,true),set_config('aeon.rules_projects',$2,true),set_config('aeon.visible_projects','*',true)`, admin.ID, projects); err != nil {
+			return err
+		}
+		company, err := allSets(t.Context(), tx, "")
+		if err != nil {
+			return err
+		}
+		if _, err = budgetCheck(t.Context(), tx, w.tid, admin.ID, company, time.Now()); err != nil {
+			return err
+		}
+		var owner, seenProjects string
+		if err = tx.QueryRow(t.Context(), `SELECT current_setting('aeon.rules_owner'),current_setting('aeon.rules_projects')`).Scan(&owner, &seenProjects); err != nil {
+			return err
+		}
+		if owner != admin.ID || seenProjects != projects {
+			t.Fatalf("settings not restored: owner %q projects %q", owner, seenProjects)
+		}
+		var n int
+		if err = tx.QueryRow(t.Context(), `SELECT count(*) FROM nodes WHERE id=$1`, hidden.ID).Scan(&n); err != nil {
+			return err
+		}
+		if n != 0 {
+			t.Fatal("the colleague's private set is still visible after the check")
+		}
+		return nil
+	})
+	if err != nil {
 		t.Fatal(err)
 	}
-	named := w.layer(admin, Scope{Layer: "agent", OwnerID: admin.ID, AgentID: agent.ID})
-	w.publish(admin, w.set(admin, named, "Persona", bulky("agent", 15)...), "260928090002.0.0")
-	sixKB := w.set(admin, company, "Six", bulky("company", 13)...)
-	refused("existing named agent", sixKB)
+}
 
-	// (c) Another owner's private person rules count too, although the
-	// publishing person cannot read them.
-	other := w.principal(tenant.Person, "colleague", "admin")
-	private := w.layer(other, Scope{Layer: "person", OwnerID: other.ID})
-	w.publish(other, w.set(other, private, "Mine", bulky("person", 17)...), "260928090003.0.0")
-	fourKB := w.set(admin, company, "Four", bulky("company4", 9)...)
-	// Without the colleague's 8 KB the four new company KB would fit next to
-	// the admin's own contexts (floor + 4 KB), but the colleague's file would not.
-	refused("another owner's private rules", fourKB)
-	// The admin's own visibility is restored after the check.
-	if code, body := w.send(admin, "GET", "/api/rules/sets/"+fourKB.ID, nil); code != 200 {
-		t.Fatalf("visibility not restored: %d %s", code, body)
+// A stalled upload holds no lock: the body is read before the transaction, so
+// an access change can take the tenant row meanwhile.
+func TestRulesWriteReadsTheBodyBeforeLocking(t *testing.T) {
+	w := newBatchWorld(t, "rules-batch-body")
+	admin := w.principal(tenant.Person, "owner", "admin")
+	company := w.layer(admin, Scope{Layer: "company"})
+	s := w.set(admin, company, "Safety", lockedRule("safety", "Keep the locked company floor."))
+	reader, writer := io.Pipe()
+	req := httptest.NewRequest("PUT", "/api/rules/sets/"+s.ID+"/draft", reader)
+	req = req.WithContext(tenant.WithPrincipal(req.Context(), admin))
+	rec := httptest.NewRecorder()
+	done := make(chan struct{})
+	go func() { w.mux.ServeHTTP(rec, req); close(done) }()
+	if _, err := writer.Write([]byte(`{"expected_revision":`)); err != nil {
+		t.Fatal(err)
 	}
-	small := w.set(admin, company, "Small", testRule("small", "A short rule."))
-	var ok BatchResult
-	if err := json.Unmarshal(w.call(admin, "POST", "/api/rules/publish", batch("", item(small, "auto")), 200), &ok); err != nil || ok.MaxBytes <= 0 || ok.MaxBytes > MaxBytes {
-		t.Fatalf("a small publication failed the budget: %+v %v", ok, err)
+	time.Sleep(200 * time.Millisecond)
+	access, err := w.d.Admin.Begin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = access.Exec(t.Context(), `SET LOCAL lock_timeout='1s'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = access.Exec(t.Context(), `SELECT id FROM tenants WHERE id=$1 FOR UPDATE`, w.tid); err != nil {
+		t.Fatal("an access change waited for a stalled rules upload:", err)
+	}
+	if err = access.Commit(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	rest := fmt.Sprintf(`%d,"name":"Safety","rules":%s}`, s.Revision, jsonBytes([]Rule{lockedRule("safety", "Keep the floor.")}))
+	if _, err = writer.Write([]byte(rest)); err != nil {
+		t.Fatal(err)
+	}
+	writer.Close()
+	<-done
+	if rec.Code != 200 {
+		t.Fatalf("draft after a slow upload: %d %s", rec.Code, rec.Body.String())
+	}
+	// Oversized bodies are refused before any transaction.
+	big := `{"expected_revision":1,"name":"` + strings.Repeat("a", int(maxBody)) + `"}`
+	if code, _ := w.send(admin, "PUT", "/api/rules/sets/"+s.ID+"/draft", json.RawMessage(big)); code != 413 {
+		t.Fatal("an oversized body was not refused:", code)
+	}
+}
+
+// A rules write that cannot get the tenant row in time fails with 503 and
+// changes nothing, instead of queueing indefinitely.
+func TestRulesWriteGivesUpOnALockItCannotGet(t *testing.T) {
+	w := newBatchWorld(t, "rules-batch-timeout")
+	admin := w.principal(tenant.Person, "owner", "admin")
+	company := w.layer(admin, Scope{Layer: "company"})
+	s := w.set(admin, company, "Safety", lockedRule("safety", "Keep the locked company floor."))
+	saved := lockTimeout
+	lockTimeout = "300ms"
+	t.Cleanup(func() { lockTimeout = saved })
+	access, err := w.d.Admin.Begin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer access.Rollback(t.Context())
+	if _, err = access.Exec(t.Context(), `SELECT id FROM tenants WHERE id=$1 FOR UPDATE`, w.tid); err != nil {
+		t.Fatal(err)
+	}
+	started := time.Now()
+	code, body := w.send(admin, "POST", "/api/rules/publish", batch("", item(s, "auto")))
+	if code != 503 || !strings.Contains(string(body), `"busy"`) || time.Since(started) > 5*time.Second {
+		t.Fatalf("publish behind a held access lock: %d %s after %s", code, body, time.Since(started))
+	}
+	if w.published(s.ID) != "" {
+		t.Fatal("a timed-out publication wrote")
+	}
+}
+
+// Knowledge creation holds the tenant's foreign-key KEY SHARE and then needs
+// the tenant advisory lock for its node. A rules publication holds that
+// advisory lock and takes the tenant row: with FOR UPDATE the two would
+// deadlock; with NO KEY UPDATE the publication proceeds and the insert follows.
+func TestRulesPublishDoesNotDeadlockWithAForeignKeyReference(t *testing.T) {
+	w := newBatchWorld(t, "rules-batch-keyshare")
+	admin := w.principal(tenant.Person, "owner", "admin")
+	company := w.layer(admin, Scope{Layer: "company"})
+	s := w.set(admin, company, "Safety", lockedRule("safety", "Keep the locked company floor."))
+	knowledge, err := w.d.Admin.Begin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer knowledge.Rollback(t.Context())
+	if _, err = knowledge.Exec(t.Context(), `SELECT id FROM tenants WHERE id=$1 FOR KEY SHARE`, w.tid); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan int, 1)
+	go func() {
+		code, _ := w.send(admin, "POST", "/api/rules/publish", batch("", item(s, "auto")))
+		done <- code
+	}()
+	select {
+	case code := <-done:
+		if code != 200 {
+			t.Fatal("publish next to a KEY SHARE holder:", code)
+		}
+	case <-time.After(4 * time.Second):
+		t.Fatal("publish waited for a foreign-key KEY SHARE holder")
+	}
+	// The knowledge transaction now takes the advisory lock its node insert needs.
+	if _, err = knowledge.Exec(t.Context(), `SET LOCAL lock_timeout='2s'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = knowledge.Exec(t.Context(), `SELECT pg_advisory_xact_lock(hashtextextended($1::text,0))`, w.tid); err != nil {
+		t.Fatal("the knowledge insert could not follow:", err)
+	}
+	if err = knowledge.Commit(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// The demotion guard relies on access changes locking the tenant row FOR
+// UPDATE, which conflicts with the NO KEY UPDATE taken by rules writes.
+func TestAccessChangesStillLockTheTenantForUpdate(t *testing.T) {
+	for _, file := range []string{"../authz/module.go", "../authz/project_members.go"} {
+		src, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(src), "FROM tenants WHERE id=$1::uuid FOR UPDATE") {
+			t.Fatalf("%s no longer locks the tenant row FOR UPDATE; revisit rules lockAccess", file)
+		}
 	}
 }

@@ -140,7 +140,7 @@ func (m *Module) publishBatch(r *http.Request, tx pgx.Tx, p tenant.Principal) (a
 		}
 		out.Versions[i] = snap
 	}
-	if out.MaxBytes, err = budgetCheck(ctx, tx, p.TenantID, now); err != nil {
+	if out.MaxBytes, err = budgetCheck(ctx, tx, p.TenantID, owner, sets, now); err != nil {
 		return nil, err
 	}
 	raw, err := json.Marshal(out)
@@ -204,19 +204,35 @@ func nextVersion(now time.Time, published string) string {
 	return format(last.Add(time.Second))
 }
 
-// budgetCheck renders, after the batch's writes, the session file of every
-// context the publication can change and fails with 422 when one exceeds the
-// budget. Contexts: every project with published project rules and a project
-// without any; every person with person or agent rules (other owners' private
-// layers included) and a person without any; each owner's named agents and
+// maxBudgetContexts bounds the session files one batch may render for its
+// budget check (projects × people and their agents × roles × harnesses that the
+// batch touches). A variable so tests can lower it.
+var maxBudgetContexts = 20000
+
+// Errors of the budget check. The one about another person's context carries
+// no size and no identity.
+var (
+	errHiddenBudget = &Error{Status: 422, Code: "rules_budget_exceeded", Message: "A session file for another person or agent would exceed the limit. Shorten always-on text or move it to details."}
+	errTooManyCtx   = &Error{Status: 422, Code: "budget_check_too_large", Message: "This publication touches too many session files to check at once. Publish fewer sets together."}
+)
+
+// budgetCheck renders, after the batch's writes, every session file that
+// includes one of the batch's sets, counting every existing contribution to
+// that file, and fails with 422 when one exceeds the budget. Files the batch
+// does not touch are neither rendered nor judged, so an oversized layer
+// elsewhere never vetoes an unrelated publication.
+//
+// Candidate files: every project with published project rules and a project
+// without any; every person with person or agent rules, other owners' private
+// layers included, and a person without any; each owner's named agents and
 // tasks; every role and harness.
 //
 // Other owners' layers are hidden from the caller by row-level security. To see
 // them, the owner setting is pointed at one owner at a time and restored before
-// returning. This window only reads: the texts stay in memory, never leave this
-// function, and only the largest byte count and pass or fail come back. The
-// transaction holds the tenant rules lock, so no write happens in between.
-func budgetCheck(ctx context.Context, tx pgx.Tx, tenantID string, now time.Time) (int, error) {
+// returning, in this same transaction. The window only reads; the texts stay in
+// memory and never leave this function. The caller learns sizes only for files
+// made entirely of layers they may read; for any other file only pass or fail.
+func budgetCheck(ctx context.Context, tx pgx.Tx, tenantID, caller string, batch []Set, now time.Time) (int, error) {
 	var savedOwner, savedProjects string
 	if err := tx.QueryRow(ctx, `SELECT coalesce(current_setting('aeon.rules_owner',true),''),coalesce(current_setting('aeon.rules_projects',true),'')`).Scan(&savedOwner, &savedProjects); err != nil {
 		return 0, err
@@ -225,63 +241,91 @@ func budgetCheck(ctx context.Context, tx pgx.Tx, tenantID string, now time.Time)
 		_, err := tx.Exec(ctx, `SELECT set_config('aeon.rules_owner',$1,true),set_config('aeon.rules_projects',$2,true)`, owner, projects)
 		return err
 	}
-	largest, err := func() (int, error) {
+	check := budget{tenant: tenantID, caller: caller, batch: batch, now: now, visible: map[string]bool{noProject: true}}
+	err := func() error {
 		if err := see("", "*"); err != nil {
-			return 0, err
+			return err
 		}
 		shared, err := publishedSnapshots(ctx, tx)
 		if err != nil {
-			return 0, err
+			return err
 		}
-		projects := []string{noProject}
+		check.shared = shared
+		check.projects = []string{noProject}
 		for _, s := range shared {
-			if s.Scope.Layer == "project" && !slices.Contains(projects, s.Scope.ProjectID) {
-				projects = append(projects, s.Scope.ProjectID)
+			if s.Scope.Layer == "project" && !slices.Contains(check.projects, s.Scope.ProjectID) {
+				check.projects = append(check.projects, s.Scope.ProjectID)
 			}
+		}
+		// Which of those projects the caller may read (their own rules setting).
+		rows, err := tx.Query(ctx, `SELECT p FROM unnest($2::text[]) p WHERE $1='*' OR p=ANY(CASE WHEN $1 IN ('','*') THEN '{}'::text[] ELSE $1::text[] END)`, savedProjects, check.projects)
+		if err != nil {
+			return err
+		}
+		visible, err := pgx.CollectRows(rows, pgx.RowTo[string])
+		if err != nil {
+			return err
+		}
+		for _, project := range visible {
+			check.visible[project] = true
+		}
+		if err = check.person(noPerson, nil); err != nil {
+			return err
 		}
 		people, err := activePeople(ctx, tx)
 		if err != nil {
-			return 0, err
-		}
-		largest, err := budgetFor(tenantID, noPerson, shared, nil, projects, now)
-		if err != nil {
-			return 0, err
+			return err
 		}
 		for _, person := range people {
 			if err := see(person, "*"); err != nil {
-				return 0, err
+				return err
 			}
-			visible, err := publishedSnapshots(ctx, tx)
+			owned, err := ownedSnapshots(ctx, tx, person)
 			if err != nil {
-				return 0, err
-			}
-			owned := []Snapshot{}
-			for _, s := range visible {
-				if s.Scope.OwnerID == person {
-					owned = append(owned, s)
-				}
+				return err
 			}
 			if len(owned) == 0 {
 				continue
 			}
-			size, err := budgetFor(tenantID, person, shared, owned, projects, now)
-			if err != nil {
-				return 0, err
+			if err = check.person(person, owned); err != nil {
+				return err
 			}
-			largest = max(largest, size)
 		}
-		return largest, nil
+		return nil
 	}()
 	if restore := see(savedOwner, savedProjects); restore != nil && err == nil {
 		err = restore
 	}
-	return largest, err
+	if err != nil {
+		return 0, err
+	}
+	if check.ownOver > 0 {
+		return 0, &Error{Status: 422, Code: "rules_budget_exceeded", Message: fmt.Sprintf("after this publication one of your session files would need %d UTF-8 bytes (limit %d); shorten always-on text or move it to details", check.ownOver, MaxBytes), ActualBytes: check.ownOver, MaxBytes: MaxBytes}
+	}
+	if check.hiddenOver {
+		return 0, errHiddenBudget
+	}
+	return check.ownMax, nil
 }
 
-// budgetFor checks one person's contexts: with no agent, and with each of the
-// person's named agents and tasks, across projects, roles and harnesses.
-func budgetFor(tenantID, person string, shared, owned []Snapshot, projects []string, now time.Time) (int, error) {
-	snapshots := append(slices.Clone(shared), owned...)
+type budget struct {
+	tenant, caller string
+	batch          []Set
+	now            time.Time
+	shared         []Snapshot
+	projects       []string
+	visible        map[string]bool
+	rendered       int
+	ownMax         int
+	ownOver        int
+	hiddenOver     bool
+}
+
+// person renders one person's files that the batch touches: with no agent and
+// with each of the person's named agents and tasks, across projects, roles and
+// harnesses.
+func (b *budget) person(person string, owned []Snapshot) error {
+	snapshots := append(slices.Clone(b.shared), owned...)
 	type agentCtx struct{ agent, task, project string }
 	agents := []agentCtx{{}}
 	for _, s := range owned {
@@ -293,30 +337,67 @@ func budgetFor(tenantID, person string, shared, owned []Snapshot, projects []str
 			agents = append(agents, a)
 		}
 	}
-	largest := 0
+	mine := person == noPerson || person == b.caller
 	for _, a := range agents {
-		checked := projects
+		checked := b.projects
 		if a.task != "" {
 			checked = []string{a.project}
 		}
 		for _, project := range checked {
+			own := mine && b.visible[project]
 			for _, role := range Roles {
 				for _, harness := range Harnesses {
-					c := Context{TenantID: tenantID, ProjectID: project, PersonID: person, AgentID: a.agent, Role: role, Harness: harness, TaskID: a.task}
-					m, err := Merge(c, snapshots, now)
-					var e *Error
-					if errors.As(err, &e) && e.Code == "rules_budget_exceeded" {
-						// Name no context: it may be another person's private file.
-						return 0, &Error{Status: 422, Code: e.Code, Message: fmt.Sprintf("after this publication a session file would need %d UTF-8 bytes (limit %d); shorten always-on text or move it to details", m.ByteSize, MaxBytes), ActualBytes: m.ByteSize, MaxBytes: MaxBytes}
+					c := Context{TenantID: b.tenant, ProjectID: project, PersonID: person, AgentID: a.agent, Role: role, Harness: harness, TaskID: a.task}
+					if !slices.ContainsFunc(b.batch, func(s Set) bool { return s.Scope.matches(c) }) {
+						continue
 					}
+					if b.rendered++; b.rendered > maxBudgetContexts {
+						return errTooManyCtx
+					}
+					m, err := Merge(c, snapshots, b.now)
+					var e *Error
+					over := errors.As(err, &e) && e.Code == "rules_budget_exceeded"
 					// A missing floor or an ambiguity does not concern the budget;
 					// session start reports those on its own.
-					largest = max(largest, m.ByteSize)
+					switch {
+					case over && own:
+						b.ownOver = max(b.ownOver, m.ByteSize)
+					case over:
+						b.hiddenOver = true
+					case own:
+						b.ownMax = max(b.ownMax, m.ByteSize)
+					}
 				}
 			}
 		}
 	}
-	return largest, nil
+	return nil
+}
+
+// ownedSnapshots loads the live snapshots of the sets one person owns (their
+// person layer, named agents and tasks), as visible under the current setting.
+func ownedSnapshots(ctx context.Context, tx pgx.Tx, person string) ([]Snapshot, error) {
+	rows, err := tx.Query(ctx, `SELECT id::text,fields->>'published_version' FROM nodes WHERE rule_resource='set' AND deleted_at IS NULL AND fields->'scope'->>'owner_id'=$1 AND coalesce(fields->>'published_version','')<>'' ORDER BY id`, person)
+	if err != nil {
+		return nil, err
+	}
+	type ref struct{ id, version string }
+	refs, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (ref, error) {
+		var r ref
+		return r, row.Scan(&r.id, &r.version)
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := []Snapshot{}
+	for _, r := range refs {
+		snap, err := loadVersion(ctx, tx, r.id, r.version)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, snap)
+	}
+	return out, nil
 }
 
 // publishedSnapshots loads the live snapshot of every set visible now.

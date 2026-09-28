@@ -3,9 +3,11 @@
 package rules
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"time"
 
@@ -61,9 +63,29 @@ func (m *Module) endpoint(permission string, fn endpoint) http.HandlerFunc {
 			writeFailure(w, authz.ErrForbidden)
 			return
 		}
-		r.Body = http.MaxBytesReader(w, r.Body, 2<<20)
+		// The whole bounded body is read before any transaction or lock, so a slow
+		// or stalled upload never holds the tenant locks taken below.
+		raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxBody))
+		if err != nil {
+			var tooBig *http.MaxBytesError
+			if errors.As(err, &tooBig) {
+				writeFailure(w, fail(413, "invalid_request", "request body exceeds 2 MiB"))
+				return
+			}
+			writeFailure(w, fail(400, "invalid_request", "request body could not be read"))
+			return
+		}
+		r.Body = io.NopCloser(bytes.NewReader(raw))
+		ctx, cancel := context.WithTimeout(r.Context(), txTimeout)
+		defer cancel()
+		r = r.WithContext(ctx)
 		var out any
-		err := db.InTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
+		err = db.InTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
+			// Bounded waits and work: a lock that cannot be had in time fails the
+			// request (503) instead of queueing behind or ahead of access changes.
+			if _, err := tx.Exec(r.Context(), `SELECT set_config('lock_timeout',$1,true),set_config('statement_timeout',$2,true)`, lockTimeout, statementTimeout); err != nil {
+				return err
+			}
 			if err := authz.RequireTx(r.Context(), tx, p, permission, authz.Scope{AnyProject: true}); err != nil {
 				return err
 			}
@@ -113,10 +135,25 @@ func (m *Module) endpoint(permission string, fn endpoint) http.HandlerFunc {
 // concurrent demotion either commits first and is seen, or waits for this
 // write. Order: the tenant advisory lock first, then the row, the same order as
 // authz.lockProjectMutation, so the two never deadlock.
+//
+// NO KEY UPDATE, not UPDATE: it conflicts with the FOR UPDATE that access
+// changes take, but not with the KEY SHARE a foreign key check takes when some
+// other request inserts a row that references the tenant (a knowledge entry,
+// say). Such a request may hold KEY SHARE while it waits for the tenant
+// advisory lock held here; FOR UPDATE would close that cycle into a deadlock.
 func lockAccess(ctx context.Context, tx pgx.Tx, tenantID string) error {
 	var id string
-	return tx.QueryRow(ctx, `SELECT id::text FROM tenants WHERE id=$1::uuid FOR UPDATE`, tenantID).Scan(&id)
+	return tx.QueryRow(ctx, `SELECT id::text FROM tenants WHERE id=$1::uuid FOR NO KEY UPDATE`, tenantID).Scan(&id)
 }
+
+// Bounds of one rules request. Variables so tests can shorten them.
+var (
+	maxBody          int64 = 2 << 20
+	txTimeout              = 30 * time.Second
+	lockTimeout            = "5s"
+	statementTimeout       = "20s"
+)
+
 func writeFailure(w http.ResponseWriter, err error) {
 	var e *Error
 	var we *workorders.Error
@@ -129,6 +166,8 @@ func writeFailure(w http.ResponseWriter, err error) {
 		e = &Error{Status: 404, Code: "not_found", Message: "rule resource unavailable"}
 	case errors.As(err, &we):
 		e = &Error{Status: we.Status, Code: "invalid_request", Message: we.Message}
+	case errors.As(err, &pe) && (pe.Code == "55P03" || pe.Code == "57014"), errors.Is(err, context.DeadlineExceeded):
+		e = &Error{Status: 503, Code: "busy", Message: "the rules store is busy; nothing was changed, try again"}
 	case errors.As(err, &pe) && pe.Code == "23505":
 		e = &Error{Status: 409, Code: "revision_conflict", Message: "rule identity or version already exists"}
 	default:

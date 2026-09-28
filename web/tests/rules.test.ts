@@ -479,3 +479,10 @@ test('publish diff lists added, changed and removed rules', () => {
   )
   assert.deepEqual(changes.map(change => change.kind), ['changed', 'added', 'removed'])
 })
+
+test('budget refusals keep another person’s size private in the message', async () => {
+  const { rulesMessage } = await import('../src/lib/rules.ts')
+  assert.equal(rulesMessage(new RulesError(422, 'rules_budget_exceeded', 'x', 12345, 12000)), 'The merged file is 12345 bytes. The limit is 12000.')
+  assert.equal(rulesMessage(new RulesError(422, 'rules_budget_exceeded', 'A session file for another person or agent would exceed the limit.')), 'A session file for another person or agent would exceed the limit.')
+  assert.match(rulesMessage(new RulesError(503, 'busy', 'busy')), /Nothing was changed/)
+})
