@@ -292,6 +292,29 @@ paths:
           required: true
           schema:
             type: "string"
+  /rules/publish:
+    post:
+      operationId: "publishRuleSets"
+      description: "Batch publication under one person approval (AEON-263). rules.publish; person only, agents always 403; every set needs the same authority as its single publish (company sets need the workspace publisher), checked for all sets before any write. Atomic: one transaction, so any failure (403, 404, 409 revision or version conflict, 422 budget) writes nothing. Each set gets its own immutable snapshot and rules.published event carrying the shared batch_id. The merged file is rendered after the writes for the caller as person, every role and harness, every project with published project rules and every named agent or task in the batch; 422 when one exceeds 12000 bytes. Exact replay returns the original result: the batch_id is derived from the request, an explicit version replays as in single publish, and an auto version replays when the set's current publication already holds the same revision and note. The single-set publish route is unchanged."
+      responses:
+        "200":
+          description: "Every set published, in request order"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/RuleBatchResult"
+        "400": {"description":"Invalid scope, rule, context or calendar version","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "403": {"description":"Permission or scoped ownership denied; agents never publish or edit company rules","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "404": {"description":"Resource unavailable","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "409": {"description":"Revision/version conflict or ambiguous same-rank identity","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "422": {"description":"Rendered rules exceed 12000 UTF-8 bytes; reduce always-on text or move content to details","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "401": {"description":"Authentication required","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              "$ref": "#/components/schemas/RuleBatchPublish"
   /rules/merged:
     get:
       operationId: "mergeAgentRules"
@@ -4467,6 +4490,50 @@ components:
           items:
             "$ref": "#/components/schemas/AgentRule"
       required: ["expected_revision", "name", "rules"]
+    RuleBatchPublish:
+      type: "object"
+      additionalProperties: false
+      properties:
+        items:
+          type: "array"
+          minItems: 1
+          maxItems: 100
+          items:
+            type: "object"
+            additionalProperties: false
+            properties:
+              set_id:
+                type: "string"
+                format: "uuid"
+              expected_revision:
+                type: "integer"
+                minimum: 1
+              version:
+                type: "string"
+                pattern: "^(auto|[1-9][0-9]{11}\\.0\\.0)$"
+                description: "auto (the server assigns the next inspr-calendar-v2 coordinate, strictly later than the set's current publication) or an explicit valid UTC calendar coordinate"
+            required: ["set_id", "expected_revision", "version"]
+        note:
+          type: "string"
+          maxLength: 500
+          description: "Optional note stored on every new snapshot of the batch. Empty or omitted stores no note."
+      required: ["items"]
+    RuleBatchResult:
+      type: "object"
+      additionalProperties: false
+      properties:
+        batch_id:
+          type: "string"
+          format: "uuid"
+          description: "Shared id recorded in each set's rules.published event; deterministic per person and request, so a replay answers with the same id"
+        versions:
+          type: "array"
+          items:
+            "$ref": "#/components/schemas/RuleSnapshot"
+        max_bytes:
+          type: "integer"
+          description: "Largest merged file, in UTF-8 bytes, among the contexts checked against the 12000-byte budget"
+      required: ["batch_id", "versions", "max_bytes"]
     RulePublish:
       type: "object"
       additionalProperties: false

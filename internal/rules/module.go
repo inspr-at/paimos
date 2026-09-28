@@ -36,6 +36,7 @@ func (m *Module) Mount(mux *http.ServeMux) {
 		{"POST /api/rules/sets/{setId}/publish", "rules.publish", m.publish}, {"POST /api/rules/sets/{setId}/restore", "rules.publish", m.restore},
 		{"GET /api/rules/sets/{setId}/versions", "rules.read", m.versions}, {"GET /api/rules/sets/{setId}/versions/{version}", "rules.read", m.version},
 		{"GET /api/rules/merged", "rules.read", m.merged},
+		{"POST /api/rules/publish", "rules.publish", m.publishBatch},
 	} {
 		mux.HandleFunc(route.pattern, m.endpoint(route.permission, route.handler))
 	}

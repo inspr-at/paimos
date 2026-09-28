@@ -28,6 +28,7 @@ var RoutePermissions = map[string]string{
 	"GET /api/rules/sets/{setId}/versions":                                              "rules.read",
 	"GET /api/rules/sets/{setId}/versions/{version}":                                    "rules.read",
 	"GET /api/rules/merged":                                                             "rules.read",
+	"POST /api/rules/publish":                                                           "rules.publish",
 	"GET /api/agent-pairing/guide":                                                      "public",
 	"POST /api/agent-pairing/device":                                                    "public",
 	"POST /api/agent-pairing/redeem":                                                    "public",
