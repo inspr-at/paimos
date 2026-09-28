@@ -71,12 +71,23 @@ func (rt *runtime) do(method, path string, body, dest any) error {
 	return rt.doHeaders(method, path, body, dest, nil)
 }
 
+func (rt *runtime) doCtx(ctx context.Context, method, path string, body, dest any) error {
+	return rt.doHeadersCtx(ctx, method, path, body, dest, nil)
+}
+
 func (rt *runtime) doHeaders(method, path string, body, dest any, headers map[string]string) error {
+	return rt.doHeadersCtx(context.Background(), method, path, body, dest, headers)
+}
+
+func (rt *runtime) doHeadersCtx(ctx context.Context, method, path string, body, dest any, headers map[string]string) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	c, err := rt.api()
 	if err != nil {
 		return err
 	}
-	if err := c.DoWithHeaders(context.Background(), method, path, body, dest, headers); err != nil {
+	if err := c.DoWithHeaders(ctx, method, path, body, dest, headers); err != nil {
 		return rt.fail(err, c.Token)
 	}
 	return nil

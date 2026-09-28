@@ -3,22 +3,15 @@
 package cli
 
 import (
-	"bufio"
-	"bytes"
 	"context"
-	"crypto/rand"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
-	"slices"
 	"strings"
 	"time"
 	"unicode"
@@ -29,19 +22,24 @@ const (
 	heartbeatSchema       = "aeon.harness-heartbeat.v1"
 	heartbeatInterval     = 50
 	heartbeatMaxCommits   = 20
-	heartbeatMaxRemember  = 100
 	heartbeatMaxTokens    = 1_000_000_000_000
 	heartbeatIndexMax     = 65536
 	heartbeatTitleLineMax = 4096
 	heartbeatUsageLineMax = 1 << 20
 	heartbeatNoteMax      = 120
+	heartbeatStopTimeout  = 15 * time.Second
 )
 
 var (
-	errOwnerExited   = errors.New("owner exited")
-	heartbeatModelRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:/-]*$`)
-	heartbeatPhases  = map[string]bool{"starting": true, "working": true, "yielded": true, "stopping": true}
-	heartbeatActs    = map[string]bool{"busy": true, "idle": true, "throttled": true}
+	errOwnerExited       = errors.New("owner exited")
+	errOwnerGone         = errors.New("owner process is not alive")
+	errHeartbeatTerminal = errors.New("heartbeat generation is closed")
+	errHeartbeatBusy     = errors.New("heartbeat state is already in use")
+	errHeartbeatState    = errors.New("heartbeat state must be an owned private directory of regular files")
+	errUsageOverflow     = errors.New("usage overflow")
+	heartbeatModelRE     = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:/-]*$`)
+	heartbeatPhases      = map[string]bool{"starting": true, "working": true, "yielded": true, "stopping": true}
+	heartbeatActs        = map[string]bool{"busy": true, "idle": true, "throttled": true}
 )
 
 // heartbeatDeps replaces clocks, liveness and name lookup in tests.
@@ -85,31 +83,6 @@ type heartbeatOptions struct {
 type heartbeatCommit struct {
 	SHA     string
 	Subject string
-}
-
-type heartbeatDisk struct {
-	Schema      string               `json:"schema"`
-	SessionID   string               `json:"session_id"`
-	Sequence    int64                `json:"sequence"`
-	LabelSent   bool                 `json:"label_sent"`
-	SentLabel   string               `json:"sent_label"`
-	SentCommits []string             `json:"sent_commits"`
-	StartRev    string               `json:"start_rev"`
-	Usage       []heartbeatUsageDisk `json:"usage,omitempty"`
-}
-
-type heartbeatUsageDisk struct {
-	Model    string `json:"model"`
-	Sequence int64  `json:"sequence"`
-	Input    int64  `json:"input"`
-	Output   int64  `json:"output"`
-	Cached   int64  `json:"cached"`
-}
-
-type heartbeatSession struct {
-	id    string
-	lease string
-	disk  heartbeatDisk
 }
 
 func (rt *runtime) harnessRunHeartbeat() *Command {
@@ -161,7 +134,48 @@ func (rt *runtime) harnessRunHeartbeat() *Command {
 	}
 }
 
+// normalize fills defaults and environment once. prepare validates the CLI;
+// runHeartbeat applies the same defaults for in-process callers.
+func (o *heartbeatOptions) normalize() {
+	if o.Management == "" {
+		o.Management = "unmanaged"
+	}
+	if o.Role == "" {
+		o.Role = "worker"
+	}
+	if o.Phase == "" {
+		o.Phase = "working"
+	}
+	if o.Activity == "" {
+		o.Activity = "busy"
+	}
+	if strings.TrimSpace(o.Model) == "" {
+		o.Model = os.Getenv("AEON_MODEL")
+	}
+	if strings.TrimSpace(o.Effort) == "" {
+		o.Effort = os.Getenv("AEON_EFFORT")
+	}
+	if o.CodexIndex == "" {
+		if home, err := os.UserHomeDir(); err == nil {
+			o.CodexIndex = filepath.Join(home, ".codex", "session_index.jsonl")
+		}
+	}
+	if o.ClaudeProjects == "" {
+		if home, err := os.UserHomeDir(); err == nil {
+			o.ClaudeProjects = filepath.Join(home, ".claude", "projects")
+		}
+	}
+}
+
+func (o *heartbeatOptions) applyRuntimeDefaults() {
+	o.normalize()
+	if o.Interval <= 0 {
+		o.Interval = heartbeatInterval
+	}
+}
+
 func (o *heartbeatOptions) prepare() error {
+	o.normalize()
 	if o.OwnerPID <= 0 {
 		return usagef("--owner-pid must be a positive process id")
 	}
@@ -174,14 +188,8 @@ func (o *heartbeatOptions) prepare() error {
 	if o.Interval < 1 || o.Interval > 3600 {
 		return usagef("--interval must be 1-3600 seconds")
 	}
-	if o.Phase == "" {
-		o.Phase = "working"
-	}
 	if !heartbeatPhases[o.Phase] {
 		return usagef("invalid --phase")
-	}
-	if o.Activity == "" {
-		o.Activity = "busy"
 	}
 	if heartbeatText(o.Activity, 40) == "" {
 		o.Activity = ""
@@ -193,12 +201,6 @@ func (o *heartbeatOptions) prepare() error {
 	}
 	if o.Parent != "" && !validUUID(o.Parent) {
 		return usagef("invalid parent session")
-	}
-	if o.Management == "" {
-		o.Management = "unmanaged"
-	}
-	if o.Role == "" {
-		o.Role = "worker"
 	}
 	if o.Management != "managed" && o.Management != "unmanaged" || o.Role != "worker" && o.Role != "coordinator" {
 		return usagef("invalid management or role")
@@ -216,77 +218,56 @@ func (o *heartbeatOptions) prepare() error {
 	if heartbeatText(o.Host, 200) == "" {
 		return usagef("--host is required")
 	}
-	if o.CodexIndex == "" {
-		if home, err := os.UserHomeDir(); err == nil {
-			o.CodexIndex = filepath.Join(home, ".codex", "session_index.jsonl")
-		}
-	}
-	if o.ClaudeProjects == "" {
-		if home, err := os.UserHomeDir(); err == nil {
-			o.ClaudeProjects = filepath.Join(home, ".claude", "projects")
-		}
-	}
-	if o.Model == "" {
-		o.Model = os.Getenv("AEON_MODEL")
-	}
-	if o.Effort == "" {
-		o.Effort = os.Getenv("AEON_EFFORT")
-	}
 	return nil
 }
 
 func (rt *runtime) runHeartbeat(ctx context.Context, o heartbeatOptions, dep heartbeatDeps) error {
-	if o.Management == "" {
-		o.Management = "unmanaged"
+	o.applyRuntimeDefaults()
+	session, created, err := rt.openHeartbeatSession(ctx, o, dep)
+	if err != nil {
+		return err
 	}
-	if o.Role == "" {
-		o.Role = "worker"
+	defer session.hold.release()
+	if session.disk.Terminal {
+		return nil
 	}
-	if o.Phase == "" {
-		o.Phase = "working"
-	}
-	if o.Interval <= 0 {
-		o.Interval = heartbeatInterval
-	}
-	if strings.TrimSpace(o.Model) == "" {
-		o.Model = os.Getenv("AEON_MODEL")
-	}
-	if strings.TrimSpace(o.Effort) == "" {
-		o.Effort = os.Getenv("AEON_EFFORT")
+	if created {
+		if err := saveHeartbeatSession(&session); err != nil {
+			return rt.abandonHeartbeat(o, &session, err)
+		}
 	}
 	if dep.alive == nil {
-		dep.alive = processAlive
+		pid, start := session.disk.OwnerPID, session.disk.OwnerStart
+		dep.alive = func(int) bool { return ownerAlive(pid, start) }
 	}
 	if dep.wait == nil {
 		dep.wait = func(ctx context.Context, pid int, interval time.Duration) error {
 			return waitHeartbeat(ctx, pid, dep.alive, interval)
 		}
 	}
-	session, created, err := rt.openHeartbeatSession(o, dep)
-	if err != nil {
-		return err
-	}
-	if created {
-		if err := saveHeartbeatSession(o.StateDir, session); err != nil {
-			if _, statErr := os.Stat(filepath.Join(o.StateDir, "session.id")); statErr != nil {
-				_ = rt.stopHeartbeat(o.Project, session)
-			}
-			return err
-		}
-	}
 	interval := time.Duration(o.Interval) * time.Second
 	for {
 		if ctx.Err() != nil || !dep.alive(o.OwnerPID) {
-			return rt.stopHeartbeat(o.Project, session)
+			return rt.finishHeartbeat(o, &session)
 		}
-		if err := rt.heartbeatBeat(o, dep, &session); err != nil {
+		err := rt.heartbeatBeat(ctx, o, dep, &session)
+		switch {
+		case errors.Is(err, errHeartbeatTerminal):
+			if serr := saveHeartbeatSession(&session); serr != nil {
+				return serr
+			}
+			return nil
+		case err != nil && ctx.Err() != nil:
+			return rt.finishHeartbeat(o, &session)
+		case err != nil:
 			fmt.Fprintf(rt.stderr, "heartbeat: beat failed: %s\n", err.Error())
-		} else if err := saveHeartbeatSession(o.StateDir, session); err != nil {
-			fmt.Fprintf(rt.stderr, "heartbeat: state save failed\n")
+		default:
+			if serr := saveHeartbeatSession(&session); serr != nil {
+				fmt.Fprintf(rt.stderr, "heartbeat: state save failed\n")
+			}
 		}
-		err := dep.wait(ctx, o.OwnerPID, interval)
-		if err != nil {
-			return rt.stopHeartbeat(o.Project, session)
+		if err := dep.wait(ctx, o.OwnerPID, interval); err != nil {
+			return rt.finishHeartbeat(o, &session)
 		}
 	}
 }
@@ -313,18 +294,75 @@ func waitHeartbeat(ctx context.Context, pid int, alive func(int) bool, interval 
 	}
 }
 
-func (rt *runtime) openHeartbeatSession(o heartbeatOptions, dep heartbeatDeps) (heartbeatSession, bool, error) {
-	if err := os.MkdirAll(o.StateDir, 0o700); err != nil {
+func (rt *runtime) finishHeartbeat(o heartbeatOptions, session *heartbeatSession) error {
+	ctx, cancel := context.WithTimeout(context.Background(), heartbeatStopTimeout)
+	defer cancel()
+	if o.Transcript != "" && !session.disk.Terminal {
+		projectID, err := rt.harnessProject(o.Project)
+		if err == nil {
+			if uerr := rt.reportHeartbeatUsage(ctx, projectID, o, session); uerr != nil {
+				if heartbeatTerminalStatus(uerr) {
+					markHeartbeatTerminal(session, terminalReason(uerr))
+					_ = saveHeartbeatSession(session)
+					return nil
+				}
+				fmt.Fprintf(rt.stderr, "heartbeat: final usage flush failed\n")
+			}
+			// Success clears a pending report in memory. Persist that either way so a
+			// lost acknowledgement stays replayable and an accepted one is not sent again.
+			_ = saveHeartbeatSession(session)
+		}
+	}
+	if session.disk.Terminal {
+		_ = saveHeartbeatSession(session)
+		return nil
+	}
+	return rt.stopHeartbeat(ctx, o.Project, *session)
+}
+
+// abandonHeartbeat closes a generation whose state could not be saved, and
+// keeps a stop intent when the close itself does not succeed.
+func (rt *runtime) abandonHeartbeat(o heartbeatOptions, session *heartbeatSession, cause error) error {
+	ctx, cancel := context.WithTimeout(context.Background(), heartbeatStopTimeout)
+	defer cancel()
+	if err := rt.stopHeartbeat(ctx, o.Project, *session); err != nil {
+		fmt.Fprintf(rt.stderr, "heartbeat: could not close the new session\n")
+		_ = session.hold.writeFile("session.id", []byte(session.id+"\n"))
+		_ = session.hold.writeFile("stop.intent", []byte(session.id+"\n"))
+		return cause
+	}
+	_ = clearHeartbeatIdentity(&session.hold)
+	return cause
+}
+
+func (rt *runtime) openHeartbeatSession(ctx context.Context, o heartbeatOptions, dep heartbeatDeps) (session heartbeatSession, created bool, err error) {
+	// A signal that arrives before registration still has to record the generation
+	// and then stop it. Cancellation applies to beats, scans and later requests.
+	if ctx.Err() != nil {
+		ctx = context.WithoutCancel(ctx)
+	}
+	hold, err := openHeartbeatHold(o.StateDir)
+	if err != nil {
 		return heartbeatSession{}, false, err
 	}
-	existing, ok, err := loadHeartbeatSession(o.StateDir)
+	session.hold = hold
+	defer func() {
+		if err != nil {
+			hold.release()
+		}
+	}()
+	if err = rt.recoverStopIntent(o, &session); err != nil {
+		return heartbeatSession{}, false, err
+	}
+	existing, ok, err := loadHeartbeatSession(&session.hold)
 	if err != nil {
 		return heartbeatSession{}, false, err
 	}
 	if ok {
 		if existing.disk.StartRev == "" {
-			existing.disk.StartRev, _ = gitHEAD(o.Worktree)
+			existing.disk.StartRev, _ = gitHEAD(ctx, o.Worktree)
 		}
+		existing.hold = session.hold
 		return existing, false, nil
 	}
 	projectID, err := rt.harnessProject(o.Project)
@@ -338,15 +376,15 @@ func (rt *runtime) openHeartbeatSession(o heartbeatOptions, dep heartbeatDeps) (
 	if me.Principal.Name != o.Agent {
 		return heartbeatSession{}, false, usagef("--agent must name the authenticated agent")
 	}
-	lease, err := readOrCreateSecret(filepath.Join(o.StateDir, "lease.key"), 32)
+	lease, err := readOrCreateStateSecret(&session.hold, "lease.key", 32)
 	if err != nil {
 		return heartbeatSession{}, false, err
 	}
-	ref, err := readOrCreateSecret(filepath.Join(o.StateDir, "session.ref"), 24)
+	ref, err := readOrCreateStateSecret(&session.hold, "session.ref", 24)
 	if err != nil {
 		return heartbeatSession{}, false, err
 	}
-	label, haveLabel := resolveHeartbeatLabel(o, dep, true)
+	label, haveLabel := resolveHeartbeatLabel(ctx, o, dep, true)
 	body := map[string]any{
 		"agent_principal_id":      me.Principal.ID,
 		"harness":                 o.Harness,
@@ -365,8 +403,7 @@ func (rt *runtime) openHeartbeatSession(o heartbeatOptions, dep heartbeatDeps) (
 	putText(body, "worktree", heartbeatText(o.Worktree, 512), true)
 	putText(body, "branch", heartbeatText(o.Branch, 200), true)
 	if o.Parent != "" {
-		parent := strings.ToLower(o.Parent)
-		body["parent_harness_session_id"] = parent
+		body["parent_harness_session_id"] = strings.ToLower(o.Parent)
 	}
 	if o.Ticket != "" {
 		ticketID, err := rt.harnessTicket(projectID, o.Ticket, 0)
@@ -385,22 +422,66 @@ func (rt *runtime) openHeartbeatSession(o heartbeatOptions, dep heartbeatDeps) (
 	var out struct {
 		ID string `json:"id"`
 	}
-	if err := rt.harnessDo(http.MethodPost, harnessPath(projectID, ""), "", body, &out); err != nil {
+	if err = rt.harnessDoCtx(ctx, http.MethodPost, harnessPath(projectID, ""), "", body, &out); err != nil {
 		return heartbeatSession{}, false, err
 	}
 	if !validUUID(out.ID) {
 		return heartbeatSession{}, false, errors.New("registration did not return a session id")
 	}
-	start, _ := gitHEAD(o.Worktree)
-	disk := heartbeatDisk{Schema: heartbeatSchema, SessionID: strings.ToLower(out.ID), StartRev: start}
+	disk := heartbeatDisk{Schema: heartbeatSchema, SessionID: strings.ToLower(out.ID), OwnerPID: o.OwnerPID}
+	if stamp, stampErr := readOwnerStamp(o.OwnerPID); stampErr == nil {
+		disk.OwnerPID = stamp.PID
+		disk.OwnerStart = stamp.Start
+	}
+	bindHeartbeatWorktree(ctx, o, &disk)
 	if haveLabel {
 		disk.LabelSent = true
 		disk.SentLabel = label
 	}
-	return heartbeatSession{id: disk.SessionID, lease: lease, disk: disk}, true, nil
+	return heartbeatSession{id: disk.SessionID, lease: lease, disk: disk, hold: session.hold}, true, nil
 }
 
-func (rt *runtime) heartbeatBeat(o heartbeatOptions, dep heartbeatDeps, session *heartbeatSession) error {
+func (rt *runtime) recoverStopIntent(o heartbeatOptions, session *heartbeatSession) error {
+	raw, err := session.hold.readFile("stop.intent", 256)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	id := strings.ToLower(strings.TrimSpace(string(raw)))
+	lease, err := readStateSecret(&session.hold, "lease.key")
+	if err != nil || !validUUID(id) {
+		return errHeartbeatState
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), heartbeatStopTimeout)
+	defer cancel()
+	stopErr := rt.stopHeartbeat(ctx, o.Project, heartbeatSession{id: id, lease: lease})
+	if stopErr != nil {
+		return stopErr
+	}
+	return clearHeartbeatIdentity(&session.hold)
+}
+
+func bindHeartbeatWorktree(ctx context.Context, o heartbeatOptions, disk *heartbeatDisk) {
+	if strings.TrimSpace(o.Worktree) == "" {
+		return
+	}
+	disk.BoundWorktree = filepath.Clean(o.Worktree)
+	disk.StartedUnix = time.Now().Unix()
+	if head, err := gitHEAD(ctx, o.Worktree); err == nil {
+		disk.StartRev = head
+		disk.CommitCursor = head
+	}
+	if branch, err := gitLine(ctx, o.Worktree, "rev-parse", "--abbrev-ref", "HEAD"); err == nil && validHeartbeatBranch(branch) {
+		disk.BoundBranch = branch
+	}
+}
+
+func (rt *runtime) heartbeatBeat(ctx context.Context, o heartbeatOptions, dep heartbeatDeps, session *heartbeatSession) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	projectID, err := rt.harnessProject(o.Project)
 	if err != nil {
 		return err
@@ -415,7 +496,7 @@ func (rt *runtime) heartbeatBeat(o heartbeatOptions, dep heartbeatDeps, session 
 		activity = "busy"
 	}
 	body["activity"] = activity
-	if label, ok := resolveHeartbeatLabel(o, dep, false); ok && (!session.disk.LabelSent || label != session.disk.SentLabel) {
+	if label, ok := resolveHeartbeatLabel(ctx, o, dep, false); ok && (!session.disk.LabelSent || label != session.disk.SentLabel) {
 		body["display_label"] = label
 	}
 	putText(body, "model", heartbeatText(o.Model, 128), true)
@@ -431,7 +512,7 @@ func (rt *runtime) heartbeatBeat(o heartbeatOptions, dep heartbeatDeps, session 
 	if note != "" {
 		body["activity_note"] = note
 	}
-	commits := heartbeatCommits(o, dep, session.disk)
+	commits := heartbeatCommits(ctx, o, dep, &session.disk)
 	if len(commits) > 0 {
 		items := make([]map[string]string, 0, len(commits))
 		for _, c := range commits {
@@ -440,16 +521,26 @@ func (rt *runtime) heartbeatBeat(o heartbeatOptions, dep heartbeatDeps, session 
 		body["commits"] = items
 	}
 	path := harnessPath(projectID, session.id) + "/heartbeat"
-	err = rt.harnessDo(http.MethodPost, path, session.lease, body, new(any))
-	if err != nil && strings.Contains(err.Error(), "api 409") {
+	err = rt.harnessDoCtx(ctx, http.MethodPost, path, session.lease, body, new(any))
+	if heartbeatTerminalStatus(err) {
+		session.disk.Sequence--
+		markHeartbeatTerminal(session, terminalReason(err))
+		return errHeartbeatTerminal
+	}
+	if err != nil && heartbeatStatus(err) == http.StatusConflict {
 		var status struct {
 			ActivitySequence int64 `json:"activity_sequence"`
 		}
-		if readErr := rt.harnessDo(http.MethodGet, harnessPath(projectID, session.id), "", nil, &status); readErr == nil && status.ActivitySequence >= session.disk.Sequence {
+		if readErr := rt.harnessDoCtx(ctx, http.MethodGet, harnessPath(projectID, session.id), "", nil, &status); readErr == nil && status.ActivitySequence >= session.disk.Sequence {
 			session.disk.Sequence = status.ActivitySequence + 1
 			body["activity_sequence"] = session.disk.Sequence
-			err = rt.harnessDo(http.MethodPost, path, session.lease, body, new(any))
+			err = rt.harnessDoCtx(ctx, http.MethodPost, path, session.lease, body, new(any))
 		}
+	}
+	if heartbeatTerminalStatus(err) {
+		session.disk.Sequence--
+		markHeartbeatTerminal(session, terminalReason(err))
+		return errHeartbeatTerminal
 	}
 	if err != nil {
 		session.disk.Sequence--
@@ -459,19 +550,28 @@ func (rt *runtime) heartbeatBeat(o heartbeatOptions, dep heartbeatDeps, session 
 		session.disk.LabelSent = true
 		session.disk.SentLabel = label
 	}
-	rememberCommits(&session.disk, commits)
+	if len(commits) > 0 {
+		session.disk.CommitCursor = commits[len(commits)-1].SHA
+	}
 	if o.Transcript != "" {
-		if uerr := rt.reportHeartbeatUsage(projectID, o, session); uerr != nil {
+		if uerr := rt.reportHeartbeatUsage(ctx, projectID, o, session); uerr != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			if heartbeatTerminalStatus(uerr) {
+				markHeartbeatTerminal(session, terminalReason(uerr))
+				return errHeartbeatTerminal
+			}
 			fmt.Fprintf(rt.stderr, "heartbeat: usage report failed\n")
 		}
 	}
 	if o.PrintControls {
-		rt.printHeartbeatControls(projectID, session.id)
+		rt.printHeartbeatControls(ctx, projectID, session.id)
 	}
 	return nil
 }
 
-func (rt *runtime) stopHeartbeat(project string, session heartbeatSession) error {
+func (rt *runtime) stopHeartbeat(ctx context.Context, project string, session heartbeatSession) error {
 	if session.id == "" || session.lease == "" {
 		return nil
 	}
@@ -479,58 +579,14 @@ func (rt *runtime) stopHeartbeat(project string, session heartbeatSession) error
 	if err != nil {
 		return err
 	}
-	return rt.harnessDo(http.MethodPost, harnessPath(projectID, session.id)+"/stop", session.lease, map[string]string{"reason": "stopped"}, new(any))
+	err = rt.harnessDoCtx(ctx, http.MethodPost, harnessPath(projectID, session.id)+"/stop", session.lease, map[string]string{"reason": "stopped"}, new(any))
+	if heartbeatTerminalStatus(err) {
+		return nil
+	}
+	return err
 }
 
-func (rt *runtime) reportHeartbeatUsage(projectID string, o heartbeatOptions, session *heartbeatSession) error {
-	sums, err := claudeUsage(o.Transcript, heartbeatText(o.Model, 128))
-	if err != nil || len(sums) == 0 {
-		return err
-	}
-	models := make([]string, 0, len(sums))
-	for model := range sums {
-		models = append(models, model)
-	}
-	slices.Sort(models)
-	for _, model := range models {
-		sum := sums[model]
-		prev := usageByModel(session.disk.Usage, model)
-		if prev != nil && prev.Input == sum.input && prev.Output == sum.output && prev.Cached == sum.cached {
-			continue
-		}
-		if prev != nil && (sum.input < prev.Input || sum.output < prev.Output || sum.cached < prev.Cached) {
-			continue
-		}
-		seq := int64(1)
-		if prev != nil {
-			seq = prev.Sequence + 1
-		}
-		provisional := true
-		report := map[string]any{
-			"report_id":           usageReportID(session.id, model, seq, sum.input, sum.output, sum.cached),
-			"model":               model,
-			"sequence":            seq,
-			"input_tokens":        sum.input,
-			"output_tokens":       sum.output,
-			"cached_input_tokens": sum.cached,
-			"provisional":         provisional,
-			// billing_mode is the usage schema's required enum, not a display label.
-			"billing_mode": "unknown",
-		}
-		if err := rt.harnessDo(http.MethodPost, harnessPath(projectID, session.id)+"/usage", session.lease, report, new(any)); err != nil {
-			return err
-		}
-		next := heartbeatUsageDisk{Model: model, Sequence: seq, Input: sum.input, Output: sum.output, Cached: sum.cached}
-		if prev == nil {
-			session.disk.Usage = append(session.disk.Usage, next)
-		} else {
-			*prev = next
-		}
-	}
-	return nil
-}
-
-func (rt *runtime) printHeartbeatControls(projectID, sessionID string) {
+func (rt *runtime) printHeartbeatControls(ctx context.Context, projectID, sessionID string) {
 	var status struct {
 		Controls []struct {
 			ID    string `json:"id"`
@@ -538,7 +594,7 @@ func (rt *runtime) printHeartbeatControls(projectID, sessionID string) {
 			State string `json:"state"`
 		} `json:"controls"`
 	}
-	if err := rt.harnessDo(http.MethodGet, harnessPath(projectID, sessionID), "", nil, &status); err == nil {
+	if err := rt.harnessDoCtx(ctx, http.MethodGet, harnessPath(projectID, sessionID), "", nil, &status); err == nil {
 		for _, c := range status.Controls {
 			if c.State == "" || c.State == "completed" || !validUUID(c.ID) {
 				continue
@@ -558,7 +614,7 @@ func (rt *runtime) printHeartbeatControls(projectID, sessionID string) {
 			SessionID string  `json:"recipient_session_id"`
 		} `json:"items"`
 	}
-	if err := rt.do(http.MethodGet, "/api/inbox/messages?wait_ms=0", nil, &page); err != nil {
+	if err := rt.doCtx(ctx, http.MethodGet, "/api/inbox/messages?wait_ms=0", nil, &page); err != nil {
 		return
 	}
 	for _, item := range page.Items {
@@ -575,7 +631,7 @@ func (rt *runtime) printHeartbeatControls(projectID, sessionID string) {
 	}
 }
 
-func resolveHeartbeatLabel(o heartbeatOptions, dep heartbeatDeps, includeFlag bool) (string, bool) {
+func resolveHeartbeatLabel(ctx context.Context, o heartbeatOptions, dep heartbeatDeps, includeFlag bool) (string, bool) {
 	if dep.label != nil {
 		label, ok := dep.label()
 		if !ok {
@@ -584,7 +640,7 @@ func resolveHeartbeatLabel(o heartbeatOptions, dep heartbeatDeps, includeFlag bo
 		label = heartbeatText(label, 128)
 		return label, label != ""
 	}
-	if label, ok := readHeartbeatNames(o); ok {
+	if label, ok := readHeartbeatNames(ctx, o); ok {
 		return label, true
 	}
 	if includeFlag {
@@ -595,10 +651,10 @@ func resolveHeartbeatLabel(o heartbeatOptions, dep heartbeatDeps, includeFlag bo
 	return "", false
 }
 
-func readHeartbeatNames(o heartbeatOptions) (string, bool) {
+func readHeartbeatNames(ctx context.Context, o heartbeatOptions) (string, bool) {
 	id := o.sourceID()
-	codex := func() (string, bool) { return codexSessionLabel(o.CodexIndex, id) }
-	claude := func() (string, bool) { return claudeSessionLabel(o, id) }
+	codex := func() (string, bool) { return readCodexSessionLabel(ctx, o.CodexIndex, id) }
+	claude := func() (string, bool) { return readClaudeSessionLabel(ctx, o, id) }
 	switch o.Harness {
 	case "codex":
 		if label, ok := codex(); ok {
@@ -627,466 +683,6 @@ func (o heartbeatOptions) sourceID() string {
 		return strings.ToLower(base)
 	}
 	return ""
-}
-
-func codexSessionLabel(path, sessionID string) (string, bool) {
-	if path == "" || !validUUID(sessionID) || unsafeHeartbeatPath(path) {
-		return "", false
-	}
-	f, err := openNoFollow(path)
-	if err != nil {
-		return "", false
-	}
-	defer f.Close()
-	st, err := f.Stat()
-	if err != nil || st.Size() > heartbeatIndexMax {
-		return "", false
-	}
-	raw, err := io.ReadAll(io.LimitReader(f, heartbeatIndexMax+1))
-	if err != nil || len(raw) > heartbeatIndexMax {
-		return "", false
-	}
-	var found string
-	var matched bool
-	for _, line := range bytes.Split(raw, []byte("\n")) {
-		line = bytes.TrimSpace(line)
-		if len(line) == 0 || len(line) > heartbeatTitleLineMax {
-			continue
-		}
-		var rec struct {
-			ID         string `json:"id"`
-			ThreadName string `json:"thread_name"`
-		}
-		if json.Unmarshal(line, &rec) != nil || !strings.EqualFold(rec.ID, sessionID) {
-			continue
-		}
-		matched = true
-		found = heartbeatText(rec.ThreadName, 128)
-	}
-	if !matched || found == "" {
-		return "", false
-	}
-	return found, true
-}
-
-func claudeSessionLabel(o heartbeatOptions, sessionID string) (string, bool) {
-	if label, ok := claudeTitleFile(o.Transcript); ok {
-		return label, true
-	}
-	path := findClaudeTranscript(o.ClaudeProjects, sessionID)
-	return claudeTitleFile(path)
-}
-
-func claudeTitleFile(path string) (string, bool) {
-	if path == "" || unsafeHeartbeatPath(path) {
-		return "", false
-	}
-	var custom, ai string
-	err := scanJSONL(path, heartbeatTitleLineMax, func(line []byte) error {
-		if !bytes.Contains(line, []byte("Title")) && !bytes.Contains(line, []byte("title")) {
-			return nil
-		}
-		var rec struct {
-			Type        string `json:"type"`
-			CustomTitle string `json:"customTitle"`
-			AITitle     string `json:"aiTitle"`
-		}
-		if json.Unmarshal(line, &rec) != nil {
-			return nil
-		}
-		switch rec.Type {
-		case "custom-title":
-			if label := heartbeatText(rec.CustomTitle, 128); label != "" {
-				custom = label
-			}
-		case "ai-title":
-			if label := heartbeatText(rec.AITitle, 128); label != "" {
-				ai = label
-			}
-		}
-		return nil
-	})
-	if err != nil {
-		return "", false
-	}
-	if custom != "" {
-		return custom, true
-	}
-	if ai != "" {
-		return ai, true
-	}
-	return "", false
-}
-
-func findClaudeTranscript(root, sessionID string) string {
-	if root == "" || !validUUID(sessionID) || unsafeHeartbeatPath(root) {
-		return ""
-	}
-	name := strings.ToLower(sessionID) + ".jsonl"
-	entries, err := os.ReadDir(root)
-	if err != nil {
-		return ""
-	}
-	for _, entry := range entries {
-		info, err := entry.Info()
-		if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
-			continue
-		}
-		candidate := filepath.Join(root, entry.Name(), name)
-		st, err := os.Lstat(candidate)
-		if err != nil || !st.Mode().IsRegular() || st.Mode()&os.ModeSymlink != 0 {
-			continue
-		}
-		return candidate
-	}
-	return ""
-}
-
-type usageSum struct {
-	input, output, cached int64
-}
-
-func claudeUsage(path, fallbackModel string) (map[string]usageSum, error) {
-	if path == "" || unsafeHeartbeatPath(path) {
-		return nil, nil
-	}
-	sums := map[string]usageSum{}
-	poisoned := map[string]bool{}
-	seen := map[string]bool{}
-	err := scanJSONL(path, heartbeatUsageLineMax, func(line []byte) error {
-		if !bytes.Contains(line, []byte(`"usage"`)) {
-			return nil
-		}
-		var rec struct {
-			UUID    string `json:"uuid"`
-			Type    string `json:"type"`
-			Message struct {
-				Model string                     `json:"model"`
-				Usage map[string]json.RawMessage `json:"usage"`
-			} `json:"message"`
-		}
-		if json.Unmarshal(line, &rec) != nil || rec.Type != "assistant" || len(rec.Message.Usage) == 0 {
-			return nil
-		}
-		if rec.UUID != "" {
-			if seen[rec.UUID] {
-				return nil
-			}
-			seen[rec.UUID] = true
-		}
-		input, okIn := jsonToken(rec.Message.Usage["input_tokens"])
-		output, okOut := jsonToken(rec.Message.Usage["output_tokens"])
-		if !okIn || !okOut {
-			return nil
-		}
-		cached := int64(0)
-		if raw, ok := rec.Message.Usage["cache_read_input_tokens"]; ok && len(bytes.TrimSpace(raw)) > 0 && string(raw) != "null" {
-			var okCached bool
-			cached, okCached = jsonToken(raw)
-			if !okCached {
-				return nil
-			}
-		}
-		// The usage route treats input as inclusive of cached input.
-		inclusive, ok := addTokens(input, cached)
-		if !ok {
-			return errUsageOverflow
-		}
-		model := heartbeatText(rec.Message.Model, 128)
-		if model == "" {
-			model = fallbackModel
-		}
-		if model == "" || !heartbeatModelRE.MatchString(model) || poisoned[model] {
-			return nil
-		}
-		cur := sums[model]
-		nextIn, ok1 := addTokens(cur.input, inclusive)
-		nextOut, ok2 := addTokens(cur.output, output)
-		nextCached, ok3 := addTokens(cur.cached, cached)
-		if !ok1 || !ok2 || !ok3 {
-			poisoned[model] = true
-			delete(sums, model)
-			return nil
-		}
-		sums[model] = usageSum{input: nextIn, output: nextOut, cached: nextCached}
-		return nil
-	})
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	return sums, nil
-}
-
-var errUsageOverflow = errors.New("usage overflow")
-
-func jsonToken(raw json.RawMessage) (int64, bool) {
-	raw = bytes.TrimSpace(raw)
-	if len(raw) == 0 || string(raw) == "null" {
-		return 0, false
-	}
-	var n int64
-	if err := json.Unmarshal(raw, &n); err != nil || n < 0 || n > heartbeatMaxTokens {
-		return 0, false
-	}
-	return n, true
-}
-
-func addTokens(a, b int64) (int64, bool) {
-	if a < 0 || b < 0 || a > heartbeatMaxTokens-b {
-		return 0, false
-	}
-	return a + b, true
-}
-
-func scanJSONL(path string, maxLine int, fn func([]byte) error) error {
-	f, err := openNoFollow(path)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	r := bufio.NewReader(f)
-	for {
-		line, overflow, err := readLimitedLine(r, maxLine)
-		if overflow {
-			if errors.Is(err, io.EOF) {
-				return nil
-			}
-			if err != nil {
-				return err
-			}
-			continue
-		}
-		if len(line) > 0 {
-			if ferr := fn(line); ferr != nil {
-				return ferr
-			}
-		}
-		if errors.Is(err, io.EOF) {
-			return nil
-		}
-		if err != nil {
-			return err
-		}
-	}
-}
-
-func readLimitedLine(r *bufio.Reader, maxLine int) ([]byte, bool, error) {
-	var line []byte
-	overflow := false
-	for {
-		chunk, err := r.ReadSlice('\n')
-		if len(chunk) > 0 && !overflow {
-			if len(line)+len(chunk) > maxLine+1 {
-				overflow = true
-				line = nil
-			} else {
-				line = append(line, chunk...)
-			}
-		}
-		if errors.Is(err, bufio.ErrBufferFull) {
-			continue
-		}
-		if overflow {
-			return nil, true, err
-		}
-		return bytes.TrimRight(line, "\r\n"), false, err
-	}
-}
-
-func heartbeatCommits(o heartbeatOptions, dep heartbeatDeps, disk heartbeatDisk) []heartbeatCommit {
-	var found []heartbeatCommit
-	var err error
-	if dep.commits != nil {
-		found, err = dep.commits(o.Worktree, disk.StartRev)
-	} else {
-		found, err = gitCommitsSince(o.Worktree, disk.StartRev)
-	}
-	if err != nil {
-		return nil
-	}
-	sent := map[string]bool{}
-	for _, sha := range disk.SentCommits {
-		sent[strings.ToLower(sha)] = true
-	}
-	return selectHeartbeatCommits(found, sent)
-}
-
-func selectHeartbeatCommits(found []heartbeatCommit, sent map[string]bool) []heartbeatCommit {
-	out := make([]heartbeatCommit, 0, len(found))
-	seen := map[string]bool{}
-	for _, c := range found {
-		sha := strings.ToLower(c.SHA)
-		subject := heartbeatText(c.Subject, 200)
-		if subject == "" || !validCommitSHA(sha) || sent[sha] || seen[sha] {
-			continue
-		}
-		seen[sha] = true
-		out = append(out, heartbeatCommit{SHA: sha, Subject: subject})
-		if len(out) == heartbeatMaxCommits {
-			break
-		}
-	}
-	return out
-}
-
-func rememberCommits(disk *heartbeatDisk, commits []heartbeatCommit) {
-	for _, c := range commits {
-		disk.SentCommits = append(disk.SentCommits, c.SHA)
-	}
-	if len(disk.SentCommits) > heartbeatMaxRemember {
-		disk.SentCommits = disk.SentCommits[len(disk.SentCommits)-heartbeatMaxRemember:]
-	}
-}
-
-func gitHEAD(worktree string) (string, error) {
-	if strings.TrimSpace(worktree) == "" {
-		return "", nil
-	}
-	out, err := heartbeatGit(worktree, "rev-parse", "HEAD")
-	if err != nil {
-		return "", err
-	}
-	sha := strings.ToLower(strings.TrimSpace(out))
-	if !validCommitSHA(sha) {
-		return "", errors.New("invalid HEAD")
-	}
-	return sha, nil
-}
-
-func gitCommitsSince(worktree, since string) ([]heartbeatCommit, error) {
-	if strings.TrimSpace(worktree) == "" || !validCommitSHA(since) {
-		return nil, nil
-	}
-	out, err := heartbeatGit(worktree, "log", "--reverse", since+"..HEAD", "--format=%H%x1f%s")
-	if err != nil {
-		return nil, err
-	}
-	var commits []heartbeatCommit
-	for _, line := range strings.Split(out, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		sha, subject, ok := strings.Cut(line, "\x1f")
-		if !ok {
-			continue
-		}
-		commits = append(commits, heartbeatCommit{SHA: sha, Subject: subject})
-	}
-	return commits, nil
-}
-
-func heartbeatGit(worktree string, args ...string) (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, "git", args...)
-	cmd.Dir = worktree
-	cmd.Stdin = nil
-	out, err := cmd.Output()
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(string(out)), nil
-}
-
-func validCommitSHA(sha string) bool {
-	if len(sha) < 7 || len(sha) > 40 {
-		return false
-	}
-	for _, r := range sha {
-		if (r < '0' || r > '9') && (r < 'a' || r > 'f') {
-			return false
-		}
-	}
-	return true
-}
-
-func loadHeartbeatSession(dir string) (heartbeatSession, bool, error) {
-	raw, err := os.ReadFile(filepath.Join(dir, "session.id"))
-	if errors.Is(err, os.ErrNotExist) {
-		return heartbeatSession{}, false, nil
-	}
-	if err != nil {
-		return heartbeatSession{}, false, err
-	}
-	id := strings.ToLower(strings.TrimSpace(string(raw)))
-	if !validUUID(id) {
-		return heartbeatSession{}, false, usagef("state directory has an invalid session id")
-	}
-	lease, err := readPrivateSecret(filepath.Join(dir, "lease.key"))
-	if err != nil {
-		return heartbeatSession{}, false, err
-	}
-	disk := heartbeatDisk{Schema: heartbeatSchema, SessionID: id}
-	stateRaw, err := os.ReadFile(filepath.Join(dir, "state.json"))
-	if err == nil {
-		if len(stateRaw) > 1<<20 {
-			return heartbeatSession{}, false, usagef("heartbeat state is too large")
-		}
-		if json.Unmarshal(stateRaw, &disk) != nil || disk.Schema != heartbeatSchema || !strings.EqualFold(disk.SessionID, id) {
-			return heartbeatSession{}, false, usagef("heartbeat state does not match the session id")
-		}
-		disk.SessionID = id
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return heartbeatSession{}, false, err
-	}
-	return heartbeatSession{id: id, lease: lease, disk: disk}, true, nil
-}
-
-func saveHeartbeatSession(dir string, session heartbeatSession) error {
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return err
-	}
-	session.disk.Schema = heartbeatSchema
-	session.disk.SessionID = session.id
-	raw, err := json.Marshal(session.disk)
-	if err != nil {
-		return err
-	}
-	if err := writePrivate(filepath.Join(dir, "session.id"), []byte(session.id+"\n")); err != nil {
-		return err
-	}
-	return writePrivate(filepath.Join(dir, "state.json"), append(raw, '\n'))
-}
-
-func readOrCreateSecret(path string, n int) (string, error) {
-	if _, err := os.Lstat(path); err == nil {
-		return readPrivateSecret(path)
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return "", err
-	}
-	buf := make([]byte, n)
-	if _, err := rand.Read(buf); err != nil {
-		return "", err
-	}
-	value := hex.EncodeToString(buf)
-	if err := writePrivate(path, []byte(value+"\n")); err != nil {
-		return "", err
-	}
-	return value, nil
-}
-
-func readPrivateSecret(path string) (string, error) {
-	// Reuse the harness lease checks: private regular file, one line, long enough.
-	st, err := os.Lstat(path)
-	if err != nil {
-		return "", err
-	}
-	if !st.Mode().IsRegular() || st.Mode().Perm()&0o077 != 0 || st.Size() > 8192 || st.Mode()&os.ModeSymlink != 0 {
-		return "", usagef("%s must be a private regular file", filepath.Base(path))
-	}
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return "", err
-	}
-	value := strings.TrimSpace(string(raw))
-	if len(value) < 32 || strings.ContainsAny(value, "\r\n") {
-		return "", usagef("%s must contain one value", filepath.Base(path))
-	}
-	return value, nil
 }
 
 func putText(body map[string]any, key, value string, include bool) {
@@ -1130,12 +726,17 @@ func agentStatusNote(worktree string) string {
 		return ""
 	}
 	path := filepath.Join(worktree, ".agent-status.json")
-	st, err := os.Lstat(path)
-	if err != nil || !st.Mode().IsRegular() || st.Mode()&os.ModeSymlink != 0 || st.Size() > 65536 {
+	f, err := openNoFollow(path)
+	if err != nil {
 		return ""
 	}
-	raw, err := os.ReadFile(path)
-	if err != nil {
+	defer f.Close()
+	st, err := f.Stat()
+	if err != nil || st.Size() > 65536 {
+		return ""
+	}
+	raw := make([]byte, st.Size())
+	if _, err := io.ReadFull(f, raw); err != nil {
 		return ""
 	}
 	var doc struct {
@@ -1147,23 +748,62 @@ func agentStatusNote(worktree string) string {
 	return heartbeatNote(doc.Note)
 }
 
-func usageByModel(items []heartbeatUsageDisk, model string) *heartbeatUsageDisk {
-	for i := range items {
-		if items[i].Model == model {
-			return &items[i]
-		}
+func heartbeatStatus(err error) int {
+	if err == nil {
+		return 0
 	}
-	return nil
+	msg := err.Error()
+	if !strings.HasPrefix(msg, "api ") {
+		return 0
+	}
+	n := 0
+	for i := 4; i < len(msg); i++ {
+		if msg[i] < '0' || msg[i] > '9' {
+			return n
+		}
+		n = n*10 + int(msg[i]-'0')
+	}
+	return n
 }
 
-func usageReportID(session, model string, seq, input, output, cached int64) string {
-	sum := sha256.Sum256([]byte(fmt.Sprintf("aeon-heartbeat-usage-v1\x00%s\x00%s\x00%d\x00%d\x00%d\x00%d", session, model, seq, input, output, cached)))
-	sum[6] = sum[6]&0x0f | 0x50
-	sum[8] = sum[8]&0x3f | 0x80
-	return fmt.Sprintf("%x-%x-%x-%x-%x", sum[0:4], sum[4:6], sum[6:8], sum[8:10], sum[10:16])
+func heartbeatTerminalStatus(err error) bool {
+	switch heartbeatStatus(err) {
+	case http.StatusForbidden, http.StatusGone:
+		return true
+	default:
+		return false
+	}
 }
 
-func unsafeHeartbeatPath(path string) bool {
-	base := strings.ToLower(filepath.Base(path))
-	return base == "" || strings.HasPrefix(base, ".env") || strings.HasSuffix(base, ".key") || strings.Contains(base, "credential")
+func terminalReason(err error) string {
+	if heartbeatStatus(err) == http.StatusGone {
+		return "archived"
+	}
+	return "stopped"
+}
+
+func markHeartbeatTerminal(session *heartbeatSession, reason string) {
+	session.disk.Terminal = true
+	if session.disk.TerminalReason == "" {
+		session.disk.TerminalReason = reason
+	}
+}
+
+func jsonToken(raw json.RawMessage) (int64, bool) {
+	trimmed := bytesTrim(raw)
+	if len(trimmed) == 0 || string(trimmed) == "null" {
+		return 0, false
+	}
+	var n int64
+	if err := json.Unmarshal(trimmed, &n); err != nil || n < 0 || n > heartbeatMaxTokens {
+		return 0, false
+	}
+	return n, true
+}
+
+func addTokens(a, b int64) (int64, bool) {
+	if a < 0 || b < 0 || a > heartbeatMaxTokens-b {
+		return 0, false
+	}
+	return a + b, true
 }

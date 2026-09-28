@@ -9,12 +9,40 @@ import (
 	"os"
 )
 
-// processAlive cannot observe another process on this platform, so the helper
-// stops instead of heartbeating an owner it cannot see.
-func processAlive(int) bool {
-	return false
+func readOwnerStamp(int) (ownerStamp, error) {
+	return ownerStamp{}, errOwnerGone
 }
 
 func openNoFollow(string) (*os.File, error) {
 	return nil, errors.New("name sources require a unix host")
+}
+
+func openHeartbeatHold(string) (heartbeatHold, error) {
+	return heartbeatHold{}, errors.New("heartbeat state requires a unix host")
+}
+
+func (h *heartbeatHold) release() {
+	if h == nil {
+		return
+	}
+	if h.lock != nil {
+		_ = h.lock.Close()
+		h.lock = nil
+	}
+	if h.dir != nil {
+		_ = h.dir.Close()
+		h.dir = nil
+	}
+}
+
+func (h *heartbeatHold) readFile(string, int) ([]byte, error) {
+	return nil, errors.New("heartbeat state requires a unix host")
+}
+
+func (h *heartbeatHold) writeFile(string, []byte) error {
+	return errors.New("heartbeat state requires a unix host")
+}
+
+func (h *heartbeatHold) remove(string) error {
+	return errors.New("heartbeat state requires a unix host")
 }

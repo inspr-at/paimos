@@ -139,6 +139,14 @@ func (rt *runtime) harnessRegistration(path string) (string, string, error) {
 // harnessDo refuses redirects, so a private registration reference or worker
 // lease cannot follow a server redirect to another origin.
 func (rt *runtime) harnessDo(method, path, lease string, body, dest any) error {
+	return rt.harnessDoCtx(context.Background(), method, path, lease, body, dest)
+}
+
+// harnessDoCtx is harnessDo bound to ctx so a heartbeat can abort on shutdown.
+func (rt *runtime) harnessDoCtx(ctx context.Context, method, path, lease string, body, dest any) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	c, err := rt.api()
 	if err != nil {
 		return err
@@ -151,7 +159,7 @@ func (rt *runtime) harnessDo(method, path, lease string, body, dest any) error {
 		}
 		reader = bytes.NewReader(raw)
 	}
-	req, err := http.NewRequestWithContext(context.Background(), method, c.BaseURL+path, reader)
+	req, err := http.NewRequestWithContext(ctx, method, c.BaseURL+path, reader)
 	if err != nil {
 		return rt.fail(err, "")
 	}

@@ -6,6 +6,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -13,6 +15,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -516,4 +519,620 @@ func gitCmd(t *testing.T, dir string, args ...string) string {
 		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
 	}
 	return string(out)
+}
+
+func hbServer(t *testing.T, calls *[]hbCall, handle func(r *http.Request, body map[string]any, w http.ResponseWriter) bool) *httptest.Server {
+	t.Helper()
+	project := map[string]any{"id": transcriptProjectID, "key": "PRJ-1", "kind_id": "project-kind", "title": "AEON", "fields": map[string]any{"project_key": "AEON"}}
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		raw, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+		if err != nil {
+			t.Errorf("read body: %v", err)
+		}
+		if len(bytes.TrimSpace(raw)) > 0 {
+			if err := json.Unmarshal(raw, &body); err != nil {
+				t.Errorf("decode %s %s: %v", r.Method, r.URL.Path, err)
+			}
+		}
+		*calls = append(*calls, hbCall{method: r.Method, path: r.URL.Path, lease: r.Header.Get("X-Aeon-Worker-Lease"), body: body})
+		w.Header().Set("Content-Type", "application/json")
+		if handle != nil && handle(r, body, w) {
+			return
+		}
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/kinds":
+			_, _ = w.Write([]byte(`{"items":[{"id":"project-kind","slug":"project"}]}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/nodes":
+			_ = json.NewEncoder(w).Encode(map[string]any{"items": []any{project}})
+		case r.Method == http.MethodGet && r.URL.Path == "/api/me":
+			_, _ = w.Write([]byte(`{"principal":{"id":"44444444-4444-4444-8444-444444444444","name":"worker"}}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/projects/"+transcriptProjectID+"/harness-sessions":
+			_, _ = w.Write([]byte(`{"id":"` + transcriptSessionID + `"}`))
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/usage"):
+			_, _ = w.Write([]byte(`{"items":[]}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/projects/"+transcriptProjectID+"/harness-sessions/"+transcriptSessionID:
+			_, _ = w.Write([]byte(`{"activity_sequence":0}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/inbox/messages":
+			_, _ = w.Write([]byte(`{"items":[],"next_after":0}`))
+		case strings.HasPrefix(r.URL.Path, "/api/projects/"+transcriptProjectID+"/harness-sessions/"):
+			_, _ = w.Write([]byte(`{"ok":true}`))
+		default:
+			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}))
+}
+
+func TestRunHeartbeatTerminalStatusExits(t *testing.T) {
+	for _, code := range []int{http.StatusGone, http.StatusForbidden} {
+		t.Run(http.StatusText(code), func(t *testing.T) {
+			var calls []hbCall
+			srv := hbServer(t, &calls, func(r *http.Request, _ map[string]any, w http.ResponseWriter) bool {
+				if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/heartbeat") {
+					w.WriteHeader(code)
+					_, _ = w.Write([]byte(`{"error":"closed"}`))
+					return true
+				}
+				return false
+			})
+			defer srv.Close()
+			rt, _, stderr := heartbeatRuntime(t, srv)
+			dir := t.TempDir()
+			err := rt.runHeartbeat(context.Background(), heartbeatTestOptions(dir), heartbeatDeps{
+				alive: func(int) bool { return true },
+				wait: func(context.Context, int, time.Duration) error {
+					t.Fatal("heartbeat waited after a terminal response")
+					return errOwnerExited
+				},
+			})
+			if err != nil {
+				t.Fatalf("run: %v stderr %s", err, stderr.String())
+			}
+			if len(hbWhere(calls, http.MethodPost, "/heartbeat")) != 1 {
+				t.Fatalf("heartbeats %d", len(hbWhere(calls, http.MethodPost, "/heartbeat")))
+			}
+			if len(hbWhere(calls, http.MethodPost, "/stop")) != 0 {
+				t.Fatal("terminal generation was stopped again")
+			}
+			before := len(calls)
+			err = rt.runHeartbeat(context.Background(), heartbeatTestOptions(dir), heartbeatDeps{alive: func(int) bool { return true }})
+			if err != nil {
+				t.Fatalf("resume: %v", err)
+			}
+			if len(calls) != before {
+				t.Fatalf("resume of a closed generation made %d requests", len(calls)-before)
+			}
+		})
+	}
+}
+
+func TestRunHeartbeatResumeRejectsReusedPID(t *testing.T) {
+	var calls []hbCall
+	srv := heartbeatFixture(t, &calls, "", "")
+	defer srv.Close()
+	rt, _, stderr := heartbeatRuntime(t, srv)
+	dir := t.TempDir()
+	opts := heartbeatTestOptions(dir)
+	opts.OwnerPID = os.Getpid()
+	if err := os.MkdirAll(opts.StateDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	lease := strings.Repeat("ab", 32)
+	if err := os.WriteFile(filepath.Join(opts.StateDir, "lease.key"), []byte(lease+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(opts.StateDir, "session.id"), []byte(transcriptSessionID+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	disk := heartbeatDisk{Schema: heartbeatSchema, SessionID: transcriptSessionID, OwnerPID: os.Getpid(), OwnerStart: "1.2"}
+	raw, err := json.Marshal(disk)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(opts.StateDir, "state.json"), append(raw, '\n'), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	err = rt.runHeartbeat(context.Background(), opts, heartbeatDeps{})
+	if err != nil {
+		t.Fatalf("resume: %v stderr %s", err, stderr.String())
+	}
+	if len(hbWhere(calls, http.MethodPost, "/heartbeat")) != 0 || len(hbWhere(calls, http.MethodPost, "/harness-sessions")) != 0 {
+		t.Fatal("reused pid resumed the generation")
+	}
+	if len(hbWhere(calls, http.MethodPost, "/stop")) != 1 {
+		t.Fatal("reused pid did not stop the generation")
+	}
+}
+
+func TestRunHeartbeatStateDirIsPrivate(t *testing.T) {
+	t.Run("loose directory", func(t *testing.T) {
+		var calls []hbCall
+		srv := heartbeatFixture(t, &calls, "", "")
+		defer srv.Close()
+		rt, _, _ := heartbeatRuntime(t, srv)
+		opts := heartbeatTestOptions(t.TempDir())
+		if err := os.Mkdir(opts.StateDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := rt.runHeartbeat(context.Background(), opts, heartbeatDeps{alive: func(int) bool { return false }}); err == nil {
+			t.Fatal("accepted a directory other users can read")
+		}
+		if len(calls) != 0 {
+			t.Fatal("loose directory reached the server")
+		}
+	})
+	t.Run("symlink", func(t *testing.T) {
+		var calls []hbCall
+		srv := heartbeatFixture(t, &calls, "", "")
+		defer srv.Close()
+		rt, _, _ := heartbeatRuntime(t, srv)
+		dir := t.TempDir()
+		real := filepath.Join(dir, "real")
+		if err := os.Mkdir(real, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		link := filepath.Join(dir, "link")
+		if err := os.Symlink(real, link); err != nil {
+			t.Fatal(err)
+		}
+		opts := heartbeatTestOptions(dir)
+		opts.StateDir = link
+		if err := rt.runHeartbeat(context.Background(), opts, heartbeatDeps{alive: func(int) bool { return false }}); err == nil {
+			t.Fatal("accepted a symlink state directory")
+		}
+		if len(calls) != 0 {
+			t.Fatal("symlink directory reached the server")
+		}
+	})
+	t.Run("loose session file", func(t *testing.T) {
+		var calls []hbCall
+		srv := heartbeatFixture(t, &calls, "", "")
+		defer srv.Close()
+		rt, _, _ := heartbeatRuntime(t, srv)
+		opts := heartbeatTestOptions(t.TempDir())
+		if err := os.Mkdir(opts.StateDir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(opts.StateDir, "session.id"), []byte(transcriptSessionID+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := rt.runHeartbeat(context.Background(), opts, heartbeatDeps{alive: func(int) bool { return false }}); err == nil {
+			t.Fatal("accepted a group-readable session id")
+		}
+		if len(hbWhere(calls, http.MethodPost, "/harness-sessions")) != 0 {
+			t.Fatal("loose session file registered a generation")
+		}
+	})
+}
+
+func TestRunHeartbeatLockIsExclusive(t *testing.T) {
+	var calls []hbCall
+	srv := heartbeatFixture(t, &calls, "", "")
+	defer srv.Close()
+	rt, _, stderr := heartbeatRuntime(t, srv)
+	opts := heartbeatTestOptions(t.TempDir())
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var once sync.Once
+	done := make(chan error, 1)
+	go func() {
+		done <- rt.runHeartbeat(context.Background(), opts, heartbeatDeps{
+			alive: func(int) bool { return true },
+			wait: func(context.Context, int, time.Duration) error {
+				once.Do(func() { close(started) })
+				<-release
+				return errOwnerExited
+			},
+		})
+	}()
+	select {
+	case <-started:
+	case err := <-done:
+		t.Fatalf("first helper exited early: %v stderr %s", err, stderr.String())
+	case <-time.After(10 * time.Second):
+		t.Fatal("first helper did not reach the lock hold")
+	}
+	err := rt.runHeartbeat(context.Background(), opts, heartbeatDeps{alive: func(int) bool { return false }})
+	if !errors.Is(err, errHeartbeatBusy) {
+		t.Fatalf("second start: %v", err)
+	}
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatalf("first helper: %v stderr %s", err, stderr.String())
+	}
+	if len(hbWhere(calls, http.MethodPost, "/harness-sessions")) != 1 {
+		t.Fatal("concurrent start registered a second generation")
+	}
+}
+
+func TestRunHeartbeatUsageReplayIsStable(t *testing.T) {
+	dir := t.TempDir()
+	transcript := filepath.Join(dir, "33333333-3333-4333-8333-333333333331.jsonl")
+	line := `{"uuid":"11111111-1111-4111-8111-111111111111","type":"assistant","message":{"model":"claude-opus","usage":{"input_tokens":10,"output_tokens":4,"cache_read_input_tokens":3}}}` + "\n"
+	if err := os.WriteFile(transcript, []byte(line), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var calls []hbCall
+	usageN := 0
+	srv := hbServer(t, &calls, func(r *http.Request, _ map[string]any, w http.ResponseWriter) bool {
+		if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/usage") {
+			usageN++
+			if usageN == 1 {
+				conn, _, err := w.(http.Hijacker).Hijack()
+				if err != nil {
+					t.Errorf("hijack: %v", err)
+					return true
+				}
+				_ = conn.Close()
+				return true
+			}
+		}
+		return false
+	})
+	defer srv.Close()
+	rt, _, stderr := heartbeatRuntime(t, srv)
+	opts := heartbeatTestOptions(dir)
+	opts.Transcript = transcript
+	n := 0
+	err := rt.runHeartbeat(context.Background(), opts, heartbeatDeps{
+		alive: func(int) bool { return true },
+		wait: func(context.Context, int, time.Duration) error {
+			n++
+			if n == 1 {
+				extra := `{"uuid":"22222222-2222-4222-8222-222222222222","type":"assistant","message":{"model":"claude-opus","usage":{"input_tokens":9,"output_tokens":9,"cache_read_input_tokens":1}}}` + "\n"
+				f, err := os.OpenFile(transcript, os.O_APPEND|os.O_WRONLY, 0o600)
+				if err != nil {
+					return err
+				}
+				_, _ = f.Write([]byte(extra))
+				_ = f.Close()
+				return nil
+			}
+			return errOwnerExited
+		},
+	})
+	if err != nil {
+		t.Fatalf("run: %v stderr %s", err, stderr.String())
+	}
+	usage := hbWhere(calls, http.MethodPost, "/usage")
+	if len(usage) < 2 {
+		t.Fatalf("usage posts %d stderr %s", len(usage), stderr.String())
+	}
+	if usage[0].body["report_id"] != usage[1].body["report_id"] || usage[0].body["sequence"] != usage[1].body["sequence"] || usage[0].body["input_tokens"] != usage[1].body["input_tokens"] {
+		t.Fatalf("replay changed the report: %#v then %#v", usage[0].body, usage[1].body)
+	}
+	if len(usage) > 2 && usage[2].body["report_id"] == usage[0].body["report_id"] {
+		t.Fatal("grown transcript reused the acknowledged report id")
+	}
+}
+
+func TestRunHeartbeatUsageReconcilesServerSequence(t *testing.T) {
+	dir := t.TempDir()
+	transcript := filepath.Join(dir, "33333333-3333-4333-8333-333333333331.jsonl")
+	body := strings.Join([]string{
+		`{"uuid":"11111111-1111-4111-8111-111111111111","type":"assistant","message":{"model":"claude-opus","usage":{"input_tokens":10,"output_tokens":4,"cache_read_input_tokens":3}}}`,
+		`{"type":"assistant","message":{"model":"claude-opus","usage":{"input_tokens":5,"output_tokens":2,"cache_read_input_tokens":1}}}`,
+	}, "\n") + "\n"
+	if err := os.WriteFile(transcript, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var calls []hbCall
+	srv := hbServer(t, &calls, func(r *http.Request, _ map[string]any, w http.ResponseWriter) bool {
+		switch {
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/usage"):
+			w.WriteHeader(http.StatusConflict)
+			_, _ = w.Write([]byte(`{"error":"usage sequence must increase"}`))
+			return true
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/usage"):
+			_, _ = w.Write([]byte(`{"items":[{"model":"claude-opus","sequence":1,"input_tokens":19,"output_tokens":6,"cached_input_tokens":4}]}`))
+			return true
+		default:
+			return false
+		}
+	})
+	defer srv.Close()
+	rt, _, stderr := heartbeatRuntime(t, srv)
+	opts := heartbeatTestOptions(dir)
+	opts.Transcript = transcript
+	err := rt.runHeartbeat(context.Background(), opts, heartbeatDeps{
+		alive: func(int) bool { return true },
+		wait:  func(context.Context, int, time.Duration) error { return errOwnerExited },
+	})
+	if err != nil {
+		t.Fatalf("run: %v stderr %s", err, stderr.String())
+	}
+	if len(hbWhere(calls, http.MethodPost, "/usage")) != 1 || len(hbWhere(calls, http.MethodGet, "/usage")) != 1 {
+		t.Fatalf("usage post %d get %d", len(hbWhere(calls, http.MethodPost, "/usage")), len(hbWhere(calls, http.MethodGet, "/usage")))
+	}
+}
+
+func TestRunHeartbeatFinalUsageFlush(t *testing.T) {
+	dir := t.TempDir()
+	transcript := filepath.Join(dir, "33333333-3333-4333-8333-333333333331.jsonl")
+	body := `{"uuid":"11111111-1111-4111-8111-111111111111","type":"assistant","message":{"model":"claude-opus","usage":{"input_tokens":10,"output_tokens":4,"cache_read_input_tokens":3}}}` + "\n"
+	if err := os.WriteFile(transcript, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var calls []hbCall
+	srv := heartbeatFixture(t, &calls, "", "")
+	defer srv.Close()
+	rt, _, stderr := heartbeatRuntime(t, srv)
+	opts := heartbeatTestOptions(dir)
+	opts.Transcript = transcript
+	err := rt.runHeartbeat(context.Background(), opts, heartbeatDeps{
+		alive: func(int) bool { return true },
+		wait: func(context.Context, int, time.Duration) error {
+			extra := `{"uuid":"22222222-2222-4222-8222-222222222222","type":"assistant","message":{"model":"claude-opus","usage":{"input_tokens":1,"output_tokens":1,"cache_read_input_tokens":0}}}` + "\n"
+			f, err := os.OpenFile(transcript, os.O_APPEND|os.O_WRONLY, 0o600)
+			if err != nil {
+				return err
+			}
+			_, _ = f.Write([]byte(extra))
+			_ = f.Close()
+			return errOwnerExited
+		},
+	})
+	if err != nil {
+		t.Fatalf("run: %v stderr %s", err, stderr.String())
+	}
+	usage := hbWhere(calls, http.MethodPost, "/usage")
+	if len(usage) != 2 {
+		t.Fatalf("usage posts %d stderr %s", len(usage), stderr.String())
+	}
+	if usage[1].body["input_tokens"] != float64(14) || usage[1].body["output_tokens"] != float64(5) || usage[1].body["sequence"] != float64(2) {
+		t.Fatalf("final flush %#v", usage[1].body)
+	}
+	stopAt := -1
+	flushAt := -1
+	for i, call := range calls {
+		if call.method == http.MethodPost && strings.HasSuffix(call.path, "/stop") && stopAt < 0 {
+			stopAt = i
+		}
+		if call.method == http.MethodPost && strings.HasSuffix(call.path, "/usage") && call.body["sequence"] == float64(2) {
+			flushAt = i
+		}
+	}
+	if flushAt < 0 || stopAt < 0 || flushAt > stopAt {
+		t.Fatalf("flush %d stop %d", flushAt, stopAt)
+	}
+}
+
+func TestRunHeartbeatCommitCursorDoesNotStarve(t *testing.T) {
+	repo, _ := gitRepo(t)
+	var calls []hbCall
+	srv := heartbeatFixture(t, &calls, "", "")
+	defer srv.Close()
+	rt, _, stderr := heartbeatRuntime(t, srv)
+	opts := heartbeatTestOptions(t.TempDir())
+	opts.Worktree = repo
+	made := false
+	beats := 0
+	err := rt.runHeartbeat(context.Background(), opts, heartbeatDeps{
+		alive: func(int) bool { return true },
+		label: func() (string, bool) { return "worker", true },
+		wait: func(context.Context, int, time.Duration) error {
+			beats++
+			if beats == 1 && !made {
+				for i := 1; i <= 21; i++ {
+					gitCommit(t, repo, fmt.Sprintf("c%02d", i))
+				}
+				made = true
+			}
+			if beats >= 3 {
+				return errOwnerExited
+			}
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("run: %v stderr %s", err, stderr.String())
+	}
+	heartbeats := hbWhere(calls, http.MethodPost, "/heartbeat")
+	if len(heartbeats) != 3 {
+		t.Fatalf("beats %d", len(heartbeats))
+	}
+	first := commitSubjects(t, heartbeats[1].body["commits"])
+	second := commitSubjects(t, heartbeats[2].body["commits"])
+	if len(first) != 20 || first[0] != "c01" || first[19] != "c20" {
+		t.Fatalf("first batch %v", first)
+	}
+	if len(second) != 1 || second[0] != "c21" {
+		t.Fatalf("second batch %v", second)
+	}
+	for _, subject := range first {
+		if subject == "c21" {
+			t.Fatal("later commit was sent before the cursor advanced")
+		}
+	}
+}
+
+func TestRunHeartbeatSkipsImportedCommits(t *testing.T) {
+	repo, _ := gitRepo(t)
+	branch := strings.TrimSpace(gitCmd(t, repo, "rev-parse", "--abbrev-ref", "HEAD"))
+	var calls []hbCall
+	srv := heartbeatFixture(t, &calls, "", "")
+	defer srv.Close()
+	rt, _, stderr := heartbeatRuntime(t, srv)
+	opts := heartbeatTestOptions(t.TempDir())
+	opts.Worktree = repo
+	done := false
+	beats := 0
+	err := rt.runHeartbeat(context.Background(), opts, heartbeatDeps{
+		alive: func(int) bool { return true },
+		label: func() (string, bool) { return "worker", true },
+		wait: func(context.Context, int, time.Duration) error {
+			beats++
+			if beats == 1 && !done {
+				gitCmd(t, repo, "checkout", "-b", "side")
+				gitCommit(t, repo, "side-work")
+				gitCmd(t, repo, "checkout", branch)
+				gitCmd(t, repo, "merge", "--no-ff", "side", "-m", "merge side")
+				gitCmd(t, repo, "checkout", "-b", "imported")
+				gitCommit(t, repo, "imported-history")
+				gitCmd(t, repo, "checkout", branch)
+				gitCmd(t, repo, "merge", "--ff-only", "imported")
+				gitCommit(t, repo, "local-work")
+				done = true
+			}
+			if beats >= 2 {
+				return errOwnerExited
+			}
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("run: %v stderr %s", err, stderr.String())
+	}
+	heartbeats := hbWhere(calls, http.MethodPost, "/heartbeat")
+	if len(heartbeats) != 2 {
+		t.Fatalf("beats %d", len(heartbeats))
+	}
+	subjects := commitSubjects(t, heartbeats[1].body["commits"])
+	joined := strings.Join(subjects, "\n")
+	if !strings.Contains(joined, "local-work") || strings.Contains(joined, "side-work") || strings.Contains(joined, "imported-history") {
+		t.Fatalf("commits %v", subjects)
+	}
+}
+
+func TestRunHeartbeatInitFailureClosesGeneration(t *testing.T) {
+	dir := t.TempDir()
+	opts := heartbeatTestOptions(dir)
+	if err := os.MkdirAll(opts.StateDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(opts.StateDir, "state.json"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Run("stop succeeds", func(t *testing.T) {
+		var calls []hbCall
+		srv := heartbeatFixture(t, &calls, "", "")
+		defer srv.Close()
+		rt, _, _ := heartbeatRuntime(t, srv)
+		err := rt.runHeartbeat(context.Background(), opts, heartbeatDeps{alive: func(int) bool { return true }})
+		if err == nil {
+			t.Fatal("save failure was ignored")
+		}
+		if len(hbWhere(calls, http.MethodPost, "/harness-sessions")) != 1 || len(hbWhere(calls, http.MethodPost, "/stop")) != 1 {
+			t.Fatalf("register %d stop %d", len(hbWhere(calls, http.MethodPost, "/harness-sessions")), len(hbWhere(calls, http.MethodPost, "/stop")))
+		}
+		if len(hbWhere(calls, http.MethodPost, "/heartbeat")) != 0 {
+			t.Fatal("failed init heartbeated")
+		}
+		if _, statErr := os.Lstat(filepath.Join(opts.StateDir, "stop.intent")); !errors.Is(statErr, os.ErrNotExist) {
+			t.Fatal("successful close kept a stop intent")
+		}
+	})
+}
+
+func TestRunHeartbeatInitFailureKeepsStopIntent(t *testing.T) {
+	dir := t.TempDir()
+	opts := heartbeatTestOptions(dir)
+	if err := os.MkdirAll(opts.StateDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(opts.StateDir, "state.json"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	var calls []hbCall
+	stops := 0
+	srv := hbServer(t, &calls, func(r *http.Request, _ map[string]any, w http.ResponseWriter) bool {
+		if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/stop") {
+			stops++
+			if stops == 1 {
+				w.WriteHeader(http.StatusInternalServerError)
+				_, _ = w.Write([]byte(`{"error":"unavailable"}`))
+				return true
+			}
+		}
+		return false
+	})
+	defer srv.Close()
+	rt, _, _ := heartbeatRuntime(t, srv)
+	err := rt.runHeartbeat(context.Background(), opts, heartbeatDeps{alive: func(int) bool { return false }})
+	if err == nil {
+		t.Fatal("save failure was ignored")
+	}
+	if _, statErr := os.Lstat(filepath.Join(opts.StateDir, "stop.intent")); statErr != nil {
+		t.Fatalf("stop intent: %v", statErr)
+	}
+	if len(hbWhere(calls, http.MethodPost, "/heartbeat")) != 0 {
+		t.Fatal("failed init heartbeated")
+	}
+	// The planted directory blocked the first save. Recovery can register only after it is gone.
+	if err := os.Remove(filepath.Join(opts.StateDir, "state.json")); err != nil {
+		t.Fatal(err)
+	}
+	err = rt.runHeartbeat(context.Background(), opts, heartbeatDeps{alive: func(int) bool { return false }})
+	if err != nil {
+		t.Fatalf("recovery: %v", err)
+	}
+	heartbeats := hbWhere(calls, http.MethodPost, "/heartbeat")
+	if len(heartbeats) != 0 {
+		t.Fatal("recovery heartbeated before the generation was closed")
+	}
+	foundStop := 0
+	for _, call := range calls {
+		if call.method == http.MethodPost && strings.HasSuffix(call.path, "/stop") {
+			foundStop++
+		}
+		if call.method == http.MethodPost && strings.HasSuffix(call.path, "/heartbeat") {
+			t.Fatal("heartbeat before recovery finished")
+		}
+	}
+	if foundStop < 2 {
+		t.Fatalf("stops %d", foundStop)
+	}
+}
+
+func TestUsageScanBoundedAndCancellable(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "usage.jsonl")
+	line1 := `{"uuid":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","type":"assistant","message":{"model":"claude-opus","usage":{"input_tokens":2,"output_tokens":1,"cache_read_input_tokens":0}}}` + "\n"
+	line2 := `{"uuid":"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb","type":"assistant","message":{"model":"claude-opus","usage":{"input_tokens":3,"output_tokens":1,"cache_read_input_tokens":0}}}` + "\n"
+	if err := os.WriteFile(path, []byte(line1+line2), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	sums, next, _, err := scanUsageWindow(context.Background(), path, "", 0, int64(len(line1)), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if next != int64(len(line1)) || sums["claude-opus"].input != 2 || sums["claude-opus"].output != 1 {
+		t.Fatalf("first window next %d sums %#v", next, sums)
+	}
+	rest, end, _, err := scanUsageWindow(context.Background(), path, "", next, 1<<20, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if end != int64(len(line1+line2)) || rest["claude-opus"].input != 3 {
+		t.Fatalf("second window end %d sums %#v", end, rest)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, _, _, err := scanUsageWindow(ctx, path, "", 0, 1<<20, nil); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled scan: %v", err)
+	}
+}
+
+func TestParseProcStatRejectsZombieShape(t *testing.T) {
+	state, start, err := parseProcStat([]byte("42 (agent) S 1 1 1 0 -1 0 0 0 0 0 0 0 0 0 20 0 1 0 4242 0 0\n"))
+	if err != nil || state != "S" || start != 4242 {
+		t.Fatalf("state %s start %d err %v", state, start, err)
+	}
+	state, start, err = parseProcStat([]byte("42 (a) b) Z 1 1 1 0 -1 0 0 0 0 0 0 0 0 0 20 0 1 0 99 0 0\n"))
+	if err != nil || state != "Z" || start != 99 {
+		t.Fatalf("zombie state %s start %d err %v", state, start, err)
+	}
+}
+
+func commitSubjects(t *testing.T, raw any) []string {
+	t.Helper()
+	items, _ := raw.([]any)
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		row, _ := item.(map[string]any)
+		subject, _ := row["subject"].(string)
+		out = append(out, subject)
+	}
+	return out
 }
