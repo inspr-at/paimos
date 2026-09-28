@@ -36,6 +36,10 @@ dev:
 release-check:
     node scripts/verify-release.mjs
 
+# Prepared rules wrapper drift; does not activate instructions or receive rules.
+rules-check:
+    go run ./scripts/rules-bootstrap check
+
 # Release history manifest (inspr.release-history.v1) embedded in the server; reads the local tags.
 release-history:
     go run ./internal/releasehistory/generate -repo . -repository inspr-at/aeon -offline

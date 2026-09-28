@@ -35,6 +35,8 @@ jobs:
           go-version: "1.26"
       - run: go vet ./...
       - run: go test ./...
+      - name: Check prepared rules bootstrap drift
+        run: go run ./scripts/rules-bootstrap check
 
   web:
     runs-on: ubuntu-latest

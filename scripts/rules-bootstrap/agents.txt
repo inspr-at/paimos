@@ -1,0 +1,43 @@
+Rules bootstrap candidate for Codex and Cursor
+
+Activation is controlled by scripts/rules-bootstrap/rollout.json. While its
+state is prepared, keep the existing repository AGENTS.md and home safety
+kernels and routing in force; do not install this identity-free candidate.
+Activation is a separate coordinator gate after person publication and a
+genuine comparison of what each harness read.
+
+Before receive or material work, obtain the coordinator's private first brief
+for this actual generation: binding.json path, independently supplied binding
+SHA256, expected public session UUID, and codex or cursor harness. Never infer
+these from environment, configuration, current slots, or a previous generation.
+The coordinator must separately approve the exact FULL company floor hash
+before creating the binding. Public files must never contain private rules,
+selectors, source paths, floor hashes, bindings, credentials or runtime output.
+
+From the actual checkout root, run:
+go run ./scripts/rules-bootstrap floor --binding PATH --binding-sha256 SHA256 --session UUID --harness HARNESS
+
+Substitute only the explicitly delivered values. Read the FULL exact stdout
+floor through the harness, without truncation, summarization, or treating a
+file write or successful exit as a read. Apply the full floor before receive
+and before any material work. Missing or unverified bootstrap blocks material
+work: stop and report the gap; never weaken or replace the floor to proceed.
+
+Then run the same flags with receive in place of floor. Read the FULL exact
+receive stdout through the harness and apply it before material work. Inspect
+the bounded stderr receipt status. Cache or floor-only output is degraded,
+not rollout success, and leaves material work blocked. Receipt failure keeps
+the checkpoint; do not overwrite, invent a new request, or retry silently.
+Only an explicitly authorized identical attempt adds --retry to receive.
+
+Private runtime belongs only below ignored tmp/aeon-rules/UUID with mode 700
+directories and mode 600 distinct files. Only paimos opens the referenced
+configuration and worker lease. The helper never opens either credential
+source. The CLI must support session start --rules-receive; it must already
+have a registered generation and a correctly configured named instance.
+
+Receipt complete means bytes received, not publication, provenance, load or
+execution verification, authority, or rollout acceptance. Genuine harness-read
+comparison remains a separate activation gate. This helper cannot ensure model
+obedience or reset instructions already loaded. Current home kernels coexist;
+keep existing safety routing functional and report conflicts to the coordinator.

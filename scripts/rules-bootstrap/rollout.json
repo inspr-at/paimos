@@ -1,0 +1,27 @@
+{
+  "schema": "aeon.rules.rollout.v1",
+  "state": "prepared",
+  "existing_agents_sha256": "e11ed1779b7964c83e1e99025b2bf889f4b5145b29ce15350793a92f2a31e21b",
+  "expected_claude_absent": true,
+  "targets": [
+    {
+      "candidate": "scripts/rules-bootstrap/agents.txt",
+      "target": "AGENTS.md",
+      "harnesses": [
+        "codex",
+        "cursor"
+      ],
+      "sha256": "b98093decd2daf70c4f0c2a80a1f78d37e049454ed478349a3c590ddc06fa18d",
+      "byte_size": 2693
+    },
+    {
+      "candidate": "scripts/rules-bootstrap/claude.txt",
+      "target": "CLAUDE.md",
+      "harnesses": [
+        "claude-code"
+      ],
+      "sha256": "2de05fcde79bafc836f875205d2fa50c3e3b2e595b0b548612f342a6c9e4c2c9",
+      "byte_size": 2728
+    }
+  ]
+}
