@@ -16,32 +16,51 @@ import (
 // A lower layer never replaces a higher identity, including locked rules; any
 // tightening must use a distinct identity instead of guessing prose semantics.
 func Merge(c Context, snapshots []Snapshot, now time.Time) (Merged, error) {
+	return merge(c, snapshots, now, false, nil)
+}
+
+// errStopped is returned when stop reports that the caller's time is up.
+var errStopped = &Error{Status: 503, Code: "busy", Message: "the rules store is busy; nothing was changed, try again"}
+
+// merge is Merge with two options for callers that render many contexts over
+// the same snapshots: validated means the caller already checked every
+// snapshot once (validSnapshot) and ordered them by rank and set id
+// (sortSnapshots), and stop, checked per snapshot, ends the work early when the
+// caller's deadline has passed.
+func merge(c Context, snapshots []Snapshot, now time.Time, validated bool, stop func() bool) (Merged, error) {
 	out := Merged{Context: c, Versions: []VersionRef{}, Rules: []Rule{}, Version: "floor-only"}
 	if err := ValidateContext(c); err != nil {
 		return out, err
 	}
-	ordered := slices.Clone(snapshots)
-	slices.SortFunc(ordered, func(a, b Snapshot) int {
-		if d := a.Scope.rank() - b.Scope.rank(); d != 0 {
-			return d
-		}
-		return strings.Compare(a.SetID, b.SetID)
-	})
+	ordered := snapshots
+	if !validated {
+		ordered = slices.Clone(snapshots)
+		slices.SortFunc(ordered, func(a, b Snapshot) int {
+			if d := a.Scope.rank() - b.Scope.rank(); d != 0 {
+				return d
+			}
+			return strings.Compare(a.SetID, b.SetID)
+		})
+	}
 	chosen := map[string]Rule{}
 	ranks := map[string]int{}
 	companyFloor := map[string]Rule{}
 	for _, s := range ordered {
-		if err := ValidateScope(s.Scope); err != nil {
-			return out, err
+		if stop != nil && stop() {
+			return out, errStopped
+		}
+		if !validated {
+			if err := ValidateScope(s.Scope); err != nil {
+				return out, err
+			}
 		}
 		if !s.Scope.matches(c) {
 			continue
 		}
-		if !releasehistory.ValidVersion(s.Version) || s.SHA256 != SnapshotDigest(s) {
-			return out, fail(409, "snapshot_integrity", "invalid snapshot version or digest")
-		}
-		if err := ValidateRules(s.Rules); err != nil {
-			return out, err
+		if !validated {
+			if err := validSnapshot(s); err != nil {
+				return out, err
+			}
 		}
 		out.Versions = append(out.Versions, VersionRef{s.SetID, s.Version, s.SHA256})
 		if out.Version == "floor-only" || s.Version > out.Version {
@@ -103,6 +122,17 @@ func Merge(c Context, snapshots []Snapshot, now time.Time) (Merged, error) {
 		return out, fail(409, "floor_missing", "publish an applicable locked company safety floor before using session rules")
 	}
 	return out, nil
+}
+
+// validSnapshot is the integrity check Merge runs on every snapshot it uses.
+func validSnapshot(s Snapshot) error {
+	if err := ValidateScope(s.Scope); err != nil {
+		return err
+	}
+	if !releasehistory.ValidVersion(s.Version) || s.SHA256 != SnapshotDigest(s) {
+		return fail(409, "snapshot_integrity", "invalid snapshot version or digest")
+	}
+	return ValidateRules(s.Rules)
 }
 
 // SnapshotDigest excludes the digest itself and publication timestamp. An empty

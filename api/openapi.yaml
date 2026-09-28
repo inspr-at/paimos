@@ -292,6 +292,29 @@ paths:
           required: true
           schema:
             type: "string"
+  /rules/publish:
+    post:
+      operationId: "publishRuleSets"
+      description: "Batch publication under one person approval (AEON-263). rules.publish; person only, agents always 403; every set needs the same authority as its single publish (company sets need the workspace publisher). Rules writes take the tenant row lock that access changes take and decide permissions under it, so a concurrent demotion is either seen or waits. All sets are authorized, then revision and rules are checked, before any write. Atomic: one transaction, so any failure (403, 404, 409 revision or version conflict, 422 budget) writes nothing. Set ids must be canonical lowercase UUIDs, each at most once. Each set gets its own immutable snapshot and rules.published event carrying the shared batch_id. After the writes, every session file that includes one of the batch's sets is rendered with every existing contribution (projects with published project rules and a project without any; every person with person or agent rules, other owners' private layers included; each owner's named agents and tasks; every role and harness); files the batch does not touch are not judged. 422 when one exceeds 12000 bytes: with actual_bytes for a file whose every layer the caller may read now (rules.read, decided under the access lock), otherwise a generic message without size or identity. 422 budget_check_too_large when the batch touches too many files, or the rule store is too large, to check at once. The body (at most 2 MiB, 413 above) is read before any lock; lock waits, statements, the budget work and the whole transaction (server-side transaction_timeout) are bounded by the request deadline, and nothing commits after it (503 busy, nothing changed). When COMMIT was sent but its answer was lost, the server looks for this request's stored answer on a fresh connection, independent of the caller's current access: 200 with that answer if it is there, otherwise 503 outcome_unknown (the COMMIT may still land; repeating the same request is safe because an identical batch returns its stored answer). Every other rules write answers an unacknowledged COMMIT with 503 outcome_unknown and reload-first wording, without reconciliation. The complete answer is stored with the writes; an exact replay of the same request by the same person returns that stored answer after re-checking authorization and writes nothing. A new request never reuses a stored version (409). The single-set publish route is unchanged."
+      responses:
+        "200":
+          description: "Every set published, in request order"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/RuleBatchResult"
+        "400": {"description":"Invalid scope, rule, context or calendar version","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "403": {"description":"Permission or scoped ownership denied; agents never publish or edit company rules","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "404": {"description":"Resource unavailable","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "409": {"description":"Revision/version conflict or ambiguous same-rank identity","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "422": {"description":"Rendered rules exceed 12000 UTF-8 bytes; reduce always-on text or move content to details","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "401": {"description":"Authentication required","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              "$ref": "#/components/schemas/RuleBatchPublish"
   /rules/merged:
     get:
       operationId: "mergeAgentRules"
@@ -4616,6 +4639,52 @@ components:
           items:
             "$ref": "#/components/schemas/AgentRule"
       required: ["expected_revision", "name", "rules"]
+    RuleBatchPublish:
+      type: "object"
+      additionalProperties: false
+      properties:
+        items:
+          type: "array"
+          minItems: 1
+          maxItems: 100
+          items:
+            type: "object"
+            additionalProperties: false
+            properties:
+              set_id:
+                type: "string"
+                format: "uuid"
+                pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                description: "Canonical lowercase UUID; other spellings are refused (400)"
+              expected_revision:
+                type: "integer"
+                minimum: 1
+              version:
+                type: "string"
+                pattern: "^(auto|[1-9][0-9]{11}\\.0\\.0)$"
+                description: "auto (the server assigns the next inspr-calendar-v2 coordinate, strictly later than the set's current publication) or an explicit valid UTC calendar coordinate"
+            required: ["set_id", "expected_revision", "version"]
+        note:
+          type: "string"
+          maxLength: 500
+          description: "Optional note stored on every new snapshot of the batch. Empty or omitted stores no note."
+      required: ["items"]
+    RuleBatchResult:
+      type: "object"
+      additionalProperties: false
+      properties:
+        batch_id:
+          type: "string"
+          format: "uuid"
+          description: "Shared id recorded in each set's rules.published event; a replay returns the stored answer with the same id"
+        versions:
+          type: "array"
+          items:
+            "$ref": "#/components/schemas/RuleSnapshot"
+        max_bytes:
+          type: "integer"
+          description: "Largest merged file, in UTF-8 bytes, among the checked files whose every layer the caller may read (rules.read); 0 when there is none"
+      required: ["batch_id", "versions", "max_bytes"]
     RulePublish:
       type: "object"
       additionalProperties: false

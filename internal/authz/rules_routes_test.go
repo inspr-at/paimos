@@ -28,7 +28,7 @@ func TestRulesPermissionsAndRoutes(t *testing.T) {
 			t.Fatal("publish missing for", role)
 		}
 	}
-	for _, p := range []string{"POST /api/rules/sets/{setId}/publish", "POST /api/rules/sets/{setId}/restore"} {
+	for _, p := range []string{"POST /api/rules/sets/{setId}/publish", "POST /api/rules/sets/{setId}/restore", "POST /api/rules/publish"} {
 		if RoutePermissions[p] != "rules.publish" {
 			t.Fatal("publish route permission")
 		}

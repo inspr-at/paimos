@@ -3,9 +3,12 @@
 package rules
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"net/http"
 	"time"
 
@@ -25,22 +28,34 @@ func New(pool *pgxpool.Pool) httpapi.Module { return &Module{pool: pool} }
 
 type endpoint func(*http.Request, pgx.Tx, tenant.Principal) (any, error)
 
+// What a write answers when its COMMIT was sent but not acknowledged. Only a
+// batch publication can find out afterwards (its answer is stored, keyed by
+// person and request); every other write says it does not know.
+const (
+	unknownChange = "The result is unknown. Reload to see the current state before trying again."
+	unknownSet    = "The set may have been created. Reload and check before creating it again."
+	unknownLayer  = "The layer may have been created. Reload and check before creating it again."
+	unknownBatch  = "The server did not confirm whether this publication was saved. Repeating the same request is safe: an identical batch returns its stored result and never publishes twice."
+)
+
 func (m *Module) Mount(mux *http.ServeMux) {
 	for _, route := range []struct {
 		pattern, permission string
 		handler             endpoint
+		unknown             string
 	}{
-		{"GET /api/rules/layers", "rules.read", m.layers}, {"POST /api/rules/layers", "rules.write", m.createLayer},
-		{"GET /api/rules/sets", "rules.read", m.sets}, {"POST /api/rules/sets", "rules.write", m.createSet},
-		{"GET /api/rules/sets/{setId}", "rules.read", m.getSet}, {"PUT /api/rules/sets/{setId}/draft", "rules.write", m.draft},
-		{"POST /api/rules/sets/{setId}/publish", "rules.publish", m.publish}, {"POST /api/rules/sets/{setId}/restore", "rules.publish", m.restore},
-		{"GET /api/rules/sets/{setId}/versions", "rules.read", m.versions}, {"GET /api/rules/sets/{setId}/versions/{version}", "rules.read", m.version},
-		{"GET /api/rules/merged", "rules.read", m.merged},
+		{"GET /api/rules/layers", "rules.read", m.layers, ""}, {"POST /api/rules/layers", "rules.write", m.createLayer, unknownLayer},
+		{"GET /api/rules/sets", "rules.read", m.sets, ""}, {"POST /api/rules/sets", "rules.write", m.createSet, unknownSet},
+		{"GET /api/rules/sets/{setId}", "rules.read", m.getSet, ""}, {"PUT /api/rules/sets/{setId}/draft", "rules.write", m.draft, unknownChange},
+		{"POST /api/rules/sets/{setId}/publish", "rules.publish", m.publish, unknownChange}, {"POST /api/rules/sets/{setId}/restore", "rules.publish", m.restore, unknownChange},
+		{"GET /api/rules/sets/{setId}/versions", "rules.read", m.versions, ""}, {"GET /api/rules/sets/{setId}/versions/{version}", "rules.read", m.version, ""},
+		{"GET /api/rules/merged", "rules.read", m.merged, ""},
+		{"POST /api/rules/publish", "rules.publish", m.publishBatch, unknownBatch},
 	} {
-		mux.HandleFunc(route.pattern, m.endpoint(route.permission, route.handler))
+		mux.HandleFunc(route.pattern, m.endpoint(route.permission, route.unknown, route.handler))
 	}
 }
-func (m *Module) endpoint(permission string, fn endpoint) http.HandlerFunc {
+func (m *Module) endpoint(permission, unknown string, fn endpoint) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
 		p, ok := tenant.PrincipalFrom(r.Context())
@@ -60,9 +75,40 @@ func (m *Module) endpoint(permission string, fn endpoint) http.HandlerFunc {
 			writeFailure(w, authz.ErrForbidden)
 			return
 		}
-		r.Body = http.MaxBytesReader(w, r.Body, 2<<20)
+		// The whole bounded body is read before any transaction or lock, so a slow
+		// or stalled upload never holds the tenant locks taken below.
+		raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxBody))
+		if err != nil {
+			var tooBig *http.MaxBytesError
+			if errors.As(err, &tooBig) {
+				writeFailure(w, fail(413, "invalid_request", "request body exceeds 2 MiB"))
+				return
+			}
+			writeFailure(w, fail(400, "invalid_request", "request body could not be read"))
+			return
+		}
+		r.Body = io.NopCloser(bytes.NewReader(raw))
+		// The transaction's context is never cancelled: pgx answers a cancelled
+		// context by dropping the connection rather than rolling back, which
+		// would leave the locks to the server's timing. The deadline bounds the
+		// work instead: lock and statement timeouts for SQL, explicit checks in
+		// the budget's CPU loops, and InTenant rolls back when fn fails.
+		deadline := time.Now().Add(txTimeout)
+		pending := &outcome{}
+		r = r.WithContext(context.WithValue(withDeadline(context.WithoutCancel(r.Context()), deadline), outcomeKey{}, pending))
 		var out any
-		err := db.InTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
+		committing := false
+		err = db.InTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
+			// Bounded waits and work: a lock that cannot be had in time fails the
+			// request (503) instead of queueing behind or ahead of access changes.
+			// The server enforces the deadline on the whole transaction too:
+			// transaction_timeout (Postgres 17+) and the idle-in-transaction
+			// timeout end the session, and with it every lock, at the deadline,
+			// however long the application spends between statements.
+			remaining := fmt.Sprintf("%dms", max(time.Until(deadline).Milliseconds(), 1))
+			if _, err := tx.Exec(r.Context(), `SELECT set_config('lock_timeout',$1,true),set_config('statement_timeout',$2,true),set_config('transaction_timeout',$3,true),set_config('idle_in_transaction_session_timeout',$3,true)`, lockTimeout, statementTimeout, remaining); err != nil {
+				return err
+			}
 			if err := authz.RequireTx(r.Context(), tx, p, permission, authz.Scope{AnyProject: true}); err != nil {
 				return err
 			}
@@ -74,34 +120,177 @@ func (m *Module) endpoint(permission string, fn endpoint) http.HandlerFunc {
 			if p.Kind == tenant.Agent {
 				agent = p.ID
 			}
-			// Preserve the original project visibility for rule RLS before enabling
-			// workspace company/person nodes. No generic API runs in this transaction.
-			var visibleProjects string
-			if err = tx.QueryRow(r.Context(), `SELECT coalesce(current_setting('aeon.visible_projects',true),'')`).Scan(&visibleProjects); err != nil {
-				return err
-			}
-			_, err = tx.Exec(r.Context(), `SELECT set_config('aeon.rules_projects',$3,true),set_config('aeon.rules_owner',$1,true),set_config('aeon.rules_agent',$2,true),set_config('aeon.rules_access','on',true),set_config('aeon.visible_projects','*',true)`, owner, agent, visibleProjects)
-			if err != nil {
+			if err = enterRules(r.Context(), tx, owner, agent); err != nil {
 				return err
 			}
 			if r.Method != "GET" && r.Method != "HEAD" {
 				if _, err = tx.Exec(r.Context(), `SELECT pg_advisory_xact_lock(hashtextextended(current_setting('aeon.tenant_id',true),0)),set_config('aeon.rules_write','on',true)`); err != nil {
 					return err
 				}
+				if err = lockAccess(r.Context(), tx, p.TenantID); err != nil {
+					return err
+				}
+				// Project visibility was derived when the transaction began; derive
+				// it again under the access lock so a revocation that committed
+				// meanwhile is honoured by every read and decision that follows.
+				var creator any
+				if workorders.UUID(p.KeyCreatorID) {
+					creator = p.KeyCreatorID
+				}
+				if _, err = tx.Exec(r.Context(), `SELECT aeon_enter_principal($1::uuid,$2::uuid,$3::uuid)`, p.TenantID, p.ID, creator); err != nil {
+					return err
+				}
+				if owner, err = actorOwner(r.Context(), tx, p); err != nil {
+					return err
+				}
+				if err = enterRules(r.Context(), tx, owner, agent); err != nil {
+					return err
+				}
 				if err = ensureKinds(r.Context(), tx, p); err != nil {
 					return err
 				}
 			}
-			out, err = fn(r, tx, p)
-			return err
+			if out, err = fn(r, tx, p); err != nil {
+				return err
+			}
+			// Never commit at or after the deadline: this is the last moment
+			// before COMMIT, with a margin for the COMMIT itself.
+			if time.Now().After(deadline.Add(-commitMargin)) {
+				return errStopped
+			}
+			committing = true
+			return nil
 		})
+		if err != nil && committing && !rolledBack(err) {
+			// COMMIT was sent and its answer did not arrive: the change may be
+			// durable, or still committing. Never answer "nothing changed" here.
+			if out, found := m.reconcile(p.TenantID, pending); found {
+				httpapi.WriteJSON(w, 200, out)
+				return
+			}
+			writeFailure(w, &Error{Status: 503, Code: "outcome_unknown", Message: unknown})
+			return
+		}
 		if err != nil {
+			// Before COMMIT nothing is durable. Past the deadline every such
+			// failure is the deadline's: the server may have ended the session.
+			if time.Now().After(deadline.Add(-commitMargin)) {
+				err = errStopped
+			}
 			writeFailure(w, err)
 			return
 		}
 		httpapi.WriteJSON(w, 200, out)
 	}
 }
+
+// outcome carries a batch publication's way to find its stored answer after
+// an unanswered COMMIT. Other writes register nothing: they cannot tell.
+type outcome struct {
+	owner  string
+	digest []byte
+}
+type outcomeKey struct{}
+
+// onUncertain records, for a batch publication, the key of its stored answer.
+func onUncertain(r *http.Request, owner string, digest []byte) {
+	if o, ok := r.Context().Value(outcomeKey{}).(*outcome); ok {
+		o.owner, o.digest = owner, digest
+	}
+}
+
+// rolledBack reports whether a COMMIT failure is a confirmed rollback: the
+// server answered with an error, or pgx saw the transaction end in ROLLBACK.
+// Anything else (EOF, a reset, a timeout while waiting) leaves the outcome open.
+func rolledBack(err error) bool {
+	var pe *pgconn.PgError
+	return errors.As(err, &pe) || errors.Is(err, pgx.ErrTxCommitRollback)
+}
+
+// reconcileHook runs before the reconciliation; tests use it to revoke access
+// or to make the reconciliation fail.
+var reconcileHook = func() error { return nil }
+
+// reconcile looks, on a fresh connection, for the stored answer of a batch
+// publication whose COMMIT went unanswered. The row is keyed by tenant, person
+// and request digest, so it can only be this request's own. The read does not
+// depend on the caller's current access (a revocation after the commit must not
+// hide it): it runs without the caller as principal and opens only this
+// person's batch rows. Found: the stored answer. Anything else (no row yet,
+// the COMMIT perhaps still in flight, or a failed read) is not an answer.
+func (m *Module) reconcile(tenantID string, pending *outcome) (any, bool) {
+	if pending.digest == nil || reconcileHook() != nil {
+		return nil, false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), reconcileTimeout)
+	defer cancel()
+	var out any
+	var found bool
+	err := db.InTenant(ctx, m.pool, tenantID, func(tx pgx.Tx) error {
+		ms := fmt.Sprintf("%dms", reconcileTimeout.Milliseconds())
+		if _, err := tx.Exec(ctx, `SELECT set_config('lock_timeout',$1,true),set_config('statement_timeout',$1,true),set_config('aeon.rules_access','on',true),set_config('aeon.rules_owner',$2,true)`, ms, pending.owner); err != nil {
+			return err
+		}
+		var err error
+		out, found, err = storedBatch(ctx, tx, tenantID, pending.owner, pending.digest)
+		return err
+	})
+	return out, err == nil && found
+}
+
+// enterRules turns on rule visibility for this person or agent: it keeps the
+// caller's project visibility for project rule layers, then opens workspace
+// visibility for company and person rule nodes. No generic API runs in this
+// transaction.
+func enterRules(ctx context.Context, tx pgx.Tx, owner, agent string) error {
+	var visibleProjects string
+	if err := tx.QueryRow(ctx, `SELECT coalesce(current_setting('aeon.visible_projects',true),'')`).Scan(&visibleProjects); err != nil {
+		return err
+	}
+	_, err := tx.Exec(ctx, `SELECT set_config('aeon.rules_projects',$3,true),set_config('aeon.rules_owner',$1,true),set_config('aeon.rules_agent',$2,true),set_config('aeon.rules_access','on',true),set_config('aeon.visible_projects','*',true)`, owner, agent, visibleProjects)
+	return err
+}
+
+type deadlineKey struct{}
+
+// withDeadline records when the request's work must stop; see expired.
+func withDeadline(ctx context.Context, at time.Time) context.Context {
+	return context.WithValue(ctx, deadlineKey{}, at)
+}
+
+// expired reports whether the request's deadline has passed.
+func expired(ctx context.Context) bool {
+	at, ok := ctx.Value(deadlineKey{}).(time.Time)
+	return ok && !time.Now().Before(at)
+}
+
+// lockAccess takes the tenant row lock that every access change takes (role,
+// binding, member and invite mutations in internal/authz) and holds it until
+// commit. Every permission decision of a rules write is made after it, so a
+// concurrent demotion either commits first and is seen, or waits for this
+// write. Order: the tenant advisory lock first, then the row, the same order as
+// authz.lockProjectMutation, so the two never deadlock.
+//
+// NO KEY UPDATE, not UPDATE: it conflicts with the FOR UPDATE that access
+// changes take, but not with the KEY SHARE a foreign key check takes when some
+// other request inserts a row that references the tenant (a knowledge entry,
+// say). Such a request may hold KEY SHARE while it waits for the tenant
+// advisory lock held here; FOR UPDATE would close that cycle into a deadlock.
+func lockAccess(ctx context.Context, tx pgx.Tx, tenantID string) error {
+	var id string
+	return tx.QueryRow(ctx, `SELECT id::text FROM tenants WHERE id=$1::uuid FOR NO KEY UPDATE`, tenantID).Scan(&id)
+}
+
+// Bounds of one rules request. Variables so tests can shorten them.
+var (
+	maxBody          int64 = 2 << 20
+	txTimeout              = 30 * time.Second
+	lockTimeout            = "5s"
+	statementTimeout       = "20s"
+	commitMargin           = 50 * time.Millisecond
+	reconcileTimeout       = 5 * time.Second
+)
+
 func writeFailure(w http.ResponseWriter, err error) {
 	var e *Error
 	var we *workorders.Error
@@ -114,6 +303,8 @@ func writeFailure(w http.ResponseWriter, err error) {
 		e = &Error{Status: 404, Code: "not_found", Message: "rule resource unavailable"}
 	case errors.As(err, &we):
 		e = &Error{Status: we.Status, Code: "invalid_request", Message: we.Message}
+	case errors.As(err, &pe) && (pe.Code == "55P03" || pe.Code == "57014" || pe.Code == "25P03" || pe.Code == "25P04"), errors.Is(err, context.DeadlineExceeded):
+		e = &Error{Status: 503, Code: "busy", Message: "the rules store is busy; nothing was changed, try again"}
 	case errors.As(err, &pe) && pe.Code == "23505":
 		e = &Error{Status: 409, Code: "revision_conflict", Message: "rule identity or version already exists"}
 	default:
