@@ -246,6 +246,7 @@ export function writeBlock(caller: Caller | null, scope: RuleScope): string | nu
   }
   if (scope.layer === 'project') {
     if (!caller.allows('rules.write', scope.project_id)) return 'Editing this project’s rules needs permission to write rules for that project.'
+    if (!caller.allows('rules.publish', scope.project_id)) return 'Editing this project’s rules needs permission to publish rules for that project.'
     return null
   }
   if (scope.layer === 'person') {
@@ -255,6 +256,7 @@ export function writeBlock(caller: Caller | null, scope: RuleScope): string | nu
   }
   if (scope.role) {
     if (!caller.allows('rules.write')) return 'Editing role rules needs the workspace permission to write rules.'
+    if (!caller.allows('rules.publish')) return 'Editing role rules needs the workspace permission to publish rules.'
     return null
   }
   const owns = caller.id === scope.owner_id || (caller.kind === 'agent' && caller.id === scope.agent_id)
