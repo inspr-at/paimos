@@ -2,8 +2,14 @@
 import { mkdirSync } from 'node:fs'
 import { expect, test, type Page } from '@playwright/test'
 
-const shots = '/private/tmp/claude-501/-Users-markus-Code-aeon/a4527da9-f872-45f5-a2f2-48dde0ce2ce5/scratchpad/shots/aeon-125-slice2'
-mkdirSync(shots, { recursive: true })
+// PORTAL_SHOTS names a directory. Unset, this file creates nothing at import.
+const shots = process.env.PORTAL_SHOTS ?? ''
+
+async function capture(page: Page, name: string) {
+  if (!shots) return
+  mkdirSync(shots, { recursive: true })
+  await page.screenshot({ path: `${shots}/${name}`, fullPage: true })
+}
 
 const portal = {
   product: { key: 'PPR-1', title: 'Harbour office', summary: 'Work that is ready before the morning opens.' },
@@ -85,7 +91,7 @@ for (const width of [1600, 390]) {
     await expect(page.getByText('4 votes')).toBeVisible()
     await expect(page.getByRole('button', { name: 'Voted for Owner assembly on a phone' })).toBeDisabled()
     await expectFits(page)
-    await page.screenshot({ path: `${shots}/public-catalog-${width}.png`, fullPage: true })
+    await capture(page, `public-catalog-${width}.png`)
   })
 }
 
@@ -127,7 +133,7 @@ test('status chips appear only past six features, and a wish is title and summar
     await page.getByRole('button', { name: 'Planned', exact: true }).click()
     await expect(page.getByRole('heading', { name: 'live feature 1' })).toBeVisible()
     await expectFits(page)
-    await page.screenshot({ path: `${shots}/public-${width}-${width === 1600 ? 'light' : 'dark'}.png`, fullPage: true })
+    await capture(page, `public-${width}-${width === 1600 ? 'light' : 'dark'}.png`)
   }
   await page.getByLabel('Title').fill('A morning bell')
   await page.getByLabel('Summary').fill('Ring once, before the office opens.')

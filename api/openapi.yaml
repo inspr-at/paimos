@@ -1376,7 +1376,9 @@ paths:
           $ref: '#/components/responses/Error'
     post:
       operationId: createNode
-      description: Allocate a tenant-scoped key, or preserve a supplied import key.
+      description: |
+        Allocate a tenant-scoped key, or preserve a supplied import key.
+        Creating a portal_product, portal_feature or portal_wish in a state other than open, or with live_since, legal_basis or decline_reason, requires a person with settings.manage. Agents are refused.
       security: *auth
       requestBody:
         $ref: '#/components/requestBodies/NodeCreate'
@@ -1384,6 +1386,8 @@ paths:
         '201':
           $ref: '#/components/responses/Node'
         '400':
+          $ref: '#/components/responses/Error'
+        '403':
           $ref: '#/components/responses/Error'
         '409':
           $ref: '#/components/responses/Error'
@@ -1428,6 +1432,10 @@ paths:
         answers 409 and changes nothing when any of them changed since. A node that
         cannot take the change (not found, another project, a kind rule, a cycle) is
         listed under skipped with a reason; nodes already so are listed as unchanged.
+        Setting state, or changing live_since, legal_basis or decline_reason, on a
+        portal_product, portal_feature or portal_wish requires a person with
+        settings.manage. Agents are refused, and the batch changes nothing.
+        Undoing that batch has the same requirement.
       security: *auth
       requestBody:
         required: true
@@ -1478,6 +1486,8 @@ paths:
                         key: {type: string}
                         reason: {type: string}
         '400':
+          $ref: '#/components/responses/Error'
+        '403':
           $ref: '#/components/responses/Error'
         '404':
           $ref: '#/components/responses/Error'
@@ -1554,6 +1564,7 @@ paths:
         updated_at value while holding the node row lock in the write transaction.
         A stale value returns 412 without changing the node or appending an event.
         Omission preserves unconditional patch behavior.
+        State, and live_since, legal_basis or decline_reason, on a portal_product, portal_feature or portal_wish require a person with settings.manage. Agents are refused.
       parameters:
         - name: If-Unmodified-Since
           in: header
@@ -1566,6 +1577,8 @@ paths:
         '200':
           $ref: '#/components/responses/Node'
         '400':
+          $ref: '#/components/responses/Error'
+        '403':
           $ref: '#/components/responses/Error'
         '404':
           $ref: '#/components/responses/Error'
@@ -4139,6 +4152,76 @@ paths:
         '400': {$ref: '#/components/responses/Error'}
         '401': {$ref: '#/components/responses/Error'}
         '403': {$ref: '#/components/responses/Error'}
+  /portal/wishes/{wishId}/publish:
+    post:
+      operationId: publishPortalWish
+      summary: Publish a wish on the public portal
+      description: settings.manage, people only. Agents are refused. A pending or hidden wish becomes published. A wish that is already published is unchanged.
+      security: [{session: []}]
+      parameters: [{name: wishId, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses:
+        '200': {description: Wish after moderation, content: {application/json: {schema: {$ref: '#/components/schemas/PortalModeration'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /portal/wishes/{wishId}/reject:
+    post:
+      operationId: rejectPortalWish
+      summary: Reject a wish that is waiting for review
+      description: settings.manage, people only. Agents are refused. Only a pending wish can be rejected. A wish that is already rejected is unchanged.
+      security: [{session: []}]
+      parameters: [{name: wishId, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses:
+        '200': {description: Wish after moderation, content: {application/json: {schema: {$ref: '#/components/schemas/PortalModeration'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /portal/wishes/{wishId}/hide:
+    post:
+      operationId: hidePortalWish
+      summary: Hide a published wish
+      description: settings.manage, people only. Agents are refused. Only a published wish can be hidden. A wish that is already hidden is unchanged.
+      security: [{session: []}]
+      parameters: [{name: wishId, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses:
+        '200': {description: Wish after moderation, content: {application/json: {schema: {$ref: '#/components/schemas/PortalModeration'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /portal/products/{productId}:
+    patch:
+      operationId: editPortalProduct
+      summary: Edit the public product title, summary or publication
+      description: settings.manage, people only. Agents are refused. published true stores state published; false stores unpublished. Omitted fields stay as they are.
+      security: [{session: []}]
+      parameters: [{name: productId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/PortalProductEdit'}}}}
+      responses:
+        '200': {description: Product after the edit, content: {application/json: {schema: {$ref: '#/components/schemas/PortalModeration'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+  /portal/features/{featureId}:
+    patch:
+      operationId: editPortalFeature
+      summary: Edit a public feature
+      description: settings.manage, people only. Agents are refused. A declined feature needs a public reason. live_since is kept only while the feature is live, and decline_reason only while it is declined.
+      security: [{session: []}]
+      parameters: [{name: featureId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/PortalFeatureEdit'}}}}
+      responses:
+        '200': {description: Feature after the edit, content: {application/json: {schema: {$ref: '#/components/schemas/PortalModeration'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
   /public/portal/{tenantSlug}:
     get:
       operationId: readPublicPortal
@@ -6166,6 +6249,36 @@ components:
       required: [enabled]
       properties:
         enabled: {type: boolean}
+    PortalModeration:
+      type: object
+      additionalProperties: false
+      required: [id, title, summary, state, fields]
+      properties:
+        id: {type: string, format: uuid}
+        title: {type: string}
+        summary: {type: string}
+        state: {type: string}
+        fields:
+          type: object
+          additionalProperties: {type: string}
+          description: Public feature fields only. Internal notes are omitted.
+    PortalProductEdit:
+      type: object
+      additionalProperties: false
+      properties:
+        title: {type: string, minLength: 1, maxLength: 300}
+        summary: {type: string, maxLength: 4000}
+        published: {type: boolean}
+    PortalFeatureEdit:
+      type: object
+      additionalProperties: false
+      properties:
+        title: {type: string, minLength: 1, maxLength: 300}
+        summary: {type: string, maxLength: 4000}
+        status: {type: string, enum: [idea, reviewed, planned, in_progress, live, declined]}
+        legal_basis: {type: string, maxLength: 240}
+        decline_reason: {type: string, maxLength: 500}
+        live_since: {type: string, maxLength: 64}
     PortalProduct:
       type: object
       additionalProperties: false

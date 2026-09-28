@@ -247,6 +247,11 @@ func (m *Module) createNode(ctx context.Context, p tenant.Principal, in nodeCrea
 		if err := requireCreateTarget(ctx, tx, p, kind.Slug, parentID); err != nil {
 			return err
 		}
+		if portalPublicationCreate(kind.Slug, state, in.Fields) {
+			if err := denyUnlessPortalModerator(ctx, tx, p); err != nil {
+				return err
+			}
+		}
 		key := explicit
 		if key == "" {
 			usePrefix := kind.ShortPrefix
@@ -324,6 +329,17 @@ func (m *Module) updateNode(ctx context.Context, p tenant.Principal, id string, 
 			}
 			if kind.Slug == "tag" {
 				return badRequest("rename tags through /api/tags/{tagId}")
+			}
+		}
+		if _, stateSet := raw["state"]; stateSet || raw["fields"] != nil {
+			kind, _, err := loadKind(ctx, tx, current.KindID)
+			if err != nil {
+				return err
+			}
+			if portalStatusWrite(kind.Slug, current.Fields, raw) {
+				if err := denyUnlessPortalModerator(ctx, tx, p); err != nil {
+					return err
+				}
 			}
 		}
 		// Compare after SELECT FOR UPDATE, so competing patches cannot both

@@ -5,8 +5,14 @@ import { fixtures, mockWork } from './work-fixtures'
 import { businessData, mockBusiness } from './business-fixtures'
 import { mockSettings, settingsData } from './settings-fixtures'
 
-const shots = '/private/tmp/claude-501/-Users-markus-Code-aeon/a4527da9-f872-45f5-a2f2-48dde0ce2ce5/scratchpad/shots/aeon-125-slice2'
-mkdirSync(shots, { recursive: true })
+// PORTAL_SHOTS names a directory. Unset, this file creates nothing at import.
+const shots = process.env.PORTAL_SHOTS ?? ''
+
+async function capture(page: Page, name: string) {
+  if (!shots) return
+  mkdirSync(shots, { recursive: true })
+  await page.screenshot({ path: `${shots}/${name}`, fullPage: true })
+}
 
 interface PortalNode {
   id: string
@@ -124,6 +130,53 @@ async function install(page: Page) {
       await route.fulfill({ status: 201, json: created })
       return
     }
+    const wishAction = /^\/api\/portal\/wishes\/([^/]+)\/(publish|reject|hide)$/.exec(path)
+    if (wishAction && method === 'POST') {
+      const node = nodes.find(item => item.id === wishAction[1])
+      if (!node) {
+        await route.fulfill({ status: 404, json: { error: 'not found' } })
+        return
+      }
+      node.state = wishAction[2] === 'publish' ? 'published' : wishAction[2] === 'hide' ? 'hidden' : 'rejected'
+      node.updated_at = stamp()
+      await route.fulfill({ json: { id: node.id, title: node.title, summary: node.body, state: node.state, fields: {} } })
+      return
+    }
+    const productEdit = /^\/api\/portal\/products\/([^/]+)$/.exec(path)
+    if (productEdit && method === 'PATCH') {
+      const node = nodes.find(item => item.id === productEdit[1])
+      if (!node) {
+        await route.fulfill({ status: 404, json: { error: 'not found' } })
+        return
+      }
+      const patch = request.postDataJSON() as { title?: string; summary?: string; published?: boolean }
+      if (patch.title !== undefined) node.title = patch.title
+      if (patch.summary !== undefined) node.body = patch.summary
+      if (patch.published !== undefined) node.state = patch.published ? 'published' : 'unpublished'
+      node.updated_at = stamp()
+      await route.fulfill({ json: { id: node.id, title: node.title, summary: node.body, state: node.state, fields: {} } })
+      return
+    }
+    const featureEdit = /^\/api\/portal\/features\/([^/]+)$/.exec(path)
+    if (featureEdit && method === 'PATCH') {
+      const node = nodes.find(item => item.id === featureEdit[1])
+      if (!node) {
+        await route.fulfill({ status: 404, json: { error: 'not found' } })
+        return
+      }
+      const patch = request.postDataJSON() as { title?: string; summary?: string; status?: string; legal_basis?: string; decline_reason?: string; live_since?: string }
+      if (patch.title !== undefined) node.title = patch.title
+      if (patch.summary !== undefined) node.body = patch.summary
+      if (patch.status !== undefined) node.state = patch.status
+      node.fields = {
+        ...(patch.legal_basis ? { legal_basis: patch.legal_basis } : {}),
+        ...(patch.decline_reason ? { decline_reason: patch.decline_reason } : {}),
+        ...(patch.live_since ? { live_since: patch.live_since } : {}),
+      }
+      node.updated_at = stamp()
+      await route.fulfill({ json: { id: node.id, title: node.title, summary: node.body, state: node.state, fields: node.fields } })
+      return
+    }
     const nodePath = /^\/api\/nodes\/([^/]+)$/.exec(path)
     if (nodePath && method === 'PATCH') {
       const node = nodes.find(item => item.id === nodePath[1])
@@ -173,6 +226,7 @@ for (const width of [1600, 390]) {
     await page.getByLabel('Summary').fill('Work that is ready before the morning opens.')
     await page.getByRole('button', { name: 'Publish', exact: true }).click()
     await expect(page.getByText('Harbour office', { exact: true })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Edit' })).not.toHaveClass(/primary/)
 
     await page.getByRole('button', { name: 'Add a feature' }).click()
     await page.getByLabel('Title').fill('Deadline radar')
@@ -192,8 +246,8 @@ for (const width of [1600, 390]) {
     await quiet.getByRole('button', { name: 'Hide' }).click()
     await expect(quiet.getByText('Hidden')).toBeVisible()
     await expectFits(page)
-    await page.screenshot({ path: `${shots}/admin-${width}-light.png`, fullPage: true })
+    await capture(page, `admin-${width}-light.png`)
     await page.emulateMedia({ colorScheme: 'dark' })
-    await page.screenshot({ path: `${shots}/admin-${width}-dark.png`, fullPage: true })
+    await capture(page, `admin-${width}-dark.png`)
   })
 }

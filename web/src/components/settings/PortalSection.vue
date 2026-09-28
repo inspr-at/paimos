@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { APIError, api, createNode, getKinds, listNodes, updateNode, type Kind, type ListItem } from '../../lib/api'
+import { APIError, api, createNode, getKinds, listNodes, type Kind, type ListItem } from '../../lib/api'
 import { calendarVersion, validVersion } from '../../lib/rules'
 import AppIcon from '../AppIcon.vue'
 import CalendarVersion from '../CalendarVersion.vue'
@@ -172,6 +172,15 @@ function closeForm() {
   formError.value = ''
 }
 
+async function writePortal(path: string, method: string, body?: unknown) {
+  const init: RequestInit = { method }
+  if (body !== undefined) {
+    init.headers = { 'Content-Type': 'application/json' }
+    init.body = JSON.stringify(body)
+  }
+  const response = await api(path, init)
+  if (!response.ok) throw new APIError(response.status, 'The portal was not updated.')
+}
 async function saveProduct() {
   const title = draft.value.title.trim()
   if (!title) { formError.value = 'A product needs a title.'; return }
@@ -180,7 +189,7 @@ async function saveProduct() {
   formError.value = ''
   try {
     if (product.value) {
-      await updateNode(product.value.id, { title, body: draft.value.summary.trim(), state: 'published' })
+      await writePortal(`/portal/products/${encodeURIComponent(product.value.id)}`, 'PATCH', { title, summary: draft.value.summary.trim(), published: true })
     } else {
       await createNode({ kind_id: productKind.value.id, title, body: draft.value.summary.trim(), state: 'published' })
     }
@@ -196,7 +205,7 @@ async function unpublish() {
   if (!product.value || saving.value) return
   saving.value = 'product'
   try {
-    await updateNode(product.value.id, { state: 'unpublished' })
+    await writePortal(`/portal/products/${encodeURIComponent(product.value.id)}`, 'PATCH', { published: false })
     closeForm()
     await load()
   } catch (cause) {
@@ -217,8 +226,18 @@ async function saveFeature() {
   saving.value = 'feature'
   formError.value = ''
   try {
-    if (editing.value) await updateNode(editing.value, { title, body: draft.value.summary.trim(), state: draft.value.status, fields })
-    else await createNode({ kind_id: featureKind.value.id, parent_id: product.value.id, title, body: draft.value.summary.trim(), state: draft.value.status, fields })
+    if (editing.value) {
+      await writePortal(`/portal/features/${encodeURIComponent(editing.value)}`, 'PATCH', {
+        title,
+        summary: draft.value.summary.trim(),
+        status: draft.value.status,
+        legal_basis: draft.value.legal.trim(),
+        ...(draft.value.status === 'declined' ? { decline_reason: draft.value.reason.trim() } : {}),
+        ...(draft.value.status === 'live' ? { live_since: fields.live_since } : {}),
+      })
+    } else {
+      await createNode({ kind_id: featureKind.value.id, parent_id: product.value.id, title, body: draft.value.summary.trim(), state: draft.value.status, fields })
+    }
     closeForm()
     await load()
   } catch (cause) {
@@ -248,7 +267,8 @@ async function setWish(node: ListItem, state: 'published' | 'hidden' | 'rejected
   saving.value = node.id
   notice.value = ''
   try {
-    await updateNode(node.id, { state })
+    const action = state === 'published' ? 'publish' : state === 'hidden' ? 'hide' : 'reject'
+    await writePortal(`/portal/wishes/${encodeURIComponent(node.id)}/${action}`, 'POST')
     await load()
   } catch (cause) {
     notice.value = explain(cause)
@@ -302,7 +322,7 @@ async function setWish(node: ListItem, state: 'published' | 'hidden' | 'rejected
         <p v-if="product.body" class="meta">{{ product.body }}</p>
         <p v-if="product.state !== 'published'" class="meta">Not on the public page.</p>
         <div class="actions">
-          <button type="button" class="btn primary" @click="startProduct">{{ product.state === 'published' ? 'Edit' : 'Publish' }}</button>
+          <button type="button" :class="product.state === 'published' ? 'btn sm' : 'btn primary'" @click="startProduct">{{ product.state === 'published' ? 'Edit' : 'Publish' }}</button>
         </div>
       </template>
     </SettingsCard>

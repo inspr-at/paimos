@@ -56,6 +56,11 @@ func New(pool *pgxpool.Pool, secureCookies bool, macKey []byte) *Module {
 func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/portal/settings", m.readSettings)
 	mux.HandleFunc("PATCH /api/portal/settings", m.updateSettings)
+	mux.HandleFunc("POST /api/portal/wishes/{wishId}/publish", m.publishWish)
+	mux.HandleFunc("POST /api/portal/wishes/{wishId}/reject", m.rejectWish)
+	mux.HandleFunc("POST /api/portal/wishes/{wishId}/hide", m.hideWish)
+	mux.HandleFunc("PATCH /api/portal/products/{productId}", m.editProduct)
+	mux.HandleFunc("PATCH /api/portal/features/{featureId}", m.editFeature)
 	mux.HandleFunc("GET /api/public/portal/{tenantSlug}", m.read)
 	mux.HandleFunc("POST /api/public/portal/{tenantSlug}/wishes", m.submitWish)
 	mux.HandleFunc("POST /api/public/portal/{tenantSlug}/wishes/{wishKey}/votes", m.vote)
