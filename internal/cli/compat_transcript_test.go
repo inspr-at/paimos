@@ -19,7 +19,7 @@ import (
 // issue create/get/list/update/comment/search/move; knowledge list/get/create/
 // update; project list; session start; anchors scan/verify; skill render;
 // sync check; harness register/list/status/orchestrator/bind/heartbeat/yield/
-// drain/complete-delivery/interrupt/stop/complete-control/mark-stopped;
+// drain/complete-delivery/interrupt/stop/complete-control/mark-stopped/run-heartbeat;
 // run-agent watch; baseline-batch report-built; tell/listen/message (CP1);
 // runtime setup (historical integration); manifest pull (removed in PAI-358).
 // Messaging and intercom are deliberately exercised in their owning package.
