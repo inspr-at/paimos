@@ -31,6 +31,7 @@ type heartbeatDisk struct {
 	PendingUsage   []heartbeatPendingUsage `json:"pending_usage,omitempty"`
 	UsageOffset    int64                   `json:"usage_offset,omitempty"`
 	UsageRecent    []string                `json:"usage_recent,omitempty"`
+	UsageDiscard   bool                    `json:"usage_discard,omitempty"`
 	OwnerPID       int                     `json:"owner_pid,omitempty"`
 	OwnerStart     string                  `json:"owner_start,omitempty"`
 	BoundWorktree  string                  `json:"bound_worktree,omitempty"`
@@ -39,6 +40,7 @@ type heartbeatDisk struct {
 	CommitCursor   string                  `json:"commit_cursor,omitempty"`
 	Terminal       bool                    `json:"terminal,omitempty"`
 	TerminalReason string                  `json:"terminal_reason,omitempty"`
+	Closed         bool                    `json:"closed,omitempty"`
 }
 
 type heartbeatUsageDisk struct {
@@ -60,6 +62,7 @@ type heartbeatPendingUsage struct {
 	ReportID string   `json:"report_id"`
 	Offset   int64    `json:"offset"`
 	Recent   []string `json:"recent,omitempty"`
+	Discard  bool     `json:"discard,omitempty"`
 }
 
 type heartbeatSession struct {
@@ -71,7 +74,7 @@ type heartbeatSession struct {
 
 func validStateName(name string) bool {
 	switch name {
-	case "session.id", "state.json", "lease.key", "session.ref", "stop.intent", "heartbeat.lock":
+	case "session.id", "state.json", "lease.key", "session.ref", "stop.intent", "settle.intent", "heartbeat.lock":
 		return true
 	default:
 		return false
@@ -156,7 +159,7 @@ func readOrCreateStateSecret(hold *heartbeatHold, name string, n int) (string, e
 
 func clearHeartbeatIdentity(hold *heartbeatHold) error {
 	var first error
-	for _, name := range []string{"stop.intent", "session.id", "state.json", "session.ref", "lease.key"} {
+	for _, name := range []string{"settle.intent", "stop.intent", "session.id", "state.json", "session.ref", "lease.key"} {
 		if err := hold.remove(name); err != nil && first == nil {
 			first = err
 		}

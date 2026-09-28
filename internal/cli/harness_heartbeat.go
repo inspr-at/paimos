@@ -235,6 +235,13 @@ func (rt *runtime) runHeartbeat(ctx context.Context, o heartbeatOptions, dep hea
 		return err
 	}
 	defer session.hold.release()
+	// A completed generation keeps its identity. Retry usage here and do not
+	// heartbeat: a beat against an already-stopped session is a 403 that
+	// would mark the generation terminal and strand the report.
+	if heartbeatSettling(&session) {
+		rt.settleGeneration(o, &session)
+		return nil
+	}
 	if session.disk.Terminal {
 		return nil
 	}
@@ -260,6 +267,7 @@ func (rt *runtime) runHeartbeat(ctx context.Context, o heartbeatOptions, dep hea
 		err := rt.heartbeatBeat(ctx, o, dep, &session)
 		switch {
 		case errors.Is(err, errHeartbeatTerminal):
+			rememberSettlement(&session)
 			if serr := saveHeartbeatSession(&session); serr != nil {
 				return serr
 			}
@@ -318,7 +326,13 @@ func (rt *runtime) finishHeartbeat(o heartbeatOptions, session *heartbeatSession
 // A stalled report ends this budget only; the cursor and any unacknowledged
 // report stay on disk for the next start.
 func (rt *runtime) drainHeartbeatUsage(ctx context.Context, o heartbeatOptions, session *heartbeatSession) {
-	if session == nil || session.disk.Terminal {
+	if session == nil {
+		return
+	}
+	// Terminal means "do not heartbeat". Pending usage is still owed; a
+	// stopped generation is allowed to settle, and a closed one may still
+	// have transcript bytes past the cursor.
+	if session.disk.Terminal && len(session.disk.PendingUsage) == 0 && !session.disk.Closed {
 		return
 	}
 	if o.Transcript == "" && len(session.disk.PendingUsage) == 0 {
@@ -344,6 +358,12 @@ func (rt *runtime) drainHeartbeatUsage(ctx context.Context, o heartbeatOptions, 
 		uerr := rt.reportHeartbeatUsage(ctx, projectID, o, session)
 		if heartbeatTerminalStatus(uerr) {
 			markHeartbeatTerminal(session, terminalReason(uerr))
+			if heartbeatStatus(uerr) == http.StatusGone {
+				session.disk.PendingUsage = nil
+				_ = session.hold.remove("settle.intent")
+			} else {
+				rememberSettlement(session)
+			}
 			_ = saveHeartbeatSession(session)
 			return
 		}
@@ -377,16 +397,19 @@ func heartbeatTranscriptCaughtUp(path string, offset int64) bool {
 }
 
 // finishStop closes the generation on a budget that the usage flush does not share.
-// A failed close leaves stop.intent so the next start retries it.
+// A failed close leaves stop.intent so the next start retries it. Pending usage
+// is recorded as settle.intent whether or not the close itself succeeds.
 func (rt *runtime) finishStop(o heartbeatOptions, session *heartbeatSession) error {
 	ctx, cancel := context.WithTimeout(context.Background(), heartbeatStopTimeout)
 	defer cancel()
 	err := rt.stopHeartbeat(ctx, o.Project, *session)
 	if err != nil {
 		rememberStopIntent(session)
+		rememberSettlement(session)
+		_ = saveHeartbeatSession(session)
 		return err
 	}
-	return nil
+	return persistStopSuccess(session)
 }
 
 func rememberStopIntent(session *heartbeatSession) {
@@ -394,6 +417,72 @@ func rememberStopIntent(session *heartbeatSession) {
 		return
 	}
 	_ = session.hold.writeFile("stop.intent", []byte(session.id+"\n"))
+}
+
+func rememberSettleIntent(session *heartbeatSession) {
+	if session == nil || session.id == "" || session.hold.dir == nil {
+		return
+	}
+	_ = session.hold.writeFile("settle.intent", []byte(session.id+"\n"))
+}
+
+func rememberSettlement(session *heartbeatSession) {
+	if session == nil || len(session.disk.PendingUsage) == 0 {
+		return
+	}
+	rememberSettleIntent(session)
+}
+
+func settleIntent(session *heartbeatSession) bool {
+	if session == nil || session.hold.dir == nil {
+		return false
+	}
+	_, err := session.hold.readFile("settle.intent", 256)
+	return err == nil
+}
+
+func heartbeatSettling(session *heartbeatSession) bool {
+	if session == nil {
+		return false
+	}
+	if session.disk.Closed || settleIntent(session) {
+		return true
+	}
+	return session.disk.Terminal && len(session.disk.PendingUsage) > 0
+}
+
+// settleGeneration posts usage owed by a generation that must not heartbeat.
+func (rt *runtime) settleGeneration(o heartbeatOptions, session *heartbeatSession) {
+	ctx, cancel := context.WithTimeout(context.Background(), heartbeatUsageFlushTimeout)
+	defer cancel()
+	rt.drainHeartbeatUsage(ctx, o, session)
+	if session.disk.TerminalReason == "archived" {
+		session.disk.PendingUsage = nil
+		_ = session.hold.remove("settle.intent")
+	} else if len(session.disk.PendingUsage) == 0 {
+		_ = session.hold.remove("settle.intent")
+	} else {
+		rememberSettleIntent(session)
+	}
+	_ = saveHeartbeatSession(session)
+}
+
+// persistStopSuccess keeps the generation id and transcript cursor. The next
+// start settles any leftover usage and does not register another generation.
+func persistStopSuccess(session *heartbeatSession) error {
+	if session == nil {
+		return errHeartbeatState
+	}
+	session.disk.Closed = true
+	if len(session.disk.PendingUsage) > 0 {
+		rememberSettleIntent(session)
+	} else if session.hold.dir != nil {
+		_ = session.hold.remove("settle.intent")
+	}
+	if session.hold.dir != nil {
+		_ = session.hold.remove("stop.intent")
+	}
+	return saveHeartbeatSession(session)
 }
 
 // abandonHeartbeat closes a generation whose state could not be saved, and
@@ -533,6 +622,9 @@ func (rt *runtime) recoverStopIntent(o heartbeatOptions, session *heartbeatSessi
 	stopping := heartbeatSession{id: id, lease: lease}
 	// A previous flush may have saved a report and then failed to stop.
 	// Post that work on the usage budget, then stop on a fresh one.
+	// The generation id and transcript cursor stay so the next start cannot
+	// register again and reread the same bytes.
+	var kept *heartbeatSession
 	if existing, ok, loadErr := loadHeartbeatSession(&session.hold); loadErr == nil && ok && strings.EqualFold(existing.id, id) {
 		existing.hold = session.hold
 		existing.lease = lease
@@ -540,14 +632,22 @@ func (rt *runtime) recoverStopIntent(o heartbeatOptions, session *heartbeatSessi
 		rt.drainHeartbeatUsage(usageCtx, o, &existing)
 		cancel()
 		stopping.disk.ProjectID = existing.disk.ProjectID
+		kept = &existing
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), heartbeatStopTimeout)
 	defer cancel()
 	stopErr := rt.stopHeartbeat(ctx, o.Project, stopping)
 	if stopErr != nil {
+		if kept != nil {
+			rememberSettlement(kept)
+			_ = saveHeartbeatSession(kept)
+		}
 		return stopErr
 	}
-	return clearHeartbeatIdentity(&session.hold)
+	if kept != nil {
+		return persistStopSuccess(kept)
+	}
+	return session.hold.remove("stop.intent")
 }
 
 func bindHeartbeatWorktree(ctx context.Context, o heartbeatOptions, disk *heartbeatDisk) {
@@ -615,6 +715,7 @@ func (rt *runtime) heartbeatBeat(ctx context.Context, o heartbeatOptions, dep he
 	if heartbeatTerminalStatus(err) {
 		session.disk.Sequence--
 		markHeartbeatTerminal(session, terminalReason(err))
+		rememberSettlement(session)
 		return errHeartbeatTerminal
 	}
 	if err != nil && heartbeatStatus(err) == http.StatusConflict {
@@ -630,6 +731,7 @@ func (rt *runtime) heartbeatBeat(ctx context.Context, o heartbeatOptions, dep he
 	if heartbeatTerminalStatus(err) {
 		session.disk.Sequence--
 		markHeartbeatTerminal(session, terminalReason(err))
+		rememberSettlement(session)
 		return errHeartbeatTerminal
 	}
 	if err != nil {
@@ -650,6 +752,7 @@ func (rt *runtime) heartbeatBeat(ctx context.Context, o heartbeatOptions, dep he
 			}
 			if heartbeatTerminalStatus(uerr) {
 				markHeartbeatTerminal(session, terminalReason(uerr))
+				rememberSettlement(session)
 				return errHeartbeatTerminal
 			}
 			fmt.Fprintf(rt.stderr, "heartbeat: usage report failed\n")

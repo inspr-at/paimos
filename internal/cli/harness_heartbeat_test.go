@@ -1094,14 +1094,14 @@ func TestUsageScanBoundedAndCancellable(t *testing.T) {
 	if err := os.WriteFile(path, []byte(line1+line2), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	sums, next, _, err := scanUsageWindow(context.Background(), path, "", 0, int64(len(line1)), nil)
+	sums, next, _, _, err := scanUsageWindow(context.Background(), path, "", 0, int64(len(line1)), nil, false)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if next != int64(len(line1)) || sums["claude-opus"].input != 2 || sums["claude-opus"].output != 1 {
 		t.Fatalf("first window next %d sums %#v", next, sums)
 	}
-	rest, end, _, err := scanUsageWindow(context.Background(), path, "", next, 1<<20, nil)
+	rest, end, _, _, err := scanUsageWindow(context.Background(), path, "", next, 1<<20, nil, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1110,7 +1110,7 @@ func TestUsageScanBoundedAndCancellable(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, _, _, err := scanUsageWindow(ctx, path, "", 0, 1<<20, nil); !errors.Is(err, context.Canceled) {
+	if _, _, _, _, err := scanUsageWindow(ctx, path, "", 0, 1<<20, nil, false); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancelled scan: %v", err)
 	}
 }
@@ -1150,7 +1150,7 @@ func TestUsagePartialLineKeepsStartOffset(t *testing.T) {
 	if err := os.WriteFile(path, []byte(line[:cut]), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	first, offset, recent, err := scanUsageWindow(context.Background(), path, "", 0, heartbeatUsageWindow, nil)
+	first, offset, recent, _, err := scanUsageWindow(context.Background(), path, "", 0, heartbeatUsageWindow, nil, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1163,7 +1163,7 @@ func TestUsagePartialLineKeepsStartOffset(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, _, _, err := scanUsageWindow(context.Background(), path, "", offset, heartbeatUsageWindow, recent)
+	second, _, _, _, err := scanUsageWindow(context.Background(), path, "", offset, heartbeatUsageWindow, recent, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1177,7 +1177,7 @@ func TestUsageOversizedLineStaysInsideBudget(t *testing.T) {
 	if err := os.WriteFile(path, []byte(strings.Repeat("x", 8<<20)+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	_, offset, _, err := scanUsageWindow(context.Background(), path, "", 0, heartbeatUsageWindow, nil)
+	_, offset, _, _, err := scanUsageWindow(context.Background(), path, "", 0, heartbeatUsageWindow, nil, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1190,7 +1190,7 @@ func TestReadLimitedLineHonorsCancelAndBudget(t *testing.T) {
 	payload := strings.Repeat("x", 8<<20) + "\n"
 	ctx := &heartbeatErrAfter{Context: context.Background(), left: 1}
 	reader := bufio.NewReader(strings.NewReader(payload))
-	_, _, err := readLimitedLine(ctx, reader, heartbeatUsageLineMax, int64(heartbeatUsageLineMax)+1)
+	_, _, _, err := readLimitedLine(ctx, reader, heartbeatUsageLineMax, int64(heartbeatUsageLineMax)+1)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancelled read: %v", err)
 	}
@@ -1203,8 +1203,8 @@ func TestReadLimitedLineHonorsCancelAndBudget(t *testing.T) {
 	}
 
 	budgetReader := bufio.NewReader(strings.NewReader(payload))
-	_, overflow, err := readLimitedLine(context.Background(), budgetReader, heartbeatUsageLineMax, 4096)
-	if err != nil || !overflow {
+	_, overflow, remainder, err := readLimitedLine(context.Background(), budgetReader, heartbeatUsageLineMax, 4096)
+	if err != nil || !overflow || !remainder {
 		t.Fatalf("budget overflow=%v err=%v", overflow, err)
 	}
 	left, err := io.ReadAll(budgetReader)
@@ -1416,6 +1416,230 @@ func TestStopIntentFlushesPendingUsage(t *testing.T) {
 	}
 	if len(hbWhere(calls, http.MethodPost, "/stop")) < 1 {
 		t.Fatal("retried start did not stop")
+	}
+}
+
+func TestClaudeTitleSkipsOversizedLine(t *testing.T) {
+	for _, size := range []int{6000, 8192} {
+		t.Run(fmt.Sprintf("%d", size), func(t *testing.T) {
+			id := "0199a213-81c0-7800-8aa1-bbab2a035a53"
+			projects := filepath.Join(t.TempDir(), "projects")
+			sessionDir := filepath.Join(projects, "encoded-cwd")
+			if err := os.MkdirAll(sessionDir, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			var body strings.Builder
+			body.WriteString(`{"type":"custom-title","customTitle":"Before"}` + "\n")
+			body.WriteString(`{"type":"assistant","message":{"content":"` + strings.Repeat("x", size) + `"}}` + "\n")
+			body.WriteString(`{"type":"custom-title","customTitle":"After"}` + "\n")
+			transcript := filepath.Join(sessionDir, id+".jsonl")
+			if err := os.WriteFile(transcript, []byte(body.String()), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			got, ok := claudeSessionLabel(heartbeatOptions{ClaudeProjects: projects}, id)
+			if !ok || got != "After" {
+				t.Fatalf("title %q ok %v", got, ok)
+			}
+		})
+	}
+}
+
+func TestSuccessfulStopRetriesPendingUsageWithoutHeartbeat(t *testing.T) {
+	dir := t.TempDir()
+	transcript := filepath.Join(dir, "usage.jsonl")
+	if err := os.WriteFile(transcript, []byte(heartbeatProbeUsageLine(1)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var calls []hbCall
+	posts := 0
+	srv := hbServer(t, &calls, func(r *http.Request, _ map[string]any, w http.ResponseWriter) bool {
+		if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/usage") {
+			posts++
+			if posts <= 2 {
+				w.WriteHeader(http.StatusServiceUnavailable)
+				_, _ = w.Write([]byte(`{"error":"unavailable"}`))
+				return true
+			}
+		}
+		return false
+	})
+	defer srv.Close()
+	rt, _, stderr := heartbeatRuntime(t, srv)
+	opts := heartbeatTestOptions(dir)
+	opts.Transcript = transcript
+	err := rt.runHeartbeat(context.Background(), opts, heartbeatDeps{
+		alive: func(int) bool { return true },
+		wait: func(context.Context, int, time.Duration) error {
+			return errOwnerExited
+		},
+	})
+	if err != nil {
+		t.Fatalf("stop: %v stderr %s", err, stderr.String())
+	}
+	if _, statErr := os.Lstat(filepath.Join(opts.StateDir, "settle.intent")); statErr != nil {
+		t.Fatalf("settle intent: %v", statErr)
+	}
+	heartbeats := len(hbWhere(calls, http.MethodPost, "/heartbeat"))
+	registrations := len(hbWhere(calls, http.MethodPost, "/harness-sessions"))
+	err = rt.runHeartbeat(context.Background(), opts, heartbeatDeps{
+		alive: func(int) bool { return true },
+		wait: func(context.Context, int, time.Duration) error {
+			t.Fatal("restart heartbeated a stopped generation")
+			return errOwnerExited
+		},
+	})
+	if err != nil {
+		t.Fatalf("restart: %v stderr %s", err, stderr.String())
+	}
+	if got := len(hbWhere(calls, http.MethodPost, "/heartbeat")); got != heartbeats {
+		t.Fatalf("heartbeats %d, want %d", got, heartbeats)
+	}
+	if got := len(hbWhere(calls, http.MethodPost, "/harness-sessions")); got != registrations {
+		t.Fatalf("registrations %d", got)
+	}
+	if posts < 3 {
+		t.Fatalf("usage posts %d, pending report was not retried", posts)
+	}
+	usage := hbWhere(calls, http.MethodPost, "/usage")
+	if usage[len(usage)-1].body["input_tokens"] != float64(2) {
+		t.Fatalf("settled usage %#v", usage[len(usage)-1].body)
+	}
+}
+
+func TestStopRecoveryDoesNotDoubleCountUsage(t *testing.T) {
+	dir := t.TempDir()
+	transcript := filepath.Join(dir, "usage.jsonl")
+	if err := os.WriteFile(transcript, []byte(heartbeatProbeUsageLine(1)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var calls []hbCall
+	stops := 0
+	srv := hbServer(t, &calls, func(r *http.Request, _ map[string]any, w http.ResponseWriter) bool {
+		if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/stop") {
+			stops++
+			if stops == 1 {
+				w.WriteHeader(http.StatusInternalServerError)
+				_, _ = w.Write([]byte(`{"error":"unavailable"}`))
+				return true
+			}
+		}
+		return false
+	})
+	defer srv.Close()
+	rt, _, stderr := heartbeatRuntime(t, srv)
+	opts := heartbeatTestOptions(dir)
+	opts.Transcript = transcript
+	err := rt.runHeartbeat(context.Background(), opts, heartbeatDeps{
+		alive: func(int) bool { return true },
+		wait: func(context.Context, int, time.Duration) error {
+			return errOwnerExited
+		},
+	})
+	if err == nil {
+		t.Fatal("stop failure was ignored")
+	}
+	raw, err := os.ReadFile(filepath.Join(opts.StateDir, "session.id"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := strings.TrimSpace(string(raw))
+	err = rt.runHeartbeat(context.Background(), opts, heartbeatDeps{
+		alive: func(int) bool { return true },
+		wait: func(context.Context, int, time.Duration) error {
+			t.Fatal("recovery heartbeated the completed generation")
+			return errOwnerExited
+		},
+	})
+	if err != nil {
+		t.Fatalf("recovery: %v stderr %s", err, stderr.String())
+	}
+	if got := len(hbWhere(calls, http.MethodPost, "/harness-sessions")); got != 1 {
+		t.Fatalf("registrations %d", got)
+	}
+	usage := hbWhere(calls, http.MethodPost, "/usage")
+	if len(usage) != 1 || usage[0].body["input_tokens"] != float64(2) {
+		t.Fatalf("usage posts %#v", usage)
+	}
+	kept, err := os.ReadFile(filepath.Join(opts.StateDir, "session.id"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(string(kept)) != id {
+		t.Fatalf("generation changed from %s to %s", id, strings.TrimSpace(string(kept)))
+	}
+	stateRaw, err := os.ReadFile(filepath.Join(opts.StateDir, "state.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var disk heartbeatDisk
+	if err := json.Unmarshal(stateRaw, &disk); err != nil {
+		t.Fatal(err)
+	}
+	if !disk.Closed || disk.UsageOffset == 0 {
+		t.Fatalf("closed %v cursor %d", disk.Closed, disk.UsageOffset)
+	}
+}
+
+func TestUsageOversizedSuffixIsNotAnotherRecord(t *testing.T) {
+	good := heartbeatProbeUsageLine(1)
+	suffix := strings.TrimSuffix(heartbeatProbeUsageLine(2), "\n")
+	limit := heartbeatUsageWindow + int64(heartbeatUsageLineMax) + 1
+	if int64(len(good)) >= limit {
+		t.Fatal("probe line is longer than the scan limit")
+	}
+	pad := strings.Repeat("x", int(limit)-len(good))
+	path := filepath.Join(t.TempDir(), "usage.jsonl")
+	if err := os.WriteFile(path, []byte(good+pad+suffix+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	sums, next, recent, discard, err := scanUsageWindow(context.Background(), path, "", 0, heartbeatUsageWindow, nil, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sums["claude-opus"].input != 2 || !discard || next != limit {
+		t.Fatalf("first window input %d discard %v cursor %d limit %d", sums["claude-opus"].input, discard, next, limit)
+	}
+	if got := good + pad; int64(len(got)) != limit || !strings.HasPrefix(suffix, "{") {
+		t.Fatal("suffix is not aligned to the scan limit")
+	}
+	rest, _, _, still, err := scanUsageWindow(context.Background(), path, "", next, heartbeatUsageWindow, recent, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rest["claude-opus"].input != 0 || still {
+		t.Fatalf("discarded suffix counted input %d discard %v", rest["claude-opus"].input, still)
+	}
+	again, _, _, _, err := scanUsageWindow(context.Background(), path, "", next, heartbeatUsageWindow, recent, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again["claude-opus"].input != 2 {
+		t.Fatalf("suffix without discard state counted %d, want 2", again["claude-opus"].input)
+	}
+
+	var calls []hbCall
+	srv := heartbeatFixture(t, &calls, "", "")
+	defer srv.Close()
+	rt, _, stderr := heartbeatRuntime(t, srv)
+	opts := heartbeatTestOptions(t.TempDir())
+	opts.Transcript = path
+	beats := 0
+	err = rt.runHeartbeat(context.Background(), opts, heartbeatDeps{
+		alive: func(int) bool { return true },
+		wait: func(context.Context, int, time.Duration) error {
+			beats++
+			if beats >= 2 {
+				return errOwnerExited
+			}
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("run: %v stderr %s", err, stderr.String())
+	}
+	usage := hbWhere(calls, http.MethodPost, "/usage")
+	if len(usage) != 1 || usage[0].body["input_tokens"] != float64(2) {
+		t.Fatalf("usage across beats %#v", usage)
 	}
 }
 

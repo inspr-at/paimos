@@ -32,7 +32,7 @@ func (rt *runtime) reportHeartbeatUsage(ctx context.Context, projectID string, o
 	if o.Transcript == "" {
 		return nil
 	}
-	sums, next, recent, err := scanUsageWindow(ctx, o.Transcript, heartbeatText(o.Model, 128), session.disk.UsageOffset, heartbeatUsageWindow, session.disk.UsageRecent)
+	sums, next, recent, discarding, err := scanUsageWindow(ctx, o.Transcript, heartbeatText(o.Model, 128), session.disk.UsageOffset, heartbeatUsageWindow, session.disk.UsageRecent, session.disk.UsageDiscard)
 	if err != nil {
 		return err
 	}
@@ -71,12 +71,13 @@ func (rt *runtime) reportHeartbeatUsage(ctx context.Context, projectID string, o
 		created = append(created, heartbeatPendingUsage{
 			Model: model, Sequence: seq, Input: input, Output: output, Cached: cached,
 			ReportID: usageReportID(session.id, model, seq, input, output, cached),
-			Offset:   next, Recent: recent,
+			Offset:   next, Recent: recent, Discard: discarding,
 		})
 	}
 	if len(created) == 0 {
 		session.disk.UsageOffset = next
 		session.disk.UsageRecent = trimRecent(recent)
+		session.disk.UsageDiscard = discarding
 		return nil
 	}
 	session.disk.PendingUsage = append(session.disk.PendingUsage, created...)
@@ -193,8 +194,9 @@ func commitUsage(session *heartbeatSession, pending heartbeatPendingUsage, ack u
 	if len(session.disk.PendingUsage) > 0 {
 		session.disk.PendingUsage = session.disk.PendingUsage[1:]
 	}
-	if pending.Offset > session.disk.UsageOffset {
+	if pending.Offset > session.disk.UsageOffset || (pending.Offset == session.disk.UsageOffset && pending.Discard != session.disk.UsageDiscard) {
 		session.disk.UsageOffset = pending.Offset
+		session.disk.UsageDiscard = pending.Discard
 	}
 	if len(pending.Recent) > 0 {
 		session.disk.UsageRecent = trimRecent(pending.Recent)
@@ -269,29 +271,56 @@ func claudeTitleFile(ctx context.Context, path string) (string, bool) {
 	if err != nil {
 		return "", false
 	}
-	reader := bufio.NewReader(f)
 	if st.Size() > heartbeatTitleScanMax {
 		if _, err := f.Seek(st.Size()-heartbeatTitleScanMax, io.SeekStart); err != nil {
 			return "", false
 		}
-		reader.Reset(f)
-		_, _ = reader.ReadSlice('\n')
 	}
+	counter := &countingReader{r: f}
+	reader := bufio.NewReader(counter)
+	origin := int64(0)
+	if st.Size() > heartbeatTitleScanMax {
+		_, _ = reader.ReadSlice('\n')
+		origin = counter.n - int64(reader.Buffered())
+	}
+	position := func() int64 { return counter.n - int64(reader.Buffered()) - origin }
 	var custom, ai string
-	var used int64
 	for {
 		if err := ctx.Err(); err != nil {
 			return "", false
 		}
-		if used > heartbeatTitleScanMax {
+		if position() > heartbeatTitleScanMax {
 			break
 		}
-		line, overflow, err := readLimitedLine(ctx, reader, heartbeatTitleLineMax, heartbeatTitleScanMax-used)
-		used += int64(len(line)) + 1
+		room := heartbeatTitleScanMax - position()
+		if room < 1 {
+			break
+		}
+		line, overflow, remainder, err := readLimitedLine(ctx, reader, heartbeatTitleLineMax, room)
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return "", false
+		}
+		if overflow && remainder {
+			left := heartbeatTitleScanMax - position()
+			if left < 0 {
+				left = 0
+			}
+			_, found, derr := discardUntilNewline(ctx, reader, left)
+			if errors.Is(derr, context.Canceled) || errors.Is(derr, context.DeadlineExceeded) {
+				return "", false
+			}
+			if !found {
+				break
+			}
+			continue
+		}
 		if overflow {
-			break
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			continue
 		}
-		if !overflow && len(line) > 0 && (bytes.Contains(line, []byte("Title")) || bytes.Contains(line, []byte("title"))) {
+		if len(line) > 0 && (bytes.Contains(line, []byte("Title")) || bytes.Contains(line, []byte("title"))) {
 			var rec struct {
 				Type        string `json:"type"`
 				CustomTitle string `json:"customTitle"`
@@ -313,7 +342,7 @@ func claudeTitleFile(ctx context.Context, path string) (string, bool) {
 		if errors.Is(err, io.EOF) {
 			break
 		}
-		if err != nil && !overflow {
+		if err != nil {
 			return "", false
 		}
 	}
@@ -369,37 +398,40 @@ func (c *countingReader) Read(p []byte) (int, error) {
 	return n, err
 }
 
-func scanUsageWindow(ctx context.Context, path, fallback string, offset, maxBytes int64, recent []string) (map[string]usageSum, int64, []string, error) {
+func scanUsageWindow(ctx context.Context, path, fallback string, offset, maxBytes int64, recent []string, discarding bool) (map[string]usageSum, int64, []string, bool, error) {
 	if ctx.Err() != nil {
-		return nil, offset, recent, ctx.Err()
+		return nil, offset, recent, discarding, ctx.Err()
 	}
 	if path == "" || unsafeHeartbeatPath(path) || maxBytes <= 0 {
-		return nil, offset, recent, nil
+		return nil, offset, recent, discarding, nil
 	}
 	f, err := openNoFollow(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, offset, recent, nil
+			return nil, offset, recent, discarding, nil
 		}
-		return nil, offset, recent, err
+		return nil, offset, recent, discarding, err
 	}
 	defer f.Close()
 	st, err := f.Stat()
 	if err != nil {
-		return nil, offset, recent, err
+		return nil, offset, recent, discarding, err
 	}
 	if offset > st.Size() {
-		return nil, offset, recent, errors.New("usage transcript shrank")
+		return nil, offset, recent, discarding, errors.New("usage transcript shrank")
 	}
 	if offset == st.Size() {
-		return nil, offset, recent, nil
+		return nil, offset, recent, discarding, nil
 	}
 	if _, err := f.Seek(offset, io.SeekStart); err != nil {
-		return nil, offset, recent, err
+		return nil, offset, recent, discarding, err
 	}
 	counter := &countingReader{r: f}
 	reader := bufio.NewReader(counter)
 	position := func() int64 { return counter.n - int64(reader.Buffered()) }
+	// One capped line may finish past the window. Bytes past this limit stay
+	// for the next scan, including the tail of a line already being discarded.
+	limit := maxBytes + int64(heartbeatUsageLineMax) + 1
 	sums := map[string]usageSum{}
 	poisoned := map[string]bool{}
 	seen := map[string]bool{}
@@ -409,42 +441,77 @@ func scanUsageWindow(ctx context.Context, path, fallback string, offset, maxByte
 	}
 	for {
 		if err := ctx.Err(); err != nil {
-			return nil, offset, recent, err
+			return nil, offset, recent, discarding, err
 		}
 		at := position()
-		if at >= maxBytes {
-			return sums, offset + at, trimRecent(ring), nil
+		if at >= limit || (at >= maxBytes && !discarding) {
+			return sums, offset + at, trimRecent(ring), discarding, nil
 		}
-		// A line may finish past the window, but only by one capped line.
-		// The cap is enforced inside the chunk loop so an oversized line
-		// cannot drain the rest of the file.
+		if discarding {
+			_, found, derr := discardUntilNewline(ctx, reader, limit-at)
+			next := position()
+			if errors.Is(derr, context.Canceled) || errors.Is(derr, context.DeadlineExceeded) {
+				return nil, offset, recent, true, derr
+			}
+			if !found {
+				return sums, offset + next, trimRecent(ring), true, nil
+			}
+			discarding = false
+			if next >= maxBytes || errors.Is(derr, io.EOF) {
+				return sums, offset + next, trimRecent(ring), false, nil
+			}
+			continue
+		}
 		budget := int64(heartbeatUsageLineMax) + 1
-		if room := maxBytes - at + int64(heartbeatUsageLineMax) + 1; room < budget {
+		if room := limit - at; room < budget {
 			budget = room
 		}
-		line, overflow, err := readLimitedLine(ctx, reader, heartbeatUsageLineMax, budget)
+		line, overflow, remainder, err := readLimitedLine(ctx, reader, heartbeatUsageLineMax, budget)
 		next := position()
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			return nil, offset, recent, err
+			return nil, offset, recent, discarding, err
 		}
 		// An unterminated line at EOF is still being written. Leave the cursor
 		// on its first byte so the next scan sees the completed record.
 		if errors.Is(err, io.EOF) && !overflow {
-			return sums, offset + at, trimRecent(ring), nil
+			return sums, offset + at, trimRecent(ring), false, nil
 		}
-		if !overflow && len(line) > 0 {
+		if overflow && remainder {
+			left := limit - next
+			if left > 0 {
+				_, found, derr := discardUntilNewline(ctx, reader, left)
+				next = position()
+				if errors.Is(derr, context.Canceled) || errors.Is(derr, context.DeadlineExceeded) {
+					return nil, offset, recent, true, derr
+				}
+				if found {
+					if next >= maxBytes || errors.Is(derr, io.EOF) {
+						return sums, offset + next, trimRecent(ring), false, nil
+					}
+					continue
+				}
+			}
+			return sums, offset + next, trimRecent(ring), true, nil
+		}
+		if overflow {
+			if next >= maxBytes || errors.Is(err, io.EOF) {
+				return sums, offset + next, trimRecent(ring), false, nil
+			}
+			continue
+		}
+		if len(line) > 0 {
 			if lineErr := noteUsageLine(line, fallback, sums, poisoned, seen, &ring); lineErr != nil {
-				return nil, offset, recent, lineErr
+				return nil, offset, recent, discarding, lineErr
 			}
 		}
-		if errors.Is(err, io.EOF) || overflow {
-			return sums, offset + next, trimRecent(ring), nil
+		if errors.Is(err, io.EOF) {
+			return sums, offset + next, trimRecent(ring), false, nil
 		}
 		if err != nil {
-			return nil, offset, recent, err
+			return nil, offset, recent, discarding, err
 		}
 		if len(seen) >= heartbeatUsageSeenMax {
-			return sums, offset + next, trimRecent(ring), nil
+			return sums, offset + next, trimRecent(ring), false, nil
 		}
 	}
 }
@@ -513,8 +580,9 @@ func noteUsageLine(line []byte, fallback string, sums map[string]usageSum, poiso
 
 // readLimitedLine reads one line, stopping inside the chunk loop when ctx is
 // cancelled, the line exceeds maxLine, or budget bytes have been pulled.
-// It does not drain the rest of an oversized line.
-func readLimitedLine(ctx context.Context, r *bufio.Reader, maxLine int, budget int64) ([]byte, bool, error) {
+// It does not drain the rest of an oversized line. remainder is true when
+// the newline was not consumed and the caller must keep discarding.
+func readLimitedLine(ctx context.Context, r *bufio.Reader, maxLine int, budget int64) ([]byte, bool, bool, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -525,16 +593,16 @@ func readLimitedLine(ctx context.Context, r *bufio.Reader, maxLine int, budget i
 	var read int64
 	for {
 		if err := ctx.Err(); err != nil {
-			return nil, false, err
+			return nil, false, false, err
 		}
 		if read >= budget || int64(len(line)) > int64(maxLine)+1 {
-			return nil, true, nil
+			return nil, true, true, nil
 		}
 		chunk, err := r.ReadSlice('\n')
 		if len(chunk) > 0 {
 			remain := budget - read
 			if int64(len(chunk)) > remain || int64(len(line))+int64(len(chunk)) > int64(maxLine)+1 {
-				return nil, true, nil
+				return nil, true, bytes.IndexByte(chunk, '\n') < 0, nil
 			}
 			read += int64(len(chunk))
 			line = append(line, chunk...)
@@ -542,8 +610,34 @@ func readLimitedLine(ctx context.Context, r *bufio.Reader, maxLine int, budget i
 		if errors.Is(err, bufio.ErrBufferFull) {
 			continue
 		}
-		return bytes.TrimRight(line, "\r\n"), false, err
+		return bytes.TrimRight(line, "\r\n"), false, false, err
 	}
+}
+
+// discardUntilNewline skips bytes until a newline, inclusive, or until budget
+// bytes have been pulled. found is false when the line continues past budget.
+func discardUntilNewline(ctx context.Context, r *bufio.Reader, budget int64) (int64, bool, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if budget < 0 {
+		budget = 0
+	}
+	var n int64
+	for n < budget {
+		if err := ctx.Err(); err != nil {
+			return n, false, err
+		}
+		b, err := r.ReadByte()
+		if err != nil {
+			return n, false, err
+		}
+		n++
+		if b == '\n' {
+			return n, true, nil
+		}
+	}
+	return n, false, nil
 }
 
 func trimRecent(ids []string) []string {
