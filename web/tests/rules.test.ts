@@ -63,12 +63,49 @@ test('permissions follow grants, never a bare membership', () => {
   assert.match(writeBlock(person(['rules.write']), company) ?? '', /publish/)
   assert.equal(writeBlock(person(['rules.write', 'rules.publish']), company), null)
   assert.match(writeBlock(person([]), project) ?? '', /that project/)
-  assert.equal(writeBlock(person([], ['rules.write']), project), null)
+  assert.match(writeBlock(person([], ['rules.write']), project) ?? '', /publish/)
+  assert.equal(writeBlock(person([], ['rules.write', 'rules.publish']), project), null)
   assert.equal(publishBlock(person(['rules.publish'], []), project), null)
   assert.match(publishBlock(person([], ['rules.publish']), company) ?? '', /workspace/)
   assert.equal(writeBlock(person(['rules.write']), own), null)
   assert.match(writeBlock(person(['rules.write', 'rules.publish']), other) ?? '', /Only that person/)
   assert.match(publishBlock(person(['rules.publish']), other) ?? '', /Only that person/)
+})
+
+test('project and role edits need publish authority; own person and named agent stay writable', () => {
+  const projectA = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+  const projectB = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
+  const self = '11111111-1111-4111-8111-111111111111'
+  const agentId = '22222222-2222-4222-8222-222222222222'
+  const taskId = '33333333-3333-4333-8333-333333333333'
+  const grants = (workspace: string[], byProject: Record<string, string[]> = {}, kind: Caller['kind'] = 'person', id = self): Caller => ({
+    id, kind,
+    allows: (permission, projectId) => workspace.includes(permission) || (!!projectId && (byProject[projectId] ?? []).includes(permission)),
+  })
+  const member = grants(['rules.read', 'rules.write'])
+  const admin = grants(['rules.read', 'rules.write', 'rules.publish'])
+  const project: RuleScope = { layer: 'project', project_id: projectA }
+  const role: RuleScope = { layer: 'agent', role: 'builder' }
+  const own: RuleScope = { layer: 'person', owner_id: self }
+  const named: RuleScope = { layer: 'agent', owner_id: self, agent_id: agentId }
+  const task: RuleScope = { layer: 'agent', project_id: projectA, owner_id: self, agent_id: agentId, task_id: taskId }
+
+  assert.match(writeBlock(member, project) ?? '', /publish/)
+  assert.match(writeBlock(member, role) ?? '', /workspace permission to publish/)
+  assert.equal(writeBlock(admin, project), null)
+  assert.equal(writeBlock(admin, role), null)
+  assert.equal(writeBlock(member, own), null)
+  assert.equal(writeBlock(member, named), null)
+  assert.match(publishBlock(member, own) ?? '', /publish/)
+  assert.equal(publishBlock(admin, own), null)
+  assert.equal(publishBlock(grants(['rules.publish'], {}, 'agent', agentId), named), 'Only a person can publish rules.')
+
+  const scoped = grants([], { [projectA]: ['rules.write', 'rules.publish'], [projectB]: ['rules.write'] })
+  assert.equal(writeBlock(scoped, project), null)
+  assert.match(writeBlock(scoped, { layer: 'project', project_id: projectB }) ?? '', /publish/)
+  assert.match(writeBlock(scoped, role) ?? '', /workspace permission to write/)
+  assert.equal(writeBlock(grants([], { [projectA]: ['rules.write'] }, 'person', self), task), null)
+  assert.equal(writeBlock(grants(['rules.write'], {}, 'agent', agentId), { layer: 'agent', owner_id: self, agent_id: agentId }), null)
 })
 
 test('draft validation and payloads stay inside the contract', () => {

@@ -62,6 +62,22 @@ test('publish is person-only and sends the version without a note', async ({ pag
   expect((post?.body as { version: string }).version).toMatch(/^[1-9][0-9]{11}\.0\.0$/)
 })
 
+test('a member without publish cannot add or save project and role rules', async ({ page }) => {
+  await setup(page, { publish: false })
+  await page.goto('/settings/agent-rules')
+  const project = page.getByRole('region', { name: 'Project', exact: true })
+  const agent = page.getByRole('region', { name: 'Agent', exact: true })
+  await expect(project).toContainText('Editing this project’s rules needs permission to publish rules for that project.')
+  await expect(project.getByRole('checkbox', { name: 'Your package is your scope.' })).toBeDisabled()
+  await expect(page.getByRole('region', { name: 'Company', exact: true })).toContainText('Editing company rules needs the workspace permission to publish rules.')
+  await expect(agent).toContainText('Editing role rules needs the workspace permission to publish rules.')
+  await expect(agent.getByRole('button', { name: 'Add agent rules' })).toBeDisabled()
+  await expect(page.getByRole('button', { name: 'Add rule' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Add set' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Save', exact: true })).toBeDisabled()
+  await expect(page.getByRole('region', { name: 'Person', exact: true }).getByRole('button', { name: 'Add person rules' })).toBeEnabled()
+})
+
 test('an agent cannot publish', async ({ page }) => {
   await setup(page, { kind: 'agent' })
   await page.goto('/settings/agent-rules')

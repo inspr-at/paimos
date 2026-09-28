@@ -341,6 +341,8 @@ async function save() {
   try {
     for (const bundle of model.value) for (const set of bundle.sets) {
       if (!dirty(set)) continue
+      const block = writeBlock(caller.value, bundle.layer.scope)
+      if (block) { error.value = block; return }
       const issue = validateDraft(set.name, set.rules)
       if (issue) { error.value = issue; return }
       try {
