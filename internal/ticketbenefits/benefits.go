@@ -34,10 +34,21 @@ func Issues(raw json.RawMessage) []string {
 	return issues
 }
 
-// Transition checks only entering done. Historical already-done records stay
+// Completed matches the product's successful ticket completion states, excluding
+// cancellation and archival. Tenant-defined states are not inferred.
+func Completed(state string) bool {
+	switch state {
+	case "done", "accepted", "delivered":
+		return true
+	default:
+		return false
+	}
+}
+
+// Transition checks only entering completion. Historical completed records stay
 // editable; reopening them subjects the next completion to today's requirements.
 func Transition(kind, before, after string, fields json.RawMessage) []string {
-	if kind != "ticket" || before == "done" || after != "done" {
+	if kind != "ticket" || Completed(before) || !Completed(after) {
 		return nil
 	}
 	return Issues(fields)

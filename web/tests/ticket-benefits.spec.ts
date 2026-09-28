@@ -37,6 +37,60 @@ test('read-only ticket shows missing-language guidance without edit controls', a
   await expect(ws.getByRole('button', { name: 'Edit', exact: true })).toHaveCount(0)
 })
 
+for (const state of ['done', 'accepted', 'delivered']) {
+  test(`historical ${state} ticket shows completed guidance in display and edit mode`, async ({ page }) => {
+    const data = fixtures()
+    data.nodes.find(n => n.key === 'PHAROS-12')!.state = state
+    await mockWork(page, data)
+    await page.goto('/p/PHAROS/PHAROS-12')
+    const ws = page.getByRole('complementary', { name: 'Ticket details' })
+    const benefits = ws.getByRole('region', { name: 'User benefit' })
+    await expect(benefits).toContainText('This completed ticket has incomplete benefit fields.')
+    await expect(benefits).not.toContainText('Before Done')
+    await ws.getByRole('button', { name: 'Edit', exact: true }).click()
+    await expect(benefits).toContainText('This completed ticket has incomplete benefit fields.')
+    await expect(benefits).not.toContainText('Before Done')
+  })
+}
+
+for (const regenerated of [false, true]) {
+  test(`${regenerated ? 'regenerated missing-snapshot' : 'v1'} history keeps headlines, chips, filters and visible changes`, async ({ page }) => {
+    const { mockReleases, releaseHistory } = await import('./releases-fixtures')
+    const history = releaseHistory()
+    const current = history.releases[0]!
+    const gap = 'Release membership and bilingual ticket fields were not captured. Git mentions do not establish release membership.'
+    if (regenerated) {
+      for (const release of history.releases) {
+        Object.assign(release, { notes: { source: 'unavailable', snapshot_sha256: '', captured_at: null, release_revision: 0, hidden: 0, items: [], gaps: [gap] } })
+      }
+    }
+    await mockWork(page, fixtures())
+    await mockReleases(page, history)
+    await page.goto(`/releases/${current.version}`)
+    const detail = page.locator('article.detail')
+    const options = page.getByRole('listbox', { name: 'Releases, newest first' }).getByRole('option')
+    await expect(options.first()).toContainText('Time entry editing')
+    await expect(options.first()).toContainText('AEON-75')
+    await expect(detail.locator('.headline')).toHaveText('Time entry editing')
+    await expect(detail.locator('.tickets')).toContainText('AEON-75')
+    await expect(detail.locator('.changes-block')).toContainText('Correct and delete time entries in the Hours view')
+    await expect(detail.locator('#release-evidence')).toHaveCount(0)
+    await expect(detail.getByRole('region', { name: 'Release notes' })).toHaveCount(0)
+    await expect(detail.getByText(gap, { exact: true })).toHaveCount(regenerated ? 1 : 0)
+    await page.getByRole('group', { name: 'Show only releases with' }).getByRole('button', { name: 'Tickets', exact: true }).click()
+    await expect(options).toHaveCount(5)
+    await page.getByRole('searchbox', { name: 'Search releases' }).fill('AEON-75')
+    await expect(options).toHaveCount(1)
+    await expect(options.first()).toContainText('Time entry editing')
+    await page.getByRole('searchbox', { name: 'Search releases' }).fill('')
+    await page.getByRole('group', { name: 'Show only releases with' }).getByRole('button', { name: 'Tickets', exact: true }).click()
+    await options.last().click()
+    await expect(detail.locator('.headline')).toHaveText('First release')
+    await expect(detail.locator('.changes-block')).toContainText('Projects, tickets and sign-in')
+    await expect(detail.getByText(gap, { exact: true })).toHaveCount(regenerated ? 1 : 0)
+  })
+}
+
 test('release notes switch languages and expose gaps without Git-headline fallback', async ({ page }) => {
   const { mockReleases, releaseHistory } = await import('./releases-fixtures')
   const history = releaseHistory()
@@ -46,6 +100,10 @@ test('release notes switch languages and expose gaps without Git-headline fallba
   await mockReleases(page, history)
   await page.goto(`/releases/${current.version}`)
   const notes = page.getByRole('region', { name: 'Release notes' })
+  const detail = page.locator('article.detail')
+  await expect(detail.locator('.headline')).toHaveCount(0)
+  await expect(detail.locator('.changes')).toHaveCount(0)
+  await expect(page.getByRole('listbox', { name: 'Releases, newest first' }).getByRole('option').first()).toContainText('Clear release notes')
   await expect(notes).toContainText('Tickets explain what you gain.')
   await expect(notes).toContainText('benefit_de is required')
   await expect(notes).not.toContainText(current.headline)

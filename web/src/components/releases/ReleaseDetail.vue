@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { displayHeadline, groupChanges, releasedAt, shortCommit, span, ticketsOf, type Release } from '../../lib/releases'
+import { displayHeadline, groupChanges, hasUsableNotes, releasedAt, shortCommit, span, ticketsOf, type Release } from '../../lib/releases'
 import { absoluteTime, relativeTime } from '../../lib/work'
 import AppIcon from '../AppIcon.vue'
 import CalendarVersion from '../CalendarVersion.vue'
@@ -73,11 +73,11 @@ defineExpose({ focus: () => heading.value?.focus({ preventScroll: false }) })
       <template v-if="reserved">Reserved {{ absoluteTime(at) }} · {{ relativeTime(at, { now, long: true }) }}. The version was taken{{ release.tag ? ' and tagged' : '' }}, but no release was published under it.</template>
       <template v-else>{{ release.published_at ? 'Published' : 'Tagged' }} {{ absoluteTime(at) }} · {{ relativeTime(at, { now, long: true }) }}</template>
     </p>
-    <p v-if="!release.notes && release.headline" class="headline">{{ displayHeadline(release) }}</p>
+    <p v-if="!hasUsableNotes(release) && release.headline" class="headline">{{ displayHeadline(release) }}</p>
 
     <TicketChips v-if="tickets.length" :tickets="tickets" class="tickets" />
 
-    <section v-if="release.notes" class="changes-block" aria-label="Release notes">
+    <section v-if="hasUsableNotes(release)" class="changes-block" aria-label="Release notes">
       <div class="badges" role="group" aria-label="Release note language">
         <button type="button" class="chip" :aria-pressed="noteLanguage === 'en'" @click="noteLanguage = 'en'">English</button>
         <button type="button" class="chip" :aria-pressed="noteLanguage === 'de'" @click="noteLanguage = 'de'">Deutsch</button>
@@ -91,6 +91,7 @@ defineExpose({ focus: () => heading.value?.focus({ preventScroll: false }) })
       <p v-if="release.notes.hidden" class="none">{{ release.notes.hidden }} {{ noteLanguage === 'en' ? 'ticket(s) hidden from release notes.' : 'Ticket(s) in den Release Notes ausgeblendet.' }}</p>
     </section>
     <div v-else class="changes-block">
+      <p v-for="gap in release.notes?.gaps" :key="gap" class="none">{{ gap }}</p>
       <ReleaseChanges v-if="counted" :groups="groups" :repository="repository" :query="query" />
       <p v-else class="none">{{ reserved ? 'Nothing shipped under this version.' : 'No changes are recorded between this release and the one before it.' }}</p>
       <p v-if="release.changes_omitted" class="none">And {{ release.changes_omitted }} more {{ release.changes_omitted === 1 ? 'change' : 'changes' }} not listed here.</p>
@@ -107,10 +108,10 @@ defineExpose({ focus: () => heading.value?.focus({ preventScroll: false }) })
       <div v-if="evidence" id="release-evidence" class="ev-body">
         <p class="sr" role="status">{{ copyStatus }}</p>
         <template v-if="release.notes">
-          <p v-if="release.headline" class="none">Git headline: {{ release.headline }}</p>
+          <p v-if="hasUsableNotes(release) && release.headline" class="none">Git headline: {{ release.headline }}</p>
           <p class="none">Note source: {{ release.notes.source }}</p>
           <p v-if="release.notes.snapshot_sha256" class="mono wrap">Snapshot SHA-256: {{ release.notes.snapshot_sha256 }}</p>
-          <ReleaseChanges v-if="counted" :groups="groups" :repository="repository" :query="query" />
+          <ReleaseChanges v-if="hasUsableNotes(release) && counted" :groups="groups" :repository="repository" :query="query" />
         </template>
         <dl>
           <div>

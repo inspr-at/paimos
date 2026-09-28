@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { compare, displayHeadline, displayText, groupByDay, groupChanges, matches, newSince, plainSubject, span, stats, ticketsOf, type Release } from '../src/lib/releases.ts'
+import { compare, displayHeadline, displayText, groupByDay, groupChanges, hasUsableNotes, matches, newSince, plainSubject, span, stats, ticketsOf, type Release } from '../src/lib/releases.ts'
 
 const rel = (version: string, at: string, extra: Partial<Release> = {}): Release => ({
   version, tag: `v${version}`, release_channel: 'stable', release_sequence: 1, state: 'published', reserved_at: at, tagged_at: at, published_at: at,
@@ -78,6 +78,30 @@ test('new since the last visit: newer published releases, nothing on a first vis
   const releases = [rel('3', ''), rel('2', ''), rel('2.5', '', { state: 'reserved' }), rel('1', '')]
   assert.deepEqual([...newSince(releases, '1')].sort(), ['2', '3'])
   assert.equal(newSince(releases, null).size, 0)
+})
+
+test('regenerated missing snapshots preserve the v1 archive headline, tickets and filters with an honest gap', () => {
+  const archived = rel('260924000001.0.0', '', {
+    headline: 'Journey (AEON-77)', tickets: ['AEON-77'],
+    changes: [change('a', 'fix', 'fix(AEON-78): repair stage', ['AEON-78'])],
+  })
+  const regenerated: Release = { ...archived, notes: {
+    source: 'unavailable', snapshot_sha256: '', captured_at: null, release_revision: 0, hidden: 0, items: [],
+    gaps: ['Release membership and bilingual ticket fields were not captured. Git mentions do not establish release membership.'],
+  } }
+  const before = structuredClone(regenerated)
+  assert.equal(hasUsableNotes(archived), false)
+  assert.equal(hasUsableNotes(regenerated), false)
+  assert.equal(displayHeadline(regenerated), displayHeadline(archived))
+  assert.equal(displayHeadline(regenerated), 'Journey')
+  assert.deepEqual(ticketsOf(regenerated), ['AEON-77', 'AEON-78'])
+  for (const q of ['', 'journey', 'repair', 'aeon-78']) {
+    const f = { q, features: false, fixes: false, tickets: true }
+    assert.equal(matches(regenerated, f), matches(archived, f))
+    assert.equal(matches(regenerated, f), true)
+  }
+  assert.deepEqual(groupChanges(regenerated.changes), groupChanges(archived.changes))
+  assert.deepEqual(regenerated, before) // Display never rewrites history or manufactures notes.
 })
 
 test('headlines read without the ticket keys their chips show, in sentence case', () => {

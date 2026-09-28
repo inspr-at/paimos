@@ -46,3 +46,31 @@ func TestCompletionRequirements(t *testing.T) {
 		}
 	}
 }
+
+func TestCompletionTransitions(t *testing.T) {
+	completed := []string{"done", "accepted", "delivered"}
+	other := []string{"", "open", "new", "backlog", "in_progress", "qa", "cancelled", "canceled", "archived", "custom-complete"}
+	for _, after := range completed {
+		if !Completed(after) {
+			t.Fatalf("%s must count as completed", after)
+		}
+		for _, before := range other {
+			if got := Transition("ticket", before, after, json.RawMessage(`{}`)); len(got) != 4 {
+				t.Fatalf("%s -> %s bypassed requirements: %v", before, after, got)
+			}
+		}
+		for _, before := range completed {
+			if got := Transition("ticket", before, after, json.RawMessage(`{}`)); len(got) != 0 {
+				t.Fatalf("%s -> %s blocked historical edit: %v", before, after, got)
+			}
+		}
+		if got := Transition("task", "open", after, json.RawMessage(`{}`)); len(got) != 0 {
+			t.Fatalf("non-ticket gate: %v", got)
+		}
+	}
+	for _, after := range other {
+		if Completed(after) || len(Transition("ticket", "open", after, json.RawMessage(`{}`))) != 0 {
+			t.Fatalf("%s must not imply successful completion", after)
+		}
+	}
+}

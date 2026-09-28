@@ -30,7 +30,7 @@ import TicketAgentWork from './TicketAgentWork.vue'
 import TicketHeaderBar from './TicketHeaderBar.vue'
 import TicketProperties from './TicketProperties.vue'
 import TicketBenefits from './TicketBenefits.vue'
-import { benefitDraft, benefitTextKeys } from '../../lib/ticketBenefits'
+import { benefitDraft, benefitTextKeys, completedTicketState } from '../../lib/ticketBenefits'
 import { can } from '../../lib/authz'
 import { AssignCancelled, assignToRelease, type ReleaseTarget } from '../../lib/releaseAssign'
 import { openedMembershipMessage, type NativeReleaseView } from '../../lib/releaseMembership'
@@ -442,7 +442,7 @@ defineExpose({
             ><PersonAvatar v-if="draftAssignee" :id="draftAssignee.value" :name="draftAssignee.label" :size="18" /><AppIcon v-else name="user" :size="13" class="pick-none" /><span :id="`${uid}-assignee-value`" class="pick-value" :class="{ unset: !draftAssignee }">{{ draftAssignee?.label ?? 'Unassigned' }}</span><AppIcon name="chevron" :size="12" class="pick-chev" /></button>
           </div>
         </div>
-        <TicketBenefits v-if="item.kind_slug === 'ticket'" :fields="draft" editing :disabled="saving" :done="item.state === 'done'" @change="changeBenefit" />
+        <TicketBenefits v-if="item.kind_slug === 'ticket'" :fields="draft" editing :disabled="saving" :done="completedTicketState(item.state)" @change="changeBenefit" />
         <section class="edit-section" aria-labelledby="edit-desc"><h3 id="edit-desc" class="eyebrow">Description</h3>
           <MarkdownEditor v-model="draft.body" label="Description" bare :split="mode === 'full'" :min-rows="mode === 'full' ? 12 : 7" :attachment-id="attachmentId" placeholder="What is this about? Paste a screenshot to add it inline." @save="saveEdit" @cancel="cancelEdit" />
         </section>
@@ -478,7 +478,7 @@ defineExpose({
           <div class="divider" />
 
           <div class="sections">
-            <TicketBenefits v-if="item.kind_slug === 'ticket'" :fields="item.fields" :done="item.state === 'done'" />
+            <TicketBenefits v-if="item.kind_slug === 'ticket'" :fields="item.fields" :done="completedTicketState(item.state)" />
             <MarkdownSection ref="descSection" title="Description" :value="item.body" :editable="editable" :save="ticket.setBody" :attachment-id="attachable ? attachmentId : undefined" empty-text="Add a description" @open-attachment="openAttachment" />
             <MarkdownSection v-if="acceptance.trim() || showAcceptance" ref="acSection" title="Acceptance criteria" :value="acceptance" :editable="editable" :save="value => ticket.setField('acceptance_criteria', value)" :attachment-id="attachable ? attachmentId : undefined" @open-attachment="openAttachment" />
             <MarkdownSection v-if="notes.trim() || showNotes" ref="notesSection" title="Notes" :value="notes" :editable="editable" :save="value => ticket.setField('notes', value)" :attachment-id="attachable ? attachmentId : undefined" @open-attachment="openAttachment" />

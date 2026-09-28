@@ -64,17 +64,19 @@ Custom unrelated properties and constraints stay in place. Schema requirements
 are deliberately optional so incomplete drafts can be created with warnings.
 
 The generic node API requires both pills (2–4 whitespace-separated words) and
-both nonblank benefits when a ticket enters exactly `done`, including creation
-in `done`, direct PATCH, bulk changes, CLI calls and bulk undo. Normal updates
+both nonblank benefits when a ticket enters a built-in completed state (`done`,
+`accepted` or `delivered`) from outside that set, including creation in any of
+those states, direct PATCH, bulk changes, CLI calls and bulk undo. Normal updates
 check the final fields and state while holding the node row lock. Bulk skips an
 incomplete ticket with a reason; bulk undo rejects the entire invalid reversal.
-An already-done ticket remains editable without fabricated backfills; reopening
-and completing it again invokes the requirement. Hiding a ticket is not an
-exception. Sentence count, positive plain language and translation fidelity are
+An already-completed ticket remains editable, including transitions within that
+set, without fabricated backfills; reopening and completing it again invokes the
+requirement. Hiding a ticket is not an exception. Sentence count, positive plain
+language and translation fidelity are
 editorial requirements, not claimed as machine-verified. This is an application
 transition rule, not a SQL constraint: historical import/migration writers retain
-their existing behavior. Other tenant-defined state names are not guessed to
-mean `done`.
+their existing behavior. Cancellation, archival and tenant-defined state names
+are not guessed to mean successful completion.
 
 For a new release, read the supported authenticated endpoint
 `GET /api/projects/{projectId}/releases/{releaseId}/note-snapshot` using a
@@ -114,10 +116,14 @@ translation or Git-headline benefit. Hidden tickets contribute no text or key to
 the public notes; incomplete hidden tickets still contribute a generic gap.
 Technical Git headlines, legacy top-level `tickets` references and changes remain
 evidence; membership claims come only from the snapshot. The release detail shows
-English/German notes; Git evidence is expandable. Old v1 manifests without the
-optional `notes` member keep their archived display. Newly generated manifests
-always include `notes`, even when unavailable. This additive reader boundary
-does not modify any existing published artifact or legacy tag.
+English/German notes; Git evidence is expandable when a snapshot is available.
+Old v1 manifests without the optional `notes` member and regenerated records with
+`notes.source = "unavailable"` keep their historical headline, ticket references,
+ticket filter and visible changes. Regenerated records also show the missing
+benefit-data gap; their Git text is not presented as benefit notes or membership.
+Available snapshots remain authoritative even when empty or incomplete. This
+additive reader boundary does not modify any existing published artifact or
+legacy tag.
 
 Integration acceptance still belongs to the coordinator: review migration0896,
 select and approve the production release/project mapping, capture/review/commit

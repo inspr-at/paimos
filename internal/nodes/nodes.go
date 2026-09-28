@@ -375,7 +375,7 @@ func (m *Module) updateNode(ctx context.Context, p tenant.Principal, id string, 
 			nextFields = fields
 			sets = append(sets, "fields = "+add(string(fields))+"::jsonb")
 		}
-		if nextState == "done" && current.State != "done" {
+		if ticketbenefits.Completed(nextState) && !ticketbenefits.Completed(current.State) {
 			kind, _, err := loadKind(ctx, tx, current.KindID)
 			if err != nil {
 				return err

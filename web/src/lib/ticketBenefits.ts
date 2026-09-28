@@ -1,5 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 export const benefitTextKeys = ['pill_en', 'pill_de', 'benefit_en', 'benefit_de'] as const
+// Matches ticketbenefits.Completed on the server, not all closed states.
+export function completedTicketState(state: string): boolean {
+  return state === 'done' || state === 'accepted' || state === 'delivered'
+}
 export function benefitIssues(fields: Record<string, unknown>): string[] {
   const issues: string[] = []
   for (const key of benefitTextKeys) {
