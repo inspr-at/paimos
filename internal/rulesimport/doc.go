@@ -24,6 +24,8 @@
 // Generic AGENTS.md and CLAUDE.md require an explicit local context. Public
 // templates additionally need an aeon-context: template HTML comment; detected
 // private/personal markers prohibit template output even with that annotation.
+// Exact directory components doctrine-private and inspr-doctrine-private are
+// private by themselves, case-insensitively, including marker-free text.
 // Re-run with the appropriate local context to retain private proposals. Section
 // selection never bypasses this check. Arbitrary symlinks are refused; only exact
 // Darwin /var and /tmp system aliases are supported. Other platforms fail closed.
