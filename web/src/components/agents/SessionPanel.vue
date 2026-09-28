@@ -20,6 +20,8 @@ import RemoveSessionDialog from './RemoveSessionDialog.vue'
 import { activityOf, currentStep, type ActivitySession } from './activity'
 import { metadataChangeText, metadataChanges } from './metadataHistory'
 import { attentionReasonText } from '../../lib/agentSignals'
+import EtaCell from '../work/EtaCell.vue'
+import { etaFromSession } from '../../lib/eta'
 
 // One session in the docked panel: who and where, the bound ticket, recent runs with
 // outcome and duration, telemetry, and the message thread with a composer.
@@ -188,6 +190,7 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
           <template v-else-if="view.session.heartbeat_at"> · heartbeat <time :datetime="view.session.heartbeat_at" :data-tip="absoluteTime(view.session.heartbeat_at)">{{ relativeTime(view.session.heartbeat_at, { now }) }}</time></template>
           <template v-else> · no heartbeat yet</template>
         </p>
+        <p v-if="view.ticket && !view.session.stopped_at && etaFromSession(view.session)" class="now-meta now-eta"><EtaCell align="start" labelled :eta="etaFromSession(view.session)" :now="now" /></p>
         <SessionStateEvidence :view="view" :now="now" />
         <ol v-if="timeline.length" class="activity-timeline" aria-label="Recent activity">
           <li v-for="(item, index) in timeline.slice(0, 6)" :key="`${item.at}-${index}`"><time :datetime="item.at">{{ relativeTime(item.at, { now }) }}</time><span>{{ item.note }}</span></li>

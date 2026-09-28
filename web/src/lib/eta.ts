@@ -33,14 +33,17 @@ export interface TicketEta {
   eta_stale?: boolean
 }
 
+// One compact reading: the headline estimate (ready first, else live), its other
+// form for hover, the percent, and a tooltip that names both forms, who and when.
 export interface EtaView {
-  ready: string | null
-  live: string | null
-  readyHover: string | null
-  liveHover: string | null
+  kind: EtaKind | null
+  text: string | null
+  hover: string | null
   progress: string | null
-  tip: string
+  pct: number | null
+  overdue: boolean
   stale: boolean
+  tip: string
 }
 
 export function etaFromTicket(eta: TicketEta | null | undefined): EtaInput | null {
@@ -68,49 +71,67 @@ export function etaFromSession(session: {
   })
 }
 
+function span(minutes: number): string {
+  return minutes < 90 ? `${minutes} min` : minutes < 36 * 60 ? `${Math.round(minutes / 60)} h` : `${Math.round(minutes / 1440)} d`
+}
+
 function relative(at: string, now: number): string {
   const delta = Date.parse(at) - now
-  const ahead = delta >= 0
   const minutes = Math.round(Math.abs(delta) / 60_000)
-  const body = minutes < 1 ? (ahead ? '<1 min' : 'overdue')
-    : minutes < 90 ? `${minutes} min`
-    : minutes < 36 * 60 ? `${Math.round(minutes / 60)} h`
-    : `${Math.round(minutes / 1440)} d`
-  if (!ahead) return minutes < 1 ? 'overdue' : `${body} overdue`
-  return minutes < 1 ? '<1 min' : `~${body}`
+  if (delta >= 0) return minutes < 1 ? '<1 min' : `~${span(minutes)}`
+  return minutes < 1 ? 'due now' : `overdue ${span(minutes)}`
 }
 
-function clock(at: string, timeZone: string): string {
-  return new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone }).format(new Date(at))
+const dayOf = (ms: number, timeZone: string) => new Intl.DateTimeFormat('en-CA', { timeZone }).format(new Date(ms))
+
+// A clock time names the weekday once it is not today, so "15:40" is never ambiguous.
+function clock(at: string, now: number, timeZone: string): string {
+  const ms = Date.parse(at)
+  const time = new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone }).format(new Date(ms))
+  if (dayOf(ms, timeZone) === dayOf(now, timeZone)) return time
+  const far = Math.abs(ms - now) > 6 * 86_400_000
+  const day = new Intl.DateTimeFormat('en-GB', far ? { day: 'numeric', month: 'short', timeZone } : { weekday: 'short', timeZone }).format(new Date(ms))
+  return `${day} ${time}`
 }
 
-function whenLabel(at: string | null | undefined, timeZone: string): string {
-  if (!at || Number.isNaN(Date.parse(at))) return ''
-  return new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone }).format(new Date(at))
-}
+const valid = (at: string | null | undefined): at is string => !!at && !Number.isNaN(Date.parse(at))
 
-function sideTip(side: EtaSide, timeZone: string): string {
+function sideTip(side: EtaSide, now: number, timeZone: string): string[] {
+  const when = clock(side.at, now, timeZone)
+  const rel = relative(side.at, now)
+  const past = Date.parse(side.at) < now
+  const head = past ? `${side.kind} was due at ${when}, ${rel}` : `${side.kind} at ${when}, in ${rel}`
   const who = side.by?.trim()
-  const when = whenLabel(side.reported_at || side.at, timeZone)
-  return [side.kind, who, when].filter(Boolean).join(' · ')
+  if (!valid(side.reported_at)) return [head, ...(who ? [`Estimated by ${who}`] : [])]
+  const from = clock(side.reported_at, now, timeZone)
+  const age = Math.max(0, Math.round((now - Date.parse(side.reported_at)) / 60_000))
+  const by = who ? ` by ${who}` : ''
+  // A stale report leads with its age: that is the news, the time is a leftover.
+  return side.stale ? [`Estimate from ${from}${by} is ${span(age)} old`, head] : [head, `Estimated${by} at ${from}`]
 }
 
 // formatEta returns null when nothing was reported. `timeZone` is explicit so tests
 // can pin a clock; the screen passes the viewer's zone.
 export function formatEta(input: EtaInput | null | undefined, mode: EtaMode, now: number, timeZone = 'UTC'): EtaView | null {
   if (!input) return null
-  const sides = [input.ready, input.live].filter((side): side is EtaSide => !!side?.at && !Number.isNaN(Date.parse(side.at)))
-  const progress = typeof input.progress === 'number' ? `${input.progress}%` : null
-  if (!sides.length && !progress) return null
-  const text = (side: EtaSide) => mode === 'clock' ? clock(side.at, timeZone) : relative(side.at, now)
-  const hover = (side: EtaSide) => mode === 'both' ? clock(side.at, timeZone) : null
+  const sides = [input.ready, input.live].filter((side): side is EtaSide => !!side && valid(side.at))
+  const pct = typeof input.progress === 'number' ? Math.max(0, Math.min(100, Math.round(input.progress))) : null
+  if (!sides.length && pct == null) return null
+  const main = sides[0] ?? null
+  const stale = !!input.stale || sides.some(side => side.stale)
+  const tip = [
+    ...sides.flatMap(side => sideTip(side, now, timeZone)),
+    ...(pct != null ? [`${pct}% done`] : []),
+  ]
+  if (stale && !sides.some(side => side.stale && valid(side.reported_at))) tip.push('Estimate not refreshed in time')
   return {
-    ready: input.ready ? text(input.ready) : null,
-    live: input.live ? text(input.live) : null,
-    readyHover: input.ready ? hover(input.ready) : null,
-    liveHover: input.live ? hover(input.live) : null,
-    progress,
-    tip: [...sides.map(side => sideTip(side, timeZone)), progress ? `${progress} done` : ''].filter(Boolean).join('\n'),
-    stale: !!input.stale || sides.some(side => side.stale),
+    kind: main?.kind ?? null,
+    text: main ? (mode === 'clock' ? clock(main.at, now, timeZone) : relative(main.at, now)) : null,
+    hover: main && mode === 'both' ? clock(main.at, now, timeZone) : null,
+    progress: pct != null ? `${pct}%` : null,
+    pct,
+    overdue: !!main && Date.parse(main.at) < now,
+    stale,
+    tip: tip.join('\n'),
   }
 }

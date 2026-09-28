@@ -26,7 +26,7 @@ export const COLUMNS: ColumnDef[] = [
   { id: 'estimate', label: 'Estimate', sort: null, width: 96, min: 72, max: 180, end: true },
   { id: 'created', label: 'Created', sort: 'created_at', width: 104, min: 80, max: 200, end: true },
   { id: 'updated', label: 'Updated', sort: 'updated_at', width: 104, min: 80, max: 200, end: true },
-  { id: 'eta', label: 'ETA', sort: 'eta_ready', width: 148, min: 96, max: 240, end: true },
+  { id: 'eta', label: 'ETA', sort: 'eta_ready', width: 140, min: 104, max: 220, end: true },
 ]
 export const COLUMN_BY_ID = new Map(COLUMNS.map(column => [column.id, column]))
 // Key and Title always lead; the rest can be hidden and reordered.

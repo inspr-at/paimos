@@ -793,7 +793,7 @@ thead th:hover .col-resize::after { opacity: 1; }
 .ticket-row td { height: var(--row-h); padding: 0 12px; border-bottom: 1px solid var(--line); vertical-align: middle; }
 .ticket-row td:first-child { padding-left: 18px; }
 .cell { display: flex; align-items: center; gap: 8px; min-width: 0; height: calc(var(--row-h) - 1px); line-height: 18px; white-space: nowrap; }
-.c-updated .cell, .c-created .cell, .c-estimate .cell { justify-content: flex-end; }
+.c-updated .cell, .c-created .cell, .c-estimate .cell, .c-eta .cell { justify-content: flex-end; }
 @media (hover: hover) { .ticket-row:hover td { background: var(--row-hover); } }
 .ticket-row.cursor td, .ticket-row.open td { background: var(--row-selected); }
 /* The ticket shown in the panel also carries a hairline ring in the row's own shape (no edge accents, rule 11). */
@@ -1011,9 +1011,10 @@ button.release-chip:focus-visible { box-shadow: var(--focus-ring); }
   .ticket-row.cursor, .ticket-row.open { background: var(--row-selected); }
   .tickets colgroup { display: none; }
   .c-key { grid-area: key; } .c-status { grid-area: status; } .c-prio { grid-area: prio; } .c-updated { grid-area: updated; }
-  .ticket-row:not(:has(.eta-cell)) .c-eta { display: none !important; }
-  .ticket-row:has(.eta-cell) { grid-template-areas: "key status prio updated" "title title title title" "eta eta eta eta"; }
-  .c-eta { grid-area: eta; }
+  /* A ticket with an estimate shows it where Updated sits; the estimate is the
+     fresher answer to "when" while an agent works on it. */
+  .ticket-row:not(:has(.eta-cell)) .c-eta, .ticket-row:has(.eta-cell) .c-updated { display: none !important; }
+  .c-eta { grid-area: updated; justify-self: end; min-width: 0; }
   .c-title { grid-area: title; }
   .ticket-row .c-assignee { display: none !important; }
   .title-cell { align-items: flex-start; flex-wrap: wrap; gap: 4px 8px; white-space: normal; }

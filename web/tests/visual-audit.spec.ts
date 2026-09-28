@@ -7,7 +7,7 @@
 // Every state is captured full-page at 1600x1000 and 390x844, light and dark, as
 // <screen>__<state>__<width>__<theme>.png. Console errors, horizontal overflow and
 // steps that could not be reached are written next to the shots in notes/*.json.
-// VISUAL_AUDIT_FILTER=<text> limits the run to screens or states containing it.
+// VISUAL_AUDIT_FILTER=<text>[|<text>…] limits the run to screens or states containing one of them.
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
@@ -73,7 +73,7 @@ const WORLD: AgentWorld = {
 const sessionId = (n: number) => `5e000000-0000-4000-8000-${String(n).padStart(12, '0')}`
 const LEAD = sessionId(1)
 const WORKER = sessionId(102)
-type AgentVariant = 'busy' | 'quiet' | 'empty' | 'recovery'
+type AgentVariant = 'busy' | 'quiet' | 'empty' | 'recovery' | 'eta'
 
 function agentsWorld(variant: AgentVariant) {
   const data = agentData({ ...WORLD, now: AGENT_NOW, empty: variant === 'empty' })
@@ -105,7 +105,18 @@ function agentsWorld(variant: AgentVariant) {
   data.approvals.splice(0, data.approvals.length, ...data.approvals.filter(a => keep.includes(Number(a.id.slice(-2)))))
   if (variant === 'quiet') data.messages.splice(0, data.messages.length, ...data.messages.filter(m => !m.is_action_request && !m.expects_reply))
   if (variant === 'recovery') Object.assign(data.sessions[1]!, { management_mode: 'unmanaged', host: 'workstation-offline', display_label: 'ops', advertised_capabilities: ['status'] })
+  if (variant === 'eta') withSessionEtas(data.sessions as unknown as Record<string, unknown>[])
   return data
+}
+// AEON-262: fresh, live-only, stale, overdue and empty estimates side by side.
+const aheadAt = (minutes: number) => new Date(AGENT_NOW + minutes * 60_000).toISOString()
+function withSessionEtas(sessions: Record<string, unknown>[]) {
+  const byId = (id: string) => sessions.find(s => s.id === id)!
+  Object.assign(sessions[0]!, { eta_live_at: aheadAt(125), eta_reported_at: agoAt(4) })
+  Object.assign(sessions[1]!, { eta_ready_at: aheadAt(25), progress_pct: 40, eta_reported_at: agoAt(2) })
+  Object.assign(sessions[2]!, { eta_ready_at: aheadAt(10), progress_pct: 70, eta_reported_at: agoAt(34), eta_stale: true })
+  Object.assign(sessions[3]!, { eta_ready_at: agoAt(5), progress_pct: 90, eta_reported_at: agoAt(3) })
+  Object.assign(byId(sessionId(101)), { eta_ready_at: aheadAt(50), progress_pct: 20, eta_reported_at: agoAt(1) })
 }
 
 async function agentsSetup(page: Page, variant: AgentVariant) {
@@ -461,6 +472,17 @@ function ticketData() {
   Object.assign(data.nodes.find(n => n.key === 'PHAROS-11')!.fields, BENEFITS)
   return workersOn(data, ['PHAROS-10', 'PHAROS-11', 'PHAROS-12', 'PHAROS-13', 'PHAROS-14'].map(key => data.nodes.find(n => n.key === key)!))
 }
+// AEON-262: the ticket list's ETA column with fresh, overdue, stale, live-only and empty rows.
+function ticketDataWithEtas() {
+  const data = ticketData()
+  const at = (minutes: number) => new Date(AT + minutes * 60_000).toISOString()
+  const set = (key: string, eta: Record<string, unknown>) => { data.nodes.find(n => n.key === key)!.eta = eta }
+  set('PHAROS-10', { eta_ready_at: at(25), progress_pct: 40, ready_by: 'fault', ready_reported_at: at(-2) })
+  set('PHAROS-11', { eta_ready_at: at(-5), progress_pct: 90, ready_by: 'hausv', ready_reported_at: at(-3) })
+  set('PHAROS-12', { eta_ready_at: at(10), progress_pct: 60, ready_by: 'wren', ready_reported_at: at(-34), ready_stale: true, eta_stale: true })
+  set('PHAROS-13', { eta_live_at: at(130), live_by: 'aeon-coordinator', live_reported_at: at(-6) })
+  return data
+}
 async function projectAgents(page: Page) {
   await mockAgents(page, agentData({ ...WORLD, now: AT }))
 }
@@ -511,6 +533,11 @@ const shots: Shot[] = [
     if (await history.isEnabled()) await history.click()
     await page.getByText('Accounts and pacing', { exact: true }).first().click()
     await expect(page.getByRole('region', { name: 'Accounts and pacing' })).toBeVisible()
+  } },
+  { screen: 'agents', state: 'eta', setup: page => agentsSetup(page, 'eta'), act: async page => { await openAgents(page); await visible(page, '.eta-cell') } },
+  { screen: 'session-panel', state: 'eta', setup: page => agentsSetup(page, 'eta'), act: async page => {
+    await openAgents(page, `/agents/${sessionId(2)}`)
+    await expect(page.getByRole('complementary', { name: 'Session details' }).locator('.eta-cell')).toBeVisible()
   } },
   { screen: 'agents', state: 'needs-you-empty', setup: page => agentsSetup(page, 'quiet'), act: page => openAgents(page) },
   { screen: 'agents', state: 'empty', setup: page => agentsSetup(page, 'empty'), act: async page => { await page.goto('/agents'); await heading(page, 'Agents', 1); await page.waitForTimeout(600) } },
@@ -702,6 +729,15 @@ const shots: Shot[] = [
     await page.clock.setSystemTime(AT)
     await mockWork(page, ticketData())
   }, act: async page => { await page.goto('/p/PHAROS'); await visible(page, 'tr.ticket-row:not(.ghost), .ticket-row') } },
+  { screen: 'project', state: 'tickets-eta', setup: async page => {
+    await page.clock.setSystemTime(AT)
+    await mockWork(page, ticketDataWithEtas())
+  }, act: async page => {
+    await page.goto('/p/PHAROS')
+    await visible(page, '.eta-cell')
+    await ticketRow(page, 'PHAROS-12').locator('.eta-cell').hover()
+    await page.waitForTimeout(900)
+  } },
   { screen: 'project', state: 'worker-disclosure', setup: async page => {
     await page.clock.setSystemTime(AT)
     await mockWork(page, ticketData(), { liveTruncated: true })
@@ -807,7 +843,7 @@ const scrollDialogToEnd = (page: Page) => page.evaluate(() => {
 }).catch(() => false)
 
 const filter = process.env.VISUAL_AUDIT_FILTER ?? ''
-for (const shot of shots.filter(s => !filter || `${s.screen}__${s.state}`.includes(filter))) {
+for (const shot of shots.filter(s => !filter || filter.split('|').some(f => `${s.screen}__${s.state}`.includes(f)))) {
   test(`${shot.screen} ${shot.state}`, async ({ browser }) => {
     test.setTimeout(300_000)
     mkdirSync(join(OUT, 'notes'), { recursive: true })

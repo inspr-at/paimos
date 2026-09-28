@@ -17,6 +17,8 @@ import AgentGlyph from './AgentGlyph.vue'
 import HarnessBadge from './HarnessBadge.vue'
 import ProviderMark from './ProviderMark.vue'
 import { intendedResult, sessionContext, sessionExecution } from './sessionRow'
+import EtaCell from '../work/EtaCell.vue'
+import { etaFromSession } from '../../lib/eta'
 
 // Session families stay together across status groups. Each lead's history is
 // opt-in for this mounted list only; refreshes never open it or persist it.
@@ -117,6 +119,10 @@ watch(() => props.selected, id => {
 // asks first anyway, so it lives in the menu.
 const live = (view: SessionView) => view.session.phase !== 'stopped' && !view.session.archived_at
 const hasMenu = (view: SessionView) => live(view) || removal.canRemove(view.session)
+// The bound ticket's estimate sits under its key while the session runs; an ended
+// session no longer speaks for the ticket.
+const etaOf = (view: SessionView) => view.ticket && live(view) ? etaFromSession(view.session) : null
+const hasEta = computed(() => current.value.some(view => !!etaOf(view)))
 // Inline hover controls only where they can ever work; a session outside Aeon or
 // a reader without write access finds the reason in the menu instead.
 const inline = (view: SessionView, kind: SessionControl['kind']) => props.canControl && view.session.management_mode === 'managed' && view.session.advertised_capabilities.includes(kind)
@@ -178,7 +184,7 @@ function rowClick(event: MouseEvent, id: string) {
     <p v-else-if="showRemoved && !removedCount" class="state">No removed sessions.</p>
     <ConnectHint v-else-if="!total && !showRemoved" :can-start="canStart" @start="emit('start')" />
 
-    <div v-else class="table" role="table" aria-label="Agent sessions">
+    <div v-else class="table" :class="{ 'has-eta': hasEta }" role="table" aria-label="Agent sessions">
       <div class="thead" role="row">
         <span role="columnheader">State</span><span role="columnheader">Intended result</span><span role="columnheader">Ticket</span>
         <span role="columnheader" class="c-exec">Execution</span>
@@ -230,6 +236,7 @@ function rowClick(event: MouseEvent, id: string) {
           <span role="cell" class="c-ticket">
             <TicketPeekLink v-if="view.ticket" class="ticket-chip" :ticket-key="view.ticket.key" :href="view.ticket.href" :tip="view.ticket.title">{{ view.ticket.key }}</TicketPeekLink>
             <span v-else class="faint">{{ view.projectKey || '—' }}</span>
+            <EtaCell v-if="etaOf(view)" class="row-eta" align="start" :eta="etaOf(view)" :now="now" />
           </span>
           <span role="cell" class="c-exec" :aria-label="[exec.model ? exec.providerLabel : '', exec.modelLine, exec.accountLine].filter(Boolean).join('. ')">
             <span class="exec-icon"><ProviderMark :provider="exec.provider" /></span>
@@ -356,6 +363,9 @@ function rowClick(event: MouseEvent, id: string) {
 .exec-model, .exec-account { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .exec-model { font-size: 12.5px; color: var(--ink); }
 .exec-account { font-size: 11.5px; color: var(--ink-3); }
+/* The estimate follows the key on its line and wraps below it only when the column is narrow. */
+.row > .c-ticket { display: flex; flex-wrap: wrap; align-items: center; align-content: center; gap: 3px 8px; padding-block: 6px; }
+.row-eta { font-size: 12px; }
 .ticket-chip { display: inline-flex; align-items: center; height: 22px; padding: 0 8px; border-radius: 6px; background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); font: 600 11.5px/1 var(--mono); text-decoration: none; font-variant-ligatures: none; white-space: nowrap; }
 .ticket-chip:hover { filter: brightness(1.04); text-decoration: underline; }
 .ticket-chip:focus-visible { box-shadow: var(--focus-ring); }
@@ -391,12 +401,16 @@ function rowClick(event: MouseEvent, id: string) {
 .sk-row { display: flex; align-items: center; gap: 18px; height: 40px; }
 .sk-row .dot { width: 10px; height: 10px; border-radius: 50%; }
 .sk-row .key { width: 70px; height: 20px; border-radius: 6px; }
+/* Estimates need a ticket track wide enough for "overdue 5 min". */
+.table.has-eta { grid-template-columns: var(--state-width) minmax(140px, 1.45fr) minmax(112px, .48fr) minmax(128px, .82fr) 80px 68px 76px; }
 @container sessions (max-width: 980px) {
   .table { --state-width: 156px; grid-template-columns: var(--state-width) minmax(120px, 1.35fr) minmax(68px, .42fr) minmax(116px, .75fr) 72px 76px; }
+  .table.has-eta { grid-template-columns: var(--state-width) minmax(120px, 1.35fr) minmax(104px, .42fr) minmax(116px, .75fr) 72px 76px; }
   .c-elapsed { display: none; }
 }
 @container sessions (max-width: 760px) {
   .table { --state-width: 150px; grid-template-columns: var(--state-width) minmax(100px, 1.2fr) minmax(64px, auto) minmax(108px, .7fr) 68px; }
+  .table.has-eta { grid-template-columns: var(--state-width) minmax(100px, 1.2fr) minmax(100px, auto) minmax(108px, .7fr) 68px; }
   .c-beat, .c-elapsed { display: none; }
   .act { display: none; }
 }
@@ -415,6 +429,7 @@ function rowClick(event: MouseEvent, id: string) {
   .worker-tools .idle-count, .worker-tools > span[aria-hidden]:has(+ .idle-count) { display: none; }
   .c-state { grid-area: state; min-width: 0; }
   .c-ticket { grid-area: ticket; justify-self: start; min-width: 0; overflow: hidden; }
+  .row > .c-ticket { padding-block: 0; }
   .c-exec { grid-area: exec; min-width: 0; }
   .c-beat { display: block; grid-area: beat; }
   .c-elapsed { display: none; }
