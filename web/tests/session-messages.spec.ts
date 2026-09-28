@@ -16,7 +16,7 @@ async function setup(page: Page, theme: 'light' | 'dark' = 'light') {
   data.sessions.splice(1); data.runs.splice(0); data.approvals.splice(0)
   const original = data.messages[1]!
   data.messages.splice(0, data.messages.length,
-    { ...original, id: 'history', body: 'Old unbound status', created_at: new Date(now - 120_000).toISOString(), sender_label: 'Previous lead' } as typeof original,
+    { ...original, id: 'history', body: 'Old unbound status', created_at: new Date(now - 120_000).toISOString(), sender_label: 'paimos:Previous lead', from: 'paimos:Previous lead' } as typeof original,
     { ...original, id: 'other', body: 'Stop the ghost session', recipient_session_id: 'other-session', sender_session_id: undefined, sender_label: 'Markus', sender_principal_id: me.id, recipient_principal_id: worker.agent_principal_id } as typeof original,
     { ...original, id: 'current1', body: 'The release checks are ready.', sender_session_id: worker.id, sender_label: 'Original lead', created_at: new Date(now - 60_000).toISOString() } as typeof original,
     { ...original, id: 'current2', body: 'The release checks are ready.', sender_session_id: worker.id, sender_label: 'Original lead', created_at: new Date(now - 30_000).toISOString() } as typeof original,
@@ -45,7 +45,7 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390])
     await panel.getByText('Other sessions of camy', { exact: true }).click()
     await expect(panel.getByText('Old unbound status')).toBeVisible()
     await expect(panel.getByText('Stop the ghost session')).toBeVisible()
-    await expect(panel.getByRole('list', { name: 'Other session messages' })).toContainText('Previous lead')
+    await expect(panel.getByRole('list', { name: 'Other session messages' }).getByText('Previous lead', { exact: true })).toBeVisible()
   })
 }
 

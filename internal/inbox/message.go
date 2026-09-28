@@ -331,6 +331,10 @@ func (m *module) ack(ctx context.Context, p tenant.Principal, id string) (Messag
 			}
 			return errNotFound
 		}
+		// Keep the generation live through commit, including idempotent retries.
+		if _, err := messageSession(ctx, tx, current.RecipientSessionID, p.ID, ""); err != nil {
+			return err
+		}
 		if current.AckedAt != nil {
 			out = current
 			return nil

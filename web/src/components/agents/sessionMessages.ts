@@ -29,5 +29,6 @@ export function collapseMessages(messages: ProjectMessage[]): MessageGroup[] {
 
 export function historicalSender(message: ProjectMessage, me: string): string {
   if (message.sender_principal_id === me) return 'You'
-  return message.sender_label || message.from?.replace(/^[^:]+:/, '') || 'Agent'
+  if (message.sender_label && message.sender_label !== message.from) return message.sender_label
+  return message.from?.replace(/^[^:]+:/, '') || 'Agent'
 }

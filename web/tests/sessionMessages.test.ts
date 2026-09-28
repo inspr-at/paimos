@@ -19,6 +19,9 @@ test('the exact session owns its conversation; unbound history owns neither gene
 test('historical sender never resolves through the live principal label', () => {
   assert.equal(historicalSender(message('1', 0), 'person'), 'Original lead')
   assert.equal(historicalSender(message('1', 0, { sender_label: undefined, from: 'paimos:old-lead' }), 'person'), 'old-lead')
+  assert.equal(historicalSender(message('1', 0, { sender_label: 'paimos:old-lead', from: 'paimos:old-lead' }), 'person'), 'old-lead')
+  assert.equal(historicalSender(message('1', 0, { sender_label: 'Frozen label', from: 'paimos:old-lead' }), 'person'), 'Frozen label')
+  assert.equal(historicalSender(message('1', 0), 'agent'), 'You')
 })
 test('exact duplicate posts collapse within 60 seconds from the first post', () => {
   const input = [message('1', 0), message('2', 60), message('3', 61), message('4', 62, { sender_session_id: 'session-two' }), message('5', 63, { body: 'Ready. ' })]

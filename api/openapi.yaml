@@ -2249,6 +2249,7 @@ paths:
       responses:
         '200': {description: Inbox page, content: {application/json: {schema: {$ref: '#/components/schemas/InboxPage'}}}}
         '400': {$ref: '#/components/responses/Error'}
+        '409': {description: 'session_ended — This session has ended.', content: {application/json: {schema: {$ref: '#/components/schemas/ApiError'}}}}
     post:
       operationId: sendInboxMessage
       summary: Send one durable message to a principal
@@ -2295,6 +2296,7 @@ paths:
         '200': {description: Acknowledged message, content: {application/json: {schema: {$ref: '#/components/schemas/InboxMessage'}}}}
         '403': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
+        '409': {description: 'session_ended — This session has ended.', content: {application/json: {schema: {$ref: '#/components/schemas/ApiError'}}}}
   /inbox/targets:
     get:
       operationId: listInboxTargets

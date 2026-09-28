@@ -142,6 +142,7 @@ func TestSessionMessageHistoryAndLifecycle(t *testing.T) {
 			t.Fatalf("label changed: %s", msg.SenderLabel)
 		}
 	}
+	assertSessionClosureEvents(t, w, []string{sent.ID, targeted.ID}, 2)
 	incoming.Key = "after-stop"
 	status, body = compatPost(t, srv, w.sender, path, incoming)
 	if status != 409 || !bytes.Contains(body, []byte("This session has ended.")) {
@@ -168,6 +169,16 @@ func TestSessionMessageHistoryAndLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	assertSessionClosureEvents(t, w, []string{sent.ID, targeted.ID, otherMsg.ID}, 3)
+	// Archiving an already stopped generation must not emit duplicate closures.
+	err = db.InTenant(dbtest.Seed(t.Context()), w.db.App, w.agent.TenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE harness_sessions SET archived_at=now(),recovery_process_state='unknown',recovery_request_id=gen_random_uuid(),recovery_request_digest='fixture'::bytea,recovery_actor_id=agent_principal_id,recovery_reason='fixture' WHERE id=$1`, first)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertSessionClosureEvents(t, w, []string{sent.ID, targeted.ID, otherMsg.ID}, 3)
 	other.Key = "after-archive"
 	status, _ = compatPost(t, srv, w.sender, path, other)
 	if status != 409 {
@@ -209,5 +220,76 @@ func TestDirectSessionSendBindingAndLegacyShape(t *testing.T) {
 	status, body = compatPost(t, srv, w.sender, "/api/inbox/messages", payload)
 	if status != 201 || bytes.Contains(body, []byte("sender_label")) || bytes.Contains(body, []byte("recipient_session_id")) {
 		t.Fatalf("legacy direct shape %d %s", status, body)
+	}
+}
+
+func TestEndedSessionCannotAcknowledge(t *testing.T) {
+	for _, ending := range []string{"stop", "archive"} {
+		t.Run(ending, func(t *testing.T) {
+			w, m, project, srv := messagingWorld(t)
+			id := messageTestSession(t, w, project, w.agent, "Ending worker")
+			in := compatInput("codex:worker", "pending")
+			in.RecipientSessionID = &id
+			pending := mustCompatSend(t, m, w.sender, project, in)
+			in.Key = "already-acked"
+			acked := mustCompatSend(t, m, w.sender, project, in)
+			ackPath := func(messageID string) string { return "/api/inbox/messages/" + messageID + "/ack" }
+			status, body := do(t, srv, w.agent.ID, "POST", ackPath(acked.ID), "", nil)
+			if status != 200 {
+				t.Fatalf("active ack: %d %s", status, body)
+			}
+			unbound := mustCompatSend(t, m, w.sender, project, compatInput("codex:worker", "broadcast"))
+			err := db.InTenant(dbtest.Seed(t.Context()), w.db.App, w.agent.TenantID, func(tx pgx.Tx) error {
+				stmt := `UPDATE harness_sessions SET phase='stopped',stopped_at=now() WHERE id=$1`
+				if ending == "archive" {
+					stmt = `UPDATE harness_sessions SET phase='stopped',stopped_at=now(),archived_at=now(),recovery_process_state='unknown',recovery_request_id=gen_random_uuid(),recovery_request_digest='fixture'::bytea,recovery_actor_id=agent_principal_id,recovery_reason='fixture' WHERE id=$1`
+				}
+				_, err := tx.Exec(t.Context(), stmt, id)
+				return err
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, messageID := range []string{pending.ID, acked.ID} {
+				status, body := do(t, srv, w.agent.ID, "POST", ackPath(messageID), "", nil)
+				if status != 409 || !bytes.Contains(body, []byte(`"code":"session_ended"`)) {
+					t.Fatalf("ended ack: %d %s", status, body)
+				}
+			}
+			status, body = do(t, srv, w.agent.ID, "POST", ackPath(unbound.ID), "", nil)
+			if status != 200 {
+				t.Fatalf("broadcast ack: %d %s", status, body)
+			}
+			err = db.InTenant(dbtest.Seed(t.Context()), w.db.App, w.agent.TenantID, func(tx pgx.Tx) error {
+				var unchanged bool
+				if err := tx.QueryRow(t.Context(), `SELECT acked_at IS NULL AND NOT EXISTS(SELECT 1 FROM inbox_message_deliveries WHERE message_id=$1 AND state='delivered') AND NOT EXISTS(SELECT 1 FROM events WHERE type='inbox.acked' AND after->>'id'=$1::text) FROM inbox_messages WHERE id=$1`, pending.ID).Scan(&unchanged); err != nil {
+					return err
+				}
+				if !unchanged {
+					return fmt.Errorf("ended ack changed message, delivery or event")
+				}
+				return nil
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func assertSessionClosureEvents(t *testing.T, w *world, messageIDs []string, expected int) {
+	t.Helper()
+	err := db.InTenant(dbtest.Seed(t.Context()), w.db.App, w.agent.TenantID, func(tx pgx.Tx) error {
+		var total, matching int
+		if err := tx.QueryRow(t.Context(), `SELECT count(*),count(*) FILTER (WHERE after->>'message_id'=ANY($1::text[]) AND NOT (after ? 'reply_message_id')) FROM events WHERE type='inbox.reply_obligation_closed' AND after->>'closed_reason'='session_ended'`, messageIDs).Scan(&total, &matching); err != nil {
+			return err
+		}
+		if total != expected || matching != expected {
+			return fmt.Errorf("closure events: total=%d matching=%d expected=%d", total, matching, expected)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 }
