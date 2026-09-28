@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
-	"sync/atomic"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -39,14 +38,17 @@ var (
 type Module struct {
 	pool          *pgxpool.Pool
 	secureCookies bool
-	limitCalls    atomic.Uint64
+	macKey        []byte
 }
 
 var _ httpapi.Module = (*Module)(nil)
 
 // New returns the portal module. secureCookies is true outside local dev, matching session cookies.
-func New(pool *pgxpool.Pool, secureCookies bool) *Module {
-	return &Module{pool: pool, secureCookies: secureCookies}
+// macKey is the server session key used to HMAC public limiter buckets. It is copied and never logged.
+func New(pool *pgxpool.Pool, secureCookies bool, macKey []byte) *Module {
+	copied := make([]byte, len(macKey))
+	copy(copied, macKey)
+	return &Module{pool: pool, secureCookies: secureCookies, macKey: copied}
 }
 
 func (m *Module) Mount(mux *http.ServeMux) {

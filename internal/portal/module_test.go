@@ -3,6 +3,8 @@
 package portal
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -10,6 +12,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 
@@ -21,7 +24,7 @@ import (
 func TestPublicPortalBoundary(t *testing.T) {
 	d := dbtest.Open(t)
 	ctx := t.Context()
-	m := New(d.App, false)
+	m := New(d.App, false, bytes.Repeat([]byte{11}, 32))
 	mux := http.NewServeMux()
 	m.Mount(mux)
 	f := &fixture{t: t, m: m, d: d, h: mux}
@@ -74,9 +77,11 @@ func TestPublicPortalBoundary(t *testing.T) {
 	closed := f.do(http.MethodGet, readA, "", readIP, nil, nil, nil)
 	unknownRes := f.do(http.MethodGet, missing, "", readIP, nil, nil, nil)
 	explicitOff := f.do(http.MethodGet, readC, "", readIP, nil, nil, nil)
-	if closed.Code != http.StatusNotFound || unknownRes.Body.String() != closed.Body.String() || explicitOff.Body.String() != closed.Body.String() {
-		t.Fatalf("closed portal is not a uniform 404: %d %s | %d %s | %d %s", closed.Code, closed.Body, unknownRes.Code, unknownRes.Body, explicitOff.Code, explicitOff.Body)
+	if closed.Code != http.StatusNotFound {
+		t.Fatalf("closed portal: %d %s", closed.Code, closed.Body)
 	}
+	sameResponse(t, closed, unknownRes)
+	sameResponse(t, closed, explicitOff)
 	for _, secret := range secrets {
 		if strings.Contains(closed.Body.String(), secret) {
 			t.Fatalf("closed body leaked %s", secret)
@@ -213,18 +218,31 @@ func TestPublicPortalBoundary(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	for i := 0; i < 10; i++ {
-		rec := f.do(http.MethodPost, "/api/public/portal/no-such-portal/wishes/PWS-1/votes", "{}", unknown, nil, nil, nil)
+	unknownVote := "/api/public/portal/no-such-portal/wishes/PWS-1/votes"
+	disabledVote := "/api/public/portal/portal-c/wishes/PWS-1/votes"
+	firstUnknown := f.do(http.MethodPost, unknownVote, "{}", unknown, nil, nil, nil)
+	firstDisabled := f.do(http.MethodPost, disabledVote, "{}", unknown, nil, nil, nil)
+	if firstUnknown.Code != http.StatusNotFound {
+		t.Fatalf("unknown vote: %d %s", firstUnknown.Code, firstUnknown.Body)
+	}
+	sameResponse(t, firstUnknown, firstDisabled)
+	for i := 0; i < 8; i++ {
+		rec := f.do(http.MethodPost, unknownVote, "{}", unknown, nil, nil, nil)
 		if rec.Code != http.StatusNotFound {
 			t.Fatalf("unknown attempt %d: %d %s", i, rec.Code, rec.Body)
 		}
 	}
-	if rec := f.do(http.MethodPost, "/api/public/portal/no-such-portal/wishes/PWS-1/votes", "{}", unknown, nil, nil, nil); rec.Code != http.StatusTooManyRequests {
-		t.Fatalf("unknown limit: %d %s", rec.Code, rec.Body)
+	blockedUnknown := f.do(http.MethodPost, unknownVote, "{}", unknown, nil, nil, nil)
+	blockedDisabled := f.do(http.MethodPost, disabledVote, "{}", unknown, nil, nil, nil)
+	if blockedUnknown.Code != http.StatusTooManyRequests {
+		t.Fatalf("unknown limit: %d %s", blockedUnknown.Code, blockedUnknown.Body)
 	}
-	if rec := f.do(http.MethodPost, voteA, "{}", unknown, nil, nil, nil); rec.Code != http.StatusCreated {
-		t.Fatalf("unknown selector consumed the tenant bucket: %d %s", rec.Code, rec.Body)
+	sameResponse(t, blockedUnknown, blockedDisabled)
+	blockedOpen := f.do(http.MethodPost, voteA, "{}", unknown, nil, nil, nil)
+	if blockedOpen.Code != http.StatusTooManyRequests {
+		t.Fatalf("open portal escaped the shared client budget: %d %s", blockedOpen.Code, blockedOpen.Body)
 	}
+	sameResponse(t, blockedUnknown, blockedOpen)
 
 	ip := "198.51.100.10"
 	key := hash("portal-read:" + ip)
@@ -250,6 +268,103 @@ func TestPublicPortalBoundary(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+func sameResponse(t *testing.T, a, b *httptest.ResponseRecorder) {
+	t.Helper()
+	if a.Code != b.Code || a.Body.String() != b.Body.String() {
+		t.Fatalf("status/body %d %s vs %d %s", a.Code, a.Body, b.Code, b.Body)
+	}
+	ah, bh := a.Header(), b.Header()
+	if len(ah) != len(bh) {
+		t.Fatalf("headers %#v vs %#v", ah, bh)
+	}
+	for key, values := range ah {
+		if strings.Join(values, "\n") != strings.Join(bh[key], "\n") {
+			t.Fatalf("header %s %v vs %v", key, values, bh[key])
+		}
+	}
+}
+
+func TestPortalLimitKeyIsNotAddressHash(t *testing.T) {
+	d := dbtest.Open(t)
+	m := New(d.App, false, bytes.Repeat([]byte{11}, 32))
+	mux := http.NewServeMux()
+	m.Mount(mux)
+	const remote = "198.51.100.77:443"
+	req := httptest.NewRequest(http.MethodGet, "/api/public/portal/no-such-portal", nil)
+	req.RemoteAddr = remote
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("read: %d %s", rec.Code, rec.Body)
+	}
+	const ip = "198.51.100.77"
+	want, err := m.bucketKey("portal-read", ip)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stored string
+	err = db.InTenant(dbtest.Seed(t.Context()), d.App, zeroTenant, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `SELECT bucket_key FROM quote_public_rate_limits`).Scan(&stored)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored == hash(ip) || stored == hash("portal-read:"+ip) || stored != want || strings.Contains(stored, "198.51.100") {
+		t.Fatalf("limiter key is a plain digest of the address: %s", stored)
+	}
+}
+
+func TestPortalLimitRowsExpireWithoutTraffic(t *testing.T) {
+	d := dbtest.Open(t)
+	m := New(d.App, false, bytes.Repeat([]byte{11}, 32))
+	ctx := t.Context()
+	oldKey := strings.Repeat("ab", 32)
+	freshKey := strings.Repeat("cd", 32)
+	err := db.InTenant(ctx, d.App, zeroTenant, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `INSERT INTO quote_public_rate_limits(tenant_id,bucket_key,attempts,updated_at) VALUES
+			($1::uuid,$2,ARRAY[clock_timestamp()-interval '3 minutes'],clock_timestamp()-interval '3 minutes'),
+			($1::uuid,$3,ARRAY[clock_timestamp()],clock_timestamp())`, zeroTenant, oldKey, freshKey)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := m.ExpireLimits(ctx); err != nil {
+		t.Fatal(err)
+	}
+	err = db.InTenant(ctx, d.App, zeroTenant, func(tx pgx.Tx) error {
+		var n int
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM quote_public_rate_limits WHERE bucket_key=$1`, oldKey).Scan(&n); err != nil {
+			return err
+		}
+		if n != 0 {
+			t.Fatal("expired limiter row remained without further traffic")
+		}
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM quote_public_rate_limits WHERE bucket_key=$1`, freshKey).Scan(&n); err != nil {
+			return err
+		}
+		if n != 1 {
+			t.Fatalf("fresh limiter rows %d", n)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stop, cancel := context.WithCancel(ctx)
+	cancel()
+	done := make(chan struct{})
+	go func() {
+		m.RunLimitSweep(stop)
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("limit sweep ignored cancellation")
 	}
 }
 

@@ -75,27 +75,78 @@ func TestOnlyPublicQuoteCapabilityPathsBypassAuthentication(t *testing.T) {
 	handler := m.Middleware(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	}))
-	for _, path := range []string{
-		"/api/public/quotes/tenant/token", "/api/public/quotes/tenant/token/accept", "/api/public/quotes/tenant/token/pdf",
-		"/api/public/portal/harbour", "/api/public/portal/harbour/wishes/PWS-1/votes",
+	for _, route := range []struct{ method, path string }{
+		{http.MethodGet, "/api/public/quotes/tenant/token"},
+		{http.MethodGet, "/api/public/quotes/tenant/token/accept"},
+		{http.MethodGet, "/api/public/quotes/tenant/token/pdf"},
+		{http.MethodGet, "/api/public/portal/harbour"},
+		{http.MethodHead, "/api/public/portal/harbour"},
+		{http.MethodPost, "/api/public/portal/harbour/wishes/PWS-1/votes"},
 	} {
 		rec := httptest.NewRecorder()
-		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		req := httptest.NewRequest(route.method, route.path, nil)
+		if route.method == http.MethodHead || route.method == http.MethodGet && route.path == "/api/public/portal/harbour" {
+			req.Pattern = portalCatalogPattern
+		}
+		if route.method == http.MethodPost {
+			req.Pattern = portalVotePattern
+		}
+		handler.ServeHTTP(rec, req)
 		if rec.Code != http.StatusNoContent {
-			t.Errorf("public path %s: %d", path, rec.Code)
+			t.Errorf("public %s %s: %d", route.method, route.path, rec.Code)
 		}
 	}
-	for _, path := range []string{
-		"/api/quotes", "/api/quotes/id/versions/1/public-link", "/api/quotes/id/versions/1/public-link/revoke",
-		"/api/public/quotes", "/api/public/quotesx/tenant/token", "/api/public/quotes-other/tenant/token",
-		"/api/public/portal", "/api/portal/settings", "/api/public/portals/harbour",
-		"/api/public/quote/tenant/token", "/api/me", "/api/events", "/api/plugins",
+	for _, route := range []struct{ method, path string }{
+		{http.MethodGet, "/api/quotes"},
+		{http.MethodGet, "/api/quotes/id/versions/1/public-link"},
+		{http.MethodGet, "/api/quotes/id/versions/1/public-link/revoke"},
+		{http.MethodGet, "/api/public/quotes"},
+		{http.MethodGet, "/api/public/quotesx/tenant/token"},
+		{http.MethodGet, "/api/public/quotes-other/tenant/token"},
+		{http.MethodGet, "/api/public/portal"},
+		{http.MethodGet, "/api/public/portal/"},
+		{http.MethodGet, "/api/portal/settings"},
+		{http.MethodGet, "/api/public/portals/harbour"},
+		{http.MethodGet, "/api/public/quote/tenant/token"},
+		{http.MethodGet, "/api/me"},
+		{http.MethodGet, "/api/events"},
+		{http.MethodGet, "/api/plugins"},
+		{http.MethodPost, "/api/public/portal/harbour"},
+		{http.MethodPut, "/api/public/portal/harbour"},
+		{http.MethodPatch, "/api/public/portal/harbour"},
+		{http.MethodDelete, "/api/public/portal/harbour"},
+		{http.MethodOptions, "/api/public/portal/harbour"},
+		{http.MethodGet, "/api/public/portal/harbour/wishes/PWS-1/votes"},
+		{http.MethodHead, "/api/public/portal/harbour/wishes/PWS-1/votes"},
+		{http.MethodPut, "/api/public/portal/harbour/wishes/PWS-1/votes"},
+		{http.MethodGet, "/api/public/portal/harbour/"},
+		{http.MethodPost, "/api/public/portal/harbour/wishes/PWS-1/votes/"},
+		{http.MethodGet, "/api/public/portal/harbour/extra"},
+		{http.MethodPost, "/api/public/portal/harbour/wishes/PWS-1/votes/extra"},
+		{http.MethodGet, "/api/public/portal/harbour/wishes/PWS-1"},
+		{http.MethodGet, "/api/public/portal/harbour/../settings"},
+		{http.MethodGet, "/api/public/portal/./harbour"},
+		{http.MethodPost, "/api/public/portal/harbour/wishes/PWS-1/votes/../votes"},
+		{http.MethodGet, "/api/public/portal/%2e%2e/me"},
+		{http.MethodGet, "/api/public/portal/%2E%2E/me"},
+		{http.MethodGet, "/api/public/portal/harbour%2Fsecret"},
+		{http.MethodGet, "/api/public/portal/harbour%2fsecret"},
+		{http.MethodPost, "/api/public/portal/harbour%2fwishes%2fPWS-1%2fvotes"},
+		{http.MethodGet, "/api/public/portal/Harbour"},
+		{http.MethodPost, "/api/public/portal/harbour/wishes/pws-1/votes"},
 	} {
 		rec := httptest.NewRecorder()
-		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		handler.ServeHTTP(rec, httptest.NewRequest(route.method, route.path, nil))
 		if rec.Code != http.StatusUnauthorized {
-			t.Errorf("protected path %s: %d", path, rec.Code)
+			t.Errorf("protected %s %s: %d", route.method, route.path, rec.Code)
 		}
+	}
+	matched := httptest.NewRequest(http.MethodGet, "/api/public/portal/harbour", nil)
+	matched.Pattern = "GET /api/portal/settings"
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, matched)
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("portal path with a foreign pattern: %d", rec.Code)
 	}
 }
 

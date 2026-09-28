@@ -215,6 +215,8 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 	if err != nil {
 		return fmt.Errorf("release history: %w", err)
 	}
+	portalMod := portal.New(pool, cfg.Env != "dev", authCfg.SessionKey)
+	go portalMod.RunLimitSweep(ctx)
 	// AEON-178: invites can create the sign-in account through a configured identity
 	// provisioner (none by default). A misconfigured provisioner stops startup.
 	provisioner, err := identity.FromEnv()
@@ -273,7 +275,7 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 			quotesMod,
 			collaborationMod,
 			publicQuotesMod,
-			portal.New(pool, cfg.Env != "dev"),
+			portalMod,
 			confirmationMod,
 			hours.New(pool, pluginRegistry),
 			directory.New(pool, pluginRegistry),

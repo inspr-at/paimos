@@ -4,9 +4,11 @@ package portal
 
 import (
 	"context"
+	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"log/slog"
 	"net"
 	"net/http"
 	"strconv"
@@ -19,10 +21,12 @@ import (
 
 const publicLimitWindow = time.Minute
 
-// allow locks one tenant and bucket in quote_public_rate_limits, the sliding
-// window AEON-133 shares across replicas. Portal operations use their own
-// bucket names so they do not consume a quote link's budget. The stored key
-// is a hash; the address itself is not written.
+// allow locks one bucket in quote_public_rate_limits, the sliding window
+// AEON-133 shares across replicas. Portal operations use their own bucket
+// names so they do not consume a quote link's budget. Public portal calls
+// pass the zero tenant: the bucket is the client and the operation, never
+// the slug, so an unknown address and a closed portal share one window.
+// The stored key is an HMAC; the address itself is not written.
 func (m *Module) allow(ctx context.Context, tenantID, key string, limit int) (bool, int, error) {
 	if m.pool == nil || limit < 1 || limit > 120 || !uuidPattern.MatchString(tenantID) {
 		return false, 0, errors.New("public rate limiter unavailable")
@@ -56,24 +60,48 @@ func (m *Module) allow(ctx context.Context, tenantID, key string, limit int) (bo
 			}
 			allowed = true
 		}
-		if m.limitCalls.Add(1)%64 == 0 {
-			_, err := tx.Exec(ctx, `DELETE FROM quote_public_rate_limits WHERE ctid IN (
-				SELECT ctid FROM quote_public_rate_limits
-				WHERE tenant_id=$1::uuid AND updated_at < clock_timestamp()-interval '2 minutes'
-				ORDER BY updated_at LIMIT 128
-			)`, tenantID)
-			return err
-		}
 		return nil
 	})
 	return allowed, retryAfter, err
 }
 
-func (m *Module) limit(w http.ResponseWriter, r *http.Request, tenantID, operation string, limit int) bool {
-	if tenantID == "" {
-		tenantID = zeroTenant
+// ExpireLimits deletes portal limiter rows older than the sliding window.
+// It does not wait for another request: RunLimitSweep calls it on a timer,
+// including once at startup. Only the zero-tenant partition is visible here,
+// which is where public portal buckets are stored.
+func (m *Module) ExpireLimits(ctx context.Context) error {
+	if m.pool == nil {
+		return errors.New("portal limiter unavailable")
 	}
-	allowed, retryAfter, err := m.allow(r.Context(), tenantID, hash(operation+":"+remoteIP(r)), limit)
+	return db.InTenant(ctx, m.pool, zeroTenant, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `DELETE FROM quote_public_rate_limits WHERE updated_at < clock_timestamp() - make_interval(secs => $1)`, int(publicLimitWindow.Seconds()))
+		return err
+	})
+}
+
+// RunLimitSweep expires idle limiter rows until ctx is cancelled.
+func (m *Module) RunLimitSweep(ctx context.Context) {
+	ticker := time.NewTicker(publicLimitWindow)
+	defer ticker.Stop()
+	for {
+		if err := m.ExpireLimits(ctx); err != nil && ctx.Err() == nil {
+			slog.Error("portal limit expiry", "err", err)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+func (m *Module) limit(w http.ResponseWriter, r *http.Request, operation string, limit int) bool {
+	key, err := m.bucketKey(operation, remoteIP(r))
+	if err != nil {
+		fail(w, http.StatusServiceUnavailable, "portal unavailable")
+		return false
+	}
+	allowed, retryAfter, err := m.allow(r.Context(), zeroTenant, key, limit)
 	if err != nil {
 		fail(w, http.StatusServiceUnavailable, "portal unavailable")
 		return false
@@ -89,6 +117,22 @@ func (m *Module) limit(w http.ResponseWriter, r *http.Request, tenantID, operati
 func hash(s string) string {
 	sum := sha256.Sum256([]byte(s))
 	return hex.EncodeToString(sum[:])
+}
+
+// bucketKey is HMAC-SHA256 under the server session key, the same keyed-hash
+// mechanism as the session cookie. A plain digest of the address would let
+// someone with a database copy recover it offline. The key is never logged.
+func (m *Module) bucketKey(operation, ip string) (string, error) {
+	if len(m.macKey) < 32 {
+		return "", errors.New("portal limiter key unavailable")
+	}
+	mac := hmac.New(sha256.New, m.macKey)
+	mac.Write([]byte("portal-limit"))
+	mac.Write([]byte{0})
+	mac.Write([]byte(operation))
+	mac.Write([]byte{0})
+	mac.Write([]byte(ip))
+	return hex.EncodeToString(mac.Sum(nil)), nil
 }
 
 func remoteIP(r *http.Request) string {

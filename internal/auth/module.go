@@ -87,7 +87,7 @@ func (m *Module) Mount(mux *http.ServeMux) {
 
 // Middleware resolves a session cookie or an agent bearer token onto the
 // request context. Unauthenticated /api requests, other than health, readiness,
-// version and /api/auth/*, /api/public/quotes/* and /api/public/portal/*, get 401 JSON.
+// version, /api/auth/*, /api/public/quotes/* and the two public portal routes, get 401 JSON.
 func (m *Module) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p, kind, err := m.authenticate(r)
@@ -211,7 +211,7 @@ func validRouteUUID(s string) bool {
 // Customer sessions may access only their own profile and quote handlers that
 // independently verify the contact binding and frozen recipient digest.
 func customerRouteAllowed(r *http.Request, p tenant.Principal) bool {
-	if isPublicAPI(r.URL.Path) || r.URL.Path == "/api/me" && r.Method == http.MethodGet {
+	if isPublicAPI(r.URL.Path) || publicPortalRequest(r) || r.URL.Path == "/api/me" && r.Method == http.MethodGet {
 		return true
 	}
 	if r.URL.Path == "/api/me/greeting" && r.Method == http.MethodGet || r.URL.Path == "/api/me/profile" && (r.Method == http.MethodGet || r.Method == http.MethodPatch) || r.URL.Path == "/api/me/avatar" && (r.Method == http.MethodPost || r.Method == http.MethodDelete) {
@@ -492,7 +492,7 @@ func agentHasScope(have []string, want string) bool {
 }
 
 func publicRequest(r *http.Request) bool {
-	return isPublicAPI(r.URL.Path) || agentpairing.PublicRoute(r.Method, r.URL.Path)
+	return isPublicAPI(r.URL.Path) || publicPortalRequest(r) || agentpairing.PublicRoute(r.Method, r.URL.Path)
 }
 func protectedRequest(r *http.Request) bool {
 	return strings.HasPrefix(r.URL.Path, "/api/") && !publicRequest(r)
@@ -503,7 +503,7 @@ func isPublicAPI(path string) bool {
 	case "/api/health", "/api/ready", "/api/version":
 		return true
 	default:
-		return strings.HasPrefix(path, "/api/auth/") || strings.HasPrefix(path, "/api/public/quotes/") || strings.HasPrefix(path, "/api/public/portal/")
+		return strings.HasPrefix(path, "/api/auth/") || strings.HasPrefix(path, "/api/public/quotes/")
 	}
 }
 

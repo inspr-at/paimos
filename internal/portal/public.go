@@ -88,19 +88,17 @@ func (m *Module) read(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusServiceUnavailable, "portal unavailable")
 		return
 	}
+	if !m.limit(w, r, "portal-read", 120) {
+		return
+	}
 	tenantID, err := m.resolveTenant(r.Context(), r.PathValue("tenantSlug"))
 	if err != nil {
 		slog.Error("portal tenant", "err", err)
 		fail(w, http.StatusServiceUnavailable, "portal unavailable")
 		return
 	}
-	if !m.limit(w, r, tenantID, "portal-read", 120) {
-		return
-	}
-	if tenantID == zeroTenant {
-		fail(w, http.StatusNotFound, "not found")
-		return
-	}
+	// Unknown slugs use the zero tenant and still run this read, so a closed
+	// portal and a missing slug do the same work and return the same 404.
 	var doc portalDocument
 	err = db.InTenant(db.AllProjects(r.Context(), "public portal read"), m.pool, tenantID, func(tx pgx.Tx) error {
 		var loadErr error
@@ -260,14 +258,7 @@ func (m *Module) vote(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusServiceUnavailable, "portal unavailable")
 		return
 	}
-	wishKey := r.PathValue("wishKey")
-	tenantID, err := m.resolveTenant(r.Context(), r.PathValue("tenantSlug"))
-	if err != nil {
-		slog.Error("portal tenant", "err", err)
-		fail(w, http.StatusServiceUnavailable, "portal unavailable")
-		return
-	}
-	if !m.limit(w, r, tenantID, "portal-vote", 10) {
+	if !m.limit(w, r, "portal-vote", 10) {
 		return
 	}
 	if !sameSite(r) {
@@ -278,7 +269,14 @@ func (m *Module) vote(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusBadRequest, "invalid vote")
 		return
 	}
-	if tenantID == zeroTenant || !validKey(wishKey) {
+	wishKey := r.PathValue("wishKey")
+	tenantID, err := m.resolveTenant(r.Context(), r.PathValue("tenantSlug"))
+	if err != nil {
+		slog.Error("portal tenant", "err", err)
+		fail(w, http.StatusServiceUnavailable, "portal unavailable")
+		return
+	}
+	if !validKey(wishKey) {
 		fail(w, http.StatusNotFound, "not found")
 		return
 	}
