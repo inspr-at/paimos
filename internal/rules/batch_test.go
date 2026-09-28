@@ -5,6 +5,7 @@ package rules
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -973,7 +974,12 @@ func TestBatchSlowRenderReleasesTheLockAtTheDeadline(t *testing.T) {
 
 // ackDropper loses the server's answer to exactly one COMMIT, after the server
 // has processed it: the change is durable, the client sees EOF.
-type ackDropper struct{ armed atomic.Bool }
+type ackDropper struct {
+	armed atomic.Bool
+	// hangUp loses the answer at once, without waiting for the server: the
+	// COMMIT may still be running when the client gives up.
+	hangUp atomic.Bool
+}
 type dropConn struct {
 	net.Conn
 	d    *ackDropper
@@ -981,6 +987,12 @@ type dropConn struct {
 }
 
 func (c *dropConn) Write(b []byte) (int, error) {
+	// With hangUp, the network is gone for the cancel request pgx sends after
+	// the lost answer too (a CancelRequest packet is 16 bytes, code 80877102).
+	if c.d.hangUp.Load() && len(b) == 16 && binary.BigEndian.Uint32(b[4:8]) == 80877102 {
+		c.Conn.Close()
+		return 0, io.ErrClosedPipe
+	}
 	if bytes.Contains(b, []byte("commit\x00")) && c.d.armed.CompareAndSwap(true, false) {
 		c.drop = true
 	}
@@ -989,9 +1001,11 @@ func (c *dropConn) Write(b []byte) (int, error) {
 func (c *dropConn) Read(b []byte) (int, error) {
 	if c.drop {
 		// Wait for the server's CommandComplete (the commit is durable by
-		// then), throw it away and hang up.
-		_ = c.Conn.SetReadDeadline(time.Now().Add(5 * time.Second))
-		_, _ = c.Conn.Read(make([]byte, 4096))
+		// then), throw it away and hang up; or hang up at once.
+		if !c.d.hangUp.Load() {
+			_ = c.Conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+			_, _ = c.Conn.Read(make([]byte, 4096))
+		}
 		c.Conn.Close()
 		return 0, io.EOF
 	}
@@ -1028,45 +1042,112 @@ func faultyWorld(t *testing.T, slug string) (*batchWorld, *ackDropper) {
 	return w, dropper
 }
 
-// The COMMIT succeeds on the server but its acknowledgement is lost. The
-// request reconciles on a fresh connection and answers 200 with the stored
-// result, exactly as a replay would.
+// unknownAnswer asserts an outcome_unknown answer with this wording.
+func unknownAnswer(t *testing.T, label string, body []byte, wording string) {
+	t.Helper()
+	var e map[string]any
+	if err := json.Unmarshal(body, &e); err != nil || e["code"] != "outcome_unknown" || e["error"] != wording {
+		t.Fatalf("%s: %s", label, body)
+	}
+	if wording != unknownBatch && strings.Contains(strings.ToLower(string(body)), "safe") {
+		t.Fatalf("%s: promises a safe retry: %s", label, body)
+	}
+}
+
+// The COMMIT succeeds on the server but its acknowledgement is lost, and the
+// caller's access is revoked before the check. The batch's stored answer is
+// read without depending on that access: 200 with the stored result, exactly
+// as a replay would give.
 func TestBatchLostCommitAcknowledgementReturnsTheStoredResult(t *testing.T) {
 	w, dropper := faultyWorld(t, "rules-batch-lostack")
 	admin := w.principal(tenant.Person, "owner", "admin")
 	company := w.floor(admin)
 	s := w.set(admin, company, "Short", testRule("short", "A short rule."))
 	req := batch("Lost ack.", item(s, "auto"))
+	saved := reconcileHook
+	reconcileHook = func() error {
+		_, err := w.d.Admin.Exec(context.Background(), `DELETE FROM role_bindings WHERE tenant_id=$1 AND principal_id=$2`, w.tid, admin.ID)
+		return err
+	}
+	t.Cleanup(func() { reconcileHook = saved })
 	dropper.armed.Store(true)
 	first := w.call(admin, "POST", "/api/rules/publish", req, 200)
 	if dropper.armed.Load() {
 		t.Fatal("no COMMIT acknowledgement was lost; the test did not exercise the fault")
 	}
-	replay := w.call(admin, "POST", "/api/rules/publish", req, 200)
-	if !bytes.Equal(first, replay) {
-		t.Fatalf("reconciled answer differs from the stored one\nfirst  %s\nreplay %s", first, replay)
-	}
 	var got BatchResult
 	if err := json.Unmarshal(first, &got); err != nil || w.published(s.ID) != got.Versions[0].Version {
 		t.Fatalf("reconciled answer: %s", first)
 	}
-	// Single publish and drafts reconcile the same way.
-	var saved Set
-	dropper.armed.Store(true)
-	json.Unmarshal(w.call(admin, "PUT", "/api/rules/sets/"+s.ID+"/draft", draftInput{s.Revision, "Short", []Rule{testRule("short", "A shorter rule.")}}, 200), &saved)
-	if dropper.armed.Load() || saved.Revision != s.Revision+1 {
-		t.Fatalf("draft after a lost acknowledgement: %+v", saved)
+	var stored []byte
+	if err := w.d.Admin.QueryRow(t.Context(), `SELECT result::text FROM rule_publish_batches WHERE tenant_id=$1 AND batch_id=$2`, w.tid, got.BatchID).Scan(&stored); err != nil {
+		t.Fatal(err)
 	}
-	dropper.armed.Store(true)
-	var snap Snapshot
-	json.Unmarshal(w.call(admin, "POST", "/api/rules/sets/"+s.ID+"/publish", map[string]any{"expected_revision": saved.Revision, "version": "261001000000.0.0", "note": "Single."}, 200), &snap)
-	if dropper.armed.Load() || snap.Version != "261001000000.0.0" || snap.Note != "Single." {
-		t.Fatalf("single publish after a lost acknowledgement: %+v", snap)
+	var fromStore BatchResult
+	if err := json.Unmarshal(stored, &fromStore); err != nil || !bytes.Equal(jsonBytes(fromStore), jsonBytes(got)) {
+		t.Fatalf("the answer is not the stored one\nanswer %s\nstored %s", first, jsonBytes(fromStore))
 	}
 }
 
-// When even the reconciliation fails, the answer says the outcome is unknown,
-// never that nothing was changed.
+// A COMMIT still running (held in a deferred trigger) when the client loses
+// the connection: the stored answer is not there yet, and absence is not a
+// rollback. The answer is outcome_unknown, and the publication does land.
+func TestBatchCommitStillRunningIsUnknownNotBusy(t *testing.T) {
+	w, dropper := faultyWorld(t, "rules-batch-inflight")
+	admin := w.principal(tenant.Person, "owner", "admin")
+	company := w.floor(admin)
+	s := w.set(admin, company, "Short", testRule("short", "A short rule."))
+	for _, stmt := range []string{
+		`CREATE FUNCTION aeon_test_slow_commit() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN PERFORM pg_sleep(1); RETURN NULL; END $$`,
+		`CREATE CONSTRAINT TRIGGER aeon_test_slow_commit AFTER INSERT ON rule_publish_batches DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION aeon_test_slow_commit()`,
+	} {
+		if _, err := w.d.Admin.Exec(t.Context(), stmt); err != nil {
+			t.Fatal(err)
+		}
+	}
+	dropper.hangUp.Store(true)
+	dropper.armed.Store(true)
+	body := w.call(admin, "POST", "/api/rules/publish", batch("", item(s, "auto")), 503)
+	unknownAnswer(t, "commit in flight", body, unknownBatch)
+	deadline := time.Now().Add(10 * time.Second)
+	for w.published(s.ID) == "" {
+		if time.Now().After(deadline) {
+			t.Fatal("the publication never landed; the test did not exercise an in-flight commit")
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+// Every other write cannot find out what happened: it says so, in its own
+// words, and never promises that repeating is safe.
+func TestLostAcknowledgementOfOtherWritesIsUnknown(t *testing.T) {
+	w, dropper := faultyWorld(t, "rules-other-lostack")
+	admin := w.principal(tenant.Person, "owner", "admin")
+	company := w.floor(admin)
+	s := w.set(admin, company, "Short", testRule("short", "A short rule."))
+	lose := func(method, path string, in any, wording, label string) {
+		t.Helper()
+		dropper.armed.Store(true)
+		code, body := w.send(admin, method, path, in)
+		if dropper.armed.Load() || code != 503 {
+			t.Fatalf("%s: %d %s", label, code, body)
+		}
+		unknownAnswer(t, label, body, wording)
+	}
+	lose("PUT", "/api/rules/sets/"+s.ID+"/draft", draftInput{s.Revision, "Short", []Rule{testRule("short", "A shorter rule.")}}, unknownChange, "draft")
+	lose("POST", "/api/rules/sets/"+s.ID+"/publish", map[string]any{"expected_revision": s.Revision + 1, "version": "261001000000.0.0"}, unknownChange, "single publish")
+	lose("POST", "/api/rules/sets/"+s.ID+"/restore", map[string]any{"expected_revision": s.Revision + 1, "version": "261001000000.0.0", "new_version": "261001000001.0.0"}, unknownChange, "restore")
+	lose("POST", "/api/rules/sets", map[string]any{"layer_id": company.ID, "name": "Maybe"}, unknownSet, "set creation")
+	lose("POST", "/api/rules/layers", Scope{Layer: "person", OwnerID: admin.ID}, unknownLayer, "layer creation")
+	// The wording is truthful: the set was in fact created.
+	var n int
+	if err := w.d.Admin.QueryRow(t.Context(), `SELECT count(*) FROM nodes WHERE tenant_id=$1 AND rule_resource='set' AND title='Maybe'`, w.tid).Scan(&n); err != nil || n != 1 {
+		t.Fatal("the set whose creation went unacknowledged:", n, err)
+	}
+}
+
+// When even the check fails, a batch publication's outcome is unknown, never
+// "nothing was changed".
 func TestBatchLostAcknowledgementWithoutReconciliationIsUnknown(t *testing.T) {
 	w, dropper := faultyWorld(t, "rules-batch-unknown")
 	admin := w.principal(tenant.Person, "owner", "admin")
@@ -1077,9 +1158,7 @@ func TestBatchLostAcknowledgementWithoutReconciliationIsUnknown(t *testing.T) {
 	t.Cleanup(func() { reconcileHook = saved })
 	dropper.armed.Store(true)
 	body := w.call(admin, "POST", "/api/rules/publish", batch("", item(s, "auto")), 503)
-	if !strings.Contains(string(body), `"outcome_unknown"`) || strings.Contains(string(body), "nothing was changed") {
-		t.Fatalf("an unreconciled commit was reported as: %s", body)
-	}
+	unknownAnswer(t, "failed check", body, unknownBatch)
 	if w.published(s.ID) == "" {
 		t.Fatal("the fault did not let the commit through; the test did not exercise the case")
 	}

@@ -28,23 +28,34 @@ func New(pool *pgxpool.Pool) httpapi.Module { return &Module{pool: pool} }
 
 type endpoint func(*http.Request, pgx.Tx, tenant.Principal) (any, error)
 
+// What a write answers when its COMMIT was sent but not acknowledged. Only a
+// batch publication can find out afterwards (its answer is stored, keyed by
+// person and request); every other write says it does not know.
+const (
+	unknownChange = "The result is unknown. Reload to see the current state before trying again."
+	unknownSet    = "The set may have been created. Reload and check before creating it again."
+	unknownLayer  = "The layer may have been created. Reload and check before creating it again."
+	unknownBatch  = "The server did not confirm whether this publication was saved. Repeating the same request is safe: an identical batch returns its stored result and never publishes twice."
+)
+
 func (m *Module) Mount(mux *http.ServeMux) {
 	for _, route := range []struct {
 		pattern, permission string
 		handler             endpoint
+		unknown             string
 	}{
-		{"GET /api/rules/layers", "rules.read", m.layers}, {"POST /api/rules/layers", "rules.write", m.createLayer},
-		{"GET /api/rules/sets", "rules.read", m.sets}, {"POST /api/rules/sets", "rules.write", m.createSet},
-		{"GET /api/rules/sets/{setId}", "rules.read", m.getSet}, {"PUT /api/rules/sets/{setId}/draft", "rules.write", m.draft},
-		{"POST /api/rules/sets/{setId}/publish", "rules.publish", m.publish}, {"POST /api/rules/sets/{setId}/restore", "rules.publish", m.restore},
-		{"GET /api/rules/sets/{setId}/versions", "rules.read", m.versions}, {"GET /api/rules/sets/{setId}/versions/{version}", "rules.read", m.version},
-		{"GET /api/rules/merged", "rules.read", m.merged},
-		{"POST /api/rules/publish", "rules.publish", m.publishBatch},
+		{"GET /api/rules/layers", "rules.read", m.layers, ""}, {"POST /api/rules/layers", "rules.write", m.createLayer, unknownLayer},
+		{"GET /api/rules/sets", "rules.read", m.sets, ""}, {"POST /api/rules/sets", "rules.write", m.createSet, unknownSet},
+		{"GET /api/rules/sets/{setId}", "rules.read", m.getSet, ""}, {"PUT /api/rules/sets/{setId}/draft", "rules.write", m.draft, unknownChange},
+		{"POST /api/rules/sets/{setId}/publish", "rules.publish", m.publish, unknownChange}, {"POST /api/rules/sets/{setId}/restore", "rules.publish", m.restore, unknownChange},
+		{"GET /api/rules/sets/{setId}/versions", "rules.read", m.versions, ""}, {"GET /api/rules/sets/{setId}/versions/{version}", "rules.read", m.version, ""},
+		{"GET /api/rules/merged", "rules.read", m.merged, ""},
+		{"POST /api/rules/publish", "rules.publish", m.publishBatch, unknownBatch},
 	} {
-		mux.HandleFunc(route.pattern, m.endpoint(route.permission, route.handler))
+		mux.HandleFunc(route.pattern, m.endpoint(route.permission, route.unknown, route.handler))
 	}
 }
-func (m *Module) endpoint(permission string, fn endpoint) http.HandlerFunc {
+func (m *Module) endpoint(permission, unknown string, fn endpoint) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
 		p, ok := tenant.PrincipalFrom(r.Context())
@@ -151,13 +162,13 @@ func (m *Module) endpoint(permission string, fn endpoint) http.HandlerFunc {
 			return nil
 		})
 		if err != nil && committing && !rolledBack(err) {
-			// COMMIT was sent and its answer did not arrive: the change may
-			// or may not be durable. Ask a fresh transaction what happened.
-			if out, err = m.reconcile(r, p, pending); err == nil {
+			// COMMIT was sent and its answer did not arrive: the change may be
+			// durable, or still committing. Never answer "nothing changed" here.
+			if out, found := m.reconcile(p.TenantID, pending); found {
 				httpapi.WriteJSON(w, 200, out)
 				return
 			}
-			writeFailure(w, err)
+			writeFailure(w, &Error{Status: 503, Code: "outcome_unknown", Message: unknown})
 			return
 		}
 		if err != nil {
@@ -173,24 +184,18 @@ func (m *Module) endpoint(permission string, fn endpoint) http.HandlerFunc {
 	}
 }
 
-// errUnknown answers a write whose COMMIT may or may not have taken effect when
-// even the reconciliation could not tell. Every rules write is safe to repeat:
-// an identical batch returns its stored answer, a publication of the same
-// version returns that version, and a draft or restore meets its own revision.
-var errUnknown = &Error{Status: 503, Code: "outcome_unknown", Message: "the server did not confirm whether this change was saved; repeating the same request is safe, it cannot apply twice"}
-
-// outcome carries a write's own way to find out, after an unanswered COMMIT,
-// whether it took effect. Handlers register it once they know their request.
+// outcome carries a batch publication's way to find its stored answer after
+// an unanswered COMMIT. Other writes register nothing: they cannot tell.
 type outcome struct {
-	reconcile func(ctx context.Context, tx pgx.Tx) (any, bool, error)
+	owner  string
+	digest []byte
 }
 type outcomeKey struct{}
 
-// onUncertain registers how this request reconciles an unanswered COMMIT:
-// found reports the committed answer; not found means nothing was changed.
-func onUncertain(r *http.Request, fn func(ctx context.Context, tx pgx.Tx) (any, bool, error)) {
+// onUncertain records, for a batch publication, the key of its stored answer.
+func onUncertain(r *http.Request, owner string, digest []byte) {
 	if o, ok := r.Context().Value(outcomeKey{}).(*outcome); ok {
-		o.reconcile = fn
+		o.owner, o.digest = owner, digest
 	}
 }
 
@@ -202,52 +207,35 @@ func rolledBack(err error) bool {
 	return errors.As(err, &pe) || errors.Is(err, pgx.ErrTxCommitRollback)
 }
 
-// reconcileHook lets a test make the reconciliation itself fail.
+// reconcileHook runs before the reconciliation; tests use it to revoke access
+// or to make the reconciliation fail.
 var reconcileHook = func() error { return nil }
 
-// reconcile asks a fresh transaction, on a fresh connection, whether this
-// request's write is durable: its stored answer when it is, 503 busy (nothing
-// changed) when it is not, and outcome_unknown when that cannot be told.
-func (m *Module) reconcile(r *http.Request, p tenant.Principal, pending *outcome) (any, error) {
-	if pending.reconcile == nil {
-		if r.Method == "GET" || r.Method == "HEAD" {
-			return nil, errStopped
-		}
-		return nil, errUnknown
+// reconcile looks, on a fresh connection, for the stored answer of a batch
+// publication whose COMMIT went unanswered. The row is keyed by tenant, person
+// and request digest, so it can only be this request's own. The read does not
+// depend on the caller's current access (a revocation after the commit must not
+// hide it): it runs without the caller as principal and opens only this
+// person's batch rows. Found: the stored answer. Anything else (no row yet,
+// the COMMIT perhaps still in flight, or a failed read) is not an answer.
+func (m *Module) reconcile(tenantID string, pending *outcome) (any, bool) {
+	if pending.digest == nil || reconcileHook() != nil {
+		return nil, false
 	}
-	deadline := time.Now().Add(reconcileTimeout)
-	ctx := withDeadline(r.Context(), deadline)
+	ctx, cancel := context.WithTimeout(context.Background(), reconcileTimeout)
+	defer cancel()
 	var out any
 	var found bool
-	err := db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
-		if err := reconcileHook(); err != nil {
+	err := db.InTenant(ctx, m.pool, tenantID, func(tx pgx.Tx) error {
+		ms := fmt.Sprintf("%dms", reconcileTimeout.Milliseconds())
+		if _, err := tx.Exec(ctx, `SELECT set_config('lock_timeout',$1,true),set_config('statement_timeout',$1,true),set_config('aeon.rules_access','on',true),set_config('aeon.rules_owner',$2,true)`, ms, pending.owner); err != nil {
 			return err
 		}
-		remaining := fmt.Sprintf("%dms", max(time.Until(deadline).Milliseconds(), 1))
-		if _, err := tx.Exec(ctx, `SELECT set_config('lock_timeout',$1,true),set_config('statement_timeout',$1,true),set_config('transaction_timeout',$1,true)`, remaining); err != nil {
-			return err
-		}
-		owner, err := actorOwner(ctx, tx, p)
-		if err != nil {
-			return err
-		}
-		agent := ""
-		if p.Kind == tenant.Agent {
-			agent = p.ID
-		}
-		if err = enterRules(ctx, tx, owner, agent); err != nil {
-			return err
-		}
-		out, found, err = pending.reconcile(ctx, tx)
+		var err error
+		out, found, err = storedBatch(ctx, tx, tenantID, pending.owner, pending.digest)
 		return err
 	})
-	if err != nil {
-		return nil, errUnknown
-	}
-	if !found {
-		return nil, errStopped
-	}
-	return out, nil
+	return out, err == nil && found
 }
 
 // enterRules turns on rule visibility for this person or agent: it keeps the

@@ -487,5 +487,6 @@ test('budget refusals keep another person’s size private in the message', asyn
   assert.match(rulesMessage(new RulesError(503, 'busy', 'busy')), /Nothing was changed/)
   assert.equal(replyUncertain(new RulesError(503, 'busy', 'busy')), false)
   assert.equal(replyUncertain(new RulesError(503, 'outcome_unknown', 'unknown')), true)
-  assert.match(rulesMessage(new RulesError(503, 'outcome_unknown', 'unknown')), /did not confirm/)
+  assert.equal(rulesMessage(new RulesError(503, 'outcome_unknown', 'The set may have been created. Reload and check before creating it again.')), 'The set may have been created. Reload and check before creating it again.')
+  assert.doesNotMatch(rulesMessage(new RulesError(503, 'outcome_unknown', '')), /safe/)
 })

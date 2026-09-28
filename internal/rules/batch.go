@@ -109,9 +109,7 @@ func (m *Module) publishBatch(r *http.Request, tx pgx.Tx, p tenant.Principal) (a
 		sets[i] = s
 	}
 	digest := requestDigest(p.TenantID, owner, in.Items, note)
-	onUncertain(r, func(ctx context.Context, tx pgx.Tx) (any, bool, error) {
-		return storedBatch(ctx, tx, p.TenantID, owner, digest)
-	})
+	onUncertain(r, owner, digest)
 	if stored, found, err := storedBatch(ctx, tx, p.TenantID, owner, digest); err != nil || found {
 		return stored, err
 	}

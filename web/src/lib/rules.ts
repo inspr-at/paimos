@@ -460,7 +460,8 @@ export function rulesMessage(error: unknown): string {
     if (error.actualBytes === undefined) return error.message || 'A session file for another person or agent would exceed the limit.'
     return `The merged file is ${error.actualBytes} bytes. The limit is ${error.maxBytes ?? RULES_BUDGET}.`
   }
-  if (error.code === 'outcome_unknown') return 'The server did not confirm whether this was saved. Reload to check; repeating the same request is safe.'
+  // The server words it per operation; only a batch publication may be repeated safely.
+  if (error.code === 'outcome_unknown') return error.message || 'The result is unknown. Reload to see the current state before trying again.'
   if (error.code === 'busy') return 'The rules are busy right now. Nothing was changed; try again in a moment.'
   if (error.code === 'ambiguous_identity') return 'Two rules of the same rank share an identity, so the merge stops.'
   if (error.code === 'forbidden') return 'You do not have permission for that.'

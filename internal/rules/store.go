@@ -4,7 +4,6 @@ package rules
 
 import (
 	"context"
-	"errors"
 	"net/http"
 	"slices"
 	"strings"
@@ -286,19 +285,6 @@ func (m *Module) draft(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
 	if err != nil {
 		return nil, err
 	}
-	onUncertain(r, func(ctx context.Context, tx pgx.Tx) (any, bool, error) {
-		now, err := loadSet(ctx, tx, s.ID)
-		if err != nil {
-			return nil, false, err
-		}
-		switch {
-		case now.Revision == in.ExpectedRevision:
-			return nil, false, nil
-		case now.Revision == in.ExpectedRevision+1 && now.Name == in.Name && jsonDigest(canonicalRules(now.Rules)) == jsonDigest(canonicalRules(in.Rules)):
-			return now, true, nil
-		}
-		return nil, false, errUnknown
-	})
 	return replaceDraft(r.Context(), tx, p, s, in)
 }
 func loadVersion(ctx context.Context, tx pgx.Tx, setID, version string) (Snapshot, error) {
@@ -391,9 +377,6 @@ func (m *Module) publish(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, e
 	if err != nil {
 		return nil, err
 	}
-	onUncertain(r, func(ctx context.Context, tx pgx.Tx) (any, bool, error) {
-		return versionCommitted(ctx, tx, s.ID, in.Version, in.ExpectedRevision, note)
-	})
 	return publishSet(r.Context(), tx, p, s, in.ExpectedRevision, in.Version, note)
 }
 func (m *Module) restore(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
@@ -414,9 +397,6 @@ func (m *Module) restore(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, e
 	if err != nil {
 		return nil, err
 	}
-	onUncertain(r, func(ctx context.Context, tx pgx.Tx) (any, bool, error) {
-		return versionCommitted(ctx, tx, s.ID, in.NewVersion, 0, note)
-	})
 	if in.NewVersion <= s.PublishedVersion {
 		return nil, fail(409, "version_conflict", "restoration must publish a new later version")
 	}
@@ -445,22 +425,6 @@ func (m *Module) restore(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, e
 	return snap, nil
 }
 
-// versionCommitted reconciles a publication whose COMMIT went unanswered: the
-// version is there with this request's note (and revision, when known), or it
-// is not. Versions are unique per set, so a different one there is not ours.
-func versionCommitted(ctx context.Context, tx pgx.Tx, setID, version string, revision int64, note string) (any, bool, error) {
-	snap, err := loadVersion(ctx, tx, setID, version)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, false, nil
-	}
-	if err != nil {
-		return nil, false, err
-	}
-	if snap.Note != note || (revision != 0 && snap.Revision != revision) {
-		return nil, false, nil
-	}
-	return snap, true, nil
-}
 func (m *Module) version(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
 	s, err := m.authorizedSet(r, tx, p, "rules.read")
 	if err != nil {
