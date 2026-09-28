@@ -19,37 +19,37 @@ func (m *module) noteSnapshot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var out releasehistory.NoteSnapshot
+	var historical *releasehistory.Notes
 	err := db.InTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
+		var state string
 		var raw []byte
-		err := tx.QueryRow(r.Context(), `SELECT jsonb_build_object(
-   'schema','aeon.release-note-snapshot.v1','tenant_id',r.tenant_id,
-   'project_node_id',r.project_node_id,'release_node_id',r.release_node_id,
-   'version',coalesce(r.version,''),'version_scheme',coalesce(r.version_scheme,''),
-   'release_revision',r.revision,'captured_at',statement_timestamp(),
-   'membership_source','journey_tickets.release_node_id','field_source','nodes.fields',
-   'tickets',coalesce((SELECT jsonb_agg(jsonb_build_object(
-    'id',t.ticket_node_id,'key',coalesce(n.key,''),'position',t.walker_position,
-    'updated_at',n.updated_at,
-    'fields',CASE WHEN n.id IS NOT NULL AND n.deleted_at IS NULL AND k.slug='ticket' THEN
-      (SELECT coalesce(jsonb_object_agg(f.key,f.value),'{}'::jsonb) FROM jsonb_each(n.fields) f
-       WHERE f.key IN ('pill_en','pill_de','benefit_en','benefit_de','hide_from_release_notes'))
-      WHEN n.id IS NOT NULL THEN jsonb_build_object('hide_from_release_notes',coalesce(n.fields->'hide_from_release_notes','false'::jsonb)) ELSE NULL END,
-    'unavailable',CASE WHEN n.id IS NULL THEN 'Member is unavailable.'
-      WHEN n.deleted_at IS NOT NULL THEN 'Member was deleted before capture.'
-      WHEN k.slug IS DISTINCT FROM 'ticket' THEN 'Member is not a ticket.' ELSE '' END)
-    ORDER BY t.walker_position,t.ticket_node_id)
-    FROM journey_tickets t
-    LEFT JOIN nodes n ON n.tenant_id=t.tenant_id AND n.id=t.ticket_node_id AND n.project_id=t.project_node_id
-    LEFT JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
-    WHERE t.tenant_id=r.tenant_id AND t.project_node_id=r.project_node_id AND t.release_node_id=r.release_node_id),'[]'::jsonb))
+		// The stored row wins. Only an unpublished release falls through to a
+		// live preview. A published release with no row was published before
+		// snapshots existed: CASE yields NULL and does not read current tickets.
+		err := tx.QueryRow(r.Context(), `SELECT r.state, COALESCE(
+   (SELECT s.snapshot FROM journey_release_note_snapshots s
+     WHERE s.tenant_id=r.tenant_id AND s.release_node_id=r.release_node_id),
+   CASE WHEN r.state IN ('released', 'superseded') THEN NULL
+        ELSE aeon_release_note_snapshot(r.project_node_id, r.release_node_id) END)
    FROM journey_releases r
    JOIN nodes rn ON rn.tenant_id=r.tenant_id AND rn.id=r.release_node_id AND rn.deleted_at IS NULL
    JOIN nodes pn ON pn.tenant_id=r.tenant_id AND pn.id=r.project_node_id AND pn.deleted_at IS NULL
-   WHERE r.tenant_id=$1 AND r.project_node_id=$2 AND r.release_node_id=$3`, p.TenantID, r.PathValue("projectId"), r.PathValue("releaseId")).Scan(&raw)
+   WHERE r.tenant_id=$1 AND r.project_node_id=$2 AND r.release_node_id=$3`, p.TenantID, r.PathValue("projectId"), r.PathValue("releaseId")).Scan(&state, &raw)
 		if err != nil {
 			return err
 		}
+		if raw == nil {
+			if state == "released" || state == "superseded" {
+				historical = releasehistory.MissingNotes()
+				return nil
+			}
+			return pgx.ErrNoRows
+		}
 		return json.Unmarshal(raw, &out)
 	})
+	if historical != nil {
+		respond(w, historical, err)
+		return
+	}
 	respond(w, out, err)
 }
