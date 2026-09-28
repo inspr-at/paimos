@@ -87,7 +87,7 @@ func (m *Module) projectMembers(w http.ResponseWriter, r *http.Request) {
           LEFT JOIN role_bindings pb ON pb.tenant_id=p.tenant_id AND pb.principal_id=p.id AND pb.scope_type='project' AND pb.scope_id=$1::uuid
           LEFT JOIN roles pr ON pr.tenant_id=pb.tenant_id AND pr.id=pb.role_id
           WHERE p.status='active' AND p.linked_to IS NULL
-            AND NOT (p.kind='agent' AND p.roles && ARRAY['system','importer','operator','embedding','quote_public_service','quote_confirmation_service']::text[])
+            AND NOT (p.kind='agent' AND p.roles && ARRAY['system','importer','operator','embedding','quote_public_service','quote_confirmation_service','portal_public_service']::text[])
             AND (pb.id IS NOT NULL OR wb.role_id IS NOT NULL AND aeon_role_reads_nodes(p.tenant_id,wb.role_id,'workspace'))
           ORDER BY p.kind DESC,lower(p.name),p.id`, projectID)
 		if err != nil {

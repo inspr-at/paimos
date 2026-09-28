@@ -77,6 +77,7 @@ func TestOnlyPublicQuoteCapabilityPathsBypassAuthentication(t *testing.T) {
 	}))
 	for _, path := range []string{
 		"/api/public/quotes/tenant/token", "/api/public/quotes/tenant/token/accept", "/api/public/quotes/tenant/token/pdf",
+		"/api/public/portal/harbour", "/api/public/portal/harbour/wishes/PWS-1/votes",
 	} {
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
@@ -87,6 +88,7 @@ func TestOnlyPublicQuoteCapabilityPathsBypassAuthentication(t *testing.T) {
 	for _, path := range []string{
 		"/api/quotes", "/api/quotes/id/versions/1/public-link", "/api/quotes/id/versions/1/public-link/revoke",
 		"/api/public/quotes", "/api/public/quotesx/tenant/token", "/api/public/quotes-other/tenant/token",
+		"/api/public/portal", "/api/portal/settings", "/api/public/portals/harbour",
 		"/api/public/quote/tenant/token", "/api/me", "/api/events", "/api/plugins",
 	} {
 		rec := httptest.NewRecorder()

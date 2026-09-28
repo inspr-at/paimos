@@ -402,7 +402,7 @@ func (m *Module) authenticateAgent(ctx context.Context, prefix, secret string) (
 			  AND EXISTS (
 			    SELECT 1 FROM principals p
 			    WHERE p.id = k.principal_id AND p.kind = 'agent' AND p.status='active'
-			      AND NOT (p.roles && ARRAY['system','importer','operator','embedding','quote_public_service','quote_confirmation_service']::text[])
+			      AND NOT (p.roles && ARRAY['system','importer','operator','embedding','quote_public_service','quote_confirmation_service','portal_public_service']::text[])
 			  )
 			RETURNING k.principal_id::text, k.tenant_id::text, k.scopes, k.created_by_principal_id::text
 		`, prefix, hashSecret(secret)).Scan(&principalID, &gotTenant, &scopes, &creatorID)
@@ -482,7 +482,7 @@ func (m *Module) createAgentKeyTx(ctx context.Context, tx pgx.Tx, p tenant.Princ
 		if principalID != "" {
 			var kind, agentName string
 			var reserved bool
-			err = tx.QueryRow(ctx, `SELECT kind,name,roles && ARRAY['system','importer','operator','embedding','quote_public_service','quote_confirmation_service']::text[]
+			err = tx.QueryRow(ctx, `SELECT kind,name,roles && ARRAY['system','importer','operator','embedding','quote_public_service','quote_confirmation_service','portal_public_service']::text[]
 				FROM principals WHERE tenant_id=$1::uuid AND id=$2::uuid FOR UPDATE`, p.TenantID, principalID).Scan(&kind, &agentName, &reserved)
 			if errors.Is(err, pgx.ErrNoRows) {
 				return errNotFound
@@ -501,7 +501,7 @@ func (m *Module) createAgentKeyTx(ctx context.Context, tx pgx.Tx, p tenant.Princ
 			}
 		} else {
 			rows, err := tx.Query(ctx, `
-			SELECT id::text,kind,roles && ARRAY['system','importer','operator','embedding','quote_public_service','quote_confirmation_service']::text[]
+			SELECT id::text,kind,roles && ARRAY['system','importer','operator','embedding','quote_public_service','quote_confirmation_service','portal_public_service']::text[]
 			FROM principals WHERE name=$1 ORDER BY created_at,id FOR UPDATE`, name)
 			if err != nil {
 				return err

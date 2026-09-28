@@ -55,6 +55,7 @@ import (
 	"github.com/inspr-at/paimos/internal/modelregistry"
 	"github.com/inspr-at/paimos/internal/nodes"
 	"github.com/inspr-at/paimos/internal/plugins"
+	"github.com/inspr-at/paimos/internal/portal"
 	"github.com/inspr-at/paimos/internal/profile"
 	"github.com/inspr-at/paimos/internal/projectgroups"
 	"github.com/inspr-at/paimos/internal/relations"
@@ -272,6 +273,7 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 			quotesMod,
 			collaborationMod,
 			publicQuotesMod,
+			portal.New(pool, cfg.Env != "dev"),
 			confirmationMod,
 			hours.New(pool, pluginRegistry),
 			directory.New(pool, pluginRegistry),

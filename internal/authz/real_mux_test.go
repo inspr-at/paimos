@@ -42,6 +42,7 @@ import (
 	"github.com/inspr-at/paimos/internal/modelregistry"
 	"github.com/inspr-at/paimos/internal/nodes"
 	"github.com/inspr-at/paimos/internal/plugins"
+	"github.com/inspr-at/paimos/internal/portal"
 	"github.com/inspr-at/paimos/internal/profile"
 	"github.com/inspr-at/paimos/internal/projectgroups"
 	"github.com/inspr-at/paimos/internal/relations"
@@ -79,7 +80,7 @@ func TestRealMuxRouteCoverage(t *testing.T) {
 		agentruns.New(nil), agentpairing.New(nil, "https://pairing.test", "test"), approvals.New(nil), modelregistry.New(nil), agentaccounts.New(nil),
 		journey.New(nil), requirements.New(nil), releases.New(nil), intake.New(nil),
 		plugins.New(nil), stagehandoff.New(nil, nil), costunits.New(nil, nil), crm.New(nil, nil),
-		&quotes.Module{}, &collaboration.Module{}, &publicquotes.Module{}, &confirmation.Module{},
+		&quotes.Module{}, &collaboration.Module{}, &publicquotes.Module{}, &confirmation.Module{}, portal.New(nil, false),
 		hours.New(nil, nil), directory.New(nil, nil),
 	}
 	mux := http.NewServeMux()
