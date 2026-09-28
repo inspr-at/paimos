@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"time"
@@ -81,12 +82,18 @@ func (m *Module) endpoint(permission string, fn endpoint) http.HandlerFunc {
 		// would leave the locks to the server's timing. The deadline bounds the
 		// work instead: lock and statement timeouts for SQL, explicit checks in
 		// the budget's CPU loops, and InTenant rolls back when fn fails.
-		r = r.WithContext(withDeadline(context.WithoutCancel(r.Context()), time.Now().Add(txTimeout)))
+		deadline := time.Now().Add(txTimeout)
+		r = r.WithContext(withDeadline(context.WithoutCancel(r.Context()), deadline))
 		var out any
 		err = db.InTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
 			// Bounded waits and work: a lock that cannot be had in time fails the
 			// request (503) instead of queueing behind or ahead of access changes.
-			if _, err := tx.Exec(r.Context(), `SELECT set_config('lock_timeout',$1,true),set_config('statement_timeout',$2,true)`, lockTimeout, statementTimeout); err != nil {
+			// The server enforces the deadline on the whole transaction too:
+			// transaction_timeout (Postgres 17+) and the idle-in-transaction
+			// timeout end the session, and with it every lock, at the deadline,
+			// however long the application spends between statements.
+			remaining := fmt.Sprintf("%dms", max(time.Until(deadline).Milliseconds(), 1))
+			if _, err := tx.Exec(r.Context(), `SELECT set_config('lock_timeout',$1,true),set_config('statement_timeout',$2,true),set_config('transaction_timeout',$3,true),set_config('idle_in_transaction_session_timeout',$3,true)`, lockTimeout, statementTimeout, remaining); err != nil {
 				return err
 			}
 			if err := authz.RequireTx(r.Context(), tx, p, permission, authz.Scope{AnyProject: true}); err != nil {
@@ -130,10 +137,22 @@ func (m *Module) endpoint(permission string, fn endpoint) http.HandlerFunc {
 					return err
 				}
 			}
-			out, err = fn(r, tx, p)
-			return err
+			if out, err = fn(r, tx, p); err != nil {
+				return err
+			}
+			// Never commit at or after the deadline: this is the last moment
+			// before COMMIT, with a margin for the COMMIT itself.
+			if time.Now().After(deadline.Add(-commitMargin)) {
+				return errStopped
+			}
+			return nil
 		})
 		if err != nil {
+			// Past the deadline every failure is the deadline's: the server may
+			// have ended the session, and nothing was committed.
+			if time.Now().After(deadline.Add(-commitMargin)) {
+				err = errStopped
+			}
 			writeFailure(w, err)
 			return
 		}
@@ -190,6 +209,7 @@ var (
 	txTimeout              = 30 * time.Second
 	lockTimeout            = "5s"
 	statementTimeout       = "20s"
+	commitMargin           = 50 * time.Millisecond
 )
 
 func writeFailure(w http.ResponseWriter, err error) {
@@ -204,7 +224,7 @@ func writeFailure(w http.ResponseWriter, err error) {
 		e = &Error{Status: 404, Code: "not_found", Message: "rule resource unavailable"}
 	case errors.As(err, &we):
 		e = &Error{Status: we.Status, Code: "invalid_request", Message: we.Message}
-	case errors.As(err, &pe) && (pe.Code == "55P03" || pe.Code == "57014"), errors.Is(err, context.DeadlineExceeded):
+	case errors.As(err, &pe) && (pe.Code == "55P03" || pe.Code == "57014" || pe.Code == "25P03" || pe.Code == "25P04"), errors.Is(err, context.DeadlineExceeded):
 		e = &Error{Status: 503, Code: "busy", Message: "the rules store is busy; nothing was changed, try again"}
 	case errors.As(err, &pe) && pe.Code == "23505":
 		e = &Error{Status: 409, Code: "revision_conflict", Message: "rule identity or version already exists"}

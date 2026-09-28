@@ -23,21 +23,25 @@ func Merge(c Context, snapshots []Snapshot, now time.Time) (Merged, error) {
 var errStopped = &Error{Status: 503, Code: "busy", Message: "the rules store is busy; nothing was changed, try again"}
 
 // merge is Merge with two options for callers that render many contexts over
-// the same snapshots: validated skips the per-snapshot integrity checks the
-// caller already ran once (validSnapshot), and stop, checked per snapshot, ends
-// the work early when the caller's deadline has passed.
+// the same snapshots: validated means the caller already checked every
+// snapshot once (validSnapshot) and ordered them by rank and set id
+// (sortSnapshots), and stop, checked per snapshot, ends the work early when the
+// caller's deadline has passed.
 func merge(c Context, snapshots []Snapshot, now time.Time, validated bool, stop func() bool) (Merged, error) {
 	out := Merged{Context: c, Versions: []VersionRef{}, Rules: []Rule{}, Version: "floor-only"}
 	if err := ValidateContext(c); err != nil {
 		return out, err
 	}
-	ordered := slices.Clone(snapshots)
-	slices.SortFunc(ordered, func(a, b Snapshot) int {
-		if d := a.Scope.rank() - b.Scope.rank(); d != 0 {
-			return d
-		}
-		return strings.Compare(a.SetID, b.SetID)
-	})
+	ordered := snapshots
+	if !validated {
+		ordered = slices.Clone(snapshots)
+		slices.SortFunc(ordered, func(a, b Snapshot) int {
+			if d := a.Scope.rank() - b.Scope.rank(); d != 0 {
+				return d
+			}
+			return strings.Compare(a.SetID, b.SetID)
+		})
+	}
 	chosen := map[string]Rule{}
 	ranks := map[string]int{}
 	companyFloor := map[string]Rule{}

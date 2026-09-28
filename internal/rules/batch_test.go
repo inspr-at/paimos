@@ -4,6 +4,7 @@ package rules
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -46,14 +47,14 @@ func TestNextVersionAndBatchIdentity(t *testing.T) {
 
 // batchWorld is one tenant with people, an agent, a project and the rules API.
 type batchWorld struct {
-	t       *testing.T
+	t       testing.TB
 	d       *dbtest.DB
 	tid     string
 	mux     *http.ServeMux
 	project string
 }
 
-func newBatchWorld(t *testing.T, slug string) *batchWorld {
+func newBatchWorld(t testing.TB, slug string) *batchWorld {
 	d := dbtest.Open(t)
 	w := &batchWorld{t: t, d: d, mux: http.NewServeMux()}
 	if err := d.App.QueryRow(t.Context(), `INSERT INTO tenants(slug,name) VALUES($1,'Rules batch') RETURNING id::text`, slug).Scan(&w.tid); err != nil {
@@ -384,7 +385,7 @@ func (w *batchWorld) task() string {
 	}
 	return id
 }
-func noContent(t *testing.T, label string, body []byte) {
+func noContent(t testing.TB, label string, body []byte) {
 	t.Helper()
 	for _, secret := range []string{"Explain every step", "person-", "agent-", "task-"} {
 		if strings.Contains(string(body), secret) {
@@ -810,34 +811,24 @@ func TestBudgetCheckStopsAtTheDeadline(t *testing.T) {
 	}
 }
 
-// bigStore is a large tenant's live rules: 10 company sets of 100 rules.
+// bigStore is a store at the work bound: maxBudgetRules rules in sets of 50,
+// all disabled (the slow case: every rule is walked, none is rendered).
 func bigStore() []Snapshot {
 	out := []Snapshot{floorSnapshot()}
-	for i := range 10 {
+	for i := range maxBudgetRules / 50 {
 		rules := []Rule{}
-		for j := range 100 {
-			rules = append(rules, testRule(fmt.Sprintf("r%02d-%03d", i, j), "A rule of ordinary length that says what agents must do."))
+		for j := range 50 {
+			r := testRule(fmt.Sprintf("r%03d-%02d", i, j), "A rule of ordinary length that says what agents must do.")
+			r.Enabled = false
+			rules = append(rules, r)
 		}
-		out = append(out, testSnapshot(fmt.Sprintf("set-%02d", i), Scope{Layer: "company"}, rules...))
+		out = append(out, testSnapshot(fmt.Sprintf("set-%03d", i), Scope{Layer: "company"}, rules...))
 	}
-	return out
+	return sortSnapshots(out)
 }
 
-func BenchmarkBudgetRender(b *testing.B) {
-	store := bigStore()
-	c := testContext()
-	c.AgentID = ""
-	for b.Loop() {
-		if _, err := merge(c, store, time.Now(), true, nil); err != nil {
-			var e *Error
-			if !errors.As(err, &e) || e.Code != "rules_budget_exceeded" {
-				b.Fatal(err)
-			}
-		}
-	}
-}
-
-// The render cap fits well inside the request deadline even for a large store.
+// The worst render the bounds allow, repeated up to the render cap, fits well
+// inside the request deadline.
 func TestBudgetCapFitsTheDeadline(t *testing.T) {
 	store := bigStore()
 	c := testContext()
@@ -846,14 +837,172 @@ func TestBudgetCapFitsTheDeadline(t *testing.T) {
 	for range maxBudgetContexts {
 		if _, err := merge(c, store, time.Now(), true, nil); err != nil {
 			var e *Error
-			if !errors.As(err, &e) || e.Code != "rules_budget_exceeded" {
+			if !errors.As(err, &e) || e.Code != "floor_missing" && e.Code != "rules_budget_exceeded" {
 				t.Fatal(err)
 			}
 		}
 	}
 	if took := time.Since(started); took > txTimeout/3 {
-		t.Fatalf("%d renders of a 1,000-rule store took %s; the deadline is %s", maxBudgetContexts, took, txTimeout)
+		t.Fatalf("%d renders of a %d-rule store took %s; the deadline is %s", maxBudgetContexts, maxBudgetRules, took, txTimeout)
 	} else {
-		t.Logf("%d renders of a 1,000-rule store took %s", maxBudgetContexts, took)
+		t.Logf("%d renders of a %d-rule store of disabled rules took %s", maxBudgetContexts, maxBudgetRules, took)
+	}
+}
+
+// BenchmarkBudgetCheck measures the whole check as a publication runs it:
+// loading, digest validation, authorization and rendering, over a store at the
+// rules bound made of disabled rules.
+func BenchmarkBudgetCheck(b *testing.B) {
+	w := newBatchWorld(b, "rules-batch-bench")
+	admin := w.principal(tenant.Person, "owner", "admin")
+	company := w.floor(admin)
+	for i := range maxBudgetRules/50 - 1 {
+		rules := bulky(fmt.Sprintf("b%03d", i), 50)
+		for j := range rules {
+			rules[j].Text = "A rule of ordinary length that says what agents must do."
+			rules[j].Enabled = false
+		}
+		w.publish(admin, w.set(admin, company, fmt.Sprintf("Set %03d", i), rules...), time.Date(2026, 9, 28, 10, 0, 0, 0, time.UTC).Add(time.Duration(i)*time.Second).Format("060102150405")+".0.0")
+	}
+	b.ResetTimer()
+	for b.Loop() {
+		err := db.InTenant(tenant.WithPrincipal(b.Context(), admin), w.d.App, w.tid, func(tx pgx.Tx) error {
+			if _, err := tx.Exec(b.Context(), `SELECT set_config('aeon.rules_access','on',true),set_config('aeon.rules_owner',$1,true),set_config('aeon.rules_projects','*',true),set_config('aeon.visible_projects','*',true)`, admin.ID); err != nil {
+				return err
+			}
+			sets, err := allSets(b.Context(), tx, company.ID)
+			if err != nil {
+				return err
+			}
+			ctx := withDeadline(b.Context(), time.Now().Add(time.Minute))
+			_, err = budgetCheck(ctx, tx, admin, admin.ID, sets[:1], time.Now())
+			return err
+		})
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+// An expired check stops even while every candidate is one the batch does not
+// touch: enumeration is work too.
+func TestBudgetEnumerationStopsAtTheDeadline(t *testing.T) {
+	projects := []string{noProject}
+	for i := range 10000 {
+		projects = append(projects, fmt.Sprintf("10000000-0000-4000-8000-%012d", i))
+	}
+	nothing := []Set{{Scope: Scope{Layer: "person", OwnerID: testPerson}}}
+	b := budget{work: &work{ctx: withDeadline(t.Context(), time.Now().Add(-time.Second))}, tenant: testTenant, batch: nothing, now: time.Now(), projects: projects, readable: map[string]bool{}}
+	started := time.Now()
+	if err := b.person(noPerson, nil); !errors.Is(err, errStopped) {
+		t.Fatal("an expired check over 200,000 untouched candidates did not stop:", err)
+	}
+	if took := time.Since(started); took > 50*time.Millisecond {
+		t.Fatal("stopping took", took)
+	}
+	if b.rendered != 0 {
+		t.Fatal("rendered", b.rendered)
+	}
+}
+
+// Past the store bound the publication is refused, never partially checked.
+func TestBudgetCheckRefusesAnOversizedStore(t *testing.T) {
+	w := newBatchWorld(t, "rules-batch-storebound")
+	admin := w.principal(tenant.Person, "owner", "admin")
+	company := w.floor(admin)
+	w.publish(admin, w.set(admin, company, "Many", bulky("many", 5)...), "260928090020.0.0")
+	saved := maxBudgetRules
+	maxBudgetRules = 4
+	t.Cleanup(func() { maxBudgetRules = saved })
+	s := w.set(admin, company, "Short", testRule("short", "A short rule."))
+	body := w.call(admin, "POST", "/api/rules/publish", batch("", item(s, "auto")), 422)
+	if !strings.Contains(string(body), `"budget_check_too_large"`) || w.published(s.ID) != "" {
+		t.Fatalf("an oversized store was not refused: %s", body)
+	}
+}
+
+// waitsAtMost runs an access change that needs the tenant row and reports how
+// long after start it got it.
+func (w *batchWorld) accessChangeAfter(start time.Time) time.Duration {
+	w.t.Helper()
+	access, err := w.d.Admin.Begin(w.t.Context())
+	if err != nil {
+		w.t.Fatal(err)
+	}
+	defer access.Rollback(w.t.Context())
+	if _, err = access.Exec(w.t.Context(), `SET LOCAL lock_timeout='5s'`); err != nil {
+		w.t.Fatal(err)
+	}
+	if _, err = access.Exec(w.t.Context(), `SELECT id FROM tenants WHERE id=$1 FOR UPDATE`, w.tid); err != nil {
+		w.t.Fatal(err)
+	}
+	return time.Since(start)
+}
+
+// Probe: a slow statement right before the answer is stored. The server ends
+// the transaction at the deadline; nothing commits and the lock is free on time.
+func TestBatchNeverCommitsAfterItsDeadline(t *testing.T) {
+	w := newBatchWorld(t, "rules-batch-commit")
+	admin := w.principal(tenant.Person, "owner", "admin")
+	company := w.floor(admin)
+	s := w.set(admin, company, "Short", testRule("short", "A short rule."))
+	savedTimeout, savedHook := txTimeout, beforeStore
+	txTimeout = 600 * time.Millisecond
+	beforeStore = func(ctx context.Context, tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `SELECT pg_sleep(2)`)
+		return err
+	}
+	t.Cleanup(func() { txTimeout, beforeStore = savedTimeout, savedHook })
+	started := time.Now()
+	done := make(chan int, 1)
+	go func() {
+		code, _ := w.send(admin, "POST", "/api/rules/publish", batch("", item(s, "auto")))
+		done <- code
+	}()
+	time.Sleep(200 * time.Millisecond)
+	if waited := w.accessChangeAfter(started); waited > txTimeout+250*time.Millisecond {
+		t.Fatalf("the lock was held %s (deadline %s)", waited, txTimeout)
+	}
+	if code := <-done; code != 503 {
+		t.Fatal("a publication past its deadline answered", code)
+	}
+	var stored int
+	if err := w.d.Admin.QueryRow(t.Context(), `SELECT count(*) FROM rule_publish_batches WHERE tenant_id=$1`, w.tid).Scan(&stored); err != nil || stored != 0 || w.published(s.ID) != "" {
+		t.Fatal("a publication past its deadline committed", stored, err)
+	}
+}
+
+// Probe: one slow render step (application CPU, no statement running). The
+// server still ends the transaction at the deadline, and nothing commits.
+func TestBatchSlowRenderReleasesTheLockAtTheDeadline(t *testing.T) {
+	w := newBatchWorld(t, "rules-batch-slowrender")
+	admin := w.principal(tenant.Person, "owner", "admin")
+	company := w.floor(admin)
+	s := w.set(admin, company, "Short", testRule("short", "A short rule."))
+	savedTimeout, savedHook := txTimeout, beforeRender
+	txTimeout = 300 * time.Millisecond
+	slept := false
+	beforeRender = func() {
+		if !slept {
+			slept = true
+			time.Sleep(time.Second)
+		}
+	}
+	t.Cleanup(func() { txTimeout, beforeRender = savedTimeout, savedHook })
+	started := time.Now()
+	done := make(chan int, 1)
+	go func() {
+		code, _ := w.send(admin, "POST", "/api/rules/publish", batch("", item(s, "auto")))
+		done <- code
+	}()
+	time.Sleep(100 * time.Millisecond)
+	if waited := w.accessChangeAfter(started); waited > txTimeout+250*time.Millisecond {
+		t.Fatalf("the lock was held %s (deadline %s)", waited, txTimeout)
+	}
+	if code := <-done; code != 503 {
+		t.Fatal("a publication past its deadline answered", code)
+	}
+	if w.published(s.ID) != "" {
+		t.Fatal("a publication past its deadline committed")
 	}
 }

@@ -147,6 +147,9 @@ func (m *Module) publishBatch(r *http.Request, tx pgx.Tx, p tenant.Principal) (a
 	if err != nil {
 		return nil, err
 	}
+	if err = beforeStore(ctx, tx); err != nil {
+		return nil, err
+	}
 	if _, err = tx.Exec(ctx, `INSERT INTO rule_publish_batches(tenant_id,person_id,request_digest,batch_id,result) VALUES($1,$2,$3,$4,$5)`, p.TenantID, owner, digest, out.BatchID, raw); err != nil {
 		return nil, err
 	}
@@ -204,24 +207,61 @@ func nextVersion(now time.Time, published string) string {
 	return format(last.Add(time.Second))
 }
 
-// maxBudgetContexts bounds the session files one batch may render for its
-// budget check (projects × people and their agents × roles × harnesses that the
-// batch touches). With snapshots validated once, one file of a large store
-// (1,000 rules) renders in about half a millisecond (BenchmarkBudgetRender:
-// ~0.45 ms on the workstation), so the cap keeps the worst case near 2.5 s,
-// far inside the 30 s request deadline (TestBudgetCapFitsTheDeadline).
-// Variables so tests can change them.
+// The budget check's work is bounded three ways: by the request deadline,
+// checked in every loop (loading, validation, authorization, enumeration and
+// rendering) and enforced by the server (transaction_timeout); by the size of
+// the store it may load (maxBudgetRules rules, an empty set counting as one,
+// and maxBudgetBytes bytes of rule text across every snapshot it reads); and by
+// the number of session files it may render (maxBudgetContexts). The store
+// bound also bounds one render. Measured on the workstation: the whole check
+// over a store at the bound made of disabled rules (loading, digest
+// validation, authorization, rendering) takes about 83 ms
+// (BenchmarkBudgetCheck); the worst render repeated up to the render cap takes
+// about 3.8 s (TestBudgetCapFitsTheDeadline), inside the 30 s deadline. Past a
+// bound the publication is refused (422 budget_check_too_large); past the
+// deadline it answers 503 and nothing commits. Variables so tests can change
+// them; beforeRender and beforeStore are test hooks.
 var (
-	maxBudgetContexts = 5000
-	beforeRender      = func() {}
+	maxBudgetContexts       = 4000
+	maxBudgetRules          = 4000
+	maxBudgetBytes    int64 = 4 << 20
+	beforeRender            = func() {}
+	beforeStore             = func(context.Context, pgx.Tx) error { return nil }
 )
 
 // Errors of the budget check. The one about another person's context carries
 // no size and no identity.
 var (
 	errHiddenBudget = &Error{Status: 422, Code: "rules_budget_exceeded", Message: "A session file for another person or agent would exceed the limit. Shorten always-on text or move it to details."}
-	errTooManyCtx   = &Error{Status: 422, Code: "budget_check_too_large", Message: "This publication touches too many session files to check at once. Publish fewer sets together."}
+	errTooManyCtx   = &Error{Status: 422, Code: "budget_check_too_large", Message: "This publication touches too many session files, or too many rules, to check at once. Publish fewer sets together."}
 )
+
+// work tracks one budget check against the deadline and the store bounds.
+type work struct {
+	ctx   context.Context
+	rules int
+	bytes int64
+}
+
+// step is called once per iteration of every loop.
+func (w *work) step() error {
+	if expired(w.ctx) {
+		return errStopped
+	}
+	return nil
+}
+
+// load counts one loaded snapshot against the store bounds.
+func (w *work) load(s Snapshot) error {
+	w.rules += max(len(s.Rules), 1) // an empty set still costs one step per render
+	for _, r := range s.Rules {
+		w.bytes += int64(len(r.Identity) + len(r.Text) + len(r.Why) + len(r.Details))
+	}
+	if w.rules > maxBudgetRules || w.bytes > maxBudgetBytes {
+		return errTooManyCtx
+	}
+	return w.step()
+}
 
 // budgetCheck renders, after the batch's writes, every session file that
 // includes one of the batch's sets, counting every existing contribution to
@@ -241,22 +281,40 @@ var (
 // own only when the caller holds rules.read, now (under the access lock), on
 // every layer in it; sizes are reported only for such files, and any other
 // file yields a generic refusal without size or identity.
-//
-// The work stops at the request's deadline (503, and the transaction rolls back).
 func budgetCheck(ctx context.Context, tx pgx.Tx, p tenant.Principal, caller string, batch []Set, now time.Time) (int, error) {
-	shared, owners, projects, err := gatherBudget(ctx, tx)
+	w := &work{ctx: ctx}
+	shared, owners, projects, err := gatherBudget(w, tx)
 	if err != nil {
 		return 0, err
 	}
 	// Validate every snapshot once; a snapshot that fails its own integrity
 	// check is left out here, and session start refuses it on its own.
-	keep := func(list []Snapshot) []Snapshot {
-		return slices.DeleteFunc(slices.Clone(list), func(s Snapshot) bool { return validSnapshot(s) != nil })
+	keep := func(list []Snapshot) ([]Snapshot, error) {
+		out := []Snapshot{}
+		for _, s := range list {
+			if err := w.step(); err != nil {
+				return nil, err
+			}
+			if validSnapshot(s) == nil {
+				out = append(out, s)
+			}
+		}
+		return out, nil
 	}
-	shared = keep(shared)
+	if shared, err = keep(shared); err != nil {
+		return 0, err
+	}
+	for i := range owners {
+		if owners[i].snapshots, err = keep(owners[i].snapshots); err != nil {
+			return 0, err
+		}
+	}
 	readable := map[string]bool{}
 	for _, list := range append([][]Snapshot{shared}, ownerLists(owners)...) {
 		for _, s := range list {
+			if err := w.step(); err != nil {
+				return 0, err
+			}
 			key := jsonDigest(s.Scope)
 			if _, known := readable[key]; known {
 				continue
@@ -268,12 +326,12 @@ func budgetCheck(ctx context.Context, tx pgx.Tx, p tenant.Principal, caller stri
 			readable[key] = err == nil
 		}
 	}
-	check := budget{ctx: ctx, tenant: p.TenantID, batch: batch, now: now, shared: shared, projects: projects, readable: readable}
+	check := budget{work: w, tenant: p.TenantID, batch: batch, now: now, shared: sortSnapshots(shared), projects: projects, readable: readable}
 	if err = check.person(noPerson, nil); err != nil {
 		return 0, err
 	}
 	for _, o := range owners {
-		if err = check.person(o.person, keep(o.snapshots)); err != nil {
+		if err = check.person(o.person, o.snapshots); err != nil {
 			return 0, err
 		}
 	}
@@ -303,7 +361,8 @@ func ownerLists(owners []ownerSnapshots) [][]Snapshot {
 // of every project, and each active person's own layers, switching the owner
 // setting one person at a time. It restores the caller's settings before it
 // returns, whatever happens.
-func gatherBudget(ctx context.Context, tx pgx.Tx) (shared []Snapshot, owners []ownerSnapshots, projects []string, err error) {
+func gatherBudget(w *work, tx pgx.Tx) (shared []Snapshot, owners []ownerSnapshots, projects []string, err error) {
+	ctx := w.ctx
 	var savedOwner, savedProjects string
 	if err = tx.QueryRow(ctx, `SELECT coalesce(current_setting('aeon.rules_owner',true),''),coalesce(current_setting('aeon.rules_projects',true),'')`).Scan(&savedOwner, &savedProjects); err != nil {
 		return nil, nil, nil, err
@@ -320,7 +379,7 @@ func gatherBudget(ctx context.Context, tx pgx.Tx) (shared []Snapshot, owners []o
 	if err = see("", "*"); err != nil {
 		return
 	}
-	if shared, err = publishedSnapshots(ctx, tx); err != nil {
+	if shared, err = publishedSnapshots(w, tx); err != nil {
 		return
 	}
 	projects = []string{noProject}
@@ -334,14 +393,14 @@ func gatherBudget(ctx context.Context, tx pgx.Tx) (shared []Snapshot, owners []o
 		return
 	}
 	for _, person := range people {
-		if expired(ctx) {
-			return nil, nil, nil, errStopped
+		if err = w.step(); err != nil {
+			return
 		}
 		if err = see(person, "*"); err != nil {
 			return
 		}
 		var owned []Snapshot
-		if owned, err = ownedSnapshots(ctx, tx, person); err != nil {
+		if owned, err = ownedSnapshots(w, tx, person); err != nil {
 			return
 		}
 		if len(owned) > 0 {
@@ -352,7 +411,7 @@ func gatherBudget(ctx context.Context, tx pgx.Tx) (shared []Snapshot, owners []o
 }
 
 type budget struct {
-	ctx        context.Context
+	*work
 	tenant     string
 	batch      []Set
 	now        time.Time
@@ -365,14 +424,29 @@ type budget struct {
 	hiddenOver bool
 }
 
+// sortSnapshots orders snapshots as merge does, once, so each render can skip it.
+func sortSnapshots(list []Snapshot) []Snapshot {
+	out := slices.Clone(list)
+	slices.SortFunc(out, func(a, b Snapshot) int {
+		if d := a.Scope.rank() - b.Scope.rank(); d != 0 {
+			return d
+		}
+		return strings.Compare(a.SetID, b.SetID)
+	})
+	return out
+}
+
 // person renders one person's files that the batch touches: with no agent and
 // with each of the person's named agents and tasks, across projects, roles and
-// harnesses.
+// harnesses. Every candidate, touched or not, is one step of work.
 func (b *budget) person(person string, owned []Snapshot) error {
-	snapshots := append(slices.Clone(b.shared), owned...)
+	snapshots := sortSnapshots(append(slices.Clone(b.shared), owned...))
 	type agentCtx struct{ agent, task, project string }
 	agents := []agentCtx{{}}
 	for _, s := range owned {
+		if err := b.step(); err != nil {
+			return err
+		}
 		if s.Scope.AgentID == "" {
 			continue
 		}
@@ -394,12 +468,12 @@ func (b *budget) person(person string, owned []Snapshot) error {
 		for _, project := range checked {
 			for _, role := range Roles {
 				for _, harness := range Harnesses {
+					if err := b.step(); err != nil {
+						return err
+					}
 					c := Context{TenantID: b.tenant, ProjectID: project, PersonID: person, AgentID: a.agent, Role: role, Harness: harness, TaskID: a.task}
 					if !slices.ContainsFunc(b.batch, func(s Set) bool { return s.Scope.matches(c) }) {
 						continue
-					}
-					if stop() {
-						return errStopped
 					}
 					if b.rendered++; b.rendered > maxBudgetContexts {
 						return errTooManyCtx
@@ -432,13 +506,13 @@ func (b *budget) person(person string, owned []Snapshot) error {
 			}
 		}
 	}
-	return nil
+	return b.step()
 }
 
 // ownedSnapshots loads the live snapshots of the sets one person owns (their
 // person layer, named agents and tasks), as visible under the current setting.
-func ownedSnapshots(ctx context.Context, tx pgx.Tx, person string) ([]Snapshot, error) {
-	rows, err := tx.Query(ctx, `SELECT id::text,fields->>'published_version' FROM nodes WHERE rule_resource='set' AND deleted_at IS NULL AND fields->'scope'->>'owner_id'=$1 AND coalesce(fields->>'published_version','')<>'' ORDER BY id`, person)
+func ownedSnapshots(w *work, tx pgx.Tx, person string) ([]Snapshot, error) {
+	rows, err := tx.Query(w.ctx, `SELECT id::text,fields->>'published_version' FROM nodes WHERE rule_resource='set' AND deleted_at IS NULL AND fields->'scope'->>'owner_id'=$1 AND coalesce(fields->>'published_version','')<>'' ORDER BY id`, person)
 	if err != nil {
 		return nil, err
 	}
@@ -452,8 +526,11 @@ func ownedSnapshots(ctx context.Context, tx pgx.Tx, person string) ([]Snapshot, 
 	}
 	out := []Snapshot{}
 	for _, r := range refs {
-		snap, err := loadVersion(ctx, tx, r.id, r.version)
+		snap, err := loadVersion(w.ctx, tx, r.id, r.version)
 		if err != nil {
+			return nil, err
+		}
+		if err = w.load(snap); err != nil {
 			return nil, err
 		}
 		out = append(out, snap)
@@ -462,18 +539,24 @@ func ownedSnapshots(ctx context.Context, tx pgx.Tx, person string) ([]Snapshot, 
 }
 
 // publishedSnapshots loads the live snapshot of every set visible now.
-func publishedSnapshots(ctx context.Context, tx pgx.Tx) ([]Snapshot, error) {
-	all, err := allSets(ctx, tx, "")
+func publishedSnapshots(w *work, tx pgx.Tx) ([]Snapshot, error) {
+	all, err := allSets(w.ctx, tx, "")
 	if err != nil {
 		return nil, err
 	}
 	out := []Snapshot{}
 	for _, s := range all {
+		if err := w.step(); err != nil {
+			return nil, err
+		}
 		if s.PublishedVersion == "" {
 			continue
 		}
-		snap, err := loadVersion(ctx, tx, s.ID, s.PublishedVersion)
+		snap, err := loadVersion(w.ctx, tx, s.ID, s.PublishedVersion)
 		if err != nil {
+			return nil, err
+		}
+		if err = w.load(snap); err != nil {
 			return nil, err
 		}
 		out = append(out, snap)
