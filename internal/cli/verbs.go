@@ -98,11 +98,13 @@ func (rt *runtime) cmdIssueCreate() *Command {
 	var description, descriptionFile, ac, acFile, notes, notesFile string
 	var tags []string
 	var dryRun bool
+	var benefits benefitFlags
 	return &Command{
 		Name:  "create",
 		Short: "Create an issue",
 		Use:   "issue create --project KEY --title TITLE",
 		addFlags: func(fs *flagSet) {
+			benefits.flags(fs)
 			fs.string(&project, "project", 'p', "project key (required)")
 			fs.string(&title, "title", 0, "title (required)")
 			fs.string(&typ, "type", 0, "epic, ticket, task, …")
@@ -152,7 +154,7 @@ func (rt *runtime) cmdIssueCreate() *Command {
 				return nil
 			}
 			return rt.createIssue(issueInput{
-				Project: project, Title: title, Type: typ, Status: status, Priority: priority,
+				Benefits: benefits, Project: project, Title: title, Type: typ, Status: status, Priority: priority,
 				Parent: parent, Assignee: assignee, Description: desc, AC: acText, Notes: notesText, Tags: tags,
 			})
 		},
@@ -165,6 +167,7 @@ func (rt *runtime) cmdIssueUpdate() *Command {
 	var closeNote, closeNoteFile string
 	var addTag, removeTag []string
 	var dryRun bool
+	var benefits benefitFlags
 	return &Command{
 		Name:    "update",
 		Short:   "Update an issue",
@@ -172,6 +175,7 @@ func (rt *runtime) cmdIssueUpdate() *Command {
 		minArgs: 1,
 		maxArgs: 1,
 		addFlags: func(fs *flagSet) {
+			benefits.flags(fs)
 			fs.string(&title, "title", 0, "new title")
 			fs.string(&typ, "type", 0, "new type")
 			fs.string(&status, "status", 0, "new status")
@@ -217,7 +221,7 @@ func (rt *runtime) cmdIssueUpdate() *Command {
 				return err
 			}
 			changed := strings.TrimSpace(title+typ+status+priority+parent+assignee+project+description+descriptionFile+ac+acFile+notes+notesFile+closeNote+closeNoteFile) != "" ||
-				len(addTag) > 0 || len(removeTag) > 0
+				len(addTag) > 0 || len(removeTag) > 0 || benefits.changed()
 			if !changed {
 				return usagef("nothing to update")
 			}
@@ -226,7 +230,7 @@ func (rt *runtime) cmdIssueUpdate() *Command {
 				return nil
 			}
 			return rt.updateIssue(issuePatch{
-				Ref: args[0], Title: title, Type: typ, Status: status, Priority: priority,
+				Benefits: benefits, Ref: args[0], Title: title, Type: typ, Status: status, Priority: priority,
 				Parent: parent, Assignee: assignee, Project: project, Description: desc,
 				AC: acText, Notes: notesText, CloseNote: closeText, AddTag: addTag, RemoveTag: removeTag,
 			})

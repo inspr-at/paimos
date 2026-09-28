@@ -10,6 +10,8 @@ test('Personal is for everyone; the other sections are for admins', () => {
   assert.equal(sectionOf(undefined), 'personal')
   assert.equal(sectionOf('nope'), 'personal')
   assert.equal(settingsLink('business', 'quotes'), '/settings/business#quotes')
+  assert.equal(visibleSections(false, permission => permission === 'rules.read').some(section => section.id === 'agent-rules'), true)
+  assert.equal(visibleSections(true).some(section => section.id === 'agent-rules'), false)
 })
 
 test('agent keys read as active, expired or revoked', () => {

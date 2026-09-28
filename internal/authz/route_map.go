@@ -17,6 +17,17 @@ const PublicRoute = "public"
 // verifies the recipient binding. Authentication and public capability routes
 // remain explicit entries so route coverage can detect new unreviewed paths.
 var RoutePermissions = map[string]string{
+	"GET /api/rules/layers":                                                             "rules.read",
+	"POST /api/rules/layers":                                                            "rules.write",
+	"GET /api/rules/sets":                                                               "rules.read",
+	"POST /api/rules/sets":                                                              "rules.write",
+	"GET /api/rules/sets/{setId}":                                                       "rules.read",
+	"PUT /api/rules/sets/{setId}/draft":                                                 "rules.write",
+	"POST /api/rules/sets/{setId}/publish":                                              "rules.publish",
+	"POST /api/rules/sets/{setId}/restore":                                              "rules.publish",
+	"GET /api/rules/sets/{setId}/versions":                                              "rules.read",
+	"GET /api/rules/sets/{setId}/versions/{version}":                                    "rules.read",
+	"GET /api/rules/merged":                                                             "rules.read",
 	"GET /api/agent-pairing/guide":                                                      "public",
 	"POST /api/agent-pairing/device":                                                    "public",
 	"POST /api/agent-pairing/redeem":                                                    "public",
@@ -133,6 +144,7 @@ var RoutePermissions = map[string]string{
 	"GET /api/projects/{projectId}/messages/listen":                                   "inbox.read",
 	"GET /api/projects/{projectId}/releases/{releaseId}/candidate-artifact":           "stage_handoffs.read",
 	"PUT /api/projects/{projectId}/releases/{releaseId}/candidate-artifact":           "stage_handoffs.write",
+	"GET /api/projects/{projectId}/releases/{releaseId}/note-snapshot":                "releases.read",
 	"GET /api/projects/{projectId}/releases/{releaseId}/walker":                       "releases.read",
 	"GET /api/projects/{projectId}/release-memberships":                               "releases.read",
 	"GET /api/projects/{projectId}/releases/{releaseId}/ticket-options":               "releases.read",

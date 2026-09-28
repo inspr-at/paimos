@@ -135,10 +135,14 @@ func TestProjectCountsWorkKindsAndStateGroups(t *testing.T) {
 	create := func(kind, state, parent string) nodeJSON {
 		t.Helper()
 		k := kindBySlug(t, p, kind)
-		raw, _ := json.Marshal(map[string]any{"kind_id": k.ID, "title": kind, "state": state, "parent_id": parent})
-		if parent == "" {
-			raw, _ = json.Marshal(map[string]any{"kind_id": k.ID, "title": kind, "state": state})
+		body := map[string]any{"kind_id": k.ID, "title": kind, "state": state}
+		if parent != "" {
+			body["parent_id"] = parent
 		}
+		if kind == "ticket" {
+			body["fields"] = json.RawMessage(benefitFields)
+		}
+		raw, _ := json.Marshal(body)
 		return mustNode(t, p, string(raw))
 	}
 	root := create("project", "active", "")

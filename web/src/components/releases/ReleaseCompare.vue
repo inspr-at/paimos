@@ -45,7 +45,7 @@ const between = computed(() => {
       <section class="included" aria-labelledby="compare-included">
         <h3 id="compare-included" class="included-h">Releases in this range</h3>
         <ul>
-          <li v-for="r in result.releases" :key="r.version"><CalendarVersion :value="r.version" class="inc-version" /><span class="inc-headline">{{ r.headline ? displayHeadline(r) : 'No headline recorded' }}</span></li>
+          <li v-for="r in result.releases" :key="r.version"><CalendarVersion :value="r.version" class="inc-version" /><span class="inc-headline">{{ r.notes || r.headline ? displayHeadline(r) : 'No headline recorded' }}</span></li>
         </ul>
       </section>
       <ReleaseChanges v-if="count" :groups="result.groups" :repository="repository" :query="query" class="changes" />

@@ -3,7 +3,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, provide, reactive, ref, watch } from 'vue'
 import mark from '../../assets/brand/aeon-mark.svg'
 import { brand, generationLabel, setOverlayTitle } from '../../lib/brand'
-import { displayHeadline, groupByDay, groupChanges, matches, releasedAt, stats as statsOf, ticketsOf, type Release } from '../../lib/releases'
+import { displayHeadline, groupByDay, groupChanges, hasUsableNotes, matches, releasedAt, stats as statsOf, ticketsOf, type Release } from '../../lib/releases'
 import { normalKey } from '../../lib/ticketLinks'
 import { relativeTime } from '../../lib/work'
 import { isCalendar, useReleases } from '../../stores/releases'
@@ -361,7 +361,7 @@ const KINDS = [
                     <span v-if="r.version === compareTo" class="tag end-tag">To</span>
                   </span>
                   <span v-if="r.state === 'reserved'" class="headline">Reserved, never published</span>
-                  <span v-else class="headline"><template v-for="(p, i) in marked(r.headline ? displayHeadline(r) : 'No headline recorded')" :key="i"><mark v-if="p.hit">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template></span>
+                  <span v-else class="headline"><template v-for="(p, i) in marked(hasUsableNotes(r) || r.headline ? displayHeadline(r) : 'No headline recorded')" :key="i"><mark v-if="p.hit">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template></span>
                   <span v-if="r.state === 'published'" class="counts">
                     <template v-for="k in KINDS" :key="k.key">
                       <span v-if="countsOf(r)[k.key]" class="count" role="img" :aria-label="k.label(countsOf(r)[k.key])" :data-tip="k.label(countsOf(r)[k.key])"><AppIcon :name="k.icon" :size="13" />{{ countsOf(r)[k.key] }}</span>

@@ -53,3 +53,86 @@ The four binaries are cross-built, not a claim that all user-service lifecycles 
 Published coordinates are immutable. The existing stable86 release `v260927181849.0.0` predates the fourth daemon target: its `paimos-agentd-darwin-arm64` asset answered HTTP 200 and its `paimos-agentd-linux-arm64` asset answered HTTP 404 in read-only HEAD checks on 2026-09-27. A guide serving that version must omit Linux arm64 rather than point at a future asset or rewrite stable86.
 
 Screenshot data for a dev tenant is `aeon demo seed`. See [DEMO.md](DEMO.md). That command is not part of the release tag workflow.
+
+## Ticket benefits and release-note snapshots (AEON-256)
+
+Tickets store `pill_en`, `pill_de`, `benefit_en`, `benefit_de` and
+`hide_from_release_notes` in `nodes.fields`. Migration `0896` adds their optional
+schema properties for every tenant and replaces `aeon_seed_node_kinds` for new
+tenants. It changes no node values, translations, events or release artifacts.
+Custom unrelated properties and constraints stay in place. Schema requirements
+are deliberately optional so incomplete drafts can be created with warnings.
+
+The generic node API requires both pills (2–4 whitespace-separated words) and
+both nonblank benefits when a ticket enters a built-in completed state (`done`,
+`accepted` or `delivered`) from outside that set, including creation in any of
+those states, direct PATCH, bulk changes, CLI calls and bulk undo. Normal updates
+check the final fields and state while holding the node row lock. Bulk skips an
+incomplete ticket with a reason; bulk undo rejects the entire invalid reversal.
+An already-completed ticket remains editable, including transitions within that
+set, without fabricated backfills; reopening and completing it again invokes the
+requirement. Hiding a ticket is not an exception. Sentence count, positive plain
+language and translation fidelity are
+editorial requirements, not claimed as machine-verified. This is an application
+transition rule, not a SQL constraint: historical import/migration writers retain
+their existing behavior. Cancellation, archival and tenant-defined state names
+are not guessed to mean successful completion.
+
+For a new release, read the supported authenticated endpoint
+`GET /api/projects/{projectId}/releases/{releaseId}/note-snapshot` using a
+project-scoped `releases.read` and `nodes.read` key (or an authorized person). The tenant comes
+from authentication, not an input parameter. The export uses one SQL statement:
+`journey_tickets.release_node_id` is the sole membership source, joined by tenant
+and project; `nodes.fields` supplies exactly the five benefit properties.
+Backlog tickets, Git mentions and a project's other releases are not membership.
+Deleted/unavailable members remain explicit gap entries. `captured_at`, release
+revision and each member's `updated_at` record the observation. No live API or
+classic database is contacted by the history builder.
+
+The release coordinator reviews that export and records its exact JSON bytes at
+`release-notes/<version>.json` in the release commit **before tagging**. Use the
+configured `paimos --instance … curl` API client; no code discovers credentials
+from other applications or files. The export is read-only, not a publication
+permission or an immutable server snapshot. It includes hidden fields for
+provenance: record it only in the release's authorized source/artifact context.
+Do not add snapshots to already-published tags or rebuild an old artifact under
+its original coordinate.
+
+`internal/releasehistory/generate` reads only that file **from its matching
+annotated Git tag**, including under `-offline`. Current worktree files and later
+ticket edits cannot change those notes. The generated manifest records the exact
+file SHA-256, tag/path, capture time, revision, both languages, hidden count and
+gaps. Members sort by recorded position, then key and ID. Exact duplicate IDs
+collapse; conflicting duplicates, duplicate keys, malformed metadata and a
+recorded version that differs from the tag fail the build. If the release had no
+assigned version at capture time (candidate registration can happen later), the
+file's tagged path is the explicit coordinator-supplied build binding; that
+missing recorded version stays a visible provenance gap. It is not inferred
+from a ticket, timestamp or Git headline.
+
+Missing snapshot files produce empty notes with a membership/field-data gap.
+Incomplete visible tickets produce field-specific gaps; they get no invented
+translation or Git-headline benefit. Hidden tickets contribute no text or key to
+the public notes; incomplete hidden tickets still contribute a generic gap.
+Technical Git headlines, legacy top-level `tickets` references and changes remain
+evidence; membership claims come only from the snapshot. The release detail shows
+English/German notes; Git evidence is expandable when a snapshot is available.
+Old v1 manifests without the optional `notes` member and regenerated records with
+`notes.source = "unavailable"` keep their historical headline, ticket references,
+ticket filter and visible changes. Regenerated records also show the missing
+benefit-data gap; their Git text is not presented as benefit notes or membership.
+Available snapshots remain authoritative even when empty or incomplete. This
+additive reader boundary does not modify any existing published artifact or
+legacy tag.
+
+Integration acceptance still belongs to the coordinator: review migration0896,
+select and approve the production release/project mapping, capture/review/commit
+an authorized snapshot before the next tag, verify its digest in the resulting
+artifact, and live-test both languages. Automatic production snapshot capture,
+server-side signed/sealed snapshots, GitHub release-body rendering, translation
+backfills and company-rule publication are not implemented here. An omitted
+snapshot is intentionally a visible gap, not a successful benefit-note release.
+The writing-rule proposal is `docs/proposals/ticket-benefit-writing.json`, using
+AR1's draft Rule DTO. It must be imported as a draft at the fetched revision and
+published separately by an authorized human; it changes no effective harness
+files or company rules.

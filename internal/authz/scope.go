@@ -62,9 +62,20 @@ var ProjectFilteredRoutes = map[string]bool{
 // then requires it in the target project (RequireTx with that project), inside
 // the transaction that writes. POST /api/nodes/bulk stays workspace-only.
 var ProjectDecidedRoutes = map[string]bool{
-	"POST /api/nodes":     true,
-	"POST /api/relations": true,
-	"POST /api/knowledge": true,
+	"GET /api/rules/layers":                          true,
+	"POST /api/rules/layers":                         true,
+	"GET /api/rules/sets":                            true,
+	"POST /api/rules/sets":                           true,
+	"GET /api/rules/sets/{setId}":                    true,
+	"PUT /api/rules/sets/{setId}/draft":              true,
+	"POST /api/rules/sets/{setId}/publish":           true,
+	"POST /api/rules/sets/{setId}/restore":           true,
+	"GET /api/rules/sets/{setId}/versions":           true,
+	"GET /api/rules/sets/{setId}/versions/{version}": true,
+	"GET /api/rules/merged":                          true,
+	"POST /api/nodes":                                true,
+	"POST /api/relations":                            true,
+	"POST /api/knowledge":                            true,
 }
 
 // Product release notes are the same for everyone; they are not tenant data.

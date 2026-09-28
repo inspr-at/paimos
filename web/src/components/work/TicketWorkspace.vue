@@ -29,6 +29,8 @@ import RelationPicker from './RelationPicker.vue'
 import TicketAgentWork from './TicketAgentWork.vue'
 import TicketHeaderBar from './TicketHeaderBar.vue'
 import TicketProperties from './TicketProperties.vue'
+import TicketBenefits from './TicketBenefits.vue'
+import { benefitDraft, benefitTextKeys, completedTicketState } from '../../lib/ticketBenefits'
 import { can } from '../../lib/authz'
 import { AssignCancelled, assignToRelease, type ReleaseTarget } from '../../lib/releaseAssign'
 import { openedMembershipMessage, type NativeReleaseView } from '../../lib/releaseMembership'
@@ -102,12 +104,12 @@ const contextColumn = computed(() => props.mode === 'full' ? wideScreen.value : 
 const editing = ref(false)
 const saving = ref(false)
 const titleField = ref<HTMLTextAreaElement>()
-const draft = reactive({ title: '', body: '', acceptance: '', notes: '', state: '', priority: '', assignee: '' })
+const draft = reactive({ ...benefitDraft({}), title: '', body: '', acceptance: '', notes: '', state: '', priority: '', assignee: '' })
 let base = { ...draft }
 function snapshot() {
   const it = props.item!
   return {
-    title: it.title, body: it.body ?? '', acceptance: typeof it.fields.acceptance_criteria === 'string' ? it.fields.acceptance_criteria : '',
+    ...benefitDraft(it.fields), title: it.title, body: it.body ?? '', acceptance: typeof it.fields.acceptance_criteria === 'string' ? it.fields.acceptance_criteria : '',
     notes: typeof it.fields.notes === 'string' ? it.fields.notes : '', state: it.state, priority: it.priority && it.priority !== 'none' ? it.priority : '', assignee: it.assignee?.id ?? '',
   }
 }
@@ -124,6 +126,10 @@ async function startEdit(focus: 'title' | 'body' = 'title') {
   // The caret goes to the end of the title: typing adds to it rather than replacing it.
   if (focus === 'title') { const el = titleField.value; el?.focus(); el?.setSelectionRange(el.value.length, el.value.length); growTitle() }
   else root.value?.querySelector<HTMLTextAreaElement>('.edit-form .md-area')?.focus()
+}
+function changeBenefit(key: string, value: string | boolean) {
+  if (key === 'hide_from_release_notes' && typeof value === 'boolean') draft.hide_from_release_notes = value
+  else if (typeof value === 'string' && benefitTextKeys.includes(key as typeof benefitTextKeys[number])) draft[key as typeof benefitTextKeys[number]] = value
 }
 function growTitle() { const el = titleField.value; if (el) { el.style.height = 'auto'; el.style.height = `${el.scrollHeight}px` } }
 async function saveEdit() {
@@ -142,6 +148,10 @@ async function saveEdit() {
   setField('notes', draft.notes, base.notes)
   setField('priority', draft.priority, base.priority)
   setField('assignee', draft.assignee, base.assignee)
+  if (target.kind_slug === 'ticket') {
+    for (const key of benefitTextKeys) setField(key, draft[key], base[key])
+    if (draft.hide_from_release_notes !== base.hide_from_release_notes) { fieldsChanged = true; fields.hide_from_release_notes = draft.hide_from_release_notes }
+  }
   if (fieldsChanged) patch.fields = fields
   saving.value = true
   const result = await ticket.patch(patch)
@@ -432,6 +442,7 @@ defineExpose({
             ><PersonAvatar v-if="draftAssignee" :id="draftAssignee.value" :name="draftAssignee.label" :size="18" /><AppIcon v-else name="user" :size="13" class="pick-none" /><span :id="`${uid}-assignee-value`" class="pick-value" :class="{ unset: !draftAssignee }">{{ draftAssignee?.label ?? 'Unassigned' }}</span><AppIcon name="chevron" :size="12" class="pick-chev" /></button>
           </div>
         </div>
+        <TicketBenefits v-if="item.kind_slug === 'ticket'" :fields="draft" editing :disabled="saving" :done="completedTicketState(item.state)" @change="changeBenefit" />
         <section class="edit-section" aria-labelledby="edit-desc"><h3 id="edit-desc" class="eyebrow">Description</h3>
           <MarkdownEditor v-model="draft.body" label="Description" bare :split="mode === 'full'" :min-rows="mode === 'full' ? 12 : 7" :attachment-id="attachmentId" placeholder="What is this about? Paste a screenshot to add it inline." @save="saveEdit" @cancel="cancelEdit" />
         </section>
@@ -467,6 +478,7 @@ defineExpose({
           <div class="divider" />
 
           <div class="sections">
+            <TicketBenefits v-if="item.kind_slug === 'ticket'" :fields="item.fields" :done="completedTicketState(item.state)" />
             <MarkdownSection ref="descSection" title="Description" :value="item.body" :editable="editable" :save="ticket.setBody" :attachment-id="attachable ? attachmentId : undefined" empty-text="Add a description" @open-attachment="openAttachment" />
             <MarkdownSection v-if="acceptance.trim() || showAcceptance" ref="acSection" title="Acceptance criteria" :value="acceptance" :editable="editable" :save="value => ticket.setField('acceptance_criteria', value)" :attachment-id="attachable ? attachmentId : undefined" @open-attachment="openAttachment" />
             <MarkdownSection v-if="notes.trim() || showNotes" ref="notesSection" title="Notes" :value="notes" :editable="editable" :save="value => ticket.setField('notes', value)" :attachment-id="attachable ? attachmentId : undefined" @open-attachment="openAttachment" />

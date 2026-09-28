@@ -28,6 +28,13 @@ func TestPolishedNodeList(t *testing.T) {
 		if fields == nil {
 			fields = map[string]any{}
 		}
+		if kind == ticket.ID && state == "done" {
+			var benefits map[string]any
+			_ = json.Unmarshal([]byte(benefitFields), &benefits)
+			for key, value := range benefits {
+				fields[key] = value
+			}
+		}
 		body := map[string]any{"kind_id": kind, "key": key, "title": title, "state": state, "fields": fields}
 		if parent != "" {
 			body["parent_id"] = parent

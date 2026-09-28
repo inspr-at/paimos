@@ -1,12 +1,14 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { displayHeadline, groupChanges, releasedAt, shortCommit, span, ticketsOf, type Release } from '../../lib/releases'
+import { displayHeadline, groupChanges, hasUsableNotes, releasedAt, shortCommit, span, ticketsOf, type Release } from '../../lib/releases'
 import { absoluteTime, relativeTime } from '../../lib/work'
 import AppIcon from '../AppIcon.vue'
 import CalendarVersion from '../CalendarVersion.vue'
 import ReleaseChanges from './ReleaseChanges.vue'
 import TicketChips from './TicketChips.vue'
+import TicketLink from './TicketLink.vue'
+const noteLanguage = ref<'en' | 'de'>('en')
 
 // One release: when it shipped, what changed, and the evidence behind it.
 const props = defineProps<{
@@ -71,11 +73,25 @@ defineExpose({ focus: () => heading.value?.focus({ preventScroll: false }) })
       <template v-if="reserved">Reserved {{ absoluteTime(at) }} · {{ relativeTime(at, { now, long: true }) }}. The version was taken{{ release.tag ? ' and tagged' : '' }}, but no release was published under it.</template>
       <template v-else>{{ release.published_at ? 'Published' : 'Tagged' }} {{ absoluteTime(at) }} · {{ relativeTime(at, { now, long: true }) }}</template>
     </p>
-    <p v-if="release.headline" class="headline">{{ displayHeadline(release) }}</p>
+    <p v-if="!hasUsableNotes(release) && release.headline" class="headline">{{ displayHeadline(release) }}</p>
 
     <TicketChips v-if="tickets.length" :tickets="tickets" class="tickets" />
 
-    <div class="changes-block">
+    <section v-if="hasUsableNotes(release)" class="changes-block" aria-label="Release notes">
+      <div class="badges" role="group" aria-label="Release note language">
+        <button type="button" class="chip" :aria-pressed="noteLanguage === 'en'" @click="noteLanguage = 'en'">English</button>
+        <button type="button" class="chip" :aria-pressed="noteLanguage === 'de'" @click="noteLanguage = 'de'">Deutsch</button>
+      </div>
+      <div v-for="note in release.notes.items" :key="note.id" :lang="noteLanguage" class="note-item">
+        <p><span class="chip">{{ noteLanguage === 'en' ? note.pill_en : note.pill_de }}</span> <TicketLink :ticket-key="note.key" /></p>
+        <p>{{ noteLanguage === 'en' ? note.benefit_en : note.benefit_de }}</p>
+      </div>
+      <p v-for="gap in release.notes.gaps" :key="gap" class="none">{{ gap }}</p>
+      <p v-if="!release.notes.items.length && !release.notes.gaps.length" class="none">{{ noteLanguage === 'en' ? 'No public release notes.' : 'Keine öffentlichen Release Notes.' }}</p>
+      <p v-if="release.notes.hidden" class="none">{{ release.notes.hidden }} {{ noteLanguage === 'en' ? 'ticket(s) hidden from release notes.' : 'Ticket(s) in den Release Notes ausgeblendet.' }}</p>
+    </section>
+    <div v-else class="changes-block">
+      <p v-for="gap in release.notes?.gaps" :key="gap" class="none">{{ gap }}</p>
       <ReleaseChanges v-if="counted" :groups="groups" :repository="repository" :query="query" />
       <p v-else class="none">{{ reserved ? 'Nothing shipped under this version.' : 'No changes are recorded between this release and the one before it.' }}</p>
       <p v-if="release.changes_omitted" class="none">And {{ release.changes_omitted }} more {{ release.changes_omitted === 1 ? 'change' : 'changes' }} not listed here.</p>
@@ -91,6 +107,12 @@ defineExpose({ focus: () => heading.value?.focus({ preventScroll: false }) })
       </button>
       <div v-if="evidence" id="release-evidence" class="ev-body">
         <p class="sr" role="status">{{ copyStatus }}</p>
+        <template v-if="release.notes">
+          <p v-if="hasUsableNotes(release) && release.headline" class="none">Git headline: {{ release.headline }}</p>
+          <p class="none">Note source: {{ release.notes.source }}</p>
+          <p v-if="release.notes.snapshot_sha256" class="mono wrap">Snapshot SHA-256: {{ release.notes.snapshot_sha256 }}</p>
+          <ReleaseChanges v-if="hasUsableNotes(release) && counted" :groups="groups" :repository="repository" :query="query" />
+        </template>
         <dl>
           <div>
             <dt>Version</dt>
@@ -153,6 +175,8 @@ defineExpose({ focus: () => heading.value?.focus({ preventScroll: false }) })
 .reserved .headline, .reserved .version { color: var(--ink-2); }
 .tickets { margin-top: 2px; }
 .changes-block { display: grid; gap: 8px; margin-top: 10px; }
+.note-item { display: grid; gap: 6px; font-size: 14px; }
+.chip[aria-pressed="true"] { background: var(--row-selected); font-weight: 650; }
 .none { font-size: 13px; color: var(--ink-3); }
 .evidence { margin-top: 14px; border-radius: 14px; background: var(--glass); border: 1px solid var(--glass-edge); box-shadow: 0 0 0 1px var(--line); overflow: hidden; }
 .ev-toggle { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 48px; padding: 8px 14px; border: 0; background: transparent; color: var(--ink); text-align: left; }

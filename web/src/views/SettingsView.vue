@@ -11,6 +11,7 @@ import PersonalSection from '../components/settings/PersonalSection.vue'
 import ProjectsSection from '../components/settings/ProjectsSection.vue'
 import WorkspaceSection from '../components/settings/WorkspaceSection.vue'
 import AccessSection from '../components/access/AccessSection.vue'
+import AgentRulesSection from '../components/rules/AgentRulesSection.vue'
 import { SETTINGS_SECTIONS, anyOf, sectionOf, visibleSections, type SectionId } from '../lib/settings'
 import { useSession } from '../stores/session'
 
@@ -36,8 +37,8 @@ const deciding = computed(() => !!meta.value.permission && !permissionsKnown())
 // Which sections show depends on my permissions: the layout waits for them, so
 // the nav never re-flows under the pointer (usually a few milliseconds).
 void refreshPermissions()
-const VIEW: Record<SectionId, Component> = { personal: PersonalSection, workspace: WorkspaceSection, access: AccessSection, business: BusinessSection, projects: ProjectsSection }
-const ICON: Record<SectionId, BizIconName> = { personal: 'user', workspace: 'folder', access: 'users', business: 'briefcase', projects: 'layers' }
+const VIEW: Record<SectionId, Component> = { personal: PersonalSection, 'agent-rules': AgentRulesSection, workspace: WorkspaceSection, access: AccessSection, business: BusinessSection, projects: ProjectsSection }
+const ICON: Record<SectionId, BizIconName> = { personal: 'user', 'agent-rules': 'book', workspace: 'folder', access: 'users', business: 'briefcase', projects: 'layers' }
 
 // A deep link scrolls to its card once the section has rendered it.
 let arrival: ReturnType<typeof setTimeout> | undefined
@@ -76,13 +77,13 @@ watch(() => [current.value, route.hash] as const, async ([, hash]) => {
           <span v-if="section.admin && !section.permission" class="admin-mark" role="img" aria-label="Admins only" data-tip="Only workspace admins see this"><AppIcon name="shield" :size="12" /></span>
         </RouterLink>
       </nav>
-      <div class="body" :class="{ wide: current === 'access' }">
+      <div class="body" :class="{ wide: current === 'access' || current === 'agent-rules' }">
         <component :is="VIEW[current]" v-if="allowed" :key="current" />
         <div v-else-if="deciding" class="set-skeleton" role="status" aria-label="Loading"><span class="skeleton" /><span class="skeleton" /></div>
         <div v-else class="gate glass-card">
           <span class="gate-icon"><AppIcon name="shield" :size="18" /></span>
-          <h2>{{ meta.permission ? `${meta.label} is for people who manage the workspace` : `${meta.label} settings are for workspace admins` }}</h2>
-          <p>{{ meta.permission ? 'Seeing who is in the workspace needs the See members permission. An admin can give it to you.' : 'A workspace admin can change these. Your own settings are under Personal.' }}</p>
+          <h2>{{ meta.deniedTitle ?? (meta.permission ? `${meta.label} is for people who manage the workspace` : `${meta.label} settings are for workspace admins`) }}</h2>
+          <p>{{ meta.denied ?? (meta.permission ? 'Seeing who is in the workspace needs the See members permission. An admin can give it to you.' : 'A workspace admin can change these. Your own settings are under Personal.') }}</p>
           <RouterLink class="btn" to="/settings/personal">Personal settings</RouterLink>
         </div>
       </div>

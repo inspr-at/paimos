@@ -104,3 +104,21 @@ The coordinator mounts `stagehandoff.New` (an `httpapi.Module`) with a Pharos la
 ## MCP
 
 `aeon mcp` (or `paimos mcp`) serves a stdio MCP server. `whoami` calls `GET /api/me` on the configured instance. The server also registers `issue_list`, `issue_get`, `issue_create`, `issue_update`, `issue_comment`, `knowledge_list`, `knowledge_get`, `knowledge_create`, `knowledge_update`, and `search`. Those tools still answer that they arrive in R1. Use the CLI verbs for those operations. They already call the Aeon API.
+
+## Ticket benefits (AEON-256)
+
+`issue create` and `issue update` accept `--pill-en`, `--pill-de`, `--benefit-en`,
+`--benefit-de` and `--hide-from-release-notes true|false`. JSON issue reads return
+these values. Creation reports missing-field warnings; `--status done` goes
+through the same server gate as the ticket UI. Supply the four texts and done
+state in one update when appropriate. A failed completion saves neither fields
+nor state. Updates send the fetched node timestamp as `If-Unmodified-Since` to
+protect concurrent edits; on conflict re-read the ticket before trying again.
+The raw node API replaces the whole `fields` object, so retain unrelated fields
+and send its precondition when clearing or editing a field.
+
+Pills have 2–4 words; benefits have one or two positive plain-language sentences.
+German is neutral without direct address. Hidden tickets still require benefits.
+The proposal in `proposals/ticket-benefit-writing.json` is compatible with AR1's
+rule draft shape and is not a published company rule. See `RELEASE.md` for the
+exact membership source, snapshot capture and offline release-history behavior.

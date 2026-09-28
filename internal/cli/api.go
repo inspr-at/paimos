@@ -18,6 +18,7 @@ import (
 )
 
 type apiNode struct {
+	Warnings  []string        `json:"warnings,omitempty"`
 	ID        string          `json:"id"`
 	Key       string          `json:"key"`
 	KindID    string          `json:"kind_id"`
@@ -67,11 +68,15 @@ func (rt *runtime) api() (*client.Client, error) {
 }
 
 func (rt *runtime) do(method, path string, body, dest any) error {
+	return rt.doHeaders(method, path, body, dest, nil)
+}
+
+func (rt *runtime) doHeaders(method, path string, body, dest any, headers map[string]string) error {
 	c, err := rt.api()
 	if err != nil {
 		return err
 	}
-	if err := c.Do(context.Background(), method, path, body, dest); err != nil {
+	if err := c.DoWithHeaders(context.Background(), method, path, body, dest, headers); err != nil {
 		return rt.fail(err, c.Token)
 	}
 	return nil

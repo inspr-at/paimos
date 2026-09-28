@@ -10,7 +10,10 @@ export interface ReleaseEvidence {
   source_commit: string; source_url: string; image: { reference: string; digest: string } | null
   ci: ReleaseRun | null; release_run: ReleaseRun | null; release_url: string; unavailable: string[]
 }
+export interface ReleaseNoteItem { id: string; key: string; pill_en: string; pill_de: string; benefit_en: string; benefit_de: string }
+export interface ReleaseNotes { source: string; snapshot_sha256: string; captured_at: string | null; release_revision: number; items: ReleaseNoteItem[]; gaps: string[]; hidden: number }
 export interface Release {
+  notes?: ReleaseNotes
   version: string; tag: string; release_channel: string; release_sequence: number; state: 'published' | 'reserved'
   reserved_at: string | null; tagged_at: string | null; published_at: string | null; headline: string
   tickets: string[]; changes: ReleaseChange[]; changes_omitted: number; evidence: ReleaseEvidence
@@ -103,7 +106,12 @@ export function displayText(text: string, keys: Iterable<string>) {
   out = out.replace(/\s+([,.;:])/g, '$1').replace(/[,;:\s]+$/, '').replace(/\s{2,}/g, ' ').trim()
   return sentence(out || text)
 }
-export const displayHeadline = (r: Pick<Release, 'headline' | 'tickets' | 'changes'>) => displayText(r.headline, ticketsOf(r as Release))
+// Regenerated archives without snapshots keep their historical display. A real
+// snapshot remains authoritative even when empty, hidden or incomplete.
+export function hasUsableNotes(r: Pick<Release, 'notes'>): r is Pick<Release, 'notes'> & { notes: ReleaseNotes } {
+  return !!r.notes && r.notes.source !== 'unavailable'
+}
+export const displayHeadline = (r: Pick<Release, 'headline' | 'tickets' | 'changes' | 'notes'>) => hasUsableNotes(r) ? (r.notes.items.map(item => item.pill_en).join(' · ') || (r.notes.gaps.length ? 'Release notes unavailable' : 'No public release notes')) : displayText(r.headline, ticketsOf(r as Release))
 // A subject without its conventional prefix ("feat(AEON-74): wide lists" reads "Wide lists").
 export function plainSubject(subject: string, tickets: string[] = []) {
   const m = /^[a-z]+(?:\([^)]*\))?!?:\s*(.+)$/.exec(subject)
@@ -159,7 +167,7 @@ export function naturalKey(a: string, b: string) { return a.localeCompare(b, 'en
 
 // ---------- Search and filters ----------
 export interface ReleaseFilter { q: string; features: boolean; fixes: boolean; tickets: boolean }
-export const ticketsOf = (r: Release) => [...new Set([...r.tickets, ...r.changes.flatMap(c => c.tickets)])].sort(naturalKey)
+export const ticketsOf = (r: Release) => [...new Set(hasUsableNotes(r) ? r.notes.items.map(item => item.key) : [...r.tickets, ...r.changes.flatMap(c => c.tickets)])].sort(naturalKey)
 export function matches(r: Release, f: ReleaseFilter) {
   const groups = groupChanges(r.changes)
   if (f.features && !groups.features.length) return false
@@ -167,7 +175,7 @@ export function matches(r: Release, f: ReleaseFilter) {
   if (f.tickets && !ticketsOf(r).length) return false
   const q = f.q.trim().toLowerCase()
   if (!q) return true
-  return r.version.includes(q) || r.headline.toLowerCase().includes(q) || r.tickets.some(t => t.toLowerCase().includes(q))
+  return !!r.notes?.items.some(item => [item.pill_en, item.pill_de, item.benefit_en, item.benefit_de, item.key].some(text => text.toLowerCase().includes(q))) || r.version.includes(q) || r.headline.toLowerCase().includes(q) || r.tickets.some(t => t.toLowerCase().includes(q))
     || r.changes.some(c => c.subject.toLowerCase().includes(q) || c.tickets.some(t => t.toLowerCase().includes(q)))
 }
 

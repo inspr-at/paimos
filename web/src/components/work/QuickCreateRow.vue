@@ -55,6 +55,7 @@ defineExpose({ focus: () => input.value?.focus(), isDirty: () => !!draft.title.t
           <AppIcon :name="draft.kind === 'epic' ? 'epic' : draft.kind === 'task' ? 'task' : 'ticket'" :size="12" :class="['kind', draft.kind]" />{{ kindLabel(draft.kind) }}<AppIcon name="chevron" :size="11" class="chev" />
         </button>
       </div>
+      <small v-if="draft.kind === 'ticket'" class="benefit-warning">Add English and German pills and benefits in ticket details before Done.</small>
     </td>
     <td v-if="span" class="c-props" :colspan="span">
       <div class="cell">
@@ -86,6 +87,7 @@ defineExpose({ focus: () => input.value?.focus(), isDirty: () => !!draft.title.t
 </template>
 
 <style scoped>
+.benefit-warning { display: block; padding: 0 12px 8px; color: var(--ink-3); font-size: 11px; }
 .create-row td { height: 44px; padding: 0 12px; background: var(--row-selected); border-bottom: 0; vertical-align: middle; }
 .create-row td:first-child { padding-left: 18px; }
 /* The row being created: a tint and a hairline ring round the row and its hint, no edge accent. */

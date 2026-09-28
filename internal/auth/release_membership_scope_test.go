@@ -113,6 +113,34 @@ func TestAgentKeyReleaseMembershipReadScopeAndVisibility(t *testing.T) {
 	if got := request(http.MethodPost, projectID, reader.Token, ticketID); got.Code != http.StatusForbidden {
 		t.Fatalf("read key gained mutation: %d %s", got.Code, got.Body.String())
 	}
+
+	// AEON-256 uses the same project scope for the release-note field export.
+	var releaseID string
+	if err := testInTenant(t.Context(), appPool, tenantID, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `INSERT INTO journey_projects(tenant_id,project_node_id) VALUES($1,$2) ON CONFLICT DO NOTHING`, tenantID, projectID); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,parent_id) SELECT $1,id,'MEM-3','Release',$2 FROM node_kinds WHERE slug='release' RETURNING nodes.id::text`, tenantID, projectID).Scan(&releaseID); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `INSERT INTO journey_releases(tenant_id,project_node_id,release_node_id,number) VALUES($1,$2,$3,1)`, tenantID, projectID, releaseID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		project, token string
+		want           int
+	}{{projectID, reader.Token, 200}, {projectID, withoutScope.Token, 403}, {otherProjectID, reader.Token, 403}, {foreignProjectID, reader.Token, 403}} {
+		req := httptest.NewRequest("GET", "/api/projects/"+tc.project+"/releases/"+releaseID+"/note-snapshot", nil)
+		req.Header.Set("Authorization", "Bearer "+tc.token)
+		_, req.Pattern = mux.Handler(req)
+		rec := httptest.NewRecorder()
+		secured.ServeHTTP(rec, req)
+		if rec.Code != tc.want {
+			t.Fatalf("snapshot scope: %d %s", rec.Code, rec.Body.String())
+		}
+	}
 	var denial string
 	for _, tc := range []struct{ project, ticket string }{{otherProjectID, otherTicketID}, {foreignProjectID, foreignTicketID}} {
 		got := request(http.MethodGet, tc.project, reader.Token, tc.ticket)
