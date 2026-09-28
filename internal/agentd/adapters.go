@@ -179,6 +179,8 @@ func (a *CodexAdapter) Start(ctx context.Context, r StartRequest, observe func(A
 		Thread struct {
 			ID string `json:"id"`
 		} `json:"thread"`
+		Model  string `json:"model"`
+		Effort string `json:"reasoningEffort"`
 	}
 	threadArgs := map[string]any{"cwd": r.Workspace, "approvalPolicy": "never", "model": r.Profile.Model}
 	if r.Tools != nil {
@@ -197,6 +199,9 @@ func (a *CodexAdapter) Start(ctx context.Context, r StartRequest, observe func(A
 	// prevent the existing run protocol and settlement from operating.
 	cp.usage, _ = sessionusage.NewManagedCodex(p.threadID, r.Profile.Model)
 	p.eventMu.Unlock()
+	// The response reports the resolved settings of this newly owned thread.
+	// Launch parameters alone are not evidence of its effective settings.
+	observe(AdapterEvent{HarnessModel: thread.Model, HarnessEffort: thread.Effort})
 	if err := cp.startTurn(op, r); err != nil {
 		return fail(errors.New("Codex turn start failed"))
 	}

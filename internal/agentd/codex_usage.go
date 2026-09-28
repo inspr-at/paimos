@@ -17,6 +17,20 @@ func (p *codexProcess) notification(raw json.RawMessage) {
 		return
 	}
 	method, _, model := eventProbe(raw)
+	if method == "thread/settings/updated" {
+		var frame struct {
+			Params struct {
+				ThreadID string `json:"threadId"`
+				Settings struct {
+					Model  string `json:"model"`
+					Effort string `json:"effort"`
+				} `json:"threadSettings"`
+			} `json:"params"`
+		}
+		if json.Unmarshal(raw, &frame) == nil && p.threadID != "" && frame.Params.ThreadID == p.threadID {
+			p.observe(AdapterEvent{HarnessModel: frame.Params.Settings.Model, HarnessEffort: frame.Params.Settings.Effort})
+		}
+	}
 	if method == "item/started" {
 		p.observe(AdapterEvent{Kind: "tool"})
 	}

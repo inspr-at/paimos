@@ -74,7 +74,22 @@ func TestFakeVendorProcess(t *testing.T) {
 			result = map[string]any{"account": map[string]string{"type": "chatgpt", "email": "agent@example.test"}}
 		case "thread/start":
 			result = map[string]any{"thread": map[string]string{"id": "thread-1"}}
+			if vendor == "codex_metadata" {
+				result = map[string]any{"thread": map[string]string{"id": "thread-1"}, "model": "model-a", "reasoningEffort": "high"}
+			}
 		case "turn/start":
+			if vendor == "codex_metadata" {
+				for _, settings := range []map[string]any{
+					{"model": "unrelated", "effort": "low", "threadId": "other-thread"},
+					{"model": "model-b", "effort": "xhigh", "threadId": "thread-1"},
+					{"model": "model-b", "effort": "xhigh", "threadId": "thread-1"},
+					{"model": "model-c", "threadId": "thread-1"},
+				} {
+					threadID := settings["threadId"]
+					delete(settings, "threadId")
+					_ = write.Encode(map[string]any{"jsonrpc": "2.0", "method": "thread/settings/updated", "params": map[string]any{"threadId": threadID, "threadSettings": settings}})
+				}
+			}
 			result = map[string]any{"turn": map[string]string{"id": "turn-1", "status": "inProgress"}}
 		case "turn/steer":
 			for _, total := range []int{20, 20, 19} {
@@ -176,6 +191,100 @@ func TestCodexAppServerProtocolAndSteer(t *testing.T) {
 	}
 	if err := p.Stop(ctx); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestCodexOwnedSettingsReachHarnessHeartbeats(t *testing.T) {
+	r := adapterRequest(t)
+	home, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(home, 0700); err != nil {
+		t.Fatal(err)
+	}
+	a := NewCodexAdapter(fakeVendorPath(t, "codex_metadata"), map[string]string{"account": home})
+	a.SetExpectedEmails(map[string]string{"account": "agent@example.test"})
+	api := &fakeAPI{}
+	s := &Supervisor{api: api, generation: r.Generation}
+	entry := &owned{record: Record{Generation: r.Generation, State: "starting"}, harness: HarnessSession{ID: "owned-session", ProjectID: "project", Lease: "owned-lease"}}
+	other := &owned{record: Record{Generation: r.Generation, State: "running"}, harness: HarnessSession{ID: "other-session", ProjectID: "project", Lease: "other-lease"}}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	proc, err := a.Start(ctx, r, func(ev AdapterEvent) {
+		if ev.HarnessModel != "" || ev.HarnessEffort != "" {
+			s.observe(entry, ev)
+		}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer proc.Stop(ctx)
+	entry.mu.Lock()
+	entry.record.State = "running"
+	entry.mu.Unlock()
+	if err := s.heartbeatHarness(ctx, entry); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.heartbeatHarness(ctx, other); err != nil {
+		t.Fatal(err)
+	}
+	api.mu.Lock()
+	defer api.mu.Unlock()
+	var ownedBeats []HarnessSession
+	for _, beat := range api.harnessBeatSessions {
+		if beat.ID == "owned-session" {
+			ownedBeats = append(ownedBeats, beat)
+		} else if beat.Model != "" || beat.ReasoningEffort != "" {
+			t.Fatalf("unrelated session overwritten: %+v", beat)
+		}
+	}
+	if len(ownedBeats) != 4 {
+		t.Fatalf("expected three verified changes and one metadata-free heartbeat, got %+v", ownedBeats)
+	}
+	for i, want := range []struct{ model, effort string }{{"model-a", "high"}, {"model-b", "xhigh"}, {"model-c", ""}, {"", ""}} {
+		if ownedBeats[i].Model != want.model || ownedBeats[i].ReasoningEffort != want.effort {
+			t.Fatalf("heartbeat %d: model=%q effort=%q", i, ownedBeats[i].Model, ownedBeats[i].ReasoningEffort)
+		}
+		if ownedBeats[i].ActivitySequence != int64(i+1) {
+			t.Fatalf("heartbeat %d lost activity sequence: %d", i, ownedBeats[i].ActivitySequence)
+		}
+	}
+	entry.mu.Lock()
+	entry.record.Generation = "old-generation"
+	entry.mu.Unlock()
+	if err := s.heartbeatHarness(ctx, entry); err != ErrGeneration {
+		t.Fatalf("stale generation heartbeat was accepted: %v", err)
+	}
+}
+
+func TestCodexMissingRuntimeMetadataIsOmitted(t *testing.T) {
+	r := adapterRequest(t)
+	home, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(home, 0700); err != nil {
+		t.Fatal(err)
+	}
+	a := NewCodexAdapter(fakeVendorPath(t, "codex_no_metadata"), map[string]string{"account": home})
+	a.SetExpectedEmails(map[string]string{"account": "agent@example.test"})
+	events := make(chan AdapterEvent, 4)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	proc, err := a.Start(ctx, r, func(ev AdapterEvent) {
+		if ev.HarnessModel != "" || ev.HarnessEffort != "" {
+			events <- ev
+		}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer proc.Stop(ctx)
+	select {
+	case ev := <-events:
+		t.Fatalf("launch request became runtime metadata: %+v", ev)
+	default:
 	}
 }
 

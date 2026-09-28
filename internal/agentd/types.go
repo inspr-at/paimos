@@ -74,13 +74,14 @@ type Node struct {
 // HarnessSession is the public binding plus the private worker lease held only
 // by this daemon generation. The lease is never persisted in the run journal.
 type HarnessSession struct {
-	Ownership       *ownedprocess.Identity `json:"-"`
-	ID              string                 `json:"id"`
-	ProjectID       string                 `json:"project_id"`
-	Lease           string                 `json:"-"`
-	Model           string                 `json:"model,omitempty"`
-	ReasoningEffort string                 `json:"reasoning_effort,omitempty"`
-	AccountLabel    string                 `json:"account_label,omitempty"`
+	Ownership        *ownedprocess.Identity `json:"-"`
+	ActivitySequence int64                  `json:"-"`
+	ID               string                 `json:"id"`
+	ProjectID        string                 `json:"project_id"`
+	Lease            string                 `json:"-"`
+	Model            string                 `json:"model,omitempty"`
+	ReasoningEffort  string                 `json:"reasoning_effort,omitempty"`
+	AccountLabel     string                 `json:"account_label,omitempty"`
 }
 
 type HarnessControl struct {
@@ -200,6 +201,8 @@ type AdapterEvent struct {
 	SessionUsage      *sessionusage.UsageReport
 	Kind              string
 	VendorSessionID   string
+	HarnessModel      string // Resolved model from this owned adapter connection only.
+	HarnessEffort     string // Omitted when the vendor has not established an effort.
 	EffectiveModel    string
 	ModelEvidence     string
 	InputTokensDelta  int64
