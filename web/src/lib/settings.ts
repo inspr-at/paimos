@@ -4,7 +4,7 @@
 import { api } from './api.ts'
 import { sessionGone } from './authz.ts'
 
-export type SectionId = 'personal' | 'agent-rules' | 'workspace' | 'access' | 'business' | 'projects'
+export type SectionId = 'personal' | 'agent-rules' | 'workspace' | 'access' | 'business' | 'projects' | 'portal'
 // permission: the section shows to whoever holds it (can()), instead of by role.
 // permission: one, or any of several (Access opens for See members or, alone, the access log).
 export interface SettingsSection { id: SectionId; label: string; summary: string; admin: boolean; permission?: string | string[]; deniedTitle?: string; denied?: string }
@@ -16,6 +16,7 @@ export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
   { id: 'access', label: 'Access', summary: 'People, roles and agents', admin: true, permission: ['members.read', 'audit.read'] },
   { id: 'business', label: 'Business', summary: 'Parts and quote settings', admin: true },
   { id: 'projects', label: 'Projects', summary: 'Ticket types', admin: true },
+  { id: 'portal', label: 'Product portal', summary: 'Public catalog', admin: true },
 ]
 export function sectionOf(param: unknown): SectionId {
   const value = Array.isArray(param) ? param[0] : param
