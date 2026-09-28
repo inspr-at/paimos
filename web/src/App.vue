@@ -20,12 +20,14 @@ import { useReleases } from './stores/releases'
 import { brand } from './lib/brand'
 import { toast } from './lib/toast'
 import { displayHeadline, getRelease } from './lib/releases'
+import { useProfile } from './stores/profile'
 import { headerFolded } from './lib/chrome'
 import { usePoller } from './lib/usePolledData'
 import { sessionFreezeApplies } from './lib/agentPairing'
 
 const ReleasesSheet = defineAsyncComponent(() => import('./components/releases/ReleasesSheet.vue'))
 const session = useSession()
+const profile = useProfile()
 const route = useRoute()
 const router = useRouter()
 const ticketPeek = provideTicketPeek()
@@ -114,7 +116,7 @@ watch(() => releases.available, async version => {
   // The new server knows what the release was about; say it in its reading form.
   const release = await getRelease(version)
   if (version !== releases.available) return
-  const about = release?.headline ? `: ${displayHeadline(release)}` : ''
+  const about = release?.headline ? `: ${displayHeadline(release, profile.profile?.locale)}` : ''
   toast(`${brand.value.wordmark} was updated to ${version}${about}`, {
     sticky: true, key: 'update',
     actions: [{ label: 'What’s new', run: () => openReleases(version) }, { label: 'Reload', run: () => window.location.reload() }],

@@ -11,7 +11,7 @@ export interface ReleaseEvidence {
   ci: ReleaseRun | null; release_run: ReleaseRun | null; release_url: string; unavailable: string[]
 }
 export interface ReleaseNoteItem { id: string; key: string; pill_en: string; pill_de: string; benefit_en: string; benefit_de: string }
-export interface ReleaseNotes { source: string; snapshot_sha256: string; captured_at: string | null; release_revision: number; items: ReleaseNoteItem[]; gaps: string[]; hidden: number }
+export interface ReleaseNotes { source: string; fallback?: 'historical-tag-headline'; snapshot_sha256: string; captured_at: string | null; release_revision: number; items: ReleaseNoteItem[]; gaps: string[]; hidden: number }
 export interface Release {
   notes?: ReleaseNotes
   version: string; tag: string; release_channel: string; release_sequence: number; state: 'published' | 'reserved'
@@ -111,7 +111,39 @@ export function displayText(text: string, keys: Iterable<string>) {
 export function hasUsableNotes(r: Pick<Release, 'notes'>): r is Pick<Release, 'notes'> & { notes: ReleaseNotes } {
   return !!r.notes && r.notes.source !== 'unavailable'
 }
-export const displayHeadline = (r: Pick<Release, 'headline' | 'tickets' | 'changes' | 'notes'>) => hasUsableNotes(r) ? (r.notes.items.map(item => item.pill_en).join(' · ') || (r.notes.gaps.length ? 'Release notes unavailable' : 'No public release notes')) : displayText(r.headline, ticketsOf(r as Release))
+// The viewer's language. German locales use DE; everything else, including a
+// missing profile, uses EN.
+export function noteLocale(locale?: string | null): 'en' | 'de' {
+  return locale?.trim().toLowerCase().startsWith('de') ? 'de' : 'en'
+}
+export interface LocalizedNote { pill: string; benefit: string; pillLang: 'en' | 'de'; benefitLang: 'en' | 'de' }
+// One ticket's pill and sentence in the viewer's language. An empty German
+// field falls back to English; English is never replaced by an empty string.
+export function localizedNote(item: ReleaseNoteItem, locale?: string | null): LocalizedNote {
+  const de = noteLocale(locale) === 'de'
+  const pillDe = item.pill_de.trim(), pillEn = item.pill_en.trim()
+  const benefitDe = item.benefit_de.trim(), benefitEn = item.benefit_en.trim()
+  const pillLang = de && pillDe ? 'de' : 'en'
+  const benefitLang = de && benefitDe ? 'de' : 'en'
+  return { pill: pillLang === 'de' ? pillDe : pillEn, benefit: benefitLang === 'de' ? benefitDe : benefitEn, pillLang, benefitLang }
+}
+export const HISTORICAL_TAG_FALLBACK = 'historical-tag-headline'
+export const HISTORICAL_TAG_LABEL = 'Historical tag headline'
+// Tag headlines are only the fallback when member benefits were never captured.
+export function historicalTagFallback(r: Pick<Release, 'notes' | 'headline'>): boolean {
+  if (!r.headline.trim()) return false
+  if (hasUsableNotes(r)) return false
+  if (!r.notes) return true
+  return r.notes.fallback === HISTORICAL_TAG_FALLBACK || r.notes.source === 'unavailable'
+}
+export function emptyNotesLine(locale?: string | null) {
+  return noteLocale(locale) === 'de' ? 'Keine öffentlichen Release Notes.' : 'No public release notes.'
+}
+export function hiddenNoteLine(count: number, locale?: string | null) {
+  if (noteLocale(locale) === 'de') return count === 1 ? 'Ein Ticket ist in den Release Notes ausgeblendet.' : `${count} Tickets sind in den Release Notes ausgeblendet.`
+  return count === 1 ? 'One ticket is hidden from release notes.' : `${count} tickets are hidden from release notes.`
+}
+export const displayHeadline = (r: Pick<Release, 'headline' | 'tickets' | 'changes' | 'notes'>, locale?: string | null) => hasUsableNotes(r) ? (r.notes.items.map(item => localizedNote(item, locale).pill).filter(Boolean).join(' · ') || (r.notes.gaps.length ? 'Release notes unavailable' : 'No public release notes')) : displayText(r.headline, ticketsOf(r as Release))
 // A subject without its conventional prefix ("feat(AEON-74): wide lists" reads "Wide lists").
 export function plainSubject(subject: string, tickets: string[] = []) {
   const m = /^[a-z]+(?:\([^)]*\))?!?:\s*(.+)$/.exec(subject)
