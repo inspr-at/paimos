@@ -3,12 +3,18 @@
 package harness_test
 
 import (
+	"context"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+
+	"github.com/inspr-at/paimos/internal/nodes"
+	"github.com/inspr-at/paimos/internal/tenant"
 )
 
 func (f *harnessFixture) addNode(t *testing.T, id, key, kind, parent, title string) {
@@ -390,6 +396,99 @@ func TestLiveEtaFollowsCurrentProject(t *testing.T) {
 	})
 	if !live.Equal(first) || !again.Equal(reported) {
 		t.Fatalf("moved ticket live ETA changed to %s reported %s", live, again)
+	}
+}
+
+func TestLiveEtaWaitsOutAProjectMove(t *testing.T) {
+	f := fixture(t)
+	lease := "eta-lease-000000000000000000000108"
+	session := f.registerSession(t, f.agent.ID, "coordinator", f.ticket, "eta-ref-0000000000000108", lease)
+	first := time.Now().Add(2 * time.Hour).UTC().Truncate(time.Second)
+	f.beat(t, session, lease, 1, map[string]any{"eta_live_at": first.Format(time.RFC3339)})
+	var live, reported time.Time
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `SELECT eta_live_at, reported_at FROM ticket_live_eta WHERE node_id=$1`, f.ticket).Scan(&live, &reported)
+	})
+	target := uid()
+	f.addNode(t, target, "DST-1", "project", "", "Destination project")
+
+	// Hold the key counter the move takes only after it has locked the ticket
+	// FOR UPDATE, so the ETA's FOR SHARE can wait, the move can then commit,
+	// and the resumed read has to see the new project.
+	blocker, err := f.db.Admin.Begin(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = blocker.Rollback(context.Background()) }()
+	if _, err = blocker.Exec(context.Background(), `INSERT INTO node_key_counters(tenant_id,prefix,last_number) VALUES($1,'DST',1)
+		ON CONFLICT (tenant_id, prefix) DO UPDATE SET last_number=node_key_counters.last_number`, f.person.TenantID); err != nil {
+		t.Fatal(err)
+	}
+
+	mux := http.NewServeMux()
+	nodes.New(f.db.App, nil).Mount(mux)
+	moveCh := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		r := httptest.NewRequest(http.MethodPost, "/api/nodes/"+f.ticket+"/project-move", strings.NewReader(`{"project_id":"`+target+`"}`))
+		r = r.WithContext(tenant.WithPrincipal(context.Background(), f.person))
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, r)
+		moveCh <- w
+	}()
+	waitForLock(t, f, "%aeon_next_node_key%")
+
+	etaCh := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		etaCh <- f.call(f.agent, "POST", "/api/projects/"+f.project+"/harness-sessions/"+session+"/heartbeat", map[string]any{
+			"phase": "working", "activity": "busy", "activity_sequence": 2,
+			"eta_live_at": time.Now().Add(6 * time.Hour).UTC().Format(time.RFC3339),
+		}, lease)
+	}()
+	waitForLock(t, f, "%FOR SHARE OF n%")
+	if err = blocker.Commit(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	moved := <-moveCh
+	expect(t, moved, 200)
+	eta := <-etaCh
+	if eta.Code != 403 && eta.Code != 409 {
+		t.Fatalf("stale coordinator live ETA: %d %s", eta.Code, eta.Body.String())
+	}
+	if !strings.Contains(eta.Body.String(), "live ETA stays with the ticket's current project") {
+		t.Fatalf("unexpected refusal: %s", eta.Body.String())
+	}
+	var project string
+	var againLive, againReported time.Time
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		if err := tx.QueryRow(t.Context(), `SELECT project_id::text FROM nodes WHERE id=$1`, f.ticket).Scan(&project); err != nil {
+			return err
+		}
+		return tx.QueryRow(t.Context(), `SELECT eta_live_at, reported_at FROM ticket_live_eta WHERE node_id=$1`, f.ticket).Scan(&againLive, &againReported)
+	})
+	if project != target {
+		t.Fatalf("ticket project = %s, want %s", project, target)
+	}
+	if !againLive.Equal(live) || !againReported.Equal(reported) {
+		t.Fatalf("moved ticket live ETA changed to %s reported %s", againLive, againReported)
+	}
+}
+
+func waitForLock(t *testing.T, f *harnessFixture, queryLike string) {
+	t.Helper()
+	var waiting int
+	var err error
+	for range 300 {
+		err = f.db.Admin.QueryRow(t.Context(), `SELECT count(*) FROM pg_stat_activity WHERE datname=current_database() AND wait_event_type='Lock' AND query LIKE $1`, queryLike).Scan(&waiting)
+		if err != nil || waiting > 0 {
+			break
+		}
+		if _, err = f.db.Admin.Exec(t.Context(), `SELECT pg_sleep(0.01)`); err != nil {
+			break
+		}
+	}
+	if err != nil || waiting == 0 {
+		t.Fatalf("timed out waiting for lock %s: %d %v", queryLike, waiting, err)
 	}
 }
 

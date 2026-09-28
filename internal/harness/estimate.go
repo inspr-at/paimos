@@ -115,10 +115,14 @@ func applyEstimate(ctx context.Context, tx pgx.Tx, p tenant.Principal, s Session
 
 func assertTicketInProject(ctx context.Context, tx pgx.Tx, nodeID, projectID string) error {
 	var current string
+	// A project move locks this row FOR UPDATE before it changes parent_id.
+	// FOR SHARE waits for that lock, then reads the committed project, and stays
+	// held through the live ETA write so the move cannot commit in between.
 	err := tx.QueryRow(ctx, `SELECT coalesce(n.project_id::text,'')
 		FROM nodes n
 		JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
-		WHERE n.id=$1 AND n.deleted_at IS NULL AND k.slug IN ('ticket','task')`, nodeID).Scan(&current)
+		WHERE n.id=$1 AND n.deleted_at IS NULL AND k.slug IN ('ticket','task')
+		FOR SHARE OF n`, nodeID).Scan(&current)
 	if errors.Is(err, pgx.ErrNoRows) || (err == nil && current != projectID) {
 		return workorders.Fail(403, "live ETA stays with the ticket's current project")
 	}
