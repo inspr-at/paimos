@@ -66,12 +66,12 @@ func attachScope(ctx context.Context, tx pgx.Tx, tenantID, owner string, s attac
 		return fail(403, "forbidden", "owner delegation no longer valid")
 	}
 	var ok bool
-	err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM nodes p JOIN node_kinds k ON k.tenant_id=p.tenant_id AND k.id=p.kind_id JOIN nodes t ON t.tenant_id=p.tenant_id AND t.project_id=p.id WHERE p.id=$1 AND k.slug='project' AND p.deleted_at IS NULL AND t.id=$2 AND t.deleted_at IS NULL)`, s.ProjectID, s.TicketID).Scan(&ok)
+	err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM nodes p JOIN node_kinds k ON k.tenant_id=p.tenant_id AND k.id=p.kind_id JOIN nodes t ON t.tenant_id=p.tenant_id AND t.project_id=p.id WHERE p.id=$1 AND k.slug='project' AND p.deleted_at IS NULL AND t.id=$2 AND t.deleted_at IS NULL) AND EXISTS(SELECT 1 FROM agent_pairing_enrollments e JOIN agent_accounts a ON a.tenant_id=e.tenant_id AND a.id=e.account_id WHERE e.computer_id=$3 AND e.state='connected' AND a.harness=$4)`, s.ProjectID, s.TicketID, s.ComputerID, s.Harness).Scan(&ok)
 	if err != nil {
 		return err
 	}
 	if !ok {
-		return fail(409, "conflict", "project or ticket binding changed")
+		return fail(409, "conflict", "project, ticket or harness enrollment changed")
 	}
 	return nil
 }

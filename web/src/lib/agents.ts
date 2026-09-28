@@ -14,6 +14,7 @@ export interface MetadataChange {
   at: string
 }
 export interface HarnessSession {
+  watch?: import("./attachWatch").AttachStatus
   id: string; project_id: string; agent_principal_id: string
   archived_at?: string | null; recovery_process_state?: 'unknown' | null
   display_label?: string | null

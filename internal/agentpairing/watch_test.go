@@ -265,3 +265,14 @@ func TestAttachCannotRenewChangedSession(t *testing.T) {
 		})
 	}
 }
+
+func TestAttachEnrollmentRemovalEndsApproval(t *testing.T) {
+	f, key, in := watchFixture(t)
+	activateWatch(t, f, key, &in)
+	if _, err := f.db.Admin.Exec(t.Context(), `UPDATE agent_pairing_enrollments SET state='revoked' WHERE computer_id=$1`, in.ComputerID); err != nil {
+		t.Fatal(err)
+	}
+	in.Sequence++
+	f.call("POST", "/api/agent-pairing/attach", in, false, key, 409)
+	f.call("POST", "/api/agent-pairing/attach", in, false, key, 410)
+}

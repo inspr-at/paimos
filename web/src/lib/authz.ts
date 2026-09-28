@@ -108,3 +108,11 @@ export function myPermissions(projectId?: string): Set<string> {
   if (answer === undefined && !revoked) void refreshPermissions(projectId)
   return new Set([...(answer?.workspace.permissions ?? []), ...(answer?.project?.permissions ?? [])])
 }
+
+// The owner may explicitly grant conversation viewing without holding it.
+// Keep this separate from can()/myPermissions(): it never enables viewing.
+export function grantablePermissions(mine: Set<string>): Set<string> {
+  const grants = new Set(mine)
+  if (!permissionsRevoked() && myWorkspaceRole()?.key === 'owner') grants.add('harness.watch')
+  return grants
+}

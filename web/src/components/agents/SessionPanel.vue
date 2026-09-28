@@ -17,6 +17,7 @@ import AgentGlyph from './AgentGlyph.vue'
 import ProvenanceDetail from './ProvenanceDetail.vue'
 import SessionStateEvidence from './SessionStateEvidence.vue'
 import SessionRecovery from './SessionRecovery.vue'
+import LiveWatch from './LiveWatch.vue'
 import { activityOf, currentStep, type ActivitySession } from './activity'
 import { metadataChangeText, metadataChanges } from './metadataHistory'
 
@@ -102,7 +103,7 @@ watch(() => s.value?.id, async id => {
 onMounted(() => root.value?.focus({ preventScroll: true }))
 
 async function send() {
-  if (!s.value || !draft.value.trim() || sending.value || composeBlock.value) return
+  if (reported.value?.watch || !s.value || !draft.value.trim() || sending.value || composeBlock.value) return
   sending.value = true; sendError.value = ''
   try {
     await agents.send(s.value, address.value, draft.value.trim(), level.value, replyTo.value?.id)
@@ -136,12 +137,12 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
         <span class="harness">{{ view.harness }}</span>
         <span v-if="view.session.host" class="host-meta">on {{ view.session.host }}</span>
         <span class="spacer" />
-        <button v-if="address && canWrite" type="button" class="btn sm" @click="focusComposer"><AppIcon name="inbox" :size="14" />Message</button>
-        <template v-if="view.session.phase !== 'stopped'">
+        <button v-if="address && canWrite && !reported?.watch" type="button" class="btn sm" @click="focusComposer"><AppIcon name="inbox" :size="14" />Message</button>
+        <template v-if="view.session.phase !== 'stopped' && !reported?.watch">
           <button type="button" class="btn sm" :aria-disabled="!!controlBlock(view, 'interrupt')" :data-tip="controlBlock(view, 'interrupt') || 'Stop the current turn'" @click="control('interrupt')"><AppIcon name="interrupt" :size="14" />Interrupt</button>
           <button type="button" class="btn sm stop" :aria-disabled="!!controlBlock(view, 'stop')" :data-tip="controlBlock(view, 'stop') || 'End this session'" @click="control('stop')"><AppIcon name="halt" :size="14" />Stop</button>
         </template>
-        <SessionRecovery :session="view.session" />
+        <SessionRecovery v-if="!reported?.watch" :session="view.session" />
       </div>
       <p v-if="view && !loading" class="head-sub">
         <TicketPeekLink v-if="view.ticket" class="ticket-chip" :ticket-key="view.ticket.key" :href="view.ticket.href" :tip="view.ticket.title">{{ view.ticket.key }}</TicketPeekLink>
@@ -173,6 +174,8 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
         </div>
         <button type="button" class="btn sm primary" @click="emit('review', pending[0])">Review</button>
       </div>
+
+      <LiveWatch v-if="reported?.watch" :session="reported" />
 
       <section class="now-block" aria-labelledby="now-title">
         <h3 id="now-title" class="eyebrow">Now</h3>
@@ -260,7 +263,7 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
         </div>
       </section>
 
-      <section class="block" aria-labelledby="messages-title">
+      <section v-if="!reported?.watch" class="block" aria-labelledby="messages-title">
         <h3 id="messages-title" class="eyebrow">Shared inbox messages</h3>
         <p class="empty-line">Messages belong to this agent principal across sessions. Sender session ownership is not recorded.</p>
         <p v-if="!messages.length && address" class="empty-line">No messages yet. Use the composer to contact {{ view.name }}.</p>
@@ -285,7 +288,7 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
       </section>
     </div>
 
-    <footer v-if="view && !loading && address" class="composer">
+    <footer v-if="view && !loading && address && !reported?.watch" class="composer">
       <p v-if="composeBlock" class="compose-block"><AppIcon name="inbox" :size="13" />{{ composeBlock }}</p>
       <form v-else class="compose" @submit.prevent="send">
         <p v-if="replyTo" class="replying"><span>Replying to “{{ replyTo.body.slice(0, 80) }}{{ replyTo.body.length > 80 ? '…' : '' }}”</span><button type="button" class="icon-btn sm flat" aria-label="Cancel the reply" @click="replyTo = null"><AppIcon name="close" :size="12" /></button></p>

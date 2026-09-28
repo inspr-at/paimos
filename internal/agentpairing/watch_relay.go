@@ -11,6 +11,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/inspr-at/paimos/internal/attachwatch"
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/tenant"
@@ -103,7 +104,12 @@ func (m *Module) watchAllowed(ctx context.Context, p tenant.Principal, project, 
 		if !live {
 			return fail(410, "attach_ended", "watch unavailable or lease ended")
 		}
-		return nil
+		var snapshot attachwatch.Snapshot
+		var owner string
+		if err = tx.QueryRow(ctx, `SELECT snapshot,owner_id::text FROM harness_attach_requests WHERE session_id=$1`, session).Scan(&snapshot, &owner); err != nil {
+			return err
+		}
+		return attachScope(ctx, tx, p.TenantID, owner, snapshot)
 	})
 }
 func (m *Module) attachStream(w http.ResponseWriter, r *http.Request) {
