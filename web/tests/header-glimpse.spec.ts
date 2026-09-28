@@ -51,6 +51,52 @@ function sized(count: number, withLinks: boolean) {
   return world
 }
 
+// Eight open tickets, exactly one edge, six of them isolated. Work-list fields
+// stay in step so a Tickets filter can shrink that visible set.
+function eightWithOneEdge() {
+  const world = ticketGraphWorld()
+  const nodes = world.graph.nodes.slice(0, 8).map((node, index) => ({
+    ...node,
+    type: 'ticket' as const,
+    status: 'backlog',
+    status_category: 'open' as const,
+    priority: index === 7 ? 'medium' : 'high',
+  }))
+  for (const node of nodes) {
+    const work = world.work.nodes.find(item => item.id === node.id)
+    if (!work) throw new Error(`missing work node ${node.id}`)
+    work.kind_slug = 'ticket'
+    work.state = 'backlog'
+    work.fields = { ...work.fields, priority: node.priority }
+  }
+  world.graph.nodes = nodes
+  world.graph.links = [{ source: nodes[0].id, target: nodes[1].id, kind: 'relates' }]
+  return world
+}
+
+// Eight high-priority tickets with no edge between them, plus one edge that
+// only joins two low-priority tickets outside that filter.
+function eightUnlinkedWhenFiltered() {
+  const world = ticketGraphWorld()
+  const nodes = world.graph.nodes.slice(0, 10).map((node, index) => ({
+    ...node,
+    type: 'ticket' as const,
+    status: 'backlog',
+    status_category: 'open' as const,
+    priority: index < 8 ? 'high' : 'low',
+  }))
+  for (const node of nodes) {
+    const work = world.work.nodes.find(item => item.id === node.id)
+    if (!work) throw new Error(`missing work node ${node.id}`)
+    work.kind_slug = 'ticket'
+    work.state = 'backlog'
+    work.fields = { ...work.fields, priority: node.priority }
+  }
+  world.graph.nodes = nodes
+  world.graph.links = [{ source: nodes[8].id, target: nodes[9].id, kind: 'relates' }]
+  return world
+}
+
 test('a wide project with tickets and a link shows a labelless 60fps glimpse', async ({ page }) => {
   await mockTicketGraph(page)
   await page.goto('/p/PHAROS/tickets')
@@ -131,6 +177,41 @@ test('eight tickets without a link stay empty', async ({ page }) => {
   await page.goto('/p/PHAROS/tickets')
   await expect.poll(() => calls.length).toBeGreaterThan(0)
   await page.waitForTimeout(400)
+  await expect(page.locator('[data-header-glimpse="on"]')).toHaveCount(0)
+})
+
+test('eight visible tickets with exactly one edge show the glimpse', async ({ page }) => {
+  const world = eightWithOneEdge()
+  expect(world.graph.nodes).toHaveLength(8)
+  expect(world.graph.links).toHaveLength(1)
+  await mockTicketGraph(page, world)
+  await page.goto('/p/PHAROS/tickets')
+  await expect(page.locator('[data-header-glimpse="on"]')).toHaveAttribute('data-shown', '8', { timeout: 20_000 })
+})
+
+test('a priority filter that leaves seven of those tickets hides the glimpse', async ({ page }) => {
+  const { calls } = await mockTicketGraph(page, eightWithOneEdge())
+  await page.goto('/p/PHAROS/tickets')
+  await expect(page.locator('[data-header-glimpse="on"]')).toHaveAttribute('data-shown', '8', { timeout: 20_000 })
+  const before = calls.length
+  await page.goto('/p/PHAROS/tickets?priority=high')
+  await expect(page.getByRole('heading', { name: 'Pharos', exact: true })).toBeVisible()
+  await expect.poll(() => calls.length).toBeGreaterThan(before)
+  await page.waitForTimeout(500)
+  await expect(page.locator('[data-header-glimpse="off"]')).toBeAttached()
+  await expect(page.locator('[data-header-glimpse="on"]')).toHaveCount(0)
+})
+
+test('a priority filter that keeps eight tickets but no link hides the glimpse', async ({ page }) => {
+  const world = eightUnlinkedWhenFiltered()
+  expect(world.graph.nodes.filter(node => node.priority === 'high')).toHaveLength(8)
+  expect(world.graph.links).toHaveLength(1)
+  const { calls } = await mockTicketGraph(page, world)
+  await page.goto('/p/PHAROS/tickets?priority=high')
+  await expect(page.getByRole('heading', { name: 'Pharos', exact: true })).toBeVisible()
+  await expect.poll(() => calls.length).toBeGreaterThan(0)
+  await page.waitForTimeout(500)
+  await expect(page.locator('[data-header-glimpse="off"]')).toBeAttached()
   await expect(page.locator('[data-header-glimpse="on"]')).toHaveCount(0)
 })
 
