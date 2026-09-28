@@ -120,6 +120,11 @@ async function control(view: SessionView, kind: SessionControl['kind']) {
     toast(kind === 'stop' ? `Stop sent to ${view.name}.` : `Interrupt sent to ${view.name}.`)
   } catch (e) { toast(message(e), { tone: 'error' }) }
 }
+async function refreshAllowance() {
+  // A refresh already in flight may have started before this window existed.
+  await agents.loadAll()
+  await agents.loadAll()
+}
 async function setAccount(account: AgentAccount, state: AgentAccount['state']) {
   if (state === 'draining') {
     const ok = await confirmAction({ title: `Drain ${accountName(account)}?`, body: 'Running work finishes; no new runs start on this account until you resume it.', confirmLabel: 'Drain account' })
@@ -274,7 +279,7 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
         <ConnectedComputers v-if="agents.loaded" :permissions="pairingAccess" compact-empty />
         <details v-if="agents.loaded" class="accounts-disclosure">
           <summary class="accounts-summary"><AppIcon name="gauge" :size="15" /><span>Accounts and pacing</span><AppIcon class="disclosure-chev" name="chevron-right" :size="15" /></summary>
-          <AccountsCard :accounts="agents.accounts" :state="agents.accountsUpdatedAt !== null ? 'ready' : agents.accountsState" :now="agents.now" :admin="agents.accountsState === 'ready'" :set="setAccount" />
+          <AccountsCard :accounts="agents.accounts" :state="agents.accountsUpdatedAt !== null ? 'ready' : agents.accountsState" :now="agents.now" :admin="agents.accountsState === 'ready'" :set="setAccount" @allowance-created="refreshAllowance()" />
         </details>
         <RunQueue v-if="agents.loaded" />
         <p v-if="agents.loaded && (agents.sessions.length || agents.pending.length)" class="hint" aria-hidden="true">
