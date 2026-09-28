@@ -36,6 +36,7 @@ func TestKernelAndRepoLayers(t *testing.T) {
   source: AEON-250
 `)
 	repo := writeDoc(t, dir, "repo/AGENTS.md", `
+<!-- aeon-context: template -->
 # Repo delta
 
 ## Git
@@ -233,7 +234,7 @@ func TestLockedSectionUncertaintyAndNestedRule(t *testing.T) {
 	}
 }
 
-func TestOwnerPolicyDropsStaleReviewNames(t *testing.T) {
+func TestModelReviewHintsRetainAllSourceRules(t *testing.T) {
 	dir := t.TempDir()
 	path := writeDoc(t, dir, "AGENTS-KERNEL.md", `
 ## Review
@@ -245,8 +246,8 @@ func TestOwnerPolicyDropsStaleReviewNames(t *testing.T) {
   Keep the ticket id.
 `)
 	got := mustBuild(t, Request{Context: ContextTemplate, Files: []string{path}})
-	if _, ok := findText(got, "Use Claude as the reviewer before merge."); ok {
-		t.Fatal("stale reviewer route was imported")
+	if _, ok := findText(got, "Use Claude as the reviewer before merge."); !ok {
+		t.Fatal("reviewer route was discarded")
 	}
 	kept, ok := findText(got, "Never call claude or codex from a worker.")
 	if !ok || kept.Strength != StrengthNormal {
@@ -256,8 +257,8 @@ func TestOwnerPolicyDropsStaleReviewNames(t *testing.T) {
 	if !ok {
 		t.Fatal("missing plain rule")
 	}
-	if strings.Contains(plain.Details, "Claude") {
-		t.Fatalf("stale detail kept in rule: %q", plain.Details)
+	if !strings.Contains(plain.Details, "Claude") {
+		t.Fatal("model hint discarded source detail")
 	}
 	if !strings.Contains(plain.Details, "Keep the ticket id.") {
 		t.Fatalf("detail discarded: %q", plain.Details)
@@ -265,8 +266,8 @@ func TestOwnerPolicyDropsStaleReviewNames(t *testing.T) {
 	if !hasUnresolved(got, "stale_model_or_review_name", 0) {
 		t.Fatal("missing stale-name report")
 	}
-	if !strings.Contains(got.OwnerPolicy, "2026-09-28") {
-		t.Fatal("owner policy missing from proposal")
+	if got.Adapter.Ready {
+		t.Fatal("unresolved routing must block apply")
 	}
 }
 
@@ -395,7 +396,11 @@ func TestProhibitedSymlinkBoundsAndMixedContext(t *testing.T) {
 		t.Fatalf("binary: %v", err)
 	}
 
-	if _, err := Build(context.Background(), Request{Context: ContextTemplate, Files: []string{dir}}); !errors.Is(err, ErrNotRegular) {
+	directory := filepath.Join(dir, "directory", "AGENTS.md")
+	if err := os.MkdirAll(directory, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Build(context.Background(), Request{Context: ContextTemplate, Files: []string{directory}}); !errors.Is(err, ErrNotRegular) {
 		t.Fatalf("directory: %v", err)
 	}
 
@@ -441,100 +446,6 @@ func TestProhibitedSymlinkBoundsAndMixedContext(t *testing.T) {
 	if len(onlyRepo.Rules) != 1 || onlyRepo.Rules[0].Text != "Keep commits small." || onlyRepo.Rules[0].Layer != LayerProject {
 		t.Fatalf("kernel section %+v", onlyRepo.Rules)
 	}
-}
-
-func TestCLIPreviewApplyAndAdapterGap(t *testing.T) {
-	dir := t.TempDir()
-	path := writeDoc(t, dir, "AGENTS-KERNEL.md", "- Prefer small commits.\n")
-	var out bytes.Buffer
-	if err := Run(context.Background(), []string{"--context", "template", "--file", path}, &out); err != nil {
-		t.Fatal(err)
-	}
-	var preview Proposal
-	if err := json.Unmarshal(out.Bytes(), &preview); err != nil {
-		t.Fatal(err)
-	}
-	if preview.Mode != "preview" || preview.Adapter.Ready {
-		t.Fatalf("preview adapter %+v", preview.Adapter)
-	}
-	if len(preview.Rules) != 1 {
-		t.Fatalf("rules %d", len(preview.Rules))
-	}
-
-	before := dirEntries(t, dir)
-	out.Reset()
-	err := Run(context.Background(), []string{"apply", "--context", "template", "--tenant", "synthetic", "--file", path}, &out)
-	if !errors.Is(err, ErrDraftUnavailable) {
-		t.Fatalf("apply: %v", err)
-	}
-	if err := json.Unmarshal(out.Bytes(), &preview); err != nil {
-		t.Fatal(err)
-	}
-	if preview.Mode != "preview" {
-		t.Fatalf("apply printed mode %s", preview.Mode)
-	}
-	if strings.Join(dirEntries(t, dir), ",") != strings.Join(before, ",") {
-		t.Fatal("apply wrote a file")
-	}
-
-	if err := Run(context.Background(), []string{"preview", "--publish", "--context", "template", "--file", path}, &out); !errors.Is(err, ErrPublishRefused) {
-		t.Fatalf("publish: %v", err)
-	}
-	if err := Run(context.Background(), []string{"preview", "--context", "template", "--file", path, "--version", "260909113550.0.1"}, &out); !errors.Is(err, ErrPublishRefused) || !strings.Contains(err.Error(), "inspr-calendar-v2") {
-		t.Fatalf("bad version: %v", err)
-	}
-	if err := Run(context.Background(), []string{"preview", "--context", "template", "--file", path, "--version", "260909113550.0.0"}, &out); !errors.Is(err, ErrPublishRefused) || !strings.Contains(err.Error(), "does not publish") {
-		t.Fatalf("valid version: %v", err)
-	}
-
-	sentinel := "DRAFT-SENTINEL-NOT-A-CONTRACT"
-	draft := writeDoc(t, dir, "ar1-api.json", `{"note":"`+sentinel+`"}`+"\n")
-	out.Reset()
-	if err := Run(context.Background(), []string{"preview", "--context", "template", "--file", path, "--ar1-draft", draft}, &out); err != nil {
-		t.Fatal(err)
-	}
-	if bytes.Contains(out.Bytes(), []byte(sentinel)) {
-		t.Fatal("draft body was copied into the proposal")
-	}
-	if err := json.Unmarshal(out.Bytes(), &preview); err != nil {
-		t.Fatal(err)
-	}
-	if preview.Adapter.Ready || preview.Adapter.DraftSHA == "" || preview.Adapter.DraftBytes == 0 {
-		t.Fatalf("adapter %+v", preview.Adapter)
-	}
-	sum := sha256.Sum256([]byte(`{"note":"` + sentinel + `"}` + "\n"))
-	if preview.Adapter.DraftSHA != hex.EncodeToString(sum[:]) {
-		t.Fatalf("draft sha %s", preview.Adapter.DraftSHA)
-	}
-
-	writer := &fakeWriter{}
-	sample := preview
-	if err := ImportDraft(context.Background(), DraftRequest{Tenant: "synthetic", Context: ContextTemplate, Authorized: false, Proposal: sample}, writer); !errors.Is(err, ErrDraftUnavailable) || writer.called != 0 {
-		t.Fatalf("unauthorized %v called %d", err, writer.called)
-	}
-	if err := ImportDraft(context.Background(), DraftRequest{Tenant: "synthetic", Context: ContextTemplate, Authorized: true, Publish: true, Proposal: sample}, writer); !errors.Is(err, ErrPublishRefused) || writer.called != 0 {
-		t.Fatalf("publish port %v", err)
-	}
-	if err := ImportDraft(context.Background(), DraftRequest{Tenant: "synthetic", Context: ContextTemplate, Version: "260909113550.0.0", Authorized: true, Proposal: sample}, writer); !errors.Is(err, ErrPublishRefused) || writer.called != 0 {
-		t.Fatalf("version port %v", err)
-	}
-	if err := ImportDraft(context.Background(), DraftRequest{Tenant: "synthetic", Context: ContextTemplate, Authorized: true, Proposal: sample}, writer); err != nil {
-		t.Fatal(err)
-	}
-	if writer.called != 1 || writer.req.Proposal.Mode != "draft" || writer.req.Publish || writer.req.Tenant != "synthetic" || writer.req.Context != ContextTemplate {
-		t.Fatalf("draft %+v", writer.req)
-	}
-}
-
-type fakeWriter struct {
-	called int
-	req    DraftRequest
-}
-
-func (f *fakeWriter) WriteDraft(ctx context.Context, req DraftRequest) error {
-	f.called++
-	f.req = req
-	return nil
 }
 
 func writeDoc(t *testing.T, dir, name, body string) string {

@@ -94,7 +94,7 @@ func privatePath(path string) (TrustContext, bool) {
 func contextAllowed(plan, file TrustContext) bool {
 	switch plan {
 	case ContextTemplate:
-		return file == ContextTemplate || file == ContextProject
+		return file == ContextTemplate
 	case ContextPrivate:
 		return file == ContextPrivate || file == ContextProject
 	case ContextProject:
@@ -104,4 +104,46 @@ func contextAllowed(plan, file TrustContext) bool {
 	default:
 		return false
 	}
+}
+
+var privateMarker = regexp.MustCompile(`(?i)(private[ _-]+kernel|doctrine-private|personal[ _-]+(?:profile|details|working agreements)|AGENTS-PROFILE|\*\*(?:user|workspace|email|identity)\*\*\s*:)`)
+var personalMarker = regexp.MustCompile(`(?im)^#{1,6}\s+personal\b|[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}`)
+
+// A filename never establishes that generic instructions are public. The
+// explicit template annotation asserts intent, but cannot override private
+// markers anywhere in the complete file, even when selecting a subsection.
+func classifyContent(file *SourceFile, body, section string, plan TrustContext) error {
+	private := file.Trust == ContextPrivate || privateMarker.MatchString(body)
+	personal := file.Trust == ContextPerson || personalMarker.MatchString(body)
+	if plan == ContextTemplate && (private || personal) {
+		return fmt.Errorf("%w: private or personal markers prohibit public-template output; use an explicit local context", ErrMixedContext)
+	}
+	if private {
+		file.Trust = ContextPrivate
+		if section == SectionPersonal && plan == ContextPerson {
+			file.Trust = ContextPerson
+		}
+	} else if personal && section == SectionAll {
+		file.Trust = ContextPerson
+		if plan == ContextPrivate {
+			file.Trust = ContextPrivate
+		}
+	}
+	if file.Kind == "repo" || file.Kind == "claude" {
+		if plan == ContextTemplate {
+			if !strings.Contains(body, "<!-- aeon-context: template -->") {
+				return fmt.Errorf("%w: generic instructions need explicit local context or an aeon-context template annotation", ErrMixedContext)
+			}
+			file.Trust = ContextTemplate
+		} else if !private && !(personal && section == SectionAll) {
+			file.Trust = plan
+		}
+		// CLAUDE.md has no inherent company authority. Its explicit context sets
+		// the local proposal layer, just as for a repository AGENTS.md.
+		file.Layer = LayerProject
+		if plan == ContextPerson {
+			file.Layer = LayerPerson
+		}
+	}
+	return nil
 }

@@ -9,8 +9,6 @@ import (
 	"fmt"
 	"slices"
 	"strings"
-
-	"github.com/inspr-at/paimos/internal/releasehistory"
 )
 
 // Build reads the requested files and returns a local proposal.
@@ -48,15 +46,18 @@ func Build(ctx context.Context, in Request) (Proposal, error) {
 			return Proposal{}, fmt.Errorf("duplicate path %s", filepathBase(clean))
 		}
 		seenPath[clean] = true
-		body, sum, err := readDoctrine(clean)
+		body, sum, size, err := readDoctrine(clean)
 		if err != nil {
 			return Proposal{}, err
 		}
-		file, err := classify(clean, section, len(body))
+		file, err := classify(clean, section, size)
 		if err != nil {
 			return Proposal{}, err
 		}
 		file.SHA256 = sum
+		if err := classifyContent(&file, body, section, in.Context); err != nil {
+			return Proposal{}, err
+		}
 		if !contextAllowed(in.Context, file.Trust) {
 			return Proposal{}, fmt.Errorf("%w: %s is %s, plan context is %s", ErrMixedContext, file.Base, file.Trust, in.Context)
 		}
@@ -71,8 +72,11 @@ func Build(ctx context.Context, in Request) (Proposal, error) {
 		}
 	}
 	proposal := assemble(in.Context, section, files, raws, unresolved)
-	proposal.Adapter = adapterFromPath(in.AR1Draft)
 	proposal.PlanID = planID(proposal)
+	proposal.Adapter = AdapterReport{Ready: true, Reason: "AR1 draft mapping available; API authorization and explicit set/revision required"}
+	if _, err := MapDraft(proposal); err != nil {
+		proposal.Adapter = AdapterReport{Reason: err.Error()}
+	}
 	return proposal, nil
 }
 
@@ -104,23 +108,19 @@ func assemble(plan TrustContext, section string, files []SourceFile, raws []buil
 		return strings.Compare(a.Path, b.Path)
 	})
 	type fpGroup struct {
-		rule  Rule
-		order int
+		rule Rule
 	}
 	type identityGroup struct {
-		order int
-		fps   []string
-		byFP  map[string]*fpGroup
+		fps  []string
+		byFP map[string]*fpGroup
 	}
 	groups := map[string]*identityGroup{}
 	var order []string
-	seq := 0
 	for _, item := range raws {
 		rule := toRule(item)
-		seq++
 		ig := groups[rule.Identity]
 		if ig == nil {
-			ig = &identityGroup{order: seq, byFP: map[string]*fpGroup{}}
+			ig = &identityGroup{byFP: map[string]*fpGroup{}}
 			groups[rule.Identity] = ig
 			order = append(order, rule.Identity)
 		}
@@ -128,7 +128,7 @@ func assemble(plan TrustContext, section string, files []SourceFile, raws []buil
 		existing := ig.byFP[fp]
 		if existing == nil {
 			rule.Sources = []SourceRef{rule.Sources[0]}
-			ig.byFP[fp] = &fpGroup{rule: rule, order: seq}
+			ig.byFP[fp] = &fpGroup{rule: rule}
 			ig.fps = append(ig.fps, fp)
 			continue
 		}
@@ -247,7 +247,6 @@ func assemble(plan TrustContext, section string, files []SourceFile, raws []buil
 		Context:        plan,
 		Section:        section,
 		Mode:           "preview",
-		OwnerPolicy:    OwnerPolicy,
 		Files:          files,
 		Rules:          rules,
 		Contradictions: contradictions,
@@ -481,52 +480,4 @@ func mapKeys(in map[string]bool) []string {
 	}
 	slices.Sort(out)
 	return out
-}
-
-// ImportDraft asks an injected AR1 port for one tenant draft.
-// A false Authorized flag, a missing port, or any publish request fails closed.
-// The CLI never sets Authorized.
-func ImportDraft(ctx context.Context, req DraftRequest, w DraftWriter) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	if req.Publish {
-		return fmt.Errorf("%w: importer does not publish rules", ErrPublishRefused)
-	}
-	if req.Version != "" {
-		if !releasehistory.ValidVersion(req.Version) {
-			return fmt.Errorf("%w: publication coordinate is not inspr-calendar-v2", ErrPublishRefused)
-		}
-		return fmt.Errorf("%w: importer does not publish ruleset versions", ErrPublishRefused)
-	}
-	if !req.Authorized {
-		return fmt.Errorf("%w: caller is not authorized to write a draft", ErrDraftUnavailable)
-	}
-	if !validTenant(req.Tenant) {
-		return fmt.Errorf("%w: one tenant slug is required", ErrDraftUnavailable)
-	}
-	if !validContext(req.Context) {
-		return fmt.Errorf("%w: one trust context is required", ErrDraftUnavailable)
-	}
-	if w == nil {
-		return fmt.Errorf("%w: AR1 draft client is not registered", ErrDraftUnavailable)
-	}
-	req.Proposal.Mode = "draft"
-	req.Publish = false
-	return w.WriteDraft(ctx, req)
-}
-
-func validTenant(slug string) bool {
-	if slug == "" || len(slug) > 63 {
-		return false
-	}
-	for i, r := range slug {
-		switch {
-		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
-		case r == '-' && i > 0:
-		default:
-			return false
-		}
-	}
-	return true
 }

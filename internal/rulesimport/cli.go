@@ -5,104 +5,52 @@ package rulesimport
 import (
 	"context"
 	"encoding/json"
-	"flag"
-	"fmt"
 	"io"
-	"strings"
 
-	"github.com/inspr-at/paimos/internal/releasehistory"
+	"github.com/inspr-at/paimos/internal/client"
 )
 
-// Run is the standalone importer command. Preview is the default.
-// Registration in the shared aeon CLI belongs to AR1; this function does not edit it.
-// Apply never publishes and cannot authorize itself.
-func Run(ctx context.Context, args []string, stdout io.Writer) error {
-	for _, arg := range args {
-		if arg == "--publish" || arg == "publish" {
-			return fmt.Errorf("%w: importer does not publish rules", ErrPublishRefused)
-		}
-	}
-	cmd, rest := splitCommand(args)
-	if cmd == "" {
-		return usage()
-	}
-	fs := flag.NewFlagSet("rulesimport "+cmd, flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
-	var files stringList
-	contextFlag := fs.String("context", "", "trust context: template, private, project, or person")
-	section := fs.String("section", SectionAll, "section: all, personal, or kernel")
-	tenant := fs.String("tenant", "", "tenant slug, required for apply and ignored for the write")
-	version := fs.String("version", "", "refused publication coordinate")
-	draft := fs.String("ar1-draft", "", "optional explicit AR1 draft file; contents are not interpreted as a contract")
-	fs.Var(&files, "file", "explicit doctrine file (repeatable)")
-	if err := fs.Parse(rest); err != nil {
-		return usage()
-	}
-	if fs.NArg() != 0 {
-		return usage()
-	}
-	if *version != "" {
-		if !releasehistory.ValidVersion(*version) {
-			return fmt.Errorf("%w: publication coordinate is not inspr-calendar-v2", ErrPublishRefused)
-		}
-		return fmt.Errorf("%w: importer does not publish ruleset versions", ErrPublishRefused)
-	}
-	proposal, err := Build(ctx, Request{
-		Context:  TrustContext(*contextFlag),
-		Section:  *section,
-		Files:    append([]string(nil), files...),
-		AR1Draft: *draft,
-	})
+// Options default to a local preview. Apply is intent, never authorization.
+// The configured API client is obtained lazily, only after local checks pass.
+type Options struct {
+	Request Request
+	Apply   bool
+	Target  Target
+}
+
+// Run prints the complete local proposal before any API call, followed by a
+// draft receipt only on success. Failure keeps the preview available on stdout.
+// Template trust refusals print nothing, so private source text cannot escape
+// through a public-template error/report. Re-run with an explicit local context.
+func Run(ctx context.Context, options Options, stdout io.Writer, connect func() (*client.Client, error)) error {
+	p, err := Build(ctx, options.Request)
 	if err != nil {
 		return err
 	}
-	encoded, err := json.MarshalIndent(proposal, "", "  ")
-	if err != nil {
+	enc := json.NewEncoder(stdout)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(p); err != nil {
 		return err
 	}
-	if _, err := fmt.Fprintf(stdout, "%s\n", encoded); err != nil {
-		return err
-	}
-	if cmd == "preview" {
+	if !options.Apply {
 		return nil
 	}
-	if !validTenant(*tenant) {
-		return fmt.Errorf("%w: apply requires one tenant slug", ErrDraftUnavailable)
+	if _, err := MapDraft(p); err != nil {
+		return err
 	}
-	return ImportDraft(ctx, DraftRequest{
-		Tenant:     *tenant,
-		Context:    proposal.Context,
-		Authorized: false,
-		Proposal:   proposal,
-	}, nil)
-}
-
-func splitCommand(args []string) (string, []string) {
-	if len(args) == 0 {
-		return "", nil
+	if err := validateTarget(options.Target); err != nil {
+		return err
 	}
-	switch args[0] {
-	case "preview", "apply":
-		return args[0], args[1:]
-	case "-h", "--help", "help":
-		return "", nil
-	default:
-		if strings.HasPrefix(args[0], "-") {
-			return "preview", args
-		}
-		return "", nil
+	if connect == nil {
+		return draftRefusal("configured API client required")
 	}
-}
-
-func usage() error {
-	return fmt.Errorf("usage: rulesimport preview|apply --context template|private|project|person --file PATH [--file PATH...] [--section all|personal|kernel] [--tenant SLUG]")
-}
-
-type stringList []string
-
-func (s *stringList) String() string { return strings.Join(*s, ",") }
-
-func (s *stringList) Set(value string) error {
-	*s = append(*s, value)
-	return nil
+	c, err := connect()
+	if err != nil {
+		return draftRefusal("configured API client unavailable")
+	}
+	result, err := ApplyDraft(ctx, c, p, options.Target)
+	if err != nil {
+		return err
+	}
+	return enc.Encode(result)
 }

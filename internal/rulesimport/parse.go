@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"time"
 	"unicode"
 )
 
@@ -21,7 +22,6 @@ var (
 	detailsRE       = regexp.MustCompile(`(?i)^details:\s*(.*)$`)
 	rolesRE         = regexp.MustCompile(`(?i)^roles:\s*(.*)$`)
 	harnessRE       = regexp.MustCompile(`(?i)^harness(?:es)?:\s*(.*)$`)
-	expiresRE       = regexp.MustCompile(`(?i)^expires:\s*(\d{4}-\d{2}-\d{2})\s*$`)
 	expiresLooseRE  = regexp.MustCompile(`(?i)^expires:`)
 	sourceRE        = regexp.MustCompile(`(?i)^source:\s*([A-Z][A-Z0-9]{1,9}-[1-9][0-9]{0,6})\s*$`)
 	sourceLooseRE   = regexp.MustCompile(`(?i)^source:`)
@@ -45,7 +45,6 @@ type rawRule struct {
 	setTitle            string
 	layer               Layer
 	placement           string
-	excluded            bool
 	extraWhy            bool
 	stale               []taggedLine
 	badExpiry           []taggedLine
@@ -166,7 +165,9 @@ func (p *parser) scan() {
 			p.tables++
 			continue
 		}
-		p.prose++
+		if trim != "<!-- aeon-context: template -->" {
+			p.prose++
+		}
 	}
 	p.flush(len(p.lines))
 }
@@ -364,24 +365,30 @@ func (p *parser) continuation(n int, body string) {
 		return
 	}
 	if expiresLooseRE.MatchString(trim) {
-		if m := expiresRE.FindStringSubmatch(trim); m != nil && validDate(m[1]) {
-			p.current.expires = m[1]
+		value := strings.TrimSpace(strings.SplitN(trim, ":", 2)[1])
+		_, instantErr := time.Parse(time.RFC3339, value)
+		if p.current.expires != "" {
+			p.current.badExpiry = append(p.current.badExpiry, taggedLine{n: n, text: trim})
+			p.current.details = append(p.current.details, trim)
+		} else if instantErr == nil || validDate(value) {
+			p.current.expires = value
 		} else {
 			p.current.badExpiry = append(p.current.badExpiry, taggedLine{n: n, text: trim})
+			p.current.details = append(p.current.details, trim)
 		}
 		return
 	}
 	if sourceLooseRE.MatchString(trim) {
-		if m := sourceRE.FindStringSubmatch(trim); m != nil {
+		if m := sourceRE.FindStringSubmatch(trim); m != nil && p.current.source == "" {
 			p.current.source = m[1]
 		} else {
 			p.current.badSource = append(p.current.badSource, taggedLine{n: n, text: trim})
+			p.current.details = append(p.current.details, trim)
 		}
 		return
 	}
 	if staleModelRoute(trim) {
 		p.current.stale = append(p.current.stale, taggedLine{n: n, text: trim})
-		return
 	}
 	p.current.details = append(p.current.details, body)
 }
@@ -433,7 +440,7 @@ func (p *parser) flush(endHint int) {
 		return
 	}
 	if staleModelRoute(rule.text) {
-		rule.excluded = true
+		rule.stale = append(rule.stale, taggedLine{n: rule.start, text: rule.text})
 	}
 	p.rules = append(p.rules, rule)
 }
@@ -450,7 +457,7 @@ func (p *parser) keep(personal bool) bool {
 }
 
 func (p *parser) finish() (fileParse, error) {
-	if p.section == SectionAll && p.sawPersonal && p.sawOther {
+	if p.section == SectionAll && p.sawPersonal && p.sawOther && p.file.Trust != ContextPrivate {
 		return fileParse{}, fmt.Errorf("%w: %s contains person and other instructions", ErrMixedContext, p.file.Base)
 	}
 	if p.prose > 0 {
@@ -474,18 +481,11 @@ func (p *parser) finish() (fileParse, error) {
 			Note: fmt.Sprintf("%d code fences outside rules were not imported", p.fences),
 		})
 	}
+	if p.section == SectionAll && p.sawPersonal && p.sawOther {
+		p.unresolved = append(p.unresolved, Unresolved{Kind: "mixed_personal_context", Path: p.file.Path, Note: "personal and other rules retained locally; split scopes before applying"})
+	}
 	kept := 0
 	for _, rule := range p.rules {
-		if rule.excluded {
-			p.unresolved = append(p.unresolved, Unresolved{
-				Kind: "stale_model_or_review_name",
-				Path: p.file.Path,
-				Line: rule.start,
-				Note: OwnerPolicy,
-				Text: excerpt(rule.text),
-			})
-			continue
-		}
 		kept++
 		if rule.unspecifiedStrength {
 			p.unresolved = append(p.unresolved, Unresolved{
@@ -509,7 +509,7 @@ func (p *parser) finish() (fileParse, error) {
 				Kind: "stale_model_or_review_name",
 				Path: p.file.Path,
 				Line: line.n,
-				Note: OwnerPolicy,
+				Note: "model/review routing requires human resolution; source text is retained without applying precedence",
 				Text: excerpt(line.text),
 			})
 		}
@@ -518,7 +518,7 @@ func (p *parser) finish() (fileParse, error) {
 				Kind: "expiry_unparsed",
 				Path: p.file.Path,
 				Line: line.n,
-				Note: "expiry was not an explicit calendar date and was not guessed",
+				Note: "expiry is repeated or invalid; choose one explicit RFC3339 instant",
 				Text: excerpt(line.text),
 			})
 		}
@@ -527,7 +527,7 @@ func (p *parser) finish() (fileParse, error) {
 				Kind: "source_unparsed",
 				Path: p.file.Path,
 				Line: line.n,
-				Note: "source was not an explicit ticket key and was not guessed",
+				Note: "source is repeated or not an explicit ticket key; source text retained",
 				Text: excerpt(line.text),
 			})
 		}
@@ -546,13 +546,7 @@ func (p *parser) finish() (fileParse, error) {
 			Note: "no list rules were found",
 		})
 	}
-	var keptRules []rawRule
-	for _, rule := range p.rules {
-		if !rule.excluded {
-			keptRules = append(keptRules, rule)
-		}
-	}
-	return fileParse{rules: keptRules, unresolved: p.unresolved, lines: p.lines}, nil
+	return fileParse{rules: p.rules, unresolved: p.unresolved, lines: p.lines}, nil
 }
 
 func explicitLocked(text string) bool {

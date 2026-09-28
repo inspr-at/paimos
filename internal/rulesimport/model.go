@@ -2,10 +2,7 @@
 
 package rulesimport
 
-import (
-	"context"
-	"errors"
-)
+import "errors"
 
 const (
 	// AlwaysOnBudget is the UTF-8 byte ceiling for the always-on projection.
@@ -64,18 +61,15 @@ var (
 	ErrUnrecognizedFile = errors.New("unrecognized doctrine file")
 	ErrDraftUnavailable = errors.New("draft write unavailable")
 	ErrPublishRefused   = errors.New("publication refused")
+	ErrDraftConflict    = errors.New("draft conflict; local proposal retained")
+	ErrUnsupported      = errors.New("safe doctrine reads unsupported on this platform")
 )
-
-// OwnerPolicy is the direct owner instruction that wins over model and review
-// names copied into source doctrine. It is a report label, not a company rule write.
-const OwnerPolicy = "Direct owner policy of 2026-09-28 wins over stale model and review names in source documents. Reviewer selection stays in the model registry. This importer reports those names and does not import them as rules."
 
 // Request is one explicit import. Paths are the only inputs; nothing is discovered.
 type Request struct {
-	Context  TrustContext
-	Section  string
-	Files    []string
-	AR1Draft string
+	Context TrustContext
+	Section string
+	Files   []string
 }
 
 // SourceFile is the stable identity of one supplied file.
@@ -91,7 +85,8 @@ type SourceFile struct {
 	Bytes     int          `json:"bytes"`
 }
 
-// SourceRef is the lineage of one rule inside a file.
+// SourceRef identifies normalized parsing lines (BOM removed, CR/CRLF to LF).
+// FileSHA256 always identifies the exact raw file bytes, including BOM/newlines.
 type SourceRef struct {
 	Path       string `json:"path"`
 	StartLine  int    `json:"start_line"`
@@ -165,23 +160,18 @@ type AlwaysOnReport struct {
 	Explanation string `json:"explanation"`
 }
 
-// AdapterGap is the unimplemented AR1 draft mapping. Ready stays false until
-// a frozen DTO is actually mapped; this package does not invent endpoints.
-type AdapterGap struct {
-	Ready      bool     `json:"ready"`
-	Reason     string   `json:"reason"`
-	Expected   []string `json:"expected"`
-	DraftSHA   string   `json:"draft_sha256,omitempty"`
-	DraftBytes int      `json:"draft_bytes,omitempty"`
+// AdapterReport records local representability; Ready is never authorization.
+type AdapterReport struct {
+	Ready  bool   `json:"ready"`
+	Reason string `json:"reason"`
 }
 
-// Proposal is a local preview. Mode is preview until an authorized draft port accepts it.
+// Proposal is the immutable local preview; successful writes produce a separate receipt.
 type Proposal struct {
 	PlanID         string           `json:"plan_id"`
 	Context        TrustContext     `json:"context"`
 	Section        string           `json:"section"`
 	Mode           string           `json:"mode"`
-	OwnerPolicy    string           `json:"owner_policy"`
 	Files          []SourceFile     `json:"files"`
 	Rules          []Rule           `json:"rules"`
 	Contradictions []Contradiction  `json:"contradictions"`
@@ -189,20 +179,5 @@ type Proposal struct {
 	Heuristics     []HeuristicMatch `json:"heuristics"`
 	Unresolved     []Unresolved     `json:"unresolved"`
 	AlwaysOn       AlwaysOnReport   `json:"always_on"`
-	Adapter        AdapterGap       `json:"adapter"`
-}
-
-// DraftRequest is the only write this package can ask for. Publish is refused.
-type DraftRequest struct {
-	Tenant     string
-	Context    TrustContext
-	Version    string
-	Publish    bool
-	Authorized bool
-	Proposal   Proposal
-}
-
-// DraftWriter is the AR1 draft port. The CLI does not supply one.
-type DraftWriter interface {
-	WriteDraft(ctx context.Context, req DraftRequest) error
+	Adapter        AdapterReport    `json:"adapter"`
 }
