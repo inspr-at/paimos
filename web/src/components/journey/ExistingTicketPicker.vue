@@ -10,6 +10,7 @@ import {
 } from '../../lib/releaseMembership'
 import { highlight, kindLabel, plural, statusMeta, statusOptions } from '../../lib/work'
 import AppIcon from '../AppIcon.vue'
+import KeyCap from '../KeyCap.vue'
 import StatusIcon from '../work/StatusIcon.vue'
 
 // Add tickets that already exist into this planning release. Search is by key or
@@ -195,7 +196,7 @@ function backdrop(event: MouseEvent) { if (event.target === dialog.value) close(
       </div>
       <p v-if="note" class="note error" role="alert">{{ note }}</p>
       <footer>
-        <p class="hint"><span class="mono">{{ picked.length }}</span> selected<span v-if="addableCount"> · {{ addableCount }} can be added</span> · <kbd class="keycap">↑</kbd><kbd class="keycap">↓</kbd> move · <kbd class="keycap">enter</kbd> select</p>
+        <p class="hint"><span class="mono">{{ picked.length }}</span> selected<span v-if="addableCount"> · {{ addableCount }} can be added</span> · <KeyCap k="up" /><KeyCap k="down" /> move · <KeyCap k="enter" /> select</p>
         <div class="actions">
           <button v-if="addableCount" type="button" class="btn sm ghost" @click="selectAddable">Select addable</button>
           <button type="button" class="btn" @click="close">Cancel</button>

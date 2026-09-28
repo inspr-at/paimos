@@ -9,6 +9,7 @@ import {
 } from '../../lib/agentPairing'
 import { onAccessChange } from '../../lib/authz'
 import { harnessLabel } from '../../lib/agentState'
+import { brand } from '../../lib/brand'
 import { usePoller } from '../../lib/usePolledData'
 import HarnessMark from './HarnessMark.vue'
 
@@ -183,7 +184,7 @@ function assign(error: unknown, fallback: string) {
     <header class="head">
       <div>
         <h2 id="computers-title">Connected computers</h2>
-        <p>Computers paired with Aeon in this workspace.</p>
+        <p>Computers paired with {{ brand.short_name }} in this workspace.</p>
       </div>
       <div class="head-actions">
         <button v-if="permissions.canListComputers" type="button" class="btn sm" :disabled="refreshing" @click="load"><AppIcon name="refresh" :size="14" />{{ refreshing ? 'Refreshing…' : 'Refresh' }}</button>
@@ -229,7 +230,7 @@ function assign(error: unknown, fallback: string) {
               <span v-if="enrollment.verification_error && enrollment.verification_error !== 'verification_unavailable'">{{ enrollment.verification_error }}</span>
               <span v-if="enrollment.local_processes">Local processes {{ enrollment.local_processes }}</span>
               <span v-if="enrollment.accounting_state === 'unconfirmed'">Accounting unconfirmed</span>
-              <button v-if="canChange(computer) && enrollment.state !== 'revoked'" type="button" class="btn sm" @click="openDialog(computer, 'enrollment', enrollment.account_id)">Remove {{ enrollment.label }} from Aeon</button>
+              <button v-if="canChange(computer) && enrollment.state !== 'revoked'" type="button" class="btn sm" @click="openDialog(computer, 'enrollment', enrollment.account_id)">Remove {{ enrollment.label }} from {{ brand.short_name }}</button>
             </li>
           </ul>
         </div>
