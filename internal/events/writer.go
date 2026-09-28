@@ -44,6 +44,16 @@ func (Writer) Append(ctx context.Context, tx pgx.Tx, p tenant.Principal, c Chang
 	return Append(ctx, tx, p, c)
 }
 
+// MutationGuard inspects one change before it is inserted. The nodes package
+// registers the portal catalog check so every later writer is covered. A
+// non-nil error aborts the caller's transaction.
+type MutationGuard func(context.Context, pgx.Tx, tenant.Principal, Change) error
+
+var mutationGuard MutationGuard
+
+// SetMutationGuard installs the process-wide check. Nil leaves Append unchanged.
+func SetMutationGuard(fn MutationGuard) { mutationGuard = fn }
+
 // Append writes in the caller's db.InTenant transaction; it never commits it.
 func Append(ctx context.Context, tx pgx.Tx, p tenant.Principal, c Change) (Event, error) {
 	before, err := snapshot(c.Before)
@@ -60,6 +70,11 @@ func Append(ctx context.Context, tx pgx.Tx, p tenant.Principal, c Change) (Event
 	}
 	if before == nil && after == nil {
 		return Event{}, fmt.Errorf("event requires a snapshot")
+	}
+	if mutationGuard != nil {
+		if err := mutationGuard(ctx, tx, p, c); err != nil {
+			return Event{}, err
+		}
 	}
 	return scanEvent(tx.QueryRow(ctx, `INSERT INTO events
 	  (tenant_id, actor_principal_id, node_id, type, before, after, at, undo_of)

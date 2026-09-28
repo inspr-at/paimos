@@ -5,10 +5,13 @@ package nodes
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"net/http"
 
 	"github.com/jackc/pgx/v5"
 
 	"github.com/inspr-at/paimos/internal/principallink"
+	"github.com/inspr-at/paimos/internal/tenant"
 )
 
 const (
@@ -80,6 +83,12 @@ func (m *Module) writeEvent(ctx context.Context, tx pgx.Tx, e Event) error {
 		return err
 	}
 	e.ActorPrincipalID = canonical
+	if err := authorizePortalChange(ctx, tx, tenant.Principal{ID: canonical, TenantID: tenantID}, e.NodeID, e.Type, e.Before, e.After); err != nil {
+		if errors.Is(err, errPortalDenied) {
+			return &httpError{status: http.StatusForbidden, msg: "permission denied"}
+		}
+		return err
+	}
 	if err := m.events.WriteEvent(ctx, tx, e); err != nil {
 		return err
 	}

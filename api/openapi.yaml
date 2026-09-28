@@ -1378,7 +1378,7 @@ paths:
       operationId: createNode
       description: |
         Allocate a tenant-scoped key, or preserve a supplied import key.
-        Creating a portal_product, portal_feature or portal_wish in a state other than open, or with live_since, legal_basis or decline_reason, requires a person with settings.manage. Agents are refused.
+        Any create of a portal_product, portal_feature or portal_wish, and any create that places a node under a portal parent, requires a person with settings.manage. Agents are refused.
       security: *auth
       requestBody:
         $ref: '#/components/requestBodies/NodeCreate'
@@ -1432,8 +1432,8 @@ paths:
         answers 409 and changes nothing when any of them changed since. A node that
         cannot take the change (not found, another project, a kind rule, a cycle) is
         listed under skipped with a reason; nodes already so are listed as unchanged.
-        Setting state, or changing live_since, legal_basis or decline_reason, on a
-        portal_product, portal_feature or portal_wish requires a person with
+        Any change to a portal_product, portal_feature or portal_wish, and any
+        reparent into or out of a portal parent, requires a person with
         settings.manage. Agents are refused, and the batch changes nothing.
         Undoing that batch has the same requirement.
       security: *auth
@@ -1564,7 +1564,7 @@ paths:
         updated_at value while holding the node row lock in the write transaction.
         A stale value returns 412 without changing the node or appending an event.
         Omission preserves unconditional patch behavior.
-        State, and live_since, legal_basis or decline_reason, on a portal_product, portal_feature or portal_wish require a person with settings.manage. Agents are refused.
+        Any change to a portal_product, portal_feature or portal_wish requires a person with settings.manage. Agents are refused.
       parameters:
         - name: If-Unmodified-Since
           in: header
@@ -1588,11 +1588,13 @@ paths:
           $ref: '#/components/responses/Error'
     delete:
       operationId: deleteNode
-      description: Soft-delete; reject while live children remain. Tags use DELETE /tags/{tagId} so assignments are removed atomically.
+      description: Soft-delete; reject while live children remain. Tags use DELETE /tags/{tagId} so assignments are removed atomically. Deleting a portal_product, portal_feature or portal_wish requires a person with settings.manage. Agents are refused.
       security: *auth
       responses:
         '204':
           description: Deleted
+        '403':
+          $ref: '#/components/responses/Error'
         '404':
           $ref: '#/components/responses/Error'
         '409':
@@ -1744,6 +1746,7 @@ paths:
         appending an event. Each successful move advances updated_at to at least
         the next second so competing moves cannot reuse the same precondition.
         Omission preserves unconditional move behavior.
+        Moving a portal_product, portal_feature or portal_wish, or moving any node into or out of a portal parent, requires a person with settings.manage. Agents are refused.
       parameters:
         - name: If-Unmodified-Since
           in: header
@@ -1756,6 +1759,8 @@ paths:
         '200':
           $ref: '#/components/responses/Node'
         '400':
+          $ref: '#/components/responses/Error'
+        '403':
           $ref: '#/components/responses/Error'
         '404':
           $ref: '#/components/responses/Error'
@@ -1785,7 +1790,7 @@ paths:
     parameters: [{$ref: '#/components/parameters/NodeId'}]
     post:
       operationId: moveNodeProject
-      description: Atomically move an issue under a target project, assign its next project key, retain all former keys as aliases, and append an undoable node.project_moved event. Issues with child nodes or feature projections cannot move.
+      description: Atomically move an issue under a target project, assign its next project key, retain all former keys as aliases, and append an undoable node.project_moved event. Issues with child nodes or feature projections cannot move. Moving a portal_product, portal_feature or portal_wish, or moving any node into or out of a portal parent, requires a person with settings.manage. Agents are refused.
       security: *auth
       requestBody:
         required: true
@@ -1813,6 +1818,7 @@ paths:
                   detached: {type: array, items: {type: string}}
                   notes: {type: array, items: {type: string}}
         '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
         '409': {$ref: '#/components/responses/Error'}
   /tickets/graph:
@@ -1865,6 +1871,7 @@ paths:
         A 409 message reads as words and names items by key, so clients can show it as it stands: an identical
         link that already exists, or a blocks, implements or duplicates link that would close a loop through
         live items (the message spells out the chain). A link from an item to itself is a 400.
+        A relation touching a portal_product, portal_feature or portal_wish requires a person with settings.manage. Agents are refused.
       security: *auth
       requestBody:
         $ref: '#/components/requestBodies/RelationCreate'
@@ -1872,6 +1879,8 @@ paths:
         '201':
           $ref: '#/components/responses/Relation'
         '400':
+          $ref: '#/components/responses/Error'
+        '403':
           $ref: '#/components/responses/Error'
         '404':
           $ref: '#/components/responses/Error'
@@ -1881,10 +1890,13 @@ paths:
     parameters: [{$ref: '#/components/parameters/RelationId'}]
     delete:
       operationId: deleteRelation
+      description: A relation touching a portal_product, portal_feature or portal_wish requires a person with settings.manage. Agents are refused.
       security: *auth
       responses:
         '204':
           description: Deleted
+        '403':
+          $ref: '#/components/responses/Error'
         '404':
           $ref: '#/components/responses/Error'
   /events:
@@ -1921,7 +1933,7 @@ paths:
     parameters: [{$ref: '#/components/parameters/EventId'}]
     post:
       operationId: undoEvent
-      description: Append one compensating event and restore the prior resource snapshot atomically. Only reversible events can be undone; an event can be undone once.
+      description: Append one compensating event and restore the prior resource snapshot atomically. Only reversible events can be undone; an event can be undone once. Undoing a change to a portal_product, portal_feature or portal_wish, or a move into or out of a portal parent, requires a person with settings.manage. Agents are refused.
       security: *auth
       responses:
         '201':

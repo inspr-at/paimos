@@ -323,9 +323,6 @@ func (m *Module) applyBulk(ctx context.Context, p tenant.Principal, plan bulkPla
 			}
 			parentAllowed = kind.AllowedChildKinds
 		}
-		if err := guardBulkPortalPublication(ctx, tx, p, plan, targets); err != nil {
-			return err
-		}
 		found := map[string]bool{}
 		var before, after []bulkSnap
 		for _, target := range targets {
@@ -577,14 +574,6 @@ func undoBulk(ctx context.Context, tx pgx.Tx, p tenant.Principal, e events.Event
 			return events.Change{}, events.ErrConflict
 		}
 		if old.State != now.State || !sameJSON(old.Fields, now.Fields) {
-			if portalKind(kinds[now.ID]) && (old.State != now.State || publicationChanged(now.Fields, old.Fields)) {
-				if err := portalModerator(ctx, tx, p); err != nil {
-					if errors.Is(err, authz.ErrForbidden) {
-						return events.Change{}, events.ErrForbidden
-					}
-					return events.Change{}, err
-				}
-			}
 			if err := authz.RequireInProjects(ctx, tx, p, "nodes.write", projects[now.ID]); err != nil {
 				return events.Change{}, events.ErrForbidden
 			}

@@ -6,20 +6,28 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"net/http"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 
 	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
 
-// Portal catalog status is a workspace decision. Generic node create, patch,
-// and bulk can still change other work with nodes.write, but state and the
-// public feature fields on portal kinds need a person with settings.manage.
-// An agent is refused even when its scopes name that permission.
+// Portal catalog rows are a workspace decision. One check covers every write
+// that records an event: create, patch, move, bulk, delete, undo, apply,
+// import, and relations. A person with settings.manage passes. Everyone else
+// is refused, including an agent whose scopes name that permission.
+//
+// Public intake and voting append their own event types and do not go through
+// the node API. Comments and attachments do not change the catalog row.
 
-var portalPublicationKeys = []string{"live_since", "legal_basis", "decline_reason"}
+func init() {
+	events.SetMutationGuard(guardAppendedMutation)
+}
+
+var errPortalDenied = errors.New("portal moderation required")
 
 func portalKind(slug string) bool {
 	switch slug {
@@ -37,101 +45,309 @@ func portalModerator(ctx context.Context, tx pgx.Tx, p tenant.Principal) error {
 	return authz.RequireTx(ctx, tx, p, "settings.manage", authz.Scope{})
 }
 
-func denyUnlessPortalModerator(ctx context.Context, tx pgx.Tx, p tenant.Principal) error {
-	err := portalModerator(ctx, tx, p)
-	if err == nil {
-		return nil
+func portalPublicEvent(eventType string) bool {
+	switch eventType {
+	case "portal.wish_submitted", "portal.vote_cast":
+		return true
+	default:
+		return strings.HasPrefix(eventType, "comment.") || strings.HasPrefix(eventType, "attachment.")
 	}
-	if errors.Is(err, authz.ErrForbidden) {
-		return &httpError{status: http.StatusForbidden, msg: "permission denied"}
+}
+
+func relationEvent(eventType string) bool {
+	switch eventType {
+	case "relation.created", "relation.deleted", "relation.undone", "import.relation":
+		return true
+	default:
+		return false
+	}
+}
+
+func guardAppendedMutation(ctx context.Context, tx pgx.Tx, p tenant.Principal, c events.Change) error {
+	before, err := snapshot(c.Before)
+	if err != nil {
+		return err
+	}
+	after, err := snapshot(c.After)
+	if err != nil {
+		return err
+	}
+	err = authorizePortalChange(ctx, tx, p, c.NodeID, c.Type, before, after)
+	if errors.Is(err, errPortalDenied) {
+		return events.ErrForbidden
 	}
 	return err
 }
 
-func portalPublicationCreate(slug, state string, fields json.RawMessage) bool {
-	if !portalKind(slug) {
-		return false
+func authorizePortalChange(ctx context.Context, tx pgx.Tx, p tenant.Principal, nodeID *string, eventType string, before, after json.RawMessage) error {
+	needs, err := portalChangeNeedsModerator(ctx, tx, nodeID, eventType, before, after)
+	if err != nil || !needs {
+		return err
 	}
-	if state != "open" {
-		return true
-	}
-	return publicationKeysTouched(nil, fields)
-}
-
-func portalStatusWrite(slug string, current json.RawMessage, raw map[string]json.RawMessage) bool {
-	if !portalKind(slug) {
-		return false
-	}
-	if _, ok := raw["state"]; ok {
-		return true
-	}
-	next, ok := raw["fields"]
-	if !ok {
-		return false
-	}
-	return publicationKeysTouched(current, next)
-}
-
-func publicationChanged(current, next json.RawMessage) bool {
-	return publicationKeysTouched(current, next)
-}
-
-func publicationKeysTouched(current, next json.RawMessage) bool {
-	before, beforeOK := publicationFieldMap(current)
-	after, afterOK := publicationFieldMap(next)
-	if !beforeOK || !afterOK {
-		return true
-	}
-	if len(before) != len(after) {
-		return true
-	}
-	for key, value := range before {
-		if after[key] != value {
-			return true
+	actor, err := principalForPortal(ctx, tx, p)
+	if err != nil {
+		if errors.Is(err, errPortalDenied) || errors.Is(err, pgx.ErrNoRows) {
+			return errPortalDenied
 		}
+		return err
 	}
-	return false
-}
-
-func publicationFieldMap(raw json.RawMessage) (map[string]string, bool) {
-	out := map[string]string{}
-	if len(raw) == 0 || string(raw) == "null" {
-		return out, true
-	}
-	var obj map[string]any
-	if json.Unmarshal(raw, &obj) != nil || obj == nil {
-		return nil, false
-	}
-	for _, key := range portalPublicationKeys {
-		value, ok := obj[key]
-		if !ok || value == nil {
-			continue
+	if err := portalModerator(ctx, tx, actor); err != nil {
+		if errors.Is(err, authz.ErrForbidden) {
+			return errPortalDenied
 		}
-		text, ok := value.(string)
-		if !ok {
-			return nil, false
-		}
-		out[key] = text
-	}
-	return out, true
-}
-
-func guardBulkPortalPublication(ctx context.Context, tx pgx.Tx, p tenant.Principal, plan bulkPlan, targets []bulkTarget) error {
-	for _, target := range targets {
-		if !portalKind(target.kindSlug) {
-			continue
-		}
-		stateChange := plan.state != nil && target.node.State != *plan.state
-		fieldChange := false
-		if plan.changesFields() {
-			next, err := nextFields(target.node.Fields, plan)
-			if err != nil || publicationChanged(target.node.Fields, next) {
-				fieldChange = true
-			}
-		}
-		if stateChange || fieldChange {
-			return denyUnlessPortalModerator(ctx, tx, p)
-		}
+		return err
 	}
 	return nil
+}
+
+// principalForPortal is the requester when the event row only stored an id.
+// An empty kind must not be treated as a person: agents stay agents.
+func principalForPortal(ctx context.Context, tx pgx.Tx, p tenant.Principal) (tenant.Principal, error) {
+	if p.Kind != tenant.Person && p.Kind != tenant.Agent {
+		if from, ok := tenant.PrincipalFrom(ctx); ok && (from.Kind == tenant.Person || from.Kind == tenant.Agent) {
+			if from.TenantID == "" {
+				from.TenantID = p.TenantID
+			}
+			p = from
+		}
+	}
+	if p.Kind == tenant.Person || p.Kind == tenant.Agent {
+		if p.TenantID == "" {
+			if err := tx.QueryRow(ctx, `SELECT current_setting('aeon.tenant_id')`).Scan(&p.TenantID); err != nil {
+				return tenant.Principal{}, err
+			}
+		}
+		return p, nil
+	}
+	if _, ok := parseUUID(p.ID); !ok {
+		return tenant.Principal{}, errPortalDenied
+	}
+	var kind string
+	err := tx.QueryRow(ctx, `SELECT current_setting('aeon.tenant_id'), kind FROM principals WHERE id = $1::uuid`, p.ID).Scan(&p.TenantID, &kind)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return tenant.Principal{}, errPortalDenied
+	}
+	if err != nil {
+		return tenant.Principal{}, err
+	}
+	p.Kind = tenant.PrincipalKind(kind)
+	return p, nil
+}
+
+func portalChangeNeedsModerator(ctx context.Context, tx pgx.Tx, nodeID *string, eventType string, before, after json.RawMessage) (bool, error) {
+	if portalPublicEvent(eventType) {
+		return false, nil
+	}
+	beforeParents := map[string]*string{}
+	afterParents := map[string]*string{}
+	collectNodeParents(before, beforeParents)
+	collectNodeParents(after, afterParents)
+
+	ids := map[string]struct{}{}
+	add := func(id string) {
+		if norm, ok := parseUUID(id); ok {
+			ids[norm] = struct{}{}
+		}
+	}
+	if nodeID != nil {
+		add(*nodeID)
+	}
+	for id := range beforeParents {
+		add(id)
+	}
+	for id := range afterParents {
+		add(id)
+	}
+	var source, target string
+	if relationEvent(eventType) {
+		source, target = relationEndpoint(before, after)
+		add(source)
+		add(target)
+	}
+	moved := changedParentIDs(beforeParents, afterParents)
+	for _, id := range moved {
+		add(id)
+	}
+	if len(ids) == 0 {
+		return false, nil
+	}
+	slugs, err := portalKindSlugs(ctx, tx, mapKeys(ids))
+	if err != nil {
+		return false, err
+	}
+	isPortal := func(id string) bool {
+		norm, ok := parseUUID(id)
+		return ok && portalKind(slugs[norm])
+	}
+	if nodeID != nil && isPortal(*nodeID) {
+		return true, nil
+	}
+	for id := range beforeParents {
+		if isPortal(id) {
+			return true, nil
+		}
+	}
+	for id := range afterParents {
+		if isPortal(id) {
+			return true, nil
+		}
+	}
+	if isPortal(source) || isPortal(target) {
+		return true, nil
+	}
+	for _, id := range moved {
+		if isPortal(id) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func changedParentIDs(before, after map[string]*string) []string {
+	keys := map[string]struct{}{}
+	for id := range before {
+		keys[id] = struct{}{}
+	}
+	for id := range after {
+		keys[id] = struct{}{}
+	}
+	var out []string
+	seen := map[string]struct{}{}
+	add := func(id *string) {
+		if id == nil {
+			return
+		}
+		if _, ok := seen[*id]; ok {
+			return
+		}
+		seen[*id] = struct{}{}
+		out = append(out, *id)
+	}
+	for id := range keys {
+		old, hadOld := before[id]
+		next, hadNew := after[id]
+		if hadOld && hadNew && sameString(old, next) {
+			continue
+		}
+		add(old)
+		add(next)
+	}
+	return out
+}
+
+func collectNodeParents(raw json.RawMessage, into map[string]*string) {
+	obj := jsonObject(raw)
+	if obj == nil {
+		return
+	}
+	addNodeParent(obj, into)
+	if nested := jsonObject(obj["node"]); nested != nil {
+		addNodeParent(nested, into)
+	}
+	var items []json.RawMessage
+	if json.Unmarshal(obj["items"], &items) != nil {
+		return
+	}
+	for _, item := range items {
+		if nested := jsonObject(item); nested != nil {
+			addNodeParent(nested, into)
+		}
+	}
+}
+
+func addNodeParent(obj map[string]json.RawMessage, into map[string]*string) {
+	id, ok := jsonUUID(obj["id"])
+	if !ok {
+		return
+	}
+	parent, present := jsonParent(obj["parent_id"])
+	if !present {
+		return
+	}
+	into[id] = parent
+}
+
+func relationEndpoint(before, after json.RawMessage) (string, string) {
+	for _, raw := range []json.RawMessage{after, before} {
+		obj := jsonObject(raw)
+		if obj == nil {
+			continue
+		}
+		source, sourceOK := jsonUUID(obj["source_node_id"])
+		target, targetOK := jsonUUID(obj["target_node_id"])
+		if sourceOK || targetOK {
+			return source, target
+		}
+	}
+	return "", ""
+}
+
+func jsonObject(raw json.RawMessage) map[string]json.RawMessage {
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil
+	}
+	var obj map[string]json.RawMessage
+	if json.Unmarshal(raw, &obj) != nil {
+		return nil
+	}
+	return obj
+}
+
+func jsonUUID(raw json.RawMessage) (string, bool) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return "", false
+	}
+	var s string
+	if json.Unmarshal(raw, &s) != nil {
+		return "", false
+	}
+	return parseUUID(s)
+}
+
+func jsonParent(raw json.RawMessage) (*string, bool) {
+	if len(raw) == 0 {
+		return nil, false
+	}
+	if string(raw) == "null" {
+		return nil, true
+	}
+	id, ok := jsonUUID(raw)
+	if !ok {
+		return nil, false
+	}
+	return &id, true
+}
+
+func portalKindSlugs(ctx context.Context, tx pgx.Tx, ids []string) (map[string]string, error) {
+	out := map[string]string{}
+	if len(ids) == 0 {
+		return out, nil
+	}
+	rows, err := tx.Query(ctx, `
+		SELECT n.id::text, k.slug
+		FROM nodes n
+		JOIN node_kinds k ON k.tenant_id = n.tenant_id AND k.id = n.kind_id
+		WHERE n.id = ANY($1::uuid[])`, ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id, slug string
+		if err := rows.Scan(&id, &slug); err != nil {
+			return nil, err
+		}
+		if norm, ok := parseUUID(id); ok {
+			out[norm] = slug
+		}
+	}
+	return out, rows.Err()
+}
+
+func mapKeys(ids map[string]struct{}) []string {
+	out := make([]string, 0, len(ids))
+	for id := range ids {
+		out = append(out, id)
+	}
+	return out
 }
