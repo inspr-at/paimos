@@ -25,7 +25,7 @@ function backdrop(event: MouseEvent) { if (event.target === dialog.value) close(
 </script>
 
 <template>
-  <dialog ref="dialog" class="rules-dialog" :class="size" :aria-labelledby="`${id}-title`" @cancel.prevent="close" @click="backdrop">
+  <dialog ref="dialog" class="rules-dialog" :class="`size-${size}`" :aria-labelledby="`${id}-title`" @cancel.prevent="close" @click="backdrop">
     <div class="card">
       <header class="head">
         <div class="titles">
@@ -44,11 +44,11 @@ function backdrop(event: MouseEvent) { if (event.target === dialog.value) close(
 .rules-dialog { padding: 0; border: 0; background: transparent; color: var(--ink); max-width: none; max-height: none; overflow: visible; }
 .rules-dialog::backdrop { background: var(--scrim); }
 .card { display: flex; flex-direction: column; min-height: 0; background: var(--surface); box-shadow: var(--shadow-pop); border: 1px solid var(--glass-edge); }
-.center, .wide { width: min(560px, calc(100vw - 24px)); margin: auto; }
-.wide { width: min(760px, calc(100vw - 24px)); }
-.center .card, .wide .card { max-height: min(760px, calc(100dvh - 24px)); border-radius: 16px; }
-.side { position: fixed; inset: 0 0 0 auto; width: min(560px, 100vw); height: 100%; margin: 0; }
-.side .card { height: 100%; border-radius: 16px 0 0 16px; }
+.size-center, .size-wide { width: min(560px, calc(100vw - 24px)); margin: auto; }
+.size-wide { width: min(760px, calc(100vw - 24px)); }
+.size-center .card, .size-wide .card { max-height: min(760px, calc(100dvh - 24px)); border-radius: 16px; }
+.size-side { position: fixed; inset: 0 0 0 auto; width: min(560px, 100vw); height: 100%; margin: 0; }
+.size-side .card { height: 100%; border-radius: 16px 0 0 16px; }
 .head { display: flex; align-items: flex-start; gap: 12px; padding: 18px 20px 12px; }
 .titles { flex: 1; min-width: 0; }
 .head h2 { margin: 0; font-size: 17px; font-weight: 650; letter-spacing: -.01em; }
@@ -57,16 +57,16 @@ function backdrop(event: MouseEvent) { if (event.target === dialog.value) close(
 .foot :deep(.btn:disabled) { opacity: .5; filter: saturate(.3); box-shadow: none; cursor: not-allowed; }
 .foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; padding: 12px 20px 16px; border-top: 1px solid var(--line); background: var(--surface); }
 @media (max-width: 600px) {
-  .center, .wide { width: 100vw; margin: auto 0 0; }
-  .center .card, .wide .card { max-height: 92dvh; border-radius: 16px 16px 0 0; }
-  .side .card { border-radius: 0; }
+  .size-center, .size-wide { width: 100vw; margin: auto 0 0; }
+  .size-center .card, .size-wide .card { max-height: 92dvh; border-radius: 16px 16px 0 0; }
+  .size-side .card { border-radius: 0; }
   .head { padding: 16px 16px 10px; }
   .body { padding: 4px 16px 14px; }
   .foot { padding: 10px 16px calc(12px + env(safe-area-inset-bottom)); }
 }
 @media (prefers-reduced-motion: no-preference) {
   .rules-dialog[open] .card { animation: rules-dialog-in .16s ease-out; }
-  .side[open] .card { animation-name: rules-dialog-side; }
+  .size-side[open] .card { animation-name: rules-dialog-side; }
 }
 @keyframes rules-dialog-in { from { opacity: 0; transform: translateY(6px); } }
 @keyframes rules-dialog-side { from { opacity: .4; transform: translateX(24px); } }

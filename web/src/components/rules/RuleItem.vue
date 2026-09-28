@@ -9,7 +9,7 @@ import { HARNESS_LABEL, HARNESSES, ROLE_LABEL, ROLES, type AgentRule } from '../
 // One rule as agents read it: the text rendered as Markdown, a lock when it is
 // locked, and only the exceptions as quiet tags. Everything technical (reason,
 // details, source, identity) waits behind the row's own disclosure.
-const props = defineProps<{ rule: AgentRule; heldBy?: string }>()
+const props = defineProps<{ rule: AgentRule; heldBy?: string; pending?: boolean }>()
 const open = ref(false)
 const id = useId()
 
@@ -20,6 +20,7 @@ const roles = computed(() => only(props.rule.roles, ROLES, value => ROLE_LABEL[v
 const harnesses = computed(() => only(props.rule.harnesses, HARNESSES, value => HARNESS_LABEL[value]))
 const tags = computed(() => {
   const out: string[] = []
+  if (props.pending) out.push('Not live yet')
   if (!props.rule.enabled && props.rule.strength !== 'locked') out.push('Off')
   if (roles.value) out.push(`${roles.value} only`)
   if (harnesses.value) out.push(`${harnesses.value} only`)

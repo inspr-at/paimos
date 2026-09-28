@@ -18,6 +18,8 @@ const props = defineProps<{
   subtitle?: string
   open: boolean
   held: Map<string, string>
+  /** Rules whose saved text differs from the live version (only for a changed set). */
+  pending?: Set<string>
   draft: SetDraft | null
   editReason: string | null
   publishReason: string | null
@@ -90,7 +92,7 @@ function removeRule(index: number) {
     </header>
 
     <ul v-if="!draft && open" :id="`${id}-rules`" class="rules">
-      <RuleItem v-for="rule in set.rules" :key="rule.identity" :rule="rule" :held-by="held.get(rule.identity)" />
+      <RuleItem v-for="rule in set.rules" :key="rule.identity" :rule="rule" :held-by="held.get(rule.identity)" :pending="pending?.has(rule.identity)" />
       <li v-if="!set.rules.length" class="empty">No rules in this set yet.</li>
     </ul>
 

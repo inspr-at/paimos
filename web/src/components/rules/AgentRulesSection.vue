@@ -177,6 +177,11 @@ const sections = computed(() => {
   ]
   return list
 })
+function pendingOf(set: Working): Set<string> | undefined {
+  if (stateOf(set) !== 'changed' || !set.live) return undefined
+  const live = new Map(set.live.rules.map(rule => [rule.identity, rule]))
+  return new Set(set.remote.rules.filter(rule => { const old = live.get(rule.identity); return !old || !rulesEqual([old], [rule]) }).map(rule => rule.identity))
+}
 function heldFor(scope: RuleScope) { return heldAbove(scopeRank(scope), { role: scope.role }) }
 const addReason = (section: { key: SectionKey; scope: RuleScope | null }) => section.scope ? writeBlock(caller.value, section.scope) : 'Choose a project first.'
 function subtitle(scope: RuleScope) { return scope.layer === 'agent' ? where(scope) : '' }
@@ -382,7 +387,7 @@ onMounted(() => {
           <div v-if="section.sets.length" class="group">
           <RuleSetCard
             v-for="{ bundle, set } in section.sets" :key="set.remote.id" :set="set.remote" :state="stateOf(set)" :subtitle="subtitle(bundle.layer.scope)"
-            :open="openSets.has(set.remote.id)" :held="heldFor(bundle.layer.scope)" :draft="editing?.setId === set.remote.id ? editing : null"
+            :open="openSets.has(set.remote.id)" :held="heldFor(bundle.layer.scope)" :pending="pendingOf(set)" :draft="editing?.setId === set.remote.id ? editing : null"
             :edit-reason="writeBlock(caller, bundle.layer.scope)" :publish-reason="publishBlock(caller, bundle.layer.scope)" :lock-reason="lockReason(bundle.layer.scope)"
             :saving="saving" :error="editing?.setId === set.remote.id ? editing.error : ''"
             @toggle="toggle(set.remote.id)" @edit="edit(set.remote.id)" @cancel="editing = null" @save="save" @add-rule="addRule"

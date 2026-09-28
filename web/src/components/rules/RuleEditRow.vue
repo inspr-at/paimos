@@ -51,7 +51,7 @@ function toggleHarness(harness: HarnessName) {
       </label>
       <div class="texts">
         <textarea class="field text" rows="1" maxlength="512" :value="rule.text" placeholder="What agents must do, in one line" :aria-label="`Rule text`" data-autofocus @input="patch({ text: oneLine(($event.target as HTMLTextAreaElement).value) })"></textarea>
-        <input class="field why" :value="rule.why" maxlength="1024" placeholder="Why, in one sentence" aria-label="Why" @input="patch({ why: oneLine(($event.target as HTMLInputElement).value) })">
+        <textarea class="field why" rows="1" :value="rule.why" maxlength="1024" placeholder="Why, in one sentence" aria-label="Why" @input="patch({ why: oneLine(($event.target as HTMLTextAreaElement).value) })"></textarea>
       </div>
       <div class="side">
         <button
@@ -97,13 +97,16 @@ function toggleHarness(harness: HarnessName) {
 <style scoped>
 .edit-rule { display: flex; flex-direction: column; gap: 4px; padding: 10px 2px 8px; }
 .edit-rule + .edit-rule { border-top: 1px solid var(--line); }
-.top { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 10px; align-items: start; }
+.top { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; grid-template-areas: "switch texts side"; gap: 10px; align-items: start; }
+.switch { grid-area: switch; }
+.texts { grid-area: texts; }
+.side { grid-area: side; }
 .switch { padding-top: 7px; }
 .texts { display: grid; gap: 6px; min-width: 0; }
 textarea.field { height: auto; padding: 7px 11px; resize: vertical; line-height: 1.45; }
-.text { field-sizing: content; min-height: 36px; resize: none; }
+textarea.text { field-sizing: content; min-height: 36px; resize: none; }
 .text { font-size: 14px; }
-.why { height: 30px; font-size: 13px; color: var(--ink-2); }
+textarea.why { field-sizing: content; min-height: 30px; padding: 5px 11px; resize: none; font-size: 13px; color: var(--ink-2); }
 .side { display: flex; gap: 2px; }
 .lock-btn[aria-pressed="true"] { color: var(--teal-ink); background: var(--row-selected); }
 [aria-disabled="true"] { opacity: .45; cursor: not-allowed; }
@@ -121,8 +124,8 @@ textarea.field { height: auto; padding: 7px 11px; resize: vertical; line-height:
 .tag { height: 26px; padding: 0 10px; border-radius: 999px; border: 1px solid var(--line-2); background: var(--surface); color: var(--ink-3); font-size: 12px; font-weight: 600; }
 .tag[aria-pressed="true"] { background: var(--chip-teal-bg); color: var(--teal-ink); border-color: var(--chip-teal-line); }
 @media (max-width: 600px) {
-  .top { grid-template-columns: auto minmax(0, 1fr); }
-  .side { grid-column: 2; justify-content: flex-end; }
+  .top { grid-template-columns: auto minmax(0, 1fr) auto; grid-template-areas: "switch . side" "texts texts texts"; row-gap: 4px; }
+  .switch { padding-top: 4px; }
   .more { margin-left: 0; }
   .grid { grid-template-columns: 1fr; }
 }
