@@ -24,6 +24,7 @@ var Registry = makeRegistry()
 func makeRegistry() []Permission {
 	groups := []struct{ group, actions string }{
 		{"nodes", "read write delete move restore configure"},
+		{"rules", "read write publish"},
 		{"kinds", "read manage"}, {"tags", "read write manage"},
 		{"relations", "read write delete"}, {"comments", "read write delete"},
 		{"attachments", "read write delete"}, {"knowledge", "read write delete"},
@@ -51,7 +52,7 @@ func makeRegistry() []Permission {
 			if action == "read" || strings.HasSuffix(action, "_read") || action == "resolve" {
 				risk = "low"
 			}
-			if action == "delete" || action == "deploy" || action == "apply" || action == "decide" || action == "decide_high" || action == "manage" || action == "issue" || action == "approve" || action == "undo" || action == "undo_other" || action == "control" || action == "configure" || action == "revoke" || action == "recover" || action == "force_stop" {
+			if action == "publish" || action == "delete" || action == "deploy" || action == "apply" || action == "decide" || action == "decide_high" || action == "manage" || action == "issue" || action == "approve" || action == "undo" || action == "undo_other" || action == "control" || action == "configure" || action == "revoke" || action == "recover" || action == "force_stop" {
 				risk = "high"
 			}
 			at := []string{"workspace", "project"}
@@ -72,7 +73,7 @@ func makeRegistry() []Permission {
 // customer portal. Those permissions never belong on an agent key.
 func agentGrantable(key string) bool {
 	switch key {
-	case "harness.force_stop", "harness.recover", "members.manage", "roles.manage", "keys.manage", "keys.read", "settings.manage", "audit.read",
+	case "rules.publish", "harness.force_stop", "harness.recover", "members.manage", "roles.manage", "keys.manage", "keys.read", "settings.manage", "audit.read",
 		"approvals.decide", "approvals.decide_high",
 		"profile.portal_read", "profile.portal_write", "quotes.portal_read", "quotes.portal_accept":
 		return false
@@ -116,6 +117,8 @@ func builtinPermissions(key string) []string {
 			allow = p.Key != "ownership.transfer"
 		case "member":
 			switch resource {
+			case "rules":
+				allow = p.Key != "rules.publish"
 			case "kinds", "models", "plugins", "members":
 				allow = p.Key == resource+".read"
 			case "imports", "settings", "roles", "keys", "audit", "account", "ownership":

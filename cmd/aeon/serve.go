@@ -61,6 +61,7 @@ import (
 	"github.com/inspr-at/paimos/internal/releasehistory"
 	"github.com/inspr-at/paimos/internal/releases"
 	"github.com/inspr-at/paimos/internal/requirements"
+	"github.com/inspr-at/paimos/internal/rules"
 	"github.com/inspr-at/paimos/internal/search"
 	"github.com/inspr-at/paimos/internal/stagehandoff"
 	"github.com/inspr-at/paimos/internal/tenant"
@@ -247,6 +248,7 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 			// R2: agents
 			inbox.New(pool),
 			harness.New(pool),
+			rules.New(pool),
 			ticketwork.New(pool),
 			usagedashboard.New(pool),
 			workorders.New(pool),

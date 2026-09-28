@@ -13,6 +13,8 @@ import (
 	"slices"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/inspr-at/paimos/internal/rules"
 )
 
 // skill render <agent> builds the canonical agent artifact from the project
@@ -713,4 +715,18 @@ func compareRendered(rendered, existing string) checkResult {
 		return checkHeaderMissing
 	}
 	return checkDiff
+}
+
+// renderRulesThroughHarness shares the skill renderer boundary while keeping the
+// server's exact bounded bytes intact. This is an always-on rules artifact, not
+// a command or SKILL.md. It returns only a suggested name; installation is opt-in.
+func renderRulesThroughHarness(m rules.Merged) (skillRender, error) {
+	if !slices.Contains(rules.Harnesses, m.Context.Harness) || len(m.Body) > rules.MaxBytes || len(m.Body) != m.ByteSize {
+		return skillRender{}, fmt.Errorf("invalid bounded rules artifact")
+	}
+	name := "AGENTS.md"
+	if m.Context.Harness == "claude-code" {
+		name = "CLAUDE.md"
+	}
+	return skillRender{Body: m.Body, SuggestedPath: name, Rev: m.SHA256}, nil
 }

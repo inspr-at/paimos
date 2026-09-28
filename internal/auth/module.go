@@ -255,6 +255,26 @@ func coreAgentScope(r *http.Request) (string, bool) {
 		return resource + ".write", true
 	}
 	switch parts[0] {
+	case "rules":
+		// Dedicated rules routes are an explicit agent allowlist. Publishing and
+		// restoring remain person-only regardless of any key's supplied scopes.
+		if len(parts) == 2 && (parts[1] == "layers" || parts[1] == "sets") && (read || r.Method == http.MethodPost) {
+			return scope("rules")
+		}
+		if len(parts) == 2 && parts[1] == "merged" && read {
+			return "rules.read", true
+		}
+		if len(parts) >= 3 && parts[1] == "sets" {
+			if len(parts) == 3 && read {
+				return "rules.read", true
+			}
+			if len(parts) == 4 && parts[3] == "draft" && r.Method == http.MethodPut {
+				return "rules.write", true
+			}
+			if (len(parts) == 4 || len(parts) == 5) && parts[3] == "versions" && read {
+				return "rules.read", true
+			}
+		}
 	case "model-prices":
 		if len(parts) == 1 && read {
 			return "harness.read", true
