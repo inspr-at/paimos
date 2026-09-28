@@ -150,9 +150,10 @@ func (rt *runtime) cmdSession() *Command {
 func (rt *runtime) cmdSessionStart() *Command {
 	var project, agent, format, bundle string
 	var ruleOpts rulesOptions
+	var receiveOpts rulesReceiveOptions
 	return &Command{
 		Name:  "start",
-		Short: "Mint an agent session id",
+		Short: "Mint an attribution id, preview rules, or explicitly receive rules for a registered session",
 		Use:   "session start --project KEY --agent NAME",
 		addFlags: func(fs *flagSet) {
 			fs.string(&project, "project", 0, "project key (required)")
@@ -160,6 +161,7 @@ func (rt *runtime) cmdSessionStart() *Command {
 			fs.string(&format, "format", 0, "env (default) or json")
 			fs.string(&bundle, "bundle", 0, "minimal (default) or full")
 			ruleOpts.flags(fs)
+			receiveOpts.flags(fs)
 		},
 		run: func(args []string) error {
 			if strings.TrimSpace(project) == "" {
@@ -167,6 +169,15 @@ func (rt *runtime) cmdSessionStart() *Command {
 			}
 			if strings.TrimSpace(agent) == "" {
 				return usagef("--agent is required")
+			}
+			if receiveOpts.Receive {
+				if ruleOpts.Preview || bundle != "" || (format != "" && format != "json") {
+					return usagef("--rules-receive is separate from preview and bundles; its output is JSON")
+				}
+				return rt.sessionRulesReceive(project, agent, ruleOpts, receiveOpts)
+			}
+			if receiveOpts.used() {
+				return usagef("receiving flags require explicit --rules-receive")
 			}
 			if ruleOpts.Preview {
 				return rt.sessionRules(project, ruleOpts)
