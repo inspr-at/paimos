@@ -17,6 +17,7 @@ import AgentGlyph from './AgentGlyph.vue'
 import ProvenanceDetail from './ProvenanceDetail.vue'
 import SessionStateEvidence from './SessionStateEvidence.vue'
 import SessionRecovery from './SessionRecovery.vue'
+import RemoveSessionDialog from './RemoveSessionDialog.vue'
 import { activityOf, currentStep, type ActivitySession } from './activity'
 import { metadataChangeText, metadataChanges } from './metadataHistory'
 
@@ -142,6 +143,7 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
           <button type="button" class="btn sm stop" :aria-disabled="!!controlBlock(view, 'stop')" :data-tip="controlBlock(view, 'stop') || 'End this session'" @click="control('stop')"><AppIcon name="halt" :size="14" />Stop</button>
         </template>
         <SessionRecovery :session="view.session" />
+        <RemoveSessionDialog :session="view.session" :label="view.name" />
       </div>
       <p v-if="view && !loading" class="head-sub">
         <TicketPeekLink v-if="view.ticket" class="ticket-chip" :ticket-key="view.ticket.key" :href="view.ticket.href" :tip="view.ticket.title">{{ view.ticket.key }}</TicketPeekLink>

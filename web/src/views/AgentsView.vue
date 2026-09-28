@@ -48,7 +48,7 @@ const showConnect = computed(() => !!session.identity && session.identity.princi
 const ticketPeek = inject(TICKET_PEEK, null)
 const ticketPeekOpen = computed(() => !!ticketPeek?.openKey.value)
 const sessionId = computed(() => typeof route.params.sessionId === 'string' ? route.params.sessionId : '')
-const selected = computed(() => agents.views.find(v => v.session.id === sessionId.value))
+const selected = computed(() => [...agents.views, ...agents.removedViews].find(v => v.session.id === sessionId.value))
 const writable = computed(() => can('harness.control'))
 const canResolve = computed(() => session.identity?.principal.kind === 'person' && can('inbox.manage'))
 const canRevoke = computed(() => session.identity?.principal.kind === 'person' && can('approvals.revoke'))
@@ -60,7 +60,7 @@ const counts = computed(() => ([['working', 'working'], ['needs', 'need somethin
 const summary = computed(() => {
   const parts: string[] = []
   if (agents.needsCount) parts.push(`${agents.needsCount} ${agents.needsCount === 1 ? 'needs' : 'need'} you`)
-  if (agents.sessionsState === 'ready' && agents.loaded) parts.push(...(agents.sessions.length ? counts.value : ['No agent connected yet']))
+  if (agents.sessionsState === 'ready' && agents.loaded) parts.push(...(agents.views.length ? counts.value : ['No agent connected yet']))
   return parts.join(' · ') || (agents.loaded ? 'Nothing waits on you' : '')
 })
 
@@ -271,7 +271,7 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
         <p v-if="agents.approvalsHardError" class="inline-error" role="alert"><AppIcon name="alert" :size="14" />Permission requests could not be loaded: {{ agents.approvalsError }} <button type="button" class="btn sm" @click="agents.refreshApprovals()">Try again</button></p>
         <SessionList
           v-if="agents.loaded"
-          :groups="agents.grouped" :now="agents.now" :cursor="cursor" :selected="sessionId" :state="agents.sessionsUpdatedAt !== null ? 'ready' : agents.sessionsState" :error="agents.sessionsError"
+          :groups="agents.grouped" :removed="agents.removedViews" :now="agents.now" :cursor="cursor" :selected="sessionId" :state="agents.sessionsUpdatedAt !== null ? 'ready' : agents.sessionsState" :error="agents.sessionsError"
           :loaded="agents.loaded" :controls="agents.controls" :can-control="writable" :can-start="canStart"
           @open="openSession" @control="control" @focus-row="id => cursor = id" @retry="agents.loadAll()" @start="startDialog?.open()"
         />

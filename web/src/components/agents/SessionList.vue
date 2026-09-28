@@ -9,6 +9,7 @@ import AppIcon from '../AppIcon.vue'
 import TicketPeekLink from '../TicketPeekLink.vue'
 import FloatingPanel from '../work/FloatingPanel.vue'
 import ConnectHint from './ConnectHint.vue'
+import RemoveSessionDialog from './RemoveSessionDialog.vue'
 import AgentStateLabel from './AgentStateLabel.vue'
 import { useAgentAppearance } from '../../lib/agentAppearance'
 const { appearance } = useAgentAppearance()
@@ -20,22 +21,25 @@ import { intendedResult, sessionContext, sessionExecution } from './sessionRow'
 // Session families stay together across status groups. Each lead's history is
 // opt-in for this mounted list only; refreshes never open it or persist it.
 const props = defineProps<{
-  groups: Record<SessionGroup, SessionView[]>; now: number; cursor: string; selected: string; state: Availability; error: string
+  removed?: SessionView[]; groups: Record<SessionGroup, SessionView[]>; now: number; cursor: string; selected: string; state: Availability; error: string
   loaded: boolean; controls: Record<string, SessionControl>; canControl: boolean; canStart: boolean
 }>()
 const emit = defineEmits<{ open: [id: string]; control: [view: SessionView, kind: SessionControl['kind']]; focusRow: [id: string]; retry: []; start: [] }>()
 const showStopped = ref(false)
+const showRemoved = ref(false)
+const listed = computed(() => showRemoved.value ? props.removed ?? [] : GROUPS.flatMap(g => props.groups[g.id]))
+const staleProjects = computed(() => [...new Set(GROUPS.flatMap(g => props.groups[g.id]).filter(v => Date.parse(v.session.heartbeat_at ?? v.session.created_at) < props.now - 15 * 60_000).map(v => v.session.project_id))])
 const total = computed(() => GROUPS.reduce((sum, g) => sum + props.groups[g.id].length, 0))
 const stopped = computed(() => GROUPS.flatMap(g => props.groups[g.id]).filter(v => v.session.phase === 'stopped' || v.session.stopped_at).length)
 const live = computed(() => total.value - stopped.value)
 type Branch = SessionBranch<SessionView>
-const forest = computed(() => sessionForest(GROUPS.flatMap(g => props.groups[g.id]), props.now))
+const forest = computed(() => sessionForest(listed.value, props.now))
 const roots = (group: SessionGroup) => forest.value.filter(branch => branch.group === group)
 const expanded = ref<Record<string, boolean>>({})
 const history = ref<Record<string, boolean>>({})
 const containsSelected = (branch: Branch): boolean => branch.view.session.id === props.selected || branch.children.some(containsSelected)
 // A direct link may reveal its selected row, but never its stopped siblings.
-const candidates = (branch: Branch) => branch.children.filter(child => history.value[branch.view.session.id] || child.liveCount > 0 || containsSelected(child))
+const candidates = (branch: Branch) => branch.children.filter(child => showRemoved.value || history.value[branch.view.session.id] || child.liveCount > 0 || containsSelected(child))
 const isExpanded = (branch: Branch): boolean => candidates(branch).length > 0 && (expanded.value[branch.view.session.id] ?? true)
 function toggle(branch: Branch) {
   const id = branch.view.session.id
@@ -62,7 +66,7 @@ const visible = (group: SessionGroup) => {
     }
   }
   for (const branch of roots(group)) {
-    if (group !== 'stopped' || showStopped.value || containsSelected(branch)) {
+    if (group !== 'stopped' || showRemoved.value || showStopped.value || containsSelected(branch)) {
       walk(branch, [])
       out[out.length - 1]!.familyEnd = true
     }
@@ -116,7 +120,9 @@ function rowClick(event: MouseEvent, id: string) {
   <section class="sessions glass-card" aria-labelledby="sessions-title">
     <header class="card-head">
       <h2 id="sessions-title">Sessions</h2>
-      <span v-if="state === 'ready' && loaded && total" class="sub">{{ live }} live{{ stopped ? ` · ${stopped} stopped` : '' }}</span>
+      <button v-if="removed?.length || showRemoved" type="button" class="btn sm" :aria-pressed="showRemoved" @click="showRemoved = !showRemoved">Removed<span v-if="removed?.length"> ({{ removed.length }})</span></button>
+      <RemoveSessionDialog v-if="!showRemoved" :project-ids="staleProjects" />
+      <span v-if="state === 'ready' && loaded && total && !showRemoved" class="sub">{{ live }} live{{ stopped ? ` · ${stopped} stopped` : '' }}</span>
     </header>
 
     <div v-if="state === 'forbidden'" class="state">
@@ -133,7 +139,8 @@ function rowClick(event: MouseEvent, id: string) {
     <div v-else-if="!loaded" class="skeleton-rows" role="status" aria-label="Loading sessions">
       <div v-for="i in 5" :key="i" class="sk-row"><span class="skeleton dot" /><span class="skeleton" :style="{ width: `${18 + (i * 7) % 16}%` }" /><span class="skeleton key" /><span class="skeleton" style="width: 12%" /></div>
     </div>
-    <ConnectHint v-else-if="!total" :can-start="canStart" @start="emit('start')" />
+    <p v-else-if="showRemoved && !listed.length" class="state">No removed sessions.</p>
+    <ConnectHint v-else-if="!total && !showRemoved" :can-start="canStart" @start="emit('start')" />
 
     <div v-else class="table" role="table" aria-label="Agent sessions">
       <div class="thead" role="row">
@@ -144,10 +151,10 @@ function rowClick(event: MouseEvent, id: string) {
       <template v-for="group in GROUPS" :key="group.id">
         <div v-if="roots(group.id).length" class="group-row" :class="group.id" role="row">
           <span role="rowheader" class="group-label">
-            <button v-if="group.id === 'stopped'" type="button" class="group-toggle" :aria-expanded="showStopped" @click="showStopped = !showStopped">
+            <button v-if="group.id === 'stopped' && !showRemoved" type="button" class="group-toggle" :aria-expanded="showStopped" @click="showStopped = !showStopped">
               <AppIcon name="chevron-right" :size="12" class="chev" :class="{ turned: showStopped }" />{{ group.label }}<span class="mono">{{ roots(group.id).length }}</span>
             </button>
-            <template v-else>{{ group.label }}<span class="mono">{{ roots(group.id).length }}</span></template>
+            <template v-else>{{ showRemoved ? 'Removed' : group.label }}<span class="mono">{{ roots(group.id).length }}</span></template>
           </span>
         </div>
         <div
@@ -203,6 +210,7 @@ function rowClick(event: MouseEvent, id: string) {
           </span>
           <span role="cell" class="right c-elapsed mono-cell">{{ elapsed(view.session, now) }}</span>
           <span role="cell" class="c-actions">
+            <RemoveSessionDialog :session="view.session" :label="view.name" />
             <template v-if="view.session.phase !== 'stopped'">
               <button
                 type="button" class="icon-btn sm flat act" :aria-label="`Interrupt ${view.name}`" :data-tip="controlBlock(view, 'interrupt') || 'Interrupt: stop the current turn, keep the session'"
@@ -223,6 +231,7 @@ function rowClick(event: MouseEvent, id: string) {
     </div>
     <FloatingPanel v-if="menu" :anchor="menu.anchor" align="end" :width="248" :label="`Actions for ${menu.view.name}`" @close="menu = null">
       <div role="menu" :aria-label="`Actions for ${menu.view.name}`">
+        <RemoveSessionDialog :session="menu.view.session" :label="menu.view.name" menu @opened="menu = null" />
         <button type="button" role="menuitem" class="menu-item" :aria-disabled="!!controlBlock(menu.view, 'interrupt')" data-autofocus @click="pick('interrupt')">
           <AppIcon name="interrupt" :size="16" /><span class="mi-text"><span>Interrupt</span><small>{{ controlBlock(menu.view, 'interrupt') || 'Stop the current turn, keep the session' }}</small></span>
         </button>
@@ -236,10 +245,10 @@ function rowClick(event: MouseEvent, id: string) {
 
 <style scoped>
 .sessions { overflow: clip; container: sessions / inline-size; }
-.card-head { display: flex; align-items: baseline; gap: 10px; padding: 14px 18px 10px; }
+.card-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; padding: 14px 18px 10px; }
 .card-head h2 { font-size: 15px; font-weight: 650; }
 .sub { font-size: 12.5px; color: var(--ink-3); }
-.table { --state-width: 158px; --tree-step: 28px; display: grid; grid-template-columns: var(--state-width) minmax(140px, 1.45fr) minmax(72px, .48fr) minmax(128px, .82fr) 80px 68px 76px; padding: 0 0 8px; }
+.table { --state-width: 158px; --tree-step: 28px; display: grid; grid-template-columns: var(--state-width) minmax(140px, 1.45fr) minmax(72px, .48fr) minmax(128px, .82fr) 80px 68px 154px; padding: 0 0 8px; }
 .thead, .row, .group-row { display: grid; grid-template-columns: subgrid; grid-column: 1 / -1; align-items: center; column-gap: 0; }
 .thead { height: 32px; padding: 0 12px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); font: 500 10.5px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--ink-3); font-variant-ligatures: none; white-space: nowrap; }
 .thead > span, .row > span { padding: 0 8px; min-width: 0; }
@@ -336,19 +345,22 @@ function rowClick(event: MouseEvent, id: string) {
 .sk-row .dot { width: 10px; height: 10px; border-radius: 50%; }
 .sk-row .key { width: 70px; height: 20px; border-radius: 6px; }
 @container sessions (max-width: 980px) {
-  .table { --state-width: 142px; grid-template-columns: var(--state-width) minmax(120px, 1.35fr) minmax(68px, .42fr) minmax(116px, .75fr) 72px 76px; }
+  .table { --state-width: 142px; grid-template-columns: var(--state-width) minmax(120px, 1.35fr) minmax(68px, .42fr) minmax(116px, .75fr) 72px 154px; }
   .c-elapsed { display: none; }
 }
 @container sessions (max-width: 760px) {
-  .table { --state-width: 136px; grid-template-columns: var(--state-width) minmax(100px, 1.2fr) minmax(64px, auto) minmax(108px, .7fr) 68px; }
+  .table { --state-width: 136px; grid-template-columns: var(--state-width) minmax(100px, 1.2fr) minmax(64px, auto) minmax(108px, .7fr) 76px; }
   .c-beat, .c-elapsed { display: none; }
+  .c-actions { flex-direction: column; }
+  .act { display: none; }
+  .more { display: grid; }
 }
-/* Phones: identity, execution and state stack; actions stay in the overflow menu. */
+/* Phones: keep Remove visible; process controls remain in the overflow menu. */
 @container sessions (max-width: 560px) {
   .table { --tree-step: 20px; display: block; }
   .thead { display: none; }
   .group-row { display: block; margin: 12px 8px 2px; padding: 0 8px; }
-  .row { --tree-joint: 32px; display: grid; grid-template-columns: auto minmax(0, 1fr) auto 44px; grid-template-areas: "agent agent beat actions" "exec exec exec actions" "state ticket ticket actions"; row-gap: 4px; column-gap: 8px; align-items: center; min-height: 72px; margin: 0 6px; padding: 10px 4px 10px calc(10px + var(--depth) * var(--tree-step)); }
+  .row { --tree-joint: 32px; display: grid; grid-template-columns: auto minmax(0, 1fr) auto 76px; grid-template-areas: "agent agent beat actions" "exec exec exec actions" "state ticket ticket actions"; row-gap: 4px; column-gap: 8px; align-items: center; min-height: 72px; margin: 0 6px; padding: 10px 4px 10px calc(10px + var(--depth) * var(--tree-step)); }
   .row > span { padding: 0; }
   .c-agent { grid-area: agent; min-width: 0; }
   .row.worker .c-agent { padding-left: 0; }
@@ -359,7 +371,7 @@ function rowClick(event: MouseEvent, id: string) {
   .c-exec { grid-area: exec; min-width: 0; }
   .c-beat { display: block; grid-area: beat; }
   .c-elapsed { display: none; }
-  .c-actions { grid-area: actions; grid-row: 1 / span 3; align-self: center; justify-content: center; }
+  .c-actions { flex-direction: column; grid-area: actions; grid-row: 1 / span 3; align-self: center; justify-content: center; }
   .act { display: none; }
   .more { display: grid; width: 44px; height: 44px; }
 }

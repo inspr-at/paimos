@@ -7,6 +7,7 @@ import AppIcon from '../AppIcon.vue'
 import TicketPeekLink from '../TicketPeekLink.vue'
 import AgentGlyph from './AgentGlyph.vue'
 import AgentStateLabel from './AgentStateLabel.vue'
+import RemoveSessionDialog from './RemoveSessionDialog.vue'
 import { useAgentAppearance } from '../../lib/agentAppearance'
 const { appearance } = useAgentAppearance()
 import { currentStep } from './activity'
@@ -24,7 +25,7 @@ const live = computed(() => props.views.filter(view => !view.session.stopped_at 
       <article v-for="view in live" :key="view.session.id" class="tile agent-state-surface" :data-state="view.status.state" :style="appearance(view.status.state)" :class="{ selected: selected === view.session.id }">
         <button type="button" class="tile-open" :aria-label="`Open ${view.name}, ${view.status.label}, ${currentStep(view)}`" @click="emit('open', view.session.id)" />
         <AgentGlyph class="glyph" :view="view" :size="43" />
-        <span class="tile-body"><strong>{{ view.name }}</strong><TicketPeekLink v-if="view.ticket" class="ticket-key" :ticket-key="view.ticket.key" :href="view.ticket.href" :tip="view.ticket.title">{{ view.ticket.key }}</TicketPeekLink><AgentStateLabel :state="view.status.state" :label="view.status.label" /><span class="step">{{ currentStep(view) }}</span><span class="elapsed"><AppIcon name="clock" :size="13" />{{ elapsed(view.session, now) }}</span></span>
+        <span class="tile-body"><strong>{{ view.name }}</strong><TicketPeekLink v-if="view.ticket" class="ticket-key" :ticket-key="view.ticket.key" :href="view.ticket.href" :tip="view.ticket.title">{{ view.ticket.key }}</TicketPeekLink><AgentStateLabel :state="view.status.state" :label="view.status.label" /><span class="step">{{ currentStep(view) }}</span><span class="elapsed"><AppIcon name="clock" :size="13" />{{ elapsed(view.session, now) }}</span><RemoveSessionDialog :session="view.session" :label="view.name" /></span>
       </article>
     </div>
     <p v-else class="quiet">No agents are working now. <button type="button" @click="emit('open', '')">Start an agent</button></p>
