@@ -2,13 +2,22 @@
 -- AEON-262. Ready and live estimates, percent done, and the tenant report interval.
 -- Stale detection and epic roll-up are computed when a ticket or session is read.
 
+SET LOCAL lock_timeout = '5s';
+
 ALTER TABLE harness_sessions
     ADD COLUMN eta_ready_at timestamptz,
     ADD COLUMN eta_live_at timestamptz,
     ADD COLUMN progress_pct smallint,
-    ADD COLUMN eta_reported_at timestamptz,
-    ADD CONSTRAINT harness_sessions_progress_pct CHECK (progress_pct IS NULL OR progress_pct BETWEEN 0 AND 100);
+    ADD COLUMN eta_reported_at timestamptz;
 
+-- New rows are checked immediately. Existing rows are validated in 0908 so this
+-- statement does not scan the table under ACCESS EXCLUSIVE.
+ALTER TABLE harness_sessions
+    ADD CONSTRAINT harness_sessions_progress_pct
+    CHECK (progress_pct IS NULL OR progress_pct BETWEEN 0 AND 100) NOT VALID;
+
+-- harness_sessions is small. A plain CREATE INDEX under lock_timeout is acceptable
+-- here; CREATE INDEX CONCURRENTLY cannot run inside this migration transaction.
 CREATE INDEX harness_sessions_ticket_eta ON harness_sessions (tenant_id, ticket_node_id)
     WHERE stopped_at IS NULL AND ticket_node_id IS NOT NULL;
 

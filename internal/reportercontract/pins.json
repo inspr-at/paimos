@@ -444,6 +444,916 @@
       }
     }
   },
+  "harness-session": {
+    "version": "harness-session/1.0",
+    "sha256": "f08037199cdce1c903eb6f57333d5edc3e6b8dc61d2015959d269c4d9d22d303",
+    "shape": {
+      "GET /projects/{projectId}/harness-sessions/{sessionId} 200": {
+        "properties": {
+          "account_label": {
+            "maxLength": 128,
+            "never a credential. Trimmed plain text; control characters stripped.": null,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "activity": {
+            "enum": [
+              "unknown",
+              "busy",
+              "idle",
+              "throttled"
+            ],
+            "type": "string"
+          },
+          "activity_history": {
+            "items": {
+              "properties": {
+                "at": {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                "note": {
+                  "maxLength": 120,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "note",
+                "at"
+              ],
+              "type": "object"
+            },
+            "newest first; present on session detail.": null,
+            "type": "array"
+          },
+          "activity_note": {
+            "maxLength": 120,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "activity_sequence": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "advertised_capabilities": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "agent_principal_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "archived_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "attention_reasons": {
+            "items": {
+              "properties": {
+                "actor": {
+                  "enum": [
+                    "person",
+                    "agent",
+                    "unknown"
+                  ],
+                  "type": "string"
+                },
+                "blocking": {
+                  "type": "boolean"
+                },
+                "count": {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                "kind": {
+                  "enum": [
+                    "approval",
+                    "held_action",
+                    "reply",
+                    "reply_due",
+                    "run_waiting",
+                    "session_yielded"
+                  ],
+                  "type": "string"
+                },
+                "location": {
+                  "enum": [
+                    "approvals",
+                    "messages",
+                    "session"
+                  ],
+                  "type": "string"
+                },
+                "scope": {
+                  "enum": [
+                    "session",
+                    "run",
+                    "shared"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "kind",
+                "scope",
+                "actor",
+                "count",
+                "blocking",
+                "location"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "branch": {
+            "maxLength": 200,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "brief": {
+            "maxLength": 240,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "commits": {
+            "items": {
+              "properties": {
+                "sha": {
+                  "pattern": "^[0-9a-fA-F]{7,40}$",
+                  "type": "string"
+                },
+                "subject": {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "sha",
+                "subject"
+              ],
+              "type": "object"
+            },
+            "maxItems": 20,
+            "type": "array"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "display_label": {
+            "maxLength": 128,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "eta_live_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "eta_ready_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "eta_reported_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "eta_stale": {
+            "type": "boolean"
+          },
+          "harness": {
+            "enum": [
+              "codex",
+              "claude",
+              "pi",
+              "cursor",
+              "grok"
+            ],
+            "type": "string"
+          },
+          "harness_version": {
+            "maxLength": 80,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "has_problem": {
+            "type": "boolean"
+          },
+          "heartbeat_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "host": {
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "management_mode": {
+            "enum": [
+              "managed",
+              "unmanaged"
+            ],
+            "type": "string"
+          },
+          "metadata_history": {
+            "and reasoning effort changes": null,
+            "items": {
+              "properties": {
+                "at": {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                "field": {
+                  "enum": [
+                    "display_label",
+                    "model",
+                    "reasoning_effort"
+                  ],
+                  "type": "string"
+                },
+                "previous_value": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "value": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "field",
+                "previous_value",
+                "value",
+                "at"
+              ],
+              "type": "object"
+            },
+            "model": null,
+            "newest first; present on session detail.": null,
+            "type": "array"
+          },
+          "model": {
+            "maxLength": 128,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "needs_attention": {
+            "type": "boolean"
+          },
+          "parent_harness_session_id": {
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "phase": {
+            "enum": [
+              "starting",
+              "working",
+              "yielded",
+              "stopping",
+              "stopped"
+            ],
+            "type": "string"
+          },
+          "process_observed_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "process_ownership": {
+            "properties": {
+              "daemon_id": {
+                "maxLength": 128,
+                "type": "string"
+              },
+              "generation": {
+                "pattern": "^[0-9a-f]{32}$",
+                "type": "string"
+              },
+              "group_id": {
+                "minimum": 2,
+                "type": "integer"
+              },
+              "process_id": {
+                "pattern": "^[0-9a-f]{32}$",
+                "type": "string"
+              },
+              "root_pid": {
+                "minimum": 2,
+                "type": "integer"
+              },
+              "started_at": {
+                "format": "date-time",
+                "type": "string"
+              }
+            },
+            "required": [
+              "daemon_id",
+              "generation",
+              "process_id",
+              "root_pid",
+              "group_id",
+              "started_at"
+            ],
+            "type": "object"
+          },
+          "progress_pct": {
+            "maximum": 100,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "project_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "reasoning_effort": {
+            "maxLength": 40,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "recovery_process_state": {
+            "enum": [
+              "unknown",
+              null
+            ],
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "revision": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "role": {
+            "enum": [
+              "worker",
+              "coordinator"
+            ],
+            "type": "string"
+          },
+          "run_id": {
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "run_status": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "stop_reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "stopped_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "ticket_node_id": {
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "work_order_id": {
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "work_shape": {
+            "enum": [
+              "unknown",
+              "ship",
+              "scout"
+            ],
+            "type": "string"
+          },
+          "worktree": {
+            "maxLength": 512,
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "project_id",
+          "agent_principal_id",
+          "harness",
+          "host",
+          "management_mode",
+          "role",
+          "work_shape",
+          "advertised_capabilities",
+          "phase",
+          "activity",
+          "activity_sequence",
+          "revision",
+          "created_at"
+        ],
+        "type": "object"
+      },
+      "POST /projects/{projectId}/harness-sessions/{sessionId}/heartbeat 200": {
+        "properties": {
+          "account_label": {
+            "maxLength": 128,
+            "never a credential. Trimmed plain text; control characters stripped.": null,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "activity": {
+            "enum": [
+              "unknown",
+              "busy",
+              "idle",
+              "throttled"
+            ],
+            "type": "string"
+          },
+          "activity_history": {
+            "items": {
+              "properties": {
+                "at": {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                "note": {
+                  "maxLength": 120,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "note",
+                "at"
+              ],
+              "type": "object"
+            },
+            "newest first; present on session detail.": null,
+            "type": "array"
+          },
+          "activity_note": {
+            "maxLength": 120,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "activity_sequence": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "advertised_capabilities": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "agent_principal_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "archived_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "attention_reasons": {
+            "items": {
+              "properties": {
+                "actor": {
+                  "enum": [
+                    "person",
+                    "agent",
+                    "unknown"
+                  ],
+                  "type": "string"
+                },
+                "blocking": {
+                  "type": "boolean"
+                },
+                "count": {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                "kind": {
+                  "enum": [
+                    "approval",
+                    "held_action",
+                    "reply",
+                    "reply_due",
+                    "run_waiting",
+                    "session_yielded"
+                  ],
+                  "type": "string"
+                },
+                "location": {
+                  "enum": [
+                    "approvals",
+                    "messages",
+                    "session"
+                  ],
+                  "type": "string"
+                },
+                "scope": {
+                  "enum": [
+                    "session",
+                    "run",
+                    "shared"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "kind",
+                "scope",
+                "actor",
+                "count",
+                "blocking",
+                "location"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "branch": {
+            "maxLength": 200,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "brief": {
+            "maxLength": 240,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "commits": {
+            "items": {
+              "properties": {
+                "sha": {
+                  "pattern": "^[0-9a-fA-F]{7,40}$",
+                  "type": "string"
+                },
+                "subject": {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "sha",
+                "subject"
+              ],
+              "type": "object"
+            },
+            "maxItems": 20,
+            "type": "array"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "display_label": {
+            "maxLength": 128,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "eta_live_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "eta_ready_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "eta_reported_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "eta_stale": {
+            "type": "boolean"
+          },
+          "harness": {
+            "enum": [
+              "codex",
+              "claude",
+              "pi",
+              "cursor",
+              "grok"
+            ],
+            "type": "string"
+          },
+          "harness_version": {
+            "maxLength": 80,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "has_problem": {
+            "type": "boolean"
+          },
+          "heartbeat_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "host": {
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "management_mode": {
+            "enum": [
+              "managed",
+              "unmanaged"
+            ],
+            "type": "string"
+          },
+          "metadata_history": {
+            "and reasoning effort changes": null,
+            "items": {
+              "properties": {
+                "at": {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                "field": {
+                  "enum": [
+                    "display_label",
+                    "model",
+                    "reasoning_effort"
+                  ],
+                  "type": "string"
+                },
+                "previous_value": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "value": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "field",
+                "previous_value",
+                "value",
+                "at"
+              ],
+              "type": "object"
+            },
+            "model": null,
+            "newest first; present on session detail.": null,
+            "type": "array"
+          },
+          "model": {
+            "maxLength": 128,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "needs_attention": {
+            "type": "boolean"
+          },
+          "parent_harness_session_id": {
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "phase": {
+            "enum": [
+              "starting",
+              "working",
+              "yielded",
+              "stopping",
+              "stopped"
+            ],
+            "type": "string"
+          },
+          "process_observed_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "process_ownership": {
+            "properties": {
+              "daemon_id": {
+                "maxLength": 128,
+                "type": "string"
+              },
+              "generation": {
+                "pattern": "^[0-9a-f]{32}$",
+                "type": "string"
+              },
+              "group_id": {
+                "minimum": 2,
+                "type": "integer"
+              },
+              "process_id": {
+                "pattern": "^[0-9a-f]{32}$",
+                "type": "string"
+              },
+              "root_pid": {
+                "minimum": 2,
+                "type": "integer"
+              },
+              "started_at": {
+                "format": "date-time",
+                "type": "string"
+              }
+            },
+            "required": [
+              "daemon_id",
+              "generation",
+              "process_id",
+              "root_pid",
+              "group_id",
+              "started_at"
+            ],
+            "type": "object"
+          },
+          "progress_pct": {
+            "maximum": 100,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "project_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "reasoning_effort": {
+            "maxLength": 40,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "recovery_process_state": {
+            "enum": [
+              "unknown",
+              null
+            ],
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "revision": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "role": {
+            "enum": [
+              "worker",
+              "coordinator"
+            ],
+            "type": "string"
+          },
+          "run_id": {
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "run_status": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "stop_reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "stopped_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "ticket_node_id": {
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "work_order_id": {
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "work_shape": {
+            "enum": [
+              "unknown",
+              "ship",
+              "scout"
+            ],
+            "type": "string"
+          },
+          "worktree": {
+            "maxLength": 512,
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "project_id",
+          "agent_principal_id",
+          "harness",
+          "host",
+          "management_mode",
+          "role",
+          "work_shape",
+          "advertised_capabilities",
+          "phase",
+          "activity",
+          "activity_sequence",
+          "revision",
+          "created_at"
+        ],
+        "type": "object"
+      }
+    }
+  },
   "journey": {
     "version": "journey/1.2",
     "sha256": "70b5eeaaadac51687593bca949a160e1a4df34287785005d371030b1712437d1",

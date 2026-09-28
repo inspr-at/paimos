@@ -30,4 +30,6 @@ test('a past estimate is overdue and an unknown estimate stays empty', () => {
   assert.equal(formatEta({}, 'relative', now), null)
   assert.equal(etaFromTicket({}), null)
   assert.equal(etaFromTicket({ progress_pct: 0 })?.progress, 0)
+  assert.equal(etaFromTicket({ eta_ready_at: '2026-09-28T13:40:00Z', eta_stale: true })?.stale, true)
+  assert.equal(formatEta(etaFromTicket({ eta_ready_at: '2026-09-28T13:40:00Z', eta_stale: true }), 'relative', now)?.stale, true)
 })

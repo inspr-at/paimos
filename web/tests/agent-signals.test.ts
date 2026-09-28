@@ -127,6 +127,16 @@ test('shared principal attention never blocks working siblings or changes person
   assert.equal(deriveAgentState(assigned, now), 'working')
 })
 
+test('a stale estimate needs attention from eta_stale, without an attention-reason kind', () => {
+  const facts = evidence({ needs_attention: false, eta_stale: true, attention_reasons: [] })
+  const status = assessAgentState(facts, now)
+  assert.equal(status.state, 'waiting')
+  assert.equal(status.label, 'Estimate stale')
+  assert.match(status.reasons[0]!.detail, /two reporting intervals/)
+  assert.equal(deriveAgentState(evidence({ needs_attention: false }), now), 'working')
+  assert.equal(liveState({ ...facts, project_id: 'p', harness: 'codex', management_mode: 'managed', role: 'worker', ticket: null, since: ago(0) } as LiveAgent, now), 'waiting')
+})
+
 test('exact approvals explain the actor, while a yielded session does not invent a person action', () => {
   const facts = evidence({ needs_attention: true, attention_reasons: [{ kind: 'approval', scope: 'run', actor: 'person', count: 1, blocking: true, location: 'approvals' }] })
   assert.equal(assessAgentState(facts, now).label, 'Awaiting approval')

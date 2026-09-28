@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/inspr-at/paimos/internal/eta"
 )
 
 func TestHarnessHeartbeatThrottledActivity(t *testing.T) {
@@ -90,5 +92,42 @@ func TestHarnessHeartbeatEtaFlags(t *testing.T) {
 	code, _, _ = runCLI(append(append([]string{}, base...), "--progress", "101"), "")
 	if code == 0 {
 		t.Fatal("progress 101 was accepted")
+	}
+}
+
+func TestParseCLIETABounds(t *testing.T) {
+	now := time.Now()
+	huge, err := parseCLIETA("+999999999999d", "--eta-ready")
+	if err != nil {
+		t.Fatal(err)
+	}
+	at, err := time.Parse(time.RFC3339, huge)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if at.Before(now) || at.After(now.Add(eta.MaxFuture+time.Minute)) {
+		t.Fatalf("positive overflow %s wrapped or escaped the cap", at)
+	}
+	if at.Before(now.Add(eta.MaxFuture - time.Minute)) {
+		t.Fatalf("positive overflow %s was not capped near 365 days", at)
+	}
+	past, err := parseCLIETA("-999999999999d", "--eta-live")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ago, err := time.Parse(time.RFC3339, past)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ago.After(now) || ago.Before(now.Add(-eta.MaxPast-time.Minute)) {
+		t.Fatalf("negative overflow %s wrapped or escaped the cap", ago)
+	}
+	far := now.Add(366 * 24 * time.Hour).UTC().Format(time.RFC3339)
+	if _, err := parseCLIETA(far, "--eta-ready"); err == nil {
+		t.Fatal("absolute instant beyond 365 days was accepted")
+	}
+	overdue := now.Add(-29 * 24 * time.Hour).UTC().Format(time.RFC3339)
+	if _, err := parseCLIETA(overdue, "--eta-ready"); err != nil {
+		t.Fatal(err)
 	}
 }

@@ -22,6 +22,7 @@ type View struct {
 	LiveBy          string     `json:"live_by,omitempty"`
 	ReadyStale      bool       `json:"ready_stale,omitempty"`
 	LiveStale       bool       `json:"live_stale,omitempty"`
+	EtaStale        bool       `json:"eta_stale,omitempty"`
 }
 
 // Blank is true when nothing was reported. A known zero percent is not blank.
@@ -87,5 +88,6 @@ func scanView(rows pgx.Rows, id *string) (View, error) {
 	if liveBy != nil {
 		view.LiveBy = *liveBy
 	}
+	view.EtaStale = view.ReadyStale || view.LiveStale
 	return view, nil
 }

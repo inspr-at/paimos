@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"os"
@@ -21,6 +22,7 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/client"
+	"github.com/inspr-at/paimos/internal/eta"
 )
 
 // cmdHarnessV2 is the complete P5.3 harness command tree.
@@ -742,25 +744,46 @@ func (rt *runtime) harnessSessionFull(project, agent, format, sid string) error 
 
 var relativeETA = regexp.MustCompile(`^([+-])(\d+)([smhd])$`)
 
+func relativeUnit(unit string) time.Duration {
+	switch unit {
+	case "s":
+		return time.Second
+	case "m":
+		return time.Minute
+	case "h":
+		return time.Hour
+	case "d":
+		return 24 * time.Hour
+	default:
+		return 0
+	}
+}
+
+// scaleDuration multiplies n by unit without wrapping. The bool is false when
+// the product does not fit in a time.Duration.
+func scaleDuration(n int64, unit time.Duration) (time.Duration, bool) {
+	if n < 0 || unit <= 0 {
+		return 0, false
+	}
+	if n > int64(math.MaxInt64/int64(unit)) {
+		return 0, false
+	}
+	return time.Duration(n) * unit, true
+}
+
 func parseCLIETA(raw, flag string) (string, error) {
 	if match := relativeETA.FindStringSubmatch(raw); match != nil {
-		n, err := strconv.Atoi(match[2])
-		if err != nil {
-			return "", usagef("%s must be RFC3339 or a relative duration like +25m", flag)
+		negative := match[1] == "-"
+		limit := eta.MaxFuture
+		if negative {
+			limit = eta.MaxPast
 		}
-		var unit time.Duration
-		switch match[3] {
-		case "s":
-			unit = time.Second
-		case "m":
-			unit = time.Minute
-		case "h":
-			unit = time.Hour
-		case "d":
-			unit = 24 * time.Hour
+		n, err := strconv.ParseInt(match[2], 10, 64)
+		delta, ok := scaleDuration(n, relativeUnit(match[3]))
+		if err != nil || !ok || delta > limit {
+			delta = limit
 		}
-		delta := time.Duration(n) * unit
-		if match[1] == "-" {
+		if negative {
 			delta = -delta
 		}
 		return time.Now().Add(delta).UTC().Format(time.RFC3339), nil
@@ -768,6 +791,9 @@ func parseCLIETA(raw, flag string) (string, error) {
 	at, err := time.Parse(time.RFC3339, raw)
 	if err != nil {
 		return "", usagef("%s must be RFC3339 or a relative duration like +25m", flag)
+	}
+	if !eta.Allowed(at, time.Now()) {
+		return "", usagef("%s must be within 30 days overdue and 365 days ahead", flag)
 	}
 	return at.UTC().Format(time.RFC3339), nil
 }

@@ -35,6 +35,9 @@ func parseETA(raw json.RawMessage) (*time.Time, bool, error) {
 	if err != nil {
 		return nil, true, workorders.Fail(400, "ETA must be an RFC3339 timestamp")
 	}
+	if !eta.Allowed(at, time.Now()) {
+		return nil, true, workorders.Fail(400, "ETA must be within 30 days overdue and 365 days ahead")
+	}
 	return &at, true, nil
 }
 
@@ -87,7 +90,7 @@ func applyEstimate(ctx context.Context, tx pgx.Tx, p tenant.Principal, s Session
 		if readySet || progressSet {
 			return s, workorders.Fail(400, "coordinators report the live ETA")
 		}
-		if err := writeTicketLive(ctx, tx, p.TenantID, *s.TicketNodeID, p.ID, liveAt); err != nil {
+		if err := writeTicketLive(ctx, tx, p.TenantID, *s.TicketNodeID, s.ProjectID, p.ID, liveAt); err != nil {
 			return s, err
 		}
 	default:
@@ -110,7 +113,22 @@ func applyEstimate(ctx context.Context, tx pgx.Tx, p tenant.Principal, s Session
 	return updated, nil
 }
 
-func writeTicketLive(ctx context.Context, tx pgx.Tx, tenantID, nodeID, by string, at *time.Time) error {
+func assertTicketInProject(ctx context.Context, tx pgx.Tx, nodeID, projectID string) error {
+	var current string
+	err := tx.QueryRow(ctx, `SELECT coalesce(n.project_id::text,'')
+		FROM nodes n
+		JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
+		WHERE n.id=$1 AND n.deleted_at IS NULL AND k.slug IN ('ticket','task')`, nodeID).Scan(&current)
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && current != projectID) {
+		return workorders.Fail(403, "live ETA stays with the ticket's current project")
+	}
+	return err
+}
+
+func writeTicketLive(ctx context.Context, tx pgx.Tx, tenantID, nodeID, projectID, by string, at *time.Time) error {
+	if err := assertTicketInProject(ctx, tx, nodeID, projectID); err != nil {
+		return err
+	}
 	if at == nil {
 		_, err := tx.Exec(ctx, `DELETE FROM ticket_live_eta WHERE node_id=$1`, nodeID)
 		return err
@@ -120,6 +138,21 @@ func writeTicketLive(ctx context.Context, tx pgx.Tx, tenantID, nodeID, by string
 		ON CONFLICT (tenant_id, node_id) DO UPDATE
 		SET eta_live_at=EXCLUDED.eta_live_at, reported_at=EXCLUDED.reported_at, reported_by=EXCLUDED.reported_by`,
 		tenantID, nodeID, at, by)
+	return err
+}
+
+// syncBoundLive copies a live estimate onto the session only when that session
+// is bound to the same ticket. Another ticket keeps its own reported_at, and
+// clearing the estimate clears the session timestamp when nothing remains.
+func syncBoundLive(ctx context.Context, tx pgx.Tx, sessionID, nodeID string, at *time.Time) error {
+	if at != nil {
+		_, err := tx.Exec(ctx, `UPDATE harness_sessions SET eta_live_at=$3, eta_reported_at=clock_timestamp()
+			WHERE id=$1 AND ticket_node_id=$2`, sessionID, nodeID, at)
+		return err
+	}
+	_, err := tx.Exec(ctx, `UPDATE harness_sessions SET eta_live_at=NULL,
+		eta_reported_at=CASE WHEN eta_ready_at IS NULL AND progress_pct IS NULL THEN NULL ELSE clock_timestamp() END
+		WHERE id=$1 AND ticket_node_id=$2`, sessionID, nodeID)
 	return err
 }
 
@@ -225,8 +258,9 @@ func (m *Module) setLiveEta(r *http.Request, tx pgx.Tx, p tenant.Principal) (any
 	var sessionID string
 	err = tx.QueryRow(ctx, `SELECT id::text FROM harness_sessions
 		WHERE agent_principal_id=$1 AND role='coordinator' AND stopped_at IS NULL AND project_id=$2
-		ORDER BY (ticket_node_id IS NOT DISTINCT FROM $3::uuid) DESC, heartbeat_at DESC NULLS LAST
-		LIMIT 1`, p.ID, projectID, nodeID).Scan(&sessionID)
+		  AND lease_digest=$3
+		ORDER BY (ticket_node_id IS NOT DISTINCT FROM $4::uuid) DESC, heartbeat_at DESC NULLS LAST
+		LIMIT 1`, p.ID, projectID, digest("lease", r.Header.Get("X-Aeon-Worker-Lease")), nodeID).Scan(&sessionID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, workorders.Fail(403, "live ETA is reported by the coordinator")
 	}
@@ -240,19 +274,10 @@ func (m *Module) setLiveEta(r *http.Request, tx pgx.Tx, p tenant.Principal) (any
 	if err := proof(s, r, p); err != nil {
 		return nil, err
 	}
-	if err := writeTicketLive(ctx, tx, p.TenantID, nodeID, p.ID, at); err != nil {
+	if err := writeTicketLive(ctx, tx, p.TenantID, nodeID, s.ProjectID, p.ID, at); err != nil {
 		return nil, err
 	}
-	if at != nil {
-		if _, err := tx.Exec(ctx, `UPDATE harness_sessions SET eta_reported_at=clock_timestamp(),
-			eta_live_at=CASE WHEN ticket_node_id=$2 THEN $3 ELSE eta_live_at END
-			WHERE id=$1`, s.ID, nodeID, at); err != nil {
-			return nil, err
-		}
-	} else if _, err := tx.Exec(ctx, `UPDATE harness_sessions SET
-			eta_live_at=CASE WHEN ticket_node_id=$2 THEN NULL ELSE eta_live_at END,
-			eta_reported_at=CASE WHEN ticket_node_id=$2 AND eta_ready_at IS NULL AND progress_pct IS NULL THEN NULL ELSE eta_reported_at END
-			WHERE id=$1`, s.ID, nodeID); err != nil {
+	if err := syncBoundLive(ctx, tx, s.ID, nodeID, at); err != nil {
 		return nil, err
 	}
 	return eta.One(ctx, tx, nodeID)

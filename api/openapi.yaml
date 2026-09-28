@@ -2416,7 +2416,7 @@ paths:
       operationId: getHarnessSession
       description: Session detail, including at most 20 recent activity notes and metadata changes, newest first.
       responses:
-        '200': {description: Session detail, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessSession'}}}}
+        '200': {description: Session detail, headers: {Aeon-Contract: {$ref: '#/components/headers/HarnessSessionContract'}}, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessSession'}}}}
   /projects/{projectId}/harness-sessions/{sessionId}/recovery:
     parameters:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -2565,7 +2565,7 @@ paths:
       - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
     post:
       operationId: heartbeatHarnessSession
-      description: The attributed worker reports liveness and optionally a current step, display label, ready estimate or percent done. A coordinator session may report the live estimate for its bound ticket. Omission preserves an estimate; JSON null clears it. A past timestamp is accepted and shown as overdue. Changed nonempty notes and changed label/model/effort values append bounded histories in the same transaction.
+      description: The attributed worker reports liveness and optionally a current step, display label, ready estimate or percent done. A coordinator session may report the live estimate for its bound ticket, and only while that ticket still belongs to the session's project. Omission preserves an estimate; JSON null clears it and its report time. An instant from 30 days ago through 365 days ahead is accepted; a past instant inside that window is overdue. Changed nonempty notes and changed label/model/effort values append bounded histories in the same transaction.
       requestBody:
         required: true
         content:
@@ -2588,11 +2588,11 @@ paths:
                 worktree: {$ref: '#/components/schemas/HarnessWorktree'}
                 branch: {$ref: '#/components/schemas/HarnessBranch'}
                 commits: {type: array, maxItems: 20, description: New commits to append, oldest first; duplicate SHAs are ignored and only the latest 20 are retained., items: {$ref: '#/components/schemas/HarnessCommit'}}
-                eta_ready_at: {type: [string, 'null'], format: date-time, description: "Worker only. RFC3339 instant the bound ticket is ready for review. Omission preserves; null clears. A past instant is overdue, not rejected."}
-                eta_live_at: {type: [string, 'null'], format: date-time, description: "Coordinator only. RFC3339 instant the bound ticket is live. Omission preserves; null clears."}
+                eta_ready_at: {type: [string, 'null'], format: date-time, description: "Worker only. RFC3339 instant the bound ticket is ready for review, from 30 days ago through 365 days ahead. Omission preserves; null clears. A past instant inside that window is overdue."}
+                eta_live_at: {type: [string, 'null'], format: date-time, description: "Coordinator only. RFC3339 instant the bound ticket is live, from 30 days ago through 365 days ahead. Omission preserves; null clears. The ticket's current project is checked on every write."}
                 progress_pct: {type: [integer, 'null'], minimum: 0, maximum: 100, description: "Worker only. Percent done for the bound ticket, 0 through 100. Omission preserves; null clears."}
       responses:
-        '200': {description: Updated session, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessSession'}}}}
+        '200': {description: Updated session, headers: {Aeon-Contract: {$ref: '#/components/headers/HarnessSessionContract'}}, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessSession'}}}}
         '400': {description: Invalid note or heartbeat}
         '403': {description: Worker proof rejected}
         '410': {description: Authenticated archived generation; detach harness servicing without signaling the process}
@@ -4357,6 +4357,7 @@ components:
     MeContract: {description: Acting principal response contract, schema: {type: string, enum: ['me/1.0']}}
     BaselineBatchesContract: {description: Classic-compatible baseline batch response contract, schema: {type: string, enum: ['baseline-batches/1.0']}}
     ApprovalsContract: {description: Approval response contract, schema: {type: string, enum: ['approvals/1.0']}}
+    HarnessSessionContract: {description: Harness status and heartbeat response contract, schema: {type: string, enum: ['harness-session/1.0']}}
   securitySchemes:
     session: {type: apiKey, in: cookie, name: aeon_session}
     agentKey: {type: http, scheme: bearer, description: Bearer token aeon_<prefix>_<secret>}
@@ -6636,7 +6637,7 @@ components:
       description: Content-free grouped evidence; no message body, rationale, request ID or private routing. Shared reasons belong to the principal inbox and never block a session. Detail requires harness.read and the underlying approval/message access.
       required: [kind, scope, actor, count, blocking, location]
       properties:
-        kind: {type: string, enum: [approval, held_action, reply, reply_due, run_waiting, session_yielded, eta_stale]}
+        kind: {type: string, enum: [approval, held_action, reply, reply_due, run_waiting, session_yielded]}
         scope: {type: string, enum: [session, run, shared]}
         actor: {type: string, enum: [person, agent, unknown]}
         count: {type: integer, minimum: 1}
@@ -6648,7 +6649,7 @@ components:
       required: [id, project_id, agent_principal_id, harness, host, management_mode, role, work_shape, advertised_capabilities, phase, activity, activity_sequence, revision, created_at]
       properties:
         run_status: {type: [string, 'null'], description: Status of the bound run when visible to the caller.}
-        needs_attention: {type: boolean, description: "Bound run waiting, exact bound-run approval pending, or an estimate older than two reporting intervals. Yielded phase is separate session evidence. Principal-only requests and nonblocking replies never set this flag. False for stopped sessions; omitted when not loaded."}
+        needs_attention: {type: boolean, description: "Bound run waiting or an exact bound-run approval pending. Yielded phase is separate session evidence. Principal-only requests and nonblocking replies never set this flag. False for stopped sessions; omitted when not loaded."}
         attention_reasons: {type: array, description: "Authorized session/run reasons and separately scoped shared inbox attention. Empty means loaded with no visible reasons; omitted when unloaded or withheld.", items: {$ref: '#/components/schemas/HarnessAttentionReason'}}
         has_problem: {type: boolean, description: "Bound run failed or lost ownership, or the stop reason reports an error or block. Normal stops are false. Omitted when not loaded."}
         id: {type: string, format: uuid}
@@ -6692,7 +6693,7 @@ components:
         eta_live_at: {type: string, format: date-time, description: When the bound ticket is estimated live.}
         progress_pct: {type: integer, minimum: 0, maximum: 100, description: Percent done. Zero is reported; omission means unknown.}
         eta_reported_at: {type: string, format: date-time, description: When the session last sent an estimate.}
-        eta_stale: {type: boolean, description: True when the last estimate is older than two reporting intervals. Omitted when fresh or absent.}
+        eta_stale: {type: boolean, description: True when the last estimate is older than two reporting intervals. Omitted when fresh or absent. Clients derive attention from this field.}
     TicketEta:
       type: object
       description: Ready and live estimates for one ticket. Epics roll up the latest child instant and the average percent of direct children that have a percent. Unknown stays absent.
@@ -6706,6 +6707,7 @@ components:
         live_by: {type: string}
         ready_stale: {type: boolean}
         live_stale: {type: boolean}
+        eta_stale: {type: boolean, description: True when the ready or live estimate is older than two reporting intervals. Omitted when fresh or absent.}
     HarnessActivityNote:
       type: object
       required: [note, at]
@@ -6882,6 +6884,7 @@ components:
             - {type: 'null'}
         since: {type: string, format: date-time, description: When the session started}
         heartbeat_at: {type: [string, 'null'], format: date-time}
+        eta_stale: {type: boolean, description: True when the session estimate is older than two reporting intervals. Omitted when fresh or absent. Clients derive attention from this field.}
     ProjectMessage:
       allOf:
         - {$ref: './openapi-messaging.yaml#/components/schemas/Message'}

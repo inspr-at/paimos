@@ -3,6 +3,8 @@
 package harness_test
 
 import (
+	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -90,6 +92,8 @@ func TestEtaHeartbeatValidationStaleAndRollup(t *testing.T) {
 	expect(t, f.call(f.agent, "POST", path+"/heartbeat", map[string]any{"phase": "working", "activity": "busy", "activity_sequence": 1, "progress_pct": 101}, lease), 400)
 	expect(t, f.call(f.agent, "POST", path+"/heartbeat", map[string]any{"phase": "working", "activity": "busy", "activity_sequence": 1, "progress_pct": -1}, lease), 400)
 	expect(t, f.call(f.agent, "POST", path+"/heartbeat", map[string]any{"phase": "working", "activity": "busy", "activity_sequence": 1, "eta_live_at": time.Now().Add(time.Hour).Format(time.RFC3339)}, lease), 400)
+	expect(t, f.call(f.agent, "POST", path+"/heartbeat", map[string]any{"phase": "working", "activity": "busy", "activity_sequence": 1, "eta_ready_at": time.Now().Add(-31 * 24 * time.Hour).Format(time.RFC3339)}, lease), 400)
+	expect(t, f.call(f.agent, "POST", path+"/heartbeat", map[string]any{"phase": "working", "activity": "busy", "activity_sequence": 1, "eta_ready_at": time.Now().Add(366 * 24 * time.Hour).Format(time.RFC3339)}, lease), 400)
 
 	past := time.Now().Add(-5 * time.Minute).UTC().Truncate(time.Second)
 	got := f.beat(t, session, lease, 1, map[string]any{"eta_ready_at": past.Format(time.RFC3339), "progress_pct": 0})
@@ -136,18 +140,13 @@ func TestEtaHeartbeatValidationStaleAndRollup(t *testing.T) {
 		return err
 	})
 	status = decode(t, f.call(f.person, "GET", path, nil, ""))
-	if status["needs_attention"] != true || status["eta_stale"] != true {
-		t.Fatalf("21 minutes should be stale: %#v", status)
+	if status["needs_attention"] == true || status["eta_stale"] != true {
+		t.Fatalf("21 minutes should be eta_stale without needs_attention: %#v", status)
 	}
-	reasons, _ := status["attention_reasons"].([]any)
-	found := false
-	for _, item := range reasons {
+	for _, item := range status["attention_reasons"].([]any) {
 		if item.(map[string]any)["kind"] == "eta_stale" {
-			found = true
+			t.Fatalf("eta_stale is not an attention reason: %#v", status["attention_reasons"])
 		}
-	}
-	if !found {
-		t.Fatalf("missing eta_stale reason: %#v", status["attention_reasons"])
 	}
 
 	expect(t, f.call(f.person, "PUT", "/api/settings/eta-interval", map[string]any{"interval_minutes": 0}, ""), 400)
@@ -288,5 +287,219 @@ func TestEtaHeartbeatValidationStaleAndRollup(t *testing.T) {
 	})
 	if len(order) != 3 || order[0] != t1 || order[1] != t2 || order[2] != t3 {
 		t.Fatalf("sort order %v, want earlier, later, unknown", order)
+	}
+}
+
+func TestHarnessReporterOmitsUnusedEta(t *testing.T) {
+	f := fixture(t)
+	lease := "eta-lease-000000000000000000000101"
+	session := f.registerSession(t, f.agent.ID, "worker", f.ticket, "eta-ref-0000000000000101", lease)
+	path := "/api/projects/" + f.project + "/harness-sessions/" + session
+	beat := f.call(f.agent, "POST", path+"/heartbeat", map[string]any{"phase": "working", "activity": "busy", "activity_sequence": 1}, lease)
+	expect(t, beat, 200)
+	status := f.call(f.person, "GET", path, nil, "")
+	expect(t, status, 200)
+	legacy := map[string]bool{"approval": true, "held_action": true, "reply": true, "reply_due": true, "run_waiting": true, "session_yielded": true}
+	for _, tc := range []struct {
+		name string
+		body map[string]any
+		got  string
+	}{
+		{"heartbeat", decode(t, beat), beat.Header().Get("Aeon-Contract")},
+		{"status", decode(t, status), status.Header().Get("Aeon-Contract")},
+	} {
+		if tc.got != "harness-session/1.0" {
+			t.Fatalf("%s Aeon-Contract = %q", tc.name, tc.got)
+		}
+		for _, key := range []string{"eta_ready_at", "eta_live_at", "progress_pct", "eta_reported_at", "eta_stale"} {
+			if _, ok := tc.body[key]; ok {
+				t.Fatalf("%s included %s without an estimate: %#v", tc.name, key, tc.body)
+			}
+		}
+		reasons, _ := tc.body["attention_reasons"].([]any)
+		for _, item := range reasons {
+			kind, _ := item.(map[string]any)["kind"].(string)
+			if !legacy[kind] {
+				t.Fatalf("%s attention kind %q is outside the legacy enum", tc.name, kind)
+			}
+		}
+	}
+	if _, ok := decode(t, beat)["needs_attention"]; ok {
+		t.Fatal("heartbeat projected needs_attention")
+	}
+	if statusBody := decode(t, status); statusBody["needs_attention"] != false {
+		t.Fatalf("status needs_attention %#v", statusBody["needs_attention"])
+	}
+}
+
+func TestRebindClearsEstimate(t *testing.T) {
+	f := fixture(t)
+	lease := "eta-lease-000000000000000000000102"
+	session := f.registerSession(t, f.agent.ID, "worker", f.ticket, "eta-ref-0000000000000102", lease)
+	ready := time.Now().Add(time.Hour).UTC().Format(time.RFC3339)
+	got := f.beat(t, session, lease, 1, map[string]any{"eta_ready_at": ready, "progress_pct": 80})
+	revision := int(got["revision"].(float64))
+	other := uid()
+	f.addNode(t, other, "ETA-20", "ticket", f.project, "Rebound ticket")
+	w := f.call(f.person, "PATCH", "/api/projects/"+f.project+"/harness-sessions/"+session+"/binding", map[string]any{
+		"expected_revision": revision, "ticket_node_id": other, "work_shape": "ship",
+	}, "")
+	expect(t, w, 200)
+	bound := decode(t, w)
+	for _, key := range []string{"eta_ready_at", "eta_live_at", "progress_pct", "eta_reported_at"} {
+		if _, ok := bound[key]; ok {
+			t.Fatalf("rebind kept %s: %#v", key, bound)
+		}
+	}
+	if row := f.nodeEta(t, other); row.ready != nil || row.progress != nil || row.readyStale {
+		t.Fatalf("rebound ticket inherited the previous estimate: %+v", row)
+	}
+}
+
+func TestLiveEtaFollowsCurrentProject(t *testing.T) {
+	f := fixture(t)
+	lease := "eta-lease-000000000000000000000103"
+	session := f.registerSession(t, f.agent.ID, "coordinator", f.ticket, "eta-ref-0000000000000103", lease)
+	first := time.Now().Add(2 * time.Hour).UTC().Truncate(time.Second)
+	f.beat(t, session, lease, 1, map[string]any{"eta_live_at": first.Format(time.RFC3339)})
+	var reported time.Time
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `SELECT reported_at FROM ticket_live_eta WHERE node_id=$1`, f.ticket).Scan(&reported)
+	})
+	other := uid()
+	f.addNode(t, other, "ETA-21", "project", "", "Moved project")
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE nodes SET parent_id=$2 WHERE id=$1`, f.ticket, other)
+		return err
+	})
+	var project string
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `SELECT project_id::text FROM nodes WHERE id=$1`, f.ticket).Scan(&project)
+	})
+	if project != other {
+		t.Fatalf("ticket project = %s, want %s", project, other)
+	}
+	moved := time.Now().Add(3 * time.Hour).UTC().Format(time.RFC3339)
+	expect(t, f.call(f.agent, "POST", "/api/projects/"+f.project+"/harness-sessions/"+session+"/heartbeat", map[string]any{
+		"phase": "working", "activity": "busy", "activity_sequence": 2, "eta_live_at": moved,
+	}, lease), 403)
+	var again time.Time
+	var live time.Time
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `SELECT eta_live_at, reported_at FROM ticket_live_eta WHERE node_id=$1`, f.ticket).Scan(&live, &again)
+	})
+	if !live.Equal(first) || !again.Equal(reported) {
+		t.Fatalf("moved ticket live ETA changed to %s reported %s", live, again)
+	}
+}
+
+func TestLiveEtaUsesTheLeaseProof(t *testing.T) {
+	f := fixture(t)
+	boundLease := "eta-lease-000000000000000000000104"
+	otherLease := "eta-lease-000000000000000000000105"
+	bound := f.registerSession(t, f.agent.ID, "coordinator", f.ticket, "eta-ref-0000000000000104", boundLease)
+	f.beat(t, bound, boundLease, 1, nil)
+	other := f.registerSession(t, f.agent.ID, "coordinator", "", "eta-ref-0000000000000105", otherLease)
+	liveAt := time.Now().Add(4 * time.Hour).UTC().Truncate(time.Second)
+	w := f.call(f.agent, "PUT", "/api/nodes/"+f.ticket+"/live-eta", map[string]any{"eta_live_at": liveAt.Format(time.RFC3339)}, otherLease)
+	expect(t, w, 200)
+	if decode(t, w)["eta_live_at"] == nil {
+		t.Fatalf("lease-matched coordinator was rejected: %s", w.Body.String())
+	}
+	var stamped int
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `SELECT count(*) FROM harness_sessions WHERE id=$1 AND eta_reported_at IS NOT NULL`, bound).Scan(&stamped)
+	})
+	if stamped != 0 {
+		t.Fatal("the bound session absorbed a live ETA proved by the other lease")
+	}
+	if other == "" {
+		t.Fatal("missing coordinator session")
+	}
+}
+
+func TestLiveEtaTimestampsArePerTicket(t *testing.T) {
+	f := fixture(t)
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE principals SET name='Ada' WHERE id=$1`, f.agent.ID)
+		return err
+	})
+	lease := "eta-lease-000000000000000000000106"
+	coord := f.registerSession(t, f.agent.ID, "coordinator", f.ticket, "eta-ref-0000000000000106", lease)
+	liveAt := time.Now().Add(2 * time.Hour).UTC().Truncate(time.Second)
+	first := f.beat(t, coord, lease, 1, map[string]any{"eta_live_at": liveAt.Format(time.RFC3339)})
+	reported := first["eta_reported_at"].(string)
+	other := uid()
+	f.addNode(t, other, "ETA-22", "ticket", f.project, "Other ticket")
+	f.registerSession(t, f.agent.ID, "worker", other, "eta-ref-0000000000000107", "eta-lease-000000000000000000000107")
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `UPDATE ticket_live_eta SET reported_at=clock_timestamp() - interval '21 minutes' WHERE node_id=$1`, f.ticket); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `UPDATE harness_sessions SET eta_reported_at=clock_timestamp() - interval '21 minutes' WHERE id=$1`, coord)
+		return err
+	})
+	later := time.Now().Add(5 * time.Hour).UTC().Format(time.RFC3339)
+	expect(t, f.call(f.agent, "PUT", "/api/nodes/"+other+"/live-eta", map[string]any{"eta_live_at": later}, lease), 200)
+	if row := f.nodeEta(t, f.ticket); !row.liveStale {
+		t.Fatalf("refreshing another ticket cleared the first ticket's staleness: %+v", row)
+	}
+	if row := f.nodeEta(t, other); row.live == nil || row.liveStale {
+		t.Fatalf("the other ticket should be fresh: %+v", row)
+	}
+	status := decode(t, f.call(f.person, "GET", "/api/projects/"+f.project+"/harness-sessions/"+coord, nil, ""))
+	if status["eta_stale"] != true || status["eta_reported_at"] == reported {
+		t.Fatalf("session timestamp was refreshed by another ticket: original %s now %#v", reported, status["eta_reported_at"])
+	}
+	expect(t, f.call(f.agent, "PUT", "/api/nodes/"+other+"/live-eta", map[string]any{"eta_live_at": nil}, lease), 200)
+	if row := f.nodeEta(t, other); row.live != nil || row.liveStale {
+		t.Fatalf("clearing the other ticket left its estimate: %+v", row)
+	}
+	cleared := decode(t, f.call(f.person, "GET", "/api/projects/"+f.project+"/harness-sessions/"+coord, nil, ""))
+	if cleared["eta_stale"] != true || cleared["eta_reported_at"] == nil {
+		t.Fatalf("clearing an unbound ticket changed the bound session timestamp: %#v", cleared)
+	}
+	expect(t, f.call(f.agent, "POST", "/api/projects/"+f.project+"/harness-sessions/"+coord+"/heartbeat", map[string]any{
+		"phase": "working", "activity": "busy", "activity_sequence": 2, "eta_live_at": nil,
+	}, lease), 200)
+	gone := decode(t, f.call(f.person, "GET", "/api/projects/"+f.project+"/harness-sessions/"+coord, nil, ""))
+	if _, ok := gone["eta_reported_at"]; ok || gone["eta_stale"] == true {
+		t.Fatalf("clearing the bound estimate left its timestamp: %#v", gone)
+	}
+	if row := f.nodeEta(t, f.ticket); row.live != nil {
+		t.Fatalf("bound clear left the ticket live ETA: %+v", row)
+	}
+}
+
+func TestEtaMigrationLockAndValidation(t *testing.T) {
+	add, err := os.ReadFile("../db/migrations/0907_eta_progress.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	validate, err := os.ReadFile("../db/migrations/0908_eta_progress_validate.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, body := range []string{string(add), string(validate)} {
+		if !strings.Contains(body, "SET LOCAL lock_timeout = '5s'") {
+			t.Fatal("migration is missing lock_timeout")
+		}
+	}
+	if !strings.Contains(string(add), "NOT VALID") || strings.Contains(string(add), "VALIDATE CONSTRAINT") {
+		t.Fatal("0907 must add the check NOT VALID and leave validation to 0908")
+	}
+	if !strings.Contains(string(add), "harness_sessions is small") {
+		t.Fatal("0907 must say why a plain index on harness_sessions is acceptable")
+	}
+	if !strings.Contains(string(validate), "VALIDATE CONSTRAINT harness_sessions_progress_pct") {
+		t.Fatal("0908 must validate the progress check")
+	}
+	f := fixture(t)
+	var validated bool
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `SELECT convalidated FROM pg_constraint WHERE conname='harness_sessions_progress_pct'`).Scan(&validated)
+	})
+	if !validated {
+		t.Fatal("progress check is not validated")
 	}
 }

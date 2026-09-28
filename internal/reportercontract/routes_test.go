@@ -9,6 +9,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/approvals"
 	"github.com/inspr-at/paimos/internal/auth"
+	"github.com/inspr-at/paimos/internal/harness"
 	"github.com/inspr-at/paimos/internal/journey"
 	"github.com/inspr-at/paimos/internal/reportercontract"
 	"github.com/inspr-at/paimos/internal/stagehandoff"
@@ -33,6 +34,8 @@ func TestReporterRoutesDeclareHeaderBeforeAuthentication(t *testing.T) {
 		{"approvals decision", "POST", "/api/approvals/00000000-0000-4000-8000-000000000001/decision", reportercontract.Approvals, approvals.New(nil).Mount},
 		{"approvals revoke", "POST", "/api/approvals/00000000-0000-4000-8000-000000000001/revoke", reportercontract.Approvals, approvals.New(nil).Mount},
 		{"me", "GET", "/api/me", reportercontract.Me, (&auth.Module{}).Mount},
+		{"harness status", "GET", "/api/projects/00000000-0000-4000-8000-000000000001/harness-sessions/00000000-0000-4000-8000-000000000002", reportercontract.HarnessSession, harness.New(nil).Mount},
+		{"harness heartbeat", "POST", "/api/projects/00000000-0000-4000-8000-000000000001/harness-sessions/00000000-0000-4000-8000-000000000002/heartbeat", reportercontract.HarnessSession, harness.New(nil).Mount},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			mux := http.NewServeMux()

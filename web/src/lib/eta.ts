@@ -30,6 +30,7 @@ export interface TicketEta {
   live_by?: string | null
   ready_stale?: boolean
   live_stale?: boolean
+  eta_stale?: boolean
 }
 
 export interface EtaView {
@@ -48,7 +49,7 @@ export function etaFromTicket(eta: TicketEta | null | undefined): EtaInput | nul
   const live = eta.eta_live_at ? { at: eta.eta_live_at, reported_at: eta.live_reported_at, by: eta.live_by, stale: eta.live_stale, kind: 'Live' as const } : null
   const progress = typeof eta.progress_pct === 'number' ? eta.progress_pct : null
   if (!ready && !live && progress == null) return null
-  return { ready, live, progress, stale: !!(eta.ready_stale || eta.live_stale) }
+  return { ready, live, progress, stale: !!(eta.eta_stale || eta.ready_stale || eta.live_stale) }
 }
 
 export function etaFromSession(session: {
