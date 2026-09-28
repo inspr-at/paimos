@@ -138,6 +138,7 @@ func (rt *runtime) root() *Command {
 		rt.cmdIssue(),
 		rt.cmdProject(),
 		rt.cmdRelation(),
+		rt.cmdRulesImport(),
 		rt.cmdTag(),
 		rt.cmdAttach(),
 		rt.cmdExternalStage(),
