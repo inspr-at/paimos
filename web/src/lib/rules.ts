@@ -500,6 +500,59 @@ export const getVersion = (setId: string, version: string) => send<RuleSnapshot>
 export const restoreSet = (setId: string, body: { expected_revision: number; version: string; new_version: string; note?: string }) => send<RuleSnapshot>(`/rules/sets/${encodeURIComponent(setId)}/restore`, 'POST', withNote(body)).then(cleanSnapshot)
 export const mergeRules = (query: string) => send<MergedRules>(`/rules/merged?${query}`)
 
+/** One entry of a batch publication; version is 'auto' or an explicit calendar version. */
+export interface BatchItem { set_id: string; expected_revision: number; version: string }
+export interface BatchResult { batch_id: string; versions: RuleSnapshot[]; max_bytes: number }
+/** Publishes several sets under one person approval (POST /rules/publish). All or nothing. */
+export const publishSets = (items: BatchItem[], note?: string) => send<BatchResult>('/rules/publish', 'POST', withNote({ items, note }))
+  .then(result => ({ ...result, versions: (result.versions ?? []).map(cleanSnapshot) }))
+
+// ---------- Set state: what is live and what waits ----------
+export type SetState = 'new' | 'changed' | 'live'
+const byIdentity = (rules: AgentRule[]) => [...rules].sort((a, b) => (a.identity < b.identity ? -1 : a.identity > b.identity ? 1 : 0))
+/** new: never published; changed: the saved draft differs from the live version; live: they match. */
+export function setState(set: Pick<RuleSet, 'name' | 'rules' | 'published_version'>, live: Pick<RuleSnapshot, 'name' | 'rules'> | null | undefined): SetState {
+  if (!set.published_version) return 'new'
+  if (!live) return 'live'
+  return live.name === set.name && rulesEqual(byIdentity(live.rules), byIdentity(set.rules)) ? 'live' : 'changed'
+}
+
+// ---------- Projected merge: the file size a publication would produce ----------
+// The same rules as the server's Merge (internal/rules/merge.go): rank, then set id;
+// role and harness selectors; expired rules drop out; the highest rank wins an
+// identity; only enabled rules are rendered. The server stays the authority (422).
+export interface MergeInput { id: string; scope: RuleScope; rules: AgentRule[] }
+export interface MergeContext { projectId: string; personId: string; role: RoleName; harness: HarnessName; agentId?: string; taskId?: string }
+// The server's merged file starts with a fixed 22-byte heading line and a blank
+// line (merge.go); every rendered rule is "- [identity] text" plus a newline.
+export const MERGE_HEADING_BYTES = 22
+export function projectedRules(sets: MergeInput[], ctx: MergeContext, now = new Date()): AgentRule[] {
+  const context: RuleContext = { projectId: ctx.projectId, personId: ctx.personId, agentId: ctx.agentId ?? '', role: ctx.role, harness: ctx.harness, taskId: ctx.taskId ?? '' }
+  const ordered = sets.filter(set => scopeMatches(set.scope, context))
+    .sort((a, b) => scopeRank(a.scope) - scopeRank(b.scope) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+  const chosen = new Map<string, AgentRule>()
+  for (const set of ordered) {
+    for (const rule of set.rules) {
+      if ((rule.roles?.length && !rule.roles.includes(ctx.role)) || (rule.harnesses?.length && !rule.harnesses.includes(ctx.harness))) continue
+      if (rule.expires_at && new Date(rule.expires_at).getTime() <= now.getTime()) continue
+      if (!chosen.has(rule.identity)) chosen.set(rule.identity, rule)
+    }
+  }
+  return [...chosen.keys()].sort().map(key => chosen.get(key)!).filter(rule => rule.enabled || rule.strength === 'locked')
+}
+export function projectedBytes(sets: MergeInput[], ctx: MergeContext, now = new Date()): number {
+  return projectedRules(sets, ctx, now).reduce((sum, rule) => sum + utf8Length(`- [${rule.identity}] ${rule.text}\n`), MERGE_HEADING_BYTES)
+}
+/** The largest merged file over every role and harness for one project and person. */
+export function largestProjected(sets: MergeInput[], projectId: string, personId: string, now = new Date()): { bytes: number; role: RoleName; harness: HarnessName } {
+  let best = { bytes: 0, role: ROLES[0] as RoleName, harness: HARNESSES[0] as HarnessName }
+  for (const role of ROLES) for (const harness of HARNESSES) {
+    const bytes = projectedBytes(sets, { projectId, personId, role, harness }, now)
+    if (bytes > best.bytes) best = { bytes, role, harness }
+  }
+  return best
+}
+
 function withNote<T extends { note?: string }>(body: T): T {
   const note = body.note?.trim()
   if (!note) {
@@ -522,7 +575,17 @@ export const IMPORT_MAX_BYTES = 2 * 1024 * 1024
 export const IMPORT_MAX_SETS = 20
 export const IMPORT_MAX_RULES = 100
 
-export interface DraftImportSet { name: string; rules: AgentRule[] }
+/** What the import does with one set: create it, replace its saved draft, or skip it (identical). */
+export type ImportAction = 'create' | 'update' | 'skip'
+export interface ImportCounts { added: number; changed: number; unchanged: number; removed: number }
+export interface DraftImportSet {
+  name: string
+  rules: AgentRule[]
+  /** Filled by the review against the workspace's current sets. */
+  action?: ImportAction
+  counts?: ImportCounts
+  existing?: { id: string; revision: number; rules: AgentRule[] }
+}
 export interface DraftImportLayer { scope: RuleScope; sets: DraftImportSet[] }
 export interface DraftImportPlan { tenantId: string; layers: DraftImportLayer[] }
 /** rulesSaved is true when the draft save was confirmed, false when the server rejected it, and null when the save reply was lost. */
@@ -532,6 +595,11 @@ export type ImportOutcome =
   | { status: 'rejected'; confirmed: ImportConfirmed[]; message: string }
   | { status: 'partial'; confirmed: ImportConfirmed[]; message: string }
   | { status: 'uncertain'; confirmed: ImportConfirmed[]; message: string }
+/** One set's outcome, for a truthful per-set report after a partial or uncertain import. */
+export interface ImportSetResult { scope: RuleScope; name: string; action: ImportAction; status: 'saved' | 'unchanged' | 'failed' | 'unknown' | 'not-started'; reason?: string }
+export type ImportReport = ImportOutcome & { results: ImportSetResult[] }
+/** A set the workspace already holds, as the import compares against it. */
+export interface ExistingSet { id: string; name: string; revision: number; rules: AgentRule[] }
 
 const IMPORT_KEYS = ['schema', 'tenant_id', 'layers']
 const SCOPE_KEYS = ['layer', 'project_id', 'owner_id', 'agent_id', 'role', 'task_id']
@@ -698,7 +766,7 @@ function parseImportRule(raw: unknown, seen: ReadonlySet<string>): { rule: Agent
   return { rule: normalizeRule(rule) }
 }
 
-function reviewDraftImport(plan: DraftImportPlan, tenantId: string, caller: Caller | null, existing: { scope: RuleScope; names: string[] }[]): string | null {
+function reviewDraftImport(plan: DraftImportPlan, tenantId: string, caller: Caller | null): string | null {
   const blocked = importBlock(caller)
   if (blocked) return blocked
   if (plan.tenantId !== tenantId) return 'This file is for a different workspace.'
@@ -714,11 +782,9 @@ function reviewDraftImport(plan: DraftImportPlan, tenantId: string, caller: Call
     if (block) return block
     const taken = new Set<string>()
     const seenIds = new Map<string, string>()
-    const present = existing.filter(row => scopeKey(row.scope) === key).flatMap(row => row.names)
     for (const set of layer.sets) {
       if (taken.has(set.name)) return `“${set.name}” is listed twice for ${scopeLabel(layer.scope)}.`
       taken.add(set.name)
-      if (present.includes(set.name)) return `“${set.name}” already exists in ${scopeLabel(layer.scope)}. Import adds new sets and does not change existing ones.`
       const local = new Set<string>()
       for (const rule of set.rules) {
         if (local.has(rule.identity)) return `“${rule.identity}” is already used in this set.`
@@ -737,12 +803,59 @@ function reviewDraftImport(plan: DraftImportPlan, tenantId: string, caller: Call
   return null
 }
 
+function countChanges(before: AgentRule[], after: AgentRule[]): ImportCounts {
+  const prior = new Map(before.map(rule => [rule.identity, rule]))
+  const next = new Set(after.map(rule => rule.identity))
+  const counts: ImportCounts = { added: 0, changed: 0, unchanged: 0, removed: 0 }
+  for (const rule of after) {
+    const old = prior.get(rule.identity)
+    if (!old) counts.added += 1
+    else if (rulesEqual([old], [rule])) counts.unchanged += 1
+    else counts.changed += 1
+  }
+  for (const rule of before) if (!next.has(rule.identity)) counts.removed += 1
+  return counts
+}
+
+/** Compares every set in the file with the set of the same name and scope, if any. */
+export function annotateImport(plan: DraftImportPlan, existing: { scope: RuleScope; sets: ExistingSet[] }[]): DraftImportPlan {
+  return {
+    tenantId: plan.tenantId,
+    layers: plan.layers.map(layer => {
+      const present = existing.filter(row => scopeKey(row.scope) === scopeKey(layer.scope)).flatMap(row => row.sets)
+      return {
+        scope: layer.scope,
+        sets: layer.sets.map(set => {
+          const match = present.find(item => item.name === set.name)
+          const { name, rules } = set
+          if (!match) return { name, rules, action: 'create' as const, counts: { added: rules.length, changed: 0, unchanged: 0, removed: 0 } }
+          const counts = countChanges(match.rules, rules)
+          const same = counts.added === 0 && counts.changed === 0 && counts.removed === 0
+          return { name, rules, action: same ? 'skip' as const : 'update' as const, counts, existing: { id: match.id, revision: match.revision, rules: match.rules } }
+        }),
+      }
+    }),
+  }
+}
+const importSets = (plan: DraftImportPlan) => plan.layers.flatMap(layer => layer.sets.map(set => ({ scope: layer.scope, set })))
+/** Sets the import writes: new ones and changed ones. */
+export const importWrites = (plan: DraftImportPlan) => importSets(plan).filter(item => item.set.action !== 'skip').length
+
+/** Project ids named by the scopes of a draft file, so their permissions can be loaded before review. */
+export function draftImportProjects(text: string): string[] {
+  try {
+    const raw = JSON.parse(text) as { layers?: { scope?: { project_id?: unknown } }[] }
+    const ids = (Array.isArray(raw?.layers) ? raw.layers : []).map(layer => layer?.scope?.project_id).filter((id): id is string => typeof id === 'string' && isUuid(id))
+    return [...new Set(ids)]
+  } catch { return [] }
+}
+
 export function parseDraftImport(
   text: string,
   byteLength: number,
   tenantId: string,
   caller: Caller | null,
-  existing: { scope: RuleScope; names: string[] }[] = [],
+  existing: { scope: RuleScope; sets: ExistingSet[] }[] = [],
 ): { plan: DraftImportPlan } | { error: string } {
   if (byteLength > IMPORT_MAX_BYTES || utf8Length(text) > IMPORT_MAX_BYTES) return { error: 'The file must be 2 MiB or smaller.' }
   let raw: unknown
@@ -784,9 +897,9 @@ export function parseDraftImport(
     layers.push({ scope: scope.scope, sets })
   }
   const plan: DraftImportPlan = { tenantId: raw.tenant_id, layers }
-  const review = reviewDraftImport(plan, tenantId, caller, existing)
+  const review = reviewDraftImport(plan, tenantId, caller)
   if (review) return { error: review }
-  return { plan }
+  return { plan: annotateImport(plan, existing) }
 }
 
 export interface ImportIO {
@@ -815,27 +928,46 @@ export async function runDraftImport(
   tenantId: string,
   caller: Caller | null,
   io: ImportIO = { listLayers, listSets, createLayer, createSet, saveDraft },
-): Promise<ImportOutcome> {
+): Promise<ImportReport> {
+  // Every set starts as not started; each step records what the server confirmed.
+  const results: ImportSetResult[] = importSets(plan).map(({ scope, set }) => ({ scope, name: set.name, action: set.action ?? 'create', status: 'not-started' }))
+  const resultOf = (scope: RuleScope, name: string) => results.find(item => item.name === name && scopeKey(item.scope) === scopeKey(scope))!
+  const done = (outcome: ImportOutcome): ImportReport => ({ ...outcome, results })
+  const refuse = (message: string) => done(rejected(message))
   const blocked = importBlock(caller)
-  if (blocked) return rejected(blocked)
-  let listed: { layer: RuleLayer; names: string[] }[]
+  if (blocked) return refuse(blocked)
+  let listed: { layer: RuleLayer; sets: RuleSet[] }[]
   try {
     const { layers } = await io.listLayers()
     listed = []
     for (const layer of layers) {
       const { sets } = await io.listSets(layer.id)
-      listed.push({ layer, names: sets.map(set => set.name) })
+      listed.push({ layer, sets })
     }
   } catch (cause) {
-    if (replyUncertain(cause)) return rejected('Could not read the current sets, so nothing was imported.')
-    return rejected(rulesMessage(cause))
+    if (replyUncertain(cause)) return refuse('Could not read the current sets, so nothing was imported.')
+    return refuse(rulesMessage(cause))
   }
-  const review = reviewDraftImport(plan, tenantId, caller, listed.map(row => ({ scope: row.layer.scope, names: row.names })))
-  if (review) return rejected(review)
+  const review = reviewDraftImport(plan, tenantId, caller)
+  if (review) return refuse(review)
+  // The workspace must still look as it did when the file was reviewed; a set
+  // added or saved elsewhere since then stops the import before any write.
+  const fresh = annotateImport(plan, listed.map(row => ({ scope: row.layer.scope, sets: row.sets })))
+  for (const [index, { scope, set }] of importSets(fresh).entries()) {
+    const reviewed = importSets(plan)[index]!.set
+    const action = reviewed.action ?? 'create'
+    if (set.action === 'skip' && action === 'skip') continue
+    if ((action === 'create') !== (set.action === 'create') || (action !== 'create' && reviewed.existing?.revision !== set.existing?.revision)) {
+      return refuse(`“${set.name}” in ${scopeLabel(scope)} changed since the file was reviewed. Nothing was imported; review the file again.`)
+    }
+  }
 
   const confirmed: ImportConfirmed[] = []
   const layersByKey = new Map(listed.map(row => [scopeKey(row.layer.scope), row.layer]))
   for (const layer of plan.layers) {
+    const writes = layer.sets.filter(set => (set.action ?? 'create') !== 'skip')
+    for (const set of layer.sets) if (set.action === 'skip') resultOf(layer.scope, set.name).status = 'unchanged'
+    if (!writes.length) continue
     let remote = layersByKey.get(scopeKey(layer.scope))
     if (!remote) {
       try {
@@ -843,34 +975,48 @@ export async function runDraftImport(
         layersByKey.set(scopeKey(remote.scope), remote)
       } catch (cause) {
         if (replyUncertain(cause)) {
-          return { status: 'uncertain', confirmed, message: `The workspace did not confirm the layer for ${scopeLabel(layer.scope)}. ${confirmedLine(confirmed)}Check the server before trying again. This import did not retry and did not roll anything back.` }
+          return done({ status: 'uncertain', confirmed, message: `The workspace did not confirm the layer for ${scopeLabel(layer.scope)}. ${confirmedLine(confirmed)}Check the server before trying again. This import did not retry and did not roll anything back.` })
         }
-        return { status: 'partial', confirmed, message: `${confirmedLine(confirmed)}${scopeLabel(layer.scope)} was not created. ${rulesMessage(cause)} Later sets were not started. Nothing was rolled back or published.` }
+        for (const set of writes) Object.assign(resultOf(layer.scope, set.name), { status: 'failed', reason: rulesMessage(cause) })
+        return done({ status: 'partial', confirmed, message: `${confirmedLine(confirmed)}${scopeLabel(layer.scope)} was not created. ${rulesMessage(cause)} Later sets were not started. Nothing was rolled back or published.` })
       }
     }
-    for (const set of layer.sets) {
-      let created: RuleSet
-      try {
-        created = await io.createSet(remote.id, set.name)
-      } catch (cause) {
-        if (replyUncertain(cause)) {
-          return { status: 'uncertain', confirmed, message: `The workspace did not confirm “${set.name}”. ${confirmedLine(confirmed)}Check the server before trying again. This import did not retry and did not roll anything back.` }
+    for (const set of writes) {
+      const result = resultOf(layer.scope, set.name)
+      let target: RuleSet
+      if (set.action === 'update' && set.existing) {
+        target = { id: set.existing.id, layer_id: remote.id, scope: remote.scope, name: set.name, revision: set.existing.revision, rules: set.existing.rules, published_version: '' }
+      } else {
+        try {
+          target = await io.createSet(remote.id, set.name)
+        } catch (cause) {
+          if (replyUncertain(cause)) {
+            result.status = 'unknown'
+            return done({ status: 'uncertain', confirmed, message: `The workspace did not confirm “${set.name}”. ${confirmedLine(confirmed)}Check the server before trying again. This import did not retry and did not roll anything back.` })
+          }
+          Object.assign(result, { status: 'failed', reason: rulesMessage(cause) })
+          return done({ status: 'partial', confirmed, message: `${confirmedLine(confirmed)}“${set.name}” was not created. ${rulesMessage(cause)} Later sets were not started. Confirmed drafts stay on the server. Nothing was rolled back or published.` })
         }
-        return { status: 'partial', confirmed, message: `${confirmedLine(confirmed)}“${set.name}” was not created. ${rulesMessage(cause)} Later sets were not started. Confirmed drafts stay on the server. Nothing was rolled back or published.` }
       }
       try {
-        const saved = await io.saveDraft(created.id, { expected_revision: created.revision, name: set.name, rules: set.rules })
+        const saved = await io.saveDraft(target.id, { expected_revision: target.revision, name: set.name, rules: set.rules })
         confirmed.push({ scope: remote.scope, layer: remote, set: saved, rulesSaved: true })
+        result.status = 'saved'
       } catch (cause) {
+        const updated = set.action === 'update'
         if (replyUncertain(cause)) {
-          confirmed.push({ scope: remote.scope, layer: remote, set: created, rulesSaved: null })
-          return { status: 'uncertain', confirmed, message: `The workspace did not confirm the rules for “${set.name}”. The set “${set.name}” ${created.id} revision ${created.revision} exists; whether its rules were saved is unknown. ${confirmedLine(confirmed)}Check the server before trying again. This import did not retry and did not roll anything back.` }
+          if (!updated) confirmed.push({ scope: remote.scope, layer: remote, set: target, rulesSaved: null })
+          result.status = 'unknown'
+          const what = updated ? `The workspace did not confirm the new draft for “${set.name}”; whether it was saved is unknown.` : `The workspace did not confirm the rules for “${set.name}”. The set “${set.name}” ${target.id} revision ${target.revision} exists; whether its rules were saved is unknown.`
+          return done({ status: 'uncertain', confirmed, message: `${what} ${confirmedLine(confirmed)}Check the server before trying again. This import did not retry and did not roll anything back.` })
         }
-        confirmed.push({ scope: remote.scope, layer: remote, set: created, rulesSaved: false })
-        return { status: 'partial', confirmed, message: `${confirmedLine(confirmed)}“${set.name}” was created, but its rules were not saved. ${rulesMessage(cause)} Later sets were not started. Confirmed drafts stay on the server. Nothing was rolled back or published.` }
+        if (!updated) confirmed.push({ scope: remote.scope, layer: remote, set: target, rulesSaved: false })
+        Object.assign(result, { status: 'failed', reason: rulesMessage(cause) })
+        const what = updated ? `The draft for “${set.name}” was not saved.` : `“${set.name}” was created, but its rules were not saved.`
+        return done({ status: 'partial', confirmed, message: `${confirmedLine(confirmed)}${what} ${rulesMessage(cause)} Later sets were not started. Confirmed drafts stay on the server. Nothing was rolled back or published.` })
       }
     }
   }
   const count = confirmed.length
-  return { status: 'imported', confirmed, message: `Imported ${count} draft ${count === 1 ? 'set' : 'sets'}. Nothing was published.` }
+  return done({ status: 'imported', confirmed, message: `Imported ${count} draft ${count === 1 ? 'set' : 'sets'}. Nothing was published.` })
 }

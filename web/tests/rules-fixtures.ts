@@ -40,6 +40,7 @@ export async function mockRules(page: Page, options: { kind?: 'person' | 'agent'
     companyName: 'Secrets',
     projectName: 'Scope',
     published: '260920100000.0.0',
+    projectPublished: '',
     companyRules: [rule('keep-secrets', 'Never print the environment.', 'locked'), rule('record-source', 'Record the source.')],
     projectRules: [rule('keep-secrets', 'Never print the environment.'), rule('package-scope', 'Your package is your scope.')],
   }
@@ -49,7 +50,7 @@ export async function mockRules(page: Page, options: { kind?: 'person' | 'agent'
   }]
   const sets = () => ({
     [COMPANY_SET]: { id: COMPANY_SET, layer_id: COMPANY, scope: { layer: 'company' }, name: state.companyName, revision: state.revision, rules: state.companyRules, published_version: state.published },
-    [PROJECT_SET]: { id: PROJECT_SET, layer_id: PROJECT_LAYER, scope: { layer: 'project', project_id: RULE_PROJECT }, name: state.projectName, revision: state.revision, rules: state.projectRules, published_version: '' },
+    [PROJECT_SET]: { id: PROJECT_SET, layer_id: PROJECT_LAYER, scope: { layer: 'project', project_id: RULE_PROJECT }, name: state.projectName, revision: state.revision, rules: state.projectRules, published_version: state.projectPublished },
   })
   await page.route('**/api/**', async route => {
     const request = route.request()
@@ -149,6 +150,24 @@ export async function mockRules(page: Page, options: { kind?: 'person' | 'agent'
       versions.unshift(snapshot)
       if (restore[1] === COMPANY_SET) { state.companyRules = snapshot.rules.map(item => ({ ...item })); state.published = body.new_version }
       return route.fulfill({ json: snapshot })
+    }
+    const one = /^\/api\/rules\/sets\/([^/]+)\/versions\/([^/]+)$/.exec(path)
+    if (one && method === 'GET') {
+      const found = one[1] === COMPANY_SET ? versions.find(version => version.version === decodeURIComponent(one[2])) : undefined
+      return found ? route.fulfill({ json: found }) : route.fulfill({ status: 404, json: { error: 'unavailable', code: 'not_found' } })
+    }
+    if (path === '/api/rules/publish' && method === 'POST') {
+      if (options.kind === 'agent') return route.fulfill({ status: 403, json: { error: 'permission or scoped ownership denied', code: 'forbidden' } })
+      const note = typeof body.note === 'string' ? body.note.trim() : ''
+      const out = (body.items as { set_id: string; version: string }[]).map(item => {
+        const version = item.version === 'auto' ? '260928213000.0.0' : item.version
+        const set = sets()[item.set_id]
+        const snapshot = { set_id: item.set_id, scope: set?.scope ?? { layer: 'company' }, name: set?.name ?? '', revision: state.revision, version, sha256: 'cd'.repeat(32), rules: set?.rules ?? [], published_at: '2026-09-28T21:30:00Z', ...(note ? { note } : {}) }
+        if (item.set_id === COMPANY_SET) { versions.unshift(snapshot); state.published = version }
+        if (item.set_id === PROJECT_SET) state.projectPublished = version
+        return snapshot
+      })
+      return route.fulfill({ json: { batch_id: '8a0f0c3e-5d1b-8e2a-9c4f-0b1d2e3f4a5b', versions: out, max_bytes: 120 } })
     }
     const history = /^\/api\/rules\/sets\/([^/]+)\/versions$/.exec(path)
     if (history && method === 'GET') return route.fulfill({ json: { versions: history[1] === COMPANY_SET ? versions : [] } })

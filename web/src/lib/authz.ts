@@ -98,6 +98,14 @@ export function permissionsKnown(projectId?: string): boolean {
   if (!cache.has(keyOf(projectId))) { void refreshPermissions(projectId); return false }
   return true
 }
+// Waits until the server has answered for this scope (asking once if nothing is
+// cached). 'known' means can() now reflects the server; 'unavailable' means the
+// answer could not be had, which is not a denial and must not be shown as one.
+export async function ensurePermissions(projectId?: string): Promise<'known' | 'unavailable'> {
+  const key = keyOf(projectId)
+  if (!cache.has(key) || requests.has(key)) await refreshPermissions(projectId)
+  return !revoked && cache.get(key) ? 'known' : 'unavailable'
+}
 export function permissionsAvailable(): boolean { revision.value; return !!cache.get('') }
 export function myWorkspaceRole(): Grant['role'] { revision.value; return cache.get('')?.workspace.role ?? null }
 export function myPermissions(projectId?: string): Set<string> {

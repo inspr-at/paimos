@@ -5,7 +5,8 @@ import { RequestFailure } from '../src/lib/api.ts'
 import {
   IMPORT_MAX_BYTES, RulesError, applyEnabled, blankRule, calendarVersion, diffRules, duplicateRule, groupState, heldIdentities,
   identityFromText, layerInColumn, mergeQuery, parseDraftImport, publishBlock, replyUncertain, resetAvailability, rulePayload, rulesEqual,
-  runDraftImport, scopeFor, touchRule, validVersion, validateDraft, validateRule, writeBlock,
+  runDraftImport, scopeFor, touchRule, validVersion, validateDraft, validateRule, writeBlock, importWrites, draftImportProjects,
+  setState, projectedRules, projectedBytes, largestProjected,
   type AgentRule, type Caller, type ImportIO, type RuleScope, type RuleSet,
 } from '../src/lib/rules.ts'
 
@@ -223,8 +224,27 @@ test('draft import accepts a person file and rejects anything it must not write'
   assert.match('error' in unknown ? unknown.error : '', /layer/)
   const project = parseDraftImport(draftFile([{ scope: { layer: 'project' }, sets: [{ name: 'Desk', rules: [] }] }]), 80, TENANT, admin)
   assert.match('error' in project ? project.error : '', /project id/)
-  const taken = parseDraftImport(draftFile([{ scope: { layer: 'company' }, sets: [{ name: 'Secrets', rules: [importRule('one', 'One.')] }] }]), 120, TENANT, admin, [{ scope: { layer: 'company' }, names: ['Secrets'] }])
-  assert.match('error' in taken ? taken.error : '', /does not change existing/)
+  // A set that already exists by name in the same scope is compared, not refused:
+  // identical sets are skipped, changed ones replace that set's saved draft.
+  const existing = { id: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee', name: 'Secrets', revision: 4, rules: [importRule('one', 'One.'), importRule('gone', 'Gone.')] }
+  const taken = parseDraftImport(draftFile([{ scope: { layer: 'company' }, sets: [
+    { name: 'Secrets', rules: [importRule('one', 'One, sharper.'), importRule('two', 'Two.')] },
+    { name: 'Fresh', rules: [importRule('three', 'Three.')] },
+  ] }]), 200, TENANT, admin, [{ scope: { layer: 'company' }, sets: [existing] }])
+  assert.equal('plan' in taken, true)
+  if ('plan' in taken) {
+    const [changed, fresh] = taken.plan.layers[0]!.sets
+    assert.equal(changed?.action, 'update')
+    assert.deepEqual(changed?.counts, { added: 1, changed: 1, unchanged: 0, removed: 1 })
+    assert.equal(changed?.existing?.revision, 4)
+    assert.equal(fresh?.action, 'create')
+    assert.equal(importWrites(taken.plan), 2)
+  }
+  const same = parseDraftImport(draftFile([{ scope: { layer: 'company' }, sets: [{ name: 'Secrets', rules: existing.rules }] }]), 200, TENANT, admin, [{ scope: { layer: 'company' }, sets: [existing] }])
+  assert.equal('plan' in same && same.plan.layers[0]?.sets[0]?.action, 'skip')
+  assert.equal('plan' in same && importWrites(same.plan), 0)
+  assert.deepEqual(draftImportProjects(draftFile([{ scope: { layer: 'project', project_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' } }, { scope: { layer: 'project', project_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' } }, { scope: { layer: 'company' } }])), ['aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'])
+  assert.deepEqual(draftImportProjects('{'), [])
   const otherPerson = parseDraftImport(draftFile([{ scope: { layer: 'person', owner_id: '33333333-3333-4333-8333-333333333333' }, sets: [{ name: 'Desk', rules: [importRule('one', 'One.')] }] }]), 160, TENANT, admin)
   assert.match('error' in otherPerson ? otherPerson.error : '', /Only that person/)
   const agentCaller = parseDraftImport(draftFile([{ scope: { layer: 'person', owner_id: SELF }, sets: [{ name: 'Desk', rules: [] }] }]), 80, TENANT, agent(['rules.write', 'rules.publish']))
@@ -320,7 +340,59 @@ test('draft import writes new sets in order and stops without publishing', async
   if (!('plan' in company)) return
   const refused = await runDraftImport(company.plan, TENANT, admin, present.io)
   assert.equal(refused.status, 'rejected')
+  assert.match(refused.message, /changed since the file was reviewed/)
   assert.equal(present.calls.some(call => call.startsWith('create')), false)
+  assert.equal(present.calls.some(call => call.startsWith('saveDraft')), false)
+})
+
+test('a reviewed update replaces only that draft, skips identical sets and reports each set', async () => {
+  const memory = memoryIO()
+  memory.layers.push({ id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', scope: { layer: 'company' }, names: ['Secrets', 'Git'] })
+  const listed = await memory.io.listSets('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa')
+  const existing = [{ scope: { layer: 'company' } as RuleScope, sets: listed.sets }]
+  const file = draftFile([{ scope: { layer: 'company' }, sets: [
+    { name: 'Secrets', rules: [importRule('one', 'One.')] },
+    { name: 'Git', rules: [] },
+    { name: 'New', rules: [importRule('two', 'Two.')] },
+  ] }])
+  const parsed = parseDraftImport(file, file.length, TENANT, admin, existing)
+  assert.equal('plan' in parsed, true)
+  if (!('plan' in parsed)) return
+  assert.deepEqual(parsed.plan.layers[0]!.sets.map(set => set.action), ['update', 'skip', 'create'])
+  const outcome = await runDraftImport(parsed.plan, TENANT, admin, memory.io)
+  assert.equal(outcome.status, 'imported')
+  assert.deepEqual(outcome.results.map(result => [result.name, result.action, result.status]), [['Secrets', 'update', 'saved'], ['Git', 'skip', 'unchanged'], ['New', 'create', 'saved']])
+  assert.deepEqual(memory.calls.filter(call => call.startsWith('createSet') || call.startsWith('saveDraft')), ['saveDraft:Secrets', 'createSet:New', 'saveDraft:New'])
+  assert.equal(memory.calls.some(call => call.includes('publish')), false)
+
+  // A failed update is reported for that set; later sets are reported as not started.
+  const failing = memoryIO()
+  failing.layers.push({ id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', scope: { layer: 'company' }, names: ['Secrets', 'Git'] })
+  failing.io.saveDraft = async () => { throw new RulesError(409, 'revision_conflict', 'conflict') }
+  const partial = await runDraftImport(parsed.plan, TENANT, admin, failing.io)
+  assert.equal(partial.status, 'partial')
+  assert.deepEqual(partial.results.map(result => result.status), ['failed', 'unchanged', 'not-started'])
+  assert.match(partial.message, /not saved/)
+})
+
+test('set state, projected merge and budget follow the server merge', () => {
+  const live = { name: 'Git', rules: [rule({ identity: 'b' }), rule({ identity: 'a' })] }
+  assert.equal(setState({ name: 'Git', rules: [rule({ identity: 'a' }), rule({ identity: 'b' })], published_version: '260928100000.0.0' }, live), 'live')
+  assert.equal(setState({ name: 'Git', rules: [rule({ identity: 'a' })], published_version: '260928100000.0.0' }, live), 'changed')
+  assert.equal(setState({ name: 'Git', rules: [], published_version: '' }, null), 'new')
+  const project = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+  const sets = [
+    { id: 'c', scope: { layer: 'company' } as RuleScope, rules: [rule({ identity: 'keep', text: 'Company wins.', strength: 'locked', roles: [], harnesses: [] })] },
+    { id: 'p', scope: { layer: 'project', project_id: project } as RuleScope, rules: [rule({ identity: 'keep', text: 'Project loses.' }), rule({ identity: 'off', enabled: false }), rule({ identity: 'codex-only', roles: [], harnesses: ['codex'] })] },
+    { id: 'x', scope: { layer: 'project', project_id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb' } as RuleScope, rules: [rule({ identity: 'elsewhere' })] },
+  ]
+  const ctx = { projectId: project, personId: SELF, role: 'builder' as const, harness: 'claude-code' as const }
+  assert.deepEqual(projectedRules(sets, ctx).map(item => item.text), ['Company wins.'])
+  const bytes = (text: string) => new TextEncoder().encode(text).length
+  assert.equal(projectedBytes(sets, ctx), bytes('# Aeon session rules\n\n- [keep] Company wins.\n'))
+  const largest = largestProjected(sets, project, SELF)
+  assert.equal(largest.harness, 'codex')
+  assert.equal(largest.bytes, new TextEncoder().encode('# Aeon session rules\n\n- [codex-only] Never print the environment.\n- [keep] Company wins.\n').length)
 })
 
 test('a 5xx after a committed write is uncertain and does not continue', async () => {

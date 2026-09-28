@@ -1,830 +1,471 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import AppIcon from '../AppIcon.vue'
-import RuleColumn, { type ColumnSet } from './RuleColumn.vue'
-import RuleDetail from './RuleDetail.vue'
-import { accountName, getProjects, listNodes, type ProjectSummary } from '../../lib/api'
+import { computed, onMounted, ref, watch } from 'vue'
+import BizIcon from '../business/BizIcon.vue'
+import RuleHistory from './RuleHistory.vue'
+import RuleSetCard, { type SetDraft } from './RuleSetCard.vue'
+import RulesImportDialog from './RulesImportDialog.vue'
+import RulesPreview from './RulesPreview.vue'
+import RulesPublishDialog, { type Budget, type PublishItem } from './RulesPublishDialog.vue'
+import { accountName, getProjects } from '../../lib/api'
 import { can } from '../../lib/authz'
 import { getMembers } from '../../lib/access'
 import { toast } from '../../lib/toast'
 import { useSession } from '../../stores/session'
 import {
-  HARNESS_LABEL, HARNESSES, IMPORT_MAX_BYTES, LAYER_LABEL, LAYERS, PUBLISH_NOTE_MAX, ROLE_LABEL, ROLES, RULES_BUDGET, RulesError,
-  applyEnabled, blankRule, calendarVersion, createLayer, createSet, diffRules, duplicateRule, getSet, utf8Length, validVersion,
-  groupState, heldIdentities, importBlock, isUuid, layerInColumn, listLayers, listSets, listVersions, mergeQuery,
-  mergeRules, normalizeRule, parseDraftImport, publishBlock, publishSet, resetAvailability, restoreSet, rulesEqual,
-  rulesMessage, runDraftImport, saveDraft, scopeFor, scopeKey, scopeLabel, scopeRank, touchRule, validateDraft, writeBlock,
-  type AgentMode, type AgentRule, type Caller, type DraftImportPlan, type HarnessName, type ImportConfirmed, type LayerName, type MergedRules,
-  type RoleName, type RuleContext, type RuleLayer, type RulePatch, type RuleSet, type RuleSnapshot,
+  ROLE_LABEL, ROLES, RulesError, blankRule, createLayer, createSet, diffRules, getVersion, importBlock, largestProjected,
+  listLayers, listSets, publishBlock, publishSets, replyUncertain, rulesEqual, rulesMessage, saveDraft, scopeKey, scopeRank,
+  setState, validateDraft, writeBlock,
+  type AgentRule, type Caller, type ImportReport, type MergeInput, type RoleName, type RuleLayer, type RuleScope, type RuleSet, type RuleSnapshot, type SetState,
 } from '../../lib/rules'
 
-interface Working {
-  remote: RuleSet
-  name: string
-  rules: AgentRule[]
-  versions: RuleSnapshot[] | null
-  versionId: string
-  collapsed: boolean
-}
+// Agent rules answer three questions at a glance: what applies, what waits to
+// go live, and the one next step. Layers read top to bottom in precedence order.
+interface Working { remote: RuleSet; live: RuleSnapshot | null }
 interface Bundle { layer: RuleLayer; sets: Working[] }
+type SectionKey = 'company' | 'project' | 'person' | 'agent'
 
 const session = useSession()
 const model = ref<Bundle[]>([])
 const loading = ref(true)
-const saving = ref(false)
-const error = ref('')
-const notice = ref('')
-const filter = ref('')
-const projectId = ref('')
-const personId = ref('')
-const role = ref<RoleName>('builder')
-const harness = ref<HarnessName>('cursor')
-const agentId = ref('')
-const taskId = ref('')
-const mode = ref<AgentMode>('role')
-const projects = ref<ProjectSummary[]>([])
-const people = ref<{ id: string; name: string }[]>([])
+const loadError = ref('')
+const projects = ref<{ id: string; title: string }[]>([])
 const agents = ref<{ id: string; name: string }[]>([])
-const tasks = ref<{ id: string; title: string }[]>([])
-const contextNote = ref('')
-const selection = ref<{ setId: string; identity: string } | null>(null)
-const previewOpen = ref(false)
-const publishOpen = ref(false)
-const restoreOpen = ref(false)
-const publishNote = ref('')
-const restoreNote = ref('')
-const removeOpen = ref(false)
-const publishSetId = ref('')
-const merged = ref<MergedRules | null>(null)
-const projectNote = ref('')
+const projectId = ref('')
+const openSets = ref(new Set<string>())
+const editing = ref<(SetDraft & { setId: string; error: string }) | null>(null)
+const saving = ref(false)
 const importOpen = ref(false)
-const importing = ref(false)
-const importLocked = ref(false)
-const importError = ref('')
-const importPlan = ref<DraftImportPlan | null>(null)
-const importFileName = ref('')
+const previewOpen = ref(false)
+const historyId = ref('')
+const publishTarget = ref<string[] | null>(null)
+const publishing = ref(false)
+const publishError = ref('')
+const adding = ref<{ section: SectionKey; name: string; role: RoleName; error: string; busy: boolean } | null>(null)
+const startedByHand = ref(false)
 
-const context = computed<RuleContext>(() => ({
-  projectId: projectId.value, personId: personId.value, agentId: agentId.value,
-  role: role.value, harness: harness.value, taskId: taskId.value,
-}))
+const me = computed(() => session.identity?.principal.id ?? '')
+const myName = computed(() => session.identity ? accountName(session.identity) : 'You')
+const tenantName = computed(() => session.identity?.tenant.name ?? 'this workspace')
+const tenantId = computed(() => session.identity?.tenant.id ?? '')
 const caller = computed<Caller | null>(() => {
   const identity = session.identity
   if (!identity) return null
   return { id: identity.principal.id, kind: identity.principal.kind === 'agent' ? 'agent' : 'person', allows: (permission, project) => can(permission, project) }
 })
-const personOptions = computed(() => {
-  const list = [...people.value]
-  const identity = session.identity
-  if (identity && !list.some(person => person.id === identity.principal.id)) list.unshift({ id: identity.principal.id, name: accountName(identity) })
-  return list
-})
-const tenantName = computed(() => session.identity?.tenant.name ?? 'Workspace')
 
-watch(() => session.identity?.principal.id, id => { if (id && !personId.value) personId.value = id }, { immediate: true })
+// ---------- Names people read instead of ids ----------
+const projectTitle = (id?: string) => projects.value.find(project => project.id === id)?.title ?? 'Project'
+const agentName = (id?: string) => agents.value.find(agent => agent.id === id)?.name ?? 'Named agent'
+function where(scope: RuleScope): string {
+  if (scope.layer === 'company') return 'Company'
+  if (scope.layer === 'project') return `${projectTitle(scope.project_id)} project`
+  if (scope.layer === 'person') return scope.owner_id === me.value ? 'Your rules' : 'Person'
+  if (scope.role) return `${ROLE_LABEL[scope.role]} role`
+  if (scope.task_id) return `${agentName(scope.agent_id)} · one task`
+  return agentName(scope.agent_id)
+}
+function scopeTitle(scope: RuleScope): string {
+  if (scope.layer === 'company') return `Company · ${tenantName.value}`
+  if (scope.layer === 'project') return `Project · ${projectTitle(scope.project_id)}`
+  if (scope.layer === 'person') return scope.owner_id === me.value ? `Your rules · ${myName.value}` : 'Another person’s rules'
+  return `Agents · ${where(scope)}`
+}
 
-function workingOf(setId: string): { bundle: Bundle; set: Working } | null {
-  for (const bundle of model.value) {
-    const set = bundle.sets.find(item => item.remote.id === setId)
-    if (set) return { bundle, set }
-  }
-  return null
+// How a higher layer is named in "Locked in … rules".
+function heldLabel(scope: RuleScope): string {
+  if (scope.layer === 'company') return 'company'
+  if (scope.layer === 'project') return `${projectTitle(scope.project_id)} project`
+  if (scope.layer === 'person') return 'your'
+  return where(scope).toLowerCase()
 }
-function displayRules(set: Working): AgentRule[] {
-  if (!set.versionId || !set.versions) return set.rules
-  return set.versions.find(version => version.version === set.versionId)?.rules ?? set.rules
-}
-function dirty(set: Working) {
-  return !set.versionId && (set.name !== set.remote.name || !rulesEqual(set.rules, set.remote.rules))
-}
-const dirtyCount = computed(() => model.value.reduce((count, bundle) => count + bundle.sets.filter(dirty).length, 0))
-const importHold = computed(() => {
-  const blocked = importBlock(caller.value)
-  if (blocked) return blocked
-  if (dirtyCount.value) return 'Save or discard unsaved drafts before importing.'
-  return ''
-})
-function columnRank(column: LayerName) {
-  if (column === 'agent') return mode.value === 'task' ? 5 : mode.value === 'named' ? 4 : 3
-  return scopeRank({ layer: column })
-}
-function heldFor(column: LayerName) {
-  const flat = model.value.flatMap(bundle => bundle.sets.map(set => ({ scope: bundle.layer.scope, rules: displayRules(set) })))
-  return heldIdentities(flat, context.value, columnRank(column))
-}
-function bundlesFor(column: LayerName) {
-  return model.value.filter(bundle => layerInColumn(bundle.layer.scope, column, context.value, mode.value))
-}
-function intendedScope(column: LayerName) {
-  return scopeFor(column, context.value, mode.value)
-}
-function columnSets(column: LayerName): ColumnSet[] {
-  return bundlesFor(column).flatMap(bundle => bundle.sets.map(set => ({
-    id: set.remote.id,
-    name: set.versionId ? (set.versions?.find(version => version.version === set.versionId)?.name ?? set.name) : set.name,
-    dirty: dirty(set),
-    readOnly: !!set.versionId,
-    collapsed: set.collapsed,
-    versionId: set.versionId,
-    versionNote: set.versionId ? (set.versions?.find(version => version.version === set.versionId)?.note ?? '') : '',
-    versions: set.versions?.map(version => ({ version: version.version, note: version.note ?? '' })) ?? null,
-    rules: displayRules(set),
-    baseline: set.remote.rules,
-    writable: !writeBlock(caller.value, bundle.layer.scope),
-    writeReason: writeBlock(caller.value, bundle.layer.scope),
-  })))
-}
-const columns = computed(() => LAYERS.map((column, index) => {
-  const bundles = bundlesFor(column)
-  const scope = intendedScope(column)
-  const block = 'scope' in scope ? writeBlock(caller.value, scope.scope) : scope.error
-  return {
-    column, number: index + 1, title: LAYER_LABEL[column], hint: hint(column),
-    sets: columnSets(column), held: [...heldFor(column)],
-    hasLayer: bundles.length > 0,
-    canAdd: bundles.length > 0 && !writeBlock(caller.value, bundles[0]!.layer.scope),
-    createLabel: `Add ${LAYER_LABEL[column].toLowerCase()} rules`,
-    createReason: bundles.length > 0 ? null : block,
-  }
-}))
-function hint(column: LayerName) {
-  if (column === 'company') return tenantName.value
-  if (column === 'project') return projects.value.find(project => project.id === projectId.value)?.title ?? 'Choose a project'
-  if (column === 'person') return personOptions.value.find(person => person.id === personId.value)?.name ?? 'Choose a person'
-  if (mode.value === 'role') return `Role · ${ROLE_LABEL[role.value]}`
-  if (mode.value === 'named') return agents.value.find(agent => agent.id === agentId.value)?.name ?? 'Choose an agent'
-  return tasks.value.find(task => task.id === taskId.value)?.title ?? 'Choose a task'
-}
-const selected = computed(() => {
-  if (!selection.value) return null
-  const located = workingOf(selection.value.setId)
-  if (!located) return null
-  const rule = displayRules(located.set).find(item => item.identity === selection.value?.identity)
-  if (!rule) return null
-  return { ...located, rule }
-})
-const selectedLock = computed(() => {
-  const current = selected.value
-  if (!current) return ''
-  const column = current.bundle.layer.scope.layer
-  if (heldFor(column).has(current.rule.identity)) return 'A higher layer locks this rule, so switching it here does not turn it off.'
-  if (current.rule.strength === 'locked') return 'Locked rules stay on and do not expire.'
-  return ''
-})
-const deleteReason = computed(() => {
-  const current = selected.value
-  if (!current) return null
-  if (current.set.versionId) return 'Published versions are read-only.'
-  if (current.rule.strength === 'locked') return 'Locked rules stay in the set.'
-  return writeBlock(caller.value, current.bundle.layer.scope)
-})
-const resetState = computed(() => {
-  const rule = selected.value?.rule
-  if (!rule) return { show: false, available: false, reason: '' }
-  const answer = resetAvailability(rule)
-  return answer.available ? { show: true, available: true, reason: 'Original wording is available.' } : { show: answer.show, available: false, reason: answer.reason }
-})
-const publishChoices = computed(() => model.value.flatMap(bundle => bundle.sets.map(set => ({
-  id: set.remote.id, name: set.name, layer: LAYER_LABEL[bundle.layer.scope.layer],
-  reason: publishBlock(caller.value, bundle.layer.scope), dirty: dirty(set),
-}))))
-const publishTarget = computed(() => publishChoices.value.find(choice => choice.id === publishSetId.value) ?? null)
-const publishChanges = computed(() => {
-  const located = publishSetId.value ? workingOf(publishSetId.value) : null
-  if (!located) return []
-  const published = located.set.versions?.find(version => version.version === located.set.remote.published_version)
-  return diffRules(published?.rules ?? [], located.set.remote.rules)
-})
-const meter = computed(() => merged.value ? Math.min(100, merged.value.byte_size / RULES_BUDGET * 100) : 0)
-const importSetCount = computed(() => importPlan.value?.layers.reduce((count, layer) => count + layer.sets.length, 0) ?? 0)
-const importRuleCount = computed(() => importPlan.value?.layers.reduce((count, layer) => count + layer.sets.reduce((sum, set) => sum + set.rules.length, 0), 0) ?? 0)
-const tenantId = computed(() => session.identity?.tenant.id ?? '')
 
-function toWorking(remote: RuleSet): Working {
-  return { remote, name: remote.name, rules: remote.rules.map(normalizeRule), versions: null, versionId: '', collapsed: false }
+// ---------- Load ----------
+async function withLive(set: RuleSet): Promise<Working> {
+  if (!set.published_version) return { remote: set, live: null }
+  try { return { remote: set, live: await getVersion(set.id, set.published_version) } } catch { return { remote: set, live: null } }
 }
-async function load() {
-  loading.value = true
-  error.value = ''
+async function load(quiet = false) {
+  if (!quiet) loading.value = true
+  loadError.value = ''
   try {
     const { layers } = await listLayers()
-    const bundles = await Promise.all(layers.map(async layer => {
-      const listed = await listSets(layer.id)
-      const sets = await Promise.all(listed.sets.map(set => getSet(set.id)))
-      return { layer, sets: sets.map(toWorking) }
+    model.value = await Promise.all(layers.map(async layer => {
+      const { sets } = await listSets(layer.id)
+      return { layer, sets: await Promise.all(sets.map(withLive)) }
     }))
-    model.value = bundles
-  } catch (cause) {
-    error.value = rulesMessage(cause)
-  } finally {
-    loading.value = false
-  }
+    rulesLoaded.value = true
+    pickProject()
+  } catch (cause) { loadError.value = rulesMessage(cause) } finally { loading.value = false }
 }
 async function loadContext() {
   try {
     const page = await getProjects(false)
-    projects.value = page.items
-    if (!projectId.value && page.items[0]) projectId.value = page.items[0].id
-  } catch { projectNote.value = 'Projects could not be loaded.' }
-  if (!can('members.read')) {
-    contextNote.value = 'Other people and named agents are listed only with permission to see members.'
-    return
-  }
-  try {
-    const members = await getMembers()
-    people.value = members.people.filter(person => person.status === 'active').map(person => ({ id: person.principal_id, name: person.name }))
-    agents.value = members.agents.map(agent => ({ id: agent.principal_id, name: agent.name }))
-  } catch { contextNote.value = 'People and agents could not be loaded.' }
+    projects.value = page.items.map(item => ({ id: item.id, title: item.title }))
+    pickProject()
+  } catch { /* the project section falls back to the rules' own project ids */ }
+  if (!can('members.read')) return
+  try { agents.value = (await getMembers()).agents.map(agent => ({ id: agent.principal_id, name: agent.name })) } catch { /* names fall back */ }
 }
-watch([mode, projectId], async () => {
-  tasks.value = []
-  if (mode.value !== 'task' || !projectId.value) return
-  try {
-    const page = await listNodes({ within: projectId.value, kind: ['task'], limit: 50 })
-    tasks.value = page.items.map(item => ({ id: item.id, title: item.title }))
-  } catch { contextNote.value = 'Tasks could not be loaded.' }
-})
+// The page opens on the project the rules actually target, not the first one listed.
+// Nothing is picked before the rules have loaded: an early pick would fall back
+// to whichever project happens to be listed first.
+const rulesLoaded = ref(false)
+function pickProject(prefer?: string) {
+  if (prefer) { projectId.value = prefer; return }
+  if (projectId.value || !rulesLoaded.value) return
+  const targeted = model.value.filter(bundle => bundle.layer.scope.layer === 'project' && bundle.sets.length).map(bundle => bundle.layer.scope.project_id!)
+  projectId.value = targeted.find(id => projects.value.some(project => project.id === id)) ?? targeted[0] ?? projects.value[0]?.id ?? ''
+}
+watch(() => session.identity?.principal.id, () => { if (session.identity) void load(true) })
 
-function editable(column: LayerName) {
-  return bundlesFor(column).flatMap(bundle => writeBlock(caller.value, bundle.layer.scope) ? [] : bundle.sets.filter(set => !set.versionId))
-}
-function toggleLayer(column: LayerName) {
-  const sets = editable(column)
-  const held = heldFor(column)
-  const enabled = groupState(sets.flatMap(set => set.rules), held) !== 'on'
-  for (const set of sets) set.rules = applyEnabled(set.rules, enabled, held)
-}
-function toggleSet(setId: string) {
-  const located = workingOf(setId)
-  if (!located || located.set.versionId || writeBlock(caller.value, located.bundle.layer.scope)) return
-  const held = heldFor(located.bundle.layer.scope.layer)
-  located.set.rules = applyEnabled(located.set.rules, groupState(located.set.rules, held) !== 'on', held)
-}
-function toggleRule(setId: string, identity: string) {
-  const located = workingOf(setId)
-  if (!located || located.set.versionId || writeBlock(caller.value, located.bundle.layer.scope)) return
-  const held = heldFor(located.bundle.layer.scope.layer)
-  located.set.rules = located.set.rules.map(rule => rule.identity === identity && canFlipRule(rule, held) ? touchRule(rule, { enabled: !rule.enabled }) : rule)
-}
-function canFlipRule(rule: AgentRule, held: Set<string>) {
-  return rule.strength !== 'locked' && !held.has(rule.identity)
-}
-function changeRule(patch: RulePatch) {
-  const current = selected.value
-  if (!current || current.set.versionId || writeBlock(caller.value, current.bundle.layer.scope)) return
-  const next = touchRule(current.rule, patch)
-  if (next.identity !== current.rule.identity && current.set.rules.some(rule => rule.identity === next.identity)) {
-    error.value = 'That identity is already used in this set.'
-    return
+// ---------- What applies, what waits ----------
+const allSets = computed(() => model.value.flatMap(bundle => bundle.sets.map(set => ({ bundle, set }))))
+const stateOf = (set: Working): SetState => setState(set.remote, set.live)
+const ruleCount = computed(() => allSets.value.reduce((n, item) => n + item.set.remote.rules.length, 0))
+const waiting = computed(() => allSets.value.filter(item => stateOf(item.set) !== 'live'))
+const publishable = computed(() => waiting.value.filter(item => !publishBlock(caller.value, item.bundle.layer.scope)))
+const liveCount = computed(() => allSets.value.length - waiting.value.length)
+const empty = computed(() => !loading.value && !loadError.value && allSets.value.length === 0)
+const status = computed(() => {
+  const sets = allSets.value.length
+  const parts = [`${ruleCount.value} ${ruleCount.value === 1 ? 'rule' : 'rules'} in ${sets} ${sets === 1 ? 'set' : 'sets'}`]
+  parts.push(liveCount.value === sets ? 'all live' : `${liveCount.value} live`)
+  if (waiting.value.length) parts.push(`${waiting.value.length} waiting to publish`)
+  return parts.join(' · ')
+})
+const publishNote = computed(() => {
+  if (!waiting.value.length || publishable.value.length) return ''
+  if (caller.value?.kind === 'agent') return 'Agents read rules; a person publishes them.'
+  return publishBlock(caller.value, waiting.value[0]!.bundle.layer.scope) ?? ''
+})
+const dirty = computed(() => {
+  const draft = editing.value
+  if (!draft) return false
+  const set = allSets.value.find(item => item.set.remote.id === draft.setId)?.set.remote
+  return !!set && (draft.name !== set.name || !rulesEqual(draft.rules, set.rules))
+})
+const importHold = computed(() => importBlock(caller.value) ?? (dirty.value ? 'Save or cancel the set you are editing before importing.' : ''))
+
+// ---------- Sections in precedence order ----------
+const heldAbove = (rank: number, context: { role?: RoleName }) => {
+  const held = new Map<string, string>()
+  for (const { bundle, set } of allSets.value) {
+    const scope = bundle.layer.scope
+    if (scopeRank(scope) >= rank) continue
+    if (scope.layer === 'project' && scope.project_id !== projectId.value) continue
+    if (scope.layer === 'person' && scope.owner_id !== me.value) continue
+    if (scope.layer === 'agent' && (scope.role ? scope.role !== context.role : true)) continue
+    for (const rule of set.remote.rules) if (rule.strength === 'locked' && !held.has(rule.identity)) held.set(rule.identity, heldLabel(scope))
   }
-  current.set.rules = current.set.rules.map(rule => rule.identity === current.rule.identity ? next : rule)
-  selection.value = { setId: current.set.remote.id, identity: next.identity }
+  return held
 }
-function addRule(setId: string) {
-  const located = workingOf(setId)
-  if (!located || writeBlock(caller.value, located.bundle.layer.scope)) return
-  const rule = blankRule(located.set.rules.map(item => item.identity))
-  located.set.rules = [...located.set.rules, rule]
-  located.set.collapsed = false
-  selection.value = { setId, identity: rule.identity }
+const sections = computed(() => {
+  const inSection = (key: SectionKey) => allSets.value.filter(({ bundle }) => {
+    const scope = bundle.layer.scope
+    if (key === 'company') return scope.layer === 'company'
+    if (key === 'project') return scope.layer === 'project' && scope.project_id === projectId.value
+    if (key === 'person') return scope.layer === 'person' && scope.owner_id === me.value
+    return scope.layer === 'agent'
+  })
+  const project = projectTitle(projectId.value)
+  const list: { key: SectionKey; title: string; lede: string; scope: RuleScope | null; sets: typeof allSets.value }[] = [
+    { key: 'company', title: 'Company', lede: `Applies to everyone in ${tenantName.value}. Wins over everything below.`, scope: { layer: 'company' }, sets: inSection('company') },
+    { key: 'project', title: 'Project', lede: projectId.value ? `Applies to work in ${project}.` : 'Choose a project to see its rules.', scope: projectId.value ? { layer: 'project', project_id: projectId.value } : null, sets: inSection('project') },
+    { key: 'person', title: 'Your rules', lede: 'How agents work with you. Only you see them.', scope: me.value ? { layer: 'person', owner_id: me.value } : null, sets: inSection('person') },
+    { key: 'agent', title: 'Agents', lede: 'Rules for one role, such as builders, or for one named agent.', scope: { layer: 'agent', role: 'builder' }, sets: inSection('agent') },
+  ]
+  return list
+})
+function heldFor(scope: RuleScope) { return heldAbove(scopeRank(scope), { role: scope.role }) }
+const addReason = (section: { key: SectionKey; scope: RuleScope | null }) => section.scope ? writeBlock(caller.value, section.scope) : 'Choose a project first.'
+function subtitle(scope: RuleScope) { return scope.layer === 'agent' ? where(scope) : '' }
+function lockReason(scope: RuleScope) {
+  const block = publishBlock(caller.value, scope)
+  return block ? `Locking needs permission to publish these rules. ${block}` : null
 }
-function duplicate() {
-  const current = selected.value
-  if (!current || current.set.versionId) return
-  const copy = duplicateRule(current.rule, current.set.rules.map(rule => rule.identity))
-  current.set.rules = [...current.set.rules, copy]
-  selection.value = { setId: current.set.remote.id, identity: copy.identity }
+
+// ---------- Editing in place ----------
+function find(setId: string) { return allSets.value.find(item => item.set.remote.id === setId) ?? null }
+function toggle(setId: string) {
+  const next = new Set(openSets.value)
+  if (next.has(setId)) next.delete(setId)
+  else next.add(setId)
+  openSets.value = next
 }
-function removeRule() {
-  const current = selected.value
-  if (!current || deleteReason.value) return
-  current.set.rules = current.set.rules.filter(rule => rule.identity !== current.rule.identity)
-  selection.value = null
-  removeOpen.value = false
+function edit(setId: string) {
+  if (editing.value && editing.value.setId !== setId && dirty.value) { toast('Save or cancel the set you are editing first.', { tone: 'error' }); return }
+  const found = find(setId)
+  if (!found) return
+  const block = writeBlock(caller.value, found.bundle.layer.scope)
+  if (block) { toast(block, { tone: 'error' }); return }
+  editing.value = { setId, name: found.set.remote.name, rules: found.set.remote.rules.map(rule => ({ ...rule, source: { ...rule.source } })), error: '' }
 }
-async function addSet(column: LayerName, name: string) {
-  const bundle = bundlesFor(column)[0]
-  if (!bundle || writeBlock(caller.value, bundle.layer.scope)) return
-  const issue = validateDraft(name, [])
-  if (issue) { error.value = issue; return }
-  try {
-    const created = await createSet(bundle.layer.id, name)
-    const full = await getSet(created.id)
-    bundle.sets = [...bundle.sets, toWorking(full)]
-    notice.value = `Added “${name}”.`
-  } catch (cause) { error.value = rulesMessage(cause) }
-}
-async function createColumn(column: LayerName) {
-  const scope = intendedScope(column)
-  if ('error' in scope) { error.value = scope.error; return }
-  const block = writeBlock(caller.value, scope.scope)
-  if (block) { error.value = block; return }
-  try {
-    const layer = await createLayer(scope.scope)
-    model.value = [...model.value, { layer, sets: [] }]
-    notice.value = `${LAYER_LABEL[column]} rules can take a set now.`
-  } catch (cause) { error.value = rulesMessage(cause) }
-}
-function rename(setId: string, name: string) {
-  const located = workingOf(setId)
-  if (!located || located.set.versionId) return
-  located.set.name = name
-}
-function collapse(setId: string) {
-  const located = workingOf(setId)
-  if (located) located.set.collapsed = !located.set.collapsed
-}
-async function history(setId: string) {
-  const located = workingOf(setId)
-  if (!located || located.set.versions) return
-  try { located.set.versions = (await listVersions(setId)).versions }
-  catch (cause) { error.value = rulesMessage(cause) }
-}
-function showVersion(setId: string, version: string) {
-  const located = workingOf(setId)
-  if (!located) return
-  located.set.versionId = version
-}
-function discard() {
-  for (const bundle of model.value) for (const set of bundle.sets) {
-    set.name = set.remote.name
-    set.rules = set.remote.rules.map(normalizeRule)
-  }
-  notice.value = 'Unsaved edits were discarded.'
+function addRule() {
+  const draft = editing.value
+  if (!draft) return
+  const rule: AgentRule = blankRule(draft.rules.map(item => item.identity))
+  rule.source.reference = 'Written by hand'
+  draft.rules = [...draft.rules, rule]
 }
 async function save() {
+  const draft = editing.value
+  const found = draft ? find(draft.setId) : null
+  if (!draft || !found) return
+  const name = draft.name.trim()
+  const issue = validateDraft(name, draft.rules)
+  if (issue) { draft.error = issue; return }
   saving.value = true
-  error.value = ''
+  draft.error = ''
   try {
-    for (const bundle of model.value) for (const set of bundle.sets) {
-      if (!dirty(set)) continue
-      const block = writeBlock(caller.value, bundle.layer.scope)
-      if (block) { error.value = block; return }
-      const issue = validateDraft(set.name, set.rules)
-      if (issue) { error.value = issue; return }
-      try {
-        const saved = await saveDraft(set.remote.id, { expected_revision: set.remote.revision, name: set.name, rules: set.rules })
-        set.remote = saved
-        set.name = saved.name
-        set.rules = saved.rules.map(normalizeRule)
-      } catch (cause) {
-        if (cause instanceof RulesError && cause.code === 'revision_conflict') {
-          try { set.remote = await getSet(set.remote.id) } catch { /* keep the previous revision and the draft */ }
-          error.value = rulesMessage(cause)
-          return
-        }
-        throw cause
-      }
-    }
-    notice.value = 'Draft saved.'
+    found.set.remote = await saveDraft(draft.setId, { expected_revision: found.set.remote.revision, name, rules: draft.rules })
+    editing.value = null
     toast('Draft saved')
-  } catch (cause) { error.value = rulesMessage(cause) }
-  finally { saving.value = false }
-}
-async function openPreview() {
-  const query = mergeQuery(context.value)
-  if ('error' in query) { error.value = query.error; return }
-  try {
-    merged.value = await mergeRules(query.query)
-    previewOpen.value = true
-    error.value = ''
-  } catch (cause) { error.value = rulesMessage(cause) }
-}
-function openPublish() {
-  const choice = publishChoices.value.find(item => item.id === selected.value?.set.remote.id && !item.reason) ?? publishChoices.value.find(item => !item.reason)
-  if (!choice) return
-  publishSetId.value = choice.id
-  publishNote.value = ''
-  publishOpen.value = true
-  void history(choice.id)
-}
-function noteOrStop(value: string): string | null {
-  const note = value.trim()
-  if (utf8Length(note) > PUBLISH_NOTE_MAX) {
-    error.value = 'A publish note can be at most 500 UTF-8 bytes.'
-    return null
-  }
-  error.value = ''
-  return note
-}
-async function confirmPublish() {
-  const located = workingOf(publishSetId.value)
-  if (!located) return
-  const block = publishBlock(caller.value, located.bundle.layer.scope)
-  if (block) { error.value = block; return }
-  if (dirty(located.set)) { error.value = 'Save the draft before publishing. Publish uses the saved draft.'; return }
-  const version = calendarVersion()
-  if (!validVersion(version)) { error.value = 'Could not build a version.'; return }
-  const note = noteOrStop(publishNote.value)
-  if (note === null) return
-  saving.value = true
-  try {
-    await publishSet(located.set.remote.id, { expected_revision: located.set.remote.revision, version, note })
-    const fresh = await getSet(located.set.remote.id)
-    located.set.remote = fresh
-    located.set.name = fresh.name
-    located.set.rules = fresh.rules.map(normalizeRule)
-    located.set.versions = null
-    located.set.versionId = ''
-    publishOpen.value = false
-    notice.value = `Published ${version}.`
-    toast('Rules published')
   } catch (cause) {
     if (cause instanceof RulesError && cause.code === 'revision_conflict') {
-      try { located.set.remote = await getSet(located.set.remote.id) } catch { /* draft stays */ }
-    }
-    error.value = rulesMessage(cause)
+      try { found.set.remote = (await listSets(found.bundle.layer.id)).sets.find(set => set.id === draft.setId) ?? found.set.remote } catch { /* keep the draft */ }
+      draft.error = 'This set was saved elsewhere meanwhile. Your edits are still here; save again to replace that version.'
+    } else draft.error = rulesMessage(cause)
   } finally { saving.value = false }
 }
-const selectedSnapshot = computed(() => {
-  const current = selected.value
-  if (!current?.set.versionId) return null
-  return current.set.versions?.find(version => version.version === current.set.versionId) ?? null
-})
-function openRestore() {
-  const current = selected.value
-  if (!current?.set.versionId) return
-  restoreNote.value = ''
-  restoreOpen.value = true
-}
-async function confirmRestore() {
-  const current = selected.value
-  if (!current?.set.versionId) return
-  const block = publishBlock(caller.value, current.bundle.layer.scope)
-  if (block) { error.value = block; return }
-  if (dirty(current.set)) { error.value = 'Save or discard the draft before restoring.'; return }
-  const newVersion = calendarVersion()
-  const note = noteOrStop(restoreNote.value)
-  if (note === null) return
-  saving.value = true
+
+// ---------- Adding a set ----------
+function startAdd(key: SectionKey) { adding.value = { section: key, name: '', role: 'builder', error: '', busy: false } }
+async function add() {
+  const form = adding.value
+  const section = sections.value.find(item => item.key === form?.section)
+  if (!form || !section?.scope) return
+  const scope: RuleScope = form.section === 'agent' ? { layer: 'agent', role: form.role } : section.scope
+  const name = form.name.trim()
+  const issue = validateDraft(name, []) ?? writeBlock(caller.value, scope)
+  if (issue) { form.error = issue; return }
+  form.busy = true
   try {
-    await restoreSet(current.set.remote.id, { expected_revision: current.set.remote.revision, version: current.set.versionId, new_version: newVersion, note })
-    const fresh = await getSet(current.set.remote.id)
-    current.set.remote = fresh
-    current.set.name = fresh.name
-    current.set.rules = fresh.rules.map(normalizeRule)
-    current.set.versionId = ''
-    current.set.versions = null
-    restoreOpen.value = false
-    notice.value = `Restored as ${newVersion}.`
-  } catch (cause) { error.value = rulesMessage(cause) }
-  finally { saving.value = false }
-}
-function existingNames() {
-  return model.value.map(bundle => ({ scope: bundle.layer.scope, names: bundle.sets.map(set => set.remote.name) }))
-}
-function showImported(confirmed: ImportConfirmed[]) {
-  const bundles = [...model.value]
-  for (const item of confirmed) {
-    let bundle = bundles.find(entry => entry.layer.id === item.layer.id)
+    let bundle = model.value.find(item => scopeKey(item.layer.scope) === scopeKey(scope))
     if (!bundle) {
-      bundle = { layer: item.layer, sets: [] }
-      bundles.push(bundle)
+      const layer = await createLayer(scope)
+      bundle = { layer, sets: [] }
+      model.value = [...model.value, bundle]
     }
-    const working = toWorking(item.set)
-    const index = bundle.sets.findIndex(set => set.remote.id === item.set.id)
-    if (index >= 0) bundle.sets.splice(index, 1, working)
-    else bundle.sets = [...bundle.sets, working]
-  }
-  model.value = bundles
+    const created = await createSet(bundle.layer.id, name)
+    bundle.sets = [...bundle.sets, { remote: created, live: null }]
+    adding.value = null
+    startedByHand.value = true
+    edit(created.id)
+    addRule()
+  } catch (cause) { form.error = rulesMessage(cause) } finally { if (adding.value) adding.value.busy = false }
 }
-async function reloadBoard(): Promise<boolean> {
+
+// ---------- One approval to publish ----------
+function openPublish(ids?: string[]) {
+  if (dirty.value) { toast('Save or cancel the set you are editing before publishing.', { tone: 'error' }); return }
+  publishError.value = ''
+  publishTarget.value = ids ?? publishable.value.map(item => item.set.remote.id)
+}
+const publishList = computed(() => (publishTarget.value ?? []).map(find).filter((item): item is NonNullable<ReturnType<typeof find>> => !!item))
+const publishItems = computed<PublishItem[]>(() => publishList.value.map(({ bundle, set }) => ({
+  id: set.remote.id, name: set.remote.name, where: where(bundle.layer.scope), state: stateOf(set), rules: set.remote.rules,
+  changes: diffRules(set.live?.rules ?? [], set.remote.rules),
+})))
+const publishBlocked = computed(() => publishTarget.value && publishTarget.value.length === publishable.value.length
+  ? waiting.value.filter(item => publishBlock(caller.value, item.bundle.layer.scope)).map(({ bundle, set }) => ({ id: set.remote.id, name: set.remote.name, where: where(bundle.layer.scope), reason: publishBlock(caller.value, bundle.layer.scope) ?? '' }))
+  : [])
+const budget = computed<Budget | null>(() => {
+  if (!publishTarget.value || !me.value) return null
+  const chosen = new Set(publishTarget.value)
+  const inputs: MergeInput[] = allSets.value.flatMap(({ bundle, set }) => {
+    const rules = chosen.has(set.remote.id) ? set.remote.rules : set.live?.rules
+    return rules ? [{ id: set.remote.id, scope: bundle.layer.scope, rules }] : []
+  })
+  const largest = largestProjected(inputs, projectId.value || '00000000-0000-4000-8000-000000000000', me.value)
+  return { ...largest, project: projectTitle(projectId.value) }
+})
+async function confirmPublish(note: string) {
+  const list = publishList.value
+  if (!list.length || publishing.value) return
+  publishing.value = true
+  publishError.value = ''
   try {
-    const { layers } = await listLayers()
-    const bundles = await Promise.all(layers.map(async layer => {
-      const listed = await listSets(layer.id)
-      const sets = await Promise.all(listed.sets.map(set => getSet(set.id)))
-      return { layer, sets: sets.map(toWorking) }
-    }))
-    model.value = bundles
-    return true
-  } catch {
-    return false
-  }
-}
-function openImport() {
-  if (importHold.value || importing.value || saving.value) return
-  importPlan.value = null
-  importError.value = ''
-  importFileName.value = ''
-  importLocked.value = false
-  importOpen.value = true
-}
-function closeImport() {
-  if (importing.value) return
-  importOpen.value = false
-  importPlan.value = null
-  importError.value = ''
-  importLocked.value = false
-  importFileName.value = ''
-}
-async function onImportFile(event: Event) {
-  if (importing.value) return
-  const input = event.target
-  if (!(input instanceof HTMLInputElement)) return
-  const file = input.files?.[0]
-  input.value = ''
-  importLocked.value = false
-  importPlan.value = null
-  importError.value = ''
-  importFileName.value = ''
-  if (!file) return
-  importFileName.value = file.name
-  if (file.size > IMPORT_MAX_BYTES) {
-    importError.value = 'The file must be 2 MiB or smaller.'
-    return
-  }
-  let text: string
-  try { text = await file.text() } catch {
-    importError.value = 'The file could not be read.'
-    return
-  }
-  const parsed = parseDraftImport(text, Math.max(file.size, utf8Length(text)), tenantId.value, caller.value, existingNames())
-  if ('error' in parsed) {
-    importError.value = parsed.error
-    return
-  }
-  importPlan.value = parsed.plan
-}
-async function confirmImport() {
-  if (importing.value || importLocked.value || !importPlan.value) return
-  const block = importHold.value
-  if (block) { importError.value = block; return }
-  const plan = importPlan.value
-  importing.value = true
-  importError.value = ''
-  try {
-    const outcome = await runDraftImport(plan, tenantId.value, caller.value)
-    if (outcome.status === 'uncertain') {
-      importLocked.value = true
-      if (dirtyCount.value) {
-        if (outcome.confirmed.length) showImported(outcome.confirmed)
-        importError.value = `${outcome.message} Unsaved edits on this page were kept.`
-        return
-      }
-      const reloaded = await reloadBoard()
-      if (!reloaded && outcome.confirmed.length) showImported(outcome.confirmed)
-      importError.value = `${outcome.message}${reloaded ? ' The board was reloaded from the server.' : ' The board could not be reloaded; check the server before trying again.'}`
+    const result = await publishSets(list.map(({ set }) => ({ set_id: set.remote.id, expected_revision: set.remote.revision, version: 'auto' })), note)
+    for (const snapshot of result.versions) {
+      const found = find(snapshot.set_id)
+      if (found) { found.set.remote = { ...found.set.remote, published_version: snapshot.version }; found.set.live = snapshot }
+    }
+    publishTarget.value = null
+    toast(`Published ${list.length} ${list.length === 1 ? 'set' : 'sets'}. Agents receive them at their next session start.`)
+  } catch (cause) {
+    if (replyUncertain(cause)) {
+      publishError.value = 'The server did not confirm the publication. The page was reloaded to show what is live now.'
+      await load(true)
       return
     }
-    if (outcome.confirmed.length) showImported(outcome.confirmed)
-    if (outcome.status === 'imported') {
-      notice.value = `${outcome.message} Use Publish on each set separately after you review it.`
-      toast('Drafts imported')
-      importOpen.value = false
-      importPlan.value = null
-      importFileName.value = ''
-      return
-    }
-    importError.value = outcome.message
-    if (outcome.status === 'partial') importLocked.value = true
-  } finally {
-    importing.value = false
+    const reason = cause instanceof RulesError && cause.code === 'revision_conflict'
+      ? 'A set was saved elsewhere meanwhile. The page was reloaded; review the sets again.'
+      : cause instanceof RulesError && cause.code === 'forbidden' ? 'You may not publish one of these sets.' : rulesMessage(cause)
+    publishError.value = `Nothing was published. ${reason}`
+    if (cause instanceof RulesError && cause.code === 'revision_conflict') await load(true)
+  } finally { publishing.value = false }
+}
+
+// ---------- Import ----------
+const existing = computed(() => model.value.map(bundle => ({ scope: bundle.layer.scope, sets: bundle.sets.map(set => set.remote) })))
+function openImport() { if (!importHold.value) importOpen.value = true }
+async function imported(report: ImportReport) {
+  const project = report.results.find(result => result.scope.layer === 'project' && result.status === 'saved')?.scope.project_id
+  await load(true)
+  if (project) pickProject(project)
+  if (report.status === 'imported') {
+    importOpen.value = false
+    const saved = report.results.filter(result => result.status === 'saved').length
+    toast(`Imported ${saved} ${saved === 1 ? 'set' : 'sets'} as drafts. Nothing is live until you publish.`)
   }
 }
-function onKey(event: KeyboardEvent) {
-  if (event.key !== 'Escape') return
-  if (importing.value) return
-  if (importOpen.value) { closeImport(); return }
-  if (previewOpen.value || publishOpen.value || restoreOpen.value || removeOpen.value) {
-    previewOpen.value = publishOpen.value = restoreOpen.value = removeOpen.value = false
-    return
-  }
-  selection.value = null
+
+// ---------- History ----------
+const historySet = computed(() => historyId.value ? find(historyId.value) : null)
+async function restored() {
+  historyId.value = ''
+  await load(true)
+  toast('Restored as a new version')
 }
+
 onMounted(() => {
-  window.addEventListener('keydown', onKey)
   void load()
   void loadContext()
 })
-onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
 </script>
 
 <template>
   <section class="rules-page" aria-labelledby="agent-rules-title">
-    <header class="rules-head">
-      <div>
+    <header class="page-head">
+      <div class="intro">
         <h2 id="agent-rules-title">Agent rules</h2>
-        <p class="lede">Company wins, then the project, then the person, then the agent. A locked rule stays on in lower layers.</p>
+        <p class="lede">Rules every agent receives at session start.</p>
+        <p v-if="!loading && !empty && !loadError" class="status" role="status">{{ status }}</p>
       </div>
-      <div class="actions">
-        <button v-if="dirtyCount" type="button" class="btn sm ghost" @click="discard">Discard</button>
-        <button type="button" class="btn sm" :disabled="!dirtyCount || saving" @click="save">Save</button>
-        <button type="button" class="btn sm ghost" :disabled="!!importHold || saving || importing" :title="importHold || undefined" @click="openImport"><AppIcon name="folder" :size="14" />Import drafts</button>
-        <button type="button" class="btn sm" @click="openPreview"><AppIcon name="book" :size="14" />Preview</button>
-        <button type="button" class="btn sm primary" :disabled="!publishChoices.some(choice => !choice.reason) || saving" @click="openPublish"><AppIcon name="upload" :size="14" />Publish</button>
+      <div v-if="!loading && !empty && !loadError" class="actions">
+        <button type="button" class="btn sm ghost" data-tip="The file an agent receives now" @click="previewOpen = true"><BizIcon name="eye" :size="14" />Preview</button>
+        <button type="button" class="btn sm ghost" :aria-disabled="!!importHold || undefined" :data-tip="importHold || 'Add or update sets from a rules file'" @click="openImport"><BizIcon name="upload" :size="14" />Import</button>
+        <button v-if="publishable.length" type="button" class="btn primary" @click="openPublish()"><BizIcon name="seal" :size="15" />Review and publish ({{ publishable.length }} {{ publishable.length === 1 ? 'set' : 'sets' }})</button>
       </div>
     </header>
-    <p v-if="!publishChoices.some(choice => !choice.reason) && !loading" class="hint">{{ publishChoices[0]?.reason ?? 'Nothing to publish yet.' }}</p>
-    <p v-if="dirtyCount" class="chip teal draft-count">{{ dirtyCount }} unsaved {{ dirtyCount === 1 ? 'draft' : 'drafts' }}</p>
+    <p v-if="publishNote" class="publish-note"><BizIcon name="lock" :size="13" />{{ publishNote }}</p>
 
-    <div class="context" role="group" aria-label="Who the preview is for">
-      <p class="tenant"><span>Workspace</span><strong>{{ tenantName }}</strong></p>
-      <label>Project
-        <select v-model="projectId" class="field"><option v-for="project in projects" :key="project.id" :value="project.id">{{ project.title }}</option></select>
-      </label>
-      <label>Person
-        <select v-model="personId" class="field"><option v-for="person in personOptions" :key="person.id" :value="person.id">{{ person.name }}</option></select>
-      </label>
-      <label>Role
-        <select v-model="role" class="field"><option v-for="item in ROLES" :key="item" :value="item">{{ ROLE_LABEL[item] }}</option></select>
-      </label>
-      <label>Harness
-        <select v-model="harness" class="field"><option v-for="item in HARNESSES" :key="item" :value="item">{{ HARNESS_LABEL[item] }}</option></select>
-      </label>
-      <label>Agent scope
-        <select v-model="mode" class="field">
-          <option value="role">Role</option>
-          <option value="named">Named agent</option>
-          <option value="task">Task</option>
-        </select>
-      </label>
-      <label v-if="mode !== 'role'">Named agent
-        <select v-model="agentId" class="field"><option value="">Choose</option><option v-for="agent in agents" :key="agent.id" :value="agent.id">{{ agent.name }}</option></select>
-      </label>
-      <label v-if="mode === 'task'">Task
-        <select v-model="taskId" class="field"><option value="">Choose</option><option v-for="task in tasks" :key="task.id" :value="task.id">{{ task.title }}</option></select>
-      </label>
-      <label class="filter">Filter
-        <input v-model="filter" class="field" type="search" placeholder="Filter rules">
-      </label>
-    </div>
-    <p v-if="projectNote || contextNote" class="hint">{{ projectNote || contextNote }}</p>
-    <p v-if="projectId && !isUuid(projectId)" class="hint">This project cannot be used for a preview until it has a workspace id.</p>
+    <p v-if="loadError" class="load-error" role="alert"><BizIcon name="alert" :size="14" /><span>{{ loadError }}</span><button type="button" class="btn sm" @click="load()">Try again</button></p>
+    <div v-if="loading" class="waiting" role="status" aria-label="Loading rules"><span class="skeleton"></span><span class="skeleton"></span><span class="skeleton"></span></div>
 
-    <div class="meter" :class="{ measured: !!merged }">
-      <span>{{ merged ? `${merged.byte_size} / ${RULES_BUDGET} bytes` : 'Open preview to measure the merged file.' }}</span>
-      <span class="bar" aria-hidden="true"><i :style="{ width: `${meter}%` }"></i></span>
-    </div>
-    <p v-if="notice" class="hint" role="status">{{ notice }}</p>
-    <p v-if="error" class="set-note error" role="alert"><AppIcon name="alert" :size="14" /><span>{{ error }}</span></p>
-    <div v-if="loading" class="waiting" role="status" aria-label="Loading rules"><span class="skeleton"></span><span class="skeleton"></span></div>
-
-    <div v-else class="board" :class="{ sided: !!selected }">
-      <div class="layers">
-        <RuleColumn
-          v-for="column in columns" :key="column.column" :number="column.number" :title="column.title" :hint="column.hint"
-          :sets="column.sets" :held="column.held" :filter="filter" :selected-id="selection ? `${selection.setId}:${selection.identity}` : ''"
-          :create-label="column.createLabel" :create-reason="column.createReason" :has-layer="column.hasLayer" :can-add="column.canAdd"
-          @toggle-layer="toggleLayer(column.column)" @toggle-set="toggleSet" @toggle-rule="toggleRule" @select="(setId, identity) => selection = { setId, identity }"
-          @add-rule="addRule" @add-set="addSet(column.column, $event)" @create="createColumn(column.column)" @rename="rename" @collapse="collapse"
-          @history="history" @version="showVersion"
-        />
-      </div>
-      <div v-if="selected" class="detail-host">
-        <RuleDetail
-          :layer="LAYER_LABEL[selected.bundle.layer.scope.layer]" :set-name="selected.set.name" :rule="selected.rule"
-          :read-only="!!selected.set.versionId || !!writeBlock(caller, selected.bundle.layer.scope)" :lock-note="selectedLock"
-          :reset="resetState" :delete-reason="deleteReason" @close="selection = null" @change="changeRule" @duplicate="duplicate"
-          @remove="removeOpen = true" @reset="error = resetState.reason"
-        />
-        <p v-if="selected.set.versionId" class="restore-row">
-          <button type="button" class="btn sm" :disabled="!!publishBlock(caller, selected.bundle.layer.scope)" @click="openRestore">Restore as a new version</button>
-          <span v-if="publishBlock(caller, selected.bundle.layer.scope)" class="hint">{{ publishBlock(caller, selected.bundle.layer.scope) }}</span>
-        </p>
-      </div>
+    <div v-else-if="empty && !startedByHand" class="empty">
+      <span class="empty-icon" aria-hidden="true"><BizIcon name="shield" :size="22" /></span>
+      <p class="empty-line">No rules yet. Import a rules file to give every agent the same rules at session start.</p>
+      <button type="button" class="btn primary" :disabled="!!importHold" :data-tip="importHold || undefined" @click="openImport"><BizIcon name="upload" :size="15" />Import rules</button>
+      <button v-if="!writeBlock(caller, { layer: 'company' })" type="button" class="btn sm ghost" @click="startedByHand = true; startAdd('company')">Or write the first set by hand</button>
     </div>
 
-    <div v-if="previewOpen && merged" class="scrim" @click.self="previewOpen = false">
-      <aside class="drawer" role="dialog" aria-modal="true" aria-label="Merged rules">
-        <header class="drawer-head"><h2>Merged rules</h2><button type="button" class="icon-btn sm flat" aria-label="Close preview" @click="previewOpen = false"><AppIcon name="close" :size="16" /></button></header>
-        <p class="hint">{{ merged.byte_size }} bytes of {{ RULES_BUDGET }}. Version {{ merged.version || 'floor only' }}.{{ dirtyCount ? ' Unsaved drafts are not in this preview.' : '' }}</p>
-        <p v-if="merged.floor" class="hint">Safety floor is included.</p>
-        <pre class="merge">{{ merged.body }}</pre>
-      </aside>
-    </div>
-
-    <div v-if="publishOpen" class="scrim" @click.self="publishOpen = false">
-      <aside class="drawer" role="dialog" aria-modal="true" aria-label="Publish">
-        <header class="drawer-head"><h2>Publish</h2><button type="button" class="icon-btn sm flat" aria-label="Close publish" @click="publishOpen = false"><AppIcon name="close" :size="16" /></button></header>
-        <label class="fld">Set
-          <select v-model="publishSetId" class="field" @change="history(publishSetId)">
-            <option v-for="choice in publishChoices" :key="choice.id" :value="choice.id" :disabled="!!choice.reason">{{ choice.layer }} · {{ choice.name }}{{ choice.reason ? ` — ${choice.reason}` : '' }}</option>
-          </select>
-        </label>
-        <p class="hint">A new version is assigned when you confirm. The previous version stays as it was.</p>
-        <p v-if="publishTarget?.dirty" class="hint">Save the draft first. Publish uses the saved draft, not unsaved edits.</p>
-        <ul class="changes">
-          <li v-if="!publishChanges.length">No difference from the published version.</li>
-          <li v-for="change in publishChanges" :key="change.kind + change.label"><span class="kind">{{ change.kind }}</span> {{ change.label }}</li>
-        </ul>
-        <label class="fld">Publish note
-          <textarea v-model="publishNote" class="field" rows="2" maxlength="500" placeholder="Optional. Saved on this version."></textarea>
-        </label>
-        <p class="hint">Leave this empty to publish without a note. A note stays on this version.</p>
-        <button type="button" class="btn primary" :disabled="saving || !!publishTarget?.reason || !!publishTarget?.dirty" @click="confirmPublish">Publish</button>
-      </aside>
-    </div>
-
-    <div v-if="restoreOpen && selected?.set.versionId" class="scrim" @click.self="restoreOpen = false">
-      <aside class="drawer" role="dialog" aria-modal="true" aria-label="Restore version">
-        <header class="drawer-head"><h2>Restore</h2><button type="button" class="icon-btn sm flat" aria-label="Close restore" @click="restoreOpen = false"><AppIcon name="close" :size="16" /></button></header>
-        <p>Publish the rules from {{ selected.set.versionId }} as a new version. The old version is not rewritten.</p>
-        <p v-if="selectedSnapshot?.note" class="version-note">Note on {{ selected.set.versionId }}: {{ selectedSnapshot.note }}</p>
-        <p v-else class="hint">{{ selected.set.versionId }} has no publish note. It stays that way.</p>
-        <label class="fld">New publish note
-          <textarea v-model="restoreNote" class="field" rows="2" maxlength="500" placeholder="Optional. Saved only on the new version."></textarea>
-        </label>
-        <p class="hint">This note is for the new version. The note on {{ selected.set.versionId }} is not rewritten.</p>
-        <button type="button" class="btn primary" :disabled="saving" @click="confirmRestore">Restore</button>
-      </aside>
-    </div>
-
-    <div v-if="importOpen" class="scrim center" @click.self="closeImport">
-      <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="import-title">
-        <header class="drawer-head">
-          <h2 id="import-title">Import drafts</h2>
-          <button type="button" class="icon-btn sm flat" aria-label="Close import" :disabled="importing" @click="closeImport"><AppIcon name="close" :size="16" /></button>
+    <div v-else-if="!loadError" class="layers">
+      <section v-for="(section, index) in sections" :key="section.key" class="layer" :aria-labelledby="`rules-layer-${section.key}`">
+        <header class="layer-head">
+          <span class="rank" aria-hidden="true">{{ index + 1 }}</span>
+          <div class="layer-titles">
+            <h3 :id="`rules-layer-${section.key}`">
+              <template v-if="section.key !== 'project' || projects.length < 2">{{ section.key === 'project' ? `Project · ${projectTitle(projectId)}` : section.title }}</template>
+              <template v-else>Project ·
+                <span class="project-pick">
+                  <select v-model="projectId" aria-label="Project"><option v-for="project in projects" :key="project.id" :value="project.id">{{ project.title }}</option></select>
+                  <BizIcon name="chevron" :size="13" />
+                </span>
+              </template>
+            </h3>
+            <p>{{ section.lede }}</p>
+          </div>
         </header>
-        <p class="hint">Drafts only. Existing sets stay as they are. Nothing is published until you use Publish on each set.</p>
-        <p class="tenant"><span>Workspace</span><strong>{{ tenantName }}</strong><span>{{ tenantId }}</span></p>
-        <label class="fld">Draft file
-          <input id="draft-import-file" class="import-file" type="file" accept="application/json,.json" :disabled="importing" @change="onImportFile">
-        </label>
-        <p v-if="importFileName" class="hint">Selected {{ importFileName }}</p>
-        <p v-if="importError" class="set-note error" role="alert"><AppIcon name="alert" :size="14" /><span>{{ importError }}</span></p>
-        <div v-if="importPlan" class="import-body">
-          <p class="hint">{{ importSetCount }} {{ importSetCount === 1 ? 'set' : 'sets' }}, {{ importRuleCount }} {{ importRuleCount === 1 ? 'rule' : 'rules' }}. Read the text, then import.</p>
-          <section v-for="layer in importPlan.layers" :key="scopeKey(layer.scope)" class="import-scope">
-            <h3>{{ scopeLabel(layer.scope) }}</h3>
-            <details v-for="set in layer.sets" :key="set.name" class="import-set" open>
-              <summary><AppIcon name="chevron-right" :size="12" class="disclosure-chev" />{{ set.name }} · {{ set.rules.length }} {{ set.rules.length === 1 ? 'rule' : 'rules' }}</summary>
-              <div v-for="rule in set.rules" :key="rule.identity" class="import-rule">
-                <p>{{ rule.text }}</p>
-                <p class="hint">{{ rule.why }}</p>
-                <details v-if="rule.details" class="import-detail">
-                  <summary><AppIcon name="chevron-right" :size="12" class="disclosure-chev" />Details</summary>
-                  <p class="hint">{{ rule.details }}</p>
-                </details>
-              </div>
-            </details>
-          </section>
+        <div class="cards">
+          <div v-if="section.sets.length" class="group">
+          <RuleSetCard
+            v-for="{ bundle, set } in section.sets" :key="set.remote.id" :set="set.remote" :state="stateOf(set)" :subtitle="subtitle(bundle.layer.scope)"
+            :open="openSets.has(set.remote.id)" :held="heldFor(bundle.layer.scope)" :draft="editing?.setId === set.remote.id ? editing : null"
+            :edit-reason="writeBlock(caller, bundle.layer.scope)" :publish-reason="publishBlock(caller, bundle.layer.scope)" :lock-reason="lockReason(bundle.layer.scope)"
+            :saving="saving" :error="editing?.setId === set.remote.id ? editing.error : ''"
+            @toggle="toggle(set.remote.id)" @edit="edit(set.remote.id)" @cancel="editing = null" @save="save" @add-rule="addRule"
+            @draft="value => editing && Object.assign(editing, value)" @publish="openPublish([set.remote.id])" @history="historyId = set.remote.id"
+          />
+          </div>
+          <p v-if="!section.sets.length && adding?.section !== section.key && addReason(section)" class="none">None yet.</p>
+          <form v-if="adding?.section === section.key" class="add-form" @submit.prevent="add">
+            <input v-model="adding.name" class="field" maxlength="128" placeholder="Name of the new set" aria-label="Name of the new set" autofocus>
+            <select v-if="section.key === 'agent'" v-model="adding.role" class="field role" aria-label="For which role"><option v-for="role in ROLES" :key="role" :value="role">For {{ ROLE_LABEL[role].toLowerCase() }}s</option></select>
+            <button type="button" class="btn sm ghost" :disabled="adding.busy" @click="adding = null">Cancel</button>
+            <button type="submit" class="btn sm" :disabled="adding.busy || !adding.name.trim()">Add set</button>
+            <p v-if="adding.error" class="form-error" role="alert">{{ adding.error }}</p>
+          </form>
+          <button v-else-if="!addReason(section)" type="button" class="add-set" :class="{ alone: !section.sets.length }" @click="startAdd(section.key)"><BizIcon name="plus" :size="14" />{{ section.sets.length ? 'Add set' : section.key === 'project' ? `Add rules for ${projectTitle(projectId)}` : section.key === 'person' ? 'Add your first set' : 'Add a set for a role' }}</button>
         </div>
-        <button type="button" class="btn primary" :disabled="!importPlan || importing || importLocked" @click="confirmImport">{{ importing ? 'Importing…' : 'Import drafts' }}</button>
-      </div>
+      </section>
     </div>
 
-    <div v-if="removeOpen" class="scrim" @click.self="removeOpen = false">
-      <aside class="drawer" role="dialog" aria-modal="true" aria-label="Remove rule">
-        <header class="drawer-head"><h2>Remove rule</h2><button type="button" class="icon-btn sm flat" aria-label="Close remove" @click="removeOpen = false"><AppIcon name="close" :size="16" /></button></header>
-        <p>The rule leaves this draft. It is removed when you save.</p>
-        <button type="button" class="btn danger" @click="removeRule">Remove</button>
-      </aside>
-    </div>
+    <RulesImportDialog
+      v-if="importOpen" :tenant-id="tenantId" :tenant-name="tenantName" :caller="caller" :existing="existing" :scope-title="scopeTitle" :hold="importHold"
+      @close="importOpen = false" @imported="imported"
+    />
+    <RulesPublishDialog
+      v-if="publishTarget" :items="publishItems" :blocked="publishBlocked" :budget="budget" :busy="publishing" :error="publishError"
+      :title="publishTarget.length === 1 && !publishBlocked.length && publishable.length !== 1 ? `Publish “${publishItems[0]?.name ?? ''}”` : undefined"
+      @close="publishTarget = null" @confirm="confirmPublish"
+    />
+    <RulesPreview
+      v-if="previewOpen" :projects="projects" :people="[{ id: me, name: myName }]" :agents="agents" :project-id="projectId" :person-id="me" :waiting="waiting.length"
+      @close="previewOpen = false"
+    />
+    <RuleHistory
+      v-if="historySet" :set="historySet.set.remote" :publish-reason="publishBlock(caller, historySet.bundle.layer.scope)" :dirty="dirty && editing?.setId === historyId"
+      @close="historyId = ''" @restored="restored"
+    />
   </section>
 </template>
 
 <style scoped>
-.rules-page { display: flex; flex-direction: column; gap: 12px; min-width: 0; max-width: 100%; }
-.rules-page :deep(button:disabled) { opacity: 1; color: var(--ink-2); background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--line); }
-.rules-head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px; align-items: flex-start; }
-.rules-head h2 { margin: 0; font-size: 20px; }
-.lede, .hint, .tenant span { color: var(--ink-2); font-size: 13px; }
-.lede { margin: 4px 0 0; max-width: 62ch; }
-.actions { display: flex; flex-wrap: wrap; gap: 8px; }
-.draft-count { align-self: flex-start; letter-spacing: 0; text-transform: none; }
-.context { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; min-width: 0; }
-.context label, .fld { display: grid; gap: 4px; min-width: 0; color: var(--ink-2); font-size: 12px; font-weight: 650; }
-.tenant { display: grid; gap: 4px; margin: 0; }
-.tenant strong { font-size: 14px; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.meter { display: flex; align-items: center; gap: 10px; color: var(--ink-2); font-size: 12px; }
-.meter .bar { width: min(160px, 40vw); }
-.waiting { display: grid; gap: 8px; }
-.waiting .skeleton { height: 88px; border-radius: 12px; }
-.board { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; min-width: 0; }
-.board.sided { grid-template-columns: minmax(0, 1fr) minmax(280px, 380px); align-items: start; }
-.layers { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; min-width: 0; }
-.detail-host { display: flex; flex-direction: column; min-width: 0; max-height: calc(100vh - 120px); position: sticky; top: 12px; border-radius: 12px; overflow: hidden; background: var(--surface); box-shadow: 0 0 0 1px var(--line); }
-.restore-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 0; padding: 0 14px 12px; }
-.scrim { position: fixed; inset: 0; z-index: 40; display: grid; justify-items: end; background: var(--scrim); }
-.scrim.center { justify-items: center; align-items: center; padding: 12px; }
-.dialog { width: min(440px, 100%); max-height: min(640px, 100%); overflow: auto; padding: 16px; border-radius: 12px; background: var(--surface); box-shadow: var(--shadow-pop); display: flex; flex-direction: column; gap: 12px; }
-.dialog .tenant strong, .dialog .tenant span:last-child { font-size: 13px; }
-.import-file { max-width: 100%; font-size: 13px; }
-.import-body { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
-.import-scope { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
-.import-scope h3 { margin: 0; font-size: 13px; }
-.import-set { border-radius: 10px; background: var(--surface-2); padding: 8px 10px; }
-.import-set summary { cursor: pointer; font-weight: 650; }
-.import-detail { margin-top: 4px; }
-.import-rule { display: flex; flex-direction: column; gap: 2px; margin-top: 8px; min-width: 0; }
-.import-rule p { margin: 0; overflow-wrap: anywhere; }
-.drawer { width: min(520px, 100%); height: 100%; overflow: auto; padding: 16px; background: var(--surface); box-shadow: var(--shadow-pop); display: flex; flex-direction: column; gap: 12px; }
-.drawer-head { display: flex; align-items: center; gap: 8px; }
-.drawer-head h2 { margin: 0; font-size: 16px; }
-.drawer-head .icon-btn { margin-left: auto; }
-.merge { margin: 0; padding: 12px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; border-radius: 10px; background: var(--surface-2); font: 12.5px/1.5 var(--mono); }
-.changes { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
-.kind { display: inline-block; min-width: 4.5em; color: var(--ink-3); font-size: 11px; font-weight: 700; text-transform: uppercase; }
-.fld textarea.field { height: auto; padding: 8px 12px; }
-.version-note { margin: 0; color: var(--ink-2); font-size: 13px; white-space: pre-wrap; overflow-wrap: anywhere; }
-@media (max-width: 1100px) {
-  .layers { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .board.sided { grid-template-columns: minmax(0, 1fr); }
-  .detail-host { position: fixed; inset: 0; z-index: 30; max-height: none; border-radius: 0; background: var(--scrim); display: grid; justify-items: end; }
-}
-@media (max-width: 700px) {
-  .layers { grid-template-columns: minmax(0, 1fr); }
+.rules-page { display: flex; flex-direction: column; gap: 20px; min-width: 0; max-width: 100%; }
+.page-head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 12px 20px; }
+.intro { min-width: 0; }
+.page-head h2 { margin: 0; font-size: 20px; font-weight: 650; letter-spacing: -.01em; }
+.lede { margin: 4px 0 0; color: var(--ink-2); font-size: 14px; }
+.status { margin: 6px 0 0; color: var(--ink-3); font-size: 13px; font-variant-numeric: tabular-nums; }
+.actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.actions [aria-disabled="true"] { opacity: .5; cursor: not-allowed; }
+.publish-note { display: flex; align-items: center; gap: 6px; margin: -8px 0 0; color: var(--ink-3); font-size: 13px; }
+.load-error { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0; padding: 12px 14px; border-radius: 12px; background: var(--danger-bg); color: var(--danger); font-size: 13.5px; }
+.load-error span { flex: 1 1 200px; }
+.waiting { display: grid; gap: 10px; }
+.waiting .skeleton { height: 56px; border-radius: 14px; }
+.empty { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 48px 20px; border-radius: 16px; background: var(--surface); box-shadow: 0 0 0 1px var(--line); text-align: center; }
+.empty-icon { display: grid; place-items: center; width: 48px; height: 48px; border-radius: 14px; background: var(--chip-teal-bg); color: var(--teal-ink); }
+.empty-line { max-width: 44ch; margin: 0; color: var(--ink-2); font-size: 14.5px; line-height: 1.5; }
+.layers { display: flex; flex-direction: column; gap: 28px; }
+.layer { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.layer-head { display: flex; align-items: flex-start; gap: 12px; }
+.rank { flex: none; display: grid; place-items: center; width: 24px; height: 24px; margin-top: 1px; border-radius: 50%; background: var(--surface-2); color: var(--ink-3); font-size: 12px; font-weight: 650; font-variant-numeric: tabular-nums; }
+.layer-titles { min-width: 0; }
+.layer-titles h3 { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; margin: 0; font-size: 15px; font-weight: 650; }
+.layer-titles p { margin: 2px 0 0; color: var(--ink-3); font-size: 13px; }
+.project-pick { position: relative; display: inline-flex; align-items: center; gap: 2px; color: var(--teal-ink); }
+.project-pick select { field-sizing: content; appearance: none; border: 0; background: none; color: inherit; font: inherit; padding: 0 16px 0 2px; margin-right: -14px; border-radius: 6px; cursor: pointer; }
+.project-pick select:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.project-pick svg { pointer-events: none; }
+.cards { display: flex; flex-direction: column; gap: 6px; padding-left: 36px; min-width: 0; }
+.group { display: flex; flex-direction: column; border-radius: 14px; background: var(--surface); box-shadow: 0 0 0 1px var(--line); min-width: 0; }
+.group > * + * { border-top: 1px solid var(--line); }
+.none { margin: 0; padding: 4px 2px; color: var(--ink-3); font-size: 13px; }
+.add-set { align-self: flex-start; display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border: 0; border-radius: 8px; background: none; color: var(--ink-3); font-size: 13px; font-weight: 600; }
+@media (hover: hover) { .add-set:hover { background: var(--row-hover); color: var(--teal-ink); } }
+.add-set.alone { align-self: stretch; justify-content: flex-start; min-height: 44px; padding: 0 14px; border-radius: 14px; border: 1px dashed var(--line-2); }
+.add-form { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px; border-radius: 14px; background: var(--surface); box-shadow: 0 0 0 1px var(--line); }
+.add-form .field { flex: 1 1 220px; }
+.add-form .role { flex: 0 1 180px; }
+.form-error { flex-basis: 100%; margin: 0; color: var(--danger); font-size: 12.5px; }
+@media (max-width: 600px) {
+  .page-head { align-items: stretch; }
+  .actions { width: 100%; }
+  .actions .primary { flex: 1 1 100%; order: -1; }
+  .cards { padding-left: 0; }
+  .rank { display: none; }
 }
 </style>
