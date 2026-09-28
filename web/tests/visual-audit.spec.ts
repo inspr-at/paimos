@@ -575,7 +575,6 @@ const shots: Shot[] = [
   } },
   { screen: 'pairing', state: 'setting-up', setup: pairingSetup, act: async page => {
     await pairingReview(page)
-    await page.getByRole('region', { name: 'Pairing review' }).getByRole('button', { name: 'Connect only', exact: true }).click()
     await page.getByRole('button', { name: 'Connect computer', exact: true }).click()
     await heading(page, 'Setting up')
   } },
@@ -583,7 +582,7 @@ const shots: Shot[] = [
     await page.goto('/agents/register-agent')
     await heading(page, 'Connected computers')
     await page.getByRole('button', { name: 'Disconnect' }).first().click()
-    await expect(page.getByRole('button', { name: 'Finish runs and disconnect' })).toBeVisible()
+    await expect(page.getByRole('dialog').getByRole('button', { name: 'Disconnect', exact: true })).toBeVisible()
   } },
   // 6. Usage dashboard
   { screen: 'usage', state: 'dashboard', setup: async page => {

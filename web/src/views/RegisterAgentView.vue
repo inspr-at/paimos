@@ -96,10 +96,40 @@ const targetProblem = computed(() => current.value ? addHarnessTargetProblem({
   requestedComputerId: requestedComputer.value,
   targetName: addTarget.value?.computer_name ?? null,
 }) : null)
+const selectedHarnesses = computed(() => {
+  const view = current.value
+  if (!view) return [] as string[]
+  const names: string[] = []
+  for (const key of selected.value) {
+    const harness = view.requested_accounts.find(item => item.account_key === key)?.harness
+    if (harness && !names.includes(harness)) names.push(harness)
+  }
+  return names
+})
+const blockedHarnesses = computed(() => {
+  if (!current.value || !pendingReview.value) return [] as string[]
+  return unsupportedVerification(current.value, selected.value).map(item => item.harness)
+})
+const verifiableLabels = computed(() => selectedHarnesses.value.filter(harness => !blockedHarnesses.value.includes(harness)).map(harness => harnessLabel(harness)))
+const blockedLabels = computed(() => blockedHarnesses.value.map(harness => harnessLabel(harness)))
+// Nothing selected can be checked: verification stays off and the control cannot be turned on.
+const verifyLocked = computed(() => selectedHarnesses.value.length > 0 && verifiableLabels.value.length === 0)
 const verificationBlocked = computed(() => {
-  if (!current.value || !pendingReview.value || !verify.value) return []
+  if (!current.value || !pendingReview.value || !verify.value || verifyLocked.value) return []
   return unsupportedVerification(current.value, selected.value)
 })
+const verifyNote = computed(() => {
+  if (!pendingReview.value || !current.value) return ''
+  if (verifyLocked.value) {
+    if (!current.value.verification_capabilities) return `This ${brand.value.short_name} has not said which harnesses can be verified.`
+    const names = listNames(blockedLabels.value)
+    return names ? `${names} can’t be verified.` : 'Verification is unavailable.'
+  }
+  if (!verify.value || !verifiableLabels.value.length) return ''
+  const will = `${listNames(verifiableLabels.value)} will be verified.`
+  return blockedLabels.value.length ? `${will} Leave out ${listNames(blockedLabels.value)}.` : will
+})
+watch(verifyLocked, locked => { if (locked) verify.value = false })
 let pollTimer = 0
 let pollStarted = 0
 
@@ -200,7 +230,7 @@ async function lookup() {
     current.value = found
     selected.value = defaultSelectedAccountKeys(found.requested_accounts)
     grantedKeys.value = null
-    verify.value = true
+    verify.value = verifiableHarnesses(found, selected.value).length > 0
     limitsWhen.value = 'later'
     limitsOpen.value = false
     limitState.value = {}
@@ -377,18 +407,20 @@ function reviewAsNewComputer() {
   void router.replace({ path: route.path, query })
 }
 
-function connectOnly() {
-  verify.value = false
-  limitsWhen.value = 'later'
+function verifiableHarnesses(view: PairingView, keys: readonly string[]) {
+  const blocked = new Set(unsupportedVerification(view, keys).map(item => item.harness))
+  const names: string[] = []
+  for (const key of keys) {
+    const harness = view.requested_accounts.find(item => item.account_key === key)?.harness
+    if (harness && !blocked.has(harness) && !names.includes(harness)) names.push(harness)
+  }
+  return names
 }
 
-function leaveOutUnsupported() {
-  if (!current.value) return
-  let next = selected.value
-  for (const item of unsupportedVerification(current.value, next)) {
-    next = setHarnessAccount(current.value.requested_accounts, next, item.harness, null)
-  }
-  selected.value = next
+function pathParts(path: string) {
+  const cut = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'))
+  if (cut <= 0 || cut >= path.length - 1) return { head: path, tail: '' }
+  return { head: path.slice(0, cut + 1), tail: path.slice(cut + 1) }
 }
 
 function harnessCapability(harness: string) {
@@ -583,7 +615,7 @@ function enrollmentDetail(enrollment: PairingView['enrollments'][number]) {
       <div class="facts">
         <div><span class="glyph"><AppIcon name="monitor" :size="16" /></span><div><p class="k">Computer</p><p>{{ current.computer_name }}</p><p class="sub">{{ [platformCaption(current.platform, current.arch), ...current.capabilities.map(capability)].join(' · ') }}</p></div></div>
         <div><span class="glyph"><AppIcon name="layers" :size="16" /></span><div><p class="k">Workspace</p><p>{{ current.tenant_name }}</p></div></div>
-        <div><span class="glyph"><AppIcon name="folder" :size="16" /></span><div><p class="k">Folder</p><p class="path">{{ current.workspace_path }}</p></div></div>
+        <div><span class="glyph"><AppIcon name="folder" :size="16" /></span><div><p class="k">Folder</p><p class="path" :data-tip="current.workspace_path"><span class="path-head">{{ pathParts(current.workspace_path).head }}</span><span class="path-tail">{{ pathParts(current.workspace_path).tail }}</span></p></div></div>
       </div>
 
       <template v-if="pendingReview">
@@ -605,24 +637,17 @@ function enrollmentDetail(enrollment: PairingView['enrollments'][number]) {
           <p v-if="verify && harnessCapability(group.harness).length" class="harness-note"><AppIcon name="info" :size="14" />{{ harnessReason(group.harness) }}</p>
         </div>
 
-        <label class="verify">
-          <input v-model="verify" type="checkbox" />
+        <label class="verify" :class="{ locked: verifyLocked }">
+          <input v-model="verify" type="checkbox" :disabled="verifyLocked" />
           <span>
             <strong>Verify selected harnesses</strong>
-            <span v-if="terms" class="sub">{{ formatVerification(terms) }}</span>
+            <span v-if="verifyNote" class="sub">{{ verifyNote }}</span>
+            <span v-if="verify && terms && !blockedLabels.length" class="sub">{{ formatVerification(terms) }}</span>
           </span>
-          <time v-if="terms" class="expiry" :datetime="terms.expires_at"><AppIcon name="clock" :size="14" />until {{ formatAllowanceMoment(terms.expires_at) }}</time>
+          <time v-if="verify && terms && !blockedLabels.length" class="expiry" :datetime="terms.expires_at"><AppIcon name="clock" :size="14" />until {{ formatAllowanceMoment(terms.expires_at) }}</time>
         </label>
-        <p v-if="terms && verificationWarning(terms)" class="problem" role="alert">{{ verificationWarning(terms) }}</p>
-        <p v-if="verify && !current.verification" class="problem">The server did not include verification terms. Leave verification off, or look the code up again.</p>
-        <div v-if="verificationBlocked.length" class="blocked" role="alert">
-          <p v-if="current.verification_capabilities">{{ listNames(verificationBlocked.map(item => harnessLabel(item.harness))) }} can’t be verified. Connect without verifying, or leave {{ verificationBlocked.length === 1 ? 'it' : 'them' }} out.</p>
-          <p v-else>This {{ brand.short_name }} has not said which harnesses can be verified. Connect only still pairs the computer.</p>
-          <div class="blocked-actions">
-            <button type="button" class="btn sm" @click="connectOnly">Connect only</button>
-            <button v-if="current.verification_capabilities" type="button" class="btn sm" @click="leaveOutUnsupported">Leave {{ verificationBlocked.length === 1 ? 'it' : 'them' }} out</button>
-          </div>
-        </div>
+        <p v-if="verify && terms && !blockedLabels.length && verificationWarning(terms)" class="problem" role="alert">{{ verificationWarning(terms) }}</p>
+        <p v-if="verify && !verifyLocked && !current.verification" class="problem">The server did not include verification terms. Leave verification off, or look the code up again.</p>
 
         <fieldset>
           <legend>After connecting</legend>
@@ -741,7 +766,9 @@ function enrollmentDetail(enrollment: PairingView['enrollments'][number]) {
 .facts .sub { font-size: 12.5px; }
 .glyph { display: grid; place-items: center; width: 24px; height: 24px; flex-shrink: 0; color: var(--ink-3); }
 .k { color: var(--ink-3); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; }
-.path { overflow-wrap: anywhere; }
+.path { display: flex; min-width: 0; overflow: hidden; }
+.path-head { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.path-tail { flex: none; white-space: nowrap; }
 .harness, .verify, .radio { display: flex; align-items: center; gap: 10px; min-height: 52px; margin-top: 8px; padding: 10px 12px; border-radius: 12px; background: var(--surface-sunken); }
 .harness { justify-content: space-between; flex-wrap: wrap; }
 .check, .verify, .radio { cursor: pointer; }
@@ -752,13 +779,14 @@ function enrollmentDetail(enrollment: PairingView['enrollments'][number]) {
 .account-pick { flex: 0 1 220px; }
 .account-pick .field { height: 36px; }
 .verify { align-items: flex-start; margin-top: 16px; }
+.verify.locked { cursor: default; }
 .verify input { margin-top: 2px; }
+.verify.locked input { opacity: .4; }
+.verify input:disabled { cursor: default; }
 .verify > span { flex: 1; min-width: 0; }
-.verify strong, .radio strong { display: block; color: var(--ink); }
-.verify .sub { display: block; margin-top: 4px; }
+.verify strong, .radio strong { display: block; color: var(--ink); font-weight: 600; }
+.verify .sub { display: block; margin-top: 2px; color: var(--ink-3); font-size: 12.5px; font-weight: 400; }
 .expiry { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-3); font-size: 12.5px; white-space: nowrap; }
-.blocked { margin-top: 8px; padding: 12px; border-radius: 12px; box-shadow: inset 0 0 0 1px var(--line-2); font-size: 13.5px; color: var(--ink); }
-.blocked-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
 fieldset { margin: 20px 0 0; padding: 0; border: 0; }
 legend { margin-bottom: 4px; color: var(--ink); font-weight: 600; font-size: 14px; }
 .radio { align-items: flex-start; }

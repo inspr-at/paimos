@@ -60,6 +60,15 @@ const accountingOpen = computed(() => {
   if (!view) return false
   return view.accounting_state === 'unconfirmed' || view.enrollments.some(item => item.accounting_state === 'unconfirmed')
 })
+const revokeExplanation = computed(() => {
+  const copy = revokeCopy.value
+  return copy ? `${copy.body} Local processes stay unconfirmed until the computer reports them.` : ''
+})
+function pathParts(path: string) {
+  const cut = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'))
+  if (cut <= 0 || cut >= path.length - 1) return { head: path, tail: '' }
+  return { head: path.slice(0, cut + 1), tail: path.slice(cut + 1) }
+}
 
 let loadTurn = 0
 watch(() => props.permissions.canListComputers, can => { if (can) void load(); else dropSignedInList() }, { immediate: true })
@@ -208,7 +217,13 @@ function assign(error: unknown, fallback: string) {
           <span class="glyph"><AppIcon name="monitor" :size="16" /></span>
           <div class="identity-text">
             <p class="name">{{ computer.computer_name }}</p>
-            <p class="meta" :title="`${platformCaption(computer.platform, computer.arch)} · ${computer.tenant_name} · ${computer.workspace_path}`">{{ platformCaption(computer.platform, computer.arch) }} · {{ computer.workspace_path }}</p>
+            <p class="meta">
+              <span class="where">{{ platformCaption(computer.platform, computer.arch) }}</span>
+              <template v-if="computer.workspace_path">
+                <span class="sep" aria-hidden="true">·</span>
+                <span class="path" :data-tip="computer.workspace_path"><span class="path-head">{{ pathParts(computer.workspace_path).head }}</span><span class="path-tail">{{ pathParts(computer.workspace_path).tail }}</span></span>
+              </template>
+            </p>
           </div>
         </div>
         <p class="harness-line">
@@ -255,10 +270,11 @@ function assign(error: unknown, fallback: string) {
           <li v-if="accountingOpen">Run accounting stays unconfirmed. Disconnecting does not settle it.</li>
         </ul>
         <div class="choices">
-          <button ref="drainButton" type="button" class="btn primary" :disabled="!!busy" @click="commit('drain')">{{ busy === 'drain' ? 'Disconnecting…' : confirm.confirmLabel }}</button>
-          <button type="button" class="btn" :disabled="!!busy" @click="commit('revoke_now')">{{ busy === 'revoke_now' ? 'Revoking…' : revokeCopy.confirmLabel }}</button>
+          <button type="button" class="revoke" :data-tip="revokeExplanation" aria-describedby="revoke-note" :disabled="!!busy" @click="commit('revoke_now')">{{ busy === 'revoke_now' ? 'Revoking…' : 'Revoke access now' }}</button>
+          <span id="revoke-note" class="sr-only">{{ revokeExplanation }}</span>
+          <button type="button" class="btn" :disabled="!!busy" @click="closeDialog">{{ confirm.cancelLabel }}</button>
+          <button ref="drainButton" type="button" class="btn primary" :disabled="!!busy" @click="commit('drain')">{{ busy === 'drain' ? 'Disconnecting…' : 'Disconnect' }}</button>
         </div>
-        <p class="fine">{{ revokeCopy.body }} Local processes stay unconfirmed until the computer reports them.</p>
       </div>
     </dialog>
   </section>
@@ -273,7 +289,7 @@ function assign(error: unknown, fallback: string) {
 .spacer { flex: 1; }
 .head .btn { flex-shrink: 0; }
 .muted { padding: 0 10px 10px; color: var(--ink-2); font-size: 13px; }
-.meta, .fine { color: var(--ink-2); font-size: 13px; }
+.meta { color: var(--ink-2); font-size: 13px; }
 .problem { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 8px 10px; color: var(--danger); }
 .next-step { padding: 0 10px 8px; color: var(--ink-2); font-size: 13px; }
 .sheet, .computer { display: grid; grid-template-columns: minmax(160px, 1.8fr) minmax(110px, 1fr) minmax(96px, .8fr) minmax(72px, .6fr) auto; gap: 6px 14px; align-items: center; }
@@ -288,7 +304,12 @@ function assign(error: unknown, fallback: string) {
 .identity-text { min-width: 0; }
 .glyph { display: grid; place-items: center; flex: none; width: 32px; height: 32px; border-radius: 9px; background: var(--surface-sunken); color: var(--ink-2); }
 .name { color: var(--ink); font-weight: 650; overflow-wrap: anywhere; }
-.identity .meta { font-size: 12px; color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.identity .meta { display: flex; align-items: baseline; min-width: 0; max-width: 100%; overflow: hidden; font-size: 12px; color: var(--ink-3); white-space: nowrap; }
+.where, .sep { flex: none; }
+.sep { padding: 0 .35em; }
+.path { display: flex; min-width: 0; flex: 1 1 auto; }
+.path-head { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.path-tail { flex: none; white-space: nowrap; }
 .harness-line, .status { display: flex; align-items: center; gap: 6px; min-width: 0; color: var(--ink); font-size: 13px; white-space: nowrap; }
 .last-active { font-size: 12.5px; }
 .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--st-backlog); }
@@ -313,9 +334,11 @@ function assign(error: unknown, fallback: string) {
 .panel p, .panel li { font-size: 13.5px; color: var(--ink-2); }
 .panel ul { display: grid; gap: 6px; margin: 10px 0 0; padding: 0; list-style: none; }
 .runs { display: flex; gap: 8px; align-items: flex-start; margin-top: 12px; padding: 10px 12px; border-radius: 12px; background: var(--mark-hl); color: var(--ink); }
-.choices { display: grid; gap: 8px; margin-top: 16px; }
-.choices .btn { width: 100%; min-height: 44px; }
-.fine { margin-top: 8px; }
+.choices { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px 12px; margin-top: 16px; }
+.revoke { margin-right: auto; padding: 0; border: 0; background: none; color: var(--danger); font-size: 12.5px; font-weight: 550; cursor: pointer; }
+@media (hover: hover) { .revoke:hover { text-decoration: underline; } }
+.revoke:disabled { opacity: .55; cursor: default; text-decoration: none; }
+.revoke:focus-visible { border-radius: 4px; box-shadow: var(--focus-ring); }
 @media (max-width: 720px) {
   .computers { padding: 4px 4px 6px; }
   .sheet { display: none; }
