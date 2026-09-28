@@ -31,10 +31,35 @@ export function normalizeAgentState(value: unknown): AgentStatePreference {
     yellowMinutes, redMinutes: bounded(v.redMinutes, Math.max(10, yellowMinutes + 1), yellowMinutes + 1, 1440),
   }
 }
+export interface AttentionReason {
+  kind: 'approval' | 'held_action' | 'reply' | 'reply_due' | 'run_waiting' | 'session_yielded'
+  scope: 'session' | 'run' | 'shared'; actor: 'person' | 'agent' | 'unknown'
+  count: number; blocking: boolean; location: 'approvals' | 'messages' | 'session'
+}
+// Text comes from controlled categories, never request bodies, IDs or rationale.
+export function attentionReasonText(reason: AttentionReason): StateReason {
+  const count = reason.count
+  const actor = reason.actor === 'agent' ? 'another agent' : reason.actor === 'person' ? 'a person' : 'an unspecified participant'
+  const details: Record<AttentionReason['kind'], string> = {
+    approval: `${count} permission request${count === 1 ? '' : 's'} awaiting a person’s decision.`,
+    held_action: `${count} held action request${count === 1 ? '' : 's'} awaiting a person’s resolution.`,
+    reply: `${count} outstanding repl${count === 1 ? 'y' : 'ies'}; waiting for ${actor}.`,
+    reply_due: `${count} requested repl${count === 1 ? 'y' : 'ies'} assigned to this session; this agent is expected to reply.`,
+    run_waiting: 'The bound run reports waiting; who must act is not specified.',
+    session_yielded: 'This session yielded; who must act is not specified.',
+  }
+  const locations = { approvals: 'Review permission requests in Needs you.', messages: 'Review the shared principal inbox in Messages below.', session: 'Check the bound run and session activity below.' }
+  return { code: `${reason.scope}-${reason.kind}-${reason.actor}`, detail: `${reason.scope === 'shared' ? 'Shared inbox · ' : ''}${details[reason.kind]}`, next: `${reason.scope === 'shared' ? 'No session ownership is recorded. ' : ''}${!reason.blocking && reason.scope !== 'shared' ? 'This does not block ongoing work. ' : ''}${locations[reason.location]}` }
+}
+export function waitingLabel(evidence: Pick<StateEvidence, 'attention_reasons'>) {
+  const reasons = evidence.attention_reasons
+  if (reasons?.some(r => r.scope !== 'shared' && r.blocking && r.kind === 'approval')) return 'Awaiting approval'
+  return reasons?.length ? 'Waiting' : STATE_LABEL.waiting
+}
 export interface StateEvidence {
   phase: string; activity: string; heartbeat_at?: string | null; created_at?: string; since?: string
   stopped_at?: string | null; stop_reason?: string | null; run_status?: string | null
-  needs_attention?: boolean; has_problem?: boolean
+  needs_attention?: boolean; has_problem?: boolean; attention_reasons?: AttentionReason[]
 }
 // Stop reasons are free text. Match error words, not arbitrary nonempty reasons:
 // "user requested", "completed", "stopped", "cancelled" are normal stops.
@@ -71,9 +96,10 @@ export function assessAgentState(evidence: StateEvidence, now: number, preferenc
     next: 'Check the worker and its heartbeat reporter on the recorded host. A missing heartbeat does not establish that the worker failed.',
   }
   if (working && heartbeat.age >= preferences.redMinutes * 60_000) return result('unresponsive', [heartbeatReason])
-  if ((evidence.needs_attention ?? needs) || evidence.phase === 'yielded' || evidence.run_status === 'waiting') {
+  if ((evidence.needs_attention ?? (needs || evidence.run_status === 'waiting')) || evidence.phase === 'yielded') {
     const detail = evidence.phase === 'yielded' ? 'The session yielded and is waiting to continue.' : evidence.run_status === 'waiting' ? 'The bound run is waiting.' : 'An approval, held action or requested reply is outstanding.'
-    return result('waiting', [{ code: 'attention', detail, next: 'Review the pending requests and messages for this session.' }])
+    const reasons = evidence.attention_reasons?.filter(r => r.scope !== 'shared' && r.blocking).sort((a, b) => Number(b.kind === 'approval') - Number(a.kind === 'approval')).map(attentionReasonText) ?? []
+    return result('waiting', reasons.length ? reasons : [{ code: 'attention', detail, next: 'Review the session activity and bound run; who must act is not specified.' }], waitingLabel(evidence))
   }
   if (evidence.activity === 'throttled') return result('throttled', [{ code: 'throttled', detail: 'The session reports throttled activity.', next: 'Check its account allowance and pacing before resuming work.' }])
   if (working && (!heartbeat.hasHeartbeat || heartbeat.age >= preferences.yellowMinutes * 60_000)) return result('awaiting', [heartbeatReason], heartbeat.hasHeartbeat ? 'Heartbeat overdue' : 'Awaiting heartbeat')

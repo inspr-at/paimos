@@ -92,7 +92,7 @@ for (const option of available) {
       if (!['robot-1', 'robot-5'].includes(option.id)) await expect(chip.locator('.live-bot').nth(1).locator(hoverArt)).toHaveCSS('animation-name', 'none')
       await expect(bot.locator('svg').first()).toBeVisible()
       await chip.hover()
-      const pop = page.getByRole('dialog', { name: 'Agents working on Aeon' })
+      const pop = page.getByRole('dialog', { name: 'Active agents on Aeon' })
       await expect(pop).toBeVisible()
       await expect(pop.locator('.live-bot').first()).toHaveAttribute('data-style', option.id)
       await page.keyboard.press('Escape')

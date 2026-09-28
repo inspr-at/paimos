@@ -110,14 +110,15 @@ test('heartbeat waiting has its own group while real requests still need a perso
   assert.equal(sessionStatus(session({ ...fresh, created_at: ago(10) }), now).group, 'unresponsive')
 })
 
-test('a session needs Markus for its agent’s pending approval or held request', () => {
+test('only an exact run approval attributes person action to a session', () => {
   const s = session()
   assert.equal(needsYou(s, [approval()], []), true)
   assert.equal(needsYou(s, [approval({ run_id: 'other' })], []), false)
   assert.equal(needsYou(s, [approval({ run_id: null })], []), true)
   assert.equal(needsYou(session({ run_id: null }), [approval({ run_id: 'other' })], []), false)
   assert.equal(needsYou(s, [], [{ ...message({ sender_principal_id: 'a1', is_action_request: true }), projectId: 'other-project' }]), false)
-  assert.equal(needsYou(s, [], [message({ sender_principal_id: 'a1', is_action_request: true })]), true)
+  assert.equal(needsYou(s, [], [message({ sender_principal_id: 'a1', is_action_request: true })]), false)
+  assert.equal(needsYou(s, [approval({ run_id: null, resource_kind: 'node', resource_id: 'n1' })], []), false)
   assert.equal(needsYou(session({ phase: 'stopped', stopped_at: ago(1) }), [approval()], []), false)
 })
 

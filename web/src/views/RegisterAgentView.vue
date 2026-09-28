@@ -6,6 +6,7 @@ import AppIcon from '../components/AppIcon.vue'
 import ConnectedComputers from '../components/agents/ConnectedComputers.vue'
 import HarnessMark from '../components/agents/HarnessMark.vue'
 import { resilientFetch } from '../lib/api'
+import { brand } from '../lib/brand'
 import { harnessLabel } from '../lib/agentState'
 import { myPermissions, onAccessChange, refreshPermissions } from '../lib/authz'
 import { rememberSignInReturn } from '../lib/signInReturn'
@@ -475,7 +476,7 @@ function capability(value: string) {
     <header class="intro">
       <p class="eyebrow">Agents</p>
       <h1>Connect a computer</h1>
-      <p class="lede">{{ adding ? 'Add a harness on a computer that is already paired. It keeps the same daemon.' : 'Use your existing AI accounts with Aeon.' }}</p>
+      <p class="lede">{{ adding ? 'Add a harness on a computer that is already paired. It keeps the same daemon.' : `Use your existing AI accounts with ${brand.short_name}.` }}</p>
     </header>
 
     <ol class="steps" aria-label="Setup progress">
@@ -492,12 +493,12 @@ function capability(value: string) {
 
     <section v-if="!current" class="card">
       <template v-if="!guideLoaded || !presentation">
-        <p class="muted">Loading the guide for this Aeon…</p>
+        <p class="muted">Loading the guide for this {{ brand.short_name }}…</p>
       </template>
       <template v-else>
         <p class="k">Page address</p>
         <div class="address">
-          <code>{{ presentation.address || 'This Aeon has not published its address yet.' }}</code>
+          <code>{{ presentation.address || `This ${brand.short_name} has not published its address yet.` }}</code>
           <button v-if="presentation.address" type="button" class="btn sm" @click="copyText(presentation.address, 'Address')">{{ copied === 'Address' ? 'Copied' : 'Copy' }}</button>
         </div>
         <ol class="howto">
@@ -516,7 +517,7 @@ function capability(value: string) {
         <p v-if="permissionsReady && session.identity && !permissions.canLookup" class="note">Only a signed-in person who can manage accounts can review a pairing code. An agent session cannot approve it.</p>
       </form>
       <details v-if="presentation" class="manual">
-        <summary>Manual and agent setup</summary>
+        <summary><AppIcon name="chevron-right" :size="12" class="disclosure-chev" />Manual and agent setup</summary>
         <p v-for="paragraph in presentation.manualParagraphs" :key="paragraph" class="copy">{{ paragraph }}</p>
         <p class="copy">{{ presentation.installNote }}</p>
         <label v-if="presentation.targets.length > 1">Platform
@@ -586,7 +587,7 @@ function capability(value: string) {
         <p v-if="verify && !current.verification" class="problem">The server did not include verification terms. Leave verification off, or look the code up again.</p>
         <div v-if="verificationBlocked.length" class="problem" role="alert">
           <p v-if="current.verification_capabilities">Verification is unavailable for {{ verificationBlocked.map(item => harnessLabel(item.harness)).join(', ') }}. Connect only still pairs the computer. Leaving a harness out skips it.</p>
-          <p v-else>This Aeon has not said which harnesses can be verified. Connect only still pairs the computer.</p>
+          <p v-else>This {{ brand.short_name }} has not said which harnesses can be verified. Connect only still pairs the computer.</p>
           <button type="button" class="btn sm" @click="connectOnly">Connect only</button>
           <button v-if="current.verification_capabilities" type="button" class="btn sm" @click="leaveOutUnsupported">Leave out unsupported harnesses</button>
         </div>
@@ -615,7 +616,7 @@ function capability(value: string) {
 
       <div v-if="showLimitForm && limitAccounts.length" class="limits">
         <h3>{{ limitsOpen && limitsWhen !== 'now' && !pendingReview ? 'Ongoing limits for connected accounts' : 'Ongoing limits for this request' }}</h3>
-        <p class="sub">{{ limitsOpen && limitsWhen !== 'now' && !pendingReview ? 'Every connected account on this computer is listed here, including accounts this request did not select.' : 'A number of requests for a period, only for the accounts selected on this request. This is an Aeon allowance, not the vendor subscription.' }}</p>
+        <p class="sub">{{ limitsOpen && limitsWhen !== 'now' && !pendingReview ? 'Every connected account on this computer is listed here, including accounts this request did not select.' : `A number of requests for a period, only for the accounts selected on this request. This is an ${brand.short_name} allowance, not the vendor subscription.` }}</p>
         <div v-for="account in limitAccounts" :key="account.key" class="limit">
           <h4>{{ account.label }}</h4>
           <p v-if="account.id && limitState[account.id] === 'saved'">Requests for this period are saved.</p>

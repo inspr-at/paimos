@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { advanceActivity, liveState, agentKey, byLead, chipText, elapsedFor, groupLive, isListedTicketWorker, liveChanges, liveSummary, phrase, sameLive, skewOf, ticketWorkers, who, type LiveAgent } from '../src/lib/liveAgents.ts'
+import { activeAgentLabel, activeByProject, activeSessions, advanceActivity, liveState, agentKey, byLead, chipText, phaseLabel, elapsedFor, groupLive, isActiveSession, isListedTicketWorker, liveChanges, liveSummary, phrase, sameLive, skewOf, ticketWorkers, who, type LiveAgent } from '../src/lib/liveAgents.ts'
 import { DEFAULT_AGENT_STATE } from '../src/lib/agentSignals.ts'
 
 const now = Date.parse('2026-09-26T12:00:00Z')
@@ -179,4 +179,70 @@ test('shared principal keeps distinct session labels and does not invent a withh
   assert.deepEqual(listed.map(who).sort(), ['Codex agent', 'aeon-coordinator', 'grok-ta1', 'grok-ta2'])
   assert.equal(listed.find(worker => worker.session_id === 's-c')!.display_label, undefined)
   assert.deepEqual(listed.filter(worker => worker.principal_id === 'coord').map(worker => worker.session_id).sort(), ['s-a', 's-b', 's-c'])
+})
+
+
+test('project pills count sessions still in progress, once, and leave stopped history in the feed', () => {
+  const ticket = { id: 't1', key: 'AEON-243', title: 'Pill', project_id: 'p1' }
+  const working = agent({ session_id: 'a1', name: 'one', ticket })
+  const starting = agent({ session_id: 'a2', name: 'two', phase: 'starting', activity: 'unknown', since: ago(50), ticket })
+  const yielded = agent({ session_id: 'a3', name: 'three', phase: 'yielded', activity: 'idle', ticket })
+  const throttled = agent({ session_id: 'a4', name: 'four', activity: 'throttled', ticket })
+  const overdue = agent({ session_id: 'a5', name: 'five', heartbeat_at: ago(11 * 60), ticket })
+  const stopped = Array.from({ length: 20 }, (_, i) => agent({
+    session_id: `stop-${i}`, name: `retired-${i}`, phase: 'stopped', activity: 'idle', stopped_at: ago(30), stop_reason: 'completed', ticket,
+  }))
+  const failed = agent({ session_id: 'fail', name: 'crashed', phase: 'stopped', activity: 'idle', stopped_at: ago(30), has_problem: true, stop_reason: 'error: failed', heartbeat_at: ago(5), ticket })
+  const archived = agent({ session_id: 'arch', name: 'old', phase: 'stopped', activity: 'idle', stopped_at: ago(30), stop_reason: 'archived_process_unknown', ticket })
+  const duplicate = agent({ session_id: 'a1', name: 'one-again', ticket })
+  const idle = agent({ session_id: 'quiet', name: 'quiet', activity: 'idle', heartbeat_at: ago(20), ticket: null })
+  const grouped = groupLive([working, starting, yielded, throttled, overdue, ...stopped, failed, archived, duplicate, idle], now)
+  assert.equal(grouped.get('p1')!.some(a => a.session_id === 'fail'), true, 'stopped history stays available to other surfaces')
+  assert.equal(isActiveSession(failed), false)
+  assert.equal(isListedTicketWorker(failed), false)
+  const listed = activeSessions(grouped.get('p1')!)
+  assert.deepEqual(listed.map(a => a.session_id), ['a5', 'a3', 'a4', 'a1', 'a2', 'quiet'])
+  assert.equal(listed.find(a => a.session_id === 'a3')!.state, 'waiting')
+  assert.equal(listed.find(a => a.session_id === 'a4')!.state, 'throttled')
+  assert.equal(listed.find(a => a.session_id === 'a5')!.state, 'unresponsive')
+  assert.equal(listed.find(a => a.session_id === 'a2')!.state, 'working')
+  assert.equal(listed.find(a => a.session_id === 'quiet')!.state, 'idle')
+  assert.equal(listed.filter(a => a.session_id === 'a1').length, 1)
+  const summary = liveSummary(listed.filter(a => a.ticket))
+  assert.match(summary, /^5 agents:/)
+  assert.doesNotMatch(summary, /5 agents needs something/)
+  assert.equal(activeByProject(groupLive(stopped, now)).size, 0)
+  assert.equal(activeSessions(groupLive([failed, archived], now).get('p1')!).length, 0)
+  assert.equal(activeAgentLabel(1), '1 active agent')
+  assert.equal(activeAgentLabel(5), '5 active agents')
+  const before = activeByProject(groupLive([working, failed], now))
+  const after = activeByProject(groupLive([failed], now))
+  assert.equal(liveChanges(before, after, () => 'Pill'), 'No agent is working on Pill any more.')
+})
+
+test('two anonymous sessions with the same harness and start both count; a known session id counts once', () => {
+  const since = ago(40)
+  const anonymous = () => agent({
+    session_id: undefined, principal_id: undefined, name: undefined, display_label: undefined, harness: 'codex', since, ticket: null,
+  })
+  const blank = agent({ session_id: '  ', principal_id: undefined, name: undefined, harness: 'codex', since, ticket: null })
+  const known = agent({ session_id: 'known', name: 'named', harness: 'claude', since })
+  const knownAgain = agent({ session_id: 'known', name: 'named-again', harness: 'claude', since })
+  const listed = activeSessions([anonymous(), anonymous(), blank, known, knownAgain])
+  assert.equal(listed.length, 4)
+  assert.equal(listed.filter(a => !a.session_id?.trim()).length, 3)
+  assert.equal(listed.filter(a => a.session_id === 'known').length, 1)
+  assert.equal(liveSummary(listed), '4 agents working: Codex agent, Codex agent, Codex agent, named on HAUSV-887')
+  assert.equal(activeAgentLabel(listed.length), '4 active agents')
+  assert.equal(chipText(listed).more, 3)
+})
+
+test('project labels and equality retain safe attention reason changes', () => {
+  const approval = agent({ state: 'waiting', needs_attention: true, attention_reasons: [{ kind: 'approval', scope: 'run', actor: 'person', count: 1, blocking: true, location: 'approvals' }] })
+  assert.equal(phaseLabel(approval), 'Awaiting approval')
+  const cleared = { ...approval, state: 'working' as const, needs_attention: false, attention_reasons: [] }
+  assert.equal(phaseLabel(cleared), 'Working')
+  assert.ok(!sameLive(new Map([['p1', [approval]]]), new Map([['p1', [cleared]]])))
+  const changed = { ...approval, attention_reasons: approval.attention_reasons!.map(r => ({ ...r, count: 2 })) }
+  assert.ok(!sameLive(new Map([['p1', [approval]]]), new Map([['p1', [changed]]])))
 })

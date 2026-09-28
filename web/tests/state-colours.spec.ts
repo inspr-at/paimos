@@ -36,6 +36,10 @@ for (const theme of ['light', 'dark'] as const) {
       expect(new Set(await page.locator('[data-project-id]').evaluateAll(elements => elements.map(el => getComputedStyle(el).backgroundColor))).size).toBe(1)
       for (const state of states) {
         const project = page.locator(`[data-project-id="p-sc1-${state}"]`)
+        if (state === 'stopped') {
+          await expect(project.locator('.live')).toHaveCount(0)
+          continue
+        }
         await expect(project).toHaveAttribute('data-agent-state', state)
         await expect(project.locator('.chip-state')).toHaveText(STATE_LABEL[state])
         await expect(project.locator('.live-bot')).toHaveAttribute('aria-label', STATE_LABEL[state])
@@ -52,6 +56,7 @@ for (const theme of ['light', 'dark'] as const) {
       for (const layout of ['Cards', 'List']) {
         await page.getByRole('radio', { name: `${layout} view`, exact: true }).click()
         for (const state of states) {
+          if (state === 'stopped') continue
           const project = page.locator(`[data-project-id="p-sc1-${state}"]`)
           const label = project.locator('.chip-state')
           await expect(label).toHaveText(STATE_LABEL[state])
@@ -87,7 +92,7 @@ test('per-viewer palettes, opacity and heartbeat thresholds persist and reach ev
   await expect(page.getByLabel('Palette', { exact: true })).toHaveValue('deutan')
   await expect(page.getByLabel('Inactive opacity', { exact: true })).toHaveValue('70')
   await page.goto('/')
-  await expect(page.locator('[data-project-id="p-sc1-stopped"] .live-chip')).toHaveCSS('opacity', '0.7')
+  await expect(page.locator('[data-project-id="p-sc1-stale"] .live-chip')).toHaveCSS('opacity', '0.7')
   // The ten-minute heartbeat is amber with the saved twelve-minute red threshold.
   await expect(page.locator('[data-project-id="p-sc1-unresponsive"] .live-bot')).toHaveAttribute('data-state', 'awaiting')
   await page.goto('/settings/personal#agents')

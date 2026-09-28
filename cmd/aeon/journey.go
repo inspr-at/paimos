@@ -11,8 +11,9 @@ import (
 	"github.com/inspr-at/paimos/internal/journey"
 )
 
-// journeyCommand is operator-only. Seed accepts --brief 1|2|3 for a fixed
-// disposable intake; these mutations have no HTTP route.
+// journeyCommand is operator-only. Seed --brief 1|2|3 completes a fixed
+// disposable intake through the intake and requirements mutations; these
+// commands have no HTTP route.
 func journeyCommand(args []string, stdout io.Writer) error {
 	if err := journey.ValidateOperator(args); err != nil {
 		return err

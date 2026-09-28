@@ -204,11 +204,15 @@
 // `seed --tenant SLUG --project KEY --to-stage build|candidate|deploy
 // [--brief 1|2|3]`. AEON-208's fixed Host status page, Release notes digest
 // and Maintenance window planner briefs are host-only synthetic intake for
-// disposable projects. The seed accepts and confirms the selected brief, then
-// creates an agreed minimal requirement, feature and completed release ticket.
-// It records revision-fenced action receipts and operator events with the brief
-// number on every step; replaying the same brief is a no-op, and changing the
-// brief after intake is refused.
+// disposable projects. The seed proposes and accepts the brief and its
+// requirement through the intake mutations, confirms the brief through the
+// journey action, and agrees the requirement through the requirements
+// mutation. That creates the feature and, once a release exists, the completed
+// release ticket. Receipts, revisions and events are the normal intake,
+// journey and requirements records, tagged disposable with the brief number.
+// Replaying the same brief is a no-op, and changing the brief after intake is
+// refused. The operator remains an agent; candidate and deploy gates stay
+// person-only.
 // Development is the default; production host runs require --production and
 // --confirm-project equal to --project. Production events record production:true
 // and the Access operator. MarkDisposable appends an operator event and

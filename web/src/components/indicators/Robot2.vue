@@ -1,4 +1,4 @@
-<!-- Robot 2 · calm-friendly: softened linework, rare blinks and a quiet typing cursor.
+<!-- Robot 2 · calm-friendly: softened linework, rare blinks and a shallow smile.
      SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import type { AgentState } from '../../lib/agentSignals'
@@ -48,10 +48,8 @@ watch(() => props.state, state => { if (state !== 'working') glint.value = 0 })
       <g v-if="state === 'working'" class="eyes">
         <path d="M12 15.5h2M18 15.5h2" />
       </g>
+      <path v-if="state === 'working'" class="smile" d="M12.9 19.2q3.1 1.25 6.2 0" />
     </g>
-    <rect v-if="state === 'working'" class="screen" x="11.5" y="18" width="9" height="2.5" rx="1.25" />
-    <path v-if="state === 'working'" class="typing" d="M13 19.25h2.5" />
-    <path v-if="state === 'working'" class="cursor" d="M18 18.8v.9" />
     <RobotExpression v-if="state !== 'working'" :state="state" />
     </g>
     <AgentStateMark :state="state" x="21" y="0" :size="11" />
@@ -68,23 +66,15 @@ watch(() => props.state, state => { if (state !== 'working') glint.value = 0 })
 .rim { fill: none; stroke: var(--signal); stroke-width: 1.25; opacity: .38; }
 .linework { fill: none; stroke: var(--ink, #203c3d); stroke-width: calc(1.35px * var(--art-stroke, 1)); stroke-linecap: round; stroke-linejoin: round; }
 .head { fill: var(--surface-raised, #fffefa); }
-.screen { fill: var(--signal); opacity: .12; }
-.typing, .cursor { fill: none; stroke: var(--signal); stroke-width: 1.2; stroke-linecap: round; }
-.cursor { opacity: .8; }
 .waiting .linework, .stale .linework { stroke: var(--signal); }
 .stale .rim { stroke-dasharray: .6 3.2; stroke-linecap: round; opacity: .6; }
 .clock { fill: var(--surface-raised, #fffefa); stroke: var(--signal); stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; }
 .clock path { fill: none; }
 .glint { fill: #c9a24a; stroke: var(--surface-raised, #fffefa); stroke-width: .6; opacity: 0; animation: event-opacity .6s ease-out both; }
 @media (prefers-reduced-motion: no-preference) {
-  .working .cursor { animation: cursor-work 3.8s ease-in-out infinite; animation-delay: var(--phase); }
-  .working:not(.lead) .cursor { animation-duration: 6.8s; }
   .working.lead .eyes { transform-origin: 16px 15.5px; animation: rare-blink 11s linear infinite; animation-delay: var(--phase); }
-  .working.lead .screen { animation: screen-work 3.8s ease-in-out infinite; animation-delay: var(--phase); }
   .lead .glint { transform-origin: 6px 7px; animation-name: event-glint; }
 }
-@keyframes cursor-work { 0%, 100% { opacity: .35; } 40%, 60% { opacity: 1; } }
-@keyframes screen-work { 0%, 100% { opacity: .08; } 50% { opacity: .2; } }
 @keyframes rare-blink { 0%, 94%, 98%, 100% { transform: scaleY(1); } 96% { transform: scaleY(.15); } }
 @keyframes event-opacity { 0%, 100% { opacity: 0; } 22%, 48% { opacity: .85; } }
 @keyframes event-glint { 0% { opacity: 0; transform: scale(.7); } 25% { opacity: 1; transform: scale(1); } 100% { opacity: 0; transform: scale(.9); } }

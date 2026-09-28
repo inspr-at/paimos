@@ -11,7 +11,7 @@ test('the public guide is readable without sign-in and keeps only the human code
   await expect(page.getByText(SETUP_COMMAND, { exact: false })).toBeHidden()
   await page.getByText('Manual and agent setup').click()
   await expect(page.getByText(SETUP_COMMAND, { exact: false })).toBeVisible()
-  await expect(page.getByText('This Aeon has not published a verified installer.')).toBeVisible()
+  await expect(page.getByText('This AEON has not published a verified installer.')).toBeVisible()
   await expect(page.getByText(/curl\|sh|aeon\.barta\.cm/)).toHaveCount(0)
   await expect(page.getByRole('button', { name: 'Sign in to review the code' })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Connect computer' })).toHaveCount(0)

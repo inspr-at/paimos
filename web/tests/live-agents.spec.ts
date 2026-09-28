@@ -100,9 +100,9 @@ test('hover and focus show who works on what; an agent opens its session', async
   await cards(page, world())
   const chip = card(page, 'p-aeon').locator('.live-chip')
   await chip.hover()
-  const pop = page.getByRole('dialog', { name: 'Agents working on Aeon' })
+  const pop = page.getByRole('dialog', { name: 'Active agents on Aeon' })
   await expect(pop).toBeVisible()
-  await expect(pop).toContainText('2 agents working')
+  await expect(pop).toContainText('2 active agents')
   const camy = pop.getByRole('link', { name: 'camy, Codex, working for 4m. Open the session' })
   await expect(camy).toHaveAttribute('href', '/agents/s-camy')
   await expect(pop.getByRole('link', { name: /AEON-184/ })).toHaveAttribute('href', '/p/AEON/AEON-184')
@@ -136,7 +136,7 @@ test('a ticket that moved on links to the project it lives in now', async ({ pag
   await cards(page, data)
   for (const [id, title] of [['p-hausv', 'Hausverwaltung'], ['p-janus', 'Janus']] as const) {
     await card(page, id).locator('.live-chip').click()
-    const pop = page.getByRole('dialog', { name: `Agents working on ${title}` })
+    const pop = page.getByRole('dialog', { name: `Active agents on ${title}` })
     await expect(pop.getByRole('link', { name: /JANUS-7/ })).toHaveAttribute('href', '/p/JANUS/JANUS-7')
     await page.keyboard.press('Escape')
     await expect(pop).toHaveCount(0)
@@ -150,10 +150,11 @@ test('without permission to know the agent the chip still says an agent works', 
   const chip = card(page, 'p-hausv').getByRole('button', { name: '1 agent working: Claude agent on HAUSV-887. Who works on what' })
   await expect(chip).toContainText('Claude agent')
   await chip.click()
-  const pop = page.getByRole('dialog', { name: 'Agents working on Hausverwaltung' })
-  // No session to open: the agent is a line, not a link.
-  await expect(pop.getByRole('link')).toHaveCount(1)
-  await expect(pop.getByRole('link')).toHaveAttribute('href', '/p/HAUSV/HAUSV-887')
+  const pop = page.getByRole('dialog', { name: 'Active agents on Hausverwaltung' })
+  // No session to open: the agent is a line, not a link. History stays a plain /agents link.
+  await expect(pop.locator('a.agent-line')).toHaveCount(0)
+  await expect(pop.getByRole('link', { name: /HAUSV-887/ })).toHaveAttribute('href', '/p/HAUSV/HAUSV-887')
+  await expect(pop.getByRole('link', { name: 'All agents' })).toHaveAttribute('href', '/agents')
 })
 
 test('list rows carry a compact live chip: robots and the state word', async ({ page }) => {
@@ -299,7 +300,7 @@ test.describe('motion', () => {
     expect(closed.animations.every(name => name.startsWith('activity-sweep'))).toBe(true)
     // Open the details: their entrance and pulse count too.
     await card(page, 'p-ops').locator('.live-chip').hover()
-    await expect(page.getByRole('dialog', { name: 'Agents working on Operations' })).toBeVisible()
+    await expect(page.getByRole('dialog', { name: 'Active agents on Operations' })).toBeVisible()
     const open = await page.evaluate(motionProperties)
     expect(open.animations.some(name => name.startsWith('live-pop-in')), open.animations.join(',')).toBe(true)
     for (const report of [closed, open]) {
@@ -324,7 +325,7 @@ for (const colorScheme of ['light', 'dark'] as const) {
     await page.emulateMedia({ colorScheme })
     await cards(page, world())
     await card(page, 'p-aeon').locator('.live-chip').click()
-    await expect(page.getByRole('dialog', { name: 'Agents working on Aeon' })).toBeVisible()
+    await expect(page.getByRole('dialog', { name: 'Active agents on Aeon' })).toBeVisible()
     const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).exclude('.version-coordinate').exclude('.calendar-version').analyze()
     const summary = results.violations.map(v => `${v.id} (${v.impact}): ${v.help}\n${v.nodes.slice(0, 4).map(n => `    ${n.target.join(' ')} — ${n.failureSummary?.split('\n').slice(1, 2).join(' ').trim()}`).join('\n')}`)
     expect(summary, summary.join('\n')).toEqual([])
@@ -425,6 +426,152 @@ for (const reducedMotion of ['reduce', 'no-preference'] as const) {
   })
 }
 
+test('the pill counts sessions still in progress and keeps each state on its own row', async ({ page }) => {
+  const data = fixtures()
+  const at = Date.parse('2026-09-23T12:00:00Z')
+  const ago = (seconds: number) => new Date(at - seconds * 1000).toISOString()
+  data.preferences.projects = { view: 'cards' }
+  data.preferences['agent-indicator'] = { style: 'robot-5', hovering: false }
+  data.projects.push(
+    { id: 'p-pill', key: 'PRJ-70', title: 'Pill', state: 'active', classic: 'PILL', description: 'Active count.', last: ago(120) },
+    { id: 'p-quiet', key: 'PRJ-71', title: 'Quiet', state: 'active', classic: 'QUIET', description: 'Only stopped sessions.', last: ago(400) },
+    { id: 'p-mix', key: 'PRJ-72', title: 'Mixed', state: 'active', classic: 'MIX', description: 'Several live states.', last: ago(200) },
+  )
+  const bound = (key: string) => ({ id: `n-${key}`, key, title: `Work ${key}`, project_id: 'p-pill' })
+  for (let i = 0; i < 5; i++) data.live.push(liveAgent({ project_id: 'p-pill', session_id: `live-${i}`, principal_id: `aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa${i}`, name: `live-${i}`, ticket: bound(`PILL-${i}`) }, 10 + i))
+  data.live.push(liveAgent({ project_id: 'p-pill', session_id: 'live-0', principal_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa0', name: 'live-0-dup', ticket: bound('PILL-0') }, 10))
+  for (let i = 0; i < 30; i++) data.live.push(liveAgent({ project_id: 'p-pill', session_id: `stop-${i}`, name: `retired-${i}`, phase: 'stopped', activity: 'idle', stopped_at: ago(90), stop_reason: 'completed', ticket: bound(`OLD-${i}`) }, 80))
+  data.live.push(liveAgent({ project_id: 'p-pill', session_id: 'failed', name: 'crashed-stopped', phase: 'stopped', activity: 'idle', stopped_at: ago(40), stop_reason: 'error: failed', has_problem: true, heartbeat_at: ago(5), ticket: bound('FAIL-1') }, 40))
+  data.live.push(liveAgent({ project_id: 'p-quiet', session_id: 'quiet-1', name: 'only-stopped', phase: 'stopped', activity: 'idle', stopped_at: ago(30), stop_reason: 'archived_process_unknown' }, 20))
+  const mixTicket = (key: string, title: string) => ({ id: `n-${key}`, key, title, project_id: 'p-mix' })
+  data.live.push(liveAgent({ project_id: 'p-mix', session_id: 'mix-work', principal_id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb1', name: 'mason', ticket: mixTicket('MIX-1', 'Keep going') }, 6))
+  data.live.push(liveAgent({ project_id: 'p-mix', session_id: 'mix-yield', principal_id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb2', name: 'wren', phase: 'yielded', activity: 'idle', ticket: mixTicket('MIX-2', 'Yielded') }, 8))
+  data.live.push(liveAgent({ project_id: 'p-mix', session_id: 'mix-throttle', principal_id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb3', name: 'theo', activity: 'throttled', ticket: mixTicket('MIX-3', 'Throttled') }, 4))
+  data.live.push(liveAgent({ project_id: 'p-mix', session_id: 'mix-late', principal_id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb4', name: 'late', heartbeat_at: ago(660), ticket: mixTicket('MIX-4', 'Overdue') }, 12))
+  await cards(page, data)
+  const pill = card(page, 'p-pill')
+  await expect(pill.locator('.count')).toHaveText('5')
+  await expect(pill.locator('.live-bot')).toHaveCount(3)
+  await expect(pill.getByRole('button', { name: /^5 agents working:/ })).toBeVisible()
+  await expect(card(page, 'p-quiet').locator('.live')).toHaveCount(0)
+  await pill.locator('.live-chip').click()
+  const pop = page.getByRole('dialog', { name: 'Active agents on Pill' })
+  await expect(pop.locator('.pop-head')).toContainText('5 active agents')
+  await expect(pop.locator('.pop-head')).not.toContainText(/needs something/i)
+  await expect(pop.getByText('retired-0')).toHaveCount(0)
+  await expect(pop.getByText('crashed-stopped')).toHaveCount(0)
+  await expect(pop.locator('.pop-agent')).toHaveCount(5)
+  const history = pop.getByRole('link', { name: 'All agents' })
+  await expect(history).toHaveAttribute('href', '/agents')
+  await history.focus()
+  await expect(history).toBeFocused()
+  await page.keyboard.press('Escape')
+  await expect(pop).toHaveCount(0)
+  await expect(pill.locator('.live-chip')).toBeFocused()
+
+  await card(page, 'p-mix').locator('.live-chip').click()
+  const mixed = page.getByRole('dialog', { name: 'Active agents on Mixed' })
+  await expect(mixed.locator('.pop-head')).toContainText('4 active agents')
+  await expect(mixed.locator('.pop-head')).not.toContainText(/needs something|throttled|heartbeat/i)
+  await expect(mixed.locator('.pop-agent', { hasText: 'wren' }).locator('.agent-state-label')).toHaveText('Needs something')
+  await expect(mixed.locator('.pop-agent', { hasText: 'theo' }).locator('.agent-state-label')).toHaveText('Throttled')
+  await expect(mixed.locator('.pop-agent', { hasText: 'late' }).locator('.agent-state-label')).toHaveText('No heartbeat')
+  await expect(mixed.locator('.pop-agent', { hasText: 'mason' }).locator('.agent-state-label')).toHaveText('Working')
+  await mixed.getByRole('link', { name: /MIX-2/ }).click()
+  await expect(page).toHaveURL('/p/MIX/MIX-2')
+})
+
+test('long names stay on one line and a long popover still reaches its links', async ({ page }) => {
+  mkdirSync('../.agent-shots', { recursive: true })
+  const data = fixtures()
+  const longName = 'Alexandria-the-project-coordinator-with-a-long-name'
+  const longKey = 'AEON-LONG-PROJECT-202'
+  data.preferences.projects = { view: 'cards' }
+  data.preferences['agent-indicator'] = { style: 'robot-5', hovering: false }
+  data.projects = [{ id: 'p-long', key: 'PRJ-80', title: 'Long labels', state: 'active', classic: 'LONG', description: 'Names and a long active list.', last: '2026-09-23T11:50:00Z' }]
+  for (let i = 0; i < 12; i++) data.live.push(liveAgent({
+    project_id: 'p-long', session_id: `long-${i}`, principal_id: `cccccccc-cccc-4ccc-8ccc-ccccccccccc${i.toString(16)}`,
+    name: `${longName}-${i}`, ticket: { id: `n-long-${i}`, key: `${longKey}-${i}`, title: `A long ticket title for session ${i}`, project_id: 'p-long' },
+  }, 3 + i))
+  data.live.push(liveAgent({ project_id: 'p-long', session_id: 'long-stopped', name: 'stopped-history', phase: 'stopped', activity: 'idle', stopped_at: '2026-09-23T11:00:00Z', stop_reason: 'completed' }, 40))
+  await cards(page, data)
+  const chip = card(page, 'p-long').locator('.live-chip')
+  const oneLine = async () => {
+    const box = (await chip.boundingBox())!
+    expect(box.height).toBeLessThanOrEqual(34)
+    const inside = await chip.evaluate(element => {
+      const root = element.getBoundingClientRect()
+      return [...element.querySelectorAll('.face, .name, .key, .chip-state')].filter(node => node.getBoundingClientRect().width > 0).map(node => {
+        const rect = node.getBoundingClientRect()
+        return { top: rect.top - root.top, bottom: root.bottom - rect.bottom, right: root.right - rect.right, clipped: node.scrollWidth > node.clientWidth + 1 }
+      })
+    })
+    expect(inside.length).toBeGreaterThan(2)
+    for (const part of inside) {
+      expect(part.top).toBeGreaterThanOrEqual(-1)
+      expect(part.bottom).toBeGreaterThanOrEqual(-1)
+      expect(part.right).toBeGreaterThanOrEqual(4)
+    }
+    expect(inside.some(part => part.clipped)).toBe(true)
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+  }
+  await page.setViewportSize({ width: 1600, height: 1000 })
+  await page.emulateMedia({ colorScheme: 'light' })
+  await oneLine()
+  await expect(chip.locator('.count')).toHaveText('12')
+  await expect(chip.locator('.live-bot').first()).toHaveAttribute('data-style', 'robot-5')
+  await page.evaluate(() => { for (const animation of document.getAnimations()) { animation.pause(); animation.currentTime = 400 } })
+  await card(page, 'p-long').screenshot({ path: '../.agent-shots/bk14-pill-1600-light.png' })
+  await chip.click()
+  const pop = page.getByRole('dialog', { name: 'Active agents on Long labels' })
+  const list = pop.locator('.pop-list')
+  await expect(list).toBeVisible()
+  expect(await list.evaluate(element => element.scrollHeight > element.clientHeight + 8)).toBe(true)
+  const last = pop.getByRole('link', { name: /AEON-LONG-PROJECT-202-11/ })
+  await last.scrollIntoViewIfNeeded()
+  await expect(last).toBeInViewport()
+  await expect(pop.getByText('stopped-history')).toHaveCount(0)
+  await expect(pop.getByRole('link', { name: 'All agents' })).toBeVisible()
+  await page.screenshot({ path: '../.agent-shots/bk14-popover-1600-light.png' })
+  await page.keyboard.press('Escape')
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.emulateMedia({ colorScheme: 'dark' })
+  await oneLine()
+  await page.evaluate(() => { for (const animation of document.getAnimations()) { animation.pause(); animation.currentTime = 400 } })
+  await card(page, 'p-long').screenshot({ path: '../.agent-shots/bk14-pill-390-dark.png' })
+  await chip.click()
+  await expect(pop).toBeVisible()
+  expect(await list.evaluate(element => element.scrollHeight > element.clientHeight + 8)).toBe(true)
+  await last.scrollIntoViewIfNeeded()
+  await expect(last).toBeInViewport()
+  await page.screenshot({ path: '../.agent-shots/bk14-popover-390-dark.png' })
+  await page.keyboard.press('Escape')
+  await expect(pop).toHaveCount(0)
+  await page.getByRole('radio', { name: 'List view' }).click()
+  const rowChip = row(page, 'p-long').locator('.live-chip')
+  await expect(rowChip).toBeVisible()
+  expect((await rowChip.boundingBox())!.height).toBeLessThanOrEqual(34)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+})
+
+test('stopped records that remain in the feed do not keep the project live', async ({ page }) => {
+  const data = fixtures()
+  data.preferences.projects = { view: 'cards' }
+  data.projects.push({ id: 'p-end', key: 'PRJ-81', title: 'Ending', state: 'active', classic: 'END', description: 'One live session and history.', last: '2026-09-23T11:40:00Z' })
+  const active = liveAgent({ project_id: 'p-end', session_id: 'end-live', principal_id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd', name: 'nova', ticket: { id: 'n-end', key: 'END-1', title: 'Finish', project_id: 'p-end' } }, 5)
+  data.live.push(active, liveAgent({ project_id: 'p-end', session_id: 'end-old', name: 'retired', phase: 'stopped', activity: 'idle', stopped_at: '2026-09-23T10:00:00Z', stop_reason: 'completed' }, 70))
+  await cards(page, data)
+  const news = page.locator('[aria-live="polite"].sr-only')
+  await expect(card(page, 'p-end').locator('.count')).toHaveCount(0)
+  await expect(card(page, 'p-end').getByRole('button', { name: /^1 agent working: nova on END-1/ })).toBeVisible()
+  Object.assign(active, { phase: 'stopped', activity: 'idle', stopped_at: '2026-09-23T12:00:00Z', stop_reason: 'completed' })
+  await page.clock.fastForward(20_500)
+  await expect(card(page, 'p-end').locator('.live')).toHaveCount(0)
+  await page.clock.fastForward(2_600)
+  await expect(news).toHaveText('No agent is working on Ending any more.')
+})
+
 // ---------- Design review screenshots (LIVE_SHOTS=<dir>) ----------
 const shots = process.env.LIVE_SHOTS ?? ''
 test.describe('screenshots', () => {
@@ -485,7 +632,7 @@ test.describe('screenshots', () => {
       await mockWork(page, world())
       await page.goto('/')
       await card(page, 'p-ops').locator('.live-chip').hover()
-      await expect(page.getByRole('dialog', { name: 'Agents working on Operations' })).toBeVisible()
+      await expect(page.getByRole('dialog', { name: 'Active agents on Operations' })).toBeVisible()
       await page.waitForTimeout(400)
       await page.screenshot({ path: `${shots}/la2-popover-${colorScheme}.png` })
     })
