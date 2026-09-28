@@ -469,6 +469,31 @@ function assignError(error: unknown, fallback: string) {
 function capability(value: string) {
   return value === 'managed_runs' ? 'Managed runs' : value
 }
+
+/** The reason without the harness name the row already shows. */
+function harnessReason(harness: string) {
+  const reason = harnessCapability(harness)[0]?.reason ?? ''
+  const label = harnessLabel(harness)
+  if (!reason.toLowerCase().startsWith(`${label.toLowerCase()} `)) return reason
+  const rest = reason.slice(label.length + 1)
+  return rest.charAt(0).toUpperCase() + rest.slice(1)
+}
+
+function listNames(names: string[]) {
+  if (names.length < 2) return names[0] ?? ''
+  return `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`
+}
+
+function enrollmentDetail(enrollment: PairingView['enrollments'][number]) {
+  const parts: string[] = [enrollment.state.replace(/_/g, ' ')]
+  if (enrollment.verification_state && enrollment.verification_state !== 'not_selected') {
+    parts.push(`verification ${enrollment.verification_state === 'unavailable' ? 'unavailable' : enrollment.verification_state.replace(/_/g, ' ')}`)
+  }
+  if (enrollment.verification_error && enrollment.verification_error !== 'verification_unavailable') parts.push(enrollment.verification_error)
+  if (enrollment.local_processes) parts.push(`local processes ${enrollment.local_processes}`)
+  if (enrollment.accounting_state === 'unconfirmed') parts.push('accounting unconfirmed')
+  return parts.join(' · ')
+}
 </script>
 
 <template>
@@ -496,30 +521,35 @@ function capability(value: string) {
         <p class="muted">Loading the guide for this {{ brand.short_name }}…</p>
       </template>
       <template v-else>
-        <p class="k">Page address</p>
-        <div class="address">
-          <code>{{ presentation.address || `This ${brand.short_name} has not published its address yet.` }}</code>
-          <button v-if="presentation.address" type="button" class="btn sm" @click="copyText(presentation.address, 'Address')">{{ copied === 'Address' ? 'Copied' : 'Copy' }}</button>
-        </div>
         <ol class="howto">
-          <li v-for="stepText in presentation.steps" :key="stepText">{{ stepText }}</li>
+          <li v-for="(stepText, index) in presentation.steps" :key="stepText">
+            <span class="howto-num" aria-hidden="true">{{ index + 1 }}</span>
+            <div class="howto-body">
+              <p>{{ stepText }}</p>
+              <div v-if="index === 0" class="address">
+                <code :title="presentation.address">{{ presentation.address || `This ${brand.short_name} has not published its address yet.` }}</code>
+                <button v-if="presentation.address" type="button" class="btn sm" @click="copyText(presentation.address, 'Address')"><AppIcon :name="copied === 'Address' ? 'check' : 'copy'" :size="13" />{{ copied === 'Address' ? 'Copied' : 'Copy' }}</button>
+              </div>
+            </div>
+          </li>
         </ol>
       </template>
       <p v-if="guideError" class="problem" role="alert">{{ guideError }} <button type="button" class="btn sm" @click="loadGuide">Try again</button></p>
 
-      <form @submit.prevent="lookup">
-        <h2>Code from the computer</h2>
-        <label>Pairing code
-          <input v-model="code" class="field" name="user-code" autocomplete="one-time-code" inputmode="numeric" spellcheck="false" />
-        </label>
-        <button class="btn primary go" type="submit" :disabled="!!busy">{{ busy === 'lookup' ? 'Looking up…' : session.identity ? 'Look up code' : 'Sign in to review the code' }}</button>
+      <form class="code-form" @submit.prevent="lookup">
+        <label for="pairing-code">Pairing code</label>
+        <div class="code-row">
+          <input id="pairing-code" v-model="code" class="field code" name="user-code" autocomplete="one-time-code" inputmode="numeric" spellcheck="false" placeholder="123-456-789" />
+          <button class="btn primary go" type="submit" :disabled="!!busy">{{ busy === 'lookup' ? 'Looking up…' : session.identity ? 'Look up code' : 'Sign in to review the code' }}</button>
+        </div>
         <p v-if="presentation" class="note">{{ presentation.note }}</p>
         <p v-if="permissionsReady && session.identity && !permissions.canLookup" class="note">Only a signed-in person who can manage accounts can review a pairing code. An agent session cannot approve it.</p>
       </form>
       <details v-if="presentation" class="manual">
         <summary><AppIcon name="chevron-right" :size="12" class="disclosure-chev" />Manual and agent setup</summary>
+        <div class="manual-body">
         <p v-for="paragraph in presentation.manualParagraphs" :key="paragraph" class="copy">{{ paragraph }}</p>
-        <p class="copy">{{ presentation.installNote }}</p>
+        <p class="copy install-note"><AppIcon name="shield" :size="14" />{{ presentation.installNote }}</p>
         <label v-if="presentation.targets.length > 1">Platform
           <select v-model="platformKey" class="field" aria-label="Install platform">
             <option v-for="target in presentation.targets" :key="`${target.platform}/${target.arch}`" :value="`${target.platform}/${target.arch}`">{{ platformCaption(target.platform, target.arch) }}</option>
@@ -535,6 +565,7 @@ function capability(value: string) {
           <pre class="command"><code>{{ presentation.setupCommand }}</code></pre>
           <button type="button" class="btn sm" @click="copyText(presentation.setupCommand, 'Command')">{{ copied === 'Command' ? 'Copied' : 'Copy command' }}</button>
         </template>
+        </div>
       </details>
     </section>
 
@@ -544,21 +575,20 @@ function capability(value: string) {
           <h2>{{ adding && pendingReview ? 'Add a harness' : pendingReview ? 'Review this computer' : progress.title }}</h2>
           <p>{{ pendingReview ? 'Confirm the details and choose which harnesses to connect.' : progress.detail }}</p>
         </div>
-        <button type="button" class="btn sm" :disabled="!!busy" @click="resetCode">Use a different code</button>
+        <button type="button" class="btn sm ghost" :disabled="!!busy" @click="resetCode">Use a different code</button>
       </header>
       <p v-if="targetProblem" class="problem" role="alert">{{ targetProblem.message }} {{ targetProblem.next }}</p>
       <button v-if="targetProblem" type="button" class="btn sm" @click="reviewAsNewComputer">Review as a new computer</button>
 
       <div class="facts">
-        <div><span class="glyph"><AppIcon name="monitor" :size="16" /></span><div><p class="k">Computer</p><p>{{ current.computer_name }}</p><p class="sub">{{ platformCaption(current.platform, current.arch) }}</p></div></div>
+        <div><span class="glyph"><AppIcon name="monitor" :size="16" /></span><div><p class="k">Computer</p><p>{{ current.computer_name }}</p><p class="sub">{{ [platformCaption(current.platform, current.arch), ...current.capabilities.map(capability)].join(' · ') }}</p></div></div>
         <div><span class="glyph"><AppIcon name="layers" :size="16" /></span><div><p class="k">Workspace</p><p>{{ current.tenant_name }}</p></div></div>
         <div><span class="glyph"><AppIcon name="folder" :size="16" /></span><div><p class="k">Folder</p><p class="path">{{ current.workspace_path }}</p></div></div>
       </div>
-      <p v-if="current.capabilities.length" class="sub caps">{{ current.capabilities.map(capability).join(', ') }}</p>
 
       <template v-if="pendingReview">
-        <h3>Select harnesses</h3>
-        <p class="sub">Choose which accounts to connect. A harness can be left out. Each selected harness uses one account.</p>
+        <h3>Harnesses</h3>
+        <p class="sub">Each selected harness connects with one account.</p>
         <div v-for="group in accountGroups" :key="group.harness" class="harness">
           <label class="check">
             <input type="checkbox" :checked="!!selectedKey(group.harness)" :aria-label="`Connect ${harnessLabel(group.harness)}`" @change="toggleHarness(group.harness, group.accounts, ($event.target as HTMLInputElement).checked)" />
@@ -572,7 +602,7 @@ function capability(value: string) {
               <option v-for="account in group.accounts" :key="account.account_key" :value="account.account_key">{{ account.label }}</option>
             </select>
           </label>
-          <p v-if="verify && harnessCapability(group.harness).length" class="problem harness-note">{{ harnessLabel(group.harness) }}: {{ harnessCapability(group.harness)[0]?.reason }}</p>
+          <p v-if="verify && harnessCapability(group.harness).length" class="harness-note"><AppIcon name="info" :size="14" />{{ harnessReason(group.harness) }}</p>
         </div>
 
         <label class="verify">
@@ -585,11 +615,13 @@ function capability(value: string) {
         </label>
         <p v-if="terms && verificationWarning(terms)" class="problem" role="alert">{{ verificationWarning(terms) }}</p>
         <p v-if="verify && !current.verification" class="problem">The server did not include verification terms. Leave verification off, or look the code up again.</p>
-        <div v-if="verificationBlocked.length" class="problem" role="alert">
-          <p v-if="current.verification_capabilities">Verification is unavailable for {{ verificationBlocked.map(item => harnessLabel(item.harness)).join(', ') }}. Connect only still pairs the computer. Leaving a harness out skips it.</p>
+        <div v-if="verificationBlocked.length" class="blocked" role="alert">
+          <p v-if="current.verification_capabilities">{{ listNames(verificationBlocked.map(item => harnessLabel(item.harness))) }} can’t be verified. Connect without verifying, or leave {{ verificationBlocked.length === 1 ? 'it' : 'them' }} out.</p>
           <p v-else>This {{ brand.short_name }} has not said which harnesses can be verified. Connect only still pairs the computer.</p>
-          <button type="button" class="btn sm" @click="connectOnly">Connect only</button>
-          <button v-if="current.verification_capabilities" type="button" class="btn sm" @click="leaveOutUnsupported">Leave out unsupported harnesses</button>
+          <div class="blocked-actions">
+            <button type="button" class="btn sm" @click="connectOnly">Connect only</button>
+            <button v-if="current.verification_capabilities" type="button" class="btn sm" @click="leaveOutUnsupported">Leave {{ verificationBlocked.length === 1 ? 'it' : 'them' }} out</button>
+          </div>
         </div>
 
         <fieldset>
@@ -603,12 +635,11 @@ function capability(value: string) {
         <p>{{ progress.next }}</p>
         <ul class="enrollments">
           <li v-for="enrollment in current.enrollments" :key="enrollment.account_id">
-            <HarnessMark :harness="enrollment.harness" :size="14" />
-            <span>{{ harnessLabel(enrollment.harness) }} · {{ enrollment.label }} · {{ enrollment.state }}</span>
-            <span v-if="enrollment.verification_state && enrollment.verification_state !== 'not_selected'">Verification {{ enrollment.verification_state === 'unavailable' ? 'unavailable' : enrollment.verification_state.replace(/_/g, ' ') }}</span>
-            <span v-if="enrollment.verification_error && enrollment.verification_error !== 'verification_unavailable'">{{ enrollment.verification_error }}</span>
-            <span v-if="enrollment.local_processes">Local processes {{ enrollment.local_processes }}</span>
-            <span v-if="enrollment.accounting_state === 'unconfirmed'">Accounting unconfirmed</span>
+            <HarnessMark :harness="enrollment.harness" :size="16" />
+            <div class="enrollment-text">
+              <p><strong>{{ enrollment.label }}</strong> <span class="sub">{{ harnessLabel(enrollment.harness) }}</span></p>
+              <p class="sub">{{ enrollmentDetail(enrollment) }}</p>
+            </div>
           </li>
         </ul>
         <button v-if="permissions.canSetOngoingLimits && current.enrollments.some(item => item.state === 'connected')" type="button" class="btn sm" @click="limitsOpen = !limitsOpen">{{ limitsOpen ? 'Hide ongoing limits' : 'Set ongoing limits' }}</button>
@@ -616,20 +647,22 @@ function capability(value: string) {
 
       <div v-if="showLimitForm && limitAccounts.length" class="limits">
         <h3>{{ limitsOpen && limitsWhen !== 'now' && !pendingReview ? 'Ongoing limits for connected accounts' : 'Ongoing limits for this request' }}</h3>
-        <p class="sub">{{ limitsOpen && limitsWhen !== 'now' && !pendingReview ? 'Every connected account on this computer is listed here, including accounts this request did not select.' : `A number of requests for a period, only for the accounts selected on this request. This is an ${brand.short_name} allowance, not the vendor subscription.` }}</p>
+        <p class="sub">{{ limitsOpen && limitsWhen !== 'now' && !pendingReview ? 'Every connected account on this computer, including ones this request did not select.' : `Requests per period for each selected account, in your local time. An ${brand.short_name} allowance, not the vendor subscription.` }}</p>
         <div v-for="account in limitAccounts" :key="account.key" class="limit">
           <h4>{{ account.label }}</h4>
           <p v-if="account.id && limitState[account.id] === 'saved'">Requests for this period are saved.</p>
           <template v-else>
+            <div class="limit-fields">
             <label>Requests
               <input class="field" type="number" min="1" step="1" :value="draftFor(account.key).allowance ?? ''" @input="setDraft(account.key, { allowance: ($event.target as HTMLInputElement).value === '' ? null : Number(($event.target as HTMLInputElement).value) })" />
             </label>
-            <label>Starts (your local time)
+            <label>Starts
               <input class="field" type="datetime-local" :value="draftFor(account.key).starts_at" @input="setDraft(account.key, { starts_at: ($event.target as HTMLInputElement).value })" />
             </label>
-            <label>Ends (your local time)
+            <label>Ends
               <input class="field" type="datetime-local" :value="draftFor(account.key).ends_at" @input="setDraft(account.key, { ends_at: ($event.target as HTMLInputElement).value })" />
             </label>
+            </div>
             <p v-if="ongoingLimitError(draftFor(account.key)) && (draftFor(account.key).allowance || draftFor(account.key).starts_at)" class="problem">{{ simpleRequestLimitError(draftFor(account.key)) }}</p>
             <p v-if="account.id && limitState[account.id] === 'uncertain'" class="problem">This allowance may already be saved. Check it before sending again.</p>
             <div v-if="account.id" class="row-actions">
@@ -661,15 +694,17 @@ function capability(value: string) {
 .intro h1 { margin-top: 6px; }
 .lede, .sub, .next, .note, .copy { color: var(--ink-2); }
 .lede { margin-top: 8px; }
+.sub, .note { font-size: 13px; }
 .steps { display: flex; align-items: center; gap: 0; margin: 22px 0; padding: 0; list-style: none; }
-.steps li { display: flex; align-items: center; gap: 8px; color: var(--ink-3); font-size: 13px; font-weight: 600; }
+.steps li { display: flex; align-items: center; gap: 8px; color: var(--ink-3); font-size: 13px; font-weight: 600; white-space: nowrap; }
 .steps li:not(:last-child) { flex: 1; }
-.steps li:not(:last-child)::after { content: ''; flex: 1; height: 1px; margin: 0 10px; background: var(--line-2); }
+.steps li:not(:last-child)::after { content: ''; flex: 1; min-width: 12px; height: 1px; margin: 0 10px; background: var(--line-2); }
 .steps .current { color: var(--ink); }
-.num { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: var(--surface-sunken); color: var(--ink-2); font: 600 12px/1 var(--mono); }
-.current .num, .done .num { background: var(--teal); color: #fff; }
-.card { padding: 18px; border: 1px solid var(--line); border-radius: 16px; background: var(--surface-raised); }
-.card h2, .card h3, .card h4 { margin: 16px 0 6px; }
+.steps .done { color: var(--ink-2); }
+.num { display: grid; place-items: center; width: 22px; height: 22px; flex-shrink: 0; border-radius: 50%; background: var(--surface-sunken); color: var(--ink-2); font: 600 12px/1 var(--mono); }
+.current .num, .done .num { background: var(--teal); color: var(--surface); }
+.card { padding: 20px; border: 1px solid var(--line); border-radius: 16px; background: var(--surface-raised); }
+.card h2, .card h3, .card h4 { margin: 20px 0 6px; }
 .card h2 { font: 600 16px/1.3 var(--font); letter-spacing: 0; }
 .card h3, .card h4 { font: 600 14px/1.3 var(--font); }
 .card > section:first-child h2, .review-head h2 { margin-top: 0; }
@@ -677,51 +712,93 @@ function capability(value: string) {
 .banner, .problem { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 12px; }
 .banner { padding: 10px 12px; border-radius: 12px; background: var(--surface-sunken); color: var(--ink-2); }
 .problem { color: var(--danger); }
-form label, .limit label { display: grid; gap: 6px; margin: 10px 0; }
-.facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: 14px; }
+.limit label { display: grid; gap: 6px; font-size: 13px; color: var(--ink-2); }
+/* Public guide: three numbered steps, the address inside the first. */
+.howto { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; margin: 0; padding: 0; list-style: none; }
+.howto li { display: flex; gap: 12px; min-width: 0; }
+.howto-num { display: grid; place-items: center; width: 24px; height: 24px; flex-shrink: 0; border-radius: 50%; background: var(--surface-sunken); color: var(--ink-2); font: 600 12px/1 var(--mono); }
+.howto-body { flex: 1; min-width: 0; padding-top: 2px; }
+.howto-body > p { color: var(--ink); }
+.address { display: flex; align-items: center; gap: 8px; margin-top: 8px; padding: 6px 6px 6px 12px; border-radius: 10px; background: var(--surface-sunken); }
+.address code { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 13px/1.4 var(--mono); }
+.address .btn, .command + .btn { gap: 6px; flex-shrink: 0; }
+.code-form { display: grid; gap: 8px; margin-top: 20px; padding-top: 20px; border-top: 1px solid var(--line); }
+.code-form label { font-weight: 600; font-size: 14px; }
+.code-row { display: flex; flex-wrap: wrap; gap: 10px; }
+.code { flex: 0 1 220px; min-width: 0; height: 44px; font: 500 16px/1 var(--mono); letter-spacing: .08em; }
+.code-form .note { font-size: 12.5px; color: var(--ink-3); }
+.manual { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--line); }
+.manual summary { cursor: pointer; font-size: 13.5px; font-weight: 600; color: var(--ink-2); }
+.manual-body { display: grid; gap: 6px; margin-top: 12px; font-size: 13px; }
+.install-note { display: flex; gap: 8px; margin-top: 6px; padding: 10px 12px; border-radius: 10px; background: var(--surface-sunken); white-space: normal; }
+.install-note svg { flex-shrink: 0; margin-top: 2px; color: var(--ink-3); }
+.manual-body .k { margin-top: 8px; }
+.command { display: block; margin: 0 0 4px; padding: 12px; overflow-x: auto; white-space: pre-wrap; border-radius: 10px; background: var(--surface-sunken); font: 12.5px/1.5 var(--mono); }
+.manual-body .btn { justify-self: start; }
+/* Review */
+.facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: 16px; }
 .facts > div { display: flex; gap: 10px; min-width: 0; padding: 12px; border-radius: 12px; background: var(--surface-sunken); }
-.glyph { display: grid; place-items: center; width: 28px; height: 28px; color: var(--ink-2); }
+.facts .sub { font-size: 12.5px; }
+.glyph { display: grid; place-items: center; width: 24px; height: 24px; flex-shrink: 0; color: var(--ink-3); }
 .k { color: var(--ink-3); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; }
-.path, .copy { overflow-wrap: anywhere; }
-.caps { margin-top: 8px; }
+.path { overflow-wrap: anywhere; }
 .harness, .verify, .radio { display: flex; align-items: center; gap: 10px; min-height: 52px; margin-top: 8px; padding: 10px 12px; border-radius: 12px; background: var(--surface-sunken); }
 .harness { justify-content: space-between; flex-wrap: wrap; }
 .check, .verify, .radio { cursor: pointer; }
-.check { display: flex; align-items: center; gap: 10px; min-width: 0; }
-.check input, .verify input, .radio input { width: 16px; height: 16px; margin: 0; accent-color: var(--teal); }
-.address { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 8px 0 12px; }
-.address code, .command { font-family: var(--mono); font-size: 13px; }
-.address code { overflow-wrap: anywhere; }
-.howto { display: grid; gap: 6px; margin: 0 0 8px; padding-left: 1.2rem; color: var(--ink-2); }
-.manual { margin-top: 16px; }
-.manual summary { cursor: pointer; font-weight: 650; }
-.command { display: block; margin: 8px 0; padding: 12px; overflow-x: auto; white-space: pre-wrap; border-radius: 12px; background: var(--surface-sunken); }
-.harness-note { flex-basis: 100%; margin: 0; }
+.check { display: flex; align-items: center; gap: 10px; min-width: 0; font-weight: 600; }
+.check input, .verify input, .radio input { width: 16px; height: 16px; margin: 0; flex-shrink: 0; accent-color: var(--teal); }
+.harness-note { display: flex; align-items: flex-start; gap: 6px; flex-basis: 100%; margin: 0; padding-left: 26px; font-size: 13px; color: var(--ink-2); }
+.harness-note svg { flex-shrink: 0; margin-top: 2px; color: var(--ink-3); }
 .account-pick { flex: 0 1 220px; }
 .account-pick .field { height: 36px; }
-.verify { align-items: flex-start; }
+.verify { align-items: flex-start; margin-top: 16px; }
+.verify input { margin-top: 2px; }
+.verify > span { flex: 1; min-width: 0; }
 .verify strong, .radio strong { display: block; color: var(--ink); }
-.expiry { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; color: var(--ink-2); font-size: 13px; white-space: nowrap; }
-.exact { margin-top: 8px; }
-fieldset { margin: 16px 0 0; padding: 0; border: 0; }
-legend { margin-bottom: 4px; color: var(--ink); font-weight: 650; }
+.verify .sub { display: block; margin-top: 4px; }
+.expiry { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-3); font-size: 12.5px; white-space: nowrap; }
+.blocked { margin-top: 8px; padding: 12px; border-radius: 12px; box-shadow: inset 0 0 0 1px var(--line-2); font-size: 13.5px; color: var(--ink); }
+.blocked-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+fieldset { margin: 20px 0 0; padding: 0; border: 0; }
+legend { margin-bottom: 4px; color: var(--ink); font-weight: 600; font-size: 14px; }
 .radio { align-items: flex-start; }
-.actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 16px; }
+.radio input { margin-top: 2px; }
+.radio .sub { display: block; margin-top: 2px; }
+.actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--line); }
 .go { min-height: 44px; padding: 0 18px; }
-.keep { display: inline-flex; align-items: center; gap: 6px; margin: 0; color: var(--ink-3); font-size: 13px; }
+.keep { display: inline-flex; align-items: center; gap: 6px; margin: 0 0 0 auto; color: var(--ink-3); font-size: 12.5px; }
 .review-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
-.enrollments { display: grid; gap: 8px; margin: 10px 0; padding: 0; list-style: none; }
-.enrollments li, .row-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-.limit { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
+.review-head p { margin-top: 4px; color: var(--ink-2); font-size: 13.5px; }
+.review-head .btn { flex-shrink: 0; }
+.progress-copy > p { margin-top: 16px; font-size: 13.5px; color: var(--ink-2); }
+.enrollments { display: grid; gap: 8px; margin: 12px 0; padding: 0; list-style: none; }
+.enrollments li { display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; border-radius: 12px; background: var(--surface-sunken); }
+.enrollments li > :first-child { margin-top: 2px; }
+.enrollment-text { min-width: 0; }
+.enrollment-text .sub { margin-top: 2px; }
+.row-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 10px; }
+.limit { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
+.limit h4 { margin-top: 0; }
+.limit-fields { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr) minmax(0, 1.4fr); gap: 10px; margin-top: 8px; }
+.limit .problem { margin: 8px 0 0; }
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
 @media (max-width: 720px) {
-  .connect { padding: 18px 12px 32px; }
-  .facts, .steps { grid-template-columns: 1fr; }
-  .steps { flex-direction: column; align-items: stretch; gap: 8px; }
-  .steps li:not(:last-child) { flex: none; }
-  .steps li:not(:last-child)::after { display: none; }
+  .connect { padding: 18px 16px 32px; }
+  .card { padding: 16px; }
+  .steps { margin: 16px 0; }
+  .steps li:not(:last-child)::after { margin: 0 8px; }
+  .facts { grid-template-columns: 1fr; gap: 0; padding: 4px 12px; border-radius: 12px; background: var(--surface-sunken); }
+  .facts > div { padding: 10px 0; border-radius: 0; background: none; }
+  .facts > div + div { border-top: 1px solid var(--line); }
   .harness, .verify { flex-wrap: wrap; }
-  .account-pick, .expiry { flex-basis: 100%; margin-left: 0; }
-  .review-head { flex-direction: column; }
+  .account-pick { flex-basis: 100%; }
+  .expiry { display: none; }
+  .review-head { flex-direction: column; gap: 8px; }
+  .review-head .btn { margin-left: -11px; }
+  .code-row .code { flex: 1 1 100%; }
+  .code-row .go { flex: 1 1 100%; }
+  .limit-fields { grid-template-columns: 1fr; }
+  .actions .go { flex: 1 1 auto; }
+  .keep { flex-basis: 100%; margin-left: 0; }
 }
 </style>
