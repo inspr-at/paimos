@@ -154,7 +154,7 @@ defineExpose({ focus: () => (phone.value ? card.value?.querySelector<HTMLElement
       <li v-for="c in rows" :id="`customer-${c.id}`" :key="c.id" class="card-row" :class="{ cursor: cursorId === c.id, archived: c.archived }" @contextmenu="contextMenu($event, c)">
         <RouterLink class="card-link" :to="`/business/customers/${c.id}`" @click="emit('cursor', c.id)">
           <span class="card-top">
-            <span class="card-name"><template v-for="(part, i) in highlight(c.name, query)" :key="i"><mark v-if="part.match">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></span>
+            <span class="card-name" :title="c.name"><template v-for="(part, i) in highlight(c.name, query)" :key="i"><mark v-if="part.match">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></span>
             <span v-if="c.customer_no" class="number mono">{{ c.customer_no }}</span>
           </span>
           <span v-if="c.archived" class="archived-chip">Archived</span>
@@ -203,7 +203,7 @@ defineExpose({ focus: () => (phone.value ? card.value?.querySelector<HTMLElement
             <td v-if="column.id === 'name'" class="c-name">
               <div class="cell drop" :data-full="fullOf(c, 'name')" @pointerover="tipIfCut">
                 <span class="org-mark" aria-hidden="true"><BizIcon name="building" :size="14" /></span>
-                <RouterLink class="name-link" :to="`/business/customers/${c.id}`" tabindex="-1">
+                <RouterLink class="name-link" :to="`/business/customers/${c.id}`" :title="c.name" tabindex="-1">
                   <template v-for="(part, i) in highlight(c.name, query)" :key="i"><mark v-if="part.match">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template>
                 </RouterLink>
                 <span v-if="c.archived" class="archived-chip">Archived</span>
@@ -268,7 +268,8 @@ thead th:hover .col-resize::after { opacity: 1; }
 tbody .row:last-child td { border-bottom: 0; }
 .cell { display: flex; align-items: center; gap: 8px; min-width: 0; line-height: 18px; white-space: nowrap; }
 /* The secondary value (legal name, role) drops out whole before the main one is
-   cut: what does not fit wraps to a second line the cell never shows. */
+   cut: what does not fit wraps to a second line the cell never shows. The primary
+   text is capped so it stays on the first line with its icon and ellipsizes. */
 .cell.drop { flex-wrap: wrap; align-content: flex-start; row-gap: 24px; height: 24px; overflow: hidden; }
 /* One line is as tall as its tallest item (the 20px avatar here, the 24px mark by the name). */
 .c-contact .cell.drop { height: 20px; row-gap: 20px; }
@@ -293,12 +294,14 @@ td.c-name { position: relative; }
 .archived-chip { flex: 0 0 auto; height: 18px; padding: 0 7px; border-radius: 999px; background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--line-2); color: var(--ink-2); font: 600 10px/18px var(--mono); letter-spacing: .06em; text-transform: uppercase; font-variant-ligatures: none; }
 .row.archived .name-link { color: var(--ink-2); }
 .card-row .archived-chip { justify-self: start; }
-.name-link { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--ink); font-weight: 600; text-decoration: none; }
+/* 32px keeps the 24px mark and the 8px gap on this line; the name ellipsizes beside them. */
+.name-link { flex: 0 1 auto; min-width: 0; max-width: calc(100% - 32px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); font-weight: 600; text-decoration: none; }
 .name-link:focus-visible { box-shadow: var(--focus-ring); border-radius: 4px; }
 .legal { flex: 0 0 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--ink-3); font-size: 12.5px; }
 .number { padding: 2px 7px; border-radius: 6px; background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); color: var(--ink); font: 500 12px/16px var(--mono); font-variant-ligatures: none; }
 .empty { color: var(--ink-3); font-size: 12.5px; }
-.person { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--ink); }
+/* 28px keeps the 20px avatar and the 8px gap on this line. */
+.person { flex: 0 1 auto; min-width: 0; max-width: calc(100% - 28px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); }
 .role { flex: 0 0 auto; color: var(--ink-3); font-size: 12.5px; }
 .text { overflow: hidden; text-overflow: ellipsis; color: var(--ink-2); }
 .mono { font-family: var(--mono); font-size: 12.5px; font-variant-numeric: tabular-nums; font-variant-ligatures: none; color: var(--ink); }
@@ -316,7 +319,7 @@ td.c-name { position: relative; }
 .card-row.cursor .card-link { background: var(--row-selected); }
 .card-link:focus-visible { box-shadow: inset var(--focus-ring); }
 .card-top { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.card-name { flex: 1; min-width: 0; font-size: 15px; font-weight: 650; color: var(--ink); overflow-wrap: anywhere; }
+.card-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 15px; font-weight: 650; color: var(--ink); }
 .card-sub { font-size: 12.5px; color: var(--ink-3); overflow-wrap: anywhere; }
 .card-meta { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 2px; }
 .meta-item { display: inline-flex; align-items: center; gap: 5px; min-width: 0; font-size: 12.5px; color: var(--ink-2); overflow-wrap: anywhere; }
