@@ -126,7 +126,7 @@ func (m *messaging) claim(ctx context.Context, p tenant.Principal, project strin
 		 JOIN inbox_compat_messages c ON c.tenant_id=d.tenant_id AND c.id=d.message_id
 		 JOIN inbox_messages i ON i.tenant_id=c.tenant_id AND i.id=c.inbox_message_id
 		 WHERE c.project_id=$1::uuid AND c.recipient_principal_id=$2::uuid AND c.recipient_address=$3
-		 AND i.acked_at IS NULL AND NOT c.is_action_request
+		 AND i.acked_at IS NULL AND NOT c.is_action_request AND c.recipient_session_id IS NULL
 		 AND c.sent_event_id > COALESCE((SELECT last_event_id FROM inbox_message_cursors
 		 WHERE project_id=$1::uuid AND principal_id=$2::uuid AND address=$3 AND adapter=$4),0)
 		 ORDER BY c.sent_event_id LIMIT 1 FOR UPDATE OF d`, project, p.ID, in.To, in.Adapter).Scan(&id, &targetID, &fallbackID, &state, &cursor, &leaseUntil, &requested, &priorFallback)

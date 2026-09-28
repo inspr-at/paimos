@@ -24,6 +24,10 @@ const (
 
 // Message is one durable inbox row. AckedAt is null until the recipient acks.
 type Message struct {
+	RecipientSessionID   *string `json:"recipient_session_id,omitempty"`
+	SenderSessionID      *string `json:"sender_session_id,omitempty"`
+	SenderLabel          string  `json:"sender_label,omitempty"`
+	frozenSenderLabel    string
 	ID                   string     `json:"id"`
 	SenderPrincipalID    string     `json:"sender_principal_id"`
 	RecipientPrincipalID string     `json:"recipient_principal_id"`
@@ -67,22 +71,27 @@ func metaFrom(m Message) messageMeta {
 	}
 }
 
-const messageCols = `id::text, sender_principal_id::text, recipient_principal_id::text,
+const messageCols = `recipient_session_id::text,sender_session_id::text,coalesce(sender_label,''),id::text, sender_principal_id::text, recipient_principal_id::text,
 	reply_to_id::text, body, idempotency_key, expires_at, sent_event_id, created_at, acked_at`
 
 func scanMessage(row pgx.Row) (Message, error) {
 	var m Message
-	err := row.Scan(&m.ID, &m.SenderPrincipalID, &m.RecipientPrincipalID, &m.ReplyToID,
+	err := row.Scan(&m.RecipientSessionID, &m.SenderSessionID, &m.frozenSenderLabel, &m.ID, &m.SenderPrincipalID, &m.RecipientPrincipalID, &m.ReplyToID,
 		&m.Body, &m.IdempotencyKey, &m.ExpiresAt, &m.SentEventID, &m.CreatedAt, &m.AckedAt)
+	if m.RecipientSessionID != nil || m.SenderSessionID != nil {
+		m.SenderLabel = m.frozenSenderLabel
+	}
 	return m, err
 }
 
 type sendInput struct {
-	Recipient string
-	Body      string
-	Key       string
-	ReplyTo   *string
-	Expires   *time.Time
+	RecipientSessionID *string
+	SenderSessionID    *string
+	Recipient          string
+	Body               string
+	Key                string
+	ReplyTo            *string
+	Expires            *time.Time
 }
 
 func (m *module) handleSend(w http.ResponseWriter, r *http.Request) {
@@ -95,6 +104,8 @@ func (m *module) handleSend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
+		RecipientSessionID   *string    `json:"recipient_session_id"`
+		SenderSessionID      *string    `json:"sender_session_id"`
 		RecipientPrincipalID string     `json:"recipient_principal_id"`
 		Body                 string     `json:"body"`
 		IdempotencyKey       string     `json:"idempotency_key"`
@@ -106,6 +117,15 @@ func (m *module) handleSend(w http.ResponseWriter, r *http.Request) {
 	}
 	in, err := normalizeSend(p, body.RecipientPrincipalID, body.Body, body.IdempotencyKey, body.ReplyToID, body.ExpiresAt)
 	if err != nil {
+		failure(w, err)
+		return
+	}
+	in.RecipientSessionID, in.SenderSessionID = body.RecipientSessionID, body.SenderSessionID
+	if err := normalizeSession(in.RecipientSessionID); err != nil {
+		failure(w, err)
+		return
+	}
+	if err := normalizeSession(in.SenderSessionID); err != nil {
 		failure(w, err)
 		return
 	}
@@ -178,6 +198,16 @@ func (m *module) send(ctx context.Context, p tenant.Principal, in sendInput) (Me
 		if !present {
 			return errNotFound
 		}
+		if _, err := messageSession(ctx, tx, in.RecipientSessionID, in.Recipient, ""); err != nil {
+			return err
+		}
+		senderLabel := p.Name
+		if in.SenderSessionID != nil {
+			senderLabel, err = messageSession(ctx, tx, in.SenderSessionID, p.ID, "")
+			if err != nil {
+				return err
+			}
+		}
 		if in.ReplyTo != nil {
 			var visible bool
 			if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM inbox_messages
@@ -202,10 +232,10 @@ func (m *module) send(ctx context.Context, p tenant.Principal, in sendInput) (Me
 		}
 		out, err = scanMessage(tx.QueryRow(ctx, `INSERT INTO inbox_messages (
 			tenant_id, id, sender_principal_id, recipient_principal_id, reply_to_id,
-			sent_event_id, body, idempotency_key, expires_at)
-			VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid, $6, $7, $8, $9)
+			sent_event_id, body, idempotency_key, expires_at,recipient_session_id,sender_session_id,sender_label)
+			VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid, $6, $7, $8, $9,$10::uuid,$11::uuid,$12)
 			RETURNING `+messageCols,
-			p.TenantID, id, p.ID, in.Recipient, in.ReplyTo, ev.ID, in.Body, in.Key, in.Expires))
+			p.TenantID, id, p.ID, in.Recipient, in.ReplyTo, ev.ID, in.Body, in.Key, in.Expires, in.RecipientSessionID, in.SenderSessionID, senderLabel))
 		if err != nil {
 			return mapWrite(err)
 		}
@@ -218,7 +248,7 @@ func (m *module) send(ctx context.Context, p tenant.Principal, in sendInput) (Me
 }
 
 func sameSend(m Message, in sendInput) bool {
-	if m.RecipientPrincipalID != in.Recipient || m.Body != in.Body {
+	if m.RecipientPrincipalID != in.Recipient || m.Body != in.Body || !sameSession(m.RecipientSessionID, in.RecipientSessionID) || !sameSession(m.SenderSessionID, in.SenderSessionID) {
 		return false
 	}
 	if m.ReplyToID == nil || in.ReplyTo == nil {
@@ -228,6 +258,9 @@ func sameSend(m Message, in sendInput) bool {
 }
 
 func enqueueWakes(ctx context.Context, tx pgx.Tx, p tenant.Principal, msg Message) error {
+	if msg.RecipientSessionID != nil {
+		return nil
+	} // Wake targets belong to the principal, not this generation.
 	rows, err := tx.Query(ctx, `SELECT id::text FROM inbox_delivery_targets
 		WHERE principal_id = $1::uuid AND kind = 'webhook' AND enabled
 		ORDER BY id
@@ -325,6 +358,9 @@ func (m *module) ack(ctx context.Context, p tenant.Principal, id string) (Messag
 			if err := advanceReceipt(ctx, tx, p, id, "handed_off", "", "", receiptTarget{}); err != nil {
 				return err
 			}
+		}
+		if err := ConfirmSessionMessage(ctx, tx, p, id); err != nil {
+			return err
 		}
 		out = updated
 		return nil

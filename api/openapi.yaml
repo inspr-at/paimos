@@ -2243,6 +2243,7 @@ paths:
       security: *auth
       parameters:
         - {name: after, in: query, schema: {type: integer, format: int64, minimum: 0}}
+        - {name: session, in: query, description: 'Only this active session of the caller plus unbound principal broadcasts. Omit to retain the principal inbox.', schema: {type: string, format: uuid}}
         - {name: wait_ms, in: query, schema: {type: integer, minimum: 0, maximum: 30000, default: 0}}
         - {$ref: '#/components/parameters/Limit'}
       responses:
@@ -2797,10 +2798,18 @@ paths:
   /projects/{projectId}/messages:
     parameters:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: sendProjectMessage
+      description: Optional session bindings are additive; unbound sends preserve principal-inbox behavior. Session-bound messages never use principal-wide transport targets.
+      requestBody: {required: true, content: {application/json: {schema: {$ref: './openapi-messaging.yaml#/components/schemas/Send'}}}}
+      responses:
+        '201': {description: Durable message, content: {application/json: {schema: {$ref: '#/components/schemas/ProjectMessage'}}}}
+        '409': {description: Session ended or idempotency conflict}
     get:
       operationId: inspectProjectMessages
       description: Person admin or super_admin inspection including held messages. Ascending by sent event ID by default. In newest_first mode after is an exclusive upper bound; zero starts at the newest. Thread selects the root and all descendants of the supplied message's reply_to chain within this project. Pending selects unresolved held action requests. Resolution never releases or delivers a held message.
       parameters:
+        - {name: session, in: query, schema: {type: string, format: uuid}, description: Exact sender or recipient session; omitting includes unbound history}
         - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 10}}
         - {name: after, in: query, schema: {type: integer, minimum: 0, default: 0}}
         - {name: newest_first, in: query, schema: {type: boolean, default: false}}
@@ -6258,6 +6267,8 @@ components:
       required: [recipient_principal_id, body, idempotency_key]
       properties:
         recipient_principal_id: {type: string, format: uuid}
+        recipient_session_id: {type: string, format: uuid, description: 'Optional exact active recipient generation; stopped or archived sessions return 409.'}
+        sender_session_id: {type: string, format: uuid, description: 'Optional active session owned by the authenticated sender; freezes its label.'}
         body: {type: string, minLength: 1, maxLength: 65536}
         idempotency_key: {type: string, minLength: 1, maxLength: 128}
         reply_to_id: {type: string, format: uuid}
@@ -6288,6 +6299,7 @@ components:
           properties:
             id: {type: string, format: uuid}
             sender_principal_id: {type: string, format: uuid}
+            sender_label: {type: string, description: Frozen at send time; returned for session-aware reads}
             sent_event_id: {type: integer, format: int64}
             created_at: {type: string, format: date-time}
             acked_at: {type: [string, 'null'], format: date-time}

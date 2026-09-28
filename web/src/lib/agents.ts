@@ -74,6 +74,7 @@ export interface ModelProfile { id: string; slug: string; harness: string; famil
 export interface ModelResolution { role: string; profile: ModelProfile | null; owner_required: boolean; source: string }
 export interface MessageTarget { id: string; principal_id: string; address: string; adapter: string; target_kind: string; maximum_level: string; role: string; enabled: boolean }
 export interface ProjectMessage {
+  recipient_session_id?: string; sender_session_id?: string; sender_label?: string; from?: string
   id: string; sender_principal_id: string; recipient_principal_id: string; to: string; body: string; reply_to?: string | null
   sent_event_id: number; is_action_request: boolean; expects_reply: boolean; delivery_level: 'simple' | 'steer'
   status: 'accepted' | 'held'; reply_obligation: 'none' | 'open' | 'closed'
@@ -81,7 +82,7 @@ export interface ProjectMessage {
 }
 export interface HeldResolution { message_id: string; decision: 'resolved' | 'dismissed'; created_at: string }
 export interface MessagePage { items: ProjectMessage[]; next_after: number; preamble?: string }
-export interface MessageSend { to: string; body: string; idempotency_key: string; reply_to?: string; expects_reply: boolean; is_action_request: boolean; delivery_level: 'simple' | 'steer' }
+export interface MessageSend { recipient_session_id?: string; sender_session_id?: string; to: string; body: string; idempotency_key: string; reply_to?: string; expects_reply: boolean; is_action_request: boolean; delivery_level: 'simple' | 'steer' }
 
 async function request<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
   const response = await api(path, { method, ...(body === undefined ? {} : {
@@ -89,7 +90,7 @@ async function request<T>(path: string, method = 'GET', body?: unknown): Promise
   }) })
   if (!response.ok) {
     const data = await response.json().catch(() => ({}))
-    throw new APIError(response.status, typeof data?.error === 'string' ? data.error : `Request failed (${response.status})`)
+    throw new APIError(response.status, typeof data?.error === 'string' ? data.error : `Request failed (${response.status})`, data)
   }
   return response.json()
 }

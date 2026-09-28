@@ -65,30 +65,30 @@ func readStateEvidence(ctx context.Context, tx pgx.Tx, ids []string) (map[string
 	}
 	// Flags and reasons share one statement snapshot: a concurrent resolution
 	// cannot leave a new false flag paired with an old pending reason.
-	// Compat sends lack a sender generation. Existing incoming delivery leases
+	// Explicit sender generations isolate outgoing obligations. Incoming delivery leases
 	// identify work explicitly; released leases never imply ownership. Receiving
 	// a reply obligation is work in progress, not proof of a blocked worker.
-	rows, err := tx.Query(ctx, `WITH active AS (SELECT tenant_id,id,project_id,agent_principal_id,run_id FROM harness_sessions WHERE id=ANY($1::uuid[]) AND stopped_at IS NULL),
+	rows, err := tx.Query(ctx, `WITH active AS (SELECT tenant_id,id,project_id,agent_principal_id,run_id FROM harness_sessions WHERE id=ANY($1::uuid[]) AND stopped_at IS NULL AND archived_at IS NULL),
     approvals AS (`+attentionApprovals+`), reasons AS (
       SELECT id,project_id,agent_principal_id,'approval' AS kind,scope,'person' AS actor,
         scope='run' AS blocking,'approvals' AS location,coalesce(permission_project,'') AS permission_project
       FROM approvals
       UNION ALL
       SELECT s.id,s.project_id,s.agent_principal_id,
-        CASE WHEN m.is_action_request THEN 'held_action' ELSE 'reply' END,'shared',
+        CASE WHEN m.is_action_request THEN 'held_action' ELSE 'reply' END,CASE WHEN m.sender_session_id=s.id THEN 'session' ELSE 'shared' END,
         CASE WHEN m.is_action_request THEN 'person' WHEN recipient.kind IN ('agent','person') THEN recipient.kind ELSE 'unknown' END,
         false,'messages',s.project_id::text
       FROM active s JOIN inbox_compat_messages m ON m.tenant_id=s.tenant_id AND m.project_id=s.project_id AND m.sender_principal_id=s.agent_principal_id
       LEFT JOIN principals recipient ON recipient.tenant_id=m.tenant_id AND recipient.id=m.recipient_principal_id
       LEFT JOIN inbox_messages i ON i.tenant_id=m.tenant_id AND i.id=m.inbox_message_id
-      WHERE (m.is_action_request AND NOT EXISTS(SELECT 1 FROM events e WHERE e.type='inbox.action_resolved'
+      WHERE (m.sender_session_id IS NULL OR m.sender_session_id=s.id) AND ((m.is_action_request AND NOT EXISTS(SELECT 1 FROM events e WHERE e.type='inbox.action_resolved'
           AND e.tenant_id=m.tenant_id AND e.node_id=m.project_id AND e.after->>'message_id'=m.id::text))
         OR (NOT m.is_action_request AND (i.expires_at IS NULL OR i.expires_at>now())
-          AND EXISTS(SELECT 1 FROM inbox_reply_obligations o WHERE o.tenant_id=m.tenant_id AND o.message_id=m.id AND o.closed_at IS NULL))
+          AND EXISTS(SELECT 1 FROM inbox_reply_obligations o WHERE o.tenant_id=m.tenant_id AND o.message_id=m.id AND o.closed_at IS NULL)))
       UNION ALL
       SELECT s.id,s.project_id,s.agent_principal_id,'reply_due','session','agent',false,'messages',s.project_id::text
-      FROM active s JOIN harness_deliveries d ON d.tenant_id=s.tenant_id AND d.session_id=s.id AND d.released_at IS NULL
-      JOIN inbox_messages i ON i.tenant_id=d.tenant_id AND i.id=d.message_id AND i.recipient_principal_id=s.agent_principal_id
+      FROM active s JOIN inbox_messages i ON i.tenant_id=s.tenant_id AND i.recipient_principal_id=s.agent_principal_id
+        AND (i.recipient_session_id=s.id OR (i.recipient_session_id IS NULL AND EXISTS(SELECT 1 FROM harness_deliveries d WHERE d.tenant_id=s.tenant_id AND d.session_id=s.id AND d.message_id=i.id AND d.released_at IS NULL)))
       JOIN inbox_compat_messages m ON m.tenant_id=i.tenant_id AND m.inbox_message_id=i.id AND m.project_id=s.project_id
       JOIN inbox_reply_obligations o ON o.tenant_id=m.tenant_id AND o.message_id=m.id AND o.closed_at IS NULL
       WHERE (i.expires_at IS NULL OR i.expires_at>now())

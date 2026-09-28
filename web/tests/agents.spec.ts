@@ -250,7 +250,8 @@ test('read-only people see requests but cannot decide or control', async ({ page
 })
 
 test('the session panel shows the ticket, runs, telemetry and the thread, and sends messages', async ({ page }) => {
-  const { calls } = await setup(page)
+  const { calls, data } = await setup(page)
+  for (const m of data.messages.filter(m => m.project === 'p-pharos')) Object.assign(m, m.sender_principal_id === data.me ? { recipient_session_id: camy } : { sender_session_id: camy, sender_label: 'camy' })
   await openAgents(page, `/agents/${camy}`)
   const details = panel(page)
   await expect(details.getByRole('heading', { name: /camy/ })).toBeVisible()
@@ -276,7 +277,7 @@ test('the session panel shows the ticket, runs, telemetry and the thread, and se
   await page.keyboard.press('Control+Enter')
   await expect(details.locator('.msg')).toHaveCount(5)
   const sent = calls.find(c => c.method === 'POST' && c.path.endsWith('/messages'))?.body as Record<string, unknown>
-  expect(sent).toMatchObject({ to: 'claude:camy', body: 'Sort stale hosts last.', delivery_level: 'steer', expects_reply: false, is_action_request: false, reply_to: '3e000000-0000-4000-8000-000000000004' })
+  expect(sent).toMatchObject({ to: 'claude:camy', recipient_session_id: camy, body: 'Sort stale hosts last.', delivery_level: 'steer', expects_reply: false, is_action_request: false, reply_to: '3e000000-0000-4000-8000-000000000004' })
   expect(typeof sent.idempotency_key).toBe('string')
   // B7: runs by agent, messages newest first in one page, sessions tenant-wide.
   expect(calls.some(c => c.path === '/api/runs' && c.query?.get('agent') === 'a0000000-0000-4000-8000-000000000001')).toBe(true)
