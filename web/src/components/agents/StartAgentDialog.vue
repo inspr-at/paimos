@@ -58,6 +58,18 @@ const sessionConnected = computed(() => !!managed.value && managed.value.phase !
 const reported = computed(() => sessionConnected.value && managed.value && requested.value ? sessionReport(managed.value, requested.value) : null)
 const permitted = computed(() => can('work_orders.write') && can('run.create'))
 const selectionVisible = computed(() => !!view.value.profileId && view.value.efforts.some(effort => effort.value === view.value.profileId) && view.value.models.some(model => model.value === choice.value.modelKey) && view.value.accounts.some(account => account.value === choice.value.accountId))
+// Notes that only restate a single option are filler; notes that explain a choice or a gap stay.
+const FILLER = [/^Only one (harness|model) /, /^This model grants one thinking level/, /^These harnesses have an enrolled account/, /^Only one host has/]
+const note = (text: string) => text && !FILLER.some(pattern => pattern.test(text)) ? text : ''
+// The status box below already states an unavailable account's reason.
+const notes = computed(() => ({ host: note(view.value.notes.host), harness: note(view.value.notes.harness), account: view.value.status.detail.includes(view.value.notes.account) ? '' : view.value.notes.account, model: note(view.value.notes.model), effort: note(view.value.notes.effort) }))
+// A closed select cannot wrap: on phones the account option keeps name and plan, and
+// the note below it carries the allowance.
+const narrow = ref(typeof window !== 'undefined' && window.matchMedia('(max-width: 600px)').matches)
+const narrowQuery = typeof window !== 'undefined' ? window.matchMedia('(max-width: 600px)') : null
+const onNarrow = (event: MediaQueryListEvent) => { narrow.value = event.matches }
+narrowQuery?.addEventListener('change', onNarrow)
+const accountLabel = (label: string) => narrow.value ? label.split(' · ').slice(0, 2).join(' · ') : label
 const canSubmit = computed(() => permitted.value && !loading.value && !busy.value && !run.value && !!ticket.value && !catalogGap.value && !!view.value.agentId && selectionVisible.value)
 
 async function search(more = false) {
@@ -176,7 +188,7 @@ async function refresh() {
   } catch { if (turn === generation) checkError.value = 'Status could not be refreshed. The last reported state is shown.' }
   finally { checking.value = false }
 }
-onBeforeUnmount(() => { generation++; searchGeneration++; catalogGeneration++; poll.stop(); clearTimeout(searchTimer) })
+onBeforeUnmount(() => { narrowQuery?.removeEventListener('change', onNarrow); generation++; searchGeneration++; catalogGeneration++; poll.stop(); clearTimeout(searchTimer) })
 defineExpose({ open })
 </script>
 
@@ -184,11 +196,9 @@ defineExpose({ open })
   <dialog ref="dialog" class="launch-dialog" :aria-labelledby="`${uid}-title`" @cancel.prevent="close">
     <form class="launch-card" @submit.prevent="submit">
       <header class="launch-head">
-        <span class="launch-icon"><AppIcon name="agent" :size="22" /></span>
-        <div><p class="eyebrow">Managed session</p><h2 :id="`${uid}-title`">Start agent</h2></div>
+        <h2 :id="`${uid}-title`">Start agent</h2>
         <button type="button" class="icon-btn flat" aria-label="Close start agent" :disabled="busy" @click="close"><AppIcon name="close" /></button>
       </header>
-      <p class="intro">Give a ticket to an agent. Its daemon starts a fresh session when an account is ready.</p>
 
       <template v-if="!run">
         <fieldset :disabled="busy" class="launch-fields">
@@ -214,7 +224,7 @@ defineExpose({ open })
               </div>
             </template>
           </div>
-          <p v-if="view.roleNote" class="note role-note">{{ view.roleNote }}</p>
+          <p v-if="view.roleNote && role.source !== 'default'" class="note role-note">{{ view.roleNote }}</p>
           <div v-if="role.role === 'review-gate'" class="select-field">
             <label :for="`${uid}-family`">Author family</label>
             <select :id="`${uid}-family`" class="field" :value="authorFamily" @change="setFamily(($event.target as HTMLSelectElement).value)">
@@ -223,45 +233,49 @@ defineExpose({ open })
             </select>
             <p class="note">Review work excludes this family. Accounts load after it is chosen.</p>
           </div>
+          <div class="pair">
           <div class="select-field">
             <label :for="`${uid}-host`">Host</label>
-            <select :id="`${uid}-host`" ref="hostSelect" class="field" :value="choice.hostId" :disabled="cascadeLocked || !view.hosts.length" :aria-describedby="view.notes.host ? `${uid}-host-note` : undefined" @change="pick('host', ($event.target as HTMLSelectElement).value)">
+            <select :id="`${uid}-host`" ref="hostSelect" class="field" :value="choice.hostId" :disabled="cascadeLocked || !view.hosts.length" :aria-describedby="notes.host ? `${uid}-host-note` : undefined" @change="pick('host', ($event.target as HTMLSelectElement).value)">
               <option value="">{{ loading ? 'Loading accounts…' : 'Choose a host' }}</option>
               <option v-for="host in view.hosts" :key="host.value" :value="host.value">{{ host.label }}</option>
             </select>
-            <p v-if="view.notes.host" :id="`${uid}-host-note`" class="note">{{ view.notes.host }}</p>
+            <p v-if="notes.host" :id="`${uid}-host-note`" class="note">{{ notes.host }}</p>
           </div>
           <div class="select-field">
             <label :for="`${uid}-harness`">Harness</label>
-            <select :id="`${uid}-harness`" class="field" :value="choice.harness" :disabled="cascadeLocked || !choice.hostId" :aria-describedby="view.notes.harness ? `${uid}-harness-note` : undefined" @change="pick('harness', ($event.target as HTMLSelectElement).value)">
+            <select :id="`${uid}-harness`" class="field" :value="choice.harness" :disabled="cascadeLocked || !choice.hostId" :aria-describedby="notes.harness ? `${uid}-harness-note` : undefined" @change="pick('harness', ($event.target as HTMLSelectElement).value)">
               <option value="">Choose a harness</option>
               <option v-for="item in view.harnesses" :key="item.value" :value="item.value">{{ item.label }}</option>
             </select>
-            <p v-if="view.notes.harness" :id="`${uid}-harness-note`" class="note">{{ view.notes.harness }}</p>
+            <p v-if="notes.harness" :id="`${uid}-harness-note`" class="note">{{ notes.harness }}</p>
+          </div>
           </div>
           <div class="select-field">
             <label :for="`${uid}-account`">Account</label>
-            <select :id="`${uid}-account`" class="field" :value="choice.accountId" :disabled="cascadeLocked || !choice.harness" :aria-describedby="view.notes.account ? `${uid}-account-note` : undefined" @change="pick('account', ($event.target as HTMLSelectElement).value)">
+            <select :id="`${uid}-account`" class="field" :value="choice.accountId" :disabled="cascadeLocked || !choice.harness" :aria-describedby="notes.account ? `${uid}-account-note` : undefined" @change="pick('account', ($event.target as HTMLSelectElement).value)">
               <option value="">Choose an account</option>
-              <option v-for="account in view.accounts" :key="account.value" :value="account.value">{{ account.label }}</option>
+              <option v-for="account in view.accounts" :key="account.value" :value="account.value">{{ accountLabel(account.label) }}</option>
             </select>
-            <p v-if="view.notes.account" :id="`${uid}-account-note`" class="note">{{ view.notes.account }}</p>
+            <p v-if="notes.account" :id="`${uid}-account-note`" class="note">{{ notes.account }}</p>
           </div>
+          <div class="pair">
           <div class="select-field">
             <label :for="`${uid}-model`">Model</label>
-            <select :id="`${uid}-model`" class="field" :value="choice.modelKey" :disabled="cascadeLocked || !choice.accountId" :aria-describedby="view.notes.model ? `${uid}-model-note` : undefined" @change="pick('model', ($event.target as HTMLSelectElement).value)">
+            <select :id="`${uid}-model`" class="field" :value="choice.modelKey" :disabled="cascadeLocked || !choice.accountId" :aria-describedby="notes.model ? `${uid}-model-note` : undefined" @change="pick('model', ($event.target as HTMLSelectElement).value)">
               <option value="">Choose a model</option>
               <option v-for="model in view.models" :key="model.value" :value="model.value">{{ model.label }}</option>
             </select>
-            <p v-if="view.notes.model" :id="`${uid}-model-note`" class="note">{{ view.notes.model }}</p>
+            <p v-if="notes.model" :id="`${uid}-model-note`" class="note">{{ notes.model }}</p>
           </div>
           <div class="select-field">
             <label :for="`${uid}-effort`">Thinking</label>
-            <select :id="`${uid}-effort`" class="field" :value="choice.profileId" :disabled="cascadeLocked || !choice.modelKey" :aria-describedby="view.notes.effort ? `${uid}-effort-note` : undefined" @change="pick('effort', ($event.target as HTMLSelectElement).value)">
+            <select :id="`${uid}-effort`" class="field" :value="choice.profileId" :disabled="cascadeLocked || !choice.modelKey" :aria-describedby="notes.effort ? `${uid}-effort-note` : undefined" @change="pick('effort', ($event.target as HTMLSelectElement).value)">
               <option value="">Choose a thinking level</option>
               <option v-for="effort in view.efforts" :key="effort.value" :value="effort.value">{{ effort.label }}</option>
             </select>
-            <p v-if="view.notes.effort" :id="`${uid}-effort-note`" class="note">{{ view.notes.effort }}</p>
+            <p v-if="notes.effort" :id="`${uid}-effort-note`" class="note">{{ notes.effort }}</p>
+          </div>
           </div>
         </fieldset>
 
@@ -269,7 +283,7 @@ defineExpose({ open })
         <div v-if="catalogGap === 'failed' || catalogGap === 'forbidden'" class="error" role="alert"><p>{{ catalogMessage }}</p><button v-if="catalogGap === 'failed'" type="button" class="btn sm" @click="loadCatalog">Retry catalog</button></div>
         <div v-if="error" class="error" role="alert"><p>{{ error }}</p><button v-if="grantStale" type="button" class="btn sm" @click="loadCatalog">Refresh catalog</button></div>
         <p v-if="!permitted" class="note">Starting an agent requires work-order write and run-create permission.</p>
-        <footer><p>The run is queued first.<br />You can follow it in Agents.</p><button type="button" class="btn" :disabled="busy" @click="close">Cancel</button><button type="submit" class="btn primary" :disabled="!canSubmit"><AppIcon :name="busy ? 'clock' : 'arrow'" :size="15" />{{ busy ? 'Queueing…' : 'Queue run' }}</button></footer>
+        <footer><button type="button" class="btn" :disabled="busy" @click="close">Cancel</button><button type="submit" class="btn primary" :disabled="!canSubmit"><AppIcon :name="busy ? 'clock' : 'arrow'" :size="15" />{{ busy ? 'Queueing…' : 'Queue run' }}</button></footer>
       </template>
 
       <template v-else>
@@ -311,13 +325,13 @@ defineExpose({ open })
 <style scoped>
 .launch-dialog { width: min(600px, calc(100vw - 24px)); max-height: calc(100dvh - 32px); padding: 0; border: 1px solid var(--line-2); border-radius: 22px; background: var(--surface-raised); color: var(--ink); box-shadow: 0 24px 80px var(--scrim); overflow: auto; }
 .launch-dialog::backdrop { background: var(--scrim); backdrop-filter: blur(5px); }
-.launch-card { padding: 26px; }
-.launch-head { display: flex; gap: 12px; align-items: center; }
-.launch-head h2 { font-size: 24px; letter-spacing: -.6px; margin-top: 3px; }
+.launch-card { padding: 22px 24px 20px; }
+.launch-head { display: flex; gap: 12px; align-items: center; margin-bottom: 18px; }
+.launch-head h2 { font-size: 21px; letter-spacing: -.4px; }
 .launch-head .icon-btn { margin-left: auto; flex-shrink: 0; }
-.launch-icon, .result-icon { display: grid; place-items: center; width: 48px; height: 48px; border-radius: 14px; background: var(--row-selected); color: var(--teal-ink); flex-shrink: 0; }
-.intro { color: var(--ink-2); font-size: 14px; line-height: 1.55; margin: 18px 0 22px; }
-.launch-fields { border: 0; padding: 0; margin: 0; display: grid; gap: 18px; min-width: 0; }
+.result-icon { display: grid; place-items: center; width: 48px; height: 48px; border-radius: 14px; background: var(--row-selected); color: var(--teal-ink); flex-shrink: 0; }
+.launch-fields { border: 0; padding: 0; margin: 0; display: grid; gap: 16px; min-width: 0; }
+.pair { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; align-items: start; }
 label { display: block; margin-bottom: 7px; font-size: 12px; font-weight: 650; color: var(--ink-2); }
 .field { width: 100%; height: 44px; min-width: 0; font-size: 14px; }
 .chosen-ticket { display: flex; align-items: center; gap: 12px; background: var(--surface-sunken); border: 1px solid var(--line); padding: 13px; border-radius: 12px; }
@@ -338,13 +352,13 @@ label { display: block; margin-bottom: 7px; font-size: 12px; font-weight: 650; c
 .role-note { margin-top: 0; }
 .dispatch-status { display: flex; gap: 10px; align-items: flex-start; font-size: 13px; line-height: 1.5; }
 .dispatch-status > svg { margin-top: 2px; flex-shrink: 0; }
-.dispatch-status { margin-top: 22px; padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-sunken); }
+.dispatch-status { margin-top: 18px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-sunken); }
 .dispatch-status p { color: var(--ink-2); margin-top: 3px; font-size: 12px; }
 .dispatch-status.warn { background: var(--surface-sunken); }
 .error { color: var(--danger); background: var(--danger-bg); border-radius: 10px; padding: 12px; margin-top: 14px; font-size: 13px; line-height: 1.5; }
 .error .btn { margin-top: 8px; }
 .bad { color: var(--danger); }
-footer { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 8px; margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--line); }
+footer { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 8px; margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--line); }
 footer > p { flex: 1; font-size: 12px; color: var(--ink-2); line-height: 1.5; }
 footer .btn { min-height: 44px; }
 .run-result { display: grid; justify-items: center; text-align: center; padding: 14px 0; gap: 12px; outline: none; }
@@ -364,15 +378,15 @@ footer .btn { min-height: 44px; }
 @media (max-width: 600px) {
   .launch-dialog { max-height: calc(100dvh - 16px); width: calc(100vw - 16px); border-radius: 18px; }
   .launch-card { padding: 20px 16px; }
-  .intro { margin: 16px 0; }
+  .pair { grid-template-columns: minmax(0, 1fr); gap: 14px; }
+  .launch-head { margin-bottom: 14px; }
   .launch-fields { gap: 14px; }
   .dispatch-status { margin-top: 16px; }
   footer { margin-top: 18px; padding-top: 16px; }
-  .launch-head h2 { font-size: 22px; }
   .launch-head .icon-btn { width: 44px; height: 44px; }
   .chosen-ticket { flex-wrap: wrap; }
   .chosen-ticket .btn { min-height: 44px; }
-  footer > p { flex-basis: 100%; }
+  footer:not(.result-footer) .btn { flex: 1; }
   .result-footer { display: grid; grid-template-columns: 1fr 1fr; }
   .result-footer > :first-child { grid-column: 1 / -1; justify-self: center; }
   .field { font-size: 16px; }

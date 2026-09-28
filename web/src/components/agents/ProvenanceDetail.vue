@@ -3,7 +3,6 @@
 import { ref, watch } from 'vue'
 import { api } from '../../lib/api'
 import { absoluteTime, relativeTime } from '../../lib/work'
-import AppIcon from '../AppIcon.vue'
 
 // Instruction versions recorded for one session: logical names, digests and
 // version identifiers. The payload has no file contents or local paths.
@@ -59,11 +58,10 @@ function shortHash(value: string) {
 </script>
 
 <template>
-  <section class="provenance" aria-labelledby="provenance-title">
-    <h3 id="provenance-title" class="head eyebrow"><span class="mark"><AppIcon name="hash" :size="13" /></span>Instructions</h3>
-    <p v-if="state === 'loading'" class="line">Loading instruction versions…</p>
-    <p v-else-if="state === 'error'" class="line" role="alert">Instruction versions could not be loaded.</p>
-    <p v-else-if="!page.revisions.length" class="line">No instruction versions recorded for this session.</p>
+  <!-- Nothing recorded means nothing shown: the section appears only with versions or an error. -->
+  <section v-if="state === 'error' || page.revisions.length" class="provenance" aria-labelledby="provenance-title">
+    <h3 id="provenance-title" class="head eyebrow">Instructions</h3>
+    <p v-if="state === 'error'" class="line" role="alert">Instruction versions could not be loaded.</p>
     <ol v-else class="revisions">
       <li v-for="rev in page.revisions" :key="rev.id" class="revision">
         <p class="rev-meta"><span>Revision {{ rev.revision }}</span><time :datetime="rev.recorded_at" :data-tip="absoluteTime(rev.recorded_at)">{{ relativeTime(rev.recorded_at, { now }) }}</time></p>
@@ -83,9 +81,8 @@ function shortHash(value: string) {
 </template>
 
 <style scoped>
-.provenance { margin-top: 26px; min-width: 0; max-width: 100%; }
+.provenance { margin-top: 24px; min-width: 0; max-width: 100%; }
 .head { display: flex; align-items: center; gap: 8px; margin: 0 0 10px; }
-.mark { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 7px; background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); color: var(--ink-2); }
 .line { margin: 0; font-size: 13px; color: var(--ink-3); }
 .revisions, .items { margin: 0; padding: 0; list-style: none; }
 .revision { padding: 10px 0; border-top: 1px solid var(--line); }

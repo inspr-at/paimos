@@ -25,8 +25,11 @@ const counted = computed(() => groups.value.features.length + groups.value.fixes
 const live = computed(() => {
   if (!props.current || !props.liveSince) return ''
   const t = Date.parse(props.liveSince)
-  return Number.isNaN(t) ? '' : `Live on this server since ${absoluteTime(props.liveSince)} · ${span(Math.max(60_000, props.now - t))}`
+  return Number.isNaN(t) ? '' : `Live on this server since ${absoluteTime(props.liveSince)}`
 })
+const liveFor = computed(() => props.liveSince ? span(Math.max(60_000, props.now - Date.parse(props.liveSince))) : '')
+// Changes name their ticket only when the release has more than one.
+const soleTicket = computed(() => tickets.value.length === 1 ? tickets.value[0] : '')
 
 // ---------- Evidence ----------
 const ev = computed(() => props.release.evidence)
@@ -63,12 +66,12 @@ defineExpose({ focus: () => heading.value?.focus({ preventScroll: false }) })
     </p>
     <h2 id="release-detail-title" ref="heading" class="version" tabindex="-1"><CalendarVersion :value="release.version" /></h2>
     <div class="badges">
-      <span v-if="current" class="chip teal"><span class="live-dot" aria-hidden="true" />Current</span>
+      <span v-if="current && !live" class="chip teal"><span class="live-dot" aria-hidden="true" />Current</span>
       <span v-if="fresh" class="chip new">New since your last visit</span>
       <span v-if="rollback" class="chip"><AppIcon name="rollback" :size="11" />Rollback target</span>
       <span v-if="reserved" class="chip">Reserved, never published</span>
     </div>
-    <p v-if="live" class="when live-line">{{ live }}</p>
+    <p v-if="live" class="when live-line"><span class="live-dot" aria-hidden="true" />{{ live }}<span class="for"> · {{ liveFor }}</span></p>
     <p v-if="at" class="when">
       <template v-if="reserved">Reserved {{ absoluteTime(at) }} · {{ relativeTime(at, { now, long: true }) }}. The version was taken{{ release.tag ? ' and tagged' : '' }}, but no release was published under it.</template>
       <template v-else>{{ release.published_at ? 'Published' : 'Tagged' }} {{ absoluteTime(at) }} · {{ relativeTime(at, { now, long: true }) }}</template>
@@ -92,7 +95,7 @@ defineExpose({ focus: () => heading.value?.focus({ preventScroll: false }) })
     </section>
     <div v-else class="changes-block">
       <p v-for="gap in release.notes?.gaps" :key="gap" class="none">{{ gap }}</p>
-      <ReleaseChanges v-if="counted" :groups="groups" :repository="repository" :query="query" />
+      <ReleaseChanges v-if="counted" :groups="groups" :repository="repository" :query="query" :sole-ticket="soleTicket" />
       <p v-else class="none">{{ reserved ? 'Nothing shipped under this version.' : 'No changes are recorded between this release and the one before it.' }}</p>
       <p v-if="release.changes_omitted" class="none">And {{ release.changes_omitted }} more {{ release.changes_omitted === 1 ? 'change' : 'changes' }} not listed here.</p>
     </div>
@@ -171,6 +174,8 @@ defineExpose({ focus: () => heading.value?.focus({ preventScroll: false }) })
 .live-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 0 3px rgba(47, 122, 90, .16); }
 .when { font-size: 13px; color: var(--ink-2); }
 .live-line { color: var(--ink); }
+.live-line .live-dot { display: inline-block; margin-right: 7px; vertical-align: 1px; }
+.live-line .for { white-space: nowrap; color: var(--ink-2); }
 .headline { margin-top: 4px; font: 500 19px/1.4 var(--serif); color: var(--ink); letter-spacing: -.01em; text-wrap: pretty; }
 .reserved .headline, .reserved .version { color: var(--ink-2); }
 .tickets { margin-top: 2px; }

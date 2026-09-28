@@ -356,6 +356,8 @@ const viewFilters = computed(() => activeView.value ? filtersFromView(activeView
 const customised = computed(() => hasFilters(filters.value) || filters.value.sort.length > 0 || filters.value.group !== 'none' || !!filters.value.cols || filters.value.showClosed)
 const viewDirty = computed(() => !!viewFilters.value && !sameListState(filters.value, viewFilters.value))
 const canSaveView = computed(() => !journeyActive.value && !knowledgeActive.value && (activeView.value ? viewDirty.value : customised.value))
+// The saved-view strip shows once there is a view to pick or a list worth keeping; the plain list alone needs no strip.
+const showViewBar = computed(() => !journeyActive.value && !knowledgeActive.value && !graphActive.value && (views.value.items.length > 0 || !!activeView.value || canSaveView.value))
 const defaultViewId = computed(() => listPrefs.value?.defaultView ?? null)
 function viewQuery(view: SavedView | null): Record<string, string> {
   return view ? filtersToQuery(filtersFromView(view)) : {}
@@ -1252,7 +1254,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
   <section class="project-page" :class="{ 'panel-open': (!!ticketKey && !fullView) || knowledgeDocked, 'full-view': fullView, 'knowledge-entry': knowledgeEntryOpen, 'knowledge-dock': knowledgeDocked }" :style="{ '--toolbar-h': `${toolbarHeight}px` }" :aria-labelledby="project && !knowledgeEntryOpen ? 'project-title' : undefined">
     <template v-if="project">
       <div v-show="!fullView && !knowledgeEntryOpen" class="list-view" :class="{ selecting: selectable && selected.size }">
-      <header class="project-head">
+      <header class="project-head" :class="{ 'glimpse-room': glimpseActive && !showViewBar }">
         <div class="head-flex" :class="{ 'with-glimpse': glimpseActive }">
         <div class="head-main">
           <div class="title-line">
@@ -1261,7 +1263,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
             <span v-if="project.frozen" class="chip state-chip">Frozen</span>
             <span v-else-if="project.archived" class="chip state-chip">Archived</span>
           </div>
-          <p class="description" :data-tip="project.description.length > 120 ? project.description : undefined">{{ project.description || 'No description yet.' }}</p>
+          <p v-if="project.description" class="description" :data-tip="project.description.length > 120 ? project.description : undefined">{{ project.description }}</p>
           <div :class="{ 'journey-chip-slot': journeyActive }"><JourneyChip :project-id="project.id" :active="journeyActive" @go="journeyActive ? journeyStageTo(journeyStage as Stage ?? 'inspire') : setSection('journey')" /></div>
         </div>
         <HeaderGlimpse v-if="headerGraphReady && headerGraph && !graphActive" :project-id="project.id" :project-key="project.routeKey" :ticket-count="counts?.total ?? 0" :enabled="headerGraph" @active="glimpseActive = $event" />
@@ -1285,7 +1287,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
       </header>
 
       <ViewBar
-        v-if="!journeyActive && !knowledgeActive && !graphActive" ref="viewBar" :views="views.items" :active-id="activeView?.id ?? null" :dirty="viewDirty" :default-id="defaultViewId" :can-save-new="canSaveView && !activeView"
+        v-if="showViewBar" ref="viewBar" :views="views.items" :active-id="activeView?.id ?? null" :dirty="viewDirty" :default-id="defaultViewId" :can-save-new="canSaveView && !activeView"
         :me="me?.id ?? null" :href-for="hrefFor" @open="id => openView(id)" @save="saveActive" @save-as="startSave" @reset="openView(activeView?.id ?? null, true)"
         @rename="startRename" @duplicate="duplicate" @set-default="setDefaultView" @share="share" @copy-link="copyViewLink" @remove="remove"
       />
@@ -1433,6 +1435,8 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
 .stick-mark { height: 1px; margin-bottom: -1px; }
 /* While tickets are selected the bulk bar floats at the bottom: the list can scroll clear of it. */
 .list-view.selecting { padding-bottom: 76px; }
+/* Without the saved-view strip the header glimpse keeps that room (14px + the 42px strip) to spread into; the graph was framed for it. */
+.project-head.glimpse-room { padding-bottom: 56px; }
 .toolbar-wrap { position: sticky; top: 0; z-index: 5; margin: 0 calc(-1 * var(--gutter)); padding: 0 var(--gutter); container: toolbar / inline-size; }
 .toolbar-wrap.stuck { background: var(--glass); box-shadow: 0 1px 0 var(--line), 0 12px 24px -20px rgba(16, 35, 39, .35); -webkit-backdrop-filter: blur(18px) saturate(1.2); backdrop-filter: blur(18px) saturate(1.2); }
 .hint { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 5px; padding: 16px 0 6px; font-size: 12px; color: var(--ink-3); }

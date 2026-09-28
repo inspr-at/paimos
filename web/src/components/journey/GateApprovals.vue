@@ -5,17 +5,19 @@ import type { Approval } from '../../lib/agents'
 import { canDecideApproval } from '../../lib/agentState'
 import { can } from '../../lib/authz'
 import { expiresIn, expiresSoon, RISK_LABEL, riskFor } from '../../lib/agentState'
-import { gateApprovalState, GATE_LABEL, STAGE_OF_GATE, type Gate } from '../../lib/journey'
+import { gateApprovalState, GATE_LABEL, GATE_OF_ACTION, offeredApproval, STAGE_OF_GATE, type Gate } from '../../lib/journey'
 import { useJourneyContext } from '../../lib/journeyContext'
 import { relativeTime } from '../../lib/work'
 import { useAgents } from '../../stores/agents'
 import { useJourney } from '../../stores/journey'
 import AppIcon from '../AppIcon.vue'
+import { askerOf } from './asker'
 
 // A gate as approvals, in the agents workspace's "Needs you" pattern: who asks,
 // for which gate, how risky and until when, with Approve and Deny. Decided ones
-// stay as a record line. Approving here only decides the gate; the stage's one
-// primary button then takes the step.
+// stay as a record line. When the stage's one primary button already approves
+// this request and takes the step, the row offers only Deny: one decision, one
+// primary action.
 const props = defineProps<{ gate: Gate; approvals: Approval[]; on: string; canDecide: boolean; now: number; me: string | null }>()
 const emit = defineEmits<{ decided: [approval: Approval, decision: 'approved' | 'denied'] }>()
 const agents = useAgents()
@@ -24,6 +26,12 @@ const ctx = useJourneyContext()
 const stage = computed(() => ctx.journey.value.stages.find(s => s.key === STAGE_OF_GATE[props.gate]))
 const live = computed(() => props.approvals.filter(a => a.decision === null && stateOf(a) === 'pending'))
 const mayDecide = (approval: Approval) => props.canDecide && canDecideApproval(approval, can)
+// The request the stage's primary button approves along with its step.
+const covered = computed(() => {
+  const journey = ctx.journey.value
+  if (GATE_OF_ACTION[journey.next_action.key] !== props.gate || journey.next_action.key === 'decide' || ctx.next.value.disabled) return null
+  return offeredApproval(ctx.approvals.value, journey, props.gate, props.now)?.id ?? null
+})
 const past = computed(() => props.approvals.filter(a => !live.value.includes(a)).sort((a, b) => {
   const priority = (id: string) => id === stage.value?.gate_approval_id ? 2 : id === stage.value?.gate_offer_id ? 1 : 0
   return priority(b.id) - priority(a.id)
@@ -55,7 +63,7 @@ function keys(event: KeyboardEvent, approval: Approval) {
   if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void submit(approval) }
   else if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); cancel() }
 }
-const who = (approval: Approval) => agents.askerName(approval.agent_principal_id, approval.agent_name)
+const who = (approval: Approval) => askerOf(agents, approval.agent_principal_id, approval.agent_name)
 const decidedBy = (approval: Approval) => approval.decided_by_principal_id && approval.decided_by_principal_id === props.me ? 'you' : 'someone else'
 const stateOf = (approval: Approval) => gateApprovalState(approval, stage.value, props.now)
 const timeOf = (approval: Approval) => new Date(stage.value?.gate_offer_id === approval.id ? stage.value.gate_offer_expires_at ?? approval.expires_at : approval.expires_at).toLocaleString()
@@ -83,11 +91,11 @@ const needsFreshRequest = computed(() => {
         <span class="mark" aria-hidden="true"><AppIcon name="shield" :size="15" /></span>
         <div class="body">
           <p class="line1">
-            <strong class="what">{{ GATE_LABEL[gate] }}</strong>
+            <strong class="what" :data-tip="approval.scope">{{ GATE_LABEL[gate] }}</strong>
             <span class="risk-chip" :class="riskFor(approval)">{{ RISK_LABEL[riskFor(approval)] }}</span>
-            <time class="expiry" :class="{ soon: expiresSoon(approval, now) }" :datetime="approval.expires_at"><AppIcon name="clock" :size="12" />{{ expiresIn(approval, now) }} · {{ new Date(approval.expires_at).toLocaleString() }}</time>
+            <time class="expiry" :class="{ soon: expiresSoon(approval, now) }" :datetime="approval.expires_at" :data-tip="new Date(approval.expires_at).toLocaleString()"><AppIcon name="clock" :size="12" />{{ expiresIn(approval, now) }}</time>
           </p>
-          <p class="line2"><span v-if="who(approval).harness" class="harness mono">{{ who(approval).harness }}</span><strong>{{ who(approval).name }}</strong><span class="asks">asks for</span><code class="scope">{{ approval.scope }}</code><span class="asks">on</span><span class="on">{{ on }}</span></p>
+          <p class="line2"><span class="asks">Asked by</span><span v-if="who(approval).harness" class="harness mono">{{ who(approval).harness }}</span><strong :data-tip="who(approval).tip || undefined">{{ who(approval).name }}</strong></p>
           <p v-if="approval.rationale" class="why">“{{ approval.rationale }}”</p>
           <form v-if="open?.id === approval.id" class="decision" @submit.prevent="submit(approval)">
             <label :for="`gate-reason-${approval.id}`">{{ open.mode === 'approve' ? 'Reason (optional)' : 'Why not? The agent sees this.' }}</label>
@@ -101,8 +109,8 @@ const needsFreshRequest = computed(() => {
           </form>
         </div>
         <div v-if="open?.id !== approval.id && mayDecide(approval)" class="row-actions">
-          <button type="button" class="btn sm" @click="begin(approval, 'deny')"><AppIcon name="close" :size="13" />Deny</button>
-          <button type="button" class="btn sm approve-soft" @click="begin(approval, 'approve')"><AppIcon name="check" :size="13" />Approve</button>
+          <button type="button" class="btn sm ghost" @click="begin(approval, 'deny')"><AppIcon name="close" :size="13" />Deny</button>
+          <button v-if="covered !== approval.id" type="button" class="btn sm approve-soft" @click="begin(approval, 'approve')"><AppIcon name="check" :size="13" />Approve</button>
         </div>
       </li>
     </ul>
@@ -110,7 +118,7 @@ const needsFreshRequest = computed(() => {
       <li v-for="approval in past" :key="approval.id" class="record">
         <AppIcon :name="stateOf(approval) === 'approved_live' ? 'check' : stateOf(approval) === 'rejected' || stateOf(approval) === 'revoked' ? 'close' : 'clock'" :size="12" :class="stateOf(approval)" />
         <span>{{ outcome(approval) }}</span>
-        <span class="faint">· {{ who(approval).name }} asked {{ relativeTime(approval.proposed_at, { now }) }}</span>
+        <span class="faint" :data-tip="`Asked by ${who(approval).name}`">· asked {{ relativeTime(approval.proposed_at, { now }) }}</span>
       </li>
     </ul>
     <p v-if="needsFreshRequest" class="fresh-note">The agent asks again for a fresh gate request.</p>
@@ -123,22 +131,18 @@ const needsFreshRequest = computed(() => {
 .items, .records { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
 .item { display: grid; grid-template-columns: 30px minmax(0, 1fr) auto; gap: 10px; align-items: start; padding: 10px 10px 10px 8px; border-radius: 12px; background: var(--surface); box-shadow: 0 0 0 1px var(--line); }
 .mark { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 8px; background: var(--row-selected); color: var(--teal-ink); }
-.item.medium .mark { background: var(--gold-wash); color: var(--gold-ink); }
-.item.high .mark { background: var(--danger-bg); color: var(--danger); }
 .body { display: grid; gap: 4px; min-width: 0; }
 .line1 { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; }
 .what { font-size: 13.5px; font-weight: 600; color: var(--ink); }
 .risk-chip { height: 18px; padding: 0 7px; border-radius: 999px; font: 600 10px/18px var(--mono); letter-spacing: .06em; text-transform: uppercase; background: var(--row-selected); color: var(--teal-ink); }
 .risk-chip.medium { background: transparent; box-shadow: inset 0 0 0 1px rgba(214, 155, 49, .55); color: var(--gold-ink); }
 .risk-chip.high { background: var(--danger-bg); color: var(--danger); }
-.expiry { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--ink-3); }
+.expiry { display: inline-flex; align-items: center; gap: 4px; margin-left: auto; font-size: 12px; color: var(--ink-3); white-space: nowrap; }
 .expiry.soon { color: var(--gold-ink); }
 .line2 { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 6px; font-size: 12.5px; color: var(--ink-2); min-width: 0; }
 .line2 strong { color: var(--ink); font-weight: 600; }
 .harness { padding: 0 6px; border-radius: 5px; background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); font-size: 10.5px; }
 .asks { color: var(--ink-3); }
-.scope { padding: 1px 6px; border-radius: 5px; background: var(--code-bg, var(--surface-2)); font: 11px var(--mono); overflow-wrap: anywhere; }
-.on { color: var(--ink); }
 .why { font-size: 12.5px; color: var(--ink-2); font-style: italic; overflow-wrap: anywhere; }
 .row-actions { display: flex; gap: 6px; }
 .btn.approve-soft { color: var(--teal-ink); box-shadow: inset 0 0 0 1px var(--chip-teal-line); background: var(--chip-teal-bg); }
@@ -149,7 +153,8 @@ const needsFreshRequest = computed(() => {
 .decision-actions { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 6px; }
 .decision-actions .hint { margin-right: auto; font-size: 11.5px; color: var(--ink-3); }
 .record { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; font-size: 12.5px; color: var(--ink-2); }
-.record svg.approved { color: var(--ok); } .record svg.denied { color: var(--danger); } .record svg.expired { color: var(--ink-3); }
+.record svg { flex-shrink: 0; color: var(--ink-3); }
+.record svg.approved_live { color: var(--ok); } .record svg.rejected { color: var(--danger); }
 .faint { color: var(--ink-3); }
 @container gate (max-width: 460px) {
   .item { grid-template-columns: 30px minmax(0, 1fr); }

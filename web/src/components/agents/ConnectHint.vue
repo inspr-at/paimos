@@ -17,5 +17,5 @@ const emit = defineEmits<{ start: [] }>()
 <style scoped>
 .connect { display: grid; justify-items: center; gap: 10px; padding: 40px 28px 44px; border-top: 1px solid var(--line); text-align: center; }
 .halo { display: grid; place-items: center; width: 52px; height: 52px; margin-bottom: 4px; border-radius: 16px; background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line), 0 8px 24px -12px var(--teal); color: var(--teal-ink); }
-.lead { max-width: 56ch; font-size: 13.5px; color: var(--ink-2); }
+.lead { max-width: 72ch; font-size: 13.5px; color: var(--ink-2); }
 </style>

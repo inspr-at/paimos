@@ -202,12 +202,16 @@ test('requirements agree with the gate scoped to the revision', async ({ page })
   expect(writes(calls, '/requirements/agree')[0].body).toMatchObject({ approval_request_id: 'ap-req', expected_revision: 12 })
 })
 
-test('Deploy shows launch admission as a blocked gate and the refused handoff', async ({ page }) => {
+test('Deploy shows closed launch admission as a check with its reason, one decision and the refused handoff', async ({ page }) => {
   await open(page, 'deploy')
-  await expect(page.getByRole('region', { name: 'Blocked: Launch admission is closed' })).toContainText('Pharos launch checks are unavailable')
+  // One decision card; the closed admission is a waiting check, not a second alarm card.
+  await expect(page.getByRole('region', { name: /^Blocked:/ })).toHaveCount(0)
+  await expect(page.locator('.deploy-checks')).toContainText('Pharos launch checks are unavailable')
   await expect(page.getByText('The host policy refused it')).toBeVisible()
   await expect(page.getByText('Launch admission · closed')).toBeVisible()
-  await expect(page.getByRole('region', { name: 'Decision: The host did not apply it' })).toBeVisible()
+  const card = page.getByRole('region', { name: 'Decision: The host did not apply it' })
+  await expect(card).toContainText('Release 2 goes to Pharos')
+  await expect(page.locator('.btn.primary:visible')).toHaveCount(1)
 })
 
 test('a stale plan write restores the list and says so', async ({ page }) => {
@@ -302,11 +306,10 @@ test('the header chip shows once there are sources, or when the stage is derived
 
 test('Deploy follows launch readiness: ready shows a check, blocked shows its reason', async ({ page }) => {
   await open(page, 'deploy', '/p/PHAROS?view=journey', { readiness: { can_admit: false, reason: 'Backup evidence is older than the policy allows.' } })
-  await expect(page.getByRole('region', { name: 'Blocked: Launch admission is closed' })).toContainText('Backup evidence is older than the policy allows.')
+  await expect(page.locator('.deploy-checks')).toContainText('Backup evidence is older than the policy allows.')
   await expect(page.getByText('Launch admission · closed')).toBeVisible()
   await page.unroute('**/api/**')
   await open(page, 'deploy', '/p/PHAROS?view=journey', { readiness: { can_admit: true, reason: '' } })
-  await expect(page.getByRole('region', { name: 'Launch admission is ready' })).toBeVisible()
   await expect(page.getByText('Launch admission · ready')).toBeVisible()
   await expect(page.getByRole('region', { name: /Blocked: Launch admission/ })).toHaveCount(0)
 })
@@ -341,7 +344,7 @@ for (const [label, available, description] of [
         await expect(card).toContainText(description)
         await expect(card.getByRole('button', { name: label })).toBeEnabled({ enabled: available })
         if (!available) {
-          await expect(page.getByRole('region', { name: 'Blocked: Launch admission is closed' })).toContainText('The approval is already applied.')
+          await expect(page.getByText('Launch admission · closed')).toBeVisible()
           await expect(page.getByText('Pharos has not reported a deployment attempt yet.')).toBeVisible()
         }
         if (process.env.EG2_SHOTS) {
@@ -370,18 +373,13 @@ for (const width of [1600, 390]) for (const theme of ['light', 'dark'] as const)
     }
     await expect(card).toContainText('Applied by you')
     await expect(card.getByRole('button', { name: 'Approve and retry deployment' })).toBeEnabled()
-    await expect(page.getByRole('region', { name: 'Blocked: Launch admission is closed' })).toContainText('Retrying records a new handoff')
+    await expect(page.getByText('Launch admission · closed')).toBeVisible()
+    // One decision, one primary action: the pending request offers only Deny beside it.
+    await expect(card.getByRole('button', { name: 'Approve', exact: true })).toHaveCount(0)
+    await expect(card.getByRole('button', { name: 'Deny', exact: true })).toBeVisible()
     await shot('pending')
-    // Decide the fresh request separately, then apply it with the primary control.
-    await card.getByRole('button', { name: 'Approve', exact: true }).click()
-    await card.getByRole('button', { name: 'Approve gate', exact: true }).click()
-    await expect(card).toContainText('Approved by you')
-    await expect(card).toContainText('Applied by you')
-    await expect(card).not.toContainText('Approval no longer available')
-    await expect(card.getByRole('button', { name: 'Retry deployment', exact: true })).toBeEnabled()
-    await shot('approved')
-    await card.getByRole('button', { name: 'Retry deployment', exact: true }).click()
-    await page.getByRole('dialog', { name: 'Retry deployment?' }).getByRole('button', { name: 'Retry deployment', exact: true }).click()
+    await card.getByRole('button', { name: 'Approve and retry deployment' }).click()
+    await page.getByRole('dialog', { name: 'Retry deployment?' }).getByRole('button', { name: 'Approve and retry deployment' }).click()
     await expect.poll(() => writes(calls, '/journey/actions').length).toBe(1)
     expect(writes(calls, '/journey/actions')[0].body.approval_request_id).toBe('ap-fresh-retry')
     expect(writes(calls, '/decision').map(c => c.path)).toEqual(['/api/approvals/ap-fresh-retry/decision'])

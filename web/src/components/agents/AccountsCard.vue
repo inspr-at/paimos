@@ -133,10 +133,10 @@ const stateLabel: Record<AgentAccount['state'], string> = { available: 'Availabl
 </script>
 
 <template>
-  <section class="accounts glass-card" aria-labelledby="accounts-title">
-    <header class="card-head">
-      <h2 id="accounts-title"><AppIcon name="gauge" :size="15" />Accounts and pacing</h2>
-    </header>
+  <!-- Lives inside the "Accounts and pacing" disclosure, whose summary is the visible
+       title; the heading stays for the region's name only. -->
+  <section class="accounts" aria-labelledby="accounts-title">
+    <h2 id="accounts-title" class="sr-only">Accounts and pacing</h2>
     <p v-if="state === 'forbidden'" class="note">Accounts and their allowances are visible to workspace admins.</p>
     <p v-else-if="state === 'error'" class="note" role="alert">Accounts could not be loaded right now.</p>
     <div v-else-if="state === 'idle'" class="sk"><span class="skeleton" /><span class="skeleton short" /><span class="skeleton" /></div>
@@ -150,6 +150,7 @@ const stateLabel: Record<AgentAccount['state'], string> = { available: 'Availabl
           <span class="harness">{{ harnessLabel(account.harness) }}</span>
           <span class="spacer" />
           <span v-if="account.state !== 'available'" class="state-text">{{ stateLabel[account.state] }}</span>
+          <button v-if="mayManage && editingId !== account.id" type="button" class="btn sm add-window" :aria-label="`Add allowance window for ${accountName(account)}`" :disabled="flight !== null || busy === account.id" @click="openAllowance(account.id)">Add allowance window</button>
           <button v-if="admin && account.state !== 'unavailable'" type="button" class="btn sm ghost toggle" :disabled="busy === account.id" @click="toggle(account)">{{ account.state === 'draining' ? 'Resume' : 'Drain' }}</button>
         </div>
         <template v-if="window?.window.provisional">
@@ -171,9 +172,8 @@ const stateLabel: Record<AgentAccount['state'], string> = { available: 'Availabl
           </p>
         </template>
         <p v-else class="facts muted">No active allowance window</p>
-        <button v-if="mayManage && editingId !== account.id" type="button" class="btn sm add-window" :aria-label="`Add allowance window for ${accountName(account)}`" :disabled="flight !== null || busy === account.id" @click="openAllowance(account.id)">Add allowance window</button>
         <AllowanceWindowForm
-          v-else-if="mayManage && editingId === account.id"
+          v-if="mayManage && editingId === account.id"
           :account="account" :now="now" :busy="flight !== null" :server-message="serverMessage" :uncertain="uncertain"
           :pending="pending[account.id]?.body ?? null"
           @save="saveAllowance(account, $event)" @cancel="closeAllowance" @check="checkAllowance(account)" @revise="reviseAllowance(account.id)"
@@ -186,15 +186,12 @@ const stateLabel: Record<AgentAccount['state'], string> = { available: 'Availabl
 </template>
 
 <style scoped>
-.accounts { overflow: clip; }
-.card-head { padding: 14px 16px 8px; }
-.card-head h2 { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 650; }
-.card-head svg { color: var(--teal); }
-.note { padding: 2px 16px 16px; font-size: 12.5px; color: var(--ink-2); }
+.accounts { border-top: 1px solid var(--line); padding-top: 8px; }
+.note { padding: 8px 18px 16px; font-size: 12.5px; color: var(--ink-2); }
 .note.error { display: flex; align-items: center; gap: 6px; color: var(--danger); }
 .sk { display: grid; gap: 10px; padding: 6px 16px 18px; }
 .sk .short { width: 60%; }
-.list { margin: 0; padding: 0 8px 8px; list-style: none; display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; }
+.list { margin: 0; padding: 0 10px 10px; list-style: none; display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; }
 .account { padding: 10px 8px 10px; border-radius: 10px; }
 .account + .account { box-shadow: inset 0 1px 0 var(--line); border-radius: 0; }
 .account.unavailable .label { color: var(--ink-2); }
@@ -209,8 +206,9 @@ const stateLabel: Record<AgentAccount['state'], string> = { available: 'Availabl
 .state-text { font-size: 11.5px; color: var(--gold-ink); font-weight: 600; }
 .account.unavailable .state-text { color: var(--ink-3); }
 .toggle, .add-window { height: 24px; padding: 0 8px; font-size: 12px; }
-.add-window { margin-top: 8px; }
-@media (hover: hover) { .account .toggle { opacity: 0; } .account:hover .toggle, .account:focus-within .toggle { opacity: 1; } }
+.add-window { border-color: transparent; background: transparent; color: var(--teal-ink); }
+/* Per-account actions appear on the account the pointer or keyboard is on. */
+@media (hover: hover) { .account .toggle, .account .add-window { opacity: 0; } .account:hover .toggle, .account:focus-within .toggle, .account:hover .add-window, .account:focus-within .add-window { opacity: 1; } }
 .meter { position: relative; height: 6px; margin: 9px 0 7px; border-radius: 999px; background: var(--skeleton); }
 .fill { position: absolute; inset: 0 auto 0 0; border-radius: inherit; background: linear-gradient(90deg, var(--teal), var(--st-qa-fill)); }
 .fill.ahead { background: linear-gradient(90deg, var(--gold), var(--gold-2)); }

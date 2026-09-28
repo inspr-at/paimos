@@ -8,7 +8,7 @@ import AppIcon from '../AppIcon.vue'
 import PersonAvatar from './PersonAvatar.vue'
 import PriorityIcon from './PriorityIcon.vue'
 import StatusIcon from './StatusIcon.vue'
-import LiveDot from '../agents/LiveDot.vue'
+import AgentStateLabel from '../agents/AgentStateLabel.vue'
 import TicketHours from '../business/TicketHours.vue'
 import { useAgents } from '../../stores/agents'
 import { usePoller } from '../../lib/usePolledData'
@@ -59,7 +59,7 @@ const target = (event: Event) => event.currentTarget as HTMLElement
         <RouterLink
           v-for="view in bound" :key="view.session.id" class="prop-btn agent-chip" :class="view.status.group" :to="`/agents/${view.session.id}`"
           :aria-label="`${view.harness} ${view.name}: ${view.status.label}. Open the session`" :data-tip="`${view.harness} · ${view.status.label}`"
-        ><LiveDot :tone="view.status.tone" :size="8" /><span class="agent-name">{{ view.name }}</span></RouterLink>
+        ><AppIcon name="agent" :size="13" class="faint" /><span class="agent-name">{{ view.name }}</span><AgentStateLabel class="agent-state" :class="{ quiet: view.status.state === 'working' }" :state="view.status.state" :label="view.status.label" /></RouterLink>
       </dd>
     </div>
     <div class="prop">
@@ -77,8 +77,8 @@ const target = (event: Event) => event.currentTarget as HTMLElement
     <div v-if="item.kind_slug !== 'epic'" class="prop">
       <dt>{{ epicParent && epicParent.kind_slug !== 'epic' ? 'Parent' : 'Epic' }}</dt>
       <dd class="epic-cell">
-        <button v-if="epicParent" type="button" class="prop-btn epic-chip" :data-tip="`Open ${epicParent.key}\n${epicParent.title}`" @click="emit('openParent', epicParent.key)">
-          <AppIcon :name="epicParent.kind_slug === 'epic' ? 'epic' : 'ticket'" :size="12" :class="['kind', epicParent.kind_slug]" /><span class="mono">{{ epicParent.key }}</span><span class="epic-title">{{ epicParent.title }}</span>
+        <button v-if="epicParent" type="button" class="prop-btn epic-chip" :data-tip="`Open ${epicParent.key}\n${epicParent.title}`" :aria-label="`${epicParent.key} ${epicParent.title}. Open it`" @click="emit('openParent', epicParent.key)">
+          <AppIcon :name="epicParent.kind_slug === 'epic' ? 'epic' : 'ticket'" :size="12" :class="['kind', epicParent.kind_slug]" /><span v-if="layout === 'column'" class="mono">{{ epicParent.key }}</span><span class="epic-title">{{ epicParent.title }}</span>
         </button>
         <button v-else-if="editable" type="button" class="prop-btn ghost" aria-label="No epic. Choose an epic" @click="emit('epic', target($event))"><AppIcon name="epic" :size="12" class="faint" /><span class="unset">No epic</span></button>
         <span v-else class="prop-static faint">No epic</span>
@@ -87,11 +87,11 @@ const target = (event: Event) => event.currentTarget as HTMLElement
     <div v-if="estimate" class="prop"><dt>Estimate</dt><dd><span class="prop-static"><span v-if="layout === 'row'" class="inline-label">Estimate</span><span class="mono">{{ estimate }}</span></span></dd></div>
     <div v-if="start" class="prop"><dt>Start</dt><dd><span class="prop-static"><span v-if="layout === 'row'" class="inline-label">Start</span>{{ start }}</span></dd></div>
     <div v-if="due" class="prop"><dt>Due</dt><dd><span class="prop-static"><span v-if="layout === 'row'" class="inline-label">Due</span>{{ due }}</span></dd></div>
-    <div v-if="item.kind_slug !== 'epic'" class="prop">
+    <div v-if="item.kind_slug !== 'epic' && (releaseEditable || releaseInfo.kind === 'member')" class="prop">
       <dt>Release</dt>
       <dd>
-        <button v-if="releaseEditable" type="button" class="prop-btn" :class="{ ghost: releaseInfo.kind !== 'member' }" aria-haspopup="menu" aria-keyshortcuts="g" :aria-label="releaseInfo.kind === 'unknown' ? 'Release unknown. Change release' : `Release: ${release || 'none'}. Change release`" @click="emit('release', target($event))"><AppIcon name="layers" :size="13" /><span :class="{ unset: releaseInfo.kind !== 'member' }">{{ releaseInfo.kind === 'unknown' ? '—' : (release || 'No release') }}</span><AppIcon name="chevron" :size="12" class="chev" /></button>
-        <span v-else class="prop-static" :class="{ faint: releaseInfo.kind !== 'member' }"><span v-if="layout === 'row'" class="inline-label">Release</span><AppIcon name="layers" :size="13" class="faint" /><span class="mono">{{ releaseInfo.kind === 'unknown' ? '—' : (release || 'No release') }}</span></span>
+        <button v-if="releaseEditable" type="button" class="prop-btn" :class="{ ghost: releaseInfo.kind !== 'member' }" aria-haspopup="menu" aria-keyshortcuts="g" :aria-label="releaseInfo.kind === 'unknown' ? 'Release unknown. Change release' : `Release: ${release || 'none'}. Change release`" @click="emit('release', target($event))"><AppIcon name="layers" :size="13" /><span :class="{ unset: releaseInfo.kind !== 'member' }">{{ releaseInfo.kind === 'unknown' ? 'Release' : (release || 'No release') }}</span><AppIcon name="chevron" :size="12" class="chev" /></button>
+        <span v-else class="prop-static" :class="{ faint: releaseInfo.kind !== 'member' }"><span v-if="layout === 'row'" class="inline-label">Release</span><AppIcon name="layers" :size="13" class="faint" /><span class="mono">{{ release }}</span></span>
       </dd>
     </div>
     <div v-if="layout === 'column'" class="prop"><dt>Updated</dt><dd><time class="prop-static" :datetime="item.updated_at" :data-tip="absoluteTime(item.updated_at)">{{ relativeTime(item.updated_at, { now, long: true }) }}</time></dd></div>
@@ -132,6 +132,8 @@ const target = (event: Event) => event.currentTarget as HTMLElement
 .row .agent-chips { flex-wrap: nowrap; }
 .agent-chip { text-decoration: none; }
 .agent-chip.needs { box-shadow: inset 0 0 0 1px rgba(214, 155, 49, .45); }
+.agent-state { font-size: 11.5px; }
+.agent-state.quiet :deep(.state-word) { display: none; }
 .agent-name { max-width: 16ch; overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
 .column .agent-chips { gap: 2px 10px; }
 .epic-chip { max-width: 100%; }

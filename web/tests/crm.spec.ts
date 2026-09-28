@@ -3,7 +3,7 @@
 // customer, the customer page (edit mode, contacts, notes and the rewrite
 // proposal, related work, undo), the quote sender in Settings, and enabling
 // Customers and Quotes from Manage parts, with axe in light and dark.
-import { test, expect, type Page } from '@playwright/test'
+import { test, expect, type Locator, type Page } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
 import { fixtures, mockWork, watchErrors } from './work-fixtures'
 import { HOFER, LUMEN, ORG_SCHEMA, QUOTE_12, crmData, mockCRM, type CRMMockOptions } from './crm-fixtures'
@@ -136,6 +136,64 @@ test('at 1440 names get the room: the role drops out whole, and cut values show 
   await table(page).getByRole('row').filter({ hasText: 'Café Vogel' }).locator('td.c-place .cell').hover()
   await page.waitForTimeout(500)
   await expect(page.locator('.tooltip')).toHaveCount(0)
+})
+
+const LONG_NAME = 'Hausverwaltung und Immobilienmakler Purkarthofer GmbH'
+// Visible slice of an ellipsized name: on the first line, wider than a sliver, shorter than its text.
+async function ellipsized(locator: Locator) {
+  return locator.evaluate(el => {
+    const box = el.getBoundingClientRect()
+    const parent = el.parentElement!.getBoundingClientRect()
+    const style = getComputedStyle(el)
+    const top = Math.max(box.top, parent.top)
+    const bottom = Math.min(box.bottom, parent.bottom)
+    return {
+      visibleHeight: bottom - top,
+      clientWidth: el.clientWidth,
+      scrollWidth: el.scrollWidth,
+      textOverflow: style.textOverflow,
+      whiteSpace: style.whiteSpace,
+      title: el.getAttribute('title'),
+    }
+  })
+}
+
+test('a long customer name stays visible and ellipsizes at 1600 and 390', async ({ page }) => {
+  const { data } = await setup(page)
+  data.customers.find(c => c.id === HOFER)!.name = LONG_NAME
+  for (const theme of ['light', 'dark'] as const) {
+    await page.emulateMedia({ colorScheme: theme })
+    for (const width of [1600, 390] as const) {
+      await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
+      await page.goto('/business/customers')
+      const name = width === 1600
+        ? table(page).getByRole('row').filter({ hasText: LONG_NAME }).locator('.name-link')
+        : page.getByRole('list', { name: 'Customers' }).locator('.card-name', { hasText: LONG_NAME })
+      await name.scrollIntoViewIfNeeded()
+      await expect(name).toBeVisible()
+      const box = await ellipsized(name)
+      expect(box.visibleHeight, `${theme} ${width}`).toBeGreaterThan(8)
+      expect(box.clientWidth, `${theme} ${width}`).toBeGreaterThan(40)
+      expect(box.scrollWidth, `${theme} ${width}`).toBeGreaterThan(box.clientWidth + 1)
+      expect(box.textOverflow, `${theme} ${width}`).toBe('ellipsis')
+      expect(box.whiteSpace, `${theme} ${width}`).toBe('nowrap')
+      expect(box.title, `${theme} ${width}`).toBe(LONG_NAME)
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `${theme} ${width}`).toBe(true)
+      if (width === 1600) {
+        const row = table(page).getByRole('row').filter({ hasText: LONG_NAME })
+        const aligned = await row.locator('td.c-name .cell').evaluate(cell => {
+          const icon = cell.querySelector('.org-mark')!.getBoundingClientRect()
+          const link = cell.querySelector('.name-link')!.getBoundingClientRect()
+          const legal = cell.querySelector('.legal')!.getBoundingClientRect()
+          const bounds = cell.getBoundingClientRect()
+          return Math.abs(icon.top - link.top) < 8 && link.top < bounds.bottom - 8 && legal.top >= bounds.bottom - 1
+        })
+        expect(aligned, `${theme} icon and name share the line`).toBe(true)
+        await name.hover()
+        await expect(page.locator('.tooltip')).toContainText(LONG_NAME)
+      }
+    }
+  }
 })
 
 test('columns resize from the keyboard and the widths are saved', async ({ page }) => {

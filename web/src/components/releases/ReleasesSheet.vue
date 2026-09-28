@@ -566,6 +566,7 @@ const KINDS = [
   .mark-backing { width: 34px; height: 34px; border-radius: 10px; }
   .mark-backing img { width: 20px; height: 20px; }
   .titles { flex: 1; }
+  .titles .eyebrow { display: none; }
   .titles h1 { font-size: 21px; }
   .spacer { display: none; }
   .close-btn { order: 1; width: 44px; height: 44px; }

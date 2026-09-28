@@ -334,7 +334,7 @@ test('Tab walks the panel in reading order; Esc closes a popover before the pane
   }
   expect(order).toEqual([
     'Copy PHAROS-12', 'Previous ticket', 'Next ticket', 'Edit', 'Open as full page', 'Open in a new tab', 'More actions', 'Close ticket details',
-    'Add an Oracle Cloud connector', 'Status: Backlog. Change status', 'Priority: Medium. Change priority', 'Assignee: nobody. Change assignee', 'PHAROS-10Guarded multi-cloud p',
+    'Add an Oracle Cloud connector', 'Status: Backlog. Change status', 'Priority: Medium. Change priority', 'Assignee: nobody. Change assignee', 'PHAROS-10 Guarded multi-cloud provisioning. Open it',
   ])
   await page.keyboard.press('Shift+Tab'); await page.keyboard.press('Shift+Tab'); await page.keyboard.press('Shift+Tab'); await page.keyboard.press('Shift+Tab')
   await expect(ws.getByRole('button', { name: /Status: Backlog/ })).toBeFocused()

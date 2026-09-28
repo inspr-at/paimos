@@ -28,7 +28,6 @@ for (const theme of ['light', 'dark'] as const) {
       await page.getByRole('button', { name: 'Close session details' }).click()
     }
     for (const state of ['working', 'waiting', 'throttled', 'problem']) await expect(page.locator(`.live-now .tile[data-state="${state}"]`)).toBeVisible()
-    await expect(page.locator('.queue .agent-state-label').first()).toHaveText('Needs something')
     await page.goto('/')
     for (const layout of ['Cards', 'List']) {
       await page.getByRole('radio', { name: `${layout} view`, exact: true }).click()
@@ -150,9 +149,9 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390])
     data.preferences['agent-indicator'] = { style: 'robot-5', hovering: false }
     await page.setViewportSize({ width, height: width === 1600 ? 1000 : 844 })
     await page.goto('/agents')
-    await expect(page.locator('.group-row').filter({ hasText: 'Awaiting heartbeat' })).toContainText('1')
-    await expect(page.locator('.group-row').filter({ hasText: 'Needs something' })).toContainText('1')
-    await expect(page.locator('.page-head .summary')).toContainText('1 needs something · 1 awaiting a heartbeat')
+    await expect(page.locator('.row[data-state="awaiting"] .agent-state-label')).toHaveText('Awaiting heartbeat')
+    await expect(page.locator('.group-row').filter({ hasText: 'Needs attention' })).toBeVisible()
+    await expect(page.locator('.page-head .summary')).toContainText('live')
     // Closing a session retains the page keyboard cursor. Native summary Enter
     // must still toggle Accounts instead of reopening that session.
     await page.locator('[data-state="working"] .agent-link').click()

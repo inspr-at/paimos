@@ -129,10 +129,10 @@ async function openEpic(page: Page) {
   return work
 }
 
-test('an epic shows sessions with reported figures and leaves missing ones unknown', async ({ page }) => {
+test('an epic shows sessions with reported figures and leaves missing ones out', async ({ page }) => {
   const work = await openEpic(page)
   await expect(work).toContainText('Totals include this epic and the tickets and tasks under it.')
-  await expect(work).toContainText('Totals add only reported figures.')
+  await expect(work).toContainText('Totals count reported figures only.')
   await expect(work).toContainText('2 sessions')
   await expect(work).toContainText('1,210 in')
   await expect(work).toContainText('$1.75, incomplete')
@@ -145,29 +145,27 @@ test('an epic shows sessions with reported figures and leaves missing ones unkno
   await expect(reported).toContainText('gpt-5.4')
   await expect(reported).toContainText('1,200 in · 80 out · 15 cached')
   await expect(reported).toContainText('$1.50 provisional')
-  await expect(reported).toContainText('subscription, reported')
+  await expect(reported).toContainText('subscription')
   await expect(reported).toContainText('gpt-5.4-mini')
   await expect(reported).toContainText('$0.25 estimated')
-  await expect(reported).toContainText('api, reported')
+  await expect(reported).toContainText('API')
   await expect(reported).toContainText('PHAROS-11')
   await expect(reported).not.toContainText('5m')
   const missing = work.locator('li').filter({ hasText: 'Cursor' })
-  await expect(missing).toContainText('Model unknown')
-  await expect(missing).toContainText('Effort unknown')
-  await expect(missing).toContainText('45s so far')
-  await expect(missing).toContainText('Tokens unknown')
-  await expect(missing).toContainText('Cost unknown')
+  // Unknown model, effort, tokens and cost are omitted, never shown as zero or as filler.
+  await expect(missing.locator('.meta').first()).toHaveText('45s so far')
+  await expect(missing).not.toContainText('unknown')
   await expect(missing).not.toContainText('$0')
   await expect(work.getByRole('link')).toHaveCount(2)
 })
 
-test('a ticket with no sessions says so without inventing a cost', async ({ page }) => {
+test('a ticket with no sessions leaves the agent work section out', async ({ page }) => {
   await mockWork(page, fixtures())
+  const read = page.waitForResponse(response => /\/api\/nodes\/[^/]+\/agent-work$/.test(new URL(response.url()).pathname))
   await page.goto('/p/PHAROS/PHAROS-11')
-  const work = panel(page).getByRole('region', { name: 'Agent work' })
-  await expect(work).toContainText('No agent sessions are recorded for this ticket.')
-  await expect(work.locator('li')).toHaveCount(0)
-  await expect(work).not.toContainText('$')
+  await expect(panel(page).getByRole('heading', { name: 'Connect Hetzner Cloud for managed provisioning' })).toBeVisible()
+  await read
+  await expect(panel(page).getByRole('region', { name: 'Agent work' })).toHaveCount(0)
 })
 
 test('a 128-character usage model keeps its figures in the ticket panel', async ({ page }) => {

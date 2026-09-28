@@ -615,7 +615,7 @@ defineExpose({
               </td>
               <td v-else-if="column.id === 'assignee'" class="c-assignee">
                 <div class="cell">
-                  <span v-if="entry.row.assignee" class="owner" :data-tip="entry.row.assignee.name"><PersonAvatar :id="entry.row.assignee.id" :name="entry.row.assignee.name" :size="20" /><span class="person-name">{{ entry.row.assignee.name }}</span></span>
+                  <span v-if="entry.row.assignee" class="owner" :class="{ 'with-workers': workersOf(entry.row).length }" :data-tip="entry.row.assignee.name"><PersonAvatar :id="entry.row.assignee.id" :name="entry.row.assignee.name" :size="20" /><span class="person-name">{{ entry.row.assignee.name }}</span></span>
                   <TicketWorkers v-if="workersOf(entry.row).length" :workers="workersOf(entry.row)" :ticket-key="entry.row.key" />
                   <span v-else-if="!entry.row.assignee" class="empty" aria-label="Unassigned">—</span>
                 </div>
@@ -690,7 +690,7 @@ defineExpose({
     <div ref="sentinel" class="sentinel" aria-hidden="true" />
     <div v-if="loadingMore" class="list-foot" role="status"><span class="spinner" aria-hidden="true" />Loading more tickets…</div>
     <div v-else-if="moreError" class="list-foot error" role="alert">More tickets could not be loaded. <button type="button" class="btn sm" @click="emit('more')">Retry</button></div>
-    <div v-else-if="!loading && !error && total && !hasMore && entries.length" class="list-foot end">{{ plural(total, 'ticket') }}</div>
+    <div v-else-if="!loading && !error && total && !hasMore && entries.length" class="list-foot end phone-only">{{ plural(total, 'ticket') }}</div>
   </div>
 </template>
 
@@ -829,8 +829,12 @@ td.c-title { position: relative; overflow: hidden; }
 .owner { display: inline-flex; align-items: center; gap: 8px; min-width: 0; flex: 1 1 auto; }
 .owner .person-name { min-width: 0; }
 .c-assignee .ticket-workers { flex: 1 1 auto; min-width: 0; }
-.c-assignee .cell:has(.owner) .ticket-workers { flex: 0 0 auto; max-width: 70%; }
-.title-workers { flex: 0 1 auto; min-width: 0; max-width: 148px; }
+/* A person and a live worker share the cell: the person keeps the avatar (name on hover), the worker keeps its name. */
+.owner.with-workers { flex: 0 0 auto; }
+.owner.with-workers .person-name { display: none; }
+.c-assignee .cell:has(.owner) .ticket-workers { flex: 0 1 auto; }
+/* The worker cue never shrinks to a letter or two; the title gives way first. */
+.title-workers { flex: 0 0 auto; min-width: 0; max-width: 132px; }
 .empty { color: var(--ink-3); }
 .c-updated time, .c-created time { color: var(--ink-2); font-size: 12.5px; font-variant-numeric: tabular-nums; }
 .c-estimate .mono { font-size: 12px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
@@ -895,6 +899,8 @@ button.release-chip:focus-visible { box-shadow: var(--focus-ring); }
 .list-foot { display: flex; align-items: center; justify-content: center; gap: 10px; min-height: 44px; font-size: 12.5px; color: var(--ink-2); border-top: 1px solid var(--line); }
 .list-foot.end { font: 500 10.5px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--ink-3); font-variant-ligatures: none; }
 .list-foot.error { color: var(--danger); }
+/* The toolbar carries the count on wider screens; phones end the list with it. */
+@media (min-width: 721px) { .list-foot.end.phone-only { display: none; } }
 .spinner { width: 14px; height: 14px; border-radius: 50%; border: 1.8px solid var(--line-2); border-top-color: var(--teal); }
 @media (prefers-reduced-motion: no-preference) { .spinner { animation: spin .8s linear infinite; } @keyframes spin { to { transform: rotate(360deg); } } }
 
@@ -905,7 +911,8 @@ button.release-chip:focus-visible { box-shadow: var(--focus-ring); }
 @container tickets (max-width: 900px) { .epic-progress .bar { display: none; } .epic-progress { padding-left: 8px; } }
 /* Below ~820px Priority keeps only its icon (label in the tooltip); Status keeps its label. */
 @container tickets (max-width: 820px) { th.c-prio .th-sort { letter-spacing: .06em; } .prio-label { display: none; } }
-@container tickets (max-width: 740px) { .parent-chip { max-width: 140px; } }
+/* A narrow table (the docked panel beside it) drops the epic chip rather than cutting it to a stub. */
+@media (min-width: 721px) { @container tickets (max-width: 1040px) { .title-cell:has(.title-workers) .parent-chip.epic { display: none; } .parent-chip.epic { min-width: 96px; } } }
 
 @media (max-width: 720px) {
   .table-card { border-radius: 14px; }
@@ -927,7 +934,8 @@ button.release-chip:focus-visible { box-shadow: var(--focus-ring); }
   .title-cell .kind-glyph { margin-top: 2px; }
   /* The link keeps its 44 px reach; the two-line clamp sits on the text inside it,
      so a third line never shows through the reach below (AEON-140). */
-  .title-link { flex: 1 1 calc(100% - 30px); min-height: 44px; padding-bottom: 12px; white-space: normal; font-size: 14.5px; line-height: 1.35; }
+  /* The whole card opens the ticket, so the title needs no padded reach of its own. */
+  .title-link { flex: 1 1 calc(100% - 30px); white-space: normal; font-size: 14.5px; line-height: 1.35; }
   .title-text { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
   .parent-chip { max-width: calc(100% - 22px); margin-left: 22px; }
   .child-count { display: none; }
@@ -954,6 +962,8 @@ button.release-chip:focus-visible { box-shadow: var(--focus-ring); }
   .more-row td { display: block; height: auto; border: 0; padding: 0; }
   .status-btn { height: 24px; margin-left: 0; padding: 0 8px 0 6px; background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); font-size: 12px; }
   .prio-label { display: none; }
+  /* A phone card shows priority only when there is one. */
+  .c-prio .empty { display: none; }
   .ghost { display: grid; }
   .group-row, .group-row th { display: block; }
   .group-row th { top: var(--toolbar-h, 0px); padding: 0 10px; }

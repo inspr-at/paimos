@@ -19,6 +19,7 @@ import SessionStateEvidence from './SessionStateEvidence.vue'
 import SessionRecovery from './SessionRecovery.vue'
 import { activityOf, currentStep, type ActivitySession } from './activity'
 import { metadataChangeText, metadataChanges } from './metadataHistory'
+import { attentionReasonText } from '../../lib/agentSignals'
 
 // One session in the docked panel: who and where, the bound ticket, recent runs with
 // outcome and duration, telemetry, and the message thread with a composer.
@@ -33,7 +34,6 @@ const replyTo = ref<ProjectMessage | null>(null)
 const sending = ref(false)
 const sendError = ref('')
 const thread = ref<HTMLElement>()
-const composeInput = ref<HTMLTextAreaElement>()
 const detail = ref<(HarnessSessionDetail & ActivitySession) | null>(null)
 const ticketState = ref('')
 
@@ -53,7 +53,19 @@ const step = computed(() => {
   if (!props.view) return ''
   return props.view.status.reasons?.length ? currentStep(props.view) : activity.value?.activity_note || currentStep(props.view)
 })
-const meta = computed(() => props.view ? [props.view.account, props.view.model].filter(Boolean).join(' · ') : '')
+// Shared-inbox attention belongs to the agent principal, not this session: one quiet
+// line in Messages instead of a block at the top of Now.
+const inboxNotes = computed(() => (s.value?.attention_reasons ?? []).filter(r => r.scope === 'shared' || !r.blocking).map(r => {
+  if (r.scope !== 'shared' || r.kind !== 'reply') return { code: attentionReasonText(r).code, text: attentionReasonText(r).detail }
+  const actor = r.actor === 'agent' ? 'another agent' : r.actor === 'person' ? 'a person' : 'someone'
+  return { code: `${r.scope}-${r.kind}-${r.actor}`, text: `Shared inbox: ${r.count} ${r.count === 1 ? 'reply' : 'replies'} outstanding, waiting for ${actor}.` }
+}))
+const setupLine = computed(() => {
+  const r = reported.value
+  if (!props.view) return ''
+  return [props.view.harness, r?.harness_version].filter(Boolean).join(' ')
+})
+const modelLine = computed(() => [reported.value?.model || props.view?.model, reported.value?.reasoning_effort].filter(Boolean).join(' · '))
 // Fetch only the selected session, and refresh when a heartbeat changes metadata
 // even if the activity note stays the same. The list does not carry history.
 watch([
@@ -114,8 +126,6 @@ function composerKeys(event: KeyboardEvent) {
   if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) { event.preventDefault(); void send() }
 }
 function control(kind: SessionControl['kind']) { if (props.view && !props.controlBlock(props.view, kind)) emit('control', props.view, kind) }
-const workShape: Record<string, string> = { ship: 'Ship: building a change', scout: 'Scout: investigating', unknown: '' }
-function focusComposer() { composeInput.value?.focus() }
 defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
 </script>
 
@@ -126,28 +136,25 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
       <div class="head-top">
         <template v-if="view && !loading">
           <AgentGlyph :view="view" :size="36" />
-          <h2 class="name">{{ view.name }}</h2>
+          <h2 class="name" :title="view.name">{{ view.name }}</h2>
           <AgentStateLabel :state="view.status.state" :label="view.status.label" />
         </template>
         <span class="spacer" />
         <button type="button" class="icon-btn sm flat" aria-label="Close session details" aria-keyshortcuts="Escape" data-tip="Close · Esc" @click="emit('close')"><AppIcon name="close" :size="15" /></button>
       </div>
+      <div v-if="view && !loading" class="head-sub">
+        <TicketPeekLink v-if="view.ticket" class="ticket-detail" :ticket-key="view.ticket.key" :href="view.ticket.href" :tip="view.ticket.title"><span class="ticket-chip">{{ view.ticket.key }}</span><span class="head-ticket">{{ view.ticket.title }}</span></TicketPeekLink>
+        <span v-if="ticketState" class="ticket-status">{{ ticketState }}</span>
+      </div>
       <div v-if="view && !loading" class="head-actions">
-        <span class="harness">{{ view.harness }}</span>
-        <span v-if="view.session.host" class="host-meta">on {{ view.session.host }}</span>
+        <span class="host-meta">{{ view.harness }}<template v-if="view.session.host"> on {{ view.session.host }}</template></span>
         <span class="spacer" />
-        <button v-if="address && canWrite" type="button" class="btn sm" @click="focusComposer"><AppIcon name="inbox" :size="14" />Message</button>
         <template v-if="view.session.phase !== 'stopped'">
-          <button type="button" class="btn sm" :aria-disabled="!!controlBlock(view, 'interrupt')" :data-tip="controlBlock(view, 'interrupt') || 'Stop the current turn'" @click="control('interrupt')"><AppIcon name="interrupt" :size="14" />Interrupt</button>
-          <button type="button" class="btn sm stop" :aria-disabled="!!controlBlock(view, 'stop')" :data-tip="controlBlock(view, 'stop') || 'End this session'" @click="control('stop')"><AppIcon name="halt" :size="14" />Stop</button>
+          <button type="button" class="btn sm ghost" :aria-disabled="!!controlBlock(view, 'interrupt')" :data-tip="controlBlock(view, 'interrupt') || 'Stop the current turn'" @click="control('interrupt')"><AppIcon name="interrupt" :size="14" />Interrupt</button>
+          <button type="button" class="btn sm ghost stop" :aria-disabled="!!controlBlock(view, 'stop')" :data-tip="controlBlock(view, 'stop') || 'End this session'" @click="control('stop')"><AppIcon name="halt" :size="14" />Stop</button>
         </template>
         <SessionRecovery :session="view.session" />
       </div>
-      <p v-if="view && !loading" class="head-sub">
-        <TicketPeekLink v-if="view.ticket" class="ticket-chip" :ticket-key="view.ticket.key" :href="view.ticket.href" :tip="view.ticket.title">{{ view.ticket.key }}</TicketPeekLink>
-        <span v-if="view.ticket" class="head-ticket">{{ view.ticket.title }}</span>
-        <span v-if="meta" class="head-account"><AppIcon name="gauge" :size="12" />{{ meta }}</span>
-      </p>
     </header>
 
     <!-- Until the first load completes the body stays a placeholder, so runs and
@@ -175,60 +182,44 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
       </div>
 
       <section class="now-block" aria-labelledby="now-title">
-        <h3 id="now-title" class="eyebrow">Now</h3>
+        <h3 id="now-title" class="sr-only">Now</h3>
         <p v-if="view.session.archived_at" class="now-meta">Archived registration · process state unknown. No process was stopped by recovery.</p>
         <strong class="now-step">{{ step }}</strong>
-        <p class="now-meta">Started {{ absoluteTime(view.session.created_at) }} · elapsed {{ elapsed(view.session, now) }}</p>
+        <p class="now-meta">
+          <span :data-tip="`Since ${absoluteTime(view.session.created_at)}`">{{ view.session.stopped_at ? 'Ran' : 'Running' }} {{ elapsed(view.session, now) }}</span>
+          <template v-if="view.session.stopped_at"> · {{ stopReasonLabel(view.session.stop_reason) || 'Stopped' }} {{ relativeTime(view.session.stopped_at, { now }) }}</template>
+          <template v-else-if="view.session.heartbeat_at"> · heartbeat <time :datetime="view.session.heartbeat_at" :data-tip="absoluteTime(view.session.heartbeat_at)">{{ relativeTime(view.session.heartbeat_at, { now }) }}</time></template>
+          <template v-else> · no heartbeat yet</template>
+        </p>
         <SessionStateEvidence :view="view" :now="now" />
         <ol v-if="timeline.length" class="activity-timeline" aria-label="Recent activity">
           <li v-for="(item, index) in timeline.slice(0, 6)" :key="`${item.at}-${index}`"><time :datetime="item.at">{{ relativeTime(item.at, { now }) }}</time><span>{{ item.note }}</span></li>
         </ol>
       </section>
 
-      <section v-if="view.ticket" class="ticket-card" aria-labelledby="ticket-title">
-        <h3 id="ticket-title" class="eyebrow">Bound ticket</h3>
-        <TicketPeekLink :ticket-key="view.ticket.key" :href="view.ticket.href" :tip="view.ticket.title" class="ticket-detail"><span class="ticket-chip">{{ view.ticket.key }}</span><strong>{{ view.ticket.title }}</strong><span v-if="ticketState" class="ticket-status">{{ ticketState }}</span></TicketPeekLink>
-      </section>
-
-      <dl class="facts">
-        <div class="fact"><dt>Project</dt><dd>
-          <RouterLink v-if="view.projectKey" class="project-link" :to="`/p/${encodeURIComponent(view.projectKey)}`"><span class="key-badge">{{ view.projectKey }}</span>{{ view.projectTitle }}</RouterLink>
-          <span v-else class="muted">Workspace</span>
-        </dd></div>
-        <div class="fact"><dt>Runs on</dt><dd><span class="mono">{{ view.session.host }}</span><span class="muted">{{ view.session.role === 'coordinator' ? 'lead session' : 'worker' }} · {{ view.session.management_mode === 'managed' ? `owned by ${brand.short_name}` : 'runs on its own' }}</span></dd></div>
-        <div v-if="view.model" class="fact"><dt>Model</dt><dd class="mono">{{ view.model }}<span v-if="run && run.model_evidence === 'vendor_reported'" class="evidence" data-tip="Reported by the vendor, not only requested"><AppIcon name="check" :size="11" /></span></dd></div>
-        <div class="fact"><dt>Heartbeat</dt><dd>
-          <time v-if="view.session.heartbeat_at" :datetime="view.session.heartbeat_at" :data-tip="absoluteTime(view.session.heartbeat_at)">{{ relativeTime(view.session.heartbeat_at, { now, long: true }) }}</time>
-          <span v-else class="muted">Never</span>
-        </dd></div>
-        <div class="fact"><dt>{{ view.session.stopped_at ? 'Ran for' : 'Running' }}</dt><dd><span :data-tip="`Since ${absoluteTime(view.session.created_at)}`">{{ elapsed(view.session, now) }}</span></dd></div>
-        <div v-if="workShape[view.session.work_shape]" class="fact"><dt>Work</dt><dd>{{ workShape[view.session.work_shape] }}</dd></div>
-        <div v-if="view.session.stopped_at" class="fact"><dt>Stopped</dt><dd>{{ stopReasonLabel(view.session.stop_reason) || 'Stopped' }} <span class="muted">{{ relativeTime(view.session.stopped_at, { now }) }}</span></dd></div>
-      </dl>
-
-      <section class="block" aria-labelledby="setup-title">
-        <h3 id="setup-title" class="eyebrow">Setup</h3>
+      <section class="block first" aria-labelledby="setup-title">
+        <h3 id="setup-title" class="eyebrow">Details</h3>
         <dl class="facts">
-          <div class="fact"><dt>Harness</dt><dd>{{ view.harness }}</dd></div>
-          <div v-if="reported?.model" class="fact"><dt>Model</dt><dd class="mono">{{ reported.model }}</dd></div>
-          <div v-if="reported?.reasoning_effort" class="fact"><dt>Effort</dt><dd>{{ reported.reasoning_effort }}</dd></div>
-          <div v-if="reported?.account_label" class="fact"><dt>Subscription</dt><dd>{{ reported.account_label }}</dd></div>
-          <div v-if="reported?.harness_version" class="fact"><dt>Version</dt><dd class="mono">{{ reported.harness_version }}</dd></div>
+          <div class="fact"><dt>Project</dt><dd>
+            <RouterLink v-if="view.projectKey" class="project-link" :to="`/p/${encodeURIComponent(view.projectKey)}`">{{ view.projectTitle || view.projectKey }}</RouterLink>
+            <span v-else class="muted">Workspace</span>
+          </dd></div>
+          <div class="fact"><dt>Runs on</dt><dd><span>{{ view.session.host }}</span><span class="muted">{{ view.session.role === 'coordinator' ? 'lead session' : 'worker' }} · {{ view.session.management_mode === 'managed' ? `owned by ${brand.short_name}` : 'runs on its own' }}</span></dd></div>
+          <div v-if="modelLine" class="fact"><dt>Model</dt><dd class="mono">{{ modelLine }}<span v-if="run && run.model_evidence === 'vendor_reported'" class="evidence" data-tip="Reported by the vendor, not only requested"><AppIcon name="check" :size="11" /></span></dd></div>
+          <div v-if="reported?.account_label || view.account" class="fact"><dt>Account</dt><dd>{{ reported?.account_label || view.account }}</dd></div>
+          <div class="fact"><dt>Harness</dt><dd>{{ setupLine }}</dd></div>
         </dl>
         <ol v-if="metadataHistory.length" class="metadata-history" aria-label="Recent session changes">
           <li v-for="(item, index) in metadataHistory" :key="`${item.field}-${item.at}-${index}`"><time :datetime="item.at">{{ relativeTime(item.at, { now }) }}</time><span>{{ metadataChangeText(item) }}</span></li>
         </ol>
       </section>
 
-      <ProvenanceDetail v-if="s" :project-id="s.project_id" :session-id="s.id" :now="now" />
-
       <section v-if="hasWork" class="block" aria-labelledby="work-title">
         <h3 id="work-title" class="eyebrow">Work</h3>
         <dl class="facts">
-          <div v-if="view.ticket" class="fact wide"><dt>Ticket</dt><dd><TicketPeekLink :ticket-key="view.ticket.key" :href="view.ticket.href" :tip="view.ticket.title" class="ticket-chip">{{ view.ticket.key }}</TicketPeekLink></dd></div>
           <div v-if="reported?.brief" class="fact wide"><dt>Brief</dt><dd>{{ reported.brief }}</dd></div>
+          <div v-if="reported?.branch" class="fact"><dt>Branch</dt><dd class="mono">{{ reported.branch }}</dd></div>
           <div v-if="reported?.worktree" class="fact wide"><dt>Worktree</dt><dd class="mono">{{ reported.worktree }}</dd></div>
-          <div v-if="reported?.branch" class="fact wide"><dt>Branch</dt><dd class="mono">{{ reported.branch }}</dd></div>
           <div v-if="reported?.commits?.length" class="fact wide"><dt>Commits</dt><dd><ol class="commits"><li v-for="commit in reported.commits" :key="commit.sha"><code>{{ commit.sha }}</code><span>{{ commit.subject }}</span></li></ol></dd></div>
         </dl>
       </section>
@@ -244,10 +235,10 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
       </section>
 
       <section v-if="view.session.management_mode === 'managed' && recentRuns.length" class="block" aria-labelledby="runs-title">
-        <h3 id="runs-title" class="eyebrow">History</h3>
+        <h3 id="runs-title" class="eyebrow">Recent runs</h3>
         <div class="runs" role="table" aria-label="Recent runs">
           <div class="run-row run-head" role="row">
-            <span role="columnheader">Outcome</span><span role="columnheader">Run</span><span role="columnheader" class="run-tokens">Tokens</span>
+            <span role="columnheader">Outcome</span><span role="columnheader">Model</span><span role="columnheader" class="run-tokens">Tokens</span>
             <span role="columnheader" class="run-duration">Took</span><span role="columnheader" class="run-when">Started</span>
           </div>
           <div v-for="item in recentRuns" :key="item.id" class="run-row" role="row">
@@ -260,11 +251,15 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
         </div>
       </section>
 
+      <ProvenanceDetail v-if="s" :project-id="s.project_id" :session-id="s.id" :now="now" />
+
       <section class="block" aria-labelledby="messages-title">
-        <h3 id="messages-title" class="eyebrow">Shared inbox messages</h3>
-        <p class="empty-line">Messages belong to this agent principal across sessions. Sender session ownership is not recorded.</p>
-        <p v-if="!messages.length && address" class="empty-line">No messages yet. Use the composer to contact {{ view.name }}.</p>
-        <p v-else-if="!address" class="empty-line">Messages start when this agent registers a target. <RouterLink to="/settings/access/agents">Agent setup</RouterLink></p>
+        <h3 id="messages-title" class="eyebrow" data-tip="Messages belong to this agent across all its sessions">Messages</h3>
+        <section v-if="inboxNotes.length" class="inbox-note" aria-label="Inbox attention">
+          <p v-for="note in inboxNotes" :key="note.code"><AppIcon name="inbox" :size="13" />{{ note.text }}</p>
+        </section>
+        <p v-if="!messages.length && address" class="empty-line">No messages yet.</p>
+        <p v-else-if="!address" class="empty-line">Messages start once this agent registers a message target. <RouterLink to="/settings/access/agents">Agent setup</RouterLink></p>
         <ol v-else class="thread" aria-label="Messages">
           <li v-for="m in messages" :key="m.id" class="msg" :class="{ theirs: fromAgent(m), mine: m.sender_principal_id === me }">
             <p class="msg-meta">
@@ -290,7 +285,7 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
       <form v-else class="compose" @submit.prevent="send">
         <p v-if="replyTo" class="replying"><span>Replying to “{{ replyTo.body.slice(0, 80) }}{{ replyTo.body.length > 80 ? '…' : '' }}”</span><button type="button" class="icon-btn sm flat" aria-label="Cancel the reply" @click="replyTo = null"><AppIcon name="close" :size="12" /></button></p>
         <label class="sr-only" :for="`compose-${view.session.id}`">Message to {{ view.name }}</label>
-        <textarea :id="`compose-${view.session.id}`" ref="composeInput" v-model="draft" class="field" rows="2" :placeholder="`Message ${view.name}…`" :disabled="!canWrite || sending" @keydown="composerKeys" />
+        <textarea :id="`compose-${view.session.id}`" v-model="draft" class="field" rows="2" :placeholder="`Message ${view.name}…`" :disabled="!canWrite || sending" @keydown="composerKeys" />
         <p v-if="sendError" class="send-error" role="alert"><AppIcon name="alert" :size="12" />{{ sendError }}</p>
         <div class="compose-row">
           <div class="seg level" role="radiogroup" aria-label="Delivery">
@@ -321,27 +316,29 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
 }
 .panel-head { flex-shrink: 0; padding: 8px 10px 10px 18px; border-bottom: 1px solid var(--line); }
 .head-top { display: flex; align-items: center; gap: 8px; min-height: 36px; }
-.head-actions { display: flex; align-items: center; gap: 6px; min-width: 0; margin-top: 8px; }
+.head-actions { display: flex; align-items: center; gap: 4px; min-width: 0; margin-top: 6px; }
 .head-actions .btn { display: inline-flex; align-items: center; justify-content: center; gap: 5px; white-space: nowrap; }
-.host-meta { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-3); font: 11px var(--mono); }
+.host-meta { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-3); font-size: 12px; }
 .name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 18px; font-weight: 650; letter-spacing: -.01em; }
 .state-text { flex-shrink: 0; font-size: 12.5px; font-weight: 600; color: var(--ink-2); }
 .state-text.needs { color: var(--gold-ink); }
-.head-sub { display: flex; align-items: center; gap: 8px; min-width: 0; margin-top: 4px; padding-right: 8px; font-size: 12.5px; color: var(--ink-2); }
-.head-ticket { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); font-weight: 600; }
-.head-account { flex-shrink: 0; display: inline-flex; align-items: center; gap: 5px; margin-left: auto; padding-left: 10px; box-shadow: inset 1px 0 0 var(--line-2); }
-.head-account svg { color: var(--ink-3); }
+.head-sub { display: flex; align-items: center; gap: 8px; min-width: 0; margin-top: 6px; padding-right: 8px; font-size: 12.5px; color: var(--ink-2); }
+.head-sub .ticket-detail { display: inline-flex; align-items: center; gap: 8px; min-width: 0; flex: 0 1 auto; color: var(--ink); text-decoration: none; }
+.head-sub .ticket-detail:hover .head-ticket { color: var(--teal-ink); }
+.head-sub .ticket-detail:focus-visible { box-shadow: var(--focus-ring); border-radius: 6px; }
+.head-ticket { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
 @media (max-width: 600px) {
-  .head-sub { flex-wrap: wrap; row-gap: 4px; }
-  .head-ticket { flex-basis: calc(100% - 80px); white-space: normal; overflow: visible; overflow-wrap: anywhere; }
-  .head-account { margin-left: 0; padding-left: 0; box-shadow: none; }
+  .head-sub { flex-wrap: nowrap; align-items: flex-start; }
+  .head-sub .ticket-detail { flex: 1 1 0; align-items: flex-start; }
+  .head-sub .ticket-status { padding-top: 3px; }
+  .head-ticket { white-space: normal; overflow-wrap: anywhere; line-height: 1.35; }
 }
 .spacer { flex: 1; }
 .bar-sep { width: 1px; height: 18px; margin: 0 4px; background: var(--line-2); }
 .panel-head [aria-disabled="true"] { opacity: .35; cursor: not-allowed; }
 .stop:not([aria-disabled="true"]):hover { color: var(--danger); }
 .scroll { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 18px 24px 24px; }
-.now-block, .ticket-card { display: grid; gap: 9px; padding: 0 0 18px; margin-bottom: 18px; border-bottom: 1px solid var(--line); }
+.now-block { display: grid; gap: 6px; padding: 0 0 18px; border-bottom: 1px solid var(--line); }
 .now-step { font-size: 19px; line-height: 1.3; color: var(--ink); overflow-wrap: anywhere; }
 .now-meta { font-size: 12px; color: var(--ink-2); }
 .activity-timeline { display: grid; gap: 0; margin: 10px 0 0; padding: 0; list-style: none; }
@@ -352,17 +349,14 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
 .metadata-history li { display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: 10px; align-items: baseline; padding: 8px 0; border-top: 1px solid var(--line); font-size: 12.5px; color: var(--ink); }
 .metadata-history time { color: var(--ink-3); font-size: 11px; white-space: nowrap; }
 .metadata-history span { overflow-wrap: anywhere; }
-.ticket-detail { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; min-width: 0; color: var(--ink); text-decoration: none; }
-.ticket-detail strong { min-width: 0; flex: 1 1 160px; font-size: 13px; overflow-wrap: anywhere; }
-.ticket-status { padding: 4px 8px; border-radius: 999px; background: var(--chip-bg); color: var(--ink-2); font-size: 11px; white-space: nowrap; }
-.harness { flex-shrink: 0; display: inline-flex; align-items: center; height: 22px; padding: 0 8px; border-radius: 7px; background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); font: 500 11px/1 var(--mono); color: var(--ink-2); font-variant-ligatures: none; }
+.ticket-status { flex: none; color: var(--ink-3); font-size: 12px; white-space: nowrap; }
 .callout { display: flex; align-items: center; gap: 12px; margin-bottom: 18px; padding: 12px 12px 12px 14px; border-radius: 12px; background: var(--gold-wash); box-shadow: inset 0 0 0 1px rgba(214, 155, 49, .35); color: var(--gold-ink); }
 .callout-text { display: grid; flex: 1; min-width: 0; font-size: 12.5px; color: var(--ink-2); }
 .callout-text strong { color: var(--ink); font-size: 13px; }
 .facts { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; gap: 12px 20px; margin: 0; }
 .fact { display: grid; grid-template-columns: minmax(0, 1fr); gap: 3px; min-width: 0; }
 .fact.wide { grid-column: 1 / -1; }
-.fact dt { font: 500 10px/1.5 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--ink-3); font-variant-ligatures: none; }
+.fact dt { font-size: 12px; line-height: 1.4; color: var(--ink-3); }
 .fact dd { margin: 0; font-size: 13px; color: var(--ink); overflow-wrap: anywhere; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .fact dd.mono, .fact dd .mono { font-size: 12px; font-family: var(--mono); font-variant-ligatures: none; }
 .commits { display: grid; gap: 5px; margin: 0; padding: 0; list-style: none; }
@@ -373,7 +367,8 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
 .project-link { display: inline-flex; align-items: center; gap: 8px; min-width: 0; max-width: 100%; color: var(--ink); text-decoration: none; }
 .project-link:hover { color: var(--teal-ink); }
 .ticket-chip { flex-shrink: 0; display: inline-flex; align-items: center; height: 22px; padding: 0 8px; border-radius: 6px; background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); font: 600 11.5px/1 var(--mono); font-variant-ligatures: none; }
-.block { margin-top: 26px; }
+.block { margin-top: 24px; }
+.block.first { margin-top: 18px; }
 .block h3 { margin-bottom: 10px; }
 .telemetry { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
 .metric { display: grid; gap: 4px; padding: 10px 12px; border-radius: 10px; background: var(--code-bg); }
@@ -384,6 +379,9 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
 .run-chip.busy { background: var(--chip-teal-bg); color: var(--teal-ink); box-shadow: inset 0 0 0 1px var(--chip-teal-line); }
 .run-chip.bad { background: var(--danger-bg); color: color-mix(in oklab, var(--danger), var(--ink) 28%); box-shadow: inset 0 0 0 1px var(--danger-line); }
 .empty-line { font-size: 13px; color: var(--ink-3); }
+.inbox-note { display: grid; gap: 4px; margin-bottom: 10px; }
+.inbox-note p { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--ink-2); }
+.inbox-note svg { flex: none; color: var(--ink-3); }
 .runs { display: grid; grid-template-columns: minmax(0, 1fr); }
 .run-row { display: grid; grid-template-columns: 92px minmax(0, 1fr) 48px 56px 68px; align-items: center; gap: 10px; min-height: 36px; border-bottom: 1px solid var(--line); font-size: 12.5px; }
 .run-head { min-height: 24px; font: 500 9.5px/1 var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--ink-3); font-variant-ligatures: none; }
@@ -429,8 +427,6 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
   .head-actions .spacer { flex-basis: 100%; height: 0; }
   .head-actions .btn { flex: 1; }
   .head-top .icon-btn { width: 40px; height: 40px; }
-  .head-sub { flex-wrap: wrap; row-gap: 4px; }
-  .head-account { margin-left: 0; padding-left: 0; box-shadow: none; width: 100%; }
   .scroll { padding: 16px 18px 24px; }
   .telemetry { grid-template-columns: 1fr 1fr; }
   .run-row { grid-template-columns: 88px minmax(0, 1fr) 56px; }

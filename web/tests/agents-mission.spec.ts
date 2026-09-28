@@ -58,7 +58,7 @@ test('detail shows now, activity, ticket status and hides unreported fields', as
   const panel = page.getByRole('complementary', { name: 'Session details' })
   await expect(panel).toContainText('Running PDF tests')
   await expect(panel.locator('.activity-timeline li')).toHaveCount(2)
-  await expect(panel.locator('.ticket-card')).toContainText('PHAROS-12')
+  await expect(panel.locator('.head-sub')).toContainText('PHAROS-12')
   await expect(panel).not.toContainText('Not reported')
   await expect(panel).not.toContainText('Account not reported')
   await expect(panel.getByRole('button', { name: /Interrupt/ })).toBeVisible()
