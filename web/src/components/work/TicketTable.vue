@@ -54,6 +54,8 @@ const props = defineProps<{
   // Multi-select for bulk changes: checkboxes lead each row.
   selectable?: boolean
   selected?: Set<string>
+  // Phone selection with nothing chosen yet: round checks show before the first tap.
+  picking?: boolean
   canAssignRelease?: boolean
   // Native journey membership for the visible tickets. Imported fields.release is not this.
   nativeReleases?: Map<string, NativeReleaseView>
@@ -93,7 +95,8 @@ const CLS: Record<ColumnId, string> = { key: 'c-key', title: 'c-title', status: 
 // add columns) and the person's saved choice. Decided here rather than in CSS so
 // every colspan matches the visible columns.
 const width = ref(1200)
-const phone = ref(false)
+const phoneQuery = window.matchMedia('(max-width: 720px)')
+const phone = ref(phoneQuery.matches)
 // One live feed for the whole list (AEON-233). Workers are matched to loaded rows;
 // a ticket with a worker earns Assignee even when nobody is the stored owner.
 const live = useLiveAgents()
@@ -143,7 +146,6 @@ function clampColumn(id: ColumnId, value: number) {
 const quickAligned = computed(() => ids.value[2] === 'status' && ids.value[3] === 'priority')
 const card = ref<HTMLElement>()
 let sizer: ResizeObserver | undefined
-const phoneQuery = window.matchMedia('(max-width: 720px)')
 const phoneChange = () => { phone.value = phoneQuery.matches }
 onMounted(() => {
   phoneChange(); phoneQuery.addEventListener('change', phoneChange)
@@ -339,28 +341,73 @@ function epicChip(row: ListItem) {
 }
 const TAG_SHOWN = 3
 function tagTip(tags: TagRef[]) { return tags.map(tag => tag.name).join(', ') }
-function statusClick(event: MouseEvent, row: ListItem) { emit('status', row, event.currentTarget as HTMLElement) }
+function statusClick(event: MouseEvent, row: ListItem) {
+  // While choosing on a phone, the card is a selection target. Status waits.
+  if (props.selectable && phone.value && selecting.value) { emit('select', row, 'toggle'); return }
+  emit('status', row, event.currentTarget as HTMLElement)
+}
 function rowClick(event: MouseEvent, row: ListItem) {
+  if (swallowClick) { swallowClick = false; return }
+  if (props.selectable && phone.value && selecting.value && !(event.target as HTMLElement).closest('.phone-check')) {
+    emit('select', row, 'toggle')
+    return
+  }
   if ((event.target as HTMLElement).closest('button, input, .ticket-workers')) return
   if (event.metaKey || event.ctrlKey) { emit('newTab', row); return }
-  // Shift-click selects the range from the last chosen row; while a selection
-  // exists on a phone, a tap adds or removes the row instead of opening it.
+  // Shift-click selects the range from the last chosen row; while a phone is
+  // choosing, a tap adds or removes the row instead of opening it.
   if (props.selectable && event.shiftKey) { event.preventDefault(); emit('select', row, 'range'); return }
   if (props.selectable && phone.value && selecting.value) { emit('select', row, 'toggle'); return }
   emit('cursor', row.id)
   emit('open', row)
 }
-const selecting = computed(() => !!props.selected?.size)
+const selecting = computed(() => !!props.picking || !!props.selected?.size)
 const loadedRows = computed(() => entries.value.filter((entry): entry is Extract<Entry, { type: 'row' }> => entry.type === 'row' && !('repeat' in entry && entry.repeat)))
 const allChecked = computed(() => !!props.selected?.size && loadedRows.value.length > 0 && loadedRows.value.every(entry => props.selected!.has(entry.row.id)))
 function checkClick(event: MouseEvent, row: ListItem) {
   event.stopPropagation()
   if (event.shiftKey) { event.preventDefault(); emit('select', row, 'range') }
 }
-// A long press on a phone starts a selection.
+// A long press on a phone starts a selection. The hold and the context menu
+// both fire for one press; the click that follows must not undo it.
+const HOLD_MS = 480
+let pressTimer = 0
+let pressOrigin: { x: number; y: number } | null = null
+let pointerDown = false
+let swallowClick = false
+function pressBegin(event: PointerEvent, row: ListItem) {
+  if (!props.selectable || !phone.value || selecting.value || event.button !== 0) return
+  if ((event.target as HTMLElement).closest('button, input')) return
+  pointerDown = true
+  swallowClick = false
+  pressOrigin = { x: event.clientX, y: event.clientY }
+  window.clearTimeout(pressTimer)
+  pressTimer = window.setTimeout(() => {
+    pressTimer = 0
+    swallowClick = true
+    emit('select', row, 'toggle')
+  }, HOLD_MS)
+}
+function pressMove(event: PointerEvent) {
+  if (!pressTimer || !pressOrigin) return
+  if (Math.hypot(event.clientX - pressOrigin.x, event.clientY - pressOrigin.y) > 10) pressFinish(false)
+}
+function pressFinish(fromPointerUp: boolean) {
+  pointerDown = false
+  pressOrigin = null
+  if (!pressTimer) return
+  window.clearTimeout(pressTimer)
+  pressTimer = 0
+  if (fromPointerUp) swallowClick = false
+}
 function longPress(event: Event, row: ListItem) {
   if (!props.selectable || !phone.value) return
   event.preventDefault()
+  if (swallowClick) return
+  if (pressTimer) { window.clearTimeout(pressTimer); pressTimer = 0 }
+  // A later click belongs to this press only while the finger is still down.
+  // A dispatched context menu (no pointer) must leave the next tap alone.
+  swallowClick = pointerDown
   emit('select', row, 'toggle')
 }
 function linkClick(event: MouseEvent) {
@@ -384,7 +431,7 @@ function observe() {
 let stopLive: (() => void) | undefined
 onMounted(() => { stopLive = live.watch(); observe() })
 watch(() => [props.scrollRoot, props.hasMore, props.loadingMore], observe)
-onBeforeUnmount(() => { stopLive?.(); observer?.disconnect() })
+onBeforeUnmount(() => { stopLive?.(); observer?.disconnect(); window.clearTimeout(pressTimer) })
 defineExpose({
   focusGrid, scrollToRow, el: grid,
   focusCreate: () => (inlineQuick.value[0] ?? quick.value)?.focus(),
@@ -556,10 +603,20 @@ defineExpose({
             :aria-selected="cursorId === entry.row.id" :aria-level="entry.tree ? entry.tree.depth + 1 : undefined"
             :aria-expanded="entry.tree?.hasChildren ? entry.tree.expanded : undefined"
             :draggable="draggable(entry) ? 'true' : undefined"
-            @click="rowClick($event, entry.row)" @contextmenu="longPress($event, entry.row)" @dragstart="dragStart($event, entry.row)" @dragend="dragEnd"
+            @click="rowClick($event, entry.row)" @contextmenu="longPress($event, entry.row)"
+            @pointerdown="pressBegin($event, entry.row)" @pointermove="pressMove" @pointerup="pressFinish(true)" @pointercancel="pressFinish(false)"
+            @dragstart="dragStart($event, entry.row)" @dragend="dragEnd"
             @dragover="entry.row.kind_slug === 'epic' && entry.tree ? dragOver($event, entry.row) : undefined"
             @dragleave="dragLeave($event, entry.row.id)" @drop="entry.row.kind_slug === 'epic' && entry.tree ? drop($event, entry.row) : undefined"
           >
+            <td v-if="phone && selecting" class="c-check">
+              <button
+                type="button" class="phone-check" role="checkbox" :aria-checked="!!selected?.has(entry.row.id)" :aria-label="`Select ${entry.row.key}`"
+                @click.stop="emit('select', entry.row, 'toggle')"
+              >
+                <span class="mark" aria-hidden="true"><AppIcon v-if="selected?.has(entry.row.id)" name="check" :size="13" /></span>
+              </button>
+            </td>
             <td class="c-key">
               <div class="cell">
                 <input
@@ -914,14 +971,36 @@ button.release-chip:focus-visible { box-shadow: var(--focus-ring); }
 /* A narrow table (the docked panel beside it) drops the epic chip rather than cutting it to a stub. */
 @media (min-width: 721px) { @container tickets (max-width: 1040px) { .title-cell:has(.title-workers) .parent-chip.epic { display: none; } .parent-chip.epic { min-width: 96px; } } }
 
+.c-check { display: none; }
+.phone-check { display: none; }
 @media (max-width: 720px) {
-  .table-card { border-radius: 14px; }
+  .table-card { border-radius: 14px; overflow: visible; }
   .tickets, .tickets tbody { display: block; }
   .tickets thead { display: none; }
+  .ticket-row { -webkit-touch-callout: none; }
   .ticket-row {
     display: grid; grid-template-columns: auto auto minmax(0, 1fr) auto; grid-template-areas: "key status prio updated" "title title title title";
     align-items: center; gap: 5px 10px; height: auto; padding: 10px 14px 11px; border-bottom: 1px solid var(--line);
   }
+  /* Native boxes stay for the wide layout. A phone uses the round mark instead. */
+  .row-check { display: none; }
+  .table-card.selecting .ticket-row {
+    grid-template-columns: 44px auto auto minmax(0, 1fr) auto;
+    grid-template-areas: "check key status prio updated" "check title title title title";
+    padding-left: 2px; column-gap: 6px;
+  }
+  .c-check { display: flex; grid-area: check; align-self: center; justify-content: center; }
+  .phone-check {
+    display: grid; place-items: center; width: 44px; height: 44px; margin: 0; padding: 0; border: 0; border-radius: 50%;
+    background: transparent; color: #fffefa;
+  }
+  .phone-check .mark {
+    display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%;
+    box-shadow: inset 0 0 0 1.5px var(--ink-2); background: var(--surface);
+  }
+  .phone-check[aria-checked="true"] .mark { background: linear-gradient(180deg, #1a8683, #0e6f6c); box-shadow: none; }
+  .phone-check:focus-visible { box-shadow: var(--focus-ring); }
+  .ticket-row.selected { background: var(--row-selected); }
   .ticket-row td { display: block !important; height: auto; padding: 0; border: 0; background: none !important; box-shadow: none !important; }
   .ticket-row td:first-child { padding-left: 0; }
   .ticket-row .cell { height: auto; }
@@ -968,5 +1047,6 @@ button.release-chip:focus-visible { box-shadow: var(--focus-ring); }
   .group-row, .group-row th { display: block; }
   .group-row th { top: var(--toolbar-h, 0px); padding: 0 10px; }
   .group-head { height: 40px; }
+  .table-card.selecting .ticket-row.tree-row { padding-left: calc(2px + var(--depth, 0) * 10px); }
 }
 </style>

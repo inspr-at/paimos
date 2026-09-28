@@ -648,6 +648,20 @@ const shots: Shot[] = [
     await dialog.getByRole('checkbox', { name: 'Select PHAROS-22' }).check()
     await dialog.getByRole('checkbox', { name: 'Select PHAROS-26' }).check()
   } },
+  { screen: 'project', state: 'ticket-selection', setup: async page => {
+    await page.clock.setSystemTime(AT)
+    await mockWork(page, fixtures())
+  }, act: async (page, width) => {
+    await page.goto('/p/PHAROS')
+    await visible(page, 'tr.ticket-row:not(.ghost)')
+    if (width < 720) await page.getByRole('button', { name: 'Select', exact: true }).click()
+    for (const key of ['PHAROS-12', 'PHAROS-14']) {
+      const row = ticketRow(page, key)
+      if (width < 720) await row.click()
+      else { await row.hover(); await row.getByRole('checkbox', { name: `Select ${key}` }).check() }
+    }
+    await expect(page.getByRole('toolbar', { name: /selected ticket/ })).toBeVisible()
+  } },
   { screen: 'releases', state: 'add-to-release-picker', setup: async page => {
     await page.clock.setSystemTime(AT)
     const world = journeyWorld('live')
@@ -655,11 +669,12 @@ const shots: Shot[] = [
     await mockMembership(page, world)
   }, act: async (page, width) => {
     await page.goto('/p/PHAROS')
+    await visible(page, 'tr.ticket-row:not(.ghost)')
+    if (width < 720) await page.getByRole('button', { name: 'Select', exact: true }).click()
     for (const key of ['PHAROS-12', 'PHAROS-14']) {
-      // Phones hide the row checkboxes; try x on a focused row (no selection may be offered there).
-      if (width < 720) { await ticketRow(page, key).focus(); await page.keyboard.press('x'); continue }
-      await ticketRow(page, key).hover()
-      await ticketRow(page, key).getByRole('checkbox', { name: `Select ${key}` }).check()
+      const row = ticketRow(page, key)
+      if (width < 720) await row.click()
+      else { await row.hover(); await row.getByRole('checkbox', { name: `Select ${key}` }).check() }
     }
     await page.getByRole('toolbar', { name: /selected ticket/ }).getByRole('button', { name: 'Add to release' }).click()
     await expect(page.getByRole('dialog', { name: 'Release for 2 tickets' })).toBeVisible()
