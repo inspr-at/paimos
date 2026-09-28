@@ -3,8 +3,9 @@
 import AppIcon from '../AppIcon.vue'
 
 // The decision card beside a stage: an eyebrow, the decision's name and the one
-// primary button, with a gold seal. Records (decided, done) and blocked gates use
-// the same card without the button's glow.
+// primary button. Records (decided, done) and blocked gates use the same card
+// without the glow. When the title and button do not fit side by side, the
+// button moves below the title instead of squeezing it.
 defineProps<{
   eyebrow: string; title: string; tone?: 'gate' | 'record' | 'blocked'
   action?: { label: string; disabled?: boolean; busy?: boolean; tip?: string } | null
@@ -14,7 +15,6 @@ const emit = defineEmits<{ act: [] }>()
 
 <template>
   <section class="gate-card" :class="tone ?? 'gate'" :aria-label="`${eyebrow}: ${title}`">
-    <span v-if="(tone ?? 'gate') === 'gate'" class="seal" aria-hidden="true" />
     <header class="gh">
       <div class="gh-text">
         <p class="eyebrow gate-eyebrow"><AppIcon v-if="tone === 'blocked'" name="alert" :size="11" />{{ eyebrow }}</p>
@@ -40,18 +40,12 @@ const emit = defineEmits<{ act: [] }>()
 .gate-card::after { content: ''; position: absolute; inset: 6px; z-index: -1; border-radius: calc(var(--radius) - 5px); box-shadow: inset 0 0 0 1px rgba(214, 155, 49, .35); pointer-events: none; }
 .gate-card.record { background: var(--glass); box-shadow: var(--shadow); }
 .gate-card.record::after { box-shadow: inset 0 0 0 1px var(--line); }
-.gate-card.blocked { background: radial-gradient(120% 90% at 100% 0%, var(--danger-bg), transparent 60%), var(--glass); box-shadow: var(--shadow); }
-.gate-card.blocked::after { box-shadow: inset 0 0 0 1px var(--danger-line); }
-.seal {
-  position: absolute; top: 14px; right: 14px; width: 26px; height: 26px; border-radius: 50%;
-  border: 1.5px solid var(--gold); background: radial-gradient(circle, var(--teal) 0 3px, var(--surface) 4px, color-mix(in oklab, var(--gold-2) 40%, var(--surface)));
-  box-shadow: 0 0 12px -2px rgba(214, 155, 49, .6);
-}
-.gh { display: flex; align-items: flex-start; gap: 12px; min-width: 0; padding-right: 38px; }
-.record .gh, .blocked .gh { padding-right: 0; }
-.gh-text { flex: 1; min-width: 0; }
+.gate-card.blocked { background: radial-gradient(120% 90% at 100% 0%, var(--gold-wash), transparent 60%), var(--glass); box-shadow: var(--shadow); }
+.gate-card.blocked::after { box-shadow: inset 0 0 0 1px rgba(214, 155, 49, .35); }
+.gh { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 10px 12px; min-width: 0; }
+.gh-text { flex: 1 1 220px; min-width: 0; }
 .gate-eyebrow { display: inline-flex; align-items: center; gap: 6px; color: var(--teal-ink); }
-.blocked .gate-eyebrow { color: var(--danger); }
+.blocked .gate-eyebrow { color: var(--gold-ink); }
 .record .gate-eyebrow { color: var(--ink-3); }
 .gh h2 { margin-top: 4px; font-size: 22px; font-weight: 300; letter-spacing: -.01em; overflow-wrap: anywhere; }
 .gate-btn { flex-shrink: 0; gap: 8px; }
@@ -59,7 +53,6 @@ const emit = defineEmits<{ act: [] }>()
 .gate-body { display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; gap: 10px; font-size: 13.5px; color: var(--ink-2); overflow-wrap: anywhere; }
 .gate-body:empty { display: none; }
 @media (max-width: 720px) {
-  .gh { flex-wrap: wrap; }
   .gate-btn { width: 100%; justify-content: center; order: 2; }
 }
 </style>

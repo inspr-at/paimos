@@ -184,11 +184,11 @@ function backdrop(event: MouseEvent) { if (event.target === dialog.value) close(
           <StatusIcon :state="ticket.status" :size="13" />
           <span class="key mono">{{ ticket.key }}</span>
           <span class="copy">
-            <span class="title"><template v-for="(part, i) in highlight(ticket.title, term)" :key="i"><mark v-if="part.match">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></span>
+            <span class="title" :data-tip="ticket.title"><template v-for="(part, i) in highlight(ticket.title, term)" :key="i"><mark v-if="part.match">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></span>
             <span v-if="availabilityMark(ticket)" class="mark">{{ availabilityMark(ticket) }}</span>
             <span v-else class="mark faint">{{ statusMeta(ticket.status).label }}</span>
           </span>
-          <span class="type">{{ kindLabel(ticket.type) }}</span>
+          <span v-if="ticket.type !== 'ticket'" class="type">{{ kindLabel(ticket.type) }}</span>
         </div>
         <p v-if="loading && !tickets.length" class="empty" role="status">Looking for tickets…</p>
         <p v-else-if="failed" class="empty error" role="alert">{{ failed }}</p>
@@ -196,9 +196,12 @@ function backdrop(event: MouseEvent) { if (event.target === dialog.value) close(
       </div>
       <p v-if="note" class="note error" role="alert">{{ note }}</p>
       <footer>
-        <p class="hint"><span class="mono">{{ picked.length }}</span> selected<span v-if="addableCount"> · {{ addableCount }} can be added</span> · <KeyCap k="up" /><KeyCap k="down" /> move · <KeyCap k="enter" /> select</p>
+        <p class="hint">
+          <span class="count"><span class="mono">{{ picked.length }}</span> of {{ addableCount }} selected</span>
+          <button v-if="addableCount && picked.length < addableCount" type="button" class="linkish" @click="selectAddable">Select all {{ addableCount }}</button>
+          <span class="keys"><KeyCap k="up" /><KeyCap k="down" /> move · <KeyCap k="enter" /> select</span>
+        </p>
         <div class="actions">
-          <button v-if="addableCount" type="button" class="btn sm ghost" @click="selectAddable">Select addable</button>
           <button type="button" class="btn" @click="close">Cancel</button>
           <button type="button" class="btn primary" :disabled="!picked.length || busy" @click="add"><AppIcon name="plus" :size="14" />{{ busy ? 'Adding…' : picked.length ? `Add ${plural(picked.length, 'ticket')}` : 'Add' }}</button>
         </div>
@@ -234,13 +237,23 @@ h2 { font-size: 18px; }
 .empty, .note { padding: 8px 4px; font-size: 13px; color: var(--ink-3); }
 .error { color: var(--danger); }
 footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 12px; }
-.hint { flex: 1 1 240px; margin: 0; font-size: 12px; color: var(--ink-3); }
+.hint { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; flex: 1 1 240px; margin: 0; font-size: 12px; color: var(--ink-3); }
+.count { color: var(--ink-2); }
+.keys { display: inline-flex; align-items: center; gap: 3px; }
+.linkish { padding: 0; border: 0; background: transparent; color: var(--teal-ink); font: inherit; font-weight: 600; cursor: pointer; }
+.linkish:focus-visible { border-radius: 4px; box-shadow: var(--focus-ring); }
 .actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
 .btn { height: 36px; }
 @media (max-width: 600px) {
   .picker, .card { width: calc(100vw - 16px); max-height: calc(100dvh - 16px); }
-  .filters, footer, .actions { flex-wrap: wrap; }
-  .filters .field, .actions .btn { flex-basis: 100%; }
+  .filters { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+  .filters .field { padding: 0 4px 0 8px; font-size: 13px; text-overflow: ellipsis; }
+  footer { flex-direction: column; align-items: stretch; }
+  .hint { flex: 0 0 auto; }
+  .keys { display: none; }
+  .actions { margin-left: 0; }
+  .actions .btn { flex: 1 1 0; height: 44px; justify-content: center; }
+  .actions .btn.primary { flex-grow: 2; }
   .options { gap: 4px; }
   .option { align-items: flex-start; height: auto; padding: 8px 8px 10px; }
   .key { width: auto; }

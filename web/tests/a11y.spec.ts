@@ -207,7 +207,7 @@ const journeyScreens: [string, JourneyStart, string, (page: Page) => Promise<voi
   }],
   ['journey imported origin', 'build', '/p/PHAROS?view=journey&stage=inspire', async page => { await expect(page.getByRole('list', { name: 'What the project brought' })).toBeVisible() }, { derived: true }],
   ['journey imported plan backlog', 'open', '/p/PHAROS?view=journey', async page => { await expect(page.getByRole('region', { name: 'Backlog · what release 1 is chosen from' })).toBeVisible() }, { derived: true }],
-  ['journey deploy ready', 'deploy', '/p/PHAROS?view=journey', async page => { await expect(page.getByRole('region', { name: 'Launch admission is ready' })).toBeVisible() }, { readiness: { can_admit: true, reason: '' } }],
+  ['journey deploy ready', 'deploy', '/p/PHAROS?view=journey', async page => { await expect(page.getByText('Launch admission · ready')).toBeVisible() }, { readiness: { can_admit: true, reason: '' } }],
   ['journey mark candidate', 'mark', '/p/PHAROS?view=journey', async page => { await expect(page.getByRole('listitem', { name: /Build gate/ })).toBeVisible() }],
   ['journey open release 1', 'open', '/p/PHAROS?view=journey', async page => { await expect(page.getByRole('region', { name: 'Decision: Open release 1' })).toBeVisible() }],
   ['journey walker sheet', 'plan', '/p/PHAROS?view=journey&walk=PHAROS-12', async page => {
