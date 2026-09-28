@@ -13,7 +13,7 @@ import { brand } from '../../lib/brand'
 import { usePoller } from '../../lib/usePolledData'
 import HarnessMark from './HarnessMark.vue'
 
-const props = defineProps<{ permissions: PairingPermissions; compactEmpty?: boolean }>()
+const props = defineProps<{ permissions: PairingPermissions; compactEmpty?: boolean; embedded?: boolean }>()
 
 const computers = ref<PairingView[]>([])
 const state = ref<'idle' | 'loading' | 'ready' | 'error'>('idle')
@@ -118,6 +118,12 @@ function canChange(computer: PairingView) {
   return props.permissions.canDisconnect && (computer.computer_state === 'connected' || computer.computer_state === 'draining')
 }
 function toggle(id: string) { openId.value = openId.value === id ? '' : id }
+// A missing report is shown as nothing, not as a filler word.
+function lastActive(computer: PairingView) {
+  const label = lastActiveLabel(computer.last_seen_at)
+  return label === 'Not reported' ? '' : label
+}
+const keyOf = (computer: PairingView) => computer.computer_id ?? computer.request_id
 
 function openDialog(computer: PairingView, scope: 'computer' | 'enrollment', accountId?: string) {
   message.value = ''
@@ -180,16 +186,13 @@ function assign(error: unknown, fallback: string) {
 </script>
 
 <template>
-  <section v-if="visible" class="computers" aria-labelledby="computers-title">
+  <section v-if="visible" class="computers" :class="{ embedded }" aria-labelledby="computers-title">
     <header class="head">
-      <div>
-        <h2 id="computers-title">Connected computers</h2>
-        <p>Computers paired with {{ brand.short_name }} in this workspace.</p>
-      </div>
-      <div class="head-actions">
-        <button v-if="permissions.canListComputers" type="button" class="btn sm" :disabled="refreshing" @click="load"><AppIcon name="refresh" :size="14" />{{ refreshing ? 'Refreshing…' : 'Refresh' }}</button>
-        <RouterLink v-if="permissions.canApprove" class="btn sm" to="/agents/register-agent"><AppIcon name="plus" :size="14" />Add computer</RouterLink>
-      </div>
+      <h2 id="computers-title">Connected computers</h2>
+      <span v-if="computers.length" class="count mono">{{ computers.length }}</span>
+      <span class="spacer" />
+      <button v-if="permissions.canListComputers" type="button" class="icon-btn sm flat" :disabled="refreshing" :aria-label="refreshing ? 'Refreshing computers' : 'Refresh computers'" :data-tip="refreshing ? 'Refreshing…' : 'Refresh'" @click="load"><AppIcon name="refresh" :size="15" /></button>
+      <RouterLink v-if="permissions.canApprove && !embedded" class="btn sm" to="/agents/register-agent"><AppIcon name="plus" :size="14" />Add computer</RouterLink>
     </header>
 
     <p v-if="state === 'loading'" class="muted">Loading paired computers…</p>
@@ -198,14 +201,14 @@ function assign(error: unknown, fallback: string) {
 
     <div v-else class="list">
       <div class="sheet" aria-hidden="true">
-        <span>Computer</span><span>Harnesses</span><span>Status</span><span>Last active</span><span>Actions</span>
+        <span>Computer</span><span>Harnesses</span><span>Status</span><span>Last active</span><span />
       </div>
-      <article v-for="computer in computers" :key="computer.computer_id ?? computer.request_id" class="computer">
+      <article v-for="computer in computers" :key="keyOf(computer)" class="computer" :class="{ open: openId === keyOf(computer) }">
         <div class="identity">
           <span class="glyph"><AppIcon name="monitor" :size="16" /></span>
-          <div>
+          <div class="identity-text">
             <p class="name">{{ computer.computer_name }}</p>
-            <p class="meta">{{ platformCaption(computer.platform, computer.arch) }} · {{ computer.tenant_name }} · {{ computer.workspace_path }}</p>
+            <p class="meta" :title="`${platformCaption(computer.platform, computer.arch)} · ${computer.tenant_name} · ${computer.workspace_path}`">{{ platformCaption(computer.platform, computer.arch) }} · {{ computer.workspace_path }}</p>
           </div>
         </div>
         <p class="harness-line">
@@ -213,26 +216,26 @@ function assign(error: unknown, fallback: string) {
           <span>{{ harnesses(computer).length }} {{ harnesses(computer).length === 1 ? 'harness' : 'harnesses' }}</span>
         </p>
         <p class="status"><span class="dot" :data-state="statusOf(computer).stateLabel" />{{ statusOf(computer).stateLabel }}</p>
-        <p class="meta">{{ lastActiveLabel(computer.last_seen_at) }}</p>
+        <p class="meta last-active">{{ lastActive(computer) }}</p>
         <div class="actions">
-          <RouterLink v-if="computer.computer_state === 'connected' && computer.computer_id" class="btn sm" :to="`/agents/register-agent?computer=${computer.computer_id}`">Add harness</RouterLink>
-          <button v-if="canChange(computer)" type="button" class="btn sm" @click="openDialog(computer, 'computer')">Disconnect</button>
-          <button type="button" class="btn sm" :aria-expanded="openId === (computer.computer_id ?? computer.request_id)" @click="toggle(computer.computer_id ?? computer.request_id)">{{ openId === (computer.computer_id ?? computer.request_id) ? 'Hide' : 'Details' }}</button>
+          <button v-if="canChange(computer)" type="button" class="btn sm ghost" @click="openDialog(computer, 'computer')">Disconnect</button>
+          <button
+            type="button" class="icon-btn sm flat details-toggle" :aria-expanded="openId === keyOf(computer)" :aria-label="`${openId === keyOf(computer) ? 'Hide' : 'Show'} details for ${computer.computer_name}`"
+            :data-tip="openId === keyOf(computer) ? 'Hide details' : 'Details'" @click="toggle(keyOf(computer))"
+          ><AppIcon name="chevron-right" :size="15" class="chev" /></button>
         </div>
-        <div v-if="openId === (computer.computer_id ?? computer.request_id)" class="detail">
-          <p>{{ statusOf(computer).detail }}</p>
-          <p>{{ statusOf(computer).next }}</p>
+        <div v-if="openId === keyOf(computer)" class="detail">
+          <p>{{ statusOf(computer).detail }} {{ statusOf(computer).next }}</p>
           <ul>
             <li v-for="enrollment in computer.enrollments" :key="enrollment.account_id">
               <HarnessMark :harness="enrollment.harness" :size="14" />
-              <span>{{ harnessLabel(enrollment.harness) }} · {{ enrollment.label }} · {{ enrollment.state }}</span>
-              <span v-if="enrollment.verification_state && enrollment.verification_state !== 'not_selected'">Verification {{ enrollment.verification_state === 'unavailable' ? 'unavailable' : enrollment.verification_state.replace(/_/g, ' ') }}</span>
-              <span v-if="enrollment.verification_error && enrollment.verification_error !== 'verification_unavailable'">{{ enrollment.verification_error }}</span>
-              <span v-if="enrollment.local_processes">Local processes {{ enrollment.local_processes }}</span>
-              <span v-if="enrollment.accounting_state === 'unconfirmed'">Accounting unconfirmed</span>
-              <button v-if="canChange(computer) && enrollment.state !== 'revoked'" type="button" class="btn sm" @click="openDialog(computer, 'enrollment', enrollment.account_id)">Remove {{ enrollment.label }} from {{ brand.short_name }}</button>
+              <span class="enrollment-name">{{ harnessLabel(enrollment.harness) }} · {{ enrollment.label }}</span>
+              <span class="enrollment-meta">{{ enrollment.state }}<template v-if="enrollment.verification_state && enrollment.verification_state !== 'not_selected'"> · verification {{ enrollment.verification_state === 'unavailable' ? 'unavailable' : enrollment.verification_state.replace(/_/g, ' ') }}</template><template v-if="enrollment.local_processes"> · {{ enrollment.local_processes }} local processes</template><template v-if="enrollment.accounting_state === 'unconfirmed'"> · accounting unconfirmed</template></span>
+              <span v-if="enrollment.verification_error && enrollment.verification_error !== 'verification_unavailable'" class="enrollment-meta">{{ enrollment.verification_error }}</span>
+              <button v-if="canChange(computer) && enrollment.state !== 'revoked'" type="button" class="btn sm ghost remove" @click="openDialog(computer, 'enrollment', enrollment.account_id)">Remove<span class="sr-only"> {{ enrollment.label }} from {{ brand.short_name }}</span></button>
             </li>
           </ul>
+          <RouterLink v-if="computer.computer_state === 'connected' && computer.computer_id" class="btn sm add-harness" :to="`/agents/register-agent?computer=${computer.computer_id}`"><AppIcon name="plus" :size="13" />Add harness</RouterLink>
         </div>
       </article>
     </div>
@@ -262,29 +265,45 @@ function assign(error: unknown, fallback: string) {
 </template>
 
 <style scoped>
-.computers { margin-top: 28px; padding: 18px 18px 8px; border: 1px solid var(--line); border-radius: 16px; background: var(--surface-raised); }
-.head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
-.head h2 { font: 600 16px/1.3 var(--font); letter-spacing: 0; }
-.head p, .meta, .fine { color: var(--ink-2); font-size: 13px; }
-.head-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.computers { container: computers / inline-size; margin-top: 28px; padding: 6px 8px 8px; border: 1px solid var(--line); border-radius: 16px; background: var(--surface-raised); }
+.computers.embedded { margin-top: 0; }
+.head { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 4px 6px 4px 10px; }
+.head h2 { font: 650 15px/1.3 var(--font); letter-spacing: 0; }
+.count { font-size: 12px; color: var(--ink-3); }
+.spacer { flex: 1; }
 .head .btn { flex-shrink: 0; }
-.problem { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 8px 0; color: var(--danger); }
-.sheet, .computer { display: grid; grid-template-columns: minmax(140px, 1.6fr) minmax(96px, 1fr) minmax(96px, .8fr) minmax(72px, .6fr) auto; gap: 8px 14px; align-items: center; }
-.sheet { padding: 0 4px 8px; color: var(--ink-3); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; }
-.computer { padding: 12px 4px; border-top: 1px solid var(--line); }
-.identity { display: flex; gap: 10px; min-width: 0; }
-.glyph { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 9px; background: var(--surface-sunken); color: var(--ink-2); }
-.name { color: var(--ink); font-weight: 650; }
-.meta, .name { overflow-wrap: anywhere; }
-.harness-line, .status { display: flex; align-items: center; gap: 6px; min-width: 0; color: var(--ink); }
+.muted { padding: 0 10px 10px; color: var(--ink-2); font-size: 13px; }
+.meta, .fine { color: var(--ink-2); font-size: 13px; }
+.problem { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 8px 10px; color: var(--danger); }
+.sheet, .computer { display: grid; grid-template-columns: minmax(160px, 1.8fr) minmax(110px, 1fr) minmax(96px, .8fr) minmax(72px, .6fr) auto; gap: 6px 14px; align-items: center; }
+.sheet span:nth-child(4), .last-active { min-width: 0; }
+@container computers (max-width: 760px) {
+  .sheet, .computer { grid-template-columns: minmax(140px, 1.6fr) auto auto auto; }
+  .sheet span:nth-child(4), .last-active { display: none; }
+}
+.sheet { padding: 0 10px 6px; color: var(--ink-3); font: 500 10.5px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; font-variant-ligatures: none; }
+.computer { padding: 8px 10px; border-top: 1px solid var(--line); }
+.identity { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.identity-text { min-width: 0; }
+.glyph { display: grid; place-items: center; flex: none; width: 32px; height: 32px; border-radius: 9px; background: var(--surface-sunken); color: var(--ink-2); }
+.name { color: var(--ink); font-weight: 650; overflow-wrap: anywhere; }
+.identity .meta { font-size: 12px; color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.harness-line, .status { display: flex; align-items: center; gap: 6px; min-width: 0; color: var(--ink); font-size: 13px; white-space: nowrap; }
+.last-active { font-size: 12.5px; }
 .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--st-backlog); }
 .dot[data-state="Connected"] { background: var(--ok); }
 .dot[data-state="Draining"], .dot[data-state="Offline"] { background: var(--gold); }
 .dot[data-state="Revoked"] { background: var(--danger); }
-.actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
-.detail { grid-column: 1 / -1; display: grid; gap: 6px; padding: 4px 0 8px; color: var(--ink-2); font-size: 13px; }
-.detail ul { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
-.detail li { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.actions { display: flex; align-items: center; justify-content: flex-end; gap: 4px; }
+.details-toggle .chev { transition: transform .2s ease; }
+.computer.open .details-toggle .chev { transform: rotate(90deg); }
+@media (prefers-reduced-motion: reduce) { .details-toggle .chev { transition: none; } }
+.detail { grid-column: 1 / -1; display: grid; gap: 8px; justify-items: start; padding: 2px 0 6px 42px; color: var(--ink-2); font-size: 12.5px; }
+.detail ul { display: grid; gap: 4px; width: 100%; margin: 0; padding: 0; list-style: none; }
+.detail li { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-height: 32px; }
+.enrollment-name { color: var(--ink); font-weight: 550; }
+.enrollment-meta { color: var(--ink-3); }
+.remove { margin-left: auto; }
 .disconnect { width: min(420px, calc(100vw - 32px)); padding: 0; border: 0; background: transparent; color: var(--ink); }
 .disconnect::backdrop { background: var(--scrim); }
 .panel { padding: 18px 18px 16px; border: 1px solid var(--glass-edge); border-radius: 16px; background: var(--surface-raised); box-shadow: var(--shadow-pop); }
@@ -297,10 +316,14 @@ function assign(error: unknown, fallback: string) {
 .choices .btn { width: 100%; min-height: 44px; }
 .fine { margin-top: 8px; }
 @media (max-width: 720px) {
-  .computers { padding: 14px 12px 6px; }
+  .computers { padding: 4px 4px 6px; }
   .sheet { display: none; }
-  .computer { grid-template-columns: 1fr; }
-  .actions { justify-content: flex-start; }
-  .head { flex-direction: column; }
+  .computer { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "id actions" "harness actions" "status actions"; row-gap: 4px; }
+  .identity { grid-area: id; }
+  .harness-line { grid-area: harness; padding-left: 42px; }
+  .status { grid-area: status; padding-left: 42px; }
+  .last-active { display: none; }
+  .actions { grid-area: actions; align-self: center; }
+  .detail { padding-left: 0; }
 }
 </style>

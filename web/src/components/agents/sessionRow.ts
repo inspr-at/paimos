@@ -64,18 +64,19 @@ export interface SessionExecution {
   providerLabel: string
 }
 
+// Unknown fields are omitted, never filled with "unknown" words.
 export function sessionExecution(view: SessionView): SessionExecution {
   const reported = view.session.model?.trim() ?? ''
   const model = reported || view.model?.trim() || ''
-  const effort = model ? (view.session.reasoning_effort?.trim() || 'effort unknown') : ''
+  const effort = model ? (view.session.reasoning_effort?.trim() || '') : ''
   const account = view.session.account_label?.trim() || view.account?.trim() || ''
   const provider = modelProvider(model)
   return {
     model,
     effort,
-    modelLine: model ? `${model} · ${effort}` : 'Model unknown',
+    modelLine: [model, effort].filter(Boolean).join(' · '),
     account,
-    accountLine: `${view.harness} · ${account || 'Account unknown'}`,
+    accountLine: [view.harness, account].filter(Boolean).join(' · '),
     provider,
     providerLabel: PROVIDER_LABEL[provider],
   }

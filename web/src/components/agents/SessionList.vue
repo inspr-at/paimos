@@ -26,11 +26,15 @@ const props = defineProps<{
 const emit = defineEmits<{ open: [id: string]; control: [view: SessionView, kind: SessionControl['kind']]; focusRow: [id: string]; retry: []; start: [] }>()
 const showStopped = ref(false)
 const total = computed(() => GROUPS.reduce((sum, g) => sum + props.groups[g.id].length, 0))
-const stopped = computed(() => GROUPS.flatMap(g => props.groups[g.id]).filter(v => v.session.phase === 'stopped' || v.session.stopped_at).length)
-const live = computed(() => total.value - stopped.value)
 type Branch = SessionBranch<SessionView>
 const forest = computed(() => sessionForest(GROUPS.flatMap(g => props.groups[g.id]), props.now))
-const roots = (group: SessionGroup) => forest.value.filter(branch => branch.group === group)
+// Three calm buckets in urgency order: what needs a look, what runs, what ended.
+// Each row still names its exact state; a family sits with its most urgent member.
+type Bucket = 'attention' | 'live' | 'stopped'
+const BUCKETS: { id: Bucket; label: string }[] = [{ id: 'attention', label: 'Needs attention' }, { id: 'live', label: 'Live' }, { id: 'stopped', label: 'Stopped' }]
+const bucketOf = (group: SessionGroup): Bucket => group === 'stopped' ? 'stopped' : group === 'working' || group === 'idle' ? 'live' : 'attention'
+const rank = (group: SessionGroup) => GROUPS.findIndex(g => g.id === group)
+const roots = (bucket: Bucket) => forest.value.filter(branch => bucketOf(branch.group) === bucket).sort((a, b) => rank(a.group) - rank(b.group))
 const expanded = ref<Record<string, boolean>>({})
 const history = ref<Record<string, boolean>>({})
 const containsSelected = (branch: Branch): boolean => branch.view.session.id === props.selected || branch.children.some(containsSelected)
@@ -50,7 +54,7 @@ const stoppedChildren = (branch: Branch) => branch.children.reduce((sum, child) 
 const workingChildren = (branch: Branch) => branch.children.reduce((sum, child) => sum + child.workingCount, 0)
 const otherChildren = (branch: Branch) => branch.children.reduce((sum, child) => sum + child.liveCount - child.workingCount, 0)
 const workerLabel = (branch: Branch) => `${branch.count - 1} ${branch.count === 2 ? 'worker' : 'workers'}`
-const visible = (group: SessionGroup) => {
+const visible = (group: Bucket) => {
   const out: { view: SessionView; branch: Branch; depth: number; parent: string; open: boolean; guides: boolean[]; family: boolean; familyEnd: boolean; primary: string; context: string; exec: ReturnType<typeof sessionExecution> }[] = []
   function walk(branch: Branch, guides: boolean[], parent = '') {
     const open = isExpanded(branch)
@@ -116,7 +120,6 @@ function rowClick(event: MouseEvent, id: string) {
   <section class="sessions glass-card" aria-labelledby="sessions-title">
     <header class="card-head">
       <h2 id="sessions-title">Sessions</h2>
-      <span v-if="state === 'ready' && loaded && total" class="sub">{{ live }} live{{ stopped ? ` · ${stopped} stopped` : '' }}</span>
     </header>
 
     <div v-if="state === 'forbidden'" class="state">
@@ -141,7 +144,7 @@ function rowClick(event: MouseEvent, id: string) {
         <span role="columnheader" class="c-exec">Execution</span>
         <span role="columnheader" class="right c-beat">Heartbeat</span><span role="columnheader" class="right c-elapsed">Running</span><span role="columnheader"><span class="sr-only">Actions</span></span>
       </div>
-      <template v-for="group in GROUPS" :key="group.id">
+      <template v-for="group in BUCKETS" :key="group.id">
         <div v-if="roots(group.id).length" class="group-row" :class="group.id" role="row">
           <span role="rowheader" class="group-label">
             <button v-if="group.id === 'stopped'" type="button" class="group-toggle" :aria-expanded="showStopped" @click="showStopped = !showStopped">
@@ -187,14 +190,11 @@ function rowClick(event: MouseEvent, id: string) {
             <TicketPeekLink v-if="view.ticket" class="ticket-chip" :ticket-key="view.ticket.key" :href="view.ticket.href" :tip="view.ticket.title">{{ view.ticket.key }}</TicketPeekLink>
             <span v-else class="faint">{{ view.projectKey || '—' }}</span>
           </span>
-          <span role="cell" class="c-exec" :aria-label="`${exec.providerLabel}. ${exec.modelLine}. ${exec.accountLine}`">
-            <ProviderMark :provider="exec.provider" />
+          <span role="cell" class="c-exec" :aria-label="[exec.model ? exec.providerLabel : '', exec.modelLine, exec.accountLine].filter(Boolean).join('. ')">
+            <span class="exec-icon"><ProviderMark :provider="exec.provider" /></span>
             <span class="exec-copy">
-              <span class="exec-model" :title="exec.modelLine">
-                <template v-if="exec.model">{{ exec.model }} · <span :class="{ missing: exec.effort === 'effort unknown' }">{{ exec.effort }}</span></template>
-                <span v-else class="missing">Model unknown</span>
-              </span>
-              <span class="exec-account" :title="exec.accountLine">{{ view.harness }} · <span :class="{ missing: !exec.account }">{{ exec.account || 'Account unknown' }}</span></span>
+              <span v-if="exec.model" class="exec-model" :title="exec.modelLine">{{ exec.modelLine }}</span>
+              <span class="exec-account" :title="exec.accountLine">{{ exec.accountLine }}</span>
             </span>
           </span>
           <span role="cell" class="right c-beat">
@@ -238,15 +238,14 @@ function rowClick(event: MouseEvent, id: string) {
 .sessions { overflow: clip; container: sessions / inline-size; }
 .card-head { display: flex; align-items: baseline; gap: 10px; padding: 14px 18px 10px; }
 .card-head h2 { font-size: 15px; font-weight: 650; }
-.sub { font-size: 12.5px; color: var(--ink-3); }
-.table { --state-width: 158px; --tree-step: 28px; display: grid; grid-template-columns: var(--state-width) minmax(140px, 1.45fr) minmax(72px, .48fr) minmax(128px, .82fr) 80px 68px 76px; padding: 0 0 8px; }
+.table { --state-width: 164px; --tree-step: 28px; display: grid; grid-template-columns: var(--state-width) minmax(140px, 1.45fr) minmax(72px, .48fr) minmax(128px, .82fr) 80px 68px 76px; padding: 0 0 8px; }
 .thead, .row, .group-row { display: grid; grid-template-columns: subgrid; grid-column: 1 / -1; align-items: center; column-gap: 0; }
 .thead { height: 32px; padding: 0 12px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); font: 500 10.5px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--ink-3); font-variant-ligatures: none; white-space: nowrap; }
 .thead > span, .row > span { padding: 0 8px; min-width: 0; }
 .right { text-align: right; justify-content: flex-end; }
 .group-row { margin: 10px 6px 2px; padding: 0 12px; }
 .group-label { grid-column: 1 / -1; display: inline-flex; align-items: center; gap: 8px; height: 26px; font: 500 10.5px/1 var(--mono); letter-spacing: .16em; text-transform: uppercase; color: var(--ink-3); font-variant-ligatures: none; }
-.group-row.needs .group-label { color: var(--gold-ink); }
+.group-row.attention .group-label { color: var(--gold-ink); }
 .group-label .mono { letter-spacing: 0; color: var(--ink-3); }
 .group-toggle { display: inline-flex; align-items: center; gap: 8px; height: 26px; margin-left: -6px; padding: 0 8px 0 6px; border: 0; border-radius: 8px; background: transparent; font: inherit; letter-spacing: inherit; text-transform: inherit; color: inherit; }
 .group-toggle:hover { background: var(--row-hover); color: var(--ink); }
@@ -283,7 +282,8 @@ function rowClick(event: MouseEvent, id: string) {
 .idle-count { padding-inline: 4px; white-space: nowrap; }
 .chev { transition: transform .2s ease; }
 @media (prefers-reduced-motion: reduce) { .row, .chev { transition: none; } }
-.c-state { display: inline-flex; align-items: center; gap: 9px; }
+.c-state { display: inline-flex; align-items: center; gap: 9px; min-width: 0; }
+.c-state :deep(.state-word) { white-space: nowrap; }
 .state-label { font-size: 12.5px; color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .row.needs .state-label { color: var(--gold-ink); font-weight: 600; }
 .row > .c-agent { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; min-width: 0; padding-block: 6px; }
@@ -296,12 +296,14 @@ function rowClick(event: MouseEvent, id: string) {
 .session-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .row:hover .result { color: var(--teal-ink); }
 .role { flex: none; height: 16px; padding: 0 5px; border-radius: 999px; background: var(--gold-wash); color: var(--gold-ink); font: 600 9px/16px var(--mono); letter-spacing: .06em; text-transform: uppercase; font-variant-ligatures: none; }
-.c-exec { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.c-exec { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
+/* Marks differ in width (Claude narrow, xAI wide): a fixed slot keeps every row's text on one left edge. */
+.exec-icon { display: grid; place-items: center; flex: none; width: 28px; height: 16px; }
+.exec-icon :deep(svg) { max-width: 28px; height: auto; max-height: 14px; }
 .exec-copy { display: grid; min-width: 0; line-height: 1.25; }
 .exec-model, .exec-account { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .exec-model { font-size: 12.5px; color: var(--ink); }
 .exec-account { font-size: 11.5px; color: var(--ink-3); }
-.missing { color: var(--ink-3); font-weight: 450; }
 .ticket-chip { display: inline-flex; align-items: center; height: 22px; padding: 0 8px; border-radius: 6px; background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); font: 600 11.5px/1 var(--mono); text-decoration: none; font-variant-ligatures: none; white-space: nowrap; }
 .ticket-chip:hover { filter: brightness(1.04); text-decoration: underline; }
 .ticket-chip:focus-visible { box-shadow: var(--focus-ring); }
@@ -336,11 +338,11 @@ function rowClick(event: MouseEvent, id: string) {
 .sk-row .dot { width: 10px; height: 10px; border-radius: 50%; }
 .sk-row .key { width: 70px; height: 20px; border-radius: 6px; }
 @container sessions (max-width: 980px) {
-  .table { --state-width: 142px; grid-template-columns: var(--state-width) minmax(120px, 1.35fr) minmax(68px, .42fr) minmax(116px, .75fr) 72px 76px; }
+  .table { --state-width: 156px; grid-template-columns: var(--state-width) minmax(120px, 1.35fr) minmax(68px, .42fr) minmax(116px, .75fr) 72px 76px; }
   .c-elapsed { display: none; }
 }
 @container sessions (max-width: 760px) {
-  .table { --state-width: 136px; grid-template-columns: var(--state-width) minmax(100px, 1.2fr) minmax(64px, auto) minmax(108px, .7fr) 68px; }
+  .table { --state-width: 150px; grid-template-columns: var(--state-width) minmax(100px, 1.2fr) minmax(64px, auto) minmax(108px, .7fr) 68px; }
   .c-beat, .c-elapsed { display: none; }
 }
 /* Phones: identity, execution and state stack; actions stay in the overflow menu. */
@@ -353,7 +355,9 @@ function rowClick(event: MouseEvent, id: string) {
   .c-agent { grid-area: agent; min-width: 0; }
   .row.worker .c-agent { padding-left: 0; }
   .row > .tree-lines { left: 25px; }
-  .worker-toggle { min-height: 44px; padding-inline: 8px; }
+  .worker-toggle { min-height: 36px; padding-inline: 6px; }
+  .worker-tools { flex-wrap: nowrap; white-space: nowrap; }
+  .worker-tools .idle-count, .worker-tools > span[aria-hidden]:has(+ .idle-count) { display: none; }
   .c-state { grid-area: state; min-width: 0; }
   .c-ticket { grid-area: ticket; justify-self: start; min-width: 0; overflow: hidden; }
   .c-exec { grid-area: exec; min-width: 0; }

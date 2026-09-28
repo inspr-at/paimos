@@ -6,7 +6,7 @@ import { RISK_LABEL, expiresIn, expiresSoon, riskFor, scopeLabel, type Asker, ty
 import { confirmAction } from '../../lib/confirm'
 import { relativeTime } from '../../lib/work'
 import AppIcon from '../AppIcon.vue'
-import AgentStateLabel from './AgentStateLabel.vue'
+import HarnessMark from './HarnessMark.vue'
 import AgentStateMark from '../indicators/AgentStateMark.vue'
 import { useAgentAppearance } from '../../lib/agentAppearance'
 const { appearance } = useAgentAppearance()
@@ -83,24 +83,24 @@ async function revoke(approval: Approval) {
 }
 const outcome = (approval: Approval) => revoked.value.has(approval.id) ? 'Revoked' : approval.decision === 'approved' ? 'Approved' : approval.decision === 'denied' ? 'Denied' : 'Expired'
 const count = computed(() => props.pending.length + props.held.length)
+// The asker's harness shows as its mark; the address label maps back to the key.
+const harnessOf = (label: string) => label.toLowerCase()
 defineExpose({ begin, cancel, isOpen: () => !!open.value })
 </script>
 
 <template>
-  <section class="queue glass-card" :style="appearance('waiting')" aria-labelledby="needs-title">
+  <section class="queue glass-card" :class="{ clear: loaded && !count }" :style="appearance('waiting')" aria-labelledby="needs-title">
     <header class="card-head">
       <h2 id="needs-title">Needs you</h2>
       <span v-if="count" class="count-badge">{{ count }}</span>
-      <span class="spacer" />
-      <p v-if="count && canDecide" class="keys" aria-hidden="true"><kbd class="keycap">j</kbd><kbd class="keycap">k</kbd> move · <kbd class="keycap">a</kbd> approve or resolve · <kbd class="keycap">d</kbd> deny or dismiss</p>
+      <p v-else-if="loaded" class="all-clear"><AppIcon name="check" :size="14" />Nothing waits on you</p>
     </header>
 
     <div v-if="!loaded" class="skeleton-rows" role="status" aria-label="Loading requests">
       <div v-for="i in 2" :key="i" class="sk-row"><span class="skeleton mark-sk" /><span class="sk-lines"><span class="skeleton" :style="{ width: `${34 + i * 9}%` }" /><span class="skeleton" style="width: 22%" /></span></div>
     </div>
-    <p v-else-if="!count" class="all-clear"><AppIcon name="check" :size="15" />Nothing waits on you. New permission requests appear here the moment an agent asks.</p>
 
-    <ul v-else class="items" aria-label="Requests waiting for you">
+    <ul v-else-if="count" class="items" aria-label="Requests waiting for you">
       <li
         v-for="approval in pending" :key="approval.id" class="item agent-state-surface" :class="[riskFor(approval), { active: cursor === `a:${approval.id}`, open: open?.id === approval.id }]"
         :data-row="`a:${approval.id}`" tabindex="-1" :aria-label="`${scopeLabel(approval.scope)}, asked by ${named(approval).name}`"
@@ -109,28 +109,29 @@ defineExpose({ begin, cancel, isOpen: () => !!open.value })
         <span class="mark"><AgentStateMark state="waiting" :size="18" /></span>
         <div class="body">
           <p class="line1">
-            <strong class="what">{{ scopeLabel(approval.scope) }}</strong>
-            <span class="risk-chip" :class="riskFor(approval)">{{ RISK_LABEL[riskFor(approval)] }}</span>
-            <time class="expiry" :class="{ soon: expiresSoon(approval, now) }" :datetime="approval.expires_at" :title="new Date(approval.expires_at).toLocaleString()"><AppIcon name="clock" :size="12" />{{ expiresIn(approval, now) }} · {{ new Date(approval.expires_at).toLocaleString() }}</time>
+            <strong class="what" :title="approval.scope">{{ scopeLabel(approval.scope) }}</strong>
+            <span class="meta">
+              <time class="expiry" :class="{ soon: expiresSoon(approval, now) }" :datetime="approval.expires_at" :data-tip="new Date(approval.expires_at).toLocaleString()">{{ expiresIn(approval, now) }}</time>
+              <span class="risk" :class="riskFor(approval)"><AppIcon v-if="riskFor(approval) === 'high'" name="alert" :size="12" />{{ RISK_LABEL[riskFor(approval)] }}</span>
+            </span>
           </p>
-          <p class="line2"><AgentStateLabel state="waiting" />
-            <button type="button" class="who" @click.stop="emit('openAgent', approval.agent_principal_id)">
-              <span v-if="named(approval).harness" class="harness">{{ named(approval).harness }}</span>
+          <p class="line2">
+            <button type="button" class="who" :data-tip="named(approval).harness ? `${named(approval).harness} agent · open its session` : 'Open its session'" @click.stop="emit('openAgent', approval.agent_principal_id)">
+              <HarnessMark v-if="named(approval).harness" class="who-mark" :harness="harnessOf(named(approval).harness)" :size="13" />
               <span v-else class="who-icon" aria-hidden="true"><AppIcon name="agent" :size="12" /></span>
               <span class="who-name">{{ named(approval).name }}</span>
             </button>
-            <!-- Two phrases that wrap as wholes: "asks for scope" and "on KEY Title". -->
-            <span class="phrase"><span class="asks">asks for</span><code class="scope">{{ approval.scope }}</code></span>
             <span class="phrase">
               <span class="asks">on</span>
-              <RouterLink v-if="resource(approval).href" class="res-key" :to="resource(approval).href!" @click.stop>{{ resource(approval).key }}</RouterLink>
+              <RouterLink v-if="resource(approval).href && resource(approval).key" class="res-key" :to="resource(approval).href!" @click.stop>{{ resource(approval).key }}</RouterLink>
               <span v-else-if="resource(approval).key" class="res-key plain">{{ resource(approval).key }}</span>
+              <RouterLink v-else-if="resource(approval).href" class="res-link" :to="resource(approval).href!" @click.stop>{{ resource(approval).label }}</RouterLink>
               <span v-else class="res-label">{{ resource(approval).label }}</span>
               <!-- The title follows a key; without a key the label already is the title. -->
-              <span v-if="resource(approval).title && resource(approval).key" class="res-title">{{ resource(approval).title }}</span>
+              <span v-if="resource(approval).title && resource(approval).key" class="res-title" :title="resource(approval).title">{{ resource(approval).title }}</span>
             </span>
           </p>
-          <p v-if="approval.rationale" class="why">“{{ approval.rationale }}”</p>
+          <p v-if="approval.rationale" class="why">{{ approval.rationale }}</p>
           <form v-if="open?.id === approval.id" class="decision" @submit.prevent="submit(approval)" @click.stop>
             <label :for="`reason-${approval.id}`">{{ open.mode === 'approve' ? 'Reason (optional)' : 'Why not? The agent sees this.' }}</label>
             <textarea
@@ -148,7 +149,7 @@ defineExpose({ begin, cancel, isOpen: () => !!open.value })
           </form>
         </div>
         <div v-if="open?.id !== approval.id && canDecideApproval(approval)" class="row-actions">
-          <button type="button" class="btn sm" aria-keyshortcuts="d" @click.stop="begin(approval.id, 'deny')"><AppIcon name="close" :size="13" />Deny</button>
+          <button type="button" class="btn sm ghost" aria-keyshortcuts="d" @click.stop="begin(approval.id, 'deny')"><AppIcon name="close" :size="13" />Deny</button>
           <button type="button" class="btn sm" :class="cursor === `a:${approval.id}` ? 'primary' : 'approve-soft'" aria-keyshortcuts="a" @click.stop="begin(approval.id, 'approve')"><AppIcon name="check" :size="13" />Approve</button>
         </div>
       </li>
@@ -158,15 +159,16 @@ defineExpose({ begin, cancel, isOpen: () => !!open.value })
       >
         <span class="mark"><AgentStateMark state="waiting" :size="18" /></span>
         <div class="body">
-          <p class="line1"><strong class="what">Action request</strong><span class="risk-chip held-chip">Held for you</span></p>
-          <p class="line2"><AgentStateLabel state="waiting" />
+          <p class="line1"><strong class="what">Action request</strong><time v-if="request.created_at" class="expiry sent-at" :datetime="request.created_at">Held for you · {{ relativeTime(request.created_at, { now, long: true }) }}</time></p>
+          <p class="line2">
             <button type="button" class="who" @click.stop="emit('openAgent', request.sender_principal_id)">
-              <span v-if="asker(request.sender_principal_id).harness" class="harness">{{ asker(request.sender_principal_id).harness }}</span>{{ asker(request.sender_principal_id).name }}
+              <HarnessMark v-if="asker(request.sender_principal_id).harness" class="who-mark" :harness="harnessOf(asker(request.sender_principal_id).harness)" :size="13" />
+              <span v-else class="who-icon" aria-hidden="true"><AppIcon name="agent" :size="12" /></span>
+              <span class="who-name">{{ asker(request.sender_principal_id).name }}</span>
             </button>
-            <span class="asks">to</span><code class="scope">{{ request.to }}</code>
+            <span class="asks">to</span><span class="to" :title="request.to">{{ request.to.split(':').pop() }}</span>
           </p>
           <p class="why body-text">{{ request.body }}</p>
-          <p v-if="request.created_at" class="sent-at"><time :datetime="request.created_at">Sent {{ relativeTime(request.created_at, { now, long: true }) }}</time></p>
           <form v-if="open?.id === request.id" class="decision" @submit.prevent="settle(request)" @click.stop>
             <label :for="`note-${request.id}`">Note (optional)</label>
             <textarea
@@ -187,7 +189,7 @@ defineExpose({ begin, cancel, isOpen: () => !!open.value })
         <div v-if="open?.id !== request.id" class="row-actions">
           <button type="button" class="btn sm ghost answer" @click.stop="emit('openAgent', request.sender_principal_id)"><AppIcon name="send" :size="13" />Answer</button>
           <template v-if="canResolve">
-            <button type="button" class="btn sm" aria-keyshortcuts="d" @click.stop="begin(request.id, 'dismiss')"><AppIcon name="close" :size="13" />Dismiss</button>
+            <button type="button" class="btn sm ghost" aria-keyshortcuts="d" @click.stop="begin(request.id, 'dismiss')"><AppIcon name="close" :size="13" />Dismiss</button>
             <button type="button" class="btn sm" :class="cursor === `m:${request.id}` ? 'primary' : 'approve-soft'" aria-keyshortcuts="a" @click.stop="begin(request.id, 'resolve')"><AppIcon name="check" :size="13" />Resolve</button>
           </template>
         </div>
@@ -214,12 +216,11 @@ defineExpose({ begin, cancel, isOpen: () => !!open.value })
 
 <style scoped>
 .queue { overflow: clip; container: queue / inline-size; }
-.card-head { display: flex; align-items: center; gap: 10px; padding: 14px 18px 12px; }
+.card-head { display: flex; align-items: center; gap: 10px; min-height: 48px; padding: 10px 18px 8px; }
+.queue.clear .card-head { padding-bottom: 10px; }
 .card-head h2 { font-size: 15px; font-weight: 650; }
 .count-badge { display: inline-grid; place-items: center; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 999px; background: var(--gold); color: #fff; font: 700 11px/1 var(--mono); font-variant-numeric: tabular-nums; }
-.spacer { flex: 1; }
-.keys { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--ink-3); }
-.all-clear { display: flex; align-items: center; gap: 8px; padding: 4px 18px 18px; font-size: 13px; color: var(--ink-2); }
+.all-clear { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--ink-3); }
 .skeleton-rows { display: grid; gap: 4px; padding: 0 8px 8px; }
 .sk-row { display: flex; align-items: center; gap: 12px; padding: 12px 12px 12px 10px; }
 .mark-sk { flex-shrink: 0; width: 30px; height: 30px; border-radius: 9px; }
@@ -235,30 +236,33 @@ defineExpose({ begin, cancel, isOpen: () => !!open.value })
 .item.high .mark { background: var(--danger-bg); box-shadow: inset 0 0 0 1px var(--danger-line); color: var(--danger); }
 .item.held .mark { background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); color: var(--ink-2); }
 .body { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; min-width: 0; }
-.line1 { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; min-height: 22px; }
+.line1 { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 10px; min-height: 22px; }
 .what { font-size: 14px; font-weight: 650; color: var(--ink); }
-.risk-chip { display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: 999px; font: 500 10.5px/1 var(--mono); letter-spacing: .06em; text-transform: uppercase; font-variant-ligatures: none; background: var(--chip-teal-bg); color: var(--teal-ink); }
-.risk-chip.medium { background: var(--gold-wash); color: var(--gold-ink); box-shadow: inset 0 0 0 1px rgba(214, 155, 49, .3); }
-.risk-chip.high { background: var(--danger-bg); color: var(--danger); box-shadow: inset 0 0 0 1px var(--danger-line); }
-.risk-chip.held-chip { background: var(--chip-bg); color: var(--ink-2); box-shadow: inset 0 0 0 1px var(--chip-line); }
-.expiry { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--ink-3); }
+/* Risk is secondary: quiet words; only high risk earns colour, with an icon. */
+.risk { display: inline-flex; align-items: center; gap: 4px; color: var(--ink-3); font-size: 12px; white-space: nowrap; }
+.meta { display: inline-flex; align-items: baseline; gap: 8px; }
+.risk::before { content: '·'; margin-right: 4px; color: var(--ink-3); }
+.res-link { color: var(--ink); font-weight: 550; text-decoration: none; }
+.res-link:hover { color: var(--teal-ink); text-decoration: underline; }
+.risk.high { color: var(--danger); font-weight: 600; }
+.expiry { font-size: 12px; color: var(--ink-3); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .expiry.soon { color: var(--gold-ink); font-weight: 600; }
-.line2 { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; font-size: 12.5px; color: var(--ink-2); }
+.line2 { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 6px; font-size: 12.5px; color: var(--ink-2); }
 .phrase { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 6px; min-width: 0; }
-.who { display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 8px 0 3px; border: 0; border-radius: 999px; background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); color: var(--ink); font-size: 12.5px; font-weight: 600; }
-.who-icon { display: inline-grid; place-items: center; width: 18px; height: 18px; border-radius: 999px; background: var(--chip-teal-bg); color: var(--teal-ink); flex: none; }
+.who { display: inline-flex; align-items: center; gap: 5px; height: 24px; margin-left: -4px; padding: 0 6px 0 4px; border: 0; border-radius: 7px; background: transparent; color: var(--ink); font-size: 12.5px; font-weight: 600; }
+.who-icon { display: inline-grid; place-items: center; width: 16px; height: 16px; border-radius: 999px; color: var(--ink-2); flex: none; }
+.who-mark { color: var(--ink-2); }
 .who-name { line-height: 1.3; }
-.who:hover { box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); }
+.who:hover { background: var(--row-hover); color: var(--teal-ink); }
 .who:focus-visible { box-shadow: var(--focus-ring); }
+.to { color: var(--ink); font-weight: 550; }
 /* Phones: who asks, what for and on what stack as three short lines; the asker and
    the resource are finger-sized chips a line apart, so their reach never meets. */
 @media (max-width: 600px) {
-  .line2 { flex-direction: column; align-items: flex-start; row-gap: 6px; }
-  .who { z-index: 1; height: 32px; padding: 0 10px 0 4px; }
+  .who { z-index: 1; height: 32px; }
+  .phrase { display: contents; }
 }
-.harness { display: inline-flex; align-items: center; height: 16px; padding: 0 6px; border-radius: 999px; background: var(--surface-raised); font: 500 10px/1 var(--mono); letter-spacing: .04em; color: var(--ink-2); font-variant-ligatures: none; }
 .asks { color: var(--ink-3); }
-.scope { padding: 1px 6px; border-radius: 6px; background: var(--code-bg); font-size: 11.5px; color: var(--ink); }
 .res-key { display: inline-flex; align-items: center; font: 600 11.5px/1 var(--mono); color: var(--teal-ink); text-decoration: none; padding: 3px 7px; border-radius: 6px; background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); font-variant-ligatures: none; }
 @media (max-width: 600px) { .res-key { z-index: 1; min-height: 28px; padding: 0 8px; } }
 .res-key:hover { text-decoration: underline; }
@@ -266,7 +270,7 @@ defineExpose({ begin, cancel, isOpen: () => !!open.value })
 .res-key.plain:hover { text-decoration: none; }
 .res-title { min-width: 0; max-width: 42ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-2); }
 .res-label { color: var(--ink); }
-.why { font-size: 13px; color: var(--ink-2); line-height: 1.45; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; }
+.why { margin-top: 2px; font-size: 13px; color: var(--ink-2); line-height: 1.45; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; }
 .body-text { -webkit-line-clamp: 3; line-clamp: 3; color: var(--ink); }
 .row-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; align-self: center; min-width: 0; max-width: 100%; }
 .decision { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; margin-top: 8px; }
@@ -279,11 +283,11 @@ defineExpose({ begin, cancel, isOpen: () => !!open.value })
 .btn.approve-soft:hover { background: var(--row-selected); box-shadow: inset 0 0 0 1px var(--teal); }
 .btn.deny { color: #fff; background: var(--danger); border-color: transparent; }
 .btn.deny:hover { filter: brightness(1.06); background: var(--danger); }
-.sent-at { font-size: 11.5px; color: var(--ink-3); }
 .fine-print { font-size: 11.5px; color: var(--ink-3); }
 .answer { color: var(--teal-ink); }
+.row-actions .btn.ghost:not(.answer) { color: var(--ink-2); }
 .error { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--danger); }
-.history { border-top: 1px solid var(--line); padding: 6px 10px 8px; }
+.history { border-top: 1px solid var(--line); padding: 4px 10px 6px; }
 .history-toggle { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 8px; border: 0; border-radius: 8px; background: transparent; color: var(--ink-2); font-size: 12.5px; font-weight: 600; }
 .history-toggle:hover { background: var(--row-hover); color: var(--ink); }
 .history-toggle:focus-visible { box-shadow: var(--focus-ring); }
@@ -310,10 +314,9 @@ defineExpose({ begin, cancel, isOpen: () => !!open.value })
 }
 @media (max-width: 720px) {
   .card-head { padding: 12px 14px 10px; }
-  .keys { display: none; }
   .item { grid-template-columns: 30px minmax(0, 1fr); padding: 12px 10px; }
   .row-actions { grid-column: 2; justify-self: start; }
-  .row-actions .btn { height: 40px; padding: 0 16px; }
+  .row-actions .btn { height: 40px; padding: 0 12px; }
   .decision-actions .hint { display: none; }
   .decision-actions .btn { height: 40px; }
   .res-title { max-width: 100%; }
@@ -322,5 +325,5 @@ defineExpose({ begin, cancel, isOpen: () => !!open.value })
   .revoke { grid-column: 2 / -1; justify-self: start; }
 }
 .item .mark { color: var(--agent-state-color); background: color-mix(in srgb, var(--agent-state-color) 10%, var(--surface-raised)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--agent-state-color) 25%, transparent); }
-.count-badge { background: var(--agent-state-color); }
+.count-badge { background: var(--agent-state-color); color: var(--surface-raised); }
 </style>

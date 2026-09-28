@@ -34,8 +34,10 @@ const router = useRouter()
 const cursor = ref('')
 const live = ref(false)
 const stale = computed(() => agents.refreshStale || (agents.sessionsUpdatedAt !== null && agents.now - agents.sessionsUpdatedAt > 45_000))
-const updatedTime = computed(() => agents.sessionsUpdatedAt === null ? '' : new Date(agents.sessionsUpdatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }))
+const updatedTime = computed(() => agents.sessionsUpdatedAt === null ? '' : new Date(agents.sessionsUpdatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }))
+const updatedFull = computed(() => agents.sessionsUpdatedAt === null ? '' : new Date(agents.sessionsUpdatedAt).toLocaleString())
 const updatedAge = computed(() => agents.sessionsUpdatedAt === null ? '' : `${Math.max(0, Math.floor((agents.now - agents.sessionsUpdatedAt) / 1000))} s ago`)
+const freshnessTip = computed(() => [live.value ? 'Connected to live updates' : 'Refreshing every 20 seconds', updatedFull.value ? `last update ${updatedFull.value}` : ''].filter(Boolean).join(' · '))
 const queue = ref<InstanceType<typeof ApprovalQueue>>()
 const startDialog = ref<InstanceType<typeof StartAgentDialog>>()
 const canStart = computed(() => session.identity?.principal.kind === 'person' && can('work_orders.write') && can('run.create'))
@@ -55,13 +57,19 @@ const canRevoke = computed(() => session.identity?.principal.kind === 'person' &
 const canDecide = computed(() => session.identity?.principal.kind === 'person' && (can('approvals.decide') || canResolve.value))
 const canDecideApproval = (approval: Approval) => session.identity?.principal.kind === 'person' && allowedToDecide(approval, can)
 const history = computed(() => decidedApprovals(agents.approvals, agents.now))
-const counts = computed(() => ([['working', 'working'], ['needs', 'need something'], ['awaiting', 'awaiting a heartbeat'], ['throttled', 'throttled'], ['problem', 'with a problem'], ['unresponsive', 'without a heartbeat'], ['idle', 'idle'], ['stopped', 'stopped']] as const)
-  .filter(([group]) => agents.grouped[group].length).map(([group, label]) => `${agents.grouped[group].length} ${group === 'needs' && agents.grouped[group].length === 1 ? 'needs something' : label}`))
+// At most three counts: what waits on Markus, what is in trouble, what runs.
+// The table groups below carry every other state.
 const summary = computed(() => {
+  if (!agents.loaded) return ''
   const parts: string[] = []
   if (agents.needsCount) parts.push(`${agents.needsCount} ${agents.needsCount === 1 ? 'needs' : 'need'} you`)
-  if (agents.sessionsState === 'ready' && agents.loaded) parts.push(...(agents.sessions.length ? counts.value : ['No agent connected yet']))
-  return parts.join(' · ') || (agents.loaded ? 'Nothing waits on you' : '')
+  if (agents.sessionsState === 'ready') {
+    const trouble = agents.grouped.problem.length + agents.grouped.unresponsive.length
+    const live = agents.sessions.filter(s => s.phase !== 'stopped' && !s.stopped_at).length
+    if (trouble) parts.push(`${trouble} with a problem`)
+    if (live) parts.push(`${live} live`)
+  }
+  return parts.join(' · ')
 })
 
 // ---------- Resources and people ----------
@@ -75,7 +83,8 @@ function resource(approval: Approval): Resource {
   }
   const id = approval.resource_id ?? ''
   const project = projects.byId(id)
-  if (project) return { label: project.title, key: project.routeKey, title: project.title, href: `/p/${encodeURIComponent(project.routeKey)}` }
+  // A project reads by its name alone; its key would only repeat it.
+  if (project) return { label: project.title, title: project.title, href: `/p/${encodeURIComponent(project.routeKey)}` }
   const node = agents.nodes[id]
   if (!node) return { label: 'a ticket' }
   const owner = projects.byRouteKey(node.key.split('-')[0] ?? '')
@@ -238,22 +247,24 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
       <div class="head-main">
         <p class="eyebrow">{{ session.identity?.tenant.name ?? 'Workspace' }}</p>
         <h1 id="agents-title">Agents</h1>
-        <p class="summary"><span v-if="summary">{{ summary }}</span><span v-else class="skeleton summary-skeleton" /></p>
+        <p class="summary"><span v-if="summary">{{ summary }}</span><span v-else-if="!agents.loaded" class="skeleton summary-skeleton" /></p>
       </div>
       <div class="head-side">
-        <button v-if="canStart" type="button" class="btn primary start-agent" @click="startDialog?.open()"><AppIcon name="plus" :size="15" />Start agent</button>
-        <RouterLink v-if="showConnect" class="btn" to="/agents/register-agent"><AppIcon name="monitor" :size="15" />Connect computer</RouterLink>
-        <RouterLink class="context-link" to="/agents/usage">Usage<AppIcon name="arrow" :size="13" /></RouterLink>
-        <RouterLink v-if="can('keys.manage')" class="context-link" to="/settings/access/agents">Agent keys<AppIcon name="arrow" :size="13" /></RouterLink>
-        <div class="freshness">
-          <p class="live" :class="{ on: live && !stale }" :data-tip="live ? 'Connected to live updates' : 'Refreshing every 20 seconds'">
-            <span class="live-mark" aria-hidden="true" />{{ stale ? 'Update delayed' : live ? 'Live' : 'Polling' }}
-          </p>
-          <span class="last-updated" role="status">
-            <template v-if="agents.sessionsUpdatedAt !== null">Updated <time :datetime="new Date(agents.sessionsUpdatedAt).toISOString()">{{ agents.refreshStale ? updatedAge : updatedTime }}</time><template v-if="agents.refreshStale"> · retrying</template></template>
-            <template v-else>Waiting for first update</template>
+        <div class="head-links">
+        <p class="freshness" :class="{ on: live && !stale, stale }" :data-tip="freshnessTip">
+          <span class="live-mark" aria-hidden="true" />
+          <span v-if="stale" class="live">Update delayed</span>
+          <span v-else-if="live" class="live">Live</span>
+          <span class="last-updated" :class="{ 'sr-only': live && !stale }" role="status">
+            <template v-if="agents.sessionsUpdatedAt !== null"><template v-if="!stale">Updated </template><time :datetime="new Date(agents.sessionsUpdatedAt).toISOString()">{{ agents.refreshStale ? updatedAge : updatedTime }}</time><template v-if="agents.refreshStale"> · retrying</template></template>
+            <template v-else>Connecting…</template>
           </span>
+        </p>
+        <RouterLink class="context-link" to="/agents/usage">Usage</RouterLink>
+        <RouterLink v-if="can('keys.manage')" class="context-link" to="/settings/access/agents">Agent keys</RouterLink>
         </div>
+        <RouterLink v-if="showConnect" class="btn connect" to="/agents/register-agent"><AppIcon name="monitor" :size="15" />Connect computer</RouterLink>
+        <button v-if="canStart" type="button" class="btn primary start-agent" @click="startDialog?.open()"><AppIcon name="plus" :size="15" />Start agent</button>
       </div>
     </header>
 
@@ -276,12 +287,12 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
           @open="openSession" @control="control" @focus-row="id => cursor = id" @retry="agents.loadAll()" @start="startDialog?.open()"
         />
         <p v-if="agents.sessionsUpdatedAt !== null && agents.sessionsState === 'error'" class="inline-error" role="alert"><AppIcon name="alert" :size="14" />Sessions could not be refreshed: {{ agents.sessionsError }} <button type="button" class="btn sm" @click="agents.loadAll()">Try again</button></p>
-        <ConnectedComputers v-if="agents.loaded" :permissions="pairingAccess" compact-empty />
-        <details v-if="agents.loaded" class="accounts-disclosure">
+        <RunQueue v-if="agents.loaded" />
+        <ConnectedComputers v-if="agents.loaded" :permissions="pairingAccess" compact-empty embedded />
+        <details v-if="agents.loaded" class="accounts-disclosure glass-card">
           <summary class="accounts-summary"><AppIcon name="gauge" :size="15" /><span>Accounts and pacing</span><AppIcon class="disclosure-chev" name="chevron-right" :size="15" /></summary>
           <AccountsCard :accounts="agents.accounts" :state="agents.accountsUpdatedAt !== null ? 'ready' : agents.accountsState" :now="agents.now" :admin="agents.accountsState === 'ready'" :set="setAccount" @allowance-created="refreshAllowance()" />
         </details>
-        <RunQueue v-if="agents.loaded" />
         <p v-if="agents.loaded && (agents.sessions.length || agents.pending.length)" class="hint" aria-hidden="true">
           <kbd class="keycap">j</kbd><kbd class="keycap">k</kbd> move · <kbd class="keycap"><AppIcon name="enter" /></kbd> open · <kbd class="keycap">a</kbd> approve · <kbd class="keycap">d</kbd> deny
         </p>
@@ -298,33 +309,34 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
 
 <style scoped>
 .agents-page { width: 100%; margin: 0; padding: 22px var(--gutter) 24px; }
-.page-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; margin-bottom: 20px; }
+.page-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; margin-bottom: 18px; }
 .page-head h1 { margin-top: 6px; }
-.head-side { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-.start-agent { min-height: 44px; }
-/* In-context link to the matching settings. */
-.context-link { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 10px; border-radius: 999px; color: var(--teal-ink); font-size: 13px; font-weight: 600; white-space: nowrap; }
-@media (max-width: 600px) {
-  .page-head { flex-direction: column; align-items: stretch; gap: 8px; }
-  .head-side { justify-content: space-between; margin: 0 -10px 0 0; }
-  .context-link { height: 44px; margin-left: -10px; }
-}
-@media (hover: hover) { .context-link:hover { background: var(--row-hover); } }
+.head-side { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.start-agent { min-height: 40px; }
+.connect { min-height: 40px; }
+/* In-context links to the matching places: quiet text, no arrows. */
+.context-link { display: inline-flex; align-items: center; height: 40px; padding: 0 10px; border-radius: 999px; color: var(--ink-2); font-size: 13px; font-weight: 550; white-space: nowrap; text-decoration: none; }
+@media (hover: hover) { .context-link:hover { background: var(--row-hover); color: var(--ink); } }
 .context-link:focus-visible { box-shadow: var(--focus-ring); }
 .summary { margin-top: 6px; min-height: 20px; font-size: 13.5px; color: var(--ink-2); }
-.summary-skeleton { display: inline-block; width: 220px; }
-.freshness { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px 10px; }
-.last-updated { color: var(--ink-2); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.live { display: inline-flex; align-items: center; gap: 8px; height: 28px; padding: 0 12px; border-radius: 999px; background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); font-size: 12px; color: var(--ink-2); }
-.live-mark { width: 7px; height: 7px; border-radius: 50%; background: var(--st-backlog); }
-.live.on .live-mark { background: var(--ok); box-shadow: 0 0 0 3px rgba(47, 122, 90, .16); }
+.summary-skeleton { display: inline-block; width: 160px; }
+/* One quiet freshness element: a dot and a word, details on hover. */
+.freshness { display: inline-flex; align-items: center; gap: 7px; height: 40px; padding: 0 8px 0 4px; margin-right: 4px; color: var(--ink-3); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.freshness.stale { color: var(--gold-ink); }
+.live-mark { width: 7px; height: 7px; border-radius: 50%; background: var(--st-backlog); flex: none; }
+.freshness.on .live-mark { background: var(--ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 16%, transparent); }
+.freshness.stale .live-mark { background: var(--gold); }
 .layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; align-items: start; container: agents-layout / inline-size; }
 .main-col { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; min-width: 0; }
-.accounts-summary { display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 10px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-raised); color: var(--ink-2); font-size: 13px; font-weight: 550; cursor: pointer; }
-.accounts-summary .disclosure-chev { margin-left: auto; }
-.accounts-summary:hover { background: var(--row-hover); color: var(--ink); }
-.accounts-summary:focus-visible { outline: none; box-shadow: var(--focus-ring); }
-.accounts-disclosure[open] > .accounts-summary { margin-bottom: 8px; }
+.accounts-disclosure { overflow: clip; }
+.accounts-summary { display: flex; align-items: center; gap: 8px; min-height: 48px; padding: 0 18px; color: var(--ink); font-size: 15px; font-weight: 650; cursor: pointer; list-style: none; }
+.accounts-summary::-webkit-details-marker { display: none; }
+.accounts-summary > svg:first-child { color: var(--ink-3); }
+.accounts-summary .disclosure-chev { margin-left: auto; color: var(--ink-3); transition: transform .2s ease; }
+.accounts-disclosure[open] .disclosure-chev { transform: rotate(90deg); }
+@media (hover: hover) { .accounts-summary:hover { background: var(--row-hover); } }
+.accounts-summary:focus-visible { outline: none; box-shadow: inset var(--focus-ring); }
+@media (prefers-reduced-motion: reduce) { .accounts-summary .disclosure-chev { transition: none; } }
 .inline-error { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 10px 14px; border-radius: 12px; background: var(--danger-bg); box-shadow: inset 0 0 0 1px var(--danger-line); font-size: 13px; color: var(--danger); }
 .hint { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 5px; padding: 4px 0; font-size: 12px; color: var(--ink-3); }
 .hint .keycap + .keycap { margin-left: 2px; }
@@ -332,9 +344,24 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
 @media (min-width: 1100px) {
   .agents-page.panel-open { margin: 0; padding-right: calc(var(--panel-w) + 22px); }
 }
+@media (max-width: 1100px) {
+  .page-head { flex-direction: column; align-items: stretch; gap: 10px; }
+  .head-side { justify-content: flex-start; }
+  .head-links { order: 9; margin-left: auto; }
+}
+.head-links { display: flex; align-items: center; gap: 4px; }
 @media (max-width: 720px) {
   .agents-page { padding: 16px 12px 20px; }
-  .page-head { align-items: flex-start; }
   .hint { display: none; }
+}
+/* Phones: fixed cells, so a button that appears after permissions load moves nothing. */
+@media (max-width: 600px) {
+  .head-side { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-areas: "start connect" "links links"; gap: 6px 8px; }
+  .start-agent { grid-area: start; }
+  .connect { grid-area: connect; }
+  .start-agent, .connect { min-height: 44px; justify-content: center; }
+  .head-links { grid-area: links; margin: 0 0 0 -10px; }
+  .context-link { height: 36px; }
+  .freshness { order: 9; margin: 0 0 0 auto; height: 36px; padding-right: 0; }
 }
 </style>
