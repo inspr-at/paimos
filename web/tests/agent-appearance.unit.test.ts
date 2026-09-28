@@ -21,7 +21,9 @@ it('shares viewer state preferences across surfaces and preserves independent se
   await settings.ready
   expect(fetch).toHaveBeenCalledTimes(1)
   expect(cards.appearance('stopped')).toMatchObject({ '--agent-state-opacity': '0.7', '--agent-state-saturation': '0' })
-  expect(cards.appearance('working')['--agent-state-color']).toBe('var(--agent-colour-blind-working)')
+  // The pre-AEON-242 red–green choice reads as Deutan without a write.
+  expect(cards.choice.value.palette).toBe('deutan')
+  expect(cards.appearance('working')['--agent-state-color']).toBe('var(--agent-deutan-working)')
   settings.save({ palette: 'monochrome', dimInactive: false })
   expect(sessions.appearance('idle')['--agent-state-opacity']).toBe('1')
   expect(sessions.appearance('working')['--agent-state-saturation']).toBe('0')

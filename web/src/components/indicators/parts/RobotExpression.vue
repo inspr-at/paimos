@@ -37,5 +37,5 @@ withDefaults(defineProps<{ state: AgentState; cx?: number; eyeY?: number; mouthY
 </template>
 
 <style scoped>
-.state-expression { fill: none; stroke: var(--ink); stroke-width: 1.2; stroke-linecap: round; stroke-linejoin: round; }
+.state-expression { fill: none; stroke: var(--ink); stroke-width: calc(1.2px * var(--art-stroke, 1)); stroke-linecap: round; stroke-linejoin: round; }
 </style>

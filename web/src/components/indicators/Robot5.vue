@@ -3,20 +3,25 @@
 import type { AgentState } from '../../lib/agentSignals'
 import AgentStateMark from './AgentStateMark.vue'
 import RobotExpression from './parts/RobotExpression.vue'
+import IndicatorRing from './parts/IndicatorRing.vue'
+import { artStroke, safeArtScale, type IndicatorRing as RingMode } from '../../lib/indicatorVariants'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 
 // Preserve LA1's artwork and working motion; SC1 supplies state colours. LiveBot encodes the
 // original principal id and stack index in seed as `${id}:${index}`.
 const props = withDefaults(defineProps<{
-  state: AgentState; size?: number; pulse: number; seed: string; lead: boolean
-}>(), { size: 26 })
+  state: AgentState; size?: number; pulse: number; seed: string; lead: boolean; ring?: RingMode; artScale?: number
+}>(), { size: 26, ring: 'still', artScale: 1 })
 const identity = computed(() => {
   const split = props.seed.lastIndexOf(':')
   const indexed = split >= 0 && /^\d+$/.test(props.seed.slice(split + 1))
   return { id: indexed ? props.seed.slice(0, split) : props.seed, index: indexed ? Number(props.seed.slice(split + 1)) : 0 }
 })
 // The robot is drawn a little larger than its disk, so its lit antenna peeks over the rim.
-const art = computed(() => Math.round(props.size * 1.1))
+// Icon size scales only this drawing; the disk, ring and marks keep the footprint.
+const scale = computed(() => safeArtScale(props.artScale))
+const art = computed(() => Math.round(props.size * 1.1 * scale.value))
+const stroke = computed(() => scale.value === 1 ? undefined : { '--art-stroke': artStroke(scale.value) })
 const style = computed(() => ({
   '--size': `${props.size}px`,
   // Head centred a touch below the disk's centre (the head's centre is 58% down the art).
@@ -44,10 +49,11 @@ onBeforeUnmount(() => clearTimeout(clear))
 </script>
 
 <template>
-  <span class="agent-indicator-art indicator robot5" :class="[state, { lead }]" :style="style" aria-hidden="true">
+  <span class="agent-indicator-art indicator robot5" :class="[state, { lead, 'ring-off': ring === 'off' }]" :style="style" aria-hidden="true">
     <span v-if="lead && state === 'working'" class="halo" />
     <span class="disk" />
-    <svg class="bot" viewBox="0 0 24 24" :width="art" :height="art" focusable="false">
+    <svg v-if="ring === 'moving'" class="ring" viewBox="0 0 32 32" focusable="false"><IndicatorRing :state="state" :lead="lead" sweep :r="15.35" /></svg>
+    <svg class="bot" viewBox="0 0 24 24" :width="art" :height="art" :style="stroke" focusable="false">
       <g class="bob">
         <path class="stalk" d="M12 7.6V3.9" />
         <circle class="tip-glow" cx="12" cy="2.5" r="1.7" />
@@ -90,16 +96,18 @@ onBeforeUnmount(() => clearTimeout(clear))
   position: absolute; inset: 0; border-radius: 50%;
   background: var(--disk); box-shadow: 0 0 0 1.5px var(--surface-raised), inset 0 0 0 1px var(--glow), 0 2px 6px -2px color-mix(in srgb, var(--glow) 25%, transparent);
 }
+.ring-off .disk { box-shadow: none; }
+.ring { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
 .bot { position: absolute; top: var(--art-top); left: 50%; translate: -50% 0; display: block; overflow: visible; }
-.stalk { fill: none; stroke: var(--rim); stroke-width: 1.5; stroke-linecap: round; }
+.stalk { fill: none; stroke: var(--rim); stroke-width: calc(1.5px * var(--art-stroke, 1)); stroke-linecap: round; }
 .tip { fill: var(--glow); }
 .tip-glow { fill: var(--glow); opacity: 0; }
 .ear { fill: var(--rim); opacity: .75; }
-.head { fill: var(--face); stroke: var(--rim); stroke-width: 1.5; }
+.head { fill: var(--face); stroke: var(--rim); stroke-width: calc(1.5px * var(--art-stroke, 1)); }
 .eye { fill: var(--eye); }
 .cheek { fill: var(--blush); }
-.smile { fill: none; stroke: var(--eye); stroke-width: 1.2; stroke-linecap: round; }
-.happy { fill: none; stroke: var(--eye); stroke-width: 1.35; stroke-linecap: round; opacity: 0; }
+.smile { fill: none; stroke: var(--eye); stroke-width: calc(1.2px * var(--art-stroke, 1)); stroke-linecap: round; }
+.happy { fill: none; stroke: var(--eye); stroke-width: calc(1.35px * var(--art-stroke, 1)); stroke-linecap: round; opacity: 0; }
 .halo {
   position: absolute; inset: -7px; border-radius: 50%; pointer-events: none;
   background: radial-gradient(circle, color-mix(in oklab, var(--glow) 50%, transparent) 36%, transparent 70%); opacity: .6;

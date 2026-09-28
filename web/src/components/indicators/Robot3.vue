@@ -4,6 +4,8 @@
 import type { AgentState } from '../../lib/agentSignals'
 import AgentStateMark from './AgentStateMark.vue'
 import RobotExpression from './parts/RobotExpression.vue'
+import IndicatorRing from './parts/IndicatorRing.vue'
+import { artStyle, type IndicatorRing as RingMode } from '../../lib/indicatorVariants'
 import { computed, ref, watch } from 'vue'
 
 // Filename is the IV1 registration surface; state and real-event pulses come
@@ -14,7 +16,10 @@ const props = withDefaults(defineProps<{
   pulse: number
   seed: string
   lead: boolean
-}>(), { size: 26 })
+  ring?: RingMode
+  artScale?: number
+}>(), { size: 26, ring: 'still', artScale: 1 })
+const inner = computed(() => artStyle(props.artScale))
 const style = computed(() => {
   let hash = 2166136261
   for (const char of props.seed) hash = Math.imul(hash ^ char.charCodeAt(0), 16777619)
@@ -31,21 +36,24 @@ watch(() => props.state, state => { if (state !== 'working') glint.value = 0 })
 <template>
   <svg class="agent-indicator-art robot-indicator robot-3" :class="[state, { lead }]" :style="style" :width="size" :height="size" viewBox="0 0 32 32" aria-hidden="true" focusable="false">
     <circle class="disk" cx="16" cy="16" r="14.5" />
-    <circle class="rim" cx="16" cy="16" r="14" />
-    <g class="linework">
-      <path d="M16 9.5V6M8 14H6.5v5H8M24 14h1.5v5H24M16 23V25M12.5 25h7" />
-      <rect class="head" x="8" y="9.5" width="16" height="13.5" rx="4" />
-    </g>
-    <circle class="antenna-halo" cx="16" cy="5.5" r="2.5" />
-    <circle class="antenna" cx="16" cy="5.5" r="1.4" />
-    <g v-if="state === 'working'" class="look">
-      <g class="eyes">
-        <rect x="11.5" y="13.5" width="2" height="3.2" rx="1" />
-        <rect x="18.5" y="13.5" width="2" height="3.2" rx="1" />
+    <circle v-if="ring !== 'off'" class="rim" cx="16" cy="16" r="14" />
+    <IndicatorRing v-if="ring === 'moving'" :state="state" :lead="lead" sweep />
+    <g class="inner-art" :style="inner">
+      <g class="linework">
+        <path d="M16 9.5V6M8 14H6.5v5H8M24 14h1.5v5H24M16 23V25M12.5 25h7" />
+        <rect class="head" x="8" y="9.5" width="16" height="13.5" rx="4" />
       </g>
+      <circle class="antenna-halo" cx="16" cy="5.5" r="2.5" />
+      <circle class="antenna" cx="16" cy="5.5" r="1.4" />
+      <g v-if="state === 'working'" class="look">
+        <g class="eyes">
+          <rect x="11.5" y="13.5" width="2" height="3.2" rx="1" />
+          <rect x="18.5" y="13.5" width="2" height="3.2" rx="1" />
+        </g>
+      </g>
+      <path v-if="state === 'working'" class="smile" d="M13.5 19.3q2.5 1.7 5 0" />
+      <RobotExpression v-if="state !== 'working'" :state="state" />
     </g>
-    <path v-if="state === 'working'" class="smile" d="M13.5 19.3q2.5 1.7 5 0" />
-    <RobotExpression v-if="state !== 'working'" :state="state" />
     <AgentStateMark :state="state" x="21" y="0" :size="11" />
     <path v-if="glint && state === 'working'" :key="glint" class="glint" d="m6 3 1.1 2.9L10 7 7.1 8.1 6 11 4.9 8.1 2 7l2.9-1.1Z" @animationend="glint = 0" />
   </svg>
@@ -58,10 +66,10 @@ watch(() => props.state, state => { if (state !== 'working') glint.value = 0 })
 }
 .disk { fill: var(--surface-raised, #fffefa); }
 .rim { fill: none; stroke: var(--signal); stroke-width: 1.25; opacity: .38; }
-.linework { fill: none; stroke: var(--ink, #203c3d); stroke-width: 1.35; stroke-linecap: round; stroke-linejoin: round; }
+.linework { fill: none; stroke: var(--ink, #203c3d); stroke-width: calc(1.35px * var(--art-stroke, 1)); stroke-linecap: round; stroke-linejoin: round; }
 .head { fill: color-mix(in srgb, var(--signal) 5%, var(--surface-raised, #fffefa)); }
 .eyes { fill: var(--ink, #203c3d); }
-.smile { fill: none; stroke: var(--ink, #203c3d); stroke-width: 1.2; stroke-linecap: round; }
+.smile { fill: none; stroke: var(--ink, #203c3d); stroke-width: calc(1.2px * var(--art-stroke, 1)); stroke-linecap: round; }
 .antenna, .antenna-halo { fill: var(--signal); }
 .antenna-halo { opacity: .12; }
 .waiting .linework, .waiting .smile, .stale .linework, .stale .smile { stroke: var(--signal); }
