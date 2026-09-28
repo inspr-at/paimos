@@ -784,6 +784,15 @@ func (s *Supervisor) observe(entry *owned, ev AdapterEvent) {
 				entry.metadataPending = append(entry.metadataPending, change)
 				if len(entry.metadataPending) > 20 {
 					// Preserve the in-flight head for an identical retry.
+					// Carry the evicted snapshot fields into the next retained
+					// change so a later model-only update cannot lose known effort.
+					dropped, next := entry.metadataPending[1], &entry.metadataPending[2]
+					if next.model == "" {
+						next.model = dropped.model
+					}
+					if next.effort == "" {
+						next.effort = dropped.effort
+					}
 					entry.metadataPending = append(entry.metadataPending[:1], entry.metadataPending[2:]...)
 				}
 			}
@@ -842,6 +851,21 @@ func (s *Supervisor) monitor(entry *owned) {
 	s.finishSessionUsage(entry)
 	entry.harnessMu.Lock()
 	defer entry.harnessMu.Unlock()
+	entry.mu.Lock()
+	pendingMetadata := len(entry.metadataPending) > 0 && entry.record.Generation == s.generation && !entry.harnessArchived
+	entry.mu.Unlock()
+	if pendingMetadata {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		flushErr := s.heartbeatHarnessPhase(ctx, entry, "stopping")
+		cancel()
+		if errors.Is(flushErr, ErrHarnessArchived) {
+			entry.mu.Lock()
+			entry.harnessArchived = true
+			entry.mu.Unlock()
+		} else if flushErr != nil {
+			slog.Warn("managed session metadata settlement incomplete")
+		}
+	}
 	entry.mu.Lock()
 	stopped := entry.stopRequested || entry.deadlineExpired.Load()
 	forced := entry.forceRequested
@@ -1190,6 +1214,10 @@ func (s *Supervisor) Close(ctx context.Context) error {
 // heartbeatHarness publishes only the process the current daemon actually owns.
 // A restarted daemon has no in-memory Process and cannot re-adopt a journal PID.
 func (s *Supervisor) heartbeatHarness(ctx context.Context, entry *owned) error {
+	return s.heartbeatHarnessPhase(ctx, entry, "working")
+}
+
+func (s *Supervisor) heartbeatHarnessPhase(ctx context.Context, entry *owned, phase string) error {
 	for {
 		entry.mu.Lock()
 		if entry.harnessArchived {
@@ -1200,7 +1228,14 @@ func (s *Supervisor) heartbeatHarness(ctx context.Context, entry *owned) error {
 			entry.mu.Unlock()
 			return ErrGeneration
 		}
+		if phase == "stopping" && len(entry.metadataPending) == 0 {
+			entry.mu.Unlock()
+			return nil
+		}
 		session := entry.harness
+		if phase == "stopping" {
+			session.Ownership = nil
+		}
 		session.ActivitySequence = entry.heartbeatSeq + 1
 		// Metadata is sent only from verified adapter snapshots. The ordinary
 		// heartbeat must not replay a stale launch value after a live change.
@@ -1210,14 +1245,16 @@ func (s *Supervisor) heartbeatHarness(ctx context.Context, entry *owned) error {
 			change = entry.metadataPending[0]
 			session.Model, session.ReasoningEffort = change.model, change.effort
 		}
-		if recovery, ok := entry.process.(RecoveryProcess); ok {
-			if identity, err := recovery.Ownership(); err == nil {
-				identity.DaemonID, identity.Generation = s.daemonID, s.generation
-				session.Ownership = &identity
+		if phase == "working" {
+			if recovery, ok := entry.process.(RecoveryProcess); ok {
+				if identity, err := recovery.Ownership(); err == nil {
+					identity.DaemonID, identity.Generation = s.daemonID, s.generation
+					session.Ownership = &identity
+				}
 			}
 		}
 		entry.mu.Unlock()
-		if err := s.api.HeartbeatHarness(ctx, session, "working"); err != nil {
+		if err := s.api.HeartbeatHarness(ctx, session, phase); err != nil {
 			return err
 		}
 		entry.mu.Lock()

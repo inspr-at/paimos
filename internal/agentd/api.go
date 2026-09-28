@@ -190,8 +190,12 @@ func (r *Remote) HeartbeatHarness(ctx context.Context, s HarnessSession, phase s
 	if sequence == 0 {
 		sequence = 1
 	}
+	activity := "busy"
+	if phase == "stopping" {
+		activity = "idle"
+	}
 	body := map[string]any{
-		"phase": phase, "activity": "busy", "activity_sequence": sequence, "process_ownership": s.Ownership,
+		"phase": phase, "activity": activity, "activity_sequence": sequence, "process_ownership": s.Ownership,
 	}
 	if s.Model != "" {
 		body["model"] = s.Model

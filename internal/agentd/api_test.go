@@ -130,13 +130,18 @@ func TestRemoteHarnessMetadataOmitsUnknownAndUnchangedFields(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	stopping := HarnessSession{ID: session.ID, ProjectID: session.ProjectID, Lease: session.Lease,
+		ActivitySequence: 4, Model: "model-final", ReasoningEffort: "xhigh"}
+	if err := remote.HeartbeatHarness(t.Context(), stopping, "stopping"); err != nil {
+		t.Fatal(err)
+	}
 	if _, ok := registration["model"]; ok {
 		t.Fatal("unknown registration model was sent")
 	}
 	if _, ok := registration["reasoning_effort"]; ok {
 		t.Fatal("unknown registration effort was sent")
 	}
-	if len(beats) != 3 || beats[0]["model"] != "model-a" || beats[0]["reasoning_effort"] != "high" || beats[1]["model"] != "model-b" {
+	if len(beats) != 4 || beats[0]["model"] != "model-a" || beats[0]["reasoning_effort"] != "high" || beats[1]["model"] != "model-b" {
 		t.Fatalf("verified metadata missing from heartbeat: %+v", beats)
 	}
 	for i, beat := range beats {
@@ -152,6 +157,9 @@ func TestRemoteHarnessMetadataOmitsUnknownAndUnchangedFields(t *testing.T) {
 	}
 	if _, ok := beats[2]["reasoning_effort"]; ok {
 		t.Fatal("routine heartbeat repeated effort")
+	}
+	if beats[3]["phase"] != "stopping" || beats[3]["activity"] != "idle" || beats[3]["model"] != "model-final" || beats[3]["reasoning_effort"] != "xhigh" || beats[3]["process_ownership"] != nil {
+		t.Fatalf("exit metadata heartbeat claimed a live process: %+v", beats[3])
 	}
 }
 
