@@ -10,12 +10,12 @@ import { getMembers } from '../../lib/access'
 import { toast } from '../../lib/toast'
 import { useSession } from '../../stores/session'
 import {
-  HARNESS_LABEL, HARNESSES, LAYER_LABEL, LAYERS, PUBLISH_NOTE_MAX, ROLE_LABEL, ROLES, RULES_BUDGET, RulesError,
+  HARNESS_LABEL, HARNESSES, IMPORT_MAX_BYTES, LAYER_LABEL, LAYERS, PUBLISH_NOTE_MAX, ROLE_LABEL, ROLES, RULES_BUDGET, RulesError,
   applyEnabled, blankRule, calendarVersion, createLayer, createSet, diffRules, duplicateRule, getSet, utf8Length, validVersion,
-  groupState, heldIdentities, isUuid, layerInColumn, listLayers, listSets, listVersions, mergeQuery,
-  mergeRules, normalizeRule, publishBlock, publishSet, resetAvailability, restoreSet, rulesEqual,
-  rulesMessage, saveDraft, scopeFor, scopeRank, touchRule, validateDraft, writeBlock,
-  type AgentMode, type AgentRule, type Caller, type HarnessName, type LayerName, type MergedRules,
+  groupState, heldIdentities, importBlock, isUuid, layerInColumn, listLayers, listSets, listVersions, mergeQuery,
+  mergeRules, normalizeRule, parseDraftImport, publishBlock, publishSet, resetAvailability, restoreSet, rulesEqual,
+  rulesMessage, runDraftImport, saveDraft, scopeFor, scopeKey, scopeLabel, scopeRank, touchRule, validateDraft, writeBlock,
+  type AgentMode, type AgentRule, type Caller, type DraftImportPlan, type HarnessName, type ImportConfirmed, type LayerName, type MergedRules,
   type RoleName, type RuleContext, type RuleLayer, type RulePatch, type RuleSet, type RuleSnapshot,
 } from '../../lib/rules'
 
@@ -58,6 +58,12 @@ const removeOpen = ref(false)
 const publishSetId = ref('')
 const merged = ref<MergedRules | null>(null)
 const projectNote = ref('')
+const importOpen = ref(false)
+const importing = ref(false)
+const importLocked = ref(false)
+const importError = ref('')
+const importPlan = ref<DraftImportPlan | null>(null)
+const importFileName = ref('')
 
 const context = computed<RuleContext>(() => ({
   projectId: projectId.value, personId: personId.value, agentId: agentId.value,
@@ -93,6 +99,12 @@ function dirty(set: Working) {
   return !set.versionId && (set.name !== set.remote.name || !rulesEqual(set.rules, set.remote.rules))
 }
 const dirtyCount = computed(() => model.value.reduce((count, bundle) => count + bundle.sets.filter(dirty).length, 0))
+const importHold = computed(() => {
+  const blocked = importBlock(caller.value)
+  if (blocked) return blocked
+  if (dirtyCount.value) return 'Save or discard unsaved drafts before importing.'
+  return ''
+})
 function columnRank(column: LayerName) {
   if (column === 'agent') return mode.value === 'task' ? 5 : mode.value === 'named' ? 4 : 3
   return scopeRank({ layer: column })
@@ -185,6 +197,9 @@ const publishChanges = computed(() => {
   return diffRules(published?.rules ?? [], located.set.remote.rules)
 })
 const meter = computed(() => merged.value ? Math.min(100, merged.value.byte_size / RULES_BUDGET * 100) : 0)
+const importSetCount = computed(() => importPlan.value?.layers.reduce((count, layer) => count + layer.sets.length, 0) ?? 0)
+const importRuleCount = computed(() => importPlan.value?.layers.reduce((count, layer) => count + layer.sets.reduce((sum, set) => sum + set.rules.length, 0), 0) ?? 0)
+const tenantId = computed(() => session.identity?.tenant.id ?? '')
 
 function toWorking(remote: RuleSet): Working {
   return { remote, name: remote.name, rules: remote.rules.map(normalizeRule), versions: null, versionId: '', collapsed: false }
@@ -456,8 +471,122 @@ async function confirmRestore() {
   } catch (cause) { error.value = rulesMessage(cause) }
   finally { saving.value = false }
 }
+function existingNames() {
+  return model.value.map(bundle => ({ scope: bundle.layer.scope, names: bundle.sets.map(set => set.remote.name) }))
+}
+function showImported(confirmed: ImportConfirmed[]) {
+  const bundles = [...model.value]
+  for (const item of confirmed) {
+    let bundle = bundles.find(entry => entry.layer.id === item.layer.id)
+    if (!bundle) {
+      bundle = { layer: item.layer, sets: [] }
+      bundles.push(bundle)
+    }
+    const working = toWorking(item.set)
+    const index = bundle.sets.findIndex(set => set.remote.id === item.set.id)
+    if (index >= 0) bundle.sets.splice(index, 1, working)
+    else bundle.sets = [...bundle.sets, working]
+  }
+  model.value = bundles
+}
+async function reloadBoard(): Promise<boolean> {
+  try {
+    const { layers } = await listLayers()
+    const bundles = await Promise.all(layers.map(async layer => {
+      const listed = await listSets(layer.id)
+      const sets = await Promise.all(listed.sets.map(set => getSet(set.id)))
+      return { layer, sets: sets.map(toWorking) }
+    }))
+    model.value = bundles
+    return true
+  } catch {
+    return false
+  }
+}
+function openImport() {
+  if (importHold.value || importing.value || saving.value) return
+  importPlan.value = null
+  importError.value = ''
+  importFileName.value = ''
+  importLocked.value = false
+  importOpen.value = true
+}
+function closeImport() {
+  if (importing.value) return
+  importOpen.value = false
+  importPlan.value = null
+  importError.value = ''
+  importLocked.value = false
+  importFileName.value = ''
+}
+async function onImportFile(event: Event) {
+  if (importing.value) return
+  const input = event.target
+  if (!(input instanceof HTMLInputElement)) return
+  const file = input.files?.[0]
+  input.value = ''
+  importLocked.value = false
+  importPlan.value = null
+  importError.value = ''
+  importFileName.value = ''
+  if (!file) return
+  importFileName.value = file.name
+  if (file.size > IMPORT_MAX_BYTES) {
+    importError.value = 'The file must be 2 MiB or smaller.'
+    return
+  }
+  let text: string
+  try { text = await file.text() } catch {
+    importError.value = 'The file could not be read.'
+    return
+  }
+  const parsed = parseDraftImport(text, Math.max(file.size, utf8Length(text)), tenantId.value, caller.value, existingNames())
+  if ('error' in parsed) {
+    importError.value = parsed.error
+    return
+  }
+  importPlan.value = parsed.plan
+}
+async function confirmImport() {
+  if (importing.value || importLocked.value || !importPlan.value) return
+  const block = importHold.value
+  if (block) { importError.value = block; return }
+  const plan = importPlan.value
+  importing.value = true
+  importError.value = ''
+  try {
+    const outcome = await runDraftImport(plan, tenantId.value, caller.value)
+    if (outcome.status === 'uncertain') {
+      importLocked.value = true
+      if (dirtyCount.value) {
+        if (outcome.confirmed.length) showImported(outcome.confirmed)
+        importError.value = `${outcome.message} Unsaved edits on this page were kept.`
+        return
+      }
+      const reloaded = await reloadBoard()
+      if (!reloaded && outcome.confirmed.length) showImported(outcome.confirmed)
+      importError.value = `${outcome.message}${reloaded ? ' The board was reloaded from the server.' : ' The board could not be reloaded; check the server before trying again.'}`
+      return
+    }
+    if (outcome.confirmed.length) showImported(outcome.confirmed)
+    if (outcome.status === 'imported') {
+      notice.value = `${outcome.message} Use Publish on each set separately after you review it.`
+      toast('Drafts imported')
+      importOpen.value = false
+      importPlan.value = null
+      importFileName.value = ''
+      return
+    }
+    importError.value = outcome.message
+    if (outcome.status === 'partial') importLocked.value = true
+  } finally {
+    importing.value = false
+  }
+}
 function onKey(event: KeyboardEvent) {
   if (event.key !== 'Escape') return
+  if (importing.value) return
+  if (importOpen.value) { closeImport(); return }
   if (previewOpen.value || publishOpen.value || restoreOpen.value || removeOpen.value) {
     previewOpen.value = publishOpen.value = restoreOpen.value = removeOpen.value = false
     return
@@ -482,6 +611,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
       <div class="actions">
         <button v-if="dirtyCount" type="button" class="btn sm ghost" @click="discard">Discard</button>
         <button type="button" class="btn sm" :disabled="!dirtyCount || saving" @click="save">Save</button>
+        <button type="button" class="btn sm ghost" :disabled="!!importHold || saving || importing" :title="importHold || undefined" @click="openImport"><AppIcon name="folder" :size="14" />Import drafts</button>
         <button type="button" class="btn sm" @click="openPreview"><AppIcon name="book" :size="14" />Preview</button>
         <button type="button" class="btn sm primary" :disabled="!publishChoices.some(choice => !choice.reason) || saving" @click="openPublish"><AppIcon name="upload" :size="14" />Publish</button>
       </div>
@@ -601,6 +731,40 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
       </aside>
     </div>
 
+    <div v-if="importOpen" class="scrim center" @click.self="closeImport">
+      <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="import-title">
+        <header class="drawer-head">
+          <h2 id="import-title">Import drafts</h2>
+          <button type="button" class="icon-btn sm flat" aria-label="Close import" :disabled="importing" @click="closeImport"><AppIcon name="close" :size="16" /></button>
+        </header>
+        <p class="hint">Drafts only. Existing sets stay as they are. Nothing is published until you use Publish on each set.</p>
+        <p class="tenant"><span>Workspace</span><strong>{{ tenantName }}</strong><span>{{ tenantId }}</span></p>
+        <label class="fld">Draft file
+          <input id="draft-import-file" class="import-file" type="file" accept="application/json,.json" :disabled="importing" @change="onImportFile">
+        </label>
+        <p v-if="importFileName" class="hint">Selected {{ importFileName }}</p>
+        <p v-if="importError" class="set-note error" role="alert"><AppIcon name="alert" :size="14" /><span>{{ importError }}</span></p>
+        <div v-if="importPlan" class="import-body">
+          <p class="hint">{{ importSetCount }} {{ importSetCount === 1 ? 'set' : 'sets' }}, {{ importRuleCount }} {{ importRuleCount === 1 ? 'rule' : 'rules' }}. Read the text, then import.</p>
+          <section v-for="layer in importPlan.layers" :key="scopeKey(layer.scope)" class="import-scope">
+            <h3>{{ scopeLabel(layer.scope) }}</h3>
+            <details v-for="set in layer.sets" :key="set.name" class="import-set" open>
+              <summary><AppIcon name="chevron-right" :size="12" class="disclosure-chev" />{{ set.name }} · {{ set.rules.length }} {{ set.rules.length === 1 ? 'rule' : 'rules' }}</summary>
+              <div v-for="rule in set.rules" :key="rule.identity" class="import-rule">
+                <p>{{ rule.text }}</p>
+                <p class="hint">{{ rule.why }}</p>
+                <details v-if="rule.details" class="import-detail">
+                  <summary><AppIcon name="chevron-right" :size="12" class="disclosure-chev" />Details</summary>
+                  <p class="hint">{{ rule.details }}</p>
+                </details>
+              </div>
+            </details>
+          </section>
+        </div>
+        <button type="button" class="btn primary" :disabled="!importPlan || importing || importLocked" @click="confirmImport">{{ importing ? 'Importing…' : 'Import drafts' }}</button>
+      </div>
+    </div>
+
     <div v-if="removeOpen" class="scrim" @click.self="removeOpen = false">
       <aside class="drawer" role="dialog" aria-modal="true" aria-label="Remove rule">
         <header class="drawer-head"><h2>Remove rule</h2><button type="button" class="icon-btn sm flat" aria-label="Close remove" @click="removeOpen = false"><AppIcon name="close" :size="16" /></button></header>
@@ -634,6 +798,18 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
 .detail-host { display: flex; flex-direction: column; min-width: 0; max-height: calc(100vh - 120px); position: sticky; top: 12px; border-radius: 12px; overflow: hidden; background: var(--surface); box-shadow: 0 0 0 1px var(--line); }
 .restore-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 0; padding: 0 14px 12px; }
 .scrim { position: fixed; inset: 0; z-index: 40; display: grid; justify-items: end; background: var(--scrim); }
+.scrim.center { justify-items: center; align-items: center; padding: 12px; }
+.dialog { width: min(440px, 100%); max-height: min(640px, 100%); overflow: auto; padding: 16px; border-radius: 12px; background: var(--surface); box-shadow: var(--shadow-pop); display: flex; flex-direction: column; gap: 12px; }
+.dialog .tenant strong, .dialog .tenant span:last-child { font-size: 13px; }
+.import-file { max-width: 100%; font-size: 13px; }
+.import-body { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.import-scope { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.import-scope h3 { margin: 0; font-size: 13px; }
+.import-set { border-radius: 10px; background: var(--surface-2); padding: 8px 10px; }
+.import-set summary { cursor: pointer; font-weight: 650; }
+.import-detail { margin-top: 4px; }
+.import-rule { display: flex; flex-direction: column; gap: 2px; margin-top: 8px; min-width: 0; }
+.import-rule p { margin: 0; overflow-wrap: anywhere; }
 .drawer { width: min(520px, 100%); height: 100%; overflow: auto; padding: 16px; background: var(--surface); box-shadow: var(--shadow-pop); display: flex; flex-direction: column; gap: 12px; }
 .drawer-head { display: flex; align-items: center; gap: 8px; }
 .drawer-head h2 { margin: 0; font-size: 16px; }
