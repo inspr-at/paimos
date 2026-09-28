@@ -109,6 +109,71 @@ and `/private/tmp` are supported through a checked descriptor walk. A custom
 symlinked checkout must be named by its physical path. Other platforms refuse
 file hashing; `--show` and explicit prompt-template versions/digests do not read instruction files.
 
+## Agent rules (ADR-004, AEON-248 / AEON-249)
+
+The dedicated `/api/rules` API stores layers, sets, rules and immutable version
+snapshots as nodes. Generic node/event APIs cannot read or mutate these resources.
+`rules.read` and `rules.write` are agent-grantable; `rules.publish` is high risk and
+person-only. Company edits require a person with workspace publish authority;
+project edits require that authority in the target project (or in an agent key's
+creator). Person and named-agent layers require their exact owner. A person's
+access to a named agent requires an active unexpired key they created. No grants
+are created by this module.
+
+Start with `POST /api/rules/layers` (a `RuleScope`), then
+`POST /api/rules/sets` (`layer_id`, `name`). Replace the whole mutable draft with
+`PUT /api/rules/sets/{setId}/draft` (`expected_revision`, `name`, `rules`). Rules
+have a stable `identity`, bounded one-line `text` and `why`, optional on-demand
+`details`, explicit `enabled`, `normal|locked` strength, source lineage, and
+optional role/harness selectors and expiry. Locked rules must be enabled and
+non-expiring; locked company rules are unconditional. Removing or changing one
+requires a new publication by the authorized person. Nothing here changes the
+company's current effective rules automatically.
+
+Publish with `POST /api/rules/sets/{setId}/publish` and an explicit reserved
+`YYMMDDhhmmss.0.0` version plus `expected_revision`. The same version and identical
+snapshot replay; changed bytes require a later version. History is available at
+`.../versions` and `.../versions/{version}`. Restore via `POST .../restore` with
+`version`, `new_version` and `expected_revision`; this creates a new publication.
+Every mutation appends a `rules.*` event in its tenant transaction. Set/version
+reads include details; the merged response excludes details.
+
+`GET /api/rules/merged` requires exact `project_id`, `person_id`, `role` and
+`harness`; agents also supply their own `agent_id`; `task_id` is optional. Tenant
+comes from authentication, and person must be the caller or its key creator.
+Role/harness are explicit selection context, not permission grants or proof of
+which process executed the result. Precedence is company, project, person, agent
+role, named agent, task. The highest matching identity wins; identical-rank
+ambiguity fails closed. No natural-language conflict guesses are made. Expiry is
+checked on every request. The complete rendered body must fit 12,000 UTF-8 bytes;
+an oversized result returns 422 with the measured size instead of truncating.
+An applicable published locked company floor is required.
+
+`paimos session start --rules-preview` is an opt-in JSON preview. Use `--project`
+with its UUID, plus `--agent`, `--rules-tenant`, `--rules-person`, `--rules-agent`
+(for agent callers), `--rules-role` and `--rules-harness`. Supply an explicit
+`--rules-cache path.json`, a separately retained `--rules-floor floor.txt`, and
+its trusted `--rules-floor-sha256`. These files require mode 0600 and physical
+paths in an existing directory outside credential/harness stores. A reviewed
+merged response's `floor` is the source for that retained file; provisioning and
+trusting its digest is an operator step. Fetching never changes that pin.
+
+`--rules-out new-preview.txt` creates a new file atomically and refuses overwrite.
+No active `AGENTS.md` or `CLAUDE.md` is installed or replaced. The reusable Go
+`rules.Stub` function provides AR6 a bounded stub preview with the verified floor.
+On network unavailability (including HTTP 502/503/504), the exact instance/context
+cache is marked stale. Wrong context, corruption, or any crossed expiry boundary
+retains only the independent floor and reports the gap. HTTP authorization and
+semantic failures never use the cache. Digests detect local corruption; the cache
+is not a signed authority against a local user able to replace both cache and pin.
+
+Preview output includes exact body hash/version/size and an AEON-219 provenance
+payload. `--rules-record-received SESSION_UUID --rules-worker-lease-file PATH`
+explicitly posts it to an existing owned harness generation. This records receipt,
+not execution; `execution_verified` remains false. It does not mint a registered
+harness session. Stub installation, automatic registration, rollout comparison,
+template import/export and UI are separate coordinator-owned work.
+
 ## UI shell (P0.5 / AEON-10)
 
 The Vue shell includes an authenticated workspace, sign-in, a 404, an account

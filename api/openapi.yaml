@@ -6,6 +6,350 @@ info:
 servers:
   - url: /api
 paths:
+  /rules/layers:
+    get:
+      operationId: "listRuleLayers"
+      description: "rules.read; only authorized project/owner layers"
+      responses:
+        "200":
+          description: "Authorized rule resource"
+          content:
+            "application/json":
+              schema:
+                type: "object"
+                additionalProperties: false
+                properties:
+                  layers:
+                    type: "array"
+                    items:
+                      "$ref": "#/components/schemas/RuleLayer"
+        "400": {"description":"Invalid scope, rule, context or calendar version","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "403": {"description":"Permission or scoped ownership denied; agents never publish or edit company rules","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "404": {"description":"Resource unavailable","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "409": {"description":"Revision/version conflict or ambiguous same-rank identity","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "422": {"description":"Rendered rules exceed 12000 UTF-8 bytes; reduce always-on text or move content to details","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "401": {"description":"Authentication required","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+    post:
+      operationId: "createRuleLayer"
+      description: "rules.write; scoped owner; company requires person workspace rules.publish"
+      responses:
+        "200":
+          description: "Authorized rule resource"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/RuleLayer"
+        "400": {"description":"Invalid scope, rule, context or calendar version","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "403": {"description":"Permission or scoped ownership denied; agents never publish or edit company rules","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "404": {"description":"Resource unavailable","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "409": {"description":"Revision/version conflict or ambiguous same-rank identity","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "422": {"description":"Rendered rules exceed 12000 UTF-8 bytes; reduce always-on text or move content to details","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "401": {"description":"Authentication required","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              "$ref": "#/components/schemas/RuleScope"
+  /rules/sets:
+    get:
+      operationId: "listRuleSets"
+      description: "rules.read; scope ownership"
+      responses:
+        "200":
+          description: "Authorized rule resource"
+          content:
+            "application/json":
+              schema:
+                type: "object"
+                additionalProperties: false
+                properties:
+                  sets:
+                    type: "array"
+                    items:
+                      "$ref": "#/components/schemas/RuleSet"
+        "400": {"description":"Invalid scope, rule, context or calendar version","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "403": {"description":"Permission or scoped ownership denied; agents never publish or edit company rules","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "404": {"description":"Resource unavailable","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "409": {"description":"Revision/version conflict or ambiguous same-rank identity","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "422": {"description":"Rendered rules exceed 12000 UTF-8 bytes; reduce always-on text or move content to details","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "401": {"description":"Authentication required","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+      parameters:
+        -
+          name: "layer_id"
+          in: "query"
+          required: true
+          schema:
+            type: "string"
+            format: "uuid"
+    post:
+      operationId: "createRuleSet"
+      description: "rules.write; scope ownership"
+      responses:
+        "200":
+          description: "Authorized rule resource"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/RuleSet"
+        "400": {"description":"Invalid scope, rule, context or calendar version","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "403": {"description":"Permission or scoped ownership denied; agents never publish or edit company rules","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "404": {"description":"Resource unavailable","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "409": {"description":"Revision/version conflict or ambiguous same-rank identity","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "422": {"description":"Rendered rules exceed 12000 UTF-8 bytes; reduce always-on text or move content to details","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "401": {"description":"Authentication required","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              additionalProperties: false
+              properties:
+                layer_id:
+                  type: "string"
+                  format: "uuid"
+                name:
+                  type: "string"
+              required: ["layer_id", "name"]
+  /rules/sets/{setId}:
+    get:
+      operationId: "getRuleSet"
+      description: "rules.read; scope ownership; includes on-demand draft details"
+      responses:
+        "200":
+          description: "Authorized rule resource"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/RuleSet"
+        "400": {"description":"Invalid scope, rule, context or calendar version","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "403": {"description":"Permission or scoped ownership denied; agents never publish or edit company rules","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "404": {"description":"Resource unavailable","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "409": {"description":"Revision/version conflict or ambiguous same-rank identity","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "422": {"description":"Rendered rules exceed 12000 UTF-8 bytes; reduce always-on text or move content to details","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "401": {"description":"Authentication required","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+      parameters:
+        -
+          name: "setId"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+            format: "uuid"
+  /rules/sets/{setId}/draft:
+    put:
+      operationId: "replaceRuleDraft"
+      description: "rules.write; scoped owner; atomic full replacement using revision"
+      responses:
+        "200":
+          description: "Authorized rule resource"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/RuleSet"
+        "400": {"description":"Invalid scope, rule, context or calendar version","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "403": {"description":"Permission or scoped ownership denied; agents never publish or edit company rules","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "404": {"description":"Resource unavailable","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "409": {"description":"Revision/version conflict or ambiguous same-rank identity","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "422": {"description":"Rendered rules exceed 12000 UTF-8 bytes; reduce always-on text or move content to details","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "401": {"description":"Authentication required","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+      parameters:
+        -
+          name: "setId"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+            format: "uuid"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              "$ref": "#/components/schemas/RuleDraft"
+  /rules/sets/{setId}/publish:
+    post:
+      operationId: "publishRuleSet"
+      description: "rules.publish; person only; company requires workspace publisher; exact replay returns original snapshot"
+      responses:
+        "200":
+          description: "Authorized rule resource"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/RuleSnapshot"
+        "400": {"description":"Invalid scope, rule, context or calendar version","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "403": {"description":"Permission or scoped ownership denied; agents never publish or edit company rules","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "404": {"description":"Resource unavailable","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "409": {"description":"Revision/version conflict or ambiguous same-rank identity","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "422": {"description":"Rendered rules exceed 12000 UTF-8 bytes; reduce always-on text or move content to details","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "401": {"description":"Authentication required","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+      parameters:
+        -
+          name: "setId"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+            format: "uuid"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              "$ref": "#/components/schemas/RulePublish"
+  /rules/sets/{setId}/restore:
+    post:
+      operationId: "restoreRuleSet"
+      description: "rules.publish; person only; publishes previous rules at a NEW version"
+      responses:
+        "200":
+          description: "Authorized rule resource"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/RuleSnapshot"
+        "400": {"description":"Invalid scope, rule, context or calendar version","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "403": {"description":"Permission or scoped ownership denied; agents never publish or edit company rules","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "404": {"description":"Resource unavailable","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "409": {"description":"Revision/version conflict or ambiguous same-rank identity","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "422": {"description":"Rendered rules exceed 12000 UTF-8 bytes; reduce always-on text or move content to details","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "401": {"description":"Authentication required","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+      parameters:
+        -
+          name: "setId"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+            format: "uuid"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              "$ref": "#/components/schemas/RuleRestore"
+  /rules/sets/{setId}/versions:
+    get:
+      operationId: "listRuleVersions"
+      description: "rules.read; immutable history includes on-demand details"
+      responses:
+        "200":
+          description: "Authorized rule resource"
+          content:
+            "application/json":
+              schema:
+                type: "object"
+                additionalProperties: false
+                properties:
+                  versions:
+                    type: "array"
+                    items:
+                      "$ref": "#/components/schemas/RuleSnapshot"
+        "400": {"description":"Invalid scope, rule, context or calendar version","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "403": {"description":"Permission or scoped ownership denied; agents never publish or edit company rules","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "404": {"description":"Resource unavailable","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "409": {"description":"Revision/version conflict or ambiguous same-rank identity","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "422": {"description":"Rendered rules exceed 12000 UTF-8 bytes; reduce always-on text or move content to details","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "401": {"description":"Authentication required","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+      parameters:
+        -
+          name: "setId"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+            format: "uuid"
+  /rules/sets/{setId}/versions/{version}:
+    get:
+      operationId: "getRuleVersion"
+      description: "rules.read; immutable historical snapshot"
+      responses:
+        "200":
+          description: "Authorized rule resource"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/RuleSnapshot"
+        "400": {"description":"Invalid scope, rule, context or calendar version","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "403": {"description":"Permission or scoped ownership denied; agents never publish or edit company rules","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "404": {"description":"Resource unavailable","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "409": {"description":"Revision/version conflict or ambiguous same-rank identity","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "422": {"description":"Rendered rules exceed 12000 UTF-8 bytes; reduce always-on text or move content to details","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "401": {"description":"Authentication required","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+      parameters:
+        -
+          name: "setId"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+            format: "uuid"
+        -
+          name: "version"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+  /rules/merged:
+    get:
+      operationId: "mergeAgentRules"
+      description: "rules.read in exact project; tenant from authentication; person must be caller or agent key creator; named agent must be caller or owner controlled; role/harness are exact requested selectors, not permission grants; fails closed on ambiguous identities; no HTTP cache"
+      responses:
+        "200":
+          description: "Authorized rule resource"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/MergedRules"
+        "400": {"description":"Invalid scope, rule, context or calendar version","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "403": {"description":"Permission or scoped ownership denied; agents never publish or edit company rules","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "404": {"description":"Resource unavailable","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "409": {"description":"Revision/version conflict or ambiguous same-rank identity","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "422": {"description":"Rendered rules exceed 12000 UTF-8 bytes; reduce always-on text or move content to details","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "401": {"description":"Authentication required","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+      parameters:
+        -
+          name: "project_id"
+          in: "query"
+          required: true
+          schema:
+            type: "string"
+            format: "uuid"
+        -
+          name: "person_id"
+          in: "query"
+          required: true
+          schema:
+            type: "string"
+            format: "uuid"
+        -
+          name: "agent_id"
+          in: "query"
+          required: false
+          schema:
+            type: "string"
+            format: "uuid"
+        -
+          name: "role"
+          in: "query"
+          required: true
+          schema:
+            type: "string"
+        -
+          name: "harness"
+          in: "query"
+          required: true
+          schema:
+            type: "string"
+        -
+          name: "task_id"
+          in: "query"
+          required: false
+          schema:
+            type: "string"
+            format: "uuid"
   /agent-pairing/guide:
     get:
       operationId: pairingGuide
@@ -3900,6 +4244,266 @@ components:
     session: {type: apiKey, in: cookie, name: aeon_session}
     agentKey: {type: http, scheme: bearer, description: Bearer token aeon_<prefix>_<secret>}
   schemas:
+    RuleError: {type: object, required: [error, code], properties: {error: {type: string}, code: {type: string}, actual_bytes: {type: integer}, max_bytes: {type: integer}}}
+    RuleScope:
+      type: "object"
+      additionalProperties: false
+      properties:
+        layer:
+          type: "string"
+          enum: ["company", "project", "person", "agent"]
+        project_id:
+          type: "string"
+          format: "uuid"
+        owner_id:
+          type: "string"
+          format: "uuid"
+        agent_id:
+          type: "string"
+          format: "uuid"
+        role:
+          type: "string"
+          enum: ["coordinator", "builder", "reviewer", "operator"]
+        task_id:
+          type: "string"
+          format: "uuid"
+      required: ["layer"]
+    AgentRule:
+      type: "object"
+      additionalProperties: false
+      properties:
+        identity:
+          type: "string"
+          pattern: "^[a-z][a-z0-9._-]{0,95}$"
+        text:
+          type: "string"
+          maxLength: 512
+          description: "Required nonempty single line; <=512 UTF-8 bytes"
+        why:
+          type: "string"
+          maxLength: 1024
+          description: "Required nonempty single line; <=1024 UTF-8 bytes"
+        details:
+          type: "string"
+          maxLength: 16384
+          description: "On demand only; <=16384 UTF-8 bytes"
+        strength:
+          description: "Locked rules must be enabled and non-expiring; company locked rules are unconditional."
+          type: "string"
+          enum: ["normal", "locked"]
+        enabled:
+          type: "boolean"
+        expires_at:
+          type: ["string", "null"]
+          format: "date-time"
+        roles:
+          type: "array"
+          items:
+            type: "string"
+            enum: ["coordinator", "builder", "reviewer", "operator"]
+          uniqueItems: true
+        harnesses:
+          type: "array"
+          items:
+            type: "string"
+            enum: ["claude-code", "codex", "grok", "pi", "cursor"]
+          uniqueItems: true
+        source:
+          type: "object"
+          required: ["reference"]
+          additionalProperties: false
+          properties:
+            reference:
+              type: "string"
+              maxLength: 512
+            revision:
+              type: "string"
+              maxLength: 128
+            identity:
+              type: "string"
+              maxLength: 96
+            edited_here:
+              type: "boolean"
+      required: ["identity", "text", "why", "strength", "enabled", "source"]
+    RuleLayer:
+      type: "object"
+      additionalProperties: false
+      properties:
+        id:
+          type: "string"
+          format: "uuid"
+        scope:
+          "$ref": "#/components/schemas/RuleScope"
+      required: ["id", "scope"]
+    RuleSet:
+      type: "object"
+      additionalProperties: false
+      properties:
+        id:
+          type: "string"
+          format: "uuid"
+        layer_id:
+          type: "string"
+          format: "uuid"
+        scope:
+          "$ref": "#/components/schemas/RuleScope"
+        name:
+          type: "string"
+          maxLength: 128
+        revision:
+          type: "integer"
+          minimum: 1
+        rules:
+          type: "array"
+          maxItems: 100
+          items:
+            "$ref": "#/components/schemas/AgentRule"
+        published_version:
+          type: "string"
+      required: ["id", "layer_id", "scope", "name", "revision", "rules", "published_version"]
+    RuleSnapshot:
+      type: "object"
+      additionalProperties: false
+      properties:
+        set_id:
+          type: "string"
+          format: "uuid"
+        scope:
+          "$ref": "#/components/schemas/RuleScope"
+        name:
+          type: "string"
+        revision:
+          type: "integer"
+        version:
+          type: "string"
+          pattern: "^[1-9][0-9]{11}\\.0\\.0$"
+          description: "inspr-calendar-v2; valid Gregorian UTC coordinate, immutable within set"
+        sha256:
+          type: "string"
+          pattern: "^[a-f0-9]{64}$"
+        rules:
+          type: "array"
+          maxItems: 100
+          items:
+            "$ref": "#/components/schemas/AgentRule"
+        published_at:
+          type: "string"
+          format: "date-time"
+      required: ["set_id", "scope", "name", "revision", "version", "sha256", "rules", "published_at"]
+    RuleDraft:
+      type: "object"
+      additionalProperties: false
+      properties:
+        expected_revision:
+          type: "integer"
+          minimum: 1
+        name:
+          type: "string"
+          maxLength: 128
+        rules:
+          type: "array"
+          maxItems: 100
+          items:
+            "$ref": "#/components/schemas/AgentRule"
+      required: ["expected_revision", "name", "rules"]
+    RulePublish:
+      type: "object"
+      additionalProperties: false
+      properties:
+        expected_revision:
+          type: "integer"
+          minimum: 1
+        version:
+          type: "string"
+          pattern: "^[1-9][0-9]{11}\\.0\\.0$"
+          description: "inspr-calendar-v2; valid Gregorian UTC coordinate, immutable within set"
+      required: ["expected_revision", "version"]
+    RuleRestore:
+      type: "object"
+      additionalProperties: false
+      properties:
+        expected_revision:
+          type: "integer"
+          minimum: 1
+        version:
+          type: "string"
+          pattern: "^[1-9][0-9]{11}\\.0\\.0$"
+          description: "inspr-calendar-v2; valid Gregorian UTC coordinate, immutable within set"
+        new_version:
+          type: "string"
+          pattern: "^[1-9][0-9]{11}\\.0\\.0$"
+          description: "inspr-calendar-v2; valid Gregorian UTC coordinate, immutable within set"
+      required: ["expected_revision", "version", "new_version"]
+    RuleContext:
+      type: "object"
+      additionalProperties: false
+      properties:
+        tenant_id:
+          type: "string"
+          format: "uuid"
+        project_id:
+          type: "string"
+          format: "uuid"
+        person_id:
+          type: "string"
+          format: "uuid"
+        agent_id:
+          type: "string"
+          format: "uuid"
+        role:
+          type: "string"
+          enum: ["coordinator", "builder", "reviewer", "operator"]
+        harness:
+          type: "string"
+          enum: ["claude-code", "codex", "grok", "pi", "cursor"]
+        task_id:
+          type: "string"
+          format: "uuid"
+      required: ["tenant_id", "project_id", "person_id", "role", "harness"]
+    MergedRules:
+      type: "object"
+      additionalProperties: false
+      properties:
+        context:
+          "$ref": "#/components/schemas/RuleContext"
+        versions:
+          type: "array"
+          items:
+            type: "object"
+            additionalProperties: false
+            properties:
+              set_id:
+                type: "string"
+                format: "uuid"
+              version:
+                type: "string"
+                pattern: "^[1-9][0-9]{11}\\.0\\.0$"
+                description: "inspr-calendar-v2; valid Gregorian UTC coordinate, immutable within set"
+              sha256:
+                type: "string"
+            required: ["set_id", "version", "sha256"]
+        version:
+          type: "string"
+          description: "Latest participating calendar version, or floor-only"
+        sha256:
+          type: "string"
+        body:
+          type: "string"
+          description: "Exact always-on rendered bytes; never exceeds 12000 UTF-8 bytes; details excluded"
+        byte_size:
+          type: "integer"
+          maximum: 12000
+        rules:
+          type: "array"
+          maxItems: 10000
+          items:
+            "$ref": "#/components/schemas/AgentRule"
+        floor:
+          type: "string"
+        valid_until:
+          type: ["string", "null"]
+          format: "date-time"
+      required: ["context", "versions", "version", "sha256", "body", "byte_size", "rules", "floor", "valid_until"]
     PairingVerificationCapabilities:
       type: object
       description: Server-owned qualification of its matching helper release; a client cannot widen this map. Unsupported choices require explicit connect_only or exclusion.

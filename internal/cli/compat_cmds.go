@@ -149,6 +149,7 @@ func (rt *runtime) cmdSession() *Command {
 
 func (rt *runtime) cmdSessionStart() *Command {
 	var project, agent, format, bundle string
+	var ruleOpts rulesOptions
 	return &Command{
 		Name:  "start",
 		Short: "Mint an agent session id",
@@ -158,6 +159,7 @@ func (rt *runtime) cmdSessionStart() *Command {
 			fs.string(&agent, "agent", 0, "agent name (required)")
 			fs.string(&format, "format", 0, "env (default) or json")
 			fs.string(&bundle, "bundle", 0, "minimal (default) or full")
+			ruleOpts.flags(fs)
 		},
 		run: func(args []string) error {
 			if strings.TrimSpace(project) == "" {
@@ -165,6 +167,9 @@ func (rt *runtime) cmdSessionStart() *Command {
 			}
 			if strings.TrimSpace(agent) == "" {
 				return usagef("--agent is required")
+			}
+			if ruleOpts.Preview {
+				return rt.sessionRules(project, agent, ruleOpts)
 			}
 			bundle = strings.TrimSpace(strings.ToLower(bundle))
 			format = strings.TrimSpace(strings.ToLower(format))
