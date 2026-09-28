@@ -85,3 +85,44 @@ it('reads legacy account data without a write, then persists the migrated style 
   pref.setHovering(true)
   await vi.waitFor(() => expect(writes).toEqual([{ style: 'robot-5', hovering: true }]))
 })
+
+it.each([
+  [{ style: 'robot-2', hovering: true, ring: 'off', size: 45 }, { style: 'robot-2', hovering: true, ring: 'off', size: 45 }],
+  [{ style: 'pulse', ring: 'Moving', size: '60' }, { style: 'pulse', hovering: false }],
+  [{ style: 'orbit', ring: null, size: NaN }, { style: 'orbit', hovering: false }],
+  [{ style: 'quill', ring: ['still'], size: 1e9 }, { style: 'quill', hovering: false, size: 100 }],
+  [{ style: 'sprite', ring: 'still', size: -40 }, { style: 'sprite', hovering: false, ring: 'still', size: 30 }],
+  [{ style: 'robot-4', size: Infinity, ring: {} }, { style: 'robot-4', hovering: false }],
+])('normalizes ring and size independently of style: %j', async (saved, expected) => {
+  const { normalizeAgentIndicator } = await import('../src/lib/agentIndicator')
+  const choice = normalizeAgentIndicator(saved)
+  expect(choice).toStrictEqual(expected)
+  expect(JSON.parse(JSON.stringify(choice))).toStrictEqual(expected)
+})
+
+it('keeps older accounts byte-compatible until ring or size is chosen, then keeps every field independent', async () => {
+  const writes: unknown[] = []
+  vi.stubGlobal('fetch', vi.fn(async (_url: string, init: RequestInit) => {
+    if (init.method === 'PUT') { writes.push(JSON.parse(String(init.body)).value); return response(writes.at(-1)) }
+    return response({ style: 'robot-3', hovering: true })
+  }))
+  const { useAgentIndicator } = await import('../src/lib/agentIndicator')
+  const settings = useAgentIndicator(), card = useAgentIndicator()
+  await settings.ready
+  settings.setStyle('robot-4')
+  await vi.waitFor(() => expect(writes.at(-1)).toStrictEqual({ style: 'robot-4', hovering: true }))
+  settings.setRing('off')
+  expect(card.choice.value).toStrictEqual({ style: 'robot-4', hovering: true, ring: 'off' })
+  await vi.waitFor(() => expect(writes.at(-1)).toStrictEqual({ style: 'robot-4', hovering: true, ring: 'off' }))
+  settings.setSize(55)
+  settings.setHovering(false)
+  settings.setStyle('pulse')
+  expect(card.choice.value).toStrictEqual({ style: 'pulse', hovering: false, ring: 'off', size: 55 })
+  await vi.waitFor(() => expect(writes.at(-1)).toStrictEqual({ style: 'pulse', hovering: false, ring: 'off', size: 55 }))
+  settings.setSize(Number('not a number'))
+  expect(card.choice.value).toStrictEqual({ style: 'pulse', hovering: false, ring: 'off' })
+  settings.setSize(140)
+  expect(card.choice.value).toStrictEqual({ style: 'pulse', hovering: false, ring: 'off', size: 100 })
+  settings.setSize(undefined)
+  expect(card.choice.value).toStrictEqual({ style: 'pulse', hovering: false, ring: 'off' })
+})

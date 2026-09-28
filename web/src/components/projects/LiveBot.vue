@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script lang="ts">
 import { defineAsyncComponent, type Component } from 'vue'
-import { availableIndicatorVariants, resolveIndicatorStyle } from '../../lib/indicatorVariants'
+import { availableIndicatorVariants, indicatorArtScale, indicatorRing, resolveIndicatorStyle } from '../../lib/indicatorVariants'
 
 // Filename-only discovery lets the other indicator packages land in any order.
 // Export availability for Settings; unavailable entries never load or select.
@@ -29,6 +29,9 @@ const props = withDefaults(defineProps<{
 }>(), { state: 'working', size: 28, eventPulse: 0, eventCaption: '', id: '', index: 0, lead: true })
 const { choice } = useAgentIndicator()
 const indicator = computed(() => resolveIndicatorStyle(normalizeAgentIndicator({ style: props.indicatorStyle ?? choice.value.style }).style, availableVariants))
+// Ring and inner size follow the viewer everywhere, previews included; unset keeps each style's drawing.
+const ring = computed(() => indicatorRing(indicator.value, choice.value.ring))
+const artScale = computed(() => indicatorArtScale(indicator.value, choice.value.size))
 const { appearance } = useAgentAppearance()
 const seed = computed(() => `${props.id}:${props.index}`)
 const style = computed(() => ({ '--size': `${props.size}px`, '--lag': `${-(props.index * .53 + ((parseInt(props.id.slice(0, 2), 16) || 0) % 7) * .31).toFixed(2)}s` }))
@@ -52,7 +55,7 @@ onBeforeUnmount(() => clearTimeout(clear))
 <template>
   <span class="live-bot" :class="[state, { hovering: choice.hovering, lead }]" :style="[style, appearance(state)]" :data-style="indicator" :data-state="state" :data-harness="harness" :aria-label="label || STATE_LABEL[state]" role="img">
     <span class="indicator-art">
-      <component :is="renderers[indicator]" :state="state" :size="size" :pulse="eventPulse" :seed="seed" :lead="lead" />
+      <component :is="renderers[indicator]" :state="state" :size="size" :pulse="eventPulse" :seed="seed" :lead="lead" :ring="ring" :art-scale="artScale" :data-ring="ring" />
     </span>
     <span v-if="pulse && eventCaption" :key="`caption-${pulse}`" class="event-caption">{{ eventCaption }}</span>
   </span>

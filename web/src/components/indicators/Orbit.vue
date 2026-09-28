@@ -3,17 +3,22 @@
 <script setup lang="ts">
 import type { AgentState } from '../../lib/agentSignals'
 import AgentStateMark from './AgentStateMark.vue'
+import { artStyle, type IndicatorRing } from '../../lib/indicatorVariants'
 import { computed, ref, watch } from 'vue'
 
 // IV1 discovers this default SFC export by filename. The wrapper owns labels,
 // viewer preferences and hovering; only real event counter advances flash.
+// The track and satellite are this style's ring; the core is its inner artwork.
 const props = withDefaults(defineProps<{
   state: AgentState
   size?: number
   pulse: number
   seed: string
   lead: boolean
-}>(), { size: 26 })
+  ring?: IndicatorRing
+  artScale?: number
+}>(), { size: 26, ring: 'moving', artScale: 1 })
+const inner = computed(() => artStyle(props.artScale))
 const style = computed(() => {
   let hash = 2166136261
   for (const char of props.seed) hash = Math.imul(hash ^ char.codePointAt(0)!, 16777619) >>> 0
@@ -31,15 +36,19 @@ watch(() => props.state, state => { if (state !== 'working') glint.value = 0 })
 </script>
 
 <template>
-  <svg class="agent-indicator-art indicator-orbit" :class="[state, { lead }]" :style="style" :width="size" :height="size"
+  <svg class="agent-indicator-art indicator-orbit" :class="[state, { lead, 'ring-moving': ring === 'moving' }]" :style="style" :width="size" :height="size"
     :data-state="state" viewBox="0 0 32 32" aria-hidden="true" focusable="false">
-    <circle class="orbit-track" cx="16" cy="16" r="12" />
-    <path class="core" d="m16 8 7 4v8l-7 4-7-4v-8Z" />
-    <path class="facet" d="m9 12 7 4 7-4M16 16v8" />
-    <path class="light-facet" d="m9 12 7 4v8l-7-4Z" />
+    <circle v-if="ring !== 'off'" class="orbit-track" cx="16" cy="16" r="12" />
+    <g class="inner-art" :style="inner">
+      <path class="core" d="m16 8 7 4v8l-7 4-7-4v-8Z" />
+      <path class="facet" d="m9 12 7 4 7-4M16 16v8" />
+      <path class="light-facet" d="m9 12 7 4v8l-7-4Z" />
+    </g>
     <g class="satellite idle">
-      <path class="trail" d="M7.5 7.5A12 12 0 0 1 16 4" />
-      <circle class="point" cx="16" cy="4" r="1.8" />
+      <template v-if="ring !== 'off'">
+        <path class="trail" d="M7.5 7.5A12 12 0 0 1 16 4" />
+        <circle class="point" cx="16" cy="4" r="1.8" />
+      </template>
       <path v-if="glint && state === 'working'" :key="glint" class="glint"
         d="m16 .8.9 2.3 2.3.9-2.3.9-.9 2.3-.9-2.3-2.3-.9 2.3-.9Z" @animationend="glint = 0" />
     </g>
@@ -54,6 +63,7 @@ watch(() => props.state, state => { if (state !== 'working') glint.value = 0 })
   color: var(--signal); overflow: visible;
 }
 .orbit-track, .core, .facet, .trail { stroke: currentColor; stroke-width: 1.5; stroke-linejoin: round; fill: none; }
+.core, .facet { stroke-width: calc(1.5px * var(--art-stroke, 1)); }
 .orbit-track { opacity: .3; stroke-width: 1; }
 .core { fill: color-mix(in srgb, currentColor 9%, var(--surface-raised, #fffefa)); }
 .facet { opacity: .85; }
@@ -65,7 +75,7 @@ watch(() => props.state, state => { if (state !== 'working') glint.value = 0 })
 .clock path { fill: none; }
 .glint { fill: #c9a24a; stroke: var(--surface-raised, #fffefa); stroke-width: .6; transform-origin: 16px 4px; animation: orbit-flash .6s ease-out both; }
 @media (prefers-reduced-motion: no-preference) {
-  .working.lead .satellite { animation: orbit-turn 6s linear infinite; animation-delay: var(--phase); }
+  .ring-moving.working.lead .satellite { animation: orbit-turn 6s linear infinite; animation-delay: var(--phase); }
   .lead .glint { animation-name: orbit-spark; }
 }
 @keyframes orbit-turn { to { transform: rotate(360deg); } }

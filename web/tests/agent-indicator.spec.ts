@@ -16,7 +16,7 @@ async function settings(page: Page) {
 const radio = (page: Page, name: string) => page.getByRole('radio', { name, exact: true })
 const loops = (locator: Locator) => locator.evaluate(el => el.getAnimations({ subtree: true }).filter(a => a.effect?.getTiming().iterations === Infinity).length)
 
-test('nine tiles keep grid order; missing files are quiet disabled placeholders', async ({ page }) => {
+test('nine icons keep their order; missing files are quiet disabled placeholders', async ({ page }) => {
   await mockIndicator(page)
   await settings(page)
   const tiles = page.getByRole('radiogroup', { name: 'Agent indicator' }).getByRole('radio')
@@ -39,9 +39,10 @@ test('nine tiles keep grid order; missing files are quiet disabled placeholders'
   expect(boxes[2]!.right).toBeLessThanOrEqual(375)
 })
 
-test('arrows browse spatially, Enter/Space select, and Tab leaves the group', async ({ page }) => {
+test('arrows browse the wrapping row in order, Enter/Space select, and Tab leaves the group', async ({ page }) => {
   const { data } = await mockIndicator(page)
   await settings(page)
+  const first = available[0]!, last = available.at(-1)!
   await radio(page, 'Robot 1').focus()
   await page.keyboard.press('ArrowLeft')
   await expect(radio(page, 'Pulse')).toBeFocused()
@@ -49,17 +50,24 @@ test('arrows browse spatially, Enter/Space select, and Tab leaves the group', as
   await page.keyboard.press('Space')
   await expect(radio(page, 'Pulse')).toBeChecked()
   await expect.poll(() => data.preferences['agent-indicator']).toEqual({ style: 'pulse', hovering: false })
-  const nextDown = ['robot-3', 'orbit', 'pulse'].find(id => available.some(v => v.id === id))!
   await page.keyboard.press('ArrowDown')
-  await expect(page.locator(`[data-variant="${nextDown}"]`)).toBeFocused()
+  await expect(radio(page, 'Robot 1')).toBeFocused()
   await page.keyboard.press('ArrowUp')
   await expect(radio(page, 'Pulse')).toBeFocused()
+  await page.keyboard.press('ArrowLeft')
+  await expect(radio(page, last.name)).toBeFocused()
+  await page.keyboard.press('ArrowRight')
+  await expect(radio(page, first.name)).toBeFocused()
+  await page.keyboard.press('End')
+  await expect(radio(page, last.name)).toBeFocused()
+  await page.keyboard.press('Home')
+  await expect(radio(page, first.name)).toBeFocused()
   await page.keyboard.press('ArrowRight')
   await expect(radio(page, 'Robot 1')).toBeFocused()
   await page.keyboard.press('Enter')
   await expect(radio(page, 'Robot 1')).toBeChecked()
   await page.keyboard.press('Tab')
-  await expect(page.getByRole('switch', { name: 'Hovering' })).toBeFocused()
+  await expect(page.getByRole('radiogroup', { name: 'Activity ring' }).getByRole('radio', { name: 'Moving' })).toBeFocused()
 })
 
 for (const option of available) {

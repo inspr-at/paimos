@@ -1,25 +1,35 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { computed } from 'vue'
 import { usePreference } from './preferences.ts'
-import { isAgentIndicatorStyle, type AgentIndicatorStyle } from './indicatorVariants.ts'
+import { clampIconSize, isAgentIndicatorStyle, isIndicatorRing, type AgentIndicatorStyle, type IndicatorRing } from './indicatorVariants.ts'
 
-export type { AgentIndicatorStyle } from './indicatorVariants.ts'
-export interface AgentIndicatorPreference { style: AgentIndicatorStyle; hovering: boolean }
+export type { AgentIndicatorStyle, IndicatorRing } from './indicatorVariants.ts'
+/** ring and size stay absent until chosen, so older accounts keep each style's own ring and size. */
+export interface AgentIndicatorPreference { style: AgentIndicatorStyle; hovering: boolean; ring?: IndicatorRing; size?: number }
 export const AGENT_INDICATOR_KEY = 'agent-indicator'
 
 // A viewer's account preference, shared by every LiveBot (including wrappers).
 // Legacy names migrate on read and are written canonically on the next save.
-// Unknown settings keep LA2's stationary default. Hovering is independent.
+// Unknown settings keep LA2's stationary default. Hovering, ring and size are
+// independent of each other and of the style.
 export function normalizeAgentIndicator(value: unknown): AgentIndicatorPreference {
   const saved = value && typeof value === 'object' ? value as Record<string, unknown> : {}
   const style = saved.style === 'calm' ? 'robot-1' : saved.style === 'playful' ? 'robot-5' : saved.style
-  return { style: isAgentIndicatorStyle(style) ? style : 'robot-1', hovering: saved.hovering === true }
+  const choice: AgentIndicatorPreference = { style: isAgentIndicatorStyle(style) ? style : 'robot-1', hovering: saved.hovering === true }
+  if (isIndicatorRing(saved.ring)) choice.ring = saved.ring
+  const size = clampIconSize(saved.size)
+  if (size !== undefined) choice.size = size
+  return choice
 }
 
 export function useAgentIndicator() {
   const preference = usePreference<AgentIndicatorPreference>(AGENT_INDICATOR_KEY)
   const choice = computed(() => normalizeAgentIndicator(preference.value.value))
-  function setStyle(style: AgentIndicatorStyle) { preference.save({ ...choice.value, style }, 0) }
-  function setHovering(hovering: boolean) { preference.save({ ...choice.value, hovering }, 0) }
-  return { choice, ready: preference.ready, setStyle, setHovering }
+  const save = (patch: Partial<AgentIndicatorPreference>) => preference.save(normalizeAgentIndicator({ ...choice.value, ...patch }), 0)
+  function setStyle(style: AgentIndicatorStyle) { save({ style }) }
+  function setHovering(hovering: boolean) { save({ hovering }) }
+  function setRing(ring: IndicatorRing) { save({ ring }) }
+  /** undefined returns every style to its drawn size. */
+  function setSize(size: number | undefined) { save({ size }) }
+  return { choice, ready: preference.ready, setStyle, setHovering, setRing, setSize }
 }

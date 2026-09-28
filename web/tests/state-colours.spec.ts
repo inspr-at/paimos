@@ -76,10 +76,10 @@ for (const theme of ['light', 'dark'] as const) {
 test('per-viewer palettes, opacity and heartbeat thresholds persist and reach every surface', async ({ page }) => {
   const { data } = await mockStateColours(page)
   await page.goto('/settings/personal#agents')
-  await page.getByLabel('Palette', { exact: true }).selectOption('colour-blind')
-  await expect.poll(() => data.preferences['agent-state']?.palette).toBe('colour-blind')
+  await page.getByLabel('Palette', { exact: true }).selectOption('deutan')
+  await expect.poll(() => data.preferences['agent-state']?.palette).toBe('deutan')
   const preview = page.locator('.state-preview .agent-state-label[data-state="working"]')
-  await expect(preview).toHaveCSS('color', 'rgb(33, 99, 174)')
+  await expect(preview).toHaveCSS('color', 'rgb(23, 103, 196)')
   const opacity = page.getByLabel('Inactive opacity', { exact: true })
   await opacity.press('Home')
   for (let step = 0; step < 30; step++) await opacity.press('ArrowRight')
@@ -89,7 +89,7 @@ test('per-viewer palettes, opacity and heartbeat thresholds persist and reach ev
   await page.getByLabel('Red after (minutes)').blur()
   await expect.poll(() => data.preferences['agent-state']?.redMinutes).toBe(12)
   await page.reload()
-  await expect(page.getByLabel('Palette', { exact: true })).toHaveValue('colour-blind')
+  await expect(page.getByLabel('Palette', { exact: true })).toHaveValue('deutan')
   await expect(page.getByLabel('Inactive opacity', { exact: true })).toHaveValue('70')
   await page.goto('/')
   await expect(page.locator('[data-project-id="p-sc1-stale"] .live-chip')).toHaveCSS('opacity', '0.7')
@@ -104,6 +104,22 @@ test('per-viewer palettes, opacity and heartbeat thresholds persist and reach ev
   await page.goto('/agents')
   await page.getByRole('button', { name: /^Stopped/ }).click()
   await expect(page.locator('.row[data-state="stopped"]')).toHaveCSS('opacity', '1')
+})
+
+test('a saved colour-blind palette shows as Deutan everywhere and is rewritten only on a change', async ({ page }) => {
+  const { data } = await mockStateColours(page)
+  data.preferences['agent-state'] = { palette: 'colour-blind', dimInactive: true, inactiveOpacity: 60, yellowMinutes: 4, redMinutes: 11 }
+  await page.goto('/settings/personal#agents')
+  const palette = page.getByLabel('Palette', { exact: true })
+  await expect(palette).toHaveValue('deutan')
+  expect(await palette.locator('option').allTextContents()).toEqual(['Standard', 'Protan red–green', 'Deutan red–green', 'Tritan blue–yellow', 'Monochrome'])
+  await expect(page.locator('.state-preview .agent-state-label[data-state="problem"]')).toHaveCSS('color', 'rgb(125, 37, 55)')
+  for (const state of ['working', 'waiting', 'problem', 'stopped']) {
+    await expect(page.locator(`.state-preview .agent-state-label[data-state="${state}"] .agent-state-mark`)).toHaveAttribute('data-mark', state)
+  }
+  expect(data.preferences['agent-state']?.palette).toBe('colour-blind')
+  await palette.selectOption('tritan')
+  await expect.poll(() => data.preferences['agent-state']).toEqual({ palette: 'tritan', dimInactive: true, inactiveOpacity: 60, yellowMinutes: 4, redMinutes: 11 })
 })
 
 test('all nine variants render every mark and stop problem/inactive motion', async ({ page }, testInfo) => {

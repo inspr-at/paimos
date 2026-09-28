@@ -2,7 +2,8 @@
 // SC1: one presentation contract for sessions, project indicators and previews.
 // Evidence stays separate from presentation; viewer thresholds never mutate it.
 export type AgentState = 'working' | 'awaiting' | 'waiting' | 'throttled' | 'problem' | 'unresponsive' | 'idle' | 'stale' | 'stopped'
-export type AgentPalette = 'standard' | 'colour-blind' | 'monochrome'
+import { normalizeAgentPalette, type AgentPalette } from './agentPalettes.ts'
+export type { AgentPalette }
 export interface AgentStatePreference {
   palette: AgentPalette; dimInactive: boolean; inactiveOpacity: number
   yellowMinutes: number; redMinutes: number
@@ -25,7 +26,7 @@ export function normalizeAgentState(value: unknown): AgentStatePreference {
   const bounded = (n: unknown, fallback: number, min: number, max: number) => typeof n === 'number' && Number.isFinite(n) ? Math.max(min, Math.min(max, Math.round(n))) : fallback
   const yellowMinutes = bounded(v.yellowMinutes, 3, 1, 1439)
   return {
-    palette: v.palette === 'colour-blind' || v.palette === 'monochrome' ? v.palette : 'standard',
+    palette: normalizeAgentPalette(v.palette),
     dimInactive: v.dimInactive !== false, inactiveOpacity: bounded(v.inactiveOpacity, 55, 40, 80),
     yellowMinutes, redMinutes: bounded(v.redMinutes, Math.max(10, yellowMinutes + 1), yellowMinutes + 1, 1440),
   }
