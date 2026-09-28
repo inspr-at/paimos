@@ -11,7 +11,7 @@ export interface SettingsSection { id: SectionId; label: string; summary: string
 export const anyOf = (permission: string | string[], allowed: (permission: string) => boolean) => (Array.isArray(permission) ? permission : [permission]).some(allowed)
 export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
   { id: 'personal', label: 'Personal', summary: 'Theme, greeting and keys', admin: false },
-  { id: 'agent-rules', label: 'Agent rules', summary: 'Layers and publish', admin: false, permission: 'rules.read', deniedTitle: 'Agent rules need permission to read them', denied: 'Reading agent rules needs the rules read permission. Project membership alone does not open this page.' },
+  { id: 'agent-rules', label: 'Agent rules', summary: 'Rules for every agent', admin: false, permission: 'rules.read', deniedTitle: 'Agent rules need permission to read them', denied: 'Reading agent rules needs the rules read permission. Project membership alone does not open this page.' },
   { id: 'workspace', label: 'Workspace', summary: 'Name and your role', admin: true },
   { id: 'access', label: 'Access', summary: 'People, roles and agents', admin: true, permission: ['members.read', 'audit.read'] },
   { id: 'business', label: 'Business', summary: 'Parts and quote settings', admin: true },

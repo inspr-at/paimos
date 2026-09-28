@@ -692,7 +692,7 @@ test('unsupported verification blocks the selected harness and connect only does
   assert.doesNotMatch(blocked.map(item => item.reason).join(' '), /installation failed/i)
   const denied = planApproval({ view: current, choice: 'one_per_harness', selectedAccountKeys: ['codex-1'], permissions: person })
   assert.equal(denied.ok, false)
-  if (!denied.ok) assert.match(denied.next, /Connect only/)
+  if (!denied.ok) assert.match(denied.next, /Turn verification off/)
   const allowed = planApproval({ view: current, choice: 'one_per_harness', selectedAccountKeys: ['claude-1'], permissions: person })
   assert.equal(allowed.ok, true)
   const connectOnly = planApproval({ view: current, choice: 'connect_only', selectedAccountKeys: ['codex-1', 'cursor-1'], permissions: person })

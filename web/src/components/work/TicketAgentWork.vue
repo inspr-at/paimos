@@ -140,19 +140,16 @@ function rowName(session: TicketAgentSession): string {
             <div class="session-top">
               <RouterLink class="name" :to="`/agents/${session.id}`" :aria-label="`${rowName(session)}. Open the session`">{{ rowName(session) }}</RouterLink>
               <span v-if="session.ticket_node_id !== nodeId" class="ticket-key">{{ session.ticket_key }}</span>
+              <span v-if="session.models.length === 1 && session.models[0]?.price_version" class="price" :data-tip="priceTip(session.models[0])">price v{{ session.models[0].price_version }}</span>
             </div>
             <p class="meta">{{ rowMeta(session) }}</p>
             <p v-if="report.usage_available && session.models.length > 1 && rowUsage(session)" class="meta figures">{{ rowUsage(session) }}</p>
-            <p v-else-if="report.usage_available && session.models.length === 1 && session.models[0] && modelFigures(session.models[0])" class="meta figures">
-              {{ modelFigures(session.models[0]) }}
-              <span v-if="session.models[0].price_version" class="price" :data-tip="priceTip(session.models[0])">price v{{ session.models[0].price_version }}</span>
-            </p>
+            <p v-else-if="report.usage_available && session.models.length === 1 && session.models[0] && modelFigures(session.models[0])" class="meta figures">{{ modelFigures(session.models[0]) }}</p>
             <p v-if="session.models_truncated" class="note">Some models for this session were left out, so its figures are incomplete.</p>
             <ul v-if="session.models.length > 1" class="models" :aria-label="`Models for ${rowName(session)}`">
               <li v-for="model in session.models" :key="model.model">
-                <span class="model-name">{{ model.model }}</span>
+                <span class="model-name">{{ model.model }}<span v-if="model.price_version" class="price" :data-tip="priceTip(model)"> · price v{{ model.price_version }}</span></span>
                 <span v-if="modelFigures(model)">{{ modelFigures(model) }}</span>
-                <span v-if="model.price_version" class="price" :data-tip="priceTip(model)">price v{{ model.price_version }}</span>
               </li>
             </ul>
           </li>
@@ -180,7 +177,8 @@ li { min-width: 0; padding: 10px 12px; border-radius: 10px; background: var(--ch
 .ticket-key { flex: none; font-family: var(--mono); font-size: 11px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
 .meta { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; margin: 3px 0 0; font-size: 12.5px; line-height: 1.4; color: var(--ink-2); overflow-wrap: anywhere; }
 .figures { color: var(--ink-3); }
-.price { font-family: var(--mono); font-size: 11px; }
+.price { flex: none; color: var(--ink-3); font-family: var(--mono); font-size: 11px; white-space: nowrap; }
+.model-name .price { font-size: inherit; }
 .models { gap: 6px; margin: 8px 0 0; }
 .models li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; margin: 0; padding: 0; background: transparent; box-shadow: none; border-radius: 0; font-size: 12px; line-height: 1.4; color: var(--ink-3); }
 .model-name { min-width: 0; overflow-wrap: anywhere; font-family: var(--mono); font-size: 11.5px; color: var(--ink-2); }

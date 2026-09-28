@@ -82,6 +82,10 @@ const needsFreshRequest = computed(() => {
   const offer = props.approvals.find(a => a.id === stage.value?.gate_offer_id)
   return offer ? ['expired', 'revoked', 'rejected', 'grant_missing'].includes(stateOf(offer)) : false
 })
+// Deployment and other high-risk gates stay on the warning tone. Red is reserved for an action that removes something.
+function destructive(approval: Approval) {
+  return /(?:^|\.)(delete|revoke|destroy|purge|remove)(?:\.|$)/.test(approval.scope)
+}
 </script>
 
 <template>
@@ -92,7 +96,7 @@ const needsFreshRequest = computed(() => {
         <div class="body">
           <p class="line1">
             <strong class="what" :data-tip="approval.scope">{{ GATE_LABEL[gate] }}</strong>
-            <span class="risk-chip" :class="riskFor(approval)">{{ RISK_LABEL[riskFor(approval)] }}</span>
+            <span class="risk-chip" :class="[riskFor(approval), { destructive: riskFor(approval) === 'high' && destructive(approval) }]"><AppIcon v-if="riskFor(approval) === 'high'" name="alert" :size="11" />{{ RISK_LABEL[riskFor(approval)] }}</span>
             <time class="expiry" :class="{ soon: expiresSoon(approval, now) }" :datetime="approval.expires_at" :data-tip="new Date(approval.expires_at).toLocaleString()"><AppIcon name="clock" :size="12" />{{ expiresIn(approval, now) }}</time>
           </p>
           <p class="line2"><span class="asks">Asked by</span><span v-if="who(approval).harness" class="harness mono">{{ who(approval).harness }}</span><strong :data-tip="who(approval).tip || undefined">{{ who(approval).name }}</strong></p>
@@ -134,9 +138,10 @@ const needsFreshRequest = computed(() => {
 .body { display: grid; gap: 4px; min-width: 0; }
 .line1 { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; }
 .what { font-size: 13.5px; font-weight: 600; color: var(--ink); }
-.risk-chip { height: 18px; padding: 0 7px; border-radius: 999px; font: 600 10px/18px var(--mono); letter-spacing: .06em; text-transform: uppercase; background: var(--row-selected); color: var(--teal-ink); }
+.risk-chip { display: inline-flex; align-items: center; gap: 3px; height: 18px; padding: 0 7px; border-radius: 999px; font: 600 10px/18px var(--mono); letter-spacing: .06em; text-transform: uppercase; background: var(--row-selected); color: var(--teal-ink); }
 .risk-chip.medium { background: transparent; box-shadow: inset 0 0 0 1px rgba(214, 155, 49, .55); color: var(--gold-ink); }
-.risk-chip.high { background: var(--danger-bg); color: var(--danger); }
+.risk-chip.high { background: var(--gold-wash); color: var(--warn); box-shadow: inset 0 0 0 1px rgba(214, 155, 49, .55); }
+.risk-chip.high.destructive { background: var(--danger-bg); color: var(--danger); box-shadow: inset 0 0 0 1px var(--danger-line); }
 .expiry { display: inline-flex; align-items: center; gap: 4px; margin-left: auto; font-size: 12px; color: var(--ink-3); white-space: nowrap; }
 .expiry.soon { color: var(--gold-ink); }
 .line2 { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 6px; font-size: 12.5px; color: var(--ink-2); min-width: 0; }
