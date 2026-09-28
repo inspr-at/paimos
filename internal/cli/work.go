@@ -15,6 +15,12 @@ import (
 // issueView is the classic issue text/JSON shape. Aeon stores the issue as a
 // node: type is the kind slug, status is state, and priority lives in fields.
 type issueView struct {
+	PillEN      string   `json:"pill_en,omitempty"`
+	PillDE      string   `json:"pill_de,omitempty"`
+	BenefitEN   string   `json:"benefit_en,omitempty"`
+	BenefitDE   string   `json:"benefit_de,omitempty"`
+	Hide        bool     `json:"hide_from_release_notes,omitempty"`
+	Warnings    []string `json:"warnings,omitempty"`
 	IssueKey    string   `json:"issue_key"`
 	Title       string   `json:"title"`
 	Type        string   `json:"type"`
@@ -28,6 +34,7 @@ type issueView struct {
 }
 
 type issueInput struct {
+	Benefits    benefitFlags
 	Project     string
 	Title       string
 	Type        string
@@ -54,7 +61,9 @@ func (rt *runtime) viewIssue(n apiNode, kinds kindTable) issueView {
 			}
 		}
 	}
+	hidden, _ := fields["hide_from_release_notes"].(bool)
 	return issueView{
+		PillEN: fieldString(fields, "pill_en"), PillDE: fieldString(fields, "pill_de"), BenefitEN: fieldString(fields, "benefit_en"), BenefitDE: fieldString(fields, "benefit_de"), Hide: hidden, Warnings: n.Warnings,
 		IssueKey:    n.Key,
 		Title:       n.Title,
 		Type:        kinds.slug(n.KindID),
@@ -250,6 +259,9 @@ func (rt *runtime) createIssue(in issueInput) error {
 		parentID = parent.ID
 	}
 	fields := map[string]any{}
+	if _, err := in.Benefits.apply(fields); err != nil {
+		return err
+	}
 	if p := strings.TrimSpace(in.Priority); p != "" {
 		fields["priority"] = p
 	}
@@ -285,6 +297,9 @@ func (rt *runtime) createIssue(in issueInput) error {
 		return err
 	}
 	view := rt.viewIssue(created, kinds)
+	for _, warning := range created.Warnings {
+		fmt.Fprintln(rt.stderr, "warning:", warning)
+	}
 	if rt.jsonOut {
 		return rt.printJSON(view)
 	}
@@ -293,6 +308,7 @@ func (rt *runtime) createIssue(in issueInput) error {
 }
 
 type issuePatch struct {
+	Benefits    benefitFlags
 	Ref         string
 	Title       string
 	Type        string
@@ -328,7 +344,10 @@ func (rt *runtime) updateIssue(in issuePatch) error {
 		return rt.fail(fmt.Errorf("issue %q not found", in.Ref), "")
 	}
 	fields := fieldMap(n.Fields)
-	changedFields := false
+	changedFields, err := in.Benefits.apply(fields)
+	if err != nil {
+		return err
+	}
 	if p := strings.TrimSpace(in.Priority); p != "" {
 		fields["priority"] = p
 		changedFields = true
@@ -389,7 +408,11 @@ func (rt *runtime) updateIssue(in issuePatch) error {
 	}
 	oldStatus := n.State
 	if len(patch) > 0 {
-		if err := rt.do(http.MethodPatch, "/api/nodes/"+url.PathEscape(n.ID), patch, &n); err != nil {
+		headers := map[string]string{}
+		if !n.UpdatedAt.IsZero() {
+			headers["If-Unmodified-Since"] = n.UpdatedAt.Format(time.RFC3339Nano)
+		}
+		if err := rt.doHeaders(http.MethodPatch, "/api/nodes/"+url.PathEscape(n.ID), patch, &n, headers); err != nil {
 			return err
 		}
 	}

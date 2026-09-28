@@ -29,6 +29,13 @@ func TestListFiltersExclusionsLabelsEpicsAndDates(t *testing.T) {
 		if fields == nil {
 			fields = map[string]any{}
 		}
+		if kind == ticket.ID && state == "done" {
+			var benefits map[string]any
+			_ = json.Unmarshal([]byte(benefitFields), &benefits)
+			for key, value := range benefits {
+				fields[key] = value
+			}
+		}
 		in := map[string]any{"kind_id": kind, "key": key, "title": title, "state": state, "fields": fields, "body": body}
 		if parent != "" {
 			in["parent_id"] = parent

@@ -8,7 +8,7 @@
 // # Where the data comes from
 //
 // The manifest is generated at build time (see the generate command in this
-// package's generate directory) from three sources, and nothing is invented:
+// package's generate directory) from the sources below; nothing is invented:
 //
 //   - Git: every annotated tag v<version> whose version is an inspr-calendar-v2
 //     coordinate. The tag message gives the headline and the release sequence,
@@ -19,6 +19,11 @@
 //   - version.json at the build: its unpublished_reservations are versions that
 //     were reserved but never published. They stay in the history, marked
 //     "reserved", so the sequence has no silent gaps.
+//   - release-notes/<version>.json at the immutable tag: an explicit export
+//     of journey_tickets membership and nodes.fields. Notes hold both languages,
+//     a source digest and gaps; hidden text is excluded. Missing snapshots do
+//     not turn Git headlines into benefits. See docs/RELEASE.md for the capture
+//     and publication boundary. Older manifests without notes remain readable.
 //   - GitHub (optional, with a token): the release's published_at, the image
 //     reference and digest the release workflow writes into the release notes
 //     ("Container: …" and "Digest: …"), and the CI and Release workflow runs for
@@ -37,7 +42,8 @@
 //	reserved_at        when the version was reserved (version.json reserved_at)
 //	tagged_at          when the annotated tag was made
 //	published_at       when it was published (GitHub release), or null
-//	headline           the tag message's headline
+//	headline           the tag message's headline (source evidence)
+//	notes              bilingual ticket benefits, snapshot provenance and gaps
 //	tickets            ticket keys: version.json's ticket and keys in the headline
 //	changes            commits since the previous published release, each with
 //	                   commit, subject, type (feat, fix, test, docs, release,

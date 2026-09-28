@@ -17,6 +17,13 @@ func TestBulkChangeSkipsWithReasonsAndUndoesAsOne(t *testing.T) {
 	project, epic, ticket, task := kindBySlug(t, p, "project"), kindBySlug(t, p, "epic"), kindBySlug(t, p, "ticket"), kindBySlug(t, p, "task")
 	create := func(kind, key, state, parent string, fields string) nodeJSON {
 		t.Helper()
+		if kind == ticket.ID {
+			var values map[string]any
+			_ = json.Unmarshal([]byte(benefitFields), &values)
+			_ = json.Unmarshal([]byte(fields), &values)
+			raw, _ := json.Marshal(values)
+			fields = string(raw)
+		}
 		body := `{"kind_id":"` + kind + `","key":"` + key + `","title":"` + key + `","state":"` + state + `","fields":` + fields
 		if parent != "" {
 			body += `,"parent_id":"` + parent + `"`

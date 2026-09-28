@@ -19,7 +19,7 @@ func TestBulkUndoNeedsTheEditPermission(t *testing.T) {
 	project := kindBySlug(t, owner, "project")
 	ticket := kindBySlug(t, owner, "ticket")
 	root := mustNode(t, owner, `{"kind_id":"`+project.ID+`","title":"Undo project"}`)
-	item := mustNode(t, owner, `{"kind_id":"`+ticket.ID+`","parent_id":"`+root.ID+`","title":"Item","state":"new"}`)
+	item := mustNode(t, owner, `{"kind_id":"`+ticket.ID+`","parent_id":"`+root.ID+`","title":"Item","state":"new","fields":`+benefitFields+`}`)
 	status, raw := call(t, &owner, http.MethodPost, "/api/nodes/bulk", `{"ids":["`+item.ID+`"],"state":"done"}`)
 	batch := decode[bulkResult](t, status, raw, http.StatusOK)
 

@@ -15,6 +15,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/inspr-at/paimos/internal/ticketbenefits"
 )
 
 const nodeReturning = `id::text, key, kind_id::text, title, body, fields, state, parent_id::text, position::text, created_at, updated_at, deleted_at`
@@ -22,6 +23,7 @@ const nodeReturning = `id::text, key, kind_id::text, title, body, fields, state,
 const nodeCols = `n.id::text, n.key, n.kind_id::text, n.title, n.body, n.fields, n.state, n.parent_id::text, n.position::text, n.created_at, n.updated_at, n.deleted_at`
 
 type nodeJSON struct {
+	Warnings  []string        `json:"warnings,omitempty"`
 	ID        string          `json:"id"`
 	Key       string          `json:"key"`
 	KindID    string          `json:"kind_id"`
@@ -234,6 +236,9 @@ func (m *Module) createNode(ctx context.Context, p tenant.Principal, in nodeCrea
 		if err != nil {
 			return err
 		}
+		if issues := ticketbenefits.Transition(kind.Slug, "", state, fields); len(issues) > 0 {
+			return unprocessable("before done: " + strings.Join(issues, "; "))
+		}
 		if parentID != nil {
 			if err := ensureParentAllows(ctx, tx, *parentID, kind.Slug); err != nil {
 				return err
@@ -281,6 +286,9 @@ func (m *Module) createNode(ctx context.Context, p tenant.Principal, in nodeCrea
 			return err
 		}
 		node = loaded
+		if kind.Slug == "ticket" {
+			node.Warnings = ticketbenefits.Issues(fields)
+		}
 		return nil
 	})
 	return node, err
@@ -323,6 +331,7 @@ func (m *Module) updateNode(ctx context.Context, p tenant.Principal, id string, 
 		if expected != nil && !current.UpdatedAt.Equal(*expected) {
 			return &httpError{status: http.StatusPreconditionFailed, msg: "node has changed"}
 		}
+		nextState, nextFields := current.State, current.Fields
 		sets := []string{"updated_at = greatest(clock_timestamp(), updated_at + interval '1 microsecond')"}
 		args := []any{}
 		add := func(v any) string {
@@ -348,6 +357,7 @@ func (m *Module) updateNode(ctx context.Context, p tenant.Principal, id string, 
 			if err != nil || !nonBlank(s) {
 				return badRequest("invalid state")
 			}
+			nextState = s
 			sets = append(sets, "state = "+add(s))
 		}
 		if v, ok := raw["fields"]; ok {
@@ -362,7 +372,17 @@ func (m *Module) updateNode(ctx context.Context, p tenant.Principal, id string, 
 			if err != nil {
 				return err
 			}
+			nextFields = fields
 			sets = append(sets, "fields = "+add(string(fields))+"::jsonb")
+		}
+		if nextState == "done" && current.State != "done" {
+			kind, _, err := loadKind(ctx, tx, current.KindID)
+			if err != nil {
+				return err
+			}
+			if issues := ticketbenefits.Transition(kind.Slug, current.State, nextState, nextFields); len(issues) > 0 {
+				return unprocessable("before done: " + strings.Join(issues, "; "))
+			}
 		}
 		idPh := add(id)
 		q := fmt.Sprintf(`UPDATE nodes SET %s WHERE id = %s::uuid AND deleted_at IS NULL RETURNING %s`,

@@ -27,6 +27,7 @@ type History struct {
 
 // Release is one reserved or published version.
 type Release struct {
+	Notes           *Notes     `json:"notes,omitempty"`
 	Version         string     `json:"version"`
 	Tag             string     `json:"tag"`
 	ReleaseChannel  string     `json:"release_channel"`

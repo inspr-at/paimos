@@ -102,6 +102,7 @@ async function undoAdded(eventId: number) {
           <button type="button" class="btn sm" @click="ctx.data.loadWalker(ctx.release.value!.id, true)"><AppIcon name="refresh" :size="13" />Try again</button>
         </div>
         <div v-else-if="walker && !walker.tickets.length" class="j-empty"><strong>No tickets yet</strong><span>Agreeing the requirements generates the tickets{{ ctx.editable.value ? "; you can also add one below" : "" }}.</span></div>
+        <p v-if="ctx.editable.value && walker" class="benefit-hint">Add English and German pills and benefits in ticket details before Done.</p>
         <form v-if="ctx.editable.value && walker" class="add-row" @submit.prevent="addTicket">
           <input v-model="newTitle" class="field" :placeholder="narrow ? 'Add a ticket' : 'Add a ticket, e.g. Show opening hours on the order form'" aria-label="New ticket for this release" maxlength="500" />
           <select v-if="features.length" v-model="newFeature" class="field feature" aria-label="Feature of the new ticket">
@@ -167,6 +168,7 @@ async function undoAdded(eventId: number) {
 </template>
 
 <style scoped>
+.benefit-hint { color: var(--ink-3); font-size: 12px; }
 .list-skel { height: 560px; border-radius: 10px; }
 .add-row { display: flex; gap: 8px; }
 .add-row .field, .add-row .btn { height: 36px; }

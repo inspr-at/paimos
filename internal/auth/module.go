@@ -299,6 +299,12 @@ func coreAgentScope(r *http.Request) (string, bool) {
 		case "intake":
 			return scope("intake")
 		case "releases":
+			if len(parts) == 5 && parts[4] == "note-snapshot" {
+				if read {
+					return "releases.read", true
+				}
+				break
+			}
 			if len(parts) == 5 && parts[4] == "candidate-artifact" {
 				if read {
 					return "stage_handoffs.read", true

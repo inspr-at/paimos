@@ -144,6 +144,7 @@ var RoutePermissions = map[string]string{
 	"GET /api/projects/{projectId}/messages/listen":                                   "inbox.read",
 	"GET /api/projects/{projectId}/releases/{releaseId}/candidate-artifact":           "stage_handoffs.read",
 	"PUT /api/projects/{projectId}/releases/{releaseId}/candidate-artifact":           "stage_handoffs.write",
+	"GET /api/projects/{projectId}/releases/{releaseId}/note-snapshot":                "releases.read",
 	"GET /api/projects/{projectId}/releases/{releaseId}/walker":                       "releases.read",
 	"GET /api/projects/{projectId}/release-memberships":                               "releases.read",
 	"GET /api/projects/{projectId}/releases/{releaseId}/ticket-options":               "releases.read",
