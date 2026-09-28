@@ -97,9 +97,9 @@ func (s *Server) build() {
 	root := http.NewServeMux()
 	root.Handle("/api/", api)
 	root.Handle("/api", api)
-	// Cutover step 5 proxies classic API paths from pm.barta.cm and
-	// flow.inspr.at/paimos here (AEON-175). They moved for good: answer every
-	// method with 410 and the new location, without auth and without data.
+	// Old classic API paths that used to be proxied from pm.barta.cm and
+	// flow.inspr.at/paimos land here (AEON-175). They moved for good: answer
+	// every method with 410 and the new location, without auth and without data.
 	root.Handle("/from-classic/api/", commonMiddleware(http.HandlerFunc(handleClassicAPIGone)))
 	root.Handle("/", commonMiddleware(spaHandler(s.Web, s.brand())))
 	s.handler = root
