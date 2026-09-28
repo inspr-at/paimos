@@ -28,6 +28,15 @@ const maxBundle = 64 << 20
 
 var showcaseKey = regexp.MustCompile(`^[a-z][a-z0-9-]{0,62}$`)
 
+// Classic quote exports store layout measurements as JSON numbers. The quote
+// document keeps them as exact one-decimal strings. Strings already in that
+// form are left unchanged.
+var millimetreFields = map[string]bool{
+	"marker_x_mm": true, "marker_y_mm": true, "text_start_mm": true,
+	"spacing_before_mm": true, "spacing_after_mm": true,
+}
+var exactMillimetres = regexp.MustCompile(`^-?(?:0|[1-9][0-9]*)(?:\.[0-9])?$`)
+
 // Bundle is a showcase directory: one manifest, organisation files, quote files and optional profiles.
 type Bundle struct {
 	Features      map[string]string
@@ -293,8 +302,12 @@ func parseBundle(files map[string][]byte) (Bundle, error) {
 	}
 	seen := map[string]bool{}
 	for _, name := range quoteNames {
+		normalized, err := coerceMillimetreNumbers(files[name])
+		if err != nil {
+			return bundle, fmt.Errorf("%s: %w", name, err)
+		}
 		var file quoteFile
-		if err := decode(files[name], &file); err != nil {
+		if err := decode(normalized, &file); err != nil {
 			return bundle, fmt.Errorf("%s: %w", name, err)
 		}
 		quote, err := quoteFrom(file, orgs, contacts, contactOrg)
@@ -308,6 +321,49 @@ func parseBundle(files map[string][]byte) (Bundle, error) {
 		bundle.Quotes = append(bundle.Quotes, quote)
 	}
 	return bundle, nil
+}
+
+func coerceMillimetreNumbers(raw []byte) ([]byte, error) {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	var value any
+	if err := dec.Decode(&value); err != nil {
+		return nil, err
+	}
+	if err := dec.Decode(new(any)); !errors.Is(err, io.EOF) {
+		return nil, errors.New("must contain one JSON value")
+	}
+	if err := walkMillimetres(value); err != nil {
+		return nil, err
+	}
+	return json.Marshal(value)
+}
+
+func walkMillimetres(value any) error {
+	switch node := value.(type) {
+	case map[string]any:
+		for key, child := range node {
+			number, numeric := child.(json.Number)
+			if millimetreFields[key] && numeric {
+				text := number.String()
+				if !exactMillimetres.MatchString(text) {
+					return fmt.Errorf("%s has unsupported precision", key)
+				}
+				node[key] = text
+				continue
+			}
+			if err := walkMillimetres(child); err != nil {
+				return err
+			}
+		}
+	case []any:
+		for _, child := range node {
+			if err := walkMillimetres(child); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func decode(raw []byte, dest any) error {

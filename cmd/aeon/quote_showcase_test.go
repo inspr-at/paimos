@@ -75,7 +75,8 @@ func TestQuoteShowcaseOperatorCommand(t *testing.T) {
 		t.Fatalf("dry-run: %s: %v", out.String(), err)
 	}
 	quotes, _ := planned["quotes"].([]any)
-	if len(quotes) != 4 {
+	organisations, _ := planned["organisations"].([]any)
+	if len(quotes) != 5 || len(organisations) != 2 || !reportHasKey(quotes, "steinwender-belegleser") || !reportHasKey(organisations, "steinwender-metallbau") {
 		t.Fatalf("dry-run quotes: %s", out.String())
 	}
 	var stream bytes.Buffer
@@ -90,6 +91,16 @@ func TestQuoteShowcaseOperatorCommand(t *testing.T) {
 	if err := json.Unmarshal(out.Bytes(), &applied); err != nil || applied["applied"] != true {
 		t.Fatalf("apply: %s: %v", out.String(), err)
 	}
+}
+
+func reportHasKey(items []any, key string) bool {
+	for _, item := range items {
+		row, _ := item.(map[string]any)
+		if row["key"] == key {
+			return true
+		}
+	}
+	return false
 }
 
 func writeBundleTar(root string, dest *bytes.Buffer) error {

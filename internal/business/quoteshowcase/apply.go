@@ -20,6 +20,7 @@ import (
 	"github.com/inspr-at/paimos/internal/business/crm"
 	"github.com/inspr-at/paimos/internal/business/quotes"
 	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
 
@@ -107,195 +108,201 @@ func Apply(ctx context.Context, pool *pgxpool.Pool, tenantID, actorID, filesDir 
 		}
 		seen[strings.ToLower(id)] = true
 	}
-	for _, profile := range bundle.Profiles {
-		result, err := quotes.ApplyProfileBundle(ctx, pool, tenantID, actorID, filesDir, "", quotes.ProfileBundle{Profile: profile.Raw}, false, apply)
-		if err != nil {
-			return report, fmt.Errorf("profile %s: %w", profile.Name, err)
-		}
-		raw, err := json.Marshal(result)
-		if err != nil {
-			return report, err
-		}
-		var item ProfileItem
-		if err := json.Unmarshal(raw, &item); err != nil {
-			return report, err
-		}
-		item.Name = profile.Name
-		report.Profiles = append(report.Profiles, item)
-	}
-	err := db.InTenant(db.AllProjects(ctx, "quote showcase bundle"), pool, tenantID, func(tx pgx.Tx) error {
-		if apply {
-			var locked string
-			if err := tx.QueryRow(ctx, `SELECT id::text FROM tenants WHERE id=$1::uuid FOR UPDATE`, tenantID).Scan(&locked); err != nil {
-				return err
+	// Profiles, archives, organisations and quotes commit together. A missing
+	// archive id or link key rolls profile changes back with the rest.
+	err := db.InTransaction(ctx, pool, func(txCtx context.Context) error {
+		for _, profile := range bundle.Profiles {
+			result, err := quotes.ApplyProfileBundle(txCtx, pool, tenantID, actorID, filesDir, "", quotes.ProfileBundle{Profile: profile.Raw}, false, apply)
+			if err != nil {
+				return fmt.Errorf("profile %s: %w", profile.Name, err)
 			}
-			if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, tenantID+":quote-showcase"); err != nil {
-				return err
-			}
-		}
-		actor, err := resolveActor(ctx, tx, tenantID, actorID, apply)
-		if err != nil {
-			return err
-		}
-		settings, err := quotes.LoadShowcaseSettings(ctx, tx)
-		if err != nil {
-			return err
-		}
-		if settings.Revision == 0 {
-			return errors.New("quote settings must be configured")
-		}
-		if err := senderReady(settings.Sender); err != nil {
-			return err
-		}
-		day, err := quotes.ShowcaseDay(settings, time.Now())
-		if err != nil {
-			return err
-		}
-		for _, id := range archiveIDs {
-			if !apply {
-				row, err := quotes.ReadShowcaseQuote(ctx, tx, id)
-				if err != nil {
-					return fmt.Errorf("archive quote %s: quote not found", id)
-				}
-				action := "archive"
-				if row.Archived {
-					action = "already_archived"
-				}
-				report.Archives = append(report.Archives, ArchiveItem{ID: id, Action: action, OfferNo: row.OfferNo, Title: row.Title})
-				continue
-			}
-			row, changed, err := quotes.ArchiveShowcaseQuote(ctx, tx, actor, id)
+			raw, err := json.Marshal(result)
 			if err != nil {
 				return err
 			}
-			action := "already_archived"
-			if changed {
-				action = "archive"
+			var item ProfileItem
+			if err := json.Unmarshal(raw, &item); err != nil {
+				return err
 			}
-			report.Archives = append(report.Archives, ArchiveItem{ID: row.ID, Action: action, OfferNo: row.OfferNo, Title: row.Title})
+			item.Name = profile.Name
+			report.Profiles = append(report.Profiles, item)
 		}
-		orgIDs := map[string]string{}
-		contactIDs := map[string]storedContact{}
-		for _, org := range bundle.Organisations {
-			existing, err := quotes.FindShowcaseKey(ctx, tx, "organisation", org.Key)
+		return db.InTenant(db.AllProjects(txCtx, "quote showcase bundle"), pool, tenantID, func(tx pgx.Tx) error {
+			if apply {
+				var locked string
+				if err := tx.QueryRow(ctx, `SELECT id::text FROM tenants WHERE id=$1::uuid FOR UPDATE`, tenantID).Scan(&locked); err != nil {
+					return err
+				}
+				if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, tenantID+":quote-showcase"); err != nil {
+					return err
+				}
+			}
+			actor, err := resolveActor(ctx, tx, tenantID, actorID, apply)
 			if err != nil {
 				return err
 			}
-			if existing != "" {
-				orgIDs[org.Key] = existing
-				report.Organisations = append(report.Organisations, RecordItem{Key: org.Key, Action: "unchanged", Name: org.Name})
-			} else if !apply {
-				report.Organisations = append(report.Organisations, RecordItem{Key: org.Key, Action: "create", Name: org.Name})
-			} else {
-				created, err := crm.InsertCustomer(ctx, tx, actor, crm.CustomerWrite{Name: org.Name, CustomerFields: crm.CustomerFields{LegalName: org.LegalName, Industry: org.Industry, Website: org.Website, Phone: org.Phone, Description: org.Description, VATID: org.VATID, RegisterNo: org.RegisterNo, Currency: org.Currency, BillingAddress: &org.Billing}}, map[string]string{"showcase_key": org.Key})
-				if err != nil {
-					return fmt.Errorf("organisation %s: %w", org.Key, err)
-				}
-				orgIDs[org.Key] = created.ID
-				report.Organisations = append(report.Organisations, RecordItem{Key: org.Key, Action: "create", Name: org.Name})
+			settings, err := quotes.LoadShowcaseSettings(ctx, tx)
+			if err != nil {
+				return err
 			}
-			for _, contact := range org.Contacts {
-				existingID, err := quotes.FindShowcaseKey(ctx, tx, "contact", contact.Key)
+			if settings.Revision == 0 {
+				return errors.New("quote settings must be configured")
+			}
+			if err := senderReady(settings.Sender); err != nil {
+				return err
+			}
+			day, err := quotes.ShowcaseDay(settings, time.Now())
+			if err != nil {
+				return err
+			}
+			for _, id := range archiveIDs {
+				if !apply {
+					row, err := quotes.ReadShowcaseQuote(ctx, tx, id)
+					if err != nil {
+						return fmt.Errorf("archive quote %s: quote not found", id)
+					}
+					action := "archive"
+					if row.Archived {
+						action = "already_archived"
+					}
+					report.Archives = append(report.Archives, ArchiveItem{ID: id, Action: action, OfferNo: row.OfferNo, Title: row.Title})
+					continue
+				}
+				row, changed, err := quotes.ArchiveShowcaseQuote(ctx, tx, actor, id)
 				if err != nil {
 					return err
 				}
-				if existingID != "" {
-					var principalID string
-					if err := tx.QueryRow(ctx, `SELECT coalesce(fields->>'showcase_principal_id','') FROM nodes WHERE id=$1::uuid`, existingID).Scan(&principalID); err != nil {
+				action := "already_archived"
+				if changed {
+					action = "archive"
+				}
+				report.Archives = append(report.Archives, ArchiveItem{ID: row.ID, Action: action, OfferNo: row.OfferNo, Title: row.Title})
+			}
+			orgIDs := map[string]string{}
+			contactIDs := map[string]storedContact{}
+			for _, org := range bundle.Organisations {
+				existing, err := quotes.FindShowcaseKey(ctx, tx, "organisation", org.Key)
+				if err != nil {
+					return err
+				}
+				if existing != "" {
+					orgIDs[org.Key] = existing
+					report.Organisations = append(report.Organisations, RecordItem{Key: org.Key, Action: "unchanged", Name: org.Name})
+				} else if !apply {
+					report.Organisations = append(report.Organisations, RecordItem{Key: org.Key, Action: "create", Name: org.Name})
+				} else {
+					created, err := crm.InsertCustomer(ctx, tx, actor, crm.CustomerWrite{Name: org.Name, CustomerFields: crm.CustomerFields{LegalName: org.LegalName, Industry: org.Industry, Website: org.Website, Phone: org.Phone, Description: org.Description, VATID: org.VATID, RegisterNo: org.RegisterNo, Currency: org.Currency, BillingAddress: &org.Billing}}, map[string]string{"showcase_key": org.Key})
+					if err != nil {
+						return fmt.Errorf("organisation %s: %w", org.Key, err)
+					}
+					orgIDs[org.Key] = created.ID
+					report.Organisations = append(report.Organisations, RecordItem{Key: org.Key, Action: "create", Name: org.Name})
+				}
+				for _, contact := range org.Contacts {
+					existingID, err := quotes.FindShowcaseKey(ctx, tx, "contact", contact.Key)
+					if err != nil {
 						return err
+					}
+					if existingID != "" {
+						var principalID string
+						if err := tx.QueryRow(ctx, `SELECT coalesce(fields->>'showcase_principal_id','') FROM nodes WHERE id=$1::uuid`, existingID).Scan(&principalID); err != nil {
+							return err
+						}
+						principal := "none"
+						if contact.Principal {
+							if principalID == "" {
+								return fmt.Errorf("contact %s exists without its acceptance principal", contact.Key)
+							}
+							principal = "unchanged"
+						}
+						contactIDs[contact.Key] = storedContact{ID: existingID, PrincipalID: principalID, Name: contact.Name, Email: contact.Email}
+						report.Contacts = append(report.Contacts, ContactItem{Key: contact.Key, Action: "unchanged", Name: contact.Name, Principal: principal})
+						continue
 					}
 					principal := "none"
 					if contact.Principal {
-						if principalID == "" {
-							return fmt.Errorf("contact %s exists without its acceptance principal", contact.Key)
+						principal = "create"
+					}
+					if !apply {
+						report.Contacts = append(report.Contacts, ContactItem{Key: contact.Key, Action: "create", Name: contact.Name, Principal: principal})
+						continue
+					}
+					if orgIDs[org.Key] == "" {
+						return fmt.Errorf("organisation %s was not created", org.Key)
+					}
+					var principalID string
+					if contact.Principal {
+						var err error
+						principalID, err = createShowcasePerson(ctx, tx, actor, contact.Name)
+						if err != nil {
+							return fmt.Errorf("contact %s: %w", contact.Key, err)
 						}
-						principal = "unchanged"
 					}
-					contactIDs[contact.Key] = storedContact{ID: existingID, PrincipalID: principalID, Name: contact.Name, Email: contact.Email}
-					report.Contacts = append(report.Contacts, ContactItem{Key: contact.Key, Action: "unchanged", Name: contact.Name, Principal: principal})
-					continue
-				}
-				principal := "none"
-				if contact.Principal {
-					principal = "create"
-				}
-				if !apply {
+					extra := map[string]string{"showcase_key": contact.Key}
+					if principalID != "" {
+						extra["showcase_principal_id"] = principalID
+					}
+					created, err := crm.InsertContact(ctx, tx, actor, orgIDs[org.Key], crm.ContactWrite{Name: contact.Name, ContactFields: crm.ContactFields{Email: contact.Email, Phone: contact.Phone, Role: contact.Role}}, extra)
+					if err != nil {
+						return fmt.Errorf("contact %s: %w", contact.Key, err)
+					}
+					if principalID != "" {
+						if _, err := crm.BindContactPrincipal(ctx, tx, actor, created.ID, principalID); err != nil {
+							return fmt.Errorf("contact %s: %w", contact.Key, err)
+						}
+					}
+					contactIDs[contact.Key] = storedContact{ID: created.ID, PrincipalID: principalID, Name: contact.Name, Email: contact.Email}
 					report.Contacts = append(report.Contacts, ContactItem{Key: contact.Key, Action: "create", Name: contact.Name, Principal: principal})
+				}
+			}
+			for _, quote := range bundle.Quotes {
+				existing, err := quotes.FindShowcaseKey(ctx, tx, "quote", quote.Key)
+				if err != nil {
+					return err
+				}
+				if existing != "" {
+					row, err := quotes.ReadShowcaseQuote(ctx, tx, existing)
+					if err != nil {
+						return err
+					}
+					linked, err := quotes.ShowcaseHasPublicLink(ctx, tx, existing)
+					if err != nil {
+						return err
+					}
+					link := "none"
+					if linked {
+						link = "unchanged"
+					}
+					report.Quotes = append(report.Quotes, QuoteItem{Key: quote.Key, Action: "unchanged", Title: row.Title, State: row.State, Versions: row.Version, PublicLink: link, OfferNo: row.OfferNo, ID: row.ID})
 					continue
-				}
-				if orgIDs[org.Key] == "" {
-					return fmt.Errorf("organisation %s was not created", org.Key)
-				}
-				var principalID string
-				if contact.Principal {
-					if err := tx.QueryRow(ctx, `INSERT INTO principals(tenant_id,kind,name,roles) VALUES($1::uuid,'person',$2,'{}') RETURNING id::text`, actor.TenantID, contact.Name).Scan(&principalID); err != nil {
-						return fmt.Errorf("contact %s: %w", contact.Key, err)
-					}
-				}
-				extra := map[string]string{"showcase_key": contact.Key}
-				if principalID != "" {
-					extra["showcase_principal_id"] = principalID
-				}
-				created, err := crm.InsertContact(ctx, tx, actor, orgIDs[org.Key], crm.ContactWrite{Name: contact.Name, ContactFields: crm.ContactFields{Email: contact.Email, Phone: contact.Phone, Role: contact.Role}}, extra)
-				if err != nil {
-					return fmt.Errorf("contact %s: %w", contact.Key, err)
-				}
-				if principalID != "" {
-					if _, err := crm.BindContactPrincipal(ctx, tx, actor, created.ID, principalID); err != nil {
-						return fmt.Errorf("contact %s: %w", contact.Key, err)
-					}
-				}
-				contactIDs[contact.Key] = storedContact{ID: created.ID, PrincipalID: principalID, Name: contact.Name, Email: contact.Email}
-				report.Contacts = append(report.Contacts, ContactItem{Key: contact.Key, Action: "create", Name: contact.Name, Principal: principal})
-			}
-		}
-		for _, quote := range bundle.Quotes {
-			existing, err := quotes.FindShowcaseKey(ctx, tx, "quote", quote.Key)
-			if err != nil {
-				return err
-			}
-			if existing != "" {
-				row, err := quotes.ReadShowcaseQuote(ctx, tx, existing)
-				if err != nil {
-					return err
-				}
-				linked, err := quotes.ShowcaseHasPublicLink(ctx, tx, existing)
-				if err != nil {
-					return err
 				}
 				link := "none"
-				if linked {
-					link = "unchanged"
+				if quote.PublicLink {
+					if linkKey == nil {
+						link = "needs_link_key"
+					} else {
+						link = "create"
+					}
 				}
-				report.Quotes = append(report.Quotes, QuoteItem{Key: quote.Key, Action: "unchanged", Title: row.Title, State: row.State, Versions: row.Version, PublicLink: link, OfferNo: row.OfferNo, ID: row.ID})
-				continue
-			}
-			link := "none"
-			if quote.PublicLink {
-				if linkKey == nil {
-					link = "needs_link_key"
-				} else {
-					link = "create"
+				if !apply {
+					if err := planQuote(ctx, tx, bundle, settings, day, quote); err != nil {
+						return fmt.Errorf("quote %s: %w", quote.Key, err)
+					}
+					report.Quotes = append(report.Quotes, QuoteItem{Key: quote.Key, Action: "create", Title: quote.Versions[len(quote.Versions)-1].Title, State: quote.State, Versions: plannedVersions(quote), PublicLink: link})
+					continue
 				}
-			}
-			if !apply {
-				if err := planQuote(ctx, tx, bundle, settings, day, quote); err != nil {
+				if quote.PublicLink && linkKey == nil {
+					return fmt.Errorf("quote %s requests a public link but no host link key is configured (AEON_LINK_KEY_FILE or AEON_MESSAGING_KEY_FILE)", quote.Key)
+				}
+				item, err := writeQuote(ctx, tx, actor, bundle, settings, day, quote, orgIDs, contactIDs, linkKey)
+				if err != nil {
 					return fmt.Errorf("quote %s: %w", quote.Key, err)
 				}
-				report.Quotes = append(report.Quotes, QuoteItem{Key: quote.Key, Action: "create", Title: quote.Versions[len(quote.Versions)-1].Title, State: quote.State, Versions: plannedVersions(quote), PublicLink: link})
-				continue
+				item.PublicLink = link
+				report.Quotes = append(report.Quotes, item)
 			}
-			if quote.PublicLink && linkKey == nil {
-				return fmt.Errorf("quote %s requests a public link but no host link key is configured (AEON_LINK_KEY_FILE or AEON_MESSAGING_KEY_FILE)", quote.Key)
-			}
-			item, err := writeQuote(ctx, tx, actor, settings, day, quote, orgIDs, contactIDs, linkKey)
-			if err != nil {
-				return fmt.Errorf("quote %s: %w", quote.Key, err)
-			}
-			item.PublicLink = link
-			report.Quotes = append(report.Quotes, item)
-		}
-		return nil
+			return nil
+		})
 	})
 	if err != nil {
 		return report, err
@@ -369,8 +376,11 @@ func addressLines(address crm.Address) string {
 	return strings.TrimSpace(address.Street + "\n" + strings.TrimSpace(address.PostalCode+" "+address.City))
 }
 
-func writeQuote(ctx context.Context, tx pgx.Tx, actor tenant.Principal, settings quotes.ShowcaseSettings, day time.Time, quote QuoteSpec, orgIDs map[string]string, contacts map[string]storedContact, linkKey []byte) (QuoteItem, error) {
+func writeQuote(ctx context.Context, tx pgx.Tx, actor tenant.Principal, bundle Bundle, settings quotes.ShowcaseSettings, day time.Time, quote QuoteSpec, orgIDs map[string]string, contacts map[string]storedContact, linkKey []byte) (QuoteItem, error) {
 	var item QuoteItem
+	if err := planQuote(ctx, tx, bundle, settings, day, quote); err != nil {
+		return item, err
+	}
 	if quote.ProfileName == "" && settings.DefaultProfileID == "" {
 		return item, errors.New("quote settings have no default profile; run aeon quote-profile apply --default first")
 	}
@@ -437,6 +447,18 @@ func writeQuote(ctx context.Context, tx pgx.Tx, actor tenant.Principal, settings
 		created = issued
 	}
 	return QuoteItem{Key: quote.Key, Action: "create", Title: quote.Versions[len(quote.Versions)-1].Title, State: state, Versions: versions, OfferNo: created.OfferNo, ID: created.ID}, nil
+}
+
+// createShowcasePerson inserts the acceptance person and the same
+// principal.created audit the other principal creation paths append.
+// The event actor is the command actor, in the caller's transaction.
+func createShowcasePerson(ctx context.Context, tx pgx.Tx, actor tenant.Principal, name string) (string, error) {
+	var id string
+	if err := tx.QueryRow(ctx, `INSERT INTO principals(tenant_id,kind,name,roles) VALUES($1::uuid,'person',$2,'{}') RETURNING id::text`, actor.TenantID, name).Scan(&id); err != nil {
+		return "", err
+	}
+	_, err := events.Append(ctx, tx, actor, events.Change{Type: "principal.created", After: map[string]any{"id": id, "kind": "person", "name": name, "roles": []string{}}})
+	return id, err
 }
 
 func senderReady(raw json.RawMessage) error {
