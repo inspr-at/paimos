@@ -58,8 +58,9 @@ func selectHeartbeatCommits(found []heartbeatCommit, sent map[string]bool) []hea
 
 // localHeartbeatCommits reports commits created on the bound branch after the
 // helper started. Reflog actions distinguish those commits from history that
-// arrived by fast-forward or merge. The cursor walks oldest-first so a long
-// history cannot crowd out a later commit.
+// arrived by fast-forward, merge, or a rebase that only moved the ref.
+// Replayed rebase commits come from HEAD. The cursor walks oldest-first so a
+// long history cannot crowd out a later commit.
 func localHeartbeatCommits(ctx context.Context, worktree string, disk *heartbeatDisk) (batch []heartbeatCommit, skipped string) {
 	if strings.TrimSpace(worktree) == "" || disk == nil || filepath.Clean(worktree) != filepath.Clean(disk.BoundWorktree) {
 		return nil, ""
@@ -105,16 +106,26 @@ func localHeartbeatCommits(ctx context.Context, worktree string, disk *heartbeat
 }
 
 func localReflogSHAs(ctx context.Context, worktree string, disk *heartbeatDisk) (map[string]bool, error) {
-	lines, err := gitLines(ctx, worktree, heartbeatReflogWalk, "reflog", "show", "--date=unix", "--format=%H%x1f%gd%x1f%gs", disk.BoundBranch)
-	if err != nil {
+	local := map[string]bool{}
+	if err := collectReflog(ctx, worktree, disk, disk.BoundBranch, local, false); err != nil {
 		return nil, err
 	}
-	local := map[string]bool{}
+	// Replayed commits are named on HEAD (`rebase (pick)`). The branch reflog
+	// only records `rebase (finish)`, which also matches a fast-forward.
+	_ = collectReflog(ctx, worktree, disk, "HEAD", local, true)
+	return local, nil
+}
+
+func collectReflog(ctx context.Context, worktree string, disk *heartbeatDisk, ref string, local map[string]bool, rebaseOnly bool) error {
+	lines, err := gitLines(ctx, worktree, heartbeatReflogWalk, "reflog", "show", "--date=unix", "--format=%H%x1f%gd%x1f%gs", ref)
+	if err != nil {
+		return err
+	}
 	for _, line := range lines {
 		sha, rest, ok := strings.Cut(line, "\x1f")
 		selector, action, ok2 := strings.Cut(rest, "\x1f")
 		sha = strings.ToLower(strings.TrimSpace(sha))
-		if !ok || !ok2 || !validCommitSHA(sha) || !localReflogAction(action) {
+		if !ok || !ok2 || !validCommitSHA(sha) || !acceptReflogAction(action, rebaseOnly) {
 			continue
 		}
 		when, ok := reflogUnix(selector)
@@ -123,7 +134,14 @@ func localReflogSHAs(ctx context.Context, worktree string, disk *heartbeatDisk) 
 		}
 		local[sha] = true
 	}
-	return local, nil
+	return nil
+}
+
+func acceptReflogAction(msg string, rebaseOnly bool) bool {
+	if rebaseOnly {
+		return rebaseCreatesCommit(msg)
+	}
+	return localReflogAction(msg)
 }
 
 func localReflogAction(msg string) bool {
@@ -136,9 +154,29 @@ func localReflogAction(msg string) bool {
 		return true
 	case strings.HasPrefix(msg, "cherry-pick"):
 		return true
-	case strings.HasPrefix(msg, "rebase"):
+	case rebaseCreatesCommit(msg):
 		return true
 	case strings.HasPrefix(msg, "merge"):
+		return true
+	default:
+		return false
+	}
+}
+
+// rebaseCreatesCommit is true for a rebase step that writes a commit.
+// start, finish and abort only move a ref onto a commit that already exists.
+func rebaseCreatesCommit(msg string) bool {
+	msg = strings.TrimSpace(msg)
+	const prefix = "rebase ("
+	if !strings.HasPrefix(msg, prefix) {
+		return false
+	}
+	op, _, ok := strings.Cut(msg[len(prefix):], ")")
+	if !ok {
+		return false
+	}
+	switch op {
+	case "pick", "reword", "edit", "squash", "fixup", "continue":
 		return true
 	default:
 		return false

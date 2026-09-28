@@ -3,6 +3,7 @@
 package cli
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -1122,6 +1123,343 @@ func TestParseProcStatRejectsZombieShape(t *testing.T) {
 	state, start, err = parseProcStat([]byte("42 (a) b) Z 1 1 1 0 -1 0 0 0 0 0 0 0 0 0 20 0 1 0 99 0 0\n"))
 	if err != nil || state != "Z" || start != 99 {
 		t.Fatalf("zombie state %s start %d err %v", state, start, err)
+	}
+}
+
+func heartbeatProbeUsageLine(i int) string {
+	return fmt.Sprintf(`{"uuid":"%08d-0000-4000-8000-000000000000","type":"assistant","message":{"model":"claude-opus","usage":{"input_tokens":2,"output_tokens":1,"cache_read_input_tokens":0}}}`+"\n", i)
+}
+
+type heartbeatErrAfter struct {
+	context.Context
+	left int
+}
+
+func (c *heartbeatErrAfter) Err() error {
+	if c.left <= 0 {
+		return context.Canceled
+	}
+	c.left--
+	return c.Context.Err()
+}
+
+func TestUsagePartialLineKeepsStartOffset(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "usage.jsonl")
+	line := heartbeatProbeUsageLine(1)
+	cut := len(line) / 2
+	if err := os.WriteFile(path, []byte(line[:cut]), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	first, offset, recent, err := scanUsageWindow(context.Background(), path, "", 0, heartbeatUsageWindow, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = f.WriteString(line[cut:])
+	_ = f.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, _, _, err := scanUsageWindow(context.Background(), path, "", offset, heartbeatUsageWindow, recent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := first["claude-opus"].input + second["claude-opus"].input; got != 2 {
+		t.Fatalf("partial line lost: first cursor=%d, total input=%d, want 2", offset, got)
+	}
+}
+
+func TestUsageOversizedLineStaysInsideBudget(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "usage.jsonl")
+	if err := os.WriteFile(path, []byte(strings.Repeat("x", 8<<20)+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, offset, _, err := scanUsageWindow(context.Background(), path, "", 0, heartbeatUsageWindow, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if offset > heartbeatUsageWindow+heartbeatUsageLineMax+1 {
+		t.Fatalf("1 MiB scan consumed %d bytes through one oversized line", offset)
+	}
+}
+
+func TestReadLimitedLineHonorsCancelAndBudget(t *testing.T) {
+	payload := strings.Repeat("x", 8<<20) + "\n"
+	ctx := &heartbeatErrAfter{Context: context.Background(), left: 1}
+	reader := bufio.NewReader(strings.NewReader(payload))
+	_, _, err := readLimitedLine(ctx, reader, heartbeatUsageLineMax, int64(heartbeatUsageLineMax)+1)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled read: %v", err)
+	}
+	rest, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rest) < 7<<20 {
+		t.Fatalf("cancelled line read consumed too much, left %d", len(rest))
+	}
+
+	budgetReader := bufio.NewReader(strings.NewReader(payload))
+	_, overflow, err := readLimitedLine(context.Background(), budgetReader, heartbeatUsageLineMax, 4096)
+	if err != nil || !overflow {
+		t.Fatalf("budget overflow=%v err=%v", overflow, err)
+	}
+	left, err := io.ReadAll(budgetReader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(left) < 7<<20 {
+		t.Fatalf("budget read consumed the rest of the line, left %d", len(left))
+	}
+}
+
+func TestHeartbeatBeatLookupHonorsCancellation(t *testing.T) {
+	var calls []hbCall
+	slow := false
+	srv := hbServer(t, &calls, func(r *http.Request, _ map[string]any, w http.ResponseWriter) bool {
+		if slow && r.URL.Path == "/api/nodes" {
+			time.Sleep(250 * time.Millisecond)
+		}
+		return false
+	})
+	defer srv.Close()
+	rt, _, _ := heartbeatRuntime(t, srv)
+	opts := heartbeatTestOptions(t.TempDir())
+	session, _, err := rt.openHeartbeatSession(context.Background(), opts, heartbeatDeps{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer session.hold.release()
+	slow = true
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	started := time.Now()
+	err = rt.heartbeatBeat(ctx, opts, heartbeatDeps{}, &session)
+	elapsed := time.Since(started)
+	if err == nil {
+		t.Fatal("deadline did not return an error")
+	}
+	if elapsed > 150*time.Millisecond {
+		t.Fatalf("20 ms cancellation took %v in project lookup", elapsed)
+	}
+}
+
+func TestFinalUsageDrainsBacklog(t *testing.T) {
+	var calls []hbCall
+	srv := heartbeatFixture(t, &calls, "", "")
+	defer srv.Close()
+	rt, _, _ := heartbeatRuntime(t, srv)
+	opts := heartbeatTestOptions(t.TempDir())
+	opts.Transcript = filepath.Join(filepath.Dir(opts.StateDir), "usage.jsonl")
+	if err := os.WriteFile(opts.Transcript, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	const count = 12000
+	err := rt.runHeartbeat(context.Background(), opts, heartbeatDeps{
+		alive: func(int) bool { return true },
+		wait: func(context.Context, int, time.Duration) error {
+			var content strings.Builder
+			for i := 1; i <= count; i++ {
+				content.WriteString(heartbeatProbeUsageLine(i))
+			}
+			if err := os.WriteFile(opts.Transcript, []byte(content.String()), 0o600); err != nil {
+				return err
+			}
+			return errOwnerExited
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	usage := hbWhere(calls, http.MethodPost, "/usage")
+	got := float64(0)
+	if len(usage) > 0 {
+		got, _ = usage[len(usage)-1].body["input_tokens"].(float64)
+	}
+	if got != count*2 {
+		t.Fatalf("stopped after flushing %.0f input tokens; want %d", got, count*2)
+	}
+}
+
+func TestFinalUsageTimeoutStillStops(t *testing.T) {
+	prev := heartbeatUsageFlushTimeout
+	heartbeatUsageFlushTimeout = 200 * time.Millisecond
+	t.Cleanup(func() { heartbeatUsageFlushTimeout = prev })
+	var calls []hbCall
+	srv := hbServer(t, &calls, func(r *http.Request, _ map[string]any, w http.ResponseWriter) bool {
+		if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/usage") {
+			<-r.Context().Done()
+			return true
+		}
+		return false
+	})
+	defer srv.Close()
+	rt, _, _ := heartbeatRuntime(t, srv)
+	opts := heartbeatTestOptions(t.TempDir())
+	opts.Transcript = filepath.Join(filepath.Dir(opts.StateDir), "usage.jsonl")
+	if err := os.WriteFile(opts.Transcript, []byte(heartbeatProbeUsageLine(1)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	session, _, err := rt.openHeartbeatSession(context.Background(), opts, heartbeatDeps{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer session.hold.release()
+	started := time.Now()
+	err = rt.finishHeartbeat(opts, &session)
+	if got := len(hbWhere(calls, http.MethodPost, "/stop")); got != 1 {
+		t.Fatalf("after %v usage timeout, /stop requests=%d (want 1); finish error=%v", time.Since(started), got, err)
+	}
+	if time.Since(started) > 2*time.Second {
+		t.Fatalf("stop waited on the usage budget: %v", time.Since(started))
+	}
+}
+
+func TestFinishHeartbeatStopIntentIsRetried(t *testing.T) {
+	var calls []hbCall
+	stops := 0
+	srv := hbServer(t, &calls, func(r *http.Request, _ map[string]any, w http.ResponseWriter) bool {
+		if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/stop") {
+			stops++
+			if stops == 1 {
+				w.WriteHeader(http.StatusInternalServerError)
+				_, _ = w.Write([]byte(`{"error":"unavailable"}`))
+				return true
+			}
+		}
+		return false
+	})
+	defer srv.Close()
+	rt, _, _ := heartbeatRuntime(t, srv)
+	opts := heartbeatTestOptions(t.TempDir())
+	session, _, err := rt.openHeartbeatSession(context.Background(), opts, heartbeatDeps{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = rt.finishHeartbeat(opts, &session)
+	if err == nil {
+		t.Fatal("stop failure was ignored")
+	}
+	if _, statErr := os.Lstat(filepath.Join(opts.StateDir, "stop.intent")); statErr != nil {
+		t.Fatalf("stop intent: %v", statErr)
+	}
+	session.hold.release()
+	resumed, _, err := rt.openHeartbeatSession(context.Background(), opts, heartbeatDeps{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resumed.hold.release()
+	if stops < 2 {
+		t.Fatalf("stops %d", stops)
+	}
+	if _, statErr := os.Lstat(filepath.Join(opts.StateDir, "stop.intent")); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatal("retried stop left the intent in place")
+	}
+}
+
+func TestStopIntentFlushesPendingUsage(t *testing.T) {
+	dir := t.TempDir()
+	transcript := filepath.Join(dir, "usage.jsonl")
+	if err := os.WriteFile(transcript, []byte(heartbeatProbeUsageLine(1)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var calls []hbCall
+	posts := 0
+	srv := hbServer(t, &calls, func(r *http.Request, _ map[string]any, w http.ResponseWriter) bool {
+		if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/usage") {
+			posts++
+			if posts == 1 {
+				conn, _, err := w.(http.Hijacker).Hijack()
+				if err != nil {
+					t.Errorf("hijack: %v", err)
+					return true
+				}
+				_ = conn.Close()
+				return true
+			}
+		}
+		return false
+	})
+	defer srv.Close()
+	rt, _, _ := heartbeatRuntime(t, srv)
+	opts := heartbeatTestOptions(dir)
+	opts.Transcript = transcript
+	session, _, err := rt.openHeartbeatSession(context.Background(), opts, heartbeatDeps{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = rt.reportHeartbeatUsage(context.Background(), transcriptProjectID, opts, &session)
+	if err == nil {
+		session.hold.release()
+		t.Fatal("first report should lose its response")
+	}
+	if len(session.disk.PendingUsage) != 1 {
+		session.hold.release()
+		t.Fatalf("pending %d", len(session.disk.PendingUsage))
+	}
+	if err := session.hold.writeFile("stop.intent", []byte(session.id+"\n")); err != nil {
+		session.hold.release()
+		t.Fatal(err)
+	}
+	session.hold.release()
+	resumed, _, err := rt.openHeartbeatSession(context.Background(), opts, heartbeatDeps{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resumed.hold.release()
+	usage := hbWhere(calls, http.MethodPost, "/usage")
+	if len(usage) < 2 || usage[0].body["report_id"] != usage[1].body["report_id"] || usage[1].body["input_tokens"] != float64(2) {
+		t.Fatalf("pending usage was not retried: %#v", usage)
+	}
+	if len(hbWhere(calls, http.MethodPost, "/stop")) < 1 {
+		t.Fatal("retried start did not stop")
+	}
+}
+
+func TestRebaseFastForwardIsNotLocal(t *testing.T) {
+	repo, _ := gitRepo(t)
+	opts := heartbeatOptions{Worktree: repo}
+	disk := heartbeatDisk{}
+	bindHeartbeatWorktree(context.Background(), opts, &disk)
+	branch := disk.BoundBranch
+	gitCmd(t, repo, "checkout", "-b", "upstream")
+	gitCommit(t, repo, "imported-upstream")
+	gitCmd(t, repo, "checkout", branch)
+	gitCmd(t, repo, "rebase", "upstream")
+	commits, _ := localHeartbeatCommits(context.Background(), repo, &disk)
+	for _, c := range commits {
+		if c.Subject == "imported-upstream" {
+			t.Fatal("rebase fast-forward attributed upstream's commit to the worker")
+		}
+	}
+}
+
+func TestRebaseReplayKeepsLocalCommits(t *testing.T) {
+	repo, base := gitRepo(t)
+	opts := heartbeatOptions{Worktree: repo}
+	disk := heartbeatDisk{}
+	bindHeartbeatWorktree(context.Background(), opts, &disk)
+	branch := disk.BoundBranch
+	if err := os.WriteFile(filepath.Join(repo, "local"), []byte("local\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitCmd(t, repo, "add", "local")
+	gitCmd(t, repo, "commit", "-m", "local-work")
+	gitCmd(t, repo, "checkout", "-b", "upstream", base)
+	gitCommit(t, repo, "upstream-work")
+	gitCmd(t, repo, "checkout", branch)
+	gitCmd(t, repo, "rebase", "upstream")
+	commits, _ := localHeartbeatCommits(context.Background(), repo, &disk)
+	subjects := make([]string, 0, len(commits))
+	for _, c := range commits {
+		subjects = append(subjects, c.Subject)
+	}
+	joined := strings.Join(subjects, "\n")
+	if !strings.Contains(joined, "local-work") || strings.Contains(joined, "upstream-work") {
+		t.Fatalf("rebase replay commits %v", subjects)
 	}
 }
 

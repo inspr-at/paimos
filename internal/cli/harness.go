@@ -201,10 +201,19 @@ func (rt *runtime) harnessDoCtx(ctx context.Context, method, path, lease string,
 	return nil
 }
 func (rt *runtime) harnessProject(ref string) (string, error) {
+	return rt.harnessProjectCtx(context.Background(), ref)
+}
+
+// harnessProjectCtx resolves a project key on ctx. Heartbeat beats use it so a
+// shutdown deadline cancels the lookup instead of waiting out the client timeout.
+func (rt *runtime) harnessProjectCtx(ctx context.Context, ref string) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 	if strings.TrimSpace(ref) == "" {
 		return "", usagef("--project is required")
 	}
-	n, err := rt.projectNode(ref)
+	n, err := rt.projectNodeCtx(ctx, ref)
 	return n.ID, err
 }
 func (rt *runtime) printHarness(v any) error {

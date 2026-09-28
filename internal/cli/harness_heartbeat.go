@@ -27,7 +27,14 @@ const (
 	heartbeatTitleLineMax = 4096
 	heartbeatUsageLineMax = 1 << 20
 	heartbeatNoteMax      = 120
-	heartbeatStopTimeout  = 15 * time.Second
+)
+
+// heartbeatStopTimeout bounds one stop attempt. The final usage flush has its
+// own budget, so a stalled usage request cannot consume the stop. Tests may
+// shorten either budget; production callers keep these defaults.
+var (
+	heartbeatStopTimeout       = 15 * time.Second
+	heartbeatUsageFlushTimeout = 15 * time.Second
 )
 
 var (
@@ -295,29 +302,98 @@ func waitHeartbeat(ctx context.Context, pid int, alive func(int) bool, interval 
 }
 
 func (rt *runtime) finishHeartbeat(o heartbeatOptions, session *heartbeatSession) error {
-	ctx, cancel := context.WithTimeout(context.Background(), heartbeatStopTimeout)
-	defer cancel()
-	if o.Transcript != "" && !session.disk.Terminal {
-		projectID, err := rt.harnessProject(o.Project)
-		if err == nil {
-			if uerr := rt.reportHeartbeatUsage(ctx, projectID, o, session); uerr != nil {
-				if heartbeatTerminalStatus(uerr) {
-					markHeartbeatTerminal(session, terminalReason(uerr))
-					_ = saveHeartbeatSession(session)
-					return nil
-				}
-				fmt.Fprintf(rt.stderr, "heartbeat: final usage flush failed\n")
-			}
-			// Success clears a pending report in memory. Persist that either way so a
-			// lost acknowledgement stays replayable and an accepted one is not sent again.
-			_ = saveHeartbeatSession(session)
-		}
+	if !session.disk.Terminal {
+		usageCtx, cancel := context.WithTimeout(context.Background(), heartbeatUsageFlushTimeout)
+		rt.drainHeartbeatUsage(usageCtx, o, session)
+		cancel()
 	}
 	if session.disk.Terminal {
 		_ = saveHeartbeatSession(session)
 		return nil
 	}
-	return rt.stopHeartbeat(ctx, o.Project, *session)
+	return rt.finishStop(o, session)
+}
+
+// drainHeartbeatUsage posts every complete usage window that fits in ctx.
+// A stalled report ends this budget only; the cursor and any unacknowledged
+// report stay on disk for the next start.
+func (rt *runtime) drainHeartbeatUsage(ctx context.Context, o heartbeatOptions, session *heartbeatSession) {
+	if session == nil || session.disk.Terminal {
+		return
+	}
+	if o.Transcript == "" && len(session.disk.PendingUsage) == 0 {
+		return
+	}
+	projectID := session.disk.ProjectID
+	if !validUUID(projectID) {
+		var err error
+		projectID, err = rt.harnessProjectCtx(ctx, o.Project)
+		if err != nil {
+			fmt.Fprintf(rt.stderr, "heartbeat: final usage flush failed\n")
+			return
+		}
+		session.disk.ProjectID = projectID
+	}
+	for {
+		if err := ctx.Err(); err != nil {
+			_ = saveHeartbeatSession(session)
+			return
+		}
+		beforeOff := session.disk.UsageOffset
+		beforePending := len(session.disk.PendingUsage)
+		uerr := rt.reportHeartbeatUsage(ctx, projectID, o, session)
+		if heartbeatTerminalStatus(uerr) {
+			markHeartbeatTerminal(session, terminalReason(uerr))
+			_ = saveHeartbeatSession(session)
+			return
+		}
+		if uerr != nil {
+			fmt.Fprintf(rt.stderr, "heartbeat: final usage flush failed\n")
+			_ = saveHeartbeatSession(session)
+			return
+		}
+		if err := saveHeartbeatSession(session); err != nil {
+			fmt.Fprintf(rt.stderr, "heartbeat: final usage flush failed\n")
+			return
+		}
+		if len(session.disk.PendingUsage) == 0 && heartbeatTranscriptCaughtUp(o.Transcript, session.disk.UsageOffset) {
+			return
+		}
+		if session.disk.UsageOffset == beforeOff && len(session.disk.PendingUsage) == beforePending {
+			return
+		}
+	}
+}
+
+func heartbeatTranscriptCaughtUp(path string, offset int64) bool {
+	if path == "" || unsafeHeartbeatPath(path) {
+		return true
+	}
+	info, err := os.Lstat(path)
+	if err != nil || !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
+		return true
+	}
+	return offset >= info.Size()
+}
+
+// finishStop closes the generation on a budget that the usage flush does not share.
+// A failed close leaves stop.intent so the next start retries it.
+func (rt *runtime) finishStop(o heartbeatOptions, session *heartbeatSession) error {
+	ctx, cancel := context.WithTimeout(context.Background(), heartbeatStopTimeout)
+	defer cancel()
+	err := rt.stopHeartbeat(ctx, o.Project, *session)
+	if err != nil {
+		rememberStopIntent(session)
+		return err
+	}
+	return nil
+}
+
+func rememberStopIntent(session *heartbeatSession) {
+	if session == nil || session.id == "" || session.hold.dir == nil {
+		return
+	}
+	_ = session.hold.writeFile("stop.intent", []byte(session.id+"\n"))
 }
 
 // abandonHeartbeat closes a generation whose state could not be saved, and
@@ -328,7 +404,7 @@ func (rt *runtime) abandonHeartbeat(o heartbeatOptions, session *heartbeatSessio
 	if err := rt.stopHeartbeat(ctx, o.Project, *session); err != nil {
 		fmt.Fprintf(rt.stderr, "heartbeat: could not close the new session\n")
 		_ = session.hold.writeFile("session.id", []byte(session.id+"\n"))
-		_ = session.hold.writeFile("stop.intent", []byte(session.id+"\n"))
+		rememberStopIntent(session)
 		return cause
 	}
 	_ = clearHeartbeatIdentity(&session.hold)
@@ -365,7 +441,7 @@ func (rt *runtime) openHeartbeatSession(ctx context.Context, o heartbeatOptions,
 		existing.hold = session.hold
 		return existing, false, nil
 	}
-	projectID, err := rt.harnessProject(o.Project)
+	projectID, err := rt.harnessProjectCtx(ctx, o.Project)
 	if err != nil {
 		return heartbeatSession{}, false, err
 	}
@@ -428,7 +504,7 @@ func (rt *runtime) openHeartbeatSession(ctx context.Context, o heartbeatOptions,
 	if !validUUID(out.ID) {
 		return heartbeatSession{}, false, errors.New("registration did not return a session id")
 	}
-	disk := heartbeatDisk{Schema: heartbeatSchema, SessionID: strings.ToLower(out.ID), OwnerPID: o.OwnerPID}
+	disk := heartbeatDisk{Schema: heartbeatSchema, SessionID: strings.ToLower(out.ID), OwnerPID: o.OwnerPID, ProjectID: projectID}
 	if stamp, stampErr := readOwnerStamp(o.OwnerPID); stampErr == nil {
 		disk.OwnerPID = stamp.PID
 		disk.OwnerStart = stamp.Start
@@ -454,9 +530,20 @@ func (rt *runtime) recoverStopIntent(o heartbeatOptions, session *heartbeatSessi
 	if err != nil || !validUUID(id) {
 		return errHeartbeatState
 	}
+	stopping := heartbeatSession{id: id, lease: lease}
+	// A previous flush may have saved a report and then failed to stop.
+	// Post that work on the usage budget, then stop on a fresh one.
+	if existing, ok, loadErr := loadHeartbeatSession(&session.hold); loadErr == nil && ok && strings.EqualFold(existing.id, id) {
+		existing.hold = session.hold
+		existing.lease = lease
+		usageCtx, cancel := context.WithTimeout(context.Background(), heartbeatUsageFlushTimeout)
+		rt.drainHeartbeatUsage(usageCtx, o, &existing)
+		cancel()
+		stopping.disk.ProjectID = existing.disk.ProjectID
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), heartbeatStopTimeout)
 	defer cancel()
-	stopErr := rt.stopHeartbeat(ctx, o.Project, heartbeatSession{id: id, lease: lease})
+	stopErr := rt.stopHeartbeat(ctx, o.Project, stopping)
 	if stopErr != nil {
 		return stopErr
 	}
@@ -482,10 +569,13 @@ func (rt *runtime) heartbeatBeat(ctx context.Context, o heartbeatOptions, dep he
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	projectID, err := rt.harnessProject(o.Project)
+	// Resolve on the beat's context every time. A cached id would hide a
+	// cancelled lookup, and the shutdown path reads ProjectID instead.
+	projectID, err := rt.harnessProjectCtx(ctx, o.Project)
 	if err != nil {
 		return err
 	}
+	session.disk.ProjectID = projectID
 	session.disk.Sequence++
 	body := map[string]any{
 		"phase":             o.Phase,
@@ -575,11 +665,15 @@ func (rt *runtime) stopHeartbeat(ctx context.Context, project string, session he
 	if session.id == "" || session.lease == "" {
 		return nil
 	}
-	projectID, err := rt.harnessProject(project)
-	if err != nil {
-		return err
+	projectID := session.disk.ProjectID
+	if !validUUID(projectID) {
+		var err error
+		projectID, err = rt.harnessProjectCtx(ctx, project)
+		if err != nil {
+			return err
+		}
 	}
-	err = rt.harnessDoCtx(ctx, http.MethodPost, harnessPath(projectID, session.id)+"/stop", session.lease, map[string]string{"reason": "stopped"}, new(any))
+	err := rt.harnessDoCtx(ctx, http.MethodPost, harnessPath(projectID, session.id)+"/stop", session.lease, map[string]string{"reason": "stopped"}, new(any))
 	if heartbeatTerminalStatus(err) {
 		return nil
 	}

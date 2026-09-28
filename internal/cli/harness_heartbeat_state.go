@@ -21,6 +21,7 @@ type heartbeatHold struct {
 type heartbeatDisk struct {
 	Schema         string                  `json:"schema"`
 	SessionID      string                  `json:"session_id"`
+	ProjectID      string                  `json:"project_id,omitempty"`
 	Sequence       int64                   `json:"sequence"`
 	LabelSent      bool                    `json:"label_sent"`
 	SentLabel      string                  `json:"sent_label,omitempty"`
