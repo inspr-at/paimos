@@ -1,11 +1,11 @@
 {
   "product": "PAIMOS AEON",
   "version_scheme": "inspr-calendar-v2",
-  "version": "260928080324.0.0",
+  "version": "260928085354.0.0",
   "release_channel": "stable",
-  "release_sequence": 88,
-  "reserved_at": "2026-09-28T08:03:24Z",
-  "ticket": "AEON-207",
+  "release_sequence": 89,
+  "reserved_at": "2026-09-28T08:53:54Z",
+  "ticket": "AEON-242",
   "unpublished_reservations": [
     "260923134337.0.0",
     "260925231350.0.0"
