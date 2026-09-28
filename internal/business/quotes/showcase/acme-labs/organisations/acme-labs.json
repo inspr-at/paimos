@@ -1,0 +1,38 @@
+{
+  "schema": "aeon.quote-showcase.v1",
+  "key": "acme-labs",
+  "name": "ACME Labs GmbH",
+  "legal_name": "ACME Labs GmbH",
+  "industry": "Analytische Labortechnik",
+  "website": "https://acme-labs.example",
+  "phone": "+43 316 445510",
+  "vat_id": "ATU87654321",
+  "register_no": "FN 654321 p",
+  "description": "Fiktives Laborunternehmen. Eingetragen zur Veranschaulichung beim Landesgericht für Zivilrechtssachen Graz.",
+  "currency": "EUR",
+  "billing_address": {
+    "street": "Laborstraße 14",
+    "postal_code": "8010",
+    "city": "Graz",
+    "country": "Österreich"
+  },
+  "contacts": [
+    {
+      "key": "acme-lena-hofer",
+      "name": "Lena Hofer",
+      "email": "lena.hofer@acme-labs.example",
+      "phone": "+43 316 445510",
+      "role": "Leitung Laborbetrieb",
+      "primary": true,
+      "principal": true
+    },
+    {
+      "key": "acme-jonas-berger",
+      "name": "Jonas Berger",
+      "email": "jonas.berger@acme-labs.example",
+      "phone": "+43 316 445511",
+      "role": "Einkauf",
+      "primary": false
+    }
+  ]
+}
