@@ -13,11 +13,13 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/inspr-at/paimos/internal/harness"
 	"github.com/inspr-at/paimos/internal/releasehistory"
 	"github.com/inspr-at/paimos/internal/rules"
 	"github.com/inspr-at/paimos/internal/rulesimport"
+	"github.com/inspr-at/paimos/internal/workorders"
 )
 
 const Schema = "aeon.instruction-comparison.v1"
@@ -28,25 +30,27 @@ const MaxFiles = 32
 // Input is one explicit comparison. Nil merged or provenance bytes mean that
 // document was not supplied. They are never inferred from names.
 type Input struct {
-	Context    rulesimport.TrustContext
-	Section    string
-	Files      []string
-	Merged     []byte
-	Provenance []byte
+	Context           rulesimport.TrustContext
+	Section           string
+	Files             []string
+	Merged            []byte
+	Provenance        []byte
+	ExpectedSessionID string
 }
 
 // Limits are constant facts about this report. They do not change when hashes agree.
 type Limits struct {
-	SuppliedFilesAreExpectedInputs bool `json:"supplied_files_are_expected_inputs"`
-	ReceiptProvesRecordedBytesOnly bool `json:"receipt_proves_recorded_bytes_only"`
-	NameMatchIsNotComparison       bool `json:"name_match_is_not_comparison"`
-	NormalizedHashIsNotRawBytes    bool `json:"normalized_hash_is_not_raw_bytes"`
-	ModelLoadVerified              bool `json:"model_load_verified"`
-	ModelObedienceVerified         bool `json:"model_obedience_verified"`
-	ExecutionVerified              bool `json:"execution_verified"`
-	WaitingWindow                  bool `json:"waiting_window"`
-	ActiveInstructionReplaced      bool `json:"active_instruction_replaced"`
-	RolloutAuthorized              bool `json:"rollout_authorized"`
+	SuppliedFilesAreExpectedInputs   bool `json:"supplied_files_are_expected_inputs"`
+	ReceiptProvesRecordedBytesOnly   bool `json:"receipt_proves_recorded_bytes_only"`
+	SuppliedMetadataIsNotServerProof bool `json:"supplied_metadata_is_not_server_proof"`
+	NameMatchIsNotComparison         bool `json:"name_match_is_not_comparison"`
+	NormalizedHashIsNotRawBytes      bool `json:"normalized_hash_is_not_raw_bytes"`
+	ModelLoadVerified                bool `json:"model_load_verified"`
+	ModelObedienceVerified           bool `json:"model_obedience_verified"`
+	ExecutionVerified                bool `json:"execution_verified"`
+	WaitingWindow                    bool `json:"waiting_window"`
+	ActiveInstructionReplaced        bool `json:"active_instruction_replaced"`
+	RolloutAuthorized                bool `json:"rollout_authorized"`
 }
 
 // Report is the one-time check. It contains hashes, keys and statuses, not instruction prose.
@@ -56,11 +60,13 @@ type Report struct {
 	SuppliedTrustContext   string       `json:"supplied_trust_context"`
 	Section                string       `json:"section"`
 	PublishedMergeCompared bool         `json:"published_merge_compared"`
+	SuppliedMergeCompared  bool         `json:"supplied_merge_compared"`
 	Blockers               []string     `json:"blockers"`
 	MissingRuntimeEvidence []Gap        `json:"missing_runtime_evidence"`
 	SuppliedInputs         []Supplied   `json:"supplied_inputs"`
 	Merge                  *MergeView   `json:"merge"`
 	Receipts               []Receipt    `json:"receipts"`
+	UnverifiedComparisons  []Receipt    `json:"unverified_comparisons"`
 	Lineage                LineageView  `json:"lineage"`
 	Differences            []Difference `json:"differences"`
 	Unresolved             []Item       `json:"unresolved"`
@@ -101,11 +107,13 @@ type MergeView struct {
 	FloorPresent              bool               `json:"floor_present"`
 	FloorInBody               bool               `json:"floor_in_body"`
 	Published                 bool               `json:"published"`
+	MetadataCurrentAndValid   bool               `json:"metadata_current_and_valid"`
 	SnapshotDigestsReverified bool               `json:"snapshot_digests_reverified"`
 }
 
-// Receipt is one recorded provenance item compared with supplied raw bytes.
+// Receipt compares one item in supplied, session-bound revision metadata.
 type Receipt struct {
+	Evidence           string   `json:"evidence"`
 	LogicalName        string   `json:"logical_name"`
 	Kind               string   `json:"kind"`
 	HashKind           string   `json:"hash_kind"`
@@ -113,6 +121,7 @@ type Receipt struct {
 	ByteSize           *int64   `json:"byte_size,omitempty"`
 	Version            string   `json:"version,omitempty"`
 	RawBytesReceived   bool     `json:"raw_bytes_received"`
+	RawDigestMatches   bool     `json:"raw_digest_matches_supplied"`
 	MergedBodyReceived bool     `json:"merged_body_received"`
 	NormalizedHashOnly bool     `json:"normalized_hash_only"`
 	NameWithoutRawHash bool     `json:"name_without_raw_hash"`
@@ -185,6 +194,9 @@ type Counts struct {
 
 type provMeta struct {
 	supplied  bool
+	recorded  bool
+	sessionID string
+	kind      string
 	items     []harness.ProvenanceItem
 	revisions int
 	truncated bool
@@ -257,18 +269,29 @@ func Compare(ctx context.Context, in Input) (Report, error) {
 	if err != nil {
 		return Report{}, err
 	}
+	if prov.supplied {
+		if !workorders.UUID(in.ExpectedSessionID) || strings.ToLower(in.ExpectedSessionID) != in.ExpectedSessionID || prov.sessionID != in.ExpectedSessionID {
+			prov.recorded = false
+			report.MissingRuntimeEvidence = append(report.MissingRuntimeEvidence, Gap{Kind: "provenance_session_unbound", Note: "supply --session with the matching canonical session ID before attributing provenance to a session"})
+		}
+		if !prov.recorded {
+			report.MissingRuntimeEvidence = append(report.MissingRuntimeEvidence, Gap{Kind: "provenance_unverified_input", Note: "proposal, incomplete or session-unbound provenance JSON is only an unverified digest comparison, not a recorded session receipt"})
+		}
+	}
 	if !merge.supplied {
 		report.Blockers = append(report.Blockers, "published_layer_unavailable")
-		report.MissingRuntimeEvidence = append(report.MissingRuntimeEvidence, Gap{Kind: "published_merge_not_supplied", Note: "no published merged rules document was supplied; current rules are not live"})
+		report.MissingRuntimeEvidence = append(report.MissingRuntimeEvidence, Gap{Kind: "published_merge_not_supplied", Note: "no merge metadata was supplied; snapshot publication and current rules are unverified"})
 	} else {
 		view := merge.view
 		report.Merge = &view
 		if !view.IntegrityOK {
 			report.Blockers = append(report.Blockers, "merge_integrity")
 		}
-		if view.IntegrityOK && !view.Published {
-			report.Blockers = append(report.Blockers, "published_floor_unavailable")
+		if !view.MetadataCurrentAndValid {
+			report.Blockers = append(report.Blockers, "merge_metadata_invalid_or_expired")
 		}
+		report.Blockers = append(report.Blockers, "publication_unverified", "independent_floor_unavailable")
+		report.MissingRuntimeEvidence = append(report.MissingRuntimeEvidence, Gap{Kind: "publication_not_verified", Note: "supplied merge metadata and its vector do not prove snapshot publication or a trusted floor"})
 		if !versionVectorWellFormed(view.Versions) {
 			report.Blockers = append(report.Blockers, "version_vector_malformed")
 		}
@@ -280,7 +303,10 @@ func Compare(ctx context.Context, in Input) (Report, error) {
 	if !prov.supplied {
 		report.MissingRuntimeEvidence = append(report.MissingRuntimeEvidence, Gap{Kind: "harness_receipt_not_supplied", Note: "no AEON-219 provenance document was supplied, so receipt of these bytes is unknown"})
 	} else if len(prov.items) == 0 {
-		report.MissingRuntimeEvidence = append(report.MissingRuntimeEvidence, Gap{Kind: "harness_receipt_empty", Note: "the provenance document records no items"})
+		report.MissingRuntimeEvidence = append(report.MissingRuntimeEvidence, Gap{Kind: "harness_receipt_empty", Note: "the supplied provenance document has no items"})
+	}
+	if prov.recorded {
+		report.MissingRuntimeEvidence = append(report.MissingRuntimeEvidence, Gap{Kind: "provenance_origin_unverified", Note: "offline JSON is supplied worker-reported metadata; API origin and runtime observation were not verified"})
 	}
 	if prov.truncated {
 		report.MissingRuntimeEvidence = append(report.MissingRuntimeEvidence, Gap{Kind: "provenance_page_truncated", Note: "older provenance revisions were not in the supplied page"})
@@ -293,11 +319,27 @@ func Compare(ctx context.Context, in Input) (Report, error) {
 	}
 
 	bodySHA := ""
-	if merge.supplied {
+	bodySize := 0
+	if merge.supplied && merge.view.IntegrityOK {
 		bodySHA = merge.computed
+		bodySize = len(merge.merged.Body)
 	}
 	for _, item := range prov.items {
-		report.Receipts = append(report.Receipts, classifyReceipt(item, report.SuppliedInputs, normalized, bodySHA))
+		comparison := classifyReceipt(item, report.SuppliedInputs, normalized, bodySHA, bodySize)
+		if prov.recorded {
+			comparison.Note = joinNote(comparison.Note, "supplied worker-reported metadata; API origin not observed")
+			report.Receipts = append(report.Receipts, comparison)
+		} else {
+			comparison.Evidence = "unverified_" + prov.kind
+			comparison.RawBytesReceived = false
+			comparison.MergedBodyReceived = false
+			if comparison.RawDigestMatches {
+				comparison.Note = "supplied digest equals raw file bytes, but unverified input establishes no recorded session receipt"
+			} else {
+				comparison.Note = joinNote(comparison.Note, "unverified input; no recorded session receipt established")
+			}
+			report.UnverifiedComparisons = append(report.UnverifiedComparisons, comparison)
+		}
 	}
 	received := map[string]bool{}
 	for _, receipt := range report.Receipts {
@@ -319,7 +361,7 @@ func Compare(ctx context.Context, in Input) (Report, error) {
 	sortGaps(report.MissingRuntimeEvidence)
 	sortItems(report.Unresolved)
 	sortDiffs(report.Differences)
-	report.PublishedMergeCompared = merge.supplied && merge.view.Published && merge.view.IntegrityOK && versionVectorWellFormed(merge.view.Versions)
+	report.SuppliedMergeCompared = merge.supplied && merge.view.IntegrityOK
 	report.Counts = countReport(report)
 	report.NextInvocation = nextInvocation(in.Files, in.Context, section, merge.supplied, prov.supplied)
 	return report, nil
@@ -329,10 +371,10 @@ func newReport(trust rulesimport.TrustContext, section string, files []string) R
 	return Report{
 		Schema: Schema,
 		Limits: Limits{
-			SuppliedFilesAreExpectedInputs: true,
-			ReceiptProvesRecordedBytesOnly: true,
-			NameMatchIsNotComparison:       true,
-			NormalizedHashIsNotRawBytes:    true,
+			SuppliedFilesAreExpectedInputs:   true,
+			SuppliedMetadataIsNotServerProof: true,
+			NameMatchIsNotComparison:         true,
+			NormalizedHashIsNotRawBytes:      true,
 		},
 		SuppliedTrustContext:   string(trust),
 		Section:                section,
@@ -340,6 +382,7 @@ func newReport(trust rulesimport.TrustContext, section string, files []string) R
 		MissingRuntimeEvidence: modelGaps(),
 		SuppliedInputs:         []Supplied{},
 		Receipts:               []Receipt{},
+		UnverifiedComparisons:  []Receipt{},
 		Differences:            []Difference{},
 		Unresolved:             []Item{},
 		NextInvocation:         nextInvocation(files, trust, section, false, false),
@@ -575,7 +618,9 @@ func receiptUnresolved(receipts []Receipt) []Item {
 	for _, receipt := range receipts {
 		switch {
 		case receipt.HashKind == "invalid":
-			out = append(out, Item{Kind: "invalid_provenance_digest", Note: receipt.LogicalName + " provenance digest is not lowercase sha256"})
+			out = append(out, Item{Kind: "invalid_provenance_digest", Note: receipt.LogicalName + " provenance hash kind or digest is invalid"})
+		case receipt.RawDigestMatches && (receipt.SizeAgrees == nil || !*receipt.SizeAgrees):
+			out = append(out, Item{Kind: "provenance_size_mismatch", Note: receipt.LogicalName + " digest matches but the recorded size is absent or contradictory"})
 		case receipt.NormalizedHashOnly:
 			out = append(out, Item{Kind: "normalized_hash_only", Note: receipt.LogicalName + " provenance digest equals a normalized line hash, not supplied raw bytes"})
 		case receipt.NameWithoutRawHash && !receipt.RawBytesReceived:
@@ -589,32 +634,36 @@ func receiptUnresolved(receipts []Receipt) []Item {
 	return out
 }
 
-func classifyReceipt(item harness.ProvenanceItem, supplied []Supplied, normalized map[string]struct{}, bodySHA string) Receipt {
-	out := Receipt{LogicalName: item.LogicalName, Kind: item.Kind, HashKind: item.HashKind, ByteSize: item.ByteSize, SuppliedBases: []string{}}
+func classifyReceipt(item harness.ProvenanceItem, supplied []Supplied, normalized map[string]struct{}, bodySHA string, bodySize int) Receipt {
+	out := Receipt{Evidence: "supplied_worker_reported_metadata", LogicalName: item.LogicalName, Kind: item.Kind, HashKind: item.HashKind, ByteSize: item.ByteSize, SuppliedBases: []string{}}
 	if item.Version != nil {
 		out.Version = *item.Version
 	}
 	if item.ContentSHA256 != nil {
-		out.ContentSHA256 = strings.ToLower(*item.ContentSHA256)
+		out.ContentSHA256 = *item.ContentSHA256
 	}
-	if out.HashKind == "content" && !sha256Pattern(out.ContentSHA256) {
+	if (out.HashKind != "content" || !sha256Pattern(out.ContentSHA256)) && !(out.HashKind == "absent" && item.ContentSHA256 == nil) {
 		out.HashKind = "invalid"
-		out.Note = "content digest is not lowercase sha256; it was not treated as a receipt"
+		out.Note = "hash kind and digest are invalid or contradictory; this is not receipt evidence"
 		out.ContentSHA256 = ""
+		return out
+	}
+	if out.HashKind == "absent" {
+		out.Note = "no content digest was recorded"
 		return out
 	}
 	var sized *bool
 	for _, file := range supplied {
 		if file.RawSHA256 == out.ContentSHA256 && out.ContentSHA256 != "" {
-			out.RawBytesReceived = true
+			out.RawDigestMatches = true
 			out.SuppliedBases = append(out.SuppliedBases, file.Base)
 			agrees := item.ByteSize != nil && *item.ByteSize == int64(file.Bytes)
 			if item.ByteSize == nil {
-				out.Note = "raw hash matches supplied bytes; recorded size is absent"
+				out.Note = "raw hash matches supplied bytes; recorded size is absent, so receipt is invalid"
 			} else if !agrees {
 				value := false
 				sized = &value
-				out.Note = "raw hash matches supplied bytes and the recorded size does not"
+				out.Note = "raw hash matches supplied bytes but recorded size contradicts it; receipt is invalid"
 			} else if sized == nil {
 				value := true
 				sized = &value
@@ -626,13 +675,16 @@ func classifyReceipt(item harness.ProvenanceItem, supplied []Supplied, normalize
 	}
 	slices.Sort(out.SuppliedBases)
 	out.SizeAgrees = sized
-	if bodySHA != "" && out.ContentSHA256 == bodySHA {
+	out.RawBytesReceived = out.RawDigestMatches && sized != nil && *sized
+	if bodySHA != "" && out.ContentSHA256 == bodySHA && item.ByteSize != nil && *item.ByteSize == int64(bodySize) {
 		out.MergedBodyReceived = true
 	}
 	if _, ok := normalized[out.ContentSHA256]; ok && out.ContentSHA256 != "" && !out.RawBytesReceived && !out.MergedBodyReceived {
 		out.NormalizedHashOnly = true
 	}
 	switch {
+	case out.RawDigestMatches && !out.RawBytesReceived:
+		// Preserve the missing or contradictory size diagnosis.
 	case out.RawBytesReceived && out.MergedBodyReceived:
 		out.Note = joinNote(out.Note, "provenance digest equals supplied raw bytes and the merged body; this is receipt, not model load or obedience")
 	case out.RawBytesReceived && out.NameWithoutRawHash:
@@ -699,13 +751,13 @@ func inspectMerge(raw []byte) (mergeMeta, error) {
 	floorPresent := strings.TrimSpace(merged.Floor) != ""
 	floorOK := floorInBody(merged.Body, merged.Floor)
 	integrity := computed == merged.SHA256 && merged.ByteSize == len(merged.Body) && utf8OK(merged.Body)
-	published := integrity && floorPresent && floorOK && len(merged.Versions) > 0 && releasehistory.ValidVersion(merged.Version) && versionVectorWellFormed(merged.Versions)
+	current := rules.ValidateMerged(merged, merged.Context, time.Now()) == nil && versionVectorWellFormed(merged.Versions) && merged.Version == latestVersion(merged.Versions) && !strings.ContainsRune(merged.Body, 0)
 	return mergeMeta{supplied: true, merged: merged, computed: computed, view: MergeView{
 		Context: merged.Context, Harness: merged.Context.Harness, Role: merged.Context.Role,
 		Version: merged.Version, Versions: append([]rules.VersionRef{}, merged.Versions...),
 		StatedBodySHA256: merged.SHA256, ComputedBodySHA256: computed,
 		ByteSize: merged.ByteSize, ComputedByteSize: len(merged.Body),
-		IntegrityOK: integrity, FloorPresent: floorPresent, FloorInBody: floorOK, Published: published,
+		IntegrityOK: integrity, FloorPresent: floorPresent, FloorInBody: floorOK, MetadataCurrentAndValid: current,
 	}}, nil
 }
 
@@ -741,6 +793,16 @@ func versionVectorWellFormed(versions []rules.VersionRef) bool {
 		}
 	}
 	return true
+}
+
+func latestVersion(versions []rules.VersionRef) string {
+	latest := ""
+	for _, v := range versions {
+		if v.Version > latest {
+			latest = v.Version
+		}
+	}
+	return latest
 }
 
 func floorInBody(body, floor string) bool {
@@ -783,12 +845,13 @@ func inspectProvenance(raw []byte) (provMeta, error) {
 			return provMeta{}, err
 		}
 		meta.items = items
+		meta.kind = "bare_array"
 	case map[string]any:
 		if err := fillProvenanceObject(raw, &meta); err != nil {
 			return provMeta{}, err
 		}
 	default:
-		return provMeta{}, errors.New("provenance document is not items or a revision page")
+		return provMeta{}, errors.New("provenance document is not an object or array")
 	}
 	if len(meta.items) > harnessMaxItems() {
 		return provMeta{}, errors.New("provenance document exceeds the item bound")
@@ -810,33 +873,66 @@ func fillProvenanceObject(raw []byte, meta *provMeta) error {
 		}
 		meta.truncated = truncated
 	}
+	if probe["provenance_recorded"] != nil {
+		var recorded bool
+		if err := json.Unmarshal(probe["provenance_recorded"], &recorded); err != nil {
+			return errors.New("provenance recorded flag is invalid")
+		}
+		if !recorded {
+			meta.kind = "proposal"
+		}
+	}
 	switch {
 	case probe["provenance_items"] != nil:
+		meta.kind = "proposal"
 		return decodeInto(&meta.items, probe["provenance_items"])
-	case probe["items"] != nil:
-		if probe["set_sha256"] != nil {
-			var set string
-			if err := json.Unmarshal(probe["set_sha256"], &set); err != nil {
-				return errors.New("provenance set digest is invalid")
-			}
-			meta.setSHA = set
-		}
-		return decodeInto(&meta.items, probe["items"])
 	case probe["revisions"] != nil:
-		var revs []struct {
-			SetSHA256 string                   `json:"set_sha256"`
-			Items     []harness.ProvenanceItem `json:"items"`
-		}
-		if err := json.Unmarshal(probe["revisions"], &revs); err != nil || len(revs) == 0 {
+		pageMetadata := probe["session_id"] != nil && probe["truncated"] != nil
+		var page harness.ProvenancePage
+		if err := json.Unmarshal(raw, &page); err != nil || len(page.Revisions) == 0 {
 			return errors.New("provenance revisions are missing")
 		}
-		meta.revisions = len(revs)
-		meta.items = revs[0].Items
-		meta.setSHA = revs[0].SetSHA256
+		proposed := meta.kind == "proposal"
+		meta.kind = "revision_page"
+		meta.revisions = len(page.Revisions)
+		meta.items = page.Revisions[0].Items
+		meta.setSHA = page.Revisions[0].SetSHA256
+		meta.sessionID = page.SessionID
+		meta.recorded = pageMetadata && validProvenanceRevision(page.Revisions[0]) && page.SessionID == page.Revisions[0].SessionID
+		previous := page.Revisions[0].Revision
+		for _, rev := range page.Revisions[1:] {
+			if !validProvenanceRevision(rev) || rev.SessionID != page.SessionID || rev.Revision >= previous {
+				meta.recorded = false
+			}
+			previous = rev.Revision
+		}
+		if proposed {
+			meta.recorded = false
+			meta.kind = "proposal"
+		}
+		return nil
+	case probe["items"] != nil:
+		var rev harness.ProvenanceRevision
+		if err := json.Unmarshal(raw, &rev); err != nil {
+			return errors.New("provenance revision is invalid")
+		}
+		proposed := meta.kind == "proposal"
+		if !proposed {
+			meta.kind = "revision"
+		}
+		meta.items, meta.setSHA, meta.sessionID = rev.Items, rev.SetSHA256, rev.SessionID
+		meta.recorded = validProvenanceRevision(rev) && !proposed
 		return nil
 	default:
 		return errors.New("provenance items were not in the document")
 	}
+}
+
+func validProvenanceRevision(rev harness.ProvenanceRevision) bool {
+	return workorders.UUID(rev.ID) && workorders.UUID(rev.SessionID) && workorders.UUID(rev.RecordedBy) &&
+		strings.ToLower(rev.ID) == rev.ID && strings.ToLower(rev.SessionID) == rev.SessionID && strings.ToLower(rev.RecordedBy) == rev.RecordedBy &&
+		rev.Revision > 0 && sha256Pattern(rev.SetSHA256) && !rev.RecordedAt.IsZero() && !rev.RecordedAt.After(time.Now().Add(time.Minute)) &&
+		len(rev.Items) > 0 && len(rev.Items) <= harnessMaxItems()
 }
 
 func decodeInto(dest *[]harness.ProvenanceItem, raw json.RawMessage) error {
@@ -899,13 +995,14 @@ func nextInvocation(files []string, trust rulesimport.TrustContext, section stri
 	if merged {
 		b.WriteString(" --merged MERGED.json")
 	} else {
-		b.WriteString(" --merged PUBLISHED_MERGED.json")
+		b.WriteString(" --merged SUPPLIED_MERGE.json")
 	}
 	if provenance {
 		b.WriteString(" --provenance PROVENANCE.json")
 	} else {
 		b.WriteString(" --provenance HARNESS_PROVENANCE.json")
 	}
+	b.WriteString(" --session SESSION_UUID")
 	b.WriteString(" --out report.json")
 	return b.String()
 }

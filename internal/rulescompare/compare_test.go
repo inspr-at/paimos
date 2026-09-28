@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/inspr-at/paimos/internal/harness"
 	"github.com/inspr-at/paimos/internal/rules"
@@ -25,6 +26,7 @@ import (
 const fixtureText = "Keep the fixture boundary."
 const floorMarker = "FLOOR-LEAK-MARKER"
 const whyMarker = "WHY-LEAK-MARKER"
+const fixtureSession = "10000000-0000-4000-8000-000000000009"
 
 func TestMissingPublicationReportsHashesWithoutSuccess(t *testing.T) {
 	path := writeAgents(t, t.TempDir(), fixtureDoc())
@@ -44,7 +46,7 @@ func TestMissingPublicationReportsHashesWithoutSuccess(t *testing.T) {
 	if len(report.SuppliedInputs) != 1 || report.SuppliedInputs[0].RawSHA256 != raw || report.SuppliedInputs[0].RawReceipt || report.SuppliedInputs[0].Base != "AGENTS.md" {
 		t.Fatalf("supplied %+v", report.SuppliedInputs)
 	}
-	if !has(report.Blockers, "published_layer_unavailable") || !strings.Contains(report.NextInvocation, "PUBLISHED_MERGED.json") || !strings.Contains(report.NextInvocation, "HARNESS_PROVENANCE.json") {
+	if !has(report.Blockers, "published_layer_unavailable") || !strings.Contains(report.NextInvocation, "SUPPLIED_MERGE.json") || !strings.Contains(report.NextInvocation, "HARNESS_PROVENANCE.json") {
 		t.Fatalf("blockers %+v invocation %s", report.Blockers, report.NextInvocation)
 	}
 	blob := mustJSON(t, report)
@@ -69,7 +71,7 @@ func TestNameAndNormalizedHashesAreNotReceipts(t *testing.T) {
 	}
 	other := sha256hex("different bytes")
 	nameOnly := provenanceJSON(t, harness.ProvenanceItem{Kind: "agents", LogicalName: "AGENTS.md", HashKind: "content", ContentSHA256: &other, ByteSize: sizePtr(1)})
-	report, err := Compare(context.Background(), Input{Context: rulesimport.ContextProject, Files: []string{path}, Provenance: nameOnly})
+	report, err := Compare(context.Background(), Input{Context: rulesimport.ContextProject, Files: []string{path}, Provenance: nameOnly, ExpectedSessionID: fixtureSession})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -81,13 +83,107 @@ func TestNameAndNormalizedHashesAreNotReceipts(t *testing.T) {
 		t.Fatal("name agreement was not left unresolved")
 	}
 	norm := provenanceJSON(t, harness.ProvenanceItem{Kind: "agents", LogicalName: "AGENTS.md", HashKind: "content", ContentSHA256: &normalized, ByteSize: sizePtr(int64(proposal.Files[0].Bytes))})
-	report, err = Compare(context.Background(), Input{Context: rulesimport.ContextProject, Files: []string{path}, Provenance: norm})
+	report, err = Compare(context.Background(), Input{Context: rulesimport.ContextProject, Files: []string{path}, Provenance: norm, ExpectedSessionID: fixtureSession})
 	if err != nil {
 		t.Fatal(err)
 	}
 	assertLimits(t, report)
 	if !report.Receipts[0].NormalizedHashOnly || report.Receipts[0].RawBytesReceived || report.Receipts[0].MergedBodyReceived || report.Counts.NormalizedOnly != 1 {
 		t.Fatalf("normalized receipt %+v", report.Receipts[0])
+	}
+}
+
+func TestMalformedDigestAndSizeNeverEstablishRawReceipt(t *testing.T) {
+	path := writeAgents(t, t.TempDir(), fixtureDoc())
+	raw := fileSHA(t, path)
+	size := int64(len(fixtureDoc()))
+	cases := []struct {
+		name   string
+		kind   string
+		digest string
+		size   *int64
+	}{
+		{"unknown_kind", "other", raw, &size},
+		{"absent_with_digest", "absent", raw, &size},
+		{"uppercase", "content", strings.ToUpper(raw), &size},
+		{"wrong_size", "content", raw, sizePtr(size + 1)},
+		{"missing_size", "content", raw, nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			item := harness.ProvenanceItem{Kind: "agents", LogicalName: "AGENTS.md", HashKind: tc.kind, ContentSHA256: &tc.digest, ByteSize: tc.size}
+			report, err := Compare(context.Background(), Input{Context: rulesimport.ContextProject, Files: []string{path}, Provenance: provenanceJSON(t, item), ExpectedSessionID: fixtureSession})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(report.Receipts) != 1 || report.Receipts[0].RawBytesReceived || report.SuppliedInputs[0].RawReceipt || report.Counts.RawReceipts != 0 {
+				t.Fatalf("malformed item became receipt: %+v", report.Receipts)
+			}
+			if !hasItem(report.Unresolved, "invalid_provenance_digest") && !hasItem(report.Unresolved, "provenance_size_mismatch") {
+				t.Fatalf("malformed item has no explicit gap: %+v", report.Unresolved)
+			}
+		})
+	}
+}
+
+func TestProposalAndWrongSessionStayUnverified(t *testing.T) {
+	path := writeAgents(t, t.TempDir(), fixtureDoc())
+	raw := fileSHA(t, path)
+	item := harness.ProvenanceItem{Kind: "agents", LogicalName: "AGENTS.md", HashKind: "content", ContentSHA256: &raw, ByteSize: sizePtr(int64(len(fixtureDoc())))}
+	canonical := provenanceJSON(t, item)
+	inputs := [][]byte{
+		mustEncode(t, []harness.ProvenanceItem{item}),
+		mustEncode(t, map[string]any{"provenance_items": []harness.ProvenanceItem{item}, "provenance_recorded": false}),
+		mustEncode(t, map[string]any{"items": []harness.ProvenanceItem{item}}),
+		canonical,
+	}
+	wantEvidence := []string{"unverified_bare_array", "unverified_proposal", "unverified_revision", "unverified_revision"}
+	for i, rawInput := range inputs {
+		session := fixtureSession
+		if i == 3 {
+			session = "10000000-0000-4000-8000-000000000099"
+		}
+		report, err := Compare(context.Background(), Input{Context: rulesimport.ContextProject, Files: []string{path}, Provenance: rawInput, ExpectedSessionID: session})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(report.Receipts) != 0 || len(report.UnverifiedComparisons) != 1 || report.UnverifiedComparisons[0].Evidence != wantEvidence[i] || !report.UnverifiedComparisons[0].RawDigestMatches || report.UnverifiedComparisons[0].RawBytesReceived || report.Counts.RawReceipts != 0 || !hasGap(report.MissingRuntimeEvidence, "provenance_unverified_input") {
+			t.Fatalf("case %d promoted unverified input: %+v", i, report)
+		}
+	}
+}
+
+func TestIncompleteRevisionMetadataStaysUnverified(t *testing.T) {
+	path := writeAgents(t, t.TempDir(), fixtureDoc())
+	raw := fileSHA(t, path)
+	item := harness.ProvenanceItem{Kind: "agents", LogicalName: "AGENTS.md", HashKind: "content", ContentSHA256: &raw, ByteSize: sizePtr(int64(len(fixtureDoc())))}
+	input := mustEncode(t, map[string]any{"session_id": fixtureSession, "revision": 1, "set_sha256": strings.Repeat("ab", 32), "items": []harness.ProvenanceItem{item}})
+	report, err := Compare(context.Background(), Input{Context: rulesimport.ContextProject, Files: []string{path}, Provenance: input, ExpectedSessionID: fixtureSession})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(report.Receipts) != 0 || len(report.UnverifiedComparisons) != 1 || report.UnverifiedComparisons[0].RawBytesReceived || !hasGap(report.MissingRuntimeEvidence, "provenance_unverified_input") {
+		t.Fatalf("incomplete revision became receipt: %+v", report)
+	}
+}
+
+func TestExpiredOrInvalidMergeIsOnlySuppliedComparison(t *testing.T) {
+	path := writeAgents(t, t.TempDir(), fixtureDoc())
+	proposal := mustProposal(t, path)
+	var merged rules.Merged
+	if err := json.Unmarshal(publishedMerge(t, importIdentity(proposal.Rules[0].Identity), proposal.Rules[0].Text, fileSHA(t, path)), &merged); err != nil {
+		t.Fatal(err)
+	}
+	past := time.Now().Add(-time.Minute)
+	merged.ValidUntil = &past
+	for _, m := range []rules.Merged{merged, func() rules.Merged { x := merged; x.ValidUntil = nil; x.Context.Role = "unknown"; return x }()} {
+		report, err := Compare(context.Background(), Input{Context: rulesimport.ContextProject, Files: []string{path}, Merged: mustEncode(t, m)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if report.PublishedMergeCompared || !report.SuppliedMergeCompared || report.Merge == nil || report.Merge.Published || report.Merge.MetadataCurrentAndValid || !has(report.Blockers, "merge_metadata_invalid_or_expired") || !has(report.Blockers, "publication_unverified") || report.Limits.RolloutAuthorized {
+			t.Fatalf("merge was promoted to publication: %+v", report)
+		}
 	}
 }
 
@@ -100,12 +196,12 @@ func TestRawReceiptAndLineageDoNotVerifyExecution(t *testing.T) {
 	merged := publishedMerge(t, importID, proposal.Rules[0].Text, raw)
 	size := int64(proposal.Files[0].Bytes)
 	prov := provenanceJSON(t, harness.ProvenanceItem{Kind: "agents", LogicalName: "AGENTS.md", HashKind: "content", ContentSHA256: &raw, ByteSize: &size})
-	report, err := Compare(context.Background(), Input{Context: rulesimport.ContextProject, Files: []string{path}, Merged: merged, Provenance: prov})
+	report, err := Compare(context.Background(), Input{Context: rulesimport.ContextProject, Files: []string{path}, Merged: merged, Provenance: prov, ExpectedSessionID: fixtureSession})
 	if err != nil {
 		t.Fatal(err)
 	}
 	assertLimits(t, report)
-	if !report.PublishedMergeCompared || report.Merge == nil || !report.Merge.IntegrityOK || !report.Merge.Published || report.Merge.Harness != "codex" || report.Merge.SnapshotDigestsReverified {
+	if report.PublishedMergeCompared || !report.SuppliedMergeCompared || report.Merge == nil || !report.Merge.IntegrityOK || report.Merge.Published || !report.Merge.MetadataCurrentAndValid || report.Merge.Harness != "codex" || report.Merge.SnapshotDigestsReverified {
 		t.Fatalf("merge %+v", report.Merge)
 	}
 	if report.Merge.ComputedBodySHA256 != report.Merge.StatedBodySHA256 || len(report.Merge.Versions) != 1 {
@@ -113,6 +209,9 @@ func TestRawReceiptAndLineageDoNotVerifyExecution(t *testing.T) {
 	}
 	if !report.SuppliedInputs[0].RawReceipt || !report.Receipts[0].RawBytesReceived || report.Receipts[0].SizeAgrees == nil || !*report.Receipts[0].SizeAgrees {
 		t.Fatalf("receipt %+v supplied %+v", report.Receipts, report.SuppliedInputs)
+	}
+	if report.Receipts[0].Evidence != "supplied_worker_reported_metadata" || !hasGap(report.MissingRuntimeEvidence, "provenance_origin_unverified") || !has(report.Blockers, "publication_unverified") || !has(report.Blockers, "independent_floor_unavailable") {
+		t.Fatalf("source or publication limit missing: %+v %+v", report.Receipts[0], report.Blockers)
 	}
 	linked := false
 	for _, rule := range report.Lineage.Rules {
@@ -150,12 +249,12 @@ func TestMergedBodyReceiptIsNotAFileReceipt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	report, err := Compare(context.Background(), Input{Context: rulesimport.ContextProject, Files: []string{path}, Merged: wrapped, Provenance: prov})
+	report, err := Compare(context.Background(), Input{Context: rulesimport.ContextProject, Files: []string{path}, Merged: wrapped, Provenance: prov, ExpectedSessionID: fixtureSession})
 	if err != nil {
 		t.Fatal(err)
 	}
 	assertLimits(t, report)
-	if !report.PublishedMergeCompared || !report.Receipts[0].MergedBodyReceived || report.Receipts[0].RawBytesReceived {
+	if report.PublishedMergeCompared || !report.SuppliedMergeCompared || !report.Receipts[0].MergedBodyReceived || report.Receipts[0].RawBytesReceived {
 		t.Fatalf("body receipt %+v", report.Receipts)
 	}
 	if report.SuppliedInputs[0].RawReceipt {
@@ -270,18 +369,18 @@ func TestProvenancePageUsesOnlyTheFirstRevision(t *testing.T) {
 	raw := fileSHA(t, path)
 	other := sha256hex("older revision")
 	page := map[string]any{
-		"session_id": "10000000-0000-4000-8000-000000000009",
+		"session_id": fixtureSession,
 		"truncated":  true,
 		"revisions": []map[string]any{
-			{"set_sha256": strings.Repeat("ab", 32), "items": []harness.ProvenanceItem{{Kind: "agents", LogicalName: "AGENTS.md", HashKind: "content", ContentSHA256: &raw, ByteSize: sizePtr(int64(len(fixtureDoc())))}}},
-			{"set_sha256": strings.Repeat("cd", 32), "items": []harness.ProvenanceItem{{Kind: "agents", LogicalName: "AGENTS.md", HashKind: "content", ContentSHA256: &other, ByteSize: sizePtr(1)}}},
+			{"id": "10000000-0000-4000-8000-000000000010", "session_id": fixtureSession, "revision": 2, "recorded_by_principal_id": "10000000-0000-4000-8000-000000000011", "recorded_at": time.Now().UTC(), "set_sha256": strings.Repeat("ab", 32), "items": []harness.ProvenanceItem{{Kind: "agents", LogicalName: "AGENTS.md", HashKind: "content", ContentSHA256: &raw, ByteSize: sizePtr(int64(len(fixtureDoc())))}}},
+			{"id": "10000000-0000-4000-8000-000000000012", "session_id": fixtureSession, "revision": 1, "recorded_by_principal_id": "10000000-0000-4000-8000-000000000011", "recorded_at": time.Now().UTC(), "set_sha256": strings.Repeat("cd", 32), "items": []harness.ProvenanceItem{{Kind: "agents", LogicalName: "AGENTS.md", HashKind: "content", ContentSHA256: &other, ByteSize: sizePtr(1)}}},
 		},
 	}
 	encoded, err := json.Marshal(page)
 	if err != nil {
 		t.Fatal(err)
 	}
-	report, err := Compare(context.Background(), Input{Context: rulesimport.ContextProject, Files: []string{path}, Provenance: encoded})
+	report, err := Compare(context.Background(), Input{Context: rulesimport.ContextProject, Files: []string{path}, Provenance: encoded, ExpectedSessionID: fixtureSession})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -316,7 +415,7 @@ func TestBOMRawHashDiffersFromNormalizedBytes(t *testing.T) {
 	normHash := sha256.Sum256(normalized)
 	norm := hex.EncodeToString(normHash[:])
 	prov := provenanceJSON(t, harness.ProvenanceItem{Kind: "agents", LogicalName: "AGENTS.md", HashKind: "content", ContentSHA256: &norm, ByteSize: sizePtr(int64(len(normalized)))})
-	report, err := Compare(context.Background(), Input{Context: rulesimport.ContextProject, Files: []string{path}, Provenance: prov})
+	report, err := Compare(context.Background(), Input{Context: rulesimport.ContextProject, Files: []string{path}, Provenance: prov, ExpectedSessionID: fixtureSession})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -325,7 +424,7 @@ func TestBOMRawHashDiffersFromNormalizedBytes(t *testing.T) {
 	}
 	raw := fileSHA(t, path)
 	prov = provenanceJSON(t, harness.ProvenanceItem{Kind: "agents", LogicalName: "AGENTS.md", HashKind: "content", ContentSHA256: &raw, ByteSize: sizePtr(int64(len(rawBytes)))})
-	report, err = Compare(context.Background(), Input{Context: rulesimport.ContextProject, Files: []string{path}, Provenance: prov})
+	report, err = Compare(context.Background(), Input{Context: rulesimport.ContextProject, Files: []string{path}, Provenance: prov, ExpectedSessionID: fixtureSession})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -389,7 +488,12 @@ func publishedMerge(t *testing.T, identity, text, revision string) []byte {
 
 func provenanceJSON(t *testing.T, item harness.ProvenanceItem) []byte {
 	t.Helper()
-	raw, err := json.Marshal(map[string]any{"items": []harness.ProvenanceItem{item}})
+	return mustEncode(t, harness.ProvenanceRevision{ID: "10000000-0000-4000-8000-000000000010", SessionID: fixtureSession, Revision: 1, SetSHA256: strings.Repeat("ab", 32), RecordedBy: "10000000-0000-4000-8000-000000000011", RecordedAt: time.Now().UTC(), Items: []harness.ProvenanceItem{item}})
+}
+
+func mustEncode(t *testing.T, value any) []byte {
+	t.Helper()
+	raw, err := json.Marshal(value)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -400,7 +504,7 @@ func sizePtr(n int64) *int64 { return &n }
 
 func assertLimits(t *testing.T, report Report) {
 	t.Helper()
-	want := Limits{SuppliedFilesAreExpectedInputs: true, ReceiptProvesRecordedBytesOnly: true, NameMatchIsNotComparison: true, NormalizedHashIsNotRawBytes: true}
+	want := Limits{SuppliedFilesAreExpectedInputs: true, SuppliedMetadataIsNotServerProof: true, NameMatchIsNotComparison: true, NormalizedHashIsNotRawBytes: true}
 	if report.Schema != Schema || report.Limits != want || report.Limits.ModelLoadVerified || report.Limits.ModelObedienceVerified || report.Limits.ExecutionVerified || report.Limits.WaitingWindow || report.Limits.ActiveInstructionReplaced || report.Limits.RolloutAuthorized {
 		t.Fatalf("limits %+v", report.Limits)
 	}

@@ -16,12 +16,12 @@ import (
 // or replace AGENTS.md / CLAUDE.md.
 func (rt *runtime) cmdRulesCompare() *Command {
 	var files []string
-	var trust, section, mergedPath, provenancePath, outPath string
+	var trust, section, mergedPath, provenancePath, sessionID, outPath string
 	return &Command{
 		Name:    "rules-compare",
 		Short:   "Compare explicit instruction files with merged rules and receipt hashes",
-		Use:     "rules-compare --context template|private|project|person --file PATH [--file PATH...] [--section all|personal|kernel] [--merged FILE.json] [--provenance FILE.json] [--out FILE.json]",
-		Long:    "Offline and one-time. Named files are expected inputs and are hashed with the doctrine importer's descriptor-safe reader. A provenance content hash proves those bytes were recorded as received only when it equals that raw SHA-256. A logical name match does not. A normalized line hash does not. Neither supply nor receipt proves a model loaded or obeyed the text. A missing published merged layer or locked floor is reported as a rollout blocker. Nothing is installed over an active instruction file, and there is no waiting window.",
+		Use:     "rules-compare --context template|private|project|person --file PATH [--file PATH...] [--section all|personal|kernel] [--merged FILE.json] [--provenance FILE.json --session SESSION_UUID] [--out FILE.json]",
+		Long:    "Offline and one-time. Named files are expected inputs and are hashed with the doctrine importer's descriptor-safe reader. Canonical AEON-219 revision metadata needs an explicit matching session ID for a worker-reported receipt comparison. Offline JSON does not prove API origin, publication, runtime execution, model load or obedience. Proposal-shaped provenance is shown separately as unverified. A supplied merge can show historical differences but cannot authorize rollout. Nothing is installed over an active instruction file, and there is no waiting window.",
 		minArgs: 0, maxArgs: 0,
 		addFlags: func(fs *flagSet) {
 			fs.strings(&files, "file", "explicit doctrine file (repeatable); no discovery")
@@ -29,6 +29,7 @@ func (rt *runtime) cmdRulesCompare() *Command {
 			fs.string(&section, "section", 0, "all (default), personal, kernel")
 			fs.string(&mergedPath, "merged", 0, "optional AR1 merged-rules JSON from an explicit private file")
 			fs.string(&provenancePath, "provenance", 0, "optional AEON-219 provenance JSON from an explicit private file")
+			fs.string(&sessionID, "session", 0, "expected harness session UUID for provenance attribution")
 			fs.string(&outPath, "out", 0, "optional new report JSON; never overwrites")
 		},
 		run: func([]string) error {
@@ -49,7 +50,7 @@ func (rt *runtime) cmdRulesCompare() *Command {
 			}
 			report, err := rulescompare.Compare(context.Background(), rulescompare.Input{
 				Context: rulesimport.TrustContext(trust), Section: section, Files: files,
-				Merged: merged, Provenance: provenance,
+				Merged: merged, Provenance: provenance, ExpectedSessionID: sessionID,
 			})
 			if err != nil {
 				return err
