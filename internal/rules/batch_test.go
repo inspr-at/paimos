@@ -5,6 +5,7 @@ package rules
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -536,7 +537,7 @@ func TestBudgetCheckRestoresVisibilityInTheTransaction(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		if _, err = budgetCheck(t.Context(), tx, w.tid, admin.ID, company, time.Now()); err != nil {
+		if _, err = budgetCheck(t.Context(), tx, admin, admin.ID, company, time.Now()); err != nil {
 			return err
 		}
 		var owner, seenProjects string
@@ -687,5 +688,172 @@ func TestAccessChangesStillLockTheTenantForUpdate(t *testing.T) {
 		if !strings.Contains(string(src), "FROM tenants WHERE id=$1::uuid FOR UPDATE") {
 			t.Fatalf("%s no longer locks the tenant row FOR UPDATE; revisit rules lockAccess", file)
 		}
+	}
+}
+
+// customPublisher binds a workspace role with exactly these permissions.
+func (w *batchWorld) customPublisher(name string, permissions ...string) (tenant.Principal, string) {
+	w.t.Helper()
+	var role string
+	if err := w.d.Admin.QueryRow(w.t.Context(), `INSERT INTO roles(tenant_id,key,name) VALUES($1,$2,$2) RETURNING id::text`, w.tid, "custom_"+name).Scan(&role); err != nil {
+		w.t.Fatal(err)
+	}
+	for _, permission := range permissions {
+		if _, err := w.d.Admin.Exec(w.t.Context(), `INSERT INTO role_permissions(tenant_id,role_id,permission) VALUES($1,$2,$3)`, w.tid, role, permission); err != nil {
+			w.t.Fatal(err)
+		}
+	}
+	return w.principal(tenant.Person, name, "custom_"+name), role
+}
+
+// A publisher who may not read the project's rules (nodes.read alone is not
+// enough) learns no sizes: neither max_bytes nor a sized refusal.
+func TestBatchBudgetSizesNeedRulesRead(t *testing.T) {
+	w := newBatchWorld(t, "rules-batch-rulesread")
+	admin := w.principal(tenant.Person, "owner", "admin")
+	company := w.floor(admin)
+	project := w.layer(admin, Scope{Layer: "project", ProjectID: w.project})
+	w.publish(admin, w.set(admin, project, "Aeon", bulky("project", 19)...), "260928090010.0.0")
+	publisher, _ := w.customPublisher("publisher", "rules.publish", "rules.write", "nodes.read")
+	// The admin prepares the drafts; the custom publisher publishes them.
+	short := w.set(admin, company, "Short", testRule("short", "A short rule."))
+	body := w.call(publisher, "POST", "/api/rules/publish", batch("", item(short, "auto")), 200)
+	var ok BatchResult
+	if err := json.Unmarshal(body, &ok); err != nil || ok.MaxBytes != 0 {
+		t.Fatalf("sizes reached a publisher without rules.read: %s", body)
+	}
+	w.refusedHidden(publisher, "project over budget, unreadable", w.set(admin, company, "ThreeHalf", bulky("companyr", 8)...))
+}
+
+// A revocation of rules.read that commits while the publication waits for the
+// access lock is honoured: the publication proceeds but reports no sizes.
+func TestBatchBudgetHonoursARevocationWhileWaiting(t *testing.T) {
+	w := newBatchWorld(t, "rules-batch-revoke")
+	admin := w.principal(tenant.Person, "owner", "admin")
+	company := w.floor(admin)
+	project := w.layer(admin, Scope{Layer: "project", ProjectID: w.project})
+	w.publish(admin, w.set(admin, project, "Aeon", bulky("project", 19)...), "260928090011.0.0")
+	publisher, role := w.customPublisher("publisher", "rules.publish", "rules.write", "rules.read", "nodes.read")
+	short := w.set(admin, company, "Short", testRule("short", "A short rule."))
+	access, err := w.d.Admin.Begin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer access.Rollback(t.Context())
+	if _, err = access.Exec(t.Context(), `SELECT id FROM tenants WHERE id=$1 FOR UPDATE`, w.tid); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = access.Exec(t.Context(), `DELETE FROM role_permissions WHERE tenant_id=$1 AND role_id=$2 AND permission='rules.read'`, w.tid, role); err != nil {
+		t.Fatal(err)
+	}
+	type answer struct {
+		code int
+		body []byte
+	}
+	done := make(chan answer, 1)
+	go func() {
+		code, body := w.send(publisher, "POST", "/api/rules/publish", batch("", item(short, "auto")))
+		done <- answer{code, body}
+	}()
+	time.Sleep(300 * time.Millisecond)
+	if err = access.Commit(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	got := <-done
+	var ok BatchResult
+	if got.code != 200 || json.Unmarshal(got.body, &ok) != nil || ok.MaxBytes != 0 {
+		t.Fatalf("a revoked reader still learned sizes: %d %s", got.code, got.body)
+	}
+}
+
+// At its deadline the budget check stops, the request answers 503 and the
+// transaction rolls back, so an access change waiting on the lock proceeds
+// within moments of the deadline.
+func TestBudgetCheckStopsAtTheDeadline(t *testing.T) {
+	w := newBatchWorld(t, "rules-batch-deadline")
+	admin := w.principal(tenant.Person, "owner", "admin")
+	company := w.floor(admin)
+	project := w.layer(admin, Scope{Layer: "project", ProjectID: w.project})
+	w.publish(admin, w.set(admin, project, "Aeon", testRule("aeon", "Aeon rule.")), "260928090012.0.0")
+	s := w.set(admin, company, "Short", testRule("short", "A short rule."))
+	savedTimeout, savedHook := txTimeout, beforeRender
+	txTimeout = 400 * time.Millisecond
+	// 40 files to render at 25 ms each would take a second without the checks.
+	beforeRender = func() { time.Sleep(25 * time.Millisecond) }
+	t.Cleanup(func() { txTimeout, beforeRender = savedTimeout, savedHook })
+	started := time.Now()
+	done := make(chan int, 1)
+	go func() {
+		code, _ := w.send(admin, "POST", "/api/rules/publish", batch("", item(s, "auto")))
+		done <- code
+	}()
+	time.Sleep(150 * time.Millisecond)
+	access, err := w.d.Admin.Begin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer access.Rollback(t.Context())
+	if _, err = access.Exec(t.Context(), `SET LOCAL lock_timeout='3s'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = access.Exec(t.Context(), `SELECT id FROM tenants WHERE id=$1 FOR UPDATE`, w.tid); err != nil {
+		t.Fatal(err)
+	}
+	if waited := time.Since(started); waited > txTimeout+250*time.Millisecond {
+		t.Fatalf("the access change got the lock %s after the request started (deadline %s)", waited, txTimeout)
+	}
+	if code := <-done; code != 503 {
+		t.Fatal("a publication past its deadline answered", code)
+	}
+	if w.published(s.ID) != "" {
+		t.Fatal("a publication past its deadline wrote")
+	}
+}
+
+// bigStore is a large tenant's live rules: 10 company sets of 100 rules.
+func bigStore() []Snapshot {
+	out := []Snapshot{floorSnapshot()}
+	for i := range 10 {
+		rules := []Rule{}
+		for j := range 100 {
+			rules = append(rules, testRule(fmt.Sprintf("r%02d-%03d", i, j), "A rule of ordinary length that says what agents must do."))
+		}
+		out = append(out, testSnapshot(fmt.Sprintf("set-%02d", i), Scope{Layer: "company"}, rules...))
+	}
+	return out
+}
+
+func BenchmarkBudgetRender(b *testing.B) {
+	store := bigStore()
+	c := testContext()
+	c.AgentID = ""
+	for b.Loop() {
+		if _, err := merge(c, store, time.Now(), true, nil); err != nil {
+			var e *Error
+			if !errors.As(err, &e) || e.Code != "rules_budget_exceeded" {
+				b.Fatal(err)
+			}
+		}
+	}
+}
+
+// The render cap fits well inside the request deadline even for a large store.
+func TestBudgetCapFitsTheDeadline(t *testing.T) {
+	store := bigStore()
+	c := testContext()
+	c.AgentID = ""
+	started := time.Now()
+	for range maxBudgetContexts {
+		if _, err := merge(c, store, time.Now(), true, nil); err != nil {
+			var e *Error
+			if !errors.As(err, &e) || e.Code != "rules_budget_exceeded" {
+				t.Fatal(err)
+			}
+		}
+	}
+	if took := time.Since(started); took > txTimeout/3 {
+		t.Fatalf("%d renders of a 1,000-rule store took %s; the deadline is %s", maxBudgetContexts, took, txTimeout)
+	} else {
+		t.Logf("%d renders of a 1,000-rule store took %s", maxBudgetContexts, took)
 	}
 }

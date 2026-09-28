@@ -140,7 +140,7 @@ func (m *Module) publishBatch(r *http.Request, tx pgx.Tx, p tenant.Principal) (a
 		}
 		out.Versions[i] = snap
 	}
-	if out.MaxBytes, err = budgetCheck(ctx, tx, p.TenantID, owner, sets, now); err != nil {
+	if out.MaxBytes, err = budgetCheck(ctx, tx, p, owner, sets, now); err != nil {
 		return nil, err
 	}
 	raw, err := json.Marshal(out)
@@ -206,8 +206,15 @@ func nextVersion(now time.Time, published string) string {
 
 // maxBudgetContexts bounds the session files one batch may render for its
 // budget check (projects × people and their agents × roles × harnesses that the
-// batch touches). A variable so tests can lower it.
-var maxBudgetContexts = 20000
+// batch touches). With snapshots validated once, one file of a large store
+// (1,000 rules) renders in about half a millisecond (BenchmarkBudgetRender:
+// ~0.45 ms on the workstation), so the cap keeps the worst case near 2.5 s,
+// far inside the 30 s request deadline (TestBudgetCapFitsTheDeadline).
+// Variables so tests can change them.
+var (
+	maxBudgetContexts = 5000
+	beforeRender      = func() {}
+)
 
 // Errors of the budget check. The one about another person's context carries
 // no size and no identity.
@@ -227,77 +234,48 @@ var (
 // layers included, and a person without any; each owner's named agents and
 // tasks; every role and harness.
 //
-// Other owners' layers are hidden from the caller by row-level security. To see
-// them, the owner setting is pointed at one owner at a time and restored before
-// returning, in this same transaction. The window only reads; the texts stay in
-// memory and never leave this function. The caller learns sizes only for files
-// made entirely of layers they may read; for any other file only pass or fail.
-func budgetCheck(ctx context.Context, tx pgx.Tx, tenantID, caller string, batch []Set, now time.Time) (int, error) {
-	var savedOwner, savedProjects string
-	if err := tx.QueryRow(ctx, `SELECT coalesce(current_setting('aeon.rules_owner',true),''),coalesce(current_setting('aeon.rules_projects',true),'')`).Scan(&savedOwner, &savedProjects); err != nil {
-		return 0, err
-	}
-	see := func(owner, projects string) error {
-		_, err := tx.Exec(ctx, `SELECT set_config('aeon.rules_owner',$1,true),set_config('aeon.rules_projects',$2,true)`, owner, projects)
-		return err
-	}
-	check := budget{tenant: tenantID, caller: caller, batch: batch, now: now, visible: map[string]bool{noProject: true}}
-	err := func() error {
-		if err := see("", "*"); err != nil {
-			return err
-		}
-		shared, err := publishedSnapshots(ctx, tx)
-		if err != nil {
-			return err
-		}
-		check.shared = shared
-		check.projects = []string{noProject}
-		for _, s := range shared {
-			if s.Scope.Layer == "project" && !slices.Contains(check.projects, s.Scope.ProjectID) {
-				check.projects = append(check.projects, s.Scope.ProjectID)
-			}
-		}
-		// Which of those projects the caller may read (their own rules setting).
-		rows, err := tx.Query(ctx, `SELECT p FROM unnest($2::text[]) p WHERE $1='*' OR p=ANY(CASE WHEN $1 IN ('','*') THEN '{}'::text[] ELSE $1::text[] END)`, savedProjects, check.projects)
-		if err != nil {
-			return err
-		}
-		visible, err := pgx.CollectRows(rows, pgx.RowTo[string])
-		if err != nil {
-			return err
-		}
-		for _, project := range visible {
-			check.visible[project] = true
-		}
-		if err = check.person(noPerson, nil); err != nil {
-			return err
-		}
-		people, err := activePeople(ctx, tx)
-		if err != nil {
-			return err
-		}
-		for _, person := range people {
-			if err := see(person, "*"); err != nil {
-				return err
-			}
-			owned, err := ownedSnapshots(ctx, tx, person)
-			if err != nil {
-				return err
-			}
-			if len(owned) == 0 {
-				continue
-			}
-			if err = check.person(person, owned); err != nil {
-				return err
-			}
-		}
-		return nil
-	}()
-	if restore := see(savedOwner, savedProjects); restore != nil && err == nil {
-		err = restore
-	}
+// Other owners' layers are hidden from the caller by row-level security. To
+// read them, the owner setting is pointed at one owner at a time and restored,
+// in this same transaction, before anything is rendered or decided. The texts
+// stay in memory and never leave this function. A file counts as the caller's
+// own only when the caller holds rules.read, now (under the access lock), on
+// every layer in it; sizes are reported only for such files, and any other
+// file yields a generic refusal without size or identity.
+//
+// The work stops at the request's deadline (503, and the transaction rolls back).
+func budgetCheck(ctx context.Context, tx pgx.Tx, p tenant.Principal, caller string, batch []Set, now time.Time) (int, error) {
+	shared, owners, projects, err := gatherBudget(ctx, tx)
 	if err != nil {
 		return 0, err
+	}
+	// Validate every snapshot once; a snapshot that fails its own integrity
+	// check is left out here, and session start refuses it on its own.
+	keep := func(list []Snapshot) []Snapshot {
+		return slices.DeleteFunc(slices.Clone(list), func(s Snapshot) bool { return validSnapshot(s) != nil })
+	}
+	shared = keep(shared)
+	readable := map[string]bool{}
+	for _, list := range append([][]Snapshot{shared}, ownerLists(owners)...) {
+		for _, s := range list {
+			key := jsonDigest(s.Scope)
+			if _, known := readable[key]; known {
+				continue
+			}
+			err := permission(ctx, tx, p, s.Scope, "rules.read")
+			if err != nil && !isDenied(err) {
+				return 0, err
+			}
+			readable[key] = err == nil
+		}
+	}
+	check := budget{ctx: ctx, tenant: p.TenantID, batch: batch, now: now, shared: shared, projects: projects, readable: readable}
+	if err = check.person(noPerson, nil); err != nil {
+		return 0, err
+	}
+	for _, o := range owners {
+		if err = check.person(o.person, keep(o.snapshots)); err != nil {
+			return 0, err
+		}
 	}
 	if check.ownOver > 0 {
 		return 0, &Error{Status: 422, Code: "rules_budget_exceeded", Message: fmt.Sprintf("after this publication one of your session files would need %d UTF-8 bytes (limit %d); shorten always-on text or move it to details", check.ownOver, MaxBytes), ActualBytes: check.ownOver, MaxBytes: MaxBytes}
@@ -308,17 +286,83 @@ func budgetCheck(ctx context.Context, tx pgx.Tx, tenantID, caller string, batch 
 	return check.ownMax, nil
 }
 
+type ownerSnapshots struct {
+	person    string
+	snapshots []Snapshot
+}
+
+func ownerLists(owners []ownerSnapshots) [][]Snapshot {
+	out := [][]Snapshot{}
+	for _, o := range owners {
+		out = append(out, o.snapshots)
+	}
+	return out
+}
+
+// gatherBudget reads every live snapshot the budget may need: the shared layers
+// of every project, and each active person's own layers, switching the owner
+// setting one person at a time. It restores the caller's settings before it
+// returns, whatever happens.
+func gatherBudget(ctx context.Context, tx pgx.Tx) (shared []Snapshot, owners []ownerSnapshots, projects []string, err error) {
+	var savedOwner, savedProjects string
+	if err = tx.QueryRow(ctx, `SELECT coalesce(current_setting('aeon.rules_owner',true),''),coalesce(current_setting('aeon.rules_projects',true),'')`).Scan(&savedOwner, &savedProjects); err != nil {
+		return nil, nil, nil, err
+	}
+	see := func(owner, projects string) error {
+		_, err := tx.Exec(ctx, `SELECT set_config('aeon.rules_owner',$1,true),set_config('aeon.rules_projects',$2,true)`, owner, projects)
+		return err
+	}
+	defer func() {
+		if restore := see(savedOwner, savedProjects); restore != nil && err == nil {
+			err = restore
+		}
+	}()
+	if err = see("", "*"); err != nil {
+		return
+	}
+	if shared, err = publishedSnapshots(ctx, tx); err != nil {
+		return
+	}
+	projects = []string{noProject}
+	for _, s := range shared {
+		if s.Scope.Layer == "project" && !slices.Contains(projects, s.Scope.ProjectID) {
+			projects = append(projects, s.Scope.ProjectID)
+		}
+	}
+	people, err := activePeople(ctx, tx)
+	if err != nil {
+		return
+	}
+	for _, person := range people {
+		if expired(ctx) {
+			return nil, nil, nil, errStopped
+		}
+		if err = see(person, "*"); err != nil {
+			return
+		}
+		var owned []Snapshot
+		if owned, err = ownedSnapshots(ctx, tx, person); err != nil {
+			return
+		}
+		if len(owned) > 0 {
+			owners = append(owners, ownerSnapshots{person, owned})
+		}
+	}
+	return
+}
+
 type budget struct {
-	tenant, caller string
-	batch          []Set
-	now            time.Time
-	shared         []Snapshot
-	projects       []string
-	visible        map[string]bool
-	rendered       int
-	ownMax         int
-	ownOver        int
-	hiddenOver     bool
+	ctx        context.Context
+	tenant     string
+	batch      []Set
+	now        time.Time
+	shared     []Snapshot
+	projects   []string
+	readable   map[string]bool
+	rendered   int
+	ownMax     int
+	ownOver    int
+	hiddenOver bool
 }
 
 // person renders one person's files that the batch touches: with no agent and
@@ -337,24 +381,41 @@ func (b *budget) person(person string, owned []Snapshot) error {
 			agents = append(agents, a)
 		}
 	}
-	mine := person == noPerson || person == b.caller
+	stop := func() bool { return expired(b.ctx) }
+	readable := make([]bool, len(snapshots))
+	for i, s := range snapshots {
+		readable[i] = b.readable[jsonDigest(s.Scope)]
+	}
 	for _, a := range agents {
 		checked := b.projects
 		if a.task != "" {
 			checked = []string{a.project}
 		}
 		for _, project := range checked {
-			own := mine && b.visible[project]
 			for _, role := range Roles {
 				for _, harness := range Harnesses {
 					c := Context{TenantID: b.tenant, ProjectID: project, PersonID: person, AgentID: a.agent, Role: role, Harness: harness, TaskID: a.task}
 					if !slices.ContainsFunc(b.batch, func(s Set) bool { return s.Scope.matches(c) }) {
 						continue
 					}
+					if stop() {
+						return errStopped
+					}
 					if b.rendered++; b.rendered > maxBudgetContexts {
 						return errTooManyCtx
 					}
-					m, err := Merge(c, snapshots, b.now)
+					beforeRender()
+					own := true
+					for i, s := range snapshots {
+						if s.Scope.matches(c) && !readable[i] {
+							own = false
+							break
+						}
+					}
+					m, err := merge(c, snapshots, b.now, true, stop)
+					if errors.Is(err, errStopped) {
+						return err
+					}
 					var e *Error
 					over := errors.As(err, &e) && e.Code == "rules_budget_exceeded"
 					// A missing floor or an ambiguity does not concern the budget;

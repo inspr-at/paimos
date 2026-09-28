@@ -76,9 +76,12 @@ func (m *Module) endpoint(permission string, fn endpoint) http.HandlerFunc {
 			return
 		}
 		r.Body = io.NopCloser(bytes.NewReader(raw))
-		ctx, cancel := context.WithTimeout(r.Context(), txTimeout)
-		defer cancel()
-		r = r.WithContext(ctx)
+		// The transaction's context is never cancelled: pgx answers a cancelled
+		// context by dropping the connection rather than rolling back, which
+		// would leave the locks to the server's timing. The deadline bounds the
+		// work instead: lock and statement timeouts for SQL, explicit checks in
+		// the budget's CPU loops, and InTenant rolls back when fn fails.
+		r = r.WithContext(withDeadline(context.WithoutCancel(r.Context()), time.Now().Add(txTimeout)))
 		var out any
 		err = db.InTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
 			// Bounded waits and work: a lock that cannot be had in time fails the
@@ -97,14 +100,7 @@ func (m *Module) endpoint(permission string, fn endpoint) http.HandlerFunc {
 			if p.Kind == tenant.Agent {
 				agent = p.ID
 			}
-			// Preserve the original project visibility for rule RLS before enabling
-			// workspace company/person nodes. No generic API runs in this transaction.
-			var visibleProjects string
-			if err = tx.QueryRow(r.Context(), `SELECT coalesce(current_setting('aeon.visible_projects',true),'')`).Scan(&visibleProjects); err != nil {
-				return err
-			}
-			_, err = tx.Exec(r.Context(), `SELECT set_config('aeon.rules_projects',$3,true),set_config('aeon.rules_owner',$1,true),set_config('aeon.rules_agent',$2,true),set_config('aeon.rules_access','on',true),set_config('aeon.visible_projects','*',true)`, owner, agent, visibleProjects)
-			if err != nil {
+			if err = enterRules(r.Context(), tx, owner, agent); err != nil {
 				return err
 			}
 			if r.Method != "GET" && r.Method != "HEAD" {
@@ -112,6 +108,22 @@ func (m *Module) endpoint(permission string, fn endpoint) http.HandlerFunc {
 					return err
 				}
 				if err = lockAccess(r.Context(), tx, p.TenantID); err != nil {
+					return err
+				}
+				// Project visibility was derived when the transaction began; derive
+				// it again under the access lock so a revocation that committed
+				// meanwhile is honoured by every read and decision that follows.
+				var creator any
+				if workorders.UUID(p.KeyCreatorID) {
+					creator = p.KeyCreatorID
+				}
+				if _, err = tx.Exec(r.Context(), `SELECT aeon_enter_principal($1::uuid,$2::uuid,$3::uuid)`, p.TenantID, p.ID, creator); err != nil {
+					return err
+				}
+				if owner, err = actorOwner(r.Context(), tx, p); err != nil {
+					return err
+				}
+				if err = enterRules(r.Context(), tx, owner, agent); err != nil {
 					return err
 				}
 				if err = ensureKinds(r.Context(), tx, p); err != nil {
@@ -127,6 +139,32 @@ func (m *Module) endpoint(permission string, fn endpoint) http.HandlerFunc {
 		}
 		httpapi.WriteJSON(w, 200, out)
 	}
+}
+
+// enterRules turns on rule visibility for this person or agent: it keeps the
+// caller's project visibility for project rule layers, then opens workspace
+// visibility for company and person rule nodes. No generic API runs in this
+// transaction.
+func enterRules(ctx context.Context, tx pgx.Tx, owner, agent string) error {
+	var visibleProjects string
+	if err := tx.QueryRow(ctx, `SELECT coalesce(current_setting('aeon.visible_projects',true),'')`).Scan(&visibleProjects); err != nil {
+		return err
+	}
+	_, err := tx.Exec(ctx, `SELECT set_config('aeon.rules_projects',$3,true),set_config('aeon.rules_owner',$1,true),set_config('aeon.rules_agent',$2,true),set_config('aeon.rules_access','on',true),set_config('aeon.visible_projects','*',true)`, owner, agent, visibleProjects)
+	return err
+}
+
+type deadlineKey struct{}
+
+// withDeadline records when the request's work must stop; see expired.
+func withDeadline(ctx context.Context, at time.Time) context.Context {
+	return context.WithValue(ctx, deadlineKey{}, at)
+}
+
+// expired reports whether the request's deadline has passed.
+func expired(ctx context.Context) bool {
+	at, ok := ctx.Value(deadlineKey{}).(time.Time)
+	return ok && !time.Now().Before(at)
 }
 
 // lockAccess takes the tenant row lock that every access change takes (role,
