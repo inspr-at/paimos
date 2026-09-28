@@ -83,6 +83,8 @@ func (m *Module) Mount(mux *http.ServeMux) {
 		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/heartbeat", "harness.worker", true, 200, m.heartbeat},
 		{"GET /api/projects/{projectId}/harness-sessions/{sessionId}/provenance", "harness.read", false, 200, m.readProvenance},
 		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/provenance", "harness.worker", true, 200, m.recordProvenance},
+		{"GET /api/projects/{projectId}/harness-sessions/{sessionId}/rules-receipts", "harness.read", false, 200, m.readRulesReceipts},
+		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/rules-receipts", "harness.worker", true, 200, m.recordRulesReceipt},
 		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/yield", "harness.worker", true, 200, m.yield},
 		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/drain", "harness.worker", true, 200, m.drain},
 		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/complete-delivery", "harness.worker", true, 200, m.completeDelivery},

@@ -248,6 +248,8 @@ var RoutePermissions = map[string]string{
 	"GET /api/projects/{projectId}/harness-sessions/{sessionId}/provenance":           "harness.read",
 	"GET /api/projects/{projectId}/harness-sessions/{sessionId}/usage":                "harness.read",
 	"POST /api/projects/{projectId}/harness-sessions/{sessionId}/provenance":          "harness.worker",
+	"GET /api/projects/{projectId}/harness-sessions/{sessionId}/rules-receipts":       "harness.read",
+	"POST /api/projects/{projectId}/harness-sessions/{sessionId}/rules-receipts":      "harness.worker",
 	"POST /api/projects/{projectId}/harness-sessions/{sessionId}/usage":               "harness.worker",
 	"POST /api/models":                                                                "models.manage",
 	"POST /api/nodes":                                                                 "nodes.write",

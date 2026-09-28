@@ -2593,6 +2593,46 @@ paths:
         '400': {description: Invalid note or heartbeat}
         '403': {description: Worker proof rejected}
         '410': {description: Authenticated archived generation; detach harness servicing without signaling the process}
+  /projects/{projectId}/harness-sessions/{sessionId}/rules-receipts:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: getHarnessRulesReceipts
+      description: Requires harness.read and session project visibility. Newest 32 append-only worker-reported received receipts, separate from instruction provenance. History remains readable after stop/archive. Use before_revision for older history; the newest receipt revision is the next write's expected_revision, or zero for empty history.
+      parameters:
+        - {name: before_revision, in: query, schema: {type: integer, minimum: 1}, description: Exclusive revision cursor. Omit to read newest receipts.}
+      responses:
+        '200': {description: Receipt history, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessRulesReceiptPage'}}}}
+        '400': {description: Invalid revision cursor}
+        '404': {description: Session is not visible}
+    post:
+      operationId: recordHarnessRulesReceipt
+      description: >-
+        Explicit worker report of receiving particular merged bytes; never publishes rules, changes
+        instruction provenance, or proves model load, obedience or execution, and grants no authority.
+        Requires harness.worker and the exact active owning generation lease. Server verifies tenant,
+        project, agent, canonical key creator, registered harness and any task's current session/project
+        binding. Role, bytes, version and source remain worker-reported; publication is not verified.
+        No offline recording or deferred automatic submission. Cache/floor-only source reports remain
+        unverified even when recorded online. expected_revision is a receipt revision, independent of
+        session/provenance revisions. Append only when it equals the latest revision (initially zero).
+        An identical request_id and normalized metadata replays its original receipt, including after newer appends;
+        divergent reuse or competing stale writes return 409. All authorization and generation checks
+        precede replay, so expired/revoked credentials and stopped/archived generations cannot replay.
+      parameters:
+        - {name: X-Aeon-Worker-Lease, in: header, required: true, schema: {type: string}, description: Private exact generation proof; never stored in a receipt or returned}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/HarnessRulesReceiptWrite'}
+      responses:
+        '200': {description: Appended or replayed receipt, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessRulesReceiptRecorded'}}}}
+        '400': {description: Invalid or unbounded metadata; unknown fields rejected}
+        '403': {description: Worker proof or context binding rejected}
+        '409': {description: Expected receipt revision conflict or divergent request reuse}
+        '410': {description: Authenticated archived generation; receipt history remains readable}
   /projects/{projectId}/harness-sessions/{sessionId}/provenance:
     parameters:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -6602,6 +6642,59 @@ components:
         previous_value: {type: [string, 'null']}
         value: {type: [string, 'null']}
         at: {type: string, format: date-time}
+    HarnessRulesReceiptContext:
+      type: object
+      additionalProperties: false
+      required: [tenant_id, project_id, person_id, agent_id, role, harness]
+      description: Identity/binding checked against the authenticated generation at recording time; role is a worker-reported merge selector, never a permission. Registered harness is metadata, not attestation of the running executable. Optional task must match the session ticket and remain in the project.
+      properties:
+        tenant_id: {type: string, format: uuid}
+        project_id: {type: string, format: uuid}
+        person_id: {type: string, format: uuid}
+        agent_id: {type: string, format: uuid}
+        task_id: {type: string, format: uuid}
+        role: {type: string, enum: [coordinator, builder, reviewer, operator]}
+        harness: {type: string, enum: [claude-code, codex, grok, pi, cursor]}
+    HarnessRulesReceiptWrite:
+      type: object
+      additionalProperties: false
+      required: [request_id, expected_revision, context, body_sha256, version, byte_size, source]
+      properties:
+        request_id: {type: string, format: uuid, description: Caller-generated idempotency ID scoped to the session; reuse only with the identical payload}
+        expected_revision: {type: integer, format: int64, minimum: 0, maximum: 9223372036854775806}
+        context: {$ref: '#/components/schemas/HarnessRulesReceiptContext'}
+        body_sha256: {type: string, pattern: '^[0-9a-f]{64}$', description: Worker-reported SHA256 of exact merged bytes, never a hash of a version label}
+        version: {type: string, maxLength: 16, pattern: '^(floor-only|[0-9]{12}\.0\.0)$', description: Worker-reported calendar version or floor-only; no assertion of publication}
+        byte_size: {type: integer, minimum: 1, maximum: 12000}
+        source: {type: string, enum: [online, cache, floor-only], description: Worker-reported source; cache/floor-only are stale fallback evidence and never fresh authority}
+    HarnessRulesReceipt:
+      type: object
+      required: [request, id, session_id, revision, recorded_by_principal_id, recorded_at, evidence, publication_verified, load_verified, execution_verified, authority_granted]
+      properties:
+        request: {$ref: '#/components/schemas/HarnessRulesReceiptWrite'}
+        id: {type: string, format: uuid}
+        session_id: {type: string, format: uuid}
+        revision: {type: integer, format: int64, minimum: 1}
+        recorded_by_principal_id: {type: string, format: uuid}
+        recorded_at: {type: string, format: date-time}
+        evidence: {type: string, const: worker_reported_received}
+        publication_verified: {type: boolean, const: false}
+        load_verified: {type: boolean, const: false}
+        execution_verified: {type: boolean, const: false}
+        authority_granted: {type: boolean, const: false}
+    HarnessRulesReceiptRecorded:
+      type: object
+      required: [receipt, replayed]
+      properties:
+        receipt: {$ref: '#/components/schemas/HarnessRulesReceipt'}
+        replayed: {type: boolean}
+    HarnessRulesReceiptPage:
+      type: object
+      required: [session_id, receipts, next_before_revision]
+      properties:
+        session_id: {type: string, format: uuid}
+        receipts: {type: array, maxItems: 32, items: {$ref: '#/components/schemas/HarnessRulesReceipt'}}
+        next_before_revision: {type: [integer, 'null'], format: int64}
     HarnessProvenanceWrite:
       type: object
       required: [items]
