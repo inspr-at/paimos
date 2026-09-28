@@ -19,9 +19,19 @@ export interface RulesMock {
   calls: { method: string; path: string; body?: unknown }[]
 }
 
-export async function mockRules(page: Page, options: { kind?: 'person' | 'agent'; conflict?: boolean; publish?: boolean } = {}): Promise<RulesMock> {
+export async function mockRules(page: Page, options: { kind?: 'person' | 'agent'; conflict?: boolean; publish?: boolean; draftFailAt?: number; setAbortAt?: number } = {}): Promise<RulesMock> {
   const calls: RulesMock['calls'] = []
   let conflicted = false
+  let layerPosts = 0
+  let setPosts = 0
+  let draftPuts = 0
+  const createdLayers: { id: string; scope: unknown }[] = []
+  const createdSets = new Map<string, { id: string; layer_id: string; scope: unknown; name: string; revision: number; rules: unknown[]; published_version: string }>()
+  const layerScope = (id: string) => {
+    if (id === COMPANY) return { layer: 'company' }
+    if (id === PROJECT_LAYER) return { layer: 'project', project_id: RULE_PROJECT }
+    return createdLayers.find(layer => layer.id === id)?.scope ?? { layer: 'company' }
+  }
   const state = {
     revision: 3,
     companyName: 'Secrets',
@@ -70,22 +80,41 @@ export async function mockRules(page: Page, options: { kind?: 'person' | 'agent'
       return route.fulfill({ json: { layers: [
         { id: COMPANY, scope: { layer: 'company' } },
         { id: PROJECT_LAYER, scope: { layer: 'project', project_id: RULE_PROJECT } },
+        ...createdLayers,
       ] } })
     }
-    if (path === '/api/rules/layers' && method === 'POST') return route.fulfill({ status: 201, json: { id: '99999999-9999-4999-8999-999999999999', scope: body } })
+    if (path === '/api/rules/layers' && method === 'POST') {
+      layerPosts += 1
+      const layer = { id: `b1b1b1b1-b1b1-41b1-81b1-${layerPosts.toString(16).padStart(12, '0')}`, scope: body }
+      createdLayers.push(layer)
+      return route.fulfill({ status: 201, json: layer })
+    }
     if (path === '/api/rules/sets' && method === 'GET') {
       const layer = url.searchParams.get('layer_id')
       const all = sets()
-      const items = Object.values(all).filter(set => set.layer_id === layer)
+      const items = [...Object.values(all), ...createdSets.values()].filter(set => set.layer_id === layer)
       return route.fulfill({ json: { sets: items } })
     }
     if (path === '/api/rules/sets' && method === 'POST') {
-      return route.fulfill({ status: 201, json: { id: 'abababab-abab-4abab-8abab-abababababab', layer_id: body.layer_id, scope: { layer: 'company' }, name: body.name, revision: 1, rules: [], published_version: '' } })
+      setPosts += 1
+      if (options.setAbortAt && setPosts === options.setAbortAt) return route.abort('failed')
+      const created = { id: `c1c1c1c1-c1c1-41c1-81c1-${setPosts.toString(16).padStart(12, '0')}`, layer_id: body.layer_id as string, scope: layerScope(body.layer_id as string), name: body.name as string, revision: 1, rules: [] as unknown[], published_version: '' }
+      createdSets.set(created.id, created)
+      return route.fulfill({ status: 201, json: created })
     }
     const setPath = /^\/api\/rules\/sets\/([^/]+)$/.exec(path)
-    if (setPath && method === 'GET') return route.fulfill({ json: sets()[setPath[1]] ?? { error: 'missing' } })
+    if (setPath && method === 'GET') return route.fulfill({ json: sets()[setPath[1]] ?? createdSets.get(setPath[1]) ?? { error: 'missing' } })
     const draft = /^\/api\/rules\/sets\/([^/]+)\/draft$/.exec(path)
     if (draft && method === 'PUT') {
+      const created = createdSets.get(draft[1])
+      if (created) {
+        draftPuts += 1
+        if (options.draftFailAt && draftPuts === options.draftFailAt) return route.fulfill({ status: 500, json: { error: 'The draft was not saved.', code: 'unavailable' } })
+        created.revision += 1
+        created.name = body.name
+        created.rules = body.rules
+        return route.fulfill({ json: created })
+      }
       if (options.conflict && !conflicted) {
         conflicted = true
         state.revision = 4

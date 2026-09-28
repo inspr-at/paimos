@@ -2,7 +2,7 @@
 // Agent rules (ADR-004). Types and calls follow the frozen AR1 contract:
 // layers, sets, draft replacement, publish, restore and merged preview.
 // Permission checks take the caller's grants; project membership is never a grant.
-import { api } from './api.ts'
+import { api, RequestFailure, StaleRequestError } from './api.ts'
 import { sessionGone } from './authz.ts'
 
 export const RULES_BUDGET = 12000
@@ -513,4 +513,348 @@ function withNote<T extends { note?: string }>(body: T): T {
 function cleanSnapshot(snapshot: RuleSnapshot): RuleSnapshot {
   const note = snapshot.note?.trim()
   return { ...snapshot, note: note || undefined, rules: (snapshot.rules ?? []).map(clean) }
+}
+
+// Person-operated bulk draft import. The file is data (aeon.rules-draft-import.v1).
+// It is parsed locally, checked in full, then written only through the rules APIs.
+export const DRAFT_IMPORT_SCHEMA = 'aeon.rules-draft-import.v1'
+export const IMPORT_MAX_BYTES = 2 * 1024 * 1024
+export const IMPORT_MAX_SETS = 20
+export const IMPORT_MAX_RULES = 100
+
+export interface DraftImportSet { name: string; rules: AgentRule[] }
+export interface DraftImportLayer { scope: RuleScope; sets: DraftImportSet[] }
+export interface DraftImportPlan { tenantId: string; layers: DraftImportLayer[] }
+export interface ImportConfirmed { scope: RuleScope; layer: RuleLayer; set: RuleSet; rulesSaved: boolean }
+export type ImportOutcome =
+  | { status: 'imported'; confirmed: ImportConfirmed[]; message: string }
+  | { status: 'rejected'; confirmed: ImportConfirmed[]; message: string }
+  | { status: 'partial'; confirmed: ImportConfirmed[]; message: string }
+  | { status: 'uncertain'; confirmed: ImportConfirmed[]; message: string }
+
+const IMPORT_KEYS = ['schema', 'tenant_id', 'layers']
+const SCOPE_KEYS = ['layer', 'project_id', 'owner_id', 'agent_id', 'role', 'task_id']
+const SET_KEYS = ['name', 'rules']
+const RULE_KEYS = ['identity', 'text', 'why', 'details', 'strength', 'enabled', 'expires_at', 'roles', 'harnesses', 'source']
+const SOURCE_KEYS = ['reference', 'revision', 'identity', 'edited_here']
+const INSTANT = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,9}))?(Z|[+-]\d{2}:\d{2})$/
+
+export function scopeKey(scope: RuleScope): string {
+  const value = scopePayload(scope)
+  return [value.layer, value.project_id ?? '', value.owner_id ?? '', value.agent_id ?? '', value.role ?? '', value.task_id ?? ''].join('\u0000')
+}
+
+export function scopeLabel(scope: RuleScope): string {
+  if (scope.layer === 'company') return 'Company'
+  if (scope.layer === 'project') return `Project ${scope.project_id ?? ''}`
+  if (scope.layer === 'person') return `Person ${scope.owner_id ?? ''}`
+  if (scope.role) return `Agent role ${ROLE_LABEL[scope.role] ?? scope.role}`
+  if (scope.task_id) return `Agent task ${scope.task_id}`
+  if (scope.agent_id) return `Named agent ${scope.agent_id}`
+  return 'Agent'
+}
+
+export function importBlock(caller: Caller | null): string | null {
+  if (!caller) return 'Sign in to import drafts.'
+  if (caller.kind !== 'person') return 'Only a person can import drafts.'
+  return null
+}
+
+export function replyUncertain(error: unknown): boolean {
+  return error instanceof RequestFailure || error instanceof StaleRequestError || error instanceof SyntaxError
+}
+
+function plainRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value)
+}
+
+function unknownKey(value: Record<string, unknown>, allowed: string[]): string | null {
+  for (const key of Object.keys(value)) if (!allowed.includes(key)) return key
+  return null
+}
+
+function validInstant(value: string): boolean {
+  const match = INSTANT.exec(value)
+  if (!match) return false
+  const year = Number(match[1])
+  const month = Number(match[2])
+  const day = Number(match[3])
+  const hour = Number(match[4])
+  const minute = Number(match[5])
+  const second = Number(match[6])
+  if (month < 1 || month > 12 || hour > 23 || minute > 59 || second > 59) return false
+  const date = new Date(Date.UTC(year, month - 1, day))
+  if (date.getUTCFullYear() !== year || date.getUTCMonth() + 1 !== month || date.getUTCDate() !== day) return false
+  if (match[8] !== 'Z') {
+    const offsetHour = Number(match[8].slice(1, 3))
+    const offsetMinute = Number(match[8].slice(4, 6))
+    if (offsetHour > 23 || offsetMinute > 59) return false
+  }
+  return true
+}
+
+function scopeIssue(scope: RuleScope): string | null {
+  if (scope.layer === 'company') {
+    if (scope.project_id || scope.owner_id || scope.agent_id || scope.role || scope.task_id) return 'Company scope stands alone.'
+    return null
+  }
+  if (scope.layer === 'project') {
+    if (!scope.project_id) return 'Project scope needs a project id.'
+    if (scope.owner_id || scope.agent_id || scope.role || scope.task_id) return 'Project scope only takes a project id.'
+    return null
+  }
+  if (scope.layer === 'person') {
+    if (!scope.owner_id) return 'Person scope needs the person’s id.'
+    if (scope.project_id || scope.agent_id || scope.role || scope.task_id) return 'Person scope only takes that person’s id.'
+    return null
+  }
+  const roleOnly = !!scope.role && !scope.agent_id && !scope.owner_id && !scope.project_id && !scope.task_id
+  const named = !scope.role && !!scope.owner_id && !!scope.agent_id && !scope.project_id && !scope.task_id
+  const task = !scope.role && !!scope.owner_id && !!scope.agent_id && !!scope.project_id && !!scope.task_id
+  if (roleOnly || named || task) return null
+  if ((scope.task_id && !scope.project_id) || (scope.project_id && !scope.task_id)) return 'An agent task needs a project id and a task id.'
+  return 'Agent scope must be a role, a named agent, or one task.'
+}
+
+function parseScope(raw: unknown): { scope: RuleScope } | { error: string } {
+  if (!plainRecord(raw)) return { error: 'Each layer needs a scope object.' }
+  const extra = unknownKey(raw, SCOPE_KEYS)
+  if (extra) return { error: `Scope has an unknown field “${extra}”.` }
+  if (typeof raw.layer !== 'string' || !LAYERS.includes(raw.layer as LayerName)) return { error: 'The scope layer is not company, project, person or agent.' }
+  const scope: RuleScope = { layer: raw.layer as LayerName }
+  for (const key of ['project_id', 'owner_id', 'agent_id', 'task_id'] as const) {
+    const id = raw[key]
+    if (id === undefined) continue
+    if (typeof id !== 'string' || !isUuid(id)) return { error: 'Scope ids must be lowercase UUIDs.' }
+    scope[key] = id
+  }
+  if (raw.role !== undefined) {
+    if (typeof raw.role !== 'string' || !ROLES.includes(raw.role as RoleName)) return { error: 'Unknown role in scope.' }
+    scope.role = raw.role as RoleName
+  }
+  const issue = scopeIssue(scope)
+  if (issue) return { error: issue }
+  return { scope }
+}
+
+function parseStringList<T extends string>(value: unknown, allowed: readonly T[], label: string): { values: T[] } | { error: string } {
+  if (value === undefined) return { values: [] }
+  if (!Array.isArray(value)) return { error: `The ${label} list must be an array.` }
+  const values: T[] = []
+  for (const item of value) {
+    if (typeof item !== 'string' || !allowed.includes(item as T)) return { error: `Unknown ${label}.` }
+    if (values.includes(item as T)) return { error: `Repeated ${label}.` }
+    values.push(item as T)
+  }
+  return { values }
+}
+
+function parseImportRule(raw: unknown, seen: ReadonlySet<string>): { rule: AgentRule } | { error: string } {
+  if (!plainRecord(raw)) return { error: 'A rule must be an object.' }
+  const extra = unknownKey(raw, RULE_KEYS)
+  if (extra) return { error: `A rule has an unknown field “${extra}”.` }
+  if (typeof raw.identity !== 'string' || typeof raw.text !== 'string' || typeof raw.why !== 'string') return { error: 'Each rule needs identity, text and why strings.' }
+  if (raw.strength !== 'normal' && raw.strength !== 'locked') return { error: 'Strength is normal or locked.' }
+  if (typeof raw.enabled !== 'boolean') return { error: 'Each rule needs enabled true or false.' }
+  if (raw.details !== undefined && typeof raw.details !== 'string') return { error: 'Details must be text.' }
+  let expires: string | null = null
+  if (raw.expires_at !== undefined && raw.expires_at !== null) {
+    if (typeof raw.expires_at !== 'string' || !validInstant(raw.expires_at)) return { error: 'Expiry must be an RFC3339 instant or empty.' }
+    expires = raw.expires_at
+  }
+  const roles = parseStringList(raw.roles, ROLES, 'role')
+  if ('error' in roles) return roles
+  const harnesses = parseStringList(raw.harnesses, HARNESSES, 'harness')
+  if ('error' in harnesses) return harnesses
+  if (!plainRecord(raw.source)) return { error: 'Each rule needs a source object.' }
+  const sourceExtra = unknownKey(raw.source, SOURCE_KEYS)
+  if (sourceExtra) return { error: `A rule source has an unknown field “${sourceExtra}”.` }
+  if (typeof raw.source.reference !== 'string') return { error: 'Each rule needs a source reference.' }
+  if (raw.source.revision !== undefined && typeof raw.source.revision !== 'string') return { error: 'The source revision must be text.' }
+  if (raw.source.identity !== undefined && typeof raw.source.identity !== 'string') return { error: 'The upstream identity must be text.' }
+  if (raw.source.edited_here !== undefined && typeof raw.source.edited_here !== 'boolean') return { error: 'edited_here must be true or false.' }
+  const rule: AgentRule = {
+    identity: raw.identity,
+    text: raw.text,
+    why: raw.why,
+    details: typeof raw.details === 'string' ? raw.details : '',
+    strength: raw.strength,
+    enabled: raw.enabled,
+    expires_at: expires,
+    roles: roles.values,
+    harnesses: harnesses.values,
+    source: {
+      reference: raw.source.reference,
+      revision: typeof raw.source.revision === 'string' ? raw.source.revision : '',
+      identity: typeof raw.source.identity === 'string' ? raw.source.identity : '',
+      edited_here: raw.source.edited_here === true,
+    },
+  }
+  const issue = validateRule(rule, seen)
+  if (issue) return { error: issue }
+  return { rule: normalizeRule(rule) }
+}
+
+function reviewDraftImport(plan: DraftImportPlan, tenantId: string, caller: Caller | null, existing: { scope: RuleScope; names: string[] }[]): string | null {
+  const blocked = importBlock(caller)
+  if (blocked) return blocked
+  if (plan.tenantId !== tenantId) return 'This file is for a different workspace.'
+  if (plan.layers.length === 0) return 'The file has no draft sets.'
+  const seenScopes = new Set<string>()
+  let sets = 0
+  let rules = 0
+  for (const layer of plan.layers) {
+    const key = scopeKey(layer.scope)
+    if (seenScopes.has(key)) return `${scopeLabel(layer.scope)} is listed more than once.`
+    seenScopes.add(key)
+    const block = writeBlock(caller, layer.scope)
+    if (block) return block
+    const taken = new Set<string>()
+    const present = existing.filter(row => scopeKey(row.scope) === key).flatMap(row => row.names)
+    for (const set of layer.sets) {
+      if (taken.has(set.name)) return `“${set.name}” is listed twice for ${scopeLabel(layer.scope)}.`
+      taken.add(set.name)
+      if (present.includes(set.name)) return `“${set.name}” already exists in ${scopeLabel(layer.scope)}. Import adds new sets and does not change existing ones.`
+      sets += 1
+      rules += set.rules.length
+    }
+  }
+  if (sets === 0) return 'The file has no draft sets.'
+  if (sets > IMPORT_MAX_SETS) return 'An import holds at most 20 sets.'
+  if (rules > IMPORT_MAX_RULES) return 'An import holds at most 100 rules.'
+  return null
+}
+
+export function parseDraftImport(
+  text: string,
+  byteLength: number,
+  tenantId: string,
+  caller: Caller | null,
+  existing: { scope: RuleScope; names: string[] }[] = [],
+): { plan: DraftImportPlan } | { error: string } {
+  if (byteLength > IMPORT_MAX_BYTES || utf8Length(text) > IMPORT_MAX_BYTES) return { error: 'The file must be 2 MiB or smaller.' }
+  let raw: unknown
+  try { raw = JSON.parse(text) } catch { return { error: 'The file is not JSON.' } }
+  if (!plainRecord(raw)) return { error: 'The file must be a JSON object.' }
+  const extra = unknownKey(raw, IMPORT_KEYS)
+  if (extra) return { error: `The file has an unknown field “${extra}”.` }
+  if (raw.schema !== DRAFT_IMPORT_SCHEMA) return { error: 'The file must use schema aeon.rules-draft-import.v1.' }
+  if (typeof raw.tenant_id !== 'string') return { error: 'The file needs a tenant_id string.' }
+  if (raw.tenant_id !== tenantId) return { error: 'This file is for a different workspace.' }
+  if (!Array.isArray(raw.layers)) return { error: 'The file needs a layers array.' }
+  const layers: DraftImportLayer[] = []
+  for (const item of raw.layers) {
+    if (!plainRecord(item)) return { error: 'Each layer must be an object.' }
+    const layerExtra = unknownKey(item, ['scope', 'sets'])
+    if (layerExtra) return { error: `A layer has an unknown field “${layerExtra}”.` }
+    const scope = parseScope(item.scope)
+    if ('error' in scope) return scope
+    if (!Array.isArray(item.sets) || item.sets.length === 0) return { error: 'Each scope needs at least one set.' }
+    const sets: DraftImportSet[] = []
+    for (const entry of item.sets) {
+      if (!plainRecord(entry)) return { error: 'Each set must be an object.' }
+      const setExtra = unknownKey(entry, SET_KEYS)
+      if (setExtra) return { error: `A set has an unknown field “${setExtra}”.` }
+      if (typeof entry.name !== 'string') return { error: 'Each set needs a name.' }
+      if (!Array.isArray(entry.rules)) return { error: `“${entry.name}” needs a rules array.` }
+      const seen = new Set<string>()
+      const rules: AgentRule[] = []
+      for (const rule of entry.rules) {
+        const parsed = parseImportRule(rule, seen)
+        if ('error' in parsed) return { error: `“${entry.name}”: ${parsed.error}` }
+        seen.add(parsed.rule.identity)
+        rules.push(parsed.rule)
+      }
+      const issue = validateDraft(entry.name, rules)
+      if (issue) return { error: issue }
+      sets.push({ name: entry.name, rules })
+    }
+    layers.push({ scope: scope.scope, sets })
+  }
+  const plan: DraftImportPlan = { tenantId: raw.tenant_id, layers }
+  const review = reviewDraftImport(plan, tenantId, caller, existing)
+  if (review) return { error: review }
+  return { plan }
+}
+
+export interface ImportIO {
+  listLayers: () => Promise<{ layers: RuleLayer[] }>
+  listSets: (layerId: string) => Promise<{ sets: RuleSet[] }>
+  createLayer: (scope: RuleScope) => Promise<RuleLayer>
+  createSet: (layerId: string, name: string) => Promise<RuleSet>
+  saveDraft: (setId: string, body: { expected_revision: number; name: string; rules: AgentRule[] }) => Promise<RuleSet>
+}
+
+function rejected(message: string): ImportOutcome {
+  return { status: 'rejected', confirmed: [], message }
+}
+
+function confirmedLine(confirmed: ImportConfirmed[]): string {
+  if (!confirmed.length) return ''
+  const parts = confirmed.map(item => `“${item.set.name}” ${item.set.id} revision ${item.set.revision}${item.rulesSaved ? '' : ' (rules not saved)'}`)
+  return `Confirmed: ${parts.join('; ')}. `
+}
+
+export async function runDraftImport(
+  plan: DraftImportPlan,
+  tenantId: string,
+  caller: Caller | null,
+  io: ImportIO = { listLayers, listSets, createLayer, createSet, saveDraft },
+): Promise<ImportOutcome> {
+  const blocked = importBlock(caller)
+  if (blocked) return rejected(blocked)
+  let listed: { layer: RuleLayer; names: string[] }[]
+  try {
+    const { layers } = await io.listLayers()
+    listed = []
+    for (const layer of layers) {
+      const { sets } = await io.listSets(layer.id)
+      listed.push({ layer, names: sets.map(set => set.name) })
+    }
+  } catch (cause) {
+    if (replyUncertain(cause)) return rejected('Could not read the current sets, so nothing was imported.')
+    return rejected(rulesMessage(cause))
+  }
+  const review = reviewDraftImport(plan, tenantId, caller, listed.map(row => ({ scope: row.layer.scope, names: row.names })))
+  if (review) return rejected(review)
+
+  const confirmed: ImportConfirmed[] = []
+  const layersByKey = new Map(listed.map(row => [scopeKey(row.layer.scope), row.layer]))
+  for (const layer of plan.layers) {
+    let remote = layersByKey.get(scopeKey(layer.scope))
+    if (!remote) {
+      try {
+        remote = await io.createLayer(layer.scope)
+        layersByKey.set(scopeKey(remote.scope), remote)
+      } catch (cause) {
+        if (replyUncertain(cause)) {
+          return { status: 'uncertain', confirmed, message: `The workspace did not confirm the layer for ${scopeLabel(layer.scope)}. ${confirmedLine(confirmed)}Check the server before trying again. This import did not retry and did not roll anything back.` }
+        }
+        return { status: 'partial', confirmed, message: `${confirmedLine(confirmed)}${scopeLabel(layer.scope)} was not created. ${rulesMessage(cause)} Later sets were not started. Nothing was rolled back or published.` }
+      }
+    }
+    for (const set of layer.sets) {
+      let created: RuleSet
+      try {
+        created = await io.createSet(remote.id, set.name)
+      } catch (cause) {
+        if (replyUncertain(cause)) {
+          return { status: 'uncertain', confirmed, message: `The workspace did not confirm “${set.name}”. ${confirmedLine(confirmed)}Check the server before trying again. This import did not retry and did not roll anything back.` }
+        }
+        return { status: 'partial', confirmed, message: `${confirmedLine(confirmed)}“${set.name}” was not created. ${rulesMessage(cause)} Later sets were not started. Confirmed drafts stay on the server. Nothing was rolled back or published.` }
+      }
+      try {
+        const saved = await io.saveDraft(created.id, { expected_revision: created.revision, name: set.name, rules: set.rules })
+        confirmed.push({ scope: remote.scope, layer: remote, set: saved, rulesSaved: true })
+      } catch (cause) {
+        confirmed.push({ scope: remote.scope, layer: remote, set: created, rulesSaved: false })
+        if (replyUncertain(cause)) {
+          return { status: 'uncertain', confirmed, message: `The workspace did not confirm the rules for “${set.name}”. ${confirmedLine(confirmed)}Check the server before trying again. This import did not retry and did not roll anything back.` }
+        }
+        return { status: 'partial', confirmed, message: `${confirmedLine(confirmed)}“${set.name}” was created, but its rules were not saved. ${rulesMessage(cause)} Later sets were not started. Confirmed drafts stay on the server. Nothing was rolled back or published.` }
+      }
+    }
+  }
+  const count = confirmed.length
+  return { status: 'imported', confirmed, message: `Imported ${count} draft ${count === 1 ? 'set' : 'sets'}. Nothing was published.` }
 }
