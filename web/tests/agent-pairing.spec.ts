@@ -3,6 +3,33 @@ import { expect, test } from '@playwright/test'
 import { fixtures, me, mockWork, watchErrors } from './work-fixtures'
 import { SETUP_COMMAND, mockAnonymousGuide, mockPairing } from './agent-pairing-fixtures'
 
+test('a qualified helper removes Connect only without a harness-name special case', async ({ page }) => {
+  await page.clock.install({ time: new Date('2026-09-27T20:00:00.000Z') })
+  await mockWork(page, fixtures())
+  // Deliberately synthetic future qualification; production remains unavailable.
+  const calls = await mockPairing(page, {
+    verification_capabilities: {
+      cursor: { supported: true, policy: 'no_tools', reason: '' },
+      codex: { supported: true, policy: 'read_only', reason: '' },
+    },
+  })
+  await page.goto('/agents/register-agent')
+  await page.getByLabel('Pairing code').fill('123-456-789')
+  await page.getByRole('button', { name: 'Look up code' }).click()
+  const review = page.getByRole('region', { name: 'Pairing review' })
+  await expect(review.getByRole('checkbox', { name: 'Verify selected harnesses' })).toBeChecked()
+  await expect(review.getByRole('button', { name: 'Connect only', exact: true })).toHaveCount(0)
+  await expect(review.locator('.harness-note')).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Connect computer', exact: true })).toBeEnabled()
+  expect(calls.some(call => call.path.endsWith('/approve'))).toBe(false)
+  await page.getByRole('button', { name: 'Connect computer', exact: true }).click()
+  await expect.poll(() => calls.find(call => call.path.endsWith('/approve'))?.body).toEqual({
+    request_digest: 'ab'.repeat(32),
+    verification: 'one_per_harness',
+    selected_account_keys: ['cursor-1', 'codex-1'],
+  })
+})
+
 test('the public guide is readable without sign-in and keeps only the human code', async ({ page }) => {
   await mockAnonymousGuide(page)
   await page.goto('/agents/register-agent')
@@ -49,7 +76,8 @@ test('a person reviews real accounts, can leave a harness out, and does not trea
   await expect(review.getByText(/1 request per selected harness/)).toBeVisible()
   await expect(review.getByText('One at a time')).toHaveCount(0)
   // Each harness row states its reason once, without repeating the harness name.
-  await expect(review.getByText('Verification cannot isolate inherited tools.')).toHaveCount(2)
+  await expect(review.getByText('Ask mode and an isolated config do not enforce a no-tools policy.')).toBeVisible()
+  await expect(review.getByText('Read-only sandboxing does not isolate inherited MCP tools and startup hooks.')).toBeVisible()
   await expect(review.getByText(/Cursor: Cursor/)).toHaveCount(0)
   await expect(review.getByRole('alert')).toContainText('Cursor and Codex can’t be verified.')
   await expect(page.getByText(/15-minute|15 minutes/)).toHaveCount(0)

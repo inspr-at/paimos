@@ -674,8 +674,8 @@ test('add harness connect stays blocked until the code matches the opened comput
 test('unsupported verification blocks the selected harness and connect only does not', () => {
   const published = {
     claude: { supported: true, policy: 'no_tools', reason: '' },
-    codex: { supported: false, policy: 'unavailable', reason: 'Codex verification cannot yet guarantee external/MCP isolation.' },
-    cursor: { supported: false, policy: 'unavailable', reason: 'Cursor external/MCP isolation is awaiting qualification.' },
+    codex: { supported: false, policy: 'unavailable', reason: 'Codex read-only sandboxing does not isolate inherited MCP tools and startup hooks.' },
+    cursor: { supported: false, policy: 'unavailable', reason: 'Cursor ask mode and an isolated config do not enforce a no-tools policy.' },
     grok: { supported: false, policy: 'unavailable', reason: 'Native Grok guided account identity is unavailable.' },
   }
   const current = view({

@@ -4670,7 +4670,7 @@ components:
         properties:
           supported: {type: boolean}
           policy: {type: string, enum: [no_tools, read_only, unavailable]}
-          reason: {type: string}
+          reason: {type: string, description: 'One concise explanation of the missing enforcement boundary when unsupported; empty when supported. Display as text, never infer support from the reason.'}
     PairingGuide:
       type: object
       required: [protocol, version, instance_url, default_tenant_slug, platforms, platform_qualification, setup_command, install_targets, install_available]

@@ -45,8 +45,8 @@ function base(overrides: Record<string, unknown> = {}) {
     ],
     verification: verification(),
     verification_capabilities: {
-      cursor: { supported: false, policy: 'unavailable', reason: 'Cursor verification cannot isolate inherited tools.' },
-      codex: { supported: false, policy: 'unavailable', reason: 'Codex verification cannot isolate inherited tools.' },
+      cursor: { supported: false, policy: 'unavailable', reason: 'Cursor ask mode and an isolated config do not enforce a no-tools policy.' },
+      codex: { supported: false, policy: 'unavailable', reason: 'Codex read-only sandboxing does not isolate inherited MCP tools and startup hooks.' },
     },
     verification_helper_version: '260927181849.0.0',
     computer_id: null, computer_state: null, principal_id: null, daemon_id: null,
@@ -66,7 +66,7 @@ function enrollment(id: string, key: string, harness: string, label: string) {
 
 export interface PairingCall { path: string; method: string; body: unknown }
 
-export async function mockPairing(page: Page) {
+export async function mockPairing(page: Page, reviewOverrides: Record<string, unknown> = {}) {
   const calls: PairingCall[] = []
   await page.route('**/api/me/permissions*', route => route.fulfill({
     json: { workspace: { role: { id: 'role-admin', key: 'admin', name: 'Admin' }, permissions: ['account.manage', 'account.read', 'authz.read'] }, project: null },
@@ -82,7 +82,7 @@ export async function mockPairing(page: Page) {
     if (path === '/api/agent-pairing/lookup' && method === 'POST') {
       const code = (body as { user_code?: string })?.user_code
       if (code === '111-222-333') return route.fulfill({ json: base({ existing_computer_id: COMPUTER, computer_name: 'studio' }) })
-      return route.fulfill({ json: base() })
+      return route.fulfill({ json: base(reviewOverrides) })
     }
     if (path.endsWith('/approve') && method === 'POST') {
       return route.fulfill({ json: base({
