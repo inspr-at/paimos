@@ -9,9 +9,11 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 
@@ -104,17 +106,26 @@ func TestPublicRateLimitCoversReadPDFAndAcceptanceAcrossTokens(t *testing.T) {
 		m := &Module{pool: database.App}
 		mux := http.NewServeMux()
 		m.Mount(mux)
+		started := time.Now()
 		for i := 0; i <= operation.limit; i++ {
 			token := strings.Repeat("A", 42) + string(rune('A'+i%2))
 			req := httptest.NewRequest(operation.method, "/api/public/quotes/invalid/"+token+operation.suffix, nil)
 			req.RemoteAddr = "192.0.2.5:43210"
 			rec := httptest.NewRecorder()
 			mux.ServeHTTP(rec, req)
+			elapsed := time.Since(started)
 			if i == operation.limit && rec.Code != http.StatusTooManyRequests {
 				t.Fatalf("%s%s request %d: got %d", operation.method, operation.suffix, i, rec.Code)
 			}
-			if i == operation.limit && rec.Header().Get("Retry-After") != "60" && rec.Header().Get("Retry-After") != "59" {
-				t.Fatalf("%s%s request %d: Retry-After = %q", operation.method, operation.suffix, i, rec.Header().Get("Retry-After"))
+			if i == operation.limit {
+				// The first stored attempt and the denial's database clock read
+				// both fall inside this measured interval. The remaining window,
+				// rounded up to seconds, cannot be shorter than 60s - elapsed.
+				minRetry := max(1, int((publicLimitWindow-elapsed+time.Second-1)/time.Second))
+				retry, err := strconv.Atoi(rec.Header().Get("Retry-After"))
+				if err != nil || retry < minRetry || retry > int(publicLimitWindow/time.Second) {
+					t.Fatalf("%s%s request %d: Retry-After = %q, want %d..60 after %s", operation.method, operation.suffix, i, rec.Header().Get("Retry-After"), minRetry, elapsed)
+				}
 			}
 			if i < operation.limit && rec.Code == http.StatusTooManyRequests {
 				t.Fatalf("%s%s request %d limited early", operation.method, operation.suffix, i)
