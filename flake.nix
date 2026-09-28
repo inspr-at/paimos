@@ -53,8 +53,8 @@
               installCheckPhase = ''
                 runHook preInstallCheck
                 test -L "$out/bin/paimos"
-                "$out/bin/paimos" --help | grep -q "paimos <command>"
-                "$out/bin/aeon" --help | grep -q "aeon <command>"
+                "$out/bin/paimos" --help | grep "paimos <command>" >/dev/null
+                "$out/bin/aeon" --help | grep "aeon <command>" >/dev/null
                 runHook postInstallCheck
               '';
               meta = {
