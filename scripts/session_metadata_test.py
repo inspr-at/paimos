@@ -316,6 +316,20 @@ class SessionMetadataTest(unittest.TestCase):
         body = json.loads(self.live([{"id": SESSION_A, "thread_name": " "}]).stdout)
         self.assertEqual((body["capture_status"], body["heartbeat_args"]), ("unavailable", []))
 
+    def test_live_index_splits_records_only_at_newlines(self) -> None:
+        # JSON writers leave these separators unescaped inside a string.
+        for separator in ("\u2028", "\u2029", "\u0085"):
+            with self.subTest(separator=repr(separator)):
+                index = self.write("session_index.jsonl", "".join(json.dumps(entry, ensure_ascii=False) + "\n" for entry in (
+                    {"id": SESSION_B, "thread_name": f"left{separator}right", "updated_at": "2026-09-28T10:00:00Z"},
+                    {"id": SESSION_A, "thread_name": "Worker", "updated_at": "2026-09-28T10:01:00Z"},
+                ))).resolve()
+                for session, name in ((SESSION_A, "Worker"), (SESSION_B, "leftright")):
+                    result = subprocess.run([sys.executable, str(SCRIPT), "--codex-index", str(index), "--harness", "codex",
+                                             "--session-id", session], capture_output=True)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertEqual(json.loads(result.stdout)["heartbeat_args"], ["--label", name])
+
     def test_live_index_refuses_symlink_and_oversize(self) -> None:
         index = self.write("session_index.jsonl", "x" * 70000).resolve()
         command = [sys.executable, str(SCRIPT), "--codex-index", str(index), "--harness", "codex", "--session-id", SESSION_A]

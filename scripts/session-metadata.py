@@ -277,7 +277,11 @@ def codex_index(path: Path, session_id: str) -> dict[str, str]:
         text = body.decode("utf-8")
     except (OSError, UnicodeError, NotImplementedError) as exc:
         raise Refusal("live name index is unavailable or unreadable") from exc
-    lines = text.splitlines()
+    # Records end at "\n" only. str.splitlines would also split a name at
+    # U+2028, U+2029 or U+0085, which Codex's JSON writer leaves unescaped.
+    lines = text.split("\n")
+    if lines[-1] == "":
+        lines.pop()
     if len(lines) > MAX_LINES:
         raise Refusal("live name index exceeds the record limit")
     found: dict[str, str] = {}
