@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { advanceActivity, liveState, agentKey, byLead, chipText, elapsedFor, groupLive, isListedTicketWorker, liveChanges, liveSummary, phrase, sameLive, skewOf, ticketWorkers, who, type LiveAgent } from '../src/lib/liveAgents.ts'
+import { advanceActivity, liveState, agentKey, byLead, chipText, phaseLabel, elapsedFor, groupLive, isListedTicketWorker, liveChanges, liveSummary, phrase, sameLive, skewOf, ticketWorkers, who, type LiveAgent } from '../src/lib/liveAgents.ts'
 import { DEFAULT_AGENT_STATE } from '../src/lib/agentSignals.ts'
 
 const now = Date.parse('2026-09-26T12:00:00Z')
@@ -179,4 +179,15 @@ test('shared principal keeps distinct session labels and does not invent a withh
   assert.deepEqual(listed.map(who).sort(), ['Codex agent', 'aeon-coordinator', 'grok-ta1', 'grok-ta2'])
   assert.equal(listed.find(worker => worker.session_id === 's-c')!.display_label, undefined)
   assert.deepEqual(listed.filter(worker => worker.principal_id === 'coord').map(worker => worker.session_id).sort(), ['s-a', 's-b', 's-c'])
+})
+
+
+test('project labels and equality retain safe attention reason changes', () => {
+  const approval = agent({ state: 'waiting', needs_attention: true, attention_reasons: [{ kind: 'approval', scope: 'run', actor: 'person', count: 1, blocking: true, location: 'approvals' }] })
+  assert.equal(phaseLabel(approval), 'Awaiting approval')
+  const cleared = { ...approval, state: 'working' as const, needs_attention: false, attention_reasons: [] }
+  assert.equal(phaseLabel(cleared), 'Working')
+  assert.ok(!sameLive(new Map([['p1', [approval]]]), new Map([['p1', [cleared]]])))
+  const changed = { ...approval, attention_reasons: approval.attention_reasons!.map(r => ({ ...r, count: 2 })) }
+  assert.ok(!sameLive(new Map([['p1', [approval]]]), new Map([['p1', [changed]]])))
 })

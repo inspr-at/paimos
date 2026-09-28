@@ -24,7 +24,7 @@ import { normalizeAgentIndicator, useAgentIndicator, type AgentIndicatorStyle } 
 // decorative; consumers own accessible status labels. Only real event evidence
 // advances eventPulse. The viewer's hovering preference belongs to this wrapper.
 const props = withDefaults(defineProps<{
-  state?: LiveBotState; harness?: Harness; size?: number; eventPulse?: number; eventCaption?: string
+  state?: LiveBotState; label?: string; harness?: Harness; size?: number; eventPulse?: number; eventCaption?: string
   indicatorStyle?: AgentIndicatorStyle | 'calm' | 'playful'; id?: string; index?: number; lead?: boolean
 }>(), { state: 'working', size: 28, eventPulse: 0, eventCaption: '', id: '', index: 0, lead: true })
 const { choice } = useAgentIndicator()
@@ -50,7 +50,7 @@ onBeforeUnmount(() => clearTimeout(clear))
 </script>
 
 <template>
-  <span class="live-bot" :class="[state, { hovering: choice.hovering, lead }]" :style="[style, appearance(state)]" :data-style="indicator" :data-state="state" :data-harness="harness" :aria-label="STATE_LABEL[state]" role="img">
+  <span class="live-bot" :class="[state, { hovering: choice.hovering, lead }]" :style="[style, appearance(state)]" :data-style="indicator" :data-state="state" :data-harness="harness" :aria-label="label || STATE_LABEL[state]" role="img">
     <span class="indicator-art">
       <component :is="renderers[indicator]" :state="state" :size="size" :pulse="eventPulse" :seed="seed" :lead="lead" />
     </span>

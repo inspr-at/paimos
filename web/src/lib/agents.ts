@@ -3,6 +3,7 @@
 // their typed controls, runs, approvals, accounts with allowance windows, models
 // and project messages. Worker-only endpoints (heartbeat, drain, claim) are absent.
 import { api, APIError } from './api.ts'
+import type { AttentionReason } from './agentSignals.ts'
 import type { LivePage } from './liveAgents.ts'
 
 export type Harness = 'codex' | 'claude' | 'pi' | 'cursor' | 'grok'
@@ -23,7 +24,7 @@ export interface HarnessSession {
   harness: Harness; host: string; management_mode: 'managed' | 'unmanaged'; role: 'coordinator' | 'worker'
   work_shape: 'unknown' | 'ship' | 'scout'; advertised_capabilities: string[]
   phase: 'starting' | 'working' | 'yielded' | 'stopping' | 'stopped'; activity: 'unknown' | 'busy' | 'idle' | 'throttled'
-  run_status?: string | null; needs_attention?: boolean; has_problem?: boolean; activity_sequence: number; revision: number; heartbeat_at: string | null; stopped_at: string | null; stop_reason: string | null; created_at: string
+  run_status?: string | null; needs_attention?: boolean; has_problem?: boolean; attention_reasons?: AttentionReason[]; activity_sequence: number; revision: number; heartbeat_at: string | null; stopped_at: string | null; stop_reason: string | null; created_at: string
   // The tenant-wide list adds node summaries (B7) and the agent principal's name (U13).
   project?: NodeSummary; ticket?: NodeSummary | null; agent?: { id: string; name: string } | null
 }

@@ -5847,13 +5847,25 @@ components:
         cached_input_usd_per_million: {$ref: '#/components/schemas/ModelPriceRate'}
         currency: {type: string, const: USD}
         created_at: {type: string, format: date-time}
+    HarnessAttentionReason:
+      type: object
+      description: Content-free grouped evidence; no message body, rationale, request ID or private routing. Shared reasons belong to the principal inbox and never block a session. Detail requires harness.read and the underlying approval/message access.
+      required: [kind, scope, actor, count, blocking, location]
+      properties:
+        kind: {type: string, enum: [approval, held_action, reply, reply_due, run_waiting, session_yielded]}
+        scope: {type: string, enum: [session, run, shared]}
+        actor: {type: string, enum: [person, agent, unknown]}
+        count: {type: integer, minimum: 1}
+        blocking: {type: boolean}
+        location: {type: string, enum: [approvals, messages, session]}
     HarnessSession:
       type: object
       description: State evidence is populated on reads and omitted when unknown in mutation responses and event snapshots.
       required: [id, project_id, agent_principal_id, harness, host, management_mode, role, work_shape, advertised_capabilities, phase, activity, activity_sequence, revision, created_at]
       properties:
         run_status: {type: [string, 'null'], description: Status of the bound run when visible to the caller.}
-        needs_attention: {type: boolean, description: "Waiting run, visible pending approval for this project or workspace, or unresolved action/reply request; content-free evidence. Omitted when not loaded."}
+        needs_attention: {type: boolean, description: "Bound run waiting or exact bound-run approval pending; yielded phase is separate session evidence. Principal-only requests and nonblocking replies never set this flag. False for stopped sessions; omitted when not loaded."}
+        attention_reasons: {type: array, description: "Authorized session/run reasons and separately scoped shared inbox attention. Empty means loaded with no visible reasons; omitted when unloaded or withheld.", items: {$ref: '#/components/schemas/HarnessAttentionReason'}}
         has_problem: {type: boolean, description: "Bound run failed or lost ownership, or the stop reason reports an error or block. Normal stops are false. Omitted when not loaded."}
         id: {type: string, format: uuid}
         project_id: {type: string, format: uuid}
@@ -5982,7 +5994,8 @@ components:
       required: [project_id, harness, management_mode, role, phase, activity, ticket, since, heartbeat_at]
       properties:
         run_status: {type: [string, 'null'], description: Status of the bound run when visible to the caller.}
-        needs_attention: {type: boolean, description: "Waiting run, visible pending approval for this project or workspace, or unresolved action/reply request; content-free evidence."}
+        needs_attention: {type: boolean, description: "Bound run waiting or exact bound-run approval pending; yielded phase is separate session evidence. Shared inbox attention and nonblocking replies do not set this flag; stopped sessions are false."}
+        attention_reasons: {type: array, description: "Authorized content-free reasons; withheld without harness.read at this project.", items: {$ref: '#/components/schemas/HarnessAttentionReason'}}
         has_problem: {type: boolean, description: Bound run failed or lost ownership, or the stop reason reports an error or block. Normal stops are false.}
         stopped_at: {type: [string, 'null'], format: date-time}
         stop_reason: {type: [string, 'null'], description: Present only with harness.read at the project.}

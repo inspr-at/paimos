@@ -4,7 +4,7 @@ import { brand } from '../../lib/brand'
 import { api, getNode } from '../../lib/api'
 import { computed, onMounted, ref, watch } from 'vue'
 import type { Approval, HarnessSessionDetail, ProjectMessage, SessionControl } from '../../lib/agents'
-import { RUN_OUTCOME, cost, elapsed, runDuration, runModel, scopeLabel, stopReasonLabel, tokens } from '../../lib/agentState'
+import { RUN_OUTCOME, approvalRun, cost, elapsed, runDuration, runModel, scopeLabel, stopReasonLabel, tokens } from '../../lib/agentState'
 import { absoluteTime, relativeTime, statusMeta } from '../../lib/work'
 import { useAgents, type SessionView } from '../../stores/agents'
 import { useSession } from '../../stores/session'
@@ -39,7 +39,7 @@ const ticketState = ref('')
 
 const s = computed(() => props.view?.session)
 const me = computed(() => session.identity?.principal.id ?? '')
-const pending = computed(() => s.value ? agents.pending.filter(a => a.agent_principal_id === s.value!.agent_principal_id) : [])
+const pending = computed(() => s.value?.run_id && s.value.phase !== 'stopped' && s.value.needs_attention !== false ? agents.pending.filter(a => a.agent_principal_id === s.value!.agent_principal_id && approvalRun(a) === s.value!.run_id) : [])
 const recentRuns = computed(() => s.value ? agents.recentRuns(s.value.agent_principal_id).slice(0, 8) : [])
 const run = computed(() => props.view?.run)
 const messages = computed(() => s.value ? agents.thread(s.value).slice(-40) : [])
@@ -261,7 +261,8 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
       </section>
 
       <section class="block" aria-labelledby="messages-title">
-        <h3 id="messages-title" class="eyebrow">Messages</h3>
+        <h3 id="messages-title" class="eyebrow">Shared inbox messages</h3>
+        <p class="empty-line">Messages belong to this agent principal across sessions. Sender session ownership is not recorded.</p>
         <p v-if="!messages.length && address" class="empty-line">No messages yet. Use the composer to contact {{ view.name }}.</p>
         <p v-else-if="!address" class="empty-line">Messages start when this agent registers a target. <RouterLink to="/settings/access/agents">Agent setup</RouterLink></p>
         <ol v-else class="thread" aria-label="Messages">
