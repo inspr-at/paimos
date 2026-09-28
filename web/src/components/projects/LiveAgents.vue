@@ -39,7 +39,8 @@ const faces = computed(() => props.agents.slice(0, props.variant === 'card' ? 3 
 const chip = computed(() => chipText(props.agents))
 const summary = computed(() => liveSummary(props.agents))
 const state = computed(() => leadingState(props.agents.map(a => a.state)))
-const groupLabel = computed(() => STATE_LABEL[state.value].toLowerCase())
+const stateLabel = computed(() => { const lead = props.agents.find(a => a.state === state.value); return lead ? phaseLabel(lead) : STATE_LABEL[state.value] })
+const groupLabel = computed(() => stateLabel.value.toLowerCase())
 const clockFormat = new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit' })
 const clock = (iso: string) => clockFormat.format(Date.parse(iso))
 const agePrefix = (agent: LiveAgent) => agent.state === 'stale' || agent.state === 'waiting' ? 'session age' : 'for'
@@ -145,7 +146,7 @@ onBeforeUnmount(() => {
       :aria-label="`${summary}. Who works on what`" @click="toggle" @pointerenter="enter" @pointerleave="leave" @focusin="focusIn" @focusout="focusOut"
     >
       <span class="faces">
-        <LiveBot v-for="(agent, i) in faces" :key="agentKey(agent)" :id="agent.principal_id" :index="i" :lead="i === 0" class="face" :state="agent.state" :harness="agent.harness" :event-pulse="live.eventPulseFor(agent)" :size="indicator.style === 'robot-5' ? (variant === 'card' ? 26 : 22) : (variant === 'card' ? 28 : 26)" />
+        <LiveBot v-for="(agent, i) in faces" :key="agentKey(agent)" :id="agent.principal_id" :index="i" :lead="i === 0" class="face" :state="agent.state" :label="phaseLabel(agent)" :harness="agent.harness" :event-pulse="live.eventPulseFor(agent)" :size="indicator.style === 'robot-5' ? (variant === 'card' ? 26 : 22) : (variant === 'card' ? 28 : 26)" />
         <span v-if="agents.length > 1" class="count mono">{{ agents.length }}</span>
       </span>
       <span v-if="variant === 'card'" class="words">
@@ -154,7 +155,7 @@ onBeforeUnmount(() => {
       </span>
       <span v-else-if="chip.key" class="key mono">{{ chip.key }}</span>
       <span v-else class="row-name">{{ chip.name }}</span>
-      <AgentStateLabel class="chip-state" :state="state" />
+      <AgentStateLabel class="chip-state" :state="state" :label="stateLabel" />
 
     </button>
     <Teleport to="body">
@@ -163,7 +164,7 @@ onBeforeUnmount(() => {
         :style="{ left: `${x}px`, top: `${y}px` }" @pointerenter="enter" @pointerleave="leave" @focusout="focusOut" @keydown="keydown"
       >
         <p class="pop-head">
-          <AgentStateLabel :state="state" />
+          <AgentStateLabel :state="state" :label="stateLabel" />
           <span>{{ agents.length }} {{ agents.length === 1 ? 'agent' : 'agents' }} {{ groupLabel }}</span>
           <span class="pop-project">{{ project.title }}</span>
         </p>
@@ -173,10 +174,10 @@ onBeforeUnmount(() => {
               :is="agent.session_id ? RouterLink : 'div'" class="agent-line" :to="agent.session_id ? `/agents/${encodeURIComponent(agent.session_id)}` : undefined"
               :aria-label="agent.session_id ? `${who(agent)}, ${harnessLabel(agent.harness)}, ${phaseLabel(agent).toLowerCase()} ${agePrefix(agent)} ${elapsedFor(agent, live.serverNow)}. Open the session` : undefined"
             >
-              <LiveBot :id="agent.principal_id" :index="i" :state="agent.state" :harness="agent.harness" :event-pulse="live.eventPulseFor(agent)" :size="indicator.style === 'robot-5' ? 30 : 32" />
+              <LiveBot :id="agent.principal_id" :index="i" :state="agent.state" :label="phaseLabel(agent)" :harness="agent.harness" :event-pulse="live.eventPulseFor(agent)" :size="indicator.style === 'robot-5' ? 30 : 32" />
               <span class="agent-text">
                 <span class="agent-name">{{ who(agent) }}<span class="harness">{{ harnessLabel(agent.harness) }}</span></span>
-                <span class="agent-meta"><AgentStateLabel :state="agent.state ?? 'working'" /><span class="sep" />{{ agePrefix(agent) }} <time class="mono" :datetime="agent.since" :title="absoluteTime(agent.since)">{{ elapsedFor(agent, live.serverNow) }}</time><span class="sep" /><span class="since">since {{ clock(agent.since) }}</span></span>
+                <span class="agent-meta"><AgentStateLabel :state="agent.state ?? 'working'" :label="phaseLabel(agent)" /><span class="sep" />{{ agePrefix(agent) }} <time class="mono" :datetime="agent.since" :title="absoluteTime(agent.since)">{{ elapsedFor(agent, live.serverNow) }}</time><span class="sep" /><span class="since">since {{ clock(agent.since) }}</span></span>
               </span>
               <AppIcon v-if="agent.session_id" class="go" name="chevron-right" :size="14" />
             </component>

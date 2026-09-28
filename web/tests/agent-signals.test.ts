@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { DEFAULT_AGENT_STATE, STATE_LABEL, assessAgentState, deriveAgentState, normalizeAgentState, problemReason, type StateEvidence } from '../src/lib/agentSignals.ts'
+import { DEFAULT_AGENT_STATE, STATE_LABEL, attentionReasonText, assessAgentState, deriveAgentState, normalizeAgentState, problemReason, type StateEvidence } from '../src/lib/agentSignals.ts'
 import { liveState, type LiveAgent } from '../src/lib/liveAgents.ts'
 import { sessionStatus } from '../src/lib/agentState.ts'
 import type { HarnessSession } from '../src/lib/agents.ts'
@@ -54,6 +54,7 @@ test('throttling has a distinct state and requests use a clock even when work co
   assert.equal(deriveAgentState(evidence({ needs_attention: true }), now), 'waiting')
   assert.equal(deriveAgentState(evidence({ phase: 'yielded' }), now), 'waiting')
   assert.equal(deriveAgentState(evidence({ run_status: 'waiting' }), now), 'waiting')
+  assert.equal(liveState(evidence({ run_status: 'waiting' }) as LiveAgent, now), 'waiting')
   assert.equal(deriveAgentState(evidence(), now, DEFAULT_AGENT_STATE, true), 'waiting')
 })
 
@@ -95,6 +96,7 @@ test('missing heartbeat is explained without inventing a worker failure', () => 
 
 test('explicit fresh false beats fallback evidence; only a new heartbeat clears age warnings', () => {
   assert.equal(deriveAgentState(evidence({ has_problem: false, needs_attention: false, run_status: 'failed' }), now, DEFAULT_AGENT_STATE, true), 'working')
+  assert.equal(deriveAgentState(evidence({ needs_attention: false, run_status: 'waiting' }), now, DEFAULT_AGENT_STATE, true), 'working')
   const facts = evidence({ heartbeat_at: ago(599_999), has_problem: false, needs_attention: false })
   assert.equal(deriveAgentState(facts, now), 'awaiting')
   assert.equal(deriveAgentState(facts, now + 1), 'unresponsive')
@@ -107,4 +109,46 @@ test('failure detail preserves the exact stop reason and bound run outcome', () 
   assert.equal(status.state, 'problem')
   assert.deepEqual(status.reasons.map(reason => reason.detail), ['Reported stop reason: worker crashed: exit 2', 'The bound run reported ownership lost.'])
   assert.ok(status.reasons.every(reason => reason.next.length > 0))
+})
+
+test('shared principal attention never blocks working siblings or changes person-action labels', () => {
+  const attention_reasons: NonNullable<StateEvidence['attention_reasons']> = [
+    { kind: 'reply', scope: 'shared', actor: 'agent', count: 2, blocking: false, location: 'messages' },
+    { kind: 'held_action', scope: 'shared', actor: 'person', count: 1, blocking: false, location: 'messages' },
+    { kind: 'approval', scope: 'shared', actor: 'person', count: 1, blocking: false, location: 'approvals' },
+  ]
+  for (const id of ['sibling', 'future-generation']) {
+    const facts = { ...evidence({ needs_attention: false, attention_reasons }), id }
+    assert.equal(sessionStatus(facts as HarnessSession, now, true).label, 'Working')
+    assert.equal(liveState(facts as LiveAgent, now), 'working')
+    assert.deepEqual(assessAgentState(facts, now).reasons, [])
+  }
+  const assigned = evidence({ attention_reasons: [{ kind: 'reply_due', scope: 'session', actor: 'agent', count: 1, blocking: false, location: 'messages' }] })
+  assert.equal(deriveAgentState(assigned, now), 'working')
+})
+
+test('exact approvals explain the actor, while a yielded session does not invent a person action', () => {
+  const facts = evidence({ needs_attention: true, attention_reasons: [{ kind: 'approval', scope: 'run', actor: 'person', count: 1, blocking: true, location: 'approvals' }] })
+  assert.equal(assessAgentState(facts, now).label, 'Awaiting approval')
+  assert.match(assessAgentState(facts, now).reasons[0]!.detail, /person’s decision/)
+  const yielded = evidence({ phase: 'yielded', needs_attention: false, attention_reasons: [{ kind: 'session_yielded', scope: 'session', actor: 'unknown', count: 1, blocking: true, location: 'session' }] })
+  assert.equal(assessAgentState(yielded, now).label, 'Waiting')
+  assert.match(assessAgentState(yielded, now).reasons[0]!.detail, /who must act is not specified/)
+  assert.equal(deriveAgentState({ ...facts, phase: 'stopped' }, now), 'stopped')
+  assert.equal(deriveAgentState({ ...facts, heartbeat_at: ago(600_000) }, now), 'unresponsive')
+})
+
+
+test('safe reasons distinguish a peer reply from person action without claiming session ownership', () => {
+  const reply = attentionReasonText({ kind: 'reply', scope: 'shared', actor: 'agent', count: 1, blocking: false, location: 'messages' })
+  assert.match(reply.detail, /Shared inbox.*waiting for another agent/)
+  assert.match(reply.next, /No session ownership/)
+  assert.doesNotMatch(reply.detail + reply.next, /Needs you/)
+  const held = attentionReasonText({ kind: 'held_action', scope: 'shared', actor: 'person', count: 1, blocking: false, location: 'messages' })
+  assert.match(held.detail, /person’s resolution/)
+  const mixed = assessAgentState(evidence({ needs_attention: true, run_status: 'waiting', attention_reasons: [
+    { kind: 'run_waiting', scope: 'run', actor: 'unknown', count: 1, blocking: true, location: 'session' },
+    { kind: 'approval', scope: 'run', actor: 'person', count: 1, blocking: true, location: 'approvals' },
+  ] }), now)
+  assert.match(mixed.reasons[0]!.detail, /person’s decision/)
 })
