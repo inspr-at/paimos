@@ -2423,7 +2423,7 @@ paths:
       - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
     post:
       operationId: requestManagedHarnessControl
-      description: Person-only harness.control. Requires managed_control_v1, a live run and fresh exact process ownership. Text is transient (never audit or journal content); expiry or server restart rejects undelivered text. Reusing request_id requires identical actor and payload. Claiming is at most once; an uncertain outcome is never automatically reinjected.
+      description: Person-only harness.control. Requires harness=claude, daemon-qualified managed_control_v1, a live run and fresh exact process ownership. A self-advertised capability alone does not qualify an adapter. Text is transient (never audit or journal content); expiry or server restart rejects undelivered text. Reusing request_id requires identical actor and payload. Claiming is at most once; an uncertain outcome is never automatically reinjected.
       requestBody:
         required: true
         content:

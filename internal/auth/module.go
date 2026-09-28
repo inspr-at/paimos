@@ -460,7 +460,7 @@ func harnessScope(parts []string, read bool) string {
 		return "harness.read"
 	}
 	for _, part := range parts {
-		if part == "controls" {
+		if part == "controls" || part == "managed-controls" {
 			return "harness.control"
 		}
 	}

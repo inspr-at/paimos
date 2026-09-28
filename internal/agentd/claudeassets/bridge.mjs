@@ -3,7 +3,7 @@
 // Lifecycle events are content-free. The explicit native_message frame carries
 // bounded send arguments transiently to the owner; it is never journaled.
 import { randomUUID } from "node:crypto";
-import { lstatSync, realpathSync } from "node:fs";
+import { lstatSync, readdirSync, realpathSync } from "node:fs";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { createInterface } from "node:readline";
 import { pathToFileURL } from "node:url";
@@ -49,12 +49,55 @@ function editPathWithinWorkspace(filePath, root) {
   }
 }
 
-function workspaceEditHook(root) {
+// Search tools can traverse descendants, not just their explicit path. Refuse
+// an escaping link anywhere in their search tree, including glob-selected links.
+// Bound the walk and fail closed on unreadable, special or dangling entries.
+function readableWorkspaceTree(path, root, recursive) {
+  const pending = [resolve(root, path)];
+  const seen = new Set();
+  let count = 0;
+  try {
+    while (pending.length) {
+      if (++count > 100000) return false;
+      const target = realpathSync(pending.pop());
+      if (!editPathWithinWorkspace(target, root)) return false;
+      if (seen.has(target)) continue;
+      seen.add(target);
+      const info = lstatSync(target);
+      if (info.isFile()) {
+        if (info.nlink !== 1) return false;
+      } else if (info.isDirectory() && recursive) {
+        for (const child of readdirSync(target)) pending.push(resolve(target, child));
+      } else return false;
+    }
+    return true;
+  } catch { return false; }
+}
+
+function localSearchPattern(pattern) {
+  return typeof pattern === "string" && !isAbsolute(pattern) &&
+    /^[A-Za-z0-9_.*? /-]+$/u.test(pattern) && !pattern.includes("..");
+}
+
+function workspacePathHook(root) {
   return async (input) => {
-    if (input?.tool_name !== "Edit" && input?.tool_name !== "Write") return {};
-    if (editPathWithinWorkspace(input.tool_input?.file_path, root)) return {};
+    const name = input?.tool_name, args = input?.tool_input;
+    let allowed = false;
+    if (name === "Edit" || name === "Write") {
+      allowed = editPathWithinWorkspace(args?.file_path, root);
+    } else if (name === "Read") {
+      allowed = typeof args?.file_path === "string" && args.file_path.length > 0 &&
+        readableWorkspaceTree(args.file_path, root, false);
+    } else if (name === "Glob" || name === "Grep") {
+      const path = args?.path === undefined ? root : args.path;
+      allowed = typeof path === "string" && path.length > 0 &&
+        (name !== "Glob" || localSearchPattern(args?.pattern)) &&
+        (args?.glob === undefined || localSearchPattern(args.glob)) &&
+        readableWorkspaceTree(path, root, true);
+    } else return {};
+    if (allowed) return {};
     return { hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny",
-      permissionDecisionReason: "Edit and Write paths must stay inside the run workspace" } };
+      permissionDecisionReason: "File and search paths must stay inside the run workspace" } };
   };
 }
 
@@ -280,31 +323,26 @@ function observeTool(message) {
       message.event?.content_block?.type === "tool_use") emit({ kind: "tool_started" });
 }
 
-function safeTokens(value) {
-  return Number.isSafeInteger(value) && value >= 0 ? value : 0;
-}
-
 function observeUsage(message) {
-  if (message?.type !== "result") return;
-  // modelUsage includes subagents and sidechains; result.usage covers only the
-  // main loop. Both modelUsage and total_cost_usd are cumulative for Query.
-  if (!message.modelUsage || typeof message.modelUsage !== "object") return;
-  let input = 0;
-  let output = 0;
+  // modelUsage includes subagents and sidechains and is cumulative for Query.
+  // Missing, malformed or overflowing usage cannot prove remaining budget.
+  if (!message.modelUsage || typeof message.modelUsage !== "object" ||
+      Array.isArray(message.modelUsage) || Object.keys(message.modelUsage).length === 0) return null;
+  let input = 0, output = 0;
   for (const usage of Object.values(message.modelUsage)) {
-    input += safeTokens(usage?.inputTokens) + safeTokens(usage?.cacheCreationInputTokens) +
-      safeTokens(usage?.cacheReadInputTokens);
-    output += safeTokens(usage?.outputTokens);
+    if (!usage || typeof usage !== "object") return null;
+    const values = [usage.inputTokens, usage.outputTokens,
+      usage.cacheCreationInputTokens ?? 0, usage.cacheReadInputTokens ?? 0];
+    if (values.some((value) => !Number.isSafeInteger(value) || value < 0)) return null;
+    input += values[0] + values[2] + values[3];
+    output += values[1];
   }
+  if (!Number.isSafeInteger(input + output)) return null;
   const frame = { kind: "usage", input_tokens_total: input, output_tokens_total: output };
   if (typeof message.total_cost_usd === "number" && Number.isFinite(message.total_cost_usd) &&
       message.total_cost_usd >= 0) frame.cost_usd_total = message.total_cost_usd;
-  if (Number.isSafeInteger(input) && Number.isSafeInteger(output) &&
-      (input > 0 || output > 0 || frame.cost_usd_total !== undefined)) {
-    emit(frame);
-    return input + output;
-  }
-  return 0;
+  emit(frame);
+  return input + output;
 }
 
 try {
@@ -337,7 +375,7 @@ try {
     includePartialMessages: true,
     permissionMode: "dontAsk",
     additionalDirectories: [],
-    hooks: verification ? { PreToolUse: [{ matcher: ".*", hooks: [async () => ({ hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: "Verification has no tools" } })] }] } : { PreToolUse: [{ matcher: "Edit|Write", hooks: [workspaceEditHook(physicalWorkspace)] }] },
+    hooks: verification ? { PreToolUse: [{ matcher: ".*", hooks: [async () => ({ hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: "Verification has no tools" } })] }] } : { PreToolUse: [{ matcher: "Read|Glob|Grep|Edit|Write", hooks: [workspacePathHook(physicalWorkspace)] }] },
     allowedTools,
     tools: verification ? [] : DEFAULT_TOOLS,
     ...(verification ? { maxTurns: 1, canUseTool: async () => ({ behavior: "deny", message: "Verification has no tools" }) } : {}),
@@ -534,9 +572,9 @@ try {
     observeTool(message);
     if (message?.type === "result") {
       turnActive = false;
-      const tokens = observeUsage(message) || 0;
+      const tokens = observeUsage(message);
       completedTurns++;
-      const reason = start.max_tokens > 0 && tokens >= start.max_tokens ? "token_budget_exhausted"
+      const reason = start.max_tokens > 0 && (tokens === null || tokens >= start.max_tokens) ? "token_budget_exhausted"
         : message.subtype === "error_max_turns" || (start.max_turns > 0 && completedTurns >= start.max_turns) ? "turn_budget_exhausted" : "";
       if (reason && start.purpose !== "pairing_verification") {
         // Enforce inside the Query owner too: remote telemetry cannot delay close.

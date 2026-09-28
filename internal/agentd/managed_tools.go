@@ -245,26 +245,11 @@ func runTerminal(ctx context.Context, workspace, branch string, in terminalArgs)
 	if err != nil || pathWithin(workspace, toolPath) {
 		return "", errors.New("terminal toolchain is not independent of workspace")
 	}
-	if in.Command == "git" && (in.Args[0] == "add" || in.Args[0] == "commit") {
-		current, err := exec.CommandContext(ctx, toolPath, "-C", workspace, "branch", "--show-current").Output()
-		if err != nil || strings.TrimSpace(string(current)) != branch || branch == "" || branch == "main" || branch == "master" {
-			return "", errors.New("run branch is not checked out")
-		}
-		if in.Args[0] == "add" {
-			for _, path := range in.Args[2:] {
-				if !safeStagePath(toolPath, workspace, path) {
-					return "", errors.New("git add path denied")
-				}
-			}
-		} else if !safeStagedSet(ctx, toolPath, workspace) {
-			return "", errors.New("git staged file set denied")
-		}
-	}
 	deadline, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
 	// Tests and package scripts execute repository code. On the local macOS
-	// daemon they run under an OS network fence, including subprocesses. Package
-	// dependencies must already be cached; only loopback test services work.
+	// daemon they run under a default-deny OS fence, including subprocesses.
+	// Dependencies must be cached; neither loopback nor Unix sockets are allowed.
 	home, err := os.UserHomeDir()
 	if err != nil || !filepath.IsAbs(home) {
 		return "", errors.New("terminal home unavailable")
@@ -302,7 +287,17 @@ func runTerminal(ctx context.Context, workspace, branch string, in terminalArgs)
 	moduleCache := ""
 	goRoot := ""
 	if in.Command == "go" {
-		out, err := exec.CommandContext(deadline, toolPath, "env", "GOROOT", "GOMODCACHE").Output()
+		probe := exec.CommandContext(deadline, toolPath, "env", "GOROOT", "GOMODCACHE")
+		probe.Dir = physicalTmp
+		probe.Env = terminalEnvironment(physicalTmp, "off", "", toolPath)
+		// The only host cache eligible for offline dependency reads is the
+		// standard module download cache, never an inherited environment path.
+		for i, value := range probe.Env {
+			if strings.HasPrefix(value, "GOMODCACHE=") {
+				probe.Env[i] = "GOMODCACHE=" + filepath.Join(physicalHome, "go", "pkg", "mod")
+			}
+		}
+		out, err := probe.Output()
 		if err != nil {
 			return "", errors.New("Go toolchain unavailable")
 		}
@@ -331,61 +326,75 @@ func runTerminal(ctx context.Context, workspace, branch string, in terminalArgs)
 			moduleCache = ""
 		}
 	}
-	profile := `(version 1) (allow default) (deny network*) (allow network-outbound (remote ip "localhost:*")) (allow network-bind (local ip "localhost:*")) (allow network-inbound (local ip "localhost:*")) (deny file-write*)`
-	profile += fmt.Sprintf(" (allow file-write* (subpath %q)) (allow file-write* (subpath %q))", physicalWorkspace, physicalTmp)
-	// Git opens the null device read/write while staging. It has no persistent
-	// backing data and grants no filesystem write outside the two run roots.
-	profile += ` (allow file-write* (literal "/dev/null"))`
-	// Deny the rest of home even to test binaries and package scripts. Read
-	// exceptions are limited to this workspace and offline dependency cache.
-	for _, path := range []string{home, physicalHome} {
-		profile += fmt.Sprintf(" (deny file-read* (subpath %q))", path)
+	readRoots := []string{goRoot}
+	if moduleCache != "" {
+		readRoots = append(readRoots, filepath.Join(moduleCache, "cache", "download"))
 	}
-	for _, path := range []string{physicalWorkspace, physicalTmp, moduleCache, goRoot} {
-		if path != "" {
-			profile += fmt.Sprintf(" (allow file-read* (subpath %q))", path)
-		}
-	}
-	// A toolchain installed under home may be needed to execute the command.
-	// Resolve links so a Nix profile grants only its immutable store target.
+	// Resolve each required executable; grant its package only, never its
+	// profile, store, home or installation prefix. Other tools fail closed.
 	toolNames := []string{in.Command}
 	if in.Command == "npm" {
-		toolNames = append(toolNames, "node")
+		toolNames = append(toolNames, "node", "sh", "env")
 	}
+	var toolPaths []string
 	for _, name := range toolNames {
 		path, lookupErr := exec.LookPath(name)
 		if lookupErr != nil {
 			return "", fmt.Errorf("terminal toolchain unavailable: %s", name)
 		}
 		path, err = filepath.EvalSymlinks(path)
-		if err != nil {
-			return "", err
+		if err != nil || !filepath.IsAbs(path) || pathWithin(workspace, path) {
+			return "", errors.New("terminal toolchain is not independent of workspace")
 		}
-		profile += fmt.Sprintf(" (allow file-read* (literal %q))", path)
-		if pathWithin(physicalHome, path) {
-			root := filepath.Dir(filepath.Dir(path))
-			if root == physicalHome {
-				return "", errors.New("terminal toolchain root is home")
+		toolPaths = append(toolPaths, path)
+		if root := terminalToolRoot(path); root != "" {
+			readRoots = append(readRoots, root)
+		}
+	}
+	readRoots, err = terminalToolDependencies(deadline, workspace, physicalTmp, readRoots)
+	if err != nil {
+		return "", err
+	}
+	profile := terminalSandboxProfile(physicalWorkspace, physicalTmp, readRoots, toolPaths)
+	childEnv := terminalEnvironment(physicalTmp, moduleProxy, goRoot, toolPaths...)
+	// Even read-only Git queries can trigger repository-configured helpers.
+	// Keep branch/staging checks inside exactly the same sandbox as the command.
+	gitProbe := func(args ...string) ([]byte, error) {
+		out, err := runSandboxedTerminal(deadline, workspace, profile, toolPath, childEnv, args)
+		return []byte(out), err
+	}
+	if in.Command == "git" && (in.Args[0] == "add" || in.Args[0] == "commit") {
+		current, err := gitProbe("branch", "--show-current")
+		if err != nil || strings.TrimSpace(string(current)) != branch || branch == "" || branch == "main" || branch == "master" {
+			return "", errors.New("run branch is not checked out")
+		}
+		if in.Args[0] == "add" {
+			for _, path := range in.Args[2:] {
+				if !safeStagePath(workspace, path, gitProbe) {
+					return "", errors.New("git add path denied")
+				}
 			}
-			profile += fmt.Sprintf(" (allow file-read* (subpath %q))", root)
+		} else if !safeStagedSet(workspace, gitProbe) {
+			return "", errors.New("git staged file set denied")
 		}
 	}
-	for _, path := range []string{"Secrets", ".ssh", ".inspr/secrets", ".aws", ".gnupg", ".config/gh", "Library/Keychains"} {
-		full := filepath.Join(physicalHome, path)
-		profile += fmt.Sprintf(" (deny file-read* (subpath %q)) (deny file-write* (subpath %q))", full, full)
-	}
-	argv := append([]string{"-p", profile, toolPath}, in.Args...)
-	cmd := exec.Command("/usr/bin/sandbox-exec", argv...)
-	cmd.Dir = workspace
+	directory := workspace
 	if in.Directory == "web" {
 		web := filepath.Join(workspace, "web")
 		physical, err := filepath.EvalSymlinks(web)
 		if err != nil || physical != web {
 			return "", errors.New("web directory is not physical")
 		}
-		cmd.Dir = web
+		directory = web
 	}
-	cmd.Env = terminalEnvironment(physicalTmp, moduleProxy, goRoot)
+	return runSandboxedTerminal(deadline, directory, profile, toolPath, childEnv, in.Args)
+}
+
+func runSandboxedTerminal(ctx context.Context, directory, profile, toolPath string, childEnv, args []string) (string, error) {
+	argv := append([]string{"-p", profile, toolPath}, args...)
+	cmd := exec.Command("/usr/bin/sandbox-exec", argv...)
+	cmd.Dir = directory
+	cmd.Env = childEnv
 	if !ownedprocess.Configure(cmd) {
 		return "", errors.New("owned process groups are unsupported")
 	}
@@ -410,7 +419,7 @@ func runTerminal(ctx context.Context, workspace, branch string, in terminalArgs)
 		_ = lifetime.Wait()
 		return "", err
 	}
-	return collectTerminal(deadline, pipeR, lifetime)
+	return collectTerminal(ctx, pipeR, lifetime)
 }
 
 // terminalLifetime permits deterministic scheduling of the signal/reap race in
@@ -519,7 +528,9 @@ func pathWithin(root, path string) bool {
 	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
-func safeStagePath(gitPath, workspace, path string) bool {
+type terminalGitProbe func(...string) ([]byte, error)
+
+func safeStagePath(workspace, path string, probe terminalGitProbe) bool {
 	if path == "." || filepath.IsAbs(path) || strings.HasPrefix(path, "-") {
 		return false
 	}
@@ -543,35 +554,128 @@ func safeStagePath(gitPath, workspace, path string) bool {
 	}
 	// A deleted tracked file is safe to stage by its exact path. A missing
 	// directory or pathspec that expands to several files is not.
-	out, err := exec.Command(gitPath, "-C", workspace, "ls-files", "-z", "--", clean).Output()
+	out, err := probe("ls-files", "-z", "--", clean)
 	return err == nil && string(out) == clean+"\x00"
 }
 
-func safeStagedSet(ctx context.Context, gitPath, workspace string) bool {
-	cmd := exec.CommandContext(ctx, gitPath, "-C", workspace, "diff", "--cached", "--name-only", "-z")
-	out, err := cmd.Output()
+func safeStagedSet(workspace string, probe terminalGitProbe) bool {
+	out, err := probe("diff", "--cached", "--name-only", "-z")
 	if err != nil || len(out) == 0 || len(out) > 64<<10 {
 		return false
 	}
 	for _, part := range strings.Split(strings.TrimSuffix(string(out), "\x00"), "\x00") {
-		if !safeStagePath(gitPath, workspace, part) {
+		if !safeStagePath(workspace, part, probe) {
 			return false
 		}
 	}
 	return true
 }
 
-func terminalEnvironment(tmp, moduleProxy, goRoot string) []string {
-	allowed := map[string]bool{"PATH": true, "HOME": true, "LANG": true, "LC_ALL": true, "AEON_TEST_DATABASE_URL": true}
-	out := []string{"GIT_TERMINAL_PROMPT=0", "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=" + filepath.Join(tmp, "gitconfig"), "GIT_ALLOW_PROTOCOL=file", "GOPROXY=" + moduleProxy, "GOSUMDB=off", "GOENV=off", "GOTOOLCHAIN=local", "GOCACHE=" + filepath.Join(tmp, "go-build"), "GOMODCACHE=" + filepath.Join(tmp, "go-mod"), "NPM_CONFIG_CACHE=" + filepath.Join(tmp, "npm-cache"), "NPM_CONFIG_USERCONFIG=" + filepath.Join(tmp, "npmrc"), "NPM_CONFIG_OFFLINE=true", "NPM_CONFIG_AUDIT=false", "TMPDIR=" + tmp, "CI=1"}
+// Only package-specific roots qualify for recursive tool reads. In particular,
+// /usr, /opt/homebrew, /nix/store and a user's home are never tool roots.
+func terminalToolRoot(path string) string {
+	for _, prefix := range []string{"/nix/store/", "/opt/homebrew/Cellar/", "/usr/local/Cellar/"} {
+		if strings.HasPrefix(path, prefix) {
+			parts := strings.Split(strings.TrimPrefix(path, prefix), "/")
+			count := 1
+			if prefix != "/nix/store/" {
+				count = 2
+			}
+			if len(parts) > count {
+				return prefix + strings.Join(parts[:count], "/")
+			}
+		}
+	}
+	if i := strings.Index(path, "/node_modules/npm/"); i >= 0 {
+		return path[:i] + "/node_modules/npm"
+	}
+	return ""
+}
+
+// Nix binaries reference shared libraries and wrappers in other immutable
+// packages. Enumerate only their local closure, never grant the entire store.
+func terminalToolDependencies(ctx context.Context, workspace, tmp string, roots []string) ([]string, error) {
+	var packages []string
+	seen := map[string]bool{}
+	for _, root := range roots {
+		if strings.HasPrefix(root, "/nix/store/") {
+			root = terminalToolRoot(root + "/bin")
+			if !seen[root] {
+				seen[root] = true
+				packages = append(packages, root)
+			}
+		}
+	}
+	if len(packages) == 0 {
+		return roots, nil
+	}
+	query, err := exec.LookPath("nix-store")
+	if err != nil {
+		return nil, errors.New("terminal toolchain dependency query unavailable")
+	}
+	query, err = filepath.EvalSymlinks(query)
+	if err != nil || !filepath.IsAbs(query) || pathWithin(workspace, query) {
+		return nil, errors.New("terminal dependency query is not independent of workspace")
+	}
+	cmd := exec.CommandContext(ctx, query, append([]string{"--query", "--requisites"}, packages...)...)
+	cmd.Dir = tmp
+	cmd.Env = terminalEnvironment(tmp, "off", "", query)
+	output, err := cmd.Output()
+	if err != nil {
+		return nil, errors.New("terminal toolchain dependency query failed")
+	}
+	closure, err := terminalStoreClosure(string(output))
+	if err != nil {
+		return nil, err
+	}
+	return append(roots, closure...), nil
+}
+
+func terminalStoreClosure(output string) ([]string, error) {
+	roots := strings.Fields(output)
+	if len(output) > 1<<20 || len(roots) == 0 || len(roots) > 4096 {
+		return nil, errors.New("terminal toolchain closure exceeds bounds")
+	}
+	for _, root := range roots {
+		if !strings.HasPrefix(root, "/nix/store/") || filepath.Clean(root) != root ||
+			strings.Contains(strings.TrimPrefix(root, "/nix/store/"), "/") ||
+			len(strings.TrimPrefix(root, "/nix/store/")) < 34 {
+			return nil, errors.New("terminal toolchain closure contains an invalid package")
+		}
+	}
+	return roots, nil
+}
+
+func terminalSandboxProfile(workspace, tmp string, readRoots, toolPaths []string) string {
+	// No network or socket permission, including localhost and Unix sockets.
+	profile := `(version 1) (deny default) (allow process-exec process-fork) (allow sysctl-read)`
+	for _, path := range []string{workspace, tmp} {
+		profile += fmt.Sprintf(" (allow file-read* file-write* (subpath %q))", path)
+	}
+	// OS runtime and entropy/null devices only; no blanket filesystem reads.
+	for _, path := range append([]string{"/System/Library", "/usr/lib"}, readRoots...) {
+		if path != "" {
+			profile += fmt.Sprintf(" (allow file-read* (subpath %q))", path)
+		}
+	}
+	for _, path := range append([]string{"/dev/null", "/dev/random", "/dev/urandom"}, toolPaths...) {
+		profile += fmt.Sprintf(" (allow file-read* (literal %q))", path)
+	}
+	profile += ` (allow file-write* (literal "/dev/null"))`
+	return profile
+}
+
+func terminalEnvironment(tmp, moduleProxy, goRoot string, toolPaths ...string) []string {
+	// Construct from constants and verified paths. No inherited AEON_*, DB,
+	// provider credentials, loader flags, user configuration or daemon HOME.
+	path := []string{}
+	for _, tool := range toolPaths {
+		path = append(path, filepath.Dir(tool))
+	}
+	path = append(path, "/usr/bin", "/bin")
+	out := []string{"PATH=" + strings.Join(path, string(os.PathListSeparator)), "HOME=" + tmp, "LANG=C", "LC_ALL=C", "GIT_TERMINAL_PROMPT=0", "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=" + filepath.Join(tmp, "gitconfig"), "GIT_ALLOW_PROTOCOL=file", "GOPROXY=" + moduleProxy, "GOSUMDB=off", "GOENV=off", "GOTOOLCHAIN=local", "CGO_ENABLED=0", "GOCACHE=" + filepath.Join(tmp, "go-build"), "GOMODCACHE=" + filepath.Join(tmp, "go-mod"), "NPM_CONFIG_CACHE=" + filepath.Join(tmp, "npm-cache"), "NPM_CONFIG_USERCONFIG=" + filepath.Join(tmp, "npmrc"), "NPM_CONFIG_OFFLINE=true", "NPM_CONFIG_AUDIT=false", "TMPDIR=" + tmp, "CI=1"}
 	if goRoot != "" {
 		out = append(out, "GOROOT="+goRoot)
-	}
-	for _, entry := range os.Environ() {
-		name, _, ok := strings.Cut(entry, "=")
-		if ok && allowed[name] {
-			out = append(out, entry)
-		}
 	}
 	return out
 }

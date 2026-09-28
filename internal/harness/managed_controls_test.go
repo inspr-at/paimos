@@ -37,6 +37,19 @@ func TestManagedControlsIdentityReplayPrivacyAndExpiry(t *testing.T) {
 	body["expected_ownership"] = wrong
 	expect(t, f.call(f.person, "POST", path+"/managed-controls", body, ""), 409)
 	body["expected_ownership"] = identity
+	// A live managed session cannot qualify by advertising a capability for
+	// an unsupported harness. Restore Claude before checking the happy path.
+	for _, adapter := range []string{"codex", "cursor", "pi", "grok"} {
+		f.tx(t, f.person, func(tx pgx.Tx) error {
+			_, err := tx.Exec(t.Context(), `UPDATE harness_sessions SET harness=$2 WHERE id=$1`, id, adapter)
+			return err
+		})
+		expect(t, f.call(f.person, "POST", path+"/managed-controls", body, ""), 409)
+	}
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE harness_sessions SET harness='claude' WHERE id=$1`, id)
+		return err
+	})
 	w = f.call(f.person, "POST", path+"/managed-controls", body, "")
 	expect(t, w, 201)
 	control := decode(t, w)["id"].(string)

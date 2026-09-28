@@ -106,7 +106,7 @@ func (m *Module) managedControl(r *http.Request, tx pgx.Tx, p tenant.Principal) 
 	if !errors.Is(err, pgx.ErrNoRows) {
 		return nil, err
 	}
-	if !forceAvailable(s, time.Now()) || !has(s, managedControlCapability) || !has(s, in.Kind) {
+	if s.Harness != "claude" || !forceAvailable(s, time.Now()) || !has(s, managedControlCapability) || !has(s, in.Kind) {
 		return nil, workorders.Fail(409, "live sandboxed managed control unavailable for this adapter")
 	}
 	if *s.ProcessOwnership != in.Ownership {

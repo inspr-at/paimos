@@ -72,7 +72,8 @@ func (s *Supervisor) managedRules(ctx context.Context, entry *owned, run Run, pr
 
 // Local counters update before telemetry I/O, including before Start returns.
 // Reporting boundaries may overshoot the token limit; they are not a provider
-// billing cap. A single graceful stop is scheduled, with no force fallback.
+// billing cap. A single graceful stop is scheduled; failure escalates through
+// Process.Stop, whose owned lifetime fences every process-group signal.
 func (s *Supervisor) observeBudget(entry *owned, ev AdapterEvent) {
 	entry.budgetMu.Lock()
 	if entry.tokenBudget <= 0 || entry.turnBudget <= 0 {
@@ -132,17 +133,19 @@ func (s *Supervisor) stopForBudget(entry *owned) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	if graceful, ok := proc.(GracefulProcess); ok {
-		if err := graceful.GracefulStop(ctx); err != nil {
-			// Do not claim exit: monitor closes the session only after Wait observes it.
-			entry.budgetMu.Lock()
-			entry.budgetStopUnconfirmed = true
-			entry.budgetMu.Unlock()
+		if err := graceful.GracefulStop(ctx); err == nil {
+			return
 		}
-	} else {
-		entry.budgetMu.Lock()
-		entry.budgetStopUnconfirmed = true
-		entry.budgetMu.Unlock()
 	}
+	// Exhaustion is a local lifetime limit, independent of human controls.
+	// Stop uses the same verified, unreaped group fence as the run deadline.
+	// A successful signal is not an exit receipt: only monitor may confirm it.
+	entry.budgetMu.Lock()
+	entry.budgetStopUnconfirmed = true
+	entry.budgetMu.Unlock()
+	stopCtx, stopCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer stopCancel()
+	_ = proc.Stop(stopCtx)
 }
 
 // Claude's stop is Query.close through the bridge, followed by observed child

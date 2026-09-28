@@ -266,9 +266,14 @@ func TestClaudeBridgeEphemeralRulesBudgetAndNativeClose(t *testing.T) {
 	}
 	for _, tc := range []struct{ name, result, reason string }{
 		{"native_close", "", ""},
+		{"missing_usage", `yield {type:'result',subtype:'success'};`, "token_budget_exhausted"},
+		{"empty_usage", `yield {type:'result',modelUsage:{}};`, "token_budget_exhausted"},
+		{"invalid_usage", `yield {type:'result',modelUsage:{fixture:{inputTokens:-1,outputTokens:1}}};`, "token_budget_exhausted"},
+		{"partial_usage", `yield {type:'result',modelUsage:{fixture:{outputTokens:1}}};`, "token_budget_exhausted"},
+		{"overflow_usage", `yield {type:'result',modelUsage:{fixture:{inputTokens:Number.MAX_SAFE_INTEGER,outputTokens:1}}};`, "token_budget_exhausted"},
 		{"tokens", `yield {type:'result',subtype:'success',modelUsage:{fixture:{inputTokens:90,outputTokens:10}}};`, "token_budget_exhausted"},
-		{"sdk_turns", `yield {type:'result',subtype:'error_max_turns'};`, "turn_budget_exhausted"},
-		{"completed_turns", `for(let i=0;i<3;i++) yield {type:'result',subtype:'success'};`, "turn_budget_exhausted"},
+		{"sdk_turns", `yield {type:'result',subtype:'error_max_turns',modelUsage:{fixture:{inputTokens:1,outputTokens:1}}};`, "turn_budget_exhausted"},
+		{"completed_turns", `for(let i=0;i<3;i++) yield {type:'result',subtype:'success',modelUsage:{fixture:{inputTokens:i+1,outputTokens:1}}};`, "turn_budget_exhausted"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			fixture := strings.Replace(sdk, "await closed;", tc.result+"await closed;", 1)
@@ -325,6 +330,151 @@ func TestClaudeNativeClosePreservesReceiptAtEOF(t *testing.T) {
 		})
 		if err := p.GracefulStop(t.Context()); err != nil {
 			t.Fatal(err)
+		}
+	}
+}
+
+type budgetStopFixture struct {
+	*fakeProcess
+	gracefulErr error
+	stopErr     error
+	graceful    int
+	stops       int
+	freshCtx    bool
+}
+
+func (p *budgetStopFixture) GracefulStop(context.Context) error {
+	p.graceful++
+	return p.gracefulErr
+}
+func (p *budgetStopFixture) Stop(ctx context.Context) error {
+	p.stops++
+	p.freshCtx = ctx.Err() == nil
+	return p.stopErr
+}
+
+func TestManagedBudgetFailedCloseEscalatesOwnedStop(t *testing.T) {
+	for _, tc := range []struct {
+		name                 string
+		gracefulErr, stopErr error
+		wantStop             bool
+	}{
+		{"native_confirmed", nil, nil, false},
+		{"native_failed", ErrControlUnconfirmed, nil, true},
+		{"native_timeout", ErrGracefulTimeout, nil, true},
+		{"ownership_lost", ErrGracefulTimeout, ErrNotOwned, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, _, e, _ := managedFixture(t)
+			p := &budgetStopFixture{gracefulErr: tc.gracefulErr, stopErr: tc.stopErr}
+			e.budgetMu.Lock()
+			e.budgetProcess = p
+			e.budgetReason = "token_budget_exhausted"
+			e.budgetMu.Unlock()
+			s.stopForBudget(e)
+			if p.graceful != 1 || (p.stops == 1) != tc.wantStop || tc.wantStop && !p.freshCtx {
+				t.Fatalf("graceful=%d stop=%d fresh=%v", p.graceful, p.stops, p.freshCtx)
+			}
+			e.mu.Lock()
+			unconfirmed := e.record.BudgetStopUnconfirmed
+			e.mu.Unlock()
+			if unconfirmed != tc.wantStop {
+				t.Fatal("signal was mistaken for an observed exit")
+			}
+		})
+	}
+}
+
+func TestClaudeBridgeReadAndSearchWorkspaceAllowlist(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("Node unavailable")
+	}
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	workspace, outside := filepath.Join(root, "work"), filepath.Join(root, "outside")
+	for _, dir := range []string{workspace, outside, filepath.Join(workspace, "safe"), filepath.Join(workspace, "linked")} {
+		if err := os.Mkdir(dir, 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, file := range []string{filepath.Join(workspace, "safe", "file"), filepath.Join(outside, "file")} {
+		if err := os.WriteFile(file, []byte("fixture"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Symlink(outside, filepath.Join(workspace, "linked", "escape")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(outside, "missing"), filepath.Join(workspace, "dangling")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(workspace, "safe", "file"), filepath.Join(workspace, "internal-link")); err != nil {
+		t.Fatal(err)
+	}
+	bridge, err := claudeAssets.ReadFile("claudeassets/bridge.mjs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bridgePath, sdkPath := filepath.Join(root, "bridge.mjs"), filepath.Join(root, "sdk.mjs")
+	if err := os.WriteFile(bridgePath, bridge, 0600); err != nil {
+		t.Fatal(err)
+	}
+	const sdk = `export function query({options}) {
+ return {streamInput:async()=>{},interrupt:async()=>({still_queued:[]}),close:()=>{},async *[Symbol.asyncIterator](){
+ const entry=options.hooks.PreToolUse[0], hook=entry.hooks[0], root=options.cwd;
+ if(entry.matcher!=='Read|Glob|Grep|Edit|Write') throw Error('matcher');
+ async function check(name,args,deny) {
+   const r=await hook({tool_name:name,tool_input:args});
+   if((r.hookSpecificOutput?.permissionDecision==='deny')!==deny) throw Error('path guard');
+ }
+ for(const path of ['../outside/file', root+'/../outside/file', 'linked/escape/file', 'dangling', '/etc/passwd', 'missing'])
+   await check('Read',{file_path:path},true);
+ for(const path of ['safe/file', root+'/safe/file', 'internal-link']) await check('Read',{file_path:path},false);
+ await check('Read',{},true);
+ for(const name of ['Glob','Grep']) {
+   for(const path of ['../outside',root+'/../outside','linked','linked/escape','dangling','/etc',undefined])
+     await check(name,{path,pattern:'*'},true);
+   await check(name,{path:'safe',pattern:'*'},false);
+   await check(name,{path:root+'/safe',pattern:'*'},false);
+   await check(name,{path:'safe',pattern:'*',glob:'../../*'},true);
+ }
+ for(const pattern of ['../*','/etc/*','safe/../../*','{safe,../outside}/*','{/etc,safe}/*','[/]etc/*'])
+   await check('Glob',{path:'safe',pattern},true);
+ yield {type:'system',subtype:'init',session_id:'fixture',capabilities:['interrupt_receipt_v1']};
+ yield {type:'result',modelUsage:{fixture:{inputTokens:1,outputTokens:1}}};
+ }};
+}`
+	if err := os.WriteFile(sdkPath, []byte(sdk), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(node, bridgePath, sdkPath, "/bin/true", workspace)
+	cmd.Stdin = strings.NewReader(`{"op":"start","prompt":"fixture","max_tokens":1}` + "\n")
+	out, err := cmd.Output()
+	if err != nil || !strings.Contains(string(out), `"kind":"budget_exhausted"`) {
+		t.Fatalf("read/search gate: %v %s", err, out)
+	}
+}
+
+type advertisedManagedAdapter struct{ *fakeAdapter }
+
+func (*advertisedManagedAdapter) ManagedControlSupported() bool { return true }
+
+func TestManagedQualificationRefusesOtherHarnessClaims(t *testing.T) {
+	s, a, p := testSupervisor(t)
+	s.adapters[Codex] = &advertisedManagedAdapter{&fakeAdapter{proc: p}}
+	if err := s.StartRun(t.Context(), a.run); err != nil {
+		t.Fatal(err)
+	}
+	e := s.runs[a.run.ID]
+	if e.managedPolicy {
+		t.Fatal("non-Claude adapter self-qualified managed control")
+	}
+	for _, capability := range a.harnessCaps {
+		if capability == managedControlCapability {
+			t.Fatal("advertised unsupported managed control")
 		}
 	}
 }

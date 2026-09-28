@@ -536,7 +536,7 @@ func TestClaudeBridgeDeniesEditsOutsideWorkspace(t *testing.T) {
     async *[Symbol.asyncIterator]() {
       if (options.permissionMode !== 'dontAsk' || options.additionalDirectories?.length !== 0) throw Error('permissions');
       const entry = options.hooks?.PreToolUse?.[0];
-      if (entry?.matcher !== 'Edit|Write' || entry.hooks?.length !== 1) throw Error('hook');
+      if (entry?.matcher !== 'Read|Glob|Grep|Edit|Write' || entry.hooks?.length !== 1) throw Error('hook');
       const hook = entry.hooks[0], root = options.cwd, outside = %q;
       for (const name of ['Edit', 'Write']) {
         for (const file_path of [outside + '/file', root + '/../outside/file', root + '/escape/file']) {

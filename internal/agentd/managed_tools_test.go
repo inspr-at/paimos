@@ -287,7 +287,7 @@ func TestTerminalSandboxesTestProcessNetwork(t *testing.T) {
 	const source = `package sandboxtest
 import ("net"; "testing"; "time")
 func TestNetworkFence(t *testing.T) {
-  l,err:=net.Listen("tcp","127.0.0.1:0"); if err!=nil { t.Fatalf("loopback bind: %v",err) }; l.Close()
+  l,err:=net.Listen("tcp","127.0.0.1:0"); if err==nil { l.Close(); t.Fatal("loopback bind escaped sandbox") }
   c,err:=net.DialTimeout("tcp","1.1.1.1:443",time.Second)
   if c!=nil { c.Close(); t.Fatal("external network escaped sandbox") }
   if err==nil { t.Fatal("external network escaped sandbox") }
@@ -391,5 +391,107 @@ func TestSandbox(t *testing.T) {
 	}
 	if content, err := os.ReadFile(filepath.Join(web, "npm-inside")); err != nil || string(content) != "ok" {
 		t.Fatalf("npm workspace output: %q %v", content, err)
+	}
+}
+
+// Policy fixtures only: do not launch or signal sandboxed processes here.
+func TestTerminalDefaultDenyProfile(t *testing.T) {
+	profile := terminalSandboxProfile("/fixture/work", "/fixture/private-temp", []string{"/fixture/toolchain", "/fixture/cache/download"}, []string{"/fixture/bin/go"})
+	if !strings.HasPrefix(profile, "(version 1) (deny default)") {
+		t.Fatal("terminal is not default deny")
+	}
+	for _, forbidden := range []string{"(allow default)", "(allow network", "localhost", "unix-socket", `(subpath "/")`, `(subpath "/Users")`, `(subpath "/private")`, `(subpath "/var/run")`, `(subpath "/nix/store")`} {
+		if strings.Contains(profile, forbidden) {
+			t.Fatalf("broad permission: %s", forbidden)
+		}
+	}
+	for _, root := range []string{"/fixture/work", "/fixture/private-temp"} {
+		if !strings.Contains(profile, fmt.Sprintf("(allow file-read* file-write* (subpath %q))", root)) {
+			t.Fatal("missing run root")
+		}
+	}
+	if strings.Count(profile, "(allow file-read* file-write*") != 2 || strings.Count(profile, "(allow file-write*") != 1 {
+		t.Fatal("unexpected writable surface")
+	}
+	for _, root := range []string{"/fixture/toolchain", "/fixture/cache/download"} {
+		if !strings.Contains(profile, fmt.Sprintf("(allow file-read* (subpath %q))", root)) {
+			t.Fatal("missing read-only dependency")
+		}
+	}
+}
+
+func TestTerminalEnvironmentDoesNotInheritCredentials(t *testing.T) {
+	for _, name := range []string{"AEON_TEST_DATABASE_URL", "AEON_URL", "AEON_RUNTIME_KEY", "DATABASE_URL", "PGPASSWORD", "ANTHROPIC_API_KEY", "AWS_SECRET_ACCESS_KEY", "NODE_OPTIONS", "DYLD_INSERT_LIBRARIES", "GIT_CONFIG_COUNT", "PATH", "HOME", "LANG"} {
+		t.Setenv(name, "inherited-fixture-value")
+	}
+	values := terminalEnvironment("/fixture/tmp", "off", "/fixture/go", "/fixture/bin/go")
+	for _, value := range values {
+		name, _, _ := strings.Cut(value, "=")
+		if strings.HasPrefix(name, "AEON_") || strings.Contains(value, "inherited-fixture-value") {
+			t.Fatal("child inherited daemon configuration")
+		}
+	}
+	for _, expected := range []string{"HOME=/fixture/tmp", "PATH=/fixture/bin:/usr/bin:/bin", "CGO_ENABLED=0"} {
+		found := false
+		for _, value := range values {
+			found = found || value == expected
+		}
+		if !found {
+			t.Fatalf("missing isolation setting %s", expected)
+		}
+	}
+}
+
+func TestTerminalToolRootsNeverGrantInstallationPrefix(t *testing.T) {
+	for path, want := range map[string]string{
+		"/nix/store/fixture-node/bin/node":               "/nix/store/fixture-node",
+		"/opt/homebrew/Cellar/node/22/bin/node":          "/opt/homebrew/Cellar/node/22",
+		"/usr/local/Cellar/node/22/bin/node":             "/usr/local/Cellar/node/22",
+		"/usr/local/lib/node_modules/npm/bin/npm-cli.js": "/usr/local/lib/node_modules/npm",
+		"/usr/bin/git": "", "/Users/fixture/bin/go": "", "/opt/homebrew/bin/node": "",
+	} {
+		if got := terminalToolRoot(path); got != want {
+			t.Fatalf("%s: %s", path, got)
+		}
+	}
+}
+
+func TestTerminalToolClosureGrantsOnlyExactPackages(t *testing.T) {
+	root := "/nix/store/" + strings.Repeat("a", 32) + "-node"
+	roots, err := terminalStoreClosure(root + "\n" + root + "-lib\n")
+	if err != nil || len(roots) != 2 || roots[0] != root {
+		t.Fatalf("closure: %v %v", roots, err)
+	}
+	for _, bad := range []string{"", "/nix/store", "/nix/store/", "/", "/Users/fixture", root + "/..", root + "/lib", root + "\n/etc", strings.Repeat(root+"\n", 4097)} {
+		if _, err := terminalStoreClosure(bad); err == nil {
+			t.Fatal("accepted a broad or invalid closure")
+		}
+	}
+}
+
+func TestTerminalGitChecksUseBoundProbe(t *testing.T) {
+	root := t.TempDir()
+	var queries []string
+	probe := func(args ...string) ([]byte, error) {
+		query := strings.Join(args, " ")
+		queries = append(queries, query)
+		switch query {
+		case "diff --cached --name-only -z", "ls-files -z -- deleted.go":
+			return []byte("deleted.go\x00"), nil
+		default:
+			t.Fatalf("unexpected preflight %s", query)
+			return nil, nil
+		}
+	}
+	if !safeStagedSet(root, probe) || len(queries) != 2 {
+		t.Fatal("staging checks did not use the bound sandbox probe")
+	}
+	for _, path := range []string{"../outside", ".env", "/etc/passwd", "."} {
+		if safeStagePath(root, path, probe) {
+			t.Fatal("unsafe staged path")
+		}
+	}
+	if len(queries) != 2 {
+		t.Fatal("unsafe path reached git")
 	}
 }

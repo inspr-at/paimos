@@ -442,7 +442,7 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 	}
 	verification := run.Purpose == VerificationPurpose
 	managedAdapter, managedOK := adapter.(ManagedControlAdapter)
-	managedPolicy := !verification && managedOK && managedAdapter.ManagedControlSupported()
+	managedPolicy := !verification && profile.Harness == Claude && managedOK && managedAdapter.ManagedControlSupported()
 	if verification {
 		s.mu.Lock()
 		entries := make([]*owned, 0, len(s.runs))
