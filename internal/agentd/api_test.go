@@ -90,6 +90,71 @@ func TestRemoteLostClaimAndPerRunTelemetryBinding(t *testing.T) {
 	}
 }
 
+func TestRemoteHarnessMetadataOmitsUnknownAndUnchangedFields(t *testing.T) {
+	var registration map[string]any
+	var beats []map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Error(err)
+		}
+		switch r.URL.Path {
+		case "/api/projects/project/harness-sessions":
+			registration = body
+			_, _ = w.Write([]byte(`{"id":"session","project_id":"project"}`))
+		case "/api/projects/project/harness-sessions/session/heartbeat":
+			if r.Header.Get("X-Aeon-Worker-Lease") != "owned-lease" {
+				t.Error("missing owned worker lease")
+			}
+			beats = append(beats, body)
+			_, _ = w.Write([]byte(`{}`))
+		default:
+			t.Errorf("unexpected harness path %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+	remote := NewRemote(server.URL, "test-key")
+	session, err := remote.RegisterHarness(t.Context(), HarnessSession{ID: "reference", ProjectID: "project", Lease: "owned-lease", AccountLabel: "known account"},
+		"agent", "run", "order", Codex, "host", []string{"status"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, update := range []HarnessSession{
+		{Model: "model-a", ReasoningEffort: "high"},
+		{Model: "model-b"},
+		{},
+	} {
+		update.ID, update.ProjectID, update.Lease = session.ID, session.ProjectID, session.Lease
+		update.ActivitySequence = int64(i + 1)
+		if err := remote.HeartbeatHarness(t.Context(), update, "working"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, ok := registration["model"]; ok {
+		t.Fatal("unknown registration model was sent")
+	}
+	if _, ok := registration["reasoning_effort"]; ok {
+		t.Fatal("unknown registration effort was sent")
+	}
+	if len(beats) != 3 || beats[0]["model"] != "model-a" || beats[0]["reasoning_effort"] != "high" || beats[1]["model"] != "model-b" {
+		t.Fatalf("verified metadata missing from heartbeat: %+v", beats)
+	}
+	for i, beat := range beats {
+		if beat["activity_sequence"] != float64(i+1) {
+			t.Fatalf("heartbeat %d lost sequence: %+v", i, beat)
+		}
+	}
+	if _, ok := beats[1]["reasoning_effort"]; ok {
+		t.Fatal("unknown effort was sent")
+	}
+	if _, ok := beats[2]["model"]; ok {
+		t.Fatal("routine heartbeat repeated model")
+	}
+	if _, ok := beats[2]["reasoning_effort"]; ok {
+		t.Fatal("routine heartbeat repeated effort")
+	}
+}
+
 func TestRemoteUsesAeonRunAndInboxContract(t *testing.T) {
 	seen := map[string]bool{}
 	var mu sync.Mutex

@@ -24,6 +24,7 @@ type fakeAPI struct {
 	harnessRegistration        HarnessSession
 	harnessCaps                []string
 	harnessBeats               int
+	harnessBeatSessions        []HarnessSession
 	harnessControls            []HarnessControl
 	harnessCompletions         []string
 	harnessDeliveries          []HarnessDelivery
@@ -84,10 +85,11 @@ func (a *fakeAPI) RegisterHarness(_ context.Context, s HarnessSession, _, _, _, 
 	a.mu.Unlock()
 	return s, nil
 }
-func (a *fakeAPI) HeartbeatHarness(context.Context, HarnessSession, string) error {
+func (a *fakeAPI) HeartbeatHarness(_ context.Context, session HarnessSession, _ string) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.harnessBeats++
+	a.harnessBeatSessions = append(a.harnessBeatSessions, session)
 	return nil
 }
 func (a *fakeAPI) YieldHarness(context.Context, HarnessSession) ([]HarnessControl, error) {
@@ -203,8 +205,8 @@ func TestManagedHarnessLifecycleAndControls(t *testing.T) {
 	if registration.ID != "session" || registration.ProjectID != "project" || len(registration.Lease) < 32 || len(caps) != 5 {
 		t.Fatalf("managed registration binding or capabilities invalid: %v", caps)
 	}
-	if registration.Model != a.profile.Model || registration.ReasoningEffort != a.profile.Effort || registration.AccountLabel != "Work subscription" {
-		t.Fatal("managed registration lost chosen model, effort or account label")
+	if registration.Model != "" || registration.ReasoningEffort != "" || registration.AccountLabel != "Work subscription" {
+		t.Fatal("Codex registration claimed unverified model or lost account label")
 	}
 	if err := s.serviceHarness(t.Context(), s.runs["run"]); err != nil {
 		t.Fatal(err)

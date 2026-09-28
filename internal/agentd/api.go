@@ -151,13 +151,20 @@ func harnessPath(s HarnessSession) string {
 
 func (r *Remote) RegisterHarness(ctx context.Context, s HarnessSession, agentID, runID, orderID, harness, host string, caps []string) (HarnessSession, error) {
 	var result HarnessSession
-	err := r.Client.Do(ctx, "POST", "/api/projects/"+url.PathEscape(s.ProjectID)+"/harness-sessions", map[string]any{
+	body := map[string]any{
 		"agent_principal_id": agentID, "run_id": runID, "ticket_node_id": orderID,
 		"work_order_id": orderID, "harness": harness, "host": host,
 		"management_mode": "managed", "role": "worker", "work_shape": "ship",
-		"model": s.Model, "reasoning_effort": s.ReasoningEffort, "account_label": s.AccountLabel,
+		"account_label":           s.AccountLabel,
 		"advertised_capabilities": caps, "harness_session_ref": s.ID, "worker_lease": s.Lease,
-	}, &result)
+	}
+	if s.Model != "" {
+		body["model"] = s.Model
+	}
+	if s.ReasoningEffort != "" {
+		body["reasoning_effort"] = s.ReasoningEffort
+	}
+	err := r.Client.Do(ctx, "POST", "/api/projects/"+url.PathEscape(s.ProjectID)+"/harness-sessions", body, &result)
 	if err != nil {
 		return HarnessSession{}, err
 	}
@@ -179,9 +186,20 @@ func (r *Remote) harnessWorker(ctx context.Context, s HarnessSession, suffix str
 }
 
 func (r *Remote) HeartbeatHarness(ctx context.Context, s HarnessSession, phase string) error {
-	return r.harnessWorker(ctx, s, "/heartbeat", map[string]any{
-		"phase": phase, "activity": "busy", "activity_sequence": 1, "process_ownership": s.Ownership,
-	}, nil)
+	sequence := s.ActivitySequence
+	if sequence == 0 {
+		sequence = 1
+	}
+	body := map[string]any{
+		"phase": phase, "activity": "busy", "activity_sequence": sequence, "process_ownership": s.Ownership,
+	}
+	if s.Model != "" {
+		body["model"] = s.Model
+	}
+	if s.ReasoningEffort != "" {
+		body["reasoning_effort"] = s.ReasoningEffort
+	}
+	return r.harnessWorker(ctx, s, "/heartbeat", body, nil)
 }
 
 func (r *Remote) YieldHarness(ctx context.Context, s HarnessSession) ([]HarnessControl, error) {
