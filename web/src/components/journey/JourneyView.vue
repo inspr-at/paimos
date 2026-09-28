@@ -20,6 +20,7 @@ import { useAgents } from '../../stores/agents'
 import { StaleJourney, useJourney } from '../../stores/journey'
 import AppIcon from '../AppIcon.vue'
 import JourneyRail from './JourneyRail.vue'
+import { askerOf } from './asker'
 import ReleaseWalker from './ReleaseWalker.vue'
 import InspireStage from './InspireStage.vue'
 import ShapeStage from './ShapeStage.vue'
@@ -153,8 +154,9 @@ const next = computed<NextState>(() => {
   }
   if (approval.value?.decision === null && !canDecideApproval(approval.value, can)) { disabled = true; tip = 'Deciding this gate requires approval and action permissions.' }
   if (gate.value && !approval.value && action.key !== 'decide') { disabled = true; tip = tip || (action.approval_request_id ? 'The action gate is unavailable or its details are missing. Refresh to check it.' : `Waiting for the ${gate.value} gate: an agent asks for it, you approve it here.`) }
-  // A pending gate is approved by the same click; labels that already say "Approve" stay as they are.
-  const label = gate.value && approval.value?.decision === null && action.key !== 'decide' && !/^Approve /.test(action.label) ? `Approve and ${action.label.charAt(0).toLowerCase()}${action.label.slice(1)}` : action.label
+  // A pending gate is approved by the same click; labels that already say "Approve",
+  // or renew an approval (renewing is approving), stay as they are.
+  const label = gate.value && approval.value?.decision === null && action.key !== 'decide' && !/^Approve /.test(action.label) && !action.renewal_action ? `Approve and ${action.label.charAt(0).toLowerCase()}${action.label.slice(1)}` : action.label
   return { label, disabled, tip, busy: store.busy }
 })
 async function act(action: ActionKey, options: { approval?: Approval | null; reason?: string; done?: string; confirmation?: JourneyConfirmation<ActionKey> } = {}) {
@@ -188,6 +190,12 @@ const DONE: Partial<Record<string, (n: string) => string>> = {
   approve_permit: () => 'Permit approved.',
   plan_next_release: () => 'The next release is open for planning.',
 }
+// Shorter confirmation copy where the long one repeats what the card said.
+const CONFIRM_LONG: Partial<Record<string, string>> = {
+  renew_candidate: 'Preparation and deployment restart with fresh evidence.',
+  renew_deploy: 'Preparation and deployment restart with fresh evidence.',
+  retry_deploy: 'The host gets the release again, with fresh evidence.',
+}
 async function runNext() {
   now.value = Date.now()
   const j = journey.value
@@ -213,7 +221,10 @@ async function runNext() {
   const key = action.renewal_action ?? action.key as ActionKey
   const confirmation = captureJourneyConfirmation(j, key, approval.value)
   const withGate = confirmation.approval
-  const body = `${withGate && withGate.decision === null ? `This approves the ${gate.value} gate that ${agents.askerName(withGate.agent_principal_id, withGate.agent_name).name} asked for. ` : ''}${ACTION_LONG[action.renewal_action ?? action.key]}`
+  const asker = withGate ? askerOf(agents, withGate.agent_principal_id, withGate.agent_name).name : ''
+  const gateName = gate.value === 'deploy' ? 'deployment' : gate.value
+  const target = action.stage === 'deploy' && release.value ? ` ${releaseName(release.value)} goes to ${plugins.value.some(p => p.id === 'pharos') ? 'Pharos' : 'the host'}.` : ''
+  const body = `${withGate && withGate.decision === null ? `This approves the ${gateName} gate that ${asker === 'An agent' ? 'an agent' : asker} asked for. ` : ''}${CONFIRM_LONG[action.renewal_action ?? action.key] ?? ACTION_LONG[action.renewal_action ?? action.key]}${target}`
   const ok = await confirmAction({ title: `${action.label}?`, body, confirmLabel: next.value.label })
   if (!ok) return
   await act(key, { confirmation, done: DONE[key]?.(releaseLabel.value) })
@@ -235,6 +246,8 @@ provide(JOURNEY, context)
 const STAGE_VIEW: Record<Stage, Component> = { inspire: InspireStage, shape: ShapeStage, requirements: RequirementsStage, plan: PlanStage, build: BuildStage, deploy: DeployStage, access: AccessStage, live: LiveStage }
 const viewedState = computed(() => journey.value?.stages.find(s => s.key === viewed.value)?.state ?? 'later')
 const CHIP: Record<string, string> = { current: 'Now', done: 'Done', skipped: 'Not needed', later: 'Later', blocked: 'Blocked' }
+// A stage that waits only for your decision says so, instead of an alarm.
+const chipLabel = computed(() => viewedState.value === 'blocked' && journey.value?.next_action.stage === viewed.value && !next.value.disabled ? 'Needs you' : CHIP[viewedState.value])
 const title = computed(() => {
   const r = release.value ? releaseName(release.value) : ''
   switch (viewed.value) {
@@ -287,7 +300,7 @@ onBeforeUnmount(() => { window.removeEventListener('keydown', keydown); clearInt
       <JourneyRail :journey="journey" :viewed="viewed" :project-title="project.title" :release-label="currentRelease ? releaseName(currentRelease) : ''" :action="next" @view="s => emit('stage', s)" />
       <header class="stage-head">
         <div class="stage-t">
-          <p class="eyebrow">{{ STAGE_LABEL[viewed] }} · <span class="state-chip" :class="viewedState">{{ CHIP[viewedState] }}</span></p>
+          <p class="eyebrow">{{ STAGE_LABEL[viewed] }} · <span class="state-chip" :class="viewedState">{{ chipLabel }}</span></p>
           <h2 id="journey-title">{{ title }}</h2>
         </div>
         <p class="subtitle">{{ subtitle }}</p>
@@ -320,7 +333,7 @@ onBeforeUnmount(() => { window.removeEventListener('keydown', keydown); clearInt
 .state-chip { display: inline-flex; align-items: center; height: 18px; margin-left: 4px; padding: 0 8px; border-radius: 999px; font: 600 10px/1 var(--mono); letter-spacing: .08em; background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); color: var(--ink-2); vertical-align: 1px; }
 .state-chip.current { background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); }
 .state-chip.done { color: var(--ok); }
-.state-chip.blocked { background: var(--danger-bg); box-shadow: inset 0 0 0 1px var(--danger-line); color: var(--danger); }
+.state-chip.blocked { background: var(--gold-wash); box-shadow: inset 0 0 0 1px rgba(214, 155, 49, .45); color: var(--gold-ink); }
 .subtitle { padding-bottom: 4px; font-size: 13.5px; color: var(--ink-2); }
 .spacer { flex: 1; }
 .owner { flex-shrink: 0; padding: 3px 9px; border-radius: 999px; font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); }

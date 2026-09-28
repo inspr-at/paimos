@@ -141,11 +141,10 @@ async function undoAdded(eventId: number) {
           <li v-else-if="walker?.features.length"><AppIcon name="check" :size="13" class="ok" /><span>Every feature has a ticket in this release</span></li>
           <li v-if="stats.unestimated"><AppIcon name="alert" :size="13" class="warn" /><span>{{ plural(stats.unestimated, 'ticket') }} in the release {{ stats.unestimated === 1 ? 'has' : 'have' }} no estimate</span></li>
           <li><AppIcon name="info" :size="13" class="info" /><span>Starting the build agrees requirements revision {{ reqRevision }}</span></li>
-          <li v-if="!journey.next_action.available && journey.next_action.reason"><AppIcon name="alert" :size="13" class="warn" /><span>{{ journey.next_action.reason }}</span></li>
+          <li v-if="!journey.next_action.available && journey.next_action.reason && !/gate/i.test(journey.next_action.reason)"><AppIcon name="alert" :size="13" class="warn" /><span>{{ journey.next_action.reason }}</span></li>
         </ul>
         <GateApprovals gate="build" :approvals="approvals" :on="ctx.releaseLabel.value" :can-decide="ctx.canAct.value" :now="ctx.now.value" :me="ctx.me.value" />
         <p v-if="!approval" class="j-note">An agent asks for the build gate on {{ ctx.releaseLabel.value }}; it appears here for you to approve.</p>
-        <p class="j-note">{{ ACTION_LONG.start_build }}</p>
       </GateCard>
       <GateCard v-else-if="planning" eyebrow="Decision" title="Start build" tone="blocked">
         <p>{{ journey.next_action.reason || 'No release is open.' }}</p>
@@ -170,13 +169,15 @@ async function undoAdded(eventId: number) {
 <style scoped>
 .benefit-hint { color: var(--ink-3); font-size: 12px; }
 .list-skel { height: 560px; border-radius: 10px; }
-.add-row { display: flex; gap: 8px; }
+.add-row { display: flex; flex-wrap: wrap; gap: 8px; }
 .add-row .field, .add-row .btn { height: 36px; }
-.add-row .feature { width: 220px; flex-shrink: 0; }
-@media (max-width: 720px) { .add-row { flex-wrap: wrap; } .add-row .feature { width: 100%; } }
+.add-row > .field:first-child { flex: 1 1 240px; }
+/* A narrow card (a docked ticket beside it) wraps the row instead of overflowing. */
+.add-row .feature { flex: 0 1 220px; min-width: 150px; }
+@media (max-width: 720px) { .add-row > .field:first-child, .add-row .feature { flex-basis: 100%; } }
 @media (max-width: 600px) {
   .add-row .field, .add-row .btn { height: 44px; }
-  .add-row .btn { flex-basis: 100%; }
+  .add-row .btn { flex: 1 1 0; }
 }
 .saving { font-size: 12px; color: var(--ink-3); }
 .linkish { display: inline-flex; align-items: center; gap: 4px; padding: 0; border: 0; background: transparent; color: var(--teal-ink); font-weight: 600; cursor: pointer; }
