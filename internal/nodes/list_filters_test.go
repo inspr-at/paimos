@@ -203,6 +203,11 @@ func TestList6000FiltersPerformance(t *testing.T) {
 			if (len(page.Items) != 50 && len(page.Items) != 1) || page.NextCursor == nil {
 				t.Fatalf("large list result: %d", len(page.Items))
 			}
+			for _, item := range page.Items {
+				if item.ChildrenCount != 0 {
+					t.Fatalf("unexpected children for %s: %d", item.Key, item.ChildrenCount)
+				}
+			}
 			if fastest == 0 || elapsed < fastest {
 				fastest = elapsed
 			}

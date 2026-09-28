@@ -736,14 +736,22 @@ func listSQL(q listQuery, anchor any) (string, []any) {
 		people = ` LEFT JOIN principals ap ON ap.tenant_id=current_setting('aeon.tenant_id')::uuid AND ap.id=f.assignee_id::uuid`
 	}
 	sql := prefix + `, ordered AS (SELECT f.id,row_number() OVER (ORDER BY ` + listOrder(q) + `) AS rn FROM filtered f` + people + `),
-    selected AS (SELECT id,rn FROM ordered WHERE rn>coalesce((SELECT rn FROM ordered WHERE id=` + anchorArg + `::uuid),0) ORDER BY rn LIMIT ` + limitArg + `)
+    selected AS (SELECT id,rn FROM ordered WHERE rn>coalesce((SELECT rn FROM ordered WHERE id=` + anchorArg + `::uuid),0) ORDER BY rn LIMIT ` + limitArg + `),
+    -- Count visible children for the page once instead of rescanning nodes per row.
+    child_counts AS MATERIALIZED (
+        SELECT c.parent_id,count(*)::int AS child_count FROM nodes c
+        JOIN selected s ON s.id=c.parent_id
+        WHERE c.tenant_id=current_setting('aeon.tenant_id')::uuid AND c.deleted_at IS NULL
+        GROUP BY c.parent_id
+    )
     SELECT ` + nodeCols + `,k.slug,k.label,nullif(n.fields->>'priority',''),assignee.id::text,assignee.name,
            ` + hasAvatar("assignee.id") + `,
            par.id::text,par.key,par.title,pk.slug,
-           (SELECT count(*)::int FROM nodes c WHERE c.parent_id=n.id AND c.deleted_at IS NULL),
+           coalesce(cc.child_count,0),
            project.id::text,project.key,project.title,
            epic.id::text,epic.key,epic.title
     FROM selected s JOIN nodes n ON n.id=s.id JOIN node_kinds k ON k.id=n.kind_id
+    LEFT JOIN child_counts cc ON cc.parent_id=n.id
     ` + assigneeJoin + `
     LEFT JOIN nodes par ON par.id=n.parent_id AND par.deleted_at IS NULL
     LEFT JOIN node_kinds pk ON pk.id=par.kind_id
