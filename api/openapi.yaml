@@ -2452,6 +2452,31 @@ paths:
         '201': {description: Idempotent typed force control; inspect its state and outcome, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessRecoveryControl'}}}}
         '403': {description: Human force permission required}
         '409': {description: Stale confirmation, offline host or unverified process generation}
+  /projects/{projectId}/harness-sessions/{sessionId}/remove:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: removeHarnessSession
+      description: Human with harness.read project access only. Archives any registration under a row lock, without a client revision or process-ownership precondition. Revokes the generation and rejects outstanding controls; authenticated late worker writes return 410. Repeated removal returns the retained record without another audit event. Keeps ticket links and history. No process is signalled; an already delivered force signal or legacy daemon reaction cannot be recalled or ruled out.
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessRemoveRequest'}}}}
+      responses:
+        '200': {description: Record removed; process state unknown, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessRemoveResult'}}}}
+        '400': {description: Invalid reason}
+        '403': {description: Human project access required}
+        '404': {description: Session not visible}
+  /projects/{projectId}/harness-sessions/remove-stale:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: removeStaleHarnessSessions
+      description: Human with harness.read project access only. Removes unarchived records whose last accepted heartbeat is more than 15 minutes old, using creation time if none was accepted, at most 200 per request; `more` is true while eligible records remain and the client repeats. Eligibility is checked under row locks against one server cutoff; stopped records with a recent heartbeat are retained. Each removal event records actor, reason, the server-generated batch_id and the cutoff. Repeating the request never duplicates removal events. Does not signal processes.
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessRemoveRequest'}}}}
+      responses:
+        '200': {description: Removed records and server eligibility cutoff, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessRemoveStaleResult'}}}}
+        '400': {description: Invalid reason}
+        '403': {description: Human project access required}
+        '404': {description: Project not visible}
   /projects/{projectId}/harness-sessions/{sessionId}/archive:
     parameters:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -6486,6 +6511,27 @@ components:
         created_at: {type: string, format: date-time}
         claimed_at: {type: [string, 'null'], format: date-time}
         completed_at: {type: [string, 'null'], format: date-time}
+    HarnessRemoveRequest:
+      type: object
+      additionalProperties: false
+      required: [reason]
+      properties:
+        reason: {type: string, minLength: 1, maxLength: 240}
+    HarnessRemoveResult:
+      type: object
+      required: [session, message, processes_signalled, process_state]
+      properties:
+        session: {$ref: '#/components/schemas/HarnessSession'}
+        message: {type: string, const: 'Record removed; process not stopped by removal.'}
+        processes_signalled: {type: boolean, const: false}
+        process_state: {type: string, const: unknown}
+    HarnessRemoveStaleResult:
+      type: object
+      required: [items, cutoff, more]
+      properties:
+        items: {type: array, maxItems: 200, items: {$ref: '#/components/schemas/HarnessRemoveResult'}}
+        cutoff: {type: string, format: date-time}
+        more: {type: boolean, description: Eligible records remain after this batch; repeat the request}
     HarnessRecovery:
       type: object
       required: [session_id, host, observed_revision, confirmation, process_state, process_scope, can_archive, force_stop_available, force_stop_reason]

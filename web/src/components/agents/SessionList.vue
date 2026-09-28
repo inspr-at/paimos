@@ -9,6 +9,7 @@ import AppIcon from '../AppIcon.vue'
 import TicketPeekLink from '../TicketPeekLink.vue'
 import FloatingPanel from '../work/FloatingPanel.vue'
 import ConnectHint from './ConnectHint.vue'
+import { isStale, useSessionRemoval } from './sessionRemoval'
 import AgentStateLabel from './AgentStateLabel.vue'
 import { useAgentAppearance } from '../../lib/agentAppearance'
 const { appearance } = useAgentAppearance()
@@ -20,26 +21,35 @@ import { intendedResult, sessionContext, sessionExecution } from './sessionRow'
 // Session families stay together across status groups. Each lead's history is
 // opt-in for this mounted list only; refreshes never open it or persist it.
 const props = defineProps<{
-  groups: Record<SessionGroup, SessionView[]>; now: number; cursor: string; selected: string; state: Availability; error: string
+  removed?: SessionView[]; groups: Record<SessionGroup, SessionView[]>; now: number; cursor: string; selected: string; state: Availability; error: string
   loaded: boolean; controls: Record<string, SessionControl>; canControl: boolean; canStart: boolean
 }>()
 const emit = defineEmits<{ open: [id: string]; control: [view: SessionView, kind: SessionControl['kind']]; focusRow: [id: string]; retry: []; start: [] }>()
 const showStopped = ref(false)
+// Removed sessions are a separate, opt-in list; they keep their full history.
+const showRemoved = ref(false)
+const removedCount = computed(() => props.removed?.length ?? 0)
+watch(removedCount, n => { if (!n) showRemoved.value = false })
+const removal = useSessionRemoval()
+const current = computed(() => GROUPS.flatMap(g => props.groups[g.id]))
+const stale = computed(() => current.value.map(v => v.session).filter(s => isStale(s, props.now) && removal.canRemove(s)))
 const total = computed(() => GROUPS.reduce((sum, g) => sum + props.groups[g.id].length, 0))
 type Branch = SessionBranch<SessionView>
-const forest = computed(() => sessionForest(GROUPS.flatMap(g => props.groups[g.id]), props.now))
+const forest = computed(() => sessionForest(showRemoved.value ? props.removed ?? [] : current.value, props.now))
 // Three calm buckets in urgency order: what needs a look, what runs, what ended.
 // Each row still names its exact state; a family sits with its most urgent member.
 type Bucket = 'attention' | 'live' | 'stopped'
 const BUCKETS: { id: Bucket; label: string }[] = [{ id: 'attention', label: 'Needs attention' }, { id: 'live', label: 'Live' }, { id: 'stopped', label: 'Stopped' }]
 const bucketOf = (group: SessionGroup): Bucket => group === 'stopped' ? 'stopped' : group === 'working' || group === 'idle' ? 'live' : 'attention'
 const rank = (group: SessionGroup) => GROUPS.findIndex(g => g.id === group)
-const roots = (bucket: Bucket) => forest.value.filter(branch => bucketOf(branch.group) === bucket).sort((a, b) => rank(a.group) - rank(b.group))
+const roots = (bucket: Bucket) => showRemoved.value
+  ? (bucket === 'stopped' ? forest.value : [])
+  : forest.value.filter(branch => bucketOf(branch.group) === bucket).sort((a, b) => rank(a.group) - rank(b.group))
 const expanded = ref<Record<string, boolean>>({})
 const history = ref<Record<string, boolean>>({})
 const containsSelected = (branch: Branch): boolean => branch.view.session.id === props.selected || branch.children.some(containsSelected)
 // A direct link may reveal its selected row, but never its stopped siblings.
-const candidates = (branch: Branch) => branch.children.filter(child => history.value[branch.view.session.id] || child.liveCount > 0 || containsSelected(child))
+const candidates = (branch: Branch) => branch.children.filter(child => showRemoved.value || history.value[branch.view.session.id] || child.liveCount > 0 || containsSelected(child))
 const isExpanded = (branch: Branch): boolean => candidates(branch).length > 0 && (expanded.value[branch.view.session.id] ?? true)
 function toggle(branch: Branch) {
   const id = branch.view.session.id
@@ -66,7 +76,7 @@ const visible = (group: Bucket) => {
     }
   }
   for (const branch of roots(group)) {
-    if (group !== 'stopped' || showStopped.value || containsSelected(branch)) {
+    if (group !== 'stopped' || showRemoved.value || showStopped.value || containsSelected(branch)) {
       walk(branch, [])
       out[out.length - 1]!.familyEnd = true
     }
@@ -97,13 +107,32 @@ watch(selectedPath, path => {
 }, { immediate: true })
 
 const controlBlock = (view: SessionView, kind: SessionControl['kind']) => controlBlocked(view.session, kind, view.name, props.canControl, props.controls[view.session.id])
-// Phones get one overflow button per row; the menu offers the same two controls.
+// A direct link to a removed session shows it in the Removed list.
+watch(() => props.selected, id => {
+  if (id && !current.value.some(v => v.session.id === id) && props.removed?.some(v => v.session.id === id)) showRemoved.value = true
+}, { immediate: true })
+
+// Every row has one quiet overflow button: process controls while it runs, and
+// Remove from Agents for people. Wide rows also offer Interrupt on hover; Stop
+// asks first anyway, so it lives in the menu.
+const live = (view: SessionView) => view.session.phase !== 'stopped' && !view.session.archived_at
+const hasMenu = (view: SessionView) => live(view) || removal.canRemove(view.session)
+// Inline hover controls only where they can ever work; a session outside Aeon or
+// a reader without write access finds the reason in the menu instead.
+const inline = (view: SessionView, kind: SessionControl['kind']) => props.canControl && view.session.management_mode === 'managed' && view.session.advertised_capabilities.includes(kind)
+// One reason for both controls is said once, under them.
+const sharedBlock = (view: SessionView) => { const why = controlBlock(view, 'interrupt'); return why && why === controlBlock(view, 'stop') ? why : '' }
 const menu = ref<{ view: SessionView; anchor: HTMLElement } | null>(null)
 function openMenu(view: SessionView, event: MouseEvent) { menu.value = menu.value?.view.session.id === view.session.id ? null : { view, anchor: event.currentTarget as HTMLElement } }
 function pick(kind: SessionControl['kind']) {
   const view = menu.value?.view
   menu.value = null
   if (view && !controlBlock(view, kind)) emit('control', view, kind)
+}
+function pickRemove() {
+  const view = menu.value?.view
+  menu.value = null
+  if (view) void removal.removeOne(view.session, view.name)
 }
 function pendingLabel(view: SessionView) {
   const c = props.controls[view.session.id]
@@ -119,7 +148,17 @@ function rowClick(event: MouseEvent, id: string) {
 <template>
   <section class="sessions glass-card" aria-labelledby="sessions-title">
     <header class="card-head">
-      <h2 id="sessions-title">Sessions</h2>
+      <h2 id="sessions-title">{{ showRemoved ? 'Removed sessions' : 'Sessions' }}</h2>
+      <span v-if="loaded && state === 'ready'" class="head-tools">
+        <button
+          v-if="!showRemoved && stale.length" type="button" class="btn sm ghost quiet-btn" :disabled="removal.busy.value"
+          :data-tip="`${stale.length} without a heartbeat for 15 minutes`" @click="removal.clearStale(stale)"
+        >Clear stale</button>
+        <button
+          v-if="removedCount || showRemoved" type="button" class="btn sm ghost quiet-btn" :aria-pressed="showRemoved"
+          :aria-label="showRemoved ? 'Back to sessions' : `Show ${removedCount} removed sessions`" @click="showRemoved = !showRemoved"
+        ><template v-if="showRemoved"><AppIcon name="arrow-left" :size="13" />Sessions</template><template v-else>Removed<span class="count">{{ removedCount }}</span></template></button>
+      </span>
     </header>
 
     <div v-if="state === 'forbidden'" class="state">
@@ -136,7 +175,8 @@ function rowClick(event: MouseEvent, id: string) {
     <div v-else-if="!loaded" class="skeleton-rows" role="status" aria-label="Loading sessions">
       <div v-for="i in 5" :key="i" class="sk-row"><span class="skeleton dot" /><span class="skeleton" :style="{ width: `${18 + (i * 7) % 16}%` }" /><span class="skeleton key" /><span class="skeleton" style="width: 12%" /></div>
     </div>
-    <ConnectHint v-else-if="!total" :can-start="canStart" @start="emit('start')" />
+    <p v-else-if="showRemoved && !removedCount" class="state">No removed sessions.</p>
+    <ConnectHint v-else-if="!total && !showRemoved" :can-start="canStart" @start="emit('start')" />
 
     <div v-else class="table" role="table" aria-label="Agent sessions">
       <div class="thead" role="row">
@@ -147,7 +187,8 @@ function rowClick(event: MouseEvent, id: string) {
       <template v-for="group in BUCKETS" :key="group.id">
         <div v-if="roots(group.id).length" class="group-row" :class="group.id" role="row">
           <span role="rowheader" class="group-label">
-            <button v-if="group.id === 'stopped'" type="button" class="group-toggle" :aria-expanded="showStopped" @click="showStopped = !showStopped">
+            <template v-if="showRemoved">Removed<span class="mono">{{ roots(group.id).length }}</span></template>
+            <button v-else-if="group.id === 'stopped'" type="button" class="group-toggle" :aria-expanded="showStopped" @click="showStopped = !showStopped">
               <AppIcon name="chevron-right" :size="12" class="chev" :class="{ turned: showStopped }" />{{ group.label }}<span class="mono">{{ roots(group.id).length }}</span>
             </button>
             <template v-else>{{ group.label }}<span class="mono">{{ roots(group.id).length }}</span></template>
@@ -203,32 +244,37 @@ function rowClick(event: MouseEvent, id: string) {
           </span>
           <span role="cell" class="right c-elapsed mono-cell">{{ elapsed(view.session, now) }}</span>
           <span role="cell" class="c-actions">
-            <template v-if="view.session.phase !== 'stopped'">
+            <template v-if="live(view)">
               <button
-                type="button" class="icon-btn sm flat act" :aria-label="`Interrupt ${view.name}`" :data-tip="controlBlock(view, 'interrupt') || 'Interrupt: stop the current turn, keep the session'"
+                v-if="inline(view, 'interrupt')" type="button" class="icon-btn sm flat act" :aria-label="`Interrupt ${view.name}`" :data-tip="controlBlock(view, 'interrupt') || 'Interrupt: stop the current turn, keep the session'"
                 :aria-disabled="!!controlBlock(view, 'interrupt')" @click="!controlBlock(view, 'interrupt') && emit('control', view, 'interrupt')"
               ><AppIcon name="interrupt" :size="16" /></button>
-              <button
-                type="button" class="icon-btn sm flat act stop" :aria-label="`Stop ${view.name}`" :data-tip="controlBlock(view, 'stop') || 'Stop: end this session'"
-                :aria-disabled="!!controlBlock(view, 'stop')" @click="!controlBlock(view, 'stop') && emit('control', view, 'stop')"
-              ><AppIcon name="halt" :size="16" /></button>
-              <button
-                type="button" class="icon-btn flat more" :aria-label="`Actions for ${view.name}`" aria-haspopup="menu"
-                :aria-expanded="menu?.view.session.id === view.session.id" @click="openMenu(view, $event)"
-              ><AppIcon name="more" :size="16" /></button>
             </template>
+            <button
+              v-if="hasMenu(view)" type="button" class="icon-btn sm flat more" :aria-label="`Actions for ${view.name}`" aria-haspopup="menu"
+              :aria-expanded="menu?.view.session.id === view.session.id" @click="openMenu(view, $event)"
+            ><AppIcon name="more" :size="16" /></button>
           </span>
         </div>
       </template>
     </div>
     <FloatingPanel v-if="menu" :anchor="menu.anchor" align="end" :width="248" :label="`Actions for ${menu.view.name}`" @close="menu = null">
       <div role="menu" :aria-label="`Actions for ${menu.view.name}`">
-        <button type="button" role="menuitem" class="menu-item" :aria-disabled="!!controlBlock(menu.view, 'interrupt')" data-autofocus @click="pick('interrupt')">
-          <AppIcon name="interrupt" :size="16" /><span class="mi-text"><span>Interrupt</span><small>{{ controlBlock(menu.view, 'interrupt') || 'Stop the current turn, keep the session' }}</small></span>
-        </button>
-        <button type="button" role="menuitem" class="menu-item danger" :aria-disabled="!!controlBlock(menu.view, 'stop')" @click="pick('stop')">
-          <AppIcon name="halt" :size="16" /><span class="mi-text"><span>Stop session…</span><small>{{ controlBlock(menu.view, 'stop') || 'End this session; asks first' }}</small></span>
-        </button>
+        <template v-if="live(menu.view)">
+          <button type="button" role="menuitem" class="menu-item" :aria-disabled="!!controlBlock(menu.view, 'interrupt')" data-autofocus @click="pick('interrupt')">
+            <AppIcon name="interrupt" :size="16" /><span class="mi-text"><span>Interrupt</span><small v-if="!sharedBlock(menu.view)">{{ controlBlock(menu.view, 'interrupt') || 'Stop the current turn, keep the session' }}</small></span>
+          </button>
+          <button type="button" role="menuitem" class="menu-item danger" :aria-disabled="!!controlBlock(menu.view, 'stop')" @click="pick('stop')">
+            <AppIcon name="halt" :size="16" /><span class="mi-text"><span>Stop session…</span><small v-if="!sharedBlock(menu.view)">{{ controlBlock(menu.view, 'stop') || 'End this session; asks first' }}</small></span>
+          </button>
+          <p v-if="sharedBlock(menu.view)" class="menu-note">{{ sharedBlock(menu.view) }}</p>
+        </template>
+        <template v-if="removal.canRemove(menu.view.session)">
+          <hr v-if="live(menu.view)" class="menu-sep">
+          <button type="button" role="menuitem" class="menu-item" :data-autofocus="live(menu.view) ? undefined : ''" @click="pickRemove">
+            <AppIcon name="archive" :size="16" /><span class="mi-text"><span>Remove from Agents…</span><small>Hides the record; does not stop the process</small></span>
+          </button>
+        </template>
       </div>
     </FloatingPanel>
   </section>
@@ -238,6 +284,12 @@ function rowClick(event: MouseEvent, id: string) {
 .sessions { overflow: clip; container: sessions / inline-size; }
 .card-head { display: flex; align-items: baseline; gap: 10px; padding: 14px 18px 10px; }
 .card-head h2 { font-size: 15px; font-weight: 650; }
+.head-tools { display: inline-flex; align-items: center; gap: 2px; margin-left: auto; margin-right: -8px; }
+.quiet-btn { color: var(--ink-2); font-weight: 550; }
+.quiet-btn:hover { color: var(--ink); }
+.quiet-btn[aria-pressed="true"] { background: transparent; box-shadow: none; color: var(--ink-2); }
+.quiet-btn[aria-pressed="true"]:hover { background: var(--row-selected); color: var(--ink); }
+.quiet-btn .count { margin-left: 2px; font: 500 11.5px/1 var(--mono); color: var(--ink-3); font-variant-numeric: tabular-nums; }
 .table { --state-width: 164px; --tree-step: 28px; display: grid; grid-template-columns: var(--state-width) minmax(140px, 1.45fr) minmax(72px, .48fr) minmax(128px, .82fr) 80px 68px 76px; padding: 0 0 8px; }
 .thead, .row, .group-row { display: grid; grid-template-columns: subgrid; grid-column: 1 / -1; align-items: center; column-gap: 0; }
 .thead { height: 32px; padding: 0 12px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); font: 500 10.5px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--ink-3); font-variant-ligatures: none; white-space: nowrap; }
@@ -311,15 +363,17 @@ function rowClick(event: MouseEvent, id: string) {
 .row .c-elapsed { font-size: 12px; color: var(--ink-2); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .faint { color: var(--ink-3); }
 .mono-cell { font-family: var(--mono); font-variant-ligatures: none; }
-/* Controls appear on the row the pointer or keyboard is on; the layout never shifts. */
-.c-actions { display: inline-flex; justify-content: flex-end; gap: 2px; }
-.act { opacity: 0; }
-.row:hover .act, .row.active .act, .row.selected .act, .row:focus-within .act { opacity: 1; }
+/* Controls appear on the row the pointer or keyboard is on; the layout never
+   shifts. The row's inset leaves ~66px of the 76px track: two 28px controls. */
+.row > .c-actions { display: inline-flex; align-items: center; justify-content: flex-end; gap: 2px; padding: 0 4px 0 0; }
+.act, .more { opacity: 0; transition: opacity .15s ease; }
+.row:hover :is(.act, .more), .row.active :is(.act, .more), .row.selected :is(.act, .more), .row:focus-within :is(.act, .more), .more[aria-expanded="true"] { opacity: 1; }
 .act[aria-disabled="true"] { color: var(--ink-3); cursor: not-allowed; }
 .row:hover .act[aria-disabled="true"], .row.active .act[aria-disabled="true"], .row.selected .act[aria-disabled="true"] { opacity: .45; }
-.stop:not([aria-disabled="true"]):hover { color: var(--danger); background: var(--danger-bg); }
-.more { display: none; }
-@media (hover: none) { .act { display: none; } .more { display: grid; } }
+@media (hover: none) { .act { display: none; } .more { opacity: 1; } .c-actions .icon-btn.more { width: 36px; height: 36px; } }
+@media (prefers-reduced-motion: reduce) { .act, .more { transition: none; } }
+.menu-note { margin: -2px 10px 6px 36px; font-size: 11.5px; line-height: 1.35; color: var(--ink-3); }
+.menu-sep { height: 1px; margin: 4px 6px; border: 0; background: var(--line); }
 .menu-item { display: flex; align-items: flex-start; gap: 10px; width: 100%; padding: 8px 10px; border: 0; border-radius: 8px; background: transparent; color: var(--ink); font-size: 13.5px; text-align: left; }
 .menu-item > svg { margin-top: 2px; color: var(--ink-2); flex-shrink: 0; }
 .menu-item:hover:not([aria-disabled="true"]) { background: var(--row-hover); }
@@ -344,6 +398,7 @@ function rowClick(event: MouseEvent, id: string) {
 @container sessions (max-width: 760px) {
   .table { --state-width: 150px; grid-template-columns: var(--state-width) minmax(100px, 1.2fr) minmax(64px, auto) minmax(108px, .7fr) 68px; }
   .c-beat, .c-elapsed { display: none; }
+  .act { display: none; }
 }
 /* Phones: identity, execution and state stack; actions stay in the overflow menu. */
 @container sessions (max-width: 560px) {
@@ -363,8 +418,8 @@ function rowClick(event: MouseEvent, id: string) {
   .c-exec { grid-area: exec; min-width: 0; }
   .c-beat { display: block; grid-area: beat; }
   .c-elapsed { display: none; }
-  .c-actions { grid-area: actions; grid-row: 1 / span 3; align-self: center; justify-content: center; }
+  .row > .c-actions { grid-area: actions; grid-row: 1 / span 3; align-self: center; justify-content: center; padding: 0; }
   .act { display: none; }
-  .more { display: grid; width: 44px; height: 44px; }
+  .c-actions .icon-btn.more { width: 44px; height: 44px; opacity: 1; }
 }
 </style>

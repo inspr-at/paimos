@@ -109,7 +109,7 @@ func (m *Module) live(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, erro
 	args := []any{LiveWindow.Seconds(), maxLive + 1}
 	if r.URL.Query().Get("include_inactive") == "true" {
 		query = liveSelect + `
- WHERE s.stopped_at IS NULL OR s.stopped_at > now()-interval '24 hours'
+ WHERE s.archived_at IS NULL AND (s.stopped_at IS NULL OR s.stopped_at > now()-interval '24 hours')
  ORDER BY coalesce(s.stopped_at,s.heartbeat_at,s.created_at) DESC,s.id DESC LIMIT $1`
 		args = []any{maxLive + 1}
 	}

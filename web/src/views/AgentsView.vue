@@ -50,7 +50,7 @@ const showConnect = computed(() => !!session.identity && session.identity.princi
 const ticketPeek = inject(TICKET_PEEK, null)
 const ticketPeekOpen = computed(() => !!ticketPeek?.openKey.value)
 const sessionId = computed(() => typeof route.params.sessionId === 'string' ? route.params.sessionId : '')
-const selected = computed(() => agents.views.find(v => v.session.id === sessionId.value))
+const selected = computed(() => [...agents.views, ...agents.removedViews].find(v => v.session.id === sessionId.value))
 const writable = computed(() => can('harness.control'))
 const canResolve = computed(() => session.identity?.principal.kind === 'person' && can('inbox.manage'))
 const canRevoke = computed(() => session.identity?.principal.kind === 'person' && can('approvals.revoke'))
@@ -65,7 +65,7 @@ const summary = computed(() => {
   if (agents.needsCount) parts.push(`${agents.needsCount} ${agents.needsCount === 1 ? 'needs' : 'need'} you`)
   if (agents.sessionsState === 'ready') {
     const trouble = agents.grouped.problem.length + agents.grouped.unresponsive.length
-    const live = agents.sessions.filter(s => s.phase !== 'stopped' && !s.stopped_at).length
+    const live = agents.views.filter(v => v.session.phase !== 'stopped' && !v.session.stopped_at).length
     if (trouble) parts.push(`${trouble} with a problem`)
     if (live) parts.push(`${live} live`)
   }
@@ -282,7 +282,7 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
         <p v-if="agents.approvalsHardError" class="inline-error" role="alert"><AppIcon name="alert" :size="14" />Permission requests could not be loaded: {{ agents.approvalsError }} <button type="button" class="btn sm" @click="agents.refreshApprovals()">Try again</button></p>
         <SessionList
           v-if="agents.loaded"
-          :groups="agents.grouped" :now="agents.now" :cursor="cursor" :selected="sessionId" :state="agents.sessionsUpdatedAt !== null ? 'ready' : agents.sessionsState" :error="agents.sessionsError"
+          :groups="agents.grouped" :removed="agents.removedViews" :now="agents.now" :cursor="cursor" :selected="sessionId" :state="agents.sessionsUpdatedAt !== null ? 'ready' : agents.sessionsState" :error="agents.sessionsError"
           :loaded="agents.loaded" :controls="agents.controls" :can-control="writable" :can-start="canStart"
           @open="openSession" @control="control" @focus-row="id => cursor = id" @retry="agents.loadAll()" @start="startDialog?.open()"
         />
@@ -293,7 +293,7 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
           <summary class="accounts-summary"><AppIcon name="gauge" :size="15" /><span>Accounts and pacing</span><AppIcon class="disclosure-chev" name="chevron-right" :size="15" /></summary>
           <AccountsCard :accounts="agents.accounts" :state="agents.accountsUpdatedAt !== null ? 'ready' : agents.accountsState" :now="agents.now" :admin="agents.accountsState === 'ready'" :set="setAccount" @allowance-created="refreshAllowance()" />
         </details>
-        <p v-if="agents.loaded && (agents.sessions.length || agents.pending.length)" class="hint" aria-hidden="true">
+        <p v-if="agents.loaded && (agents.views.length || agents.pending.length)" class="hint" aria-hidden="true">
           <kbd class="keycap">j</kbd><kbd class="keycap">k</kbd> move · <kbd class="keycap"><AppIcon name="enter" /></kbd> open · <kbd class="keycap">a</kbd> approve · <kbd class="keycap">d</kbd> deny
         </p>
       </div>
