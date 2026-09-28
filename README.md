@@ -171,8 +171,21 @@ Preview output includes exact body hash/version/size and an AEON-219 provenance
 payload. `--rules-record-received SESSION_UUID --rules-worker-lease-file PATH`
 explicitly posts it to an existing owned harness generation. This records receipt,
 not execution; `execution_verified` remains false. It does not mint a registered
-harness session. Stub installation, automatic registration, rollout comparison,
-template import/export and UI are separate coordinator-owned work.
+harness session. Stub installation, automatic registration, template import/export
+and UI remain separate coordinator-owned work.
+
+`aeon rules-compare` (the same verb on `paimos`) is the one-time offline check.
+Pass each instruction file with `--file` and an explicit `--context`. Optional
+`--merged` is a saved AR1 merged-rules JSON document; optional `--provenance` is
+a saved AEON-219 provenance JSON document. Both are read as private `.json`
+files. The report prints supplied raw SHA-256 values, the merge body hash and
+version vector, harness context, lineage links, differences and unresolved
+items. A provenance digest proves recorded bytes only when it equals a supplied
+file's raw SHA-256. A matching logical name, or a normalized line hash, is not
+that proof. The report never claims a model loaded or obeyed the instructions,
+never waits, and never replaces `AGENTS.md` or `CLAUDE.md`. Until a published
+merged layer and locked floor are supplied, rollout stays blocked; the command
+still prints the supplied hashes and the exact next invocation.
 
 ## UI shell (P0.5 / AEON-10)
 
