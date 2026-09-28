@@ -122,16 +122,20 @@ export function isActiveSession(agent: Pick<LiveAgent, 'phase' | 'stopped_at' | 
   return true
 }
 
-// The sessions a project pill, its summary and its popover may count. The same
-// session is kept once, in the order the caller already chose.
+// The sessions a project pill, its summary and its popover may count. A known
+// session id is kept once, in the order the caller already chose. A missing or
+// blank id is not identity: the same harness and start can still be two live
+// sessions, so both stay in the count.
 export function activeSessions(agents: LiveAgent[]): LiveAgent[] {
   const seen = new Set<string>()
   const active: LiveAgent[] = []
   for (const agent of agents) {
     if (!isActiveSession(agent)) continue
-    const key = agentKey(agent)
-    if (seen.has(key)) continue
-    seen.add(key)
+    const id = agent.session_id?.trim()
+    if (id) {
+      if (seen.has(id)) continue
+      seen.add(id)
+    }
     active.push(agent)
   }
   return active

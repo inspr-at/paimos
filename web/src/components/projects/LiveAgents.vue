@@ -4,7 +4,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, useId, watch } fro
 import { RouterLink } from 'vue-router'
 import { absoluteTime } from '../../lib/work'
 import { harnessLabel } from '../../lib/agentState'
-import { activeAgentLabel, activeSessions, agentKey, chipText, elapsedFor, liveSummary, phaseLabel, who, type LiveAgent } from '../../lib/liveAgents'
+import { activeAgentLabel, activeSessions, chipText, elapsedFor, liveSummary, phaseLabel, who, type LiveAgent } from '../../lib/liveAgents'
 import { useLiveAgents } from '../../stores/liveAgents'
 import { useProjects } from '../../stores/projects'
 import AppIcon from '../AppIcon.vue'
@@ -148,7 +148,7 @@ onBeforeUnmount(() => {
       :aria-label="`${summary}. Who works on what`" @click="toggle" @pointerenter="enter" @pointerleave="leave" @focusin="focusIn" @focusout="focusOut"
     >
       <span class="faces">
-        <LiveBot v-for="(agent, i) in faces" :key="agentKey(agent)" :id="agent.principal_id" :index="i" :lead="i === 0" class="face" :state="agent.state" :label="phaseLabel(agent)" :harness="agent.harness" :event-pulse="live.eventPulseFor(agent)" :size="20" />
+        <LiveBot v-for="(agent, i) in faces" :key="agent.session_id?.trim() || `anon-${i}`" :id="agent.principal_id" :index="i" :lead="i === 0" class="face" :state="agent.state" :label="phaseLabel(agent)" :harness="agent.harness" :event-pulse="live.eventPulseFor(agent)" :size="20" />
         <span v-if="shown.length > 1" class="count mono">{{ shown.length }}</span>
       </span>
       <span v-if="variant === 'card'" class="words">

@@ -220,6 +220,23 @@ test('project pills count sessions still in progress, once, and leave stopped hi
   assert.equal(liveChanges(before, after, () => 'Pill'), 'No agent is working on Pill any more.')
 })
 
+test('two anonymous sessions with the same harness and start both count; a known session id counts once', () => {
+  const since = ago(40)
+  const anonymous = () => agent({
+    session_id: undefined, principal_id: undefined, name: undefined, display_label: undefined, harness: 'codex', since, ticket: null,
+  })
+  const blank = agent({ session_id: '  ', principal_id: undefined, name: undefined, harness: 'codex', since, ticket: null })
+  const known = agent({ session_id: 'known', name: 'named', harness: 'claude', since })
+  const knownAgain = agent({ session_id: 'known', name: 'named-again', harness: 'claude', since })
+  const listed = activeSessions([anonymous(), anonymous(), blank, known, knownAgain])
+  assert.equal(listed.length, 4)
+  assert.equal(listed.filter(a => !a.session_id?.trim()).length, 3)
+  assert.equal(listed.filter(a => a.session_id === 'known').length, 1)
+  assert.equal(liveSummary(listed), '4 agents working: Codex agent, Codex agent, Codex agent, named on HAUSV-887')
+  assert.equal(activeAgentLabel(listed.length), '4 active agents')
+  assert.equal(chipText(listed).more, 3)
+})
+
 test('project labels and equality retain safe attention reason changes', () => {
   const approval = agent({ state: 'waiting', needs_attention: true, attention_reasons: [{ kind: 'approval', scope: 'run', actor: 'person', count: 1, blocking: true, location: 'approvals' }] })
   assert.equal(phaseLabel(approval), 'Awaiting approval')
