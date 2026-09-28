@@ -21,22 +21,26 @@ func attachPeerPID(fd int) (int, error) {
 	}
 	return int(u.Pid), nil
 }
-func linuxAttachStat(raw []byte) (start string, parent int, tty bool, err error) {
+func linuxAttachStat(raw []byte) (start string, parent, session int, tty bool, err error) {
 	// comm may itself contain spaces and parentheses; fields after its LAST ')' are fixed.
 	end := strings.LastIndexByte(string(raw), ')')
 	if end < 0 {
-		return "", 0, false, errors.New("invalid process stat")
+		return "", 0, 0, false, errors.New("invalid process stat")
 	}
 	fields := strings.Fields(string(raw[end+1:]))
 	if len(fields) < 20 || fields[0] == "Z" {
-		return "", 0, false, errors.New("process unavailable")
+		return "", 0, 0, false, errors.New("process unavailable")
 	}
 	parent, err = strconv.Atoi(fields[1])
 	if err != nil {
 		return
 	}
+	session, err = strconv.Atoi(fields[3])
+	if err != nil || session < 1 {
+		return "", 0, 0, false, errors.New("invalid process session")
+	}
 	_, err = strconv.ParseUint(fields[19], 10, 64)
-	return fields[19], parent, fields[4] != "0", err
+	return fields[19], parent, session, fields[4] != "0", err
 }
 func observeAttachProcess(pid int) (attachObservation, error) {
 	fail := errors.New("kernel process identity unavailable")
@@ -45,7 +49,7 @@ func observeAttachProcess(pid int) (attachObservation, error) {
 	if err != nil {
 		return attachObservation{}, fail
 	}
-	start, parent, tty, err := linuxAttachStat(raw)
+	start, parent, session, tty, err := linuxAttachStat(raw)
 	if err != nil {
 		return attachObservation{}, fail
 	}
@@ -65,9 +69,9 @@ func observeAttachProcess(pid int) (attachObservation, error) {
 	if err != nil {
 		return attachObservation{}, fail
 	}
-	again, _, _, err := linuxAttachStat(after)
-	if err != nil || again != start {
+	again, lastParent, lastSession, lastTTY, err := linuxAttachStat(after)
+	if err != nil || again != start || parent != lastParent || session != lastSession || tty != lastTTY {
 		return attachObservation{}, fail
 	}
-	return attachObservation{Process: attachwatch.Process{PID: pid, UID: int(st.Uid), Started: start, Executable: exe, CWD: cwd}, Parent: parent, TTY: tty}, nil
+	return attachObservation{Process: attachwatch.Process{PID: pid, UID: int(st.Uid), Started: start, Executable: exe, CWD: cwd}, Parent: parent, Session: session, TTY: tty}, nil
 }

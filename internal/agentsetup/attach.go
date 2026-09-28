@@ -3,8 +3,9 @@ package agentsetup
 
 import "errors"
 
-// ReadAttachProof is daemon-only: it binds the independent lifecycle proof and
-// public hostname to the already approved runtime. Never return this to a CLI
+// ReadAttachProof is for daemon-start registration only: it binds the lifecycle
+// proof and public hostname to the already approved runtime. It is readable by
+// same-user code, so it must never authorize watch exchanges. Never return it to a CLI
 // client, put it in a process argument, or include it in diagnostics.
 func ReadAttachProof(root string, c RuntimeConfig) (host string, proof secret, err error) {
 	store, err := OpenStore(root, false)

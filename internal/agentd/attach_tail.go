@@ -1,7 +1,6 @@
 //go:build darwin || linux
 
 // SPDX-License-Identifier: AGPL-3.0-only
-//
 package agentd
 
 import (
@@ -149,6 +148,8 @@ func (t *attachTail) next() (string, error) {
 
 var attachSensitive = regexp.MustCompile(`(?i)(api[ _-]?key|access[ _-]?token|refresh[ _-]?token|authorization|bearer[ :]+|password|passwd|client[ _-]?secret|private[ _-]?key|device[ _-]?proof|lifecycle[ _-]?secret|aeon_[a-z0-9_]+|sk-[a-z0-9_-]+|gh[pousr]_[a-z0-9_]+|AKIA[A-Z0-9]+)`)
 var attachEnv = regexp.MustCompile(`(?:^|[^A-Za-z0-9_])[A-Z_][A-Z0-9_]*\s*=\s*\S`)
+var attachAssignment = regexp.MustCompile(`(?i)(?:^|[^A-Za-z0-9_])(?:secret|token)[\s"']*[:=]`)
+var attachURLUserinfo = regexp.MustCompile(`(?i)(?:[a-z][a-z0-9+.-]*:)?//[^\s/?#]*@`)
 var attachOpaque = regexp.MustCompile(`[A-Za-z0-9+/=_-]{32,}`)
 
 type attachRedactor struct{ privateKey bool }
@@ -161,6 +162,11 @@ func (r *attachRedactor) line(raw []byte) (string, bool) {
 	if strings.Contains(s, "-----BEGIN ") {
 		r.privateKey = true
 	}
+	// Combining marks can split both keywords and opaque-token matches. Drop
+	// the entire line rather than normalize and risk displaying a split secret.
+	if strings.ContainsFunc(s, func(v rune) bool { return unicode.In(v, unicode.Mn) }) {
+		return "", false
+	}
 	if r.privateKey {
 		if strings.Contains(s, "-----END ") {
 			r.privateKey = false
@@ -168,7 +174,7 @@ func (r *attachRedactor) line(raw []byte) (string, bool) {
 		return "[redacted]", true
 	}
 	// Dropping the whole record prevents partially redacted JSON or split values.
-	if attachSensitive.MatchString(s) || attachEnv.MatchString(s) || attachOpaque.MatchString(s) {
+	if attachSensitive.MatchString(s) || attachEnv.MatchString(s) || attachAssignment.MatchString(s) || attachURLUserinfo.MatchString(s) || attachOpaque.MatchString(s) {
 		return "[redacted]", true
 	}
 	for _, v := range s {

@@ -35,6 +35,10 @@ func observeAttachProcess(pid int) (attachObservation, error) {
 	if err != nil || first.Proc.P_pid != int32(pid) || first.Proc.P_stat == 5 {
 		return attachObservation{}, fmt.Errorf("%w: sysctl %v", fail, err)
 	}
+	session, err := unix.Getsid(pid)
+	if err != nil || session < 1 {
+		return attachObservation{}, fail
+	}
 	exe := make([]byte, 4096)
 	n, err := attachProcInfo(pid, 11, exe)
 	// libproc proc_pidpath treats any non-error as success, then uses strlen.
@@ -63,8 +67,9 @@ func observeAttachProcess(pid int) (attachObservation, error) {
 		return attachObservation{}, fail
 	}
 	last, err := unix.SysctlKinfoProc("kern.proc.pid", pid)
-	if err != nil || last.Proc.P_starttime != first.Proc.P_starttime || last.Eproc.Ucred.Uid != first.Eproc.Ucred.Uid {
+	lastSession, sessionErr := unix.Getsid(pid)
+	if err != nil || sessionErr != nil || session != lastSession || last.Proc.P_starttime != first.Proc.P_starttime || last.Eproc.Ucred.Uid != first.Eproc.Ucred.Uid || last.Eproc.Ppid != first.Eproc.Ppid || last.Eproc.Tdev != first.Eproc.Tdev {
 		return attachObservation{}, fail
 	}
-	return attachObservation{Process: attachwatch.Process{PID: pid, UID: int(first.Eproc.Ucred.Uid), Started: fmt.Sprintf("%d:%d", first.Proc.P_starttime.Sec, first.Proc.P_starttime.Usec), Executable: executable, CWD: cwd}, Parent: int(first.Eproc.Ppid), TTY: first.Eproc.Tdev != -1}, nil
+	return attachObservation{Process: attachwatch.Process{PID: pid, UID: int(first.Eproc.Ucred.Uid), Started: fmt.Sprintf("%d:%d", first.Proc.P_starttime.Sec, first.Proc.P_starttime.Usec), Executable: executable, CWD: cwd}, Parent: int(first.Eproc.Ppid), Session: session, TTY: first.Eproc.Tdev != -1}, nil
 }

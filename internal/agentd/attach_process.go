@@ -14,8 +14,9 @@ import (
 
 type attachObservation struct {
 	attachwatch.Process
-	Parent int
-	TTY    bool
+	Parent  int
+	Session int
+	TTY     bool
 }
 type attachPeerKey struct{}
 
@@ -58,19 +59,30 @@ func attachPeer(r *http.Request) (attachObservation, error) {
 // An injected command launched beneath the selected agent cannot approve it.
 // This is defense in depth, not a boundary against unrestricted same-UID code.
 func independentAttachPeer(peer, target attachObservation, observe func(int) (attachObservation, error)) bool {
-	if peer.UID != target.UID {
+	current, err := observe(peer.PID)
+	if err != nil || current.Process != peer.Process || current.UID != target.UID || !current.TTY || current.Session <= 1 || current.Session == current.PID {
 		return false
 	}
-	pid := peer.PID
+	leader, err := observe(current.Session)
+	if err != nil || leader.PID != current.Session || leader.Session != current.Session {
+		return false
+	}
+	// A double fork can hide the parent chain, but a setsid/pty helper either
+	// leads its own session or still belongs to the attacker's (possibly dead)
+	// session leader. Both ancestry walks must remain independent on every poll.
+	return independentAttachAncestry(current.PID, target.PID, observe) && independentAttachAncestry(leader.PID, target.PID, observe)
+}
+
+func independentAttachAncestry(pid, target int, observe func(int) (attachObservation, error)) bool {
 	for i := 0; i < 128 && pid > 1; i++ {
-		if pid == target.PID {
+		if pid == target {
 			return false
 		}
 		p, err := observe(pid)
-		if err != nil || p.Parent == pid {
+		if err != nil || p.PID != pid || p.Parent < 1 || p.Parent == pid {
 			return false
 		}
 		pid = p.Parent
 	}
-	return pid <= 1
+	return pid == 1
 }

@@ -1,7 +1,6 @@
 //go:build darwin || linux
 
 // SPDX-License-Identifier: AGPL-3.0-only
-//
 package agentd
 
 import (
@@ -154,7 +153,8 @@ func TestAttachLocalConsentPeerPollAndNoReplay(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	peer := attachObservation{Process: attachwatch.Process{PID: 3000, UID: os.Getuid(), Started: "cli-start", Executable: exe, CWD: root}, Parent: 1, TTY: true}
+	peer := attachObservation{Process: attachwatch.Process{PID: 3000, UID: os.Getuid(), Started: "cli-start", Executable: exe, CWD: root}, Parent: 2000, Session: 2000, TTY: true}
+	leader := attachObservation{Process: attachwatch.Process{PID: 2000, UID: os.Getuid(), Started: "terminal-start", Executable: exe, CWD: root}, Parent: 1, Session: 2000, TTY: true}
 	target := attachObservation{Process: attachwatch.Process{PID: 4000, UID: os.Getuid(), Started: "agent-start", Executable: exe, CWD: root}, Parent: 1, TTY: true}
 	var sent []attachwatch.DeviceRequest
 	failNetwork := false
@@ -183,6 +183,9 @@ func TestAttachLocalConsentPeerPollAndNoReplay(t *testing.T) {
 		}
 		if pid == peer.PID {
 			return peer, nil
+		}
+		if pid == leader.PID {
+			return leader, nil
 		}
 		return attachObservation{}, errors.New("unknown fixture PID")
 	}
@@ -278,5 +281,162 @@ func TestAttachBearerAloneCannotJoin(t *testing.T) {
 	m.serve(w, r, "fixture-local-token")
 	if w.Code != 403 {
 		t.Fatal("readable same-user bearer bypassed kernel peer checks")
+	}
+}
+
+func TestAttachSessionAncestryRejectsPTYBypasses(t *testing.T) {
+	for _, attack := range []string{"independent terminal", "injected child", "setsid helper", "double fork dead leader", "target session", "descendant session leader", "lost tty", "ancestry cycle"} {
+		t.Run(attack, func(t *testing.T) {
+			peer := attachObservation{Process: attachwatch.Process{PID: 30, UID: 10}, Parent: 20, Session: 20, TTY: true}
+			target := attachObservation{Process: attachwatch.Process{PID: 40, UID: 10}, Parent: 1, Session: 40, TTY: true}
+			leader := attachObservation{Process: attachwatch.Process{PID: 20, UID: 10}, Parent: 1, Session: 20, TTY: true}
+			switch attack {
+			case "injected child":
+				peer.Parent = target.PID
+			case "setsid helper":
+				peer.Parent, peer.Session = 1, peer.PID
+			case "double fork dead leader":
+				peer.Parent, peer.Session = 1, 99
+			case "target session":
+				peer.Parent, peer.Session = 1, target.PID
+			case "descendant session leader":
+				peer.Parent, leader.Parent = 1, target.PID
+			case "lost tty":
+				peer.TTY = false
+			case "ancestry cycle":
+				leader.Parent = peer.PID
+			}
+			observe := func(pid int) (attachObservation, error) {
+				for _, p := range []attachObservation{peer, target, leader} {
+					if p.PID == pid {
+						return p, nil
+					}
+				}
+				return attachObservation{}, errors.New("dead fixture process")
+			}
+			if got := independentAttachPeer(peer, target, observe); got != (attack == "independent terminal") {
+				t.Fatal("helper ancestry/session decision incorrect")
+			}
+		})
+	}
+}
+
+func TestAttachRechecksAncestryAndSessionOnConfirmAndEveryPoll(t *testing.T) {
+	for _, stage := range []string{"confirm", "activation", "upload"} {
+		for _, attack := range []string{"parent becomes target", "setsid", "dead leader", "leader becomes target child"} {
+			t.Run(stage+"/"+attack, func(t *testing.T) {
+				path := attachFixtureFile(t, "")
+				exe, err := os.Executable()
+				if err != nil {
+					t.Fatal(err)
+				}
+				exe, err = filepath.EvalSymlinks(exe)
+				if err != nil {
+					t.Fatal(err)
+				}
+				root := filepath.Dir(path)
+				peer := attachObservation{Process: attachwatch.Process{PID: 30, UID: os.Getuid(), Started: "helper", Executable: exe, CWD: root}, Parent: 20, Session: 20, TTY: true}
+				leader := attachObservation{Process: attachwatch.Process{PID: 20, UID: os.Getuid()}, Parent: 1, Session: 20, TTY: true}
+				target := attachObservation{Process: attachwatch.Process{PID: 40, UID: os.Getuid(), Started: "target", Executable: exe, CWD: root}, Parent: 1}
+				dead := false
+				var sent []attachwatch.DeviceRequest
+				m, err := NewAttachManager(AttachConfig{Origin: "https://paired.test", ComputerID: "11111111-1111-4111-8111-111111111111", Host: "fixture", Workspace: root, Executables: map[string]string{"codex": exe}, Exchange: func(_ context.Context, in attachwatch.DeviceRequest) (attachwatch.View, error) {
+					sent = append(sent, in)
+					state := "pending"
+					if in.Operation == "poll" {
+						state = "active"
+					}
+					return attachwatch.View{RequestID: in.RequestID, Digest: in.Digest, Snapshot: in.Snapshot, State: state}, nil
+				}})
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer m.Close(t.Context())
+				m.observe = func(pid int) (attachObservation, error) {
+					for _, p := range []attachObservation{peer, target, leader} {
+						if pid == p.PID && !(dead && pid == leader.PID) {
+							return p, nil
+						}
+					}
+					return attachObservation{}, errors.New("dead fixture process")
+				}
+				v, err := m.handle(t.Context(), peer, AttachLocalRequest{Operation: "preview", PID: target.PID, Harness: "codex", ProjectID: "22222222-2222-4222-8222-222222222222", TicketID: "33333333-3333-4333-8333-333333333333", Transcript: path})
+				if err != nil {
+					t.Fatal(err)
+				}
+				op := "confirm"
+				if stage != "confirm" {
+					if _, err = m.handle(t.Context(), peer, AttachLocalRequest{Operation: op, ID: v.ID, Digest: v.Digest}); err != nil {
+						t.Fatal(err)
+					}
+					op = "poll"
+				}
+				if stage == "upload" {
+					m.sessions[v.ID].touched = time.Now().Add(-2 * time.Second)
+					if _, err = m.handle(t.Context(), peer, AttachLocalRequest{Operation: op, ID: v.ID, Digest: v.Digest}); err != nil {
+						t.Fatal(err)
+					}
+					appendAttach(t, path, "must never upload\n")
+				}
+				sent = nil
+				switch attack {
+				case "parent becomes target":
+					peer.Parent = target.PID
+				case "setsid":
+					peer.Parent, peer.Session = 1, peer.PID
+				case "dead leader":
+					peer.Parent, dead = 1, true
+				case "leader becomes target child":
+					peer.Parent, leader.Parent = 1, target.PID
+				}
+				m.sessions[v.ID].touched = time.Now().Add(-2 * time.Second)
+				if _, err = m.handle(t.Context(), peer, AttachLocalRequest{Operation: op, ID: v.ID, Digest: v.Digest}); err == nil || len(m.sessions) != 0 {
+					t.Fatal("changed helper ancestry retained watch")
+				}
+				for _, request := range sent {
+					if request.Operation != "detach" || request.Text != "" {
+						t.Fatal("unsafe helper requested or fed watch")
+					}
+				}
+			})
+		}
+	}
+}
+
+func TestAttachRedactionCredentialVariants(t *testing.T) {
+	for _, line := range []string{
+		"apiKey=fixture", "accessToken: fixture", "refreshToken=fixture", "clientSecret: fixture", "privateKey=fixture",
+		"secret=fixture", "token = fixture", `"token": "fixture"`, `setting {'secret': 'fixture'}`,
+		"postgres://reader:fixture@db.test/app", "https://reader@host.test/path", "//reader:fixture@host.test/", "ssh://reader:fixture@host.test",
+	} {
+		t.Run(line, func(t *testing.T) {
+			for _, structured := range []bool{false, true} {
+				raw := []byte(line)
+				if structured {
+					raw, _ = json.Marshal(map[string]any{"type": "assistant", "message": map[string]string{"content": line}})
+				}
+				var r attachRedactor
+				if text, ok := r.record(raw); !ok || text != "[redacted]" {
+					t.Fatal("credential variant not redacted")
+				}
+			}
+		})
+	}
+	for _, line := range []string{"api\u0301Key=fixture", "to\u034fen=fixture", strings.Repeat("abcdefgh\u0301", 8), "innocent e\u0301 text"} {
+		var r attachRedactor
+		if text, ok := r.record([]byte(line)); ok || text != "" {
+			t.Fatal("nonspacing mark line was displayed")
+		}
+		raw, _ := json.Marshal(map[string]any{"type": "assistant", "message": map[string]string{"content": line}})
+		if text, ok := r.record(raw); ok || text != "" {
+			t.Fatal("JSON nonspacing mark line was displayed")
+		}
+	}
+	var r attachRedactor
+	if _, ok := r.line([]byte("-----BEGIN PRIVATE KEY-----\u0301")); ok {
+		t.Fatal("nonspacing mark header displayed")
+	}
+	if text, ok := r.line([]byte("short fixture key body")); !ok || text != "[redacted]" {
+		t.Fatal("dropped header lost private-key redaction state")
 	}
 }

@@ -70,10 +70,10 @@ onBeforeUnmount(() => { close(); stopAccess() })
           <dt>Process</dt><dd>PID {{ review.snapshot.process.pid }} · UID {{ review.snapshot.process.uid }}</dd>
           <dt>Executable</dt><dd class="path">{{ review.snapshot.process.executable }}</dd>
           <dt>Started</dt><dd class="path">{{ review.snapshot.process.started }}</dd>
-        </dl>
-        <details><summary><AppIcon name="chevron-right" class="disclosure-chev" :size="12" />Transcript and approval details</summary><dl>
           <dt>Transcript</dt><dd class="path">{{ review.snapshot.transcript }}</dd>
           <dt>File identity</dt><dd class="path">{{ review.snapshot.file_id }}</dd>
+        </dl>
+        <details><summary><AppIcon name="chevron-right" class="disclosure-chev" :size="12" />Approval details</summary><dl>
           <dt>Project ID</dt><dd class="path">{{ review.snapshot.project_id }}</dd>
           <dt>Ticket ID</dt><dd class="path">{{ review.snapshot.ticket_id }}</dd>
           <dt>Snapshot</dt><dd class="path">{{ review.request_digest }}</dd>

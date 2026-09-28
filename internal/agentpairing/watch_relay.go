@@ -76,7 +76,7 @@ func inertText(s string) bool {
 		return false
 	}
 	for _, r := range s {
-		if unicode.IsControl(r) && r != '\n' && r != '\t' || unicode.In(r, unicode.Cf) {
+		if unicode.IsControl(r) && r != '\n' && r != '\t' || unicode.In(r, unicode.Cf, unicode.Mn) {
 			return false
 		}
 	}

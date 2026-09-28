@@ -30,6 +30,7 @@ type Module struct {
 	mu                    sync.Mutex
 	clients               map[string]rate
 	watch                 watchRelay
+	watchKeys             watchPollKeys
 }
 type rate struct {
 	start time.Time

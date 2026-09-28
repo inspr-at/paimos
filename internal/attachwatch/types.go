@@ -58,10 +58,11 @@ type DeviceRequest struct {
 	Operation   string   `json:"operation"`
 	RequestID   string   `json:"request_id"`
 	ComputerID  string   `json:"computer_id"`
-	DeviceProof string   `json:"device_proof"`
+	DeviceProof string   `json:"device_proof,omitempty"`
+	PollKey     string   `json:"poll_key"`
 	Snapshot    Snapshot `json:"snapshot"`
 	Digest      string   `json:"request_digest"`
-	Sequence    int64    `json:"sequence"`
+	Sequence    int64    `json:"sequence,omitempty"`
 	Text        string   `json:"text,omitempty"`
 }
 type View struct {

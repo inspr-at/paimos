@@ -145,7 +145,7 @@ func (m *AttachManager) handle(ctx context.Context, peer attachObservation, in A
 		return m.localView(in.ID, s), nil
 	}
 	observed, err := m.observe(s.snapshot.Process.PID)
-	if err != nil || observed.Process != s.snapshot.Process || s.tail.check() != nil || in.Digest != s.snapshot.Digest() {
+	if err != nil || observed.Process != s.snapshot.Process || !independentAttachPeer(peer, observed, m.observe) || s.tail.check() != nil || in.Digest != s.snapshot.Digest() {
 		m.end(ctx, in.ID, s)
 		return AttachLocalView{}, errors.New("identity changed; watch detached")
 	}
@@ -187,7 +187,7 @@ func (m *AttachManager) handle(ctx context.Context, peer attachObservation, in A
 		}
 	}
 	observed, err = m.observe(s.snapshot.Process.PID)
-	if err != nil || observed.Process != s.snapshot.Process || s.tail.check() != nil {
+	if err != nil || observed.Process != s.snapshot.Process || !independentAttachPeer(peer, observed, m.observe) || s.tail.check() != nil {
 		m.end(ctx, in.ID, s)
 		return AttachLocalView{}, errors.New("identity changed; watch detached")
 	}

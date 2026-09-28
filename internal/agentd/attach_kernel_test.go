@@ -33,7 +33,7 @@ func TestAttachKernelSelfAndSocketPeer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if p.PID != os.Getpid() || p.UID != os.Getuid() || p.CWD != cwd || p.Executable != exe || p.Started == "" {
+	if p.PID != os.Getpid() || p.UID != os.Getuid() || p.CWD != cwd || p.Executable != exe || p.Started == "" || p.Session < 1 {
 		t.Fatal("kernel observation does not match test process")
 	}
 	root, err := os.MkdirTemp("/tmp", "attach-peer-")

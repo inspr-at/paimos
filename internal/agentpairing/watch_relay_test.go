@@ -40,7 +40,7 @@ func TestWatchRelayNoHistoryIsolationAndBounds(t *testing.T) {
 	if b.count != 2 {
 		t.Fatal("viewer quota leaked")
 	}
-	for _, bad := range []string{"\x1b[31mred", "\u202etext", "\x00", "\xff"} {
+	for _, bad := range []string{"\x1b[31mred", "\u202etext", "\x00", "\xff", "api\u0301Key=fixture"} {
 		if inertText(bad) {
 			t.Fatal("active/control text accepted")
 		}

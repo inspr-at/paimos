@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"math/big"
 	"net/http"
+	"sync"
 
 	"github.com/inspr-at/paimos/internal/attachwatch"
 	"github.com/inspr-at/paimos/internal/authz"
@@ -18,6 +19,47 @@ import (
 	"github.com/inspr-at/paimos/internal/workorders"
 	"github.com/jackc/pgx/v5"
 )
+
+// Poll authority is intentionally absent from pairing.json and every database
+// row. Losing either process's memory requires registration and fresh consent.
+// Serialize registration against exchanges through commit and relay publication.
+type watchPollKeys struct {
+	sync.RWMutex
+	hashes map[string]string
+}
+
+func (m *Module) registerWatchKey(ctx context.Context, p tenant.Principal, in attachwatch.DeviceRequest) error {
+	if !hashRE.MatchString(in.PollKey) || !hashRE.MatchString(in.DeviceProof) || in.PollKey == in.DeviceProof || in.Text != "" {
+		return fail(403, "forbidden", "fresh daemon poll key required")
+	}
+	m.watchKeys.Lock()
+	defer m.watchKeys.Unlock()
+	key := p.TenantID + "/" + in.ComputerID
+	if _, exists := m.watchKeys.hashes[key]; !exists && len(m.watchKeys.hashes) >= 4096 {
+		return fail(429, "rate_limited", "daemon registration capacity reached")
+	}
+	err := m.in(ctx, p.TenantID, func(tx pgx.Tx) error {
+		_, principal, _, _, proof, err := attachComputer(ctx, tx, in.ComputerID)
+		if err != nil || principal != p.ID || subtle.ConstantTimeCompare([]byte(proof), []byte(digest(in.DeviceProof))) != 1 {
+			return fail(403, "forbidden", "computer proof rejected")
+		}
+		// Even a caller holding the lifecycle proof cannot take over a previous
+		// approval by registering another key. No pending/approved watch survives.
+		_, err = tx.Exec(ctx, `WITH ended AS (
+ UPDATE harness_attach_requests SET state='detached',lease_until=NULL
+ WHERE computer_id=$1 AND state IN ('pending','approved','active') RETURNING session_id)
+ UPDATE harness_sessions SET phase='stopped',stopped_at=coalesce(stopped_at,clock_timestamp()),
+ stop_reason='watch daemon restarted; process exit unconfirmed' WHERE id IN (SELECT session_id FROM ended)`, in.ComputerID)
+		return err
+	})
+	if err == nil {
+		if m.watchKeys.hashes == nil {
+			m.watchKeys.hashes = make(map[string]string)
+		}
+		m.watchKeys.hashes[key] = digest(in.PollKey)
+	}
+	return err
+}
 
 func (m *Module) mountWatch(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/agent-pairing/attach", m.attachDevice)
@@ -104,7 +146,28 @@ func (m *Module) attachDevice(w http.ResponseWriter, r *http.Request) {
 	var in attachwatch.DeviceRequest
 	// JSON escapes can expand a bounded text record sixfold.
 	r.Body = http.MaxBytesReader(w, r.Body, 128<<10)
-	if workorders.Decode(r, &in) != nil || !uuidRE.MatchString(in.RequestID) || !uuidRE.MatchString(in.ComputerID) || !hashRE.MatchString(in.DeviceProof) || len(in.Text) > attachwatch.MaxText || !inertText(in.Text) {
+	if workorders.Decode(r, &in) != nil || !uuidRE.MatchString(in.ComputerID) || len(in.Text) > attachwatch.MaxText || !inertText(in.Text) {
+		WriteError(w, fail(400, "invalid_request", "invalid attach request"))
+		return
+	}
+	if in.Operation == "register" {
+		if err := m.registerWatchKey(r.Context(), p, in); err != nil {
+			WriteError(w, err)
+			return
+		}
+		reply(w, map[string]string{"state": "registered"})
+		return
+	}
+	// Authenticate before processing watch IDs, snapshots, leases or text. A
+	// readable long-lived lifecycle proof conveys no watch authority.
+	m.watchKeys.RLock()
+	defer m.watchKeys.RUnlock()
+	expected := m.watchKeys.hashes[p.TenantID+"/"+in.ComputerID]
+	if !hashRE.MatchString(in.PollKey) || expected == "" || subtle.ConstantTimeCompare([]byte(expected), []byte(digest(in.PollKey))) != 1 {
+		WriteError(w, fail(403, "forbidden", "daemon poll key rejected"))
+		return
+	}
+	if !uuidRE.MatchString(in.RequestID) {
 		WriteError(w, fail(400, "invalid_request", "invalid attach request"))
 		return
 	}
@@ -123,12 +186,15 @@ func (m *Module) attachDevice(w http.ResponseWriter, r *http.Request) {
 	var publish string
 	err := m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
 		ctx := r.Context()
-		owner, principal, host, workspace, proof, err := attachComputer(ctx, tx, in.ComputerID)
-		if err != nil || principal != p.ID || subtle.ConstantTimeCompare([]byte(proof), []byte(digest(in.DeviceProof))) != 1 {
+		owner, principal, host, workspace, _, err := attachComputer(ctx, tx, in.ComputerID)
+		if err != nil || principal != p.ID {
 			return fail(403, "forbidden", "computer proof rejected")
 		}
 		if in.Operation == "request" {
 			s := in.Snapshot
+			if in.Digest != s.Digest() {
+				return fail(409, "conflict", "snapshot digest required")
+			}
 			if !s.Valid() || s.ComputerID != in.ComputerID || !uuidRE.MatchString(s.ProjectID) || !uuidRE.MatchString(s.TicketID) || s.Host != host || !attachwatch.Within(workspace, s.Process.CWD) || in.Text != "" {
 				return fail(400, "invalid_request", "invalid snapshot or cwd outside approved workspace")
 			}
@@ -176,9 +242,6 @@ func (m *Module) attachDevice(w http.ResponseWriter, r *http.Request) {
 		if out.Snapshot.ComputerID != in.ComputerID || owner != approvedOwner || host != out.Snapshot.Host || !attachwatch.Within(workspace, out.Snapshot.Process.CWD) {
 			return fail(403, "forbidden", "attach proof rejected")
 		}
-		if in.Operation == "detach" {
-			return attachEnd(ctx, tx, &out, "detached")
-		}
 		expired, err := attachExpired(ctx, tx, &out)
 		if err != nil {
 			return err
@@ -189,6 +252,9 @@ func (m *Module) attachDevice(w http.ResponseWriter, r *http.Request) {
 		}
 		if in.Digest != out.Digest || in.Snapshot.Digest() != out.Digest {
 			rejected = fail(409, "conflict", "process or approval snapshot changed")
+			return attachEnd(ctx, tx, &out, "detached")
+		}
+		if in.Operation == "detach" {
 			return attachEnd(ctx, tx, &out, "detached")
 		}
 		if err = attachScope(ctx, tx, p.TenantID, owner, out.Snapshot); err != nil {

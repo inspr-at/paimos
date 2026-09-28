@@ -487,8 +487,12 @@ paths:
       operationId: attachDevice
       summary: Paired daemon requests, activates, renews or detaches a read-only watch
       description: >-
-        The single paired-runtime attach route. Requires the paired bearer and independent
-        computer lifecycle proof. Codes never appear in URLs. Activation and every poll
+        The single paired-runtime attach route. At daemon startup, register requires the
+        paired bearer, computer lifecycle proof and a fresh memory-only poll_key. Registration
+        invalidates all earlier watches on that computer, requiring new owner approval.
+        All other operations require the paired bearer and registered poll_key; lifecycle
+        proof alone is rejected. Neither daemon nor server persists the poll key. Codes never
+        appear in URLs. Requests, activation and every poll
         repeat the immutable kernel-observed snapshot. Lease is 60 seconds and cannot
         be resurrected. Text is host-redacted and relayed in memory only, never stored.
       requestBody:
@@ -498,11 +502,18 @@ paths:
             schema: {$ref: '#/components/schemas/AttachDeviceRequest'}
       responses:
         '200':
-          description: Attach state; user_code is returned only to the requesting daemon
+          description: Registration acknowledgement or attach state; user_code is returned only to the requesting daemon
           content:
             application/json:
-              schema: {$ref: '#/components/schemas/AttachView'}
-        '403': {description: Paired computer proof required}
+              schema:
+                oneOf:
+                  - {$ref: '#/components/schemas/AttachView'}
+                  - type: object
+                    required: [state]
+                    additionalProperties: false
+                    properties:
+                      state: {type: string, const: registered}
+        '403': {description: Registered memory-only poll key required; lifecycle proof only authorizes registration}
         '409': {description: Snapshot mismatch or poll sequence rejected}
         '410': {description: Expired or revoked; new owner approval required}
         '429': {description: Attempt or stream quota exceeded}
@@ -4424,14 +4435,22 @@ components:
     AttachDeviceRequest:
       type: object
       additionalProperties: false
-      required: [operation, request_id, computer_id, device_proof]
+      required: [operation, computer_id, poll_key]
+      oneOf:
+        - properties:
+            operation: {const: register}
+          required: [device_proof]
+        - properties:
+            operation: {enum: [request, poll, detach]}
+          required: [request_id, snapshot, request_digest]
       properties:
-        operation: {type: string, enum: [request, poll, detach]}
+        operation: {type: string, enum: [register, request, poll, detach]}
         request_id: {type: string, format: uuid}
         computer_id: {type: string, format: uuid}
-        device_proof: {type: string, writeOnly: true, description: Existing computer lifecycle proof; kept in daemon}
+        device_proof: {type: string, writeOnly: true, description: Existing computer lifecycle proof; registration only, never watch authority}
+        poll_key: {type: string, pattern: '^[a-f0-9]{64}$', writeOnly: true, description: Fresh daemon-start random key held only in memory; required for every operation}
         snapshot: {$ref: '#/components/schemas/AttachSnapshot'}
-        request_digest: {type: string}
+        request_digest: {type: string, description: Required with the snapshot for request, activation, poll and detachment}
         sequence: {type: integer, minimum: 1}
         text: {type: string, maxLength: 16384, description: Host-redacted new complete records only; no persistence or replay}
     AttachView:

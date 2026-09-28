@@ -4,6 +4,8 @@ package main
 import (
 	"bufio"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"flag"
 	"fmt"
@@ -31,9 +33,24 @@ func pairedAttach(root string, c agentsetup.RuntimeConfig, remote *agentd.Remote
 	for _, a := range c.Accounts {
 		paths[a.Harness] = a.Path
 	}
+	// Generated once per daemon start; captured only by the exchange closure.
+	// Never add this key to RuntimeConfig, setup stores, local replies or logs.
+	var key [32]byte
+	if _, err = rand.Read(key[:]); err != nil {
+		return nil, errors.New("cannot create watch poll key")
+	}
+	pollKey := hex.EncodeToString(key[:])
+	clear(key[:])
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	var registered attachwatch.View
+	registration := map[string]string{"operation": "register", "computer_id": c.ComputerID, "device_proof": string(proof), "poll_key": pollKey}
+	if err = remote.Client.Do(ctx, "POST", "/api/agent-pairing/attach", registration, &registered); err != nil || registered.State != "registered" {
+		return nil, errors.New("paired instance refused watch registration")
+	}
 	return agentd.NewAttachManager(agentd.AttachConfig{Origin: c.Origin, ComputerID: c.ComputerID, Host: host, Workspace: c.Workspace, Executables: paths,
 		Exchange: func(ctx context.Context, in attachwatch.DeviceRequest) (attachwatch.View, error) {
-			in.DeviceProof = string(proof)
+			in.PollKey = pollKey
 			var out attachwatch.View
 			err := remote.Client.Do(ctx, "POST", "/api/agent-pairing/attach", in, &out)
 			return out, err

@@ -126,10 +126,18 @@ exact membership source, snapshot capture and offline release-history behavior.
 
 ## Read-only attached watches (AEON-258)
 
-The paired daemon uses only `POST /api/agent-pairing/attach` for requests,
-activation, polls and detachment. It requires the existing runtime key plus the
-computer lifecycle proof, kept inside agentd. The pairing fence permits exactly
-this additional route. The nine-digit code identifies a ten-minute request;
+The paired daemon uses only `POST /api/agent-pairing/attach` for registration,
+requests, activation, polls and detachment. At startup it registers a fresh random
+poll key using the runtime bearer and computer lifecycle proof. The poll key lives
+only in daemon memory; the server retains only its hash in memory. It never enters
+pairing.json, a setup store, a database, local replies or logs. Watch operations
+require that key plus the snapshot digest; pairing.json alone cannot authorize
+them. Registration ends every earlier pending, approved or active watch for that
+computer: a daemon restart requires new local consent and owner approval. Server
+restart loses poll authority too; restart the daemon to register again. Registration
+is serialized with exchanges and cannot transfer an earlier approval to a new key.
+The pairing fence permits exactly this additional route.
+The nine-digit code identifies a ten-minute request;
 owner lookup accepts at most ten attempts per tenant in ten minutes. Codes and
 proofs never go in URLs.
 
@@ -151,7 +159,8 @@ has no replay and keeps only a bounded in-flight delivery per connected viewer;
 slow readers disconnect. Every delivery and idle second rechecks the permission
 and lease. Conversation bytes never enter events, heartbeat metadata or a
 server-side journal. The relay is process-local: multi-server deployments need
-sticky routing for live delivery (there is deliberately no durable broker).
+sticky routing for registration, watch operations and live delivery (there is
+deliberately no durable key store or broker).
 
 The mirror is agent-written, unverified text. Redaction cannot identify every
 form of confidential prose: owners must refuse mixed-trust-context sessions.
@@ -168,7 +177,11 @@ aeon-agentd attach --setup-root /absolute/setup-root --pid 1234 --harness codex 
 ```
 
 The local helper reads consent from its controlling terminal, never stdin or a
-flag. Type `WATCH`, then open the paired instance's Agents page and choose
+flag. It must belong to an existing live terminal session, cannot itself be a
+session leader, and neither its ancestry nor its session leader's ancestry may
+include the target harness. These checks repeat at confirmation and on every
+poll, including immediately before upload. Type `WATCH`, then open the paired
+instance's Agents page and choose
 **Attach session**. Review the code and snapshot, then approve. Keep the terminal
 open; Ctrl-C detaches without signalling the harness. Missing helper polls,
 identity changes, replaced/truncated transcripts, network errors or revocation
@@ -182,6 +195,8 @@ owner-owned regular inode with one hard link. It starts at activation-time EOF,
 bounds reads and records, and never rewinds. Plain lines and recognized
 Claude/Codex JSONL text records are supported; unknown structured/tool records
 are dropped. JSON escapes are decoded before redacting secret patterns,
-environment assignments and private-key blocks. Control/format characters are
+camelCase secret names, lowercase secret/token assignments, URL userinfo,
+environment assignments and private-key blocks. Lines containing Unicode
+nonspacing marks are dropped. Control/format characters are
 rejected. The browser displays text only and clears it on disconnect, permission
 change, hidden tab or navigation; it never reconnects automatically.
