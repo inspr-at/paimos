@@ -20,7 +20,21 @@ import (
 func (rt *runtime) cmdMessagingTell() *Command {
 	var project, message, messageFile, level, reply, thread, key string
 	var expectsReply, action bool
-	return &Command{Name: "tell", Short: "Send a durable message or held action request", Use: "tell <harness:agent|principal-uuid> --project KEY -m TEXT", minArgs: 1, maxArgs: 1,
+	return &Command{Name: "tell", Short: "Send a durable message or inspect its receipt", Use: "tell <harness:agent|principal-uuid> --project KEY -m TEXT | tell status <message-uuid>", minArgs: 1, maxArgs: 1,
+		subs: []*Command{{Name: "status", Short: "Read your message's push receipt", Use: "tell status <message-uuid>", minArgs: 1, maxArgs: 1, run: func(args []string) error {
+			if !validUUID(args[0]) {
+				return usagef("message ID must be a UUID")
+			}
+			receipt, err := rt.tellReceipt(args[0])
+			if err != nil {
+				return err
+			}
+			if rt.jsonOut {
+				return rt.printJSON(receipt)
+			}
+			_, err = fmt.Fprintf(rt.stdout, "message: %s\npush: %s\n", receipt.MessageID, tellReceiptState(receipt))
+			return err
+		}}},
 		addFlags: func(fs *flagSet) {
 			fs.string(&project, "project", 0, "project key (required)")
 			fs.string(&message, "message", 'm', "message text (required)")
@@ -83,23 +97,68 @@ func (rt *runtime) cmdMessagingTell() *Command {
 			if err := rt.do(http.MethodPost, "/api/projects/"+url.PathEscape(p.ID)+"/messages", req, &sent); err != nil {
 				return err
 			}
-			if rt.jsonOut {
-				if rt.program == "paimos" {
-					return rt.printJSON(messagingClassicView(sent, project))
+			receipt, receiptErr := rt.tellReceipt(sent.ID)
+			receiptState := "unavailable"
+			if receiptErr == nil {
+				switch receipt.State {
+				case "queued", "handed_off", "failed":
+					receiptState = receipt.State
 				}
-				return rt.printJSON(sent)
 			}
-			state := "delivered"
+			state := "receipt unavailable"
+			if receiptState != "unavailable" {
+				state = tellReceiptState(receipt)
+			}
 			if sent.Status == "held" {
 				state = "held: action request - requires human approval"
 			}
+			if rt.jsonOut {
+				if rt.program == "paimos" {
+					view := messagingClassicView(sent, project)
+					view.Delivered = sent.Status != "held" && receiptState == "handed_off"
+					return rt.printJSON(struct {
+						classicMessageView
+						Stored        bool   `json:"stored"`
+						ReceiptState  string `json:"receipt_state"`
+						FailureReason string `json:"failure_reason,omitempty"`
+					}{view, true, receiptState, receipt.FailureReason})
+				}
+				return rt.printJSON(struct {
+					inbox.CompatMessage
+					Stored        bool   `json:"stored"`
+					ReceiptState  string `json:"receipt_state"`
+					FailureReason string `json:"failure_reason,omitempty"`
+				}{sent, true, receiptState, receipt.FailureReason})
+			}
 			if rt.program == "paimos" {
-				_, err = fmt.Fprintf(rt.stdout, "✓ %s → %s (%s)\nmessage: %s\nthread: %s · hop %d\n", messagingSender(sent), sent.To, state, sent.ID, sent.ThreadID, sent.Hop)
+				_, err = fmt.Fprintf(rt.stdout, "stored: %s → %s\npush: %s\nmessage: %s\nthread: %s · hop %d\n", messagingSender(sent), sent.To, state, sent.ID, sent.ThreadID, sent.Hop)
 				return err
 			}
-			_, err = fmt.Fprintf(rt.stdout, "✓ %s → %s (%s)\nmessage: %s\n", me.Principal.Name, sent.RecipientPrincipalID, state, sent.ID)
+			_, err = fmt.Fprintf(rt.stdout, "stored: %s → %s\npush: %s\nmessage: %s\n", me.Principal.Name, sent.RecipientPrincipalID, state, sent.ID)
 			return err
 		}}
+}
+
+func (rt *runtime) tellReceipt(id string) (inbox.Receipt, error) {
+	var receipt inbox.Receipt
+	err := rt.do(http.MethodGet, "/api/inbox/messages/"+url.PathEscape(id)+"/receipt", nil, &receipt)
+	return receipt, err
+}
+
+func tellReceiptState(receipt inbox.Receipt) string {
+	switch receipt.State {
+	case "handed_off":
+		return "delivered"
+	case "queued":
+		return "queued"
+	case "failed":
+		if receipt.FailureReason != "" {
+			return "failed/" + receipt.FailureReason
+		}
+		return "failed"
+	default:
+		return "receipt unavailable"
+	}
 }
 func (rt *runtime) cmdMessagingListen() *Command {
 	var as, project, deliver, after, poll string

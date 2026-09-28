@@ -52,6 +52,8 @@ hello`, messageID)
 	}
 	frameJSON := bytes.TrimSpace(frameBuf.Bytes())
 	classicJSON := fmt.Sprintf(`{"cursor":42,"message_id":%q,"context_id":"AEON","from":"paimos:sender","to":"codex:receiver","role":"agent","metadata":{},"thread_id":%q,"hop":1,"delivered":true,"is_action_request":false,"expects_reply":true,"reply_address":"paimos:sender","created_at":"2026-09-25T00:00:00Z","delivery_level":"steer","delivery_fallback":"simple","delivery_target":{"primary":{"binding_id":%q,"kind":"codex_thread"},"simple_fallback":null},"parts":[{"kind":"text","text":%s}]}`+"\n", messageID, messageID, targetID, frameJSON)
+	tellJSON := strings.Replace(classicJSON, `"delivered":true`, `"delivered":false`, 1)
+	tellJSON = strings.TrimSuffix(tellJSON, "}\n") + `,"stored":true,"receipt_state":"queued"}` + "\n"
 	targetJSON := `{"id":"` + targetID + `","principal_id":"` + recipientID + `","address":"codex:receiver","adapter":"codex","target_kind":"codex_thread","maximum_level":"steer","role":"primary","version":1,"enabled":true,"has_secret":false,"created_at":"2026-09-25T00:00:00Z"}`
 	deliveryJSON := `{"id":"` + deliveryID + `","message_id":"` + messageID + `","target_id":"` + targetID + `","fallback_target_id":null,"state":"pending","reason":"","attempts":0,"effective_level":"","fallback_reason":""}`
 	workJSON := fmt.Sprintf(`{"delivery_id":%q,"lease_token":%q,"cursor":42,"state":"pending","adapter":"codex","target_kind":"codex_thread","target_ref":"fixture-thread","maximum_level":"steer","message":%s}`, deliveryID, leaseID, messageJSON)
@@ -78,8 +80,8 @@ hello`, messageID)
 		output   string
 		deliver  localDeliverer
 	}{
-		{"tell", []string{"tell", "codex:receiver", "--project", "AEON", "--level", "steer", "--expects-reply", "--idempotency-key", "retry", "-m", "hello"}, []string{"POST " + base + `/messages {"body":"hello","delivery_level":"steer","expects_reply":true,"idempotency_key":"retry","is_action_request":false,"to":"codex:receiver"}`}, classicJSON, nil},
-		{"tell file and action request", []string{"tell", "codex:receiver", "--project", "AEON", "--level", "steer", "--action-request", "--idempotency-key", "retry", "--message-file", messageFile}, []string{"POST " + base + `/messages {"body":"hello","delivery_level":"steer","expects_reply":false,"idempotency_key":"retry","is_action_request":true,"to":"codex:receiver"}`}, classicJSON, nil},
+		{"tell", []string{"tell", "codex:receiver", "--project", "AEON", "--level", "steer", "--expects-reply", "--idempotency-key", "retry", "-m", "hello"}, []string{"POST " + base + `/messages {"body":"hello","delivery_level":"steer","expects_reply":true,"idempotency_key":"retry","is_action_request":false,"to":"codex:receiver"}`, "GET /api/inbox/messages/" + messageID + "/receipt"}, tellJSON, nil},
+		{"tell file and action request", []string{"tell", "codex:receiver", "--project", "AEON", "--level", "steer", "--action-request", "--idempotency-key", "retry", "--message-file", messageFile}, []string{"POST " + base + `/messages {"body":"hello","delivery_level":"steer","expects_reply":false,"idempotency_key":"retry","is_action_request":true,"to":"codex:receiver"}`, "GET /api/inbox/messages/" + messageID + "/receipt"}, tellJSON, nil},
 		{"target set", []string{"message", "target", "set", "--project", "AEON", "--address", "codex:receiver", "--adapter", "codex", "--kind", "codex_thread", "--maximum-level", "steer", "--target-ref-file", ref}, []string{"POST " + base + `/message-targets {"adapter":"codex","address":"codex:receiver","maximum_level":"steer","role":"primary","target_kind":"codex_thread","target_ref":"fixture-thread","target_secret":""}`}, targetJSON + "\n", nil},
 		{"target set argv reference", []string{"message", "target", "set", "--project", "AEON", "--address", "codex:receiver", "--adapter", "codex", "--kind", "codex_thread", "--maximum-level", "steer", "--target-ref", "fixture-thread"}, []string{"POST " + base + `/message-targets {"adapter":"codex","address":"codex:receiver","maximum_level":"steer","role":"primary","target_kind":"codex_thread","target_ref":"fixture-thread","target_secret":""}`}, targetJSON + "\n", nil},
 		{"target set routine key files", []string{"message", "target", "set", "--project", "AEON", "--address", "grok_bot:receiver", "--adapter", "grok_bot_routine", "--kind", "https_webhook", "--target-ref-file", webhookRef, "--target-key-file", keyFile}, []string{"POST " + base + `/message-targets {"adapter":"grok_bot_routine","address":"grok_bot:receiver","maximum_level":"simple","role":"primary","target_kind":"https_webhook","target_ref":"https://routine.example/hook","target_secret":"synthetic-sender-key"}`}, targetJSON + "\n", nil},
@@ -120,6 +122,8 @@ hello`, messageID)
 					}
 					seen = append(seen, item)
 					switch {
+					case strings.HasSuffix(path, "/receipt"):
+						fmt.Fprintf(w, `{"message_id":%q,"state":"queued"}`, messageID)
 					case strings.HasSuffix(path, "/delivery-claim"):
 						fmt.Fprint(w, workJSON)
 					case strings.HasSuffix(path, "/delivery-complete"):
