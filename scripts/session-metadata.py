@@ -8,6 +8,9 @@ account stay unknown. Fixture mode exercises adapter logic with synthetic data.
 Neither mode reads transcripts or auth stores.
 Live reads require physical paths on Linux or Darwin; only Darwin's exact
 root /var and /tmp system aliases are supported. Other platforms fail closed.
+The live index must be a single-link regular file owned by the caller on its
+directory's device. A blank or unprintable name is not a rename: it yields no
+label, so an unavailable or partial read can never clear the Aeon label.
 
 stdout is one JSON object:
   harness, optional thread_title, model, reasoning_effort,
@@ -230,7 +233,15 @@ def open_codex_index(path: Path) -> int:
             child = os.open(part, flags | os.O_DIRECTORY, dir_fd=parent)
             os.close(parent)
             parent = child
-        return os.open(parts[-1], flags, dir_fd=parent)
+        leaf = os.open(parts[-1], flags, dir_fd=parent)
+        try:
+            # A file mounted over the leaf is not the directory's own index.
+            if os.fstat(leaf).st_dev != os.fstat(parent).st_dev:
+                raise Refusal("live index must be on its directory's device")
+        except BaseException:
+            os.close(leaf)
+            raise
+        return leaf
     finally:
         os.close(parent)
 
@@ -248,6 +259,9 @@ def codex_index(path: Path, session_id: str) -> dict[str, str]:
             info = os.fstat(fd)
             if not stat.S_ISREG(info.st_mode) or not 0 <= info.st_size <= MAX_BYTES:
                 raise Refusal("live index must be a bounded regular file")
+            # A second link can give a private file an allowed name and path.
+            if info.st_nlink != 1 or info.st_uid != os.getuid():
+                raise Refusal("live index must be a single-link file owned by this user")
             # Bound bytes, including growth after fstat and short reads. A text
             # wrapper's character limit can consume more than MAX_BYTES bytes.
             body = bytearray()
@@ -280,7 +294,9 @@ def codex_index(path: Path, session_id: str) -> dict[str, str]:
             raise Refusal("live name index has an unsupported record shape")
         if document.get("id") == session_id and isinstance(document.get("thread_name"), str):
             # The name index is append-only; the last matching entry is current.
-            found = {"thread_title": clean(document["thread_name"], LIMITS["thread_title"])}
+            # A blank current entry means the name is unknown, not "clear it".
+            name = clean(document["thread_name"], LIMITS["thread_title"])
+            found = {"thread_title": name} if name else {}
     return found
 
 
