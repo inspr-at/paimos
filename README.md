@@ -312,6 +312,25 @@ capture remain unimplemented.
 
 ### Session recovery
 
+Managed sandbox controls (AEON-260) use the additive
+`POST /api/projects/{projectId}/harness-sessions/{sessionId}/managed-controls`
+route. A person needs `harness.control`, the daemon must advertise
+`managed_control_v1`, and the request carries a stable UUID `request_id`,
+`kind` (`steer`, `interrupt`, `stop`) and exact `expected_ownership`.
+A steer also carries at most 8192 UTF-8 bytes of `text`. Controls expire after
+45 seconds, with at most 16 outstanding/recent requests per session.
+The existing control GET returns durable metadata; yield claims at most once.
+Steer text lives only in a bounded expiring memory relay, never in control rows,
+events, heartbeat or the daemon journal. Server restart rejects lost text;
+ambiguous delivery is reported as unconfirmed, never silently reinjected.
+Identical request IDs replay their receipt; divergent retries are refused.
+Pending authorization is rechecked when the daemon claims the control.
+
+The worker-only `POST .../managed-context` route returns the ADR-004 merge for
+that session's tenant, project, key creator, agent and work order. Callers cannot
+select another context. This is an execution-scoped read under the worker
+lease, not a general rules permission or a repository file installation.
+
 People with `harness.recover` permission can open **Recover** in a session’s details and archive its registration after confirming the exact session and host. Archive preserves ticket links, outcomes and audit history, revokes the old worker generation, and records process state as unknown. It never signals a process. Late heartbeats, control completions and registration replays cannot reopen an archived generation; a new session needs a new reference and lease. The recovery dialog refreshes on stale observations. Recovery-aware daemons detach their harness registration without stopping the run. Active older managed daemons must stop normally before archive is available, because they cannot detach safely. Archive waits for any already-authorized force request to finish or expire.
 
 Managed daemons report a per-launch process identity and generation. **Force stop** additionally requires human `harness.force_stop` permission, a fresh ownership report, and exact session/host/process-group confirmation. The daemon rejects a changed identity, restart, expired request or lost ownership; deadline and cancellation are rechecked under the final signal lock. Local transport and inbox credentials cannot authorize force stop. Expiry uses server and daemon wall clocks, which need normal host clock synchronization; archive cannot retract a signal that was already authorized or delivered, and always retains unknown process state. It signals only the owned process group (including children in that group), and reports root exit separately from queue acceptance; escaped descendants are outside its scope. Linux and macOS keep the group leader unreaped while signaling, preventing PID reuse. Unsupported adapters, legacy unmanaged sessions and offline ownership cannot be force stopped. Normal user **Stop** sends TERM and reports timeout without escalating; daemon cleanup retains its bounded force cleanup.

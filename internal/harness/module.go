@@ -56,7 +56,10 @@ import (
 	"github.com/inspr-at/paimos/internal/workorders"
 )
 
-type Module struct{ pool *pgxpool.Pool }
+type Module struct {
+	pool        *pgxpool.Pool
+	controlText controlRelay
+}
 
 var _ httpapi.Module = (*Module)(nil)
 
@@ -88,6 +91,8 @@ func (m *Module) Mount(mux *http.ServeMux) {
 		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/yield", "harness.worker", true, 200, m.yield},
 		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/drain", "harness.worker", true, 200, m.drain},
 		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/complete-delivery", "harness.worker", true, 200, m.completeDelivery},
+		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/managed-controls", "harness.control", false, 201, m.managedControl},
+		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/managed-context", "harness.worker", true, 200, m.managedContext},
 		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/controls/interrupt", "harness.control", false, 201, m.interrupt},
 		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/controls/stop", "harness.control", false, 201, m.stop},
 		{"GET /api/projects/{projectId}/harness-sessions/{sessionId}/controls/{controlId}", "harness.read", false, 200, m.control},
@@ -363,7 +368,7 @@ func normalizeCaps(in []string, management string) ([]string, error) {
 				continue
 			}
 			switch v {
-			case "inbox", "status", "steer", "interrupt", "stop":
+			case "inbox", "status", "steer", "interrupt", "stop", managedControlCapability:
 			default:
 				return nil, workorders.Fail(400, "invalid capability")
 			}
@@ -374,7 +379,7 @@ func normalizeCaps(in []string, management string) ([]string, error) {
 			out = append(out, v)
 		}
 	}
-	if management == "unmanaged" && (seen["interrupt"] || seen["stop"]) {
+	if management == "unmanaged" && (seen["interrupt"] || seen["stop"] || seen[managedControlCapability]) {
 		return nil, workorders.Fail(400, "unmanaged session cannot own controls")
 	}
 	sort.Strings(out)
@@ -874,7 +879,7 @@ func (m *Module) markStopped(r *http.Request, tx pgx.Tx, p tenant.Principal) (an
 		return nil, err
 	}
 	switch in.Reason {
-	case "stopped", "process_exited", "process_failed", "ownership_lost", "force_stopped":
+	case "stopped", "process_exited", "process_failed", "ownership_lost", "force_stopped", "token_budget_exhausted", "turn_budget_exhausted":
 	default:
 		return nil, workorders.Fail(400, "invalid stop reason")
 	}

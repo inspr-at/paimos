@@ -2417,6 +2417,48 @@ paths:
       description: Session detail, including at most 20 recent activity notes and metadata changes, newest first.
       responses:
         '200': {description: Session detail, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessSession'}}}}
+  /projects/{projectId}/harness-sessions/{sessionId}/managed-controls:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: requestManagedHarnessControl
+      description: Person-only harness.control. Requires managed_control_v1, a live run and fresh exact process ownership. Text is transient (never audit or journal content); expiry or server restart rejects undelivered text. Reusing request_id requires identical actor and payload. Claiming is at most once; an uncertain outcome is never automatically reinjected.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [request_id, kind, expected_ownership]
+              properties:
+                request_id: {type: string, format: uuid}
+                kind: {type: string, enum: [steer, interrupt, stop]}
+                text: {type: string, maxLength: 8192, description: Required only for steer; UTF-8 byte limit 8192.}
+                expected_ownership: {$ref: '#/components/schemas/HarnessProcessOwnership'}
+      responses:
+        '201': {description: Pending or identical replay; reason authorization_expired means expired., content: {application/json: {schema: {$ref: '#/components/schemas/HarnessManagedControl'}}}}
+        '403': {description: Person with project harness.control required}
+        '409': {description: Unmanaged, unsupported, stale ownership, changed retry or session unavailable}
+        '429': {description: Session control quota reached}
+  /projects/{projectId}/harness-sessions/{sessionId}/managed-context:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: X-Aeon-Worker-Lease, in: header, required: true, schema: {type: string}}
+    post:
+      operationId: managedHarnessContext
+      description: Bound managed worker only. ADR-004 rules merge for this exact tenant/project/key creator/agent/task; delivered in ephemeral context. No repository writes. A receipt proves received bytes, not model obedience. No caller-selectable context or broader rules access.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, additionalProperties: false}
+      responses:
+        '200': {description: ADR-004 merged rules envelope}
+        '403': {description: Invalid worker lease or owner}
+        '409': {description: Managed run required}
   /projects/{projectId}/harness-sessions/{sessionId}/recovery:
     parameters:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -6456,7 +6498,7 @@ components:
         management_mode: {type: string, enum: [managed, unmanaged]}
         role: {type: string, enum: [coordinator, worker]}
         work_shape: {type: string, enum: [unknown, ship, scout]}
-        advertised_capabilities: {type: array, items: {type: string, enum: [inbox, status, steer, interrupt, stop]}}
+        advertised_capabilities: {type: array, items: {type: string, enum: [inbox, status, steer, interrupt, stop, managed_control_v1]}}
         harness_session_ref: {type: string, minLength: 16, maxLength: 4096, writeOnly: true}
         worker_lease: {type: string, minLength: 32, maxLength: 256, writeOnly: true}
     HarnessProcessOwnership:
@@ -6470,6 +6512,22 @@ components:
         root_pid: {type: integer, minimum: 2}
         group_id: {type: integer, minimum: 2}
         started_at: {type: string, format: date-time}
+    HarnessManagedControl:
+      type: object
+      required: [id, session_id, kind, state, sequence, outcome, reason, created_at, expected_ownership, expires_at]
+      properties:
+        id: {type: string, format: uuid}
+        session_id: {type: string, format: uuid}
+        kind: {type: string, enum: [steer, interrupt, stop]}
+        state: {type: string, enum: [pending, claimed, completed]}
+        sequence: {type: integer, format: int64}
+        outcome: {type: [string, 'null'], enum: [applied, rejected, null]}
+        reason: {type: [string, 'null'], description: Content-free outcome. authorization_expired means expired before claim; outcome_unconfirmed means no safe retry. queued_next_turn acknowledges queued input rather than model obedience.}
+        expected_ownership: {$ref: '#/components/schemas/HarnessProcessOwnership'}
+        expires_at: {type: string, format: date-time}
+        created_at: {type: string, format: date-time}
+        claimed_at: {type: [string, 'null'], format: date-time}
+        completed_at: {type: [string, 'null'], format: date-time}
     HarnessRecoveryControl:
       type: object
       required: [id, session_id, kind, state, sequence, outcome, reason, created_at, expected_ownership, expires_at]

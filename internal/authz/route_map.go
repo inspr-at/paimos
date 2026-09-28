@@ -263,8 +263,12 @@ var RoutePermissions = map[string]string{
 	"POST /api/projects/{projectId}/baseline-batches/batches/{batchId}/built-receipt": "stage.verify",
 	"POST /api/projects/{projectId}/harness-sessions":                                 "harness.write",
 	"POST /api/projects/{projectId}/harness-sessions/{sessionId}/complete-delivery":   "harness.worker",
-	"POST /api/projects/{projectId}/harness-sessions/{sessionId}/controls/interrupt":  "harness.control",
-	"POST /api/projects/{projectId}/harness-sessions/{sessionId}/controls/stop":       "harness.control",
+
+	"POST /api/projects/{projectId}/harness-sessions/{sessionId}/managed-controls": "harness.control",
+	"POST /api/projects/{projectId}/harness-sessions/{sessionId}/managed-context":  "harness.worker",
+
+	"POST /api/projects/{projectId}/harness-sessions/{sessionId}/controls/interrupt":            "harness.control",
+	"POST /api/projects/{projectId}/harness-sessions/{sessionId}/controls/stop":                 "harness.control",
 	"POST /api/projects/{projectId}/harness-sessions/{sessionId}/controls/{controlId}/complete": "harness.worker",
 	"POST /api/projects/{projectId}/harness-sessions/{sessionId}/drain":                         "harness.worker",
 	"POST /api/projects/{projectId}/harness-sessions/{sessionId}/heartbeat":                     "harness.worker",
