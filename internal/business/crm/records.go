@@ -336,6 +336,105 @@ func (m *module) getCustomer(w http.ResponseWriter, r *http.Request) {
 	}
 	httpapi.WriteJSON(w, 200, out)
 }
+func mergeShowcaseFields(base []byte, extra map[string]string) ([]byte, error) {
+	if len(extra) == 0 {
+		return base, nil
+	}
+	var fields map[string]any
+	if err := json.Unmarshal(base, &fields); err != nil || fields == nil {
+		return nil, errInvalid("invalid customer fields")
+	}
+	for key, value := range extra {
+		if key != "showcase_key" && key != "showcase_principal_id" {
+			return nil, errInvalid("unsupported showcase field")
+		}
+		if _, exists := fields[key]; exists || strings.TrimSpace(value) == "" || len(value) > 80 {
+			return nil, errInvalid("invalid showcase field")
+		}
+		fields[key] = value
+	}
+	return json.Marshal(fields)
+}
+
+// InsertCustomer is the organisation create the CRM API uses. extra may carry
+// showcase_key; it is stored beside the typed fields and is not part of the
+// undo snapshot, which customer() reads back without unknown keys.
+func InsertCustomer(ctx context.Context, tx pgx.Tx, p tenant.Principal, in CustomerWrite, extra map[string]string) (Customer, error) {
+	var out Customer
+	if err := in.validate(); err != nil {
+		return out, err
+	}
+	if in.ExpectedRevision != 0 {
+		return out, errInvalid("new customer has no revision")
+	}
+	raw, _ := json.Marshal(in.CustomerFields)
+	fields, err := mergeShowcaseFields(raw, extra)
+	if err != nil {
+		return out, err
+	}
+	if err := tx.QueryRow(ctx, `WITH kind AS (SELECT id,short_prefix FROM node_kinds WHERE slug='organisation') INSERT INTO nodes(tenant_id,kind_id,key,title,fields) SELECT $1::uuid,kind.id,aeon_next_node_key($1::uuid,kind.short_prefix),$2,$3::jsonb FROM kind RETURNING id::text`, p.TenantID, in.Name, fields).Scan(&out.ID); err != nil {
+		return out, err
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO crm_organisation_profiles(tenant_id,organisation_node_id) VALUES($1::uuid,$2::uuid) ON CONFLICT DO NOTHING`, p.TenantID, out.ID); err != nil {
+		return out, err
+	}
+	out, err = customer(ctx, tx, out.ID, false)
+	if err != nil {
+		return out, err
+	}
+	return out, appendCRM(ctx, tx, p, out.ID, "crm.customer_created", nil, out)
+}
+
+// InsertContact is the contact create the CRM API uses, including the first
+// contact becoming primary. extra may carry showcase_key and showcase_principal_id.
+func InsertContact(ctx context.Context, tx pgx.Tx, p tenant.Principal, org string, in ContactWrite, extra map[string]string) (ContactRecord, error) {
+	var out ContactRecord
+	if err := in.validate(); err != nil {
+		return out, err
+	}
+	if in.ExpectedRevision != 0 {
+		return out, errInvalid("new contact has no revision")
+	}
+	before, err := customer(ctx, tx, org, true)
+	if err != nil {
+		return out, err
+	}
+	raw, _ := json.Marshal(in.ContactFields)
+	fields, err := mergeShowcaseFields(raw, extra)
+	if err != nil {
+		return out, err
+	}
+	var id string
+	if err := tx.QueryRow(ctx, `WITH kind AS (SELECT id,short_prefix FROM node_kinds WHERE slug='contact') INSERT INTO nodes(tenant_id,kind_id,key,title,fields) SELECT $1::uuid,kind.id,aeon_next_node_key($1::uuid,kind.short_prefix),$2,$3::jsonb FROM kind RETURNING id::text`, p.TenantID, in.Name, fields).Scan(&id); err != nil {
+		return out, err
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO node_relations(tenant_id,source_node_id,target_node_id,type) VALUES($1::uuid,$2::uuid,$3::uuid,'contact_for')`, p.TenantID, id, org); err != nil {
+		return out, err
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO crm_contact_profiles(tenant_id,contact_node_id,organisation_node_id) VALUES($1::uuid,$2::uuid,$3::uuid) ON CONFLICT DO NOTHING`, p.TenantID, id, org); err != nil {
+		return out, err
+	}
+	out, err = contact(ctx, tx, id, false)
+	if err != nil {
+		return out, err
+	}
+	if err := appendCRM(ctx, tx, p, id, "crm.contact_created", nil, out); err != nil {
+		return out, err
+	}
+	if before.PrimaryContactNodeID == nil {
+		if _, err := tx.Exec(ctx, `UPDATE crm_organisation_profiles SET primary_contact_node_id=$1::uuid,revision=revision+1 WHERE organisation_node_id=$2::uuid`, id, org); err != nil {
+			return out, err
+		}
+		out.Primary = true
+		after, err := customer(ctx, tx, org, false)
+		if err != nil {
+			return out, err
+		}
+		return out, appendCRM(ctx, tx, p, org, "crm.primary_contact_changed", before, after)
+	}
+	return out, nil
+}
+
 func (m *module) createCustomer(w http.ResponseWriter, r *http.Request) {
 	p, ok := m.actor(w, r, true)
 	if !ok {
@@ -356,19 +455,9 @@ func (m *module) createCustomer(w http.ResponseWriter, r *http.Request) {
 	}
 	var out Customer
 	e := m.run(r, p, fence.PermNodesContribute, func(tx pgx.Tx) error {
-		fields, _ := json.Marshal(in.CustomerFields)
-		if e := tx.QueryRow(r.Context(), `WITH kind AS (SELECT id,short_prefix FROM node_kinds WHERE slug='organisation') INSERT INTO nodes(tenant_id,kind_id,key,title,fields) SELECT $1::uuid,kind.id,aeon_next_node_key($1::uuid,kind.short_prefix),$2,$3::jsonb FROM kind RETURNING id::text`, p.TenantID, in.Name, fields).Scan(&out.ID); e != nil {
-			return e
-		}
-		if _, e := tx.Exec(r.Context(), `INSERT INTO crm_organisation_profiles(tenant_id,organisation_node_id) VALUES($1::uuid,$2::uuid) ON CONFLICT DO NOTHING`, p.TenantID, out.ID); e != nil {
-			return e
-		}
-		var e error
-		out, e = customer(r.Context(), tx, out.ID, false)
-		if e != nil {
-			return e
-		}
-		return appendCRM(r.Context(), tx, p, out.ID, "crm.customer_created", nil, out)
+		var err error
+		out, err = InsertCustomer(r.Context(), tx, p, in, nil)
+		return err
 	})
 	if e != nil {
 		writeErr(w, e)
@@ -598,44 +687,9 @@ func (m *module) createContact(w http.ResponseWriter, r *http.Request) {
 	}
 	var out ContactRecord
 	e = m.run(r, p, fence.PermNodesContribute, func(tx pgx.Tx) error {
-		before, e := customer(r.Context(), tx, org, true)
-		if e != nil {
-			return e
-		}
-		fields, _ := json.Marshal(in.ContactFields)
-		var id string
-		e = tx.QueryRow(r.Context(), `WITH kind AS (SELECT id,short_prefix FROM node_kinds WHERE slug='contact') INSERT INTO nodes(tenant_id,kind_id,key,title,fields) SELECT $1::uuid,kind.id,aeon_next_node_key($1::uuid,kind.short_prefix),$2,$3::jsonb FROM kind RETURNING id::text`, p.TenantID, in.Name, fields).Scan(&id)
-		if e != nil {
-			return e
-		}
-		_, e = tx.Exec(r.Context(), `INSERT INTO node_relations(tenant_id,source_node_id,target_node_id,type) VALUES($1::uuid,$2::uuid,$3::uuid,'contact_for')`, p.TenantID, id, org)
-		if e != nil {
-			return e
-		}
-		_, e = tx.Exec(r.Context(), `INSERT INTO crm_contact_profiles(tenant_id,contact_node_id,organisation_node_id) VALUES($1::uuid,$2::uuid,$3::uuid) ON CONFLICT DO NOTHING`, p.TenantID, id, org)
-		if e != nil {
-			return e
-		}
-		out, e = contact(r.Context(), tx, id, false)
-		if e != nil {
-			return e
-		}
-		if e = appendCRM(r.Context(), tx, p, id, "crm.contact_created", nil, out); e != nil {
-			return e
-		}
-		if before.PrimaryContactNodeID == nil {
-			_, e = tx.Exec(r.Context(), `UPDATE crm_organisation_profiles SET primary_contact_node_id=$1::uuid,revision=revision+1 WHERE organisation_node_id=$2::uuid`, id, org)
-			if e != nil {
-				return e
-			}
-			out.Primary = true
-			after, e := customer(r.Context(), tx, org, false)
-			if e != nil {
-				return e
-			}
-			return appendCRM(r.Context(), tx, p, org, "crm.primary_contact_changed", before, after)
-		}
-		return nil
+		var err error
+		out, err = InsertContact(r.Context(), tx, p, org, in, nil)
+		return err
 	})
 	if e != nil {
 		writeErr(w, e)

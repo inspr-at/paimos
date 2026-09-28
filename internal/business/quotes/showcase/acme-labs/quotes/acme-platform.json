@@ -1,0 +1,149 @@
+{
+  "schema": "aeon.quote-showcase.v1",
+  "key": "acme-platform",
+  "organisation": "acme-labs",
+  "contact": "acme-lena-hofer",
+  "state": "issued",
+  "public_link": true,
+  "validity_days": 45,
+  "versions": [
+    {
+      "title": "Laborplattform und Methodenvalidierung",
+      "subtitle": "Aufbau, Qualifizierung und Schulung der Analyseplattform",
+      "project_ref": "ACME-PLAT-2026",
+      "currency": "EUR",
+      "legal": {
+        "intro": "ACME Labs GmbH erhält dieses Angebot für die dokumentierte Einrichtung ihrer Analyseumgebung. Die Leistungen, Termine und Beträge auf den folgenden Seiten sind die vereinbarte Fassung.",
+        "accept_text": "Mit der Unterschrift nimmt ACME Labs GmbH das Angebot in der vorliegenden Fassung an. Änderungen bedürfen einer neuen Version.",
+        "vat_note": "Die ausgewiesenen Beträge verstehen sich zuzüglich der gesetzlichen Umsatzsteuer.",
+        "discount_note": "Ein Nachlass ist in dieser Summe nicht verrechnet.",
+        "payment_terms": "Zahlbar innerhalb von 14 Tagen nach Rechnungseingang ohne Abzug. Mit der Auftragserteilung werden 30 Prozent angezahlt, der Rest nach Abnahme der vereinbarten Leistung."
+      },
+      "sections": [
+        {
+          "heading": "Leistungsumfang",
+          "numbering_style": "decimal",
+          "spacing_before_mm": "3.5",
+          "spacing_after_mm": "2",
+          "nodes": [
+            {
+              "kind": "paragraph",
+              "text": "Wir richten die Analyseplattform in den bestehenden Laborräumen ein, binden die freigegebenen Geräte an und übergeben eine nachvollziehbare Betriebsdokumentation."
+            },
+            {
+              "kind": "item",
+              "text": "Aufnahme der vorhandenen Geräte, Schnittstellen und Verantwortlichkeiten.",
+              "marker": "disc"
+            },
+            {
+              "kind": "item",
+              "text": "Aufbau der Benutzer, Rollen und der täglichen Sicherung.",
+              "marker": "circle"
+            },
+            {
+              "kind": "item",
+              "text": "Projektstart und Bestandsaufnahme vor Ort.",
+              "marker": "decimal",
+              "numbering": "outline",
+              "list_start": 1
+            },
+            {
+              "kind": "item",
+              "text": "Schnittstellen zu den bestehenden Analysegeräten.",
+              "marker": "decimal",
+              "numbering": "outline",
+              "depth": 1,
+              "list_continue": true
+            },
+            {
+              "kind": "item",
+              "text": "Schulung der Laborleitung anhand der übergebenen Unterlagen.",
+              "marker": "decimal",
+              "numbering": "outline",
+              "section_bound": true,
+              "marker_x_mm": "1.5",
+              "text_start_mm": "8"
+            }
+          ]
+        },
+        {
+          "heading": "Qualifizierung",
+          "numbering_style": "upper-roman",
+          "keep_together": true,
+          "nodes": [
+            {
+              "kind": "paragraph",
+              "text": "Die Inbetriebnahme der Plattform erfolgt vor Ort und wird protokolliert.",
+              "marks": [
+                {
+                  "start": 4,
+                  "end": 18,
+                  "bold": true
+                },
+                {
+                  "start": 41,
+                  "end": 48,
+                  "italic": true
+                }
+              ]
+            },
+            {
+              "kind": "paragraph",
+              "text": "Die Qualifizierung umfasst einen dokumentierten Lauf mit den von ACME Labs bereitgestellten Referenzproben. Abweichungen werden vor der Abnahme geschlossen."
+            }
+          ]
+        },
+        {
+          "heading": "Nicht enthaltener Umfang",
+          "numbering_style": "lower-alpha",
+          "nodes": [
+            {
+              "kind": "paragraph",
+              "text": "Optional und nicht in der Summe: ein Bereitschaftsdienst außerhalb der Kernzeit kann später gesondert beauftragt werden. Dafür gibt es in diesem Angebot keine Position."
+            }
+          ]
+        },
+        {
+          "heading": "Zahlungsbedingungen",
+          "numbering_style": "none",
+          "nodes": [
+            {
+              "kind": "paragraph",
+              "text": "Zahlbar innerhalb von 14 Tagen nach Rechnungseingang ohne Abzug. Mit der Auftragserteilung werden 30 Prozent angezahlt, der Rest nach Abnahme der vereinbarten Leistung."
+            }
+          ]
+        }
+      ],
+      "positions": [
+        {
+          "short_text": "Plattformlizenzen",
+          "long_text": "Benannte Zugänge für Laborleitung, Analytik und Einkauf, einschließlich der Einrichtung der Rollen.",
+          "quantity": "12",
+          "unit_label": "Benutzer",
+          "unit_price_cents": 18500
+        },
+        {
+          "short_text": "Validierung vor Ort",
+          "long_text": "Gemeinsame Läufe mit Referenzproben, Abweichungsprotokoll und Freigabeempfehlung.",
+          "quantity": "4.5",
+          "unit_label": "Tag",
+          "unit_price_cents": 96000
+        },
+        {
+          "short_text": "Schulung Laborbetrieb",
+          "long_text": "Ein Workshop für die genannten Ansprechpartner, mit Kurzprotokoll.",
+          "quantity": "1",
+          "unit_label": "psch",
+          "unit_price_cents": 240000
+        },
+        {
+          "short_text": "Verbrauchsmaterial für die Läufe",
+          "long_text": "Referenzsets, die nur für die Qualifizierung verwendet und danach übergeben werden.",
+          "quantity": "2.5",
+          "unit_label": "Set",
+          "unit_price_cents": 18600
+        }
+      ]
+    }
+  ]
+}

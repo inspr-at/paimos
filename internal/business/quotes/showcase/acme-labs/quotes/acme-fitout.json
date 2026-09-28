@@ -1,0 +1,304 @@
+{
+  "schema": "aeon.quote-showcase.v1",
+  "key": "acme-fitout",
+  "organisation": "acme-labs",
+  "contact": "acme-lena-hofer",
+  "state": "issued",
+  "validity_days": 30,
+  "versions": [
+    {
+      "title": "Laborumbau Gebäude B",
+      "subtitle": "Zwei Arbeitszonen für Probenvorbereitung und Auswertung",
+      "project_ref": "ACME-FIT-2026",
+      "currency": "EUR",
+      "legal": {
+        "intro": "ACME Labs GmbH erhält dieses Angebot für die dokumentierte Einrichtung ihrer Analyseumgebung. Die Leistungen, Termine und Beträge auf den folgenden Seiten sind die vereinbarte Fassung.",
+        "accept_text": "Mit der Unterschrift nimmt ACME Labs GmbH das Angebot in der vorliegenden Fassung an. Änderungen bedürfen einer neuen Version.",
+        "vat_note": "Die ausgewiesenen Beträge verstehen sich zuzüglich der gesetzlichen Umsatzsteuer.",
+        "discount_note": "Ein Nachlass ist in dieser Summe nicht verrechnet.",
+        "payment_terms": "Zahlbar innerhalb von 14 Tagen nach Rechnungseingang ohne Abzug. Mit der Auftragserteilung werden 30 Prozent angezahlt, der Rest nach Abnahme der vereinbarten Leistung."
+      },
+      "sections": [
+        {
+          "heading": "Bauliche Leistungen",
+          "numbering_style": "upper-alpha",
+          "nodes": [
+            {
+              "kind": "paragraph",
+              "text": "Der Umbau schafft zwei getrennte Arbeitszonen für Probenvorbereitung und Auswertung. Die bestehende Lüftung bleibt erhalten und wird nur an den neuen Zonentüren ergänzt."
+            },
+            {
+              "kind": "item",
+              "text": "Demontage der nicht mehr benötigten Einbauten und fachgerechte Entsorgung.",
+              "marker": "square"
+            },
+            {
+              "kind": "item",
+              "text": "Neue Arbeitsflächen mit der vereinbarten chemikalienbeständigen Beschichtung.",
+              "marker": "dash"
+            },
+            {
+              "kind": "item",
+              "text": "Kennzeichnung der Medienanschlüsse nach dem Laborstandard von ACME Labs.",
+              "marker": "square",
+              "glyph": "§"
+            }
+          ]
+        },
+        {
+          "heading": "Ablauf",
+          "numbering_style": "lower-roman",
+          "nodes": [
+            {
+              "kind": "paragraph",
+              "text": "Die Arbeiten finden in Gebäude B statt, ohne den laufenden Routinebetrieb im Nachbartrakt zu unterbrechen. Wir stimmen Sperrzeiten, Medienabschaltungen und die Zwischenlagerung der Geräte mit der Laborleitung ab. Nach jeder Etappe bleibt der Raum besenrein und die freigegebenen Flächen sind wieder benutzbar. Offene Punkte werden täglich mit Lena Hofer abgestimmt und im Bautagebuch festgehalten."
+            },
+            {
+              "kind": "paragraph",
+              "text": "Die Montage erfolgt in zwei Abschnitten. Zuerst wird die Probenvorbereitung fertiggestellt, danach die Auswertungszone. So bleibt immer eine Arbeitsfläche benutzbar."
+            }
+          ]
+        },
+        {
+          "heading": "Abgrenzung",
+          "numbering_style": "none",
+          "page_break_before": true,
+          "nodes": [
+            {
+              "kind": "paragraph",
+              "text": "Die Alternative einer Edelstahloberfläche anstelle der Epoxidbeschichtung ist nicht Bestandteil dieses Angebots und daher nicht in der Summe enthalten."
+            },
+            {
+              "kind": "paragraph",
+              "text": "Bauseitige Leistungen von ACME Labs sind der freie Zugang, die Entsorgung von Gefahrstoffen aus dem Bestand und die Freigabe der Medienabschaltungen."
+            }
+          ]
+        },
+        {
+          "heading": "Zahlungsbedingungen",
+          "numbering_style": "none",
+          "nodes": [
+            {
+              "kind": "paragraph",
+              "text": "Zahlbar innerhalb von 14 Tagen nach Rechnungseingang ohne Abzug. Mit der Auftragserteilung werden 30 Prozent angezahlt, der Rest nach Abnahme der vereinbarten Leistung."
+            }
+          ]
+        }
+      ],
+      "positions": [
+        {
+          "short_text": "Baustelleneinrichtung",
+          "long_text": "Die Arbeiten finden in Gebäude B statt, ohne den laufenden Routinebetrieb im Nachbartrakt zu unterbrechen. Wir stimmen Sperrzeiten, Medienabschaltungen und die Zwischenlagerung der Geräte mit der Laborleitung ab. Nach jeder Etappe bleibt der Raum besenrein und die freigegebenen Flächen sind wieder benutzbar. Offene Punkte werden täglich mit Lena Hofer abgestimmt und im Bautagebuch festgehalten.",
+          "quantity": "1",
+          "unit_label": "psch",
+          "unit_price_cents": 180000
+        },
+        {
+          "short_text": "Demontage Bestand",
+          "long_text": "Abbau der bezeichneten Einbauten, Schutz der verbleibenden Geräte und Übergabe des Materials zur Entsorgung durch ACME Labs.",
+          "quantity": "1",
+          "unit_label": "psch",
+          "unit_price_cents": 240000
+        },
+        {
+          "short_text": "Trennwände",
+          "long_text": "Leichte Trennwände zwischen Probenvorbereitung und Auswertung, einschließlich der Zonentür und der Sichtscheibe.",
+          "quantity": "18.5",
+          "unit_label": "m",
+          "unit_price_cents": 14500
+        },
+        {
+          "short_text": "Arbeitsflächen",
+          "long_text": "Beschichtete Arbeitsflächen auf den bestehenden Unterbauten, mit hochgezogener Kante an der Wandseite.",
+          "quantity": "14",
+          "unit_label": "m",
+          "unit_price_cents": 22000
+        },
+        {
+          "short_text": "Medienanschlüsse",
+          "long_text": "Umsetzen der vorhandenen Anschlüsse für Wasser, Druckluft und Abzug, ohne neue Hausanschlüsse.",
+          "quantity": "6",
+          "unit_label": "Stk",
+          "unit_price_cents": 38000
+        },
+        {
+          "short_text": "Bodenbeschichtung",
+          "long_text": "Epoxidbeschichtung der freigegebenen Bodenflächen, einschließlich Grundierung und der vereinbarten Rutschhemmung.",
+          "quantity": "86",
+          "unit_label": "m²",
+          "unit_price_cents": 7400
+        },
+        {
+          "short_text": "Bauleitung",
+          "long_text": "Örtliche Bauleitung während der Montage, tägliche Abstimmung und Führung des Bautagebuchs.",
+          "quantity": "8",
+          "unit_label": "Tag",
+          "unit_price_cents": 72000
+        },
+        {
+          "short_text": "Endreinigung",
+          "long_text": "Übergabereinigung beider Zonen, ohne die spätere laborseitige Desinfektion.",
+          "quantity": "1",
+          "unit_label": "psch",
+          "unit_price_cents": 96000
+        }
+      ]
+    },
+    {
+      "title": "Laborumbau Gebäude B, Revision 2",
+      "subtitle": "Angepasstes Aufmaß und zusätzliche Medienleiste",
+      "project_ref": "ACME-FIT-2026",
+      "currency": "EUR",
+      "legal": {
+        "intro": "ACME Labs GmbH erhält dieses Angebot für die dokumentierte Einrichtung ihrer Analyseumgebung. Die Leistungen, Termine und Beträge auf den folgenden Seiten sind die vereinbarte Fassung.",
+        "accept_text": "Mit der Unterschrift nimmt ACME Labs GmbH das Angebot in der vorliegenden Fassung an. Änderungen bedürfen einer neuen Version.",
+        "vat_note": "Die ausgewiesenen Beträge verstehen sich zuzüglich der gesetzlichen Umsatzsteuer.",
+        "discount_note": "Ein Nachlass ist in dieser Summe nicht verrechnet.",
+        "payment_terms": "Zahlbar innerhalb von 14 Tagen nach Rechnungseingang ohne Abzug. Mit der Auftragserteilung werden 30 Prozent angezahlt, der Rest nach Abnahme der vereinbarten Leistung."
+      },
+      "sections": [
+        {
+          "heading": "Bauliche Leistungen",
+          "numbering_style": "upper-alpha",
+          "nodes": [
+            {
+              "kind": "paragraph",
+              "text": "Der Umbau schafft zwei getrennte Arbeitszonen für Probenvorbereitung und Auswertung. Die bestehende Lüftung bleibt erhalten und wird nur an den neuen Zonentüren ergänzt."
+            },
+            {
+              "kind": "item",
+              "text": "Demontage der nicht mehr benötigten Einbauten und fachgerechte Entsorgung.",
+              "marker": "square"
+            },
+            {
+              "kind": "item",
+              "text": "Neue Arbeitsflächen mit der vereinbarten chemikalienbeständigen Beschichtung.",
+              "marker": "dash"
+            },
+            {
+              "kind": "item",
+              "text": "Kennzeichnung der Medienanschlüsse nach dem Laborstandard von ACME Labs.",
+              "marker": "square",
+              "glyph": "§"
+            }
+          ]
+        },
+        {
+          "heading": "Ablauf",
+          "numbering_style": "lower-roman",
+          "nodes": [
+            {
+              "kind": "paragraph",
+              "text": "Die Arbeiten finden in Gebäude B statt, ohne den laufenden Routinebetrieb im Nachbartrakt zu unterbrechen. Wir stimmen Sperrzeiten, Medienabschaltungen und die Zwischenlagerung der Geräte mit der Laborleitung ab. Nach jeder Etappe bleibt der Raum besenrein und die freigegebenen Flächen sind wieder benutzbar. Offene Punkte werden täglich mit Lena Hofer abgestimmt und im Bautagebuch festgehalten."
+            },
+            {
+              "kind": "paragraph",
+              "text": "Die Montage erfolgt in zwei Abschnitten. Zuerst wird die Probenvorbereitung fertiggestellt, danach die Auswertungszone. So bleibt immer eine Arbeitsfläche benutzbar."
+            }
+          ]
+        },
+        {
+          "heading": "Abgrenzung",
+          "numbering_style": "none",
+          "page_break_before": true,
+          "nodes": [
+            {
+              "kind": "paragraph",
+              "text": "Die Alternative einer Edelstahloberfläche bleibt außerhalb dieses Auftrags.",
+              "marks": [
+                {
+                  "start": 22,
+                  "end": 41,
+                  "italic": true
+                }
+              ]
+            },
+            {
+              "kind": "paragraph",
+              "text": "Die Alternative einer Edelstahloberfläche anstelle der Epoxidbeschichtung ist nicht Bestandteil dieses Angebots und daher nicht in der Summe enthalten."
+            },
+            {
+              "kind": "paragraph",
+              "text": "Bauseitige Leistungen von ACME Labs sind der freie Zugang, die Entsorgung von Gefahrstoffen aus dem Bestand und die Freigabe der Medienabschaltungen."
+            }
+          ]
+        },
+        {
+          "heading": "Zahlungsbedingungen",
+          "numbering_style": "none",
+          "nodes": [
+            {
+              "kind": "paragraph",
+              "text": "Zahlbar innerhalb von 14 Tagen nach Rechnungseingang ohne Abzug. Mit der Auftragserteilung werden 30 Prozent angezahlt, der Rest nach Abnahme der vereinbarten Leistung."
+            }
+          ]
+        }
+      ],
+      "positions": [
+        {
+          "short_text": "Baustelleneinrichtung",
+          "long_text": "Die Arbeiten finden in Gebäude B statt, ohne den laufenden Routinebetrieb im Nachbartrakt zu unterbrechen. Wir stimmen Sperrzeiten, Medienabschaltungen und die Zwischenlagerung der Geräte mit der Laborleitung ab. Nach jeder Etappe bleibt der Raum besenrein und die freigegebenen Flächen sind wieder benutzbar. Offene Punkte werden täglich mit Lena Hofer abgestimmt und im Bautagebuch festgehalten.",
+          "quantity": "1",
+          "unit_label": "psch",
+          "unit_price_cents": 180000
+        },
+        {
+          "short_text": "Demontage Bestand",
+          "long_text": "Abbau der bezeichneten Einbauten, Schutz der verbleibenden Geräte und Übergabe des Materials zur Entsorgung durch ACME Labs.",
+          "quantity": "1",
+          "unit_label": "psch",
+          "unit_price_cents": 240000
+        },
+        {
+          "short_text": "Trennwände",
+          "long_text": "Leichte Trennwände zwischen Probenvorbereitung und Auswertung, einschließlich der Zonentür und der Sichtscheibe.",
+          "quantity": "18.5",
+          "unit_label": "m",
+          "unit_price_cents": 14500
+        },
+        {
+          "short_text": "Arbeitsflächen",
+          "long_text": "Beschichtete Arbeitsflächen auf den bestehenden Unterbauten, mit hochgezogener Kante an der Wandseite.",
+          "quantity": "14",
+          "unit_label": "m",
+          "unit_price_cents": 22000
+        },
+        {
+          "short_text": "Medienanschlüsse",
+          "long_text": "Umsetzen der vorhandenen Anschlüsse für Wasser, Druckluft und Abzug, ohne neue Hausanschlüsse.",
+          "quantity": "6",
+          "unit_label": "Stk",
+          "unit_price_cents": 38000
+        },
+        {
+          "short_text": "Bodenbeschichtung",
+          "long_text": "Epoxidbeschichtung der freigegebenen Bodenflächen, einschließlich Grundierung und der vereinbarten Rutschhemmung. Die Fläche wurde nach dem Aufmaß der Revision 2 angepasst.",
+          "quantity": "86",
+          "unit_label": "m²",
+          "unit_price_cents": 8100
+        },
+        {
+          "short_text": "Bauleitung",
+          "long_text": "Örtliche Bauleitung während der Montage, tägliche Abstimmung und Führung des Bautagebuchs.",
+          "quantity": "8",
+          "unit_label": "Tag",
+          "unit_price_cents": 72000
+        },
+        {
+          "short_text": "Endreinigung",
+          "long_text": "Übergabereinigung beider Zonen, ohne die spätere laborseitige Desinfektion.",
+          "quantity": "1",
+          "unit_label": "psch",
+          "unit_price_cents": 96000
+        },
+        {
+          "short_text": "Zusätzliche Medienleiste",
+          "long_text": "Eine weitere Leiste in der Auswertungszone für die nachträglich freigegebenen Geräte. Die Edelstahlvariante bleibt weiterhin außerhalb des Auftrags.",
+          "quantity": "1",
+          "unit_label": "Stk",
+          "unit_price_cents": 54000
+        }
+      ]
+    }
+  ]
+}

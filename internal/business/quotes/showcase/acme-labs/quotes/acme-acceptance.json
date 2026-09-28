@@ -1,0 +1,82 @@
+{
+  "schema": "aeon.quote-showcase.v1",
+  "key": "acme-acceptance",
+  "organisation": "acme-labs",
+  "contact": "acme-lena-hofer",
+  "state": "accepted",
+  "validity_days": 21,
+  "versions": [
+    {
+      "title": "Qualifizierungsläufe Referenzproben",
+      "subtitle": "Drei dokumentierte Läufe zur Freigabe der Plattform",
+      "project_ref": "ACME-QUAL-2026",
+      "currency": "EUR",
+      "legal": {
+        "intro": "ACME Labs GmbH erhält dieses Angebot für die dokumentierte Einrichtung ihrer Analyseumgebung. Die Leistungen, Termine und Beträge auf den folgenden Seiten sind die vereinbarte Fassung.",
+        "accept_text": "Mit der Unterschrift nimmt ACME Labs GmbH das Angebot in der vorliegenden Fassung an. Änderungen bedürfen einer neuen Version.",
+        "vat_note": "Die ausgewiesenen Beträge verstehen sich zuzüglich der gesetzlichen Umsatzsteuer.",
+        "discount_note": "Ein Nachlass ist in dieser Summe nicht verrechnet.",
+        "payment_terms": "Zahlbar innerhalb von 14 Tagen nach Rechnungseingang ohne Abzug. Mit der Auftragserteilung werden 30 Prozent angezahlt, der Rest nach Abnahme der vereinbarten Leistung."
+      },
+      "sections": [
+        {
+          "heading": "Vereinbarte Läufe",
+          "numbering_style": "decimal",
+          "nodes": [
+            {
+              "kind": "paragraph",
+              "text": "Wir führen drei Qualifizierungsläufe mit den Referenzproben von ACME Labs durch und übergeben je Lauf ein Protokoll mit dem Ergebnis und den offenen Punkten."
+            },
+            {
+              "kind": "item",
+              "text": "Lauf zur Probenvorbereitung.",
+              "marker": "decimal",
+              "numbering": "outline",
+              "list_start": 1
+            },
+            {
+              "kind": "item",
+              "text": "Lauf zur Auswertung.",
+              "marker": "decimal",
+              "numbering": "outline",
+              "list_continue": true
+            },
+            {
+              "kind": "item",
+              "text": "Wiederholungslauf der offenen Punkte.",
+              "marker": "decimal",
+              "numbering": "outline",
+              "section_bound": true
+            }
+          ]
+        },
+        {
+          "heading": "Zahlungsbedingungen",
+          "numbering_style": "none",
+          "nodes": [
+            {
+              "kind": "paragraph",
+              "text": "Zahlbar innerhalb von 14 Tagen nach Rechnungseingang ohne Abzug. Mit der Auftragserteilung werden 30 Prozent angezahlt, der Rest nach Abnahme der vereinbarten Leistung."
+            }
+          ]
+        }
+      ],
+      "positions": [
+        {
+          "short_text": "Qualifizierungsläufe",
+          "long_text": "Drei dokumentierte Läufe einschließlich Vorbereitung und Protokoll.",
+          "quantity": "3",
+          "unit_label": "Lauf",
+          "unit_price_cents": 128000
+        },
+        {
+          "short_text": "Auswertung der Protokolle",
+          "long_text": "Zusammenführung der drei Protokolle zu einer Freigabeempfehlung an die Laborleitung.",
+          "quantity": "1",
+          "unit_label": "psch",
+          "unit_price_cents": 84000
+        }
+      ]
+    }
+  ]
+}

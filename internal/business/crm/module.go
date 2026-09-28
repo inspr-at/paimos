@@ -86,6 +86,43 @@ func (m *module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/crm/organisations/{organisationId}/sync-status", m.providerSyncStatus)
 }
 
+// BindContactPrincipal links a person to a contact and records crm.contact_bound.
+// A repeat of the same pair returns the existing binding and writes nothing.
+func BindContactPrincipal(ctx context.Context, tx pgx.Tx, p tenant.Principal, contactID, principalID string) (Binding, error) {
+	var out Binding
+	slug, err := lockContact(ctx, tx, p.TenantID, contactID)
+	if err != nil {
+		return out, err
+	}
+	if slug != Contact {
+		return out, errConflict
+	}
+	kind, err := lockPrincipalKind(ctx, tx, p.TenantID, principalID)
+	if err != nil {
+		return out, err
+	}
+	if kind != string(tenant.Person) {
+		return out, errConflict
+	}
+	existing, err := lockBinding(ctx, tx, p.TenantID, contactID, principalID)
+	if err == nil {
+		return existing, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return out, err
+	}
+	out, err = insertBinding(ctx, tx, p, contactID, principalID)
+	if err != nil {
+		var pe *pgconn.PgError
+		if errors.As(err, &pe) && pe.Code == "23505" {
+			return lockBinding(ctx, tx, p.TenantID, contactID, principalID)
+		}
+		return out, err
+	}
+	_, err = events.Append(ctx, tx, p, events.Change{NodeID: &out.ContactNodeID, Type: EventContactBound, After: out})
+	return out, err
+}
+
 func (m *module) bind(w http.ResponseWriter, r *http.Request) {
 	p, ok := m.actor(w, r, true)
 	if !ok {
@@ -119,49 +156,11 @@ func (m *module) bind(w http.ResponseWriter, r *http.Request) {
 		if err := m.installationOpen(r.Context(), tx, p.TenantID); err != nil {
 			return err
 		}
-		slug, err := lockContact(r.Context(), tx, p.TenantID, contactID)
-		if err != nil {
-			return err
-		}
-		if slug != Contact {
-			return errConflict
-		}
-		kind, err := lockPrincipalKind(r.Context(), tx, p.TenantID, principalID)
-		if err != nil {
-			return err
-		}
-		if kind != string(tenant.Person) {
-			return errConflict
-		}
 		if err := m.recheckInstallation(r.Context(), tx, p.TenantID); err != nil {
 			return err
 		}
-		existing, err := lockBinding(r.Context(), tx, p.TenantID, contactID, principalID)
-		if err == nil {
-			out = existing
-			return nil
-		}
-		if !errors.Is(err, pgx.ErrNoRows) {
-			return err
-		}
-		out, err = insertBinding(r.Context(), tx, p, contactID, principalID)
-		if err != nil {
-			var pe *pgconn.PgError
-			if errors.As(err, &pe) && pe.Code == "23505" {
-				replay, readErr := lockBinding(r.Context(), tx, p.TenantID, contactID, principalID)
-				if readErr != nil {
-					return readErr
-				}
-				out = replay
-				return nil
-			}
-			return err
-		}
-		_, err = events.Append(r.Context(), tx, p, events.Change{
-			NodeID: &out.ContactNodeID,
-			Type:   EventContactBound,
-			After:  out,
-		})
+		var err error
+		out, err = BindContactPrincipal(r.Context(), tx, p, contactID, principalID)
 		return err
 	})
 	if err != nil {

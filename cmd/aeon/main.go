@@ -131,6 +131,13 @@ func main() {
 		}
 		return
 	}
+	if len(os.Args) > 2 && os.Args[1] == "quote-showcase" && os.Args[2] == "apply" {
+		if err := quoteShowcaseApply(context.Background(), os.Args[3:], os.Stdin, os.Stdout); err != nil {
+			fmt.Fprintln(os.Stderr, "quote-showcase:", err)
+			os.Exit(1)
+		}
+		return
+	}
 	if len(os.Args) > 2 && os.Args[1] == "quote-profile" && os.Args[2] == "apply" {
 		if err := quoteProfileApply(context.Background(), os.Args[3:], os.Stdin, os.Stdout); err != nil {
 			fmt.Fprintln(os.Stderr, "quote-profile:", err)
