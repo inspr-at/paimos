@@ -155,8 +155,7 @@ onBeforeUnmount(() => {
         <span class="name" :title="chip.name">{{ chip.name }}</span>
         <template v-if="chip.key"><span class="dot" /><span class="key mono" :title="chip.key">{{ chip.key }}</span></template>
       </span>
-      <span v-else-if="chip.key" class="key mono">{{ chip.key }}</span>
-      <span v-else class="row-name">{{ chip.name }}</span>
+      <span v-else class="row-name" :title="chip.name">{{ chip.name }}</span>
       <AgentStateLabel class="chip-state" :state="state" :label="stateLabel" />
 
     </button>
@@ -178,14 +177,14 @@ onBeforeUnmount(() => {
               <LiveBot :id="agent.principal_id" :index="i" :state="agent.state" :label="phaseLabel(agent)" :harness="agent.harness" :event-pulse="live.eventPulseFor(agent)" :size="indicator.style === 'robot-5' ? 30 : 32" />
               <span class="agent-text">
                 <span class="agent-name">{{ who(agent) }}<span class="harness">{{ harnessLabel(agent.harness) }}</span></span>
-                <span class="agent-meta"><AgentStateLabel :state="agent.state ?? 'working'" :label="phaseLabel(agent)" /><span class="sep" />{{ agePrefix(agent) }} <time class="mono" :datetime="agent.since" :title="absoluteTime(agent.since)">{{ elapsedFor(agent, live.serverNow) }}</time><span class="sep" /><span class="since">since {{ clock(agent.since) }}</span></span>
+                <span class="agent-meta"><AgentStateLabel :state="agent.state ?? 'working'" :label="phaseLabel(agent)" /><span class="sep" />{{ agePrefix(agent) }} <time class="mono" :datetime="agent.since" :title="`Since ${clock(agent.since)} · ${absoluteTime(agent.since)}`">{{ elapsedFor(agent, live.serverNow) }}</time></span>
               </span>
               <AppIcon v-if="agent.session_id" class="go" name="chevron-right" :size="14" />
             </component>
             <RouterLink v-if="agent.ticket && ticketHref(agent)" class="ticket-line" :to="ticketHref(agent)">
               <span class="ticket-key mono">{{ agent.ticket.key }}</span><span class="ticket-title">{{ agent.ticket.title }}</span>
             </RouterLink>
-            <p v-else class="ticket-line none">{{ agent.ticket ? agent.ticket.key : 'No ticket bound' }}</p>
+            <p v-else-if="agent.ticket" class="ticket-line none">{{ agent.ticket.key }}</p>
           </li>
         </ul>
         <p class="pop-foot"><RouterLink class="history" to="/agents">All agents</RouterLink></p>
@@ -200,10 +199,10 @@ onBeforeUnmount(() => {
 
 .live-chip {
   position: relative; display: inline-flex; align-items: center; flex-wrap: nowrap; gap: 5px; min-width: 0; width: max-content; max-width: 100%; min-height: 28px; padding: 0 8px 0 6px;
-  border: 0; border-radius: 999px; background: color-mix(in oklab, var(--signal) 5%, var(--surface-raised)); box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--signal) 18%, transparent);
+  border: 0; border-radius: 999px; background: var(--chip-bg); box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--signal) 14%, var(--chip-line));
   color: var(--ink); font: 500 12px/1 var(--font); cursor: pointer; -webkit-user-select: none; user-select: none; transition: none;
 }
-.live-chip:hover, .live.open .live-chip { box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--signal) 40%, transparent); }
+.live-chip:hover, .live.open .live-chip { box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--signal) 32%, var(--chip-line)); }
 /* State tints are independent of the selected artwork. */
 /* A finger's reach: the chip answers a little beyond its edge (44px tall, and wide on a phone row). */
 .live-chip::before { content: ''; position: absolute; inset: -8px -2px; border-radius: 999px; }
@@ -220,10 +219,9 @@ onBeforeUnmount(() => {
 .dot { flex-shrink: 0; width: 3px; height: 3px; border-radius: 50%; background: var(--ink-3); }
 .key { min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: 11px; font-weight: 600; letter-spacing: .04em; color: var(--teal-ink); white-space: nowrap; }
 .as-row .live-chip { min-height: 28px; padding: 0 8px 0 6px; }
-/* Keep two overlapping robots and the total in the phone row's gutter. */
+/* Phones give the row chip its own line: robots, the total, the lead's name and the state. */
 @media (max-width: 760px) {
-  .as-row .key, .as-row .row-name { display: none; }
-  .as-row .live-chip { gap: 0; }
+  .as-row .live-chip { gap: 5px; }
   .as-row .live-chip::before { inset: -8px -2px; }
 }
 /* ---------- The popover ---------- */
@@ -256,7 +254,6 @@ a.agent-line:focus-visible, .ticket-line:focus-visible { outline: none; box-shad
 .agent-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 12px; color: var(--ink-2); }
 .sep { width: 3px; height: 3px; border-radius: 50%; background: var(--ink-3); }
 .agent-meta time { color: var(--ink); font-size: 11.5px; }
-.since { white-space: nowrap; color: var(--ink-2); }
 .go { flex-shrink: 0; color: var(--ink-3); }
 a.agent-line:hover .go { color: var(--teal-ink); }
 .ticket-line { display: flex; align-items: baseline; gap: 8px; min-width: 0; margin: 0; padding: 6px 8px 7px 46px; border-radius: 8px; color: var(--ink-2); font-size: 12.5px; text-decoration: none; }
@@ -268,7 +265,6 @@ a.agent-line:hover .go { color: var(--teal-ink); }
 .chip-state :deep(.state-word) { white-space: nowrap; }
 .live-chip { opacity: var(--agent-state-opacity, 1); }
 .live-chip :deep(.live-bot), .live-chip :deep(.agent-state-label) { opacity: 1; }
-.as-row .key, .as-row .row-name { display: none; }
 /* A narrow card keeps one line by showing two robots; the count still says how many. */
 @container live-card (max-width: 300px) {
   .as-card .face:nth-child(n+3) { display: none; }

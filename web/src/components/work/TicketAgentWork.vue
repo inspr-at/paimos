@@ -8,8 +8,9 @@ import {
 } from '../../lib/ticketAgentWork'
 
 // Sessions that worked on this ticket, epic or task, including visible
-// descendants. A session with several models is counted once. Missing tokens
-// and cost stay unknown; they are not shown as zero.
+// descendants. A session with several models is counted once. Missing tokens,
+// cost, model or effort are left out, never shown as zero. With no sessions the
+// section is not shown at all (unless the query was capped).
 const props = defineProps<{ nodeId: string; kind: string }>()
 
 const report = ref<TicketAgentWork | null>(null)
@@ -47,17 +48,20 @@ const rollup = computed(() => {
   return 'Totals include this task and the work under it.'
 })
 
+const known = (...parts: string[]) => parts.filter(Boolean).join(' · ')
+const duration = (seconds: number | null, state: string) => { const text = formatWorkDuration(seconds, state); return text === 'Time unknown' ? '' : text }
+
 function costLabel(amount: string | null, state: string): string {
-  if (state === 'unknown' || amount == null) return 'Cost unknown'
+  if (state === 'unknown' || amount == null) return ''
   const text = formatUsd(amount)
-  if (!text) return 'Cost unknown'
+  if (!text) return ''
   if (state === 'provisional') return `${text} provisional`
   if (state === 'partial') return `${text}, incomplete`
   return `${text} estimated`
 }
 
 function tokenLabel(input: string | null, output: string | null, cached: string | null, state: string, cachedState: string): string {
-  if (state === 'unknown' || input == null || output == null) return 'Tokens unknown'
+  if (state === 'unknown' || input == null || output == null) return ''
   const parts = [`${formatTokenCount(input)} in`, `${formatTokenCount(output)} out`]
   if (cachedState !== 'unknown' && cached != null) parts.push(`${formatTokenCount(cached)} cached`)
   const text = parts.join(' · ')
@@ -68,38 +72,40 @@ const summary = computed(() => {
   const totals = report.value?.totals
   if (!totals) return ''
   const count = `${totals.session_count} ${totals.session_count === 1 ? 'session' : 'sessions'}`
-  const time = formatWorkDuration(totals.duration_seconds, totals.duration_state)
-  if (!report.value?.usage_available) return `${count} · ${time}`
-  return `${count} · ${time} · ${tokenLabel(totals.input_tokens, totals.output_tokens, totals.cached_input_tokens, totals.tokens_state, totals.cached_state)} · ${costLabel(totals.estimated_cost_usd, totals.cost_state)}`
+  const time = duration(totals.duration_seconds, totals.duration_state)
+  if (!report.value?.usage_available) return known(count, time)
+  return known(count, time, tokenLabel(totals.input_tokens, totals.output_tokens, totals.cached_input_tokens, totals.tokens_state, totals.cached_state), costLabel(totals.estimated_cost_usd, totals.cost_state))
 })
 
 function displayModel(session: TicketAgentSession): string {
   if (session.models.length === 1) return session.models[0].model
   if (session.models.length > 1) return `${session.models.length} models`
   if (session.model_state === 'known' && session.model) return session.model
-  return 'Model unknown'
+  return ''
 }
 
 function rowMeta(session: TicketAgentSession): string {
-  const effort = session.effort_state === 'known' && session.effort ? session.effort : 'Effort unknown'
-  return `${harnessLabel(session.harness)} · ${displayModel(session)} · ${effort} · ${formatWorkDuration(session.duration_seconds, session.duration_state)}`
+  const effort = session.effort_state === 'known' && session.effort ? session.effort : ''
+  // An unlabelled session is already named after its harness.
+  return known(session.label ? harnessLabel(session.harness) : '', displayModel(session), effort, duration(session.duration_seconds, session.duration_state))
 }
 
 function rowUsage(session: TicketAgentSession): string {
-  return `${tokenLabel(session.input_tokens, session.output_tokens, session.cached_input_tokens, session.tokens_state, session.cached_state)} · ${costLabel(session.estimated_cost_usd, session.cost_state)}`
+  return known(tokenLabel(session.input_tokens, session.output_tokens, session.cached_input_tokens, session.tokens_state, session.cached_state), costLabel(session.estimated_cost_usd, session.cost_state))
 }
 
 function modelCost(model: TicketAgentUsageModel): string {
-  if (model.cost_state !== 'estimated' || model.estimated_cost_usd == null) return 'Cost unknown'
+  if (model.cost_state !== 'estimated' || model.estimated_cost_usd == null) return ''
   const amount = formatUsd(model.estimated_cost_usd)
-  if (!amount) return 'Cost unknown'
+  if (!amount) return ''
   return model.provisional ? `${amount} provisional` : `${amount} estimated`
 }
 
 function modelFigures(model: TicketAgentUsageModel): string {
   const tokens = tokenLabel(model.input_tokens, model.output_tokens, model.cached_input_tokens, model.tokens_state, model.cached_state)
-  const bill = model.billing_mode === 'subscription' ? ' · subscription, reported' : model.billing_mode === 'api' ? ' · api, reported' : ''
-  return `${tokens} · ${modelCost(model)}${bill}`
+  const bill = model.billing_mode === 'subscription' ? 'subscription' : model.billing_mode === 'api' ? 'API' : ''
+  const figures = known(tokens, modelCost(model))
+  return figures ? known(figures, bill) : ''
 }
 
 function priceTip(model: TicketAgentUsageModel): string {
@@ -113,22 +119,20 @@ function rowName(session: TicketAgentSession): string {
 </script>
 
 <template>
-  <section class="agent-work" aria-label="Agent work">
+  <section v-if="!loading && (error || (report && (report.sessions.length || report.scope_truncated)))" class="agent-work" aria-label="Agent work">
     <header class="section-head">
       <h3 class="eyebrow"><AppIcon name="agent" :size="12" />Agent work</h3>
     </header>
-    <p v-if="loading" class="note" role="status">Loading agent work…</p>
-    <p v-else-if="error" class="note warn" role="alert">{{ error }} <button type="button" class="retry" @click="load(nodeId)">Try again</button></p>
+    <p v-if="error" class="note warn" role="alert">{{ error }} <button type="button" class="retry" @click="load(nodeId)">Try again</button></p>
     <template v-else-if="report">
       <template v-if="!report.sessions.length">
-        <p class="note">{{ report.scope_truncated ? 'No agent sessions are recorded in the included items.' : `No agent sessions are recorded for this ${noun}.` }}</p>
-        <p v-if="report.scope_truncated" class="note">Some items under this {{ noun }} were left out of the query.</p>
+        <p class="note">No agent sessions are recorded in the included items.</p>
+        <p class="note">Some items under this {{ noun }} were left out of the query.</p>
       </template>
       <template v-else>
-        <p class="summary">{{ summary }}</p>
+        <p v-if="report.sessions.length > 1 || report.includes_descendants" class="summary">{{ summary }}</p>
         <p v-if="rollup" class="note">{{ rollup }}</p>
-        <p v-if="!report.usage_available" class="note">Token counts and estimated cost are not available yet.</p>
-        <p v-else-if="report.totals.tokens_state === 'partial' || report.totals.cost_state === 'partial'" class="note">Totals add only reported figures. Missing reports stay unknown.</p>
+        <p v-if="report.totals.tokens_state === 'partial' || report.totals.cost_state === 'partial'" class="note">Totals count reported figures only.</p>
         <p v-if="report.scope_truncated" class="note">Some items under this {{ noun }} were left out of the query.</p>
         <p v-if="report.list_truncated" class="note">Showing the {{ report.sessions.length }} most recent sessions. Totals cover only those.</p>
         <ul>
@@ -138,8 +142,8 @@ function rowName(session: TicketAgentSession): string {
               <span v-if="session.ticket_node_id !== nodeId" class="ticket-key">{{ session.ticket_key }}</span>
             </div>
             <p class="meta">{{ rowMeta(session) }}</p>
-            <p v-if="report.usage_available && session.models.length !== 1" class="meta figures">{{ session.models.length ? rowUsage(session) : 'Tokens unknown · Cost unknown' }}</p>
-            <p v-else-if="report.usage_available && session.models[0]" class="meta figures">
+            <p v-if="report.usage_available && session.models.length > 1 && rowUsage(session)" class="meta figures">{{ rowUsage(session) }}</p>
+            <p v-else-if="report.usage_available && session.models.length === 1 && session.models[0] && modelFigures(session.models[0])" class="meta figures">
               {{ modelFigures(session.models[0]) }}
               <span v-if="session.models[0].price_version" class="price" :data-tip="priceTip(session.models[0])">price v{{ session.models[0].price_version }}</span>
             </p>
@@ -147,7 +151,7 @@ function rowName(session: TicketAgentSession): string {
             <ul v-if="session.models.length > 1" class="models" :aria-label="`Models for ${rowName(session)}`">
               <li v-for="model in session.models" :key="model.model">
                 <span class="model-name">{{ model.model }}</span>
-                <span>{{ modelFigures(model) }}</span>
+                <span v-if="modelFigures(model)">{{ modelFigures(model) }}</span>
                 <span v-if="model.price_version" class="price" :data-tip="priceTip(model)">price v{{ model.price_version }}</span>
               </li>
             </ul>

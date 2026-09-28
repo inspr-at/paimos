@@ -118,13 +118,14 @@ const editStatusOptions = computed(() => {
   const options = statusOptions([props.item?.state ?? ''])
   return options.some(o => o.value === draft.state) || !draft.state ? options : [{ value: draft.state, meta: statusMeta(draft.state) }, ...options]
 })
-async function startEdit(focus: 'title' | 'body' = 'title') {
+async function startEdit(focus: 'title' | 'body' | 'benefit' = 'title') {
   if (!editable.value || !props.item || editing.value) return
   base = snapshot(); Object.assign(draft, base)
   editing.value = true
   await nextTick()
   // The caret goes to the end of the title: typing adds to it rather than replacing it.
   if (focus === 'title') { const el = titleField.value; el?.focus(); el?.setSelectionRange(el.value.length, el.value.length); growTitle() }
+  else if (focus === 'benefit') root.value?.querySelector<HTMLInputElement>('.edit-benefits input')?.focus()
   else root.value?.querySelector<HTMLTextAreaElement>('.edit-form .md-area')?.focus()
 }
 function changeBenefit(key: string, value: string | boolean) {
@@ -442,7 +443,6 @@ defineExpose({
             ><PersonAvatar v-if="draftAssignee" :id="draftAssignee.value" :name="draftAssignee.label" :size="18" /><AppIcon v-else name="user" :size="13" class="pick-none" /><span :id="`${uid}-assignee-value`" class="pick-value" :class="{ unset: !draftAssignee }">{{ draftAssignee?.label ?? 'Unassigned' }}</span><AppIcon name="chevron" :size="12" class="pick-chev" /></button>
           </div>
         </div>
-        <TicketBenefits v-if="item.kind_slug === 'ticket'" :fields="draft" editing :disabled="saving" :done="completedTicketState(item.state)" @change="changeBenefit" />
         <section class="edit-section" aria-labelledby="edit-desc"><h3 id="edit-desc" class="eyebrow">Description</h3>
           <MarkdownEditor v-model="draft.body" label="Description" bare :split="mode === 'full'" :min-rows="mode === 'full' ? 12 : 7" :attachment-id="attachmentId" placeholder="What is this about? Paste a screenshot to add it inline." @save="saveEdit" @cancel="cancelEdit" />
         </section>
@@ -452,6 +452,7 @@ defineExpose({
         <section class="edit-section" aria-labelledby="edit-notes"><h3 id="edit-notes" class="eyebrow">Notes</h3>
           <MarkdownEditor v-model="draft.notes" label="Notes" bare :split="mode === 'full'" :min-rows="3" :attachment-id="attachmentId" @save="saveEdit" @cancel="cancelEdit" />
         </section>
+        <TicketBenefits v-if="item.kind_slug === 'ticket'" class="edit-benefits" :fields="draft" editing :disabled="saving" :done="completedTicketState(item.state)" @change="changeBenefit" />
         <p class="edit-hint"><KeyCap k="mod" /><KeyCap k="enter" /> save · <kbd class="keycap">esc</kbd> cancel · paste or drop images to attach them</p>
       </form>
 
@@ -478,7 +479,6 @@ defineExpose({
           <div class="divider" />
 
           <div class="sections">
-            <TicketBenefits v-if="item.kind_slug === 'ticket'" :fields="item.fields" :done="completedTicketState(item.state)" />
             <MarkdownSection ref="descSection" title="Description" :value="item.body" :editable="editable" :save="ticket.setBody" :attachment-id="attachable ? attachmentId : undefined" empty-text="Add a description" @open-attachment="openAttachment" />
             <MarkdownSection v-if="acceptance.trim() || showAcceptance" ref="acSection" title="Acceptance criteria" :value="acceptance" :editable="editable" :save="value => ticket.setField('acceptance_criteria', value)" :attachment-id="attachable ? attachmentId : undefined" @open-attachment="openAttachment" />
             <MarkdownSection v-if="notes.trim() || showNotes" ref="notesSection" title="Notes" :value="notes" :editable="editable" :save="value => ticket.setField('notes', value)" :attachment-id="attachable ? attachmentId : undefined" @open-attachment="openAttachment" />
@@ -486,6 +486,7 @@ defineExpose({
               <button v-if="!(acceptance.trim() || showAcceptance)" type="button" class="add-section" @click="addSection('acceptance')"><AppIcon name="plus" :size="12" />Acceptance criteria</button>
               <button v-if="!(notes.trim() || showNotes)" type="button" class="add-section" @click="addSection('notes')"><AppIcon name="plus" :size="12" />Notes</button>
             </div>
+            <TicketBenefits v-if="item.kind_slug === 'ticket'" class="ws-benefits" :fields="item.fields" :done="completedTicketState(item.state)" :editable="editable" @edit="startEdit('benefit')" />
           </div>
 
           <TicketAgentWork v-if="item.kind_slug === 'ticket' || item.kind_slug === 'epic' || item.kind_slug === 'task'" class="ws-block" :node-id="item.id" :kind="item.kind_slug" />
@@ -578,6 +579,7 @@ defineExpose({
 .meta time { color: var(--ink-2); }
 .divider { height: 1px; margin: 18px 0 20px; background: linear-gradient(90deg, var(--line-2), transparent); }
 .read-only { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; padding: 8px 12px; border-radius: 10px; background: var(--code-bg); font-size: 12.5px; color: var(--ink-2); }
+.ws-benefits { margin-top: 26px; }
 .add-sections { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 14px; }
 .add-section { display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 10px; border: 0; border-radius: 999px; background: transparent; box-shadow: inset 0 0 0 1px var(--line); color: var(--ink-3); font-size: 12px; }
 @media (hover: hover) { .add-section:hover { color: var(--teal-ink); box-shadow: inset 0 0 0 1px var(--glass-rim); background: var(--row-hover); } }
@@ -626,7 +628,8 @@ defineExpose({
 .pick-chev { flex-shrink: 0; color: var(--ink-3); }
 .edit-section { display: grid; gap: 8px; }
 .edit-section .eyebrow { margin: 0; }
-.edit-hint { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--ink-3); }
+.edit-hint { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; font-size: 12px; color: var(--ink-3); }
+@media (max-width: 720px), (hover: none) { .edit-hint { display: none; } }
 /* Full page editing is a focused writing layout: editor and preview side by side. */
 .ticket-ws.full.editing { max-width: 1480px; }
 .full .edit-form { padding: 26px 0 40px; }

@@ -42,7 +42,7 @@ const value = (project: Project, kind: StatKind) => kind === 'open' ? project.op
           <span v-else-if="project.state === 'deleted'" class="chip state-chip">Deleted</span>
           <span v-else-if="project.archived && showArchived" class="chip state-chip">Archived</span>
         </span>
-        <span class="project-desc">{{ project.description || 'No description' }}</span>
+        <span v-if="project.description" class="project-desc" :data-tip="project.description.length > 60 ? project.description : undefined">{{ project.description }}</span>
       </span>
       <template v-for="id in columns" :key="id">
         <StatCount v-if="stat(id)" class="stat" :kind="stat(id)!" :value="value(project, stat(id)!)" />
@@ -83,8 +83,8 @@ const value = (project: Project, kind: StatKind) => kind === 'open' ? project.op
 .project-text { display: grid; gap: 1px; min-width: 0; }
 /* The live chip's place: the end of the project column (an absolutely placed
    grid child takes its grid area as containing block). */
-.row-live { position: absolute; grid-column: 2 / 3; grid-row: 1; top: 50%; right: 0; translate: 0 -50%; z-index: 1; max-width: 200px; }
-.project-item.live .project-text { padding-right: 208px; }
+.row-live { position: absolute; grid-column: 2 / 3; grid-row: 1; top: 50%; right: 0; translate: 0 -50%; z-index: 1; max-width: 260px; }
+.project-item.live .project-text { padding-right: 268px; }
 .project-name { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .name { font-size: 14.5px; font-weight: 650; letter-spacing: -.005em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .project-desc { font-size: 13px; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

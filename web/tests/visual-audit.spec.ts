@@ -464,6 +464,38 @@ function ticketData() {
 async function projectAgents(page: Page) {
   await mockAgents(page, agentData({ ...WORLD, now: AT }))
 }
+// One story across the ticket list, the panel chip and Agent work: the live
+// worker on PHAROS-11 is the agents world's camy session, the one on PHAROS-12 is
+// nova, and the agent-work report lists the same sessions.
+function ticketDataWithAgents() {
+  const data = ticketData()
+  const bind = (key: string, n: number, label: string, harness: 'claude' | 'codex') => {
+    const worker = data.live.find(agent => agent.ticket?.key === key && agent.display_label)
+    if (worker) Object.assign(worker, { display_label: label, harness, session_id: `5e000000-0000-4000-8000-0000000000${String(n).padStart(2, '0')}`, principal_id: `a0000000-0000-4000-8000-00000000000${n}` })
+  }
+  bind('PHAROS-11', 1, 'camy', 'claude')
+  bind('PHAROS-12', 2, 'nova', 'codex')
+  return data
+}
+async function ticketAgentWork(page: Page) {
+  const session = (n: number, key: string, harness: string, label: string, model: string, minutes: number, input: string, output: string, cost: string) => ({
+    id: `5e000000-0000-4000-8000-0000000000${String(n).padStart(2, '0')}`, ticket_node_id: `n-${n}`, ticket_key: key, ticket_title: '', harness, label,
+    model, model_state: 'known', effort: 'high', effort_state: 'known', phase: 'working', started_at: new Date(AT - minutes * 60_000).toISOString(), ended_at: null,
+    duration_seconds: minutes * 60, duration_state: 'ongoing', usage_reported: true, models_truncated: false,
+    models: [{ model, input_tokens: input, output_tokens: output, cached_input_tokens: null, tokens_state: 'known', cached_state: 'unknown', estimated_cost_usd: cost, cost_state: 'estimated', provisional: true, price_version: '3', billing_mode: 'subscription', subscription_label: null }],
+    input_tokens: input, output_tokens: output, cached_input_tokens: null, tokens_state: 'known', cached_state: 'unknown', estimated_cost_usd: cost, cost_state: 'provisional', unknown_token_models: 0, unknown_cost_models: 0,
+  })
+  const reports: Record<string, ReturnType<typeof session>> = {
+    'n-1': session(1, 'PHAROS-11', 'claude', 'camy', 'claude-fable-high', 72, '184300', '22140', '3.840000000000'),
+    'n-2': session(2, 'PHAROS-12', 'codex', 'nova', 'codex-astra-xhigh', 26, '41200', '5900', '0.610000000000'),
+  }
+  for (const [node, row] of Object.entries(reports)) {
+    await page.route(`**/api/nodes/${node}/agent-work`, route => route.fulfill({ json: {
+      node_id: node, kind: 'ticket', currency: 'USD', usage_available: true, includes_descendants: false, scope_truncated: false, list_truncated: false, sessions: [row],
+      totals: { session_count: 1, input_tokens: row.input_tokens, output_tokens: row.output_tokens, cached_input_tokens: null, tokens_state: 'known', cached_state: 'unknown', estimated_cost_usd: row.estimated_cost_usd, cost_state: 'provisional', currency: 'USD', duration_seconds: row.duration_seconds, duration_state: 'ongoing', unknown_token_sessions: 0, unknown_cost_sessions: 0, unknown_token_models: 0, unknown_cost_models: 0 },
+    } }))
+  }
+}
 const grid = (page: Page) => page.getByRole('grid', { name: 'Tickets' })
 const ticketRow = (page: Page, key: string) => grid(page).locator('tr.ticket-row').filter({ has: page.locator('.key', { hasText: new RegExp(`^${key}$`) }) })
 const ticketPanel = (page: Page) => page.getByRole('complementary', { name: 'Ticket details' })
@@ -665,21 +697,24 @@ const shots: Shot[] = [
   } },
   { screen: 'ticket', state: 'workspace-with-benefits', setup: async page => {
     await page.clock.setSystemTime(AT)
-    await mockWork(page, ticketData())
+    await mockWork(page, ticketDataWithAgents())
     await projectAgents(page)
+    await ticketAgentWork(page)
   }, act: async page => { await page.goto('/p/PHAROS/PHAROS-11'); await expect(ticketPanel(page)).toBeVisible(); await page.waitForTimeout(400) } },
   { screen: 'ticket', state: 'benefits-missing', setup: async page => {
     await page.clock.setSystemTime(AT)
-    await mockWork(page, ticketData())
+    await mockWork(page, ticketDataWithAgents())
     await projectAgents(page)
+    await ticketAgentWork(page)
   }, act: async page => {
     await page.goto('/p/PHAROS/PHAROS-12')
     await expect(ticketPanel(page).getByRole('region', { name: 'User benefit' })).toBeVisible()
   } },
   { screen: 'ticket', state: 'benefits-edit', setup: async page => {
     await page.clock.setSystemTime(AT)
-    await mockWork(page, ticketData())
+    await mockWork(page, ticketDataWithAgents())
     await projectAgents(page)
+    await ticketAgentWork(page)
   }, act: async page => {
     await page.goto('/p/PHAROS/PHAROS-12')
     await ticketPanel(page).getByRole('button', { name: 'Edit', exact: true }).click()

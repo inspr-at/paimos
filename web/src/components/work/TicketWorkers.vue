@@ -34,7 +34,7 @@ const leadLabel = computed(() => {
   const agent = lead.value
   if (!agent) return ''
   const limits = [
-    live.truncated ? 'More live sessions were left out of this update.' : '',
+    live.truncated ? 'Some live sessions are not shown.' : '',
     live.pollStale ? 'Showing the last successful update.' : '',
   ].filter(Boolean)
   return `${lineLabel(agent)}${limits.length ? ` ${limits.join(' ')}` : ''}`
@@ -99,7 +99,7 @@ onBeforeUnmount(() => {
   <span v-if="lead" ref="root" class="ticket-workers" :class="`as-${variant}`" @click.stop @keydown="onKey" @dragstart.stop.prevent>
     <component
       :is="leadTo ? RouterLink : 'button'" :ref="setLeadTrigger" :to="leadTo || undefined" :type="leadTo ? undefined : 'button'"
-      class="worker-lead" :aria-label="leadLabel" :aria-expanded="!leadTo ? open : undefined" :aria-controls="!leadTo && open ? id : undefined"
+      class="worker-lead" :data-tip="`${who(lead)} · ${phaseLabel(lead)}`" :aria-label="leadLabel" :aria-expanded="!leadTo ? open : undefined" :aria-controls="!leadTo && open ? id : undefined"
       @click.stop="leadClick"
     >
       <LiveBot :id="lead.principal_id" :state="lead.state" :harness="lead.harness" :event-pulse="live.eventPulseFor(lead)" :size="botSize" />
@@ -126,7 +126,7 @@ onBeforeUnmount(() => {
             <p v-if="!agent.session_id" class="withheld">Session details are withheld</p>
           </li>
         </ul>
-        <p v-if="live.truncated" class="limit">More live sessions were left out of this update.</p>
+        <p v-if="live.truncated" class="limit">Some live sessions are not shown.</p>
         <p v-if="live.pollStale" class="limit">Showing the last successful update.</p>
       </div>
     </Teleport>

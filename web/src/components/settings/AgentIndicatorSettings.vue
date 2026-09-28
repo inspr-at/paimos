@@ -76,10 +76,9 @@ const fill = (value: number, min: number, max: number) => ({ '--fill': `${(value
   <div class="indicator-settings">
     <fieldset class="picker">
       <legend :id="`${id}-label`">Agent indicator</legend>
-      <p :id="`${id}-hint`" class="hint">Choose how your agents look while they work.</p>
       <div class="picker-body">
         <div class="picker-main">
-          <div ref="grid" class="indicator-choices" role="radiogroup" :aria-labelledby="`${id}-label`" :aria-describedby="`${id}-hint`">
+          <div ref="grid" class="indicator-choices" role="radiogroup" :aria-labelledby="`${id}-label`">
             <button v-for="(option, index) in indicatorVariants" :key="option.id" type="button" role="radio"
               class="indicator-choice" :class="{ selected: selected === option.id, unavailable: !available.has(option.id) }"
               :data-variant="option.id" :aria-checked="selected === option.id" :aria-disabled="!available.has(option.id)"
@@ -96,6 +95,7 @@ const fill = (value: number, min: number, max: number) => ({ '--fill': `${(value
         </div>
         <div class="demo" aria-hidden="true">
           <LiveBot :indicator-style="selected" id="indicator-demo" :size="64" />
+          <span class="demo-label">Preview</span>
         </div>
       </div>
     </fieldset>
@@ -103,7 +103,7 @@ const fill = (value: number, min: number, max: number) => ({ '--fill': `${(value
     <div class="setting-row">
       <div class="setting-copy">
         <p :id="`${id}-ring-label`" class="setting-label">Activity ring</p>
-        <p :id="`${id}-ring-hint`" class="hint">The outline around each agent: Moving turns while it works, Still stays put, Off hides it. Separate from Hovering.</p>
+        <p :id="`${id}-ring-hint`" class="hint">The outline around each agent while it works.</p>
       </div>
       <div ref="ringGroup" class="seg" role="radiogroup" :aria-labelledby="`${id}-ring-label`" :aria-describedby="`${id}-ring-hint`" @keydown="ringKeys">
         <button v-for="option in RINGS" :key="option.ring" type="button" role="radio" :aria-checked="ring === option.ring" :tabindex="ring === option.ring ? 0 : -1" @click="chooseRing(option.ring)">{{ option.label }}</button>
@@ -113,20 +113,19 @@ const fill = (value: number, min: number, max: number) => ({ '--fill': `${(value
     <div class="setting-row slider-row">
       <div class="setting-copy">
         <label :for="`${id}-size`" class="setting-label">Icon size</label>
-        <p :id="`${id}-size-hint`" class="hint">How much of the space inside the ring the icon fills. At 100% it reaches the ring.</p>
+        <p :id="`${id}-size-hint`" class="hint">How much of the ring the icon fills.</p>
       </div>
       <div class="slider">
         <input :id="`${id}-size`" class="range" type="range" :min="ICON_SIZE.min" :max="ICON_SIZE.max" :step="ICON_SIZE.step" :value="size"
           :style="fill(size, ICON_SIZE.min, ICON_SIZE.max)" :aria-valuetext="sizeText" :aria-describedby="`${id}-size-hint`"
           @input="chooseSize(Number(($event.target as HTMLInputElement).value))" />
-        <span class="slider-value">{{ size }}%</span>
+        <span class="slider-value" :class="{ native: choice.size === undefined }" :data-tip="choice.size === undefined ? 'As each style is drawn' : undefined">{{ size }}%</span>
         <button v-if="choice.size !== undefined" class="link-btn" type="button" @click="chooseSize(undefined)">Use drawn sizes</button>
-        <span v-else class="slider-note">Each style as drawn</span>
       </div>
     </div>
 
     <div class="setting-row switch-row">
-      <div class="setting-copy"><p :id="`${id}-hovering-label`" class="setting-label">Hovering</p><p :id="`${id}-hovering-hint`" class="hint">A gentle up-and-down motion while working. Respects reduced motion.</p></div>
+      <div class="setting-copy"><p :id="`${id}-hovering-label`" class="setting-label">Hovering</p><p :id="`${id}-hovering-hint`" class="hint">A gentle float while working, off with reduced motion.</p></div>
       <label class="switch">
         <input type="checkbox" role="switch" :checked="choice.hovering" :aria-labelledby="`${id}-hovering-label`" :aria-describedby="`${id}-hovering-hint`" @change="failed = false; setHovering(($event.target as HTMLInputElement).checked)" />
         <span>{{ choice.hovering ? 'On' : 'Off' }}</span>
@@ -137,10 +136,7 @@ const fill = (value: number, min: number, max: number) => ({ '--fill': `${(value
     <fieldset class="state-settings">
       <legend>State colours</legend>
       <div class="setting-row flush">
-        <div class="setting-copy">
-          <p class="hint">The same colours, marks and words everywhere. Saved for your account.</p>
-          <p :id="`${id}-palette-hint`" class="hint">{{ AGENT_PALETTES.find(option => option.id === states.palette)?.description }}</p>
-        </div>
+        <p :id="`${id}-palette-hint`" class="hint">{{ AGENT_PALETTES.find(option => option.id === states.palette)?.description }}</p>
         <select class="field palette" aria-label="Palette" :aria-describedby="`${id}-palette-hint`" :value="states.palette" @change="saveState({ palette: ($event.target as HTMLSelectElement).value as AgentPalette })">
           <option v-for="option in AGENT_PALETTES" :key="option.id" :value="option.id">{{ option.name }}</option>
         </select>
@@ -150,27 +146,24 @@ const fill = (value: number, min: number, max: number) => ({ '--fill': `${(value
           <LiveBot :state="state" :size="32" /><AgentStateLabel :state="state" />
         </span>
       </div>
-      <div class="setting-row switch-row">
-        <div class="setting-copy"><p :id="`${id}-dim`" class="setting-label">Dim inactive</p><p class="hint">Idle and normally stopped agents stay grey.</p></div>
-        <label class="switch"><input type="checkbox" role="switch" :checked="states.dimInactive" :aria-labelledby="`${id}-dim`" @change="saveState({ dimInactive: ($event.target as HTMLInputElement).checked })" /><span>{{ states.dimInactive ? 'On' : 'Off' }}</span></label>
-      </div>
-      <div class="setting-row slider-row" :class="{ disabled: !states.dimInactive }">
-        <div class="setting-copy"><label :for="`${id}-opacity`" class="setting-label">Inactive opacity</label></div>
-        <div class="slider">
-          <input :id="`${id}-opacity`" class="range" type="range" min="40" max="80" step="1" :disabled="!states.dimInactive" :value="states.inactiveOpacity"
-            :style="fill(states.inactiveOpacity, 40, 80)" aria-label="Inactive opacity" :aria-valuetext="`${states.inactiveOpacity}%`"
-            @input="saveState({ inactiveOpacity: Number(($event.target as HTMLInputElement).value) })" />
-          <span class="slider-value">{{ states.inactiveOpacity }}%</span>
+      <div class="setting-row switch-row dim-row">
+        <div class="setting-copy"><p :id="`${id}-dim`" class="setting-label">Dim inactive</p><p class="hint">Idle and stopped agents fade.</p></div>
+        <div class="dim-controls">
+          <div v-if="states.dimInactive" class="slider compact">
+            <input :id="`${id}-opacity`" class="range" type="range" min="40" max="80" step="1" :value="states.inactiveOpacity"
+              :style="fill(states.inactiveOpacity, 40, 80)" aria-label="Inactive opacity" :aria-valuetext="`${states.inactiveOpacity}%`"
+              @input="saveState({ inactiveOpacity: Number(($event.target as HTMLInputElement).value) })" />
+            <span class="slider-value">{{ states.inactiveOpacity }}%</span>
+          </div>
+          <label class="switch"><input type="checkbox" role="switch" :checked="states.dimInactive" :aria-labelledby="`${id}-dim`" @change="saveState({ dimInactive: ($event.target as HTMLInputElement).checked })" /><span>{{ states.dimInactive ? 'On' : 'Off' }}</span></label>
         </div>
       </div>
-      <div class="heartbeat">
-        <p class="setting-label">Heartbeat timing</p>
-        <p class="hint">Warnings for sessions that were working. No heartbeat means activity is unconfirmed; Problem means a reported failure.</p>
+      <div class="setting-row">
+        <div class="setting-copy"><p class="setting-label">Heartbeat warnings</p><p class="hint">When a working agent goes quiet.</p></div>
         <div class="thresholds">
-          <label class="state-field">Yellow after (minutes)<input class="field" type="number" min="1" max="1439" step="1" :value="states.yellowMinutes" @change="saveState({ yellowMinutes: Number(($event.target as HTMLInputElement).value) })" /></label>
-          <label class="state-field">Red after (minutes)<input class="field" type="number" :min="states.yellowMinutes + 1" max="1440" step="1" :value="states.redMinutes" @change="saveState({ redMinutes: Number(($event.target as HTMLInputElement).value) })" /></label>
+          <label class="state-field"><AgentStateLabel state="awaiting" /><span class="unit">after</span><input class="field" type="number" min="1" max="1439" step="1" aria-label="Yellow after (minutes)" :value="states.yellowMinutes" @change="saveState({ yellowMinutes: Number(($event.target as HTMLInputElement).value) })" /><span class="unit">min</span></label>
+          <label class="state-field" data-tip="Always after the first warning"><AgentStateLabel state="unresponsive" /><span class="unit">after</span><input class="field" type="number" :min="states.yellowMinutes + 1" max="1440" step="1" aria-label="Red after (minutes)" :value="states.redMinutes" @change="saveState({ redMinutes: Number(($event.target as HTMLInputElement).value) })" /><span class="unit">min</span></label>
         </div>
-        <p class="hint">Red must follow yellow. Changing yellow moves red forward when needed.</p>
       </div>
       <p v-if="stateFailed" class="save-error" role="alert">Your agent state settings could not be saved.<button class="btn sm" type="button" @click="saveState({})">Try again</button></p>
     </fieldset>
@@ -193,7 +186,8 @@ legend, .setting-label { display: block; padding: 0; font-size: 13.5px; font-wei
 .placeholder { width: 30px; height: 30px; fill: none; stroke: var(--ink-3); stroke-width: 1; opacity: .45; }
 .caption { margin-top: 10px; min-height: 20px; font-size: 13px; line-height: 20px; color: var(--ink-2); }
 .caption strong { font-weight: 600; color: var(--ink); }
-.demo { display: grid; place-items: center; width: 96px; height: 96px; border-radius: 14px; background: var(--surface-sunken); }
+.demo { display: grid; place-items: center; align-content: center; gap: 6px; width: 104px; height: 104px; border-radius: 14px; background: var(--surface-sunken); }
+.demo-label { font: 500 9.5px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--ink-3); font-variant-ligatures: none; }
 .setting-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 18px; }
 .setting-row.flush { margin-top: 4px; }
 .setting-copy { min-width: 0; }
@@ -201,7 +195,8 @@ legend, .setting-label { display: block; padding: 0; font-size: 13.5px; font-wei
 .switch-row .switch { flex-shrink: 0; }
 .slider { display: grid; grid-template-columns: minmax(140px, 220px) 42px; align-items: center; gap: 4px 10px; flex-shrink: 0; }
 .slider-value { font-size: 12.5px; font-weight: 600; font-variant-numeric: tabular-nums; text-align: right; color: var(--ink); }
-.slider-note, .link-btn { grid-column: 1; justify-self: start; font-size: 12px; color: var(--ink-2); }
+.slider-value.native { color: var(--ink-2); font-weight: 500; }
+.link-btn { grid-column: 1; justify-self: start; font-size: 12px; color: var(--ink-2); }
 .link-btn { padding: 2px 0; border: 0; background: none; color: var(--teal-ink); font: inherit; font-size: 12px; font-weight: 600; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
 .link-btn:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; border-radius: 4px; }
 .slider-row.disabled .setting-label, .slider-row.disabled .slider-value { color: var(--ink-3); }
@@ -224,10 +219,12 @@ legend, .setting-label { display: block; padding: 0; font-size: 13.5px; font-wei
 .palette { flex-shrink: 0; width: 220px; min-height: 36px; padding: 6px 10px; }
 .state-preview { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px 10px; margin-top: 14px; padding: 14px 10px; border-radius: 10px; background: var(--surface-sunken); }
 .state-example { display: grid; justify-items: center; gap: 8px; text-align: center; }
-.heartbeat { margin-top: 22px; }
-.state-field { display: grid; gap: 6px; margin-block: 14px; font-size: 12.5px; font-weight: 550; color: var(--ink); }
-.state-field .field { width: 100%; min-height: 36px; padding: 6px 10px; }
-.thresholds { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.dim-controls { display: flex; align-items: center; gap: 16px; flex-shrink: 0; }
+.slider.compact { grid-template-columns: 140px 42px; }
+.thresholds { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; flex-shrink: 0; }
+.state-field { display: inline-flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--ink-2); }
+.state-field .field { width: 64px; min-height: 32px; padding: 4px 8px; text-align: right; font-variant-numeric: tabular-nums; }
+.unit { color: var(--ink-3); }
 @media (max-width: 600px) {
   .picker-body { grid-template-columns: minmax(0, 1fr); }
   .demo { grid-row: 1; width: 100%; height: 84px; }
@@ -238,6 +235,13 @@ legend, .setting-label { display: block; padding: 0; font-size: 13.5px; font-wei
   .seg button { height: 40px; }
   .slider { grid-template-columns: minmax(0, 1fr) 42px; }
   .palette { width: 100%; }
+  /* Phones: the switch stays beside its copy; the opacity slider takes the next line. */
+  .dim-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "copy switch" "slider slider"; gap: 10px 16px; }
+  .dim-row .setting-copy { grid-area: copy; }
+  .dim-controls { display: contents; }
+  .dim-controls .switch { grid-area: switch; }
+  .slider.compact { grid-area: slider; grid-template-columns: minmax(0, 1fr) 42px; }
+  .thresholds { justify-content: flex-start; }
   .state-preview { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 </style>
