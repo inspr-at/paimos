@@ -18,6 +18,8 @@ import ProvenanceDetail from './ProvenanceDetail.vue'
 import SessionStateEvidence from './SessionStateEvidence.vue'
 import SessionRecovery from './SessionRecovery.vue'
 import { activityOf, currentStep, type ActivitySession } from './activity'
+import EtaCell from '../work/EtaCell.vue'
+import { etaFromSession } from '../../lib/eta'
 import { metadataChangeText, metadataChanges } from './metadataHistory'
 
 // One session in the docked panel: who and where, the bound ticket, recent runs with
@@ -179,6 +181,7 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
         <p v-if="view.session.archived_at" class="now-meta">Archived registration · process state unknown. No process was stopped by recovery.</p>
         <strong class="now-step">{{ step }}</strong>
         <p class="now-meta">Started {{ absoluteTime(view.session.created_at) }} · elapsed {{ elapsed(view.session, now) }}</p>
+        <EtaCell :eta="etaFromSession(view.session)" :now="now" />
         <SessionStateEvidence :view="view" :now="now" />
         <ol v-if="timeline.length" class="activity-timeline" aria-label="Recent activity">
           <li v-for="(item, index) in timeline.slice(0, 6)" :key="`${item.at}-${index}`"><time :datetime="item.at">{{ relativeTime(item.at, { now }) }}</time><span>{{ item.note }}</span></li>
@@ -188,6 +191,7 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
       <section v-if="view.ticket" class="ticket-card" aria-labelledby="ticket-title">
         <h3 id="ticket-title" class="eyebrow">Bound ticket</h3>
         <TicketPeekLink :ticket-key="view.ticket.key" :href="view.ticket.href" :tip="view.ticket.title" class="ticket-detail"><span class="ticket-chip">{{ view.ticket.key }}</span><strong>{{ view.ticket.title }}</strong><span v-if="ticketState" class="ticket-status">{{ ticketState }}</span></TicketPeekLink>
+        <EtaCell :eta="etaFromSession(view.session)" :now="now" />
       </section>
 
       <dl class="facts">

@@ -23,6 +23,8 @@ import LiveNow from '../components/agents/LiveNow.vue'
 import StartAgentDialog from '../components/agents/StartAgentDialog.vue'
 import RunQueue from '../components/agents/RunQueue.vue'
 import ConnectedComputers from '../components/agents/ConnectedComputers.vue'
+import EtaCell from '../components/work/EtaCell.vue'
+import { etaFromSession } from '../lib/eta'
 
 // Markus's desk for agents: what waits on him first, then every live session grouped
 // by state, with accounts and pacing folded below them. A session opens in the docked panel.
@@ -239,6 +241,7 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
         <p class="eyebrow">{{ session.identity?.tenant.name ?? 'Workspace' }}</p>
         <h1 id="agents-title">Agents</h1>
         <p class="summary"><span v-if="summary">{{ summary }}</span><span v-else class="skeleton summary-skeleton" /></p>
+        <EtaCell v-if="selected" :eta="etaFromSession(selected.session)" :now="agents.now" />
       </div>
       <div class="head-side">
         <button v-if="canStart" type="button" class="btn primary start-agent" @click="startDialog?.open()"><AppIcon name="plus" :size="15" />Start agent</button>

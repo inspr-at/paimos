@@ -16,6 +16,8 @@ import AgentGlyph from './AgentGlyph.vue'
 import HarnessBadge from './HarnessBadge.vue'
 import ProviderMark from './ProviderMark.vue'
 import { intendedResult, sessionContext, sessionExecution } from './sessionRow'
+import EtaCell from '../work/EtaCell.vue'
+import { etaFromSession } from '../../lib/eta'
 
 // Session families stay together across status groups. Each lead's history is
 // opt-in for this mounted list only; refreshes never open it or persist it.
@@ -26,6 +28,7 @@ const props = defineProps<{
 const emit = defineEmits<{ open: [id: string]; control: [view: SessionView, kind: SessionControl['kind']]; focusRow: [id: string]; retry: []; start: [] }>()
 const showStopped = ref(false)
 const total = computed(() => GROUPS.reduce((sum, g) => sum + props.groups[g.id].length, 0))
+const showEta = computed(() => GROUPS.some(group => props.groups[group.id].some(view => etaFromSession(view.session))))
 const stopped = computed(() => GROUPS.flatMap(g => props.groups[g.id]).filter(v => v.session.phase === 'stopped' || v.session.stopped_at).length)
 const live = computed(() => total.value - stopped.value)
 type Branch = SessionBranch<SessionView>
@@ -135,9 +138,10 @@ function rowClick(event: MouseEvent, id: string) {
     </div>
     <ConnectHint v-else-if="!total" :can-start="canStart" @start="emit('start')" />
 
-    <div v-else class="table" role="table" aria-label="Agent sessions">
+    <div v-else class="table" :class="{ 'has-eta': showEta }" role="table" aria-label="Agent sessions">
       <div class="thead" role="row">
         <span role="columnheader">State</span><span role="columnheader">Intended result</span><span role="columnheader">Ticket</span>
+        <span v-if="showEta" role="columnheader" class="c-eta">ETA</span>
         <span role="columnheader" class="c-exec">Execution</span>
         <span role="columnheader" class="right c-beat">Heartbeat</span><span role="columnheader" class="right c-elapsed">Running</span><span role="columnheader"><span class="sr-only">Actions</span></span>
       </div>
@@ -187,6 +191,7 @@ function rowClick(event: MouseEvent, id: string) {
             <TicketPeekLink v-if="view.ticket" class="ticket-chip" :ticket-key="view.ticket.key" :href="view.ticket.href" :tip="view.ticket.title">{{ view.ticket.key }}</TicketPeekLink>
             <span v-else class="faint">{{ view.projectKey || '—' }}</span>
           </span>
+          <span v-if="showEta" role="cell" class="c-eta"><EtaCell :eta="etaFromSession(view.session)" :now="now" /></span>
           <span role="cell" class="c-exec" :aria-label="`${exec.providerLabel}. ${exec.modelLine}. ${exec.accountLine}`">
             <ProviderMark :provider="exec.provider" />
             <span class="exec-copy">
@@ -360,7 +365,17 @@ function rowClick(event: MouseEvent, id: string) {
   .c-beat { display: block; grid-area: beat; }
   .c-elapsed { display: none; }
   .c-actions { grid-area: actions; grid-row: 1 / span 3; align-self: center; justify-content: center; }
+  .c-eta:not(:has(.eta-cell)) { display: none; }
+  .row:has(.eta-cell) { grid-template-areas: "agent agent beat actions" "exec exec exec actions" "state ticket eta actions"; }
+  .c-eta { grid-area: eta; justify-self: end; }
   .act { display: none; }
   .more { display: grid; width: 44px; height: 44px; }
+}
+.table.has-eta { grid-template-columns: var(--state-width) minmax(140px, 1.45fr) minmax(72px, .48fr) minmax(84px, .5fr) minmax(128px, .82fr) 80px 68px 76px; }
+@container sessions (max-width: 980px) {
+  .table.has-eta { grid-template-columns: var(--state-width) minmax(120px, 1.35fr) minmax(68px, .42fr) minmax(76px, .45fr) minmax(116px, .75fr) 72px 76px; }
+}
+@container sessions (max-width: 760px) {
+  .table.has-eta { grid-template-columns: var(--state-width) minmax(100px, 1.2fr) minmax(64px, auto) minmax(72px, .4fr) minmax(108px, .7fr) 68px; }
 }
 </style>

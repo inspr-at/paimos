@@ -32,7 +32,7 @@ export function normalizeAgentState(value: unknown): AgentStatePreference {
   }
 }
 export interface AttentionReason {
-  kind: 'approval' | 'held_action' | 'reply' | 'reply_due' | 'run_waiting' | 'session_yielded'
+  kind: 'approval' | 'held_action' | 'reply' | 'reply_due' | 'run_waiting' | 'session_yielded' | 'eta_stale'
   scope: 'session' | 'run' | 'shared'; actor: 'person' | 'agent' | 'unknown'
   count: number; blocking: boolean; location: 'approvals' | 'messages' | 'session'
 }
@@ -47,6 +47,7 @@ export function attentionReasonText(reason: AttentionReason): StateReason {
     reply_due: `${count} requested repl${count === 1 ? 'y' : 'ies'} assigned to this session; this agent is expected to reply.`,
     run_waiting: 'The bound run reports waiting; who must act is not specified.',
     session_yielded: 'This session yielded; who must act is not specified.',
+    eta_stale: 'The estimate was not refreshed within two reporting intervals.',
   }
   const locations = { approvals: 'Review permission requests in Needs you.', messages: 'Review the shared principal inbox in Messages below.', session: 'Check the bound run and session activity below.' }
   return { code: `${reason.scope}-${reason.kind}-${reason.actor}`, detail: `${reason.scope === 'shared' ? 'Shared inbox · ' : ''}${details[reason.kind]}`, next: `${reason.scope === 'shared' ? 'No session ownership is recorded. ' : ''}${!reason.blocking && reason.scope !== 'shared' ? 'This does not block ongoing work. ' : ''}${locations[reason.location]}` }
@@ -54,6 +55,7 @@ export function attentionReasonText(reason: AttentionReason): StateReason {
 export function waitingLabel(evidence: Pick<StateEvidence, 'attention_reasons'>) {
   const reasons = evidence.attention_reasons
   if (reasons?.some(r => r.scope !== 'shared' && r.blocking && r.kind === 'approval')) return 'Awaiting approval'
+  if (reasons?.some(r => r.blocking && r.kind === 'eta_stale') && !reasons.some(r => r.blocking && r.scope !== 'shared' && r.kind !== 'eta_stale')) return 'Estimate stale'
   return reasons?.length ? 'Waiting' : STATE_LABEL.waiting
 }
 export interface StateEvidence {

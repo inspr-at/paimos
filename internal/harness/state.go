@@ -97,11 +97,13 @@ func readStateEvidence(ctx context.Context, tx pgx.Tx, ids []string) (map[string
       FROM reasons GROUP BY id,kind,scope,actor,blocking,location,permission_project
     ) SELECT s.id::text,s.project_id::text,s.agent_principal_id::text,s.phase,r.status,
       (s.stopped_at IS NULL AND (coalesce(r.status='waiting',false)
-        OR EXISTS(SELECT 1 FROM approvals a WHERE a.id=s.id AND a.scope='run'))),
+        OR EXISTS(SELECT 1 FROM approvals a WHERE a.id=s.id AND a.scope='run')
+        OR (s.eta_reported_at IS NOT NULL AND s.eta_reported_at < now() - aeon_eta_interval() * 2))),
       (coalesce(r.status IN ('failed','ownership_lost'),false)
         OR coalesce(replace(replace(s.stop_reason,'_',' '),'-',' ') ~* '\m(error|errored|failed|failure|blocked|crash(ed)?|ownership lost|heartbeat lost|timeout|timed out)\M',false)),
       coalesce(q.kind,''),coalesce(q.scope,''),coalesce(q.actor,''),coalesce(q.blocking,false),
-      coalesce(q.location,''),coalesce(q.permission_project,''),coalesce(q.count,0)
+      coalesce(q.location,''),coalesce(q.permission_project,''),coalesce(q.count,0),
+      (s.stopped_at IS NULL AND s.eta_reported_at IS NOT NULL AND s.eta_reported_at < now() - aeon_eta_interval() * 2)
     FROM harness_sessions s LEFT JOIN agent_runs r ON r.tenant_id=s.tenant_id AND r.id=s.run_id
     LEFT JOIN grouped q ON q.id=s.id
     WHERE s.id=ANY($1::uuid[])
@@ -114,8 +116,9 @@ func readStateEvidence(ctx context.Context, tx pgx.Tx, ids []string) (map[string
 		var id, project, principal, phase, permissionProject string
 		var evidence StateEvidence
 		var reason AttentionReason
+		var etaStale bool
 		if err := rows.Scan(&id, &project, &principal, &phase, &evidence.RunStatus, &evidence.NeedsAttention, &evidence.HasProblem,
-			&reason.Kind, &reason.Scope, &reason.Actor, &reason.Blocking, &reason.Location, &permissionProject, &reason.Count); err != nil {
+			&reason.Kind, &reason.Scope, &reason.Actor, &reason.Blocking, &reason.Location, &permissionProject, &reason.Count, &etaStale); err != nil {
 			return nil, err
 		}
 		if existing, found := out[id]; found {
@@ -129,6 +132,9 @@ func readStateEvidence(ctx context.Context, tx pgx.Tx, ids []string) (map[string
 					}
 					if phase == "yielded" {
 						reasons = append(reasons, AttentionReason{"session_yielded", "session", "unknown", 1, true, "session"})
+					}
+					if etaStale {
+						reasons = append(reasons, AttentionReason{"eta_stale", "session", "agent", 1, true, "session"})
 					}
 				}
 				evidence.AttentionReasons = &reasons

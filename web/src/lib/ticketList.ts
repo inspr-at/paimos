@@ -396,12 +396,16 @@ export function compareRows(keys: SortKey[]): (a: ListItem, b: ListItem) => numb
       case 'title': return row.title.toLowerCase()
       case 'kind': return row.kind_slug
       case 'assignee': return row.assignee?.name.toLowerCase() ?? ''
+      case 'eta_ready': return row.eta?.eta_ready_at ? Date.parse(row.eta.eta_ready_at) : 0
+      case 'progress': return typeof row.eta?.progress_pct === 'number' ? row.eta.progress_pct : 0
     }
   }
+  const missing = (row: ListItem, field: SortKey['field']) => field === 'eta_ready' ? !row.eta?.eta_ready_at : field === 'progress' ? typeof row.eta?.progress_pct !== 'number' : false
   return (a, b) => {
     for (const key of keys) {
-      // Unassigned work comes last in both directions, as on the server.
+      // Unassigned work, and estimates nobody reported, come last in both directions.
       if (key.field === 'assignee' && !a.assignee !== !b.assignee) return a.assignee ? -1 : 1
+      if (missing(a, key.field) !== missing(b, key.field)) return missing(a, key.field) ? 1 : -1
       const x = value(a, key.field), y = value(b, key.field)
       if (x !== y) return (x < y ? -1 : 1) * (key.desc ? -1 : 1)
     }

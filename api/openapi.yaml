@@ -2565,7 +2565,7 @@ paths:
       - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
     post:
       operationId: heartbeatHarnessSession
-      description: The attributed worker reports liveness and optionally a current step or display label. Changed nonempty notes and changed label/model/effort values append bounded histories in the same transaction.
+      description: The attributed worker reports liveness and optionally a current step, display label, ready estimate or percent done. A coordinator session may report the live estimate for its bound ticket. Omission preserves an estimate; JSON null clears it. A past timestamp is accepted and shown as overdue. Changed nonempty notes and changed label/model/effort values append bounded histories in the same transaction.
       requestBody:
         required: true
         content:
@@ -2588,11 +2588,71 @@ paths:
                 worktree: {$ref: '#/components/schemas/HarnessWorktree'}
                 branch: {$ref: '#/components/schemas/HarnessBranch'}
                 commits: {type: array, maxItems: 20, description: New commits to append, oldest first; duplicate SHAs are ignored and only the latest 20 are retained., items: {$ref: '#/components/schemas/HarnessCommit'}}
+                eta_ready_at: {type: [string, 'null'], format: date-time, description: "Worker only. RFC3339 instant the bound ticket is ready for review. Omission preserves; null clears. A past instant is overdue, not rejected."}
+                eta_live_at: {type: [string, 'null'], format: date-time, description: "Coordinator only. RFC3339 instant the bound ticket is live. Omission preserves; null clears."}
+                progress_pct: {type: [integer, 'null'], minimum: 0, maximum: 100, description: "Worker only. Percent done for the bound ticket, 0 through 100. Omission preserves; null clears."}
       responses:
         '200': {description: Updated session, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessSession'}}}}
         '400': {description: Invalid note or heartbeat}
         '403': {description: Worker proof rejected}
         '410': {description: Authenticated archived generation; detach harness servicing without signaling the process}
+  /settings/eta-interval:
+    get:
+      operationId: getEtaInterval
+      description: Minutes between fresh estimates. Ten minutes when the workspace has not chosen one. Requires settings.manage.
+      responses:
+        '200':
+          description: Reporting interval
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [interval_minutes]
+                properties:
+                  interval_minutes: {type: integer, minimum: 1, maximum: 240}
+    put:
+      operationId: putEtaInterval
+      description: Sets how often working agents must refresh an estimate. Requires settings.manage. One through 240 minutes.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [interval_minutes]
+              properties:
+                interval_minutes: {type: integer, minimum: 1, maximum: 240}
+      responses:
+        '200':
+          description: Updated interval
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [interval_minutes]
+                properties:
+                  interval_minutes: {type: integer, minimum: 1, maximum: 240}
+        '400': {description: Interval outside 1 to 240 minutes}
+  /nodes/{nodeId}/live-eta:
+    parameters:
+      - {name: nodeId, in: path, required: true, schema: {type: string, format: uuid}}
+    put:
+      operationId: putNodeLiveEta
+      description: A coordinator session reports when a ticket or task in its project is live. Epics roll up from children and reject this write. Null clears the live estimate. Requires the worker lease of an active coordinator session in the node's project.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [eta_live_at]
+              properties:
+                eta_live_at: {type: [string, 'null'], format: date-time}
+      responses:
+        '200': {description: The ticket estimate after the write, content: {application/json: {schema: {$ref: '#/components/schemas/TicketEta'}}}}
+        '400': {description: Not a ticket or task, or the timestamp is not RFC3339}
+        '403': {description: No active coordinator session for this agent in the project}
+        '404': {description: Node not found}
   /projects/{projectId}/harness-sessions/{sessionId}/rules-receipts:
     parameters:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -6576,7 +6636,7 @@ components:
       description: Content-free grouped evidence; no message body, rationale, request ID or private routing. Shared reasons belong to the principal inbox and never block a session. Detail requires harness.read and the underlying approval/message access.
       required: [kind, scope, actor, count, blocking, location]
       properties:
-        kind: {type: string, enum: [approval, held_action, reply, reply_due, run_waiting, session_yielded]}
+        kind: {type: string, enum: [approval, held_action, reply, reply_due, run_waiting, session_yielded, eta_stale]}
         scope: {type: string, enum: [session, run, shared]}
         actor: {type: string, enum: [person, agent, unknown]}
         count: {type: integer, minimum: 1}
@@ -6588,7 +6648,7 @@ components:
       required: [id, project_id, agent_principal_id, harness, host, management_mode, role, work_shape, advertised_capabilities, phase, activity, activity_sequence, revision, created_at]
       properties:
         run_status: {type: [string, 'null'], description: Status of the bound run when visible to the caller.}
-        needs_attention: {type: boolean, description: "Bound run waiting or exact bound-run approval pending; yielded phase is separate session evidence. Principal-only requests and nonblocking replies never set this flag. False for stopped sessions; omitted when not loaded."}
+        needs_attention: {type: boolean, description: "Bound run waiting, exact bound-run approval pending, or an estimate older than two reporting intervals. Yielded phase is separate session evidence. Principal-only requests and nonblocking replies never set this flag. False for stopped sessions; omitted when not loaded."}
         attention_reasons: {type: array, description: "Authorized session/run reasons and separately scoped shared inbox attention. Empty means loaded with no visible reasons; omitted when unloaded or withheld.", items: {$ref: '#/components/schemas/HarnessAttentionReason'}}
         has_problem: {type: boolean, description: "Bound run failed or lost ownership, or the stop reason reports an error or block. Normal stops are false. Omitted when not loaded."}
         id: {type: string, format: uuid}
@@ -6628,6 +6688,24 @@ components:
         archived_at: {type: [string, 'null'], format: date-time}
         recovery_process_state: {type: [string, 'null'], enum: [unknown, null]}
         created_at: {type: string, format: date-time}
+        eta_ready_at: {type: string, format: date-time, description: When the bound ticket is estimated ready for review.}
+        eta_live_at: {type: string, format: date-time, description: When the bound ticket is estimated live.}
+        progress_pct: {type: integer, minimum: 0, maximum: 100, description: Percent done. Zero is reported; omission means unknown.}
+        eta_reported_at: {type: string, format: date-time, description: When the session last sent an estimate.}
+        eta_stale: {type: boolean, description: True when the last estimate is older than two reporting intervals. Omitted when fresh or absent.}
+    TicketEta:
+      type: object
+      description: Ready and live estimates for one ticket. Epics roll up the latest child instant and the average percent of direct children that have a percent. Unknown stays absent.
+      properties:
+        eta_ready_at: {type: string, format: date-time}
+        eta_live_at: {type: string, format: date-time}
+        progress_pct: {type: integer, minimum: 0, maximum: 100}
+        ready_reported_at: {type: string, format: date-time}
+        live_reported_at: {type: string, format: date-time}
+        ready_by: {type: string}
+        live_by: {type: string}
+        ready_stale: {type: boolean}
+        live_stale: {type: boolean}
     HarnessActivityNote:
       type: object
       required: [note, at]
@@ -7691,6 +7769,9 @@ components:
                 id: {type: string, format: uuid}
                 key: {type: string}
                 title: {type: string}
+            eta:
+              description: Ready and live estimates when an active agent has reported one. Absent when unknown.
+              $ref: '#/components/schemas/TicketEta'
     TreeEntry:
       type: object
       required: [node, depth]
@@ -8000,7 +8081,7 @@ components:
       in: query
       schema:
         type: string
-        description: Comma-separated sort keys; prefix a key with - for descending order. Keys are position, updated_at, created_at, key, title, state, priority, kind, assignee (by name, unassigned work last in both directions).
+        description: Comma-separated sort keys; prefix a key with - for descending order. Keys are position, updated_at, created_at, key, title, state, priority, kind, assignee (by name, unassigned work last in both directions), eta_ready (unknown last in both directions), progress (unknown last in both directions).
         default: position
     Direction:
       name: direction

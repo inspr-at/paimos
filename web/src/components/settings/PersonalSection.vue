@@ -2,6 +2,8 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref } from 'vue'
 import { brand } from '../../lib/brand'
+import type { EtaMode } from '../../lib/eta'
+import { usePreference } from '../../lib/preferences'
 import { run } from '../../lib/commands'
 import { setTheme, themeChoice, type ThemeChoice } from '../../lib/theme'
 import { toast } from '../../lib/toast'
@@ -16,6 +18,12 @@ import GraphMotionSettings from './GraphMotionSettings.vue'
 // Everyone's own settings: the profile (photo, names, handle, time zone, language),
 // the theme, the greeting, and the keys.
 const store = useProfile()
+const { value: etaChoice, save: saveEta } = usePreference<{ mode?: EtaMode }>('eta-display')
+const etaModes: { value: EtaMode; label: string }[] = [
+  { value: 'relative', label: 'Relative' }, { value: 'clock', label: 'Clock' }, { value: 'both', label: 'Both' },
+]
+const etaMode = computed(() => etaChoice.value?.mode === 'clock' || etaChoice.value?.mode === 'both' ? etaChoice.value.mode : 'relative')
+function setEtaMode(mode: EtaMode) { saveEta({ mode }, 0) }
 
 const themes: { value: ThemeChoice; label: string; icon: 'sun' | 'moon' | 'monitor' }[] = [
   { value: 'light', label: 'Light', icon: 'sun' }, { value: 'dark', label: 'Dark', icon: 'moon' }, { value: 'system', label: 'System', icon: 'monitor' },
@@ -78,8 +86,14 @@ const KEYS: { keys: string[][]; label: string }[] = [
     </SettingsCard>
 
     <SettingsCard v-if="profile || profileError" title="Agents" icon="agent" anchor="agents">
-      <template #lead>Your indicator style, state palette and heartbeat warnings.</template>
+      <template #lead>Your indicator style, state palette, heartbeat warnings and how estimates are shown.</template>
       <AgentIndicatorSettings />
+      <div class="eta-display">
+        <span id="eta-display-label">Estimates show as</span>
+        <div class="seg" role="radiogroup" aria-labelledby="eta-display-label">
+          <button v-for="option in etaModes" :key="option.value" type="button" role="radio" :aria-checked="etaMode === option.value" @click="setEtaMode(option.value)">{{ option.label }}</button>
+        </div>
+      </div>
     </SettingsCard>
 
     <SettingsCard v-if="profile || profileError" title="Greeting" icon="sparkle" anchor="greeting">
@@ -110,6 +124,8 @@ const KEYS: { keys: string[][]; label: string }[] = [
 
 <style scoped>
 .section { display: grid; gap: 14px; }
+.eta-display { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-top: 16px; }
+.eta-display > span { font-size: 13px; color: var(--ink-2); }
 .seg button { height: 30px; }
 .switch-skeleton { width: 72px; height: 20px; }
 .error-line { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--danger); }

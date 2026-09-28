@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -440,7 +441,7 @@ func (rt *runtime) harnessBind() *Command {
 	}}
 }
 func (rt *runtime) harnessWorker(kind string) *Command {
-	var project, session, agent, leaseFile, phase, activity, activityKind, note, model, effort, accountLabel, harnessVersion, brief, worktree, branch, deliveryID, level, reason string
+	var project, session, agent, leaseFile, phase, activity, activityKind, note, model, effort, accountLabel, harnessVersion, brief, worktree, branch, deliveryID, level, reason, etaReady, etaLive, progress string
 	// The sentinel distinguishes an omitted flag from --label "", which clears a label.
 	const omittedLabel = "\x00"
 	label := omittedLabel
@@ -467,6 +468,9 @@ func (rt *runtime) harnessWorker(kind string) *Command {
 			fs.string(&activity, "activity", 0, "unknown, busy, idle or throttled")
 			fs.string(&activityKind, "activity-kind", 0, "classic content-free adapter event kind")
 			fs.int(&sequence, "activity-sequence", "monotonic sequence")
+			fs.string(&etaReady, "eta-ready", 0, "RFC3339 or a relative duration such as +25m")
+			fs.string(&etaLive, "eta-live", 0, "RFC3339 or a relative duration; coordinator sessions only")
+			fs.string(&progress, "progress", 0, "percent done, 0 through 100")
 		case "complete-delivery":
 			fs.string(&deliveryID, "delivery-id", 0, "leased delivery UUID")
 			fs.int(&cursor, "cursor", "sent-event cursor")
@@ -540,6 +544,27 @@ func (rt *runtime) harnessWorker(kind string) *Command {
 					items = append(items, map[string]string{"sha": sha, "subject": subject})
 				}
 				body["commits"] = items
+			}
+			if etaReady != "" {
+				at, err := parseCLIETA(etaReady, "--eta-ready")
+				if err != nil {
+					return err
+				}
+				body["eta_ready_at"] = at
+			}
+			if etaLive != "" {
+				at, err := parseCLIETA(etaLive, "--eta-live")
+				if err != nil {
+					return err
+				}
+				body["eta_live_at"] = at
+			}
+			if progress != "" {
+				n, err := strconv.Atoi(progress)
+				if err != nil || n < 0 || n > 100 {
+					return usagef("--progress must be an integer from 0 to 100")
+				}
+				body["progress_pct"] = n
 			}
 		case "complete-delivery":
 			if !validUUID(deliveryID) || cursor < 1 {
@@ -713,4 +738,36 @@ func (rt *runtime) harnessSessionFull(project, agent, format, sid string) error 
 	safePath := "'" + strings.ReplaceAll(dir, "'", "'\\''") + "'"
 	fmt.Fprintf(rt.stdout, "export PAIMOS_AGENT_NAME=%s\nexport PAIMOS_SESSION_ID=%s\nexport PAIMOS_KNOWLEDGE_DIR=%s\n", agent, sid, safePath)
 	return nil
+}
+
+var relativeETA = regexp.MustCompile(`^([+-])(\d+)([smhd])$`)
+
+func parseCLIETA(raw, flag string) (string, error) {
+	if match := relativeETA.FindStringSubmatch(raw); match != nil {
+		n, err := strconv.Atoi(match[2])
+		if err != nil {
+			return "", usagef("%s must be RFC3339 or a relative duration like +25m", flag)
+		}
+		var unit time.Duration
+		switch match[3] {
+		case "s":
+			unit = time.Second
+		case "m":
+			unit = time.Minute
+		case "h":
+			unit = time.Hour
+		case "d":
+			unit = 24 * time.Hour
+		}
+		delta := time.Duration(n) * unit
+		if match[1] == "-" {
+			delta = -delta
+		}
+		return time.Now().Add(delta).UTC().Format(time.RFC3339), nil
+	}
+	at, err := time.Parse(time.RFC3339, raw)
+	if err != nil {
+		return "", usagef("%s must be RFC3339 or a relative duration like +25m", flag)
+	}
+	return at.UTC().Format(time.RFC3339), nil
 }

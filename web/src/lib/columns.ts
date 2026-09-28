@@ -8,7 +8,7 @@
 // text columns, so the metadata stays near the title. Free of Vue for unit tests.
 import type { SortField } from './work.ts'
 
-export type ColumnId = 'key' | 'title' | 'status' | 'priority' | 'assignee' | 'epic' | 'release' | 'tags' | 'cost' | 'estimate' | 'created' | 'updated'
+export type ColumnId = 'key' | 'title' | 'status' | 'priority' | 'assignee' | 'epic' | 'release' | 'tags' | 'cost' | 'estimate' | 'created' | 'updated' | 'eta'
 export interface ColumnDef { id: ColumnId; label: string; sort: SortField | null; width: number; min: number; max: number; end?: boolean }
 // defaultView: the saved view this person opens the project with.
 export interface ListPrefs { order?: ColumnId[]; visible?: ColumnId[]; widths?: Partial<Record<ColumnId, number>>; defaultView?: string | null }
@@ -26,6 +26,7 @@ export const COLUMNS: ColumnDef[] = [
   { id: 'estimate', label: 'Estimate', sort: null, width: 96, min: 72, max: 180, end: true },
   { id: 'created', label: 'Created', sort: 'created_at', width: 104, min: 80, max: 200, end: true },
   { id: 'updated', label: 'Updated', sort: 'updated_at', width: 104, min: 80, max: 200, end: true },
+  { id: 'eta', label: 'ETA', sort: 'eta_ready', width: 148, min: 96, max: 240, end: true },
 ]
 export const COLUMN_BY_ID = new Map(COLUMNS.map(column => [column.id, column]))
 // Key and Title always lead; the rest can be hidden and reordered.
@@ -37,14 +38,14 @@ export const TITLE_TARGET = 960
 const TITLE_ROOM = 420
 const PHONE: ColumnId[] = ['key', 'title', 'status', 'priority', 'updated']
 // The order columns leave in when space runs out: the least essential first.
-const DROP_ORDER: ColumnId[] = ['estimate', 'cost', 'tags', 'release', 'created', 'epic', 'assignee', 'updated', 'priority', 'status']
+const DROP_ORDER: ColumnId[] = ['eta', 'estimate', 'cost', 'tags', 'release', 'created', 'epic', 'assignee', 'updated', 'priority', 'status']
 // Columns only wide tables add on their own.
 const WIDE_EXTRAS: ColumnId[] = ['estimate', 'tags', 'release', 'created', 'epic', 'assignee']
 // The text columns that take spare width on wide tables (their text gets room).
 const GROWS: ColumnId[] = ['epic', 'tags', 'assignee', 'release', 'cost']
 // Which optional values any loaded row has. `workers` is live ticket work with
 // no stored assignee; it earns the Assignee column the same way a person does.
-export interface Present { assigned?: boolean; workers?: boolean; estimate?: boolean; release?: boolean; tags?: boolean }
+export interface Present { assigned?: boolean; workers?: boolean; estimate?: boolean; release?: boolean; tags?: boolean; eta?: boolean }
 
 export function orderOf(prefs: ListPrefs | null | undefined): ColumnId[] {
   const valid = (prefs?.order ?? []).filter((id): id is ColumnId => COLUMN_BY_ID.has(id as ColumnId) && !PINNED.includes(id as ColumnId))
@@ -59,10 +60,13 @@ export function automaticColumns(tableWidth: number, present: Present = {}): Col
   const out: ColumnId[] = ['key', 'title', 'status', 'priority']
   if (tableWidth >= WIDE_TABLE) {
     const optional: ColumnId[] = [...(present.release ? ['release' as const] : []), ...(present.tags ? ['tags' as const] : []), ...(present.estimate ? ['estimate' as const] : [])]
-    return [...out, 'assignee', 'epic', ...optional, 'created', 'updated']
+    const wide: ColumnId[] = [...out, 'assignee', 'epic', ...optional, 'created', 'updated']
+    if (present.eta) wide.push('eta')
+    return wide
   }
   if (tableWidth > 900 && (present.assigned || present.workers)) out.push('assignee')
   if (tableWidth > 740) out.push('updated')
+  if (present.eta) out.push('eta')
   return out
 }
 
@@ -74,7 +78,10 @@ export function widthOf(id: ColumnId, prefs: ListPrefs | null | undefined): numb
 
 // The columns to show, in order. `customised` is true when a saved choice applies.
 export function visibleColumns(tableWidth: number, options: { phone: boolean; present?: Present; prefs?: ListPrefs | null }): { columns: ColumnDef[]; customised: boolean } {
-  if (options.phone) return { columns: PHONE.map(id => COLUMN_BY_ID.get(id)!), customised: false }
+  if (options.phone) {
+    const phone = options.present?.eta ? [...PHONE, 'eta' as const] : PHONE
+    return { columns: phone.map(id => COLUMN_BY_ID.get(id)!), customised: false }
+  }
   const prefs = options.prefs
   const customised = !!prefs?.visible
   const chosen = customised ? new Set<ColumnId>([...PINNED, ...prefs!.visible!]) : new Set(automaticColumns(tableWidth, options.present))
