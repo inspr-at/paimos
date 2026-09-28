@@ -640,6 +640,7 @@ func listFilterSQL(q listQuery, sortFields bool) (string, []any) {
 		}
 	}
 	from, scopeCondition := "nodes n", ""
+	kindJoin := ` JOIN node_kinds k ON k.id=n.kind_id AND k.tenant_id=n.tenant_id `
 	scopeRoot := `coalesce($7::uuid, CASE WHEN $8::bool AND $10::bool THEN $9::uuid ELSE NULL::uuid END)`
 	scopeSeed := ""
 	if q.Within != nil || (q.ParentSet && q.Descendants) {
@@ -654,6 +655,12 @@ func listFilterSQL(q listQuery, sortFields bool) (string, []any) {
 		from = `scope s CROSS JOIN LATERAL (
             SELECT * FROM nodes WHERE tenant_id=current_setting('aeon.tenant_id')::uuid AND id=s.id OFFSET 0
         ) n`
+		// Keep kind lookup dependent on the node. Stale tenant statistics on
+		// node_kinds can otherwise put kinds before scope and repeat the entire
+		// scoped node lookup and its JSON filters once per kind (AEON-248).
+		kindJoin = ` JOIN LATERAL (
+            SELECT slug FROM node_kinds WHERE id=n.kind_id AND tenant_id=n.tenant_id OFFSET 0
+        ) k ON true `
 		if q.Within != nil {
 			scopeCondition = ` AND n.id<>$7::uuid`
 		} else {
@@ -676,7 +683,7 @@ func listFilterSQL(q listQuery, sortFields bool) (string, []any) {
     )` + epicCTE + `, filtered AS MATERIALIZED (
 		SELECT n.id,` + projection + `
             assignee.id::text AS assignee_id,n.state,k.slug AS kind_slug,
-            coalesce(nullif(n.fields->>'priority',''),'none') AS priority FROM ` + from + ` JOIN node_kinds k ON k.id=n.kind_id AND k.tenant_id=n.tenant_id ` + assigneeJoin + `
+            coalesce(nullif(n.fields->>'priority',''),'none') AS priority FROM ` + from + kindJoin + assigneeJoin + `
         WHERE n.deleted_at IS NULL
         AND ($1::uuid IS NULL OR n.kind_id=$1::uuid)
         AND (cardinality($2::text[])=0 OR k.slug=ANY($2::text[]) OR n.kind_id::text=ANY($2::text[]))

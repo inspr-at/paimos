@@ -16,6 +16,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/tenant"
 )
 
 // The U22 list filters: exclusions, tags, cost units, releases, epics, dates,
@@ -160,6 +161,32 @@ func TestListFiltersExclusionsLabelsEpicsAndDates(t *testing.T) {
 
 // The 6000-node list stays fast with the new facets and filters in use.
 func TestList6000FiltersPerformance(t *testing.T) {
+	testList6000FiltersPerformance(t)
+}
+
+func TestList6000FiltersWithStaleKindStatistics(t *testing.T) {
+	// TRUNCATE resets relation estimates but retains column statistics from
+	// the previous tenant, just as it can between full-suite fixtures after
+	// autoanalyze. ANALYZE nodes alone does not refresh these join estimates.
+	newPrincipal(t, "previous-kind-statistics")
+	if _, err := appPool.Exec(t.Context(), `ANALYZE node_kinds`); err != nil {
+		t.Fatal(err)
+	}
+	p, path := testList6000FiltersPerformance(t)
+	plans := logListPerformancePlans(t, p, path)
+	for _, name := range []string{"list", "facets"} {
+		visits := filteredNodeVisits(plans[name], false)
+		t.Logf("%s filtered node visits: %.0f", name, visits)
+		// Bound actual work, without prescribing an index or join algorithm.
+		// A kind join must not repeat the node lookup/filter for every kind.
+		if visits <= 0 || visits > 6002 {
+			t.Errorf("%s filtered node visits = %.0f, want one pass over 6001 nodes", name, visits)
+		}
+	}
+}
+
+func testList6000FiltersPerformance(t *testing.T) (tenant.Principal, string) {
+	t.Helper()
 	p := newPrincipal(t, "large-filters")
 	project := kindBySlug(t, p, "project")
 	ticket := kindBySlug(t, p, "ticket")
@@ -186,14 +213,15 @@ func TestList6000FiltersPerformance(t *testing.T) {
 	if os.Getenv("CI") != "" {
 		limit = 600 * time.Millisecond
 	}
-	for _, path := range []string{
+	paths := []string{
 		// The same page shape and budget as TestList6000Performance, with the new
 		// filters and the assignee sort, then the on-demand label counts.
 		"/api/nodes?within=" + root.ID + "&sort=-assignee,-updated_at&limit=50&tag=bug,!t3&cost_unit=!cu%201&state=!done&facets=state,kind,priority,assignee",
 		"/api/nodes?within=" + root.ID + "&sort=state,-updated_at&limit=1&facets=tag",
 		"/api/nodes?within=" + root.ID + "&sort=state,-updated_at&limit=1&facets=cost_unit",
 		"/api/nodes?within=" + root.ID + "&sort=state,-updated_at&limit=50&epic=none&date_field=created&date_from=2020-01-01T00:00:00Z&facets=state,kind,priority,assignee",
-	} {
+	}
+	for _, path := range paths {
 		var fastest time.Duration
 		for i := 0; i < 3; i++ {
 			start := time.Now()
@@ -202,6 +230,9 @@ func TestList6000FiltersPerformance(t *testing.T) {
 			page := decode[nodePage](t, status, body, http.StatusOK)
 			if (len(page.Items) != 50 && len(page.Items) != 1) || page.NextCursor == nil {
 				t.Fatalf("large list result: %d", len(page.Items))
+			}
+			if path == paths[0] && page.Facets["kind"]["ticket"] != 2058 {
+				t.Fatalf("filtered ticket facet = %d, want 2058", page.Facets["kind"]["ticket"])
 			}
 			for _, item := range page.Items {
 				if item.ChildrenCount != 0 {
@@ -214,9 +245,11 @@ func TestList6000FiltersPerformance(t *testing.T) {
 		}
 		t.Logf("6000-node list %s: fastest of 3 = %s", path[strings.Index(path, "&"):], fastest)
 		if fastest >= limit {
+			logListPerformancePlans(t, p, path)
 			t.Fatalf("6000-node filtered list exceeded %s: %s", limit, fastest)
 		}
 	}
+	return p, paths[0]
 }
 
 func addPrincipalIn(t *testing.T, tenantID, name string) struct{ ID string } {
