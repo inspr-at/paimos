@@ -329,10 +329,12 @@ func (rt *runtime) drainHeartbeatUsage(ctx context.Context, o heartbeatOptions, 
 	if session == nil {
 		return
 	}
-	// Terminal means "do not heartbeat". Pending usage is still owed; a
-	// stopped generation is allowed to settle, and a closed one may still
-	// have transcript bytes past the cursor.
-	if session.disk.Terminal && len(session.disk.PendingUsage) == 0 && !session.disk.Closed {
+	// Terminal means "do not heartbeat". Pending usage is still owed, and so
+	// is unread transcript: a partial record or an interrupted scan. A
+	// stopped generation is allowed to settle those, and a closed one may
+	// still have transcript bytes past the cursor.
+	owed := len(session.disk.PendingUsage) > 0 || heartbeatTranscriptOutstanding(o.Transcript, session.disk.UsageOffset, session.disk.UsageDiscard)
+	if session.disk.Terminal && !owed && !session.disk.Closed {
 		return
 	}
 	if o.Transcript == "" && len(session.disk.PendingUsage) == 0 {
@@ -396,6 +398,21 @@ func heartbeatTranscriptCaughtUp(path string, offset int64) bool {
 	return offset >= info.Size()
 }
 
+// heartbeatTranscriptOutstanding reports bytes a later scan can still turn
+// into usage: a partial record past the cursor, or an interrupted discard
+// still waiting for its newline.
+func heartbeatTranscriptOutstanding(path string, offset int64, discarding bool) bool {
+	if !heartbeatTranscriptCaughtUp(path, offset) {
+		return true
+	}
+	if !discarding || path == "" || unsafeHeartbeatPath(path) {
+		return false
+	}
+	info, err := os.Lstat(path)
+	// A cursor past EOF means the transcript shrank.
+	return err == nil && info.Mode().IsRegular() && info.Mode()&os.ModeSymlink == 0 && offset <= info.Size()
+}
+
 // finishStop closes the generation on a budget that the usage flush does not share.
 // A failed close leaves stop.intent so the next start retries it. Pending usage
 // is recorded as settle.intent whether or not the close itself succeeds.
@@ -452,6 +469,8 @@ func heartbeatSettling(session *heartbeatSession) bool {
 }
 
 // settleGeneration posts usage owed by a generation that must not heartbeat.
+// Acknowledged reports stay eligible for another settle while unread
+// transcript remains, including a partial record or an interrupted scan.
 func (rt *runtime) settleGeneration(o heartbeatOptions, session *heartbeatSession) {
 	ctx, cancel := context.WithTimeout(context.Background(), heartbeatUsageFlushTimeout)
 	defer cancel()
@@ -459,10 +478,10 @@ func (rt *runtime) settleGeneration(o heartbeatOptions, session *heartbeatSessio
 	if session.disk.TerminalReason == "archived" {
 		session.disk.PendingUsage = nil
 		_ = session.hold.remove("settle.intent")
-	} else if len(session.disk.PendingUsage) == 0 {
-		_ = session.hold.remove("settle.intent")
-	} else {
+	} else if len(session.disk.PendingUsage) > 0 || heartbeatTranscriptOutstanding(o.Transcript, session.disk.UsageOffset, session.disk.UsageDiscard) {
 		rememberSettleIntent(session)
+	} else {
+		_ = session.hold.remove("settle.intent")
 	}
 	_ = saveHeartbeatSession(session)
 }

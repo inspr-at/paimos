@@ -1506,6 +1506,136 @@ func TestSuccessfulStopRetriesPendingUsageWithoutHeartbeat(t *testing.T) {
 	}
 }
 
+func TestForbiddenHeartbeatSettlesPartialRecordAfterPendingReplay(t *testing.T) {
+	dir := t.TempDir()
+	transcript := filepath.Join(dir, "usage.jsonl")
+	line1 := heartbeatProbeUsageLine(1)
+	line2 := heartbeatProbeUsageLine(2)
+	partial := line2[:len(line2)/2]
+	if err := os.WriteFile(transcript, []byte(line1+partial), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var calls []hbCall
+	heartbeats := 0
+	usagePosts := 0
+	srv := hbServer(t, &calls, func(r *http.Request, _ map[string]any, w http.ResponseWriter) bool {
+		if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/heartbeat") {
+			heartbeats++
+			if heartbeats >= 2 {
+				w.WriteHeader(http.StatusForbidden)
+				_, _ = w.Write([]byte(`{"error":"stopped"}`))
+				return true
+			}
+		}
+		if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/usage") {
+			usagePosts++
+			if usagePosts == 1 {
+				w.WriteHeader(http.StatusServiceUnavailable)
+				_, _ = w.Write([]byte(`{"error":"unavailable"}`))
+				return true
+			}
+		}
+		return false
+	})
+	defer srv.Close()
+	rt, _, stderr := heartbeatRuntime(t, srv)
+	opts := heartbeatTestOptions(dir)
+	opts.Transcript = transcript
+	err := rt.runHeartbeat(context.Background(), opts, heartbeatDeps{
+		alive: func(int) bool { return true },
+		wait:  func(context.Context, int, time.Duration) error { return nil },
+	})
+	if err != nil {
+		t.Fatalf("stop: %v stderr %s", err, stderr.String())
+	}
+	if heartbeats != 2 {
+		t.Fatalf("heartbeats %d", heartbeats)
+	}
+	if _, statErr := os.Lstat(filepath.Join(opts.StateDir, "settle.intent")); statErr != nil {
+		t.Fatalf("settle intent after forbidden heartbeat: %v", statErr)
+	}
+	stopped := loadHeartbeatDisk(t, opts.StateDir)
+	if !stopped.Terminal || stopped.Closed || len(stopped.PendingUsage) != 1 {
+		t.Fatalf("after forbidden heartbeat terminal=%v closed=%v pending=%d", stopped.Terminal, stopped.Closed, len(stopped.PendingUsage))
+	}
+
+	err = rt.runHeartbeat(context.Background(), opts, heartbeatDeps{
+		alive: func(int) bool { return true },
+		wait: func(context.Context, int, time.Duration) error {
+			t.Fatal("replay heartbeated a stopped generation")
+			return errOwnerExited
+		},
+	})
+	if err != nil {
+		t.Fatalf("replay: %v stderr %s", err, stderr.String())
+	}
+	if heartbeats != 2 {
+		t.Fatalf("heartbeats after replay %d", heartbeats)
+	}
+	if _, statErr := os.Lstat(filepath.Join(opts.StateDir, "settle.intent")); statErr != nil {
+		t.Fatalf("settle intent cleared while the next record was partial: %v", statErr)
+	}
+	replayed := loadHeartbeatDisk(t, opts.StateDir)
+	info, err := os.Lstat(transcript)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !replayed.Terminal || replayed.Closed || len(replayed.PendingUsage) != 0 || replayed.UsageOffset >= info.Size() || replayed.UsageDiscard {
+		t.Fatalf("after replay terminal=%v closed=%v pending=%d cursor=%d size=%d discard=%v", replayed.Terminal, replayed.Closed, len(replayed.PendingUsage), replayed.UsageOffset, info.Size(), replayed.UsageDiscard)
+	}
+	usage := hbWhere(calls, http.MethodPost, "/usage")
+	if len(usage) != 2 || usage[1].body["input_tokens"] != float64(2) || usage[0].body["report_id"] != usage[1].body["report_id"] {
+		t.Fatalf("pending replay %#v", usage)
+	}
+
+	f, err := os.OpenFile(transcript, os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = f.WriteString(line2[len(partial):])
+	_ = f.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = rt.runHeartbeat(context.Background(), opts, heartbeatDeps{
+		alive: func(int) bool { return true },
+		wait: func(context.Context, int, time.Duration) error {
+			t.Fatal("recovery heartbeated a stopped generation")
+			return errOwnerExited
+		},
+	})
+	if err != nil {
+		t.Fatalf("recovery: %v stderr %s", err, stderr.String())
+	}
+	if heartbeats != 2 || len(hbWhere(calls, http.MethodPost, "/harness-sessions")) != 1 || len(hbWhere(calls, http.MethodPost, "/stop")) != 0 {
+		t.Fatalf("heartbeats %d registrations %d stops %d", heartbeats, len(hbWhere(calls, http.MethodPost, "/harness-sessions")), len(hbWhere(calls, http.MethodPost, "/stop")))
+	}
+	if _, statErr := os.Lstat(filepath.Join(opts.StateDir, "settle.intent")); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("settle intent after the partial record completed: %v", statErr)
+	}
+	settled := loadHeartbeatDisk(t, opts.StateDir)
+	if !settled.Terminal || settled.Closed || len(settled.PendingUsage) != 0 {
+		t.Fatalf("settled terminal=%v closed=%v pending=%d", settled.Terminal, settled.Closed, len(settled.PendingUsage))
+	}
+	usage = hbWhere(calls, http.MethodPost, "/usage")
+	if len(usage) != 3 || usage[2].body["input_tokens"] != float64(4) {
+		t.Fatalf("partial record was not settled: %#v", usage)
+	}
+}
+
+func loadHeartbeatDisk(t *testing.T, stateDir string) heartbeatDisk {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join(stateDir, "state.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var disk heartbeatDisk
+	if err := json.Unmarshal(raw, &disk); err != nil {
+		t.Fatal(err)
+	}
+	return disk
+}
+
 func TestStopRecoveryDoesNotDoubleCountUsage(t *testing.T) {
 	dir := t.TempDir()
 	transcript := filepath.Join(dir, "usage.jsonl")
