@@ -118,9 +118,31 @@ test('deep links open one release, and the address follows the selection', async
 
 test('keys: j and k move, Enter opens, e shows evidence, ? lists keys, / searches, c compares, Esc steps back', async ({ page }) => {
   const { history } = await setup(page)
+  // Selecting a release writes the address through a navigation that refreshes
+  // the session, so the address lands after the cursor has moved. Hold those
+  // refreshes and release them only once Compare is showing: the late address
+  // used to be taken as a new selection and the comparison closed under the keys.
+  let armed = false
+  let navigations = 0
+  let releaseNavigations: () => void = () => {}
+  let navigationGate = Promise.resolve()
+  await page.route(/\/api\/me(?:\?|$)/, async route => {
+    if (!armed) { await route.fallback(); return }
+    navigations++
+    try {
+      await navigationGate
+      await route.fallback()
+    } finally { navigations-- }
+  })
+  const historyReady = page.waitForResponse(res => res.ok() && new URL(res.url()).pathname === '/api/releases')
   await page.goto('/releases')
+  await historyReady
   await expect(options(page).first()).toHaveAttribute('aria-selected', 'true')
   await expect(page.getByRole('listbox', { name: 'Releases, newest first' })).toBeFocused()
+  // The first selection's address has landed. Later ones wait until Compare is open.
+  await expect(page).toHaveURL(new RegExp(`/releases/${escaped(history.current)}(?:$|\\?)`))
+  navigationGate = new Promise(resolve => { releaseNavigations = resolve })
+  armed = true
   await page.keyboard.press('j')
   await expect(options(page).nth(1)).toHaveAttribute('aria-selected', 'true')
   await page.keyboard.press('Enter')
@@ -147,10 +169,18 @@ test('keys: j and k move, Enter opens, e shows evidence, ? lists keys, / searche
 
   // Compare from the selected release; j and k move the other end.
   await page.keyboard.press('c')
-  const compare = sheet(page).locator('.compare')
+  const compare = sheet(page).locator('section.compare')
+  await expect(compare).toBeVisible()
   await expect(compare.getByRole('heading', { level: 2 })).toContainText('From')
   await expect(compare.locator('.facts')).toContainText('1 release')
-  await page.keyboard.press('j'); await page.keyboard.press('j')
+  await page.keyboard.press('j')
+  await page.keyboard.press('j')
+  // The address catches up here, after both ends are chosen, and the comparison stays.
+  await expect.poll(() => navigations).toBeGreaterThan(0)
+  releaseNavigations()
+  await expect(page).toHaveURL(new RegExp(`/releases/${escaped(history.releases[1].version)}(?:$|\\?)`))
+  await expect.poll(() => navigations).toBe(0)
+  await expect(compare).toBeVisible()
   await expect(compare.locator('.facts')).toContainText('2 releases')
   await expect(compare.locator('.facts')).toContainText('3 tickets')
   await expect(compare.locator('.changes')).toContainText('Other changes')
