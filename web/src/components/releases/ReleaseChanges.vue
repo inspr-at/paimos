@@ -1,16 +1,22 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed } from 'vue'
-import { plainSubject, shortCommit, type ChangeGroup, type PresentedChanges, type ReleaseChange, type TicketChangeLine } from '../../lib/releases'
+import { idMatches, plainSubject, shortCommit, type ChangeGroup, type PresentedChanges, type ReleaseChange, type ReleaseLang, type ReleaseView, type TicketChangeLine } from '../../lib/releases'
 import AppIcon, { type IconName } from '../AppIcon.vue'
+import LangBadge from './LangBadge.vue'
 import TicketLink from './TicketLink.vue'
 
 // A release's changes, the same for every release (AEON-305): features and fixes
-// are one block per ticket. The pill is the heading, the benefit the sentence,
-// and the ticket's commits sit behind a small disclosure. Anything no ticket
-// tells about stays under Other, with the package prefix and leading key removed.
-const props = defineProps<{ presented: PresentedChanges; repository: string; query?: string; soleTicket?: string }>()
+// are one block per ticket. Highlights: the pill is the heading, the benefit the
+// sentence, and the ticket's commits sit behind a small disclosure. Details: the
+// pill heads the ticket's commits, listed open, and the benefit steps aside
+// (AEON-323). Anything no ticket tells about stays under Other, with the package
+// prefix and leading key removed. A text in the other language carries a badge.
+const props = defineProps<{ presented: PresentedChanges; repository: string; query?: string; soleTicket?: string; view?: ReleaseView; lang?: ReleaseLang }>()
 const presented = computed(() => props.presented)
+const details = computed(() => props.view === 'details')
+const fellBack = (lang: ReleaseLang) => !!props.lang && lang !== props.lang
+const titleLang = (line: TicketChangeLine) => line.pill ? line.pillLang : line.benefitLang
 const ticketsShown = (c: ReleaseChange) => props.soleTicket && c.tickets.length === 1 && c.tickets[0] === props.soleTicket ? [] : c.tickets
 const GROUPS: { key: ChangeGroup; label: string; icon: IconName }[] = [
   { key: 'features', label: 'Features', icon: 'sparkle' },
@@ -23,12 +29,12 @@ const shown = computed(() => GROUPS.filter(g => countOf(g.key)))
 const commitUrl = (sha: string) => props.repository ? `https://github.com/${props.repository}/commit/${sha}` : ''
 const titleId = (group: string, key: string) => `change-${group}-${key}`
 const commitWord = (n: number) => n === 1 ? '1 commit' : `${n} commits`
-// A subject hit is painted inside the disclosure. Open it for this query, then
+// A subject or SHA hit is painted inside the disclosure. Open it for this query, then
 // leave it alone so a later render does not slam a reader-closed disclosure shut.
 const revealed = new WeakMap<HTMLDetailsElement, string>()
 function commitsMatch(line: TicketChangeLine) {
   const q = props.query?.trim().toLowerCase()
-  return !!q && line.commits.some(c => plainSubject(c.subject, c.tickets).toLowerCase().includes(q))
+  return !!q && line.commits.some(c => plainSubject(c.subject, c.tickets).toLowerCase().includes(q) || idMatches(c.commit, q))
 }
 function revealCommits(el: unknown, line: TicketChangeLine) {
   if (!(el instanceof HTMLDetailsElement)) return
@@ -40,8 +46,16 @@ function revealCommits(el: unknown, line: TicketChangeLine) {
   if (hit) el.open = true
 }
 const showBenefit = (line: TicketChangeLine) => {
+  if (details.value) return false
   const benefit = line.benefit.trim()
   return !!benefit && benefit.toLowerCase() !== line.pill.trim().toLowerCase()
+}
+// A SHA search marks the start of the short SHA it matched.
+function shaParts(sha: string) {
+  const short = shortCommit(sha), q = props.query?.trim().toLowerCase() ?? ''
+  if (!idMatches(sha, q)) return [{ text: short, hit: false }]
+  const n = Math.min(q.length, short.length)
+  return [{ text: short.slice(0, n), hit: true }, { text: short.slice(n), hit: false }].filter(p => p.text)
 }
 // Search terms stay marked in the list of changes.
 function parts(text: string) {
@@ -68,17 +82,24 @@ function parts(text: string) {
         <li v-for="line in presented[g.key]" :key="line.key">
           <article class="ticket-line" :aria-labelledby="titleId(g.key, line.key)">
             <div class="line-head">
-              <h4 :id="titleId(g.key, line.key)" class="pill-title" :lang="line.pill ? line.pillLang : line.benefitLang"><template v-for="(p, i) in parts(line.pill || line.benefit)" :key="i"><mark v-if="p.hit">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template></h4>
+              <h4 :id="titleId(g.key, line.key)" class="pill-title" :lang="titleLang(line)"><template v-for="(p, i) in parts(line.pill || line.benefit)" :key="i"><mark v-if="p.hit">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template><LangBadge v-if="fellBack(titleLang(line))" :lang="titleLang(line)" /></h4>
               <TicketLink :ticket-key="line.key" variant="inline" />
             </div>
-            <p v-if="line.pill && showBenefit(line)" class="benefit" :lang="line.benefitLang"><template v-for="(p, i) in parts(line.benefit)" :key="i"><mark v-if="p.hit">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template></p>
-            <details v-if="line.commits.length" :ref="el => revealCommits(el, line)" class="commits">
+            <p v-if="line.pill && showBenefit(line)" class="benefit" :lang="line.benefitLang"><template v-for="(p, i) in parts(line.benefit)" :key="i"><mark v-if="p.hit">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template><LangBadge v-if="fellBack(line.benefitLang) && !fellBack(titleLang(line))" :lang="line.benefitLang" /></p>
+            <ul v-if="details && line.commits.length" class="commit-list open" :aria-label="`${commitWord(line.commits.length)}`">
+              <li v-for="c in line.commits" :key="c.commit">
+                <p class="subject"><template v-for="(p, i) in parts(plainSubject(c.subject, c.tickets))" :key="i"><mark v-if="p.hit">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template></p>
+                <a v-if="commitUrl(c.commit)" class="mono commit" :href="commitUrl(c.commit)" target="_blank" rel="noopener" :aria-label="`Commit ${shortCommit(c.commit)} on GitHub`"><template v-for="(p, i) in shaParts(c.commit)" :key="i"><mark v-if="p.hit">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template></a>
+                <span v-else class="mono commit"><template v-for="(p, i) in shaParts(c.commit)" :key="i"><mark v-if="p.hit">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template></span>
+              </li>
+            </ul>
+            <details v-else-if="line.commits.length" :ref="el => revealCommits(el, line)" class="commits">
               <summary><AppIcon name="chevron-right" :size="12" class="chev" />{{ commitWord(line.commits.length) }}</summary>
               <ul class="commit-list">
                 <li v-for="c in line.commits" :key="c.commit">
                   <p class="subject"><template v-for="(p, i) in parts(plainSubject(c.subject, c.tickets))" :key="i"><mark v-if="p.hit">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template></p>
-                  <a v-if="commitUrl(c.commit)" class="mono commit" :href="commitUrl(c.commit)" target="_blank" rel="noopener" :aria-label="`Commit ${shortCommit(c.commit)} on GitHub`">{{ shortCommit(c.commit) }}</a>
-                  <span v-else class="mono commit">{{ shortCommit(c.commit) }}</span>
+                  <a v-if="commitUrl(c.commit)" class="mono commit" :href="commitUrl(c.commit)" target="_blank" rel="noopener" :aria-label="`Commit ${shortCommit(c.commit)} on GitHub`"><template v-for="(p, i) in shaParts(c.commit)" :key="i"><mark v-if="p.hit">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template></a>
+                  <span v-else class="mono commit"><template v-for="(p, i) in shaParts(c.commit)" :key="i"><mark v-if="p.hit">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template></span>
                 </li>
               </ul>
             </details>
@@ -91,8 +112,8 @@ function parts(text: string) {
           <p class="meta">
             <span v-if="TYPE_LABEL[c.type]" class="type">{{ TYPE_LABEL[c.type] }}</span>
             <TicketLink v-for="t in ticketsShown(c)" :key="t" :ticket-key="t" variant="inline" />
-            <a v-if="commitUrl(c.commit)" class="mono commit" :href="commitUrl(c.commit)" target="_blank" rel="noopener" :aria-label="`Commit ${shortCommit(c.commit)} on GitHub`">{{ shortCommit(c.commit) }}</a>
-            <span v-else class="mono commit">{{ shortCommit(c.commit) }}</span>
+            <a v-if="commitUrl(c.commit)" class="mono commit" :href="commitUrl(c.commit)" target="_blank" rel="noopener" :aria-label="`Commit ${shortCommit(c.commit)} on GitHub`"><template v-for="(p, i) in shaParts(c.commit)" :key="i"><mark v-if="p.hit">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template></a>
+            <span v-else class="mono commit"><template v-for="(p, i) in shaParts(c.commit)" :key="i"><mark v-if="p.hit">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template></span>
           </p>
         </li>
       </ul>
@@ -123,6 +144,10 @@ ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 1px; }
 .commits[open] .chev { transform: rotate(90deg); }
 .commit-list { margin: 6px 0 2px; padding: 0; gap: 6px; }
 .commit-list li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; padding: 0 0 0 16px; }
+/* Details: the commits are the content, listed open under the pill. */
+.commit-list.open { margin: 3px 0 2px; gap: 4px; }
+.commit-list.open li { padding-left: 0; }
+.commit-list.open .subject { color: var(--ink-2); }
 @media (hover: hover) {
   .ticket-lines > li:hover, .group > ul:not(.ticket-lines) > li:hover { background: var(--row-hover); }
   .commits summary:hover { color: var(--ink-2); }
@@ -137,6 +162,13 @@ ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 1px; }
   .group > ul { padding-left: 0; }
   .ticket-lines > li, .group > ul:not(.ticket-lines) > li { margin-left: 0; padding: 6px 4px 7px; }
   .commit-list li { padding-left: 8px; }
+}
+/* Phones: the subject wraps on the left and the SHA keeps its 44 px target on the right. */
+@media (max-width: 600px) {
+  .commit-list.open { gap: 0; }
+  .commit-list.open li { flex-wrap: nowrap; align-items: center; justify-content: space-between; gap: 12px; }
+  .commit-list.open .subject { flex: 1 1 auto; min-width: 0; }
+  .commit-list.open .commit { flex: 0 0 auto; }
 }
 @media (max-width: 600px) { .changes { gap: 6px; } ul:not(.ticket-lines):not(.commit-list) > li { padding-bottom: 0; } .meta { margin-top: 0; } }
 @media (prefers-reduced-motion: reduce) { .chev { transition: none; } }

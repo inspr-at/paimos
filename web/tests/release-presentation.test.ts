@@ -34,17 +34,17 @@ test('a captured snapshot names the release: its pills, features before fixes, i
     { id: '1', key: 'AEON-1', pill_en: 'Snapshot pill', pill_de: 'Schnappschuss', benefit_en: 'Snapshot benefit.', benefit_de: '' },
   ] }
   const changes = [change(1, 'features', 'AEON-1', 'Live pill', 'Live benefit.'), change(2, 'fixes', 'AEON-2', 'Live fix', 'Live fix benefit.'), change(3, 'features', 'AEON-9', 'Not a member', 'Not in the snapshot.')]
-  assert.deepEqual(railLine(release({ notes, changes }), 'de'), { text: 'Schnappschuss · Fixed thing', themed: false })
+  assert.deepEqual(railLine(release({ notes, changes }), 'de'), { text: 'Schnappschuss · Fixed thing', themed: false, lang: 'en' })
   assert.equal(releaseTitle(release({ notes, changes })), 'Snapshot pill')
 })
 
 test('without a presentation the rail and titles never fall back to the tag message label', () => {
   const plain = release({ changes: [change(1, 'other')] })
-  assert.deepEqual(railLine(plain), { text: '', themed: false })
+  assert.deepEqual(railLine(plain), { text: '', themed: false, lang: 'en' })
   const benefits = release({ changes: [change(1, 'features', 'AEON-74', 'Wide lists', 'More columns.'), change(2, 'fixes', 'AEON-75', 'Week total', 'Stays put.')] })
-  assert.deepEqual(railLine(benefits), { text: 'Wide lists · Week total', themed: false })
+  assert.deepEqual(railLine(benefits), { text: 'Wide lists · Week total', themed: false, lang: 'en' })
   const named = release({ presentation, changes: benefits.changes })
-  assert.deepEqual(railLine(named), { text: 'Releases with a name', themed: true })
+  assert.deepEqual(railLine(named), { text: 'Releases with a name', themed: true, lang: 'en' })
   assert.equal(releaseTitle(named, 'de'), 'Releases mit Namen')
   // Never the Git tag message: the first benefit pill, else nothing.
   assert.equal(releaseTitle(release({ headline: 'Stable102', tickets: ['AEON-74'] })), '')
@@ -54,7 +54,8 @@ test('without a presentation the rail and titles never fall back to the tag mess
 test('search finds presentation text and marks every hit', () => {
   const named = release({ presentation })
   const filter = { q: 'einführung', features: false, fixes: false, tickets: false }
-  assert.equal(matches(named, filter), true)
+  assert.equal(matches(named, filter, 'de'), true)
+  assert.equal(matches(named, filter, 'en'), false)
   assert.equal(matches(release(), filter), false)
   assert.deepEqual(markParts('Name the name', 'NAME'), [{ text: 'Name', hit: true }, { text: ' the ', hit: false }, { text: 'name', hit: true }])
   assert.deepEqual(markParts('plain', ''), [{ text: 'plain', hit: false }])

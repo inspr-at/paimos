@@ -1,23 +1,27 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { emptyNotesLine, hasUsableNotes, hiddenNoteLine, localizedPresentation, markParts, presentRelease, releasedAt, shortCommit, span, ticketsOf, WRITTEN_AFTER_LABEL, writtenAfterRelease, type Release } from '../../lib/releases'
+import { emptyNotesLine, hasUsableNotes, hiddenNoteLine, localizedPresentation, markParts, presentRelease, releaseCopy, releasedAt, runWord, shortCommit, span, ticketsOf, writtenAfterLine, writtenAfterRelease, type Release, type ReleaseLang, type ReleaseView } from '../../lib/releases'
 import { absoluteTime, relativeTime } from '../../lib/work'
-import { useProfile } from '../../stores/profile'
 import AppIcon from '../AppIcon.vue'
 import CalendarVersion from '../CalendarVersion.vue'
+import LangBadge from './LangBadge.vue'
 import ReleaseChanges from './ReleaseChanges.vue'
 import TicketChips from './TicketChips.vue'
-const profile = useProfile()
-const locale = computed(() => profile.profile?.locale ?? null)
 
 // One release: when it shipped, its name when it has one, what it brings, and
 // the evidence behind it. Every release reads the same (AEON-305): backfilled
 // notes and linked tickets both become blocks under Features and Fixes.
+// Highlights tells the benefits; Details lists the commits and shows the
+// evidence open (AEON-323).
 const props = defineProps<{
   release: Release; repository: string; current: boolean; rollback: boolean; fresh: boolean
   liveSince: string | null; now: number; query: string; evidence: boolean
+  lang: ReleaseLang; view: ReleaseView
 }>()
+const locale = computed(() => props.lang)
+const details = computed(() => props.view === 'details')
+const evidenceOpen = computed(() => details.value || props.evidence)
 const emit = defineEmits<{ evidence: [open: boolean] }>()
 
 const at = computed(() => releasedAt(props.release))
@@ -28,8 +32,11 @@ const counted = computed(() => lines.value.features.length + lines.value.fixes.l
 // The header: theme, headline and intro when the release has them. The pills
 // and benefits are the blocks below; Git tag messages are evidence only.
 const presented = computed(() => localizedPresentation(props.release, locale.value))
+// One badge for the header when the headline fell back; else on the part that did.
+const badge = (lang: ReleaseLang, own = false) => lang !== props.lang && (own || presented.value?.headlineLang === props.lang)
 const noted = computed(() => hasUsableNotes(props.release) ? props.release.notes : null)
 const parts = (text: string) => markParts(text, props.query)
+const copyText = computed(() => releaseCopy(locale.value))
 // A ticket already heading a block needs no chip.
 const lined = computed(() => new Set([...lines.value.features, ...lines.value.fixes].map(line => line.key)))
 const chipTickets = computed(() => tickets.value.filter(key => !lined.value.has(key)))
@@ -44,8 +51,6 @@ const soleTicket = computed(() => tickets.value.length === 1 ? tickets.value[0] 
 
 // ---------- Evidence ----------
 const ev = computed(() => props.release.evidence)
-const RUN_WORD: Record<string, string> = { success: 'passed', failure: 'failed', cancelled: 'cancelled', skipped: 'skipped', timed_out: 'timed out' }
-const runWord = (run: { status: string; conclusion: string }) => run.conclusion ? (RUN_WORD[run.conclusion] ?? run.conclusion.replace(/_/g, ' ')) : run.status.replace(/_/g, ' ')
 const summary = computed(() => {
   const bits: string[] = []
   if (ev.value.ci) bits.push(`CI ${runWord(ev.value.ci)}`)
@@ -89,31 +94,36 @@ defineExpose({ focus: () => heading.value?.focus({ preventScroll: false }) })
     </p>
     <section class="notes" aria-label="Release notes">
       <div v-if="!reserved && presented" class="summary">
-        <p v-if="presented.theme" class="kicker" :lang="presented.themeLang"><template v-for="(p, i) in parts(presented.theme)" :key="i"><mark v-if="p.hit">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template></p>
-        <p class="headline" :lang="presented.headlineLang"><template v-for="(p, i) in parts(presented.headline)" :key="i"><mark v-if="p.hit">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template></p>
-        <p v-if="presented.intro" class="intro" :lang="presented.introLang"><template v-for="(p, i) in parts(presented.intro)" :key="i"><mark v-if="p.hit">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template></p>
+        <p v-if="presented.theme" class="kicker" :lang="presented.themeLang"><template v-for="(p, i) in parts(presented.theme)" :key="i"><mark v-if="p.hit">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template><LangBadge v-if="badge(presented.themeLang)" :lang="presented.themeLang" /></p>
+        <p class="headline" :lang="presented.headlineLang"><template v-for="(p, i) in parts(presented.headline)" :key="i"><mark v-if="p.hit">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template><LangBadge v-if="badge(presented.headlineLang, true)" :lang="presented.headlineLang" /></p>
+        <p v-if="presented.intro" class="intro" :lang="presented.introLang"><template v-for="(p, i) in parts(presented.intro)" :key="i"><mark v-if="p.hit">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template><LangBadge v-if="badge(presented.introLang)" :lang="presented.introLang" /></p>
       </div>
       <p v-if="noted && !noted.items.length && !noted.gaps.length" class="none">{{ emptyNotesLine(locale) }}</p>
       <TicketChips v-if="chipTickets.length" :tickets="chipTickets" class="tickets" />
-      <ReleaseChanges v-if="counted" :presented="lines" :repository="repository" :query="query" :sole-ticket="soleTicket" />
-      <p v-else-if="!noted" class="none">{{ reserved ? 'Nothing shipped under this version.' : 'No changes are recorded between this release and the one before it.' }}</p>
+      <ReleaseChanges v-if="counted" :presented="lines" :repository="repository" :query="query" :sole-ticket="soleTicket" :view="view" :lang="lang" />
+      <p v-else-if="!noted" class="none" :lang="lang">{{ reserved ? copyText.nothingShipped : copyText.noChanges }}</p>
       <template v-if="noted">
         <p v-for="gap in noted.gaps" :key="gap" class="none">{{ gap }}</p>
         <p v-if="noted.hidden" class="none">{{ hiddenNoteLine(noted.hidden, locale) }}</p>
       </template>
-      <p v-if="release.changes_omitted" class="none">And {{ release.changes_omitted }} more {{ release.changes_omitted === 1 ? 'change' : 'changes' }} not listed here.</p>
-      <p v-if="writtenAfterRelease(release)" class="none written-after">{{ WRITTEN_AFTER_LABEL }}</p>
+      <p v-if="release.changes_omitted" class="none" :lang="lang">{{ copyText.omitted(release.changes_omitted) }}</p>
+      <p v-if="writtenAfterRelease(release)" class="none written-after">{{ writtenAfterLine(locale) }}</p>
     </section>
 
     <!-- A reservation that was tagged still has evidence: often why it never published. -->
-    <section v-if="release.tag" class="evidence" :class="{ open: evidence }">
-      <button type="button" class="ev-toggle" :aria-expanded="evidence" aria-controls="release-evidence" aria-keyshortcuts="e" @click="emit('evidence', !evidence)">
+    <!-- Details shows it open; Highlights keeps it behind a toggle. -->
+    <section v-if="release.tag" class="evidence" :class="{ open: evidenceOpen }" aria-labelledby="release-evidence-title">
+      <h3 v-if="details" id="release-evidence-title" class="ev-toggle ev-head">
         <span class="ev-icon"><AppIcon name="shield" :size="14" /></span>
         <span class="ev-title">Evidence</span>
+      </h3>
+      <button v-else type="button" class="ev-toggle" :aria-expanded="evidence" aria-controls="release-evidence" aria-keyshortcuts="e" @click="emit('evidence', !evidence)">
+        <span class="ev-icon"><AppIcon name="shield" :size="14" /></span>
+        <span id="release-evidence-title" class="ev-title">Evidence</span>
         <span class="ev-summary">{{ summary }}</span>
         <AppIcon name="chevron" :size="14" class="ev-chev" />
       </button>
-      <div v-if="evidence" id="release-evidence" class="ev-body">
+      <div v-if="evidenceOpen" id="release-evidence" class="ev-body">
         <p class="sr" role="status">{{ copyStatus }}</p>
         <p v-if="release.headline" class="none">Tag message: {{ release.headline }}</p>
         <template v-if="release.notes">
@@ -195,6 +205,8 @@ mark { background: var(--mark-hl); color: inherit; border-radius: 3px; padding: 
 .ev-toggle { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 48px; padding: 8px 14px; border: 0; background: transparent; color: var(--ink); text-align: left; }
 @media (hover: hover) { .ev-toggle:hover { background: var(--row-hover); } }
 .ev-toggle:focus-visible { box-shadow: inset 0 0 0 2px var(--aqua); }
+.ev-head { margin: 0; font: inherit; letter-spacing: 0; }
+@media (hover: hover) { .ev-head:hover { background: transparent; } }
 .ev-icon { display: grid; place-items: center; width: 26px; height: 26px; border-radius: 8px; background: var(--surface-2); color: var(--teal-ink); }
 .ev-title { font-weight: 650; font-size: 13.5px; }
 .ev-summary { flex: 1; min-width: 0; font-size: 12.5px; color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

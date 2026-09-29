@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { compare, displayHeadline, displayText, groupByDay, groupChanges, hasUsableNotes, isCalendarVersion, liveServer, matches, newSince, plainSubject, presentChanges, presentRelease, releaseNotice, span, stats, ticketsOf, type Release } from '../src/lib/releases.ts'
+import { compare, displayHeadline, displayText, evidenceSearch, groupByDay, groupChanges, hasUsableNotes, idMatches, isCalendarVersion, liveServer, localizedNote, localizedPresentation, matches, newSince, pickText, plainSubject, presentChanges, presentRelease, railLine, releaseCopy, releaseLang, releaseLangKey, releaseName, releaseNotice, releaseTitle, releaseView, span, stats, technicalLine, ticketsOf, WRITTEN_AFTER_LABEL, writtenAfterLine, type Release } from '../src/lib/releases.ts'
 
 const rel = (version: string, at: string, extra: Partial<Release> = {}): Release => ({
   version, tag: `v${version}`, release_channel: 'stable', release_sequence: 1, state: 'published', reserved_at: at, tagged_at: at, published_at: at,
@@ -178,13 +178,16 @@ test('compare aggregates everything after the older up to the newer release', ()
 test('search and filters look at headlines, changes and ticket keys', () => {
   const r = rel('260924000001.0.0', '', { headline: 'Journey (AEON-77)', tickets: ['AEON-77'], changes: [change('a', 'fix', 'fix(AEON-78): repair stage', ['AEON-78'])] })
   const f = { q: '', features: false, fixes: false, tickets: false }
-  assert.ok(matches(r, { ...f, q: 'journey' }))
+  // The tag message is evidence: Details shows it, Highlights does not.
+  assert.ok(matches(r, { ...f, q: 'journey' }, null, 'details'))
+  assert.ok(!matches(r, { ...f, q: 'journey' }))
   assert.ok(matches(r, { ...f, q: 'repair' }))
   assert.ok(matches(r, { ...f, q: 'aeon-78' }))
   assert.ok(!matches(r, { ...f, q: 'hours' }))
   const noted = rel('260924000009.0.0', '', { changes: [{ ...change('n', 'other', 'P0.x: internal', ['AEON-1']), group: 'features', linked_tickets: [{ key: 'AEON-1', pill_en: 'Hosts in minutes', pill_de: 'Hosts in Minuten', benefit_en: 'You approve the price once.', benefit_de: 'Du bestätigst den Preis einmal.' }] }] })
   assert.ok(matches(noted, { ...f, q: 'approve the price' }))
-  assert.ok(matches(noted, { ...f, q: 'minuten' }))
+  assert.ok(!matches(noted, { ...f, q: 'minuten' }))
+  assert.ok(matches(noted, { ...f, q: 'minuten' }, 'de'))
   assert.ok(!matches(r, { ...f, fixes: true })) // no visible fix line; the row counts it as other
   assert.ok(!matches(r, { ...f, features: true }))
   assert.ok(matches(r, { ...f, tickets: true }))
@@ -202,7 +205,9 @@ test('feature and fix filters follow the visible ticket lines, in the viewer loc
   assert.equal(matches(lined, { ...f, features: true }), true)
   assert.equal(matches(lined, { ...f, fixes: true }), false)
   const deOnly = rel('260924000011.0.0', '', { changes: [{ ...change('d', 'fix', 'fix: price', ['AEON-2']), group: 'fixes' as const, linked_tickets: [{ key: 'AEON-2', pill_en: ' ', pill_de: 'Preis', benefit_en: '', benefit_de: 'Du siehst den Preis.' }] }] })
-  assert.equal(matches(deOnly, { ...f, fixes: true }), false)
+  // Never blank: English falls back to the German pill (AEON-323).
+  assert.equal(matches(deOnly, { ...f, fixes: true }), true)
+  assert.equal(presentChanges(deOnly.changes).fixes[0]?.pillLang, 'de')
   assert.equal(matches(deOnly, { ...f, fixes: true }, 'de-AT'), true)
   assert.equal(presentChanges(deOnly.changes, 'de-AT').fixes.length, 1)
 })
@@ -228,10 +233,12 @@ test('regenerated missing snapshots preserve the v1 archive headline, tickets an
   assert.equal(displayHeadline(regenerated), displayHeadline(archived))
   assert.equal(displayHeadline(regenerated), 'Journey')
   assert.deepEqual(ticketsOf(regenerated), ['AEON-77', 'AEON-78'])
+  // The tag message is evidence, which Details shows (AEON-323).
   for (const q of ['', 'journey', 'repair', 'aeon-78']) {
     const f = { q, features: false, fixes: false, tickets: true }
     assert.equal(matches(regenerated, f), matches(archived, f))
-    assert.equal(matches(regenerated, f), true)
+    assert.equal(matches(regenerated, f, null, 'details'), matches(archived, f, null, 'details'))
+    assert.equal(matches(regenerated, f, null, 'details'), true)
   }
   assert.deepEqual(groupChanges(regenerated.changes), groupChanges(archived.changes))
   assert.deepEqual(regenerated, before) // Display never rewrites history or manufactures notes.
@@ -288,4 +295,136 @@ test('a history cached before the deploy still says a newer version is live', ()
   // Without the poll, a stale history still names a version it does not have.
   assert.equal(releaseNotice(PAGE, PAGE, SERVER, null), 'missing')
   assert.equal(releaseNotice(PAGE, PAGE, SERVER), 'missing')
+})
+
+test('language and view: the address, then the remembered choice, then the profile; Highlights by default', () => {
+  assert.equal(releaseLang(undefined, 'de-AT'), 'de')
+  assert.equal(releaseLang('en', 'de-AT', 'de'), 'en')
+  assert.equal(releaseLang(undefined, 'de-AT', 'en'), 'en')
+  assert.equal(releaseLang(undefined, 'en-GB', 'de'), 'de')
+  assert.equal(releaseLang(undefined, 'en-GB', 'fr'), 'en')
+  assert.equal(releaseLang('fr', 'en-GB'), 'en')
+  assert.equal(releaseLang(['de'], null), 'de')
+  assert.equal(releaseView(undefined), 'highlights')
+  assert.equal(releaseView('details'), 'details')
+  assert.equal(releaseView('technical'), 'highlights')
+  assert.equal(releaseLangKey('p-1'), 'aeon.release-history.lang.p-1')
+  assert.match(technicalLine(rel('1', '2026-09-29T12:00:00Z', { changes: [change('a'.repeat(40), 'feat', 'feat(AEON-1): phone state line'), change('b'.repeat(40), 'fix', 'fix: keep the cue')] })), /Phone state line · Keep the cue/)
+  assert.equal(writtenAfterLine('de'), 'Notizen nach dem Release geschrieben')
+  assert.equal(writtenAfterLine('en'), WRITTEN_AFTER_LABEL)
+})
+
+test('a missing translation falls back to the other language, never blank, and says which', () => {
+  assert.deepEqual(pickText('Wide lists', 'Breite Listen', 'de'), { text: 'Breite Listen', lang: 'de' })
+  assert.deepEqual(pickText('Wide lists', '  ', 'de-AT'), { text: 'Wide lists', lang: 'en' })
+  assert.deepEqual(pickText('', 'Breite Listen', 'en'), { text: 'Breite Listen', lang: 'de' })
+  assert.deepEqual(pickText(' ', '', 'de'), { text: '', lang: 'de' })
+  assert.deepEqual(pickText(undefined, null, 'en'), { text: '', lang: 'en' })
+  // Pill and benefit fall back on their own.
+  const note = { pill_en: 'Wide lists', pill_de: 'Breite Listen', benefit_en: 'More columns fit.', benefit_de: '' }
+  assert.deepEqual(localizedNote(note, 'de'), { pill: 'Breite Listen', benefit: 'More columns fit.', pillLang: 'de', benefitLang: 'en' })
+  assert.deepEqual(localizedNote({ ...note, pill_en: '' }, 'en'), { pill: 'Breite Listen', benefit: 'More columns fit.', pillLang: 'de', benefitLang: 'en' })
+  // The header too, and a German-only presentation still names the release in English.
+  const presentation = { theme_en: 'Lists', theme_de: '', headline_en: '', headline_de: 'Alles auf einen Blick', intro_en: 'Read more.', intro_de: 'Mehr lesen.', revision: 1, updated_at: '' }
+  const named = localizedPresentation({ presentation }, 'en')!
+  assert.deepEqual([named.theme, named.themeLang, named.headline, named.headlineLang, named.intro, named.introLang], ['Lists', 'en', 'Alles auf einen Blick', 'de', 'Read more.', 'en'])
+  const german = localizedPresentation({ presentation }, 'de')!
+  assert.deepEqual([german.theme, german.themeLang, german.headlineLang, german.introLang], ['Lists', 'en', 'de', 'de'])
+  assert.equal(localizedPresentation({ presentation: { ...presentation, headline_de: '' } }, 'de'), null)
+  assert.equal(releaseTitle({ presentation, changes: [] }, 'en'), 'Lists')
+})
+
+test('search follows the chosen language and view', () => {
+  const f = { q: '', features: false, fixes: false, tickets: false }
+  const note = { key: 'AEON-5', pill_en: 'Wide lists', pill_de: 'Breite Listen', benefit_en: 'More columns fit on a laptop.', benefit_de: 'Mehr Spalten passen auf einen Laptop.' }
+  const r = rel('260924000012.0.0', '', { headline: 'Stable112 tag', tickets: ['AEON-5'], changes: [
+    { ...change('a'.repeat(40), 'feat', 'P0.x: widen the grid (AEON-5)', ['AEON-5']), group: 'features' as const, linked_tickets: [note] },
+    change('b'.repeat(40), 'chore', 'P0.x: pin the vendor hash'),
+  ] })
+  const hit = (q: string, lang: string, view: 'highlights' | 'details') => matches(r, { ...f, q }, lang, view)
+  // Pills, ticket keys, version and commit subjects in both views.
+  for (const view of ['highlights', 'details'] as const) {
+    assert.ok(hit('wide lists', 'en', view))
+    assert.ok(hit('breite', 'de', view))
+    assert.ok(hit('aeon-5', 'en', view))
+    assert.ok(hit('widen the grid', 'en', view))
+    assert.ok(hit('vendor hash', 'en', view))
+    assert.ok(hit('260924000012', 'en', view))
+  }
+  // Benefits only where Highlights shows them; the tag message only in Details' evidence.
+  assert.ok(hit('laptop', 'en', 'highlights'))
+  assert.ok(!hit('laptop', 'en', 'details'))
+  assert.ok(!hit('stable112', 'en', 'highlights'))
+  assert.ok(hit('stable112', 'en', 'details'))
+  // The other language's words are not on screen.
+  assert.ok(!hit('breite', 'en', 'highlights'))
+  assert.ok(!hit('wide lists', 'de', 'details'))
+})
+
+test('Details search finds commit SHAs from their start and the evidence it shows', () => {
+  const f = { q: '', features: false, fixes: false, tickets: false }
+  const r = rel('260929113854.0.0', '', { headline: 'Stable105', changes: [
+    change('5a622e2c0ffee00000000000000000000000000a', 'feat', 'P0.x: tidy dead sessions', []),
+  ], notes: { source: 'database-snapshot', snapshot_sha256: 'feedbeef'.repeat(8), captured_at: null, release_revision: 1, items: [], gaps: [], hidden: 0 },
+  evidence: {
+    source_commit: '9f8e7d6c5b4a39281706f5e4d3c2b1a098765432', source_url: '', release_url: '',
+    image: { reference: 'ghcr.io/markus-barta/aeon:260929113854.0.0', digest: 'sha256:0123abcd'.padEnd(71, '9') },
+    ci: { name: 'Web and Go checks', url: '', status: 'completed', conclusion: 'success' },
+    release_run: { name: 'Release image', url: '', status: 'in_progress', conclusion: '' },
+    unavailable: ['The GitHub release is not reachable.'],
+  } })
+  const hit = (q: string, view: 'highlights' | 'details') => matches(r, { ...f, q }, 'en', view)
+  // Commit SHAs, short or full, in both views (Highlights folds them, Other shows them).
+  for (const view of ['highlights', 'details'] as const) {
+    assert.ok(hit('5a622e2', view))
+    assert.ok(hit('5A622E2C0FFEE', view))
+  }
+  // From the start and from four characters: a word inside a hash is no hit.
+  assert.ok(!hit('c0ffee', 'details'))
+  assert.ok(!hit('5a6', 'details'))
+  assert.ok(idMatches('sha256:0123abcd99', 'sha256:0123'))
+  assert.ok(idMatches('sha256:0123abcd99', '0123abc'))
+  assert.ok(!idMatches('deadbeef', 'beef'))
+  // Evidence as Details shows it open: tag message, source, snapshot, source
+  // commit, runs by name and outcome, image, digest and what is unavailable.
+  for (const q of ['stable105', 'database-snapshot', 'feedbeef', '9f8e7d6', 'web and go checks', 'passed', 'in progress', 'release image', 'ghcr.io/markus-barta', '0123abcd', 'not reachable']) {
+    assert.ok(hit(q, 'details'), q)
+    assert.ok(!hit(q, 'highlights'), q)
+  }
+  assert.deepEqual(evidenceSearch(rel('1.0.0', '', { headline: '', tag: '' })), { texts: [], ids: ['abc1234def'] })
+})
+
+test('names in the rail and in Compare say when they fell back to the other language', () => {
+  const english = { key: 'AEON-291', pill_en: 'Dead sessions tidy up', pill_de: '', benefit_en: 'Old sessions go.', benefit_de: '' }
+  const german = { key: 'AEON-5', pill_en: 'Wide lists', pill_de: 'Breite Listen', benefit_en: '', benefit_de: '' }
+  const only = rel('2.0.0', '', { changes: [{ ...change('c'.repeat(40), 'feat', 'x (AEON-291)', ['AEON-291']), group: 'features' as const, linked_tickets: [english] }] })
+  assert.deepEqual(railLine(only, 'de'), { text: 'Dead sessions tidy up', themed: false, lang: 'en' })
+  assert.deepEqual(railLine(only, 'en'), { text: 'Dead sessions tidy up', themed: false, lang: 'en' })
+  assert.deepEqual(releaseName(only, 'de'), { text: 'Dead sessions tidy up', lang: 'en' })
+  // Mixed: the line names the language any part fell back to.
+  const both = rel('3.0.0', '', { changes: [
+    { ...change('d'.repeat(40), 'feat', 'y (AEON-5)', ['AEON-5']), group: 'features' as const, linked_tickets: [german] },
+    { ...change('e'.repeat(40), 'fix', 'z (AEON-291)', ['AEON-291']), group: 'fixes' as const, linked_tickets: [english] },
+  ] })
+  assert.deepEqual(railLine(both, 'de'), { text: 'Breite Listen · Dead sessions tidy up', themed: false, lang: 'en' })
+  assert.deepEqual(releaseName(both, 'de'), { text: 'Breite Listen', lang: 'de' })
+  // A theme that fell back says so too.
+  const presentation = { theme_en: 'Lists', theme_de: '', headline_en: 'All at a glance', headline_de: 'Alles auf einen Blick', intro_en: '', intro_de: '', revision: 1, updated_at: '' }
+  assert.deepEqual(railLine(rel('4.0.0', '', { presentation }), 'de'), { text: 'Lists', themed: true, lang: 'en' })
+  assert.deepEqual(releaseName(rel('4.0.0', '', { presentation: { ...presentation, theme_en: '' } }), 'de'), { text: 'Alles auf einen Blick', lang: 'de' })
+})
+
+test('empty and compare lines follow the chosen language', () => {
+  const en = releaseCopy('en'), de = releaseCopy('de')
+  assert.equal(en.noChanges, 'No changes are recorded between this release and the one before it.')
+  assert.equal(de.noChanges, 'Zwischen diesem und dem vorherigen Release sind keine Änderungen verzeichnet.')
+  assert.equal(de.nothingShipped, 'Unter dieser Version wurde nichts ausgeliefert.')
+  assert.equal(de.compareNone, 'Zwischen diesen Releases sind keine Änderungen verzeichnet.')
+  assert.equal(en.omitted(1), 'And 1 more change not listed here.')
+  assert.equal(de.omitted(3), '3 weitere Änderungen sind hier nicht aufgeführt.')
+  assert.equal(de.noMatchText(12, 'x'), 'Nichts in 12 Releases passt zu „x“.')
+  assert.equal(en.noMatchText(12, ''), 'Nothing in 12 releases fits these filters.')
+  // Every line exists in both languages and differs.
+  for (const key of Object.keys(en) as (keyof typeof en)[]) assert.notDeepEqual(String(en[key]), String(de[key]), key)
+  assert.equal(releaseCopy('de-AT').comparePick, 'Zweites Release wählen')
 })
