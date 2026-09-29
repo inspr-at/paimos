@@ -9,6 +9,7 @@ import { useSession } from '../../stores/session'
 import AppIcon from '../AppIcon.vue'
 import KeyCap from '../KeyCap.vue'
 import SessionMessages from './SessionMessages.vue'
+import SessionRequests from './SessionRequests.vue'
 import { belongsToSession, collapseMessages } from './sessionMessages'
 import { loadReadMark, nearBottom, saveReadMark, unreadGroups, type InboxReceipt, type ReadMark } from './sessionChat'
 
@@ -27,6 +28,8 @@ const ended = computed(() => s.value.phase === 'stopped' || !!s.value.stopped_at
 // Managed sessions (AEON-260) take input only through the Session controls above:
 // no composer and no Reply here.
 const managed = computed(() => s.value.advertised_capabilities.includes('managed_control_v1'))
+// Unmanaged sessions take rename/model requests next to the composer (AEON-225).
+const unmanaged = computed(() => s.value.management_mode === 'unmanaged')
 
 const draft = ref('')
 const level = ref<'simple' | 'steer'>('simple')
@@ -235,7 +238,8 @@ defineExpose({ focusComposer: () => textarea.value?.focus() })
     </div>
 
     <p v-if="managed && !ended" class="managed-hint"><AppIcon name="send" :size="13" />Steer this managed session with the controls above.</p>
-    <footer v-else-if="address || composeBlock" class="composer">
+    <footer v-else-if="address || composeBlock || unmanaged" class="composer">
+      <SessionRequests v-if="unmanaged" :key="s.id" :session="s" :now="now" />
       <p v-if="composeBlock" class="compose-block"><AppIcon name="inbox" :size="13" />{{ composeBlock }}</p>
       <form v-else class="compose" @submit.prevent="send">
         <p v-if="replyTo" class="replying"><span>Replying to “{{ replyTo.body.slice(0, 80) }}{{ replyTo.body.length > 80 ? '…' : '' }}”</span><button type="button" class="icon-btn sm flat" aria-label="Cancel the reply" @click="replyTo = null"><AppIcon name="close" :size="12" /></button></p>

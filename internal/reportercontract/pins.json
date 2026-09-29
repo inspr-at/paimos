@@ -445,14 +445,13 @@
     }
   },
   "harness-session": {
-    "version": "harness-session/1.0",
-    "sha256": "f08037199cdce1c903eb6f57333d5edc3e6b8dc61d2015959d269c4d9d22d303",
+    "version": "harness-session/1.1",
+    "sha256": "09dff956da220327daed37c54e552f8d42749b04e4c219531db789584b9840cc",
     "shape": {
       "GET /projects/{projectId}/harness-sessions/{sessionId} 200": {
         "properties": {
           "account_label": {
             "maxLength": 128,
-            "never a credential. Trimmed plain text; control characters stripped.": null,
             "type": [
               "string",
               "null"
@@ -485,7 +484,6 @@
               ],
               "type": "object"
             },
-            "newest first; present on session detail.": null,
             "type": "array"
           },
           "activity_note": {
@@ -610,6 +608,129 @@
             "maxItems": 20,
             "type": "array"
           },
+          "controls": {
+            "items": {
+              "properties": {
+                "claimed_at": {
+                  "format": "date-time",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "completed_at": {
+                  "format": "date-time",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "created_at": {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                "expected_generation": {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                "expires_at": {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                "id": {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                "kind": {
+                  "enum": [
+                    "rename_request",
+                    "model_request"
+                  ],
+                  "type": "string"
+                },
+                "outcome": {
+                  "enum": [
+                    "applied",
+                    "rejected",
+                    null
+                  ],
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "reason": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "request_payload": {
+                  "properties": {
+                    "account_id": {
+                      "format": "uuid",
+                      "type": "string"
+                    },
+                    "display_label": {
+                      "maxLength": 64,
+                      "minLength": 1,
+                      "pattern": "^[A-Za-z0-9 _.:()/#-]+$",
+                      "type": "string"
+                    },
+                    "model": {
+                      "maxLength": 128,
+                      "type": "string"
+                    },
+                    "model_profile_id": {
+                      "format": "uuid",
+                      "type": "string"
+                    },
+                    "reasoning_effort": {
+                      "enum": [
+                        "default",
+                        "low",
+                        "medium",
+                        "high",
+                        "xhigh"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                },
+                "sequence": {
+                  "format": "int64",
+                  "type": "integer"
+                },
+                "session_id": {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                "state": {
+                  "enum": [
+                    "pending",
+                    "claimed",
+                    "completed"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "session_id",
+                "expected_generation",
+                "kind",
+                "state",
+                "sequence",
+                "request_payload",
+                "expires_at",
+                "outcome",
+                "reason"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
           "created_at": {
             "format": "date-time",
             "type": "string"
@@ -678,7 +799,6 @@
             "type": "string"
           },
           "metadata_history": {
-            "and reasoning effort changes": null,
             "items": {
               "properties": {
                 "at": {
@@ -714,8 +834,6 @@
               ],
               "type": "object"
             },
-            "model": null,
-            "newest first; present on session detail.": null,
             "type": "array"
           },
           "model": {
@@ -904,7 +1022,6 @@
         "properties": {
           "account_label": {
             "maxLength": 128,
-            "never a credential. Trimmed plain text; control characters stripped.": null,
             "type": [
               "string",
               "null"
@@ -937,7 +1054,6 @@
               ],
               "type": "object"
             },
-            "newest first; present on session detail.": null,
             "type": "array"
           },
           "activity_note": {
@@ -1062,6 +1178,129 @@
             "maxItems": 20,
             "type": "array"
           },
+          "controls": {
+            "items": {
+              "properties": {
+                "claimed_at": {
+                  "format": "date-time",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "completed_at": {
+                  "format": "date-time",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "created_at": {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                "expected_generation": {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                "expires_at": {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                "id": {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                "kind": {
+                  "enum": [
+                    "rename_request",
+                    "model_request"
+                  ],
+                  "type": "string"
+                },
+                "outcome": {
+                  "enum": [
+                    "applied",
+                    "rejected",
+                    null
+                  ],
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "reason": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "request_payload": {
+                  "properties": {
+                    "account_id": {
+                      "format": "uuid",
+                      "type": "string"
+                    },
+                    "display_label": {
+                      "maxLength": 64,
+                      "minLength": 1,
+                      "pattern": "^[A-Za-z0-9 _.:()/#-]+$",
+                      "type": "string"
+                    },
+                    "model": {
+                      "maxLength": 128,
+                      "type": "string"
+                    },
+                    "model_profile_id": {
+                      "format": "uuid",
+                      "type": "string"
+                    },
+                    "reasoning_effort": {
+                      "enum": [
+                        "default",
+                        "low",
+                        "medium",
+                        "high",
+                        "xhigh"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                },
+                "sequence": {
+                  "format": "int64",
+                  "type": "integer"
+                },
+                "session_id": {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                "state": {
+                  "enum": [
+                    "pending",
+                    "claimed",
+                    "completed"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "session_id",
+                "expected_generation",
+                "kind",
+                "state",
+                "sequence",
+                "request_payload",
+                "expires_at",
+                "outcome",
+                "reason"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
           "created_at": {
             "format": "date-time",
             "type": "string"
@@ -1130,7 +1369,6 @@
             "type": "string"
           },
           "metadata_history": {
-            "and reasoning effort changes": null,
             "items": {
               "properties": {
                 "at": {
@@ -1166,8 +1404,6 @@
               ],
               "type": "object"
             },
-            "model": null,
-            "newest first; present on session detail.": null,
             "type": "array"
           },
           "model": {
