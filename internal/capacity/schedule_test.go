@@ -156,3 +156,53 @@ func TestScheduleDSTAndValidation(t *testing.T) {
 		}
 	}
 }
+
+func TestPlanZeroRemainingAndInvalidTotal(t *testing.T) {
+	s := DefaultSchedule("Europe/Vienna")
+	if s.Timezone != "Europe/Vienna" {
+		t.Fatal(s.Timezone)
+	}
+	in := PlanInput{Now: instant("2026-09-28T12:00:00Z"), Reset: instant("2026-09-30T12:00:00Z"), WindowStart: instant("2026-09-28T08:00:00Z"), UsedToday: 100}
+	for _, override := range []string{"", "sprint", "hold"} {
+		in.Override = override
+		p, err := Plan(in, s)
+		if err != nil || p.SuggestedTodayPercent != 0 {
+			t.Fatal(p, err)
+		}
+	}
+	in.Remaining = 1
+	if _, err := Plan(in, s); err == nil {
+		t.Fatal("remaining + used_today > 100 accepted")
+	}
+	s.Override = "unknown"
+	if s.Validate() == nil {
+		t.Fatal("unknown override accepted")
+	}
+}
+
+func TestCurrentBandAndSprintReset(t *testing.T) {
+	s := DefaultSchedule()
+	in := PlanInput{Now: instant("2026-09-28T23:00:00Z"), WindowStart: instant("2026-09-28T08:00:00Z"), Reset: instant("2026-09-30T22:00:00Z"), Remaining: 60}
+	p, err := Plan(in, s)
+	if err != nil || p.AvailableNowPercent != 0 {
+		t.Fatal("off band allowed", p, err)
+	}
+	s.Override = "sprint"
+	until := in.Now.Add(time.Hour)
+	s.OverrideUntil = &until
+	p, err = Plan(in, s)
+	if err != nil || p.AvailableNowPercent != 60 {
+		t.Fatal("Sprint not literal", p, err)
+	}
+	in.Now = until
+	p, err = Plan(in, s)
+	if err != nil || p.AvailableNowPercent != 0 {
+		t.Fatal("Sprint survived reset", p, err)
+	}
+	s.Override = "hold"
+	in.Now = instant("2026-09-29T12:00:00Z")
+	p, err = Plan(in, s)
+	if err != nil || p.AvailableNowPercent != 0 {
+		t.Fatal("Hold allowed", p, err)
+	}
+}

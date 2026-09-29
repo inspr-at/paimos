@@ -27,3 +27,19 @@ func TestCapacityClaimRechecksReadingAuthorityAndFreshness(t *testing.T) {
 	update(true, "0 minutes", 0)
 	f.call(t, f.agent, "POST", "/api/runs/"+run.ID+"/claim", claimBody(ids), 200, nil)
 }
+
+func TestCapacityClaimAllowsOnlyItsRecordedRefresh(t *testing.T) {
+	f := setup(t)
+	o := f.order(t, nil)
+	run := f.run(t, o)
+	ids := f.reserve(t, run)
+	f.tx(t, f.agent, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE account_allowance_windows SET unit='percent',allowance=100,used=0,reserved=1,capacity_kind='5h',capacity_read_at=clock_timestamp()-interval '11 minutes',capacity_allowed=true,capacity_refresh_run=$1 WHERE id=(SELECT window_id FROM account_reservations WHERE run_id=$1)`, run.ID)
+		if err != nil {
+			return err
+		}
+		_, err = tx.Exec(t.Context(), `UPDATE account_reservations SET reserved_units=1 WHERE run_id=$1`, run.ID)
+		return err
+	})
+	f.call(t, f.agent, "POST", "/api/runs/"+run.ID+"/claim", claimBody(ids), 200, nil)
+}

@@ -49,11 +49,13 @@
 // tenant-isolated and idempotent; optional run IDs must use that account.
 // Derived percent windows have allowance 100 and conservatively round used
 // percent upward for the integer reservation ledger. Fresh means <=10 minutes;
-// aging <=window/6, stale beyond, expired at reset. Only fresh measured readings
-// route. Explicit vendor denial fails closed until explicit vendor recovery.
+// aging <=window/6, stale beyond, expired at reset. Aging/stale readings allow
+// one estimated 1% refresh job per observation, with no other live run. If all
+// windows reset, a provisional five-minute 1% grant permits that same single
+// refresh; expiry/release never renews it without a new measured observation. Explicit vendor denial fails closed until explicit vendor recovery.
 // Readings never approve pairing: POST {id}/capacity/approve requires a person
 // with account.manage and records the existing separate ongoing-use approval.
-// Active manual windows override derived windows. Percent reservations hold an
+// Active manual windows override pacing; fresh vendor denial still fences them. Percent reservations hold an
 // initial 1% per job; tokens/dollars never masquerade as vendor quota.
 // Settlement releases that hold without adding usage already in observations.
 //
@@ -62,13 +64,20 @@
 // from the legacy account contract. GET {id}/readings returns 200 recent samples.
 // GET/PUT /api/agent-accounts/capacity/schedule stores the current person's user,
 // pool (harness) or account override; account wins, then pool, then user. Null
-// removes an override. Default: UTC, Monday-Friday, 08-22, nights disabled,
+// removes an override. Default: the person profile timezone (UTC if absent), Monday-Friday, 08-22, nights disabled,
 // off_days expire. Per-day half-hour bands, an optional crossing night, three
 // shifts and 24 hourly blocks match the approved schedule editor. Shifts and
 // blocks replace work bands; reduced rates are adjustable from 0.1 to 0.9.
-// Pacing uses weighted hours and the schedule day boundary; it is advice, not
-// a reserve profile or routing budget. A missing usage baseline projects from
-// now and is explicitly marked unknown rather than inventing daily usage.
+// Routing enforces max(0,budget-used_today), including outstanding reservations.
+// The pairing approver owns the schedule; for unpaired accounts the first person
+// saving an account schedule establishes ownership. Account/pool/user schedules
+// support override=sprint (remaining quota until the next reset in scope, stored
+// as override_until) or hold (zero allowance). Outside work bands routing waits
+// unless Sprint is active.
+// A missing period baseline anchors at the first sample and remains marked unknown.
+// Every report is a full normalized snapshot per source; missing buckets retire
+// derived windows but never delete history. Claude sparse events retain unexpired
+// peers at their original observation times and drop them after reset.
 //
 // Lead workers can use harness heartbeat or run-heartbeat with --capacity-account
 // UUID --capacity-source codex|claude --capacity-file PHYSICAL_JSONL_PATH. The
@@ -81,7 +90,8 @@
 // with the file modification time, so later output cannot freshen old quota.
 // No credential files, vendor identity or raw stream content are uploaded.
 // agentd captures Codex at start/end and updates, with quota-neutral app-server
-// fallback before routing. Claude preserves its first/last available stream
+// fallback on a separate idle ticker, at most every five minutes (configurable),
+// never while an account has a live managed run. Claude preserves its first/last available stream
 // observation, including the original read time on the end snapshot; it does
 // not invent a pre-run baseline when the vendor supplies none.
 //

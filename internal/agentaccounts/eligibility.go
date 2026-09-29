@@ -73,11 +73,22 @@ func activeWindows(windows []Window, now time.Time) []Window {
 			latest[key] = w
 		}
 	}
-	// Each current vendor window constrains the account. Dropping just a stale
-	// or denied weekly window would incorrectly route against its fresh 5h peer.
-	usable := !manual && len(latest) > 0
-	for _, w := range latest {
-		if !w.capacityAllowed || now.Sub(*w.capacityReadAt) > 10*time.Minute || now.Before(w.StartsAt) || !now.Before(w.EndsAt) {
+	// A current vendor denial fences even explicit manual budgets. Expired or
+	// replaced buckets are history, not permanent account constraints.
+	usable := !manual
+	for key, w := range latest {
+		if w.capacityRetired {
+			delete(latest, key)
+			continue
+		}
+		if !w.capacityAllowed && now.Sub(*w.capacityReadAt) <= 10*time.Minute {
+			return out
+		}
+		if !now.Before(w.EndsAt) {
+			delete(latest, key)
+			continue
+		}
+		if !w.capacityAllowed || now.Before(w.StartsAt) {
 			usable = false
 		}
 	}

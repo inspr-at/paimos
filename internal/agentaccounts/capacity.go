@@ -70,6 +70,12 @@ func ingestReadings(ctx context.Context, tx pgx.Tx, p tenant.Principal, id strin
 	if err != nil {
 		return err
 	}
+	snapshotAt := map[string]time.Time{}
+	for _, v := range readings {
+		if v.ReadAt.After(snapshotAt[v.Source]) {
+			snapshotAt[v.Source] = v.ReadAt
+		}
+	}
 	for _, v := range readings {
 		if err := v.Validate(now); err != nil {
 			return fail(400, err.Error())
@@ -101,13 +107,16 @@ func ingestReadings(ctx context.Context, tx pgx.Tx, p tenant.Principal, id strin
 		// Estimates never replace a measured observation. Within a timestamp the
 		// harness wins over the daemon; delayed/out-of-order samples stay history.
 		var newer bool
-		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM account_capacity_readings WHERE account_id=$1 AND window_kind=$2 AND bucket=$3 AND source<>'estimate' AND (read_at>$4 OR (read_at=$4 AND source='harness' AND $5<>'harness')))`, id, v.WindowKind, v.Bucket, v.ReadAt, v.Source).Scan(&newer); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM account_capacity_readings WHERE account_id=$1 AND window_kind=$2 AND bucket=$3 AND source<>'estimate' AND (read_at>$4 OR (read_at=$4 AND source='harness' AND $5<>'harness'))) OR EXISTS(SELECT 1 FROM account_capacity_readings WHERE account_id=$1 AND source=$5 AND read_at>$6)`, id, v.WindowKind, v.Bucket, v.ReadAt, v.Source, snapshotAt[v.Source]).Scan(&newer); err != nil {
 			return err
 		}
 		if newer || v.Source == "estimate" {
 			continue
 		}
-		if _, err := tx.Exec(ctx, `UPDATE account_allowance_windows SET capacity_allowed=false WHERE account_id=$1 AND capacity_kind=$2 AND capacity_bucket=$3`, id, v.WindowKind, v.Bucket); err != nil {
+		if _, err := tx.Exec(ctx, `UPDATE account_allowance_windows SET capacity_retired=true WHERE account_id=$1 AND capacity_kind='refresh' AND capacity_read_at<$2`, id, v.ReadAt); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `UPDATE account_allowance_windows SET capacity_allowed=false, capacity_retired=true WHERE account_id=$1 AND capacity_kind=$2 AND capacity_bucket=$3`, id, v.WindowKind, v.Bucket); err != nil {
 			return err
 		}
 		// A missing authority bit is not recovery from a vendor denial,
@@ -127,11 +136,29 @@ func ingestReadings(ctx context.Context, tx pgx.Tx, p tenant.Principal, id strin
 				return err
 			}
 		}
-		_, err = tx.Exec(ctx, `INSERT INTO account_allowance_windows(tenant_id,account_id,starts_at,ends_at,unit,allowance,used,pace_model,burst_ratio,capacity_kind,capacity_bucket,capacity_read_at,capacity_allowed)
-   VALUES($1,$2,$3,$4,'percent',100,$5,'unrestricted',0,$6,$7,$8,$9)
+		_, err = tx.Exec(ctx, `INSERT INTO account_allowance_windows(tenant_id,account_id,starts_at,ends_at,unit,allowance,used,pace_model,burst_ratio,capacity_kind,capacity_bucket,capacity_read_at,capacity_allowed,capacity_source)
+   VALUES($1,$2,$3,$4,'percent',100,$5,'unrestricted',0,$6,$7,$8,$9,$10)
    ON CONFLICT(tenant_id,account_id,capacity_kind,capacity_bucket,ends_at) WHERE capacity_kind IS NOT NULL
-   DO UPDATE SET starts_at=EXCLUDED.starts_at,used=EXCLUDED.used,capacity_read_at=EXCLUDED.capacity_read_at,capacity_allowed=EXCLUDED.capacity_allowed`, p.TenantID, id, v.StartsAt(), v.ResetsAt, int64(math.Ceil(v.UsedPercent)), v.WindowKind, v.Bucket, v.ReadAt, allowed)
+   DO UPDATE SET starts_at=EXCLUDED.starts_at,used=EXCLUDED.used,capacity_read_at=EXCLUDED.capacity_read_at,capacity_allowed=EXCLUDED.capacity_allowed,capacity_source=EXCLUDED.capacity_source,capacity_retired=false,capacity_refresh_run=CASE WHEN EXCLUDED.capacity_read_at>account_allowance_windows.capacity_read_at THEN NULL ELSE account_allowance_windows.capacity_refresh_run END`, p.TenantID, id, v.StartsAt(), v.ResetsAt, int64(math.Ceil(v.UsedPercent)), v.WindowKind, v.Bucket, v.ReadAt, allowed, v.Source)
 		if err != nil {
+			return err
+		}
+	}
+	for _, source := range []string{"harness", "agentd"} {
+		var at time.Time
+		keys := []string{}
+		for _, v := range readings {
+			if v.Source == source {
+				if v.ReadAt.After(at) {
+					at = v.ReadAt
+				}
+				keys = append(keys, v.WindowKind+"/"+v.Bucket)
+			}
+		}
+		if at.IsZero() {
+			continue
+		}
+		if _, err := tx.Exec(ctx, `UPDATE account_allowance_windows SET capacity_retired=true WHERE account_id=$1 AND capacity_source=$2 AND capacity_read_at<=$3 AND NOT (capacity_kind||'/'||capacity_bucket=ANY($4::text[])) AND NOT EXISTS(SELECT 1 FROM account_capacity_readings WHERE account_id=$1 AND source=$2 AND read_at>$3)`, id, source, at, keys); err != nil {
 			return err
 		}
 	}
@@ -141,7 +168,7 @@ func ingestReadings(ctx context.Context, tx pgx.Tx, p tenant.Principal, id strin
 func readCapacity(ctx context.Context, tx pgx.Tx, id string, current bool) ([]capacity.Reading, error) {
 	query := `SELECT window_kind,bucket,window_minutes,used_percent::float8,resets_at,read_at,source,plan,ordinary_usage_allowed,COALESCE(run_id::text,''),phase FROM account_capacity_readings WHERE account_id=$1 ORDER BY read_at DESC, CASE source WHEN 'harness' THEN 0 WHEN 'agentd' THEN 1 ELSE 2 END LIMIT 200`
 	if current {
-		query = `SELECT window_kind,bucket,window_minutes,used_percent::float8,resets_at,read_at,source,plan,ordinary_usage_allowed,COALESCE(run_id::text,''),phase FROM (SELECT DISTINCT ON(window_kind,bucket) * FROM account_capacity_readings WHERE account_id=$1 ORDER BY window_kind,bucket,read_at DESC, CASE source WHEN 'harness' THEN 0 WHEN 'agentd' THEN 1 ELSE 2 END) r ORDER BY resets_at,window_kind,bucket`
+		query = `SELECT window_kind,bucket,window_minutes,used_percent::float8,resets_at,read_at,source,plan,ordinary_usage_allowed,COALESCE(run_id::text,''),phase FROM (SELECT DISTINCT ON(window_kind,bucket) * FROM account_capacity_readings WHERE account_id=$1 AND (source='estimate' OR EXISTS(SELECT 1 FROM account_allowance_windows w WHERE w.account_id=account_capacity_readings.account_id AND w.capacity_kind=window_kind AND w.capacity_bucket=bucket AND w.capacity_read_at=read_at AND NOT w.capacity_retired)) ORDER BY window_kind,bucket,read_at DESC, CASE source WHEN 'harness' THEN 0 WHEN 'agentd' THEN 1 ELSE 2 END) r ORDER BY resets_at,window_kind,bucket`
 	}
 	rows, err := tx.Query(ctx, query, id)
 	if err != nil {
@@ -163,9 +190,11 @@ func (m *Module) capacityHistory(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if err := m.requirePermission(r, p, "account.read"); err != nil {
-		writeErr(w, err)
-		return
+	if p.Kind != tenant.Agent {
+		if err := m.requirePermission(r, p, "account.read"); err != nil {
+			writeErr(w, err)
+			return
+		}
 	}
 	var out []capacity.Reading
 	err := m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
@@ -173,10 +202,18 @@ func (m *Module) capacityHistory(w http.ResponseWriter, r *http.Request) {
 		if !uuidRE.MatchString(id) {
 			return fail(404, "account not found")
 		}
-		if _, err := getAccount(r.Context(), tx, id); err != nil {
+		account, err := getAccount(r.Context(), tx, id)
+		if err != nil {
 			return fail(404, "account not found")
 		}
-		var err error
+		if p.Kind == tenant.Agent {
+			if err := requireScope(r.Context(), tx, r, p, "account.probe"); err != nil {
+				return err
+			}
+			if account.RegisteredBy != p.ID {
+				return fail(403, "only the registering agent can read capacity")
+			}
+		}
 		out, err = readCapacity(r.Context(), tx, id, false)
 		return err
 	})
@@ -237,24 +274,7 @@ func (m *Module) capacityList(w http.ResponseWriter, r *http.Request) {
 			}
 			for _, v := range readings {
 				left := 100 - v.UsedPercent
-				periodStart, _ := s.Period(now)
-				known := !v.StartsAt().Before(periodStart)
-				usedToday := v.UsedPercent
-				if !known && !v.ReadAt.Before(periodStart) {
-					var baseline float64
-					err := tx.QueryRow(r.Context(), `SELECT used_percent::float8 FROM account_capacity_readings WHERE account_id=$1 AND window_kind=$2 AND bucket=$3 AND resets_at=$4 AND read_at=$5 AND source<>'estimate' ORDER BY CASE source WHEN 'harness' THEN 0 ELSE 1 END LIMIT 1`, a.ID, v.WindowKind, v.Bucket, v.ResetsAt, periodStart).Scan(&baseline)
-					if err != nil && !isNoRows(err) {
-						return err
-					}
-					known = err == nil && baseline <= v.UsedPercent
-					usedToday = v.UsedPercent - baseline
-				}
-				input := capacity.PlanInput{Now: now, Reset: v.ResetsAt, WindowStart: v.StartsAt(), Remaining: left, UsedToday: usedToday}
-				if !known {
-					input.WindowStart = now
-					input.UsedToday = 0
-				}
-				pace, err := capacity.Plan(input, s)
+				pace, known, err := readingPacing(r.Context(), tx, a.ID, v, now, s)
 				if err != nil {
 					return err
 				}
@@ -357,6 +377,24 @@ func (m *Module) capacitySchedule(w http.ResponseWriter, r *http.Request) {
 		if err := in.Schedule.Validate(); err != nil {
 			return fail(400, err.Error())
 		}
+		if in.Schedule.Override == "sprint" {
+			// Sprint is literal and bounded to the next limiting reset in scope.
+			var until *time.Time
+			if err := tx.QueryRow(r.Context(), `SELECT min(w.ends_at) FROM account_allowance_windows w JOIN agent_accounts a ON a.tenant_id=w.tenant_id AND a.id=w.account_id WHERE w.capacity_read_at IS NOT NULL AND NOT w.capacity_retired AND w.ends_at>now() AND ($1='user' OR ($1='pool' AND a.harness=$2) OR ($1='account' AND a.id::text=$2))`, in.Scope, key).Scan(&until); err != nil {
+				return err
+			}
+			if until == nil {
+				return fail(400, "Sprint requires a current capacity reset")
+			}
+			in.Schedule.OverrideUntil = until
+		} else {
+			in.Schedule.OverrideUntil = nil
+		}
+		if in.Scope == "account" {
+			if _, err := tx.Exec(r.Context(), `UPDATE agent_accounts SET capacity_owner=COALESCE(capacity_owner,$2::uuid) WHERE id=$1`, key, p.ID); err != nil {
+				return err
+			}
+		}
 		raw, _ := json.Marshal(in.Schedule)
 		_, err := tx.Exec(r.Context(), `INSERT INTO account_capacity_schedules(tenant_id,principal_id,scope,scope_key,account_id,schedule) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(tenant_id,principal_id,scope,scope_key) DO UPDATE SET schedule=EXCLUDED.schedule`, p.TenantID, p.ID, in.Scope, key, account, raw)
 		return err
@@ -375,7 +413,12 @@ func effectiveSchedule(ctx context.Context, tx pgx.Tx, person string, a Account)
 	var raw []byte
 	err := tx.QueryRow(ctx, `SELECT schedule FROM account_capacity_schedules WHERE principal_id=$1 AND ((scope='user' AND scope_key='') OR (scope='pool' AND scope_key=$2) OR (scope='account' AND scope_key=$3)) ORDER BY CASE scope WHEN 'account' THEN 0 WHEN 'pool' THEN 1 ELSE 2 END LIMIT 1`, person, a.Harness, a.ID).Scan(&raw)
 	if isNoRows(err) {
-		return capacity.DefaultSchedule(), nil
+		var zone string
+		err = tx.QueryRow(ctx, `SELECT timezone FROM personal_profiles WHERE principal_id=$1`, person).Scan(&zone)
+		if err != nil && !isNoRows(err) {
+			return capacity.Schedule{}, err
+		}
+		return capacity.DefaultSchedule(zone), nil
 	}
 	if err != nil {
 		return capacity.Schedule{}, err
@@ -439,5 +482,55 @@ func (s *scheduleOverride) UnmarshalJSON(raw []byte) error {
 		return errors.New("schedule is required; use null to remove an override")
 	}
 	*s = scheduleOverride(v)
+	return nil
+}
+
+// Anchor at the period boundary when available, otherwise at the first actual
+// sample in this period. Never move the baseline forward on every route.
+func readingPacing(ctx context.Context, tx pgx.Tx, id string, v capacity.Reading, now time.Time, s capacity.Schedule) (capacity.Pacing, bool, error) {
+	period, _ := s.Period(now)
+	start, used, known := v.StartsAt(), v.UsedPercent, !v.StartsAt().Before(period)
+	if !known {
+		var baseline float64
+		var at time.Time
+		err := tx.QueryRow(ctx, `SELECT used_percent::float8,read_at FROM account_capacity_readings WHERE account_id=$1 AND window_kind=$2 AND bucket=$3 AND resets_at=$4 AND read_at>=$5 AND read_at<=$6 AND source<>'estimate' ORDER BY read_at,CASE source WHEN 'harness' THEN 0 ELSE 1 END LIMIT 1`, id, v.WindowKind, v.Bucket, v.ResetsAt, period, v.ReadAt).Scan(&baseline, &at)
+		if err != nil && !isNoRows(err) {
+			return capacity.Pacing{}, false, err
+		}
+		if err == nil && baseline <= v.UsedPercent {
+			start, used, known = at, v.UsedPercent-baseline, at.Equal(period)
+		} else {
+			start, used = now, 0
+		}
+	}
+	p, err := capacity.Plan(capacity.PlanInput{Now: now, Reset: v.ResetsAt, WindowStart: start, Remaining: 100 - v.UsedPercent, UsedToday: used}, s)
+	return p, known, err
+}
+
+func routingSchedule(ctx context.Context, tx pgx.Tx, a Account) (capacity.Schedule, error) {
+	var person *string
+	err := tx.QueryRow(ctx, `SELECT COALESCE((SELECT p.approved_by FROM agent_pairing_enrollments e JOIN agent_pairing_requests p ON p.tenant_id=e.tenant_id AND p.id=e.request_id WHERE e.account_id=a.id),a.capacity_owner)::text FROM agent_accounts a WHERE a.id=$1`, a.ID).Scan(&person)
+	if err != nil {
+		return capacity.Schedule{}, err
+	}
+	if person == nil {
+		return capacity.DefaultSchedule(), nil
+	}
+	return effectiveSchedule(ctx, tx, *person, a)
+}
+
+func applyCapacityPacing(ctx context.Context, tx pgx.Tx, a Account, windows []Window, now time.Time, s capacity.Schedule) error {
+	for i := range windows {
+		w := &windows[i]
+		if w.capacityReadAt == nil {
+			continue
+		}
+		v := capacity.Reading{WindowKind: w.capacityKind, Bucket: w.capacityBucket, WindowMinutes: int(w.EndsAt.Sub(w.StartsAt) / time.Minute), ResetsAt: w.EndsAt, ReadAt: *w.capacityReadAt, UsedPercent: float64(w.Used)}
+		p, _, err := readingPacing(ctx, tx, a.ID, v, now, s)
+		if err != nil {
+			return err
+		}
+		w.capacityBudget = &p.AvailableNowPercent
+	}
 	return nil
 }

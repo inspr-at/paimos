@@ -46,6 +46,9 @@ type Window struct {
 	capacityAllowed     bool
 	capacityKind        string
 	capacityBucket      string
+	capacityRetired     bool
+	capacityRefreshRun  *string
+	capacityBudget      *float64
 
 	ID          string    `json:"id"`
 	AccountID   string    `json:"account_id"`

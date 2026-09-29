@@ -147,8 +147,8 @@ func reserve(ctx context.Context, tx pgx.Tx, r *http.Request, p tenant.Principal
 		estimate := windowEstimate(window, estimates)
 		tag, err := tx.Exec(ctx, `
 			UPDATE account_allowance_windows
-			SET reserved = reserved + $2
-			WHERE id = $1::uuid AND used + reserved + $2 <= allowance`, window.ID, estimate)
+			SET reserved = reserved + $2, capacity_refresh_run=CASE WHEN capacity_kind='refresh' OR capacity_read_at < $4::timestamptz-interval '10 minutes' THEN $3::uuid ELSE capacity_refresh_run END
+			WHERE id = $1::uuid AND used + reserved + $2 <= allowance`, window.ID, estimate, run.ID, now)
 		if err != nil {
 			return RouteResult{}, err
 		}
@@ -170,6 +170,16 @@ func reserve(ctx context.Context, tx pgx.Tx, r *http.Request, p tenant.Principal
 	return result, nil
 }
 
+// ValidateReservedCapacity rechecks the router's capacity policy at launch.
+// The caller must authenticate ownership and hold the run/account locks first.
+func ValidateReservedCapacity(ctx context.Context, tx pgx.Tx, runID, accountID string) error {
+	run, err := lockRun(ctx, tx, runID)
+	if err != nil {
+		return err
+	}
+	return validateReservedAccount(ctx, tx, run, accountID)
+}
+
 func validateReservedAccount(ctx context.Context, tx pgx.Tx, run runRow, accountID string) error {
 	a, err := lockAccount(ctx, tx, accountID)
 	if err != nil {
@@ -183,8 +193,30 @@ func validateReservedAccount(ctx context.Context, tx pgx.Tx, run runRow, account
 		(a.AllowedProfileIDs != nil && !slices.Contains(a.AllowedProfileIDs, *run.ProfileID)) {
 		return fail(http.StatusConflict, "reserved account is not eligible")
 	}
+	all, err := lockAccountWindows(ctx, tx, []string{accountID})
+	if err != nil {
+		return err
+	}
+	if len(activeWindows(all[accountID], now)) == 0 {
+		return fail(http.StatusConflict, "reserved capacity is not eligible")
+	}
+	active := activeWindows(all[accountID], now)
+	if run.Purpose != "pairing_verification" && len(active) > 0 && active[0].capacityReadAt != nil {
+		schedule, err := routingSchedule(ctx, tx, a)
+		if err != nil {
+			return err
+		}
+		if err := applyCapacityPacing(ctx, tx, a, active, now, schedule); err != nil {
+			return err
+		}
+		for _, w := range active {
+			if w.capacityBudget != nil && float64(w.Reserved) > *w.capacityBudget {
+				return fail(http.StatusConflict, "reserved pacing is not eligible")
+			}
+		}
+	}
 	var invalidCapacity bool
-	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM account_reservations r JOIN account_allowance_windows w ON w.tenant_id=r.tenant_id AND w.id=r.window_id WHERE r.run_id=$1 AND r.state='active' AND w.capacity_read_at IS NOT NULL AND (NOT w.capacity_allowed OR w.capacity_read_at<$2::timestamptz-interval '10 minutes' OR w.ends_at<=$2 OR w.used+w.reserved>w.allowance))`, run.ID, now).Scan(&invalidCapacity); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM account_reservations r JOIN account_allowance_windows w ON w.tenant_id=r.tenant_id AND w.id=r.window_id WHERE r.run_id=$1 AND r.state='active' AND w.capacity_read_at IS NOT NULL AND (NOT w.capacity_allowed OR w.capacity_retired OR (w.capacity_read_at<$2::timestamptz-interval '10 minutes' AND w.capacity_refresh_run IS DISTINCT FROM r.run_id) OR w.ends_at<=$2 OR w.used+w.reserved>w.allowance))`, run.ID, now).Scan(&invalidCapacity); err != nil {
 		return err
 	}
 	if invalidCapacity {
@@ -338,6 +370,12 @@ func selectAccount(ctx context.Context, tx pgx.Tx, run runRow, principalID, harn
 			continue
 		}
 		active := activeWindows(windows[account.ID], now)
+		if len(active) == 0 && run.Purpose != "pairing_verification" {
+			refresh := expiredCapacityRefresh(account, windows[account.ID], now)
+			if refresh != nil {
+				active = []Window{*refresh}
+			}
+		}
 		eligible := active[:0]
 		for _, w := range active {
 			if windowForRun(w, run) {
@@ -345,6 +383,22 @@ func selectAccount(ctx context.Context, tx pgx.Tx, run runRow, principalID, harn
 			}
 		}
 		active = eligible
+		if run.Purpose != "pairing_verification" && len(active) > 0 && active[0].capacityReadAt != nil {
+			schedule, err := routingSchedule(ctx, tx, account)
+			if err != nil {
+				return Account{}, nil, err
+			}
+			if err := applyCapacityPacing(ctx, tx, account, active, now, schedule); err != nil {
+				return Account{}, nil, err
+			}
+			stale := false
+			for _, w := range active {
+				stale = stale || w.capacityReadAt != nil && (w.capacityKind == "refresh" || now.Sub(*w.capacityReadAt) > 10*time.Minute)
+			}
+			if stale && usedSlots[account.ID] > 0 {
+				continue
+			}
+		}
 		// The one-shot grant has exactly one window, never a choice among budgets.
 		if run.Purpose == "pairing_verification" && len(active) != 1 {
 			continue
@@ -385,13 +439,24 @@ func selectAccount(ctx context.Context, tx pgx.Tx, run runRow, principalID, harn
 		}
 		return picks[i].account.ID < picks[j].account.ID
 	})
+	// Materialize a provisional grant only for the selected account; losing
+	// candidates must not consume their single refresh opportunity.
+	for i := range picks[0].windows {
+		w := &picks[0].windows[i]
+		if w.ID != "" {
+			continue
+		}
+		if err := tx.QueryRow(ctx, `INSERT INTO account_allowance_windows(tenant_id,account_id,starts_at,ends_at,unit,allowance,used,pace_model,burst_ratio,capacity_kind,capacity_read_at,capacity_allowed,capacity_source) SELECT tenant_id,id,$2,$3,'percent',1,0,'unrestricted',0,'refresh',$4,true,'estimate' FROM agent_accounts WHERE id=$1 RETURNING id::text`, w.AccountID, w.StartsAt, w.EndsAt, w.capacityReadAt).Scan(&w.ID); err != nil {
+			return Account{}, nil, err
+		}
+	}
 	return picks[0].account, picks[0].windows, nil
 }
 
 func lockAccountWindows(ctx context.Context, tx pgx.Tx, accountIDs []string) (map[string][]Window, error) {
 	rows, err := tx.Query(ctx, `
 		SELECT id::text, account_id::text, starts_at, ends_at, unit, allowance, used, reserved,
-		       pace_model, burst_ratio::float8, pairing_verification, capacity_read_at, capacity_allowed, COALESCE(capacity_kind,''), capacity_bucket
+		       pace_model, burst_ratio::float8, pairing_verification, capacity_read_at, capacity_allowed, COALESCE(capacity_kind,''), capacity_bucket, capacity_retired, capacity_refresh_run::text
 		FROM account_allowance_windows
 		WHERE account_id::text = ANY($1::text[])
 		ORDER BY id
@@ -403,7 +468,7 @@ func lockAccountWindows(ctx context.Context, tx pgx.Tx, accountIDs []string) (ma
 	out := map[string][]Window{}
 	for rows.Next() {
 		var w Window
-		if err := rows.Scan(&w.ID, &w.AccountID, &w.StartsAt, &w.EndsAt, &w.Unit, &w.Allowance, &w.Used, &w.Reserved, &w.PaceModel, &w.BurstRatio, &w.pairingVerification, &w.capacityReadAt, &w.capacityAllowed, &w.capacityKind, &w.capacityBucket); err != nil {
+		if err := rows.Scan(&w.ID, &w.AccountID, &w.StartsAt, &w.EndsAt, &w.Unit, &w.Allowance, &w.Used, &w.Reserved, &w.PaceModel, &w.BurstRatio, &w.pairingVerification, &w.capacityReadAt, &w.capacityAllowed, &w.capacityKind, &w.capacityBucket, &w.capacityRetired, &w.capacityRefreshRun); err != nil {
 			return nil, err
 		}
 		out[w.AccountID] = append(out[w.AccountID], w)
@@ -433,4 +498,33 @@ func windowEstimate(w Window, estimates map[string]int64) int64 {
 		return 1
 	}
 	return estimates[w.Unit]
+}
+
+// When all measured windows have reset, Claude needs one small run to emit its
+// next snapshot. This is a provisional 1% estimate, never a renewed vendor limit.
+// The account row is locked; one durable grant per last observation prevents
+// retries, releases or its five-minute expiry from minting more refresh jobs.
+func expiredCapacityRefresh(a Account, windows []Window, now time.Time) *Window {
+	var latest time.Time
+	for _, w := range windows {
+		if w.capacityReadAt == nil || w.capacityKind == "refresh" {
+			continue
+		}
+		if !w.capacityRetired && (w.EndsAt.After(now) || !w.capacityAllowed && now.Sub(*w.capacityReadAt) <= 10*time.Minute) {
+			return nil
+		}
+		if w.capacityReadAt.After(latest) {
+			latest = *w.capacityReadAt
+		}
+	}
+	if latest.IsZero() {
+		return nil
+	}
+	for _, w := range windows {
+		if w.capacityKind == "refresh" && w.capacityReadAt != nil && !w.capacityReadAt.Before(latest) {
+			return nil
+		}
+	}
+	w := Window{AccountID: a.ID, StartsAt: now, EndsAt: now.Add(5 * time.Minute), Unit: "percent", Allowance: 1, PaceModel: "unrestricted", capacityReadAt: &latest, capacityAllowed: true, capacityKind: "refresh", Provisional: true}
+	return &w
 }

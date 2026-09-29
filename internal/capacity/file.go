@@ -60,6 +60,9 @@ func ReadFile(path, source string, now time.Time) ([]Reading, error) {
 	for scan.Scan() {
 		// An undated quota event preceding later output has no reliable read
 		// time: file mtime also changes for non-quota events. Do not refresh it.
+		if len(inferred) > 0 {
+			parser = Parser{}
+		}
 		for k := range inferred {
 			delete(latest, k)
 			delete(inferred, k)
@@ -92,6 +95,9 @@ func ReadFile(path, source string, now time.Time) ([]Reading, error) {
 			readings = parser.Codex(line, at)
 		} else {
 			readings = parser.Claude(line, at)
+		}
+		if len(readings) > 0 {
+			latest = map[string]Reading{}
 		}
 		for _, r := range readings {
 			key := r.WindowKind + "/" + r.Bucket

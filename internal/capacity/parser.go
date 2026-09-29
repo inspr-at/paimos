@@ -12,9 +12,10 @@ import (
 // credit balances, prompts, paths or vendor authentication material.
 // Codex notifications are sparse; omitted fields do not erase a vendor denial.
 type Parser struct {
-	codex   map[string]codexSnapshot
-	claude  map[string]Reading
-	allowed *bool
+	codex         map[string]codexSnapshot
+	claude        map[string]Reading
+	allowed       *bool
+	codexReadings map[string]Reading
 }
 type codexWindow struct {
 	Used    *float64 `json:"usedPercent"`
@@ -154,7 +155,10 @@ func (p *Parser) Codex(raw []byte, at time.Time) []Reading {
 		old.Primary = mergeWindow(old.Primary, n.Primary)
 		old.Secondary = mergeWindow(old.Secondary, n.Secondary)
 		p.codex[k] = old
-		for _, w := range []*codexWindow{old.Primary, old.Secondary} {
+		for i, w := range []*codexWindow{old.Primary, old.Secondary} {
+			if in.Allowed == nil && ((i == 0 && n.Primary == nil) || (i == 1 && n.Secondary == nil)) {
+				continue
+			}
 			if w == nil || w.Used == nil || w.Minutes == nil || w.Reset == nil {
 				continue
 			}
@@ -178,7 +182,33 @@ func (p *Parser) Codex(raw []byte, at time.Time) []Reading {
 			}
 		}
 	}
+	if len(out) == 0 {
+		return nil
+	}
+	if p.codexReadings == nil {
+		p.codexReadings = map[string]Reading{}
+	}
+	for _, r := range out {
+		p.codexReadings[r.WindowKind+"/"+r.Bucket] = r
+	}
+	out = out[:0]
+	for k, r := range p.codexReadings {
+		if r.ResetsAt.After(at) {
+			out = append(out, r)
+		} else {
+			delete(p.codexReadings, k)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].WindowKind+out[i].Bucket < out[j].WindowKind+out[j].Bucket })
 	return out
+}
+
+// CodexSnapshot consumes a full account/rateLimits/read response. Notification
+// patches use Codex instead and preserve fields the vendor did not update.
+func (p *Parser) CodexSnapshot(raw []byte, at time.Time) []Reading {
+	p.codex = nil
+	p.codexReadings = nil
+	return p.Codex(raw, at)
 }
 func windowKind(minutes int) string {
 	switch minutes {
@@ -291,6 +321,22 @@ func (p *Parser) Claude(raw []byte, at time.Time) []Reading {
 			p.claude[k] = r
 			out = append(out, r)
 		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	out = out[:0]
+	keys := []string{}
+	for k, r := range p.claude {
+		if !r.ResetsAt.After(at) {
+			delete(p.claude, k)
+		} else {
+			keys = append(keys, k)
+		}
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		out = append(out, p.claude[k])
 	}
 	return out
 }

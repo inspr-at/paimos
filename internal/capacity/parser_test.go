@@ -109,3 +109,31 @@ func TestSparseClaudeDenialDoesNotNeedUtilization(t *testing.T) {
 		t.Fatal("allowed-only event freshened quota")
 	}
 }
+
+func TestFullCodexSnapshotDropsMissingBucket(t *testing.T) {
+	now := time.Now().UTC()
+	p := Parser{}
+	raw := fmt.Sprintf(`{"rateLimits":{"primary":{"usedPercent":10,"windowDurationMins":300,"resetsAt":%d},"secondary":{"usedPercent":100,"windowDurationMins":10080,"resetsAt":%d}}}`, now.Add(time.Hour).Unix(), now.Add(24*time.Hour).Unix())
+	if got := p.CodexSnapshot([]byte(raw), now); len(got) != 2 {
+		t.Fatal(got)
+	}
+	raw = fmt.Sprintf(`{"rateLimits":{"primary":{"usedPercent":11,"windowDurationMins":300,"resetsAt":%d}}}`, now.Add(time.Hour).Unix())
+	if got := p.CodexSnapshot([]byte(raw), now.Add(time.Second)); len(got) != 1 || got[0].WindowKind != "5h" {
+		t.Fatal(got)
+	}
+}
+func TestClaudeSparseSnapshotPreservesTimesAndExpiresPeers(t *testing.T) {
+	now := time.Now().UTC()
+	p := Parser{}
+	weekly := fmt.Sprintf(`{"type":"rate_limit_event","rate_limit_info":{"status":"allowed","rateLimitType":"seven_day_opus","utilization":1,"resetsAt":%d}}`, now.Add(time.Minute).Unix())
+	p.Claude([]byte(weekly), now)
+	short := fmt.Sprintf(`{"type":"rate_limit_event","rate_limit_info":{"status":"allowed","rateLimitType":"five_hour","utilization":0.1,"resetsAt":%d}}`, now.Add(time.Hour).Unix())
+	got := p.Claude([]byte(short), now.Add(time.Second))
+	if len(got) != 2 || !got[1].ReadAt.Equal(now) {
+		t.Fatal(got)
+	}
+	got = p.Claude([]byte(short), now.Add(2*time.Minute))
+	if len(got) != 1 || got[0].WindowKind != "5h" {
+		t.Fatal(got)
+	}
+}

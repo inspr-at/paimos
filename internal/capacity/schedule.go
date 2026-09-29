@@ -24,14 +24,16 @@ type Shifts struct {
 	K     []float64 `json:"k"`
 }
 type Schedule struct {
-	Timezone string    `json:"timezone"`
-	Week     []Day     `json:"week"`
-	OffDays  string    `json:"off_days"`
-	Nights   bool      `json:"nights"`
-	Model    string    `json:"model"`
-	Night    Night     `json:"night"`
-	Shifts   Shifts    `json:"shifts"`
-	Blocks   []float64 `json:"blocks"`
+	OverrideUntil *time.Time `json:"override_until,omitempty"`
+	Override      string     `json:"override,omitempty"`
+	Timezone      string     `json:"timezone"`
+	Week          []Day      `json:"week"`
+	OffDays       string     `json:"off_days"`
+	Nights        bool       `json:"nights"`
+	Model         string     `json:"model"`
+	Night         Night      `json:"night"`
+	Shifts        Shifts     `json:"shifts"`
+	Blocks        []float64  `json:"blocks"`
 }
 
 func Preset(days int) []Day {
@@ -41,8 +43,11 @@ func Preset(days int) []Day {
 	}
 	return w
 }
-func DefaultSchedule() Schedule {
+func DefaultSchedule(timezones ...string) Schedule {
 	s := Schedule{Timezone: "UTC", Week: Preset(5), OffDays: "expire", Model: "daynight", Night: Night{22, 8, .6}, Shifts: Shifts{6, 14, 22, []float64{1, 1, .5}}, Blocks: make([]float64, 24)}
+	if len(timezones) > 0 && timezones[0] != "" {
+		s.Timezone = timezones[0]
+	}
 	for h := range s.Blocks {
 		s.Blocks[h] = .5
 		if h >= 8 && h < 22 {
@@ -61,7 +66,7 @@ func grid(v float64, end bool) bool {
 func rateOK(v float64) bool { return v == 0 || v == 1 || v >= .1 && v <= .9 }
 func (s Schedule) Validate() error {
 	bad := errors.New("invalid capacity schedule")
-	if s.Timezone == "" {
+	if s.Timezone == "" || (s.Override != "" && s.Override != "sprint" && s.Override != "hold") {
 		return bad
 	}
 	if _, err := time.LoadLocation(s.Timezone); err != nil {
@@ -222,6 +227,7 @@ func (s Schedule) Period(now time.Time) (time.Time, time.Time) {
 }
 
 type Pacing struct {
+	AvailableNowPercent   float64    `json:"available_now_percent"`
 	UsableHours           float64    `json:"usable_hours"`
 	PercentPerHour        float64    `json:"percent_per_hour"`
 	SuggestedTodayPercent float64    `json:"suggested_today_percent"`
@@ -238,7 +244,7 @@ type Pacing struct {
 type PlanInput struct {
 	Now, Reset, WindowStart time.Time
 	Remaining, UsedToday    float64
-	Override                string // Empty, sprint, or hold. Overrides are advice, never vendor authority.
+	Override                string // Empty, sprint, or hold. Overrides affect pacing, never vendor authority.
 }
 
 // Plan implements the approved schedule formula. UsedToday must be supplied
@@ -246,6 +252,12 @@ type PlanInput struct {
 func Plan(in PlanInput, s Schedule) (Pacing, error) {
 	if err := s.Validate(); err != nil {
 		return Pacing{}, err
+	}
+	if in.Override == "" {
+		in.Override = s.Override
+		if in.Override == "sprint" && s.OverrideUntil != nil && !in.Now.Before(*s.OverrideUntil) {
+			in.Override = ""
+		}
 	}
 	if math.IsNaN(in.Remaining) || math.IsNaN(in.UsedToday) || in.Remaining < 0 || in.UsedToday < 0 || in.Remaining+in.UsedToday > 100 || in.Reset.Sub(in.Now) > 367*24*time.Hour || in.Override != "" && in.Override != "hold" && in.Override != "sprint" {
 		return Pacing{}, errors.New("invalid pacing input")
@@ -291,6 +303,10 @@ func Plan(in PlanInput, s Schedule) (Pacing, error) {
 		p.BudgetPercent = in.UsedToday
 	}
 	p.SuggestedTodayPercent = math.Max(0, p.BudgetPercent-in.UsedToday)
+	loc, _ := time.LoadLocation(s.Timezone)
+	if in.Override == "sprint" || s.rate(in.Now.In(loc), p.AllowOff) > 0 {
+		p.AvailableNowPercent = p.SuggestedTodayPercent
+	}
 	p.Ahead = in.UsedToday > p.BudgetPercent+.5
 	p.Unused = in.Remaining > 0 && p.SuggestedTodayPercent == 0 && total == 0
 	if s.Nights && (s.Model == "daynight" || s.Model == "shifts") && total > 0 {
