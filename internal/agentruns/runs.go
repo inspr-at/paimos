@@ -158,7 +158,9 @@ func (m *module) get(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error
 	if p.Kind == tenant.Agent && v.AgentID != p.ID {
 		return nil, workorders.Fail(403, "run belongs to another agent")
 	}
-	v.Wait, err = agentaccounts.WaitForRun(r.Context(), tx, v.ID)
+	if v.Status == "queued" && v.Purpose == "managed" {
+		v.Wait, err = agentaccounts.WaitForRun(r.Context(), tx, v.ID)
+	}
 	return v, err
 }
 func (m *module) queued(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
@@ -200,6 +202,9 @@ func (m *module) queued(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, er
 	}
 	rows.Close()
 	for i := range out {
+		if out[i].Purpose != "managed" {
+			continue
+		}
 		out[i].Wait, err = agentaccounts.WaitForRun(r.Context(), tx, out[i].ID)
 		if err != nil {
 			return nil, err

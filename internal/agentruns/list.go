@@ -87,6 +87,9 @@ func (m *module) list(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, erro
 	}
 	rows.Close()
 	for i := range out.Items {
+		if out.Items[i].Status != "queued" || out.Items[i].Purpose != "managed" {
+			continue
+		}
 		out.Items[i].Wait, err = agentaccounts.WaitForRun(r.Context(), tx, out.Items[i].ID)
 		if err != nil {
 			return nil, err

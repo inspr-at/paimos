@@ -376,6 +376,7 @@ var RoutePermissions = map[string]string{
 	"POST /api/relations":                                                                       "relations.write",
 	"POST /api/roles":                                                                           "roles.manage",
 	"POST /api/runs/{runId}/claim":                                                              "run.claim",
+	"POST /api/runs/{runId}/capacity-override":                                                  "run.create", // Person-only, queued managed run; handler checks work-order edit access.
 	"POST /api/runs/{runId}/telemetry":                                                          "run.telemetry",
 	"POST /api/stage-handoffs":                                                                  "stage_handoffs.write",
 	"POST /api/stage-handoffs/{handoffId}/classic-batch-alias":                                  "stage_handoffs.decide",
