@@ -309,8 +309,8 @@ test('Keep for you: wall times in the schedule zone, and saves confirm reserve a
 test('the server rank wins over displayed reset times and names', () => {
  const accounts = [acct('a', 'Soon', 'codex'), acct('b', 'Later', 'codex')]
  const capacity = [
-  { ...cap('a', [win({ budget: 10, reset: '2026-09-30T12:00:00Z' })]), routing: { rank: 2, available_slots: 1 } },
-  { ...cap('b', [win({ budget: 10, reset: '2026-10-02T12:00:00Z' })]), routing: { rank: 1, available_slots: 1 } },
+  { ...cap('a', [win({ used: 0, budget: 10, reset: '2026-09-30T12:00:00Z' })]), routing: { rank: 2, available_slots: 1 } },
+  { ...cap('b', [win({ used: 0, budget: 10, reset: '2026-10-02T12:00:00Z' })]), routing: { rank: 1, available_slots: 1 } },
  ]
  const [pool] = pools(accounts, capacity)
  assert.deepEqual(pool.rows.map(r => r.name), ['Later', 'Soon'])
@@ -322,8 +322,8 @@ test('the server rank wins over displayed reset times and names', () => {
 
 test('server-ineligible accounts stay out of the actionable plan', () => {
   const capacity: AccountCapacity[] = [
-    { ...cap('a', [win({ budget: 10 })]), routing: { rank: 1, available_slots: 1 } },
-    { ...cap('b', [win({ budget: 20 })]), routing: { rank: 0, available_slots: 0, wait: { code: 'vendor', run_now_allowed: false } } },
+    { ...cap('a', [win({ used: 0, budget: 10, reset: '2026-09-30T12:00:00Z' })]), routing: { rank: 1, available_slots: 1 } },
+    { ...cap('b', [win({ used: 0, budget: 20, reset: '2026-10-02T12:00:00Z' })]), routing: { rank: 0, available_slots: 0, wait: { code: 'vendor', run_now_allowed: false } } },
   ]
   const [pool] = pools([acct('a', 'Spare', 'codex'), acct('b', 'Main', 'codex')], capacity)
   const sentence = plainText(poolSentence(pool, now, TZ))

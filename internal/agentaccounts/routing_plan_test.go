@@ -99,6 +99,8 @@ func TestRoutingAdviceMatchesReservationsAndScope(t *testing.T) {
 	// A workspace-authorized lead gets advice without owning daemon accounts.
 	lead := addPrincipal(t, person.TenantID, "agent", "lead", []string{"admin"})
 	leadKey := issueKey(t, lead, []string{"account.read"})
+	callStatus(t, mod, &lead, leadKey, "GET", path, "", 403, nil)
+	dbtest.BindRole(t, testDB, person.TenantID, lead.ID, "admin")
 	callStatus(t, mod, &lead, leadKey, "GET", path, "", 200, &next)
 	if len(next.Accounts) != 2 {
 		t.Fatal("lead advice did not use read authority")
