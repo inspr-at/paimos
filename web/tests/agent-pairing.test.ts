@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { afterEach, test } from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import { sessionEnded } from '../src/lib/api.ts'
 import {
   DEFAULT_REVIEW_CHOICE, LOOKUP_DEBOUNCE_MS, MIN_POLL_INTERVAL_MS, PUBLIC_PAIRING_GUIDE_PATH, PairingError,
   agentRouteKind, canonicalUserCode, clearPairingClientState, createOngoingLimits, denyPairing,
-  describeComputerStatus, describeHarnessStatus, describeHarnessFix, describeProgress, disconnectComputer, disconnectConfirm, disconnectEnrollment,
+  describeComputerStatus, describeHarnessStatus, describeHarnessFix, describeHarnessHint, describeProgress, harnessRecovery, disconnectComputer, disconnectConfirm, disconnectEnrollment,
   formatVerification, getPairingGuide, isPublicPairingGuide, listPairingComputers, lookupPairing,
   ongoingLimitError, pairingPermissions, planApproval, planLookup, planOngoingLimits, planPoll,
   registerAgentUrl, sessionFreezeApplies, submitApproval, verificationWarning, defaultSelectedAccountKeys,
@@ -833,4 +834,46 @@ test('harness details whitelist reasons and derive fixed commands without exposi
   parsed = (await listPairingComputers())[0]!
   assert.equal(describeHarnessStatus(parsed, 'claude'), 'Ready')
   assert.equal(describeHarnessFix(parsed, 'claude'), '')
+})
+
+test('web fixes and labels follow the shared daemon/server vocabulary', async () => {
+  // Written by internal/agentsetup TestRecoveryFixIsOneSharedVocabulary from RecoveryFix.
+  const table = JSON.parse(readFileSync(new URL('../../internal/agentsetup/testdata/harness_recovery.json', import.meta.url), 'utf8')) as {
+    harnesses: string[]; reasons: string[]; fixes: Record<string, Record<string, { kind: string; command: string }>>
+  }
+  assert.ok(table.reasons.includes('pin_drifted') && table.reasons.includes('future_reason'))
+  for (const harness of table.harnesses) {
+    for (const reason of table.reasons) {
+      assert.deepEqual(harnessRecovery(harness, reason), table.fixes[harness]?.[reason], `${harness}/${reason}`)
+      const report = view({ computer_state: 'connected', connectivity: 'online', harness_statuses: { [harness]: 'blocked' }, harness_details: { [harness]: { state: 'blocked', reason, fix: 'untrusted' } } })
+      globalThis.fetch = async () => jsonResponse({ computers: [report] })
+      const parsed = (await listPairingComputers())[0]!
+      const label = describeHarnessStatus(parsed, harness)
+      // Every known code has its own words; only a newer code is shown raw.
+      assert.equal(label.startsWith('Needs attention'), reason === 'future_reason', `${harness}/${reason}: ${label}`)
+      assert.equal(label.includes('future_reason'), reason === 'future_reason')
+      assert.equal(describeHarnessFix(parsed, harness), table.fixes[harness]?.[reason]?.command ?? '')
+      assert.equal(JSON.stringify(parsed).includes('untrusted'), false)
+    }
+  }
+  const drifted = view({ computer_state: 'connected', connectivity: 'online', setup_state: 'connected', harness_statuses: { claude: 'blocked', codex: 'ready' }, harness_details: { claude: { state: 'blocked', reason: 'pin_drifted' }, codex: { state: 'ready' } } })
+  globalThis.fetch = async () => jsonResponse({ computers: [drifted] })
+  let parsed = (await listPairingComputers())[0]!
+  assert.equal(describeComputerStatus(parsed).stateLabel, 'Connected')
+  assert.equal(describeHarnessStatus(parsed, 'claude'), 'Pin changed')
+  assert.equal(describeHarnessFix(parsed, 'claude'), 'aeon-agentd repin --harness claude')
+  assert.equal(describeHarnessStatus(parsed, 'codex'), 'Ready')
+  assert.equal(describeHarnessFix(parsed, 'codex'), '')
+  // A newer state is omitted from the closed legacy map but stays visible.
+  const future = view({ computer_state: 'connected', connectivity: 'online', harness_statuses: { codex: 'ready' }, harness_details: { claude: { state: 'future_state', reason: 'future_reason' }, codex: { state: 'ready' } } })
+  globalThis.fetch = async () => jsonResponse({ computers: [future] })
+  parsed = (await listPairingComputers())[0]!
+  assert.equal(describeHarnessStatus(parsed, 'claude'), 'Needs attention · future_reason')
+  assert.equal(describeHarnessFix(parsed, 'claude'), '')
+  assert.equal(describeHarnessHint(parsed, 'claude'), '')
+  for (const [reason, hint] of [['repin_pending', 'Retries automatically.'], ['cli_unavailable', 'Restore the approved executable, then retry.'], ['pin_drifted', '']]) {
+    const held = view({ computer_state: 'connected', connectivity: 'online', harness_statuses: { claude: 'blocked' }, harness_details: { claude: { state: 'blocked', reason } } })
+    globalThis.fetch = async () => jsonResponse({ computers: [held] })
+    assert.equal(describeHarnessHint((await listPairingComputers())[0]!, 'claude'), hint)
+  }
 })

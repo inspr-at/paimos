@@ -7,8 +7,8 @@ import { mockPairing } from './agent-pairing-fixtures'
 
 function computerReport() {
   return {
-    harness_statuses: { claude: 'blocked', codex: 'ready' },
-    harness_details: { claude: { state: 'blocked', reason: 'dependency_invalid', fix: 'ignored daemon-supplied command' }, codex: { state: 'ready' } },
+    harness_statuses: { claude: 'blocked', codex: 'ready' } as Record<string, string>,
+    harness_details: { claude: { state: 'blocked', reason: 'dependency_invalid', fix: 'ignored daemon-supplied command' }, codex: { state: 'ready' } } as Record<string, { state: string; reason?: string; fix?: string }>,
     enrollments: ['claude', 'codex'].map((harness, i) => ({
       account_id: i ? '55555555-5555-4555-8555-555555555555' : '44444444-4444-4444-8444-444444444444',
       account_key: `${harness}-1`, harness, label: `${harness === 'claude' ? 'Claude' : 'Codex'} work`,
@@ -80,16 +80,16 @@ test('offline and revoked computers do not present prior harness reports as live
 })
 
 for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390]) for (const [reason, command] of [
-  ['pin_missing', 'aeon-agentd add-harness --harness claude'],
+  ['pin_missing', 'aeon-agentd repin --harness claude'],
   ['login_required', 'claude auth login'],
-  ['cli_unavailable', 'aeon-agentd setup status'],
+  ['cli_unavailable', 'aeon-agentd setup'],
 ]) test(`harness row shows the specific ${reason} command at ${width} ${theme}`, async ({ page }) => {
   await page.setViewportSize({ width, height: 844 })
   await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' })
   await mockWork(page, fixtures())
   const report = computerReport()
   if (reason === 'login_required') report.harness_statuses.claude = 'login_required'
-  report.harness_details.claude = { state: report.harness_statuses.claude, reason: reason!, fix: 'untrusted' }
+  report.harness_details.claude = { state: report.harness_statuses.claude!, reason: reason!, fix: 'untrusted' }
   await mockPairing(page, {}, report)
   await page.goto('/agents')
   const row = page.getByRole('region', { name: 'Connected computers' }).locator('.harness-report').filter({ hasText: 'Claude' })
@@ -100,4 +100,62 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390])
   if (process.env.HARNESS_STATUS_SHOTS) {
     await page.getByRole('region', { name: 'Connected computers' }).screenshot({ path: join(process.env.HARNESS_STATUS_SHOTS, `agents-${reason}-${width}-${theme}.png`), animations: 'disabled' })
   }
+})
+
+// AEON-347/348: per-account pin blocks and per-harness holds share one reason
+// vocabulary and fix; one ready harness keeps the computer connected.
+for (const [width, theme] of [[1600, 'light'], [390, 'dark']] as const) test(`every shared reason shows its fix beside a ready harness at ${width} ${theme}`, async ({ page }) => {
+  const errors = watchErrors(page)
+  await page.setViewportSize({ width, height: 844 })
+  await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' })
+  await mockWork(page, fixtures())
+  const report = computerReport()
+  report.harness_details.claude = { state: 'blocked', reason: 'pin_drifted', fix: 'untrusted' }
+  await mockPairing(page, {}, report)
+  await page.goto('/agents')
+  const computers = page.getByRole('region', { name: 'Connected computers' })
+  const row = (name: string) => computers.locator('.harness-report').filter({ hasText: name })
+  await expect(computers.locator('.status')).toHaveText('Connected')
+  await expect(row('Claude')).toContainText('Pin changed')
+  await expect(row('Claude').locator('code')).toHaveText('aeon-agentd repin --harness claude')
+  await expect(row('Codex')).toContainText('Ready')
+  await expect(row('Codex').locator('code')).toHaveCount(0)
+  if (process.env.HARNESS_STATUS_SHOTS) {
+    await computers.screenshot({ path: join(process.env.HARNESS_STATUS_SHOTS, `agents-pin-drifted-${width}-${theme}.png`), animations: 'disabled' })
+  }
+  const repin = 'aeon-agentd repin --harness claude'
+  const addCodex = 'aeon-agentd add-harness --harness codex'
+  for (const [harness, reason, label, command] of [
+    ['Claude', 'pin_missing', 'Pin missing', repin],
+    ['Claude', 'pin_partial', 'Pin incomplete', repin],
+    ['Claude', 'pin_invalid', 'Pin invalid', repin],
+    ['Claude', 'pin_unsafe', 'Pin unsafe', repin],
+    ['Claude', 'harness_failed', 'Failed to start', 'aeon-agentd setup'],
+    ['Codex', 'pin_missing', 'Pin missing', addCodex],
+    ['Codex', 'pin_partial', 'Pin incomplete', addCodex],
+    ['Codex', 'pin_drifted', 'Pin changed', addCodex],
+    ['Codex', 'pin_invalid', 'Pin invalid', addCodex],
+    ['Codex', 'pin_unsafe', 'Pin unsafe', addCodex],
+    ['Codex', 'dependency_invalid', 'Dependency needs repair', addCodex],
+    ['Claude', 'future_reason', 'Needs attention · future_reason', ''],
+  ] as const) {
+    const held = harness.toLowerCase()
+    const other = held === 'claude' ? 'codex' : 'claude'
+    report.harness_statuses = { [held]: 'blocked', [other]: 'ready' }
+    report.harness_details = { [held]: { state: 'blocked', reason, fix: 'untrusted' }, [other]: { state: 'ready' } }
+    await page.getByRole('button', { name: 'Refresh computers' }).click()
+    await expect(row(harness)).toContainText(label)
+    if (command) await expect(row(harness).locator('code')).toHaveText(command)
+    else await expect(row(harness).locator('code')).toHaveCount(0)
+    await expect(computers.locator('.status')).toHaveText('Connected')
+    await expect(computers).not.toContainText('untrusted')
+  }
+  // A newer daemon's state is kept out of the legacy map but never dropped.
+  report.harness_statuses = { codex: 'ready' }
+  report.harness_details = { claude: { state: 'future_state', reason: 'future_reason' }, codex: { state: 'ready' } }
+  await page.getByRole('button', { name: 'Refresh computers' }).click()
+  await expect(row('Claude')).toContainText('Needs attention · future_reason')
+  await expect(row('Claude').locator('code')).toHaveCount(0)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+  expect(errors).toEqual([])
 })

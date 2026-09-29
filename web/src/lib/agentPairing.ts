@@ -928,27 +928,50 @@ function harnessDetail(view: HarnessView, harness: string): HarnessDetail | unde
   return detail && (!view.harness_statuses?.[harness] || detail.state === view.harness_statuses[harness]) ? detail : undefined
 }
 
-// Never show a daemon-supplied command. This fixed vocabulary is shared with
-// agentsetup.HarnessReport; local paths and diagnostics stay on the computer.
+// Never show a daemon-supplied command. Codes and fixes are the vocabulary of
+// agentsetup.RecoveryFix, pinned for both sides by
+// internal/agentsetup/testdata/harness_recovery.json. Unknown bounded codes
+// from newer daemons stay visible; local paths and diagnostics never arrive.
 function harnessCode(value: unknown): string | undefined {
   return typeof value === 'string' && /^[a-z][a-z0-9_]{0,63}$/.test(value) ? value : undefined
 }
 
+const PIN_REASONS = ['dependency_invalid', 'pin_missing', 'pin_partial', 'pin_drifted', 'pin_invalid', 'pin_unsafe']
+
 function harnessFix(harness: string, reason?: HarnessReason): HarnessFix | undefined {
   if (!['claude', 'codex', 'cursor', 'grok', 'pi'].includes(harness)) return
-  if (['dependency_invalid', 'pin_partial', 'pin_drifted', 'pin_invalid', 'pin_unsafe'].includes(reason ?? '')) {
+  // repin replaces Claude's shared pins; add-harness renews another harness's blocked pin.
+  if (PIN_REASONS.includes(reason ?? '')) {
     return harness === 'claude'
       ? { kind: 'repin', command: 'aeon-agentd repin --harness claude' }
       : { kind: 'add_harness', command: `aeon-agentd add-harness --harness ${harness}` }
   }
-  if (reason === 'pin_missing') return { kind: 'add_harness', command: `aeon-agentd add-harness --harness ${harness}` }
   if (['harness_failed', 'cli_unavailable', 'profile_permissions'].includes(reason ?? '')) return { kind: 'restart', command: 'aeon-agentd setup' }
   if (reason === 'login_required') return { kind: 'login', command: harness === 'claude' ? 'claude auth login' : harness === 'pi' ? 'pi' : `${harness === 'cursor' ? 'cursor-agent' : harness} login` }
+}
+
+/** The repair kind and exact command for one reason; exported for the shared-vocabulary test. */
+export function harnessRecovery(harness: string, reason: string): HarnessFix | undefined {
+  return harnessFix(harness, reason)
 }
 
 export function describeHarnessFix(view: HarnessView, harness: string): string {
   const detail = harnessDetail(view, harness)
   return view.computer_state === 'connected' && detail && ['blocked', 'login_required', 'checking'].includes(detail.state) ? harnessFix(harness, detail.reason)?.command ?? '' : ''
+}
+
+const HARNESS_HINTS: Record<string, string> = {
+  repin_pending: 'Retries automatically.',
+  cli_unavailable: 'Restore the approved executable, then retry.',
+  harness_failed: 'Restore the approved installation, then retry.',
+  profile_permissions: 'Make the pi profile private, then retry.',
+}
+
+/** One short sentence that the command alone does not say; empty otherwise. */
+export function describeHarnessHint(view: HarnessView, harness: string): string {
+  const detail = harnessDetail(view, harness)
+  if (view.computer_state !== 'connected' || !detail?.reason || detail.state !== 'blocked') return ''
+  return HARNESS_HINTS[detail.reason] ?? ''
 }
 
 export function describeHarnessStatus(view: HarnessView, harness: string): string {
@@ -957,8 +980,9 @@ export function describeHarnessStatus(view: HarnessView, harness: string): strin
   const status = view.harness_statuses?.[harness] ?? detail?.state
   if (!status) return ''
   const labels: Record<HarnessStatus, string> = { ready: 'Ready', blocked: 'Needs attention', login_required: 'Sign in required', checking: 'Checking', draining: 'Draining' }
-  const reasons: Record<HarnessReason, string> = { repin_pending: 'Waiting for repin', dependency_invalid: 'Dependency needs repair', pin_missing: 'Pin missing', login_required: 'Sign in required', starting: 'Starting', cli_unavailable: 'Executable unavailable', pin_partial: 'Pin incomplete', pin_drifted: 'Pin changed', pin_invalid: 'Pin invalid', pin_unsafe: 'Pin unsafe', harness_failed: 'Harness failed', profile_permissions: 'Profile permissions need repair' }
-  const label = !HARNESS_STATES.includes(status as typeof HARNESS_STATES[number]) ? `Needs attention · ${status}` : detail?.reason ? reasons[detail.reason] ?? `Needs attention · ${detail.reason}` : labels[status]!
+  const reasons: Record<HarnessReason, string> = { repin_pending: 'Waiting for repin', dependency_invalid: 'Dependency needs repair', pin_missing: 'Pin missing', login_required: 'Sign in required', starting: 'Starting', cli_unavailable: 'Executable unavailable', pin_partial: 'Pin incomplete', pin_drifted: 'Pin changed', pin_invalid: 'Pin invalid', pin_unsafe: 'Pin unsafe', harness_failed: 'Failed to start', profile_permissions: 'Profile permissions need repair' }
+  // A code from a newer daemon is shown raw rather than dropped or guessed.
+  const label = !HARNESS_STATES.includes(status as typeof HARNESS_STATES[number]) ? `Needs attention · ${detail?.reason ?? status}` : detail?.reason ? reasons[detail.reason] ?? `Needs attention · ${detail.reason}` : labels[status]!
   return view.connectivity === 'online' ? label : `Last reported: ${label.toLowerCase()}`
 }
 
