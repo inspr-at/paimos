@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -405,6 +406,28 @@ func printSetupProgress(out io.Writer, jsonOutput bool, p agentsetup.Progress) e
 	_, err := fmt.Fprintf(out, "%s: %s\n", p.Stage, p.Action)
 	if err != nil {
 		return err
+	}
+	// One line per harness that is not ready, then per blocked account; both
+	// use the shared reason codes and fix commands.
+	harnesses := make([]string, 0, len(p.HarnessDetails))
+	for harness, detail := range p.HarnessDetails {
+		if detail.State != "ready" {
+			harnesses = append(harnesses, harness)
+		}
+	}
+	sort.Strings(harnesses)
+	for _, harness := range harnesses {
+		detail := p.HarnessDetails[harness]
+		line := "harness " + harness + " " + detail.State
+		if detail.Reason != "" {
+			line += " reason " + detail.Reason
+		}
+		if detail.Fix.Command != "" {
+			line += " fix " + detail.Fix.Command
+		}
+		if _, err = fmt.Fprintln(out, line); err != nil {
+			return err
+		}
 	}
 	for _, blocked := range p.BlockedAccounts {
 		if _, err = fmt.Fprintf(out, "blocked account %s harness %s reason %s fix %s\n", blocked.AccountID, blocked.Harness, blocked.Reason, blocked.Fix.Command); err != nil {

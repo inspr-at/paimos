@@ -193,13 +193,15 @@ func TestRuntimeDriftKeepsSiblingPolling(t *testing.T) {
 }
 
 func TestStatusTextKeepsPinFix(t *testing.T) {
-	progress := agentsetup.Progress{Stage: "connected", Action: "Computer connected; ongoing limits remain separately controlled.", BlockedAccounts: []agentsetup.BlockedAccount{{AccountID: "old", Harness: "codex", Reason: agentsetup.PinInvalid, Fix: agentsetup.RecoveryFix("codex", agentsetup.PinDrifted)}}}
+	progress := agentsetup.Progress{Stage: "connected", Action: "Computer connected; ongoing limits remain separately controlled.",
+		HarnessDetails:  map[string]agentsetup.HarnessDetail{"claude": {State: "blocked", Reason: agentsetup.PinDrifted, Fix: agentsetup.RecoveryFix("claude", agentsetup.PinDrifted)}, "codex": {State: "ready"}},
+		BlockedAccounts: []agentsetup.BlockedAccount{{AccountID: "old", Harness: "codex", Reason: agentsetup.PinInvalid, Fix: agentsetup.RecoveryFix("codex", agentsetup.PinInvalid)}}}
 	var text bytes.Buffer
-	if err := printSetupProgress(&text, false, progress); err != nil || !strings.Contains(text.String(), "connected:") || !strings.Contains(text.String(), "blocked account old harness codex reason pin_invalid fix repin") {
+	if err := printSetupProgress(&text, false, progress); err != nil || !strings.Contains(text.String(), "connected:") || !strings.Contains(text.String(), "harness claude blocked reason pin_drifted fix aeon-agentd repin --harness claude\n") || strings.Contains(text.String(), "\nharness codex") || !strings.Contains(text.String(), "blocked account old harness codex reason pin_invalid fix aeon-agentd add-harness --harness codex\n") {
 		t.Fatal(text.String(), err)
 	}
 	var encoded bytes.Buffer
-	if err := printSetupProgress(&encoded, true, progress); err != nil || !strings.Contains(encoded.String(), `"blocked_accounts"`) || !strings.Contains(encoded.String(), `"reason":"pin_invalid"`) || !strings.Contains(encoded.String(), `"fix":"repin"`) {
+	if err := printSetupProgress(&encoded, true, progress); err != nil || !strings.Contains(encoded.String(), `"blocked_accounts"`) || !strings.Contains(encoded.String(), `"reason":"pin_invalid"`) || !strings.Contains(encoded.String(), `"fix":{"kind":"add_harness","command":"aeon-agentd add-harness --harness codex"}`) || !strings.Contains(encoded.String(), `"fix":{"kind":"repin","command":"aeon-agentd repin --harness claude"}`) {
 		t.Fatal(encoded.String(), err)
 	}
 }

@@ -311,8 +311,10 @@ func TestTypedProgressDistinguishesMissingLoginAndUnsafeVerification(t *testing.
 	if err != nil || p.Stage != "blocked" || !strings.Contains(p.Action, "harness failed to start") {
 		t.Fatal("startup failure presented as login required", err)
 	}
-	if err = e.SyncFences(t.Context()); err != nil || a.progress == nil || a.progress.State != "setup_failed" || a.progress.ErrorCode != "installation_failed" {
-		t.Fatal("startup failure lost during reconciliation", err)
+	// A harness that fails to start is a per-harness hold, never setup_failed
+	// for the whole computer (AEON-347/348).
+	if err = e.SyncFences(t.Context()); err != nil || a.progress == nil || a.progress.State != "connected" || a.progress.ErrorCode != "" {
+		t.Fatal("startup failure became a computer-wide setup failure", err, a.progress)
 	}
 	l.states[""] = LocalStatus{DaemonID: "paired-daemon", State: "drained", HarnessFailed: true, ProfilePermissions: true}
 	p, err = e.Status(t.Context())

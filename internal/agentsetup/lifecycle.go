@@ -6,6 +6,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"time"
+
+	"github.com/inspr-at/paimos/internal/harnesslaunch"
 )
 
 func (e *Engine) Status(ctx context.Context) (Progress, error) {
@@ -350,6 +353,9 @@ func (e *Engine) reconcile(ctx context.Context, s *snapshot) (Progress, error) {
 			if local.HarnessFailed && !local.Ready {
 				p.Stage = "blocked"
 				p.Action = "An approved harness failed to start. Restore its pinned installation and interpreter, then resume setup."
+				if len(local.BlockedAccounts) > 0 {
+					p.Action = "No approved harness can start. Run the fix listed for each blocked account; the daemon resumes it on its next check."
+				}
 				return p, nil
 			}
 			if observed.State == "login_required" {
@@ -462,6 +468,9 @@ func (e *Engine) AddHarness(ctx context.Context, candidates []Candidate) (Progre
 		}
 		for _, a := range s.View.Enrollments {
 			if a.State == "connected" && a.Harness == c.Harness && a.Label == c.Label {
+				if len(candidates) == 1 && !s.Removed[a.AccountID] {
+					return e.renewPin(s, a, c)
+				}
 				return e.progress(s), errors.New("this harness account is already connected; no new request was created")
 			}
 		}
@@ -505,6 +514,84 @@ func (e *Engine) AddHarness(ctx context.Context, candidates []Candidate) (Progre
 		return Progress{}, err
 	}
 	return e.Step(ctx)
+}
+
+// renewPin is the add_harness repair for a connected account whose own
+// interpreter pin is blocked: it swaps only that Node pin for the one just
+// discovered. No request, approval, credential, identity or launcher changes,
+// and a healthy pin is never replaced. The daemon lifts the block on its next
+// runtime check. Claude pins are shared and change only through repin.
+func (e *Engine) renewPin(s *snapshot, enrolled Enrollment, c Candidate) (Progress, error) {
+	exists := errors.New("this harness account is already connected; no new request was created")
+	if c.Harness == "claude" || c.Harness == "grok" {
+		return e.progress(s), exists
+	}
+	raw, err := e.Store.Read(RuntimeName, 128<<10)
+	var config RuntimeConfig
+	if err != nil || json.Unmarshal(raw, &config) != nil || config.Schema != "aeon.agent-runtime.v1" || config.Origin != s.Origin || config.Workspace != s.Request.Workspace || config.TenantID != s.View.TenantID || config.PrincipalID != s.BoundPrincipal || config.ComputerID != s.BoundComputer || config.DaemonID != s.BoundDaemon {
+		return e.progress(s), errors.New("pin renewal runtime ownership does not match this pairing")
+	}
+	index := -1
+	for i, a := range config.Accounts {
+		if a.AccountID == enrolled.AccountID && a.Key == enrolled.AccountKey && a.Harness == c.Harness {
+			index = i
+		}
+	}
+	candidate := -1
+	for i, local := range s.Candidates {
+		if local.Candidate.Key == enrolled.AccountKey && local.Candidate.Harness == c.Harness {
+			candidate = i
+		}
+	}
+	if index < 0 || candidate < 0 || !pinBlocked(config, enrolled.AccountID) {
+		return e.progress(s), exists
+	}
+	current := config.Accounts[index]
+	if current.Path != c.Path || current.Home != c.Home || current.Identity != c.Identity {
+		return e.progress(s), errors.New("the signed-in account or executable differs from the enrolled one; remove this enrollment, then add the harness again")
+	}
+	current.Node, current.PiNode = c.Node, c.PiNode
+	config.Accounts[index] = current
+	if pinBlocked(config, enrolled.AccountID) {
+		return Progress{Stage: "blocked", Action: "the discovered interpreter is still unusable; pass --node-path to an installed Node executable outside the workspace"}, errors.New("interpreter pin still blocked")
+	}
+	id, err := uuid()
+	if err != nil {
+		return Progress{}, err
+	}
+	old := s.Candidates[candidate].Candidate.Interpreter()
+	event, _ := json.Marshal(struct {
+		Kind      string             `json:"kind"`
+		ID        string             `json:"id"`
+		At        time.Time          `json:"at"`
+		AccountID string             `json:"account_id"`
+		Harness   string             `json:"harness"`
+		Old       harnesslaunch.Node `json:"old"`
+		New       harnesslaunch.Node `json:"new"`
+	}{"interpreter_pin_renewed", id, e.now(), enrolled.AccountID, c.Harness, old, c.Interpreter()})
+	if err := e.Store.Write("pin-renewal-"+id+".json", event, true); err != nil {
+		return Progress{}, err
+	}
+	s.Candidates[candidate].Candidate.Node, s.Candidates[candidate].Candidate.PiNode = c.Node, c.PiNode
+	if err := e.save(s, false); err != nil {
+		return Progress{}, err
+	}
+	raw, _ = json.Marshal(config)
+	if err := e.Store.Write(RuntimeName, raw, false); err != nil {
+		return Progress{}, errors.New("pin renewal recorded but runtime update incomplete; rerun add-harness")
+	}
+	p := e.progress(s)
+	p.Action = "Interpreter pin renewed; the daemon resumes this account on its next check. No approval, sign-in or credential changed."
+	return p, nil
+}
+
+func pinBlocked(c RuntimeConfig, accountID string) bool {
+	for _, block := range AccountPinBlocks(c) {
+		if block.AccountID == accountID {
+			return true
+		}
+	}
+	return false
 }
 
 func observedProgress(v View, local LocalStatus) *SetupProgress {

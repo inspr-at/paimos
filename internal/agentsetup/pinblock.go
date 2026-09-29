@@ -5,13 +5,14 @@ package agentsetup
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"syscall"
 
 	"github.com/inspr-at/paimos/internal/harnesslaunch"
-	"github.com/inspr-at/paimos/internal/piprobe"
 )
 
 // BlockedAccount is one enrollment the paired daemon must not launch.
@@ -25,7 +26,8 @@ type BlockedAccount struct {
 
 type pinHit struct {
 	BlockedAccount
-	shared bool
+	// err is the local diagnostic. It never leaves this computer.
+	err error
 }
 
 // AccountPinBlocks reports every per-account pin problem. A hit means that
@@ -45,74 +47,52 @@ func AccountPinBlocks(c RuntimeConfig) []BlockedAccount {
 // ValidateRuntimeDependencies gates execution, never access to recovery metadata
 // or the credential needed to revoke this computer. One bad pin fails the whole
 // config here. The paired daemon uses AccountPinBlocks and keeps the other accounts.
+// The typed reason is the first block's; the error keeps its local diagnostic.
 func ValidateRuntimeDependencies(c RuntimeConfig) error {
 	hits := accountPinHits(c)
 	if len(hits) == 0 {
 		return nil
 	}
-	sharedOnly := true
-	for _, hit := range hits {
-		if hit.Reason == PinDrifted {
-			return &HarnessIssue{Reason: hit.Reason, Err: piprobe.ErrStart}
-		}
-		if !hit.shared {
-			sharedOnly = false
-		}
-	}
-	if sharedOnly {
-		return &HarnessIssue{Reason: hits[0].Reason, Err: errors.New("pinned Claude runtime dependencies are unavailable or unsafe")}
-	}
-	return &HarnessIssue{Reason: hits[0].Reason, Err: harnesslaunch.ErrStart}
+	return &HarnessIssue{Reason: hits[0].Reason, Err: hits[0].err}
 }
 
 func accountPinHits(c RuntimeConfig) []pinHit {
 	var hits []pinHit
-	sharedReason := ""
-	sharedKnown := false
-	shared := func() string {
-		if !sharedKnown {
-			sharedReason = claudeSharedReason(c)
-			sharedKnown = true
-		}
-		return sharedReason
-	}
+	var shared *string
 	for _, a := range c.Accounts {
 		if a.Harness == "grok" {
 			continue
 		}
-		reason := ""
+		var reason string
+		var diagnostic error
 		if a.Harness == "claude" {
+			// Claude launches with the shared Node/SDK pins that repin replaces,
+			// following their links like the adapter does. A per-account Node
+			// recorded at discovery is never executed, so it cannot block Claude.
 			if _, err := ResolveClaudeExecutable(a.Path, c.Workspace); err != nil {
-				hits = append(hits, pinHit{BlockedAccount: BlockedAccount{AccountID: a.AccountID, Harness: a.Harness, Reason: HarnessFailureReason(err), Fix: RecoveryFix(a.Harness, HarnessFailureReason(err))}})
-				continue
+				reason, diagnostic = HarnessFailureReason(err), err
+			} else {
+				if shared == nil {
+					value := claudeSharedReason(c)
+					shared = &value
+				}
+				reason = *shared
+				diagnostic = errors.New("Claude dependencies changed: run aeon-agentd repin --harness claude; saved dependencies are " + strings.ReplaceAll(strings.TrimPrefix(reason, "pin_"), "_", " "))
 			}
-		}
-		fromShared := false
-		switch {
-		case a.Harness == "claude" && a.Node == (harnesslaunch.Node{}):
-			reason = shared()
-			fromShared = reason != ""
-		case a.Harness == "claude" && a.Node.Path != c.NodePath:
-			reason = PinInvalid
-		default:
+		} else {
 			node := a.Node
 			if a.Harness == "pi" {
 				node = a.PiNode
 			}
 			reason = nodePinReason(a.Path, c.Workspace, node)
-			if reason == "" && a.Harness == "claude" {
-				if sharedProblem := shared(); sharedProblem != "" {
-					reason = sharedProblem
-					fromShared = true
-				}
-			}
+			diagnostic = fmt.Errorf("%w; %s interpreter pin is %s: run %s", harnesslaunch.ErrStart, a.Harness, strings.TrimPrefix(reason, "pin_"), RecoveryFix(a.Harness, reason).Command)
 		}
 		if reason == "" {
 			continue
 		}
 		hits = append(hits, pinHit{BlockedAccount: BlockedAccount{
 			AccountID: a.AccountID, Harness: a.Harness, Reason: reason, Fix: RecoveryFix(a.Harness, reason),
-		}, shared: fromShared})
+		}, err: diagnostic})
 	}
 	sort.Slice(hits, func(i, j int) bool {
 		if hits[i].AccountID == hits[j].AccountID {

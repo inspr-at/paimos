@@ -457,9 +457,8 @@ func (s *Supervisor) PollOnce(ctx context.Context) error {
 		}
 		s.profilePermissions[account.ID] = errors.Is(dependencyErr, piprobe.ErrPrivateProfile)
 		s.mu.Unlock()
-		if dependencyErr != nil {
-			failures = append(failures, errors.New("harness failed to start"))
-		}
+		// A harness that fails to start is a per-harness hold reported through
+		// Lifecycle, not a poll failure: siblings keep polling and dispatching.
 		if err != nil {
 			failures = append(failures, errors.New("account probe unavailable"))
 		}

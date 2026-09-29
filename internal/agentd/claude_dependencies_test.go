@@ -188,7 +188,7 @@ func TestClaudeDependencyBreakAndRepinHoldDoNotStarveCodex(t *testing.T) {
 				wantReason, wantFix = "repin_pending", ""
 			}
 			if failure == "cli" {
-				wantReason, wantFix = "cli_unavailable", "aeon-agentd setup status"
+				wantReason, wantFix = "cli_unavailable", "aeon-agentd setup"
 			}
 			if detail.State != "blocked" || detail.Reason != wantReason || detail.Fix.Command != wantFix {
 				t.Fatalf("wrong reason/fix: %+v", detail)

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -295,5 +296,42 @@ func TestPiProbeLockIsPerAccount(t *testing.T) {
 	}
 	if available, err := a.ProbeStatus(t.Context(), "fast"); available || !errors.Is(err, piprobe.ErrPrivateProfile) {
 		t.Fatal("permissions need a distinct hint", err)
+	}
+}
+
+// A drifted pin on one account never makes the computer unready while another
+// harness works; the Claude row and the blocked account carry the same fix.
+func TestDriftedClaudePinKeepsReadyCodexComputerReady(t *testing.T) {
+	s, _, _ := testSupervisor(t)
+	s.mu.Lock()
+	s.probedAccounts["account"] = true
+	s.accounts = append(s.accounts, EnrolledAccount{ID: "claude-account", Key: "claude-local", Harness: Claude, DependencyBlocked: true, PinReason: agentsetup.PinDrifted, PinFix: agentsetup.FixRepin})
+	s.blockedAccounts["claude-account"] = true
+	s.mu.Unlock()
+	status := s.Lifecycle("")
+	repin := agentsetup.HarnessFix{Kind: agentsetup.FixRepin, Command: "aeon-agentd repin --harness claude"}
+	if !status.Ready || status.HarnessFailed || status.HarnessStatuses[Codex] != "ready" || status.HarnessStatuses[Claude] != "blocked" {
+		t.Fatalf("one drifted pin made the computer unready: %+v", status)
+	}
+	if detail := status.HarnessDetails[Claude]; detail.State != "blocked" || detail.Reason != agentsetup.PinDrifted || detail.Fix != repin {
+		t.Fatalf("Claude row lost its fix: %+v", detail)
+	}
+	if len(status.BlockedAccounts) != 1 || status.BlockedAccounts[0].AccountID != "claude-account" || status.BlockedAccounts[0].Reason != agentsetup.PinDrifted || status.BlockedAccounts[0].Fix != repin {
+		t.Fatalf("blocked account and harness detail disagree: %+v", status.BlockedAccounts)
+	}
+	if slices.Contains(status.VerificationUnavailable, "claude-account") {
+		t.Fatal("pin-blocked verification refused instead of waiting for the repair")
+	}
+	s.mu.Lock()
+	s.probedAccounts["account"] = false
+	s.mu.Unlock()
+	if status := s.Lifecycle(""); status.Ready || status.HarnessFailed {
+		t.Fatalf("a starting sibling is not a harness failure: %+v", status)
+	}
+	s.mu.Lock()
+	s.accounts = s.accounts[1:]
+	s.mu.Unlock()
+	if status := s.Lifecycle(""); status.Ready || !status.HarnessFailed {
+		t.Fatalf("every account blocked must summarize as failed: %+v", status)
 	}
 }

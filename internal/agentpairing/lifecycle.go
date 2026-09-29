@@ -346,7 +346,11 @@ func (m *Module) harnessReports(ctx context.Context, tx pgx.Tx, computer string,
 			dropped = true
 			continue
 		}
-		statuses[harness] = status
+		// A newer state token stays in harness_details; the legacy map keeps
+		// its closed set for older readers.
+		if agentsetup.KnownHarnessState(status) {
+			statuses[harness] = status
+		}
 	}
 	for harness, report := range progress.HarnessDetails {
 		detail, ok := agentsetup.HarnessReport(harness, report.State, report.Reason)
@@ -355,8 +359,11 @@ func (m *Module) harnessReports(ctx context.Context, tx pgx.Tx, computer string,
 			dropped = true
 			continue
 		}
-		statuses[harness] = detail.State
-		// Never persist client-supplied commands, paths or diagnostics.
+		if agentsetup.KnownHarnessState(detail.State) {
+			statuses[harness] = detail.State
+		}
+		// Never persist client-supplied commands, paths or diagnostics: the
+		// fix is derived from the harness and reason code.
 		details[harness] = detail
 	}
 	if dropped {

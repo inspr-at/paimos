@@ -1232,7 +1232,40 @@ func TestHarnessDetailsAreCanonicalAndRevokedReportsDoNotBlockCleanup(t *testing
 	if report.HarnessDetails["claude"].Reason != "repin_pending" || report.HarnessDetails["claude"].Fix.Command != "" {
 		t.Fatal("pending repin requires a repair")
 	}
-	for _, detail := range []agentsetup.HarnessDetail{{State: "blocked", Reason: "future_reason"}, {State: "ready"}, {State: "blocked", Reason: "local diagnostic text"}} {
+	// Every per-account pin reason from AEON-347 is one shared code with the
+	// canonical fix; a drifted Claude pin leaves a ready Codex computer connected.
+	for _, reason := range []string{"pin_missing", "pin_partial", "pin_drifted", "pin_invalid", "pin_unsafe", "harness_failed", "cli_unavailable"} {
+		progress.HarnessDetails["claude"] = agentsetup.HarnessDetail{State: "blocked", Reason: reason, Fix: agentsetup.HarnessFix{Kind: "restart", Command: "untrusted"}}
+		proof["progress"] = progress
+		report = agentpairing.View{}
+		decodeResult(t, f.call("POST", "/api/agent-pairing/reconcile", proof, false, "", 200), &report)
+		want := agentsetup.RecoveryFix("claude", reason)
+		if got := report.HarnessDetails["claude"]; got.Reason != reason || got.Fix != want || want.Command == "" || report.SetupState != "connected" || report.HarnessStatuses["codex"] != "ready" {
+			t.Fatalf("%s lost its canonical fix or the ready computer: %+v %s", reason, got, report.SetupState)
+		}
+	}
+	// Codes from a newer daemon stay visible without a guessed fix; only
+	// malformed or inconsistent reports are ignored.
+	progress.HarnessDetails["claude"] = agentsetup.HarnessDetail{State: "blocked", Reason: "future_reason"}
+	proof["progress"] = progress
+	report = agentpairing.View{}
+	decodeResult(t, f.call("POST", "/api/agent-pairing/reconcile", proof, false, "", 200), &report)
+	if got := report.HarnessDetails["claude"]; got.Reason != "future_reason" || got.Fix != (agentsetup.HarnessFix{}) || report.HarnessStatuses["claude"] != "blocked" {
+		t.Fatalf("unknown reason dropped or given a fix: %+v", got)
+	}
+	progress.HarnessStatuses["claude"] = "future_state"
+	progress.HarnessDetails["claude"] = agentsetup.HarnessDetail{State: "future_state", Reason: "future_reason"}
+	proof["progress"] = progress
+	report = agentpairing.View{}
+	decodeResult(t, f.call("POST", "/api/agent-pairing/reconcile", proof, false, "", 200), &report)
+	if got := report.HarnessDetails["claude"]; got.State != "future_state" || got.Reason != "future_reason" || got.Fix.Command != "" {
+		t.Fatalf("unknown state dropped: %+v", got)
+	}
+	if _, legacy := report.HarnessStatuses["claude"]; legacy || report.HarnessStatuses["codex"] != "ready" {
+		t.Fatalf("unknown state entered the closed legacy map: %+v", report.HarnessStatuses)
+	}
+	progress.HarnessStatuses["claude"] = "blocked"
+	for _, detail := range []agentsetup.HarnessDetail{{State: "ready"}, {State: "blocked", Reason: "local diagnostic text"}, {State: "ready", Reason: "pin_drifted"}} {
 		progress.HarnessDetails["claude"] = detail
 		proof["progress"] = progress
 		report = agentpairing.View{}

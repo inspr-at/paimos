@@ -273,7 +273,8 @@ func TestAccountPinBlockReasons(t *testing.T) {
 	}
 	claude := RuntimeConfig{Accounts: []RuntimeAccount{{Harness: "claude", AccountID: "claude", Path: shell}, {Harness: "codex", AccountID: "codex", Path: shell}}}
 	blocks := AccountPinBlocks(claude)
-	if len(blocks) != 1 || blocks[0].AccountID != "claude" || blocks[0].Reason != PinMissing || blocks[0].Fix.Kind != FixAddHarness {
+	// Claude's missing shared pins are repaired by repin, which sets them.
+	if len(blocks) != 1 || blocks[0].AccountID != "claude" || blocks[0].Reason != PinMissing || blocks[0].Fix != (HarnessFix{FixRepin, "aeon-agentd repin --harness claude"}) {
 		t.Fatalf("claude dependency blocked the wrong account: %+v", blocks)
 	}
 	if ValidateRuntimeDependencies(claude) == nil {
@@ -288,5 +289,61 @@ func TestStatusKeepsBlockedAccountReasonAndFix(t *testing.T) {
 	p, err := e.Status(t.Context())
 	if err != nil || p.Stage != "connected" || len(p.BlockedAccounts) != 1 || p.BlockedAccounts[0].AccountID != "old" || p.BlockedAccounts[0].Harness != "codex" || p.BlockedAccounts[0].Reason != PinDrifted || p.BlockedAccounts[0].Fix.Kind != FixAddHarness {
 		t.Fatalf("connected status hid the blocked account: stage=%s blocks=%+v err=%v", p.Stage, p.BlockedAccounts, err)
+	}
+}
+
+// add_harness is the fix for another harness's blocked pin. For the enrolled
+// account it renews only that Node pin locally: no request, approval, identity
+// or launcher change, and a healthy pin is never replaced.
+func TestAddHarnessRenewsOnlyABlockedPin(t *testing.T) {
+	e, api, _, options, _ := engineFixture(t)
+	defer e.Store.Close()
+	d, _, node := npmFixture(t, "codex")
+	c, err := d.Detect(t.Context(), "codex", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	options.Candidates = []Candidate{c}
+	approveFixture(t, e, api, options)
+	if _, err := e.AddHarness(t.Context(), []Candidate{c}); err == nil || !strings.Contains(err.Error(), "already connected") {
+		t.Fatal("healthy pin renewed or re-requested", err)
+	}
+	drift := func() {
+		t.Helper()
+		config, err := ReadRuntimeConfig(e.Store.Path())
+		if err != nil {
+			t.Fatal(err)
+		}
+		config.Accounts[0].Node.Version = "22.20.0"
+		raw, _ := json.Marshal(config)
+		if err := e.Store.Write(RuntimeName, raw, false); err != nil {
+			t.Fatal(err)
+		}
+		blocks := AccountPinBlocks(config)
+		if len(blocks) != 1 || blocks[0].Reason != PinDrifted || blocks[0].Fix != (HarnessFix{FixAddHarness, "aeon-agentd add-harness --harness codex"}) {
+			t.Fatalf("drift not classified with its fix: %+v", blocks)
+		}
+	}
+	drift()
+	other := c
+	other.Identity = "someone-else@example.test"
+	if _, err := e.AddHarness(t.Context(), []Candidate{other}); err == nil || !strings.Contains(err.Error(), "differs") {
+		t.Fatal("another identity renewed the enrolled pin", err)
+	}
+	creates := api.createCount
+	p, err := e.AddHarness(t.Context(), []Candidate{c})
+	if err != nil || !strings.Contains(p.Action, "Interpreter pin renewed") || api.createCount != creates {
+		t.Fatal("blocked pin not renewed locally", err, p.Action)
+	}
+	config, err := ReadRuntimeConfig(e.Store.Path())
+	if err != nil || len(config.Accounts) != 1 || config.Accounts[0].Node != node || len(AccountPinBlocks(config)) != 0 {
+		t.Fatalf("runtime still blocked: %+v %v", config.Accounts, err)
+	}
+	saved, err := e.SavedOptions()
+	if err != nil || len(saved.Candidates) != 1 || saved.Candidates[0].Node != node {
+		t.Fatal("resume would restore the drifted pin", err)
+	}
+	if _, err := e.AddHarness(t.Context(), []Candidate{c}); err == nil || !strings.Contains(err.Error(), "already connected") {
+		t.Fatal("renewed pin renewed again", err)
 	}
 }
