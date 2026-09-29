@@ -8,7 +8,7 @@ import { defineStore } from 'pinia'
 import { computed } from 'vue'
 import { listPairingComputers, type PairingView } from '../lib/agentPairing'
 import {
-  buildPools, buildRows, clone, defaultSchedule, listCapacity, listSchedules, putSchedule, sameShape, stripOverride,
+  buildPools, buildRows, clone, confirmsSave, uncertainFailure, defaultSchedule, listCapacity, listSchedules, putSchedule, sameShape, stripOverride,
   type AccountCapacity, type AccountInput, type CapacitySchedule, type GaugePreference, type Override, type Pool, type ScheduleOverride,
 } from '../lib/capacity'
 import { usePreference } from '../lib/preferences'
@@ -75,8 +75,19 @@ export const useCapacity = defineStore('capacity', () => {
     try {
       await putSchedule({ scope: 'user', schedule: body, carry_overrides: true })
     } catch (e) {
-      local(before)
-      throw new Error(`Nothing was saved: ${e instanceof Error ? e.message : 'the server did not accept the schedule'}.`)
+      if (!uncertainFailure(e)) {
+        local(before)
+        throw new Error(`Nothing was saved: ${e instanceof Error ? e.message : 'the server did not accept the schedule'}.`)
+      }
+      // The answer was lost, not necessarily the save: ask the server what it has.
+      let fresh: ScheduleOverride[]
+      try { fresh = await listSchedules() } catch {
+        local(before)
+        throw new Error("Couldn't confirm the save: the connection dropped. Check the schedule, then try again.")
+      }
+      local(fresh)
+      if (confirmsSave(fresh, body)) return
+      throw new Error('Not saved: the connection dropped before the server took it. Try again.')
     } finally {
       await Promise.all([schedulesRead.refresh(), capacityRead.refresh()])
     }

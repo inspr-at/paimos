@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { APIError, RequestFailure, StaleRequestError } from '../src/lib/api.ts'
 import {
-  accountPlan, accountState, buildPools, buildRows, clampRate, dayProfile, daysLabel, defaultSchedule, fullPaceHours, gauge, gaugeModeFor,
+  accountPlan, confirmsSave, uncertainFailure, accountState, buildPools, buildRows, clampRate, dayProfile, daysLabel, defaultSchedule, fullPaceHours, gauge, gaugeModeFor,
   nightLabel, pickWindows, plainText, poolSentence, presetWeek, rateAt, sameShape, scheduleProblem, setGlobalMode, sourceLine, todayCell,
   toggleAccountMode, when, type AccountCapacity, type AccountInput, type CapacitySchedule, type CapacityWindow,
 } from '../src/lib/capacity.ts'
@@ -207,4 +208,18 @@ test('a Sprint ends at the pool\'s earliest limiting reset, 5-hour windows inclu
     { ...cap('b', [win({ used: 58, budget: 42, reset: '2026-10-02T07:14:00Z' })]), limiting_reset: '2026-09-29T13:00:00Z' },
   ])
   assert.equal(codex.sprintEnd, '2026-09-29T13:00:00Z')
+})
+
+test('a lost save answer is uncertain until the server confirms what it has', () => {
+  assert.ok(uncertainFailure(new RequestFailure('network')))
+  assert.ok(uncertainFailure(new RequestFailure('timeout')))
+  assert.ok(uncertainFailure(new StaleRequestError('gap')))
+  assert.ok(uncertainFailure(new APIError(504, 'gateway timeout')))
+  assert.ok(!uncertainFailure(new APIError(400, 'invalid capacity schedule')))
+  assert.ok(!uncertainFailure(new APIError(500, 'database unavailable')))
+  const sent = { ...schedule(), week: presetWeek(7) }
+  assert.ok(confirmsSave([{ scope: 'user', schedule: sent }, { scope: 'pool', pool: 'grok', schedule: { ...schedule(), override: 'hold' } }], sent))
+  assert.ok(!confirmsSave([{ scope: 'user', schedule: schedule() }], sent))
+  assert.ok(!confirmsSave([], sent))
+  assert.ok(!confirmsSave([{ scope: 'user', schedule: { ...sent, timezone: 'UTC' } }], sent))
 })

@@ -236,6 +236,39 @@ test('a failed schedule save keeps the editor open and changes nothing', async (
   expect(capacity.schedules.find(e => e.pool === 'grok')?.schedule.week.filter(d => d.on)).toHaveLength(7)
 })
 
+// AEON-299 re-review 2: a lost answer is uncertain; the page asks the server
+// what it has and says Saved, Not saved, or that it could not confirm.
+for (const scenario of [
+  { name: 'committed, answer lost', commit: true, refetch: true, says: "Saved. Today's plan follows the new schedule.", open: false, hint: 'every day' },
+  { name: 'never arrived', commit: false, refetch: true, says: 'Not saved: the connection dropped before the server took it. Try again.', open: true, hint: 'Mon–Fri' },
+  { name: 'server unreachable', commit: false, refetch: false, says: "Couldn't confirm the save: the connection dropped. Check the schedule, then try again.", open: true, hint: 'Mon–Fri' },
+]) {
+  test(`a save whose answer is lost: ${scenario.name}`, async ({ page }) => {
+    const { capacity } = await setup(page)
+    await open(page)
+    let dropped = false
+    await page.route('**/api/agent-accounts/capacity/schedule', async route => {
+      const request = route.request()
+      if (request.method() === 'PUT' && !dropped) {
+        dropped = true
+        if (scenario.commit) capacity.handle('/api/agent-accounts/capacity/schedule', 'PUT', request.postDataJSON())
+        return route.abort('connectionreset')
+      }
+      if (request.method() === 'GET' && dropped && !scenario.refetch) return route.abort('connectionreset')
+      return route.fallback()
+    })
+    await cap(page).getByRole('button', { name: 'Customize work week' }).click()
+    const editor = page.getByRole('dialog', { name: 'Work week' })
+    await editor.getByRole('switch', { name: 'Saturday' }).click()
+    await editor.getByRole('switch', { name: 'Sunday' }).click()
+    await editor.getByRole('button', { name: 'Save' }).click()
+    await expect(page.getByText(scenario.says)).toBeVisible()
+    await expect(page.getByText(/Nothing was saved/)).toHaveCount(0)
+    await expect(editor).toHaveCount(scenario.open ? 1 : 0)
+    if (scenario.refetch) await expect(cap(page).locator('.setting.days .cap-hint')).toHaveText(scenario.hint)
+  })
+}
+
 // AEON-299 review 2: a computer-wide login flag or a check that could not run
 // is not a sign-in prompt; only a confirmed sign-out for that account is.
 test('sign-in prompts only for a confirmed sign-out of that account', async ({ page }) => {

@@ -4,7 +4,7 @@
 // explain today's plan. Every number here comes from the server's pacing
 // (GET /agent-accounts/capacity, POST …/capacity/preview); this module only picks
 // windows, names states and words the plan. It never re-derives a budget.
-import { api, APIError } from './api.ts'
+import { api, APIError, RequestFailure, StaleRequestError } from './api.ts'
 
 export type Pool = 'codex' | 'claude' | 'pi' | 'cursor' | 'grok'
 export type OffDays = 'rest' | 'expire' | 'normal'
@@ -66,6 +66,17 @@ export const listCapacity = () => request<AccountCapacity[]>('/agent-accounts/ca
 export const previewCapacity = (schedule: CapacitySchedule) => request<AccountCapacity[]>('/agent-accounts/capacity/preview', 'POST', { schedule: stripOverride(schedule) })
 export const listSchedules = () => request<ScheduleOverride[]>('/agent-accounts/capacity/schedule')
 export const putSchedule = (body: ScheduleOverride) => request<void>('/agent-accounts/capacity/schedule', 'PUT', body)
+
+/**
+ * A failed save whose outcome is unknown: the request may have committed and
+ * only the answer was lost (no connection, timeout, a gateway error).
+ */
+export const uncertainFailure = (e: unknown) => e instanceof RequestFailure || e instanceof StaleRequestError || (e instanceof APIError && (e.status === 502 || e.status === 504))
+/** Whether the person's saved schedule is the one that was sent. */
+export function confirmsSave(entries: ScheduleOverride[], sent: CapacitySchedule) {
+  const saved = entries.find(e => e.scope === 'user')?.schedule
+  return !!saved && sameShape(saved, sent) && saved.timezone === sent.timezone
+}
 
 // ---------- Schedule shape ----------
 export const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] as const
