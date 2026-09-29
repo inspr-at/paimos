@@ -40,6 +40,7 @@ import (
 	publicquotes "github.com/inspr-at/paimos/internal/business/quotes/public"
 	"github.com/inspr-at/paimos/internal/config"
 	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/deliveryvote"
 	"github.com/inspr-at/paimos/internal/embedding"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/fromclassic"
@@ -253,6 +254,7 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 			harness.New(pool),
 			rules.New(pool),
 			ticketwork.New(pool),
+			deliveryvote.New(pool),
 			usagedashboard.New(pool),
 			workorders.New(pool),
 			agentruns.New(pool, settleUsage),

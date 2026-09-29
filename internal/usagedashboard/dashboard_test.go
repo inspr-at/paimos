@@ -149,6 +149,14 @@ func (w *world) session(t *testing.T, p tenant.Principal, project string, ticket
 	return id
 }
 
+func (w *world) deliver(t *testing.T, p tenant.Principal, session string, at time.Time) {
+	t.Helper()
+	w.tx(t, p, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE harness_sessions SET phase='stopped', stopped_at=$2, stop_reason='completed' WHERE id=$1`, session, at)
+		return err
+	})
+}
+
 func (w *world) managedRun(t *testing.T, p tenant.Principal, project string) string {
 	t.Helper()
 	orderNode, run := uid(), uid()
@@ -417,6 +425,117 @@ func TestDashboardMissingUsageIsAnError(t *testing.T) {
 	}
 	if bytes.Contains([]byte(body), []byte(`"input_tokens"`)) || bytes.Contains([]byte(body), []byte("0.000000000000")) {
 		t.Fatalf("missing usage was masked as a dashboard: %s", body)
+	}
+}
+
+func TestDashboardRatesByVoteSnapshot(t *testing.T) {
+	w := newWorld(t)
+	project := w.project(t, w.home, "VIS-1", "Visible project")
+	ticket := w.ticket(t, w.home, project, "VIS-2", "Known ticket")
+	at := time.Date(2026, 9, 10, 12, 0, 0, 0, time.UTC)
+	sessionID := w.session(t, w.home, project, &ticket, at, "session-model-decoy", nil, []modelUsage{
+		{model: "gpt-4.1", in: i64(10), out: i64(2), cached: i64(0), cost: str("1.000000000000"), billing: "api"},
+	}, 1)
+	second := w.session(t, w.home, project, &ticket, at.Add(time.Minute), "session-model-decoy", nil, []modelUsage{
+		{model: "gpt-4.1", in: i64(4), out: i64(1), cached: i64(0), cost: str("0.250000000000"), billing: "api"},
+	}, 2)
+	w.deliver(t, w.home, sessionID, at.Add(time.Hour))
+	w.deliver(t, w.home, second, at.Add(2*time.Hour))
+	for i, voter := range []tenant.Principal{w.home, w.member} {
+		var score any
+		if i == 0 {
+			score = 5
+		}
+		w.tx(t, w.home, func(tx pgx.Tx) error {
+			_, err := tx.Exec(t.Context(), `INSERT INTO agent_delivery_votes
+				(tenant_id, session_id, ticket_node_id, voter_principal_id, score, tags, comment, harness, model)
+				VALUES ($1,$2,$3,$4,$5,'{}','Needs another pass','codex','vote-model')`, w.home.TenantID, sessionID, ticket, voter.ID, score)
+			return err
+		})
+	}
+	code, page, body := w.get(t, w.home, "/api/usage/dashboard?from=2026-09-10T00:00:00Z&to=2026-09-11T00:00:00Z")
+	if code != 200 {
+		t.Fatalf("status %d %s", code, body)
+	}
+	if page.Totals.Sessions != 2 || usd(t, page.Totals.EstimatedCostUSD) != "1.250000000000" {
+		t.Fatalf("usage totals changed %+v", page.Totals)
+	}
+	if got := group(t, page.ByModel, "gpt-4.1"); got.Sessions != 2 {
+		t.Fatalf("priced model %+v", got)
+	}
+	if got := group(t, page.ByHarness, "codex"); got.Sessions != 2 {
+		t.Fatalf("harness usage %+v", page.ByHarness)
+	}
+	if page.Ratings.Votes != 2 || page.Ratings.Exceptions != 1 || page.Ratings.Deliveries != 2 || page.Ratings.ReworkRate == nil || *page.Ratings.ReworkRate != "1/2" {
+		t.Fatalf("ratings %+v", page.Ratings)
+	}
+	if page.Ratings.Average == nil || *page.Ratings.Average != "5.00" {
+		t.Fatalf("optional score still averages %+v", page.Ratings.Average)
+	}
+	if len(page.Ratings.ByModel) != 1 || page.Ratings.ByModel[0].Label != "gpt-4.1" || page.Ratings.ByModel[0].Exceptions != 1 || page.Ratings.ByModel[0].Deliveries != 2 || page.Ratings.ByModel[0].ReworkRate == nil || *page.Ratings.ByModel[0].ReworkRate != "1/2" {
+		t.Fatalf("rating models %+v", page.Ratings.ByModel)
+	}
+	if len(page.Ratings.ByHarness) != 1 || page.Ratings.ByHarness[0].Label != "codex" || page.Ratings.ByHarness[0].Votes != 2 || page.Ratings.ByHarness[0].Exceptions != 1 {
+		t.Fatalf("rating harness %+v", page.Ratings.ByHarness)
+	}
+	if strings.Contains(body, "vote-model") || strings.Contains(body, "session-model-decoy") {
+		t.Fatalf("rate followed a vote snapshot or the session model instead of the delivery: %s", body)
+	}
+}
+
+func TestDashboardRatingsCountStoppedDeliveriesOnly(t *testing.T) {
+	w := newWorld(t)
+	project := w.project(t, w.home, "VIS-1", "Visible project")
+	ticket := w.ticket(t, w.home, project, "VIS-2", "Known ticket")
+	at := time.Date(2026, 9, 10, 12, 0, 0, 0, time.UTC)
+	stoppedID := w.session(t, w.home, project, &ticket, at, "session-model-decoy", nil, []modelUsage{
+		{model: "gpt-4.1", in: i64(10), out: i64(2), cached: i64(0), cost: str("1.000000000000"), billing: "api"},
+	}, 1)
+	runningID := w.session(t, w.home, project, &ticket, at.Add(time.Minute), "session-model-decoy", nil, []modelUsage{
+		{model: "gpt-4.1", in: i64(4), out: i64(1), cached: i64(0), cost: str("0.250000000000"), billing: "api"},
+	}, 2)
+	w.deliver(t, w.home, stoppedID, at.Add(time.Hour))
+	for _, sessionID := range []string{stoppedID, runningID} {
+		w.tx(t, w.home, func(tx pgx.Tx) error {
+			_, err := tx.Exec(t.Context(), `INSERT INTO agent_delivery_votes
+				(tenant_id, session_id, ticket_node_id, voter_principal_id, score, tags, comment, harness, model)
+				VALUES ($1,$2,$3,$4,4,'{}','Still running','codex','vote-model')`, w.home.TenantID, sessionID, ticket, w.home.ID)
+			return err
+		})
+	}
+	code, page, body := w.get(t, w.home, "/api/usage/dashboard?from=2026-09-10T00:00:00Z&to=2026-09-11T00:00:00Z")
+	if code != 200 {
+		t.Fatalf("status %d %s", code, body)
+	}
+	if page.Totals.Sessions != 2 {
+		t.Fatalf("usage still counts the running session %+v", page.Totals)
+	}
+	if got := group(t, page.ByModel, "gpt-4.1"); got.Sessions != 2 {
+		t.Fatalf("priced model %+v", got)
+	}
+	if page.Ratings.Votes != 1 || page.Ratings.Exceptions != 1 || page.Ratings.Deliveries != 1 || page.Ratings.ReworkRate == nil || *page.Ratings.ReworkRate != "1/1" {
+		t.Fatalf("running session counted as a delivery %+v", page.Ratings)
+	}
+	if len(page.Ratings.ByModel) != 1 || page.Ratings.ByModel[0].Deliveries != 1 || page.Ratings.ByModel[0].Exceptions != 1 {
+		t.Fatalf("rating models %+v", page.Ratings.ByModel)
+	}
+	if len(page.Ratings.ByHarness) != 1 || page.Ratings.ByHarness[0].Deliveries != 1 || page.Ratings.ByHarness[0].Votes != 1 {
+		t.Fatalf("rating harness %+v", page.Ratings.ByHarness)
+	}
+}
+
+func TestDashboardMissingVotesStayEmpty(t *testing.T) {
+	w := newWorld(t)
+	if _, err := w.db.App.Exec(t.Context(), `DROP TABLE agent_delivery_votes`); err != nil {
+		t.Fatal(err)
+	}
+	project := w.project(t, w.home, "VIS-1", "Visible project")
+	at := time.Date(2026, 9, 10, 8, 0, 0, 0, time.UTC)
+	sessionID := w.session(t, w.home, project, nil, at, "session-model-decoy", nil, nil, 1)
+	w.deliver(t, w.home, sessionID, at.Add(time.Hour))
+	code, page, body := w.get(t, w.home, "/api/usage/dashboard?from=2026-09-10&to=2026-09-11")
+	if code != 200 || page.Totals.Sessions != 1 || page.Ratings.Votes != 0 || page.Ratings.Exceptions != 0 || page.Ratings.Deliveries != 1 || page.Ratings.ReworkRate != nil || page.Ratings.Average != nil || page.Ratings.ByModel == nil || page.Ratings.ByHarness == nil {
+		t.Fatalf("missing votes %d %+v %s", code, page.Ratings, body)
 	}
 }
 
