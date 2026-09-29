@@ -234,11 +234,9 @@ func (m *Module) managedContext(r *http.Request, tx pgx.Tx, p tenant.Principal) 
 	if err = tx.QueryRow(r.Context(), `SELECT coalesce(max_session_file_bytes,12000) FROM harness_sessions WHERE id=$1`, s.ID).Scan(&registered); err != nil {
 		return nil, err
 	}
-	out, err := rules.ForManagedSession(r.Context(), tx, p, s.ProjectID, *s.WorkOrderID, h, min(maximum, registered))
-	if e, ok := err.(*rules.Error); ok {
-		return nil, workorders.Fail(e.Status, e.Message)
-	}
-	return out, err
+	// A rules failure keeps its safe status and code (AEON-320's shared
+	// WriteError), e.g. 503 doctrine_unavailable or 422 client_floor_too_large.
+	return rules.ForManagedSession(r.Context(), tx, p, s.ProjectID, *s.WorkOrderID, h, min(maximum, registered))
 }
 
 func controlRequesterAuthorized(r *http.Request, tx pgx.Tx, p tenant.Principal, s Session, c Control) (bool, error) {
