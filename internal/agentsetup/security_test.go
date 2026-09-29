@@ -18,6 +18,48 @@ type executorFunc func(context.Context, Command) ([]byte, error)
 
 func (f executorFunc) Run(c context.Context, v Command) ([]byte, error) { return f(c, v) }
 
+func TestDiscoveryOffersOnlyInstalledSignedInHarnesses(t *testing.T) {
+	home := physicalTemp(t)
+	bin := filepath.Join(home, ".nix-profile", "bin")
+	if err := os.MkdirAll(bin, 0700); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"claude", "codex", "cursor-agent"} {
+		if err := os.WriteFile(filepath.Join(bin, name), []byte("fixture"), 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	d := Discovery{Home: home, LookPath: func(name string) (string, error) {
+		if name == "claude" || name == "codex" || name == "cursor-agent" {
+			return filepath.Join(bin, name), nil
+		}
+		return "", os.ErrNotExist
+	}, Executor: executorFunc(func(_ context.Context, c Command) ([]byte, error) {
+		if strings.Join(c.Args, " ") == "--version" {
+			return []byte("1.2.3"), nil
+		}
+		switch filepath.Base(c.Path) {
+		case "claude":
+			return []byte(`{"loggedIn":true,"email":"fixture@example.test","authMethod":"oauth"}`), nil
+		case "cursor-agent":
+			return []byte(`{"status":"authenticated","isAuthenticated":true,"userInfo":{"userId":"fixture","email":"cursor@example.test"}}`), nil
+		case "codex":
+			return nil, errors.New("not signed in")
+		}
+		t.Fatal("unexpected command")
+		return nil, errors.New("unexpected")
+	})}
+	candidates := d.Available(t.Context(), "")
+	if len(candidates) != 2 || candidates[0].Harness != "claude" || candidates[1].Harness != "cursor" {
+		t.Fatalf("offered unexpected harnesses: %d", len(candidates))
+	}
+	for _, c := range candidates {
+		if !c.Managed || c.Login != "signed_in" || !filepath.IsAbs(c.Path) {
+			t.Fatal("Nix candidate not pinned and identified")
+		}
+	}
+}
+
 func TestDiscoveryNeverUsesCredentialFilesAndChecksIdentity(t *testing.T) {
 	home := physicalTemp(t)
 	path := filepath.Join(home, "fake-vendor")

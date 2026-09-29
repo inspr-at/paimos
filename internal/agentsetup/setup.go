@@ -238,9 +238,8 @@ func validateOptions(o Options) error {
 			return errors.New("one explicitly identified signed-in account is required per harness")
 		}
 		seen[c.Harness] = true
-		if c.Managed {
-			return ErrDeclarative
-		}
+		// Nix-owned vendor executables can be pinned and used without changing
+		// their installation. Service ownership is enforced separately below.
 		if c.Harness == "claude" && (!filepath.IsAbs(o.NodePath) || !filepath.IsAbs(o.ClaudeSDKPath)) {
 			return errors.New("Claude requires pinned Node and Agent SDK paths")
 		}
@@ -317,7 +316,10 @@ func (e *Engine) Begin(ctx context.Context, o Options) (Progress, error) {
 	if e.Services == nil {
 		return Progress{}, errors.New("service ownership preflight unavailable")
 	}
-	if err := e.Services.Preflight(ctx, e.Store.Path(), nil); err != nil {
+	// Declarative setup may request approval and prepare its private runtime,
+	// but cannot adopt, install or activate the configuration owner's service.
+	// Other ownership conflicts still fail closed, even without StartService.
+	if err := e.Services.Preflight(ctx, e.Store.Path(), nil); err != nil && !(errors.Is(err, ErrDeclarative) && !o.StartService) {
 		stage := "service_conflict"
 		if errors.Is(err, ErrDeclarative) {
 			stage = "managed_plan"

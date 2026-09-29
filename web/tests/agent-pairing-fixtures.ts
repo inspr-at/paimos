@@ -9,7 +9,8 @@ const ACCOUNT_2 = '55555555-5555-4555-8555-555555555555'
 const MODEL = '66666666-6666-4666-8666-666666666666'
 const DIGEST = 'ab'.repeat(32)
 
-export const SETUP_COMMAND = "<verified absolute paimos-agentd path> setup --url 'https://aeon.example' --workspace <absolute approved folder> --state-root <absolute private folder outside repos> --harness <codex|claude|cursor|grok> --start-service"
+export const SETUP_COMMAND = `"<verified absolute paimos-agentd path>" pair --url 'https://aeon.example'`
+export const NIX_PAIR_COMMAND = "aeon-agentd pair --url 'https://aeon.example'"
 
 export function pairingGuide() {
   return {
@@ -23,6 +24,12 @@ export function pairingGuide() {
     install_available: false,
     install_targets: [],
     managed_installation: 'Use the owning Nix or Home Manager configuration.',
+    managed_setup: {
+      command: NIX_PAIR_COMMAND,
+      service_option: 'uzumaki.aeon.agentd.enable',
+      module_url: 'https://github.com/markus-barta/nixcfg/blob/main/modules/uzumaki/aeon-agentd.nix',
+      service_note: 'The current Home Manager module needs a paired-service update before this computer can connect.',
+    },
   }
 }
 

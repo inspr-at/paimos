@@ -153,6 +153,31 @@ func TestGeneratedInstallerPrivateSuccess(t *testing.T) {
 	}
 }
 
+func TestGeneratedInstallerPreservesExistingAeonAndNix(t *testing.T) {
+	for _, tool := range []string{"aeon-agentd", "paimos-agentd", "nix"} {
+		t.Run(tool, func(t *testing.T) {
+			f := newInstallerFixture(t, false)
+			path := filepath.Join(filepath.Dir(f.curlCalls), "tools", tool)
+			// A guard fixture must never be executed, installed over or removed.
+			contents := []byte("#!/bin/sh\nexit 97\n")
+			if err := os.WriteFile(path, contents, 0700); err != nil {
+				t.Fatal(err)
+			}
+			if err := f.run(t); err == nil {
+				t.Fatal("installed over an existing tool")
+			}
+			assertNoDownload(t, f)
+			got, err := os.ReadFile(path)
+			if err != nil || string(got) != string(contents) {
+				t.Fatal("changed existing tool")
+			}
+			if _, err := os.Stat(f.targetDir); !os.IsNotExist(err) {
+				t.Fatal("created installer destination")
+			}
+		})
+	}
+}
+
 func TestGeneratedInstallerRejectsUnsafeAncestors(t *testing.T) {
 	for _, ancestor := range []string{"home", ".local", ".local/lib", ".local/lib/aeon", ".local/lib/aeon/" + installerTestVersion} {
 		for _, condition := range []string{"symlink", "writable", "foreign"} {

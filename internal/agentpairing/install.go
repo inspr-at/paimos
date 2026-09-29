@@ -41,8 +41,12 @@ func installTargets() []InstallTarget {
 		// bytes non-executable until the exact manifest entry verifies successfully.
 		cmd := fmt.Sprintf(`(
 set -eu
+if command -v aeon-agentd >/dev/null 2>&1; then
+  printf 'Aeon is already installed. Use aeon-agentd pair with the --url from this instance guide.\n' >&2
+  exit 1
+fi
 if command -v paimos-agentd >/dev/null 2>&1 || command -v nix >/dev/null 2>&1; then
-  printf 'Existing or Nix-managed installation: reuse the verified tool or use the owning declarative configuration.\n' >&2
+  printf 'Use the Nix / Home Manager section of this instance guide to pair with the existing Aeon tool; managed binaries and services are preserved.\n' >&2
   exit 1
 fi
 umask 077
@@ -99,5 +103,21 @@ printf 'Verified binary: %%s/paimos-agentd\n' "$aeon_pairing_dir"
 }
 
 func setupCommand(origin string) string {
-	return `<verified absolute paimos-agentd path> setup --url ` + shellQuote(origin) + ` --workspace <absolute approved folder> --state-root <absolute private folder outside repos> --harness <codex|claude|cursor|grok> --start-service`
+	return `"<verified absolute paimos-agentd path>" pair --url ` + shellQuote(origin)
+}
+
+type ManagedSetup struct {
+	Command       string `json:"command"`
+	ServiceOption string `json:"service_option"`
+	ModuleURL     string `json:"module_url"`
+	ServiceNote   string `json:"service_note"`
+}
+
+func managedSetup(origin string) ManagedSetup {
+	return ManagedSetup{
+		Command:       "aeon-agentd pair --url " + shellQuote(origin),
+		ServiceOption: "uzumaki.aeon.agentd.enable",
+		ModuleURL:     "https://github.com/markus-barta/nixcfg/blob/main/modules/uzumaki/aeon-agentd.nix",
+		ServiceNote:   "The current Home Manager module needs a paired-service update before this computer can connect.",
+	}
 }

@@ -149,6 +149,8 @@ nix profile install github:inspr-at/aeon#aeon
 
 GitHub release assets, next to `paimos-agentd` for the same four OS/architecture pairs and listed in the same `SHA256SUMS`: `aeon-cli-darwin-amd64`, `aeon-cli-darwin-arm64`, `aeon-cli-linux-amd64`, `aeon-cli-linux-arm64`. Put the CLI file on `PATH` as `aeon`; a symlink named `paimos` selects its compatibility mode. For checksum-verified computer pairing, see [Agent integration](docs/AGENT_INTEGRATION.md).
 
+With the reviewed Nix package on PATH, run `aeon-agentd pair --url 'INSTANCE_ORIGIN_FROM_GUIDE'` from your working folder (bare `aeon-agentd pair` asks for the origin or resumes the saved instance). Confirm the folder, select detected signed-in harnesses, then enter the 9-digit code in the browser and approve as a person. Pairing creates its own private state; Nix/Home Manager retains service ownership.
+
 Invoking the binary as `paimos` gives the paimos-compatible CLI. `PAIMOS_URL` (with `PAIMOS_API_KEY` or `PAIMOS_API_KEY_FILE`) is the process-only target.
 
 Managed `aeon-agentd` Codex runs report fresh app-server thread usage to

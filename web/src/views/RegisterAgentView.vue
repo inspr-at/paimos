@@ -568,6 +568,22 @@ function enrollmentDetail(enrollment: PairingView['enrollments'][number]) {
       </template>
       <p v-if="guideError" class="problem" role="alert">{{ guideError }} <button type="button" class="btn sm" @click="loadGuide">Try again</button></p>
 
+      <details v-if="presentation?.managedSetup" class="manual nix-guide">
+        <summary><AppIcon name="chevron-right" :size="12" class="disclosure-chev" />Nix / Home Manager</summary>
+        <div class="manual-body">
+          <p class="copy">With aeon-agentd installed, run this in the folder you want to work in.</p>
+          <pre class="command"><code>{{ presentation.managedSetup.command }}</code></pre>
+          <button type="button" class="btn sm" @click="copyText(presentation.managedSetup.command, 'Pair command')"><AppIcon :name="copied === 'Pair command' ? 'check' : 'copy'" :size="13" />{{ copied === 'Pair command' ? 'Copied' : 'Copy pairing command' }}</button>
+          <p class="copy">Confirm the folder and accounts, then enter the code below.</p>
+          <details class="service-details">
+            <summary><AppIcon name="chevron-right" :size="12" class="disclosure-chev" />Declarative service</summary>
+            <p class="copy">Home Manager keeps ownership of the binary and service.</p>
+            <a :href="presentation.managedSetup.module_url" target="_blank" rel="noopener noreferrer"><code>{{ presentation.managedSetup.service_option }}</code></a>
+            <p class="copy">{{ presentation.managedSetup.service_note }}</p>
+          </details>
+        </div>
+      </details>
+
       <form class="code-form" @submit.prevent="lookup">
         <label for="pairing-code">Pairing code</label>
         <div class="code-row">
@@ -590,12 +606,12 @@ function enrollmentDetail(enrollment: PairingView['enrollments'][number]) {
         <template v-if="selectedTarget">
           <p class="k">{{ platformCaption(selectedTarget.platform, selectedTarget.arch) }}</p>
           <pre class="command"><code>{{ selectedTarget.command }}</code></pre>
-          <button type="button" class="btn sm" @click="copyText(selectedTarget.command, 'Command')">{{ copied === 'Command' ? 'Copied' : 'Copy command' }}</button>
+          <button type="button" class="btn sm" @click="copyText(selectedTarget.command, 'Install command')">{{ copied === 'Install command' ? 'Copied' : 'Copy install command' }}</button>
         </template>
-        <template v-else-if="presentation.setupCommand">
+        <template v-if="presentation.setupCommand">
           <p class="k">Setup command</p>
           <pre class="command"><code>{{ presentation.setupCommand }}</code></pre>
-          <button type="button" class="btn sm" @click="copyText(presentation.setupCommand, 'Command')">{{ copied === 'Command' ? 'Copied' : 'Copy command' }}</button>
+          <button type="button" class="btn sm" @click="copyText(presentation.setupCommand, 'Setup command')">{{ copied === 'Setup command' ? 'Copied' : 'Copy setup command' }}</button>
         </template>
         </div>
       </details>
@@ -758,8 +774,11 @@ function enrollmentDetail(enrollment: PairingView['enrollments'][number]) {
 .install-note { display: flex; gap: 8px; margin-top: 6px; padding: 10px 12px; border-radius: 10px; background: var(--surface-sunken); white-space: normal; }
 .install-note svg { flex-shrink: 0; margin-top: 2px; color: var(--ink-3); }
 .manual-body .k { margin-top: 8px; }
-.command { display: block; margin: 0 0 4px; padding: 12px; overflow-x: auto; white-space: pre-wrap; border-radius: 10px; background: var(--surface-sunken); font: 12.5px/1.5 var(--mono); }
+.command { display: block; margin: 0 0 4px; padding: 12px; overflow-wrap: anywhere; white-space: pre-wrap; border-radius: 10px; background: var(--surface-sunken); font: 12.5px/1.5 var(--mono); }
 .manual-body .btn { justify-self: start; }
+.service-details { font-size: 13px; color: var(--ink-2); }
+.service-details summary { cursor: pointer; color: var(--ink-2); }
+.service-details p, .service-details a { display: block; margin-top: 8px; overflow-wrap: anywhere; }
 /* Review */
 .facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: 16px; }
 .facts > div { display: flex; gap: 10px; min-width: 0; padding: 12px; border-radius: 12px; background: var(--surface-sunken); }

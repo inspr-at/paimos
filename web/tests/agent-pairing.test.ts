@@ -103,6 +103,22 @@ function guidePayload(overrides: Record<string, unknown> = {}): PairingGuide {
   }
 }
 
+test('the Nix guide is additive, parsed as published, and never guesses a paired service option', async () => {
+  const managed = {
+    command: "aeon-agentd pair --url 'https://other.example'",
+    service_option: 'uzumaki.aeon.agentd.enable',
+    module_url: 'https://github.com/markus-barta/nixcfg/blob/main/modules/uzumaki/aeon-agentd.nix',
+    service_note: 'NIX-583 still needs paired-mode support.',
+  }
+  globalThis.fetch = async () => jsonResponse(guidePayload({ managed_setup: managed }))
+  const guide = await getPairingGuide()
+  assert.deepEqual(presentPublicGuide(guide).managedSetup, managed)
+  assert.match(presentPublicGuide(guide).note, /signed-in person/)
+  assert.equal(presentPublicGuide(guidePayload()).managedSetup, null)
+  globalThis.fetch = async () => jsonResponse(guidePayload({ managed_setup: { ...managed, module_url: 'javascript:alert(1)' } }))
+  await assert.rejects(getPairingGuide(), PairingError)
+})
+
 test('the public guide is not a session route and stays usable after sign-out', () => {
   assert.equal(agentRouteKind('/agents/register-agent'), 'register-agent')
   assert.equal(agentRouteKind('/agents/usage'), 'usage')

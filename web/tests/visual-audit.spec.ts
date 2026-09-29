@@ -526,6 +526,12 @@ const shots: Shot[] = [
     await expect(page.getByRole('region', { name: 'Accounts and pacing' })).toContainText('5-hour')
   } },
   // 5. Connected computers and pairing
+  { screen: 'pairing', state: 'nix-guide', setup: mockAnonymousGuide, act: async page => {
+    await page.goto('/agents/register-agent')
+    await heading(page, 'Connect a computer')
+    await page.getByText('Nix / Home Manager', { exact: true }).click()
+    await page.getByText('Declarative service', { exact: true }).click()
+  } },
   { screen: 'pairing', state: 'public-guide', setup: mockAnonymousGuide, act: async page => {
     await page.goto('/agents/register-agent')
     await heading(page, 'Connect a computer')

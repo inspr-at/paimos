@@ -1,7 +1,27 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { expect, test } from '@playwright/test'
 import { fixtures, me, mockWork, watchErrors } from './work-fixtures'
-import { SETUP_COMMAND, mockAnonymousGuide, mockPairing } from './agent-pairing-fixtures'
+import { NIX_PAIR_COMMAND, SETUP_COMMAND, mockAnonymousGuide, mockPairing } from './agent-pairing-fixtures'
+
+test('Nix pairing offers the short instance command and preserves person approval', async ({ page, context }) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write'])
+  await mockAnonymousGuide(page)
+  await page.goto('/agents/register-agent')
+  await page.getByText('Nix / Home Manager', { exact: true }).click()
+  await expect(page.getByText(NIX_PAIR_COMMAND, { exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Copy pairing command' })).toBeVisible()
+  await page.getByRole('button', { name: 'Copy pairing command' }).click()
+  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(NIX_PAIR_COMMAND)
+  await expect(page.getByText('Confirm the folder and accounts, then enter the code below.')).toBeVisible()
+  await page.getByText('Declarative service', { exact: true }).click()
+  await expect(page.getByRole('link', { name: 'uzumaki.aeon.agentd.enable' })).toHaveAttribute('href', 'https://github.com/markus-barta/nixcfg/blob/main/modules/uzumaki/aeon-agentd.nix')
+  await expect(page.getByText(/needs a paired-service update/)).toBeVisible()
+  await expect(page.getByText(/Entering the code does not grant access/)).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Connect computer', exact: true })).toHaveCount(0)
+  expect(NIX_PAIR_COMMAND).not.toMatch(/mkdir|\/nix\/store|--state-root|--harness|--workspace/)
+  await page.setViewportSize({ width: 390, height: 844 })
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+})
 
 test('a qualified helper removes Connect only without a harness-name special case', async ({ page }) => {
   await page.clock.install({ time: new Date('2026-09-27T20:00:00.000Z') })
