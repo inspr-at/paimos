@@ -59,6 +59,11 @@ func TestObservedCapacityPreservesSeparatePairingApproval(t *testing.T) {
 	now := time.Now().UTC().Add(-time.Second)
 	reading := capacity.Reading{WindowKind: "5h", WindowMinutes: 300, UsedPercent: 20, ReadAt: now, ResetsAt: now.Add(time.Hour), Source: "harness"}
 	f.call("POST", "/api/agent-accounts/"+e.AccountID+"/readings", map[string]any{"readings": []capacity.Reading{reading}}, false, key, 204)
+	// Approval, rather than the wall clock's work-hours band, must decide
+	// whether this account can route an ordinary run.
+	schedule := capacity.DefaultSchedule()
+	schedule.Override = "sprint"
+	f.call("PUT", "/api/agent-accounts/capacity/schedule", map[string]any{"scope": "user", "schedule": schedule}, true, "", 204)
 	var approved bool
 	if err := f.db.Admin.QueryRow(t.Context(), `SELECT ongoing_approved_at IS NOT NULL FROM agent_pairing_enrollments WHERE account_id=$1`, e.AccountID).Scan(&approved); err != nil {
 		t.Fatal(err)
