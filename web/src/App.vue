@@ -79,9 +79,10 @@ function openReleases(version?: string) {
   openedHere = true
   void router.push({ path: route.path, query: { ...route.query, releases: version ?? 'all' }, hash: route.hash })
 }
-// The version pill opens the release this page is running. Menus open the full
-// history (`all`), which stays unselected instead of being rewritten to that release.
-function openRunningRelease() { openReleases(releases.current || undefined) }
+// The version pill opens the release this page is running. Before that version
+// is known the address keeps the intent (`current`) and the sheet resolves it.
+// Menus open the full history (`all`), which stays unselected.
+function openRunningRelease() { openReleases(releases.current || 'current') }
 // A release and a language or view chosen in quick succession (a choice whose
 // filter hides the selected release moves the selection) both land: each
 // replace carries what is still on its way, until the address has it.

@@ -6,7 +6,7 @@
 // light and dark, for review by eye.
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test, type Page, type Route } from '@playwright/test'
 import { fixtures, me, mockWork, watchErrors } from './work-fixtures'
 import { mockGuestPermissions } from './authz-fixtures'
 import { mockReleases, releaseHistory } from './releases-fixtures'
@@ -82,6 +82,58 @@ async function expectFullHistory(page: Page) {
   await expect(history.getByRole('option', { selected: true })).toHaveCount(0)
   return history
 }
+
+// Hold /version and the history until the test lets them answer, so a click can
+// land before either is known. Registered after the page's own mocks, which then
+// fulfill the request.
+async function holdReleaseApis(page: Page) {
+  let release!: () => void
+  const gate = new Promise<void>(resolve => { release = resolve })
+  const wait = async (route: Route) => { await gate; await route.fallback() }
+  await page.route('**/api/version**', wait)
+  await page.route('**/api/releases**', wait)
+  return release
+}
+
+test.describe('release history before the version has loaded', () => {
+  for (const width of [1440, 390]) {
+    test(`the footer pill still opens the running release at ${width}`, async ({ page }) => {
+      await page.setViewportSize({ width, height: width < 600 ? 844 : 900 })
+      const state = await signIn(page, 'member')
+      const release = await holdReleaseApis(page)
+      await page.goto('/', { waitUntil: 'domcontentloaded' })
+      await expect(page.getByRole('list', { name: 'Projects' })).toBeVisible()
+      const pill = page.locator('footer.app-footer .version-pill')
+      await expect(pill).toHaveAccessibleName('Release history')
+      await pill.click()
+      await expect(page).toHaveURL(/[?&]releases=current(?:&|#|$)/)
+      const history = page.getByRole('dialog', { name: 'PAIMOS AEON releases' })
+      await expect(history).toBeVisible()
+      await expect(history.locator('[role="option"][aria-selected="true"]')).toHaveCount(0)
+      release()
+      await page.waitForLoadState('networkidle')
+      const version = state.history.current
+      await expect(page).toHaveURL(new RegExp(`[?&]releases=${version.replace(/\./g, '\\.')}(?:&|#|$)`))
+      await expect(history.locator('[role="option"][aria-selected="true"]')).toHaveCount(1)
+      await expect(history.locator('[role="option"][aria-selected="true"]')).toHaveAttribute('id', `release-${version.replace(/\./g, '-')}`)
+      await expect(history.getByRole('heading', { level: 2, name: version })).toBeVisible()
+    })
+
+    test(`header release history stays on the full list at ${width}`, async ({ page }) => {
+      await page.setViewportSize({ width, height: width < 600 ? 844 : 900 })
+      await signIn(page, 'member')
+      const release = await holdReleaseApis(page)
+      await page.goto('/', { waitUntil: 'domcontentloaded' })
+      await expect(page.getByRole('list', { name: 'Projects' })).toBeVisible()
+      const menu = await openAccount(page)
+      await menu.getByRole('menuitem', { name: 'Release history', exact: true }).click()
+      await expect(page).toHaveURL(/[?&]releases=all(?:&|#|$)/)
+      release()
+      const history = await expectFullHistory(page)
+      if (width < 600) await expect(history.locator('.shell')).not.toHaveClass(/show-detail/)
+    })
+  }
+})
 
 test.describe('gear menu', () => {
   test('an admin sees the workspace, agents, help and a healthy system', async ({ page }) => {
