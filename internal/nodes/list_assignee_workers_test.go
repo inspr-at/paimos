@@ -126,15 +126,24 @@ func TestListAssigneeSortUsesLiveWorkerName(t *testing.T) {
 			}
 		}
 	}
+	sortedLead := leadOn(t, p, "/api/nodes?within="+root.ID+"&kind=ticket&sort=assignee", both.Key)
+	plainLead := leadOn(t, p, "/api/nodes?within="+root.ID+"&kind=ticket&sort=updated_at", both.Key)
+	if sortedLead == nil || plainLead == nil || sortedLead.Name != "Aaa" || sortedLead.Name != plainLead.Name || sortedLead.Key != plainLead.Key {
+		t.Fatalf("assigned lead sorted %#v plain %#v", sortedLead, plainLead)
+	}
 
 	// Other sorts look up workers only after paging, in the same statement.
 	plain, _ := listSQL(listQuery{Sort: []sortKey{{Name: "updated_at", Desc: true}}, Limit: 50}, nil)
-	if strings.Contains(strings.Split(plain, "selected AS")[0], "harness_sessions") || !strings.Contains(plain, "harness_sessions") {
+	if strings.Contains(strings.Split(plain, "selected AS")[0], "harness_sessions") || !strings.Contains(plain, "harness_sessions") || strings.Contains(plain, "ap.name IS NULL") || strings.Contains(plain, "sess.") {
 		t.Fatal("updated sort must project workers only after paging")
 	}
 	sorted, _ := listSQL(listQuery{Sort: []sortKey{{Name: "assignee"}}, Limit: 50}, nil)
-	if !strings.Contains(strings.Split(sorted, "selected AS")[0], "harness_sessions") || !strings.Contains(sorted, "s.lead_name,s.lead_key") {
-		t.Fatal("assignee sort missing the worker lateral")
+	before, after, cut := strings.Cut(sorted, "selected AS")
+	if !cut || !strings.Contains(before, "harness_sessions sess") || !strings.Contains(before, "ap.name IS NULL") || !strings.Contains(before, "AS lead_name") || strings.Contains(sorted, "sessess") {
+		t.Fatal("assignee sort must probe a live lead only when the row has no stored person, and carry that lead")
+	}
+	if !strings.Contains(after, "s.lead_name") || !strings.Contains(after, "s.lead_name IS NULL") || !strings.Contains(after, "harness_sessions sess") {
+		t.Fatal("assigned rows must take their lead from the page of the same statement")
 	}
 
 	// About 300 tickets and enough live sessions that a per-row sequential scan
@@ -214,6 +223,139 @@ func TestListAssigneeSortUsesLiveWorkerName(t *testing.T) {
 	if seqLoops > 1 || !slices.Contains(indexes, "harness_sessions_ticket_eta") {
 		t.Fatalf("assignee sort did not probe harness_sessions_ticket_eta (seq loops %.0f, indexes %v)", seqLoops, indexes)
 	}
+}
+
+// Stored people are the assignee sort key, so their live leads are read with
+// the page rather than once per filtered row. Sort and display stay one statement.
+func TestListAssigneeSortSkipsLiveLookupForStoredPeople(t *testing.T) {
+	p := newPrincipal(t, "assignee-stored-perf")
+	project := kindBySlug(t, p, "project")
+	ticket := kindBySlug(t, p, "ticket")
+	root := mustNode(t, p, `{"kind_id":"`+project.ID+`","title":"Stored"}`)
+	sam := addPrincipalIn(t, p.TenantID, "Sam")
+	zed := insertNamedAgent(t, p.TenantID, "Zed")
+	err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `INSERT INTO nodes (tenant_id, key, kind_id, title, state, parent_id, position, fields)
+            SELECT $1, 'OWN-'||g, $2, 'Owned '||g, 'new', $3, g, jsonb_build_object('assignee', $4::text)
+            FROM generate_series(1, 300) g`, p.TenantID, ticket.ID, root.ID, sam.ID); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `INSERT INTO harness_sessions (
+            tenant_id, project_id, agent_principal_id, ticket_node_id, harness, host, management, role, work_shape,
+            ref_digest, lease_digest, phase, activity, display_label, created_at, heartbeat_at)
+            SELECT $1, $2, $3, n.id, 'claude', 'test', 'unmanaged', 'worker', 'ship',
+                decode(md5(n.id::text||g::text), 'hex'), decode(md5(g::text||n.id::text), 'hex'),
+                'working', 'busy', 'Zara', clock_timestamp() - make_interval(hours => g), clock_timestamp()
+            FROM nodes n
+            CROSS JOIN generate_series(1, 4) g
+            WHERE n.tenant_id=$1 AND n.key LIKE 'OWN-%'`, p.TenantID, root.ID, zed)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	makeOpen := func(key string) nodeJSON {
+		t.Helper()
+		raw, _ := json.Marshal(map[string]any{"kind_id": ticket.ID, "key": key, "title": key, "state": "new", "parent_id": root.ID})
+		return mustNode(t, p, string(raw))
+	}
+	open1, open2 := makeOpen("OPEN-1"), makeOpen("OPEN-2")
+	insertLiveSession(t, p.TenantID, root.ID, zed, open1.ID, "claude", "worker", "Zara", "working", "busy", "", 30)
+	insertLiveSession(t, p.TenantID, root.ID, zed, open2.ID, "claude", "worker", "Zara", "working", "busy", "", 20)
+	if _, err := appPool.Exec(t.Context(), `ANALYZE nodes, principals, harness_sessions`); err != nil {
+		t.Fatal(err)
+	}
+
+	page := listPage(t, p, "/api/nodes?within="+root.ID+"&kind=ticket&sort=assignee&limit=50")
+	if len(page.Items) != 50 {
+		t.Fatalf("page %d", len(page.Items))
+	}
+	for _, item := range page.Items {
+		if item.Assignee == nil || item.Assignee.Name != "Sam" || item.LeadWorker == nil || item.LeadWorker.Name != "Zara" {
+			t.Fatalf("stored row %s assignee %#v lead %#v", item.Key, item.Assignee, item.LeadWorker)
+		}
+	}
+	// "Zara" sorts after "Sam", so these two are the tail and still have a lead.
+	tail := listPage(t, p, "/api/nodes?within="+root.ID+"&kind=ticket&sort=-assignee&limit=2")
+	if len(tail.Items) != 2 {
+		t.Fatalf("tail %d", len(tail.Items))
+	}
+	for _, item := range tail.Items {
+		if item.Assignee != nil || item.LeadWorker == nil || item.LeadWorker.Name != "Zara" {
+			t.Fatalf("open row %s assignee %#v lead %#v", item.Key, item.Assignee, item.LeadWorker)
+		}
+	}
+
+	q, err := parseListQuery(httptest.NewRequest(http.MethodGet, "/api/nodes?within="+root.ID+"&kind=ticket&sort=assignee&limit=50", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	q.seen = assigneeSeen{harnessAll: true, members: true}
+	sqlText, args := listSQL(q, nil)
+	var planRaw string
+	err = db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), "EXPLAIN (ANALYZE, FORMAT JSON) "+sqlText, args...).Scan(&planRaw)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	indexLoops, seqLoops, indexes := harnessProbeStats(planRaw)
+	var explained []map[string]any
+	if err := json.Unmarshal([]byte(planRaw), &explained); err != nil {
+		t.Fatal(err)
+	}
+	for _, rootPlan := range explained {
+		if ms, ok := rootPlan["Execution Time"].(float64); ok {
+			t.Logf("assignee sort of 300 stored people: %.1f ms, %.0f index loops (indexes %v)", ms, indexLoops, indexes)
+			if ms > 500 {
+				t.Errorf("assignee sort exceeded 500ms: %.1f", ms)
+			}
+		}
+	}
+	// The two open rows are probed while ordering. The page is stored people.
+	// A probe of all 300 before paging is at least 300 loops; the page stays well under that.
+	if seqLoops > 1 || !slices.Contains(indexes, "harness_sessions_ticket_eta") || indexLoops < 40 || indexLoops >= 300 {
+		t.Fatalf("stored-person leads were not limited to the page (index loops %.0f, seq %.0f, indexes %v)", indexLoops, seqLoops, indexes)
+	}
+}
+
+func harnessProbeStats(planRaw string) (indexLoops, seqLoops float64, indexes []string) {
+	var explained []map[string]any
+	if json.Unmarshal([]byte(planRaw), &explained) != nil {
+		return 0, 0, nil
+	}
+	var walk func(any)
+	walk = func(node any) {
+		switch n := node.(type) {
+		case map[string]any:
+			if n["Relation Name"] == "harness_sessions" {
+				if name, ok := n["Index Name"].(string); ok {
+					indexes = append(indexes, name)
+					if name == "harness_sessions_ticket_eta" {
+						if loops, ok := n["Actual Loops"].(float64); ok {
+							indexLoops += loops
+						}
+					}
+				}
+				if n["Node Type"] == "Seq Scan" {
+					if loops, ok := n["Actual Loops"].(float64); ok {
+						seqLoops += loops
+					}
+				}
+			}
+			for _, child := range n {
+				walk(child)
+			}
+		case []any:
+			for _, child := range n {
+				walk(child)
+			}
+		}
+	}
+	for _, rootPlan := range explained {
+		walk(rootPlan)
+	}
+	return indexLoops, seqLoops, indexes
 }
 
 // A viewer sorts by the name the live feed would show them. harness.read

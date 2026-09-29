@@ -3,9 +3,9 @@
 // the B1 query semantics (within, kind, state, priority, assignee, q, hide_closed,
 // sort, facets, cursor paging) so specs can assert on real behaviour.
 import type { Page } from '@playwright/test'
-import { deriveAgentState, normalizeAgentState } from '../src/lib/agentSignals.ts'
+import { deriveAgentState, normalizeAgentState, STATE_PRIORITY } from '../src/lib/agentSignals.ts'
 import { benefitIssues, completedTicketState } from '../src/lib/ticketBenefits.ts'
-import { compareServerLead, leadWorkerKey, who, type LiveAgent } from '../src/lib/liveAgents.ts'
+import { leadWorkerKey, who, type LiveAgent } from '../src/lib/liveAgents.ts'
 import { mockEffectivePermissions } from './authz-fixtures'
 
 export const me = { id: '11111111-1111-4111-8111-111111111111', name: 'Markus Barta' }
@@ -207,8 +207,27 @@ function costUnit(node: MockNode): string {
 }
 const release = (node: MockNode) => labelOf(node.fields.release)
 const personName = (data: Fixtures, id: unknown) => typeof id === 'string' ? data.people.find(p => p.id === id)?.name ?? '' : ''
-// Live workers on one ticket, in the server's lead order (attention at the
-// viewer's thresholds, then start, heartbeat and public facts — not a session id).
+// Mock stand-in for the list query's lead order. The server chooses; this
+// only keeps fixture rows in that order (attention at the viewer's thresholds,
+// then a worker before a coordinator, then start, heartbeat and public facts).
+function compareServerLead(a: LiveAgent, b: LiveAgent) {
+  const rank = (agent: LiveAgent) => STATE_PRIORITY[agent.state ?? 'working']
+  const beat = (agent: LiveAgent) => {
+    const parsed = Date.parse(agent.heartbeat_at ?? '')
+    return Number.isNaN(parsed) ? Number.POSITIVE_INFINITY : parsed
+  }
+  return rank(a) - rank(b)
+    || Number(a.role === 'coordinator') - Number(b.role === 'coordinator')
+    || Date.parse(a.since) - Date.parse(b.since)
+    || beat(a) - beat(b)
+    || a.harness.localeCompare(b.harness)
+    || (a.activity_sequence ?? 0) - (b.activity_sequence ?? 0)
+    || a.phase.localeCompare(b.phase)
+    || a.activity.localeCompare(b.activity)
+    || who(a).localeCompare(who(b))
+    || leadWorkerKey(a).localeCompare(leadWorkerKey(b))
+}
+// Live workers on one ticket, in the server's lead order.
 function liveOn(data: Fixtures, node: MockNode): LiveAgent[] {
   const preferences = normalizeAgentState(data.preferences['agent-state'])
   return data.live.flatMap(agent => {

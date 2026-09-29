@@ -436,8 +436,10 @@ func (m *Module) listNodes(ctx context.Context, tenantID string, q listQuery) (n
 		if mark != nil {
 			anchor = mark.ID
 		}
-		// The lead is decided here for every row, and the assignee sort uses
-		// the same choice. Thresholds are the viewer's normalized preference.
+		// The lead is decided in this one statement. An assignee sort probes a
+		// live lead while ordering only when the row has no stored person, and
+		// reads the page's remaining leads from that same statement.
+		// Thresholds are the viewer's normalized preference.
 		q.leadYellow, q.leadRed = 3, 10
 		if p, ok := tenant.PrincipalFrom(ctx); ok {
 			seen, err := assigneeAudience(ctx, tx, p)
@@ -771,15 +773,18 @@ func assigneeShownExpr(projectID, harnessAll, projects, members string) string {
     END`
 }
 
-// assigneeWorkerJoin chooses and projects the lead together. Assignee sorts
-// carry these exact values through paging; other sorts attach the lookup only
-// to the selected page. The partial index harness_sessions_ticket_eta probes
-// one ticket, and both paths use one statement snapshot.
-func assigneeWorkerJoin(nodeID, projectID, harnessAll, projects, members string, yellow, red int) string {
+// assigneeWorkerJoin chooses and projects the lead together. gate is an outer
+// boolean. Empty means every row; otherwise the probe runs only when the gate
+// is true (CASE does not evaluate that branch). Assignee sorts pass
+// "ap.name IS NULL" while ordering, because a stored person is already the
+// sort key, and "s.lead_name IS NULL" on the page so assigned rows still
+// receive a lead. The carried sort lead and the page lead are one statement.
+// Other sorts attach the lookup only to the selected page. The partial index
+// harness_sessions_ticket_eta probes one ticket.
+func assigneeWorkerJoin(nodeID, projectID, harnessAll, projects, members string, yellow, red int, gate string) string {
 	shown := assigneeShownExpr(projectID, harnessAll, projects, members)
 	key := assigneeLeadKeyExpr(harnessAll)
-	return ` LEFT JOIN LATERAL (
-    SELECT ` + shown + ` AS shown_name, ` + key + ` AS lead_key
+	lookup := `SELECT ` + shown + ` AS shown_name, ` + key + ` AS lead_key
     FROM harness_sessions s
     LEFT JOIN principals agent ON agent.tenant_id=s.tenant_id AND agent.id=s.agent_principal_id
     LEFT JOIN agent_runs run ON run.tenant_id=s.tenant_id AND run.id=s.run_id
@@ -787,7 +792,22 @@ func assigneeWorkerJoin(nodeID, projectID, harnessAll, projects, members string,
       AND s.ticket_node_id=` + nodeID + `
       AND ` + assigneeWorkerEligible + `
     ORDER BY ` + assigneeLeadOrder(yellow, red, shown, key) + `
-    LIMIT 1
+    LIMIT 1`
+	if gate == "" {
+		return ` LEFT JOIN LATERAL (
+    ` + lookup + `
+) worker ON true `
+	}
+	// Rename the session so a gate that reads the selected page (alias s)
+	// does not bind to this scan.
+	scoped := strings.ReplaceAll(lookup, "s.", "sess.")
+	scoped = strings.ReplaceAll(scoped, "harness_sessions s", "harness_sessions sess")
+	return ` LEFT JOIN LATERAL (
+    SELECT payload->>'shown_name' AS shown_name, payload->>'lead_key' AS lead_key
+    FROM (SELECT CASE WHEN ` + gate + ` THEN (
+        SELECT jsonb_build_object('shown_name', picked.shown_name, 'lead_key', picked.lead_key)
+        FROM (` + scoped + `) picked
+    ) END AS payload) gated
 ) worker ON true `
 }
 
@@ -1031,17 +1051,19 @@ func listSQL(q listQuery, anchor any) (string, []any) {
 	}
 	args = append(args, q.seen.harnessAll, projects, q.seen.members)
 	harnessAll, projectArg, members := fmt.Sprintf("$%d", len(args)-2), fmt.Sprintf("$%d", len(args)-1), fmt.Sprintf("$%d", len(args))
-	workerJoin := func(nodeID, projectID string) string {
-		return assigneeWorkerJoin(nodeID, projectID, harnessAll, projectArg, members, q.leadYellow, q.leadRed)
+	workerJoin := func(nodeID, projectID, gate string) string {
+		return assigneeWorkerJoin(nodeID, projectID, harnessAll, projectArg, members, q.leadYellow, q.leadRed, gate)
 	}
 	people, orderedLead := "", ""
 	leadColumns := "worker.shown_name,worker.lead_key"
-	pageWorker := workerJoin("n.id", "n.project_id")
+	pageWorker := workerJoin("n.id", "n.project_id", "")
 	if sortsBy(q, "assignee") {
-		people = ` LEFT JOIN principals ap ON ap.tenant_id=current_setting('aeon.tenant_id')::uuid AND ap.id=f.assignee_id::uuid` + workerJoin("f.id", "f.project_id")
+		// A stored person is the sort key, so only the other rows need a live
+		// probe before paging. Assigned rows take their lead from the page.
+		people = ` LEFT JOIN principals ap ON ap.tenant_id=current_setting('aeon.tenant_id')::uuid AND ap.id=f.assignee_id::uuid` + workerJoin("f.id", "f.project_id", "ap.name IS NULL")
 		orderedLead = ",worker.shown_name AS lead_name,worker.lead_key"
-		leadColumns = "s.lead_name,s.lead_key"
-		pageWorker = ""
+		leadColumns = "coalesce(s.lead_name,worker.shown_name),coalesce(s.lead_key,worker.lead_key)"
+		pageWorker = workerJoin("n.id", "n.project_id", "s.lead_name IS NULL")
 	}
 	etaJoin := ""
 	if sortsBy(q, "eta_ready") || sortsBy(q, "progress") {
