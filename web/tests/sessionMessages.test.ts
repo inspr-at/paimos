@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { belongsToSession, collapseMessages, historicalSender } from '../src/components/agents/sessionMessages.ts'
+import { answeredMessages, collapseMessages, historicalSender } from '../src/components/agents/sessionMessages.ts'
 import type { ProjectMessage } from '../src/lib/agents.ts'
 
 const message = (id: string, seconds: number, fields: Partial<ProjectMessage> = {}): ProjectMessage => ({
@@ -10,11 +10,22 @@ const message = (id: string, seconds: number, fields: Partial<ProjectMessage> = 
   is_action_request: false, expects_reply: false, delivery_level: 'simple', status: 'accepted', reply_obligation: 'none',
   created_at: new Date(1_800_000_000_000 + seconds * 1000).toISOString(), ...fields,
 })
-test('the exact session owns its conversation; unbound history owns neither generation', () => {
-  assert.equal(belongsToSession(message('1', 0), 'session-one'), true)
-  assert.equal(belongsToSession(message('1', 0), 'session-two'), false)
-  assert.equal(belongsToSession(message('1', 0, { sender_session_id: undefined }), 'session-one'), false)
-  assert.equal(belongsToSession(message('1', 0, { recipient_session_id: 'session-two' }), 'session-two'), true)
+test('only an accepted counterpart reply marks a question answered', () => {
+  const question = message('q', 0, { sender_principal_id: 'person', recipient_principal_id: 'agent' })
+  const reply = message('r', 1, { reply_to: 'q' })
+  assert.deepEqual([...answeredMessages([question, reply])], ['q'])
+  for (const fields of [{ is_action_request: true }, { status: 'held' }, { sender_principal_id: 'other' }, { recipient_principal_id: 'other' }, { reply_to: undefined }]) {
+    assert.equal(answeredMessages([question, { ...reply, ...fields }]).size, 0)
+  }
+  assert.equal(collapseMessages([question, reply])[0]!.answered, true)
+  assert.equal(collapseMessages([question])[0]!.answered, false)
+})
+test('repeated text across a turn stays in order and answered duplicates remain distinct', () => {
+  const question = message('q', 1, { sender_principal_id: 'person', recipient_principal_id: 'agent' })
+  assert.deepEqual(collapseMessages([message('1', 0), question, message('2', 2)]).map(m => m.id), ['1', 'q', '2'])
+  const again = { ...question, id: 'q2', sent_event_id: 2 }
+  const groups = collapseMessages([question, again, message('r', 3, { reply_to: 'q2' })])
+  assert.deepEqual(groups.map(m => [m.id, m.answered]), [['q', false], ['q2', true], ['r', false]])
 })
 test('historical sender never resolves through the live principal label', () => {
   assert.equal(historicalSender(message('1', 0), 'person'), 'Original lead')

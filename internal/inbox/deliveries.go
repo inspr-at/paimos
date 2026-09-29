@@ -473,11 +473,15 @@ func (m *messaging) readMessages(w http.ResponseWriter, r *http.Request, inspect
  ), thread AS (
  SELECT id FROM ancestors WHERE reply_to_id IS NULL
  UNION SELECT c.id FROM inbox_compat_messages c JOIN thread t ON c.reply_to_id=t.id WHERE c.project_id=$1::uuid
+ ), session_thread AS (
+ SELECT id FROM inbox_compat_messages WHERE $3 AND project_id=$1::uuid AND (recipient_session_id=$9::uuid OR sender_session_id=$9::uuid)
+ UNION SELECT c.id FROM inbox_compat_messages c JOIN session_thread s ON c.reply_to_id=s.id
+ WHERE c.project_id=$1::uuid AND c.sender_session_id IS NULL AND c.recipient_session_id IS NULL AND NOT c.is_action_request
  ) SELECT `+compatMessageCols+` FROM inbox_compat_messages c `+compatObligationJoin+`
  LEFT JOIN inbox_messages i ON i.tenant_id=c.tenant_id AND i.id=c.inbox_message_id
  WHERE c.project_id=$1::uuid AND `+comparison+`
  AND ($3 OR (c.recipient_principal_id=$4::uuid AND NOT c.is_action_request AND i.acked_at IS NULL AND (i.expires_at IS NULL OR i.expires_at>clock_timestamp())))
- AND (($3 AND ($9::uuid IS NULL OR c.recipient_session_id=$9::uuid OR c.sender_session_id=$9::uuid))
+ AND (($3 AND ($9::uuid IS NULL OR c.id IN (SELECT id FROM session_thread)))
       OR (NOT $3 AND (c.recipient_session_id IS NULL OR c.recipient_session_id=$9::uuid)))
  AND ($5='' OR c.recipient_address=$5)
  AND ($7::uuid IS NULL OR c.id IN (SELECT id FROM thread))

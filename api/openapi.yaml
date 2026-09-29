@@ -2768,7 +2768,7 @@ paths:
         '404': {description: Session is not visible}
     put:
       operationId: putSessionReadMarker
-      description: Move this person's watermark forward. last_read_message_id is a message in this session. last_read_event_id is that message's sent_event_id, or the sent_event_id of a later message in the same session. A lower or equal event leaves the stored marker unchanged and returns it. Requires harness.read. Agents receive 403. Does not change message resources.
+      description: Move this person's watermark forward. last_read_message_id is a message in this session, including an unbound reply linked to its messages. last_read_event_id is that message's sent_event_id, or the sent_event_id of a later message in the same session. A lower or equal event leaves the stored marker unchanged and returns it. Requires harness.read. Agents receive 403. Does not change message resources.
       requestBody:
         required: true
         content:
@@ -3376,7 +3376,7 @@ paths:
       operationId: inspectProjectMessages
       description: Person admin or super_admin inspection including held messages. Ascending by sent event ID by default. In newest_first mode after is an exclusive upper bound; zero starts at the newest. Thread selects the root and all descendants of the supplied message's reply_to chain within this project. Pending selects unresolved held action requests. Resolution never releases or delivers a held message.
       parameters:
-        - {name: session, in: query, schema: {type: string, format: uuid}, description: Exact sender or recipient session; omitting includes unbound history}
+        - {name: session, in: query, schema: {type: string, format: uuid}, description: 'Exact sender or recipient session and unbound replies linked to its messages, in either direction. Other explicit generations and unrelated principal history are excluded. Omitting includes unbound history.'}
         - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 10}}
         - {name: after, in: query, schema: {type: integer, minimum: 0, default: 0}}
         - {name: newest_first, in: query, schema: {type: boolean, default: false}}

@@ -173,3 +173,64 @@ func compatPostAuth(t *testing.T, srv *httptest.Server, p tenant.Principal, path
 	}
 	return do(t, srv, p.ID, "POST", path, string(b), headerAuth(token))
 }
+
+func TestSessionThreadIncludesBothDirectionsAndUnboundReplies(t *testing.T) {
+	w, m, project, srv := messagingWorld(t)
+	first := messageTestSession(t, w, project, w.agent, "First generation")
+	second := messageTestSession(t, w, project, w.agent, "Second generation")
+	question := compatInput(w.agent.ID, "question")
+	question.RecipientSessionID = &first
+	question.ExpectsReply = true
+	asked := mustCompatSend(t, m, w.sender, project, question)
+	reply := compatInput(w.sender.ID, "unbound-answer")
+	reply.ReplyTo = &asked.ID
+	answered := mustCompatSend(t, m, w.agent, project, reply)
+	followup := compatInput(w.agent.ID, "unbound-followup")
+	followup.ReplyTo = &answered.ID
+	followed := mustCompatSend(t, m, w.sender, project, followup)
+	bound := compatInput(w.sender.ID, "ordinary-answer")
+	bound.SenderSessionID = &first
+	ordinary := mustCompatSend(t, m, w.agent, project, bound)
+	question.Key, question.RecipientSessionID = "other-question", &second
+	otherQuestion := mustCompatSend(t, m, w.sender, project, question)
+	reply.Key, reply.ReplyTo = "other-answer", &otherQuestion.ID
+	otherAnswer := mustCompatSend(t, m, w.agent, project, reply)
+	// Unrelated principal history and a new explicit generation replying to an
+	// unbound descendant must not migrate into the first generation's thread.
+	mustCompatSend(t, m, w.agent, project, compatInput(w.sender.ID, "unrelated"))
+	bound.Key, bound.SenderSessionID, bound.ReplyTo = "new-generation", &second, &followed.ID
+	newGeneration := mustCompatSend(t, m, w.agent, project, bound)
+	base := "/api/projects/" + project + "/messages?session="
+	for _, tc := range []struct {
+		session string
+		want    []string
+	}{
+		{first, []string{asked.ID, answered.ID, followed.ID, ordinary.ID}},
+		{second, []string{otherQuestion.ID, otherAnswer.ID, newGeneration.ID}},
+	} {
+		status, body := do(t, srv, w.admin.ID, "GET", base+tc.session+"&limit=200", "", nil)
+		page := mustJSON[compatPage](t, body)
+		if status != 200 || len(page.Items) != len(tc.want) {
+			t.Fatalf("thread %d %s", status, body)
+		}
+		for i, want := range tc.want {
+			if page.Items[i].ID != want {
+				t.Fatalf("item %d: got %s want %s", i, page.Items[i].ID, want)
+			}
+		}
+	}
+	// Pagination is applied after session membership, in both directions.
+	status, body := do(t, srv, w.admin.ID, "GET", base+first+"&newest_first=true&limit=2", "", nil)
+	page := mustJSON[compatPage](t, body)
+	if status != 200 || len(page.Items) != 2 || page.Items[0].ID != ordinary.ID || page.Items[1].ID != followed.ID {
+		t.Fatalf("newest %d %s", status, body)
+	}
+	status, body = do(t, srv, w.admin.ID, "GET", fmt.Sprintf("%s%s&newest_first=true&limit=2&after=%d", base, first, page.NextAfter), "", nil)
+	page = mustJSON[compatPage](t, body)
+	if status != 200 || len(page.Items) != 2 || page.Items[0].ID != answered.ID || page.Items[1].ID != asked.ID || page.Items[1].ReplyObligation != "closed" {
+		t.Fatalf("older %d %s", status, body)
+	}
+	if status, _ := do(t, srv, w.outsider.ID, "GET", base+first, "", nil); status == 200 {
+		t.Fatal("foreign tenant inspected the thread")
+	}
+}

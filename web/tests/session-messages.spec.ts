@@ -18,15 +18,15 @@ async function setup(page: Page, theme: 'light' | 'dark' = 'light') {
   data.messages.splice(0, data.messages.length,
     { ...original, id: 'history', body: 'Old unbound status', created_at: new Date(now - 120_000).toISOString(), sender_label: 'paimos:Previous lead', from: 'paimos:Previous lead' } as typeof original,
     { ...original, id: 'other', body: 'Stop the ghost session', recipient_session_id: 'other-session', sender_session_id: undefined, sender_label: 'Markus', sender_principal_id: me.id, recipient_principal_id: worker.agent_principal_id } as typeof original,
-    { ...original, id: 'current1', body: 'The release checks are ready.', sender_session_id: worker.id, sender_label: 'Original lead', created_at: new Date(now - 60_000).toISOString() } as typeof original,
-    { ...original, id: 'current2', body: 'The release checks are ready.', sender_session_id: worker.id, sender_label: 'Original lead', created_at: new Date(now - 30_000).toISOString() } as typeof original,
+    { ...original, id: 'current1', sent_event_id: 201, body: 'The release checks are ready.', sender_session_id: worker.id, sender_label: 'Original lead', created_at: new Date(now - 60_000).toISOString() } as typeof original,
+    { ...original, id: 'current2', sent_event_id: 202, body: 'The release checks are ready.', sender_session_id: worker.id, sender_label: 'Original lead', created_at: new Date(now - 30_000).toISOString() } as typeof original,
   )
   const calls = await mockAgents(page, data)
   return { data, worker, calls }
 }
 
 for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390]) {
-  test(`${theme} ${width}: session thread isolates history and collapses exact duplicates`, async ({ page }) => {
+  test(`${theme} ${width}: session thread excludes other sessions and collapses consecutive duplicates`, async ({ page }) => {
     const { worker } = await setup(page, theme)
     await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
     await page.goto(`/agents/${worker.id}`)
@@ -44,10 +44,8 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390])
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
     const dir = process.env.SESSION_MESSAGES_SHOTS
     if (dir) { mkdirSync(dir, { recursive: true }); await page.screenshot({ path: resolve(dir, `${theme}-${width}.png`), fullPage: true }) }
-    await panel.getByText('Other sessions of camy', { exact: true }).click()
-    await expect(panel.getByText('Old unbound status')).toBeVisible()
-    await expect(panel.getByText('Stop the ghost session')).toBeVisible()
-    await expect(panel.getByRole('list', { name: 'Other session messages' }).getByText('Previous lead', { exact: true })).toBeVisible()
+    await expect(panel.getByText(/Other sessions of/)).toHaveCount(0)
+    await expect(panel.getByRole('region', { name: 'Inbox attention' })).toHaveCount(0)
   })
 }
 

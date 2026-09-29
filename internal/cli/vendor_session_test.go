@@ -225,7 +225,7 @@ func TestInboxHookBindsVendorSession(t *testing.T) {
 	}
 }
 
-func TestTellReplyFillsResolvedSenderSession(t *testing.T) {
+func TestTellFillsResolvedSenderSession(t *testing.T) {
 	const (
 		projectID = "00000000-0000-4000-8000-000000000002"
 		messageID = "00000000-0000-4000-8000-000000000004"
@@ -250,8 +250,8 @@ func TestTellReplyFillsResolvedSenderSession(t *testing.T) {
 				fmt.Fprint(w, `{"items":[{"id":"`+projectID+`","kind_id":"00000000-0000-4000-8000-000000000001","key":"AEON-1","title":"AEON","fields":{"project_key":"AEON"}}]}`)
 			case r.URL.Path == "/api/inbox/session-binding":
 				seen = append(seen, "binding "+fmt.Sprint(body["harness_session_ref"]))
-				if binding == http.StatusNotFound {
-					w.WriteHeader(http.StatusNotFound)
+				if binding != http.StatusOK {
+					w.WriteHeader(binding)
 					fmt.Fprint(w, `{"error":"not found"}`)
 					return
 				}
@@ -292,10 +292,82 @@ func TestTellReplyFillsResolvedSenderSession(t *testing.T) {
 	})
 	t.Run("ordinary", func(t *testing.T) {
 		code, out, errOut, seen := run(t, []string{"tell", "codex:receiver", "--project", "AEON", "--idempotency-key", "retry", "-m", "hello"})
-		if code != 0 || strings.Contains(strings.Join(seen, "\n"), "session-binding") || strings.Contains(strings.Join(seen, "\n"), "sender_session_id") {
-			t.Fatalf("ordinary tell inferred a session: exit %d out %q err %q seen %q", code, out, errOut, seen)
+		if code != 0 || strings.Contains(out+errOut, vendor) || len(seen) < 2 || seen[0] != "binding "+vendor || !strings.Contains(seen[1], `"sender_session_id":"`+sessionID+`"`) {
+			t.Fatalf("ordinary tell missed its binding: exit %d out %q err %q seen %q", code, out, errOut, seen)
 		}
 	})
+	for _, source := range []string{"flag", "id", "file", "state-dir", "codex-session", "codex-thread", "unbound", "missing-file", "invalid-id", "invalid-file", "symlink", "unavailable"} {
+		t.Run(source, func(t *testing.T) {
+			isolate(t)
+			t.Setenv("CLAUDE_CODE_SESSION_ID", vendor)
+			dir := t.TempDir()
+			file := filepath.Join(dir, "session.id")
+			if err := os.WriteFile(file, []byte(sessionID+"\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			args := []string{"aeon", "--config", filepath.Join(dir, "missing"), "tell", "00000000-0000-4000-8000-000000000003", "--project", "AEON", "-m", "hello"}
+			bound, lookup, fail := true, false, false
+			bindingStatus := http.StatusOK
+			switch source {
+			case "flag":
+				args = append(args, "--sender-session", sessionID)
+				t.Setenv("AEON_SESSION_ID", "invalid") // Explicit flag wins.
+			case "id":
+				t.Setenv("AEON_SESSION_ID", sessionID)
+				t.Setenv("AEON_SESSION_FILE", filepath.Join(dir, "missing"))
+			case "file":
+				t.Setenv("AEON_SESSION_FILE", file)
+			case "state-dir":
+				t.Setenv("AEON_SESSION_STATE_DIR", dir)
+			case "codex-session", "codex-thread":
+				t.Setenv("CLAUDE_CODE_SESSION_ID", "")
+				name := "CODEX_SESSION_ID"
+				if source == "codex-thread" {
+					name = "CODEX_THREAD_ID"
+				}
+				t.Setenv(name, vendor)
+				lookup = true
+			case "unbound":
+				t.Setenv("CLAUDE_CODE_SESSION_ID", "")
+				bound = false
+			case "missing-file":
+				t.Setenv("AEON_SESSION_FILE", filepath.Join(dir, "missing"))
+				bound = false
+			case "invalid-id":
+				t.Setenv("AEON_SESSION_ID", "invalid")
+				fail = true
+			case "invalid-file":
+				if err := os.WriteFile(file, []byte("invalid"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				t.Setenv("AEON_SESSION_FILE", file)
+				fail = true
+			case "symlink":
+				link := filepath.Join(dir, "link")
+				if err := os.Symlink(file, link); err != nil {
+					t.Fatal(err)
+				}
+				t.Setenv("AEON_SESSION_FILE", link)
+				fail = true
+			case "unavailable":
+				bindingStatus, lookup, fail = http.StatusServiceUnavailable, true, true
+			}
+			_, seen := serve(t, bindingStatus)
+			var out, errOut bytes.Buffer
+			code := RunMessaging(args, strings.NewReader(""), &out, &errOut)
+			joined := strings.Join(*seen, "\n")
+			if (code != 0) != fail || strings.Contains(out.String()+errOut.String(), vendor) || strings.Contains(joined, "binding "+vendor) != lookup {
+				t.Fatalf("exit %d; binding lookup or output disagrees with %s", code, source)
+			}
+			if fail {
+				if strings.Contains(joined, "POST /api/projects/") {
+					t.Fatal("invalid binding sent a message")
+				}
+			} else if strings.Contains(joined, `"sender_session_id":"`+sessionID+`"`) != bound {
+				t.Fatalf("wrong attribution for %s", source)
+			}
+		})
+	}
 	t.Run("miss", func(t *testing.T) {
 		isolate(t)
 		t.Setenv("CLAUDE_CODE_SESSION_ID", vendor)

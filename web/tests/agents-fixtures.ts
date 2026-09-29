@@ -198,6 +198,16 @@ export async function mockAgents(page: Page, data: AgentData, options: AgentMock
       }
       const newest = q.get('newest_first') === 'true', limit = Number(q.get('limit') ?? 10), after = Number(q.get('after') ?? 0)
       let all = [...data.messages, ...data.sent].filter(m => m.project === project)
+      const session = q.get('session')
+      if (session) {
+        const belongs = new Set(all.filter(m => m.sender_session_id === session || m.recipient_session_id === session).map(m => m.id))
+        let previous = -1
+        while (previous !== belongs.size) {
+          previous = belongs.size
+          for (const m of all) if (!m.sender_session_id && !m.recipient_session_id && !m.is_action_request && m.reply_to && belongs.has(m.reply_to)) belongs.add(m.id)
+        }
+        all = all.filter(m => belongs.has(m.id))
+      }
       if (q.get('pending') === 'true') all = all.filter(m => m.is_action_request && !m.human_resolution_outcome)
       all = newest ? all.filter(m => !after || m.sent_event_id < after).reverse() : all.filter(m => m.sent_event_id > after)
       const page = all.slice(0, limit)

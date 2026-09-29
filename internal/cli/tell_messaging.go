@@ -41,7 +41,7 @@ func (rt *runtime) cmdMessagingTell() *Command {
 			fs.string(&messageFile, "message-file", 0, "message text file, or - for stdin")
 			fs.string(&level, "level", 0, "simple or steer")
 			fs.string(&recipientSession, "recipient-session", 0, "exact recipient session UUID")
-			fs.string(&senderSession, "sender-session", 0, "your session UUID for historical attribution")
+			fs.string(&senderSession, "sender-session", 0, "your session UUID (defaults to the current Aeon or harness binding)")
 			fs.string(&reply, "reply-to", 0, "exact counterpart message UUID")
 			fs.string(&thread, "thread", 0, "conversation thread ID")
 			fs.string(&key, "idempotency-key", 0, "stable retry key (generated if omitted)")
@@ -74,13 +74,10 @@ func (rt *runtime) cmdMessagingTell() *Command {
 			if reply != "" && !validUUID(reply) {
 				return usagef("--reply-to must be a UUID")
 			}
-			if reply != "" && senderSession == "" {
-				if vendor := ambientVendorSessionRef(); vendor != "" {
-					resolved, resolveErr := rt.lookupVendorSession(context.Background(), vendor)
-					if resolveErr != nil {
-						return rt.fail(resolveErr, vendor)
-					}
-					senderSession = resolved
+			if senderSession == "" {
+				senderSession, err = rt.ambientSenderSession(context.Background())
+				if err != nil {
+					return rt.fail(err, "")
 				}
 			}
 			if len(key) > 128 || strings.ContainsRune(key, 0) {

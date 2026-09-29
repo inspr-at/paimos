@@ -177,11 +177,15 @@ export const useAgents = defineStore('agents', () => {
       sessions.value = [...sessions.value.filter(s => !ids.has(s.id)), ...items.map(item => mergeSessionEvidence(previous.get(item.id), item))]
     } catch { /* the ticket panel simply shows no sessions */ }
   }
-  // One project's messages, newest first; the panel shows the agent's side of it.
-  async function refreshThread(projectId: string) {
+  // Scope before limiting: a busy project must not crowd a session's replies out.
+  const threadReads = new Map<string, number>()
+  async function refreshThread(projectId: string, sessionId: string) {
+    const read = (threadReads.get(sessionId) ?? 0) + 1
+    threadReads.set(sessionId, read)
     try {
-      const page = await listMessages(projectId, { limit: 200 })
-      threads.value = { ...threads.value, [projectId]: page.items }
+      const page = await listMessages(projectId, { session: sessionId, limit: 200 })
+      if (threadReads.get(sessionId) !== read) return
+      threads.value = { ...threads.value, [sessionId]: page.items }
       learnAddresses(page.items)
       if (messagingState.value !== 'ready') messagingState.value = 'ready'
     } catch (e) { if (messagingState.value !== 'ready') messagingState.value = availability(e) }
@@ -238,9 +242,8 @@ export const useAgents = defineStore('agents', () => {
     return { name: `Agent ${principalId.slice(0, 8)}`, harness: '', sessionId: '' }
   }
   // Oldest first for reading; the server returns the newest 200.
-  const thread = (session: HarnessSession) => (threads.value[session.project_id] ?? [])
-    .filter(m => m.sender_principal_id === session.agent_principal_id || m.recipient_principal_id === session.agent_principal_id)
-    .slice().reverse()
+  const thread = (session: HarnessSession) => (threads.value[session.id] ?? [])
+    .slice().sort((a, b) => a.sent_event_id - b.sent_event_id)
   const addressOf = (principalId: string) => addresses.value[principalId] ?? ''
 
   // An accepted removal wins over any list or ticket read already in flight.
@@ -291,7 +294,7 @@ export const useAgents = defineStore('agents', () => {
   }
   async function send(session: HarnessSession, to: string, body: string, level: 'simple' | 'steer', replyTo?: string) {
     await sendMessage(session.project_id, { to, body, recipient_session_id: session.id, idempotency_key: crypto.randomUUID(), expects_reply: false, is_action_request: false, delivery_level: level, ...(replyTo ? { reply_to: replyTo } : {}) })
-    await refreshThread(session.project_id)
+    await refreshThread(session.project_id, session.id)
   }
   async function setAccount(account: AgentAccount, state: AgentAccount['state']) {
     const updated = await setAccountState(account.id, state)

@@ -85,10 +85,16 @@ func (m *Module) putReadMarker(r *http.Request, tx pgx.Tx, p tenant.Principal) (
 // its newest post while naming the group's first id. The stored id is the
 // message that owns the event.
 func canonicalReadMessage(ctx context.Context, tx pgx.Tx, projectID, sessionID, messageID string, eventID int64) (string, error) {
+	// Same membership as the session inspection: exact bindings plus unbound
+	// descendants, never messages explicitly attributed to another generation.
+	const thread = `WITH RECURSIVE session_thread AS (
+		SELECT id,sent_event_id FROM inbox_compat_messages
+		WHERE project_id=$1 AND (sender_session_id=$3 OR recipient_session_id=$3)
+		UNION SELECT c.id,c.sent_event_id FROM inbox_compat_messages c JOIN session_thread s ON c.reply_to_id=s.id
+		WHERE c.project_id=$1 AND c.sender_session_id IS NULL AND c.recipient_session_id IS NULL AND NOT c.is_action_request
+	) `
 	var messageEvent int64
-	err := tx.QueryRow(ctx, `
-		SELECT sent_event_id FROM inbox_compat_messages
-		WHERE project_id=$1 AND id=$2 AND (sender_session_id=$3 OR recipient_session_id=$3)`,
+	err := tx.QueryRow(ctx, thread+`SELECT sent_event_id FROM session_thread WHERE id=$2`,
 		projectID, messageID, sessionID).Scan(&messageEvent)
 	if errors.Is(err, pgx.ErrNoRows) || (err == nil && eventID < messageEvent) {
 		return "", workorders.Fail(400, "message is not in this session")
@@ -100,9 +106,7 @@ func canonicalReadMessage(ctx context.Context, tx pgx.Tx, projectID, sessionID, 
 		return messageID, nil
 	}
 	var owner string
-	err = tx.QueryRow(ctx, `
-		SELECT id::text FROM inbox_compat_messages
-		WHERE project_id=$1 AND sent_event_id=$2 AND (sender_session_id=$3 OR recipient_session_id=$3)`,
+	err = tx.QueryRow(ctx, thread+`SELECT id::text FROM session_thread WHERE sent_event_id=$2`,
 		projectID, eventID, sessionID).Scan(&owner)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", workorders.Fail(400, "message is not in this session")

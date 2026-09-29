@@ -287,7 +287,7 @@ test('the session panel shows the ticket, runs, telemetry and the thread, and se
   expect(typeof sent.idempotency_key).toBe('string')
   // B7: runs by agent, messages newest first in one page, sessions tenant-wide.
   expect(calls.some(c => c.path === '/api/runs' && c.query?.get('agent') === 'a0000000-0000-4000-8000-000000000001')).toBe(true)
-  expect(calls.some(c => c.path === '/api/projects/p-pharos/messages' && c.method === 'GET' && c.query?.get('newest_first') === 'true' && c.query?.get('limit') === '200')).toBe(true)
+  expect(calls.some(c => c.path === '/api/projects/p-pharos/messages' && c.method === 'GET' && c.query?.get('session') === camy && c.query?.get('newest_first') === 'true' && c.query?.get('limit') === '200')).toBe(true)
   expect(calls.some(c => /\/api\/projects\/[^/]+\/harness-sessions$/.test(c.path))).toBe(false)
 })
 

@@ -38,6 +38,19 @@ func ambientVendorSessionRef() string {
 	return vendorSessionRef("codex")
 }
 
+// Use the same explicit sources and precedence as the inbox hook. A configured
+// file that has not been written yet never falls through to another generation.
+func (rt *runtime) ambientSenderSession(ctx context.Context) (string, error) {
+	id, err := inboxHookSession()
+	if err != nil || id != "" || os.Getenv("AEON_SESSION_ID") != "" || os.Getenv("AEON_SESSION_FILE") != "" || os.Getenv("AEON_SESSION_STATE_DIR") != "" {
+		return id, err
+	}
+	if ref := ambientVendorSessionRef(); ref != "" {
+		return rt.lookupVendorSession(ctx, ref)
+	}
+	return "", nil
+}
+
 func normalizeVendorRef(raw string) string {
 	raw = strings.TrimSpace(raw)
 	if len(raw) < 16 || len(raw) > 4096 || strings.ContainsAny(raw, "\r\n") {

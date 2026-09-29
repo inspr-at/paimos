@@ -4,7 +4,7 @@ import { computed } from 'vue'
 import type { ProjectMessage } from '../../lib/agents'
 import { useSession } from '../../stores/session'
 import { absoluteTime, relativeTime } from '../../lib/work'
-import { belongsToSession, collapseMessages, historicalSender } from './sessionMessages'
+import { collapseMessages, historicalSender } from './sessionMessages'
 import type { MessageStatus } from '../../lib/agents'
 import { statusLabel, statusTip } from './sessionChat'
 import AppIcon from '../AppIcon.vue'
@@ -12,63 +12,51 @@ import Avatar from '../Avatar.vue'
 
 // newFrom places the "New" divider above that message; statuses carry the delivery
 // progress of the viewer's own messages (AEON-280) when the server has one.
-const props = defineProps<{ messages: ProjectMessage[]; sessionId: string; principalId: string; address: string; now: number; canReply: boolean; newFrom?: string; newCount?: number; statuses?: Record<string, MessageStatus> }>()
+const props = defineProps<{ messages: ProjectMessage[]; principalId: string; now: number; canReply: boolean; newFrom?: string; newCount?: number; statuses?: Record<string, MessageStatus> }>()
 const emit = defineEmits<{ reply: [message: ProjectMessage] }>()
 const identity = useSession()
 const me = computed(() => identity.identity?.principal.id ?? '')
-const agent = computed(() => props.address.replace(/^[^:]+:/, '') || 'this agent')
-const groups = computed(() => [
-  { history: false, items: collapseMessages(props.messages.filter(m => belongsToSession(m, props.sessionId))) },
-  { history: true, items: collapseMessages(props.messages.filter(m => !belongsToSession(m, props.sessionId))) },
-])
+const items = computed(() => collapseMessages(props.messages))
 const statusOf = (m: ProjectMessage) => m.sender_principal_id === me.value ? props.statuses?.[m.id] : undefined
 </script>
 
 <template>
   <section class="session-messages" aria-label="Conversation">
-    <template v-for="group in groups" :key="String(group.history)">
-      <component :is="group.history ? 'details' : 'div'" v-if="!group.history || group.items.length" :class="{ history: group.history }">
-        <summary v-if="group.history"><AppIcon name="chevron-right" :size="12" class="disclosure-chev" />Other sessions of {{ agent }}</summary>
-        <p v-if="!group.items.length" class="empty-line">No messages in this session yet.</p>
-        <ol v-else class="thread" :aria-label="group.history ? 'Other session messages' : 'Messages'">
-          <template v-for="m in group.items" :key="m.id">
-            <li v-if="!group.history && m.id === newFrom" class="new-divider" role="separator" :aria-label="`${newCount ?? 1} new`"><span>New</span></li>
-            <li class="msg" :class="{ mine: m.sender_principal_id === me }" :data-event="group.history ? undefined : m.last_event" :data-id="m.id">
-              <p class="msg-meta">
-                <Avatar :name="historicalSender(m, me)" :kind="m.sender_principal_id === me ? 'person' : 'agent'" :size="18" />
-                <span class="msg-author" :title="historicalSender(m, me)">{{ historicalSender(m, me) }}</span>
-                <span v-if="m.count > 1" class="duplicate" :aria-label="`${m.count} identical posts`">×{{ m.count }}</span>
-                <span v-if="m.delivery_level === 'steer'" class="msg-chip"><AppIcon name="bolt" :size="10" />Steer</span>
-                <span v-if="m.is_action_request" class="msg-chip">Action request</span>
-                <span v-if="m.reply_obligation === 'open'" class="msg-chip">Awaiting reply</span>
-                <span v-if="m.human_resolution_outcome" class="msg-chip">{{ m.human_resolution_outcome === 'resolved' ? 'Resolved' : 'Dismissed' }}</span>
-                <button v-if="!group.history && canReply && m.sender_principal_id === principalId" type="button" class="reply" @click="emit('reply', m)">Reply</button>
-                <time v-if="m.created_at" class="msg-time" :datetime="m.created_at" :data-tip="absoluteTime(m.created_at)">{{ relativeTime(m.created_at, { now }) }}</time>
-                <span v-if="statusOf(m) && statusOf(m)!.status !== 'not_delivered'" class="delivery" :class="statusOf(m)!.status" :data-status="statusOf(m)!.status" :data-tip="statusTip(statusOf(m)!, absoluteTime)">
-                  <svg width="15" height="12" viewBox="0 0 20 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
-                    <path d="m1.8 8.6 3 3 6.2-6.8" />
-                    <path v-if="statusOf(m)!.status !== 'sent'" d="m9.6 11.4.2.2 6.2-6.8" />
-                  </svg>
-                  <span class="delivery-word">{{ statusLabel(statusOf(m)!) }}</span>
-                </span>
-              </p>
-              <p class="msg-body">{{ m.body }}</p>
-              <p v-if="statusOf(m)?.status === 'not_delivered'" class="undelivered" data-status="not_delivered" :data-tip="statusTip(statusOf(m)!, absoluteTime)"><AppIcon name="alert" :size="12" />{{ statusLabel(statusOf(m)!) }}</p>
-            </li>
-          </template>
-        </ol>
-      </component>
-    </template>
+    <p v-if="!items.length" class="empty-line">No messages in this session yet.</p>
+    <ol v-else class="thread" aria-label="Messages">
+      <template v-for="m in items" :key="m.id">
+        <li v-if="m.id === newFrom" class="new-divider" role="separator" :aria-label="`${newCount ?? 1} new`"><span>New</span></li>
+        <li class="msg" :class="{ mine: m.sender_principal_id === me }" :data-event="m.last_event" :data-id="m.id">
+          <p class="msg-meta">
+            <Avatar :name="historicalSender(m, me)" :kind="m.sender_principal_id === me ? 'person' : 'agent'" :size="18" />
+            <span class="msg-author" :title="historicalSender(m, me)">{{ historicalSender(m, me) }}</span>
+            <span v-if="m.count > 1" class="duplicate" :aria-label="`${m.count} identical posts`">×{{ m.count }}</span>
+            <span v-if="m.delivery_level === 'steer'" class="msg-chip"><AppIcon name="bolt" :size="10" />Steer</span>
+            <span v-if="m.is_action_request" class="msg-chip">Action request</span>
+            <span v-if="m.reply_obligation === 'open' && !m.answered" class="msg-chip">Awaiting reply</span>
+            <span v-if="m.human_resolution_outcome" class="msg-chip">{{ m.human_resolution_outcome === 'resolved' ? 'Resolved' : 'Dismissed' }}</span>
+            <button v-if="canReply && m.sender_principal_id === principalId" type="button" class="reply" @click="emit('reply', m)">Reply</button>
+            <time v-if="m.created_at" class="msg-time" :datetime="m.created_at" :data-tip="absoluteTime(m.created_at)">{{ relativeTime(m.created_at, { now }) }}</time>
+            <span v-if="m.answered" class="delivery answered" data-status="answered" data-tip="A reply to this message is in the conversation">Answered</span>
+            <span v-else-if="statusOf(m) && statusOf(m)!.status !== 'not_delivered'" class="delivery" :class="statusOf(m)!.status" :data-status="statusOf(m)!.status" :data-tip="statusTip(statusOf(m)!, absoluteTime)">
+              <svg width="15" height="12" viewBox="0 0 20 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+                <path d="m1.8 8.6 3 3 6.2-6.8" />
+                <path v-if="statusOf(m)!.status !== 'sent'" d="m9.6 11.4.2.2 6.2-6.8" />
+              </svg>
+              <span class="delivery-word">{{ statusLabel(statusOf(m)!) }}</span>
+            </span>
+          </p>
+          <p class="msg-body">{{ m.body }}</p>
+          <p v-if="!m.answered && statusOf(m)?.status === 'not_delivered'" class="undelivered" data-status="not_delivered" :data-tip="statusTip(statusOf(m)!, absoluteTime)"><AppIcon name="alert" :size="12" />{{ statusLabel(statusOf(m)!) }}</p>
+        </li>
+      </template>
+    </ol>
   </section>
 </template>
 
 <style scoped>
 .session-messages { min-width: 0; }
-.empty-line, summary { font-size: 13px; color: var(--ink-2); }
-.history { margin-top: 16px; }
-summary { display: flex; align-items: center; gap: 6px; cursor: pointer; padding: 8px 0; overflow-wrap: anywhere; }
-.history[open] .disclosure-chev { transform: rotate(90deg); }
-summary:focus-visible { outline: none; box-shadow: var(--focus-ring); border-radius: 6px; }
+.empty-line { font-size: 13px; color: var(--ink-2); }
 .thread { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; margin: 0; padding: 0; list-style: none; }
 .msg { min-width: 0; max-width: min(92%, 640px); padding: 10px 12px; border-radius: 12px; background: var(--comment-bg, var(--code-bg)); box-shadow: inset 0 0 0 1px var(--line); }
 .msg.mine { justify-self: end; background: var(--chip-teal-bg); }
@@ -80,7 +68,7 @@ summary:focus-visible { outline: none; box-shadow: var(--focus-ring); border-rad
 /* Sent → Delivered → Read: one quiet check becomes two, Read turns teal. Words, not colour alone. */
 .delivery { display: inline-flex; align-items: center; gap: 3px; font-size: 11px; color: var(--ink-3); white-space: nowrap; }
 .delivery svg { flex: none; }
-.delivery.read { color: var(--teal-ink); }
+.delivery.read, .delivery.answered { color: var(--teal-ink); }
 .undelivered { display: flex; align-items: center; gap: 5px; margin-top: 6px; font-size: 12px; font-weight: 600; color: var(--danger); overflow-wrap: anywhere; }
 .undelivered svg { flex: none; }
 .msg-body { font-size: 13.5px; line-height: 1.5; color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }
