@@ -197,6 +197,52 @@ test('keys: j and k move, Enter opens, e shows evidence, ? lists keys, / searche
   await expect(sheet(page)).toHaveCount(0)
 })
 
+test('compare follows Back, Forward and an in-app release link', async ({ page }) => {
+  const { history } = await setup(page)
+  const path = (index: number) => `/releases/${history.releases[index].version}`
+  const selected = (index: number) => expect(options(page).nth(index)).toHaveAttribute('aria-selected', 'true')
+  const compare = sheet(page).locator('section.compare')
+  // Client-side, like a release link. A full load would remount the sheet and hide the bug.
+  const openRelease = async (index: number) => {
+    const mark = await page.evaluate(() => {
+      const state = window as unknown as { __releaseNav?: number }
+      state.__releaseNav = (state.__releaseNav ?? 0) + 1
+      return state.__releaseNav
+    })
+    await page.evaluate(async url => {
+      const { router } = await import('/src/router.ts')
+      await router.push(url)
+    }, path(index))
+    expect(await page.evaluate(() => (window as unknown as { __releaseNav?: number }).__releaseNav)).toBe(mark)
+  }
+  await page.goto(path(0))
+  await selected(0)
+  await openRelease(3)
+  await expect(page).toHaveURL(path(3))
+  await selected(3)
+  await page.getByRole('listbox', { name: 'Releases, newest first' }).focus()
+  await page.keyboard.press('c')
+  await expect(compare).toBeVisible()
+  await page.goBack()
+  await expect(page).toHaveURL(path(0))
+  await expect(compare).toHaveCount(0)
+  await selected(0)
+  await page.getByRole('listbox', { name: 'Releases, newest first' }).focus()
+  await page.keyboard.press('c')
+  await expect(compare).toBeVisible()
+  await page.goForward()
+  await expect(page).toHaveURL(path(3))
+  await expect(compare).toHaveCount(0)
+  await selected(3)
+  await page.getByRole('listbox', { name: 'Releases, newest first' }).focus()
+  await page.keyboard.press('c')
+  await expect(compare).toBeVisible()
+  await openRelease(1)
+  await expect(page).toHaveURL(path(1))
+  await expect(compare).toHaveCount(0)
+  await selected(1)
+})
+
 test('filters follow the feature and fix blocks, and still keep releases with tickets', async ({ page }) => {
   await setup(page)
   await page.goto('/releases')

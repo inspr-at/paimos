@@ -97,10 +97,19 @@ const missing = ref('')
 // focused while that request is in flight, and a key then would hit an empty
 // list or a history that is about to be replaced.
 const keysReady = ref(false)
-// The version last written to the address. The navigation waits on the session,
-// so the address arrives after the cursor has already moved on. That arrival is
-// an echo of a selection this sheet made, not someone opening another release.
-let addressed: string | null = null
+// Versions this sheet has written to the address and not yet seen come back.
+// The navigation waits on the session, so the address lands after the cursor
+// has moved — often into Compare, which never writes the address. Only that
+// echo is ignored. Back, Forward and an in-app link are a different version:
+// they select it, and Compare closes.
+const pendingEchoes: string[] = []
+function targetVersion(target: string | null) {
+  return target && target !== 'all' ? target.replace(/^v/, '') : ''
+}
+function publishSelection(version: string) {
+  if (version !== targetVersion(props.target) && pendingEchoes.at(-1) !== version) pendingEchoes.push(version)
+  emit('select', version)
+}
 const phoneQuery = window.matchMedia('(max-width: 760px)')
 const phone = ref(phoneQuery.matches)
 const onPhone = (event: MediaQueryListEvent) => { phone.value = event.matches }
@@ -147,23 +156,23 @@ function initialSelection() {
   cursor.value = currentKnown.value ? current.value : releases.value[0]?.version ?? null
 }
 watch(() => props.target, target => {
-  const wanted = target && target !== 'all' ? target.replace(/^v/, '') : ''
-  if (!wanted || wanted === cursor.value || !byVersion.value.has(wanted)) return
-  // Compare keeps the address on the release it started from and moves the
-  // cursor to the other end. j/k never write the address, so the only update
-  // that lands during a comparison is that earlier selection catching up
-  // (or an older one the router had not finished). Following it closed the
-  // comparison under the keys.
-  if (mode.value === 'compare') return
-  if (wanted === addressed) return
+  const wanted = targetVersion(target)
+  if (!wanted || !byVersion.value.has(wanted)) return
+  const echo = pendingEchoes.lastIndexOf(wanted)
+  if (echo !== -1) {
+    // This write landed. Earlier ones were superseded by it; later ones are
+    // still in flight and must not look like someone opening that release.
+    pendingEchoes.splice(0, echo + 1)
+    return
+  }
+  pendingEchoes.length = 0
+  if (wanted === cursor.value) return
+  mode.value = 'browse'
   cursor.value = wanted
 })
 watch(cursor, async (value, old) => {
   if (!value) return
-  if (mode.value === 'browse') {
-    addressed = value
-    emit('select', value)
-  }
+  if (mode.value === 'browse') publishSelection(value)
   await nextTick()
   document.getElementById(optionId(value))?.scrollIntoView({ block: 'nearest' })
   if (detailPane.value && old) detailPane.value.scrollTop = 0
@@ -204,10 +213,7 @@ function startCompare() {
 function exitCompare() {
   mode.value = 'browse'
   compareFrom.value = null
-  if (cursor.value) {
-    addressed = cursor.value
-    emit('select', cursor.value)
-  }
+  if (cursor.value) publishSelection(cursor.value)
   listbox.value?.focus({ preventScroll: true })
 }
 function swap() { if (compareTo.value && compareFrom.value) { const a = compareFrom.value; compareFrom.value = compareTo.value; cursor.value = a } }
