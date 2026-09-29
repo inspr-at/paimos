@@ -81,11 +81,17 @@ function poolDraft(value: string): { reserve: ReserveMode; percent?: number } {
   if (value === 'auto' || value === 'off' || value === '') return { reserve: value }
   return { reserve: 'fixed', percent: Number(value) }
 }
+// pool_reserves on the preview wire is reserve_percent (OpenAPI); percent is only the editor's own draft.
+function previewPool(id: Pool, value: string): PoolReserve {
+  const choice = poolDraft(value)
+  if (choice.reserve !== 'fixed') return { pool: id, reserve: choice.reserve }
+  return { pool: id, reserve: 'fixed', reserve_percent: choice.percent }
+}
 const draftSchedule = computed<CapacitySchedule>(() => {
   const s = withReserve(clone(props.schedule), mode.value, mode.value === 'fixed' ? percent.value : undefined)
   return awayUntil.value ? { ...s, override: 'away', override_until: awayUntil.value } : s
 })
-const draftPools = computed<PoolReserve[]>(() => vendorRows.value.filter(v => v.measured).map(v => ({ pool: v.id as Pool, ...poolDraft(perPool.value[v.id] ?? '') })).map(r => (r.reserve === 'fixed' ? r : { pool: r.pool, reserve: r.reserve })))
+const draftPools = computed(() => vendorRows.value.filter(v => v.measured).map(v => previewPool(v.id as Pool, perPool.value[v.id] ?? '')))
 const currentSentences = computed(() => props.pools.map(p => ({ id: p.id, sentence: poolSentence(p, props.now) })))
 const previewPools = ref<PoolView[] | null>(null)
 const previewFailed = ref(false)

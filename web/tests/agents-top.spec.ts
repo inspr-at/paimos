@@ -269,6 +269,27 @@ test('Keep for you: the popover is keyboard-complete, previews live and saves on
   await expect(cap(page).getByRole('button', { name: 'Keep for you Auto · ~30%' })).toBeVisible()
 })
 
+test('Keep for you: a numeric per-vendor share previews and saves that share', async ({ page }) => {
+  const { capacity } = await setup(page)
+  await open(page)
+  await cap(page).getByRole('button', { name: /^Keep for you/ }).click()
+  const ed = page.getByRole('dialog', { name: 'Keep for you' })
+  await ed.getByRole('button', { name: 'Per vendor' }).click()
+  await ed.getByLabel('Codex: keep for you').selectOption('40')
+  await expect(ed.getByLabel('Codex: keep for you')).toHaveValue('40')
+  const codexReserve = () => (capacity.previews.at(-1) as { pool_reserves?: { pool: string; reserve: string; reserve_percent?: number }[] } | undefined)?.pool_reserves?.find(r => r.pool === 'codex')
+  await expect.poll(codexReserve).toEqual({ pool: 'codex', reserve: 'fixed', reserve_percent: 40 })
+  await expect(ed.getByText('The preview could not be updated')).toHaveCount(0)
+  await expect(ed.locator('.pv li').first()).toContainText('keeping ~40% for you')
+  await ed.getByRole('button', { name: 'Save' }).click()
+  await expect(ed).toHaveCount(0)
+  await expect(page.getByText('Saved. Agents leave you room while you work.')).toBeVisible()
+  const saved = capacity.puts.find(p => (p as { pool?: string }).pool === 'codex') as { scope: string; pool: string; schedule: { reserve?: string; reserve_percent?: number; percent?: number } }
+  expect(saved).toMatchObject({ scope: 'pool', pool: 'codex', schedule: { reserve: 'fixed', reserve_percent: 40 } })
+  expect(saved.schedule).not.toHaveProperty('percent')
+  await expect(pool(page, 'codex').locator('.plan')).toHaveText('Today: ~15% of Main, keeping ~40% for you. Spare is kept for you until tomorrow 18:02.')
+})
+
 test("Keep for you: I'm away until… is one save and one header chip", async ({ page }) => {
   const { capacity } = await setup(page)
   await open(page)
@@ -508,6 +529,8 @@ test.describe('phone', () => {
     await expect(keep.getByRole('button', { name: 'Save' })).toBeInViewport()
     await page.keyboard.press('Escape')
     await expect(keep).toHaveCount(0)
+    await expect(page.locator('#app')).not.toHaveAttribute('inert', '')
+    await expect(cap(page).getByRole('button', { name: /^Keep for you/ })).toBeFocused()
     expect(await noScroll(page)).toBe(true)
     // The pool menu opens under its button, in view, with focus on the first choice.
     await pool(page, 'claude').getByRole('button', { name: 'Claude: sprint or hold' }).click()
