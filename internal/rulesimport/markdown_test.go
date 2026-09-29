@@ -87,3 +87,25 @@ func TestMarkdownActionTextAndLineage(t *testing.T) {
 		})
 	}
 }
+
+func TestEmptyATXClosingHashesEndPersonalSection(t *testing.T) {
+	const kernelText = "Keep commits small."
+	const personalText = "Prefer short replies."
+	for _, line := range []string{"## ##", "## #", "##\t##", "## ##  "} {
+		t.Run(line, func(t *testing.T) {
+			body := "# Doc\n\n## Personal section\n\n- " + personalText + "\n\n" + line + "\n\n- " + kernelText + "\n"
+			if got := indexATXHeadings(body)[7]; got.level != 2 || got.title != "" {
+				t.Fatalf("empty heading line %q indexed %+v", line, got)
+			}
+			path := writeDoc(t, t.TempDir(), "AGENTS.md", body)
+			kernel := mustBuild(t, Request{Context: ContextProject, Section: SectionKernel, Files: []string{path}})
+			if len(kernel.Rules) != 1 || kernel.Rules[0].Text != kernelText || kernel.Rules[0].Sources[0].HeadingPath != "Doc / " {
+				t.Fatalf("kernel section %+v", kernel.Rules)
+			}
+			personal := mustBuild(t, Request{Context: ContextPerson, Section: SectionPersonal, Files: []string{path}})
+			if len(personal.Rules) != 1 || personal.Rules[0].Text != personalText || personal.Rules[0].Sources[0].HeadingPath != "Doc / Personal section" {
+				t.Fatalf("personal section %+v", personal.Rules)
+			}
+		})
+	}
+}

@@ -214,21 +214,44 @@ func indexEmptyATX(gap []byte) int {
 	return -1
 }
 
+// isEmptyATX reports a column-0 ATX heading with no inline text.
+// Goldmark stores no line segment for these, including a closing hash run
+// ("## ##"), so the scanner would otherwise keep the previous section.
 func isEmptyATX(line []byte) bool {
-	if len(line) == 0 || line[0] != '#' {
-		return false
+	if n := len(line); n > 0 && line[n-1] == '\r' {
+		line = line[:n-1]
 	}
 	i := 0
-	for i < len(line) && i < 6 && line[i] == '#' {
+	for i < len(line) && line[i] == '#' {
 		i++
+		if i > 6 {
+			return false
+		}
 	}
-	if i == 0 || (i < len(line) && line[i] == '#') {
+	if i == 0 {
 		return false
 	}
-	for _, c := range line[i:] {
-		if c != ' ' && c != '\t' {
+	rest := line[i:]
+	if len(rest) == 0 {
+		return true
+	}
+	if !isATXSpace(rest[0]) {
+		return false
+	}
+	for len(rest) > 0 && isATXSpace(rest[len(rest)-1]) {
+		rest = rest[:len(rest)-1]
+	}
+	for len(rest) > 0 && isATXSpace(rest[0]) {
+		rest = rest[1:]
+	}
+	for _, c := range rest {
+		if c != '#' {
 			return false
 		}
 	}
 	return true
+}
+
+func isATXSpace(c byte) bool {
+	return c == ' ' || c == '\t' || c == '\r'
 }
