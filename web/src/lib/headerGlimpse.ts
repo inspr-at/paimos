@@ -49,7 +49,7 @@ export interface GlimpseBox { x: number; y: number; width: number; height: numbe
 // The backdrop spans the header; these measured islands stay completely clear,
 // including icons and controls beside the text. Resize and content observers
 // keep the mask current when a stage, saved view or docked panel changes shape.
-export const GLIMPSE_CLEAR_SELECTOR = '.title-line > *, .description, .journey-chip, .head-stats, .project-tabs, .view-bar .view-tab, .view-bar .tab, .view-bar .changes, .toolbar-wrap'
+export const GLIMPSE_CLEAR_SELECTOR = '.title-line > *, .description, .head-stats, .project-tabs, .view-bar .view-tab, .view-bar .tab, .view-bar .changes, .toolbar-wrap'
 
 export function glimpseOverlaps(a: GlimpseBox, b: GlimpseBox, gap = 0): boolean {
   return a.x < b.x + b.width + gap && a.x + a.width + gap > b.x
