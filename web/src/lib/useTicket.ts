@@ -3,6 +3,7 @@ import { onScopeDispose, ref, watch, type Ref } from 'vue'
 import { APIError, createNode, createRelation, deleteNode, deleteRelation, getKinds, getNode, getRelations, listNodes, lookupNodes, moveNode, updateNode, type Kind, type ListItem, type ListParent, type NodePatch, type Relation, type WorkNode } from './api'
 import { liveNodes, type LiveNodeStore, type LiveView, type NodeChange } from './liveNodes'
 import { compareRevision, describeFields } from './liveUpdates'
+import { ownWrites } from './ownWrites'
 import { linkBody, linkedSentence, relationLabel, unlinkedSentence, type RelationChoice } from './relations'
 import { benefitGateError } from './doneGate'
 import { toast } from './toast'
@@ -82,6 +83,16 @@ export function useTicket(item: Ref<ListItem | null>, context: {
   // wait for it, so relations never push activity down after it shows.
   const relationsReady = ref(false)
   let generation = 0
+  // Live changes to the open ticket, counted, and the latest: a read that one
+  // overtook answers for an older state (a deletion, or an older revision).
+  let liveSeen = 0
+  let liveLatest: { deleted: boolean; revision: string | null } | null = null
+  function overtaken(seen: number, node: WorkNode | null): boolean {
+    if (liveSeen === seen || !liveLatest) return false
+    if (!node) return !liveLatest.deleted
+    if (liveLatest.deleted) return !liveLatest.revision || compareRevision(node.updated_at, liveLatest.revision) <= 0
+    return compareRevision(node.updated_at, liveLatest.revision) < 0
+  }
 
   function merge(target: ListItem, node: WorkNode) {
     const assigneeId = typeof node.fields.assignee === 'string' ? node.fields.assignee : null
@@ -96,18 +107,24 @@ export function useTicket(item: Ref<ListItem | null>, context: {
     const target = item.value
     if (!target) return
     const request = ++generation
+    const seen = liveSeen
     loading.value = true; error.value = ''
     try {
       const node = await getNode(target.id)
       if (request !== generation) return
+      // A live change that landed meanwhile answers for a later state.
+      if (overtaken(seen, node)) return
       // An editor opened while this read ran: a newer version waits like a
       // live change, so a save still sends the revision the editor started from.
       if (busy() && compareRevision(node.updated_at, target.updated_at) > 0) { hold(target, { ...reread(target), revision: node.updated_at }, node); return }
+      // Never back to an older version (a save of the viewer's landed meanwhile).
+      if (!gone.value && compareRevision(node.updated_at, target.updated_at) < 0) return
       merge(target, node)
       gone.value = false
     } catch (e) {
       if (request !== generation) return
       if (e instanceof APIError && (e.status === 404 || e.status === 410)) {
+        if (overtaken(seen, null)) return
         if (busy()) hold(target, { ...reread(target), change: 'deleted' }, null)
         else gone.value = true
       } else error.value = message(e)
@@ -320,7 +337,8 @@ export function useTicket(item: Ref<ListItem | null>, context: {
   let flashTimer: ReturnType<typeof setTimeout> | undefined
   const store = context.live?.store ?? liveNodes
   const busy = () => !!context.live?.busy.value
-  const mine = (change: NodeChange) => !!change.actorId && change.actorId === context.live?.me()
+  // A write this tab made; the same person's change in another tab is not one.
+  const mine = (change: NodeChange) => !!change.actorId && change.actorId === context.live?.me() && ownWrites.made(change)
 
   // A node that left this project (a project move) is gone from here, like a deleted one.
   const leftProject = (target: ListItem, change: NodeChange) =>
@@ -374,6 +392,8 @@ export function useTicket(item: Ref<ListItem | null>, context: {
         if (child && node && node.parent_id === target.id && compareRevision(node.updated_at, child.updated_at) > 0) merge(child, node)
         return
       }
+      liveSeen++
+      liveLatest = !node || leftProject(target, change) ? { deleted: true, revision: change.revision } : { deleted: false, revision: node.updated_at }
       if (busy()) {
         if (mine(change)) return
         if (node && !leftProject(target, change) && compareRevision(node.updated_at, target.updated_at) <= 0) {
@@ -404,7 +424,7 @@ export function useTicket(item: Ref<ListItem | null>, context: {
     if (waiting) applyLive(target, waiting.change, waiting.node)
     if (reread) void refresh()
   })
-  watch(() => item.value?.id, () => { held = null; rereadAfterEdit = false; liveHeld.value = null; liveFields.value = []; liveMessage.value = '' })
+  watch(() => item.value?.id, () => { held = null; rereadAfterEdit = false; liveHeld.value = null; liveFields.value = []; liveMessage.value = ''; liveLatest = null })
   // Loads and saves tell the store which version the panel has, so the
   // event of the viewer's own save needs no refetch. A conflict reload that
   // already shows the held change settles it.

@@ -11,7 +11,8 @@ const mira = '22222222-2222-4222-8222-222222222222'
 // browser reconnects after `retry`, as after a real drop. Playwright does not
 // show the Last-Event-ID header Chromium adds to a reconnect, so each page's
 // last delivered ID stands in for it (the Go stream tests cover the header).
-export function liveServer(data: Fixtures) {
+// actor: whose writes the events name (the signed-in person: their other tab).
+export function liveServer(data: Fixtures, actor = mira) {
   const seen = new Map(data.nodes.map(node => [node.id, structuredClone(node)]))
   const log: { id: number; type: string; data: unknown }[] = []
   let newest = 500
@@ -33,7 +34,7 @@ export function liveServer(data: Fixtures) {
       fields: before && after ? changedFields(before, after) : after ? [] : ['deleted_at'],
       revision: after?.updated_at ?? new Date(Date.parse(node.updated_at) + 1000).toISOString(),
     }
-    log.push({ id, type, data: { id, actor_principal_id: mira, node_id: node.id, type, before: null, after: null, at: new Date().toISOString(), undo_of: null, node_changes: [change] } })
+    log.push({ id, type, data: { id, actor_principal_id: actor, node_id: node.id, type, before: null, after: null, at: new Date().toISOString(), undo_of: null, node_changes: [change] } })
   }
   const scan = () => {
     const now = new Map(data.nodes.map(node => [node.id, node]))
@@ -69,11 +70,11 @@ export function liveServer(data: Fixtures) {
 type Viewport = { width: number; height: number }
 // Two signed-in browsers on url. viewportB alone keeps the slice 1a call; an
 // options object also sets A's viewport and the fixture options.
-export async function openBoth(browser: Browser, url: string, viewport?: Viewport | { a?: Viewport; b?: Viewport; options?: MockOptions; colorScheme?: 'light' | 'dark' }) {
+export async function openBoth(browser: Browser, url: string, viewport?: Viewport | { a?: Viewport; b?: Viewport; options?: MockOptions; colorScheme?: 'light' | 'dark'; actor?: string }) {
   const settings = viewport && 'width' in viewport ? { b: viewport } : viewport ?? {}
   const viewportB = settings.b, viewportA = 'a' in settings ? settings.a : undefined
   const data = fixtures('options' in settings ? settings.options : {})
-  const live = liveServer(data)
+  const live = liveServer(data, 'actor' in settings ? settings.actor : undefined)
   const scheme = 'colorScheme' in settings && settings.colorScheme ? { colorScheme: settings.colorScheme } : {}
   const contexts: BrowserContext[] = [await browser.newContext({ ...scheme, ...(viewportA ? { viewport: viewportA } : {}) }), await browser.newContext({ ...scheme, ...(viewportB ? { viewport: viewportB } : {}) })]
   const [a, b] = await Promise.all(contexts.map(context => context.newPage()))

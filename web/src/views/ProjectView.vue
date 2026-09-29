@@ -201,6 +201,8 @@ const liveList = useLiveList({
   holds: id => ticketKey.value && panelItem.value?.id === id
     ? !!panel.value?.busy() || !!panel.value?.isDirty()
     : selected.value.has(id) || statusMenu.value?.row.id === id,
+  // The open ticket's editor saves against the revision it started from: Show leaves that row to it.
+  editing: id => !!ticketKey.value && panelItem.value?.id === id && !!panel.value?.busy(),
   blockers: () => ({
     selected: selected.value.size + (phonePicking.value ? 1 : 0),
     editing: creating.value || !!outline.createUnder.value || !!panel.value?.busy() || !!panel.value?.isDirty() || !!table.value?.createDirty(),

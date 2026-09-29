@@ -17,6 +17,7 @@ export function accountEmail(identity: Identity) {
 import { learnPictures } from './avatar.ts'
 import type { TicketEta } from './eta.ts'
 import type { TicketEstimate } from './estimates.ts'
+import { ownWrites } from './ownWrites.ts'
 
 export interface Version { version: string; scheme: string; brand?: import('./brand').Brand }
 
@@ -149,16 +150,18 @@ function query(values: object): string {
   return encoded ? `?${encoded}` : ''
 }
 const idPath = (id: string) => encodeURIComponent(id)
+// Node writes of this tab: live views know their events are already on screen (AEON-326).
+const wrote = (node: WorkNode) => { ownWrites.wrote([node]); return node }
 export const getKinds = () => json<{ items: Kind[] }>('/kinds')
 export const getNode = (id: string) => json<WorkNode>(`/nodes/${idPath(id)}`)
-export const createNode = (body: NodeCreate) => json<WorkNode>('/nodes', 'POST', body)
+export const createNode = (body: NodeCreate) => json<WorkNode>('/nodes', 'POST', body).then(wrote)
 // ifUnmodifiedSince is the node's updated_at as read; a newer server copy answers 412.
 export const updateNode = (id: string, body: NodePatch, options: { ifUnmodifiedSince?: string } = {}) =>
-  json<WorkNode>(`/nodes/${idPath(id)}`, 'PATCH', body, options.ifUnmodifiedSince ? { 'If-Unmodified-Since': options.ifUnmodifiedSince } : {})
+  json<WorkNode>(`/nodes/${idPath(id)}`, 'PATCH', body, options.ifUnmodifiedSince ? { 'If-Unmodified-Since': options.ifUnmodifiedSince } : {}).then(wrote)
 // ifUnmodifiedSince: the node's updated_at as read; the move answers 412 with the current node when it changed.
 export const moveNode = (id: string, parent_id: string | null, before_id?: string | null, options: { ifUnmodifiedSince?: string } = {}) =>
-  json<WorkNode>(`/nodes/${idPath(id)}/move`, 'POST', { parent_id, before_id }, options.ifUnmodifiedSince ? { 'If-Unmodified-Since': options.ifUnmodifiedSince } : {})
-export const deleteNode = (id: string) => json<void>(`/nodes/${idPath(id)}`, 'DELETE')
+  json<WorkNode>(`/nodes/${idPath(id)}/move`, 'POST', { parent_id, before_id }, options.ifUnmodifiedSince ? { 'If-Unmodified-Since': options.ifUnmodifiedSince } : {}).then(wrote)
+export const deleteNode = (id: string) => json<void>(`/nodes/${idPath(id)}`, 'DELETE').then(() => { ownWrites.deleted(id) })
 export const searchNodes = (q: string, params: { kind_id?: string; state?: string; cursor?: string; limit?: number } = {}, options: { signal?: AbortSignal } = {}) =>
   json<Page<SearchHit>>(`/search${query({ q, ...params })}`, 'GET', undefined, {}, options.signal)
 // B1 list and project-summary wire types (api/openapi.yaml NodeListItem, listProjects).
@@ -227,7 +230,7 @@ export interface BulkChange {
   if_unmodified_since?: Record<string, string>
 }
 export interface BulkResult { event_id: number | null; items: WorkNode[]; unchanged: string[]; skipped: { id: string; key?: string; reason: string; code?: string }[] }
-export const bulkChange = (body: BulkChange) => json<BulkResult>('/nodes/bulk', 'POST', body)
+export const bulkChange = (body: BulkChange) => json<BulkResult>('/nodes/bulk', 'POST', body).then(result => { ownWrites.wrote(result.items ?? []); return result })
 export const undoEvent = (eventId: number) => json<unknown>(`/events/${eventId}/undo`, 'POST')
 export const getProjects = (includeArchived = false) => json<{ items: ProjectSummary[] }>(`/projects${includeArchived ? '?include_archived=true' : ''}`)
   .then(page => { learnPictures(page.items.flatMap(project => project.people ?? [])); return page })

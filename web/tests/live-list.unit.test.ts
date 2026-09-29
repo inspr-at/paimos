@@ -8,8 +8,9 @@ import { effectScope, nextTick, ref, type EffectScope } from 'vue'
 import type { ListItem, ListPage, ListQuery } from '../src/lib/api'
 import { LiveNodeStore, type NodeChange } from '../src/lib/liveNodes'
 import { PENDING_CAP } from '../src/lib/liveUpdates'
+import { ownWrites } from '../src/lib/ownWrites'
 import { filtersFromQuery, type ListFilters } from '../src/lib/ticketList'
-import { placeKey, RETRY_MS, useLiveList, type LiveList, type LiveListBlockers } from '../src/lib/useLiveList'
+import { BATCH_MS, placeKey, RETRY_MS, useLiveList, type LiveList, type LiveListBlockers, type LiveListOptions } from '../src/lib/useLiveList'
 
 const ME = 'me-1', MIRA = 'mira-2', PROJECT = 'p-1'
 let clock = 0
@@ -42,14 +43,14 @@ interface Harness {
   live: LiveList; rows: ReturnType<typeof ref<ListItem[]>>; store: LiveNodeStore; srv: ReturnType<typeof server>
   blockers: LiveListBlockers; loading: ReturnType<typeof ref<boolean>>; loads: ReturnType<typeof ref<number>>
   filters: ReturnType<typeof ref<ListFilters>>; reload: ReturnType<typeof vi.fn>; applied: ReturnType<typeof vi.fn>
-  // Rows the person works with (selected, open in an editor).
-  holding: Set<string>
+  // Rows the person works with (selected, open in an editor), and those open in an editor.
+  holding: Set<string>; editing: Set<string>
   send(change: Partial<NodeChange> & Pick<NodeChange, 'id'>): void
   views(): { resync?: (reason: 'initial' | 'gap') => void; resumed?: () => void }[]
   settle(): Promise<void>
 }
 let scope: EffectScope | undefined
-function setup(initial: ListItem[], query: Record<string, string> = {}, extra: ListItem[] = []): Harness {
+function setup(initial: ListItem[], query: Record<string, string> = {}, extra: ListItem[] = [], more: Partial<LiveListOptions> = {}): Harness {
   const srv = server([...initial.map(row => structuredClone(row)), ...extra])
   const store = new LiveNodeStore({ open: () => null })
   const rows = ref<ListItem[]>(initial)
@@ -57,16 +58,16 @@ function setup(initial: ListItem[], query: Record<string, string> = {}, extra: L
   const loading = ref(false), loads = ref(1)
   const blockers: LiveListBlockers = { selected: 0, editing: false, menuOpen: false, dialogOpen: false, dragging: false }
   const reload = vi.fn(), applied = vi.fn()
-  const holding = new Set<string>()
+  const holding = new Set<string>(), editing = new Set<string>()
   scope = effectScope()
   const live = scope.run(() => useLiveList({
     projectId: ref(PROJECT), filters, rows, loading, loads, loadedOnce: ref(true), more: () => false, active: ref(true),
-    me: () => ME, blockers: () => blockers, reload, applied, store, fetchList: srv.fetchList, holds: id => holding.has(id),
-    env: { now: () => clock, hidden: () => false, listen: () => () => {} },
+    me: () => ME, blockers: () => blockers, reload, applied, store, fetchList: srv.fetchList, holds: id => holding.has(id), editing: id => editing.has(id),
+    env: { now: () => clock, hidden: () => false, listen: () => () => {} }, ...more,
   }))!
   let event = 1000
   return {
-    live, rows, store, srv, blockers, loading, loads, filters, reload, applied, holding,
+    live, rows, store, srv, blockers, loading, loads, filters, reload, applied, holding, editing,
     views: () => [...(store as unknown as { views: Set<{ resync?: () => void; resumed?: () => void }> }).views],
     send(change) {
       store.apply({ eventId: ++event, type: 'node.updated', actorId: MIRA, projectId: PROJECT, change: 'updated', fields: [], revision: null, ...change })
@@ -81,7 +82,7 @@ function edit(h: Harness, id: string, patch: Partial<ListItem>) {
   return node
 }
 
-beforeEach(() => { clock = 0; vi.useFakeTimers() })
+beforeEach(() => { clock = 0; vi.useFakeTimers(); ownWrites.clear() })
 afterEach(() => { scope?.stop(); scope = undefined; vi.useRealTimers() })
 
 describe('useLiveList: field changes', () => {
@@ -192,11 +193,37 @@ describe('useLiveList: field changes', () => {
     expect(h.rows.value![0].title).toBe('Restored')
   })
 
-  it('leaves the person’s own changes to the code that made them', async () => {
+  it('leaves the changes this tab made to the code that made them', async () => {
     const h = setup([item('n1')])
-    h.send({ id: 'n1', actorId: ME, fields: ['title'] })
+    const node = edit(h, 'n1', { title: 'Mine' })
+    ownWrites.wrote([node])
+    h.send({ id: 'n1', actorId: ME, fields: ['title'], revision: node.updated_at })
     await h.settle()
     expect(h.srv.fetchList).not.toHaveBeenCalled()
+  })
+
+  it('follows the same person’s changes from another tab', async () => {
+    const h = setup([item('n1')])
+    const node = edit(h, 'n1', { title: 'From my other tab' })
+    // This tab never wrote that revision: the actor alone proves nothing.
+    h.send({ id: 'n1', actorId: ME, fields: ['title'], revision: node.updated_at })
+    await h.settle()
+    expect(h.srv.fetchList).toHaveBeenCalledTimes(1)
+    expect(h.rows.value![0].title).toBe('From my other tab')
+    expect(h.live.message.value).toBe('K-1 was updated elsewhere: title.')
+  })
+
+  it('a write of this tab whose answer lands after its event is still its own: nothing waits or is said', async () => {
+    const h = setup([item('n1', { state: 'backlog' }), item('n2')])
+    const node = edit(h, 'n1', { state: 'cancelled' })
+    h.send({ id: 'n1', actorId: ME, fields: ['state'], revision: node.updated_at })
+    // The answer of the write comes back while the list waits to read.
+    Object.assign(h.rows.value![0], { state: 'cancelled', updated_at: node.updated_at })
+    ownWrites.wrote([node])
+    await h.settle()
+    expect(h.live.pill.value).toBeNull()
+    expect(h.live.labels.value.size).toBe(0)
+    expect(h.live.message.value).toBe('')
   })
 })
 
@@ -312,6 +339,63 @@ describe('useLiveList: structural changes wait', () => {
     expect(h.live.labels.value.size).toBe(0)
   })
 
+  it('Show leaves the row under an open editor as it is: the editor still saves against the revision it started from', async () => {
+    const h = setup([item('n1'), item('n2')])
+    const row = h.rows.value![0], seen = row.updated_at
+    h.holding.add('n1'); h.editing.add('n1')
+    const node = edit(h, 'n1', { title: 'Theirs' })
+    h.send({ id: 'n1', fields: ['title'], revision: node.updated_at })
+    await h.settle()
+    expect(h.live.labels.value.get('n1')).toBe('Changed')
+    expect(h.live.pill.value).toBe('1 update · Show')
+    h.live.apply()
+    // The editor takes the newer version when it closes, or meets it as a conflict when it saves.
+    expect(row.updated_at).toBe(seen)
+    expect(row.title).toBe('Ticket n1')
+    expect(h.live.pill.value).toBeNull()
+    expect(h.live.labels.value.size).toBe(0)
+    h.live.checkNow()
+    expect(row.updated_at).toBe(seen)
+    // Closed without taking it: the row catches up.
+    h.editing.delete('n1'); h.holding.delete('n1')
+    h.live.checkNow()
+    expect(row.title).toBe('Theirs')
+    expect(row.updated_at).toBe(node.updated_at)
+    expect(h.live.flash.value.has('n1')).toBe(true)
+  })
+
+  it('without a word on which row is edited, a held row keeps its revision on Show while an editor is open', async () => {
+    const h = setup([item('n1'), item('n2')], {}, [], { editing: undefined })
+    const row = h.rows.value![0], seen = row.updated_at
+    h.holding.add('n1'); h.blockers.editing = true
+    const node = edit(h, 'n1', { title: 'Remote' })
+    h.send({ id: 'n1', fields: ['title'], revision: node.updated_at })
+    await h.settle()
+    expect(h.live.pill.value).toBe('1 update · Show')
+    h.live.apply()
+    expect(row.updated_at).toBe(seen)
+    expect(row.title).toBe('Ticket n1')
+    h.holding.delete('n1'); h.blockers.editing = false
+    h.live.checkNow()
+    expect(row.title).toBe('Remote')
+  })
+
+  it('an editor that took the newer version itself leaves nothing to catch up', async () => {
+    const h = setup([item('n1')])
+    const row = h.rows.value![0]
+    h.holding.add('n1'); h.editing.add('n1')
+    const node = edit(h, 'n1', { title: 'Theirs' })
+    h.send({ id: 'n1', fields: ['title'], revision: node.updated_at })
+    await h.settle()
+    h.live.apply()
+    // The save met the change as a conflict, and was saved again on top of it.
+    Object.assign(row, { title: 'Mine, on top of theirs', updated_at: at(90) })
+    h.editing.delete('n1'); h.holding.delete('n1')
+    h.live.checkNow()
+    expect(row.title).toBe('Mine, on top of theirs')
+    expect(h.live.flash.value.has('n1')).toBe(false)
+  })
+
   it('a held row that someone else closed keeps its values until it leaves', async () => {
     const h = setup([item('n1', { state: 'backlog' }), item('n2')])
     const row = h.rows.value![0], seen = row.updated_at
@@ -420,6 +504,51 @@ describe('useLiveList: loads and gaps', () => {
     expect(h.rows.value!.map(r => r.id)).toEqual(['n1', 'n2'])
     // One request for the page; only the new row is looked at more closely.
     expect(h.srv.calls.map(q => q.ids ?? null)).toEqual([null, ['n7']])
+  })
+
+  it('a resync that failed runs again at once when the stream resumes', async () => {
+    const h = setup([item('n1')])
+    h.srv.fetchList.mockRejectedValueOnce(new Error('offline'))
+    edit(h, 'n1', { title: 'Remote' })
+    for (const view of h.views()) view.resync?.('gap')
+    await vi.advanceTimersByTimeAsync(0)
+    expect(h.srv.fetchList).toHaveBeenCalledTimes(1)
+    for (const view of h.views()) view.resumed?.()
+    await vi.advanceTimersByTimeAsync(BATCH_MS * 3)
+    expect(h.rows.value![0].title).toBe('Remote')
+    expect(h.live.message.value).toBe('K-1 was updated elsewhere.')
+  })
+
+  it('a resync that keeps failing is tried again after growing waits, then waits for a resumed stream', async () => {
+    const h = setup([item('n1')])
+    const plain = h.srv.fetchList.getMockImplementation()!
+    h.srv.fetchList.mockRejectedValue(new Error('offline'))
+    edit(h, 'n1', { title: 'Remote' })
+    for (const view of h.views()) view.resync?.('gap')
+    await vi.advanceTimersByTimeAsync(0)
+    expect(h.srv.fetchList).toHaveBeenCalledTimes(1)
+    await vi.advanceTimersByTimeAsync(RETRY_MS[0])
+    expect(h.srv.fetchList).toHaveBeenCalledTimes(2)
+    await vi.advanceTimersByTimeAsync(RETRY_MS.reduce((a, b) => a + b, 0) + 60_000)
+    expect(h.srv.fetchList).toHaveBeenCalledTimes(RETRY_MS.length + 1)
+    expect(h.rows.value![0].title).toBe('Ticket n1')
+    h.srv.fetchList.mockImplementation(plain)
+    for (const view of h.views()) view.resumed?.()
+    await vi.advanceTimersByTimeAsync(BATCH_MS * 3)
+    expect(h.rows.value![0].title).toBe('Remote')
+  })
+
+  it('after a gap every loaded row is read again, past the first 200 too, in batches', async () => {
+    const loaded = Array.from({ length: 250 }, (_, i) => item(`n${i}`))
+    const h = setup(loaded)
+    edit(h, 'n249', { title: 'Changed past row 200' })
+    h.srv.nodes.splice(h.srv.nodes.findIndex(n => n.id === 'n240'), 1)
+    for (const view of h.views()) view.resync?.('gap')
+    await vi.advanceTimersByTimeAsync(BATCH_MS * 3)
+    await h.settle()
+    expect(h.rows.value!.find(row => row.id === 'n249')!.title).toBe('Changed past row 200')
+    expect(h.live.labels.value.get('n240')).toBe('Deleted')
+    expect(h.srv.calls.every(query => !query.ids || query.ids.length <= 200)).toBe(true)
   })
 
   it('places a row by the order fields and the group, never by its update time', () => {

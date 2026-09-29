@@ -3,7 +3,7 @@
 // field changes patch in place; structural changes (a row that closed, no
 // longer matches, was deleted or moved, a new matching row) wait as pending
 // updates behind an "N updates · Show" pill and apply only when it is safe.
-import { statusMeta } from './work'
+import { statusMeta } from './work.ts'
 
 export type ChangeKind = 'created' | 'updated' | 'deleted'
 export interface NodeChangeSummary { change: ChangeKind; fields: string[] }

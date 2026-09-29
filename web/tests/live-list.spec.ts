@@ -8,6 +8,7 @@
 import { expect, test, type Page } from '@playwright/test'
 import { mkdirSync } from 'node:fs'
 import { openBoth } from './live-server'
+import { me } from './work-fixtures'
 
 const shots = process.env.LIVE_SHOTS_DIR
 const panel = (page: Page) => page.getByRole('complementary', { name: 'Ticket details' })
@@ -198,6 +199,59 @@ test('the row under an open editor keeps its revision: saving meets the change a
     await expect(a.getByText('PHAROS-12 was changed elsewhere. The newer version is shown; your draft is kept.')).toBeVisible()
     expect(data.nodes.find(n => n.id === 'n-2')!.title).toBe('Add an Oracle Cloud connector')
     expect(data.nodes.find(n => n.id === 'n-2')!.fields.priority).toBe('high')
+    expect(errorsA).toEqual([])
+  } finally { await close() }
+})
+
+test('Show leaves the row under an open editor as it was: saving still meets the change as a conflict', async ({ browser }) => {
+  const { a, b, data, errorsA, close } = await openBoth(browser, '/p/PHAROS/tickets')
+  try {
+    await a.locator('#row-n-2 .title-link').click()
+    const wsA = panel(a)
+    await wsA.getByRole('button', { name: 'Edit', exact: true }).click()
+    await wsA.locator('#edit-title').fill('LOCAL TITLE')
+    await b.goto('/p/PHAROS/PHAROS-12')
+    await panel(b).getByRole('heading', { name: 'Add an Oracle Cloud connector' }).click()
+    await panel(b).getByLabel('Title', { exact: true }).fill('REMOTE TITLE')
+    await b.keyboard.press('Enter')
+    await expect(a.locator('#row-n-2 .live-label')).toHaveText('Changed')
+
+    // Show applies the list's updates; the editor keeps the revision it started from.
+    await a.getByRole('button', { name: '1 update · Show' }).click()
+    await expect(a.locator('#row-n-2 .live-label')).toHaveCount(0)
+    await expect(wsA.locator('#edit-title')).toHaveValue('LOCAL TITLE')
+    await wsA.locator('#edit-title').focus()
+    await a.keyboard.press(`${mod}+Enter`)
+    await expect(a.getByText('PHAROS-12 was changed elsewhere. The newer version is shown; your draft is kept.')).toBeVisible()
+    await expect(wsA.locator('#edit-title')).toHaveValue('LOCAL TITLE')
+    expect(data.nodes.find(n => n.id === 'n-2')!.title).toBe('REMOTE TITLE')
+    expect(errorsA).toEqual([])
+  } finally { await close() }
+})
+
+test('changes by the same person in another tab reach the list; the tab’s own changes need no read', async ({ browser }) => {
+  // Both browsers are the same account: every event names the signed-in person.
+  const { a, b, live, errorsA, close } = await openBoth(browser, '/p/PHAROS/tickets', { actor: me.id })
+  try {
+    const reads: string[] = []
+    a.on('request', request => { const url = new URL(request.url()); if (url.pathname === '/api/nodes' && url.searchParams.has('ids')) reads.push(url.searchParams.get('ids')!) })
+    await b.goto('/p/PHAROS/PHAROS-12')
+    await panel(b).getByRole('heading', { name: 'Add an Oracle Cloud connector' }).click()
+    await panel(b).getByLabel('Title', { exact: true }).fill('Add an Oracle Cloud Always Free connector')
+    await b.keyboard.press('Enter')
+    await expect(a.locator('#row-n-2')).toContainText('Always Free')
+    await expect(said(a)).toHaveText('PHAROS-12 was updated elsewhere: title.')
+
+    // A's own status change: its event is already on screen, so nothing is read or said.
+    const before = reads.length
+    await setStatus(a, 'n-4', 'PHAROS-14', 'In progress')
+    await expect(a.locator('#row-n-4 .status-btn')).toHaveAccessibleName(/In progress/)
+    // Two more stream answers to A: the first one after the change carried its event.
+    const streams = live.requests.filter(r => r.page === 'a').length
+    await expect.poll(() => live.requests.filter(r => r.page === 'a').length).toBeGreaterThan(streams + 1)
+    await a.waitForTimeout(500)
+    expect(reads.slice(before)).toEqual([])
+    await expect(said(a)).toHaveText('PHAROS-12 was updated elsewhere: title.')
     expect(errorsA).toEqual([])
   } finally { await close() }
 })

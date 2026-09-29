@@ -106,6 +106,76 @@ describe('useTicket: a read that lands during an edit', () => {
   })
 })
 
+describe('useTicket: a read that live changes overtook', () => {
+  const resync = (store: LiveNodeStore) => (store as unknown as { views: Set<{ resync?: (r: string) => void }> }).views.forEach(view => view.resync?.('gap'))
+
+  it('a gap read that a deletion overtook during an edit leaves the deletion waiting; cancelling shows it gone', async () => {
+    api.getNode.mockResolvedValueOnce(node())
+    const { ticket, store, busy, target } = setup()
+    await settle()
+    const answer = slow()
+    resync(store)
+    busy.value = true
+    await nextTick()
+    store.apply(change({ change: 'deleted', fields: ['deleted_at'], revision: at(4) }))
+    expect(ticket.liveHeld.value).toBe('deleted')
+    answer(node({ title: 'Stale after delete', updated_at: at(3) }))
+    await settle()
+    expect(ticket.liveHeld.value).toBe('deleted')
+    busy.value = false
+    await settle()
+    expect(ticket.gone.value).toBe(true)
+    expect(target.title).toBe('Original')
+  })
+
+  it('a gap read that a deletion overtook does not bring the ticket back', async () => {
+    api.getNode.mockResolvedValueOnce(node())
+    const { ticket, store, target } = setup()
+    await settle()
+    const answer = slow()
+    resync(store)
+    store.apply(change({ change: 'deleted', fields: ['deleted_at'], revision: at(4) }))
+    expect(ticket.gone.value).toBe(true)
+    answer(node({ title: 'Stale after delete', updated_at: at(3) }))
+    await settle()
+    expect(ticket.gone.value).toBe(true)
+    expect(target.title).toBe('Original')
+  })
+
+  it('a gap read older than a live change that landed meanwhile is not used', async () => {
+    api.getNode.mockResolvedValueOnce(node())
+    const fetchNode = vi.fn<(id: string) => Promise<WorkNode | null>>()
+    const { store, target } = setup(fetchNode)
+    await settle()
+    const answer = slow()
+    resync(store)
+    fetchNode.mockResolvedValueOnce(node({ title: 'Newer', updated_at: at(5) }))
+    store.apply(change({ revision: at(5) }))
+    await settle()
+    expect(target.title).toBe('Newer')
+    answer(node({ title: 'Older', updated_at: at(3) }))
+    await settle()
+    expect(target.title).toBe('Newer')
+    expect(target.updated_at).toBe(at(5))
+  })
+
+  it('a gap read that a restore overtook does not show the ticket as gone', async () => {
+    api.getNode.mockResolvedValueOnce(node())
+    const fetchNode = vi.fn<(id: string) => Promise<WorkNode | null>>()
+    const { ticket, store, target } = setup(fetchNode)
+    await settle()
+    const answer = slow()
+    resync(store)
+    fetchNode.mockResolvedValueOnce(node({ title: 'Restored', updated_at: at(5) }))
+    store.apply(change({ change: 'created', fields: [], revision: at(5) }))
+    await settle()
+    answer(Promise.reject(new APIError(404, 'gone')))
+    await settle()
+    expect(ticket.gone.value).toBe(false)
+    expect(target.title).toBe('Restored')
+  })
+})
+
 describe('useTicket: deleted and restored', () => {
   it('a restored ticket is here again', async () => {
     api.getNode.mockResolvedValueOnce(node())
