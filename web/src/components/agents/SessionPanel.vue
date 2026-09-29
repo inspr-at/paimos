@@ -1,16 +1,19 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { brand } from '../../lib/brand'
-import { APIError, api, getNode } from '../../lib/api'
+import { api, getNode } from '../../lib/api'
 import { computed, onMounted, ref, watch } from 'vue'
-import type { Approval, HarnessSessionDetail, ProjectMessage, SessionControl } from '../../lib/agents'
+import type { Approval, HarnessSessionDetail, SessionControl } from '../../lib/agents'
 import { RUN_OUTCOME, approvalRun, cost, elapsed, runDuration, runModel, scopeLabel, stopReasonLabel, tokens } from '../../lib/agentState'
 import { absoluteTime, relativeTime, statusMeta } from '../../lib/work'
 import { useAgents, type SessionView } from '../../stores/agents'
 import AppIcon from '../AppIcon.vue'
 import TicketPeekLink from '../TicketPeekLink.vue'
-import KeyCap from '../KeyCap.vue'
-import SessionMessages from './SessionMessages.vue'
+import { useRoute, useRouter } from 'vue-router'
+import SessionChat from './SessionChat.vue'
+import SessionTabs from './SessionTabs.vue'
+import { initialTab, saveTab, type SessionTab } from './sessionChat'
+import { useVisualViewport } from '../../lib/visualViewport'
 import AgentStateLabel from './AgentStateLabel.vue'
 import AgentGlyph from './AgentGlyph.vue'
 import ProvenanceDetail from './ProvenanceDetail.vue'
@@ -19,22 +22,28 @@ import SessionRecovery from './SessionRecovery.vue'
 import RemoveSessionDialog from './RemoveSessionDialog.vue'
 import { activityOf, currentStep, type ActivitySession } from './activity'
 import { metadataChangeText, metadataChanges } from './metadataHistory'
-import { attentionReasonText } from '../../lib/agentSignals'
 import EtaCell from '../work/EtaCell.vue'
 import { etaFromSession } from '../../lib/eta'
 
-// One session in the docked panel: who and where, the bound ticket, recent runs with
-// outcome and duration, telemetry, and the message thread with a composer.
+// One session in the docked panel: who and where, the bound ticket, then two tabs:
+// Overview (now, details, work, runs, provenance) and Messages (thread and composer).
 const props = defineProps<{ view: SessionView | undefined; loading: boolean; now: number; canWrite: boolean; controlBlock: (view: SessionView, kind: SessionControl['kind']) => string }>()
 const emit = defineEmits<{ close: []; control: [view: SessionView, kind: SessionControl['kind']]; review: [approval: Approval] }>()
 const agents = useAgents()
 const root = ref<HTMLElement>()
-const draft = ref('')
-const level = ref<'simple' | 'steer'>('simple')
-const replyTo = ref<ProjectMessage | null>(null)
-const sending = ref(false)
-const sendError = ref('')
 const thread = ref<HTMLElement>()
+// The last tab is remembered per viewer; ?tab=messages deep-links (AEON-273).
+const route = useRoute()
+const router = useRouter()
+const tab = ref<SessionTab>(initialTab(route.query.tab))
+const unread = ref(0)
+function selectTab(next: SessionTab) {
+  tab.value = next
+  saveTab(next)
+  if (route.query.tab !== undefined) { const query = { ...route.query }; delete query.tab; void router.replace({ query }) }
+}
+watch(() => route.query.tab, value => { if (value === 'messages' || value === 'overview') tab.value = value })
+useVisualViewport(root)
 const detail = ref<(HarnessSessionDetail & ActivitySession) | null>(null)
 const ticketState = ref('')
 
@@ -42,8 +51,6 @@ const s = computed(() => props.view?.session)
 const pending = computed(() => s.value?.run_id && s.value.phase !== 'stopped' && s.value.needs_attention !== false ? agents.pending.filter(a => a.agent_principal_id === s.value!.agent_principal_id && approvalRun(a) === s.value!.run_id) : [])
 const recentRuns = computed(() => s.value ? agents.recentRuns(s.value.agent_principal_id).slice(0, 8) : [])
 const run = computed(() => props.view?.run)
-const messages = computed(() => s.value ? agents.thread(s.value) : [])
-const address = computed(() => s.value ? agents.addressOf(s.value.agent_principal_id) : '')
 const activity = computed(() => detail.value?.id === s.value?.id ? detail.value : props.view ? activityOf(props.view) : null)
 const reported = computed(() => detail.value?.id === s.value?.id ? detail.value : s.value)
 const hasWork = computed(() => !!(reported.value?.brief || reported.value?.worktree || reported.value?.branch || reported.value?.commits?.length))
@@ -53,13 +60,6 @@ const step = computed(() => {
   if (!props.view) return ''
   return props.view.status.reasons?.length ? currentStep(props.view) : activity.value?.activity_note || currentStep(props.view)
 })
-// Shared-inbox attention belongs to the agent principal, not this session: one quiet
-// line in Messages instead of a block at the top of Now.
-const inboxNotes = computed(() => (s.value?.attention_reasons ?? []).filter(r => r.scope === 'shared' || !r.blocking).map(r => {
-  if (r.scope !== 'shared' || r.kind !== 'reply') return { code: attentionReasonText(r).code, text: attentionReasonText(r).detail }
-  const actor = r.actor === 'agent' ? 'another agent' : r.actor === 'person' ? 'a person' : 'someone'
-  return { code: `${r.scope}-${r.kind}-${r.actor}`, text: `Shared inbox: ${r.count} ${r.count === 1 ? 'reply' : 'replies'} outstanding, waiting for ${actor}.` }
-}))
 const setupLine = computed(() => {
   const r = reported.value
   if (!props.view) return ''
@@ -94,35 +94,13 @@ watch(() => props.view?.ticket?.id, async id => {
   if (!id) return
   try { const node = await getNode(id); if (props.view?.ticket?.id === id) ticketState.value = statusMeta(node.state).label } catch { /* Ticket summary remains useful. */ }
 }, { immediate: true })
-const composeBlock = computed(() => {
-  if (!s.value) return ''
-  if (s.value.phase === 'stopped' || s.value.stopped_at || s.value.archived_at || sendError.value === 'This session has ended.') return 'This session has ended.'
-  if (agents.messagingState === 'error') return 'Messages could not be loaded right now. Close and reopen the session to try again.'
-  if (agents.messagingState === 'forbidden') return 'Messages are open to workspace admins.'
-  if (!address.value) return `${props.view!.name} has no message address yet. It gets one when it registers a message target.`
-  return ''
-})
-
 watch(() => s.value?.id, async id => {
   if (!id || !s.value) return
-  draft.value = ''; replyTo.value = null; sendError.value = ''
   thread.value?.scrollTo({ top: 0 })
-  await Promise.all([agents.refreshAgentRuns(s.value.agent_principal_id), agents.refreshThread(s.value.project_id)])
+  await agents.refreshAgentRuns(s.value.agent_principal_id)
 }, { immediate: true })
 onMounted(() => root.value?.focus({ preventScroll: true }))
 
-async function send() {
-  if (!s.value || !draft.value.trim() || sending.value || composeBlock.value) return
-  sending.value = true; sendError.value = ''
-  try {
-    await agents.send(s.value, address.value, draft.value.trim(), level.value, replyTo.value?.id)
-    draft.value = ''; replyTo.value = null
-  } catch (e) { sendError.value = e instanceof APIError && e.status === 409 && e.body.code === 'session_ended' ? 'This session has ended.' : e instanceof Error ? e.message : 'The message was not sent. Please try again.' }
-  finally { sending.value = false }
-}
-function composerKeys(event: KeyboardEvent) {
-  if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) { event.preventDefault(); void send() }
-}
 function control(kind: SessionControl['kind']) { if (props.view && !props.controlBlock(props.view, kind)) emit('control', props.view, kind) }
 defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
 </script>
@@ -154,6 +132,7 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
         <SessionRecovery :session="view.session" />
         <RemoveSessionDialog :session="view.session" :label="view.name" />
       </div>
+      <SessionTabs v-if="view && !loading" :selected="tab" :unread="tab === 'messages' ? 0 : unread" @select="selectTab" />
     </header>
 
     <!-- Until the first load completes the body stays a placeholder, so runs and
@@ -170,7 +149,7 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
       </div>
     </div>
 
-    <div v-else ref="thread" class="scroll">
+    <div v-else v-show="tab === 'overview'" id="session-panel-overview" ref="thread" class="scroll" role="tabpanel" aria-labelledby="session-tab-overview">
       <div v-if="pending.length" class="callout" role="note">
         <AppIcon name="shield" :size="15" />
         <div class="callout-text">
@@ -252,29 +231,10 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
       </section>
 
       <ProvenanceDetail v-if="s" :project-id="s.project_id" :session-id="s.id" :now="now" />
-      <section v-if="inboxNotes.length" class="inbox-note" aria-label="Inbox attention">
-        <p v-for="note in inboxNotes" :key="note.code"><AppIcon name="inbox" :size="13" />{{ note.text }}</p>
-      </section>
-      <SessionMessages :messages="messages" :session-id="view.session.id" :principal-id="view.session.agent_principal_id" :address="address" :now="now" :can-reply="canWrite && !composeBlock" @reply="replyTo = $event" />
     </div>
+    <SessionChat v-if="view && !loading" v-show="tab === 'messages'" id="session-panel-messages" :view="view" :now="now" :can-write="canWrite" :active="tab === 'messages'"
+      role="tabpanel" aria-labelledby="session-tab-messages" @unread="unread = $event" />
 
-    <footer v-if="view && !loading && address" class="composer">
-      <p v-if="composeBlock" class="compose-block"><AppIcon name="inbox" :size="13" />{{ composeBlock }}</p>
-      <form v-else class="compose" @submit.prevent="send">
-        <p v-if="replyTo" class="replying"><span>Replying to “{{ replyTo.body.slice(0, 80) }}{{ replyTo.body.length > 80 ? '…' : '' }}”</span><button type="button" class="icon-btn sm flat" aria-label="Cancel the reply" @click="replyTo = null"><AppIcon name="close" :size="12" /></button></p>
-        <label class="sr-only" :for="`compose-${view.session.id}`">Message to {{ view.name }}</label>
-        <textarea :id="`compose-${view.session.id}`" v-model="draft" class="field" rows="2" :placeholder="`Message ${view.name}…`" :disabled="!canWrite || sending" @keydown="composerKeys" />
-        <p v-if="sendError" class="send-error" role="alert"><AppIcon name="alert" :size="12" />{{ sendError }}</p>
-        <div class="compose-row">
-          <div class="seg level" role="radiogroup" aria-label="Delivery">
-            <button type="button" role="radio" :aria-checked="level === 'simple'" data-tip="Waits until the agent reads its inbox" @click="level = 'simple'">Simple</button>
-            <button type="button" role="radio" :aria-checked="level === 'steer'" data-tip="Reaches the agent during its current turn" @click="level = 'steer'"><AppIcon name="bolt" :size="11" />Steer</button>
-          </div>
-          <span class="compose-hint" aria-hidden="true"><KeyCap k="mod" /><KeyCap k="enter" /></span>
-          <button type="submit" class="btn sm primary" :disabled="!draft.trim() || sending || !canWrite"><AppIcon name="send" :size="13" />{{ sending ? 'Sending…' : 'Send' }}</button>
-        </div>
-      </form>
-    </footer>
   </aside>
 </template>
 
@@ -315,7 +275,7 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
 .bar-sep { width: 1px; height: 18px; margin: 0 4px; background: var(--line-2); }
 .panel-head [aria-disabled="true"] { opacity: .35; cursor: not-allowed; }
 .stop:not([aria-disabled="true"]):hover { color: var(--danger); }
-.scroll { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 18px 24px 24px; }
+.scroll { flex: 1; min-height: 0; overflow: hidden auto; overscroll-behavior: contain; padding: 18px 24px 24px; }
 .now-block { display: grid; gap: 6px; padding: 0 0 18px; border-bottom: 1px solid var(--line); }
 .now-step { font-size: 19px; line-height: 1.3; color: var(--ink); overflow-wrap: anywhere; }
 .now-meta { font-size: 12px; color: var(--ink-2); }
@@ -357,9 +317,6 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
 .run-chip.busy { background: var(--chip-teal-bg); color: var(--teal-ink); box-shadow: inset 0 0 0 1px var(--chip-teal-line); }
 .run-chip.bad { background: var(--danger-bg); color: color-mix(in oklab, var(--danger), var(--ink) 28%); box-shadow: inset 0 0 0 1px var(--danger-line); }
 .empty-line { font-size: 13px; color: var(--ink-3); }
-.inbox-note { display: grid; gap: 4px; margin-bottom: 10px; }
-.inbox-note p { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--ink-2); }
-.inbox-note svg { flex: none; color: var(--ink-3); }
 .runs { display: grid; grid-template-columns: minmax(0, 1fr); }
 .run-row { display: grid; grid-template-columns: 92px minmax(0, 1fr) 48px 56px 68px; align-items: center; gap: 10px; min-height: 36px; border-bottom: 1px solid var(--line); font-size: 12.5px; }
 .run-head { min-height: 24px; font: 500 9.5px/1 var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--ink-3); font-variant-ligatures: none; }
@@ -368,29 +325,6 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
 .run-tokens, .run-duration { font-size: 12px; color: var(--ink-2); text-align: right; font-variant-numeric: tabular-nums; }
 .run-when { font-size: 12px; color: var(--ink-3); text-align: right; white-space: nowrap; }
 .run-head .run-tokens, .run-head .run-duration, .run-head .run-when { font: inherit; color: inherit; }
-.thread { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; margin: 0; padding: 0; list-style: none; }
-.msg { position: relative; max-width: 88%; padding: 10px 12px; border-radius: 12px 12px 12px 4px; background: var(--comment-bg, var(--code-bg)); box-shadow: inset 0 0 0 1px var(--line); }
-.msg.mine { justify-self: end; border-radius: 12px 12px 4px 12px; background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); }
-.msg-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-bottom: 4px; font-size: 11.5px; }
-.msg-author { font-weight: 650; color: var(--ink); }
-.msg-time { margin-left: auto; padding-left: 8px; font-size: 11px; color: var(--ink-3); white-space: nowrap; }
-.msg-chip { display: inline-flex; align-items: center; gap: 3px; height: 17px; padding: 0 6px; border-radius: 999px; font: 600 9.5px/1 var(--mono); letter-spacing: .06em; text-transform: uppercase; font-variant-ligatures: none; background: var(--chip-bg); color: var(--ink-2); }
-.msg-chip.steer { background: var(--gold-wash); color: var(--gold-ink); }
-.msg-chip.open { background: var(--chip-teal-bg); color: var(--teal-ink); }
-.msg-body { font-size: 13.5px; line-height: 1.5; color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; }
-.reply { margin-top: 6px; padding: 0; border: 0; background: transparent; color: var(--teal-ink); font-size: 12px; font-weight: 600; }
-.reply:hover { text-decoration: underline; }
-.reply:focus-visible { box-shadow: var(--focus-ring); border-radius: 4px; }
-.composer { flex-shrink: 0; padding: 10px 14px 12px; border-top: 1px solid var(--line); background: var(--surface-raised-2); border-radius: 0 0 var(--radius) var(--radius); }
-.compose { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
-.compose textarea { width: 100%; min-height: 56px; max-height: 180px; resize: vertical; padding: 9px 11px; font: inherit; font-size: 13.5px; line-height: 1.45; }
-.compose-row { display: flex; align-items: center; gap: 10px; }
-.level button { display: inline-flex; align-items: center; gap: 4px; }
-.compose-hint { margin-left: auto; display: inline-flex; gap: 2px; }
-.compose-block { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--ink-2); padding: 6px 2px; }
-.replying { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 4px 4px 4px 10px; border-radius: 8px; background: var(--code-bg); font-size: 12px; color: var(--ink-2); }
-.replying span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.send-error { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--danger); }
 .gone { display: grid; justify-items: center; gap: 8px; padding: 56px 16px; text-align: center; }
 .gone h2 { font-size: 17px; }
 .gone p { font-size: 13.5px; color: var(--ink-2); }
@@ -399,20 +333,21 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
 .sk { display: grid; gap: 14px; }
 .sk .w40 { width: 40%; height: 18px; } .sk .w70 { width: 70%; } .sk .w90 { width: 90%; } .sk .w60 { width: 60%; }
 @media (max-width: 720px) {
-  .session-panel { z-index: 40; inset: 0; width: auto; height: 100dvh; border-radius: 0; border: 0; background: var(--canvas); }
+  /* The sheet follows the visual viewport, so the keyboard never covers the composer. */
+  .session-panel { z-index: 40; inset: var(--vv-top, 0px) 0 auto 0; width: auto; height: var(--vv-h, 100dvh); border-radius: 0; border: 0; background: var(--canvas); }
   .panel-head { padding: 6px 8px 10px 16px; }
   .head-actions { flex-wrap: wrap; }
   .head-actions .spacer { flex-basis: 100%; height: 0; }
   /* Up to four quiet controls share one row on phones. */
   .head-actions .btn { flex: 1 1 0; min-width: 0; padding-inline: 4px; }
   .head-top .icon-btn { width: 40px; height: 40px; }
+  /* While typing (keyboard open) the thread gets the room: controls and ticket step aside. */
+  .session-panel:has(#session-panel-messages textarea:focus) .head-actions,
+  .session-panel:has(#session-panel-messages textarea:focus) .head-sub { display: none; }
   .scroll { padding: 16px 18px 24px; }
   .telemetry { grid-template-columns: 1fr 1fr; }
   .run-row { grid-template-columns: 88px minmax(0, 1fr) 56px; }
   .run-tokens, .run-when { display: none; }
-  .composer { border-radius: 0; padding: 8px 12px calc(8px + env(safe-area-inset-bottom)); background: var(--surface-raised); }
-  .compose-hint { display: none; }
-  .compose-row .btn { margin-left: auto; height: 40px; }
   @media (prefers-reduced-motion: no-preference) { .session-panel { animation-name: sheet-in; } @keyframes sheet-in { from { transform: translateY(24px); opacity: 0; } to { transform: none; opacity: 1; } } }
 }
 </style>

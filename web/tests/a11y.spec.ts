@@ -91,8 +91,14 @@ const screens: [string, (page: Page) => Promise<void>, string, (page: Page) => P
   }, '/agents', async page => { await expect(page.getByRole('heading', { name: 'This page stumbled.' })).toBeVisible() }],
   ['agents', signedIn, '/agents', async page => { await expect(page.locator('.agents-page .row').first()).toBeVisible() }],
   ['agents empty', page => signedIn(page, true), '/agents', async page => { await expect(page.getByRole('heading', { name: 'No agent has connected yet' })).toBeVisible() }],
-  ['agents session panel', signedIn, '/agents/5e000000-0000-4000-8000-000000000001', async page => {
-    await expect(page.getByRole('complementary', { name: 'Session details' }).locator('.msg').first()).toBeVisible()
+  ['agents session panel', signedIn, '/agents/5e000000-0000-4000-8000-000000000001?tab=messages', async page => {
+    // These fixture messages are unbound history, so open that disclosure to audit the bubbles.
+    const panel = page.getByRole('complementary', { name: 'Session details' })
+    await panel.getByText(/^Other sessions of/).click()
+    await expect(panel.locator('.msg').first()).toBeVisible()
+  }],
+  ['agents session overview', signedIn, '/agents/5e000000-0000-4000-8000-000000000001?tab=overview', async page => {
+    await expect(page.getByRole('complementary', { name: 'Session details' }).locator('.now-step')).toBeVisible()
   }],
   ['business setup', business({ enabled: [] }), '/business', async page => { await expect(page.getByRole('heading', { name: 'Set up Business' })).toBeVisible() }],
   ['business overview', business(), '/business', async page => { await expect(page.getByRole('list', { name: 'Time per ticket' })).toBeVisible() }],

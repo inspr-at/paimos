@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import type { ProjectMessage } from '../../lib/agents.ts'
 
-export type MessageGroup = ProjectMessage & { count: number }
+// last_event is the newest sent_event_id folded into the group (read watermarks).
+export type MessageGroup = ProjectMessage & { count: number; last_event: number }
 export const belongsToSession = (message: ProjectMessage, sessionId: string) =>
   message.recipient_session_id === sessionId || message.sender_session_id === sessionId
 
@@ -17,9 +18,9 @@ export function collapseMessages(messages: ProjectMessage[]): MessageGroup[] {
       message.reply_obligation, message.human_resolution_outcome])
     const previous = latest.get(key)
     const elapsed = Date.parse(message.created_at ?? '') - Date.parse(previous?.created_at ?? '')
-    if (previous && elapsed >= 0 && elapsed <= 60_000) previous.count++
+    if (previous && elapsed >= 0 && elapsed <= 60_000) { previous.count++; previous.last_event = Math.max(previous.last_event, message.sent_event_id) }
     else {
-      const group = { ...message, count: 1 }
+      const group = { ...message, count: 1, last_event: message.sent_event_id }
       groups.push(group)
       latest.set(key, group)
     }
