@@ -206,6 +206,9 @@ func (e *Engine) progress(s *snapshot) Progress {
 		p.VerificationURI = s.Response.VerificationURI
 		p.Action = "Enter this code at the same Aeon instance, review the selected accounts and choices, then Connect computer."
 	}
+	if s.DisconnectAll || s.View.ComputerState == "revoked" || s.Phase == "revoked" || s.Phase == "denied" || s.Phase == "expired" {
+		p.Action = "Keep this pairing's state for status and cleanup; to pair again, rerun pair with --state-root pointing to a new, empty private folder outside the working folder, then approve the new code in the browser. For Nix/Home Manager, update the service's state root through the owning configuration's review path."
+	}
 	if e.now().Before(s.NextPoll) {
 		p.RetryAfterSeconds = int(s.NextPoll.Sub(e.now()).Seconds()) + 1
 	}
@@ -265,6 +268,14 @@ func (e *Engine) Begin(ctx context.Context, o Options) (Progress, error) {
 		if s.Origin != strings.TrimRight(o.Origin, "/") || s.Request.Workspace != o.Workspace {
 			return Progress{}, ErrCollision
 		}
+		if s.DisconnectAll || s.View.ComputerState == "revoked" || s.Phase == "revoked" {
+			p := e.progress(s)
+			return p, errors.New("this enrollment is revoked or disconnecting. " + p.Action)
+		}
+		if s.Phase == "denied" || s.Phase == "expired" {
+			p := e.progress(s)
+			return p, errors.New("this pairing request has ended. " + p.Action)
+		}
 		if err := e.checkSavedClaudeDependencies(s, ClaudeDependencies{NodePath: o.NodePath, SDKPath: o.ClaudeSDKPath}, false); err != nil {
 			return e.progress(s), err
 		}
@@ -276,9 +287,6 @@ func (e *Engine) Begin(ctx context.Context, o Options) (Progress, error) {
 					return e.progress(s), err
 				}
 			}
-		}
-		if s.DisconnectAll || s.View.ComputerState == "revoked" {
-			return e.progress(s), errors.New("this enrollment is revoked; fresh pairing requires a new private state directory and fresh approval")
 		}
 		return e.Step(ctx)
 	} else if !errors.Is(err, os.ErrNotExist) {
@@ -318,7 +326,8 @@ func (e *Engine) Begin(ctx context.Context, o Options) (Progress, error) {
 	}
 	// Declarative setup may request approval and prepare its private runtime,
 	// but cannot adopt, install or activate the configuration owner's service.
-	// Other ownership conflicts still fail closed, even without StartService.
+	// Preflight stops at declarative ownership; further service conflicts are
+	// checked only for unmanaged installs. No service is installed or activated here.
 	if err := e.Services.Preflight(ctx, e.Store.Path(), nil); err != nil && !(errors.Is(err, ErrDeclarative) && !o.StartService) {
 		stage := "service_conflict"
 		if errors.Is(err, ErrDeclarative) {
@@ -413,7 +422,8 @@ func (e *Engine) Step(ctx context.Context) (Progress, error) {
 		return e.reconcile(ctx, s)
 	}
 	if s.Phase == "denied" || s.Phase == "expired" || s.Phase == "revoked" {
-		return e.progress(s), errors.New("pairing request ended; fresh approval requires a fresh enrollment request")
+		p := e.progress(s)
+		return p, errors.New("this pairing request has ended. " + p.Action)
 	}
 	if e.now().Before(s.NextPoll) {
 		return e.progress(s), nil

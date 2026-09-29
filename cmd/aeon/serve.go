@@ -274,7 +274,7 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 			approvals.New(pool),
 			modelregistry.New(pool),
 			agentaccounts.New(pool),
-			agentpairing.New(pool, cfg.PublicURL, cfg.BootstrapTenantSlug),
+			agentpairing.New(pool, cfg.PublicURL, cfg.BootstrapTenantSlug, cfg.PairingNixGuide),
 			// R3: journey
 			journey.New(pool),
 			requirements.New(pool),
@@ -308,7 +308,7 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 		ln = listened
 	}
 	srv := &http.Server{
-		Handler:           agentpairing.GuidePage(api.Handler(), webFS, cfg.PublicURL),
+		Handler:           agentpairing.GuidePage(api.Handler(), webFS, cfg.PublicURL, cfg.PairingNixGuide),
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       time.Minute,
 	}

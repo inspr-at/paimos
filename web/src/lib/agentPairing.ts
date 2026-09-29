@@ -175,6 +175,8 @@ export interface ManagedSetup {
   service_option: string
   module_url: string
   service_note: string
+  platform_note?: string
+  prerequisite_note?: string
 }
 
 export interface ApproveBody {
@@ -1322,6 +1324,10 @@ function parseGuide(data: unknown): PairingGuide {
       module_url: httpsUrl(managed.module_url, 'managed_setup.module_url'),
       service_note: bounded(managed.service_note, 'managed_setup.service_note', 1000),
     }
+    const platform = optionalBounded(managed.platform_note, 'managed_setup.platform_note', 500)
+    const prerequisites = optionalBounded(managed.prerequisite_note, 'managed_setup.prerequisite_note', 1000)
+    if (platform) guide.managed_setup.platform_note = platform
+    if (prerequisites) guide.managed_setup.prerequisite_note = prerequisites
   }
   const capabilities = parseCapabilities(record.verification_capabilities, 'verification_capabilities')
   if (capabilities) guide.verification_capabilities = capabilities

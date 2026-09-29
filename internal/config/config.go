@@ -35,6 +35,9 @@ type Config struct {
 	// doctrine repositories, one token file and <ref>.allowlist.json per reference
 	// (AEON_DOCTRINE_CREDENTIALS_DIR, AEON-318). Aeon stores only the names.
 	DoctrineCredentialsDir string
+	// PairingNixGuide is deployment-admin-owned public guidance. There is no
+	// tenant or pairing-peer write path; absent configuration hides the block.
+	PairingNixGuide *PairingNixGuide
 }
 
 // FromEnv reads AEON_* variables. Empty optional values take their defaults.
@@ -75,6 +78,10 @@ func FromEnv() (Config, error) {
 		}
 	}
 	var err error
+	cfg.PairingNixGuide, err = parsePairingNixGuide(os.Getenv("AEON_PAIRING_NIX_GUIDE_JSON"))
+	if err != nil {
+		return Config{}, err
+	}
 	cfg.LinkKey, err = LinkKeyFromEnv()
 	if err != nil {
 		return Config{}, err

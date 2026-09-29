@@ -200,3 +200,28 @@ func TestPairRejectsUnsafeExplicitRootWithoutWrites(t *testing.T) {
 		t.Fatal("unsafe root created")
 	}
 }
+
+func TestPairFromHomeExplainsWorkspaceBeforeConfirmationOrWrites(t *testing.T) {
+	home, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_STATE_HOME", "")
+	t.Chdir(home)
+	for _, extra := range [][]string{nil, {"--workspace", home}, {"--json"}} {
+		var out bytes.Buffer
+		args := append([]string{"--url", "https://example.test"}, extra...)
+		err = setupCommandInput("pair", args, strings.NewReader("yes\n"), &out)
+		if err == nil || !strings.Contains(err.Error(), "--workspace") || !strings.Contains(err.Error(), "home folder") || !strings.Contains(err.Error(), "--state-root") {
+			t.Fatalf("home-folder recovery missing: %v", err)
+		}
+		if out.Len() != 0 {
+			t.Fatal("asked for confirmation before rejecting impossible workspace")
+		}
+		entries, err := os.ReadDir(home)
+		if err != nil || len(entries) != 0 {
+			t.Fatal("home-folder rejection created pairing state")
+		}
+	}
+}
