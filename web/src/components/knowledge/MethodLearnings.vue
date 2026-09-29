@@ -21,16 +21,22 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{ accepted: [entry: KnowledgeEntry]; reverted: [] }>()
 
+const inboxPreview = 3
 const items = ref<MethodLearning[]>([])
 const truncated = ref(false)
 const error = ref('')
 const busy = ref(false)
+const showAll = ref(false)
 const accepting = ref<MethodLearning | null>(null)
 const chosen = ref('')
 const dialogError = ref('')
 const dialog = ref<HTMLDialogElement>()
+const heading = ref<HTMLHeadingElement>()
+const listEl = ref<HTMLElement>()
 let opener: HTMLElement | null = null
 let controller: AbortController | undefined
+
+const shown = computed(() => (showAll.value || items.value.length <= inboxPreview) ? items.value : items.value.slice(0, inboxPreview))
 
 const canDecide = computed(() => props.person && props.canWrite)
 const choices = computed(() => {
@@ -67,7 +73,7 @@ async function load() {
     error.value = e instanceof Error ? e.message : 'Method learnings could not be loaded.'
   }
 }
-watch(() => props.project.id, () => { void load() }, { immediate: true })
+watch(() => props.project.id, () => { showAll.value = false; void load() }, { immediate: true })
 watch(choices, entries => {
   if (!accepting.value || entries.some(entry => entry.id === chosen.value)) return
   chosen.value = preferred(entries)?.id ?? ''
@@ -81,11 +87,32 @@ function openAccept(item: MethodLearning, event: MouseEvent) {
   dialogError.value = ''
   void nextTick(() => dialog.value?.showModal())
 }
-function close() {
+function excerpt(text: string) {
+  const chars = [...text]
+  if (chars.length <= 48) return text
+  return `${chars.slice(0, 48).join('').trimEnd()}…`
+}
+function actionName(verb: string, item: MethodLearning) {
+  return `${verb} ${item.key}: ${excerpt(item.text)}`
+}
+// A click handler passes the event, which must not count as "skip restore".
+function close(restore: boolean | Event = true) {
+  const restoreFocus = typeof restore === 'boolean' ? restore : true
   dialog.value?.close()
   accepting.value = null
   dialogError.value = ''
-  opener?.focus()
+  if (restoreFocus) opener?.focus()
+}
+async function settleFocus(removedId: string, before: MethodLearning[]) {
+  const index = before.findIndex(row => row.id === removedId)
+  const next = index >= 0 ? before[index + 1] : undefined
+  await nextTick()
+  const button = next ? listEl.value?.querySelector<HTMLButtonElement>(`[data-learning-id="${CSS.escape(next.id)}"] button`) : null
+  if (button) {
+    button.focus()
+    return
+  }
+  heading.value?.focus()
 }
 function backdrop(event: MouseEvent) { if (event.target === dialog.value) close() }
 
@@ -100,10 +127,13 @@ async function accept() {
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
         const decision = await acceptLearning(item.id, entry.id, since)
+        const before = items.value.slice()
         items.value = items.value.filter(row => row.id !== item.id)
         if (decision.entry) emit('accepted', decision.entry)
-        close()
+        close(false)
+        busy.value = false
         toast('Added to the changelog.', { action: { label: 'Undo', run: () => void undo(decision.event_id) }, timeout: 8000 })
+        await settleFocus(item.id, before)
         return
       } catch (e) {
         if (attempt === 0 && e instanceof KnowledgeError && e.status === 412 && e.entry) {
@@ -132,8 +162,11 @@ async function dismiss(item: MethodLearning) {
   busy.value = true
   try {
     const decision = await dismissLearning(item.id)
+    const before = items.value.slice()
     items.value = items.value.filter(row => row.id !== item.id)
+    busy.value = false
     toast('Dismissed.', { action: { label: 'Undo', run: () => void undo(decision.event_id) }, timeout: 8000 })
+    await settleFocus(item.id, before)
   } catch (e) {
     toast(e instanceof Error ? e.message : 'Dismiss did not work.', { tone: 'error' })
   } finally {
@@ -158,13 +191,13 @@ async function undo(eventId: number) {
     <div class="head">
       <span class="mark" aria-hidden="true"><AppIcon name="sparkle" :size="15" /></span>
       <div class="head-copy">
-        <h2 id="method-learnings-title">Method learnings</h2>
+        <h2 id="method-learnings-title" ref="heading" tabindex="-1">Method learnings</h2>
         <p v-if="items.length && !canDecide" class="wait">Waiting for a person to accept.</p>
         <p v-else-if="error" class="wait" role="status">{{ error }}</p>
       </div>
     </div>
-    <ul v-if="items.length" class="rows">
-      <li v-for="item in items" :key="item.id" class="row">
+    <ul v-if="items.length" ref="listEl" class="rows">
+      <li v-for="item in shown" :key="item.id" class="row" :data-learning-id="item.id">
         <div class="copy">
           <p class="line" :title="item.text">{{ item.text }}</p>
           <p class="meta">
@@ -175,11 +208,12 @@ async function undo(eventId: number) {
           </p>
         </div>
         <div v-if="canDecide" class="actions">
-          <button type="button" class="btn primary" :disabled="busy" @click="openAccept(item, $event)">Accept</button>
-          <button type="button" class="btn" :disabled="busy" :aria-label="`Dismiss ${item.key}`" @click="dismiss(item)">Dismiss</button>
+          <button type="button" class="btn" :disabled="busy" :aria-label="actionName('Accept', item)" @click="openAccept(item, $event)">Accept</button>
+          <button type="button" class="btn ghost" :disabled="busy" :aria-label="actionName('Dismiss', item)" @click="dismiss(item)">Dismiss</button>
         </div>
       </li>
     </ul>
+    <button v-if="items.length > inboxPreview" type="button" class="btn ghost disclose" @click="showAll = !showAll">{{ showAll ? 'Show fewer' : `Show all ${items.length}` }}</button>
     <p v-if="truncated" class="more">Showing the 50 newest.</p>
 
     <dialog ref="dialog" class="learn-dialog" aria-labelledby="learn-accept-title" @cancel.prevent="close" @click="backdrop">
@@ -188,7 +222,6 @@ async function undo(eventId: number) {
           <span class="mark" aria-hidden="true"><AppIcon name="book" :size="15" /></span>
           <div class="head-copy">
             <h2 id="learn-accept-title">Add to a changelog</h2>
-            <p class="wait">{{ accepting.text }}</p>
           </div>
         </div>
         <label class="pick" for="learn-entry">Entry</label>
@@ -196,10 +229,9 @@ async function undo(eventId: number) {
           <option v-if="!choices.length" value="">No entry in this project yet</option>
           <option v-for="entry in choices" :key="entry.id" :value="entry.id">{{ entry.title }}</option>
         </select>
-        <p v-if="chosenEntry" class="where">Adds this line to {{ chosenEntry.title }}.</p>
         <p v-if="accepting" class="preview">
           <span>- {{ previewDate }}: {{ accepting.text }}.</span>
-          <span>Source: [{{ linkLabel(accepting.key) }}]({{ accepting.href }}).</span>
+          <span>Source: <a :href="accepting.href">{{ linkLabel(accepting.key) }}</a>.</span>
         </p>
         <p v-if="dialogError" class="problem" role="alert">{{ dialogError }}</p>
         <div class="foot">
@@ -221,7 +253,7 @@ h2 { margin: 0; font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
 .rows { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 8px; }
 .row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px 16px; align-items: center; min-width: 0; padding: 10px 12px; border-radius: 12px; background: var(--surface-sunken); }
 .copy { min-width: 0; }
-.line { margin: 0; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; font-size: 14px; line-height: 1.4; }
+.line { margin: 0; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; min-width: 0; font-size: 14px; line-height: 1.4; }
 .meta { display: flex; flex-wrap: wrap; gap: 4px 10px; margin: 4px 0 0; color: var(--ink-2); font-size: 12.5px; }
 .meta a { color: var(--teal-ink); font-weight: 600; }
 .actions { display: flex; gap: 8px; align-items: center; }
@@ -232,15 +264,17 @@ h2 { margin: 0; font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
 .learn-card { display: grid; gap: 10px; max-height: calc(100dvh - 24px); overflow: auto; padding: 18px 18px 16px; border-radius: var(--radius); border: 1px solid var(--glass-edge); background: linear-gradient(165deg, var(--surface-raised), var(--surface-raised-2)); box-shadow: var(--shadow-pop), var(--shadow); }
 .pick { font-size: 12.5px; font-weight: 600; color: var(--ink-2); }
 .entry { width: 100%; min-width: 0; min-height: 40px; padding: 0 10px; border-radius: 10px; border: 1px solid var(--line-2); background: var(--field-bg); color: var(--ink); }
-.where { margin: 0; color: var(--ink-2); font-size: 13px; }
+.disclose { margin-top: 10px; }
 .preview { display: grid; gap: 4px; margin: 0; padding: 10px 12px; border-radius: 10px; background: var(--code-bg); color: var(--ink); font-size: 13px; line-height: 1.45; }
 .preview span { overflow-wrap: anywhere; }
+.preview a { color: var(--teal-ink); text-decoration: underline; text-underline-offset: 2px; }
 .problem { margin: 0; color: var(--danger); font-size: 13px; }
 .foot { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
 .foot .btn { display: inline-flex; align-items: center; justify-content: center; min-height: 36px; }
 @container (max-width: 560px) {
-  .row { grid-template-columns: minmax(0, 1fr); }
-  .actions .btn { flex: 1; min-height: 40px; }
+  .row { grid-template-columns: minmax(0, 1fr); align-items: start; }
+  .actions { flex-wrap: wrap; }
+  .actions .btn { flex: none; width: auto; min-height: 40px; }
 }
 @media (max-width: 480px) {
   .foot { flex-direction: column-reverse; }
