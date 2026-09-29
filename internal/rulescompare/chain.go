@@ -9,12 +9,14 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/inspr-at/paimos/internal/rulesimport"
 )
 
 // projectDocMaxBytes is Codex's documented default project_doc_max_bytes.
-// The comparison does not read config.toml, so fallback filenames stay unused.
+// A file that crosses the cap contributes its prefix. The comparison does not
+// read config.toml, so fallback filenames stay unused.
 const projectDocMaxBytes = 32768
 
 // Chain is the instruction files one harness would load for one launch
@@ -119,11 +121,38 @@ func (b *builder) gaps() []string {
 func (b *builder) add(logical, text, sum string, size int) bool {
 	if b.harness == "codex" && b.used+size > projectDocMaxBytes {
 		b.capped = true
-		return false
+		remain := projectDocMaxBytes - b.used
+		if remain <= 0 {
+			return false
+		}
+		text = truncateUTF8(text, remain)
+		if text == "" {
+			return false
+		}
+		sum = sha256Hex(text)
+		size = len(text)
+		b.used = projectDocMaxBytes
+		b.files = append(b.files, ChainFile{Logical: logical, SHA256: sum, Bytes: size, Text: text})
+		return true
 	}
 	b.used += size
 	b.files = append(b.files, ChainFile{Logical: logical, SHA256: sum, Bytes: size, Text: text})
 	return true
+}
+
+// truncateUTF8 keeps a byte prefix without splitting a rune.
+func truncateUTF8(s string, n int) string {
+	if n <= 0 || s == "" {
+		return ""
+	}
+	if len(s) <= n {
+		return s
+	}
+	s = s[:n]
+	for len(s) > 0 && !utf8.ValidString(s) {
+		s = s[:len(s)-1]
+	}
+	return s
 }
 
 func (b *builder) claude(home string, dirs []string) error {

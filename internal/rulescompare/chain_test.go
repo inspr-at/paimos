@@ -260,8 +260,54 @@ func TestCodexChainPrefersOverrideSkipsEmptyAndCapsBytes(t *testing.T) {
 	writeFixture(t, filepath.Join(cappedHome, ".codex", "AGENTS.md"), "x")
 	writeFixture(t, filepath.Join(cappedRepo, "AGENTS.md"), strings.Repeat("a", projectDocMaxBytes))
 	capped, err := LoadChain("codex", cappedHome, cappedRepo)
-	if err != nil || len(capped.Files) != 1 || !strings.Contains(strings.Join(capped.Gaps, ","), "codex_byte_cap") {
-		t.Fatalf("%v files %d gaps %v", err, len(capped.Files), capped.Gaps)
+	if err != nil || len(capped.Files) != 2 || capped.Files[0].Text != "x" {
+		t.Fatalf("%v files %d", err, len(capped.Files))
+	}
+	prefix := capped.Files[1]
+	wantPrefix := strings.Repeat("a", projectDocMaxBytes-1)
+	if prefix.Bytes != len(wantPrefix) || prefix.Text != wantPrefix || prefix.SHA256 != sha256Hex(wantPrefix) {
+		t.Fatalf("prefix bytes %d", prefix.Bytes)
+	}
+	if !strings.Contains(strings.Join(capped.Gaps, ","), "codex_byte_cap") {
+		t.Fatal(capped.Gaps)
+	}
+}
+
+func TestCodexRetainsPrefixInsideByteCap(t *testing.T) {
+	repo := filepath.Join(t.TempDir(), "fixture")
+	if err := os.MkdirAll(repo, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	gitDir(t, repo)
+	body := doc("safety", "Keep the floor.", "Synthetic.")
+	body += strings.Repeat(" ", projectDocMaxBytes+1-len(body))
+	writeFixture(t, filepath.Join(repo, "AGENTS.md"), body)
+	got, err := LoadChain("codex", "", repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Files) != 1 || got.Files[0].Bytes != projectDocMaxBytes || !strings.Contains(strings.Join(got.Gaps, ","), "codex_byte_cap") {
+		t.Fatalf("whole %d-byte file discarded, including in-budget first rule; files %d gaps %v", len(body), len(got.Files), got.Gaps)
+	}
+	parsed, err := rulesimport.ParseLoaded(got.Files[0].Logical, got.Files[0].Text, got.Files[0].SHA256, got.Files[0].Bytes)
+	if err != nil || len(parsed.Rules) != 1 || parsed.Rules[0].Text != "Keep the floor." {
+		t.Fatalf("prefix lost the rule: %v rules %d", err, len(parsed.Rules))
+	}
+
+	split := filepath.Join(t.TempDir(), "split-rune")
+	if err = os.MkdirAll(split, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	gitDir(t, split)
+	raw := strings.Repeat("a", projectDocMaxBytes-1) + "€"
+	writeFixture(t, filepath.Join(split, "AGENTS.md"), raw)
+	got, err = LoadChain("codex", "", split)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := strings.Repeat("a", projectDocMaxBytes-1)
+	if len(got.Files) != 1 || got.Files[0].Text != want || got.Files[0].SHA256 != sha256Hex(want) {
+		t.Fatalf("rune split kept %d bytes", len(got.Files[0].Text))
 	}
 }
 
