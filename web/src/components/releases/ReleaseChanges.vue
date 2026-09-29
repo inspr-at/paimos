@@ -143,9 +143,10 @@ ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 1px; }
 .change-glyph {
   --glyph-gap: 8px;
   position: relative; display: inline-block; width: 0; height: 1lh; vertical-align: top;
-  opacity: .7; pointer-events: none;
+  pointer-events: none;
 }
-.change-glyph :deep(svg) { position: absolute; right: var(--glyph-gap); top: 0; bottom: 0; margin-block: auto; }
+/* Mute the icon, not this zero-width box. WebKit drops opacity on that box, so the mark painted fully opaque. */
+.change-glyph :deep(svg) { position: absolute; right: var(--glyph-gap); top: 0; bottom: 0; margin-block: auto; opacity: .7; }
 @supports (height: 1cap) {
   .change-glyph { height: 1cap; vertical-align: baseline; }
 }

@@ -24,7 +24,7 @@ async function samples(page: Page, wrap: boolean) {
   return page.evaluate(({ long, wrap }) => {
     const titles = [...document.querySelectorAll<HTMLElement>('.detail .features .pill-title, .detail .fixes .pill-title, .detail .other > ul > li > .subject')]
     const seen = new Set<string>()
-    const out: { kind: string; delta: number; gap: number; wrapped: boolean; svgH: number; lineShift: number; transform: string }[] = []
+    const out: { kind: string; delta: number; gap: number; wrapped: boolean; svgH: number; lineShift: number; transform: string; svgOpacity: number }[] = []
     for (const el of titles) {
       const group = el.closest('.group')
       const kind = group?.classList.contains('features') ? 'features' : group?.classList.contains('fixes') ? 'fixes' : 'other'
@@ -62,6 +62,7 @@ async function samples(page: Page, wrap: boolean) {
         svgH: svg.height,
         lineShift,
         transform: `${getComputedStyle(glyph).transform} ${getComputedStyle(el.querySelector('svg')!).transform}`,
+        svgOpacity: Number(getComputedStyle(el.querySelector('svg')!).opacity),
       })
       marker.remove()
     }
@@ -86,6 +87,7 @@ for (const width of [1600, 390]) {
         expect(row.svgH, `${width} ${row.kind} icon size`).toBeGreaterThan(12.5)
         expect(row.svgH, `${width} ${row.kind} icon size`).toBeLessThan(13.5)
         expect(row.transform, `${width} ${row.kind}`).toBe('none none')
+        expect(row.svgOpacity, `${width} ${row.kind} svg opacity`).toBeCloseTo(0.7)
         if (wrap) {
           expect(row.wrapped, `${width} ${row.kind} should wrap`).toBe(true)
           expect(Math.abs(row.lineShift), `${width} ${row.kind} wrapped lines`).toBeLessThanOrEqual(0.5)
