@@ -303,6 +303,88 @@ func TestUsageLocatorsSkipVendorAuth(t *testing.T) {
 	}
 }
 
+func TestUsageFilePostsOnEveryBeat(t *testing.T) {
+	var calls []hbCall
+	srv := hbServer(t, &calls, nil)
+	defer srv.Close()
+	rt, _, stderr := heartbeatRuntime(t, srv)
+	cases := []struct {
+		name    string
+		harness string
+		write   func(dir string) string
+		model   string
+		input   float64
+	}{
+		{
+			name: "grok", harness: "grok", model: "grok-4", input: 13,
+			write: func(dir string) string {
+				path := filepath.Join(dir, "sessions", "work", "usage.json")
+				if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+					t.Fatal(err)
+				}
+				body := `{"session":{"inputTokens":10,"outputTokens":4,"cachedReadTokens":2,"cacheCreationTokens":1,"primaryModelId":"grok-4"}}`
+				if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				return path
+			},
+		},
+		{
+			name: "codex", harness: "codex", model: "gpt-5", input: 150,
+			write: func(dir string) string {
+				path := filepath.Join(dir, "sessions", "rollout-beat.jsonl")
+				if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+					t.Fatal(err)
+				}
+				raw, err := os.ReadFile(filepath.Join("..", "sessionusage", "testdata", "codex_token_count.jsonl"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err = os.WriteFile(path, raw, 0o600); err != nil {
+					t.Fatal(err)
+				}
+				return path
+			},
+		},
+		{
+			name: "cursor", harness: "cursor", model: "composer-2.5", input: 42,
+			write: func(dir string) string {
+				path := filepath.Join(dir, "cursor.jsonl")
+				raw, err := os.ReadFile(filepath.Join("..", "sessionusage", "testdata", "cursor_result.jsonl"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err = os.WriteFile(path, raw, 0o600); err != nil {
+					t.Fatal(err)
+				}
+				return path
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			opts := heartbeatTestOptions(dir)
+			opts.Harness = tc.harness
+			opts.UsageSource = tc.harness
+			opts.UsageFile = tc.write(dir)
+			opts.Transcript = ""
+			if tc.harness == "codex" {
+				opts.Model = "gpt-5"
+			}
+			session := openUsageSession(t, rt, opts)
+			before := len(usagePosts(calls))
+			if err := rt.heartbeatBeat(context.Background(), opts, heartbeatDeps{}, session); err != nil {
+				t.Fatalf("beat: %v stderr %s", err, stderr.String())
+			}
+			posted := usagePosts(calls)[before:]
+			if len(posted) != 1 || posted[0]["model"] != tc.model || numField(posted[0], "input_tokens") != tc.input {
+				t.Fatalf("beat usage %#v stderr %s", posted, stderr.String())
+			}
+		})
+	}
+}
+
 func TestUsageAllowlistRefusesSecretFilesAndSymlinkParents(t *testing.T) {
 	dir := t.TempDir()
 	real := filepath.Join(dir, "real", "sessions", "work", "sid")

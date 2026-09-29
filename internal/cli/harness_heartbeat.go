@@ -446,6 +446,16 @@ func (rt *runtime) drainHeartbeatUsage(ctx context.Context, o heartbeatOptions, 
 	}
 }
 
+// heartbeatUsageDue is true when this beat can owe a usage post. A resolved
+// Grok, Codex, or Cursor log counts even when --transcript is empty.
+func heartbeatUsageDue(o heartbeatOptions) bool {
+	if o.Transcript != "" {
+		return true
+	}
+	target, err := resolveHeartbeatUsage(o)
+	return err != nil || target.Path != ""
+}
+
 func heartbeatTranscriptCaughtUp(path string, offset int64) bool {
 	if path == "" || unsafeHeartbeatPath(path) {
 		return true
@@ -846,7 +856,7 @@ func (rt *runtime) heartbeatBeat(ctx context.Context, o heartbeatOptions, dep he
 	if len(commits) > 0 {
 		session.disk.CommitCursor = commits[len(commits)-1].SHA
 	}
-	if o.Transcript != "" {
+	if heartbeatUsageDue(o) {
 		if uerr := rt.reportHeartbeatUsage(ctx, projectID, o, session); uerr != nil {
 			if ctx.Err() != nil {
 				return ctx.Err()
