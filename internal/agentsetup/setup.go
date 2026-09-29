@@ -327,7 +327,7 @@ func (e *Engine) Begin(ctx context.Context, o Options) (Progress, error) {
 	// Declarative setup may request approval and prepare its private runtime,
 	// but cannot adopt, install or activate the configuration owner's service.
 	// Preflight stops at declarative ownership; further service conflicts are
-	// checked only for unmanaged installs. No service operation runs here.
+	// checked only for unmanaged installs. No service is installed or activated here.
 	if err := e.Services.Preflight(ctx, e.Store.Path(), nil); err != nil && !(errors.Is(err, ErrDeclarative) && !o.StartService) {
 		stage := "service_conflict"
 		if errors.Is(err, ErrDeclarative) {
