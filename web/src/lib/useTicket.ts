@@ -81,7 +81,7 @@ export function useTicket(item: Ref<ListItem | null>, context: {
   function merge(target: ListItem, node: WorkNode) {
     const assigneeId = typeof node.fields.assignee === 'string' ? node.fields.assignee : null
     Object.assign(target, {
-      title: node.title, body: node.body, fields: node.fields, state: node.state, updated_at: node.updated_at, parent_id: node.parent_id,
+      title: node.title, body: node.body, fields: node.fields, state: node.state, updated_at: node.updated_at, parent_id: node.parent_id, estimate: node.estimate,
       priority: typeof node.fields.priority === 'string' && node.fields.priority ? node.fields.priority : null,
       assignee: assigneeId ? (target.assignee?.id === assigneeId ? target.assignee : { id: assigneeId, name: context.names.get(assigneeId) ?? 'Someone' }) : null,
     })
@@ -181,6 +181,11 @@ export function useTicket(item: Ref<ListItem | null>, context: {
     if (value === null || value === undefined || value === '') delete fields[name]
     else fields[name] = value
     return fields
+  }
+  const setEstimate = (hours: number | null) => {
+    const fields = { ...(item.value?.fields ?? {}), estimate_hours: hours } as Record<string, unknown>
+    for (const key of ['estimate_source', 'estimate_by', 'estimate_at', 'estimate_confirmed']) delete fields[key]
+    return patch({ fields })
   }
   const setTitle = (title: string) => patch({ title })
   const setBody = (body: string) => patch({ body })
@@ -300,5 +305,5 @@ export function useTicket(item: Ref<ListItem | null>, context: {
     return { done, total: scope.length, percent: scope.length ? Math.round((done / scope.length) * 100) : 0 }
   }
 
-  return { loading, error, gone, readOnly, children, childrenLoading, related, relationsReady, refresh, patch, setTitle, setBody, setField, setPriority, setAssignee, moveTo, remove, addChild, childProgress, link, unlink }
+  return { loading, error, gone, readOnly, children, childrenLoading, related, relationsReady, refresh, patch, setEstimate, setTitle, setBody, setField, setPriority, setAssignee, moveTo, remove, addChild, childProgress, link, unlink }
 }

@@ -16,6 +16,7 @@ export function accountEmail(identity: Identity) {
 
 import { learnPictures } from './avatar.ts'
 import type { TicketEta } from './eta.ts'
+import type { TicketEstimate } from './estimates.ts'
 
 export interface Version { version: string; scheme: string; brand?: import('./brand').Brand }
 
@@ -102,6 +103,7 @@ export interface Kind {
   allowed_child_kinds: string[] | null; field_schema: Record<string, unknown>
 }
 export interface WorkNode {
+  estimate?: TicketEstimate
   id: string; key: string; kind_id: string; title: string; body: string
   fields: Record<string, unknown>; state: string; parent_id: string | null
   position: string; created_at: string; updated_at: string; deleted_at?: string | null

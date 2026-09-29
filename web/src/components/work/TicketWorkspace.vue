@@ -504,7 +504,7 @@ defineExpose({
           <InlineTitle ref="title" :value="item.title" :editable="editable" :large="mode === 'full'" :save="ticket.setTitle" />
           <TicketProperties
             class="ws-props" :class="{ 'only-narrow': mode === 'full' }" :item="item" :editable="editable" layout="row" :now="now"
-            :release-view="releaseView" :release-editable="canRelease"
+            :release-view="releaseView" :release-editable="canRelease" :save-estimate="ticket.setEstimate"
             @status="anchor => emit('status', anchor)" @priority="anchor => openMenu('priority', anchor)" @assignee="anchor => openMenu('assignee', anchor)"
             @epic="anchor => openMenu('epic', anchor)" @release="anchor => openMenu('release', anchor)" @open-parent="openLinked"
           />
@@ -572,7 +572,7 @@ defineExpose({
           <div class="side-card">
             <TicketProperties
               :item="item" :editable="editable" layout="column" :now="now"
-              :release-view="releaseView" :release-editable="canRelease"
+              :release-view="releaseView" :release-editable="canRelease" :save-estimate="ticket.setEstimate"
               @status="anchor => emit('status', anchor)" @priority="anchor => openMenu('priority', anchor)" @assignee="anchor => openMenu('assignee', anchor)"
               @epic="anchor => openMenu('epic', anchor)" @release="anchor => openMenu('release', anchor)" @open-parent="openLinked"
             />

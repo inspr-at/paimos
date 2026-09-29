@@ -56,6 +56,22 @@ Named instances and the default live in `~/.aeon/config.yaml`. The agent API key
 
 Versioning: INSPR Calendar Versioning v2 (`inspr-calendar-v2`, `YYMMDDhhmmss.0.0`); the version display uses the pinned INSPR presentation bundle, checked by `just release-check`.
 
+### Agent work estimates
+
+Estimates are expected **agent hours until ready for review**, separate from a live ETA.
+Set them with `aeon issue create ... --estimate 2h`, `aeon issue update AEON-317 --estimate 90m`, or `aeon issue estimate AEON-317 --hours 1.5 --source agent`. Decimal hours and minutes are accepted; values must be greater than zero and at most 200 hours. The optional source asserts the authenticated principal kind; the server stamps the principal and time. Creating a ticket or task as an agent without an estimate returns a warning.
+
+Agent drafts show `est.` until a person or a working agent bound to the ticket confirms or changes them. Resubmitting the hours through the estimate command confirms them; provenance is recorded again. The ticket's Estimate control also edits or clears the value. Epics show the sum of direct, visible, open ticket/task children, with estimated-child coverage in the tooltip; nested tasks are not counted twice. The Estimate sort keeps empty values last in either direction. Imported points remain visible as points, not converted to hours.
+
+For a backfill, an agent drafts a JSON plan such as `[{"key":"AEON-317","hours":2},{"key":"AEON-318","hours":0.5}]`, then runs:
+
+```sh
+aeon issue estimate --missing --project AEON --from-file plan.json --dry-run
+aeon issue estimate --missing --project AEON --from-file plan.json --apply
+```
+
+Both modes validate every plan entry and project membership before any write. Apply uses the agent identity, skips work already estimated and checks each node's revision. A concurrent change stops the plan; earlier successful writes remain applied and a rerun skips them. There are no server-side model calls.
+
 ## Install the CLI
 
 Nix installs `bin/aeon` and a `bin/paimos` symlink:

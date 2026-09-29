@@ -1,5 +1,6 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
+import { estimateDisplay } from '../../lib/estimates'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { ListItem } from '../../lib/api'
 import { COLUMN_BY_ID, costUnitLabel, layoutWidths, releaseLabel, tagList, titleRoom, visibleColumns, type ColumnId, type ListPrefs, type TagRef } from '../../lib/columns'
@@ -231,12 +232,7 @@ function autofit(id: ColumnId) {
   emit('widths', { ...(props.prefs?.widths ?? {}), [id]: next })
 }
 watch(() => props.prefs?.widths, () => { if (!resizing) dragWidths.value = {} })
-function estimate(row: ListItem) {
-  const hours = row.fields.estimate_hours, points = row.fields.estimate_lp
-  if (typeof hours === 'number' && hours > 0) return `${hours} h`
-  if (typeof points === 'number' && points > 0) return `${points} pt`
-  return ''
-}
+function estimate(row: ListItem) { return estimateDisplay(row).text }
 const grid = ref<HTMLTableElement>()
 const quick = ref<InstanceType<typeof QuickCreateRow>>()
 const inlineQuick = ref<InstanceType<typeof QuickCreateRow>[]>([])
@@ -713,7 +709,7 @@ defineExpose({
                   <span v-else class="empty" aria-label="No cost unit">—</span>
                 </div>
               </td>
-              <td v-else-if="column.id === 'estimate'" class="c-estimate"><div class="cell"><span v-if="estimate(entry.row)" class="mono">{{ estimate(entry.row) }}</span><span v-else class="empty" aria-label="No estimate">—</span></div></td>
+              <td v-else-if="column.id === 'estimate'" class="c-estimate"><div class="cell"><span v-if="estimate(entry.row)" class="mono" :class="{ 'estimate-draft': estimateDisplay(entry.row).draft }" :data-tip="estimateDisplay(entry.row).tip">{{ estimate(entry.row) }}<span v-if="estimateDisplay(entry.row).draft" class="estimate-mark"> est.</span></span><span v-else class="empty" aria-label="No estimate">—</span></div></td>
               <td v-else-if="column.id === 'created'" class="c-created"><div class="cell"><time :datetime="entry.row.created_at" :data-tip="absoluteTime(entry.row.created_at)">{{ relativeTime(entry.row.created_at, { now }) }}</time></div></td>
               <td v-else-if="column.id === 'updated'" class="c-updated"><div class="cell"><time :datetime="entry.row.updated_at" :data-tip="absoluteTime(entry.row.updated_at)">{{ relativeTime(entry.row.updated_at, { now }) }}</time></div></td>
               <td v-else-if="column.id === 'eta'" class="c-eta"><div class="cell"><EtaCell :eta="etaFromTicket(entry.row.eta)" :now="now" /></div></td>
@@ -898,6 +894,8 @@ td.c-title { position: relative; overflow: hidden; }
 .title-workers { flex: 0 0 auto; min-width: 0; max-width: 132px; }
 .empty { color: var(--ink-3); }
 .c-updated time, .c-created time { color: var(--ink-2); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.c-estimate .mono.estimate-draft { color: var(--ink-3); }
+.estimate-mark { font-size: 10px; }
 .c-estimate .mono { font-size: 12px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
 .epic-cell { display: inline-flex; align-items: center; gap: 6px; min-width: 0; color: var(--ink-2); font-size: 12.5px; }
 .epic-name { overflow: hidden; text-overflow: ellipsis; }

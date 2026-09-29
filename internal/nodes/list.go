@@ -126,7 +126,7 @@ type treeQuery struct {
 	Cursor   string
 }
 
-var validSort = map[string]bool{"key": true, "title": true, "state": true, "priority": true, "kind": true, "updated_at": true, "created_at": true, "position": true, "assignee": true, "eta_ready": true, "progress": true}
+var validSort = map[string]bool{"key": true, "title": true, "state": true, "priority": true, "kind": true, "updated_at": true, "created_at": true, "position": true, "assignee": true, "eta_ready": true, "progress": true, "estimate": true}
 var validFacet = map[string]bool{"state": true, "kind": true, "priority": true, "assignee": true, "tag": true, "cost_unit": true, "release": true}
 
 // dateFieldKeys maps date_field to the fields key of dates kept in node fields.
@@ -492,6 +492,13 @@ func (m *Module) listNodes(ctx context.Context, tenantID string, q listQuery) (n
 			for i := range page.Items {
 				ids[i] = page.Items[i].ID
 			}
+			estimates, err := loadEstimates(ctx, tx, ids)
+			if err != nil {
+				return err
+			}
+			for i := range page.Items {
+				page.Items[i].Estimate = estimates[page.Items[i].ID]
+			}
 			views, err := eta.Load(ctx, tx, ids)
 			if err != nil {
 				return err
@@ -752,6 +759,8 @@ func listOrder(q listQuery) string {
 			parts = append(parts, "ap.name IS NULL ASC", "lower(ap.name) "+dir, "ap.id "+dir)
 		case "eta_ready":
 			parts = append(parts, "eta.eta_ready_at IS NULL ASC", "eta.eta_ready_at "+dir)
+		case "estimate":
+			parts = append(parts, "est.hours IS NULL ASC", "est.hours "+dir)
 		case "progress":
 			parts = append(parts, "eta.progress_pct IS NULL ASC", "eta.progress_pct "+dir)
 		default:
@@ -780,7 +789,11 @@ func listSQL(q listQuery, anchor any) (string, []any) {
 	if sortsBy(q, "eta_ready") || sortsBy(q, "progress") {
 		etaJoin = ` LEFT JOIN LATERAL aeon_node_eta(f.id) eta ON true`
 	}
-	sql := prefix + `, ordered AS (SELECT f.id,row_number() OVER (ORDER BY ` + listOrder(q) + `) AS rn FROM filtered f` + people + etaJoin + `),
+	estimateJoin := ""
+	if sortsBy(q, "estimate") {
+		estimateJoin = ` LEFT JOIN LATERAL (` + estimateSQL(`SELECT n.id,n.fields,f.kind_slug FROM nodes n WHERE n.tenant_id=current_setting('aeon.tenant_id')::uuid AND n.id=f.id`) + `) est ON true`
+	}
+	sql := prefix + `, ordered AS (SELECT f.id,row_number() OVER (ORDER BY ` + listOrder(q) + `) AS rn FROM filtered f` + people + etaJoin + estimateJoin + `),
     selected AS (SELECT id,rn FROM ordered WHERE rn>coalesce((SELECT rn FROM ordered WHERE id=` + anchorArg + `::uuid),0) ORDER BY rn LIMIT ` + limitArg + `),
     -- Count visible children for the page once instead of rescanning nodes per row.
     child_counts AS MATERIALIZED (

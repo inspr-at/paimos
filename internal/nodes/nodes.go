@@ -23,6 +23,7 @@ const nodeReturning = `id::text, key, kind_id::text, title, body, fields, state,
 const nodeCols = `n.id::text, n.key, n.kind_id::text, n.title, n.body, n.fields, n.state, n.parent_id::text, n.position::text, n.created_at, n.updated_at, n.deleted_at`
 
 type nodeJSON struct {
+	Estimate  *estimateView   `json:"estimate,omitempty"`
 	Warnings  []string        `json:"warnings,omitempty"`
 	ID        string          `json:"id"`
 	Key       string          `json:"key"`
@@ -181,6 +182,11 @@ func (m *Module) getNode(ctx context.Context, tenantID, id string) (nodeJSON, er
 			return err
 		}
 		node = loaded
+		views, err := loadEstimates(ctx, tx, []string{id})
+		if err != nil {
+			return err
+		}
+		node.Estimate = views[id]
 		return nil
 	})
 	return node, err
@@ -233,6 +239,9 @@ func (m *Module) createNode(ctx context.Context, p tenant.Principal, in nodeCrea
 			return err
 		}
 		fields, err := validateFields(schema, in.Fields)
+		if err == nil {
+			fields, err = canonicalEstimate(ctx, tx, p, "", fields, nil)
+		}
 		if err == nil {
 			fields, err = canonicalAssignments(ctx, tx, p.TenantID, fields)
 		}
@@ -291,6 +300,13 @@ func (m *Module) createNode(ctx context.Context, p tenant.Principal, in nodeCrea
 		node = loaded
 		if kind.Slug == "ticket" {
 			node.Warnings = ticketbenefits.Issues(fields)
+		}
+		if p.Kind == tenant.Agent && (kind.Slug == "ticket" || kind.Slug == "task") {
+			var f map[string]any
+			_ = json.Unmarshal(fields, &f)
+			if f["estimate_hours"] == nil {
+				node.Warnings = append(node.Warnings, "add an agent-hours estimate with --estimate (for example 2h or 30m)")
+			}
 		}
 		return nil
 	})
@@ -373,6 +389,9 @@ func (m *Module) updateNode(ctx context.Context, p tenant.Principal, id string, 
 			}
 			fields, err := validateFields(schema, v)
 			if err == nil {
+				fields, err = canonicalEstimate(ctx, tx, p, id, fields, current.Fields)
+			}
+			if err == nil {
 				fields, err = canonicalAssignments(ctx, tx, p.TenantID, fields)
 			}
 			if err != nil {
@@ -404,6 +423,11 @@ func (m *Module) updateNode(ctx context.Context, p tenant.Principal, id string, 
 			return err
 		}
 		node = loaded
+		views, err := loadEstimates(ctx, tx, []string{id})
+		if err != nil {
+			return err
+		}
+		node.Estimate = views[id]
 		return nil
 	})
 	return node, err

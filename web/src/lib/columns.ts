@@ -23,7 +23,7 @@ export const COLUMNS: ColumnDef[] = [
   { id: 'release', label: 'Release', sort: null, width: 132, min: 84, max: 260 },
   { id: 'tags', label: 'Tags', sort: null, width: 180, min: 96, max: 420 },
   { id: 'cost', label: 'Cost unit', sort: null, width: 150, min: 96, max: 320 },
-  { id: 'estimate', label: 'Estimate', sort: null, width: 96, min: 72, max: 180, end: true },
+  { id: 'estimate', label: 'Estimate', sort: 'estimate', width: 96, min: 72, max: 180, end: true },
   { id: 'created', label: 'Created', sort: 'created_at', width: 104, min: 80, max: 200, end: true },
   { id: 'updated', label: 'Updated', sort: 'updated_at', width: 104, min: 80, max: 200, end: true },
   { id: 'eta', label: 'ETA', sort: 'eta_ready', width: 140, min: 104, max: 220, end: true },

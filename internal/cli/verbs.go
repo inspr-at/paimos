@@ -25,6 +25,7 @@ func (rt *runtime) cmdIssue() *Command {
 			rt.cmdIssueGet(),
 			rt.cmdIssueCreate(),
 			rt.cmdIssueUpdate(),
+			rt.cmdIssueEstimate(),
 			rt.cmdIssueComment(),
 			rt.cmdIssueMove(),
 			rt.cmdSearch("issue search"),
@@ -99,12 +100,14 @@ func (rt *runtime) cmdIssueCreate() *Command {
 	var tags []string
 	var dryRun bool
 	var benefits benefitFlags
+	var estimate string
 	return &Command{
 		Name:  "create",
 		Short: "Create an issue",
 		Use:   "issue create --project KEY --title TITLE",
 		addFlags: func(fs *flagSet) {
 			benefits.flags(fs)
+			fs.string(&estimate, "estimate", 0, "agent hours: 2h, 90m or 1.5")
 			fs.string(&project, "project", 'p', "project key (required)")
 			fs.string(&title, "title", 0, "title (required)")
 			fs.string(&typ, "type", 0, "epic, ticket, task, …")
@@ -145,6 +148,11 @@ func (rt *runtime) cmdIssueCreate() *Command {
 					return err
 				}
 			}
+			if estimate != "" {
+				if _, err := parseEstimate(estimate); err != nil {
+					return err
+				}
+			}
 			if dryRun {
 				kind := strings.TrimSpace(typ)
 				if kind == "" {
@@ -154,7 +162,7 @@ func (rt *runtime) cmdIssueCreate() *Command {
 				return nil
 			}
 			return rt.createIssue(issueInput{
-				Benefits: benefits, Project: project, Title: title, Type: typ, Status: status, Priority: priority,
+				Estimate: estimate, Benefits: benefits, Project: project, Title: title, Type: typ, Status: status, Priority: priority,
 				Parent: parent, Assignee: assignee, Description: desc, AC: acText, Notes: notesText, Tags: tags,
 			})
 		},
@@ -168,6 +176,7 @@ func (rt *runtime) cmdIssueUpdate() *Command {
 	var addTag, removeTag []string
 	var dryRun bool
 	var benefits benefitFlags
+	var estimate string
 	return &Command{
 		Name:    "update",
 		Short:   "Update an issue",
@@ -176,6 +185,7 @@ func (rt *runtime) cmdIssueUpdate() *Command {
 		maxArgs: 1,
 		addFlags: func(fs *flagSet) {
 			benefits.flags(fs)
+			fs.string(&estimate, "estimate", 0, "agent hours: 2h, 90m or 1.5")
 			fs.string(&title, "title", 0, "new title")
 			fs.string(&typ, "type", 0, "new type")
 			fs.string(&status, "status", 0, "new status")
@@ -221,7 +231,12 @@ func (rt *runtime) cmdIssueUpdate() *Command {
 				return err
 			}
 			changed := strings.TrimSpace(title+typ+status+priority+parent+assignee+project+description+descriptionFile+ac+acFile+notes+notesFile+closeNote+closeNoteFile) != "" ||
-				len(addTag) > 0 || len(removeTag) > 0 || benefits.changed()
+				len(addTag) > 0 || len(removeTag) > 0 || benefits.changed() || estimate != ""
+			if estimate != "" {
+				if _, err := parseEstimate(estimate); err != nil {
+					return err
+				}
+			}
 			if !changed {
 				return usagef("nothing to update")
 			}
@@ -230,7 +245,7 @@ func (rt *runtime) cmdIssueUpdate() *Command {
 				return nil
 			}
 			return rt.updateIssue(issuePatch{
-				Benefits: benefits, Ref: args[0], Title: title, Type: typ, Status: status, Priority: priority,
+				Estimate: estimate, Benefits: benefits, Ref: args[0], Title: title, Type: typ, Status: status, Priority: priority,
 				Parent: parent, Assignee: assignee, Project: project, Description: desc,
 				AC: acText, Notes: notesText, CloseNote: closeText, AddTag: addTag, RemoveTag: removeTag,
 			})

@@ -1,0 +1,111 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+package cli
+
+import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func TestParseEstimate(t *testing.T) {
+	for value, want := range map[string]float64{"2h": 2, "90m": 1.5, "1.5": 1.5, "30m": .5, ".5h": .5, " 200 ": 200, "12000m": 200} {
+		got, err := parseEstimate(value)
+		if err != nil || got != want {
+			t.Fatalf("%q = %v, %v", value, got, err)
+		}
+	}
+	for _, value := range []string{"", "0", "-1h", "200.1", "12001m", "NaN", "Inf", "1e2", "2 h", "2hours", "1h30m", "1.", "+2"} {
+		if got, err := parseEstimate(value); err == nil {
+			t.Errorf("%q accepted: %v", value, got)
+		}
+	}
+}
+
+func TestEstimateCLIFlagsAndPlan(t *testing.T) {
+	isolate(t)
+	revision := "2026-09-29T10:00:00.123456Z"
+	ticket := apiNode{ID: transcriptEntryID, Key: "AEON-1", KindID: "ticket-kind", Fields: json.RawMessage(`{"priority":"high"}`)}
+	_ = json.Unmarshal([]byte(`"`+revision+`"`), &ticket.UpdatedAt)
+	existing := apiNode{ID: transcriptSessionID, Key: "AEON-2", KindID: "ticket-kind", Fields: json.RawMessage(`{"estimate_hours":5}`), UpdatedAt: ticket.UpdatedAt}
+	var writes []map[string]any
+	conflict := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "GET" && r.URL.Path == "/api/kinds":
+			json.NewEncoder(w).Encode(map[string]any{"items": []apiKind{{ID: "project-kind", Slug: "project"}, {ID: "ticket-kind", Slug: "ticket"}}})
+		case r.Method == "GET" && r.URL.Path == "/api/nodes":
+			if r.URL.Query().Get("kind_id") == "project-kind" {
+				json.NewEncoder(w).Encode(map[string]any{"items": []apiNode{{ID: transcriptProjectID, Key: "PRJ-1", KindID: "project-kind", Fields: json.RawMessage(`{"project_key":"AEON"}`)}}})
+				return
+			}
+			if r.URL.Query().Get("within") != "" && r.URL.Query().Get("within") != transcriptProjectID {
+				t.Error("wrong project scope")
+			}
+			json.NewEncoder(w).Encode(map[string]any{"items": []apiNode{ticket, existing}})
+		case r.Method == "PATCH" || r.Method == "POST":
+			if r.Method == "PATCH" && r.Header.Get("If-Unmodified-Since") != revision {
+				t.Error("missing revision")
+			}
+			var body map[string]any
+			json.NewDecoder(r.Body).Decode(&body)
+			writes = append(writes, body)
+			if conflict {
+				w.WriteHeader(412)
+				w.Write([]byte(`{"error":"node has changed"}`))
+				return
+			}
+			json.NewEncoder(w).Encode(ticket)
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL)
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	t.Setenv("AEON_URL", srv.URL)
+	t.Setenv("AEON_API_KEY", testKey)
+	run := func(args []string, stdin string) (int, string, string) {
+		return runCLI(append([]string{"aeon", "--config", filepath.Join(t.TempDir(), "missing")}, args...), stdin)
+	}
+	for _, args := range [][]string{{"issue", "create", "--project", "AEON", "--title", "Work", "--estimate", "90m"}, {"issue", "update", "AEON-1", "--estimate", "1.5"}, {"issue", "estimate", "AEON-1", "--hours", "1.5", "--source", "agent"}} {
+		code, out, err := run(args, "")
+		if code != 0 {
+			t.Fatalf("%v: %d %s %s", args, code, out, err)
+		}
+		fields := writes[len(writes)-1]["fields"].(map[string]any)
+		if fields["estimate_hours"] != 1.5 {
+			t.Fatal(fields)
+		}
+		if fields["estimate_by"] != nil || fields["estimate_at"] != nil {
+			t.Fatal("client forged provenance")
+		}
+	}
+	base := []string{"issue", "estimate", "--missing", "--project", "AEON", "--from-file", "-"}
+	plan := `[{"key":"AEON-1","hours":2},{"key":"AEON-2","hours":3}]`
+	before := len(writes)
+	code, out, err := run(append(base, "--dry-run"), plan)
+	if code != 0 || len(writes) != before || !strings.Contains(out, "skipped: already estimated") {
+		t.Fatalf("dry %d %s %s", code, out, err)
+	}
+	for _, invalid := range []string{`[{"key":"AEON-1","hours":2},{"key":"FOREIGN-1","hours":3}]`, `[{"key":"AEON-1","hours":2},{"key":"AEON-1","hours":3}]`, `[{"key":"AEON-1","hours":201}]`, plan + ` []`, `[{"key":"AEON-1","hours":2,"source":"person"}]`} {
+		code, _, _ = run(append(base, "--apply"), invalid)
+		if code == 0 || len(writes) != before {
+			t.Fatal("invalid plan wrote", invalid)
+		}
+	}
+	code, out, err = run(append(base, "--apply"), plan)
+	if code != 0 || len(writes) != before+1 {
+		t.Fatalf("apply %d %s %s", code, out, err)
+	}
+	fields := writes[len(writes)-1]["fields"].(map[string]any)
+	if fields["estimate_source"] != "agent" || fields["priority"] != "high" {
+		t.Fatal(fields)
+	}
+	conflict = true
+	code, _, err = run(append(base, "--apply"), plan)
+	if code == 0 || !strings.Contains(err, "stopped at AEON-1") {
+		t.Fatal("conflict accepted", err)
+	}
+}
