@@ -364,6 +364,8 @@ var RoutePermissions = map[string]string{
 	"PUT /api/quotes/{quoteId}/profile":                                                         "quotes.write",
 	"GET /api/settings/eta-interval":                                                            "settings.manage",
 	"PUT /api/settings/eta-interval":                                                            "settings.manage",
+	"GET /api/settings/heartbeat-lost":                                                          "settings.manage",
+	"PUT /api/settings/heartbeat-lost":                                                          "settings.manage",
 	"PUT /api/nodes/{nodeId}/live-eta":                                                          "harness.worker",
 }
 

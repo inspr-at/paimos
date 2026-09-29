@@ -88,6 +88,8 @@ func (m *Module) Mount(mux *http.ServeMux) {
 		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/heartbeat", "harness.worker", true, 200, m.heartbeat},
 		{"GET /api/settings/eta-interval", "settings.manage", false, 200, m.getEtaInterval},
 		{"PUT /api/settings/eta-interval", "settings.manage", false, 200, m.putEtaInterval},
+		{"GET /api/settings/heartbeat-lost", "settings.manage", false, 200, m.getHeartbeatLost},
+		{"PUT /api/settings/heartbeat-lost", "settings.manage", false, 200, m.putHeartbeatLost},
 		{"PUT /api/nodes/{nodeId}/live-eta", "harness.worker", true, 200, m.setLiveEta},
 		{"GET /api/projects/{projectId}/harness-sessions/{sessionId}/provenance", "harness.read", false, 200, m.readProvenance},
 		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/provenance", "harness.worker", true, 200, m.recordProvenance},
@@ -334,8 +336,7 @@ func proof(s Session, r *http.Request, p tenant.Principal) error {
 	// Authenticate the worker before revealing that its generation was archived.
 	// All write paths using worker(), including provenance, fence archived
 	// registrations before checking idempotent receipts or appending revisions.
-	lease := r.Header.Get("X-Aeon-Worker-Lease")
-	if p.Kind != tenant.Agent || p.ID != s.AgentPrincipalID || len(lease) < 32 || subtle.ConstantTimeCompare(digest("lease", lease), s.leaseDigest) != 1 {
+	if !leaseProof(s, r, p) {
 		return workorders.Fail(403, "harness worker proof rejected")
 	}
 	if s.ArchivedAt != nil {
@@ -345,6 +346,11 @@ func proof(s Session, r *http.Request, p tenant.Principal) error {
 		return workorders.Fail(403, "harness worker proof rejected")
 	}
 	return nil
+}
+// leaseProof authenticates the generation's own worker, whatever its state.
+func leaseProof(s Session, r *http.Request, p tenant.Principal) bool {
+	lease := r.Header.Get("X-Aeon-Worker-Lease")
+	return s.ID != "" && p.Kind == tenant.Agent && p.ID == s.AgentPrincipalID && len(lease) >= 32 && subtle.ConstantTimeCompare(digest("lease", lease), s.leaseDigest) == 1
 }
 func worker(ctx context.Context, tx pgx.Tx, r *http.Request, p tenant.Principal) (Session, error) {
 	s, err := load(ctx, tx, r.PathValue("projectId"), r.PathValue("sessionId"), true)
@@ -837,6 +843,10 @@ func (m *Module) heartbeat(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 	}
 	ctx := r.Context()
 	s, err := worker(ctx, tx, r, p)
+	if err != nil && lostContact(s) && leaseProof(s, r, p) {
+		// AEON-291: the sweeper closed a silent generation; its own worker is back.
+		s, err = revive(ctx, tx, p, s, in.Phase)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -940,6 +950,15 @@ func (m *Module) markStopped(r *http.Request, tx pgx.Tx, p tenant.Principal) (an
 	}
 	ctx := r.Context()
 	s, err := worker(ctx, tx, r, p)
+	if err != nil && lostContact(s) && leaseProof(s, r, p) {
+		// The server already closed this silent generation; the worker's own
+		// reason replaces "lost contact". Its obligations and leases are closed.
+		before := s
+		if s, err = scanSession(tx.QueryRow(ctx, `UPDATE harness_sessions SET stop_reason=$2,revision=revision+1 WHERE id=$1 RETURNING `+sessionColumns, s.ID, in.Reason)); err != nil {
+			return nil, err
+		}
+		return s, record(ctx, tx, p, s, "stop_confirmed", before, s)
+	}
 	if err != nil {
 		return nil, err
 	}

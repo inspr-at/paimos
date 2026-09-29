@@ -2767,7 +2767,7 @@ paths:
       - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
     post:
       operationId: heartbeatHarnessSession
-      description: The attributed worker reports liveness and optionally a current step, display label, ready estimate or percent done. A coordinator session may report the live estimate for its bound ticket, and only while that ticket still belongs to the session's project. Omission preserves an estimate; JSON null clears it and its report time. An instant from 30 days ago through 365 days ahead is accepted; a past instant inside that window is overdue. Changed nonempty notes and changed label/model/effort values append bounded histories in the same transaction.
+      description: The attributed worker reports liveness and optionally a current step, display label, ready estimate or percent done. A coordinator session may report the live estimate for its bound ticket, and only while that ticket still belongs to the session's project. Omission preserves an estimate; JSON null clears it and its report time. An instant from 30 days ago through 365 days ahead is accepted; a past instant inside that window is overdue. Changed nonempty notes and changed label/model/effort values append bounded histories in the same transaction. A generation the server closed as heartbeat_lost (Lost contact) is revived by its own worker's next heartbeat, unless it was removed or a newer generation registered the same session reference (AEON-291).
       requestBody:
         required: true
         content:
@@ -2835,6 +2835,43 @@ paths:
                 properties:
                   interval_minutes: {type: integer, minimum: 1, maximum: 240}
         '400': {description: Interval outside 1 to 240 minutes}
+  /settings/heartbeat-lost:
+    get:
+      operationId: getHeartbeatLost
+      description: Minutes without a heartbeat (or, before the first one, since registration) after which the server closes an unmanaged session as stop_reason heartbeat_lost, shown as Lost contact. Fifteen when the workspace has not chosen one. Managed sessions are left to their daemon. Requires settings.manage (AEON-291).
+      responses:
+        '200':
+          description: Lost-contact threshold
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [heartbeat_lost_minutes]
+                properties:
+                  heartbeat_lost_minutes: {type: integer, minimum: 5, maximum: 1440}
+    put:
+      operationId: putHeartbeatLost
+      description: Sets the lost-contact threshold for unmanaged sessions. Requires settings.manage. Five through 1440 minutes. The server sweeps once a minute; no process is signalled.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [heartbeat_lost_minutes]
+              properties:
+                heartbeat_lost_minutes: {type: integer, minimum: 5, maximum: 1440}
+      responses:
+        '200':
+          description: Updated threshold
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [heartbeat_lost_minutes]
+                properties:
+                  heartbeat_lost_minutes: {type: integer, minimum: 5, maximum: 1440}
+        '400': {description: Threshold outside 5 to 1440 minutes}
   /nodes/{nodeId}/live-eta:
     parameters:
       - {name: nodeId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -2931,6 +2968,10 @@ paths:
         - {name: agent, in: query, schema: {type: string, format: uuid}}
         - {name: project, in: query, schema: {type: string, format: uuid}}
         - {name: ticket, in: query, schema: {type: string, format: uuid}}
+        - name: view
+          in: query
+          schema: {type: string, enum: [all, current], default: all}
+          description: current is the Agents list and omits sessions stopped or removed more than 24 hours ago; all keeps every generation (history). AEON-291.
         - {name: cursor, in: query, schema: {type: string}}
         - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 50}}
       responses:
@@ -7444,6 +7485,7 @@ components:
         message: {type: string, const: 'Record removed; process not stopped by removal.'}
         processes_signalled: {type: boolean, const: false}
         process_state: {type: string, const: unknown}
+        event_id: {type: integer, format: int64, description: 'The harness.removed event; POST /events/{eventId}/undo restores the record as it was (AEON-291). Omitted when the record was already removed.'}
     HarnessRemoveStaleResult:
       type: object
       required: [items, cutoff, more]
@@ -7588,7 +7630,7 @@ components:
         revision: {type: integer, format: int64}
         heartbeat_at: {type: [string, 'null'], format: date-time}
         stopped_at: {type: [string, 'null'], format: date-time}
-        stop_reason: {type: [string, 'null']}
+        stop_reason: {type: [string, 'null'], description: 'Why the generation closed. heartbeat_lost means the server closed a silent unmanaged session (Lost contact); its worker may still revive it with a heartbeat.'}
         process_ownership: {$ref: '#/components/schemas/HarnessProcessOwnership'}
         process_observed_at: {type: [string, 'null'], format: date-time}
         archived_at: {type: [string, 'null'], format: date-time}

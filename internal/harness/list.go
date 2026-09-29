@@ -63,13 +63,20 @@ func (m *Module) listAll(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, e
 	if harness != "" && !validHarness(harness) {
 		return nil, workorders.Fail(400, "invalid harness")
 	}
+	// AEON-291: view=current is the Agents list: sessions that stopped (or were
+	// removed) more than 24 hours ago leave it. view=all, the default, keeps
+	// every generation for history and for existing clients.
+	view := q.Get("view")
+	if view != "" && view != "all" && view != "current" {
+		return nil, workorders.Fail(400, "invalid view")
+	}
 	agent, projectID, ticket := q.Get("agent"), q.Get("project"), q.Get("ticket")
 	for _, id := range []string{agent, projectID, ticket} {
 		if id != "" && !workorders.UUID(id) {
 			return nil, workorders.Fail(400, "invalid filter id")
 		}
 	}
-	filters, _ := json.Marshal([]string{p.TenantID, p.ID, state, harness, agent, projectID, ticket})
+	filters, _ := json.Marshal([]string{p.TenantID, p.ID, state, harness, agent, projectID, ticket, view})
 	fingerprint := fmt.Sprintf("%x", sha256.Sum256(filters))
 	var cursor sessionCursor
 	if raw := q.Get("cursor"); raw != "" {
@@ -83,7 +90,8 @@ func (m *Module) listAll(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, e
  AND ($2='' OR harness=$2) AND ($3::uuid IS NULL OR agent_principal_id=$3)
  AND ($4::uuid IS NULL OR project_id=$4) AND ($5::uuid IS NULL OR ticket_node_id=$5)
  AND ($6::timestamptz IS NULL OR (created_at,id)<($6,$7::uuid))
- ORDER BY created_at DESC,id DESC LIMIT $8`, state, harness, nullable(agent), nullable(projectID), nullable(ticket), cursorTime(cursor), nullable(cursor.ID), limit+1)
+ AND ($9<>'current' OR coalesce(greatest(stopped_at,archived_at),'infinity')>clock_timestamp()-interval '24 hours')
+ ORDER BY created_at DESC,id DESC LIMIT $8`, state, harness, nullable(agent), nullable(projectID), nullable(ticket), cursorTime(cursor), nullable(cursor.ID), limit+1, view)
 	if err != nil {
 		return nil, err
 	}
