@@ -73,7 +73,17 @@ func TestParseComparisonRejectsProseAndCountDrift(t *testing.T) {
 	conflict["counts"] = map[string]any{"both": 0, "only_local": 0, "only_merged": 0, "differs": 1, "files": 1}
 	rejectedComparison(t, jsonBytes(conflict))
 	conflict["rules"] = []any{map[string]any{"identity": "safety", "status": "differs", "changed": []string{"local_conflict"}}}
+	conflict["merged"] = map[string]any{"version": "260929120000.0.0", "sha256": cmpDigest, "rule_count": 0}
 	mustComparison(t, jsonBytes(conflict))
+	conflict["rules"] = []any{map[string]any{"identity": "safety", "status": "differs", "changed": []string{"local_conflict"}, "merged_text_sha256": cmpDigest}}
+	conflict["merged"] = map[string]any{"version": "260929120000.0.0", "sha256": cmpDigest, "rule_count": 1}
+	mustComparison(t, jsonBytes(conflict))
+	conflict["rules"] = []any{map[string]any{"identity": "safety", "status": "only_local", "changed": []string{"local_conflict"}}}
+	conflict["counts"] = map[string]any{"both": 0, "only_local": 1, "only_merged": 0, "differs": 0, "files": 1}
+	conflict["merged"] = map[string]any{"version": "260929120000.0.0", "sha256": cmpDigest, "rule_count": 0}
+	mustComparison(t, jsonBytes(conflict))
+	conflict["rules"] = []any{map[string]any{"identity": "safety", "status": "only_local", "changed": []string{"local_conflict"}, "local_text_sha256": cmpDigest}}
+	rejectedComparison(t, jsonBytes(conflict))
 
 	dup := comparisonBody("10000000-0000-4000-8000-000000000002", "codex", "fixture")
 	dup["rules"] = []any{
@@ -90,6 +100,17 @@ func TestParseComparisonRejectsProseAndCountDrift(t *testing.T) {
 	mustComparison(t, jsonBytes(omitted))
 	omitted["gaps"] = []any{"/tmp/secret"}
 	rejectedComparison(t, jsonBytes(omitted))
+}
+
+func TestUploadLocallyConflictingAbsentRule(t *testing.T) {
+	body := comparisonBody("10000000-0000-4000-8000-000000000002", "claude-code", "fixture")
+	body["merged"] = map[string]any{"version": "260929120000.0.0", "sha256": cmpDigest, "rule_count": 0}
+	body["local"] = map[string]any{"set_sha256": cmpDigest, "rule_count": 2}
+	body["rules"] = []any{map[string]any{"identity": "style", "status": "differs", "changed": []string{"local_conflict"}}}
+	body["counts"] = map[string]any{"both": 0, "only_local": 0, "only_merged": 0, "differs": 1, "files": 2}
+	if _, err := parseComparison(jsonBytes(body)); err != nil {
+		t.Fatalf("CLI conflict report cannot upload: %v", err)
+	}
 }
 
 func TestComparisonsStoreHashesAndRefuseMutation(t *testing.T) {

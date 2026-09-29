@@ -225,7 +225,15 @@ func diffLoaded(harness string, local []rulesimport.LoadedRule, merged []rules.R
 	add := func(row LiveRule) {
 		if i, ok := seen[row.Identity]; ok {
 			if rows[i].LocalTextSHA256 != row.LocalTextSHA256 {
-				rows[i] = LiveRule{Identity: row.Identity, Status: "differs", Changed: []string{"local_conflict"}}
+				mergedHash := rows[i].MergedTextSHA256
+				if mergedHash == "" {
+					mergedHash = row.MergedTextSHA256
+				}
+				if mergedHash == "" {
+					rows[i] = LiveRule{Identity: row.Identity, Status: "only_local", Changed: []string{"local_conflict"}}
+				} else {
+					rows[i] = LiveRule{Identity: row.Identity, Status: "differs", Changed: []string{"local_conflict"}, MergedTextSHA256: mergedHash}
+				}
 			}
 			return
 		}
@@ -235,10 +243,13 @@ func diffLoaded(harness string, local []rulesimport.LoadedRule, merged []rules.R
 	for _, id := range order {
 		g := groups[id]
 		if g.conflict {
-			add(LiveRule{Identity: g.id, Status: "differs", Changed: []string{"local_conflict"}})
-			if g.match != "" {
-				consumed[g.match] = true
+			if g.match == "" {
+				add(LiveRule{Identity: g.id, Status: "only_local", Changed: []string{"local_conflict"}})
+				continue
 			}
+			m := byID[g.match]
+			add(LiveRule{Identity: g.id, Status: "differs", Changed: []string{"local_conflict"}, MergedTextSHA256: sha256Hex(m.Text)})
+			consumed[g.match] = true
 			continue
 		}
 		rule := g.items[0]

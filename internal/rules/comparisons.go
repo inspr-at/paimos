@@ -399,7 +399,7 @@ func validateComparison(upload comparisonUpload) error {
 	if upload.Local.RuleCount < 0 || upload.Local.RuleCount > maxComparisonRules || upload.Merged.RuleCount < 0 || upload.Merged.RuleCount > maxComparisonRules {
 		return reject
 	}
-	var both, onlyLocal, onlyMerged, differs int
+	var both, onlyLocal, onlyMerged, differs, mergedDiffers int
 	seen := map[string]bool{}
 	for _, rule := range upload.Rules {
 		if !comparisonID.MatchString(rule.Identity) || seen[rule.Identity] {
@@ -414,6 +414,9 @@ func validateComparison(upload comparisonUpload) error {
 			}
 		case "only_local":
 			onlyLocal++
+			if hashlessLocalConflict(rule) {
+				break
+			}
 			if !comparisonPair(rule, true, false) || len(rule.Changed) != 0 {
 				return reject
 			}
@@ -427,12 +430,15 @@ func validateComparison(upload comparisonUpload) error {
 			if !comparisonChanged(rule) {
 				return reject
 			}
+			if !hashlessLocalConflict(rule) {
+				mergedDiffers++
+			}
 		default:
 			return reject
 		}
 	}
 	localSide := both + onlyLocal + differs
-	mergedSide := both + onlyMerged + differs
+	mergedSide := both + onlyMerged + mergedDiffers
 	if both != upload.Counts.Both || onlyLocal != upload.Counts.OnlyLocal || onlyMerged != upload.Counts.OnlyMerged || differs != upload.Counts.Differs {
 		return reject
 	}
@@ -474,9 +480,17 @@ func comparisonChanged(rule comparisonRule) bool {
 		}
 	}
 	if conflict {
-		return len(rule.Changed) == 1 && rule.LocalTextSHA256 == "" && rule.MergedTextSHA256 == ""
+		if len(rule.Changed) != 1 || rule.LocalTextSHA256 != "" {
+			return false
+		}
+		return rule.MergedTextSHA256 == "" || comparisonHex.MatchString(rule.MergedTextSHA256)
 	}
 	return comparisonPair(rule, true, true)
+}
+
+// hashlessLocalConflict is a local disagreement with no merged text to count.
+func hashlessLocalConflict(rule comparisonRule) bool {
+	return len(rule.Changed) == 1 && rule.Changed[0] == "local_conflict" && rule.LocalTextSHA256 == "" && rule.MergedTextSHA256 == ""
 }
 
 func comparisonVersion(s string) bool {

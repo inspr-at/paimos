@@ -85,7 +85,7 @@ func TestDiffChainMatchesExplicitWhyAndConflict(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(conflicted.Rules) != 1 || conflicted.Rules[0].Status != "differs" || strings.Join(conflicted.Rules[0].Changed, ",") != "local_conflict" || conflicted.Rules[0].LocalTextSHA256 != "" || conflicted.Rules[0].MergedTextSHA256 != "" {
+	if len(conflicted.Rules) != 1 || conflicted.Rules[0].Status != "differs" || strings.Join(conflicted.Rules[0].Changed, ",") != "local_conflict" || conflicted.Rules[0].LocalTextSHA256 != "" || conflicted.Rules[0].MergedTextSHA256 != sha256Hex(local.Text) {
 		t.Fatalf("%+v", conflicted.Rules)
 	}
 
@@ -124,5 +124,23 @@ func TestCodexLaterFileWins(t *testing.T) {
 	row := got.Rules[0]
 	if row.Status != "differs" || strings.Join(row.Changed, ",") != "text" || row.LocalTextSHA256 != sha256Hex(parsed.Rules[0].Text) || row.MergedTextSHA256 != sha256Hex(merged.Rules[0].Text) {
 		t.Fatalf("later file was treated as a local conflict: %+v", row)
+	}
+}
+
+func TestConflictAbsentFromMerge(t *testing.T) {
+	chain := Chain{Harness: "claude-code", Files: []ChainFile{
+		chainFile(t, "repo/CLAUDE.md", doc("style", "Use root style.", "Synthetic.")),
+		chainFile(t, "repo/pkg/CLAUDE.md", doc("style", "Use package style.", "Synthetic.")),
+	}}
+	got, err := DiffChain(chain, "builder", "10000000-0000-4000-8000-000000000002", rules.Merged{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Rules) != 1 || got.Counts.OnlyLocal != 1 || got.Counts.Differs != 0 || got.Merged.RuleCount != 0 {
+		t.Fatalf("absent merged rule counted as a difference: rows=%+v counts=%+v merged=%+v", got.Rules, got.Counts, got.Merged)
+	}
+	row := got.Rules[0]
+	if row.Status != "only_local" || strings.Join(row.Changed, ",") != "local_conflict" || row.LocalTextSHA256 != "" || row.MergedTextSHA256 != "" {
+		t.Fatalf("%+v", row)
 	}
 }
