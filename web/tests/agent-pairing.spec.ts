@@ -107,7 +107,8 @@ test('pi pairing names the local provider, shows its SVG and connects without ve
   await page.goto('/agents/register-agent')
   await page.getByText('Manual and agent setup').click()
   await expect(page.getByText(/For pi, use \/login and \/model/)).toBeVisible()
-  await expect(page.getByText(SETUP_COMMAND, { exact: false })).toContainText('grok|pi')
+  // AEON-333: the guide's pair command discovers harnesses, pi included, so it names none.
+  await expect(page.getByText(SETUP_COMMAND, { exact: false }).first()).toBeVisible()
   await page.getByLabel('Pairing code').fill('123-456-789')
   await page.getByRole('button', { name: 'Look up code' }).click()
   const review = page.getByRole('region', { name: 'Pairing review' })
