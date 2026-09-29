@@ -79,14 +79,15 @@ function openReleases(version?: string) {
   void router.push({ path: route.path, query: { ...route.query, releases: version ?? 'all' }, hash: route.hash })
 }
 function selectRelease(version: string) {
-  if (releasesRoute.value) { if (route.params.version !== version) void router.replace(`/releases/${version}`) }
+  // Keep the history's language and reading (and any other query) across versions.
+  if (releasesRoute.value) { if (route.params.version !== version) void router.replace({ path: `/releases/${version}`, query: { ...route.query }, hash: route.hash }) }
   else if (releasesQuery.value !== version) void router.replace({ path: route.path, query: { ...route.query, releases: version }, hash: route.hash })
 }
 function closeReleases() {
   if (openedHere && typeof window.history.state?.back === 'string') { openedHere = false; router.back(); return }
   openedHere = false
   if (releasesRoute.value) { void router.replace('/'); return }
-  const { releases: _releases, ...rest } = route.query
+  const { releases: _releases, lang: _lang, reading: _reading, ...rest } = route.query
   void router.replace({ path: route.path, query: rest, hash: route.hash })
 }
 // The release history's mark goes home: a real navigation to /, which also closes the overlay.

@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed } from 'vue'
-import { plainSubject, shortCommit, type ChangeGroup, type PresentedChanges, type ReleaseChange, type TicketChangeLine } from '../../lib/releases'
+import { forReading, plainSubject, shortCommit, type ChangeGroup, type PresentedChanges, type ReleaseChange, type ReleaseReading, type TicketChangeLine } from '../../lib/releases'
 import AppIcon, { type IconName } from '../AppIcon.vue'
 import TicketLink from './TicketLink.vue'
 
@@ -9,8 +9,8 @@ import TicketLink from './TicketLink.vue'
 // are one block per ticket. The pill is the heading, the benefit the sentence,
 // and the ticket's commits sit behind a small disclosure. Anything no ticket
 // tells about stays under Other, with the package prefix and leading key removed.
-const props = defineProps<{ presented: PresentedChanges; repository: string; query?: string; soleTicket?: string }>()
-const presented = computed(() => props.presented)
+const props = defineProps<{ presented: PresentedChanges; repository: string; query?: string; soleTicket?: string; reading?: ReleaseReading }>()
+const presented = computed(() => forReading(props.presented, props.reading ?? 'highlights'))
 const ticketsShown = (c: ReleaseChange) => props.soleTicket && c.tickets.length === 1 && c.tickets[0] === props.soleTicket ? [] : c.tickets
 const GROUPS: { key: ChangeGroup; label: string; icon: IconName }[] = [
   { key: 'features', label: 'Features', icon: 'sparkle' },
@@ -40,6 +40,7 @@ function revealCommits(el: unknown, line: TicketChangeLine) {
   if (hit) el.open = true
 }
 const showBenefit = (line: TicketChangeLine) => {
+  if (props.reading === 'details') return false
   const benefit = line.benefit.trim()
   return !!benefit && benefit.toLowerCase() !== line.pill.trim().toLowerCase()
 }
@@ -72,7 +73,7 @@ function parts(text: string) {
               <TicketLink :ticket-key="line.key" variant="inline" />
             </div>
             <p v-if="line.pill && showBenefit(line)" class="benefit" :lang="line.benefitLang"><template v-for="(p, i) in parts(line.benefit)" :key="i"><mark v-if="p.hit">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template></p>
-            <details v-if="line.commits.length" :ref="el => revealCommits(el, line)" class="commits">
+            <details v-if="reading === 'details' && line.commits.length" :ref="el => revealCommits(el, line)" class="commits">
               <summary><AppIcon name="chevron-right" :size="12" class="chev" />{{ commitWord(line.commits.length) }}</summary>
               <ul class="commit-list">
                 <li v-for="c in line.commits" :key="c.commit">

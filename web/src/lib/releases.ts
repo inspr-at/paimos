@@ -198,6 +198,36 @@ export function hasUsableNotes(r: Pick<Release, 'notes'>): r is Pick<Release, 'n
 export function noteLocale(locale?: string | null): 'en' | 'de' {
   return locale?.trim().toLowerCase().startsWith('de') ? 'de' : 'en'
 }
+// The release history's own language and reading, chosen in its header (AEON-323).
+// A missing choice follows the viewer's locale and the benefit reading.
+export type ReleaseLang = 'en' | 'de'
+export type ReleaseReading = 'highlights' | 'details'
+export function releaseLang(value: unknown, profileLocale?: string | null): ReleaseLang {
+  const raw = Array.isArray(value) ? value[0] : value
+  return raw === 'en' || raw === 'de' ? raw : noteLocale(profileLocale)
+}
+export function releaseReading(value: unknown): ReleaseReading {
+  const raw = Array.isArray(value) ? value[0] : value
+  return raw === 'details' ? 'details' : 'highlights'
+}
+// Highlights is the benefit. Details keeps every commit, including ones no ticket tells.
+export function forReading(presented: PresentedChanges, reading: ReleaseReading): PresentedChanges {
+  return reading === 'details' ? presented : { features: presented.features, fixes: presented.fixes, other: [] }
+}
+// A short technical line for the list and the compare range: the first few subjects.
+export function technicalLine(r: Pick<Release, 'changes'>, limit = 3): string {
+  const seen = new Set<string>()
+  const parts: string[] = []
+  for (const c of r.changes) {
+    if (!changeGroup(c)) continue
+    const text = plainSubject(c.subject, c.tickets)
+    if (!text || seen.has(text)) continue
+    seen.add(text)
+    parts.push(text)
+    if (parts.length === limit) break
+  }
+  return parts.join(' · ')
+}
 export interface LocalizedNote { pill: string; benefit: string; pillLang: 'en' | 'de'; benefitLang: 'en' | 'de' }
 // One ticket's pill and sentence in the viewer's language. An empty German
 // field falls back to English; English is never replaced by an empty string.
@@ -257,6 +287,9 @@ export function markParts(text: string, query?: string | null): { text: string; 
 }
 export const HISTORICAL_TAG_FALLBACK = 'historical-tag-headline'
 export const WRITTEN_AFTER_LABEL = 'Notes written after release'
+export function writtenAfterLine(locale?: string | null) {
+  return noteLocale(locale) === 'de' ? 'Notizen nach dem Release geschrieben' : WRITTEN_AFTER_LABEL
+}
 // A backfilled snapshot was captured after publication. The hint stays off
 // when the notes are only the historical headline.
 export function writtenAfterRelease(r: Pick<Release, 'notes'>): boolean {

@@ -125,6 +125,7 @@ test('keys: j and k move, Enter opens, e shows evidence, ? lists keys, / searche
   await expect(page.getByRole('dialog', { name: 'Release history keys' })).toHaveCount(0)
   await expect(sheet(page)).toBeVisible()
 
+  await sheet(page).getByRole('radio', { name: 'Details', exact: true }).click()
   await page.keyboard.press('/')
   const search = sheet(page).getByRole('searchbox', { name: 'Search releases' })
   await expect(search).toBeFocused()

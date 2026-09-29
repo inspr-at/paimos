@@ -52,6 +52,9 @@ for (const colorScheme of ['light', 'dark'] as const) {
       const named = features.getByRole('article', { name: 'Named releases' })
       await expect(named.locator('.benefit')).toHaveText('Every release opens with its theme and one sentence about what it changes for you.')
       await expect(named.locator('.line-head').getByText('AEON-305', { exact: true })).toBeVisible()
+      await expect(named.locator('summary')).toHaveCount(0)
+      await sheet(page).getByRole('radio', { name: 'Details', exact: true }).click()
+      await expect(named.locator('.benefit')).toHaveCount(0)
       await expect(named.locator('summary')).toHaveText('2 commits')
       await expect(named.getByText('Release presentation store, API and present CLI')).toBeHidden()
       await named.locator('summary').click()
@@ -93,6 +96,8 @@ test('without a presentation: the blocks lead, and a release without them is ver
   await rows(page).nth(3).click()
   await expect(d.locator('.summary')).toHaveCount(0)
   await expect(d.locator('.tickets')).toContainText('PAI-1057')
+  await expect(d.getByText('Internal changes only.')).toBeVisible()
+  await sheet(page).getByRole('radio', { name: 'Details', exact: true }).click()
   // No ticket tells a benefit, so the fix commit is listed under Other.
   await expect(d.getByRole('region', { name: 'Other changes, 1' })).toContainText('Retry a busy BEGIN in release acceptance transactions')
 })

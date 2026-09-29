@@ -102,7 +102,7 @@ async function open(page: Page, grouped: boolean) {
   await mockReleases(page, history)
   await page.goto(`/releases/${history.current}`)
   // The rail names the pills too (AEON-305), so wait inside the detail.
-  const ready = grouped ? 'Quotes open reliably' : 'showcase quotes load without crashing'
+  const ready = grouped ? 'Quotes open reliably' : 'Internal changes only.'
   await expect(sheet(page).locator('article.detail').getByText(ready)).toBeVisible()
   return history
 }
@@ -127,6 +127,9 @@ for (const width of [1600, 390]) {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
     await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'reduce' })
     await open(page, false)
+    await expect(sheet(page).locator('.changes')).toHaveCount(0)
+    await expect(sheet(page).getByText('Internal changes only.')).toBeVisible()
+    await sheet(page).getByRole('radio', { name: 'Details', exact: true }).click()
     const changes = sheet(page).locator('.changes')
     await expect(changes.getByRole('region', { name: /^Other changes,/ })).toBeVisible()
     await expect(changes.getByText('showcase quotes load without crashing')).toBeVisible()
@@ -154,6 +157,10 @@ for (const width of [1600, 390]) {
     await expect(quotes.getByText('Showcase quotes open, and a draft copied from an empty list can still be issued.')).toBeVisible()
     await expect(chat.getByRole('link', { name: /AEON-273/ })).toBeVisible()
     await expect(quotes.getByRole('link', { name: /AEON-274/ })).toBeVisible()
+    await expect(chat.locator('summary')).toHaveCount(0)
+    await expect(changes.getByRole('region', { name: /^Other changes,/ })).toHaveCount(0)
+    await sheet(page).getByRole('radio', { name: 'Details', exact: true }).click()
+    await expect(chat.getByText('The iPhone session chat keeps its tabs, unread messages and scroll position.')).toBeHidden()
     await expect(chat.locator('summary')).toHaveText('3 commits')
     await expect(requests.locator('summary')).toHaveText('3 commits')
     await expect(settings.locator('summary')).toHaveText('2 commits')
@@ -171,6 +178,7 @@ for (const width of [1600, 390]) {
     await noHorizontalScroll(page)
     if (width === 1600 || width === 390) await shot(page, `${width}-light-open`)
     await chat.locator('summary').click()
+    await sheet(page).getByRole('radio', { name: 'Highlights', exact: true }).click()
     await page.emulateMedia({ colorScheme: 'dark', reducedMotion: 'reduce' })
     await expect(fixes).toBeVisible()
     await expect(quotes.getByText('Showcase quotes open, and a draft copied from an empty list can still be issued.')).toBeVisible()
@@ -194,6 +202,7 @@ for (const width of [1600, 390]) {
 test('Enter and Space expand the commit disclosure and leave the release where it is', async ({ page }) => {
   await page.setViewportSize({ width: 1600, height: 900 })
   await open(page, true)
+  await sheet(page).getByRole('radio', { name: 'Details', exact: true }).click()
   const chat = sheet(page).locator('.changes').getByRole('article', { name: 'Session chat on iPhone' })
   const summary = chat.locator('summary')
   const subject = 'Reserve stable100 session chat on iPhone'
@@ -215,8 +224,9 @@ test('a search that matches only a commit subject opens that disclosure', async 
   const search = sheet(page).getByRole('searchbox', { name: 'Search releases' })
   await search.fill('scroll position')
   await expect(chat.getByText('unread messages and scroll position')).toBeVisible()
-  await expect(chat.getByText('Reserve stable100 session chat on iPhone')).toBeHidden()
+  await expect(chat.getByText('Reserve stable100 session chat on iPhone')).toHaveCount(0)
   await search.fill('viewport-fit')
+  await sheet(page).getByRole('radio', { name: 'Details', exact: true }).click()
   await expect(chat.getByText('safe-area padding for the shell and phone sheet')).toBeVisible()
   await expect(requests.getByText('Harden session requests and preserve reporter payloads')).toBeHidden()
 })

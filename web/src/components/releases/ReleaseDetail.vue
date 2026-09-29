@@ -1,30 +1,33 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { emptyNotesLine, hasUsableNotes, hiddenNoteLine, localizedPresentation, markParts, presentRelease, releasedAt, shortCommit, span, ticketsOf, WRITTEN_AFTER_LABEL, writtenAfterRelease, type Release } from '../../lib/releases'
+import { emptyNotesLine, forReading, hasUsableNotes, hiddenNoteLine, localizedPresentation, markParts, presentRelease, releasedAt, shortCommit, span, ticketsOf, writtenAfterLine, writtenAfterRelease, type Release, type ReleaseReading } from '../../lib/releases'
 import { absoluteTime, relativeTime } from '../../lib/work'
-import { useProfile } from '../../stores/profile'
 import AppIcon from '../AppIcon.vue'
 import CalendarVersion from '../CalendarVersion.vue'
 import ReleaseChanges from './ReleaseChanges.vue'
 import TicketChips from './TicketChips.vue'
-const profile = useProfile()
-const locale = computed(() => profile.profile?.locale ?? null)
 
 // One release: when it shipped, its name when it has one, what it brings, and
 // the evidence behind it. Every release reads the same (AEON-305): backfilled
 // notes and linked tickets both become blocks under Features and Fixes.
+// Highlights tells the benefit; Details tells the commits (AEON-323).
 const props = defineProps<{
   release: Release; repository: string; current: boolean; rollback: boolean; fresh: boolean
   liveSince: string | null; now: number; query: string; evidence: boolean
+  locale: string | null; reading: ReleaseReading
 }>()
+const locale = computed(() => props.locale)
 const emit = defineEmits<{ evidence: [open: boolean] }>()
 
 const at = computed(() => releasedAt(props.release))
 const reserved = computed(() => props.release.state === 'reserved')
-const lines = computed(() => presentRelease(props.release, locale.value))
+const full = computed(() => presentRelease(props.release, locale.value))
+const lines = computed(() => forReading(full.value, props.reading))
 const tickets = computed(() => ticketsOf(props.release))
 const counted = computed(() => lines.value.features.length + lines.value.fixes.length + lines.value.other.length)
+// A release whose only record is commits has nothing to highlight.
+const technicalOnly = computed(() => props.reading === 'highlights' && !full.value.features.length && !full.value.fixes.length && full.value.other.length > 0)
 // The header: theme, headline and intro when the release has them. The pills
 // and benefits are the blocks below; Git tag messages are evidence only.
 const presented = computed(() => localizedPresentation(props.release, locale.value))
@@ -95,14 +98,15 @@ defineExpose({ focus: () => heading.value?.focus({ preventScroll: false }) })
       </div>
       <p v-if="noted && !noted.items.length && !noted.gaps.length" class="none">{{ emptyNotesLine(locale) }}</p>
       <TicketChips v-if="chipTickets.length" :tickets="chipTickets" class="tickets" />
-      <ReleaseChanges v-if="counted" :presented="lines" :repository="repository" :query="query" :sole-ticket="soleTicket" />
+      <ReleaseChanges v-if="counted" :presented="lines" :repository="repository" :query="query" :sole-ticket="soleTicket" :reading="reading" />
+      <p v-else-if="technicalOnly && !(noted && !noted.items.length && !noted.gaps.length)" class="none">{{ emptyNotesLine(locale) }}</p>
       <p v-else-if="!noted" class="none">{{ reserved ? 'Nothing shipped under this version.' : 'No changes are recorded between this release and the one before it.' }}</p>
       <template v-if="noted">
         <p v-for="gap in noted.gaps" :key="gap" class="none">{{ gap }}</p>
         <p v-if="noted.hidden" class="none">{{ hiddenNoteLine(noted.hidden, locale) }}</p>
       </template>
       <p v-if="release.changes_omitted" class="none">And {{ release.changes_omitted }} more {{ release.changes_omitted === 1 ? 'change' : 'changes' }} not listed here.</p>
-      <p v-if="writtenAfterRelease(release)" class="none written-after">{{ WRITTEN_AFTER_LABEL }}</p>
+      <p v-if="writtenAfterRelease(release)" class="none written-after">{{ writtenAfterLine(locale) }}</p>
     </section>
 
     <!-- A reservation that was tagged still has evidence: often why it never published. -->

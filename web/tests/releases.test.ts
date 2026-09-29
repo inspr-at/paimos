@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { compare, displayHeadline, displayText, groupByDay, groupChanges, hasUsableNotes, matches, newSince, plainSubject, presentChanges, presentRelease, span, stats, ticketsOf, type Release } from '../src/lib/releases.ts'
+import { compare, displayHeadline, displayText, forReading, groupByDay, groupChanges, hasUsableNotes, matches, newSince, plainSubject, presentChanges, presentRelease, releaseLang, releaseReading, span, stats, technicalLine, ticketsOf, writtenAfterLine, WRITTEN_AFTER_LABEL, type Release } from '../src/lib/releases.ts'
 
 const rel = (version: string, at: string, extra: Partial<Release> = {}): Release => ({
   version, tag: `v${version}`, release_channel: 'stable', release_sequence: 1, state: 'published', reserved_at: at, tagged_at: at, published_at: at,
@@ -251,4 +251,23 @@ test('headlines read without the ticket keys their chips show, in sentence case'
   assert.equal(displayText('(AEON-75)', keys), '(AEON-75)')
   assert.equal(plainSubject('fix(AEON-72): keep unknown binaries as downloads (AEON-72)', ['AEON-72']), 'Keep unknown binaries as downloads')
   assert.equal(displayHeadline({ headline: 'wide lists (AEON-74)', tickets: ['AEON-74'], changes: [] }), 'Wide lists')
+})
+
+test('language and reading come from the release URL, else the profile and highlights', () => {
+  assert.equal(releaseLang(undefined, 'de-AT'), 'de')
+  assert.equal(releaseLang('en', 'de-AT'), 'en')
+  assert.equal(releaseLang('de', null), 'de')
+  assert.equal(releaseLang('fr', 'en-GB'), 'en')
+  assert.equal(releaseLang(['de'], null), 'de')
+  assert.equal(releaseReading(undefined), 'highlights')
+  assert.equal(releaseReading('details'), 'details')
+  assert.equal(releaseReading('technical'), 'highlights')
+  const told = presentRelease(rel('260929113854.0.0', '2026-09-29T12:00:00Z', {
+    changes: [change('a'.repeat(40), 'feat', 'feat: named'), change('b'.repeat(40), 'chore', 'P0.x: pin the vendor hash')],
+  }))
+  assert.equal(forReading(told, 'highlights').other.length, 0)
+  assert.equal(forReading(told, 'details').other.length, told.other.length)
+  assert.match(technicalLine(rel('1', '2026-09-29T12:00:00Z', { changes: [change('a'.repeat(40), 'feat', 'feat(AEON-1): phone state line'), change('b'.repeat(40), 'fix', 'fix: keep the cue')] })), /Phone state line · Keep the cue/)
+  assert.equal(writtenAfterLine('de'), 'Notizen nach dem Release geschrieben')
+  assert.equal(writtenAfterLine('en'), WRITTEN_AFTER_LABEL)
 })
