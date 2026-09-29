@@ -17,6 +17,8 @@ import (
 	"time"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/inspr-at/paimos/internal/sessionrequest"
 )
 
 const (
@@ -802,7 +804,7 @@ func (rt *runtime) heartbeatBeat(ctx context.Context, o heartbeatOptions, dep he
 		}
 	}
 	if o.PrintControls {
-		rt.printHeartbeatControls(ctx, session.id, controls)
+		rt.printHeartbeatControls(ctx, session.id, o.Harness, controls)
 	}
 	return nil
 }
@@ -872,8 +874,8 @@ func applyHeartbeatRequests(o heartbeatOptions, dep heartbeatDeps, session *hear
 				continue
 			}
 			session.disk.AppliedRenameSequence = c.Sequence
-			label := heartbeatText(c.Payload.DisplayLabel, 128)
-			if label == "" {
+			label := c.Payload.DisplayLabel
+			if !sessionrequest.ValidLabel(label) {
 				continue
 			}
 			session.disk.RequestedLabel = label
@@ -883,8 +885,8 @@ func applyHeartbeatRequests(o heartbeatOptions, dep heartbeatDeps, session *hear
 				continue
 			}
 			session.disk.AppliedModelSequence = c.Sequence
-			model, effort := heartbeatText(c.Payload.Model, 128), heartbeatText(c.Payload.ReasoningEffort, 40)
-			if model == "" || effort == "" {
+			model, effort := c.Payload.Model, c.Payload.ReasoningEffort
+			if !sessionrequest.ValidModel(o.Harness, model, effort) {
 				continue
 			}
 			session.disk.RequestedModel, session.disk.RequestedEffort = model, effort
@@ -893,7 +895,15 @@ func applyHeartbeatRequests(o heartbeatOptions, dep heartbeatDeps, session *hear
 	}
 }
 
-func (rt *runtime) printHeartbeatControls(ctx context.Context, sessionID string, controls []heartbeatControl) {
+func (rt *runtime) printHeartbeatControls(ctx context.Context, sessionID, harness string, controls []heartbeatControl) {
+	var profiles []struct {
+		ID      string `json:"id"`
+		Harness string `json:"harness"`
+		Model   string `json:"model"`
+		Effort  string `json:"effort"`
+		Enabled bool   `json:"enabled"`
+	}
+	catalogRead := false
 	for _, c := range controls {
 		if c.State != "pending" && c.State != "claimed" || !validUUID(c.ID) {
 			continue
@@ -902,14 +912,36 @@ func (rt *runtime) printHeartbeatControls(ctx context.Context, sessionID string,
 			if !heartbeatSessionRequest(c, sessionID) || !c.ExpiresAt.After(time.Now()) {
 				continue
 			}
+			if c.Kind == "rename_request" {
+				if !sessionrequest.ValidLabel(c.Payload.DisplayLabel) || c.Payload.Model != "" || c.Payload.ReasoningEffort != "" || c.Payload.AccountID != "" || c.Payload.ModelProfileID != "" {
+					continue
+				}
+			} else {
+				if c.Payload.DisplayLabel != "" || !validUUID(c.Payload.AccountID) || !validUUID(c.Payload.ModelProfileID) || !sessionrequest.ValidModel(harness, c.Payload.Model, c.Payload.ReasoningEffort) {
+					continue
+				}
+				if !catalogRead {
+					catalogRead = true
+					if err := rt.doCtx(ctx, http.MethodGet, "/api/models", nil, &profiles); err != nil {
+						profiles = nil // Fail closed; a later beat retries the catalog.
+					}
+				}
+				matched := false
+				for _, p := range profiles {
+					if strings.EqualFold(p.ID, c.Payload.ModelProfileID) && p.Enabled && p.Harness == harness && p.Model == c.Payload.Model && p.Effort == c.Payload.ReasoningEffort {
+						matched = true
+						break
+					}
+				}
+				if !matched {
+					continue
+				}
+			}
 			record := struct {
 				Type   string `json:"type"`
 				Schema string `json:"schema"`
 				heartbeatControl
 			}{"request", "aeon.session-request.v1", c}
-			if !rt.jsonOut {
-				fmt.Fprint(rt.stdout, "request ")
-			}
 			_ = json.NewEncoder(rt.stdout).Encode(record)
 		} else {
 			kind, state := heartbeatText(c.Kind, 40), heartbeatText(c.State, 40)

@@ -446,7 +446,7 @@
   },
   "harness-session": {
     "version": "harness-session/1.1",
-    "sha256": "77516a24f2c65ecbc30564eceb20ce90fc97ed7eb1bf0f0b21fb28bddfe69599",
+    "sha256": "081f8a80ddbb35a65f20882fead611454be3f18b9468921526838634f26091ec",
     "shape": {
       "GET /projects/{projectId}/harness-sessions/{sessionId} 200": {
         "properties": {
@@ -662,7 +662,6 @@
                   ]
                 },
                 "reason": {
-                  "not applied.": null,
                   "type": [
                     "string",
                     "null"
@@ -675,7 +674,9 @@
                       "type": "string"
                     },
                     "display_label": {
-                      "maxLength": 128,
+                      "maxLength": 64,
+                      "minLength": 1,
+                      "pattern": "^[A-Za-z0-9 _.:()/#-]+$",
                       "type": "string"
                     },
                     "model": {
@@ -687,7 +688,13 @@
                       "type": "string"
                     },
                     "reasoning_effort": {
-                      "maxLength": 40,
+                      "enum": [
+                        "default",
+                        "low",
+                        "medium",
+                        "high",
+                        "xhigh"
+                      ],
                       "type": "string"
                     }
                   },
@@ -1230,7 +1237,6 @@
                   ]
                 },
                 "reason": {
-                  "not applied.": null,
                   "type": [
                     "string",
                     "null"
@@ -1243,7 +1249,9 @@
                       "type": "string"
                     },
                     "display_label": {
-                      "maxLength": 128,
+                      "maxLength": 64,
+                      "minLength": 1,
+                      "pattern": "^[A-Za-z0-9 _.:()/#-]+$",
                       "type": "string"
                     },
                     "model": {
@@ -1255,7 +1263,13 @@
                       "type": "string"
                     },
                     "reasoning_effort": {
-                      "maxLength": 40,
+                      "enum": [
+                        "default",
+                        "low",
+                        "medium",
+                        "high",
+                        "xhigh"
+                      ],
                       "type": "string"
                     }
                   },

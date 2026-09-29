@@ -2453,7 +2453,7 @@ paths:
     post:
       operationId: requestHarnessSessionChange
       security: *auth
-      description: Person with harness.control permission requests a change to an unmanaged session. The immutable session UUID is its generation; expected_generation must equal it. Requests expire after ten minutes. Exact request_id replay returns the original control; divergent reuse conflicts. No metadata changes until the session acknowledges application and reports it on a heartbeat.
+      description: Person with harness.control permission requests a change to an unmanaged session. The immutable session UUID is its generation; expected_generation must equal it. Requests expire after ten minutes. Exact request_id replay returns the original control; divergent reuse conflicts. Rename labels permit only ASCII letters, digits, spaces and -_.:()/# (at most 64 characters). Model requests require a granted enabled catalog profile and a supported harness effort. No metadata changes until the session acknowledges application and reports it on a heartbeat.
       requestBody:
         required: true
         content:
@@ -2466,7 +2466,7 @@ paths:
                 request_id: {type: string, format: uuid}
                 expected_generation: {type: string, format: uuid}
                 kind: {type: string, enum: [rename_request, model_request]}
-                display_label: {type: string, minLength: 1, maxLength: 128}
+                display_label: {type: string, minLength: 1, maxLength: 64, pattern: '^[A-Za-z0-9 _.:()/#-]+$'}
                 account_id: {type: string, format: uuid}
                 model_profile_id: {type: string, format: uuid}
       responses:
@@ -6812,7 +6812,7 @@ components:
         state: {type: string, enum: [pending, claimed, completed]}
         sequence: {type: integer, format: int64}
         outcome: {type: [string, 'null'], enum: [applied, rejected, null]}
-        reason: {type: [string, 'null'], description: request_expired means expired, not applied.}
+        reason: {type: [string, 'null'], description: 'request_expired means expired, not applied.'}
         expires_at: {type: string, format: date-time}
         created_at: {type: string, format: date-time}
         claimed_at: {type: [string, 'null'], format: date-time}
@@ -6820,9 +6820,9 @@ components:
         request_payload:
           type: object
           properties:
-            display_label: {type: string, maxLength: 128}
+            display_label: {type: string, minLength: 1, maxLength: 64, pattern: '^[A-Za-z0-9 _.:()/#-]+$'}
             model: {type: string, maxLength: 128}
-            reasoning_effort: {type: string, maxLength: 40}
+            reasoning_effort: {type: string, enum: [default, low, medium, high, xhigh]}
             account_id: {type: string, format: uuid}
             model_profile_id: {type: string, format: uuid}
     HarnessRecoveryControl:

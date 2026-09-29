@@ -113,7 +113,7 @@ func (m *Module) Mount(mux *http.ServeMux) {
 }
 
 type Session struct {
-	Controls             *[]Control             `json:"controls,omitempty"`
+	Controls             []Control              `json:"controls,omitempty"`
 	ProcessOwnership     *ownedprocess.Identity `json:"process_ownership,omitempty"`
 	ProcessObservedAt    *time.Time             `json:"process_observed_at,omitempty"`
 	ArchivedAt           *time.Time             `json:"archived_at"`
@@ -718,7 +718,7 @@ func (m *Module) status(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, er
 	if err != nil {
 		return nil, err
 	}
-	s.Controls = &controls
+	s.Controls = controls
 	return s, nil
 }
 func (m *Module) orchestrator(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {

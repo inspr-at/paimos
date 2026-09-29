@@ -9,8 +9,8 @@ import (
 	"errors"
 	"net/http"
 	"strings"
-	"unicode"
 
+	"github.com/inspr-at/paimos/internal/sessionrequest"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
 	"github.com/jackc/pgx/v5"
@@ -74,14 +74,10 @@ func (m *Module) requestSessionChange(r *http.Request, tx pgx.Tx, p tenant.Princ
 	}
 	payload := SessionRequestPayload{}
 	if in.Kind == "rename_request" {
-		label, e := cleanText(in.DisplayLabel, 128, "display label")
-		if e != nil {
-			return nil, e
+		if !sessionrequest.ValidLabel(in.DisplayLabel) || in.AccountID != "" || in.ModelProfileID != "" {
+			return nil, workorders.Fail(400, "label must contain 1-64 ASCII letters, digits, spaces or -_.:()/#")
 		}
-		if label == "" || strings.ContainsFunc(in.DisplayLabel, unicode.IsControl) || in.AccountID != "" || in.ModelProfileID != "" {
-			return nil, workorders.Fail(400, "a nonempty label without control characters is required")
-		}
-		payload.DisplayLabel = label
+		payload.DisplayLabel = strings.TrimSpace(in.DisplayLabel)
 	} else {
 		if in.DisplayLabel != "" || !workorders.UUID(in.AccountID) || !workorders.UUID(in.ModelProfileID) {
 			return nil, workorders.Fail(400, "account and model profile from the catalog required")
@@ -97,6 +93,9 @@ func (m *Module) requestSessionChange(r *http.Request, tx pgx.Tx, p tenant.Princ
 		}
 		if err != nil {
 			return nil, err
+		}
+		if !sessionrequest.ValidModel(s.Harness, payload.Model, payload.ReasoningEffort) {
+			return nil, workorders.Fail(400, "model profile has an invalid model or unsupported harness effort")
 		}
 		payload.AccountID = in.AccountID
 		payload.ModelProfileID = in.ModelProfileID

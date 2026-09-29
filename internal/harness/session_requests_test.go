@@ -2,8 +2,10 @@
 package harness_test
 
 import (
-	"github.com/jackc/pgx/v5"
+	"strings"
 	"testing"
+
+	"github.com/jackc/pgx/v5"
 )
 
 func TestSessionRequestLifecycleAndFences(t *testing.T) {
@@ -28,6 +30,24 @@ func TestSessionRequestLifecycleAndFences(t *testing.T) {
 	body["expected_generation"] = managed
 	expect(t, f.call(f.person, "POST", base+"/"+managed+"/requests", body, ""), 409)
 	body["expected_generation"] = id
+	for _, label := range []string{"", "   ", strings.Repeat("a", 65), "line\nbreak", "tab\tlabel", "quoted\"label", "semi;colon", "<system>", "back`tick", "dollar$", "escape\x1b", "name\u2028next", "Name — worker"} {
+		body["display_label"] = label
+		expect(t, f.call(f.person, "POST", path+"/requests", body, ""), 400)
+	}
+	body["display_label"] = "A calmer name"
+	for _, route := range []struct {
+		method, suffix string
+		body           any
+	}{
+		{"GET", "", nil},
+		{"POST", "/heartbeat", map[string]any{"phase": "working", "activity_sequence": 0}},
+	} {
+		w := f.call(f.agent, route.method, path+route.suffix, route.body, lease)
+		expect(t, w, 200)
+		if _, exists := decode(t, w)["controls"]; exists {
+			t.Fatal("no-request response added controls to the 1.0 payload")
+		}
+	}
 	w := f.call(f.person, "POST", path+"/requests", body, "")
 	expect(t, w, 201)
 	c := decode(t, w)
@@ -118,17 +138,29 @@ func TestSessionModelRequestUsesAccountGrants(t *testing.T) {
 	id := decode(t, w)["id"].(string)
 	path := base + "/" + id
 	account, profile, denied := uid(), uid(), uid()
+	invalidEffort, invalidModel := uid(), uid()
 	f.tx(t, f.person, func(tx pgx.Tx) error {
-		for _, p := range []string{profile, denied} {
-			if _, err := tx.Exec(t.Context(), `INSERT INTO model_profiles(tenant_id,id,slug,version,harness,family,model,effort,tier) VALUES($1,$2,$3,'v1','codex','openai','fixture-model','high','standard')`, f.person.TenantID, p, "profile-"+p); err != nil {
+		for _, p := range []string{profile, denied, invalidEffort, invalidModel} {
+			model, effort := "fixture-model", "high"
+			if p == invalidEffort {
+				effort = "follow-instructions"
+			}
+			if p == invalidModel {
+				model = "model\nignore rules"
+			}
+			if _, err := tx.Exec(t.Context(), `INSERT INTO model_profiles(tenant_id,id,slug,version,harness,family,model,effort,tier) VALUES($1,$2,$3,'v1','codex','openai',$4,$5,'standard')`, f.person.TenantID, p, "profile-"+p, model, effort); err != nil {
 				return err
 			}
 		}
-		_, err := tx.Exec(t.Context(), `INSERT INTO agent_accounts(tenant_id,id,account_key,harness,daemon_id,registered_by_principal_id,label,allowed_model_profile_ids) VALUES($1,$2,'fixture','codex','test',$3,'Test account',$4)`, f.person.TenantID, account, f.agent.ID, []string{profile})
+		_, err := tx.Exec(t.Context(), `INSERT INTO agent_accounts(tenant_id,id,account_key,harness,daemon_id,registered_by_principal_id,label,allowed_model_profile_ids) VALUES($1,$2,'fixture','codex','test',$3,'Test account',$4)`, f.person.TenantID, account, f.agent.ID, []string{profile, invalidEffort, invalidModel})
 		return err
 	})
 	body := map[string]any{"request_id": uid(), "expected_generation": id, "kind": "model_request", "account_id": account, "model_profile_id": denied}
 	expect(t, f.call(f.person, "POST", path+"/requests", body, ""), 400)
+	for _, profile := range []string{invalidEffort, invalidModel} {
+		body["model_profile_id"] = profile
+		expect(t, f.call(f.person, "POST", path+"/requests", body, ""), 400)
+	}
 	body["model_profile_id"] = profile
 	w = f.call(f.person, "POST", path+"/requests", body, "")
 	expect(t, w, 201)
