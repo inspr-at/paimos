@@ -3,7 +3,7 @@ import { expect, test, type Page } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
 import { fixtures, mockWork, watchErrors } from './work-fixtures'
 import { mockSettings, settingsData } from './settings-fixtures'
-import { mockRules } from './rules-fixtures'
+import { RULE_PROJECT, mockRules } from './rules-fixtures'
 
 async function setup(page: Page, options: Parameters<typeof mockRules>[1] = {}) {
   await mockWork(page, fixtures())
@@ -188,6 +188,48 @@ test('rule details stay behind the row disclosure', async ({ page }) => {
   await expect(page.getByText('Because the record says so.')).toBeVisible()
   await expect(page.getByText('More when asked.')).toBeVisible()
   await expect(page.getByText('keep-secrets', { exact: true })).toBeVisible()
+})
+
+test('loaded-file comparison shows counts, hides rule text, and fits at 390', async ({ page }) => {
+  const sentinel = 'SYNTHETIC_RULE_PROSE_251'
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write'])
+  await setup(page, {
+    comparisons: [{
+      id: '99999999-9999-4999-8999-999999999999', harness: 'claude-code', role: 'builder', project_id: RULE_PROJECT,
+      repo_sha256: 'ab'.repeat(32), merge_sha256: 'cd'.repeat(32), merge_version: '260929120000.0.0', local_set_sha256: 'ef'.repeat(32),
+      counts: { both: 2, only_local: 1, only_merged: 0, differs: 1, files: 2 },
+      rules: [{ identity: 'keep-secrets', status: 'both', text: sentinel }], text: sentinel, created_at: '2026-09-29T12:00:00Z',
+    }],
+  })
+  await page.goto('/settings/agent-rules')
+  const panel = page.getByRole('region', { name: 'Loaded vs published' })
+  await expect(panel.getByRole('heading', { name: 'Loaded vs published' })).toBeVisible()
+  await expect(panel).toContainText('Claude · both 2, only local 1, only merged 0, differs 1')
+  await expect(panel).not.toContainText(sentinel)
+  await expect(panel).not.toContainText('keep-secrets')
+  await expect(panel.getByRole('button')).toHaveCount(0)
+  await page.setViewportSize({ width: 390, height: 844 })
+  const box = await panel.boundingBox()
+  expect(box?.width ?? 999).toBeLessThanOrEqual(390)
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth + 1)
+  expect(overflow).toBe(false)
+
+  await setup(page)
+  await page.goto('/settings/agent-rules')
+  const empty = page.getByRole('region', { name: 'Loaded vs published' })
+  await expect(empty).toContainText('No loaded-file comparison yet.')
+  await expect(empty).not.toContainText(RULE_PROJECT)
+  await empty.getByRole('button', { name: 'Copy compare command' }).click()
+  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(`aeon rules compare --harness codex --repo . --project ${RULE_PROJECT} --role builder`)
+  await expect(empty).not.toContainText(RULE_PROJECT)
+})
+
+test('a failed loaded-file comparison is one line', async ({ page }) => {
+  await setup(page, { comparisonStatus: 503 })
+  await page.goto('/settings/agent-rules')
+  const panel = page.getByRole('region', { name: 'Loaded vs published' })
+  await expect(panel).toContainText('Loaded-file comparison is unavailable.')
+  await expect(panel.getByRole('button')).toHaveCount(0)
 })
 
 test('layout holds at 1600 and 390 in light and dark', async ({ page }) => {

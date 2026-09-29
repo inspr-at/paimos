@@ -8,7 +8,8 @@ import (
 
 func TestRulesAgentRouteCeiling(t *testing.T) {
 	for _, tc := range []struct{ method, path, want string }{
-		{"GET", "/api/rules/merged", "rules.read"}, {"HEAD", "/api/rules/sets/id/versions/v", "rules.read"},
+		{"GET", "/api/rules/merged", "rules.read"}, {"GET", "/api/rules/comparisons", "rules.read"},
+		{"POST", "/api/rules/comparisons", "rules.write"}, {"HEAD", "/api/rules/sets/id/versions/v", "rules.read"},
 		{"POST", "/api/rules/sets", "rules.write"}, {"PUT", "/api/rules/sets/id/draft", "rules.write"},
 		{"POST", "/api/rules/sets/id/publish", ""}, {"POST", "/api/rules/sets/id/restore", ""}, {"POST", "/api/rules/anything", ""},
 	} {

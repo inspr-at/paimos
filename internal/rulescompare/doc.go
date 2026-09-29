@@ -13,4 +13,11 @@
 // Compare does not wait, publish, read directories, or replace active
 // instruction files. Supplied merge metadata cannot prove publication or the
 // trusted floor; rollout remains unauthorized.
+//
+// LoadChain plus DiffChain is the one-time harness comparison. It reads the
+// allowlisted CLAUDE.md / AGENTS.md chain for an explicit repo and home,
+// then diffs those rules against a merged bundle the caller already fetched.
+// Claude @path imports expand inside that repo or home root. It does not list
+// directories, call the API, publish, wait, or replace instruction files. An
+// empty home skips user-level files.
 package rulescompare

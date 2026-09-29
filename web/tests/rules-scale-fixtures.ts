@@ -275,6 +275,7 @@ export async function mockRulesScale(page: Page, options: ScaleOptions = {}): Pr
         version: live.length ? '260926090000.0.0' : 'floor-only', sha256: 'cd'.repeat(32), body: text, byte_size: Buffer.byteLength(text), rules: [], floor: live.length ? 'locked company floor' : '', valid_until: null,
       })
     }
+    if (path === '/api/rules/comparisons' && method === 'GET') return fulfil(route, { comparisons: [] })
     return fulfil(route, { error: 'unexpected rules call', code: 'not_found' }, 404)
   })
   return { calls, releasePermissions: () => release() }

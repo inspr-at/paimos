@@ -16,10 +16,28 @@ func openNoFollow(path string) (*os.File, error) {
 	return openDoctrineAt(path, unix.Openat, unix.Readlinkat)
 }
 
+func openInstructionNoFollow(path string) (*os.File, error) {
+	return openInstructionAt(path, unix.Openat, unix.Readlinkat)
+}
+
+func openContainedNoFollow(path string, roots []string) (*os.File, error) {
+	return openChecked(path, unix.Openat, unix.Readlinkat, func(p string) (string, error) {
+		return validateContainedPath(p, roots)
+	}, true)
+}
+
 // Based on internal/harness/provenance_files_unix.go. Each lookup resolves one
 // component against a pinned parent. Hooks are syscall seams for race tests.
 func openDoctrineAt(path string, openat func(int, string, int, uint32) (int, error), readlinkat func(int, string, []byte) (int, error)) (*os.File, error) {
-	clean, err := validateDoctrinePath(path)
+	return openChecked(path, openat, readlinkat, validateDoctrinePath, false)
+}
+
+func openInstructionAt(path string, openat func(int, string, int, uint32) (int, error), readlinkat func(int, string, []byte) (int, error)) (*os.File, error) {
+	return openChecked(path, openat, readlinkat, validateInstructionPath, true)
+}
+
+func openChecked(path string, openat func(int, string, int, uint32) (int, error), readlinkat func(int, string, []byte) (int, error), validate func(string) (string, error), missingOK bool) (*os.File, error) {
+	clean, err := validate(path)
 	if err != nil {
 		return nil, err
 	}
@@ -51,6 +69,9 @@ func openDoctrineAt(path string, openat func(int, string, int, uint32) (int, err
 		if e != nil {
 			if errors.Is(e, unix.ELOOP) || errors.Is(e, unix.ENOTDIR) {
 				return nil, ErrSymlink
+			}
+			if missingOK && errors.Is(e, unix.ENOENT) {
+				return nil, os.ErrNotExist
 			}
 			return nil, ErrProhibitedPath
 		}
