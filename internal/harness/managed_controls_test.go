@@ -163,6 +163,41 @@ func TestManagedControlsIdentityReplayPrivacyAndExpiry(t *testing.T) {
 	})
 }
 
+func TestManagedControlFreshnessUsesDatabaseClock(t *testing.T) {
+	// Same contract as force-stop freshness: the observation window is the
+	// database clock, including when that clock is nowhere near the host wall clock.
+	now := time.Date(2099, time.January, 1, 11, 0, 0, 0, time.UTC)
+	f := fixtureWithOwnershipClock(t, func() time.Time { return now })
+	order, run := stateRun(t, f, f.project, "running", "MCT-11")
+	lease := "managed-clock-lease-000000000000000001"
+	base := "/api/projects/" + f.project + "/harness-sessions"
+	w := f.call(f.person, "POST", base, map[string]any{"agent_principal_id": f.agent.ID, "harness": "claude", "host": "fixture", "harness_session_ref": "managed-clock-ref-0000000000000001", "worker_lease": lease, "management_mode": "managed", "role": "worker", "run_id": run, "work_order_id": order, "ticket_node_id": order, "work_shape": "ship", "advertised_capabilities": []string{"managed_control_v1", "steer", "stop"}}, "")
+	expect(t, w, 201)
+	path := base + "/" + decode(t, w)["id"].(string)
+	identity := ownedprocess.Identity{DaemonID: "fixture", Generation: strings.Repeat("a", 32), ProcessID: strings.Repeat("b", 32), RootPID: 1234, GroupID: 1234, StartedAt: now.Add(-time.Hour)}
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE agent_runs SET daemon_id=$2,daemon_generation=$3 WHERE id=$1`, run, identity.DaemonID, identity.Generation)
+		return err
+	})
+	expect(t, f.call(f.agent, "POST", path+"/heartbeat", map[string]any{"phase": "working", "activity_sequence": 1, "process_ownership": identity}, lease), 200)
+	body := map[string]any{"request_id": uid(), "kind": "steer", "text": "clock fixture", "expected_ownership": identity}
+	w = f.call(f.person, "POST", path+"/managed-controls", body, "")
+	expect(t, w, 201)
+	if strings.Contains(w.Body.String(), "clock fixture") {
+		t.Fatal("text in public response")
+	}
+	now = now.Add(46 * time.Second)
+	body["request_id"] = uid()
+	w = f.call(f.person, "POST", path+"/managed-controls", body, "")
+	expect(t, w, 409)
+	if !strings.Contains(w.Body.String(), "live sandboxed managed control unavailable") {
+		t.Fatal(w.Body.String())
+	}
+	expect(t, f.call(f.agent, "POST", path+"/heartbeat", map[string]any{"phase": "working", "activity_sequence": 2, "process_ownership": identity}, lease), 200)
+	body["request_id"] = uid()
+	expect(t, f.call(f.person, "POST", path+"/managed-controls", body, ""), 201)
+}
+
 func TestManagedControlsRefuseUnmanagedAndUnknownPolicy(t *testing.T) {
 	f := fixture(t)
 	base := "/api/projects/" + f.project + "/harness-sessions"

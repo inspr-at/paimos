@@ -107,7 +107,14 @@ func (m *Module) managedControl(r *http.Request, tx pgx.Tx, p tenant.Principal) 
 	if !errors.Is(err, pgx.ErrNoRows) {
 		return nil, err
 	}
-	if s.Harness != "claude" || !forceAvailable(s, time.Now()) || !has(s, managedControlCapability) || !has(s, in.Kind) {
+	// process_observed_at is stamped from the database clock. A container clock
+	// ahead of the API host makes that fresh stamp look future-dated to time.Now(),
+	// and forceAvailable then refuses a live session (AEON-337).
+	now, err := m.ownershipNow(r.Context(), tx)
+	if err != nil {
+		return nil, err
+	}
+	if s.Harness != "claude" || !forceAvailable(s, now) || !has(s, managedControlCapability) || !has(s, in.Kind) {
 		return nil, workorders.Fail(409, "live sandboxed managed control unavailable for this adapter")
 	}
 	if *s.ProcessOwnership != in.Ownership {
