@@ -4,8 +4,9 @@ import { computed, nextTick, onBeforeUnmount, onMounted, provide, reactive, ref,
 import { useRoute, useRouter } from 'vue-router'
 import mark from '../../assets/brand/aeon-mark.svg'
 import { brand, generationLabel, setOverlayTitle } from '../../lib/brand'
-import { groupByDay, matches, presentRelease, railLine, releaseLang, releaseReading, releasedAt, stats as statsOf, technicalLine, ticketsOf, type Release, type ReleaseLang, type ReleaseReading } from '../../lib/releases'
+import { groupByDay, matches, presentRelease, railLine, releaseLang, releaseLangKey, releaseView, releasedAt, stats as statsOf, technicalLine, ticketsOf, type Release, type ReleaseLang, type ReleaseView } from '../../lib/releases'
 import { useProfile } from '../../stores/profile'
+import { useSession } from '../../stores/session'
 import { normalKey } from '../../lib/ticketLinks'
 import { relativeTime } from '../../lib/work'
 import { isCalendar, useReleases } from '../../stores/releases'
@@ -28,22 +29,37 @@ const emit = defineEmits<{ select: [version: string]; close: []; home: []; navig
 const store = useReleases()
 const version = useVersion()
 const profile = useProfile()
+const session = useSession()
 const route = useRoute()
 const router = useRouter()
-// EN | DE and Highlights | Details live in the URL so a reload and a version
-// change keep them. Absent, the language follows the profile and the reading
-// is Highlights. The labels stay the same in both languages.
-const lang = computed(() => releaseLang(route.query.lang, profile.profile?.locale))
-const reading = computed(() => releaseReading(route.query.reading))
+// EN | DE and Highlights | Details (AEON-323). Both live in the address under
+// their own keys, since the page behind the sheet may use ?view= itself, so a
+// link, a reload and a version change keep them. The language is also this
+// person's remembered choice on this device, else the profile's. The labels
+// read the same in both languages.
+const langKey = computed(() => session.identity ? releaseLangKey(session.identity.principal.id) : '')
+const remembered = ref<string | null>(null)
+watch(langKey, key => { try { remembered.value = key ? localStorage.getItem(key) : null } catch { remembered.value = null } }, { immediate: true })
+// A choice waits here until the address has it, so two quick clicks both land.
+type SwitchKey = 'release_lang' | 'release_view'
+const pending = reactive<Partial<Record<SwitchKey, string>>>({})
+watch(() => route.query, query => { for (const key of ['release_lang', 'release_view'] as const) if (query[key] === pending[key]) delete pending[key] })
+const lang = computed(() => releaseLang(pending.release_lang ?? route.query.release_lang, profile.profile?.locale, remembered.value))
+const view = computed(() => releaseView(pending.release_view ?? route.query.release_view))
 const locale = lang
 const LANGS = ['en', 'de'] as const
-const READINGS = ['highlights', 'details'] as const
-function putQuery(key: 'lang' | 'reading', value: string) {
-  if (route.query[key] === value) return
-  void router.replace({ path: route.path, query: { ...route.query, [key]: value }, hash: route.hash })
+const VIEWS = ['highlights', 'details'] as const
+function putQuery(key: SwitchKey, value: string) {
+  if ((pending[key] ?? route.query[key]) === value) return
+  pending[key] = value
+  void router.replace({ path: route.path, query: { ...route.query, ...pending }, hash: route.hash })
 }
-function chooseLang(next: ReleaseLang) { putQuery('lang', next) }
-function chooseReading(next: ReleaseReading) { putQuery('reading', next) }
+function chooseLang(next: ReleaseLang) {
+  remembered.value = next
+  try { if (langKey.value) localStorage.setItem(langKey.value, next) } catch { /* private window: the address keeps it */ }
+  putQuery('release_lang', next)
+}
+function chooseView(next: ReleaseView) { putQuery('release_view', next) }
 function switchKeys(event: KeyboardEvent, current: string, options: readonly string[], choose: (value: string) => void) {
   const key = event.key
   if (key === 'ArrowUp' || key === 'ArrowDown') { event.preventDefault(); event.stopPropagation(); return }
@@ -78,7 +94,7 @@ const onPhone = (event: MediaQueryListEvent) => { phone.value = event.matches }
 
 const history = computed(() => store.history)
 const releases = computed(() => [...(history.value?.releases ?? [])].sort((a, b) => b.version.localeCompare(a.version)))
-const visible = computed(() => releases.value.filter(r => matches(r, filter, locale.value)))
+const visible = computed(() => releases.value.filter(r => matches(r, filter, locale.value, view.value)))
 const days = computed(() => groupByDay(visible.value, now.value))
 const order = computed(() => days.value.flatMap(d => d.releases))
 const indexOf = computed(() => new Map(order.value.map((r, i) => [r.version, i])))
@@ -225,7 +241,7 @@ function keydown(event: KeyboardEvent) {
   }
   if (typing(event.target) || event.metaKey || event.ctrlKey || event.altKey) return
   if (inPeek(event.target)) { peekKeys(event); return }
-  if (event.target instanceof Element && event.target.closest('.reading') && ['ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
+  if (event.target instanceof Element && event.target.closest('.switches') && ['ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
   const onControl = event.target instanceof HTMLElement && !!event.target.closest('button, a, summary') && event.target !== listbox.value
   switch (event.key) {
     case 'j': case 'ArrowDown': event.preventDefault(); step(1); break
@@ -301,6 +317,16 @@ const KINDS = [
             <h1 id="releases-title">{{ brand.wordmark }} releases</h1>
           </div>
           <span class="spacer" />
+          <div class="switches">
+            <div class="seg" role="radiogroup" aria-label="Language" @keydown="switchKeys($event, lang, LANGS, value => chooseLang(value as ReleaseLang))">
+              <button type="button" role="radio" :aria-checked="lang === 'en'" :tabindex="lang === 'en' ? 0 : -1" @click="chooseLang('en')">EN</button>
+              <button type="button" role="radio" :aria-checked="lang === 'de'" :tabindex="lang === 'de' ? 0 : -1" @click="chooseLang('de')">DE</button>
+            </div>
+            <div class="seg" role="radiogroup" aria-label="View" @keydown="switchKeys($event, view, VIEWS, value => chooseView(value as ReleaseView))">
+              <button type="button" role="radio" :aria-checked="view === 'highlights'" :tabindex="view === 'highlights' ? 0 : -1" @click="chooseView('highlights')">Highlights</button>
+              <button type="button" role="radio" :aria-checked="view === 'details'" :tabindex="view === 'details' ? 0 : -1" @click="chooseView('details')">Details</button>
+            </div>
+          </div>
           <label class="search-field search">
             <AppIcon name="search" :size="14" />
             <input ref="searchInput" v-model="filter.q" class="field" type="search" placeholder="Search headlines, changes, tickets" aria-label="Search releases" aria-keyshortcuts="/" @keydown="searchKeys" />
@@ -311,16 +337,6 @@ const KINDS = [
           </button>
           <button type="button" class="icon-btn flat help-btn" aria-label="Keyboard shortcuts" aria-keyshortcuts="?" :aria-expanded="help" @click="help = !help"><AppIcon name="keyboard" :size="15" /></button>
           <button type="button" class="icon-btn close-btn" aria-label="Close release history" aria-keyshortcuts="Escape" @click="emit('close')"><AppIcon name="close" :size="15" /></button>
-        </div>
-        <div class="reading">
-          <div class="seg" role="radiogroup" aria-label="Language" @keydown="switchKeys($event, lang, LANGS, value => chooseLang(value as ReleaseLang))">
-            <button type="button" role="radio" :aria-checked="lang === 'en'" :tabindex="lang === 'en' ? 0 : -1" @click="chooseLang('en')">EN</button>
-            <button type="button" role="radio" :aria-checked="lang === 'de'" :tabindex="lang === 'de' ? 0 : -1" @click="chooseLang('de')">DE</button>
-          </div>
-          <div class="seg" role="radiogroup" aria-label="View" @keydown="switchKeys($event, reading, READINGS, value => chooseReading(value as ReleaseReading))">
-            <button type="button" role="radio" :aria-checked="reading === 'highlights'" :tabindex="reading === 'highlights' ? 0 : -1" @click="chooseReading('highlights')">Highlights</button>
-            <button type="button" role="radio" :aria-checked="reading === 'details'" :tabindex="reading === 'details' ? 0 : -1" @click="chooseReading('details')">Details</button>
-          </div>
         </div>
         <p v-if="stale" class="notice" role="status">
           <AppIcon name="info" :size="14" />
@@ -406,7 +422,7 @@ const KINDS = [
                   <span v-if="r.state === 'reserved'" class="headline">Reserved, never published</span>
                   <template v-else>
                     <span v-if="railLine(r, locale).text" class="headline" :class="{ theme: railLine(r, locale).themed }"><template v-for="(p, i) in marked(railLine(r, locale).text)" :key="i"><mark v-if="p.hit">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template></span>
-                    <span v-if="reading === 'details' && technicalLine(r)" class="subjects" :title="technicalLine(r)"><template v-for="(p, i) in marked(technicalLine(r))" :key="i"><mark v-if="p.hit">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template></span>
+                    <span v-if="view === 'details' && technicalLine(r)" class="subjects" :title="technicalLine(r)"><template v-for="(p, i) in marked(technicalLine(r))" :key="i"><mark v-if="p.hit">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template></span>
                   </template>
                   <span v-if="r.state === 'published'" class="counts">
                     <template v-for="k in KINDS" :key="k.key">
@@ -425,12 +441,12 @@ const KINDS = [
           <button v-if="phone" type="button" class="btn sm ghost back" @click="showDetail = false"><AppIcon name="arrow-left" :size="13" />All releases</button>
           <ReleaseCompare
             v-if="mode === 'compare' && compareFrom" key="compare" :releases="releases" :from="compareFrom" :to="compareTo"
-            :repository="history?.repository ?? ''" :query="filter.q" :locale="locale" :reading="reading" @swap="swap" @exit="exitCompare"
+            :repository="history?.repository ?? ''" :query="filter.q" :lang="lang" :view="view" @swap="swap" @exit="exitCompare"
           />
           <ReleaseDetail
             v-else-if="selected" ref="detail" :key="selected.version" :release="selected" :repository="history?.repository ?? ''"
             :current="selected.version === current" :rollback="selected.version === rollbackTarget" :fresh="store.highlight.has(selected.version)"
-            :live-since="history?.live_since ?? null" :now="now" :query="filter.q" :evidence="evidence" :locale="locale" :reading="reading" @evidence="value => evidence = value"
+            :live-since="history?.live_since ?? null" :now="now" :query="filter.q" :evidence="evidence" :lang="lang" :view="view" @evidence="value => evidence = value"
           />
           <div v-else-if="store.loading" class="detail-loading skeleton-body" role="status" aria-label="Loading release"><span class="skeleton" /><span class="skeleton" /><span class="skeleton" /></div>
         </section>
@@ -474,9 +490,9 @@ const KINDS = [
 /* ---------- Head ---------- */
 .head { display: grid; gap: 14px; padding: 18px 0 16px; }
 .title-row { display: flex; align-items: center; gap: 12px; min-width: 0; }
-.reading { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding-left: 52px; }
-.reading .seg { flex: 0 0 auto; }
-.reading .seg button { height: 32px; padding: 0 12px; }
+/* The two switches sit with search and Compare, at the header controls' 36 px. */
+.switches { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
+.switches .seg button { height: 30px; padding: 0 12px; }
 .mark-backing { display: grid; place-items: center; text-decoration: none; transition: transform .12s ease, box-shadow .12s ease; flex-shrink: 0; width: 40px; height: 40px; border-radius: 12px; background: #f7f6f2; box-shadow: 0 0 0 1px var(--glass-rim), 0 6px 16px -10px rgba(32, 60, 61, .5); }
 .mark-backing:hover { box-shadow: 0 0 0 1px var(--glass-rim), 0 8px 20px -10px rgba(32, 60, 61, .6); transform: translateY(-1px); }
 .mark-backing:focus-visible { outline: 2px solid var(--focus, #0e6f6c); outline-offset: 2px; }
@@ -606,6 +622,11 @@ const KINDS = [
   .body { grid-template-columns: minmax(320px, 380px) minmax(0, 1fr); gap: 20px; }
   .search { width: min(280px, 30vw); }
 }
+/* Too narrow for the title, switches and search in one line: the switches take the next one. */
+@media (max-width: 1180px) and (min-width: 761px) {
+  .title-row { flex-wrap: wrap; row-gap: 10px; }
+  .switches { order: 10; flex-basis: 100%; padding-left: 52px; }
+}
 /* Too narrow for three columns: the release and its ticket side by side. */
 @media (max-width: 1279px) and (min-width: 761px) {
   .peeking .body { grid-template-columns: minmax(0, 1fr) minmax(400px, 48%); gap: 20px; }
@@ -614,8 +635,8 @@ const KINDS = [
 @media (max-width: 760px) {
   .shell { padding: 0 16px; }
   .head { gap: 10px; padding: 12px 0 10px; }
-  .reading { padding-left: 0; }
-  .reading .seg button { height: 40px; padding: 0 14px; }
+  .switches { order: 4; flex: 1 1 100%; flex-wrap: wrap; }
+  .switches .seg button { height: 38px; padding: 0 14px; }
   .title-row { flex-wrap: wrap; gap: 10px; }
   .mark-backing { width: 34px; height: 34px; border-radius: 10px; }
   .mark-backing img { width: 20px; height: 20px; }

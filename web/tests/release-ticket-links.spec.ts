@@ -11,7 +11,6 @@ const sheet = (page: Page) => page.getByRole('dialog', { name: 'PAIMOS AEON rele
 const panel = (page: Page) => sheet(page).getByRole('complementary', { name: 'Ticket details' })
 const chips = (page: Page) => sheet(page).locator('.detail .tickets')
 const TITLE = 'Connect Hetzner Cloud for managed provisioning'
-const atRelease = (version: string) => new RegExp(`/releases/${version.replaceAll('.', '\\.')}(?:\\?|$)`)
 
 // The second release names AEON-74 (no such ticket here) and PHAROS-11 (a ticket here).
 async function open(page: Page, data = fixtures()) {
@@ -22,10 +21,6 @@ async function open(page: Page, data = fixtures()) {
   await expect(chips(page).getByRole('link', { name: `PHAROS-11: ${TITLE}` })).toBeVisible()
   return { history, calls }
 }
-async function showDetails(page: Page) {
-  await sheet(page).getByRole('radio', { name: 'Details', exact: true }).click()
-  await expect(sheet(page).locator('.changes').getByRole('link', { name: `PHAROS-11: ${TITLE}` })).toBeVisible()
-}
 
 test('a ticket key opens the ticket beside the history, with one lookup for the release', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
@@ -33,20 +28,18 @@ test('a ticket key opens the ticket beside the history, with one lookup for the 
   const { history, calls } = await open(page)
   const chip = chips(page).getByRole('link', { name: `PHAROS-11: ${TITLE}` })
   await expect(chip).toHaveAttribute('href', '/p/PHAROS/PHAROS-11')
+  // The key in the list of changes is the same link.
+  await expect(sheet(page).locator('.changes').getByRole('link', { name: `PHAROS-11: ${TITLE}` })).toHaveAttribute('href', '/p/PHAROS/PHAROS-11')
   const lookups = calls.filter(call => call.path === '/api/nodes/lookup' && call.query.has('keys'))
   expect(lookups).toHaveLength(1)
   expect(lookups[0].query.get('keys')!.split(',').sort()).toEqual(['AEON-74', 'PHAROS-11'])
-  // The key in the commit list is the same link. Details reveals it, and the
-  // address change asks for access again, so the count above stays the opening lookup.
-  await showDetails(page)
-  await expect(sheet(page).locator('.changes').getByRole('link', { name: `PHAROS-11: ${TITLE}` })).toHaveAttribute('href', '/p/PHAROS/PHAROS-11')
 
   await chip.click()
   await expect(panel(page).getByRole('heading', { name: TITLE })).toBeVisible()
   await expect(panel(page).getByRole('button', { name: /Status: In progress/ })).toBeVisible()
   await expect(chip).toHaveAttribute('aria-current', 'true')
   // The history stays: same address, the list and the release beside the ticket.
-  await expect(page).toHaveURL(atRelease(history.releases[1].version))
+  await expect(page).toHaveURL(`/releases/${history.releases[1].version}`)
   await expect(sheet(page).getByRole('listbox', { name: 'Releases, newest first' })).toBeVisible()
   const detail = (await sheet(page).locator('.detail').boundingBox())!
   const aside = (await panel(page).boundingBox())!
@@ -82,7 +75,6 @@ test('keys this workspace does not have stay plain text', async ({ page }) => {
   const plain = chips(page).getByText('AEON-74', { exact: true })
   await expect(plain).toHaveJSProperty('tagName', 'SPAN')
   await expect(plain).toHaveAttribute('data-tip', 'AEON-74 is not a ticket in this AEON workspace')
-  await showDetails(page)
   await expect(sheet(page).locator('.changes').getByText('AEON-74', { exact: true }).first()).toHaveJSProperty('tagName', 'SPAN')
   // Another tracker's key (classic Paimos) likewise.
   await page.goto(`/releases/${history.releases[3].version}`)
@@ -154,9 +146,9 @@ test('another person or workspace starts without the earlier answers', async ({ 
   // Any navigation refreshes the session: step to the next release and back, one settled step at a time.
   const rows = sheet(page).getByRole('listbox', { name: 'Releases, newest first' }).getByRole('option')
   await rows.nth(2).click()
-  await expect(page).toHaveURL(atRelease(history.releases[2].version))
+  await expect(page).toHaveURL(`/releases/${history.releases[2].version}`)
   await rows.nth(1).click()
-  await expect(page).toHaveURL(atRelease(history.releases[1].version))
+  await expect(page).toHaveURL(`/releases/${history.releases[1].version}`)
   await expect(chips(page).getByText('PHAROS-11', { exact: true })).toHaveJSProperty('tagName', 'SPAN')
   await expect(sheet(page).getByRole('link', { name: new RegExp(TITLE) })).toHaveCount(0)
   expect(lookups).toBeGreaterThan(0)
@@ -188,7 +180,7 @@ test('a ticket still on its way when the person or workspace changes never shows
   await answerNothing(page)
   await page.route('**/api/me', route => route.fulfill({ json: { principal: { id: '33333333-3333-4333-8333-333333333333', name: 'Ola Nordmann', kind: 'person', roles: ['member'] }, tenant: { id: 't2', name: 'Other Studio' } } }))
   await sheet(page).getByRole('listbox', { name: 'Releases, newest first' }).getByRole('option').nth(2).click()
-  await expect(page).toHaveURL(atRelease(history.releases[2].version))
+  await expect(page).toHaveURL(`/releases/${history.releases[2].version}`)
   await expect(panel(page).getByRole('heading', { name: 'This ticket could not be opened' })).toBeVisible()
   // The held answer lands after this; it must not show.
   await page.waitForTimeout(2000)
@@ -233,7 +225,6 @@ for (const colorScheme of ['light', 'dark'] as const) {
       await page.setViewportSize(viewport)
       await page.emulateMedia({ colorScheme, reducedMotion: 'reduce' })
       await open(page)
-      await showDetails(page)
       if (viewport.width > 600) await chips(page).getByRole('link', { name: `PHAROS-11: ${TITLE}` }).hover()
       await sheet(page).locator('.changes').getByRole('link', { name: `PHAROS-11: ${TITLE}` }).click()
       await expect(panel(page).getByRole('heading', { name: TITLE })).toBeVisible()

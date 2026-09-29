@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed } from 'vue'
-import { compare, emptyNotesLine, forReading, presentChanges, releasedAt, releaseTitle, span, type Release, type ReleaseReading } from '../../lib/releases'
+import { compare, presentChanges, releasedAt, releaseTitle, span, type Release, type ReleaseLang, type ReleaseView } from '../../lib/releases'
 import { absoluteTime } from '../../lib/work'
 import AppIcon from '../AppIcon.vue'
 import CalendarVersion from '../CalendarVersion.vue'
@@ -9,20 +9,18 @@ import ReleaseChanges from './ReleaseChanges.vue'
 import TicketChips from './TicketChips.vue'
 
 // Two releases side by side: everything that shipped after the older one, up to
-// and including the newer one. The same Highlights / Details reading as one release.
-const props = defineProps<{ releases: Release[]; from: string; to: string | null; repository: string; query: string; locale: string | null; reading: ReleaseReading }>()
+// and including the newer one, in the same language and view as one release.
+const props = defineProps<{ releases: Release[]; from: string; to: string | null; repository: string; query: string; lang: ReleaseLang; view: ReleaseView }>()
 const emit = defineEmits<{ swap: []; exit: [] }>()
 const result = computed(() => props.to && props.to !== props.from ? compare(props.releases, props.from, props.to) : null)
 const count = computed(() => result.value ? result.value.groups.features.length + result.value.groups.fixes.length + result.value.groups.other.length : 0)
 // The range reads like one release: a block per linked ticket, and a chip only
 // for tickets that head no block.
-const full = computed(() => result.value ? presentChanges(result.value.changes, props.locale) : null)
-const lines = computed(() => full.value ? forReading(full.value, props.reading) : null)
-const shown = computed(() => lines.value ? lines.value.features.length + lines.value.fixes.length + lines.value.other.length : 0)
-const rangeTitle = (r: Release) => releaseTitle(r, props.locale)
+const lines = computed(() => result.value ? presentChanges(result.value.changes, props.lang) : null)
+const rangeTitle = (r: Release) => releaseTitle(r, props.lang)
 const chipTickets = computed(() => {
-  if (!result.value || !full.value) return []
-  const lined = new Set([...full.value.features, ...full.value.fixes].map(line => line.key))
+  if (!result.value || !lines.value) return []
+  const lined = new Set([...lines.value.features, ...lines.value.fixes].map(line => line.key))
   return result.value.tickets.filter(key => !lined.has(key))
 })
 const between = computed(() => {
@@ -60,8 +58,7 @@ const between = computed(() => {
           <li v-for="r in result.releases" :key="r.version"><CalendarVersion :value="r.version" class="inc-version" /><span v-if="rangeTitle(r)" class="inc-headline">{{ rangeTitle(r) }}</span><span v-else-if="releasedAt(r)" class="inc-date">{{ absoluteTime(releasedAt(r)!) }}</span></li>
         </ul>
       </section>
-      <ReleaseChanges v-if="shown && lines" :presented="lines" :repository="repository" :query="query" :reading="reading" class="changes" />
-      <p v-else-if="reading === 'highlights' && count" class="none">{{ emptyNotesLine(locale) }}</p>
+      <ReleaseChanges v-if="count && lines" :presented="lines" :repository="repository" :query="query" :view="view" :lang="lang" class="changes" />
       <p v-else class="none">No changes are recorded between these releases.</p>
     </template>
     <p v-else class="hint">

@@ -54,7 +54,8 @@ test('without a presentation the rail and titles never fall back to the tag mess
 test('search finds presentation text and marks every hit', () => {
   const named = release({ presentation })
   const filter = { q: 'einführung', features: false, fixes: false, tickets: false }
-  assert.equal(matches(named, filter), true)
+  assert.equal(matches(named, filter, 'de'), true)
+  assert.equal(matches(named, filter, 'en'), false)
   assert.equal(matches(release(), filter), false)
   assert.deepEqual(markParts('Name the name', 'NAME'), [{ text: 'Name', hit: true }, { text: ' the ', hit: false }, { text: 'name', hit: true }])
   assert.deepEqual(markParts('plain', ''), [{ text: 'plain', hit: false }])

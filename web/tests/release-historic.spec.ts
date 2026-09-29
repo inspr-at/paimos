@@ -64,23 +64,15 @@ for (const width of [1600, 390]) {
       await page.emulateMedia({ colorScheme, reducedMotion: 'reduce' })
       await open(page, V105)
       expect(await blocks(page, 'Features, 2')).toEqual([
-        ['Dead sessions tidy up', 'AEON-291', 'benefit', ''],
-        ['Rules shadow check', 'AEON-251', 'benefit', ''],
+        ['Dead sessions tidy up', 'AEON-291', 'benefit', '10 commits'],
+        ['Rules shadow check', 'AEON-251', 'benefit', '8 commits'],
       ])
       expect(await blocks(page, 'Fixes, 3')).toEqual([
-        ['Session list on phones', 'AEON-304', 'benefit', ''],
-        ['Clear Done check', 'AEON-303', 'benefit', ''],
-        ['Honest project counts', 'AEON-302', 'benefit', ''],
-      ])
-      await expect(detail(page).getByRole('region', { name: /^Other changes/ })).toHaveCount(0)
-      await sheet(page).getByRole('radio', { name: 'Details', exact: true }).click()
-      await expect(detail(page).locator('summary').first()).toHaveText('10 commits')
-      expect(await blocks(page, 'Features, 2')).toEqual([
-        ['Dead sessions tidy up', 'AEON-291', '', '10 commits'],
-        ['Rules shadow check', 'AEON-251', '', '8 commits'],
+        ['Session list on phones', 'AEON-304', 'benefit', '4 commits'],
+        ['Clear Done check', 'AEON-303', 'benefit', '3 commits'],
+        ['Honest project counts', 'AEON-302', 'benefit', '6 commits'],
       ])
       await expect(detail(page).getByRole('region', { name: 'Other changes, 9' })).toContainText('Sign and notarize darwin paimos-agentd in the release workflow')
-      await sheet(page).getByRole('radio', { name: 'Highlights', exact: true }).click()
       // The missing capture says nothing: no gap, no label, no tag message.
       await expect(detail(page)).not.toContainText('were not captured')
       await noTagTitle(page, 'release: v260929113854.0.0')
@@ -88,22 +80,20 @@ for (const width of [1600, 390]) {
 
       if (width === 390) await sheet(page).getByRole('button', { name: 'All releases' }).click()
       await sheet(page).getByRole('listbox', { name: 'Releases, newest first' }).getByRole('option').nth(1).click()
-      await expect(page).toHaveURL(new RegExp(`/releases/${V102.replaceAll('.', '\\.')}\\?reading=highlights$`))
+      await expect(page).toHaveURL(`/releases/${V102}`)
       const features = detail(page).getByRole('region', { name: 'Features, 5' })
       await expect(features.locator('.group-h .g-icon svg')).toHaveCount(1)
       expect(await blocks(page, 'Features, 5')).toEqual([
-        ['Deploy target on screen', 'AEON-211', 'benefit', ''],
-        ['Rate agent work', 'AEON-218', 'benefit', ''],
-        ['Instruction provenance', 'AEON-219', 'benefit', ''],
-        ['Merged rules at start', 'AEON-249', 'benefit', ''],
-        ['Read on every device', 'AEON-276', 'benefit', ''],
+        ['Deploy target on screen', 'AEON-211', 'benefit', '4 commits'],
+        ['Rate agent work', 'AEON-218', 'benefit', '5 commits'],
+        ['Instruction provenance', 'AEON-219', 'benefit', '3 commits'],
+        ['Merged rules at start', 'AEON-249', 'benefit', '2 commits'],
+        ['Read on every device', 'AEON-276', 'benefit', '3 commits'],
       ])
       // AEON-293 is bug-tagged, so its block is a fix.
-      expect(await blocks(page, 'Fixes, 1')).toEqual([['Readable risk chip', 'AEON-293', 'benefit', '']])
+      expect(await blocks(page, 'Fixes, 1')).toEqual([['Readable risk chip', 'AEON-293', 'benefit', '1 commit']])
       const deploy = features.getByRole('article', { name: 'Deploy target on screen' })
       await expect(deploy.locator('.benefit')).toHaveText('Every deploy approval names the server it goes to, so nothing is approved blind.')
-      await sheet(page).getByRole('radio', { name: 'Details', exact: true }).click()
-      await expect(deploy.locator('.benefit')).toHaveCount(0)
       await expect(deploy.getByText('Preserve strict handoff bytes with optional deployment targets')).toBeHidden()
       await deploy.locator('summary').click()
       await expect(deploy.getByText('Preserve strict handoff bytes with optional deployment targets')).toBeVisible()

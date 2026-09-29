@@ -198,23 +198,23 @@ export function hasUsableNotes(r: Pick<Release, 'notes'>): r is Pick<Release, 'n
 export function noteLocale(locale?: string | null): 'en' | 'de' {
   return locale?.trim().toLowerCase().startsWith('de') ? 'de' : 'en'
 }
-// The release history's own language and reading, chosen in its header (AEON-323).
-// A missing choice follows the viewer's locale and the benefit reading.
+// The release history's own language and view, chosen in its header (AEON-323).
+// The address wins, then this person's last choice on this device, then the
+// profile locale. The view is Highlights unless the address says Details.
 export type ReleaseLang = 'en' | 'de'
-export type ReleaseReading = 'highlights' | 'details'
-export function releaseLang(value: unknown, profileLocale?: string | null): ReleaseLang {
-  const raw = Array.isArray(value) ? value[0] : value
-  return raw === 'en' || raw === 'de' ? raw : noteLocale(profileLocale)
+export type ReleaseView = 'highlights' | 'details'
+const first = (value: unknown) => Array.isArray(value) ? value[0] : value
+export function releaseLang(value: unknown, profileLocale?: string | null, remembered?: string | null): ReleaseLang {
+  const raw = first(value)
+  if (raw === 'en' || raw === 'de') return raw
+  return remembered === 'en' || remembered === 'de' ? remembered : noteLocale(profileLocale)
 }
-export function releaseReading(value: unknown): ReleaseReading {
-  const raw = Array.isArray(value) ? value[0] : value
-  return raw === 'details' ? 'details' : 'highlights'
+export function releaseView(value: unknown): ReleaseView {
+  return first(value) === 'details' ? 'details' : 'highlights'
 }
-// Highlights is the benefit. Details keeps every commit, including ones no ticket tells.
-export function forReading(presented: PresentedChanges, reading: ReleaseReading): PresentedChanges {
-  return reading === 'details' ? presented : { features: presented.features, fixes: presented.fixes, other: [] }
-}
-// A short technical line for the list and the compare range: the first few subjects.
+// Where a person's language choice is kept on this device.
+export const releaseLangKey = (principalId: string) => `aeon.release-history.lang.${principalId}`
+// Details: a short technical line for a list row, the first few commit subjects.
 export function technicalLine(r: Pick<Release, 'changes'>, limit = 3): string {
   const seen = new Set<string>()
   const parts: string[] = []
@@ -229,25 +229,29 @@ export function technicalLine(r: Pick<Release, 'changes'>, limit = 3): string {
   return parts.join(' · ')
 }
 export interface LocalizedNote { pill: string; benefit: string; pillLang: 'en' | 'de'; benefitLang: 'en' | 'de' }
-// One ticket's pill and sentence in the viewer's language. An empty German
-// field falls back to English; English is never replaced by an empty string.
+// One text in the chosen language; a missing one falls back to the other
+// language, never to an empty string while either has words. The lang tells
+// the reader (and the fallback badge) which one it is.
+export function pickText(en: string | null | undefined, de: string | null | undefined, locale?: string | null): { text: string; lang: ReleaseLang } {
+  const want = noteLocale(locale)
+  const texts = { en: (en ?? '').trim(), de: (de ?? '').trim() }
+  const other: ReleaseLang = want === 'de' ? 'en' : 'de'
+  if (texts[want] || !texts[other]) return { text: texts[want], lang: want }
+  return { text: texts[other], lang: other }
+}
+// One ticket's pill and sentence in the chosen language, each falling back on its own.
 export function localizedNote(item: Pick<ReleaseNoteItem, 'pill_en' | 'pill_de' | 'benefit_en' | 'benefit_de'>, locale?: string | null): LocalizedNote {
-  const de = noteLocale(locale) === 'de'
-  const pillDe = item.pill_de.trim(), pillEn = item.pill_en.trim()
-  const benefitDe = item.benefit_de.trim(), benefitEn = item.benefit_en.trim()
-  const pillLang = de && pillDe ? 'de' : 'en'
-  const benefitLang = de && benefitDe ? 'de' : 'en'
-  return { pill: pillLang === 'de' ? pillDe : pillEn, benefit: benefitLang === 'de' ? benefitDe : benefitEn, pillLang, benefitLang }
+  const pill = pickText(item.pill_en, item.pill_de, locale), benefit = pickText(item.benefit_en, item.benefit_de, locale)
+  return { pill: pill.text, benefit: benefit.text, pillLang: pill.lang, benefitLang: benefit.lang }
 }
 export interface LocalizedPresentation { theme: string; headline: string; intro: string; themeLang: 'en' | 'de'; headlineLang: 'en' | 'de'; introLang: 'en' | 'de' }
-// A release's theme, headline and intro in the viewer's language; an empty
-// German field falls back to English. Null when the release has none.
+// A release's theme, headline and intro in the chosen language, each falling
+// back to the other one. Null when the release has no headline in either.
 export function localizedPresentation(r: Pick<Release, 'presentation'>, locale?: string | null): LocalizedPresentation | null {
   const p = r.presentation
-  if (!p || !p.headline_en?.trim()) return null
-  const de = noteLocale(locale) === 'de'
-  const pick = (en: string, deText: string) => de && deText?.trim() ? { text: deText.trim(), lang: 'de' as const } : { text: (en ?? '').trim(), lang: 'en' as const }
-  const theme = pick(p.theme_en, p.theme_de), headline = pick(p.headline_en, p.headline_de), intro = pick(p.intro_en, p.intro_de)
+  if (!p) return null
+  const theme = pickText(p.theme_en, p.theme_de, locale), headline = pickText(p.headline_en, p.headline_de, locale), intro = pickText(p.intro_en, p.intro_de, locale)
+  if (!headline.text) return null
   return { theme: theme.text, headline: headline.text, intro: intro.text, themeLang: theme.lang, headlineLang: headline.lang, introLang: intro.lang }
 }
 // The pills a release tells, features first, for its title and rail line.
@@ -383,18 +387,29 @@ export function naturalKey(a: string, b: string) { return a.localeCompare(b, 'en
 // ---------- Search and filters ----------
 export interface ReleaseFilter { q: string; features: boolean; fixes: boolean; tickets: boolean }
 export const ticketsOf = (r: Release) => [...new Set(hasUsableNotes(r) ? r.notes.items.map(item => item.key) : [...r.tickets, ...r.changes.flatMap(c => c.tickets)])].sort(naturalKey)
-// The filters follow the blocks the detail and the row counts show.
-export function matches(r: Release, f: ReleaseFilter, locale?: string | null) {
+// The filters follow the blocks the detail and the row counts show. Search
+// looks at the text the chosen language and view show (AEON-323): both views
+// show the name, pills, ticket keys and commit subjects (Highlights opens a
+// folded list on a hit); Highlights adds the benefits, Details the evidence's
+// tag message.
+export function matches(r: Release, f: ReleaseFilter, locale?: string | null, view: ReleaseView = 'highlights') {
   const presented = presentRelease(r, locale)
   if (f.features && !presented.features.length) return false
   if (f.fixes && !presented.fixes.length) return false
   if (f.tickets && !ticketsOf(r).length) return false
   const q = f.q.trim().toLowerCase()
   if (!q) return true
-  const p = r.presentation
-  if (p && [p.theme_en, p.theme_de, p.headline_en, p.headline_de, p.intro_en, p.intro_de].some(text => (text ?? '').toLowerCase().includes(q))) return true
-  return !!r.notes?.items.some(item => [item.pill_en, item.pill_de, item.benefit_en, item.benefit_de, item.key].some(text => text.toLowerCase().includes(q))) || r.version.includes(q) || r.headline.toLowerCase().includes(q) || r.tickets.some(t => t.toLowerCase().includes(q))
-    || r.changes.some(c => c.subject.toLowerCase().includes(q) || c.tickets.some(t => t.toLowerCase().includes(q)) || (c.linked_tickets ?? []).some(t => [t.pill_en, t.pill_de, t.benefit_en, t.benefit_de, t.key].some(text => text.toLowerCase().includes(q))))
+  const lines = [...presented.features, ...presented.fixes]
+  const named = localizedPresentation(r, locale)
+  const commits = [...lines.flatMap(line => line.commits), ...presented.other]
+  const texts = [
+    r.version, ...ticketsOf(r), ...r.tickets,
+    ...(named ? [named.theme, named.headline, named.intro] : []),
+    ...lines.map(line => line.pill || line.benefit),
+    ...(view === 'highlights' ? lines.map(line => line.benefit) : [r.headline]),
+    ...commits.flatMap(c => [plainSubject(c.subject, c.tickets), ...c.tickets]),
+  ]
+  return texts.some(text => text.toLowerCase().includes(q))
 }
 
 // ---------- New since the last visit ----------
