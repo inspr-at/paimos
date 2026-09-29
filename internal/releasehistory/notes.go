@@ -156,7 +156,6 @@ func NotesFromSnapshot(raw []byte, version, source string) (*Notes, error) {
 			_ = json.Unmarshal(t.Fields, &flags)
 			if flags.Hidden {
 				out.Hidden++
-				out.Gaps = append(out.Gaps, "A hidden member was unavailable at capture.")
 			} else {
 				out.Gaps = append(out.Gaps, label+": "+t.Unavailable)
 			}
@@ -171,14 +170,11 @@ func NotesFromSnapshot(raw []byte, version, source string) (*Notes, error) {
 			continue
 		}
 		hidden, _ := fields["hide_from_release_notes"].(bool)
-		issues := ticketbenefits.Issues(t.Fields)
 		if hidden {
 			out.Hidden++
-			if len(issues) > 0 {
-				out.Gaps = append(out.Gaps, "A hidden ticket has incomplete benefit fields.")
-			}
 			continue
 		}
+		issues := ticketbenefits.Issues(t.Fields)
 		if len(issues) > 0 {
 			out.Gaps = append(out.Gaps, label+": "+strings.Join(issues, "; "))
 			continue

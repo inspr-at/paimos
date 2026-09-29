@@ -207,3 +207,39 @@ for (const width of [1600, 390]) {
     }
   })
 }
+
+for (const width of [1600, 390]) {
+  test(`internal-only releases keep the tag headline and quiet detail at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
+    // Cover both a hidden-only capture and an empty internal capture.
+    for (const hidden of [2, 0]) {
+      await openNotedRelease(page, { ...benefitNotes(), hidden, items: [], gaps: [] })
+      const sheet = page.getByRole('dialog', { name: 'PAIMOS AEON releases' })
+      const row = page.getByRole('listbox', { name: 'Releases, newest first' }).getByRole('option').first()
+      const notes = page.getByRole('region', { name: 'Release notes' })
+      await expect(notes.getByText('Internal changes only.', { exact: true })).toBeVisible()
+      await expect(notes.locator('.note-item')).toHaveCount(0)
+      await expect(sheet).not.toContainText('No public release notes')
+      await expect(notes).not.toContainText('is required')
+      if (width === 390) await sheet.getByRole('button', { name: 'All releases' }).click()
+      await expect(row.locator('.headline')).toHaveText('Time entry editing (AEON-75)')
+      await expect(row.locator('.headline')).not.toBeEmpty()
+      await expect(row.getByText('Historical tag headline')).toHaveCount(0)
+      if (process.env.SHOTS && hidden && width === 390) {
+        for (const theme of ['light', 'dark']) {
+          await page.evaluate(theme => { document.documentElement.dataset.theme = theme }, theme)
+          await page.screenshot({ path: `${process.env.SHOTS}/internal-list-${width}-${theme}.png` })
+        }
+      }
+      if (width === 390) await row.click()
+      for (const theme of ['light', 'dark']) {
+        await page.evaluate(theme => { document.documentElement.dataset.theme = theme }, theme)
+        await expect(notes.getByText('Internal changes only.', { exact: true })).toBeVisible()
+        expect(await sheet.evaluate(el => el.scrollWidth > el.clientWidth + 1)).toBeFalsy()
+        if (process.env.SHOTS && hidden) {
+          await page.screenshot({ path: `${process.env.SHOTS}/internal-${width}-${theme}.png` })
+        }
+      }
+    }
+  })
+}

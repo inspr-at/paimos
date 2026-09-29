@@ -49,7 +49,7 @@ func TestNotesSnapshotLanguagesHiddenGapsAndDuplicates(t *testing.T) {
 	s.Tickets = append(s.Tickets, unavailable)
 	raw, _ = json.Marshal(s)
 	notes, err = NotesFromSnapshot(raw, notesVersion, "fixture")
-	if err != nil || notes.Hidden != 2 {
+	if err != nil || notes.Hidden != 2 || len(notes.Gaps) != 1 {
 		t.Fatalf("hidden unavailable: %+v %v", notes, err)
 	}
 	encoded, _ = json.Marshal(notes)
@@ -196,5 +196,20 @@ func TestManifestSnapshotRequiresExplicitBackfillProvenance(t *testing.T) {
 		if _, err := NotesFromSnapshot(raw, notesVersion, "database-snapshot"); err == nil {
 			t.Fatal("incomplete manifest provenance accepted")
 		}
+	}
+}
+
+func TestHiddenSnapshotMembersOnlyContributeToCount(t *testing.T) {
+	for _, unavailable := range []string{"", "Member was deleted before capture."} {
+		t.Run(unavailable, func(t *testing.T) {
+			s := noteFixture()
+			s.Tickets[0].Fields = json.RawMessage(`{"hide_from_release_notes":true}`)
+			s.Tickets[0].Unavailable = unavailable
+			raw, _ := json.Marshal(s)
+			notes, err := NotesFromSnapshot(raw, notesVersion, "fixture")
+			if err != nil || notes.Hidden != 1 || len(notes.Items) != 0 || len(notes.Gaps) != 0 {
+				t.Fatalf("hidden-only notes: %+v %v", notes, err)
+			}
+		})
 	}
 }

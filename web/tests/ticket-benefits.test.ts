@@ -2,7 +2,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { benefitDraft, benefitIssues, completedTicketState } from '../src/lib/ticketBenefits.ts'
-import { displayHeadline, hasUsableNotes, historicalTagFallback, localizedNote, noteLocale, ticketsOf, matches, writtenAfterRelease, WRITTEN_AFTER_LABEL, type Release } from '../src/lib/releases.ts'
+import { displayHeadline, emptyNotesLine, hasUsableNotes, historicalTagFallback, localizedNote, noteLocale, ticketsOf, matches, writtenAfterRelease, WRITTEN_AFTER_LABEL, type Release } from '../src/lib/releases.ts'
 const fields = { pill_en: 'Clear release notes', pill_de: 'Verständliche Release Notes', benefit_en: 'Tickets explain what you gain.', benefit_de: 'Tickets erklären den Nutzen.' }
 test('benefit completion covers product completion states without guessing custom or cancelled states', () => {
   for (const state of ['done', 'accepted', 'delivered']) assert.equal(completedTicketState(state), true, state)
@@ -37,8 +37,10 @@ test('snapshot notes displace Git headlines and ticket guesses while archives st
   assert.deepEqual(ticketsOf(r), [])
   assert.equal(hasUsableNotes(r), true) // An incomplete snapshot cannot fall back to Git benefits.
   r.notes!.gaps = []
-  assert.equal(displayHeadline(r), 'No public release notes')
-  assert.equal(historicalTagFallback(r), false) // Captured empty membership does not borrow the tag headline.
+  assert.equal(displayHeadline(r), 'Invented headline')
+  assert.equal(emptyNotesLine(), 'Internal changes only.')
+  assert.equal(emptyNotesLine('de-AT'), 'Nur interne Änderungen.')
+  assert.equal(historicalTagFallback(r), false) // A known internal release does not claim its snapshot is missing.
   assert.deepEqual(ticketsOf(r), []) // Hidden-only/empty membership stays authoritative.
   r.notes = { source: 'unavailable', fallback: 'historical-tag-headline', snapshot_sha256: '', captured_at: null, release_revision: 0, hidden: 0, items: [], gaps: ['missing'] }
   assert.equal(historicalTagFallback(r), true)

@@ -2,13 +2,16 @@
 package releases
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -24,8 +27,8 @@ import (
 func TestManifestBackfillServedScopedImmutableAndIdempotent(t *testing.T) {
 	f := ticketSetup(t)
 	dbtest.BindRole(t, f.db, f.person.TenantID, f.person.ID, "admin")
-	visible := f.existing("ticket", f.project, "Visible", "open")
-	hidden := f.existing("ticket", f.project, "Hidden", "open")
+	visible := f.existing("ticket", f.project, "Visible", "done")
+	hidden := f.existing("ticket", f.project, "Hidden", "accepted")
 	var visibleKey, hiddenKey string
 	fields := `{"pill_en":"Clear benefits","pill_de":"Klare Vorteile","benefit_en":"You see what changed.","benefit_de":"Sie sehen die Änderungen.","private_field":"must not escape"}`
 	f.tx(func(tx pgx.Tx) error {
@@ -273,5 +276,149 @@ func TestNativeBackfillKeepsLegacyVersions(t *testing.T) {
 	}
 	if body := snapshotBody(t, f, f.release); !strings.Contains(body, `"version": "1.2.3"`) || !strings.Contains(body, `"version_scheme": "legacy"`) {
 		t.Fatal(body)
+	}
+}
+
+func TestManifestBackfillExcludesUnfinishedTicketsAndReportsPublicGaps(t *testing.T) {
+	f := ticketSetup(t)
+	dbtest.BindRole(t, f.db, f.person.TenantID, f.person.ID, "admin")
+	var keys, excluded, completed, gaps []string
+	for _, state := range []string{"done", "accepted", "delivered", "open", "in_progress", "blocked", "new", "cancelled", "archived", "custom-complete"} {
+		id := f.existing("ticket", f.project, state, state)
+		var key string
+		f.tx(func(tx pgx.Tx) error {
+			return tx.QueryRow(t.Context(), `SELECT key FROM nodes WHERE id=$1`, id).Scan(&key)
+		})
+		keys = append(keys, key)
+		switch state {
+		case "done", "accepted", "delivered":
+			completed = append(completed, key)
+			if state == "accepted" {
+				f.tx(func(tx pgx.Tx) error {
+					_, err := tx.Exec(t.Context(), `UPDATE nodes SET fields='{"hide_from_release_notes":true}' WHERE id=$1`, id)
+					return err
+				})
+			} else {
+				gaps = append(gaps, key)
+			}
+		default:
+			excluded = append(excluded, key)
+		}
+	}
+	slices.Sort(excluded)
+	slices.Sort(gaps)
+	slices.Sort(completed)
+	when := time.Date(2026, 1, 15, 10, 0, 0, 0, time.UTC)
+	const version = "260115100000.0.0"
+	// Include duplicates from both manifest sources; they remain one member.
+	opts := NoteBackfillOptions{Project: f.project, History: releasehistory.History{Releases: []releasehistory.Release{{Version: version, State: releasehistory.StatePublished, TaggedAt: &when, Tickets: keys, Changes: []releasehistory.Change{{Tickets: keys}}}}}}
+	for _, apply := range []bool{false, true} {
+		report, err := BackfillNoteSnapshots(t.Context(), f.db.App, f.person.TenantID, f.person.ID, apply, opts)
+		if err != nil || len(report.Planned) != 1 {
+			t.Fatalf("apply=%v report=%+v error=%v", apply, report, err)
+		}
+		item := report.Planned[0]
+		if item.Tickets != 3 || item.Hidden != 1 || item.Notes != 0 || !slices.Equal(item.ExcludedKeys, excluded) || !slices.Equal(item.GapKeys, gaps) {
+			t.Fatalf("apply=%v item=%+v", apply, item)
+		}
+		var stored int
+		f.tx(func(tx pgx.Tx) error {
+			return tx.QueryRow(t.Context(), `SELECT count(*) FROM release_manifest_note_snapshots`).Scan(&stored)
+		})
+		if (!apply && stored != 0) || (apply && stored != 1) {
+			t.Fatalf("apply=%v stored=%d", apply, stored)
+		}
+	}
+	var raw []byte
+	f.tx(func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `SELECT snapshot FROM release_manifest_note_snapshots WHERE version=$1`, version).Scan(&raw)
+	})
+	var snap releasehistory.NoteSnapshot
+	if err := json.Unmarshal(raw, &snap); err != nil {
+		t.Fatal(err)
+	}
+	var captured []string
+	for i, ticket := range snap.Tickets {
+		captured = append(captured, ticket.Key)
+		if ticket.Position != i {
+			t.Fatalf("non-contiguous position: %+v", ticket)
+		}
+	}
+	if !slices.Equal(captured, completed) {
+		t.Fatalf("captured=%v want=%v", captured, completed)
+	}
+	notes, err := releasehistory.NotesFromSnapshot(raw, version, "test")
+	if err != nil || notes.Hidden != 1 || len(notes.Gaps) != 2 {
+		t.Fatalf("notes=%+v error=%v", notes, err)
+	}
+}
+
+func TestMalformedBackfillFallsBackOnlyForItsRelease(t *testing.T) {
+	f := ticketSetup(t)
+	dbtest.BindRole(t, f.db, f.person.TenantID, f.person.ID, "admin")
+	when := time.Date(2026, 1, 15, 10, 0, 0, 0, time.UTC)
+	const good = "260115100000.0.0"
+	const bad = "260115110000.0.0"
+	history := releasehistory.History{Releases: []releasehistory.Release{
+		{Version: bad, State: releasehistory.StatePublished, TaggedAt: &when, Headline: "Historical bad headline"},
+		{Version: good, State: releasehistory.StatePublished, TaggedAt: &when, Headline: "Good headline"},
+	}}
+	_, err := BackfillNoteSnapshots(t.Context(), f.db.App, f.person.TenantID, f.person.ID, true, NoteBackfillOptions{Project: f.project, Release: good, History: history})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Valid database identity, but invalid snapshot revision. Insert once, never
+	// disable the immutability trigger or rewrite an existing capture.
+	f.tx(func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO release_manifest_note_snapshots(tenant_id,project_node_id,version,snapshot)
+   SELECT tenant_id,project_node_id,$2,jsonb_set(jsonb_set(snapshot,'{version}',to_jsonb($2::text)),'{release_revision}','0')
+   FROM release_manifest_note_snapshots WHERE version=$1`, good, bad)
+		return err
+	})
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+	mux := http.NewServeMux()
+	releasehistory.NewWith(history, good).WithBackfills(f.db.App, f.project).Mount(mux)
+	for _, path := range []string{"/api/releases", "/api/releases/" + good, "/api/releases/" + bad} {
+		response := httptest.NewRecorder()
+		mux.ServeHTTP(response, httptest.NewRequest("GET", path, nil).WithContext(tenant.WithPrincipal(t.Context(), f.person)))
+		if response.Code != http.StatusOK {
+			t.Fatalf("%s: %d %s", path, response.Code, response.Body.String())
+		}
+		var releases []releasehistory.Release
+		if path == "/api/releases" {
+			var body releasehistory.Response
+			if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+				t.Fatal(err)
+			}
+			releases = body.Releases
+			if len(releases) != 2 {
+				t.Fatal("release dropped")
+			}
+		} else {
+			var body releasehistory.Release
+			if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+				t.Fatal(err)
+			}
+			releases = []releasehistory.Release{body}
+		}
+		for _, rel := range releases {
+			if rel.Version == good && (rel.Notes == nil || rel.Notes.Source != "database-snapshot" || !rel.Notes.WrittenAfterRelease) {
+				t.Fatalf("good release lost notes: %+v", rel)
+			}
+			if rel.Version == bad && (rel.Notes == nil || rel.Notes.Fallback != releasehistory.HistoricalFallback || rel.Headline != "Historical bad headline") {
+				t.Fatalf("bad release lacks fallback: %+v", rel)
+			}
+		}
+	}
+	if !strings.Contains(logs.String(), "invalid release note snapshot") || !strings.Contains(logs.String(), bad) {
+		t.Fatalf("missing diagnostic: %s", logs.String())
+	}
+	for _, rel := range history.Releases {
+		if rel.Notes != nil {
+			t.Fatal("shared history mutated")
+		}
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -120,7 +121,11 @@ func (m *Module) historyFor(ctx context.Context) (History, error) {
 			}
 			notes, err := NotesFromSnapshot(raw, rel.Version, "database-snapshot")
 			if err != nil {
-				return err
+				// A malformed stored capture must not hide every other release.
+				// Log identifiers only: decoder errors can include private field names.
+				slog.WarnContext(ctx, "invalid release note snapshot; using historical fallback", "version", rel.Version, "project_node_id", project)
+				h.Releases[i].Notes = MissingNotes()
+				continue
 			}
 			h.Releases[i].Notes = notes
 		}

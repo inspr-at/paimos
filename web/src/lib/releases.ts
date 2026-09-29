@@ -107,7 +107,7 @@ export function displayText(text: string, keys: Iterable<string>) {
   return sentence(out || text)
 }
 // Regenerated archives without snapshots keep their historical display. A real
-// snapshot remains authoritative even when empty, hidden or incomplete.
+// snapshot keeps its membership authoritative even when empty, hidden or incomplete.
 export function hasUsableNotes(r: Pick<Release, 'notes'>): r is Pick<Release, 'notes'> & { notes: ReleaseNotes } {
   return !!r.notes && r.notes.source !== 'unavailable'
 }
@@ -143,13 +143,21 @@ export function historicalTagFallback(r: Pick<Release, 'notes' | 'headline'>): b
   return r.notes.fallback === HISTORICAL_TAG_FALLBACK || r.notes.source === 'unavailable'
 }
 export function emptyNotesLine(locale?: string | null) {
-  return noteLocale(locale) === 'de' ? 'Keine öffentlichen Release Notes.' : 'No public release notes.'
+  return noteLocale(locale) === 'de' ? 'Nur interne Änderungen.' : 'Internal changes only.'
 }
 export function hiddenNoteLine(count: number, locale?: string | null) {
   if (noteLocale(locale) === 'de') return count === 1 ? 'Ein Ticket ist in den Release Notes ausgeblendet.' : `${count} Tickets sind in den Release Notes ausgeblendet.`
   return count === 1 ? 'One ticket is hidden from release notes.' : `${count} tickets are hidden from release notes.`
 }
-export const displayHeadline = (r: Pick<Release, 'headline' | 'tickets' | 'changes' | 'notes'>, locale?: string | null) => hasUsableNotes(r) ? (r.notes.items.map(item => localizedNote(item, locale).pill).filter(Boolean).join(' · ') || (r.notes.gaps.length ? 'Release notes unavailable' : 'No public release notes')) : displayText(r.headline, ticketsOf(r as Release))
+export function displayHeadline(r: Pick<Release, 'headline' | 'tickets' | 'changes' | 'notes'>, locale?: string | null) {
+  if (hasUsableNotes(r)) {
+    const pills = r.notes.items.map(item => localizedNote(item, locale).pill).filter(Boolean).join(' · ')
+    if (pills) return pills
+    if (r.notes.gaps.length) return 'Release notes unavailable'
+    // Internal-only releases keep a useful list title; snapshot membership still wins.
+  }
+  return displayText(r.headline, ticketsOf(r as Release))
+}
 // A subject without its conventional prefix ("feat(AEON-74): wide lists" reads "Wide lists").
 export function plainSubject(subject: string, tickets: string[] = []) {
   const m = /^[a-z]+(?:\([^)]*\))?!?:\s*(.+)$/.exec(subject)

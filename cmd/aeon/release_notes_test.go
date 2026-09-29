@@ -97,7 +97,7 @@ func TestReleaseNotesBackfillManifestCLISelectors(t *testing.T) {
 		if err := tx.QueryRow(ctx, `INSERT INTO nodes(tenant_id,kind_id,key,title,fields) SELECT $1,id,'PRJ-1','Project','{"project_key":"CLI"}'::jsonb FROM node_kinds WHERE slug='project' RETURNING nodes.id::text`, tenantID).Scan(&project); err != nil {
 			return err
 		}
-		return tx.QueryRow(ctx, `INSERT INTO nodes(tenant_id,kind_id,key,title,parent_id,fields) SELECT $1,id,'CLI-1','Ticket',$2,'{"pill_en":"Clear changes","pill_de":"Klare Änderungen","benefit_en":"You see benefits.","benefit_de":"Sie sehen Vorteile."}'::jsonb FROM node_kinds WHERE slug='ticket' RETURNING nodes.id::text`, tenantID, project).Scan(&ticket)
+		return tx.QueryRow(ctx, `INSERT INTO nodes(tenant_id,kind_id,key,title,parent_id,state,fields) SELECT $1,id,'CLI-1','Ticket',$2,'done','{"pill_en":"Clear changes","pill_de":"Klare Änderungen","benefit_en":"You see benefits.","benefit_de":"Sie sehen Vorteile."}'::jsonb FROM node_kinds WHERE slug='ticket' RETURNING nodes.id::text`, tenantID, project).Scan(&ticket)
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -119,7 +119,7 @@ func TestReleaseNotesBackfillManifestCLISelectors(t *testing.T) {
 	if err := releaseNotesBackfillWithHistory(ctx, args, &out, load); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out.String(), `"notes_count":1`) || !strings.Contains(out.String(), `"inserted":0`) || strings.Contains(out.String(), "260115110000.0.0") {
+	if !strings.Contains(out.String(), `"excluded_keys":[]`) || !strings.Contains(out.String(), `"gap_keys":[]`) || !strings.Contains(out.String(), `"notes_count":1`) || !strings.Contains(out.String(), `"inserted":0`) || strings.Contains(out.String(), "260115110000.0.0") {
 		t.Fatal(out.String())
 	}
 	out.Reset()

@@ -41,6 +41,8 @@ type NoteBackfillItem struct {
 	Tickets          int       `json:"ticket_count"`
 	Notes            int       `json:"notes_count"`
 	Hidden           int       `json:"hidden_count"`
+	ExcludedKeys     []string  `json:"excluded_keys"`
+	GapKeys          []string  `json:"gap_keys"`
 	MembershipSource string    `json:"membership_source"`
 }
 
@@ -108,7 +110,7 @@ func BackfillNoteSnapshots(ctx context.Context, pool *pgxpool.Pool, tenantID, ac
 				return err
 			}
 		}
-		save := func(snap releasehistory.NoteSnapshot) error {
+		save := func(snap releasehistory.NoteSnapshot, excluded []string) error {
 			snap.Label = releasehistory.BackfillLabel
 			snap.Backfilled = true
 			snap.ActorID = actorID
@@ -119,13 +121,13 @@ func BackfillNoteSnapshots(ctx context.Context, pool *pgxpool.Pool, tenantID, ac
 			}
 			// Native journey captures can have legacy or unassigned versions.
 			// Do not apply the calendar-only tag import validator to those rows.
-			notesCount, hiddenCount := snapshotNoteCounts(snap.Tickets)
+			notesCount, hiddenCount, gapKeys := snapshotNoteCounts(snap.Tickets)
 			if snap.MembershipSource == releasehistory.ManifestMembershipSource {
 				if _, err := releasehistory.NotesFromSnapshot(raw, snap.Version, "backfill"); err != nil {
 					return err
 				}
 			}
-			item := NoteBackfillItem{ProjectID: projectID, ReleaseID: snap.ReleaseID, Version: snap.Version, ReleasedAt: *snap.ReleasedAt, Revision: snap.Revision, Tickets: len(snap.Tickets), Notes: notesCount, Hidden: hiddenCount, MembershipSource: snap.MembershipSource}
+			item := NoteBackfillItem{ProjectID: projectID, ReleaseID: snap.ReleaseID, Version: snap.Version, ReleasedAt: *snap.ReleasedAt, Revision: snap.Revision, Tickets: len(snap.Tickets), Notes: notesCount, Hidden: hiddenCount, MembershipSource: snap.MembershipSource, ExcludedKeys: append([]string{}, excluded...), GapKeys: gapKeys}
 			if apply {
 				var tag pgconn.CommandTag
 				if snap.MembershipSource == releasehistory.ManifestMembershipSource {
@@ -211,7 +213,7 @@ func BackfillNoteSnapshots(ctx context.Context, pool *pgxpool.Pool, tenantID, ac
 				return err
 			}
 			snap.ReleasedAt = n.released
-			if err := save(snap); err != nil {
+			if err := save(snap, nil); err != nil {
 				return err
 			}
 		}
@@ -246,11 +248,11 @@ func BackfillNoteSnapshots(ctx context.Context, pool *pgxpool.Pool, tenantID, ac
 				report.Skipped = append(report.Skipped, NoteBackfillSkip{ProjectID: projectID, Version: rel.Version, Reason: "Original release time is unavailable."})
 				continue
 			}
-			snap, err := manifestSnapshot(ctx, tx, actor, projectID, rel, *released)
+			snap, excluded, err := manifestSnapshot(ctx, tx, actor, projectID, rel, *released)
 			if err != nil {
 				return err
 			}
-			if err := save(snap); err != nil {
+			if err := save(snap, excluded); err != nil {
 				return err
 			}
 		}
@@ -285,44 +287,51 @@ func backfillAuthorize(ctx context.Context, tx pgx.Tx, actor tenant.Principal) e
 	return nil
 }
 
-func manifestSnapshot(ctx context.Context, tx pgx.Tx, actor tenant.Principal, projectID string, rel releasehistory.Release, released time.Time) (releasehistory.NoteSnapshot, error) {
+func manifestSnapshot(ctx context.Context, tx pgx.Tx, actor tenant.Principal, projectID string, rel releasehistory.Release, released time.Time) (releasehistory.NoteSnapshot, []string, error) {
 	snap := releasehistory.NoteSnapshot{Schema: releasehistory.SnapshotSchema, TenantID: actor.TenantID, ProjectID: projectID, Version: rel.Version, VersionScheme: "inspr-calendar-v2", Revision: 1, ReleasedAt: &released, MembershipSource: releasehistory.ManifestMembershipSource, FieldSource: releasehistory.FieldSource, Tickets: []releasehistory.NoteTicket{}}
+	excluded := []string{}
 	keys := append([]string{}, rel.Tickets...)
 	for _, c := range rel.Changes {
 		keys = append(keys, c.Tickets...)
 	}
 	// Capture the complete field set in one MVCC statement. Only current tickets
 	// in this tenant/project can resolve the manifest's approximate membership.
-	rows, err := tx.Query(ctx, `SELECT n.id::text,n.key,n.updated_at,
+	rows, err := tx.Query(ctx, `SELECT n.id::text,n.key,n.updated_at,coalesce(n.state,''),
   (SELECT coalesce(jsonb_object_agg(f.key,f.value),'{}'::jsonb) FROM jsonb_each(n.fields) f WHERE f.key IN ('pill_en','pill_de','benefit_en','benefit_de','hide_from_release_notes')),
   statement_timestamp()
   FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
   WHERE n.project_id=$1 AND n.key=ANY($2::text[]) AND n.deleted_at IS NULL AND k.slug='ticket'
   ORDER BY n.key,n.id`, projectID, keys)
 	if err != nil {
-		return snap, err
+		return snap, excluded, err
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var ticket releasehistory.NoteTicket
-		if err := rows.Scan(&ticket.ID, &ticket.Key, &ticket.UpdatedAt, &ticket.Fields, &snap.CapturedAt); err != nil {
-			return snap, err
+		var state string
+		if err := rows.Scan(&ticket.ID, &ticket.Key, &ticket.UpdatedAt, &state, &ticket.Fields, &snap.CapturedAt); err != nil {
+			return snap, excluded, err
+		}
+		if !ticketbenefits.Completed(state) {
+			excluded = append(excluded, ticket.Key)
+			continue
 		}
 		ticket.Position = len(snap.Tickets)
 		snap.Tickets = append(snap.Tickets, ticket)
 	}
 	if err := rows.Err(); err != nil {
-		return snap, err
+		return snap, excluded, err
 	}
 	if snap.CapturedAt.IsZero() {
 		err = tx.QueryRow(ctx, `SELECT statement_timestamp()`).Scan(&snap.CapturedAt)
 	}
-	return snap, err
+	return snap, excluded, err
 }
 
 // Both capture queries return unique ticket identities. Count their usable
 // notes with the same field validator as the release history renderer.
-func snapshotNoteCounts(tickets []releasehistory.NoteTicket) (notes, hidden int) {
+func snapshotNoteCounts(tickets []releasehistory.NoteTicket) (notes, hidden int, gapKeys []string) {
+	gapKeys = []string{}
 	for _, ticket := range tickets {
 		var flags struct {
 			Hidden bool `json:"hide_from_release_notes"`
@@ -334,6 +343,8 @@ func snapshotNoteCounts(tickets []releasehistory.NoteTicket) (notes, hidden int)
 		}
 		if ticket.Unavailable == "" && len(ticketbenefits.Issues(ticket.Fields)) == 0 {
 			notes++
+		} else {
+			gapKeys = append(gapKeys, ticket.Key)
 		}
 	}
 	return
