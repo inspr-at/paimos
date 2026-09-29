@@ -348,6 +348,14 @@ func TestSupervisorUsageArchiveDetachesWithoutStoppingRun(t *testing.T) {
 	s, api, proc := testSupervisor(t)
 	defer s.Close(context.Background())
 	var calls atomic.Int32
+	// The usage POST blocks in the handler until release. finish therefore
+	// runs while that write is in flight; the 410 is delivered only after
+	// shutdown has started. A lost 410 used to be retried as a second write.
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	var enteredOnce sync.Once
+	var releaseOnce sync.Once
+	releaseWrite := func() { releaseOnce.Do(func() { close(release) }) }
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/projects/project/harness-sessions/session/usage" {
 			t.Error("not bound to registration response")
@@ -358,11 +366,14 @@ func TestSupervisorUsageArchiveDetachesWithoutStoppingRun(t *testing.T) {
 		if r.Header.Get("X-Aeon-Worker-Lease") != lease {
 			t.Error("lease mismatch")
 		}
+		enteredOnce.Do(func() { close(entered) })
+		<-release
 		calls.Add(1)
 		w.WriteHeader(410)
 		_, _ = w.Write([]byte(`{"error":"harness generation archived"}`))
 	}))
 	defer server.Close()
+	defer releaseWrite()
 	s.api = &usageTestAPI{api, NewRemote(server.URL, "synthetic-key")}
 	s.adapters[Codex] = &usageTestAdapter{proc}
 	if err := s.PollOnce(t.Context()); err != nil {
@@ -371,7 +382,17 @@ func TestSupervisorUsageArchiveDetachesWithoutStoppingRun(t *testing.T) {
 	s.mu.Lock()
 	entry := s.runs["run"]
 	s.mu.Unlock()
-	if err := finishUsageTest(t, entry.usage); !errors.Is(err, ErrHarnessArchived) {
+	select {
+	case <-entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("usage write did not start")
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+	defer cancel()
+	settled := make(chan error, 1)
+	go func() { settled <- entry.usage.finish(ctx) }()
+	releaseWrite()
+	if err := <-settled; !errors.Is(err, ErrHarnessArchived) {
 		t.Fatal(err)
 	}
 	select {
@@ -391,7 +412,7 @@ func TestSupervisorUsageArchiveDetachesWithoutStoppingRun(t *testing.T) {
 	api.mu.Lock()
 	defer api.mu.Unlock()
 	if len(api.harnessStops) != 0 || calls.Load() != 1 {
-		t.Fatal("worker wrote after archive")
+		t.Fatalf("worker wrote after archive: stops=%v calls=%d", api.harnessStops, calls.Load())
 	}
 	if len(api.reports) == 0 || api.reports[len(api.reports)-1].Kind != "finished" {
 		t.Fatal("archive lost existing run settlement")
