@@ -930,7 +930,8 @@ function harnessDetail(view: HarnessView, harness: string): HarnessDetail | unde
 function harnessFix(harness: string, reason?: HarnessReason): string {
   if (!['claude', 'codex', 'cursor', 'grok', 'pi'].includes(harness)) return ''
   if (reason === 'dependency_invalid' && harness === 'claude') return 'aeon-agentd repin --harness claude'
-  if (reason === 'dependency_invalid' || reason === 'pin_missing' || reason === 'cli_unavailable') return `aeon-agentd add-harness --harness ${harness}`
+  if (reason === 'cli_unavailable') return 'aeon-agentd setup status'
+  if (reason === 'dependency_invalid' || reason === 'pin_missing') return `aeon-agentd add-harness --harness ${harness}`
   if (reason === 'login_required') return harness === 'claude' ? 'claude auth login' : `${harness === 'cursor' ? 'cursor-agent' : harness} login`
   return ''
 }

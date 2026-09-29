@@ -399,12 +399,7 @@ func (s *Supervisor) PollOnce(ctx context.Context) error {
 			if s.dependencyReasons == nil {
 				s.dependencyReasons = map[string]string{}
 			}
-			reason := "dependency_invalid"
-			var issue *agentsetup.HarnessIssue
-			if errors.As(dependencyErr, &issue) {
-				reason = issue.Reason
-			}
-			s.dependencyReasons[account.Harness] = reason
+			s.dependencyReasons[account.Harness] = agentsetup.HarnessFailureReason(dependencyErr)
 		} else if hold == "" {
 			delete(s.dependencyErrors, account.Harness)
 			delete(s.dependencyReasons, account.Harness)

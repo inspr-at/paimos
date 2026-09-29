@@ -197,3 +197,30 @@ func TestLocalStatusPreservesHarnessDetails(t *testing.T) {
 		t.Fatal("CLI status discarded harness reason/fix")
 	}
 }
+
+func TestUnavailableClaudeExecutableReportsRestoreInsteadOfRepin(t *testing.T) {
+	for _, pending := range []bool{false, true} {
+		e, old, next := appliedRepinFixture(t)
+		current := next
+		if pending {
+			current = old
+		}
+		var path string
+		for _, a := range next.Accounts {
+			if a.Harness == agentd.Claude {
+				path = a.Path
+			}
+		}
+		if path == "" {
+			t.Fatal("Claude fixture missing")
+		}
+		if err := os.Rename(path, path+".retired"); err != nil {
+			t.Fatal(err)
+		}
+		s := &repinSupervisor{}
+		_, err := pollPairedRuntime(t.Context(), s, e.Store.Path(), current, next)
+		if err != nil || s.polls != 1 || s.reasons[agentd.Claude] != "cli_unavailable" {
+			t.Fatal("executable failure misclassified or stopped other polling", err)
+		}
+	}
+}

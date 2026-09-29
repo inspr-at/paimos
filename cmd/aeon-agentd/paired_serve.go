@@ -222,12 +222,12 @@ func refreshPairedRuntime(ctx context.Context, s pairedRuntimeSupervisor, root s
 		if next.ClaudeRepinID != c.ClaudeRepinID {
 			s.SetHarnessHoldWithReason(agentd.Claude, "repin_pending", "Claude repin pending: waiting for active Claude runs to exit")
 			if err := agentsetup.ValidateRuntimeDependencies(next); err != nil {
-				s.SetHarnessHoldWithReason(agentd.Claude, "dependency_invalid", err.Error())
+				s.SetHarnessHoldWithReason(agentd.Claude, agentsetup.HarnessFailureReason(err), err.Error())
 				return c, nil
 			}
 			if err := restartPairedClaude(ctx, s, c, next, ad); err != nil {
 				if !errors.Is(err, agentd.ErrDraining) {
-					s.SetHarnessHoldWithReason(agentd.Claude, "dependency_invalid", "Claude repin failed: "+err.Error())
+					s.SetHarnessHoldWithReason(agentd.Claude, agentsetup.HarnessFailureReason(err), "Claude repin failed: "+err.Error())
 				}
 				return c, nil
 			}
@@ -237,7 +237,7 @@ func refreshPairedRuntime(ctx context.Context, s pairedRuntimeSupervisor, root s
 		c = next
 	}
 	if err := agentsetup.ValidateRuntimeDependencies(c); err != nil {
-		s.SetHarnessHoldWithReason(agentd.Claude, "dependency_invalid", err.Error())
+		s.SetHarnessHoldWithReason(agentd.Claude, agentsetup.HarnessFailureReason(err), err.Error())
 		return c, nil
 	}
 	// c describes the adapter already installed above or at cold start. A

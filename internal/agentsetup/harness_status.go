@@ -2,6 +2,8 @@
 
 package agentsetup
 
+import "errors"
+
 // HarnessIssue retains the diagnostic locally while exposing only its code.
 type HarnessIssue struct {
 	Reason string
@@ -10,6 +12,19 @@ type HarnessIssue struct {
 
 func (e *HarnessIssue) Error() string { return e.Err.Error() }
 func (e *HarnessIssue) Unwrap() error { return e.Err }
+
+// HarnessFailureReason preserves a typed failure across startup, probe and
+// refresh paths; callers never classify private diagnostics by matching text.
+func HarnessFailureReason(err error) string {
+	if err == nil {
+		return ""
+	}
+	var issue *HarnessIssue
+	if errors.As(err, &issue) {
+		return issue.Reason
+	}
+	return "dependency_invalid"
+}
 
 // HarnessDetail complements the legacy string status map without sending local
 // diagnostics. Reason and Fix share the blocked_accounts vocabulary.
@@ -56,8 +71,12 @@ func HarnessReport(harness, state, reason string) (HarnessDetail, bool) {
 			} else {
 				d.Fix = "aeon-agentd add-harness --harness " + harness
 			}
-		case "pin_missing", "cli_unavailable":
+		case "pin_missing":
 			d.Fix = "aeon-agentd add-harness --harness " + harness
+		case "cli_unavailable":
+			// Existing enrollments cannot be added again, and repin changes
+			// only Node/SDK pins. Local status explains the required restoration.
+			d.Fix = "aeon-agentd setup status"
 		default:
 			return HarnessDetail{}, false
 		}

@@ -79,11 +79,13 @@ test('offline and revoked computers do not present prior harness reports as live
   await expect(computers.locator('.harness-report')).toHaveCount(0)
 })
 
-for (const [reason, command] of [
+for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390]) for (const [reason, command] of [
   ['pin_missing', 'aeon-agentd add-harness --harness claude'],
   ['login_required', 'claude auth login'],
-  ['cli_unavailable', 'aeon-agentd add-harness --harness claude'],
-]) test(`harness row shows the specific ${reason} command`, async ({ page }) => {
+  ['cli_unavailable', 'aeon-agentd setup status'],
+]) test(`harness row shows the specific ${reason} command at ${width} ${theme}`, async ({ page }) => {
+  await page.setViewportSize({ width, height: 844 })
+  await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' })
   await mockWork(page, fixtures())
   const report = computerReport()
   if (reason === 'login_required') report.harness_statuses.claude = 'login_required'
@@ -93,4 +95,9 @@ for (const [reason, command] of [
   const row = page.getByRole('region', { name: 'Connected computers' }).locator('.harness-report').filter({ hasText: 'Claude' })
   await expect(row.locator('code')).toHaveText(command!)
   await expect(row).not.toContainText('untrusted')
+  if (reason === 'cli_unavailable') await expect(row).toContainText('Restore the approved executable, then retry.')
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+  if (process.env.HARNESS_STATUS_SHOTS) {
+    await page.getByRole('region', { name: 'Connected computers' }).screenshot({ path: join(process.env.HARNESS_STATUS_SHOTS, `agents-${reason}-${width}-${theme}.png`), animations: 'disabled' })
+  }
 })

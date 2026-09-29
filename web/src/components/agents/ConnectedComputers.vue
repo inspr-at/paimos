@@ -238,6 +238,7 @@ function assign(error: unknown, fallback: string) {
             <span class="harness-report-text" :title="[harnessLabel(harness), describeHarnessStatus(computer, harness)].filter(Boolean).join(' · ')">
               <span>{{ harnessLabel(harness) }}<span v-if="describeHarnessStatus(computer, harness)" class="harness-state"> · {{ describeHarnessStatus(computer, harness) }}</span></span>
               <code v-if="describeHarnessFix(computer, harness)" class="harness-fix">{{ describeHarnessFix(computer, harness) }}</code>
+              <span v-if="computer.harness_details?.[harness]?.reason === 'cli_unavailable'" class="harness-hint">Restore the approved executable, then retry.</span>
               <span v-else-if="computer.harness_details?.[harness]?.reason === 'repin_pending' && computer.harness_statuses?.[harness] === 'blocked'" class="harness-hint">Retries automatically.</span>
             </span>
           </span>
