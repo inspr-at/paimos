@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { machinesForAdd, type AddMachine } from '../../lib/addAccount'
 import { listPairingComputers, type PairingView } from '../../lib/agentPairing'
 import { accountName } from '../../lib/accountCascade'
@@ -23,6 +23,7 @@ import SettingsCard from './SettingsCard.vue'
 const agents = useAgents()
 const session = useSession()
 const route = useRoute()
+const router = useRouter()
 const mayManage = computed(() => session.identity?.principal.kind === 'person' && can('account.manage'))
 const open = ref(false)
 const views = ref<PairingView[]>([])
@@ -68,8 +69,15 @@ watch(mayManage, allowed => {
   if (!allowed) { open.value = false; return }
   void loadComputers()
 }, { immediate: true })
+// #add-account opens the panel once. Drop the hash with replace (no new history
+// entry) before the next machine refresh, or that refresh would open it again.
+let addAccountArmed = true
 watch([() => route.hash, mayManage, machines], () => {
-  if (route.hash === '#add-account' && mayManage.value && machines.value.length) open.value = true
+  if (route.hash !== '#add-account') { addAccountArmed = true; return }
+  if (!addAccountArmed || !mayManage.value || !machines.value.length) return
+  addAccountArmed = false
+  open.value = true
+  void router.replace({ path: route.path, query: { ...route.query }, hash: '' })
 }, { immediate: true })
 
 async function setAccount(account: AgentAccount, state: AgentAccount['state']) {

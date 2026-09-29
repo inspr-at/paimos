@@ -155,8 +155,8 @@ test('Add an account on the agents card opens the steps; Manage accounts does no
   await expect(add).toHaveAttribute('href', '/settings/accounts#add-account')
   await shoot(page, 'agents', cap.locator('.cap-head'))
   await add.click()
-  await expect(page).toHaveURL(/\/settings\/accounts#add-account$/)
   await expect(page.getByRole('region', { name: 'Add an account' })).toBeVisible()
+  await expect(page).toHaveURL(/\/settings\/accounts$/)
   await expect(page.getByLabel('Sign-in step')).toHaveValue('For pi, use /login and /model in pi first.')
   expect(errors).toEqual([])
 })
@@ -215,7 +215,40 @@ test('the accounts hash opens the steps once a machine is paired', async ({ page
   await page.goto('/settings/accounts#add-account')
   await expect(page.getByRole('region', { name: 'Add an account' })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Add an account' })).toHaveAttribute('aria-expanded', 'true')
+  await expect(page).toHaveURL(/\/settings\/accounts$/)
   await expect(page.locator('#agent-accounts')).toBeVisible()
+})
+
+test('closing the hash-opened panel stays closed through a refresh and a focus', async ({ page }) => {
+  const errors = watchErrors(page)
+  await setup(page)
+  await page.goto('/settings/accounts')
+  const panel = page.getByRole('region', { name: 'Add an account' })
+  const toggle = page.getByRole('button', { name: 'Add an account' })
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false')
+  await page.goto('/settings/accounts#add-account')
+  await expect(panel).toBeVisible()
+  await expect(page).toHaveURL(/\/settings\/accounts$/)
+  await toggle.click()
+  await expect(panel).toHaveCount(0)
+
+  const computers = () => page.waitForResponse(response => response.url().includes('/api/agent-pairing/computers') && response.request().method() === 'GET' && response.ok())
+  const refreshed = computers()
+  await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')))
+  await refreshed
+  await expect(panel).toHaveCount(0)
+  const focused = computers()
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+  await focused
+  await expect(panel).toHaveCount(0)
+
+  await page.goBack()
+  await expect(page).toHaveURL(/\/settings\/accounts$/)
+  await expect(panel).toHaveCount(0)
+  await toggle.click()
+  await expect(panel).toBeVisible()
+  await expect(page).not.toHaveURL(/#add-account/)
+  expect(errors).toEqual([])
 })
 
 test('a new account shows up when the window is focused again', async ({ page }) => {
