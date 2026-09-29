@@ -215,7 +215,7 @@ paths:
       parameters:
         - $ref: '#/components/parameters/projectId'
       responses:
-        '200': {description: Instruction source identities for one visible project, newest first}
+        '200': {description: 'Instruction source identities for one visible project, newest first'}
         '400': {description: Unknown or invalid query}
         '404': {description: Project is not visible}
   /api/projects/{projectId}/harness-sessions/{sessionId}/provenance:
