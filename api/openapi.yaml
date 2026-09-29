@@ -9115,7 +9115,7 @@ components:
       type: object
       required: [id, source, node_id, key, title, text, at, author, href]
       properties:
-        id: {type: string, description: n- plus the node id, or c- plus the node id and comment event id}
+        id: {type: string, description: "n- plus the node id, or c- plus the node id and comment event id"}
         source: {type: string, enum: [ticket, comment]}
         node_id: {type: string, format: uuid}
         key: {type: string}
