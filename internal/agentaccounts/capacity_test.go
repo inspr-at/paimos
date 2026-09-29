@@ -412,6 +412,65 @@ func TestCapacityDefaultUsesPersonTimezone(t *testing.T) {
 	}
 }
 
+func TestRoutingInheritsOwnerScheduleWithoutAccountOverride(t *testing.T) {
+	reset(t)
+	person := makePrincipal(t, "capacity-inherit", "person", "Ada", []string{"admin"})
+	runner := addPrincipal(t, person.TenantID, "agent", "runner", nil)
+	token := issueKey(t, runner, []string{"account.manage", "account.probe"})
+	mod := accountsMod()
+	var account Account
+	callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts", `{"account_key":"inherit","harness":"codex","daemon_id":"daemon-a","label":"Inherited"}`, 201, &account)
+	err := db.InTenant(dbtest.Seed(t.Context()), appPool, person.TenantID, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `UPDATE agent_keys SET created_by_principal_id=$1 WHERE principal_id=$2`, person.ID, runner.ID); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `INSERT INTO personal_profiles(tenant_id,principal_id,timezone) VALUES($1,$2,'Pacific/Auckland') ON CONFLICT(tenant_id,principal_id) DO UPDATE SET timezone=EXCLUDED.timezone`, person.TenantID, person.ID)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	check := func(wantZone, wantOverride string) {
+		t.Helper()
+		err := db.InTenant(dbtest.Seed(t.Context()), appPool, person.TenantID, func(tx pgx.Tx) error {
+			s, err := routingSchedule(t.Context(), tx, account)
+			if err == nil && (s.Timezone != wantZone || s.Override != wantOverride) {
+				t.Fatalf("routing schedule = %s/%s, want %s/%s", s.Timezone, s.Override, wantZone, wantOverride)
+			}
+			return err
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	check("Pacific/Auckland", "")
+	user := capacity.DefaultSchedule("Europe/Vienna")
+	user.Override = "hold"
+	callStatus(t, mod, &person, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{"user", "", "", &user}), 204, nil)
+	check("Europe/Vienna", "hold")
+	pool := capacity.DefaultSchedule("America/New_York")
+	callStatus(t, mod, &person, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{"pool", "codex", "", &pool}), 204, nil)
+	check("America/New_York", "")
+	if n := scalar(t, person, `SELECT count(*) FROM account_capacity_schedules WHERE scope='account'`); n != 0 {
+		t.Fatal("test must not establish an account override")
+	}
+	// A second human key creator must not make us choose an arbitrary owner.
+	other := addPrincipal(t, person.TenantID, "person", "Other", []string{"admin"})
+	issueKey(t, runner, []string{"account.read"})
+	err = db.InTenant(dbtest.Seed(t.Context()), appPool, person.TenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE agent_keys SET created_by_principal_id=$1 WHERE principal_id=$2 AND created_by_principal_id IS NULL`, other.ID, runner.ID)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	check("UTC", "")
+	// An explicitly saved owner remains authoritative even with multiple creators.
+	callStatus(t, mod, &person, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{"account", "", account.ID, &user}), 204, nil)
+	callStatus(t, mod, &person, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{"account", "", account.ID, nil}), 204, nil)
+	check("America/New_York", "")
+}
+
 func TestExpiredCapacityGetsOneProvisionalRefresh(t *testing.T) {
 	reset(t)
 	person := makePrincipal(t, "expired-capacity", "person", "Ada", []string{"admin"})

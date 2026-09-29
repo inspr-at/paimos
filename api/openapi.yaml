@@ -3429,10 +3429,11 @@ paths:
         '403': {description: Scope or ownership mismatch}
     get:
       operationId: listCapacityReadings
-      description: Person account.read permission, or the registering agent with account.probe scope. Used by idle capture to respect the latest observation across daemon restarts.
+      description: Person account.read permission, or the registering agent with account.probe scope. Paired keys may read only accounts enrolled by their own computer. Used by idle capture to respect the latest observation across daemon restarts; lookup failures fall back to locally persisted successful capture times.
       summary: Most recent 200 observations for an account
       responses:
         '200': {description: Readings, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/CapacityReading'}}}}}
+        '403': {description: Scope or pairing ownership mismatch}
   /agent-accounts/capacity/schedule:
     get:
       operationId: listCapacitySchedules

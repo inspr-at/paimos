@@ -5,16 +5,93 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"log/slog"
 	"net/url"
+	"os"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/capacity"
+	"github.com/inspr-at/paimos/internal/client"
 )
 
 type capacityAPI interface {
 	ReportCapacity(context.Context, string, []capacity.Reading) error
+}
+
+// Only normalized observation times survive a restart, bound to this daemon's
+// tenant and principal. Remote lookup results are never local capture evidence.
+type capacityCaptureState struct {
+	TenantID    string               `json:"tenant_id"`
+	PrincipalID string               `json:"principal_id"`
+	Last        map[string]time.Time `json:"last"`
+}
+
+func (s *Supervisor) capacityStateName() string {
+	return "aeon-agentd-" + s.daemonID + ".capacity.json"
+}
+
+func (s *Supervisor) loadCapacityCaptures() error {
+	raw, err := s.state.Read(s.capacityStateName(), 1<<20)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	var saved capacityCaptureState
+	if json.Unmarshal(raw, &saved) != nil || saved.TenantID != s.tenantID || saved.PrincipalID != s.principalID || len(saved.Last) > 4096 {
+		return errors.New("invalid capacity capture state binding")
+	}
+	s.capacitySaved = saved.Last
+	for id, at := range saved.Last {
+		s.capacityLast[id] = at
+	}
+	return nil
+}
+
+func (s *Supervisor) rememberCapacityCapture(id string, readings []capacity.Reading) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.capacitySaved == nil {
+		s.capacitySaved = map[string]time.Time{}
+	}
+	changed := false
+	for _, r := range readings {
+		if r.Source == "estimate" {
+			continue
+		}
+		if r.ReadAt.After(s.capacityLast[id]) {
+			s.capacityLast[id] = r.ReadAt
+		}
+		if r.ReadAt.After(s.capacitySaved[id]) {
+			s.capacitySaved[id] = r.ReadAt
+			changed = true
+		}
+	}
+	if !changed || s.state == nil {
+		return
+	}
+	raw, err := json.Marshal(capacityCaptureState{s.tenantID, s.principalID, s.capacitySaved})
+	if err == nil {
+		err = s.state.Write(s.capacityStateName(), raw, false)
+	}
+	if err != nil {
+		logCapacityError("capacity capture time could not be persisted", id, err)
+	}
+}
+
+func logCapacityError(message, id string, err error) {
+	// API response bodies and transport URLs may contain private data. Record
+	// the failure category and HTTP status without logging either raw value.
+	var status *client.StatusError
+	code := 0
+	if errors.As(err, &status) {
+		code = status.Status
+	}
+	slog.Warn(message, "account_id", id, "error_type", fmt.Sprintf("%T", err), "http_status", code)
 }
 
 // LatestCapacityReadAt lets idle capture respect observations from external
@@ -125,6 +202,7 @@ func (s *Supervisor) flushCapacity(ctx context.Context, e *owned) {
 	if api.ReportCapacity(ctx, id, items) != nil {
 		return
 	}
+	s.rememberCapacityCapture(id, items)
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	for i, k := range keys {
@@ -277,9 +355,17 @@ func (s *Supervisor) captureIdleCapacity(ctx context.Context, now time.Time) {
 		if latest, ok := s.api.(interface {
 			LatestCapacityReadAt(context.Context, string) (time.Time, error)
 		}); ok {
-			at, err := latest.LatestCapacityReadAt(op, a.ID)
-			fresh = err != nil || now.Sub(at) < s.capacityInterval
-			if err == nil {
+			// Leave capture time available even if the freshness lookup times out.
+			lookup, stopLookup := context.WithTimeout(op, 2*time.Second)
+			at, err := latest.LatestCapacityReadAt(lookup, a.ID)
+			stopLookup()
+			if err != nil {
+				logCapacityError("capacity reading lookup failed; using last local capture", a.ID, err)
+				s.mu.Lock()
+				fresh = now.Sub(s.capacitySaved[a.ID]) < s.capacityInterval
+				s.mu.Unlock()
+			} else {
+				fresh = now.Sub(at) < s.capacityInterval
 				s.mu.Lock()
 				if at.After(s.capacityLast[a.ID]) {
 					s.capacityLast[a.ID] = at
@@ -290,14 +376,11 @@ func (s *Supervisor) captureIdleCapacity(ctx context.Context, now time.Time) {
 		if !fresh && s.dispatchAllowed(a.ID) {
 			readings = capture.CaptureCapacity(op, a.Key)
 		}
-		if len(readings) > 0 && api.ReportCapacity(op, a.ID, readings) == nil {
-			s.mu.Lock()
-			for _, r := range readings {
-				if r.ReadAt.After(s.capacityLast[a.ID]) {
-					s.capacityLast[a.ID] = r.ReadAt
-				}
+		if len(readings) > 0 {
+			s.rememberCapacityCapture(a.ID, readings)
+			if err := api.ReportCapacity(op, a.ID, readings); err != nil {
+				logCapacityError("capacity reading report failed", a.ID, err)
 			}
-			s.mu.Unlock()
 		}
 		cancel()
 		s.mu.Lock()

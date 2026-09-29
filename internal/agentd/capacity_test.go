@@ -2,9 +2,11 @@
 package agentd
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,6 +16,7 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/capacity"
+	"github.com/inspr-at/paimos/internal/client"
 )
 
 type capacityTestAPI struct {
@@ -201,6 +204,9 @@ type idleCapacityAdapter struct {
 
 func (a *idleCapacityAdapter) CaptureCapacity(ctx context.Context, _ string) []capacity.Reading {
 	a.calls++
+	if ctx.Err() != nil {
+		return nil
+	}
 	if a.entered != nil {
 		close(a.entered)
 		select {
@@ -260,6 +266,9 @@ func TestCaptureDoesNotHoldDispatchBudget(t *testing.T) {
 	done := make(chan struct{})
 	go func() { defer close(done); s.captureIdleCapacity(t.Context(), a.at) }()
 	<-a.entered
+	if status := s.Lifecycle(""); status.State != "capturing" || status.Ready {
+		t.Fatal("idle quota capture reported draining or ready", status)
+	}
 	if !s.dispatchMu.TryLock() {
 		t.Fatal("capture holds dispatch mutex")
 	}
@@ -294,11 +303,77 @@ func TestCapacityOutboxReplacesMissingBuckets(t *testing.T) {
 
 type latestCapacityTestAPI struct {
 	*capacityTestAPI
-	at time.Time
+	at      time.Time
+	err     error
+	timeout bool
 }
 
-func (a *latestCapacityTestAPI) LatestCapacityReadAt(context.Context, string) (time.Time, error) {
-	return a.at, nil
+func (a *latestCapacityTestAPI) LatestCapacityReadAt(ctx context.Context, _ string) (time.Time, error) {
+	if a.timeout {
+		<-ctx.Done()
+		return time.Time{}, ctx.Err()
+	}
+	return a.at, a.err
+}
+
+func TestIdleCaptureLookupTimeoutLeavesCaptureBudget(t *testing.T) {
+	s, api, _ := testSupervisor(t)
+	reporter := &latestCapacityTestAPI{capacityTestAPI: &capacityTestAPI{API: api}, timeout: true}
+	s.api = reporter
+	a := &idleCapacityAdapter{fakeAdapter: s.adapters[Codex].(*fakeAdapter), at: time.Now()}
+	s.adapters[Codex] = a
+	s.probedAccounts["account"] = true
+	s.captureIdleCapacity(t.Context(), a.at)
+	if a.calls != 1 || len(reporter.got) != 1 {
+		t.Fatal("freshness lookup exhausted the capture deadline")
+	}
+}
+
+func TestIdleCaptureLookupFailureFallsBackAcrossRestart(t *testing.T) {
+	for _, reportFails := range []bool{false, true} {
+		t.Run(fmt.Sprintf("report_failure=%v", reportFails), func(t *testing.T) {
+			s, api, _ := testSupervisor(t)
+			now := time.Now().UTC()
+			reporter := &latestCapacityTestAPI{capacityTestAPI: &capacityTestAPI{API: api, fail: reportFails}, err: &client.StatusError{Status: 403, Message: "private response must not be logged"}}
+			s.api = reporter
+			a := &idleCapacityAdapter{fakeAdapter: s.adapters[Codex].(*fakeAdapter), at: now}
+			s.adapters[Codex] = a
+			s.probedAccounts["account"] = true
+			var logs bytes.Buffer
+			previous := slog.Default()
+			slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+			defer slog.SetDefault(previous)
+			s.captureIdleCapacity(t.Context(), now)
+			if a.calls != 1 {
+				t.Fatal("lookup error suppressed first capture")
+			}
+			if !strings.Contains(logs.String(), "http_status=403") || strings.Contains(logs.String(), "private response") {
+				t.Fatal("missing bounded lookup error log")
+			}
+			root, workspace, accounts := s.state.Path(), s.workspace, s.accounts
+			if err := s.Close(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			restarted, err := NewSupervisor(t.Context(), Config{API: reporter, StateRoot: root, DaemonID: "daemon", Workspace: workspace, Accounts: accounts, Adapters: []Adapter{a}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer restarted.Close(t.Context())
+			restarted.probedAccounts["account"] = true
+			if !restarted.capacitySaved["account"].Equal(now) {
+				t.Fatal("successful local capture did not survive restart")
+			}
+			restarted.captureIdleCapacity(t.Context(), now.Add(time.Minute))
+			if a.calls != 1 {
+				t.Fatal("restart ignored recent local capture")
+			}
+			a.at = now.Add(5 * time.Minute)
+			restarted.captureIdleCapacity(t.Context(), a.at)
+			if a.calls != 2 {
+				t.Fatal("lookup error suppressed stale local capture")
+			}
+		})
+	}
 }
 func TestIdleCaptureRespectsReadingFromPreviousDaemon(t *testing.T) {
 	s, api, _ := testSupervisor(t)

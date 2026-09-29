@@ -7,8 +7,10 @@ import (
 )
 
 func TestCapacityReadingUsesProbeScope(t *testing.T) {
-	scope, ok := coreAgentScope(httptest.NewRequest("POST", "/api/agent-accounts/11111111-1111-4111-8111-111111111111/readings", nil))
-	if !ok || scope != "account.probe" {
-		t.Fatalf("%s %v", scope, ok)
+	for _, method := range []string{"GET", "POST"} {
+		scope, ok := coreAgentScope(httptest.NewRequest(method, "/api/agent-accounts/11111111-1111-4111-8111-111111111111/readings", nil))
+		if !ok || scope != "account.probe" {
+			t.Fatalf("%s: %s %v", method, scope, ok)
+		}
 	}
 }

@@ -132,7 +132,7 @@ func (s *Supervisor) Lifecycle(accountID string) LifecycleStatus {
 	s.mu.Lock()
 	v.Ready = len(s.accounts) > 0
 	if s.capacityCapturing {
-		v.State = "draining"
+		v.State = "capturing"
 		v.Ready = false
 	}
 	v.AllFenced, _ = s.readFence("")
@@ -151,6 +151,9 @@ func (s *Supervisor) Lifecycle(accountID string) LifecycleStatus {
 				v.VerificationUnavailable = append(v.VerificationUnavailable, a.ID)
 			}
 		}
+	}
+	if s.capacityCapturing && (s.closing || v.AllFenced || len(v.FencedAccountIDs) > 0) {
+		v.State = "draining"
 	}
 	entries := make([]*owned, 0, len(s.runs))
 	for _, e := range s.runs {

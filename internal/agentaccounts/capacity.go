@@ -509,7 +509,14 @@ func readingPacing(ctx context.Context, tx pgx.Tx, id string, v capacity.Reading
 
 func routingSchedule(ctx context.Context, tx pgx.Tx, a Account) (capacity.Schedule, error) {
 	var person *string
-	err := tx.QueryRow(ctx, `SELECT COALESCE((SELECT p.approved_by FROM agent_pairing_enrollments e JOIN agent_pairing_requests p ON p.tenant_id=e.tenant_id AND p.id=e.request_id WHERE e.account_id=a.id),a.capacity_owner)::text FROM agent_accounts a WHERE a.id=$1`, a.ID).Scan(&person)
+	// Pairing and an explicit account owner take precedence. An unpaired agent
+	// with one human key creator can use that person's pool/user defaults before
+	// an account override has ever been saved. Ambiguous ownership stays unset.
+	err := tx.QueryRow(ctx, `SELECT COALESCE(
+ (SELECT p.approved_by FROM agent_pairing_enrollments e JOIN agent_pairing_requests p ON p.tenant_id=e.tenant_id AND p.id=e.request_id WHERE e.account_id=a.id),
+ a.capacity_owner,
+ (SELECT (array_agg(DISTINCT k.created_by_principal_id))[1] FROM agent_keys k JOIN principals p ON p.tenant_id=k.tenant_id AND p.id=k.created_by_principal_id WHERE k.tenant_id=a.tenant_id AND k.principal_id=a.registered_by_principal_id AND p.kind='person' HAVING count(DISTINCT k.created_by_principal_id)=1)
+)::text FROM agent_accounts a WHERE a.id=$1`, a.ID).Scan(&person)
 	if err != nil {
 		return capacity.Schedule{}, err
 	}

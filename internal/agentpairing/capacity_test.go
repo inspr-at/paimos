@@ -9,6 +9,45 @@ import (
 	"github.com/inspr-at/paimos/internal/capacity"
 )
 
+func TestPairedCapacityReadingsThroughAuthMiddleware(t *testing.T) {
+	f := newFixture(t) // Real pairing, runtime key, auth middleware and account handler.
+	p := f.propose("codex")
+	f.approve(p, "connect_only")
+	v := f.redeem(p)
+	e := v.Enrollments[0]
+	key := "aeon_" + v.RuntimePrefix + "_" + p.runtime
+	now := time.Now().UTC().Add(-time.Second).Truncate(time.Microsecond)
+	reading := capacity.Reading{WindowKind: "5h", WindowMinutes: 300, UsedPercent: 20, ReadAt: now, ResetsAt: now.Add(time.Hour), Source: "agentd"}
+	f.call("POST", "/api/agent-accounts/"+e.AccountID+"/readings", map[string]any{"readings": []capacity.Reading{reading}}, false, key, 204)
+	// account.probe alone must pass both authorization layers.
+	if _, err := f.db.Admin.Exec(t.Context(), `UPDATE agent_keys SET scopes=ARRAY['account.probe'] WHERE principal_id=$1`, *v.PrincipalID); err != nil {
+		t.Fatal(err)
+	}
+	var got []capacity.Reading
+	decodeResult(t, f.call("GET", "/api/agent-accounts/"+e.AccountID+"/readings", nil, false, key, 200), &got)
+	if len(got) != 1 || !got[0].ReadAt.Equal(now) || got[0].UsedPercent != 20 {
+		t.Fatal("paired daemon could not read its observation")
+	}
+	other := f.propose("codex")
+	f.approve(other, "connect_only")
+	otherView := f.redeem(other)
+	f.call("GET", "/api/agent-accounts/"+otherView.Enrollments[0].AccountID+"/readings", nil, false, key, 403)
+	f.call("GET", "/api/agent-accounts/"+uuid(t, f.db)+"/readings", nil, false, key, 403)
+	f.call("GET", "/api/agent-accounts/not-a-uuid/readings", nil, false, key, 403)
+	f.call("GET", "/api/agent-accounts/"+e.AccountID, nil, false, key, 403)
+	if _, err := f.db.Admin.Exec(t.Context(), `UPDATE agent_keys SET scopes=ARRAY['account.read'] WHERE principal_id=$1`, *v.PrincipalID); err != nil {
+		t.Fatal(err)
+	}
+	f.call("GET", "/api/agent-accounts/"+e.AccountID+"/readings", nil, false, key, 403)
+	if _, err := f.db.Admin.Exec(t.Context(), `UPDATE agent_keys SET scopes=ARRAY['account.probe'] WHERE principal_id=$1`, *v.PrincipalID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.db.Admin.Exec(t.Context(), `UPDATE agent_pairing_enrollments SET state='revoked' WHERE account_id=$1`, e.AccountID); err != nil {
+		t.Fatal(err)
+	}
+	f.call("GET", "/api/agent-accounts/"+e.AccountID+"/readings", nil, false, key, 403)
+}
+
 func TestObservedCapacityPreservesSeparatePairingApproval(t *testing.T) {
 	f := newFixture(t)
 	p := f.propose("claude")

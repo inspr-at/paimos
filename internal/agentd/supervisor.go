@@ -117,6 +117,7 @@ type harnessMetadata struct {
 type Supervisor struct {
 	capacityInterval    time.Duration
 	capacityLast        map[string]time.Time
+	capacitySaved       map[string]time.Time
 	capacityAttempt     map[string]time.Time
 	capacityCapturing   bool
 	maxTokens, maxTurns int64
@@ -272,6 +273,9 @@ func NewSupervisor(ctx context.Context, c Config) (*Supervisor, error) {
 	s := &Supervisor{capacityInterval: c.CapacityInterval, capacityLast: map[string]time.Time{}, capacityAttempt: map[string]time.Time{}, maxTokens: c.MaxTokens, maxTurns: c.MaxTurns, state: state, blockedAccounts: map[string]bool{}, probedAccounts: map[string]bool{}, loginRequired: map[string]bool{}, api: c.API, journal: j, lock: lock, adapters: adapters, runs: map[string]*owned{}, tenantID: tenantID,
 		principalID: principalID, daemonID: c.DaemonID, generation: gen, workspace: physical, estimates: c.EstimatedUnits, accounts: c.Accounts,
 		heartbeatInterval: heartbeat, maxRunDuration: maxRun, prepareScratch: verificationScratch, newHarnessID: randomID}
+	if err := s.loadCapacityCaptures(); err != nil {
+		return nil, err
+	}
 	for _, rec := range j.Snapshot() {
 		// A persisted PID is never proof of ownership after a restart.
 		if !noLocalProcess(rec) && rec.State != "ownership_lost" {

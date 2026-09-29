@@ -435,6 +435,9 @@ func coreAgentScope(r *http.Request) (string, bool) {
 			return "run.claim", true
 		}
 	case "agent-accounts":
+		if r.Method == "GET" && len(parts) == 3 && parts[2] == "readings" {
+			return "account.probe", true
+		}
 		if read {
 			return "account.read", true
 		}

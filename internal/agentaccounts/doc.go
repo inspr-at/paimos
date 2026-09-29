@@ -62,6 +62,11 @@
 // GET /api/agent-accounts/capacity (person account.read) returns exact percentages,
 // original observation time, source, freshness, and schedule pacing separately
 // from the legacy account contract. GET {id}/readings returns 200 recent samples.
+// Paired keys use account.probe and can read only their computer's enrollments.
+// Idle capture lookup failures log a bounded error category and fall back to
+// successful local capture times persisted across daemon restarts. A quota
+// capture reports lifecycle capturing, or draining when a drain is requested;
+// it never grants permission to clean up a still-owned local process.
 // GET/PUT /api/agent-accounts/capacity/schedule stores the current person's user,
 // pool (harness) or account override; account wins, then pool, then user. Null
 // removes an override. Default: the person profile timezone (UTC if absent), Monday-Friday, 08-22, nights disabled,
@@ -70,8 +75,11 @@
 // blocks replace work bands; reduced rates are adjustable from 0.1 to 0.9.
 // Routing enforces max(0,budget-used_today), including outstanding reservations.
 // The pairing approver owns the schedule; for unpaired accounts the first person
-// saving an account schedule establishes ownership. Account/pool/user schedules
-// support override=sprint (remaining quota until the next reset in scope, stored
+// saving an account schedule establishes ownership. Schedules also inherit
+// from an unpaired agent's unambiguous human key creator before an
+// account override exists, including the owner's profile timezone by default.
+// Ambiguous or unknown ownership does not select another person's schedule.
+// Account/pool/user schedules support override=sprint (remaining quota until the next reset in scope, stored
 // as override_until) or hold (zero allowance). Outside work bands routing waits
 // unless Sprint is active.
 // A missing period baseline anchors at the first sample and remains marked unknown.

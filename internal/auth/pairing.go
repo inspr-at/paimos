@@ -50,6 +50,16 @@ func (m *Module) pairingBoundary(r *http.Request, p tenant.Principal) error {
 				return nil
 			}
 		case "agent-accounts":
+			if r.Method == "GET" && len(parts) == 4 && parts[3] == "readings" && validRouteUUID(parts[2]) {
+				var own bool
+				if err = tx.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM agent_pairing_enrollments e JOIN agent_pairing_computers c ON c.tenant_id=e.tenant_id AND c.id=e.computer_id JOIN agent_accounts a ON a.tenant_id=e.tenant_id AND a.id=e.account_id WHERE e.account_id=$1 AND c.principal_id=$2 AND a.registered_by_principal_id=$2 AND e.state<>'revoked')`, parts[2], p.ID).Scan(&own); err != nil {
+					return err
+				}
+				if own {
+					return nil
+				}
+				return deny
+			}
 			if r.Method == "GET" && len(parts) == 2 {
 				return nil
 			}

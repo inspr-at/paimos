@@ -74,7 +74,7 @@ var RoutePermissions = map[string]string{
 	"GET /api/agent-accounts":                                        "account.read",
 	"POST /api/agent-accounts/{accountId}/capacity/approve":          "account.manage",
 	"GET /api/agent-accounts/capacity":                               "account.read",
-	"GET /api/agent-accounts/{accountId}/readings":                   "account.read",
+	"GET /api/agent-accounts/{accountId}/readings":                   "account.read|account.probe", // Handler requires read for people, probe + ownership for agents.
 	"POST /api/agent-accounts/{accountId}/readings":                  "account.probe",
 	"GET /api/agent-accounts/capacity/schedule":                      "account.read",
 	"PUT /api/agent-accounts/capacity/schedule":                      "account.manage",
