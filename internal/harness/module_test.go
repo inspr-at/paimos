@@ -195,6 +195,11 @@ func TestHarnessGenerationAndOwnedControls(t *testing.T) {
 }
 
 func TestHarnessInboxLeaseAndExactAck(t *testing.T) {
+	for _, outcome := range []string{"", "failed"} {
+		t.Run("outcome="+outcome, func(t *testing.T) { testHarnessInboxSettlement(t, outcome) })
+	}
+}
+func testHarnessInboxSettlement(t *testing.T, outcome string) {
 	f := fixture(t)
 	base := "/api/projects/" + f.project + "/harness-sessions"
 	lease := "generation-lease-000000000000000000000002"
@@ -228,10 +233,31 @@ func TestHarnessInboxLeaseAndExactAck(t *testing.T) {
 		t.Fatalf("lease replay %s: %v", w.Body.String(), err)
 	}
 	body := map[string]any{"delivery_id": d["delivery_id"], "cursor": d["cursor"], "effective_level": "simple"}
+	if outcome == "failed" {
+		body["outcome"], body["failure_reason"] = "failed", "outcome_unconfirmed"
+	}
+	expect(t, f.call(f.agent, "POST", path+"/complete-delivery", map[string]any{"delivery_id": d["delivery_id"], "cursor": d["cursor"], "outcome": "failed"}, lease), 400)
+	expect(t, f.call(f.foreign, "POST", path+"/complete-delivery", body, lease), 403)
 	expect(t, f.call(f.agent, "POST", path+"/complete-delivery", map[string]any{"delivery_id": d["delivery_id"], "cursor": 999, "effective_level": "simple"}, lease), 409)
 	w = f.call(f.agent, "POST", path+"/complete-delivery", body, lease)
 	expect(t, w, 200)
 	expect(t, f.call(f.agent, "POST", path+"/complete-delivery", body, lease), 200)
+	if outcome == "failed" {
+		// A conflicting late success cannot upgrade uncertainty to handoff.
+		delete(body, "outcome")
+		delete(body, "failure_reason")
+		expect(t, f.call(f.agent, "POST", path+"/complete-delivery", body, lease), 200)
+		f.tx(t, f.agent, func(tx pgx.Tx) error {
+			var state, reason string
+			if err := tx.QueryRow(t.Context(), `SELECT state,failure_reason FROM inbox_receipts WHERE message_id=$1`, messageID).Scan(&state, &reason); err != nil {
+				return err
+			}
+			if state != "failed" || reason != "outcome_unconfirmed" {
+				t.Fatalf("lost failed receipt: %s %s", state, reason)
+			}
+			return nil
+		})
+	}
 	w = f.call(f.agent, "POST", path+"/drain", map[string]any{}, lease)
 	expect(t, w, 200)
 	if strings.TrimSpace(w.Body.String()) != "[]" {

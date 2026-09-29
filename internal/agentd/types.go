@@ -95,6 +95,8 @@ type HarnessControl struct {
 }
 
 type HarnessDelivery struct {
+	Outcome           string `json:"-"`
+	FailureReason     string `json:"-"`
 	ID                string `json:"delivery_id"`
 	MessageID         string `json:"message_id"`
 	Cursor            int64  `json:"cursor"`

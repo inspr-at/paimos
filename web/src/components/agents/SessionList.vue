@@ -210,7 +210,7 @@ function rowClick(event: MouseEvent, id: string) {
           </span>
           <span role="cell" class="c-state">
             <AgentStateLabel :state="view.status.state" :label="view.status.label" :detail="pendingLabel(view)" />
-            <span v-if="live(view) && !view.session.advertised_capabilities.includes('inbox')" class="no-inbox" title="This session has no inbox delivery path. Launch a managed worker to receive follow-up messages.">No inbox</span>
+            <span v-if="live(view) && view.session.management_mode === 'managed' && view.session.run_id && !view.session.advertised_capabilities.includes('inbox')" class="no-inbox" title="This session has no inbox delivery path. Launch a managed worker to receive follow-up messages.">No inbox</span>
           </span>
           <span role="cell" class="c-agent">
             <span v-if="depth" class="sr-only">Worker of {{ parent }}. </span>

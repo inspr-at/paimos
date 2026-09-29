@@ -229,9 +229,14 @@ func (r *Remote) CompleteHarnessControl(ctx context.Context, s HarnessSession, i
 }
 
 func (r *Remote) CompleteHarnessDelivery(ctx context.Context, s HarnessSession, d HarnessDelivery) error {
-	return r.harnessWorker(ctx, s, "/complete-delivery", map[string]any{
-		"delivery_id": d.ID, "cursor": d.Cursor, "effective_level": "simple",
-	}, nil)
+	body := map[string]any{"delivery_id": d.ID, "cursor": d.Cursor, "effective_level": "simple"}
+	if d.Outcome != "" {
+		body["outcome"] = d.Outcome
+	}
+	if d.FailureReason != "" {
+		body["failure_reason"] = d.FailureReason
+	}
+	return r.harnessWorker(ctx, s, "/complete-delivery", body, nil)
 }
 
 func (r *Remote) StopHarness(ctx context.Context, s HarnessSession, reason string) error {

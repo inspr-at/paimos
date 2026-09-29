@@ -95,9 +95,10 @@ func firstNonempty(a, b string) string {
 
 // CodexAdapter speaks the app-server thread and turn protocol.
 type CodexAdapter struct {
-	Path   string
-	Homes  map[string]string
-	Emails map[string]string
+	IdleTimeout time.Duration // Zero uses the ten-minute clean-turn completion window.
+	Path        string
+	Homes       map[string]string
+	Emails      map[string]string
 }
 
 func NewCodexAdapter(path string, homes map[string]string) *CodexAdapter {
@@ -109,6 +110,10 @@ func (*CodexAdapter) Name() string                                 { return Code
 type codexProcess struct {
 	*wireProcess
 	persistent                bool
+	idleTimeout               time.Duration
+	idleTimer                 *time.Timer
+	idleGeneration            uint64
+	finishing                 bool
 	profile                   Profile
 	idlePublished             bool
 	controlMu                 sync.Mutex
@@ -130,13 +135,14 @@ func (p *codexProcess) Control(ctx context.Context, op, text string) error {
 	defer p.controlMu.Unlock()
 	p.eventMu.Lock()
 	idle := p.terminalSeen && p.acknowledged && p.terminal != nil && p.terminal.Clean && !p.invalid
-	ended := p.sealed || p.abandoned.Load() || p.invalid || (p.terminalSeen && (!p.persistent || !idle))
+	ended := p.finishing || p.sealed || p.abandoned.Load() || p.invalid || (p.terminalSeen && (!p.persistent || !idle))
 	thread, turn := p.threadID, p.turnID
 	p.eventMu.Unlock()
 	if ended {
 		return ErrNotOwned
 	}
-	if op == "inbox" {
+	inbox := op == "inbox"
+	if inbox {
 		if p.persistent && idle {
 			return p.wakeTurn(ctx, text)
 		}
@@ -149,6 +155,26 @@ func (p *codexProcess) Control(ctx context.Context, op, text string) error {
 			TurnID string `json:"turnId"`
 		}
 		raw, err := p.request(ctx, "jsonrpc", "turn/steer", map[string]any{"threadId": thread, "expectedTurnId": turn, "input": []map[string]string{{"type": "text", "text": text}}})
+		if inbox && errors.Is(err, errCodexNoActiveTurn) {
+			// A clean terminal may follow the rejection on the wire. Wait only
+			// for that proof, then start once on the same thread.
+			for {
+				p.eventMu.Lock()
+				ready, ended := p.idlePublished, p.invalid || p.sealed || p.finishing
+				p.eventMu.Unlock()
+				if ended {
+					return ErrNotOwned
+				}
+				if ready {
+					return p.wakeTurn(ctx, text)
+				}
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case <-time.After(10 * time.Millisecond):
+				}
+			}
+		}
 		if err != nil || json.Unmarshal(raw, &result) != nil || result.TurnID != turn {
 			return errors.New("Codex steer acknowledgement mismatch")
 		}
@@ -177,7 +203,7 @@ func (a *CodexAdapter) Start(ctx context.Context, r StartRequest, observe func(A
 	if err != nil {
 		return nil, err
 	}
-	cp := &codexProcess{wireProcess: p, done: make(chan bool, 1), persistent: r.InboxEnabled && r.Run.Purpose != VerificationPurpose, profile: r.Profile}
+	cp := &codexProcess{wireProcess: p, done: make(chan bool, 1), persistent: r.InboxEnabled && r.Run.Purpose != VerificationPurpose, idleTimeout: a.IdleTimeout, profile: r.Profile}
 	p.setOnEvent(cp.notification)
 	fail := p.failStart
 	op, cancel := operationContext(ctx)

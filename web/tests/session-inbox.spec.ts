@@ -14,7 +14,11 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390])
     const data = agentData({ me: me.id, projects: { pharos: 'p-pharos', aeon: 'p-aeon', pai: 'p-frozen' }, tickets: { fleet: 'n-1', restore: 'n-2', web: 'n-a1', release: 'n-5', approvals: 'n-6' } })
     const oneShot = data.sessions[3]!
     oneShot.advertised_capabilities = ['status', 'stop']
-    oneShot.management_mode = 'unmanaged'
+    oneShot.management_mode = 'managed'
+    oneShot.run_id = 'one-shot-run'
+    const interactive = data.sessions[0]!
+    interactive.advertised_capabilities = ['status']
+    interactive.run_id = null
     const managed = data.sessions[1]!
     managed.activity = 'idle'
     await mockAgents(page, data)
@@ -23,6 +27,7 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390])
     await expect(row.getByText('No inbox', { exact: true })).toBeVisible()
     await expect(row.locator('.no-inbox')).toHaveAttribute('title', /managed worker/)
     await expect(page.locator(`[data-row="s:${managed.id}"] .no-inbox`)).toHaveCount(0)
+    await expect(page.locator(`[data-row="s:${interactive.id}"] .no-inbox`)).toHaveCount(0)
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true)
     const box = await row.locator('.no-inbox').boundingBox()
     expect(box!.x).toBeGreaterThanOrEqual(0)

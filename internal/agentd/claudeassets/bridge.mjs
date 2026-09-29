@@ -380,7 +380,7 @@ const handleControlLine = (line) => {
           fail("event_stream_bound", correlationID);
           return;
         }
-        const steerActiveTurn = request.op === "steer" || turnActive;
+        const steerActiveTurn = request.op === "steer" || (turnActive && interruptReceipt);
         const uuid = randomUUID();
         controlUUID = uuid;
         const state = addCorrelation(uuid, correlationID);
@@ -483,8 +483,7 @@ for (const buffered of bufferedLines.splice(0)) handleControlLine(buffered);
 try {
   for await (const message of queryHandle) {
     if (message?.type === "system" && message.subtype === "init") {
-      if (!validID(message.session_id) || !Array.isArray(message.capabilities) ||
-          (start.purpose !== "pairing_verification" && !message.capabilities.includes("interrupt_receipt_v1"))) {
+      if (!validID(message.session_id) || !Array.isArray(message.capabilities)) {
         fail("app_server_protocol", "", "interrupt_receipt_v1_missing");
         queryHandle.close();
         break;
@@ -497,7 +496,7 @@ try {
       }
       const initModel = initModelMissing ? "" : message.model;
       const initModelEvidenceStatus = initModelMissing ? "unverified" : "vendor_reported";
-      interruptReceipt = true;
+      interruptReceipt = message.capabilities.includes("interrupt_receipt_v1");
       if (!sessionStarted) {
         sessionStarted = true;
         sessionID = message.session_id;

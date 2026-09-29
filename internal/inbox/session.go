@@ -76,3 +76,19 @@ func ConfirmSessionMessage(ctx context.Context, tx pgx.Tx, p tenant.Principal, m
 	}
 	return advanceReceipt(ctx, tx, p, messageID, "handed_off", "simple", "", receiptTarget{})
 }
+
+// FailSessionMessage settles authenticated, acknowledged input with an uncertain
+// or rejected handoff. The harness lease and message are closed in the same tx.
+func FailSessionMessage(ctx context.Context, tx pgx.Tx, p tenant.Principal, messageID, reason string) error {
+	var owned bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM inbox_messages WHERE id=$1::uuid AND recipient_principal_id=$2::uuid AND acked_at IS NOT NULL)`, messageID, p.ID).Scan(&owned); err != nil {
+		return err
+	}
+	if !owned {
+		return nil
+	}
+	if _, err := tx.Exec(ctx, `UPDATE inbox_message_deliveries d SET state='dead',reason='transport_error' FROM inbox_compat_messages c WHERE c.tenant_id=d.tenant_id AND c.id=d.message_id AND c.inbox_message_id=$1::uuid`, messageID); err != nil {
+		return err
+	}
+	return advanceReceipt(ctx, tx, p, messageID, "failed", "", reason, receiptTarget{})
+}
