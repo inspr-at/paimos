@@ -3783,7 +3783,7 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [from, to, generated_at, attribution, trend_basis, list_price_currency, truncated, totals, by_project, by_model, by_harness, by_subscription, trend, tickets, tickets_cost_unknown, allowance, ratings]
+                required: [from, to, generated_at, attribution, trend_basis, list_price_currency, truncated, totals, by_project, by_model, by_harness, by_subscription, trend, tickets, tickets_cost_unknown, allowance, ratings, work]
                 properties:
                   from: {type: string, format: date-time}
                   to: {type: string, format: date-time}
@@ -3802,6 +3802,7 @@ paths:
                   tickets_cost_unknown: {type: integer, minimum: 0, description: Visible tickets whose list estimate is entirely unknown. They are not ranked.}
                   allowance: {$ref: '#/components/schemas/UsageAllowance'}
                   ratings: {$ref: '#/components/schemas/DeliveryRatingSummary'}
+                  work: {$ref: '#/components/schemas/UsageWork'}
         '400': {description: Invalid range or project}
         '401': {description: Authentication required}
         '403': {description: Permission denied}
@@ -6619,6 +6620,137 @@ components:
           properties:
             project_id: {type: string, format: uuid}
             project_key: {type: string}
+    UsageWork:
+      type: object
+      description: >-
+        What agents got done and where the time went (AEON-301). Sessions are the visible sessions that started in
+        [from, to), the same set as the usage totals. done and released count distinct visible tickets whose ticket_done or
+        released outcome event was recorded in [from, to) with an agent session; a ticket done by a person alone is not
+        counted. Agent time runs from a session's start to its last heartbeat, or to its stop when that came within 15
+        minutes of it, clipped to the range end; a session with no heartbeat that was not stopped within 15 minutes of
+        registering has no known time and is left out of agent_seconds, never counted as zero. Tokens are the known input
+        plus output of reported usage rows; null when no session in the group reported any. Token coverage is per
+        component (UsageWorkTokenParts), so a partial report never reads as complete. Every day of the range is
+        present in days, as UTC days; zero there is a known zero.
+      allOf:
+        - {$ref: '#/components/schemas/UsageWorkTokenParts'}
+      required: [basis, sessions, worker_sessions, timed_sessions, agent_seconds, usage_reported_sessions, model_sessions, done, released, done_attributed, tickets_worked, tickets_done, days, tickets, by_harness, by_model, by_project, waste]
+      properties:
+        basis: {type: string, enum: [sessions_started_in_range]}
+        sessions: {type: integer, minimum: 0}
+        worker_sessions: {type: integer, minimum: 0}
+        timed_sessions: {type: integer, minimum: 0, description: Sessions whose agent time is known.}
+        agent_seconds: {type: integer, format: int64, minimum: 0, description: Sum over timed_sessions.}
+        usage_reported_sessions: {type: integer, minimum: 0, description: 'Sessions that reported both input and output tokens; a usage report without them does not count. Per-component coverage is in UsageWorkTokenParts.'}
+        model_sessions: {type: integer, minimum: 0, description: Sessions that registered a model; by_model covers only these.}
+        done: {type: integer, minimum: 0}
+        released: {type: integer, minimum: 0}
+        done_attributed: {type: integer, minimum: 0, description: Done tickets with a harness session, attributed in by_harness and by_model to the ticket's latest worker session before it was done.}
+        tickets_worked: {type: integer, minimum: 0, description: Distinct tickets with a session in the range. tickets holds at most 50 of them.}
+        tickets_done: {type: integer, minimum: 0, description: Worked tickets whose state is done, accepted or delivered now.}
+        days:
+          type: array
+          items:
+            type: object
+            required: [day, done, sessions, agent_seconds]
+            properties:
+              day: {type: string, format: date}
+              done: {type: integer, minimum: 0}
+              sessions: {type: integer, minimum: 0, description: Sessions that started on this day.}
+              agent_seconds: {type: integer, format: int64, minimum: 0}
+        tickets:
+          type: array
+          maxItems: 50
+          description: Worked tickets, most agent time first.
+          items:
+            type: object
+            allOf:
+              - {$ref: '#/components/schemas/UsageWorkTokenParts'}
+            required: [id, key, title, project_id, project_key, state, done_in_range, released, sessions, timed_sessions, agent_seconds, tokens, usage_reported_sessions, last_active_at]
+            properties:
+              id: {type: string, format: uuid}
+              key: {type: string}
+              title: {type: string}
+              project_id: {type: string, format: uuid}
+              project_key: {type: string}
+              state: {type: string}
+              done_in_range: {type: boolean}
+              released: {type: boolean, description: The ticket has a released outcome event.}
+              sessions: {type: integer, minimum: 0}
+              timed_sessions: {type: integer, minimum: 0}
+              agent_seconds: {type: integer, format: int64, minimum: 0}
+              tokens: {type: [string, 'null'], pattern: '^(0|[1-9][0-9]*)$'}
+              usage_reported_sessions: {type: integer, minimum: 0}
+              last_active_at: {type: string, format: date-time}
+        by_harness: {type: array, items: {$ref: '#/components/schemas/UsageWorkGroup'}}
+        by_model: {type: array, items: {$ref: '#/components/schemas/UsageWorkGroup'}}
+        by_project: {type: array, items: {$ref: '#/components/schemas/UsageWorkGroup'}}
+        waste:
+          type: object
+          description: >-
+            stuck is an open session that is not idle or throttled and has not sent a heartbeat for over 10 minutes.
+            The other kinds are stopped worker sessions on a ticket that is not done: failed (run failed or lost
+            ownership, or an error stop reason), lost (the server closed it for silence and it left no commit), and
+            no_result (it had a worktree to report commits from, or a managed run, and left no commit). A ticket that is
+            not done after three or more worker sessions is one retried row holding them all. total counts every row;
+            rows holds the ten with the most agent time.
+          required: [total, stuck, failed, lost, no_result, retried, rows]
+          properties:
+            total: {type: integer, minimum: 0}
+            stuck: {type: integer, minimum: 0}
+            failed: {type: integer, minimum: 0}
+            lost: {type: integer, minimum: 0}
+            no_result: {type: integer, minimum: 0}
+            retried: {type: integer, minimum: 0}
+            rows:
+              type: array
+              maxItems: 10
+              items:
+                type: object
+                required: [kind, session_id, project_id, project_key, ticket_id, ticket_key, ticket_title, harness, model, label, at, sessions, agent_seconds]
+                properties:
+                  kind: {type: string, enum: [stuck, failed, lost, no_result, retried]}
+                  session_id: {type: string, format: uuid, description: For retried, the newest worker session.}
+                  project_id: {type: string, format: uuid}
+                  project_key: {type: string}
+                  ticket_id: {type: [string, 'null'], format: uuid}
+                  ticket_key: {type: [string, 'null']}
+                  ticket_title: {type: [string, 'null']}
+                  harness: {type: string}
+                  model: {type: [string, 'null']}
+                  label: {type: [string, 'null'], description: The session's display label.}
+                  at: {type: string, format: date-time, description: Last sign of life.}
+                  sessions: {type: integer, minimum: 1}
+                  agent_seconds: {type: [integer, 'null'], format: int64, description: Null when unknown.}
+    UsageWorkGroup:
+      type: object
+      allOf:
+        - {$ref: '#/components/schemas/UsageWorkTokenParts'}
+      required: [key, label, sessions, timed_sessions, agent_seconds, done, tokens, usage_reported_sessions]
+      properties:
+        key: {type: string, description: 'Harness, registered session model, or project ID.'}
+        label: {type: string}
+        sessions: {type: integer, minimum: 0}
+        timed_sessions: {type: integer, minimum: 0}
+        agent_seconds: {type: integer, format: int64, minimum: 0}
+        done: {type: integer, minimum: 0}
+        tokens: {type: [string, 'null'], pattern: '^(0|[1-9][0-9]*)$'}
+        usage_reported_sessions: {type: integer, minimum: 0}
+    UsageWorkTokenParts:
+      type: object
+      description: >-
+        Tokens by component (AEON-301), each with the sessions that reported it. A session counts for a component only
+        when every one of its usage rows carries it; a missing component is left out of the sum, never added as zero,
+        and a null sum means no session reported that component. Cached input is part of input and not added to tokens.
+      required: [input_tokens, output_tokens, cached_input_tokens, input_reported_sessions, output_reported_sessions, cached_input_reported_sessions, usage_provisional_sessions]
+      properties:
+        input_tokens: {type: [string, 'null'], pattern: '^(0|[1-9][0-9]*)$'}
+        output_tokens: {type: [string, 'null'], pattern: '^(0|[1-9][0-9]*)$'}
+        cached_input_tokens: {type: [string, 'null'], pattern: '^(0|[1-9][0-9]*)$'}
+        input_reported_sessions: {type: integer, minimum: 0}
+        output_reported_sessions: {type: integer, minimum: 0}
+        cached_input_reported_sessions: {type: integer, minimum: 0}
+        usage_provisional_sessions: {type: integer, minimum: 0, description: Sessions with a provisional usage report; their figures may still change.}
     UsageAllowance:
       type: object
       description: Declared allowance, explicit reservations and schedule capacity stay numbers. Used, headroom and hard remaining are null while a window is provisional, including mixed settled evidence. Null and overflow are never zero.
