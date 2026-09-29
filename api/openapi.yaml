@@ -6281,7 +6281,7 @@ components:
         pr_url: {type: string}
         rule_label: {type: string}
         before: {"$ref": "#/components/schemas/DoctrineMetric"}
-        metrics: {type: array, items: {"$ref": "#/components/schemas/DoctrineMetric"}, description: Baseline context for review and fix rounds, CI failures, reverts, exception votes and time to done; missing observations are omitted}
+        metrics: {type: array, items: {"$ref": "#/components/schemas/DoctrineMetric"}, description: "Baseline context for review and fix rounds, CI failures, reverts, exception votes and time to done; missing observations are omitted"}
         after: {"$ref": "#/components/schemas/DoctrineMetric"}
         delta: {type: number, description: After mean minus before mean; lower is the intended direction}
         evidence:
