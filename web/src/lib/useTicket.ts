@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { ref, watch, type Ref } from 'vue'
+import { onScopeDispose, ref, watch, type Ref } from 'vue'
 import { APIError, createNode, createRelation, deleteNode, deleteRelation, getKinds, getNode, getRelations, listNodes, lookupNodes, moveNode, updateNode, type Kind, type ListItem, type ListParent, type NodePatch, type Relation, type WorkNode } from './api'
+import { liveNodes, type LiveNodeStore, type LiveView, type NodeChange } from './liveNodes'
+import { compareRevision, describeFields } from './liveUpdates'
 import { linkBody, linkedSentence, relationLabel, unlinkedSentence, type RelationChoice } from './relations'
 import { benefitGateError } from './doneGate'
 import { toast } from './toast'
@@ -65,6 +67,9 @@ export function useTicket(item: Ref<ListItem | null>, context: {
   onRemoved: (item: ListItem) => void
   onCreated: (item: ListItem) => void
   onMoved: (item: ListItem, fromParent: string | null) => void
+  // Live updates (AEON-326): while busy (an editor open, a save running)
+  // changes by others wait; me tells the viewer's own changes apart.
+  live?: { busy: Ref<boolean>; me: () => string | null; store?: LiveNodeStore }
 }) {
   const loading = ref(false)
   const error = ref('')
@@ -293,6 +298,97 @@ export function useTicket(item: Ref<ListItem | null>, context: {
     }
   }
 
+  // ---------- Live: someone else's change patches the ticket in place (AEON-326) ----------
+  // The store refetches the node through the normal API. While the viewer
+  // edits, the change waits: nothing moves under them, and a save still sends
+  // the revision they started from, so it meets the change as a conflict.
+  const liveFields = ref<string[]>([]) // what someone else just changed, for a brief highlight
+  const liveMessage = ref('') // said politely to screen readers
+  const liveHeld = ref<'changed' | 'deleted' | null>(null) // a change waiting while the viewer edits
+  let held: { change: NodeChange; node: WorkNode | null } | null = null
+  let rereadAfterEdit = false
+  let flashTimer: ReturnType<typeof setTimeout> | undefined
+  const store = context.live?.store ?? liveNodes
+  const busy = () => !!context.live?.busy.value
+  const mine = (change: NodeChange) => !!change.actorId && change.actorId === context.live?.me()
+
+  // A node that left this project (a project move) is gone from here, like a deleted one.
+  const leftProject = (target: ListItem, change: NodeChange) =>
+    change.fields.includes('project_id') && !!target.project && change.projectId !== target.project.id
+
+  function applyLive(target: ListItem, change: NodeChange, node: WorkNode | null) {
+    if (!node || leftProject(target, change)) { gone.value = true; return }
+    if (compareRevision(node.updated_at, target.updated_at) <= 0) return
+    const parentChanged = node.parent_id !== target.parent_id
+    merge(target, node)
+    if (parentChanged) void resolveParent(target)
+    if (mine(change)) return
+    clearTimeout(flashTimer)
+    liveFields.value = change.fields
+    flashTimer = setTimeout(() => { liveFields.value = [] }, 2000)
+    const words = describeFields(change.fields)
+    liveMessage.value = words ? `${target.key} was updated elsewhere: ${words}.` : `${target.key} was updated elsewhere.`
+  }
+  // The parent chip after a move by someone else: the project itself, or the
+  // new epic (a task's ticket) by its preview.
+  async function resolveParent(target: ListItem) {
+    const id = target.parent_id
+    if (!id) { target.parent = null; return }
+    if (target.project?.id === id) { target.parent = { id, key: target.project.key, title: target.project.title, kind_slug: 'project' }; return }
+    try {
+      const preview = (await lookupNodes([id])).items.find(node => node.id === id)
+      if (!preview || target.parent_id !== id) return
+      target.parent = { id, key: preview.key, title: preview.title, kind_slug: target.kind_slug === 'task' ? 'ticket' : 'epic' }
+    } catch { /* the chip keeps the former parent until the next load */ }
+  }
+  const liveView: LiveView = {
+    shows: id => item.value?.id === id || children.value.some(child => child.id === id),
+    changed(change, node) {
+      const target = item.value
+      if (!target || node === undefined) return
+      if (change.id !== target.id) {
+        // Children patch in place; one that went away stays until the next load.
+        const child = children.value.find(entry => entry.id === change.id)
+        if (child && node && node.parent_id === target.id && compareRevision(node.updated_at, child.updated_at) > 0) merge(child, node)
+        return
+      }
+      if (busy()) {
+        if (mine(change) || (node && compareRevision(node.updated_at, target.updated_at) <= 0)) return
+        held = { change, node }
+        liveHeld.value = !node || leftProject(target, change) ? 'deleted' : 'changed'
+        return
+      }
+      applyLive(target, change, node)
+    },
+    // After a gap nothing is known to have changed: read the ticket again,
+    // quietly, once the viewer is done editing.
+    resync() {
+      if (!item.value) return
+      if (busy()) rereadAfterEdit = true
+      else void refresh()
+    },
+  }
+  onScopeDispose(store.subscribe(liveView))
+  onScopeDispose(() => clearTimeout(flashTimer))
+  watch(() => busy(), now => {
+    const target = item.value
+    if (now || !target) return
+    const waiting = held, reread = rereadAfterEdit
+    held = null; liveHeld.value = null; rereadAfterEdit = false
+    if (waiting) applyLive(target, waiting.change, waiting.node)
+    if (reread) void refresh()
+  })
+  watch(() => item.value?.id, () => { held = null; rereadAfterEdit = false; liveHeld.value = null; liveFields.value = []; liveMessage.value = '' })
+  // Loads and saves tell the store which version the panel has, so the
+  // event of the viewer's own save needs no refetch. A conflict reload that
+  // already shows the held change settles it.
+  watch(() => item.value?.updated_at, () => {
+    const target = item.value
+    if (!target) return
+    store.put([target])
+    if (held?.node && compareRevision(target.updated_at, held.node.updated_at) >= 0) { held = null; liveHeld.value = null }
+  }, { immediate: true })
+
   function childProgress() {
     const list = children.value
     const scope = list.filter(child => statusMeta(child.state).key !== 'cancelled')
@@ -300,5 +396,5 @@ export function useTicket(item: Ref<ListItem | null>, context: {
     return { done, total: scope.length, percent: scope.length ? Math.round((done / scope.length) * 100) : 0 }
   }
 
-  return { loading, error, gone, readOnly, children, childrenLoading, related, relationsReady, refresh, patch, setTitle, setBody, setField, setPriority, setAssignee, moveTo, remove, addChild, childProgress, link, unlink }
+  return { loading, error, gone, readOnly, children, childrenLoading, related, relationsReady, refresh, patch, setTitle, setBody, setField, setPriority, setAssignee, moveTo, remove, addChild, childProgress, link, unlink, liveFields, liveMessage, liveHeld }
 }
