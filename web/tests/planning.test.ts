@@ -107,6 +107,15 @@ test('numeric planning sorts use spent else estimated, null last and ID ties', (
   }
 })
 
+test('model sort still orders areas when both rows lack a role', () => {
+  const absent = { ...row(undefined, {}), id: 'A' } as ListItem
+  const backend = { ...row(undefined, { area: 'backend' }), id: 'B' } as ListItem
+  const frontend = { ...row(undefined, { area: 'frontend' }), id: 'C' } as ListItem
+  const rows = [absent, frontend, backend]
+  assert.deepEqual([...rows].sort(compareRows([{ field: 'model', desc: false }])).map(item => item.id), ['B', 'C', 'A'])
+  assert.deepEqual([...rows].sort(compareRows([{ field: 'model', desc: true }])).map(item => item.id), ['C', 'B', 'A'])
+})
+
 test('model sort keeps a missing area last in both directions', () => {
   const withArea = { ...row(undefined, { route_role: 'build', area: 'frontend' }), id: 'a' } as ListItem
   const noArea = { ...row(undefined, { route_role: 'build' }), id: 'b' } as ListItem

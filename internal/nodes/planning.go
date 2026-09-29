@@ -465,16 +465,20 @@ func sampleOf(lines []usageLine, seconds map[string]float64) (calibrationSample,
 	return out, true
 }
 
-// usdString formats an exact amount with six decimals.
+// usdPlaces is the precision list and paid amounts are projected with.
+// The SQL sort key rounds to the same places before the id tiebreaker.
+const usdPlaces = 6
+
+// usdString formats an exact amount at the projected precision.
 func usdString(v *big.Rat) *string {
-	s := v.FloatString(6)
+	s := v.FloatString(usdPlaces)
 	return &s
 }
 func usdFloat(v float64) *string {
 	if math.IsNaN(v) || math.IsInf(v, 0) || v < 0 {
 		return nil
 	}
-	s := new(big.Rat).SetFloat64(v).FloatString(6)
+	s := new(big.Rat).SetFloat64(v).FloatString(usdPlaces)
 	return &s
 }
 

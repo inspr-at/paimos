@@ -191,16 +191,17 @@ function modelOrder(row: PlanningRow): ModelOrder | null {
 }
 /**
  * Model order matches the list API: the role's rung, then the area.
- * A missing role and a missing area both stay last in either direction.
+ * A missing role stays last. Rows that both lack a role still compare areas.
+ * A missing area stays last in either direction.
  */
 export function compareModelSort(a: PlanningRow, b: PlanningRow, desc: boolean): number {
   const x = modelOrder(a), y = modelOrder(b)
   if ((x === null) !== (y === null)) return x === null ? 1 : -1
-  if (!x || !y) return 0
   const dir = desc ? -1 : 1
-  if (x.rank !== y.rank) return (x.rank < y.rank ? -1 : 1) * dir
-  if ((x.area === '') !== (y.area === '')) return x.area === '' ? 1 : -1
-  if (x.area !== y.area) return (x.area < y.area ? -1 : 1) * dir
+  if (x && y && x.rank !== y.rank) return (x.rank < y.rank ? -1 : 1) * dir
+  const xa = areaOf(a), ya = areaOf(b)
+  if ((xa === '') !== (ya === '')) return xa === '' ? 1 : -1
+  if (xa !== ya) return (xa < ya ? -1 : 1) * dir
   return 0
 }
 /** The list API's order for a numeric planning sort key: null sorts last in both directions. */

@@ -185,6 +185,42 @@ func TestPlanningSortUsesDisplayedNumbersAndCursor(t *testing.T) {
 	}
 }
 
+func TestPlanningRoundedCostTie(t *testing.T) {
+	w := planningSetup(t)
+	first := w.node(t, "RND-1", "ticket", w.root.ID, "open", nil)
+	second := w.node(t, "RND-2", "ticket", w.root.ID, "open", nil)
+	w.session(t, first.ID, "codex", "gpt-6-astra", "xhigh", "gpt-6-astra", 60, 1000, 0, 0, "api", "")
+	w.session(t, second.ID, "codex", "gpt-6-astra", "xhigh", "gpt-6-astra", 60, 1000, 0, 0, "api", "")
+	// Digits past the six the API projects. The lower id holds the larger raw
+	// amount, so an unrounded ascending sort would put it second.
+	ordered := []nodeJSON{first, second}
+	slices.SortFunc(ordered, func(a, b nodeJSON) int { return strings.Compare(a.ID, b.ID) })
+	err := db.InTenant(dbtest.Seed(t.Context()), appPool, w.admin.TenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE harness_session_usage u SET estimated_cost_usd=v.cost
+			FROM harness_sessions s
+			JOIN (VALUES ($2::uuid, 1.0000004::numeric), ($3::uuid, 1.0000001::numeric)) AS v(ticket, cost) ON s.ticket_node_id=v.ticket
+			WHERE u.tenant_id=s.tenant_id AND u.session_id=s.id AND s.tenant_id=$1`, w.admin.TenantID, ordered[0].ID, ordered[1].ID)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	views := planningOf(t, w.admin, "/api/nodes?within="+w.root.ID+"&q=RND-")
+	for _, n := range ordered {
+		cost := views[n.Key].Cost
+		if cost == nil || cost.ListSpent == nil || cost.PaidSpent == nil || *cost.ListSpent != "1.000000" || *cost.PaidSpent != "1.000000" {
+			t.Fatalf("%s projected cost: %+v", n.Key, cost)
+		}
+	}
+	want := []string{ordered[0].Key, ordered[1].Key}
+	for _, sort := range []string{"list_cost", "-list_cost", "paid", "-paid"} {
+		got := listKeys(t, w.admin, "/api/nodes?within="+w.root.ID+"&q=RND-&sort="+sort)
+		if !slices.Equal(got, want) {
+			t.Fatalf("%s rounded tie: got %v want %v", sort, got, want)
+		}
+	}
+}
+
 func TestPlanningBulkUsagePerformance(t *testing.T) {
 	w := planningSetup(t)
 	ids := planningBulk(t, w, 1000, 4, "open", "PERF-", true)

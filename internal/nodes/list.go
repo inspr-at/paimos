@@ -1069,7 +1069,13 @@ func listOrder(q listQuery) string {
 			parts = append(parts, "route.rank IS NULL ASC", "route.rank "+dir, "route.area IS NULL ASC", "route.area "+dir)
 		case "tokens", "list_cost", "paid":
 			// The same numeric value as the cell: spent, else estimated.
-			value := map[string]string{"tokens": "plan.tokens", "list_cost": "plan.list_usd", "paid": "plan.paid_usd"}[key.Name]
+			// Cost matches usdString: round away the digits the API does not project,
+			// then the id tiebreaker below.
+			value := map[string]string{
+				"tokens":    "plan.tokens",
+				"list_cost": fmt.Sprintf("round(plan.list_usd::numeric, %d)", usdPlaces),
+				"paid":      fmt.Sprintf("round(plan.paid_usd::numeric, %d)", usdPlaces),
+			}[key.Name]
 			parts = append(parts, value+" IS NULL ASC", value+" "+dir)
 		default:
 			parts = append(parts, "f."+key.Name+" "+dir)
