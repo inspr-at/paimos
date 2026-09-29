@@ -153,6 +153,8 @@ func MapDraft(p Proposal) ([]DraftRule, error) {
 			Roles: slices.Clone(r.Roles), Harnesses: slices.Clone(r.Harnesses),
 			Source: DraftSource{Reference: reference, Identity: sourceID, EditedHere: false},
 		}
+		// Revision is part of the baseline, so it is fixed before the fingerprint.
+		rule.Source.Revision = sourceRevision(r.Sources)
 		lineage, err := json.Marshal(draftLineage{
 			Schema: "aeon.doctrine-lineage.v1", Identity: r.Identity, ExplicitID: r.ExplicitID,
 			Layer: r.Layer, Set: r.Set, SetTitle: r.SetTitle, Placement: r.Placement, Source: r.Source,
@@ -163,11 +165,6 @@ func MapDraft(p Proposal) ([]DraftRule, error) {
 		if err != nil {
 			return nil, draftRefusal("cannot encode source lineage")
 		}
-		revision := r.Sources[0].FileSHA256
-		if len(r.Sources) > 1 {
-			revision = digest(lineage)
-		}
-		rule.Source.Revision = revision
 		rule.Details = r.Details + "\n\n[aeon doctrine lineage]\n" + string(lineage)
 		if err := validateDraftRule(rule); err != nil {
 			return nil, err

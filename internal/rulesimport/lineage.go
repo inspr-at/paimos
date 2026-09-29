@@ -22,6 +22,9 @@ func cutLineage(details string) (body, raw string, ok bool) {
 	return strings.TrimSuffix(details[:i], "\n\n"), details[i+len(lineageMarker):], true
 }
 
+// contentFingerprint is the imported baseline. It covers every user-editable
+// draft field, including the draft identity and source revision, so an API
+// edit of either is a divergence even when edited_here stays false.
 func contentFingerprint(r DraftRule) string {
 	details, _, _ := cutLineage(r.Details)
 	expires := ""
@@ -29,11 +32,30 @@ func contentFingerprint(r DraftRule) string {
 		expires = r.ExpiresAt.UTC().Format(time.RFC3339)
 	}
 	h := sha256.New()
-	fmt.Fprintf(h, "text=%s\nwhy=%s\ndetails=%s\nstrength=%s\nenabled=%t\nexpires=%s\nroles=%s\nharnesses=%s\nreference=%s\nidentity=%s\n",
+	fmt.Fprintf(h, "text=%s\nwhy=%s\ndetails=%s\nstrength=%s\nenabled=%t\nexpires=%s\nroles=%s\nharnesses=%s\nreference=%s\nsource_identity=%s\nidentity=%s\nrevision=%s\nedited_here=%t\n",
 		r.Text, r.Why, details, r.Strength, r.Enabled, expires,
 		strings.Join(uniqueSorted(r.Roles), ","),
 		strings.Join(uniqueSorted(r.Harnesses), ","),
-		r.Source.Reference, r.Source.Identity)
+		r.Source.Reference, r.Source.Identity, r.Identity, r.Source.Revision, r.Source.EditedHere)
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// sourceRevision is the imported source revision stored on the draft. One file
+// uses its raw SHA-256. Several files use a digest of their paths and raw
+// hashes. That digest is fixed before the content baseline so the baseline can
+// include the revision; the revision is not a digest of the lineage document
+// that stores the baseline.
+func sourceRevision(sources []SourceRef) string {
+	if len(sources) == 0 {
+		return ""
+	}
+	if len(sources) == 1 {
+		return sources[0].FileSHA256
+	}
+	h := sha256.New()
+	for _, src := range sources {
+		fmt.Fprintf(h, "%s\n%s\n", src.Path, src.FileSHA256)
+	}
 	return hex.EncodeToString(h.Sum(nil))
 }
 
@@ -263,10 +285,21 @@ func betterEdge(a, b lineageEdge) bool {
 	return a.sim >= b.sim+0.15
 }
 
+// headingsAlign compares the section path under the document title. A retitle
+// keeps that path and must not look like a brand-new rule.
+func headingsAlign(left, right string) bool {
+	if left == right {
+		return true
+	}
+	_, lRest, lok := strings.Cut(left, " / ")
+	_, rRest, rok := strings.Cut(right, " / ")
+	return lok && rok && lRest != "" && lRest == rRest
+}
+
 func lineageAligned(a, b draftLineage) (aligned, samePos bool) {
 	for _, left := range a.Sources {
 		for _, right := range b.Sources {
-			if left.Path == "" || left.Path != right.Path || left.HeadingPath != right.HeadingPath {
+			if left.Path == "" || left.Path != right.Path || !headingsAlign(left.HeadingPath, right.HeadingPath) {
 				continue
 			}
 			aligned = true

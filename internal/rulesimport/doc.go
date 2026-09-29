@@ -13,12 +13,14 @@
 // failure leaves that local proposal intact; HTTP response bodies are not logged.
 // Identical imported identities are idempotent and reported unchanged. A draft
 // rule from an earlier import is updated when the source changed and the stored
-// rule still matches the baseline recorded for that source revision. A rule
-// marked edited here, or whose stored content diverged from that baseline, is
-// left in place and reported as a conflict. Unannotated rules whose text
-// changed are matched by source path, heading path and position or similarity;
-// an ambiguous replacement is reported and not written. Unrelated existing
-// draft rules are preserved. Publication is never requested.
+// rule still matches the baseline recorded for that source revision. The
+// baseline covers every user-editable field, including the draft identity and
+// source revision. A rule marked edited here, or whose stored content diverged
+// from that baseline, is left in place and reported as a conflict. Unannotated
+// rules whose text changed are matched by source path, the heading path below
+// the document title, and position or similarity; an ambiguous replacement is
+// reported and not written. Unrelated existing draft rules are preserved.
+// Publication is never requested.
 //
 // AR1 has no on-demand placement field. Packs are attached as draft details and
 // stay out of the session-file projection. Unresolved choices, mixed layer/set

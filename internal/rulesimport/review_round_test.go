@@ -188,6 +188,107 @@ func TestAmbiguousLineageReplacementIsReported(t *testing.T) {
 	}
 }
 
+func TestBaselineCoversIdentityAndSourceRevision(t *testing.T) {
+	path := writeDoc(t, t.TempDir(), "AGENTS.md", "## Git\n- Never force-push.\n  Why: shared history.\n")
+	proposal := mustBuild(t, Request{Context: ContextProject, Files: []string{path}})
+	mapped, err := MapDraft(proposal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name string
+		edit func(*DraftRule)
+		kept func(DraftRule) bool
+	}{
+		{
+			name: "identity",
+			edit: func(rule *DraftRule) { rule.Identity = "aeon-renamed-rule" },
+			kept: func(rule DraftRule) bool { return rule.Identity == "aeon-renamed-rule" },
+		},
+		{
+			name: "revision",
+			edit: func(rule *DraftRule) { rule.Source.Revision = "aeon-corrected-revision" },
+			kept: func(rule DraftRule) bool { return rule.Source.Revision == "aeon-corrected-revision" },
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rules := append([]DraftRule(nil), mapped...)
+			tc.edit(&rules[0])
+			if !divergedFromBaseline(rules[0]) {
+				t.Fatal("edit still matches the imported baseline")
+			}
+			current := &DraftSet{
+				ID: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", Name: "Imported", Revision: 4,
+				Scope: DraftScope{Layer: LayerProject}, Rules: rules,
+			}
+			var puts int
+			_, err := ApplyDraft(context.Background(), serveDraft(t, current, &puts), proposal, Target{SetID: current.ID, Revision: current.Revision})
+			if !errors.Is(err, ErrDraftConflict) || puts != 0 || !tc.kept(current.Rules[0]) || len(current.Rules) != 1 {
+				t.Fatalf("Aeon edit overwritten: err=%v puts=%d rules=%+v", err, puts, current.Rules)
+			}
+		})
+	}
+}
+
+func TestRetitleMatchesHeadingBelowDocumentTitle(t *testing.T) {
+	dir := t.TempDir()
+	path := writeDoc(t, dir, "AGENTS.md", "# Repo rules\n\n## Git\n- Never force-push.\n  Why: shared history.\n")
+	first := mustBuild(t, Request{Context: ContextProject, Files: []string{path}})
+	mapped, err := MapDraft(first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	current := &DraftSet{
+		ID: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", Name: "Imported", Revision: 4,
+		Scope: DraftScope{Layer: LayerProject}, Rules: mapped,
+	}
+	var puts int
+	api := serveDraft(t, current, &puts)
+	if err := os.WriteFile(path, []byte("# Updated repo rules\n\n## Git\n- Never force-push the default branch.\n  Why: shared history.\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	second := mustBuild(t, Request{Context: ContextProject, Files: []string{path}})
+	result, err := ApplyDraft(context.Background(), api, second, Target{SetID: current.ID, Revision: current.Revision})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Added != 0 || result.Updated != 1 || result.Unchanged != 0 || puts != 1 || len(current.Rules) != 1 || current.Rules[0].Text != "Never force-push the default branch." {
+		t.Fatalf("retitle appended the changed rule: %+v rules=%+v", result, current.Rules)
+	}
+}
+
+func TestEmphasisStrippingKeepsIdentifiers(t *testing.T) {
+	assertNoDirectiveConflict(t, "Never delete foo_bar.", "Must delete foobar.")
+	assertNoDirectiveConflict(t, "Never delete `foo_bar`.", "Must delete `foobar`.")
+
+	same := directivePair(t, "Never delete `foo_bar`.", "Must delete `foo_bar`.")
+	if !hasCrossLayer(same, "delete foo_bar") {
+		t.Fatalf("identical code identifiers missed: %+v", same.Contradictions)
+	}
+	emphasized := directivePair(t, "_Never_ delete foo_bar.", "Always delete foo_bar.")
+	if !hasCrossLayer(emphasized, "delete foo_bar") {
+		t.Fatalf("emphasis around a directive missed: %+v", emphasized.Contradictions)
+	}
+}
+
+func directivePair(t *testing.T, left, right string) Proposal {
+	t.Helper()
+	return mustBuild(t, Request{Context: ContextTemplate, Files: []string{
+		writeDoc(t, t.TempDir(), "AGENTS-KERNEL.md", "# Synthetic kernel\n\n## Files\n- "+left+"\n  Why: keep that file.\n"),
+		writeDoc(t, t.TempDir(), "AGENTS.md", "<!-- aeon-context: template -->\n# Repo\n\n## Cleanup\n- "+right+"\n  Why: obsolete file.\n"),
+	}})
+}
+
+func assertNoDirectiveConflict(t *testing.T, left, right string) {
+	t.Helper()
+	got := directivePair(t, left, right)
+	for _, item := range got.Contradictions {
+		if item.Kind == "cross_layer_directive" {
+			t.Fatalf("distinct identifiers flagged: %+v", item)
+		}
+	}
+}
+
 func hasCrossLayer(p Proposal, topic string) bool {
 	for _, item := range p.Contradictions {
 		if item.Kind == "cross_layer_directive" && item.Topic == topic {
