@@ -140,7 +140,7 @@ function destructive(approval: Approval) {
 .what { font-size: 13.5px; font-weight: 600; color: var(--ink); }
 .risk-chip { display: inline-flex; align-items: center; gap: 3px; height: 18px; padding: 0 7px; border-radius: 999px; font: 600 10px/18px var(--mono); letter-spacing: .06em; text-transform: uppercase; background: var(--row-selected); color: var(--teal-ink); }
 .risk-chip.medium { background: transparent; box-shadow: inset 0 0 0 1px rgba(214, 155, 49, .55); color: var(--gold-ink); }
-.risk-chip.high { background: var(--gold-wash); color: var(--warn); box-shadow: inset 0 0 0 1px rgba(214, 155, 49, .55); }
+.risk-chip.high { background: var(--gold-wash); color: var(--warn-ink); box-shadow: inset 0 0 0 1px rgba(214, 155, 49, .55); }
 .risk-chip.high.destructive { background: var(--danger-bg); color: var(--danger); box-shadow: inset 0 0 0 1px var(--danger-line); }
 .expiry { display: inline-flex; align-items: center; gap: 4px; margin-left: auto; font-size: 12px; color: var(--ink-3); white-space: nowrap; }
 .expiry.soon { color: var(--gold-ink); }
