@@ -377,12 +377,6 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
   .session-panel:has(#session-panel-messages textarea:focus) .head-actions,
   .session-panel:has(#session-panel-messages textarea:focus) .head-sub,
   .session-panel:has(#session-panel-messages textarea:focus) .managed-controls { display: none; }
-  .menu-item { display: flex; align-items: flex-start; gap: 10px; width: 100%; padding: 8px 10px; border: 0; border-radius: 8px; background: transparent; color: var(--ink); font-size: 13.5px; text-align: left; }
-  .menu-item > svg { margin-top: 2px; color: var(--ink-2); flex-shrink: 0; }
-  .menu-item:hover { background: var(--row-hover); }
-  .menu-item:focus-visible { background: var(--row-selected); box-shadow: inset 0 0 0 1px var(--glass-rim); }
-  .mi-text { display: grid; gap: 2px; min-width: 0; }
-  .mi-text small { font-size: 11.5px; color: var(--ink-3); line-height: 1.35; }
   .scroll { padding: 16px 18px 24px; }
   .telemetry { grid-template-columns: 1fr 1fr; }
   .run-row { grid-template-columns: 88px minmax(0, 1fr) 56px; }

@@ -73,6 +73,11 @@ function toggleMore(event: MouseEvent) {
   const anchor = event.currentTarget as HTMLElement
   moreAnchor.value = moreAnchor.value === anchor ? null : anchor
 }
+function closeMore(restore: boolean) {
+  const trigger = moreAnchor.value
+  moreAnchor.value = null
+  if (restore) trigger?.focus()
+}
 function pickSetting(kind: Setting) { moreAnchor.value = null; void editSetting(kind) }
 function closeIfItem(event: MouseEvent) {
   if ((event.target as Element | null)?.closest?.('[role="menuitem"]')) moreAnchor.value = null
@@ -167,16 +172,17 @@ async function sendRequest() {
       <button type="button" class="btn sm ghost" :disabled="!!unavailable || waiting || !session.advertised_capabilities.includes('stop')" @click="confirmStop = true; composing = false; editing = null"><AppIcon name="halt" :size="14" /><span>Stop</span></button>
       <button v-if="phone" type="button" class="icon-btn flat more" aria-label="More session actions" aria-haspopup="menu" :aria-expanded="!!moreAnchor" :disabled="waiting" @click="toggleMore"><AppIcon name="more" :size="16" /></button>
     </div>
-    <FloatingPanel v-if="phone && moreAnchor" :anchor="moreAnchor" align="end" :width="288" label="More session actions" @close="moreAnchor = null">
-      <div class="overflow-menu" role="menu" aria-label="More session actions" @click="closeIfItem">
-        <template v-for="kind in settings" :key="kind">
-          <button v-if="session.advertised_capabilities.includes(kind)" type="button" role="menuitem" class="menu-item" :disabled="!!unavailable || waiting" :aria-label="`Edit ${settingNames[kind].toLowerCase()}`" :title="currentSetting(kind)" @click="pickSetting(kind)">
-            <AppIcon name="edit" :size="16" /><span class="mi-text"><span>{{ settingNames[kind] }}</span><small>{{ currentSetting(kind) || 'Set' }}</small></span>
-          </button>
-        </template>
-        <slot name="more" />
-        <hr class="menu-sep" />
-        <p class="menu-note">Tools stay bound to this run and its budget. Other processes running as the same OS user are outside this isolation boundary.</p>
+    <FloatingPanel v-if="phone && moreAnchor" :anchor="moreAnchor" align="end" :width="288" label="More session actions" @close="closeMore">
+      <div class="overflow-menu">
+        <div class="overflow-list" role="menu" aria-label="More session actions" :aria-describedby="`${uid}-limits`" @click="closeIfItem">
+          <template v-for="kind in settings" :key="kind">
+            <button v-if="session.advertised_capabilities.includes(kind)" type="button" role="menuitem" class="menu-item" :disabled="!!unavailable || waiting" :aria-label="`Edit ${settingNames[kind].toLowerCase()}`" :title="currentSetting(kind)" @click="pickSetting(kind)">
+              <AppIcon name="edit" :size="16" /><span class="mi-text"><span>{{ settingNames[kind] }}</span><small>{{ currentSetting(kind) || 'Set' }}</small></span>
+            </button>
+          </template>
+          <slot name="more" />
+        </div>
+        <p :id="`${uid}-limits`" class="menu-note">Tools stay bound to this run and its budget. Other processes running as the same OS user are outside this isolation boundary.</p>
       </div>
     </FloatingPanel>
     <p v-if="unavailable" class="hint">{{ unavailable }}</p>
@@ -187,9 +193,10 @@ async function sendRequest() {
       <div class="control-row"><button type="submit" class="btn sm primary" :disabled="!canSteer || waiting || !!unavailable">Send steer</button><button type="button" class="btn sm ghost" :disabled="waiting" @click="composing = false">Cancel</button></div>
     </form>
     <div v-if="!phone && confirmStop" class="stop-confirm"><span>End this session?</span><button type="button" class="btn sm" @click="submit('stop')">Confirm stop</button><button type="button" class="btn sm ghost" @click="confirmStop = false">Cancel</button></div>
-    <p v-if="feedback" class="feedback" role="status">{{ feedback }}</p>
-    <p v-if="error" class="hint" role="alert">{{ error }}</p>
-    <div v-if="uncertain" class="control-row"><button type="button" class="btn sm ghost" :disabled="busy" @click="check()">Check result</button><button v-if="request" type="button" class="btn sm ghost" :disabled="busy" @click="sendRequest">Retry same request</button></div>
+    <!-- A modal sheet makes the page behind it inert, so a lost receipt stays in the sheet. -->
+    <p v-if="feedback && !sheetOpen" class="feedback" role="status">{{ feedback }}</p>
+    <p v-if="error && !sheetOpen" class="hint" role="alert">{{ error }}</p>
+    <div v-if="uncertain && !sheetOpen" class="control-row"><button type="button" class="btn sm ghost" :disabled="busy" @click="check()">Check result</button><button v-if="request" type="button" class="btn sm ghost" :disabled="busy" @click="sendRequest">Retry same request</button></div>
     <details v-if="!phone"><summary><AppIcon name="chevron-right" :size="12" />Control limits</summary><p>Tools stay bound to this run and its budget. Other processes running as the same OS user are outside this isolation boundary.</p></details>
     <dialog v-if="phone" ref="sheetEl" class="steer-sheet" :aria-labelledby="`${uid}-sheet-title`" @cancel.prevent="closeSheet" @click="backdrop">
       <div class="sheet-card">
@@ -218,6 +225,9 @@ async function sendRequest() {
             <p :id="`${uid}-help`" class="hint">{{ session.harness === 'claude' ? 'Queues your message for the next turn and interrupts the current one.' : 'Adds your message to the running turn.' }}</p>
             <div class="sheet-actions"><button type="submit" class="btn primary" :disabled="!canSteer || waiting || !!unavailable">Send steer</button><button type="button" class="btn ghost" :disabled="waiting" @click="closeSheet">Cancel</button></div>
           </form>
+          <p v-if="sheetOpen && feedback" class="feedback" role="status">{{ feedback }}</p>
+          <p v-if="sheetOpen && error" class="hint" role="alert">{{ error }}</p>
+          <div v-if="sheetOpen && uncertain" class="sheet-actions"><button type="button" class="btn ghost" :disabled="busy" @click="check()">Check result</button><button v-if="request" type="button" class="btn ghost" :disabled="busy" @click="sendRequest">Retry same request</button></div>
         </div>
       </div>
     </dialog>
@@ -240,32 +250,31 @@ textarea{resize:vertical;min-height:78px;padding:10px}
 .hint,.feedback,details,.menu-note{font-size:12px;line-height:1.5;margin:0}.hint,details,.menu-note{color:var(--ink-3)}
 .feedback{background:var(--surface-sunken);border-radius:var(--radius-row);padding:8px 10px;overflow-wrap:anywhere}
 summary{cursor:pointer;width:fit-content;display:flex;align-items:center;gap:6px;list-style:none}summary::-webkit-details-marker{display:none}details[open] summary :deep(svg){transform:rotate(90deg)}details p{margin:6px 0 0}.stop-confirm{font-size:13px}
-.menu-item{display:flex;align-items:flex-start;gap:10px;width:100%;padding:8px 10px;border:0;border-radius:8px;background:transparent;color:var(--ink);font-size:13.5px;text-align:left}
-.menu-item > svg{margin-top:2px;color:var(--ink-2);flex-shrink:0}
-.menu-item:hover:not(:disabled){background:var(--row-hover)}
-.menu-item:focus-visible{background:var(--row-selected);box-shadow:inset 0 0 0 1px var(--glass-rim)}
-.menu-item:disabled{color:var(--ink-3);cursor:not-allowed}
-.mi-text{display:grid;gap:2px;min-width:0}
-.mi-text small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11.5px;color:var(--ink-3);line-height:1.35}
-.menu-sep{height:1px;margin:4px 6px;border:0;background:var(--line)}
-.overflow-menu:not(:has([role="menuitem"])) .menu-sep{display:none}
-.menu-note{margin:2px 10px 6px;overflow-wrap:anywhere}
+.overflow-menu :deep(.menu-item){display:flex;align-items:center;gap:10px;width:100%;min-height:44px;padding:8px 10px;border:0;border-radius:8px;background:transparent;color:var(--ink);font-size:13.5px;text-align:left}
+.overflow-menu :deep(.menu-item > svg){color:var(--ink-2);flex-shrink:0}
+.overflow-menu :deep(.menu-item:hover:not(:disabled)){background:var(--row-hover)}
+.overflow-menu :deep(.menu-item:focus-visible){background:var(--row-selected);box-shadow:inset 0 0 0 1px var(--glass-rim)}
+.overflow-menu :deep(.menu-item:disabled){color:var(--ink-3);cursor:not-allowed}
+.overflow-menu :deep(.mi-text){display:grid;gap:2px;min-width:0}
+.overflow-menu :deep(.mi-text small){overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11.5px;color:var(--ink-3);line-height:1.35}
+.menu-note{margin:4px 10px 6px;padding-top:8px;border-top:1px solid var(--line);overflow-wrap:anywhere}
+.overflow-menu:not(:has([role="menuitem"])) .menu-note{border-top:0;padding-top:0}
 .steer-sheet{position:fixed;inset:auto 0 calc(100dvh - var(--vv-top, 0px) - var(--vv-h, 100dvh)) 0;width:auto;max-width:none;height:auto;max-height:min(88dvh, var(--vv-h, 88dvh));margin:0;padding:0;border:0;background:transparent;color:var(--ink);overflow:visible}
 .steer-sheet::backdrop{background:var(--scrim)}
 .sheet-card{display:flex;flex-direction:column;max-height:min(88dvh, var(--vv-h, 88dvh));border-radius:20px 20px 0 0;border-top:1px solid var(--glass-edge);background:var(--surface-raised);box-shadow:0 -18px 40px -18px rgba(0, 0, 0, .35)}
 .grabber{align-self:center;width:40px;height:4px;margin-top:8px;border-radius:999px;background:var(--line-2)}
 .sheet-head{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:4px 10px 4px 20px}
 .sheet-head h2{font-size:17px}
-.sheet-head .icon-btn{width:40px;height:40px}
-.sheet-body{padding:4px 16px calc(16px + env(safe-area-inset-bottom))}
+.sheet-head .icon-btn{width:44px;height:44px}
+.sheet-body{display:grid;gap:10px;padding:4px 16px calc(16px + env(safe-area-inset-bottom))}
 .sheet-lead{margin:0;font-size:14px}
 .sheet-actions{display:flex;gap:8px}
 .sheet-actions .btn{flex:1;min-height:44px}
 @media(max-width:720px){
   .managed-controls{gap:8px;padding-top:8px}
   .control-row{flex-wrap:nowrap}
-  .control-row > .btn{flex:0 0 auto;min-height:40px}
-  .more{margin-left:auto;width:40px;height:40px}
+  .control-row > .btn{flex:0 0 auto;min-width:44px;min-height:44px}
+  .more{margin-left:auto;width:44px;height:44px}
 }
 @media(prefers-reduced-motion:no-preference){
   .steer-sheet[open] .sheet-card{animation:sheet-up .24s cubic-bezier(.2,.7,.2,1)}

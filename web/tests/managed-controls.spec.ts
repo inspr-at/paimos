@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { test, expect, type Page } from '@playwright/test'
+import { test, expect, type Locator, type Page } from '@playwright/test'
 import { mkdir } from 'node:fs/promises'
 import { fixtures, me, mockWork } from './work-fixtures'
 import { agentData, mockAgents } from './agents-fixtures'
@@ -83,6 +83,89 @@ test('lost POST response preserves the request id for explicit retry', async ({ 
   await expect(controls(page).getByRole('status')).toContainText('Interrupt applied')
   expect(requests).toHaveLength(2)
   expect(requests[1]).toEqual(requests[0])
+})
+
+async function touch(locator: Locator) {
+  const box = await locator.boundingBox()
+  expect(box?.width).toBeGreaterThanOrEqual(44)
+  expect(box?.height).toBeGreaterThanOrEqual(44)
+}
+
+test('a lost steer response keeps the receipt and retry inside the phone sheet', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  const { requests } = await setup(page, { lostResponse: true })
+  await controls(page).getByRole('button', { name: 'Steer', exact: true }).click()
+  const sheet = page.getByRole('dialog', { name: 'Steer' })
+  await sheet.getByLabel('What should change?').fill('Keep going.')
+  await sheet.getByRole('button', { name: 'Send steer' }).click()
+  await expect(sheet).toBeVisible()
+  await expect(sheet.getByRole('status')).toContainText('Outcome unconfirmed')
+  await expect(sheet.getByRole('alert')).toBeVisible()
+  await expect(sheet.getByLabel('What should change?')).toHaveValue('Keep going.')
+  await touch(sheet.getByRole('button', { name: 'Check result' }))
+  await touch(sheet.getByRole('button', { name: 'Retry same request' }))
+  await sheet.getByRole('button', { name: 'Check result' }).click()
+  await expect(sheet.getByRole('status')).toContainText('Steer applied')
+  await expect(sheet.getByRole('button', { name: 'Check result' })).toHaveCount(0)
+  expect(requests).toHaveLength(1)
+})
+
+test('phone stop asks before sending, and More reaches Recover and Remove', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  const { requests } = await setup(page)
+  await page.route('**/harness-sessions/*/recovery', route => route.fulfill({ json: {
+    session_id: id, host: 'imac0', display_label: 'Focused session', observed_revision: 'c'.repeat(64),
+    confirmation: `archive ${id} on imac0`, process_state: 'running', process_scope: 'No process will be signalled.',
+    can_archive: true, force_stop_available: false, force_stop_reason: 'Force stop is not available.',
+  } }))
+  for (const name of ['Steer', 'Interrupt', 'Stop']) await touch(controls(page).getByRole('button', { name, exact: true }))
+  const more = controls(page).getByRole('button', { name: 'More session actions' })
+  await touch(more)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+
+  await controls(page).getByRole('button', { name: 'Stop', exact: true }).click()
+  const stop = page.getByRole('dialog', { name: 'Stop' })
+  await expect(stop.getByRole('button', { name: 'Confirm stop' })).toBeVisible()
+  await touch(stop.getByRole('button', { name: 'Close' }))
+  expect(requests).toHaveLength(0)
+  await page.keyboard.press('Escape')
+  await expect(stop).toBeHidden()
+  expect(requests).toHaveLength(0)
+
+  await controls(page).getByRole('button', { name: 'Stop', exact: true }).click()
+  await expect(stop.getByRole('button', { name: 'Confirm stop' })).toBeVisible()
+  await page.mouse.click(24, 24)
+  await expect(stop).toBeHidden()
+  expect(requests).toHaveLength(0)
+  await expect(page).toHaveURL(new RegExp(id))
+
+  await more.click()
+  const menu = page.getByRole('menu', { name: 'More session actions' })
+  await expect(menu.locator('p')).toHaveCount(0)
+  await expect(page.getByText('Tools stay bound to this run and its budget.')).toBeVisible()
+  const recoverItem = menu.getByRole('menuitem', { name: 'Recover', exact: true })
+  const removeItem = menu.getByRole('menuitem', { name: 'Remove Focused session from Agents' })
+  await touch(recoverItem)
+  await touch(removeItem)
+  await page.keyboard.press('Escape')
+  await expect(more).toBeFocused()
+  await expect(menu).toBeHidden()
+
+  await more.click()
+  await menu.getByRole('menuitem', { name: 'Recover', exact: true }).click()
+  const recover = page.getByRole('dialog', { name: 'Recover session' })
+  await expect(recover).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(recover).toBeHidden()
+
+  await more.click()
+  await menu.getByRole('menuitem', { name: 'Remove Focused session from Agents' }).click()
+  const confirm = page.getByRole('dialog', { name: 'Remove Focused session from Agents?' })
+  await expect(confirm).toContainText('The process is not stopped')
+  await confirm.getByRole('button', { name: 'Cancel' }).click()
+  await expect(confirm).toBeHidden()
+  await expect(page).toHaveURL(new RegExp(id))
+  expect(requests).toHaveLength(0)
 })
 
 test('navigation clears private drafts', async ({ page }) => {
