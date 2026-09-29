@@ -9,8 +9,9 @@ import (
 )
 
 // CoordinatorBaseScopes is the CLI coordinator key ceiling minted before
-// AEON-327. A live key that still carries every one of these is a coordinator
-// key; pairing runtime keys do not.
+// AEON-327. These stored scopes identify a coordinator ceiling, not live
+// authority; derived reads also require coordinator role grants. Pairing
+// runtime keys do not carry this ceiling.
 var CoordinatorBaseScopes = []string{
 	"harness.read", "harness.write", "harness.worker",
 	"inbox.read", "inbox.send",
@@ -53,46 +54,67 @@ func CoordinatorCeiling(scopes []string, permission string) bool {
 	return permission == "models.read" || permission == "rules.read"
 }
 
-// applyCoordinatorReads adds the AEON-327 reads onto an effective grant.
-// models.read is workspace-wide. rules.read is added on a project, and on the
-// any-project set the rules API uses to enter a handler, only when that same
-// grant already includes nodes.read. It is never added to the workspace list.
-// Call this before the key-creator intersection so a creator who lacks the
-// read still caps the agent.
-func applyCoordinatorReads(result *Effective, p tenant.Principal) {
-	if p.Kind != tenant.Agent || !IsCoordinatorKey(p.Scopes) {
+// applyCoordinatorReads runs after the creator intersection. Every derived
+// read requires live coordinator grants and, for a human-created key, the
+// creator's permission. Project reads also require nodes.read in that same
+// project on both sides of the intersection.
+func applyCoordinatorReads(result *Effective, p tenant.Principal, own grants, creator *grants) {
+	if !liveCoordinator(p, own) {
 		return
 	}
-	if !contains(result.Workspace.Permissions, "models.read") {
-		result.Workspace.Permissions = append(result.Workspace.Permissions, "models.read")
+	if coordinatorAllows(p, own, creator, "models.read", "") {
+		result.Workspace.Permissions = unique(append(result.Workspace.Permissions, "models.read"))
 	}
-	result.Workspace.Permissions = unique(result.Workspace.Permissions)
-	if result.Project != nil && coordinatorReadsProject(result.Workspace.Permissions, result.Project.Permissions) {
-		if !contains(result.Project.Permissions, "rules.read") {
-			result.Project.Permissions = append(result.Project.Permissions, "rules.read")
+	if result.Project != nil && coordinatorAllows(p, own, creator, "rules.read", result.Project.ID) {
+		result.Project.Permissions = unique(append(result.Project.Permissions, "rules.read"))
+	}
+	// AnyProject is an entry check, but the intersection must still name a
+	// common project. Intersecting permission names from disjoint projects
+	// would incorrectly give a coordinator access to workspace rule layers.
+	anyRules := coordinatorReadsProject(own, creator, "")
+	for id := range own.projects {
+		anyRules = anyRules || coordinatorReadsProject(own, creator, id)
+	}
+	if creator != nil {
+		for id := range creator.projects {
+			anyRules = anyRules || coordinatorReadsProject(own, creator, id)
 		}
-		result.Project.Permissions = unique(result.Project.Permissions)
 	}
-	if coordinatorReadsProject(result.Workspace.Permissions, result.anyProject) && !contains(result.anyProject, "rules.read") {
+	if anyRules {
 		result.anyProject = unique(append(result.anyProject, "rules.read"))
 	}
 }
 
-func coordinatorReadsProject(workspace, project []string) bool {
-	return contains(workspace, "nodes.read") || contains(project, "nodes.read")
+// A stored key ceiling alone is not a role. Re-read its workspace coordinator
+// permissions and its workspace/project node grant on every authorization.
+func liveCoordinator(p tenant.Principal, g grants) bool {
+	if p.Kind != tenant.Agent || !IsCoordinatorKey(p.Scopes) || g.workspaceRole == nil {
+		return false
+	}
+	for _, permission := range CoordinatorBaseScopes {
+		if !g.allows(permission, "") && (permission != "nodes.read" || !contains(g.anyProject, permission)) {
+			return false
+		}
+	}
+	return true
+}
+
+func coordinatorReadsProject(own grants, creator *grants, projectID string) bool {
+	return own.allows("nodes.read", projectID) && (creator == nil ||
+		creator.allows("nodes.read", projectID) && creator.allows("rules.read", projectID))
 }
 
 // coordinatorAllows is applyCoordinatorReads for one ProjectsTx question.
 // An empty projectID is the workspace, where rules.read stays denied.
-func coordinatorAllows(p tenant.Principal, g grants, permission, projectID string) bool {
-	if p.Kind != tenant.Agent || !IsCoordinatorKey(p.Scopes) {
+func coordinatorAllows(p tenant.Principal, own grants, creator *grants, permission, projectID string) bool {
+	if !liveCoordinator(p, own) {
 		return false
 	}
 	switch permission {
 	case "models.read":
-		return true
+		return creator == nil || creator.allows(permission, "")
 	case "rules.read":
-		return projectID != "" && g.allows("nodes.read", projectID)
+		return projectID != "" && coordinatorReadsProject(own, creator, projectID)
 	default:
 		return false
 	}

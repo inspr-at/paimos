@@ -40,10 +40,14 @@
 //	  inbox.receipt.
 //	/api/models, /api/plugins: models.read or plugins.read; writes have no
 //	  agent mapping. A coordinator key may resolve models even when its stored
-//	  scopes were minted before models.read.
+//	  scopes were minted before models.read, while its live coordinator
+//	  role grants remain in place and its creator permits that read.
 //	/api/rules: rules.read or rules.write. Publishing and restoring have no
 //	  agent mapping. A coordinator key's rules.read applies on projects it can
-//	  already read, not as a workspace permission.
+//	  already read after the creator intersection, not as a workspace
+//	  permission. Operator-created keys without a human creator are refused
+//	  by the rules handler with rules_owner_required; issue the key as a
+//	  signed-in person to preserve personal rule ownership and merge context.
 //	/api/work-orders: work_orders.read or work_orders.write; run creation
 //	  uses run.create. /api/runs: run.read, run.claim or run.telemetry.
 //	/api/harness-sessions, /api/projects/{id}/harness-sessions:

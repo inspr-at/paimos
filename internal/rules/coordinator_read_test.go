@@ -149,4 +149,66 @@ func TestCoordinatorReadsRuleDraftsOnlyOnItsProjects(t *testing.T) {
 	if status != http.StatusForbidden {
 		t.Fatalf("coordinator merged project B: %d %s", status, raw)
 	}
+	// Reproduce the creator ceiling leak with real comparison rows. The key's
+	// role can read nodes workspace-wide; its creator can read only project A
+	// nodes while retaining workspace rules.read.
+	must(other, http.MethodPost, "/api/rules/comparisons", comparisonBody(projectA, "codex", "allowed-project-a"), http.StatusOK)
+	must(other, http.MethodPost, "/api/rules/comparisons", comparisonBody(projectB, "codex", "private-project-b"), http.StatusOK)
+	exec := func(query string, args ...any) {
+		t.Helper()
+		if _, err := d.Admin.Exec(ctx, query, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	exec(`INSERT INTO role_permissions(tenant_id,role_id,permission) SELECT $1,id,'nodes.read' FROM roles WHERE tenant_id=$1 AND key='coord_ws'`, tid)
+	exec(`DELETE FROM role_bindings WHERE tenant_id=$1 AND principal_id=$2`, tid, admin.ID)
+	var readerRole string
+	if err := d.Admin.QueryRow(ctx, `INSERT INTO roles(tenant_id,key,name) VALUES($1,'creator_rules','Creator rules reader') RETURNING id::text`, tid).Scan(&readerRole); err != nil {
+		t.Fatal(err)
+	}
+	exec(`INSERT INTO role_permissions(tenant_id,role_id,permission) VALUES($1,$2,'rules.read')`, tid, readerRole)
+	exec(`INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type) VALUES($1,$2,$3,'workspace')`, tid, admin.ID, readerRole)
+	exec(`INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,scope_id) SELECT $1,$2,id,'project',$3::uuid FROM roles WHERE tenant_id=$1 AND key='coord_a'`, tid, admin.ID, projectA)
+	for _, scopes := range [][]string{authz.CoordinatorBaseScopes, authz.CoordinatorKeyScopes} {
+		coordinator.Scopes = scopes
+		if body := must(coordinator, http.MethodGet, "/api/rules/comparisons?project_id="+projectA, nil, http.StatusOK); !strings.Contains(string(body), "allowed-project-a") {
+			t.Fatalf("allowed comparison missing: %s", body)
+		}
+		must(coordinator, http.MethodGet, "/api/rules/comparisons?project_id="+projectB, nil, http.StatusForbidden)
+		must(coordinator, http.MethodGet, "/api/rules/sets?layer_id="+layerA.ID, nil, http.StatusOK)
+		must(coordinator, http.MethodGet, "/api/rules/sets?layer_id="+layerB.ID, nil, http.StatusNotFound)
+		must(coordinator, http.MethodGet, merged, nil, http.StatusOK)
+		must(coordinator, http.MethodGet, "/api/rules/merged?project_id="+projectB+"&person_id="+admin.ID+"&agent_id="+coordinator.ID+"&role=coordinator&harness=codex", nil, http.StatusForbidden)
+		body := must(coordinator, http.MethodGet, "/api/rules/layers", nil, http.StatusOK)
+		if !strings.Contains(string(body), layerA.ID) || strings.Contains(string(body), layerB.ID) || strings.Contains(string(body), foreign.ID) {
+			t.Fatalf("creator project/owner ceiling failed: %s", body)
+		}
+		// Bulk project decisions must agree with the handler's RequireTx path.
+		if err := db.InTenant(ctx, d.App, tid, func(tx pgx.Tx) error {
+			check, err := authz.ProjectsTx(ctx, tx, coordinator)
+			if err != nil {
+				return err
+			}
+			if !check("rules.read", projectA) || check("rules.read", projectB) || check("rules.read", "") {
+				t.Error("ProjectsTx bypassed the creator project ceiling")
+			}
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Removing the creator's rules permission revokes reads even though both
+	// principals still have nodes.read on project A.
+	exec(`DELETE FROM role_permissions WHERE tenant_id=$1 AND role_id=$2 AND permission='rules.read'`, tid, readerRole)
+	must(coordinator, http.MethodGet, "/api/rules/layers", nil, http.StatusForbidden)
+	exec(`INSERT INTO role_permissions(tenant_id,role_id,permission) VALUES($1,$2,'rules.read')`, tid, readerRole)
+	must(coordinator, http.MethodGet, "/api/rules/layers", nil, http.StatusOK)
+
+	// Node grants in different projects must not combine into an AnyProject
+	// rules grant: the key retains A, while the creator now holds only B.
+	exec(`DELETE FROM role_permissions WHERE tenant_id=$1 AND permission='nodes.read' AND role_id=(SELECT id FROM roles WHERE tenant_id=$1 AND key='coord_ws')`, tid)
+	exec(`UPDATE role_bindings SET scope_id=$3 WHERE tenant_id=$1 AND principal_id=$2 AND scope_type='project'`, tid, admin.ID, projectB)
+	must(coordinator, http.MethodGet, "/api/rules/layers", nil, http.StatusForbidden)
+	must(coordinator, http.MethodGet, "/api/rules/comparisons?project_id="+projectA, nil, http.StatusForbidden)
+	must(coordinator, http.MethodGet, "/api/rules/comparisons?project_id="+projectB, nil, http.StatusForbidden)
 }

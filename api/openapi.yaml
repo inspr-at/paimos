@@ -9,7 +9,7 @@ paths:
   /rules/layers:
     get:
       operationId: "listRuleLayers"
-      description: "rules.read; only authorized project/owner layers"
+      description: "rules.read; only authorized project/owner layers. Coordinator keys require live coordinator role grants and effective node access on a project, capped by their human creator's node and rules access. After permission checks, rules reads refuse operator-created keys without a human creator with 403 rules_owner_required; create the key as a signed-in person to retain scoped ownership."
       responses:
         "200":
           description: "Authorized rule resource"

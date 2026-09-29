@@ -14,9 +14,12 @@
 // exists per scope. Guest is a project-only role; Owner and Customer are
 // workspace-only. Agent key scopes narrow this set; an empty scope list grants
 // no API access. A coordinator key (CoordinatorKeyScopes, including a key
-// minted with only CoordinatorBaseScopes) may read the model registry.
-// rules.read is granted only on projects that key can already read, never
-// as a workspace permission and never to any other agent key.
+// minted with only CoordinatorBaseScopes) may read the model registry while
+// its live coordinator role grants remain. Derived rules.read is granted only
+// on projects that key can read after the creator intersection, never as a
+// workspace permission or to any other agent key. The creator must also hold
+// rules.read on that same project. The rules handler separately requires a
+// human creator for ownership, including for operator-created keys.
 //
 // Visibility (P2) is enforced by row-level security, not here: db.InTenant
 // sets the caller's visible projects once per transaction ("*" for a
