@@ -7,6 +7,7 @@ import { deriveAgentState, normalizeAgentState } from '../src/lib/agentSignals.t
 import { benefitIssues, completedTicketState } from '../src/lib/ticketBenefits.ts'
 import { compareServerLead, leadWorkerKey, who, type LiveAgent } from '../src/lib/liveAgents.ts'
 import { mockEffectivePermissions } from './authz-fixtures'
+import { planningSortValue, type PlanningColumn } from '../src/lib/planning.ts'
 
 export const me = { id: '11111111-1111-4111-8111-111111111111', name: 'Markus Barta' }
 const mira = { id: '22222222-2222-4222-8222-222222222222', name: 'Mira Holm' }
@@ -19,6 +20,7 @@ export interface MockNode {
   created_at: string; updated_at: string
   estimate?: import('../src/lib/estimates').TicketEstimate
   eta?: Record<string, unknown>
+  planning?: import('../src/lib/planning').TicketPlanning
 }
 export interface MockView {
   id: string; owner_principal_id: string; project_id: string | null; name: string; filters: Record<string, string>
@@ -137,7 +139,8 @@ export function liveAgent(fields: Partial<LiveAgentMock> & Pick<LiveAgentMock, '
 }
 export interface Call { path: string; method: string; query: URLSearchParams; body: unknown; headers: Record<string, string> }
 
-function item(node: MockNode, data: Fixtures) {
+// usage: the caller holds harness.read, so planning keeps its cost (AEON-329).
+function item(node: MockNode, data: Fixtures, usage = true) {
   const kindIds: Record<string, string> = { epic: 'k-epic', ticket: 'k-ticket', task: 'k-task', project: 'k-project' }
   const parent = node.parent_id ? data.nodes.find(n => n.id === node.parent_id) : undefined
   const project = data.projects.find(p => p.id === node.project)!
@@ -157,6 +160,7 @@ function item(node: MockNode, data: Fixtures) {
     epic: epicAbove(node, data),
     ...(node.eta ? { eta: node.eta } : {}),
     ...(node.estimate ? { estimate: node.estimate } : {}),
+    ...(node.planning ? { planning: usage ? node.planning : { ...node.planning, cost: undefined } } : {}),
     ...(lead ? { lead_worker: { name: who(lead), key: leadWorkerKey(lead) } } : {}),
   }
 }
@@ -523,6 +527,14 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
           }
           const etaMissing = (n: MockNode) => field === 'estimate' ? (n.kind_slug === 'epic' ? n.estimate?.hours == null : typeof n.fields.estimate_hours !== 'number' || n.fields.estimate_hours <= 0) : field === 'eta_ready' ? !n.eta?.eta_ready_at : field === 'progress' ? typeof n.eta?.progress_pct !== 'number' : false
           if ((field === 'estimate' || field === 'eta_ready' || field === 'progress') && etaMissing(a) !== etaMissing(b)) return etaMissing(a) ? 1 : -1
+          if (field === 'model' || field === 'tokens' || field === 'list_cost' || field === 'paid') {
+            // Spent (or the role's rung), unknown last; costs are unknown without harness.read.
+            const plan = (n: MockNode) => options.readOnly && field !== 'model' && field !== 'tokens' ? null : planningSortValue({ kind_slug: n.kind_slug, fields: n.fields, planning: n.planning }, field as PlanningColumn)
+            const x = plan(a), y = plan(b)
+            if ((x === null) !== (y === null)) return x === null ? 1 : -1
+            if (x !== null && y !== null && x !== y) return (x < y ? -1 : 1) * (desc ? -1 : 1)
+            continue
+          }
           const value = (n: MockNode): string | number => field === 'estimate' ? (n.kind_slug === 'epic' ? n.estimate?.hours ?? 0 : Number(n.fields.estimate_hours ?? 0)) : field === 'state' ? (STATE_ORDER.indexOf(normal(n.state)) + 1 || 99)
             : field === 'priority' ? PRIORITY_ORDER.indexOf(typeof n.fields.priority === 'string' ? n.fields.priority : 'none')
             : field === 'updated_at' ? Date.parse(n.updated_at) : field === 'created_at' ? Date.parse(n.created_at) : field === 'key' ? Number(n.key.split('-')[1]) : field === 'title' ? n.title
@@ -546,7 +558,7 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
       }
       const limit = Number(query.get('limit') ?? 50), offset = Number((query.get('cursor') ?? 'o:0').slice(2))
       const pageRows = rows.slice(offset, offset + limit)
-      return route.fulfill({ json: { items: pageRows.map(n => item(n, data)), next_cursor: offset + limit < rows.length ? `o:${offset + limit}` : null, ...(Object.keys(facets).length ? { facets } : {}) } })
+      return route.fulfill({ json: { items: pageRows.map(n => item(n, data, !options.readOnly)), next_cursor: offset + limit < rows.length ? `o:${offset + limit}` : null, ...(Object.keys(facets).length ? { facets } : {}) } })
     }
     const agentWorkPath = /^\/api\/nodes\/([^/]+)\/agent-work$/.exec(path)
     if (agentWorkPath && method === 'GET') {

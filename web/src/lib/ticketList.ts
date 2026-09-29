@@ -8,6 +8,7 @@
 // values are alternatives and every excluded value must not match; filters
 // combine with AND. That is classic Paimos's model, and the list API's.
 import { estimateHours } from './estimates.ts'
+import { planningSortValue } from './planning.ts'
 import type { Facets, ListItem, ListQuery } from './api.ts'
 import { COLUMN_BY_ID, PINNED, type ColumnId } from './columns.ts'
 import { DEFAULT_SORT, KINDS, PRIORITIES, kindLabel, normaliseState, parseSort, priorityLabel, serializeSort, statusMeta, statusOptions, type SortKey } from './work.ts'
@@ -400,9 +401,11 @@ export function compareRows(keys: SortKey[]): (a: ListItem, b: ListItem) => numb
       case 'estimate': return estimateHours(row) ?? 0
       case 'eta_ready': return row.eta?.eta_ready_at ? Date.parse(row.eta.eta_ready_at) : 0
       case 'progress': return typeof row.eta?.progress_pct === 'number' ? row.eta.progress_pct : 0
+      case 'model': case 'tokens': case 'list_cost': case 'paid': return planningSortValue(row, field) ?? 0
     }
   }
-  const missing = (row: ListItem, field: SortKey['field']) => field === 'estimate' ? estimateHours(row) === null : field === 'eta_ready' ? !row.eta?.eta_ready_at : field === 'progress' ? typeof row.eta?.progress_pct !== 'number' : false
+  const missing = (row: ListItem, field: SortKey['field']) => field === 'estimate' ? estimateHours(row) === null : field === 'eta_ready' ? !row.eta?.eta_ready_at : field === 'progress' ? typeof row.eta?.progress_pct !== 'number'
+    : field === 'model' || field === 'tokens' || field === 'list_cost' || field === 'paid' ? planningSortValue(row, field) === null : false
   return (a, b) => {
     for (const key of keys) {
       // Unassigned work, estimates nobody reported, and unknown states come last in both directions.

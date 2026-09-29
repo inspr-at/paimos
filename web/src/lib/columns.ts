@@ -6,9 +6,13 @@
 // choice fixes order and visibility; columns that cannot fit still step aside from
 // the end. On wide tables Title stops at ~960px and the spare width goes to the
 // text columns, so the metadata stays near the title. Free of Vue for unit tests.
+// The planning columns (Model, Tokens, ≈ Cost, Paid; AEON-329) join wide tables
+// when a loaded row fills them, leave first when space runs out, and stay hidden
+// while no loaded row has a value, even when chosen.
 import type { SortField } from './work.ts'
+import { PLANNING_COLUMNS } from './planning.ts'
 
-export type ColumnId = 'key' | 'title' | 'status' | 'priority' | 'assignee' | 'epic' | 'release' | 'tags' | 'cost' | 'estimate' | 'created' | 'updated' | 'progress' | 'eta'
+export type ColumnId = 'key' | 'title' | 'status' | 'priority' | 'assignee' | 'epic' | 'release' | 'tags' | 'cost' | 'estimate' | 'model' | 'tokens' | 'list_cost' | 'paid' | 'created' | 'updated' | 'progress' | 'eta'
 export interface ColumnDef { id: ColumnId; label: string; sort: SortField | null; width: number; min: number; max: number; end?: boolean }
 // defaultView: the saved view this person opens the project with.
 export interface ListPrefs { order?: ColumnId[]; visible?: ColumnId[]; widths?: Partial<Record<ColumnId, number>>; defaultView?: string | null }
@@ -24,6 +28,12 @@ export const COLUMNS: ColumnDef[] = [
   { id: 'tags', label: 'Tags', sort: null, width: 180, min: 96, max: 420 },
   { id: 'cost', label: 'Cost unit', sort: null, width: 150, min: 96, max: 320 },
   { id: 'estimate', label: 'Estimate', sort: 'estimate', width: 96, min: 72, max: 180, end: true },
+  // 156px fits "Codex astra · xhigh" at the cell's 12.5px type.
+  { id: 'model', label: 'Model', sort: 'model', width: 156, min: 96, max: 260 },
+  // 118px fits "1.54M / 10M"; ≈ Cost fits "$4.48 / $27".
+  { id: 'tokens', label: 'Tokens', sort: 'tokens', width: 118, min: 84, max: 180, end: true },
+  { id: 'list_cost', label: '≈ Cost', sort: 'list_cost', width: 112, min: 80, max: 170, end: true },
+  { id: 'paid', label: 'Paid', sort: 'paid', width: 100, min: 72, max: 160, end: true },
   { id: 'created', label: 'Created', sort: 'created_at', width: 104, min: 80, max: 200, end: true },
   { id: 'updated', label: 'Updated', sort: 'updated_at', width: 104, min: 80, max: 200, end: true },
   { id: 'progress', label: 'Progress', sort: 'progress', width: 100, min: 84, max: 140, end: true },
@@ -40,14 +50,14 @@ export const TITLE_TARGET = 960
 const TITLE_ROOM = 420
 const PHONE: ColumnId[] = ['key', 'title', 'status', 'priority', 'updated']
 // The order columns leave in when space runs out: the least essential first.
-const DROP_ORDER: ColumnId[] = ['eta', 'progress', 'estimate', 'cost', 'tags', 'release', 'created', 'epic', 'assignee', 'updated', 'priority', 'status']
+const DROP_ORDER: ColumnId[] = ['paid', 'list_cost', 'tokens', 'model', 'eta', 'progress', 'estimate', 'cost', 'tags', 'release', 'created', 'epic', 'assignee', 'updated', 'priority', 'status']
 // Columns only wide tables add on their own.
-const WIDE_EXTRAS: ColumnId[] = ['estimate', 'tags', 'release', 'created', 'epic', 'assignee']
+const WIDE_EXTRAS: ColumnId[] = ['paid', 'list_cost', 'tokens', 'model', 'estimate', 'tags', 'release', 'created', 'epic', 'assignee']
 // The text columns that take spare width on wide tables (their text gets room).
 const GROWS: ColumnId[] = ['epic', 'tags', 'assignee', 'release', 'cost']
 // Which optional values any loaded row has. `workers` is live ticket work with
 // no stored assignee; it earns the Assignee column the same way a person does.
-export interface Present { assigned?: boolean; workers?: boolean; estimate?: boolean; release?: boolean; tags?: boolean; progress?: boolean; eta?: boolean }
+export interface Present { assigned?: boolean; workers?: boolean; estimate?: boolean; release?: boolean; tags?: boolean; progress?: boolean; eta?: boolean; model?: boolean; tokens?: boolean; list_cost?: boolean; paid?: boolean }
 
 export function orderOf(prefs: ListPrefs | null | undefined): ColumnId[] {
   const valid = (prefs?.order ?? []).filter((id): id is ColumnId => COLUMN_BY_ID.has(id as ColumnId) && !PINNED.includes(id as ColumnId))
@@ -55,13 +65,14 @@ export function orderOf(prefs: ListPrefs | null | undefined): ColumnId[] {
   return [...PINNED, ...new Set(valid), ...rest]
 }
 
-// Wide tables add Assignee, Epic and Created, and Release, Tags and Estimate when
-// some row has one; narrower ones show Assignee when someone is assigned or a
-// live worker is on a loaded ticket.
+// Wide tables add Assignee, Epic and Created, and Release, Tags, Estimate and the
+// planning columns when some row has one; narrower ones show Assignee when
+// someone is assigned or a live worker is on a loaded ticket.
 export function automaticColumns(tableWidth: number, present: Present = {}): ColumnId[] {
   const out: ColumnId[] = ['key', 'title', 'status', 'priority']
   if (tableWidth >= WIDE_TABLE) {
-    const optional: ColumnId[] = [...(present.release ? ['release' as const] : []), ...(present.tags ? ['tags' as const] : []), ...(present.estimate ? ['estimate' as const] : [])]
+    const optional: ColumnId[] = [...(present.release ? ['release' as const] : []), ...(present.tags ? ['tags' as const] : []), ...(present.estimate ? ['estimate' as const] : []),
+      ...PLANNING_COLUMNS.filter(id => present[id])]
     const wide: ColumnId[] = [...out, 'assignee', 'epic', ...optional, 'created', 'updated']
     if (present.progress) wide.push('progress')
     if (present.eta) wide.push('eta')
@@ -94,6 +105,7 @@ export function visibleColumns(tableWidth: number, options: { phone: boolean; pr
   const prefs = options.prefs
   const customised = !!prefs?.visible
   const chosen = customised ? new Set<ColumnId>([...PINNED, ...prefs!.visible!]) : new Set(automaticColumns(tableWidth, options.present))
+  for (const id of PLANNING_COLUMNS) if (!options.present?.[id]) chosen.delete(id)
   let ids = orderOf(prefs).filter(id => chosen.has(id))
   const total = (title: number) => ids.reduce((sum, id) => sum + (id === 'title' ? title : widthOf(id, prefs)), 0)
   // Columns a wide table adds on its own leave first when Title would get cramped.

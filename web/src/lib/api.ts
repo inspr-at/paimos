@@ -17,6 +17,7 @@ export function accountEmail(identity: Identity) {
 import { learnPictures } from './avatar.ts'
 import type { TicketEta } from './eta.ts'
 import type { TicketEstimate } from './estimates.ts'
+import type { TicketPlanning } from './planning.ts'
 
 export interface Version { version: string; scheme: string; brand?: import('./brand').Brand }
 
@@ -175,6 +176,8 @@ export interface ListItem extends WorkNode {
   eta?: TicketEta
   // The live worker the Assignee cell leads with. Absent when none is bound.
   lead_worker?: LeadWorker | null
+  // Model, tokens and (with harness.read) cost for the planning columns (AEON-329).
+  planning?: TicketPlanning
 }
 export type Facets = Record<string, Record<string, number>>
 export interface ListPage extends Page<ListItem> { facets?: Facets }
