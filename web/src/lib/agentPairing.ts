@@ -679,7 +679,7 @@ export function planApproval(input: {
   if (target) return { ok: false, message: target.message, next: target.next }
   if (verification === 'one_per_harness') {
     if (!input.view.verification) {
-      return { ok: false, message: 'The server did not include verification terms.', next: 'Choose Connect only, or look the code up again. This page will not invent a verification allowance.' }
+      return { ok: false, message: 'The server did not include verification terms.', next: 'Turn verification off, or look the code up again. This page will not invent a verification allowance.' }
     }
     const unsupported = unsupportedVerification(input.view, selected.keys)
     if (unsupported.length) {
@@ -687,7 +687,7 @@ export function planApproval(input: {
       return {
         ok: false,
         message: `Verification is unavailable for ${names}.`,
-        next: 'Choose Connect only, or leave out the harnesses that cannot be verified. Nothing is granted until you do. This page does not treat every harness as verified.',
+        next: 'Turn verification off, or leave out the harnesses that cannot be verified. Nothing is granted until you do. This page does not treat every harness as verified.',
       }
     }
   }
@@ -813,7 +813,7 @@ function setupProgress(view: PairingView): PairingProgress {
       phase: 'verify',
       title: 'Verification unavailable',
       detail: verificationUnavailableDetail(unavailable.verification_error),
-      next: 'The computer stays paired. Choose Connect only on a new approval, or leave that harness out. This is not an installation failure.',
+      next: 'The computer stays paired. Turn verification off on a new approval, or leave that harness out. This is not an installation failure.',
       renewsAuthority: false,
     }
   }
@@ -1257,7 +1257,7 @@ function explain(status: number, code: string, serverMessage: string, retryAfter
     },
     verification_unavailable: {
       message: 'Verification is unavailable for a selected harness.',
-      next: 'Choose Connect only, or leave that harness out, and connect again. Nothing was granted.',
+      next: 'Turn verification off, or leave that harness out, and connect again. Nothing was granted.',
     },
     pairing_revoked: {
       message: 'This computer is already disconnected.',

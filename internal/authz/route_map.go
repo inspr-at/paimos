@@ -28,6 +28,7 @@ var RoutePermissions = map[string]string{
 	"GET /api/rules/sets/{setId}/versions":                                              "rules.read",
 	"GET /api/rules/sets/{setId}/versions/{version}":                                    "rules.read",
 	"GET /api/rules/merged":                                                             "rules.read",
+	"POST /api/rules/publish":                                                           "rules.publish",
 	"GET /api/agent-pairing/guide":                                                      "public",
 	"POST /api/agent-pairing/device":                                                    "public",
 	"POST /api/agent-pairing/redeem":                                                    "public",
@@ -337,6 +338,9 @@ var RoutePermissions = map[string]string{
 	"PUT /api/projects/{projectId}/journey/profile":                    "journey.act",
 	"PUT /api/projects/{projectId}/releases/{releaseId}/plan":          "releases.write",
 	"PUT /api/quotes/{quoteId}/profile":                                "quotes.write",
+	"GET /api/settings/eta-interval":                                   "settings.manage",
+	"PUT /api/settings/eta-interval":                                   "settings.manage",
+	"PUT /api/nodes/{nodeId}/live-eta":                                 "harness.worker",
 }
 
 func PermissionForPattern(pattern string) (string, bool) {

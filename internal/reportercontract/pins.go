@@ -40,6 +40,10 @@ var surfaces = map[string]surface{
 		{"/projects/{projectId}/baseline-batches/batches/{batchId}/built-receipt", "post", "200"},
 	}},
 	"approvals": {Approvals, "ApprovalsContract", []operation{{"/approvals", "get", "200"}, {"/approvals", "post", "201"}, {"/approvals/{approvalId}/decision", "post", "200"}, {"/approvals/{approvalId}/revoke", "post", "200"}}},
+	"harness-session": {HarnessSession, "HarnessSessionContract", []operation{
+		{"/projects/{projectId}/harness-sessions/{sessionId}", "get", "200"},
+		{"/projects/{projectId}/harness-sessions/{sessionId}/heartbeat", "post", "200"},
+	}},
 }
 
 // Current derives each pin from the OpenAPI response schema, recursively

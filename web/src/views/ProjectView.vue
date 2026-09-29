@@ -858,6 +858,12 @@ async function remove(view: SavedView) {
 // ---------- Selection and bulk changes ----------
 const selectable = computed(() => writable.value && !journeyActive.value && !knowledgeActive.value && !graphActive.value && !fullView.value)
 const selected = ref(new Set<string>())
+// Phone selection can be armed before the first card is chosen.
+const phoneQuery = window.matchMedia('(max-width: 720px)')
+const phone = ref(phoneQuery.matches)
+const phonePicking = ref(false)
+const picking = computed(() => phonePicking.value || selected.value.size > 0)
+const onPhone = () => { phone.value = phoneQuery.matches; if (!phone.value) phonePicking.value = false }
 let selectAnchor: string | null = null
 function selectRow(row: ListItem, mode: 'toggle' | 'range') {
   const next = new Set(selected.value)
@@ -871,13 +877,16 @@ function selectRow(row: ListItem, mode: 'toggle' | 'range') {
     selectAnchor = row.id
   }
   selected.value = next
+  if (phone.value && next.size) phonePicking.value = true
   cursorId.value = row.id
 }
 function selectAll(on: boolean) {
   selected.value = on ? new Set(sequence.value.map(row => row.id)) : new Set()
   selectAnchor = on ? sequence.value[0]?.id ?? null : null
+  if (!on) phonePicking.value = false
+  else if (phone.value) phonePicking.value = true
 }
-function clearSelection() { selected.value = new Set(); selectAnchor = null }
+function clearSelection() { selected.value = new Set(); selectAnchor = null; phonePicking.value = false }
 // Everything that matches, beyond the loaded pages (up to the bulk limit of 500).
 async function selectAllMatching() {
   if (list.cursor.value) await list.loadAll(500)
@@ -1146,7 +1155,7 @@ function keydown(event: KeyboardEvent) {
   const row = sequence.value.find(item => item.id === cursorId.value)
   if (event.key === 'F') { event.preventDefault(); toolbar.value?.openFilterMenu(); return }
   if (selectable.value && !panel.value?.el?.contains(document.activeElement)) {
-    if (event.key === 'Escape' && selected.value.size) { event.preventDefault(); clearSelection(); return }
+    if (event.key === 'Escape' && (selected.value.size || phonePicking.value)) { event.preventDefault(); clearSelection(); return }
     if (!ticketKey.value) {
       if (event.key === 'x' && row) { event.preventDefault(); selectRow(row, 'toggle'); return }
       if (event.key === 'J' || (event.key === 'ArrowDown' && event.shiftKey)) { event.preventDefault(); extendSelection(1); return }
@@ -1215,6 +1224,7 @@ onMounted(() => {
   void projects.load()
   window.addEventListener('keydown', keydown)
   window.addEventListener('beforeunload', beforeUnload)
+  phoneQuery.addEventListener('change', onPhone)
   clock = setInterval(() => { now.value = Date.now() }, 60_000)
 })
 // The toolbar only exists once the project is known, so observe it when it appears.
@@ -1239,6 +1249,7 @@ onBeforeUnmount(() => {
   list.invalidate()
   knowledge.stop()
   dockQuery.removeEventListener('change', onDockWidth)
+  phoneQuery.removeEventListener('change', onPhone)
 })
 
 // ---------- Document title ----------
@@ -1304,6 +1315,14 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
           :columns="toolbarColumns" @columns="saveColumns" @columns-reset="resetColumns"
           :header-graph="headerGraph" @header-graph="setHeaderGraph"
         />
+        <div v-if="selectable && (sequence.length || picking)" class="phone-pick" :class="{ on: picking }">
+          <p v-if="picking" class="phone-pick-status">
+            <span aria-live="polite"><b class="mono">{{ selected.size.toLocaleString('en-GB') }}</b> selected</span>
+            <span class="dot" aria-hidden="true">·</span>
+            <button type="button" @click="clearSelection">Cancel</button>
+          </p>
+          <button v-else type="button" class="quiet" @click="phonePicking = true">Select</button>
+        </div>
       </div>
 
       <JourneyView
@@ -1326,7 +1345,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
         :collapsed="collapsed" :total="total" :project-key="routeKey" :scroll-root="scrollRoot" :now="now" :show-assignee="showAssignee"
         :creating="creating" :project-id="project.id" :known-states="knownStates" :create="quickCreate" @close-create="closeCreate"
         :outline="outlineActive ? outline.entries.value : null" :can-drag="outlineActive && writable" :prefs="tablePrefs"
-        :selectable="selectable" :selected="selected" :can-assign-release="can('releases.write', project.id)" :native-releases="nativeReleases" @select="selectRow" @select-all="selectAll"
+        :selectable="selectable" :selected="selected" :picking="phonePicking" :can-assign-release="can('releases.write', project.id)" :native-releases="nativeReleases" @select="selectRow" @select-all="selectAll"
         @layout="(visible, customised) => tableLayout = { visible, customised }" @widths="saveWidths"
         @toggle-row="outline.toggle" @toggle-no-epic="outline.noEpicCollapsed.value = !outline.noEpicCollapsed.value"
         @more-children="id => id === project!.id ? outline.loadMoreRoot() : outline.loadChildren(id, true)" @move="moveRow"
@@ -1435,6 +1454,18 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
 .stick-mark { height: 1px; margin-bottom: -1px; }
 /* While tickets are selected the bulk bar floats at the bottom: the list can scroll clear of it. */
 .list-view.selecting { padding-bottom: 76px; }
+@media (max-width: 720px) { .list-view.selecting { padding-bottom: calc(168px + env(safe-area-inset-bottom)); } }
+.phone-pick { display: none; }
+@media (max-width: 720px) {
+  .phone-pick { display: flex; align-items: center; justify-content: flex-start; min-height: 44px; margin-top: -2px; }
+  .phone-pick-status { display: flex; align-items: center; gap: 8px; min-height: 44px; margin: 0; font-size: 15px; color: var(--ink-2); }
+  .phone-pick-status b { font-size: 15px; font-weight: 700; color: var(--ink); font-variant-numeric: tabular-nums; }
+  .phone-pick .dot { color: var(--ink-3); }
+  .phone-pick button { min-height: 44px; padding: 0 12px; border: 0; border-radius: 8px; background: transparent; color: var(--ink-2); font-size: 15px; font-weight: 600; }
+  .phone-pick button.quiet { padding-left: 2px; color: var(--ink-2); font-weight: 600; }
+  .phone-pick.on button { margin-left: -12px; color: var(--teal-ink); }
+  .phone-pick button:focus-visible { box-shadow: var(--focus-ring); }
+}
 /* Without the saved-view strip the header glimpse keeps that room (14px + the 42px strip) to spread into; the graph was framed for it. */
 .project-head.glimpse-room { padding-bottom: 56px; }
 .toolbar-wrap { position: sticky; top: 0; z-index: 5; margin: 0 calc(-1 * var(--gutter)); padding: 0 var(--gutter); container: toolbar / inline-size; }

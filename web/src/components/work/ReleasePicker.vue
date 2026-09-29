@@ -1,6 +1,6 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { getJourney, listReleases, releaseName, releaseRefs } from '../../lib/journey'
 import { canOpenRelease, nextReleaseTitle, planningRelease } from '../../lib/releaseMembership'
 import type { ReleaseTarget } from '../../lib/releaseAssign'
@@ -17,6 +17,9 @@ const rows = ref<Row[]>([])
 const loading = ref(true)
 const failed = ref('')
 const active = ref(0)
+const dialog = ref<HTMLDialogElement>()
+const phoneQuery = window.matchMedia('(max-width: 720px)')
+const phone = ref(phoneQuery.matches)
 let generation = 0
 
 async function load() {
@@ -42,7 +45,14 @@ async function load() {
     if (request === generation) loading.value = false
   }
 }
-onMounted(load)
+function backdrop(event: MouseEvent) { if (event.target === dialog.value) emit('close', false) }
+onMounted(async () => {
+  void load()
+  if (!phone.value) return
+  await nextTick()
+  dialog.value?.showModal()
+  dialog.value?.querySelector<HTMLElement>('[data-autofocus]')?.focus({ preventScroll: true })
+})
 onBeforeUnmount(() => { generation++ })
 
 function choose(row: Row) {
@@ -67,7 +77,25 @@ function keydown(event: KeyboardEvent) {
 </script>
 
 <template>
-  <FloatingPanel :anchor="anchor" :width="360" :label="`Release for ${subject}`" cycle @close="restore => emit('close', restore)">
+  <dialog v-if="phone" ref="dialog" class="release-sheet" :aria-label="`Release for ${subject}`" @cancel.prevent="emit('close', true)" @click="backdrop">
+    <div class="sheet-card">
+      <span class="grabber" aria-hidden="true" />
+      <p class="menu-title eyebrow">Add to release</p>
+      <div class="options" role="listbox" aria-label="Releases" tabindex="0" data-autofocus @keydown="keydown">
+        <button
+          v-for="(row, index) in rows" :id="`release-option-${index}`" :key="row.id" type="button" role="option" class="option"
+          :aria-selected="active === index" :aria-disabled="row.disabled" :disabled="row.disabled" :data-tip="row.disabled ? row.detail : undefined"
+          @click="choose(row)" @pointermove="active = index"
+        >
+          <AppIcon :name="row.id === 'new' ? 'plus' : 'layers'" :size="14" />
+          <span class="text"><span class="title">{{ row.title }}</span><span class="detail">{{ row.detail }}</span></span>
+        </button>
+        <p v-if="loading && !rows.length" class="note" role="status">Looking for releases…</p>
+        <p v-else-if="failed" class="note error" role="alert">{{ failed }}</p>
+      </div>
+    </div>
+  </dialog>
+  <FloatingPanel v-else :anchor="anchor" :width="360" :label="`Release for ${subject}`" cycle @close="restore => emit('close', restore)">
     <p class="menu-title eyebrow">Add to release</p>
     <div class="options" role="listbox" aria-label="Releases" tabindex="0" data-autofocus @keydown="keydown">
       <button
@@ -97,4 +125,22 @@ function keydown(event: KeyboardEvent) {
 .option:disabled .detail { color: var(--ink-3); }
 .note { padding: 8px 10px; font-size: 13px; color: var(--ink-3); }
 .note.error { color: var(--danger); }
+.release-sheet {
+  position: fixed; top: auto; right: 0; bottom: 0; left: 0; width: 100%; max-width: none; height: fit-content; max-height: min(70dvh, 520px);
+  margin: 0; padding: 0; border: 0; background: transparent; color: var(--ink); overflow: visible;
+}
+.release-sheet::backdrop { background: var(--scrim); }
+.sheet-card {
+  display: flex; flex-direction: column; max-height: min(70dvh, 520px); padding: 0 8px calc(12px + env(safe-area-inset-bottom));
+  border-radius: 20px 20px 0 0; border-top: 1px solid var(--glass-edge); background: var(--surface-raised);
+  box-shadow: 0 -18px 40px -18px rgba(0, 0, 0, .35);
+}
+.grabber { align-self: center; width: 40px; height: 4px; margin-top: 8px; border-radius: 999px; background: var(--line-2); }
+.sheet-card .menu-title { padding: 10px 12px 6px; }
+.sheet-card .option { min-height: 52px; padding: 10px 12px; }
+.sheet-card .options { overflow: auto; overscroll-behavior: contain; }
+@media (prefers-reduced-motion: no-preference) {
+  .release-sheet[open] .sheet-card { animation: sheet-up .24s cubic-bezier(.2, .7, .2, 1); }
+  @keyframes sheet-up { from { transform: translateY(40px); opacity: .6; } to { transform: none; opacity: 1; } }
+}
 </style>

@@ -292,6 +292,29 @@ paths:
           required: true
           schema:
             type: "string"
+  /rules/publish:
+    post:
+      operationId: "publishRuleSets"
+      description: "Batch publication under one person approval (AEON-263). rules.publish; person only, agents always 403; every set needs the same authority as its single publish (company sets need the workspace publisher). Rules writes take the tenant row lock that access changes take and decide permissions under it, so a concurrent demotion is either seen or waits. All sets are authorized, then revision and rules are checked, before any write. Atomic: one transaction, so any failure (403, 404, 409 revision or version conflict, 422 budget) writes nothing. Set ids must be canonical lowercase UUIDs, each at most once. Each set gets its own immutable snapshot and rules.published event carrying the shared batch_id. After the writes, every session file that includes one of the batch's sets is rendered with every existing contribution (projects with published project rules and a project without any; every person with person or agent rules, other owners' private layers included; each owner's named agents and tasks; every role and harness); files the batch does not touch are not judged. 422 when one exceeds 12000 bytes: with actual_bytes for a file whose every layer the caller may read now (rules.read, decided under the access lock), otherwise a generic message without size or identity. 422 budget_check_too_large when the batch touches more than 1,000 session files, or the rule store holds more than 2,000 rules or 2 MiB of rule text, for one check. The body (at most 2 MiB, 413 above) is read before any lock; lock waits, statements, the budget work and the whole transaction (server-side transaction_timeout) are bounded by the request deadline, and nothing commits after it (503 busy, nothing changed). When COMMIT was sent but its answer was lost, the server looks for this request's stored answer on a fresh connection, independent of the caller's current access: 200 with that answer if it is there, otherwise 503 outcome_unknown (the COMMIT may still land; repeating the same request is safe because an identical batch returns its stored answer). Every other rules write answers an unacknowledged COMMIT with 503 outcome_unknown and reload-first wording, without reconciliation. The complete answer is stored with the writes; an exact replay of the same request by the same person returns that stored answer after re-checking authorization and writes nothing. A new request never reuses a stored version (409). The single-set publish route is unchanged."
+      responses:
+        "200":
+          description: "Every set published, in request order"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/RuleBatchResult"
+        "400": {"description":"Invalid scope, rule, context or calendar version","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "403": {"description":"Permission or scoped ownership denied; agents never publish or edit company rules","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "404": {"description":"Resource unavailable","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "409": {"description":"Revision/version conflict or ambiguous same-rank identity","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "422": {"description":"Rendered rules exceed 12000 UTF-8 bytes; reduce always-on text or move content to details","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "401": {"description":"Authentication required","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              "$ref": "#/components/schemas/RuleBatchPublish"
   /rules/merged:
     get:
       operationId: "mergeAgentRules"
@@ -2422,7 +2445,7 @@ paths:
       operationId: getHarnessSession
       description: Session detail, including at most 20 recent activity notes and metadata changes, newest first.
       responses:
-        '200': {description: Session detail, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessSession'}}}}
+        '200': {description: Session detail, headers: {Aeon-Contract: {$ref: '#/components/headers/HarnessSessionContract'}}, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessSession'}}}}
   /projects/{projectId}/harness-sessions/{sessionId}/recovery:
     parameters:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -2596,7 +2619,7 @@ paths:
       - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
     post:
       operationId: heartbeatHarnessSession
-      description: The attributed worker reports liveness and optionally a current step or display label. Changed nonempty notes and changed label/model/effort values append bounded histories in the same transaction.
+      description: The attributed worker reports liveness and optionally a current step, display label, ready estimate or percent done. A coordinator session may report the live estimate for its bound ticket, and only while that ticket still belongs to the session's project. Omission preserves an estimate; JSON null clears it and its report time. An instant from 30 days ago through 365 days ahead is accepted; a past instant inside that window is overdue. Changed nonempty notes and changed label/model/effort values append bounded histories in the same transaction.
       requestBody:
         required: true
         content:
@@ -2619,11 +2642,71 @@ paths:
                 worktree: {$ref: '#/components/schemas/HarnessWorktree'}
                 branch: {$ref: '#/components/schemas/HarnessBranch'}
                 commits: {type: array, maxItems: 20, description: New commits to append, oldest first; duplicate SHAs are ignored and only the latest 20 are retained., items: {$ref: '#/components/schemas/HarnessCommit'}}
+                eta_ready_at: {type: [string, 'null'], format: date-time, description: "Worker only. RFC3339 instant the bound ticket is ready for review, from 30 days ago through 365 days ahead. Omission preserves; null clears. A past instant inside that window is overdue."}
+                eta_live_at: {type: [string, 'null'], format: date-time, description: "Coordinator only. RFC3339 instant the bound ticket is live, from 30 days ago through 365 days ahead. Omission preserves; null clears. The ticket's current project is checked on every write."}
+                progress_pct: {type: [integer, 'null'], minimum: 0, maximum: 100, description: "Worker only. Percent done for the bound ticket, 0 through 100. Omission preserves; null clears."}
       responses:
-        '200': {description: Updated session, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessSession'}}}}
+        '200': {description: Updated session, headers: {Aeon-Contract: {$ref: '#/components/headers/HarnessSessionContract'}}, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessSession'}}}}
         '400': {description: Invalid note or heartbeat}
         '403': {description: Worker proof rejected}
         '410': {description: Authenticated archived generation; detach harness servicing without signaling the process}
+  /settings/eta-interval:
+    get:
+      operationId: getEtaInterval
+      description: Minutes between fresh estimates. Ten minutes when the workspace has not chosen one. Requires settings.manage.
+      responses:
+        '200':
+          description: Reporting interval
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [interval_minutes]
+                properties:
+                  interval_minutes: {type: integer, minimum: 1, maximum: 240}
+    put:
+      operationId: putEtaInterval
+      description: Sets how often working agents must refresh an estimate. Requires settings.manage. One through 240 minutes.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [interval_minutes]
+              properties:
+                interval_minutes: {type: integer, minimum: 1, maximum: 240}
+      responses:
+        '200':
+          description: Updated interval
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [interval_minutes]
+                properties:
+                  interval_minutes: {type: integer, minimum: 1, maximum: 240}
+        '400': {description: Interval outside 1 to 240 minutes}
+  /nodes/{nodeId}/live-eta:
+    parameters:
+      - {name: nodeId, in: path, required: true, schema: {type: string, format: uuid}}
+    put:
+      operationId: putNodeLiveEta
+      description: A coordinator session reports when a ticket or task in its project is live. Epics roll up from children and reject this write. Null clears the live estimate. Requires the worker lease of an active coordinator session in the node's project.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [eta_live_at]
+              properties:
+                eta_live_at: {type: [string, 'null'], format: date-time}
+      responses:
+        '200': {description: The ticket estimate after the write, content: {application/json: {schema: {$ref: '#/components/schemas/TicketEta'}}}}
+        '400': {description: Not a ticket or task, or the timestamp is not RFC3339}
+        '403': {description: No active coordinator session for this agent in the project}
+        '404': {description: Node not found}
   /projects/{projectId}/harness-sessions/{sessionId}/rules-receipts:
     parameters:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -4385,6 +4468,7 @@ components:
     MeContract: {description: Acting principal response contract, schema: {type: string, enum: ['me/1.0']}}
     BaselineBatchesContract: {description: Classic-compatible baseline batch response contract, schema: {type: string, enum: ['baseline-batches/1.0']}}
     ApprovalsContract: {description: Approval response contract, schema: {type: string, enum: ['approvals/1.0']}}
+    HarnessSessionContract: {description: Harness status and heartbeat response contract, schema: {type: string, enum: ['harness-session/1.0']}}
   securitySchemes:
     session: {type: apiKey, in: cookie, name: aeon_session}
     agentKey: {type: http, scheme: bearer, description: Bearer token aeon_<prefix>_<secret>}
@@ -4555,6 +4639,52 @@ components:
           items:
             "$ref": "#/components/schemas/AgentRule"
       required: ["expected_revision", "name", "rules"]
+    RuleBatchPublish:
+      type: "object"
+      additionalProperties: false
+      properties:
+        items:
+          type: "array"
+          minItems: 1
+          maxItems: 100
+          items:
+            type: "object"
+            additionalProperties: false
+            properties:
+              set_id:
+                type: "string"
+                format: "uuid"
+                pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                description: "Canonical lowercase UUID; other spellings are refused (400)"
+              expected_revision:
+                type: "integer"
+                minimum: 1
+              version:
+                type: "string"
+                pattern: "^(auto|[1-9][0-9]{11}\\.0\\.0)$"
+                description: "auto (the server assigns the next inspr-calendar-v2 coordinate, strictly later than the set's current publication) or an explicit valid UTC calendar coordinate"
+            required: ["set_id", "expected_revision", "version"]
+        note:
+          type: "string"
+          maxLength: 500
+          description: "Optional note stored on every new snapshot of the batch. Empty or omitted stores no note."
+      required: ["items"]
+    RuleBatchResult:
+      type: "object"
+      additionalProperties: false
+      properties:
+        batch_id:
+          type: "string"
+          format: "uuid"
+          description: "Shared id recorded in each set's rules.published event; a replay returns the stored answer with the same id"
+        versions:
+          type: "array"
+          items:
+            "$ref": "#/components/schemas/RuleSnapshot"
+        max_bytes:
+          type: "integer"
+          description: "Largest merged file, in UTF-8 bytes, among the checked files whose every layer the caller may read (rules.read); 0 when there is none"
+      required: ["batch_id", "versions", "max_bytes"]
     RulePublish:
       type: "object"
       additionalProperties: false
@@ -4670,7 +4800,7 @@ components:
         properties:
           supported: {type: boolean}
           policy: {type: string, enum: [no_tools, read_only, unavailable]}
-          reason: {type: string}
+          reason: {type: string, description: 'One concise explanation of the missing enforcement boundary when unsupported; empty when supported. Display as text, never infer support from the reason.'}
     PairingGuide:
       type: object
       required: [protocol, version, instance_url, default_tenant_slug, platforms, platform_qualification, setup_command, install_targets, install_available]
@@ -6757,7 +6887,7 @@ components:
       required: [id, project_id, agent_principal_id, harness, host, management_mode, role, work_shape, advertised_capabilities, phase, activity, activity_sequence, revision, created_at]
       properties:
         run_status: {type: [string, 'null'], description: Status of the bound run when visible to the caller.}
-        needs_attention: {type: boolean, description: "Bound run waiting or exact bound-run approval pending; yielded phase is separate session evidence. Principal-only requests and nonblocking replies never set this flag. False for stopped sessions; omitted when not loaded."}
+        needs_attention: {type: boolean, description: "Bound run waiting or an exact bound-run approval pending. Yielded phase is separate session evidence. Principal-only requests and nonblocking replies never set this flag. False for stopped sessions; omitted when not loaded."}
         attention_reasons: {type: array, description: "Authorized session/run reasons and separately scoped shared inbox attention. Empty means loaded with no visible reasons; omitted when unloaded or withheld.", items: {$ref: '#/components/schemas/HarnessAttentionReason'}}
         has_problem: {type: boolean, description: "Bound run failed or lost ownership, or the stop reason reports an error or block. Normal stops are false. Omitted when not loaded."}
         id: {type: string, format: uuid}
@@ -6797,6 +6927,25 @@ components:
         archived_at: {type: [string, 'null'], format: date-time}
         recovery_process_state: {type: [string, 'null'], enum: [unknown, null]}
         created_at: {type: string, format: date-time}
+        eta_ready_at: {type: string, format: date-time, description: When the bound ticket is estimated ready for review.}
+        eta_live_at: {type: string, format: date-time, description: When the bound ticket is estimated live.}
+        progress_pct: {type: integer, minimum: 0, maximum: 100, description: Percent done. Zero is reported; omission means unknown.}
+        eta_reported_at: {type: string, format: date-time, description: When the session last sent an estimate.}
+        eta_stale: {type: boolean, description: True when the last estimate is older than two reporting intervals. Omitted when fresh or absent. Clients derive attention from this field.}
+    TicketEta:
+      type: object
+      description: Ready and live estimates for one ticket. Epics roll up the latest child instant and the average percent of direct children that have a percent. Unknown stays absent.
+      properties:
+        eta_ready_at: {type: string, format: date-time}
+        eta_live_at: {type: string, format: date-time}
+        progress_pct: {type: integer, minimum: 0, maximum: 100}
+        ready_reported_at: {type: string, format: date-time}
+        live_reported_at: {type: string, format: date-time}
+        ready_by: {type: string}
+        live_by: {type: string}
+        ready_stale: {type: boolean}
+        live_stale: {type: boolean}
+        eta_stale: {type: boolean, description: True when the ready or live estimate is older than two reporting intervals. Omitted when fresh or absent.}
     HarnessActivityNote:
       type: object
       required: [note, at]
@@ -6973,6 +7122,7 @@ components:
             - {type: 'null'}
         since: {type: string, format: date-time, description: When the session started}
         heartbeat_at: {type: [string, 'null'], format: date-time}
+        eta_stale: {type: boolean, description: True when the session estimate is older than two reporting intervals. Omitted when fresh or absent. Clients derive attention from this field.}
     ProjectMessage:
       allOf:
         - {$ref: './openapi-messaging.yaml#/components/schemas/Message'}
@@ -7860,6 +8010,9 @@ components:
                 id: {type: string, format: uuid}
                 key: {type: string}
                 title: {type: string}
+            eta:
+              description: Ready and live estimates when an active agent has reported one. Absent when unknown.
+              $ref: '#/components/schemas/TicketEta'
     TreeEntry:
       type: object
       required: [node, depth]
@@ -8169,7 +8322,7 @@ components:
       in: query
       schema:
         type: string
-        description: Comma-separated sort keys; prefix a key with - for descending order. Keys are position, updated_at, created_at, key, title, state, priority, kind, assignee (by name, unassigned work last in both directions).
+        description: Comma-separated sort keys; prefix a key with - for descending order. Keys are position, updated_at, created_at, key, title, state, priority, kind, assignee (by name, unassigned work last in both directions), eta_ready (unknown last in both directions), progress (unknown last in both directions).
         default: position
     Direction:
       name: direction

@@ -20,6 +20,10 @@
 // detect drift. run-agent watch executes local Claude work orders and reports
 // evidence to Aeon. baseline-batch report-built resolves classic batch aliases
 // to stage handoffs and records typed built evidence.
+// harness run-heartbeat registers or resumes one session from a private state
+// directory and posts known heartbeat fields while its owner process lives.
+// Owner exit and SIGTERM mark that session stopped. A Claude transcript path
+// posts cumulative usage to the existing session usage route.
 // CP3 adds relation add, project create/show/update and resource reads, tag
 // catalog commands, attachment upload/list/get/rm, declarative apply, schema,
 // doctor, and authenticated curl. External-stage request/pull/report/result

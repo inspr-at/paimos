@@ -26,7 +26,7 @@ test('checkbox and Shift-click select a range; one status change for all of them
   await expect(bulkBar(page)).toContainText('3selected')
   await expect(grid(page).locator('tr.ticket-row.selected .key')).toHaveText(['PHAROS-11', 'PHAROS-12', 'PHAROS-13'])
   // Shift-click selects; it never opens the ticket.
-  await expect(page).toHaveURL('/p/PHAROS')
+  await expect(page).toHaveURL(/\/p\/PHAROS\/tickets$/)
   await bulkBar(page).getByRole('button', { name: 'Status' }).click()
   await page.getByRole('menu', { name: 'Status of 3 tickets' }).getByRole('menuitemradio', { name: 'Done' }).click()
   await expect(page.getByText('3 tickets are now Done')).toBeVisible()
@@ -147,7 +147,7 @@ test('on a phone a long press starts a selection, taps add to it, and the bar fi
   await row(page, 'PHAROS-12').dispatchEvent('contextmenu')
   await expect(bulkBar(page)).toBeVisible()
   await row(page, 'PHAROS-14').click()
-  await expect(page).toHaveURL('/p/PHAROS')
+  await expect(page).toHaveURL(/\/p\/PHAROS\/tickets$/)
   await expect(bulkBar(page)).toContainText('2')
   const box = (await bulkBar(page).boundingBox())!
   expect(box.x).toBeGreaterThanOrEqual(0)

@@ -3,6 +3,33 @@ import { expect, test } from '@playwright/test'
 import { fixtures, me, mockWork, watchErrors } from './work-fixtures'
 import { SETUP_COMMAND, mockAnonymousGuide, mockPairing } from './agent-pairing-fixtures'
 
+test('a qualified helper removes Connect only without a harness-name special case', async ({ page }) => {
+  await page.clock.install({ time: new Date('2026-09-27T20:00:00.000Z') })
+  await mockWork(page, fixtures())
+  // Deliberately synthetic future qualification; production remains unavailable.
+  const calls = await mockPairing(page, {
+    verification_capabilities: {
+      cursor: { supported: true, policy: 'no_tools', reason: '' },
+      codex: { supported: true, policy: 'read_only', reason: '' },
+    },
+  })
+  await page.goto('/agents/register-agent')
+  await page.getByLabel('Pairing code').fill('123-456-789')
+  await page.getByRole('button', { name: 'Look up code' }).click()
+  const review = page.getByRole('region', { name: 'Pairing review' })
+  await expect(review.getByRole('checkbox', { name: 'Verify selected harnesses' })).toBeChecked()
+  await expect(review.getByRole('button', { name: 'Connect only', exact: true })).toHaveCount(0)
+  await expect(review.locator('.harness-note')).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Connect computer', exact: true })).toBeEnabled()
+  expect(calls.some(call => call.path.endsWith('/approve'))).toBe(false)
+  await page.getByRole('button', { name: 'Connect computer', exact: true }).click()
+  await expect.poll(() => calls.find(call => call.path.endsWith('/approve'))?.body).toEqual({
+    request_digest: 'ab'.repeat(32),
+    verification: 'one_per_harness',
+    selected_account_keys: ['cursor-1', 'codex-1'],
+  })
+})
+
 test('the public guide is readable without sign-in and keeps only the human code', async ({ page }) => {
   await mockAnonymousGuide(page)
   await page.goto('/agents/register-agent')
@@ -42,27 +69,28 @@ test('a person reviews real accounts, can leave a harness out, and does not trea
   await expect(review.getByLabel('Account for Cursor').locator('option:checked')).toHaveText('Cursor work')
   await expect(review.getByLabel('Account for Codex')).toHaveValue('codex-1')
   await expect(review.getByLabel('Account for Codex').locator('option:checked')).toHaveText('Codex work')
-  await expect(review.getByRole('checkbox', { name: 'Verify selected harnesses' })).toBeChecked()
-  const expiry = review.locator('time')
-  await expect(expiry).toHaveAttribute('datetime', '2026-09-27T20:30:00.000Z')
-  await expect(expiry).not.toContainText('2026-09-27T20:30:00.000Z')
-  await expect(review.getByText(/1 request per selected harness/)).toBeVisible()
+  const verify = review.getByRole('checkbox', { name: 'Verify selected harnesses' })
+  await expect(verify).toBeDisabled()
+  await expect(verify).not.toBeChecked()
+  await expect(review.getByText('Cursor and Codex can’t be verified.')).toBeVisible()
+  await expect(review.locator('time')).toHaveCount(0)
+  await expect(review.getByText(/1 request per selected harness/)).toHaveCount(0)
   await expect(review.getByText('One at a time')).toHaveCount(0)
-  // Each harness row states its reason once, without repeating the harness name.
-  await expect(review.getByText('Verification cannot isolate inherited tools.')).toHaveCount(2)
+  // Nothing can be verified, so verification is off and the precise row reasons stay hidden; the one-line note is enough.
+  await expect(review.getByText('Ask mode and an isolated config do not enforce a no-tools policy.')).toHaveCount(0)
+  await expect(review.getByText('Read-only sandboxing does not isolate inherited MCP tools and startup hooks.')).toHaveCount(0)
   await expect(review.getByText(/Cursor: Cursor/)).toHaveCount(0)
-  await expect(review.getByRole('alert')).toContainText('Cursor and Codex can’t be verified.')
   await expect(page.getByText(/15-minute|15 minutes/)).toHaveCount(0)
 
   await page.getByRole('checkbox', { name: 'Connect Cursor' }).uncheck()
+  await expect(review.getByText('Codex can’t be verified.')).toBeVisible()
+  await expect(verify).toBeDisabled()
   await page.getByRole('radio', { name: /Set ongoing limits/ }).check()
   await expect(page.getByText('Cost in micros')).toHaveCount(0)
   await expect(page.getByText('Tokens')).toHaveCount(0)
   await expect(page.getByRole('spinbutton', { name: 'Requests', exact: true })).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Connect computer', exact: true })).toBeDisabled()
-  await review.getByRole('button', { name: 'Connect only', exact: true }).click()
-  await expect(review.getByRole('checkbox', { name: 'Verify selected harnesses' })).not.toBeChecked()
-  await expect(review.getByRole('radio', { name: /Keep ongoing runs paused/ })).toBeChecked()
+  await expect(page.getByRole('button', { name: 'Connect computer', exact: true })).toBeEnabled()
+  await page.getByRole('radio', { name: /Keep ongoing runs paused/ }).check()
 
   await page.getByRole('button', { name: 'Connect computer', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'Setting up' })).toBeVisible()
@@ -75,8 +103,13 @@ test('a person reviews real accounts, can leave a harness out, and does not trea
   })
   expect(JSON.stringify(approval?.body)).not.toMatch(/device_secret|expected_revision|allowance/)
 
-  await page.getByRole('button', { name: 'Disconnect' }).click()
-  await page.getByRole('button', { name: 'Finish runs and disconnect' }).click()
+  await page.getByRole('button', { name: 'Disconnect', exact: true }).click()
+  const dialog = page.getByRole('dialog')
+  await expect(dialog.getByRole('button', { name: 'Disconnect', exact: true })).toBeVisible()
+  const revoke = dialog.getByRole('button', { name: 'Revoke access now' })
+  await expect(revoke).toBeVisible()
+  await expect(revoke).toHaveAttribute('data-tip', /Local processes stay unconfirmed until the computer reports them/)
+  await dialog.getByRole('button', { name: 'Disconnect', exact: true }).click()
   await expect.poll(() => calls.some(call => call.path.endsWith('/disconnect'))).toBe(true)
   const disconnect = calls.find(call => call.path.endsWith('/disconnect'))
   expect(disconnect?.body).toEqual({ mode: 'drain', expected_revision: 4 })

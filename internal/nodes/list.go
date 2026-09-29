@@ -15,6 +15,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+
+	"github.com/inspr-at/paimos/internal/eta"
 )
 
 type listPerson struct {
@@ -53,6 +55,7 @@ type listItem struct {
 	ChildrenCount int          `json:"children_count"`
 	Project       *listProject `json:"project"`
 	Epic          *listEpic    `json:"epic"`
+	Eta           *eta.View    `json:"eta,omitempty"`
 }
 type nodePage struct {
 	Items      []listItem                `json:"items"`
@@ -123,7 +126,7 @@ type treeQuery struct {
 	Cursor   string
 }
 
-var validSort = map[string]bool{"key": true, "title": true, "state": true, "priority": true, "kind": true, "updated_at": true, "created_at": true, "position": true, "assignee": true}
+var validSort = map[string]bool{"key": true, "title": true, "state": true, "priority": true, "kind": true, "updated_at": true, "created_at": true, "position": true, "assignee": true, "eta_ready": true, "progress": true}
 var validFacet = map[string]bool{"state": true, "kind": true, "priority": true, "assignee": true, "tag": true, "cost_unit": true, "release": true}
 
 // dateFieldKeys maps date_field to the fields key of dates kept in node fields.
@@ -484,6 +487,22 @@ func (m *Module) listNodes(ctx context.Context, tenantID string, q listQuery) (n
 				return err
 			}
 		}
+		if len(page.Items) > 0 {
+			ids := make([]string, len(page.Items))
+			for i := range page.Items {
+				ids[i] = page.Items[i].ID
+			}
+			views, err := eta.Load(ctx, tx, ids)
+			if err != nil {
+				return err
+			}
+			for i := range page.Items {
+				if view, ok := views[page.Items[i].ID]; ok {
+					copied := view
+					page.Items[i].Eta = &copied
+				}
+			}
+		}
 		return nil
 	})
 	return page, err
@@ -720,6 +739,10 @@ func listOrder(q listQuery) string {
 		case "assignee":
 			// Unassigned work comes last in both directions.
 			parts = append(parts, "ap.name IS NULL ASC", "lower(ap.name) "+dir, "ap.id "+dir)
+		case "eta_ready":
+			parts = append(parts, "eta.eta_ready_at IS NULL ASC", "eta.eta_ready_at "+dir)
+		case "progress":
+			parts = append(parts, "eta.progress_pct IS NULL ASC", "eta.progress_pct "+dir)
 		default:
 			parts = append(parts, "f."+key.Name+" "+dir)
 		}
@@ -742,7 +765,11 @@ func listSQL(q listQuery, anchor any) (string, []any) {
 	if sortsBy(q, "assignee") {
 		people = ` LEFT JOIN principals ap ON ap.tenant_id=current_setting('aeon.tenant_id')::uuid AND ap.id=f.assignee_id::uuid`
 	}
-	sql := prefix + `, ordered AS (SELECT f.id,row_number() OVER (ORDER BY ` + listOrder(q) + `) AS rn FROM filtered f` + people + `),
+	etaJoin := ""
+	if sortsBy(q, "eta_ready") || sortsBy(q, "progress") {
+		etaJoin = ` LEFT JOIN LATERAL aeon_node_eta(f.id) eta ON true`
+	}
+	sql := prefix + `, ordered AS (SELECT f.id,row_number() OVER (ORDER BY ` + listOrder(q) + `) AS rn FROM filtered f` + people + etaJoin + `),
     selected AS (SELECT id,rn FROM ordered WHERE rn>coalesce((SELECT rn FROM ordered WHERE id=` + anchorArg + `::uuid),0) ORDER BY rn LIMIT ` + limitArg + `),
     -- Count visible children for the page once instead of rescanning nodes per row.
     child_counts AS MATERIALIZED (

@@ -674,8 +674,8 @@ test('add harness connect stays blocked until the code matches the opened comput
 test('unsupported verification blocks the selected harness and connect only does not', () => {
   const published = {
     claude: { supported: true, policy: 'no_tools', reason: '' },
-    codex: { supported: false, policy: 'unavailable', reason: 'Codex verification cannot yet guarantee external/MCP isolation.' },
-    cursor: { supported: false, policy: 'unavailable', reason: 'Cursor external/MCP isolation is awaiting qualification.' },
+    codex: { supported: false, policy: 'unavailable', reason: 'Codex read-only sandboxing does not isolate inherited MCP tools and startup hooks.' },
+    cursor: { supported: false, policy: 'unavailable', reason: 'Cursor ask mode and an isolated config do not enforce a no-tools policy.' },
     grok: { supported: false, policy: 'unavailable', reason: 'Native Grok guided account identity is unavailable.' },
   }
   const current = view({
@@ -692,7 +692,7 @@ test('unsupported verification blocks the selected harness and connect only does
   assert.doesNotMatch(blocked.map(item => item.reason).join(' '), /installation failed/i)
   const denied = planApproval({ view: current, choice: 'one_per_harness', selectedAccountKeys: ['codex-1'], permissions: person })
   assert.equal(denied.ok, false)
-  if (!denied.ok) assert.match(denied.next, /Connect only/)
+  if (!denied.ok) assert.match(denied.next, /Turn verification off/)
   const allowed = planApproval({ view: current, choice: 'one_per_harness', selectedAccountKeys: ['claude-1'], permissions: person })
   assert.equal(allowed.ok, true)
   const connectOnly = planApproval({ view: current, choice: 'connect_only', selectedAccountKeys: ['codex-1', 'cursor-1'], permissions: person })

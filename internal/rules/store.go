@@ -303,6 +303,17 @@ func loadVersion(ctx context.Context, tx pgx.Tx, setID, version string) (Snapsho
 	return *f.Snapshot, nil
 }
 func publishSet(ctx context.Context, tx pgx.Tx, p tenant.Principal, s Set, revision int64, version, note string) (Snapshot, error) {
+	return publishSetIn(ctx, tx, p, s, revision, version, note, "")
+}
+
+// publishedEvent is the rules.published event payload: the snapshot, plus the
+// shared batch id when the set was published as part of one batch approval.
+type publishedEvent struct {
+	Snapshot
+	BatchID string `json:"batch_id,omitempty"`
+}
+
+func publishSetIn(ctx context.Context, tx pgx.Tx, p tenant.Principal, s Set, revision int64, version, note, batchID string) (Snapshot, error) {
 	if !releasehistory.ValidVersion(version) {
 		return Snapshot{}, fail(400, "invalid_version", "version must be a valid YYMMDDhhmmss.0.0 UTC calendar coordinate")
 	}
@@ -344,7 +355,7 @@ func publishSet(ctx context.Context, tx pgx.Tx, p tenant.Principal, s Set, revis
 	if err = saveSet(ctx, tx, s); err != nil {
 		return Snapshot{}, err
 	}
-	if err = audit(ctx, tx, p, s.ID, "published", map[string]string{"version": before}, snap); err != nil {
+	if err = audit(ctx, tx, p, s.ID, "published", map[string]string{"version": before}, publishedEvent{snap, batchID}); err != nil {
 		return Snapshot{}, err
 	}
 	return snap, nil
@@ -413,6 +424,7 @@ func (m *Module) restore(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, e
 	}
 	return snap, nil
 }
+
 func (m *Module) version(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
 	s, err := m.authorizedSet(r, tx, p, "rules.read")
 	if err != nil {

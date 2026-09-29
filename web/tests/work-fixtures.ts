@@ -14,6 +14,7 @@ export interface MockNode {
   id: string; key: string; kind_slug: string; title: string; body: string; state: string
   fields: Record<string, unknown>; parent_id: string | null; project: string
   created_at: string; updated_at: string
+  eta?: Record<string, unknown>
 }
 export interface MockView {
   id: string; owner_principal_id: string; project_id: string | null; name: string; filters: Record<string, string>
@@ -150,6 +151,7 @@ function item(node: MockNode, data: Fixtures) {
     children_count: data.nodes.filter(n => n.parent_id === node.id).length,
     project: { id: project.id, key: project.key, title: project.title },
     epic: epicAbove(node, data),
+    ...(node.eta ? { eta: node.eta } : {}),
   }
 }
 // The nearest epic above a node, like the server's list projection.
@@ -463,10 +465,14 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
       rows = [...rows].sort((a, b) => {
         for (const raw of sort) {
           const desc = raw.startsWith('-'), field = desc ? raw.slice(1) : raw
+          const etaMissing = (n: MockNode) => field === 'eta_ready' ? !n.eta?.eta_ready_at : field === 'progress' ? typeof n.eta?.progress_pct !== 'number' : false
+          if ((field === 'eta_ready' || field === 'progress') && etaMissing(a) !== etaMissing(b)) return etaMissing(a) ? 1 : -1
           const value = (n: MockNode): string | number => field === 'state' ? (STATE_ORDER.indexOf(normal(n.state)) + 1 || 99)
             : field === 'priority' ? PRIORITY_ORDER.indexOf(typeof n.fields.priority === 'string' ? n.fields.priority : 'none')
             : field === 'updated_at' ? Date.parse(n.updated_at) : field === 'created_at' ? Date.parse(n.created_at) : field === 'key' ? Number(n.key.split('-')[1]) : field === 'title' ? n.title
-            : field === 'kind' ? n.kind_slug : field === 'assignee' ? (personName(data, n.fields.assignee) || '\uffff') : 0
+            : field === 'kind' ? n.kind_slug : field === 'assignee' ? (personName(data, n.fields.assignee) || '\uffff')
+            : field === 'eta_ready' ? Date.parse(String(n.eta?.eta_ready_at ?? '')) || 0
+            : field === 'progress' ? (typeof n.eta?.progress_pct === 'number' ? n.eta.progress_pct : 0) : 0
           const x = value(a), y = value(b)
           if (x !== y) return (x < y ? -1 : 1) * (desc ? -1 : 1)
         }
