@@ -312,6 +312,7 @@ func (rt *runtime) createIssue(in issueInput) error {
 	if err := rt.do(http.MethodPost, "/api/nodes", body, &created); err != nil {
 		return err
 	}
+	created.Warnings = withEstimateHints(created.Warnings)
 	kinds, err := rt.loadKinds()
 	if err != nil {
 		return err
@@ -438,11 +439,13 @@ func (rt *runtime) updateIssue(in issuePatch) error {
 	}
 	oldStatus := n.State
 	if len(patch) > 0 {
-		headers := map[string]string{}
-		if !n.UpdatedAt.IsZero() {
-			headers["If-Unmodified-Since"] = n.UpdatedAt.Format(time.RFC3339Nano)
+		if n.UpdatedAt.IsZero() {
+			return usagef("%s has no revision timestamp; nothing was written", n.Key)
 		}
-		if err := rt.doHeaders(http.MethodPatch, "/api/nodes/"+url.PathEscape(n.ID), patch, &n, headers); err != nil {
+		if err := rt.doHeaders(http.MethodPatch, "/api/nodes/"+url.PathEscape(n.ID), patch, &n, map[string]string{"If-Unmodified-Since": n.UpdatedAt.Format(time.RFC3339Nano)}); err != nil {
+			if stale, ok := err.(*exitError); ok && strings.Contains(stale.msg, "api 412:") {
+				stale.msg += "; nothing was written"
+			}
 			return err
 		}
 	}

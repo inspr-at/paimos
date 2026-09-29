@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"maps"
 	"net/http"
 	"net/url"
 	"os"
@@ -88,15 +87,7 @@ func (rt *runtime) doHeadersCtx(ctx context.Context, method, path string, body, 
 	if err != nil {
 		return err
 	}
-	// The server uses this only to phrase the missing-estimate warning.
-	sent := maps.Clone(headers)
-	if sent == nil {
-		sent = map[string]string{}
-	}
-	if strings.TrimSpace(sent["X-Aeon-Client"]) == "" {
-		sent["X-Aeon-Client"] = "cli"
-	}
-	if err := c.DoWithHeaders(ctx, method, path, body, dest, sent); err != nil {
+	if err := c.DoWithHeaders(ctx, method, path, body, dest, headers); err != nil {
 		return rt.fail(err, c.Token)
 	}
 	return nil

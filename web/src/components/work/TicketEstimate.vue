@@ -2,18 +2,13 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, useId, watch } from 'vue'
 import type { ListItem } from '../../lib/api'
-import { estimateDisplay, parseEstimate } from '../../lib/estimates'
+import { estimateControlLabel, estimateDisplay, parseEstimate } from '../../lib/estimates'
 import type { SaveResult } from '../../lib/useTicket'
 import AppIcon from '../AppIcon.vue'
 
 const props = defineProps<{ item: ListItem; editable: boolean; save?: (hours: number | null) => Promise<SaveResult> }>()
 const view = computed(() => estimateDisplay(props.item))
-const editLabel = computed(() => {
-  if (!view.value.text) return 'Add estimate'
-  const author = props.item.estimate?.by?.name
-  const origin = view.value.draft ? `, agent draft${author ? ` by ${author}` : ''}` : ''
-  return `Estimate: ${view.value.text}${origin}. Edit estimate`
-})
+const editLabel = computed(() => estimateControlLabel(props.item))
 const canEdit = computed(() => props.editable && props.item.kind_slug !== 'epic' && !!props.save)
 const editing = ref(false), saving = ref(false), draft = ref(''), error = ref('')
 const input = ref<HTMLInputElement | null>(null)
