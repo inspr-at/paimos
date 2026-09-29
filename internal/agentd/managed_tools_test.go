@@ -411,7 +411,7 @@ func TestSandbox(t *testing.T) {
 
 // Policy fixtures only: do not launch or signal sandboxed processes here.
 func TestTerminalDefaultDenyProfile(t *testing.T) {
-	profile := terminalSandboxProfile("/fixture/work", "/fixture/private-temp", []string{"/fixture/toolchain", "/fixture/cache/download"}, []string{"/fixture/bin/go"})
+	profile := terminalSandboxProfile("/fixture/work", "/fixture/private-temp", []string{"/fixture/toolchain", "/fixture/cache/download"}, []string{"/fixture/bin/go"}, []string{"/fixture/Cellar/lib/1/lib/example.dylib"})
 	if !strings.HasPrefix(profile, "(version 1) (deny default)") {
 		t.Fatal("terminal is not default deny")
 	}
@@ -430,6 +430,9 @@ func TestTerminalDefaultDenyProfile(t *testing.T) {
 	}
 	if strings.Count(profile, "(allow file-read* file-write*") != 2 || strings.Count(profile, "(allow file-write*") != 1 {
 		t.Fatal("unexpected writable surface")
+	}
+	if !strings.Contains(profile, `(allow file-read* file-map-executable (literal "/fixture/Cellar/lib/1/lib/example.dylib"))`) || strings.Contains(profile, `(subpath "/fixture/Cellar`) {
+		t.Fatal("library permission is not exact and read-only")
 	}
 	for _, root := range []string{"/fixture/toolchain", "/fixture/cache/download"} {
 		if !strings.Contains(profile, fmt.Sprintf("(allow file-read* (subpath %q))", root)) {
@@ -470,6 +473,30 @@ func TestTerminalToolRootsNeverGrantInstallationPrefix(t *testing.T) {
 	} {
 		if got := terminalToolRoot(path); got != want {
 			t.Fatalf("%s: %s", path, got)
+		}
+	}
+}
+
+func TestTerminalLibraryProfileGrantsOnlyResolvedKegs(t *testing.T) {
+	for _, prefix := range []string{"/opt/homebrew", "/usr/local"} {
+		keg := prefix + "/Cellar/llhttp/9.4.3"
+		alias := prefix + "/opt/llhttp/lib/libllhttp.9.4.dylib"
+		profile := terminalSandboxProfile("/fixture/work", "/fixture/tmp", nil, nil, []string{alias, keg + "/lib/libllhttp.9.4.3.dylib"})
+		if !strings.Contains(profile, fmt.Sprintf("(allow file-read* file-map-executable (subpath %q))", keg)) {
+			t.Fatal("resolved dependency keg is not readable/mappable")
+		}
+		for _, broad := range []string{prefix, prefix + "/Cellar", prefix + "/opt", prefix + "/opt/llhttp", prefix + "/Cellar/llhttp"} {
+			if strings.Contains(profile, fmt.Sprintf("(subpath %q)", broad)) {
+				t.Fatalf("broad library grant: %s", broad)
+			}
+		}
+		if strings.Count(profile, "(allow file-read* file-write*") != 2 || strings.Count(profile, "(allow file-write*") != 1 {
+			t.Fatal("library closure widened write permissions")
+		}
+		profile = terminalSandboxProfile("/fixture/work", "/fixture/tmp", nil, nil, []string{prefix + "/Cellar/openssl@3/3.6/lib/libcrypto.3.dylib"})
+		config := prefix + "/etc/openssl@3/openssl.cnf"
+		if !strings.Contains(profile, fmt.Sprintf("(deny file-read* file-test-existence (with errno ENOENT) (literal %q))", config)) {
+			t.Fatal("host OpenSSL configuration must remain unreadable")
 		}
 	}
 }

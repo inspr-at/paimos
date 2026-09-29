@@ -107,6 +107,8 @@ type terminalArgs struct {
 
 func addManagedTools(s *mcp.Server, b toolBinding) {
 	addManagedFileTools(s, b)
+	// Cache qualified library closures only for this managed run.
+	var libraries terminalLibraryCache
 	mcp.AddTool(s, &mcp.Tool{Name: "aeon_comment", Description: "Comment on the bound work order."},
 		func(ctx context.Context, _ *mcp.CallToolRequest, in commentArgs) (*mcp.CallToolResult, string, error) {
 			if !b.active() || len(in.Body) > 65536 || strings.TrimSpace(in.Body) == "" {
@@ -182,7 +184,7 @@ func addManagedTools(s *mcp.Server, b toolBinding) {
 			if !b.active() {
 				return nil, "", ErrNotOwned
 			}
-			out, err := runTerminal(ctx, b.workspace, b.branch, in)
+			out, err := libraries.runTerminal(ctx, b.workspace, b.branch, in)
 			return nil, out, err
 		})
 }
@@ -209,6 +211,11 @@ func boundCriterion(ctx context.Context, b toolBinding, id string) bool {
 }
 
 func runTerminal(ctx context.Context, workspace, branch string, in terminalArgs) (string, error) {
+	var libraries terminalLibraryCache
+	return libraries.runTerminal(ctx, workspace, branch, in)
+}
+
+func (libraries *terminalLibraryCache) runTerminal(ctx context.Context, workspace, branch string, in terminalArgs) (string, error) {
 	if in.Directory != "" && in.Directory != "root" && in.Directory != "web" {
 		return "", errors.New("terminal directory denied")
 	}
@@ -338,6 +345,7 @@ func runTerminal(ctx context.Context, workspace, branch string, in terminalArgs)
 		toolNames = append(toolNames, "node", "sh", "env")
 	}
 	var toolPaths []string
+	var libraryPaths []string
 	for _, name := range toolNames {
 		path, lookupErr := exec.LookPath(name)
 		if lookupErr != nil {
@@ -351,12 +359,17 @@ func runTerminal(ctx context.Context, workspace, branch string, in terminalArgs)
 		if root := terminalToolRoot(path); root != "" {
 			readRoots = append(readRoots, root)
 		}
+		closure, err := libraries.closure(deadline, workspace, physicalTmp, path, inspectTerminalLibrary)
+		if err != nil {
+			return "", err
+		}
+		libraryPaths = append(libraryPaths, closure...)
 	}
 	readRoots, err = terminalToolDependencies(deadline, workspace, physicalTmp, readRoots)
 	if err != nil {
 		return "", err
 	}
-	profile := terminalSandboxProfile(physicalWorkspace, physicalTmp, readRoots, toolPaths)
+	profile := terminalSandboxProfile(physicalWorkspace, physicalTmp, readRoots, toolPaths, libraryPaths)
 	childEnv := terminalEnvironment(physicalTmp, moduleProxy, goRoot, toolPaths...)
 	// Even read-only Git queries can trigger repository-configured helpers.
 	// Keep branch/staging checks inside exactly the same sandbox as the command.
@@ -662,7 +675,7 @@ func terminalStoreClosure(output string) ([]string, error) {
 	return roots, nil
 }
 
-func terminalSandboxProfile(workspace, tmp string, readRoots, toolPaths []string) string {
+func terminalSandboxProfile(workspace, tmp string, readRoots, toolPaths, libraryPaths []string) string {
 	// No network or socket permission, including localhost and Unix sockets.
 	profile := `(version 1) (deny default) (deny process-info*) (allow process-info* (target self)) (deny sysctl-read (sysctl-name-prefix "kern.procargs")) (allow process-exec process-fork)`
 	// Exact runtime queries only: CPU count/page size for Go, memory and OS
@@ -694,10 +707,29 @@ func terminalSandboxProfile(workspace, tmp string, readRoots, toolPaths []string
 	for _, path := range append([]string{"/", "/dev/null", "/dev/random", "/dev/urandom"}, toolPaths...) {
 		profile += fmt.Sprintf(" (allow file-read* (literal %q))", path)
 	}
+	libraryKegs := map[string]bool{}
+	for _, path := range libraryPaths {
+		profile += fmt.Sprintf(" (allow file-read* file-map-executable (literal %q))", path)
+		// Homebrew also symlinks versioned dylib filenames inside the keg.
+		// dyld inspects those intermediate spellings while resolving a load.
+		if root := terminalToolRoot(path); (strings.HasPrefix(root, "/opt/homebrew/Cellar/") || strings.HasPrefix(root, "/usr/local/Cellar/")) && !libraryKegs[root] {
+			profile += fmt.Sprintf(" (allow file-read* file-map-executable (subpath %q))", root)
+			libraryKegs[root] = true
+			prefix, packagePath, _ := strings.Cut(root, "/Cellar/")
+			formula, _, _ := strings.Cut(packagePath, "/")
+			if formula == "openssl" || strings.HasPrefix(formula, "openssl@") {
+				// OpenSSL tolerates an absent default config but aborts Node on
+				// EPERM. Hide this host config rather than reading it or changing
+				// the fixed child environment. No additional read is authorized.
+				config := filepath.Join(prefix, "etc", formula, "openssl.cnf")
+				profile += fmt.Sprintf(" (deny file-read* file-test-existence (with errno ENOENT) (literal %q))", config)
+			}
+		}
+	}
 	// Node resolves executable and workspace ancestors with lstat. Grant only
 	// their metadata; granting parent-directory contents would expose siblings.
 	ancestors := map[string]bool{}
-	for _, path := range append(append([]string{workspace, tmp}, readRoots...), toolPaths...) {
+	for _, path := range append(append(append([]string{workspace, tmp}, readRoots...), toolPaths...), libraryPaths...) {
 		if !filepath.IsAbs(path) {
 			continue
 		}
