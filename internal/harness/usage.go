@@ -159,6 +159,12 @@ func scanUsage(row pgx.Row) (SessionModelUsage, error) {
 	out := SessionModelUsage{Currency: "USD", CostStatus: "unknown", MetadataSource: "reported"}
 	err := row.Scan(&out.SessionID, &out.Model, &out.Sequence, &out.InputTokens, &out.OutputTokens, &out.CachedInputTokens, &out.ReasoningTokens,
 		&out.Provisional, &out.PriceVersion, &out.EstimatedCostUSD, &out.AccountID, &out.AccountLabel, &out.BillingMode, &out.SubscriptionLabel, &out.ReportedAt)
+	// Only api billing is priced. A stored estimate on a subscription or
+	// unknown row is historical: it is never returned, and its price version
+	// never pins a later api price.
+	if out.BillingMode != "api" {
+		out.PriceVersion, out.EstimatedCostUSD = nil, nil
+	}
 	if out.EstimatedCostUSD != nil {
 		out.CostStatus = "estimated"
 	}

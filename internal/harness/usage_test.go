@@ -502,3 +502,25 @@ func TestUsagePricingIsolationAndStorageConstraints(t *testing.T) {
 		return err
 	})
 }
+
+// Review case: a historical subscription row that still stores $12.34 and a
+// price version is returned without dollars. Only api billing is priced.
+func TestHistoricalSubscriptionUsageIsNeverPriced(t *testing.T) {
+	f := fixture(t)
+	expect(t, usagePrice(t, f, 1, "2.5"), 201)
+	path, id, lease := usageSession(t, f, "unmanaged")
+	in := usagePayload()
+	in["billing_mode"] = "subscription"
+	usageResult(t, f.call(f.agent, "POST", path+"/usage", in, lease))
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE harness_session_usage SET estimated_cost_usd=12.34, price_version=1 WHERE session_id=$1`, id)
+		return err
+	})
+	w := f.call(f.person, "GET", path+"/usage", nil, "")
+	expect(t, w, 200)
+	items := decode(t, w)["items"].([]any)
+	row := items[0].(map[string]any)
+	if row["estimated_cost_usd"] != nil || row["cost_status"] != "unknown" || row["price_version"] != nil || row["billing_mode"] != "subscription" {
+		t.Fatalf("historical subscription row priced: %v", row)
+	}
+}

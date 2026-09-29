@@ -7301,10 +7301,10 @@ components:
         cached_input_tokens: {$ref: '#/components/schemas/NonNegativeIntString'}
         tokens_state: {type: string, enum: [known, unknown]}
         cached_state: {type: string, enum: [known, unknown]}
-        estimated_cost_usd: {$ref: '#/components/schemas/NonNegativeDecimalString'}
+        estimated_cost_usd: {$ref: '#/components/schemas/NonNegativeDecimalString', description: Null unless billing_mode is api. A stored estimate on a subscription or unknown row is historical and is never returned or summed.}
         cost_state: {type: string, enum: [estimated, unknown]}
         provisional: {type: boolean}
-        price_version: {$ref: '#/components/schemas/NonNegativeIntString'}
+        price_version: {$ref: '#/components/schemas/NonNegativeIntString', description: Null unless billing_mode is api.}
         billing_mode: {type: string, enum: [unknown, api, subscription]}
         subscription_label: {type: [string, 'null']}
     TicketAgentSession:
@@ -7719,7 +7719,7 @@ components:
         cached_input_tokens: {$ref: '#/components/schemas/UsageTokenCount'}
         reasoning_tokens: {$ref: '#/components/schemas/UsageTokenCount', description: Subset of output_tokens. Null means unknown, not zero. Not added to estimated_cost_usd.}
         provisional: {type: boolean, description: True when the reporter marks partial or any of input, output, or cached input is unknown. A missing reasoning count does not by itself make the row provisional. Cost remains an estimate even when false.}
-        price_version: {type: [integer, 'null'], format: int64}
+        price_version: {type: [integer, 'null'], format: int64, description: Null unless billing_mode is api.}
         estimated_cost_usd: {type: [string, 'null'], pattern: '^[0-9]+\.[0-9]{12}$', description: 'Exact ((input-cached)*input_rate + cached*cached_rate + output*output_rate)/1000000, with no binary floats or intermediate rounding. Present only when billing_mode is api and every counter and price is known. Subscription and unknown stay null. Never actual billed cost.'}
         cost_status: {type: string, enum: [estimated, unknown]}
         currency: {type: string, const: USD}
