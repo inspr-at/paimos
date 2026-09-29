@@ -419,6 +419,88 @@ paths:
         "403": {"description":"Permission or agent binding denied","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "404": {"description":"Project unavailable","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "413": {"description":"Comparison is larger than 256 KiB","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+  /rules/doctrine:
+    get:
+      operationId: getDoctrineLayer
+      description: "rules.read (person or agent key). The INSPR doctrine as a git-backed, read-only rule layer (AEON-318): every repository this workspace indexes, at its pinned commit. Git is the source of truth. Each rule's identity is its repository, file and heading anchor; source is the exact bytes of its lines at the pinned commit, and url opens those lines. TL;DRs come from a .tldr.yaml sidecar in git and are only displayed. Aeon holds no doctrine text beyond a cache keyed by the pinned commit. There is no route that edits doctrine."
+      responses:
+        "200":
+          description: The doctrine layer
+          content:
+            application/json:
+              schema: {"$ref": "#/components/schemas/DoctrineLayer"}
+        "401": {"description":"Authentication required","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "403": {"description":"Permission denied","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+  /rules/doctrine/sources:
+    post:
+      operationId: addDoctrineSource
+      description: "settings.manage; person only. Adds a repository to the doctrine layer, pinned to a commit. The server resolves ref (or checks commit) on GitHub before anything is stored, then indexes the pinned commit; a failed index is recorded on the source (state failed, error), the pin stays. A private repository names a credential reference; the server reads that read-only token from its credential directory at fetch time and never stores, logs or returns it. At most 8 repositories per workspace."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {"$ref": "#/components/schemas/DoctrineSourceInput"}
+      responses:
+        "200":
+          description: The doctrine layer after the change
+          content:
+            application/json:
+              schema: {"$ref": "#/components/schemas/DoctrineLayer"}
+        "400": {"description":"Invalid repository, ref, commit, paths or credential reference","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "401": {"description":"Authentication required","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "403": {"description":"Permission denied; agent keys never configure doctrine","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "409": {"description":"The repository is already configured, the limit is reached, or ref does not name commit (code ref_mismatch)","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "422": {"description":"GitHub or the credential could not be used (code git_unavailable); nothing was stored","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+  /rules/doctrine/sources/{sourceId}:
+    parameters:
+      - {name: sourceId, in: path, required: true, schema: {type: string, format: uuid}}
+    put:
+      operationId: pinDoctrineSource
+      description: "settings.manage; person only. Replaces a source's pin and selection. The repository cannot change. A new commit restarts pinned_at, drops the cached bytes of the old commit and indexes the new one. Responses as for addDoctrineSource; 404 when the source is not in this workspace."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {"$ref": "#/components/schemas/DoctrineSourceInput"}
+      responses:
+        "200":
+          description: The doctrine layer after the change
+          content:
+            application/json:
+              schema: {"$ref": "#/components/schemas/DoctrineLayer"}
+        "400": {"description":"Invalid input","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "401": {"description":"Authentication required","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "403": {"description":"Permission denied","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "404": {"description":"Source unavailable","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "409": {"description":"ref does not name commit (code ref_mismatch)","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "422": {"description":"GitHub or the credential could not be used; nothing changed","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+    delete:
+      operationId: removeDoctrineSource
+      description: "settings.manage; person only. Stops indexing a repository and deletes its cached bytes. Git is not touched."
+      responses:
+        "200":
+          description: The doctrine layer after the change
+          content:
+            application/json:
+              schema: {"$ref": "#/components/schemas/DoctrineLayer"}
+        "401": {"description":"Authentication required","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "403": {"description":"Permission denied","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "404": {"description":"Source unavailable","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+  /rules/doctrine/sources/{sourceId}/index:
+    parameters:
+      - {name: sourceId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: indexDoctrineSource
+      description: "settings.manage; person only. Reads the source again at its pinned commit and replaces the cache. A failure keeps the files of the last successful index at this commit and sets error."
+      responses:
+        "200":
+          description: The doctrine layer after the attempt
+          content:
+            application/json:
+              schema: {"$ref": "#/components/schemas/DoctrineLayer"}
+        "401": {"description":"Authentication required","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "403": {"description":"Permission denied","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "404": {"description":"Source unavailable","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
   /agent-pairing/guide:
     get:
       operationId: pairingGuide
@@ -5858,6 +5940,112 @@ components:
           maxItems: 16
           description: "Comparison limits. Tokens only; no paths or instruction text."
           items: {type: string, pattern: "^[a-z][a-z0-9_]{0,63}$"}
+    DoctrineTLDR:
+      type: object
+      additionalProperties: false
+      required: [en]
+      description: "An explanation for people, read from git (AEON-314 shape). check is true when the sidecar's basis no longer matches the text."
+      properties:
+        en: {type: string, maxLength: 300}
+        de: {type: string, maxLength: 300}
+        check: {type: boolean}
+    DoctrineRule:
+      type: object
+      additionalProperties: false
+      required: [key, identity, set, heading_path, anchor, start_line, end_line, source, sha256, text, strength, url]
+      properties:
+        key: {type: string, description: "The rule's aeon-rule id, or its text key (t-…) without one; TL;DR sidecars refer to it"}
+        identity: {type: string, description: "repository/path#anchor"}
+        set: {type: string}
+        heading_path: {type: string}
+        anchor: {type: string, description: "GitHub anchor of the heading the rule sits under"}
+        start_line: {type: integer, minimum: 1}
+        end_line: {type: integer, minimum: 1}
+        source: {type: string, description: "The exact bytes of lines start_line..end_line at the pinned commit"}
+        sha256: {type: string, pattern: "^[0-9a-f]{64}$"}
+        text: {type: string, description: "The rule line as the importer reads it"}
+        strength: {type: string, enum: [normal, locked]}
+        url: {type: string, format: uri, description: "The file at the pinned commit, opened at these lines"}
+        tldr: {"$ref": "#/components/schemas/DoctrineTLDR"}
+    DoctrineSet:
+      type: object
+      additionalProperties: false
+      required: [set, title, anchor]
+      properties:
+        set: {type: string}
+        title: {type: string}
+        anchor: {type: string}
+        tldr: {"$ref": "#/components/schemas/DoctrineTLDR"}
+    DoctrineFile:
+      type: object
+      additionalProperties: false
+      required: [path, blob_sha, sha256, bytes, kind, layer, url, sets, rules]
+      properties:
+        path: {type: string}
+        blob_sha: {type: string, pattern: "^[0-9a-f]{40}$"}
+        sha256: {type: string, pattern: "^[0-9a-f]{64}$"}
+        bytes: {type: integer, minimum: 0}
+        kind: {type: string}
+        layer: {type: string}
+        url: {type: string, format: uri}
+        tldr: {"$ref": "#/components/schemas/DoctrineTLDR"}
+        sets: {type: array, items: {"$ref": "#/components/schemas/DoctrineSet"}}
+        rules: {type: array, items: {"$ref": "#/components/schemas/DoctrineRule"}}
+        sidecar:
+          type: object
+          additionalProperties: false
+          required: [path, url]
+          properties:
+            path: {type: string}
+            url: {type: string, format: uri}
+            problem: {type: string}
+            unmatched: {type: array, maxItems: 50, items: {type: string}}
+        problem: {type: string, description: "Set when the file could not be indexed"}
+    DoctrineSkip:
+      type: object
+      additionalProperties: false
+      required: [path, reason]
+      properties:
+        path: {type: string}
+        reason: {type: string}
+    DoctrineSource:
+      type: object
+      additionalProperties: false
+      required: [id, repository, visibility, commit, pinned_at, paths, url, state, files, skipped]
+      properties:
+        id: {type: string, format: uuid}
+        repository: {type: string, description: "owner/name on GitHub"}
+        visibility: {type: string, enum: [public, private]}
+        ref: {type: string, description: "The release tag the pin was set from"}
+        commit: {type: string, pattern: "^[0-9a-f]{40}$"}
+        committed_at: {type: string, format: date-time}
+        pinned_at: {type: string, format: date-time, description: "When this commit was pinned in Aeon"}
+        paths: {type: array, minItems: 1, maxItems: 20, items: {type: string}}
+        credential_ref: {type: string, description: "Name of the read-only credential; never the credential"}
+        url: {type: string, format: uri}
+        state: {type: string, enum: [ready, not_indexed, failed]}
+        error: {type: string, maxLength: 300}
+        indexed_at: {type: string, format: date-time}
+        files: {type: array, items: {"$ref": "#/components/schemas/DoctrineFile"}}
+        skipped: {type: array, maxItems: 50, items: {"$ref": "#/components/schemas/DoctrineSkip"}}
+    DoctrineLayer:
+      type: object
+      additionalProperties: false
+      required: [sources]
+      properties:
+        sources: {type: array, maxItems: 8, items: {"$ref": "#/components/schemas/DoctrineSource"}}
+    DoctrineSourceInput:
+      type: object
+      additionalProperties: false
+      required: [visibility]
+      description: "Commit is the pin. ref names the release tag; alone it is resolved to the commit it names now, with commit it must name that commit. paths default to docs/AGENTS-*.md; a wildcard never selects AGENTS-PROFILE*.md. repository is required when adding and must match when pinning."
+      properties:
+        repository: {type: string, pattern: "^[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9._-]{1,100}$"}
+        visibility: {type: string, enum: [public, private]}
+        ref: {type: string, maxLength: 128}
+        commit: {type: string, pattern: "^[0-9a-f]{40}$"}
+        paths: {type: array, maxItems: 20, items: {type: string, maxLength: 200}}
+        credential_ref: {type: string, pattern: "^[a-z0-9][a-z0-9-]{0,62}$", description: "Required for a private repository. Names a token file in the server's AEON_DOCTRINE_CREDENTIALS_DIR"}
     PairingVerificationCapabilities:
       type: object
       description: Server-owned qualification of its matching helper release; a client cannot widen this map. Unsupported choices require explicit connect_only or exclusion.
