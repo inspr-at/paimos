@@ -5,6 +5,7 @@ import BizIcon from '../business/BizIcon.vue'
 import RuleHistory from './RuleHistory.vue'
 import RuleSetCard, { type SetDraft } from './RuleSetCard.vue'
 import RuleTick from './RuleTick.vue'
+import RulesBudgetSection from './RulesBudgetSection.vue'
 import RulesImportDialog from './RulesImportDialog.vue'
 import RulesPreview from './RulesPreview.vue'
 import RulesPublishDialog, { type Budget, type PublishItem } from './RulesPublishDialog.vue'
@@ -14,10 +15,10 @@ import { getMembers } from '../../lib/access'
 import { toast } from '../../lib/toast'
 import { useSession } from '../../stores/session'
 import {
-  MAX_RULES, ROLE_LABEL, ROLES, RulesError, applyEnabled, blankRule, copyName, createLayer, createSet, diffRules, duplicateRule, getVersion, groupsState, hasMovable, importBlock, largestProjected,
+  DEFAULT_BUDGET, MAX_RULES, ROLE_LABEL, ROLES, RulesError, applyEnabled, getBudget, saveTldrs, blankRule, copyName, createLayer, createSet, diffRules, duplicateRule, getVersion, groupsState, hasMovable, importBlock, largestProjected,
   listLayers, listSets, publishBlock, publishSets, replyUncertain, rulesEqual, rulesMessage, saveDraft, scopeKey, scopeRank,
   setState, validateDraft, writeBlock,
-  type AgentRule, type Caller, type CheckGroup, type CheckState, type ImportReport, type MergeInput, type RoleName, type RuleLayer, type RuleScope, type RuleSet, type RuleSnapshot, type SetState,
+  type AgentRule, type Caller, type CheckGroup, type RuleBudgetView, type CheckState, type ImportReport, type MergeInput, type RoleName, type RuleLayer, type RuleScope, type RuleSet, type RuleSnapshot, type SetState,
 } from '../../lib/rules'
 
 // Agent rules answer three questions at a glance: what applies, what waits to
@@ -44,6 +45,8 @@ const publishing = ref(false)
 const publishError = ref('')
 const adding = ref<{ section: SectionKey; name: string; role: RoleName; error: string; busy: boolean } | null>(null)
 const startedByHand = ref(false)
+const budgetView = ref<RuleBudgetView>(DEFAULT_BUDGET)
+const canManageBudget = computed(() => caller.value?.kind === 'person' && can('settings.manage'))
 
 const me = computed(() => session.identity?.principal.id ?? '')
 const myName = computed(() => session.identity ? accountName(session.identity) : 'You')
@@ -396,6 +399,35 @@ async function save() {
   } finally { saving.value = false }
 }
 
+// ---------- Explanations for people (AEON-314) ----------
+// They are written into the draft on their own, never touching rule text, and
+// go live with the normal publish. Agents never receive them.
+type Explanation = { en: string; de?: string } | null
+async function writeExplanation(setId: string, body: { set?: Explanation; rules?: Record<string, Explanation> }): Promise<string | null> {
+  const found = find(setId)
+  if (!found) return 'That set is no longer here.'
+  if (editing.value?.setId === setId) return 'Save or cancel your edits to this set first.'
+  try {
+    found.set.remote = await saveTldrs(setId, { expected_revision: found.set.remote.revision, ...body })
+    toast('Draft saved')
+    return null
+  } catch (cause) {
+    if (cause instanceof RulesError && cause.code === 'revision_conflict') {
+      await load(true)
+      return 'This set was saved elsewhere meanwhile. The page was reloaded; try again.'
+    }
+    return rulesMessage(cause)
+  }
+}
+function explainSetFor(setId: string, scope: RuleScope) {
+  if (writeBlock(caller.value, scope)) return undefined
+  return (value: Explanation) => writeExplanation(setId, { set: value })
+}
+function explainRuleFor(setId: string, scope: RuleScope) {
+  if (writeBlock(caller.value, scope)) return undefined
+  return (identity: string, value: Explanation) => writeExplanation(setId, { rules: { [identity]: value } })
+}
+
 // ---------- Adding a set ----------
 function startAdd(key: SectionKey) { adding.value = { section: key, name: '', role: 'builder', error: '', busy: false } }
 async function add() {
@@ -444,8 +476,8 @@ const budget = computed<Budget | null>(() => {
     const rules = chosen.has(set.remote.id) ? set.remote.rules : set.live?.rules
     return rules ? [{ id: set.remote.id, scope: bundle.layer.scope, rules }] : []
   })
-  const largest = largestProjected(inputs, projectId.value || '00000000-0000-4000-8000-000000000000', me.value)
-  return { ...largest, project: projectTitle(projectId.value) }
+  const largest = largestProjected(inputs, projectId.value || '00000000-0000-4000-8000-000000000000', me.value, new Date(), budgetView.value)
+  return { ...largest, project: projectTitle(projectId.value), limits: budgetView.value }
 })
 async function confirmPublish(note: string) {
   const list = publishList.value
@@ -499,6 +531,7 @@ async function restored() {
 onMounted(() => {
   void load()
   void loadContext()
+  getBudget().then(view => { budgetView.value = view }).catch(() => { /* the default budget stays shown */ })
 })
 </script>
 
@@ -511,7 +544,7 @@ onMounted(() => {
         <p v-if="!loading && !empty && !loadError" class="status" role="status">{{ status }}</p>
       </div>
       <div v-if="!loading && !empty && !loadError" class="actions">
-        <button type="button" class="btn sm ghost" data-tip="The file an agent receives now" @click="previewOpen = true"><BizIcon name="eye" :size="14" />Preview</button>
+        <button type="button" class="btn sm ghost" data-tip="Each rule next to its explanation" @click="previewOpen = true"><BizIcon name="eye" :size="14" />Preview</button>
         <button type="button" class="btn sm ghost" :aria-disabled="!!importHold || undefined" :data-tip="importHold || 'Add or update sets from a rules file'" @click="openImport"><BizIcon name="upload" :size="14" />Import</button>
         <button v-if="publishable.length" type="button" class="btn primary" @click="openPublish()"><BizIcon name="seal" :size="15" />Review and publish ({{ publishable.length }} {{ publishable.length === 1 ? 'set' : 'sets' }})</button>
       </div>
@@ -559,6 +592,7 @@ onMounted(() => {
             @toggle="toggle(set.remote.id)" @edit="edit(set.remote.id)" @cancel="editing = null" @save="save" @add-rule="addRule" @duplicate-rule="duplicateAt"
             @draft="value => editing && Object.assign(editing, value)" @publish="openPublish([set.remote.id])" @history="historyId = set.remote.id"
             @duplicate="duplicateSet(set.remote.id)" @tick="onSetTick(set.remote.id, $event)" @tick-rule="(identity, enabled) => onRuleTick(set.remote.id, identity, enabled)"
+            :explain-set="explainSetFor(set.remote.id, bundle.layer.scope)" :explain-rule="explainRuleFor(set.remote.id, bundle.layer.scope)"
           />
           </div>
           <p v-if="!section.sets.length && adding?.section !== section.key && addReason(section)" class="none">None yet.</p>
@@ -572,6 +606,7 @@ onMounted(() => {
           <button v-else-if="!addReason(section)" type="button" class="add-set" :class="{ alone: !section.sets.length }" @click="startAdd(section.key)"><BizIcon name="plus" :size="14" />{{ section.sets.length ? 'Add set' : section.key === 'project' ? `Add rules for ${projectTitle(projectId)}` : section.key === 'person' ? 'Add your first set' : 'Add a set for a role' }}</button>
         </div>
       </section>
+      <RulesBudgetSection :view="budgetView" :can-manage="canManageBudget" @saved="view => { budgetView = view; toast('Budget saved') }" />
     </div>
 
     <RulesImportDialog
@@ -584,7 +619,7 @@ onMounted(() => {
       @close="publishTarget = null" @confirm="confirmPublish"
     />
     <RulesPreview
-      v-if="previewOpen" :projects="projects" :people="[{ id: me, name: myName }]" :agents="agents" :project-id="projectId" :person-id="me" :waiting="waiting.length"
+      v-if="previewOpen" :projects="projects" :people="[{ id: me, name: myName }]" :agents="agents" :project-id="projectId" :person-id="me" :waiting="waiting.length" :where="where"
       @close="previewOpen = false"
     />
     <RuleHistory

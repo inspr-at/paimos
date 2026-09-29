@@ -6,6 +6,7 @@ import RowMenu from '../business/RowMenu.vue'
 import RuleEditRow from './RuleEditRow.vue'
 import RuleItem from './RuleItem.vue'
 import RuleTick from './RuleTick.vue'
+import RuleTldrEditor from './RuleTldrEditor.vue'
 import type { RowAction } from '../../lib/rowActions'
 import { canFlip, validateDraft, type AgentRule, type CheckState, type RuleSet, type SetState } from '../../lib/rules'
 
@@ -32,6 +33,9 @@ const props = defineProps<{
   tickDisabled?: boolean
   tickTip?: string
   duplicateReason?: string
+  /** Save explanations into the draft (AEON-314); absent when the caller may not write. */
+  explainSet?: (value: { en: string; de?: string } | null) => Promise<string | null>
+  explainRule?: (identity: string, value: { en: string; de?: string } | null) => Promise<string | null>
 }>()
 const emit = defineEmits<{
   toggle: []
@@ -49,6 +53,8 @@ const emit = defineEmits<{
 }>()
 const id = useId()
 const menuAnchor = ref<HTMLElement | null>(null)
+const explaining = ref(false)
+const checkTip = 'The rules changed after this explanation was written. Check it still fits.'
 const rules = computed(() => props.draft?.rules ?? props.set.rules)
 const draftWarning = computed(() => props.draft ? validateDraft(props.draft.name, props.draft.rules).warning ?? '' : '')
 const savedWarning = computed(() => !props.draft && props.open ? validateDraft(props.set.name, props.set.rules).warning ?? '' : '')
@@ -65,6 +71,7 @@ const items = computed<RowAction[]>(() => [
   { id: 'edit', label: 'Edit rules', icon: 'edit', group: 0, reason: props.editReason ?? undefined },
   { id: 'publish', label: 'Publish this set', icon: 'upload', group: 0, reason: props.state === 'live' ? 'Already live.' : props.publishReason ?? undefined },
   { id: 'duplicate', label: 'Duplicate set', icon: 'copy', group: 0, reason: props.duplicateReason },
+  { id: 'explain', label: props.set.tldr?.en ? 'Edit explanation' : 'Add explanation', icon: 'info', group: 1, reason: props.explainSet ? undefined : props.editReason ?? 'You may not edit this set.' },
   { id: 'history', label: 'Version history', icon: 'history', group: 1, reason: props.set.published_version ? undefined : 'Not published yet.' },
 ])
 function select(action: string) {
@@ -73,6 +80,11 @@ function select(action: string) {
   else if (action === 'publish') emit('publish')
   else if (action === 'duplicate') emit('duplicate')
   else if (action === 'history') emit('history')
+  else if (action === 'explain' && props.explainSet) explaining.value = true
+}
+function ruleExplainer(identity: string) {
+  const save = props.explainRule
+  return save ? (value: { en: string; de?: string } | null) => save(identity, value) : undefined
 }
 function switchable(rule: AgentRule) {
   return !props.editReason && canFlip(rule, props.held)
@@ -95,9 +107,15 @@ function removeRule(index: number) {
       <button v-if="!draft" type="button" class="toggle" :aria-expanded="open" :aria-controls="`${id}-rules`" @click="emit('toggle')">
         <BizIcon name="chevron-right" :size="14" class="chev" />
         <span class="names">
-          <h4 :id="`${id}-name`" class="name" :title="set.name">{{ set.name }}</h4>
-          <span v-if="subtitle" class="subtitle">{{ subtitle }}</span>
-          <span class="summary">{{ summary }}</span>
+          <span class="title-row">
+            <h4 :id="`${id}-name`" class="name" :title="set.name">{{ set.name }}</h4>
+            <span v-if="subtitle" class="subtitle">{{ subtitle }}</span>
+            <span class="summary">{{ summary }}</span>
+          </span>
+          <span v-if="set.tldr?.en" class="set-tldr" :title="set.tldr.de ? `${set.tldr.en} · ${set.tldr.de}` : set.tldr.en">
+            <span class="tldr-text">{{ set.tldr.en }}</span>
+            <span v-if="set.tldr.check" class="check" :data-tip="checkTip">Check</span>
+          </span>
         </span>
       </button>
       <label v-else class="name-edit">
@@ -109,8 +127,11 @@ function removeRule(index: number) {
       <button v-if="!draft" type="button" class="icon-btn sm flat" :aria-label="`Actions for ${set.name}`" aria-haspopup="menu" data-tip="Edit, duplicate, history" @click="menuAnchor = $event.currentTarget as HTMLElement"><BizIcon name="more" :size="16" /></button>
     </header>
 
+    <div v-if="explaining && explainSet && !draft" class="set-explain">
+      <RuleTldrEditor :value="set.tldr" :save="explainSet" @done="explaining = false" />
+    </div>
     <ul v-if="!draft && open" :id="`${id}-rules`" class="rules">
-      <RuleItem v-for="rule in set.rules" :key="rule.identity" :rule="rule" :set-name="set.name" :held-by="held.get(rule.identity)" :pending="pending?.has(rule.identity)" :switchable="switchable(rule)" :switch-disabled="saving || tickDisabled" @toggle="emit('tick-rule', rule.identity, $event)" />
+      <RuleItem v-for="rule in set.rules" :key="rule.identity" :rule="rule" :set-name="set.name" :held-by="held.get(rule.identity)" :pending="pending?.has(rule.identity)" :switchable="switchable(rule)" :switch-disabled="saving || tickDisabled" :explain="ruleExplainer(rule.identity)" @toggle="emit('tick-rule', rule.identity, $event)" />
       <li v-if="!set.rules.length" class="empty">No rules in this set yet.</li>
     </ul>
     <p v-if="savedWarning" class="wording" role="status">{{ savedWarning }}</p>
@@ -150,8 +171,13 @@ function removeRule(index: number) {
 .chev { flex: none; color: var(--ink-3); }
 .open .chev { transform: rotate(90deg); }
 @media (prefers-reduced-motion: no-preference) { .chev { transition: transform .15s ease; } }
-.names { display: flex; align-items: baseline; gap: 8px; min-width: 0; flex: 1 1 auto; }
-.names .summary { margin-left: auto; }
+.names { display: flex; flex-direction: column; gap: 1px; min-width: 0; flex: 1 1 auto; padding: 4px 0; }
+.title-row { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.title-row .summary { margin-left: auto; }
+.set-tldr { display: flex; align-items: baseline; gap: 8px; min-width: 0; color: var(--ink-3); font-size: 12.5px; line-height: 1.4; }
+.tldr-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.check { flex: none; padding: 0 7px; border-radius: 999px; background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--line-2); color: var(--ink-2); font-size: 11px; font-weight: 600; line-height: 17px; }
+.set-explain { padding: 4px 16px 12px 40px; }
 .name { margin: 0; font-size: 14.5px; font-weight: 650; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .subtitle { color: var(--ink-3); font-size: 12.5px; white-space: nowrap; }
 .summary { flex: none; color: var(--ink-3); font-size: 12.5px; white-space: nowrap; font-variant-numeric: tabular-nums; }
@@ -177,9 +203,12 @@ function removeRule(index: number) {
   .rules { padding-left: 8px; }
   .wording { margin-left: 8px; margin-right: 8px; }
   .toggle { min-height: 52px; }
-  .names { flex-direction: column; align-items: flex-start; gap: 1px; max-width: 100%; overflow: hidden; }
+  .names { max-width: 100%; overflow: hidden; }
+  .title-row { flex-direction: column; align-items: flex-start; gap: 1px; }
   .name, .subtitle, .summary { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
-  .names .summary { margin-left: 0; }
+  .title-row .summary { margin-left: 0; }
+  .set-explain { padding: 4px 12px 12px; }
+  .set-tldr .tldr-text { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
   .edit-rules { padding: 4px 8px 0; }
 }
 </style>

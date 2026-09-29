@@ -101,12 +101,79 @@ const PROJECT: [string, Spec[]][] = [
   ]],
 ]
 
-function rule(spec: Spec, reference: string) {
+// Explanations for people (AEON-314), as an agent would draft them: short,
+// technical, what the rule prevents. A few are missing; one is marked for a
+// check because its rule changed after it was written.
+interface Tldr { en: string; de?: string; basis?: string; check?: boolean }
+const SET_TLDR: Record<string, Tldr> = {
+  Secrets: { en: 'Credentials never reach a transcript, a log or a commit.', de: 'Zugangsdaten landen nie in Protokollen, Logs oder Commits.' },
+  Git: { en: 'No command that silently destroys work or rewrites shared history.', de: 'Keine Befehle, die Arbeit zerstören oder geteilte Historie umschreiben.' },
+  'Cross-repo authoring': { en: 'Write only in your own repo; everywhere else, propose through a ticket.' },
+  'Files and operations': { en: 'Reversible deletes and no risky local builds or secret files.' },
+  Fleet: { en: 'Production hosts stay production; labs run elsewhere.' },
+  'Tickets and attribution': { en: 'Every change has one ticket and a named worker.' },
+  'Review gates': { en: 'Risky changes get a cross-family review before merge; the rest per batch.', check: true },
+  'Trust contexts': { en: 'Personal, INSPR and business data never mix.' },
+  Versioning: { en: 'Calendar versions everywhere; old releases stay reproducible.' },
+  Communication: { en: 'Short, dense reports that are easy to scan.' },
+  'Package scope': { en: 'Parallel workers stay inside their own package.', de: 'Parallele Worker bleiben in ihrem Paket.' },
+  'Contract first': { en: 'The OpenAPI contract leads; tenants are isolated by RLS.' },
+  Interface: { en: 'Calm, consistent UI without the usual AI tells.' },
+}
+const RULE_TLDR: Record<string, Tldr> = {
+  'no-env-dump': { en: 'Printing the environment dumps every credential into the transcript at once.', de: 'Die Umgebung auszugeben legt alle Zugangsdaten offen.' },
+  'secret-stop': { en: 'A leaked value is compromised: stop, do not echo it, get it rotated.' },
+  'agent-secrets': { en: 'Source the credential file inside a subshell; the value never enters the chat.' },
+  'no-commit-secrets': { en: 'Git history is permanent; a committed secret is public forever.' },
+  'git-destructive': { en: 'These commands delete uncommitted work with no undo.' },
+  'git-force-main': { en: 'Force-pushing main breaks every other clone.', de: 'Force-Push auf main zerstört alle anderen Klone.' },
+  'git-hooks': { en: 'Hooks run the secret scan; skipping them lets leaks through.', check: true },
+  'git-amend': { en: 'Amending can overwrite the commit someone already reviewed.' },
+  'git-diff-first': { en: 'A last look at the file set catches stray files before they land.' },
+  'own-repo-only': { en: 'Other repos have owners and reviews; propose changes there, never edit.' },
+  'release-pins': { en: 'The one allowed cross-repo write: bump the pin, nothing else.' },
+  'third-party-stop': { en: 'Business-owned code is never changed on an agent’s own initiative.' },
+  'own-residue': { en: 'Delete only branches you created yourself.' },
+  'trash-not-rm': { en: 'Trash can be undone; rm -rf cannot.' },
+  'no-nixos-on-mac': { en: 'NixOS builds fail on macOS; build on the target host.' },
+  'encrypted-files': { en: 'Encrypted files hold production secrets; the operator runs those commands.' },
+  'no-new-md': { en: 'Knowledge goes to one searchable place, not scattered files.' },
+  'prod-not-lab': { en: 'Test VMs once took a production host down (INSPR-461).' },
+  'labs-local': { en: 'Experiments run on the workstation or CI, never on the fleet.' },
+  'one-step': { en: 'Interactive procedures go step by step so no host is left half done.' },
+  'ticket-first': { en: 'No ticket and no worker marker means no material work.' },
+  'one-tracker': { en: 'One tracker per product keeps one history.' },
+  handoffs: { en: 'Keep earlier markers so the trail stays complete.' },
+  'cross-family': { en: 'A reviewer from another model family catches different mistakes.' },
+  'high-risk-before-merge': { en: 'Auth, migrations, secrets and deploys are reviewed before merge, never after.' },
+  'reviewer-from-registry': { en: 'Model names live in the registry, so rules never go stale.' },
+  'explicit-ok': { en: 'Only an explicit ok opens the gate.' },
+  'no-cross-context': { en: 'Client data never meets personal or open-source work.', de: 'Kundendaten treffen nie auf private oder Open-Source-Arbeit.' },
+  'classify-by-output': { en: 'Who owns the output decides the context, not the GitHub org.' },
+  'person-layer-private': { en: 'Personal preferences stay inside their workspace.' },
+  'calendar-versions': { en: 'YYMMDDhhmmss.0.0 in UTC for every release.' },
+  'keep-history': { en: 'Old releases must still build after a scheme change.' },
+  telegraph: { en: 'Dense reports with a TL;DR first and last.' },
+  'no-emojis': { en: 'No emojis in reports or commits.' },
+  'time-neutral': { en: 'Check the clock before saying good morning.' },
+  'package-scope': { en: 'Touch only your package’s files so parallel workers never collide.', de: 'Nur die eigenen Paketdateien ändern.' },
+  'shared-files': { en: 'Shared files change additively; PHAROS and JANUS parse them strictly.' },
+  'migration-numbers': { en: 'Re-check the migration number right before committing.' },
+  'contract-first': { en: 'Endpoint and contract change in the same commit.' },
+  'tenant-rls': { en: 'Row-level security on tenant_id is the tenant boundary.' },
+  'no-edge-accents': { en: 'No coloured edge bars to mark state; use tint, ring or weight.' },
+  'svg-icons': { en: 'SVG icons only, centred in their controls.' },
+  'design-tokens': { en: 'Colours and spacing come from the design tokens.' },
+}
+const withTldr = (tldr: Tldr | undefined) => tldr ? { tldr: { basis: '0123456789abcdef', ...tldr } } : {}
+
+function rule(spec: Spec, reference: string, explained = false) {
   return {
     identity: spec.id, text: spec.text, why: spec.why, ...(spec.details ? { details: spec.details } : {}),
     strength: (spec.locked ? 'locked' : 'normal') as Strength, enabled: spec.locked ? true : !spec.off,
-    roles: spec.roles ?? [], harnesses: [], source: { reference, identity: spec.locked ? spec.id : undefined, edited_here: false },
-  }
+    roles: spec.roles ?? [], harnesses: [] as string[], source: { reference, identity: spec.locked ? spec.id : undefined, edited_here: false },
+    ...(explained ? withTldr(RULE_TLDR[spec.id]) : {}),
+  } as { identity: string; text: string; why: string; details?: string; strength: Strength; enabled: boolean; roles: string[]; harnesses: string[]; source: { reference: string; identity?: string; edited_here: boolean }; tldr?: Tldr }
 }
 export type ScaleRule = ReturnType<typeof rule>
 const setId = (n: number) => `e0000000-0000-4000-8000-${String(n).padStart(12, '0')}`
@@ -129,14 +196,18 @@ export interface ScaleOptions {
   /** Holds every project-scoped permission answer until released. */
   holdProjectPermissions?: boolean
   batchFailure?: { status: number; code: string; error: string; actual_bytes?: number; max_bytes?: number }
+  /** AEON-314: sets and rules carry explanations. */
+  tldr?: boolean
+  /** AEON-314: the workspace budget. */
+  budget?: { max_bytes: number; layer_max_bytes: Record<string, number> }
 }
 export interface ScaleMock {
   calls: { method: string; path: string; body?: unknown }[]
   releasePermissions: () => void
 }
 
-interface MockSet { id: string; layer_id: string; scope: Record<string, string>; name: string; revision: number; rules: ScaleRule[]; published_version: string }
-interface MockSnapshot { set_id: string; scope: Record<string, string>; name: string; revision: number; version: string; sha256: string; rules: ScaleRule[]; published_at: string; note?: string }
+interface MockSet { id: string; layer_id: string; scope: Record<string, string>; name: string; revision: number; rules: ScaleRule[]; published_version: string; tldr?: Tldr | null }
+interface MockSnapshot { set_id: string; scope: Record<string, string>; name: string; revision: number; version: string; sha256: string; rules: ScaleRule[]; published_at: string; note?: string; tldr?: Tldr | null }
 
 export async function mockRulesScale(page: Page, options: ScaleOptions = {}): Promise<ScaleMock> {
   const state = options.state ?? 'drafts'
@@ -146,15 +217,18 @@ export async function mockRulesScale(page: Page, options: ScaleOptions = {}): Pr
   const layers: { id: string; scope: Record<string, string> }[] = []
   const sets: MockSet[] = []
   const versions = new Map<string, MockSnapshot[]>()
+  let budget = options.budget ?? { max_bytes: 12000, layer_max_bytes: {} as Record<string, number> }
   const snapshot = (set: MockSet, version: string, rules = set.rules, note?: string): MockSnapshot => ({
-    set_id: set.id, scope: set.scope, name: set.name, revision: set.revision, version, sha256: 'ab'.repeat(32), rules: rules.map(item => ({ ...item })),
+    set_id: set.id, scope: set.scope, name: set.name, revision: set.revision, version, sha256: 'ab'.repeat(32), rules: rules.map(item => ({ ...item })), ...(set.tldr ? { tldr: set.tldr } : {}),
     published_at: `20${version.slice(0, 2)}-${version.slice(2, 4)}-${version.slice(4, 6)}T${version.slice(6, 8)}:${version.slice(8, 10)}:${version.slice(10, 12)}Z`, ...(note ? { note } : {}),
   })
   if (state !== 'empty') {
     layers.push({ id: COMPANY_LAYER, scope: { layer: 'company' } }, { id: PROJECT_LAYER, scope: { layer: 'project', project_id: AEON_PROJECT } })
     let n = 0
-    for (const [name, specs] of COMPANY) sets.push({ id: setId(++n), layer_id: COMPANY_LAYER, scope: { layer: 'company' }, name, revision: 2, rules: specs.map(spec => rule(spec, 'inspr-doctrine 0.14')), published_version: '' })
-    for (const [name, specs] of PROJECT) sets.push({ id: setId(++n), layer_id: PROJECT_LAYER, scope: { layer: 'project', project_id: AEON_PROJECT }, name, revision: 2, rules: specs.map(spec => rule(spec, 'aeon/AGENTS.md')), published_version: '' })
+    const explained = !!options.tldr
+    const setTldr = (name: string) => explained && SET_TLDR[name] ? { tldr: { basis: '0123456789abcdef', ...SET_TLDR[name] } } : {}
+    for (const [name, specs] of COMPANY) sets.push({ id: setId(++n), layer_id: COMPANY_LAYER, scope: { layer: 'company' }, name, revision: 2, rules: specs.map(spec => rule(spec, 'inspr-doctrine 0.14', explained)), published_version: '', ...setTldr(name) })
+    for (const [name, specs] of PROJECT) sets.push({ id: setId(++n), layer_id: PROJECT_LAYER, scope: { layer: 'project', project_id: AEON_PROJECT }, name, revision: 2, rules: specs.map(spec => rule(spec, 'aeon/AGENTS.md', explained)), published_version: '', ...setTldr(name) })
     const publishAll = state === 'live' ? sets : sets.slice(0, 3)
     for (const set of publishAll) {
       set.published_version = '260926090000.0.0'
@@ -211,7 +285,7 @@ export async function mockRulesScale(page: Page, options: ScaleOptions = {}): Pr
       sets.push(created)
       return fulfil(route, created)
     }
-    const one = /^\/api\/rules\/sets\/([^/]+)(?:\/(draft|publish|restore|versions)(?:\/([^/]+))?)?$/.exec(path)
+    const one = /^\/api\/rules\/sets\/([^/]+)(?:\/(draft|publish|restore|versions|tldr)(?:\/([^/]+))?)?$/.exec(path)
     const set = one ? sets.find(item => item.id === one[1]) : undefined
     if (one && !set) return fulfil(route, { error: 'rule resource unavailable', code: 'not_found' }, 404)
     if (one && set) {
@@ -222,6 +296,18 @@ export async function mockRulesScale(page: Page, options: ScaleOptions = {}): Pr
         set.revision += 1
         set.name = body.name
         set.rules = body.rules
+        return fulfil(route, set)
+      }
+      if (action === 'tldr' && method === 'PUT') {
+        if (body.expected_revision !== set.revision) return fulfil(route, { error: 'draft changed', code: 'revision_conflict' }, 409)
+        for (const [identity, value] of Object.entries((body.rules ?? {}) as Record<string, Tldr | null>)) {
+          const target = set.rules.find(item => item.identity === identity)
+          if (!target) return fulfil(route, { error: `no rule ${identity}`, code: 'unknown_rule' }, 400)
+          if (value) target.tldr = { ...value, basis: 'fedcba9876543210' }
+          else delete target.tldr
+        }
+        if ('set' in body) set.tldr = body.set ? { ...body.set, basis: 'fedcba9876543210' } : null
+        set.revision += 1
         return fulfil(route, set)
       }
       if (action === 'versions' && method === 'GET' && version) {
@@ -263,6 +349,36 @@ export async function mockRulesScale(page: Page, options: ScaleOptions = {}): Pr
         return snap
       })
       return fulfil(route, { batch_id: '8a0f0c3e-5d1b-8e2a-9c4f-0b1d2e3f4a5b', versions: out, max_bytes: 6120 })
+    }
+    if (path === '/api/rules/budget') {
+      if (method === 'PUT') budget = { max_bytes: body.max_bytes, layer_max_bytes: body.layer_max_bytes ?? {} }
+      return fulfil(route, { ...budget, default_bytes: 12000, min_bytes: 2000, ceiling_bytes: 64000, min_layer_bytes: 500 })
+    }
+    if (path === '/api/rules/explained' && method === 'GET') {
+      const live = sets.filter(item => item.published_version && (item.scope.layer === 'company' || item.scope.project_id === url.searchParams.get('project_id')))
+      const chosen = new Map<string, { rule: ScaleRule; set: MockSet; snap: MockSnapshot }>()
+      for (const item of live) {
+        const snap = versions.get(item.id)?.[0]
+        for (const entry of snap?.rules ?? []) if (!chosen.has(entry.identity) && (!entry.roles.length || entry.roles.includes(url.searchParams.get('role') ?? ''))) chosen.set(entry.identity, { rule: entry, set: item, snap: snap! })
+      }
+      const served = [...chosen.keys()].sort().map(key => chosen.get(key)!).filter(item => item.rule.enabled)
+      const lines = served.map(item => `- [${item.rule.identity}] ${item.rule.text}`)
+      const text = `# Aeon session rules\n\n${lines.map(line => `${line}\n`).join('')}`
+      const usage: Record<string, number> = {}
+      const setBytes = new Map<string, number>()
+      for (const [i, item] of served.entries()) {
+        const n = Buffer.byteLength(`${lines[i]}\n`)
+        usage[item.set.scope.layer!] = (usage[item.set.scope.layer!] ?? 0) + n
+        setBytes.set(item.set.id, (setBytes.get(item.set.id) ?? 0) + n)
+      }
+      const byteSize = Buffer.byteLength(text)
+      return fulfil(route, {
+        context: { tenant_id: SCALE_TENANT, project_id: url.searchParams.get('project_id'), person_id: url.searchParams.get('person_id'), role: url.searchParams.get('role'), harness: url.searchParams.get('harness') },
+        version: live.length ? '260926090000.0.0' : 'floor-only', sha256: 'cd'.repeat(32), body: text, byte_size: byteSize, budget, usage,
+        sets: live.filter(item => setBytes.has(item.id)).map(item => ({ set_id: item.id, name: item.name, scope: item.scope, version: item.published_version, bytes: setBytes.get(item.id), ...(versions.get(item.id)?.[0]?.tldr ? { tldr: versions.get(item.id)![0]!.tldr } : {}) })),
+        rules: served.map((item, i) => ({ identity: item.rule.identity, text: item.rule.text, line: lines[i], set_id: item.set.id, layer: item.set.scope.layer, strength: item.rule.strength, bytes: Buffer.byteLength(`${lines[i]}\n`), ...(item.rule.tldr ? { tldr: item.rule.tldr } : {}) })),
+        ...(live.length ? {} : { problem: { code: 'floor_missing', error: 'publish an applicable locked company safety floor before using session rules' } }),
+      })
     }
     if (path === '/api/rules/merged' && method === 'GET') {
       const live = sets.filter(item => item.published_version && (item.scope.layer === 'company' || item.scope.project_id === url.searchParams.get('project_id')))

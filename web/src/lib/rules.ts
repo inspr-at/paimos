@@ -5,7 +5,9 @@
 import { api, RequestFailure, StaleRequestError } from './api.ts'
 import { sessionGone } from './authz.ts'
 
+/** The ADR-004 default budget; a workspace may configure its own (GET /rules/budget). */
 export const RULES_BUDGET = 12000
+export const TLDR_MAX = 300
 export const PUBLISH_NOTE_MAX = 500
 export const MAX_RULES = 100
 export const LAYERS = ['company', 'project', 'person', 'agent'] as const
@@ -39,6 +41,15 @@ export interface RuleSource {
   identity?: string
   edited_here: boolean
 }
+/** A short technical explanation for people (AEON-314). Never sent to agents. */
+export interface RuleTLDR {
+  en: string
+  de?: string
+  /** Fingerprint of the text it was written for; the server stamps it when omitted. */
+  basis?: string
+  /** Derived by the server: the text changed after the explanation was written. */
+  check?: boolean
+}
 export interface AgentRule {
   identity: string
   text: string
@@ -50,6 +61,7 @@ export interface AgentRule {
   roles?: RoleName[]
   harnesses?: HarnessName[]
   source: RuleSource
+  tldr?: RuleTLDR | null
 }
 export interface RuleLayer { id: string; scope: RuleScope }
 export interface RuleSet {
@@ -60,6 +72,7 @@ export interface RuleSet {
   revision: number
   rules: AgentRule[]
   published_version: string
+  tldr?: RuleTLDR | null
 }
 export interface RuleSnapshot {
   set_id: string
@@ -71,6 +84,7 @@ export interface RuleSnapshot {
   rules: AgentRule[]
   published_at: string
   note?: string
+  tldr?: RuleTLDR | null
 }
 export interface MergedRules {
   context: { tenant_id: string; project_id: string; person_id: string; agent_id?: string; role: string; harness: string; task_id?: string }
@@ -102,12 +116,14 @@ export class RulesError extends Error {
   readonly code: string
   readonly actualBytes?: number
   readonly maxBytes?: number
-  constructor(status: number, code: string, message: string, actualBytes?: number, maxBytes?: number) {
+  readonly layer?: LayerName
+  constructor(status: number, code: string, message: string, actualBytes?: number, maxBytes?: number, layer?: LayerName) {
     super(message)
     this.status = status
     this.code = code
     this.actualBytes = actualBytes
     this.maxBytes = maxBytes
+    this.layer = layer
   }
 }
 
@@ -140,6 +156,25 @@ function oneLine(value: string, max: number, required: boolean): string | null {
   return null
 }
 
+/** An explanation as it is stored: trimmed, without the derived check mark. */
+export function tldrPayload(tldr: RuleTLDR | null | undefined): RuleTLDR | null {
+  if (!tldr || !tldr.en?.trim()) return null
+  const out: RuleTLDR = { en: tldr.en.trim() }
+  if (tldr.de?.trim()) out.de = tldr.de.trim()
+  if (tldr.basis) out.basis = tldr.basis
+  return out
+}
+const tldrKey = (tldr: RuleTLDR | null | undefined) => JSON.stringify(tldrPayload(tldr))
+export const tldrEqual = (a: RuleTLDR | null | undefined, b: RuleTLDR | null | undefined) => tldrKey(a) === tldrKey(b)
+
+/** Checks one explanation line; null when it is fine. */
+export function validateTLDR(value: string, required: boolean): string | null {
+  if (required && !value.trim()) return 'Write a short explanation first.'
+  if (utf8Length(value.trim()) > TLDR_MAX) return `Keep it to one line of at most ${TLDR_MAX} bytes.`
+  if (/[\r\n\u2028\u2029]/.test(value)) return 'Keep it to one line.'
+  return null
+}
+
 export function normalizeRule(raw: AgentRule): AgentRule {
   return {
     identity: raw.identity,
@@ -157,6 +192,7 @@ export function normalizeRule(raw: AgentRule): AgentRule {
       identity: raw.source?.identity ?? '',
       edited_here: !!raw.source?.edited_here,
     },
+    tldr: raw.tldr?.en ? { ...raw.tldr } : null,
   }
 }
 
@@ -176,6 +212,8 @@ export function rulePayload(rule: AgentRule): AgentRule {
   }
   if (rule.details) payload.details = rule.details
   if (rule.strength !== 'locked' && rule.expires_at) payload.expires_at = rule.expires_at
+  const tldr = tldrPayload(rule.tldr)
+  if (tldr) payload.tldr = tldr
   return payload
 }
 
@@ -437,6 +475,10 @@ export function validateRule(rule: AgentRule, seen: ReadonlySet<string>): string
   if (oneLine(rule.source.reference, 512, true)) return 'Add a source, such as a ticket or an incident.'
   if (rule.source.revision && oneLine(rule.source.revision, 128, false)) return 'The source revision is one line, up to 128 bytes.'
   if (rule.source.identity && oneLine(rule.source.identity, 96, false)) return 'The upstream identity is one line, up to 96 bytes.'
+  if (rule.tldr && (rule.tldr.en?.trim() || rule.tldr.de?.trim())) {
+    const issue = validateTLDR(rule.tldr.en ?? '', true) ?? validateTLDR(rule.tldr.de ?? '', false)
+    if (issue) return `Explanation: ${issue}`
+  }
   for (const role of rule.roles ?? []) if (!ROLES.includes(role)) return 'Unknown role.'
   for (const harness of rule.harnesses ?? []) if (!HARNESSES.includes(harness)) return 'Unknown harness.'
   return null
@@ -547,7 +589,9 @@ export function rulesMessage(error: unknown): string {
   if (error.code === 'rules_budget_exceeded') {
     // Without a size the file belongs to someone else; the server's words say so.
     if (error.actualBytes === undefined) return error.message || 'A session file for another person or agent would exceed the limit.'
-    return `The merged file is ${error.actualBytes} bytes. The limit is ${error.maxBytes ?? RULES_BUDGET}.`
+    const fmt = (n: number) => n.toLocaleString('en-US')
+    if (error.layer) return `${LAYER_LABEL[error.layer]} rules would take ${fmt(error.actualBytes)} bytes of the session file. Their cap is ${fmt(error.maxBytes ?? 0)}.`
+    return `The merged file is ${fmt(error.actualBytes)} bytes. The limit is ${fmt(error.maxBytes ?? RULES_BUDGET)}.`
   }
   // The server words it per operation; only a batch publication may be repeated safely.
   if (error.code === 'outcome_unknown') return error.message || 'The result is unknown. Reload to see the current state before trying again.'
@@ -555,13 +599,13 @@ export function rulesMessage(error: unknown): string {
   if (error.code === 'ambiguous_identity') return 'Two rules of the same rank share an identity, so the merge stops.'
   if (error.code === 'forbidden') return 'You do not have permission for that.'
   if (error.code === 'not_found') return 'That rules record is no longer there.'
-  if (error.code === 'invalid_rule' || error.code === 'invalid_scope' || error.code === 'invalid_version') return error.message || 'The rules request was not accepted.'
+  if (error.code === 'invalid_rule' || error.code === 'invalid_scope' || error.code === 'invalid_version' || error.code === 'invalid_tldr' || error.code === 'invalid_budget' || error.code === 'unknown_rule') return error.message || 'The rules request was not accepted.'
   return error.message || 'The rules request failed.'
 }
 
 async function parseError(response: Response): Promise<RulesError> {
-  const body = await response.json().catch(() => ({})) as { error?: string; code?: string; actual_bytes?: number; max_bytes?: number }
-  return new RulesError(response.status, body.code || '', body.error || `Request failed (${response.status})`, body.actual_bytes, body.max_bytes)
+  const body = await response.json().catch(() => ({})) as { error?: string; code?: string; actual_bytes?: number; max_bytes?: number; layer?: LayerName }
+  return new RulesError(response.status, body.code || '', body.error || `Request failed (${response.status})`, body.actual_bytes, body.max_bytes, body.layer)
 }
 
 async function send<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
@@ -584,6 +628,10 @@ export const listSets = async (layerId: string) => {
 }
 export const createSet = (layerId: string, name: string) => send<RuleSet>('/rules/sets', 'POST', { layer_id: layerId, name }).then(set => ({ ...set, rules: (set.rules ?? []).map(clean) }))
 export const getSet = (setId: string) => send<RuleSet>(`/rules/sets/${encodeURIComponent(setId)}`).then(set => ({ ...set, rules: (set.rules ?? []).map(clean) }))
+const cleanSet = (set: RuleSet): RuleSet => ({ ...set, rules: (set.rules ?? []).map(clean) })
+/** Writes explanations only (AEON-314). set: undefined keeps, null removes; rules: identity → text or null. */
+export const saveTldrs = (setId: string, body: { expected_revision: number; set?: { en: string; de?: string } | null; rules?: Record<string, { en: string; de?: string } | null> }) =>
+  send<RuleSet>(`/rules/sets/${encodeURIComponent(setId)}/tldr`, 'PUT', body).then(cleanSet)
 export const saveDraft = (setId: string, body: { expected_revision: number; name: string; rules: AgentRule[] }) => send<RuleSet>(`/rules/sets/${encodeURIComponent(setId)}/draft`, 'PUT', {
   expected_revision: body.expected_revision, name: body.name, rules: body.rules.map(rulePayload),
 }).then(set => ({ ...set, rules: (set.rules ?? []).map(clean) }))
@@ -596,6 +644,59 @@ export const getVersion = (setId: string, version: string) => send<RuleSnapshot>
 export const restoreSet = (setId: string, body: { expected_revision: number; version: string; new_version: string; note?: string }) => send<RuleSnapshot>(`/rules/sets/${encodeURIComponent(setId)}/restore`, 'POST', withNote(body)).then(cleanSnapshot)
 export const mergeRules = (query: string) => send<MergedRules>(`/rules/merged?${query}`)
 
+// ---------- Budget and the explained file (AEON-314) ----------
+export type LayerBytes = Partial<Record<LayerName, number>>
+export interface RuleBudget { max_bytes: number; layer_max_bytes: LayerBytes }
+export interface RuleBudgetView extends RuleBudget { default_bytes: number; min_bytes: number; ceiling_bytes: number; min_layer_bytes: number }
+export const DEFAULT_BUDGET: RuleBudgetView = { max_bytes: RULES_BUDGET, layer_max_bytes: {}, default_bytes: RULES_BUDGET, min_bytes: 2000, ceiling_bytes: 64000, min_layer_bytes: 500 }
+export const getBudget = () => send<RuleBudgetView>('/rules/budget').then(view => ({ ...view, layer_max_bytes: view.layer_max_bytes ?? {} }))
+export const putBudget = (budget: RuleBudget) => send<RuleBudgetView>('/rules/budget', 'PUT', budget).then(view => ({ ...view, layer_max_bytes: view.layer_max_bytes ?? {} }))
+
+export interface ExplainedSet { set_id: string; name: string; scope: RuleScope; version: string; tldr?: RuleTLDR | null; bytes: number }
+export interface ExplainedRule { identity: string; text: string; line: string; set_id: string; layer: LayerName; strength: 'normal' | 'locked'; tldr?: RuleTLDR | null; bytes: number }
+export interface ExplainedRules {
+  context: MergedRules['context']
+  version: string
+  sha256: string
+  body: string
+  byte_size: number
+  budget: RuleBudget
+  usage: LayerBytes
+  sets: ExplainedSet[]
+  rules: ExplainedRule[]
+  problem?: { code: string; error: string; actual_bytes?: number; max_bytes?: number; layer?: LayerName } | null
+}
+export const explainRules = (query: string) => send<ExplainedRules>(`/rules/explained?${query}`).then(out => ({ ...out, budget: { ...out.budget, layer_max_bytes: out.budget.layer_max_bytes ?? {} }, usage: out.usage ?? {} }))
+
+/** A byte count people read: "840 B", "7.1 kB", "12 kB". */
+export function byteSize(n: number): string {
+  if (n < 1000) return `${n} B`
+  return `${(n / 1000).toLocaleString('en-US', { maximumFractionDigits: 1, minimumFractionDigits: n % 1000 >= 50 ? 1 : 0 })} kB`
+}
+/** "7.1 of 8 kB" when both read in kB, otherwise "840 B of 8 kB". */
+function ofLimit(used: number, limit: number): string {
+  const a = byteSize(used)
+  const b = byteSize(limit)
+  return a.endsWith(' kB') && b.endsWith(' kB') ? `${a.slice(0, -3)} of ${b}` : `${a} of ${b}`
+}
+/** Per-layer use against the budget, e.g. "Company 7.1 of 8 kB · Project 2.3 kB · total 9.4 of 12 kB". */
+export function budgetParts(usage: LayerBytes, total: number, budget: RuleBudget): { label: string; over: boolean }[] {
+  const parts: { label: string; over: boolean }[] = []
+  for (const layer of LAYERS) {
+    const used = usage[layer] ?? 0
+    const cap = budget.layer_max_bytes[layer] ?? 0
+    if (!used && !cap) continue
+    parts.push({ label: cap ? `${LAYER_LABEL[layer]} ${ofLimit(used, cap)}` : `${LAYER_LABEL[layer]} ${byteSize(used)}`, over: !!cap && used > cap })
+  }
+  parts.push({ label: `total ${ofLimit(total, budget.max_bytes)}`, over: total > budget.max_bytes })
+  return parts
+}
+export const budgetLine = (usage: LayerBytes, total: number, budget: RuleBudget) => budgetParts(usage, total, budget).map(part => part.label).join(' · ')
+/** True when the file or one layer is over its limit. */
+export function overBudget(usage: LayerBytes, total: number, budget: RuleBudget): boolean {
+  return total > budget.max_bytes || LAYERS.some(layer => (budget.layer_max_bytes[layer] ?? 0) > 0 && (usage[layer] ?? 0) > (budget.layer_max_bytes[layer] ?? 0))
+}
+
 /** One entry of a batch publication; version is 'auto' or an explicit calendar version. */
 export interface BatchItem { set_id: string; expected_revision: number; version: string }
 export interface BatchResult { batch_id: string; versions: RuleSnapshot[]; max_bytes: number }
@@ -607,10 +708,10 @@ export const publishSets = (items: BatchItem[], note?: string) => send<BatchResu
 export type SetState = 'new' | 'changed' | 'live'
 const byIdentity = (rules: AgentRule[]) => [...rules].sort((a, b) => (a.identity < b.identity ? -1 : a.identity > b.identity ? 1 : 0))
 /** new: never published; changed: the saved draft differs from the live version; live: they match. */
-export function setState(set: Pick<RuleSet, 'name' | 'rules' | 'published_version'>, live: Pick<RuleSnapshot, 'name' | 'rules'> | null | undefined): SetState {
+export function setState(set: Pick<RuleSet, 'name' | 'rules' | 'published_version' | 'tldr'>, live: Pick<RuleSnapshot, 'name' | 'rules' | 'tldr'> | null | undefined): SetState {
   if (!set.published_version) return 'new'
   if (!live) return 'live'
-  return live.name === set.name && rulesEqual(byIdentity(live.rules), byIdentity(set.rules)) ? 'live' : 'changed'
+  return live.name === set.name && tldrEqual(live.tldr, set.tldr) && rulesEqual(byIdentity(live.rules), byIdentity(set.rules)) ? 'live' : 'changed'
 }
 
 // ---------- Projected merge: the file size a publication would produce ----------
@@ -622,29 +723,56 @@ export interface MergeContext { projectId: string; personId: string; role: RoleN
 // The server's merged file starts with a fixed 22-byte heading line and a blank
 // line (merge.go); every rendered rule is "- [identity] text" plus a newline.
 export const MERGE_HEADING_BYTES = 22
-export function projectedRules(sets: MergeInput[], ctx: MergeContext, now = new Date()): AgentRule[] {
+interface Projected { rule: AgentRule; layer: LayerName }
+function projectedWithLayer(sets: MergeInput[], ctx: MergeContext, now: Date): Projected[] {
   const context: RuleContext = { projectId: ctx.projectId, personId: ctx.personId, agentId: ctx.agentId ?? '', role: ctx.role, harness: ctx.harness, taskId: ctx.taskId ?? '' }
   const ordered = sets.filter(set => scopeMatches(set.scope, context))
     .sort((a, b) => scopeRank(a.scope) - scopeRank(b.scope) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
-  const chosen = new Map<string, AgentRule>()
+  const chosen = new Map<string, Projected>()
   for (const set of ordered) {
     for (const rule of set.rules) {
       if ((rule.roles?.length && !rule.roles.includes(ctx.role)) || (rule.harnesses?.length && !rule.harnesses.includes(ctx.harness))) continue
       if (rule.expires_at && new Date(rule.expires_at).getTime() <= now.getTime()) continue
-      if (!chosen.has(rule.identity)) chosen.set(rule.identity, rule)
+      if (!chosen.has(rule.identity)) chosen.set(rule.identity, { rule, layer: set.scope.layer })
     }
   }
-  return [...chosen.keys()].sort().map(key => chosen.get(key)!).filter(rule => rule.enabled || rule.strength === 'locked')
+  return [...chosen.keys()].sort().map(key => chosen.get(key)!).filter(item => item.rule.enabled || item.rule.strength === 'locked')
 }
+export function projectedRules(sets: MergeInput[], ctx: MergeContext, now = new Date()): AgentRule[] {
+  return projectedWithLayer(sets, ctx, now).map(item => item.rule)
+}
+const lineBytes = (rule: AgentRule) => utf8Length(`- [${rule.identity}] ${rule.text}\n`)
 export function projectedBytes(sets: MergeInput[], ctx: MergeContext, now = new Date()): number {
-  return projectedRules(sets, ctx, now).reduce((sum, rule) => sum + utf8Length(`- [${rule.identity}] ${rule.text}\n`), MERGE_HEADING_BYTES)
+  return projectedUsage(sets, ctx, now).bytes
 }
-/** The largest merged file over every role and harness for one project and person. */
-export function largestProjected(sets: MergeInput[], projectId: string, personId: string, now = new Date()): { bytes: number; role: RoleName; harness: HarnessName } {
-  let best = { bytes: 0, role: ROLES[0] as RoleName, harness: HARNESSES[0] as HarnessName }
+/** The file's size and each layer's share of it, as the server counts them. */
+export function projectedUsage(sets: MergeInput[], ctx: MergeContext, now = new Date()): { bytes: number; usage: LayerBytes } {
+  const usage: LayerBytes = {}
+  let bytes = MERGE_HEADING_BYTES
+  for (const { rule, layer } of projectedWithLayer(sets, ctx, now)) {
+    const n = lineBytes(rule)
+    bytes += n
+    usage[layer] = (usage[layer] ?? 0) + n
+  }
+  return { bytes, usage }
+}
+/** How far a file is over its limits (0 when it fits): the larger of the total's and any layer's excess. */
+export function budgetExcess(bytes: number, usage: LayerBytes, budget: RuleBudget): number {
+  let excess = Math.max(0, bytes - budget.max_bytes)
+  for (const layer of LAYERS) {
+    const cap = budget.layer_max_bytes[layer] ?? 0
+    if (cap > 0) excess = Math.max(excess, (usage[layer] ?? 0) - cap)
+  }
+  return excess
+}
+/** The file to show over every role and harness for one project and person: the one furthest over a limit, otherwise the largest. */
+export function largestProjected(sets: MergeInput[], projectId: string, personId: string, now = new Date(), budget: RuleBudget = DEFAULT_BUDGET): { bytes: number; usage: LayerBytes; role: RoleName; harness: HarnessName } {
+  let best = { bytes: 0, usage: {} as LayerBytes, role: ROLES[0] as RoleName, harness: HARNESSES[0] as HarnessName }
+  let bestExcess = 0
   for (const role of ROLES) for (const harness of HARNESSES) {
-    const bytes = projectedBytes(sets, { projectId, personId, role, harness }, now)
-    if (bytes > best.bytes) best = { bytes, role, harness }
+    const { bytes, usage } = projectedUsage(sets, { projectId, personId, role, harness }, now)
+    const excess = budgetExcess(bytes, usage, budget)
+    if (excess > bestExcess || (excess === bestExcess && bytes > best.bytes)) { best = { bytes, usage, role, harness }; bestExcess = excess }
   }
   return best
 }
@@ -924,7 +1052,11 @@ export function annotateImport(plan: DraftImportPlan, existing: { scope: RuleSco
         scope: layer.scope,
         sets: layer.sets.map(set => {
           const match = present.find(item => item.name === set.name)
-          const { name, rules } = set
+          // An import never erases people's explanations: a rule without one
+          // keeps the explanation its stored twin has (AEON-314).
+          const kept = new Map((match?.rules ?? []).map(rule => [rule.identity, rule.tldr]))
+          const name = set.name
+          const rules = set.rules.map(rule => rule.tldr?.en || !kept.get(rule.identity) ? rule : { ...rule, tldr: kept.get(rule.identity) })
           if (!match) return { name, rules, action: 'create' as const, counts: { added: rules.length, changed: 0, unchanged: 0, removed: 0 } }
           const counts = countChanges(match.rules, rules)
           const same = counts.added === 0 && counts.changed === 0 && counts.removed === 0
