@@ -48,7 +48,7 @@ test('Business shows only while one of its parts is open', async ({ page }) => {
   await expect(places(page).getByRole('link')).toHaveText(['Projects', 'Agents'])
 })
 
-test('g then b crosses the release menu g opened; another menu, a stale arm or a field does not', async ({ page }) => {
+test('g then b crosses the release menu g opened; another menu blocks a new arm, and an expired arm or a field stays on the ticket', async ({ page }) => {
   await setup(page)
   await page.goto('/p/PHAROS/PHAROS-11')
   const ticket = page.locator('.ticket-ws')
@@ -73,9 +73,8 @@ test('g then b crosses the release menu g opened; another menu, a stale arm or a
   await page.keyboard.press('p')
   await expect(page).toHaveURL('/p/PHAROS/PHAROS-11')
   await expect(status).toBeVisible()
-  // setFixedTime freezes the business clock; only another setFixedTime moves
-  // it. Past the 1.5s window, g inside Status must not re-arm, so p stays put.
-  await page.clock.setFixedTime(NOW.getTime() + 1_600)
+  // Status is another menu, so g inside it never arms and p stays on the ticket.
+  // The expired arm is separate: g opens Release, the clock jumps 1.6s, and b stays.
   await page.keyboard.press('g')
   await page.keyboard.press('p')
   await expect(page).toHaveURL('/p/PHAROS/PHAROS-11')
@@ -83,6 +82,16 @@ test('g then b crosses the release menu g opened; another menu, a stale arm or a
 
   await page.keyboard.press('Escape')
   await expect(status).toHaveCount(0)
+  await page.locator('main').focus()
+  await page.keyboard.press('g')
+  await expect(release).toBeVisible()
+  await page.clock.setFixedTime(NOW.getTime() + 1_600)
+  await page.keyboard.press('b')
+  // The URL is already the ticket, so a router.push would pass an immediate check.
+  await page.waitForTimeout(1_000)
+  await expect(page).toHaveURL('/p/PHAROS/PHAROS-11')
+  await page.keyboard.press('Escape')
+  await expect(release).toHaveCount(0)
   await page.locator('main').focus()
   await page.keyboard.press('g')
   await expect(release).toBeVisible()
