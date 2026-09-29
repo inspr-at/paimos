@@ -85,6 +85,7 @@ type HarnessSession struct {
 }
 
 type HarnessControl struct {
+	Value             string                 `json:"value,omitempty"`
 	Text              string                 `json:"text,omitempty"`
 	ExpiresAt         *time.Time             `json:"expires_at,omitempty"`
 	ExpectedOwnership *ownedprocess.Identity `json:"expected_ownership,omitempty"`
@@ -267,6 +268,7 @@ type EnrolledAccount struct {
 }
 
 type ControlRequest struct {
+	Value             string                 `json:"value,omitempty"`
 	ExpiresAt         *time.Time             `json:"expires_at,omitempty"`
 	ExpectedOwnership *ownedprocess.Identity `json:"expected_ownership,omitempty"`
 	TenantID          string                 `json:"tenant_id"`

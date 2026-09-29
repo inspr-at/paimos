@@ -23,3 +23,10 @@ func TestManagedControlRouteRequiresControlScope(t *testing.T) {
 		}
 	}
 }
+
+func TestManagedSettingsRouteRequiresControlScope(t *testing.T) {
+	path := "/api/projects/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/harness-sessions/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb/managed-settings"
+	if got, ok := coreAgentScope(httptest.NewRequest("GET", path, nil)); !ok || got != "harness.control" {
+		t.Fatalf("%q %v", got, ok)
+	}
+}

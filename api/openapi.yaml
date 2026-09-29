@@ -2488,14 +2488,42 @@ paths:
               required: [request_id, kind, expected_ownership]
               properties:
                 request_id: {type: string, format: uuid}
-                kind: {type: string, enum: [steer, interrupt, stop]}
+                kind: {type: string, enum: [steer, interrupt, stop, rename, model, effort]}
                 text: {type: string, maxLength: 8192, description: Required only for steer; UTF-8 byte limit 8192.}
+                value: {type: string, minLength: 1, maxLength: 128, description: Required only for rename/model/effort. Name is public session metadata; model and effort must match the enrolled account catalog.}
                 expected_ownership: {$ref: '#/components/schemas/HarnessProcessOwnership'}
       responses:
         '201': {description: Pending or identical replay; reason authorization_expired means expired., content: {application/json: {schema: {$ref: '#/components/schemas/HarnessManagedControl'}}}}
+        '400': {description: Invalid typed value or model/effort outside the enrolled account catalog}
         '403': {description: Person with project harness.control required}
         '409': {description: Unmanaged, unsupported, stale ownership, changed retry or session unavailable}
         '429': {description: Session control quota reached}
+  /projects/{projectId}/harness-sessions/{sessionId}/managed-settings:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: getManagedHarnessSettings
+      description: Person with harness.control reads only model and effort choices from this run's enrolled account catalog. Missing enrollment returns no choices.
+      responses:
+        '200':
+          description: Account-scoped model choices, filtered to supported Claude efforts
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [models]
+                properties:
+                  models:
+                    type: array
+                    items:
+                      type: object
+                      required: [model, efforts]
+                      properties:
+                        model: {type: string}
+                        efforts: {type: array, items: {type: string, enum: [low, medium, high, xhigh, max]}}
+        '403': {description: Person with project harness.control required}
+        '409': {description: Managed Claude session required}
   /projects/{projectId}/harness-sessions/{sessionId}/managed-context:
     parameters:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -7278,7 +7306,7 @@ components:
         management_mode: {type: string, enum: [managed, unmanaged]}
         role: {type: string, enum: [coordinator, worker]}
         work_shape: {type: string, enum: [unknown, ship, scout]}
-        advertised_capabilities: {type: array, items: {type: string, enum: [inbox, status, steer, interrupt, stop, managed_control_v1]}}
+        advertised_capabilities: {type: array, items: {type: string, enum: [inbox, status, steer, interrupt, stop, managed_control_v1, rename, model, effort]}}
         harness_session_ref: {type: string, minLength: 16, maxLength: 4096, writeOnly: true}
         worker_lease: {type: string, minLength: 32, maxLength: 256, writeOnly: true}
     HarnessProcessOwnership:
@@ -7298,7 +7326,8 @@ components:
       properties:
         id: {type: string, format: uuid}
         session_id: {type: string, format: uuid}
-        kind: {type: string, enum: [steer, interrupt, stop]}
+        kind: {type: string, enum: [steer, interrupt, stop, rename, model, effort]}
+        value: {type: string, description: Public setting value; absent for steering and process controls}
         state: {type: string, enum: [pending, claimed, completed]}
         sequence: {type: integer, format: int64}
         outcome: {type: [string, 'null'], enum: [applied, rejected, null]}

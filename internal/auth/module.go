@@ -456,6 +456,9 @@ func coreAgentScope(r *http.Request) (string, bool) {
 }
 
 func harnessScope(parts []string, read bool) string {
+	if len(parts) > 0 && parts[len(parts)-1] == "managed-settings" {
+		return "harness.control"
+	}
 	if read {
 		return "harness.read"
 	}

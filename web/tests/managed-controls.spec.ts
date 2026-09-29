@@ -10,7 +10,7 @@ const ownership = { daemon_id: 'fixture', generation: 'a'.repeat(32), process_id
 async function setup(page: Page, options: { stale?: boolean; denied?: boolean; lostResponse?: boolean; pending?: boolean; reject?: string } = {}) {
   await mockWork(page, fixtures(), { admin: true })
   const data = agentData({ me: me.id, projects: { pharos: 'p-pharos', aeon: 'p-aeon', pai: 'p-frozen' }, tickets: { fleet: 'n-1', restore: 'n-2', web: 'n-a1', release: 'n-5', approvals: 'n-6' } })
-  Object.assign(data.sessions[0]!, { advertised_capabilities: ['status', 'steer', 'interrupt', 'stop', 'managed_control_v1'], process_ownership: ownership, process_observed_at: new Date(Date.now() - (options.stale ? 60000 : 1000)).toISOString() })
+  Object.assign(data.sessions[0]!, { advertised_capabilities: ['status', 'steer', 'interrupt', 'stop', 'managed_control_v1', 'rename', 'model', 'effort'], display_label: 'Focused session', model: 'fixture-model', reasoning_effort: 'high', process_ownership: ownership, process_observed_at: new Date(Date.now() - (options.stale ? 60000 : 1000)).toISOString() })
   await mockAgents(page, data)
   if (options.denied) await page.route('**/api/me/permissions*', route => {
     const effective = mockEffectivePermissions('admin', new URL(route.request().url()).searchParams.get('project_id') || undefined)
@@ -18,6 +18,7 @@ async function setup(page: Page, options: { stale?: boolean; denied?: boolean; l
     if (effective.project) effective.project.permissions = effective.project.permissions.filter(p => p !== 'harness.control')
     return route.fulfill({ json: effective })
   })
+  await page.route('**/api/projects/*/harness-sessions/*/managed-settings', route => route.fulfill({ json: { models: [{ model: 'fixture-model', efforts: ['low', 'high'] }, { model: 'other-model', efforts: ['high'] }] } }))
   const requests: Record<string, unknown>[] = []
   let control: Record<string, unknown> | undefined
   await page.route('**/api/projects/*/harness-sessions/*/managed-controls', async route => {
@@ -29,7 +30,7 @@ async function setup(page: Page, options: { stale?: boolean; denied?: boolean; l
   })
   await page.route('**/api/projects/*/harness-sessions/*/controls/*', route => {
     if (!control) return route.fallback()
-    return route.fulfill({ json: { ...control, ...(options.pending ? {} : { state: 'completed', outcome: options.reject ? 'rejected' : 'applied', reason: options.reject || (control.kind === 'steer' ? 'queued_next_turn' : control.kind === 'stop' ? 'native_close_exited' : 'native_interrupt_acknowledged') }) } })
+    return route.fulfill({ json: { ...control, ...(options.pending ? {} : { state: 'completed', outcome: options.reject ? 'rejected' : 'applied', reason: options.reject || (control.kind === 'steer' ? 'queued_next_turn' : control.kind === 'stop' ? 'native_close_exited' : control.kind === 'effort' ? 'setting_applied_next_turn' : control.kind === 'model' || control.kind === 'rename' ? 'setting_applied' : 'native_interrupt_acknowledged') }) } })
   })
   await page.goto(`/agents/${id}`)
   await expect(page.getByRole('region', { name: 'Session controls' })).toBeVisible()
@@ -131,5 +132,50 @@ for (const width of [1600, 390]) for (const theme of ['light', 'dark']) test(`ma
   if (process.env.MANAGED_CONTROL_SHOTS) {
     await mkdir(process.env.MANAGED_CONTROL_SHOTS, { recursive: true })
     await page.screenshot({ path: `${process.env.MANAGED_CONTROL_SHOTS}/${width}-${theme}.png`, fullPage: true })
+  }
+})
+
+for (const [field, kind, value] of [['name', 'rename', 'Review tenant isolation'], ['model', 'model', 'other-model'], ['effort', 'effort', 'low']]) test(`session ${field} uses typed acknowledged controls`, async ({ page }) => {
+  const { requests } = await setup(page)
+  await controls(page).getByRole('button', { name: `Edit ${field}` }).click()
+  const input = controls(page).getByLabel(`${field![0]!.toUpperCase()}${field!.slice(1)}`, { exact: true })
+  if (field === 'name') await input.fill(value!)
+  else await input.selectOption(value!)
+  await controls(page).getByRole('button', { name: `Save ${field}` }).click()
+  await expect(controls(page).getByRole('status')).toContainText(`${field![0]!.toUpperCase()}${field!.slice(1)} applied`)
+  if (kind === 'effort') await expect(controls(page).getByRole('status')).toContainText('takes effect next turn')
+  expect(requests).toHaveLength(1)
+  expect(requests[0]).toMatchObject({ kind, value, expected_ownership: ownership })
+  expect(requests[0]).not.toHaveProperty('text')
+})
+
+test('setting rejected keeps reported values and surfaces the receipt', async ({ page }) => {
+  await setup(page, { reject: 'setting_rejected' })
+  await controls(page).getByRole('button', { name: 'Edit model' }).click()
+  await controls(page).getByLabel('Model', { exact: true }).selectOption('other-model')
+  await controls(page).getByRole('button', { name: 'Save model' }).click()
+  await expect(controls(page).getByRole('status')).toHaveText('Model rejected by the harness.')
+  await expect(controls(page).getByRole('button', { name: 'Edit model' })).toContainText('fixture-model')
+})
+
+test('setting pending blocks competing settings and process controls', async ({ page }) => {
+  await setup(page, { pending: true })
+  await controls(page).getByRole('button', { name: 'Edit name' }).click()
+  await controls(page).getByLabel('Name', { exact: true }).fill('New name')
+  await controls(page).getByRole('button', { name: 'Save name' }).click()
+  await expect(controls(page).getByRole('status')).toHaveText('Name pending · waiting for the daemon.')
+  for (const name of ['Edit name', 'Edit model', 'Edit effort', 'Steer', 'Interrupt', 'Stop']) await expect(controls(page).getByRole('button', { name, exact: true })).toBeDisabled()
+})
+
+for (const width of [1600, 390]) for (const theme of ['light', 'dark']) test(`managed settings ${width} ${theme}`, async ({ page }) => {
+  await page.setViewportSize({ width, height: 1000 })
+  await setup(page)
+  await page.evaluate(theme => { document.documentElement.dataset.theme = theme }, theme)
+  await controls(page).getByRole('button', { name: 'Edit effort' }).click()
+  await expect(controls(page).getByLabel('Effort', { exact: true })).toBeEnabled()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+  if (process.env.MANAGED_CONTROL_SHOTS) {
+    await mkdir(process.env.MANAGED_CONTROL_SHOTS, { recursive: true })
+    await page.screenshot({ path: `${process.env.MANAGED_CONTROL_SHOTS}/settings-${width}-${theme}.png`, fullPage: true })
   }
 })

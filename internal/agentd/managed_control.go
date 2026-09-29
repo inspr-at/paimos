@@ -6,7 +6,10 @@ import (
 	"errors"
 	"log/slog"
 	"runtime"
+	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/inspr-at/paimos/internal/rules"
 )
@@ -166,4 +169,22 @@ func (entry *owned) budgetStopReason() string {
 	entry.budgetMu.Lock()
 	defer entry.budgetMu.Unlock()
 	return entry.budgetReason
+}
+
+// Setting values are a separate typed field; never interpreted as input text.
+var ErrSettingRejected = errors.New("harness rejected session setting")
+
+func isSetting(kind string) bool { return kind == "rename" || kind == "model" || kind == "effort" }
+func validSettingValue(kind, value string) bool {
+	if value == "" || strings.TrimSpace(value) != value || !utf8.ValidString(value) || utf8.RuneCountInString(value) > 128 || strings.ContainsFunc(value, unicode.IsControl) {
+		return false
+	}
+	if kind != "effort" {
+		return true
+	}
+	switch value {
+	case "low", "medium", "high", "xhigh", "max":
+		return true
+	}
+	return false
 }

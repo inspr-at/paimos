@@ -96,6 +96,7 @@ func (m *Module) Mount(mux *http.ServeMux) {
 		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/yield", "harness.worker", true, 200, m.yield},
 		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/drain", "harness.worker", true, 200, m.drain},
 		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/complete-delivery", "harness.worker", true, 200, m.completeDelivery},
+		{"GET /api/projects/{projectId}/harness-sessions/{sessionId}/managed-settings", "harness.control", false, 200, m.managedSettings},
 		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/managed-controls", "harness.control", false, 201, m.managedControl},
 		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/managed-context", "harness.worker", true, 200, m.managedContext},
 		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/controls/interrupt", "harness.control", false, 201, m.interrupt},
@@ -389,7 +390,7 @@ func normalizeCaps(in []string, management string) ([]string, error) {
 				continue
 			}
 			switch v {
-			case "inbox", "status", "steer", "interrupt", "stop", managedControlCapability:
+			case "inbox", "status", "steer", "interrupt", "stop", "rename", "model", "effort", managedControlCapability:
 			default:
 				return nil, workorders.Fail(400, "invalid capability")
 			}
@@ -400,7 +401,7 @@ func normalizeCaps(in []string, management string) ([]string, error) {
 			out = append(out, v)
 		}
 	}
-	if management == "unmanaged" && (seen["interrupt"] || seen["stop"] || seen[managedControlCapability]) {
+	if management == "unmanaged" && (seen["interrupt"] || seen["stop"] || seen["rename"] || seen["model"] || seen["effort"] || seen[managedControlCapability]) {
 		return nil, workorders.Fail(400, "unmanaged session cannot own controls")
 	}
 	sort.Strings(out)
