@@ -13,6 +13,7 @@ int aeon_local_auth_result(void *handle);
 void aeon_local_auth_close(void *handle);
 int aeon_installed_daemon_name_allowed(const char *name);
 int aeon_running_executable_name_allowed(void);
+int aeon_signed_daemon_team(char *team, int size);
 */
 import "C"
 
@@ -39,7 +40,21 @@ func localAuthRunningExecutableAllowed() bool {
 	return C.aeon_running_executable_name_allowed() == 1
 }
 
+// localAuthSignedByExpectedTeam reports whether this running executable is the
+// installed daemon with a valid hardened Developer ID signature by the team the
+// build expects (expectedTeamID).
+func localAuthSignedByExpectedTeam() bool {
+	var team [32]C.char
+	if C.aeon_signed_daemon_team(&team[0], C.int(len(team))) != 1 {
+		return false
+	}
+	return localAuthTeamAllowed(expectedTeamID, C.GoString(&team[0]))
+}
+
 func CurrentLocalAuthCapability() string {
+	if !localAuthSignedByExpectedTeam() {
+		return attachwatch.LocalAuthUnsigned
+	}
 	switch C.aeon_local_auth_capability() {
 	case 0:
 		return attachwatch.LocalAuthAvailable
@@ -56,6 +71,9 @@ func (systemLocalAuthenticator) Confirm(ctx context.Context, reason string) erro
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	if !localAuthSignedByExpectedTeam() {
+		return errors.New(localAuthUnsignedMessage(expectedTeamID))
+	}
 	text := C.CString(reason)
 	defer C.free(unsafe.Pointer(text))
 	var failure C.int
@@ -63,7 +81,7 @@ func (systemLocalAuthenticator) Confirm(ctx context.Context, reason string) erro
 	if handle == nil {
 		switch failure {
 		case 1:
-			return errors.New("local confirmation unavailable: installed paimos-agentd or aeon-agentd must have a valid hardened Developer ID signature without debugging or library-validation exceptions")
+			return errors.New(localAuthUnsignedMessage(expectedTeamID))
 		case 2:
 			return errors.New("local confirmation unavailable: no macOS graphical login session")
 		default:

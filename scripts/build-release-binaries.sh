@@ -12,6 +12,15 @@ if [ -n "${VERSION:-}" ] && [ "$VERSION" != "$version" ]; then
   exit 1
 fi
 ldflags="-X github.com/inspr-at/paimos/internal/version.Version=${version}"
+# Developer ID team the darwin daemon must be signed by for Mac confirmation
+# (internal/agentd.expectedTeamID). Not secret. The Release workflow signs with
+# this team; unsigned or differently signed builds still fail closed.
+team="${AEON_DEVELOPER_ID_TEAM:-P66J39QV6V}"
+if ! printf '%s' "$team" | grep -Eq '^[A-Z0-9]{10}$'; then
+  echo "AEON_DEVELOPER_ID_TEAM must be a 10-character Apple team id" >&2
+  exit 1
+fi
+team_ldflag="-X github.com/inspr-at/paimos/internal/agentd.expectedTeamID=${team}"
 mkdir -p dist
 
 require_buildinfo() {
@@ -27,6 +36,14 @@ require_buildinfo() {
   fi
   if ! printf '%s\n' "$info" | grep -F -q "GOARCH=${arch}"; then
     echo "$bin missing GOARCH=${arch}" >&2
+    exit 1
+  fi
+}
+
+# -trimpath drops -ldflags from the build info, so look for the -X value itself.
+require_team() {
+  if ! LC_ALL=C grep -a -F -q "$team" "$1"; then
+    echo "$1 missing expected Developer ID team ${team}" >&2
     exit 1
   fi
 }
@@ -48,15 +65,16 @@ darwin_agentd() {
     exit 1
   fi
   out="dist/paimos-agentd-darwin-${arch}"
-  CGO_ENABLED=1 GOOS=darwin GOARCH="$arch" go build -trimpath -ldflags "$ldflags" -o "$out" ./cmd/aeon-agentd
+  CGO_ENABLED=1 GOOS=darwin GOARCH="$arch" go build -trimpath -ldflags "$ldflags $team_ldflag" -o "$out" ./cmd/aeon-agentd
   require_buildinfo "$out" darwin "$arch" 1
+  require_team "$out"
   if ! otool -L "$out" | grep -F -q 'LocalAuthentication.framework'; then
     echo "LocalAuthentication.framework not linked" >&2
     exit 1
   fi
-  # TODO(AEON-285): Developer ID-sign this binary and enable the hardened runtime
-  # before publish. Unsigned and ad-hoc builds fail Mac confirmation closed.
-  # Signing waits for Markus; do not add secrets or codesign steps here.
+  # Signing happens in the Release workflow (agentd-darwin job, "Sign and
+  # notarize paimos-agentd", scripts/sign-notarize.sh) with secrets from the
+  # release-signing environment. Local builds stay unsigned and fail closed.
 }
 
 linux_agentd() {
@@ -92,6 +110,7 @@ verify_darwin() {
       exit 1
     fi
     require_buildinfo "$bin" darwin "$arch" 1
+    require_team "$bin"
   done
 }
 
