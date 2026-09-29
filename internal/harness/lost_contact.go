@@ -77,11 +77,12 @@ func lostContact(s Session) bool {
 }
 
 // revive reopens a lost-contact generation for its own worker. The caller has
-// verified the worker proof and holds the row lock. A newer generation that
-// registered the same session reference owns it now; the old one stays closed.
+// verified the worker proof and holds the row lock. Once any newer generation
+// registered the same session reference, whatever its state now, it replaced
+// this one for good: the old generation stays closed.
 func revive(ctx context.Context, tx pgx.Tx, p tenant.Principal, s Session, phase string) (Session, error) {
 	var taken bool
-	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM harness_sessions WHERE project_id=$1 AND ref_digest=$2 AND stopped_at IS NULL AND id<>$3)`, s.ProjectID, s.refDigest, s.ID).Scan(&taken); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM harness_sessions WHERE project_id=$1 AND ref_digest=$2 AND id<>$3 AND (created_at,id)>($4,$3::uuid))`, s.ProjectID, s.refDigest, s.ID, s.CreatedAt).Scan(&taken); err != nil {
 		return s, err
 	}
 	if taken {

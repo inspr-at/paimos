@@ -293,6 +293,7 @@ components:
         processes_signalled: {type: boolean, const: false}
         process_state: {type: string, const: unknown}
         event_id: {type: integer, format: int64, description: 'The harness.removed event; POST /events/{eventId}/undo restores the record as it was (AEON-291). Omitted when the record was already removed.'}
+        undoable: {type: boolean, description: 'Whether the caller may undo event_id (events.undo in the project). Answered by a single removal with event_id; remove-stale items omit it.'}
     HarnessRemoveStaleResult:
       type: object
       required: [items, cutoff, more]

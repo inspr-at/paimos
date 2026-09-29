@@ -3,9 +3,14 @@
 package harness_test
 
 import (
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/json"
+	"fmt"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 
@@ -195,6 +200,81 @@ func TestLostContactStaysClosedWhenRemovedOrReplaced(t *testing.T) {
 	expect(t, f.call(f.agent, "POST", replaced.path+"/heartbeat", beat, replaced.lease), 403)
 	if got := sessionState(t, f, replaced); got["stop_reason"] != "heartbeat_lost" {
 		t.Fatalf("replaced generation changed: %v", got)
+	}
+}
+
+func TestLostContactStaysClosedAfterItsReplacementStops(t *testing.T) {
+	f := fixture(t)
+	beat := map[string]any{"phase": "working", "activity": "busy", "activity_sequence": 1}
+	old := registerUnmanaged(t, f, false)
+	age(t, f, old.id, "20 minutes", false)
+	if sweep(t, f) != 1 {
+		t.Fatal("not swept")
+	}
+	base := "/api/projects/" + f.project + "/harness-sessions"
+	nextLease := "next-lease-" + uid()
+	w := f.call(f.person, "POST", base, map[string]any{"agent_principal_id": f.agent.ID, "harness": "cursor", "host": "lost-host", "harness_session_ref": old.ref, "worker_lease": nextLease, "management_mode": "unmanaged", "role": "worker"}, "")
+	expect(t, w, 201)
+	next := base + "/" + decode(t, w)["id"].(string)
+	expect(t, f.call(f.agent, "POST", next+"/stop", map[string]any{"reason": "process_exited"}, nextLease), 200)
+	expect(t, f.call(f.agent, "POST", old.path+"/heartbeat", beat, old.lease), 403)
+	if got := sessionState(t, f, old); got["stop_reason"] != "heartbeat_lost" || got["stopped_at"] == nil {
+		t.Fatalf("old generation revived after its replacement stopped: %v", got)
+	}
+}
+
+func TestListCursorKeepsLegacyFingerprintOutsideCurrentView(t *testing.T) {
+	f := fixture(t)
+	for i := 0; i < 3; i++ {
+		registerUnmanaged(t, f, false)
+	}
+	page := func(query string, status int) map[string]any {
+		t.Helper()
+		w := f.call(f.person, "GET", "/api/harness-sessions?limit=1"+query, nil, "")
+		expect(t, w, status)
+		if status != 200 {
+			return nil
+		}
+		return decode(t, w)
+	}
+	// A cursor minted before AEON-291 (no view in the fingerprint) still pages.
+	filters, _ := json.Marshal([]string{f.person.TenantID, f.person.ID, "", "", "", "", ""})
+	first := page("", 200)["items"].([]any)[0].(map[string]any)
+	at, _ := time.Parse(time.RFC3339Nano, first["created_at"].(string))
+	raw, _ := json.Marshal(map[string]any{"query": fmt.Sprintf("%x", sha256.Sum256(filters)), "at": at, "id": first["id"]})
+	legacy := base64.RawURLEncoding.EncodeToString(raw)
+	page("&cursor="+legacy, 200)
+	page("&view=all&cursor="+legacy, 200)
+	page("&view=current&cursor="+legacy, 400)
+	// Default and view=all mint the same cursor; view=current binds its own.
+	def, all := page("", 200)["next_cursor"], page("&view=all", 200)["next_cursor"]
+	if def == nil || def != all {
+		t.Fatalf("default %v and all %v cursors differ", def, all)
+	}
+	current := page("&view=current", 200)["next_cursor"].(string)
+	page("&view=current&cursor="+current, 200)
+	page("&cursor="+current, 400)
+}
+
+func TestRemovalSaysWhetherTheCallerMayUndo(t *testing.T) {
+	f := fixture(t)
+	admin := registerUnmanaged(t, f, false)
+	w := f.call(f.person, "POST", admin.path+"/remove", map[string]any{"reason": "Admin removal"}, "")
+	expect(t, w, 200)
+	if got := decode(t, w); got["undoable"] != true || got["event_id"] == nil {
+		t.Fatalf("admin removal: %v", got)
+	}
+	viewer := registerUnmanaged(t, f, false)
+	// A viewer may remove records (harness.read) but not undo events.
+	dbtest.BindRole(t, f.db, f.person.TenantID, f.person.ID, "viewer")
+	w = f.call(f.person, "POST", viewer.path+"/remove", map[string]any{"reason": "Viewer removal"}, "")
+	expect(t, w, 200)
+	if got := decode(t, w); got["undoable"] != false || got["event_id"] == nil {
+		t.Fatalf("viewer removal: %v", got)
+	}
+	// A retry answers neither.
+	if got := decode(t, f.call(f.person, "POST", viewer.path+"/remove", map[string]any{"reason": "again"}, "")); got["undoable"] != nil || got["event_id"] != nil {
+		t.Fatalf("retry: %v", got)
 	}
 }
 

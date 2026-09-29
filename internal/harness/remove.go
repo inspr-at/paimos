@@ -23,6 +23,9 @@ type removeResult struct {
 	// EventID is the harness.removed event that POST /api/events/{id}/undo
 	// reverses (AEON-291). An idempotent retry of an earlier removal omits it.
 	EventID int64 `json:"event_id,omitempty"`
+	// Undoable says whether the caller may undo that event (events.undo in
+	// the session's project). Present only with event_id.
+	Undoable *bool `json:"undoable,omitempty"`
 }
 
 func removalAuthorized(r *http.Request, tx pgx.Tx, p tenant.Principal) error {
@@ -70,7 +73,17 @@ func (m *Module) remove(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, er
 	if err != nil {
 		return nil, err
 	}
-	return removeRegistration(r.Context(), tx, p, s, reason, nil)
+	out, err := removeRegistration(r.Context(), tx, p, s, reason, nil)
+	if err != nil || out.EventID == 0 {
+		return out, err
+	}
+	undo := authz.RequireTx(r.Context(), tx, p, "events.undo", authz.Scope{ProjectID: s.ProjectID})
+	if undo != nil && !errors.Is(undo, authz.ErrForbidden) {
+		return nil, undo
+	}
+	allowed := undo == nil
+	out.Undoable = &allowed
+	return out, nil
 }
 
 // removeStaleBatch bounds one batch request's row locks and response. The

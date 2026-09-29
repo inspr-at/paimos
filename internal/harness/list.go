@@ -76,7 +76,13 @@ func (m *Module) listAll(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, e
 			return nil, workorders.Fail(400, "invalid filter id")
 		}
 	}
-	filters, _ := json.Marshal([]string{p.TenantID, p.ID, state, harness, agent, projectID, ticket, view})
+	// Default and view=all keep the pre-AEON-291 fingerprint, so cursors that
+	// PHAROS/JANUS already hold stay valid; only view=current binds the view.
+	fields := []string{p.TenantID, p.ID, state, harness, agent, projectID, ticket}
+	if view == "current" {
+		fields = append(fields, view)
+	}
+	filters, _ := json.Marshal(fields)
 	fingerprint := fmt.Sprintf("%x", sha256.Sum256(filters))
 	var cursor sessionCursor
 	if raw := q.Get("cursor"); raw != "" {
