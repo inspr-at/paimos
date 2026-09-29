@@ -28,6 +28,9 @@ func TestDeriveOutcomeDetail(t *testing.T) {
 		{"completed", []GitCommit{{SHA: sha, Subject: "Merge feature", Parents: 2, OnDefaultBranch: false}}, nil, nil, "committed"},
 		{"completed", []GitCommit{{SHA: sha, Subject: "Add usage", Parents: 2, OnDefaultBranch: true}}, nil, nil, "merged"},
 		{"completed", []GitCommit{{SHA: sha, Subject: "Merge feature", Parents: 2, OnDefaultBranch: true}}, nil, []string{"https://github.com/acme/merged-tools/pull/4"}, "merged"},
+		// An upstream merge synced into the worktree does not merge the run's own change.
+		{"completed", []GitCommit{{SHA: sha, Subject: "sync main", Parents: 2}, {SHA: "1123456789abcdef", Subject: "unrelated", Parents: 1, OnDefaultBranch: true}, {SHA: "2123456789abcdef", Subject: "upstream merge", Parents: 2, OnDefaultBranch: true}, {SHA: "3123456789abcdef", Subject: "worker change", Parents: 1}}, nil, nil, "committed"},
+		{"completed", []GitCommit{{SHA: sha, Subject: "Merge feature", Parents: 2, OnDefaultBranch: true}, {SHA: "3123456789abcdef", Subject: "worker change", Parents: 1, OnDefaultBranch: true}}, nil, nil, "merged"},
 		{"cancelled", nil, nil, nil, "abandoned"},
 		{"ownership_lost", nil, nil, nil, "abandoned"},
 		{"cancelled", nil, []string{"abc"}, nil, "abandoned"},

@@ -33,14 +33,15 @@ func commitSubject(s string) bool {
 	return true
 }
 
+// deriveOutcomeDetail classifies a run from its git evidence. merged needs a
+// merge commit on the default branch and no non-merge commit of the run off
+// it: an upstream merge synced into the worktree while the run's own changes
+// are still unmerged is not a merge of the run.
 func deriveOutcomeDetail(status string, commits []GitCommit, shas, refs []string) string {
-	merged, pr, committed := false, false, false
+	merged, pr, committed := runMerged(commits), false, false
 	for _, c := range commits {
 		if commitSHA(strings.ToLower(strings.TrimSpace(c.SHA))) {
 			committed = true
-		}
-		if c.Parents >= 2 && c.OnDefaultBranch {
-			merged = true
 		}
 	}
 	for _, sha := range shas {
@@ -66,6 +67,25 @@ func deriveOutcomeDetail(status string, commits []GitCommit, shas, refs []string
 	default:
 		return "no_commit"
 	}
+}
+
+func runMerged(commits []GitCommit) bool {
+	mergeOnDefault := false
+	for _, c := range commits {
+		if !commitSHA(strings.ToLower(strings.TrimSpace(c.SHA))) {
+			continue
+		}
+		if c.Parents >= 2 {
+			mergeOnDefault = mergeOnDefault || c.OnDefaultBranch
+			continue
+		}
+		// A change of this run that is not on the default branch is unmerged,
+		// whatever upstream merges came along with it.
+		if !c.OnDefaultBranch {
+			return false
+		}
+	}
+	return mergeOnDefault
 }
 
 func classifyEvidenceRef(ref string) (merged, pr, committed bool) {

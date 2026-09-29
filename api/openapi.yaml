@@ -8091,7 +8091,7 @@ components:
               sha: {type: string, pattern: '^[0-9a-f]{7,40}$'}
               subject: {type: string, minLength: 1, maxLength: 200}
               parents: {type: integer, minimum: 0, maximum: 64, description: Parent count from git. Optional. A merge commit has at least two.}
-              on_default_branch: {type: boolean, description: Optional. True when the commit is an ancestor of the default branch. merged requires this together with parents >= 2.}
+              on_default_branch: {type: boolean, description: 'Optional. True when the commit is an ancestor of the default branch (origin/HEAD, else the configured or main/master branch; never the worktree HEAD). merged requires a commit with parents >= 2 on the default branch and no non-merge commit of the run off it.'}
     ApprovalProposal:
       type: object
       required: [scope, resource_kind, rationale, expires_at]

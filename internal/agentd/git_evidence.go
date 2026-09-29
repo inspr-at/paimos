@@ -61,19 +61,51 @@ func commitsSince(ctx context.Context, workspace, start string) []GitCommit {
 	return commits
 }
 
+// defaultBranchRef names the repository's default branch: origin/HEAD, then
+// the repository's own init.defaultBranch, then origin/main|master, then a
+// local main|master. It never falls back to HEAD: a worktree's own branch is
+// not the default branch, so an unknown default yields "" and nothing is
+// reported as on the default branch.
 func defaultBranchRef(ctx context.Context, workspace string) string {
-	if out, err := gitOutput(ctx, workspace, "rev-parse", "--abbrev-ref", "origin/HEAD"); err == nil {
-		name := strings.TrimSpace(out)
-		if name != "" && name != "HEAD" && !strings.Contains(name, " ") {
+	if out, err := gitOutput(ctx, workspace, "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"); err == nil {
+		if name := strings.TrimSpace(out); branchRefName(name) && refExists(ctx, workspace, name) {
 			return name
 		}
 	}
-	for _, name := range []string{"main", "master"} {
-		if _, err := gitOutput(ctx, workspace, "rev-parse", "--verify", "--quiet", name); err == nil {
+	var candidates []string
+	if out, err := gitOutput(ctx, workspace, "config", "--local", "--get", "init.defaultBranch"); err == nil {
+		if name := strings.TrimSpace(out); branchRefName(name) {
+			candidates = append(candidates, "origin/"+name, name)
+		}
+	}
+	candidates = append(candidates, "origin/main", "origin/master", "main", "master")
+	for _, name := range candidates {
+		if refExists(ctx, workspace, name) {
 			return name
 		}
 	}
-	return "HEAD"
+	return ""
+}
+
+func refExists(ctx context.Context, workspace, name string) bool {
+	full := "refs/heads/" + name
+	if strings.HasPrefix(name, "origin/") {
+		full = "refs/remotes/" + name
+	}
+	_, err := gitOutput(ctx, workspace, "rev-parse", "--verify", "--quiet", full+"^{commit}")
+	return err == nil
+}
+
+func branchRefName(name string) bool {
+	if name == "" || name == "HEAD" || strings.HasSuffix(name, "/HEAD") || len(name) > 200 || strings.HasPrefix(name, "-") || strings.Contains(name, "..") {
+		return false
+	}
+	for _, r := range name {
+		if r <= 0x20 || r == 0x7f || strings.ContainsRune("~^:?*[\\", r) {
+			return false
+		}
+	}
+	return true
 }
 
 func commitOnDefaultBranch(ctx context.Context, workspace, sha, ref string) bool {
