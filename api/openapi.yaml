@@ -8052,7 +8052,7 @@ components:
         outcome: {type: [string, 'null'], enum: [completed, failed, cancelled, ownership_lost, null]}
         duration_ms: {type: [integer, 'null'], format: int64, description: Whole elapsed milliseconds for terminal runs; null until both timestamps exist}
         active_ms: {type: [integer, 'null'], format: int64, description: Milliseconds not spent waiting. Null until the run is terminal and both timestamps exist. Equal to duration_ms when no waiting telemetry was recorded.}
-        outcome_detail: {type: [string, 'null'], enum: [no_commit, committed, pr_opened, merged, abandoned, null], description: Derived when the run becomes terminal. merged requires positive evidence: at least one of the run's own non-merge commits, and every one of them an ancestor of the default branch. A pull-request URL is pr_opened. Null when the run is not terminal.}
+        outcome_detail: {type: [string, 'null'], enum: [no_commit, committed, pr_opened, merged, abandoned, null], description: Derived when the run becomes terminal. merged requires positive evidence, that is at least one of the run's own non-merge commits with every one of them an ancestor of the default branch. A pull-request URL is pr_opened. Null when the run is not terminal.}
         retry_of_run_id: {type: [string, 'null'], format: uuid, description: Earlier run of the same work order and agent that this run retries.}
         model_evidence: {type: string, enum: [unverified, vendor_reported]}
         input_tokens: {type: integer, format: int64}
