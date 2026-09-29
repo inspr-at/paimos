@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { formatDollars, formatTokenCount, listCostCell, modelCell, paidCell, planningPresent, planningSortValue, tokensCell, type PlanningRow, type TicketPlanning } from '../src/lib/planning.ts'
+import { compareModelSort, formatDollars, formatTokenCount, listCostCell, modelCell, paidCell, planningPresent, planningSortValue, tokensCell, type PlanningRow, type TicketPlanning } from '../src/lib/planning.ts'
 import { compareRows } from '../src/lib/ticketList.ts'
 import type { ListItem } from '../src/lib/api.ts'
 
@@ -85,6 +85,7 @@ test('presence and sort values follow the list API', () => {
   assert.deepEqual(planningPresent([row(undefined, {})]), { model: false, tokens: false, list_cost: false, paid: false })
   assert.equal(planningSortValue(rows[0]!, 'model'), '3:backend')
   assert.equal(planningSortValue(rows[1]!, 'model'), null)
+  assert.equal(compareModelSort(rows[0]!, rows[1]!, false), -1)
   assert.equal(planningSortValue(rows[0]!, 'tokens'), 5)
   assert.equal(planningSortValue(rows[0]!, 'list_cost'), 1)
   assert.equal(planningSortValue(rows[0]!, 'paid'), null)
@@ -104,4 +105,14 @@ test('numeric planning sorts use spent else estimated, null last and ID ties', (
     assert.deepEqual([...rows].sort(desc).map(r => r.id), ['a', 'b', 'c', 'd', 'e'])
     assert.equal(asc(low, low), 0)
   }
+})
+
+test('model sort keeps a missing area last in both directions', () => {
+  const withArea = { ...row(undefined, { route_role: 'build', area: 'frontend' }), id: 'a' } as ListItem
+  const noArea = { ...row(undefined, { route_role: 'build' }), id: 'b' } as ListItem
+  const higher = { ...row(undefined, { route_role: 'build-hard', area: 'backend' }), id: 'c' } as ListItem
+  const none = { ...row(undefined, {}), id: 'd' } as ListItem
+  const rows = [noArea, none, higher, withArea]
+  assert.deepEqual([...rows].sort(compareRows([{ field: 'model', desc: false }])).map(item => item.id), ['a', 'b', 'c', 'd'])
+  assert.deepEqual([...rows].sort(compareRows([{ field: 'model', desc: true }])).map(item => item.id), ['c', 'a', 'b', 'd'])
 })

@@ -214,7 +214,7 @@ func TestPlanningBulkUsagePerformance(t *testing.T) {
 			return err
 		}
 		q.seen = assigneeSeen{harnessAll: true, members: true}
-		if _, err := loadPlanningOrder(t.Context(), tx, &q); err != nil {
+		if err := preparePlanningSort(t.Context(), tx, &q); err != nil {
 			return err
 		}
 		order, args := listSQL(q, nil)

@@ -9,6 +9,7 @@ import (
 	"math/big"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -155,62 +156,58 @@ func planningPricesCTE() string {
     )`
 }
 
-// Numeric sorts consume exactly the projected figures, including calibration,
-// epic rollups and permission checks. Loading all filtered roots in one batch
-// avoids a correlated usage scan per row. The selected page reuses these views.
-func loadPlanningOrder(ctx context.Context, tx pgx.Tx, q *listQuery) (map[string]*planningView, error) {
-	prefix, args := listFilterSQL(*q, false)
-	rows, err := tx.Query(ctx, prefix+` SELECT id::text, kind_slug, project_id::text FROM filtered WHERE kind_slug IN ('ticket','task','epic')`, args...)
+// planSortRate is one route's estimate rates for the SQL sort key. Role "" is
+// any route (no area, or a role the registry did not resolve). Paid is 0 under
+// a subscription, the list rate when billed per use, and null when unknown.
+type planSortRate struct {
+	Role   string   `json:"role"`
+	Tokens float64  `json:"tokens_per_hour"`
+	List   *float64 `json:"list_per_hour"`
+	Paid   *float64 `json:"paid_per_hour"`
+}
+
+// preparePlanningSort resolves each role once and stores the rates the list
+// statement multiplies. The sort key itself is SQL over the filtered rows, so
+// a tokens or cost sort does not build a planning view per matching row.
+func preparePlanningSort(ctx context.Context, tx pgx.Tx, q *listQuery) error {
+	var seeds []planRow
+	for _, role := range []string{"scout", "mechanical", "build", "build-hard", "review-gate"} {
+		seeds = append(seeds, planRow{role: role, area: "backend"})
+	}
+	routes, err := resolvePlanRoutes(ctx, tx, seeds)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	var items []listItem
-	for rows.Next() {
-		var item listItem
-		var project *string
-		if err := rows.Scan(&item.ID, &item.KindSlug, &project); err != nil {
-			rows.Close()
-			return nil, err
-		}
-		if project != nil {
-			item.Project = &listProject{ID: *project}
-		}
-		items = append(items, item)
-	}
-	err = rows.Err()
-	rows.Close()
+	samples, err := loadCalibrationSamples(ctx, tx, routes, q.seen.costVisible)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	views, err := loadPlanning(ctx, tx, items, q.seen)
-	if err != nil {
-		return nil, err
-	}
-	type value struct {
-		ID     string  `json:"id"`
-		Tokens *int64  `json:"tokens"`
-		List   *string `json:"list_usd"`
-		Paid   *string `json:"paid_usd"`
-	}
-	values := make([]value, 0, len(views))
-	for id, view := range views {
-		v := value{ID: id, Tokens: view.Tokens.Spent}
-		if v.Tokens == nil {
-			v.Tokens = view.Tokens.Estimated
+	billing := map[string]planBilling{}
+	if len(routes) > 0 {
+		if billing, err = loadPlanBilling(ctx, tx, routes, q.seen); err != nil {
+			return err
 		}
-		if c := view.Cost; c != nil {
-			v.List, v.Paid = c.ListSpent, c.PaidSpent
-			if v.List == nil {
-				v.List = c.ListEstimated
-			}
-			if v.Paid == nil {
-				v.Paid = c.PaidEstimated
-			}
-		}
-		values = append(values, v)
 	}
-	q.planningOrder, err = json.Marshal(values)
-	return views, err
+	pl := &planner{routes: routes, samples: samples, billing: billing, calibrations: map[routeKey]calibration{}}
+	anyRoute := pl.calibration(nil)
+	rates := []planSortRate{{Role: "", Tokens: anyRoute.tokensPerHour, List: anyRoute.listPerHour}}
+	for role, route := range routes {
+		if route.view == nil {
+			continue
+		}
+		c := pl.calibration(route)
+		rate := planSortRate{Role: role, Tokens: c.tokensPerHour, List: c.listPerHour}
+		switch billing[route.view.Harness].mode {
+		case "subscription":
+			zero := 0.0
+			rate.Paid = &zero
+		case "api":
+			rate.Paid = c.listPerHour
+		}
+		rates = append(rates, rate)
+	}
+	q.planRates, err = json.Marshal(rates)
+	return err
 }
 
 func (s assigneeSeen) costVisible(project string) bool {
@@ -854,18 +851,202 @@ func resolvePlanRoutes(ctx context.Context, tx pgx.Tx, rows []planRow) (map[stri
 	return out, nil
 }
 
-// loadCalibrationSamples streams finished tickets newest first. Validate the
-// whole ticket, then match its main route, then take at most 30 per needed route.
-// Unreported sessions and unrelated routes never exhaust the sampling window.
-func loadCalibrationSamples(ctx context.Context, tx pgx.Tx, routes map[string]*planRoute, cost func(string) bool) ([]calibrationSample, error) {
-	rows, err := tx.Query(ctx, `WITH `+planningStatesCTE()+`, `+planningPricesCTE()+`, finished AS (
-        SELECT n.id, n.updated_at FROM nodes n`+planningOpenChild("n")+`
+// modelKeySQL is ModelKey in SQL: lower case, and an Anthropic alias or id
+// collapses to its family word so "opus" and "claude-opus-5-5" share a route.
+func modelKeySQL(expr string) string {
+	key := `lower(btrim(` + expr + `))`
+	return `CASE WHEN strpos(` + key + `, 'claude') > 0 OR strpos(` + key + `, '-') = 0 THEN CASE
+        WHEN strpos(` + key + `, 'fable') > 0 THEN 'fable'
+        WHEN strpos(` + key + `, 'opus') > 0 THEN 'opus'
+        WHEN strpos(` + key + `, 'sonnet') > 0 THEN 'sonnet'
+        WHEN strpos(` + key + `, 'haiku') > 0 THEN 'haiku'
+        ELSE ` + key + ` END ELSE ` + key + ` END`
+}
+
+// planRateRoleSQL is the role whose prepared rate prices this row. An unknown
+// area, or none, uses the any-route rate (role ”).
+func planRateRoleSQL(fields string) string {
+	return `CASE WHEN btrim(coalesce(` + fields + `->>'area','')) IN ('backend','frontend','full-stack','infra','design','docs') THEN btrim(coalesce(` + fields + `->>'route_role','')) ELSE '' END`
+}
+
+func planCostVisibleSQL(project, harnessAll, projects string) string {
+	return `(` + harnessAll + ` OR ` + project + ` = ANY(` + projects + `::uuid[]))`
+}
+
+// planningSortSQL is the tokens / list / paid sort key for every filtered
+// ticket, task and epic: spent usage when any of it was reported, otherwise
+// the estimate. Cost stays null where the caller cannot see it (AEON-370).
+func planningSortSQL(ratesArg, harnessAll, projects string) string {
+	visible := planCostVisibleSQL("s.project_id", harnessAll, projects)
+	rowVisible := planCostVisibleSQL("f.project_id", harnessAll, projects)
+	rateCols := `raw.hours,
+            (CASE WHEN spec.role IS NOT NULL THEN spec.tokens_per_hour ELSE anyr.tokens_per_hour END)::numeric AS tokens_per_hour,
+            (CASE WHEN spec.role IS NOT NULL THEN spec.list_per_hour ELSE anyr.list_per_hour END)::numeric AS list_per_hour,
+            (CASE WHEN spec.role IS NOT NULL THEN spec.paid_per_hour ELSE anyr.paid_per_hour END)::numeric AS paid_per_hour`
+	rateJoin := `
+            LEFT JOIN plan_rates spec ON spec.role = raw.role AND raw.role <> ''
+            LEFT JOIN plan_rates anyr ON anyr.role = ''`
+	return `, ` + planningStatesCTE() + `, ` + planningPricesCTE() + `, plan_rates AS (
+        SELECT * FROM jsonb_to_recordset(` + ratesArg + `::jsonb) AS r(role text, tokens_per_hour float8, list_per_hour float8, paid_per_hour float8)
+    ), plan_sub AS MATERIALIZED (
+        ` + planningSubtreeSQL(`SELECT f.id AS root FROM filtered f WHERE f.kind_slug IN ('ticket','task','epic')`) + `
+    ), plan_lines AS MATERIALIZED (
+        SELECT t.root AS id,
+            (u.model IS NOT NULL AND u.input_tokens IS NOT NULL AND u.output_tokens IS NOT NULL AND u.cached_input_tokens IS NOT NULL) AS complete,
+            CASE WHEN u.model IS NOT NULL AND u.input_tokens IS NOT NULL AND u.output_tokens IS NOT NULL AND u.cached_input_tokens IS NOT NULL
+                THEN u.input_tokens + u.output_tokens END AS tokens,
+            ` + visible + ` AS cost_ok,
+            CASE
+                WHEN NOT ` + visible + ` THEN NULL
+                WHEN u.billing_mode = 'api' AND u.estimated_cost_usd IS NOT NULL THEN u.estimated_cost_usd
+                WHEN u.model IS NOT NULL AND u.input_tokens IS NOT NULL AND u.output_tokens IS NOT NULL AND u.cached_input_tokens IS NOT NULL
+                    AND price.input_usd_per_million IS NOT NULL AND price.output_usd_per_million IS NOT NULL AND price.cached_input_usd_per_million IS NOT NULL
+                THEN ((u.input_tokens - u.cached_input_tokens) * price.input_usd_per_million
+                    + u.output_tokens * price.output_usd_per_million
+                    + u.cached_input_tokens * price.cached_input_usd_per_million) / 1000000
+            END AS list_usd,
+            u.billing_mode, u.estimated_cost_usd
+        FROM plan_sub t
+        JOIN harness_sessions s ON s.tenant_id=current_setting('aeon.tenant_id')::uuid AND s.ticket_node_id=t.id
+            AND ((SELECT aeon_visible_all()) OR s.project_id = ANY ((SELECT aeon_visible_projects())::uuid[]))
+        JOIN harness_session_usage u ON u.tenant_id=s.tenant_id AND u.session_id=s.id
+        LEFT JOIN plan_prices price ON price.model=u.model
+    ), plan_usage_agg AS MATERIALIZED (
+        SELECT id,
+            CASE WHEN bool_or(complete) THEN coalesce(sum(tokens) FILTER (WHERE complete), 0) END AS tokens,
+            sum(list_usd) FILTER (WHERE list_usd IS NOT NULL) AS list_usd,
+            CASE WHEN bool_or(cost_ok AND (billing_mode = 'subscription' OR (billing_mode = 'api' AND estimated_cost_usd IS NOT NULL)))
+                THEN coalesce(sum(CASE
+                    WHEN cost_ok AND billing_mode = 'subscription' THEN 0
+                    WHEN cost_ok AND billing_mode = 'api' AND estimated_cost_usd IS NOT NULL THEN estimated_cost_usd
+                END), 0) END AS paid_usd
+        FROM plan_lines GROUP BY id
+    ), plan_own AS MATERIALIZED (
+        SELECT base.id,
+            CASE WHEN base.kind_slug <> 'epic' AND rated.hours IS NOT NULL THEN round(rated.hours * rated.tokens_per_hour)::bigint END AS tokens,
+            CASE WHEN base.kind_slug <> 'epic' AND rated.hours IS NOT NULL THEN rated.hours * rated.list_per_hour END AS list_usd,
+            CASE WHEN base.kind_slug <> 'epic' AND rated.hours IS NOT NULL THEN rated.hours * rated.paid_per_hour END AS paid_usd
+        FROM (
+            SELECT f.id, f.kind_slug, ` + estimateHoursSQL("nd.fields") + ` AS hours, ` + planRateRoleSQL("nd.fields") + ` AS role
+            FROM filtered f
+            JOIN nodes nd ON nd.tenant_id=current_setting('aeon.tenant_id')::uuid AND nd.id=f.id
+            WHERE f.kind_slug IN ('ticket','task','epic')
+        ) base
+        JOIN LATERAL (
+            SELECT ` + rateCols + ` FROM (SELECT base.hours, base.role) raw` + rateJoin + `
+        ) rated ON true
+    ), plan_child_est AS MATERIALIZED (
+        SELECT e.id,
+            (sum(round(r.hours * r.tokens_per_hour)) FILTER (WHERE r.hours IS NOT NULL))::bigint AS tokens,
+            sum(r.hours * r.list_per_hour) FILTER (WHERE r.hours IS NOT NULL AND r.list_per_hour IS NOT NULL) AS list_usd,
+            sum(r.hours * r.paid_per_hour) FILTER (WHERE r.hours IS NOT NULL AND r.paid_per_hour IS NOT NULL) AS paid_usd
+        FROM filtered e
+        JOIN nodes c ON c.tenant_id=current_setting('aeon.tenant_id')::uuid AND c.parent_id=e.id AND c.deleted_at IS NULL
+        JOIN node_kinds ck ON ck.tenant_id=c.tenant_id AND ck.id=c.kind_id AND ck.slug IN ('ticket','task')
+        LEFT JOIN plan_states cs ON cs.kind_id=c.kind_id AND cs.norm=` + workStateNormSQL("c.state") + `
+        JOIN LATERAL (
+            SELECT ` + rateCols + `
+            FROM (SELECT ` + estimateHoursSQL("c.fields") + ` AS hours, ` + planRateRoleSQL("c.fields") + ` AS role) raw` + rateJoin + `
+        ) r ON true
+        WHERE e.kind_slug='epic' AND ` + workCountBucketSQL("c.state", "cs") + ` NOT IN ('cancelled','archived')
+        GROUP BY e.id
+    ), planning_values AS MATERIALIZED (
+        SELECT f.id,
+            coalesce(u.tokens, CASE WHEN f.kind_slug='epic' THEN ch.tokens ELSE o.tokens END) AS tokens,
+            CASE WHEN ` + rowVisible + ` THEN coalesce(u.list_usd, CASE WHEN f.kind_slug='epic' THEN ch.list_usd ELSE o.list_usd END) END AS list_usd,
+            CASE WHEN ` + rowVisible + ` THEN coalesce(u.paid_usd, CASE WHEN f.kind_slug='epic' THEN ch.paid_usd ELSE o.paid_usd END) END AS paid_usd
+        FROM filtered f
+        LEFT JOIN plan_usage_agg u ON u.id=f.id
+        LEFT JOIN plan_own o ON o.id=f.id
+        LEFT JOIN plan_child_est ch ON ch.id=f.id
+        WHERE f.kind_slug IN ('ticket','task','epic')
+    )`
+}
+
+// calibrationSampleSQL keeps at most calibrationWindow eligible finished
+// tickets per needed route, plus that many newest on any route. Eligibility
+// (every session stopped and fully reported, at least a minute, some tokens)
+// is applied before the limit, so unreported tickets are not transferred.
+func calibrationSampleSQL() string {
+	window := strconv.Itoa(calibrationWindow)
+	return `WITH ` + planningStatesCTE() + `, ` + planningPricesCTE() + `, finished AS (
+        SELECT n.id, n.updated_at FROM nodes n` + planningOpenChild("n") + `
         WHERE n.tenant_id=current_setting('aeon.tenant_id')::uuid AND n.deleted_at IS NULL
-            AND `+workCountBucketSQL("n.state", "ns")+`='done'
+            AND ` + workCountBucketSQL("n.state", "ns") + `='done'
+    ), vis AS (
+        SELECT s.ticket_node_id AS ticket, s.id AS session, s.harness,
+            coalesce(s.model,'') AS session_model,
+            lower(coalesce(s.reasoning_effort,'')) AS effort,
+            CASE WHEN s.stopped_at IS NULL THEN -1::float8 ELSE EXTRACT(EPOCH FROM (s.stopped_at-s.created_at))::float8 END AS seconds
+        FROM harness_sessions s
+        JOIN finished f ON f.id=s.ticket_node_id
+        WHERE s.tenant_id=current_setting('aeon.tenant_id')::uuid
+            AND ((SELECT aeon_visible_all()) OR s.project_id = ANY ((SELECT aeon_visible_projects())::uuid[]))
+    ), usage_stat AS (
+        SELECT v.session,
+            count(u.session_id) AS usage_rows,
+            count(*) FILTER (WHERE u.session_id IS NOT NULL AND (u.model IS NULL OR u.input_tokens IS NULL OR u.output_tokens IS NULL OR u.cached_input_tokens IS NULL)) AS incomplete_rows,
+            coalesce(sum(u.input_tokens+u.output_tokens) FILTER (WHERE u.model IS NOT NULL AND u.input_tokens IS NOT NULL AND u.output_tokens IS NOT NULL AND u.cached_input_tokens IS NOT NULL), 0) AS tokens
+        FROM vis v
+        LEFT JOIN harness_session_usage u ON u.tenant_id=current_setting('aeon.tenant_id')::uuid AND u.session_id=v.session
+        GROUP BY v.session
+    ), good AS (
+        SELECT v.ticket FROM vis v JOIN usage_stat u ON u.session=v.session
+        GROUP BY v.ticket
+        HAVING bool_and(v.seconds >= 0 AND u.usage_rows > 0 AND u.incomplete_rows = 0)
+            AND sum(v.seconds) >= 60 AND sum(u.tokens) > 0
+    ), main AS (
+        SELECT DISTINCT ON (v.ticket) v.ticket, v.session, v.harness, v.session_model, v.effort
+        FROM vis v
+        JOIN usage_stat u ON u.session=v.session
+        JOIN good g ON g.ticket=v.ticket
+        ORDER BY v.ticket, u.tokens DESC, v.session::text ASC
+    ), model_tokens AS (
+        SELECT u.session_id, u.model, sum(u.input_tokens+u.output_tokens) AS n
+        FROM harness_session_usage u
+        JOIN main m ON m.session=u.session_id
+        WHERE u.tenant_id=current_setting('aeon.tenant_id')::uuid
+        GROUP BY u.session_id, u.model
+    ), top_model AS (
+        SELECT DISTINCT ON (session_id) session_id, model FROM model_tokens
+        ORDER BY session_id, n DESC, model ASC
+    ), routed AS (
+        SELECT m.ticket AS id, f.updated_at, m.harness, m.effort,
+            ` + modelKeySQL(`CASE WHEN m.session_model <> '' THEN m.session_model ELSE tm.model END`) + ` AS model_key
+        FROM main m
+        JOIN finished f ON f.id=m.ticket
+        JOIN top_model tm ON tm.session_id=m.session
+    ), picked AS (
+        SELECT id FROM (SELECT id, row_number() OVER (ORDER BY updated_at DESC, id) AS rn FROM routed) s WHERE rn <= ` + window + `
+        UNION
+        SELECT id FROM (
+            SELECT e.id, row_number() OVER (PARTITION BY n.ord ORDER BY e.updated_at DESC, e.id) AS rn
+            FROM routed e
+            JOIN unnest($1::text[], $2::text[], $3::text[]) WITH ORDINALITY AS n(harness, model, effort, ord)
+                ON e.harness=n.harness AND e.model_key=n.model AND (e.effort='' OR e.effort=n.effort)
+        ) s WHERE rn <= ` + window + `
     )
-    SELECT t.id::text, s.project_id::text, CASE WHEN s.stopped_at IS NULL THEN -1 ELSE EXTRACT(EPOCH FROM (s.stopped_at-s.created_at))::float8 END, `+usageLineColumns+`
-    FROM finished t`+planningUsageFrom+`
-    ORDER BY t.updated_at DESC, t.id, s.id, u.model`)
+    SELECT t.id::text, s.project_id::text, CASE WHEN s.stopped_at IS NULL THEN -1 ELSE EXTRACT(EPOCH FROM (s.stopped_at-s.created_at))::float8 END, ` + usageLineColumns + `
+    FROM (SELECT n.id, n.updated_at FROM nodes n JOIN picked p ON p.id=n.id) t` + planningUsageFrom + `
+    ORDER BY t.updated_at DESC, t.id, s.id, u.model`
+}
+
+// loadCalibrationSamples reads a bounded set of eligible finished tickets,
+// newest first, and keeps at most 30 samples per needed route.
+func loadCalibrationSamples(ctx context.Context, tx pgx.Tx, routes map[string]*planRoute, cost func(string) bool) ([]calibrationSample, error) {
+	var harnesses, models, efforts []string
+	for _, route := range routes {
+		if route == nil || route.view == nil {
+			continue
+		}
+		harnesses = append(harnesses, route.key.harness)
+		models = append(models, route.key.model)
+		efforts = append(efforts, route.key.effort)
+	}
+	if harnesses == nil {
+		harnesses, models, efforts = []string{}, []string{}, []string{}
+	}
+	rows, err := tx.Query(ctx, calibrationSampleSQL(), harnesses, models, efforts)
 	if err != nil {
 		return nil, err
 	}

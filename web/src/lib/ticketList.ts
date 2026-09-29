@@ -8,7 +8,7 @@
 // values are alternatives and every excluded value must not match; filters
 // combine with AND. That is classic Paimos's model, and the list API's.
 import { estimateHours } from './estimates.ts'
-import { planningSortValue } from './planning.ts'
+import { compareModelSort, planningSortValue } from './planning.ts'
 import type { Facets, ListItem, ListQuery } from './api.ts'
 import { COLUMN_BY_ID, PINNED, type ColumnId } from './columns.ts'
 import { DEFAULT_SORT, KINDS, PRIORITIES, kindLabel, normaliseState, parseSort, priorityLabel, serializeSort, statusMeta, statusOptions, type SortKey } from './work.ts'
@@ -408,6 +408,11 @@ export function compareRows(keys: SortKey[]): (a: ListItem, b: ListItem) => numb
     : field === 'model' || field === 'tokens' || field === 'list_cost' || field === 'paid' ? planningSortValue(row, field) === null : false
   return (a, b) => {
     for (const key of keys) {
+      if (key.field === 'model') {
+        const delta = compareModelSort(a, b, key.desc)
+        if (delta !== 0) return delta
+        continue
+      }
       // Unassigned work, estimates nobody reported, and unknown states come last in both directions.
       if (key.field === 'assignee' && !a.assignee !== !b.assignee) return a.assignee ? -1 : 1
       if (key.field === 'state') {

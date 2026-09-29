@@ -132,10 +132,10 @@ type listQuery struct {
 	DateTo    *time.Time `json:"date_to,omitempty"`
 	// seen and the lead thresholds are filled by listNodes. They are not
 	// request input and stay out of the cursor fingerprint (unexported).
-	seen          assigneeSeen
-	leadYellow    int
-	leadRed       int
-	planningOrder json.RawMessage
+	seen       assigneeSeen
+	leadYellow int
+	leadRed    int
+	planRates  json.RawMessage
 }
 type listCursor struct {
 	Hash string `json:"hash"`
@@ -457,11 +457,8 @@ func (m *Module) listNodes(ctx context.Context, tenantID string, q listQuery) (n
 			}
 			q.leadYellow, q.leadRed = yellow, red
 		}
-		var planning map[string]*planningView
 		if sortsByPlanningValue(q) {
-			var err error
-			planning, err = loadPlanningOrder(ctx, tx, &q)
-			if err != nil {
+			if err := preparePlanningSort(ctx, tx, &q); err != nil {
 				return dbErr("planning sort", err)
 			}
 		}
@@ -551,11 +548,9 @@ func (m *Module) listNodes(ctx context.Context, tenantID string, q listQuery) (n
 			for i := range page.Items {
 				page.Items[i].Estimate = estimates[page.Items[i].ID]
 			}
-			if planning == nil {
-				planning, err = loadPlanning(ctx, tx, page.Items, q.seen)
-				if err != nil {
-					return dbErr("list planning", err)
-				}
+			planning, err := loadPlanning(ctx, tx, page.Items, q.seen)
+			if err != nil {
+				return dbErr("list planning", err)
 			}
 			for i := range page.Items {
 				page.Items[i].Planning = planning[page.Items[i].ID]
@@ -1128,14 +1123,12 @@ func listSQL(q listQuery, anchor any) (string, []any) {
         ) route ON true`
 	}
 	if sortsByPlanningValue(q) {
-		values := q.planningOrder
-		if len(values) == 0 {
-			values = json.RawMessage(`[]`)
+		rates := q.planRates
+		if len(rates) == 0 {
+			rates = json.RawMessage(`[]`)
 		}
-		args = append(args, string(values))
-		planningCTE = fmt.Sprintf(`, planning_values AS MATERIALIZED (
-            SELECT * FROM jsonb_to_recordset($%d::jsonb) AS v(id uuid, tokens bigint, list_usd numeric, paid_usd numeric)
-        )`, len(args))
+		args = append(args, string(rates))
+		planningCTE = planningSortSQL(fmt.Sprintf("$%d", len(args)), harnessAll, projectArg)
 		planningJoin += ` LEFT JOIN planning_values plan ON plan.id=f.id`
 	}
 	if sortsBy(q, "estimate") {

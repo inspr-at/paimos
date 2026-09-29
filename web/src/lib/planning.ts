@@ -184,12 +184,40 @@ export function planningPresent(rows: PlanningRow[]): Record<PlanningColumn, boo
   }
 }
 const ROLE_RANK: Record<string, number> = { scout: 0, mechanical: 1, build: 2, 'build-hard': 3, 'review-gate': 4 }
-/** The list API's order for a planning sort key: null sorts last in both directions. */
+interface ModelOrder { rank: number; area: string }
+function modelOrder(row: PlanningRow): ModelOrder | null {
+  const rank = ROLE_RANK[roleOf(row)]
+  return rank === undefined ? null : { rank, area: areaOf(row) }
+}
+/**
+ * Model order matches the list API: the role's rung, then the area.
+ * A missing role and a missing area both stay last in either direction.
+ */
+export function compareModelSort(a: PlanningRow, b: PlanningRow, desc: boolean): number {
+  const x = modelOrder(a), y = modelOrder(b)
+  if ((x === null) !== (y === null)) return x === null ? 1 : -1
+  if (!x || !y) return 0
+  const dir = desc ? -1 : 1
+  if (x.rank !== y.rank) return (x.rank < y.rank ? -1 : 1) * dir
+  if ((x.area === '') !== (y.area === '')) return x.area === '' ? 1 : -1
+  if (x.area !== y.area) return (x.area < y.area ? -1 : 1) * dir
+  return 0
+}
+/** The list API's order for a numeric planning sort key: null sorts last in both directions. */
 export function planningSortValue(row: PlanningRow, field: PlanningColumn): number | string | null {
   switch (field) {
-    case 'model': { const rank = ROLE_RANK[roleOf(row)]; return rank === undefined ? null : `${rank}:${areaOf(row) || '~'}` }
+    case 'model': { const order = modelOrder(row); return order ? `${order.rank}:${order.area}` : null }
     case 'tokens': return row.planning?.tokens.spent ?? row.planning?.tokens.estimated ?? null
     case 'list_cost': return num(row.planning?.cost?.list_spent) ?? num(row.planning?.cost?.list_estimated)
     case 'paid': return num(row.planning?.cost?.paid_spent) ?? num(row.planning?.cost?.paid_estimated)
+  }
+}
+/** Screen-reader text for one planning cell; empty when the cell has nothing to explain. */
+export function planningTip(row: PlanningRow, column: PlanningColumn): string {
+  switch (column) {
+    case 'model': return modelCell(row).tip
+    case 'tokens': return tokensCell(row).tip
+    case 'list_cost': return listCostCell(row).tip
+    case 'paid': return paidCell(row).tip
   }
 }

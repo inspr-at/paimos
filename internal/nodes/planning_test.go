@@ -331,6 +331,10 @@ func TestListPlanningColumns(t *testing.T) {
 	if got := keys(w.admin, "model"); strings.Join(got[:5], ",") != "PLN-4,PLN-8,PLN-6,PLN-2,PLN-7" {
 		t.Fatalf("model sort: %v", got)
 	}
+	// Descending reverses the rung and the area, and still leaves a missing area last.
+	if got := keys(w.admin, "-model"); strings.Join(got[:5], ",") != "PLN-7,PLN-2,PLN-8,PLN-6,PLN-4" {
+		t.Fatalf("model sort descending: %v", got)
+	}
 	if got := keys(w.admin, "-tokens"); strings.Join(got[:4], ",") != "PLN-5,PLN-4,PLN-1,PLN-2" && strings.Join(got[:4], ",") != "PLN-5,PLN-4,PLN-2,PLN-1" {
 		t.Fatalf("tokens sort: %v", got)
 	}
