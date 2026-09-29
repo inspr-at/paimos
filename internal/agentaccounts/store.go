@@ -119,7 +119,7 @@ func attachWindows(ctx context.Context, tx pgx.Tx, accounts []Account) ([]Accoun
 			return nil, err
 		}
 		if w.capacityReadAt != nil {
-			w.Provisional = w.capacityKind == "refresh"
+			w.Provisional = synthetic(w)
 		} // Vendor percentage is measured; token settlement is irrelevant.
 		byAccount[w.AccountID] = append(byAccount[w.AccountID], w)
 	}

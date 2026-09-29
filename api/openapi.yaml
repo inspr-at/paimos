@@ -3028,6 +3028,17 @@ paths:
         '201': {description: Run, content: {application/json: {schema: {$ref: '#/components/schemas/AgentRun'}}}}
         '403': {$ref: '#/components/responses/Error'}
         '409': {$ref: '#/components/responses/Error'}
+  /runs/{runId}/capacity-override:
+    post:
+      operationId: runNowOnce
+      summary: Let a queued managed run skip its schedule and reserve once
+      description: Person with run.create permission and work-order edit access only. Vendor, account, approval, freshness and concurrency fences still apply.
+      parameters: [{name: runId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody: {required: true, content: {application/json: {schema: {type: object, additionalProperties: false, required: [capacity_override], properties: {capacity_override: {type: string, const: now}}}}}}
+      responses:
+        '200': {description: Updated run, content: {application/json: {schema: {$ref: '#/components/schemas/AgentRun'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
   /projects/{projectId}/harness-sessions:
     parameters:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -8769,10 +8780,21 @@ components:
             work_order_id: {type: string, format: uuid}
             submitted_by_principal_id: {type: string, format: uuid}
             created_at: {type: string, format: date-time}
+    CapacityWait:
+      type: object
+      required: [code, run_now_allowed]
+      description: Server routing advice; times use the account owner schedule. Does not grant dispatch authority.
+      properties:
+        code: {type: string, enum: [schedule, reserve, reading, vendor, offline, sign_in, hold, approval, capacity, allowance, models, state]}
+        until: {type: string, format: date-time}
+        read_at: {type: string, format: date-time}
+        timezone: {type: string}
+        run_now_allowed: {type: boolean, description: Only schedule or reserve waits can be skipped; all safety fences still apply.}
     RunCreate:
       type: object
       required: [agent_principal_id, model_profile_id]
       properties:
+        capacity_override: {type: string, enum: [now], description: Person only. Skip the schedule and reserve for this run; never approval, vendor truth, sign-in, freshness or concurrency.}
         agent_principal_id: {type: string, format: uuid}
         model_profile_id: {type: string, format: uuid}
         requested_account_id:
@@ -9364,6 +9386,8 @@ components:
       type: object
       required: [id, work_order_id, agent_principal_id, status, model_evidence, input_tokens, output_tokens, cost_micros, created_at]
       properties:
+        capacity_override: {type: string, enum: ['', now]}
+        wait: {$ref: '#/components/schemas/CapacityWait'}
         purpose: {type: string, enum: [managed, pairing_verification]}
         verification_policy: {type: string, enum: [read_only], description: Present only for pairing_verification; local adapter must enforce this policy.}
         verification_task: {type: string, description: Fixed harmless server task for pairing verification.}
@@ -9408,7 +9432,7 @@ components:
         turn_count_delta: {type: integer, minimum: 0}
         effective_model: {type: string}
         model_evidence: {type: string, enum: [unverified, vendor_reported]}
-        error_code: {type: string, enum: [event_stream_bound, app_server_protocol, child_exit_failed, turn_failed, child_stop_failed, ownership_lost, reporter_unavailable, workspace_conflict, decision_refused]}
+        error_code: {type: string, enum: [event_stream_bound, app_server_protocol, child_exit_failed, turn_failed, child_stop_failed, ownership_lost, reporter_unavailable, workspace_conflict, decision_refused, vendor_limit]}
         git_commits:
           type: array
           maxItems: 20
@@ -9686,6 +9710,7 @@ components:
       type: object
       required: [id, label, plan, registered_by_principal_id, state, last_probe_at, last_probe_ok, available, unavailable_reasons, remaining_fraction, windows, models, default_model_profile_id]
       properties:
+        wait: {$ref: '#/components/schemas/CapacityWait'}
         id: {type: string, format: uuid}
         label: {type: string}
         plan: {type: string}

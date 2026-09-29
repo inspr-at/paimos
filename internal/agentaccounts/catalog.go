@@ -60,6 +60,7 @@ type CatalogHarness struct {
 }
 
 type CatalogAccount struct {
+	Wait               *CapacityWait   `json:"wait,omitempty"`
 	ID                 string          `json:"id"`
 	Label              string          `json:"label"`
 	Plan               string          `json:"plan"`
@@ -136,6 +137,44 @@ func (m *Module) catalog(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		out = buildCatalog(accounts, profiles, used, role, now)
+		byID := make(map[string]Account, len(accounts))
+		for _, a := range accounts {
+			byID[a.ID] = a
+		}
+		for hi := range out.Hosts {
+			for vi := range out.Hosts[hi].Harnesses {
+				h := &out.Hosts[hi].Harnesses[vi]
+				h.DefaultAccountID = nil
+				best := -1.0
+				for ai := range h.Accounts {
+					choice := &h.Accounts[ai]
+					a := byID[choice.ID]
+					windows, wait, err := admission(r.Context(), tx, a, a.Windows, now, used[a.ID], runRow{Purpose: "managed"}, false)
+					if err != nil {
+						return err
+					}
+					if wait == nil {
+						wait = windowWait(windows, now)
+					}
+					if len(choice.Models) == 0 {
+						wait = waitFor("models")
+					}
+					choice.Wait = wait
+					choice.Available = wait == nil
+					// Retain the legacy reason vocabulary for existing clients.
+					if choice.Available {
+						choice.UnavailableReasons = []string{}
+					} else if len(choice.UnavailableReasons) == 0 {
+						choice.UnavailableReasons = []string{"allowance"}
+					}
+					if choice.Available && choice.RemainingFraction != nil && *choice.RemainingFraction > best {
+						best = *choice.RemainingFraction
+						id := choice.ID
+						h.DefaultAccountID = &id
+					}
+				}
+			}
+		}
 		return nil
 	})
 	if err != nil {

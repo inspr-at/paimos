@@ -97,7 +97,7 @@ func (t Telemetry) validate() error {
 		return workorders.Fail(400, "vendor evidence requires effective_model")
 	}
 	switch t.ErrorCode {
-	case "", "event_stream_bound", "app_server_protocol", "child_exit_failed", "turn_failed", "child_stop_failed", "ownership_lost", "reporter_unavailable", "workspace_conflict", "decision_refused":
+	case "", "event_stream_bound", "app_server_protocol", "child_exit_failed", "turn_failed", "child_stop_failed", "ownership_lost", "reporter_unavailable", "workspace_conflict", "decision_refused", "vendor_limit":
 	default:
 		return workorders.Fail(400, "invalid error code")
 	}

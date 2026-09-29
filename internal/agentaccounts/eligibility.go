@@ -27,7 +27,11 @@ func HarnessHealthAt(ctx context.Context, tx pgx.Tx, now time.Time) (map[string]
 		health.Accounts++
 		if account.State == "available" && probeFresh(account, now) && used[account.ID] < account.MaxParallel {
 			health.Available++
-			if allowanceHeadroom(account.Windows, now) {
+			windows, wait, err := admission(ctx, tx, account, account.Windows, now, used[account.ID], runRow{Purpose: "managed"}, false)
+			if err != nil {
+				return nil, err
+			}
+			if wait == nil && windowWait(windows, now) == nil {
 				health.Dispatchable++
 			}
 		}
