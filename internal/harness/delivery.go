@@ -68,6 +68,8 @@ func (m *Module) drain(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
 }
 func (m *Module) completeDelivery(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
 	var in struct {
+		Outcome        string `json:"outcome"`
+		FailureReason  string `json:"failure_reason"`
 		DeliveryID     string `json:"delivery_id"`
 		Cursor         int64  `json:"cursor"`
 		EffectiveLevel string `json:"effective_level"`
@@ -90,6 +92,14 @@ func (m *Module) completeDelivery(r *http.Request, tx pgx.Tx, p tenant.Principal
 	}
 	if in.FallbackReason != "" {
 		return nil, workorders.Fail(400, "fallback reason is not applicable")
+	}
+	if in.Outcome == "" {
+		in.Outcome = "handed_off"
+	}
+	if (in.Outcome != "handed_off" && in.Outcome != "failed") ||
+		(in.Outcome == "handed_off" && in.FailureReason != "") ||
+		(in.Outcome == "failed" && in.FailureReason != "outcome_unconfirmed" && in.FailureReason != "child_unavailable") {
+		return nil, workorders.Fail(400, "invalid delivery outcome")
 	}
 	ctx := r.Context()
 	s, err := worker(ctx, tx, r, p)
@@ -120,10 +130,19 @@ func (m *Module) completeDelivery(r *http.Request, tx pgx.Tx, p tenant.Principal
 	if err != nil {
 		return nil, err
 	}
-	if err = inbox.ConfirmSessionMessage(ctx, tx, p, messageID); err != nil {
+	if in.Outcome == "failed" {
+		err = inbox.FailSessionMessage(ctx, tx, p, messageID, in.FailureReason)
+	} else {
+		err = inbox.ConfirmSessionMessage(ctx, tx, p, messageID)
+	}
+	if err != nil {
 		return nil, err
 	}
-	if err = record(ctx, tx, p, s, "delivery_acknowledged", nil, map[string]any{"message_id": messageID, "cursor": cursor}); err != nil {
+	event := "delivery_acknowledged"
+	if in.Outcome == "failed" {
+		event = "delivery_failed"
+	}
+	if err = record(ctx, tx, p, s, event, nil, map[string]any{"message_id": messageID, "cursor": cursor, "outcome": in.Outcome, "failure_reason": in.FailureReason}); err != nil {
 		return nil, err
 	}
 	err = tx.QueryRow(ctx, `UPDATE harness_deliveries SET completed_at=clock_timestamp() WHERE id=$1 RETURNING completed_at`, in.DeliveryID).Scan(&completed)

@@ -2612,6 +2612,33 @@ paths:
       description: Session detail, including at most 20 recent activity notes and metadata changes, newest first.
       responses:
         '200': {description: Session detail, headers: {Aeon-Contract: {$ref: '#/components/headers/HarnessSessionContract'}}, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessSession'}}}}
+  /projects/{projectId}/harness-sessions/{sessionId}/complete-delivery:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: X-Aeon-Worker-Lease, in: header, required: true, schema: {type: string}, description: Private exact generation proof}
+    post:
+      security: *auth
+      operationId: completeHarnessDelivery
+      description: Settle an exact worker lease. Omitted outcome means handed_off; failed requires a bounded reason and advances the sender receipt without reinjecting uncertain input.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [delivery_id, cursor]
+              properties:
+                delivery_id: {type: string, format: uuid}
+                cursor: {type: integer, minimum: 1}
+                effective_level: {type: string, enum: [simple], default: simple}
+                outcome: {type: string, enum: [handed_off, failed], default: handed_off}
+                failure_reason: {type: string, enum: [outcome_unconfirmed, child_unavailable]}
+      responses:
+        '200': {description: Exact leased delivery settled idempotently}
+        '400': {description: Invalid settlement}
+        '409': {description: Lease cursor mismatch or released lease}
+        '410': {description: Archived generation}
   /projects/{projectId}/harness-sessions/{sessionId}/managed-controls:
     parameters:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}

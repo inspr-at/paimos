@@ -124,7 +124,7 @@ func TestRemoteHarnessMetadataOmitsUnknownAndUnchangedFields(t *testing.T) {
 	for i, update := range []HarnessSession{
 		{Model: "model-a", ReasoningEffort: "high"},
 		{Model: "model-b"},
-		{},
+		{Activity: "idle"},
 	} {
 		update.ID, update.ProjectID, update.Lease = session.ID, session.ProjectID, session.Lease
 		update.ActivitySequence = int64(i + 1)
@@ -153,6 +153,9 @@ func TestRemoteHarnessMetadataOmitsUnknownAndUnchangedFields(t *testing.T) {
 	}
 	if _, ok := beats[1]["reasoning_effort"]; ok {
 		t.Fatal("unknown effort was sent")
+	}
+	if beats[0]["activity"] != "busy" || beats[2]["activity"] != "idle" || beats[2]["phase"] != "working" {
+		t.Fatal("idle activity changed the live phase or was lost")
 	}
 	if _, ok := beats[2]["model"]; ok {
 		t.Fatal("routine heartbeat repeated model")
