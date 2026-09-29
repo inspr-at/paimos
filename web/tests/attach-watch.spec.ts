@@ -170,8 +170,8 @@ test('strict approval cannot proceed on a Linux daemon', async ({ page }) => {
   await expect(page.getByRole('button', { name: 'Decline', exact: true })).toBeEnabled()
 })
 
-for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390]) {
-  test(`metadata-only attach approval and status ${theme} ${width}`, async ({ page }) => {
+for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390]) for (const consent_mode of ['aeon', 'local_auth'] as const) {
+  test(`metadata-only attach approval and status ${theme} ${width} ${consent_mode}`, async ({ page }) => {
     const worker = await setup(page, true, theme)
     Object.assign(worker.watch!, { mode: 'lease' })
     await page.setViewportSize({ width, height: 1000 })
@@ -181,7 +181,7 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390])
     expect(await page.evaluate(() => (window as unknown as { attachChannels: { url: string }[] }).attachChannels.filter(c => c.url.endsWith('/watch')).length)).toBe(0)
     await page.getByRole('button', { name: 'Close session details' }).click()
     const review = {
-      request_id: 'lease-fixture', request_digest: 'a'.repeat(64), consent_digest: 'b'.repeat(64), consent_mode: 'aeon', state: 'pending', expires_at: new Date(Date.now() + 600_000).toISOString(),
+      request_id: 'lease-fixture', request_digest: 'a'.repeat(64), consent_digest: 'b'.repeat(64), consent_mode, state: 'pending', expires_at: new Date(Date.now() + 600_000).toISOString(),
       snapshot: { mode: 'lease', platform: 'darwin', computer_id: 'computer-fixture', project_id: 'p-pharos', ticket_id: 'n-2', host: 'Markus’s MacBook', harness: 'codex', transcript: '', file_id: '', process: { pid: 4812, uid: 501, started: '2026-09-29T17:00:00Z', executable: '/opt/homebrew/bin/codex', cwd: '/Users/markus/Code/pharos' } },
     }
     await page.route('**/api/nodes/p-pharos', route => route.fulfill({ json: { id: 'p-pharos', key: 'PHAROS', title: 'Pharos' } }))
@@ -212,10 +212,11 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390])
     expect(await dialog.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true)
     expect((await new AxeBuilder({ page }).include('dialog').analyze()).violations).toEqual([])
     mkdirSync(shots, { recursive: true })
-    await page.screenshot({ path: `${shots}/lease-approval-${theme}-${width}.png` })
-    await dialog.getByRole('button', { name: 'Allow attach', exact: true }).click()
-    await expect(dialog).toContainText('Approved. Keep the attach terminal open to report session status.')
-    await expect(dialog.getByRole('button', { name: 'Allow attach', exact: true })).toHaveCount(0)
+    await page.screenshot({ path: `${shots}/lease-approval-${consent_mode}-${theme}-${width}.png` })
+    const action = consent_mode === 'local_auth' ? 'Allow and confirm on Mac' : 'Allow attach'
+    await dialog.getByRole('button', { name: action, exact: true }).click()
+    await expect(dialog).toContainText(consent_mode === 'local_auth' ? 'Waiting for confirmation on Markus’s MacBook. Nothing is shared until you confirm there.' : 'Approved. Keep the attach terminal open to report session status.')
+    await expect(dialog.getByRole('button', { name: action, exact: true })).toHaveCount(0)
     await expect(dialog.getByRole('button', { name: 'Detach session', exact: true })).toBeVisible()
     expect(approvals).toBe(1)
   })
