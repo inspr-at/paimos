@@ -795,9 +795,11 @@ func (m *Module) status(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, er
 	return s, nil
 }
 
-// lookup answers the ambient tell check. It reads one generation's identity and
-// end times and does not lock the row or load activity, history, or controls.
-func (m *Module) lookup(r *http.Request, tx pgx.Tx, _ tenant.Principal) (any, error) {
+// lookup answers the ambient tell check for the caller's own generation.
+// Another principal's row is the same not-found as a missing id: one query,
+// with no second read that could differ in timing or body. It does not lock
+// the row or load activity, history, or controls.
+func (m *Module) lookup(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
 	projectID, id := r.PathValue("projectId"), r.PathValue("sessionId")
 	if !workorders.UUID(projectID) {
 		return nil, workorders.Fail(400, "invalid project id")
@@ -806,7 +808,7 @@ func (m *Module) lookup(r *http.Request, tx pgx.Tx, _ tenant.Principal) (any, er
 		return nil, workorders.Fail(400, "invalid session id")
 	}
 	var out sessionLookup
-	err := tx.QueryRow(r.Context(), `SELECT id::text, project_id::text, agent_principal_id::text, stopped_at, archived_at FROM harness_sessions WHERE project_id=$1 AND id=$2`, projectID, id).Scan(&out.ID, &out.ProjectID, &out.AgentPrincipalID, &out.StoppedAt, &out.ArchivedAt)
+	err := tx.QueryRow(r.Context(), `SELECT id::text, project_id::text, agent_principal_id::text, stopped_at, archived_at FROM harness_sessions WHERE project_id=$1 AND id=$2 AND agent_principal_id=$3`, projectID, id, p.ID).Scan(&out.ID, &out.ProjectID, &out.AgentPrincipalID, &out.StoppedAt, &out.ArchivedAt)
 	if err != nil {
 		return nil, err
 	}

@@ -55,7 +55,8 @@ func TestHarnessSessionLookup(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	req := httptest.NewRequest(http.MethodGet, path, nil).WithContext(tenant.WithPrincipal(ctx, f.person))
+	req := httptest.NewRequest(http.MethodGet, path, nil).WithContext(tenant.WithPrincipal(ctx, f.agent))
+	req.Header.Set("Authorization", "Bearer "+f.key)
 	rec := httptest.NewRecorder()
 	f.mux.ServeHTTP(rec, req)
 	release()
@@ -77,10 +78,31 @@ func TestHarnessSessionLookup(t *testing.T) {
 		t.Fatal("session detail dropped activity history")
 	}
 
+	sibling := tenant.Principal{ID: uid(), TenantID: f.person.TenantID, Kind: tenant.Agent}
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO principals(tenant_id,id,kind,name) VALUES($1,$2,'agent','sibling')`, sibling.TenantID, sibling.ID)
+		return err
+	})
+	dbtest.BindRole(t, f.db, sibling.TenantID, sibling.ID, "member")
+	siblingKey := mintKey(t, f, sibling, []string{"harness.read"})
+	if detailSibling := callBearer(f, sibling, siblingKey, "GET", "/api/projects/"+f.project+"/harness-sessions/"+id, nil, ""); detailSibling.Code != 200 {
+		t.Fatalf("sibling with project access should read session detail: %d %s", detailSibling.Code, detailSibling.Body.String())
+	}
+	missing := callBearer(f, sibling, siblingKey, "GET", "/api/projects/"+f.project+"/harness-sessions/"+uid()+"/lookup", nil, "")
+	hidden := callBearer(f, sibling, siblingKey, "GET", path, nil, "")
+	expect(t, missing, 404)
+	if hidden.Code != missing.Code || hidden.Body.String() != missing.Body.String() || hidden.Header().Get("Content-Type") != missing.Header().Get("Content-Type") || hidden.Header().Get("Cache-Control") != missing.Header().Get("Cache-Control") {
+		t.Fatalf("other principal lookup %d %q, missing %d %q", hidden.Code, hidden.Body.String(), missing.Code, missing.Body.String())
+	}
+	personHidden := f.call(f.person, "GET", path, nil, "")
+	if personHidden.Code != missing.Code || personHidden.Body.String() != missing.Body.String() {
+		t.Fatalf("person lookup %d %q, missing %d %q", personHidden.Code, personHidden.Body.String(), missing.Code, missing.Body.String())
+	}
+
 	expect(t, f.call(f.foreign, "GET", path, nil, ""), 404)
-	expect(t, f.call(f.person, "GET", "/api/projects/"+f.project+"/harness-sessions/"+uid()+"/lookup", nil, ""), 404)
-	expect(t, f.call(f.person, "GET", "/api/projects/"+uid()+"/harness-sessions/"+id+"/lookup", nil, ""), 404)
-	expect(t, f.call(f.person, "GET", "/api/projects/"+f.project+"/harness-sessions/not-a-uuid/lookup", nil, ""), 400)
+	expect(t, f.call(f.agent, "GET", "/api/projects/"+f.project+"/harness-sessions/"+uid()+"/lookup", nil, ""), 404)
+	expect(t, f.call(f.agent, "GET", "/api/projects/"+uid()+"/harness-sessions/"+id+"/lookup", nil, ""), 404)
+	expect(t, f.call(f.agent, "GET", "/api/projects/"+f.project+"/harness-sessions/not-a-uuid/lookup", nil, ""), 400)
 
 	quiet := tenant.Principal{ID: uid(), TenantID: f.person.TenantID, Kind: tenant.Agent}
 	secret := uid()
@@ -103,10 +125,14 @@ func TestHarnessSessionLookup(t *testing.T) {
 		_, err := tx.Exec(t.Context(), `UPDATE harness_sessions SET phase='stopped',stopped_at=now(),archived_at=now(),recovery_process_state='unknown',recovery_request_id=gen_random_uuid(),recovery_request_digest='fixture'::bytea,recovery_actor_id=agent_principal_id,recovery_reason='fixture' WHERE id=$1`, id)
 		return err
 	})
-	endedRec := f.call(f.person, "GET", path, nil, "")
+	endedRec := f.call(f.agent, "GET", path, nil, "")
 	expect(t, endedRec, 200)
 	ended := decode(t, endedRec)
-	if ended["stopped_at"] == nil || ended["archived_at"] == nil || ended["agent_principal_id"] != f.agent.ID {
+	if len(ended) != 5 || ended["id"] != id || ended["project_id"] != f.project || ended["stopped_at"] == nil || ended["archived_at"] == nil || ended["agent_principal_id"] != f.agent.ID {
 		t.Fatalf("ended lookup: %#v", ended)
+	}
+	endedHidden := callBearer(f, sibling, siblingKey, "GET", path, nil, "")
+	if endedHidden.Code != missing.Code || endedHidden.Body.String() != missing.Body.String() {
+		t.Fatalf("ended other principal lookup %d %q, missing %d %q", endedHidden.Code, endedHidden.Body.String(), missing.Code, missing.Body.String())
 	}
 }

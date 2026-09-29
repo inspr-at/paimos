@@ -2676,7 +2676,7 @@ paths:
       - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
     get:
       operationId: lookupHarnessSession
-      description: Active-generation check for an ambient sender. One row, no lock, and no activity, history, or controls.
+      description: Active-generation check for the caller's own ambient sender session. One row, no lock, and no activity, history, or controls. A session owned by another principal is not found.
       responses:
         '200':
           description: Session identity and end times
@@ -2685,7 +2685,7 @@ paths:
               schema: {$ref: '#/components/schemas/HarnessSessionLookup'}
         '400': {description: Invalid id}
         '403': {$ref: '#/components/responses/Error'}
-        '404': {description: Session is not in this project}
+        '404': {description: No such session for this caller}
   /projects/{projectId}/harness-sessions/{sessionId}/complete-delivery:
     parameters:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -8195,7 +8195,7 @@ components:
         location: {type: string, enum: [approvals, messages, session]}
     HarnessSessionLookup:
       type: object
-      description: Enough to decide whether an ambient tell may name this generation. Null end times mean it is still active.
+      description: Enough to decide whether an ambient tell may name this generation. Returned only for the caller's own session. Null end times mean it is still active.
       required: [id, project_id, agent_principal_id, stopped_at, archived_at]
       properties:
         id: {type: string, format: uuid}
