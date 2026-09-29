@@ -80,7 +80,7 @@ func TestLostContactSweepClosesOnlySilentUnmanagedSessions(t *testing.T) {
 	}
 	for _, s := range []lostSession{silent, never} {
 		got := sessionState(t, f, s)
-		if got["phase"] != "stopped" || got["stop_reason"] != "heartbeat_lost" || got["stopped_at"] == nil || got["archived_at"] != nil {
+		if got["phase"] != "stopped" || got["stop_reason"] != "heartbeat_lost" || got["stopped_at"] == nil || got["archived_at"] != nil || got["has_problem"] != false {
 			t.Fatalf("silent session not lost: %v", got)
 		}
 	}
