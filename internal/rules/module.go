@@ -453,11 +453,15 @@ func (m *Module) merged(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, er
 	if err != nil {
 		return nil, err
 	}
+	maximum, err := RequestMaximum(r)
+	if err != nil {
+		return nil, err
+	}
 	cat, err := loadDoctrineCatalog(r.Context(), tx)
 	if err != nil {
 		return nil, err
 	}
-	merged, err := MergeDeliveredWithin(c, snapshots, time.Now().UTC(), limits, cat)
+	merged, err := MergeDeliveredForClient(c, snapshots, time.Now().UTC(), limits, maximum, cat)
 	if err != nil {
 		return nil, err
 	}

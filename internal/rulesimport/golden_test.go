@@ -165,7 +165,7 @@ func TestGoldenContradictionsReport(t *testing.T) {
 	}
 }
 
-// The importer budget equals rules.MaxBytes; that equality is checked in
+// The importer budget equals rules.LegacyMaxBytes; that equality is checked in
 // cap_external_test.go, because rules imports this package through doctrine.
 func TestAlwaysOnBudgetRejectsOverCap(t *testing.T) {
 	over := mustBuild(t, Request{Context: ContextTemplate, Files: []string{

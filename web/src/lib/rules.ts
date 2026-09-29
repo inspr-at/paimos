@@ -740,7 +740,8 @@ export const listComparisons = (projectId: string) => send<{ comparisons: RulesC
 // ---------- Budget and the explained file (AEON-314) ----------
 export type LayerBytes = Partial<Record<LayerName, number>>
 export interface RuleBudget { max_bytes: number; layer_max_bytes: LayerBytes }
-export interface RuleBudgetView extends RuleBudget { default_bytes: number; min_bytes: number; ceiling_bytes: number; min_layer_bytes: number }
+export interface RuleBudgetBlocker { host: string; harness: string; version?: string; max_session_file_bytes: number }
+export interface RuleBudgetView extends RuleBudget { default_bytes: number; min_bytes: number; ceiling_bytes: number; min_layer_bytes: number; blocking_clients?: RuleBudgetBlocker[]; blocking_clients_more?: number }
 export const DEFAULT_BUDGET: RuleBudgetView = { max_bytes: RULES_BUDGET, layer_max_bytes: {}, default_bytes: RULES_BUDGET, min_bytes: 2000, ceiling_bytes: 12000, min_layer_bytes: 500 }
 export const getBudget = () => send<RuleBudgetView>('/rules/budget').then(view => ({ ...view, layer_max_bytes: view.layer_max_bytes ?? {} }))
 export const putBudget = (budget: RuleBudget) => send<RuleBudgetView>('/rules/budget', 'PUT', budget).then(view => ({ ...view, layer_max_bytes: view.layer_max_bytes ?? {} }))

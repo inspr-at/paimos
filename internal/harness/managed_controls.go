@@ -200,7 +200,19 @@ func (m *Module) managedContext(r *http.Request, tx pgx.Tx, p tenant.Principal) 
 	if h == "claude" {
 		h = "claude-code"
 	}
-	return rules.ForManagedSession(r.Context(), tx, p, s.ProjectID, *s.WorkOrderID, h)
+	maximum, err := rules.RequestMaximum(r)
+	if err != nil {
+		return nil, workorders.Fail(400, err.Error())
+	}
+	var registered int
+	if err = tx.QueryRow(r.Context(), `SELECT coalesce(max_session_file_bytes,12000) FROM harness_sessions WHERE id=$1`, s.ID).Scan(&registered); err != nil {
+		return nil, err
+	}
+	out, err := rules.ForManagedSession(r.Context(), tx, p, s.ProjectID, *s.WorkOrderID, h, min(maximum, registered))
+	if e, ok := err.(*rules.Error); ok {
+		return nil, workorders.Fail(e.Status, e.Message)
+	}
+	return out, err
 }
 
 func controlRequesterAuthorized(r *http.Request, tx pgx.Tx, p tenant.Principal, s Session, c Control) (bool, error) {

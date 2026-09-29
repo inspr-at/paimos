@@ -340,8 +340,7 @@ func TestRulesReceiptContextCredentialAndGenerationFencing(t *testing.T) {
 	}
 }
 
-// Receipts accept exactly the 12,000-byte session file every deployed client
-// enforces and refuse one byte more (AEON-314 keeps the ceiling).
+// Receipts accept the upgraded 64,000-byte ceiling and reject one byte more.
 func TestRulesReceiptByteSizeBoundary(t *testing.T) {
 	f, session, lease, in := receiptFixture(t)
 	path := session + "/rules-receipts"
@@ -352,8 +351,8 @@ func TestRulesReceiptByteSizeBoundary(t *testing.T) {
 	next := in
 	next.RequestID, next.ExpectedRevision, next.ByteSize = uid(), &rev, &over
 	expect(t, f.call(f.agent, "POST", path, next, lease), 400)
-	if rules.MaxBytes != 12000 {
-		t.Fatalf("session file ceiling moved to %d; raising it is version-gated", rules.MaxBytes)
+	if rules.MaxBytes != 64000 {
+		t.Fatalf("unexpected upgraded session file ceiling %d", rules.MaxBytes)
 	}
 }
 

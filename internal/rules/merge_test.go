@@ -96,7 +96,7 @@ func TestMergeUTF8BudgetAndOnDemandDetails(t *testing.T) {
 	s := testSnapshot("big", Scope{Layer: "project", ProjectID: testProject}, rs...)
 	if _, err := Merge(testContext(), []Snapshot{floorSnapshot(), s}, time.Now()); err == nil {
 		t.Fatal("unicode byte overflow accepted")
-	} else if e, ok := err.(*Error); !ok || e.Code != "rules_budget_exceeded" || e.ActualBytes <= MaxBytes {
+	} else if e, ok := err.(*Error); !ok || e.Code != "rules_budget_exceeded" || e.ActualBytes <= LegacyMaxBytes {
 		t.Fatal(err)
 	}
 	s.Rules = s.Rules[:1]
@@ -190,7 +190,7 @@ func TestMergedStoreBudget(t *testing.T) {
 func TestMergeExactBudgetAndStubFloor(t *testing.T) {
 	base := floorSnapshot()
 	header := "# Aeon session rules\n\n"
-	capacity := MaxBytes - len(header) - len(ruleLine(base.Rules[0]))
+	capacity := LegacyMaxBytes - len(header) - len(ruleLine(base.Rules[0]))
 	rs := []Rule{}
 	for i := 0; i < 24; i++ {
 		rs = append(rs, testRule(fmt.Sprintf("limit-%02d", i), ""))
@@ -205,7 +205,7 @@ func TestMergeExactBudgetAndStubFloor(t *testing.T) {
 	}
 	s := testSnapshot("limit", Scope{Layer: "project", ProjectID: testProject}, rs...)
 	m, err := Merge(testContext(), []Snapshot{base, s}, time.Now())
-	if err != nil || m.ByteSize != MaxBytes {
+	if err != nil || m.ByteSize != LegacyMaxBytes {
 		t.Fatal("exact byte budget", err, m.ByteSize)
 	}
 	stub, err := Stub(m)

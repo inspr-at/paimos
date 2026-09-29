@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -385,6 +386,39 @@ func TestPublicationCatalogIsLoadedOncePerRequest(t *testing.T) {
 		return nil
 	})
 	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A compatibility cut (AEON-328) keeps the doctrine release note and the
+// doctrine floor pin, like every locked rule (AEON-320).
+func TestDoctrineSurvivesCompatibilityCut(t *testing.T) {
+	now := time.Date(2026, 9, 29, 12, 0, 0, 0, time.UTC)
+	floor := floorSnapshot()
+	cat := doctrine.Catalog{
+		Releases: []doctrine.Release{{Repository: "org/repo", Commit: strings.Repeat("b", 40)}},
+		Rules:    []doctrine.Indexed{{Identity: "org/repo/kernel#safety", Text: floor.Rules[0].Text}},
+	}
+	var extra []Rule
+	for i := range 8 {
+		extra = append(extra, testRule("long-"+strconv.Itoa(i), strings.Repeat("Keep this project preference in mind. ", 10)))
+	}
+	project := testSnapshot("project", Scope{Layer: "project", ProjectID: testProject}, extra...)
+	full, err := MergeDeliveredForClient(testContext(), []Snapshot{project, floor}, now, DefaultBudget(), LegacyMaxBytes, cat)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if full.ByteSize <= MinBudgetBytes {
+		t.Fatalf("fixture too small to force a cut: %d", full.ByteSize)
+	}
+	cut, err := MergeDeliveredForClient(testContext(), []Snapshot{project, floor}, now, DefaultBudget(), MinBudgetBytes, cat)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cut.ByteSize > MinBudgetBytes || !strings.Contains(cut.Body, "Compatibility cut") || !strings.Contains(cut.Body, cat.Pointer()) || !strings.Contains(cut.Body, "org/repo/kernel#safety at commit "+strings.Repeat("b", 40)) || strings.Contains(cut.Body, floor.Rules[0].Text) {
+		t.Fatalf("cut lost doctrine delivery: %q", cut.Body)
+	}
+	if err := ValidateMerged(cut, testContext(), now); err != nil {
 		t.Fatal(err)
 	}
 }

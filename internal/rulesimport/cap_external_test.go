@@ -11,8 +11,8 @@ import (
 
 // An external test package: internal/rules imports rulesimport through the
 // doctrine layer (AEON-318), so an in-package test importing rules would cycle.
-func TestAlwaysOnBudgetMatchesShippedCap(t *testing.T) {
-	if rulesimport.AlwaysOnBudget != rules.MaxBytes {
-		t.Fatalf("importer budget %d, shipped cap %d", rulesimport.AlwaysOnBudget, rules.MaxBytes)
+func TestAlwaysOnBudgetKeepsDefault(t *testing.T) {
+	if rulesimport.AlwaysOnBudget != rules.LegacyMaxBytes {
+		t.Fatalf("importer budget %d, default %d", rulesimport.AlwaysOnBudget, rules.LegacyMaxBytes)
 	}
 }

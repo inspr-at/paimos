@@ -139,7 +139,7 @@ func TestCoordinatorReadsRuleDraftsOnlyOnItsProjects(t *testing.T) {
 	locked.Strength = "locked"
 	var set Set
 	json.Unmarshal(must(admin, http.MethodPost, "/api/rules/sets", map[string]any{"layer_id": company.ID, "name": "Safety"}, http.StatusOK), &set)
-	must(admin, http.MethodPut, "/api/rules/sets/"+set.ID+"/draft", draftInput{1, "Safety", []Rule{locked}}, http.StatusOK)
+	must(admin, http.MethodPut, "/api/rules/sets/"+set.ID+"/draft", draftInput{ExpectedRevision: 1, Name: "Safety", Rules: []Rule{locked}}, http.StatusOK)
 	must(admin, http.MethodPost, "/api/rules/sets/"+set.ID+"/publish", map[string]any{"expected_revision": 2, "version": "260929160000.0.0"}, http.StatusOK)
 	merged := "/api/rules/merged?project_id=" + projectA + "&person_id=" + admin.ID + "&agent_id=" + coordinator.ID + "&role=coordinator&harness=codex"
 	if body := must(coordinator, http.MethodGet, merged, nil, http.StatusOK); !strings.Contains(string(body), "Keep the locked company floor.") {

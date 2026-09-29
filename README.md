@@ -252,8 +252,32 @@ Role/harness are explicit selection context, not permission grants or proof of
 which process executed the result. Precedence is company, project, person, agent
 role, named agent, task. The highest matching identity wins; identical-rank
 ambiguity fails closed. No natural-language conflict guesses are made. Expiry is
-checked on every request. The complete rendered body must fit 12,000 UTF-8 bytes;
-an oversized result returns 422 with the measured size instead of truncating.
+checked on every request. The complete rendered body must fit the workspace
+budget (12,000 UTF-8 bytes by default); publication over that budget returns 422.
+Admins can set up to 64,000 bytes in the rules budget editor once all clients
+active in the tenant over the last seven days report support. Missing reports,
+reports under 12,000, stopped/archived older generations and an empty inventory
+retain the 12,000-byte ceiling. The editor lists up to 50 blocking hosts,
+harnesses and reported versions, and counts any further clients.
+CLI and agentd send optional `max_session_file_bytes` and `rules_client_version`
+on registration and every heartbeat. The number is that harness's default read
+limit: Codex stops at `project_doc_max_bytes` (32,768 bytes of combined
+`AGENTS.md`); the other harnesses report 64,000. Omission resets support to the
+legacy limit, so rolling a client back closes the gate. These are request-only fields;
+PHAROS/JANUS reporter response contracts and pins are unchanged.
+
+Rules requests report `X-Aeon-Max-Session-File-Bytes` (2,000–64,000; omission
+means 12,000). Managed delivery also respects its registered capability.
+When a valid publication is larger than that limit, delivery retains all locked
+rules, then adds whole rules in precedence/identity order as space allows, with
+an explicit compatibility note in the file. Legacy cuts also fit the old 512-KiB
+cache envelope, with 16 KiB reserved for its wrapper. The body digest, receipt
+and served manifest describe the actual cut. If locked rules plus the note cannot fit,
+delivery fails closed with an upgrade message; it never drops a locked rule.
+Upgraded CLI, managed delivery, Claude bridge and caches accept 64,000-byte
+files. The bounded cache envelope allows 32 MiB for repeated text, metadata and
+worst-case JSON escaping. Roll out the server before upgraded reporting clients;
+raise the workspace budget only after the editor's gate clears.
 An applicable published locked company floor is required.
 
 `paimos session start --rules-preview` is an opt-in JSON preview. Use `--project`
