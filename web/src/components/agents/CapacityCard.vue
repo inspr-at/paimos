@@ -371,15 +371,15 @@ onBeforeUnmount(() => { document.removeEventListener('click', outside, true); wi
 .pool-info { min-width: 0; }
 .pool-head { display: flex; align-items: center; gap: 10px; min-height: 32px; }
 .vendor { display: grid; place-items: center; flex: none; width: 30px; height: 30px; border-radius: 9px; background: var(--surface-raised); box-shadow: inset 0 0 0 1px var(--line), 0 1px 2px rgba(32, 60, 61, .06); color: var(--ink); }
-.pool-name { color: var(--ink); font-size: 15px; font-weight: 650; }
-.pool-plan { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; color: var(--ink-3); font-size: 12.5px; white-space: nowrap; }
+.pool-name { min-width: 0; overflow-wrap: anywhere; color: var(--ink); font-size: 15px; font-weight: 650; }
+.pool-plan { min-width: 0; max-width: 100%; overflow: hidden; overflow-wrap: anywhere; text-overflow: ellipsis; color: var(--ink-3); font-size: 12.5px; white-space: nowrap; }
 .pool-head .more { flex: none; width: 32px; height: 32px; margin-left: auto; }
 .override { flex: none; display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 2px 0 9px; border-radius: 999px; background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); font-size: 12px; font-weight: 600; white-space: nowrap; }
 .override.hold { background: var(--surface-sunken); box-shadow: inset 0 0 0 1px var(--line-2); color: var(--ink-2); }
 .override button { display: grid; place-items: center; width: 20px; height: 20px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: inherit; }
 .override button:hover { background: var(--row-hover); }
 .override button:focus-visible { box-shadow: var(--focus-ring); }
-.plan { margin-top: 8px; padding-left: 40px; color: var(--ink-2); font-size: 13.5px; line-height: 1.5; text-wrap: pretty; }
+.plan { min-width: 0; margin-top: 8px; padding-left: 40px; overflow-wrap: anywhere; color: var(--ink-2); font-size: 13.5px; line-height: 1.5; text-wrap: pretty; }
 .plan :deep(b) { color: var(--ink); font-weight: 600; }
 .plan :deep(.n) { color: var(--teal-ink); font-weight: 700; font-variant-numeric: tabular-nums; }
 .plan.ahead :deep(.n) { color: var(--gold-ink); }
@@ -388,8 +388,8 @@ onBeforeUnmount(() => { document.removeEventListener('click', outside, true); wi
 .acct { display: grid; grid-template-columns: minmax(0, 180px) minmax(140px, 1fr) 72px minmax(0, 120px) 150px minmax(0, 180px); align-items: center; gap: 16px; min-height: 44px; min-width: 0; padding: 6px 10px; border-radius: var(--radius-row); }
 @media (hover: hover) { .acct:hover { background: var(--row-hover); } }
 .acct-name { display: flex; align-items: center; gap: 9px; min-width: 0; }
-.acct-name .nm { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); font-size: 13.5px; font-weight: 600; }
-.host { display: inline-block; flex: 0 1 auto; min-width: 0; max-width: 100%; overflow: hidden; line-height: 22px; text-overflow: ellipsis; }
+.acct-name .nm { min-width: 0; overflow: hidden; overflow-wrap: anywhere; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); font-size: 13.5px; font-weight: 600; }
+.host { display: inline-block; flex: 0 1 auto; min-width: 0; max-width: 100%; overflow: hidden; overflow-wrap: anywhere; line-height: 22px; text-overflow: ellipsis; }
 .dot { position: relative; flex: none; width: 8px; height: 8px; border-radius: 50%; }
 .dot.live, .dot.unread { background: var(--ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 18%, transparent); }
 .dot.offline, .dot.paused, .dot.unavailable { background: transparent; box-shadow: inset 0 0 0 1.6px var(--ink-3); }
@@ -400,14 +400,14 @@ button.left { cursor: pointer; }
 button.left:focus-visible { box-shadow: var(--focus-ring); }
 .left b { color: var(--ink); font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .left span { margin-left: 3px; color: var(--ink-3); font-size: 12px; }
-.today { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-2); font-size: 13px; font-variant-numeric: tabular-nums; }
+.today { min-width: 0; overflow: hidden; overflow-wrap: anywhere; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-2); font-size: 13px; font-variant-numeric: tabular-nums; }
 .today b { color: var(--teal-ink); font-weight: 700; }
 .today.ahead b { color: var(--gold-ink); }
 .today.quiet, .today .quiet { color: var(--ink-3); }
 .today .btn { height: 26px; max-width: 100%; padding: 0 10px; overflow: hidden; font-size: 12px; text-overflow: ellipsis; }
 .resets { min-width: 0; overflow: hidden; color: var(--ink-2); font-size: 13px; white-space: nowrap; font-variant-numeric: tabular-nums; text-overflow: ellipsis; }
 .gauge-cell { min-width: 0; }
-.source { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-3); font-size: 12px; text-align: right; }
+.source { min-width: 0; overflow: hidden; overflow-wrap: anywhere; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-3); font-size: 12px; text-align: right; }
 .acct.dim .gauge, .acct.dim .left, .acct.dim .resets { opacity: .6; }
 .win5 { margin-top: 5px; color: var(--ink-3); font-size: 11.5px; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .win5 b { color: var(--ink-2); font-weight: 600; }
@@ -440,7 +440,7 @@ button.left:focus-visible { box-shadow: var(--focus-ring); }
 .menu button:hover, .menu button:focus-visible { background: var(--row-hover); box-shadow: none; outline: none; }
 .menu button svg { grid-row: span 2; margin-top: 2px; color: var(--ink-2); }
 .menu .t { color: var(--ink); font-size: 13.5px; font-weight: 600; }
-.menu .d { color: var(--ink-3); font-size: 12px; line-height: 1.4; }
+.menu .d { overflow-wrap: anywhere; color: var(--ink-3); font-size: 12px; line-height: 1.4; }
 .sheet-host { position: fixed; inset: 0; z-index: 80; }
 .scrim { position: absolute; inset: 0; background: var(--scrim); }
 @media (prefers-reduced-motion: reduce) { .tog::after { transition: none; } }

@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // AEON-355: the Accounts card stays inside itself from 390 to 2560, with the
-// session panel open and closed. Long names, one pool of three accounts and
-// pools of one, including an account with no reading yet.
+// session panel open and closed. Long names, one unbroken account name, one
+// pool of three accounts and pools of one, including an account with no
+// reading yet. The card, main and the document have no horizontal overflow.
 import { mkdirSync } from 'node:fs'
 import { expect, test, type Page } from '@playwright/test'
 import { agentData, mockAgents, type AgentWorld } from './agents-fixtures'
@@ -21,12 +22,17 @@ const world: AgentWorld = {
   },
 }
 const shots = process.env.AEON355_SHOTS
+// Email-shaped account name with no spaces, so the plan sentence has to break inside it.
+const UNBROKEN = 'productionreleaseautomation@engineering.example.org'
 
 async function setup(page: Page) {
   await page.clock.setSystemTime(NOW)
   await mockWork(page, fixtures(), { admin: true })
   const data = agentData(world)
   const capacity = capacityWorld({ longNames: true, unread: true })
+  const spare = capacity.accounts.find(account => account.harness === 'codex' && account.label.startsWith('Spare'))
+  if (!spare) throw new Error('codex spare account missing from the long-name fixture')
+  spare.label = UNBROKEN
   data.accounts = capacity.accounts as unknown as typeof data.accounts
   data.approvals = data.approvals.filter(a => a.decision)
   data.messages = data.messages.filter(m => !m.is_action_request)
@@ -47,8 +53,12 @@ function widths() {
 
 async function fit(page: Page) {
   return page.evaluate(() => {
+    const root = document.documentElement
+    const documentOver = Math.max(root.scrollWidth - root.clientWidth, root.scrollWidth - window.innerWidth)
+    const main = document.querySelector('main')
+    const mainOver = main ? main.scrollWidth - main.clientWidth : null
     const card = document.querySelector('.cap')
-    if (!card) return { missing: true as const }
+    if (!card) return { missing: true as const, documentOver, mainOver, offenders: [], pageOffender: '' }
     const edge = card.getBoundingClientRect().right
     const describe = (el: Element) => {
       const cls = (el.getAttribute('class') || '').split(/\s+/).filter(Boolean).slice(0, 3).join('.')
@@ -64,8 +74,7 @@ async function fit(page: Page) {
     }
     offenders.sort((a, b) => b.over - a.over)
     let pageOffender = ''
-    const scroll = document.documentElement.scrollWidth - window.innerWidth
-    if (scroll > 1) {
+    if (documentOver > 1) {
       let worst = 0
       for (const el of document.body.querySelectorAll('*')) {
         const box = el.getBoundingClientRect()
@@ -75,7 +84,7 @@ async function fit(page: Page) {
         }
       }
     }
-    return { missing: false as const, offenders: offenders.slice(0, 4), scroll, pageOffender, card: Math.round(edge) }
+    return { missing: false as const, offenders: offenders.slice(0, 4), documentOver, mainOver, pageOffender, card: Math.round(edge) }
   })
 }
 
@@ -95,7 +104,8 @@ test('accounts card fits every width, panel open and closed', async ({ page }) =
   await expect(card.locator('.pool[data-pool="pi"] .plan')).toContainText('No reading yet')
   await expect(card.locator('.pool[data-pool="pi"] .today')).toHaveText('no reading yet')
   await expect(card.locator('.pool[data-pool="pi"] .source')).toHaveText('')
-  await expect(card.locator('.pool[data-pool="codex"] .nm').first()).toHaveAttribute('title', /Spare workstation account/)
+  await expect(card.locator('.pool[data-pool="codex"] .nm').first()).toHaveAttribute('title', UNBROKEN)
+  await expect(card.locator('.pool[data-pool="codex"] .plan')).toContainText(UNBROKEN)
   if (shots) mkdirSync(shots, { recursive: true })
 
   const problems: string[] = []
@@ -108,7 +118,9 @@ test('accounts card fits every width, panel open and closed', async ({ page }) =
       const result = await fit(page)
       if (result.missing) problems.push(`${label} ${width}px has no accounts card`)
       else if (result.offenders?.length) problems.push(`${label} ${width}px spills ${result.offenders.map(o => `${o.desc} (+${o.over}px)`).join('; ')}`)
-      if ((result.scroll ?? 0) > 1) problems.push(`${label} ${width}px document scrolls by ${result.scroll}px via ${result.pageOffender}`)
+      if ((result.documentOver ?? 0) > 1) problems.push(`${label} ${width}px document scrolls by ${result.documentOver}px via ${result.pageOffender}`)
+      if (result.mainOver == null) problems.push(`${label} ${width}px has no main`)
+      else if (result.mainOver > 1) problems.push(`${label} ${width}px main scrolls by ${Math.round(result.mainOver * 10) / 10}px`)
     }
   }
   await sweep('closed')
