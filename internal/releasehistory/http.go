@@ -3,9 +3,11 @@
 package releasehistory
 
 import (
+	"context"
 	"embed"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -48,6 +50,7 @@ type Module struct {
 	history History
 	current string
 	started time.Time
+	tickets TicketSource
 }
 
 // New serves the embedded history; current is the running version.
@@ -64,6 +67,15 @@ func New() (*Module, error) {
 // live on this server.
 func NewWith(h History, current string) *Module {
 	return &Module{history: h, current: current, started: time.Now().UTC().Truncate(time.Second)}
+}
+
+// UseTickets classifies changes when the history is served. Call it before
+// the server accepts requests. Without it, responses keep the embedded
+// changes and clients derive groups from type.
+func (m *Module) UseTickets(src TicketSource) {
+	if m != nil {
+		m.tickets = src
+	}
 }
 
 var _ httpapi.Module = (*Module)(nil)
@@ -95,7 +107,7 @@ func (m *Module) list(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store")
-	httpapi.WriteJSON(w, http.StatusOK, Response{History: m.history, Current: m.current, LiveSince: m.started})
+	httpapi.WriteJSON(w, http.StatusOK, Response{History: m.annotated(r.Context()), Current: m.current, LiveSince: m.started})
 }
 
 func (m *Module) one(w http.ResponseWriter, r *http.Request) {
@@ -107,7 +119,7 @@ func (m *Module) one(w http.ResponseWriter, r *http.Request) {
 		httpapi.WriteError(w, http.StatusBadRequest, "not an inspr-calendar-v2 version")
 		return
 	}
-	for _, rel := range m.history.Releases {
+	for _, rel := range m.annotated(r.Context()).Releases {
 		if rel.Version == v {
 			w.Header().Set("Cache-Control", "no-store")
 			httpapi.WriteJSON(w, http.StatusOK, rel)
@@ -115,4 +127,23 @@ func (m *Module) one(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	httpapi.WriteError(w, http.StatusNotFound, "no such release in this build's history")
+}
+
+// annotated adds group from linked tickets. A lookup error, or no source,
+// returns the embedded history unchanged.
+func (m *Module) annotated(ctx context.Context) History {
+	if m.tickets == nil {
+		return m.history
+	}
+	p, ok := tenant.PrincipalFrom(ctx)
+	if !ok || p.TenantID == "" {
+		return m.history
+	}
+	keys := historyTicketKeys(m.history)
+	meta, err := m.tickets(ctx, p.TenantID, keys)
+	if err != nil {
+		slog.Warn("release change groups left derived from commit type", "err", err)
+		return m.history
+	}
+	return withGroups(m.history, meta)
 }

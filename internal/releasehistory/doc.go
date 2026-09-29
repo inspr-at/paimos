@@ -47,7 +47,17 @@
 //	tickets            ticket keys: version.json's ticket and keys in the headline
 //	changes            commits since the previous published release, each with
 //	                   commit, subject, type (feat, fix, test, docs, release,
-//	                   refactor, chore, other), scope and the ticket keys it names
+//	                   refactor, chore, other), scope and the ticket keys it names.
+//	                   When served, group is features, fixes or other: conventional
+//	                   feat and fix prefixes win, and test, docs, refactor and
+//	                   chore stay other. Otherwise a linked bug tag, type or kind
+//	                   is fixes, a visible release-note pill or benefit is
+//	                   features, and anything else is other. Several tickets take
+//	                   the strongest group and the commit is listed once. The
+//	                   version bump omits group. Older manifests without it stay
+//	                   valid; clients then derive the group from type. Group uses
+//	                   current ticket metadata, so past releases follow it
+//	                   without a migration.
 //	changes_omitted    how many more changes there were beyond the listed ones
 //	evidence           source_commit and its URL, the OCI image reference and
 //	                   digest, the CI and Release runs (URL, conclusion), the

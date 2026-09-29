@@ -31,6 +31,20 @@ test('changes group into features, fixes and other; version bumps are left out',
   assert.equal(plainSubject('B10: repair journey'), 'B10: repair journey')
 })
 
+test('a server group wins over the commit type, and a version bump stays out', () => {
+  const grouped = groupChanges([
+    { ...change('1', 'other', 'P0.x: session chat (AEON-273)', ['AEON-273']), group: 'features' },
+    { ...change('2', 'other', 'P0.x: quotes crash (AEON-274)', ['AEON-274']), group: 'fixes' },
+    { ...change('3', 'other', 'P0.x: refresh the manifest'), group: 'other' },
+    { ...change('4', 'feat', 'feat: conventional'), group: 'fixes' },
+    { ...change('5', 'release', 'release: v1'), group: 'features' },
+    change('6', 'fix', 'fix: still a fix when the manifest has no group'),
+  ])
+  assert.deepEqual(grouped.features.map(c => c.commit), ['1'])
+  assert.deepEqual(grouped.fixes.map(c => c.commit), ['2', '4', '6'])
+  assert.deepEqual(grouped.other.map(c => c.commit), ['3'])
+})
+
 test('stats count today and this week, the gap since the last release and the median gap', () => {
   const now = new Date(2026, 8, 24, 16, 0).getTime() // a Thursday
   const at = (d: number, h: number) => new Date(2026, 8, d, h).toISOString()

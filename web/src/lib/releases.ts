@@ -4,7 +4,8 @@
 // ranges and search. Free of Vue for unit tests.
 import { api } from './api.ts'
 
-export interface ReleaseChange { commit: string; subject: string; type: 'feat' | 'fix' | 'test' | 'docs' | 'release' | 'refactor' | 'chore' | 'other'; scope: string; tickets: string[]; at: string }
+export type ChangeGroup = 'features' | 'fixes' | 'other'
+export interface ReleaseChange { commit: string; subject: string; type: 'feat' | 'fix' | 'test' | 'docs' | 'release' | 'refactor' | 'chore' | 'other'; scope: string; tickets: string[]; at: string; group?: ChangeGroup }
 export interface ReleaseRun { name: string; url: string; status: string; conclusion: string }
 export interface ReleaseEvidence {
   source_commit: string; source_url: string; image: { reference: string; digest: string } | null
@@ -73,15 +74,21 @@ export function groupByDay(releases: Release[], now: number): Day[] {
 }
 
 // ---------- Changes ----------
-export type ChangeGroup = 'features' | 'fixes' | 'other'
 export const GROUP_OF: Record<ReleaseChange['type'], ChangeGroup | null> = {
   feat: 'features', fix: 'fixes', test: 'other', docs: 'other', refactor: 'other', chore: 'other', other: 'other',
   // The version bump is the release itself, not a change in it.
   release: null,
 }
+// The server's group wins, so every client agrees. Older manifests omit it
+// and the commit type decides. A version bump stays out of the groups.
+export function changeGroup(c: ReleaseChange): ChangeGroup | null {
+  if (c.type === 'release') return null
+  if (c.group === 'features' || c.group === 'fixes' || c.group === 'other') return c.group
+  return GROUP_OF[c.type]
+}
 export function groupChanges(changes: ReleaseChange[]): Record<ChangeGroup, ReleaseChange[]> {
   const out: Record<ChangeGroup, ReleaseChange[]> = { features: [], fixes: [], other: [] }
-  for (const c of changes) { const g = GROUP_OF[c.type]; if (g) out[g].push(c) }
+  for (const c of changes) { const g = changeGroup(c); if (g) out[g].push(c) }
   return out
 }
 // ---------- Display ----------

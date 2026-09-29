@@ -58,6 +58,9 @@ type Change struct {
 	Scope   string   `json:"scope"`
 	Tickets []string `json:"tickets"`
 	At      string   `json:"at"`
+	// Group is the display group (features, fixes, other), set when the
+	// history is served. Empty on the version bump and on an unannotated manifest.
+	Group string `json:"group,omitempty"`
 }
 
 // Evidence is what proves a release: its source, its image and its runs.
