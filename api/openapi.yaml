@@ -2240,7 +2240,9 @@ paths:
         If-Unmodified-Since is the entry's updated_at; a stale value returns
         412 with the current entry and writes nothing. Agents cannot accept.
         Text that looks like it holds a credential is not copied: 409
-        learning_sensitive.
+        learning_sensitive with the matched ranges (positions only). A person
+        may repeat the request with confirm_not_sensitive; the event records
+        confirmed_not_sensitive. An agent cannot confirm (403).
       parameters:
         - {name: learningId, in: path, required: true, schema: {type: string}}
         - {name: If-Unmodified-Since, in: header, schema: {type: string}}
@@ -2263,7 +2265,10 @@ paths:
         '404':
           $ref: '#/components/responses/Error'
         '409':
-          $ref: '#/components/responses/Error'
+          description: already_decided, or learning_sensitive with the suspected credential ranges
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MethodLearningProblem'}
         '412':
           description: The entry changed since it was read
           content:
@@ -2302,8 +2307,10 @@ paths:
         learning line. Its source records the learning id and the node.
         Publishing stays a separate person approval and is not performed.
         Agents cannot draft. A second decision on the same learning is 409.
-        Text that looks like it holds a credential is not copied: 409
-        learning_sensitive.
+        Text or a title that looks like it holds a credential is not copied:
+        409 learning_sensitive with the matched ranges (positions only). A
+        person may repeat the request with confirm_not_sensitive; the event
+        records confirmed_not_sensitive. An agent cannot confirm (403).
       parameters:
         - {name: learningId, in: path, required: true, schema: {type: string}}
       security: *auth
@@ -2325,7 +2332,10 @@ paths:
         '404':
           $ref: '#/components/responses/Error'
         '409':
-          $ref: '#/components/responses/Error'
+          description: already_decided, or learning_sensitive with the suspected credential ranges
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MethodLearningProblem'}
   /knowledge/resolve:
     get:
       operationId: resolveKnowledge
@@ -9146,6 +9156,9 @@ components:
       additionalProperties: false
       properties:
         knowledge_id: {type: string, format: uuid}
+        confirm_not_sensitive:
+          type: boolean
+          description: A person confirms that text flagged as a credential is not one. Agents cannot confirm.
     MethodLearningDraft:
       type: object
       required: [layer_id, set_id]
@@ -9153,6 +9166,27 @@ components:
       properties:
         layer_id: {type: string, format: uuid}
         set_id: {type: string, format: uuid}
+        confirm_not_sensitive:
+          type: boolean
+          description: A person confirms that text flagged as a credential is not one. Agents cannot confirm.
+    MethodLearningProblem:
+      type: object
+      required: [error, code]
+      properties:
+        error: {type: string}
+        code: {type: string}
+        ranges:
+          type: array
+          description: With learning_sensitive, the suspected credentials as Unicode code point offsets into the learning's text or title. The text itself is never returned.
+          items: {$ref: '#/components/schemas/SensitiveRange'}
+    SensitiveRange:
+      type: object
+      required: [field, start, end]
+      additionalProperties: false
+      properties:
+        field: {type: string, enum: [text, title]}
+        start: {type: integer, minimum: 0}
+        end: {type: integer, minimum: 0}
     MethodLearningDecision:
       type: object
       required: [id, decision, event_id]

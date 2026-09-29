@@ -34,6 +34,8 @@ type learningDraftAudit struct {
 	ProjectID string     `json:"project_id"`
 	Text      string     `json:"text"`
 	Rule      rules.Rule `json:"rule"`
+	// A person confirmed that a suspected credential is not one.
+	ConfirmedNotSensitive bool `json:"confirmed_not_sensitive,omitempty"`
 }
 
 func (m *module) handleDraftLearning(w http.ResponseWriter, r *http.Request) {
@@ -55,12 +57,12 @@ func (m *module) handleDraftLearning(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	layerID, setID, err := parseDraft(raw)
+	layerID, setID, confirm, err := parseDraft(raw)
 	if err != nil {
 		writeErr(w, err)
 		return
 	}
-	decision, err := m.draftLearning(r.Context(), p, r.PathValue("learningId"), nodeID, commentID, comment, layerID, setID)
+	decision, err := m.draftLearning(r.Context(), p, r.PathValue("learningId"), nodeID, commentID, comment, layerID, setID, confirm)
 	if err != nil {
 		writeErr(w, err)
 		return
@@ -68,35 +70,39 @@ func (m *module) handleDraftLearning(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, decision)
 }
 
-func parseDraft(raw map[string]json.RawMessage) (string, string, error) {
+func parseDraft(raw map[string]json.RawMessage) (string, string, bool, error) {
 	if len(raw) == 0 {
-		return "", "", fail(http.StatusBadRequest, "invalid_request", "layer_id and set_id are required")
+		return "", "", false, fail(http.StatusBadRequest, "invalid_request", "layer_id and set_id are required")
 	}
 	for key := range raw {
-		if key != "layer_id" && key != "set_id" {
-			return "", "", fail(http.StatusBadRequest, "invalid_request", "unknown field "+key)
+		if key != "layer_id" && key != "set_id" && key != "confirm_not_sensitive" {
+			return "", "", false, fail(http.StatusBadRequest, "invalid_request", "unknown field "+key)
 		}
 	}
 	layerID, _, err := stringField(raw, "layer_id")
 	if err != nil {
-		return "", "", err
+		return "", "", false, err
 	}
 	setID, _, err := stringField(raw, "set_id")
 	if err != nil {
-		return "", "", err
+		return "", "", false, err
 	}
 	layerID, setID = strings.TrimSpace(layerID), strings.TrimSpace(setID)
 	if !canonicalUUID(layerID) || !canonicalUUID(setID) {
-		return "", "", fail(http.StatusBadRequest, "invalid_request", "layer_id and set_id are required")
+		return "", "", false, fail(http.StatusBadRequest, "invalid_request", "layer_id and set_id are required")
 	}
-	return layerID, setID, nil
+	confirm, err := confirmField(raw)
+	if err != nil {
+		return "", "", false, err
+	}
+	return layerID, setID, confirm, nil
 }
 
 func canonicalUUID(s string) bool {
 	return validUUID(s) && s == strings.ToLower(s)
 }
 
-func (m *module) draftLearning(ctx context.Context, p tenant.Principal, publicID, nodeID, commentID string, comment bool, layerID, setID string) (LearningDecision, error) {
+func (m *module) draftLearning(ctx context.Context, p tenant.Principal, publicID, nodeID, commentID string, comment bool, layerID, setID string, confirm bool) (LearningDecision, error) {
 	var out LearningDecision
 	err := db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
 		if !canWrite(ctx, tx, p, "knowledge.write") {
@@ -113,8 +119,9 @@ func (m *module) draftLearning(ctx context.Context, p tenant.Principal, publicID
 		if err != nil {
 			return err
 		}
-		if looksSensitive(item.Text) || looksSensitive(item.Title) {
-			return sensitiveLearning()
+		confirmed, err := sensitiveCheck(append(sensitiveRanges("text", item.Text), sensitiveRanges("title", item.Title)...), confirm)
+		if err != nil {
+			return err
 		}
 		rule, err := learningRule(item, publicID, nodeID, commentID, comment)
 		if err != nil {
@@ -125,7 +132,7 @@ func (m *module) draftLearning(ctx context.Context, p tenant.Principal, publicID
 		}
 		audit := learningDraftAudit{
 			SourceKey: publicID, Source: item.Source, NodeID: item.NodeID, CommentID: item.CommentID,
-			ProjectID: item.projectID, Text: item.Text, Rule: rule,
+			ProjectID: item.projectID, Text: item.Text, Rule: rule, ConfirmedNotSensitive: confirmed,
 		}
 		ev, err := events.Append(ctx, tx, p, events.Change{NodeID: &item.NodeID, Type: evLearningDrafted, After: audit})
 		if err != nil {

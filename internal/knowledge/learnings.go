@@ -91,9 +91,33 @@ func closedLearning() error {
 }
 
 // sensitiveLearning refuses to copy text that looks like it holds a
-// credential into a changelog or a rule draft.
-func sensitiveLearning() error {
-	return fail(http.StatusConflict, "learning_sensitive", "This learning looks like it holds a credential. Remove it from the source first.")
+// credential into a changelog or a rule draft. It names the matched ranges,
+// never the text. A person may repeat the request with
+// confirm_not_sensitive; the event records that they did.
+func sensitiveLearning(ranges []SensitiveRange) error {
+	e := fail(http.StatusConflict, "learning_sensitive", "This looks like a credential — remove it, or confirm it is not one.")
+	e.ranges = ranges
+	return e
+}
+
+// sensitiveCheck returns the refusal for flagged text, or whether a person's
+// confirmation overrode a match.
+func sensitiveCheck(ranges []SensitiveRange, confirm bool) (bool, error) {
+	if len(ranges) == 0 {
+		return false, nil
+	}
+	if !confirm {
+		return false, sensitiveLearning(ranges)
+	}
+	return true, nil
+}
+
+// acceptedSnap is the learning_accepted after-image: the entry snapshot, and
+// whether a person confirmed that a suspected credential is not one. Undo
+// reads the snapshot and ignores the flag.
+type acceptedSnap struct {
+	nodeSnap
+	ConfirmedNotSensitive bool `json:"confirmed_not_sensitive,omitempty"`
 }
 
 func alreadyDecided() error {
@@ -364,7 +388,7 @@ func (m *module) handleAcceptLearning(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	knowledgeID, err := parseAccept(raw)
+	knowledgeID, confirm, err := parseAccept(raw)
 	if err != nil {
 		writeErr(w, err)
 		return
@@ -374,7 +398,7 @@ func (m *module) handleAcceptLearning(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	decision, err := m.acceptLearning(r.Context(), p, r.PathValue("learningId"), nodeID, commentID, comment, knowledgeID, expected)
+	decision, err := m.acceptLearning(r.Context(), p, r.PathValue("learningId"), nodeID, commentID, comment, knowledgeID, confirm, expected)
 	if errors.Is(err, errStale) {
 		writeErr(w, m.stale(r.Context(), p, knowledgeID))
 		return
@@ -408,23 +432,27 @@ func (m *module) handleDismissLearning(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, decision)
 }
 
-func parseAccept(raw map[string]json.RawMessage) (string, error) {
+func parseAccept(raw map[string]json.RawMessage) (string, bool, error) {
 	if len(raw) == 0 {
-		return "", fail(http.StatusBadRequest, "invalid_request", "knowledge_id is required")
+		return "", false, fail(http.StatusBadRequest, "invalid_request", "knowledge_id is required")
 	}
 	for key := range raw {
-		if key != "knowledge_id" {
-			return "", fail(http.StatusBadRequest, "invalid_request", "unknown field "+key)
+		if key != "knowledge_id" && key != "confirm_not_sensitive" {
+			return "", false, fail(http.StatusBadRequest, "invalid_request", "unknown field "+key)
 		}
 	}
 	id, ok, err := stringField(raw, "knowledge_id")
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	if !ok || !validUUID(strings.TrimSpace(id)) {
-		return "", fail(http.StatusBadRequest, "invalid_request", "knowledge_id is required")
+		return "", false, fail(http.StatusBadRequest, "invalid_request", "knowledge_id is required")
 	}
-	return strings.TrimSpace(id), nil
+	confirm, err := confirmField(raw)
+	if err != nil {
+		return "", false, err
+	}
+	return strings.TrimSpace(id), confirm, nil
 }
 
 // ---------- List ----------
@@ -619,7 +647,7 @@ func sortLearnings(items []Learning) {
 
 // ---------- Accept and dismiss ----------
 
-func (m *module) acceptLearning(ctx context.Context, p tenant.Principal, publicID, nodeID, commentID string, comment bool, knowledgeID string, expected *time.Time) (LearningDecision, error) {
+func (m *module) acceptLearning(ctx context.Context, p tenant.Principal, publicID, nodeID, commentID string, comment bool, knowledgeID string, confirm bool, expected *time.Time) (LearningDecision, error) {
 	var out LearningDecision
 	err := db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
 		if !canWrite(ctx, tx, p, "knowledge.write") {
@@ -635,8 +663,9 @@ func (m *module) acceptLearning(ctx context.Context, p tenant.Principal, publicI
 		if err != nil {
 			return err
 		}
-		if looksSensitive(item.Text) {
-			return sensitiveLearning()
+		confirmed, err := sensitiveCheck(sensitiveRanges("text", item.Text), confirm)
+		if err != nil {
+			return err
 		}
 		current, _, err := lockNode(ctx, tx, p.TenantID, knowledgeID, false)
 		if err != nil {
@@ -663,7 +692,7 @@ func (m *module) acceptLearning(ctx context.Context, p tenant.Principal, publicI
 		if err != nil {
 			return err
 		}
-		ev, err := events.Append(ctx, tx, p, events.Change{NodeID: &updated.ID, Type: evLearningAccepted, Before: current, After: updated})
+		ev, err := events.Append(ctx, tx, p, events.Change{NodeID: &updated.ID, Type: evLearningAccepted, Before: current, After: acceptedSnap{updated, confirmed}})
 		if err != nil {
 			return err
 		}

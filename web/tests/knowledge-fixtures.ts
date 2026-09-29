@@ -122,6 +122,9 @@ export function knowledgeWorld(options: { empty?: boolean } = {}) {
 export interface MockLearning {
   id: string; source: 'ticket' | 'comment'; node_id: string; key: string; title: string; text: string
   comment_id?: string; at: string; author: { id: string; name: string } | null; href: string
+  // Mock only: the server answers 409 learning_sensitive with these ranges
+  // until a person confirms.
+  sensitive?: { field: 'text' | 'title'; start: number; end: number }[]
 }
 export type KnowledgeWorld = ReturnType<typeof knowledgeWorld>
 export interface KnowledgeMockOptions {
@@ -190,7 +193,7 @@ export async function mockKnowledge(page: Page, world: KnowledgeWorld, options: 
     calls.push({ path: url.pathname, method, query, body, headers: request.headers() })
     const parts = url.pathname.replace(/^\/api\/knowledge\/?/, '').split('/').filter(Boolean)
     if (parts[0] === 'learnings') {
-      if (method === 'GET') return json(route, 200, { items: world.learnings, truncated: false })
+      if (method === 'GET') return json(route, 200, { items: world.learnings.map(({ sensitive: _sensitive, ...item }) => item), truncated: false })
       const id = decodeURIComponent(parts[1] ?? '')
       const found = world.learnings.find(item => item.id === id)
       if (!found) return json(route, 404, { error: 'This learning is no longer open.', code: 'learning_closed' })
@@ -200,6 +203,9 @@ export async function mockKnowledge(page: Page, world: KnowledgeWorld, options: 
         world.decisions.push({ event_id: eventId, item: found })
         world.learnings = world.learnings.filter(item => item.id !== id)
         return json(route, 200, { id, decision: 'dismissed', event_id: eventId })
+      }
+      if ((parts[2] === 'accept' || parts[2] === 'draft') && method === 'POST' && found.sensitive?.length && (body as { confirm_not_sensitive?: boolean } | null)?.confirm_not_sensitive !== true) {
+        return json(route, 409, { error: 'This looks like a credential — remove it, or confirm it is not one.', code: 'learning_sensitive', ranges: found.sensitive })
       }
       if (parts[2] === 'accept' && method === 'POST') {
         const input = body as { knowledge_id?: string }

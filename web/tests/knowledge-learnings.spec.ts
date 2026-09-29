@@ -274,6 +274,68 @@ test('the draft dialog offers only layers the person can write', async ({ page }
   await expect(dialog.getByLabel('Layer').locator('option')).toHaveText(['Your rules'])
 })
 
+function suspected(now = Date.now()): MockLearning[] {
+  const text = `Sign in with password=${'x'.repeat(5)} on staging`
+  const start = text.indexOf('x')
+  return [
+    {
+      id: 'c-eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee-90', source: 'comment', node_id: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
+      key: 'PHAROS-15', title: 'Staging login', text, comment_id: '90',
+      at: new Date(now - 3_600_000).toISOString(), author: { id: me.id, name: me.name }, href: '/p/PHAROS/PHAROS-15',
+      sensitive: [{ field: 'text', start, end: start + 5 }],
+    },
+    {
+      id: 'c-ffffffff-ffff-4fff-8fff-ffffffffffff-91', source: 'comment', node_id: 'ffffffff-ffff-4fff-8fff-ffffffffffff',
+      key: 'PHAROS-16', title: 'Staging token', text, comment_id: '91',
+      at: new Date(now - 7_200_000).toISOString(), author: null, href: '/p/PHAROS/PHAROS-16',
+      sensitive: [{ field: 'text', start, end: start + 5 }],
+    },
+  ]
+}
+
+test('a suspected credential needs a person to confirm it is not one', async ({ page }) => {
+  for (const width of [1280, 390]) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
+    const errors = watchErrors(page)
+    const { calls } = await open(page, { learnings: suspected(), rules: ['rules.write', 'rules.publish'] })
+    await mockRuleLayers(page)
+
+    await card(page, 'Sign in with').first().getByRole('button', { name: /^Accept PHAROS-15:/ }).click()
+    const dialog = page.getByRole('dialog', { name: 'Add to a changelog' })
+    await dialog.getByRole('button', { name: 'Add to changelog' }).click()
+    const note = dialog.getByRole('alert')
+    await expect(note).toContainText('This looks like a credential — remove it, or confirm it is not one.')
+    await expect(note.getByRole('link', { name: 'remove it' })).toHaveAttribute('href', '/p/PHAROS/PHAROS-15')
+    await expect(dialog.locator('mark.suspect')).toHaveText('xxxxx')
+    const add = dialog.getByRole('button', { name: 'Add to changelog' })
+    await expect(add).toBeDisabled()
+    expect(calls.filter(call => call.method === 'POST' && call.path.endsWith('/accept')).at(-1)?.body).toEqual({ knowledge_id: 'k-deploy' })
+    expect(await overflow(page)).toBeLessThanOrEqual(1)
+    if (width === 1280) {
+      const result = await new AxeBuilder({ page }).include('dialog').withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).analyze()
+      expect(result.violations.map(v => `${v.id}: ${v.nodes.map(n => n.target.join(' ')).join(', ')}`)).toEqual([])
+    }
+    await note.getByRole('checkbox', { name: 'It is not a credential' }).check()
+    await add.click()
+    await expect(page.getByText('Added to the changelog.')).toBeVisible()
+    expect(calls.filter(call => call.method === 'POST' && call.path.endsWith('/accept')).at(-1)?.body).toEqual({ knowledge_id: 'k-deploy', confirm_not_sensitive: true })
+
+    await card(page, 'Sign in with').getByRole('button', { name: /^Accept PHAROS-16:/ }).click()
+    await page.getByRole('dialog', { name: 'Add to a changelog' }).getByRole('radio', { name: 'Rule draft' }).click()
+    const draft = page.getByRole('dialog', { name: 'Save a rule draft' })
+    await expect(draft.getByRole('alert')).toHaveCount(0)
+    await draft.getByLabel('Layer').selectOption({ label: 'Pharos' })
+    await draft.getByRole('button', { name: 'Save rule draft' }).click()
+    await expect(draft.getByRole('alert')).toContainText('This looks like a credential')
+    await expect(draft.getByRole('button', { name: 'Save rule draft' })).toBeDisabled()
+    await draft.getByRole('checkbox', { name: 'It is not a credential' }).check()
+    await draft.getByRole('button', { name: 'Save rule draft' }).click()
+    await expect(page.getByText('Saved as a rule draft.')).toBeVisible()
+    expect(calls.filter(call => call.method === 'POST' && call.path.endsWith('/draft')).at(-1)?.body).toEqual({ layer_id: ids.projectLayer, set_id: ids.projectSet, confirm_not_sensitive: true })
+    expect(errors).toEqual([])
+  }
+})
+
 test('the inbox has no axe violations', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 })
   await open(page)
@@ -286,13 +348,18 @@ test('screenshots at 1600 and 390, light and dark', async ({ browser }) => {
   test.setTimeout(240_000)
   const shots = resolve(process.env.VISUAL_AUDIT_DIR ?? 'test-results/knowledge-learnings')
   mkdirSync(shots, { recursive: true })
-  const shot = async (browser: Browser, width: number, theme: 'light' | 'dark', mode: 'inbox' | 'dialog' | 'empty' | 'long') => {
+  const shot = async (browser: Browser, width: number, theme: 'light' | 'dark', mode: 'inbox' | 'dialog' | 'empty' | 'long' | 'suspect') => {
     const context = await browser.newContext({ viewport: { width, height: width === 390 ? 844 : 1000 }, colorScheme: theme, reducedMotion: 'reduce', deviceScaleFactor: 1 })
     const page = await context.newPage()
     if (mode === 'empty') await open(page, { learnings: [], inbox: false })
     else if (mode === 'long') {
       await open(page, { learnings: four() })
       await page.getByRole('button', { name: 'Show all 4' }).click()
+    } else if (mode === 'suspect') {
+      await open(page, { learnings: suspected() })
+      await card(page, 'Sign in with').first().getByRole('button', { name: /^Accept PHAROS-15:/ }).click()
+      await page.getByRole('dialog', { name: 'Add to a changelog' }).getByRole('button', { name: 'Add to changelog' }).click()
+      await expect(page.getByRole('dialog', { name: 'Add to a changelog' }).getByRole('alert')).toBeVisible()
     } else {
       await open(page)
       if (mode === 'dialog') {
@@ -311,4 +378,7 @@ test('screenshots at 1600 and 390, light and dark', async ({ browser }) => {
   }
   await shot(browser, 1600, 'light', 'dialog')
   await shot(browser, 390, 'dark', 'dialog')
+  for (const theme of ['light', 'dark'] as const) {
+    for (const width of [1600, 390]) await shot(browser, width, theme, 'suspect')
+  }
 })

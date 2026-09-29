@@ -4,7 +4,7 @@ import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { confirmAction } from '../../lib/confirm'
 import {
   KnowledgeError, acceptLearning, dismissLearning, draftLearning, listLearnings, undoKnowledge,
-  type KnowledgeEntry, type KnowledgeItem, type MethodLearning,
+  type KnowledgeEntry, type KnowledgeItem, type MethodLearning, type SensitiveRange,
 } from '../../lib/knowledge'
 import { can } from '../../lib/authz'
 import { listLayers, listSets, ROLE_LABEL, writeBlock, type Caller, type RuleLayer, type RuleSet, type RoleName } from '../../lib/rules'
@@ -39,6 +39,10 @@ const layerId = ref('')
 const setId = ref('')
 const rulesLoading = ref(false)
 const dialogError = ref('')
+// A 409 learning_sensitive: the suspected ranges, and the person's answer.
+const suspect = ref<SensitiveRange[] | null>(null)
+const notCredential = ref(false)
+const confirming = computed(() => !!suspect.value && notCredential.value)
 let rulesLoaded = false
 const dialog = ref<HTMLDialogElement>()
 const heading = ref<HTMLHeadingElement>()
@@ -67,6 +71,28 @@ function linkLabel(key: string) {
   return key.replaceAll('[', '(').replaceAll(']', ')').replaceAll('(', '⟨').replaceAll(')', '⟩')
 }
 const previewDate = computed(() => new Date().toISOString().slice(0, 10))
+// The learning split around its suspected credentials (code point offsets).
+const previewParts = computed(() => {
+  const chars = [...(accepting.value?.text ?? '')]
+  const marks = (suspect.value ?? []).filter(r => r.field === 'text' && r.start < r.end && r.end <= chars.length).sort((a, b) => a.start - b.start)
+  const parts: { text: string; mark: boolean }[] = []
+  let at = 0
+  for (const r of marks) {
+    if (r.start < at) continue
+    if (r.start > at) parts.push({ text: chars.slice(at, r.start).join(''), mark: false })
+    parts.push({ text: chars.slice(r.start, r.end).join(''), mark: true })
+    at = r.end
+  }
+  if (at < chars.length) parts.push({ text: chars.slice(at).join(''), mark: false })
+  return parts
+})
+function flagged(e: unknown): boolean {
+  if (!(e instanceof KnowledgeError) || e.code !== 'learning_sensitive') return false
+  suspect.value = e.ranges
+  notCredential.value = false
+  dialogError.value = ''
+  return true
+}
 
 async function load() {
   controller?.abort()
@@ -166,6 +192,8 @@ function openAccept(item: MethodLearning, event: MouseEvent) {
   destination.value = 'changelog'
   chosen.value = preferred(choices.value)?.id ?? ''
   dialogError.value = ''
+  suspect.value = null
+  notCredential.value = false
   void nextTick(() => dialog.value?.showModal())
 }
 function excerpt(text: string) {
@@ -182,6 +210,8 @@ function close(restore: boolean | Event = true) {
   dialog.value?.close()
   accepting.value = null
   dialogError.value = ''
+  suspect.value = null
+  notCredential.value = false
   if (restoreFocus) opener?.focus()
 }
 async function settleFocus(removedId: string, before: MethodLearning[]) {
@@ -210,7 +240,7 @@ async function saveDraft() {
   busy.value = true
   dialogError.value = ''
   try {
-    const decision = await draftLearning(item.id, { layer_id: layer, set_id: set })
+    const decision = await draftLearning(item.id, confirming.value ? { layer_id: layer, set_id: set, confirm_not_sensitive: true } : { layer_id: layer, set_id: set })
     const before = items.value.slice()
     items.value = items.value.filter(row => row.id !== item.id)
     close(false)
@@ -218,7 +248,7 @@ async function saveDraft() {
     toast('Saved as a rule draft.', { action: { label: 'Undo', run: () => void undo(decision.event_id) }, timeout: 8000 })
     await settleFocus(item.id, before)
   } catch (e) {
-    dialogError.value = e instanceof Error ? e.message : 'That could not be saved.'
+    if (!flagged(e)) dialogError.value = e instanceof Error ? e.message : 'That could not be saved.'
   } finally {
     busy.value = false
   }
@@ -238,7 +268,7 @@ async function accept() {
   try {
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
-        const decision = await acceptLearning(item.id, entry.id, since)
+        const decision = await acceptLearning(item.id, entry.id, since, confirming.value)
         const before = items.value.slice()
         items.value = items.value.filter(row => row.id !== item.id)
         if (decision.entry) emit('accepted', decision.entry)
@@ -257,7 +287,7 @@ async function accept() {
       }
     }
   } catch (e) {
-    dialogError.value = e instanceof Error ? e.message : 'That could not be added.'
+    if (!flagged(e)) dialogError.value = e instanceof Error ? e.message : 'That could not be added.'
   } finally {
     busy.value = false
   }
@@ -350,7 +380,7 @@ async function undo(eventId: number) {
             <option v-for="entry in choices" :key="entry.id" :value="entry.id">{{ entry.title }}</option>
           </select>
           <p v-if="accepting" class="preview">
-            <span>{{ previewDate }}: {{ accepting.text }}.</span>
+            <span>{{ previewDate }}: <template v-for="(part, i) in previewParts" :key="i"><mark v-if="part.mark" class="suspect">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template>.</span>
             <span>Source: <a :href="accepting.href">{{ linkLabel(accepting.key) }}</a>.</span>
           </p>
         </template>
@@ -371,14 +401,18 @@ async function undo(eventId: number) {
             </template>
           </template>
           <p v-if="accepting" class="preview">
-            <span>{{ accepting.text }}</span>
+            <span><template v-for="(part, i) in previewParts" :key="i"><mark v-if="part.mark" class="suspect">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></span>
             <span>Publishing stays a separate approval.</span>
           </p>
         </template>
+        <div v-if="suspect && accepting" class="suspect-note" role="alert">
+          <p>This looks like a credential — <a :href="accepting.href">remove it</a>, or confirm it is not one.</p>
+          <label class="confirm"><input v-model="notCredential" type="checkbox" /> It is not a credential</label>
+        </div>
         <p v-if="dialogError" class="problem" role="alert">{{ dialogError }}</p>
         <div class="foot">
           <button type="button" class="btn" @click="close">Cancel</button>
-          <button type="submit" class="btn primary" :disabled="busy || (destination === 'changelog' ? !chosen : rulesLoading || !setId)">{{ destination === 'draft' ? (busy ? 'Saving…' : 'Save rule draft') : (busy ? 'Adding…' : 'Add to changelog') }}</button>
+          <button type="submit" class="btn primary" :disabled="busy || (!!suspect && !notCredential) || (destination === 'changelog' ? !chosen : rulesLoading || !setId)">{{ destination === 'draft' ? (busy ? 'Saving…' : 'Save rule draft') : (busy ? 'Adding…' : 'Add to changelog') }}</button>
         </div>
       </form>
     </dialog>
@@ -415,6 +449,11 @@ h2 { margin: 0; font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
 .preview span { overflow-wrap: anywhere; }
 .preview a { color: var(--teal-ink); text-decoration: underline; text-underline-offset: 2px; }
 .problem { margin: 0; color: var(--danger); font-size: 13px; }
+.suspect { padding: 0 2px; border-radius: 3px; background: color-mix(in srgb, var(--warn) 24%, transparent); color: inherit; }
+.suspect-note { display: grid; gap: 6px; margin: 0; padding: 10px 12px; border-radius: 10px; color: var(--ink); background: color-mix(in srgb, var(--warn) 10%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warn) 32%, transparent); font-size: 13px; line-height: 1.45; }
+.suspect-note p { margin: 0; overflow-wrap: anywhere; }
+.suspect-note a { color: var(--teal-ink); text-decoration: underline; text-underline-offset: 2px; }
+.confirm { display: inline-flex; align-items: center; gap: 8px; min-height: 32px; font-size: 14px; }
 .foot { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
 .foot .btn { display: inline-flex; align-items: center; justify-content: center; min-height: 36px; }
 @container (max-width: 560px) {
