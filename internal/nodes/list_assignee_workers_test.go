@@ -319,6 +319,111 @@ func TestListAssigneeSortSkipsLiveLookupForStoredPeople(t *testing.T) {
 	}
 }
 
+// An assignee sort used to inline the gated lookup and probe each unassigned
+// ticket four times. Each unassigned row is probed at most once; assigned
+// rows add at most one probe for the page of this same statement.
+func TestListAssigneeSortProbesEachUnassignedRowOnce(t *testing.T) {
+	p := newPrincipal(t, "assignee-probe-once")
+	project := kindBySlug(t, p, "project")
+	ticket := kindBySlug(t, p, "ticket")
+	root := mustNode(t, p, `{"kind_id":"`+project.ID+`","title":"Probe once"}`)
+	sam := addPrincipalIn(t, p.TenantID, "Sam")
+	zed := insertNamedAgent(t, p.TenantID, "Zed")
+	const tickets = 3000
+	err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `INSERT INTO nodes (tenant_id, key, kind_id, title, state, parent_id, position)
+            SELECT $1, 'OPEN-'||g, $2, 'Open '||g, 'new', $3, g FROM generate_series(1, $4) g`,
+			p.TenantID, ticket.ID, root.ID, tickets); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `INSERT INTO harness_sessions (
+            tenant_id, project_id, agent_principal_id, ticket_node_id, harness, host, management, role, work_shape,
+            ref_digest, lease_digest, phase, activity, display_label, created_at, heartbeat_at)
+            SELECT $1, $2, $3, n.id, 'claude', 'test', 'unmanaged', 'worker', 'ship',
+                decode(md5(n.id::text), 'hex'), decode(md5('lease'||n.id::text), 'hex'),
+                'working', 'busy', 'W-'||n.key, clock_timestamp(), clock_timestamp()
+            FROM nodes n
+            WHERE n.tenant_id=$1 AND n.key LIKE 'OPEN-%'`, p.TenantID, root.ID, zed)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := appPool.Exec(t.Context(), `ANALYZE nodes, principals, harness_sessions`); err != nil {
+		t.Fatal(err)
+	}
+
+	page := listPage(t, p, "/api/nodes?within="+root.ID+"&kind=ticket&sort=assignee&limit=20")
+	if len(page.Items) != 20 {
+		t.Fatalf("page %d", len(page.Items))
+	}
+	for _, item := range page.Items {
+		if item.Assignee != nil || item.LeadWorker == nil || item.LeadWorker.Name != "W-"+item.Key {
+			t.Fatalf("unassigned %s assignee %#v lead %#v", item.Key, item.Assignee, item.LeadWorker)
+		}
+	}
+	loops, seq := explainAssigneeProbes(t, p, root.ID)
+	// Every row is unassigned, and the page reuses the lead this statement
+	// already carried, so the index runs once per row and no more.
+	if seq > 1 || loops > tickets || loops < tickets {
+		t.Fatalf("unassigned probe loops %.0f, seq %.0f, want %d", loops, seq, tickets)
+	}
+
+	const assigned = 1500
+	err = db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE nodes SET fields=jsonb_build_object('assignee', $2::text)
+            WHERE tenant_id=$1 AND parent_id=$3 AND key LIKE 'OPEN-%' AND position<=$4`,
+			p.TenantID, sam.ID, root.ID, assigned)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := appPool.Exec(t.Context(), `ANALYZE nodes, principals, harness_sessions`); err != nil {
+		t.Fatal(err)
+	}
+	mixed := listPage(t, p, "/api/nodes?within="+root.ID+"&kind=ticket&sort=assignee&limit=50")
+	if len(mixed.Items) != 50 {
+		t.Fatalf("mixed page %d", len(mixed.Items))
+	}
+	for _, item := range mixed.Items {
+		if item.Assignee == nil || item.Assignee.Name != "Sam" || item.LeadWorker == nil || item.LeadWorker.Name != "W-"+item.Key {
+			t.Fatalf("assigned %s assignee %#v lead %#v", item.Key, item.Assignee, item.LeadWorker)
+		}
+	}
+	loops, seq = explainAssigneeProbes(t, p, root.ID)
+	unassigned := tickets - assigned
+	// Ordering probes the open rows once. The page is stored people, one probe
+	// each, and the statement asks for one extra row to decide the cursor.
+	const pageRows = 50 + 1
+	if seq > 1 || loops > float64(unassigned+pageRows) || loops < float64(unassigned) {
+		t.Fatalf("mixed probe loops %.0f, seq %.0f, unassigned %d page %d", loops, seq, unassigned, pageRows)
+	}
+}
+
+func explainAssigneeProbes(t *testing.T, p tenant.Principal, rootID string) (indexLoops, seqLoops float64) {
+	t.Helper()
+	q, err := parseListQuery(httptest.NewRequest(http.MethodGet, "/api/nodes?within="+rootID+"&kind=ticket&sort=assignee&limit=50", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	q.seen = assigneeSeen{harnessAll: true, members: true}
+	sqlText, args := listSQL(q, nil)
+	var planRaw string
+	err = db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), "EXPLAIN (ANALYZE, FORMAT JSON) "+sqlText, args...).Scan(&planRaw)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	indexLoops, seqLoops, indexes := harnessProbeStats(planRaw)
+	if !slices.Contains(indexes, "harness_sessions_ticket_eta") {
+		t.Fatalf("assignee sort did not probe harness_sessions_ticket_eta (index loops %.0f, seq %.0f, indexes %v)", indexLoops, seqLoops, indexes)
+	}
+	t.Logf("assignee sort probes: %.0f index loops, %.0f seq (indexes %v)", indexLoops, seqLoops, indexes)
+	return indexLoops, seqLoops
+}
+
 func harnessProbeStats(planRaw string) (indexLoops, seqLoops float64, indexes []string) {
 	var explained []map[string]any
 	if json.Unmarshal([]byte(planRaw), &explained) != nil {

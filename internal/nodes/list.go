@@ -781,6 +781,10 @@ func assigneeShownExpr(projectID, harnessAll, projects, members string) string {
 // receive a lead. The carried sort lead and the page lead are one statement.
 // Other sorts attach the lookup only to the selected page. The partial index
 // harness_sessions_ticket_eta probes one ticket.
+//
+// gated is MATERIALIZED. Inlining it re-runs the lookup once per reference:
+// the sort reads the shown name twice, and the statement also carries the
+// name and the key, four probes per unassigned row. The CTE evaluates once.
 func assigneeWorkerJoin(nodeID, projectID, harnessAll, projects, members string, yellow, red int, gate string) string {
 	shown := assigneeShownExpr(projectID, harnessAll, projects, members)
 	key := assigneeLeadKeyExpr(harnessAll)
@@ -803,11 +807,14 @@ func assigneeWorkerJoin(nodeID, projectID, harnessAll, projects, members string,
 	scoped := strings.ReplaceAll(lookup, "s.", "sess.")
 	scoped = strings.ReplaceAll(scoped, "harness_sessions s", "harness_sessions sess")
 	return ` LEFT JOIN LATERAL (
+    WITH gated AS MATERIALIZED (
+        SELECT CASE WHEN ` + gate + ` THEN (
+            SELECT jsonb_build_object('shown_name', picked.shown_name, 'lead_key', picked.lead_key)
+            FROM (` + scoped + `) picked
+        ) END AS payload
+    )
     SELECT payload->>'shown_name' AS shown_name, payload->>'lead_key' AS lead_key
-    FROM (SELECT CASE WHEN ` + gate + ` THEN (
-        SELECT jsonb_build_object('shown_name', picked.shown_name, 'lead_key', picked.lead_key)
-        FROM (` + scoped + `) picked
-    ) END AS payload) gated
+    FROM gated
 ) worker ON true `
 }
 
