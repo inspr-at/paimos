@@ -279,7 +279,7 @@ func TestPlanningBulkUsagePerformance(t *testing.T) {
 			return fmt.Errorf("explain plan missing")
 		}
 		if problems := planningListPlanProblems(root); len(problems) != 0 {
-			t.Errorf("list planning plan: %s", strings.Join(problems, "; "))
+			t.Errorf("list planning plan: %s\n%s", strings.Join(problems, "; "), planUsageSketch(root))
 		}
 		// A cheap index must not turn the usage read into a per-row loop. That
 		// is the plan the full suite picked when usage had grown.
@@ -296,7 +296,7 @@ func TestPlanningBulkUsagePerformance(t *testing.T) {
 		}
 		root2, _ := docs2[0]["Plan"].(map[string]any)
 		if problems := planningListPlanProblems(root2); len(problems) != 0 {
-			t.Errorf("cheap-index plan: %s", strings.Join(problems, "; "))
+			t.Errorf("cheap-index plan: %s\n%s", strings.Join(problems, "; "), planUsageSketch(root2))
 		}
 		return nil
 	})
@@ -428,6 +428,36 @@ func mustPlan(t *testing.T, raw string) map[string]any {
 
 func planProblemContains(problems []string, fragment string) bool {
 	return strings.Contains(strings.Join(problems, "; "), fragment)
+}
+
+func planUsageSketch(root map[string]any) string {
+	var b strings.Builder
+	var walk func(map[string]any, []string)
+	walk = func(n map[string]any, ancestors []string) {
+		typ, _ := n["Node Type"].(string)
+		rel, _ := n["Relation Name"].(string)
+		parent, _ := n["Parent Relationship"].(string)
+		label := typ
+		if rel != "" {
+			label += " " + rel
+		}
+		if parent != "" {
+			label += " (" + parent + ")"
+		}
+		if n["Relation Name"] == "harness_session_usage" {
+			filter, _ := n["Filter"].(string)
+			if len(filter) > 160 {
+				filter = filter[:160]
+			}
+			fmt.Fprintf(&b, "%s -> %s filter %s\n", strings.Join(ancestors, " / "), label, filter)
+		}
+		next := append(append([]string{}, ancestors...), label)
+		for _, child := range planChildren(n) {
+			walk(child, next)
+		}
+	}
+	walk(root, nil)
+	return b.String()
 }
 
 func planChildren(n map[string]any) []map[string]any {

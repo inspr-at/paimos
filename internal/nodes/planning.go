@@ -900,14 +900,13 @@ func planningSortSQL(ratesArg, harnessAll, projects string) string {
         JOIN harness_sessions s ON s.tenant_id=current_setting('aeon.tenant_id')::uuid AND s.ticket_node_id=t.id
             AND ((SELECT aeon_visible_all()) OR s.project_id = ANY ((SELECT aeon_visible_projects())::uuid[]))
     ), plan_usage_rows AS MATERIALIZED (
-        -- One read of usage for the filtered tickets' sessions. Joining each
-        -- session to the usage index re-plans as a nested loop with a per-row
-        -- visibility subplan once that table grows.
+        -- Scan this tenant's usage once. A join from each session into the
+        -- usage index re-plans as a nested loop with a per-row visibility
+        -- subplan once that table grows; the lines below hash these rows.
         SELECT u.session_id, u.model, u.input_tokens, u.output_tokens, u.cached_input_tokens,
             u.billing_mode, u.estimated_cost_usd
         FROM harness_session_usage u
         WHERE u.tenant_id=current_setting('aeon.tenant_id')::uuid
-            AND u.session_id IN (SELECT ps.session_id FROM plan_sessions ps)
     ), plan_lines AS MATERIALIZED (
         SELECT ps.id,
             (u.model IS NOT NULL AND u.input_tokens IS NOT NULL AND u.output_tokens IS NOT NULL AND u.cached_input_tokens IS NOT NULL) AS complete,
