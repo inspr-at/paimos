@@ -2,6 +2,7 @@
 package agentpairing_test
 
 import (
+	"bytes"
 	"net/http/httptest"
 	"testing"
 
@@ -11,17 +12,30 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
+type watchSetting struct {
+	ConsentMode string `json:"consent_mode"`
+	Computers   []struct {
+		ComputerID string `json:"computer_id"`
+		Name       string `json:"name"`
+		Capability string `json:"capability"`
+	} `json:"local_auth_computers"`
+}
+
 const watchSecurityPath = "/api/me/security/session-watching"
 
 func setWatchMode(f *fixture, mode string) {
 	f.call("PUT", watchSecurityPath, map[string]string{"consent_mode": mode}, true, "", 200)
 }
 func TestWatchSecurityIsPersonOnlySameOriginAndTenantScoped(t *testing.T) {
-	f, key, _ := watchFixture(t)
-	var setting map[string]string
-	decodeResult(t, f.call("GET", watchSecurityPath, nil, true, "", 200), &setting)
-	if setting["consent_mode"] != attachwatch.ConsentAeon {
-		t.Fatal("default is not A")
+	f, key, in := watchFixture(t)
+	var setting watchSetting
+	loaded := f.call("GET", watchSecurityPath, nil, true, "", 200)
+	if bytes.Contains(loaded.Body.Bytes(), []byte(`"local_auth_computers":null`)) {
+		t.Fatal("null computer list")
+	}
+	decodeResult(t, loaded, &setting)
+	if setting.ConsentMode != attachwatch.ConsentAeon || len(setting.Computers) != 1 || setting.Computers[0].ComputerID != in.ComputerID || setting.Computers[0].Capability != attachwatch.LocalAuthUnreported {
+		t.Fatalf("default view %+v", setting)
 	}
 	f.call("GET", watchSecurityPath, nil, false, key, 403)
 	f.call("PUT", watchSecurityPath, map[string]string{"consent_mode": "local_auth"}, false, key, 403)
@@ -34,9 +48,10 @@ func TestWatchSecurityIsPersonOnlySameOriginAndTenantScoped(t *testing.T) {
 	}
 	f.call("PUT", watchSecurityPath, map[string]string{"consent_mode": "off"}, true, "", 400)
 	f.call("PUT", watchSecurityPath, map[string]string{"consent_mode": "aeon", "person_id": f.person}, true, "", 400)
+	f.call("PUT", watchSecurityPath, map[string]any{"consent_mode": "aeon", "local_auth_computers": []any{}}, true, "", 400)
 	setWatchMode(f, attachwatch.ConsentLocalAuth)
 	decodeResult(t, f.call("GET", watchSecurityPath, nil, true, "", 200), &setting)
-	if setting["consent_mode"] != attachwatch.ConsentLocalAuth {
+	if setting.ConsentMode != attachwatch.ConsentLocalAuth {
 		t.Fatal("setting not persisted")
 	}
 	// A second person in the same tenant neither inherits nor edits this policy.
@@ -54,13 +69,13 @@ func TestWatchSecurityIsPersonOnlySameOriginAndTenantScoped(t *testing.T) {
 	login := f.call("POST", "/api/auth/dev-login", map[string]string{"email": "second@example.test"}, false, "", 200)
 	f.cookie = login.Result().Cookies()[0]
 	decodeResult(t, f.call("GET", watchSecurityPath, nil, true, "", 200), &setting)
-	if setting["consent_mode"] != attachwatch.ConsentAeon {
+	if setting.ConsentMode != attachwatch.ConsentAeon {
 		t.Fatal("inherited another person's setting")
 	}
 	setWatchMode(f, attachwatch.ConsentAeon)
 	f.cookie = ownerCookie
 	decodeResult(t, f.call("GET", watchSecurityPath, nil, true, "", 200), &setting)
-	if setting["consent_mode"] != attachwatch.ConsentLocalAuth {
+	if setting.ConsentMode != attachwatch.ConsentLocalAuth {
 		t.Fatal("another person overwrote owner's setting")
 	}
 	other := uuid(t, f.db)
@@ -160,5 +175,75 @@ func TestWatchSettingChangeDoesNotAffectActiveModeA(t *testing.T) {
 	decodeResult(t, f.call("POST", "/api/agent-pairing/attach", in, false, key, 200), &next)
 	if next.State != "active" || next.ConsentMode != attachwatch.ConsentAeon || *next.SessionID != *v.SessionID {
 		t.Fatal("active watch policy changed")
+	}
+}
+
+func readWatchSetting(t *testing.T, f *fixture) watchSetting {
+	t.Helper()
+	var setting watchSetting
+	body := f.call("GET", watchSecurityPath, nil, true, "", 200)
+	if bytes.Contains(body.Body.Bytes(), []byte(`"local_auth_computers":null`)) {
+		t.Fatal("null computer list")
+	}
+	decodeResult(t, body, &setting)
+	return setting
+}
+
+func TestLocalAuthCapabilityFollowsDaemonRegistration(t *testing.T) {
+	f, key, in := watchFixture(t)
+	setting := readWatchSetting(t, f)
+	if len(setting.Computers) != 1 || setting.Computers[0].Name != "Test workstation" || setting.Computers[0].Capability != attachwatch.LocalAuthUnreported || setting.Computers[0].ComputerID != in.ComputerID {
+		t.Fatalf("omitted registration %+v", setting.Computers)
+	}
+	in.LocalAuthCapability = attachwatch.LocalAuthUnsigned
+	requestWatch(t, f, key, in)
+	in.Operation = "poll"
+	in.Sequence = 1
+	in.LocalAuthCapability = attachwatch.LocalAuthPolicy
+	f.call("POST", "/api/agent-pairing/attach", in, false, key, 200)
+	if got := readWatchSetting(t, f); len(got.Computers) != 1 || got.Computers[0].Capability != attachwatch.LocalAuthUnreported {
+		t.Fatalf("poll changed capability %+v", got.Computers)
+	}
+	f.call("POST", "/api/agent-pairing/attach", attachwatch.DeviceRequest{Operation: "register", ComputerID: in.ComputerID, DeviceProof: in.DeviceProof, PollKey: nonce(), LocalAuthCapability: "browser"}, false, key, 400)
+	f.call("POST", "/api/agent-pairing/attach", attachwatch.DeviceRequest{Operation: "register", ComputerID: in.ComputerID, DeviceProof: in.DeviceProof, PollKey: nonce(), LocalAuthCapability: attachwatch.LocalAuthUnreported}, false, key, 400)
+	if got := readWatchSetting(t, f); got.Computers[0].Capability != attachwatch.LocalAuthUnreported {
+		t.Fatal("rejected registration changed capability")
+	}
+	keyPoll := nonce()
+	f.call("POST", "/api/agent-pairing/attach", attachwatch.DeviceRequest{Operation: "register", ComputerID: in.ComputerID, DeviceProof: in.DeviceProof, PollKey: keyPoll, LocalAuthCapability: attachwatch.LocalAuthAvailable}, false, key, 200)
+	if got := readWatchSetting(t, f); got.Computers[0].Capability != attachwatch.LocalAuthAvailable {
+		t.Fatalf("available report %+v", got.Computers)
+	}
+	again := in
+	again.Operation = "request"
+	again.RequestID = uuid(t, f.db)
+	again.PollKey = keyPoll
+	again.LocalAuthCapability = attachwatch.LocalAuthUnsupported
+	again.Sequence = 0
+	requestWatch(t, f, key, again)
+	if got := readWatchSetting(t, f); got.Computers[0].Capability != attachwatch.LocalAuthAvailable {
+		t.Fatal("request changed capability")
+	}
+	f.call("POST", "/api/agent-pairing/attach", attachwatch.DeviceRequest{Operation: "register", ComputerID: in.ComputerID, DeviceProof: in.DeviceProof, PollKey: nonce()}, false, key, 200)
+	if _, err := f.db.Admin.Exec(t.Context(), `UPDATE agent_pairing_requests q SET details=details-'computer_name' FROM agent_pairing_computers c WHERE c.id=$1 AND q.tenant_id=c.tenant_id AND q.id=c.request_id`, in.ComputerID); err != nil {
+		t.Fatal(err)
+	}
+	if got := readWatchSetting(t, f); got.Computers[0].Name != "Paired computer" || got.Computers[0].Capability != attachwatch.LocalAuthUnreported {
+		t.Fatalf("cleared name %+v", got.Computers)
+	}
+	second := uuid(t, f.db)
+	if err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.tenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `WITH i AS (INSERT INTO identities(issuer,subject,email) VALUES('fixture','capability-second','capability-second@example.test') RETURNING id) INSERT INTO principals(tenant_id,id,kind,identity_id,name,roles) SELECT $1,$2,'person',i.id,'Capability second',ARRAY['member'] FROM i`, f.tenantID, second)
+		if err != nil {
+			return err
+		}
+		return dbtest.BindLegacyTx(t.Context(), tx, f.tenantID, second)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	login := f.call("POST", "/api/auth/dev-login", map[string]string{"email": "capability-second@example.test"}, false, "", 200)
+	f.cookie = login.Result().Cookies()[0]
+	if got := readWatchSetting(t, f); got.ConsentMode != attachwatch.ConsentAeon || len(got.Computers) != 0 {
+		t.Fatalf("other person saw %+v", got)
 	}
 }

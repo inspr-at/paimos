@@ -26,12 +26,15 @@
 //	paimos-agentd-linux-amd64
 //	SHA256SUMS
 //
-// The release build sets CGO_ENABLED=0, passes -trimpath, and injects the
+// Darwin release builds set CGO_ENABLED=1 so paimos-agentd links
+// LocalAuthentication. Linux paimos-agentd, aeon-cli, and the server image
+// stay CGO_ENABLED=0. Every release build passes -trimpath and injects the
 // version.json version field with the same linker setting as the server image:
 //
 //	-X github.com/inspr-at/paimos/internal/version.Version=<version>
 //
-// Development builds leave that variable at "dev".
+// Development builds leave that variable at "dev". The build used by
+// .github/workflows/release.yml is scripts/build-release-binaries.sh.
 //
 // Verify the checksums before installing. From the directory that contains
 // the downloaded assets, on Linux:
@@ -45,16 +48,15 @@
 // Install the matching binary into a new, user-owned versioned directory only
 // after verification; see docs/AGENT_INTEGRATION.md for the exact guide.
 //
-// From source, at the repository root, set VERSION to the version field of
-// version.json (no leading v):
+// From source, at the repository root:
 //
-//	CGO_ENABLED=0 go build -trimpath \
-//	  -ldflags "-X github.com/inspr-at/paimos/internal/version.Version=${VERSION}" \
-//	  -o paimos-agentd ./cmd/aeon-agentd
+//	bash scripts/build-release-binaries.sh host
 //
-// Cross-compiling uses the same flags with GOOS and GOARCH set to darwin or
-// linux and arm64 or amd64. CGO stays off, so those four targets build
-// without a C toolchain. Crossbuilds alone do not qualify user-service behavior.
+// On a Mac that builds the host darwin paimos-agentd with CGO_ENABLED=1 and
+// both Linux agentd targets with CGO_ENABLED=0. A darwin CGO build must run
+// on the matching architecture; LocalAuthentication cannot be cross-compiled.
+// Linux agentd and aeon-cli stay static. Crossbuilds alone do not qualify
+// user-service behavior.
 package main
 
 import "github.com/inspr-at/paimos/internal/version"

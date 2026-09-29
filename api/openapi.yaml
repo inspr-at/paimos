@@ -554,18 +554,18 @@ paths:
   /me/security/session-watching:
     get:
       operationId: getSessionWatchingSecurity
-      summary: Read the signed-in person's session watching consent mode
+      summary: Read the signed-in person's session watching consent and reported computers
       responses:
         '200':
-          description: Per-person setting; defaults to Aeon approval
+          description: Per-person setting, defaulting to Aeon approval, plus advisory capability for connected computers this person approved
           content:
             application/json:
-              schema: {$ref: '#/components/schemas/SessionWatchingSecurity'}
+              schema: {$ref: '#/components/schemas/SessionWatchingSecurityView'}
         '403': {description: Signed-in person required}
     put:
       operationId: setSessionWatchingSecurity
       summary: Change consent for future approvals without changing active watches
-      description: Same-origin person only. Local confirmation requires a signed macOS daemon with LocalAuthentication; Linux is unavailable and fails closed.
+      description: Same-origin person only. Saving local_auth is allowed when no computer can confirm; approval then fails closed. The response lists advisory daemon capability and never treats that report as confirmation.
       requestBody:
         required: true
         content:
@@ -573,10 +573,10 @@ paths:
             schema: {$ref: '#/components/schemas/SessionWatchingSecurity'}
       responses:
         '200':
-          description: Saved per-person setting
+          description: Saved per-person setting and advisory computer capability
           content:
             application/json:
-              schema: {$ref: '#/components/schemas/SessionWatchingSecurity'}
+              schema: {$ref: '#/components/schemas/SessionWatchingSecurityView'}
         '400': {description: Invalid mode}
         '403': {description: Same-origin signed-in person required}
   /agent-pairing/attach:
@@ -595,6 +595,8 @@ paths:
         local_auth remains approved (no session or lease) until the registered daemon
         echoes consent_digest and local_confirmed after in-process macOS authentication.
         Missing confirmation never activates; request-supplied policy overrides are refused.
+        Registration may report local_auth_capability. Omission is stored as unreported.
+        That report is advisory and never satisfies local confirmation. A later poll cannot change it.
         Text is host-redacted and relayed in memory only, never stored.
       requestBody:
         required: true
@@ -5267,6 +5269,23 @@ components:
       required: [consent_mode]
       properties:
         consent_mode: {type: string, enum: [aeon, local_auth], default: aeon}
+    SessionWatchingSecurityView:
+      type: object
+      additionalProperties: false
+      required: [consent_mode, local_auth_computers]
+      description: Saved consent plus the advisory capability last reported by each connected computer this person approved. The report never authorizes a watch.
+      properties:
+        consent_mode: {type: string, enum: [aeon, local_auth], default: aeon}
+        local_auth_computers:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [computer_id, name, capability]
+            properties:
+              computer_id: {type: string, format: uuid}
+              name: {type: string, maxLength: 128}
+              capability: {type: string, enum: [available, unsupported, unsigned, no_gui, policy, unreported]}
     AttachProcess:
       type: object
       additionalProperties: false
@@ -5312,6 +5331,10 @@ components:
         request_digest: {type: string, description: 'Required with the snapshot for request, activation, poll and detachment'}
         consent_digest: {type: string, description: Echo of the server-selected consent binding; required for strict activation}
         local_confirmed: {type: boolean, description: Set only by the daemon after in-process LocalAuthentication; never accepted on the local socket}
+        local_auth_capability:
+          type: string
+          enum: [available, unsupported, unsigned, no_gui, policy]
+          description: Registration only. An omitted registration is stored as unreported. A later poll cannot change it. This value never satisfies local confirmation.
         sequence: {type: integer, minimum: 1}
         text: {type: string, maxLength: 16384, description: Host-redacted new complete records only; no persistence or replay}
     AttachView:
