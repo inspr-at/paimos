@@ -301,3 +301,21 @@ func TestMakeThisRepeat(t *testing.T) {
 		t.Fatalf("requests this month: %+v", c.Limit)
 	}
 }
+
+// Inline rename changes the label only; a legacy null model grant stays null.
+func TestRenameKeepsModelGrants(t *testing.T) {
+	f := limitWorld(t, "rename", 1)
+	mod := accountsMod()
+	path := "/api/agent-accounts/" + f.account.ID + "/label"
+	callStatus(t, mod, &f.runner, f.token, "PUT", path, `{"label":"Spare"}`, 403, nil)
+	callStatus(t, mod, &f.admin, "", "PUT", path, `{"label":"  "}`, 400, nil)
+	callStatus(t, mod, &f.admin, "", "PUT", path, `{"label":"Spare","plan":"Pro"}`, 400, nil)
+	var out Account
+	callStatus(t, mod, &f.admin, "", "PUT", path, `{"label":" Spare "}`, 200, &out)
+	if out.Label != "Spare" || out.AllowedProfileIDs != nil {
+		t.Fatalf("rename: %+v", out)
+	}
+	if n := scalar(t, f.admin, `SELECT count(*) FROM agent_accounts WHERE id=$1 AND label='Spare' AND allowed_model_profile_ids IS NULL`, f.account.ID); n != 1 {
+		t.Fatal("rename changed the model grants")
+	}
+}

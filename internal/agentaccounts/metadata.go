@@ -130,3 +130,59 @@ func replaceMetadata(ctx context.Context, tx pgx.Tx, p tenant.Principal, id stri
 	}
 	return after, nil
 }
+
+// renameAccount changes only the display label (AEON-384 inline rename), so
+// a rename never turns a legacy model-grant policy into an explicit one.
+func renameAccount(ctx context.Context, tx pgx.Tx, p tenant.Principal, id, label string) (Account, error) {
+	if !uuidRE.MatchString(id) {
+		return Account{}, fail(http.StatusNotFound, "account not found")
+	}
+	label, err := metadataText(label, false)
+	if err != nil {
+		return Account{}, err
+	}
+	before, err := lockAccount(ctx, tx, id)
+	if err != nil {
+		return Account{}, err
+	}
+	if before.Label == label {
+		return before, nil
+	}
+	if _, err := tx.Exec(ctx, `UPDATE agent_accounts SET label=$2 WHERE id=$1::uuid`, id, label); err != nil {
+		return Account{}, err
+	}
+	after, err := getAccount(ctx, tx, id)
+	if err != nil {
+		return Account{}, err
+	}
+	return after, writeEvent(ctx, tx, p, evUpdated, before, after)
+}
+
+func (m *Module) rename(w http.ResponseWriter, r *http.Request) {
+	p, ok := principal(w, r)
+	if !ok {
+		return
+	}
+	if err := m.requirePermission(r, p, "account.manage"); err != nil {
+		writeErr(w, err)
+		return
+	}
+	var in struct {
+		Label string `json:"label"`
+	}
+	if err := decodeJSON(w, r, &in); err != nil {
+		writeErr(w, err)
+		return
+	}
+	var out Account
+	err := m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
+		var err error
+		out, err = renameAccount(r.Context(), tx, p, r.PathValue("accountId"), in.Label)
+		return err
+	})
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	httpapi.WriteJSON(w, http.StatusOK, out)
+}

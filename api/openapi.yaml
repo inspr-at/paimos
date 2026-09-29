@@ -4387,6 +4387,28 @@ paths:
         '400': {$ref: '#/components/responses/Error'}
         '403': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
+  /agent-accounts/{accountId}/label:
+    put:
+      operationId: renameAgentAccount
+      summary: Rename an account
+      description: Person account.manage permission. Changes only the display label (Settings, inline rename); plan, host label and model grants stay exactly as they are, including a legacy null grant policy. Audited; an identical label is a no-op.
+      security: [{session: []}]
+      parameters: [{name: accountId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [label]
+              properties:
+                label: {type: string, minLength: 1, maxLength: 128}
+      responses:
+        '200': {description: Account, content: {application/json: {schema: {$ref: '#/components/schemas/AgentAccount'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
   /agent-accounts/{accountId}/windows:
     post:
       operationId: createAccountWindow

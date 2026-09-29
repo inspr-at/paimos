@@ -38,6 +38,8 @@
 // A grant change does not stop already owned runs. Metadata is audited and an
 // identical retry is a no-op. Credentials, home paths and identities stay local.
 // Display labels accept up to 128 Unicode characters, matching session metadata.
+// PUT {id}/label (person account.manage) renames only, so Settings' inline
+// rename never turns a legacy null grant into an explicit one.
 //
 // Agentd's local account enrollment accepts an optional metadata object with
 // exactly those four fields and publishes it once on daemon startup. Owner
