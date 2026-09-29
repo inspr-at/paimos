@@ -128,6 +128,85 @@ func TestPortalPaceHistoryMatchesLink(t *testing.T) {
 	}
 }
 
+func TestPortalPaceClearAndRelinkRejectsStaleHistory(t *testing.T) {
+	d := dbtest.Open(t)
+	m := New(d.App, false, bytesRepeat())
+	mux := http.NewServeMux()
+	m.Mount(mux)
+	f := &fixture{t: t, m: m, d: d, h: mux}
+
+	tenantID := makeTenant(t, d, "pace-reissue", "Pace Reissue")
+	admin := makePerson(t, d, tenantID, "Pace Reissue Admin", "admin")
+	insertNode(t, d, tenantID, "PPR-1", "portal_product", "Harbour catalog", "Public summary.", "published", "", "{}")
+	projectA := insertNode(t, d, tenantID, "PRJ-1", "project", "SECRET-PACE-A", "SECRET-PACE-BODY-A", "open", "", "{}")
+	setPortal(t, d, tenantID, true)
+
+	const ip = "203.0.113.46:1000"
+	historyBody := func(revision int64, on bool) string {
+		flag := "false"
+		if on {
+			flag = "true"
+		}
+		return `{"release_history":` + flag + `,"project_id":"` + projectA + `","revision":` + strconv.FormatInt(revision, 10) + `}`
+	}
+	requireRow := func(history bool, revision int64) {
+		t.Helper()
+		gotProject, gotHistory, gotRevision, found := paceLinkRow(t, d, tenantID)
+		if !found || gotProject != projectA || gotHistory != history || gotRevision != revision {
+			t.Fatalf("pace row found=%v project=%s history=%v revision=%d; want %s %v %d", found, gotProject, gotHistory, gotRevision, projectA, history, revision)
+		}
+		if issued := paceRevisionIssued(t, d, tenantID); issued != revision {
+			t.Fatalf("issued revision %d, row %d", issued, revision)
+		}
+	}
+
+	linked := decodeItem[paceAdmin](t, f.do(http.MethodPut, "/api/portal/pace", `{"project_id":"`+projectA+`"}`, ip, &admin, nil, nil))
+	if linked.ProjectID != projectA || linked.ReleaseHistory || linked.Revision != 1 {
+		t.Fatalf("link %+v", linked)
+	}
+	requireRow(false, 1)
+
+	mustOK(t, f.do(http.MethodPut, "/api/portal/pace", `{"project_id":null}`, ip, &admin, nil, nil))
+	if _, _, _, found := paceLinkRow(t, d, tenantID); found {
+		t.Fatal("cleared link left a pace row")
+	}
+	if issued := paceRevisionIssued(t, d, tenantID); issued != 1 {
+		t.Fatalf("clear reused or dropped the issued revision %d", issued)
+	}
+
+	relinked := decodeItem[paceAdmin](t, f.do(http.MethodPut, "/api/portal/pace", `{"project_id":"`+projectA+`"}`, ip, &admin, nil, nil))
+	if relinked.ProjectID != projectA || relinked.ReleaseHistory || relinked.Revision != 2 {
+		t.Fatalf("relink after clear %+v", relinked)
+	}
+	stale := f.do(http.MethodPut, "/api/portal/pace", historyBody(1, true), ip, &admin, nil, nil)
+	if stale.Code != http.StatusConflict || !strings.Contains(stale.Body.String(), paceLinkConflict) || strings.Contains(stale.Body.String(), "SECRET-PACE") {
+		t.Fatalf("stale history after clear and relink: %d %s", stale.Code, stale.Body)
+	}
+	requireRow(false, 2)
+
+	published := decodeItem[paceAdmin](t, f.do(http.MethodPut, "/api/portal/pace", historyBody(2, true), ip, &admin, nil, nil))
+	if !published.ReleaseHistory || published.ProjectID != projectA || published.Revision != 3 {
+		t.Fatalf("publish the recreated link %+v", published)
+	}
+	requireRow(true, 3)
+
+	mustOK(t, f.do(http.MethodPut, "/api/portal/pace", `{"project_id":null}`, ip, &admin, nil, nil))
+	if issued := paceRevisionIssued(t, d, tenantID); issued != 3 {
+		t.Fatalf("clear after publish issued %d", issued)
+	}
+	again := decodeItem[paceAdmin](t, f.do(http.MethodPut, "/api/portal/pace", `{"project_id":"`+projectA+`"}`, ip, &admin, nil, nil))
+	if again.ReleaseHistory || again.Revision != 4 {
+		t.Fatalf("second relink %+v", again)
+	}
+	for _, revision := range []int64{1, 2, 3} {
+		rec := f.do(http.MethodPut, "/api/portal/pace", historyBody(revision, true), ip, &admin, nil, nil)
+		if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), paceLinkConflict) {
+			t.Fatalf("stale revision %d after the second relink: %d %s", revision, rec.Code, rec.Body)
+		}
+	}
+	requireRow(false, 4)
+}
+
 func paceLinkRow(t *testing.T, d *dbtest.DB, tenantID string) (project string, history bool, revision int64, found bool) {
 	t.Helper()
 	err := db.InTenant(dbtest.Seed(t.Context()), d.App, tenantID, func(tx pgx.Tx) error {
@@ -145,4 +224,28 @@ func paceLinkRow(t *testing.T, d *dbtest.DB, tenantID string) (project string, h
 		t.Fatal(err)
 	}
 	return project, history, revision, found
+}
+
+func paceRevisionIssued(t *testing.T, d *dbtest.DB, tenantID string) int64 {
+	t.Helper()
+	var revision int64
+	var found bool
+	err := db.InTenant(dbtest.Seed(t.Context()), d.App, tenantID, func(tx pgx.Tx) error {
+		err := tx.QueryRow(t.Context(), `SELECT revision FROM portal_pace_revision`).Scan(&revision)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		found = true
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !found {
+		t.Fatal("pace revision counter missing")
+	}
+	return revision
 }

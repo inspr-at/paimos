@@ -61,6 +61,22 @@ func (m *Module) readPace(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// nextPaceRevision issues the next pace-link revision for this tenant.
+// The counter row outlives portal_pace, so clearing a link and creating it
+// again cannot land on a revision a stale release-history write still holds.
+// Callers run inside the pace transaction; a later 409 rolls the issue back.
+func nextPaceRevision(ctx context.Context, tx pgx.Tx) (int64, error) {
+	var revision int64
+	err := tx.QueryRow(ctx, `
+		INSERT INTO portal_pace_revision AS c (tenant_id, revision)
+		SELECT NULLIF(current_setting('aeon.tenant_id', true), '')::uuid,
+		       COALESCE((SELECT p.revision FROM portal_pace p), 0) + 1
+		ON CONFLICT (tenant_id) DO UPDATE
+		SET revision = GREATEST(c.revision, COALESCE((SELECT p.revision FROM portal_pace p), 0)) + 1
+		RETURNING revision`).Scan(&revision)
+	return revision, err
+}
+
 func (m *Module) writePace(w http.ResponseWriter, r *http.Request) {
 	m.manage(w, r, func(ctx context.Context, tx pgx.Tx, p tenant.Principal) (any, error) {
 		in, err := decodePaceWrite(r)
@@ -76,19 +92,26 @@ func (m *Module) writePace(w http.ResponseWriter, r *http.Request) {
 		case in.setHistory:
 			// Project and revision are both in this one update, so a link that
 			// moved or advanced after the admin read it cannot take the opt-in.
+			// The replacement revision comes from a counter that survives a
+			// cleared row. A mismatch returns 409 and rolls that issue back.
+			revision, err := nextPaceRevision(ctx, tx)
+			if err != nil {
+				return nil, err
+			}
 			tag, err := tx.Exec(ctx, `
 				UPDATE portal_pace AS p
 				SET release_history = $1,
-				    revision = p.revision + 1
+				    revision = $4
 				WHERE p.project_node_id = $2::uuid
 				  AND p.revision = $3
+				  AND $4 > p.revision
 				  AND EXISTS (
 					SELECT 1
 					FROM nodes n
 					JOIN node_kinds k ON k.tenant_id = n.tenant_id AND k.id = n.kind_id
 					WHERE n.tenant_id = p.tenant_id AND n.id = p.project_node_id
 					  AND n.deleted_at IS NULL AND k.slug = 'project'
-				)`, in.history, in.projectID, in.revision)
+				)`, in.history, in.projectID, in.revision, revision)
 			if err != nil {
 				return nil, err
 			}
@@ -121,13 +144,17 @@ func (m *Module) writePace(w http.ResponseWriter, r *http.Request) {
 			if err == nil && currentProject == in.projectID {
 				history = currentHistory
 			}
+			revision, err := nextPaceRevision(ctx, tx)
+			if err != nil {
+				return nil, err
+			}
 			if _, err := tx.Exec(ctx, `
-				INSERT INTO portal_pace(tenant_id, project_node_id, release_history)
-				VALUES (NULLIF(current_setting('aeon.tenant_id', true), '')::uuid, $1::uuid, $2)
+				INSERT INTO portal_pace(tenant_id, project_node_id, release_history, revision)
+				VALUES (NULLIF(current_setting('aeon.tenant_id', true), '')::uuid, $1::uuid, $2, $3)
 				ON CONFLICT (tenant_id) DO UPDATE
 				SET project_node_id = EXCLUDED.project_node_id,
 				    release_history = EXCLUDED.release_history,
-				    revision = portal_pace.revision + 1`, in.projectID, history); err != nil {
+				    revision = EXCLUDED.revision`, in.projectID, history, revision); err != nil {
 				return nil, err
 			}
 		}
