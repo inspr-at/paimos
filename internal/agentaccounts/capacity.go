@@ -287,16 +287,18 @@ func (m *Module) capacityPreview(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, fail(http.StatusTooManyRequests, "too many previews; try again shortly"))
 		return
 	}
-	if !g.acquire() {
-		retryAfter(w, time.Second)
-		writeErr(w, fail(http.StatusServiceUnavailable, "previews are busy; try again shortly"))
+	// One deadline covers reading the body and the work. The body is read
+	// before a slot is taken, so a slow or unfinished upload never holds one.
+	deadline := time.Now().Add(g.timeout)
+	raw, err := readBodyBy(w, r, deadline)
+	if err != nil {
+		writeErr(w, err)
 		return
 	}
-	defer g.release()
 	var in struct {
 		Schedule *capacity.Schedule `json:"schedule"`
 	}
-	if err := decodeJSON(w, r, &in); err != nil {
+	if err := decodeStrict(raw, &in); err != nil {
 		writeErr(w, err)
 		return
 	}
@@ -308,12 +310,18 @@ func (m *Module) capacityPreview(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, fail(400, err.Error()))
 		return
 	}
+	if !g.acquire() {
+		retryAfter(w, time.Second)
+		writeErr(w, fail(http.StatusServiceUnavailable, "previews are busy; try again shortly"))
+		return
+	}
+	defer g.release()
 	draft := *in.Schedule
 	draft.Override, draft.OverrideUntil = "", nil
-	ctx, cancel := context.WithTimeout(r.Context(), g.timeout)
+	ctx, cancel := context.WithDeadline(r.Context(), deadline)
 	defer cancel()
 	var out []accountCapacity
-	err := m.in(ctx, p.TenantID, func(tx pgx.Tx) error {
+	err = m.in(ctx, p.TenantID, func(tx pgx.Tx) error {
 		var err error
 		out, err = projectCapacity(ctx, tx, p.ID, &draft, g.budget)
 		return err

@@ -3453,6 +3453,7 @@ paths:
         '200': {description: Capacity, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/AccountCapacity'}}}}}
         '400': {description: Invalid schedule}
         '403': {description: Person account.read permission required}
+        '408': {description: The request body did not arrive within the preview deadline}
         '413': {description: Too many long capacity windows to preview at once (bounded integration work)}
         '429': {description: Per-person preview rate exceeded; see Retry-After}
         '503': {description: Previews busy or the preview deadline passed; see Retry-After}

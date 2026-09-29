@@ -2,8 +2,11 @@
 package agentaccounts
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 	"strconv"
 	"sync"
@@ -238,4 +241,54 @@ func previewSteps(start, reset time.Time) int {
 		return 1
 	}
 	return 4*int(reset.Sub(start)/(30*time.Minute)) + 4
+}
+
+// readBodyBy reads at most 1 MiB of request body before deadline. The
+// connection gets a read deadline where the server supports it, and the handler
+// stops waiting at the deadline either way (408), so a stalled upload costs
+// neither a preview slot nor the caller's time.
+func readBodyBy(w http.ResponseWriter, r *http.Request, deadline time.Time) ([]byte, error) {
+	_ = http.NewResponseController(w).SetReadDeadline(deadline)
+	body := http.MaxBytesReader(w, r.Body, 1<<20)
+	type result struct {
+		raw []byte
+		err error
+	}
+	done := make(chan result, 1)
+	go func() {
+		raw, err := io.ReadAll(body)
+		done <- result{raw, err}
+	}()
+	timer := time.NewTimer(time.Until(deadline))
+	defer timer.Stop()
+	select {
+	case got := <-done:
+		if got.err != nil {
+			var tooLarge *http.MaxBytesError
+			if errors.As(got.err, &tooLarge) {
+				return nil, fail(http.StatusRequestEntityTooLarge, "request body too large")
+			}
+			return nil, fail(http.StatusRequestTimeout, "the preview request did not arrive in time")
+		}
+		return got.raw, nil
+	case <-timer.C:
+		_ = r.Body.Close()
+		return nil, fail(http.StatusRequestTimeout, "the preview request did not arrive in time")
+	case <-r.Context().Done():
+		return nil, fail(http.StatusRequestTimeout, "the preview request was cancelled")
+	}
+}
+
+// decodeStrict is decodeJSON for a body already read: one JSON value, no unknown fields.
+func decodeStrict(raw []byte, dst any) error {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(dst); err != nil {
+		return fail(http.StatusBadRequest, "invalid JSON request body")
+	}
+	var extra any
+	if err := dec.Decode(&extra); !errors.Is(err, io.EOF) {
+		return fail(http.StatusBadRequest, "request body must contain one JSON value")
+	}
+	return nil
 }

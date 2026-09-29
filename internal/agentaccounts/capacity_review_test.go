@@ -3,7 +3,10 @@ package agentaccounts
 
 import (
 	"encoding/json"
+	"io"
 	"math"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -176,10 +179,55 @@ func TestCapacityPreviewBounds(t *testing.T) {
 	small := &Module{pool: appPool, preview: newPreviewGuard(10, time.Minute, 4, 10, previewTimeout)}
 	callStatus(t, small, &admin, "", "POST", path, body, 413, nil)
 	late := &Module{pool: appPool, preview: newPreviewGuard(10, time.Minute, 4, previewBudget, time.Nanosecond)}
-	callStatus(t, late, &admin, "", "POST", path, body, 503, nil)
+	// One deadline covers body and work: it ends as 408 (body) or 503 (work).
+	if status, _ := call(t, late, &admin, "", "POST", path, body); status != http.StatusRequestTimeout && status != http.StatusServiceUnavailable {
+		t.Fatal("past deadline answered", status)
+	}
 	// A rejected preview holds no slot: the busy guard still serves.
 	if !busy.acquire() {
 		t.Fatal("slot leaked")
 	}
 	busy.release()
+}
+
+// Re-review 1: a slow or unfinished body is read under the preview deadline and
+// before a slot is taken, so it cannot starve another person's preview.
+func TestCapacityPreviewSlowBodyHoldsNoSlot(t *testing.T) {
+	admin, _, _, _ := capacityWorld(t, "preview-slow", "codex")
+	other := addPrincipal(t, admin.TenantID, "person", "Second", []string{"admin"})
+	guard := newPreviewGuard(10, time.Minute, 1, previewBudget, 300*time.Millisecond)
+	mod := &Module{pool: appPool, preview: guard}
+	mux := http.NewServeMux()
+	mod.Mount(mux)
+	type slow struct {
+		rec  *httptest.ResponseRecorder
+		pipe *io.PipeWriter
+		done chan struct{}
+	}
+	var stalled []slow
+	for range 4 {
+		reader, writer := io.Pipe()
+		r := httptest.NewRequest("POST", "/api/agent-accounts/capacity/preview", reader)
+		r = r.WithContext(tenant.WithPrincipal(r.Context(), admin))
+		s := slow{httptest.NewRecorder(), writer, make(chan struct{})}
+		go func() { mux.ServeHTTP(s.rec, r); close(s.done) }()
+		stalled = append(stalled, s)
+	}
+	body := encoded(t, map[string]any{"schedule": capacity.DefaultSchedule("Europe/Vienna")})
+	callStatus(t, mod, &other, "", "POST", "/api/agent-accounts/capacity/preview", body, 200, nil)
+	for _, s := range stalled {
+		select {
+		case <-s.done:
+		case <-time.After(5 * time.Second):
+			t.Fatal("a stalled body outlived the preview deadline")
+		}
+		if s.rec.Code != http.StatusRequestTimeout {
+			t.Fatal("stalled body answered", s.rec.Code)
+		}
+		_ = s.pipe.Close()
+	}
+	if !guard.acquire() {
+		t.Fatal("a slot leaked")
+	}
+	guard.release()
 }
