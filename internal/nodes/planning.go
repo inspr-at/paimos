@@ -6,6 +6,7 @@ import (
 	"errors"
 	"math"
 	"math/big"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -445,16 +446,202 @@ func usdFloat(v float64) *string {
 	return &s
 }
 
-// planRoute is one resolved role, shared by every row with that role.
+// planRoute is one resolved role, shared by every row with that role. view
+// is nil when the registry selected nothing.
 type planRoute struct {
 	view     *planningRoute
 	key      routeKey
 	mixPrice *float64
-	gap      string
 }
 
 // planBilling is how a harness was billed most recently.
 type planBilling struct{ mode, plan string }
+
+// planner holds what one list page's estimates share: the resolved roles, the
+// calibration samples and each routed harness's billing.
+type planner struct {
+	routes       map[string]*planRoute
+	samples      []calibrationSample
+	billing      map[string]planBilling
+	calibrations map[routeKey]calibration
+}
+
+// planEstimate is one ticket's or task's estimate; tokens is nil without hours.
+type planEstimate struct {
+	tokens             *int64
+	list, paid         *float64
+	plans              []string
+	cal                calibration
+	anyRoute           bool
+	unpriced, unbilled bool
+}
+
+// route is the resolved route for a row, or nil when the role, the area or
+// the registry leaves none (the estimate then uses any route).
+func (pl *planner) route(r planRow) *planRoute {
+	route := pl.routes[r.role]
+	if route == nil || route.view == nil || r.area == "" || !modelregistry.KnownRouteArea(r.area) {
+		return nil
+	}
+	return route
+}
+
+func (pl *planner) calibration(route *planRoute) calibration {
+	key, mix := routeKey{}, (*float64)(nil)
+	if route != nil {
+		key, mix = route.key, route.mixPrice
+	}
+	c, ok := pl.calibrations[key]
+	if !ok {
+		c = calibrate(pl.samples, key, mix)
+		pl.calibrations[key] = c
+	}
+	return c
+}
+
+// estimate multiplies the row's hours by its route's rate. Paid follows the
+// route harness's billing: 0 under a subscription, the list estimate when
+// billed per use, unknown otherwise.
+func (pl *planner) estimate(r planRow) planEstimate {
+	if r.hours == nil {
+		return planEstimate{}
+	}
+	route := pl.route(r)
+	c := pl.calibration(route)
+	n := int64(math.Round(*r.hours * c.tokensPerHour))
+	e := planEstimate{tokens: &n, cal: c, anyRoute: route == nil, unbilled: true}
+	if c.listPerHour != nil {
+		v := *r.hours * *c.listPerHour
+		e.list = &v
+	} else {
+		e.unpriced = true
+	}
+	if route != nil {
+		switch b := pl.billing[route.view.Harness]; b.mode {
+		case "subscription":
+			zero := 0.0
+			e.paid, e.plans, e.unbilled = &zero, []string{b.plan}, false
+		case "api":
+			e.paid, e.unbilled = e.list, e.list == nil
+		}
+	}
+	return e
+}
+
+// epicEstimate sums the estimates of an epic's open and done children.
+func (pl *planner) epicEstimate(kids []planRow) (planEstimate, planningChildren) {
+	counts := planningChildren{Total: len(kids)}
+	var sum planEstimate
+	var tokens int64
+	var list, paid float64
+	for _, kid := range kids {
+		e := pl.estimate(kid)
+		if e.tokens == nil {
+			continue
+		}
+		counts.Estimated++
+		tokens += *e.tokens
+		if e.list != nil {
+			list += *e.list
+			sum.list = &list
+		}
+		if e.paid != nil {
+			paid += *e.paid
+			sum.paid = &paid
+		}
+		sum.unpriced = sum.unpriced || e.unpriced
+		sum.unbilled = sum.unbilled || e.unbilled
+		sum.plans = append(sum.plans, e.plans...)
+	}
+	if counts.Estimated > 0 {
+		sum.tokens = &tokens
+	}
+	return sum, counts
+}
+
+// view assembles one row. costVisible is harness.read on the row's project.
+// Nil when there is nothing to show.
+func (pl *planner) view(self planRow, kids []planRow, used *planUsage, costVisible bool) *planningView {
+	view := &planningView{}
+	if used != nil {
+		view.Tokens.Sessions, view.Tokens.Unreported = len(used.sessions), len(used.unreported)
+		if used.reported {
+			spent := used.input + used.output
+			view.Tokens.Spent = &spent
+			view.Tokens.Input, view.Tokens.Output, view.Tokens.Cached = used.input, used.output, used.cached
+		}
+	}
+	var e planEstimate
+	if self.kind == "epic" {
+		var counts planningChildren
+		e, counts = pl.epicEstimate(kids)
+		if counts.Total > 0 {
+			view.Children = &counts
+		}
+	} else {
+		if self.role != "" {
+			switch route := pl.routes[self.role]; {
+			case self.area == "" || !modelregistry.KnownRouteArea(self.area):
+				view.RouteGap = "area"
+			case self.role == "review-gate":
+				view.RouteGap = "review_gate"
+			case route == nil || route.view == nil:
+				view.RouteGap = "registry"
+			default:
+				copied := *route.view
+				view.Route = &copied
+			}
+		}
+		e = pl.estimate(self)
+		if e.tokens != nil {
+			view.Tokens.Calibration = &planningCalibration{Basis: e.cal.basis, Tickets: e.cal.tickets, TokensPerHour: int64(math.Round(e.cal.tokensPerHour)), AnyRoute: e.anyRoute}
+		}
+	}
+	view.Tokens.Estimated = e.tokens
+	if costVisible && (used != nil || e.tokens != nil) {
+		view.Cost = planCost(used, e)
+	}
+	if view.Route == nil && view.RouteGap == "" && view.Tokens.Sessions == 0 && view.Tokens.Estimated == nil {
+		return nil
+	}
+	return view
+}
+
+// planCost projects spent usage and the estimate into USD strings.
+func planCost(used *planUsage, e planEstimate) *planningCost {
+	c := &planningCost{Plans: []string{}}
+	plans := map[string]bool{}
+	if used != nil {
+		if used.listed {
+			c.ListSpent = usdString(used.list)
+		}
+		if used.paidKnown {
+			c.PaidSpent = usdString(used.paid)
+		}
+		c.ListUnpriced, c.PaidUnknown = used.listUnpriced, used.paidUnknown
+		for plan := range used.plans {
+			plans[plan] = true
+		}
+	}
+	if e.tokens != nil {
+		if e.list != nil {
+			c.ListEstimated = usdFloat(*e.list)
+		}
+		if e.paid != nil {
+			c.PaidEstimated = usdFloat(*e.paid)
+		}
+		c.ListUnpriced = c.ListUnpriced || e.unpriced
+		c.PaidUnknown = c.PaidUnknown || e.unbilled
+		for _, plan := range e.plans {
+			plans[plan] = true
+		}
+	}
+	for plan := range plans {
+		c.Plans = append(c.Plans, plan)
+	}
+	sort.Strings(c.Plans)
+	return c
+}
 
 // loadPlanning computes the planning view for the page's tickets, tasks and
 // epics. cost reports whether the caller may see usage cost on a project.
@@ -477,220 +664,38 @@ func loadPlanning(ctx context.Context, tx pgx.Tx, items []listItem, cost func(pr
 	if err != nil {
 		return nil, err
 	}
-	routes, err := resolvePlanRoutes(ctx, tx, rows)
-	if err != nil {
+	pl := &planner{billing: map[string]planBilling{}, calibrations: map[routeKey]calibration{}}
+	if pl.routes, err = resolvePlanRoutes(ctx, tx, rows); err != nil {
 		return nil, err
 	}
-	var samples []calibrationSample
-	estimating := false
-	for _, r := range rows {
-		if r.hours != nil {
-			estimating = true
-			break
-		}
-	}
-	if estimating {
-		if samples, err = loadCalibrationSamples(ctx, tx); err != nil {
+	if slices.ContainsFunc(rows, func(r planRow) bool { return r.hours != nil }) {
+		if pl.samples, err = loadCalibrationSamples(ctx, tx); err != nil {
 			return nil, err
 		}
 	}
-	billing := map[string]planBilling{}
-	anyCost := false
-	for _, item := range items {
-		if item.Project != nil && cost(item.Project.ID) {
-			anyCost = true
-			break
-		}
-	}
-	if anyCost && len(routes) > 0 {
-		if billing, err = loadPlanBilling(ctx, tx, routes); err != nil {
+	visible := func(item listItem) bool { return item.Project != nil && cost(item.Project.ID) }
+	if len(pl.routes) > 0 && slices.ContainsFunc(items, visible) {
+		if pl.billing, err = loadPlanBilling(ctx, tx, pl.routes); err != nil {
 			return nil, err
 		}
 	}
-	calibrations := map[routeKey]calibration{}
-	calibrationOf := func(route *planRoute) calibration {
-		key, mix := routeKey{}, (*float64)(nil)
-		if route != nil && route.view != nil {
-			key, mix = route.key, route.mixPrice
-		}
-		c, ok := calibrations[key]
-		if !ok {
-			c = calibrate(samples, key, mix)
-			calibrations[key] = c
-		}
-		return c
-	}
-	type estimate struct {
-		tokens     *int64
-		list, paid *float64
-		plan       string
-		cal        calibration
-		anyRoute   bool
-		unpriced   bool
-		unbilled   bool
-	}
-	estimateOf := func(r planRow) estimate {
-		if r.hours == nil {
-			return estimate{}
-		}
-		route := routes[r.role]
-		if route != nil && route.view == nil {
-			route = nil
-		}
-		if r.area == "" || !modelregistry.KnownRouteArea(r.area) {
-			route = nil
-		}
-		c := calibrationOf(route)
-		n := int64(math.Round(*r.hours * c.tokensPerHour))
-		e := estimate{tokens: &n, cal: c, anyRoute: route == nil}
-		if c.listPerHour != nil {
-			v := *r.hours * *c.listPerHour
-			e.list = &v
-		} else {
-			e.unpriced = true
-		}
-		if route != nil {
-			switch b := billing[route.view.Harness]; b.mode {
-			case "subscription":
-				zero := 0.0
-				e.paid, e.plan = &zero, b.plan
-			case "api":
-				e.paid = e.list
-				e.unbilled = e.list == nil
-			default:
-				e.unbilled = true
-			}
-		} else {
-			e.unbilled = true
-		}
-		return e
-	}
+	own := map[string]planRow{}
 	children := map[string][]planRow{}
 	for _, r := range rows {
-		if r.parent != "" {
+		if r.parent == "" {
+			own[r.id] = r
+		} else {
 			children[r.parent] = append(children[r.parent], r)
 		}
 	}
-	own := map[string]*planRow{}
-	for i := range rows {
-		if rows[i].parent == "" {
-			own[rows[i].id] = &rows[i]
-		}
-	}
 	for _, item := range items {
-		self := own[item.ID]
-		if self == nil {
+		self, ok := own[item.ID]
+		if !ok {
 			continue
 		}
-		view := &planningView{}
-		used := usage[item.ID]
-		if used != nil {
-			view.Tokens.Sessions, view.Tokens.Unreported = len(used.sessions), len(used.unreported)
-			if used.reported {
-				spent := used.input + used.output
-				view.Tokens.Spent = &spent
-				view.Tokens.Input, view.Tokens.Output, view.Tokens.Cached = used.input, used.output, used.cached
-			}
+		if view := pl.view(self, children[item.ID], usage[item.ID], visible(item)); view != nil {
+			out[item.ID] = view
 		}
-		var listEst, paidEst *float64
-		plans := map[string]bool{}
-		unpriced, unbilled := false, false
-		if self.kind == "epic" {
-			kids := children[item.ID]
-			view.Children = &planningChildren{Total: len(kids)}
-			var tokens int64
-			var list, paid float64
-			listKnown, paidKnown := false, false
-			for _, kid := range kids {
-				e := estimateOf(kid)
-				if e.tokens == nil {
-					continue
-				}
-				view.Children.Estimated++
-				tokens += *e.tokens
-				if e.list != nil {
-					list += *e.list
-					listKnown = true
-				}
-				unpriced = unpriced || e.unpriced
-				if e.paid != nil {
-					paid += *e.paid
-					paidKnown = true
-				}
-				unbilled = unbilled || e.unbilled
-				if e.plan != "" {
-					plans[e.plan] = true
-				}
-			}
-			if view.Children.Estimated > 0 {
-				view.Tokens.Estimated = &tokens
-				if listKnown {
-					listEst = &list
-				}
-				if paidKnown {
-					paidEst = &paid
-				}
-			}
-			if view.Children.Total == 0 {
-				view.Children = nil
-			}
-		} else {
-			if self.role != "" {
-				switch route := routes[self.role]; {
-				case self.area == "" || !modelregistry.KnownRouteArea(self.area):
-					view.RouteGap = "area"
-				case self.role == "review-gate":
-					view.RouteGap = "review_gate"
-				case route == nil || route.view == nil:
-					view.RouteGap = "registry"
-				default:
-					copied := *route.view
-					view.Route = &copied
-				}
-			}
-			if e := estimateOf(*self); e.tokens != nil {
-				view.Tokens.Estimated = e.tokens
-				view.Tokens.Calibration = &planningCalibration{Basis: e.cal.basis, Tickets: e.cal.tickets, TokensPerHour: int64(math.Round(e.cal.tokensPerHour)), AnyRoute: e.anyRoute}
-				listEst, paidEst, unpriced, unbilled = e.list, e.paid, e.unpriced, e.unbilled
-				if e.plan != "" {
-					plans[e.plan] = true
-				}
-			}
-		}
-		if item.Project != nil && cost(item.Project.ID) && (used != nil || view.Tokens.Estimated != nil) {
-			c := &planningCost{Plans: []string{}}
-			if used != nil && used.listed {
-				c.ListSpent = usdString(used.list)
-			}
-			if used != nil && used.paidKnown {
-				c.PaidSpent = usdString(used.paid)
-			}
-			if used != nil {
-				c.ListUnpriced, c.PaidUnknown = used.listUnpriced, used.paidUnknown
-				for plan := range used.plans {
-					plans[plan] = true
-				}
-			}
-			if view.Tokens.Estimated != nil {
-				if listEst != nil {
-					c.ListEstimated = usdFloat(*listEst)
-				}
-				if paidEst != nil {
-					c.PaidEstimated = usdFloat(*paidEst)
-				}
-				c.ListUnpriced = c.ListUnpriced || unpriced
-				c.PaidUnknown = c.PaidUnknown || unbilled
-			}
-			for plan := range plans {
-				c.Plans = append(c.Plans, plan)
-			}
-			sort.Strings(c.Plans)
-			view.Cost = c
-		}
-		if view.Route == nil && view.RouteGap == "" && view.Tokens.Sessions == 0 && view.Tokens.Estimated == nil {
-			continue
-		}
-		out[item.ID] = view
 	}
 	return out, nil
 }

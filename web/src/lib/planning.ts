@@ -151,7 +151,7 @@ export function listCostCell(row: PlanningRow): FigureCell {
     const hours = cal && tokens.estimated !== null && cal.tokens_per_hour > 0 ? tokens.estimated / cal.tokens_per_hour : null
     lines.push(`Estimated ≈ ${exactDollars(cost.list_estimated!)}${hours ? ` (${exactDollars(String(est / hours))}/h)` : ''}`)
   }
-  if (cost.list_unpriced) lines.push('Some usage has no list price, so this is a lower bound')
+  if (cost.list_unpriced) lines.push('Part of this has no list price, so it is a lower bound')
   if (over) lines.push(`Over the estimate by ${formatDollars(spent! - est!)}`)
   const label = ['approximately', spent !== null ? `${formatDollars(spent)} spent` : '', est !== null ? `${formatDollars(est)} estimated` : '', over ? 'over the estimate' : ''].filter(Boolean).join(' ')
   return { spent: spent !== null ? formatDollars(spent) : '', estimated: est !== null ? formatDollars(est) : '', over, label, tip: lines.join('\n') }
@@ -167,7 +167,7 @@ export function paidCell(row: PlanningRow): FigureCell {
   if (spent !== null) lines.push(`Paid ${exactDollars(cost.paid_spent!)}`)
   if (est !== null) lines.push(`Estimated ${exactDollars(cost.paid_estimated!)}`)
   if (plans) lines.push(`Work on ${plans} counts as $0`)
-  if (cost.paid_unknown) lines.push('Some usage was reported without its billing')
+  if (cost.paid_unknown) lines.push('Part of this has no billing on record')
   if (over) lines.push(`Over the estimate by ${formatDollars(spent! - est!)}`)
   const label = [spent !== null ? `${formatDollars(spent)} paid` : '', est !== null ? `${formatDollars(est)} estimated` : '', over ? 'over the estimate' : ''].filter(Boolean).join(', ')
   return { spent: spent !== null ? formatDollars(spent) : '', estimated: est !== null ? formatDollars(est) : '', over, label, tip: lines.join('\n') }

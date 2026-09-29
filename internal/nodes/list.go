@@ -794,8 +794,9 @@ func assigneeShownExpr(projectID, harnessAll, projects, members string) string {
 
 // assigneeWorkerJoin chooses and projects the lead together. Assignee sorts
 // carry these exact values through paging; other sorts attach the lookup only
-// to the selected page. The partial index harness_sessions_ticket_eta probes
-// one ticket, and both paths use one statement snapshot.
+// to the selected page. A ticket session index (the partial
+// harness_sessions_ticket_eta or harness_sessions_ticket_node) probes one
+// ticket, and both paths use one statement snapshot.
 func assigneeWorkerJoin(nodeID, projectID, harnessAll, projects, members string, yellow, red int) string {
 	shown := assigneeShownExpr(projectID, harnessAll, projects, members)
 	key := assigneeLeadKeyExpr(harnessAll)
