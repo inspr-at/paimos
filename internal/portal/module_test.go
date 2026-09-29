@@ -434,6 +434,11 @@ func rejectWish(t *testing.T, d *dbtest.DB, tenantID, title string) {
 func setWishState(t *testing.T, d *dbtest.DB, tenantID, title, state string) {
 	t.Helper()
 	err := db.InTenant(dbtest.Seed(t.Context()), d.App, tenantID, func(tx pgx.Tx) error {
+		// Fixture stands in for a moderator transaction. The catalog trigger
+		// refuses this state change until that flag is set.
+		if _, err := tx.Exec(t.Context(), `SELECT set_config('aeon.portal_moderation','on',true)`); err != nil {
+			return err
+		}
 		tag, err := tx.Exec(t.Context(), `UPDATE nodes SET state=$2 WHERE title=$1 AND deleted_at IS NULL`, title, state)
 		if err != nil {
 			return err

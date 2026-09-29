@@ -434,7 +434,7 @@ func upsertNode(ctx context.Context, tx pgx.Tx, tenantID, sourceID, kindID, key,
 		}
 		_, err = tx.Exec(ctx, `UPDATE nodes SET title=$3,body=$4,state=$5,fields=$6::jsonb,updated_at=coalesce($7::timestamptz,now()) WHERE tenant_id=$1 AND id=$2`, tenantID, id, title, body, state, string(bodyJSON), parseClassicTime(stringField(original, "updated_at")))
 		if err != nil {
-			return "", false, false, err
+			return "", false, false, forbidPortal(err)
 		}
 	} else {
 		createdAt := parseClassicTime(stringField(original, "created_at"))
@@ -507,7 +507,7 @@ func setParent(ctx context.Context, tx pgx.Tx, tenantID, actor, childID, parentI
 	}
 	changed, err := tx.Exec(ctx, `UPDATE nodes SET parent_id=$3 WHERE tenant_id=$1 AND id=$2 AND parent_id IS DISTINCT FROM $3`, tenantID, childID, parentID)
 	if err != nil {
-		return false, err
+		return false, forbidPortal(err)
 	}
 	if changed.RowsAffected() == 0 {
 		return false, nil
@@ -584,6 +584,13 @@ func principalRefs(r Record, users map[int64]string, fields ...string) Record {
 	}
 	return refs
 }
+func forbidPortal(err error) error {
+	if events.PortalCatalogDenied(err) {
+		return events.ErrForbidden
+	}
+	return err
+}
+
 func nullString(s string) any {
 	if s == "" {
 		return nil

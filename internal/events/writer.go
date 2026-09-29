@@ -5,10 +5,12 @@ package events
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/inspr-at/paimos/internal/tenant"
 )
@@ -53,6 +55,13 @@ var mutationGuard MutationGuard
 
 // SetMutationGuard installs the process-wide check. Nil leaves Append unchanged.
 func SetMutationGuard(fn MutationGuard) { mutationGuard = fn }
+
+// PortalCatalogDenied reports the nodes trigger that blocks a portal catalog
+// update or delete unless the transaction armed aeon.portal_moderation.
+func PortalCatalogDenied(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "42501" && pgErr.Message == "portal moderation required"
+}
 
 // Append writes in the caller's db.InTenant transaction; it never commits it.
 func Append(ctx context.Context, tx pgx.Tx, p tenant.Principal, c Change) (Event, error) {

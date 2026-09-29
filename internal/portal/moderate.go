@@ -129,6 +129,9 @@ func (m *Module) moderate(w http.ResponseWriter, r *http.Request, fn func(contex
 		if err := authz.RequireTx(r.Context(), tx, p, "settings.manage", authz.Scope{}); err != nil {
 			return err
 		}
+		if _, err := tx.Exec(r.Context(), `SELECT set_config('aeon.portal_moderation','on',true)`); err != nil {
+			return err
+		}
 		var applyErr error
 		item, applyErr = fn(r.Context(), tx, p)
 		return applyErr

@@ -20,6 +20,12 @@ import (
 // import, and relations. A person with settings.manage passes. Everyone else
 // is refused, including an agent whose scopes name that permission.
 //
+// Indirect writes never appear on that event: sibling renumbering and the
+// project cascade update portal rows the caller did not name. The database
+// trigger nodes_portal_row_guard refuses those unless this transaction armed
+// aeon.portal_moderation after the same person check. Position is included.
+// Public catalog order is that column.
+//
 // Public intake and voting append their own event types and do not go through
 // the node API. Comments and attachments do not change the catalog row.
 
@@ -43,6 +49,28 @@ func portalModerator(ctx context.Context, tx pgx.Tx, p tenant.Principal) error {
 		return authz.ErrForbidden
 	}
 	return authz.RequireTx(ctx, tx, p, "settings.manage", authz.Scope{})
+}
+
+// armPortalModeration lets later statements in this transaction update or
+// delete portal catalog rows. The flag is set only after a person passes
+// settings.manage. Everyone else, including an agent whose scopes name that
+// permission, leaves it unset so the database trigger refuses the write.
+func armPortalModeration(ctx context.Context, tx pgx.Tx, p tenant.Principal) error {
+	actor, err := principalForPortal(ctx, tx, p)
+	if err != nil {
+		if errors.Is(err, errPortalDenied) || errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		return err
+	}
+	if err := portalModerator(ctx, tx, actor); err != nil {
+		if errors.Is(err, authz.ErrForbidden) {
+			return nil
+		}
+		return err
+	}
+	_, err = tx.Exec(ctx, `SELECT set_config('aeon.portal_moderation', 'on', true)`)
+	return err
 }
 
 func portalPublicEvent(eventType string) bool {
