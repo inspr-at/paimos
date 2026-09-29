@@ -4,9 +4,9 @@ package doctrine
 
 import (
 	"bytes"
-	"errors"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"net/url"
 	"sort"
