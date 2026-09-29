@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -36,6 +37,11 @@ func (m *module) listen(w http.ResponseWriter, r *http.Request) {
 		failure(w, err)
 		return
 	}
+	exact, err := exactSessionQuery(r, sessionID)
+	if err != nil {
+		failure(w, err)
+		return
+	}
 	ctx := r.Context()
 	// A one-shot pull is what a turn-boundary hook does; a wait is a long poll.
 	via := SeenHook
@@ -43,7 +49,7 @@ func (m *module) listen(w http.ResponseWriter, r *http.Request) {
 		via = SeenLongPoll
 	}
 	if waitMS == 0 {
-		page, err := m.page(ctx, p, after, limit, sessionID, via)
+		page, err := m.page(ctx, p, after, limit, sessionID, exact, via)
 		if err != nil {
 			failure(w, err)
 			return
@@ -62,7 +68,7 @@ func (m *module) listen(w http.ResponseWriter, r *http.Request) {
 		failure(w, err)
 		return
 	}
-	page, err := m.page(ctx, p, after, limit, sessionID, via)
+	page, err := m.page(ctx, p, after, limit, sessionID, exact, via)
 	if err != nil {
 		failure(w, err)
 		return
@@ -77,7 +83,7 @@ func (m *module) listen(w http.ResponseWriter, r *http.Request) {
 			failure(w, waitErr)
 			return
 		}
-		page, err = m.page(ctx, p, after, limit, sessionID, via)
+		page, err = m.page(ctx, p, after, limit, sessionID, exact, via)
 		if err != nil {
 			if ctx.Err() != nil {
 				return
@@ -120,8 +126,8 @@ func parseListenQuery(r *http.Request) (after int64, waitMS int, limit int, err 
 	return after, waitMS, limit, nil
 }
 
-func (m *module) page(ctx context.Context, p tenant.Principal, after int64, limit int, session *string, via string) (Page, error) {
-	items, err := m.pendingVia(ctx, p, after, limit+1, session, via)
+func (m *module) page(ctx context.Context, p tenant.Principal, after int64, limit int, session *string, exact bool, via string) (Page, error) {
+	items, err := m.pendingVia(ctx, p, after, limit+1, session, exact, via)
 	if err != nil {
 		return Page{}, err
 	}
@@ -142,13 +148,14 @@ func (m *module) pending(ctx context.Context, p tenant.Principal, after int64, l
 	if len(sessions) > 0 {
 		sessionID = sessions[0]
 	}
-	return m.pendingVia(ctx, p, after, limit, sessionID, "")
+	return m.pendingVia(ctx, p, after, limit, sessionID, false, "")
 }
 
 // pendingVia reads the caller's unacked messages. With a session it records
 // that generation as listening through via (AEON-280); every returned message
-// is stamped as handed over to its recipient.
-func (m *module) pendingVia(ctx context.Context, p tenant.Principal, after int64, limit int, sessionID *string, via string) ([]Message, error) {
+// is stamped as handed over to its recipient. exact leaves out unbound
+// principal-wide rows, so a session hook never pages through a broadcast backlog.
+func (m *module) pendingVia(ctx context.Context, p tenant.Principal, after int64, limit int, sessionID *string, exact bool, via string) ([]Message, error) {
 	var items []Message
 	err := db.InTenant(tenant.WithPrincipal(ctx, p), m.pool, p.TenantID, func(tx pgx.Tx) error {
 		items = nil
@@ -158,12 +165,12 @@ func (m *module) pendingVia(ctx context.Context, p tenant.Principal, after int64
 		rows, err := tx.Query(ctx, `SELECT `+messageCols+`
 			FROM inbox_messages
 			WHERE recipient_principal_id = $1::uuid
-			  AND (recipient_session_id IS NULL OR recipient_session_id=$4::uuid)
+			  AND ((recipient_session_id IS NULL AND NOT $5) OR recipient_session_id=$4::uuid)
               AND sent_event_id > $2
 			  AND acked_at IS NULL
 			  AND (expires_at IS NULL OR expires_at > clock_timestamp())
 			ORDER BY sent_event_id
-			LIMIT $3`, p.ID, after, limit, sessionID)
+			LIMIT $3`, p.ID, after, limit, sessionID, exact)
 		if err != nil {
 			return err
 		}
@@ -239,4 +246,21 @@ func waitTenantNotify(ctx context.Context, conn *pgx.Conn, tenantID string, dead
 			return nil
 		}
 	}
+}
+
+// exactSessionQuery reads exact_session (AEON-280): true returns only rows bound
+// to the named session. It needs session; omitted or false keeps the default.
+func exactSessionQuery(r *http.Request, session *string) (bool, error) {
+	q := r.URL.Query()
+	if !q.Has("exact_session") {
+		return false, nil
+	}
+	exact, err := strconv.ParseBool(q.Get("exact_session"))
+	if err != nil {
+		return false, badRequest("invalid exact_session")
+	}
+	if exact && session == nil {
+		return false, badRequest("exact_session requires session")
+	}
+	return exact, nil
 }

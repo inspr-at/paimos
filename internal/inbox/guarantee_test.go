@@ -253,7 +253,7 @@ func TestSessionEndFailsBoundMessagesAndCopiesCoordinator(t *testing.T) {
 		t.Fatalf("notices %+v", notices)
 	}
 	// The coordinator's session pulls its copy like any bound message.
-	page, err := m.base.page(t.Context(), lead, 0, 10, &parent, SeenHook)
+	page, err := m.base.page(t.Context(), lead, 0, 10, &parent, false, SeenHook)
 	if err != nil || len(page.Items) != 1 || !strings.HasPrefix(page.Items[0].Body, "Not delivered to your worker") || page.Items[0].SenderLabel != "System" {
 		t.Fatalf("coordinator pull %+v %v", page, err)
 	}
@@ -449,5 +449,52 @@ func TestSweeperIsASingleRunner(t *testing.T) {
 	}
 	if n, err := sweeper.SweepLocked(t.Context()); err != nil || n != 1 {
 		t.Fatalf("runner swept %d %v", n, err)
+	}
+}
+
+func TestExactSessionLeavesOutBroadcasts(t *testing.T) {
+	w, m, project, srv := messagingWorld(t)
+	session := messageTestSession(t, w, project, w.agent, "Hook worker")
+	for i := range 3 {
+		mustCompatSend(t, m, w.sender, project, compatInput("codex:worker", "broadcast-"+string(rune('a'+i))))
+	}
+	in := compatInput("codex:worker", "bound")
+	in.RecipientSessionID = &session
+	bound := mustCompatSend(t, m, w.sender, project, in)
+	base := "/api/inbox/messages?wait_ms=0&session=" + session
+	status, body := do(t, srv, w.agent.ID, "GET", base, "", nil)
+	if status != 200 || len(mustJSON[Page](t, body).Items) != 4 {
+		t.Fatalf("default session pull changed: %d %s", status, body)
+	}
+	status, body = do(t, srv, w.agent.ID, "GET", base+"&exact_session=true", "", nil)
+	page := mustJSON[Page](t, body)
+	if status != 200 || len(page.Items) != 1 || page.Items[0].ID != bound.ID {
+		t.Fatalf("exact pull %d %s", status, body)
+	}
+	for _, bad := range []string{"/api/inbox/messages?exact_session=true", "/api/inbox/messages?session=" + session + "&exact_session=maybe", "/api/inbox/stream?exact_session=1"} {
+		if status, body := do(t, srv, w.agent.ID, "GET", bad, "", nil); status != 400 {
+			t.Fatalf("%s: %d %s", bad, status, body)
+		}
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, srv.URL+"/api/inbox/stream?exact_session=true&session="+session, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("X-Principal", w.agent.ID)
+	resp, err := srv.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	sc := bufio.NewScanner(resp.Body)
+	sc.Buffer(make([]byte, 4096), 1<<20)
+	if kind, _ := readFrame(t, sc); kind != "comment" {
+		t.Fatalf("first frame %s", kind)
+	}
+	// The first message frame is the bound one: no broadcast precedes it.
+	if kind, data := readFrame(t, sc); kind != "message" || !strings.Contains(data, bound.ID) {
+		t.Fatalf("exact stream frame %s %s", kind, data)
 	}
 }

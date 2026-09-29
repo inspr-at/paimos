@@ -32,6 +32,11 @@ func (m *module) stream(w http.ResponseWriter, r *http.Request) {
 		failure(w, err)
 		return
 	}
+	exact, err := exactSessionQuery(r, sessionID)
+	if err != nil {
+		failure(w, err)
+		return
+	}
 	conn, err := listenConn(r.Context(), m.pool)
 	if err != nil {
 		failure(w, err)
@@ -42,7 +47,7 @@ func (m *module) stream(w http.ResponseWriter, r *http.Request) {
 		failure(w, err)
 		return
 	}
-	batch, err := m.pendingVia(r.Context(), p, after, 200, sessionID, SeenStream)
+	batch, err := m.pendingVia(r.Context(), p, after, 200, sessionID, exact, SeenStream)
 	if err != nil {
 		failure(w, err)
 		return
@@ -88,7 +93,7 @@ func (m *module) stream(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		batch, err = m.pendingVia(r.Context(), p, after, 200, sessionID, SeenStream)
+		batch, err = m.pendingVia(r.Context(), p, after, 200, sessionID, exact, SeenStream)
 		if err != nil {
 			return
 		}

@@ -68,6 +68,8 @@
 // sender plus a copy to the recipient session's coordinator. Session pulls,
 // drains, streams and acks record inbox_seen_at/via on the session; a first
 // hand-over stamps fetched_at (Delivered) and appends inbox.message_fetched.
+// exact_session=true (with session) on /api/inbox/messages and /api/inbox/stream
+// returns only rows bound to that session, without unbound broadcasts.
 // GET /api/inbox/message-status gives the sender sent|delivered|read|
 // not_delivered per message.
 //
