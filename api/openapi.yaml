@@ -2320,10 +2320,11 @@ paths:
   /events/stream:
     get:
       operationId: streamEvents
-      description: SSE id is the event ID; event is its type; data is Event JSON. Quote events are excluded and use the authorized quote collaboration stream. LISTEN/NOTIFY wakes durable replay; periodic comments keep the connection alive.
+      description: 'SSE id is the event ID; event is its type; data is Event JSON. Quote events are excluded and use the authorized quote collaboration stream. LISTEN/NOTIFY wakes durable replay; periodic comments keep the connection alive. Live mode (AEON-326): with the after query parameter every connection first sends an event named stream.ready whose id and data {"after": N, "resumed": bool} name the event ID the stream continues after. after=latest starts at the newest event without replaying the log; a numeric after replays from there. Last-Event-ID (a browser reconnect) wins over after. A resume point more than 1000 events behind, or ahead of the newest event, restarts at the newest event. resumed is true only when the stream continues exactly after the ID the client sent; false (after=latest, or a restart) tells the client to refetch what it shows. Node events carry node_changes.'
       security: *auth
       parameters:
         - {name: Last-Event-ID, in: header, schema: {type: integer, format: int64, minimum: 0}}
+        - {name: after, in: query, description: 'Live mode: latest, or an exclusive event ID', schema: {type: string, pattern: '^(latest|[0-9]+)$'}}
       responses:
         '200':
           description: Tenant event stream
@@ -10630,6 +10631,36 @@ components:
         undo_of:
           type: [integer, 'null']
           format: int64
+        node_changes:
+          type: array
+          description: Set on node.* events when read (history and stream), never stored. The nodes the event changed, for live views; values are read through the node routes.
+          items:
+            $ref: '#/components/schemas/NodeChange'
+    NodeChange:
+      type: object
+      description: AEON-326. One node change, derived from an event the reader may read. Clients refetch the node through GET /nodes/{nodeId} (or their list) to see values.
+      required: [id, project_id, change, fields, revision]
+      properties:
+        id:
+          type: string
+          format: uuid
+        project_id:
+          type: [string, 'null']
+          format: uuid
+          description: The node's project now; null outside every project
+        change:
+          type: string
+          enum: [created, updated, deleted]
+          description: A restored node reads as created
+        fields:
+          type: array
+          description: 'Changed attributes: key, kind_id, title, body, state, parent_id, position, deleted_at, project_id (a project move) and fields.<name> for custom fields. Empty for created.'
+          items:
+            type: string
+        revision:
+          type: [string, 'null']
+          format: date-time
+          description: The node's updated_at after the change, the value If-Unmodified-Since takes
     EventPage:
       type: object
       required: [items, next_after]

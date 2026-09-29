@@ -1,6 +1,6 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, toRef, useId, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, toRef, useId, watch, watchEffect } from 'vue'
 import { APIError, undoEvent, type ListItem } from '../../lib/api'
 import { confirmAction } from '../../lib/confirm'
 import { toast } from '../../lib/toast'
@@ -60,11 +60,14 @@ const emit = defineEmits<{
 }>()
 
 const item = toRef(props, 'item')
+// Set below from the editors: while one is open, changes by others wait.
+const liveBusy = ref(false)
 const ticket = useTicket(item, {
   names: props.names,
   onRemoved: removed => emit('removed', removed),
   onCreated: created => emit('created', created),
   onMoved: (moved, fromParent) => emit('moved', moved, fromParent),
+  live: { busy: liveBusy, me: () => props.me?.id ?? null },
 })
 const activity = useActivity(computed(() => props.item?.id ?? null))
 const editable = computed(() => props.canWrite && !ticket.readOnly.value && !ticket.gone.value)
@@ -210,7 +213,11 @@ async function saveEdit() {
     void nextTick(() => root.value?.focus({ preventScroll: true }))
   } else if (result === 'conflict') {
     // The newer version is loaded; the draft stays, compared against it from now on.
-    base = snapshot()
+    // What the viewer did not touch takes the newer value, so saving again
+    // does not undo someone else's change.
+    const fresh = snapshot()
+    for (const key of Object.keys(base) as (keyof typeof base)[]) if (draft[key] === base[key]) (draft as Record<string, unknown>)[key] = fresh[key]
+    base = fresh
   }
 }
 async function cancelEdit() {
@@ -282,6 +289,16 @@ const notesSection = ref<InstanceType<typeof MarkdownSection>>()
 const sections = computed(() => [descSection.value, acSection.value, notesSection.value].filter(section => !!section))
 const composer = ref<InstanceType<typeof CommentComposer>>()
 const timeline = ref<InstanceType<typeof ActivityTimeline>>()
+watchEffect(() => { liveBusy.value = editing.value || saving.value || !!title.value?.editing || sections.value.some(section => section.editing) })
+// Parts someone else just changed get a brief tint (AEON-326).
+const PROPERTY_FIELDS = ['state', 'parent_id', 'fields.priority', 'fields.assignee', 'fields.estimate', 'fields.eta', 'fields.release']
+const liveTint = computed(() => {
+  const fields = ticket.liveFields.value
+  return {
+    title: fields.includes('title'), props: fields.some(field => PROPERTY_FIELDS.includes(field)), body: fields.includes('body'),
+    acceptance: fields.includes('fields.acceptance_criteria'), notes: fields.includes('fields.notes'),
+  }
+})
 const menu = ref<{ kind: 'priority' | 'assignee' | 'epic' | 'release'; anchor: HTMLElement } | null>(null)
 const showAcceptance = ref(false)
 const showNotes = ref(false)
@@ -442,6 +459,7 @@ defineExpose({
       @start-agent="item && startDialog?.open(item)"
     />
     <StartAgentDialog ref="startDialog" />
+    <p class="sr-only" role="status" aria-live="polite">{{ ticket.liveMessage.value }}</p>
 
     <div ref="scroller" class="ws-scroll">
       <div v-if="ticket.gone.value" class="ws-state" role="alert">
@@ -464,6 +482,9 @@ defineExpose({
 
       <!-- Edit mode: the whole ticket as one form, one Save -->
       <form v-else-if="editing" class="edit-form" :aria-label="`Edit ${item.key}`" @submit.prevent="saveEdit" @keydown="editKeys">
+        <p v-if="ticket.liveHeld.value" class="edit-live" role="status">
+          <AppIcon :name="ticket.liveHeld.value === 'deleted' ? 'archive' : 'refresh'" :size="13" />{{ ticket.liveHeld.value === 'deleted' ? 'Deleted elsewhere meanwhile.' : 'Changed elsewhere meanwhile: saving shows that version first and keeps your draft.' }}
+        </p>
         <label class="sr-only" for="edit-title">Title</label>
         <textarea id="edit-title" ref="titleField" v-model="draft.title" class="edit-title" :class="{ large: mode === 'full' }" rows="1" maxlength="500" placeholder="Title" @input="growTitle" @keydown.enter.exact.prevent />
         <div class="edit-props">
@@ -502,9 +523,9 @@ defineExpose({
       <div v-else class="ws-grid">
         <div class="ws-main">
           <p v-if="!editable" class="read-only" role="note"><AppIcon name="alert" :size="13" />You can read this {{ kindLabel(item.kind_slug).toLowerCase() }} but not change it.</p>
-          <InlineTitle ref="title" :value="item.title" :editable="editable" :large="mode === 'full'" :save="ticket.setTitle" />
+          <InlineTitle ref="title" :class="{ 'live-tint': liveTint.title }" :value="item.title" :editable="editable" :large="mode === 'full'" :save="ticket.setTitle" />
           <TicketProperties
-            class="ws-props" :class="{ 'only-narrow': mode === 'full' }" :item="item" :editable="editable" layout="row" :now="now"
+            class="ws-props" :class="{ 'only-narrow': mode === 'full', 'live-tint': liveTint.props }" :item="item" :editable="editable" layout="row" :now="now"
             :release-view="releaseView" :release-editable="canRelease" :save-estimate="ticket.setEstimate"
             @status="anchor => emit('status', anchor)" @priority="anchor => openMenu('priority', anchor)" @assignee="anchor => openMenu('assignee', anchor)"
             @epic="anchor => openMenu('epic', anchor)" @release="anchor => openMenu('release', anchor)" @open-parent="openLinked"
@@ -522,9 +543,9 @@ defineExpose({
           <div class="divider" />
 
           <div class="sections">
-            <MarkdownSection ref="descSection" title="Description" :value="item.body" :editable="editable" :save="ticket.setBody" :attachment-id="attachable ? attachmentId : undefined" empty-text="Add a description" @open-attachment="openAttachment" />
-            <MarkdownSection v-if="acceptance.trim() || showAcceptance" ref="acSection" title="Acceptance criteria" :value="acceptance" :editable="editable" :save="value => ticket.setField('acceptance_criteria', value)" :attachment-id="attachable ? attachmentId : undefined" @open-attachment="openAttachment" />
-            <MarkdownSection v-if="notes.trim() || showNotes" ref="notesSection" title="Notes" :value="notes" :editable="editable" :save="value => ticket.setField('notes', value)" :attachment-id="attachable ? attachmentId : undefined" @open-attachment="openAttachment" />
+            <MarkdownSection ref="descSection" :class="{ 'live-tint': liveTint.body }" title="Description" :value="item.body" :editable="editable" :save="ticket.setBody" :attachment-id="attachable ? attachmentId : undefined" empty-text="Add a description" @open-attachment="openAttachment" />
+            <MarkdownSection v-if="acceptance.trim() || showAcceptance" ref="acSection" :class="{ 'live-tint': liveTint.acceptance }" title="Acceptance criteria" :value="acceptance" :editable="editable" :save="value => ticket.setField('acceptance_criteria', value)" :attachment-id="attachable ? attachmentId : undefined" @open-attachment="openAttachment" />
+            <MarkdownSection v-if="notes.trim() || showNotes" ref="notesSection" :class="{ 'live-tint': liveTint.notes }" title="Notes" :value="notes" :editable="editable" :save="value => ticket.setField('notes', value)" :attachment-id="attachable ? attachmentId : undefined" @open-attachment="openAttachment" />
             <div v-if="editable && (!(acceptance.trim() || showAcceptance) || !(notes.trim() || showNotes))" class="add-sections">
               <button v-if="!(acceptance.trim() || showAcceptance)" type="button" class="add-section" @click="addSection('acceptance')"><AppIcon name="plus" :size="12" />Acceptance criteria</button>
               <button v-if="!(notes.trim() || showNotes)" type="button" class="add-section" @click="addSection('notes')"><AppIcon name="plus" :size="12" />Notes</button>
@@ -573,7 +594,7 @@ defineExpose({
         <aside v-if="mode === 'full'" class="ws-side" aria-label="Properties">
           <div class="side-card">
             <TicketProperties
-              :item="item" :editable="editable" layout="column" :now="now"
+              :class="{ 'live-tint': liveTint.props }" :item="item" :editable="editable" layout="column" :now="now"
               :release-view="releaseView" :release-editable="canRelease" :save-estimate="ticket.setEstimate"
               @status="anchor => emit('status', anchor)" @priority="anchor => openMenu('priority', anchor)" @assignee="anchor => openMenu('assignee', anchor)"
               @epic="anchor => openMenu('epic', anchor)" @release="anchor => openMenu('release', anchor)" @open-parent="openLinked"
@@ -673,6 +694,12 @@ defineExpose({
 .edit-section { display: grid; gap: 8px; }
 .edit-section .eyebrow { margin: 0; }
 .edit-hint { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; font-size: 12px; color: var(--ink-3); }
+.edit-live { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 10px; background: var(--code-bg); font-size: 12.5px; color: var(--ink-2); }
+.edit-live svg { flex-shrink: 0; color: var(--teal-ink); }
+/* Someone else's change: a brief full tint, never an edge accent (AEON-326). */
+.live-tint { border-radius: 10px; animation: live-tint 2s ease-out; }
+@keyframes live-tint { from { background-color: var(--row-selected); box-shadow: 0 0 0 6px var(--row-selected); } to { background-color: transparent; box-shadow: 0 0 0 6px transparent; } }
+@media (prefers-reduced-motion: reduce) { .live-tint { animation: none; background-color: var(--row-hover); box-shadow: 0 0 0 6px var(--row-hover); } }
 @media (max-width: 720px), (hover: none) { .edit-hint { display: none; } }
 /* Full page editing is a focused writing layout: editor and preview side by side. */
 .ticket-ws.full.editing { max-width: 1480px; }
