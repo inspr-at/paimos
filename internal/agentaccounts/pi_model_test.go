@@ -59,6 +59,15 @@ func TestPiAccountModelPermissionCatalogAndImmutablePins(t *testing.T) {
 	if scalar(t, admin, `SELECT count(*) FROM model_profiles WHERE id=$1 AND model='openrouter/vendor/model'`, first) != 1 {
 		t.Fatal("prior run pin rewritten")
 	}
+	// Neither a registering agent nor a person can bypass the model binding via
+	// display metadata. Revocation remains possible by submitting an empty grant.
+	metadata := fmt.Sprintf(`{"label":"Local pi","plan":"","host_label":"","allowed_model_profile_ids":[%q]}`, first)
+	for _, caller := range []struct {
+		who   *tenant.Principal
+		token string
+	}{{&admin, ""}, {&runner, token}} {
+		callStatus(t, mod, caller.who, caller.token, "PUT", "/api/agent-accounts/"+a.ID+"/metadata", metadata, 400, nil)
+	}
 	var catalog Catalog
 	callStatus(t, mod, &admin, "", "GET", "/api/agent-accounts/catalog", "", 200, &catalog)
 	models := catalog.Hosts[0].Harnesses[0].Accounts[0].Models

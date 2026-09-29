@@ -431,7 +431,7 @@ func (a *PiAdapter) Start(ctx context.Context, r StartRequest, observe func(Adap
 		return nil, errors.New("Pi held queue requires explicit operator reconciliation")
 	}
 	childEnv := harnesslaunch.Environment(withEnv("PI_CODING_AGENT_DIR", home), a.Nodes[r.AccountKey].Path)
-	if a.Providers != nil {
+	if a.Providers != nil || provider == "openrouter" {
 		childEnv = piprobe.Environment(home, a.Nodes[r.AccountKey].Path)
 	}
 	p, err := launchWire(a.Path, []string{"--mode", "rpc", "--no-session", "--provider", provider, "--model", model, "--thinking", r.Profile.Effort}, r.Workspace, childEnv, "pi", observe)

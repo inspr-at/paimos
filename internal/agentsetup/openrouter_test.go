@@ -83,3 +83,37 @@ func TestOpenRouterKeyFileNeverExecutesAndRejectsUnsafePaths(t *testing.T) {
 		t.Fatal("symlink accepted")
 	}
 }
+
+func TestOpenRouterModelConfigPreservesLocalEdits(t *testing.T) {
+	home := physicalTemp(t)
+	if err := os.WriteFile(filepath.Join(home, "aeon-openrouter-profile"), []byte("aeon.openrouter.v1"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(home, "models.json")
+	if err := ConfigureOpenRouterModel(home, "vendor/model"); err != nil {
+		t.Fatal(err)
+	}
+	if err := ConfigureOpenRouterModel(home, "vendor/next:free"); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil || !strings.Contains(string(raw), "vendor/next:free") {
+		t.Fatal("model not replaced")
+	}
+	for _, edited := range []string{
+		string(raw) + ` {"local":"edit"}`,
+		strings.Replace(string(raw), `"models":[`, `"models":[{"id":"extra/model"},`, 1),
+		strings.Replace(string(raw), `"id":`, `"contextWindow":32768,"id":`, 1),
+	} {
+		if err := os.WriteFile(path, []byte(edited), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if err := ConfigureOpenRouterModel(home, "vendor/other"); err == nil {
+			t.Fatal("local edits overwritten")
+		}
+		current, _ := os.ReadFile(path)
+		if string(current) != edited {
+			t.Fatal("local edits changed on failure")
+		}
+	}
+}

@@ -115,6 +115,14 @@ func replaceMetadata(ctx context.Context, tx pgx.Tx, p tenant.Principal, id stri
 	if count != len(ids) {
 		return Account{}, fail(http.StatusBadRequest, "profiles must be enabled tenant profiles for this harness")
 	}
+	if before.Harness == "pi" && before.Provider != "" && before.Model != "" {
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM model_profiles WHERE id::text = ANY($1::text[]) AND model=$2`, ids, before.Provider+"/"+before.Model).Scan(&count); err != nil {
+			return Account{}, err
+		}
+		if count != len(ids) {
+			return Account{}, fail(http.StatusBadRequest, "pi grants must match the account model; change the model in Settings")
+		}
+	}
 	if before.Label == label && before.Plan == plan && before.HostLabel == host && before.AllowedProfileIDs != nil && slices.Equal(before.AllowedProfileIDs, ids) {
 		return before, nil
 	}

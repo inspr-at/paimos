@@ -4377,7 +4377,7 @@ paths:
   /agent-accounts/{accountId}/metadata:
     put:
       operationId: replaceAgentAccountMetadata
-      description: Replace display metadata and explicit model-profile grants. Requires account.manage for a person or a scoped registering agent key. IDs must reference this tenant's enabled profiles for the account harness. No credentials, home paths or provider identities. Audited and idempotent.
+      description: Replace display metadata and explicit model-profile grants. Requires account.manage for a person or a scoped registering agent key. IDs must reference this tenant's enabled profiles for the account harness and match a pi account's configured provider/model. Change that binding through the person-only model endpoint; empty grants still revoke dispatch. No credentials, home paths or provider identities. Audited and idempotent.
       security: *auth
       parameters: [{name: accountId, in: path, required: true, schema: {type: string, format: uuid}}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/AgentAccountMetadataWrite'}}}}

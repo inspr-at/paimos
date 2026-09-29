@@ -8,10 +8,12 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"github.com/inspr-at/paimos/internal/openrouter"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/inspr-at/paimos/internal/openrouter"
 )
 
 // OpenRouterKeyFile reads only the owner-selected private env file. It never
@@ -137,7 +139,7 @@ func ConfigureOpenRouterModel(home, model string) error {
 		var old config
 		dec := json.NewDecoder(bytes.NewReader(raw))
 		dec.DisallowUnknownFields()
-		if dec.Decode(&old) != nil || len(old.Providers) != 1 || old.Providers["openrouter"].BaseURL != openrouter.BaseURL || old.Providers["openrouter"].API != "openai-completions" {
+		if dec.Decode(&old) != nil || dec.Decode(new(any)) != io.EOF || len(old.Providers) != 1 || len(old.Providers["openrouter"].Models) != 1 || old.Providers["openrouter"].BaseURL != openrouter.BaseURL || old.Providers["openrouter"].API != "openai-completions" {
 			return errors.New("pi model configuration changed locally; review it before starting")
 		}
 	} else if !errors.Is(err, os.ErrNotExist) {
