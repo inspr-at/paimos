@@ -55,14 +55,15 @@ type AttachLocalRequest struct {
 	Transcript string `json:"transcript,omitempty"`
 }
 type AttachLocalView struct {
-	Reason    string               `json:"reason,omitempty"`
-	ID        string               `json:"id"`
-	Origin    string               `json:"origin"`
-	Snapshot  attachwatch.Snapshot `json:"snapshot"`
-	Digest    string               `json:"request_digest"`
-	State     string               `json:"state"`
-	Code      string               `json:"user_code,omitempty"`
-	SessionID *string              `json:"session_id,omitempty"`
+	ConsentMode string               `json:"consent_mode,omitempty"`
+	Reason      string               `json:"reason,omitempty"`
+	ID          string               `json:"id"`
+	Origin      string               `json:"origin"`
+	Snapshot    attachwatch.Snapshot `json:"snapshot"`
+	Digest      string               `json:"request_digest"`
+	State       string               `json:"state"`
+	Code        string               `json:"user_code,omitempty"`
+	SessionID   *string              `json:"session_id,omitempty"`
 }
 
 func NewAttachManager(c AttachConfig) (*AttachManager, error) {
@@ -75,7 +76,7 @@ func NewAttachManager(c AttachConfig) (*AttachManager, error) {
 	return &AttachManager{cfg: c, observe: observeAttachProcess, sessions: make(map[string]*localAttach)}, nil
 }
 func (m *AttachManager) localView(id string, s *localAttach) AttachLocalView {
-	return AttachLocalView{ID: id, Origin: m.cfg.Origin, Snapshot: s.snapshot, Digest: s.snapshot.Digest(), State: s.view.State, Code: s.view.UserCode, SessionID: s.view.SessionID}
+	return AttachLocalView{ConsentMode: s.view.ConsentMode, ID: id, Origin: m.cfg.Origin, Snapshot: s.snapshot, Digest: s.snapshot.Digest(), State: s.view.State, Code: s.view.UserCode, SessionID: s.view.SessionID}
 }
 func (m *AttachManager) request(s *localAttach, id, operation string) attachwatch.DeviceRequest {
 	return attachwatch.DeviceRequest{Operation: operation, RequestID: id, ComputerID: m.cfg.ComputerID, Snapshot: s.snapshot, Digest: s.snapshot.Digest(), Sequence: s.sequence}

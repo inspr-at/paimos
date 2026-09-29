@@ -7,7 +7,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/attachwatch"
@@ -31,8 +30,9 @@ func leaseFixture(t *testing.T) (*fixture, string, attachwatch.DeviceRequest) {
 func TestAttachLeaseApprovalSingleUseAndActivationAtomic(t *testing.T) {
 	f, key, in := leaseFixture(t)
 	v := requestWatch(t, f, key, in)
-	if delta := time.Until(v.ExpiresAt); delta < 9*time.Minute || delta > 10*time.Minute {
-		t.Fatal("wrong code lifetime")
+	var lifetime float64
+	if err := f.db.Admin.QueryRow(t.Context(), `SELECT extract(epoch FROM expires_at-created_at)::double precision FROM harness_attach_requests WHERE id=$1`, in.RequestID).Scan(&lifetime); err != nil || lifetime < 599 || lifetime > 601 {
+		t.Fatal("wrong server code lifetime", err)
 	}
 	approval := "/api/agent-pairing/attach/" + in.RequestID + "/approve"
 	body := map[string]string{"request_digest": v.Digest, "consent_digest": v.ConsentDigest}
@@ -143,8 +143,15 @@ func TestAttachLeaseRejectsTextViewerAndChangedScope(t *testing.T) {
 	f.call("POST", "/api/agent-pairing/attach", bad, false, key, 400)
 	v := activateWatch(t, f, key, &in)
 	// Even an explicit viewing grant cannot turn status-only consent into a stream.
+	role := uuid(t, f.db)
 	if err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.tenantID, func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `INSERT INTO role_permissions(tenant_id,role_id,permission) SELECT tenant_id,id,'harness.watch' FROM roles WHERE key='owner'`)
+		if _, err := tx.Exec(t.Context(), `INSERT INTO roles(tenant_id,id,key,name) VALUES($1,$2,'lease_watch','Explicit watch')`, f.tenantID, role); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `INSERT INTO role_permissions(tenant_id,role_id,permission) VALUES($1,$2,'harness.watch')`, f.tenantID, role); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,scope_id) VALUES($1,$2,$3,'project',$4)`, f.tenantID, f.person, role, in.Snapshot.ProjectID)
 		return err
 	}); err != nil {
 		t.Fatal(err)
@@ -173,6 +180,10 @@ func TestAttachLeaseRejectsTextViewerAndChangedScope(t *testing.T) {
 	in.Sequence = 1
 	in.ConsentDigest = v.ConsentDigest
 	f.call("POST", "/api/agent-pairing/attach", in, false, key, 403)
+	var state string
+	if err := f.db.Admin.QueryRow(t.Context(), `SELECT state FROM harness_attach_requests WHERE id=$1`, in.RequestID).Scan(&state); err != nil || state != "detached" {
+		t.Fatal("changed allowlist retained approval", err)
+	}
 }
 
 func TestAttachLeaseTenantIsolationAndConfirmedExit(t *testing.T) {
@@ -222,12 +233,13 @@ func TestAttachLeaseTenantIsolationAndConfirmedExit(t *testing.T) {
 	}
 	var detail struct {
 		Watch struct {
-			State string `json:"state"`
-			Mode  string `json:"mode"`
+			State        string `json:"state"`
+			Mode         string `json:"mode"`
+			ProcessState string `json:"process_state"`
 		} `json:"watch"`
 	}
 	decodeResult(t, f.call("GET", "/api/projects/"+in.Snapshot.ProjectID+"/harness-sessions/"+*v.SessionID, nil, true, "", 200), &detail)
-	if detail.Watch.State != "confirmed_exited" || detail.Watch.Mode != "lease" {
+	if detail.Watch.State != "detached" || detail.Watch.ProcessState != "confirmed_exited" || detail.Watch.Mode != "lease" {
 		t.Fatal("truthful metadata status not projected")
 	}
 	in.Operation = "poll"

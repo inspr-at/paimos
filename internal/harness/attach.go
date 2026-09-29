@@ -10,11 +10,12 @@ import (
 )
 
 type AttachStatus struct {
-	RequestID  string     `json:"request_id"`
-	OwnerID    string     `json:"owner_id"`
-	Mode       string     `json:"mode,omitempty"`
-	State      string     `json:"state"`
-	LeaseUntil *time.Time `json:"lease_until"`
+	RequestID    string     `json:"request_id"`
+	OwnerID      string     `json:"owner_id"`
+	Mode         string     `json:"mode,omitempty"`
+	ProcessState string     `json:"process_state,omitempty"`
+	State        string     `json:"state"`
+	LeaseUntil   *time.Time `json:"lease_until"`
 }
 
 func readAttachStatus(ctx context.Context, tx pgx.Tx, session string) (*AttachStatus, error) {
@@ -28,6 +29,10 @@ func readAttachStatus(ctx context.Context, tx pgx.Tx, session string) (*AttachSt
  JOIN agent_pairing_computers c ON c.tenant_id=a.tenant_id AND c.id=a.computer_id WHERE a.session_id=$1`, session).Scan(&out.RequestID, &out.OwnerID, &out.State, &out.LeaseUntil, &out.Mode)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
+	}
+	if out.State == "confirmed_exited" {
+		// Existing reporters retain the stable status enum; exit evidence is additive.
+		out.State, out.ProcessState = "detached", "confirmed_exited"
 	}
 	return &out, err
 }

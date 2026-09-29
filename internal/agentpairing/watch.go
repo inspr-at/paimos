@@ -277,8 +277,12 @@ func (m *Module) attachDevice(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return fail(403, "forbidden", "attach proof rejected")
 		}
-		if out.Snapshot.ComputerID != in.ComputerID || owner != approvedOwner || host != out.Snapshot.Host || !attachwatch.Within(workspace, out.Snapshot.Process.CWD) {
+		if out.Snapshot.ComputerID != in.ComputerID {
 			return fail(403, "forbidden", "attach proof rejected")
+		}
+		if owner != approvedOwner || host != out.Snapshot.Host || !attachwatch.Within(workspace, out.Snapshot.Process.CWD) {
+			rejected = fail(403, "forbidden", "attach approval binding changed")
+			return attachEnd(ctx, tx, &out, "detached")
 		}
 		expired, err := attachExpired(ctx, tx, &out)
 		if err != nil {

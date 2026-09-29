@@ -40,6 +40,12 @@ func TestHarnessStatusAndHeartbeatContract(t *testing.T) {
 			t.Fatalf("missing %s in %#v", op, shape)
 		}
 		props, _ := body["properties"].(map[string]any)
+		watch, _ := props["watch"].(map[string]any)
+		watchProps, _ := watch["properties"].(map[string]any)
+		watchState, _ := watchProps["state"].(map[string]any)
+		if !reflect.DeepEqual(watchState["enum"], []any{"active", "detached", "unreachable"}) {
+			t.Fatalf("%s changed the existing watch state enum", op)
+		}
 		reasons, _ := props["attention_reasons"].(map[string]any)
 		items, _ := reasons["items"].(map[string]any)
 		kindProps, _ := items["properties"].(map[string]any)

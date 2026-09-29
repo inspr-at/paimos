@@ -149,7 +149,7 @@ func attachCommand(args []string, out io.Writer) error {
 		case <-ticker.C:
 			next, err := client.Attach(ctx, agentd.AttachLocalRequest{Operation: "poll", ID: view.ID, Digest: view.Digest})
 			if err != nil {
-				return errors.New("watch ended or unreachable; start a new attach to resume")
+				return errors.New("attach ended or unreachable; start a new attach to resume")
 			}
 			if next.State == "confirmed_exited" || next.State == "detached" || next.State == "unreachable" {
 				fmt.Fprintf(out, "Attach: %s\n", next.State)
@@ -158,7 +158,7 @@ func attachCommand(args []string, out io.Writer) error {
 			if next.Reason != "" {
 				return errors.New(next.Reason)
 			}
-			if next.State == "approved" && previous != "approved" {
+			if next.State == "approved" && previous != "approved" && next.ConsentMode == attachwatch.ConsentLocalAuth {
 				fmt.Fprintln(out, "Waiting for local confirmation on the paired Mac; watch is not active yet.")
 			}
 			if next.State != previous {

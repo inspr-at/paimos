@@ -2,7 +2,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { getNode } from '../../lib/api'
-import { attachAction, type AttachReview } from '../../lib/attachWatch'
+import { attachAction, metadataOnlyAttach, type AttachReview } from '../../lib/attachWatch'
 import { can, onAccessChange } from '../../lib/authz'
 import { useSession } from '../../stores/session'
 import AppIcon from '../AppIcon.vue'
@@ -13,6 +13,7 @@ const dialog = ref<HTMLDialogElement>()
 const codeInput = ref<HTMLInputElement>()
 const code = ref('')
 const review = ref<AttachReview | null>(null)
+const metadataOnly = computed(() => !!review.value && metadataOnlyAttach(review.value.snapshot))
 const strict = computed(() => review.value?.consent_mode === 'local_auth')
 const localUnavailable = computed(() => strict.value && review.value?.snapshot.platform !== 'darwin')
 const busy = ref(false)
@@ -56,7 +57,7 @@ onBeforeUnmount(() => { close(); stopAccess() })
   <template v-if="allowed">
     <button class="btn attach-session" type="button" @click="open"><AppIcon name="eye" :size="15" />Attach session</button>
     <dialog ref="dialog" aria-labelledby="attach-title" @cancel.prevent="close" @click="event => { if (event.target === dialog) close() }">
-      <header><h2 id="attach-title">Watch a running session</h2><button class="close" type="button" aria-label="Close attach review" @click="close"><AppIcon name="close" :size="18" /></button></header>
+      <header><h2 id="attach-title">{{ !review || metadataOnly ? 'Attach a running session' : 'Watch a running session' }}</h2><button class="close" type="button" aria-label="Close attach review" @click="close"><AppIcon name="close" :size="18" /></button></header>
       <form v-if="!review" @submit.prevent="lookup">
         <p>Enter the code from <code>aeon-agentd attach</code> on your paired computer.</p>
         <label for="attach-code">Attach code</label>
@@ -64,7 +65,7 @@ onBeforeUnmount(() => { close(); stopAccess() })
         <footer><button type="submit" class="btn primary" :disabled="busy">{{ busy ? 'Checking…' : 'Review session' }}</button></footer>
       </form>
       <template v-else>
-        <p class="request-warning">Requested by a process on {{ review.snapshot.host }}. <strong>Only allow if you started this watch yourself.</strong></p>
+        <p class="request-warning"><template v-if="!metadataOnly">Requested by a process on {{ review.snapshot.host }}. </template><strong>{{ metadataOnly ? 'Only allow if you started this attach yourself.' : 'Only allow if you started this watch yourself.' }}</strong></p>
         <p class="host">{{ review.snapshot.host }} <span>· {{ review.snapshot.harness }}</span></p>
         <dl>
           <dt>Project</dt><dd :title="review.snapshot.project_id">{{ project }}</dd>
@@ -73,23 +74,24 @@ onBeforeUnmount(() => { close(); stopAccess() })
           <dt>Process</dt><dd>PID {{ review.snapshot.process.pid }} · UID {{ review.snapshot.process.uid }}</dd>
           <dt>Executable</dt><dd class="path">{{ review.snapshot.process.executable }}</dd>
           <dt>Started</dt><dd class="path">{{ review.snapshot.process.started }}</dd>
-          <dt>Transcript</dt><dd class="path" :title="review.snapshot.transcript"><template v-for="(segment, index) in review.snapshot.transcript.split('/')" :key="index">{{ index ? '/' : '' }}<wbr v-if="index" />{{ segment }}</template></dd>
-          <dt>File identity</dt><dd class="path">{{ review.snapshot.file_id }}</dd>
+          <template v-if="!metadataOnly"><dt>Transcript</dt><dd class="path" :title="review.snapshot.transcript"><template v-for="(segment, index) in review.snapshot.transcript.split('/')" :key="index">{{ index ? '/' : '' }}<wbr v-if="index" />{{ segment }}</template></dd>
+          <dt>File identity</dt><dd class="path">{{ review.snapshot.file_id }}</dd></template>
         </dl>
         <details><summary><AppIcon name="chevron-right" class="disclosure-chev" :size="12" />Approval details</summary><dl>
           <dt>Project ID</dt><dd class="path">{{ review.snapshot.project_id }}</dd>
           <dt>Ticket ID</dt><dd class="path">{{ review.snapshot.ticket_id }}</dd>
           <dt>Snapshot</dt><dd class="path">{{ review.request_digest }}</dd>
-        </dl><p class="limits">The mirror is agent-written and unverified; same-user processes are not isolated.</p></details>
-        <p class="consent">New turns will be visible to people explicitly granted conversation access in this project, until you revoke.</p>
-        <p class="limits">Only approve a single trust context; redaction is best effort.</p>
+        </dl><p class="limits">{{ metadataOnly ? 'Same-user processes are not isolated.' : 'The mirror is agent-written and unverified; same-user processes are not isolated.' }}</p></details>
+        <p v-if="metadataOnly" class="consent">Session status only; no conversation text is read or shared.</p>
+        <p v-else class="consent">New turns will be visible to people explicitly granted conversation access in this project, until you revoke.</p>
+        <p v-if="!metadataOnly" class="limits">Only approve a single trust context; redaction is best effort.</p>
         <p v-if="localUnavailable" class="consent" role="status">Local confirmation is unavailable on this computer; this setting requires an updated paired Mac daemon.</p>
         <p v-else-if="strict && review.state === 'pending'" class="local-step">Next, confirm on {{ review.snapshot.host }} with Touch ID or your Mac password.</p>
         <p v-if="strict && review.state === 'approved'" role="status">Waiting for confirmation on {{ review.snapshot.host }}. Nothing is shared until you confirm there.</p>
-        <p v-else-if="review.state === 'approved' || review.state === 'active'" role="status">Approved. Keep the attach terminal open to share new turns.</p>
+        <p v-else-if="review.state === 'approved' || review.state === 'active'" role="status">{{ metadataOnly ? 'Approved. Keep the attach terminal open to report session status.' : 'Approved. Keep the attach terminal open to share new turns.' }}</p>
         <p v-else-if="review.state !== 'pending'" role="status">This watch ended. Start a new attach in your terminal to resume.</p>
-        <footer v-if="review.state === 'pending'"><button class="btn" type="button" :disabled="busy" @click="decide(true)">Decline</button><button class="btn primary" type="button" :disabled="busy || localUnavailable" @click="decide()">{{ busy ? 'Saving…' : strict ? 'Allow and confirm on Mac' : 'Allow live watch' }}</button></footer>
-        <footer v-else-if="review.state === 'approved' || review.state === 'active'"><button class="btn" type="button" :disabled="busy" @click="decide(true)">Revoke watch</button></footer>
+        <footer v-if="review.state === 'pending'"><button class="btn" type="button" :disabled="busy" @click="decide(true)">Decline</button><button class="btn primary" type="button" :disabled="busy || localUnavailable" @click="decide()">{{ busy ? 'Saving…' : strict ? 'Allow and confirm on Mac' : metadataOnly ? 'Allow attach' : 'Allow live watch' }}</button></footer>
+        <footer v-else-if="review.state === 'approved' || review.state === 'active'"><button class="btn" type="button" :disabled="busy" @click="decide(true)">{{ metadataOnly ? 'Detach session' : 'Revoke watch' }}</button></footer>
       </template>
       <p v-if="error" role="alert">{{ error }}</p>
     </dialog>

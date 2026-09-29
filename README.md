@@ -523,3 +523,23 @@ Managed agents can pass `target` and an optional `release_node_id` to
 accepts an optional `--target-file JSON`. Verify handoffs retain the preceding
 deploy handoff's recorded target internally when present; neither handoff body
 emits target fields.
+
+### Attach session status (AEON-352)
+
+From a separate interactive terminal on a paired computer, run
+`aeon-agentd attach --setup-root PATH --pid PID --harness codex --project-id UUID --ticket-id UUID`.
+Review the kernel-observed process and physical folder, type `ATTACH`, then enter
+its nine-digit code under **Agents → Attach session** on the paired instance.
+The computer owner approves the exact snapshot; the code expires in ten minutes.
+Keep that terminal open: peer-checked polls renew a 60-second server lease.
+Revocation, identity changes and lease expiry require a fresh approval. Losing
+contact means unreachable; only a kernel check can confirm process exit.
+
+This default attaches metadata only (`snapshot.mode=lease`): it opens no
+transcript, sends no conversation text, and has no conversation viewer. Existing
+explicit `--transcript PATH` watches remain compatible, with their separate
+`WATCH` consent. The existing `harness.watch` project permission remains off for
+all built-in roles and is never implied by `harness.read` or `nodes.read`.
+The paired computer's tenant-scoped workspace is the hard cwd allowlist; neither
+`AEON_URL` nor local request fields can override the paired origin. Same-user
+processes are not isolated by this feature.

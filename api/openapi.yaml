@@ -789,7 +789,7 @@ paths:
               required: [request_digest]
               properties:
                 request_digest: {type: string, pattern: '^[0-9a-f]{64}$'}
-                consent_digest: {type: string, pattern: '^[0-9a-f]{64}$', description: Required for local_auth; binds the mode the person reviewed}
+                consent_digest: {type: string, pattern: '^[0-9a-f]{64}$', description: Required for local_auth and mode=lease; binds the consent the person reviewed}
       responses:
         '200': {description: 'Approved snapshot; activation requires the registered daemon poll key and, for local_auth, its local confirmation'}
         '403': {description: Same-origin paired owner required}
@@ -5877,7 +5877,7 @@ components:
     MeContract: {description: Acting principal response contract, schema: {type: string, enum: ['me/1.0']}}
     BaselineBatchesContract: {description: Classic-compatible baseline batch response contract, schema: {type: string, enum: ['baseline-batches/1.0']}}
     ApprovalsContract: {description: Approval response contract, schema: {type: string, enum: ['approvals/1.1']}}
-    HarnessSessionContract: {description: Harness status and heartbeat response contract, schema: {type: string, enum: ['harness-session/1.3']}}
+    HarnessSessionContract: {description: Harness status and heartbeat response contract, schema: {type: string, enum: ['harness-session/1.4']}}
   securitySchemes:
     session: {type: apiKey, in: cookie, name: aeon_session}
     agentKey: {type: http, scheme: bearer, description: Bearer token aeon_<prefix>_<secret>}
@@ -9115,7 +9115,8 @@ components:
             mode: {type: string, const: lease, description: Metadata only; no conversation viewer}
             request_id: {type: string, format: uuid}
             owner_id: {type: string, format: uuid}
-            state: {type: string, enum: [active, detached, unreachable, confirmed_exited]}
+            state: {type: string, enum: [active, detached, unreachable]}
+            process_state: {type: string, const: confirmed_exited, description: Present only for a kernel-confirmed exit; absent means unconfirmed}
             lease_until: {type: [string, 'null'], format: date-time}
         host: {type: string}
         management_mode: {type: string, enum: [managed, unmanaged]}
