@@ -460,6 +460,7 @@ func (rt *runtime) harnessBind() *Command {
 	}}
 }
 func (rt *runtime) harnessWorker(kind string) *Command {
+	var capacityOptions heartbeatCapacity
 	var project, session, agent, leaseFile, phase, activity, activityKind, note, model, effort, accountLabel, harnessVersion, brief, worktree, branch, deliveryID, level, reason, etaReady, etaLive, progress string
 	// The sentinel distinguishes an omitted flag from --label "", which clears a label.
 	const omittedLabel = "\x00"
@@ -473,6 +474,7 @@ func (rt *runtime) harnessWorker(kind string) *Command {
 		fs.string(&leaseFile, "worker-lease-file", 0, "private generation lease file")
 		switch kind {
 		case "heartbeat":
+			capacityOptions.flags(fs)
 			fs.string(&phase, "phase", 0, "starting, working, yielded or stopping")
 			fs.string(&label, "label", 0, "current session display name (empty clears it)")
 			fs.string(&note, "note", 0, "current step, at most 120 characters")
@@ -498,6 +500,9 @@ func (rt *runtime) harnessWorker(kind string) *Command {
 			fs.string(&reason, "reason", 0, "stop reason")
 		}
 	}, run: func([]string) error {
+		if err := capacityOptions.validate(); err != nil {
+			return err
+		}
 		id, err := rt.harnessProject(project)
 		if err != nil {
 			return err
@@ -607,6 +612,11 @@ func (rt *runtime) harnessWorker(kind string) *Command {
 		err = rt.harnessDo(http.MethodPost, path, lease, body, &out)
 		if err != nil {
 			return err
+		}
+		if kind == "heartbeat" {
+			if err := rt.reportHeartbeatCapacity(context.Background(), capacityOptions); err != nil {
+				return err
+			}
 		}
 		return rt.printHarness(out)
 	}}

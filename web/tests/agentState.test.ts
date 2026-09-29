@@ -214,3 +214,8 @@ test('fresh session projection cannot be changed by a stale optional run or requ
     assert.equal(sessionStatus(current, now, true, undefined, { status } as AgentRun).state, 'working')
   }
 })
+
+test('vendor percentage windows have an explicit unit label', async () => {
+ const { UNIT_LABEL } = await import('../src/lib/agentState.ts')
+ assert.equal(UNIT_LABEL.percent, 'percent')
+})

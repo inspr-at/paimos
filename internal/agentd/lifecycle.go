@@ -131,6 +131,10 @@ func (s *Supervisor) Lifecycle(accountID string) LifecycleStatus {
 	v := LifecycleStatus{DaemonID: s.daemonID, Generation: s.generation, State: "drained", ActiveRunIDs: []string{}, UnconfirmedRunIDs: []string{}, SettlementPendingRunIDs: []string{}, FencedAccountIDs: []string{}, VerificationResults: map[string]string{}}
 	s.mu.Lock()
 	v.Ready = len(s.accounts) > 0
+	if s.capacityCapturing {
+		v.State = "capturing"
+		v.Ready = false
+	}
 	v.AllFenced, _ = s.readFence("")
 	for _, a := range s.accounts {
 		fenced, e := s.readFence(a.ID)
@@ -147,6 +151,9 @@ func (s *Supervisor) Lifecycle(accountID string) LifecycleStatus {
 				v.VerificationUnavailable = append(v.VerificationUnavailable, a.ID)
 			}
 		}
+	}
+	if s.capacityCapturing && (s.closing || v.AllFenced || len(v.FencedAccountIDs) > 0) {
+		v.State = "draining"
 	}
 	entries := make([]*owned, 0, len(s.runs))
 	for _, e := range s.runs {

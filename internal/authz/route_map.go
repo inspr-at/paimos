@@ -144,6 +144,12 @@ var RoutePermissions = map[string]string{
 	"GET /api/projects/{projectId}/harness-sessions/{sessionId}":             "harness.read",
 	"GET /api/projects/{projectId}/harness-sessions/{sessionId}/read-marker": "harness.read",
 	"GET /api/inbox/message-status":                                          "inbox.receipt",
+	"POST /api/agent-accounts/{accountId}/capacity/approve":                  "account.manage",
+	"GET /api/agent-accounts/capacity":                                       "account.read",
+	"GET /api/agent-accounts/{accountId}/readings":                           "account.read|account.probe", // Handler requires read for people, probe + ownership for agents.
+	"POST /api/agent-accounts/{accountId}/readings":                          "account.probe",
+	"GET /api/agent-accounts/capacity/schedule":                              "account.read",
+	"PUT /api/agent-accounts/capacity/schedule":                              "account.manage",
 	"GET /api/projects/{projectId}/harness-sessions/{sessionId}/controls/{controlId}": "harness.read",
 	"GET /api/projects/{projectId}/harness-sessions/{sessionId}/recovery":             "harness.read",
 	"POST /api/projects/{projectId}/harness-sessions/{sessionId}/remove":              "harness.read",

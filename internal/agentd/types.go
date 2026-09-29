@@ -9,6 +9,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/capacity"
 	"github.com/inspr-at/paimos/internal/ownedprocess"
 	"github.com/inspr-at/paimos/internal/sessionusage"
 )
@@ -210,6 +211,7 @@ type RunTools struct {
 
 type AdapterEvent struct {
 	Activity          string // busy or idle, independent of the run process lifetime.
+	Capacity          []capacity.Reading
 	BudgetExhausted   string
 	BudgetTurnsDelta  int64
 	SessionUsage      *sessionusage.UsageReport

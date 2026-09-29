@@ -446,13 +446,16 @@ func coreAgentScope(r *http.Request) (string, bool) {
 			return "run.claim", true
 		}
 	case "agent-accounts":
+		if r.Method == "GET" && len(parts) == 3 && parts[2] == "readings" {
+			return "account.probe", true
+		}
 		if read {
 			return "account.read", true
 		}
 		if r.Method == "POST" && len(parts) == 2 && parts[1] == "route" {
 			return "account.route", true
 		}
-		if r.Method == "POST" && len(parts) == 3 && parts[2] == "probe" {
+		if r.Method == "POST" && len(parts) == 3 && (parts[2] == "probe" || parts[2] == "readings") {
 			return "account.probe", true
 		}
 		return "account.manage", true

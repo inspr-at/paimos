@@ -70,7 +70,7 @@ func pairedAdapters(c agentsetup.RuntimeConfig) ([]agentd.EnrolledAccount, []age
 	return accounts, adapters, nil
 }
 
-func servePaired(root string) error {
+func servePaired(root string, capacityInterval time.Duration) error {
 	c, err := agentsetup.ReadRuntimeConfig(root)
 	if err != nil {
 		return err
@@ -96,7 +96,7 @@ func servePaired(root string) error {
 	defer stop()
 	state := filepath.Join(root, "daemon")
 	remote := agentd.NewRemote(c.Origin, string(key))
-	s, err := agentd.NewSupervisor(ctx, agentd.Config{API: remote, StateRoot: state, DaemonID: c.DaemonID, Workspace: c.Workspace, Accounts: accounts, Adapters: adapters, EstimatedUnits: map[string]int64{"requests": 1}})
+	s, err := agentd.NewSupervisor(ctx, agentd.Config{CapacityInterval: capacityInterval, API: remote, StateRoot: state, DaemonID: c.DaemonID, Workspace: c.Workspace, Accounts: accounts, Adapters: adapters, EstimatedUnits: map[string]int64{"requests": 1}})
 	if err != nil {
 		return err
 	}
@@ -130,11 +130,17 @@ func servePaired(root string) error {
 	if err != nil {
 		return err
 	}
+	captureCtx, stopCapture := context.WithCancel(ctx)
+	captureDone := make(chan struct{})
+	go func() { defer close(captureDone); s.RunCapacityCaptures(captureCtx) }()
+	defer func() { stopCapture(); <-captureDone }()
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 	stopping := false
 	for {
 		if stopping {
+			stopCapture()
+			<-captureDone
 			op, cancel := context.WithTimeout(context.Background(), time.Second)
 			err = s.Close(op)
 			cancel()
