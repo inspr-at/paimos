@@ -11,6 +11,8 @@ import { mockEffectivePermissions } from './authz-fixtures'
 export const me = { id: '11111111-1111-4111-8111-111111111111', name: 'Markus Barta' }
 const mira = { id: '22222222-2222-4222-8222-222222222222', name: 'Mira Holm' }
 const now = Date.parse('2026-09-23T12:00:00Z')
+// Like the server, every node write moves updated_at forward, whatever the clock says.
+const forward = (previous: string, at: number) => new Date(Math.max(at, Date.parse(previous) + 1)).toISOString()
 const ago = (hours: number) => new Date(now - hours * 3_600_000).toISOString()
 
 export interface MockNode {
@@ -365,7 +367,7 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
         if (refusal) { skipped.push({ id, key: node.key, reason: refusal.error, code: refusal.code }); continue }
         const next = { ...node, fields, state: nextState, parent_id: input.parent_id ?? node.parent_id }
         if (JSON.stringify(next) === JSON.stringify(node)) { unchanged.push(id); continue }
-        Object.assign(node, next, { updated_at: new Date(now + 120_000 + calls.length).toISOString() })
+        Object.assign(node, next, { updated_at: forward(node.updated_at, now + 120_000 + calls.length) })
         before.push(old); after.push(JSON.parse(JSON.stringify(node)))
       }
       const eventId = after.length ? 5000 + data.batches.length : null
@@ -378,7 +380,7 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
       const batch = data.batches.find(b => b.id === Number(batchUndo[1]))!
       const stale = batch.after.some(a => data.nodes.find(n => n.id === a.id)?.updated_at !== a.updated_at)
       if (batch.undone || stale) return route.fulfill({ status: 409, json: { code: 'conflict', message: 'resource changed or event is not reversible' } })
-      for (const old of batch.before) Object.assign(data.nodes.find(n => n.id === old.id)!, old, { updated_at: new Date(now + 180_000 + calls.length).toISOString() })
+      for (const old of batch.before) { const node = data.nodes.find(n => n.id === old.id)!; Object.assign(node, old, { updated_at: forward(node.updated_at, now + 180_000 + calls.length) }) }
       batch.undone = true
       return route.fulfill({ status: 201, json: { id: batch.id + 1, type: 'node.bulk_changed', undo_of: batch.id } })
     }
@@ -459,7 +461,7 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
         return route.fulfill({ status: 412, json: { error: 'node has changed', node: { ...current, kind_id: `k-${kind}`, position: '0', deleted_at: null } } })
       }
       node.parent_id = (body as { parent_id: string }).parent_id
-      node.updated_at = new Date(now + 90_000).toISOString()
+      node.updated_at = forward(node.updated_at, now + 90_000)
       const { kind_slug: kind, project: _p, ...rest } = node
       return route.fulfill({ json: { ...rest, kind_id: `k-${kind}`, position: '0', deleted_at: null } })
     }
@@ -576,17 +578,18 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
       if (method === 'DELETE') {
         if (data.nodes.some(n => n.parent_id === id)) return route.fulfill({ status: 409, json: { error: 'node has children' } })
         data.nodes.splice(data.nodes.indexOf(node), 1)
-        return route.fulfill({ status: 204 })
+        // The revision of the deletion, as its event names it (live-server.ts, AEON-326).
+        return route.fulfill({ status: 204, headers: { 'aeon-revision': new Date(Date.parse(node.updated_at) + 1000).toISOString() } })
       }
       if (method === 'PATCH' && options.readOnly) return route.fulfill({ status: 403, json: { error: 'forbidden' } })
       if (method === 'PATCH' && options.conflictAlways === id) {
-        node.updated_at = new Date(now + 45_000 + calls.length).toISOString(); node.title = 'Renamed by Mira'
+        node.updated_at = forward(node.updated_at, now + 45_000 + calls.length); node.title = 'Renamed by Mira'
         return route.fulfill({ status: 412, json: { error: 'node has changed' } })
       }
       if (method === 'PATCH') {
         if (options.failPatch) return route.fulfill({ status: 422, json: { error: 'State is not allowed here' } })
         // Someone else saved this node after the list was read.
-        if (options.conflictOn === id && !node.title.endsWith('(edited elsewhere)')) { node.updated_at = new Date(now + 30_000).toISOString(); node.title = `${node.title} (edited elsewhere)` }
+        if (options.conflictOn === id && !node.title.endsWith('(edited elsewhere)')) { node.updated_at = forward(node.updated_at, now + 30_000); node.title = `${node.title} (edited elsewhere)` }
         const expected = request.headers()['if-unmodified-since']
         if (expected && expected !== node.updated_at) return route.fulfill({ status: 412, json: { error: 'node has changed' } })
         const patch = body as { state?: string; fields?: Record<string, unknown> }
@@ -594,7 +597,7 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
         const nextFields = patch.fields && typeof patch.fields === 'object' && !Array.isArray(patch.fields) ? patch.fields : node.fields
         const refusal = completionRefusal(node, nextState, nextFields)
         if (refusal) return route.fulfill({ status: 422, json: refusal })
-        Object.assign(node, body as object, { updated_at: new Date(now + 60_000 + calls.length).toISOString() })
+        Object.assign(node, body as object, { updated_at: forward(node.updated_at, now + 60_000 + calls.length) })
       }
       const { kind_slug: kind, project: _project, ...rest } = node
       return route.fulfill({ json: { ...rest, kind_id: `k-${kind}`, position: '0', deleted_at: null } })
