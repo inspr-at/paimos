@@ -281,6 +281,23 @@ func TestPlanningBulkUsagePerformance(t *testing.T) {
 		if problems := planningListPlanProblems(root); len(problems) != 0 {
 			t.Errorf("list planning plan: %s", strings.Join(problems, "; "))
 		}
+		// A cheap index must not turn the usage read into a per-row loop. That
+		// is the plan the full suite picked when usage had grown.
+		if _, err := tx.Exec(t.Context(), `SET LOCAL random_page_cost = 0.1`); err != nil {
+			return err
+		}
+		var skewed string
+		if err := tx.QueryRow(t.Context(), "EXPLAIN (FORMAT JSON) "+order, args...).Scan(&skewed); err != nil {
+			return err
+		}
+		var docs2 []map[string]any
+		if err := json.Unmarshal([]byte(skewed), &docs2); err != nil {
+			return err
+		}
+		root2, _ := docs2[0]["Plan"].(map[string]any)
+		if problems := planningListPlanProblems(root2); len(problems) != 0 {
+			t.Errorf("cheap-index plan: %s", strings.Join(problems, "; "))
+		}
 		return nil
 	})
 	if err != nil {

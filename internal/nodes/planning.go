@@ -881,7 +881,7 @@ func planCostVisibleSQL(project, harnessAll, projects string) string {
 // ticket, task and epic: spent usage when any of it was reported, otherwise
 // the estimate. Cost stays null where the caller cannot see it (AEON-370).
 func planningSortSQL(ratesArg, harnessAll, projects string) string {
-	visible := planCostVisibleSQL("s.project_id", harnessAll, projects)
+	visible := planCostVisibleSQL("ps.project_id", harnessAll, projects)
 	rowVisible := planCostVisibleSQL("f.project_id", harnessAll, projects)
 	rateCols := `raw.hours,
             (CASE WHEN spec.role IS NOT NULL THEN spec.tokens_per_hour ELSE anyr.tokens_per_hour END)::numeric AS tokens_per_hour,
@@ -894,8 +894,22 @@ func planningSortSQL(ratesArg, harnessAll, projects string) string {
         SELECT * FROM jsonb_to_recordset(` + ratesArg + `::jsonb) AS r(role text, tokens_per_hour float8, list_per_hour float8, paid_per_hour float8)
     ), plan_sub AS MATERIALIZED (
         ` + planningSubtreeSQL(`SELECT f.id AS root FROM filtered f WHERE f.kind_slug IN ('ticket','task','epic')`) + `
+    ), plan_sessions AS MATERIALIZED (
+        SELECT t.root AS id, s.id AS session_id, s.project_id
+        FROM plan_sub t
+        JOIN harness_sessions s ON s.tenant_id=current_setting('aeon.tenant_id')::uuid AND s.ticket_node_id=t.id
+            AND ((SELECT aeon_visible_all()) OR s.project_id = ANY ((SELECT aeon_visible_projects())::uuid[]))
+    ), plan_usage_rows AS MATERIALIZED (
+        -- One read of usage for the filtered tickets' sessions. Joining each
+        -- session to the usage index re-plans as a nested loop with a per-row
+        -- visibility subplan once that table grows.
+        SELECT u.session_id, u.model, u.input_tokens, u.output_tokens, u.cached_input_tokens,
+            u.billing_mode, u.estimated_cost_usd
+        FROM harness_session_usage u
+        WHERE u.tenant_id=current_setting('aeon.tenant_id')::uuid
+            AND u.session_id IN (SELECT ps.session_id FROM plan_sessions ps)
     ), plan_lines AS MATERIALIZED (
-        SELECT t.root AS id,
+        SELECT ps.id,
             (u.model IS NOT NULL AND u.input_tokens IS NOT NULL AND u.output_tokens IS NOT NULL AND u.cached_input_tokens IS NOT NULL) AS complete,
             CASE WHEN u.model IS NOT NULL AND u.input_tokens IS NOT NULL AND u.output_tokens IS NOT NULL AND u.cached_input_tokens IS NOT NULL
                 THEN u.input_tokens + u.output_tokens END AS tokens,
@@ -910,10 +924,8 @@ func planningSortSQL(ratesArg, harnessAll, projects string) string {
                     + u.cached_input_tokens * price.cached_input_usd_per_million) / 1000000
             END AS list_usd,
             u.billing_mode, u.estimated_cost_usd
-        FROM plan_sub t
-        JOIN harness_sessions s ON s.tenant_id=current_setting('aeon.tenant_id')::uuid AND s.ticket_node_id=t.id
-            AND ((SELECT aeon_visible_all()) OR s.project_id = ANY ((SELECT aeon_visible_projects())::uuid[]))
-        JOIN harness_session_usage u ON u.tenant_id=s.tenant_id AND u.session_id=s.id
+        FROM plan_sessions ps
+        JOIN plan_usage_rows u ON u.session_id=ps.session_id
         LEFT JOIN plan_prices price ON price.model=u.model
     ), plan_usage_agg AS MATERIALIZED (
         SELECT id,
