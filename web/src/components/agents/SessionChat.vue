@@ -10,7 +10,7 @@ import KeyCap from '../KeyCap.vue'
 import SessionMessages from './SessionMessages.vue'
 import SessionRequests from './SessionRequests.vue'
 import { collapseMessages } from './sessionMessages'
-import { awaitsInboxHook, hookDeliveryNotice, keepFailedReadMark, loadReadMark, markerFromServer, nearBottom, preferReadMark, queueReadMark, readMarkFlushDelay, saveReadMark, statusDone, unreadGroups, type ReadMark } from './sessionChat'
+import { awaitsInboxHook, hookDeliveryNotice, hookNoticeVisible, hookReceipts, keepFailedReadMark, loadReadMark, markerFromServer, nearBottom, preferReadMark, queueReadMark, readMarkFlushDelay, saveReadMark, statusDone, unreadGroups, type ReadMark } from './sessionChat'
 
 // The Messages tab of the session panel (AEON-273): the thread with a read
 // watermark per viewer, a pinned bottom with a jump button, and the composer.
@@ -38,7 +38,9 @@ const level = ref<'simple' | 'steer'>('simple')
 const replyTo = ref<ProjectMessage | null>(null)
 const sending = ref(false)
 const sendError = ref('')
-const hookNotice = ref(false)
+// Ids sent from this view while the session still needs its inbox hook.
+// Older receipts stay out of this list, so they cannot hide a new wait.
+const pendingHookIds = ref<string[]>([])
 
 // ---------- Read state ----------
 const mark = ref<ReadMark | null>(null)
@@ -412,8 +414,8 @@ let statusAgain = false
 function refreshReceipts() {
   if (!props.active || !me.value) return
   if (statusFlight) { statusAgain = true; return }
-  const todo = current.value.filter(m => m.sender_principal_id === me.value).slice(-30)
-    .filter(m => !statusDone(statuses.value[m.id])).map(m => m.id)
+  const visible = current.value.filter(m => m.sender_principal_id === me.value).slice(-30).map(m => m.id)
+  const todo = [...new Set([...visible, ...pendingHookIds.value])].filter(id => !statusDone(statuses.value[id]))
   if (!todo.length) return
   const session = s.value.id
   statusFlight = messageStatuses(todo).then(page => {
@@ -452,7 +454,7 @@ watch([() => me.value, () => s.value.id], async ([viewer, id]) => {
   touchY = undefined
   markerHold = viewer && person.value && !local ? generation : 0
   seen?.disconnect()
-  draft.value = ''; replyTo.value = null; sendError.value = ''; hookNotice.value = false
+  draft.value = ''; replyTo.value = null; sendError.value = ''; pendingHookIds.value = []
   const projectId = s.value.project_id
   boundProject = projectId
   boundSession = id
@@ -477,15 +479,21 @@ const composeBlock = computed(() => {
   if (!s.value.id && !address.value) return `${props.view.name} has no message address yet. It gets one when it registers a message target.`
   return ''
 })
-const showHookNotice = computed(() => hookNotice.value && awaitsInboxHook(s.value) && !current.value.some(m => m.sender_principal_id === me.value && (statuses.value[m.id]?.status === 'delivered' || statuses.value[m.id]?.status === 'read')))
+const hookReceipt = computed(() => hookReceipts(pendingHookIds.value, statuses.value))
+const showHookNotice = computed(() => hookNoticeVisible(awaitsInboxHook(s.value), hookReceipt.value))
 async function send() {
   if (!draft.value.trim() || sending.value || composeBlock.value) return
   sending.value = true; sendError.value = ''
+  const before = new Set(messages.value.map(m => m.id))
   try {
     await agents.send(s.value, recipient.value, draft.value.trim(), level.value, replyTo.value?.id)
     refreshedAt = Date.now()
     draft.value = ''; replyTo.value = null
-    hookNotice.value = awaitsInboxHook(s.value)
+    if (awaitsInboxHook(s.value)) {
+      const known = new Set(pendingHookIds.value)
+      const added = messages.value.filter(m => m.sender_principal_id === me.value && !before.has(m.id) && !known.has(m.id)).map(m => m.id)
+      if (added.length) pendingHookIds.value = [...pendingHookIds.value, ...added]
+    }
     await nextTick(); toBottom(true); refreshReceipts()
   } catch (e) { sendError.value = e instanceof APIError && e.status === 409 && e.body.code === 'session_ended' ? 'This session has ended.' : e instanceof Error ? e.message : 'The message was not sent. Please try again.' }
   finally { sending.value = false }

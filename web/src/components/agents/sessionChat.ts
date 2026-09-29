@@ -128,6 +128,22 @@ export function awaitsInboxHook(session: Pick<HarnessSession, 'phase' | 'stopped
   return true
 }
 
+// Receipts for sends this view is waiting on. Delivered and read are finished.
+// not_delivered is finished too: that message shows its own failure.
+export interface HookReceipts { waiting: string[]; failed: MessageStatus[] }
+export function hookReceipts(pendingIds: readonly string[], statuses: Readonly<Record<string, MessageStatus | undefined>>): HookReceipts {
+  const waiting: string[] = []
+  const failed: MessageStatus[] = []
+  for (const id of pendingIds) {
+    const status = statuses[id]
+    if (status?.status === 'not_delivered') failed.push(status)
+    else if (status?.status === 'delivered' || status?.status === 'read') continue
+    else waiting.push(id)
+  }
+  return { waiting, failed }
+}
+export const hookNoticeVisible = (awaits: boolean, receipts: HookReceipts) => awaits && receipts.waiting.length > 0
+
 // Within this distance of the end the thread counts as read to the bottom.
 export const nearBottom = (el: { scrollHeight: number; scrollTop: number; clientHeight: number }, slack = 32) =>
   el.scrollHeight - el.scrollTop - el.clientHeight <= slack
