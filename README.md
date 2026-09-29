@@ -177,7 +177,10 @@ The App installation must select exactly `inspr-at/inspr-modules` and
 implicit metadata read). Each minted token is narrowed to the proposal
 repository alone and checked against that exact scope and live repository
 visibility. Installation tokens are revoked after use (including validation
-failures), with bounded cancellation-independent cleanup. A private repo becoming public blocks publication. The configured tenant is the sole proposal writer; tenant settings
+failures), with bounded cancellation-independent cleanup via GitHub’s
+[revocation endpoint](https://docs.github.com/en/rest/apps/installations#revoke-an-installation-access-token).
+A private repo becoming public blocks publication. The configured tenant is the
+sole proposal writer; tenant settings
 cannot grant another workspace access to the central doctrine. The App must
 **not bypass branch protections**. Main must require CI and the independent
 cross-family gate so both remain enforced during a merge race. No direct-main

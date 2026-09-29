@@ -26,7 +26,7 @@ const guardTLDR = "Copper notebooks stay hidden."
 func seedPrivateGuard(t *testing.T, f doctrineFixture, m *Module, actor tenant.Principal) SourceView {
 	t.Helper()
 	f.fake.commit(privateRepository, fixtureCommit, map[string]string{
-		"docs/AGENTS-KERNEL-PRIVATE.md":        "# Private\n\n## Planning\n<!-- aeon-rule: copper -->\n- " + guardRule + "\n",
+		"docs/AGENTS-KERNEL-PRIVATE.md":        "# Private\n\n## Planning\n<!-- aeon-rule: copper -->\n- " + guardRule + "\n  Why: The silver ledger contains nine emerald diagrams beside the northern window.\n",
 		"docs/AGENTS-KERNEL-PRIVATE.tldr.yaml": "rules:\n  copper:\n    en: " + guardTLDR + "\n    de: Kupferne Notizen bleiben verborgen.\n  unmatched:\n    en: Reserved observatory protocol.\n",
 	}, "main")
 	allowCredential(t, m.credentials.Dir, "guard-read", actor.TenantID, privateRepository)
@@ -60,6 +60,9 @@ func fullwidth(s string) string {
 }
 
 func TestPrivateQuoteNormalization(t *testing.T) {
+	if guardPrivateQuotes([]string{"Café notebooks stay hidden."}, "Cafe\u200b\u0301 notebooks stay hidden.") == nil {
+		t.Fatal("format insertion defeated canonical composition")
+	}
 	corpus := []string{guardRule, guardTLDR}
 	for _, quote := range []string{
 		guardRule, guardTLDR, "Notice: " + strings.ToUpper(guardRule),
@@ -103,7 +106,7 @@ func TestPublicProposalRequiresPrivateCorpusAndBlocksQuotes(t *testing.T) {
 		t.Fatal("missing private index did not fail before GitHub")
 	}
 	private := seedPrivateGuard(t, f, m, owner)
-	for _, field := range []string{"rule", "en", "de", "explanation", "unmatched"} {
+	for _, field := range []string{"rule", "en", "de", "explanation", "unmatched", "continuation"} {
 		bad := in
 		switch field {
 		case "rule":
@@ -116,6 +119,8 @@ func TestPublicProposalRequiresPrivateCorpusAndBlocksQuotes(t *testing.T) {
 			bad.Explanation = strings.ReplaceAll(guardRule, "o", "o\u200b")
 		case "unmatched":
 			bad.Explanation = "Reserved observatory protocol."
+		case "continuation":
+			bad.Explanation = "The silver ledger contains nine emerald diagrams beside the northern window."
 		}
 		before = forge.calls
 		got := f.call(owner, "POST", endpoint, bad, 422)
@@ -186,7 +191,7 @@ func TestSlowGitHubDoesNotHoldDatabaseLocks(t *testing.T) {
 			case <-time.After(10 * time.Second):
 				t.Fatal("request never reached slow GitHub")
 			}
-			ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+			ctx, cancel := context.WithTimeout(tenant.WithPrincipal(t.Context(), owner), 2*time.Second)
 			defer cancel()
 			err := db.InTenant(ctx, f.d.App, owner.TenantID, func(tx pgx.Tx) error {
 				// FK check on tenants + events append must complete while GitHub waits.

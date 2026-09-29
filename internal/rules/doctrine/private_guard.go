@@ -46,7 +46,7 @@ func (m *Module) privateTexts(ctx context.Context, tx pgx.Tx, actor tenant.Princ
 				return nil, unavailable()
 			}
 			for _, rule := range file.Rules {
-				texts = append(texts, rule.Text)
+				texts = append(texts, rule.Text, rule.Source)
 			}
 		}
 		if len(texts) == 0 {

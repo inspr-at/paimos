@@ -194,7 +194,7 @@ func normalizeProposalText(text string) string {
 		}
 		return r
 	}, text)
-	return strings.Join(strings.Fields(cases.Fold().String(text)), " ")
+	return strings.Join(strings.Fields(cases.Fold().String(norm.NFKC.String(text))), " ")
 }
 
 func proposalWords(text string) []string {
