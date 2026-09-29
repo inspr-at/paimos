@@ -150,7 +150,7 @@ test.describe('edit mode', () => {
     await form.getByRole('button', { name: 'Status Backlog' }).focus()
     await page.keyboard.press('ArrowDown')
     await expect(page.getByRole('menu', { name: 'Status of PHAROS-12' })).toBeVisible()
-    await page.keyboard.press('3')
+    await page.keyboard.press('4')
     await expect(form.getByRole('button', { name: 'Status In progress' })).toBeFocused()
     await form.getByRole('button', { name: 'Assignee Unassigned' }).click()
     await page.getByRole('textbox', { name: 'Find assignee' }).fill('mira')
