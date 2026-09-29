@@ -81,6 +81,33 @@ async function openTicket(page: Page, theme: 'light' | 'dark' = 'light') {
   return { work, saved }
 }
 
+test('a working session on the ticket shows no mark and a stopped one does', async ({ page }) => {
+  const workingId = '5e000000-0000-4000-8000-000000000002'
+  const report = structuredClone(agentWork)
+  report.sessions.push({
+    ...agentWork.sessions[0],
+    id: workingId,
+    label: 'Still working',
+    phase: 'working',
+    ended_at: null,
+    duration_state: 'ongoing',
+  })
+  report.totals.session_count = 2
+  await mockWork(page, fixtures())
+  await page.route('**/api/nodes/n-epic/agent-work', route => route.fulfill({ json: report }))
+  await page.route('**/api/nodes/n-epic/delivery-ratings', route => route.fulfill({
+    json: { node_id: 'n-epic', sessions: [rating(null), { ...rating(null), session_id: workingId }] },
+  }))
+  await page.goto('/p/PHAROS/PHAROS-10')
+  const work = page.getByRole('region', { name: 'Agent work' })
+  await expect(work).toBeVisible()
+  const stopped = work.locator('li').filter({ hasText: 'Harbor worker' }).first()
+  const working = work.locator('li').filter({ hasText: 'Still working' }).first()
+  await expect(stopped.getByRole('button', { name: 'Needs rework' })).toBeVisible()
+  await expect(working.getByRole('button', { name: 'Needs rework' })).toHaveCount(0)
+  await expect(working.locator('[data-delivery-rating]')).toHaveCount(0)
+})
+
 test('a person marks rework with a reason and can undo it', async ({ page }) => {
   const errors = watchErrors(page)
   const { work, saved } = await openTicket(page)

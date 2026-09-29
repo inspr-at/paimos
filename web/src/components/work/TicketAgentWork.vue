@@ -164,7 +164,7 @@ function rowName(session: TicketAgentSession): string {
                 <span v-if="modelFigures(model)">{{ modelFigures(model) }}</span>
               </li>
             </ul>
-            <DeliveryRating v-if="ratings.get(session.id)" :session-id="session.id" :initial="ratings.get(session.id)" />
+            <DeliveryRating v-if="session.phase === 'stopped' && ratings.get(session.id)" :session-id="session.id" :initial="ratings.get(session.id)" />
           </li>
         </ul>
       </template>
