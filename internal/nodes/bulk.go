@@ -29,7 +29,9 @@ import (
 // (node_id null) whose id the response returns: POST /api/events/{id}/undo
 // restores every node of the batch, or none when any of them changed since.
 // A node that cannot take the change is skipped with a reason; nothing else
-// about the batch fails for it.
+// about the batch fails for it. if_unmodified_since names the revision (the
+// updated_at) the caller last saw per node: a node changed since is skipped
+// with code conflict and left as it is (AEON-326).
 const (
 	evNodeBulkChanged = "node.bulk_changed"
 	maxBulkNodes      = 500
@@ -65,7 +67,12 @@ type bulkRequest struct {
 	TagsAdd    []bulkTag       `json:"tags_add"`
 	TagsRemove []string        `json:"tags_remove"`
 	ParentID   *string         `json:"parent_id"`
+	// Per node: the updated_at the caller last saw.
+	IfUnmodifiedSince map[string]string `json:"if_unmodified_since"`
 }
+
+// codeConflict marks a node skipped because it changed since the caller read it.
+const codeConflict = "conflict"
 
 // bulkSnap is the part of a node a batch changes and its undo restores.
 type bulkSnap struct {
@@ -135,6 +142,7 @@ type bulkPlan struct {
 	tagsAdd                []bulkTag
 	tagsRemove             map[string]bool
 	parentID               *string
+	expected               map[string]time.Time
 }
 
 func (b bulkPlan) changesFields() bool {
@@ -219,6 +227,23 @@ func parseBulk(in bulkRequest) (bulkPlan, error) {
 			return plan, badRequest("invalid parent_id")
 		}
 		plan.parentID = &id
+	}
+	if len(in.IfUnmodifiedSince) > maxBulkNodes {
+		return plan, badRequest("invalid if_unmodified_since")
+	}
+	for raw, at := range in.IfUnmodifiedSince {
+		id, ok := parseUUID(raw)
+		if !ok {
+			return plan, badRequest("invalid if_unmodified_since")
+		}
+		when, err := time.Parse(time.RFC3339Nano, at)
+		if err != nil {
+			return plan, badRequest("invalid if_unmodified_since")
+		}
+		if plan.expected == nil {
+			plan.expected = map[string]time.Time{}
+		}
+		plan.expected[id] = when
 	}
 	if plan.state == nil && !plan.changesFields() && plan.parentID == nil {
 		return plan, badRequest("nothing to change")
@@ -334,6 +359,11 @@ func (m *Module) applyBulk(ctx context.Context, p tenant.Principal, plan bulkPla
 			current := target.node
 			skip := func(reason string) {
 				result.Skipped = append(result.Skipped, bulkSkip{ID: current.ID, Key: current.Key, Reason: reason})
+			}
+			// Compared under the row lock, exactly like PATCH's If-Unmodified-Since.
+			if expected, ok := plan.expected[current.ID]; ok && !current.UpdatedAt.Equal(expected) {
+				result.Skipped = append(result.Skipped, bulkSkip{ID: current.ID, Key: current.Key, Reason: "changed since you loaded it", Code: codeConflict})
+				continue
 			}
 			move := plan.parentID != nil && !sameString(current.ParentID, plan.parentID)
 			if move {

@@ -1750,6 +1750,7 @@ paths:
         - {name: facets, in: query, description: 'Repeatable or comma-separated state, kind, priority, assignee, tag, cost_unit, release. Tag, cost unit and release counts are keyed by their display spelling; none counts work without one.', schema: {type: array, items: {type: string}}}
         - {name: parent_id, in: query, schema: {type: string, format: uuid}}
         - {name: include_descendants, in: query, schema: {type: boolean, default: false}}
+        - {name: ids, in: query, description: 'Repeatable or comma-separated node IDs, at most 200: only these nodes, with every other filter still applied. A live list refetches the rows that changed through its own query; a row that no longer matches is absent.', schema: {type: array, maxItems: 200, items: {type: string, format: uuid}}}
         - {$ref: '#/components/parameters/Sort'}
         - {$ref: '#/components/parameters/Direction'}
         - {$ref: '#/components/parameters/Limit'}
@@ -1826,6 +1827,8 @@ paths:
         answers 409 and changes nothing when any of them changed since. A node that
         cannot take the change (not found, another project, a kind rule, a cycle) is
         listed under skipped with a reason; nodes already so are listed as unchanged.
+        if_unmodified_since names, per node, the updated_at the caller last saw; a
+        node changed since is skipped with code conflict and left as it is.
         Any change to a portal_product, portal_feature or portal_wish, and any
         reparent into or out of a portal parent, requires a person with
         settings.manage. Agents are refused, and the batch changes nothing.
@@ -1858,6 +1861,11 @@ paths:
                           color: {type: string, maxLength: 32}
                 tags_remove: {type: array, maxItems: 20, items: {type: string, minLength: 1, maxLength: 100}}
                 parent_id: {type: string, format: uuid}
+                if_unmodified_since:
+                  type: object
+                  description: Node ID to the updated_at the caller last saw (RFC 3339, compared exactly like PATCH's If-Unmodified-Since). Nodes not named are not checked.
+                  maxProperties: 500
+                  additionalProperties: {type: string, format: date-time}
       responses:
         '200':
           description: Changed, unchanged and skipped nodes
@@ -1881,7 +1889,7 @@ paths:
                         reason: {type: string}
                         code:
                           type: string
-                          description: benefit_required when a ticket enters done, accepted or delivered without pill_en, pill_de, benefit_en and benefit_de. Hidden tickets are not exempt. Omitted for other skips.
+                          description: benefit_required when a ticket enters done, accepted or delivered without pill_en, pill_de, benefit_en and benefit_de. Hidden tickets are not exempt. conflict when the node changed since the revision named in if_unmodified_since. Omitted for other skips.
         '400':
           $ref: '#/components/responses/Error'
         '403':

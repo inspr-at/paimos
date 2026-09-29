@@ -127,6 +127,9 @@ type listQuery struct {
 	DateField string     `json:"date_field,omitempty"`
 	DateFrom  *time.Time `json:"date_from,omitempty"`
 	DateTo    *time.Time `json:"date_to,omitempty"`
+	// Only these nodes, with every other filter still applied: a live list
+	// refetches the rows that changed through its own query (AEON-326).
+	IDs []string `json:"ids,omitempty"`
 	// seen and the lead thresholds are filled by listNodes. They are not
 	// request input and stay out of the cursor fingerprint (unexported).
 	seen       assigneeSeen
@@ -144,6 +147,9 @@ type treeQuery struct {
 	Limit    int
 	Cursor   string
 }
+
+// maxListIDs bounds the ids filter: one live refetch covers at most a page.
+const maxListIDs = 200
 
 var validSort = map[string]bool{"key": true, "title": true, "state": true, "priority": true, "kind": true, "updated_at": true, "created_at": true, "position": true, "assignee": true, "eta_ready": true, "progress": true, "estimate": true}
 var validFacet = map[string]bool{"state": true, "kind": true, "priority": true, "assignee": true, "tag": true, "cost_unit": true, "release": true}
@@ -302,6 +308,19 @@ func parseListQuery(r *http.Request) (listQuery, error) {
 		}
 		out.ParentSet = true
 		out.ParentID = &id
+	}
+	if out.IDs, err = queryList(r, "ids"); err != nil {
+		return out, err
+	}
+	if len(out.IDs) > maxListIDs {
+		return out, badRequest("ids lists at most 200 nodes")
+	}
+	for i, raw := range out.IDs {
+		id, ok := parseUUID(raw)
+		if !ok {
+			return out, badRequest("invalid ids")
+		}
+		out.IDs[i] = id
 	}
 	if out.Descendants, err = queryBool(r, "include_descendants"); err != nil {
 		return out, err
@@ -838,6 +857,7 @@ func listFilterSQL(q listQuery, sortFields bool) (string, []any) {
 	not := func(match func([]string) string) func([]string) string {
 		return func(values []string) string { return "NOT (" + match(values) + ")" }
 	}
+	add(q.IDs, func(v []string) string { return `n.id=ANY(` + arg(v) + `::uuid[])` })
 	add(q.StatesNot, func(v []string) string { return `NOT (n.state=ANY(` + arg(v) + `::text[]))` })
 	add(q.PrioritiesNot, func(v []string) string {
 		return `NOT (coalesce(nullif(n.fields->>'priority',''),'none')=ANY(` + arg(v) + `::text[]))`
