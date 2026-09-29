@@ -23,6 +23,7 @@ A push of a `v*` tag runs `.github/workflows/release.yml`.
 5. Run the image smoke gate. Publishing waits for it.
 6. Refuse a coordinate whose GHCR image tag already exists, including a tag left by a partial earlier run. Push the image to `ghcr.io/inspr-at/aeon:<version>`. There is no `latest` tag.
 7. Create the GitHub release once with the CLI, `paimos-agentd`, and `SHA256SUMS`. Existing releases are never uploaded to or overwritten. The notes name the image and its digest.
+8. The `homebrew-tap` job then renders `Formula/aeon-agentd.rb` from that release's darwin `SHA256SUMS` entries and, when `HOMEBREW_TAP_APP_ID` and `HOMEBREW_TAP_APP_KEY` are present in the `homebrew-tap` environment, opens a pull request on `inspr-at/homebrew-tap`. The formula installs the signed, notarized darwin bytes with `bin.install` and does not rebuild or re-sign them. If either secret is absent the job logs `homebrew tap bump skipped: app secrets absent` and succeeds. The stable 105 sample is [docs/homebrew/aeon-agentd.rb](homebrew/aeon-agentd.rb).
 
 ## Image smoke gate
 

@@ -126,6 +126,8 @@ jobs:
   release:
     needs: agentd-darwin
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -288,3 +290,25 @@ jobs:
             dist/SHA256SUMS \
             --title "$tag" \
             --notes "$notes"
+
+  # Runs only after the release assets exist. The homebrew-tap environment is
+  # limited to v* tags. App secrets are read only in the bump step. Absent
+  # secrets skip the pull request and succeed.
+  homebrew-tap:
+    needs: release
+    runs-on: ubuntu-latest
+    environment: homebrew-tap
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+      - name: Open Homebrew tap formula pull request
+        env:
+          HOMEBREW_TAP_APP_ID: ${{ secrets.HOMEBREW_TAP_APP_ID }}
+          HOMEBREW_TAP_APP_KEY: ${{ secrets.HOMEBREW_TAP_APP_KEY }}
+          VERSION: ${{ needs.release.outputs.version }}
+        run: node scripts/homebrew-tap-pr.mjs

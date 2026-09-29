@@ -5,6 +5,7 @@ import (
 	"html"
 	"io/fs"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/inspr-at/paimos/internal/version"
@@ -31,7 +32,11 @@ func GuidePage(next http.Handler, web fs.FS, origin string) http.Handler {
 			guide += `<li>` + html.EscapeString(h) + `: ` + html.EscapeString(detail) + `</li>`
 		}
 		guide += `</ul></section>`
-		targets := installTargets()
+		pairOrigin := base
+		if u, err := url.Parse(base); err == nil && u.Host != "" && (u.Scheme == "https" || u.Scheme == "http") {
+			pairOrigin = u.Scheme + "://" + u.Host
+		}
+		targets := installTargets(pairOrigin)
 		if len(targets) == 0 {
 			guide += `<p>Development build: no verified release installer is available. Use an already verified compatible setup tool or wait for the coordinator's release.</p>`
 		} else {

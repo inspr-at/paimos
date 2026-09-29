@@ -62,6 +62,7 @@ jobs:
         with:
           node-version: "24"
       - run: node scripts/verify-release.mjs
+      - run: node --test scripts/homebrew-formula.test.mjs scripts/homebrew-tap-pr.test.mjs
 
   e2e:
     runs-on: ubuntu-latest
