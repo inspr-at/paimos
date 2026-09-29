@@ -119,9 +119,9 @@ export function keyExpiry(key: Pick<AgentKey, 'expires_at' | 'revoked_at'>, now 
 
 // ---------- Agent key scopes ----------
 // What a key may call: registry permissions marked agent_grantable (contract v2
-// #6). An empty list grants nothing (SEC4); the server takes at most 32 and never
-// more than the creator holds.
-export const MAX_KEY_SCOPES = 32
+// #6). An empty list grants nothing (SEC4); the server never grants more than the
+// creator holds. MAX_KEY_SCOPES mirrors the server's raw input guard (AEON-367).
+export const MAX_KEY_SCOPES = 256
 export const keyScopes = (registry: Permission[]) => registry.filter(p => p.agent_grantable)
 // What the coordinating agent uses end to end (internal/cli compat test).
 export const COORDINATOR_SCOPES = ['account.manage', 'inbox.read', 'inbox.send', 'models.read', 'nodes.read', 'nodes.write', 'nodes.configure', 'relations.read', 'relations.write', 'events.read', 'events.undo', 'search.read', 'views.read', 'views.write']
