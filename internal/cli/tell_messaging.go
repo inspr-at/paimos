@@ -172,7 +172,7 @@ func tellReceiptState(receipt inbox.Receipt) string {
 	}
 }
 func (rt *runtime) cmdMessagingListen() *Command {
-	var as, project, deliver, after, poll, sessionID string
+	var as, project, deliver, after, poll, sessionID, targetRefFile string
 	var follow, ack bool
 	limit := 10
 	return &Command{Name: "listen", Short: "Read your project inbox", Use: "listen --project KEY [--as harness:agent] [--ack]", maxArgs: 0, addFlags: func(fs *flagSet) {
@@ -182,15 +182,16 @@ func (rt *runtime) cmdMessagingListen() *Command {
 		fs.string(&after, "after", 0, "last printed event cursor")
 		fs.int(&limit, "limit", "page size (1–10)")
 		fs.string(&deliver, "deliver", 0, "local transport adapter")
-		fs.string(&poll, "poll-interval", 0, "follow polling interval (default 2s)")
-		fs.bool(&follow, "follow", 0, "keep polling until interrupted")
+		fs.string(&targetRefFile, "target-ref-file", 0, "exact local harness reference for --session --deliver")
+		fs.string(&poll, "poll-interval", 0, "delivery retry backoff (default 2s)")
+		fs.bool(&follow, "follow", 0, "long-poll until interrupted")
 		fs.bool(&ack, "ack", 0, "acknowledge each successfully printed message")
 	}, run: func(args []string) error {
 		if sessionID != "" && !validUUID(sessionID) {
 			return usagef("--session must be a UUID")
 		}
-		if sessionID != "" && deliver != "" {
-			return usagef("--session uses the session inbox; --deliver targets a principal-wide adapter")
+		if targetRefFile != "" && (sessionID == "" || deliver == "") {
+			return usagef("--target-ref-file requires --session and --deliver")
 		}
 		if project == "" {
 			return usagef("--project is required")
@@ -215,7 +216,7 @@ func (rt *runtime) cmdMessagingListen() *Command {
 				return usagef("--poll-interval must be greater than zero")
 			}
 		}
-		if deliver != "" && (!messagingAddressRE.MatchString(as) || !localMessagingAdapter(deliver)) {
+		if deliver != "" && ((sessionID == "" && !messagingAddressRE.MatchString(as)) || !localMessagingAdapter(deliver)) {
 			return usagef("--deliver requires --as harness:agent and a registered local adapter")
 		}
 		p, err := rt.projectNode(project)
@@ -226,12 +227,16 @@ func (rt *runtime) cmdMessagingListen() *Command {
 		if err != nil {
 			return err
 		}
+		if sessionID != "" && deliver != "" {
+			return rt.listenSessionDelivery(p.ID, project, sessionID, deliver, targetRefFile, after, limit, follow, interval)
+		}
 		if deliver != "" {
 			return rt.listenMessagingDelivery(p.ID, project, as, deliver, follow, interval)
 		}
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 		defer stop()
 		cursor := after
+		var wakeCursor int64
 		for {
 			q := url.Values{"limit": {fmt.Sprint(limit)}}
 			if sessionID != "" {
@@ -256,9 +261,15 @@ func (rt *runtime) cmdMessagingListen() *Command {
 			path := "/api/projects/" + url.PathEscape(p.ID) + "/messages/listen?" + q.Encode()
 			if !strings.Contains(as, ":") {
 				q.Set("wait_ms", "0")
+				if follow {
+					q.Set("wait_ms", "25000")
+				}
 				path = "/api/inbox/messages?" + q.Encode()
 			}
-			if err := rt.do(http.MethodGet, path, nil, &page); err != nil {
+			if err := rt.doMessagingPoll(ctx, http.MethodGet, path, &page, follow, interval); err != nil {
+				if ctx.Err() != nil {
+					return nil
+				}
 				return err
 			}
 			if page.Preamble == "" {
@@ -290,13 +301,13 @@ func (rt *runtime) cmdMessagingListen() *Command {
 			if ack {
 				for _, v := range page.Items {
 					ackPath := "/api/projects/" + url.PathEscape(p.ID) + "/messages/" + url.PathEscape(v.ID) + "/ack"
-					if strings.Contains(as, ":") {
-						if err := rt.do(http.MethodPost, ackPath, nil, nil); err != nil {
-							return err
-						}
-						continue
+					if !strings.Contains(as, ":") {
+						ackPath = "/api/inbox/messages/" + url.PathEscape(v.ID) + "/ack"
 					}
-					if err := rt.do(http.MethodPost, "/api/inbox/messages/"+url.PathEscape(v.ID)+"/ack", nil, nil); err != nil {
+					if err := rt.doMessagingPoll(ctx, http.MethodPost, ackPath, nil, follow, interval); err != nil {
+						if ctx.Err() != nil {
+							return nil
+						}
 						return err
 					}
 				}
@@ -310,10 +321,24 @@ func (rt *runtime) cmdMessagingListen() *Command {
 				}
 				return nil
 			}
-			select {
-			case <-ctx.Done():
+			if strings.Contains(as, ":") && len(page.Items) == 0 {
+				// Keep the strict project/address response unchanged. The raw inbox
+				// is only a long-poll wake hint; its cursor is a separate event stream.
+				var wake inbox.Page
+				q := url.Values{"wait_ms": {"25000"}, "after": {strconv.FormatInt(wakeCursor, 10)}}
+				if sessionID != "" {
+					q.Set("session", sessionID)
+				}
+				if err := rt.doMessagingPoll(ctx, http.MethodGet, "/api/inbox/messages?"+q.Encode(), &wake, follow, interval); err != nil {
+					if ctx.Err() != nil {
+						return nil
+					}
+					return err
+				}
+				wakeCursor = wake.NextAfter
+			}
+			if ctx.Err() != nil {
 				return nil
-			case <-time.After(interval):
 			}
 		}
 	}}
