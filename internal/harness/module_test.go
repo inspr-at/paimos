@@ -14,6 +14,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 
@@ -41,6 +42,11 @@ type harnessFixture struct {
 }
 
 func fixture(t *testing.T) *harnessFixture {
+	t.Helper()
+	return fixtureWithOwnershipClock(t, nil)
+}
+
+func fixtureWithOwnershipClock(t *testing.T, now func() time.Time) *harnessFixture {
 	t.Helper()
 	f := &harnessFixture{db: dbtest.Open(t), mux: http.NewServeMux()}
 	f.person = tenant.Principal{ID: uid(), TenantID: uid(), Kind: tenant.Person}
@@ -87,7 +93,11 @@ func fixture(t *testing.T) *harnessFixture {
 		return err
 	})
 	f.key = "aeon_" + prefix + "_" + secret
-	harness.New(f.db.App).Mount(f.mux)
+	if now == nil {
+		harness.New(f.db.App).Mount(f.mux)
+	} else {
+		harness.NewWithOwnershipClock(f.db.App, now).Mount(f.mux)
+	}
 	return f
 }
 func (f *harnessFixture) tx(t *testing.T, p tenant.Principal, fn func(pgx.Tx) error) {
