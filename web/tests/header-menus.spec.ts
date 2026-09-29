@@ -86,12 +86,12 @@ async function expectFullHistory(page: Page) {
 // Hold /version and the history until the test lets them answer, so a click can
 // land before either is known. Registered after the page's own mocks, which then
 // fulfill the request.
-async function holdReleaseApis(page: Page) {
+async function holdReleaseApis(page: Page, releases?: (route: Route) => Promise<void>) {
   let release!: () => void
   const gate = new Promise<void>(resolve => { release = resolve })
   const wait = async (route: Route) => { await gate; await route.fallback() }
   await page.route('**/api/version**', wait)
-  await page.route('**/api/releases**', wait)
+  await page.route('**/api/releases**', releases ? async route => { await gate; await releases(route) } : wait)
   return release
 }
 
@@ -110,6 +110,12 @@ test.describe('release history before the version has loaded', () => {
       const history = page.getByRole('dialog', { name: 'PAIMOS AEON releases' })
       await expect(history).toBeVisible()
       await expect(history.locator('[role="option"][aria-selected="true"]')).toHaveCount(0)
+      // The list stays up until the running release is known. A phone must not
+      // cover it with an empty detail while the history is still on its way.
+      if (width < 600) {
+        await expect(history.locator('.shell')).not.toHaveClass(/show-detail/)
+        await expect(history.getByRole('status', { name: 'Loading the release history' })).toBeVisible()
+      }
       release()
       await page.waitForLoadState('networkidle')
       const version = state.history.current
@@ -117,6 +123,7 @@ test.describe('release history before the version has loaded', () => {
       await expect(history.locator('[role="option"][aria-selected="true"]')).toHaveCount(1)
       await expect(history.locator('[role="option"][aria-selected="true"]')).toHaveAttribute('id', `release-${version.replace(/\./g, '-')}`)
       await expect(history.getByRole('heading', { level: 2, name: version })).toBeVisible()
+      if (width < 600) await expect(history.locator('.shell')).toHaveClass(/show-detail/)
     })
 
     test(`header release history stays on the full list at ${width}`, async ({ page }) => {
@@ -133,6 +140,46 @@ test.describe('release history before the version has loaded', () => {
       if (width < 600) await expect(history.locator('.shell')).not.toHaveClass(/show-detail/)
     })
   }
+
+  test('at 390 a footer click keeps the error and retry when the history fails', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 })
+    await signIn(page, 'member')
+    const release = await holdReleaseApis(page, route => route.fulfill({ status: 503, json: { error: 'The release history could not be loaded.' } }))
+    await page.goto('/', { waitUntil: 'domcontentloaded' })
+    await expect(page.getByRole('list', { name: 'Projects' })).toBeVisible()
+    const pill = page.locator('footer.app-footer .version-pill')
+    await expect(pill).toHaveAccessibleName('Release history')
+    await pill.click()
+    await expect(page).toHaveURL(/[?&]releases=current(?:&|#|$)/)
+    release()
+    const history = page.getByRole('dialog', { name: 'PAIMOS AEON releases' })
+    await expect(history).toBeVisible()
+    await expect(history.locator('.shell')).not.toHaveClass(/show-detail/)
+    await expect(history.getByRole('heading', { name: 'The release history could not be loaded.' })).toBeVisible()
+    await expect(history.getByRole('button', { name: 'Try again' })).toBeVisible()
+  })
+
+  test('at 390 a footer click keeps the empty history when this build has none', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 })
+    await signIn(page, 'member')
+    const release = await holdReleaseApis(page, route => route.fulfill({
+      json: {
+        schema: 'inspr.release-history.v1', product: 'PAIMOS AEON', repository: '', version_scheme: 'inspr-calendar-v2',
+        generated_at: '0001-01-01T00:00:00Z', source: 'none', current: 'dev', live_since: new Date().toISOString(), releases: [],
+      },
+    }))
+    await page.goto('/', { waitUntil: 'domcontentloaded' })
+    await expect(page.getByRole('list', { name: 'Projects' })).toBeVisible()
+    const pill = page.locator('footer.app-footer .version-pill')
+    await expect(pill).toHaveAccessibleName('Release history')
+    await pill.click()
+    await expect(page).toHaveURL(/[?&]releases=current(?:&|#|$)/)
+    release()
+    const history = page.getByRole('dialog', { name: 'PAIMOS AEON releases' })
+    await expect(history).toBeVisible()
+    await expect(history.locator('.shell')).not.toHaveClass(/show-detail/)
+    await expect(history.getByRole('heading', { name: 'No release history in this build' })).toBeVisible()
+  })
 })
 
 test.describe('gear menu', () => {
