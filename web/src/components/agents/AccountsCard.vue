@@ -8,6 +8,7 @@ import { PACE_LABEL, UNIT_LABEL, bindingWindow, duration, harnessLabel } from '.
 import type { Availability } from '../../stores/agents'
 import { useSession } from '../../stores/session'
 import AppIcon from '../AppIcon.vue'
+import PiAccountModel from '../settings/PiAccountModel.vue'
 import AllowanceWindowForm from './AllowanceWindowForm.vue'
 import { ABSENT_ALLOWANCE, allowanceFailure, beginSave, findSavedAllowance, holdUncertain, releaseHeld, settleSave, UNCERTAIN_ALLOWANCE, type HeldAllowance } from './allowanceWindow'
 
@@ -172,6 +173,7 @@ const stateLabel: Record<AgentAccount['state'], string> = { available: 'Availabl
           </p>
         </template>
         <p v-else class="facts muted">No active allowance window</p>
+        <PiAccountModel v-if="account.harness === 'pi'" :account="account" :editable="mayManage" @saved="emit('allowance-created')" />
         <AllowanceWindowForm
           v-if="mayManage && editingId === account.id"
           :account="account" :now="now" :busy="flight !== null" :server-message="serverMessage" :uncertain="uncertain"

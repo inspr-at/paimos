@@ -619,6 +619,14 @@ function enrollmentDetail(enrollment: PairingView['enrollments'][number]) {
         </div>
       </div>
 
+      <details v-if="presentation" class="manual">
+        <summary><AppIcon name="chevron-right" :size="12" class="disclosure-chev" />pi with OpenRouter</summary>
+        <div class="manual-body">
+          <p class="copy">On a paired computer, enter the key locally; choose the model in Settings, under Accounts.</p>
+          <pre class="command"><code>aeon-agentd add-harness --harness pi --provider openrouter</code></pre>
+          <p class="copy">For a new computer, add <code>--harness pi --provider openrouter</code> to the pairing command above.</p>
+        </div>
+      </details>
       <form class="code-form" @submit.prevent="lookup">
         <label for="pairing-code">Pairing code</label>
         <div class="code-row">

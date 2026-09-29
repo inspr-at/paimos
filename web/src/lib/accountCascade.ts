@@ -18,7 +18,7 @@ const STEPS: CascadeStep[] = ['host', 'harness', 'account', 'model', 'effort']
 const STEP_KEY = { host: 'hostId', harness: 'harness', account: 'accountId', model: 'modelKey', effort: 'profileId' } as const
 const EFFORT_ORDER = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']
 const EFFORT_LABEL: Record<string, string> = {
-  none: 'None', minimal: 'Minimal', low: 'Low', medium: 'Medium', high: 'High', xhigh: 'Extra high', max: 'Max',
+  off: 'Off', none: 'None', minimal: 'Minimal', low: 'Low', medium: 'Medium', high: 'High', xhigh: 'Extra high', max: 'Max',
 }
 const FAMILY_LABEL: Record<AuthorFamily, string> = { openai: 'OpenAI', anthropic: 'Anthropic', xai: 'xAI', cursor: 'Cursor' }
 const HOUR = 3_600_000
