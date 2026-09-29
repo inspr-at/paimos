@@ -117,7 +117,10 @@ type codexShutdown struct {
 }
 
 type codexProcess struct {
-	capacityParser capacity.Parser
+	capacityParser   capacity.Parser
+	lastCapacity     []capacity.Reading
+	pendingLimit     *capacity.LimitHit
+	pendingLimitTurn string
 	*wireProcess
 	persistent                                               bool
 	idleTimeout                                              time.Duration
@@ -247,6 +250,9 @@ func (a *CodexAdapter) Start(ctx context.Context, r StartRequest, observe func(A
 		a.quotaIDs.Store(r.AccountKey, account.Account.ID)
 	}
 	cp.readCapacity(op, "start")
+	if p.vendorLimited.Load() {
+		return fail(errors.New("Codex capacity refused run"))
+	}
 	var thread struct {
 		Thread struct {
 			ID string `json:"id"`

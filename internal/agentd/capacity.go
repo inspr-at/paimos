@@ -238,18 +238,25 @@ func (p *codexProcess) readCapacity(ctx context.Context, phase string) {
 		return
 	}
 	defer p.eventMu.Unlock()
-	p.emitCapacityReadings(p.capacityParser.CodexSnapshot(raw, time.Now().UTC()), phase)
+	at := time.Now().UTC()
+	readings := p.capacityParser.CodexSnapshot(raw, at)
+	if hit := capacity.VendorLimit(Codex, raw, readings, at); hit != nil {
+		p.emitVendorLimit(hit)
+		return
+	}
+	p.emitCapacityReadings(readings, phase)
 }
 func (p *codexProcess) emitCapacity(raw []byte, phase string) {
 	at := time.Now().UTC()
 	readings := p.capacityParser.Codex(raw, at)
 	if hit := capacity.VendorLimit(Codex, raw, readings, at); hit != nil {
-		p.observe(limitEvent(hit))
+		p.emitVendorLimit(hit)
 		return
 	}
 	p.emitCapacityReadings(readings, phase)
 }
 func (p *codexProcess) emitCapacityReadings(readings []capacity.Reading, phase string) {
+	p.lastCapacity = append([]capacity.Reading(nil), readings...)
 	for i := range readings {
 		readings[i].Phase = phase
 	}

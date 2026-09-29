@@ -197,3 +197,67 @@ func TestCodexVendorLimitSettlesRunAndCapacity(t *testing.T) {
 		t.Fatal("100% harness reading missing")
 	}
 }
+
+func TestCodexVendorLimitAtStartReturnsObservedProcess(t *testing.T) {
+	for _, vendor := range []string{"codex_limited", "codex_limit_error"} {
+		t.Run(vendor, func(t *testing.T) {
+			req := adapterRequest(t)
+			a := NewCodexAdapter(fakeVendorPath(t, vendor), map[string]string{"account": privateCapacityHome(t)})
+			a.SetExpectedEmails(map[string]string{"account": "agent@example.test"})
+			var mu sync.Mutex
+			var hits int
+			proc, err := a.Start(t.Context(), req, func(e AdapterEvent) {
+				mu.Lock()
+				defer mu.Unlock()
+				if e.ErrorCode == "vendor_limit" {
+					hits++
+				}
+			})
+			if err != nil || proc == nil {
+				t.Fatal("vendor refusal lost its owned process")
+			}
+			_ = proc.Wait()
+			mu.Lock()
+			defer mu.Unlock()
+			if hits == 0 || !proc.(interface{ ProcessExited() bool }).ProcessExited() {
+				t.Fatal("limit did not prove owned exit")
+			}
+		})
+	}
+}
+
+func TestCodexVendorLimitNotificationBinding(t *testing.T) {
+	hits := 0
+	p := &codexProcess{wireProcess: &wireProcess{threadID: "owned", turnID: "turn", observe: func(e AdapterEvent) {
+		if e.VendorLimit != nil {
+			hits++
+		}
+	}}, acknowledged: true}
+	for _, thread := range []string{"foreign", "owned"} {
+		p.notification(json.RawMessage(fmt.Sprintf(`{"method":"error","params":{"threadId":%q,"turnId":"turn","error":{"codexErrorInfo":{"rateLimitReachedType":"usage"}}}}`, thread)))
+		if thread == "foreign" && hits != 0 {
+			t.Fatal("foreign thread stopped run")
+		}
+	}
+	if hits != 1 {
+		t.Fatal("owned limit missing")
+	}
+}
+
+func TestCodexVendorLimitWaitsForTurnAcknowledgement(t *testing.T) {
+	for _, turn := range []string{"expected", "foreign"} {
+		t.Run(turn, func(t *testing.T) {
+			f := newCodexLifecycleFixture(t)
+			f.emit(t, fmt.Sprintf(`{"method":"error","params":{"threadId":"synthetic-thread","turnId":%q,"error":{"codexErrorInfo":{"rateLimitReachedType":"usage"}}}}`, turn))
+			if f.proc.vendorLimited.Load() {
+				t.Fatal("limit preceded turn acknowledgement")
+			}
+			if err := f.ack(t, `"result":{"turn":{"id":"expected","status":"inProgress"}}`); err != nil {
+				t.Fatal(err)
+			}
+			if f.proc.vendorLimited.Load() != (turn == "expected") {
+				t.Fatal("turn binding failed")
+			}
+		})
+	}
+}

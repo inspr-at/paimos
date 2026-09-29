@@ -107,7 +107,7 @@ func readStateEvidence(ctx context.Context, tx pgx.Tx, ids []string) (map[string
       (coalesce(r.status IN ('failed','ownership_lost') AND coalesce(vl.error_code,'')<>'vendor_limit',false)
         OR coalesce(s.stop_reason<>'heartbeat_lost' AND replace(replace(s.stop_reason,'_',' '),'-',' ') ~* '\m(error|errored|failed|failure|blocked|crash(ed)?|ownership lost|heartbeat lost|timeout|timed out)\M',false)),
       coalesce(q.kind,''),coalesce(q.scope,''),coalesce(q.actor,''),coalesce(q.blocking,false),
-      coalesce(q.location,''),coalesce(q.permission_project,''),coalesce(q.count,0), coalesce(vl.error_code='vendor_limit',false),coalesce(vl.limit_window,''),vl.limit_resets_at
+      coalesce(q.location,''),coalesce(q.permission_project,''),coalesce(q.count,0), coalesce(r.status='failed' AND vl.error_code='vendor_limit',false),coalesce(vl.limit_window,''),vl.limit_resets_at
     FROM harness_sessions s LEFT JOIN agent_runs r ON r.tenant_id=s.tenant_id AND r.id=s.run_id
     LEFT JOIN LATERAL (SELECT error_code,limit_window,limit_resets_at FROM run_telemetry t WHERE t.tenant_id=s.tenant_id AND t.run_id=s.run_id AND t.error_code IS NOT NULL ORDER BY sequence DESC LIMIT 1) vl ON true
     LEFT JOIN grouped q ON q.id=s.id

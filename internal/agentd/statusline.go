@@ -185,7 +185,9 @@ func (s *Supervisor) syncStatuslines(ctx context.Context, now time.Time) {
 		if a.Harness != Claude || !s.dispatchAllowed(a.ID) {
 			continue
 		}
-		consent, err := api.StatuslineConsent(ctx, a.ID)
+		op, cancel := context.WithTimeout(ctx, 3*time.Second)
+		consent, err := api.StatuslineConsent(op, a.ID)
+		cancel()
 		if err != nil {
 			continue
 		}

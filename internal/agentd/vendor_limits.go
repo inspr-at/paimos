@@ -12,6 +12,11 @@ func limitEvent(hit *capacity.LimitHit) AdapterEvent {
 	return AdapterEvent{Kind: "status", ErrorCode: "vendor_limit", Activity: "throttled", Capacity: hit.Readings, VendorLimit: hit}
 }
 
+func (p *wireProcess) emitVendorLimit(hit *capacity.LimitHit) {
+	p.vendorLimited.Store(true)
+	p.observe(limitEvent(hit))
+}
+
 func (s *Supervisor) observeVendorLimit(e *owned, hit *capacity.LimitHit) {
 	e.mu.Lock()
 	if e.record.Generation != s.generation || e.harnessArchived || e.vendorLimit != nil {

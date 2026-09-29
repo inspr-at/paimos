@@ -3,6 +3,7 @@ package agentaccounts
 
 import (
 	"bytes"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -29,7 +30,7 @@ func TestAccountSignalsOwnershipTenantKeyAndConsent(t *testing.T) {
 		if v.who == 2 {
 			p, key = foreign, foreignKey
 		}
-		callStatus(t, mod, &p, key, "POST", "/api/agent-accounts", `{"account_key":"local","harness":"claude","daemon_id":"fixture-daemon","label":"Claude"}`, 201, v.account)
+		callStatus(t, mod, &p, key, "POST", "/api/agent-accounts", fmt.Sprintf(`{"account_key":"local","harness":"claude","daemon_id":"fixture-daemon-%d","label":"Claude"}`, v.who), 201, v.account)
 	}
 	path := "/api/agent-accounts/" + a.ID
 	var first, second, other struct {
@@ -64,7 +65,13 @@ func TestAccountSignalsOwnershipTenantKeyAndConsent(t *testing.T) {
 	}
 	var accounts []Account
 	callStatus(t, mod, &admin, "", "GET", "/api/agent-accounts", "", 200, &accounts)
-	if accounts[0].QuotaFingerprint != strings.Repeat("a", 64) || !accounts[0].StatuslineEnabled {
+	var got Account
+	for _, account := range accounts {
+		if account.ID == a.ID {
+			got = account
+		}
+	}
+	if got.QuotaFingerprint != strings.Repeat("a", 64) || !got.StatuslineEnabled {
 		t.Fatal("account projection lost signal")
 	}
 	if scalar(t, foreign, `SELECT count(*) FROM tenant_quota_keys WHERE tenant_id<>$1`, foreign.TenantID) != 0 {

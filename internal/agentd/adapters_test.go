@@ -73,8 +73,8 @@ func TestFakeVendorProcess(t *testing.T) {
 		result := any(map[string]any{})
 		switch frame.Method {
 		case "account/rateLimits/read":
-			if vendor == "codex_capacity" {
-				result = map[string]any{"rateLimits": map[string]any{"primary": map[string]any{"usedPercent": 31, "windowDurationMins": 10080, "resetsAt": time.Now().Add(24 * time.Hour).Unix()}}, "ordinaryUsageAllowed": true}
+			if vendor == "codex_capacity" || vendor == "codex_limited" {
+				result = map[string]any{"rateLimits": map[string]any{"primary": map[string]any{"usedPercent": 31, "windowDurationMins": 10080, "resetsAt": time.Now().Add(24 * time.Hour).Unix()}}, "ordinaryUsageAllowed": vendor != "codex_limited"}
 			}
 		case "account/read":
 			result = map[string]any{"account": map[string]string{"type": "chatgpt", "email": "agent@example.test"}}
@@ -84,6 +84,10 @@ func TestFakeVendorProcess(t *testing.T) {
 				result = map[string]any{"thread": map[string]string{"id": "thread-1"}, "model": "model-a", "reasoningEffort": "high"}
 			}
 		case "turn/start":
+			if vendor == "codex_limit_error" {
+				_ = write.Encode(map[string]any{"jsonrpc": "2.0", "id": frame.ID, "error": map[string]any{"code": -32000, "data": map[string]string{"rateLimitReachedType": "usage"}}})
+				continue
+			}
 			if vendor == "codex_metadata" {
 				for _, settings := range []map[string]any{
 					{"model": "unrelated", "effort": "low", "threadId": "other-thread"},
