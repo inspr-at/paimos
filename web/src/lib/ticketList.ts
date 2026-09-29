@@ -413,7 +413,7 @@ export function compareRows(keys: SortKey[]): (a: ListItem, b: ListItem) => numb
   }
 }
 
-// Stable status ordering by workflow (the server orders unknown spellings last).
+// Stable status ordering by workflow. The server keeps an unknown spelling after that workflow.
 export function orderByStatus(rows: ListItem[], desc = false): ListItem[] {
   return rows
     .map((row, index) => ({ row, index, order: statusMeta(row.state).order }))

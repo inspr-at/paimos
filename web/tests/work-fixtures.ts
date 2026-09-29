@@ -47,7 +47,7 @@ export interface MockOptions {
   liveTruncated?: boolean
 }
 
-const STATE_ORDER = ['open', 'new', 'backlog', 'blocked', 'in_progress', 'active', 'qa', 'accepted', 'done', 'cancelled', 'archived']
+const STATE_ORDER = ['open', 'new', 'backlog', 'blocked', 'in_progress', 'active', 'qa', 'accepted', 'delivered', 'done', 'cancelled', 'archived']
 const PRIORITY_ORDER = ['high', 'medium', 'low', 'none']
 
 export function fixtures(options: MockOptions = {}) {

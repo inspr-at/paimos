@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync"
 	"testing"
@@ -356,5 +357,60 @@ func TestHideClosedAgreesWithBuckets(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestStateSortFollowsWorkflow(t *testing.T) {
+	p := newPrincipal(t, "state-sort")
+	project := kindBySlug(t, p, "project")
+	ticket := kindBySlug(t, p, "ticket")
+	root := mustNode(t, p, `{"kind_id":"`+project.ID+`","title":"Sort","state":"active"}`)
+	for _, state := range []string{"archived", "mystery", "done", "qa", "active", "in-progress", "blocked", "open", "new", "cancelled", "canceled", "accepted", "delivered"} {
+		body := map[string]any{"kind_id": ticket.ID, "title": state, "state": state, "parent_id": root.ID}
+		if state == "done" || state == "accepted" || state == "delivered" {
+			body["fields"] = json.RawMessage(benefitFields)
+		}
+		raw, err := json.Marshal(body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		mustNode(t, p, string(raw))
+	}
+	want := []string{"open", "new", "blocked", "active", "in-progress", "qa", "accepted", "delivered", "done", "canceled", "cancelled", "archived", "mystery"}
+	get := func(path string) nodePage {
+		t.Helper()
+		status, body := call(t, &p, http.MethodGet, path, "")
+		return decode[nodePage](t, status, body, http.StatusOK)
+	}
+	statesOf := func(page nodePage) []string {
+		out := make([]string, len(page.Items))
+		for i, n := range page.Items {
+			out[i] = n.State
+		}
+		return out
+	}
+	if got := statesOf(get("/api/nodes?within=" + root.ID + "&sort=state&limit=100")); strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("workflow order:\n got %v\nwant %v", got, want)
+	}
+	var paged []string
+	cursor := ""
+	for range len(want) + 1 {
+		path := "/api/nodes?within=" + root.ID + "&sort=state&limit=2"
+		if cursor != "" {
+			path += "&cursor=" + url.QueryEscape(cursor)
+		}
+		page := get(path)
+		paged = append(paged, statesOf(page)...)
+		if page.NextCursor == nil {
+			break
+		}
+		cursor = *page.NextCursor
+	}
+	if strings.Join(paged, ",") != strings.Join(want, ",") {
+		t.Fatalf("paged order:\n got %v\nwant %v", paged, want)
+	}
+	desc := get("/api/nodes?within=" + root.ID + "&sort=-state&limit=100")
+	if len(desc.Items) != len(want) || desc.Items[0].State != "archived" || desc.Items[len(desc.Items)-1].State != "mystery" {
+		t.Fatalf("descending ends: %v", statesOf(desc))
 	}
 }

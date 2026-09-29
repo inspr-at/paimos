@@ -693,9 +693,10 @@ func listFilterSQL(q listQuery, sortFields bool) (string, []any) {
 		projection = `n.key,n.title,n.body,n.position,n.created_at,n.updated_at,
             coalesce(n.fields->>'priority','') AS priority_raw,`
 	}
-	// Hide closed uses the same buckets as the project counts. The category
-	// lookup stays out of the plan until the filter is on.
-	closedPred := "TRUE"
+	// Hide closed uses the same buckets as the project counts. Until the filter
+	// is on, the predicate stays the previous literal so an unfiltered list
+	// keeps its plan.
+	closedPred := `n.state NOT IN ('done','cancelled','archived','delivered','accepted')`
 	configuredCTE := ""
 	configuredJoin := ""
 	if q.HideClosed {
@@ -741,7 +742,7 @@ func listOrder(q listQuery) string {
 		case "key":
 			parts = append(parts, `regexp_replace(f.key,'-[0-9]+$','') `+dir, `substring(f.key from '-([0-9]+)$')::numeric `+dir)
 		case "state":
-			parts = append(parts, `CASE WHEN f.state IN ('new','backlog','in_progress','active','qa','accepted','delivered','done','cancelled','archived') THEN 0 ELSE 1 END ASC`, `CASE f.state WHEN 'new' THEN 0 WHEN 'backlog' THEN 1 WHEN 'in_progress' THEN 2 WHEN 'active' THEN 2 WHEN 'qa' THEN 3 WHEN 'accepted' THEN 4 WHEN 'delivered' THEN 5 WHEN 'done' THEN 6 WHEN 'cancelled' THEN 7 WHEN 'archived' THEN 8 ELSE 9 END `+dir, "f.state "+dir)
+			parts = append(parts, workStateKnownSQL("f.state")+` ASC`, workStateOrderSQL("f.state")+` `+dir, "f.state "+dir)
 		case "priority":
 			parts = append(parts, `CASE f.priority WHEN 'high' THEN 0 WHEN 'medium' THEN 1 WHEN 'low' THEN 2 WHEN 'none' THEN 3 ELSE 4 END `+dir, `f.priority_raw `+dir)
 		case "kind":
