@@ -21,9 +21,9 @@ const world: AgentWorld = {
 }
 
 type Computers = 'ready' | 'empty' | 'error' | 'hold'
-const homebrew = (harness: string) => `"$(brew --prefix)/bin/aeon-agentd" add-harness --harness ${harness}`
-const nix = (harness: string) => `"$HOME/.nix-profile/bin/aeon-agentd" add-harness --harness ${harness}`
-const direct = (harness: string) => `"$HOME/.local/bin/aeon-agentd" add-harness --harness ${harness}`
+const homebrew = (harness: string) => `env "$(brew --prefix)/bin/aeon-agentd" add-harness --harness ${harness}`
+const nix = (harness: string) => `env "$HOME/.nix-profile/bin/aeon-agentd" add-harness --harness ${harness}`
+const direct = (harness: string) => `env "$HOME/.local/bin/aeon-agentd" add-harness --harness ${harness}`
 const CALM = 'Sign-in happens on the machine; the password never reaches AEON.'
 
 async function setup(page: Page, options: { manage?: boolean; desk?: boolean; computers?: Computers } = {}) {

@@ -43,7 +43,10 @@ export function signInStep(harness: string): SignInStep {
 /**
  * Path-proof `add-harness`: the binary is named by its install, so an older
  * `aeon-agentd` earlier on PATH cannot shadow it.
- * Homebrew: `"$(brew --prefix)/bin/aeon-agentd"` (AEON-358).
+ * Each line starts with `env` so the path is an argument. Fish rejects a
+ * command substitution in command position (`"$(brew --prefix)/…"`, exit 127);
+ * `env` runs in fish ≥3.4, zsh, and bash.
+ * Homebrew: `env "$(brew --prefix)/bin/aeon-agentd"`.
  * Nix: the profile entry discovery already treats as managed.
  * Direct: the checksum installer's `~/.local/bin` link.
  * A harness that is not a shell token produces no command.
@@ -53,11 +56,11 @@ export function addHarnessCommand(harness: string, install: AgentdInstall): stri
   const tail = `add-harness --harness ${harness}`
   switch (install) {
     case 'homebrew':
-      return `"$(brew --prefix)/bin/aeon-agentd" ${tail}`
+      return `env "$(brew --prefix)/bin/aeon-agentd" ${tail}`
     case 'nix':
-      return `"$HOME/.nix-profile/bin/aeon-agentd" ${tail}`
+      return `env "$HOME/.nix-profile/bin/aeon-agentd" ${tail}`
     case 'direct':
-      return `"$HOME/.local/bin/aeon-agentd" ${tail}`
+      return `env "$HOME/.local/bin/aeon-agentd" ${tail}`
   }
 }
 
