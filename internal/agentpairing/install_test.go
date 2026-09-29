@@ -2,6 +2,7 @@
 package agentpairing
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"fmt"
 	"os"
@@ -17,14 +18,30 @@ import (
 const (
 	installerTestVersion = "260927200000.0.0"
 	installerTestOrigin  = "https://pairing.test"
-	installerNextLine    = "aeon-agentd pair --url https://pairing.test\n"
 )
+
+func namedPairLine(origin string) string {
+	return "aeon-agentd pair --url " + shellQuote(origin) + "\n"
+}
+
+func absolutePairLine(home, origin string) string {
+	return shellQuote(filepath.Join(home, ".local", "bin", "aeon-agentd")) + " pair --url " + shellQuote(origin) + "\n"
+}
+
+func pathHint(home string) string {
+	return "Add " + shellQuote(filepath.Join(home, ".local", "bin")) + " to PATH to run aeon-agentd by name.\n"
+}
 
 type installerFixture struct {
 	home, targetDir, curlCalls, asset, command string
 }
 
 func newInstallerFixture(t *testing.T, corrupt bool) installerFixture {
+	t.Helper()
+	return newInstallerFixtureOrigin(t, corrupt, installerTestOrigin)
+}
+
+func newInstallerFixtureOrigin(t *testing.T, corrupt bool, origin string) installerFixture {
 	t.Helper()
 	if runtime.GOOS != "darwin" && runtime.GOOS != "linux" {
 		t.Skip("installer targets macOS and Linux")
@@ -34,7 +51,7 @@ func newInstallerFixture(t *testing.T, corrupt bool) installerFixture {
 	t.Cleanup(func() { version.Version = oldVersion })
 
 	var target InstallTarget
-	for _, candidate := range installTargets(installerTestOrigin) {
+	for _, candidate := range installTargets(origin) {
 		if candidate.Platform == runtime.GOOS && candidate.Arch == runtime.GOARCH {
 			target = candidate
 			break
@@ -114,20 +131,33 @@ esac
 	}
 }
 
-func (f installerFixture) run(t *testing.T) (string, error) {
+func (f installerFixture) toolsPath() string {
+	return filepath.Join(filepath.Dir(f.curlCalls), "tools")
+}
+
+func (f installerFixture) execute(t *testing.T, path string) (string, string, error) {
 	t.Helper()
 	cmd := exec.Command("sh", "-c", f.command)
 	cmd.Env = []string{
 		"HOME=" + f.home,
-		"PATH=" + filepath.Join(filepath.Dir(f.curlCalls), "tools"),
+		"PATH=" + path,
 		"FIXTURE_DIR=" + filepath.Join(filepath.Dir(f.curlCalls), "release"),
 		"CURL_CALLS=" + f.curlCalls,
 	}
-	out, err := cmd.CombinedOutput()
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	err := cmd.Run()
 	if err != nil {
-		t.Logf("installer refused: %s", strings.TrimSpace(string(out)))
+		t.Logf("installer refused: %s", strings.TrimSpace(stdout.String()+"\n"+stderr.String()))
 	}
-	return string(out), err
+	return stdout.String(), stderr.String(), err
+}
+
+func (f installerFixture) run(t *testing.T) (string, error) {
+	t.Helper()
+	stdout, stderr, err := f.execute(t, f.toolsPath())
+	return stdout + stderr, err
 }
 
 func assertNoDownload(t *testing.T, f installerFixture) {
@@ -139,12 +169,12 @@ func assertNoDownload(t *testing.T, f installerFixture) {
 
 func TestGeneratedInstallerPrivateSuccess(t *testing.T) {
 	f := newInstallerFixture(t, false)
-	out, err := f.run(t)
+	stdout, stderr, err := f.execute(t, f.toolsPath())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if out != installerNextLine {
-		t.Fatalf("stdout = %q", out)
+	if stdout != absolutePairLine(f.home, installerTestOrigin) || stderr != pathHint(f.home) {
+		t.Fatalf("stdout %q stderr %q", stdout, stderr)
 	}
 	installed := filepath.Join(f.targetDir, "paimos-agentd")
 	got, err := os.ReadFile(installed)
@@ -328,12 +358,12 @@ func TestGeneratedInstallerRetargetsOwnedLink(t *testing.T) {
 	if err := os.Symlink(previous, link); err != nil {
 		t.Fatal(err)
 	}
-	out, err := f.run(t)
+	stdout, stderr, err := f.execute(t, f.toolsPath())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if out != installerNextLine {
-		t.Fatalf("stdout = %q", out)
+	if stdout != absolutePairLine(f.home, installerTestOrigin) || stderr != pathHint(f.home) {
+		t.Fatalf("stdout %q stderr %q", stdout, stderr)
 	}
 	got, err := os.Readlink(link)
 	if err != nil || got != filepath.Join(f.targetDir, "paimos-agentd") {
@@ -380,10 +410,19 @@ func TestGeneratedInstallerRefusesForeignBin(t *testing.T) {
 
 func TestPairNextLineRejectsShell(t *testing.T) {
 	line, ok := pairNextLine(installerTestOrigin)
-	if !ok || line != strings.TrimSuffix(installerNextLine, "\n") {
+	if !ok || line != strings.TrimSuffix(namedPairLine(installerTestOrigin), "\n") {
 		t.Fatalf("pair line %q %v", line, ok)
 	}
-	for _, bad := range []string{"", "https://pairing.test/path", "https://pairing.test/$(id)", "http://user@pairing.test", "https://pairing.test';touch /tmp/x;'", "aeon-agentd pair --url https://pairing.test"} {
+	line, ok = pairNextLine("http://[::1]:8080")
+	if !ok || line != "aeon-agentd pair --url 'http://[::1]:8080'" {
+		t.Fatalf("ipv6 pair line %q %v", line, ok)
+	}
+	for _, good := range []string{"http://[::1]", "https://pairing.test:443", "http://127.0.0.1:8080", "http://[2001:db8::1]:8443"} {
+		if _, ok := pairNextLine(good); !ok {
+			t.Fatalf("rejected %q", good)
+		}
+	}
+	for _, bad := range []string{"", "https://pairing.test/path", "https://pairing.test/$(id)", "http://user@pairing.test", "https://pairing.test';touch /tmp/x;'", "aeon-agentd pair --url https://pairing.test", "http://[::1]:8080/$(id)", "http://[::1]:99999", "http://::1", "http://[gggg::1]:8080", "HTTP://[::1]:8080", "https://pairing.test/", "http://[::1]:8080?x=1"} {
 		if _, ok := pairNextLine(bad); ok {
 			t.Fatalf("accepted %q", bad)
 		}
@@ -396,4 +435,80 @@ func TestPairNextLineRejectsShell(t *testing.T) {
 			t.Fatalf("unsafe command: %s", target.Command)
 		}
 	}
+	for _, target := range installTargets("http://[::1]:8080/$(id)") {
+		if strings.Contains(target.Command, "curl") || strings.Contains(target.Command, "$(id)") || strings.Contains(target.Command, "[::1]") {
+			t.Fatalf("unsafe ipv6 command: %s", target.Command)
+		}
+	}
+}
+
+func assertPairLineRuns(t *testing.T, f installerFixture, line, path, origin string) {
+	t.Helper()
+	installed := filepath.Join(f.targetDir, "paimos-agentd")
+	script := "#!/bin/sh\nprintf '%s\\n' \"$*\" > \"$AEON_PAIR_ARGV\"\n"
+	if err := os.WriteFile(installed, []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, ":"), []byte("x"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	argv := filepath.Join(dir, "argv")
+	cmd := exec.Command("sh", "-c", strings.TrimRight(line, "\n"))
+	cmd.Dir = dir
+	cmd.Env = []string{"PATH=" + path, "HOME=" + f.home, "AEON_PAIR_ARGV=" + argv}
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("pair line: %v %s", err, out)
+	}
+	got, err := os.ReadFile(argv)
+	if err != nil || string(got) != "pair --url "+origin+"\n" {
+		t.Fatalf("argv %q %v", got, err)
+	}
+}
+
+func TestGeneratedInstallerPairLineFollowsPath(t *testing.T) {
+	t.Run("on-path", func(t *testing.T) {
+		f := newInstallerFixture(t, false)
+		path := filepath.Join(f.home, ".local", "bin") + ":" + f.toolsPath()
+		stdout, stderr, err := f.execute(t, path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if stdout != namedPairLine(installerTestOrigin) || stderr != "" {
+			t.Fatalf("stdout %q stderr %q", stdout, stderr)
+		}
+		assertPairLineRuns(t, f, stdout, filepath.Join(f.home, ".local", "bin")+":/usr/bin:/bin", installerTestOrigin)
+	})
+	t.Run("off-path", func(t *testing.T) {
+		f := newInstallerFixture(t, false)
+		stdout, stderr, err := f.execute(t, f.toolsPath())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if stdout != absolutePairLine(f.home, installerTestOrigin) || stderr != pathHint(f.home) {
+			t.Fatalf("stdout %q stderr %q", stdout, stderr)
+		}
+		assertPairLineRuns(t, f, stdout, "/usr/bin:/bin", installerTestOrigin)
+	})
+}
+
+func TestGeneratedInstallerIPv6Origin(t *testing.T) {
+	const origin = "http://[::1]:8080"
+	f := newInstallerFixtureOrigin(t, false, origin)
+	if !strings.Contains(f.command, "curl") || !strings.Contains(f.command, shellQuote(origin)) || strings.Contains(f.command, "Refusing to install without a usable instance URL") {
+		t.Fatal("IPv6 origin did not render an installer")
+	}
+	stdout, stderr, err := f.execute(t, f.toolsPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stdout != absolutePairLine(f.home, origin) || stderr != pathHint(f.home) {
+		t.Fatalf("stdout %q stderr %q", stdout, stderr)
+	}
+	calls, err := os.ReadFile(f.curlCalls)
+	if err != nil || len(strings.Split(strings.TrimSpace(string(calls)), "\n")) != 2 {
+		t.Fatalf("expected exactly two fixture downloads: %q, %v", calls, err)
+	}
+	assertPairLineRuns(t, f, stdout, "/usr/bin:/bin", origin)
 }
