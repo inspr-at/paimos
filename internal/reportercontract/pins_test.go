@@ -114,43 +114,47 @@ func TestPinnedShapeKeys(t *testing.T) {
 	}
 }
 
-// TestOpenAPIPropertyNamesHaveNoSpace re-parses the contract. An unquoted
-// flow-mapping description that contains ", " or ": " becomes extra keys, and
-// those keys contain a space.
+// TestOpenAPIPropertyNamesHaveNoSpace re-parses the canonical contract and the
+// harness fragment. An unquoted flow-mapping description that contains ", " or
+// ": " becomes extra keys, and those keys contain a space.
 func TestOpenAPIPropertyNamesHaveNoSpace(t *testing.T) {
-	raw, err := os.ReadFile("../../api/openapi.yaml")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var doc any
-	if err := yaml.Unmarshal(raw, &doc); err != nil {
-		t.Fatal(err)
-	}
-	var bad []string
-	var walk func(any, string)
-	walk = func(v any, path string) {
-		switch node := v.(type) {
-		case map[string]any:
-			keys := make([]string, 0, len(node))
-			for key := range node {
-				keys = append(keys, key)
+	for _, name := range []string{"../../api/openapi.yaml", "../../internal/harness/openapi.yaml"} {
+		t.Run(name, func(t *testing.T) {
+			raw, err := os.ReadFile(name)
+			if err != nil {
+				t.Fatal(err)
 			}
-			sort.Strings(keys)
-			for _, key := range keys {
-				if strings.Contains(key, " ") {
-					bad = append(bad, path+"/"+key)
+			var doc any
+			if err := yaml.Unmarshal(raw, &doc); err != nil {
+				t.Fatal(err)
+			}
+			var bad []string
+			var walk func(any, string)
+			walk = func(v any, path string) {
+				switch node := v.(type) {
+				case map[string]any:
+					keys := make([]string, 0, len(node))
+					for key := range node {
+						keys = append(keys, key)
+					}
+					sort.Strings(keys)
+					for _, key := range keys {
+						if strings.Contains(key, " ") {
+							bad = append(bad, path+"/"+key)
+						}
+						walk(node[key], path+"/"+key)
+					}
+				case []any:
+					for i, item := range node {
+						walk(item, path+"["+strconv.Itoa(i)+"]")
+					}
 				}
-				walk(node[key], path+"/"+key)
 			}
-		case []any:
-			for i, item := range node {
-				walk(item, path+"["+strconv.Itoa(i)+"]")
+			walk(doc, "")
+			if len(bad) > 0 {
+				t.Fatalf("parsed OpenAPI property names contain a space:\n%s", strings.Join(bad, "\n"))
 			}
-		}
-	}
-	walk(doc, "")
-	if len(bad) > 0 {
-		t.Fatalf("parsed OpenAPI property names contain a space:\n%s", strings.Join(bad, "\n"))
+		})
 	}
 }
 

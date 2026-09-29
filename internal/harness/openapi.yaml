@@ -27,7 +27,7 @@ paths:
       parameters:
         - $ref: '#/components/parameters/projectId'
       responses:
-        '200': {description: Resolved, ambiguous or unset}
+        '200': {description: 'Resolved, ambiguous or unset'}
   /api/projects/{projectId}/harness-sessions/{sessionId}:
     get:
       operationId: getHarnessSession
@@ -55,7 +55,7 @@ paths:
       summary: Human-authorized recovery preview
       parameters: [{$ref: '#/components/parameters/projectId'}, {$ref: '#/components/parameters/sessionId'}]
       responses:
-        '200': {description: Exact session, host, observed revision and recovery confirmation; process state remains unknown}
+        '200': {description: 'Exact session, host, observed revision and recovery confirmation; process state remains unknown'}
         '403': {description: Human harness.recover permission required}
   /api/projects/{projectId}/harness-sessions/{sessionId}/controls/force-stop:
     post:
@@ -156,7 +156,7 @@ paths:
       responses:
         '201': {description: Typed pending or replayed control metadata}
         '403': {description: Person permission required}
-        '409': {description: Unmanaged, unsupported or stale generation}
+        '409': {description: 'Unmanaged, unsupported or stale generation'}
   /api/projects/{projectId}/harness-sessions/{sessionId}/managed-context:
     post:
       operationId: managedHarnessContext
