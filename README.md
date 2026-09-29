@@ -54,6 +54,8 @@ paimos mcp
 capacity; `--json` returns the ordered advice. It never reserves quota. The
 Accounts plan uses that same order: soonest weekly/monthly reset, then larger
 available cap, then account ID. Short windows still constrain every admission.
+Workspace readers can request advice across their accounts; paired agents and
+keys with only `account.probe` see only accounts registered by that agent.
 
 `aeon capacity next codex --env` prints a shell-quoted config-home export only
 when the selected account belongs to the authenticated local agentd. Use
