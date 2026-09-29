@@ -15,7 +15,7 @@ import { loadReadMark, nearBottom, saveReadMark, unreadGroups, type InboxReceipt
 
 // The Messages tab of the session panel (AEON-273): the thread with a read
 // watermark per viewer, a pinned bottom with a jump button, and the composer.
-const props = defineProps<{ view: SessionView; now: number; canWrite: boolean; active: boolean }>()
+const props = defineProps<{ view: SessionView; now: number; canWrite: boolean; active: boolean; allowCompose?: boolean }>()
 const emit = defineEmits<{ unread: [count: number] }>()
 const agents = useAgents()
 const identity = useSession()
@@ -238,7 +238,7 @@ defineExpose({ focusComposer: () => textarea.value?.focus() })
     </div>
 
     <p v-if="managed && !ended" class="managed-hint"><AppIcon name="send" :size="13" />Steer this managed session with the controls above.</p>
-    <footer v-else-if="address || composeBlock || unmanaged" class="composer">
+    <footer v-else-if="allowCompose !== false && (address || composeBlock || unmanaged)" class="composer">
       <SessionRequests v-if="unmanaged" :key="s.id" :session="s" :now="now" />
       <p v-if="composeBlock" class="compose-block"><AppIcon name="inbox" :size="13" />{{ composeBlock }}</p>
       <form v-else class="compose" @submit.prevent="send">

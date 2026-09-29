@@ -21,6 +21,7 @@ import SessionStateEvidence from './SessionStateEvidence.vue'
 import SessionRecovery from './SessionRecovery.vue'
 import RemoveSessionDialog from './RemoveSessionDialog.vue'
 import ManagedSessionControls from './ManagedSessionControls.vue'
+import LiveWatch from './LiveWatch.vue'
 import { activityOf, currentStep, type ActivitySession } from './activity'
 import { metadataChangeText, metadataChanges } from './metadataHistory'
 import EtaCell from '../work/EtaCell.vue'
@@ -126,14 +127,14 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
       <div v-if="view && !loading" class="head-actions">
         <span class="host-meta">{{ view.harness }}<template v-if="view.session.host"> on {{ view.session.host }}</template></span>
         <span class="spacer" />
-        <template v-if="view.session.phase !== 'stopped' && !view.session.advertised_capabilities.includes('managed_control_v1')">
+        <template v-if="view.session.phase !== 'stopped' && !reported?.watch && !view.session.advertised_capabilities.includes('managed_control_v1')">
           <button type="button" class="btn sm ghost" :aria-disabled="!!controlBlock(view, 'interrupt')" :data-tip="controlBlock(view, 'interrupt') || 'Stop the current turn'" @click="control('interrupt')"><AppIcon name="interrupt" :size="14" />Interrupt</button>
           <button type="button" class="btn sm ghost stop" :aria-disabled="!!controlBlock(view, 'stop')" :data-tip="controlBlock(view, 'stop') || 'End this session'" @click="control('stop')"><AppIcon name="halt" :size="14" />Stop</button>
         </template>
-        <SessionRecovery :session="view.session" />
+        <SessionRecovery v-if="!reported?.watch" :session="view.session" />
         <RemoveSessionDialog :session="view.session" :label="view.name" />
       </div>
-      <ManagedSessionControls v-if="view && !loading" :session="reported || view.session" :now="now" />
+      <ManagedSessionControls v-if="view && !loading && !reported?.watch" :session="reported || view.session" :now="now" />
       <SessionTabs v-if="view && !loading" :selected="tab" :unread="tab === 'messages' ? 0 : unread" @select="selectTab" />
     </header>
 
@@ -160,6 +161,8 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
         </div>
         <button type="button" class="btn sm primary" @click="emit('review', pending[0])">Review</button>
       </div>
+
+      <LiveWatch v-if="reported?.watch" :session="reported" />
 
       <section class="now-block" aria-labelledby="now-title">
         <h3 id="now-title" class="sr-only">Now</h3>
@@ -234,7 +237,7 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
 
       <ProvenanceDetail v-if="s" :project-id="s.project_id" :session-id="s.id" :now="now" />
     </div>
-    <SessionChat v-if="view && !loading" v-show="tab === 'messages'" id="session-panel-messages" :view="view" :now="now" :can-write="canWrite" :active="tab === 'messages'"
+    <SessionChat v-if="view && !loading" v-show="tab === 'messages'" id="session-panel-messages" :view="view" :now="now" :can-write="canWrite && !reported?.watch" :allow-compose="!reported?.watch" :active="tab === 'messages'"
       role="tabpanel" aria-labelledby="session-tab-messages" @unread="unread = $event" />
   </aside>
 </template>

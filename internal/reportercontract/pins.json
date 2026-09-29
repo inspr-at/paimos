@@ -445,8 +445,8 @@
     }
   },
   "harness-session": {
-    "version": "harness-session/1.1",
-    "sha256": "09dff956da220327daed37c54e552f8d42749b04e4c219531db789584b9840cc",
+    "version": "harness-session/1.2",
+    "sha256": "bd77481300d33b5c79b1003c98e299b49dcb5e047130b9a9b2520c254a455e7a",
     "shape": {
       "GET /projects/{projectId}/harness-sessions/{sessionId} 200": {
         "properties": {
@@ -976,6 +976,34 @@
               "string",
               "null"
             ]
+          },
+          "watch": {
+            "properties": {
+              "lease_until": {
+                "format": "date-time",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "owner_id": {
+                "format": "uuid",
+                "type": "string"
+              },
+              "request_id": {
+                "format": "uuid",
+                "type": "string"
+              },
+              "state": {
+                "enum": [
+                  "active",
+                  "detached",
+                  "unreachable"
+                ],
+                "type": "string"
+              }
+            },
+            "type": "object"
           },
           "work_order_id": {
             "format": "uuid",
@@ -1546,6 +1574,34 @@
               "string",
               "null"
             ]
+          },
+          "watch": {
+            "properties": {
+              "lease_until": {
+                "format": "date-time",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "owner_id": {
+                "format": "uuid",
+                "type": "string"
+              },
+              "request_id": {
+                "format": "uuid",
+                "type": "string"
+              },
+              "state": {
+                "enum": [
+                  "active",
+                  "detached",
+                  "unreachable"
+                ],
+                "type": "string"
+              }
+            },
+            "type": "object"
           },
           "work_order_id": {
             "format": "uuid",
