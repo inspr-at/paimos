@@ -145,6 +145,7 @@ type profileBundleReport struct {
 	DefaultChange  bool   `json:"default_change"`
 	DraftsChanged  int    `json:"drafts_changed"`
 	SourceInstance string `json:"source_instance,omitempty"`
+	RefreshDrafts  bool   `json:"refresh_drafts,omitempty"`
 }
 
 type bundleAsset struct {
@@ -157,7 +158,20 @@ type bundleAsset struct {
 // runs in db.InTenant. Apply is one database transaction; immutable content
 // files may remain unreferenced if the transaction fails.
 func ApplyProfileBundle(ctx context.Context, pool *pgxpool.Pool, tenantID, actorID, filesDir, sourceInstance string, bundle ProfileBundle, makeDefault, apply bool) (profileBundleReport, error) {
-	report := profileBundleReport{Applied: apply, SourceInstance: sourceInstance}
+	return applyProfileBundle(ctx, pool, tenantID, actorID, filesDir, sourceInstance, bundle, makeDefault, false, apply)
+}
+
+// ApplyProfileBundleRefreshingDrafts applies the bundle like ApplyProfileBundle
+// and then points every live draft quote that already uses this profile at the
+// current revision, with one quote.profile_selected event each. Drafts already
+// on the current revision are left alone, so a second run changes nothing.
+// It repairs drafts that hold a stale or malformed snapshot (AEON-274).
+func ApplyProfileBundleRefreshingDrafts(ctx context.Context, pool *pgxpool.Pool, tenantID, actorID, filesDir, sourceInstance string, bundle ProfileBundle, makeDefault, apply bool) (profileBundleReport, error) {
+	return applyProfileBundle(ctx, pool, tenantID, actorID, filesDir, sourceInstance, bundle, makeDefault, true, apply)
+}
+
+func applyProfileBundle(ctx context.Context, pool *pgxpool.Pool, tenantID, actorID, filesDir, sourceInstance string, bundle ProfileBundle, makeDefault, refreshDrafts, apply bool) (profileBundleReport, error) {
+	report := profileBundleReport{Applied: apply, SourceInstance: sourceInstance, RefreshDrafts: refreshDrafts}
 	if pool == nil || !uuidRe.MatchString(tenantID) || (actorID != "" && !uuidRe.MatchString(actorID)) || (sourceInstance != "" && !profileSourceInstance.MatchString(sourceInstance)) {
 		return report, errors.New("invalid tenant, actor or source instance")
 	}
@@ -289,8 +303,9 @@ func ApplyProfileBundle(ctx context.Context, pool *pgxpool.Pool, tenantID, actor
 				}
 			}
 		}
-		definition := in.Definition
-		definition.Fonts = append([]profileFont(nil), in.Definition.Fonts...)
+		definition := in.Definition.normalized()
+		// Never nil: a nil slice is stored as null and crashed the quote page (AEON-274).
+		definition.Fonts = append([]profileFont{}, in.Definition.Fonts...)
 		definition.Cover = make(map[string]string, len(in.Definition.Cover))
 		for k, v := range in.Definition.Cover {
 			definition.Cover[k] = v
@@ -349,7 +364,7 @@ func ApplyProfileBundle(ctx context.Context, pool *pgxpool.Pool, tenantID, actor
 		if archived {
 			return errors.New("profile with this name is archived")
 		}
-		newRaw, err := json.Marshal(definition)
+		newRaw, err := marshalProfile(definition)
 		if err != nil {
 			return err
 		}
@@ -409,8 +424,12 @@ func ApplyProfileBundle(ctx context.Context, pool *pgxpool.Pool, tenantID, actor
 				}
 			}
 		}
-		if sourceInstance != "" {
-			rows, err := tx.Query(ctx, `SELECT d.quote_node_id::text FROM quote_drafts d JOIN business_quotes q ON q.quote_node_id=d.quote_node_id JOIN paimos_offer_imports i ON i.node_id=d.quote_node_id WHERE i.source_instance=$1 AND i.source_kind='offer' AND q.state='draft' AND q.deleted_at IS NULL AND q.archived_at IS NULL ORDER BY d.quote_node_id`, sourceInstance)
+		if sourceInstance != "" || (refreshDrafts && report.ProfileID != "") {
+			// Imported drafts from one source instance, and with refreshDrafts
+			// every live draft whose snapshot already names this profile.
+			rows, err := tx.Query(ctx, `SELECT d.quote_node_id::text FROM quote_drafts d JOIN business_quotes q ON q.quote_node_id=d.quote_node_id WHERE q.state='draft' AND q.deleted_at IS NULL AND q.archived_at IS NULL AND (
+				($1<>'' AND EXISTS (SELECT 1 FROM paimos_offer_imports i WHERE i.node_id=d.quote_node_id AND i.source_instance=$1 AND i.source_kind='offer'))
+				OR ($2 AND d.document->'profile'->>'id'=$3)) ORDER BY d.quote_node_id`, sourceInstance, refreshDrafts, report.ProfileID)
 			if err != nil {
 				return err
 			}
@@ -455,7 +474,7 @@ func ApplyProfileBundle(ctx context.Context, pool *pgxpool.Pool, tenantID, actor
 				}
 				before := doc.Profile
 				doc.Profile = &documentProfileSnapshot{ID: report.ProfileID, Revision: report.Revision, Definition: definition}
-				raw, err := json.Marshal(doc)
+				raw, err := marshalDraft(doc)
 				if err != nil {
 					return err
 				}

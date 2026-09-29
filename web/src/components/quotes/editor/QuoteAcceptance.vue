@@ -2,20 +2,22 @@
 <script setup lang="ts">
 import QuoteText from './QuoteText.vue'
 import { documentTotal } from '../../../lib/quotes/layout'
-import { profileLabel, profileMoney } from '../../../lib/quotes/profile'
+import { computed } from 'vue'
+import { normalizeProfile, profileLabel, profileMoney } from '../../../lib/quotes/profile'
 import type { QuoteEditor } from '../../../lib/quotes/editor'
 import type { QuoteDocumentData } from '../../../lib/quotes/types'
-defineProps<{ document: QuoteDocumentData; editor: QuoteEditor; editable?: boolean; accepted?: { name: string; company?: string; at: string; digest: string } | null }>()
+const props = defineProps<{ document: QuoteDocumentData; editor: QuoteEditor; editable?: boolean; accepted?: { name: string; company?: string; at: string; digest: string } | null }>()
+const profile = computed(() => normalizeProfile(props.document.profile))
 </script>
 <template>
   <section class="quote-acceptance" aria-label="Acceptance">
-    <div v-if="document.profile?.definition.totals.discount === 'line'" class="quote-adjustment"><span>{{ profileLabel(document.profile, 'discount', 'Rabatt') }}</span><QuoteText :model-value="document.legal.discount_note ?? ''" label="Rabattinformation" :editable="editable" @update:model-value="editor.editField('legal', { key: 'discount_note', text: $event })" /></div>
-    <div class="quote-total"><span>{{ document.profile?.definition.totals.net_label || profileLabel(document.profile, 'net', 'Nettosumme') }}</span><strong>{{ profileMoney(documentTotal(document.positions), document.currency, document.profile) }}</strong></div>
-    <div v-if="document.profile?.definition.totals.vat === 'line'" class="quote-adjustment"><span>{{ profileLabel(document.profile, 'vat', 'Umsatzsteuer') }}</span><QuoteText :model-value="document.legal.vat_note ?? ''" label="Umsatzsteuerhinweis" :editable="editable" @update:model-value="editor.editField('legal', { key: 'vat_note', text: $event })" /></div>
-    <div v-else-if="document.profile?.definition.totals.vat !== 'hidden'" class="quote-vat-note"><QuoteText :model-value="document.legal.vat_note ?? ''" label="Umsatzsteuerhinweis" :editable="editable" @update:model-value="editor.editField('legal', { key: 'vat_note', text: $event })" /></div>
-    <div v-if="document.profile?.definition.payment_terms.position === 'after-totals'" class="quote-payment"><h3>{{ document.profile.definition.payment_terms.heading }}</h3><QuoteText tag="p" :model-value="document.legal.payment_terms ?? ''" label="Payment terms" :editable="editable" @update:model-value="editor.editField('legal', { key: 'payment_terms', text: $event })" /></div>
+    <div v-if="profile?.definition.totals.discount === 'line'" class="quote-adjustment"><span>{{ profileLabel(document.profile, 'discount', 'Rabatt') }}</span><QuoteText :model-value="document.legal.discount_note ?? ''" label="Rabattinformation" :editable="editable" @update:model-value="editor.editField('legal', { key: 'discount_note', text: $event })" /></div>
+    <div class="quote-total"><span>{{ profile?.definition.totals.net_label || profileLabel(document.profile, 'net', 'Nettosumme') }}</span><strong>{{ profileMoney(documentTotal(document.positions), document.currency, document.profile) }}</strong></div>
+    <div v-if="profile?.definition.totals.vat === 'line'" class="quote-adjustment"><span>{{ profileLabel(document.profile, 'vat', 'Umsatzsteuer') }}</span><QuoteText :model-value="document.legal.vat_note ?? ''" label="Umsatzsteuerhinweis" :editable="editable" @update:model-value="editor.editField('legal', { key: 'vat_note', text: $event })" /></div>
+    <div v-else-if="profile?.definition.totals.vat !== 'hidden'" class="quote-vat-note"><QuoteText :model-value="document.legal.vat_note ?? ''" label="Umsatzsteuerhinweis" :editable="editable" @update:model-value="editor.editField('legal', { key: 'vat_note', text: $event })" /></div>
+    <div v-if="profile?.definition.payment_terms.position === 'after-totals'" class="quote-payment"><h3>{{ profile.definition.payment_terms.heading }}</h3><QuoteText tag="p" :model-value="document.legal.payment_terms ?? ''" label="Payment terms" :editable="editable" @update:model-value="editor.editField('legal', { key: 'payment_terms', text: $event })" /></div>
     <QuoteText tag="p" class="quote-accept-text" :model-value="document.legal.accept_text ?? ''" label="Annahmetext" :editable="editable" @update:model-value="editor.editField('legal', { key: 'accept_text', text: $event })" />
-    <div class="quote-signatures"><div v-if="accepted" class="quote-stamp"><strong>Digital angenommen</strong><span>{{ accepted.name }} · {{ accepted.company }}</span><time>{{ accepted.at }}</time><small>{{ accepted.digest }}</small></div><div v-else>{{ profileLabel(document.profile, 'signature_customer', 'Ort, Datum, Unterschrift Auftraggeber') }}</div><div v-if="document.profile?.definition.acceptance.signature_columns !== 1">{{ profileLabel(document.profile, 'signature_sender', 'Ort, Datum, Unterschrift Auftragnehmer') }}</div></div>
+    <div class="quote-signatures"><div v-if="accepted" class="quote-stamp"><strong>Digital angenommen</strong><span>{{ accepted.name }} · {{ accepted.company }}</span><time>{{ accepted.at }}</time><small>{{ accepted.digest }}</small></div><div v-else>{{ profileLabel(document.profile, 'signature_customer', 'Ort, Datum, Unterschrift Auftraggeber') }}</div><div v-if="profile?.definition.acceptance.signature_columns !== 1">{{ profileLabel(document.profile, 'signature_sender', 'Ort, Datum, Unterschrift Auftragnehmer') }}</div></div>
   </section>
 </template>
 <style scoped>
