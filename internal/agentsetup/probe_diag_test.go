@@ -23,17 +23,17 @@ func TestRedactProbeLineKeepsCauseAndDropsSecrets(t *testing.T) {
 		line string
 		want string
 	}{
-		{name: "deleted folder", line: "The current working directory was deleted", want: "The current working directory was deleted"},
-		{name: "home path", line: "The current working directory was deleted: " + filepath.Join(home, "Code", "old"), want: "The current working directory was deleted: ~/Code/old"},
-		{name: "other home on deleted folder", line: "The current working directory was deleted: /home/other/proj", want: "The current working directory was deleted: ~/proj"},
-		{name: "longer home prefix on deleted folder", line: "The current working directory was deleted: /Users/adaburg", want: "The current working directory was deleted: ~"},
-		{name: "command not found", line: "zsh: command not found: claude", want: "zsh: command not found: claude"},
-		{name: "permission denied", line: "bash: claude: Permission denied", want: "bash: claude: Permission denied"},
-		{name: "missing module", line: "Error: Cannot find module '@scope/left-pad'", want: "cannot find module @scope/left-pad"},
+		{name: "deleted folder", line: "The current working directory was deleted", want: detailDeletedFolder},
+		{name: "home path", line: "The current working directory was deleted: " + filepath.Join(home, "Code", "old"), want: detailDeletedFolder},
+		{name: "other home on deleted folder", line: "The current working directory was deleted: /home/other/proj", want: detailDeletedFolder},
+		{name: "longer home prefix on deleted folder", line: "The current working directory was deleted: /Users/adaburg", want: detailDeletedFolder},
+		{name: "command not found", line: "zsh: command not found: claude", want: detailCommandNotFound},
+		{name: "permission denied", line: "bash: claude: Permission denied", want: detailPermissionDenied},
+		{name: "missing module", line: "Error: Cannot find module '@scope/left-pad'", want: detailMissingModule},
 		{name: "home only", line: "missing " + home, want: generic},
 		{name: "other home", line: "missing /home/other/proj", want: generic},
 		{name: "longer prefix", line: "missing /Users/adaburg", want: generic},
-		{name: "token same line", line: "The current working directory was deleted " + secret, want: generic},
+		{name: "token same line", line: "The current working directory was deleted " + secret, want: detailDeletedFolder},
 		{name: "assignment", line: "failed token=" + token, want: generic},
 		{name: "bearer", line: "Authorization: Bearer " + token, want: generic},
 		{name: "url user", line: "dial https://user:" + token + "@example.test/path", want: generic},
@@ -44,36 +44,37 @@ func TestRedactProbeLineKeepsCauseAndDropsSecrets(t *testing.T) {
 		{name: "single quoted password", line: "startup failed password='synthetic words remain'", want: generic},
 		{name: "absolute path", line: "missing /opt/customer-a/project/config.json", want: generic},
 		{name: "path permission", line: "/opt/customer-a/project/config.json: permission denied", want: generic},
-		{name: "module path", line: "Error: Cannot find module '/opt/customer-a/project/config.json'", want: generic},
-		{name: "shaped command", line: "command not found: sk-" + strings.Repeat("a", 12), want: generic},
-		{name: "second line ignored by caller", line: "The current working directory was deleted", want: "The current working directory was deleted"},
+		{name: "module path", line: "Error: Cannot find module '/opt/customer-a/project/config.json'", want: detailMissingModule},
+		{name: "shaped command", line: "command not found: sk-" + strings.Repeat("a", 12), want: detailCommandNotFound},
+		{name: "second line ignored by caller", line: "The current working directory was deleted", want: detailDeletedFolder},
 	}
-	hidden := []string{home, "/Users/", "/home/", secret, token, "demoCredential_1234567890", "words remain", "review-fixture@example.test", "/opt/customer-a/project/config.json"}
+	hidden := []string{home, "/Users/", "/home/", secret, token, "sk-", "demoCredential_1234567890", "words remain", "review-fixture@example.test", "/opt/customer-a/project/config.json", "left-pad", "adaburg"}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			got := redactProbeLine(tc.line, []string{home})
 			if got != tc.want {
 				t.Fatalf("got %q", got)
 			}
-			if tc.want == generic {
-				for _, item := range hidden {
-					if strings.Contains(got, item) {
-						t.Fatalf("leaked %q in %q", item, got)
-					}
+			for _, item := range hidden {
+				if strings.Contains(got, item) {
+					t.Fatalf("leaked %q in %q", item, got)
 				}
 			}
 		})
 	}
 	long := "The current working directory was deleted " + strings.Repeat("word ", 40)
-	capped := redactProbeLine(long, nil)
-	if capped != generic || strings.Contains(capped, "word") || len([]rune(capped)) > probeDetailLimit {
-		t.Fatalf("unsafe tail kept %q", capped)
+	if got := redactProbeLine(long, nil); got != detailDeletedFolder || strings.Contains(got, "word") {
+		t.Fatalf("deleted folder kept stderr %q", got)
 	}
-	if redactProbeLine("-----BEGIN PRIVATE KEY-----\nabc", nil) != "" {
-		t.Fatal("key block kept")
+	noisy := "loader failed " + strings.Repeat("word ", 40)
+	if got := redactProbeLine(noisy, nil); got != generic || strings.Contains(got, "word") {
+		t.Fatalf("unrecognised line kept stderr %q", got)
 	}
-	if redactProbeLine("bad\x00line", nil) != "" {
-		t.Fatal("control line kept")
+	if got := redactProbeLine("-----BEGIN PRIVATE KEY-----\nabc", nil); got != generic || strings.Contains(got, "BEGIN") || strings.Contains(got, "PRIVATE") {
+		t.Fatalf("key block kept %q", got)
+	}
+	if got := redactProbeLine("bad\x00line", nil); got != generic || strings.Contains(got, "bad") {
+		t.Fatalf("control line kept %q", got)
 	}
 	if got := capturedProbeLine([]byte("first\nsecond token="+token), false); got != "first" {
 		t.Fatalf("first line %q", got)
@@ -101,7 +102,7 @@ func TestDiscoveryProbeDirectoryAndRedactedStartCause(t *testing.T) {
 		return nil, &CommandError{ExitCode: 1, stderr: "The current working directory was deleted: " + leaked + "\n" + secret}
 	})}
 	_, err := d.Detect(t.Context(), "claude", "")
-	if !errors.Is(err, harnesslaunch.ErrStart) || !strings.Contains(err.Error(), "the launcher must also work with the service PATH") || !strings.Contains(err.Error(), "The current working directory was deleted: ~/trashed/worktree") {
+	if !errors.Is(err, harnesslaunch.ErrStart) || !strings.Contains(err.Error(), "the launcher must also work with the service PATH") || !strings.Contains(err.Error(), detailDeletedFolder) {
 		t.Fatal(err)
 	}
 	if strings.Contains(err.Error(), home) || strings.Contains(err.Error(), secret) || strings.Contains(err.Error(), "sk-") {
@@ -170,7 +171,7 @@ func TestOSExecutorUsesProbeDirAndHidesStderrFromErrorText(t *testing.T) {
 	if strings.Contains(exit.Error(), "deleted") || strings.Contains(exit.Error(), secret) || strings.Contains(exit.Error(), "token") {
 		t.Fatal(exit)
 	}
-	if got := probeFailureDetail(err, home); got != "The current working directory was deleted" || strings.Contains(exit.stderr, secret) {
+	if got := probeFailureDetail(err, home); got != detailDeletedFolder || strings.Contains(exit.stderr, secret) || strings.Contains(got, "token") {
 		t.Fatalf("detail %q stderr %q", got, exit.stderr)
 	}
 	raw, readErr := os.ReadFile(marker)
@@ -263,6 +264,121 @@ func TestRuntimeNodeCheckUsesHomeWhenWorkspaceMissing(t *testing.T) {
 	c := RuntimeConfig{Workspace: missing, Accounts: []RuntimeAccount{{Harness: "codex", Path: path, Node: node}}}
 	if err := ValidateHarnessRuntimeDependencies(c); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestProbeDetailDropsTokenInsideAllowlistedShapes(t *testing.T) {
+	const token = "demoCredential_1234567890"
+	cases := []struct {
+		name, line, want string
+	}{
+		{name: "module", line: "Error: Cannot find module '" + token + "'", want: detailMissingModule},
+		{name: "command", line: "command not found: " + token, want: detailCommandNotFound},
+		{name: "permission", line: token + ": permission denied", want: detailPermissionDenied},
+		{name: "deleted", line: "The current working directory was deleted: ~/Code/" + token, want: detailDeletedFolder},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := redactProbeLine(tc.line, []string{"/Users/ada"}); got != tc.want || strings.Contains(got, token) {
+				t.Fatalf("redact %q", got)
+			}
+			home, workspace := physicalTemp(t), physicalTemp(t)
+			path := filepath.Join(home, "claude")
+			body := "#!/bin/sh\nprintf '%s\\n' " + quoteShell(tc.line) + " >&2\nexit 1\n"
+			if err := os.WriteFile(path, []byte(body), 0700); err != nil {
+				t.Fatal(err)
+			}
+			d := Discovery{Home: home, Workspace: workspace, LookPath: func(string) (string, error) { return path, nil }}
+			_, err := d.Detect(t.Context(), "claude", "")
+			if !errors.Is(err, harnesslaunch.ErrStart) || strings.Contains(err.Error(), token) || !strings.Contains(err.Error(), tc.want) {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestProbeDetailOutputSetIsClosed(t *testing.T) {
+	const token = "demoCredential_1234567890"
+	allowed := map[string]struct{}{
+		"the working folder was deleted":                                                  {},
+		"a command the harness needs was not found":                                       {},
+		"permission denied while starting the harness":                                    {},
+		"a module the harness needs is missing":                                           {},
+		"the harness printed an error; run the harness --version in a terminal to see it": {},
+		"the harness printed an error; run claude --version in a terminal to see it":      {},
+		"the harness printed an error; run codex --version in a terminal to see it":       {},
+		"the harness printed an error; run cursor --version in a terminal to see it":      {},
+		"the harness printed an error; run grok --version in a terminal to see it":        {},
+		"the harness printed an error; run pi --version in a terminal to see it":          {},
+	}
+	if detailDeletedFolder != "the working folder was deleted" ||
+		detailCommandNotFound != "a command the harness needs was not found" ||
+		detailPermissionDenied != "permission denied while starting the harness" ||
+		detailMissingModule != "a module the harness needs is missing" {
+		t.Fatal("fixed sentences drifted")
+	}
+	if genericProbeDetail("") != "the harness printed an error; run the harness --version in a terminal to see it" {
+		t.Fatal(genericProbeDetail(""))
+	}
+	for _, name := range []string{"claude", "codex", "cursor", "grok", "pi"} {
+		got := genericProbeDetail(name)
+		if _, ok := allowed[got]; !ok || !strings.Contains(got, name) {
+			t.Fatalf("harness hint %q", got)
+		}
+	}
+	for _, cmd := range []string{"", "cursor-agent", "node", token, "sk-" + strings.Repeat("a", 12), "/opt/customer-a", "review-fixture@example.test"} {
+		got := genericProbeDetail(cmd)
+		if got != genericProbeDetail("") {
+			t.Fatalf("cmd %q became %q", cmd, got)
+		}
+	}
+	home := "/Users/ada"
+	lines := []string{
+		"",
+		"   ",
+		"\x1b[31m",
+		"The current working directory was deleted",
+		"The current working directory was deleted: " + filepath.Join(home, "Code", token),
+		"The current working directory was deleted: /opt/customer-a/" + token,
+		"The current working directory was deleted: ~/" + token,
+		"zsh: command not found: " + token,
+		"command not found: " + token,
+		token + ": permission denied",
+		"bash: " + token + ": Permission denied",
+		"Error: Cannot find module '" + token + "'",
+		`Error: Cannot find module "` + token + `"`,
+		"Error: Cannot find module '@scope/" + token + "'",
+		"Error: Cannot find module '/opt/customer-a/project/config.json'",
+		"missing /opt/customer-a/project/config.json",
+		`startup failed {"access_token":"` + token + `"}`,
+		`password="` + token + `"`,
+		"startup failed for review-fixture@example.test",
+		"loader failed " + strings.Repeat("synthetic-long-line ", 50),
+		"-----BEGIN PRIVATE KEY-----\n" + token,
+		"bad\x00" + token,
+		"\x1b[31mThe current working directory was deleted: ~/" + token + "\x1b[0m",
+	}
+	commands := []string{"", "claude", "codex", "cursor", "grok", "pi", "cursor-agent", "node", token}
+	hidden := []string{token, "review-fixture@example.test", "/opt/", home, "synthetic-long-line", "BEGIN", "PRIVATE"}
+	for _, cmd := range commands {
+		for _, line := range lines {
+			got := safeProbeDetail(line, []string{home}, cmd)
+			blank := strings.TrimSpace(probeANSI.ReplaceAllString(line, "")) == ""
+			if blank {
+				if got != "" {
+					t.Fatalf("blank line produced %q", got)
+				}
+				continue
+			}
+			if _, ok := allowed[got]; !ok {
+				t.Fatalf("open output %q for %q cmd %q", got, line, cmd)
+			}
+			for _, item := range hidden {
+				if strings.Contains(got, item) {
+					t.Fatalf("leaked %q in %q", item, got)
+				}
+			}
+		}
 	}
 }
 
