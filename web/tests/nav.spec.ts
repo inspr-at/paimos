@@ -73,8 +73,9 @@ test('g then b crosses the release menu g opened; another menu, a stale arm or a
   await page.keyboard.press('p')
   await expect(page).toHaveURL('/p/PHAROS/PHAROS-11')
   await expect(status).toBeVisible()
-  // The arm has expired; g inside Status must not re-arm, so p still stays put.
-  await page.waitForTimeout(1600)
+  // The business fixture freezes the clock, so the arm expires only when that
+  // clock moves. g inside Status must not re-arm, so p still stays put.
+  await page.clock.fastForward(1_600)
   await page.keyboard.press('g')
   await page.keyboard.press('p')
   await expect(page).toHaveURL('/p/PHAROS/PHAROS-11')
