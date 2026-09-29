@@ -7,4 +7,5 @@ ALTER TABLE run_telemetry DROP CONSTRAINT run_telemetry_error_code_check;
 ALTER TABLE run_telemetry ADD CONSTRAINT run_telemetry_error_code_check
     CHECK (error_code IN ('event_stream_bound', 'app_server_protocol',
         'child_exit_failed', 'turn_failed', 'child_stop_failed', 'ownership_lost',
-        'reporter_unavailable', 'workspace_conflict', 'decision_refused', 'vendor_limit'));
+        'reporter_unavailable', 'workspace_conflict', 'decision_refused', 'vendor_limit'))
+    NOT VALID;

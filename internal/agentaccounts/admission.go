@@ -4,11 +4,16 @@ package agentaccounts
 import (
 	"context"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/capacity"
 	"github.com/jackc/pgx/v5"
 )
+
+// vendorStopBackoff bounds a vendor stop that names no reset. It is a retry
+// limit, not a guessed vendor window.
+const vendorStopBackoff = time.Hour
 
 // CapacityWait is advisory. Reserve and claim always recheck the same policy.
 type CapacityWait struct {
@@ -66,39 +71,14 @@ func admission(ctx context.Context, tx pgx.Tx, a Account, all []Window, now time
 	if err != nil {
 		return nil, nil, err
 	}
-	// Explicit vendor denial persists until explicit vendor recovery, including
-	// across reset. A manual cap or a generation restart cannot erase it.
-	var denied bool
-	var reset, readAt *time.Time
-	err = tx.QueryRow(ctx, `SELECT ordinary_usage_allowed=false,resets_at,read_at FROM account_capacity_readings
- WHERE account_id=$1 AND source<>'estimate' AND ordinary_usage_allowed IS NOT NULL
- ORDER BY read_at DESC,CASE source WHEN 'harness' THEN 0 ELSE 1 END,ordinary_usage_allowed ASC LIMIT 1`, a.ID).Scan(&denied, &reset, &readAt)
-	if err != nil && !isNoRows(err) {
+	blindHarness := a.Harness == "grok" || a.Harness == "cursor" || a.Harness == "pi"
+	block, err := loadVendorBlock(ctx, tx, a, blindHarness)
+	if err != nil {
 		return nil, nil, err
 	}
-	if denied {
-		w := &CapacityWait{Code: "vendor", ReadAt: readAt, Timezone: s.Timezone}
-		if reset != nil && reset.After(now) {
-			w.Until = reset
-		}
-		return nil, w, nil
-	}
-	blindHarness := a.Harness == "grok" || a.Harness == "cursor" || a.Harness == "pi"
-	if blindHarness {
-		var stopped bool
-		// A manual cap or an estimate cannot erase an actual vendor stop.
-		// Only explicit later vendor recovery can make this account usable again.
-		err = tx.QueryRow(ctx, `SELECT EXISTS(
- SELECT 1 FROM run_telemetry t JOIN agent_runs ar ON ar.tenant_id=t.tenant_id AND ar.id=t.run_id
- WHERE ar.account_id=$1 AND t.error_code='vendor_limit' AND NOT EXISTS(
-  SELECT 1 FROM account_capacity_readings r WHERE r.account_id=$1 AND r.source<>'estimate'
-  AND r.ordinary_usage_allowed=true AND r.read_at>t.at))`, a.ID).Scan(&stopped)
-		if err != nil {
-			return nil, nil, err
-		}
-		if stopped {
-			return nil, &CapacityWait{Code: "vendor", Timezone: s.Timezone}, nil
-		}
+	// A denial still in force is vendor truth. Run now cannot skip it.
+	if block.waiting(now) {
+		return nil, &CapacityWait{Code: "vendor", Until: block.until, ReadAt: block.readAt, Timezone: s.Timezone}, nil
 	}
 	// Omit synthetic grants from the next job's budget. They are never quota
 	// observations and a settled/released grant must not replenish itself.
@@ -129,6 +109,20 @@ func admission(ctx context.Context, tx pgx.Tx, a Account, all []Window, now time
 	if own != nil && len(active) == 0 {
 		active = []Window{*own}
 	}
+	// After the vendor's reset, or a bounded backoff when it named none, one
+	// run may refresh. The same once-per-generation and no-concurrent fences
+	// as the first reading apply. A new denial (new read time) can be probed
+	// again; a spent epoch cannot.
+	if len(active) == 0 && block.refreshDue(now) {
+		granted, wait, err := recoveryGrant(ctx, tx, a, s, block, now, slots)
+		if err != nil {
+			return nil, nil, err
+		}
+		if wait != nil {
+			return nil, wait, nil
+		}
+		active = granted
+	}
 	if len(active) == 0 {
 		if refresh := expiredCapacityRefresh(a, all, now); refresh != nil {
 			active = []Window{*refresh}
@@ -156,17 +150,12 @@ func admission(ctx context.Context, tx pgx.Tx, a Account, all []Window, now time
 		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM account_capacity_readings WHERE account_id=$1)`, a.ID).Scan(&observed); err != nil {
 			return nil, nil, err
 		}
-		blind = !observed && (len(active) == 0 || own != nil && own.capacityKind == "blind")
-		if blind {
-			loc, _ := time.LoadLocation(s.Timezone)
-			local := now.In(loc)
-			day := time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, loc)
-			var runs int
-			// Count durable reservations, including released attempts. Polling,
-			// cancelling or a daemon restart cannot mint another daily allowance.
-			err := tx.QueryRow(ctx, `SELECT count(DISTINCT r.run_id)
- FROM account_reservations r JOIN account_allowance_windows w ON w.tenant_id=r.tenant_id AND w.id=r.window_id
- WHERE w.account_id=$1 AND w.capacity_kind='blind' AND w.starts_at >= $2 AND r.run_id::text<>$3`, a.ID, day, run.ID).Scan(&runs)
+		// A content-free recovery probe is not a paced budget and not a daily
+		// attempt. Measured Codex/Claude recovery stays on the paced path.
+		recovering := containsRecovery(active)
+		blind = !observed && (recovering || len(active) == 0 || own != nil && own.capacityKind == "blind")
+		if blind && !recovering {
+			runs, err := countBlindDayRuns(ctx, tx, a.ID, run.ID, s, now)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -175,6 +164,8 @@ func admission(ctx context.Context, tx pgx.Tx, a Account, all []Window, now time
 					return nil, waitFor("capacity"), nil
 				}
 				if runs >= 3 {
+					loc, _ := time.LoadLocation(s.Timezone)
+					local := now.In(loc)
 					d := s.Week[(int(local.Weekday())+6)%7]
 					end := time.Date(local.Year(), local.Month(), local.Day(), int(d.End), int(d.End*60)%60, 0, 0, loc)
 					return nil, &CapacityWait{Code: "allowance", Until: &end, Timezone: s.Timezone}, nil
@@ -213,11 +204,40 @@ func admission(ctx context.Context, tx pgx.Tx, a Account, all []Window, now time
 			return nil, nil, err
 		}
 	}
-	for _, w := range active {
-		if w.Allowance-w.Used-w.Reserved < boolInt(!claiming) {
-			return nil, &CapacityWait{Code: "allowance", Until: &w.EndsAt, Timezone: s.Timezone}, nil
+	// Hard allowance wins over a schedule wait, in a stable window order, so
+	// "Run now once" is offered only when it can help.
+	ordered := slices.Clone(active)
+	slices.SortFunc(ordered, func(a, b Window) int {
+		if c := strings.Compare(a.capacityKind, b.capacityKind); c != 0 {
+			return c
 		}
-		if w.capacityBudget != nil && *w.capacityBudget < float64(w.Reserved+boolInt(!claiming)) {
+		if c := strings.Compare(a.capacityBucket, b.capacityBucket); c != 0 {
+			return c
+		}
+		if a.EndsAt.Before(b.EndsAt) {
+			return -1
+		}
+		if b.EndsAt.Before(a.EndsAt) {
+			return 1
+		}
+		return strings.Compare(a.ID, b.ID)
+	})
+	need := boolInt(!claiming)
+	var hardUntil *time.Time
+	for _, w := range ordered {
+		if w.Allowance-w.Used-w.Reserved >= need {
+			continue
+		}
+		end := w.EndsAt
+		if hardUntil == nil || end.After(*hardUntil) {
+			hardUntil = &end
+		}
+	}
+	if hardUntil != nil {
+		return nil, &CapacityWait{Code: "allowance", Until: hardUntil, Timezone: s.Timezone}, nil
+	}
+	for _, w := range ordered {
+		if w.capacityBudget != nil && *w.capacityBudget < float64(w.Reserved+need) {
 			next := s.NextStart(now.Add(time.Second), false)
 			if next != nil && !next.After(now.Add(time.Second)) {
 				_, end := s.Period(now)
@@ -234,6 +254,159 @@ func boolInt(v bool) int64 {
 		return 1
 	}
 	return 0
+}
+
+type vendorBlock struct {
+	active bool
+	until  *time.Time
+	readAt *time.Time
+	epoch  time.Time
+}
+
+func (b vendorBlock) waiting(now time.Time) bool {
+	return b.active && b.until != nil && b.until.After(now)
+}
+
+func (b vendorBlock) refreshDue(now time.Time) bool {
+	return b.active && !b.waiting(now)
+}
+
+func loadVendorBlock(ctx context.Context, tx pgx.Tx, a Account, blindHarness bool) (vendorBlock, error) {
+	block, err := readingDenial(ctx, tx, a.ID)
+	if err != nil {
+		return vendorBlock{}, err
+	}
+	if !block.active && blindHarness {
+		block, err = blindDenial(ctx, tx, a.ID)
+		if err != nil {
+			return vendorBlock{}, err
+		}
+	}
+	if !block.active {
+		return vendorBlock{}, nil
+	}
+	cleared, err := denialClearedByRun(ctx, tx, a.ID, block.epoch)
+	if err != nil || cleared {
+		return vendorBlock{}, err
+	}
+	return block, nil
+}
+
+// readingDenial is the denying bucket whose reset is latest. A newer allowance
+// on one bucket does not hide another bucket that still denies.
+func readingDenial(ctx context.Context, tx pgx.Tx, accountID string) (vendorBlock, error) {
+	var resets, readAt time.Time
+	err := tx.QueryRow(ctx, `SELECT resets_at, read_at FROM (
+ SELECT DISTINCT ON (window_kind, bucket) window_kind, bucket, resets_at, read_at, ordinary_usage_allowed
+ FROM account_capacity_readings
+ WHERE account_id=$1 AND source<>'estimate' AND ordinary_usage_allowed IS NOT NULL
+ ORDER BY window_kind, bucket, read_at DESC, CASE source WHEN 'harness' THEN 0 ELSE 1 END
+) latest
+ WHERE ordinary_usage_allowed=false
+ ORDER BY resets_at DESC, read_at DESC, window_kind, bucket
+ LIMIT 1`, accountID).Scan(&resets, &readAt)
+	if isNoRows(err) {
+		return vendorBlock{}, nil
+	}
+	if err != nil {
+		return vendorBlock{}, err
+	}
+	read := readAt.UTC()
+	until := resets.UTC()
+	return vendorBlock{active: true, until: &until, readAt: &read, epoch: read}, nil
+}
+
+func blindDenial(ctx context.Context, tx pgx.Tx, accountID string) (vendorBlock, error) {
+	var at *time.Time
+	err := tx.QueryRow(ctx, `SELECT max(t.at) FROM run_telemetry t
+ JOIN agent_runs ar ON ar.tenant_id=t.tenant_id AND ar.id=t.run_id
+ WHERE ar.account_id=$1 AND t.error_code='vendor_limit' AND NOT EXISTS(
+  SELECT 1 FROM account_capacity_readings r WHERE r.account_id=$1 AND r.source<>'estimate'
+  AND r.ordinary_usage_allowed=true AND r.read_at>t.at)`, accountID).Scan(&at)
+	if err != nil || at == nil {
+		return vendorBlock{}, err
+	}
+	stop := at.UTC()
+	until := stop.Add(vendorStopBackoff)
+	return vendorBlock{active: true, until: &until, readAt: &stop, epoch: stop}, nil
+}
+
+// denialClearedByRun is a run that started after the denial and finished
+// without a vendor stop. The run that produced the denial started earlier.
+func denialClearedByRun(ctx context.Context, tx pgx.Tx, accountID string, epoch time.Time) (bool, error) {
+	var cleared bool
+	err := tx.QueryRow(ctx, `SELECT EXISTS(
+ SELECT 1 FROM agent_runs ar WHERE ar.account_id=$1 AND ar.status='completed' AND ar.started_at > $2
+ AND NOT EXISTS(SELECT 1 FROM run_telemetry t WHERE t.tenant_id=ar.tenant_id AND t.run_id=ar.id AND t.error_code='vendor_limit'))`, accountID, epoch).Scan(&cleared)
+	return cleared, err
+}
+
+func recoveryBucket(a Account, epoch time.Time) string {
+	gen := ""
+	if a.daemonGeneration != nil {
+		gen = *a.daemonGeneration
+	}
+	return "recover:" + gen + ":" + epoch.UTC().Format(time.RFC3339Nano)
+}
+
+func containsRecovery(windows []Window) bool {
+	for _, w := range windows {
+		if w.capacityKind == "refresh" && strings.HasPrefix(w.capacityBucket, "recover:") {
+			return true
+		}
+	}
+	return false
+}
+
+func recoveryGrant(ctx context.Context, tx pgx.Tx, a Account, s capacity.Schedule, block vendorBlock, now time.Time, slots int) ([]Window, *CapacityWait, error) {
+	reading := &CapacityWait{Code: "reading", ReadAt: block.readAt, Timezone: s.Timezone}
+	if a.daemonGeneration == nil || *a.daemonGeneration == "" {
+		return nil, reading, nil
+	}
+	if slots > 0 {
+		return nil, waitFor("reading"), nil
+	}
+	bucket := recoveryBucket(a, block.epoch)
+	var granted bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM account_allowance_windows WHERE account_id=$1 AND capacity_kind='refresh' AND capacity_bucket=$2)`, a.ID, bucket).Scan(&granted); err != nil {
+		return nil, nil, err
+	}
+	if granted {
+		return nil, reading, nil
+	}
+	w := provisionalWindow(a.ID, now, "refresh")
+	w.capacityBucket = bucket
+	return []Window{w}, nil, nil
+}
+
+// countBlindDayRuns counts today's blind attempts that started inside the
+// owner's work bands. A night or off-day run does not consume the three.
+func countBlindDayRuns(ctx context.Context, tx pgx.Tx, accountID, exceptRun string, s capacity.Schedule, now time.Time) (int, error) {
+	loc, err := time.LoadLocation(s.Timezone)
+	if err != nil {
+		loc = time.UTC
+	}
+	local := now.In(loc)
+	day := time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, loc)
+	next := time.Date(local.Year(), local.Month(), local.Day()+1, 0, 0, 0, 0, loc)
+	rows, err := tx.Query(ctx, `SELECT DISTINCT w.starts_at
+ FROM account_reservations r JOIN account_allowance_windows w ON w.tenant_id=r.tenant_id AND w.id=r.window_id
+ WHERE w.account_id=$1 AND w.capacity_kind='blind' AND w.starts_at >= $2 AND w.starts_at < $3 AND r.run_id::text <> $4`, accountID, day, next, exceptRun)
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+	n := 0
+	for rows.Next() {
+		var start time.Time
+		if err := rows.Scan(&start); err != nil {
+			return 0, err
+		}
+		if blindDayPolicy(s, start) {
+			n++
+		}
+	}
+	return n, rows.Err()
 }
 func timePtr(t time.Time) *time.Time { return &t }
 func bootstrapBucket(a Account) string {

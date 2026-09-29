@@ -201,15 +201,8 @@ func (m *module) queued(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, er
 		return nil, err
 	}
 	rows.Close()
-	for i := range out {
-		if out[i].Purpose != "managed" {
-			continue
-		}
-		out[i].Wait, err = agentaccounts.WaitForRun(r.Context(), tx, out[i].ID)
-		if err != nil {
-			return nil, err
-		}
-	}
+	// The daemon poll is agent-only and does not compute per-run wait.
+	// People read that advisory on the run list and the run itself.
 	return out, nil
 }
 func (m *module) create(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {

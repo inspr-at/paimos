@@ -4141,7 +4141,7 @@ paths:
   /runs/queued:
     get:
       operationId: listQueuedRuns
-      description: Agent daemon sees queued runs for its principal only. Polling is a fallback when webhook wakes are missed.
+      description: Agent daemon sees queued runs for its principal only. Polling is a fallback when webhook wakes are missed. The daemon poll omits per-run wait; people read it on the run.
       security: [{agentKey: []}]
       parameters: [{$ref: '#/components/parameters/Limit'}]
       responses:

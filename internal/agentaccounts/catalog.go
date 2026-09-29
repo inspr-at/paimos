@@ -145,7 +145,6 @@ func (m *Module) catalog(w http.ResponseWriter, r *http.Request) {
 			for vi := range out.Hosts[hi].Harnesses {
 				h := &out.Hosts[hi].Harnesses[vi]
 				h.DefaultAccountID = nil
-				best := -1.0
 				for ai := range h.Accounts {
 					choice := &h.Accounts[ai]
 					a := byID[choice.ID]
@@ -167,12 +166,8 @@ func (m *Module) catalog(w http.ResponseWriter, r *http.Request) {
 					} else if len(choice.UnavailableReasons) == 0 {
 						choice.UnavailableReasons = []string{"allowance"}
 					}
-					if choice.Available && choice.RemainingFraction != nil && *choice.RemainingFraction > best {
-						best = *choice.RemainingFraction
-						id := choice.ID
-						h.DefaultAccountID = &id
-					}
 				}
+				h.DefaultAccountID = chooseDefaultAccount(h.Accounts)
 			}
 		}
 		return nil
@@ -238,17 +233,42 @@ func buildCatalog(accounts []Account, profiles []catalogProfile, occupancy map[s
 	for i := range out.Hosts {
 		for j := range out.Hosts[i].Harnesses {
 			h := &out.Hosts[i].Harnesses[j]
-			best := -1.0
-			for _, a := range h.Accounts {
-				if a.Available && a.RemainingFraction != nil && *a.RemainingFraction > best {
-					best = *a.RemainingFraction
-					id := a.ID
-					h.DefaultAccountID = &id
-				}
-			}
+			h.DefaultAccountID = chooseDefaultAccount(h.Accounts)
 		}
 	}
 	return out
+}
+
+// chooseDefaultAccount ranks measured remaining fraction, lowest account id
+// breaking a tie. With no measurement, the only runnable account is the
+// default. Several unread accounts stay unranked, and unknown is never zero.
+func chooseDefaultAccount(accounts []CatalogAccount) *string {
+	best := -1.0
+	var measured, only string
+	known := false
+	runnable := 0
+	for i := range accounts {
+		a := &accounts[i]
+		if !a.Available {
+			continue
+		}
+		runnable++
+		only = a.ID
+		if a.RemainingFraction != nil && *a.RemainingFraction > best {
+			best = *a.RemainingFraction
+			measured = a.ID
+			known = true
+		}
+	}
+	if known {
+		id := measured
+		return &id
+	}
+	if runnable == 1 {
+		id := only
+		return &id
+	}
+	return nil
 }
 
 func catalogAccount(a Account, profiles []catalogProfile, usedSlots int, now time.Time) CatalogAccount {

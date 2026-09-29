@@ -221,24 +221,36 @@ function knownFraction(account: CatalogAccount | undefined) {
 }
 function preferredHarness(host: CatalogHost | undefined) {
   let best: { harness: string; fraction: number; id: string } | null = null
+  let only = ''
+  let runnable = 0
   for (const item of host?.harnesses ?? []) {
     const account = defaultAccount(item)
+    if (!account) continue
+    runnable++
+    only = item.harness
     const fraction = knownFraction(account)
-    if (!account || fraction == null) continue
+    if (fraction == null) continue
     if (!best || fraction > best.fraction || (fraction === best.fraction && account.id < best.id)) best = { harness: item.harness, fraction, id: account.id }
   }
-  return best?.harness ?? ''
+  if (best) return best.harness
+  return runnable === 1 ? only : ''
 }
 function preferredHost(catalog: AgentAccountCatalog) {
   let best: { host: string; fraction: number; id: string } | null = null
+  let only = ''
+  let runnable = 0
   for (const host of catalog.hosts) {
     const harness = harnessOf(host, preferredHarness(host))
     const account = defaultAccount(harness)
+    if (!account) continue
+    runnable++
+    only = host.daemon_id
     const fraction = knownFraction(account)
-    if (!account || fraction == null) continue
+    if (fraction == null) continue
     if (!best || fraction > best.fraction || (fraction === best.fraction && account.id < best.id)) best = { host: host.daemon_id, fraction, id: account.id }
   }
-  return best?.host ?? ''
+  if (best) return best.host
+  return runnable === 1 ? only : ''
 }
 function routedModel(account: CatalogAccount | undefined) {
   const id = account?.default_model_profile_id
