@@ -160,6 +160,36 @@ describe('RowStore: editors', () => {
   })
 })
 
+describe('review 326g: authoritative child counts replace local dedupe history', () => {
+  it('counts a child returning after a remote move and same-revision reload', () => {
+    const rows = new RowStore()
+    const parent = rows.adopt(item('parent', 1), rows.mark(), { show: true })!
+    rows.child('parent', 'child', true)
+    rows.child('parent', 'child', true) // panel and Outline report the creation
+    expect(parent.children_count).toBe(1)
+    // Moving a child does not change the parent's own revision.
+    rows.adopt(item('parent', 1, { children_count: 0 }), rows.mark(), { show: true })
+    rows.child('parent', 'child', true)
+    expect(parent.children_count).toBe(1)
+    rows.child('parent', 'child', false)
+    rows.adopt(item('parent', 1, { children_count: 1 }), rows.mark(), { show: true })
+    rows.child('parent', 'child', false)
+    expect(parent.children_count).toBe(0)
+  })
+
+  it('node reads and rejected list copies keep the dedupe for the current count', () => {
+    const rows = new RowStore()
+    const parent = rows.adopt(item('parent', 2), rows.mark(), { show: true })!
+    rows.child('parent', 'child', true)
+    rows.adoptNode(node('parent', 3), rows.mark(), { show: true })
+    rows.child('parent', 'child', true)
+    expect(parent.children_count).toBe(1)
+    rows.adopt(item('parent', 1, { children_count: 0 }), rows.mark(), { show: true })
+    rows.child('parent', 'child', true)
+    expect(parent.children_count).toBe(1)
+  })
+})
+
 // ---------- Random interleavings ----------
 // A tiny seeded generator, so a failing seed can be replayed.
 function random(seed: number) {

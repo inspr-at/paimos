@@ -208,6 +208,10 @@ export class RowStore {
         if (order > 0 && compareRevision(revision, entry.revision) > 0) { entry.revision = revision; entry.touched = ++this.clock }
         entry.latest = copy
         entry.full = full || (order === 0 && entry.full)
+        // A list page replaces the count, so earlier local child deltas no
+        // longer describe its baseline. Node reads only carry the previous
+        // projection and must keep the dedupe shared by panel and Outline.
+        if (full) entry.children.clear()
         if (copy.assignee?.name && copy.assignee.name !== 'Someone') this.names.set(copy.assignee.id, copy.assignee.name)
         if (full && copy.parent?.kind_slug && copy.parent.key) this.learnParent(copy.parent)
         // The same revision with the list projections (the parent chip a node

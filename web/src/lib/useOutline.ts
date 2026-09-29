@@ -97,9 +97,15 @@ export function useOutline(projectId: Ref<string | null>, filters: Ref<ListFilte
     const request = generation
     block.loading = true; block.error = ''
     try {
-      const sent = rowStore.mark()
-      const page = await listNodes({ ...params, sort: sortParam.value, limit: LEVEL, cursor: more ? block.cursor ?? undefined : undefined } as never)
-      if (request !== generation) return
+      // Keep the same level and cursor when a gap makes an in-flight page
+      // untrustworthy. It may contain a deletion the stream never delivered.
+      const query = { ...params, sort: sortParam.value, limit: LEVEL, cursor: more ? block.cursor ?? undefined : undefined }
+      let sent, page
+      do {
+        sent = rowStore.mark()
+        page = await listNodes(query as never)
+        if (request !== generation) return
+      } while (rowStore.gapSince(sent))
       // Rows are the row store's display objects (AEON-326): the panel and the
       // list show the same object, and a copy older than a deletion stays out.
       const ids: string[] = []

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test, expect, type Page } from '@playwright/test'
 import { fixtures, mockWork, watchErrors, type Call, type MockNode } from './work-fixtures'
+import { openOne } from './live-server'
 
 // setSystemTime lets time flow (setFixedTime would freeze Vue's event timestamps).
 test.beforeEach(async ({ page }) => { await page.clock.setSystemTime(new Date('2026-09-23T12:00:00Z')) })
@@ -21,6 +22,79 @@ function tree() {
   return data
 }
 const lists = (calls: Call[]) => calls.filter(call => call.path === '/api/nodes' && call.method === 'GET')
+
+// Review 326g: neither a lazy root nor a child level may admit a page read
+// before a gap. Hold the retry too, to check the deleted row never flashes.
+for (const level of ['root', 'children'] as const) {
+  test(`a lazy ${level} page crossing a stream gap is read again before it shows`, async ({ browser }) => {
+    let releaseFirst!: () => void, releaseRetry!: () => void, releaseStream!: () => void
+    const first = new Promise<void>(resolve => { releaseFirst = resolve })
+    const retry = new Promise<void>(resolve => { releaseRetry = resolve })
+    const stream = new Promise<void>(resolve => { releaseStream = resolve })
+    const parent = level === 'root' ? 'p-pharos' : 'n-epic'
+    const victim = level === 'root' ? 'n-4' : 'n-1'
+    const key = level === 'root' ? 'PHAROS-14' : 'PHAROS-11'
+    let requests = 0, computed = 0
+    const h = await openOne(browser, '/p/PHAROS/tickets?view=outline&closed=1', {
+      first: stream,
+      hold: ({ method, path, query }) => {
+        if (method !== 'GET' || path !== '/api/nodes' || query.get('parent_id') !== parent || query.get('kind') === 'epic') return
+        const n = ++requests
+        return { until: n === 1 ? first : retry, computed: () => { computed++ } }
+      },
+    })
+    try {
+      if (level === 'children') await row(h.page, 'PHAROS-10').getByRole('button', { name: 'Expand PHAROS-10' }).click()
+      await expect.poll(() => computed).toBe(1)
+      h.data.nodes.splice(h.data.nodes.findIndex(node => node.id === victim), 1)
+      releaseStream()
+      await expect.poll(() => h.live.requests.length).toBeGreaterThan(1)
+      releaseFirst()
+      await expect.poll(() => computed).toBe(2)
+      await expect(row(h.page, key)).toHaveCount(0)
+      releaseRetry()
+      await expect(row(h.page, level === 'root' ? 'PHAROS-10' : 'PHAROS-12')).toBeVisible()
+      await expect(outline(h.page).locator('tr.ghost.tree-row')).toHaveCount(0)
+      await expect(row(h.page, key)).toHaveCount(0)
+      expect(requests).toBe(2)
+      expect(h.errors).toEqual([])
+    } finally { releaseFirst(); releaseRetry(); releaseStream(); await h.close() }
+  })
+}
+
+test('a created child moved away remotely and back locally remains expandable after reload', async ({ browser }) => {
+  const data = fixtures()
+  data.nodes.push({ ...structuredClone(data.nodes.find(node => node.id === 'n-epic')!), id: 'empty', key: 'PHAROS-30', title: 'Empty epic' })
+  const h = await openOne(browser, '/p/PHAROS/PHAROS-30?view=outline&closed=1', { data })
+  const page = h.page, panel = page.getByRole('complementary', { name: 'Ticket details' })
+  try {
+    const children = panel.getByRole('region', { name: 'Tickets in this epic' })
+    await children.getByRole('button', { name: 'Add ticket' }).click()
+    await children.getByLabel('New ticket title').fill('Return this child')
+    await page.keyboard.press('Enter')
+    await expect(children.locator('.child-row')).toHaveCount(1)
+    const child = data.nodes.find(node => node.title === 'Return this child')!
+    Object.assign(child, { parent_id: 'n-epic', updated_at: new Date(Date.parse(child.updated_at) + 60_000).toISOString() })
+    await ticketViews(page).getByRole('tab', { name: 'List', exact: true }).click()
+    await expect(page.getByRole('grid', { name: 'Tickets' })).toBeVisible()
+    await ticketViews(page).getByRole('tab', { name: 'Outline', exact: true }).click()
+    await expect(row(page, 'PHAROS-30')).toBeVisible()
+    await expect(row(page, 'PHAROS-30').locator('.twisty')).toHaveCount(0)
+    await row(page, 'PHAROS-10').getByRole('button', { name: 'Expand PHAROS-10' }).click()
+    await row(page, child.key).getByText(child.key, { exact: true }).click()
+    await panel.getByRole('button', { name: 'More actions' }).click()
+    await page.getByRole('menuitem', { name: 'Move to another epic…' }).click()
+    await page.getByLabel('Find an epic').fill('Empty epic')
+    await expect(page.getByRole('listbox', { name: 'Epics' }).getByRole('option')).toHaveCount(1)
+    await page.keyboard.press('Enter')
+    await expect(page.getByText(/moved to PHAROS-30 Empty epic/)).toBeVisible()
+    await expect(row(page, 'PHAROS-30').getByRole('button', { name: 'Expand PHAROS-30' })).toBeVisible()
+    await row(page, 'PHAROS-30').getByRole('button', { name: 'Expand PHAROS-30' }).click()
+    await expect(row(page, child.key)).toBeVisible()
+    expect(child.parent_id).toBe('empty')
+    expect(h.errors).toEqual([])
+  } finally { await h.close() }
+})
 
 test('the List | Outline switch keeps the view in the URL and the same toolbar', async ({ page }) => {
   const errors = watchErrors(page)
