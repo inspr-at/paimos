@@ -39,7 +39,7 @@ onMounted(async () => {
         <span class="state">{{ proposalState(p) }}</span>
         <span v-if="p.gate_reason && p.state === 'in_review'" class="quiet">{{ p.gate_reason }}</span>
         <a v-if="p.release_url" :href="p.release_url" target="_blank" rel="noopener noreferrer" class="quiet">{{ p.release }}</a>
-        <span v-else-if="p.state === 'merged'" class="quiet">{{ p.release_requested ? 'Release requested; waiting for the repository.' : p.approved_by ? 'Merged; release request still pending.' : 'Merged outside Aeon; request release in the repository.' }}</span>
+        <span v-else-if="p.state === 'merged'" class="quiet">{{ p.release_requested ? 'Release requested; waiting for the repository.' : p.approved_by ? 'Merged; release request still pending.' : 'Merged externally; request release in the repository.' }}</span>
       </div>
       <div class="actions">
         <button v-if="canWrite && p.pr_number" class="btn sm ghost" :disabled="!!busy" :aria-label="`Refresh ${p.repository} PR #${p.pr_number}`" @click="update(p)">{{ busy === p.id ? 'Checking…' : 'Refresh' }}</button>

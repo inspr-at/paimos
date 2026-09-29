@@ -286,7 +286,7 @@ test('external merges show repository release guidance and contextual controls',
   await page.route('**/api/rules/doctrine/proposals', route => route.fulfill({ json: { proposals: [{ id: 'external', repository: READY.repository, pr_number: 12, pr_url: 'https://github.com/inspr-at/inspr-modules/pull/12', head_sha: '2'.repeat(40), state: 'merged', gate_ready: false, pinned_machines: 0 }] } }))
   await page.goto('/settings/agent-rules')
   const doctrine = section(page)
-  await expect(doctrine.getByText('Merged outside Aeon; request release in the repository.')).toBeVisible()
+  await expect(doctrine.getByText('Merged externally; request release in the repository.')).toBeVisible()
   await expect(doctrine.getByRole('button', { name: /Request release/ })).toHaveCount(0)
   await expect(doctrine.getByRole('button', { name: 'Refresh inspr-at/inspr-modules PR #12', exact: true })).toBeVisible()
   await doctrine.getByRole('button', { name: /^AGENTS-KERNEL\.md/ }).click()
