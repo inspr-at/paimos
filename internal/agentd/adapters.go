@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -676,7 +677,7 @@ func (a *ClaudeAdapter) Start(ctx context.Context, r StartRequest, observe func(
 		return nil, err
 	}
 	cp := &claudeProcess{wireProcess: p, assetDir: dir, ready: make(chan error, 1), controls: map[string]chan bool{}}
-	var inputTokens, outputTokens, costMicros int64
+	var inputTokens, outputTokens, cachedTokens, costMicros int64
 	p.setOnEvent(func(raw json.RawMessage) {
 		var frame struct {
 			Kind            string             `json:"kind"`
@@ -687,6 +688,7 @@ func (a *ClaudeAdapter) Start(ctx context.Context, r StartRequest, observe func(
 			ModelEvidence   string             `json:"model_evidence_status"`
 			InputTokens     int64              `json:"input_tokens_total"`
 			OutputTokens    int64              `json:"output_tokens_total"`
+			CachedTokens    *int64             `json:"cached_input_tokens_total"`
 			CostUSD         json.RawMessage    `json:"cost_usd_total"`
 			Models          []claudeModelUsage `json:"models"`
 		}
@@ -716,10 +718,13 @@ func (a *ClaudeAdapter) Start(ctx context.Context, r StartRequest, observe func(
 			}
 			ev := AdapterEvent{Kind: "usage", InputTokensDelta: cumulativeDelta(frame.InputTokens, &inputTokens),
 				OutputTokensDelta: cumulativeDelta(frame.OutputTokens, &outputTokens)}
+			if cached, ok := claudeCachedTotal(frame.CachedTokens, frame.Models); ok && cached >= cachedTokens {
+				ev.CachedInputTokensDelta = cumulativeDelta(cached, &cachedTokens)
+			}
 			if cost, ok := usdMicros(frame.CostUSD); ok {
 				ev.CostMicrosDelta = cumulativeDelta(cost, &costMicros)
 			}
-			if ev.InputTokensDelta > 0 || ev.OutputTokensDelta > 0 || ev.CostMicrosDelta > 0 {
+			if ev.InputTokensDelta > 0 || ev.OutputTokensDelta > 0 || ev.CachedInputTokensDelta > 0 || ev.CostMicrosDelta > 0 {
 				observe(ev)
 			}
 			reports := claudeModelReports(frame.Models)
@@ -759,6 +764,26 @@ type claudeModelUsage struct {
 	Input  int64  `json:"input_tokens"`
 	Output int64  `json:"output_tokens"`
 	Cached int64  `json:"cached_input_tokens"`
+}
+
+// claudeCachedTotal is the cumulative cache-read input across models: the
+// bridge's own total, or the sum of its per-model figures. The same numbers
+// feed session usage, so run telemetry and session usage agree.
+func claudeCachedTotal(total *int64, models []claudeModelUsage) (int64, bool) {
+	if total != nil {
+		return *total, *total >= 0
+	}
+	if len(models) == 0 {
+		return 0, false
+	}
+	var sum int64
+	for _, model := range models {
+		if model.Cached < 0 || sum > math.MaxInt64-model.Cached {
+			return 0, false
+		}
+		sum += model.Cached
+	}
+	return sum, true
 }
 
 func claudeModelReports(models []claudeModelUsage) []sessionusage.UsageReport {

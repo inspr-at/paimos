@@ -256,7 +256,7 @@ function observeUsage(message) {
   // Missing, malformed or overflowing usage cannot prove remaining budget.
   if (!message.modelUsage || typeof message.modelUsage !== "object" ||
       Array.isArray(message.modelUsage) || Object.keys(message.modelUsage).length === 0) return null;
-  let input = 0, output = 0;
+  let input = 0, output = 0, cachedTotal = 0;
   const models = [];
   for (const [model, usage] of Object.entries(message.modelUsage)) {
     if (!usage || typeof usage !== "object") return null;
@@ -267,10 +267,12 @@ function observeUsage(message) {
     const inclusive = values[0] + created + cached;
     input += inclusive;
     output += values[1];
+    cachedTotal += cached;
     models.push({ model, input_tokens: inclusive, output_tokens: usage.outputTokens, cached_input_tokens: cached });
   }
-  if (!Number.isSafeInteger(input + output)) return null;
-  const frame = { kind: "usage", input_tokens_total: input, output_tokens_total: output, models };
+  if (!Number.isSafeInteger(input + output) || !Number.isSafeInteger(cachedTotal)) return null;
+  const frame = { kind: "usage", input_tokens_total: input, output_tokens_total: output,
+    cached_input_tokens_total: cachedTotal, models };
   if (typeof message.total_cost_usd === "number" && Number.isFinite(message.total_cost_usd) &&
       message.total_cost_usd >= 0) frame.cost_usd_total = message.total_cost_usd;
   emit(frame);
