@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"slices"
 
-	"github.com/inspr-at/paimos/internal/rules/doctrine"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
@@ -33,8 +32,8 @@ type channelView struct {
 
 const maxChannelDuplicates = 100
 
-func (m *Module) channels(r *http.Request, tx pgx.Tx, _ tenant.Principal) (any, error) {
-	cat, err := doctrine.LoadCatalog(r.Context(), tx)
+func (m *Module) channels(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
+	cat, err := loadDoctrineCatalog(r.Context(), tx)
 	if err != nil {
 		return nil, err
 	}
@@ -49,6 +48,9 @@ func (m *Module) channels(r *http.Request, tx pgx.Tx, _ tenant.Principal) (any, 
 	var dups []channelDuplicate
 	for _, set := range sets {
 		if set.PublishedVersion == "" {
+			continue
+		}
+		if err := permission(r.Context(), tx, p, set.Scope, "rules.read"); err != nil {
 			continue
 		}
 		snap, err := loadVersion(r.Context(), tx, set.ID, set.PublishedVersion)

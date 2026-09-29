@@ -173,6 +173,7 @@ paths:
       operationId: "publishRuleSet"
       description: "rules.publish; person only; company requires workspace publisher; exact replay of the same version and note returns the original snapshot. A rule that copies a git-backed doctrine rule is refused (409 doctrine_duplicate) and names Propose a change."
       responses:
+        "503": {"description":"Doctrine catalog unavailable (doctrine_unavailable); check the source credential grant and server configuration","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "200":
           description: "Authorized rule resource"
           content:
@@ -204,6 +205,7 @@ paths:
       operationId: "restoreRuleSet"
       description: "rules.publish; person only; publishes previous rules at a NEW version; optional note applies only to that new version. Restoring a copy of a git-backed doctrine rule is refused (409 doctrine_duplicate) and names Propose a change."
       responses:
+        "503": {"description":"Doctrine catalog unavailable (doctrine_unavailable); check the source credential grant and server configuration","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "200":
           description: "Authorized rule resource"
           content:
@@ -297,6 +299,7 @@ paths:
       operationId: "publishRuleSets"
       description: "Batch publication under one person approval (AEON-263). rules.publish; person only, agents always 403; every set needs the same authority as its single publish (company sets need the workspace publisher). Rules writes take the tenant row lock that access changes take and decide permissions under it, so a concurrent demotion is either seen or waits. All sets are authorized, then revision and rules are checked, before any write. Atomic: one transaction, so any failure (403, 404, 409 revision or version conflict, 422 budget) writes nothing. Set ids must be canonical lowercase UUIDs, each at most once. Each set gets its own immutable snapshot and rules.published event carrying the shared batch_id. After the writes, every session file that includes one of the batch's sets is rendered with every existing contribution (projects with published project rules and a project without any; every person with person or agent rules, other owners' private layers included; each owner's named agents and tasks; every role and harness); files the batch does not touch are not judged. 422 when one exceeds 12000 bytes: with actual_bytes for a file whose every layer the caller may read now (rules.read, decided under the access lock), otherwise a generic message without size or identity. 422 budget_check_too_large when the batch touches more than 1,000 session files, or the rule store holds more than 2,000 rules or 2 MiB of rule text, for one check. The body (at most 2 MiB, 413 above) is read before any lock; lock waits, statements, the budget work and the whole transaction (server-side transaction_timeout) are bounded by the request deadline, and nothing commits after it (503 busy, nothing changed). When COMMIT was sent but its answer was lost, the server looks for this request's stored answer on a fresh connection, independent of the caller's current access: 200 with that answer if it is there, otherwise 503 outcome_unknown (the COMMIT may still land; repeating the same request is safe because an identical batch returns its stored answer). Every other rules write answers an unacknowledged COMMIT with 503 outcome_unknown and reload-first wording, without reconciliation. The complete answer is stored with the writes; an exact replay of the same request by the same person returns that stored answer after re-checking authorization and writes nothing. A new request never reuses a stored version (409). The single-set publish route is unchanged. A rule that copies a git-backed doctrine rule is 409 doctrine_duplicate and names Propose a change; the batch writes nothing."
       responses:
+        "503": {"description":"Doctrine catalog unavailable (doctrine_unavailable); check the source credential grant and server configuration","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "200":
           description: "Every set published, in request order"
           content:
@@ -320,6 +323,7 @@ paths:
       operationId: "mergeAgentRules"
       description: "rules.read in exact project; tenant from authentication; person must be caller or agent key creator; named agent must be caller or owner controlled; role/harness are exact requested selectors, not permission grants; fails closed on ambiguous identities; no HTTP cache. The rendered file stays at or below 12000 UTF-8 bytes. Git-backed doctrine rules are omitted from that file; when a doctrine release is pinned, body names the release and does not repeat its text. The 12000-byte budget counts this session file only, separate from the harness doctrine. Loading the snapshots for that one file stops at the same store caps as publication: 2,000 rules or 2 MiB of rule text (422 budget_check_too_large). The 1,000 session-file cap remains on batch publication."
       responses:
+        "503": {"description":"Doctrine catalog unavailable (doctrine_unavailable); check the source credential grant and server configuration","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "200":
           description: "Authorized rule resource"
           content:
@@ -422,8 +426,9 @@ paths:
   /rules/channels:
     get:
       operationId: getRuleChannels
-      description: "rules.read. Delivery channels for rules (AEON-320). releases names each pinned doctrine repository (repository, ref, commit) and carries no doctrine text. duplicates lists published Aeon rules that copy a git-backed rule: the same trimmed text, or a source identity or reference equal to that rule's identity (repository/path#anchor, AEON-318). The session file omits those rules and states the pin as a pointer. At most 100 duplicates, ordered by Aeon identity."
+      description: "rules.read. Delivery channels for rules (AEON-320). releases names each pinned doctrine repository (repository, ref, commit) and carries no doctrine text. duplicates lists only published Aeon rules whose set scope the caller may read (rules.read and scoped ownership), including the exact project. A copy matches a git-backed rule by: the same trimmed text, or a source identity or reference equal to that rule's identity (repository/path#anchor, AEON-318). The session file omits those rules and states the pin as a pointer. At most 100 duplicates, ordered by Aeon identity."
       responses:
+        "503": {"description":"Doctrine catalog unavailable (doctrine_unavailable); check the source credential grant and server configuration","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "200":
           description: Doctrine pins and published copies
           content:
@@ -2934,6 +2939,7 @@ paths:
           application/json:
             schema: {type: object, additionalProperties: false}
       responses:
+        "503": {"description":"Doctrine catalog unavailable (doctrine_unavailable); check the source credential grant and server configuration","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         '200': {description: ADR-004 merged rules envelope}
         '403': {description: Invalid worker lease or owner}
         '409': {description: Managed run required}

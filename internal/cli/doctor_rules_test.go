@@ -4,6 +4,7 @@ package cli
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -81,7 +82,7 @@ func TestDoctorReportsOneChannel(t *testing.T) {
 		t.Fatalf("drift exit %d\n%s\n%s", code, out, errOut)
 	}
 	cleanDoctrine := doctrine
-	for _, mode := range []string{"empty harness", "removed marker", "failed source", "unindexed source", "missing state", "ready with error", "file index error", "missing files", "changed pin", "empty response", "session duplicate", "empty session", "missing session", "unreadable session", "inbox only", "explicit session", "codex session"} {
+	for _, mode := range []string{"rewrapped", "nested imports", "missing import", "cyclic import", "unsafe import", "import drift", "empty harness", "removed marker", "failed source", "unindexed source", "missing state", "ready with error", "file index error", "missing files", "changed pin", "empty response", "session duplicate", "empty session", "missing session", "unreadable session", "inbox only", "explicit session", "codex session"} {
 		t.Run(mode, func(t *testing.T) {
 			doctrine = cleanDoctrine
 			mustWrite := func(path, text string) {
@@ -96,6 +97,28 @@ func TestDoctorReportsOneChannel(t *testing.T) {
 			args := []string{"aeon", "--config", filepath.Join(t.TempDir(), "missing"), "doctor"}
 			want, phrase := 2, ""
 			switch mode {
+			case "rewrapped":
+				mustWrite(filepath.Join(home, ".claude", "CLAUDE.md"), "- Never print\n  the\t environment.\n")
+				want, phrase = 0, "no rule served twice"
+			case "nested imports", "missing import", "cyclic import", "unsafe import", "import drift":
+				mustWrite(filepath.Join(home, ".claude", "CLAUDE.md"), "# Harness\n@wrapper.md\n")
+				mustWrite(filepath.Join(home, ".claude", "wrapper.md"), "See @../kernel.md\n")
+				mustWrite(filepath.Join(home, "kernel.md"), matched)
+				want, phrase = 0, "no rule served twice"
+				switch mode {
+				case "missing import":
+					mustWrite(filepath.Join(home, "kernel.md"), "@missing.md\n")
+					want, phrase = 1, "unverified"
+				case "cyclic import":
+					mustWrite(filepath.Join(home, "kernel.md"), "@.claude/CLAUDE.md\n")
+					want, phrase = 1, "unverified"
+				case "unsafe import":
+					mustWrite(filepath.Join(home, "kernel.md"), "@.env\n")
+					want, phrase = 1, "unverified"
+				case "import drift":
+					mustWrite(filepath.Join(home, "kernel.md"), drifted)
+					want, phrase = 2, "harness file drifted"
+				}
 			case "empty harness":
 				mustWrite(filepath.Join(home, ".claude", "CLAUDE.md"), "")
 			case "removed marker":
@@ -149,7 +172,7 @@ func TestDoctorReportsOneChannel(t *testing.T) {
 				}
 			}
 			code, out, errOut := runCLI(args, "")
-			if code != want || !strings.Contains(out, phrase) || strings.Contains(out, "no rule served twice") {
+			if code != want || !strings.Contains(out, phrase) || (want != 0 && strings.Contains(out, "no rule served twice")) || (phrase == "unverified" && strings.Contains(out, "drifted")) {
 				t.Fatalf("%s: exit %d want %d\n%s\n%s", mode, code, want, out, errOut)
 			}
 		})
@@ -191,5 +214,73 @@ func TestDoctorRulesHookOutputs(t *testing.T) {
 	outputs, err = rulesSessionOutputs(home, doctorRulesOptions{Harness: "codex", Out: "manual.txt"})
 	if err != nil || len(outputs) != 1 || outputs[0].Harness != "codex" || outputs[0].Path != filepath.Join(home, "manual.txt") {
 		t.Fatalf("explicit output %v %v", outputs, err)
+	}
+}
+
+func TestDoctorHarnessImportsAreBounded(t *testing.T) {
+	for _, mode := range []string{"symlink", "outside home", "secret directory", "large file", "total bytes", "depth", "file count", "quoted and home imports", "code examples"} {
+		t.Run(mode, func(t *testing.T) {
+			home := t.TempDir()
+			path := filepath.Join(home, "CLAUDE.md")
+			write := func(path, text string) {
+				t.Helper()
+				if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(path, []byte(text), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			text, wantVerified := "@import.md\n", false
+			switch mode {
+			case "symlink":
+				write(filepath.Join(home, "target.md"), "Untrusted fixture text.")
+				if err := os.Symlink("target.md", filepath.Join(home, "import.md")); err != nil {
+					t.Fatal(err)
+				}
+			case "outside home":
+				outside := filepath.Join(t.TempDir(), "outside.md")
+				write(outside, "Untrusted fixture text.")
+				text = "@" + outside
+			case "secret directory":
+				write(filepath.Join(home, ".ssh", "fixture.md"), "Untrusted fixture text.")
+				text = "@.ssh/fixture.md"
+			case "large file":
+				write(filepath.Join(home, "import.md"), strings.Repeat("x", 256*1024+1))
+			case "depth", "file count", "total bytes":
+				text = ""
+				count, size := 9, 0
+				if mode == "file count" {
+					count = 64
+				} else if mode == "total bytes" {
+					count, size = 5, 240*1024
+				}
+				for i := 0; i < count; i++ {
+					name := fmt.Sprintf("part-%d.md", i)
+					content := strings.Repeat("x", size)
+					if mode == "depth" && i+1 < count {
+						content = fmt.Sprintf("@part-%d.md\n", i+1)
+					}
+					write(filepath.Join(home, name), content)
+					if mode != "depth" || i == 0 {
+						text += "@" + name + "\n"
+					}
+				}
+			case "quoted and home imports":
+				text, wantVerified = "@\"my file.md\"\n@~/other.md\n", true
+				write(filepath.Join(home, "my file.md"), "First rule.")
+				write(filepath.Join(home, "other.md"), "Second rule.")
+			case "code examples":
+				text, wantVerified = "`@missing.md`\n```md\n@missing.md\n```\n", true
+			}
+			write(path, text)
+			file := readHarnessImports(home, "claude", path)
+			if file.Missing || file.Unverified == wantVerified || strings.Contains(file.Text, "Untrusted fixture text.") {
+				t.Fatalf("verification=%v missing=%v", !file.Unverified, file.Missing)
+			}
+			if mode == "quoted and home imports" && (!strings.Contains(file.Text, "First rule.") || !strings.Contains(file.Text, "Second rule.")) {
+				t.Fatal("literal imports were not read")
+			}
+		})
 	}
 }

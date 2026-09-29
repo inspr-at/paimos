@@ -103,6 +103,10 @@ func (rt *runtime) rulesChannelCheck(options doctorRulesOptions) doctorCheck {
 			seenHarness[output.Harness] = true
 		}
 		for _, target := range paths {
+			if !target.session {
+				files = append(files, readHarnessImports(home, output.Harness, target.path))
+				continue
+			}
 			text, missing, err := readHarnessFile(target.path)
 			if err != nil {
 				return doctorCheck{Name: "rules", Status: "warn", Detail: output.Harness + ": delivered file could not be read"}

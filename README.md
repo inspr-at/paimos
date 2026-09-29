@@ -304,6 +304,11 @@ This explicitly checks that file and its harness file. Doctor never executes
 hooks or expands shell expressions. Missing, empty, unreadable or unverified
 files and unready/failed doctrine sources cannot earn “no rule served twice”.
 Deleted rules are detected even when their markers were deleted too.
+Doctor normalizes whitespace and follows literal Markdown `@path` imports,
+relative to each importing file (`~/` resolves to the home directory). Reads
+stay within the home and harness directories, refuse secret paths and symlinks,
+and stop at 8 import levels, 64 files, 256 KiB per file or 1 MiB total. Unresolved
+imports report “unverified” instead of drift; neither result certifies delivery.
 
 Session merges resolve precedence before omitting doctrine copies. A locked
 company rule delivered by doctrine retains its floor obligation as a reference
@@ -312,7 +317,11 @@ the session file, cache or bootstrap. Existing independently retained floor
 pins still require explicit review when changing from text to that reference.
 Catalog reads for publication, delivery and channel reports recheck the same
 host-provisioned credential grants as the doctrine API; an inaccessible source
-fails the operation before cached text or matching identities are inspected.
+fails the operation with `503 doctrine_unavailable` before cached text or
+matching identities are inspected, including managed-session delivery. A batch
+loads the catalog once for its request; later requests recheck the grants.
+Channel reports include duplicates only from sets whose exact scope the caller
+may read, including the project permission and scoped ownership checks.
 
 ## UI shell (P0.5 / AEON-10)
 

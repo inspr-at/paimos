@@ -3,6 +3,7 @@
 package rules
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -180,12 +181,15 @@ func TestPublishBlocksDoctrineDuplicateAndSessionOmitsIt(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	for _, denied := range []string{"missing", "wrong tenant", "wrong repository", "revoked"} {
+	for _, denied := range []string{"missing", "wrong tenant", "wrong repository", "revoked", "missing credentials directory"} {
 		switch denied {
 		case "wrong tenant":
 			grant(testTenant, repo)
 		case "wrong repository":
 			grant(tid, "other/repository")
+		case "missing credentials directory":
+			grant(tid, repo)
+			handler = (doctrine.Credentials{Dir: filepath.Join(creds, "missing")}).CatalogMiddleware(mux)
 		case "revoked":
 			grant(tid, repo)
 			if got := call("GET", "/api/rules/channels", nil, 200); !strings.Contains(string(got), doctrineID) {
@@ -203,7 +207,10 @@ func TestPublishBlocksDoctrineDuplicateAndSessionOmitsIt(t *testing.T) {
 			{"POST", "/api/rules/sets/" + projectSet.ID + "/restore", map[string]any{"expected_revision": 3, "version": "260928120001.0.0", "new_version": "260928120004.0.0"}},
 			{"POST", "/api/rules/publish", map[string]any{"items": []any{map[string]any{"set_id": projectSet.ID, "expected_revision": 3, "version": "260928120003.0.0"}}}},
 		} {
-			got := call(request.method, request.path, request.body, 500)
+			got := call(request.method, request.path, request.body, 503)
+			if !strings.Contains(string(got), `"code":"doctrine_unavailable"`) {
+				t.Fatalf("%s did not explain unavailable doctrine: %s", denied, got)
+			}
 			if strings.Contains(string(got), doctrineID) || strings.Contains(string(got), copied.Text) || strings.Contains(string(got), "doctrine_duplicate") {
 				t.Fatalf("%s leaked cached matching identity", denied)
 			}
@@ -211,7 +218,7 @@ func TestPublishBlocksDoctrineDuplicateAndSessionOmitsIt(t *testing.T) {
 	}
 	grant(tid, repo)
 	handler = mux // A missing server policy context must never grant access.
-	call("GET", "/api/rules/channels", nil, 500)
+	call("GET", "/api/rules/channels", nil, 503)
 }
 
 func TestDoctrineSelectionPreservesPrecedenceAndFloor(t *testing.T) {
@@ -270,5 +277,104 @@ func TestDoctrineSelectionPreservesPrecedenceAndFloor(t *testing.T) {
 		if strings.Contains(m.Body, "Lower preference.") != (mode == "expired" || mode == "other-role") {
 			t.Fatalf("%s changed precedence: %s", mode, m.Body)
 		}
+	}
+}
+
+func TestChannelsOnlyExposeReadableSets(t *testing.T) {
+	w := newBatchWorld(t, "channels-permissions")
+	admin := w.principal(tenant.Person, "owner", "admin")
+	reader := w.principal(tenant.Person, "scoped reader", "viewer")
+	var hiddenProject string
+	err := db.InTenant(dbtest.Seed(t.Context()), w.d.App, w.tid, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title) SELECT $1,id,'CH-2','Hidden' FROM node_kinds WHERE tenant_id=$1 AND slug='project' RETURNING id::text`, w.tid).Scan(&hiddenProject)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.d.Admin.Exec(t.Context(), `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,scope_id) SELECT $1,$2,id,'project',$3 FROM roles WHERE tenant_id=$1 AND key='admin'`, w.tid, reader.ID, w.project); err != nil {
+		t.Fatal(err)
+	}
+	floor := testRule("floor", "Keep the company floor.")
+	floor.Strength = "locked"
+	w.publish(admin, w.set(admin, w.layer(admin, Scope{Layer: "company"}), "Floor", floor), "260929010000.0.0")
+	visibleLayer := w.layer(admin, Scope{Layer: "project", ProjectID: w.project})
+	hiddenLayer := w.layer(admin, Scope{Layer: "project", ProjectID: hiddenProject})
+	const text = "Never print the environment."
+	visible := w.set(admin, visibleLayer, "Visible", testRule("visible-copy", text))
+	hidden := w.set(admin, hiddenLayer, "Hidden", testRule("hidden-copy", text))
+	w.publish(admin, visible, "260929010001.0.0")
+	w.publish(admin, hidden, "260929010001.0.0")
+
+	// Existing publications predate the doctrine index, so both are copies.
+	doc := []byte("# Kernel\n\n## Secrets\n\n<!-- aeon-rule: no-env-dump -->\n- " + text + "\n")
+	const repo, commit = "inspr-at/fixture-doctrine", "1111111111111111111111111111111111111111"
+	err = db.InTenant(dbtest.Seed(t.Context()), w.d.App, w.tid, func(tx pgx.Tx) error {
+		var id string
+		if err := tx.QueryRow(t.Context(), `INSERT INTO doctrine_sources(tenant_id,repository,visibility,ref,commit_sha,paths,indexed_at) VALUES($1,$2,'public','fixture',$3,ARRAY['docs/AGENTS-KERNEL.md'],clock_timestamp()) RETURNING id::text`, w.tid, repo, commit).Scan(&id); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `INSERT INTO doctrine_cache(tenant_id,source_id,commit_sha,path,blob_sha,content) VALUES($1,$2,$3,'docs/AGENTS-KERNEL.md',$4,$5)`, w.tid, id, commit, doctrine.BlobSHA(doc), doc)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var all channelView
+	if err := json.Unmarshal(w.call(admin, "GET", "/api/rules/channels", nil, 200), &all); err != nil || len(all.Duplicates) != 2 {
+		t.Fatalf("admin channels: %+v, %v", all, err)
+	}
+	w.call(reader, "GET", "/api/rules/sets?layer_id="+hiddenLayer.ID, nil, 403)
+	w.call(reader, "GET", "/api/rules/sets?layer_id="+visibleLayer.ID, nil, 200)
+	old := beforeSnapshotLoad
+	t.Cleanup(func() { beforeSnapshotLoad = old })
+	beforeSnapshotLoad = func(id, _ string) {
+		if id == hidden.ID {
+			t.Fatal("loaded a snapshot without rules.read in its project")
+		}
+	}
+	var scoped channelView
+	if err := json.Unmarshal(w.call(reader, "GET", "/api/rules/channels", nil, 200), &scoped); err != nil {
+		t.Fatal(err)
+	}
+	if len(scoped.Duplicates) != 1 || scoped.Duplicates[0].Identity != "visible-copy" || len(scoped.Releases) != 1 {
+		t.Fatalf("scoped channel report: %+v", scoped)
+	}
+}
+
+type catalogCountingTx struct {
+	pgx.Tx
+	reads int
+}
+
+func (tx *catalogCountingTx) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+	if strings.Contains(sql, "FROM doctrine_sources") {
+		tx.reads++
+	}
+	return tx.Tx.Query(ctx, sql, args...)
+}
+
+func TestPublicationCatalogIsLoadedOncePerRequest(t *testing.T) {
+	w := newBatchWorld(t, "catalog-once")
+	err := db.InTenant(dbtest.Seed(t.Context()), w.d.App, w.tid, func(tx pgx.Tx) error {
+		counted := &catalogCountingTx{Tx: tx}
+		for request := 1; request <= 2; request++ {
+			ctx := withDoctrineCatalog(t.Context())
+			for _, text := range []string{"First set.", "Second set."} {
+				if err := rejectDoctrineCopy(ctx, counted, []Rule{testRule("local", text)}); err != nil {
+					return err
+				}
+			}
+			// The post-publication budget check shares this catalog too.
+			if _, err := loadDoctrineCatalog(ctx, counted); err != nil {
+				return err
+			}
+			if counted.reads != request {
+				t.Fatalf("%d requests made %d catalog reads", request, counted.reads)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 }

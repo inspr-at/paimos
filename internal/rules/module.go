@@ -15,7 +15,6 @@ import (
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/httpapi"
-	"github.com/inspr-at/paimos/internal/rules/doctrine"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
 	"github.com/jackc/pgx/v5"
@@ -154,6 +153,7 @@ func (m *Module) endpoint(permission, unknown string, fn endpoint) http.HandlerF
 					return err
 				}
 			}
+			r = r.WithContext(withDoctrineCatalog(r.Context()))
 			if out, err = fn(r, tx, p); err != nil {
 				return err
 			}
@@ -483,7 +483,7 @@ func (m *Module) merged(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, er
 		}
 		snapshots = append(snapshots, snap)
 	}
-	cat, err := doctrine.LoadCatalog(r.Context(), tx)
+	cat, err := loadDoctrineCatalog(r.Context(), tx)
 	if err != nil {
 		return nil, err
 	}

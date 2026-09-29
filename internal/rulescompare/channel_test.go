@@ -86,3 +86,23 @@ func TestDeliveryReportRejectsUnverifiedAndRemovedRules(t *testing.T) {
 		t.Fatalf("missed actual session: %s %s", status, detail)
 	}
 }
+
+func TestDeliveryReportNormalizesWhitespaceAndRefusesUnresolvedImports(t *testing.T) {
+	release := PinnedRelease{Repository: "org/repo", Commit: strings.Repeat("a", 40), State: "ready", Rules: []PinnedRule{{Identity: "org/repo/kernel#safe", Text: "Preserve\n  safety and privacy."}}}
+	file := HarnessFile{Harness: "claude", Text: "- Preserve safety\n\tand   privacy."}
+	if status, detail := DeliveryReport([]HarnessFile{file}, []PinnedRelease{release}, nil); status != "ok" {
+		t.Fatalf("rewrapped rule: %s %s", status, detail)
+	}
+	file.Session, file.Text = true, "# Aeon session rules\n\n- Preserve safety\n  and privacy."
+	if status, detail := DeliveryReport([]HarnessFile{file}, []PinnedRelease{release}, nil); status != "fail" || !strings.Contains(detail, "rule served twice") {
+		t.Fatalf("rewrapped duplicate: %s %s", status, detail)
+	}
+	file.Session, file.Unverified, file.Text = false, true, "@missing.md"
+	if status, detail := DeliveryReport([]HarnessFile{file}, []PinnedRelease{release}, nil); status != "warn" || !strings.Contains(detail, "unverified") || strings.Contains(detail, "drift") {
+		t.Fatalf("unresolved import: %s %s", status, detail)
+	}
+	duplicates := []ServedDuplicate{{Identity: "copy", Doctrine: release.Rules[0].Identity}}
+	if status, _ := DeliveryReport([]HarnessFile{file}, []PinnedRelease{release}, duplicates); status != "fail" {
+		t.Fatal("unresolved imports hid a known duplicate")
+	}
+}

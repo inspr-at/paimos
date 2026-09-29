@@ -363,7 +363,7 @@ func budgetCheck(ctx context.Context, tx pgx.Tx, p tenant.Principal, caller stri
 			readable[key] = err == nil
 		}
 	}
-	cat, err := doctrine.LoadCatalog(ctx, tx)
+	cat, err := loadDoctrineCatalog(ctx, tx)
 	if err != nil {
 		return 0, err
 	}

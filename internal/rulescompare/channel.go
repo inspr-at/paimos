@@ -37,11 +37,12 @@ type ServedDuplicate struct {
 // HarnessFile is the rendered instruction file for one harness. Missing means
 // the session hook is installed and the file is not there.
 type HarnessFile struct {
-	Harness string
-	Path    string
-	Session bool
-	Missing bool
-	Text    string
+	Harness    string
+	Path       string
+	Session    bool
+	Missing    bool
+	Unverified bool
+	Text       string
 }
 
 // DeliveryReport is the aeon doctor form of the rules comparison (AEON-320).
@@ -69,6 +70,11 @@ func DeliveryReport(files []HarnessFile, releases []PinnedRelease, duplicates []
 			problems = append(problems, file.label()+": rendered harness file missing")
 			continue
 		}
+		if file.Unverified {
+			problems = append(problems, file.label()+": harness imports unverified")
+			problems = append(problems, sessionDoubles(file, releases)...)
+			continue
+		}
 		if strings.TrimSpace(file.Text) == "" {
 			problems = append(problems, file.label()+": delivered file is empty")
 		} else if file.Session && !strings.Contains(file.Text, "# Aeon session rules") {
@@ -93,7 +99,7 @@ func DeliveryReport(files []HarnessFile, releases []PinnedRelease, duplicates []
 		return "ok", "no rule served twice"
 	}
 	for _, problem := range problems {
-		if !strings.HasSuffix(problem, "rendered harness file missing") {
+		if !strings.HasSuffix(problem, "rendered harness file missing") && !strings.HasSuffix(problem, "harness imports unverified") {
 			return "fail", strings.Join(problems, "; ")
 		}
 	}
@@ -109,10 +115,11 @@ func (f HarnessFile) label() string {
 
 func driftLines(file HarnessFile, releases []PinnedRelease) []string {
 	var lines []string
+	text := normalizedDeliveryText(file.Text)
 	for _, rel := range releases {
 		var ids []string
 		for _, rule := range rel.Rules {
-			if rule.Text != "" && strings.Contains(file.Text, rule.Text) {
+			if rule.Text != "" && strings.Contains(text, normalizedDeliveryText(rule.Text)) {
 				continue
 			}
 			ids = append(ids, rule.Identity)
@@ -140,10 +147,11 @@ func sessionDoubles(file HarnessFile, releases []PinnedRelease) []string {
 		return nil
 	}
 	var lines []string
+	text := normalizedDeliveryText(file.Text)
 	seen := map[string]bool{}
 	for _, rel := range releases {
 		for _, rule := range rel.Rules {
-			if rule.Text == "" || seen[rule.Identity] || !strings.Contains(file.Text, rule.Text) {
+			if rule.Text == "" || seen[rule.Identity] || !strings.Contains(text, normalizedDeliveryText(rule.Text)) {
 				continue
 			}
 			seen[rule.Identity] = true
@@ -152,4 +160,8 @@ func sessionDoubles(file HarnessFile, releases []PinnedRelease) []string {
 	}
 	sort.Strings(lines)
 	return lines
+}
+
+func normalizedDeliveryText(text string) string {
+	return strings.Join(strings.Fields(text), " ")
 }
