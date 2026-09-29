@@ -1,0 +1,9 @@
+{
+  "harnesses": {
+    "claude-code": {"path": "CLAUDE.md", "file": "claude-code.golden"},
+    "codex": {"path": "AGENTS.md", "file": "codex.golden"},
+    "grok": {"path": "AGENTS.md", "file": "grok.golden"},
+    "pi": {"path": "AGENTS.md", "file": "pi.golden"},
+    "cursor": {"path": "AGENTS.md", "file": "cursor.golden"}
+  }
+}

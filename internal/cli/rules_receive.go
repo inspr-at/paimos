@@ -114,6 +114,9 @@ func rulesReceiveFetch(api *client.Client, c rules.Context, o rulesOptions, floo
 		if err != nil {
 			return m, "floor-only", err.Error(), nil
 		}
+		if err = persistStaleCache(o.Cache, api.BaseURL, c, cache, now); err != nil {
+			return m, "", "", err
+		}
 		return m, "cache", "network unavailable; publication and generation not checked online", nil
 	}
 	if err = rules.ValidateMerged(m, c, now); err != nil {

@@ -2,6 +2,7 @@
 package rules
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -129,6 +130,60 @@ func TestRuleValidation(t *testing.T) {
 		if ValidateScope(s) == nil {
 			t.Fatalf("accepted scope %+v", s)
 		}
+	}
+}
+
+func TestMergeLowerLayersAddOrTightenOnly(t *testing.T) {
+	now := time.Date(2026, 9, 29, 8, 0, 0, 0, time.UTC)
+	past := now.Add(-time.Minute)
+	relax := testRule("safety", "Skip the safety floor.")
+	relax.Enabled = false
+	tighten := testRule("safety.review", "Review every safety exception.")
+	project := testSnapshot("project", Scope{Layer: "project", ProjectID: testProject}, relax, tighten)
+	silence := testRule("safety.review", "Skip the extra review.")
+	silence.Enabled = false
+	add := testRule("tone", "Be brief.")
+	expired := testRule("tone.temp", "Use a temporary aside.")
+	expired.ExpiresAt = &past
+	person := testSnapshot("person", Scope{Layer: "person", OwnerID: testPerson}, silence, add, expired)
+	m, err := Merge(testContext(), []Snapshot{person, project, floorSnapshot()}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(m.Body, "Preserve safety") || strings.Contains(m.Body, "Skip the safety") {
+		t.Fatal("lower layer relaxed the locked floor", m.Body)
+	}
+	if !strings.Contains(m.Body, "Review every safety exception") || strings.Contains(m.Body, "Skip the extra review") {
+		t.Fatal("lower layer relaxed a tighter rule", m.Body)
+	}
+	if !strings.Contains(m.Body, "Be brief") || strings.Contains(m.Body, "temporary aside") {
+		t.Fatal("add or expiry", m.Body)
+	}
+	if !strings.Contains(m.Floor, "Preserve safety") || strings.Contains(m.Floor, "Review every") || strings.Contains(m.Floor, "Be brief") {
+		t.Fatal("floor picked up a lower rule", m.Floor)
+	}
+}
+
+func TestMergedStoreBudget(t *testing.T) {
+	savedRules, savedBytes := maxBudgetRules, maxBudgetBytes
+	t.Cleanup(func() {
+		maxBudgetRules, maxBudgetBytes = savedRules, savedBytes
+	})
+	snaps := []Snapshot{floorSnapshot(), testSnapshot("project", Scope{Layer: "project", ProjectID: testProject}, testRule("tone", "Be brief."))}
+	maxBudgetRules = 1
+	if err := storeBudget(context.Background(), snaps); err == nil {
+		t.Fatal("rule cap accepted")
+	} else if e, ok := err.(*Error); !ok || e.Code != "budget_check_too_large" || e.Status != 422 {
+		t.Fatal(err)
+	}
+	maxBudgetRules = savedRules
+	maxBudgetBytes = 1
+	if err := storeBudget(context.Background(), snaps); err == nil {
+		t.Fatal("byte cap accepted")
+	}
+	maxBudgetBytes = savedBytes
+	if err := storeBudget(context.Background(), snaps); err != nil {
+		t.Fatal(err)
 	}
 }
 

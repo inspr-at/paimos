@@ -287,7 +287,13 @@ func (m *Module) draft(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
 	}
 	return replaceDraft(r.Context(), tx, p, s, in)
 }
+
+// beforeSnapshotLoad observes each snapshot read. Tests count it to prove a
+// merge stops once the store cap is crossed.
+var beforeSnapshotLoad = func(string, string) {}
+
 func loadVersion(ctx context.Context, tx pgx.Tx, setID, version string) (Snapshot, error) {
+	beforeSnapshotLoad(setID, version)
 	var raw []byte
 	err := tx.QueryRow(ctx, `SELECT fields FROM nodes WHERE parent_id=$1 AND rule_resource='version' AND fields->>'version'=$2`, setID, version).Scan(&raw)
 	if err != nil {

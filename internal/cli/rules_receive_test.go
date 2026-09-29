@@ -247,11 +247,13 @@ func TestRulesReceiveOfflineNeverPostsOrQueues(t *testing.T) {
 			if cache == "corrupt" {
 				raw = []byte("corrupt")
 			}
+			cachePath := filepath.Join(f.dir, "cache.json")
 			if cache != "absent" {
-				if err = rules.WriteFile(filepath.Join(f.dir, "cache.json"), raw, false); err != nil {
+				if err = rules.WriteFile(cachePath, raw, false); err != nil {
 					t.Fatal(err)
 				}
 			}
+			before, beforeErr := os.ReadFile(cachePath)
 			f.status = 503
 			code, out, stderr := f.run(t, false)
 			want := "floor-only"
@@ -260,6 +262,18 @@ func TestRulesReceiveOfflineNeverPostsOrQueues(t *testing.T) {
 			}
 			if code != 0 || out["source"] != want || out["stale"] != true || out["gap"] == "" || out["receipt_recorded"] != false || out["complete"] != false || f.posts != 0 {
 				t.Fatal(code, out, stderr)
+			}
+			after, afterErr := os.ReadFile(cachePath)
+			if cache == "valid" {
+				var marked rules.Cache
+				if json.Unmarshal(after, &marked) != nil || !marked.Stale || marked.Bundle.SHA256 != f.bundle.SHA256 {
+					t.Fatal("valid cache was not marked stale", string(after))
+				}
+				if _, err = rules.DecodeCache(after, f.server.URL, f.bundle.Context, time.Now()); err != nil {
+					t.Fatal(err)
+				}
+			} else if (beforeErr == nil) != (afterErr == nil) || string(before) != string(after) {
+				t.Fatal("unused cache was rewritten", cache)
 			}
 			f.status = 0
 			code, _, _ = f.run(t, true)
