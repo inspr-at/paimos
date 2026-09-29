@@ -53,7 +53,25 @@ func TestReleaseSignsDarwinAgentdBeforeChecksums(t *testing.T) {
 	if !strings.Contains(rest, "SHA256SUMS") {
 		t.Fatal("checksums must be computed in the release job, after signing")
 	}
-	for _, name := range []string{"ci.yml", "pairing-platform.yml"} {
+	sign = strings.Index(darwin, "- name: Sign and notarize paimos-agentd")
+	cleanup := strings.Index(darwin, "- name: Remove signing keychain and temp files")
+	if cleanup < sign || !strings.Contains(darwin[cleanup:], "if: always()") ||
+		!strings.Contains(darwin[cleanup:], "security delete-keychain") ||
+		!strings.Contains(darwin[cleanup:], `rm -rf "$RUNNER_TEMP"/sign.*`) {
+		t.Fatal("agentd-darwin needs an always() step after signing that deletes the keychain and signing temp files")
+	}
+	if on := topLevelBlock(workflow, "on"); on != "  push:\n    tags:\n      - \"v*\"\n" {
+		t.Fatalf("release workflow must trigger on v* tags only, got:\n%s", on)
+	}
+	entries, err := os.ReadDir("../../.github/workflows")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		name := e.Name()
+		if name == "release.yml" || !(strings.HasSuffix(name, ".yml") || strings.HasSuffix(name, ".yaml")) {
+			continue
+		}
 		other := readRepo(t, ".github/workflows/"+name)
 		if strings.Contains(other, "APPLE_") || strings.Contains(other, "release-signing") || strings.Contains(other, "sign-notarize") {
 			t.Fatalf("%s must never reference signing secrets", name)
@@ -62,6 +80,22 @@ func TestReleaseSignsDarwinAgentdBeforeChecksums(t *testing.T) {
 	if !strings.Contains(script, "agentd.expectedTeamID=${team}") || !strings.Contains(script, "require_team") {
 		t.Fatal("build script does not embed and check the expected Developer ID team")
 	}
+}
+
+// topLevelBlock returns the indented body of a top-level YAML key.
+func topLevelBlock(doc, key string) string {
+	_, after, ok := strings.Cut(doc, "\n"+key+":\n")
+	if !ok {
+		return ""
+	}
+	var b strings.Builder
+	for _, line := range strings.SplitAfter(after, "\n") {
+		if line != "\n" && !strings.HasPrefix(line, " ") {
+			break
+		}
+		b.WriteString(line)
+	}
+	return strings.TrimRight(b.String(), "\n") + "\n"
 }
 
 func readRepo(t *testing.T, rel string) string {

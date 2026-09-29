@@ -69,6 +69,31 @@ jobs:
             exit 1
           fi
           bash scripts/sign-notarize.sh --identifier paimos-agentd "dist/paimos-agentd-darwin-${{ matrix.arch }}"
+      # Backstop for sign-notarize.sh's EXIT trap, which a cancellation during
+      # notarization can skip: however the signing step ended, delete the
+      # temporary keychain (private key), drop it from the search list and
+      # remove every signing temp file (.p12, .p8, zip). Idempotent.
+      - name: Remove signing keychain and temp files
+        if: always()
+        run: |
+          set -uo pipefail
+          for kc in "$RUNNER_TEMP"/sign.*/signing.keychain-db; do
+            [ -e "$kc" ] || continue
+            security delete-keychain "$kc" 2>/dev/null || true
+          done
+          kept=()
+          while IFS= read -r k; do
+            k="${k#"${k%%[![:space:]]*}"}"; k="${k#\"}"; k="${k%\"}"
+            case "$k" in ""|*/signing.keychain-db) ;; *) kept+=("$k") ;; esac
+          done < <(security list-keychains -d user)
+          [ ${#kept[@]} -gt 0 ] || kept=("$HOME/Library/Keychains/login.keychain-db")
+          security list-keychains -d user -s "${kept[@]}"
+          rm -rf "$RUNNER_TEMP"/sign.*
+          if compgen -G "$RUNNER_TEMP/sign.*" >/dev/null || security list-keychains -d user | grep -q signing.keychain-db; then
+            echo "::error::signing keychain or temp files remain"
+            exit 1
+          fi
+          echo "signing keychain and temp files removed"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: agentd-darwin-${{ matrix.arch }}
