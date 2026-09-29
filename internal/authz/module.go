@@ -248,11 +248,20 @@ func canGrantTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, perms []stri
 		return err
 	}
 	for _, key := range perms {
+		if canGrantExplicitWatch(p, own, key) {
+			continue
+		}
 		if !contains(own.Workspace.Permissions, key) {
 			return ErrForbidden
 		}
 	}
 	return nil
+}
+
+// Workspace owners may explicitly opt a custom role into conversation viewing.
+// This delegation exception grants no implicit viewing access to the owner.
+func canGrantExplicitWatch(p tenant.Principal, own Effective, key string) bool {
+	return key == "harness.watch" && p.Kind == tenant.Person && own.Workspace.Role != nil && own.Workspace.Role.Key == "owner"
 }
 
 // Serialize access-management changes per tenant, then recheck the actor's

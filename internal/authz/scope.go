@@ -25,6 +25,8 @@ import (
 // authorized by the workspace binding alone, so a project-only principal never
 // reaches workspace-wide data such as members, quotes, CRM or hours.
 var ProjectFilteredRoutes = map[string]bool{
+	"GET /api/me/security/session-watching":       true,
+	"PUT /api/me/security/session-watching":       true,
 	"GET /api/approvals":                          true,
 	"GET /api/harness-sessions/live":              true,
 	"GET /api/usage/dashboard":                    true,

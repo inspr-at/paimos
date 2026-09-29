@@ -9,7 +9,7 @@ import type { HarnessSession } from '../../lib/agents'
 import { useAgents } from '../../stores/agents'
 import AppIcon from '../AppIcon.vue'
 
-const props = defineProps<{ session: HarnessSession }>()
+const props = defineProps<{ session: HarnessSession; hideTrigger?: boolean }>()
 const agents = useAgents()
 const router = useRouter()
 const uid = useId()
@@ -131,10 +131,11 @@ async function submit() {
     } else error.value = e instanceof Error ? e.message : 'The result is unknown. Retry with the same confirmation.'
   } finally { if (turn === epoch) busy.value = false }
 }
+defineExpose({ open })
 </script>
 
 <template>
-  <button v-if="allowed && !session.archived_at" type="button" class="btn sm ghost" @click="open"><AppIcon name="wrench" :size="14" />Recover</button>
+  <button v-if="allowed && !session.archived_at && !hideTrigger" type="button" class="btn sm ghost" @click="open"><AppIcon name="wrench" :size="14" />Recover</button>
   <dialog ref="dialog" class="recovery-dialog" :aria-labelledby="`${uid}-title`" :aria-describedby="`${uid}-intro`" @cancel.prevent="close">
     <div class="recovery-card">
       <div class="recovery-body">

@@ -70,6 +70,22 @@ func TestRolesNoEscalationAndBuiltinImmutability(t *testing.T) {
 	if code := request("POST", "/api/roles", `{"name":"Observer","permissions":["nodes.read"]}`, adminID); code != 201 {
 		t.Errorf("admin role creation: %d", code)
 	}
+	if code := request("POST", "/api/roles", `{"name":"Watch denied","permissions":["harness.watch"]}`, adminID); code != 403 {
+		t.Errorf("admin implicitly delegated conversation access: %d", code)
+	}
+	if code := request("POST", "/api/roles", `{"name":"Watch explicit","permissions":["harness.watch"]}`, ownerID); code != 201 {
+		t.Errorf("owner could not explicitly delegate conversation access: %d", code)
+	}
+	err = db.InTenant(ctx, d.App, tid, func(tx pgx.Tx) error {
+		p := tenant.Principal{ID: ownerID, TenantID: tid, Kind: tenant.Person}
+		if RequireTx(ctx, tx, p, "harness.watch", Scope{}) == nil {
+			t.Error("delegating conversation access implicitly granted owner viewing")
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if code := request("PATCH", "/api/roles/"+builtinID, `{"name":"Changed"}`, ownerID); code != 403 {
 		t.Errorf("built-in edited: %d", code)
 	}

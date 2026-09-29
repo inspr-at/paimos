@@ -156,6 +156,9 @@ func (m *Module) authorizeProjectMutation(ctx context.Context, tx pgx.Tx, p tena
 		return err
 	}
 	for _, key := range grants {
+		if canGrantExplicitWatch(p, own, key) {
+			continue
+		}
 		if !contains(own.Project.Permissions, key) {
 			return ErrForbidden
 		}

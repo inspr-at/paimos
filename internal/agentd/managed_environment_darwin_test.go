@@ -80,7 +80,15 @@ func TestTerminalProcargsFixture(t *testing.T) {
 		if out, err := baseline.CombinedOutput(); err != nil {
 			t.Fatalf("baseline: %v %s", err, out)
 		}
-		profile := terminalSandboxProfile(arg, arg, nil, []string{exe, "/bin/ps"}, nil)
+		// Grant the fixture binary's own dylib closure as production grants a
+		// tool's: a cgo test binary (local auth) built by a Nix toolchain links
+		// store libraries outside /usr/lib.
+		var cache terminalLibraryCache
+		libraries, err := cache.closure(t.Context(), arg, arg, exe, inspectTerminalLibrary)
+		if err != nil {
+			t.Fatal(err)
+		}
+		profile := terminalSandboxProfile(arg, arg, nil, []string{exe, "/bin/ps"}, libraries)
 		ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 		defer cancel()
 		out, err := runSandboxedTerminal(ctx, arg, profile, exe, terminalEnvironment(arg, "off", "", exe), []string{"-test.run=^TestTerminalProcargsFixture$", "--", "aeon-env-child", strconv.Itoa(os.Getpid())})
