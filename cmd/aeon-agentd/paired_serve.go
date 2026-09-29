@@ -18,9 +18,6 @@ import (
 )
 
 func pairedAdapters(c agentsetup.RuntimeConfig) ([]agentd.EnrolledAccount, []agentd.Adapter, error) {
-	if err := agentsetup.ValidateRuntimeDependencies(c); err != nil {
-		return nil, nil, err
-	}
 	codexHomes, emails, claudeHomes, cursorIDs := map[string]string{}, map[string]string{}, map[string]string{}, map[string]string{}
 	claudeEmails := map[string]string{}
 	grokBindings := map[string]agentd.GrokBinding{}
@@ -152,44 +149,10 @@ func servePaired(root string) error {
 			if err == nil {
 				next, _, readErr := agentsetup.ReadRuntime(root)
 				if readErr == nil {
-					readErr = agentsetup.ValidateRuntimeDependencies(next)
-				}
-				if readErr == nil && !reflect.DeepEqual(c, next) {
-					if next.Origin != c.Origin || next.TenantID != c.TenantID || next.PrincipalID != c.PrincipalID || next.DaemonID != c.DaemonID || next.Workspace != c.Workspace || next.ComputerID != c.ComputerID {
-						readErr = errors.New("pairing configuration identity changed")
-					} else {
-						for _, nextAccount := range next.Accounts {
-							for _, oldAccount := range c.Accounts {
-								if oldAccount.AccountID == nextAccount.AccountID && oldAccount != nextAccount {
-									readErr = errors.New("approved account binding changed")
-								}
-							}
-						}
-						if readErr != nil {
-							stopping = true
-							cancel()
-							continue
-						}
-						var ac []agentd.EnrolledAccount
-						var ad []agentd.Adapter
-						ac, ad, readErr = pairedAdapters(next)
-						if readErr == nil {
-							if next.ClaudeRepinID != c.ClaudeRepinID {
-								readErr = restartPairedClaude(op, s, c, next, ad)
-							} else {
-								readErr = s.RefreshAccounts(ac, ad)
-							}
-							if readErr == nil {
-								c = next
-							}
-						}
+					c, readErr = pollPairedRuntime(op, s, root, c, next)
+					if readErr != nil {
+						stopping = true
 					}
-				}
-				if readErr == nil {
-					readErr = acknowledgePairedClaude(op, s, root, c)
-				}
-				if readErr == nil {
-					_ = s.PollOnce(op)
 				}
 			}
 		} else {
@@ -208,7 +171,7 @@ func servePaired(root string) error {
 	}
 }
 
-func restartPairedClaude(ctx context.Context, s *agentd.Supervisor, old, next agentsetup.RuntimeConfig, adapters []agentd.Adapter) error {
+func restartPairedClaude(ctx context.Context, s pairedRuntimeSupervisor, old, next agentsetup.RuntimeConfig, adapters []agentd.Adapter) error {
 	// Repin is not an account-enrollment or authority-change mechanism.
 	unchanged := next
 	unchanged.NodePath, unchanged.ClaudeSDKPath, unchanged.ClaudeRepinID = old.NodePath, old.ClaudeSDKPath, old.ClaudeRepinID
@@ -223,7 +186,71 @@ func restartPairedClaude(ctx context.Context, s *agentd.Supervisor, old, next ag
 	return errors.New("repin has no approved Claude adapter")
 }
 
-func acknowledgePairedClaude(ctx context.Context, s *agentd.Supervisor, root string, c agentsetup.RuntimeConfig) error {
+type pairedRuntimeSupervisor interface {
+	SetHarnessHold(string, string)
+	RefreshAccounts([]agentd.EnrolledAccount, []agentd.Adapter) error
+	RestartClaude(context.Context, *agentd.ClaudeAdapter) error
+	PollOnce(context.Context) error
+}
+
+// pollPairedRuntime keeps recovery and other harnesses polling while Claude
+// waits for a repin or a dependency repair. Identity changes still fail closed.
+func pollPairedRuntime(ctx context.Context, s pairedRuntimeSupervisor, root string, c, next agentsetup.RuntimeConfig) (agentsetup.RuntimeConfig, error) {
+	current, err := refreshPairedRuntime(ctx, s, root, c, next)
+	if err == nil {
+		_ = s.PollOnce(ctx)
+	}
+	return current, err
+}
+
+func refreshPairedRuntime(ctx context.Context, s pairedRuntimeSupervisor, root string, c, next agentsetup.RuntimeConfig) (agentsetup.RuntimeConfig, error) {
+	if next.Origin != c.Origin || next.TenantID != c.TenantID || next.PrincipalID != c.PrincipalID || next.DaemonID != c.DaemonID || next.Workspace != c.Workspace || next.ComputerID != c.ComputerID {
+		return c, errors.New("pairing configuration identity changed")
+	}
+	for _, nextAccount := range next.Accounts {
+		for _, oldAccount := range c.Accounts {
+			if oldAccount.AccountID == nextAccount.AccountID && oldAccount != nextAccount {
+				return c, errors.New("approved account binding changed")
+			}
+		}
+	}
+	if !reflect.DeepEqual(c, next) {
+		ac, ad, err := pairedAdapters(next)
+		if err != nil {
+			return c, err
+		}
+		if next.ClaudeRepinID != c.ClaudeRepinID {
+			s.SetHarnessHold(agentd.Claude, "Claude repin pending: waiting for active Claude runs to exit")
+			if err := agentsetup.ValidateRuntimeDependencies(next); err != nil {
+				s.SetHarnessHold(agentd.Claude, err.Error())
+				return c, nil
+			}
+			if err := restartPairedClaude(ctx, s, c, next, ad); err != nil {
+				if !errors.Is(err, agentd.ErrDraining) {
+					s.SetHarnessHold(agentd.Claude, "Claude repin failed: "+err.Error())
+				}
+				return c, nil
+			}
+		} else if err := s.RefreshAccounts(ac, ad); err != nil {
+			return c, err
+		}
+		c = next
+	}
+	if err := agentsetup.ValidateRuntimeDependencies(c); err != nil {
+		s.SetHarnessHold(agentd.Claude, err.Error())
+		return c, nil
+	}
+	// c describes the adapter already installed above or at cold start. A
+	// receipt retry must not replace it again or depend on historical runs.
+	if err := acknowledgePairedClaude(root, c); err != nil {
+		s.SetHarnessHold(agentd.Claude, "Claude repin pending: acknowledgement unavailable; retrying automatically")
+		return c, nil
+	}
+	s.SetHarnessHold(agentd.Claude, "")
+	return c, nil
+}
+
+func acknowledgePairedClaude(root string, c agentsetup.RuntimeConfig) error {
 	if c.ClaudeRepinID == "" {
 		return nil
 	}
@@ -236,19 +263,7 @@ func acknowledgePairedClaude(ctx context.Context, s *agentd.Supervisor, root str
 	if err != nil || applied {
 		return err
 	}
-	_, adapters, err := pairedAdapters(c)
-	if err != nil {
-		return err
-	}
-	for _, adapter := range adapters {
-		if claude, ok := adapter.(*agentd.ClaudeAdapter); ok {
-			if err := s.RestartClaude(ctx, claude); err != nil {
-				return err
-			}
-			return agentsetup.AcknowledgeClaudeRepin(root, c)
-		}
-	}
-	return errors.New("repin has no approved Claude adapter")
+	return agentsetup.AcknowledgeClaudeRepin(root, c)
 }
 
 func syncPairing(ctx context.Context, root, origin string, s *agentd.Supervisor) error {

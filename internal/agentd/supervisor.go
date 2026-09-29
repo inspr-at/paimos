@@ -120,6 +120,8 @@ type Supervisor struct {
 	blockedAccounts   map[string]bool
 	probedAccounts    map[string]bool
 	loginRequired     map[string]bool
+	harnessHolds      map[string]string
+	dependencyErrors  map[string]string
 	mu                sync.Mutex
 	api               API
 	journal           *localjournal.Journal[Record]
@@ -371,12 +373,33 @@ func (s *Supervisor) PollOnce(ctx context.Context) error {
 			continue
 		}
 		probe := adapters[account.Harness].(AccountProber)
-		available := probe.Probe(ctx, account.Key)
+		s.mu.Lock()
+		hold := s.harnessHolds[account.Harness]
+		s.mu.Unlock()
+		available := false
+		var dependencyErr error
+		if hold == "" {
+			if detailed, ok := probe.(interface {
+				ProbeAccount(context.Context, string) (bool, error)
+			}); ok {
+				available, dependencyErr = detailed.ProbeAccount(ctx, account.Key)
+			} else {
+				available = probe.Probe(ctx, account.Key)
+			}
+		}
 		err := s.api.Probe(ctx, account.ID, s.daemonID, s.generation, available)
 		s.mu.Lock()
+		if s.dependencyErrors == nil {
+			s.dependencyErrors = map[string]string{}
+		}
+		if dependencyErr != nil {
+			s.dependencyErrors[account.Harness] = dependencyErr.Error()
+		} else if hold == "" {
+			delete(s.dependencyErrors, account.Harness)
+		}
 		s.blockedAccounts[account.ID] = err != nil || !available
 		s.probedAccounts[account.ID] = err == nil && available
-		s.loginRequired[account.ID] = !available
+		s.loginRequired[account.ID] = !available && hold == "" && dependencyErr == nil
 		s.mu.Unlock()
 		if err != nil {
 			failures = append(failures, errors.New("account probe unavailable"))
@@ -437,6 +460,14 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 	adapter := s.adapters[profile.Harness]
 	if adapter == nil || profile.ID == "" {
 		return ErrUnsupported
+	}
+	// A harness hold must also cover direct starts and runs whose account is
+	// chosen by routing, rather than only queued runs with an account ID.
+	s.mu.Lock()
+	held := s.harnessHolds[profile.Harness] != "" || s.dependencyErrors[profile.Harness] != ""
+	s.mu.Unlock()
+	if held {
+		return ErrDraining
 	}
 	if err := validQueuedExecutionMode(run, adapter); err != nil {
 		if errors.Is(err, ErrVerificationUnavailable) && entry == nil {

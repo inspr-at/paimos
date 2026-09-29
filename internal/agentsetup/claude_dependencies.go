@@ -108,10 +108,18 @@ func pinnedRegular(path, workspace string, executable bool) (string, error) {
 	return physical, nil
 }
 
-// ResolveClaudeExecutable applies the same link-chain checks to the CLI before
-// its account probe or launch. It does not change any other harness's policy.
-func ResolveClaudeExecutable(path, workspace string) (string, error) {
-	return pinnedRegular(path, workspace, true)
+// ResolveClaudeExecutable preserves the CLI's existing physical executable
+// policy. The stricter stable-link policy belongs to the Node/SDK pins only;
+// applying it to the approved CLI would reject existing Homebrew installations.
+func ResolveClaudeExecutable(path, _ string) (string, error) {
+	physical, err := filepath.EvalSymlinks(path)
+	if err == nil && filepath.IsAbs(path) && physical == path {
+		info, err := os.Stat(physical)
+		if err == nil && info.Mode().IsRegular() && info.Mode().Perm()&0111 != 0 {
+			return physical, nil
+		}
+	}
+	return "", errors.New("Claude CLI executable changed or unavailable; restore the approved physical executable, then retry")
 }
 
 func trustedClaudeOwner(info os.FileInfo) bool {
@@ -173,7 +181,10 @@ func resolveOwnedPath(path, workspace string) (string, os.FileInfo, error) {
 		}
 		physical = next
 	}
-	if info == nil {
+	// A link target can end in '.' or '..', so the last traversed component's
+	// metadata need not describe the final physical path.
+	info, err := os.Lstat(physical)
+	if err != nil || !trustedClaudeOwner(info) || info.Mode()&os.ModeSymlink != 0 || info.Mode().Perm()&0022 != 0 && !(info.IsDir() && info.Mode()&os.ModeSticky != 0) {
 		return "", nil, ErrUnsafePath
 	}
 	return physical, info, nil

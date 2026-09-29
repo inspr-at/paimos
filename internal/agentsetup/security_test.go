@@ -333,3 +333,19 @@ func TestTypedProgressDistinguishesMissingLoginAndUnsafeVerification(t *testing.
 		t.Fatal("server-reported unavailable verification was hidden")
 	}
 }
+
+func TestStatusSurfacesClaudeDependencyAndRepinFailures(t *testing.T) {
+	for _, issue := range []string{"Claude dependencies changed/invalid: run aeon-agentd repin --harness claude", "Claude repin pending: waiting for active Claude runs to exit", "Claude CLI executable changed or unavailable; restore the approved physical executable, then retry"} {
+		e, a, l, o, _ := engineFixture(t)
+		approveFixture(t, e, a, o)
+		l.states[""] = LocalStatus{DaemonID: "paired-daemon", State: "unconfirmed", HarnessErrors: map[string]string{"claude": issue}}
+		p, err := e.Status(t.Context())
+		if err != nil || p.Stage != "blocked" || p.Action != issue || p.LocalProcesses != "unconfirmed" {
+			t.Fatal("specific Claude failure was hidden", p, err)
+		}
+		progress := observedProgress(a.view, l.states[""])
+		if progress.State != "setup_failed" || progress.ErrorCode != "installation_failed" {
+			t.Fatal("dependency failure reported as sign-in or ready")
+		}
+	}
+}

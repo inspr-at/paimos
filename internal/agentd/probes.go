@@ -95,8 +95,18 @@ func (a *CursorAdapter) Probe(ctx context.Context, key string) bool {
 }
 
 func (a *ClaudeAdapter) Probe(ctx context.Context, key string) bool {
+	available, _ := a.ProbeAccount(ctx, key)
+	return available
+}
+
+// ProbeAccount separates local dependency failures from vendor sign-in state.
+// Dependency diagnostics are value-free; vendor output is never surfaced.
+func (a *ClaudeAdapter) ProbeAccount(ctx context.Context, key string) (bool, error) {
 	resolved, err := a.resolved("")
-	return err == nil && resolved.probeResolved(ctx, key)
+	if err != nil {
+		return false, err
+	}
+	return resolved.probeResolved(ctx, key), nil
 }
 
 func (a *ClaudeAdapter) probeResolved(ctx context.Context, key string) bool {

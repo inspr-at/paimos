@@ -117,6 +117,7 @@ type Progress struct {
 	RetryAfterSeconds int          `json:"retry_after_seconds,omitempty"`
 }
 type LocalStatus struct {
+	HarnessErrors                          map[string]string
 	LoginRequired                          bool
 	VerificationUnavailable                []string
 	Ready                                  bool
@@ -686,6 +687,11 @@ func ValidateRuntimeDependencies(c RuntimeConfig) error {
 	claude := false
 	for _, a := range c.Accounts {
 		claude = claude || a.Harness == "claude"
+		if a.Harness == "claude" {
+			if _, err := ResolveClaudeExecutable(a.Path, c.Workspace); err != nil {
+				return err
+			}
+		}
 	}
 	if claude {
 		if _, err := ResolveClaudeRuntime(ClaudeDependencies{NodePath: c.NodePath, SDKPath: c.ClaudeSDKPath}, c.Workspace); err != nil {

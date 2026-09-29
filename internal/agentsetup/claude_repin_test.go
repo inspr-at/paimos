@@ -99,7 +99,7 @@ func TestClaudeStableLinksSurviveRetargetAndOldInstallationRemoval(t *testing.T)
 	if err != nil || resolved != (ClaudeDependencies{NodePath: newNode, SDKPath: newSDK}) {
 		t.Fatalf("retarget: %+v %v", resolved, err)
 	}
-	if err := ValidateRuntimeDependencies(RuntimeConfig{Workspace: workspace, NodePath: got.NodePath, ClaudeSDKPath: got.SDKPath, Accounts: []RuntimeAccount{{Harness: "claude"}}}); err != nil {
+	if err := ValidateRuntimeDependencies(RuntimeConfig{Workspace: workspace, NodePath: got.NodePath, ClaudeSDKPath: got.SDKPath, Accounts: []RuntimeAccount{{Harness: "claude", Path: newNode}}}); err != nil {
 		t.Fatal(err)
 	}
 	opts.NodePath, opts.ClaudeSDKPath = "", ""
@@ -109,6 +109,51 @@ func TestClaudeStableLinksSurviveRetargetAndOldInstallationRemoval(t *testing.T)
 	c, err := ReadRuntimeConfig(e.Store.Path())
 	if err != nil || c.NodePath != pins.NodePath || c.ClaudeSDKPath != pins.SDKPath || api.createCount != 1 {
 		t.Fatal("stable pins lost or update required a new enrollment")
+	}
+}
+
+func TestResolveOwnedPathReturnsFinalInfoForParentLink(t *testing.T) {
+	root := physicalTemp(t)
+	child := filepath.Join(root, "child")
+	if err := os.Mkdir(child, 0700); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(root, "link")
+	if err := os.Symlink("child/..", link); err != nil {
+		t.Fatal(err)
+	}
+	physical, got, err := resolveOwnedPath(link, "")
+	want, statErr := os.Stat(root)
+	if err != nil || statErr != nil || physical != root || !os.SameFile(got, want) {
+		t.Fatal("returned metadata for an intermediate component", err, statErr)
+	}
+}
+
+func TestClaudeCLIUsesExistingPolicyAndReportsBrokenExecutable(t *testing.T) {
+	_, node, sdk := claudeFixture(t)
+	brew := physicalTemp(t)
+	if err := os.Chmod(brew, 0775); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(brew, ".git"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	cli := filepath.Join(brew, "claude")
+	if err := os.WriteFile(cli, []byte("synthetic executable"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	c := RuntimeConfig{Workspace: physicalTemp(t), NodePath: node, ClaudeSDKPath: sdk, Accounts: []RuntimeAccount{{Harness: "claude", Path: cli}}}
+	if err := ValidateRuntimeDependencies(c); err != nil {
+		t.Fatal("Homebrew-style approved CLI rejected", err)
+	}
+	if err := os.Chmod(cli, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidateRuntimeDependencies(c); err == nil || !strings.Contains(err.Error(), "Claude CLI executable") || strings.Contains(err.Error(), "login") {
+		t.Fatal("invalid CLI lacks a specific diagnostic", err)
+	}
+	if _, err := ResolveClaudeExecutable(filepath.Join(brew, "missing"), ""); err == nil {
+		t.Fatal("missing CLI accepted")
 	}
 }
 

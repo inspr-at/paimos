@@ -25,6 +25,7 @@ type DrainRequest struct {
 // LifecycleStatus does not conflate telemetry acceptance with observed exit.
 // Only a drained status permits removing a pairing-owned service or credential.
 type LifecycleStatus struct {
+	HarnessErrors           map[string]string `json:"harness_errors,omitempty"`
 	LoginRequired           bool              `json:"login_required"`
 	VerificationUnavailable []string          `json:"verification_unavailable_account_ids"`
 	Ready                   bool              `json:"ready"`
@@ -128,7 +129,7 @@ func (s *Supervisor) Drain(req DrainRequest) (LifecycleStatus, error) {
 }
 
 func (s *Supervisor) Lifecycle(accountID string) LifecycleStatus {
-	v := LifecycleStatus{DaemonID: s.daemonID, Generation: s.generation, State: "drained", ActiveRunIDs: []string{}, UnconfirmedRunIDs: []string{}, SettlementPendingRunIDs: []string{}, FencedAccountIDs: []string{}, VerificationResults: map[string]string{}}
+	v := LifecycleStatus{DaemonID: s.daemonID, Generation: s.generation, State: "drained", ActiveRunIDs: []string{}, UnconfirmedRunIDs: []string{}, SettlementPendingRunIDs: []string{}, FencedAccountIDs: []string{}, VerificationResults: map[string]string{}, HarnessErrors: map[string]string{}}
 	s.mu.Lock()
 	v.Ready = len(s.accounts) > 0
 	v.AllFenced, _ = s.readFence("")
@@ -137,10 +138,18 @@ func (s *Supervisor) Lifecycle(accountID string) LifecycleStatus {
 		if fenced || e != nil {
 			v.FencedAccountIDs = append(v.FencedAccountIDs, a.ID)
 		} else {
+			issue := s.harnessHolds[a.Harness]
+			if issue == "" {
+				issue = s.dependencyErrors[a.Harness]
+			}
+			if issue != "" {
+				v.HarnessErrors[a.Harness] = issue
+				v.Ready = false
+			}
 			if !s.probedAccounts[a.ID] || s.blockedAccounts[a.ID] {
 				v.Ready = false
 			}
-			if s.loginRequired[a.ID] {
+			if s.loginRequired[a.ID] && issue == "" {
 				v.LoginRequired = true
 			}
 			if adapter, ok := s.adapters[a.Harness].(VerificationAdapter); !ok || !adapter.VerificationSupported() {
@@ -233,7 +242,37 @@ func (s *Supervisor) accountAvailable(account string) bool {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	for _, a := range s.accounts {
+		if a.ID == account && (s.harnessHolds[a.Harness] != "" || s.dependencyErrors[a.Harness] != "") {
+			return false
+		}
+	}
 	return !s.blockedAccounts[account] && !s.blockedAccounts[""]
+}
+
+// SetHarnessHold pauses fresh work for one harness without changing durable
+// lifecycle fences or touching processes. An empty reason releases the hold;
+// a successful account probe is still required before dispatch resumes.
+func (s *Supervisor) SetHarnessHold(harness, reason string) {
+	s.dispatchMu.Lock()
+	defer s.dispatchMu.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.harnessHolds == nil {
+		s.harnessHolds = map[string]string{}
+	}
+	if reason == "" {
+		delete(s.harnessHolds, harness)
+		return
+	}
+	s.harnessHolds[harness] = reason
+	for _, a := range s.accounts {
+		if a.Harness == harness {
+			delete(s.probedAccounts, a.ID)
+			delete(s.loginRequired, a.ID)
+			s.blockedAccounts[a.ID] = true
+		}
+	}
 }
 
 // settlePending retries the exact persisted sequence; it never restarts a run.
@@ -321,24 +360,31 @@ func (s *Supervisor) RefreshAccounts(accounts []EnrolledAccount, adapters []Adap
 	return nil
 }
 
-// RestartClaude replaces only the idle Claude adapter. Dispatch cannot race the
-// idle check; running/uncertain processes retain their ownership and adapter.
+// RestartClaude replaces only the idle Claude adapter. Only live handles from
+// this generation use that adapter. Historical ownership and pending accounting
+// remain untouched and continue to reconcile independently of the replacement.
 func (s *Supervisor) RestartClaude(ctx context.Context, adapter *ClaudeAdapter) error {
 	if adapter == nil {
 		return ErrScope
 	}
-	s.settlePending(ctx)
 	s.dispatchMu.Lock()
 	defer s.dispatchMu.Unlock()
 	s.mu.Lock()
 	accounts := append([]EnrolledAccount(nil), s.accounts...)
+	entries := make([]*owned, 0, len(s.runs))
+	for _, entry := range s.runs {
+		entries = append(entries, entry)
+	}
 	s.mu.Unlock()
-	for _, account := range accounts {
-		if account.Harness != Claude {
-			continue
+	for _, entry := range entries {
+		entry.mu.Lock()
+		claude := entry.record.AccountID == ""
+		for _, account := range accounts {
+			claude = claude || account.ID == entry.record.AccountID && account.Harness == Claude
 		}
-		status := s.Lifecycle(account.ID)
-		if len(status.ActiveRunIDs)+len(status.UnconfirmedRunIDs)+len(status.SettlementPendingRunIDs) != 0 {
+		active := claude && entry.record.Generation == s.generation && entry.process != nil && !entry.record.ExitObserved
+		entry.mu.Unlock()
+		if active {
 			return ErrDraining
 		}
 	}
