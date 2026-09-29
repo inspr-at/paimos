@@ -99,7 +99,7 @@ func attachCommand(args []string, out io.Writer) error {
 	fmt.Fprintf(tty, "Watch this running session on %s\nHost: %s · %s · PID %d · UID %d\nStarted: %s\nExecutable: %s\nFolder: %s\nTranscript: %s (%s)\nProject: %s · Ticket: %s\n", view.Origin, view.Snapshot.Host, view.Snapshot.Harness, p.PID, p.UID, p.Started, p.Executable, p.CWD, view.Snapshot.Transcript, view.Snapshot.FileID, view.Snapshot.ProjectID, view.Snapshot.TicketID)
 	fmt.Fprintln(tty, "Only new turns after approval. Audience: people explicitly granted harness.watch in this project.")
 	fmt.Fprintln(tty, "Do not attach mixed-context or confidential sessions. Redaction is best effort; same-user processes are not isolated.")
-	fmt.Fprint(tty, "Type WATCH to consent locally, then approve in your paired browser: ")
+	fmt.Fprint(tty, "Type WATCH for the best-effort local check, then approve in your paired browser: ")
 	// Bound input and handle Ctrl-C without leaving a background attach running.
 	answers := make(chan string, 1)
 	go func() {
@@ -131,6 +131,12 @@ func attachCommand(args []string, out io.Writer) error {
 			next, err := client.Attach(ctx, agentd.AttachLocalRequest{Operation: "poll", ID: view.ID, Digest: view.Digest})
 			if err != nil {
 				return errors.New("watch ended or unreachable; start a new attach to resume")
+			}
+			if next.Reason != "" {
+				return errors.New(next.Reason)
+			}
+			if next.State == "approved" && previous != "approved" {
+				fmt.Fprintln(out, "Waiting for local confirmation on the paired Mac; watch is not active yet.")
 			}
 			if next.State != previous {
 				fmt.Fprintf(out, "Watch: %s\n", next.State)

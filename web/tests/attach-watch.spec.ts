@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { mkdirSync } from 'node:fs'
+import AxeBuilder from '@axe-core/playwright'
 import { expect, test, type Page } from '@playwright/test'
 import { fixtures, me, mockWork } from './work-fixtures'
 import { agentData, mockAgents } from './agents-fixtures'
@@ -90,8 +91,8 @@ test('control characters clear the stream and owner revocation closes access', a
   await expect(page.getByLabel('Agent-written live text')).toHaveCount(0)
   await expect(page.getByRole('button', { name: 'Watch live', exact: true })).toHaveCount(0)
 })
-for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390]) {
-  test(`approval and live watch layout ${theme} ${width}`, async ({ page }) => {
+for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390]) for (const consent_mode of ['aeon', 'local_auth'] as const) {
+  test(`approval and live watch layout ${theme} ${width} ${consent_mode}`, async ({ page }) => {
     const worker = await setup(page, true, theme)
     await page.setViewportSize({ width, height: 1000 })
     await page.goto(`/agents/${worker.id}`)
@@ -101,8 +102,8 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390])
     mkdirSync(shots, { recursive: true })
     await page.screenshot({ path: `${shots}/watch-${theme}-${width}.png` })
     await page.getByRole('button', { name: 'Close session details' }).click()
-    const snapshot = { computer_id: 'computer-fixture', project_id: 'p-pharos', ticket_id: 'n-2', host: 'Markus’s MacBook', harness: 'codex', transcript: '/Users/markus/.codex/sessions/2026/09/29/session.jsonl', file_id: '1:234567', process: { pid: 4812, uid: 501, started: '2026-09-29T00:12:30Z', executable: '/opt/homebrew/bin/codex', cwd: '/Users/markus/Code/pharos' } }
-    const review = { request_id: 'attach-fixture', request_digest: 'a'.repeat(64), state: 'pending', expires_at: new Date(Date.now() + 600_000).toISOString(), snapshot }
+    const snapshot = { platform: 'darwin', computer_id: 'computer-fixture', project_id: 'p-pharos', ticket_id: 'n-2', host: 'Markus’s MacBook', harness: 'codex', transcript: '/Users/markus/.codex/sessions/2026/09/29/session.jsonl', file_id: '1:234567', process: { pid: 4812, uid: 501, started: '2026-09-29T00:12:30Z', executable: '/opt/homebrew/bin/codex', cwd: '/Users/markus/Code/pharos' } }
+    const review = { consent_mode, consent_digest: 'b'.repeat(64), request_id: 'attach-fixture', request_digest: 'a'.repeat(64), state: 'pending', expires_at: new Date(Date.now() + 600_000).toISOString(), snapshot }
     await page.route('**/api/nodes/p-pharos', route => route.fulfill({ json: { id: 'p-pharos', key: 'PHAROS', title: 'Pharos' } }))
     await page.route('**/api/nodes/n-2', route => route.fulfill({ json: { id: 'n-2', key: 'PHAROS-12', title: 'PDF worker image' } }))
     let approved = false
@@ -112,7 +113,7 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390])
         expect(route.request().postDataJSON()).toEqual({ user_code: '123456789' })
         return route.fulfill({ json: review })
       }
-      expect(route.request().postDataJSON()).toEqual({ request_digest: review.request_digest })
+      expect(route.request().postDataJSON()).toEqual({ request_digest: review.request_digest, consent_digest: review.consent_digest })
       approved = true
       return route.fulfill({ json: { ...review, state: 'approved' } })
     })
@@ -120,17 +121,20 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390])
     await page.getByLabel('Attach code', { exact: true }).fill('123 456 789')
     await page.getByRole('button', { name: 'Review session' }).click()
     const dialog = page.getByRole('dialog')
+    await expect(dialog.getByText('Requested by a process on Markus’s MacBook.', { exact: false })).toBeVisible()
+    await expect(dialog.getByText('Only allow if you started this watch yourself.')).toBeVisible()
     await expect(dialog.getByText('PID 4812 · UID 501')).toBeVisible()
     // The actual bytes being approved must be visible without opening details.
     await expect(dialog.locator('details')).not.toHaveAttribute('open', '')
     await expect(dialog.locator(':scope > dl').getByText(snapshot.transcript, { exact: true })).toBeVisible()
     await expect(dialog.locator(':scope > dl').getByText(snapshot.file_id, { exact: true })).toBeVisible()
-    await expect(dialog.getByRole('button', { name: 'Allow live watch' })).toBeVisible()
+    await expect(dialog.getByRole('button', { name: consent_mode === 'local_auth' ? 'Allow and confirm on Mac' : 'Allow live watch' })).toBeVisible()
     await expect(dialog).toContainText('PDF worker image')
     expect(await dialog.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true)
-    await page.screenshot({ path: `${shots}/approval-${theme}-${width}.png` })
-    await dialog.getByRole('button', { name: 'Allow live watch' }).click()
-    await expect(dialog.getByText('Approved. Keep the attach terminal open to share new turns.')).toBeVisible()
+    expect((await new AxeBuilder({ page }).include('dialog').analyze()).violations).toEqual([])
+    await page.screenshot({ path: `${shots}/approval-${consent_mode}-${theme}-${width}.png` })
+    await dialog.getByRole('button', { name: consent_mode === 'local_auth' ? 'Allow and confirm on Mac' : 'Allow live watch' }).click()
+    await expect(dialog.getByText(consent_mode === 'local_auth' ? 'Waiting for confirmation on Markus’s MacBook. Nothing is shared until you confirm there.' : 'Approved. Keep the attach terminal open to share new turns.')).toBeVisible()
     expect(approved).toBe(true)
   })
 }
@@ -147,4 +151,19 @@ for (const role of ['owner', 'admin'] as const) test(`only an owner can explicit
     await permission.check()
     await expect(permission).toBeChecked()
   } else await expect(permission).toBeDisabled()
+})
+
+test('strict approval cannot proceed on a Linux daemon', async ({ page }) => {
+  await setup(page)
+  await page.route('**/api/agent-pairing/attach/lookup', route => route.fulfill({ json: {
+    request_id: 'linux-fixture', request_digest: 'a'.repeat(64), consent_digest: 'b'.repeat(64), consent_mode: 'local_auth', state: 'pending', expires_at: new Date(Date.now() + 600_000).toISOString(),
+    snapshot: { platform: 'linux', computer_id: 'computer-fixture', project_id: 'p-pharos', ticket_id: 'n-2', host: 'Linux workstation', harness: 'codex', transcript: '/home/owner/session.jsonl', file_id: '1:234', process: { pid: 4812, uid: 1000, started: 'fixture', executable: '/usr/bin/codex', cwd: '/home/owner/work' } },
+  } }))
+  await page.goto('/agents')
+  await page.getByRole('button', { name: 'Attach session', exact: true }).click()
+  await page.getByLabel('Attach code', { exact: true }).fill('123456789')
+  await page.getByRole('button', { name: 'Review session' }).click()
+  await expect(page.getByRole('dialog')).toContainText('Local confirmation is unavailable on this computer')
+  await expect(page.getByRole('button', { name: 'Allow and confirm on Mac' })).toBeDisabled()
+  await expect(page.getByRole('button', { name: 'Decline', exact: true })).toBeEnabled()
 })

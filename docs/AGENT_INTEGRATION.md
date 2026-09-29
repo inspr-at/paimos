@@ -141,6 +141,53 @@ The nine-digit code identifies a ten-minute request;
 owner lookup accepts at most ten attempts per tenant in ten minutes. Codes and
 proofs never go in URLs.
 
+The person's **Settings → Personal → Security → Session watching** setting is
+stored server-side in `person_watch_security`, scoped to that person and tenant.
+`GET/PUT /api/me/security/session-watching` accepts only the signed-in person;
+writes require the instance’s origin. The server, never a device request, selects
+one of two modes at approval:
+
+- **Approve in Aeon** (`aeon`, default): same-origin, digest-bound person approval
+  is the consent gate. The terminal WATCH prompt is a best-effort extra factor;
+  a same-user process can emulate its PTY. The approval warns who requested it
+  and shows process, cwd and transcript before the Allow action.
+- **Also confirm on the Mac** (`local_auth`): after browser approval the daemon
+  must also complete LocalAuthentication in its own process. No helper, CLI
+  flag, local socket field or environment value can assert this result. Until
+  confirmation succeeds there is no session, lease or shared text. Cancel,
+  timeout, unavailable authentication, loss of the peer, or revocation fails
+  closed. Linux and older daemons cannot approve this mode.
+
+The separate `consent_digest` binds the request ID, snapshot digest and mode,
+using the `aeon.attach.consent.v1` domain. The browser echoes it on approval;
+a stale review is rejected after a setting change. The daemon validates it,
+then echoes it with its authenticated confirmation for strict activation.
+Only the memory-key-authenticated exchange can carry that assertion; it is a
+trusted-daemon assertion, not remote OS attestation. A replacement daemon that
+registers using stolen pairing credentials still needs fresh browser approval,
+but the server cannot verify its executable or LocalAuthentication result.
+Preventing that same-user replacement requires the separately tracked protected
+device identity/installer boundary; this mode does not claim that protection.
+Pending requests read the current setting; approved and active requests retain the
+pinned mode. Changing settings neither upgrades nor downgrades existing watches.
+Mode A retains the original snapshot digest and accepts legacy A approvals.
+
+Native Mac confirmation needs `CGO_ENABLED=1`, Apple's Foundation,
+LocalAuthentication and Security frameworks, and an executable named
+`aeon-agentd` with a valid Developer ID signature, hardened runtime and no
+get-task-allow, library-validation or DYLD-environment exceptions. It validates
+the running process through `SecCodeCopySelf`/`SecCodeCheckValidity`, checks for
+a graphical login, and evaluates a fresh `LAContext` with
+[`deviceOwnerAuthentication`](https://developer.apple.com/documentation/localauthentication/lapolicy/deviceownerauthentication).
+The OS supplies Touch ID/device-password authentication (and other OS-supported
+owner factors); the reason names the harness session PID and host. Contexts
+are never reused. The prompt is asynchronous, remains revocable during polling,
+and times out after 90 seconds. These checks do not replace installer provenance
+or same-user OS isolation. **Current CGO-disabled Nix packages, unsigned/ad-hoc
+builds, and headless contexts fail closed with a specific local error**; no
+signing identity or release pipeline is changed by this feature. A real signed
+interactive-device acceptance check belongs to release qualification.
+
 The original pairing owner reviews the immutable host, harness, kernel process
 identity, physical cwd, transcript inode, project and ticket snapshot at the
 paired origin. Approval binds its digest; activation and each poll recheck the

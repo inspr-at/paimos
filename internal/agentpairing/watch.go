@@ -62,6 +62,8 @@ func (m *Module) registerWatchKey(ctx context.Context, p tenant.Principal, in at
 }
 
 func (m *Module) mountWatch(mux *http.ServeMux) {
+	mux.HandleFunc("GET /api/me/security/session-watching", m.person("profile.read", m.watchSecurity))
+	mux.HandleFunc("PUT /api/me/security/session-watching", m.person("profile.write", m.watchSecurity))
 	mux.HandleFunc("POST /api/agent-pairing/attach", m.attachDevice)
 	mux.HandleFunc("POST /api/agent-pairing/attach/lookup", m.person("account.manage", m.attachLookup))
 	mux.HandleFunc("POST /api/agent-pairing/attach/{requestId}/approve", m.person("account.manage", m.attachApprove))
@@ -90,7 +92,11 @@ func loadAttach(ctx context.Context, tx pgx.Tx, id string) (attachwatch.View, st
 	if !uuidRE.MatchString(id) {
 		return v, owner, code, fail(404, "not_found", "attach unavailable")
 	}
-	err := tx.QueryRow(ctx, `SELECT id::text,digest,snapshot,state,expires_at,lease_until,session_id::text,owner_id::text,user_code FROM harness_attach_requests WHERE id=$1 FOR UPDATE`, id).Scan(&v.RequestID, &v.Digest, &v.Snapshot, &v.State, &v.ExpiresAt, &v.LeaseUntil, &v.SessionID, &owner, &code)
+	err := tx.QueryRow(ctx, `SELECT id::text,digest,snapshot,state,expires_at,lease_until,session_id::text,owner_id::text,user_code,consent_mode FROM harness_attach_requests WHERE id=$1 FOR UPDATE`, id).Scan(&v.RequestID, &v.Digest, &v.Snapshot, &v.State, &v.ExpiresAt, &v.LeaseUntil, &v.SessionID, &owner, &code, &v.ConsentMode)
+	if err == nil && v.State == "pending" {
+		v.ConsentMode, err = watchConsentMode(ctx, tx, owner)
+	}
+	v.ConsentDigest = attachwatch.ConsentDigest(v.RequestID, v.Digest, v.ConsentMode)
 	return v, owner, code, err
 }
 
@@ -192,6 +198,9 @@ func (m *Module) attachDevice(w http.ResponseWriter, r *http.Request) {
 		}
 		if in.Operation == "request" {
 			s := in.Snapshot
+			if in.LocalConfirmed || in.ConsentDigest != "" {
+				return fail(400, "invalid_request", "consent is selected by the server at approval")
+			}
 			if in.Digest != s.Digest() {
 				return fail(409, "conflict", "snapshot digest required")
 			}
@@ -254,6 +263,10 @@ func (m *Module) attachDevice(w http.ResponseWriter, r *http.Request) {
 			rejected = fail(409, "conflict", "process or approval snapshot changed")
 			return attachEnd(ctx, tx, &out, "detached")
 		}
+		if in.Operation == "poll" && out.State == "active" && out.ConsentMode == attachwatch.ConsentLocalAuth && in.ConsentDigest != out.ConsentDigest {
+			rejected = fail(409, "conflict", "consent binding mismatch")
+			return attachEnd(ctx, tx, &out, "detached")
+		}
 		if in.Operation == "detach" {
 			return attachEnd(ctx, tx, &out, "detached")
 		}
@@ -268,6 +281,20 @@ func (m *Module) attachDevice(w http.ResponseWriter, r *http.Request) {
 			return nil
 		}
 		if out.State == "approved" {
+			if out.ConsentMode == attachwatch.ConsentLocalAuth {
+				if in.ConsentDigest != "" && in.ConsentDigest != out.ConsentDigest {
+					return fail(409, "conflict", "consent binding mismatch")
+				}
+				if !in.LocalConfirmed {
+					if in.Text != "" {
+						return fail(409, "conflict", "local confirmation required before activation")
+					}
+					return nil // Keep approval pending at the daemon; no session or lease yet.
+				}
+				if in.ConsentDigest != out.ConsentDigest || out.Snapshot.Platform != "darwin" {
+					return fail(409, "conflict", "macOS local confirmation required")
+				}
+			}
 			if in.Text != "" {
 				return fail(409, "conflict", "activation contains no transcript")
 			}
@@ -359,18 +386,19 @@ func (m *Module) attachLookup(w http.ResponseWriter, r *http.Request, p tenant.P
 }
 func (m *Module) attachApprove(w http.ResponseWriter, r *http.Request, p tenant.Principal) {
 	var in struct {
-		Digest string `json:"request_digest"`
+		Digest        string `json:"request_digest"`
+		ConsentDigest string `json:"consent_digest"`
 	}
 	if decode(w, r, &in) != nil {
 		WriteError(w, fail(400, "invalid_request", "review digest required"))
 		return
 	}
-	m.attachDecision(w, r, p, in.Digest, false)
+	m.attachDecision(w, r, p, in.Digest, in.ConsentDigest, false)
 }
 func (m *Module) attachRevoke(w http.ResponseWriter, r *http.Request, p tenant.Principal) {
-	m.attachDecision(w, r, p, "", true)
+	m.attachDecision(w, r, p, "", "", true)
 }
-func (m *Module) attachDecision(w http.ResponseWriter, r *http.Request, p tenant.Principal, d string, revoke bool) {
+func (m *Module) attachDecision(w http.ResponseWriter, r *http.Request, p tenant.Principal, d, consentDigest string, revoke bool) {
 	var out attachwatch.View
 	var rejected error
 	err := m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
@@ -394,6 +422,12 @@ func (m *Module) attachDecision(w http.ResponseWriter, r *http.Request, p tenant
 			rejected = fail(410, "attach_ended", "attach expired")
 			return nil
 		}
+		if (consentDigest != "" || out.ConsentMode == attachwatch.ConsentLocalAuth) && consentDigest != out.ConsentDigest {
+			return fail(409, "conflict", "consent setting changed; review the request again")
+		}
+		if out.ConsentMode == attachwatch.ConsentLocalAuth && out.Snapshot.Platform != "darwin" {
+			return fail(409, "local_auth_unavailable", "local confirmation requires an updated paired Mac daemon; unavailable on Linux")
+		}
 		if d != out.Digest {
 			return fail(409, "conflict", "review digest mismatch")
 		}
@@ -405,7 +439,7 @@ func (m *Module) attachDecision(w http.ResponseWriter, r *http.Request, p tenant
 			return err
 		}
 		if out.State == "pending" {
-			_, err = tx.Exec(r.Context(), `UPDATE harness_attach_requests SET state='approved' WHERE id=$1`, out.RequestID)
+			_, err = tx.Exec(r.Context(), `UPDATE harness_attach_requests SET state='approved',consent_mode=$2 WHERE id=$1`, out.RequestID, out.ConsentMode)
 			out.State = "approved"
 		}
 		return err

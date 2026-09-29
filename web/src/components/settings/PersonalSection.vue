@@ -12,10 +12,14 @@ import ProfileCard from './ProfileCard.vue'
 import SettingsCard from './SettingsCard.vue'
 import AgentIndicatorSettings from './AgentIndicatorSettings.vue'
 import GraphMotionSettings from './GraphMotionSettings.vue'
+import SessionWatchingSettings from './SessionWatchingSettings.vue'
+import { useSession } from '../../stores/session'
+import { can } from '../../lib/authz'
 
 // Everyone's own settings: the profile (photo, names, handle, time zone, language),
 // the theme, the greeting, and the keys.
 const store = useProfile()
+const session = useSession()
 
 const themes: { value: ThemeChoice; label: string; icon: 'sun' | 'moon' | 'monitor' }[] = [
   { value: 'light', label: 'Light', icon: 'sun' }, { value: 'dark', label: 'Dark', icon: 'moon' }, { value: 'system', label: 'System', icon: 'monitor' },
@@ -63,6 +67,10 @@ const KEYS: { keys: string[][]; label: string }[] = [
       <template #lead>How you appear to people and agents in this workspace.</template>
       <p v-if="profileError" class="set-note error" role="alert"><AppIcon name="alert" :size="14" />{{ profileError }}<button type="button" class="btn sm" @click="load">Try again</button></p>
       <ProfileCard v-else />
+    </SettingsCard>
+
+    <SettingsCard v-if="session.identity?.principal.kind === 'person' && can('profile.read')" title="Security" icon="shield" anchor="security">
+      <SessionWatchingSettings :key="`${session.identity?.tenant.id}/${session.identity?.principal.id}`" />
     </SettingsCard>
 
     <SettingsCard v-if="profile || profileError" title="Appearance" icon="sun" anchor="appearance">

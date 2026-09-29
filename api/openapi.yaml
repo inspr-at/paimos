@@ -482,6 +482,34 @@ paths:
         '404': {description: Request or proof not found}
         '409': {description: Immutable choice or lifecycle conflict}
         '429': {description: Rate or attempt limit reached; honor Retry-After}
+  /me/security/session-watching:
+    get:
+      operationId: getSessionWatchingSecurity
+      summary: Read the signed-in person's session watching consent mode
+      responses:
+        '200':
+          description: Per-person setting; defaults to Aeon approval
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SessionWatchingSecurity'}
+        '403': {description: Signed-in person required}
+    put:
+      operationId: setSessionWatchingSecurity
+      summary: Change consent for future approvals without changing active watches
+      description: Same-origin person only. Local confirmation requires a signed macOS daemon with LocalAuthentication; Linux is unavailable and fails closed.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/SessionWatchingSecurity'}
+      responses:
+        '200':
+          description: Saved per-person setting
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SessionWatchingSecurity'}
+        '400': {description: Invalid mode}
+        '403': {description: Same-origin signed-in person required}
   /agent-pairing/attach:
     post:
       operationId: attachDevice
@@ -494,7 +522,11 @@ paths:
         proof alone is rejected. Neither daemon nor server persists the poll key. Codes never
         appear in URLs. Requests, activation and every poll
         repeat the immutable kernel-observed snapshot. Lease is 60 seconds and cannot
-        be resurrected. Text is host-redacted and relayed in memory only, never stored.
+        be resurrected. The server pins the owner's consent_mode at person approval.
+        local_auth remains approved (no session or lease) until the registered daemon
+        echoes consent_digest and local_confirmed after in-process macOS authentication.
+        Missing confirmation never activates; request-supplied policy overrides are refused.
+        Text is host-redacted and relayed in memory only, never stored.
       requestBody:
         required: true
         content:
@@ -556,8 +588,9 @@ paths:
               required: [request_digest]
               properties:
                 request_digest: {type: string, pattern: '^[0-9a-f]{64}$'}
+                consent_digest: {type: string, pattern: '^[0-9a-f]{64}$', description: Required for local_auth; binds the mode the person reviewed}
       responses:
-        '200': {description: Approved snapshot; activation still requires fresh device proof}
+        '200': {description: Approved snapshot; activation requires the registered daemon poll key and, for local_auth, its local confirmation}
         '403': {description: Same-origin paired owner required}
         '409': {description: Digest differs from reviewed snapshot}
         '410': {description: Approval expired or revoked}
@@ -4409,6 +4442,12 @@ components:
     session: {type: apiKey, in: cookie, name: aeon_session}
     agentKey: {type: http, scheme: bearer, description: Bearer token aeon_<prefix>_<secret>}
   schemas:
+    SessionWatchingSecurity:
+      type: object
+      additionalProperties: false
+      required: [consent_mode]
+      properties:
+        consent_mode: {type: string, enum: [aeon, local_auth], default: aeon}
     AttachProcess:
       type: object
       additionalProperties: false
@@ -4432,6 +4471,7 @@ components:
         process: {$ref: '#/components/schemas/AttachProcess'}
         transcript: {type: string, maxLength: 1024}
         file_id: {type: string, maxLength: 128}
+        platform: {type: string, enum: [darwin, linux], description: Observed daemon platform; required for strict local authentication}
     AttachDeviceRequest:
       type: object
       additionalProperties: false
@@ -4451,6 +4491,8 @@ components:
         poll_key: {type: string, pattern: '^[a-f0-9]{64}$', writeOnly: true, description: Fresh daemon-start random key held only in memory; required for every operation}
         snapshot: {$ref: '#/components/schemas/AttachSnapshot'}
         request_digest: {type: string, description: Required with the snapshot for request, activation, poll and detachment}
+        consent_digest: {type: string, description: Echo of the server-selected consent binding; required for strict activation}
+        local_confirmed: {type: boolean, description: Set only by the daemon after in-process LocalAuthentication; never accepted on the local socket}
         sequence: {type: integer, minimum: 1}
         text: {type: string, maxLength: 16384, description: Host-redacted new complete records only; no persistence or replay}
     AttachView:
@@ -4465,6 +4507,8 @@ components:
         lease_until: {type: [string, 'null'], format: date-time}
         session_id: {type: [string, 'null'], format: uuid}
         user_code: {type: string, description: Nine digits, daemon response only}
+        consent_mode: {type: string, enum: [aeon, local_auth]}
+        consent_digest: {type: string, description: SHA-256 binding of request ID, snapshot digest and server-selected mode; immutable after approval}
 
     RuleError: {type: object, required: [error, code], properties: {error: {type: string}, code: {type: string}, actual_bytes: {type: integer}, max_bytes: {type: integer}}}
     RuleScope:

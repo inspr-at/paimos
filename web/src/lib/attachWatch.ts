@@ -1,17 +1,19 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { api } from './api.ts'
 
+export type WatchConsentMode = 'aeon' | 'local_auth'
 export interface AttachStatus { request_id: string; owner_id: string; state: 'active' | 'detached' | 'unreachable'; lease_until: string | null }
 export interface AttachReview {
+  consent_mode?: WatchConsentMode; consent_digest?: string
   request_id: string; request_digest: string; state: 'pending' | 'approved' | 'active' | 'detached' | 'unreachable'; expires_at: string
   snapshot: {
-    computer_id: string; project_id: string; ticket_id: string; host: string; harness: string; transcript: string; file_id: string
+    platform?: 'darwin' | 'linux'; computer_id: string; project_id: string; ticket_id: string; host: string; harness: string; transcript: string; file_id: string
     process: { pid: number; uid: number; started: string; executable: string; cwd: string }
   }
 }
 export async function attachAction(path: string, body?: object, signal?: AbortSignal): Promise<AttachReview> {
   const res = await api(`/agent-pairing/attach${path}`, { method: 'POST', signal, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body ?? {}) })
-  if (!res.ok) throw new Error(res.status === 429 ? 'Too many attempts. Try again in ten minutes.' : res.status === 403 ? 'Only the paired computer’s owner can approve this watch.' : res.status === 410 ? 'This request ended. Start a new attach in the terminal.' : 'Attach unavailable. Check the code and try again.')
+  if (!res.ok) throw new Error(res.status === 429 ? 'Too many attempts. Try again in ten minutes.' : res.status === 403 ? 'Only the paired computer’s owner can approve this watch.' : res.status === 409 ? 'The consent setting or request changed. Close this review and enter the code again.' : res.status === 410 ? 'This request ended. Start a new attach in the terminal.' : 'Attach unavailable. Check the code and try again.')
   return res.json() as Promise<AttachReview>
 }
 // Defense in depth for a malicious or stale relay. Payloads remain plain text;
