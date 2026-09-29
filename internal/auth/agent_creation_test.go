@@ -39,7 +39,7 @@ func TestCreateAgentAndFirstKey(t *testing.T) {
 				return err
 			}
 		}
-		for key, target := range map[string]*string{"A": &projectA, "B": &projectB} {
+		for key, target := range map[string]*string{"PRJ-1": &projectA, "PRJ-2": &projectB} {
 			if err := tx.QueryRow(ctx, `INSERT INTO nodes(tenant_id,key,title,state,kind_id) SELECT $1::uuid,$2,$2,'active',id FROM node_kinds WHERE slug='project' RETURNING id::text`, owner.TenantID, key).Scan(target); err != nil {
 				return err
 			}
@@ -72,7 +72,7 @@ func TestCreateAgentAndFirstKey(t *testing.T) {
 		if err := tx.QueryRow(ctx, `SELECT id::text FROM roles WHERE key='viewer'`).Scan(&foreignRole); err != nil {
 			return err
 		}
-		return tx.QueryRow(ctx, `INSERT INTO nodes(tenant_id,key,title,state,kind_id) SELECT $1::uuid,'FOREIGN','Foreign','active',id FROM node_kinds WHERE slug='project' RETURNING id::text`, otherTenant).Scan(&foreignProject)
+		return tx.QueryRow(ctx, `INSERT INTO nodes(tenant_id,key,title,state,kind_id) SELECT $1::uuid,'FOR-1','Foreign','active',id FROM node_kinds WHERE slug='project' RETURNING id::text`, otherTenant).Scan(&foreignProject)
 	}); err != nil {
 		t.Fatal(err)
 	}

@@ -767,7 +767,7 @@ paths:
     post:
       operationId: createAgent
       summary: Create an agent with a role ceiling and project access, before issuing its first key
-      description: People with keys.manage only. Role grants must be held by the creator. Agent, description, bindings and audit events commit atomically. Names are unique across principals within the workspace (case-insensitive). Choose a workspace role or project roles; project-only agents never acquire workspace access when keys are issued.
+      description: People with keys.manage only. Role grants must be held by the creator. Agent, description, bindings and audit events commit atomically. New names are checked against all existing principals within the workspace (case-insensitive). Choose a workspace role or project roles; project-only agents never acquire workspace access when keys are issued.
       requestBody:
         required: true
         content:

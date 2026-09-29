@@ -477,6 +477,12 @@ func (m *Module) createAgentKeyTx(ctx context.Context, tx pgx.Tx, p tenant.Princ
 			if err := tx.QueryRow(ctx, `SELECT id::text FROM tenants WHERE id=$1::uuid FOR UPDATE`, p.TenantID).Scan(&tenantLock); err != nil {
 				return err
 			}
+			if p.Kind != tenant.Person {
+				return authz.ErrForbidden
+			}
+			if err := authz.RequireTx(ctx, tx, p, "keys.manage", authz.Scope{}); err != nil {
+				return err
+			}
 		}
 		var err error
 		if principalID != "" {
