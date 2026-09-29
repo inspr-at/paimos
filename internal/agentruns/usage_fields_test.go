@@ -126,15 +126,24 @@ func TestRunUsageFields(t *testing.T) {
 	real := f.claim(t, f.run(t, o))
 	f.call(t, f.agent, "POST", "/api/runs/"+real.ID+"/telemetry", map[string]any{
 		"sequence": 1, "kind": "finished", "status": "completed",
-		"git_commits": []map[string]any{{"sha": "0123456789abcdef", "subject": "Merge feature", "parents": 2, "on_default_branch": true}},
+		"git_commits": []map[string]any{{"sha": "0123456789abcdef", "subject": "Merge feature", "parents": 2, "on_default_branch": true}, {"sha": "1123456789abcdef", "subject": "own change", "parents": 1, "on_default_branch": true}},
 	}, 200, &real)
 	if real.OutcomeDetail == nil || *real.OutcomeDetail != "merged" {
-		t.Fatalf("merge commit: %+v", real)
+		t.Fatalf("own commit merged: %+v", real)
+	}
+	// A merge commit alone is no evidence that the run's own work merged.
+	mergeOnly := f.claim(t, f.run(t, o))
+	f.call(t, f.agent, "POST", "/api/runs/"+mergeOnly.ID+"/telemetry", map[string]any{
+		"sequence": 1, "kind": "finished", "status": "completed",
+		"git_commits": []map[string]any{{"sha": "0123456789abcdef", "subject": "Merge feature", "parents": 2, "on_default_branch": true}},
+	}, 200, &mergeOnly)
+	if mergeOnly.OutcomeDetail == nil || *mergeOnly.OutcomeDetail != "committed" {
+		t.Fatalf("merge commit alone: %+v", mergeOnly)
 	}
 	subjectOnly := f.claim(t, f.run(t, o))
 	f.call(t, f.agent, "POST", "/api/runs/"+subjectOnly.ID+"/telemetry", map[string]any{
 		"sequence": 1, "kind": "finished", "status": "completed",
-		"git_commits": []map[string]any{{"sha": "0123456789abcdef", "subject": "Merge branch 'main'", "parents": 1, "on_default_branch": true}},
+		"git_commits": []map[string]any{{"sha": "0123456789abcdef", "subject": "Merge branch 'main'", "parents": 1}},
 	}, 200, &subjectOnly)
 	if subjectOnly.OutcomeDetail == nil || *subjectOnly.OutcomeDetail != "committed" {
 		t.Fatalf("merge subject: %+v", subjectOnly)
