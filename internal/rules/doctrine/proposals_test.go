@@ -314,7 +314,7 @@ func newProposalFixture(t *testing.T) (doctrineFixture, *proposalForge, *Module)
 		forge.ServeHTTP(w, r)
 		return w.Result(), nil
 	})}
-	m := New(d.App, Options{CredentialsDir: dir, Client: client, App: AppConfig{ID: "8", InstallationID: "9", KeyRef: "app-key", GateLogin: "independent-gate[bot]", DCOAcknowledged: true}})
+	m := New(d.App, Options{CredentialsDir: dir, Client: client, GuardKey: testGuardMaster(), App: AppConfig{ID: "8", InstallationID: "9", KeyRef: "app-key", GateLogin: "independent-gate[bot]", DCOAcknowledged: true}})
 	mux := http.NewServeMux()
 	m.Mount(mux)
 	return doctrineFixture{t: t, d: d, mux: mux, fake: reader}, forge, m

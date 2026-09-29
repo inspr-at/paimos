@@ -5,6 +5,7 @@ package doctrine
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"os"
 	"os/exec"
@@ -15,12 +16,16 @@ import (
 	"github.com/inspr-at/paimos/internal/rulesimport"
 )
 
+func testGuardMaster() []byte {
+	return []byte("synthetic-doctrine-guard-key-0123456789")
+}
+
 func quoteCorpus(texts ...string) *guardCorpus {
 	docs := map[string]string{}
 	for i, text := range texts {
 		docs[fmt.Sprintf("private/%02d.md", i)] = text
 	}
-	return corpusFrom(docs)
+	return corpusFrom(testGuardMaster(), docs)
 }
 
 type memReader struct {
@@ -69,14 +74,14 @@ func TestGuardCorpusRoundTripOmitsPlaintext(t *testing.T) {
 	if bytes.Contains(raw, []byte("copper")) || bytes.Contains(raw, []byte("notebooks")) || bytes.Contains(raw, []byte(guardRule)) {
 		t.Fatal("marshaled guard contains plaintext")
 	}
-	back, err := unmarshalGuard(raw)
+	back, err := unmarshalGuard(raw, testGuardMaster())
 	if err != nil {
 		t.Fatal(err)
 	}
 	if guardPrivateQuotes(back, nil, guardRule) == nil || guardPrivateQuotes(back, nil, guardTLDR) == nil {
 		t.Fatal("round trip dropped a quotation")
 	}
-	if _, err := unmarshalGuard([]byte("nope")); err == nil {
+	if _, err := unmarshalGuard([]byte("nope"), testGuardMaster()); err == nil {
 		t.Fatal("corrupt guard accepted")
 	}
 }
@@ -94,18 +99,18 @@ func TestReadPrivateCorpusFullTreeFailClosed(t *testing.T) {
 		"notes/blank.md":                       []byte("   \n"),
 	}
 	ctx := context.Background()
-	raw, err := readPrivateCorpus(ctx, memReader{files: docs, fail: "docs/AGENTS-PROFILE-MARKUS.md"}, privateRepository, fixtureCommit)
+	raw, err := readPrivateCorpus(ctx, memReader{files: docs, fail: "docs/AGENTS-PROFILE-MARKUS.md"}, privateRepository, fixtureCommit, testGuardMaster())
 	if err == nil || raw != nil {
 		t.Fatal("unreadable blob did not fail closed")
 	}
-	raw, err = readPrivateCorpus(ctx, memReader{files: docs}, privateRepository, fixtureCommit)
+	raw, err = readPrivateCorpus(ctx, memReader{files: docs}, privateRepository, fixtureCommit, testGuardMaster())
 	if err != nil {
 		t.Fatal(err)
 	}
 	if bytes.Contains(raw, []byte(profile)) || bytes.Contains(raw, []byte(command)) || bytes.Contains(raw, []byte("profile")) {
 		t.Fatal("corpus stored plaintext")
 	}
-	corpus, err := unmarshalGuard(raw)
+	corpus, err := unmarshalGuard(raw, testGuardMaster())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,15 +125,111 @@ func TestReadPrivateCorpusFullTreeFailClosed(t *testing.T) {
 	}
 	bad := docs
 	bad["notes/odd.md"] = []byte{0xff, 0xfe, 'a'}
-	if _, err := readPrivateCorpus(ctx, memReader{files: bad}, privateRepository, fixtureCommit); err == nil {
+	if _, err := readPrivateCorpus(ctx, memReader{files: bad}, privateRepository, fixtureCommit, testGuardMaster()); err == nil {
 		t.Fatal("invalid UTF-8 did not fail closed")
 	}
-	if _, err := readPrivateCorpus(ctx, memReader{files: map[string][]byte{}, sizes: nil}, privateRepository, fixtureCommit); err == nil {
+	if _, err := readPrivateCorpus(ctx, memReader{files: map[string][]byte{}, sizes: nil}, privateRepository, fixtureCommit, testGuardMaster()); err == nil {
 		t.Fatal("empty tree did not fail closed")
 	}
 	over := map[string][]byte{"docs/AGENTS-KERNEL-PRIVATE.md": []byte(guardRule)}
-	if _, err := readPrivateCorpus(ctx, memReader{files: over, sizes: map[string]int{"docs/AGENTS-KERNEL-PRIVATE.md": maxGuardFile + 1}}, privateRepository, fixtureCommit); err == nil {
+	if _, err := readPrivateCorpus(ctx, memReader{files: over, sizes: map[string]int{"docs/AGENTS-KERNEL-PRIVATE.md": maxGuardFile + 1}}, privateRepository, fixtureCommit, testGuardMaster()); err == nil {
 		t.Fatal("oversized file did not fail closed")
+	}
+	wide := map[string][]byte{
+		"docs/OK.md":   []byte(guardRule),
+		"docs/WIDE.md": utf16LE("The private line must not be skipped as binary text."),
+	}
+	if _, err := readPrivateCorpus(ctx, memReader{files: wide}, privateRepository, fixtureCommit, testGuardMaster()); err == nil {
+		t.Fatal("UTF-16 text was skipped as binary")
+	}
+	broken := map[string][]byte{"docs/OK.md": []byte(guardRule), "notes/broken.md": {'h', 0, 'i'}}
+	if _, err := readPrivateCorpus(ctx, memReader{files: broken}, privateRepository, fixtureCommit, testGuardMaster()); err == nil {
+		t.Fatal("undecodable text file was skipped")
+	}
+	if _, err := readPrivateCorpus(ctx, memReader{files: wide}, privateRepository, fixtureCommit, nil); err == nil || strings.Contains(err.Error(), "synthetic-doctrine") {
+		t.Fatal("missing guard key was accepted or reflected")
+	}
+	if utf16Text([]byte{0, 1, 2, 3}) {
+		t.Fatal("binary fixture classified as UTF-16")
+	}
+}
+
+func utf16LE(s string) []byte {
+	out := make([]byte, len(s)*2)
+	for i := 0; i < len(s); i++ {
+		out[i*2] = s[i]
+	}
+	return out
+}
+
+func TestGuardHMACIsNotReversibleFromTheCorpus(t *testing.T) {
+	key := testGuardMaster()
+	raw, err := corpusFrom(key, map[string]string{"docs/private.md": guardRule}).marshal()
+	if err != nil {
+		t.Fatal(err)
+	}
+	words := proposalWords(guardRule)
+	if len(words) < quoteRunWords {
+		t.Fatal("fixture quotation is shorter than a run")
+	}
+	sum := sha256.Sum256([]byte(strings.Join(words[:quoteRunWords], "\x00")))
+	if bytes.Contains(raw, key) || bytes.Contains(raw, sum[:]) || bytes.Contains(raw, []byte("copper")) {
+		t.Fatal("corpus exposes the key, an unkeyed hash, or plaintext")
+	}
+	other := bytes.Repeat([]byte{9}, 32)
+	alt, err := corpusFrom(other, map[string]string{"docs/private.md": guardRule}).marshal()
+	if err != nil || bytes.Equal(raw, alt) {
+		t.Fatal("a different key produced the same corpus")
+	}
+	if _, err := unmarshalGuard(raw, other); err == nil {
+		t.Fatal("corpus opened with the wrong key")
+	}
+	v1 := append([]byte{'P', 'G', 1}, raw[3:]...)
+	if _, err := unmarshalGuard(v1, key); err == nil {
+		t.Fatal("version 1 corpus accepted")
+	}
+	a := deriveGuardKey(key, "11111111-1111-4111-8111-111111111111")
+	b := deriveGuardKey(key, "22222222-2222-4222-8222-222222222222")
+	if len(a) != 32 || bytes.Equal(a, b) || bytes.Equal(a, key) || deriveGuardKey(key[:31], "tenant") != nil || deriveGuardKey(key, "") != nil {
+		t.Fatal("tenant key derivation is not separated")
+	}
+}
+
+func TestMainMatchingFilesIgnoresOtherPins(t *testing.T) {
+	mainFiles := fixtureFiles()
+	cached := make([]File, 0, len(mainFiles))
+	tree := make([]Entry, 0, len(mainFiles))
+	for path, content := range mainFiles {
+		raw := []byte(content)
+		cached = append(cached, File{Path: path, BlobSHA: BlobSHA(raw), Content: append([]byte(nil), raw...)})
+		tree = append(tree, Entry{Path: path, SHA: BlobSHA(raw)})
+	}
+	for i := range cached {
+		if cached[i].Path != "docs/AGENTS-DOMAIN-DEV.md" {
+			continue
+		}
+		cached[i].Content = append(cached[i].Content, []byte("\n- "+guardRule+"\n")...)
+		cached[i].BlobSHA = BlobSHA(cached[i].Content)
+	}
+	matched := mainMatchingFiles(cached, tree)
+	if len(matched) != len(cached)-1 {
+		t.Fatalf("matched %d files", len(matched))
+	}
+	for _, file := range matched {
+		if bytes.Contains(file.Content, []byte("copper observatory")) {
+			t.Fatal("pin-only blob stayed in the exemption")
+		}
+	}
+	corpus := quoteCorpus(guardRule)
+	if guardPrivateQuotes(corpus, matched, guardRule) == nil {
+		t.Fatal("pin-only private rule was exempted")
+	}
+	if guardPrivateQuotes(corpus, cached, guardRule) != nil {
+		t.Fatal("the same pin bytes would have been treated as public")
+	}
+	extra := File{Path: "docs/UNMERGED.md", BlobSHA: BlobSHA([]byte(guardRule)), Content: []byte(guardRule)}
+	if n := len(mainMatchingFiles(append(append([]File{}, matched...), extra), tree)); n != len(matched) {
+		t.Fatalf("unmerged blob exempted, matched %d", n)
 	}
 }
 
@@ -145,7 +246,7 @@ func TestGuardAttackClassesAndPublicOverlap(t *testing.T) {
 		"commands/secrets.md":           "- " + command + "\n",
 		"rules.tldr.yaml":               "rules:\n  copper:\n    en: " + guardTLDR + "\n",
 	}
-	corpus := corpusFrom(docs)
+	corpus := corpusFrom(testGuardMaster(), docs)
 	public := []File{{Path: "docs/AGENTS-KERNEL.md", Content: []byte("# Public\n\n- " + shared + "\n")}}
 	if err := guardPrivateQuotes(corpus, public, shared); err != nil {
 		t.Fatalf("shared public span refused: %v", err)
@@ -187,7 +288,7 @@ func TestUnchangedFixtureRulesAreNotPrivateQuotes(t *testing.T) {
 	docs := fixtureFiles()
 	docs["docs/AGENTS-KERNEL-PRIVATE.md"] = fixtureKernel + "\n\n" + guardRule + "\n"
 	docs["commands/secrets.md"] = "- Never paste an age identity into a chat transcript or a public pull request.\n"
-	corpus := corpusFrom(docs)
+	corpus := corpusFrom(testGuardMaster(), docs)
 	var public []File
 	for path, content := range fixtureFiles() {
 		public = append(public, File{Path: path, Content: []byte(content)})
@@ -231,7 +332,7 @@ func TestCheckedOutDoctrineGuardCounts(t *testing.T) {
 	privDocs := gitTexts(t, private)
 	public := indexedDoctrineFiles(pubDocs)
 	views := Render(publicRepository, fixtureCommit, false, public)
-	corpus := corpusFrom(privDocs)
+	corpus := corpusFrom(testGuardMaster(), privDocs)
 	raw, err := corpus.marshal()
 	if err != nil {
 		t.Fatal(err)
@@ -240,7 +341,7 @@ func TestCheckedOutDoctrineGuardCounts(t *testing.T) {
 		t.Fatal("measured corpus looks like plaintext")
 	}
 	checked, refused := 0, 0
-	allow := allowFromFiles(public)
+	allow := allowFromFiles(testGuardMaster(), public)
 	for _, view := range views {
 		for _, rule := range view.Rules {
 			checked++
@@ -306,7 +407,7 @@ func TestCheckedOutDoctrineGuardCounts(t *testing.T) {
 		}
 		narrow[path] = text
 	}
-	narrowRaw, err := corpusFrom(narrow).marshal()
+	narrowRaw, err := corpusFrom(testGuardMaster(), narrow).marshal()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -349,6 +450,7 @@ func gitTexts(t *testing.T, dir string) map[string]string {
 		t.Fatalf("git ls-files %s: %v", dir, err)
 	}
 	docs := map[string]string{}
+	textFail := 0
 	for _, name := range bytes.Split(out, []byte{0}) {
 		if len(name) == 0 {
 			continue
@@ -370,16 +472,20 @@ func gitTexts(t *testing.T, dir string) map[string]string {
 		if err != nil {
 			t.Fatalf("unreadable %s", path)
 		}
-		if bytes.Contains(raw, []byte{0}) {
+		if utf16Text(raw) || (doctrineTextPath(path) && (bytes.Contains(raw, []byte{0}) || !utf8Valid(raw))) || (!bytes.Contains(raw, []byte{0}) && !utf8Valid(raw)) {
+			textFail++
 			continue
 		}
-		if !utf8Valid(raw) {
-			t.Fatalf("invalid text %s", path)
+		if bytes.Contains(raw, []byte{0}) {
+			continue
 		}
 		if len(bytes.TrimSpace(raw)) == 0 {
 			continue
 		}
 		docs[path] = string(raw)
+	}
+	if textFail > 0 {
+		t.Fatalf("undecodable text files=%d", textFail)
 	}
 	if len(docs) == 0 {
 		t.Fatalf("no text files in %s", dir)

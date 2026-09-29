@@ -34,7 +34,12 @@ type Config struct {
 	// DoctrineCredentialsDir holds host-provisioned doctrine read tokens and App
 	// keys, one credential file and <ref>.allowlist.json per reference
 	// (AEON_DOCTRINE_CREDENTIALS_DIR, AEON-318). Aeon stores only the names.
-	DoctrineCredentialsDir  string
+	DoctrineCredentialsDir string
+	// DoctrineGuardKey is the server secret for per-tenant HMAC of the private
+	// doctrine quotation guard (AEON_DOCTRINE_GUARD_KEY_FILE). In dev without a
+	// file it is random and lives only in memory; in prod without a file it is
+	// nil and public proposals stay refused. It is never logged.
+	DoctrineGuardKey        []byte
 	DoctrineAppID           string
 	DoctrineInstallationID  string
 	DoctrineAppKeyRef       string
@@ -73,6 +78,18 @@ func FromEnv() (Config, error) {
 	}
 	if cfg.DatabaseURL == "" {
 		return Config{}, fmt.Errorf("AEON_DATABASE_URL is required")
+	}
+	if f := os.Getenv("AEON_DOCTRINE_GUARD_KEY_FILE"); f != "" {
+		key, err := doctrineGuardKey(f)
+		if err != nil {
+			return Config{}, err
+		}
+		cfg.DoctrineGuardKey = key
+	} else if cfg.Env == "dev" {
+		cfg.DoctrineGuardKey = make([]byte, 32)
+		if _, err := rand.Read(cfg.DoctrineGuardKey); err != nil {
+			return Config{}, fmt.Errorf("dev doctrine guard key: %w", err)
+		}
 	}
 	if f := os.Getenv("AEON_MESSAGING_KEY_FILE"); f != "" {
 		key, err := messagingKey(f)
@@ -124,6 +141,24 @@ func LinkKeyFromEnv() ([]byte, error) {
 	}
 	sum := sha256.Sum256([]byte("aeon/link-vault/v1\x00" + secret))
 	return sum[:], nil
+}
+
+// doctrineGuardKey reads a host-generated secret file of at least 32
+// characters. The bytes are the HMAC master; callers derive a per-tenant key.
+// The file contents are never logged.
+func doctrineGuardKey(file string) ([]byte, error) {
+	b, err := os.ReadFile(file)
+	if err != nil {
+		return nil, fmt.Errorf("AEON_DOCTRINE_GUARD_KEY_FILE: %w", err)
+	}
+	if len(b) > 4096 {
+		return nil, fmt.Errorf("AEON_DOCTRINE_GUARD_KEY_FILE is too long")
+	}
+	secret := strings.TrimSpace(string(b))
+	if len(secret) < 32 {
+		return nil, fmt.Errorf("AEON_DOCTRINE_GUARD_KEY_FILE must hold at least 32 characters")
+	}
+	return []byte(secret), nil
 }
 
 // messagingKey reads a host-generated secret file (at least 32 characters)

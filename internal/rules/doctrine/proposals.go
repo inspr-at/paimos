@@ -39,6 +39,8 @@ type Proposal struct {
 	GateReady        bool      `json:"gate_ready"`
 	GateReason       string    `json:"gate_reason,omitempty"`
 	PinnedMachines   int       `json:"pinned_machines"`
+	Branch           string    `json:"branch,omitempty"`
+	Orphaned         bool      `json:"orphaned,omitempty"`
 	CreatedAt        time.Time `json:"created_at"`
 	GateReview       int64     `json:"-"`
 	BaseCommit       string    `json:"-"`
@@ -112,9 +114,14 @@ func saveProposal(ctx context.Context, tx pgx.Tx, actor tenant.Principal, p *Pro
 	if event == "" {
 		return nil
 	}
-	_, err = events.Append(ctx, tx, actor, events.Change{Type: event, After: map[string]any{
+	after := map[string]any{
 		"proposal_id": p.ID, "repository": p.Repository, "pr_number": p.PRNumber, "head_sha": p.HeadSHA, "state": p.State, "proposed_by": p.ProposedBy, "approved_by": p.ApprovedBy, "gate_review_id": p.GateReview, "merge_commit": p.MergeCommit, "release": p.Release, "release_commit": p.ReleaseCommit, "release_requested": p.ReleaseRequested,
-	}})
+	}
+	if p.Branch != "" {
+		after["branch"] = p.Branch
+		after["orphaned"] = p.Orphaned
+	}
+	_, err = events.Append(ctx, tx, actor, events.Change{Type: event, After: after})
 	return err
 }
 func (m *Module) proposalAccess(p tenant.Principal) error {
@@ -218,9 +225,6 @@ func (m *Module) propose(r *http.Request, actor tenant.Principal) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := guardPrivateQuotes(guard, files, in.Source, in.TLDR.EN, in.TLDR.DE, in.Explanation); err != nil {
-		return nil, err
-	}
 	g, err := m.appClient(ctx, actor.TenantID, source.Repository)
 	if err != nil {
 		return nil, err
@@ -240,6 +244,11 @@ func (m *Module) propose(r *http.Request, actor tenant.Principal) (any, error) {
 	current := map[string]string{}
 	for _, e := range tree {
 		current[e.Path] = e.SHA
+	}
+	// Exempt only blobs that are on main right now. The configured pin, a
+	// proposal branch and an unmerged SHA are not a public-text exemption.
+	if err := guardPrivateQuotes(guard, mainMatchingFiles(files, tree), in.Source, in.TLDR.EN, in.TLDR.DE, in.Explanation); err != nil {
+		return nil, err
 	}
 	cached := map[string]string{}
 	for _, f := range files {
@@ -365,22 +374,21 @@ func (m *Module) runProposal(ctx context.Context, actor tenant.Principal, permis
 	}()
 	before := p
 	event, err := fn(ctx, &p)
-	if err != nil {
-		return p, err
+	if err == nil {
+		err = m.tx(ctx, actor, permission, func(tx pgx.Tx) error {
+			if err := countPins(ctx, tx, &p); err != nil {
+				return err
+			}
+			if p == before {
+				event = ""
+			}
+			p.OperationID, p.OperationUntil = "", time.Time{}
+			return saveProposal(ctx, tx, actor, &p, event)
+		})
 	}
-	err = m.tx(ctx, actor, permission, func(tx pgx.Tx) error {
-		if err := countPins(ctx, tx, &p); err != nil {
-			return err
-		}
-		if p == before {
-			event = ""
-		}
-		p.OperationID, p.OperationUntil = "", time.Time{}
-		return saveProposal(ctx, tx, actor, &p, event)
-	})
-	// A write that GitHub already accepted must stay visible when the final
-	// authorization check fails. Record the PR, merge or dispatch as an
-	// observation instead of dropping it.
+	// A GitHub write that already landed must stay visible when authority is
+	// revoked in the same flight: a PR, merge, dispatch, or a proposal branch
+	// left without a pull request. The caller still receives the refusal.
 	if err != nil && errors.Is(err, authz.ErrForbidden) && writeLanded(before, p) {
 		if obsErr := m.recordObservation(ctx, actor, &p, observedEvent(before, p)); obsErr != nil {
 			return p, obsErr
@@ -390,7 +398,7 @@ func (m *Module) runProposal(ctx context.Context, actor tenant.Principal, permis
 }
 
 func writeLanded(before, p Proposal) bool {
-	return before.PRNumber == 0 && p.PRNumber > 0 || before.MergeCommit == "" && p.MergeCommit != "" || !before.ReleaseRequested && p.ReleaseRequested
+	return before.PRNumber == 0 && p.PRNumber > 0 || before.MergeCommit == "" && p.MergeCommit != "" || !before.ReleaseRequested && p.ReleaseRequested || before.Branch == "" && p.Branch != "" && p.PRNumber == 0
 }
 
 func observedEvent(before, p Proposal) string {
@@ -399,6 +407,10 @@ func observedEvent(before, p Proposal) string {
 		return "doctrine.merge_observed"
 	case !before.ReleaseRequested && p.ReleaseRequested:
 		return "doctrine.release_observed"
+	case before.PRNumber == 0 && p.PRNumber > 0:
+		return "doctrine.proposal_observed"
+	case before.Branch == "" && p.Branch != "" && p.PRNumber == 0:
+		return "doctrine.branch_observed"
 	default:
 		return "doctrine.proposal_observed"
 	}

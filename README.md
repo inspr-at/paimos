@@ -146,7 +146,12 @@ GitHub write. Text is NFKC-normalized, stripped of invisible format characters,
 and case/whitespace folded. Whole private rules/TL;DRs, eight-word quotations,
 and substantial four-word shingle overlap are refused. Public proposals require
 a successfully indexed private source with a valid credential grant; missing or
-unusable private indexes block publication. Unchanged file content is excluded.
+unusable private indexes block publication. The quotation guard is an HMAC keyed
+by `AEON_DOCTRINE_GUARD_KEY_FILE` (at least 32 characters; dev without the file
+uses an ephemeral key), and startup rebuilds a missing or rotated guard. Public
+exemptions use the current main tree only, never the configured pin. Public
+proposal letters must be Latin, including German umlauts and ß, and digits must
+be ASCII. Unchanged file content is excluded.
 Credential-shaped text is refused for either repository, including private.
 Git stays authoritative; the database holds request digests, PR references and
 audit metadata, never draft prose or credentials. Keep the same request UUID

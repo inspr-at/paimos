@@ -447,7 +447,7 @@ paths:
                   proposals: {type: array, items: {"$ref": "#/components/schemas/DoctrineProposal"}}
     post:
       operationId: proposeDoctrineChange
-      description: "Workspace rules.write. Requires a server-configured GitHub App, operator-acknowledged DCO contribution policy and its designated tenant. The App key reference requires an operator-owned tenant/exact-repository allowlist grant, checked before key use for each proposal, refresh or approval. Tokens are narrowed to the owning repository; all GitHub requests use https://api.github.com with redirects disabled. Commit authorship and sign-off use the verified App bot identity. The source determines the owning repository; only inspr-at/inspr-modules and inspr-at/inspr-doctrine-private are writable. Before ANY GitHub write, the changed rule, its TLDR entry and explanation are Unicode-normalized and checked for identity patterns and quotations from the indexed private doctrine rules and TLDRs. Public proposals require an available, authorized private index; unchanged file content is not scanned. GitHub I/O holds no database locks: short authorized transactions reserve a per-proposal lease and compare the saved version before applying results. Source, main-file blob and rule digest must match. Reuse request_id with identical input to recover a timeout; another input returns 409. No draft prose is retained in Aeon."
+      description: "Workspace rules.write. Requires a server-configured GitHub App, operator-acknowledged DCO contribution policy and its designated tenant. The App key reference requires an operator-owned tenant/exact-repository allowlist grant, checked before key use for each proposal, refresh or approval. Tokens are narrowed to the owning repository; all GitHub requests use https://api.github.com with redirects disabled. Commit authorship and sign-off use the verified App bot identity. The source determines the owning repository; only inspr-at/inspr-modules and inspr-at/inspr-doctrine-private are writable. Before ANY GitHub write, the changed rule, its TLDR entry and explanation are Unicode-normalized and checked for identity patterns and quotations from the indexed private doctrine. Public proposal letters must be Latin, including German umlauts and ß, and digits must be ASCII (422 non_latin). Quotation exemptions use only blobs identical to the repository's current main tree, never the configured pin, a proposal branch or an unmerged SHA. The private guard is an HMAC keyed by the server secret AEON_DOCTRINE_GUARD_KEY_FILE; a missing or stale guard returns 422 private_index_unavailable until reindex or the startup rebuild. Public proposals require an available, authorized private index; unchanged file content is not scanned. GitHub I/O holds no database locks: short authorized transactions reserve a per-proposal lease and compare the saved version before applying results. Source, main-file blob and rule digest must match. Reuse request_id with identical input to recover a timeout; another input returns 409. No draft prose is retained in Aeon. A ref that lands after authority is revoked is stored as branch with orphaned true and a doctrine.branch_observed event."
       requestBody:
         required: true
         content:
@@ -462,7 +462,7 @@ paths:
         "400": {description: Invalid edit}
         "403": {description: Permission or tenant denied}
         "409": {description: Stale source or request id conflict}
-        "422": {description: Credential/public leak guard or GitHub refused the proposal}
+        "422": {description: "Credential, non-Latin public text (non_latin), private quotation (private_doctrine), or a missing private guard (private_index_unavailable) refused the proposal"}
         "503": {description: App not configured or outcome uncertain; retry the same request id}
   /rules/doctrine/proposals/{proposalId}/refresh:
     parameters:
@@ -6074,6 +6074,8 @@ components:
         gate_ready: {type: boolean}
         gate_reason: {type: string}
         pinned_machines: {type: integer, minimum: 0, description: "Operator-reported, not live machine inventory"}
+        branch: {type: string, description: "Proposal branch name when the GitHub ref exists"}
+        orphaned: {type: boolean, description: "True when that branch exists without a pull request because authority was revoked during the ref write. An admin should delete the branch."}
         created_at: {type: string, format: date-time}
     DoctrineTLDR:
       type: object

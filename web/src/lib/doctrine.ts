@@ -188,6 +188,7 @@ export interface DoctrineProposal {
   head_sha: string; pr_number: number; pr_url: string; proposed_by: string; approved_by?: string
   merge_commit?: string; release?: string; release_commit?: string; release_url?: string
   release_requested?: boolean; gate_ready: boolean; gate_reason?: string; pinned_machines: number; created_at: string
+  branch?: string; orphaned?: boolean
 }
 export interface DoctrineProposalInput {
   request_id: string; source_id: string; path: string; rule_key: string; rule_sha256: string
@@ -209,7 +210,8 @@ export const proposeDoctrineChange = (input: DoctrineProposalInput) => proposalR
 export const getDoctrineProposals = async () => (await proposalRequest<{ proposals: DoctrineProposal[] }>('', 'GET')).proposals ?? []
 export const refreshDoctrineProposal = (id: string) => proposalRequest<DoctrineProposal>(`/${encodeURIComponent(id)}/refresh`)
 export const approveDoctrineProposal = (id: string, head: string) => proposalRequest<DoctrineProposal>(`/${encodeURIComponent(id)}/approve`, 'POST', { head_sha: head })
-export function proposalState(p: Pick<DoctrineProposal, 'state' | 'pinned_machines'>): string {
+export function proposalState(p: Pick<DoctrineProposal, 'state' | 'pinned_machines'> & { orphaned?: boolean }): string {
+  if (p.orphaned) return 'Branch left on GitHub'
   if (p.state === 'pinned') return `Pinned on ${p.pinned_machines} reported ${p.pinned_machines === 1 ? 'machine' : 'machines'}`
   return { proposed: 'Proposed', in_review: 'In review', merged: 'Merged', released: 'Released', closed: 'Closed' }[p.state]
 }

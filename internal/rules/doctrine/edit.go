@@ -77,11 +77,31 @@ func guardPublic(repository string, texts ...string) error {
 		return nil
 	}
 	for _, text := range texts {
+		if !latinPublicText(text) {
+			return fail(422, "non_latin", "Public proposals may use only Latin letters, including German umlauts and ß, and ASCII digits. Nothing was published.")
+		}
 		if publicLeaks.MatchString(normalizeProposalText(text)) {
 			return fail(422, "public_identity", "This public proposal contains identity-bearing or credential-shaped text. Generalise it, or propose the private rule in inspr-doctrine-private. Nothing was published.")
 		}
 	}
 	return nil
+}
+
+// latinPublicText allows Latin letters, including German umlauts and ß, and
+// ASCII digits. Other letters and digits are refused so a lookalike alphabet
+// cannot carry a private quotation into a public proposal.
+func latinPublicText(text string) bool {
+	for _, form := range []string{text, norm.NFKC.String(text)} {
+		for _, r := range form {
+			if unicode.IsLetter(r) && !unicode.Is(unicode.Latin, r) {
+				return false
+			}
+			if unicode.IsNumber(r) && (r < '0' || r > '9') {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // editRule changes exactly one indexed rule and its sidecar entry. Parse both
@@ -203,14 +223,18 @@ func normalizeProposalText(text string) string {
 		}
 		return r
 	}, text)
+	text = foldConfusables(text)
 	folded := cases.Fold().String(norm.NFKC.String(text))
-	folded = strings.Map(func(r rune) rune {
+	return strings.Join(strings.Fields(foldConfusables(folded)), " ")
+}
+
+func foldConfusables(text string) string {
+	return strings.Map(func(r rune) rune {
 		if mapped, ok := confusableFold[r]; ok {
 			return mapped
 		}
 		return r
-	}, folded)
-	return strings.Join(strings.Fields(folded), " ")
+	}, text)
 }
 
 func proposalWords(text string) []string {
@@ -226,4 +250,17 @@ var confusableFold = map[rune]rune{
 	'\u0442': 't', '\u0433': 'r', '\u044d': 'e', '\u0454': 'e', '\u0491': 'g', '\u0432': 'b', '\u0431': 'b', '\u04b3': 'h',
 	'\u03b1': 'a', '\u03b5': 'e', '\u03b9': 'i', '\u03ba': 'k', '\u03bf': 'o', '\u03c1': 'p', '\u03c4': 't', '\u03c5': 'u',
 	'\u03bd': 'v', '\u03c7': 'x', '\u03b3': 'y', '\u03b7': 'n', '\u03c9': 'w', '\u03b2': 'b',
+	'\u0131': 'i', '\u0585': 'o',
+}
+
+func init() {
+	for from, to := range confusableFold {
+		upper := unicode.ToUpper(from)
+		if upper == from {
+			continue
+		}
+		if _, ok := confusableFold[upper]; !ok {
+			confusableFold[upper] = to
+		}
+	}
 }

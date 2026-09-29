@@ -129,6 +129,7 @@ func (g *GitHub) preparePR(ctx context.Context, p *Proposal, files map[string]st
 	if ref.Object.SHA != head.SHA {
 		return fail(409, "branch_changed", "The proposal branch changed outside Aeon; inspect it in git.")
 	}
+	p.Branch = branch
 	var prs []pull
 	if err := g.request(ctx, "GET", base+"/pulls?state=all&head="+url.QueryEscape("inspr-at:"+branch)+"&per_page=100", nil, &prs); err != nil {
 		return err
@@ -141,6 +142,8 @@ func (g *GitHub) preparePR(ctx context.Context, p *Proposal, files map[string]st
 		pr = prs[0]
 	} else {
 		if err := g.authorizeWrite(ctx); err != nil {
+			p.Orphaned = true
+			p.GateReason = "This proposal's branch exists on GitHub without a pull request because authority was revoked during the ref write. An admin should delete the branch."
 			return err
 		}
 		body := "## Proposed change\n\n" + explanation + "\n\nReview the rule and TL;DR diff. Merge requires a person in Aeon and the repository gates."

@@ -33,10 +33,13 @@ import (
 
 // Options configure the server side. CredentialsDir is
 // AEON_DOCTRINE_CREDENTIALS_DIR; Client allows test transport injection.
+// GuardKey is the server secret for per-tenant HMAC of the private quotation
+// guard. It is copied, never logged, and never written to the database.
 type Options struct {
 	CredentialsDir string
 	Client         *http.Client
 	App            AppConfig
+	GuardKey       []byte
 }
 
 // Module serves the doctrine layer.
@@ -45,12 +48,24 @@ type Module struct {
 	credentials Credentials
 	client      *http.Client
 	app         AppConfig
+	guardMaster []byte
 }
 
 var _ httpapi.Module = (*Module)(nil)
 
 func New(pool *pgxpool.Pool, opts Options) *Module {
-	return &Module{pool: pool, credentials: Credentials{Dir: opts.CredentialsDir}, client: opts.Client, app: opts.App}
+	var key []byte
+	if len(opts.GuardKey) >= 32 {
+		key = append([]byte(nil), opts.GuardKey...)
+	}
+	return &Module{pool: pool, credentials: Credentials{Dir: opts.CredentialsDir}, client: opts.Client, app: opts.App, guardMaster: key}
+}
+
+func (m *Module) guardKey(tenantID string) []byte {
+	if m == nil {
+		return nil
+	}
+	return deriveGuardKey(m.guardMaster, tenantID)
 }
 
 // fetchTimeout bounds one resolve or index against the repository host.
@@ -557,11 +572,116 @@ func (m *Module) fetch(ctx context.Context, tenantID string, s Source) ([]File, 
 	if s.Repository != privateRepository || s.Visibility != "private" {
 		return files, skipped, nil, nil
 	}
-	corpus, err := readPrivateCorpus(ctx, reader, s.Repository, s.Commit)
+	corpus, err := readPrivateCorpus(ctx, reader, s.Repository, s.Commit, m.guardKey(tenantID))
 	if err != nil {
 		return nil, nil, nil, err
 	}
 	return files, skipped, corpus, nil
+}
+
+// EnsurePrivateGuards rebuilds a private quotation guard that is missing or
+// was keyed with a different server secret. A failed rebuild leaves the
+// doctrine index readable and public proposals refused until a later success.
+// It does not log the key or any doctrine text.
+func (m *Module) EnsurePrivateGuards(ctx context.Context) {
+	if m == nil || m.pool == nil || len(m.guardMaster) < 32 {
+		slog.Info("doctrine guard rebuild skipped", "reason", "no guard key")
+		return
+	}
+	rows, err := m.pool.Query(ctx, `SELECT id::text FROM tenants ORDER BY id`)
+	if err != nil {
+		slog.Error("doctrine guard rebuild", "err", err)
+		return
+	}
+	var tenants []string
+	for rows.Next() {
+		var id string
+		if rows.Scan(&id) == nil {
+			tenants = append(tenants, id)
+		}
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		slog.Error("doctrine guard rebuild", "err", err)
+		return
+	}
+	for _, tenantID := range tenants {
+		if ctx.Err() != nil {
+			return
+		}
+		if err := m.ensureTenantGuard(ctx, tenantID); err != nil && ctx.Err() == nil {
+			slog.Error("doctrine guard rebuild", "tenant", tenantID, "err", err)
+		}
+	}
+}
+
+func (m *Module) ensureTenantGuard(ctx context.Context, tenantID string) error {
+	var ids []string
+	err := db.InTenant(ctx, m.pool, tenantID, func(tx pgx.Tx) error {
+		sources, err := listSources(ctx, tx)
+		if err != nil {
+			return err
+		}
+		key := m.guardKey(tenantID)
+		for _, s := range sources {
+			if s.Repository != privateRepository || s.Visibility != "private" || s.IndexedAt == nil || s.CredentialRef == "" {
+				continue
+			}
+			raw, err := loadGuardCorpus(ctx, tx, s)
+			if err != nil {
+				return err
+			}
+			if corpus, err := unmarshalGuard(raw, key); err == nil && !corpus.empty() {
+				continue
+			}
+			ids = append(ids, s.ID)
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	for _, id := range ids {
+		if err := m.rebuildGuard(ctx, tenantID, id); err != nil && ctx.Err() == nil {
+			slog.Error("doctrine guard rebuild", "tenant", tenantID, "source", id, "err", err)
+		}
+	}
+	return nil
+}
+
+func (m *Module) rebuildGuard(ctx context.Context, tenantID, id string) error {
+	var s Source
+	if err := db.InTenant(ctx, m.pool, tenantID, func(tx pgx.Tx) error {
+		var err error
+		s, err = getSource(ctx, tx, id, false)
+		return err
+	}); err != nil {
+		return err
+	}
+	if s.Repository != privateRepository || s.Visibility != "private" || s.IndexedAt == nil || s.CredentialRef == "" {
+		return nil
+	}
+	reader, err := m.reader(tenantID, s.Repository, s.CredentialRef)
+	if err != nil {
+		return err
+	}
+	fetchCtx, cancel := context.WithTimeout(ctx, fetchTimeout)
+	corpus, err := readPrivateCorpus(fetchCtx, reader, s.Repository, s.Commit, m.guardKey(tenantID))
+	cancel()
+	if err != nil {
+		return err
+	}
+	return db.InTenant(ctx, m.pool, tenantID, func(tx pgx.Tx) error {
+		current, err := getSource(ctx, tx, id, true)
+		if err != nil {
+			return err
+		}
+		if current.Commit != s.Commit || current.IndexedAt == nil {
+			return nil
+		}
+		return storeGuardCorpus(ctx, tx, tenantID, current, corpus)
+	})
 }
 
 // safeMessage is what a failed fetch records: the repository or credential

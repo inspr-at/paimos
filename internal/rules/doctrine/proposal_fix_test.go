@@ -132,9 +132,9 @@ func TestPublicProposalRequiresPrivateCorpusAndBlocksQuotes(t *testing.T) {
 		case "continuation":
 			bad.Explanation = "The silver ledger contains nine emerald diagrams beside the northern window."
 		}
-		before = forge.calls
+		beforeWrites := forge.writes
 		got := f.call(owner, "POST", endpoint, bad, 422)
-		if !strings.Contains(string(got), "private_doctrine") || strings.Contains(string(got), guardTLDR) || forge.calls != before {
+		if !strings.Contains(string(got), "private_doctrine") || strings.Contains(string(got), guardTLDR) || forge.writes != beforeWrites {
 			t.Fatalf("private %s reached GitHub or was reflected", field)
 		}
 	}
@@ -391,9 +391,13 @@ func TestPrivateGuardFullTreeAndWriteObservation(t *testing.T) {
 		bad.Explanation = attack
 		bad.RequestID = "31900000-0000-4000-8000-0000000000a1"
 		before = forge.writes
+		want := "private_doctrine"
+		if !latinPublicText(attack) {
+			want = "non_latin"
+		}
 		got := f.call(owner, "POST", "/api/rules/doctrine/proposals", bad, 422)
-		if !strings.Contains(string(got), "private_doctrine") || bytes.Contains(got, []byte(attack)) || forge.writes != before {
-			t.Fatal("private attack reached GitHub or was reflected")
+		if !strings.Contains(string(got), want) || bytes.Contains(got, []byte(attack)) || forge.writes != before {
+			t.Fatalf("private attack reached GitHub or was reflected as %s", want)
 		}
 	}
 }
@@ -447,6 +451,24 @@ func TestWriteReauthorizedBeforeGitHubMutation(t *testing.T) {
 			t.Fatal("revoked authority created a ref or PR")
 		}
 	})
+	t.Run("during ref", func(t *testing.T) {
+		f, forge, m, owner, in := publicProposalFixture(t)
+		seedPrivateGuard(t, f, m, owner)
+		forge.beforeRequest = func(r *http.Request) {
+			if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/git/refs") {
+				revoke(t, f, owner)
+			}
+		}
+		got := f.call(owner, "POST", "/api/rules/doctrine/proposals", in, 403)
+		if bytes.Contains(got, []byte(guardRule)) || len(forge.refs) != 1 || len(forge.pulls) != 0 {
+			t.Fatal("revocation during the ref write left no branch record or created a PR")
+		}
+		var branch, orphaned, event string
+		err := f.d.Admin.QueryRow(t.Context(), `SELECT COALESCE(data->>'branch',''), COALESCE(data->>'orphaned',''), COALESCE((SELECT type FROM events WHERE tenant_id=$1 AND type='doctrine.branch_observed' LIMIT 1),'') FROM doctrine_proposals WHERE id=$2`, owner.TenantID, in.RequestID).Scan(&branch, &orphaned, &event)
+		if err != nil || branch != "aeon/proposals/"+in.RequestID || orphaned != "true" || event != "doctrine.branch_observed" {
+			t.Fatalf("orphaned branch not observed branch=%s orphaned=%s event=%s err=%v", branch, orphaned, event, err)
+		}
+	})
 	t.Run("after pull", func(t *testing.T) {
 		f, forge, m, owner, in := publicProposalFixture(t)
 		seedPrivateGuard(t, f, m, owner)
@@ -493,6 +515,216 @@ func TestWriteReauthorizedBeforeGitHubMutation(t *testing.T) {
 			t.Fatalf("lost dispatch %s calls=%d err=%v", requested, forge.dispatches, err)
 		}
 	})
+}
+
+const launderSHA = "4444444444444444444444444444444444444444"
+
+func pinLaunder(t *testing.T, f doctrineFixture, owner tenant.Principal, sourceID, ref string) {
+	t.Helper()
+	files := fixtureFiles()
+	files["docs/AGENTS-DOMAIN-DEV.md"] = files["docs/AGENTS-DOMAIN-DEV.md"] + "\n- " + guardRule + "\n"
+	var refs []string
+	if ref != "" {
+		refs = []string{ref}
+	}
+	f.fake.commit(publicRepository, launderSHA, files, refs...)
+	body := map[string]any{"visibility": "public", "commit": launderSHA}
+	if ref != "" {
+		body["ref"] = ref
+	}
+	updated := find(f.layer(owner, "PUT", "/api/rules/doctrine/sources/"+sourceID, body), publicRepository)
+	if updated == nil || updated.State != "ready" || updated.Commit != launderSHA {
+		t.Fatal("launder pin did not index")
+	}
+}
+
+func TestPublicPinCannotLaunderPrivateText(t *testing.T) {
+	quote := func(t *testing.T, ref string) {
+		t.Helper()
+		f, forge, m, owner, in := publicProposalFixture(t)
+		seedPrivateGuard(t, f, m, owner)
+		pinLaunder(t, f, owner, in.SourceID, ref)
+		bad := in
+		bad.RequestID = "31900000-0000-4000-8000-0000000000b1"
+		bad.Explanation = guardRule
+		before := forge.writes
+		got := f.call(owner, "POST", "/api/rules/doctrine/proposals", bad, 422)
+		if !strings.Contains(string(got), "private_doctrine") || bytes.Contains(got, []byte(guardRule)) || forge.writes != before {
+			t.Fatal("pinned private text was published")
+		}
+		ok := in
+		ok.RequestID = "31900000-0000-4000-8000-0000000000b2"
+		ok.TLDR.DE = "Öffentliche Regeln bleiben gültig."
+		f.call(owner, "POST", "/api/rules/doctrine/proposals", ok, 200)
+	}
+	t.Run("branch", func(t *testing.T) { quote(t, "aeon/proposals/launder") })
+	t.Run("sha", func(t *testing.T) { quote(t, "") })
+}
+
+func TestPublicProposalRejectsNonLatin(t *testing.T) {
+	f, forge, m, owner, in := publicProposalFixture(t)
+	seedPrivateGuard(t, f, m, owner)
+	cases := []struct {
+		id   string
+		name string
+		text string
+		code string
+	}{
+		{"31900000-0000-4000-8000-0000000000c1", "greek capital", "Clarify step \u0391.", "non_latin"},
+		{"31900000-0000-4000-8000-0000000000c2", "armenian", "Clarify step \u0585.", "non_latin"},
+		{"31900000-0000-4000-8000-0000000000c3", "arabic digit", "Clarify step \u0661.", "non_latin"},
+		{"31900000-0000-4000-8000-0000000000c4", "fullwidth digit", "Clarify step \uff11.", "non_latin"},
+		{"31900000-0000-4000-8000-0000000000c5", "dotless quote", strings.ReplaceAll(guardRule, "i", "\u0131"), "private_doctrine"},
+	}
+	for _, tc := range cases {
+		bad := in
+		bad.Explanation = tc.text
+		bad.RequestID = tc.id
+		beforeWrites, beforeCalls := forge.writes, forge.calls
+		got := f.call(owner, "POST", "/api/rules/doctrine/proposals", bad, 422)
+		if !strings.Contains(string(got), tc.code) || bytes.Contains(got, []byte(tc.text)) || forge.writes != beforeWrites {
+			t.Fatalf("%s reached GitHub or was reflected", tc.name)
+		}
+		if tc.code == "non_latin" && forge.calls != beforeCalls {
+			t.Fatalf("%s reached GitHub", tc.name)
+		}
+	}
+	corpus := quoteCorpus(guardRule)
+	for _, text := range []string{greekCapitals(guardRule), cyrillicCapitals(guardRule), strings.ReplaceAll(guardRule, "o", "\u0585"), strings.ReplaceAll(guardRule, "i", "\u0131")} {
+		if latinPublicText(text) && strings.ContainsRune(text, '\u0131') {
+			continue
+		}
+		if guardPrivateQuotes(corpus, nil, text) == nil {
+			t.Fatal("lookalike quotation accepted")
+		}
+	}
+	if guardPrivateQuotes(corpus, nil, strings.ReplaceAll(guardRule, "i", "\u0131")) == nil {
+		t.Fatal("dotless i escaped the quotation guard")
+	}
+	if !latinPublicText("Öffentliche Regeln bleiben gültig. äöüÄÖÜß 0123456789") {
+		t.Fatal("Latin letters, umlauts or ASCII digits refused")
+	}
+	if latinPublicText("step \u0391") || latinPublicText("step \u0585") || latinPublicText("step \u0661") || latinPublicText("step \uff11") {
+		t.Fatal("non-Latin letter or digit accepted")
+	}
+}
+
+func greekCapitals(s string) string {
+	return strings.Map(func(r rune) rune {
+		switch r {
+		case 'a', 'A':
+			return '\u0391'
+		case 'b', 'B':
+			return '\u0392'
+		case 'e', 'E':
+			return '\u0395'
+		case 'i', 'I':
+			return '\u0399'
+		case 'k', 'K':
+			return '\u039a'
+		case 'o', 'O':
+			return '\u039f'
+		case 'p', 'P':
+			return '\u03a1'
+		case 't', 'T':
+			return '\u03a4'
+		case 'u', 'U':
+			return '\u03a5'
+		case 'x', 'X':
+			return '\u03a7'
+		case 'y', 'Y':
+			return '\u0393'
+		case 'n', 'N':
+			return '\u0397'
+		case 'v', 'V':
+			return '\u039d'
+		case 'w', 'W':
+			return '\u03a9'
+		default:
+			return r
+		}
+	}, s)
+}
+
+func cyrillicCapitals(s string) string {
+	return strings.Map(func(r rune) rune {
+		switch r {
+		case 'a', 'A':
+			return '\u0410'
+		case 'e', 'E':
+			return '\u0415'
+		case 'o', 'O':
+			return '\u041e'
+		case 'p', 'P':
+			return '\u0420'
+		case 'c', 'C':
+			return '\u0421'
+		case 'y', 'Y':
+			return '\u0423'
+		case 'x', 'X':
+			return '\u0425'
+		case 'i', 'I':
+			return '\u0406'
+		case 's', 'S':
+			return '\u0405'
+		case 'h', 'H':
+			return '\u04ba'
+		default:
+			return r
+		}
+	}, s)
+}
+
+func TestPrivateGuardRebuildsWhenMissingOrRotated(t *testing.T) {
+	f, forge, m, owner, in := publicProposalFixture(t)
+	private := seedPrivateGuard(t, f, m, owner)
+	if _, err := f.d.Admin.Exec(t.Context(), `DELETE FROM doctrine_private_guard WHERE source_id=$1`, private.ID); err != nil {
+		t.Fatal(err)
+	}
+	before := forge.calls
+	if got := f.call(owner, "POST", "/api/rules/doctrine/proposals", in, 422); !strings.Contains(string(got), "private_index_unavailable") || forge.calls != before || forge.writes != 0 {
+		t.Fatal("missing guard reached GitHub")
+	}
+	f.fake.down = true
+	m.EnsurePrivateGuards(t.Context())
+	var indexError string
+	if err := f.d.Admin.QueryRow(t.Context(), `SELECT COALESCE(index_error,'') FROM doctrine_sources WHERE id=$1`, private.ID).Scan(&indexError); err != nil || indexError != "" {
+		t.Fatal("failed guard rebuild recorded an index error")
+	}
+	f.fake.down = false
+	m.EnsurePrivateGuards(t.Context())
+	clean := in
+	clean.RequestID = "31900000-0000-4000-8000-0000000000d1"
+	f.call(owner, "POST", "/api/rules/doctrine/proposals", clean, 200)
+
+	rotated := bytes.Repeat([]byte{0x3c}, 32)
+	m.guardMaster = rotated
+	stale := in
+	stale.RequestID = "31900000-0000-4000-8000-0000000000d2"
+	before = forge.calls
+	if got := f.call(owner, "POST", "/api/rules/doctrine/proposals", stale, 422); !strings.Contains(string(got), "private_index_unavailable") || forge.calls != before {
+		t.Fatal("rotated guard reached GitHub")
+	}
+	m.EnsurePrivateGuards(t.Context())
+	quoted := in
+	quoted.RequestID = "31900000-0000-4000-8000-0000000000d3"
+	quoted.Explanation = guardRule
+	beforeWrites := forge.writes
+	got := f.call(owner, "POST", "/api/rules/doctrine/proposals", quoted, 422)
+	if !strings.Contains(string(got), "private_doctrine") || bytes.Contains(got, []byte(guardRule)) || forge.writes != beforeWrites {
+		t.Fatal("rebuilt guard missed a private quotation")
+	}
+	var corpus []byte
+	if err := f.d.Admin.QueryRow(t.Context(), `SELECT corpus FROM doctrine_private_guard WHERE source_id=$1`, private.ID).Scan(&corpus); err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(corpus, rotated) || bytes.Contains(corpus, m.guardKey(owner.TenantID)) || bytes.Contains(corpus, []byte("copper")) {
+		t.Fatal("rebuilt corpus exposes the key or plaintext")
+	}
+	again := in
+	again.RequestID = "31900000-0000-4000-8000-0000000000d4"
+	again.TLDR.DE = "Öffentliche Regeln bleiben gültig."
+	f.call(owner, "POST", "/api/rules/doctrine/proposals", again, 200)
 }
 
 func TestPrivateQuoteFailureIsGeneric(t *testing.T) {

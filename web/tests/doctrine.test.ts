@@ -69,4 +69,5 @@ test('proposal states distinguish release requests and reported machine pins', (
   assert.equal(proposalState({ state: 'released', pinned_machines: 0 }), 'Released')
   assert.equal(proposalState({ state: 'pinned', pinned_machines: 1 }), 'Pinned on 1 reported machine')
   assert.equal(proposalState({ state: 'pinned', pinned_machines: 3 }), 'Pinned on 3 reported machines')
+  assert.equal(proposalState({ state: 'proposed', pinned_machines: 0, orphaned: true }), 'Branch left on GitHub')
 })

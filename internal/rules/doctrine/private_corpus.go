@@ -5,6 +5,7 @@ package doctrine
 import (
 	"bytes"
 	"context"
+	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/binary"
 	"slices"
@@ -30,39 +31,68 @@ const (
 	maxCorpusBytes      = 8 << 20
 )
 
-// guardCorpus is the private quotation index. It stores hashes of normalised
-// runs, whole entries and shingles, never the private words themselves.
+// guardCorpus is the private quotation index. It stores HMAC hashes of
+// normalised runs, whole entries and shingles, never the private words or the
+// server key. key is the per-tenant HMAC key and stays in memory only.
 type guardCorpus struct {
+	key     []byte
+	keyID   [8]byte
 	runs    map[[16]byte]struct{}
 	wholes  map[uint16]map[[16]byte]struct{}
 	entries []map[[16]byte]struct{}
 	seen    map[[16]byte]struct{}
 }
 
-func newGuardCorpus() *guardCorpus {
+func newGuardCorpus(key []byte) *guardCorpus {
+	copied := append([]byte(nil), key...)
 	return &guardCorpus{
+		key:    copied,
+		keyID:  guardFingerprint(copied),
 		runs:   map[[16]byte]struct{}{},
 		wholes: map[uint16]map[[16]byte]struct{}{},
 		seen:   map[[16]byte]struct{}{},
 	}
 }
 
+// deriveGuardKey mixes the server secret with the tenant so a database backup
+// cannot be matched against a dictionary, and one tenant's corpus cannot be
+// checked with another's key. The master never leaves the server process.
+func deriveGuardKey(master []byte, tenantID string) []byte {
+	if len(master) < 32 || tenantID == "" {
+		return nil
+	}
+	mac := hmac.New(sha256.New, master)
+	mac.Write([]byte("aeon/doctrine-guard/v1\x00"))
+	mac.Write([]byte(strings.ToLower(tenantID)))
+	return mac.Sum(nil)
+}
+
+func guardFingerprint(key []byte) [8]byte {
+	sum := sha256.Sum256(key)
+	var id [8]byte
+	copy(id[:], sum[:8])
+	return id
+}
+
 func (c *guardCorpus) empty() bool {
 	return c == nil || len(c.runs) == 0 && len(c.wholes) == 0 && len(c.entries) == 0
 }
 
-func hashWords(words []string) [16]byte {
-	h := sha256.New()
+func hashWords(key []byte, words []string) [16]byte {
+	mac := hmac.New(sha256.New, key)
 	for i, w := range words {
 		if i > 0 {
-			h.Write([]byte{0})
+			mac.Write([]byte{0})
 		}
-		h.Write([]byte(w))
+		mac.Write([]byte(w))
 	}
 	var out [16]byte
-	copy(out[:], h.Sum(nil))
+	sum := mac.Sum(nil)
+	copy(out[:], sum[:16])
 	return out
 }
+
+func (c *guardCorpus) hash(words []string) [16]byte { return hashWords(c.key, words) }
 
 func (c *guardCorpus) add(path, text string) {
 	text = strings.ReplaceAll(strings.ReplaceAll(text, "\r\n", "\n"), "\r", "\n")
@@ -80,7 +110,7 @@ func (c *guardCorpus) add(path, text string) {
 
 func (c *guardCorpus) addRuns(words []string) {
 	for i := 0; i+quoteRunWords <= len(words); i++ {
-		c.runs[hashWords(words[i:i+quoteRunWords])] = struct{}{}
+		c.runs[c.hash(words[i:i+quoteRunWords])] = struct{}{}
 	}
 }
 
@@ -90,7 +120,7 @@ func (c *guardCorpus) addEntry(text string) {
 		return
 	}
 	c.addRuns(words)
-	h := hashWords(words)
+	h := c.hash(words)
 	if _, ok := c.seen[h]; ok {
 		return
 	}
@@ -105,7 +135,7 @@ func (c *guardCorpus) addEntry(text string) {
 	}
 	set := make(map[[16]byte]struct{}, len(words))
 	for i := 0; i+4 <= len(words); i++ {
-		set[hashWords(words[i:i+4])] = struct{}{}
+		set[c.hash(words[i:i+4])] = struct{}{}
 	}
 	c.entries = append(c.entries, set)
 }
@@ -130,8 +160,8 @@ func (c *guardCorpus) addYAML(text string) {
 	walk(&node)
 }
 
-func corpusFrom(docs map[string]string) *guardCorpus {
-	c := newGuardCorpus()
+func corpusFrom(key []byte, docs map[string]string) *guardCorpus {
+	c := newGuardCorpus(key)
 	paths := make([]string, 0, len(docs))
 	for path := range docs {
 		paths = append(paths, path)
@@ -146,14 +176,18 @@ func corpusFrom(docs map[string]string) *guardCorpus {
 // publicAllow is the indexed public text. A private span that already occurs
 // here is not a quotation of something unpublished.
 type publicAllow struct {
+	key      []byte
 	runs     map[[16]byte]struct{}
 	shingles map[[16]byte]struct{}
 	streams  [][]string
 	windows  map[uint16]map[[16]byte]struct{}
 }
 
-func allowFromFiles(files []File) publicAllow {
+func (a publicAllow) hash(words []string) [16]byte { return hashWords(a.key, words) }
+
+func allowFromFiles(key []byte, files []File) publicAllow {
 	a := publicAllow{
+		key:      key,
 		runs:     map[[16]byte]struct{}{},
 		shingles: map[[16]byte]struct{}{},
 		windows:  map[uint16]map[[16]byte]struct{}{},
@@ -168,10 +202,10 @@ func allowFromFiles(files []File) publicAllow {
 		}
 		a.streams = append(a.streams, words)
 		for i := 0; i+quoteRunWords <= len(words); i++ {
-			a.runs[hashWords(words[i:i+quoteRunWords])] = struct{}{}
+			a.runs[a.hash(words[i:i+quoteRunWords])] = struct{}{}
 		}
 		for i := 0; i+4 <= len(words); i++ {
-			a.shingles[hashWords(words[i:i+4])] = struct{}{}
+			a.shingles[a.hash(words[i:i+4])] = struct{}{}
 		}
 	}
 	return a
@@ -186,7 +220,7 @@ func (a *publicAllow) hasWindow(n uint16, h [16]byte) bool {
 		width := int(n)
 		for _, stream := range a.streams {
 			for i := 0; i+width <= len(stream); i++ {
-				set[hashWords(stream[i:i+width])] = struct{}{}
+				set[a.hash(stream[i:i+width])] = struct{}{}
 			}
 		}
 		if a.windows == nil {
@@ -210,7 +244,7 @@ func (c *guardCorpus) quotes(allow publicAllow, texts ...string) bool {
 
 func (c *guardCorpus) runHit(allow publicAllow, words []string) bool {
 	for i := 0; i+quoteRunWords <= len(words); i++ {
-		h := hashWords(words[i : i+quoteRunWords])
+		h := c.hash(words[i : i+quoteRunWords])
 		if _, ok := c.runs[h]; !ok {
 			continue
 		}
@@ -229,7 +263,7 @@ func (c *guardCorpus) wholeHit(allow publicAllow, words []string) bool {
 		}
 		width := int(n)
 		for i := 0; i+width <= len(words); i++ {
-			h := hashWords(words[i : i+width])
+			h := c.hash(words[i : i+width])
 			if _, ok := set[h]; !ok || allow.hasWindow(n, h) {
 				continue
 			}
@@ -245,7 +279,7 @@ func (c *guardCorpus) shingleHit(allow publicAllow, words []string) bool {
 	}
 	proposed := make(map[[16]byte]struct{}, len(words))
 	for i := 0; i+4 <= len(words); i++ {
-		proposed[hashWords(words[i:i+4])] = struct{}{}
+		proposed[c.hash(words[i:i+4])] = struct{}{}
 	}
 	for _, entry := range c.entries {
 		matches, denom := 0, 0
@@ -273,10 +307,10 @@ func guardPrivateQuotes(c *guardCorpus, public []File, texts ...string) error {
 	if c == nil {
 		return nil
 	}
-	if c.empty() {
-		return fail(422, "private_index_unavailable", "Public proposals require an authorized, successfully indexed private doctrine source. Restore its index before proposing.")
+	if c.empty() || len(c.key) < 32 {
+		return fail(422, "private_index_unavailable", privateGuardUnavailable)
 	}
-	if c.quotes(allowFromFiles(public), texts...) {
+	if c.quotes(allowFromFiles(c.key, public), texts...) {
 		return fail(422, "private_doctrine", "This public proposal quotes private doctrine. Generalise the changed text or propose it in the private repository. Nothing was published.")
 	}
 	return nil
@@ -289,8 +323,12 @@ func (c *guardCorpus) marshal() ([]byte, error) {
 		lengths = append(lengths, int(n))
 	}
 	slices.Sort(lengths)
+	if len(c.key) < 32 {
+		return nil, gitFail("the private doctrine guard key is not configured")
+	}
 	var b []byte
-	b = append(b, 'P', 'G', 1)
+	b = append(b, 'P', 'G', 2)
+	b = append(b, c.keyID[:]...)
 	b = appendU32(b, len(runs))
 	for _, h := range runs {
 		b = append(b, h[:]...)
@@ -335,12 +373,16 @@ func appendU32(b []byte, n int) []byte {
 	return append(b, buf[:]...)
 }
 
-func unmarshalGuard(raw []byte) (*guardCorpus, error) {
-	if len(raw) < 3 || raw[0] != 'P' || raw[1] != 'G' || raw[2] != 1 {
+func unmarshalGuard(raw, key []byte) (*guardCorpus, error) {
+	if len(key) < 32 || len(raw) < 11 || raw[0] != 'P' || raw[1] != 'G' || raw[2] != 2 {
 		return nil, gitFail("the private doctrine guard could not be read")
 	}
-	c := &guardCorpus{runs: map[[16]byte]struct{}{}, wholes: map[uint16]map[[16]byte]struct{}{}}
-	rest := raw[3:]
+	id := guardFingerprint(key)
+	if !hmac.Equal(raw[3:11], id[:]) {
+		return nil, gitFail("the private doctrine guard could not be read")
+	}
+	c := newGuardCorpus(key)
+	rest := raw[11:]
 	var n int
 	var err error
 	if n, rest, err = takeU32(rest, 2_000_000); err != nil {
@@ -424,7 +466,59 @@ func takeU32(b []byte, limit int) (int, []byte, error) {
 // narrowing what the index shows must not narrow what a public proposal is
 // checked against. Binary blobs have no doctrine text; anything unreadable
 // fails the build. The returned bytes contain hashes only.
-func readPrivateCorpus(ctx context.Context, r Reader, repository, commit string) ([]byte, error) {
+// mainMatchingFiles keeps cached public blobs that are identical to main's
+// current tree. A configured pin, proposal branch or unmerged SHA does not
+// widen the quotation exemption.
+func mainMatchingFiles(cached []File, tree []Entry) []File {
+	current := make(map[string]string, len(tree))
+	for _, e := range tree {
+		current[e.Path] = e.SHA
+	}
+	out := make([]File, 0, len(cached))
+	for _, f := range cached {
+		if f.BlobSHA != "" && current[f.Path] == f.BlobSHA {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+func utf16Text(raw []byte) bool {
+	if len(raw) >= 2 && ((raw[0] == 0xff && raw[1] == 0xfe) || (raw[0] == 0xfe && raw[1] == 0xff)) {
+		return true
+	}
+	if len(raw) < 4 || len(raw)%2 != 0 {
+		return false
+	}
+	nulEven, nulOdd := 0, 0
+	for i, b := range raw {
+		if b != 0 {
+			continue
+		}
+		if i%2 == 0 {
+			nulEven++
+		} else {
+			nulOdd++
+		}
+	}
+	half := len(raw) / 2
+	return nulEven == half || nulOdd == half
+}
+
+func doctrineTextPath(path string) bool {
+	lower := strings.ToLower(path)
+	for _, ext := range []string{".md", ".yaml", ".yml", ".txt", ".json"} {
+		if strings.HasSuffix(lower, ext) {
+			return true
+		}
+	}
+	return false
+}
+
+func readPrivateCorpus(ctx context.Context, r Reader, repository, commit string, key []byte) ([]byte, error) {
+	if len(key) < 32 {
+		return nil, gitFail("the private doctrine guard key is not configured")
+	}
 	entries, err := r.Tree(ctx, repository, commit)
 	if err != nil {
 		return nil, err
@@ -432,7 +526,7 @@ func readPrivateCorpus(ctx context.Context, r Reader, repository, commit string)
 	if len(entries) == 0 {
 		return nil, gitFail("the private doctrine tree has no files")
 	}
-	c := newGuardCorpus()
+	c := newGuardCorpus(key)
 	total, texts := 0, 0
 	for _, e := range entries {
 		if e.Size < 0 || e.Size > maxGuardFile {
@@ -446,6 +540,9 @@ func readPrivateCorpus(ctx context.Context, r Reader, repository, commit string)
 			return nil, gitFail("the private doctrine tree is larger than the guard can cover")
 		}
 		total += len(raw)
+		if utf16Text(raw) || (doctrineTextPath(e.Path) && (bytes.Contains(raw, []byte{0}) || !utf8.Valid(raw))) {
+			return nil, gitFail("a private doctrine file is not UTF-8 text")
+		}
 		if bytes.Contains(raw, []byte{0}) {
 			continue
 		}

@@ -234,6 +234,15 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 	// AEON-280: delivery deadlines and the attempt cap; one runner across
 	// processes through an advisory lock.
 	go inbox.NewSweeper(pool).Run(ctx)
+	doctrineMod := doctrine.New(pool, doctrine.Options{
+		CredentialsDir: cfg.DoctrineCredentialsDir,
+		GuardKey:       cfg.DoctrineGuardKey,
+		App: doctrine.AppConfig{
+			ID: cfg.DoctrineAppID, InstallationID: cfg.DoctrineInstallationID, KeyRef: cfg.DoctrineAppKeyRef,
+			TenantID: cfg.DoctrineAppTenantID, GateLogin: cfg.DoctrineGateLogin, DCOAcknowledged: cfg.DoctrineDCOAcknowledged,
+		},
+	})
+	go doctrineMod.EnsurePrivateGuards(ctx)
 	api := &httpapi.Server{
 		Pool:  pool,
 		Brand: &productBrand,
@@ -261,7 +270,7 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 			inbox.New(pool),
 			harness.New(pool),
 			rules.New(pool),
-			doctrine.New(pool, doctrine.Options{CredentialsDir: cfg.DoctrineCredentialsDir, App: doctrine.AppConfig{ID: cfg.DoctrineAppID, InstallationID: cfg.DoctrineInstallationID, KeyRef: cfg.DoctrineAppKeyRef, TenantID: cfg.DoctrineAppTenantID, GateLogin: cfg.DoctrineGateLogin, DCOAcknowledged: cfg.DoctrineDCOAcknowledged}}),
+			doctrineMod,
 			ticketwork.New(pool),
 			deliveryvote.New(pool),
 			usagedashboard.New(pool),
