@@ -236,8 +236,13 @@ func (m *Module) handleRevokeAgentKey(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// maxScopeInput bounds the raw scope list of one request. It is only an input
+// guard: the registry (agent-grantable permissions) and the role and creator
+// ceilings bound what a key may actually hold (AEON-367 dropped the old cap of 32).
+const maxScopeInput = 256
+
 func cleanScopes(in []string) ([]string, error) {
-	if len(in) > 32 {
+	if len(in) > maxScopeInput {
 		return nil, errors.New("too many scopes")
 	}
 	out := make([]string, 0, len(in))

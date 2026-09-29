@@ -75,7 +75,7 @@ onMounted(load)
           <input v-model="term" class="field" type="search" aria-label="Find a scope" placeholder="Find a scope" data-autofocus autocomplete="off" />
         </label>
         <fieldset class="scopes" :disabled="busy || !allowed">
-          <legend>{{ selected.size }} of {{ MAX_KEY_SCOPES }} scopes</legend>
+          <legend>{{ selected.size }} {{ selected.size === 1 ? 'scope' : 'scopes' }}</legend>
           <div v-for="group in groups" :key="group.group" class="scope-group" role="group" :aria-label="group.group">
             <p class="group-h">{{ group.group }}</p>
             <label v-for="scope in group.items" :key="scope.key" class="scope-row">
