@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// AEON-326: the ticket list, the live list and the open ticket, wired as the
+// AEON-326: the ticket list, live list, open ticket and lazy Outline, wired as the
 // project page wires them, over a small server that answers each request
 // whenever the test likes. Random interleavings of loads, next pages, stream
 // events, gaps, editor sessions (open, save, 412, cancel), moves, deletes,
@@ -15,7 +15,10 @@
 //   it (the panel closes) only when the tab knows it deleted;
 // - a parent chip that matched never names another parent while it stays;
 // - no save overwrites a field it did not mean to change;
-// - once everything arrived, the list and the panel show the server's state.
+// - once everything arrived, the views show the server's state (the Outline
+//   reloads, since it does not itself subscribe to live row changes);
+// - an authoritative child count starts a new baseline: subsequent local
+//   moves count, and children remain reachable through the expand control.
 // LIVE_VIEW_SEEDS sets the number of seeds; LIVE_VIEW_TRACE=<seed> replays
 // one with every step logged (run with --reporter=verbose to see it pass).
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
@@ -24,9 +27,10 @@ import type { ListItem, ListParent, WorkNode } from '../src/lib/api'
 import { LiveNodeStore } from '../src/lib/liveNodes'
 import { rowStore } from '../src/lib/rowStore'
 import { filtersFromQuery } from '../src/lib/ticketList'
-import { guardedMove, useTicket } from '../src/lib/useTicket'
+import { guardedMove, kinds, useTicket } from '../src/lib/useTicket'
 import { useLiveList } from '../src/lib/useLiveList'
 import { useTicketList } from '../src/lib/useTicketList'
+import { useOutline } from '../src/lib/useOutline'
 
 vi.mock('../src/lib/toast', () => ({ toast: vi.fn() }))
 
@@ -518,3 +522,236 @@ describe('the list, the live list and the panel over any delivery order', () => 
     expect(failed).toEqual([])
   }, 600_000)
 })
+
+// The Outline does not subscribe to row changes itself: ProjectView's live
+// connection records gaps/tombstones, its lazy levels load on demand, and
+// workspace callbacks insert/relocate rows. Exercise those real boundaries,
+// including the panel's create callback (both views count the same child).
+async function runOutline(seed: number): Promise<string[]> {
+  const next = random(seed)
+  const pick = <T>(items: T[]) => items[Math.floor(next() * items.length)]!
+  const root = `outline-${seed}` // expansion memory belongs to one project
+  const failures: string[] = []
+  let phase = 'initial', epoch = 0, revision = 20, sequence = 500
+  const fail = (message: string) => { if (failures.length < 6) failures.push(`${phase}: ${message}`) }
+  const log = (message: string) => { if (seed === TRACE) console.log(`OUTLINE ${phase}: ${message}`) }
+  const data = new Map<string, ListItem>()
+  const parent = (id: string): ListParent => ({ id, key: id === root ? 'PRJ' : `PRJ-${id}`, title: id, kind_slug: id === root ? 'project' : 'epic' })
+  function make(id: string, under: string, kind = 'ticket'): ListItem {
+    return { id, key: `PRJ-${id}`, title: id, body: '', fields: {}, state: 'new', kind_id: `k-${kind}`, kind_slug: kind, kind_label: kind,
+      parent_id: under, parent: parent(under), epic: under === root ? null : parent(under), position: '0', created_at: at(0), updated_at: at(++revision),
+      deleted_at: null, priority: null, assignee: null, children_count: 0, project: { id: root, key: 'PRJ', title: root } }
+  }
+  for (const id of ['a', 'b']) data.set(id, make(id, root, 'epic'))
+  for (let i = 0; i < 6; i++) data.set(`child-${i}`, make(`child-${i}`, i < 3 ? root : i < 5 ? 'a' : 'b'))
+  const count = (id: string) => [...data.values()].filter(n => n.parent_id === id).length
+  const copy = (n: ListItem) => structuredClone({ ...n, children_count: count(n.id) })
+  const nodeCopy = (n: ListItem): WorkNode => ({ id: n.id, key: n.key, title: n.title, body: n.body, kind_id: n.kind_id,
+    state: n.state, fields: structuredClone(n.fields), parent_id: n.parent_id, position: n.position, created_at: n.created_at, updated_at: n.updated_at, deleted_at: n.deleted_at })
+  const source = new FakeSource()
+  rowStore.clear()
+  const store = new LiveNodeStore({ open: () => source, rows: rowStore, graceMs: 0 })
+  const off = store.subscribe({ shows: () => false, changed: () => {} })
+  const gap = () => { epoch++; source.emit('stream.ready', { after: ++sequence, resumed: false }, sequence) }
+  const resume = () => source.emit('stream.ready', { after: sequence, resumed: true }, sequence)
+  const floors = new Map<string, number>()
+  function event(id: string, change: Kind, rev: number) {
+    if (change === 'deleted') floors.set(id, rev)
+    source.emit(change === 'deleted' ? 'node.deleted' : 'node.created', {
+      id: ++sequence, type: change === 'deleted' ? 'node.deleted' : 'node.created', actor_principal_id: MIRA,
+      node_changes: [{ id, project_id: root, change, fields: [], revision: at(rev) }],
+    }, sequence)
+  }
+  interface Read { method: string; url: URL; body?: Record<string, string>; epoch: number; answer?: { status: number; json: unknown }; resolve: (r: Response) => void; done?: boolean }
+  const calls: Read[] = []
+  const readIn = new Map<string, number>()
+  const own = new Set<string>()
+  fetchNow = (url, init = {}) => new Promise(resolve => {
+    calls.push({ method: init.method ?? 'GET', url: new URL(url, 'http://aeon.test'), body: init.body ? JSON.parse(String(init.body)) : undefined, epoch, resolve })
+  })
+  function process(call: Read) {
+    const { pathname: path, searchParams: q } = call.url
+    log(`process ${call.method} ${path}?${q} sent in epoch ${call.epoch}`)
+    let json: unknown, status = 200
+    if (path === '/api/nodes' && call.method === 'GET') {
+      // Small server pages exercise root and child pagination independently
+      // of the production page-size constant.
+      const kinds = q.get('kind')?.split(',')
+      const rows = [...data.values()].filter(n => n.parent_id === q.get('parent_id') && (!kinds || kinds.includes(n.kind_slug))).sort((a, b) => a.id.localeCompare(b.id))
+      const start = Number(q.get('cursor') ?? 0), limit = Math.min(2, Number(q.get('limit') ?? 2))
+      json = { items: rows.slice(start, start + limit).map(copy), next_cursor: start + limit < rows.length ? String(start + limit) : null, facets: {} }
+    } else if (path === '/api/kinds') {
+      json = { items: ['ticket', 'epic', 'task'].map(slug => ({ id: `k-${slug}`, slug, label: slug, schema: {} })) }
+    } else if (path === '/api/nodes' && call.method === 'POST') {
+      const n = make(`new-${++revision}`, call.body!.parent_id)
+      n.title = call.body!.title
+      data.set(n.id, n); own.add(n.id); json = nodeCopy(n)
+    } else if (path.endsWith('/move')) {
+      const n = data.get(path.split('/')[3])!
+      n.parent_id = call.body!.parent_id; n.parent = parent(n.parent_id); n.epic = n.parent_id === root ? null : n.parent
+      n.updated_at = at(++revision); own.add(n.id); json = nodeCopy(n)
+    } else if (path === '/api/relations' || path === '/api/nodes/lookup') json = { items: [] }
+    else {
+      const n = data.get(path.split('/')[3])
+      if (n) json = nodeCopy(n)
+      else { status = 404; json = { error: 'Not found' } }
+    }
+    call.answer = { status, json }
+  }
+  function deliver(call: Read) {
+    call.done = true
+    log(`deliver ${call.method} ${call.url.pathname}?${call.url.searchParams} in epoch ${epoch}`)
+    const { status, json } = call.answer!
+    const body = json as { items?: ListItem[]; id?: string }
+    if (call.epoch === epoch) for (const n of body.items ?? (body.id ? [body as ListItem] : [])) readIn.set(n.id, epoch)
+    call.resolve({ ok: status < 400, status, headers: new Headers(), json: async () => json } as Response)
+  }
+  const scope = effectScope(), selected = ref<ListItem | null>(null)
+  const { outline, ticket } = scope.run(() => {
+    const outline = useOutline(ref(root), ref(filtersFromQuery({ closed: '1' })), ref(true), { rows: ref([]), loading: ref(false), names: new Map() })
+    const ticket = useTicket(selected, { names: new Map(), onCreated: item => outline.insert(item), onRemoved: item => outline.remove(item),
+      onMoved: (item, from) => outline.relocate(item, from, from === root ? null : from), live: { busy: ref(false), me: () => ME, store } })
+    return { outline, ticket }
+  })!
+  let admitted = new Map<string, ListItem>()
+  function observe() {
+    const now = new Map<string, ListItem>()
+    for (const id of new Set([...data.keys(), ...admitted.keys(), ...floors.keys()])) {
+      const row = outline.node(id)
+      if (!row) continue
+      now.set(id, row)
+      if (!admitted.has(id)) {
+        if (readIn.get(id) !== epoch && !own.has(id)) fail(`${id} admitted without a read since gap ${epoch}`)
+        if (revOf(row.updated_at) <= (floors.get(id) ?? 0)) fail(`${id} admitted at/below its deletion floor`)
+      }
+    }
+    admitted = now
+    const ids = outline.rows.value.map(n => n.id)
+    log(`visible ${ids.join(',')}; counts ${['a', 'b'].map(id => `${id}=${outline.node(id)?.children_count}`).join(',')}`)
+    if (new Set(ids).size !== ids.length) fail('duplicate displayed row')
+  }
+  // Process and deliver are separate, and random across all outstanding
+  // root, child, panel and stats reads. Every delivery is observed.
+  async function drain() {
+    for (let i = 0; i < 400; i++) {
+      await settle()
+      const pending = calls.filter(c => !c.done)
+      if (!pending.length) return
+      const call = pick(pending)
+      if (!call.answer) process(call)
+      else deliver(call)
+      await settle(); observe()
+    }
+    fail('requests did not settle')
+  }
+  async function reload() { outline.reload(); await settle(); observe(); await drain() }
+  async function move(id: string, to: string) {
+    const row = outline.node(id)!
+    const moving = guardedMove(row, parent(to), (item, from) => outline.relocate(item, from, from === root ? null : from))
+    await drain(); await moving; observe()
+  }
+  function checkCounts() {
+    for (const id of ['a', 'b']) {
+      if (outline.node(id)?.children_count !== count(id)) fail(`${id} shows ${outline.node(id)?.children_count} children; server has ${count(id)}`)
+      if (count(id) > 0 && !outline.hasChildren(id)) fail(`${id} has no expand control`)
+    }
+  }
+  try {
+    gap(); await drain()
+    // Randomly interleave lazy loads, pagination, expansion and repeated gaps.
+    // A deletion during the gap is deliberately not delivered as an event.
+    for (let round = 0; round < 5; round++) {
+      phase = `lazy ${round}`
+      outline.collapseAll(); await reload()
+      const under = pick([root, 'a', 'b'])
+      if (under === root) { outline.reload(); await settle(); observe() }
+      else { outline.setExpanded(under, true); await settle() }
+      const pending = calls.filter(c => !c.done && c.url.searchParams.get('parent_id') === under && c.url.searchParams.get('kind') !== 'epic')
+      if (pending.length) {
+        const held = pick(pending)
+        process(held)
+        const items = (held.answer!.json as { items: ListItem[] }).items
+        const victim = pick(items)
+        if (victim) data.delete(victim.id)
+        const missed = next() < 0.75
+        if (missed) gap(); else resume()
+        // Sometimes the deletion and restore are delivered, but the first
+        // post-restore copy is still on its way: the floor must hide the old page.
+        if (victim && !missed) {
+          event(victim.id, 'deleted', ++revision)
+          const restored = { ...victim, updated_at: at(++revision) }
+          data.set(victim.id, restored); event(victim.id, 'created', revision)
+        }
+        deliver(held); await settle(); observe()
+        if (next() < 0.5) { gap(); outline.toggle('a'); await settle(); observe() }
+      }
+      await drain()
+      if (outline.hasMoreRoot.value) { outline.loadMoreRoot(); await drain() }
+      if (next() < 0.5) { void outline.expandAll(); await drain() }
+      else { outline.toggle(pick(['a', 'b'])); await drain() }
+    }
+    // Create through the actual panel, remote move without a callback, reload,
+    // then move back through guardedMove + Outline's actual relocation callback.
+    // Repeat in either direction so both retained true and false flags matter.
+    phase = 'create / remote move / authoritative reload / local return'
+    await reload()
+    const a = pick(['a', 'b']), b = a === 'a' ? 'b' : 'a'
+    selected.value = outline.node(a)!
+    await drain()
+    const creating = ticket.addChild(`seed ${seed}`, 'PRJ')
+    await drain()
+    const child = await creating
+    if (!child) { fail('creation failed'); return failures }
+    selected.value = null; await settle()
+    checkCounts()
+    for (let round = 0; round < 4; round++) {
+      const n = data.get(child.id)!
+      const from = n.parent_id!, to = from === a ? b : a
+      n.parent_id = to; n.parent = parent(to); n.epic = n.parent; n.updated_at = at(++revision)
+      if (next() < 0.5) gap(); else resume()
+      outline.collapseAll(); await reload(); checkCounts()
+      outline.setExpanded(to, true); await drain()
+      for (let page = 0; page < 5 && !outline.node(child.id); page++) { const loading = outline.loadChildren(to, true); await drain(); await loading }
+      await move(child.id, from); checkCounts()
+      outline.setExpanded(from, true); await drain()
+      for (let page = 0; page < 5 && !outline.rows.value.some(row => row.id === child.id); page++) {
+        const loading = outline.loadChildren(from, true); await drain(); await loading
+      }
+      if (!outline.rows.value.some(row => row.id === child.id)) fail('the returned child is hidden')
+      await move(child.id, to); checkCounts()
+    }
+    phase = 'final reload and expand'
+    await reload(); checkCounts()
+    void outline.expandAll(); await drain()
+    while (outline.hasMoreRoot.value) { outline.loadMoreRoot(); await drain() }
+    for (const id of ['a', 'b']) { const loading = outline.loadChildren(id, true); await drain(); await loading }
+    if (outline.rows.value.map(n => n.id).sort().join() !== [...data.keys()].sort().join()) fail('fully loaded Outline differs from server')
+  } finally { selected.value = null; scope.stop(); off(); rowStore.clear() }
+  return failures
+}
+
+describe('the lazy Outline over delayed pages, gaps and child moves', () => {
+  it(`admits trusted pages and keeps moved children reachable (${SEEDS} seeds)`, async () => {
+    // Session-cached metadata must not consume random choices only for the
+    // first seed: replaying any seed alone uses exactly the same schedule.
+    fetchNow = async () => ({ ok: true, status: 200, headers: new Headers(), json: async () => ({
+      items: ['ticket', 'epic', 'task'].map(slug => ({ id: `k-${slug}`, slug, label: slug, schema: {} })),
+    }) }) as Response
+    await kinds()
+    const failed: string[] = []
+    for (let seed = TRACE || 1; seed <= (TRACE || SEEDS); seed++) {
+      const failures = await runOutline(seed)
+      if (failures.length) failed.push(`seed ${seed}: ${failures.join('; ')}`)
+    }
+    if (failed.length) console.log(`OUTLINE-VIEWS ${failed.length}/${SEEDS} seeds failed\n${failed.slice(0, 12).join('\n')}`)
+    expect(failed).toEqual([])
+  }, 600_000)
+})
+
+// Isolating take()'s floor check is intentionally a store-level assertion:
+// no view calls the private take() directly. Outline/list use adopt()'s
+// return, which is also gated by showable()/visible(); the panel's child-page
+// loader reads latest() only after adopt() succeeds. show() and current() enforce the
+// same floor too. Removing only take's check can poison latest without making
+// a view show it; row-store.unit.test.ts detects that state. Removing the
+// floor altogether must (and does) fail both view-level seeded suites.
