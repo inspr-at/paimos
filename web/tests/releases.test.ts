@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { compare, displayHeadline, displayText, groupByDay, groupChanges, hasUsableNotes, matches, newSince, plainSubject, presentChanges, span, stats, ticketsOf, type Release } from '../src/lib/releases.ts'
+import { compare, displayHeadline, displayText, groupByDay, groupChanges, hasUsableNotes, isCalendarVersion, matches, newSince, plainSubject, presentChanges, releaseNotice, span, stats, ticketsOf, type Release } from '../src/lib/releases.ts'
 
 const rel = (version: string, at: string, extra: Partial<Release> = {}): Release => ({
   version, tag: `v${version}`, release_channel: 'stable', release_sequence: 1, state: 'published', reserved_at: at, tagged_at: at, published_at: at,
@@ -186,4 +186,23 @@ test('headlines read without the ticket keys their chips show, in sentence case'
   assert.equal(displayText('(AEON-75)', keys), '(AEON-75)')
   assert.equal(plainSubject('fix(AEON-72): keep unknown binaries as downloads (AEON-72)', ['AEON-72']), 'Keep unknown binaries as downloads')
   assert.equal(displayHeadline({ headline: 'wide lists (AEON-74)', tickets: ['AEON-74'], changes: [] }), 'Wide lists')
+})
+
+const PAGE = '260929095359.0.0'
+const SERVER = '260929113854.0.0'
+
+test('an outdated page gets the update notice, including when the server version is missing from history', () => {
+  assert.equal(isCalendarVersion(PAGE), true)
+  assert.equal(isCalendarVersion('dev'), false)
+  assert.equal(isCalendarVersion(''), false)
+  assert.equal(releaseNotice(PAGE, SERVER, SERVER), 'update')
+  assert.equal(releaseNotice(PAGE, SERVER, ''), 'update')
+  assert.equal(releaseNotice(PAGE, SERVER, '260101120000.0.0'), 'update')
+  assert.equal(releaseNotice(PAGE, PAGE, SERVER), 'missing')
+  assert.equal(releaseNotice(PAGE, PAGE, ''), null)
+  assert.equal(releaseNotice(SERVER, PAGE, ''), null)
+  assert.equal(releaseNotice('dev', SERVER, ''), null)
+  assert.equal(releaseNotice('dev', SERVER, 'nope'), 'missing')
+  assert.equal(releaseNotice(null, SERVER, ''), null)
+  assert.equal(releaseNotice(PAGE, 'dev', '260101120000.0.0'), 'missing')
 })

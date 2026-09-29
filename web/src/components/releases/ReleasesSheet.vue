@@ -3,11 +3,11 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, provide, reactive, ref, watch } from 'vue'
 import mark from '../../assets/brand/aeon-mark.svg'
 import { brand, generationLabel, setOverlayTitle } from '../../lib/brand'
-import { displayHeadline, groupByDay, hasUsableNotes, HISTORICAL_TAG_LABEL, historicalTagFallback, matches, presentChanges, releasedAt, stats as statsOf, ticketsOf, WRITTEN_AFTER_LABEL, writtenAfterRelease, type Release } from '../../lib/releases'
+import { displayHeadline, groupByDay, hasUsableNotes, HISTORICAL_TAG_LABEL, historicalTagFallback, matches, presentChanges, releasedAt, releaseNotice, stats as statsOf, ticketsOf, WRITTEN_AFTER_LABEL, writtenAfterRelease, type Release } from '../../lib/releases'
 import { useProfile } from '../../stores/profile'
 import { normalKey } from '../../lib/ticketLinks'
 import { relativeTime } from '../../lib/work'
-import { isCalendar, useReleases } from '../../stores/releases'
+import { useReleases } from '../../stores/releases'
 import { useVersion } from '../../stores/version'
 import AppIcon from '../AppIcon.vue'
 import CalendarVersion from '../CalendarVersion.vue'
@@ -64,8 +64,9 @@ const stats = computed(() => statsOf(releases.value, now.value))
 const filtering = computed(() => !!filter.q.trim() || filter.features || filter.fixes || filter.tickets)
 const reservedCount = computed(() => releases.value.filter(r => r.state === 'reserved').length)
 const compareTo = computed(() => mode.value === 'compare' && cursor.value && cursor.value !== compareFrom.value ? cursor.value : null)
-// This page still runs an older build than the server: say so, with a reload.
-const stale = computed(() => isCalendar(version.value?.version) && isCalendar(current.value) && current.value > version.value.version)
+// One notice. An outdated page says a newer version is live; it does not also
+// warn that this build's history lacks that version.
+const notice = computed(() => releaseNotice(version.value?.version, current.value, missing.value))
 const optionId = (v: string) => `release-${v.replace(/\./g, '-')}`
 
 // ---------- Selection ----------
@@ -73,7 +74,9 @@ function initialSelection() {
   if (cursor.value && byVersion.value.has(cursor.value)) return
   const wanted = props.target && props.target !== 'all' ? props.target.replace(/^v/, '') : ''
   if (wanted && byVersion.value.has(wanted)) { cursor.value = wanted; if (phone.value) showDetail.value = true; return }
-  if (wanted) missing.value = wanted
+  // A version this build does not have cannot open as detail. Stay on the list,
+  // where the one notice explains it.
+  if (wanted) { missing.value = wanted; showDetail.value = false }
   cursor.value = currentKnown.value ? current.value : releases.value[0]?.version ?? null
 }
 watch(() => props.target, target => {
@@ -282,12 +285,12 @@ const KINDS = [
           <button type="button" class="icon-btn flat help-btn" aria-label="Keyboard shortcuts" aria-keyshortcuts="?" :aria-expanded="help" @click="help = !help"><AppIcon name="keyboard" :size="15" /></button>
           <button type="button" class="icon-btn close-btn" aria-label="Close release history" aria-keyshortcuts="Escape" @click="emit('close')"><AppIcon name="close" :size="15" /></button>
         </div>
-        <p v-if="stale" class="notice" role="status">
+        <p v-if="notice === 'update'" class="notice" role="status">
           <AppIcon name="info" :size="14" />
-          <span>This page still runs {{ version.value?.version }}; the server runs {{ current }}.</span>
+          <span>A newer version is live: this page still runs {{ version.value?.version }}, and the server runs {{ current }}.</span>
           <button type="button" class="btn sm" @click="reload"><AppIcon name="refresh" :size="12" />Reload</button>
         </p>
-        <p v-if="missing" class="notice" role="status">
+        <p v-else-if="notice === 'missing'" class="notice" role="status">
           <AppIcon name="info" :size="14" />
           <span>{{ missing }} is not in this build’s release history.</span>
           <button type="button" class="icon-btn flat sm" aria-label="Dismiss" @click="missing = ''"><AppIcon name="close" :size="12" /></button>
@@ -450,7 +453,8 @@ const KINDS = [
 .compare-btn .keycap { margin-right: -5px; }
 .icon-btn { width: 36px; height: 36px; }
 .notice { display: flex; align-items: center; gap: 10px; padding: 8px 10px 8px 14px; border-radius: 12px; background: var(--glass); border: 1px solid var(--glass-edge); box-shadow: 0 0 0 1px var(--line); color: var(--ink); font-size: 13px; }
-.notice > span { flex: 1; min-width: 0; }
+.notice > span { flex: 1; min-width: 0; line-height: 1.35; }
+.notice .btn, .notice .icon-btn { flex: none; }
 .notice svg { color: var(--teal-ink); }
 .stats-placeholder { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px; height: 110px; }
 .stats-placeholder .skeleton { border-radius: 14px; }
@@ -579,6 +583,8 @@ const KINDS = [
   .titles h1 { font-size: 21px; }
   .spacer { display: none; }
   .close-btn { order: 1; width: 44px; height: 44px; }
+  .notice .btn, .notice .icon-btn { height: 44px; }
+  .notice .icon-btn { width: 44px; }
   .search { order: 2; flex: 1 1 calc(100% - 54px); width: auto; }
   .search .field { height: 44px; }
   .slash, .help-btn, .compare-btn .btn-text, .compare-btn .keycap { display: none; }

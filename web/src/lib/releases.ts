@@ -290,3 +290,19 @@ export function newSince(releases: Release[], lastSeen: string | null) {
   return new Set(releases.filter(r => r.state === 'published' && r.version > lastSeen).map(r => r.version))
 }
 export const shortCommit = (sha: string) => sha.slice(0, 7)
+
+// ---------- One notice after a deploy ----------
+// Calendar versions are fixed-width, so string order is version order.
+// The releases store uses the same test.
+const CALENDAR_VERSION = /^\d{12}\.\d+\.\d+$/
+export function isCalendarVersion(value: string | null | undefined): value is string {
+  return !!value && CALENDAR_VERSION.test(value)
+}
+
+// A page older than the server already says a newer version is live. That
+// version missing from this build's history is the same fact, so the history
+// shows one notice, never both.
+export function releaseNotice(pageVersion: string | null | undefined, serverVersion: string, missingVersion: string): 'update' | 'missing' | null {
+  if (isCalendarVersion(pageVersion) && isCalendarVersion(serverVersion) && serverVersion > pageVersion) return 'update'
+  return missingVersion ? 'missing' : null
+}
