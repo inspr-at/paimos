@@ -65,7 +65,7 @@ func (m *Module) handleCreateNode(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	node, err := m.createNode(r.Context(), p, in, cliClient(r))
+	node, err := m.createNode(r.Context(), p, in)
 	if err != nil {
 		writeErr(w, err)
 		return
@@ -192,11 +192,7 @@ func (m *Module) getNode(ctx context.Context, tenantID, id string) (nodeJSON, er
 	return node, err
 }
 
-func cliClient(r *http.Request) bool {
-	return strings.EqualFold(strings.TrimSpace(r.Header.Get("X-Aeon-Client")), "cli")
-}
-
-func (m *Module) createNode(ctx context.Context, p tenant.Principal, in nodeCreate, cli bool) (nodeJSON, error) {
+func (m *Module) createNode(ctx context.Context, p tenant.Principal, in nodeCreate) (nodeJSON, error) {
 	kindID, ok := parseUUID(in.KindID)
 	if !ok {
 		return nodeJSON{}, badRequest("invalid kind_id")
@@ -312,7 +308,7 @@ func (m *Module) createNode(ctx context.Context, p tenant.Principal, in nodeCrea
 			var f map[string]any
 			_ = json.Unmarshal(fields, &f)
 			if f["estimate_hours"] == nil {
-				node.Warnings = append(node.Warnings, missingEstimateWarning(cli))
+				node.Warnings = append(node.Warnings, missingEstimateWarning())
 			}
 		}
 		views, err := loadEstimates(ctx, tx, []string{loaded.ID})

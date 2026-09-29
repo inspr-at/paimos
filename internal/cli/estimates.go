@@ -39,6 +39,19 @@ func estimateFields(fields map[string]any, hours float64, source string) {
 		fields["estimate_source"] = source
 	}
 }
+func withEstimateHints(warnings []string) []string {
+	out := make([]string, 0, len(warnings)+1)
+	hinted := false
+	for _, warning := range warnings {
+		out = append(out, warning)
+		if hinted || !strings.Contains(warning, "fields.estimate_hours") || strings.Contains(warning, "--estimate") {
+			continue
+		}
+		out = append(out, "pass --estimate (for example 2h or 30m)")
+		hinted = true
+	}
+	return out
+}
 func validEstimate(value any) bool {
 	h, ok := value.(float64)
 	return ok && h > 0 && h <= 200 && !math.IsInf(h, 0) && !math.IsNaN(h)

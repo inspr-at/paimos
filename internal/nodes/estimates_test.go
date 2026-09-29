@@ -52,6 +52,11 @@ func TestEstimateValidationAttributionAndPreservation(t *testing.T) {
 		if n.Estimate == nil || n.Estimate.Hours == nil || *n.Estimate.Hours != 1.5 || n.Estimate.EstimatedChildren != 0 || n.Estimate.OpenChildren != 0 || n.Estimate.By == nil || n.Estimate.By.ID != actor.ID || n.Estimate.By.Name != actor.Name {
 			t.Fatalf("create estimate view: %+v", n.Estimate)
 		}
+		code, body := call(t, &actor, "GET", "/api/nodes/"+n.ID, "")
+		got := decode[nodeJSON](t, code, body, 200)
+		if got.Estimate == nil || got.Estimate.Hours == nil || *got.Estimate.Hours != *n.Estimate.Hours || got.Estimate.By == nil || got.Estimate.By.ID != n.Estimate.By.ID || got.Estimate.By.Name != n.Estimate.By.Name || got.Estimate.OpenChildren != n.Estimate.OpenChildren || got.Estimate.EstimatedChildren != n.Estimate.EstimatedChildren {
+			t.Fatalf("create estimate differs from get: create %+v get %+v", n.Estimate, got.Estimate)
+		}
 		f := estimateFieldsOf(t, n)
 		if f["estimate_source"] != string(actor.Kind) || f["estimate_by"] != actor.ID || f["estimate_confirmed"] != (actor.Kind == tenant.Person) {
 			t.Fatalf("provenance: %v", f)
@@ -62,7 +67,7 @@ func TestEstimateValidationAttributionAndPreservation(t *testing.T) {
 		// A replacement of other fields must not turn an agent draft into a person estimate.
 		f["priority"] = "high"
 		raw, _ := json.Marshal(map[string]any{"fields": f})
-		code, body := call(t, &p, "PATCH", "/api/nodes/"+n.ID, string(raw))
+		code, body = call(t, &p, "PATCH", "/api/nodes/"+n.ID, string(raw))
 		updated := decode[nodeJSON](t, code, body, 200)
 		after := estimateFieldsOf(t, updated)
 		if after["estimate_by"] != actor.ID || after["estimate_at"] != f["estimate_at"] {
@@ -72,6 +77,9 @@ func TestEstimateValidationAttributionAndPreservation(t *testing.T) {
 		updated = decode[nodeJSON](t, code, body, 200)
 		if estimateFieldsOf(t, updated)["estimate_source"] != "person" {
 			t.Fatal("person confirmation did not attribute")
+		}
+		if updated.Estimate == nil || updated.Estimate.Hours == nil || *updated.Estimate.Hours != 1.5 || updated.Estimate.By == nil || updated.Estimate.By.ID != p.ID {
+			t.Fatal("update estimate view", updated.Estimate)
 		}
 		code, body = call(t, &agent, "PATCH", "/api/nodes/"+n.ID, `{"fields":{"estimate_hours":2,"estimate_source":"person"}}`)
 		if code != 400 {
@@ -95,8 +103,11 @@ func TestEstimateValidationAttributionAndPreservation(t *testing.T) {
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 	cliNode := decode[nodeJSON](t, rec.Code, rec.Body.Bytes(), http.StatusCreated)
-	if !strings.Contains(strings.Join(cliNode.Warnings, " "), "--estimate") || strings.Contains(strings.Join(cliNode.Warnings, " "), "fields.estimate_hours") {
-		t.Fatal("cli warning", cliNode.Warnings)
+	if strings.Contains(strings.Join(cliNode.Warnings, " "), "--estimate") || !strings.Contains(strings.Join(cliNode.Warnings, " "), "fields.estimate_hours") {
+		t.Fatal("api warning stays neutral", cliNode.Warnings)
+	}
+	if cliNode.Estimate != nil {
+		t.Fatal("missing hours still has an estimate view")
 	}
 	other := addPrincipal(t, "estimate-other")
 	code, _ := call(t, &other, "PATCH", "/api/nodes/"+missing.ID, `{"fields":{"estimate_hours":2}}`)

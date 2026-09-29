@@ -80,11 +80,8 @@ func canonicalEstimate(ctx context.Context, tx pgx.Tx, p tenant.Principal, id st
 	return json.Marshal(next)
 }
 
-// The CLI names its flag; every other caller is told which field to set.
-func missingEstimateWarning(cli bool) string {
-	if cli {
-		return "add an agent-hours estimate with --estimate (for example 2h or 30m)"
-	}
+// Callers are told which field to set. The CLI adds its own flag hint.
+func missingEstimateWarning() string {
 	return "add an agent-hours estimate in fields.estimate_hours (for example 2 or 0.5)"
 }
 
