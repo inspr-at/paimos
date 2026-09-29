@@ -539,6 +539,36 @@ LEFT JOIN principals assignee_target ON assignee_target.tenant_id=n.tenant_id
 LEFT JOIN LATERAL (SELECT coalesce(assignee_target.id,native_person.id,classic_person.id) AS id,
     coalesce(assignee_target.name,native_person.name,classic_person.name) AS name) assignee ON true `
 
+// assigneeShownSQL is the name the Assignee cell leads with: the stored person,
+// otherwise the lead live worker (worker.shown_name).
+const assigneeShownSQL = `coalesce(ap.name, worker.shown_name)`
+
+// assigneeWorkerJoin picks that lead worker. It is attached only while sorting
+// by assignee. ap.name IS NULL inside the lateral skips the lookup when a
+// stored name already decides the order. Eligibility matches the list chip
+// (ticketWorkers / isActiveSession): bound to the ticket, not stopped, and a
+// stop reason that is not an archive. Among those, a worker leads a
+// coordinator, then the earliest start, then the session id — the same
+// tie-break the chip uses once two sessions share a state. The partial index
+// harness_sessions_ticket_eta (tenant, ticket, stopped_at IS NULL) probes one
+// ticket, so a list that is not sorted by assignee never touches the table.
+const assigneeWorkerJoin = ` LEFT JOIN LATERAL (
+    SELECT coalesce(nullif(btrim(s.display_label), ''), nullif(btrim(agent.name), ''),
+        CASE s.harness WHEN 'codex' THEN 'Codex' WHEN 'claude' THEN 'Claude' WHEN 'pi' THEN 'Pi'
+            WHEN 'cursor' THEN 'Cursor' WHEN 'grok' THEN 'Grok'
+            ELSE upper(left(s.harness, 1)) || substr(s.harness, 2) END || ' agent') AS shown_name
+    FROM harness_sessions s
+    LEFT JOIN principals agent ON agent.tenant_id=s.tenant_id AND agent.id=s.agent_principal_id
+    WHERE ap.name IS NULL
+      AND s.tenant_id=current_setting('aeon.tenant_id')::uuid
+      AND s.ticket_node_id=f.id
+      AND s.stopped_at IS NULL
+      AND s.phase<>'stopped'
+      AND position('archived' in lower(coalesce(s.stop_reason, '')))=0
+    ORDER BY (s.role='coordinator'), s.created_at, s.id
+    LIMIT 1
+) worker ON true `
+
 // Label and tag expressions over a node n. Native fields win, also an
 // explicit null; imported work falls back to its classic copy.
 func labelSQL(field string) string {
@@ -748,8 +778,9 @@ func listOrder(q listQuery) string {
 		case "kind":
 			parts = append(parts, "f.kind_slug "+dir)
 		case "assignee":
-			// Unassigned work comes last in both directions.
-			parts = append(parts, "ap.name IS NULL ASC", "lower(ap.name) "+dir, "ap.id "+dir)
+			// The shown name, empty last in both directions. ap.id then f.id
+			// keep people who share a name in a stable order.
+			parts = append(parts, assigneeShownSQL+" IS NULL ASC", "lower("+assigneeShownSQL+") "+dir, "ap.id "+dir)
 		case "eta_ready":
 			parts = append(parts, "eta.eta_ready_at IS NULL ASC", "eta.eta_ready_at "+dir)
 		case "progress":
@@ -774,7 +805,7 @@ func listSQL(q listQuery, anchor any) (string, []any) {
 	anchorArg, limitArg := fmt.Sprintf("$%d", len(args)-1), fmt.Sprintf("$%d", len(args))
 	people := ""
 	if sortsBy(q, "assignee") {
-		people = ` LEFT JOIN principals ap ON ap.tenant_id=current_setting('aeon.tenant_id')::uuid AND ap.id=f.assignee_id::uuid`
+		people = ` LEFT JOIN principals ap ON ap.tenant_id=current_setting('aeon.tenant_id')::uuid AND ap.id=f.assignee_id::uuid` + assigneeWorkerJoin
 	}
 	etaJoin := ""
 	if sortsBy(q, "eta_ready") || sortsBy(q, "progress") {

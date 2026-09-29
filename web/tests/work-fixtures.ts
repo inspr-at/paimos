@@ -4,6 +4,7 @@
 // sort, facets, cursor paging) so specs can assert on real behaviour.
 import type { Page } from '@playwright/test'
 import { benefitIssues, completedTicketState } from '../src/lib/ticketBenefits.ts'
+import { who, type LiveAgent } from '../src/lib/liveAgents.ts'
 import { mockEffectivePermissions } from './authz-fixtures'
 
 export const me = { id: '11111111-1111-4111-8111-111111111111', name: 'Markus Barta' }
@@ -203,6 +204,23 @@ function costUnit(node: MockNode): string {
 }
 const release = (node: MockNode) => labelOf(node.fields.release)
 const personName = (data: Fixtures, id: unknown) => typeof id === 'string' ? data.people.find(p => p.id === id)?.name ?? '' : ''
+// The name an assignee sort uses: the stored person, else the lead live worker
+// (worker before coordinator, earliest start, then session id). Empty is last
+// in both directions. Stopped and archived sessions do not count.
+function shownAssignee(data: Fixtures, node: MockNode): string {
+  const stored = personName(data, node.fields.assignee).trim()
+  if (stored) return stored.toLowerCase()
+  const live = data.live.filter(agent => {
+    const ticket = agent.ticket
+    if (!ticket || ticket.id !== node.id || agent.project_id !== node.project || ticket.project_id !== node.project) return false
+    if (agent.phase === 'stopped' || agent.stopped_at) return false
+    if (/archived/i.test(agent.stop_reason ?? '')) return false
+    return true
+  }).sort((a, b) => Number(a.role === 'coordinator') - Number(b.role === 'coordinator')
+    || Date.parse(a.since) - Date.parse(b.since)
+    || (a.session_id ?? a.since).localeCompare(b.session_id ?? b.since))
+  return live[0] ? who(live[0] as LiveAgent).trim().toLowerCase() : ''
+}
 
 function completionRefusal(node: MockNode, nextState: string, fields: Record<string, unknown>): { error: string; code: string } | null {
   if (node.kind_slug !== 'ticket' || completedTicketState(node.state) || !completedTicketState(nextState)) return null
@@ -487,12 +505,18 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
       rows = [...rows].sort((a, b) => {
         for (const raw of sort) {
           const desc = raw.startsWith('-'), field = desc ? raw.slice(1) : raw
+          if (field === 'assignee') {
+            const x = shownAssignee(data, a), y = shownAssignee(data, b)
+            if (!x !== !y) return x ? -1 : 1
+            if (x !== y) return (x < y ? -1 : 1) * (desc ? -1 : 1)
+            continue
+          }
           const etaMissing = (n: MockNode) => field === 'eta_ready' ? !n.eta?.eta_ready_at : field === 'progress' ? typeof n.eta?.progress_pct !== 'number' : false
           if ((field === 'eta_ready' || field === 'progress') && etaMissing(a) !== etaMissing(b)) return etaMissing(a) ? 1 : -1
           const value = (n: MockNode): string | number => field === 'state' ? (STATE_ORDER.indexOf(normal(n.state)) + 1 || 99)
             : field === 'priority' ? PRIORITY_ORDER.indexOf(typeof n.fields.priority === 'string' ? n.fields.priority : 'none')
             : field === 'updated_at' ? Date.parse(n.updated_at) : field === 'created_at' ? Date.parse(n.created_at) : field === 'key' ? Number(n.key.split('-')[1]) : field === 'title' ? n.title
-            : field === 'kind' ? n.kind_slug : field === 'assignee' ? (personName(data, n.fields.assignee) || '\uffff')
+            : field === 'kind' ? n.kind_slug
             : field === 'eta_ready' ? Date.parse(String(n.eta?.eta_ready_at ?? '')) || 0
             : field === 'progress' ? (typeof n.eta?.progress_pct === 'number' ? n.eta.progress_pct : 0) : 0
           const x = value(a), y = value(b)
