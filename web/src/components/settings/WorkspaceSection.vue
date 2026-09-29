@@ -2,6 +2,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { api } from '../../lib/api'
+import { brand } from '../../lib/brand'
 import { can, myWorkspaceRole, permissionsAvailable } from '../../lib/authz'
 import { useSession } from '../../stores/session'
 import AppIcon from '../AppIcon.vue'
@@ -25,6 +26,25 @@ onMounted(async () => {
     }
   } catch { /* hide the control when the interval cannot be read */ }
 })
+// AEON-291: minutes of silence before the server marks a session outside the
+// product as Lost contact. Hidden when it cannot be read.
+const lostMinutes = ref(15)
+const lostReady = ref(false)
+onMounted(async () => {
+  if (!can('settings.manage')) return
+  try {
+    const response = await api('/settings/heartbeat-lost')
+    if (!response.ok) return
+    const body = await response.json()
+    if (typeof body.heartbeat_lost_minutes === 'number') { lostMinutes.value = body.heartbeat_lost_minutes; lostReady.value = true }
+  } catch { /* hide the control */ }
+})
+async function saveLost() {
+  const next = Math.round(Number(lostMinutes.value))
+  if (!(next >= 5 && next <= 1440)) return
+  lostMinutes.value = next
+  await api('/settings/heartbeat-lost', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ heartbeat_lost_minutes: next }) })
+}
 async function saveInterval() {
   const next = Math.round(Number(minutes.value))
   if (next < 1 || next > 240) return
@@ -46,6 +66,11 @@ async function saveInterval() {
       <template #lead>How often a working agent reports when a ticket will be ready, and when it will be live.</template>
       <label class="interval" for="eta-minutes">Minutes between estimates</label>
       <input id="eta-minutes" v-model.number="minutes" class="minutes" type="number" min="1" max="240" inputmode="numeric" @change="saveInterval" />
+    </SettingsCard>
+    <SettingsCard v-if="lostReady" title="Silent sessions" icon="agent" anchor="silent-sessions">
+      <template #lead>A session running outside {{ brand.short_name }} that stops reporting is marked Lost contact. Its next heartbeat brings it back.</template>
+      <label class="interval" for="lost-minutes">Minutes without a heartbeat</label>
+      <input id="lost-minutes" v-model.number="lostMinutes" class="minutes" type="number" min="5" max="1440" inputmode="numeric" @change="saveLost" />
     </SettingsCard>
     <SettingsCard v-if="can('members.read')" title="People and agents" icon="users" anchor="members">
       <template #lead>Members, invites, roles, project access and agent keys have their own place.</template>

@@ -19,25 +19,35 @@ import ProviderMark from './ProviderMark.vue'
 import { intendedResult, sessionContext, sessionExecution } from './sessionRow'
 import EtaCell from '../work/EtaCell.vue'
 import { etaFromSession } from '../../lib/eta'
+import { brand } from '../../lib/brand'
+import { toast } from '../../lib/toast'
+import { quickRemoval, sessionMenu, type SessionMenu } from './sessionActions'
+import { controlPermitted, type ControlGrant } from '../../lib/managedControl'
+import { can } from '../../lib/authz'
+import { useSession } from '../../stores/session'
 
 // Session families stay together across status groups. Each lead's history is
 // opt-in for this mounted list only; refreshes never open it or persist it.
 const props = defineProps<{
-  removed?: SessionView[]; groups: Record<SessionGroup, SessionView[]>; now: number; cursor: string; selected: string; state: Availability; error: string
-  loaded: boolean; controls: Record<string, SessionControl>; canControl: boolean; canStart: boolean
+  history?: SessionView[]; historyState?: 'idle' | 'loading' | 'ready' | 'error'; historyMore?: boolean; groups: Record<SessionGroup, SessionView[]>; now: number; cursor: string; selected: string; state: Availability; error: string
+  loaded: boolean; controls: Record<string, SessionControl>; canStart: boolean
 }>()
-const emit = defineEmits<{ open: [id: string]; control: [view: SessionView, kind: SessionControl['kind']]; focusRow: [id: string]; retry: []; start: [] }>()
+const emit = defineEmits<{ open: [id: string]; control: [view: SessionView, kind: SessionControl['kind']]; focusRow: [id: string]; retry: []; start: []; history: []; older: [] }>()
 const showStopped = ref(false)
-// Removed sessions are a separate, opt-in list; they keep their full history.
+// History is a separate, opt-in list of every ended or removed session. The
+// main list keeps only sessions that ended in the last 24 hours (AEON-291).
 const showRemoved = ref(false)
-const removedCount = computed(() => props.removed?.length ?? 0)
-watch(removedCount, n => { if (!n) showRemoved.value = false })
+const removedCount = computed(() => props.history?.length ?? 0)
+function toggleHistory() {
+  showRemoved.value = !showRemoved.value
+  if (showRemoved.value) emit('history')
+}
 const removal = useSessionRemoval()
 const current = computed(() => GROUPS.flatMap(g => props.groups[g.id]))
 const stale = computed(() => current.value.map(v => v.session).filter(s => isStale(s, props.now) && removal.canRemove(s)))
 const total = computed(() => GROUPS.reduce((sum, g) => sum + props.groups[g.id].length, 0))
 type Branch = SessionBranch<SessionView>
-const forest = computed(() => sessionForest(showRemoved.value ? props.removed ?? [] : current.value, props.now))
+const forest = computed(() => sessionForest(showRemoved.value ? props.history ?? [] : current.value, props.now))
 // Three calm buckets in urgency order: what needs a look, what runs, what ended.
 // Each row still names its exact state; a family sits with its most urgent member.
 type Bucket = 'attention' | 'live' | 'stopped'
@@ -57,7 +67,7 @@ function toggle(branch: Branch) {
   const id = branch.view.session.id
   expanded.value[id] = !isExpanded(branch)
 }
-function toggleHistory(branch: Branch) {
+function toggleStopped(branch: Branch) {
   const id = branch.view.session.id
   history.value[id] = !history.value[id]
   expanded.value[id] = true
@@ -108,27 +118,34 @@ watch(selectedPath, path => {
   if (roots('stopped').some(containsSelected)) showStopped.value = true
 }, { immediate: true })
 
-const controlBlock = (view: SessionView, kind: SessionControl['kind']) => controlBlocked(view.session, kind, view.name, props.canControl, props.controls[view.session.id])
-// A direct link to a removed session shows it in the Removed list.
-watch(() => props.selected, id => {
-  if (id && !current.value.some(v => v.session.id === id) && props.removed?.some(v => v.session.id === id)) showRemoved.value = true
+// Control rights are per session: harness.control in that session's project.
+const identity = useSession()
+const grant = computed<ControlGrant>(() => ({ person: identity.identity?.principal.kind === 'person', can }))
+const controlBlock = (view: SessionView, kind: SessionControl['kind']) => controlBlocked(view.session, kind, view.name, controlPermitted(view.session, grant.value), props.controls[view.session.id])
+// A direct link to a session that already left the list shows it in History.
+// Removing the selected session here never flips the list.
+let seenCurrent = ''
+watch([() => props.selected, () => props.history?.length, () => current.value.length], ([id]) => {
+  if (!id) return
+  if (current.value.some(v => v.session.id === id)) { seenCurrent = id; return }
+  if (seenCurrent !== id && props.history?.some(v => v.session.id === id)) showRemoved.value = true
 }, { immediate: true })
 
-// Every row has one quiet overflow button: process controls while it runs, and
-// Remove from Agents for people. Wide rows also offer Interrupt on hover; Stop
-// asks first anyway, so it lives in the menu.
+// A row offers only what works for its session (AEON-291). Ended and silent
+// sessions get a bin right in the row: one click, then an undo toast. The
+// overflow holds the rest; it is hidden when the bin already says it all.
 const live = (view: SessionView) => view.session.phase !== 'stopped' && !view.session.archived_at
-const hasMenu = (view: SessionView) => live(view) || removal.canRemove(view.session)
+const menuOf = (view: SessionView): SessionMenu => sessionMenu(view, { grant: grant.value, canRemove: removal.canRemove(view.session), pending: props.controls[view.session.id], product: brand.value.short_name, now: props.now })
+const bin = (view: SessionView) => removal.canRemove(view.session) && quickRemoval(view)
+const hasMenu = (view: SessionView) => { const m = menuOf(view); return m.control.length > 0 || m.other.length > 0 || !!m.note || (m.remove && !bin(view)) }
 // The bound ticket's estimate sits under its key while the session runs; an ended
 // session no longer speaks for the ticket.
 const etaOf = (view: SessionView) => view.ticket && live(view) ? etaFromSession(view.session) : null
 const hasEta = computed(() => current.value.some(view => !!etaOf(view)))
-// Inline hover controls only where they can ever work; a session outside Aeon or
-// a reader without write access finds the reason in the menu instead.
-const inline = (view: SessionView, kind: SessionControl['kind']) => props.canControl && view.session.management_mode === 'managed' && view.session.advertised_capabilities.includes(kind)
-// One reason for both controls is said once, under them.
-const sharedBlock = (view: SessionView) => { const why = controlBlock(view, 'interrupt'); return why && why === controlBlock(view, 'stop') ? why : '' }
+// The hover shortcut exists only where Interrupt works right now.
+const inline = (view: SessionView, kind: SessionControl['kind']) => menuOf(view).control.includes(kind)
 const menu = ref<{ view: SessionView; anchor: HTMLElement } | null>(null)
+const menuItems = computed(() => menu.value ? menuOf(menu.value.view) : null)
 function openMenu(view: SessionView, event: MouseEvent) { menu.value = menu.value?.view.session.id === view.session.id ? null : { view, anchor: event.currentTarget as HTMLElement } }
 function pick(kind: SessionControl['kind']) {
   const view = menu.value?.view
@@ -138,7 +155,18 @@ function pick(kind: SessionControl['kind']) {
 function pickRemove() {
   const view = menu.value?.view
   menu.value = null
-  if (view) void removal.removeOne(view.session, view.name)
+  if (view) void removal.removeOne(view.session, view.name, quickRemoval(view))
+}
+function pickOpen() {
+  const view = menu.value?.view
+  menu.value = null
+  if (view) emit('open', view.session.id)
+}
+async function pickCopy() {
+  const view = menu.value?.view
+  menu.value = null
+  if (!view) return
+  try { await navigator.clipboard.writeText(view.session.id); toast('Session id copied') } catch { toast('Copy failed. The id is in the session details.', { tone: 'error' }) }
 }
 function pendingLabel(view: SessionView) {
   const c = props.controls[view.session.id]
@@ -154,16 +182,16 @@ function rowClick(event: MouseEvent, id: string) {
 <template>
   <section class="sessions glass-card" aria-labelledby="sessions-title">
     <header class="card-head">
-      <h2 id="sessions-title">{{ showRemoved ? 'Removed sessions' : 'Sessions' }}</h2>
+      <h2 id="sessions-title">{{ showRemoved ? 'History' : 'Sessions' }}</h2>
       <span v-if="loaded && state === 'ready'" class="head-tools">
         <button
           v-if="!showRemoved && stale.length" type="button" class="btn sm ghost quiet-btn" :disabled="removal.busy.value"
           :data-tip="`${stale.length} without a heartbeat for 15 minutes`" @click="removal.clearStale(stale)"
         >Clear stale</button>
         <button
-          v-if="removedCount || showRemoved" type="button" class="btn sm ghost quiet-btn" :aria-pressed="showRemoved"
-          :aria-label="showRemoved ? 'Back to sessions' : `Show ${removedCount} removed sessions`" @click="showRemoved = !showRemoved"
-        ><template v-if="showRemoved"><AppIcon name="arrow-left" :size="13" />Sessions</template><template v-else>Removed<span class="count">{{ removedCount }}</span></template></button>
+          type="button" class="btn sm ghost quiet-btn" :aria-pressed="showRemoved"
+          :aria-label="showRemoved ? 'Back to sessions' : 'Show history: every ended or removed session'" @click="toggleHistory"
+        ><template v-if="showRemoved"><AppIcon name="arrow-left" :size="13" />Sessions</template><template v-else><AppIcon name="clock" :size="13" />History</template></button>
       </span>
     </header>
 
@@ -181,7 +209,7 @@ function rowClick(event: MouseEvent, id: string) {
     <div v-else-if="!loaded" class="skeleton-rows" role="status" aria-label="Loading sessions">
       <div v-for="i in 5" :key="i" class="sk-row"><span class="skeleton dot" /><span class="skeleton" :style="{ width: `${18 + (i * 7) % 16}%` }" /><span class="skeleton key" /><span class="skeleton" style="width: 12%" /></div>
     </div>
-    <p v-else-if="showRemoved && !removedCount" class="state">No removed sessions.</p>
+    <p v-else-if="showRemoved && !removedCount" class="state" :role="historyState === 'error' ? 'alert' : undefined">{{ historyState === 'loading' ? 'Loading history…' : historyState === 'error' ? 'History could not be loaded.' : 'No ended sessions yet.' }}</p>
     <ConnectHint v-else-if="!total && !showRemoved" :can-start="canStart" @start="emit('start')" />
 
     <div v-else class="table" :class="{ 'has-eta': hasEta }" role="table" aria-label="Agent sessions">
@@ -193,7 +221,7 @@ function rowClick(event: MouseEvent, id: string) {
       <template v-for="group in BUCKETS" :key="group.id">
         <div v-if="roots(group.id).length" class="group-row" :class="group.id" role="row">
           <span role="rowheader" class="group-label">
-            <template v-if="showRemoved">Removed<span class="mono">{{ roots(group.id).length }}</span></template>
+            <template v-if="showRemoved">Ended<span class="mono">{{ roots(group.id).length }}</span></template>
             <button v-else-if="group.id === 'stopped'" type="button" class="group-toggle" :aria-expanded="showStopped" @click="showStopped = !showStopped">
               <AppIcon name="chevron-right" :size="12" class="chev" :class="{ turned: showStopped }" />{{ group.label }}<span class="mono">{{ roots(group.id).length }}</span>
             </button>
@@ -208,7 +236,7 @@ function rowClick(event: MouseEvent, id: string) {
             <span v-for="(continues, level) in guides" :key="level" class="tree-guide" :class="{ continues, elbow: level === depth - 1, last: level === depth - 1 && !continues }" :style="{ '--level': level }" />
             <span v-if="open" class="tree-stem" :style="{ '--level': depth }" />
           </span>
-          <span role="cell" class="c-state"><AgentStateLabel :state="view.status.state" :label="view.status.label" :detail="pendingLabel(view)" /></span>
+          <span role="cell" class="c-state"><AgentStateLabel :state="view.status.state" :label="view.status.label" :detail="view.session.archived_at ? 'Removed' : pendingLabel(view)" /></span>
           <span role="cell" class="c-agent">
             <span v-if="depth" class="sr-only">Worker of {{ parent }}. </span>
             <RouterLink class="agent-link" :to="`/agents/${view.session.id}`" :aria-label="`${view.harness} ${view.name}, ${view.status.label}${view.session.role === 'coordinator' ? ', lead' : ''}. ${primary}. ${context}`">
@@ -230,7 +258,7 @@ function rowClick(event: MouseEvent, id: string) {
               </button>
               <template v-if="otherChildren(branch)"><span aria-hidden="true"> · </span><span class="idle-count">{{ otherChildren(branch) }} other active</span></template>
               <span aria-hidden="true"> · </span>
-              <button type="button" class="worker-toggle history-toggle" :disabled="!stoppedChildren(branch)" :aria-expanded="!!history[view.session.id]" :aria-label="`${history[view.session.id] ? 'Hide' : 'Show'} stopped workers of ${view.name}: ${stoppedChildren(branch)} stopped`" @click="toggleHistory(branch)">{{ stoppedChildren(branch) }} stopped</button>
+              <button type="button" class="worker-toggle history-toggle" :disabled="!stoppedChildren(branch)" :aria-expanded="!!history[view.session.id]" :aria-label="`${history[view.session.id] ? 'Hide' : 'Show'} stopped workers of ${view.name}: ${stoppedChildren(branch)} stopped`" @click="toggleStopped(branch)">{{ stoppedChildren(branch) }} stopped</button>
             </span>
           </span>
           <span role="cell" class="c-ticket">
@@ -251,12 +279,14 @@ function rowClick(event: MouseEvent, id: string) {
           </span>
           <span role="cell" class="right c-elapsed mono-cell">{{ elapsed(view.session, now) }}</span>
           <span role="cell" class="c-actions">
-            <template v-if="live(view)">
-              <button
-                v-if="inline(view, 'interrupt')" type="button" class="icon-btn sm flat act" :aria-label="`Interrupt ${view.name}`" :data-tip="controlBlock(view, 'interrupt') || 'Interrupt: stop the current turn, keep the session'"
-                :aria-disabled="!!controlBlock(view, 'interrupt')" @click="!controlBlock(view, 'interrupt') && emit('control', view, 'interrupt')"
-              ><AppIcon name="interrupt" :size="16" /></button>
-            </template>
+            <button
+              v-if="inline(view, 'interrupt')" type="button" class="icon-btn sm flat act" :aria-label="`Interrupt ${view.name}`" data-tip="Interrupt: stop the current turn, keep the session"
+              @click="emit('control', view, 'interrupt')"
+            ><AppIcon name="interrupt" :size="16" /></button>
+            <button
+              v-if="bin(view)" type="button" class="icon-btn sm flat bin" :aria-label="`Remove ${view.name}`" data-tip="Remove · undo right after"
+              :disabled="removal.busy.value" @click="removal.removeOne(view.session, view.name, true)"
+            ><AppIcon name="trash" :size="16" /></button>
             <button
               v-if="hasMenu(view)" type="button" class="icon-btn sm flat more" :aria-label="`Actions for ${view.name}`" aria-haspopup="menu"
               :aria-expanded="menu?.view.session.id === view.session.id" @click="openMenu(view, $event)"
@@ -265,23 +295,36 @@ function rowClick(event: MouseEvent, id: string) {
         </div>
       </template>
     </div>
-    <FloatingPanel v-if="menu" :anchor="menu.anchor" align="end" :width="248" :label="`Actions for ${menu.view.name}`" @close="menu = null">
+    <div v-if="showRemoved && loaded && state === 'ready' && (historyMore || (historyState === 'loading' && removedCount))" class="older">
+      <button type="button" class="btn sm ghost quiet-btn" :disabled="historyState === 'loading'" @click="emit('older')">{{ historyState === 'loading' ? 'Loading…' : 'Show older' }}</button>
+    </div>
+    <FloatingPanel v-if="menu && menuItems" :anchor="menu.anchor" align="end" :width="248" :label="`Actions for ${menu.view.name}`" @close="menu = null">
       <div role="menu" :aria-label="`Actions for ${menu.view.name}`">
-        <template v-if="live(menu.view)">
-          <button type="button" role="menuitem" class="menu-item" :aria-disabled="!!controlBlock(menu.view, 'interrupt')" data-autofocus @click="pick('interrupt')">
-            <AppIcon name="interrupt" :size="16" /><span class="mi-text"><span>Interrupt</span><small v-if="!sharedBlock(menu.view)">{{ controlBlock(menu.view, 'interrupt') || 'Stop the current turn, keep the session' }}</small></span>
+        <template v-if="menuItems.control.length">
+          <button v-if="menuItems.control.includes('interrupt')" type="button" role="menuitem" class="menu-item" data-autofocus @click="pick('interrupt')">
+            <AppIcon name="interrupt" :size="16" /><span class="mi-text"><span>Interrupt</span><small>Stop the current turn, keep the session</small></span>
           </button>
-          <button type="button" role="menuitem" class="menu-item danger" :aria-disabled="!!controlBlock(menu.view, 'stop')" @click="pick('stop')">
-            <AppIcon name="halt" :size="16" /><span class="mi-text"><span>Stop session…</span><small v-if="!sharedBlock(menu.view)">{{ controlBlock(menu.view, 'stop') || 'End this session; asks first' }}</small></span>
+          <button v-if="menuItems.control.includes('stop')" type="button" role="menuitem" class="menu-item danger" @click="pick('stop')">
+            <AppIcon name="halt" :size="16" /><span class="mi-text"><span>Stop session…</span></span>
           </button>
-          <p v-if="sharedBlock(menu.view)" class="menu-note">{{ sharedBlock(menu.view) }}</p>
+          <button v-if="menuItems.control.includes('settings')" type="button" role="menuitem" class="menu-item" @click="pickOpen">
+            <AppIcon name="edit" :size="16" /><span class="mi-text"><span>Name, model, effort</span></span>
+          </button>
+          <hr class="menu-sep">
         </template>
-        <template v-if="removal.canRemove(menu.view.session)">
-          <hr v-if="live(menu.view)" class="menu-sep">
-          <button type="button" role="menuitem" class="menu-item" :data-autofocus="live(menu.view) ? undefined : ''" @click="pickRemove">
-            <AppIcon name="archive" :size="16" /><span class="mi-text"><span>Remove from Agents…</span><small>Hides the record; does not stop the process</small></span>
+        <RouterLink v-if="menuItems.other.includes('ticket') && menu.view.ticket" role="menuitem" class="menu-item" :to="menu.view.ticket.href" :data-autofocus="menuItems.control.length ? undefined : ''" @click="menu = null">
+          <AppIcon name="link" :size="16" /><span class="mi-text"><span>Open {{ menu.view.ticket.key }}</span></span>
+        </RouterLink>
+        <button type="button" role="menuitem" class="menu-item" :data-autofocus="menuItems.control.length || menu.view.ticket ? undefined : ''" @click="pickCopy">
+          <AppIcon name="copy" :size="16" /><span class="mi-text"><span>Copy session id</span></span>
+        </button>
+        <template v-if="menuItems.remove">
+          <hr class="menu-sep">
+          <button type="button" role="menuitem" class="menu-item" @click="pickRemove">
+            <AppIcon name="trash" :size="16" /><span class="mi-text"><span>{{ quickRemoval(menu.view) ? 'Remove' : 'Remove…' }}</span></span>
           </button>
         </template>
+        <p v-if="menuItems.note" class="menu-note">{{ menuItems.note }}</p>
       </div>
     </FloatingPanel>
   </section>
@@ -376,15 +419,16 @@ function rowClick(event: MouseEvent, id: string) {
 /* Controls appear on the row the pointer or keyboard is on; the layout never
    shifts. The row's inset leaves ~66px of the 76px track: two 28px controls. */
 .row > .c-actions { display: inline-flex; align-items: center; justify-content: flex-end; gap: 2px; padding: 0 4px 0 0; }
+/* The bin is always visible on an ended or silent row: it is that row's action. */
 .act, .more { opacity: 0; transition: opacity .15s ease; }
 .row:hover :is(.act, .more), .row.active :is(.act, .more), .row.selected :is(.act, .more), .row:focus-within :is(.act, .more), .more[aria-expanded="true"] { opacity: 1; }
-.act[aria-disabled="true"] { color: var(--ink-3); cursor: not-allowed; }
-.row:hover .act[aria-disabled="true"], .row.active .act[aria-disabled="true"], .row.selected .act[aria-disabled="true"] { opacity: .45; }
-@media (hover: none) { .act { display: none; } .more { opacity: 1; } .c-actions .icon-btn.more { width: 36px; height: 36px; } }
+.bin { color: var(--ink-3); }
+.bin:hover:not(:disabled) { color: var(--ink); }
+@media (hover: none) { .act { display: none; } .more { opacity: 1; } .c-actions .icon-btn:is(.more, .bin) { width: 36px; height: 36px; } }
 @media (prefers-reduced-motion: reduce) { .act, .more { transition: none; } }
-.menu-note { margin: -2px 10px 6px 36px; font-size: 11.5px; line-height: 1.35; color: var(--ink-3); }
+.menu-note { margin: 4px 6px 2px; padding: 8px 4px 2px; border-top: 1px solid var(--line); font-size: 11.5px; line-height: 1.4; color: var(--ink-3); }
 .menu-sep { height: 1px; margin: 4px 6px; border: 0; background: var(--line); }
-.menu-item { display: flex; align-items: flex-start; gap: 10px; width: 100%; padding: 8px 10px; border: 0; border-radius: 8px; background: transparent; color: var(--ink); font-size: 13.5px; text-align: left; }
+.menu-item { display: flex; align-items: flex-start; gap: 10px; box-sizing: border-box; text-decoration: none; width: 100%; padding: 8px 10px; border: 0; border-radius: 8px; background: transparent; color: var(--ink); font-size: 13.5px; text-align: left; }
 .menu-item > svg { margin-top: 2px; color: var(--ink-2); flex-shrink: 0; }
 .menu-item:hover:not([aria-disabled="true"]) { background: var(--row-hover); }
 .menu-item:focus-visible { background: var(--row-selected); box-shadow: inset 0 0 0 1px var(--glass-rim); }
@@ -392,6 +436,8 @@ function rowClick(event: MouseEvent, id: string) {
 .menu-item[aria-disabled="true"] { color: var(--ink-3); cursor: not-allowed; }
 .mi-text { display: grid; gap: 2px; min-width: 0; }
 .mi-text small { font-size: 11.5px; color: var(--ink-3); line-height: 1.35; }
+.older { display: flex; justify-content: center; padding: 0 0 12px; }
+@media (max-width: 720px) { .older .btn { min-height: 44px; } }
 .state { display: grid; justify-items: center; gap: 8px; padding: 48px 24px 56px; text-align: center; color: var(--ink-2); border-top: 1px solid var(--line); }
 .state > svg { color: var(--teal); margin-bottom: 4px; }
 .state h3 { color: var(--ink); font-size: 16px; }
@@ -414,6 +460,8 @@ function rowClick(event: MouseEvent, id: string) {
   .c-beat, .c-elapsed { display: none; }
   .act { display: none; }
 }
+/* The menu floats outside the list container: size its targets by viewport. */
+@media (max-width: 720px) { .menu-item { min-height: 44px; align-items: center; } .menu-item > svg { margin-top: 0; } }
 /* Phones: identity, execution and state stack; actions stay in the overflow menu. */
 @container sessions (max-width: 560px) {
   .table { --tree-step: 20px; display: block; }
@@ -433,8 +481,8 @@ function rowClick(event: MouseEvent, id: string) {
   .c-exec { grid-area: exec; min-width: 0; }
   .c-beat { display: block; grid-area: beat; }
   .c-elapsed { display: none; }
-  .row > .c-actions { grid-area: actions; grid-row: 1 / span 3; align-self: center; justify-content: center; padding: 0; }
+  .row > .c-actions { grid-area: actions; grid-row: 1 / span 3; align-self: center; flex-direction: column; justify-content: center; gap: 0; padding: 0; }
   .act { display: none; }
-  .c-actions .icon-btn.more { width: 44px; height: 44px; opacity: 1; }
+  .c-actions .icon-btn:is(.more, .bin) { width: 44px; height: 44px; opacity: 1; }
 }
 </style>

@@ -63,6 +63,8 @@ func readStateEvidence(ctx context.Context, tx pgx.Tx, ids []string) (map[string
 	if err != nil {
 		return nil, err
 	}
+	// A server-closed silent session (heartbeat_lost, "Lost contact") ended;
+	// losing reports is not evidence that the worker failed (AEON-291).
 	// Flags and reasons share one statement snapshot: a concurrent resolution
 	// cannot leave a new false flag paired with an old pending reason.
 	// Explicit sender generations isolate outgoing obligations. Incoming delivery leases
@@ -99,7 +101,7 @@ func readStateEvidence(ctx context.Context, tx pgx.Tx, ids []string) (map[string
       (s.stopped_at IS NULL AND (coalesce(r.status='waiting',false)
         OR EXISTS(SELECT 1 FROM approvals a WHERE a.id=s.id AND a.scope='run'))),
       (coalesce(r.status IN ('failed','ownership_lost'),false)
-        OR coalesce(replace(replace(s.stop_reason,'_',' '),'-',' ') ~* '\m(error|errored|failed|failure|blocked|crash(ed)?|ownership lost|heartbeat lost|timeout|timed out)\M',false)),
+        OR coalesce(s.stop_reason<>'heartbeat_lost' AND replace(replace(s.stop_reason,'_',' '),'-',' ') ~* '\m(error|errored|failed|failure|blocked|crash(ed)?|ownership lost|heartbeat lost|timeout|timed out)\M',false)),
       coalesce(q.kind,''),coalesce(q.scope,''),coalesce(q.actor,''),coalesce(q.blocking,false),
       coalesce(q.location,''),coalesce(q.permission_project,''),coalesce(q.count,0)
     FROM harness_sessions s LEFT JOIN agent_runs r ON r.tenant_id=s.tenant_id AND r.id=s.run_id

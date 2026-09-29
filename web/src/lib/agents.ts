@@ -14,10 +14,12 @@ export interface MetadataChange {
   value: string | null
   at: string
 }
+export interface ProcessOwnership { daemon_id: string; generation: string; process_id: string; root_pid: number; group_id: number; started_at: string }
 export interface HarnessSession {
   watch?: import("./attachWatch").AttachStatus
   id: string; project_id: string; agent_principal_id: string
   archived_at?: string | null; recovery_process_state?: 'unknown' | null
+  process_ownership?: ProcessOwnership; process_observed_at?: string
   display_label?: string | null
   model?: string | null; reasoning_effort?: string | null; account_label?: string | null; harness_version?: string | null
   brief?: string | null; worktree?: string | null; branch?: string | null; commits?: { sha: string; subject: string }[]
@@ -115,16 +117,24 @@ const query = (params: Record<string, string | number | boolean | undefined>) =>
   return text ? `?${text}` : ''
 }
 // Tenant-wide sessions, newest first, with project and ticket summaries.
-export const listAllSessions = (params: { ticket?: string; agent?: string; project?: string; state?: string; cursor?: string; limit?: number } = {}) =>
+// view=current (the Agents list) omits sessions that ended more than 24 hours ago;
+// view=all, the server default, keeps every generation for history (AEON-291).
+export const listAllSessions = (params: { ticket?: string; agent?: string; project?: string; state?: string; view?: 'current' | 'all'; cursor?: string; limit?: number } = {}) =>
   request<Paged<HarnessSession>>(`/harness-sessions${query({ limit: 200, ...params })}`)
 // Agents working right now in every visible project, in one read (AEON-184).
 export const getLiveAgents = () => request<LivePage>('/harness-sessions/live?include_inactive=true')
 export const listRuns = (params: { session?: string; agent?: string; work_order?: string; cursor?: string; limit?: number } = {}) =>
   request<Paged<AgentRun>>(`/runs${query({ limit: 50, ...params })}`)
-export interface RemoveSessionResult { session: HarnessSession; message: string; processes_signalled: false; process_state: 'unknown' }
+export interface RemoveSessionResult { session: HarnessSession; message: string; processes_signalled: false; process_state: 'unknown'; event_id?: number; undoable?: boolean }
 export const removeSession = (session: HarnessSession, reason: string) => request<RemoveSessionResult>(`${sessionPath(session.project_id, session.id)}/remove`, 'POST', { reason })
+// Undo of a removal restores the record exactly as it was (POST /events/{id}/undo).
+export const undoRemoval = (eventId: number) => request<{ after: HarnessSession }>(`/events/${enc(String(eventId))}/undo`, 'POST').then(event => event.after)
 export const removeStaleSessions = (projectId: string, reason: string) => request<{ items: RemoveSessionResult[]; cutoff: string; more: boolean }>(`${sessionPath(projectId)}/remove-stale`, 'POST', { reason })
 export const requestControl = (projectId: string, sessionId: string, kind: SessionControl['kind']) => request<SessionControl>(`${sessionPath(projectId, sessionId)}/controls/${kind}`, 'POST', {})
+// A managed_control_v1 session takes Interrupt and Stop through the
+// ownership-aware route, bound to the exact process generation (AEON-291).
+export const requestManagedControl = (session: HarnessSession, kind: SessionControl['kind']) =>
+  request<SessionControl>(`${sessionPath(session.project_id, session.id)}/managed-controls`, 'POST', { request_id: crypto.randomUUID(), kind, expected_ownership: { ...session.process_ownership } })
 export const getControl = (projectId: string, sessionId: string, controlId: string) => request<SessionControl>(`${sessionPath(projectId, sessionId)}/controls/${enc(controlId)}`)
 export const listAccounts = () => request<AgentAccount[]>('/agent-accounts')
 export const setAccountState = (id: string, state: AgentAccount['state']) => request<AgentAccount>(`/agent-accounts/${enc(id)}`, 'PATCH', { state })
@@ -163,7 +173,7 @@ export function paceFraction(model: AllowanceWrite['pace_model'], elapsed: numbe
 // Named server events that change what the agents workspace shows. They are wake
 // hints only: the caller re-reads the authorized projections. Heartbeats use the
 // periodic refresh; registration/stop and reconnect wake the consumer immediately.
-const HARNESS_EVENTS = ['registered', 'bound', 'yielded', 'stopped', 'removed', 'control_requested', 'control_claimed', 'control_completed']
+const HARNESS_EVENTS = ['registered', 'bound', 'yielded', 'stopped', 'removed', 'restored', 'revived', 'control_requested', 'control_claimed', 'control_completed']
 const OTHER_EVENTS = ['approval.proposed', 'approval.approved', 'approval.denied', 'approval.revoked', 'run.created', 'run.claimed', 'run.telemetry', 'work_order.started', 'work_order.updated', 'inbox.compat_sent', 'inbox.delivery_queued', 'inbox.reply_obligation_closed', 'inbox.action_resolved']
 export function subscribeAgents(changed: () => void, connection: (live: boolean) => void = () => {}): () => void {
   if (typeof EventSource === 'undefined') return () => {}

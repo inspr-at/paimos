@@ -3,13 +3,14 @@ import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { APIError, getNode } from '../lib/api'
 import {
-  decideApproval, getControl, listAccounts, listAllSessions, listApprovals, listMessages, listModels, listRuns, listTargets,
+  decideApproval, getControl, listAccounts, listAllSessions, listApprovals, listMessages, listModels, listRuns, listTargets, requestManagedControl,
   requestControl, resolveMessage, revokeApproval, sendMessage, setAccountState,
   type AgentAccount, type AgentRun, type Approval, type HarnessSession, type ModelProfile, type ProjectMessage, type SessionControl,
 } from '../lib/agents'
 import { agentName, harnessLabel, heldRequests, mergeSessionEvidence, needsYou, pendingApprovals, runModel, sessionStatus, type SessionStatus } from '../lib/agentState'
 import { advanceActivity, type ActivityEvidence } from '../lib/liveAgents'
 import { toast } from '../lib/toast'
+import { managedControlSession } from '../lib/managedControl'
 import { usePolledData } from '../lib/usePolledData'
 import { useProjects } from './projects'
 import { useAgentAppearance } from '../lib/agentAppearance'
@@ -44,7 +45,7 @@ export const useAgents = defineStore('agents', () => {
     const cursors = new Set<string>()
     let cursor: string | undefined
     do {
-      const result = await listAllSessions({ cursor })
+      const result = await listAllSessions({ cursor, view: 'current' })
       for (const item of result.items) out.set(item.id, item)
       cursor = result.next_cursor ?? undefined
       if (cursor && cursors.has(cursor)) throw new Error('Session pagination did not advance. Please retry.')
@@ -215,6 +216,47 @@ export const useAgents = defineStore('agents', () => {
   }
   const views = computed(() => sessions.value.filter(s => !s.archived_at).map(viewOf))
   const removedViews = computed(() => sessions.value.filter(s => s.archived_at).map(viewOf))
+  // History (AEON-291): the list reads only sessions that ended in the last 24
+  // hours. Every ended or removed generation is read on demand, newest first.
+  const historySessions = ref<HarnessSession[]>([])
+  const historyState = ref<'idle' | 'loading' | 'ready' | 'error'>('idle')
+  // The next page's cursor: History reads one page at a time and "Show older"
+  // continues until the server has no more.
+  const historyCursor = ref<string | null>(null)
+  let historyFlight: Promise<void> | undefined
+  function loadHistory(force = false) {
+    if (historyFlight) return historyFlight
+    if (historyState.value === 'ready' && !force) return Promise.resolve()
+    return readHistory(undefined)
+  }
+  function loadOlderHistory() {
+    if (historyFlight) return historyFlight
+    if (!historyCursor.value) return Promise.resolve()
+    return readHistory(historyCursor.value)
+  }
+  function readHistory(cursor: string | undefined) {
+    historyState.value = 'loading'
+    historyFlight = (async () => {
+      try {
+        const result = await listAllSessions({ cursor, view: 'all' })
+        const page = result.items.filter(item => item.stopped_at || item.archived_at)
+        if (cursor) {
+          const seen = new Set(historySessions.value.map(item => item.id))
+          historySessions.value = [...historySessions.value, ...page.filter(item => !seen.has(item.id))]
+        } else historySessions.value = page
+        historyCursor.value = result.next_cursor ?? null
+        historyState.value = 'ready'
+      } catch { historyState.value = 'error' } finally { historyFlight = undefined }
+    })()
+    return historyFlight
+  }
+  const historyMore = computed(() => !!historyCursor.value)
+  const historyViews = computed(() => {
+    const byId = new Map(historySessions.value.map(item => [item.id, item]))
+    for (const item of sessions.value) if (item.stopped_at || item.archived_at || byId.has(item.id)) byId.set(item.id, item)
+    const ended = (item: HarnessSession) => Date.parse(item.archived_at ?? item.stopped_at ?? item.created_at)
+    return [...byId.values()].filter(item => item.stopped_at || item.archived_at).sort((a, b) => ended(b) - ended(a)).map(viewOf)
+  })
   const grouped = computed(() => {
     const out: Record<SessionStatus['group'], SessionView[]> = { problem: [], unresponsive: [], needs: [], awaiting: [], throttled: [], working: [], idle: [], stopped: [] }
     for (const view of views.value) out[view.status.group].push(view)
@@ -250,6 +292,7 @@ export const useAgents = defineStore('agents', () => {
     appliedSessionRead = ++sessionReadOrder
     const known = sessions.value.some(s => s.id === removed.id)
     sessions.value = known ? sessions.value.map(s => s.id === removed.id ? { ...s, ...removed } : s) : [...sessions.value, removed]
+    historySessions.value = historySessions.value.map(s => s.id === removed.id ? { ...s, ...removed } : s)
   }
 
   // ---------- Writes ----------
@@ -267,7 +310,8 @@ export const useAgents = defineStore('agents', () => {
   }
   async function control(view: SessionView, kind: SessionControl['kind']) {
     const { session } = view
-    const issued = await requestControl(session.project_id, session.id, kind)
+    // managed_control_v1 sessions refuse the legacy route; use the ownership-aware one.
+    const issued = managedControlSession(session) ? await requestManagedControl(session, kind) : await requestControl(session.project_id, session.id, kind)
     controls.value = { ...controls.value, [session.id]: issued }
     void follow(session, issued, view.name)
     return issued
@@ -301,7 +345,7 @@ export const useAgents = defineStore('agents', () => {
 
   return {
     now, sessions, sessionsState, sessionsError, sessionsUpdatedAt, sessionsStale, refreshStale, approvals, approvalsState, approvalsError, approvalsHardError, accounts, accountsState, accountsUpdatedAt, messagingState, runs, nodes, controls, eventPulseFor,
-    loading, loaded, pending, held, needsCount, views, removedViews, recordRemoval, grouped,
+    loading, loaded, pending, held, needsCount, views, removedViews, historyViews, historyState, historyMore, loadHistory, loadOlderHistory, recordRemoval, grouped,
     loadAll, loadNeeds, ensureTicket, refreshApprovals, refreshSessions, refreshThread, refreshAgentRuns, tick,
     viewOf, byAgent, forTicket, recentRuns, askerName, thread, addressOf, decide, revoke, resolve, control, send, setAccount,
     invalidatePolls: () => { sessionsRead.invalidate(); approvalsRead.invalidate(); accountsRead.invalidate(); modelsRead.invalidate(); runsRead.invalidate() },

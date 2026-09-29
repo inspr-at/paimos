@@ -144,7 +144,7 @@ test('phone stop asks before sending, and More reaches Recover and Remove', asyn
   await expect(menu.locator('p')).toHaveCount(0)
   await expect(page.getByText('Tools stay bound to this run and its budget.')).toBeVisible()
   const recoverItem = menu.getByRole('menuitem', { name: 'Recover', exact: true })
-  const removeItem = menu.getByRole('menuitem', { name: 'Remove Focused session from Agents' })
+  const removeItem = menu.getByRole('menuitem', { name: 'Remove Focused session' })
   await touch(recoverItem)
   await touch(removeItem)
   await page.keyboard.press('Escape')
@@ -159,9 +159,10 @@ test('phone stop asks before sending, and More reaches Recover and Remove', asyn
   await expect(recover).toBeHidden()
 
   await more.click()
-  await menu.getByRole('menuitem', { name: 'Remove Focused session from Agents' }).click()
-  const confirm = page.getByRole('dialog', { name: 'Remove Focused session from Agents?' })
-  await expect(confirm).toContainText('The process is not stopped')
+  await menu.getByRole('menuitem', { name: 'Remove Focused session' }).click()
+  const confirm = page.getByRole('dialog', { name: 'Remove Focused session?' })
+  // A live session with a fresh heartbeat: the consequence is true, so it is said.
+  await expect(confirm).toContainText('Its process keeps running')
   await confirm.getByRole('button', { name: 'Cancel' }).click()
   await expect(confirm).toBeHidden()
   await expect(page).toHaveURL(new RegExp(id))
