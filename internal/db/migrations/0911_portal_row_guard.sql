@@ -12,6 +12,7 @@
 -- (set_config('aeon.portal_moderation','on',true)); every other update or
 -- delete of a portal_product, portal_feature or portal_wish row is refused.
 -- Inserts stay open so public wish intake can still append a pending wish.
+SET LOCAL lock_timeout = '5s'; -- never queue node writes behind a blocked CREATE TRIGGER
 
 CREATE FUNCTION aeon_portal_row_guard() RETURNS trigger
 LANGUAGE plpgsql AS $$
