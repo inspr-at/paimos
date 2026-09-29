@@ -58,7 +58,7 @@ test('planning columns show the route, spent / estimated, list price and paid, w
   await expect(built.locator('.plan-model')).toHaveText('Codex astra · xhigh')
   await expect(built.locator('.plan-model')).toHaveAttribute('data-tip', 'Build hard · backend\nModel registry, revision 3f9a1c2b')
   await expect(built.locator('.c-tokens .plan-figure')).toHaveText(/^1\.54M\s*\/\s*10M$/)
-  await expect(built.locator('.c-tokens .plan-figure')).toHaveAttribute('data-tip', /2h × 5M\/h: default 5M\/h until 5 finished tickets on Codex astra · xhigh/)
+  await expect(built.locator('.c-tokens .plan-figure')).toHaveAttribute('data-tip', /2h at 5M\/h: default 5M\/h until 5 finished tickets on Codex astra · xhigh/)
   await expect(built.locator('.c-list-cost .plan-figure')).toHaveText(/^≈\s*\$4\.48\s*\/\s*\$27$/)
   await expect(built.locator('.c-list-cost .plan-figure')).toHaveAttribute('aria-label', 'approximately $4.48 spent $27 estimated')
   await expect(built.locator('.c-paid .plan-figure')).toHaveText(/^\$3\.80\s*\/\s*\$27$/)

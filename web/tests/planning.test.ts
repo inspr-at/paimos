@@ -41,11 +41,11 @@ test('model names the registry route, or says why there is none', () => {
 test('tokens read spent / estimated with the calibration basis', () => {
   const both = tokensCell(row({ route, tokens: tokens(1_540_000, 10_000_000, { calibration: { basis: 'default', tickets: 0, tokens_per_hour: 5_000_000 } }) }))
   assert.deepEqual([both.spent, both.estimated, both.over], ['1.54M', '10M', false])
-  assert.match(both.tip, /Estimated 10,000,000 tokens\n2h × 5M\/h: default 5M\/h until 5 finished tickets on Codex astra · xhigh/)
+  assert.match(both.tip, /Estimated 10,000,000 tokens\n2h at 5M\/h: default 5M\/h until 5 finished tickets on Codex astra · xhigh/)
   assert.equal(both.label, '1.54M tokens spent, 10M estimated')
   const median = tokensCell(row({ route, tokens: tokens(null, 12_000_000, { calibration: { basis: 'median', tickets: 12, tokens_per_hour: 6_000_000 } }) }))
   assert.equal(median.spent, '')
-  assert.match(median.tip, /2h × 6M\/h: median of the last 12 finished tickets on Codex astra · xhigh/)
+  assert.match(median.tip, /2h at 6M\/h: median of the last 12 finished tickets on Codex astra · xhigh/)
   const anyRoute = tokensCell(row({ tokens: tokens(null, 5_000_000, { calibration: { basis: 'default', tickets: 0, tokens_per_hour: 5_000_000, any_route: true } }) }))
   assert.match(anyRoute.tip, /on any route/)
   // Over the estimate: flagged in text, not only by colour.

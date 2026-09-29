@@ -108,7 +108,7 @@ function basisLine(tokens: PlanningTokens, row: PlanningRow): string {
   const rate = `${formatTokenCount(cal.tokens_per_hour)}/h`
   const route = row.planning?.route?.label
   const on = cal.any_route || !route ? 'on any route' : `on ${route}`
-  const times = hours !== null ? `${Number(hours.toFixed(2))}h × ${rate}` : rate
+  const times = hours !== null ? `${Number(hours.toFixed(2))}h at ${rate}` : rate
   return cal.basis === 'median'
     ? `${times}: median of the last ${cal.tickets} finished tickets ${on}`
     : `${times}: default ${formatTokenCount(DEFAULT_RATE)}/h until 5 finished tickets ${on}`
