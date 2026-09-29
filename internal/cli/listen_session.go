@@ -4,7 +4,10 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -13,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/client"
 	"github.com/inspr-at/paimos/internal/inbox"
 )
 
@@ -38,7 +42,10 @@ func (rt *runtime) listenSessionDelivery(projectID, project, session, adapter, r
 		ID      string `json:"id"`
 		Harness string `json:"harness"`
 	}
-	if err := rt.doCtx(ctx, http.MethodGet, harnessPath(projectID, session), nil, &status); err != nil {
+	if err := rt.doMessagingPoll(ctx, http.MethodGet, harnessPath(projectID, session), &status, follow, interval); err != nil {
+		if ctx.Err() != nil {
+			return nil
+		}
 		return err
 	}
 	harness := strings.TrimSuffix(adapter, "_resume")
@@ -60,15 +67,20 @@ func (rt *runtime) listenSessionDelivery(projectID, project, session, adapter, r
 			q.Set("after", after)
 		}
 		var page inbox.Page
-		if err := rt.doCtx(ctx, http.MethodGet, "/api/inbox/messages?"+q.Encode(), nil, &page); err != nil {
+		if err := rt.doMessagingPoll(ctx, http.MethodGet, "/api/inbox/messages?"+q.Encode(), &page, follow, interval); err != nil {
 			if ctx.Err() != nil {
 				return nil
 			}
 			return err
 		}
 		retry := false
+		delivered := false
 		for _, msg := range page.Items {
-			if !validUUID(msg.ID) || (msg.RecipientSessionID != nil && !strings.EqualFold(*msg.RecipientSessionID, session)) {
+			if msg.RecipientSessionID == nil || !strings.EqualFold(*msg.RecipientSessionID, session) {
+				after = strconv.FormatInt(msg.SentEventID, 10)
+				continue
+			}
+			if !validUUID(msg.ID) {
 				return fmt.Errorf("invalid session inbox response")
 			}
 			// Plain session messages carry no transport-level request; queue as simple.
@@ -88,14 +100,18 @@ func (rt *runtime) listenSessionDelivery(projectID, project, session, adapter, r
 				return fmt.Errorf("invalid session delivery result")
 			}
 			// This endpoint invokes ConfirmSessionMessage, advancing delivery and receipt.
-			if err := rt.doCtx(ctx, http.MethodPost, "/api/inbox/messages/"+url.PathEscape(msg.ID)+"/ack", nil, nil); err != nil {
+			if err := rt.doMessagingPoll(ctx, http.MethodPost, "/api/inbox/messages/"+url.PathEscape(msg.ID)+"/ack", nil, follow, interval); err != nil {
+				if ctx.Err() != nil {
+					return nil
+				}
 				return err
 			}
+			delivered = true
 			after = strconv.FormatInt(msg.SentEventID, 10)
 			backoff = initialBackoff
 		}
 		if !follow {
-			if len(page.Items) == 0 {
+			if !delivered {
 				return &exitError{code: 3}
 			}
 			return nil
@@ -118,4 +134,47 @@ func waitMessagingRetry(ctx context.Context, interval time.Duration) bool {
 	case <-timer.C:
 		return true
 	}
+}
+
+// Retry only reads and idempotent acknowledgements. In particular, retry an ack
+// in place after handoff, without reprinting or redelivering the message.
+func (rt *runtime) doMessagingPoll(ctx context.Context, method, path string, dest any, follow bool, interval time.Duration) error {
+	c, err := rt.api()
+	if err != nil {
+		return err
+	}
+	backoff := min(interval, 30*time.Second)
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		err := c.Do(ctx, method, path, nil, dest)
+		if err == nil {
+			return nil
+		}
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if !follow || !transientMessagingError(err) {
+			return rt.fail(err, c.Token)
+		}
+		if !waitMessagingRetry(ctx, backoff) {
+			return ctx.Err()
+		}
+		backoff = min(backoff*2, 30*time.Second)
+	}
+}
+
+func transientMessagingError(err error) bool {
+	var status *client.StatusError
+	if errors.As(err, &status) {
+		return status.Status == http.StatusRequestTimeout || status.Status == http.StatusTooManyRequests || status.Status >= 500
+	}
+	// url.Error itself implements net.Error even for permanent URL/TLS errors.
+	var request *url.Error
+	if errors.As(err, &request) {
+		err = request.Err
+	}
+	var network net.Error
+	return errors.As(err, &network) || errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF)
 }

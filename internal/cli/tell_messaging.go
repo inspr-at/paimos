@@ -266,7 +266,7 @@ func (rt *runtime) cmdMessagingListen() *Command {
 				}
 				path = "/api/inbox/messages?" + q.Encode()
 			}
-			if err := rt.doCtx(ctx, http.MethodGet, path, nil, &page); err != nil {
+			if err := rt.doMessagingPoll(ctx, http.MethodGet, path, &page, follow, interval); err != nil {
 				if ctx.Err() != nil {
 					return nil
 				}
@@ -301,13 +301,13 @@ func (rt *runtime) cmdMessagingListen() *Command {
 			if ack {
 				for _, v := range page.Items {
 					ackPath := "/api/projects/" + url.PathEscape(p.ID) + "/messages/" + url.PathEscape(v.ID) + "/ack"
-					if strings.Contains(as, ":") {
-						if err := rt.doCtx(ctx, http.MethodPost, ackPath, nil, nil); err != nil {
-							return err
-						}
-						continue
+					if !strings.Contains(as, ":") {
+						ackPath = "/api/inbox/messages/" + url.PathEscape(v.ID) + "/ack"
 					}
-					if err := rt.doCtx(ctx, http.MethodPost, "/api/inbox/messages/"+url.PathEscape(v.ID)+"/ack", nil, nil); err != nil {
+					if err := rt.doMessagingPoll(ctx, http.MethodPost, ackPath, nil, follow, interval); err != nil {
+						if ctx.Err() != nil {
+							return nil
+						}
 						return err
 					}
 				}
@@ -329,7 +329,7 @@ func (rt *runtime) cmdMessagingListen() *Command {
 				if sessionID != "" {
 					q.Set("session", sessionID)
 				}
-				if err := rt.doCtx(ctx, http.MethodGet, "/api/inbox/messages?"+q.Encode(), nil, &wake); err != nil {
+				if err := rt.doMessagingPoll(ctx, http.MethodGet, "/api/inbox/messages?"+q.Encode(), &wake, follow, interval); err != nil {
 					if ctx.Err() != nil {
 						return nil
 					}

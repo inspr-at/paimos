@@ -9,8 +9,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 const inboxHookMarker = " # aeon-inbox-hook-v1"
@@ -42,6 +44,9 @@ func (rt *runtime) cmdHookInstall(uninstall bool) *Command {
 			return err
 		}
 		dir, file := ".claude", "settings.json"
+		if scope == "project" {
+			file = "settings.local.json"
+		}
 		if harness == "codex" {
 			dir, file = ".codex", "hooks.json"
 		}
@@ -58,6 +63,12 @@ func (rt *runtime) cmdHookInstall(uninstall bool) *Command {
 		executable, err := os.Executable()
 		if err != nil {
 			return err
+		}
+		if !uninstall {
+			executable, err = stableHookExecutable(executable, os.Getenv("PATH"))
+			if err != nil {
+				return err
+			}
 		}
 		command := shellHookQuote(executable)
 		config, err := rt.configFile()
@@ -130,7 +141,7 @@ func (rt *runtime) mergeInboxHooks(path, command, harness string, uninstall, dry
 				continue
 			}
 			if len(remaining) > 0 {
-				group["hooks"], _ = json.Marshal(remaining)
+				group["hooks"], _ = encodeHookSettings(remaining, false)
 				kept = append(kept, group)
 			}
 		}
@@ -140,7 +151,7 @@ func (rt *runtime) mergeInboxHooks(path, command, harness string, uninstall, dry
 			if harness == "codex" && event != "Stop" {
 				handler["additionalContextLimit"] = 0
 			}
-			raw, _ := json.Marshal([]any{handler})
+			raw, _ := encodeHookSettings([]any{handler}, false)
 			kept = append(kept, map[string]json.RawMessage{"hooks": raw})
 			changes = append(changes, "+ "+event+": "+cmd+" (timeout 3s)")
 		}
@@ -150,7 +161,7 @@ func (rt *runtime) mergeInboxHooks(path, command, harness string, uninstall, dry
 				delete(hooks, event)
 			}
 		} else {
-			hooks[event], _ = json.Marshal(kept)
+			hooks[event], _ = encodeHookSettings(kept, false)
 		}
 	}
 	if uninstall && len(changes) == 0 {
@@ -160,13 +171,12 @@ func (rt *runtime) mergeInboxHooks(path, command, harness string, uninstall, dry
 	if len(hooks) == 0 {
 		delete(doc, "hooks")
 	} else {
-		doc["hooks"], _ = json.Marshal(hooks)
+		doc["hooks"], _ = encodeHookSettings(hooks, false)
 	}
-	after, err := json.MarshalIndent(doc, "", "  ")
+	after, err := encodeHookSettings(doc, true)
 	if err != nil {
 		return errors.New("cannot encode hook settings")
 	}
-	after = append(after, '\n')
 	// Compare decoded JSON too: key order or whitespace is not a configuration change.
 	var a, b any
 	_ = json.Unmarshal(before, &a)
@@ -217,6 +227,15 @@ func (rt *runtime) mergeInboxHooks(path, command, harness string, uninstall, dry
 	if err := tmp.Close(); err != nil {
 		return err
 	}
+	if exists {
+		if err := backupHookSettings(path, before); err != nil {
+			return err
+		}
+	}
+	current, _, err = readHookSettings(path)
+	if (exists && (err != nil || !bytes.Equal(current, before))) || (!exists && !errors.Is(err, os.ErrNotExist)) {
+		return errors.New("hook settings changed; retry")
+	}
 	if err := os.Rename(tmp.Name(), path); err != nil {
 		return errors.New("cannot replace hook settings")
 	}
@@ -238,4 +257,73 @@ func readHookSettings(path string) ([]byte, os.FileMode, error) {
 		return nil, 0600, errors.New("settings exceed size limit")
 	}
 	return raw, info.Mode().Perm(), nil
+}
+
+// Keep a profile symlink in the command instead of resolving it into the Nix
+// store. Its profile roots the current package and follows profile upgrades.
+func stableHookExecutable(executable, searchPath string) (string, error) {
+	current, err := os.Stat(executable)
+	if err != nil {
+		return "", err
+	}
+	for _, dir := range filepath.SplitList(searchPath) {
+		if !filepath.IsAbs(dir) {
+			continue
+		}
+		candidate := filepath.Join(dir, "aeon")
+		if inNixStore(candidate) {
+			continue
+		}
+		if _, err := exec.LookPath(candidate); err != nil {
+			continue
+		}
+		info, err := os.Stat(candidate)
+		if err == nil && os.SameFile(current, info) {
+			return candidate, nil
+		}
+	}
+	executable, err = filepath.Abs(executable)
+	if err != nil {
+		return "", err
+	}
+	if inNixStore(executable) {
+		return "", errors.New("install Aeon in a persistent profile and put its aeon symlink on PATH before installing hooks")
+	}
+	return executable, nil
+}
+
+func inNixStore(path string) bool {
+	return path == "/nix/store" || strings.HasPrefix(path, "/nix/store/")
+}
+
+func encodeHookSettings(value any, indent bool) ([]byte, error) {
+	var out bytes.Buffer
+	enc := json.NewEncoder(&out)
+	enc.SetEscapeHTML(false)
+	if indent {
+		enc.SetIndent("", "  ")
+	}
+	if err := enc.Encode(value); err != nil {
+		return nil, err
+	}
+	return out.Bytes(), nil
+}
+
+func backupHookSettings(path string, before []byte) error {
+	backup, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".backup-"+time.Now().UTC().Format("20060102T150405.000000000Z")+"-*")
+	if err != nil {
+		return errors.New("cannot back up hook settings")
+	}
+	// CreateTemp uses 0600: old settings can contain private values.
+	defer backup.Close()
+	if _, err := backup.Write(before); err != nil {
+		return errors.New("cannot write hook settings backup")
+	}
+	if err := backup.Sync(); err != nil {
+		return errors.New("cannot sync hook settings backup")
+	}
+	if err := backup.Close(); err != nil {
+		return errors.New("cannot close hook settings backup")
+	}
+	return nil
 }

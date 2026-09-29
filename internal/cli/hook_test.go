@@ -107,7 +107,7 @@ type failedHookWriter struct{}
 func (failedHookWriter) Write([]byte) (int, error) { return 0, errors.New("closed pipe") }
 
 func TestInboxHookFailOpenAndNoLoop(t *testing.T) {
-	for _, test := range []string{"missing-session", "invalid-session", "malformed-input", "wrong-event", "empty", "active-stop", "api-down", "ack-down", "closed-output", "short-output", "wrong-session"} {
+	for _, test := range []string{"missing-session", "invalid-session", "malformed-input", "wrong-event", "empty", "active-stop", "api-down", "ack-down", "closed-output", "short-output", "wrong-session", "unbound"} {
 		t.Run(test, func(t *testing.T) {
 			config := setupHookTest(t)
 			t.Setenv("AEON_SESSION_ID", hookSessionID)
@@ -146,6 +146,9 @@ func TestInboxHookFailOpenAndNoLoop(t *testing.T) {
 				page := inbox.Page{Items: []inbox.Message{hookFixtureMessage()}}
 				if test == "empty" {
 					page.Items = nil
+				}
+				if test == "unbound" {
+					page.Items[0].RecipientSessionID = nil
 				}
 				if test == "wrong-session" {
 					page.Items[0].RecipientSessionID = ptrHook("00000000-0000-4000-8000-000000000099")
@@ -253,5 +256,96 @@ func TestInboxHookCanceledBeforeEmission(t *testing.T) {
 	rt := &runtime{configPath: config, stdin: strings.NewReader(`{"hook_event_name":"Stop"}`), stdout: &out, stderr: io.Discard}
 	if rt.runInboxHook(ctx, "Stop") == nil || out.Len() != 0 {
 		t.Fatal("canceled hook should not emit")
+	}
+}
+
+func TestInboxHookSubagentGoldens(t *testing.T) {
+	for _, harness := range []string{"claude", "codex"} {
+		for _, event := range inboxHookEvents() {
+			t.Run(harness+"/"+event, func(t *testing.T) {
+				config := setupHookTest(t)
+				t.Setenv("AEON_SESSION_ID", hookSessionID)
+				var calls atomic.Int32
+				srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { calls.Add(1); http.Error(w, "unexpected call", 403) }))
+				defer srv.Close()
+				t.Setenv("AEON_URL", srv.URL)
+				t.Setenv("AEON_API_KEY", "fixture-hook-key")
+				input, err := os.ReadFile(filepath.Join("testdata", "hooks", event+".subagent.input.json"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				golden, err := os.ReadFile(filepath.Join("testdata", "hooks", "subagent.golden.json"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				code, out, stderr := runCLIWithMessaging([]string{"aeon", "--config", config, "hook", harness, event}, string(input))
+				if code != 0 || out != string(golden) || stderr != "" || calls.Load() != 0 {
+					t.Fatalf("subagent consumed inbox: code=%d calls=%d", code, calls.Load())
+				}
+			})
+		}
+	}
+}
+
+func TestInboxHookMixedSessionBatch(t *testing.T) {
+	config := setupHookTest(t)
+	t.Setenv("AEON_SESSION_ID", hookSessionID)
+	var acks atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			if r.URL.Path != "/api/inbox/messages/"+hookMessageID+"/ack" {
+				t.Error("acked another session or principal message")
+			}
+			acks.Add(1)
+			fmt.Fprint(w, `{}`)
+			return
+		}
+		unbound, foreign := hookFixtureMessage(), hookFixtureMessage()
+		unbound.ID, unbound.Body, unbound.RecipientSessionID = "unbound-must-not-be-validated", "unbound-body", nil
+		foreign.ID, foreign.Body, foreign.RecipientSessionID = "foreign-must-not-be-validated", "foreign-body", ptrHook("00000000-0000-4000-8000-000000000099")
+		_ = json.NewEncoder(w).Encode(inbox.Page{Items: []inbox.Message{unbound, hookFixtureMessage(), foreign}})
+	}))
+	defer srv.Close()
+	t.Setenv("AEON_URL", srv.URL)
+	t.Setenv("AEON_API_KEY", "fixture-hook-key")
+	code, out, stderr := runCLIWithMessaging([]string{"aeon", "--config", config, "hook", "claude", "Stop"}, `{"hook_event_name":"Stop"}`)
+	if code != 0 || stderr != "" || acks.Load() != 1 || !strings.Contains(out, hookMessageID) || strings.Contains(out, "unbound-body") || strings.Contains(out, "foreign-body") {
+		t.Fatalf("incorrect batch: code=%d acks=%d", code, acks.Load())
+	}
+}
+
+func TestInboxHookPagesPastUnboundMessages(t *testing.T) {
+	config := setupHookTest(t)
+	t.Setenv("AEON_SESSION_ID", hookSessionID)
+	var pulls, acks atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			if r.URL.Path != "/api/inbox/messages/"+hookMessageID+"/ack" {
+				t.Error("acked skipped message")
+			}
+			acks.Add(1)
+			fmt.Fprint(w, `{}`)
+			return
+		}
+		pulls.Add(1)
+		if r.URL.Query().Get("after") == "41" {
+			_ = json.NewEncoder(w).Encode(inbox.Page{Items: []inbox.Message{hookFixtureMessage()}, NextAfter: 42})
+			return
+		}
+		var skipped []inbox.Message
+		for i := 0; i < 10; i++ {
+			msg := hookFixtureMessage()
+			msg.RecipientSessionID = nil
+			msg.SentEventID = int64(32 + i)
+			skipped = append(skipped, msg)
+		}
+		_ = json.NewEncoder(w).Encode(inbox.Page{Items: skipped, NextAfter: 41})
+	}))
+	defer srv.Close()
+	t.Setenv("AEON_URL", srv.URL)
+	t.Setenv("AEON_API_KEY", "fixture-hook-key")
+	code, out, stderr := runCLIWithMessaging([]string{"aeon", "--config", config, "hook", "claude", "Stop"}, `{"hook_event_name":"Stop"}`)
+	if code != 0 || stderr != "" || pulls.Load() != 2 || acks.Load() != 1 || !strings.Contains(out, hookMessageID) {
+		t.Fatalf("bound message starved: code=%d pulls=%d acks=%d", code, pulls.Load(), acks.Load())
 	}
 }

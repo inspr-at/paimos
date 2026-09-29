@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -24,9 +25,10 @@ const hookBudget = 2500 * time.Millisecond
 func inboxHookEvents() []string { return []string{"PostToolUse", "UserPromptSubmit", "Stop"} }
 
 type harnessHookInput struct {
-	Event      string `json:"hook_event_name"`
-	Session    string `json:"session_id"`
-	StopActive bool   `json:"stop_hook_active"`
+	Event      string  `json:"hook_event_name"`
+	Session    string  `json:"session_id"`
+	AgentID    *string `json:"agent_id"`
+	StopActive bool    `json:"stop_hook_active"`
 }
 
 func (rt *runtime) cmdHook() *Command {
@@ -64,7 +66,8 @@ func (rt *runtime) runInboxHook(ctx context.Context, event string) error {
 	if err != nil || len(raw) > 16<<20 || json.Unmarshal(raw, &input) != nil || input.Event != event {
 		return errors.New("invalid hook input")
 	}
-	if event == "Stop" && input.StopActive {
+	// Subagents inherit the parent binding but must never consume its inbox.
+	if input.AgentID != nil || (event == "Stop" && input.StopActive) {
 		return nil
 	}
 	if err := ctx.Err(); err != nil {
@@ -74,20 +77,36 @@ func (rt *runtime) runInboxHook(ctx context.Context, event string) error {
 	if err != nil || session == "" {
 		return err
 	}
-	var page inbox.Page
 	q := url.Values{"session": {session}, "wait_ms": {"0"}, "limit": {"10"}}
-	if err := rt.doCtx(ctx, http.MethodGet, "/api/inbox/messages?"+q.Encode(), nil, &page); err != nil {
-		return err
-	}
-	if len(page.Items) == 0 {
-		return nil
-	}
 	var frame strings.Builder
-	for _, msg := range page.Items {
-		if !validUUID(msg.ID) || (msg.RecipientSessionID != nil && !strings.EqualFold(*msg.RecipientSessionID, session)) {
-			return errors.New("invalid inbox response")
+	var delivered []inbox.Message
+	var after int64
+	for {
+		var page inbox.Page
+		if err := rt.doCtx(ctx, http.MethodGet, "/api/inbox/messages?"+q.Encode(), nil, &page); err != nil {
+			return err
 		}
-		frame.WriteString(sessionMessageFrame(msg))
+		for _, msg := range page.Items {
+			// The server also returns principal-wide rows; leave those for their consumer.
+			if msg.RecipientSessionID == nil || !strings.EqualFold(*msg.RecipientSessionID, session) {
+				continue
+			}
+			if !validUUID(msg.ID) {
+				return errors.New("invalid inbox response")
+			}
+			frame.WriteString(sessionMessageFrame(msg))
+			delivered = append(delivered, msg)
+		}
+		if len(delivered) > 0 {
+			break
+		}
+		if len(page.Items) == 0 || page.NextAfter <= after {
+			return nil
+		}
+		// Skipped rows stay pending; advance only this invocation's read cursor so
+		// a full page of broadcasts cannot starve the bound session's messages.
+		after = page.NextAfter
+		q.Set("after", strconv.FormatInt(after, 10))
 	}
 	var output any
 	if event == "Stop" {
@@ -121,7 +140,7 @@ func (rt *runtime) runInboxHook(ctx context.Context, event string) error {
 	}
 	// Successful stdout is the handoff boundary. An ack failure permits replay;
 	// it must never cause a message to disappear before it reaches the harness.
-	for _, msg := range page.Items {
+	for _, msg := range delivered {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
