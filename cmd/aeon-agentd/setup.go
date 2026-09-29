@@ -157,6 +157,11 @@ func setupCommandInput(command string, args []string, in io.Reader, out io.Write
 	if err = agentsetup.ValidateStateLocation(root, ""); err != nil {
 		return err
 	}
+	if command == "setup" {
+		if _, err := agentsetup.ResolveSocketPath(filepath.Join(root, "daemon"), nil); err != nil {
+			return err
+		}
+	}
 	executable, err := os.Executable()
 	if err != nil {
 		return err

@@ -19,10 +19,22 @@ import (
 
 type pairingTransport func(*http.Request) (*http.Response, error)
 
+// Realistic short home paths keep the prompt tests independent of macOS's
+// unusually long test temp root; socket length refusal has its own test.
+func pairingShortTemp(t *testing.T) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("/tmp", "aeon-pair-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	return dir
+}
+
 func (f pairingTransport) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
 func TestPairOneCommandCreatesDefaultStateDisplaysCodeAndResumes(t *testing.T) {
-	home, err := filepath.EvalSymlinks(t.TempDir())
+	home, err := filepath.EvalSymlinks(pairingShortTemp(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -152,7 +164,7 @@ func TestSetupPromptOffersAccountsAndRequiresAffirmativeChoice(t *testing.T) {
 }
 
 func TestPairDefaultsConfirmWorkspaceBeforeCreatingState(t *testing.T) {
-	home, err := filepath.EvalSymlinks(t.TempDir())
+	home, err := filepath.EvalSymlinks(pairingShortTemp(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -185,7 +197,7 @@ func TestPairDefaultsConfirmWorkspaceBeforeCreatingState(t *testing.T) {
 }
 
 func TestPairRejectsUnsafeExplicitRootWithoutWrites(t *testing.T) {
-	home, err := filepath.EvalSymlinks(t.TempDir())
+	home, err := filepath.EvalSymlinks(pairingShortTemp(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -202,7 +214,7 @@ func TestPairRejectsUnsafeExplicitRootWithoutWrites(t *testing.T) {
 }
 
 func TestPairFromHomeExplainsWorkspaceBeforeConfirmationOrWrites(t *testing.T) {
-	home, err := filepath.EvalSymlinks(t.TempDir())
+	home, err := filepath.EvalSymlinks(pairingShortTemp(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -222,6 +234,38 @@ func TestPairFromHomeExplainsWorkspaceBeforeConfirmationOrWrites(t *testing.T) {
 		entries, err := os.ReadDir(home)
 		if err != nil || len(entries) != 0 {
 			t.Fatal("home-folder rejection created pairing state")
+		}
+	}
+}
+
+func TestPairSetupAndServeRefuseImpossibleSocketBeforeSideEffects(t *testing.T) {
+	home, err := filepath.EvalSymlinks(pairingShortTemp(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	home = filepath.Join(home, strings.Repeat("long-home-", 12))
+	if err := os.Mkdir(home, 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+	root := filepath.Join(home, "paired")
+	for _, command := range []string{"pair", "setup", "serve"} {
+		var out bytes.Buffer
+		var err error
+		if command == "serve" {
+			err = serve([]string{"--setup-root", root})
+		} else {
+			err = setupCommandInput(command, []string{"--state-root", root}, strings.NewReader(""), &out)
+		}
+		if err == nil || !strings.Contains(err.Error(), "The agentd socket path is too long for this system") || !strings.Contains(err.Error(), "Use a shorter --setup-root") {
+			t.Fatalf("%s preflight: %v", command, err)
+		}
+		if out.Len() != 0 {
+			t.Fatalf("%s prompted before refusal", command)
+		}
+		entries, err := os.ReadDir(home)
+		if err != nil || len(entries) != 0 {
+			t.Fatalf("%s created state before refusal", command)
 		}
 	}
 }
