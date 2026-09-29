@@ -138,14 +138,14 @@ func admission(ctx context.Context, tx pgx.Tx, a Account, all []Window, now time
 			// cancelling or a daemon restart cannot mint another daily allowance.
 			err := tx.QueryRow(ctx, `SELECT count(DISTINCT r.run_id), EXISTS(
  SELECT 1 FROM run_telemetry t JOIN agent_runs ar ON ar.tenant_id=t.tenant_id AND ar.id=t.run_id
- WHERE ar.account_id=$1 AND t.error_code='vendor_limit' AND t.at >= $2)
+ WHERE ar.account_id=$1 AND t.error_code='vendor_limit')
  FROM account_reservations r JOIN account_allowance_windows w ON w.tenant_id=r.tenant_id AND w.id=r.window_id
  WHERE w.account_id=$1 AND w.capacity_kind='blind' AND w.starts_at >= $2 AND r.run_id::text<>$3`, a.ID, day, run.ID).Scan(&runs, &stopped)
 			if err != nil {
 				return nil, nil, err
 			}
 			if stopped {
-				return nil, &CapacityWait{Code: "vendor", Until: timePtr(day.AddDate(0, 0, 1)), Timezone: s.Timezone}, nil
+				return nil, &CapacityWait{Code: "vendor", Timezone: s.Timezone}, nil
 			}
 			if blindDayPolicy(s, now) {
 				if slots > 0 {
@@ -153,7 +153,7 @@ func admission(ctx context.Context, tx pgx.Tx, a Account, all []Window, now time
 				}
 				if runs >= 3 {
 					d := s.Week[(int(local.Weekday())+6)%7]
-					end := day.Add(time.Duration(d.End * float64(time.Hour)))
+					end := time.Date(local.Year(), local.Month(), local.Day(), int(d.End), int(d.End*60)%60, 0, 0, loc)
 					return nil, &CapacityWait{Code: "allowance", Until: &end, Timezone: s.Timezone}, nil
 				}
 			}

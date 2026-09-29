@@ -127,6 +127,9 @@ func attachWindows(ctx context.Context, tx pgx.Tx, accounts []Account) ([]Accoun
 		return nil, err
 	}
 	for i := range accounts {
+		if err := tx.QueryRow(ctx, `SELECT NOT EXISTS(SELECT 1 FROM agent_pairing_enrollments WHERE account_id=$1 AND (ongoing_approved_at IS NULL OR state<>'connected'))`, accounts[i].ID).Scan(&accounts[i].OngoingUseApproved); err != nil {
+			return nil, err
+		}
 		if ws := byAccount[accounts[i].ID]; ws != nil {
 			accounts[i].Windows = ws
 		} else {

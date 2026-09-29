@@ -25,8 +25,7 @@ func TestFirstReadingGrantIsSingleUsePerGeneration(t *testing.T) {
 			}
 			if harness == "claude" {
 				seed(func(tx pgx.Tx) error {
-					_, err := tx.Exec(t.Context(), `UPDATE model_profiles SET harness='claude' WHERE id=$1`, profile)
-					return err
+					return tx.QueryRow(t.Context(), `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier) VALUES($1,'first-claude','1','claude','anthropic','test','high','strong') RETURNING id::text`, person.TenantID).Scan(&profile)
 				})
 			}
 			token := issueKey(t, runner, []string{"account.manage", "account.probe", "run.claim"})
@@ -38,7 +37,9 @@ func TestFirstReadingGrantIsSingleUsePerGeneration(t *testing.T) {
 			}
 			probe("g1")
 			s := capacity.DefaultSchedule()
-			s.Override = "sprint"
+			for i := range s.Week {
+				s.Week[i] = capacity.Day{On: true, Start: 0, End: 24}
+			}
 			callStatus(t, mod, &person, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{"account", "", a.ID, &s, false}), 204, nil)
 			first := insertRun(t, person, runner, profile)
 			route := mustRoute(t, mod, runner, token, first, "daemon-a", []Account{a}, map[string]int64{"requests": 1})
@@ -86,8 +87,7 @@ func TestBlindDayPolicyAndDurableDailyLimit(t *testing.T) {
 				}
 			}
 			seed(func(tx pgx.Tx) error {
-				_, err := tx.Exec(t.Context(), `UPDATE model_profiles SET harness=$2 WHERE id=$1`, profile, harness)
-				return err
+				return tx.QueryRow(t.Context(), `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier) VALUES($1,$2,'1',$2,'openai','test','high','strong') RETURNING id::text`, person.TenantID, harness).Scan(&profile)
 			})
 			token := issueKey(t, runner, []string{"account.manage", "account.probe", "run.claim"})
 			mod := accountsMod()

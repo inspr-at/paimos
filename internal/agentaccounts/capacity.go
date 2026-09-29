@@ -558,8 +558,17 @@ func (m *Module) approveCapacity(w http.ResponseWriter, r *http.Request) {
 		if !uuidRE.MatchString(id) {
 			return fail(404, "account not found")
 		}
-		if err := agentpairing.AccountFence(r.Context(), tx, id, false); err != nil {
+		// A person may opt in during pairing review, before the helper redeems
+		// setup. RunFence still requires redeemed setup before any dispatch.
+		var blocked bool
+		if err := tx.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM agent_pairing_enrollments e
+         JOIN agent_pairing_requests q ON q.tenant_id=e.tenant_id AND q.id=e.request_id
+         JOIN agent_pairing_computers c ON c.tenant_id=e.tenant_id AND c.id=e.computer_id
+         WHERE e.account_id=$1 AND (e.state<>'connected' OR c.state<>'connected' OR q.state NOT IN ('approved','redeemed')))`, id).Scan(&blocked); err != nil {
 			return err
+		}
+		if blocked {
+			return fail(409, "account is not available for approval")
 		}
 		if _, err := lockAccount(r.Context(), tx, id); err != nil {
 			return err

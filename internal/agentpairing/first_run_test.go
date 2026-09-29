@@ -11,7 +11,8 @@ import (
 func TestPairedCodexClaimWithoutAllowanceSetup(t *testing.T) {
 	f := newFixture(t)
 	p := f.propose("codex")
-	f.approve(p, "connect_only")
+	approved := f.approve(p, "connect_only")
+	f.call("POST", "/api/agent-accounts/"+approved.Enrollments[0].AccountID+"/capacity/approve", nil, true, "", 204)
 	v := f.redeem(p)
 	e := v.Enrollments[0]
 	key := "aeon_" + v.RuntimePrefix + "_" + p.runtime

@@ -9661,6 +9661,7 @@ components:
         - type: object
           required: [id, registered_by_principal_id, state, created_at]
           properties:
+            ongoing_use_approved: {type: boolean, description: True for an unpaired account or an explicitly approved connected pairing enrollment. State and other dispatch fences still apply.}
             id: {type: string, format: uuid}
             registered_by_principal_id: {type: string, format: uuid}
             state: {type: string, enum: [available, draining, unavailable]}
