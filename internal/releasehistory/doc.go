@@ -63,13 +63,17 @@
 //	                   When that capture has no group, or the release has no
 //	                   capture, every commit ticket takes its group from the live
 //	                   classification (a bug is fixes, a visible benefit is
-//	                   features). Only those two facts are read. Live pill and
-//	                   benefit text is not copied, so a release with no capture
-//	                   has no Highlights text: that is the no-live-text rule.
-//	                   A capture that already records a group keeps it. A features
-//	                   or fixes change carries linked_tickets only for frozen
-//	                   note text. Hidden tickets, and tickets with no pill or
-//	                   benefit, are omitted from that text. Later ticket edits
+//	                   features). Only those two facts are read, and Note stays
+//	                   nil. Live pill and benefit text is not copied, so a
+//	                   release with no capture has no Highlights text: that is
+//	                   the no-live-text rule. A capture that already records a
+//	                   group keeps it. Commit tickets that capture does not name
+//	                   (a hidden member, a member with no pill or benefit, or a
+//	                   ticket that was not a release member) take the same
+//	                   group-only classification, still with no note text. A
+//	                   features or fixes change carries linked_tickets only for
+//	                   frozen note text. Hidden tickets, and tickets with no pill
+//	                   or benefit, are omitted from that text. Later ticket edits
 //	                   cannot change the captured text.
 //	changes_omitted    how many more changes there were beyond the listed ones
 //	evidence           source_commit and its URL, the OCI image reference and
@@ -100,8 +104,11 @@
 // Note text is never taken from live ticket fields, and reads never contact
 // the network. When a capture has no group, or the release has none, Aeon
 // reads the live classification of every commit ticket (bug tag, type or kind,
-// or a visible benefit) and ignores the live pill and benefit. A release
-// without a capture therefore loses live-text Highlights by design.
+// or a visible benefit) and ignores the live pill and benefit. A capture that
+// already records a group keeps that group, and Aeon reads the same two facts
+// for commit tickets the capture does not name. Note stays nil on that read.
+// A release without a capture therefore loses live-text Highlights by design,
+// and a grouped capture does not gain Highlights for a ticket it did not tell.
 // Portable notes use the additive notes.public_items without tenant-local UUIDs;
 // notes.items retains its original API contract. Other products can still opt
 // into the legacy TicketSource annotation for both group and text.

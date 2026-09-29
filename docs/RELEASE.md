@@ -148,6 +148,15 @@ It loses live-text Highlights by design: the no-live-text rule keeps pill and
 benefit text out of the response, so Highlights has nothing to show until a
 capture exists. Compare still follows the classified group.
 
+A capture that already stores a group keeps that group and its frozen text.
+Commit tickets the capture does not name — a hidden member, a member with no
+pill or benefit, and a ticket that was not a release member — still take
+`changes[].group` from those same two live facts. The note on that
+classification stays empty, so live pill and benefit text never reaches
+`linked_tickets` or Highlights. Tickets the capture already grouped are not
+read again. A shared commit still takes the strongest group. Compare follows
+that group.
+
 `internal/releasehistory/generate` also reads legacy `release-notes/VERSION.json`
 files **from their matching annotated Git tags**, including under `-offline`.
 Later ticket edits cannot change those notes. The generated manifest records the exact
