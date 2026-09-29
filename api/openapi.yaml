@@ -6638,7 +6638,7 @@ components:
         worker_sessions: {type: integer, minimum: 0}
         timed_sessions: {type: integer, minimum: 0, description: Sessions whose agent time is known.}
         agent_seconds: {type: integer, format: int64, minimum: 0, description: Sum over timed_sessions.}
-        usage_reported_sessions: {type: integer, minimum: 0, description: Sessions with at least one usage row.}
+        usage_reported_sessions: {type: integer, minimum: 0, description: 'Sessions that reported a token figure; a usage report without token components does not count.'}
         model_sessions: {type: integer, minimum: 0, description: Sessions that registered a model; by_model covers only these.}
         done: {type: integer, minimum: 0}
         released: {type: integer, minimum: 0}

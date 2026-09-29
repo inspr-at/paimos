@@ -171,3 +171,41 @@ func TestDashboardWorkFromSessionsAndOutcomes(t *testing.T) {
 		t.Fatalf("empty range %d %s", code, body)
 	}
 }
+
+// A provisional report with no token components is not token coverage: the
+// page must say "reported by 1 of 2 sessions", never "by all 2".
+func TestDashboardWorkTokenCoverageCountsOnlyReportedTokens(t *testing.T) {
+	w := newWorld(t)
+	project := w.project(t, w.home, "TOK-1", "Token project")
+	ticket := w.ticket(t, w.home, project, "TOK-2", "Token ticket")
+	day := time.Date(2026, 9, 14, 10, 0, 0, 0, time.UTC)
+	full := w.workSession(t, w.home, workSession{project: project, ticket: &ticket, harness: "claude", model: "claude-opus-5-5", at: day,
+		beat: tm(day.Add(time.Hour)), stop: tm(day.Add(time.Hour)), worktree: true, commits: 1}, 7)
+	empty := w.workSession(t, w.home, workSession{project: project, ticket: &ticket, harness: "claude", model: "claude-opus-5-5", at: day.Add(2 * time.Hour),
+		beat: tm(day.Add(3 * time.Hour)), stop: tm(day.Add(3 * time.Hour)), worktree: true, commits: 1}, 8)
+	w.tx(t, w.home, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `INSERT INTO harness_session_usage(tenant_id,session_id,model,sequence,input_tokens,output_tokens,cached_input_tokens,provisional,billing_mode,reported_at)
+			VALUES($1,$2,'claude-opus-5-5',1,60,40,0,false,'unknown',$3)`, w.home.TenantID, full, day); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `INSERT INTO harness_session_usage(tenant_id,session_id,model,sequence,input_tokens,output_tokens,cached_input_tokens,provisional,billing_mode,reported_at)
+			VALUES($1,$2,'claude-opus-5-5',1,NULL,NULL,NULL,true,'unknown',$3)`, w.home.TenantID, empty, day)
+		return err
+	})
+	dbtest.BindRole(t, w.db, w.home.TenantID, w.admin.ID, "admin")
+
+	code, page, body := w.get(t, w.admin, "/api/usage/dashboard?from=2026-09-14&to=2026-09-15")
+	if code != 200 {
+		t.Fatalf("status %d %s", code, body)
+	}
+	work := page.Work
+	if work.Sessions != 2 || work.ReportedSessions != 1 {
+		t.Fatalf("coverage sessions %d reported %d", work.Sessions, work.ReportedSessions)
+	}
+	if len(work.Tickets) != 1 || work.Tickets[0].Tokens == nil || *work.Tickets[0].Tokens != "100" || work.Tickets[0].ReportedSessions != 1 || work.Tickets[0].Sessions != 2 {
+		t.Fatalf("ticket %+v", work.Tickets)
+	}
+	if len(work.ByHarness) != 1 || work.ByHarness[0].ReportedSessions != 1 || work.ByHarness[0].Tokens == nil || *work.ByHarness[0].Tokens != "100" {
+		t.Fatalf("harness %+v", work.ByHarness)
+	}
+}

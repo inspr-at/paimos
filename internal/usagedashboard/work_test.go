@@ -64,6 +64,11 @@ func TestWasteKindNamesOnlyRealWaste(t *testing.T) {
 		{"scout work leaves no commit by design", worker(func(r *workRow) { r.shape = "scout" }), ""},
 		{"no worktree, so no commit evidence", worker(func(r *workRow) { r.worktree = false }), ""},
 		{"managed run with no commit", worker(func(r *workRow) { r.worktree = false; r.runOutcome = sp("no_commit") }), "no_result"},
+		{"run committed outside the session's list", worker(func(r *workRow) { r.runOutcome = sp("committed") }), ""},
+		{"run opened a pull request", worker(func(r *workRow) { r.runOutcome = sp("pr_opened") }), ""},
+		{"run merged", worker(func(r *workRow) { r.runOutcome = sp("merged") }), ""},
+		{"merged run that lost contact", worker(func(r *workRow) { r.runOutcome = sp("merged"); r.stopReason = "heartbeat_lost" }), ""},
+		{"abandoned run is still no result", worker(func(r *workRow) { r.runOutcome = sp("abandoned") }), "no_result"},
 		{"lost contact without a commit", worker(func(r *workRow) { r.stopReason = "heartbeat_lost" }), "lost"},
 		{"lost contact after a commit", worker(func(r *workRow) { r.stopReason = "heartbeat_lost"; r.commits = 1 }), ""},
 		{"failed run", worker(func(r *workRow) { r.runStatus = sp("ownership_lost"); r.commits = 3 }), "failed"},
@@ -95,7 +100,7 @@ func TestBuildWorkFoldsRetriesAndAttributesDone(t *testing.T) {
 		row("s2", retry, "AEON-1", "in_progress", day.Add(2*time.Hour), func(r *workRow) { r.stopReason = "heartbeat_lost" }),
 		row("s3", retry, "AEON-1", "in_progress", day.Add(4*time.Hour), func(r *workRow) { r.commits = 1 }),
 		row("s4", shipped, "AEON-2", "done", day.Add(24*time.Hour), func(r *workRow) {
-			r.harness, r.model, r.commits, r.usageRows, r.tokens = "claude", sp("claude-opus-5-5"), 2, 1, sp("1200")
+			r.harness, r.model, r.commits, r.tokens = "claude", sp("claude-opus-5-5"), 2, sp("1200")
 		}),
 		row("s5", nil, "", "", day, func(r *workRow) {
 			r.ticketKey, r.ticketTitle, r.ticketState, r.role, r.model, r.shape = nil, nil, nil, "coordinator", nil, "unknown"

@@ -131,7 +131,6 @@ type workRow struct {
 	commits                                 int
 	label                                   *string
 	runStatus, runOutcome                   *string
-	usageRows                               int64
 	tokens                                  *string
 }
 
@@ -193,7 +192,7 @@ func loadWorkSessions(ctx context.Context, tx pgx.Tx, from, to time.Time, projec
 		       s.created_at, s.heartbeat_at, s.stopped_at, coalesce(s.stop_reason, ''),
 		       s.worktree IS NOT NULL, jsonb_array_length(s.commits), s.display_label,
 		       r.status, r.outcome_detail,
-		       coalesce(u.rows, 0), u.tokens::text
+		       u.tokens::text
 		  FROM harness_sessions s
 		  JOIN nodes p ON p.tenant_id = s.tenant_id AND p.id = s.project_id
 		  LEFT JOIN nodes t ON t.tenant_id = s.tenant_id AND t.id = s.ticket_node_id AND t.deleted_at IS NULL
@@ -223,7 +222,7 @@ func loadWorkSessions(ctx context.Context, tx pgx.Tx, from, to time.Time, projec
 			&r.created, &r.heartbeat, &r.stopped, &r.stopReason,
 			&r.worktree, &r.commits, &r.label,
 			&r.runStatus, &r.runOutcome,
-			&r.usageRows, &r.tokens,
+			&r.tokens,
 		); err != nil {
 			return nil, err
 		}
@@ -359,7 +358,7 @@ func wasteKind(r workRow, now time.Time) string {
 		(r.stopReason != "heartbeat_lost" && problemWords.MatchString(strings.NewReplacer("_", " ", "-", " ").Replace(r.stopReason))) {
 		return "failed"
 	}
-	if r.commits > 0 {
+	if r.commits > 0 || positiveRun(r.runOutcome) {
 		return ""
 	}
 	if r.stopReason == "heartbeat_lost" {
@@ -369,6 +368,19 @@ func wasteKind(r workRow, now time.Time) string {
 		return "no_result"
 	}
 	return ""
+}
+
+// positiveRun is run evidence that the session left something behind, even
+// when its own commit list is empty.
+func positiveRun(outcome *string) bool {
+	if outcome == nil {
+		return false
+	}
+	switch *outcome {
+	case "committed", "pr_opened", "merged":
+		return true
+	}
+	return false
 }
 
 type tally struct {
@@ -383,16 +395,15 @@ func (t *tally) add(r workRow, secs int64, timed bool) {
 		t.timed++
 		t.seconds += secs
 	}
-	if r.usageRows > 0 {
-		t.reported++
-	}
+	// Coverage counts only sessions that reported a token figure; a usage row
+	// with no token components (a provisional report) is not coverage.
 	if r.tokens != nil {
-		n, ok := new(big.Int).SetString(*r.tokens, 10)
-		if ok {
+		if n, ok := new(big.Int).SetString(*r.tokens, 10); ok {
 			if t.tokens == nil {
 				t.tokens = new(big.Int)
 			}
 			t.tokens.Add(t.tokens, n)
+			t.reported++
 		}
 	}
 }
