@@ -9,12 +9,31 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
+// roundTheClock gives the run's account an owner schedule that is always in
+// hours, with Keep for you off: these claims are about reading authority and
+// freshness, not about the wall clock (the default 08–22 UTC work band made them
+// fail after 22:00 UTC) or the reserve (the run holds all 100 units).
+func roundTheClock(t *testing.T, f *fixture, runID string) {
+	t.Helper()
+	s := capacity.DefaultSchedule()
+	for i := range s.Week {
+		s.Week[i] = capacity.Day{On: true, Start: 0, End: 24}
+	}
+	s.Reserve = capacity.ReserveOff
+	raw, _ := json.Marshal(s)
+	f.tx(t, f.agent, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `WITH a AS (UPDATE agent_accounts SET capacity_owner=$2 WHERE id=(SELECT account_id FROM agent_runs WHERE id=$1) RETURNING tenant_id,id)
+ INSERT INTO account_capacity_schedules(tenant_id,principal_id,scope,scope_key,account_id,schedule) SELECT tenant_id,$2,'account',id::text,id,$3 FROM a`, runID, f.person.ID, raw)
+		return err
+	})
+}
+
 func TestCapacityClaimRechecksReadingAuthorityAndFreshness(t *testing.T) {
 	f := setup(t)
 	o := f.order(t, nil)
 	run := f.run(t, o)
 	ids := f.reserve(t, run)
-	openAllDay(t, f, run.ID)
+	roundTheClock(t, f, run.ID)
 	update := func(allowed bool, age string, used int) {
 		t.Helper()
 		f.tx(t, f.agent, func(tx pgx.Tx) error {
@@ -37,7 +56,7 @@ func TestCapacityClaimAllowsOnlyItsRecordedRefresh(t *testing.T) {
 	o := f.order(t, nil)
 	run := f.run(t, o)
 	ids := f.reserve(t, run)
-	openAllDay(t, f, run.ID)
+	roundTheClock(t, f, run.ID)
 	f.tx(t, f.agent, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `UPDATE account_allowance_windows SET unit='percent',allowance=100,used=0,reserved=1,capacity_kind='5h',capacity_read_at=clock_timestamp()-interval '11 minutes',capacity_allowed=true,capacity_refresh_run=$1 WHERE id=(SELECT window_id FROM account_reservations WHERE run_id=$1)`, run.ID)
 		if err != nil {
@@ -47,25 +66,4 @@ func TestCapacityClaimAllowsOnlyItsRecordedRefresh(t *testing.T) {
 		return err
 	})
 	f.call(t, f.agent, "POST", "/api/runs/"+run.ID+"/claim", claimBody(ids), 200, nil)
-}
-
-// openAllDay keeps a measured claim on the pacing path at any wall clock.
-// The default band is 08:00–22:00 UTC, so a night run would wait on the schedule.
-func openAllDay(t *testing.T, f *fixture, runID string) {
-	t.Helper()
-	s := capacity.DefaultSchedule()
-	for i := range s.Week {
-		s.Week[i] = capacity.Day{On: true, Start: 0, End: 24}
-	}
-	raw, err := json.Marshal(s)
-	if err != nil {
-		t.Fatal(err)
-	}
-	f.tx(t, f.agent, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET capacity_owner=$2 WHERE id=(SELECT account_id FROM agent_runs WHERE id=$1)`, runID, f.person.ID); err != nil {
-			return err
-		}
-		_, err := tx.Exec(t.Context(), `INSERT INTO account_capacity_schedules(tenant_id,principal_id,scope,scope_key,schedule) VALUES($1,$2,'user','',$3)`, f.person.TenantID, f.person.ID, raw)
-		return err
-	})
 }

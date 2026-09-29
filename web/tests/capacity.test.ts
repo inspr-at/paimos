@@ -5,7 +5,8 @@ import { APIError, RequestFailure, StaleRequestError } from '../src/lib/api.ts'
 import {
   accountPlan, confirmsSave, uncertainFailure, accountState, buildPools, buildRows, clampRate, dayProfile, daysLabel, defaultSchedule, fullPaceHours, gauge, gaugeModeFor,
   nightLabel, pickWindows, plainText, poolSentence, presetWeek, rateAt, sameShape, scheduleProblem, setGlobalMode, sourceLine, todayCell,
-  toggleAccountMode, when, type AccountCapacity, type AccountInput, type CapacitySchedule, type CapacityWindow,
+  toggleAccountMode, when, reserveLabel, reserveLevel, withReserve, workStart, zonedInstant, activeOverride, stripOverride,
+  type AccountCapacity, type AccountInput, type CapacitySchedule, type CapacityWindow,
 } from '../src/lib/capacity.ts'
 
 const TZ = 'Europe/Vienna'
@@ -16,7 +17,7 @@ const periodStart = iso('2026-09-29T06:00:00Z') // 08:00 local
 const periodEnd = iso('2026-09-30T06:00:00Z')
 const schedule = (fields: Partial<CapacitySchedule> = {}): CapacitySchedule => ({ ...defaultSchedule(TZ), ...fields })
 
-function win(fields: { kind?: CapacityWindow['reading']['window_kind']; used: number; usedToday?: number; budget: number; reset: string; start?: string; tonight?: number; finish?: string; source?: 'harness' | 'agentd' | 'estimate'; readMin?: number; freshness?: CapacityWindow['freshness']; unused?: boolean; allowOff?: boolean; ahead?: boolean; plan?: string }): CapacityWindow {
+function win(fields: { kind?: CapacityWindow['reading']['window_kind']; used: number; usedToday?: number; budget: number; reset: string; start?: string; tonight?: number; finish?: string; source?: 'harness' | 'agentd' | 'estimate'; readMin?: number; freshness?: CapacityWindow['freshness']; unused?: boolean; allowOff?: boolean; ahead?: boolean; plan?: string; kept?: number; keptUntil?: string; level?: number }): CapacityWindow {
   const usedToday = fields.usedToday ?? 0
   return {
     reading: { window_kind: fields.kind ?? 'weekly', window_minutes: 10080, used_percent: fields.used, resets_at: iso(fields.reset), source: fields.source ?? 'harness', read_at: new Date(now - (fields.readMin ?? 2) * 60_000).toISOString(), plan: fields.plan },
@@ -24,6 +25,7 @@ function win(fields: { kind?: CapacityWindow['reading']['window_kind']; used: nu
     pacing: {
       usable_hours: 40, percent_per_hour: 1, suggested_today_percent: Math.max(0, fields.budget - usedToday), budget_percent: fields.budget, used_today_percent: usedToday,
       tonight_percent: fields.tonight ?? 0, period_start: periodStart, period_end: periodEnd, finish: fields.finish ?? null, unused: fields.unused, allow_off: fields.allowOff, ahead: fields.ahead,
+      ...(fields.kept !== undefined ? { reserve_percent: fields.level ?? 30, reserve_effective_percent: fields.kept, ...(fields.keptUntil ? { reserve_until: iso(fields.keptUntil) } : {}) } : {}),
     },
   }
 }
@@ -118,7 +120,7 @@ test('two Codex accounts: soonest reset first, one plan sentence, gauges from se
   assert.equal(plainText(poolSentence(codex, now, TZ)), 'Today: ~6% of Spare, then ~15% of Main — soonest reset first, so each lands at 0% as it resets.')
   const spare = codex.rows[0]
   const plan = accountPlan(spare, now)!
-  assert.deepEqual(gauge(spare, plan), { later: 5, today: 4, spent: 2, tick: 5, frozen: false })
+  assert.deepEqual(gauge(spare, plan), { yours: 0, later: 5, today: 4, spent: 2, tick: 5, frozen: false })
   assert.deepEqual(todayCell(spare, plan), { kind: 'share', value: '~6%', tip: 'Plan for today ~6%: 2% used, 4% to go' })
   assert.equal(sourceLine(spare, now), 'Codex reported · 9 min ago')
   const studio = codex.rows[2]
@@ -225,4 +227,83 @@ test('a lost save answer is uncertain until the server confirms what it has', ()
   assert.ok(!confirmsSave([{ scope: 'user', schedule: schedule() }], sent))
   assert.ok(!confirmsSave([], sent))
   assert.ok(!confirmsSave([{ scope: 'user', schedule: { ...sent, timezone: 'UTC' } }], sent))
+})
+
+// ---------- Keep for you (AEON-375) ----------
+test('Keep for you: labels, levels and the yours segment at the 0 end', () => {
+  assert.equal(reserveLabel(null), 'Auto · ~30%')
+  assert.equal(reserveLabel({ reserve: 'auto' }), 'Auto · ~30%')
+  assert.equal(reserveLabel({ reserve: 'fixed', reserve_percent: 45 }), '45%')
+  assert.equal(reserveLabel({ reserve: 'off' }), 'Nothing')
+  assert.deepEqual([reserveLevel(null), reserveLevel({ reserve: 'fixed', reserve_percent: 20 }), reserveLevel({ reserve: 'off' })], [30, 20, 0])
+  assert.deepEqual(withReserve(schedule({ reserve: 'fixed', reserve_percent: 20 }), 'off').reserve_percent, undefined)
+  assert.equal(withReserve(schedule(), '').reserve, undefined)
+  // Main: 42% left, 30% kept, today 15 of which 3 used: [yours 30][later 0][today 12].
+  const [codex] = pools([acct('main', 'Main', 'codex')], [cap('main', [win({ used: 58, usedToday: 3, budget: 15, reset: '2026-10-02T07:14:00Z', kept: 30 })])])
+  const plan = accountPlan(codex.rows[0], now)!
+  assert.deepEqual(gauge(codex.rows[0], plan), { yours: 30, later: 0, today: 12, spent: 3, tick: 30, frozen: false })
+  assert.equal(plainText(poolSentence(codex, now, TZ)), 'Today: use up to ~15% of Codex (3% so far) — on track to finish at 0% right as it resets Fri 09:14. Keeps ~30% for you while you work.')
+  // Near the reset the reserve shrinks and says until when.
+  const [late] = pools([acct('main', 'Main', 'codex')], [cap('main', [win({ used: 58, usedToday: 3, budget: 15, reset: '2026-10-02T07:14:00Z', kept: 3, keptUntil: '2026-10-02T07:14:00Z' })])])
+  assert.equal(plainText(poolSentence(late, now, TZ)), 'Today: use up to ~15% of Codex (3% so far) — on track to finish at 0% right as it resets Fri 09:14. Keeps ~3% for you until Fri 09:14.')
+  // Reserve off, or no reserve reported: release 11 text and gauge.
+  const [off] = pools([acct('main', 'Main', 'codex')], [cap('main', [win({ used: 58, usedToday: 3, budget: 15, reset: '2026-10-02T07:14:00Z', kept: 0, level: 0 })])])
+  assert.equal(gauge(off.rows[0], accountPlan(off.rows[0], now)).yours, 0)
+  assert.equal(plainText(poolSentence(off, now, TZ)), 'Today: use up to ~15% of Codex (3% so far) — on track to finish at 0% right as it resets Fri 09:14.')
+})
+
+test('Keep for you: an account at your reserve leaves today\'s plan and reads kept for you', () => {
+  const [codex] = pools(
+    [acct('main', 'Main', 'codex'), acct('spare', 'Spare', 'codex')],
+    [cap('main', [win({ used: 58, usedToday: 3, budget: 15, reset: '2026-10-02T07:14:00Z', kept: 30 })]), cap('spare', [win({ used: 91, usedToday: 2, budget: 6, reset: '2026-09-30T16:02:00Z', kept: 30, keptUntil: '2026-09-30T16:02:00Z' })])],
+  )
+  const spare = codex.rows[0]
+  const plan = accountPlan(spare, now)!
+  assert.equal(plan.atReserve, true)
+  assert.equal(plan.reserve, 9, 'what is kept is never more than what is left')
+  assert.equal(todayCell(spare, plan).kind, 'reserve')
+  assert.deepEqual(gauge(spare, plan), { yours: 9, later: 0, today: 0, spent: 2, tick: 5, frozen: false })
+  assert.equal(plainText(poolSentence(codex, now, TZ)), 'Today: ~15% of Main, keeping ~30% for you. Spare is kept for you until tomorrow 18:02.')
+  // Every account at the reserve: agents wait.
+  const [both] = pools([acct('spare', 'Spare', 'codex'), acct('s2', 'Spare 2', 'codex')], [cap('spare', [win({ used: 91, usedToday: 2, budget: 6, reset: '2026-09-30T16:02:00Z', kept: 30 })]), cap('s2', [win({ used: 90, usedToday: 1, budget: 5, reset: '2026-10-01T16:02:00Z', kept: 30 })])])
+  const s = poolSentence(both, now, TZ)
+  assert.equal(plainText(s), 'At your reserve: Spare and Spare 2 are kept for you. Agents wait.')
+  assert.equal(s.ahead, true)
+  // One account alone at its reserve.
+  const [single] = pools([acct('spare', 'Spare', 'codex')], [cap('spare', [win({ used: 91, usedToday: 2, budget: 6, reset: '2026-09-30T16:02:00Z', kept: 30, keptUntil: '2026-09-30T16:02:00Z' })])])
+  assert.equal(plainText(poolSentence(single, now, TZ)), 'At your reserve: the 9% left of Codex is kept for you until tomorrow 18:02. Agents wait.')
+})
+
+test("Keep for you: the 5-hour window's clause, Away and a dated Hold", () => {
+  const five: CapacityWindow = { ...win({ kind: '5h', used: 40, budget: 60, reset: '2026-09-29T14:40:00Z', kept: 16, keptUntil: '2026-09-29T14:40:00Z' }) }
+  const [claude] = pools([acct('c', 'markus', 'claude')], [cap('c', [win({ used: 63, usedToday: 4, budget: 10, reset: '2026-10-04T09:00:00Z', finish: '2026-10-02T20:00:00Z', kept: 30 }), five])])
+  assert.equal(plainText(poolSentence(claude, now, TZ)), 'Today: use up to ~10% of Claude (4% so far) — on track to finish at 0% by Fri 22:00, before it resets Sun 11:00. Its 5-hour window keeps ~16% for you until 16:40.')
+  const away = schedule({ override: 'away', override_until: '2026-10-05T06:00:00Z' })
+  const [gone] = pools([acct('c', 'markus', 'claude')], [cap('c', [win({ used: 63, usedToday: 4, budget: 37, reset: '2026-10-04T09:00:00Z', kept: 0 })], away)])
+  assert.equal(gone.override, 'away')
+  assert.equal(plainText(poolSentence(gone, now, TZ)), "Away: agents may use all 37% of Claude until you're back.")
+  assert.deepEqual(todayCell(gone.rows[0], accountPlan(gone.rows[0], now)), { kind: 'sprint', text: 'all 37%' })
+  assert.equal(activeOverride(schedule({ override: 'away', override_until: '2026-09-29T10:00:00Z' }), now), '', 'Away ends at its date')
+  const held = schedule({ override: 'hold', override_until: '2026-09-29T14:02:00Z' })
+  const [h] = pools([acct('g', 'markus', 'grok')], [cap('g', [win({ used: 10, budget: 0, reset: '2026-10-06T11:10:00Z' })], held)])
+  assert.equal(plainText(poolSentence(h, now, TZ)), "On hold until 16:02. Agents leave Grok alone until then; today's share moves to the coming days.")
+  assert.equal(activeOverride(held, Date.parse('2026-09-29T14:02:00Z')), '', 'a dated Hold ends at its date')
+})
+
+test('Keep for you: wall times in the schedule zone, and saves confirm reserve and Away', () => {
+  assert.equal(new Date(zonedInstant(2026, 9, 5, 8, TZ)).toISOString(), '2026-10-05T06:00:00.000Z')
+  assert.equal(new Date(zonedInstant(2026, 9, 26, 8, TZ)).toISOString(), '2026-10-26T07:00:00.000Z', 'after the change to CET')
+  assert.equal(new Date(zonedInstant(2026, 2, 29, 2.5, TZ)).toISOString(), '2026-03-29T01:30:00.000Z', 'a DST gap resolves forward')
+  const s = schedule()
+  assert.equal(new Date(workStart(s, now, 1)).toISOString(), '2026-09-30T06:00:00.000Z', 'tomorrow 08:00')
+  assert.equal(new Date(workStart(s, now, 1, 0)).toISOString(), '2026-10-05T06:00:00.000Z', 'next Monday 08:00')
+  const friday = Date.parse('2026-10-02T12:00:00Z')
+  assert.equal(new Date(workStart(s, friday, 1)).toISOString(), '2026-10-05T06:00:00.000Z', "tomorrow's hours skip the weekend")
+  const sent = withReserve(stripOverride(s), 'fixed', 40)
+  assert.equal(confirmsSave([{ scope: 'user', schedule: sent }], sent), true)
+  assert.equal(confirmsSave([{ scope: 'user', schedule: withReserve(sent, 'auto') }], sent), false, 'a different reserve is not the save')
+  const away = { ...sent, override: 'away' as const, override_until: '2026-10-05T06:00:00Z' }
+  assert.equal(confirmsSave([{ scope: 'user', schedule: { ...away, override_until: '2026-10-05T06:00:00.000Z' } }], away), true)
+  assert.equal(confirmsSave([{ scope: 'user', schedule: sent }], away), false)
+  assert.equal(sameShape(sent, s), true, 'Keep for you is not the shape')
 })

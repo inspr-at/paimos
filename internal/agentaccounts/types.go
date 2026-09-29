@@ -50,6 +50,10 @@ type Window struct {
 	capacityRetired     bool
 	capacityRefreshRun  *string
 	capacityBudget      *float64
+	// Set when Keep for you binds: the paced share without it, and when the
+	// reserve is gone.
+	capacityShare        *float64
+	capacityReserveUntil *time.Time
 
 	ID          string    `json:"id"`
 	AccountID   string    `json:"account_id"`

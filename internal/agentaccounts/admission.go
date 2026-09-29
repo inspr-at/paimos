@@ -218,7 +218,7 @@ func admission(ctx context.Context, tx pgx.Tx, a Account, all []Window, now time
 	if stale && slots > 0 {
 		return nil, &CapacityWait{Code: "reading", ReadAt: lastRead(all)}, nil
 	}
-	if s.Override == "hold" {
+	if s.ActiveOverride(now) == "hold" {
 		return nil, &CapacityWait{Code: "hold", Until: s.OverrideUntil, Timezone: s.Timezone}, nil
 	}
 	// Blind accounts use Q3 at night/off days, not a fictitious vendor window.
@@ -263,15 +263,30 @@ func admission(ctx context.Context, tx pgx.Tx, a Account, all []Window, now time
 	if hardUntil != nil {
 		return nil, &CapacityWait{Code: "allowance", Until: hardUntil, Timezone: s.Timezone}, nil
 	}
+	// The schedule is account-wide, Keep for you per window: a run waits for the
+	// schedule when any window's paced share is short, and for the reserve when
+	// only the reserve stands in the way (until the person's last band before
+	// that window's reset).
+	var reserve *CapacityWait
 	for _, w := range ordered {
-		if w.capacityBudget != nil && *w.capacityBudget < float64(w.Reserved+need) {
-			next := s.NextStart(now.Add(time.Second), false)
-			if next != nil && !next.After(now.Add(time.Second)) {
-				_, end := s.Period(now)
-				next = s.NextStart(end, false)
-			}
-			return nil, &CapacityWait{Code: "schedule", Until: next, Timezone: s.Timezone, RunNowAllowed: true}, nil
+		if w.capacityBudget == nil || *w.capacityBudget >= float64(w.Reserved+need) {
+			continue
 		}
+		if w.capacityShare != nil && *w.capacityShare >= float64(w.Reserved+need) {
+			if reserve == nil || w.capacityReserveUntil != nil && (reserve.Until == nil || w.capacityReserveUntil.After(*reserve.Until)) {
+				reserve = &CapacityWait{Code: "reserve", Until: w.capacityReserveUntil, Timezone: s.Timezone, RunNowAllowed: true}
+			}
+			continue
+		}
+		next := s.NextStart(now.Add(time.Second), false)
+		if next != nil && !next.After(now.Add(time.Second)) {
+			_, end := s.Period(now)
+			next = s.NextStart(end, false)
+		}
+		return nil, &CapacityWait{Code: "schedule", Until: next, Timezone: s.Timezone, RunNowAllowed: true}, nil
+	}
+	if reserve != nil {
+		return nil, reserve, nil
 	}
 	return active, nil, nil
 }

@@ -25,3 +25,12 @@ func (s Schedule) NextStart(now time.Time, allowOff bool) *time.Time {
 	}
 	return nil
 }
+
+// ActiveOverride is the override in force at now: Sprint ends at its reset,
+// Away at its date, and Hold at its date when it has one.
+func (s Schedule) ActiveOverride(now time.Time) string {
+	if s.Override == "" || s.OverrideUntil != nil && !now.Before(*s.OverrideUntil) {
+		return ""
+	}
+	return s.Override
+}
