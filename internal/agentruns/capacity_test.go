@@ -10,9 +10,10 @@ import (
 )
 
 // roundTheClock gives the run's account an owner schedule that is always in
-// hours, with Keep for you off: these claims are about reading authority and
-// freshness, not about the wall clock (the default 08–22 UTC work band made them
-// fail after 22:00 UTC) or the reserve (the run holds all 100 units).
+// hours, sprinting, with Keep for you off. These claims are about reading
+// authority and freshness. The default 08–22 band waits after 22:00 UTC, and a
+// window that crosses midnight otherwise keeps only today's slice — less than
+// the 100 units this run already holds. Sprint pins the whole remainder.
 func roundTheClock(t *testing.T, f *fixture, runID string) {
 	t.Helper()
 	s := capacity.DefaultSchedule()
@@ -20,6 +21,7 @@ func roundTheClock(t *testing.T, f *fixture, runID string) {
 		s.Week[i] = capacity.Day{On: true, Start: 0, End: 24}
 	}
 	s.Reserve = capacity.ReserveOff
+	s.Override = "sprint"
 	raw, _ := json.Marshal(s)
 	f.tx(t, f.agent, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `WITH a AS (UPDATE agent_accounts SET capacity_owner=$2 WHERE id=(SELECT account_id FROM agent_runs WHERE id=$1) RETURNING tenant_id,id)

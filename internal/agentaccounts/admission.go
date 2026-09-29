@@ -314,22 +314,39 @@ func (b vendorBlock) refreshDue(now time.Time) bool {
 }
 
 func loadVendorBlock(ctx context.Context, tx pgx.Tx, a Account) (vendorBlock, error) {
-	block, err := readingDenial(ctx, tx, a.ID)
+	named, err := readingDenial(ctx, tx, a.ID)
 	if err != nil {
 		return vendorBlock{}, err
 	}
-	// A stop that names no window uses the same one-hour backoff for every
-	// harness. A denying reading still takes precedence while it is current.
-	if !block.active {
-		block, err = blindDenial(ctx, tx, a.ID)
-		if err != nil {
-			return vendorBlock{}, err
-		}
+	unnamed, err := blindDenial(ctx, tx, a.ID)
+	if err != nil {
+		return vendorBlock{}, err
 	}
+	// Clear each denial on its own epoch before choosing. A recovery that
+	// finishes a named denial must not hide a later stop that names no window:
+	// that stop keeps the one-hour backoff, including across a daemon restart.
+	// A denying reading that is still in force takes precedence.
+	named, err = dropClearedDenial(ctx, tx, a.ID, named)
+	if err != nil {
+		return vendorBlock{}, err
+	}
+	unnamed, err = dropClearedDenial(ctx, tx, a.ID, unnamed)
+	if err != nil {
+		return vendorBlock{}, err
+	}
+	if named.active {
+		return named, nil
+	}
+	return unnamed, nil
+}
+
+// dropClearedDenial forgets a denial once a later run has finished without a
+// vendor stop. An inactive block stays inactive.
+func dropClearedDenial(ctx context.Context, tx pgx.Tx, accountID string, block vendorBlock) (vendorBlock, error) {
 	if !block.active {
 		return vendorBlock{}, nil
 	}
-	cleared, err := denialClearedByRun(ctx, tx, a.ID, block.epoch)
+	cleared, err := denialClearedByRun(ctx, tx, accountID, block.epoch)
 	if err != nil || cleared {
 		return vendorBlock{}, err
 	}
@@ -397,7 +414,7 @@ func recoveryBucket(a Account, epoch time.Time) string {
 // Off hours and holds keep their own reason. During the work band the next
 // real run is still waiting, which is not a capacity reading.
 func blindAfterRecovery(s capacity.Schedule, now time.Time) *CapacityWait {
-	if s.Override == "hold" {
+	if s.ActiveOverride(now) == "hold" {
 		return &CapacityWait{Code: "hold", Until: s.OverrideUntil, Timezone: s.Timezone}
 	}
 	if !blindDayPolicy(s, now) {

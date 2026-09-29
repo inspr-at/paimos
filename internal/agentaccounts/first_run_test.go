@@ -813,6 +813,11 @@ func TestRecoveryWithoutReadingResumesFirstRun(t *testing.T) {
 	if card == nil || card.AwaitingReading || len(card.Windows) == 0 {
 		t.Fatalf("reading after reread: %+v", card)
 	}
+	// Sprint keeps the whole remainder. A round-the-clock week still gives a
+	// multi-day window only the hours left today, which is below two
+	// reservations late in the day.
+	s.Override = "sprint"
+	callStatus(t, mod, &person, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{"account", "", a.ID, &s, false}), 204, nil)
 	measured := insertRun(t, person, runner, profile)
 	other := insertRun(t, person, runner, profile)
 	mustRoute(t, mod, runner, token, measured, "daemon-a", []Account{a}, map[string]int64{"requests": 1})
@@ -879,6 +884,105 @@ func TestClaudeUnnamedStopUsesVendorBackoff(t *testing.T) {
 	}
 	if w := admit(); w != nil && w.Code == "vendor" {
 		t.Fatalf("completion left the unnamed stop: %+v", w)
+	}
+}
+
+func TestUnnamedStopAfterClearedNamedDenialKeepsBackoff(t *testing.T) {
+	reset(t)
+	person := makePrincipal(t, "cleared-named", "person", "Ada", []string{"admin"})
+	runner := addPrincipal(t, person.TenantID, "agent", "runner", nil)
+	profile := codexProfile(t, person)
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, person.TenantID, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier) VALUES($1,'cleared-named','1','claude','anthropic','test','high','strong') RETURNING id::text`, person.TenantID).Scan(&profile)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	token := issueKey(t, runner, []string{"account.manage", "account.probe", "run.claim"})
+	mod := accountsMod()
+	var a Account
+	callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts", encoded(t, map[string]any{"account_key": "cleared", "harness": "claude", "daemon_id": "daemon-a", "label": "Main", "max_parallel_runs": 2}), 201, &a)
+	probe := func(g string) {
+		t.Helper()
+		callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts/"+a.ID+"/probe", encoded(t, map[string]any{"daemon_id": "daemon-a", "daemon_generation": g, "available": true}), 200, nil)
+	}
+	probe("g1")
+	s := capacity.DefaultSchedule()
+	for i := range s.Week {
+		s.Week[i] = capacity.Day{On: true, Start: 0, End: 24}
+	}
+	callStatus(t, mod, &person, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{"account", "", a.ID, &s, false}), 204, nil)
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	readAt := now.Add(-3 * time.Hour)
+	no := false
+	callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts/"+a.ID+"/readings", encoded(t, readingsWrite{[]capacity.Reading{
+		{WindowKind: "5h", Bucket: "five_hour", WindowMinutes: 300, UsedPercent: 100, ReadAt: readAt, ResetsAt: now.Add(-2 * time.Hour), Source: "harness", OrdinaryUsageAllowed: &no},
+	}}), 204, nil)
+	recovery := insertRun(t, person, runner, profile)
+	mustRoute(t, mod, runner, token, recovery, "daemon-a", []Account{a}, map[string]int64{"requests": 1})
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, person.TenantID, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `UPDATE agent_runs SET status='completed', started_at=$2 WHERE id=$1`, recovery, readAt.Add(time.Minute)); err != nil {
+			return err
+		}
+		return Release(t.Context(), tx, runner, recovery, "", "")
+	}); err != nil {
+		t.Fatal(err)
+	}
+	admit := func(at time.Time) ([]Window, *CapacityWait) {
+		t.Helper()
+		var windows []Window
+		var wait *CapacityWait
+		if err := db.InTenant(dbtest.Seed(t.Context()), appPool, person.TenantID, func(tx pgx.Tx) error {
+			loaded, err := getAccount(t.Context(), tx, a.ID)
+			if err != nil {
+				return err
+			}
+			loaded.LastProbeAt = &at
+			windows, wait, err = admission(t.Context(), tx, loaded, loaded.Windows, at, 0, runRow{Purpose: "managed", CapacityOverride: "now"}, false)
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+		return windows, wait
+	}
+	windows, w := admit(now)
+	if w != nil || len(windows) != 1 || !strings.HasPrefix(windows[0].capacityBucket, "reread:g1:") {
+		t.Fatalf("cleared named denial should reread: %+v windows=%+v", w, windows)
+	}
+	stop := now.Add(-30 * time.Minute)
+	cause := insertRun(t, person, runner, profile)
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, person.TenantID, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `UPDATE agent_runs SET account_id=$2, status='cancelled' WHERE id=$1`, cause, a.ID); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `INSERT INTO run_telemetry(tenant_id,run_id,sequence,kind,error_code,at) VALUES($1,$2,1,'usage','vendor_limit',$3)`, person.TenantID, cause, stop)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	refuse := func(at time.Time) {
+		t.Helper()
+		_, w := admit(at)
+		if w == nil || w.Code != "vendor" || w.RunNowAllowed || w.Until == nil || !w.Until.Equal(stop.Add(vendorStopBackoff)) {
+			t.Fatalf("unnamed stop at %s: %+v", at.Format(time.RFC3339), w)
+		}
+	}
+	refuse(now)
+	refuse(stop.Add(vendorStopBackoff - time.Millisecond))
+	blocked := insertRun(t, person, runner, profile)
+	callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts/route", routeBody(t, blocked, "daemon-a", []Account{a}, map[string]int64{"requests": 1}), 409, nil)
+	probe("g2")
+	refuse(time.Now().UTC())
+	restarted := insertRun(t, person, runner, profile)
+	callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts/route", routeBody(t, restarted, "daemon-a", []Account{a}, map[string]int64{"requests": 1}), 409, nil)
+	if n := scalar(t, person, `SELECT count(*) FROM account_allowance_windows WHERE account_id=$1 AND capacity_bucket LIKE 'reread:%'`, a.ID); n != 0 {
+		t.Fatal("unnamed stop minted a reread", n)
+	}
+	opened, w := admit(stop.Add(vendorStopBackoff))
+	if w != nil && w.Code == "vendor" {
+		t.Fatalf("backoff lasted past an hour: %+v", w)
+	}
+	if w != nil || len(opened) != 1 || !strings.HasPrefix(opened[0].capacityBucket, "recover:g2:") {
+		t.Fatalf("hour ended on the unnamed stop: %+v windows=%+v", w, opened)
 	}
 }
 
