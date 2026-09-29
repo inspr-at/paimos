@@ -207,6 +207,90 @@ func TestPortalPaceClearAndRelinkRejectsStaleHistory(t *testing.T) {
 	requireRow(false, 4)
 }
 
+// A link written before 0936 has no counter until that migration copies it.
+// The copy runs as the non-bypass owner, which cannot see portal_pace
+// without a tenant setting. Clear, relink, then submit the old revision.
+func TestPortalPaceMigrationBackfillRejectsStaleHistory(t *testing.T) {
+	ctx := t.Context()
+	d, err := dbtest.NewUnmigrated(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := d.Close(); err != nil {
+			t.Errorf("dbtest cleanup: %v", err)
+		}
+	})
+
+	var tenantID, projectID string
+	err = db.MigrateWithHook(ctx, d.App, func(name string) error {
+		if name != "0936_portal_pace_link_revision.sql" {
+			return nil
+		}
+		if err := d.App.QueryRow(ctx, `INSERT INTO tenants(slug,name) VALUES('pace-pre-936','Pace Before') RETURNING id::text`).Scan(&tenantID); err != nil {
+			return err
+		}
+		return db.InTenant(dbtest.Seed(ctx), d.App, tenantID, func(tx pgx.Tx) error {
+			if _, err := tx.Exec(ctx, `SELECT set_config('aeon.portal_moderation','on',true)`); err != nil {
+				return err
+			}
+			if err := tx.QueryRow(ctx, `
+				INSERT INTO nodes(tenant_id,key,kind_id,title,body,state)
+				SELECT $1::uuid,'PRJ-1',k.id,'SECRET-PACE-PRE','SECRET-PACE-BODY','open'
+				FROM node_kinds k WHERE k.tenant_id=$1::uuid AND k.slug='project'
+				RETURNING id::text`, tenantID).Scan(&projectID); err != nil {
+				return err
+			}
+			_, err := tx.Exec(ctx, `INSERT INTO portal_pace(tenant_id, project_node_id) VALUES ($1::uuid, $2::uuid)`, tenantID, projectID)
+			return err
+		})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	m := New(d.App, false, bytesRepeat())
+	mux := http.NewServeMux()
+	m.Mount(mux)
+	f := &fixture{t: t, m: m, d: d, h: mux}
+	insertNode(t, d, tenantID, "PPR-1", "portal_product", "Harbour catalog", "Public summary.", "published", "", "{}")
+	admin := makePerson(t, d, tenantID, "Pace Before Admin", "admin")
+	setPortal(t, d, tenantID, true)
+
+	gotProject, gotHistory, gotRevision, found := paceLinkRow(t, d, tenantID)
+	if !found || gotProject != projectID || gotHistory || gotRevision != 1 {
+		t.Fatalf("backfilled link found=%v project=%s history=%v revision=%d", found, gotProject, gotHistory, gotRevision)
+	}
+	if issued := paceRevisionIssued(t, d, tenantID); issued != 1 {
+		t.Fatalf("backfilled counter %d, want 1", issued)
+	}
+
+	const ip = "203.0.113.47:1000"
+	history := func(revision int64) string {
+		return `{"release_history":true,"project_id":"` + projectID + `","revision":` + strconv.FormatInt(revision, 10) + `}`
+	}
+	mustOK(t, f.do(http.MethodPut, "/api/portal/pace", `{"project_id":null}`, ip, &admin, nil, nil))
+	if _, _, _, found := paceLinkRow(t, d, tenantID); found {
+		t.Fatal("cleared pre-migration link left a pace row")
+	}
+	if issued := paceRevisionIssued(t, d, tenantID); issued != 1 {
+		t.Fatalf("clear dropped the backfilled revision %d", issued)
+	}
+
+	relinked := decodeItem[paceAdmin](t, f.do(http.MethodPut, "/api/portal/pace", `{"project_id":"`+projectID+`"}`, ip, &admin, nil, nil))
+	if relinked.ProjectID != projectID || relinked.ReleaseHistory || relinked.Revision != 2 || relinked.ProjectTitle != "SECRET-PACE-PRE" {
+		t.Fatalf("relink after backfill %+v", relinked)
+	}
+	stale := f.do(http.MethodPut, "/api/portal/pace", history(1), ip, &admin, nil, nil)
+	if stale.Code != http.StatusConflict || !strings.Contains(stale.Body.String(), paceLinkConflict) || strings.Contains(stale.Body.String(), "SECRET-PACE") {
+		t.Fatalf("stale history after a pre-migration link was cleared and relinked: %d %s", stale.Code, stale.Body)
+	}
+	gotProject, gotHistory, gotRevision, found = paceLinkRow(t, d, tenantID)
+	if !found || gotProject != projectID || gotHistory || gotRevision != 2 {
+		t.Fatalf("link after rejected stale submit found=%v project=%s history=%v revision=%d", found, gotProject, gotHistory, gotRevision)
+	}
+}
+
 func paceLinkRow(t *testing.T, d *dbtest.DB, tenantID string) (project string, history bool, revision int64, found bool) {
 	t.Helper()
 	err := db.InTenant(dbtest.Seed(t.Context()), d.App, tenantID, func(tx pgx.Tx) error {

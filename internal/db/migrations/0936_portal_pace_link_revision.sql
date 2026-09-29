@@ -17,10 +17,25 @@ CREATE TABLE portal_pace_revision (
     revision bigint NOT NULL CHECK (revision >= 1)
 );
 
--- Seed before row-level security, while this migration can see every tenant.
--- portal_pace has one row per tenant, so the primary key cannot conflict.
-INSERT INTO portal_pace_revision (tenant_id, revision)
-SELECT tenant_id, revision FROM portal_pace;
+-- portal_pace already forces tenant RLS. This migration runs as the
+-- non-bypass owner, so a bare read sees no existing links and the next
+-- link would reuse revision 1. Scope each tenant, then restore the caller.
+-- Seed before row-level security on the counter. One pace row per tenant,
+-- so the primary key cannot conflict.
+DO $$
+DECLARE
+    t record;
+    prior_setting text := current_setting('aeon.tenant_id', true);
+BEGIN
+    FOR t IN SELECT id FROM tenants ORDER BY id LOOP
+        PERFORM set_config('aeon.tenant_id', t.id::text, true);
+        INSERT INTO portal_pace_revision (tenant_id, revision)
+        SELECT tenant_id, revision FROM portal_pace
+        WHERE tenant_id = t.id;
+    END LOOP;
+    PERFORM set_config('aeon.tenant_id', coalesce(prior_setting, ''), true);
+END;
+$$;
 
 ALTER TABLE portal_pace_revision ENABLE ROW LEVEL SECURITY;
 ALTER TABLE portal_pace_revision FORCE ROW LEVEL SECURITY;
