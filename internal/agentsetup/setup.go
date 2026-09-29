@@ -221,7 +221,7 @@ func (e *Engine) progress(s *snapshot) Progress {
 	if s.Phase == "awaiting_approval" {
 		p.UserCode = s.Response.UserCode
 		p.VerificationURI = s.Response.VerificationURI
-		p.Action = "Enter this code at the same Aeon instance, review the selected accounts and choices, then Connect computer."
+		p.Action = "Enter this code at the same Aeon instance, review the selected accounts and choices, then Connect your machine."
 	}
 	if s.DisconnectAll || s.View.ComputerState == "revoked" || s.Phase == "revoked" || s.Phase == "denied" || s.Phase == "expired" {
 		p.Action = "Keep this pairing's state for status and cleanup; to pair again, rerun pair with --state-root pointing to a new, empty private folder outside the working folder, then approve the new code in the browser. For Nix/Home Manager, update the service's state root through the owning configuration's review path."

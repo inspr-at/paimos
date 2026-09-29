@@ -17,9 +17,10 @@ func TestIssueMoveAliasCLI(t *testing.T) {
 	const projectID = "11111111-1111-4111-8111-111111111111"
 	moved := false
 	var patched bool
+	const revision = "2026-09-29T12:00:00Z"
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		issue := map[string]any{"id": issueID, "kind_id": "ticket-kind", "key": "SRC-1", "title": "Move me", "state": "active", "fields": map[string]any{}}
+		issue := map[string]any{"id": issueID, "kind_id": "ticket-kind", "key": "SRC-1", "title": "Move me", "state": "active", "fields": map[string]any{}, "updated_at": revision}
 		if moved {
 			issue["key"] = "DST-1"
 			issue["parent_id"] = projectID
@@ -44,6 +45,9 @@ func TestIssueMoveAliasCLI(t *testing.T) {
 			moved = true
 			_ = json.NewEncoder(w).Encode(map[string]any{"issue_id": issueID, "old_key": "SRC-1", "new_key": "DST-1", "project_id": projectID, "detached": []string{}, "notes": []string{}})
 		case r.Method == "PATCH" && r.URL.Path == "/api/nodes/"+issueID:
+			if got := r.Header.Get("If-Unmodified-Since"); got != revision {
+				t.Errorf("alias write revision: %q", got)
+			}
 			patched = true
 			_ = json.NewEncoder(w).Encode(issue)
 		default:

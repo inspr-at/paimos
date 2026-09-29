@@ -33,6 +33,8 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version: "1.26"
+      - name: Install the shells the pairing command tests run in
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq zsh fish
       - run: go vet ./...
       - run: go test ./...
       - name: Check prepared rules bootstrap drift

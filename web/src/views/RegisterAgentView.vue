@@ -17,7 +17,8 @@ import {
   emptyRequestLimit, formatAllowanceMoment, formatVerification, getPairingComputer, getPairingGuide,
   isAddHarness, lookupPairing, matchOngoingLimit, ongoingLimitAccounts, ongoingLimitError, pairingPermissions,
   pairingReadGeneration, peekPairingCode, planOngoingLimits, planPoll, platformCaption, presentPublicGuide,
-  rememberPairingCode, setHarnessAccount, simpleRequestLimitError, submitApproval, takePairingCode,
+  chooseInstallMethod, installMethods, readPairingInstallMethod, rememberPairingCode, setHarnessAccount, simpleRequestLimitError, submitApproval, takePairingCode,
+  writePairingInstallMethod,
   unsupportedVerification, verificationWarning,
   type OngoingLimitDraft, type PairingGuide, type PairingView, type ReviewChoice,
 } from '../lib/agentPairing'
@@ -50,6 +51,7 @@ const busy = ref('')
 const message = ref('')
 const nextStep = ref('')
 const presentation = computed(() => guideLoaded.value ? presentPublicGuide(guide.value) : null)
+const methods = computed(() => presentation.value ? installMethods(presentation.value) : [])
 const fallbackCommand = computed(() => 'export PATH="$HOME/.local/bin:$PATH"\n' + (presentation.value?.setupCommand ?? ''))
 const selectedTarget = computed(() => {
   const targets = presentation.value?.targets ?? []
@@ -138,7 +140,16 @@ let pollStarted = 0
 watch(guide, value => {
   const first = value?.install_targets[0]
   platformKey.value = first ? `${first.platform}/${first.arch}` : ''
+  installMethod.value = chooseInstallMethod(installMethods(presentPublicGuide(value)), readPairingInstallMethod(browserStorage()))
 })
+
+function browserStorage(): Storage | null {
+  try { return localStorage } catch { return null }
+}
+
+function rememberInstall(value: string) {
+  writePairingInstallMethod(browserStorage(), value)
+}
 const stopAccess = onAccessChange(change => { if (change === 'reset') clearSignedInPreview() })
 watch(() => session.requiresSignIn, ended => { if (ended) clearSignedInPreview() })
 
@@ -534,7 +545,7 @@ function enrollmentDetail(enrollment: PairingView['enrollments'][number]) {
   <article class="connect" data-aeon-pairing-guide="pairing-v1">
     <header class="intro">
       <p class="eyebrow">Agents</p>
-      <h1>Connect a computer</h1>
+      <h1>Connect your machine</h1>
       <p class="lede">{{ adding ? 'Add a harness on a computer that is already paired. It keeps the same daemon.' : 'Pair a computer with agentd; no API key needed.' }}</p>
       <p class="key-path">For a CLI or script, <RouterLink to="/settings/access/agents?new=1">create an agent and key</RouterLink>.</p>
     </header>
@@ -556,20 +567,15 @@ function enrollmentDetail(enrollment: PairingView['enrollments'][number]) {
         <p class="muted">Loading the guide for this {{ brand.short_name }}…</p>
       </template>
       <template v-else>
-        <div class="agent-address">
-          <p class="copy">Open this address on the computer, or give it to the agent setting it up.</p>
-          <div class="address">
-            <code :title="presentation.address">{{ presentation.address }}</code>
-            <button type="button" class="btn sm" aria-label="Copy guide address" @click="copyText(presentation.address, 'Address')"><AppIcon :name="copied === 'Address' ? 'check' : 'copy'" :size="13" />{{ copied === 'Address' ? 'Copied' : 'Copy' }}</button>
-          </div>
-        </div>
-        <label v-if="presentation.homebrewCommand" class="install-choice">Install on this computer
-          <select v-model="installMethod" class="field" aria-label="Install on this computer">
-            <option value="homebrew">macOS · Homebrew</option>
-            <option value="manual">macOS or Linux · without Homebrew</option>
-            <option v-if="presentation.managedSetup" value="nix">Nix / Home Manager</option>
+        <label v-if="methods.length" class="install-choice">Install on this computer
+          <select v-model="installMethod" class="field" aria-label="Install on this computer" @change="rememberInstall(($event.target as HTMLSelectElement).value)">
+            <option v-if="methods.includes('homebrew')" value="homebrew">macOS · Homebrew</option>
+            <option v-if="methods.includes('manual')" value="manual">macOS or Linux · direct download</option>
+            <option v-if="methods.includes('nix')" value="nix">{{ presentation.nixLabel }}</option>
           </select>
         </label>
+        <p v-if="presentation.nixHint" class="nix-hint">{{ presentation.nixHint.replaceAll(' · ', '\u00a0·\u00a0') }}</p>
+        <p v-if="presentation.homebrewPending" class="pending-note">{{ presentation.homebrewPending }}</p>
         <div v-if="presentation.homebrewCommand && installMethod === 'homebrew'" class="install-guide">
           <p class="copy">Run these from your project folder.</p>
           <pre class="command"><code>{{ presentation.homebrewCommand }}</code></pre>
@@ -577,12 +583,12 @@ function enrollmentDetail(enrollment: PairingView['enrollments'][number]) {
           <p class="copy">Confirm the folder and accounts, then approve the code below to start the service.</p>
           <details class="service-details">
             <summary><AppIcon name="chevron-right" :size="12" class="disclosure-chev" />Release and upgrades</summary>
-            <p class="copy">Homebrew installs the tap’s current signed release, which may differ from this instance.</p>
+            <p class="copy">This formula matches this {{ brand.short_name }}’s version.</p>
             <p class="copy"><code>aeon-agentd status</code> reports a helper/instance version mismatch when the instance is reachable.</p>
             <p class="copy">Upgrading or rerunning pair does not drain or restart an existing daemon; arrange a restart after work finishes and verify Touch ID on the new daemon.</p>
           </details>
         </div>
-        <div v-if="presentation.homebrewCommand && installMethod === 'manual'" class="install-guide">
+        <div v-if="methods.includes('manual') && installMethod === 'manual'" class="install-guide">
           <p v-if="!selectedTarget" class="copy">{{ presentation.installNote }}</p>
           <template v-else>
             <label>Platform
@@ -598,26 +604,35 @@ function enrollmentDetail(enrollment: PairingView['enrollments'][number]) {
           <button type="button" class="btn sm" @click="copyText(fallbackCommand, 'Fallback pair')"><AppIcon :name="copied === 'Fallback pair' ? 'check' : 'copy'" :size="13" />{{ copied === 'Fallback pair' ? 'Copied' : 'Copy pairing command' }}</button>
           <p class="copy">Approve the code below; only then is the user service installed.</p>
         </div>
+        <div v-if="presentation.managedSetup && installMethod === 'nix'" class="nix-guide">
+          <div class="manual-body">
+            <p v-if="presentation.managedSetup.platform_note" class="copy">{{ presentation.managedSetup.platform_note }}</p>
+            <p v-if="presentation.managedSetup.prerequisite_note" class="copy">{{ presentation.managedSetup.prerequisite_note }}</p>
+            <p class="copy">Run this from your project folder, not your home folder.</p>
+            <pre class="command"><code>{{ presentation.managedSetup.command }}</code></pre>
+            <button type="button" class="btn sm" @click="copyText(presentation.managedSetup.command, 'Pair command')"><AppIcon :name="copied === 'Pair command' ? 'check' : 'copy'" :size="13" />{{ copied === 'Pair command' ? 'Copied' : 'Copy pairing command' }}</button>
+            <p class="copy">Confirm the folder and accounts, then enter the code below.</p>
+            <details class="service-details">
+              <summary><AppIcon name="chevron-right" :size="12" class="disclosure-chev" />Declarative service</summary>
+              <p class="copy">Home Manager keeps ownership of the binary and service.</p>
+              <a :href="presentation.managedSetup.module_url" target="_blank" rel="noopener noreferrer"><code>{{ presentation.managedSetup.service_option }}</code></a>
+              <p class="copy">{{ presentation.managedSetup.service_note }}</p>
+            </details>
+          </div>
+        </div>
+        <details v-if="methods.length" class="service-details trouble">
+          <summary><AppIcon name="chevron-right" :size="12" class="disclosure-chev" />Trouble?</summary>
+          <p class="copy">If you see <code>usage: paimos-agentd setup|status…</code>, an older agentd is running first. Update the Nix pin to a release that includes pair, or run the path-proof command above. Add a harness with the same binary: <code>env "$(brew --prefix)/bin/aeon-agentd" add-harness</code> or <code>env "$HOME/.nix-profile/bin/aeon-agentd" add-harness</code>.</p>
+        </details>
+        <div v-if="presentation.address" class="agent-address">
+          <p class="copy">Setting up another computer, or letting an agent do it? Share this address.</p>
+          <div class="address">
+            <code :title="presentation.address">{{ presentation.address }}</code>
+            <button type="button" class="btn sm" aria-label="Copy guide address" @click="copyText(presentation.address, 'Address')"><AppIcon :name="copied === 'Address' ? 'check' : 'copy'" :size="13" />{{ copied === 'Address' ? 'Copied' : 'Copy' }}</button>
+          </div>
+        </div>
       </template>
       <p v-if="guideError" class="problem" role="alert">{{ guideError }} <button type="button" class="btn sm" @click="loadGuide">Try again</button></p>
-
-      <div v-if="presentation?.managedSetup && (!presentation.homebrewCommand || installMethod === 'nix')" class="nix-guide">
-        <h3 v-if="!presentation.homebrewCommand">Nix / Home Manager</h3>
-        <div class="manual-body">
-          <p v-if="presentation.managedSetup.platform_note" class="copy">{{ presentation.managedSetup.platform_note }}</p>
-          <p v-if="presentation.managedSetup.prerequisite_note" class="copy">{{ presentation.managedSetup.prerequisite_note }}</p>
-          <p class="copy">Run this from your project folder, not your home folder.</p>
-          <pre class="command"><code>{{ presentation.managedSetup.command }}</code></pre>
-          <button type="button" class="btn sm" @click="copyText(presentation.managedSetup.command, 'Pair command')"><AppIcon :name="copied === 'Pair command' ? 'check' : 'copy'" :size="13" />{{ copied === 'Pair command' ? 'Copied' : 'Copy pairing command' }}</button>
-          <p class="copy">Confirm the folder and accounts, then enter the code below.</p>
-          <details class="service-details">
-            <summary><AppIcon name="chevron-right" :size="12" class="disclosure-chev" />Declarative service</summary>
-            <p class="copy">Home Manager keeps ownership of the binary and service.</p>
-            <a :href="presentation.managedSetup.module_url" target="_blank" rel="noopener noreferrer"><code>{{ presentation.managedSetup.service_option }}</code></a>
-            <p class="copy">{{ presentation.managedSetup.service_note }}</p>
-          </details>
-        </div>
-      </div>
 
       <form class="code-form" @submit.prevent="lookup">
         <label for="pairing-code">Pairing code</label>
@@ -633,21 +648,6 @@ function enrollmentDetail(enrollment: PairingView['enrollments'][number]) {
         <div class="manual-body">
         <p v-for="paragraph in presentation.manualParagraphs" :key="paragraph" class="copy">{{ paragraph }}</p>
         <p class="copy install-note"><AppIcon name="shield" :size="14" />{{ presentation.installNote }}</p>
-        <label v-if="!presentation.homebrewCommand && presentation.targets.length > 1">Platform
-          <select v-model="platformKey" class="field" aria-label="Install platform">
-            <option v-for="target in presentation.targets" :key="`${target.platform}/${target.arch}`" :value="`${target.platform}/${target.arch}`">{{ platformCaption(target.platform, target.arch) }}</option>
-          </select>
-        </label>
-        <template v-if="!presentation.homebrewCommand && selectedTarget">
-          <p class="k">{{ platformCaption(selectedTarget.platform, selectedTarget.arch) }}</p>
-          <pre class="command"><code>{{ selectedTarget.command }}</code></pre>
-          <button type="button" class="btn sm" @click="copyText(selectedTarget.command, 'Install command')">{{ copied === 'Install command' ? 'Copied' : 'Copy install command' }}</button>
-        </template>
-        <template v-if="!presentation.homebrewCommand && presentation.setupCommand">
-          <p class="k">Setup command</p>
-          <pre class="command"><code>{{ presentation.setupCommand }}</code></pre>
-          <button type="button" class="btn sm" @click="copyText(presentation.setupCommand, 'Setup command')">{{ copied === 'Setup command' ? 'Copied' : 'Copy setup command' }}</button>
-        </template>
         </div>
       </details>
       <details v-if="presentation" class="manual">
@@ -764,7 +764,7 @@ function enrollmentDetail(enrollment: PairingView['enrollments'][number]) {
       </div>
 
       <div v-if="pendingReview" class="actions">
-        <button class="btn primary go" type="button" :disabled="!!busy || !permissions.canApprove || !selected.length || !!targetProblem || verificationBlocked.length > 0" @click="connect">{{ busy === 'approve' ? (addRequest ? 'Adding…' : 'Connecting…') : addRequest ? 'Add harness' : 'Connect computer' }}</button>
+        <button class="btn primary go" type="button" :disabled="!!busy || !permissions.canApprove || !selected.length || !!targetProblem || verificationBlocked.length > 0" @click="connect">{{ busy === 'approve' ? (addRequest ? 'Adding…' : 'Connecting…') : addRequest ? 'Add harness' : 'Connect your machine' }}</button>
         <button class="btn" type="button" :disabled="!!busy || !permissions.canDeny" @click="deny">Deny</button>
         <p class="keep"><AppIcon name="shield" :size="14" />Vendor sign-ins and project files stay on the computer.</p>
       </div>
@@ -780,8 +780,11 @@ function enrollmentDetail(enrollment: PairingView['enrollments'][number]) {
 </template>
 
 <style scoped>
-.install-choice { display: grid; gap: 8px; font-weight: 500; }
+.install-choice { display: grid; gap: 8px; color: var(--ink); font-weight: 600; }
+.install-choice .field { font-weight: 500; }
+.nix-hint, .pending-note { margin: 8px 0 0; color: var(--ink-2); font-size: 13px; }
 .install-guide { display: grid; justify-items: start; gap: 10px; margin-top: 16px; }
+.trouble { margin-top: 14px; }
 .install-guide > label, .install-guide > details, .install-guide .command { width: 100%; min-width: 0; box-sizing: border-box; }
 .install-guide > p { margin: 0; }
 .installer-source { max-height: 280px; overflow: auto; }
@@ -812,7 +815,7 @@ function enrollmentDetail(enrollment: PairingView['enrollments'][number]) {
 .limit label { display: grid; gap: 6px; font-size: 13px; color: var(--ink-2); }
 /* Public guide commands and optional instance details. */
 .address { min-width: 0; display: flex; align-items: center; gap: 8px; margin-top: 8px; padding: 6px 6px 6px 12px; border-radius: 10px; background: var(--surface-sunken); }
-.agent-address { margin-bottom: 24px; }
+.agent-address { margin-top: 22px; }
 .agent-address > p { margin: 0; }
 .address code { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 13px/1.4 var(--mono); }
 .address .btn, .command + .btn { gap: 6px; flex-shrink: 0; }

@@ -231,6 +231,7 @@ onBeforeUnmount(() => { document.removeEventListener('click', outside, true); wi
           <button class="gear" type="button" aria-haspopup="dialog" :aria-expanded="editor?.kind === 'night'" aria-label="Customize night and shifts" :data-tip="mayManage ? 'Customize night and shifts' : manageTip" :disabled="!mayManage" @click="openEditor('night', $event)"><AppIcon name="gear" :size="15" /></button>
         </div>
       </div>
+      <RouterLink v-if="mayManage" class="manage add-account" to="/settings/accounts#add-account" aria-label="Add an account" data-tip="Add an account on a paired machine"><AppIcon name="plus" :size="15" /><span>Add<span class="long"> an account</span></span></RouterLink>
       <RouterLink class="manage" to="/settings/accounts" data-tip="Accounts in Settings: sign-ins, names, which accounts agents may use"><AppIcon name="sliders" :size="15" /><span>Manage<span class="long"> accounts</span></span></RouterLink>
     </div>
 
@@ -355,6 +356,11 @@ onBeforeUnmount(() => { document.removeEventListener('click', outside, true); wi
 .manage { display: inline-flex; align-items: center; gap: 7px; height: 32px; padding: 0 10px; border-radius: 999px; color: var(--ink-2); font-size: 13px; font-weight: 550; white-space: nowrap; text-decoration: none; }
 @media (hover: hover) { .manage:hover { background: var(--row-hover); color: var(--ink); } }
 .manage:focus-visible { box-shadow: var(--focus-ring); }
+/* Phone: the word "Add" wraps Manage onto its own row. An icon keeps both actions on the title line. */
+@media (max-width: 720px) {
+  .manage.add-account { position: relative; flex: none; width: 44px; margin-right: 0; padding: 0; justify-content: center; }
+  .manage.add-account span { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+}
 .empty { display: flex; align-items: center; gap: 10px; padding: 16px 20px; color: var(--ink-3); font-size: 13px; }
 
 .pool { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; min-width: 0; padding: 16px 18px 16px 20px; }
