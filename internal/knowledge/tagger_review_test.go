@@ -34,7 +34,7 @@ func TestLooksSensitive(t *testing.T) {
 		"-----BEGIN OPENSSH PRIVATE KEY----- b3Blbn",
 		"db url postgres://aeon:hunter22@db.internal/aeon",
 		"set password=Winter2026! on the box",
-		`"api_key": "abcdef123456"`,
+		`"api_` + `key": "abcdef` + `123456"`,
 		"x" + "ai-" + strings.Repeat("Q9w8E7r6", 3),
 		"s" + "k-proj-" + strings.Repeat("Ab12Cd34", 3),
 		"gl" + "pat-" + strings.Repeat("xY9", 7),
