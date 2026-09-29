@@ -79,6 +79,8 @@ func serve(args []string) error {
 	f.SetOutput(io.Discard)
 	var base, keyFile, workspace, state, daemonID, accountsPath, codexPath, claudePath, nodePath, sdkPath, piPath, cursorPath string
 	var estimateRequests, estimateTokens, estimateCost int64
+	var capacityInterval time.Duration
+	f.DurationVar(&capacityInterval, "capacity-interval", 5*time.Minute, "minimum interval between idle quota captures")
 	var setupRoot string
 	f.StringVar(&setupRoot, "setup-root", "", "private approved pairing state")
 	f.StringVar(&base, "url", "", "AEON URL")
@@ -100,10 +102,16 @@ func serve(args []string) error {
 		return err
 	}
 	if setupRoot != "" {
-		if f.NFlag() != 1 || len(f.Args()) != 0 {
+		allowedFlags := true
+		f.Visit(func(v *flag.Flag) {
+			if v.Name != "setup-root" && v.Name != "capacity-interval" {
+				allowedFlags = false
+			}
+		})
+		if !allowedFlags || len(f.Args()) != 0 {
 			return errors.New("paired serve does not accept runtime overrides")
 		}
-		return servePaired(setupRoot)
+		return servePaired(setupRoot, capacityInterval)
 	}
 	if len(f.Args()) != 0 || agentd.ValidateBaseURL(base) != nil {
 		return errors.New("invalid AEON URL or arguments")
@@ -204,7 +212,7 @@ func serve(args []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	s, err := agentd.NewSupervisor(ctx, agentd.Config{API: agentd.NewRemote(base, key), StateRoot: state, DaemonID: daemonID,
-		Workspace: workspace, Adapters: adapters, EstimatedUnits: estimates, Accounts: accounts})
+		Workspace: workspace, Adapters: adapters, EstimatedUnits: estimates, Accounts: accounts, CapacityInterval: capacityInterval})
 	if err != nil {
 		return err
 	}
@@ -214,11 +222,17 @@ func serve(args []string) error {
 		return err
 	}
 	defer local.Close()
+	captureCtx, stopCapture := context.WithCancel(ctx)
+	captureDone := make(chan struct{})
+	go func() { defer close(captureDone); s.RunCapacityCaptures(captureCtx) }()
+	defer func() { stopCapture(); <-captureDone }()
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 	stopping := false
 	for {
 		if stopping {
+			stopCapture()
+			<-captureDone
 			closeCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 			closeErr := s.Close(closeCtx)
 			cancel()

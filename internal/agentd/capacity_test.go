@@ -190,3 +190,125 @@ func TestClaudeBridgeCapacityProjectionAndEndTime(t *testing.T) {
 		t.Fatal("end snapshot changed observation time")
 	}
 }
+
+type idleCapacityAdapter struct {
+	*fakeAdapter
+	calls   int
+	at      time.Time
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (a *idleCapacityAdapter) CaptureCapacity(ctx context.Context, _ string) []capacity.Reading {
+	a.calls++
+	if a.entered != nil {
+		close(a.entered)
+		select {
+		case <-a.release:
+		case <-ctx.Done():
+			return nil
+		}
+	}
+	return []capacity.Reading{{ReadAt: a.at, WindowKind: "5h", WindowMinutes: 300, UsedPercent: 10, ResetsAt: a.at.Add(time.Hour), Source: "agentd"}}
+}
+func TestIdleCapacityCadenceAndLiveRunFence(t *testing.T) {
+	s, api, _ := testSupervisor(t)
+	reporter := &capacityTestAPI{API: api}
+	s.api = reporter
+	now := time.Now().UTC()
+	a := &idleCapacityAdapter{fakeAdapter: s.adapters[Codex].(*fakeAdapter), at: now}
+	s.adapters[Codex] = a
+	s.probedAccounts["account"] = true
+	s.captureIdleCapacity(t.Context(), now)
+	for i := 1; i < 60; i++ {
+		s.captureIdleCapacity(t.Context(), now.Add(time.Duration(i)*5*time.Second))
+	}
+	if a.calls != 1 {
+		t.Fatal("captured every dispatch poll", a.calls)
+	}
+	a.at = now.Add(5 * time.Minute)
+	s.captureIdleCapacity(t.Context(), a.at)
+	if a.calls != 2 {
+		t.Fatal("five-minute capture missing", a.calls)
+	}
+	s.runs["live"] = &owned{record: Record{AccountID: "account", State: "running", LaunchState: launchAttempted}}
+	s.captureIdleCapacity(t.Context(), now.Add(10*time.Minute))
+	if a.calls != 2 {
+		t.Fatal("captured live managed account")
+	}
+	delete(s.runs, "live")
+	e := &owned{record: Record{Generation: s.generation, AccountID: "account", RunID: "run"}}
+	s.observeCapacity(e, []capacity.Reading{{ReadAt: now.Add(9 * time.Minute)}})
+	s.captureIdleCapacity(t.Context(), now.Add(10*time.Minute))
+	if a.calls != 2 {
+		t.Fatal("ignored recent stream reading")
+	}
+	// Configuration is respected as well as the five-minute default.
+	s.capacityInterval = time.Minute
+	a.at = now.Add(11 * time.Minute)
+	s.captureIdleCapacity(t.Context(), a.at)
+	if a.calls != 3 {
+		t.Fatal("configured cadence ignored")
+	}
+}
+func TestCaptureDoesNotHoldDispatchBudget(t *testing.T) {
+	s, api, _ := testSupervisor(t)
+	s.api = &capacityTestAPI{API: api}
+	a := &idleCapacityAdapter{fakeAdapter: s.adapters[Codex].(*fakeAdapter), at: time.Now(), entered: make(chan struct{}), release: make(chan struct{})}
+	s.adapters[Codex] = a
+	s.probedAccounts["account"] = true
+	done := make(chan struct{})
+	go func() { defer close(done); s.captureIdleCapacity(t.Context(), a.at) }()
+	<-a.entered
+	if !s.dispatchMu.TryLock() {
+		t.Fatal("capture holds dispatch mutex")
+	}
+	s.dispatchMu.Unlock()
+	if err := s.StartRun(t.Context(), api.run); err != ErrDraining {
+		t.Fatal("dispatch must defer during capture", err)
+	}
+	status, err := s.Drain(DrainRequest{DaemonID: s.daemonID, AccountID: "account"})
+	if err != nil || status.State != "draining" {
+		t.Fatal("drain ignored capture process", status, err)
+	}
+	if err := s.Close(t.Context()); err != ErrDraining {
+		t.Fatal("closed while capture still owned", err)
+	}
+	close(a.release)
+	<-done
+}
+func TestCapacityOutboxReplacesMissingBuckets(t *testing.T) {
+	s := &Supervisor{generation: "g"}
+	e := &owned{record: Record{Generation: "g"}}
+	now := time.Now()
+	a := capacity.Reading{WindowKind: "5h", ReadAt: now, Source: "harness", Phase: "update"}
+	b := a
+	b.WindowKind = "weekly"
+	s.observeCapacity(e, []capacity.Reading{a, b})
+	a.ReadAt = now.Add(time.Second)
+	s.observeCapacity(e, []capacity.Reading{a})
+	if len(e.capacityPending) != 1 {
+		t.Fatal("missing bucket remained pending", e.capacityPending)
+	}
+}
+
+type latestCapacityTestAPI struct {
+	*capacityTestAPI
+	at time.Time
+}
+
+func (a *latestCapacityTestAPI) LatestCapacityReadAt(context.Context, string) (time.Time, error) {
+	return a.at, nil
+}
+func TestIdleCaptureRespectsReadingFromPreviousDaemon(t *testing.T) {
+	s, api, _ := testSupervisor(t)
+	now := time.Now()
+	s.api = &latestCapacityTestAPI{capacityTestAPI: &capacityTestAPI{API: api}, at: now.Add(-time.Minute)}
+	a := &idleCapacityAdapter{fakeAdapter: s.adapters[Codex].(*fakeAdapter), at: now}
+	s.adapters[Codex] = a
+	s.probedAccounts["account"] = true
+	s.captureIdleCapacity(t.Context(), now)
+	if a.calls != 0 {
+		t.Fatal("fresh server reading ignored")
+	}
+}

@@ -38,6 +38,7 @@ type Config struct {
 	Accounts          []EnrolledAccount
 	HeartbeatInterval time.Duration
 	MaxRunDuration    time.Duration
+	CapacityInterval  time.Duration
 }
 
 type replay struct {
@@ -114,6 +115,10 @@ type harnessMetadata struct {
 }
 
 type Supervisor struct {
+	capacityInterval    time.Duration
+	capacityLast        map[string]time.Time
+	capacityAttempt     map[string]time.Time
+	capacityCapturing   bool
 	maxTokens, maxTurns int64
 
 	dispatchMu        sync.Mutex
@@ -174,6 +179,12 @@ func NewSupervisor(ctx context.Context, c Config) (*Supervisor, error) {
 	}
 	if len(adapters) == 0 {
 		return nil, errors.New("no adapters configured")
+	}
+	if c.CapacityInterval == 0 {
+		c.CapacityInterval = 5 * time.Minute
+	}
+	if c.CapacityInterval < time.Second {
+		return nil, errors.New("invalid capacity interval")
 	}
 	heartbeat := c.HeartbeatInterval
 	if heartbeat == 0 {
@@ -258,7 +269,7 @@ func NewSupervisor(ctx context.Context, c Config) (*Supervisor, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &Supervisor{maxTokens: c.MaxTokens, maxTurns: c.MaxTurns, state: state, blockedAccounts: map[string]bool{}, probedAccounts: map[string]bool{}, loginRequired: map[string]bool{}, api: c.API, journal: j, lock: lock, adapters: adapters, runs: map[string]*owned{}, tenantID: tenantID,
+	s := &Supervisor{capacityInterval: c.CapacityInterval, capacityLast: map[string]time.Time{}, capacityAttempt: map[string]time.Time{}, maxTokens: c.MaxTokens, maxTurns: c.MaxTurns, state: state, blockedAccounts: map[string]bool{}, probedAccounts: map[string]bool{}, loginRequired: map[string]bool{}, api: c.API, journal: j, lock: lock, adapters: adapters, runs: map[string]*owned{}, tenantID: tenantID,
 		principalID: principalID, daemonID: c.DaemonID, generation: gen, workspace: physical, estimates: c.EstimatedUnits, accounts: c.Accounts,
 		heartbeatInterval: heartbeat, maxRunDuration: maxRun, prepareScratch: verificationScratch, newHarnessID: randomID}
 	for _, rec := range j.Snapshot() {
@@ -365,22 +376,14 @@ func (s *Supervisor) PollOnce(ctx context.Context) error {
 			}
 		}
 		if probeBlocked {
+			s.mu.Lock()
+			s.probedAccounts[account.ID] = false
+			s.mu.Unlock()
 			continue
 		}
 		probe := adapters[account.Harness].(AccountProber)
 		available := probe.Probe(ctx, account.Key)
 		err := s.api.Probe(ctx, account.ID, s.daemonID, s.generation, available)
-		if err == nil && available {
-			if capture, ok := probe.(interface {
-				CaptureCapacity(context.Context, string) []capacity.Reading
-			}); ok {
-				if api, ok := s.api.(capacityAPI); ok {
-					if readings := capture.CaptureCapacity(ctx, account.Key); len(readings) > 0 {
-						_ = api.ReportCapacity(ctx, account.ID, readings)
-					}
-				}
-			}
-		}
 		s.mu.Lock()
 		s.blockedAccounts[account.ID] = err != nil || !available
 		s.probedAccounts[account.ID] = err == nil && available
@@ -405,6 +408,12 @@ func (s *Supervisor) PollOnce(ctx context.Context) error {
 func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 	s.dispatchMu.Lock()
 	defer s.dispatchMu.Unlock()
+	s.mu.Lock()
+	capturing := s.capacityCapturing
+	s.mu.Unlock()
+	if capturing {
+		return ErrDraining
+	}
 	if !s.dispatchAllowed(run.requestedAccount()) {
 		return ErrDraining
 	}
@@ -1351,7 +1360,11 @@ func (s *Supervisor) Close(ctx context.Context) error {
 	defer s.dispatchMu.Unlock()
 	s.mu.Lock()
 	s.closing = true
+	capturing := s.capacityCapturing
 	s.mu.Unlock()
+	if capturing {
+		return ErrDraining
+	}
 	status := s.Lifecycle("")
 	if len(status.ActiveRunIDs) > 0 {
 		return ErrDraining
