@@ -183,7 +183,7 @@ export function bandRows(pools: PoolView[], now: number): BandRow[] {
     const gauges = plans.map(({ r, plan }) => gauge(r, plan))
     const mean = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length
     const g: Gauge | null = gauges.length ? {
-      later: mean(gauges.map(x => x.later)), today: mean(gauges.map(x => x.today)), spent: mean(gauges.map(x => x.spent)),
+      yours: mean(gauges.map(x => x.yours)), later: mean(gauges.map(x => x.later)), today: mean(gauges.map(x => x.today)), spent: mean(gauges.map(x => x.spent)),
       tick: gauges.every(x => x.tick !== null) ? mean(gauges.map(x => x.tick!)) : null, frozen: gauges.every(x => x.frozen),
     } : null
     const live = plans.filter(({ r, plan }) => r.state === 'live' && plan && !plan.override && !(plan.dayOff && !plan.expiring))

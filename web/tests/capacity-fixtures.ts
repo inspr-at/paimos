@@ -2,8 +2,9 @@
 // The Agents desk's capacity world from the approved prototype (AEON-292/299):
 // Codex Spare, Main and Studio (offline), Claude with 5-hour and weekly windows,
 // Grok in a fresh week and Cursor on a monthly estimate. The mock paces with a
-// small stand-in for the server formula: it reacts to the schedule, Sprint and
-// Hold so the header states and editors can be exercised, not to prove pacing.
+// small stand-in for the server formula: it reacts to the schedule, Sprint,
+// Hold, Away and Keep for you (a runway over the person's hours) so the header
+// states and editors can be exercised, not to prove pacing.
 import { pairingEnrollment, pairingView } from './agent-pairing-fixtures'
 
 export const NOW = Date.parse('2026-09-29T12:02:00Z') // Tue 14:02 in Vienna
@@ -14,7 +15,7 @@ const MBP = 'd0000000-0000-4000-8000-000000000001', STUDIO = 'd0000000-0000-4000
 const iso = (s: string) => new Date(Date.parse(s)).toISOString()
 const minutesAgo = (m: number) => new Date(NOW - m * 60_000).toISOString()
 
-type Schedule = Record<string, unknown> & { week: { on: boolean; start: number; end: number }[]; nights: boolean; off_days: string; override?: string; override_until?: string }
+type Schedule = Record<string, unknown> & { week: { on: boolean; start: number; end: number }[]; nights: boolean; off_days: string; override?: string; override_until?: string; reserve?: string; reserve_percent?: number }
 export const defaultSchedule = (): Schedule => ({
   timezone: TZ, week: Array.from({ length: 7 }, (_, i) => ({ on: i < 5, start: 8, end: 22 })), off_days: 'expire', nights: false, model: 'daynight',
   night: { start: 22, end: 8, k: 0.6 }, shifts: { early: 6, late: 14, night: 22, k: [1, 1, 0.5] }, blocks: Array.from({ length: 24 }, (_, h) => (h >= 8 && h < 22 ? 1 : 0.5)),
@@ -30,6 +31,15 @@ export interface CapacityOptions {
   unmeasured?: boolean
   /** mbp2607's setup reports login_required (computer-wide, not per account). */
   computerLogin?: boolean
+  /**
+   * The one-time plan card: 'first' has no saved schedule yet, 'new' a release 11
+   * schedule without Keep for you. By default Keep for you is confirmed (Auto).
+   */
+  planCard?: 'first' | 'new'
+  /** The person's Keep for you, when not Auto. */
+  reserve?: 'off' | number
+  /** Away until Monday 08:00, set on the person's schedule. */
+  away?: boolean
 }
 
 export function capacityWorld(options: CapacityOptions = {}) {
@@ -47,16 +57,51 @@ export function capacityWorld(options: CapacityOptions = {}) {
   if (!options.noCursor) accts.push({ id: ACCOUNTS.cursor, label: 'markus', harness: 'cursor', host: 'mbp2607', plan: 'Pro', state: options.signin ? 'unavailable' : 'available', probe: !options.signin, ...(options.signin ? { failure: 'auth_failed' } : {}), windows: [{ kind: 'monthly', used: 43, usedToday: 7, budget: 6, reset: '2026-10-14T07:00:00Z', start: '2026-09-14T07:00:00Z', source: 'estimate', readMin: options.signin ? 2 * 24 * 60 : 20 }] })
 
   const schedules: { scope: string; pool?: string; account_id?: string; schedule: Schedule }[] = []
-  const effective = (a: Acct): Schedule => {
-    const pick = schedules.find(e => e.scope === 'account' && e.account_id === a.id) ?? schedules.find(e => e.scope === 'pool' && e.pool === a.harness) ?? schedules.find(e => e.scope === 'user')
-    return pick ? pick.schedule : defaultSchedule()
+  if (options.planCard !== 'first') {
+    const user: Schedule = defaultSchedule()
+    if (options.planCard !== 'new') Object.assign(user, typeof options.reserve === 'number' ? { reserve: 'fixed', reserve_percent: options.reserve } : { reserve: options.reserve ?? 'auto' })
+    if (options.away) Object.assign(user, { override: 'away', override_until: iso('2026-10-05T06:00:00Z') })
+    schedules.push({ scope: 'user', schedule: user })
+  }
+  const live = (x: Schedule) => !!x.override && !(x.override_until && Date.parse(x.override_until) <= NOW)
+  // The server's resolveSchedule: the most specific shape, Away from the person's
+  // schedule where no override of its own is in force, the most specific reserve.
+  const resolveChain = (chain: Schedule[]): Schedule => {
+    const s: Schedule = { ...chain[0] }
+    const top = chain[chain.length - 1]
+    if (!live(s) && live(top) && top.override === 'away') Object.assign(s, { override: 'away', override_until: top.override_until })
+    delete s.reserve; delete s.reserve_percent
+    const own = chain.find(c => c.reserve)
+    if (own) Object.assign(s, { reserve: own.reserve, ...(own.reserve === 'fixed' ? { reserve_percent: own.reserve_percent } : {}) })
+    return s
+  }
+  const entryOf = (a: Acct) => ({ account: schedules.find(e => e.scope === 'account' && e.account_id === a.id)?.schedule, pool: schedules.find(e => e.scope === 'pool' && e.pool === a.harness)?.schedule })
+  const resolve = (a: Acct): Schedule => {
+    const { account, pool } = entryOf(a)
+    return resolveChain([account, pool, schedules.find(e => e.scope === 'user')?.schedule ?? defaultSchedule()].filter(Boolean) as Schedule[])
+  }
+  const effective = (a: Acct): Schedule => resolve(a)
+  // The runway stand-in: the person's work-band hours from now to the reset, on
+  // a half-hour walk in Vienna, against min(window, one work-day band).
+  const localHour = (at: number) => { const p = new Intl.DateTimeFormat('en-GB', { timeZone: TZ, weekday: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(new Date(at)); const get = (t: string) => p.find(x => x.type === t)!.value; return { wd: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].indexOf(get('weekday')), h: +get('hour') + +get('minute') / 60 } }
+  function runway(s: Schedule, reset: number, minutes: number, level: number) {
+    const band = Math.max(...s.week.filter(d => d.on).map(d => d.end - d.start))
+    const ref = Math.min(band, minutes / 60)
+    let hours = 0, until = 0
+    for (let t = reset; t > NOW && hours < ref; t -= 30 * 60_000) {
+      const from = Math.max(NOW, t - 30 * 60_000)
+      const { wd, h } = localHour((from + t) / 2)
+      const d = s.week[wd]
+      if (d.on && h >= d.start && h < d.end) { hours += (t - from) / 3600e3; until ||= t }
+    }
+    return { reserve: until ? level * Math.min(1, hours / ref) : 0, until }
   }
   // Stand-in pacing: fewer work days give a larger daily share, nights add a
   // share tonight, a day off rests unless capacity would expire.
   function pace(w: Win, s: Schedule) {
     const onDays = s.week.filter(d => d.on).length || 1
     const tuesdayOn = s.week[1].on || s.off_days === 'normal'
-    const override = s.override === 'sprint' && s.override_until && Date.parse(s.override_until) <= NOW ? '' : s.override ?? ''
+    const override = live(s) ? s.override ?? '' : ''
     const left = 100 - w.used, leftAtStart = left + w.usedToday
     let budget = Math.min(leftAtStart, w.budget * (5 / onDays) * (s.nights ? 1.2 : 1))
     let tonight = s.nights ? budget * 0.2 : 0
@@ -66,18 +111,35 @@ export function capacityWorld(options: CapacityOptions = {}) {
       if (soon && s.off_days === 'expire') { allowOff = true; budget = leftAtStart; tonight = 0 }
       else { budget = w.usedToday; tonight = 0; unused = soon && left > 0 }
     }
-    if (override === 'sprint') { budget = leftAtStart; tonight = 0 }
+    if (override === 'sprint' || override === 'away') { budget = leftAtStart; tonight = 0 }
     if (override === 'hold') { budget = w.usedToday; tonight = 0 }
+    const level = s.reserve === 'off' ? 0 : s.reserve === 'fixed' ? s.reserve_percent ?? 30 : 30
+    const kept = level && override !== 'sprint' && override !== 'away' ? runway(s, Date.parse(w.reset), w.kind === '5h' ? 300 : w.kind === 'monthly' ? 43200 : 10080, level) : { reserve: 0, until: 0 }
+    const share = Math.max(0, budget - w.usedToday)
     return {
-      usable_hours: 40, percent_per_hour: left / 40, suggested_today_percent: Math.max(0, budget - w.usedToday), available_now_percent: Math.max(0, budget - w.usedToday),
+      usable_hours: 40, percent_per_hour: left / 40, suggested_today_percent: share, available_now_percent: Math.max(0, Math.min(share, left - kept.reserve)),
       budget_percent: budget, used_today_percent: w.usedToday, tonight_percent: tonight, period_start: iso('2026-09-29T06:00:00Z'), period_end: iso('2026-09-30T06:00:00Z'),
       finish: w.finish ? iso(w.finish) : iso(w.reset), allow_off: allowOff, unused, ahead: w.usedToday > budget + 0.5 && !override,
+      reserve_percent: level, reserve_effective_percent: kept.reserve, ...(kept.until ? { reserve_until: new Date(kept.until).toISOString() } : {}),
     }
   }
   const freshness = (w: Win) => (w.readMin <= 10 ? 'fresh' : w.readMin <= 50 || (w.kind !== '5h' && w.readMin <= 28 * 60) ? (w.readMin > 120 ? 'stale' : 'aging') : 'stale')
-  const project = (draft?: Schedule) => accts.map(a => {
+  const project = (draft?: Schedule, pools: { pool: string; reserve: string; reserve_percent?: number }[] = []) => accts.map(a => {
     const saved = effective(a)
-    const s = draft ? { ...draft, override: saved.override, override_until: saved.override_until } : saved
+    let s = saved
+    if (draft) {
+      // The preview: the draft as the person's schedule; pool entries follow its
+      // shape with their own override and reserve, pool drafts on top.
+      const { account, pool } = entryOf(a)
+      const wanted = pools.find(p => p.pool === a.harness)
+      const { override: _o, override_until: _u, reserve: _r, reserve_percent: _p, ...shape } = draft
+      const own = wanted ?? (pool?.reserve ? { reserve: pool.reserve, reserve_percent: pool.reserve_percent } : null)
+      const carried: Schedule | undefined = pool || own?.reserve ? {
+        ...shape, ...(pool && live(pool) ? { override: pool.override, override_until: pool.override_until } : {}),
+        ...(own?.reserve ? { reserve: own.reserve, ...(own.reserve === 'fixed' ? { reserve_percent: own.reserve_percent } : {}) } : {}),
+      } as Schedule : undefined
+      s = resolveChain([account, carried, draft].filter(Boolean) as Schedule[])
+    }
     const resets = a.windows.map(w => Date.parse(w.reset)).filter(t => t > NOW)
     return {
       account_id: a.id, ongoing_use_approved: true, schedule: s,
@@ -103,20 +165,21 @@ export function capacityWorld(options: CapacityOptions = {}) {
   const previews: unknown[] = []
   function handle(path: string, method: string, body: unknown): { status?: number; json?: unknown } | null {
     if (path === '/api/agent-accounts/capacity' && method === 'GET') return { json: project() }
-    if (path === '/api/agent-accounts/capacity/preview' && method === 'POST') { previews.push(body); return { json: project((body as { schedule: Schedule }).schedule) } }
+    if (path === '/api/agent-accounts/capacity/preview' && method === 'POST') { previews.push(body); const b = body as { schedule: Schedule; pool_reserves?: { pool: string; reserve: string; reserve_percent?: number }[] }; return { json: project(b.schedule, b.pool_reserves) } }
     if (path === '/api/agent-accounts/capacity/schedule' && method === 'GET') return { json: schedules }
     if (path === '/api/agent-accounts/capacity/schedule' && method === 'PUT') {
       puts.push(body)
       const input = body as { scope: string; pool?: string; account_id?: string; schedule: Schedule | null; carry_overrides?: boolean }
       if (input.carry_overrides && input.scope === 'user' && input.schedule) {
-        // The server rule (carryDraft): entries that only carry Sprint/Hold follow the new schedule.
-        const shape = (x: Schedule) => { const { override: _o, override_until: _u, timezone: _t, ...rest } = x; return JSON.stringify(rest) }
+        // The server rule (carryDraft): entries that only carry Sprint/Hold or their own reserve follow the new schedule.
+        const shape = (x: Schedule) => { const { override: _o, override_until: _u, timezone: _t, reserve: _r, reserve_percent: _p, ...rest } = x; return JSON.stringify(rest) }
         const previous = schedules.find(e => e.scope === 'user')?.schedule ?? defaultSchedule()
         for (const e of [...schedules]) {
           if (e.scope === 'user' || shape(e.schedule) !== shape(previous)) continue
-          const active = e.schedule.override && !(e.schedule.override === 'sprint' && e.schedule.override_until && Date.parse(e.schedule.override_until) <= NOW)
-          if (active) e.schedule = { ...input.schedule, override: e.schedule.override, ...(e.schedule.override_until ? { override_until: e.schedule.override_until } : {}) }
-          else schedules.splice(schedules.indexOf(e), 1)
+          const active = live(e.schedule)
+          if (!active && !e.schedule.reserve) { schedules.splice(schedules.indexOf(e), 1); continue }
+          const { override: _o, override_until: _u, reserve: _r, reserve_percent: _p, ...base } = input.schedule
+          e.schedule = { ...base, ...(active ? { override: e.schedule.override, ...(e.schedule.override_until ? { override_until: e.schedule.override_until } : {}) } : {}), ...(e.schedule.reserve ? { reserve: e.schedule.reserve, ...(e.schedule.reserve === 'fixed' ? { reserve_percent: e.schedule.reserve_percent } : {}) } : {}) } as Schedule
         }
       }
       const at = schedules.findIndex(e => e.scope === input.scope && e.pool === input.pool && e.account_id === input.account_id)
@@ -126,7 +189,7 @@ export function capacityWorld(options: CapacityOptions = {}) {
         if (schedule.override === 'sprint') {
           const resets = accts.filter(a => input.scope === 'user' || a.harness === input.pool || a.id === input.account_id).flatMap(a => a.windows.map(w => Date.parse(w.reset))).filter(t => t > NOW)
           schedule.override_until = new Date(Math.min(...resets)).toISOString()
-        } else delete schedule.override_until
+        } else if (schedule.override !== 'hold' && schedule.override !== 'away') delete schedule.override_until
         schedules.push({ scope: input.scope, ...(input.pool ? { pool: input.pool } : {}), ...(input.account_id ? { account_id: input.account_id } : {}), schedule })
       }
       return { status: 204 }
