@@ -49,7 +49,9 @@ func (m *Module) Mount(mux *http.ServeMux) {
 		{"GET /api/rules/sets/{setId}", "rules.read", m.getSet, ""}, {"PUT /api/rules/sets/{setId}/draft", "rules.write", m.draft, unknownChange},
 		{"POST /api/rules/sets/{setId}/publish", "rules.publish", m.publish, unknownChange}, {"POST /api/rules/sets/{setId}/restore", "rules.publish", m.restore, unknownChange},
 		{"GET /api/rules/sets/{setId}/versions", "rules.read", m.versions, ""}, {"GET /api/rules/sets/{setId}/versions/{version}", "rules.read", m.version, ""},
-		{"GET /api/rules/merged", "rules.read", m.merged, ""},
+		{"GET /api/rules/merged", "rules.read", m.merged, ""}, {"GET /api/rules/explained", "rules.read", m.explained, ""},
+		{"PUT /api/rules/sets/{setId}/tldr", "rules.write", m.tldr, unknownChange},
+		{"GET /api/rules/budget", "rules.read", m.getBudget, ""}, {"PUT /api/rules/budget", "settings.manage", m.putBudget, unknownChange},
 		{"POST /api/rules/publish", "rules.publish", m.publishBatch, unknownBatch},
 	} {
 		mux.HandleFunc(route.pattern, m.endpoint(route.permission, route.unknown, route.handler))
@@ -416,30 +418,52 @@ func principalExists(ctx context.Context, tx pgx.Tx, id, kind string) error {
 	return nil
 }
 func (m *Module) merged(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
+	c, snapshots, err := m.mergeInputs(r, tx, p)
+	if err != nil {
+		return nil, err
+	}
+	limits, err := LoadBudget(r.Context(), tx)
+	if err != nil {
+		return nil, err
+	}
+	merged, err := MergeWithin(c, snapshots, time.Now().UTC(), limits)
+	if err != nil {
+		return nil, err
+	}
+	if err = RecordServedManifest(r.Context(), tx, c, merged); err != nil {
+		return nil, err
+	}
+	return merged, nil
+}
+
+// mergeInputs checks the merge selectors and the caller's right to read that
+// session file, then loads the live snapshots it is built from under the store
+// caps. The merged file and its explanation for people share it.
+func (m *Module) mergeInputs(r *http.Request, tx pgx.Tx, p tenant.Principal) (Context, []Snapshot, error) {
 	q := r.URL.Query()
 	allowed := map[string]bool{"project_id": true, "person_id": true, "agent_id": true, "role": true, "harness": true, "task_id": true}
 	for k, v := range q {
 		if !allowed[k] || len(v) != 1 {
-			return nil, fail(400, "invalid_scope", "unknown or repeated merge selector")
+			return Context{}, nil, fail(400, "invalid_scope", "unknown or repeated merge selector")
 		}
 	}
 	c := Context{p.TenantID, q.Get("project_id"), q.Get("person_id"), q.Get("agent_id"), q.Get("role"), q.Get("harness"), q.Get("task_id")}
 	if err := ValidateContext(c); err != nil {
-		return nil, err
+		return c, nil, err
 	}
 	owner, err := actorOwner(r.Context(), tx, p)
 	if err != nil {
-		return nil, err
+		return c, nil, err
 	}
 	if owner != c.PersonID {
-		return nil, authz.ErrForbidden
+		return c, nil, authz.ErrForbidden
 	}
 	if p.Kind == tenant.Agent && c.AgentID != p.ID {
-		return nil, authz.ErrForbidden
+		return c, nil, authz.ErrForbidden
 	}
 	scope := Scope{Layer: "project", ProjectID: c.ProjectID}
 	if err = permission(r.Context(), tx, p, scope, "rules.read"); err != nil {
-		return nil, err
+		return c, nil, err
 	}
 	if c.AgentID != "" {
 		scope = Scope{Layer: "agent", OwnerID: c.PersonID, AgentID: c.AgentID}
@@ -448,12 +472,12 @@ func (m *Module) merged(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, er
 			scope.ProjectID = c.ProjectID
 		}
 		if err = permission(r.Context(), tx, p, scope, "rules.read"); err != nil {
-			return nil, err
+			return c, nil, err
 		}
 	}
 	ss, err := allSets(r.Context(), tx, "")
 	if err != nil {
-		return nil, err
+		return c, nil, err
 	}
 	// Count each snapshot as it is read. A snapshot costs at least one rule, so
 	// once the running total is at the cap the rest are refused unread. A
@@ -465,28 +489,21 @@ func (m *Module) merged(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, er
 			continue
 		}
 		if err = permission(r.Context(), tx, p, s.Scope, "rules.read"); err != nil {
-			return nil, err
+			return c, nil, err
 		}
 		if budget.rules >= maxBudgetRules {
-			return nil, errMergeStoreTooLarge
+			return c, nil, errMergeStoreTooLarge
 		}
 		snap, err := loadVersion(r.Context(), tx, s.ID, s.PublishedVersion)
 		if err != nil {
-			return nil, err
+			return c, nil, err
 		}
 		if err = budget.admit(snap); err != nil {
-			return nil, err
+			return c, nil, err
 		}
 		snapshots = append(snapshots, snap)
 	}
-	merged, err := Merge(c, snapshots, time.Now().UTC())
-	if err != nil {
-		return nil, err
-	}
-	if err = RecordServedManifest(r.Context(), tx, c, merged); err != nil {
-		return nil, err
-	}
-	return merged, nil
+	return c, snapshots, nil
 }
 
 // fields is the storage envelope on ordinary Aeon nodes. Scope is copied onto
@@ -500,6 +517,7 @@ type fields struct {
 	Rule             *Rule     `json:"rule,omitempty"`
 	Version          string    `json:"version,omitempty"`
 	Snapshot         *Snapshot `json:"snapshot,omitempty"`
+	TLDR             *TLDR     `json:"tldr,omitempty"`
 }
 
 func decodeFields(raw []byte) (fields, error) {

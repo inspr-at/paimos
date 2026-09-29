@@ -19,8 +19,17 @@ import (
 	"github.com/inspr-at/paimos/internal/workorders"
 )
 
+// MaxBytes is the default always-on budget of one merged session file. A
+// workspace may configure its own budget between MinBudgetBytes and
+// CeilingBytes (AEON-314); clients that only check a received file's size use
+// CeilingBytes, the largest file any workspace can be served.
 const MaxBytes = 12000
+const MinBudgetBytes = 2000
+const CeilingBytes = 64000
 const MaxRules = 100
+
+// MaxTLDRBytes bounds one explanation line in one language.
+const MaxTLDRBytes = 300
 
 var identityPattern = regexp.MustCompile(`^[a-z][a-z0-9._-]{0,95}$`)
 var Roles = []string{"coordinator", "builder", "reviewer", "operator"}
@@ -51,7 +60,98 @@ type Rule struct {
 	Roles     []string   `json:"roles,omitempty"`
 	Harnesses []string   `json:"harnesses,omitempty"`
 	Source    Source     `json:"source"`
+	// TLDR is for people only: Merge drops it, so agents never receive it.
+	TLDR *TLDR `json:"tldr,omitempty"`
 }
+
+// TLDR is a short, technical explanation of a rule or a set for people
+// (AEON-314). It lives in the draft and in every published snapshot, so it is
+// versioned and approved with the normal publication, and it is never part of
+// what agents receive: Merge removes it before anything is rendered.
+type TLDR struct {
+	EN string `json:"en"`
+	DE string `json:"de,omitempty"`
+	// Basis fingerprints the text the explanation was written for (see
+	// RuleBasis and SetBasis). The server stamps it when it is empty.
+	Basis string `json:"basis,omitempty"`
+	// Check is derived on every read and never stored: the explained text
+	// changed after the explanation was written, so a person should check it.
+	Check bool `json:"check,omitempty"`
+}
+
+// RuleBasis fingerprints the one line agents read for a rule.
+func RuleBasis(r Rule) string { return digest([]byte(r.Text))[:16] }
+
+// SetBasis fingerprints what a set tells agents: every rule's identity and
+// text, in identity order. Switching a rule on or off does not change it.
+func SetBasis(rules []Rule) string {
+	sorted := slices.Clone(rules)
+	slices.SortFunc(sorted, func(a, b Rule) int { return strings.Compare(a.Identity, b.Identity) })
+	var b strings.Builder
+	for _, r := range sorted {
+		b.WriteString(r.Identity)
+		b.WriteByte(0)
+		b.WriteString(r.Text)
+		b.WriteByte('\n')
+	}
+	return digest([]byte(b.String()))[:16]
+}
+
+// storedTLDR is the form written to a draft: trimmed, never marked for a
+// check, and stamped with basis when the caller did not name one (written now).
+func storedTLDR(t *TLDR, basis string) *TLDR {
+	if t == nil {
+		return nil
+	}
+	out := TLDR{EN: strings.TrimSpace(t.EN), DE: strings.TrimSpace(t.DE), Basis: t.Basis}
+	if out.Basis == "" {
+		out.Basis = basis
+	}
+	return &out
+}
+
+// checked returns a copy marked for a check when its basis no longer matches.
+func checked(t *TLDR, basis string) *TLDR {
+	if t == nil {
+		return nil
+	}
+	out := *t
+	out.Check = out.Basis != basis
+	return &out
+}
+
+func validTLDR(t *TLDR) bool {
+	if t == nil {
+		return true
+	}
+	if !line(t.EN, MaxTLDRBytes, true) || !line(t.DE, MaxTLDRBytes, false) {
+		return false
+	}
+	if t.Basis == "" {
+		return true
+	}
+	if len(t.Basis) != 16 {
+		return false
+	}
+	for _, r := range t.Basis {
+		if !(r >= '0' && r <= '9' || r >= 'a' && r <= 'f') {
+			return false
+		}
+	}
+	return true
+}
+
+// ValidateTLDR checks one explanation as a request states it (before stamping).
+func ValidateTLDR(t *TLDR) error {
+	if t != nil {
+		trimmed := TLDR{EN: strings.TrimSpace(t.EN), DE: strings.TrimSpace(t.DE), Basis: t.Basis}
+		if !validTLDR(&trimmed) {
+			return fail(400, "invalid_tldr", fmt.Sprintf("an explanation needs English text; each language is one line of at most %d UTF-8 bytes", MaxTLDRBytes))
+		}
+	}
+	return nil
+}
+
 type Layer struct {
 	ID    string `json:"id"`
 	Scope Scope  `json:"scope"`
@@ -64,6 +164,8 @@ type Set struct {
 	Revision         int64  `json:"revision"`
 	Rules            []Rule `json:"rules"`
 	PublishedVersion string `json:"published_version"`
+	// TLDR explains the whole set to people; never sent to agents.
+	TLDR *TLDR `json:"tldr,omitempty"`
 }
 type Snapshot struct {
 	SetID       string    `json:"set_id"`
@@ -76,6 +178,8 @@ type Snapshot struct {
 	PublishedAt time.Time `json:"published_at"`
 	// Note is omitted when empty so historical snapshots keep their digest.
 	Note string `json:"note,omitempty"`
+	// TLDR is omitted when empty so historical snapshots keep their digest.
+	TLDR *TLDR `json:"tldr,omitempty"`
 }
 type Context struct {
 	TenantID  string `json:"tenant_id"`
@@ -108,6 +212,8 @@ type Error struct {
 	Message     string `json:"error"`
 	ActualBytes int    `json:"actual_bytes,omitempty"`
 	MaxBytes    int    `json:"max_bytes,omitempty"`
+	// Layer names the layer whose own cap was crossed; empty for the total.
+	Layer string `json:"layer,omitempty"`
 }
 
 func (e *Error) Error() string { return e.Message }
@@ -172,6 +278,9 @@ func ValidateRules(rules []Rule) error {
 			return fail(400, "invalid_rule", "unique stable identity, bounded text/why/details/source and normal|locked strength required")
 		}
 		// A locked safety floor must not disappear offline or depend on a selector.
+		if !validTLDR(r.TLDR) {
+			return fail(400, "invalid_tldr", fmt.Sprintf("an explanation needs English text; each language is one line of at most %d UTF-8 bytes", MaxTLDRBytes))
+		}
 		if r.Strength == "locked" && (!r.Enabled || r.ExpiresAt != nil) {
 			return fail(400, "invalid_rule", "locked rules must be enabled and non-expiring; change them through a new higher-authority publication")
 		}

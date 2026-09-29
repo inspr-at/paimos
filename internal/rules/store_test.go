@@ -68,9 +68,9 @@ func TestStoreAuthorizationHistoryAndGenericNodeGuards(t *testing.T) {
 	locked := testRule("safety", "Keep the locked company floor.")
 	locked.Strength = "locked"
 	call(admin, "PUT", "/api/rules/sets/"+set.ID+"/draft", map[string]any{"expected_revision": 1, "name": "Safety"}, 400)
-	call(admin, "PUT", "/api/rules/sets/"+set.ID+"/draft", draftInput{1, "Safety", nil}, 400)
-	call(admin, "PUT", "/api/rules/sets/"+set.ID+"/draft", draftInput{1, "Safety", []Rule{locked}}, 200)
-	call(agent, "PUT", "/api/rules/sets/"+set.ID+"/draft", draftInput{2, "Safety", []Rule{locked}}, 403)
+	call(admin, "PUT", "/api/rules/sets/"+set.ID+"/draft", draftInput{ExpectedRevision: 1, Name: "Safety", Rules: nil}, 400)
+	call(admin, "PUT", "/api/rules/sets/"+set.ID+"/draft", draftInput{ExpectedRevision: 1, Name: "Safety", Rules: []Rule{locked}}, 200)
+	call(agent, "PUT", "/api/rules/sets/"+set.ID+"/draft", draftInput{ExpectedRevision: 2, Name: "Safety", Rules: []Rule{locked}}, 403)
 	pub := map[string]any{"expected_revision": 2, "version": "260928110000.0.0"}
 	call(agent, "POST", "/api/rules/sets/"+set.ID+"/publish", pub, 403)
 	call(member, "POST", "/api/rules/sets/"+set.ID+"/publish", pub, 403)
@@ -80,7 +80,7 @@ func TestStoreAuthorizationHistoryAndGenericNodeGuards(t *testing.T) {
 		t.Fatal("publish replay changed snapshot")
 	}
 	locked.Text = "Updated safety."
-	call(admin, "PUT", "/api/rules/sets/"+set.ID+"/draft", draftInput{2, "Safety", []Rule{locked}}, 200)
+	call(admin, "PUT", "/api/rules/sets/"+set.ID+"/draft", draftInput{ExpectedRevision: 2, Name: "Safety", Rules: []Rule{locked}}, 200)
 	pub["expected_revision"] = 3
 	call(admin, "POST", "/api/rules/sets/"+set.ID+"/publish", pub, 409)
 	pub["version"] = "260229110000.0.0"
@@ -98,7 +98,7 @@ func TestStoreAuthorizationHistoryAndGenericNodeGuards(t *testing.T) {
 	json.Unmarshal(call(admin, "POST", "/api/rules/sets", map[string]any{"layer_id": private.ID, "name": "Private preferences"}, 200), &privSet)
 	call(other, "GET", "/api/rules/sets/"+privSet.ID, nil, 404)
 	call(other, "POST", "/api/rules/layers", Scope{Layer: "person", OwnerID: admin.ID}, 403)
-	call(agent, "PUT", "/api/rules/sets/"+privSet.ID+"/draft", draftInput{1, "Private preferences", []Rule{testRule("style", "Be clear.")}}, 200)
+	call(agent, "PUT", "/api/rules/sets/"+privSet.ID+"/draft", draftInput{ExpectedRevision: 1, Name: "Private preferences", Rules: []Rule{testRule("style", "Be clear.")}}, 200)
 	// Generic reads and writes cannot bypass private ownership, rules permission,
 	// or version immutability, even for a workspace administrator.
 	err = db.InTenant(tenant.WithPrincipal(t.Context(), other), d.App, tid, func(tx pgx.Tx) error {
@@ -162,7 +162,7 @@ func TestStoreAuthorizationHistoryAndGenericNodeGuards(t *testing.T) {
 	call(scoped, "POST", "/api/rules/layers", Scope{Layer: "project", ProjectID: foreignProject}, 403)
 	var projectSet Set
 	json.Unmarshal(call(scoped, "POST", "/api/rules/sets", map[string]any{"layer_id": projectLayer.ID, "name": "Project rules"}, 200), &projectSet)
-	call(scoped, "PUT", "/api/rules/sets/"+projectSet.ID+"/draft", draftInput{1, "Project rules", []Rule{testRule("project-style", "Use project style.")}}, 200)
+	call(scoped, "PUT", "/api/rules/sets/"+projectSet.ID+"/draft", draftInput{ExpectedRevision: 1, Name: "Project rules", Rules: []Rule{testRule("project-style", "Use project style.")}}, 200)
 	call(scoped, "POST", "/api/rules/sets/"+projectSet.ID+"/publish", map[string]any{"expected_revision": 2, "version": "260928110003.0.0"}, 200)
 	mergePath := "/api/rules/merged?project_id=" + projectID + "&person_id=" + scoped.ID + "&role=builder&harness=codex"
 	merged := call(scoped, "GET", mergePath, nil, 200)
@@ -192,7 +192,7 @@ func TestStoreAuthorizationHistoryAndGenericNodeGuards(t *testing.T) {
 	json.Unmarshal(call(admin, "POST", "/api/rules/layers", Scope{Layer: "agent", OwnerID: admin.ID, AgentID: agent.ID}, 200), &named)
 	var namedSet Set
 	json.Unmarshal(call(admin, "POST", "/api/rules/sets", map[string]any{"layer_id": named.ID, "name": "Named agent"}, 200), &namedSet)
-	call(agent, "PUT", "/api/rules/sets/"+namedSet.ID+"/draft", draftInput{1, "Named agent", []Rule{testRule("persona", "Agent-specific rule.")}}, 200)
+	call(agent, "PUT", "/api/rules/sets/"+namedSet.ID+"/draft", draftInput{ExpectedRevision: 1, Name: "Named agent", Rules: []Rule{testRule("persona", "Agent-specific rule.")}}, 200)
 	call(admin, "POST", "/api/rules/sets/"+namedSet.ID+"/publish", map[string]any{"expected_revision": 2, "version": "260928110004.0.0"}, 200)
 	call(other, "GET", "/api/rules/sets/"+namedSet.ID, nil, 404)
 	secondAgent := agent
@@ -290,7 +290,7 @@ func TestMergedLoadStopsWhenTheStoreCapIsCrossed(t *testing.T) {
 		if err = json.Unmarshal(call("POST", "/api/rules/sets", map[string]any{"layer_id": layer.ID, "name": names[i]}, 200), &set); err != nil {
 			t.Fatal(err)
 		}
-		call("PUT", "/api/rules/sets/"+set.ID+"/draft", draftInput{1, names[i], []Rule{rule}}, 200)
+		call("PUT", "/api/rules/sets/"+set.ID+"/draft", draftInput{ExpectedRevision: 1, Name: names[i], Rules: []Rule{rule}}, 200)
 		call("POST", "/api/rules/sets/"+set.ID+"/publish", map[string]any{"expected_revision": 2, "version": "260929084800.0.0"}, 200)
 	}
 	var ordered []string

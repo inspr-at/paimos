@@ -155,7 +155,7 @@ func TestPublishNotePersistsWithoutRewritingHistory(t *testing.T) {
 	}
 	locked := testRule("safety", "Keep the locked company floor.")
 	locked.Strength = "locked"
-	call(admin, "PUT", "/api/rules/sets/"+set.ID+"/draft", draftInput{1, "Safety", []Rule{locked}}, 200)
+	call(admin, "PUT", "/api/rules/sets/"+set.ID+"/draft", draftInput{ExpectedRevision: 1, Name: "Safety", Rules: []Rule{locked}}, 200)
 	plain := map[string]any{"expected_revision": 2, "version": "260928120000.0.0"}
 	call(agent, "POST", "/api/rules/sets/"+set.ID+"/publish", map[string]any{"expected_revision": 2, "version": "260928120000.0.0", "note": "Agents do not publish."}, 403)
 	call(member, "POST", "/api/rules/sets/"+set.ID+"/publish", map[string]any{"expected_revision": 2, "version": "260928120000.0.0", "note": "Members do not publish company rules."}, 403)
@@ -173,7 +173,7 @@ func TestPublishNotePersistsWithoutRewritingHistory(t *testing.T) {
 	}
 	call(admin, "POST", "/api/rules/sets/"+set.ID+"/publish", map[string]any{"expected_revision": 2, "version": "260928120000.0.0", "note": "Too late."}, 409)
 	locked.Text = "Keep the locked company floor in force."
-	call(admin, "PUT", "/api/rules/sets/"+set.ID+"/draft", draftInput{2, "Safety", []Rule{locked}}, 200)
+	call(admin, "PUT", "/api/rules/sets/"+set.ID+"/draft", draftInput{ExpectedRevision: 2, Name: "Safety", Rules: []Rule{locked}}, 200)
 	notedBody := map[string]any{"expected_revision": 3, "version": "260928120001.0.0", "note": "  Kept the floor.\nStill locked.\t"}
 	second := call(admin, "POST", "/api/rules/sets/"+set.ID+"/publish", notedBody, 200)
 	var published Snapshot

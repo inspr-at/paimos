@@ -119,7 +119,7 @@ func (w *batchWorld) set(p tenant.Principal, l Layer, name string, rules ...Rule
 	if err := json.Unmarshal(w.call(p, "POST", "/api/rules/sets", map[string]any{"layer_id": l.ID, "name": name}, 200), &s); err != nil {
 		w.t.Fatal(err)
 	}
-	if err := json.Unmarshal(w.call(p, "PUT", "/api/rules/sets/"+s.ID+"/draft", draftInput{1, name, rules}, 200), &s); err != nil {
+	if err := json.Unmarshal(w.call(p, "PUT", "/api/rules/sets/"+s.ID+"/draft", draftInput{ExpectedRevision: 1, Name: name, Rules: rules}, 200), &s); err != nil {
 		w.t.Fatal(err)
 	}
 	return s
@@ -543,7 +543,7 @@ func TestBudgetCheckRestoresVisibilityInTheTransaction(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		if _, err = budgetCheck(t.Context(), tx, admin, admin.ID, company, time.Now()); err != nil {
+		if _, err = budgetCheck(t.Context(), tx, admin, admin.ID, company, time.Now(), DefaultBudget()); err != nil {
 			return err
 		}
 		var owner, seenProjects string
@@ -799,7 +799,7 @@ func TestBudgetCapFitsTheDeadline(t *testing.T) {
 	c := testContext()
 	c.AgentID = ""
 	render := func() {
-		if _, err := merge(c, store, time.Now(), true, nil); err != nil {
+		if _, err := merge(c, store, time.Now(), true, nil, DefaultBudget()); err != nil {
 			var e *Error
 			if !errors.As(err, &e) || e.Code != "floor_missing" && e.Code != "rules_budget_exceeded" {
 				t.Fatal(err)
@@ -849,7 +849,7 @@ func BenchmarkBudgetCheck(b *testing.B) {
 				return err
 			}
 			ctx := withDeadline(b.Context(), time.Now().Add(time.Minute))
-			_, err = budgetCheck(ctx, tx, admin, admin.ID, sets[:1], time.Now())
+			_, err = budgetCheck(ctx, tx, admin, admin.ID, sets[:1], time.Now(), DefaultBudget())
 			return err
 		})
 		if err != nil {
@@ -1147,7 +1147,7 @@ func TestLostAcknowledgementOfOtherWritesIsUnknown(t *testing.T) {
 		}
 		unknownAnswer(t, label, body, wording)
 	}
-	lose("PUT", "/api/rules/sets/"+s.ID+"/draft", draftInput{s.Revision, "Short", []Rule{testRule("short", "A shorter rule.")}}, unknownChange, "draft")
+	lose("PUT", "/api/rules/sets/"+s.ID+"/draft", draftInput{ExpectedRevision: s.Revision, Name: "Short", Rules: []Rule{testRule("short", "A shorter rule.")}}, unknownChange, "draft")
 	lose("POST", "/api/rules/sets/"+s.ID+"/publish", map[string]any{"expected_revision": s.Revision + 1, "version": "261001000000.0.0"}, unknownChange, "single publish")
 	lose("POST", "/api/rules/sets/"+s.ID+"/restore", map[string]any{"expected_revision": s.Revision + 1, "version": "261001000000.0.0", "new_version": "261001000001.0.0"}, unknownChange, "restore")
 	lose("POST", "/api/rules/sets", map[string]any{"layer_id": company.ID, "name": "Maybe"}, unknownSet, "set creation")
