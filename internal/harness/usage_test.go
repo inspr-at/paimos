@@ -66,7 +66,7 @@ func TestUsageModelAndAccountLabelLimits(t *testing.T) {
 	expect(t, f.call(f.person, "POST", "/api/model-prices", price, ""), 201)
 	expect(t, f.call(f.person, "GET", "/api/model-prices?model="+model, nil, ""), 200)
 	report := usagePayload()
-	report["model"], report["account_label"] = model, label
+	report["model"], report["account_label"], report["billing_mode"] = model, label, "api"
 	out, _ := usageResult(t, f.call(f.agent, "POST", path+"/usage", report, lease))
 	if out.Model != model || out.AccountLabel == nil || *out.AccountLabel != label || out.PriceVersion == nil || *out.PriceVersion != 1 {
 		t.Fatalf("128-character model/account label or price was lost: %+v", out)
@@ -116,7 +116,7 @@ func TestUsageReportingLifecycle(t *testing.T) {
 	report := usagePayload()
 	report["billing_mode"], report["subscription_label"], report["account_label"] = "subscription", "Synthetic plan", "Synthetic account"
 	out, replay := usageResult(t, f.call(f.agent, "POST", path+"/usage", report, lease))
-	if replay || out.EstimatedCostUSD == nil || *out.EstimatedCostUSD != "0.000360000000" || !out.Provisional || *out.PriceVersion != 1 || out.BillingMode != "subscription" || out.MetadataSource != "reported" {
+	if replay || out.EstimatedCostUSD != nil || out.PriceVersion != nil || !out.Provisional || out.BillingMode != "subscription" || out.MetadataSource != "reported" {
 		t.Fatalf("unexpected usage %+v", out)
 	}
 	first := make(map[string]any)
@@ -133,8 +133,8 @@ func TestUsageReportingLifecycle(t *testing.T) {
 	expect(t, usagePrice(t, f, 3, "99"), 201)
 	expect(t, usagePrice(t, f, 2, "20"), 409)
 	out, _ = usageResult(t, f.call(f.agent, "POST", path+"/usage", report, lease))
-	if *out.EstimatedCostUSD != "0.000485000000" || *out.PriceVersion != 1 {
-		t.Fatalf("repriced old usage: %+v", out)
+	if out.EstimatedCostUSD != nil || out.PriceVersion != nil || out.BillingMode != "subscription" {
+		t.Fatalf("subscription priced: %+v", out)
 	}
 	out, replay = usageResult(t, f.call(f.agent, "POST", path+"/usage", first, lease))
 	if !replay || out.Sequence != 2 || *out.InputTokens != 150 {
@@ -171,8 +171,10 @@ func TestUsageReportingLifecycle(t *testing.T) {
 	})
 	// A new managed session pins the latest version; no managed telemetry is duplicated.
 	managed, _, managedLease := usageSession(t, f, "managed")
-	out, _ = usageResult(t, f.call(f.agent, "POST", managed+"/usage", usagePayload(), managedLease))
-	if *out.PriceVersion != 3 || *out.EstimatedCostUSD != "0.006150000000" {
+	managedReport := usagePayload()
+	managedReport["billing_mode"] = "api"
+	out, _ = usageResult(t, f.call(f.agent, "POST", managed+"/usage", managedReport, managedLease))
+	if out.PriceVersion == nil || *out.PriceVersion != 3 || out.EstimatedCostUSD == nil || *out.EstimatedCostUSD != "0.006150000000" {
 		t.Fatalf("managed pricing: %+v", out)
 	}
 	expect(t, f.call(f.agent, "GET", managed+"/usage", nil, ""), 200)
@@ -199,8 +201,15 @@ func TestUsageUnknownAndLatePricing(t *testing.T) {
 	expect(t, usagePrice(t, f, 1, "2.5"), 201)
 	report["report_id"], report["sequence"] = uid(), 3
 	out, _ = usageResult(t, f.call(f.agent, "POST", path+"/usage", report, lease))
-	if out.EstimatedCostUSD == nil || *out.EstimatedCostUSD != "0.000360000000" {
-		t.Fatal("late pricing missing")
+	if out.EstimatedCostUSD != nil || out.PriceVersion != nil {
+		t.Fatal("unknown billing received a dollar estimate")
+	}
+	apiPath, _, apiLease := usageSession(t, f, "managed")
+	apiReport := usagePayload()
+	apiReport["billing_mode"] = "api"
+	out, _ = usageResult(t, f.call(f.agent, "POST", apiPath+"/usage", apiReport, apiLease))
+	if out.EstimatedCostUSD == nil || *out.EstimatedCostUSD != "0.000360000000" || out.PriceVersion == nil || *out.PriceVersion != 1 {
+		t.Fatalf("api pricing missing: %+v", out)
 	}
 	report["report_id"], report["model"], report["sequence"] = uid(), "second-model", 1
 	report["input_tokens"], report["output_tokens"], report["cached_input_tokens"] = 0, 0, 0
@@ -421,7 +430,7 @@ func TestUsagePricingIsolationAndStorageConstraints(t *testing.T) {
 	// Maximum values survive exact NUMERIC persistence without int64 products.
 	p := map[string]any{"model": "max-model", "version": 1, "input_usd_per_million": "1000000", "output_usd_per_million": "1000000", "cached_input_usd_per_million": "1000000"}
 	expect(t, f.call(f.person, "POST", "/api/model-prices", p, ""), 201)
-	in["model"], in["report_id"], in["input_tokens"], in["output_tokens"], in["cached_input_tokens"] = "max-model", uid(), int64(1000000000000), int64(1000000000000), int64(1000000000000)
+	in["model"], in["report_id"], in["billing_mode"], in["input_tokens"], in["output_tokens"], in["cached_input_tokens"] = "max-model", uid(), "api", int64(1000000000000), int64(1000000000000), int64(1000000000000)
 	out, _ := usageResult(t, f.call(f.agent, "POST", path+"/usage", in, lease))
 	if *out.EstimatedCostUSD != "2000000000000.000000000000" {
 		t.Fatal("maximum exact cost changed")

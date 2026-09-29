@@ -18,6 +18,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/inspr-at/paimos/internal/sessionusage"
 )
 
 type grokSpec struct{ name, digest string }
@@ -53,6 +55,8 @@ type grokProcess struct {
 	answer      strings.Builder
 	events      int
 	sessionID   string
+	model       string
+	observe     func(AdapterEvent)
 	violation   atomic.Bool
 	cleanOnce   sync.Once
 }
@@ -161,7 +165,7 @@ func (a *GrokAdapter) startNative(ctx context.Context, r StartRequest, b GrokBin
 	if err != nil {
 		return nil, err
 	}
-	gp := &grokProcess{wireProcess: p, proxy: proxy, scratch: scratch, scratchInfo: info, binding: b, authBefore: before, promptDone: make(chan error, 1)}
+	gp := &grokProcess{wireProcess: p, proxy: proxy, scratch: scratch, scratchInfo: info, binding: b, authBefore: before, promptDone: make(chan error, 1), model: grokModel, observe: observe}
 	p.setOnEvent(gp.onEvent)
 	fail := func(e error) (Process, error) {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -295,7 +299,14 @@ func (p *grokProcess) onEvent(raw json.RawMessage) {
 					}
 					p.mu.Unlock()
 				}
-			case "agent_thought_chunk", "current_mode_update", "session_info_update", "usage_update", "plan", "available_commands_update":
+			case "usage_update":
+				if p.observe != nil {
+					if report, ok := grokNativeUsage(frame.Params, p.model); ok {
+						p.observe(AdapterEvent{SessionUsage: &report})
+					}
+				}
+				return
+			case "agent_thought_chunk", "current_mode_update", "session_info_update", "plan", "available_commands_update":
 				return
 			}
 		}
@@ -308,6 +319,29 @@ func (p *grokProcess) onEvent(raw json.RawMessage) {
 			_ = p.Stop(ctx)
 		}()
 	}
+}
+
+func grokNativeUsage(raw json.RawMessage, model string) (sessionusage.UsageReport, bool) {
+	var params struct {
+		Update struct {
+			Input  *int64 `json:"inputTokens"`
+			Output *int64 `json:"outputTokens"`
+			Cached *int64 `json:"cachedReadTokens"`
+			Model  string `json:"model"`
+		} `json:"update"`
+	}
+	if json.Unmarshal(raw, &params) != nil || params.Update.Input == nil || params.Update.Output == nil || *params.Update.Input < 0 || *params.Update.Output < 0 {
+		return sessionusage.UsageReport{}, false
+	}
+	name := params.Update.Model
+	if name == "" {
+		name = model
+	}
+	cached, known := int64(0), false
+	if params.Update.Cached != nil && *params.Update.Cached >= 0 && *params.Update.Cached <= *params.Update.Input {
+		cached, known = *params.Update.Cached, true
+	}
+	return sessionusage.CountReport(name, *params.Update.Input, *params.Update.Output, cached, known)
 }
 
 func safeGrokPath(path string) bool {

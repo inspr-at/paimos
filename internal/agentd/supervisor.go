@@ -104,6 +104,7 @@ type owned struct {
 	harnessArchived bool
 	protocolFailed  bool
 	protocolStopped bool
+	launchRev       string
 }
 
 type harnessMetadata struct {
@@ -638,7 +639,7 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 	if err != nil {
 		return err
 	}
-	if usageAPI, ok := s.api.(sessionUsageAPI); ok && profile.Harness == Codex {
+	if usageAPI, ok := s.api.(sessionUsageAPI); ok {
 		entry.usage = newSessionUsageReporter(usageAPI, entry.harness, func() bool {
 			entry.mu.Lock()
 			defer entry.mu.Unlock()
@@ -716,6 +717,9 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 		return err
 	}
 	launchedAt := time.Now()
+	if !verification {
+		entry.launchRev = workspaceHEAD(ctx, s.workspace)
+	}
 	proc, err := adapter.Start(ctx, StartRequest{TenantID: s.tenantID, PrincipalID: s.principalID, Run: run, Profile: profile,
 		AccountKey: route.AccountKey, Workspace: runWorkspace, StateRoot: filepath.Dir(s.journal.JournalPath()), Prompt: prompt, Generation: s.generation, Tools: runTools, Rules: ephemeralRules, MaxTurns: entry.turnBudget, MaxTokens: entry.tokenBudget}, observe)
 	if err != nil {
@@ -950,7 +954,7 @@ func (s *Supervisor) monitor(entry *owned) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	reportErr := s.update(ctx, entry, Telemetry{Kind: "finished", Status: status, ErrorCode: code})
+	reportErr := s.update(ctx, entry, Telemetry{Kind: "finished", Status: status, ErrorCode: code, GitCommits: commitsSince(ctx, s.workspace, entry.launchRev)})
 	entry.mu.Lock()
 	doneRequested := entry.doneRequested
 	entry.mu.Unlock()

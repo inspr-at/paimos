@@ -62,15 +62,17 @@ type heartbeatUsageDisk struct {
 // heartbeatPendingUsage is the exact report persisted before it is posted.
 // A lost response replays these bytes; the transcript is not reread into a new id.
 type heartbeatPendingUsage struct {
-	Model    string   `json:"model"`
-	Sequence int64    `json:"sequence"`
-	Input    int64    `json:"input"`
-	Output   int64    `json:"output"`
-	Cached   int64    `json:"cached"`
-	ReportID string   `json:"report_id"`
-	Offset   int64    `json:"offset"`
-	Recent   []string `json:"recent,omitempty"`
-	Discard  bool     `json:"discard,omitempty"`
+	Model             string   `json:"model"`
+	Sequence          int64    `json:"sequence"`
+	Input             int64    `json:"input"`
+	Output            int64    `json:"output"`
+	Cached            int64    `json:"cached"`
+	ReportID          string   `json:"report_id"`
+	Offset            int64    `json:"offset"`
+	Recent            []string `json:"recent,omitempty"`
+	Discard           bool     `json:"discard,omitempty"`
+	BillingMode       string   `json:"billing_mode,omitempty"`
+	SubscriptionLabel string   `json:"subscription_label,omitempty"`
 }
 
 type heartbeatSession struct {

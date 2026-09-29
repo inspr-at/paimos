@@ -3134,7 +3134,9 @@ paths:
         total for one session and model. The range selects sessions by start time and does not mean the tokens
         or list estimate were consumed inside it. Null totals are unknown, not zero. estimated_cost_usd is the
         exact USD list estimate, summed once; it is not a billed charge. billing_mode and subscription_label are
-        reported metadata, not verified coverage, and a subscription does not remove the estimate. Run telemetry
+        reported metadata, not verified coverage. New reports are priced from model_prices only when billing_mode
+        is api. Subscription and unknown store tokens without a dollar estimate. Rows that already have an
+        estimate stay in the sum. Run telemetry
         and agent-run totals are not added. More than 5000 sessions sets truncated and drops the rest. If the
         usage relation is not installed the response is 503, not a dashboard of zeros. Allowance windows are the
         caller's registered account windows and only when they hold account.read; the response has no account key.
@@ -7289,7 +7291,7 @@ components:
         totals: {$ref: '#/components/schemas/TicketAgentWorkTotals'}
     TicketAgentUsageModel:
       type: object
-      description: One current usage row for a session and model. estimated_cost_usd is a list price, not a billed charge. billing_mode is reported metadata, not verified coverage.
+      description: One current usage row for a session and model. estimated_cost_usd is a list price, not a billed charge, and is present only when billing_mode is api. billing_mode is reported metadata, not verified coverage.
       required: [model, input_tokens, output_tokens, cached_input_tokens, tokens_state, cached_state, estimated_cost_usd, cost_state, provisional, price_version, billing_mode, subscription_label]
       properties:
         model: {type: string}
@@ -7496,6 +7498,10 @@ components:
           type: [string, 'null']
           format: uuid
           description: Optional strict account choice. Must belong to the selected agent, match the model harness and allow the selected model profile. The daemon still reserves allowance and claims; an unavailable chosen account leaves the run queued without fallback. Omit or null for automatic routing.
+        retry_of_run_id:
+          type: [string, 'null']
+          format: uuid
+          description: Optional earlier run of the same work order and agent. A different order, agent, or unknown run is rejected.
     RunClaim:
       type: object
       required: [daemon_id, daemon_generation, reservation_ids]
@@ -7711,7 +7717,7 @@ components:
         cached_input_tokens: {$ref: '#/components/schemas/UsageTokenCount'}
         provisional: {type: boolean, description: True when the reporter marks partial or any counter is unknown. Cost remains an estimate even when false.}
         price_version: {type: [integer, 'null'], format: int64}
-        estimated_cost_usd: {type: [string, 'null'], pattern: '^[0-9]+\.[0-9]{12}$', description: 'Exact ((input-cached)*input_rate + cached*cached_rate + output*output_rate)/1000000, with no binary floats or intermediate rounding. Null if any counter or pricing is unknown; never actual billed cost.'}
+        estimated_cost_usd: {type: [string, 'null'], pattern: '^[0-9]+\.[0-9]{12}$', description: 'Exact ((input-cached)*input_rate + cached*cached_rate + output*output_rate)/1000000, with no binary floats or intermediate rounding. Present only when billing_mode is api and every counter and price is known. Subscription and unknown stay null. Never actual billed cost.'}
         cost_status: {type: string, enum: [estimated, unknown]}
         currency: {type: string, const: USD}
         account_id: {type: [string, 'null'], format: uuid}
@@ -8042,6 +8048,9 @@ components:
         effective_model: {type: [string, 'null']}
         outcome: {type: [string, 'null'], enum: [completed, failed, cancelled, ownership_lost, null]}
         duration_ms: {type: [integer, 'null'], format: int64, description: Whole elapsed milliseconds for terminal runs; null until both timestamps exist}
+        active_ms: {type: [integer, 'null'], format: int64, description: Milliseconds not spent waiting. Null until the run is terminal and both timestamps exist. Equal to duration_ms when no waiting telemetry was recorded.}
+        outcome_detail: {type: [string, 'null'], enum: [no_commit, committed, pr_opened, merged, abandoned, null], description: Derived when the run becomes terminal from this run's git commits, harness session commits, and work evidence. Null when the run is not terminal.}
+        retry_of_run_id: {type: [string, 'null'], format: uuid, description: Earlier run of the same work order and agent that this run retries.}
         model_evidence: {type: string, enum: [unverified, vendor_reported]}
         input_tokens: {type: integer, format: int64}
         output_tokens: {type: integer, format: int64}
@@ -8064,6 +8073,16 @@ components:
         effective_model: {type: string}
         model_evidence: {type: string, enum: [unverified, vendor_reported]}
         error_code: {type: string, enum: [event_stream_bound, app_server_protocol, child_exit_failed, turn_failed, child_stop_failed, ownership_lost, reporter_unavailable, workspace_conflict, decision_refused]}
+        git_commits:
+          type: array
+          maxItems: 20
+          description: Optional commits this run introduced after its launch revision. The server derives outcome_detail from these, from the run's harness session commits, and from this run's work evidence.
+          items:
+            type: object
+            required: [sha, subject]
+            properties:
+              sha: {type: string, pattern: '^[0-9a-f]{7,40}$'}
+              subject: {type: string, minLength: 1, maxLength: 200}
     ApprovalProposal:
       type: object
       required: [scope, resource_kind, rationale, expires_at]

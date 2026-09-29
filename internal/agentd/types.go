@@ -118,16 +118,23 @@ type WorkCriterion struct {
 // Telemetry carries content-free, nonnegative deltas. TurnCountDelta is one
 // accepted user turn; token and cost deltas come from vendor usage reports.
 type Telemetry struct {
-	Sequence          int64  `json:"sequence"`
-	Kind              string `json:"kind"`
-	Status            string `json:"status,omitempty"`
-	InputTokensDelta  int64  `json:"input_tokens_delta,omitempty"`
-	OutputTokensDelta int64  `json:"output_tokens_delta,omitempty"`
-	CostMicrosDelta   int64  `json:"cost_micros_delta,omitempty"`
-	TurnCountDelta    int64  `json:"turn_count_delta,omitempty"`
-	EffectiveModel    string `json:"effective_model,omitempty"`
-	ModelEvidence     string `json:"model_evidence,omitempty"`
-	ErrorCode         string `json:"error_code,omitempty"`
+	Sequence          int64       `json:"sequence"`
+	Kind              string      `json:"kind"`
+	Status            string      `json:"status,omitempty"`
+	InputTokensDelta  int64       `json:"input_tokens_delta,omitempty"`
+	OutputTokensDelta int64       `json:"output_tokens_delta,omitempty"`
+	CostMicrosDelta   int64       `json:"cost_micros_delta,omitempty"`
+	TurnCountDelta    int64       `json:"turn_count_delta,omitempty"`
+	EffectiveModel    string      `json:"effective_model,omitempty"`
+	ModelEvidence     string      `json:"model_evidence,omitempty"`
+	ErrorCode         string      `json:"error_code,omitempty"`
+	GitCommits        []GitCommit `json:"git_commits,omitempty"`
+}
+
+// GitCommit is one commit introduced after the run's launch revision.
+type GitCommit struct {
+	SHA     string `json:"sha"`
+	Subject string `json:"subject"`
 }
 
 type InboxMessage struct {

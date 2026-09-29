@@ -13,6 +13,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/inspr-at/paimos/internal/sessionusage"
 )
 
 // TestFakeVendorProcess is invoked only through a private test wrapper. It
@@ -107,6 +109,11 @@ func TestFakeVendorProcess(t *testing.T) {
 			}
 			time.Sleep(500 * time.Millisecond)
 			result = map[string]string{"stopReason": "end_turn"}
+			if vendor == "cursor_tokens" {
+				result = map[string]any{"stopReason": "end_turn", "usage": map[string]any{
+					"inputTokens": 30, "outputTokens": 8, "cacheReadTokens": 10, "cacheWriteTokens": 2,
+				}}
+			}
 		case "initialize":
 			if strings.HasPrefix(vendor, "cursor") {
 				result = map[string]int{"protocolVersion": 1}
@@ -478,13 +485,19 @@ func TestClaudeBridgeMapsSDKResultUsage(t *testing.T) {
 	cmd := exec.Command(node, bridgePath, sdkPath, "/bin/true", root)
 	cmd.Stdin = strings.NewReader(`{"op":"start","prompt":"hello","model":"test-model","effort":"high"}` + "\n")
 	output, _ := cmd.Output() // The fake Query closes without a normal stop receipt.
-	var turn, usage bool
+	var turn, usage, models bool
 	for _, line := range strings.Split(strings.TrimSpace(string(output)), "\n") {
 		var frame struct {
 			Kind    string          `json:"kind"`
 			Input   int64           `json:"input_tokens_total"`
 			Output  int64           `json:"output_tokens_total"`
 			CostUSD json.RawMessage `json:"cost_usd_total"`
+			Models  []struct {
+				Model  string `json:"model"`
+				Input  int64  `json:"input_tokens"`
+				Output int64  `json:"output_tokens"`
+				Cached int64  `json:"cached_input_tokens"`
+			} `json:"models"`
 		}
 		if json.Unmarshal([]byte(line), &frame) != nil {
 			continue
@@ -495,10 +508,44 @@ func TestClaudeBridgeMapsSDKResultUsage(t *testing.T) {
 		if frame.Kind == "usage" && frame.Input == 17 && frame.Output == 5 {
 			cost, ok := usdMicros(frame.CostUSD)
 			usage = ok && cost == 13
+			models = len(frame.Models) == 1 && frame.Models[0].Model == "model" && frame.Models[0].Input == 17 && frame.Models[0].Output == 5 && frame.Models[0].Cached == 4
 		}
 	}
-	if !turn || !usage {
-		t.Fatalf("Claude bridge did not map result usage: turn=%t usage=%t output=%s", turn, usage, output)
+	if !turn || !usage || !models {
+		t.Fatalf("Claude bridge did not map result usage: turn=%t usage=%t models=%t output=%s", turn, usage, models, output)
+	}
+}
+
+func TestCursorPromptResultReportsTokens(t *testing.T) {
+	r := adapterRequest(t)
+	r.Profile.Harness = Cursor
+	a := NewCursorAdapter(fakeVendorPath(t, "cursor_tokens"), map[string]string{"account": "42"})
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	events := make(chan AdapterEvent, 16)
+	p, err := a.Start(ctx, r, func(ev AdapterEvent) { events <- ev })
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cost int64
+	var report *sessionusage.UsageReport
+	for report == nil || cost < 8 {
+		select {
+		case ev := <-events:
+			cost += ev.CostMicrosDelta
+			if ev.SessionUsage != nil {
+				copied := *ev.SessionUsage
+				report = &copied
+			}
+		case <-ctx.Done():
+			t.Fatalf("Cursor token usage missing: cost=%d", cost)
+		}
+	}
+	if err := p.Stop(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if report == nil || report.Model != "test-model" || report.BillingMode != "unknown" || !report.Provisional || report.InputTokens == nil || *report.InputTokens != 42 || report.CachedInputTokens == nil || *report.CachedInputTokens != 10 || report.OutputTokens == nil || *report.OutputTokens != 8 || cost != 8 {
+		t.Fatalf("cursor tokens cost=%d report=%+v", cost, report)
 	}
 }
 

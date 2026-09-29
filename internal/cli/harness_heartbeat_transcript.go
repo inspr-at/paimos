@@ -29,10 +29,21 @@ func (rt *runtime) reportHeartbeatUsage(ctx context.Context, projectID string, o
 	if err := rt.replayPendingUsage(ctx, projectID, session); err != nil {
 		return err
 	}
-	if o.Transcript == "" {
+	target, err := resolveHeartbeatUsage(o)
+	if err != nil {
+		return err
+	}
+	if target.Path == "" {
 		return nil
 	}
-	sums, next, recent, discarding, err := scanUsageWindow(ctx, o.Transcript, heartbeatText(o.Model, 128), session.disk.UsageOffset, heartbeatUsageWindow, session.disk.UsageRecent, session.disk.UsageDiscard)
+	if target.Snapshot {
+		return rt.reportSnapshotUsage(ctx, projectID, o, session, target.Path)
+	}
+	source := target.Source
+	if source == "" {
+		source = "claude"
+	}
+	sums, next, recent, discarding, err := scanUsageWindowSource(ctx, target.Path, heartbeatText(o.Model, 128), session.disk.UsageOffset, heartbeatUsageWindow, session.disk.UsageRecent, session.disk.UsageDiscard, source)
 	if err != nil {
 		return err
 	}
@@ -46,7 +57,14 @@ func (rt *runtime) reportHeartbeatUsage(ctx context.Context, projectID string, o
 		sum := sums[model]
 		prev := usageByModel(session.disk.Usage, model)
 		input, output, cached := sum.input, sum.output, sum.cached
-		if prev != nil {
+		if sum.absolute {
+			if prev != nil && (input < prev.Input || output < prev.Output || cached < prev.Cached) {
+				continue
+			}
+			if prev != nil && input == prev.Input && output == prev.Output && cached == prev.Cached {
+				continue
+			}
+		} else if prev != nil {
 			var ok1, ok2, ok3 bool
 			input, ok1 = addTokens(prev.Input, sum.input)
 			output, ok2 = addTokens(prev.Output, sum.output)
@@ -68,10 +86,12 @@ func (rt *runtime) reportHeartbeatUsage(ctx context.Context, projectID string, o
 		if prev != nil {
 			seq = prev.Sequence + 1
 		}
+		mode, label := usageBilling(o)
 		created = append(created, heartbeatPendingUsage{
 			Model: model, Sequence: seq, Input: input, Output: output, Cached: cached,
 			ReportID: usageReportID(session.id, model, seq, input, output, cached),
 			Offset:   next, Recent: recent, Discard: discarding,
+			BillingMode: mode, SubscriptionLabel: label,
 		})
 	}
 	if len(created) == 0 {
@@ -115,7 +135,10 @@ func (rt *runtime) postPendingUsage(ctx context.Context, projectID string, sessi
 		"output_tokens":       pending.Output,
 		"cached_input_tokens": pending.Cached,
 		"provisional":         provisional,
-		"billing_mode":        "unknown",
+		"billing_mode":        pendingBilling(pending),
+	}
+	if pending.BillingMode == "subscription" && pending.SubscriptionLabel != "" {
+		body["subscription_label"] = pending.SubscriptionLabel
 	}
 	var result struct {
 		Usage struct {
@@ -385,6 +408,7 @@ func findClaudeTranscript(root, sessionID string) string {
 
 type usageSum struct {
 	input, output, cached int64
+	absolute              bool
 }
 
 type countingReader struct {
@@ -399,6 +423,10 @@ func (c *countingReader) Read(p []byte) (int, error) {
 }
 
 func scanUsageWindow(ctx context.Context, path, fallback string, offset, maxBytes int64, recent []string, discarding bool) (map[string]usageSum, int64, []string, bool, error) {
+	return scanUsageWindowSource(ctx, path, fallback, offset, maxBytes, recent, discarding, "claude")
+}
+
+func scanUsageWindowSource(ctx context.Context, path, fallback string, offset, maxBytes int64, recent []string, discarding bool, source string) (map[string]usageSum, int64, []string, bool, error) {
 	if ctx.Err() != nil {
 		return nil, offset, recent, discarding, ctx.Err()
 	}
@@ -500,7 +528,13 @@ func scanUsageWindow(ctx context.Context, path, fallback string, offset, maxByte
 			continue
 		}
 		if len(line) > 0 {
-			if lineErr := noteUsageLine(line, fallback, sums, poisoned, seen, &ring); lineErr != nil {
+			var lineErr error
+			if source == "" || source == "claude" {
+				lineErr = noteUsageLine(line, fallback, sums, poisoned, seen, &ring)
+			} else {
+				lineErr = noteHarnessLine(source, line, fallback, sums, poisoned, seen, &ring)
+			}
+			if lineErr != nil {
 				return nil, offset, recent, discarding, lineErr
 			}
 		}

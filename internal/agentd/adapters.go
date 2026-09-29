@@ -480,11 +480,15 @@ func (a *CursorAdapter) Start(ctx context.Context, r StartRequest, observe func(
 		}
 		if len(frame.ID) > 0 && strings.Trim(string(frame.ID), "\"") == cp.promptID {
 			var result struct {
-				StopReason string `json:"stopReason"`
+				StopReason string                     `json:"stopReason"`
+				Usage      map[string]json.RawMessage `json:"usage"`
 			}
 			if len(frame.Error) > 0 && string(frame.Error) != "null" || json.Unmarshal(frame.Result, &result) != nil || result.StopReason != "end_turn" {
 				cp.finish(errors.New("Cursor ACP prompt failed"))
 			} else {
+				if report, ok := sessionusage.CursorPromptUsage(result.Usage, r.Profile.Model); ok {
+					observe(AdapterEvent{SessionUsage: &report})
+				}
 				cp.finish(nil)
 			}
 			return
@@ -677,15 +681,16 @@ func (a *ClaudeAdapter) Start(ctx context.Context, r StartRequest, observe func(
 	var inputTokens, outputTokens, costMicros int64
 	p.setOnEvent(func(raw json.RawMessage) {
 		var frame struct {
-			Kind            string          `json:"kind"`
-			Reason          string          `json:"reason"`
-			CorrelationID   string          `json:"correlation_id"`
-			EffectiveModel  string          `json:"effective_model"`
-			EffectiveEffort string          `json:"effective_effort"`
-			ModelEvidence   string          `json:"model_evidence_status"`
-			InputTokens     int64           `json:"input_tokens_total"`
-			OutputTokens    int64           `json:"output_tokens_total"`
-			CostUSD         json.RawMessage `json:"cost_usd_total"`
+			Kind            string             `json:"kind"`
+			Reason          string             `json:"reason"`
+			CorrelationID   string             `json:"correlation_id"`
+			EffectiveModel  string             `json:"effective_model"`
+			EffectiveEffort string             `json:"effective_effort"`
+			ModelEvidence   string             `json:"model_evidence_status"`
+			InputTokens     int64              `json:"input_tokens_total"`
+			OutputTokens    int64              `json:"output_tokens_total"`
+			CostUSD         json.RawMessage    `json:"cost_usd_total"`
+			Models          []claudeModelUsage `json:"models"`
 		}
 		if json.Unmarshal(raw, &frame) != nil {
 			return
@@ -719,6 +724,11 @@ func (a *ClaudeAdapter) Start(ctx context.Context, r StartRequest, observe func(
 			if ev.InputTokensDelta > 0 || ev.OutputTokensDelta > 0 || ev.CostMicrosDelta > 0 {
 				observe(ev)
 			}
+			reports := claudeModelReports(frame.Models)
+			for i := range reports {
+				report := reports[i]
+				observe(AdapterEvent{SessionUsage: &report})
+			}
 		case "tool_started":
 			observe(AdapterEvent{Kind: "tool"})
 		case "control_applied", "control_failed":
@@ -744,4 +754,22 @@ func (a *ClaudeAdapter) Start(ctx context.Context, r StartRequest, observe func(
 	case <-p.readDone:
 		return p.failStart(errors.New("Claude bridge ended before readiness"))
 	}
+}
+
+type claudeModelUsage struct {
+	Model  string `json:"model"`
+	Input  int64  `json:"input_tokens"`
+	Output int64  `json:"output_tokens"`
+	Cached int64  `json:"cached_input_tokens"`
+}
+
+func claudeModelReports(models []claudeModelUsage) []sessionusage.UsageReport {
+	out := make([]sessionusage.UsageReport, 0, len(models))
+	for _, model := range models {
+		report, ok := sessionusage.CountReport(model.Model, model.Input, model.Output, model.Cached, true)
+		if ok {
+			out = append(out, report)
+		}
+	}
+	return out
 }

@@ -229,12 +229,17 @@ func (m *Module) reportUsage(r *http.Request, tx pgx.Tx, p tenant.Principal) (an
 			return nil, workorders.Fail(400, "account must belong to tenant and session harness")
 		}
 	}
-	price, err := loadUsagePrice(ctx, tx, next.Model, next.PriceVersion)
-	if err == nil {
-		next.PriceVersion = &price.Version
-		next.EstimatedCostUSD = estimateUsageCost(next, price)
-	} else if !errors.Is(err, pgx.ErrNoRows) {
-		return nil, err
+	if next.BillingMode == "api" {
+		price, err := loadUsagePrice(ctx, tx, next.Model, next.PriceVersion)
+		if err == nil {
+			next.PriceVersion = &price.Version
+			next.EstimatedCostUSD = estimateUsageCost(next, price)
+		} else if !errors.Is(err, pgx.ErrNoRows) {
+			return nil, err
+		}
+	} else {
+		next.PriceVersion = nil
+		next.EstimatedCostUSD = nil
 	}
 	out, err := scanUsage(tx.QueryRow(ctx, `INSERT INTO harness_session_usage
         (tenant_id,session_id,model,sequence,input_tokens,output_tokens,cached_input_tokens,provisional,price_version,estimated_cost_usd,account_id,account_label,billing_mode,subscription_label)
