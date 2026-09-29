@@ -130,6 +130,8 @@ describe('useLiveList: structural changes wait', () => {
     expect(h.live.labels.value.get('n1')).toBe('Closed')
     expect(h.live.pill.value).toBe('1 update · Show')
     expect(h.live.message.value).toBe('K-1 was closed elsewhere. Press U to show updates.')
+    // The counts wait with the row.
+    expect(h.applied).not.toHaveBeenCalled()
     h.live.apply()
     expect(h.rows.value!.map(r => r.id)).toEqual(['n2'])
     expect(h.live.pill.value).toBeNull()

@@ -16,6 +16,8 @@ export function liveServer(data: Fixtures) {
   const log: { id: number; type: string; data: unknown }[] = []
   let newest = 500
   const requests: { page: string; after: string | null; resumed: boolean }[] = []
+  // A held page hears nothing new (a slow connection): its stream resumes where it was.
+  const held = new Set<string>()
   const changedFields = (before: MockNode, after: MockNode) => {
     const fields = (['title', 'body', 'state', 'parent_id'] as const).filter(key => before[key] !== after[key]) as string[]
     for (const key of new Set([...Object.keys(before.fields), ...Object.keys(after.fields)])) {
@@ -54,25 +56,26 @@ export function liveServer(data: Fixtures) {
       requests.push({ page: name, after: query.get('after'), resumed: resume !== null })
       const lines = ['retry: 150', '', ': connected', '', `id: ${after}`, 'event: stream.ready', `data: ${JSON.stringify({ after, resumed: resume !== null })}`, '']
       lastEventId = after
-      for (const event of log.filter(event => event.id > after)) {
+      for (const event of held.has(name) ? [] : log.filter(event => event.id > after)) {
         lines.push(`id: ${event.id}`, `event: ${event.type}`, `data: ${JSON.stringify(event.data)}`, '')
         lastEventId = event.id
       }
       return route.fulfill({ status: 200, headers: { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' }, body: `${lines.join('\n')}\n` })
     })
   }
-  return { install, requests }
+  return { install, requests, hold: (name: string, on = true) => { if (on) held.add(name); else held.delete(name) } }
 }
 
 type Viewport = { width: number; height: number }
 // Two signed-in browsers on url. viewportB alone keeps the slice 1a call; an
 // options object also sets A's viewport and the fixture options.
-export async function openBoth(browser: Browser, url: string, viewport?: Viewport | { a?: Viewport; b?: Viewport; options?: MockOptions }) {
+export async function openBoth(browser: Browser, url: string, viewport?: Viewport | { a?: Viewport; b?: Viewport; options?: MockOptions; colorScheme?: 'light' | 'dark' }) {
   const settings = viewport && 'width' in viewport ? { b: viewport } : viewport ?? {}
   const viewportB = settings.b, viewportA = 'a' in settings ? settings.a : undefined
   const data = fixtures('options' in settings ? settings.options : {})
   const live = liveServer(data)
-  const contexts: BrowserContext[] = [await browser.newContext(viewportA ? { viewport: viewportA } : {}), await browser.newContext(viewportB ? { viewport: viewportB } : {})]
+  const scheme = 'colorScheme' in settings && settings.colorScheme ? { colorScheme: settings.colorScheme } : {}
+  const contexts: BrowserContext[] = [await browser.newContext({ ...scheme, ...(viewportA ? { viewport: viewportA } : {}) }), await browser.newContext({ ...scheme, ...(viewportB ? { viewport: viewportB } : {}) })]
   const [a, b] = await Promise.all(contexts.map(context => context.newPage()))
   for (const [page, name] of [[a, 'a'], [b, 'b']] as const) { await mockWork(page, data); await live.install(page, name) }
   const errors = watchErrors(b), errorsA = watchErrors(a)

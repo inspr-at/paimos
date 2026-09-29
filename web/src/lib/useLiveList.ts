@@ -220,7 +220,8 @@ export function useLiveList(options: LiveListOptions) {
     }
     announce(outcome.filter(entry => !entry.queued.own))
     if (outcome.some(entry => entry.kind !== 'ignore' && entry.kind !== 'patch' && !entry.queued.own)) markedAt = env.now()
-    if (outcome.some(entry => entry.kind !== 'ignore')) options.applied?.()
+    // Counts follow the rows: waiting updates change them when they apply.
+    if (outcome.some(entry => entry.kind === 'patch' && entry.newer)) options.applied?.()
     watchPending()
   }
 

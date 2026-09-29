@@ -570,7 +570,7 @@ function aroundLiveApply(removing: Set<string>, apply: () => void) {
 let liveCounts: ReturnType<typeof setTimeout> | undefined
 function liveApplied() {
   clearTimeout(liveCounts)
-  liveCounts = setTimeout(() => { void list.refreshCounts(); void projects.load(true) }, 800)
+  liveCounts = setTimeout(() => { void list.refreshCounts(); void projects.load(true) }, 300)
 }
 onBeforeUnmount(() => clearTimeout(liveCounts))
 function showUpdates() {
@@ -1515,12 +1515,12 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
         :project="project" :filters="filters" ref="ticketGraphView" @open="openKey" @state="(value: TicketGraphState) => graphState = value" />
       <template v-else>
       <div v-if="listActive && liveList.pill.value" class="live-dock">
-        <button type="button" class="live-pill" aria-keyshortcuts="u" :data-tip="liveList.pending.overflow ? 'Load the list again' : 'Show the updates · u'" @click="showUpdates">
+        <button type="button" class="live-pill" :aria-label="liveList.pill.value" aria-keyshortcuts="u" :data-tip="liveList.pending.overflow ? 'Load the list again' : 'Show the updates · u'" @click="showUpdates">
           <AppIcon :name="liveList.pending.overflow ? 'refresh' : 'arrow-up'" :size="13" />
           <span>{{ liveList.pill.value.split(' · ')[0] }}</span><span class="dot" aria-hidden="true">·</span><b>{{ liveList.pill.value.split(' · ')[1] }}</b>
         </button>
       </div>
-      <p v-if="listActive" class="sr-only" role="status" aria-live="polite">{{ liveList.message.value }}</p>
+      <p v-if="listActive" class="sr-only live-said" role="status" aria-live="polite">{{ liveList.message.value }}</p>
       <TicketTable
         ref="table" :expected-rows="expectedRows" :groups="groups" :group="filters.group" :rows-by-id="rowsById" :cursor-id="cursorId" :open-id="panelItem?.id ?? null"
         :query="filters.q" :sort="filters.sort" :density="density"
@@ -1538,6 +1538,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
         @copy="row => copyKey(row.key)" @new-tab="row => newTab(row.key)" @toggle-group="toggleGroup" @open-epic="openEpic"
         @retry="outlineActive ? outline.reload() : list.load()" @more="outlineActive ? outline.loadMoreRoot() : list.loadMore()" @grid-focus="focusFirst" @clear-filters="clearFilters" @show-closed="update({ showClosed: true })"
         :live-labels="listActive ? liveList.labels.value : undefined" :live-flash="listActive ? liveList.flash.value : undefined"
+        :live-pill="listActive && liveList.pill.value ? { text: liveList.pill.value, overflow: liveList.pending.overflow } : null" @show-updates="showUpdates"
       />
       </template>
 
@@ -1638,11 +1639,11 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
 .activity { font-size: 12px; color: var(--ink-3); }
 .activity time { color: var(--ink-2); }
 .stick-mark { height: 1px; margin-bottom: -1px; }
-/* Waiting live updates: a pill floats over the list's top edge, under the column
-   headers, and never pushes rows down (AEON-326). */
-.live-dock { position: sticky; top: calc(var(--toolbar-h, 0px) + 42px); z-index: 4; height: 0; display: flex; justify-content: center; pointer-events: none; }
+/* Waiting live updates on a phone (the Title header carries them on wider
+   screens): a pill floats just under the toolbar and never pushes cards down (AEON-326). */
+.live-dock { display: none; }
 .live-pill {
-  display: inline-flex; align-items: center; gap: 6px; height: 30px; margin-top: 42px; padding: 0 13px 0 11px; border: 1px solid var(--glass-edge); border-radius: 999px;
+  display: inline-flex; align-items: center; gap: 6px; height: 32px; margin-top: 4px; padding: 0 13px 0 11px; border: 1px solid var(--glass-edge); border-radius: 999px;
   background: var(--glass); box-shadow: var(--shadow-pop); color: var(--ink-2); font-size: 12.5px; white-space: nowrap; pointer-events: auto;
   -webkit-backdrop-filter: blur(18px) saturate(1.2); backdrop-filter: blur(18px) saturate(1.2);
 }
@@ -1665,8 +1666,8 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
   .phone-pick-status b { font-size: 15px; font-weight: 700; color: var(--ink); font-variant-numeric: tabular-nums; }
   .phone-pick .dot { color: var(--ink-3); }
   .phone-pick .gone { color: var(--ink-2); }
-  .live-dock { top: calc(var(--toolbar-h, 0px) + 6px); }
-  .live-pill { margin-top: 6px; height: 34px; font-size: 13.5px; }
+  .live-dock { position: sticky; top: calc(var(--toolbar-h, 0px) + 4px); z-index: 4; height: 0; display: flex; justify-content: center; pointer-events: none; }
+  .live-pill { font-size: 13px; }
   .phone-pick button { min-height: 44px; padding: 0 12px; border: 0; border-radius: 8px; background: transparent; color: var(--ink-2); font-size: 15px; font-weight: 600; }
   .phone-pick button.quiet { padding-left: 2px; color: var(--ink-2); font-weight: 600; }
   .phone-pick.on button { margin-left: -12px; color: var(--teal-ink); }
