@@ -113,6 +113,11 @@ func Render(repository, commit string, private bool, files []File) []FileView {
 		seenSet := map[string]bool{}
 		for _, rule := range indexed.Rules {
 			src := rule.Sources[0]
+			if src.StartLine < 1 || src.EndLine < src.StartLine || src.EndLine > len(lines) {
+				// The importer counts lines as rawLines does; a range outside the
+				// file would be a parser defect, and is not shown as exact bytes.
+				continue
+			}
 			exact := strings.Join(lines[src.StartLine-1:src.EndLine], "")
 			digest := sha256.Sum256([]byte(exact))
 			anchor := anchorAt(anchors, src.StartLine)

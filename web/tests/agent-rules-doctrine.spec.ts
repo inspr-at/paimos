@@ -128,7 +128,7 @@ test('a workspace manager links a repository at a pinned release', async ({ page
   // Private needs the name of a server-side credential before it can be saved.
   await dialog.getByRole('radio', { name: 'Private' }).click()
   await expect(submit).toBeDisabled()
-  await expect(dialog.getByText('Name of a read-only token on the server. The token itself is never stored here.')).toBeVisible()
+  await expect(dialog.getByText('Name of a read-only token on the server (never stored here); members who read rules will see this doctrine.')).toBeVisible()
   await dialog.getByRole('radio', { name: 'Public' }).click()
   await expect(submit).toBeEnabled()
   await submit.click()

@@ -76,7 +76,7 @@ async function remove() {
       <label v-if="visibility === 'private' || credential" class="row">
         <span class="label">Credential</span>
         <input v-model="credential" class="field mono" placeholder="doctrine-private-read" autocomplete="off" spellcheck="false" :aria-describedby="`${id}-cred`">
-        <span :id="`${id}-cred`" class="hint">Name of a read-only token on the server. The token itself is never stored here.</span>
+        <span :id="`${id}-cred`" class="hint">Name of a read-only token on the server (never stored here); members who read rules will see this doctrine.</span>
       </label>
       <label class="row">
         <span class="label">Files</span>
