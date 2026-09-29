@@ -2879,7 +2879,7 @@ paths:
     get:
       operationId: listModelPrices
       security: *auth
-      description: Latest immutable price version per model for the tenant. Requires harness.read. No seeded or inferred vendor prices.
+      description: Latest immutable price version per model for the tenant. Requires harness.read. A migration seeds published api list prices. Prices are not inferred at request time. Subscription billing does not use these rates for dashboard dollars.
       parameters:
         - {name: model, in: query, schema: {type: string, minLength: 1, maxLength: 128}}
       responses:
@@ -3135,8 +3135,9 @@ paths:
         or list estimate were consumed inside it. Null totals are unknown, not zero. estimated_cost_usd is the
         exact USD list estimate, summed once; it is not a billed charge. billing_mode and subscription_label are
         reported metadata, not verified coverage. New reports are priced from model_prices only when billing_mode
-        is api. Subscription and unknown store tokens without a dollar estimate. Rows that already have an
-        estimate stay in the sum. Run telemetry
+        is api. Subscription and unknown store tokens without a dollar estimate. Dashboard totals sum a
+        stored estimate only when billing_mode is api. Subscription and unknown rows stay unknown even
+        when a historical estimate is stored. Run telemetry
         and agent-run totals are not added. More than 5000 sessions sets truncated and drops the rest. If the
         usage relation is not installed the response is 503, not a dashboard of zeros. Allowance windows are the
         caller's registered account windows and only when they hold account.read; the response has no account key.

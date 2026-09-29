@@ -67,24 +67,32 @@ func TestAggregateCountsASessionOnceAcrossModels(t *testing.T) {
 	if total.CachedInputTokens == nil || *total.CachedInputTokens != "1" || total.CachedInputKnownRows != 1 || total.CachedInputUnknownRows != 2 {
 		t.Fatalf("cached %+v", total)
 	}
-	if total.EstimatedCostUSD == nil || *total.EstimatedCostUSD != "0.000000800000" || total.CostState != "partial" || total.ProvisionalRows != 1 || total.ProvisionalSessions != 1 {
+	if total.EstimatedCostUSD == nil || *total.EstimatedCostUSD != "0.000000400000" || total.CostState != "partial" || total.CostKnownRows != 1 || total.CostUnknownRows != 2 || total.ProvisionalRows != 1 || total.ProvisionalSessions != 1 {
 		t.Fatalf("cost %+v", total)
 	}
-	if len(models) != 3 || models[0].Label != "alpha" || models[0].Sessions != 1 || models[1].Sessions != 1 || models[2].Label != "Unreported" {
+	if len(models) != 3 {
 		t.Fatalf("models %+v", models)
+	}
+	alphaGroup := findLabel(models, "alpha")
+	betaGroup := findLabel(models, "beta")
+	if alphaGroup.Sessions != 1 || alphaGroup.EstimatedCostUSD != nil || alphaGroup.CostState != "unknown" {
+		t.Fatalf("subscription model cost leaked: %+v", alphaGroup)
+	}
+	if betaGroup.Sessions != 1 || betaGroup.EstimatedCostUSD == nil || *betaGroup.EstimatedCostUSD != "0.000000400000" {
+		t.Fatalf("api model %+v", betaGroup)
 	}
 	planGroup := findLabel(subs, "Plan")
 	apiGroup := findLabel(subs, "API")
-	if planGroup.Sessions != 1 || planGroup.BillingMode != "subscription" || planGroup.EstimatedCostUSD == nil || *planGroup.EstimatedCostUSD != "0.000000400000" {
+	if planGroup.Sessions != 1 || planGroup.BillingMode != "subscription" || planGroup.EstimatedCostUSD != nil || planGroup.CostState != "unknown" {
 		t.Fatalf("plan %+v", planGroup)
 	}
-	if apiGroup.Sessions != 1 || apiGroup.BillingMode != "api" || apiGroup.Sessions+planGroup.Sessions+findLabel(subs, "Unreported").Sessions != 3 {
+	if apiGroup.Sessions != 1 || apiGroup.BillingMode != "api" || apiGroup.EstimatedCostUSD == nil || *apiGroup.EstimatedCostUSD != "0.000000400000" || apiGroup.Sessions+planGroup.Sessions+findLabel(subs, "Unreported").Sessions != 3 {
 		t.Fatalf("subscription session sum double-counted totals: %+v", subs)
 	}
 	if len(trend) != 1 || trend[0].Day != "2026-09-10" || trend[0].Group.Sessions != 2 || trend[0].Group.Label != "" {
 		t.Fatalf("trend %+v", trend)
 	}
-	if unknown != 0 || len(tickets) != 1 || tickets[0].Key != "T-1" || tickets[0].Sessions != 1 || tickets[0].EstimatedCostUSD == nil || *tickets[0].EstimatedCostUSD != "0.000000800000" {
+	if unknown != 0 || len(tickets) != 1 || tickets[0].Key != "T-1" || tickets[0].Sessions != 1 || tickets[0].EstimatedCostUSD == nil || *tickets[0].EstimatedCostUSD != "0.000000400000" {
 		t.Fatalf("tickets %d %+v", unknown, tickets)
 	}
 }

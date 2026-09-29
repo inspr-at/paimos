@@ -430,8 +430,41 @@ func TestUsagePricingIsolationAndStorageConstraints(t *testing.T) {
 	expect(t, usagePrice(t, f, 1, "2.5"), 201)
 	w := f.call(f.foreign, "GET", "/api/model-prices", nil, "")
 	expect(t, w, 200)
-	if len(decode(t, w)["items"].([]any)) != 0 {
-		t.Fatal("foreign tenant price leaked")
+	items := decode(t, w)["items"].([]any)
+	if len(items) == 0 {
+		t.Fatal("seeded api list prices missing")
+	}
+	seeded := map[string]map[string]any{}
+	for _, item := range items {
+		row := item.(map[string]any)
+		model := row["model"].(string)
+		if model == "test-model" {
+			t.Fatal("foreign tenant price leaked")
+		}
+		seeded[model] = row
+	}
+	for _, absent := range []string{"haiku", "sonnet", "opus", "fable", "composer-2.5", "grok-4", "grok-4-fast", "gpt-6-terra", "grok-4.7-high"} {
+		if _, ok := seeded[absent]; ok {
+			t.Fatalf("unsourced model %s was seeded", absent)
+		}
+	}
+	for model, want := range map[string][3]string{
+		"grok-4.7":                  {"2.000000", "0.500000", "6.000000"},
+		"claude-sonnet-5":           {"2.000000", "0.200000", "10.000000"},
+		"anthropic/claude-sonnet-5": {"2.000000", "0.200000", "10.000000"},
+		"claude-opus-5":             {"5.000000", "0.500000", "25.000000"},
+		"anthropic/claude-opus-5":   {"5.000000", "0.500000", "25.000000"},
+		"claude-opus-5-5":           {"4.000000", "0.200000", "20.000000"},
+		"claude-fable-5-1":          {"10.000000", "0.250000", "50.000000"},
+		"claude-haiku-4-5-20251001": {"1.000000", "0.100000", "5.000000"},
+		"gpt-6-sol":                 {"2.000000", "0.200000", "10.000000"},
+		"gpt-6-luna":                {"0.100000", "0.010000", "0.500000"},
+		"gpt-4.1":                   {"2.000000", "0.500000", "8.000000"},
+	} {
+		row := seeded[model]
+		if row == nil || row["input_usd_per_million"] != want[0] || row["cached_input_usd_per_million"] != want[1] || row["output_usd_per_million"] != want[2] {
+			t.Fatalf("seed %s = %+v", model, row)
+		}
 	}
 	path, id, lease := usageSession(t, f, "managed")
 	in := usagePayload()

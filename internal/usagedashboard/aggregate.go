@@ -497,7 +497,9 @@ func (b *bucket) add(row sessionRow) error {
 	b.input.add(row.input, false)
 	b.output.add(row.output, false)
 	b.cached.add(row.cached, false)
-	if row.cost == nil {
+	// Only api billing contributes dollars. A stored estimate on a subscription
+	// or unknown row is historical and stays out of the sum.
+	if rowMode(row) != "api" || row.cost == nil {
 		b.costUnknown++
 		return nil
 	}
