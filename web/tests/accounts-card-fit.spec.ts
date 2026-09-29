@@ -1,0 +1,120 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// AEON-355: the Accounts card stays inside itself from 390 to 2560, with the
+// session panel open and closed. Long names, one pool of three accounts and
+// pools of one, including an account with no reading yet.
+import { mkdirSync } from 'node:fs'
+import { expect, test, type Page } from '@playwright/test'
+import { agentData, mockAgents, type AgentWorld } from './agents-fixtures'
+import { NOW, TZ, capacityWorld } from './capacity-fixtures'
+import { mockEffectivePermissions } from './authz-fixtures'
+import { fixtures, me, mockWork, watchErrors } from './work-fixtures'
+
+test.use({ timezoneId: TZ })
+const world: AgentWorld = {
+  me: me.id, now: NOW,
+  projects: { pharos: 'p-pharos', aeon: 'p-aeon', pai: 'p-frozen' },
+  tickets: { fleet: 'n-1', restore: 'n-2', web: 'n-a1', release: 'n-5', approvals: 'n-6' },
+  nodes: {
+    'p-pharos': { key: 'PRJ-17', title: 'Pharos' }, 'p-aeon': { key: 'PRJ-35', title: 'Aeon' }, 'p-frozen': { key: 'PRJ-26', title: 'Studio infrastructure' },
+    'n-1': { key: 'PHAROS-11', title: 'Connect Hetzner Cloud for managed provisioning' }, 'n-2': { key: 'PHAROS-12', title: 'Add an Oracle Cloud connector' },
+    'n-a1': { key: 'AEON-1', title: 'Aeon foundation' }, 'n-5': { key: 'PHAROS-15', title: 'Beacon health probes' }, 'n-6': { key: 'PHAROS-16', title: 'Retire the old dashboard' },
+  },
+}
+const shots = process.env.AEON355_SHOTS
+
+async function setup(page: Page) {
+  await page.clock.setSystemTime(NOW)
+  await mockWork(page, fixtures(), { admin: true })
+  const data = agentData(world)
+  const capacity = capacityWorld({ longNames: true, unread: true })
+  data.accounts = capacity.accounts as unknown as typeof data.accounts
+  data.approvals = data.approvals.filter(a => a.decision)
+  data.messages = data.messages.filter(m => !m.is_action_request)
+  await mockAgents(page, data, { capacity })
+  await page.route('**/api/me/permissions*', route => {
+    const answer = mockEffectivePermissions('admin', new URL(route.request().url()).searchParams.get('project_id') ?? undefined)
+    answer.workspace.permissions = [...answer.workspace.permissions, 'account.read', 'account.manage', 'run.create', 'run.read', 'models.read', 'work_orders.read']
+    return route.fulfill({ json: answer })
+  })
+}
+
+function widths() {
+  const set = new Set<number>()
+  for (let w = 390; w <= 1600; w += 20) set.add(w)
+  for (const edge of [601, 616, 720, 721, 1044, 1100, 1264, 1265, 1320, 1400, 1440, 1450, 1920, 2560]) set.add(edge)
+  return [...set].sort((a, b) => a - b)
+}
+
+async function fit(page: Page) {
+  return page.evaluate(() => {
+    const card = document.querySelector('.cap')
+    if (!card) return { missing: true as const }
+    const edge = card.getBoundingClientRect().right
+    const describe = (el: Element) => {
+      const cls = (el.getAttribute('class') || '').split(/\s+/).filter(Boolean).slice(0, 3).join('.')
+      const text = [...el.childNodes].every(node => node.nodeType === 3) ? (el.textContent || '').trim().slice(0, 48) : ''
+      return `${el.tagName.toLowerCase()}${cls ? '.' + cls : ''}${text ? ` "${text}"` : ''}`
+    }
+    const offenders: { over: number; desc: string }[] = []
+    for (const el of card.querySelectorAll('*')) {
+      const box = el.getBoundingClientRect()
+      if (box.width < 1 && box.height < 1) continue
+      const over = box.right - edge
+      if (over > 1) offenders.push({ over: Math.round(over * 10) / 10, desc: describe(el) })
+    }
+    offenders.sort((a, b) => b.over - a.over)
+    let pageOffender = ''
+    const scroll = document.documentElement.scrollWidth - window.innerWidth
+    if (scroll > 1) {
+      let worst = 0
+      for (const el of document.body.querySelectorAll('*')) {
+        const box = el.getBoundingClientRect()
+        if (box.right > window.innerWidth + 1 && box.right > worst) {
+          worst = box.right
+          pageOffender = describe(el)
+        }
+      }
+    }
+    return { missing: false as const, offenders: offenders.slice(0, 4), scroll, pageOffender, card: Math.round(edge) }
+  })
+}
+
+test('accounts card fits every width, panel open and closed', async ({ page }) => {
+  test.setTimeout(300_000)
+  const errors = watchErrors(page)
+  await setup(page)
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await page.goto('/agents')
+  await expect(page.getByRole('heading', { name: 'Agents', level: 1 })).toBeVisible()
+  const card = page.getByRole('region', { name: 'Accounts' })
+  await expect(card.locator('.pool[data-pool="codex"] .acct')).toHaveCount(3)
+  await expect(card.locator('.pool[data-pool="claude"] .acct')).toHaveCount(1)
+  await expect(card.locator('.pool[data-pool="grok"] .acct')).toHaveCount(1)
+  await expect(card.locator('.pool[data-pool="cursor"] .acct')).toHaveCount(1)
+  await expect(card.locator('.pool[data-pool="pi"] .acct')).toHaveCount(1)
+  await expect(card.locator('.pool[data-pool="pi"] .plan')).toContainText('No reading yet')
+  await expect(card.locator('.pool[data-pool="pi"] .today')).toHaveText('no reading yet')
+  await expect(card.locator('.pool[data-pool="pi"] .source')).toHaveText('')
+  await expect(card.locator('.pool[data-pool="codex"] .nm').first()).toHaveAttribute('title', /Spare workstation account/)
+  if (shots) mkdirSync(shots, { recursive: true })
+
+  const problems: string[] = []
+  const sweep = async (label: string) => {
+    for (const width of widths()) {
+      await page.setViewportSize({ width, height: width < 800 ? 844 : 1000 })
+      if (shots && [390, 610, 720, 721, 1100, 1320, 1400, 1440, 1600, 2560].includes(width)) {
+        await card.screenshot({ path: `${shots}/${label}-${width}.png` })
+      }
+      const result = await fit(page)
+      if (result.missing) problems.push(`${label} ${width}px has no accounts card`)
+      else if (result.offenders?.length) problems.push(`${label} ${width}px spills ${result.offenders.map(o => `${o.desc} (+${o.over}px)`).join('; ')}`)
+      if ((result.scroll ?? 0) > 1) problems.push(`${label} ${width}px document scrolls by ${result.scroll}px via ${result.pageOffender}`)
+    }
+  }
+  await sweep('closed')
+  await page.goto('/agents/5e000000-0000-4000-8000-000000000001')
+  await expect(page.getByRole('complementary', { name: 'Session details' })).toBeVisible()
+  await sweep('panel')
+  expect(problems, problems.join('\n')).toEqual([])
+  expect(errors).toEqual([])
+})

@@ -327,6 +327,11 @@ onBeforeUnmount(() => { resized.disconnect(); crumbsChanged.disconnect(); narrow
 /* The search pill gives up width before a breadcrumb has to clip. */
 @media (max-width: 1100px) { .search-pill { width: 200px; } }
 @media (max-width: 900px) { .search-pill { width: 180px; } }
+/* Just wider than the phone header, the fixed pill is a few pixels too wide for the row. */
+@media (max-width: 720px) {
+  .search-pill { flex-shrink: 1; min-width: 44px; overflow: hidden; }
+  .search-pill .pill-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+}
 @media (max-width: 600px) {
   .app-header { gap: 4px; padding: 0 10px; }
   .lockup { min-height: 44px; min-width: 44px; justify-content: center; }
