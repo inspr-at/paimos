@@ -851,6 +851,262 @@ func TestRunHeartbeatDeadOwnerStopForbiddenStaysOpen(t *testing.T) {
 	}
 }
 
+// TestStopReconcilesGenerationAlreadyStopped is the crash after the server
+// commits /stop and before the client persists closed. A later strict stop
+// is 403 or 409; the status read must close the generation and exit 0.
+func TestStopReconcilesGenerationAlreadyStopped(t *testing.T) {
+	for _, code := range []int{http.StatusForbidden, http.StatusConflict} {
+		t.Run(http.StatusText(code), func(t *testing.T) {
+			rt, opts, stderr, calls := stoppedGenerationServer(t, code, func(stopped bool) string {
+				if !stopped {
+					return `{"id":"` + transcriptSessionID + `","phase":"starting"}`
+				}
+				return `{"id":"` + transcriptSessionID + `","phase":"stopped","stopped_at":"2026-09-29T16:00:00Z"}`
+			})
+			crashAfterServerStop(t, rt, opts)
+			stderr.Reset()
+			if err := rt.runHeartbeat(context.Background(), opts, heartbeatDeps{alive: func(int) bool { return false }}); err != nil {
+				t.Fatalf("rerun: %v stderr %s", err, stderr.String())
+			}
+			if !loadHeartbeatDisk(t, opts.StateDir).Closed {
+				t.Fatal("already-stopped generation stayed open")
+			}
+			if !strings.Contains(stderr.String(), "will not resume") {
+				t.Fatalf("stderr %s", stderr.String())
+			}
+			stops := len(hbWhere(*calls, http.MethodPost, "/stop"))
+			stderr.Reset()
+			if err := rt.runHeartbeat(context.Background(), opts, heartbeatDeps{alive: func(int) bool { return false }}); err != nil {
+				t.Fatalf("second rerun: %v stderr %s", err, stderr.String())
+			}
+			if got := len(hbWhere(*calls, http.MethodPost, "/stop")); got != stops {
+				t.Fatalf("closed rerun called /stop again (%d to %d)", stops, got)
+			}
+			if _, statErr := os.Lstat(filepath.Join(opts.StateDir, "stop.intent")); !errors.Is(statErr, os.ErrNotExist) {
+				t.Fatal("reconciled stop left an intent")
+			}
+		})
+	}
+	t.Run("strict intent", func(t *testing.T) {
+		rt, opts, stderr, calls := stoppedGenerationServer(t, http.StatusForbidden, func(stopped bool) string {
+			if !stopped {
+				return `{"id":"` + transcriptSessionID + `","phase":"starting"}`
+			}
+			return `{"id":"` + transcriptSessionID + `","phase":"stopped","stopped_at":"2026-09-29T16:00:00Z"}`
+		})
+		crashAfterServerStop(t, rt, opts)
+		if err := os.WriteFile(filepath.Join(opts.StateDir, "stop.intent"), []byte(transcriptSessionID+"\nstrict\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		stderr.Reset()
+		if err := rt.runHeartbeat(context.Background(), opts, heartbeatDeps{alive: func(int) bool { return true }}); err != nil {
+			t.Fatalf("rerun: %v stderr %s", err, stderr.String())
+		}
+		if !loadHeartbeatDisk(t, opts.StateDir).Closed {
+			t.Fatal("strict recovery left the generation open")
+		}
+		if len(hbWhere(*calls, http.MethodPost, "/heartbeat")) != 0 {
+			t.Fatal("strict recovery heartbeated a stopped generation")
+		}
+		if !strings.Contains(stderr.String(), "will not resume") {
+			t.Fatalf("stderr %s", stderr.String())
+		}
+	})
+	t.Run("still starting", func(t *testing.T) {
+		rt, opts, stderr, _ := stoppedGenerationServer(t, http.StatusForbidden, func(bool) string {
+			return `{"id":"` + transcriptSessionID + `","phase":"starting"}`
+		})
+		saveOpenHeartbeat(t, rt, opts)
+		if err := rt.runHeartbeat(context.Background(), opts, heartbeatDeps{alive: func(int) bool { return false }}); err == nil || errors.Is(err, errOwnerGone) {
+			t.Fatalf("rejected stop: %v stderr %s", err, stderr.String())
+		}
+		if loadHeartbeatDisk(t, opts.StateDir).Closed {
+			t.Fatal("unconfirmed 403 marked the generation closed")
+		}
+		intent, err := os.ReadFile(filepath.Join(opts.StateDir, "stop.intent"))
+		if err != nil || !strings.Contains(string(intent), "strict") {
+			t.Fatalf("strict intent %q err %v", intent, err)
+		}
+	})
+	t.Run("other generation", func(t *testing.T) {
+		rt, opts, stderr, _ := stoppedGenerationServer(t, http.StatusForbidden, func(bool) string {
+			return `{"id":"11111111-1111-4111-8111-111111111111","phase":"stopped","stopped_at":"2026-09-29T16:00:00Z"}`
+		})
+		saveOpenHeartbeat(t, rt, opts)
+		if err := rt.runHeartbeat(context.Background(), opts, heartbeatDeps{alive: func(int) bool { return false }}); err == nil || errors.Is(err, errOwnerGone) {
+			t.Fatalf("other generation: %v stderr %s", err, stderr.String())
+		}
+		if loadHeartbeatDisk(t, opts.StateDir).Closed {
+			t.Fatal("another generation's stop closed this one")
+		}
+	})
+	t.Run("archived", func(t *testing.T) {
+		rt, opts, stderr, _ := stoppedGenerationServer(t, http.StatusForbidden, func(bool) string {
+			return `{"id":"` + transcriptSessionID + `","phase":"stopped","archived_at":"2026-09-29T16:00:00Z"}`
+		})
+		saveOpenHeartbeat(t, rt, opts)
+		if err := rt.runHeartbeat(context.Background(), opts, heartbeatDeps{alive: func(int) bool { return false }}); err != nil {
+			t.Fatalf("archived: %v stderr %s", err, stderr.String())
+		}
+		if !loadHeartbeatDisk(t, opts.StateDir).Closed {
+			t.Fatal("archived generation stayed open")
+		}
+	})
+}
+
+func stoppedGenerationServer(t *testing.T, code int, status func(stopped bool) string) (*runtime, heartbeatOptions, *bytes.Buffer, *[]hbCall) {
+	t.Helper()
+	var calls []hbCall
+	stopped := false
+	srv := hbServer(t, &calls, func(r *http.Request, _ map[string]any, w http.ResponseWriter) bool {
+		sessionPath := "/api/projects/" + transcriptProjectID + "/harness-sessions/" + transcriptSessionID
+		if r.Method == http.MethodGet && r.URL.Path == sessionPath {
+			_, _ = w.Write([]byte(status(stopped)))
+			return true
+		}
+		if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/stop") {
+			// A status that changes once the server commits distinguishes the
+			// crash (first stop succeeds) from a stop the server never accepts.
+			commits := status(false) != status(true)
+			if !stopped && commits {
+				stopped = true
+				_, _ = w.Write([]byte(`{"ok":true}`))
+				return true
+			}
+			stopped = true
+			w.WriteHeader(code)
+			_, _ = w.Write([]byte(`{"error":"harness worker proof rejected"}`))
+			return true
+		}
+		return false
+	})
+	t.Cleanup(srv.Close)
+	rt, _, stderr := heartbeatRuntime(t, srv)
+	return rt, heartbeatTestOptions(t.TempDir()), stderr, &calls
+}
+
+func saveOpenHeartbeat(t *testing.T, rt *runtime, opts heartbeatOptions) {
+	t.Helper()
+	session, _, err := rt.openHeartbeatSession(context.Background(), opts, heartbeatDeps{alive: func(int) bool { return true }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := saveHeartbeatSession(&session); err != nil {
+		session.hold.release()
+		t.Fatal(err)
+	}
+	session.hold.release()
+}
+
+func crashAfterServerStop(t *testing.T, rt *runtime, opts heartbeatOptions) {
+	t.Helper()
+	session, _, err := rt.openHeartbeatSession(context.Background(), opts, heartbeatDeps{alive: func(int) bool { return true }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := saveHeartbeatSession(&session); err != nil {
+		session.hold.release()
+		t.Fatal(err)
+	}
+	if err := rt.stopHeartbeatStrict(context.Background(), opts.Project, session); err != nil {
+		session.hold.release()
+		t.Fatal(err)
+	}
+	session.hold.release()
+	if loadHeartbeatDisk(t, opts.StateDir).Closed {
+		t.Fatal("stop persisted closed before the crash")
+	}
+}
+
+func TestStopRetryBoundAndPermanentRejection(t *testing.T) {
+	t.Run("bound", func(t *testing.T) {
+		prev := heartbeatStopRetryBound
+		heartbeatStopRetryBound = 2
+		t.Cleanup(func() { heartbeatStopRetryBound = prev })
+		var calls []hbCall
+		srv := hbServer(t, &calls, func(r *http.Request, _ map[string]any, w http.ResponseWriter) bool {
+			if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/stop") {
+				w.WriteHeader(http.StatusInternalServerError)
+				_, _ = w.Write([]byte(`{"error":"unavailable"}`))
+				return true
+			}
+			return false
+		})
+		defer srv.Close()
+		rt, _, stderr := heartbeatRuntime(t, srv)
+		opts := heartbeatTestOptions(t.TempDir())
+		err := rt.runHeartbeat(context.Background(), opts, heartbeatDeps{
+			alive: func(int) bool { return true },
+			wait:  func(context.Context, int, time.Duration) error { return errOwnerExited },
+		})
+		if err == nil {
+			t.Fatal("transient stop failure was ignored")
+		}
+		noBeat := heartbeatDeps{
+			alive: func(int) bool { return true },
+			wait: func(context.Context, int, time.Duration) error {
+				t.Fatal("recovery heartbeated")
+				return errOwnerExited
+			},
+		}
+		if err := rt.runHeartbeat(context.Background(), opts, noBeat); err == nil {
+			t.Fatal("second transient failure was ignored")
+		}
+		stderr.Reset()
+		err = rt.runHeartbeat(context.Background(), opts, noBeat)
+		if !errors.Is(err, errHeartbeatStopBound) {
+			t.Fatalf("bound: %v stderr %s", err, stderr.String())
+		}
+		if !strings.Contains(stderr.String(), "stop retries are exhausted") {
+			t.Fatalf("stderr %s", stderr.String())
+		}
+		if got := len(hbWhere(calls, http.MethodPost, "/stop")); got != 2 {
+			t.Fatalf("stops %d", got)
+		}
+		if loadHeartbeatDisk(t, opts.StateDir).Closed {
+			t.Fatal("exhausted retries marked the generation closed")
+		}
+	})
+	t.Run("permanent", func(t *testing.T) {
+		var calls []hbCall
+		srv := hbServer(t, &calls, func(r *http.Request, _ map[string]any, w http.ResponseWriter) bool {
+			if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/stop") {
+				w.WriteHeader(http.StatusBadRequest)
+				_, _ = w.Write([]byte(`{"error":"invalid stop reason"}`))
+				return true
+			}
+			return false
+		})
+		defer srv.Close()
+		rt, _, stderr := heartbeatRuntime(t, srv)
+		opts := heartbeatTestOptions(t.TempDir())
+		err := rt.runHeartbeat(context.Background(), opts, heartbeatDeps{
+			alive: func(int) bool { return true },
+			wait:  func(context.Context, int, time.Duration) error { return errOwnerExited },
+		})
+		if err == nil {
+			t.Fatal("permanent stop failure was ignored")
+		}
+		stderr.Reset()
+		err = rt.runHeartbeat(context.Background(), opts, heartbeatDeps{
+			alive: func(int) bool { return true },
+			wait: func(context.Context, int, time.Duration) error {
+				t.Fatal("permanent rejection was retried into a heartbeat")
+				return errOwnerExited
+			},
+		})
+		if !errors.Is(err, errHeartbeatStopRejected) {
+			t.Fatalf("permanent: %v stderr %s", err, stderr.String())
+		}
+		if got := len(hbWhere(calls, http.MethodPost, "/stop")); got != 1 {
+			t.Fatalf("stops %d", got)
+		}
+		if !strings.Contains(stderr.String(), "stop will not be retried") {
+			t.Fatalf("stderr %s", stderr.String())
+		}
+	})
+}
+
 func TestRunHeartbeatStateDirIsPrivate(t *testing.T) {
 	t.Run("loose directory", func(t *testing.T) {
 		var calls []hbCall
