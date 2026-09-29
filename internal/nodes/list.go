@@ -12,6 +12,7 @@ import (
 	"math"
 	"net/http"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -64,6 +65,9 @@ type listItem struct {
 	// permission-projected label. Key identifies that session for the client
 	// without carrying a session id the caller cannot already see.
 	LeadWorker *leadWorker `json:"lead_worker,omitempty"`
+	// Planning is the resolved model, tokens and (with harness.read) cost of a
+	// ticket, task or epic (AEON-329). Absent when there is nothing to show.
+	Planning *planningView `json:"planning,omitempty"`
 }
 
 // leadWorker is one bound live session, chosen by the server.
@@ -145,7 +149,7 @@ type treeQuery struct {
 	Cursor   string
 }
 
-var validSort = map[string]bool{"key": true, "title": true, "state": true, "priority": true, "kind": true, "updated_at": true, "created_at": true, "position": true, "assignee": true, "eta_ready": true, "progress": true, "estimate": true}
+var validSort = map[string]bool{"key": true, "title": true, "state": true, "priority": true, "kind": true, "updated_at": true, "created_at": true, "position": true, "assignee": true, "eta_ready": true, "progress": true, "estimate": true, "model": true, "tokens": true, "list_cost": true, "paid": true}
 var validFacet = map[string]bool{"state": true, "kind": true, "priority": true, "assignee": true, "tag": true, "cost_unit": true, "release": true}
 
 // dateFieldKeys maps date_field to the fields key of dates kept in node fields.
@@ -536,6 +540,16 @@ func (m *Module) listNodes(ctx context.Context, tenantID string, q listQuery) (n
 			}
 			for i := range page.Items {
 				page.Items[i].Estimate = estimates[page.Items[i].ID]
+			}
+			seen := q.seen
+			planning, err := loadPlanning(ctx, tx, page.Items, func(projectID string) bool {
+				return seen.harnessAll || slices.Contains(seen.projects, projectID)
+			})
+			if err != nil {
+				return dbErr("list planning", err)
+			}
+			for i := range page.Items {
+				page.Items[i].Planning = planning[page.Items[i].ID]
 			}
 			views, err := eta.Load(ctx, tx, ids)
 			if err != nil {
@@ -1016,6 +1030,13 @@ func listOrder(q listQuery) string {
 			parts = append(parts, "est.hours IS NULL ASC", "est.hours "+dir)
 		case "progress":
 			parts = append(parts, "eta.progress_pct IS NULL ASC", "eta.progress_pct "+dir)
+		case "model":
+			// The role's rung on the ladder, then the area; rows without a role last.
+			parts = append(parts, "route.rank IS NULL ASC", "route.rank "+dir, "route.area IS NULL ASC", "route.area "+dir)
+		case "tokens", "list_cost", "paid":
+			// Spent first; work nothing was spent on yet follows by its estimate.
+			value := map[string]string{"tokens": "plan.tokens", "list_cost": "plan.list_usd", "paid": "plan.paid_usd"}[key.Name]
+			parts = append(parts, value+" IS NULL ASC", value+" "+dir, "est.hours IS NULL ASC", "est.hours "+dir)
 		default:
 			parts = append(parts, "f."+key.Name+" "+dir)
 		}
@@ -1056,11 +1077,15 @@ func listSQL(q listQuery, anchor any) (string, []any) {
 	if sortsBy(q, "eta_ready") || sortsBy(q, "progress") {
 		etaJoin = ` LEFT JOIN LATERAL aeon_node_eta(f.id) eta ON true`
 	}
-	estimateJoin := ""
-	if sortsBy(q, "estimate") {
+	estimateJoin, planningCTE, planningJoin := "", "", ""
+	if sortsByPlanning(q) {
+		planningCTE = ", " + planningStatesCTE()
+		planningJoin = planningSortJoin(harnessAll, projectArg)
+	}
+	if sortsBy(q, "estimate") || sortsBy(q, "tokens") || sortsBy(q, "list_cost") || sortsBy(q, "paid") {
 		estimateJoin = ` LEFT JOIN LATERAL (` + estimateSQL(`SELECT n.id,n.fields,f.kind_slug FROM nodes n WHERE n.tenant_id=current_setting('aeon.tenant_id')::uuid AND n.id=f.id`) + `) est ON true`
 	}
-	sql := prefix + `, ordered AS (SELECT f.id,row_number() OVER (ORDER BY ` + listOrder(q) + `) AS rn` + orderedLead + ` FROM filtered f` + people + etaJoin + estimateJoin + `),
+	sql := prefix + planningCTE + `, ordered AS (SELECT f.id,row_number() OVER (ORDER BY ` + listOrder(q) + `) AS rn` + orderedLead + ` FROM filtered f` + people + etaJoin + estimateJoin + planningJoin + `),
     selected AS (SELECT * FROM ordered WHERE rn>coalesce((SELECT rn FROM ordered WHERE id=` + anchorArg + `::uuid),0) ORDER BY rn LIMIT ` + limitArg + `),
     -- Count visible children for the page once instead of rescanning nodes per row.
     child_counts AS MATERIALIZED (
