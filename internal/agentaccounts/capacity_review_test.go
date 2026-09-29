@@ -3,6 +3,7 @@ package agentaccounts
 
 import (
 	"encoding/json"
+	"math"
 	"testing"
 	"time"
 
@@ -87,7 +88,8 @@ func TestCapacityPreviewMatchesSavedInheritance(t *testing.T) {
 		if !sameShape(p.Schedule, s.Schedule) || p.Schedule.Override != s.Schedule.Override || len(p.Windows) != 1 || len(s.Windows) != 1 {
 			t.Fatalf("%s: preview %+v, saved %+v", h, p.Schedule, s.Schedule)
 		}
-		if pw, sw := p.Windows[0].Pacing, s.Windows[0].Pacing; pw.BudgetPercent != sw.BudgetPercent || pw.UsableHours != sw.UsableHours {
+		// Usable hours count from now, which moves between the two reads.
+		if pw, sw := p.Windows[0].Pacing, s.Windows[0].Pacing; pw.BudgetPercent != sw.BudgetPercent || pw.TonightPercent != sw.TonightPercent || math.Abs(pw.UsableHours-sw.UsableHours) > 0.01 {
 			t.Fatalf("%s: preview paced %+v, saved paced %+v", h, pw, sw)
 		}
 	}
