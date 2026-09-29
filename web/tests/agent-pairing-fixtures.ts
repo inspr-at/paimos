@@ -21,6 +21,7 @@ export function pairingGuide() {
     version: '260927181849.0.0',
     platform_qualification: 'candidate; consult the exact release service qualification evidence',
     setup_command: SETUP_COMMAND,
+    verification_capabilities: { pi: { supported: false, policy: 'unavailable', reason: 'pi verification has no qualified no-tools policy for extensions and provider configuration.' } },
     install_available: false,
     install_targets: [],
     managed_installation: 'Use the owning Nix or Home Manager configuration.',

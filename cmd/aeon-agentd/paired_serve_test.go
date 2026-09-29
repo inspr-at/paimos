@@ -166,8 +166,9 @@ func TestColdRevokedDaemonReconcilesWithoutRuntimeAuthentication(t *testing.T) {
 			}
 			runtime := agentsetup.RuntimeConfig{Schema: "aeon.agent-runtime.v1", Origin: server.URL, TenantID: tenant, PrincipalID: principal, DaemonID: "fixture", ComputerID: computer, Workspace: root,
 				NodePath: "/missing/node", ClaudeSDKPath: "/missing/sdk.mjs", Accounts: []agentsetup.RuntimeAccount{{Harness: "claude", AccountID: "account"}}}
-			if err := agentsetup.ValidateRuntimeDependencies(runtime); err == nil {
-				t.Fatal("missing dependencies passed execution validation")
+			accounts, adapters, err := pairedAdapters(runtime)
+			if err != nil || len(adapters) != 0 || len(accounts) != 1 || !accounts[0].DependencyBlocked || accounts[0].PinReason != agentsetup.PinInvalid || accounts[0].PinFix != agentsetup.FixRepin {
+				t.Fatal("missing dependencies allowed an execution adapter", err)
 			}
 			raw, _ = json.Marshal(runtime)
 			if err = store.Write(agentsetup.RuntimeName, raw, true); err != nil {

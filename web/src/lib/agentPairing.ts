@@ -35,7 +35,7 @@ const DISCONNECT_MODES = ['drain', 'revoke_now'] as const
 const UNITS = ['requests', 'tokens', 'cost_micros'] as const
 const PACES = ['steady', 'frontload', 'unrestricted'] as const
 const HARNESS_STATES = ['ready', 'blocked', 'login_required', 'checking', 'draining'] as const
-export type HarnessStatus = (typeof HARNESS_STATES)[number]
+export type HarnessStatus = string
 
 export type RequestState = (typeof REQUEST_STATES)[number]
 export type ComputerState = (typeof COMPUTER_STATES)[number]
@@ -62,6 +62,7 @@ export interface RequestedAccount {
   harness: string
   label: string
   model_profile_id?: string
+  provider?: string
 }
 
 /** Server-derived. A missing entry is not a claim that verification works. */
@@ -104,8 +105,9 @@ export interface PairingEnrollment {
   accounting_state?: AccountingState
 }
 
-export type HarnessReason = 'repin_pending' | 'dependency_invalid' | 'pin_missing' | 'login_required' | 'starting' | 'cli_unavailable'
-export interface HarnessDetail { state: HarnessStatus; reason?: HarnessReason; fix?: string }
+export type HarnessReason = string
+export interface HarnessFix { kind: 'repin' | 'add_harness' | 'login' | 'restart'; command: string }
+export interface HarnessDetail { state: HarnessStatus; reason?: HarnessReason; fix?: HarnessFix }
 
 /** Public pairing projection. Secret-bearing keys are not part of this type. */
 export interface PairingView {
@@ -340,6 +342,7 @@ export function presentPublicGuide(guide: PairingGuide | null): PublicGuidePrese
     guide?.platform_qualification ? `Platform note from this ${product()}: ${guide.platform_qualification}` : '',
     guide?.default_tenant_slug ? `The published workspace slug is ${guide.default_tenant_slug}.` : '',
     guide?.managed_setup ? '' : guide?.managed_installation ?? '',
+    guide?.verification_capabilities?.pi ? 'For pi, use /login and /model in pi first; setup checks the configured provider without reading credential files.' : '',
     guide?.verification_helper_version ? `Verification helper published by this ${product()}: ${guide.verification_helper_version}.` : '',
     guide?.setup_command
       ? ''
@@ -927,17 +930,25 @@ function harnessDetail(view: HarnessView, harness: string): HarnessDetail | unde
 
 // Never show a daemon-supplied command. This fixed vocabulary is shared with
 // agentsetup.HarnessReport; local paths and diagnostics stay on the computer.
-function harnessFix(harness: string, reason?: HarnessReason): string {
-  if (!['claude', 'codex', 'cursor', 'grok', 'pi'].includes(harness)) return ''
-  if (reason === 'dependency_invalid' && harness === 'claude') return 'aeon-agentd repin --harness claude'
-  if (reason === 'cli_unavailable') return 'aeon-agentd setup status'
-  if (reason === 'dependency_invalid' || reason === 'pin_missing') return `aeon-agentd add-harness --harness ${harness}`
-  if (reason === 'login_required') return harness === 'claude' ? 'claude auth login' : `${harness === 'cursor' ? 'cursor-agent' : harness} login`
-  return ''
+function harnessCode(value: unknown): string | undefined {
+  return typeof value === 'string' && /^[a-z][a-z0-9_]{0,63}$/.test(value) ? value : undefined
+}
+
+function harnessFix(harness: string, reason?: HarnessReason): HarnessFix | undefined {
+  if (!['claude', 'codex', 'cursor', 'grok', 'pi'].includes(harness)) return
+  if (['dependency_invalid', 'pin_partial', 'pin_drifted', 'pin_invalid', 'pin_unsafe'].includes(reason ?? '')) {
+    return harness === 'claude'
+      ? { kind: 'repin', command: 'aeon-agentd repin --harness claude' }
+      : { kind: 'add_harness', command: `aeon-agentd add-harness --harness ${harness}` }
+  }
+  if (reason === 'pin_missing') return { kind: 'add_harness', command: `aeon-agentd add-harness --harness ${harness}` }
+  if (['harness_failed', 'cli_unavailable', 'profile_permissions'].includes(reason ?? '')) return { kind: 'restart', command: 'aeon-agentd setup' }
+  if (reason === 'login_required') return { kind: 'login', command: harness === 'claude' ? 'claude auth login' : harness === 'pi' ? 'pi' : `${harness === 'cursor' ? 'cursor-agent' : harness} login` }
 }
 
 export function describeHarnessFix(view: HarnessView, harness: string): string {
-  return view.computer_state === 'connected' ? harnessFix(harness, harnessDetail(view, harness)?.reason) : ''
+  const detail = harnessDetail(view, harness)
+  return view.computer_state === 'connected' && detail && ['blocked', 'login_required', 'checking'].includes(detail.state) ? harnessFix(harness, detail.reason)?.command ?? '' : ''
 }
 
 export function describeHarnessStatus(view: HarnessView, harness: string): string {
@@ -946,8 +957,8 @@ export function describeHarnessStatus(view: HarnessView, harness: string): strin
   const status = view.harness_statuses?.[harness] ?? detail?.state
   if (!status) return ''
   const labels: Record<HarnessStatus, string> = { ready: 'Ready', blocked: 'Needs attention', login_required: 'Sign in required', checking: 'Checking', draining: 'Draining' }
-  const reasons: Record<HarnessReason, string> = { repin_pending: 'Waiting for repin', dependency_invalid: 'Dependency needs repair', pin_missing: 'Pin missing', login_required: 'Sign in required', starting: 'Starting', cli_unavailable: 'Executable unavailable' }
-  const label = detail?.reason ? reasons[detail.reason] : labels[status]
+  const reasons: Record<HarnessReason, string> = { repin_pending: 'Waiting for repin', dependency_invalid: 'Dependency needs repair', pin_missing: 'Pin missing', login_required: 'Sign in required', starting: 'Starting', cli_unavailable: 'Executable unavailable', pin_partial: 'Pin incomplete', pin_drifted: 'Pin changed', pin_invalid: 'Pin invalid', pin_unsafe: 'Pin unsafe', harness_failed: 'Harness failed', profile_permissions: 'Profile permissions need repair' }
+  const label = !HARNESS_STATES.includes(status as typeof HARNESS_STATES[number]) ? `Needs attention · ${status}` : detail?.reason ? reasons[detail.reason] ?? `Needs attention · ${detail.reason}` : labels[status]!
   return view.connectivity === 'online' ? label : `Last reported: ${label.toLowerCase()}`
 }
 
@@ -1426,10 +1437,10 @@ function parseView(data: unknown): PairingView {
   if (record.harness_statuses != null) {
     const statuses = asRecord(record.harness_statuses, 'harness_statuses')
     view.harness_statuses = {}
-    // Ignore future harnesses/states without inventing readiness. Never carry
+    // Keep future code tokens visible without inventing readiness. Never carry
     // arbitrary diagnostics into the public computer projection.
-    for (const harness of ['claude', 'codex', 'cursor', 'grok']) {
-      const status = optionalEnum(statuses[harness], HARNESS_STATES)
+    for (const harness of ['claude', 'codex', 'cursor', 'grok', 'pi']) {
+      const status = harnessCode(statuses[harness])
       if (status) view.harness_statuses[harness] = status
     }
   }
@@ -1440,12 +1451,12 @@ function parseView(data: unknown): PairingView {
       const raw = details[harness]
       if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue
       const item = raw as Record<string, unknown>
-      const state = optionalEnum(item.state, HARNESS_STATES)
+      const state = harnessCode(item.state)
       if (!state || view.harness_statuses?.[harness] && view.harness_statuses[harness] !== state) continue
-      const allowed: Partial<Record<HarnessStatus, readonly HarnessReason[]>> = { blocked: ['repin_pending', 'dependency_invalid', 'pin_missing', 'cli_unavailable'], login_required: ['login_required'], checking: ['starting'] }
-      const reason = optionalEnum(item.reason, allowed[state] ?? [])
-      if (item.reason && !reason) continue
-      view.harness_details[harness] = { state, ...(reason ? { reason, fix: harnessFix(harness, reason) } : {}) }
+      const reason = harnessCode(item.reason)
+      if (item.reason && !reason || ['ready', 'draining'].includes(state) && reason) continue
+      const fix = ['blocked', 'login_required', 'checking'].includes(state) ? harnessFix(harness, reason) : undefined
+      view.harness_details[harness] = { state, ...(reason ? { reason } : {}), ...(fix ? { fix } : {}) }
     }
   }
   if (typeof record.setup_error === 'string' && record.setup_error) view.setup_error = record.setup_error.slice(0, 500)
@@ -1474,6 +1485,11 @@ function accounts(value: unknown): RequestedAccount[] {
       label: bounded(record.label, 'label', 128),
     }
     if (record.model_profile_id != null) account.model_profile_id = uuid(record.model_profile_id, 'model_profile_id')
+    if (record.provider != null) {
+      const provider = bounded(record.provider, 'provider', 64)
+      if (account.harness !== 'pi' || !/^[a-z][a-z0-9_-]{0,63}$/.test(provider)) invalid('provider')
+      account.provider = provider
+    }
     return account
   })
 }

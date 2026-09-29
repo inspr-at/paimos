@@ -8,6 +8,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/inspr-at/paimos/internal/piprobe"
 )
 
 func TestDrainCloseNeverStopsOwnedChild(t *testing.T) {
@@ -115,6 +117,38 @@ func TestRevokedProbeDoesNotStarveOtherAccount(t *testing.T) {
 	}
 }
 
+type detailedProbeAdapter struct {
+	fakeAdapter
+	err error
+}
+
+func (a *detailedProbeAdapter) ProbeStatus(context.Context, string) (bool, error) {
+	return false, a.err
+}
+
+func TestProbeStartupFailureIsNotLoginRequired(t *testing.T) {
+	s, api, process := testSupervisor(t)
+	adapter := &detailedProbeAdapter{fakeAdapter: fakeAdapter{proc: process}, err: errors.New("synthetic startup failure")}
+	s.adapters[Codex] = adapter
+	_ = s.PollOnce(t.Context())
+	status := s.Lifecycle("")
+	if !status.HarnessFailed || status.LoginRequired || status.Ready || api.claims != 0 {
+		t.Fatal("startup failure reported as login required or allowed work")
+	}
+	adapter.err = piprobe.ErrPrivateProfile
+	_ = s.PollOnce(t.Context())
+	status = s.Lifecycle("")
+	if !status.ProfilePermissions || !status.HarnessFailed || status.LoginRequired {
+		t.Fatal("permissions classification lost")
+	}
+	adapter.err = nil
+	_ = s.PollOnce(t.Context())
+	status = s.Lifecycle("")
+	if status.ProfilePermissions || status.HarnessFailed || !status.LoginRequired || status.Ready || api.claims != 0 {
+		t.Fatal("missing login not distinguished from startup failure")
+	}
+}
+
 type verificationFakeAdapter struct {
 	fakeAdapter
 	starts  int
@@ -205,12 +239,12 @@ func TestLifecycleReadinessIsPerHarness(t *testing.T) {
 		t.Fatalf("healthy account not ready: %+v", status)
 	}
 	s.SetHarnessHoldWithReason(Codex, "repin_pending", "waiting for active runs")
-	if status := s.Lifecycle(""); status.Ready || status.HarnessStatuses[Codex] != "blocked" || status.HarnessDetails[Codex].Reason != "repin_pending" || status.HarnessDetails[Codex].Fix != "" {
+	if status := s.Lifecycle(""); status.Ready || status.HarnessStatuses[Codex] != "blocked" || status.HarnessDetails[Codex].Reason != "repin_pending" || status.HarnessDetails[Codex].Fix.Command != "" {
 		t.Fatalf("held account is ready: %+v", status)
 	}
 	s.SetHarnessHold(Codex, "")
 	s.loginRequired["account"] = true
-	if status := s.Lifecycle(""); status.Ready || !status.LoginRequired || status.HarnessStatuses[Codex] != "login_required" || status.HarnessDetails[Codex].Fix != "codex login" {
+	if status := s.Lifecycle(""); status.Ready || !status.LoginRequired || status.HarnessStatuses[Codex] != "login_required" || status.HarnessDetails[Codex].Fix.Command != "codex login" {
 		t.Fatalf("unsigned account is ready: %+v", status)
 	}
 	s.loginRequired["account"] = false

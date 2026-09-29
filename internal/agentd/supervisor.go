@@ -23,6 +23,7 @@ import (
 	"github.com/inspr-at/paimos/internal/agentsetup"
 	"github.com/inspr-at/paimos/internal/localjournal"
 	"github.com/inspr-at/paimos/internal/ownedprocess"
+	"github.com/inspr-at/paimos/internal/piprobe"
 )
 
 type Config struct {
@@ -113,6 +114,8 @@ type harnessMetadata struct {
 
 type Supervisor struct {
 	maxTokens, maxTurns int64
+	profilePermissions  map[string]bool
+	harnessFailed       map[string]bool
 
 	dispatchMu         sync.Mutex
 	state              *agentsetup.Store
@@ -180,7 +183,16 @@ func NewSupervisor(ctx context.Context, c Config) (*Supervisor, error) {
 		adapters[a.Name()] = a
 	}
 	if len(adapters) == 0 {
-		return nil, errors.New("no adapters configured")
+		blockedOnly := len(c.Accounts) > 0
+		for _, account := range c.Accounts {
+			if !account.DependencyBlocked {
+				blockedOnly = false
+				break
+			}
+		}
+		if !blockedOnly {
+			return nil, errors.New("no adapters configured")
+		}
 	}
 	heartbeat := c.HeartbeatInterval
 	if heartbeat == 0 {
@@ -211,11 +223,13 @@ func NewSupervisor(ctx context.Context, c Config) (*Supervisor, error) {
 		}
 	}
 	for _, account := range c.Accounts {
-		if account.ID == "" || account.Key == "" || adapters[account.Harness] == nil {
+		if account.ID == "" || account.Key == "" || (adapters[account.Harness] == nil && !account.DependencyBlocked) {
 			return nil, errors.New("invalid local account enrollment")
 		}
-		if _, ok := adapters[account.Harness].(AccountProber); !ok {
-			return nil, errors.New("adapter has no account probe")
+		if adapters[account.Harness] != nil {
+			if _, ok := adapters[account.Harness].(AccountProber); !ok {
+				return nil, errors.New("adapter has no account probe")
+			}
 		}
 	}
 	state, err := agentsetup.OpenStore(c.StateRoot, true)
@@ -294,6 +308,15 @@ func NewSupervisor(ctx context.Context, c Config) (*Supervisor, error) {
 			return nil, err
 		}
 	}
+	if s.harnessFailed == nil {
+		s.harnessFailed = map[string]bool{}
+	}
+	for _, account := range s.accounts {
+		if account.DependencyBlocked {
+			s.blockedAccounts[account.ID] = true
+			s.harnessFailed[account.ID] = true
+		}
+	}
 	keepLock = true
 	keepState = true
 	return s, nil
@@ -362,6 +385,12 @@ func (s *Supervisor) PollOnce(ctx context.Context) error {
 		if fenced || fenceErr != nil {
 			continue
 		}
+		if account.DependencyBlocked {
+			if err := s.api.Probe(ctx, account.ID, s.daemonID, s.generation, false); err != nil {
+				failures = append(failures, errors.New("account probe unavailable"))
+			}
+			continue
+		}
 		// Account probes can start vendor executables. A refused verification
 		// must not reach one merely because health probing precedes dispatch.
 		probeBlocked := false
@@ -385,6 +414,10 @@ func (s *Supervisor) PollOnce(ctx context.Context) error {
 				ProbeAccount(context.Context, string) (bool, error)
 			}); ok {
 				available, dependencyErr = detailed.ProbeAccount(ctx, account.Key)
+			} else if detailed, ok := probe.(interface {
+				ProbeStatus(context.Context, string) (bool, error)
+			}); ok {
+				available, dependencyErr = detailed.ProbeStatus(ctx, account.Key)
 			} else {
 				available = probe.Probe(ctx, account.Key)
 			}
@@ -395,19 +428,38 @@ func (s *Supervisor) PollOnce(ctx context.Context) error {
 			s.dependencyErrors = map[string]string{}
 		}
 		if dependencyErr != nil {
-			s.dependencyErrors[account.Harness] = dependencyErr.Error()
+			s.dependencyErrors[account.ID] = dependencyErr.Error()
 			if s.dependencyReasons == nil {
 				s.dependencyReasons = map[string]string{}
 			}
-			s.dependencyReasons[account.Harness] = agentsetup.HarnessFailureReason(dependencyErr)
+			reason := "harness_failed"
+			var issue *agentsetup.HarnessIssue
+			if errors.As(dependencyErr, &issue) {
+				reason = issue.Reason
+			}
+			if errors.Is(dependencyErr, piprobe.ErrPrivateProfile) {
+				reason = "profile_permissions"
+			}
+			s.dependencyReasons[account.ID] = reason
 		} else if hold == "" {
-			delete(s.dependencyErrors, account.Harness)
-			delete(s.dependencyReasons, account.Harness)
+			delete(s.dependencyErrors, account.ID)
+			delete(s.dependencyReasons, account.ID)
 		}
 		s.blockedAccounts[account.ID] = err != nil || !available
 		s.probedAccounts[account.ID] = err == nil && available
 		s.loginRequired[account.ID] = !available && hold == "" && dependencyErr == nil
+		if s.harnessFailed == nil {
+			s.harnessFailed = map[string]bool{}
+		}
+		s.harnessFailed[account.ID] = dependencyErr != nil
+		if s.profilePermissions == nil {
+			s.profilePermissions = map[string]bool{}
+		}
+		s.profilePermissions[account.ID] = errors.Is(dependencyErr, piprobe.ErrPrivateProfile)
 		s.mu.Unlock()
+		if dependencyErr != nil {
+			failures = append(failures, errors.New("harness failed to start"))
+		}
 		if err != nil {
 			failures = append(failures, errors.New("account probe unavailable"))
 		}
@@ -464,17 +516,17 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 			break
 		}
 	}
-	adapter := s.adapters[profile.Harness]
-	if adapter == nil || profile.ID == "" {
-		return ErrUnsupported
-	}
 	// A harness hold must also cover direct starts and runs whose account is
 	// chosen by routing, rather than only queued runs with an account ID.
 	s.mu.Lock()
-	held := s.harnessHolds[profile.Harness] != "" || s.dependencyErrors[profile.Harness] != ""
+	held := s.harnessHeld(profile.Harness)
+	adapter := s.adapters[profile.Harness]
 	s.mu.Unlock()
 	if held {
 		return ErrDraining
+	}
+	if adapter == nil || profile.ID == "" {
+		return ErrUnsupported
 	}
 	if err := validQueuedExecutionMode(run, adapter); err != nil {
 		if errors.Is(err, ErrVerificationUnavailable) && entry == nil {

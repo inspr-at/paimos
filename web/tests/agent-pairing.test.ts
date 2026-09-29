@@ -96,7 +96,7 @@ function guidePayload(overrides: Record<string, unknown> = {}): PairingGuide {
     platforms: ['darwin/arm64', 'linux/amd64'],
     version: '260927181849.0.0',
     platform_qualification: 'candidate; consult the exact release service qualification evidence',
-    setup_command: "<verified absolute paimos-agentd path> setup --url 'https://aeon.example' --workspace <absolute approved folder> --state-root <absolute private folder outside repos> --harness <codex|claude|cursor|grok> --start-service",
+    setup_command: "<verified absolute paimos-agentd path> setup --url 'https://aeon.example' --workspace <absolute approved folder> --state-root <absolute private folder outside repos> --harness <codex|claude|cursor|grok|pi> --start-service",
     install_available: false,
     install_targets: [],
     ...overrides,
@@ -156,6 +156,16 @@ test('the guide uses the server origin and stays available when the session is f
   assert.equal(registerAgentUrl(guide), 'https://aeon.example/agents/register-agent')
   assert.equal(JSON.stringify(guide).includes('aeon.barta.cm'), false)
   assert.equal(guide.version, '260927181849.0.0')
+})
+
+test('pi provider binding survives lookup without widening verification', async () => {
+  const requested = account({ harness: 'pi', provider: 'anthropic', label: 'pi / anthropic (local profile)' })
+  globalThis.fetch = async () => jsonResponse(view({ requested_accounts: [requested], verification_capabilities: {
+    pi: { supported: false, policy: 'unavailable', reason: 'No qualified no-tools policy.' },
+  } }))
+  const found = await lookupPairing('123456789')
+  assert.equal(found.requested_accounts[0]?.provider, 'anthropic')
+  assert.equal(unsupportedVerification(found, [requested.account_key])[0]?.harness, 'pi')
 })
 
 test('lookup sends only the code and does not approve', async () => {

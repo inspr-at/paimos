@@ -190,7 +190,7 @@ func TestClaudeDependencyBreakAndRepinHoldDoNotStarveCodex(t *testing.T) {
 			if failure == "cli" {
 				wantReason, wantFix = "cli_unavailable", "aeon-agentd setup status"
 			}
-			if detail.State != "blocked" || detail.Reason != wantReason || detail.Fix != wantFix {
+			if detail.State != "blocked" || detail.Reason != wantReason || detail.Fix.Command != wantFix {
 				t.Fatalf("wrong reason/fix: %+v", detail)
 			}
 			if (failure == "node" || failure == "sdk") && !strings.Contains(issue, "repin") {
@@ -217,7 +217,7 @@ func TestClaudeDependencyBreakAndRepinHoldDoNotStarveCodex(t *testing.T) {
 			if err := s.PollOnce(t.Context()); err != nil {
 				t.Fatal(err)
 			}
-			if status := s.Lifecycle(""); !status.Ready || status.LoginRequired || len(status.HarnessErrors) != 0 || status.HarnessDetails[Claude].Reason != "" || status.HarnessDetails[Claude].Fix != "" || status.HarnessStatuses[Claude] != "ready" || status.HarnessStatuses[Codex] != "ready" {
+			if status := s.Lifecycle(""); !status.Ready || status.LoginRequired || len(status.HarnessErrors) != 0 || status.HarnessDetails[Claude].Reason != "" || status.HarnessDetails[Claude].Fix.Command != "" || status.HarnessStatuses[Claude] != "ready" || status.HarnessStatuses[Codex] != "ready" {
 				t.Fatalf("repaired Claude did not recover: %+v", status)
 			}
 		})

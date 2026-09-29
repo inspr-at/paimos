@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -18,6 +19,8 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/grokprobe"
+	"github.com/inspr-at/paimos/internal/harnesslaunch"
+	"github.com/inspr-at/paimos/internal/piprobe"
 )
 
 type Command struct {
@@ -110,25 +113,39 @@ func SupportedPlatform(goos, arch string) (Platform, error) {
 func CurrentPlatform() (Platform, error) { return SupportedPlatform(runtime.GOOS, runtime.GOARCH) }
 
 type Candidate struct {
-	Key       string            `json:"account_key"`
-	Harness   string            `json:"harness"`
-	Label     string            `json:"label"`
-	ProfileID string            `json:"model_profile_id,omitempty"`
-	Path      string            `json:"-"`
-	Home      string            `json:"-"`
-	Version   string            `json:"-"`
-	Identity  string            `json:"-"`
-	Login     string            `json:"-"`
-	Managed   bool              `json:"-"`
-	Grok      grokprobe.Binding `json:"-"`
+	Key       string             `json:"account_key"`
+	Harness   string             `json:"harness"`
+	Label     string             `json:"label"`
+	ProfileID string             `json:"model_profile_id,omitempty"`
+	Provider  string             `json:"provider,omitempty"`
+	Path      string             `json:"-"`
+	Home      string             `json:"-"`
+	Version   string             `json:"-"`
+	Identity  string             `json:"-"`
+	Login     string             `json:"-"`
+	Managed   bool               `json:"-"`
+	Grok      grokprobe.Binding  `json:"-"`
+	PiNode    piprobe.Node       `json:"-"`
+	Node      harnesslaunch.Node `json:"-"`
+}
+
+// Interpreter retains the legacy pi field while sharing validation with other launchers.
+func (c Candidate) Interpreter() harnesslaunch.Node {
+	if c.Harness == "pi" {
+		return c.PiNode
+	}
+	return c.Node
 }
 
 type Discovery struct {
 	Executor      Executor
 	LookPath      func(string) (string, error)
 	Home          string
+	NodePath      string
+	Workspace     string
 	CodexIdentity func(context.Context, string, string) (string, error)
 	GrokProbe     func(context.Context, grokprobe.Binding) (grokprobe.Identity, error)
+	PiProvider    func(context.Context, string, string, string, string) (string, error)
 }
 
 var safeLabel = regexp.MustCompile(`^[^\x00-\x1f\x7f]{1,128}$`)
@@ -164,6 +181,8 @@ func (d Discovery) Detect(ctx context.Context, harness, accountContext string) (
 		authArgs = []string{"status", "--format", "json"}
 	case "grok":
 		return d.detectGrok(ctx, accountContext)
+	case "pi":
+		c.Home = filepath.Join(d.Home, ".pi", "agent")
 	default:
 		return c, errors.New("unsupported guided harness")
 	}
@@ -187,17 +206,52 @@ func (d Discovery) Detect(ctx context.Context, harness, accountContext string) (
 	}
 	c.Path = physical
 	c.Managed = strings.HasPrefix(physical, "/nix/store/") || strings.Contains(path, "/.nix-profile/")
-	raw, err := d.Executor.Run(ctx, Command{Path: physical, Args: []string{"--version"}})
+	c.Node, err = d.ResolveNode(ctx, physical)
 	if err != nil {
-		return c, errors.New("harness version unavailable")
+		return c, err
+	}
+	childEnv := harnesslaunch.Environment(os.Environ(), c.Node.Path)
+	versionCommand := Command{Path: physical, Args: []string{"--version"}, Env: childEnv}
+	if harness == "pi" {
+		c.PiNode, c.Node = c.Node, harnesslaunch.Node{}
+		versionCommand.Env = piprobe.Environment(c.Home, c.PiNode.Path)
+	}
+	raw, err := d.Executor.Run(ctx, versionCommand)
+	if err != nil {
+		return c, fmt.Errorf("%w; the launcher must also work with the service PATH", harnesslaunch.ErrStart)
 	}
 	match := safeVersion.FindSubmatch(raw)
 	if len(match) != 2 {
-		return c, errors.New("harness version not recognized")
+		return c, fmt.Errorf("%w; harness version not recognized", harnesslaunch.ErrStart)
 	}
 	c.Version = string(match[1])
-	raw, err = d.Executor.Run(ctx, Command{Path: physical, Args: authArgs, StatusStderr: harness == "codex"})
+	if harness == "pi" {
+		probe := d.PiProvider
+		if probe == nil {
+			probe = piprobe.Provider
+		}
+		provider, err := probe(ctx, c.Path, c.Home, accountContext, c.PiNode.Path)
+		if errors.Is(err, piprobe.ErrStart) {
+			return c, piprobe.ErrStart
+		}
+		if errors.Is(err, piprobe.ErrPrivateProfile) {
+			return c, piprobe.ErrPrivateProfile
+		}
+		if err != nil || !piprobe.ValidProvider(provider) || accountContext != "" && provider != accountContext {
+			return c, errors.New("pi provider configuration unavailable; use pi /login and /model normally, then resume setup")
+		}
+		// The public RPC identifies a configured provider, not a person. Keep
+		// the profile path private and do not invent an email or subscription.
+		c.Identity, c.Label, c.Login = provider, "pi / "+provider+" (local profile)", "signed_in"
+		c.Provider = provider
+		return c, nil
+	}
+	raw, err = d.Executor.Run(ctx, Command{Path: physical, Args: authArgs, Env: childEnv, StatusStderr: harness == "codex"})
 	if err != nil {
+		var exit *CommandError
+		if errors.As(err, &exit) && (exit.ExitCode == 126 || exit.ExitCode == 127) {
+			return c, harnesslaunch.ErrStart
+		}
 		return c, errors.New("vendor sign-in unavailable; use the vendor's normal login, then resume setup")
 	}
 	switch harness {
@@ -207,7 +261,9 @@ func (d Discovery) Detect(ctx context.Context, harness, accountContext string) (
 		}
 		inspect := d.CodexIdentity
 		if inspect == nil {
-			inspect = CodexIdentity
+			inspect = func(ctx context.Context, path, home string) (string, error) {
+				return codexIdentity(ctx, path, home, c.Node.Path)
+			}
 		}
 		identity, err := inspect(ctx, physical, c.Home)
 		if err != nil {
@@ -249,6 +305,57 @@ func (d Discovery) Detect(ctx context.Context, harness, accountContext string) (
 	}
 	c.Login = "signed_in"
 	return c, nil
+}
+
+// ResolveNode inspects the launcher and pins Node without executing package scripts.
+func (d Discovery) ResolveNode(ctx context.Context, path string) (harnesslaunch.Node, error) {
+	if d.LookPath == nil {
+		d.LookPath = exec.LookPath
+	}
+	if d.Executor == nil {
+		d.Executor = OSExecutor{}
+	}
+	needed, err := harnesslaunch.NeedsNode(path)
+	if err != nil || !needed && d.NodePath == "" {
+		return harnesslaunch.Node{}, err
+	}
+	action := fmt.Errorf("%w; pass --node-path to an installed Node executable outside the workspace", harnesslaunch.ErrStart)
+	node := d.NodePath
+	if node == "" {
+		node, err = d.LookPath("node")
+		if err != nil {
+			return harnesslaunch.Node{}, action
+		}
+	}
+	physical, err := pinnedRegular(node, d.Workspace, true)
+	if err != nil || filepath.Base(physical) != "node" {
+		return harnesslaunch.Node{}, action
+	}
+	raw, err := d.Executor.Run(ctx, Command{Path: physical, Args: []string{"--version"}, Env: harnesslaunch.Environment(nil, physical)})
+	match := safeVersion.FindSubmatch(raw)
+	if err != nil || len(match) != 2 {
+		return harnesslaunch.Node{}, action
+	}
+	return harnesslaunch.Node{Path: physical, Version: string(match[1])}, nil
+}
+
+func validateNode(path, workspace string, node harnesslaunch.Node) error {
+	needed, err := harnesslaunch.NeedsNode(path)
+	if err != nil {
+		return err
+	}
+	if node.Path == "" && node.Version == "" && !needed {
+		return nil
+	}
+	physical, err := pinnedRegular(node.Path, workspace, true)
+	if err != nil || physical != node.Path || filepath.Base(physical) != "node" || node.Version == "" {
+		return harnesslaunch.ErrStart
+	}
+	match := safeVersion.FindStringSubmatch(node.Version)
+	if len(match) != 2 || match[1] != node.Version {
+		return harnesslaunch.ErrStart
+	}
+	return nil
 }
 
 func (d Discovery) detectGrok(ctx context.Context, accountContext string) (Candidate, error) {

@@ -272,6 +272,12 @@ type AccountMetadata struct {
 type EnrolledAccount struct {
 	ID, Key, Harness string
 	Metadata         *AccountMetadata
+	// DependencyBlocked means this enrollment's interpreter pin is missing,
+	// partial, drifted, invalid, or unsafe. It stays enrolled and unlaunchable.
+	// PinReason and PinFix are the status code and the repair command.
+	DependencyBlocked bool
+	PinReason         string
+	PinFix            string
 }
 
 type ControlRequest struct {

@@ -15,6 +15,8 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/grokprobe"
+	"github.com/inspr-at/paimos/internal/harnesslaunch"
+	"github.com/inspr-at/paimos/internal/piprobe"
 )
 
 const snapshotName = "pairing.json"
@@ -32,31 +34,39 @@ func (c LocalCandidate) MarshalJSON() ([]byte, error) {
 	type plain LocalCandidate
 	return json.Marshal(struct {
 		plain
-		Grok grokprobe.Binding `json:"grok,omitempty"`
-	}{plain(c), c.Candidate.Grok})
+		Grok   grokprobe.Binding  `json:"grok,omitempty"`
+		PiNode piprobe.Node       `json:"pi_node,omitempty"`
+		Node   harnesslaunch.Node `json:"node,omitempty"`
+	}{plain(c), c.Candidate.Grok, c.Candidate.PiNode, c.Candidate.Node})
 }
 func (c *LocalCandidate) UnmarshalJSON(raw []byte) error {
 	type plain LocalCandidate
 	var v struct {
 		plain
-		Grok grokprobe.Binding `json:"grok"`
+		Grok   grokprobe.Binding  `json:"grok"`
+		PiNode piprobe.Node       `json:"pi_node"`
+		Node   harnesslaunch.Node `json:"node"`
 	}
 	if err := json.Unmarshal(raw, &v); err != nil {
 		return err
 	}
 	*c = LocalCandidate(v.plain)
 	c.Candidate.Grok = v.Grok
+	c.Candidate.PiNode = v.PiNode
+	c.Candidate.Node = v.Node
 	return nil
 }
 
 type RuntimeAccount struct {
-	Harness   string            `json:"harness"`
-	Key       string            `json:"key"`
-	AccountID string            `json:"account_id"`
-	Home      string            `json:"home,omitempty"`
-	Identity  string            `json:"identity,omitempty"`
-	Path      string            `json:"path"`
-	Grok      grokprobe.Binding `json:"grok,omitempty"`
+	Harness   string             `json:"harness"`
+	Key       string             `json:"key"`
+	AccountID string             `json:"account_id"`
+	Home      string             `json:"home,omitempty"`
+	Identity  string             `json:"identity,omitempty"`
+	Path      string             `json:"path"`
+	Grok      grokprobe.Binding  `json:"grok,omitempty"`
+	PiNode    piprobe.Node       `json:"pi_node,omitempty"`
+	Node      harnesslaunch.Node `json:"node,omitempty"`
 }
 type RuntimeConfig struct {
 	Schema        string           `json:"schema"`
@@ -103,6 +113,7 @@ type snapshot struct {
 // Only Progress is printable. The snapshot and HTTP request bodies contain
 // private capabilities and must never be returned as status or diagnostics.
 type Progress struct {
+	BlockedAccounts   []BlockedAccount         `json:"blocked_accounts,omitempty"`
 	HarnessDetails    map[string]HarnessDetail `json:"harness_details,omitempty"`
 	HarnessStatuses   map[string]string        `json:"harness_statuses,omitempty"`
 	AccountingState   string                   `json:"accounting_state,omitempty"`
@@ -119,6 +130,8 @@ type Progress struct {
 	RetryAfterSeconds int                      `json:"retry_after_seconds,omitempty"`
 }
 type LocalStatus struct {
+	ProfilePermissions                     bool
+	HarnessFailed                          bool
 	HarnessDetails                         map[string]HarnessDetail
 	HarnessStatuses                        map[string]string
 	HarnessErrors                          map[string]string
@@ -128,6 +141,7 @@ type LocalStatus struct {
 	DaemonID, State                        string
 	Active, Unconfirmed, SettlementPending []string
 	VerificationResults                    map[string]string
+	BlockedAccounts                        []BlockedAccount
 }
 
 // SavedOptions exposes only noncredential choices to resume the local command.
@@ -240,8 +254,8 @@ func validateOptions(o Options) error {
 	if info, err := os.Stat(p); err != nil || !info.IsDir() {
 		return ErrUnsafePath
 	}
-	if !safeLabel.MatchString(o.ComputerName) || len(o.Candidates) < 1 || len(o.Candidates) > 4 {
-		return errors.New("select one to four signed-in harness accounts and a computer name")
+	if !safeLabel.MatchString(o.ComputerName) || len(o.Candidates) < 1 || len(o.Candidates) > 5 {
+		return errors.New("select one to five signed-in harness accounts and a computer name")
 	}
 	seen := map[string]bool{}
 	for _, c := range o.Candidates {
@@ -253,6 +267,11 @@ func validateOptions(o Options) error {
 		// their installation. Service ownership is enforced separately below.
 		if c.Harness == "claude" && (!filepath.IsAbs(o.NodePath) || !filepath.IsAbs(o.ClaudeSDKPath)) {
 			return errors.New("Claude requires pinned Node and Agent SDK paths")
+		}
+		if c.Harness != "grok" {
+			if err := validateNode(c.Path, o.Workspace, c.Interpreter()); err != nil {
+				return err
+			}
 		}
 		if c.Harness == "grok" {
 			if o.Platform.OS != "darwin" || o.Platform.Arch != "arm64" {
@@ -459,6 +478,11 @@ func (e *Engine) Step(ctx context.Context) (Progress, error) {
 	if err = validateView(s, v, true); err != nil {
 		return e.progress(s), err
 	}
+	// The server fills an omitted profile at device creation. Pin its first
+	// digest-bound projection so later polls cannot substitute a different one.
+	for i := range s.Request.Accounts {
+		s.Request.Accounts[i].ProfileID = v.Requested[i].ProfileID
+	}
 	// A pending/denied Add harness request has no new computer projection.
 	// Preserve the healthy shared computer while this separate request waits.
 	if s.Request.ExistingComputerID == "" || v.ComputerID != "" {
@@ -605,7 +629,7 @@ func (e *Engine) provision(ctx context.Context, s *snapshot) (result Progress, r
 						return e.progress(s), err
 					}
 				}
-				config.Accounts = append(config.Accounts, RuntimeAccount{a.Harness, a.AccountKey, a.AccountID, c.Home, c.Identity, c.Path, c.Candidate.Grok})
+				config.Accounts = append(config.Accounts, RuntimeAccount{a.Harness, a.AccountKey, a.AccountID, c.Home, c.Identity, c.Path, c.Candidate.Grok, c.Candidate.PiNode, c.Candidate.Node})
 				found = true
 				break
 			}
@@ -658,6 +682,9 @@ func (e *Engine) provision(ctx context.Context, s *snapshot) (result Progress, r
 		return p, nil
 	}
 	local, err := e.Local.Status(ctx, "")
+	if err == nil && local.DaemonID == s.View.DaemonID && len(local.BlockedAccounts) > 0 {
+		p.BlockedAccounts = append([]BlockedAccount(nil), local.BlockedAccounts...)
+	}
 	if err != nil || local.DaemonID != s.View.DaemonID || !local.Ready {
 		p.Stage = "provisioning"
 		p.Action = "Daemon connectivity is unconfirmed; resume setup after the approved service starts."
@@ -684,25 +711,38 @@ func ReadRuntimeConfig(root string) (RuntimeConfig, error) {
 	return c, nil
 }
 
-// ValidateRuntimeDependencies gates execution, never access to recovery metadata
-// or the credential needed to revoke this computer. Removed harnesses do not
-// block the remaining accounts merely because their old dependency pins remain.
-func ValidateRuntimeDependencies(c RuntimeConfig) error {
-	claude := false
+// UnpinnedEnrollment reports an older npm Codex, Cursor or pi account whose
+// env-node launcher has no interpreter pin. A native wrapper is not unpinned.
+func UnpinnedEnrollment(a RuntimeAccount) bool {
+	switch a.Harness {
+	case "codex", "cursor", "pi":
+	default:
+		return false
+	}
+	node := a.Node
+	if a.Harness == "pi" {
+		node = a.PiNode
+	}
+	if node != (harnesslaunch.Node{}) {
+		return false
+	}
+	needed, err := harnesslaunch.NeedsNode(a.Path)
+	return err == nil && needed
+}
+
+// LaunchableRuntime removes unpinned enrollments so a whole-config check can
+// still see the other accounts. The paired daemon does not use it to ignore
+// partial, drifted, invalid, or unsafe pins; AccountPinBlocks isolates every
+// pin problem to that account.
+func LaunchableRuntime(c RuntimeConfig) RuntimeConfig {
+	kept := make([]RuntimeAccount, 0, len(c.Accounts))
 	for _, a := range c.Accounts {
-		claude = claude || a.Harness == "claude"
-		if a.Harness == "claude" {
-			if _, err := ResolveClaudeExecutable(a.Path, c.Workspace); err != nil {
-				return err
-			}
+		if !UnpinnedEnrollment(a) {
+			kept = append(kept, a)
 		}
 	}
-	if claude {
-		if _, err := ResolveClaudeRuntime(ClaudeDependencies{NodePath: c.NodePath, SDKPath: c.ClaudeSDKPath}, c.Workspace); err != nil {
-			return errors.New("Claude dependencies changed: run aeon-agentd repin --harness claude; runtime dependencies are unavailable or unsafe")
-		}
-	}
-	return nil
+	c.Accounts = kept
+	return c
 }
 func ReadRuntime(root string) (RuntimeConfig, secret, error) {
 	c, err := ReadRuntimeConfig(root)
@@ -735,6 +775,15 @@ func (e *Engine) DispatchPermitted() (bool, error) {
 }
 
 func sameChoices(a, b []Candidate) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	b = append([]Candidate(nil), b...)
+	for i := range b {
+		if b[i].ProfileID == "" && uuidPattern.MatchString(a[i].ProfileID) {
+			b[i].ProfileID = a[i].ProfileID
+		}
+	}
 	left, _ := json.Marshal(a)
 	right, _ := json.Marshal(b)
 	return string(left) == string(right)

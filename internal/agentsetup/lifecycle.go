@@ -327,6 +327,8 @@ func (e *Engine) reconcile(ctx context.Context, s *snapshot) (Progress, error) {
 		local, err := e.Local.Status(ctx, "")
 		if err == nil && local.DaemonID == v.DaemonID {
 			p.HarnessDetails, p.HarnessStatuses = local.HarnessDetails, local.HarnessStatuses
+			p.BlockedAccounts = append([]BlockedAccount(nil), local.BlockedAccounts...)
+			// A Claude hold keeps its own stage: repin is a Claude-only flow.
 			if issue := local.HarnessErrors["claude"]; issue != "" {
 				if local.HarnessDetails["claude"].Reason == "repin_pending" {
 					p.Stage = "repin_pending"
@@ -340,6 +342,16 @@ func (e *Engine) reconcile(ctx context.Context, s *snapshot) (Progress, error) {
 				return p, nil
 			}
 			observed := observedProgress(v, local)
+			if local.ProfilePermissions && !local.Ready {
+				p.Stage = "blocked"
+				p.Action = "The pi local profile must be a private directory. Review its permissions, then resume setup."
+				return p, nil
+			}
+			if local.HarnessFailed && !local.Ready {
+				p.Stage = "blocked"
+				p.Action = "An approved harness failed to start. Restore its pinned installation and interpreter, then resume setup."
+				return p, nil
+			}
 			if observed.State == "login_required" {
 				p.Stage = "login_required"
 				p.Action = "An approved vendor account is no longer signed in with its approved identity. Use normal vendor login, then resume setup."
@@ -434,7 +446,7 @@ func (e *Engine) AddHarness(ctx context.Context, candidates []Candidate) (Progre
 	if s.DisconnectAll || s.View.ComputerState != "connected" {
 		return e.progress(s), errors.New("Add harness requires a connected computer")
 	}
-	if len(candidates) == 0 || len(candidates) > 4 {
+	if len(candidates) == 0 || len(candidates) > 5 {
 		return e.progress(s), errors.New("select a signed-in harness account")
 	}
 	selected := map[string]bool{}
@@ -443,6 +455,11 @@ func (e *Engine) AddHarness(ctx context.Context, candidates []Candidate) (Progre
 			return e.progress(s), errors.New("invalid Add harness account choice")
 		}
 		selected[c.Harness] = true
+		if c.Harness != "grok" {
+			if err := validateNode(c.Path, s.Request.Workspace, c.Interpreter()); err != nil {
+				return Progress{Stage: "blocked", Action: err.Error()}, err
+			}
+		}
 		for _, a := range s.View.Enrollments {
 			if a.State == "connected" && a.Harness == c.Harness && a.Label == c.Label {
 				return e.progress(s), errors.New("this harness account is already connected; no new request was created")
@@ -492,14 +509,19 @@ func (e *Engine) AddHarness(ctx context.Context, candidates []Candidate) (Progre
 
 func observedProgress(v View, local LocalStatus) *SetupProgress {
 	p := &SetupProgress{State: "provisioning", HarnessStatuses: local.HarnessStatuses, HarnessDetails: local.HarnessDetails}
-	if local.LoginRequired && !local.Ready {
+	// A runtime hold or pin block is not an installation failure. Setup stays
+	// complete even when every harness is held; per-harness details carry the
+	// reason and fix. Harnesses that are only starting prove nothing yet.
+	held := local.HarnessFailed || local.ProfilePermissions || len(local.BlockedAccounts) > 0 || len(local.HarnessErrors) > 0
+	for _, detail := range local.HarnessDetails {
+		held = held || detail.State == "blocked"
+	}
+	if local.LoginRequired && !local.Ready && !held {
 		p.State = "login_required"
 		p.ErrorCode = "login_required"
 		return p
 	}
-	// A runtime hold is not an installation failure. Setup remains complete
-	// even when every harness is held; per-harness readiness stays explicit.
-	if local.Ready || len(local.HarnessErrors) > 0 {
+	if local.Ready || held {
 		p.State = "connected"
 	}
 	for _, a := range v.Enrollments {

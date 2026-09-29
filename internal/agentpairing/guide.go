@@ -26,7 +26,7 @@ func GuidePage(next http.Handler, web fs.FS, origin string, nixGuide ...*config.
 			guide += `<section><h2>Nix / Home Manager</h2><p>` + html.EscapeString(managed.PlatformNote) + `</p><p>` + html.EscapeString(managed.PrerequisiteNote) + `</p><p>Run this in the intended project folder, not your home folder:</p><pre><code>` + html.EscapeString(managed.Command) + `</code></pre><p>Confirm the folder and signed-in harnesses, then enter the 9-digit code here and approve as a person; setup waits for that approval without changing managed binaries or services.</p><p>Service option: <a href="` + html.EscapeString(managed.ModuleURL) + `"><code>` + html.EscapeString(managed.ServiceOption) + `</code></a>. ` + html.EscapeString(managed.ServiceNote) + `</p></section>`
 		}
 		guide += `<section><h2>Verification availability for this helper release</h2><p>Verification remains selected by default. If a selected harness is unavailable, explicitly choose Connect only or leave that harness out; the server never silently changes your choice. Unsupported verification does not mean the computer installation failed.</p><ul>`
-		for _, h := range []string{"claude", "codex", "cursor", "grok"} {
+		for _, h := range []string{"claude", "codex", "cursor", "grok", "pi"} {
 			c := verificationCapabilities("", "")[h]
 			detail := c.Reason
 			if c.Supported {

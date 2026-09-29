@@ -31,6 +31,7 @@ func (s *repinSupervisor) SetHarnessHoldWithReason(harness, code, reason string)
 	s.holds[harness] = reason
 	s.reasons[harness] = code
 }
+func (*repinSupervisor) PinHealthMatches([]agentd.EnrolledAccount) bool                   { return true }
 func (*repinSupervisor) RefreshAccounts([]agentd.EnrolledAccount, []agentd.Adapter) error { return nil }
 func (s *repinSupervisor) RestartClaude(context.Context, *agentd.ClaudeAdapter) error {
 	s.restarts++
@@ -191,7 +192,7 @@ func TestRepinDoesNotPermitIdentityChanges(t *testing.T) {
 }
 
 func TestLocalStatusPreservesHarnessDetails(t *testing.T) {
-	detail := agentsetup.HarnessDetail{State: "blocked", Reason: "pin_missing", Fix: "aeon-agentd add-harness --harness codex"}
+	detail := agentsetup.HarnessDetail{State: "blocked", Reason: "pin_missing", Fix: agentsetup.RecoveryFix("codex", "pin_missing")}
 	local := localStatus(agentd.LifecycleStatus{Ready: true, HarnessDetails: map[string]agentsetup.HarnessDetail{"codex": detail}})
 	if !local.Ready || local.HarnessDetails["codex"] != detail {
 		t.Fatal("CLI status discarded harness reason/fix")

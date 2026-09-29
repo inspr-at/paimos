@@ -27,7 +27,7 @@ func (m *Module) approve(w http.ResponseWriter, r *http.Request, p tenant.Princi
 		WriteError(w, err)
 		return
 	}
-	if !hashRE.MatchString(in.Digest) || (in.Verification != "one_per_harness" && in.Verification != "connect_only") || len(in.Selected) < 1 || len(in.Selected) > 4 {
+	if !hashRE.MatchString(in.Digest) || (in.Verification != "one_per_harness" && in.Verification != "connect_only") || len(in.Selected) < 1 || len(in.Selected) > 5 {
 		WriteError(w, fail(400, "invalid_request", "review digest, selected accounts and verification choice required"))
 		return
 	}
@@ -92,7 +92,7 @@ func (m *Module) approve(w http.ResponseWriter, r *http.Request, p tenant.Princi
 		// or local account label is never a request to adopt another identity.
 		for _, a := range chosen {
 			var ok bool
-			if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM model_profiles WHERE id=$1 AND harness=$2 AND enabled)`, a.ProfileID, a.Harness).Scan(&ok); err != nil {
+			if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM model_profiles WHERE id=$1 AND harness=$2 AND enabled AND ($3='' OR (starts_with(model,$3||'/') AND length(model)>length($3)+1)))`, a.ProfileID, a.Harness, a.Provider).Scan(&ok); err != nil {
 				return err
 			}
 			if !ok {

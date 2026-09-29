@@ -21,6 +21,7 @@ import (
 	"github.com/inspr-at/paimos/internal/agentd"
 	"github.com/inspr-at/paimos/internal/agentdwire"
 	"github.com/inspr-at/paimos/internal/agentsetup"
+	"github.com/inspr-at/paimos/internal/piprobe"
 )
 
 type stringsFlag []string
@@ -37,7 +38,7 @@ func (l localPairing) client() (agentdwire.Client, error) {
 	return agentdwire.OpenClient(filepath.Join(l.root, "daemon"))
 }
 func localStatus(s agentd.LifecycleStatus) agentsetup.LocalStatus {
-	return agentsetup.LocalStatus{HarnessDetails: s.HarnessDetails, HarnessStatuses: s.HarnessStatuses, HarnessErrors: s.HarnessErrors, LoginRequired: s.LoginRequired, VerificationUnavailable: s.VerificationUnavailable, Ready: s.Ready, DaemonID: s.DaemonID, State: s.State, Active: s.ActiveRunIDs, Unconfirmed: s.UnconfirmedRunIDs, SettlementPending: s.SettlementPendingRunIDs, VerificationResults: s.VerificationResults}
+	return agentsetup.LocalStatus{HarnessDetails: s.HarnessDetails, HarnessStatuses: s.HarnessStatuses, HarnessErrors: s.HarnessErrors, ProfilePermissions: s.ProfilePermissions, HarnessFailed: s.HarnessFailed, LoginRequired: s.LoginRequired, VerificationUnavailable: s.VerificationUnavailable, Ready: s.Ready, DaemonID: s.DaemonID, State: s.State, Active: s.ActiveRunIDs, Unconfirmed: s.UnconfirmedRunIDs, SettlementPending: s.SettlementPendingRunIDs, VerificationResults: s.VerificationResults, BlockedAccounts: append([]agentsetup.BlockedAccount(nil), s.BlockedAccounts...)}
 }
 func (l localPairing) Status(ctx context.Context, account string) (agentsetup.LocalStatus, error) {
 	if l.supervisor != nil {
@@ -104,9 +105,9 @@ func setupCommandInput(command string, args []string, in io.Reader, out io.Write
 	f.StringVar(&workspace, "workspace", "", "approved physical working folder")
 	f.StringVar(&computer, "computer-name", "", "computer display name")
 	f.Var(&harnesses, "harness", "selected harness; repeat for another harness")
-	f.StringVar(&contextLabel, "account-context", "", "Codex signed-in account email")
+	f.StringVar(&contextLabel, "account-context", "", "Expected account identity (pi: configured provider ID)")
 	f.StringVar(&account, "account-id", "", "remove only this enrolled account")
-	f.StringVar(&nodePath, "node-path", "", "pinned Node executable for Claude")
+	f.StringVar(&nodePath, "node-path", "", "pinned Node executable for npm harness launchers")
 	f.StringVar(&sdkPath, "claude-sdk-path", "", "pinned Claude Agent SDK module")
 	f.BoolVar(&jsonOutput, "json", false, "safe progress as JSON")
 	f.BoolVar(&startService, "start-service", false, "request user service installation after authenticated Connect approval")
@@ -235,7 +236,7 @@ func setupCommandInput(command string, args []string, in io.Reader, out io.Write
 	}
 	var candidates []agentsetup.Candidate
 	if savedErr != nil || command == "add-harness" {
-		d := agentsetup.Discovery{Home: home}
+		d := agentsetup.Discovery{Home: home, NodePath: nodePath, Workspace: workspace}
 		if len(harnesses) == 0 && (command == "setup" || command == "add-harness") {
 			if jsonOutput {
 				return errors.New("--harness is required with --json")
@@ -248,7 +249,11 @@ func setupCommandInput(command string, args []string, in io.Reader, out io.Write
 		for _, h := range harnesses {
 			c, e := d.Detect(ctx, h, contextLabel)
 			if e != nil {
-				_ = printSetupProgress(out, jsonOutput, agentsetup.Progress{Schema: "aeon.agent-setup.v1", Stage: "login_required", Action: e.Error()})
+				stage := "login_required"
+				if errors.Is(e, piprobe.ErrStart) || errors.Is(e, piprobe.ErrPrivateProfile) {
+					stage = "blocked"
+				}
+				_ = printSetupProgress(out, jsonOutput, agentsetup.Progress{Schema: "aeon.agent-setup.v1", Stage: stage, Action: e.Error()})
 				return e
 			}
 			candidates = append(candidates, c)
@@ -291,6 +296,11 @@ func setupCommandInput(command string, args []string, in io.Reader, out io.Write
 		}
 		defer store.Close()
 		engine.Store = store
+	}
+	// The shared Node/SDK options belong to Claude. Other launchers retain a private
+	// per-account interpreter binding even when --node-path was supplied.
+	if nodePath, err = claudeNodeOption(nodePath, candidates, saved.Candidates); err != nil {
+		return err
 	}
 	engine.ClaudeDependencies = agentsetup.ClaudeDependencies{NodePath: nodePath, SDKPath: sdkPath}
 	if computer == "" {
@@ -346,6 +356,39 @@ func setupCommandInput(command string, args []string, in io.Reader, out io.Write
 	return nil
 }
 
+func claudeNodeOption(requested string, discovered, saved []agentsetup.Candidate) (string, error) {
+	choices := discovered
+	if len(choices) == 0 {
+		choices = saved
+	}
+	for _, c := range choices {
+		if c.Harness == "claude" {
+			return requested, nil
+		}
+	}
+	if len(choices) == 0 {
+		return requested, nil
+	}
+	if len(discovered) == 0 && requested != "" {
+		physical, err := filepath.EvalSymlinks(requested)
+		matched := false
+		for _, c := range choices {
+			node := c.Interpreter()
+			if node.Path == "" {
+				continue
+			}
+			if err != nil || physical != node.Path {
+				return "", errors.New("--node-path conflicts with saved interpreter; no enrollment was changed")
+			}
+			matched = true
+		}
+		if !matched {
+			return "", errors.New("--node-path conflicts with saved interpreter; no enrollment was changed")
+		}
+	}
+	return "", nil
+}
+
 func printSetupProgress(out io.Writer, jsonOutput bool, p agentsetup.Progress) error {
 	if p.Schema == "" {
 		p.Schema = "aeon.agent-setup.v1"
@@ -360,5 +403,13 @@ func printSetupProgress(out io.Writer, jsonOutput bool, p agentsetup.Progress) e
 		}
 	}
 	_, err := fmt.Fprintf(out, "%s: %s\n", p.Stage, p.Action)
-	return err
+	if err != nil {
+		return err
+	}
+	for _, blocked := range p.BlockedAccounts {
+		if _, err = fmt.Fprintf(out, "blocked account %s harness %s reason %s fix %s\n", blocked.AccountID, blocked.Harness, blocked.Reason, blocked.Fix.Command); err != nil {
+			return err
+		}
+	}
+	return nil
 }

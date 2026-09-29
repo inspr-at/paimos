@@ -106,7 +106,7 @@ func newFixture(t *testing.T) *fixture {
 	decodeResult(t, login, &me)
 	f.person = me.Principal.ID
 	err = db.InTenant(dbtest.Seed(t.Context()), d.App, id, func(tx pgx.Tx) error {
-		for _, h := range []string{"codex", "cursor", "claude", "grok"} {
+		for _, h := range []string{"codex", "cursor", "claude", "grok", "pi"} {
 			var profile string
 			err := tx.QueryRow(t.Context(), `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier) VALUES($1,$2,'1',$2,'openai','test-model','low','fast') RETURNING id::text`, id, h).Scan(&profile)
 			if err != nil {
@@ -1206,14 +1206,14 @@ func TestHarnessDetailsAreCanonicalAndRevokedReportsDoNotBlockCleanup(t *testing
 	f.approve(p, "connect_only")
 	v := f.redeem(p)
 	progress := agentpairing.SetupProgress{State: "connected", HarnessStatuses: map[string]string{"claude": "blocked", "codex": "ready"}, HarnessDetails: map[string]agentsetup.HarnessDetail{
-		"claude": {State: "blocked", Reason: "dependency_invalid", Fix: "arbitrary local diagnostic"},
+		"claude": {State: "blocked", Reason: "dependency_invalid", Fix: agentsetup.HarnessFix{Kind: "restart", Command: "arbitrary local diagnostic"}},
 		"codex":  {State: "ready"},
 		"pi":     {State: "blocked", Reason: "pin_missing"},
 	}}
 	proof := map[string]any{"tenant_id": f.tenantID, "request_id": p.id, "lifecycle_secret": p.lifecycle, "progress": progress}
 	var report agentpairing.View
 	decodeResult(t, f.call("POST", "/api/agent-pairing/reconcile", proof, false, "", 200), &report)
-	if len(report.HarnessDetails) != 2 || report.HarnessDetails["claude"].Fix != "aeon-agentd repin --harness claude" || report.HarnessDetails["claude"].Reason != "dependency_invalid" {
+	if len(report.HarnessDetails) != 2 || report.HarnessDetails["claude"].Fix.Command != "aeon-agentd repin --harness claude" || report.HarnessDetails["claude"].Reason != "dependency_invalid" {
 		t.Fatal("details leaked untrusted data or lost the canonical repair command")
 	}
 	var listed struct {
@@ -1225,11 +1225,11 @@ func TestHarnessDetailsAreCanonicalAndRevokedReportsDoNotBlockCleanup(t *testing
 	if len(listed.Computers) != 1 || listed.Computers[0].HarnessDetails["claude"] != report.HarnessDetails["claude"] {
 		t.Fatal("list/detail lost harness repair details")
 	}
-	progress.HarnessDetails["claude"] = agentsetup.HarnessDetail{State: "blocked", Reason: "repin_pending", Fix: "must not be retained"}
+	progress.HarnessDetails["claude"] = agentsetup.HarnessDetail{State: "blocked", Reason: "repin_pending", Fix: agentsetup.HarnessFix{Kind: "restart", Command: "must not be retained"}}
 	proof["progress"] = progress
 	report = agentpairing.View{}
 	decodeResult(t, f.call("POST", "/api/agent-pairing/reconcile", proof, false, "", 200), &report)
-	if report.HarnessDetails["claude"].Reason != "repin_pending" || report.HarnessDetails["claude"].Fix != "" {
+	if report.HarnessDetails["claude"].Reason != "repin_pending" || report.HarnessDetails["claude"].Fix.Command != "" {
 		t.Fatal("pending repin requires a repair")
 	}
 	for _, detail := range []agentsetup.HarnessDetail{{State: "blocked", Reason: "future_reason"}, {State: "ready"}, {State: "blocked", Reason: "local diagnostic text"}} {

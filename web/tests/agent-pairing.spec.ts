@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { expect, test } from '@playwright/test'
+import { mkdirSync } from 'node:fs'
+import { join } from 'node:path'
 import { fixtures, me, mockWork, watchErrors } from './work-fixtures'
 import { NIX_PAIR_COMMAND, SETUP_COMMAND, mockAnonymousGuide, mockPairing, pairingGuide } from './agent-pairing-fixtures'
 
@@ -38,6 +40,43 @@ test('an unconfigured instance omits the Nix module without losing the public gu
   await expect(page.getByText(/Use the owning Nix or Home Manager configuration/)).toBeVisible()
   await expect(page.getByRole('button', { name: 'Sign in to review the code' })).toBeVisible()
   await expect(page.getByRole('link', { name: /uzumaki|services.aeon/ })).toHaveCount(0)
+})
+
+test('pi pairing names the local provider, shows its SVG and connects without verification', async ({ page }) => {
+  await page.clock.install({ time: new Date('2026-09-27T20:00:00.000Z') })
+  await mockWork(page, fixtures())
+  const reason = 'pi verification has no qualified no-tools policy for extensions and provider configuration.'
+  const calls = await mockPairing(page, {
+    requested_accounts: [{ account_key: 'pi-1', harness: 'pi', provider: 'anthropic', label: 'pi / anthropic (local profile)' }],
+    verification_capabilities: { pi: { supported: false, policy: 'unavailable', reason } },
+  })
+  await page.goto('/agents/register-agent')
+  await page.getByText('Manual and agent setup').click()
+  await expect(page.getByText(/For pi, use \/login and \/model/)).toBeVisible()
+  await expect(page.getByText(SETUP_COMMAND, { exact: false })).toContainText('grok|pi')
+  await page.getByLabel('Pairing code').fill('123-456-789')
+  await page.getByRole('button', { name: 'Look up code' }).click()
+  const review = page.getByRole('region', { name: 'Pairing review' })
+  await expect(review.getByLabel('Connect Pi')).toBeChecked()
+  await expect(review.getByLabel('Account for Pi').locator('option:checked')).toHaveText('pi / anthropic (local profile)')
+  await expect(review.locator('.harness .mark svg path')).toHaveCount(3)
+  await expect(review.getByRole('checkbox', { name: 'Verify selected harnesses' })).toBeDisabled()
+  await expect(review.getByText('Pi can’t be verified.')).toHaveAttribute('title', reason)
+
+  if (process.env.PI_PAIRING_SHOTS) {
+    mkdirSync(process.env.PI_PAIRING_SHOTS, { recursive: true })
+    for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390]) {
+      await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
+      await page.emulateMedia({ colorScheme: theme })
+      await page.getByRole('button', { name: 'Connect computer', exact: true }).scrollIntoViewIfNeeded()
+      await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+      await page.screenshot({ path: join(process.env.PI_PAIRING_SHOTS, `pi-pairing__${width}__${theme}.png`), fullPage: true })
+    }
+  }
+  await page.getByRole('button', { name: 'Connect computer', exact: true }).click()
+  await expect.poll(() => calls.find(call => call.path.endsWith('/approve'))?.body).toEqual({
+    request_digest: 'ab'.repeat(32), verification: 'connect_only', selected_account_keys: ['pi-1'],
+  })
 })
 
 test('a qualified helper removes Connect only without a harness-name special case', async ({ page }) => {

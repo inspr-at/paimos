@@ -32,12 +32,14 @@ var RuntimePermissions = []string{"run.read", "run.claim", "run.telemetry", "wor
 var uuidRE = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 var hashRE = regexp.MustCompile(`^[0-9a-f]{64}$`)
 var accountRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`)
+var providerRE = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,63}$`)
 
 type Choice struct {
 	AccountKey string `json:"account_key"`
 	Harness    string `json:"harness"`
 	Label      string `json:"label"`
 	ProfileID  string `json:"model_profile_id,omitempty"`
+	Provider   string `json:"provider,omitempty"`
 }
 type Details struct {
 	ComputerName       string   `json:"computer_name"`
@@ -191,7 +193,7 @@ func validateDevice(in deviceRequest) error {
 	if !uuidRE.MatchString(in.RequestID) || (in.TenantID == "") == (in.TenantSlug == "") || in.TenantID != "" && !uuidRE.MatchString(in.TenantID) || !hashRE.MatchString(in.DeviceHash) || !hashRE.MatchString(in.RuntimeHash) || !hashRE.MatchString(in.LifecycleHash) || in.DeviceHash == in.RuntimeHash || in.DeviceHash == in.LifecycleHash || in.RuntimeHash == in.LifecycleHash {
 		return fail(400, "invalid_request", "distinct commitments, request UUID and exactly one tenant selector required")
 	}
-	if !safeText(in.ComputerName, 128) || !safeText(in.Workspace, 1024) || !path.IsAbs(in.Workspace) || path.Clean(in.Workspace) != in.Workspace || in.Workspace == "/" || (in.Platform != "darwin" && in.Platform != "linux") || (in.Arch != "arm64" && in.Arch != "amd64") || len(in.Capabilities) != 1 || in.Capabilities[0] != "managed_runs" || len(in.Accounts) < 1 || len(in.Accounts) > 4 {
+	if !safeText(in.ComputerName, 128) || !safeText(in.Workspace, 1024) || !path.IsAbs(in.Workspace) || path.Clean(in.Workspace) != in.Workspace || in.Workspace == "/" || (in.Platform != "darwin" && in.Platform != "linux") || (in.Arch != "arm64" && in.Arch != "amd64") || len(in.Capabilities) != 1 || in.Capabilities[0] != "managed_runs" || len(in.Accounts) < 1 || len(in.Accounts) > 5 {
 		return fail(400, "invalid_request", "invalid computer, folder, capabilities or account selection")
 	}
 	seen := map[string]bool{}
@@ -201,11 +203,14 @@ func validateDevice(in deviceRequest) error {
 			return fail(400, "invalid_request", "choose exactly one identified account per harness")
 		}
 		switch a.Harness {
-		case "claude", "codex", "cursor", "grok":
+		case "claude", "codex", "cursor", "grok", "pi":
 		default:
 			return fail(400, "invalid_request", "unsupported harness")
 		}
 		seen[a.Harness] = true
+		if a.Provider != "" && (a.Harness != "pi" || !providerRE.MatchString(a.Provider)) {
+			return fail(400, "invalid_request", "invalid pi provider binding")
+		}
 		seenAccounts[a.AccountKey] = true
 	}
 	if in.ExistingComputerID != "" && (!uuidRE.MatchString(in.ExistingComputerID) || !hashRE.MatchString(in.ExistingProof)) || in.ExistingComputerID == "" && in.ExistingProof != "" {

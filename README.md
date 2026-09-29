@@ -74,9 +74,9 @@ Repin records local `claude-repin-<id>.json` and `claude-repin-<id>-applied.json
 
 A pending or failed repin, or a broken Claude dependency, holds only fresh Claude work. Other harnesses and claim recovery keep polling. Local status keeps `ready: true` when any enrolled, unfenced account is ready; setup and Add harness can report connected as soon as one harness passes its probe, while another still shows starting or needs sign-in.
 
-`harness_statuses` remains the legacy state map; the additive `harness_details` map carries `{state, reason, fix}` using the same reason/fix vocabulary as per-account `blocked_accounts`. Reasons include `repin_pending`, `dependency_invalid`, `pin_missing`, `login_required`, `starting` and `cli_unavailable`. `/agents` shows the fixed recovery command on the affected harness row; a pending repin says “Waiting for repin” and retries automatically without a repair command. For an unavailable approved CLI executable, the row directs you to restore the approved executable, with `aeon-agentd setup status` providing local diagnostics; adding the same enrollment or repinning Node/SDK would not repair it. Raw `harness_errors` stay local.
+`harness_statuses` remains the legacy state map; the additive `harness_details` map carries `{state, reason, fix}` using the same reason/fix vocabulary as per-account `blocked_accounts`. Both use structured `fix: {kind, command}` objects (kinds: `repin`, `add_harness`, `login`, `restart`). Reasons are `repin_pending`, `dependency_invalid`, `pin_missing`, `pin_partial`, `pin_drifted`, `pin_invalid`, `pin_unsafe`, `login_required`, `starting`, `harness_failed`, `cli_unavailable` and `profile_permissions`. `dependency_invalid` covers a runtime dependency check; the `pin_*` codes describe the particular persisted pin failure. `/agents` shows the fixed recovery command on the affected harness row; a pending repin says “Waiting for repin” and retries automatically without a repair command. For an unavailable approved CLI executable, the row directs you to restore the approved executable, then resume with `aeon-agentd setup` (`restart`); `aeon-agentd status` provides local diagnostics; adding the same enrollment or repinning Node/SDK would not repair it. Raw `harness_errors` stay local.
 
-Unknown, unenrolled and revoked harness reports or unsupported codes are dropped without interrupting fence sync or cleanup; one value-free warning is logged per server instance. Malformed JSON shapes still fail validation. Missing reports stay absent, offline reports are labelled as last reported, and a legacy daemon clears prior reports when it omits them. The CLI retains its existing approved physical-executable policy, including Homebrew installations; the stricter ownership and directory checks apply to Node and SDK pins.
+Unknown reason or state tokens from newer daemons remain visible as “Needs attention” with the raw code, without a guessed repair command. Unenrolled, revoked, malformed-code and mismatched harness reports are dropped without interrupting fence sync or cleanup; one value-free warning is logged per server instance. Advisory detail extensions and legacy string fixes are accepted, and commands are always rebuilt from known reasons. Malformed JSON shapes still fail validation. Missing reports stay absent, offline reports are labelled as last reported, and a legacy daemon clears prior reports when it omits them. The CLI retains its existing approved physical-executable policy, including Homebrew installations; the stricter ownership and directory checks apply to Node and SDK pins.
 
 Invoking the binary as `paimos` gives the paimos-compatible CLI. `PAIMOS_URL` (with `PAIMOS_API_KEY` or `PAIMOS_API_KEY_FILE`) is the process-only target.
 
@@ -318,6 +318,55 @@ sign-in, and 404 screenshots in both themes at 1280×720 and 390×844 to
 `/tmp/aeon-p05-shots/`. Screenshots and browser test output are not committed.
 
 Licence: AGPL-3.0-only.
+
+### Harness interpreter pins
+
+Guided setup pins Node's physical path and version privately for npm-launched
+Codex, Cursor, Claude and pi. `--node-path` selects an installed Node outside the
+workspace, including for shell wrappers. Setup checks the launcher using the
+service PATH (`/usr/bin:/bin:/usr/sbin:/sbin`) with the pinned Node directory first;
+interactive shell paths and Node injection variables cannot mask missing runtime
+dependencies. The same pin is used for account probes and run launches. A missing,
+partial, drifted, invalid, or unsafe pin blocks only that account: the paired
+daemon and its other accounts keep running, and that harness does not launch
+until the pin is fixed. Status names the account, a reason code (`pin_missing`,
+`pin_partial`, `pin_drifted`, `pin_invalid`, `pin_unsafe`), and the fix command
+as the same `{kind, command}` object used by harness details. Claude supports
+`repin` for partial, drifted, invalid or unsafe pins; missing pins and other
+harnesses use `add_harness`. Existing enrollments must be removed through the
+normal approved account flow before re-enrollment. Repin never renews authority.
+Native launchers and saved pi bindings remain supported. Paths and interpreter
+versions stay local.
+
+### Pi guided setup
+
+`paimos-agentd setup --harness pi` and `add-harness --harness pi` use the same
+person-approved pairing flow as the other harnesses. Install pi normally and use
+its `/login` and `/model` commands first. Setup pins the executable and reads its
+version. For npm's `#!/usr/bin/env node` entrypoint it also resolves Node (or
+uses `--node-path`), pins its physical path and version privately, and prepends
+its directory to the probe and runtime PATH. Node must be installed outside the
+workspace. A missing or changed interpreter pin blocks only that account.
+Setup then checks
+the selected provider/model against pi's public RPC
+`get_available_models` response. `--account-context anthropic` selects a specific
+configured provider instead. The local profile is `~/.pi/agent`; Aeon never
+opens its credential files, inherits provider keys for this check, or sends a
+prompt. This establishes configured authentication, not remote credential
+validity or a person's identity. The approval label names the provider and local
+profile; the server selects an enabled pi model profile for that provider, and
+only the computer keeps the profile path. The profile directory must be private
+(no group or other access), as required by the daemon. Managed installations stay
+with their owning Nix/Home Manager configuration.
+
+The paired daemon rechecks that provider at most once a minute during polling
+and afresh before each run, and refuses a model profile from a different
+provider. Probe startup failures report a harness startup problem; only missing
+provider configuration requests vendor login. Pi verification is explicitly
+unavailable: its managed adapter has no qualified no-tools boundary. Connect without verification, then
+set request limits for ongoing work. Pi retains its existing SVG harness icon and
+account allowance pipeline; missing vendor token, cost or capacity readings
+remain unreported, never inferred from a provider name or a successful probe.
 
 ### Session metadata
 

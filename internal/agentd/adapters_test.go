@@ -6,6 +6,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -13,6 +14,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/inspr-at/paimos/internal/piprobe"
 )
 
 // TestFakeVendorProcess is invoked only through a private test wrapper. It
@@ -58,6 +61,9 @@ func TestFakeVendorProcess(t *testing.T) {
 			data := any(map[string]any{})
 			if frame.Type == "get_state" {
 				data = map[string]any{"model": map[string]string{"provider": "anthropic", "id": "test-model"}, "thinkingLevel": "high"}
+			}
+			if frame.Type == "get_available_models" {
+				data = map[string]any{"models": []map[string]string{{"provider": "anthropic", "id": "test-model"}}}
 			}
 			if frame.Type == "clear_queue" {
 				data = map[string]any{"steering": []string{"held steer"}, "followUp": []string{"held follow"}}
@@ -300,8 +306,30 @@ func TestPiRPCStateAndSteer(t *testing.T) {
 		t.Fatal(err)
 	}
 	a := NewPiAdapter(fakeVendorPath(t, "pi"), map[string]string{"account": home})
+	a.SetExpectedProviders(map[string]string{"account": "anthropic"})
+	// Exercise npm's env-node entrypoint with no node on the service PATH.
+	script, err := os.ReadFile(a.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(a.Path, []byte(strings.Replace(string(script), "#!/bin/sh", "#!/usr/bin/env node", 1)), 0700); err != nil {
+		t.Fatal(err)
+	}
+	node := filepath.Join(home, "node")
+	if err := os.WriteFile(node, []byte("#!/bin/sh\n[ -z \"$NODE_OPTIONS\" ] && [ -z \"$ANTHROPIC_API_KEY\" ] || exit 3\nexec /bin/sh \"$@\"\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	a.Nodes = map[string]piprobe.Node{"account": {Path: node, Version: "22.19.0"}}
+	t.Setenv("PATH", t.TempDir())
+	t.Setenv("NODE_OPTIONS", "synthetic-not-an-option")
+	t.Setenv("ANTHROPIC_API_KEY", "synthetic-not-a-credential")
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+	wrong := r
+	wrong.Profile.Model = "openai/test-model"
+	if process, err := a.Start(ctx, wrong, func(AdapterEvent) { t.Error("wrong provider prompted") }); err == nil || process != nil {
+		t.Fatal("guided pi account accepted another provider")
+	}
 	p, err := a.Start(ctx, r, func(AdapterEvent) {})
 	if err != nil {
 		t.Fatal(err)
@@ -328,6 +356,79 @@ func TestPiRPCStateAndSteer(t *testing.T) {
 	if err := p.Stop(ctx); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func TestPiProbeBackoffAndFreshLaunch(t *testing.T) {
+	r := adapterRequest(t)
+	r.Profile.Harness, r.Profile.Model = Pi, "anthropic/test-model"
+	home, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(home, 0700); err != nil {
+		t.Fatal(err)
+	}
+	path := fakeVendorPath(t, "pi")
+	original, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	count := filepath.Join(home, "probe-count")
+	prefix := fmt.Sprintf("#!/bin/sh\nprintf x >> %q\n", count)
+	script := prefix + strings.TrimPrefix(string(original), "#!/bin/sh\n")
+	if err := os.WriteFile(path, []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	a := NewPiAdapter(path, map[string]string{"account": home})
+	a.SetExpectedProviders(map[string]string{"account": "anthropic"})
+	checkCount := func(want int) {
+		t.Helper()
+		raw, err := os.ReadFile(count)
+		if err != nil || len(raw) != want {
+			t.Fatalf("probe launches=%d, want %d: %v", len(raw), want, err)
+		}
+	}
+	for range 3 {
+		if available, err := a.ProbeStatus(t.Context(), "account"); !available || err != nil {
+			t.Fatal("healthy probe failed", err)
+		}
+	}
+	checkCount(1)
+	// Expiry permits a new probe without sleeping in the test.
+	a.probeMu.Lock()
+	cached := a.probes["account"]
+	cached.expires = time.Now().Add(-time.Second)
+	a.probes["account"] = cached
+	a.probeMu.Unlock()
+	if !a.Probe(t.Context(), "account") {
+		t.Fatal("expired probe not refreshed")
+	}
+	checkCount(2)
+	// A different provider must never inherit a cached success.
+	a.Providers["account"] = "openai"
+	if available, err := a.ProbeStatus(t.Context(), "account"); available || err != nil {
+		t.Fatal("missing provider misclassified", err)
+	}
+	checkCount(3)
+	a.Providers["account"] = "anthropic"
+	if !a.Probe(t.Context(), "account") {
+		t.Fatal("restored provider not checked")
+	}
+	checkCount(4)
+	// Even within the cache window, a run must freshly check the harness.
+	if err := os.WriteFile(path, []byte(prefix+"exit 127\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if p, err := a.Start(t.Context(), r, func(AdapterEvent) { t.Error("failed harness emitted an event") }); p != nil || !errors.Is(err, piprobe.ErrStart) {
+		t.Fatal("cached success allowed a failed harness to start", err)
+	}
+	checkCount(5)
+	for range 3 {
+		if available, err := a.ProbeStatus(t.Context(), "account"); available || !errors.Is(err, piprobe.ErrStart) {
+			t.Fatal("startup failure became login failure", err)
+		}
+	}
+	checkCount(5)
 }
 
 func TestCursorACPAndAccountBinding(t *testing.T) {
