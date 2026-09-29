@@ -13,6 +13,7 @@ const shots = process.env.LIVE_SHOTS_DIR
 const panel = (page: Page) => page.getByRole('complementary', { name: 'Ticket details' })
 const bulkBar = (page: Page) => page.getByRole('toolbar', { name: /selected ticket/ })
 const said = (page: Page) => page.locator('p.live-said')
+const mod = process.platform === 'darwin' ? 'Meta' : 'Control'
 
 async function setStatus(page: Page, id: string, key: string, status: string) {
   await page.locator(`#row-${id} .status-btn`).click()
@@ -146,6 +147,96 @@ test('bulk and inline changes that meet a newer version are conflicts with Revie
     await inline.getByRole('button', { name: 'Review' }).click()
     await expect(a).toHaveURL(/\/p\/PHAROS\/PHAROS-14/)
     await expect(panel(a).getByRole('heading', { name: /dark too/ })).toBeVisible()
+  } finally { await close() }
+})
+
+test('a selected row keeps the version A saw: a bulk change meets the newer one as a conflict', async ({ browser }) => {
+  const { a, b, data, errorsA, close } = await openBoth(browser, '/p/PHAROS/tickets')
+  try {
+    for (const id of ['n-2', 'n-4']) await a.locator(`#row-${id} .row-check`).check()
+    await b.goto('/p/PHAROS/PHAROS-12')
+    await expect(panel(b).getByRole('heading', { name: 'Add an Oracle Cloud connector' })).toBeVisible()
+    await b.keyboard.press('p')
+    await b.getByRole('menu', { name: 'Priority of PHAROS-12' }).getByRole('menuitemradio', { name: 'High' }).click()
+
+    // A: the selected row waits as changed, with the priority A saw.
+    const row = a.locator('#row-n-2')
+    await expect(row.locator('.live-label')).toHaveText('Changed')
+    await expect(row.locator('.c-prio')).not.toContainText('High')
+    await expect(a.getByRole('button', { name: '1 update · Show' })).toBeVisible()
+    await expect(said(a)).toHaveText('PHAROS-12 was updated elsewhere: priority. Press U to show updates.')
+
+    await bulkBar(a).getByRole('button', { name: 'Priority' }).click()
+    await a.getByRole('menu', { name: 'Priority of 2 tickets' }).getByRole('menuitemradio', { name: 'Low' }).click()
+    await expect(a.locator('.toast').filter({ hasText: 'PHAROS-12 was changed elsewhere meanwhile and kept its newer version.' })).toBeVisible()
+    expect(data.nodes.find(n => n.id === 'n-2')!.fields.priority).toBe('high')
+    expect(data.nodes.find(n => n.id === 'n-4')!.fields.priority).toBe('low')
+    expect(errorsA).toEqual([])
+  } finally { await close() }
+})
+
+test('the row under an open editor keeps its revision: saving meets the change as a conflict', async ({ browser }) => {
+  const { a, b, data, errorsA, close } = await openBoth(browser, '/p/PHAROS/tickets')
+  try {
+    await a.locator('#row-n-2 .title-link').click()
+    const wsA = panel(a)
+    await wsA.getByRole('button', { name: 'Edit', exact: true }).click()
+    await wsA.locator('#edit-title').fill('Oracle connector, my wording')
+
+    await b.goto('/p/PHAROS/PHAROS-12')
+    await expect(panel(b).getByRole('heading', { name: 'Add an Oracle Cloud connector' })).toBeVisible()
+    await b.keyboard.press('p')
+    await b.getByRole('menu', { name: 'Priority of PHAROS-12' }).getByRole('menuitemradio', { name: 'High' }).click()
+    await expect(panel(b).getByRole('button', { name: /Priority: High/ })).toBeVisible()
+
+    // The list read lands too, and waits: the row A edits keeps what A saw.
+    const row = a.locator('#row-n-2')
+    await expect(row.locator('.live-label')).toHaveText('Changed')
+    await expect(wsA.getByRole('status').filter({ hasText: 'Changed elsewhere meanwhile' })).toBeVisible()
+    await wsA.locator('#edit-title').focus()
+    await a.keyboard.press(`${mod}+Enter`)
+    await expect(a.getByText('PHAROS-12 was changed elsewhere. The newer version is shown; your draft is kept.')).toBeVisible()
+    expect(data.nodes.find(n => n.id === 'n-2')!.title).toBe('Add an Oracle Cloud connector')
+    expect(data.nodes.find(n => n.id === 'n-2')!.fields.priority).toBe('high')
+    expect(errorsA).toEqual([])
+  } finally { await close() }
+})
+
+test('Show brings a waiting change into a selected row', async ({ browser }) => {
+  const { a, b, errorsA, close } = await openBoth(browser, '/p/PHAROS/tickets')
+  try {
+    await a.locator('#row-n-2 .row-check').check()
+    await b.goto('/p/PHAROS/PHAROS-12')
+    await panel(b).getByRole('heading', { name: 'Add an Oracle Cloud connector' }).click()
+    await panel(b).getByLabel('Title', { exact: true }).fill('Add an Oracle Cloud Always Free connector')
+    await b.keyboard.press('Enter')
+    const row = a.locator('#row-n-2')
+    await expect(row.locator('.live-label')).toHaveText('Changed')
+    await expect(row).not.toContainText('Always Free')
+    await a.getByRole('button', { name: '1 update · Show' }).click()
+    await expect(row).toContainText('Always Free')
+    await expect(row.locator('.live-label')).toHaveCount(0)
+    await expect(row).toHaveClass(/selected/)
+    expect(errorsA).toEqual([])
+  } finally { await close() }
+})
+
+test('a list read that fails is tried again', async ({ browser }) => {
+  const { a, b, errorsA, close } = await openBoth(browser, '/p/PHAROS/tickets')
+  try {
+    let failed = 0
+    await a.route(url => url.pathname === '/api/nodes' && url.searchParams.has('ids'), route => {
+      if (!failed++) return route.fulfill({ status: 503, json: { error: 'Unavailable' } })
+      return route.fallback()
+    })
+    await b.goto('/p/PHAROS/PHAROS-12')
+    await panel(b).getByRole('heading', { name: 'Add an Oracle Cloud connector' }).click()
+    await panel(b).getByLabel('Title', { exact: true }).fill('Add an Oracle Cloud Always Free connector')
+    await b.keyboard.press('Enter')
+    await expect.poll(() => failed).toBeGreaterThan(0)
+    await expect(a.locator('#row-n-2')).toContainText('Always Free', { timeout: 6000 })
+    expect(failed).toBeGreaterThan(1)
+    expect(errorsA.filter(error => !/503/.test(error))).toEqual([])
   } finally { await close() }
 })
 

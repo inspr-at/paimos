@@ -91,3 +91,56 @@ test('a ticket deleted in one browser reads as gone in the other, on a phone too
     expect(errors).toEqual([])
   } finally { await close() }
 })
+
+test('a read that lands after the editor opened waits: the save still meets the change as a conflict', async ({ browser }) => {
+  const { a, b, live, data, errors, close } = await openBoth(browser, '/p/PHAROS/tickets')
+  try {
+    // B hears nothing live (a slow connection); its read of the ticket is slow too.
+    live.hold('b')
+    let release!: () => void
+    const slow = new Promise<void>(resolve => { release = resolve })
+    await b.route('**/api/nodes/n-2', async route => { if (route.request().method() === 'GET') await slow; return route.fallback() })
+
+    await a.goto('/p/PHAROS/PHAROS-12')
+    await panel(a).getByRole('heading', { name: 'Add an Oracle Cloud connector' }).click()
+    await panel(a).getByLabel('Title', { exact: true }).fill('Oracle connector, their wording')
+    await a.keyboard.press('Enter')
+    await expect(panel(a).getByRole('heading', { name: 'Oracle connector, their wording' })).toBeVisible()
+
+    // B opens the ticket from its older list and edits before the read lands.
+    await b.locator('#row-n-2 .title-link').click()
+    const wsB = panel(b)
+    await wsB.getByRole('button', { name: 'Edit', exact: true }).click()
+    const draftTitle = wsB.locator('#edit-title')
+    await draftTitle.fill('Oracle connector, my wording')
+    release()
+    await expect(wsB.getByRole('status').filter({ hasText: 'Changed elsewhere meanwhile' })).toBeVisible()
+    await expect(draftTitle).toHaveValue('Oracle connector, my wording')
+
+    await draftTitle.focus()
+    await b.keyboard.press(`${mod}+Enter`)
+    await expect(b.getByText('PHAROS-12 was changed elsewhere. The newer version is shown; your draft is kept.')).toBeVisible()
+    expect(data.nodes.find(n => n.id === 'n-2')!.title).toBe('Oracle connector, their wording')
+    expect(errors).toEqual([])
+  } finally { await close() }
+})
+
+test('a ticket deleted and restored elsewhere is here again', async ({ browser }) => {
+  const { a, b, data, errors, close } = await openBoth(browser, '/p/PHAROS/PHAROS-14')
+  try {
+    const wsB = panel(b)
+    await expect(wsB.getByRole('heading', { name: 'Visual acceptance of the version pill' })).toBeVisible()
+    const copy = structuredClone(data.nodes.find(n => n.id === 'n-4')!)
+    await panel(a).getByRole('button', { name: 'More actions' }).click()
+    await a.getByRole('menuitem', { name: 'Delete ticket…' }).click()
+    await a.getByRole('dialog', { name: 'Delete PHAROS-14?' }).getByRole('button', { name: 'Delete ticket' }).click()
+    await expect(wsB.getByRole('alert')).toContainText('PHAROS-14 is no longer here')
+
+    // Restored (undo): it comes back as it was, with a newer revision.
+    data.nodes.push({ ...copy, updated_at: new Date(Date.parse(copy.updated_at) + 5 * 60_000).toISOString() })
+    await expect(wsB.getByRole('heading', { name: 'Visual acceptance of the version pill' })).toBeVisible()
+    await expect(wsB.getByRole('alert')).toHaveCount(0)
+    await expect(wsB.getByRole('button', { name: 'Edit', exact: true })).toBeVisible()
+    expect(errors).toEqual([])
+  } finally { await close() }
+})
