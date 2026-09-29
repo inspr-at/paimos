@@ -8794,7 +8794,7 @@ components:
       type: object
       required: [agent_principal_id, model_profile_id]
       properties:
-        capacity_override: {type: string, enum: [now], description: Person only. Skip the schedule and reserve for this run; never approval, vendor truth, sign-in, freshness or concurrency.}
+        capacity_override: {type: string, enum: [now], description: 'Person only. Skip the schedule and reserve for this run; never approval, vendor truth, sign-in, freshness or concurrency.'}
         agent_principal_id: {type: string, format: uuid}
         model_profile_id: {type: string, format: uuid}
         requested_account_id:

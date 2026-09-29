@@ -54,6 +54,10 @@ func TestFirstReadingGrantIsSingleUsePerGeneration(t *testing.T) {
 			if again.Reservations[0].ReservationID != route.Reservations[0].ReservationID {
 				t.Fatal("grant replay changed")
 			}
+			// A new probe generation does not create a second concurrent run.
+			probe("g2")
+			callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts/route", routeBody(t, second, "daemon-a", []Account{a}, map[string]int64{"requests": 1}), 409, nil)
+			probe("g1")
 			seed(func(tx pgx.Tx) error { return Release(t.Context(), tx, runner, first, "", "") })
 			callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts/route", routeBody(t, second, "daemon-a", []Account{a}, map[string]int64{"requests": 1}), 409, nil)
 			probe("g1")

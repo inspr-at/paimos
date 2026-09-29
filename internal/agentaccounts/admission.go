@@ -125,6 +125,9 @@ func admission(ctx context.Context, tx pgx.Tx, a Account, all []Window, now time
 			return nil, nil, err
 		}
 		if !observed && !granted && a.daemonGeneration != nil {
+			if slots > 0 {
+				return nil, waitFor("reading"), nil
+			}
 			w := provisionalWindow(a.ID, now, "refresh")
 			w.capacityBucket = bootstrapBucket(a)
 			active = []Window{w}
