@@ -47,12 +47,29 @@ type proposalForge struct {
 	calls           int
 	dispatches      int
 	mergeCalls      int
+	revocations     int
+	minted          int
+	beforeRequest   func(*http.Request)
 	proposalID      string
 }
 
 func (f *proposalForge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	f.calls++
+	if f.beforeRequest != nil {
+		f.beforeRequest(r)
+	}
 	send := func(v any) { _ = json.NewEncoder(w).Encode(v) }
+	if r.URL.Path == "/installation/token" && r.Method == "DELETE" {
+		if r.Header.Get("Authorization") != "Bearer installationFixtureToken319" {
+			f.t.Error("revocation used wrong credential")
+		}
+		if r.Context().Err() != nil {
+			f.t.Error("revocation inherited cancelled context")
+		}
+		f.revocations++
+		w.WriteHeader(204)
+		return
+	}
 	if r.URL.Path == "/app" {
 		send(map[string]any{"id": 8, "slug": "fixture-doctrine"})
 		return
@@ -93,6 +110,7 @@ func (f *proposalForge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if f.extraRepo {
 			repos = append(repos, map[string]any{"full_name": "someone/else", "private": true})
 		}
+		f.minted++
 		send(map[string]any{"token": "installationFixtureToken319", "permissions": map[string]string{"contents": "write", "pull_requests": "write", "metadata": "read"}, "repositories": repos})
 		return
 	}
@@ -360,6 +378,7 @@ func TestProposalRoundTripAndSafety(t *testing.T) {
 	otherID := f.tenant("proposal-b")
 	other := f.principal(otherID, "person", "other", "admin", nil, "")
 	layer := f.layer(owner, "POST", "/api/rules/doctrine/sources", SourceInput{Repository: publicRepository, Visibility: "public", Ref: "main"})
+	seedPrivateGuard(t, f, m, owner)
 	src := find(layer, publicRepository)
 	if src == nil || !layer.ProposalsEnabled {
 		t.Fatal("missing source or proposal capability")
@@ -506,7 +525,7 @@ func TestProposalRoundTripAndSafety(t *testing.T) {
 		t.Fatal("proposal crossed tenant")
 	}
 	var eventCount int
-	if err := f.d.Admin.QueryRow(t.Context(), `SELECT count(*) FROM events WHERE tenant_id=$1 AND type IN ('doctrine.proposed','doctrine.approved','doctrine.merged','doctrine.release_requested','doctrine.machine_pin_reported','doctrine.released')`, tid).Scan(&eventCount); err != nil || eventCount < 6 {
+	if err := f.d.Admin.QueryRow(t.Context(), `SELECT count(*) FROM events WHERE tenant_id=$1 AND type IN ('doctrine.proposed','doctrine.approved','doctrine.merged','doctrine.merge_observed','doctrine.release_requested','doctrine.machine_pin_reported','doctrine.released')`, tid).Scan(&eventCount); err != nil || eventCount < 6 {
 		t.Fatalf("audit %d %v", eventCount, err)
 	}
 	var leaked int
@@ -514,6 +533,9 @@ func TestProposalRoundTripAndSafety(t *testing.T) {
 		t.Fatal("event retained prose/credential")
 	}
 	f.call(owner, "DELETE", "/api/rules/doctrine/sources/"+src.ID, nil, 200)
+	if forge.revocations != forge.minted {
+		t.Fatal("installation tokens left live after operations")
+	}
 	if got := f.call(owner, "GET", path, nil, 200); !strings.Contains(string(got), p.ID) {
 		t.Fatal("unlink erased proposal history")
 	}

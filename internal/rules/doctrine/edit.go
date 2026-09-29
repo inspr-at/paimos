@@ -10,7 +10,11 @@ import (
 	"io"
 	"regexp"
 	"strings"
+	"unicode"
 	"unicode/utf8"
+
+	"golang.org/x/text/cases"
+	"golang.org/x/text/unicode/norm"
 
 	"github.com/inspr-at/paimos/internal/workorders"
 	"gopkg.in/yaml.v3"
@@ -65,7 +69,7 @@ func writableSource(s Source) bool {
 
 func guardPublic(repository string, texts ...string) error {
 	for _, text := range texts {
-		if credentialLeaks.MatchString(text) {
+		if credentialLeaks.MatchString(normalizeProposalText(text)) {
 			return fail(422, "credential_text", "This proposal contains credential-shaped text. Remove credentials before publishing to either repository.")
 		}
 	}
@@ -73,7 +77,7 @@ func guardPublic(repository string, texts ...string) error {
 		return nil
 	}
 	for _, text := range texts {
-		if publicLeaks.MatchString(text) {
+		if publicLeaks.MatchString(normalizeProposalText(text)) {
 			return fail(422, "public_identity", "This public proposal contains identity-bearing or credential-shaped text. Generalise it, or propose the private rule in inspr-doctrine-private. Nothing was published.")
 		}
 	}
@@ -173,8 +177,66 @@ func editRule(s Source, files []File, in ProposalInput) (map[string]string, erro
 	if len(encoded) > MaxSidecarBytes {
 		return nil, fail(400, "invalid_request", "The TL;DR sidecar exceeds its size limit.")
 	}
-	if err := guardPublic(s.Repository, in.Path, in.RuleKey, content, string(encoded), in.Explanation); err != nil {
+	if err := guardPublic(s.Repository, in.Source, in.TLDR.EN, in.TLDR.DE, in.Explanation); err != nil {
 		return nil, err
 	}
 	return map[string]string{in.Path: content, SidecarPath(in.Path): string(encoded)}, nil
+}
+
+// Normalize only for comparison; the proposed git bytes remain unchanged.
+func normalizeProposalText(text string) string {
+	text = norm.NFKC.String(text)
+	text = strings.Map(func(r rune) rune {
+		// Cf includes zero-width joiners/spaces, bidi controls and soft hyphens.
+		// Also remove invisible combining selectors and the grapheme joiner.
+		if unicode.Is(unicode.Cf, r) || r == '\u034f' || r >= '\ufe00' && r <= '\ufe0f' || r >= '\U000e0100' && r <= '\U000e01ef' {
+			return -1
+		}
+		return r
+	}, text)
+	return strings.Join(strings.Fields(cases.Fold().String(text)), " ")
+}
+
+func proposalWords(text string) []string {
+	return strings.FieldsFunc(normalizeProposalText(text), func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsNumber(r) })
+}
+
+// Reject whole private entries (including short TLDRs), any eight-word run,
+// or >=60% of a private entry's unique four-word shingles with >=8 words
+// covered. The latter catches lightly edited quotes without requiring an
+// exact whole-rule match. Error messages never identify the private match.
+func guardPrivateQuotes(privateTexts []string, texts ...string) error {
+	for _, proposed := range texts {
+		words := proposalWords(proposed)
+		joined := " " + strings.Join(words, " ") + " "
+		shingles := map[string]bool{}
+		for i := 0; i+4 <= len(words); i++ {
+			shingles[strings.Join(words[i:i+4], " ")] = true
+		}
+		for _, private := range privateTexts {
+			pw := proposalWords(private)
+			if len(pw) == 0 {
+				continue
+			}
+			blocked := strings.Contains(joined, " "+strings.Join(pw, " ")+" ")
+			for i := 0; !blocked && i+8 <= len(pw); i++ {
+				blocked = strings.Contains(joined, " "+strings.Join(pw[i:i+8], " ")+" ")
+			}
+			unique := map[string]bool{}
+			matches := 0
+			for i := 0; i+4 <= len(pw); i++ {
+				key := strings.Join(pw[i:i+4], " ")
+				if !unique[key] {
+					unique[key] = true
+					if shingles[key] {
+						matches++
+					}
+				}
+			}
+			if blocked || matches >= 5 && matches*100 >= len(unique)*60 {
+				return fail(422, "private_doctrine", "This public proposal quotes private doctrine. Generalise the changed text or propose it in the private repository. Nothing was published.")
+			}
+		}
+	}
+	return nil
 }

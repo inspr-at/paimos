@@ -41,7 +41,7 @@ const unmatched = computed(() => props.file.sidecar?.unmatched ?? [])
               <pre class="source" :class="{ quiet: !!rule.tldr }">{{ sourceText(rule) }}</pre>
             </div>
             <div class="rule-actions">
-              <button v-if="canPropose" class="btn sm ghost" type="button" @click="emit('propose', rule)">Propose change</button>
+              <button v-if="canPropose" class="btn sm ghost" type="button" :aria-label="`Propose change to ${file.path} ${lineLabel(rule)}`" @click="emit('propose', rule)">Propose change</button>
               <a class="lines" :href="rule.url" target="_blank" rel="noopener noreferrer" :aria-label="`Open lines ${lineLabel(rule).slice(1)} of ${fileName(file.path)} in git`" :data-tip="`${file.path} ${lineLabel(rule)}`">{{ lineLabel(rule) }}</a>
             </div>
           </li>

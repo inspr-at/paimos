@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"regexp"
@@ -136,6 +137,18 @@ func (m *Module) appClient(ctx context.Context, tenantID, repository string) (*G
 	if err != nil {
 		return nil, err
 	}
+	// Once minted, revoke even a token rejected by scope/visibility validation.
+	// Never send an invalid token back as an Authorization header.
+	if !tokenPattern.MatchString(out.Token) {
+		return nil, gitFail("the App token is invalid")
+	}
+	g.Token = out.Token
+	ready := false
+	defer func() {
+		if !ready {
+			g.revoke()
+		}
+	}()
 	allowed := map[string]bool{repository: false}
 	for _, r := range out.Repositories {
 		if _, ok := allowed[r.FullName]; !ok {
@@ -167,6 +180,7 @@ func (m *Module) appClient(ctx context.Context, tenantID, repository string) (*G
 	}
 	g.botName = bot.Login
 	g.botEmail = strconv.FormatInt(bot.ID, 10) + "+" + bot.Login + "@users.noreply.github.com"
+	ready = true
 	return g, nil
 }
 
@@ -217,3 +231,14 @@ func (e *apiError) Error() string {
 	return "GitHub did not accept the operation; refresh before retrying"
 }
 func (e *apiError) Unwrap() error { return ErrGit }
+
+// Revocation gets its own bounded context so request cancellation cannot leave
+// an installation token live until expiry. Never log a credential or API body.
+func (g *GitHub) revoke() {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := g.request(ctx, http.MethodDelete, "/installation/token", nil, nil); err != nil {
+		slog.Warn("doctrine installation token revocation was not confirmed")
+	}
+	g.Token = ""
+}

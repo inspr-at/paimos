@@ -141,12 +141,20 @@ Git-backed doctrine rules (AEON-319) have **Propose change** when the server's
 GitHub App is enabled for the workspace. The editor creates a proposal branch
 and PR in the rule's owning public/private repo, changing its source and git
 TL;DR sidecar together. Public proposals run the `inspr-modules` leak patterns
-against the complete outgoing files and PR explanation before any GitHub write;
-identity-bearing public edits are refused, not silently copied across repos.
+against only the changed rule, its TL;DR entry and PR explanation before any
+GitHub write. Text is NFKC-normalized, stripped of invisible format characters,
+and case/whitespace folded. Whole private rules/TL;DRs, eight-word quotations,
+and substantial four-word shingle overlap are refused. Public proposals require
+a successfully indexed private source with a valid credential grant; missing or
+unusable private indexes block publication. Unchanged file content is excluded.
 Credential-shaped text is refused for either repository, including private.
 Git stays authoritative; the database holds request digests, PR references and
 audit metadata, never draft prose or credentials. Keep the same request UUID
-and input when retrying a lost response. Refresh reconciles an uncertain merge.
+and input when retrying a lost response. Short transactions authorize and reserve
+a bounded proposal lease, then apply GitHub results with a version compare-and-set;
+no database locks span network calls. Refresh reconciles an uncertain merge and
+emits an event only when state changes. Externally observed merges are recorded
+as observations; without prior Aeon approval, request release in the repository.
 
 Host provisioning (no App exists yet): set `AEON_DOCTRINE_APP_ID`,
 `AEON_DOCTRINE_INSTALLATION_ID`, `AEON_DOCTRINE_APP_KEY_REF`,
@@ -168,7 +176,8 @@ The App installation must select exactly `inspr-at/inspr-modules` and
 `inspr-at/inspr-doctrine-private`, with contents + pull requests write (and
 implicit metadata read). Each minted token is narrowed to the proposal
 repository alone and checked against that exact scope and live repository
-visibility. A private repo becoming public blocks publication. The configured tenant is the sole proposal writer; tenant settings
+visibility. Installation tokens are revoked after use (including validation
+failures), with bounded cancellation-independent cleanup. A private repo becoming public blocks publication. The configured tenant is the sole proposal writer; tenant settings
 cannot grant another workspace access to the central doctrine. The App must
 **not bypass branch protections**. Main must require CI and the independent
 cross-family gate so both remain enforced during a merge race. No direct-main

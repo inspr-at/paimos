@@ -4,12 +4,14 @@ package doctrine
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
@@ -41,11 +43,17 @@ type Proposal struct {
 	GateReview       int64     `json:"-"`
 	BaseCommit       string    `json:"-"`
 	InputDigest      string    `json:"-"`
+	Version          int64     `json:"-"`
+	OperationID      string    `json:"-"`
+	OperationUntil   time.Time `json:"-"`
 }
 
 type proposalData struct {
 	Proposal
-	GateReviewID int64 `json:"gate_review_id,omitempty"`
+	GateReviewID   int64     `json:"gate_review_id,omitempty"`
+	Version        int64     `json:"version"`
+	OperationID    string    `json:"operation_id,omitempty"`
+	OperationUntil time.Time `json:"operation_until,omitempty"`
 }
 
 const proposalColumns = `id::text,source_id::text,repository,path,rule_key,input_digest,base_commit,proposed_by::text,created_at,data`
@@ -66,6 +74,7 @@ func scanProposal(row pgx.Row) (Proposal, error) {
 	}
 	d.ID, d.SourceID, d.Repository, d.Path, d.RuleKey, d.InputDigest, d.BaseCommit, d.ProposedBy, d.CreatedAt = p.ID, p.SourceID, p.Repository, p.Path, p.RuleKey, p.InputDigest, p.BaseCommit, p.ProposedBy, p.CreatedAt
 	d.GateReview = d.GateReviewID
+	d.Proposal.Version, d.Proposal.OperationID, d.Proposal.OperationUntil = d.Version, d.OperationID, d.OperationUntil
 	if d.State == "" {
 		d.State = "proposed"
 	}
@@ -87,13 +96,21 @@ func countPins(ctx context.Context, tx pgx.Tx, p *Proposal) error {
 	}
 	return nil
 }
-func saveProposal(ctx context.Context, tx pgx.Tx, actor tenant.Principal, p Proposal, event string) error {
-	raw, err := json.Marshal(proposalData{Proposal: p, GateReviewID: p.GateReview})
+func saveProposal(ctx context.Context, tx pgx.Tx, actor tenant.Principal, p *Proposal, event string) error {
+	raw, err := json.Marshal(proposalData{Proposal: *p, GateReviewID: p.GateReview, Version: p.Version + 1, OperationID: p.OperationID, OperationUntil: p.OperationUntil})
 	if err != nil {
 		return err
 	}
-	if _, err = tx.Exec(ctx, `UPDATE doctrine_proposals SET data=$2 WHERE id=$1`, p.ID, raw); err != nil {
+	result, err := tx.Exec(ctx, `UPDATE doctrine_proposals SET data=$2 WHERE id=$1 AND COALESCE((data->>'version')::bigint,0)=$3`, p.ID, raw, p.Version)
+	if err != nil {
 		return err
+	}
+	if result.RowsAffected() != 1 {
+		return fail(409, "proposal_changed", "The proposal changed during this operation. Refresh before retrying; GitHub may have accepted it.")
+	}
+	p.Version++
+	if event == "" {
+		return nil
 	}
 	_, err = events.Append(ctx, tx, actor, events.Change{Type: event, After: map[string]any{
 		"proposal_id": p.ID, "repository": p.Repository, "pr_number": p.PRNumber, "head_sha": p.HeadSHA, "state": p.State, "proposed_by": p.ProposedBy, "approved_by": p.ApprovedBy, "gate_review_id": p.GateReview, "merge_commit": p.MergeCommit, "release": p.Release, "release_commit": p.ReleaseCommit, "release_requested": p.ReleaseRequested,
@@ -155,6 +172,7 @@ func (m *Module) propose(r *http.Request, actor tenant.Principal) (any, error) {
 	var source Source
 	var files []File
 	var existing *Proposal
+	var privateTexts []string
 	err := m.tx(ctx, actor, "rules.write", func(tx pgx.Tx) error {
 		p, err := getProposal(ctx, tx, in.RequestID)
 		if err == nil {
@@ -185,6 +203,9 @@ func (m *Module) propose(r *http.Request, actor tenant.Principal) (any, error) {
 			}
 		}
 		files, err = cachedFiles(ctx, tx, source)
+		if err == nil && source.Repository == publicRepository {
+			privateTexts, err = m.privateTexts(ctx, tx, actor)
+		}
 		return err
 	})
 	if err != nil {
@@ -197,10 +218,14 @@ func (m *Module) propose(r *http.Request, actor tenant.Principal) (any, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := guardPrivateQuotes(privateTexts, in.Source, in.TLDR.EN, in.TLDR.DE, in.Explanation); err != nil {
+		return nil, err
+	}
 	g, err := m.appClient(ctx, actor.TenantID, source.Repository)
 	if err != nil {
 		return nil, err
 	}
+	defer g.revoke()
 	main, err := g.main(ctx, source.Repository)
 	if err != nil {
 		return nil, err
@@ -236,48 +261,37 @@ func (m *Module) propose(r *http.Request, actor tenant.Principal) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	var p Proposal
-	err = m.tx(ctx, actor, "rules.write", func(tx pgx.Tx) error {
-		var err error
-		p, err = getProposal(ctx, tx, in.RequestID)
-		if err != nil {
-			return err
-		}
+	return m.runProposal(ctx, actor, "rules.write", in.RequestID, func(ctx context.Context, p *Proposal) (string, error) {
 		if p.InputDigest != inputDigest(in) || p.ProposedBy != actor.ID {
-			return fail(409, "request_conflict", "That request UUID belongs to another proposal.")
+			return "", fail(409, "request_conflict", "That request UUID belongs to another proposal.")
 		}
 		if p.PRNumber > 0 {
-			return nil
+			return "", nil
 		}
-		// A changed base after a partial request must be inspected, not rebased
-		// underneath a possibly already published proposal branch.
 		if p.BaseCommit != main {
-			return fail(409, "base_changed", "Main moved during an unfinished proposal. Inspect its branch before starting a new request.")
+			return "", fail(409, "base_changed", "Main moved during an unfinished proposal. Inspect its branch before starting a new request.")
 		}
-		if err = g.preparePR(ctx, &p, changed, in.Explanation); err != nil {
-			return err
-		}
-		return saveProposal(ctx, tx, actor, p, "doctrine.proposed")
+		return "doctrine.proposed", g.preparePR(ctx, p, changed, in.Explanation)
 	})
-	return p, err
 }
 
 func (m *Module) refreshProposal(r *http.Request, actor tenant.Principal) (any, error) {
-	return m.withProposal(r, actor, "rules.write", func(ctx context.Context, tx pgx.Tx, g *GitHub, p *Proposal) error {
-		previousRelease := p.ReleaseCommit
+	return m.withProposal(r, actor, "rules.write", func(ctx context.Context, g *GitHub, p *Proposal) (string, error) {
+		previousRelease, previousMerge := p.ReleaseCommit, p.MergeCommit
 		if err := m.observe(ctx, g, p); err != nil {
-			return err
-		}
-		if err := countPins(ctx, tx, p); err != nil {
-			return err
+			return "", err
 		}
 		event := "doctrine.proposal_refreshed"
+		if p.MergeCommit != "" && previousMerge == "" {
+			event = "doctrine.merge_observed"
+		}
 		if p.ReleaseCommit != "" && previousRelease == "" {
 			event = "doctrine.released"
 		}
-		return saveProposal(ctx, tx, actor, *p, event)
+		return event, nil
 	})
 }
+
 func (m *Module) observe(ctx context.Context, g *GitHub, p *Proposal) error {
 	if p.PRNumber == 0 {
 		return nil
@@ -317,28 +331,69 @@ func (m *Module) observe(ctx context.Context, g *GitHub, p *Proposal) error {
 	return nil
 }
 
-// withProposal authorizes before credential reads and holds the proposal row
-// lock across the bounded external operation, serializing retries per tenant.
-func (m *Module) withProposal(r *http.Request, actor tenant.Principal, permission string, fn func(context.Context, pgx.Tx, *GitHub, *Proposal) error) (any, error) {
+// runProposal reserves a bounded per-proposal lease in a short transaction.
+// No transaction, connection or DB lock spans external I/O. The saved version
+// is the compare-and-set token; an expired worker cannot overwrite its successor.
+func (m *Module) runProposal(ctx context.Context, actor tenant.Principal, permission, id string, fn func(context.Context, *Proposal) (string, error)) (Proposal, error) {
+	var p Proposal
+	operationID := rand.Text()
+	err := m.tx(ctx, actor, permission, func(tx pgx.Tx) error {
+		var err error
+		p, err = getProposal(ctx, tx, id)
+		if err != nil {
+			return err
+		}
+		if p.OperationID != "" && time.Now().Before(p.OperationUntil) {
+			return fail(409, "proposal_busy", "This proposal is being checked. Refresh shortly.")
+		}
+		p.OperationID, p.OperationUntil = operationID, time.Now().Add(fetchTimeout+10*time.Second)
+		return saveProposal(ctx, tx, actor, &p, "")
+	})
+	if err != nil {
+		return p, err
+	}
+	// Release even on cancellation/errors, without persisting unconfirmed API
+	// results. A process crash is recovered by the bounded lease expiration.
+	defer func() {
+		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		_ = db.InTenant(cleanup, m.pool, actor.TenantID, func(tx pgx.Tx) error {
+			_, err := tx.Exec(cleanup, `UPDATE doctrine_proposals SET data=(data-'operation_id'-'operation_until') || jsonb_build_object('version',COALESCE((data->>'version')::bigint,0)+1) WHERE id=$1 AND data->>'operation_id'=$2`, id, operationID)
+			return err
+		})
+	}()
+	before := p
+	event, err := fn(ctx, &p)
+	if err != nil {
+		return p, err
+	}
+	err = m.tx(ctx, actor, permission, func(tx pgx.Tx) error {
+		if err := countPins(ctx, tx, &p); err != nil {
+			return err
+		}
+		if p == before {
+			event = ""
+		}
+		p.OperationID, p.OperationUntil = "", time.Time{}
+		return saveProposal(ctx, tx, actor, &p, event)
+	})
+	return p, err
+}
+
+func (m *Module) withProposal(r *http.Request, actor tenant.Principal, permission string, fn func(context.Context, *GitHub, *Proposal) (string, error)) (any, error) {
 	if err := m.proposalAccess(actor); err != nil {
 		return nil, err
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), fetchTimeout)
 	defer cancel()
-	var p Proposal
-	err := m.tx(ctx, actor, permission, func(tx pgx.Tx) error {
-		var err error
-		p, err = getProposal(ctx, tx, r.PathValue("proposalId"))
-		if err != nil {
-			return err
-		}
+	return m.runProposal(ctx, actor, permission, r.PathValue("proposalId"), func(ctx context.Context, p *Proposal) (string, error) {
 		g, err := m.appClient(ctx, actor.TenantID, p.Repository)
 		if err != nil {
-			return err
+			return "", err
 		}
-		return fn(ctx, tx, g, &p)
+		defer g.revoke()
+		return fn(ctx, g, p)
 	})
-	return p, err
 }
 func (m *Module) approveProposal(r *http.Request, actor tenant.Principal) (any, error) {
 	if actor.Kind != tenant.Person || actor.KeyCreatorID != "" {
@@ -353,89 +408,97 @@ func (m *Module) approveProposal(r *http.Request, actor tenant.Principal) (any, 
 	if !shaPattern.MatchString(in.Head) {
 		return nil, fail(400, "invalid_request", "Name the exact PR commit to approve.")
 	}
-	// Approval intent survives an uncertain merge response. No caller assertion
-	// can stand in for the independent gate read from GitHub.
-	_, err := m.withProposal(r, actor, "rules.publish", func(ctx context.Context, tx pgx.Tx, g *GitHub, p *Proposal) error {
+	// Approval intent survives an uncertain merge response. An already merged
+	// PR is an observation, never a new approval attributed to this person.
+	_, err := m.withProposal(r, actor, "rules.publish", func(ctx context.Context, g *GitHub, p *Proposal) (string, error) {
 		if in.Head != p.HeadSHA {
-			return fail(409, "stale_head", "Reload the PR before approving its current commit.")
+			return "", fail(409, "stale_head", "Reload the PR before approving its current commit.")
 		}
 		if p.ApprovedBy != "" {
-			return nil
+			return "", nil
 		}
 		pr, err := g.pr(ctx, *p)
 		if err != nil {
-			return err
+			return "", err
+		}
+		if validPull(*p, pr) && pr.Merged {
+			if !shaPattern.MatchString(pr.MergeCommit) {
+				return "", gitFail("the merge commit is invalid")
+			}
+			p.MergeCommit, p.State, p.GateReady = pr.MergeCommit, "merged", false
+			p.GateReason = "Merged outside Aeon; request its release in the repository."
+			return "doctrine.merge_observed", nil
 		}
 		review, reason, err := g.gate(ctx, *p, pr, m.app.GateLogin)
 		if err != nil {
-			return err
+			return "", err
 		}
 		if review == 0 {
-			return fail(409, "gate_closed", reason)
+			return "", fail(409, "gate_closed", reason)
 		}
-		p.ApprovedBy = actor.ID
-		p.GateReview = review
-		return saveProposal(ctx, tx, actor, *p, "doctrine.approved")
+		p.ApprovedBy, p.GateReview = actor.ID, review
+		return "doctrine.approved", nil
 	})
 	if err != nil {
 		return nil, err
 	}
-	// Check again immediately before the SHA-guarded merge. The repository's
-	// required checks and review protections are the final race-safe authority.
-	_, err = m.withProposal(r, actor, "rules.publish", func(ctx context.Context, tx pgx.Tx, g *GitHub, p *Proposal) error {
+	// Recheck protected-main gates immediately before the SHA-guarded merge.
+	_, err = m.withProposal(r, actor, "rules.publish", func(ctx context.Context, g *GitHub, p *Proposal) (string, error) {
 		if in.Head != p.HeadSHA {
-			return fail(409, "stale_head", "The approved PR commit changed.")
+			return "", fail(409, "stale_head", "The approved PR commit changed.")
+		}
+		if p.ApprovedBy == "" {
+			return "", fail(409, "external_merge", "This PR merged outside Aeon. Request its release in the repository.")
 		}
 		pr, err := g.pr(ctx, *p)
 		if err != nil {
-			return err
+			return "", err
 		}
 		if !validPull(*p, pr) {
-			return fail(409, "stale_head", "The PR head or target changed.")
+			return "", fail(409, "stale_head", "The PR head or target changed.")
 		}
 		if pr.Merged {
 			if p.MergeCommit == pr.MergeCommit {
-				return countPins(ctx, tx, p)
+				return "", nil
 			}
 			if !shaPattern.MatchString(pr.MergeCommit) {
-				return gitFail("the merge commit is invalid")
+				return "", gitFail("the merge commit is invalid")
 			}
-			p.MergeCommit = pr.MergeCommit
-			p.State = "merged"
-		} else {
-			review, reason, err := g.gate(ctx, *p, pr, m.app.GateLogin)
-			if err != nil {
-				return err
-			}
-			if review == 0 {
-				return fail(409, "gate_closed", reason)
-			}
-			p.GateReview = review
-			if err = g.merge(ctx, p); err != nil {
-				return err
-			}
+			p.MergeCommit, p.State, p.GateReady = pr.MergeCommit, "merged", false
+			return "doctrine.merge_observed", nil
+		}
+		review, reason, err := g.gate(ctx, *p, pr, m.app.GateLogin)
+		if err != nil {
+			return "", err
+		}
+		if review == 0 {
+			return "", fail(409, "gate_closed", reason)
+		}
+		p.GateReview = review
+		if err := g.merge(ctx, p); err != nil {
+			return "", err
 		}
 		p.GateReady = false
-		return saveProposal(ctx, tx, actor, *p, "doctrine.merged")
+		return "doctrine.merged", nil
 	})
 	if err != nil {
 		return nil, err
 	}
-	return m.withProposal(r, actor, "rules.publish", func(ctx context.Context, tx pgx.Tx, g *GitHub, p *Proposal) error {
+	return m.withProposal(r, actor, "rules.publish", func(ctx context.Context, g *GitHub, p *Proposal) (string, error) {
 		if p.MergeCommit == "" {
-			return fail(409, "not_merged", "The merge has not been confirmed.")
+			return "", fail(409, "not_merged", "The merge has not been confirmed.")
+		}
+		if p.ApprovedBy == "" {
+			return "", fail(409, "external_merge", "This PR merged outside Aeon. Request its release in the repository.")
 		}
 		if p.ReleaseRequested {
-			return countPins(ctx, tx, p)
+			return "", nil
 		}
-		if !p.ReleaseRequested {
-			if err := g.releaseRequest(ctx, *p); err != nil {
-				return err
-			}
-			p.ReleaseRequested = true
+		if err := g.releaseRequest(ctx, *p); err != nil {
+			return "", err
 		}
-		// A repository dispatch is a request, never evidence of a release.
-		return saveProposal(ctx, tx, actor, *p, "doctrine.release_requested")
+		p.ReleaseRequested = true
+		return "doctrine.release_requested", nil
 	})
 }
 func (m *Module) reportPin(r *http.Request, actor tenant.Principal) (any, error) {
@@ -469,7 +532,7 @@ func (m *Module) reportPin(r *http.Request, actor tenant.Principal) (any, error)
 		if err = countPins(r.Context(), tx, &p); err != nil {
 			return err
 		}
-		return saveProposal(r.Context(), tx, actor, p, "doctrine.machine_pin_reported")
+		return saveProposal(r.Context(), tx, actor, &p, "doctrine.machine_pin_reported")
 	})
 	return p, err
 }

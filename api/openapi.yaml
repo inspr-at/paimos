@@ -447,7 +447,7 @@ paths:
                   proposals: {type: array, items: {"$ref": "#/components/schemas/DoctrineProposal"}}
     post:
       operationId: proposeDoctrineChange
-      description: "Workspace rules.write. Requires a server-configured GitHub App, operator-acknowledged DCO contribution policy and its designated tenant. The App key reference requires an operator-owned tenant/exact-repository allowlist grant, checked before key use for each proposal, refresh or approval. Tokens are narrowed to the owning repository; all GitHub requests use https://api.github.com with redirects disabled. Commit authorship and sign-off use the verified App bot identity. The source determines the owning repository; only inspr-at/inspr-modules and inspr-at/inspr-doctrine-private are writable. An identity-bearing public proposal is refused before ANY GitHub write. Source, main-file blob and rule digest must match. Reuse request_id with identical input to recover a timeout; another input returns 409. No draft prose is retained in Aeon."
+      description: "Workspace rules.write. Requires a server-configured GitHub App, operator-acknowledged DCO contribution policy and its designated tenant. The App key reference requires an operator-owned tenant/exact-repository allowlist grant, checked before key use for each proposal, refresh or approval. Tokens are narrowed to the owning repository; all GitHub requests use https://api.github.com with redirects disabled. Commit authorship and sign-off use the verified App bot identity. The source determines the owning repository; only inspr-at/inspr-modules and inspr-at/inspr-doctrine-private are writable. Before ANY GitHub write, the changed rule, its TLDR entry and explanation are Unicode-normalized and checked for identity patterns and quotations from the indexed private doctrine rules and TLDRs. Public proposals require an available, authorized private index; unchanged file content is not scanned. GitHub I/O holds no database locks: short authorized transactions reserve a per-proposal lease and compare the saved version before applying results. Source, main-file blob and rule digest must match. Reuse request_id with identical input to recover a timeout; another input returns 409. No draft prose is retained in Aeon."
       requestBody:
         required: true
         content:
@@ -469,7 +469,7 @@ paths:
       - {name: proposalId, in: path, required: true, schema: {type: string, format: uuid}}
     post:
       operationId: refreshDoctrineProposal
-      description: "Workspace rules.write. Observe PR/check/review/release state from GitHub; never merge or dispatch. A release is accepted only with owning-repo provenance for this proposal and merge, and a tag resolving to that merge or its descendant."
+      description: "Workspace rules.write. Observe PR/check/review/release state from GitHub; never merge or dispatch. An unchanged refresh emits no event. A release is accepted only with owning-repo provenance for this proposal and merge, and a tag resolving to that merge or its descendant."
       responses:
         "200":
           description: Current proposal
@@ -481,7 +481,7 @@ paths:
       - {name: proposalId, in: path, required: true, schema: {type: string, format: uuid}}
     post:
       operationId: approveDoctrineProposal
-      description: "Person-only workspace rules.publish, no agent/key approval. Body head_sha must match the recorded and live PR head. Requires protected main, clean mergeability, and the configured independent gate account's latest APPROVED review on that exact head with explicit ok, checks_green, and distinct author/reviewer families. GitHub enforces required checks at merge; the App must not bypass protections. Record the approval before attempting the SHA-guarded merge. Dispatch doctrine-release to the owning repo after merge (idempotency key proposal id); the repo reserves CalVer3 under its own flow. Refresh observes the published release; dispatch alone is never released. Repeating approval recovers uncertain merge/dispatch outcomes."
+      description: "Person-only workspace rules.publish, no agent/key approval. Body head_sha must match the recorded and live PR head. Requires protected main, clean mergeability, and the configured independent gate account's latest APPROVED review on that exact head with explicit ok, checks_green, and distinct author/reviewer families. GitHub enforces required checks at merge; the App must not bypass protections. Record the approval before attempting the SHA-guarded merge. Dispatch doctrine-release to the owning repo after merge (idempotency key proposal id); the repo reserves CalVer3 under its own flow. Refresh observes the published release; dispatch alone is never released. Repeating approval recovers uncertain merge/dispatch outcomes. A merge observed outside Aeon is recorded as an observation, never attributed to the observing person as approver; without an existing Aeon approval, release must be requested in the owning repository."
       requestBody:
         required: true
         content:

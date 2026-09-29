@@ -218,7 +218,7 @@ func (m *Module) tx(ctx context.Context, p tenant.Principal, permission string, 
 		// Proposal mutations serialize with workspace access changes. Check
 		// authority after taking the same tenant lock used by role writers.
 		if permission == "rules.write" || permission == "rules.publish" {
-			if _, err := tx.Exec(ctx, `SELECT id FROM tenants WHERE id=$1 FOR UPDATE`, p.TenantID); err != nil {
+			if _, err := tx.Exec(ctx, `SELECT id FROM tenants WHERE id=$1 FOR NO KEY UPDATE`, p.TenantID); err != nil {
 				return err
 			}
 		}

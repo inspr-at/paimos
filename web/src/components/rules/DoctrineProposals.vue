@@ -39,11 +39,11 @@ onMounted(async () => {
         <span class="state">{{ proposalState(p) }}</span>
         <span v-if="p.gate_reason && p.state === 'in_review'" class="quiet">{{ p.gate_reason }}</span>
         <a v-if="p.release_url" :href="p.release_url" target="_blank" rel="noopener noreferrer" class="quiet">{{ p.release }}</a>
-        <span v-else-if="p.state === 'merged'" class="quiet">{{ p.release_requested ? 'Release requested; waiting for the repository.' : 'Merged; release request still pending.' }}</span>
+        <span v-else-if="p.state === 'merged'" class="quiet">{{ p.release_requested ? 'Release requested; waiting for the repository.' : p.approved_by ? 'Merged; release request still pending.' : 'Merged outside Aeon; request release in the repository.' }}</span>
       </div>
       <div class="actions">
-        <button v-if="canWrite && p.pr_number" class="btn sm ghost" :disabled="!!busy" @click="update(p)">{{ busy === p.id ? 'Checking…' : 'Refresh' }}</button>
-        <button v-if="canApprove && (p.gate_ready || p.state === 'merged' && !p.release_requested)" class="btn sm primary" :disabled="!!busy" :title="`Approve commit ${p.head_sha}`" @click="update(p, true)">{{ p.state === 'merged' ? 'Request release' : 'Approve & merge' }}</button>
+        <button v-if="canWrite && p.pr_number" class="btn sm ghost" :disabled="!!busy" :aria-label="`Refresh ${p.repository} PR #${p.pr_number}`" @click="update(p)">{{ busy === p.id ? 'Checking…' : 'Refresh' }}</button>
+        <button v-if="canApprove && (p.gate_ready || p.state === 'merged' && p.approved_by && !p.release_requested)" class="btn sm primary" :disabled="!!busy" :aria-label="`${p.state === 'merged' ? 'Request release for' : 'Approve & merge'} ${p.repository} PR #${p.pr_number}`" :title="`Approve commit ${p.head_sha}`" @click="update(p, true)">{{ p.state === 'merged' ? 'Request release' : 'Approve & merge' }}</button>
       </div>
     </article>
   </div>
