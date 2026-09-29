@@ -282,6 +282,7 @@ var RoutePermissions = map[string]string{
 	"POST /api/knowledge":                                                                       "knowledge.write",
 	"POST /api/knowledge/learnings/{learningId}/accept":                                         "knowledge.write",
 	"POST /api/knowledge/learnings/{learningId}/dismiss":                                        "knowledge.write",
+	"POST /api/knowledge/learnings/{learningId}/draft":                                          "knowledge.write",
 	"POST /api/me/avatar":                                                                       "profile.write|profile.portal_write",
 	"GET /api/model-prices":                                                                     "harness.read",
 	"POST /api/model-prices":                                                                    "models.manage",

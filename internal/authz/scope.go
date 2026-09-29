@@ -98,7 +98,7 @@ func routeTarget(pattern string, values map[string]string) (kind, id string) {
 		return "node", values["nodeId"]
 	case strings.HasPrefix(pattern, "GET /api/knowledge/{id}") || strings.HasPrefix(pattern, "PATCH /api/knowledge/{id}") || strings.HasPrefix(pattern, "DELETE /api/knowledge/{id}"):
 		return "node", values["id"]
-	case pattern == "POST /api/knowledge/learnings/{learningId}/accept" || pattern == "POST /api/knowledge/learnings/{learningId}/dismiss":
+	case pattern == "POST /api/knowledge/learnings/{learningId}/accept" || pattern == "POST /api/knowledge/learnings/{learningId}/dismiss" || pattern == "POST /api/knowledge/learnings/{learningId}/draft":
 		// Accept and dismiss name the source item, not a project. The node's
 		// project_id is that item's project, including a project node itself.
 		nodeID, ok := learningSourceNode(values["learningId"])

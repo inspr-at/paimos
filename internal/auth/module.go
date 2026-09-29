@@ -389,7 +389,7 @@ func coreAgentScope(r *http.Request) (string, bool) {
 		// Listing candidates is ordinary knowledge read. Accept and dismiss stay
 		// with a person: an agent key has no authority on those two routes, and
 		// the handler refuses every agent again.
-		if r.Method == http.MethodPost && len(parts) == 4 && parts[1] == "learnings" && (parts[3] == "accept" || parts[3] == "dismiss") {
+		if r.Method == http.MethodPost && len(parts) == 4 && parts[1] == "learnings" && (parts[3] == "accept" || parts[3] == "dismiss" || parts[3] == "draft") {
 			return "", false
 		}
 		return scope("knowledge")

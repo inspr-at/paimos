@@ -65,6 +65,10 @@ export function plainError(status: number, code: string, message: string): strin
   if (code === 'person_required') return 'Only a person can accept or dismiss a method learning.'
   if (code === 'learning_closed') return 'This learning is no longer open.'
   if (code === 'already_decided') return 'This learning was already accepted or dismissed.'
+  if (code === 'rule_unavailable') return 'That rule set is not available.'
+  if (code === 'rule_forbidden') return 'You cannot draft rules in that set.'
+  if (code === 'already_in_set') return 'This learning is already a rule in that set.'
+  if (code === 'revision_conflict') return 'That rule set changed. Open it and try again.'
   if (status === 403) return 'You can read knowledge here but not change it.'
   if (status === 404) return 'This entry no longer exists.'
   if (code === 'slug_taken') return message.replace(/^another/, 'Another')
@@ -115,8 +119,9 @@ export interface MethodLearning {
 }
 export interface MethodLearningPage { items: MethodLearning[]; truncated: boolean }
 export interface MethodLearningDecision {
-  id: string; decision: 'accepted' | 'dismissed'; event_id: number
+  id: string; decision: 'accepted' | 'dismissed' | 'drafted'; event_id: number
   knowledge_id?: string; heading?: string; line?: string; entry?: KnowledgeEntry
+  rule_set_id?: string; rule_layer_id?: string; rule_identity?: string
 }
 export const listLearnings = (projectId: string, signal?: AbortSignal) =>
   send<MethodLearningPage>(`/learnings${query({ project_id: projectId })}`, { signal })
@@ -127,6 +132,8 @@ export const acceptLearning = (id: string, knowledgeId: string, ifUnmodifiedSinc
   })
 export const dismissLearning = (id: string) =>
   send<MethodLearningDecision>(`/learnings/${encodeURIComponent(id)}/dismiss`, { method: 'POST', body: {} })
+export const draftLearning = (id: string, body: { layer_id: string; set_id: string }) =>
+  send<MethodLearningDecision>(`/learnings/${encodeURIComponent(id)}/draft`, { method: 'POST', body })
 // Undo one knowledge write through the event log.
 export async function undoKnowledge(eventId: number): Promise<void> {
   const response = await api(`/events/${eventId}/undo`, { method: 'POST' })

@@ -20,6 +20,7 @@ func UndoHandlers() map[string]events.UndoFunc {
 	return map[string]events.UndoFunc{
 		evCreated: undoCreate, evUpdated: undoUpdate, evDeleted: undoDelete,
 		evLearningAccepted: undoLearningAccepted, evLearningDismissed: undoLearningDismissed,
+		evLearningDrafted: undoLearningDrafted,
 	}
 }
 

@@ -48,7 +48,11 @@
 //     heading whose text contains "changelog", or a new Changelog section),
 //     links the source, and appends knowledge.learning_accepted. Dismiss
 //     (POST .../dismiss) is person-only and appends knowledge.learning_dismissed.
-//     Agents may tag candidates; they cannot accept, dismiss or undo either.
+//     Draft (POST .../draft) is person-only: it appends one rule to a chosen
+//     rule draft and records knowledge.learning_drafted. It does not publish.
+//     Agents may tag candidates; they cannot accept, dismiss, draft or undo.
+//     A daily tagger nominates closed tickets, review verdicts and incident
+//     comments. It never accepts them. paimos serve starts it.
 //   - Principals with a viewer or read-only role cannot write (403).
 //
 // Every write runs in db.InTenant and appends one event in the same

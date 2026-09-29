@@ -34,6 +34,7 @@ const (
 
 var (
 	processLearningToken = regexp.MustCompile(`(?i)(^|[^A-Za-z0-9_-])#?process-learning([^A-Za-z0-9_-]|$)`)
+	incidentWord         = regexp.MustCompile(`(?i)(^|[^A-Za-z0-9_-])incident([^A-Za-z0-9_-]|$)`)
 	atxHeading           = regexp.MustCompile(`^(#{1,6})[ \t]+(.+?)\s*$`)
 	changelogWord        = regexp.MustCompile(`(?i)changelog`)
 	issueKinds           = map[string]bool{"ticket": true, "task": true, "epic": true}
@@ -52,6 +53,7 @@ type Learning struct {
 	Author    *Person   `json:"author"`
 	Href      string    `json:"href"`
 	projectID string
+	verdict   bool
 }
 
 // LearningPage is GET /api/knowledge/learnings.
@@ -72,13 +74,16 @@ type learningAudit struct {
 
 // LearningDecision is the result of accept or dismiss.
 type LearningDecision struct {
-	ID          string `json:"id"`
-	Decision    string `json:"decision"`
-	EventID     int64  `json:"event_id"`
-	KnowledgeID string `json:"knowledge_id,omitempty"`
-	Heading     string `json:"heading,omitempty"`
-	Line        string `json:"line,omitempty"`
-	Entry       *Entry `json:"entry,omitempty"`
+	ID           string `json:"id"`
+	Decision     string `json:"decision"`
+	EventID      int64  `json:"event_id"`
+	KnowledgeID  string `json:"knowledge_id,omitempty"`
+	Heading      string `json:"heading,omitempty"`
+	Line         string `json:"line,omitempty"`
+	Entry        *Entry `json:"entry,omitempty"`
+	RuleSetID    string `json:"rule_set_id,omitempty"`
+	RuleLayerID  string `json:"rule_layer_id,omitempty"`
+	RuleIdentity string `json:"rule_identity,omitempty"`
 }
 
 func closedLearning() error {
@@ -467,11 +472,18 @@ func listLearnings(ctx context.Context, tx pgx.Tx, tenantID, projectID string) (
 	if err != nil {
 		return page, err
 	}
-	items := append(tickets, comments...)
+	nominated, err := listNominated(ctx, tx, tenantID, projectID, projectKey, decided)
+	if err != nil {
+		return page, err
+	}
+	items := mergeNominations(append(tickets, comments...), nominated)
 	sortLearnings(items)
 	if len(items) > learningListLimit {
 		items = items[:learningListLimit]
 		page.Truncated = true
+	}
+	if items == nil {
+		items = []Learning{}
 	}
 	page.Items = items
 	return page, nil
@@ -646,7 +658,7 @@ func (m *module) acceptLearning(ctx context.Context, p tenant.Principal, publicI
 		if err != nil {
 			return err
 		}
-		if err := insertDecision(ctx, tx, p, item.projectID, publicID, "accepted", &current.ID, &heading, &line, ev.ID); err != nil {
+		if err := insertDecision(ctx, tx, p, item.projectID, publicID, "accepted", &current.ID, &heading, &line, ev.ID, nil, nil, nil); err != nil {
 			return err
 		}
 		entry, err := loadEntry(ctx, tx, p.TenantID, current.ID, false)
@@ -682,7 +694,7 @@ func (m *module) dismissLearning(ctx context.Context, p tenant.Principal, public
 		if err != nil {
 			return err
 		}
-		if err := insertDecision(ctx, tx, p, item.projectID, publicID, "dismissed", nil, nil, nil, ev.ID); err != nil {
+		if err := insertDecision(ctx, tx, p, item.projectID, publicID, "dismissed", nil, nil, nil, ev.ID, nil, nil, nil); err != nil {
 			return err
 		}
 		out = LearningDecision{ID: publicID, Decision: "dismissed", EventID: ev.ID}
@@ -708,11 +720,11 @@ func ensureUndecided(ctx context.Context, tx pgx.Tx, tenantID, publicID string) 
 	return alreadyDecided()
 }
 
-func insertDecision(ctx context.Context, tx pgx.Tx, p tenant.Principal, projectID, publicID, decision string, knowledgeID, heading, line *string, eventID int64) error {
+func insertDecision(ctx context.Context, tx pgx.Tx, p tenant.Principal, projectID, publicID, decision string, knowledgeID, heading, line *string, eventID int64, ruleSetID, ruleLayerID, ruleIdentity *string) error {
 	_, err := tx.Exec(ctx, `INSERT INTO method_learning_decisions
-	  (tenant_id, project_id, source_key, decision, knowledge_id, heading, line, decided_by, event_id)
-	  VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
-		p.TenantID, projectID, publicID, decision, knowledgeID, heading, line, p.ID, eventID)
+	  (tenant_id, project_id, source_key, decision, knowledge_id, heading, line, decided_by, event_id, rule_set_id, rule_layer_id, rule_identity)
+	  VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+		p.TenantID, projectID, publicID, decision, knowledgeID, heading, line, p.ID, eventID, ruleSetID, ruleLayerID, ruleIdentity)
 	if err != nil {
 		var pe *pgconn.PgError
 		if errors.As(err, &pe) && pe.Code == "23505" {
@@ -743,6 +755,14 @@ func loadOpen(ctx context.Context, tx pgx.Tx, tenantID, nodeID, commentID string
 	item.NodeID = nodeID
 	item.projectID = projectID
 	item.Href = learningHref(projectKey, item.Key, kind, slug)
+	publicID := nodeLearningID(nodeID)
+	if comment {
+		publicID = commentLearningID(nodeID, commentID)
+	}
+	nom, err := nominationOf(ctx, tx, tenantID, publicID)
+	if err != nil {
+		return Learning{}, err
+	}
 	if comment {
 		body, at, author, ok, err := openComment(ctx, tx, tenantID, nodeID, commentID)
 		if err != nil || !ok {
@@ -752,10 +772,34 @@ func loadOpen(ctx context.Context, tx pgx.Tx, tenantID, nodeID, commentID string
 			return Learning{}, closedLearning()
 		}
 		text, tagged := commentLearningText(body)
-		if !tagged {
+		if nom != nil {
+			switch nom.Origin {
+			case "review_verdict":
+				if !strings.Contains(body, "VERDICT") {
+					return Learning{}, closedLearning()
+				}
+				if nom.Excerpt != "" {
+					text = nom.Excerpt
+				}
+			case "incident_comment":
+				if !incidentWord.MatchString(body) {
+					return Learning{}, closedLearning()
+				}
+				if !tagged {
+					text = oneLine(body, false)
+				}
+			default:
+				if !tagged {
+					return Learning{}, closedLearning()
+				}
+			}
+		} else if !tagged {
 			return Learning{}, closedLearning()
 		}
-		item.ID = commentLearningID(nodeID, commentID)
+		if text == "" {
+			return Learning{}, closedLearning()
+		}
+		item.ID = publicID
 		item.Source = "comment"
 		item.CommentID = commentID
 		item.Text = text
@@ -763,16 +807,195 @@ func loadOpen(ctx context.Context, tx pgx.Tx, tenantID, nodeID, commentID string
 		item.Author = author
 		return item, nil
 	}
-	if !issueKinds[kind] || !hasLearningTag(fields) {
+	text := ""
+	tagged := issueKinds[kind] && hasLearningTag(fields)
+	if tagged {
+		text = oneLine(item.Title, false)
+	}
+	if nom != nil && (nom.Origin == "closed_ticket" || nom.Origin == "review_verdict") {
+		if !issueKinds[kind] {
+			return Learning{}, closedLearning()
+		}
+		if nom.Origin == "review_verdict" && nom.Excerpt != "" {
+			text = nom.Excerpt
+		} else if text == "" {
+			text = nom.Excerpt
+		}
+	} else if !tagged {
 		return Learning{}, closedLearning()
 	}
-	item.ID = nodeLearningID(nodeID)
+	if text == "" {
+		return Learning{}, closedLearning()
+	}
+	item.ID = publicID
 	item.Source = "ticket"
-	item.Text = oneLine(item.Title, false)
-	if item.Text == "" {
-		return Learning{}, closedLearning()
-	}
+	item.Text = text
 	return item, nil
+}
+
+type nomination struct {
+	Origin    string
+	Excerpt   string
+	CommentID string
+	NodeID    string
+	At        time.Time
+}
+
+func nominationOf(ctx context.Context, tx pgx.Tx, tenantID, sourceKey string) (*nomination, error) {
+	var nom nomination
+	var commentID *string
+	err := tx.QueryRow(ctx, `SELECT origin, excerpt, comment_id::text, node_id::text, nominated_at
+		FROM method_learning_nominations WHERE tenant_id=$1 AND source_key=$2`, tenantID, sourceKey).Scan(&nom.Origin, &nom.Excerpt, &commentID, &nom.NodeID, &nom.At)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if commentID != nil {
+		nom.CommentID = *commentID
+	}
+	return &nom, nil
+}
+
+func listNominated(ctx context.Context, tx pgx.Tx, tenantID, projectID, projectKey string, decided map[string]bool) ([]Learning, error) {
+	rows, err := tx.Query(ctx, `SELECT source_key, node_id::text, comment_id::text, origin, excerpt, nominated_at
+		FROM method_learning_nominations
+		WHERE tenant_id=$1 AND project_id=$2::uuid
+		ORDER BY nominated_at DESC
+		LIMIT `+strconv.Itoa(learningScanLimit), tenantID, projectID)
+	if err != nil {
+		return nil, err
+	}
+	// Resolve each nomination after the scan. A query on this transaction
+	// while rows are open is "conn busy".
+	defer rows.Close()
+	type nominatedHit struct {
+		sourceKey, nodeID, origin, excerpt string
+		commentID                          *string
+		at                                 time.Time
+	}
+	var hits []nominatedHit
+	for rows.Next() {
+		var hit nominatedHit
+		if err := rows.Scan(&hit.sourceKey, &hit.nodeID, &hit.commentID, &hit.origin, &hit.excerpt, &hit.at); err != nil {
+			return nil, err
+		}
+		hits = append(hits, hit)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	rows.Close()
+	var out []Learning
+	for _, hit := range hits {
+		if decided[hit.sourceKey] {
+			continue
+		}
+		comment := ""
+		if hit.commentID != nil {
+			comment = *hit.commentID
+		}
+		item, ok, err := learningFromNomination(ctx, tx, tenantID, projectID, projectKey, hit.sourceKey, hit.nodeID, comment, hit.origin, hit.excerpt, hit.at)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			out = append(out, item)
+		}
+	}
+	return out, nil
+}
+
+func learningFromNomination(ctx context.Context, tx pgx.Tx, tenantID, projectID, projectKey, sourceKey, nodeID, commentID, origin, excerpt string, at time.Time) (Learning, bool, error) {
+	var item Learning
+	var kind, slug string
+	err := tx.QueryRow(ctx, `SELECT n.key, n.title, n.updated_at, k.slug, coalesce(n.fields->>'slug','')
+		FROM nodes n
+		JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
+		WHERE n.tenant_id=$1 AND n.id=$2::uuid AND n.deleted_at IS NULL`, tenantID, nodeID).Scan(&item.Key, &item.Title, &item.At, &kind, &slug)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Learning{}, false, nil
+	}
+	if err != nil {
+		return Learning{}, false, err
+	}
+	item.NodeID = nodeID
+	item.ID = sourceKey
+	item.Href = learningHref(projectKey, item.Key, kind, slug)
+	item.projectID = projectID
+	switch origin {
+	case "closed_ticket":
+		if !issueKinds[kind] {
+			return Learning{}, false, nil
+		}
+		item.Source = "ticket"
+		item.Text = oneLine(item.Title, false)
+		if item.Text == "" {
+			item.Text = excerpt
+		}
+	case "review_verdict":
+		item.verdict = true
+		item.Text = excerpt
+		if commentID == "" {
+			if !issueKinds[kind] {
+				return Learning{}, false, nil
+			}
+			item.Source = "ticket"
+		} else {
+			body, commentAt, author, ok, err := openComment(ctx, tx, tenantID, nodeID, commentID)
+			if err != nil || !ok || !strings.Contains(body, "VERDICT") {
+				return Learning{}, false, err
+			}
+			item.Source = "comment"
+			item.CommentID = commentID
+			item.At = commentAt
+			item.Author = author
+		}
+	case "incident_comment":
+		body, commentAt, author, ok, err := openComment(ctx, tx, tenantID, nodeID, commentID)
+		if err != nil || !ok || !incidentWord.MatchString(body) {
+			return Learning{}, false, err
+		}
+		text, tagged := commentLearningText(body)
+		if !tagged {
+			text = oneLine(body, false)
+		}
+		if text == "" {
+			return Learning{}, false, nil
+		}
+		item.Source = "comment"
+		item.CommentID = commentID
+		item.Text = text
+		item.At = commentAt
+		item.Author = author
+	default:
+		return Learning{}, false, nil
+	}
+	if item.Text == "" {
+		return Learning{}, false, nil
+	}
+	if item.At.IsZero() {
+		item.At = at
+	}
+	return item, true, nil
+}
+
+func mergeNominations(items, nominated []Learning) []Learning {
+	index := map[string]int{}
+	for i, item := range items {
+		index[item.ID] = i
+	}
+	for _, nom := range nominated {
+		if at, ok := index[nom.ID]; ok {
+			if nom.verdict && nom.Text != "" {
+				items[at].Text = nom.Text
+			}
+			continue
+		}
+		items = append(items, nom)
+	}
+	return items
 }
 
 func openComment(ctx context.Context, tx pgx.Tx, tenantID, nodeID, commentID string) (string, time.Time, *Person, bool, error) {

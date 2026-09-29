@@ -31,6 +31,7 @@ const (
 	evDeleted           = "knowledge.deleted"
 	evLearningAccepted  = "knowledge.learning_accepted"
 	evLearningDismissed = "knowledge.learning_dismissed"
+	evLearningDrafted   = "knowledge.learning_drafted"
 )
 
 type module struct{ pool *pgxpool.Pool }
@@ -46,6 +47,7 @@ func (m *module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/knowledge/learnings", m.handleListLearnings)
 	mux.HandleFunc("POST /api/knowledge/learnings/{learningId}/accept", m.handleAcceptLearning)
 	mux.HandleFunc("POST /api/knowledge/learnings/{learningId}/dismiss", m.handleDismissLearning)
+	mux.HandleFunc("POST /api/knowledge/learnings/{learningId}/draft", m.handleDraftLearning)
 	mux.HandleFunc("GET /api/knowledge/{id}", m.handleGet)
 	mux.HandleFunc("PATCH /api/knowledge/{id}", m.handleUpdate)
 	mux.HandleFunc("DELETE /api/knowledge/{id}", m.handleDelete)

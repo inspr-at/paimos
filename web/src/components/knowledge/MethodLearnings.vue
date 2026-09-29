@@ -3,9 +3,10 @@
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { confirmAction } from '../../lib/confirm'
 import {
-  KnowledgeError, acceptLearning, dismissLearning, listLearnings, undoKnowledge,
+  KnowledgeError, acceptLearning, dismissLearning, draftLearning, listLearnings, undoKnowledge,
   type KnowledgeEntry, type KnowledgeItem, type MethodLearning,
 } from '../../lib/knowledge'
+import { listLayers, listSets, ROLE_LABEL, type RuleLayer, type RuleSet, type RoleName } from '../../lib/rules'
 import { toast } from '../../lib/toast'
 import { relativeTime } from '../../lib/work'
 import AppIcon from '../AppIcon.vue'
@@ -29,7 +30,14 @@ const busy = ref(false)
 const showAll = ref(false)
 const accepting = ref<MethodLearning | null>(null)
 const chosen = ref('')
+const destination = ref<'changelog' | 'draft'>('changelog')
+const layers = ref<RuleLayer[]>([])
+const sets = ref<RuleSet[]>([])
+const layerId = ref('')
+const setId = ref('')
+const rulesLoading = ref(false)
 const dialogError = ref('')
+let rulesLoaded = false
 const dialog = ref<HTMLDialogElement>()
 const heading = ref<HTMLHeadingElement>()
 const listEl = ref<HTMLElement>()
@@ -80,9 +88,72 @@ watch(choices, entries => {
 })
 onBeforeUnmount(() => controller?.abort())
 
+function layerOption(layer: RuleLayer): string {
+  const scope = layer.scope
+  if (scope.agent_id || scope.task_id) return ''
+  if (scope.layer === 'project') {
+    if (scope.project_id !== props.project.id) return ''
+    return props.project.title
+  }
+  if (scope.layer === 'person') return 'Your rules'
+  if (scope.layer === 'company') return 'Company'
+  if (scope.layer === 'agent' && scope.role) return `Agent role · ${ROLE_LABEL[scope.role as RoleName] ?? scope.role}`
+  return ''
+}
+const draftLayers = computed(() => layers.value.flatMap(layer => {
+  const label = layerOption(layer)
+  return label ? [{ id: layer.id, label }] : []
+}))
+
+async function loadSets() {
+  const id = layerId.value
+  if (!id) {
+    sets.value = []
+    setId.value = ''
+    return
+  }
+  rulesLoading.value = true
+  try {
+    const page = await listSets(id)
+    if (layerId.value !== id) return
+    sets.value = page.sets
+    setId.value = page.sets.some(set => set.id === setId.value) ? setId.value : (page.sets[0]?.id ?? '')
+  } catch (e) {
+    sets.value = []
+    setId.value = ''
+    dialogError.value = e instanceof Error ? e.message : 'Rule sets could not be loaded.'
+  } finally {
+    rulesLoading.value = false
+  }
+}
+async function loadRules() {
+  if (rulesLoaded) {
+    if (!draftLayers.value.some(layer => layer.id === layerId.value)) {
+      layerId.value = draftLayers.value[0]?.id ?? ''
+      await loadSets()
+    }
+    return
+  }
+  rulesLoading.value = true
+  dialogError.value = ''
+  try {
+    const page = await listLayers()
+    layers.value = page.layers
+    rulesLoaded = true
+    layerId.value = draftLayers.value[0]?.id ?? ''
+    await loadSets()
+  } catch (e) {
+    dialogError.value = e instanceof Error ? e.message : 'Rule sets could not be loaded.'
+  } finally {
+    rulesLoading.value = false
+  }
+}
+watch(destination, value => { if (value === 'draft') void loadRules() })
+
 function openAccept(item: MethodLearning, event: MouseEvent) {
   opener = event.currentTarget instanceof HTMLElement ? event.currentTarget : null
   accepting.value = item
+  destination.value = 'changelog'
   chosen.value = preferred(choices.value)?.id ?? ''
   dialogError.value = ''
   void nextTick(() => dialog.value?.showModal())
@@ -121,7 +192,33 @@ async function settleFocus(removedId: string, before: MethodLearning[]) {
 }
 function backdrop(event: MouseEvent) { if (event.target === dialog.value) close() }
 
+async function saveDraft() {
+  const item = accepting.value
+  const layer = layerId.value
+  const set = setId.value
+  if (!item || !layer || !set || busy.value) return
+  busy.value = true
+  dialogError.value = ''
+  try {
+    const decision = await draftLearning(item.id, { layer_id: layer, set_id: set })
+    const before = items.value.slice()
+    items.value = items.value.filter(row => row.id !== item.id)
+    close(false)
+    busy.value = false
+    toast('Saved as a rule draft.', { action: { label: 'Undo', run: () => void undo(decision.event_id) }, timeout: 8000 })
+    await settleFocus(item.id, before)
+  } catch (e) {
+    dialogError.value = e instanceof Error ? e.message : 'That could not be saved.'
+  } finally {
+    busy.value = false
+  }
+}
+
 async function accept() {
+  if (destination.value === 'draft') {
+    await saveDraft()
+    return
+  }
   const item = accepting.value
   const entry = chosenEntry.value
   if (!item || !entry || busy.value) return
@@ -226,22 +323,52 @@ async function undo(eventId: number) {
         <div class="head">
           <span class="mark" aria-hidden="true"><AppIcon name="book" :size="15" /></span>
           <div class="head-copy">
-            <h2 id="learn-accept-title">Add to a changelog</h2>
+            <h2 id="learn-accept-title">{{ destination === 'draft' ? 'Save a rule draft' : 'Add to a changelog' }}</h2>
           </div>
         </div>
-        <label class="pick" for="learn-entry">Entry</label>
-        <select id="learn-entry" v-model="chosen" class="entry" :disabled="!choices.length">
-          <option v-if="!choices.length" value="">No entry in this project yet</option>
-          <option v-for="entry in choices" :key="entry.id" :value="entry.id">{{ entry.title }}</option>
-        </select>
-        <p v-if="accepting" class="preview">
-          <span>{{ previewDate }}: {{ accepting.text }}.</span>
-          <span>Source: <a :href="accepting.href">{{ linkLabel(accepting.key) }}</a>.</span>
-        </p>
+        <fieldset class="dest">
+          <legend>Save it as</legend>
+          <div class="choices">
+            <label><input v-model="destination" type="radio" name="learn-dest" value="changelog" /> Changelog</label>
+            <label><input v-model="destination" type="radio" name="learn-dest" value="draft" /> Rule draft</label>
+          </div>
+        </fieldset>
+        <template v-if="destination === 'changelog'">
+          <label class="pick" for="learn-entry">Entry</label>
+          <select id="learn-entry" v-model="chosen" class="entry" :disabled="!choices.length">
+            <option v-if="!choices.length" value="">No entry in this project yet</option>
+            <option v-for="entry in choices" :key="entry.id" :value="entry.id">{{ entry.title }}</option>
+          </select>
+          <p v-if="accepting" class="preview">
+            <span>{{ previewDate }}: {{ accepting.text }}.</span>
+            <span>Source: <a :href="accepting.href">{{ linkLabel(accepting.key) }}</a>.</span>
+          </p>
+        </template>
+        <template v-else>
+          <p v-if="rulesLoading" class="wait">Loading rule sets…</p>
+          <p v-else-if="!draftLayers.length" class="wait">No rule set you can draft into.</p>
+          <template v-else>
+            <label class="pick" for="learn-layer">Layer</label>
+            <select id="learn-layer" v-model="layerId" class="entry" @change="loadSets()">
+              <option v-for="layer in draftLayers" :key="layer.id" :value="layer.id">{{ layer.label }}</option>
+            </select>
+            <p v-if="!rulesLoading && !sets.length" class="wait">No rule set you can draft into.</p>
+            <template v-else>
+              <label class="pick" for="learn-set">Rule set</label>
+              <select id="learn-set" v-model="setId" class="entry" :disabled="rulesLoading || !sets.length">
+                <option v-for="set in sets" :key="set.id" :value="set.id">{{ set.name }}</option>
+              </select>
+            </template>
+          </template>
+          <p v-if="accepting" class="preview">
+            <span>{{ accepting.text }}</span>
+            <span>Publishing stays a separate approval.</span>
+          </p>
+        </template>
         <p v-if="dialogError" class="problem" role="alert">{{ dialogError }}</p>
         <div class="foot">
           <button type="button" class="btn" @click="close">Cancel</button>
-          <button type="submit" class="btn primary" :disabled="busy || !chosen">{{ busy ? 'Adding…' : 'Add to changelog' }}</button>
+          <button type="submit" class="btn primary" :disabled="busy || (destination === 'changelog' ? !chosen : rulesLoading || !setId)">{{ destination === 'draft' ? (busy ? 'Saving…' : 'Save rule draft') : (busy ? 'Adding…' : 'Add to changelog') }}</button>
         </div>
       </form>
     </dialog>
@@ -268,7 +395,11 @@ h2 { margin: 0; font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
 .learn-dialog::backdrop { background: var(--scrim); }
 .learn-card { display: grid; gap: 10px; max-height: calc(100dvh - 24px); overflow: auto; padding: 18px 18px 16px; border-radius: var(--radius); border: 1px solid var(--glass-edge); background: linear-gradient(165deg, var(--surface-raised), var(--surface-raised-2)); box-shadow: var(--shadow-pop), var(--shadow); }
 .pick { font-size: 12.5px; font-weight: 600; color: var(--ink-2); }
-.entry { width: 100%; min-width: 0; min-height: 40px; padding: 0 10px; border-radius: 10px; border: 1px solid var(--line-2); background: var(--field-bg); color: var(--ink); }
+.dest { margin: 0; padding: 0; border: 0; min-width: 0; }
+.dest legend { padding: 0; font-size: 12.5px; font-weight: 600; color: var(--ink-2); }
+.choices { display: flex; flex-wrap: wrap; gap: 8px 16px; margin-top: 6px; }
+.choices label { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; font-size: 14px; }
+.entry { width: 100%; min-width: 0; max-width: 100%; min-height: 40px; padding: 0 10px; border-radius: 10px; border: 1px solid var(--line-2); background: var(--field-bg); color: var(--ink); }
 .disclose { margin-top: 10px; }
 .preview { display: grid; gap: 4px; margin: 0; padding: 10px 12px; border-radius: 10px; background: var(--code-bg); color: var(--ink); font-size: 13px; line-height: 1.45; }
 .preview span { overflow-wrap: anywhere; }

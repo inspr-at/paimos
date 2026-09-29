@@ -2205,11 +2205,13 @@ paths:
     get:
       operationId: listMethodLearnings
       description: |
-        Open method learnings for one project (AEON-275). A learning is a live
-        ticket, task or epic in that project whose tags include process-learning,
-        or a comment on a node in the project whose current text contains that
-        tag as its own word (an optional leading # is allowed). Accepted and
-        dismissed items are omitted. At most 50, newest first.
+        Open method learnings for one project (AEON-275, AEON-288). A learning is
+        a live ticket, task or epic in that project whose tags include
+        process-learning, a comment on a node in the project whose current text
+        contains that tag as its own word (an optional leading # is allowed),
+        or a nomination from the daily tagger that is still open. A review
+        verdict's stored excerpt is the line shown. Accepted, dismissed and
+        drafted items are omitted. At most 50, newest first.
       security: *auth
       parameters:
         - {name: project_id, in: query, required: true, schema: {type: string, format: uuid}}
@@ -2274,6 +2276,37 @@ paths:
       responses:
         '200':
           description: Dismissed
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MethodLearningDecision'}
+        '400':
+          $ref: '#/components/responses/Error'
+        '403':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+        '409':
+          $ref: '#/components/responses/Error'
+  /knowledge/learnings/{learningId}/draft:
+    post:
+      operationId: draftMethodLearning
+      description: |
+        A person with knowledge.write turns one open method learning into a
+        single rule in the chosen draft (AEON-288). The rule's text is the
+        learning line. Its source records the learning id and the node.
+        Publishing stays a separate person approval and is not performed.
+        Agents cannot draft. A second decision on the same learning is 409.
+      parameters:
+        - {name: learningId, in: path, required: true, schema: {type: string}}
+      security: *auth
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/MethodLearningDraft'}
+      responses:
+        '200':
+          description: Drafted into the chosen rule set
           content:
             application/json:
               schema: {$ref: '#/components/schemas/MethodLearningDecision'}
@@ -9105,17 +9138,27 @@ components:
       additionalProperties: false
       properties:
         knowledge_id: {type: string, format: uuid}
+    MethodLearningDraft:
+      type: object
+      required: [layer_id, set_id]
+      additionalProperties: false
+      properties:
+        layer_id: {type: string, format: uuid}
+        set_id: {type: string, format: uuid}
     MethodLearningDecision:
       type: object
       required: [id, decision, event_id]
       properties:
         id: {type: string}
-        decision: {type: string, enum: [accepted, dismissed]}
+        decision: {type: string, enum: [accepted, dismissed, drafted]}
         event_id: {type: integer, format: int64}
         knowledge_id: {type: string, format: uuid}
         heading: {type: string}
         line: {type: string}
         entry: {$ref: '#/components/schemas/KnowledgeEntry'}
+        rule_set_id: {type: string, format: uuid}
+        rule_layer_id: {type: string, format: uuid}
+        rule_identity: {type: string}
     KnowledgeCreate:
       type: object
       required: [project_id, type, slug, title]

@@ -219,6 +219,14 @@ export async function mockKnowledge(page: Page, world: KnowledgeWorld, options: 
         world.learnings = world.learnings.filter(item => item.id !== id)
         return json(route, 200, { id, decision: 'accepted', event_id: eventId, knowledge_id: entry.id, heading: 'Changelog', line, entry: full(entry, { event_id: eventId }) })
       }
+      if (parts[2] === 'draft' && method === 'POST') {
+        const input = body as { layer_id?: string; set_id?: string }
+        const eventId = ++world.counter.event
+        world.decisions.push({ event_id: eventId, item: found })
+        world.learnings = world.learnings.filter(item => item.id !== id)
+        const identity = found.source === 'comment' ? `learn.c.${found.node_id}.${found.comment_id}` : `learn.n.${found.node_id}`
+        return json(route, 200, { id, decision: 'drafted', event_id: eventId, rule_set_id: input.set_id, rule_layer_id: input.layer_id, rule_identity: identity })
+      }
       return json(route, 400, { error: 'invalid request', code: 'invalid_request' })
     }
     if (!parts.length && method === 'GET') {

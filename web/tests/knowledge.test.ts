@@ -29,6 +29,10 @@ test('method-learning errors stay specific when the status is also 403 or 404', 
   assert.equal(plainError(409, 'already_decided', 'done'), 'This learning was already accepted or dismissed.')
   assert.equal(plainError(403, 'forbidden', 'no'), 'You can read knowledge here but not change it.')
   assert.equal(plainError(404, 'not_found', 'gone'), 'This entry no longer exists.')
+  assert.equal(plainError(404, 'rule_unavailable', 'missing'), 'That rule set is not available.')
+  assert.equal(plainError(403, 'rule_forbidden', 'no'), 'You cannot draft rules in that set.')
+  assert.equal(plainError(409, 'already_in_set', 'dup'), 'This learning is already a rule in that set.')
+  assert.equal(plainError(409, 'revision_conflict', 'stale'), 'That rule set changed. Open it and try again.')
 })
 
 test('slugs: suggestions from titles, unique, and the rules agents rely on', () => {

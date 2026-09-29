@@ -175,6 +175,78 @@ test('an empty inbox leaves the knowledge tab in place', async ({ page }) => {
   expect(await overflow(page)).toBeLessThanOrEqual(1)
 })
 
+test('a person can save a learning as a rule draft', async ({ page }) => {
+  const ids = {
+    projectLayer: '11111111-1111-4111-8111-111111111111',
+    foreignLayer: '22222222-2222-4222-8222-222222222222',
+    personLayer: '33333333-3333-4333-8333-333333333333',
+    companyLayer: '44444444-4444-4444-8444-444444444444',
+    roleLayer: '55555555-5555-4555-8555-555555555555',
+    namedLayer: '66666666-6666-4666-8666-666666666666',
+    namedAgent: '77777777-7777-4777-8777-777777777777',
+    foreignProject: '99999999-9999-4999-8999-999999999999',
+    projectSet: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1',
+    personSet: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2',
+    companySet: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa3',
+    roleSet: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa4',
+  }
+  const setFor: Record<string, { id: string; name: string }> = {
+    [ids.projectLayer]: { id: ids.projectSet, name: 'Safety' },
+    [ids.personLayer]: { id: ids.personSet, name: 'Personal' },
+    [ids.companyLayer]: { id: ids.companySet, name: 'Floor' },
+    [ids.roleLayer]: { id: ids.roleSet, name: 'Builder rules' },
+  }
+  for (const width of [1600, 390]) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
+    const { calls } = await open(page)
+    await page.route('**/api/rules/**', async route => {
+      const url = new URL(route.request().url())
+      if (url.pathname.endsWith('/rules/layers')) {
+        await route.fulfill({ json: { layers: [
+          { id: ids.foreignLayer, scope: { layer: 'project', project_id: ids.foreignProject } },
+          { id: ids.projectLayer, scope: { layer: 'project', project_id: 'p-pharos' } },
+          { id: ids.namedLayer, scope: { layer: 'agent', owner_id: me.id, agent_id: ids.namedAgent } },
+          { id: ids.personLayer, scope: { layer: 'person', owner_id: me.id } },
+          { id: ids.companyLayer, scope: { layer: 'company' } },
+          { id: ids.roleLayer, scope: { layer: 'agent', role: 'builder' } },
+        ] } })
+        return
+      }
+      if (url.pathname.endsWith('/rules/sets')) {
+        const found = setFor[url.searchParams.get('layer_id') ?? '']
+        await route.fulfill({ json: { sets: found ? [{ id: found.id, layer_id: url.searchParams.get('layer_id'), scope: { layer: 'company' }, name: found.name, revision: 1, rules: [], published_version: '' }] : [] } })
+        return
+      }
+      await route.fulfill({ status: 404, json: { error: 'missing' } })
+    })
+    await card(page, 'Write the release note in the same turn').getByRole('button', { name: /^Accept PHAROS-11:/ }).click()
+    const changelog = page.getByRole('dialog', { name: 'Add to a changelog' })
+    await expect(changelog.getByRole('button', { name: 'Add to changelog' })).toBeVisible()
+    await expect(changelog.locator('.btn.primary')).toHaveCount(1)
+    await changelog.getByRole('button', { name: 'Add to changelog' }).click()
+    expect(calls.filter(call => call.method === 'POST' && call.path.endsWith('/accept')).at(-1)?.body).toEqual({ knowledge_id: 'k-deploy' })
+
+    await card(page, 'Renumber at integration').getByRole('button', { name: /^Accept PHAROS-12:/ }).click()
+    await page.getByRole('dialog', { name: 'Add to a changelog' }).getByRole('radio', { name: 'Rule draft' }).click()
+    const dialog = page.getByRole('dialog', { name: 'Save a rule draft' })
+    await expect(dialog.getByLabel('Entry')).toHaveCount(0)
+    const layer = dialog.getByLabel('Layer')
+    await expect(layer.locator('option')).toHaveText(['Pharos', 'Your rules', 'Company', 'Agent role · Builder'])
+    expect((await layer.locator('option').allTextContents()).join('\n')).not.toMatch(/[0-9a-f]{8}-[0-9a-f]{4}-/)
+    await expect(dialog.getByText(ids.foreignProject)).toHaveCount(0)
+    await expect(dialog.getByText(ids.namedAgent)).toHaveCount(0)
+    await layer.selectOption({ label: 'Pharos' })
+    await dialog.getByLabel('Rule set').selectOption({ label: 'Safety' })
+    await expect(dialog.getByText('Renumber at integration')).toBeVisible()
+    await expect(dialog.getByText('Publishing stays a separate approval.')).toBeVisible()
+    await expect(dialog.locator('.btn.primary')).toHaveCount(1)
+    expect(await overflow(page)).toBeLessThanOrEqual(1)
+    await dialog.getByRole('button', { name: 'Save rule draft' }).click()
+    expect(calls.filter(call => call.method === 'POST' && call.path.endsWith('/draft')).at(-1)?.body).toEqual({ layer_id: ids.projectLayer, set_id: ids.projectSet })
+    await expect(page.getByText('Saved as a rule draft.')).toBeVisible()
+  }
+})
+
 test('the inbox has no axe violations', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 })
   await open(page)
