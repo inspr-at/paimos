@@ -645,6 +645,7 @@ func (rt *runtime) openHeartbeatSession(ctx context.Context, o heartbeatOptions,
 	if o.Parent != "" {
 		body["parent_harness_session_id"] = strings.ToLower(o.Parent)
 	}
+	attachVendorSessionRef(body, o.Harness, ref, lease)
 	if o.Ticket != "" {
 		ticketID, err := rt.harnessTicket(projectID, o.Ticket, 0)
 		if err != nil {

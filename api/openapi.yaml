@@ -2459,6 +2459,35 @@ paths:
         '403': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
         '409': {$ref: '#/components/responses/Error'}
+  /inbox/session-binding:
+    post:
+      operationId: resolveInboxSessionBinding
+      summary: Resolve the caller's active generation from a harness-native session reference
+      description: Requires inbox.send. The reference is write-only and is matched as a digest against the caller's active harness_session_ref or vendor_session_ref. Exactly one active generation returns its Aeon session id. None or several is 404, including another principal's row. Stopped and archived generations are excluded.
+      security: *auth
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [harness_session_ref]
+              properties:
+                harness_session_ref: {type: string, minLength: 16, maxLength: 4096, writeOnly: true}
+      responses:
+        '200':
+          description: The caller's active generation
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [session_id]
+                properties:
+                  session_id: {type: string, format: uuid}
+        '400': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
   /inbox/stream:
     get:
       operationId: streamInbox
@@ -3338,7 +3367,7 @@ paths:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
     post:
       operationId: sendProjectMessage
-      description: Optional session bindings are additive; unbound sends preserve principal-inbox behavior. Session-bound messages never use principal-wide transport targets.
+      description: Optional session bindings are additive; unbound sends preserve principal-inbox behavior. Session-bound messages never use principal-wide transport targets. A reply may omit a session binding. An explicit different generation is not found.
       requestBody: {required: true, content: {application/json: {schema: {$ref: './openapi-messaging.yaml#/components/schemas/Send'}}}}
       responses:
         '201': {description: Durable message, content: {application/json: {schema: {$ref: '#/components/schemas/ProjectMessage'}}}}
@@ -7947,6 +7976,12 @@ components:
         work_shape: {type: string, enum: [unknown, ship, scout]}
         advertised_capabilities: {type: array, items: {type: string, enum: [inbox, status, steer, interrupt, stop, managed_control_v1, rename, model, effort]}}
         harness_session_ref: {type: string, minLength: 16, maxLength: 4096, writeOnly: true}
+        vendor_session_ref:
+          type: string
+          minLength: 16
+          maxLength: 4096
+          writeOnly: true
+          description: Optional harness-native session id, digested like harness_session_ref. Omitted on replay does not clear a stored value. The same value as harness_session_ref is not stored again.
         worker_lease: {type: string, minLength: 32, maxLength: 256, writeOnly: true}
     HarnessProcessOwnership:
       type: object

@@ -276,6 +276,7 @@ var RoutePermissions = map[string]string{
 	"POST /api/events/{eventId}/undo":                                                           "events.undo",
 	"POST /api/inbox/messages":                                                                  "inbox.send",
 	"POST /api/inbox/messages/{messageId}/ack":                                                  "inbox.send",
+	"POST /api/inbox/session-binding":                                                           "inbox.send",
 	"POST /api/inbox/targets":                                                                   "inbox.send|inbox.manage",
 	"POST /api/kinds":                                                                           "kinds.manage",
 	"POST /api/knowledge":                                                                       "knowledge.write",

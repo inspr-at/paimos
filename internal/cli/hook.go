@@ -74,8 +74,21 @@ func (rt *runtime) runInboxHook(ctx context.Context, event string) error {
 		return err
 	}
 	session, err := inboxHookSession()
-	if err != nil || session == "" {
+	if err != nil {
 		return err
+	}
+	// A configured explicit binding that is missing or empty stays a no-op.
+	// Only a session with none of the AEON_SESSION sources set may use the vendor id.
+	if session == "" && os.Getenv("AEON_SESSION_ID") == "" && os.Getenv("AEON_SESSION_FILE") == "" && os.Getenv("AEON_SESSION_STATE_DIR") == "" {
+		if ref := normalizeVendorRef(input.Session); ref != "" {
+			session, err = rt.lookupVendorSession(ctx, ref)
+			if err != nil {
+				return err
+			}
+		}
+	}
+	if session == "" {
+		return nil
 	}
 	// exact_session (AEON-280) makes the server return only rows bound to this
 	// generation; the client-side check below stays as defense in depth.

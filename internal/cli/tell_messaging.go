@@ -74,6 +74,15 @@ func (rt *runtime) cmdMessagingTell() *Command {
 			if reply != "" && !validUUID(reply) {
 				return usagef("--reply-to must be a UUID")
 			}
+			if reply != "" && senderSession == "" {
+				if vendor := ambientVendorSessionRef(); vendor != "" {
+					resolved, resolveErr := rt.lookupVendorSession(context.Background(), vendor)
+					if resolveErr != nil {
+						return rt.fail(resolveErr, vendor)
+					}
+					senderSession = resolved
+				}
+			}
 			if len(key) > 128 || strings.ContainsRune(key, 0) {
 				return usagef("invalid --idempotency-key")
 			}

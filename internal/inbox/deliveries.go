@@ -209,11 +209,12 @@ func (m *messaging) commitMessage(ctx context.Context, p tenant.Principal, proje
 			if err != nil {
 				return err
 			}
-			// An exact reply cannot be claimed by a different generation.
-			if parentRecipientSession != nil && !sameSession(in.SenderSessionID, parentRecipientSession) {
+			// An omitted session is not a different generation. An explicit
+			// mismatch stays hidden, including after the parent was acknowledged.
+			if parentRecipientSession != nil && in.SenderSessionID != nil && !sameSession(in.SenderSessionID, parentRecipientSession) {
 				return errNotFound
 			}
-			if parentSenderSession != nil && !sameSession(in.RecipientSessionID, parentSenderSession) {
+			if parentSenderSession != nil && in.RecipientSessionID != nil && !sameSession(in.RecipientSessionID, parentSenderSession) {
 				return errNotFound
 			}
 			if thread != "" && thread != parentThread {
