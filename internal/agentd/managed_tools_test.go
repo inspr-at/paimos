@@ -70,7 +70,11 @@ func TestManagedToolsRunBinding(t *testing.T) {
 	active := true
 	const token = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" // gitleaks:allow synthetic test token
 	doneRequested := false
-	host, err := startManagedTools(token, toolBinding{api: f, workOrderID: "order-a", runID: "run-a", workspace: t.TempDir(), branch: "aeon/run-a", active: func() bool { return active }, requestDone: func() { doneRequested = true }, replySender: func(id string) (string, bool) {
+	workspace, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	host, err := startManagedTools(token, toolBinding{api: f, workOrderID: "order-a", runID: "run-a", workspace: workspace, branch: "aeon/run-a", active: func() bool { return active }, requestDone: func() { doneRequested = true }, replySender: func(id string) (string, bool) {
 		if id == "33333333-3333-3333-3333-333333333333" {
 			return "44444444-4444-4444-4444-444444444444", true
 		}
@@ -101,6 +105,15 @@ func TestManagedToolsRunBinding(t *testing.T) {
 			t.Fatalf("%s error=%v want %v", name, result.IsError, wantError)
 		}
 	}
+	call("aeon_write", map[string]any{"file_path": "source.txt", "content": "before"}, false)
+	call("aeon_edit", map[string]any{"file_path": "source.txt", "old_string": "before", "new_string": "after"}, false)
+	call("aeon_read", map[string]any{"file_path": "source.txt"}, false)
+	call("aeon_glob", map[string]any{"pattern": "*.txt"}, false)
+	call("aeon_grep", map[string]any{"pattern": "after"}, false)
+	call("aeon_read", map[string]any{"file_path": "../outside"}, true)
+	if data, err := os.ReadFile(filepath.Join(workspace, "source.txt")); err != nil || string(data) != "after" {
+		t.Fatal("MCP file proxy did not apply edit")
+	}
 	call("aeon_comment", map[string]any{"body": "progress"}, false)
 	call("aeon_status", map[string]any{"status": "blocked", "expected_revision": int64(4)}, false)
 	call("aeon_status", map[string]any{"status": "done", "expected_revision": int64(4)}, false)
@@ -112,6 +125,8 @@ func TestManagedToolsRunBinding(t *testing.T) {
 		t.Fatalf("wrong binding: %+v", f)
 	}
 	active = false
+	call("aeon_write", map[string]any{"file_path": "source.txt", "content": "late"}, true)
+	call("aeon_read", map[string]any{"file_path": "source.txt"}, true)
 	call("aeon_comment", map[string]any{"body": "late"}, true)
 	if len(f.comments) != 1 {
 		t.Fatal("expired run wrote a comment")
@@ -400,10 +415,13 @@ func TestTerminalDefaultDenyProfile(t *testing.T) {
 	if !strings.HasPrefix(profile, "(version 1) (deny default)") {
 		t.Fatal("terminal is not default deny")
 	}
-	for _, forbidden := range []string{"(allow default)", "(allow network", "localhost", "unix-socket", `(subpath "/")`, `(subpath "/Users")`, `(subpath "/private")`, `(subpath "/var/run")`, `(subpath "/nix/store")`} {
+	for _, forbidden := range []string{"(allow default)", "(allow sysctl-read)", "(allow network", "localhost", "unix-socket", `(subpath "/")`, `(subpath "/Users")`, `(subpath "/private")`, `(subpath "/var/run")`, `(subpath "/nix/store")`} {
 		if strings.Contains(profile, forbidden) {
 			t.Fatalf("broad permission: %s", forbidden)
 		}
+	}
+	if !strings.Contains(profile, "(deny process-info*)") || !strings.Contains(profile, `(deny sysctl-read (sysctl-name-prefix "kern.procargs"))`) {
+		t.Fatal("process argument introspection is not explicitly denied")
 	}
 	for _, root := range []string{"/fixture/work", "/fixture/private-temp"} {
 		if !strings.Contains(profile, fmt.Sprintf("(allow file-read* file-write* (subpath %q))", root)) {
@@ -493,5 +511,20 @@ func TestTerminalGitChecksUseBoundProbe(t *testing.T) {
 	}
 	if len(queries) != 2 {
 		t.Fatal("unsafe path reached git")
+	}
+}
+
+func TestClaudeEnvironmentDoesNotInheritDaemonSettings(t *testing.T) {
+	for _, name := range []string{"AEON_DATABASE_URL", "AEON_TEST_DATABASE_URL", "AEON_RUNTIME_KEY", "DATABASE_URL", "ANTHROPIC_API_KEY", "NODE_OPTIONS", "DYLD_INSERT_LIBRARIES", "PATH", "HOME", "CLAUDE_CONFIG_DIR"} {
+		t.Setenv(name, "inherited-fixture-value")
+	}
+	values := claudeEnvironment("/fixture/account", "/fixture/node/bin/node", "/fixture/claude/bin/claude")
+	if len(values) != 5 {
+		t.Fatal("unexpected bridge environment surface")
+	}
+	for _, value := range values {
+		if strings.Contains(value, "inherited-fixture-value") {
+			t.Fatal("bridge inherited daemon environment")
+		}
 	}
 }

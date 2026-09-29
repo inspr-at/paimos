@@ -106,6 +106,7 @@ type terminalArgs struct {
 }
 
 func addManagedTools(s *mcp.Server, b toolBinding) {
+	addManagedFileTools(s, b)
 	mcp.AddTool(s, &mcp.Tool{Name: "aeon_comment", Description: "Comment on the bound work order."},
 		func(ctx context.Context, _ *mcp.CallToolRequest, in commentArgs) (*mcp.CallToolResult, string, error) {
 			if !b.active() || len(in.Body) > 65536 || strings.TrimSpace(in.Body) == "" {
@@ -419,8 +420,14 @@ func runSandboxedTerminal(ctx context.Context, directory, profile, toolPath stri
 		_ = lifetime.Wait()
 		return "", err
 	}
-	return collectTerminal(ctx, pipeR, lifetime)
+	return collectTerminal(ctx, pipeR, terminalGroupLifetime{lifetime})
 }
+
+// WaitGroup kills remaining members while the exited leader still reserves the
+// process-group identity, including children that closed their output pipes.
+type terminalGroupLifetime struct{ *ownedprocess.Lifetime }
+
+func (l terminalGroupLifetime) Wait() error { return l.WaitGroup() }
 
 // terminalLifetime permits deterministic scheduling of the signal/reap race in
 // tests. Production always supplies the verified ownedprocess.Lifetime above.
@@ -430,6 +437,8 @@ type terminalLifetime interface {
 }
 
 func collectTerminal(ctx context.Context, output io.Reader, lifetime terminalLifetime) (string, error) {
+	waited := make(chan error, 1)
+	go func() { waited <- lifetime.Wait() }()
 	finished := make(chan struct{})
 	cancelDone := make(chan struct{})
 	go func() {
@@ -437,6 +446,11 @@ func collectTerminal(ctx context.Context, output io.Reader, lifetime terminalLif
 		select {
 		case <-ctx.Done():
 			_ = lifetime.Signal(true)
+			// An escaped descendant or failed ownership observation can keep
+			// a pipe open. Cancellation must also bound output collection.
+			if closer, ok := output.(io.Closer); ok {
+				_ = closer.Close()
+			}
 		case <-finished:
 		}
 	}()
@@ -450,15 +464,15 @@ func collectTerminal(ctx context.Context, output io.Reader, lifetime terminalLif
 	out, readErr := io.ReadAll(io.LimitReader(output, (64<<10)+1))
 	if len(out) > 64<<10 {
 		_ = lifetime.Signal(true)
-		_ = lifetime.Wait()
+		_ = <-waited
 		return "", errors.New("terminal output exceeds 64 KiB")
 	}
 	if readErr != nil {
 		_ = lifetime.Signal(true)
-		_ = lifetime.Wait()
+		_ = <-waited
 		return "", readErr
 	}
-	err := lifetime.Wait()
+	err := <-waited
 	if err != nil {
 		return string(out), fmt.Errorf("terminal command failed: %w", err)
 	}
@@ -618,6 +632,8 @@ func terminalToolDependencies(ctx context.Context, workspace, tmp string, roots 
 		return nil, errors.New("terminal dependency query is not independent of workspace")
 	}
 	cmd := exec.CommandContext(ctx, query, append([]string{"--query", "--requisites"}, packages...)...)
+	// Nix is a multicall binary; physical resolution must preserve argv[0].
+	cmd.Args[0] = "nix-store"
 	cmd.Dir = tmp
 	cmd.Env = terminalEnvironment(tmp, "off", "", query)
 	output, err := cmd.Output()
@@ -648,7 +664,22 @@ func terminalStoreClosure(output string) ([]string, error) {
 
 func terminalSandboxProfile(workspace, tmp string, readRoots, toolPaths []string) string {
 	// No network or socket permission, including localhost and Unix sockets.
-	profile := `(version 1) (deny default) (allow process-exec process-fork) (allow sysctl-read)`
+	profile := `(version 1) (deny default) (deny process-info*) (allow process-info* (target self)) (deny sysctl-read (sysctl-name-prefix "kern.procargs")) (allow process-exec process-fork)`
+	// Exact runtime queries only: CPU count/page size for Go, memory and OS
+	// version/hostname/machine for libc uname used by libuv/Node, and Go ARM
+	// instruction selection. hw.pagesize_compat is the numeric Go page-size MIB.
+	// Explicit process-info denial is required for Darwin procargs (deny default
+	// alone does not block that special sysctl path); libdispatch needs self
+	// process information during initialization. Other-process tables
+	// and kern.procargs2 remain denied, including numeric sysctl MIB access.
+	for _, name := range []string{
+		"hw.ncpu", "hw.activecpu", "hw.logicalcpu", "hw.logicalcpu_max", "hw.physicalcpu", "hw.physicalcpu_max",
+		"hw.pagesize", "hw.pagesize_compat", "hw.memsize",
+		"kern.ostype", "kern.osrelease", "kern.osversion", "kern.version", "kern.hostname", "hw.machine",
+		"hw.optional.armv8_1_atomics", "hw.optional.armv8_crc32", "hw.optional.armv8_2_sha512", "hw.optional.armv8_2_sha3", "hw.optional.arm.FEAT_DIT",
+	} {
+		profile += fmt.Sprintf(" (allow sysctl-read (sysctl-name %q))", name)
+	}
 	for _, path := range []string{workspace, tmp} {
 		profile += fmt.Sprintf(" (allow file-read* file-write* (subpath %q))", path)
 	}
@@ -658,8 +689,27 @@ func terminalSandboxProfile(workspace, tmp string, readRoots, toolPaths []string
 			profile += fmt.Sprintf(" (allow file-read* (subpath %q))", path)
 		}
 	}
-	for _, path := range append([]string{"/dev/null", "/dev/random", "/dev/urandom"}, toolPaths...) {
+	// Darwin libignition opens / as an openat anchor (dyld-support.sb).
+	// Literal directory access grants no reads of its children.
+	for _, path := range append([]string{"/", "/dev/null", "/dev/random", "/dev/urandom"}, toolPaths...) {
 		profile += fmt.Sprintf(" (allow file-read* (literal %q))", path)
+	}
+	// Node resolves executable and workspace ancestors with lstat. Grant only
+	// their metadata; granting parent-directory contents would expose siblings.
+	ancestors := map[string]bool{}
+	for _, path := range append(append([]string{workspace, tmp}, readRoots...), toolPaths...) {
+		if !filepath.IsAbs(path) {
+			continue
+		}
+		for parent := filepath.Dir(path); ; parent = filepath.Dir(parent) {
+			if !ancestors[parent] {
+				profile += fmt.Sprintf(" (allow file-read-metadata (literal %q))", parent)
+				ancestors[parent] = true
+			}
+			if parent == "/" {
+				break
+			}
+		}
 	}
 	profile += ` (allow file-write* (literal "/dev/null"))`
 	return profile

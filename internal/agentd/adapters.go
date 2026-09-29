@@ -66,6 +66,14 @@ func withEnv(name, value string) []string {
 	return append(env, prefix+value)
 }
 
+// Claude authenticates from its pinned account directory. Never inherit daemon
+// credentials, loader flags, provider overrides or arbitrary host configuration.
+func claudeEnvironment(home, nodePath, claudePath string) []string {
+	return []string{"HOME=" + home, "CLAUDE_CONFIG_DIR=" + home,
+		"PATH=" + strings.Join([]string{filepath.Dir(nodePath), filepath.Dir(claudePath), "/usr/bin", "/bin"}, string(os.PathListSeparator)),
+		"LANG=C", "LC_ALL=C"}
+}
+
 func eventProbe(raw json.RawMessage) (method, kind, model string) {
 	var frame struct {
 		Method string `json:"method"`
@@ -650,7 +658,7 @@ func (a *ClaudeAdapter) Start(ctx context.Context, r StartRequest, observe func(
 			return nil, e
 		}
 	}
-	p, err := launchWire(a.NodePath, []string{filepath.Join(dir, "bridge.mjs"), a.SDKPath, a.ClaudePath, r.Workspace}, r.Workspace, withEnv("CLAUDE_CONFIG_DIR", home), "bridge", observe)
+	p, err := launchWire(a.NodePath, []string{filepath.Join(dir, "bridge.mjs"), a.SDKPath, a.ClaudePath, r.Workspace}, r.Workspace, claudeEnvironment(home, a.NodePath, a.ClaudePath), "bridge", observe)
 	if err != nil {
 		return nil, err
 	}

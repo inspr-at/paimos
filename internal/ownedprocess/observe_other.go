@@ -8,3 +8,5 @@ import "errors"
 const waitObservationSupported = false
 
 func observeExit(int) error { return errors.New("non-reaping child observation unsupported") }
+
+func emptyExitedGroup(int, error) bool { return false }

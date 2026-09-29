@@ -99,7 +99,7 @@ func (a *ClaudeAdapter) Probe(ctx context.Context, key string) bool {
 	if err != nil {
 		return false
 	}
-	raw, err := probeCommand(ctx, a.ClaudePath, withEnv("CLAUDE_CONFIG_DIR", home), "auth", "status", "--json")
+	raw, err := probeCommand(ctx, a.ClaudePath, claudeEnvironment(home, a.NodePath, a.ClaudePath), "auth", "status", "--json")
 	if err != nil {
 		return false
 	}

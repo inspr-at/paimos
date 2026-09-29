@@ -20,6 +20,7 @@ type Lifetime struct {
 	cmd       *exec.Cmd
 	available bool
 	reaped    bool
+	verified  bool
 }
 
 func Track(cmd *exec.Cmd) *Lifetime { return &Lifetime{cmd: cmd, available: waitObservationSupported} }
@@ -27,8 +28,33 @@ func TrackingSupported() bool       { return waitObservationSupported }
 func (l *Lifetime) Wait() error     { return l.wait(observeExit) }
 
 func (l *Lifetime) wait(observe func(int) error) error {
-	_ = observe(l.cmd.Process.Pid)
+	return l.waitOwned(observe, false)
+}
+
+// WaitGroup terminates remaining group members before reaping the leader. The
+// unreaped child reserves the initially verified identity throughout signaling.
+// Darwin hides zombie leaders from getpgid, so successful WNOWAIT observation
+// and the launch-time verification authorize this final group cleanup.
+func (l *Lifetime) WaitGroup() error { return l.waitOwned(observeExit, true) }
+
+func (l *Lifetime) waitOwned(observe func(int) error, killGroup bool) error {
+	observeErr := observe(l.cmd.Process.Pid)
 	l.mu.Lock()
+	var groupErr error
+	if killGroup {
+		groupErr = observeErr
+		if groupErr == nil {
+			if !l.available || !l.verified || l.reaped {
+				groupErr = errors.New("verified process group unavailable")
+			}
+		}
+		if groupErr == nil {
+			groupErr = Signal(l.cmd, true)
+			if groupErr != nil && emptyExitedGroup(l.cmd.Process.Pid, groupErr) {
+				groupErr = nil
+			}
+		}
+	}
 	// Reject all future signals before releasing the PID. The observer can
 	// also fail while the child lives, or because another reaper released it:
 	// fail closed in both cases, without holding the lock across a blocking
@@ -39,12 +65,19 @@ func (l *Lifetime) wait(observe func(int) error) error {
 	l.mu.Lock()
 	l.reaped = true
 	l.mu.Unlock()
+	if groupErr != nil {
+		return errors.Join(result, groupErr)
+	}
 	return result
 }
 func (l *Lifetime) Verify() error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	return l.verify()
+	err := l.verify()
+	if err == nil {
+		l.verified = true
+	}
+	return err
 }
 func (l *Lifetime) verify() error {
 	if !l.available || l.reaped {

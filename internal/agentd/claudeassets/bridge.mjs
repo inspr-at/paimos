@@ -3,8 +3,8 @@
 // Lifecycle events are content-free. The explicit native_message frame carries
 // bounded send arguments transiently to the owner; it is never journaled.
 import { randomUUID } from "node:crypto";
-import { lstatSync, readdirSync, realpathSync } from "node:fs";
-import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
+import { realpathSync } from "node:fs";
+import { isAbsolute } from "node:path";
 import { createInterface } from "node:readline";
 import { pathToFileURL } from "node:url";
 
@@ -15,89 +15,16 @@ const MAX_STEER_BYTES = 64 * 1024;
 const MAX_PENDING_STEERS = 256;
 const CORRELATION_TTL_MS = 60 * 1000;
 const CONTROL_INPUT_TIMEOUT_MS = 30 * 1000;
-const DEFAULT_TOOLS = ["Read", "Glob", "Grep", "Edit", "Write"];
+// Built-in file tools reopen paths after hooks and cannot enforce descriptor
+// ownership. All file access goes through the run-bound daemon MCP proxy.
 const AEON_TOOLS = ["aeon_comment", "aeon_status", "aeon_check_criterion", "aeon_evidence",
-  "aeon_request_approval", "aeon_reply", "aeon_terminal"];
+  "aeon_request_approval", "aeon_reply", "aeon_terminal", "aeon_read", "aeon_write",
+  "aeon_edit", "aeon_glob", "aeon_grep"];
 
-function editPathWithinWorkspace(filePath, root) {
-  if (typeof filePath !== "string" || filePath.length === 0 || filePath.includes("\0")) return false;
-  const target = resolve(root, filePath);
-  try {
-    // Resolve the target or its nearest existing parent. This rejects links
-    // from the workspace to another repo or a protected home directory.
-    let existing = target;
-    const suffix = [];
-    while (true) {
-      try {
-        existing = resolve(realpathSync(existing), ...suffix.reverse());
-        break;
-      } catch (error) {
-        if (error.code !== "ENOENT") return false;
-        try { if (lstatSync(existing).isSymbolicLink()) return false; } catch (statError) {
-          if (statError.code !== "ENOENT") return false;
-        }
-        const parent = dirname(existing);
-        if (parent === existing) return false;
-        suffix.push(existing.slice(parent.length + (parent === sep ? 0 : 1)));
-        existing = parent;
-      }
-    }
-    const rel = relative(root, existing);
-    return rel === "" || (rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
-  } catch {
-    return false;
-  }
-}
-
-// Search tools can traverse descendants, not just their explicit path. Refuse
-// an escaping link anywhere in their search tree, including glob-selected links.
-// Bound the walk and fail closed on unreadable, special or dangling entries.
-function readableWorkspaceTree(path, root, recursive) {
-  const pending = [resolve(root, path)];
-  const seen = new Set();
-  let count = 0;
-  try {
-    while (pending.length) {
-      if (++count > 100000) return false;
-      const target = realpathSync(pending.pop());
-      if (!editPathWithinWorkspace(target, root)) return false;
-      if (seen.has(target)) continue;
-      seen.add(target);
-      const info = lstatSync(target);
-      if (info.isFile()) {
-        if (info.nlink !== 1) return false;
-      } else if (info.isDirectory() && recursive) {
-        for (const child of readdirSync(target)) pending.push(resolve(target, child));
-      } else return false;
-    }
-    return true;
-  } catch { return false; }
-}
-
-function localSearchPattern(pattern) {
-  return typeof pattern === "string" && !isAbsolute(pattern) &&
-    /^[A-Za-z0-9_.*? /-]+$/u.test(pattern) && !pattern.includes("..");
-}
-
-function workspacePathHook(root) {
-  return async (input) => {
-    const name = input?.tool_name, args = input?.tool_input;
-    let allowed = false;
-    if (name === "Edit" || name === "Write") {
-      allowed = editPathWithinWorkspace(args?.file_path, root);
-    } else if (name === "Read") {
-      allowed = typeof args?.file_path === "string" && args.file_path.length > 0 &&
-        readableWorkspaceTree(args.file_path, root, false);
-    } else if (name === "Glob" || name === "Grep") {
-      const path = args?.path === undefined ? root : args.path;
-      allowed = typeof path === "string" && path.length > 0 &&
-        (name !== "Glob" || localSearchPattern(args?.pattern)) &&
-        (args?.glob === undefined || localSearchPattern(args.glob)) &&
-        readableWorkspaceTree(path, root, true);
-    } else return {};
-    if (allowed) return {};
-    return { hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny",
-      permissionDecisionReason: "File and search paths must stay inside the run workspace" } };
+function managedToolHook(allowedTools) {
+  return async (input) => allowedTools.includes(input?.tool_name) ? {} : {
+    hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny",
+      permissionDecisionReason: "Only run-bound daemon tools are available" }
   };
 }
 
@@ -360,7 +287,7 @@ try {
   }
   const mcpServers = toolBinding ? { aeon: { type: "http", url: toolBinding.url,
     headers: { Authorization: `Bearer ${toolBinding.token}` } } } : {};
-  const allowedTools = verification ? [] : toolBinding ? [...DEFAULT_TOOLS, ...AEON_TOOLS.map((name) => `mcp__aeon__${name}`)] : DEFAULT_TOOLS;
+  const allowedTools = !verification && toolBinding ? AEON_TOOLS.map((name) => `mcp__aeon__${name}`) : [];
   start.tools = undefined;
   input = new InputStream(userMessage(start.prompt));
   start.prompt = "";
@@ -375,9 +302,9 @@ try {
     includePartialMessages: true,
     permissionMode: "dontAsk",
     additionalDirectories: [],
-    hooks: verification ? { PreToolUse: [{ matcher: ".*", hooks: [async () => ({ hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: "Verification has no tools" } })] }] } : { PreToolUse: [{ matcher: "Read|Glob|Grep|Edit|Write", hooks: [workspacePathHook(physicalWorkspace)] }] },
+    hooks: { PreToolUse: [{ matcher: ".*", hooks: [managedToolHook(allowedTools)] }] },
     allowedTools,
-    tools: verification ? [] : DEFAULT_TOOLS,
+    tools: [],
     ...(verification ? { maxTurns: 1, canUseTool: async () => ({ behavior: "deny", message: "Verification has no tools" }) } : {}),
     systemPrompt: { type: "preset", preset: "claude_code", ...(start.rules ? { append: start.rules } : {}) },
     ...(!verification && Number.isSafeInteger(start.max_turns) && start.max_turns > 0 ? { maxTurns: start.max_turns } : {}),

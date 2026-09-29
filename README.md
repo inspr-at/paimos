@@ -332,8 +332,20 @@ select another context. This is an execution-scoped read under the worker
 lease, not a general rules permission or a repository file installation.
 
 The qualifying adapter is currently the restricted Claude SDK bridge on macOS:
-explicit tools, no native Bash, workspace edit guard, strict MCP inventory and
-the existing bounded sandbox terminal. Codex and Cursor cannot yet enforce the
+explicit daemon-owned MCP tools, no native Bash or file tools, strict MCP inventory
+and a bounded sandbox terminal. Read/Edit/Write/Glob/Grep use descriptor-relative
+`openat` with `O_NOFOLLOW` on every component; reads and writes validate regular
+files with a single link using `fstat` before accessing contents. Search walks
+opened directory descriptors. Symlinks (including internal ones), hard links,
+special files and oversized searches fail closed. Write creates missing parent
+directories relative to opened directory descriptors. The bridge receives only its pinned account HOME/config directory,
+a tool-specific PATH and fixed locale, never the daemon environment. The terminal
+allows exact CPU/page-size/memory/uname and ARM-feature sysctls for Go/Node;
+process arguments and other-process inspection are explicitly denied (the macOS
+default denial alone does not block numeric procargs queries). Self inspection
+is allowed for the macOS runtime. Terminal completion
+kills remaining group members before reaping its leader, including children that
+close or inherit stdout. Codex and Cursor cannot yet enforce the
 required inherited-tool ceiling; they, Pi and Grok do not advertise this new
 capability. Unsupported platforms and missing bound tools/rules fail closed.
 The boundary does not isolate another process running as the same OS user.

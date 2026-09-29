@@ -502,7 +502,7 @@ func TestClaudeBridgeMapsSDKResultUsage(t *testing.T) {
 	}
 }
 
-func TestClaudeBridgeDeniesEditsOutsideWorkspace(t *testing.T) {
+func TestClaudeBridgeDeniesNativeEdits(t *testing.T) {
 	node, err := exec.LookPath("node")
 	if err != nil {
 		t.Skip("Node is unavailable")
@@ -536,7 +536,7 @@ func TestClaudeBridgeDeniesEditsOutsideWorkspace(t *testing.T) {
     async *[Symbol.asyncIterator]() {
       if (options.permissionMode !== 'dontAsk' || options.additionalDirectories?.length !== 0) throw Error('permissions');
       const entry = options.hooks?.PreToolUse?.[0];
-      if (entry?.matcher !== 'Read|Glob|Grep|Edit|Write' || entry.hooks?.length !== 1) throw Error('hook');
+      if (entry?.matcher !== '.*' || entry.hooks?.length !== 1) throw Error('hook');
       const hook = entry.hooks[0], root = options.cwd, outside = %q;
       for (const name of ['Edit', 'Write']) {
         for (const file_path of [outside + '/file', root + '/../outside/file', root + '/escape/file']) {
@@ -544,7 +544,7 @@ func TestClaudeBridgeDeniesEditsOutsideWorkspace(t *testing.T) {
           if (result.hookSpecificOutput?.permissionDecision !== 'deny') throw Error('outside edit');
         }
         const allowed = await hook({ tool_name: name, tool_input: { file_path: root + '/inside/file' } });
-        if (allowed.hookSpecificOutput?.permissionDecision === 'deny') throw Error('inside edit');
+        if (allowed.hookSpecificOutput?.permissionDecision !== 'deny') throw Error('native edit must be disabled');
       }
       yield { type: 'system', subtype: 'init', session_id: 'fake-session', model: 'test-model', capabilities: ['interrupt_receipt_v1'] };
       yield { type: 'result', modelUsage: { model: { inputTokens: 1, outputTokens: 1 } } };

@@ -385,7 +385,7 @@ func TestManagedBudgetFailedCloseEscalatesOwnedStop(t *testing.T) {
 	}
 }
 
-func TestClaudeBridgeReadAndSearchWorkspaceAllowlist(t *testing.T) {
+func TestClaudeBridgeOnlyAllowsDaemonFileTools(t *testing.T) {
 	node, err := exec.LookPath("node")
 	if err != nil {
 		t.Skip("Node unavailable")
@@ -394,26 +394,7 @@ func TestClaudeBridgeReadAndSearchWorkspaceAllowlist(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	workspace, outside := filepath.Join(root, "work"), filepath.Join(root, "outside")
-	for _, dir := range []string{workspace, outside, filepath.Join(workspace, "safe"), filepath.Join(workspace, "linked")} {
-		if err := os.Mkdir(dir, 0700); err != nil {
-			t.Fatal(err)
-		}
-	}
-	for _, file := range []string{filepath.Join(workspace, "safe", "file"), filepath.Join(outside, "file")} {
-		if err := os.WriteFile(file, []byte("fixture"), 0600); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := os.Symlink(outside, filepath.Join(workspace, "linked", "escape")); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(filepath.Join(outside, "missing"), filepath.Join(workspace, "dangling")); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(filepath.Join(workspace, "safe", "file"), filepath.Join(workspace, "internal-link")); err != nil {
-		t.Fatal(err)
-	}
+	workspace := root
 	bridge, err := claudeAssets.ReadFile("claudeassets/bridge.mjs")
 	if err != nil {
 		t.Fatal(err)
@@ -424,25 +405,17 @@ func TestClaudeBridgeReadAndSearchWorkspaceAllowlist(t *testing.T) {
 	}
 	const sdk = `export function query({options}) {
  return {streamInput:async()=>{},interrupt:async()=>({still_queued:[]}),close:()=>{},async *[Symbol.asyncIterator](){
- const entry=options.hooks.PreToolUse[0], hook=entry.hooks[0], root=options.cwd;
- if(entry.matcher!=='Read|Glob|Grep|Edit|Write') throw Error('matcher');
- async function check(name,args,deny) {
-   const r=await hook({tool_name:name,tool_input:args});
-   if((r.hookSpecificOutput?.permissionDecision==='deny')!==deny) throw Error('path guard');
+ const entry=options.hooks.PreToolUse[0], hook=entry.hooks[0];
+ if(entry.matcher!=='.*' || options.tools.length!==0) throw Error('native tool inventory');
+ for(const name of ['Read','Edit','Write','Glob','Grep','Bash','Agent','mcp__other__read']) {
+   const r=await hook({tool_name:name,tool_input:{file_path:options.cwd+'/safe/file'}});
+   if(r.hookSpecificOutput?.permissionDecision!=='deny') throw Error('native tool escaped');
  }
- for(const path of ['../outside/file', root+'/../outside/file', 'linked/escape/file', 'dangling', '/etc/passwd', 'missing'])
-   await check('Read',{file_path:path},true);
- for(const path of ['safe/file', root+'/safe/file', 'internal-link']) await check('Read',{file_path:path},false);
- await check('Read',{},true);
- for(const name of ['Glob','Grep']) {
-   for(const path of ['../outside',root+'/../outside','linked','linked/escape','dangling','/etc',undefined])
-     await check(name,{path,pattern:'*'},true);
-   await check(name,{path:'safe',pattern:'*'},false);
-   await check(name,{path:root+'/safe',pattern:'*'},false);
-   await check(name,{path:'safe',pattern:'*',glob:'../../*'},true);
+ for(const name of ['aeon_read','aeon_write','aeon_edit','aeon_glob','aeon_grep','aeon_terminal']) {
+   const tool='mcp__aeon__'+name;
+   if(!options.allowedTools.includes(tool)) throw Error('missing proxy');
+   if((await hook({tool_name:tool})).hookSpecificOutput?.permissionDecision==='deny') throw Error('proxy denied');
  }
- for(const pattern of ['../*','/etc/*','safe/../../*','{safe,../outside}/*','{/etc,safe}/*','[/]etc/*'])
-   await check('Glob',{path:'safe',pattern},true);
  yield {type:'system',subtype:'init',session_id:'fixture',capabilities:['interrupt_receipt_v1']};
  yield {type:'result',modelUsage:{fixture:{inputTokens:1,outputTokens:1}}};
  }};
@@ -451,7 +424,7 @@ func TestClaudeBridgeReadAndSearchWorkspaceAllowlist(t *testing.T) {
 		t.Fatal(err)
 	}
 	cmd := exec.Command(node, bridgePath, sdkPath, "/bin/true", workspace)
-	cmd.Stdin = strings.NewReader(`{"op":"start","prompt":"fixture","max_tokens":1}` + "\n")
+	cmd.Stdin = strings.NewReader(`{"op":"start","prompt":"fixture","max_tokens":1,"tools":{"url":"http://127.0.0.1:12345","token":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}` + "\n")
 	out, err := cmd.Output()
 	if err != nil || !strings.Contains(string(out), `"kind":"budget_exhausted"`) {
 		t.Fatalf("read/search gate: %v %s", err, out)
