@@ -139,7 +139,7 @@ func TestBlindDayPolicyAndDurableDailyLimit(t *testing.T) {
 				if _, err := tx.Exec(t.Context(), `UPDATE agent_runs SET account_id=$2 WHERE id=$1`, run, a.ID); err != nil {
 					return err
 				}
-				if _, err := tx.Exec(t.Context(), `INSERT INTO run_telemetry(tenant_id,run_id,sequence,kind,error_code) VALUES($1,$2,1,'usage','vendor_limit')`, person.TenantID, run); err != nil {
+				if _, err := tx.Exec(t.Context(), `INSERT INTO run_telemetry(tenant_id,run_id,sequence,kind,error_code,at) VALUES($1,$2,1,'usage','vendor_limit',$3)`, person.TenantID, run, now); err != nil {
 					return err
 				}
 				for _, at := range []time.Time{now, now.Add(24 * time.Hour)} {
@@ -150,6 +150,26 @@ func TestBlindDayPolicyAndDurableDailyLimit(t *testing.T) {
 					}
 					if w == nil || w.Code != "vendor" || w.RunNowAllowed || w.Until != nil {
 						t.Fatalf("vendor stop lost: %+v", w)
+					}
+				}
+				// Even a manual cap plus an optimistic estimate cannot erase the
+				// stop. Explicit vendor recovery is required, later than that stop.
+				manual := []Window{{AccountID: a.ID, StartsAt: now, EndsAt: now.Add(2 * time.Hour), Unit: "requests", Allowance: 100, PaceModel: "unrestricted"}}
+				for _, source := range []string{"estimate", "harness"} {
+					if _, err := tx.Exec(t.Context(), `INSERT INTO account_capacity_readings(tenant_id,account_id,window_kind,window_minutes,used_percent,resets_at,read_at,source,ordinary_usage_allowed) VALUES($1,$2,'5h',300,5,$3,$4,$5,true)`, person.TenantID, a.ID, now.Add(time.Hour), now.Add(time.Minute), source); err != nil {
+						return err
+					}
+					afterReading := now.Add(2 * time.Minute)
+					a.LastProbeAt = &afterReading
+					_, w, err := admission(t.Context(), tx, a, manual, afterReading, 0, runRow{Purpose: "managed", CapacityOverride: "now"}, false)
+					if err != nil {
+						return err
+					}
+					if source == "estimate" && (w == nil || w.Code != "vendor") {
+						t.Fatalf("estimate erased stop: %+v", w)
+					}
+					if source == "harness" && w != nil {
+						t.Fatalf("explicit recovery did not clear stop: %+v", w)
 					}
 				}
 				return nil

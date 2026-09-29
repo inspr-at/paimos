@@ -83,6 +83,23 @@ func admission(ctx context.Context, tx pgx.Tx, a Account, all []Window, now time
 		}
 		return nil, w, nil
 	}
+	blindHarness := a.Harness == "grok" || a.Harness == "cursor" || a.Harness == "pi"
+	if blindHarness {
+		var stopped bool
+		// A manual cap or an estimate cannot erase an actual vendor stop.
+		// Only explicit later vendor recovery can make this account usable again.
+		err = tx.QueryRow(ctx, `SELECT EXISTS(
+ SELECT 1 FROM run_telemetry t JOIN agent_runs ar ON ar.tenant_id=t.tenant_id AND ar.id=t.run_id
+ WHERE ar.account_id=$1 AND t.error_code='vendor_limit' AND NOT EXISTS(
+  SELECT 1 FROM account_capacity_readings r WHERE r.account_id=$1 AND r.source<>'estimate'
+  AND r.ordinary_usage_allowed=true AND r.read_at>t.at))`, a.ID).Scan(&stopped)
+		if err != nil {
+			return nil, nil, err
+		}
+		if stopped {
+			return nil, &CapacityWait{Code: "vendor", Timezone: s.Timezone}, nil
+		}
+	}
 	// Omit synthetic grants from the next job's budget. They are never quota
 	// observations and a settled/released grant must not replenish itself.
 	regular := make([]Window, 0, len(all))
@@ -134,7 +151,7 @@ func admission(ctx context.Context, tx pgx.Tx, a Account, all []Window, now time
 		}
 	}
 	blind := false
-	if a.Harness == "grok" || a.Harness == "cursor" || a.Harness == "pi" {
+	if blindHarness {
 		var observed bool
 		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM account_capacity_readings WHERE account_id=$1)`, a.ID).Scan(&observed); err != nil {
 			return nil, nil, err
@@ -145,19 +162,13 @@ func admission(ctx context.Context, tx pgx.Tx, a Account, all []Window, now time
 			local := now.In(loc)
 			day := time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, loc)
 			var runs int
-			var stopped bool
 			// Count durable reservations, including released attempts. Polling,
 			// cancelling or a daemon restart cannot mint another daily allowance.
-			err := tx.QueryRow(ctx, `SELECT count(DISTINCT r.run_id), EXISTS(
- SELECT 1 FROM run_telemetry t JOIN agent_runs ar ON ar.tenant_id=t.tenant_id AND ar.id=t.run_id
- WHERE ar.account_id=$1 AND t.error_code='vendor_limit')
+			err := tx.QueryRow(ctx, `SELECT count(DISTINCT r.run_id)
  FROM account_reservations r JOIN account_allowance_windows w ON w.tenant_id=r.tenant_id AND w.id=r.window_id
- WHERE w.account_id=$1 AND w.capacity_kind='blind' AND w.starts_at >= $2 AND r.run_id::text<>$3`, a.ID, day, run.ID).Scan(&runs, &stopped)
+ WHERE w.account_id=$1 AND w.capacity_kind='blind' AND w.starts_at >= $2 AND r.run_id::text<>$3`, a.ID, day, run.ID).Scan(&runs)
 			if err != nil {
 				return nil, nil, err
-			}
-			if stopped {
-				return nil, &CapacityWait{Code: "vendor", Timezone: s.Timezone}, nil
 			}
 			if blindDayPolicy(s, now) {
 				if slots > 0 {
