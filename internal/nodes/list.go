@@ -1070,7 +1070,10 @@ func listOrder(q listQuery) string {
 		case "tokens", "list_cost", "paid":
 			// The same numeric value as the cell: spent, else estimated.
 			// Cost matches usdString: round away the digits the API does not project,
-			// then the id tiebreaker below.
+			// then the id tiebreaker below. The round stays on this sort key. The
+			// amount is a CTE projection, so an expression index cannot serve it,
+			// and rounding inside the aggregate does not shrink the plan: sorting
+			// those rows is noise next to building the aggregate.
 			value := map[string]string{
 				"tokens":    "plan.tokens",
 				"list_cost": fmt.Sprintf("round(plan.list_usd::numeric, %d)", usdPlaces),

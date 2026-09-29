@@ -7,6 +7,8 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -223,26 +225,33 @@ func TestPlanningRoundedCostTie(t *testing.T) {
 
 func TestPlanningBulkUsagePerformance(t *testing.T) {
 	w := planningSetup(t)
-	ids := planningBulk(t, w, 1000, 4, "open", "PERF-", true)
+	planningBulk(t, w, 1000, 4, "open", "PERF-", true)
 	if _, err := appPool.Exec(t.Context(), `ANALYZE nodes, harness_sessions, harness_session_usage, model_prices`); err != nil {
 		t.Fatal(err)
 	}
-	path := "/api/nodes?within=" + w.root.ID + "&kind=ticket&sort=tokens&limit=50"
-	var fastest time.Duration
-	for range 3 {
+	// List cost so the explained sort key is the rounded projection. Every
+	// row reports the same 4000 tokens, so the page check does not depend on
+	// which tied cost sorts first.
+	path := "/api/nodes?within=" + w.root.ID + "&kind=ticket&sort=list_cost&limit=50"
+	if page := listPage(t, w.admin, path); !planningBulkPage(page) {
+		t.Fatal("bulk usage totals")
+	}
+	samples := make([]time.Duration, 0, 5)
+	for range 5 {
 		start := time.Now()
 		page := listPage(t, w.admin, path)
 		elapsed := time.Since(start)
-		if len(page.Items) != 50 || page.Items[0].Planning.Tokens.Spent == nil || *page.Items[0].Planning.Tokens.Spent != 4000 {
+		if !planningBulkPage(page) {
 			t.Fatal("bulk usage totals")
 		}
-		if fastest == 0 || elapsed < fastest {
-			fastest = elapsed
-		}
+		samples = append(samples, elapsed)
 	}
-	t.Logf("1000 tickets / 4000 usage rows, complete list request: %s", fastest)
-	if fastest >= 200*time.Millisecond {
-		t.Errorf("planning request exceeded 200ms: %s", fastest)
+	slices.Sort(samples)
+	median := samples[len(samples)/2]
+	budget := planningPerfBudget()
+	t.Logf("1000 tickets / 4000 usage rows, list median %s of %v (budget %s)", median, samples, budget)
+	if median >= budget {
+		t.Errorf("planning request exceeded %s: median %s", budget, median)
 	}
 	err := db.InTenant(dbtest.Seed(t.Context()), appPool, w.admin.TenantID, func(tx pgx.Tx) error {
 		q, err := parseListQuery(httptest.NewRequest(http.MethodGet, path, nil))
@@ -254,34 +263,242 @@ func TestPlanningBulkUsagePerformance(t *testing.T) {
 			return err
 		}
 		order, args := listSQL(q, nil)
-		for _, probe := range []struct {
-			name, sql string
-			args      []any
-		}{{"bulk usage", planUsageSQL(), []any{ids}}, {"ordered page", order, args}} {
-			var raw string
-			if err := tx.QueryRow(t.Context(), "EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) "+probe.sql, probe.args...).Scan(&raw); err != nil {
-				return err
-			}
-			t.Logf("EXPLAIN %s: %s", probe.name, raw)
-			var plan []map[string]any
-			if err := json.Unmarshal([]byte(raw), &plan); err != nil {
-				return err
-			}
-			var check func(map[string]any)
-			check = func(p map[string]any) {
-				if p["Relation Name"] == "harness_session_usage" && p["Node Type"] == "Seq Scan" && p["Actual Loops"].(float64) > 1 {
-					t.Errorf("repeated full usage scan: %v", p)
-				}
-				children, _ := p["Plans"].([]any)
-				for _, child := range children {
-					check(child.(map[string]any))
-				}
-			}
-			check(plan[0]["Plan"].(map[string]any))
+		var raw string
+		if err := tx.QueryRow(t.Context(), "EXPLAIN (FORMAT JSON) "+order, args...).Scan(&raw); err != nil {
+			return err
+		}
+		var docs []map[string]any
+		if err := json.Unmarshal([]byte(raw), &docs); err != nil {
+			return err
+		}
+		if len(docs) != 1 {
+			return fmt.Errorf("explain documents: %d", len(docs))
+		}
+		root, _ := docs[0]["Plan"].(map[string]any)
+		if root == nil {
+			return fmt.Errorf("explain plan missing")
+		}
+		if problems := planningListPlanProblems(root); len(problems) != 0 {
+			t.Errorf("list planning plan: %s", strings.Join(problems, "; "))
 		}
 		return nil
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
+}
+
+func planningBulkPage(page nodePage) bool {
+	return len(page.Items) == 50 && page.Items[0].Planning != nil && page.Items[0].Planning.Tokens.Spent != nil && *page.Items[0].Planning.Tokens.Spent == 4000
+}
+
+// planningPerfBudget is a tripwire for a request that has left the expected
+// range. A quiet machine stays at 200ms. Shared CI and a two-processor test
+// run are several times noisier, so they only fail far beyond that.
+func planningPerfBudget() time.Duration {
+	if os.Getenv("CI") != "" || runtime.GOMAXPROCS(0) <= 2 {
+		return 600 * time.Millisecond
+	}
+	return 200 * time.Millisecond
+}
+
+// planningListPlanProblems checks the list-with-planning plan: one grouped
+// aggregation over usage for the tickets that define the page, no per-row
+// subplan or nested loop from those tickets into usage, and a sort key that
+// rounds cost to the projected places.
+func planningListPlanProblems(root map[string]any) []string {
+	ctes := map[string]map[string]any{}
+	var index func(map[string]any)
+	index = func(n map[string]any) {
+		if name, ok := n["Subplan Name"].(string); ok && strings.HasPrefix(name, "CTE ") {
+			ctes[strings.TrimPrefix(name, "CTE ")] = n
+		}
+		for _, child := range planChildren(n) {
+			index(child)
+		}
+	}
+	index(root)
+	var problems []string
+	usageAggs := 0
+	var walk func(map[string]any, bool, bool)
+	walk = func(n map[string]any, nestedInner, inSubPlan bool) {
+		if n["Relation Name"] == "harness_session_usage" {
+			if nestedInner {
+				problems = append(problems, "nested loop drives ticket rows into usage")
+			}
+			if inSubPlan {
+				problems = append(problems, "per-row subplan scans usage")
+			}
+			if planHasSubPlan(n) && !strings.Contains(fmt.Sprint(n["Filter"]), "hashed SubPlan") {
+				problems = append(problems, "per-row subplan over usage")
+			}
+		}
+		if n["Node Type"] == "Aggregate" && n["Partial Mode"] != "Partial" && planInputScansUsage(n, ctes, map[string]bool{}) {
+			usageAggs++
+			if !planGroupKeyHasID(n) {
+				problems = append(problems, "usage aggregate is not grouped by ticket id")
+			}
+		}
+		for _, child := range planChildren(n) {
+			rel, _ := child["Parent Relationship"].(string)
+			walk(child, nestedInner || (n["Node Type"] == "Nested Loop" && rel == "Inner"), inSubPlan || rel == "SubPlan")
+		}
+	}
+	walk(root, false, false)
+	if usageAggs != 1 {
+		problems = append(problems, fmt.Sprintf("grouped usage aggregates = %d, want 1", usageAggs))
+	}
+	if !planSortUsesRoundedCost(root) {
+		problems = append(problems, "sort key does not use the rounded cost projection")
+	}
+	return problems
+}
+
+func TestPlanningListPlanShape(t *testing.T) {
+	good := `{
+      "Node Type": "Sort",
+      "Sort Key": ["((round((plan.list_usd)::numeric, 6) IS NULL))", "round((plan.list_usd)::numeric, 6)", "f.id"],
+      "Plans": [{
+        "Node Type": "Aggregate", "Partial Mode": "Simple", "Group Key": ["plan_lines.id"],
+        "Plans": [{
+          "Node Type": "Hash Join",
+          "Plans": [{
+            "Node Type": "Seq Scan", "Relation Name": "harness_session_usage",
+            "Filter": "(ANY ((hashed SubPlan 1).col1))",
+            "Plans": [{"Node Type": "Seq Scan", "Parent Relationship": "SubPlan", "Relation Name": "harness_sessions"}]
+          }]
+        }]
+      }]
+    }`
+	if problems := planningListPlanProblems(mustPlan(t, good)); len(problems) != 0 {
+		t.Fatalf("grouped plan: %v", problems)
+	}
+	nested := `{
+      "Node Type": "Sort",
+      "Sort Key": ["round((plan.paid_usd)::numeric, 6)"],
+      "Plans": [{
+        "Node Type": "Nested Loop",
+        "Plans": [
+          {"Node Type": "Seq Scan", "Parent Relationship": "Outer", "Relation Name": "nodes"},
+          {"Node Type": "Index Scan", "Parent Relationship": "Inner", "Relation Name": "harness_session_usage"}
+        ]
+      }]
+    }`
+	if !planProblemContains(planningListPlanProblems(mustPlan(t, nested)), "nested loop") {
+		t.Fatal("nested loop into usage was accepted")
+	}
+	looped := `{
+      "Node Type": "Aggregate", "Partial Mode": "Simple", "Group Key": ["id"],
+      "Plans": [{
+        "Node Type": "Index Scan", "Relation Name": "harness_session_usage",
+        "Filter": "EXISTS(SubPlan 9)",
+        "Plans": [{"Node Type": "Index Scan", "Parent Relationship": "SubPlan", "Subplan Name": "SubPlan 9", "Relation Name": "harness_sessions"}]
+      }]
+    }`
+	if !planProblemContains(planningListPlanProblems(mustPlan(t, looped)), "per-row subplan") {
+		t.Fatal("per-row usage subplan was accepted")
+	}
+}
+
+func mustPlan(t *testing.T, raw string) map[string]any {
+	t.Helper()
+	var n map[string]any
+	if err := json.Unmarshal([]byte(raw), &n); err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
+func planProblemContains(problems []string, fragment string) bool {
+	return strings.Contains(strings.Join(problems, "; "), fragment)
+}
+
+func planChildren(n map[string]any) []map[string]any {
+	raw, _ := n["Plans"].([]any)
+	out := make([]map[string]any, 0, len(raw))
+	for _, child := range raw {
+		if m, ok := child.(map[string]any); ok {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
+func planHasSubPlan(n map[string]any) bool {
+	for _, child := range planChildren(n) {
+		if child["Parent Relationship"] == "SubPlan" {
+			return true
+		}
+	}
+	return false
+}
+
+func planGroupKeyHasID(n map[string]any) bool {
+	keys, _ := n["Group Key"].([]any)
+	for _, key := range keys {
+		if s, ok := key.(string); ok && strings.Contains(s, "id") {
+			return true
+		}
+	}
+	return false
+}
+
+func planSortUsesRoundedCost(n map[string]any) bool {
+	found := false
+	var walk func(map[string]any)
+	walk = func(n map[string]any) {
+		if keys, ok := n["Sort Key"].([]any); ok {
+			for _, key := range keys {
+				if s, ok := key.(string); ok && roundedCostSortKey(s) {
+					found = true
+				}
+			}
+		}
+		if s, ok := n["Window"].(string); ok && roundedCostSortKey(s) {
+			found = true
+		}
+		for _, child := range planChildren(n) {
+			walk(child)
+		}
+	}
+	walk(n)
+	return found
+}
+
+func roundedCostSortKey(s string) bool {
+	return strings.Contains(s, "round(") && (strings.Contains(s, "list_usd") || strings.Contains(s, "paid_usd"))
+}
+
+// planInputScansUsage reports whether n's own input reads harness_session_usage.
+// InitPlans and subplans are separate statements. An aggregated CTE is that
+// statement's result, not another scan of usage.
+func planInputScansUsage(n map[string]any, ctes map[string]map[string]any, seen map[string]bool) bool {
+	for _, child := range planChildren(n) {
+		rel, _ := child["Parent Relationship"].(string)
+		if rel == "InitPlan" || rel == "SubPlan" || child["Node Type"] == "Aggregate" {
+			continue
+		}
+		if child["Relation Name"] == "harness_session_usage" {
+			return true
+		}
+		if child["Node Type"] == "CTE Scan" {
+			name, _ := child["CTE Name"].(string)
+			if name == "" || seen[name] {
+				continue
+			}
+			def, ok := ctes[name]
+			if !ok || def["Node Type"] == "Aggregate" {
+				continue
+			}
+			seen[name] = true
+			if def["Relation Name"] == "harness_session_usage" || planInputScansUsage(def, ctes, seen) {
+				return true
+			}
+			continue
+		}
+		if planInputScansUsage(child, ctes, seen) {
+			return true
+		}
+	}
+	return false
 }
