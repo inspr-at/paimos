@@ -44,6 +44,7 @@ const newFrom = ref<string>()
 const newCount = ref(0)
 watch(() => unread.value.length, n => emit('unread', n), { immediate: true })
 function markRead(event: number, id: string) {
+  if (holdingMarker()) return
   if (!me.value || !id || !Number.isFinite(event)) return
   if (!mark.value || mark.value.event < event) mark.value = saveReadMark(me.value, s.value.id, event, id)
   if (!person.value || !mark.value) return
@@ -65,13 +66,27 @@ let flushAgain = false
 let boundProject = ''
 let boundSession = ''
 let readGeneration = 0
+// The first server read is in flight and this browser has no watermark yet.
+// Screen observations must not mark the provisional bottom view as read.
+let markerHold = 0
+let awaitingServerPlacement = false
+let userMoved = false
+let placed = false
+let adjusting = false
+let anchorTop = 0
+let placeChain: Promise<void> = Promise.resolve()
+const holdingMarker = () => markerHold !== 0 && markerHold === readGeneration
 function arm() {
   if (!pending || !person.value) return
   if (flushTimer !== undefined) clearTimeout(flushTimer)
   flushTimer = setTimeout(() => { flushTimer = undefined; void flush() }, readMarkFlushDelay)
 }
-function reconcileDivider() {
-  if (!entered) return
+function syncDivider() {
+  if (!entered || holdingMarker()) {
+    newFrom.value = undefined
+    newCount.value = 0
+    return
+  }
   const first = unread.value[0]
   newFrom.value = first && current.value[0]?.id !== first.id ? first.id : undefined
   newCount.value = unread.value.length
@@ -110,22 +125,50 @@ async function flush() {
   flushAgain = false
   if (pending) await flush()
 }
+function releaseMarkerHold(generation: number) {
+  if (markerHold !== generation) return
+  markerHold = 0
+  const waiting = awaitingServerPlacement
+  awaitingServerPlacement = false
+  if (!entered || generation !== readGeneration) return
+  syncDivider()
+  if (waiting && !userMoved) void schedulePlace(generation)
+  else observe()
+}
 async function pullReadMark(projectId: string, sessionId: string, viewer: string, generation: number) {
   try {
     const response = await api(readPath(projectId, sessionId))
-    if (!response.ok || generation !== readGeneration || s.value.id !== sessionId) return
-    const remote = markerFromServer(await response.json())
-    if (remote && preferReadMark(mark.value, remote) === remote) {
-      mark.value = saveReadMark(viewer, sessionId, remote.event, remote.id, undefined, remote.at)
-      reconcileDivider()
+    if (generation !== readGeneration || s.value.id !== sessionId) return
+    if (!response.ok) {
+      releaseMarkerHold(generation)
+      return
     }
+    const remote = markerFromServer(await response.json())
+    const advanced = !!(remote && preferReadMark(mark.value, remote) === remote)
+    if (advanced && remote) mark.value = saveReadMark(viewer, sessionId, remote.event, remote.id, undefined, remote.at)
+    const waiting = awaitingServerPlacement && generation === readGeneration
+    const held = markerHold === generation
+    if (held) markerHold = 0
+    if (waiting && entered && !userMoved && advanced) {
+      awaitingServerPlacement = false
+      await schedulePlace(generation)
+    } else if (waiting || advanced) {
+      if (waiting) awaitingServerPlacement = false
+      syncDivider()
+      if (waiting && entered) observe()
+    }
+    // The reader left the provisional bottom before the marker arrived.
+    if (held && entered && placed && userMoved) observe()
     const current = mark.value
     if (!person.value || !current?.id || (remote && current.event <= remote.event)) return
     boundProject = projectId
     boundSession = sessionId
     pending = queueReadMark(pending, current)
     arm()
-  } catch { /* Offline: the local watermark stands. */ }
+  } catch {
+    // Offline: the local watermark stands, and a provisional landing may observe.
+    releaseMarkerHold(generation)
+  }
 }
 function repull() {
   if (!person.value || !me.value) return
@@ -144,36 +187,92 @@ const reduced = () => typeof matchMedia === 'function' && matchMedia('(prefers-r
 function onScroll() {
   const el = scroller.value
   if (!el) return
+  const top = el.scrollTop
   if (nearBottom(el)) stick = true
-  else if (el.scrollTop < lastTop - 2) stick = false
-  lastTop = el.scrollTop
-  distance.value = el.scrollHeight - el.scrollTop - el.clientHeight
+  else if (top < lastTop - 2) stick = false
+  lastTop = top
+  distance.value = el.scrollHeight - top - el.clientHeight
+  if (!entered || !placed) return
+  if (Math.abs(top - anchorTop) <= 2 || adjusting) {
+    if (adjusting) anchorTop = top
+    return
+  }
+  userMoved = true
+  awaitingServerPlacement = false
 }
+// The reader asked for the latest post: a late server mark must not pull them away.
 function toBottom(smooth = false) {
   const el = scroller.value
   if (!el) return
+  userMoved = true
+  awaitingServerPlacement = false
   stick = true
   el.scrollTo({ top: el.scrollHeight, behavior: smooth && !reduced() ? 'smooth' : 'auto' })
+  anchorTop = el.scrollTop
   if (!smooth || reduced()) onScroll()
 }
-// Reopening resumes at the first unread message. A first visit shows the latest
-// exchange instead of stranding the reader at the beginning of a long thread.
-async function enter() {
-  entered = true
-  const first = unread.value[0]
-  newFrom.value = first && current.value[0]?.id !== first.id ? first.id : undefined
-  newCount.value = unread.value.length
-  await nextTick()
+// Keep a pinned bottom without treating the move as the reader's own scroll.
+function keepBottom() {
   const el = scroller.value
   if (!el) return
+  adjusting = true
+  stick = true
+  el.scrollTop = el.scrollHeight
+  anchorTop = el.scrollTop
+  lastTop = el.scrollTop
+  distance.value = el.scrollHeight - el.scrollTop - el.clientHeight
+  adjusting = false
+}
+function schedulePlace(generation: number) {
+  const run = placeChain.then(() => placeThread(generation))
+  placeChain = run.then(() => undefined, () => undefined)
+  return run
+}
+// Reopening resumes at the first unread message. A first visit, with no mark on
+// this browser or the server, shows the latest exchange. A server mark that
+// arrives after that provisional landing moves the reader unless they scrolled.
+async function placeThread(generation: number) {
+  if (generation !== readGeneration || !entered || !props.active) return
+  // The server mark can arrive while the thread paints. Sync again so the
+  // divider and the scroll use that mark, not the provisional bottom.
+  syncDivider()
+  let synced = mark.value?.event ?? null
+  await nextTick()
+  if (generation !== readGeneration || !entered || !props.active) return
+  if (userMoved) {
+    if (!holdingMarker()) observe()
+    return
+  }
+  if ((mark.value?.event ?? null) !== synced) {
+    syncDivider()
+    await nextTick()
+    if (generation !== readGeneration || !entered || !props.active || userMoved) return
+  }
+  const el = scroller.value
+  if (!el) return
+  const first = unread.value[0]
   const target = mark.value ? el.querySelector<HTMLElement>('.new-divider') ?? (first ? el.querySelector<HTMLElement>(`.msg[data-id="${CSS.escape(first.id)}"]`) : null) : null
+  adjusting = true
   if (target) {
     el.scrollTop = Math.max(0, target.getBoundingClientRect().top - el.getBoundingClientRect().top + el.scrollTop - 12)
     stick = nearBottom(el)
-  } else toBottom()
+  } else {
+    el.scrollTop = el.scrollHeight
+    stick = true
+  }
+  anchorTop = el.scrollTop
   lastTop = el.scrollTop
-  onScroll()
-  observe()
+  distance.value = el.scrollHeight - el.scrollTop - el.clientHeight
+  adjusting = false
+  placed = true
+  if (holdingMarker()) awaitingServerPlacement = true
+  else observe()
+}
+async function enter() {
+  entered = true
+  userMoved = false
+  placed = false
+  await schedulePlace(readGeneration)
 }
 watch(() => props.active, active => {
   if (active && loaded) void enter()
@@ -186,7 +285,7 @@ watch(() => current.value.map(m => `${m.id}:${m.count}`).join(), async (_now, _b
   onCleanup(() => { cancelled = true })
   await nextTick()
   if (cancelled || !props.active || !entered) return
-  if (stick) toBottom()
+  if (stick) keepBottom()
   else onScroll()
   observe()
 })
@@ -194,11 +293,14 @@ watch(() => current.value.map(m => `${m.id}:${m.count}`).join(), async (_now, _b
 // ---------- Seen: in view while the tab and the page are visible ----------
 let seen: IntersectionObserver | undefined
 let resize: ResizeObserver | undefined
+let observeGeneration = 0
 function observe() {
   const el = scroller.value
-  if (!el || typeof IntersectionObserver === 'undefined') return
   seen?.disconnect()
+  if (!el || holdingMarker() || typeof IntersectionObserver === 'undefined') return
+  const generation = ++observeGeneration
   seen = new IntersectionObserver(entries => {
+    if (generation !== observeGeneration || holdingMarker()) return
     if (!props.active || document.visibilityState !== 'visible') return
     const rootHeight = el.clientHeight
     let best: { event: number; id: string } | undefined
@@ -223,7 +325,7 @@ onMounted(() => {
   window.addEventListener('focus', onFocus)
   if (typeof ResizeObserver !== 'undefined' && scroller.value) {
     // The keyboard or a taller composer shrinks the thread: stay on the latest post.
-    resize = new ResizeObserver(() => { if (props.active && entered && stick) toBottom() })
+    resize = new ResizeObserver(() => { if (props.active && entered && stick) keepBottom() })
     resize.observe(scroller.value)
   }
 })
@@ -276,6 +378,11 @@ watch([() => me.value, () => s.value.id], async ([viewer, id]) => {
   mark.value = local
   statuses.value = {}
   entered = false; loaded = false; newFrom.value = undefined; distance.value = 0; stick = true
+  userMoved = false
+  placed = false
+  awaitingServerPlacement = false
+  markerHold = viewer && person.value && !local ? generation : 0
+  seen?.disconnect()
   draft.value = ''; replyTo.value = null; sendError.value = ''
   const projectId = s.value.project_id
   boundProject = projectId

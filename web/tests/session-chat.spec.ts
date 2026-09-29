@@ -214,6 +214,58 @@ test('the thread renders before the read marker answers', async ({ page }) => {
   } finally { release() }
 })
 
+// A new browser has no local watermark. The thread can paint at the latest post
+// while the server marker is still in flight; that provisional view must not
+// count as reading, and the marker must then open the first unread post.
+test('a late server read marker opens the thread at the first unread message', async ({ page }) => {
+  const seen = '3e000000-0000-4000-8000-000000000105'
+  const { worker } = await setup(page, { count: 40, storage: { 'aeon.session-tab': 'messages' }, readMark: { event: 205, id: seen } })
+  let release: () => void = () => {}
+  const gate = new Promise<void>(resolve => { release = resolve })
+  await page.route('**/read-marker', async route => {
+    if (route.request().method() === 'GET') await gate
+    await route.fallback()
+  })
+  await page.setViewportSize({ width: 1600, height: 800 })
+  try {
+    const opened = page.goto(`/agents/${worker.id}`)
+    const panel = panelOf(page)
+    await expect(panel.locator('.msg').last()).toBeInViewport()
+    await expect(panel.getByRole('separator')).toHaveCount(0)
+    expect(await localEvent(page, worker.id)).toBe(0)
+    release()
+    await opened
+    await expect(panel.getByRole('separator', { name: /new/ })).toBeVisible()
+    await expect(panel.locator('.msg').nth(6)).toBeInViewport()
+    await expect(panel.locator('.msg').last()).not.toBeInViewport()
+    await expect.poll(() => localEvent(page, worker.id)).toBeGreaterThan(205)
+    expect(await localEvent(page, worker.id)).toBeLessThan(239)
+  } finally { release() }
+})
+
+test('scrolling away before a late read marker arrives keeps that position', async ({ page }) => {
+  const seen = '3e000000-0000-4000-8000-000000000120'
+  const { worker } = await setup(page, { count: 40, storage: { 'aeon.session-tab': 'messages' }, readMark: { event: 220, id: seen } })
+  let release: () => void = () => {}
+  const gate = new Promise<void>(resolve => { release = resolve })
+  await page.route('**/read-marker', async route => {
+    if (route.request().method() === 'GET') await gate
+    await route.fallback()
+  })
+  await page.setViewportSize({ width: 1600, height: 800 })
+  try {
+    const opened = page.goto(`/agents/${worker.id}`)
+    const panel = panelOf(page)
+    await expect(panel.locator('.msg').last()).toBeInViewport()
+    await scroller(page).evaluate(el => { el.scrollTop = 0 })
+    await expect.poll(() => scroller(page).evaluate(el => el.scrollTop)).toBe(0)
+    release()
+    await opened
+    await expect.poll(() => localEvent(page, worker.id)).toBe(220)
+    expect(await scroller(page).evaluate(el => el.scrollTop)).toBe(0)
+  } finally { release() }
+})
+
 test('focusing the window picks up a read from another device', async ({ page }) => {
   const seen = '3e000000-0000-4000-8000-000000000101'
   const { worker } = await setup(page, { count: 5, readMark: { event: 201, id: seen } })
