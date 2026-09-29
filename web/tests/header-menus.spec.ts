@@ -350,6 +350,31 @@ test.describe('phones', () => {
     await expect(page).toHaveURL('/')
     await expect(page.getByRole('button', { name: 'Switch to dark theme' })).toBeVisible()
   })
+  // Fonts change the room without resizing the header: a late JetBrains Mono must
+  // bring the moon back once it leaves the room for it (Codex round 3).
+  test('the moon comes back when a late font leaves room for it', async ({ page }) => {
+    let release!: () => void
+    const held = new Promise<void>(resolve => { release = resolve })
+    await page.route('**/jetbrains*.woff2*', async route => { await held; await route.continue() })
+    await page.setViewportSize({ width: 390, height: 844 })
+    await page.emulateMedia({ colorScheme: 'light' })
+    await signIn(page, 'admin', { business: true })
+    await page.goto('/p/PHAROS/PHAROS-11?view=full')
+    const moon = page.getByRole('button', { name: 'Switch to dark theme' })
+    await expect(page.getByRole('navigation', { name: 'Breadcrumb' }).locator('.crumb.current')).toHaveText('PHAROS-11')
+    await expect(moon).toBeHidden()
+    expect(await page.evaluate(() => document.fonts.check('12px "JetBrains Mono"'))).toBe(false)
+    await page.setViewportSize({ width: 415, height: 844 })
+    // Let the resize settle on the fallback font: just short of the room it needs.
+    await page.evaluate(() => new Promise(done => requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(done)))))
+    await expect(moon).toBeHidden()
+    release()
+    await page.evaluate(() => document.fonts.ready.then(() => undefined))
+    expect(await page.evaluate(() => document.fonts.check('12px "JetBrains Mono"'))).toBe(true)
+    await expect(moon).toBeVisible()
+    const key = page.getByRole('navigation', { name: 'Breadcrumb' }).locator('.crumb.current')
+    await expect.poll(() => key.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true)
+  })
   for (const [width, business] of [[390, false], [440, true], [1600, true]] as const) {
     test(`the moon stays in the header at ${width}${business ? ' with three places' : ''}`, async ({ page }) => {
       await page.setViewportSize({ width, height: 844 })

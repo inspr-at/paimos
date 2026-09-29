@@ -106,33 +106,47 @@ watch(() => session.identity?.principal.id, id => {
 // Phones: the moon steps aside only when the breadcrumb's page (a ticket key) would
 // otherwise clip, and comes back as soon as the free room holds it (AEON-312). The
 // decision is measured, never guessed from the number of places; its quick toggle
-// then leads the avatar sheet.
+// then leads the avatar sheet. Room within a tenth of a pixel counts as enough, so
+// subpixel noise never keeps it away; should its return clip the key anyway, it
+// stays away at that width until the width, the page or the fonts change.
 const header = ref<HTMLElement>()
 const moonAway = ref(false)
 const narrow = window.matchMedia('(max-width: 600px)')
+let returnedAt = -1
+let heldAt = -1
 function fitMoon() {
   const el = header.value
   if (!el || !narrow.matches) { moonAway.value = false; return }
   const crumb = el.querySelector<HTMLElement>('.crumbs > .crumb.current')
   const overflow = crumb ? crumb.scrollWidth - crumb.clientWidth : 0
-  if (!moonAway.value) { if (overflow > 0.5) moonAway.value = true; return }
+  const width = el.clientWidth
+  if (!moonAway.value) {
+    if (overflow > 0.5) { moonAway.value = true; if (returnedAt === width) heldAt = width }
+    return
+  }
+  if (heldAt === width) return
   const spacer = el.querySelector<HTMLElement>('.spacer')
   const gap = parseFloat(getComputedStyle(el).columnGap) || 0
-  if (spacer && spacer.getBoundingClientRect().width - Math.max(0, overflow) >= 44 + gap) moonAway.value = false
+  if (spacer && spacer.getBoundingClientRect().width - Math.max(0, overflow) >= 44 + gap - 0.1) { moonAway.value = false; returnedAt = width }
 }
 let fitFrame = 0
 function refit() { cancelAnimationFrame(fitFrame); fitFrame = requestAnimationFrame(() => { fitMoon(); fitFrame = requestAnimationFrame(fitMoon) }) }
+function remeasure() { heldAt = -1; refit() }
 const resized = new ResizeObserver(refit)
 const crumbsChanged = new MutationObserver(refit)
-watch([() => route.fullPath, () => places.value.length, navReady], () => { void nextTick(refit) })
+// A web font swapping in changes the room without resizing the header.
+const fonts = 'fonts' in document ? document.fonts : undefined
+watch([() => route.fullPath, () => places.value.length, navReady], () => { heldAt = -1; void nextTick(refit) })
 onMounted(() => {
   if (header.value) { resized.observe(header.value); crumbsChanged.observe(header.value, { childList: true, subtree: true, characterData: true }) }
-  narrow.addEventListener('change', refit)
+  narrow.addEventListener('change', remeasure)
+  fonts?.addEventListener('loadingdone', remeasure)
+  void fonts?.ready.then(remeasure)
   refit()
   window.addEventListener('keydown', shortcut); window.addEventListener('keydown', placeKeys, true)
   needsPoll.start()
 })
-onBeforeUnmount(() => { resized.disconnect(); crumbsChanged.disconnect(); narrow.removeEventListener('change', refit); cancelAnimationFrame(fitFrame); window.removeEventListener('keydown', shortcut); window.removeEventListener('keydown', placeKeys, true); needsPoll.stop() })
+onBeforeUnmount(() => { resized.disconnect(); crumbsChanged.disconnect(); narrow.removeEventListener('change', remeasure); fonts?.removeEventListener('loadingdone', remeasure); cancelAnimationFrame(fitFrame); window.removeEventListener('keydown', shortcut); window.removeEventListener('keydown', placeKeys, true); needsPoll.stop() })
 </script>
 
 <template>
