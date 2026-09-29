@@ -52,6 +52,69 @@ export interface AllowanceWindow {
   headroom: number | null
   hard_remaining: number | null
 }
+export interface WorkGroup {
+  key: string
+  label: string
+  sessions: number
+  timed_sessions: number
+  agent_seconds: number
+  done: number
+  tokens: string | null
+  usage_reported_sessions: number
+}
+export interface WorkTicket {
+  id: string
+  key: string
+  title: string
+  project_id: string
+  project_key: string
+  state: string
+  done_in_range: boolean
+  released: boolean
+  sessions: number
+  timed_sessions: number
+  agent_seconds: number
+  tokens: string | null
+  usage_reported_sessions: number
+  last_active_at: string
+}
+export type WasteKind = 'stuck' | 'failed' | 'lost' | 'no_result' | 'retried'
+export interface WasteItem {
+  kind: WasteKind
+  session_id: string
+  project_id: string
+  project_key: string
+  ticket_id: string | null
+  ticket_key: string | null
+  ticket_title: string | null
+  harness: string
+  model: string | null
+  label: string | null
+  at: string
+  sessions: number
+  agent_seconds: number | null
+}
+/** What agents got done and where the time went (AEON-301). */
+export interface UsageWork {
+  basis: 'sessions_started_in_range'
+  sessions: number
+  worker_sessions: number
+  timed_sessions: number
+  agent_seconds: number
+  usage_reported_sessions: number
+  model_sessions: number
+  done: number
+  released: number
+  done_attributed: number
+  tickets_worked: number
+  tickets_done: number
+  days: { day: string; done: number; sessions: number; agent_seconds: number }[]
+  tickets: WorkTicket[]
+  by_harness: WorkGroup[]
+  by_model: WorkGroup[]
+  by_project: WorkGroup[]
+  waste: { total: number; stuck: number; failed: number; lost: number; no_result: number; retried: number; rows: WasteItem[] }
+}
 export interface UsageDashboard {
   from: string
   to: string
@@ -78,6 +141,7 @@ export interface UsageDashboard {
     by_model: { label: string; votes: number; average: string | null; exceptions: number; deliveries: number; rework_rate: string | null }[]
     by_harness: { label: string; votes: number; average: string | null; exceptions: number; deliveries: number; rework_rate: string | null }[]
   }
+  work: UsageWork
 }
 
 export const costStateLabel: Record<CostState, string> = {

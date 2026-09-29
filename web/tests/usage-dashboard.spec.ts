@@ -1,147 +1,169 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+// AEON-301: Agents → Usage is one page for capacity and usage. "Now" is the
+// capacity band; below it what agents got done, what it took and where the
+// waste is. Nothing unknown is drawn as a dash or a zero.
 import { test, expect, type Page } from '@playwright/test'
-import { mkdirSync } from 'node:fs'
-import { resolve } from 'node:path'
-import { fixtures, mockWork } from './work-fixtures'
-import type { UsageDashboard, UsageGroup } from '../src/lib/usageFormat.ts'
+import { watchErrors } from './work-fixtures'
+import { USAGE_TZ, setupUsage } from './usage-fixtures'
+import { usageDashboard } from './usage-data'
 
-const shots = resolve(process.cwd(), '../.agent-shots')
+test.use({ timezoneId: USAGE_TZ })
 
-function group(label: string, sessions: number, cost: string | null, extra: Partial<UsageGroup> = {}): UsageGroup {
-  const known = cost ? 1 : 0
-  return {
-    label, key: label, sessions, usage_rows: sessions, unreported_sessions: cost ? 0 : sessions,
-    input_tokens: known ? '1000' : null, input_known_rows: known, input_unknown_rows: known ? 0 : 1,
-    output_tokens: known ? '400' : null, output_known_rows: known, output_unknown_rows: known ? 0 : 1,
-    cached_input_tokens: null, cached_input_known_rows: 0, cached_input_unknown_rows: Math.max(sessions, 1),
-    tokens_state: known ? 'partial' : 'unknown', estimated_cost_usd: cost, cost_known_rows: known, cost_unknown_rows: known ? 0 : Math.max(sessions, 1),
-    cost_state: known ? 'partial' : 'unknown', provisional_rows: 0, provisional_sessions: 0, ...extra,
-  }
-}
-
-const dashboard: UsageDashboard = {
-  from: '2026-08-29T00:00:00Z', to: '2026-09-28T00:00:00Z', generated_at: '2026-09-27T10:00:00Z',
-  attribution: 'lifetime_for_sessions_started_in_range', trend_basis: 'session_started_utc_day', list_price_currency: 'USD',
-  truncated: false,
-  totals: {
-    label: 'All visible sessions', sessions: 6, usage_rows: 7, unreported_sessions: 1,
-    input_tokens: '1013', input_known_rows: 4, input_unknown_rows: 2,
-    output_tokens: '408', output_known_rows: 4, output_unknown_rows: 2,
-    cached_input_tokens: '53', cached_input_known_rows: 3, cached_input_unknown_rows: 3,
-    tokens_state: 'partial', estimated_cost_usd: '528.000000000000', cost_known_rows: 5, cost_unknown_rows: 2,
-    cost_state: 'partial', provisional_rows: 1, provisional_sessions: 1,
-  },
-  by_project: [group('Pharos', 4, '521.000000000000', { key: 'PHAROS', id: 'p-pharos' }), group('Unreported', 1, null, { key: '' })],
-  by_model: [group('gpt-4.1', 4, '521.000000000000'), group('Unreported', 1, null)],
-  by_subscription: [group('Codex Pro', 3, '521.000000000000', { billing_mode: 'subscription' }), group('Unreported', 1, null, { billing_mode: 'unreported' })],
-  trend: [
-    { day: '2026-09-10', group: group('', 4, '521.000000000000') },
-    { day: '2026-09-11', group: group('', 1, null) },
-  ],
-  tickets: [{
-    ...group('Known ticket', 2, '520.000000000000', { key: 'PHAROS-11', id: 'n-1', cost_state: 'partial' }),
-    project_id: 'p-pharos', project_key: 'PHAROS',
-  }],
-  tickets_cost_unknown: 1,
-  allowance: {
-    state: 'visible',
-    windows: [
-      {
-        account_id: 'a-1', label: 'Codex Pro', harness: 'codex', account_state: 'available', window_id: 'w-1', unit: 'tokens',
-        allowance: 1000, used: null, reserved: 50, pace_model: 'unrestricted', burst_ratio: '0.1000',
-        starts_at: '2026-09-27T09:00:00Z', ends_at: '2026-09-27T11:00:00Z', provisional: true, pace_cap: 1000, headroom: null, hard_remaining: null,
-      },
-      {
-        account_id: 'a-2', label: 'Measured pool', harness: 'codex', account_state: 'available', window_id: 'w-2', unit: 'tokens',
-        allowance: 1000, used: 120, reserved: 30, pace_model: 'unrestricted', burst_ratio: '0.1000',
-        starts_at: '2026-09-27T09:00:00Z', ends_at: '2026-09-27T11:00:00Z', provisional: false, pace_cap: 1000, headroom: 850, hard_remaining: 850,
-      },
-    ],
-  },
-}
-
-async function install(page: Page, theme: 'light' | 'dark') {
-  const data = fixtures()
-  data.preferences.theme = { choice: theme }
-  await mockWork(page, data)
-  const calls: string[] = []
-  await page.route('**/api/usage/dashboard**', async route => {
-    calls.push(route.request().url())
-    await route.fulfill({ json: dashboard })
-  })
-  return calls
-}
-
-test('usage shows lifetime list estimate, unknown, and allowance without turning gaps into zero', async ({ page }) => {
-  const calls = await install(page, 'light')
-  await page.goto('/agents/usage')
+const band = (page: Page) => page.getByRole('region', { name: 'Capacity' })
+const tile = (page: Page, key: string) => page.locator(`.tile-${key}`)
+const noScroll = (page: Page) => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)
+async function open(page: Page, query = '') {
+  await page.goto(`/agents/usage${query}`)
   await expect(page.getByRole('heading', { name: 'Usage', level: 1 })).toBeVisible()
-  // One visible sentence; the caveats stay readable to screen readers and on hover.
-  await expect(page.locator('.summary')).toContainText('Lifetime usage of the sessions that started')
-  await expect(page.locator('.summary')).toContainText('not spend consumed')
-  await expect(page.locator('.summary')).toContainText('not verified coverage')
-  await expect(page.locator('.summary [data-tip]')).toHaveAttribute('data-tip', /Unknown is not zero/)
-  const summary = page.locator('.summary-card')
-  await expect(summary).toContainText('6 sessions started')
-  await expect(summary).toContainText('1,013 from 4 of 6')
-  await expect(summary).toContainText('528.00 USD')
-  await expect(summary).toContainText('1 provisional')
-  await expect(summary).toContainText('2 reports without a price')
-  await expect(summary).toContainText('1 session reported no usage')
-  await expect(summary).not.toContainText('0.00')
-  await expect(page.getByRole('heading', { name: 'By start day', exact: true })).toBeVisible()
-  await expect(page.getByRole('img', { name: /List estimate per start day/ })).toBeVisible()
-  // A day with sessions and no known price is a hollow stub, never a zero bar.
-  await expect(page.locator('.trend .col .stub')).toHaveCount(1)
-  await page.getByText('Show table', { exact: true }).click()
-  await expect(page.getByRole('row', { name: /11 Sep/ })).toContainText('Unknown')
+}
+// A dash as a value, not as punctuation in a sentence: no element holds only a dash.
+async function noDashes(page: Page) {
+  const placeholders = await page.locator('.usage-page *').evaluateAll(els => els.filter(el => /^[–—-]$/.test((el.textContent ?? '').trim())).length)
+  expect(placeholders).toBe(0)
+  expect(await page.locator('.usage-page').innerText()).not.toMatch(/Unknown|Not reported|Price unknown/)
+}
+
+test('nothing reported yet: capacity now, then done, agent time and waste — no dashes', async ({ page }) => {
+  const errors = watchErrors(page)
+  const calls = await setupUsage(page, { variant: 'unreported' })
+  await open(page)
+
+  // Now: one row per vendor pool, soonest reset first, with the plan sentence.
+  await expect(band(page).locator('.meta')).toHaveText('5 of 6 accounts ready')
+  await expect(band(page).locator('.row')).toHaveCount(4)
+  await expect(band(page).locator('.row .pool-name')).toHaveText(['Claude', 'Codex', 'Grok', 'Cursor'])
+  const claude = band(page).locator('[data-pool="claude"]')
+  await expect(claude.locator('.reset')).toHaveText('resets 16:40 · 5-hour')
+  await expect(claude.locator('.sentence')).toContainText('Today: use up to ~10% of Claude (4% so far)')
+  await expect(claude.getByRole('meter')).toHaveAttribute('aria-label', 'Claude: 37% left, 4% of ~10% used today')
+  const codex = band(page).locator('[data-pool="codex"]')
+  await expect(codex.locator('.plan-name')).toHaveText('3 accounts · Pro · weekly')
+  await expect(codex.locator('.reset')).toHaveText('resets tomorrow 18:02')
+  await expect(band(page).locator('[data-pool="cursor"] .sentence')).toContainText('Ahead of pace')
+  await expect(band(page).getByRole('link', { name: 'Pacing' })).toHaveAttribute('href', '/agents')
+
+  // So far: four tiles, the cost tile is its reason with coverage.
+  await expect(tile(page, 'done')).toContainText('41 tickets done')
+  await expect(tile(page, 'done')).toContainText('6 released')
+  await expect(tile(page, 'cost')).toContainText('Cost is not measured yet')
+  await expect(tile(page, 'cost')).toContainText('reported by 0 of 357 sessions')
+  await expect(tile(page, 'time')).toContainText('612 h agent time')
+  await expect(tile(page, 'time')).toContainText('timed for 349 of 357 sessions')
+  await expect(tile(page, 'waste')).toContainText('9 runs with nothing to show')
+
+  await expect(page.getByRole('img', { name: /Tickets done per day: 41 in total/ })).toBeVisible()
+
+  const tickets = page.getByRole('region', { name: 'Tickets' })
+  await expect(tickets.locator('.card-meta')).toHaveText('64 worked · 43 done')
+  await expect(tickets.locator('.ticket')).toHaveCount(8)
+  await expect(tickets.locator('.ticket').first()).toContainText('AEON-292')
+  await expect(tickets.locator('.ticket').first()).toContainText('Released · 14 sessions')
+  await expect(tickets.locator('.ticket').first().locator('.time')).toHaveText('32 h')
+  await expect(tickets.getByRole('link', { name: /AEON-292/ })).toHaveAttribute('href', '/p/AEON/AEON-292')
+  await tickets.getByRole('button', { name: 'Show 3 more' }).click()
+  await expect(tickets.locator('.ticket')).toHaveCount(11)
+  await expect(tickets).toContainText('and 53 more tickets with less agent time')
+
+  const waste = page.getByRole('region', { name: 'Waste' })
+  await expect(waste.locator('.waste')).toHaveCount(9)
+  await expect(waste.locator('.waste').first()).toContainText('Tried 4× not done yet')
+  await expect(waste.locator('.waste').nth(2)).toContainText('Stuck silent for 42 min')
+  await expect(waste.getByRole('link', { name: /^Open session: Stuck, AEON-301/ })).toHaveAttribute('href', '/agents/5e000000-0000-4000-8000-000000000042')
+  await expect(waste.getByRole('link', { name: 'Open ticket PHAROS-12' })).toHaveAttribute('href', /^\/p\/[A-Z0-9-]+\/PHAROS-12$/)
+
   const breakdown = page.getByRole('region', { name: 'Breakdown' })
-  await expect(breakdown).toContainText('Pharos')
-  await breakdown.getByRole('button', { name: 'Subscription' }).click()
-  await expect(breakdown.getByRole('button', { name: 'Subscription' })).toHaveAttribute('aria-pressed', 'true')
-  await expect(breakdown).toContainText('Reported subscription')
-  await expect(page.getByRole('link', { name: /PHAROS-11/ })).toHaveAttribute('href', '/p/PHAROS/PHAROS-11')
-  await expect(page.getByRole('region', { name: 'Most expensive tickets' })).toContainText('1,000 in · 400 out')
-  await expect(page.getByRole('region', { name: 'Most expensive tickets' })).toContainText('1 more ticket has no known price.')
-  const allowance = page.getByRole('region', { name: 'Allowance' })
-  await expect(allowance).toContainText('Codex Pro')
-  await expect(allowance).toContainText('Provisional')
-  await expect(allowance).toContainText('mixed settled evidence')
-  const unknownWindow = allowance.getByRole('listitem', { name: 'Codex Pro' })
-  await expect(unknownWindow).toContainText('1,000 tokens')
-  const unknownFacts = unknownWindow.locator('dd')
-  await expect(unknownFacts.nth(0)).toContainText('Unknown')
-  await expect(unknownFacts.nth(1)).toHaveText('50')
-  await expect(unknownFacts.nth(2)).toHaveText('1,000')
-  await expect(unknownFacts.nth(3)).toContainText('Unknown')
-  await expect(unknownFacts.nth(4)).toContainText('Unknown')
-  const measuredWindow = allowance.getByRole('listitem', { name: 'Measured pool' })
-  const measuredFacts = measuredWindow.locator('dd')
-  await expect(measuredFacts.nth(0)).toHaveText('120')
-  await expect(measuredFacts.nth(3)).toHaveText('850')
-  await expect(measuredFacts.nth(4)).toHaveText('850')
-  await expect(measuredWindow).not.toContainText('Provisional')
+  await expect(breakdown.getByRole('columnheader')).toHaveText(['Harness', 'Done', 'Sessions', 'Agent time', 'Rework'])
+  await expect(breakdown.getByRole('row', { name: /Claude/ })).toContainText('22')
+  await breakdown.getByRole('button', { name: 'Model' }).click()
+  await expect(breakdown.getByRole('button', { name: 'Model' })).toHaveAttribute('aria-pressed', 'true')
+  await expect(breakdown).toContainText('claude-opus-5-5')
+  await expect(breakdown).toContainText('Model registered by 331 of 357 sessions.')
+  // Nobody reported tokens, so there is no token column at all.
+  await expect(breakdown.getByRole('columnheader', { name: 'Tokens' })).toHaveCount(0)
+  await noDashes(page)
+
   await page.getByRole('button', { name: '7 days' }).click()
-  await expect.poll(() => calls.at(-1) ?? '').toContain('from=2026-')
+  await expect.poll(() => calls.at(-1) ?? '').toContain('from=2026-09-2')
   await expect(page).toHaveURL(/days=7/)
+  await expect(page.getByRole('heading', { name: 'Last 7 days' })).toBeVisible()
   await page.getByRole('combobox', { name: 'Project', exact: true }).selectOption({ label: 'Pharos' })
   await expect.poll(() => calls.at(-1) ?? '').toContain('project=p-pharos')
+  expect(await noScroll(page)).toBe(true)
+  // No coloured edge accents (AGENTS.md rule 11).
+  const edges = await page.locator('.usage-page *').evaluateAll(els => els.filter(el => { const s = getComputedStyle(el); return ['Left', 'Top'].some(side => parseFloat(s[`border${side}Width` as 'borderLeftWidth']) >= 3 && s[`border${side}Style` as 'borderLeftStyle'] !== 'none') }).length)
+  expect(edges).toBe(0)
+  expect(errors).toEqual([])
 })
 
-function isolated(cost: string, sessions: number, from: string, label: string): UsageDashboard {
-  const row = group(label, sessions, cost)
-  return {
-    ...dashboard,
-    from, to: '2026-09-28T00:00:00Z',
-    totals: { ...row, label: 'All visible sessions' },
-    by_project: [row],
-    by_model: [group('gpt-4.1', sessions, cost)],
-    by_subscription: [group('Codex Pro', sessions, cost, { billing_mode: 'subscription' })],
-    trend: [{ day: from.slice(0, 10), group: group('', sessions, cost) }],
-    tickets: [],
-    tickets_cost_unknown: 0,
-    allowance: { state: 'none', windows: [] },
-  }
+test('partly reported: tokens with coverage, API spend as the only money, a token column', async ({ page }) => {
+  await setupUsage(page, { variant: 'reported' })
+  await open(page)
+  await expect(tile(page, 'cost')).toContainText('100M tokens')
+  await expect(tile(page, 'cost')).toContainText('12.40 USD at API list price')
+  await expect(tile(page, 'cost')).toContainText('reported by 212 of 357 sessions')
+  const tickets = page.getByRole('region', { name: 'Tickets' })
+  await expect(tickets.locator('.card-meta')).toHaveText('64 worked · 43 done · tokens for 8')
+  await expect(tickets.locator('.ticket').first()).toContainText('12.9M tokens')
+  const breakdown = page.getByRole('region', { name: 'Breakdown' })
+  await expect(breakdown.getByRole('columnheader', { name: 'Tokens' })).toBeVisible()
+  await expect(breakdown.getByRole('row', { name: /Claude/ })).toContainText('61.4M')
+  // A group that reported nothing has an empty cell, not a dash or a zero.
+  await expect(breakdown.getByRole('row', { name: /Grok/ }).getByRole('cell').nth(4)).toHaveText('')
+  await noDashes(page)
+})
+
+test('a range without sessions is one line; capacity still shows now', async ({ page }) => {
+  await setupUsage(page, { variant: 'empty' })
+  await open(page)
+  await expect(page.getByText('No agent sessions in the last 30 days.')).toBeVisible()
+  await expect(page.locator('.tiles')).toHaveCount(0)
+  await expect(page.getByRole('region', { name: 'Tickets' })).toHaveCount(0)
+  await expect(band(page).locator('.row')).toHaveCount(4)
+})
+
+test('without account access the capacity band is hidden and the rest works', async ({ page }) => {
+  await setupUsage(page, { variant: 'unreported', noAccounts: true })
+  await open(page)
+  await expect(tile(page, 'done')).toContainText('41 tickets done')
+  await expect(band(page)).toHaveCount(0)
+  await expect(page.getByRole('heading', { name: 'Now' })).toHaveCount(0)
+})
+
+test('no accounts yet: one line and the one action that fixes it', async ({ page }) => {
+  await setupUsage(page, { variant: 'unreported', noPools: true })
+  await open(page)
+  await expect(band(page)).toContainText('No accounts yet. Sign in to a harness on a connected computer and it appears here.')
+  await expect(band(page).getByRole('link', { name: 'Connect computer' })).toHaveAttribute('href', '/agents/register-agent')
+  await expect(band(page).locator('.band-foot')).toHaveCount(0)
+})
+
+test('a failed read says so in one line and retries', async ({ page }) => {
+  await setupUsage(page, { variant: 'unreported' })
+  let fail = true
+  await page.route('**/api/usage/dashboard**', async route => {
+    if (fail) { fail = false; return route.fulfill({ status: 503, json: { error: 'session usage is not available' } }) }
+    return route.fallback()
+  })
+  await open(page)
+  await expect(page.getByRole('alert')).toHaveText('Usage could not be loaded right now.Try again')
+  await page.getByRole('button', { name: 'Try again' }).click()
+  await expect(page.getByRole('alert')).toHaveCount(0)
+  await expect(tile(page, 'done')).toContainText('41 tickets done')
+})
+
+test('at 390 the page stacks without horizontal scroll', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await setupUsage(page, { variant: 'reported' })
+  await open(page)
+  await expect(tile(page, 'waste')).toBeVisible()
+  await expect(page.getByRole('region', { name: 'Breakdown' }).getByRole('columnheader')).toHaveText(['Harness', 'Done', 'Agent time'])
+  expect(await noScroll(page)).toBe(true)
+})
+
+function marked(done: number) {
+  const d = usageDashboard('unreported', 7)
+  d.work.done = done
+  return d
 }
 
 test('an older usage response cannot replace the selection that followed it', async ({ page }) => {
@@ -155,41 +177,29 @@ test('an older usage response cannot replace the selection that followed it', as
       const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
       if (!url.includes('/api/usage/dashboard')) return original(input, init)
       return new Promise(resolve => {
-        held.push({
-          url,
-          signal: init?.signal ?? undefined,
-          finish: value => resolve(new Response(JSON.stringify(value.body), { status: value.status, headers: { 'Content-Type': 'application/json' } })),
-        })
+        held.push({ url, signal: init?.signal ?? undefined, finish: value => resolve(new Response(JSON.stringify(value.body), { status: value.status, headers: { 'Content-Type': 'application/json' } })) })
       })
     }
   })
-  const data = fixtures()
-  data.preferences.theme = { choice: 'light' }
-  await mockWork(page, data)
+  await setupUsage(page, { variant: 'unreported' })
   const heldCount = () => page.evaluate(() => (window as unknown as { __usageHeld: unknown[] }).__usageHeld.length)
   const aborted = (index: number) => page.evaluate(index => (window as unknown as { __usageHeld: { signal?: AbortSignal }[] }).__usageHeld[index]?.signal?.aborted ?? false, index)
   const finish = (index: number, status: number, body: unknown) => page.evaluate(({ index, status, body }) => {
     ;(window as unknown as { __usageHeld: { finish: (value: { status: number; body: unknown }) => void }[] }).__usageHeld[index].finish({ status, body })
   }, { index, status, body })
-  const kept = isolated('77.000000000000', 3, '2026-09-21T00:00:00Z', 'Kept range')
-  const stale = isolated('999.000000000000', 9, '2026-08-29T00:00:00Z', 'Stale project')
-  const status = page.locator('.state-line')
-  const summary = page.locator('.summary-card')
+  const done = tile(page, 'done')
+  const status = page.getByRole('status').filter({ hasText: /usage/ })
 
   await page.goto('/agents/usage?days=7')
   await expect.poll(heldCount).toBe(1)
-  await finish(0, 200, kept)
-  await expect(summary).toContainText('3 sessions started')
-  await expect(summary).toContainText('77.00 USD')
-  await expect(page.locator('.range')).toContainText('21 Sept 2026')
+  await finish(0, 200, marked(3))
+  await expect(done).toContainText('3 tickets done')
   await expect(page.locator('.usage-page')).toHaveAttribute('aria-busy', 'false')
 
   await page.getByRole('combobox', { name: 'Project', exact: true }).selectOption({ label: 'Pharos' })
   await expect.poll(heldCount).toBe(2)
   await expect.poll(() => aborted(0)).toBe(true)
-  await expect(summary).toHaveCount(0)
-  await expect(page.getByText('77.00 USD')).toHaveCount(0)
-  await expect(page.getByText('21 Sept 2026')).toHaveCount(0)
+  await expect(done).toHaveCount(0)
   await expect(status).toHaveText('Loading usage')
   await expect(page.locator('.usage-page')).toHaveAttribute('aria-busy', 'true')
   await expect(page.getByRole('button', { name: '7 days' })).toHaveAttribute('aria-pressed', 'true')
@@ -197,76 +207,35 @@ test('an older usage response cannot replace the selection that followed it', as
   await page.getByRole('combobox', { name: 'Project', exact: true }).selectOption({ label: 'All projects' })
   await expect.poll(heldCount).toBe(3)
   await expect.poll(() => aborted(1)).toBe(true)
-  await expect(summary).toContainText('77.00 USD')
-  await expect(summary).toContainText('3 sessions started')
-  await expect(page.locator('.range')).toContainText('21 Sept 2026')
+  await expect(done).toContainText('3 tickets done')
   await expect(status).toHaveText('Updating usage')
 
-  await finish(1, 200, stale)
-  await expect(page.getByText('999.00 USD')).toHaveCount(0)
-  await expect(page.getByText('Stale project')).toHaveCount(0)
-  await expect(page.getByText('9 sessions started')).toHaveCount(0)
-  await expect(page.getByText(/29 Aug/)).toHaveCount(0)
-  await expect(summary).toContainText('77.00 USD')
+  await finish(1, 200, marked(999))
+  await expect(page.getByText('999 tickets done')).toHaveCount(0)
+  await expect(done).toContainText('3 tickets done')
   await expect(status).toHaveText('Updating usage')
-  await expect(page.locator('.usage-page')).toHaveAttribute('aria-busy', 'true')
 
   await page.getByRole('combobox', { name: 'Project', exact: true }).selectOption({ label: 'Pharos' })
   await expect.poll(heldCount).toBe(4)
   await page.getByRole('combobox', { name: 'Project', exact: true }).selectOption({ label: 'All projects' })
   await expect.poll(heldCount).toBe(5)
   await expect.poll(() => aborted(3)).toBe(true)
-  await expect(summary).toContainText('77.00 USD')
-  await expect(status).toHaveText('Updating usage')
   await finish(3, 503, { error: 'The old project range failed' })
-  await expect(page.getByText('The old project range failed')).toHaveCount(0)
-  await expect(summary).toContainText('77.00 USD')
-  await expect(summary).toContainText('3 sessions started')
-  await expect(status).toHaveText('Updating usage')
   await expect(page.getByRole('alert')).toHaveCount(0)
+  await expect(done).toContainText('3 tickets done')
 
   await finish(4, 503, { error: 'The selected range could not be loaded' })
-  await expect(page.getByRole('alert')).toContainText('The selected range could not be loaded')
-  await expect(summary).toContainText('77.00 USD')
-  await expect(summary).toContainText('3 sessions started')
-  await expect(page.getByText('999.00 USD')).toHaveCount(0)
-  await expect(page.getByText('The old project range failed')).toHaveCount(0)
+  await expect(page.getByRole('alert')).toContainText('Usage could not be loaded right now.')
+  await expect(done).toContainText('3 tickets done')
   await expect(status).toHaveCount(0)
   await expect(page.locator('.usage-page')).toHaveAttribute('aria-busy', 'false')
 
   await page.getByRole('combobox', { name: 'Project', exact: true }).selectOption({ label: 'Pharos' })
   await expect.poll(heldCount).toBe(6)
-  await page.getByRole('region', { name: 'Usage' }).getByRole('link', { name: 'Agents' }).click()
+  await page.getByRole('region', { name: 'Usage' }).getByRole('link', { name: 'Agents', exact: true }).click()
   await expect(page).toHaveURL(/\/agents$/)
   await expect.poll(() => aborted(5)).toBe(true)
-  await finish(5, 200, stale)
-  await expect(page.getByText('999.00 USD')).toHaveCount(0)
-  await expect(page.getByText('Stale project')).toHaveCount(0)
+  await finish(5, 200, marked(999))
+  await expect(page.getByText('999 tickets done')).toHaveCount(0)
   expect(pageErrors).toEqual([])
-})
-
-test('usage screenshots at 1600 and 390, light and dark', async ({ browser }) => {
-  test.setTimeout(120_000)
-  mkdirSync(shots, { recursive: true })
-  for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390]) {
-    const context = await browser.newContext({ viewport: { width, height: width === 390 ? 844 : 1000 }, colorScheme: theme, reducedMotion: 'reduce', deviceScaleFactor: 1 })
-    const page = await context.newPage()
-    await install(page, theme)
-    await page.goto('/agents/usage')
-    await expect(page.getByRole('heading', { name: 'Usage', level: 1 })).toBeVisible()
-    await expect(page.locator('.summary-card')).toContainText('528.00 USD')
-    await expect(page.locator('html')).toHaveAttribute('data-theme', theme)
-    await page.evaluate(() => {
-      const shell = document.querySelector('.app-shell')
-      const main = document.querySelector('main')
-      for (const node of [document.documentElement, document.body, shell, main]) {
-        if (!(node instanceof HTMLElement)) continue
-        node.style.height = 'auto'
-        node.style.overflow = 'visible'
-      }
-      if (shell instanceof HTMLElement) shell.style.display = 'block'
-    })
-    await page.screenshot({ path: resolve(shots, `usage-${width}-${theme}.png`), fullPage: true })
-    await context.close()
-  }
 })
