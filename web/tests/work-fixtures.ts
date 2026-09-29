@@ -3,8 +3,9 @@
 // the B1 query semantics (within, kind, state, priority, assignee, q, hide_closed,
 // sort, facets, cursor paging) so specs can assert on real behaviour.
 import type { Page } from '@playwright/test'
+import { deriveAgentState, normalizeAgentState } from '../src/lib/agentSignals.ts'
 import { benefitIssues, completedTicketState } from '../src/lib/ticketBenefits.ts'
-import { who, type LiveAgent } from '../src/lib/liveAgents.ts'
+import { compareServerLead, leadWorkerKey, who, type LiveAgent } from '../src/lib/liveAgents.ts'
 import { mockEffectivePermissions } from './authz-fixtures'
 
 export const me = { id: '11111111-1111-4111-8111-111111111111', name: 'Markus Barta' }
@@ -143,6 +144,7 @@ function item(node: MockNode, data: Fixtures) {
   // the payload reads like an older server's.
   const person = typeof node.fields.assignee === 'string' ? data.people.find(p => p.id === node.fields.assignee) : undefined
   const assignee = person ? { id: person.id, name: person.name, ...(person.has_avatar === undefined ? {} : { has_avatar: person.has_avatar }) } : null
+  const lead = leadOf(data, node)
   return {
     id: node.id, key: node.key, kind_id: kindIds[node.kind_slug], title: node.title, body: node.body, fields: node.fields, state: node.state,
     parent_id: node.parent_id, position: '0', created_at: node.created_at, updated_at: node.updated_at, deleted_at: null,
@@ -153,6 +155,7 @@ function item(node: MockNode, data: Fixtures) {
     project: { id: project.id, key: project.key, title: project.title },
     epic: epicAbove(node, data),
     ...(node.eta ? { eta: node.eta } : {}),
+    ...(lead ? { lead_worker: { name: who(lead), key: leadWorkerKey(lead) } } : {}),
   }
 }
 // The nearest epic above a node, like the server's list projection.
@@ -204,22 +207,27 @@ function costUnit(node: MockNode): string {
 }
 const release = (node: MockNode) => labelOf(node.fields.release)
 const personName = (data: Fixtures, id: unknown) => typeof id === 'string' ? data.people.find(p => p.id === id)?.name ?? '' : ''
-// The name an assignee sort uses: the stored person, else the lead live worker
-// (worker before coordinator, earliest start, then session id). Empty is last
-// in both directions. Stopped and archived sessions do not count.
+// Live workers on one ticket, in the server's lead order (attention at the
+// viewer's thresholds, then start, heartbeat and public facts — not a session id).
+function liveOn(data: Fixtures, node: MockNode): LiveAgent[] {
+  const preferences = normalizeAgentState(data.preferences['agent-state'])
+  return data.live.flatMap(agent => {
+    const ticket = agent.ticket
+    if (!ticket || ticket.id !== node.id || agent.project_id !== node.project || ticket.project_id !== node.project) return []
+    if (agent.phase === 'stopped' || agent.stopped_at) return []
+    if (/archived/i.test(agent.stop_reason ?? '')) return []
+    const live: LiveAgent = { ...agent, ticket }
+    return [{ ...live, state: deriveAgentState(live, now, preferences) }]
+  }).sort(compareServerLead)
+}
+function leadOf(data: Fixtures, node: MockNode) { return liveOn(data, node)[0] }
+// The name an assignee sort uses: the stored person, else the lead live worker.
+// Empty is last in both directions.
 function shownAssignee(data: Fixtures, node: MockNode): string {
   const stored = personName(data, node.fields.assignee).trim()
   if (stored) return stored.toLowerCase()
-  const live = data.live.filter(agent => {
-    const ticket = agent.ticket
-    if (!ticket || ticket.id !== node.id || agent.project_id !== node.project || ticket.project_id !== node.project) return false
-    if (agent.phase === 'stopped' || agent.stopped_at) return false
-    if (/archived/i.test(agent.stop_reason ?? '')) return false
-    return true
-  }).sort((a, b) => Number(a.role === 'coordinator') - Number(b.role === 'coordinator')
-    || Date.parse(a.since) - Date.parse(b.since)
-    || (a.session_id ?? a.since).localeCompare(b.session_id ?? b.since))
-  return live[0] ? who(live[0] as LiveAgent).trim().toLowerCase() : ''
+  const lead = leadOf(data, node)
+  return lead ? who(lead).trim().toLowerCase() : ''
 }
 
 function completionRefusal(node: MockNode, nextState: string, fields: Record<string, unknown>): { error: string; code: string } | null {

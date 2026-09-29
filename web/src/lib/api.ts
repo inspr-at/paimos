@@ -164,12 +164,15 @@ export const searchNodes = (q: string, params: { kind_id?: string; state?: strin
 export interface ListPerson { id: string; name: string; has_avatar?: boolean }
 export interface ListParent { id: string; key: string; title: string; kind_slug: string }
 export interface ListProject { id: string; key: string; title: string }
+export interface LeadWorker { name: string; key: string }
 export interface ListItem extends WorkNode {
   kind_slug: string; kind_label: string; priority: string | null; assignee: ListPerson | null
   parent: ListParent | null; children_count: number; project: ListProject | null
   // The nearest epic above the item (a task's is its ticket's epic); absent on older servers.
   epic?: ListProject | null
   eta?: TicketEta
+  // The live worker the Assignee cell leads with. Absent when none is bound.
+  lead_worker?: LeadWorker | null
 }
 export type Facets = Record<string, Record<string, number>>
 export interface ListPage extends Page<ListItem> { facets?: Facets }

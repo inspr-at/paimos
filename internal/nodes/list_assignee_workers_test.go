@@ -4,11 +4,14 @@ package nodes
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 
@@ -108,6 +111,19 @@ func TestListAssigneeSortUsesLiveWorkerName(t *testing.T) {
 		tail := strings.Join(got[3:], ",")
 		if !strings.Contains(tail, "PAI-4") || !strings.Contains(tail, "PAI-5") || strings.Contains(tail, "PAI-1") {
 			t.Fatalf("empty rows not last: %v", got)
+		}
+	}
+	plainPage := listPage(t, p, "/api/nodes?within="+root.ID+"&kind=ticket&sort=updated_at")
+	for _, item := range plainPage.Items {
+		switch item.Key {
+		case "PAI-2":
+			if item.LeadWorker == nil || item.LeadWorker.Name != "Kai" || !strings.HasPrefix(item.LeadWorker.Key, "s:") {
+				t.Fatalf("unsorted lead: %#v", item.LeadWorker)
+			}
+		case "PAI-4", "PAI-5":
+			if item.LeadWorker != nil {
+				t.Fatalf("%s named a lead: %#v", item.Key, item.LeadWorker)
+			}
 		}
 	}
 
@@ -312,11 +328,328 @@ func TestListAssigneeSortLeadsWithTheAttentionState(t *testing.T) {
 	}
 }
 
+func TestLeadMinutesFollowTheWebRules(t *testing.T) {
+	if y, r := leadMinutesFromJSON(nil); y != 3 || r != 10 {
+		t.Fatalf("empty %d %d", y, r)
+	}
+	if y, r := leadMinutesFromJSON([]byte(`{"yellowMinutes":3,"redMinutes":20}`)); y != 3 || r != 20 {
+		t.Fatalf("3/20 %d %d", y, r)
+	}
+	if y, r := leadMinutesFromJSON([]byte(`{"yellowMinutes":20}`)); y != 20 || r != 21 {
+		t.Fatalf("missing red %d %d", y, r)
+	}
+	if y, r := leadMinutesFromJSON([]byte(`{"yellowMinutes":3,"redMinutes":2}`)); y != 3 || r != 4 {
+		t.Fatalf("red below yellow %d %d", y, r)
+	}
+	if y, r := leadMinutesFromJSON([]byte(`{"yellowMinutes":"nope","redMinutes":null}`)); y != 3 || r != 10 {
+		t.Fatalf("garbage %d %d", y, r)
+	}
+}
+
+// A viewer whose red threshold is 20 minutes still treats a 12-minute-old
+// working heartbeat as awaiting, so a waiting session leads. The default
+// 10-minute threshold makes that same heartbeat unresponsive and it leads.
+func TestListLeadUsesTheViewerHeartbeatThresholds(t *testing.T) {
+	p := newPrincipal(t, "assignee-threshold")
+	project := kindBySlug(t, p, "project")
+	ticketKind := kindBySlug(t, p, "ticket")
+	root := mustNode(t, p, `{"kind_id":"`+project.ID+`","title":"Thresholds"}`)
+	makeTicket := func(key string) nodeJSON {
+		t.Helper()
+		raw, _ := json.Marshal(map[string]any{"kind_id": ticketKind.ID, "key": key, "title": key, "state": "new", "parent_id": root.ID})
+		return mustNode(t, p, string(raw))
+	}
+	mix := makeTicket("THR-1")
+	only := makeTicket("THR-2")
+	ada := insertNamedAgent(t, p.TenantID, "Ada")
+	stamp := func(node, label, phase, activity string, created, heartbeat time.Duration) {
+		t.Helper()
+		insertLiveSessionStamp(t, p.TenantID, root.ID, ada, node, "claude", "worker", label, phase, activity, time.Now().UTC().Add(-created), time.Now().UTC().Add(-heartbeat))
+	}
+	stamp(mix.ID, "Ada", "working", "busy", 30*time.Minute, 12*time.Minute)
+	stamp(mix.ID, "Zed", "yielded", "idle", time.Minute, time.Second)
+	stamp(only.ID, "Mia", "working", "busy", 2*time.Minute, time.Second)
+
+	keys := func(sort string) []string {
+		t.Helper()
+		return listKeys(t, p, "/api/nodes?within="+root.ID+"&kind=ticket&sort="+sort)
+	}
+	lead := func() string {
+		t.Helper()
+		for _, item := range listPage(t, p, "/api/nodes?within="+root.ID+"&kind=ticket&sort=updated_at").Items {
+			if item.Key == mix.Key && item.LeadWorker != nil {
+				return item.LeadWorker.Name
+			}
+		}
+		t.Fatal("missing lead")
+		return ""
+	}
+	if got := keys("assignee"); strings.Join(got, ",") != "THR-1,THR-2" || lead() != "Ada" {
+		t.Fatalf("default 3/10: order %v lead %s", keys("assignee"), lead())
+	}
+	setAgentState(t, p, 3, 20)
+	if got := keys("assignee"); strings.Join(got, ",") != "THR-2,THR-1" {
+		t.Fatalf("3/20 order %v", got)
+	}
+	if got := keys("-assignee"); strings.Join(got, ",") != "THR-1,THR-2" {
+		t.Fatalf("3/20 desc %v", got)
+	}
+	if lead() != "Zed" {
+		t.Fatalf("3/20 lead %s", lead())
+	}
+	sorted := listPage(t, p, "/api/nodes?within="+root.ID+"&kind=ticket&sort=assignee")
+	for _, item := range sorted.Items {
+		if item.Key == mix.Key && (item.LeadWorker == nil || item.LeadWorker.Name != "Zed") {
+			t.Fatalf("sorted lead %#v", item.LeadWorker)
+		}
+	}
+}
+
+// Equal start and heartbeat, session ids withheld: the lead name on the row
+// is the name the sort uses. Swapping hidden labels and principal names does
+// not change a guest's order or key.
+func TestListLeadTieBreakIgnoresWithheldSessionIDs(t *testing.T) {
+	p := newPrincipal(t, "assignee-tie")
+	project := kindBySlug(t, p, "project")
+	ticketKind := kindBySlug(t, p, "ticket")
+	root := mustNode(t, p, `{"kind_id":"`+project.ID+`","title":"Ties"}`)
+	makeTicket := func(key, assignee string) nodeJSON {
+		t.Helper()
+		fields := map[string]any{}
+		if assignee != "" {
+			fields["assignee"] = assignee
+		}
+		raw, _ := json.Marshal(map[string]any{"kind_id": ticketKind.ID, "key": key, "title": key, "state": "new", "parent_id": root.ID, "fields": fields})
+		return mustNode(t, p, string(raw))
+	}
+	bee := addPrincipalIn(t, p.TenantID, "Bee")
+	frank := addPrincipalIn(t, p.TenantID, "Frank")
+	makeTicket("TIE-1", bee.ID)
+	tie := makeTicket("TIE-2", "")
+	makeTicket("TIE-3", frank.ID)
+	makeTicket("TIE-4", "")
+	hiddenC := insertNamedAgent(t, p.TenantID, "HiddenC")
+	hiddenG := insertNamedAgent(t, p.TenantID, "HiddenG")
+	at := time.Now().UTC().Truncate(time.Microsecond)
+	claudeID := insertLiveSessionStamp(t, p.TenantID, root.ID, hiddenC, tie.ID, "claude", "worker", "Zed", "working", "busy", at, at)
+	grokID := insertLiveSessionStamp(t, p.TenantID, root.ID, hiddenG, tie.ID, "grok", "worker", "Aaa", "working", "busy", at, at)
+
+	guest := insertPerson(t, p.TenantID, "Guest")
+	bindProjectRole(t, p.TenantID, guest.ID, "guest", root.ID)
+
+	path := "/api/nodes?within=" + root.ID + "&kind=ticket&sort="
+	adminAsc := listKeys(t, p, path+"assignee")
+	if strings.Join(adminAsc, ",") != "TIE-1,TIE-3,TIE-2,TIE-4" {
+		t.Fatalf("admin asc %v", adminAsc)
+	}
+	guestAsc := listKeys(t, guest, path+"assignee")
+	if strings.Join(guestAsc, ",") != "TIE-1,TIE-2,TIE-3,TIE-4" {
+		t.Fatalf("guest asc %v", guestAsc)
+	}
+	guestPage := listPage(t, guest, path+"assignee")
+	var guestLead *leadWorker
+	for _, item := range guestPage.Items {
+		if item.Key != tie.Key {
+			continue
+		}
+		guestLead = item.LeadWorker
+	}
+	if guestLead == nil || guestLead.Name != "Claude agent" {
+		t.Fatalf("guest lead %#v", guestLead)
+	}
+	if strings.Contains(guestLead.Key, claudeID) || strings.Contains(guestLead.Key, grokID) {
+		t.Fatalf("guest key leaked a session id: %s", guestLead.Key)
+	}
+	snap := sessionSnap(t, p.TenantID, claudeID)
+	wantKey := leadWorkerKey(false, snap.id, snap.harness, snap.created, snap.heartbeat, snap.role, snap.phase, snap.activity, snap.label, snap.name, false, false)
+	if guestLead.Key != wantKey {
+		t.Fatalf("guest key %q want %q", guestLead.Key, wantKey)
+	}
+	adminLead := leadOn(t, p, path+"updated_at", tie.Key)
+	if adminLead == nil || adminLead.Name != "Zed" || adminLead.Key != "s:"+claudeID {
+		t.Fatalf("admin lead %#v", adminLead)
+	}
+	if plain := leadOn(t, guest, path+"updated_at", tie.Key); plain == nil || plain.Name != guestLead.Name || plain.Key != guestLead.Key {
+		t.Fatalf("unsorted guest lead %#v sorted %#v", plain, guestLead)
+	}
+
+	err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `UPDATE harness_sessions SET display_label = CASE id::text WHEN $1 THEN 'Aaa' WHEN $2 THEN 'Zed' END WHERE id::text IN ($1, $2)`, claudeID, grokID); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `UPDATE principals SET name = CASE id::text WHEN $1 THEN 'HiddenG' WHEN $2 THEN 'HiddenC' END WHERE id::text IN ($1, $2)`, hiddenC, hiddenG)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := listKeys(t, guest, path+"assignee"); strings.Join(got, ",") != strings.Join(guestAsc, ",") {
+		t.Fatalf("guest order changed after hidden rename: %v", got)
+	}
+	if again := leadOn(t, guest, path+"assignee", tie.Key); again == nil || again.Name != "Claude agent" || again.Key != guestLead.Key {
+		t.Fatalf("guest lead changed %#v", again)
+	}
+	if got := listKeys(t, p, path+"assignee"); strings.Join(got, ",") != "TIE-2,TIE-1,TIE-3,TIE-4" {
+		t.Fatalf("admin should now sort by Aaa: %v", got)
+	}
+	if again := leadOn(t, p, path+"assignee", tie.Key); again == nil || again.Name != "Aaa" {
+		t.Fatalf("admin lead after rename %#v", again)
+	}
+}
+
+func TestListAssigneeSortPagesStably(t *testing.T) {
+	p := newPrincipal(t, "assignee-page")
+	project := kindBySlug(t, p, "project")
+	ticketKind := kindBySlug(t, p, "ticket")
+	root := mustNode(t, p, `{"kind_id":"`+project.ID+`","title":"Pages"}`)
+	makeTicket := func(key, assignee string) nodeJSON {
+		t.Helper()
+		fields := map[string]any{}
+		if assignee != "" {
+			fields["assignee"] = assignee
+		}
+		raw, _ := json.Marshal(map[string]any{"kind_id": ticketKind.ID, "key": key, "title": key, "state": "new", "parent_id": root.ID, "fields": fields})
+		return mustNode(t, p, string(raw))
+	}
+	anna := addPrincipalIn(t, p.TenantID, "Anna")
+	bela := addPrincipalIn(t, p.TenantID, "Bela")
+	dora := addPrincipalIn(t, p.TenantID, "Dora")
+	evan := addPrincipalIn(t, p.TenantID, "Evan")
+	makeTicket("PG-1", anna.ID)
+	makeTicket("PG-2", bela.ID)
+	cara := makeTicket("PG-3", "")
+	makeTicket("PG-4", dora.ID)
+	makeTicket("PG-5", evan.ID)
+	worker := insertNamedAgent(t, p.TenantID, "Cara")
+	insertLiveSession(t, p.TenantID, root.ID, worker, cara.ID, "claude", "worker", "Cara", "working", "busy", "", 5)
+
+	walk := func(sort string) []string {
+		t.Helper()
+		var out []string
+		seen := map[string]bool{}
+		cursor := ""
+		for range 8 {
+			path := "/api/nodes?within=" + root.ID + "&kind=ticket&sort=" + url.QueryEscape(sort) + "&limit=2"
+			if cursor != "" {
+				path += "&cursor=" + url.QueryEscape(cursor)
+			}
+			page := listPage(t, p, path)
+			if len(page.Items) == 0 || len(page.Items) > 2 {
+				t.Fatalf("page size %d", len(page.Items))
+			}
+			for _, item := range page.Items {
+				if seen[item.Key] {
+					t.Fatalf("duplicate %s", item.Key)
+				}
+				seen[item.Key] = true
+				out = append(out, item.Key)
+				if item.Key == cara.Key && (item.LeadWorker == nil || item.LeadWorker.Name != "Cara") {
+					t.Fatalf("paged lead %#v", item.LeadWorker)
+				}
+			}
+			if page.NextCursor == nil {
+				return out
+			}
+			cursor = *page.NextCursor
+		}
+		t.Fatal("cursor did not end")
+		return nil
+	}
+	wantAsc := []string{"PG-1", "PG-2", "PG-3", "PG-4", "PG-5"}
+	wantDesc := []string{"PG-5", "PG-4", "PG-3", "PG-2", "PG-1"}
+	if got, again := walk("assignee"), walk("assignee"); strings.Join(got, ",") != strings.Join(wantAsc, ",") || strings.Join(again, ",") != strings.Join(wantAsc, ",") {
+		t.Fatalf("asc %v then %v", got, again)
+	}
+	if got := walk("-assignee"); strings.Join(got, ",") != strings.Join(wantDesc, ",") {
+		t.Fatalf("desc %v", got)
+	}
+}
+
+func listPage(t *testing.T, who tenant.Principal, path string) nodePage {
+	t.Helper()
+	status, body := call(t, &who, http.MethodGet, path, "")
+	return decode[nodePage](t, status, body, http.StatusOK)
+}
+
+func listKeys(t *testing.T, who tenant.Principal, path string) []string {
+	t.Helper()
+	page := listPage(t, who, path)
+	out := make([]string, 0, len(page.Items))
+	for _, item := range page.Items {
+		out = append(out, item.Key)
+	}
+	return out
+}
+
+func leadOn(t *testing.T, who tenant.Principal, path, key string) *leadWorker {
+	t.Helper()
+	for _, item := range listPage(t, who, path).Items {
+		if item.Key == key {
+			return item.LeadWorker
+		}
+	}
+	return nil
+}
+
+func setAgentState(t *testing.T, p tenant.Principal, yellow, red int) {
+	t.Helper()
+	raw := fmt.Sprintf(`{"yellowMinutes":%d,"redMinutes":%d}`, yellow, red)
+	err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO user_preferences (tenant_id, principal_id, key, value)
+			VALUES ($1::uuid, $2::uuid, 'agent-state', $3::jsonb)
+			ON CONFLICT (tenant_id, principal_id, key) DO UPDATE SET value = EXCLUDED.value`, p.TenantID, p.ID, raw)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+type stampedSession struct {
+	id, harness, role, phase, activity, label, name string
+	created                                         time.Time
+	heartbeat                                       *time.Time
+}
+
+func sessionSnap(t *testing.T, tenantID, id string) stampedSession {
+	t.Helper()
+	var snap stampedSession
+	err := db.InTenant(dbtest.Seed(t.Context()), appPool, tenantID, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `SELECT s.id::text, s.harness, s.role, s.phase, s.activity, coalesce(s.display_label,''), coalesce(a.name,''), s.created_at, s.heartbeat_at
+			FROM harness_sessions s LEFT JOIN principals a ON a.tenant_id=s.tenant_id AND a.id=s.agent_principal_id
+			WHERE s.id=$1::uuid`, id).Scan(&snap.id, &snap.harness, &snap.role, &snap.phase, &snap.activity, &snap.label, &snap.name, &snap.created, &snap.heartbeat)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return snap
+}
+
 func insertNamedAgent(t *testing.T, tenantID, name string) string {
 	t.Helper()
 	var id string
 	err := db.InTenant(dbtest.Seed(t.Context()), appPool, tenantID, func(tx pgx.Tx) error {
 		return tx.QueryRow(t.Context(), `INSERT INTO principals (tenant_id, kind, name) VALUES ($1, 'agent', $2) RETURNING id::text`, tenantID, name).Scan(&id)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return id
+}
+
+func insertLiveSessionStamp(t *testing.T, tenantID, projectID, principal, node, harness, role, label, phase, activity string, created, heartbeat time.Time) string {
+	t.Helper()
+	var id string
+	err := db.InTenant(dbtest.Seed(t.Context()), appPool, tenantID, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `INSERT INTO harness_sessions (
+			tenant_id, project_id, agent_principal_id, ticket_node_id, harness, host, management, role, work_shape,
+			ref_digest, lease_digest, phase, activity, display_label, created_at, heartbeat_at)
+			VALUES ($1, $2, $3, $4, $5, 'test', 'unmanaged', $6, 'ship',
+				decode(replace(gen_random_uuid()::text, '-', ''), 'hex'),
+				decode(replace(gen_random_uuid()::text, '-', ''), 'hex'),
+				$7, $8, nullif($9::text, ''), $10, $11)
+			RETURNING id::text`,
+			tenantID, projectID, principal, node, harness, role, phase, activity, label, created, heartbeat).Scan(&id)
 	})
 	if err != nil {
 		t.Fatal(err)

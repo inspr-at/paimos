@@ -4,7 +4,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { ListItem } from '../../lib/api'
 import { COLUMN_BY_ID, costUnitLabel, layoutWidths, releaseLabel, tagList, titleRoom, visibleColumns, type ColumnId, type ListPrefs, type TagRef } from '../../lib/columns'
 import { releaseCell, type NativeReleaseView } from '../../lib/releaseMembership'
-import { ticketWorkers, type LiveAgent } from '../../lib/liveAgents'
+import { ticketWorkers, withServerLead, type LiveAgent } from '../../lib/liveAgents'
 import { useLiveAgents } from '../../stores/liveAgents'
 import type { GroupBy, RowGroup, EpicRef } from '../../lib/ticketList'
 import type { OutlineEntry, TreeMeta } from '../../lib/outline'
@@ -104,13 +104,15 @@ const phone = ref(phoneQuery.matches)
 const live = useLiveAgents()
 const workersById = computed(() => ticketWorkers(live.forProject(props.projectId), props.projectId))
 function workersOf(row: ListItem) { return workersById.value.get(row.id) ?? NO_WORKERS }
+// The server names the lead. Other live workers stay in the feed's order after it.
+function assigneeWorkers(row: ListItem) { return withServerLead(workersOf(row), row.lead_worker) }
 // Release, Tags and Estimate earn their automatic columns only when some loaded row has one.
 const present = computed(() => {
   const rows = [...props.rowsById.values()]
   const listed = props.outline ? props.outline.flatMap(entry => entry.type === 'row' ? [entry.row] : []) : rows
   return {
     assigned: props.showAssignee,
-    workers: listed.some(row => workersOf(row).length > 0),
+    workers: listed.some(row => workersOf(row).length > 0 || !!row.lead_worker?.name),
     estimate: rows.some(row => !!estimate(row)),
     release: rows.some(row => !!releaseLabel(row.fields) || props.nativeReleases?.get(row.id)?.status === 'member'),
     tags: rows.some(row => tagList(row.fields).length > 0),
@@ -684,8 +686,8 @@ defineExpose({
               </td>
               <td v-else-if="column.id === 'assignee'" class="c-assignee">
                 <div class="cell">
-                  <span v-if="entry.row.assignee" class="owner" :class="{ 'with-workers': workersOf(entry.row).length }" :data-tip="entry.row.assignee.name"><PersonAvatar :id="entry.row.assignee.id" :name="entry.row.assignee.name" :size="20" /><span class="person-name">{{ entry.row.assignee.name }}</span></span>
-                  <TicketWorkers v-if="workersOf(entry.row).length" :workers="workersOf(entry.row)" :ticket-key="entry.row.key" />
+                  <span v-if="entry.row.assignee" class="owner" :class="{ 'with-workers': assigneeWorkers(entry.row).length }" :data-tip="entry.row.assignee.name"><PersonAvatar :id="entry.row.assignee.id" :name="entry.row.assignee.name" :size="20" /><span class="person-name">{{ entry.row.assignee.name }}</span></span>
+                  <TicketWorkers v-if="assigneeWorkers(entry.row).length" :workers="assigneeWorkers(entry.row)" :ticket-key="entry.row.key" />
                   <span v-else-if="!entry.row.assignee" class="empty" aria-label="Unassigned">—</span>
                 </div>
               </td>

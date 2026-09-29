@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { activeAgentLabel, activeByProject, activeSessions, advanceActivity, liveState, agentKey, byLead, chipText, phaseLabel, elapsedFor, groupLive, isActiveSession, isListedTicketWorker, liveChanges, liveSummary, phrase, sameLive, skewOf, ticketWorkers, who, type LiveAgent } from '../src/lib/liveAgents.ts'
+import { activeAgentLabel, activeByProject, activeSessions, advanceActivity, liveState, agentKey, byLead, chipText, leadWorkerKey, phaseLabel, elapsedFor, groupLive, isActiveSession, isListedTicketWorker, liveChanges, liveSummary, phrase, sameLive, skewOf, ticketWorkers, who, withServerLead, type LiveAgent } from '../src/lib/liveAgents.ts'
 import { DEFAULT_AGENT_STATE } from '../src/lib/agentSignals.ts'
 
 const now = Date.parse('2026-09-26T12:00:00Z')
@@ -159,6 +159,27 @@ test('ticket workers match this project and ticket, and omit stopped or archived
   const rebound = ticketWorkers(groupLive([agent({ session_id: 'work', ticket: { id: 't2', key: 'PHAROS-11', title: 'Other', project_id: 'p1' } })], now).get('p1')!, 'p1')
   assert.equal(rebound.get('t1'), undefined)
   assert.equal(rebound.get('t2')![0]!.session_id, 'work')
+})
+
+test('the assignee cell leads with the server key, not the client tie-break', () => {
+  const since = ago(60)
+  const beat = ago(30)
+  const claude = agent({ session_id: undefined, principal_id: undefined, name: undefined, display_label: undefined, harness: 'claude', since, heartbeat_at: beat })
+  const grok = agent({ session_id: undefined, principal_id: undefined, name: undefined, display_label: undefined, harness: 'grok', since, heartbeat_at: beat })
+  assert.equal(leadWorkerKey(claude).includes('s:'), false)
+  assert.equal(leadWorkerKey(grok).split('\u0001')[1], 'grok')
+  // Equal start and no session id: byLead keeps feed order (Grok). The server key selects Claude.
+  const fed = [grok, claude]
+  assert.equal(who(fed.slice().sort(byLead)[0]!), 'Grok agent')
+  const led = withServerLead(fed, { name: 'Claude agent', key: leadWorkerKey(claude) })
+  assert.deepEqual(led.map(who), ['Claude agent', 'Grok agent'])
+  const ada = agent({ session_id: 'ada', name: 'Ada', since: ago(12 * 60), heartbeat_at: ago(12 * 60) })
+  const zed = agent({ session_id: 'zed', name: 'Zed', phase: 'yielded', activity: 'idle', since: ago(60), needs_attention: true })
+  const custom = { ...DEFAULT_AGENT_STATE, yellowMinutes: 3, redMinutes: 20 }
+  const listed = ticketWorkers(groupLive([ada, zed], now, custom).get('p1')!, 'p1').get('t1')!
+  assert.equal(who(listed[0]!), 'Zed')
+  assert.deepEqual(withServerLead(listed, { name: 'Ada', key: leadWorkerKey(ada) }).map(who), ['Ada', 'Zed'])
+  assert.equal(who(withServerLead([], { name: 'Kai', key: 's:missing' })[0]!), 'Kai')
 })
 
 test('shared principal keeps distinct session labels and does not invent a withheld one', () => {

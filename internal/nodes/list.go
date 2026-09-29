@@ -7,7 +7,9 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -58,6 +60,16 @@ type listItem struct {
 	Project       *listProject `json:"project"`
 	Epic          *listEpic    `json:"epic"`
 	Eta           *eta.View    `json:"eta,omitempty"`
+	// LeadWorker is the live session the Assignee cell leads with. Name is the
+	// permission-projected label. Key identifies that session for the client
+	// without carrying a session id the caller cannot already see.
+	LeadWorker *leadWorker `json:"lead_worker,omitempty"`
+}
+
+// leadWorker is one bound live session, chosen by the server.
+type leadWorker struct {
+	Name string `json:"name"`
+	Key  string `json:"key"`
 }
 type nodePage struct {
 	Items      []listItem                `json:"items"`
@@ -115,9 +127,11 @@ type listQuery struct {
 	DateField string     `json:"date_field,omitempty"`
 	DateFrom  *time.Time `json:"date_from,omitempty"`
 	DateTo    *time.Time `json:"date_to,omitempty"`
-	// seen is filled by listNodes for an assignee sort. It is not request
-	// input and stays out of the cursor fingerprint (encoding/json skips it).
-	seen assigneeSeen
+	// seen and the lead thresholds are filled by listNodes. They are not
+	// request input and stay out of the cursor fingerprint (unexported).
+	seen       assigneeSeen
+	leadYellow int
+	leadRed    int
 }
 type listCursor struct {
 	Hash string `json:"hash"`
@@ -422,14 +436,20 @@ func (m *Module) listNodes(ctx context.Context, tenantID string, q listQuery) (n
 		if mark != nil {
 			anchor = mark.ID
 		}
-		if sortsBy(q, "assignee") {
-			if p, ok := tenant.PrincipalFrom(ctx); ok {
-				seen, err := assigneeAudience(ctx, tx, p)
-				if err != nil {
-					return dbErr("assignee sort", err)
-				}
-				q.seen = seen
+		// The lead is decided here for every row, and the assignee sort uses
+		// the same choice. Thresholds are the viewer's normalized preference.
+		q.leadYellow, q.leadRed = 3, 10
+		if p, ok := tenant.PrincipalFrom(ctx); ok {
+			seen, err := assigneeAudience(ctx, tx, p)
+			if err != nil {
+				return dbErr("assignee audience", err)
 			}
+			q.seen = seen
+			yellow, red, err := readLeadMinutes(ctx, tx, p.ID)
+			if err != nil {
+				return dbErr("lead thresholds", err)
+			}
+			q.leadYellow, q.leadRed = yellow, red
 		}
 		sql, args := listSQL(q, anchor)
 		rows, err := tx.Query(ctx, sql, args...)
@@ -516,6 +536,16 @@ func (m *Module) listNodes(ctx context.Context, tenantID string, q listQuery) (n
 					page.Items[i].Eta = &copied
 				}
 			}
+			leads, err := loadLeadWorkers(ctx, tx, ids, q.seen, q.leadYellow, q.leadRed)
+			if err != nil {
+				return err
+			}
+			for i := range page.Items {
+				if lead, ok := leads[page.Items[i].ID]; ok {
+					copied := lead
+					page.Items[i].LeadWorker = &copied
+				}
+			}
 		}
 		return nil
 	})
@@ -599,17 +629,193 @@ func assigneeAudience(ctx context.Context, tx pgx.Tx, p tenant.Principal) (assig
 	return seen, rows.Err()
 }
 
-// assigneeLeadRank is byLead's state order (web STATE_PRIORITY) at the
-// default chip thresholds: problem, unresponsive (10 min), waiting, awaiting
-// (3 min), throttled, working, idle, stale. Stopped sessions are already
-// excluded. Waiting is a yielded phase, a waiting run, a stale estimate, or
-// a pending approval bound to this session's run — the same evidence the
-// live feed turns into needs_attention, eta_stale and phase.
-const assigneeLeadRank = `CASE
-    WHEN coalesce(run.status IN ('failed','ownership_lost'), false)
+// readLeadMinutes is the viewer's agent-state preference, normalized the same
+// way as the web: yellow 1–1439 (default 3), red strictly above yellow and at
+// most 1440 (default at least 10). A missing row uses 3 and 10.
+func readLeadMinutes(ctx context.Context, tx pgx.Tx, principalID string) (int, int, error) {
+	if _, ok := parseUUID(principalID); !ok {
+		return 3, 10, nil
+	}
+	var raw []byte
+	err := tx.QueryRow(ctx, `SELECT value FROM user_preferences WHERE principal_id=$1::uuid AND key='agent-state'`, principalID).Scan(&raw)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 3, 10, nil
+	}
+	if err != nil {
+		return 0, 0, err
+	}
+	yellow, red := leadMinutesFromJSON(raw)
+	return yellow, red, nil
+}
+
+// leadMinutesFromJSON applies normalizeAgentState's minute rules. Non-numbers
+// take the fallback; a present red below yellow+1 is lifted, and a missing
+// red starts at max(10, yellow+1).
+func leadMinutesFromJSON(raw []byte) (int, int) {
+	var v map[string]any
+	if json.Unmarshal(raw, &v) != nil || v == nil {
+		return 3, 10
+	}
+	yellow := boundMinutes(v["yellowMinutes"], 3, 1, 1439)
+	red := boundMinutes(v["redMinutes"], max(10, yellow+1), yellow+1, 1440)
+	return yellow, red
+}
+
+func boundMinutes(n any, fallback, min, maxV int) int {
+	f, ok := asFloat(n)
+	if !ok || math.IsNaN(f) || math.IsInf(f, 0) {
+		return fallback
+	}
+	rounded := int(math.Round(f))
+	if rounded < min {
+		return min
+	}
+	if rounded > maxV {
+		return maxV
+	}
+	return rounded
+}
+
+func asFloat(n any) (float64, bool) {
+	switch v := n.(type) {
+	case float64:
+		return v, true
+	case int:
+		return float64(v), true
+	case json.Number:
+		f, err := v.Float64()
+		return f, err == nil
+	default:
+		return 0, false
+	}
+}
+
+func normalizeLeadMinutes(yellow, red int) (int, int) {
+	if yellow < 1 || red < 1 {
+		return 3, 10
+	}
+	if yellow > 1439 {
+		yellow = 1439
+	}
+	if red <= yellow {
+		red = yellow + 1
+	}
+	if red > 1440 {
+		red = 1440
+	}
+	return yellow, red
+}
+
+// loadLeadWorkers resolves the lead session for each page row. The order is
+// assigneeLeadOrder, so the name matches an assignee sort of the same rows.
+func loadLeadWorkers(ctx context.Context, tx pgx.Tx, ids []string, seen assigneeSeen, yellow, red int) (map[string]leadWorker, error) {
+	out := map[string]leadWorker{}
+	if len(ids) == 0 {
+		return out, nil
+	}
+	projects := seen.projects
+	if projects == nil {
+		projects = []string{}
+	}
+	shown := assigneeShownExpr("ticket.project_id", "$2", "$3", "$4")
+	rows, err := tx.Query(ctx, `SELECT DISTINCT ON (s.ticket_node_id)
+        s.ticket_node_id::text, `+shown+`,
+        s.id::text, s.harness, s.created_at, s.heartbeat_at, s.role, s.phase, s.activity,
+        coalesce(s.display_label, ''), coalesce(agent.name, ''), ticket.project_id::text
+      FROM harness_sessions s
+      JOIN nodes ticket ON ticket.tenant_id=s.tenant_id AND ticket.id=s.ticket_node_id
+      LEFT JOIN principals agent ON agent.tenant_id=s.tenant_id AND agent.id=s.agent_principal_id
+      LEFT JOIN agent_runs run ON run.tenant_id=s.tenant_id AND run.id=s.run_id
+      WHERE s.tenant_id=current_setting('aeon.tenant_id')::uuid
+        AND s.ticket_node_id = ANY($1::uuid[])
+        AND `+assigneeWorkerEligible+`
+      ORDER BY s.ticket_node_id, `+assigneeLeadOrder(yellow, red), ids, seen.harnessAll, projects, seen.members)
+	if err != nil {
+		return nil, dbErr("lead workers", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var ticketID, name, sessionID, harness, role, phase, activity, label, principal string
+		var projectID *string
+		var since time.Time
+		var heartbeat *time.Time
+		if err := rows.Scan(&ticketID, &name, &sessionID, &harness, &since, &heartbeat, &role, &phase, &activity, &label, &principal, &projectID); err != nil {
+			return nil, err
+		}
+		if name == "" {
+			continue
+		}
+		project := ""
+		if projectID != nil {
+			project = *projectID
+		}
+		showLabel := seen.showsSessionLabel(project)
+		out[ticketID] = leadWorker{
+			Name: name,
+			Key:  leadWorkerKey(seen.harnessAll, sessionID, harness, since, heartbeat, role, phase, activity, label, principal, showLabel, showLabel || seen.members),
+		}
+	}
+	return out, rows.Err()
+}
+
+func (s assigneeSeen) showsSessionLabel(projectID string) bool {
+	if s.harnessAll {
+		return true
+	}
+	for _, id := range s.projects {
+		if id == projectID {
+			return true
+		}
+	}
+	return false
+}
+
+// leadWorkerKey matches the web leadWorkerKey. A workspace harness reader
+// gets the session id they can already open. Everyone else gets public
+// fields only, plus a label or principal name when that projection includes it.
+func leadWorkerKey(showSession bool, sessionID, harness string, since time.Time, heartbeat *time.Time, role, phase, activity, label, name string, showLabel, showName bool) string {
+	if showSession && sessionID != "" {
+		return "s:" + sessionID
+	}
+	beat := ""
+	if heartbeat != nil {
+		beat = jsonTime(*heartbeat)
+	}
+	if !showLabel || strings.TrimSpace(label) == "" {
+		label = ""
+	}
+	if !showName {
+		name = ""
+	}
+	return strings.Join([]string{"v", harness, jsonTime(since), beat, role, phase, activity, label, name}, "\x01")
+}
+
+func jsonTime(t time.Time) string {
+	raw, err := t.MarshalJSON()
+	if err != nil || len(raw) < 2 {
+		return ""
+	}
+	return string(raw[1 : len(raw)-1])
+}
+
+// assigneeLeadOrder is the server's only lead choice. Rank matches the web
+// STATE_PRIORITY at this viewer's normalized thresholds (yellow awaiting,
+// red unresponsive): problem, unresponsive, waiting, awaiting, throttled,
+// working, idle, stale. Waiting is a yielded phase, a waiting run, a stale
+// estimate, or a pending approval on this session's run. Ties break by a
+// worker before a coordinator, then start, then heartbeat, then public
+// session facts. The session id is never a key: a withheld id must not
+// decide which name is shown or sorted.
+func assigneeLeadOrder(yellow, red int) string {
+	if yellow == 0 && red == 0 {
+		yellow, red = 3, 10
+	}
+	yellow, red = normalizeLeadMinutes(yellow, red)
+	return fmt.Sprintf(`CASE
+    WHEN coalesce(run.status IN ('failed','ownership_lost','blocked'), false)
       OR coalesce(s.stop_reason <> 'heartbeat_lost' AND replace(replace(s.stop_reason, '_', ' '), '-', ' ') ~* '\m(error|errored|failed|failure|blocked|crash(ed)?|ownership lost|heartbeat lost|timeout|timed out)\M', false) THEN 0
     WHEN s.phase IN ('starting','working','stopping') AND s.activity NOT IN ('idle','throttled')
-      AND coalesce(s.heartbeat_at, s.created_at) <= now() - interval '10 minutes' THEN 1
+      AND coalesce(s.heartbeat_at, s.created_at) <= now() - make_interval(mins => %d) THEN 1
     WHEN s.phase = 'yielded' OR coalesce(run.status = 'waiting', false)
       OR (s.eta_reported_at IS NOT NULL AND now() - s.eta_reported_at > 2 * aeon_eta_interval())
       OR EXISTS (
@@ -621,36 +827,46 @@ const assigneeLeadRank = `CASE
       ) THEN 2
     WHEN s.activity = 'throttled' THEN 4
     WHEN s.phase IN ('starting','working','stopping') AND s.activity NOT IN ('idle','throttled')
-      AND (s.heartbeat_at IS NULL OR s.heartbeat_at <= now() - interval '3 minutes') THEN 3
+      AND (s.heartbeat_at IS NULL OR s.heartbeat_at <= now() - make_interval(mins => %d)) THEN 3
     WHEN s.phase IN ('starting','working','stopping') AND s.activity NOT IN ('idle','throttled') THEN 5
-    WHEN s.heartbeat_at IS NULL OR s.heartbeat_at <= now() - interval '3 minutes' THEN 7
+    WHEN s.heartbeat_at IS NULL OR s.heartbeat_at <= now() - make_interval(mins => %d) THEN 7
     ELSE 6
-END`
+END, (s.role = 'coordinator'), s.created_at, s.heartbeat_at NULLS LAST, s.harness, s.activity_sequence, s.phase, s.activity`, red, yellow, yellow)
+}
+
+// assigneeWorkerEligible is who may lead: bound, not stopped, not archived.
+const assigneeWorkerEligible = `s.stopped_at IS NULL
+      AND s.phase<>'stopped'
+      AND position('archived' in lower(coalesce(s.stop_reason, '')))=0`
 
 // assigneeHarnessLabel is who()'s last resort: the harness word plus " agent".
 const assigneeHarnessLabel = `CASE s.harness WHEN 'codex' THEN 'Codex' WHEN 'claude' THEN 'Claude' WHEN 'pi' THEN 'Pi'
         WHEN 'cursor' THEN 'Cursor' WHEN 'grok' THEN 'Grok'
         ELSE upper(left(s.harness, 1)) || substr(s.harness, 2) END || ' agent'`
 
-// assigneeWorkerJoin picks the lead worker and names it the way this caller
-// would see it. It is attached only while sorting by assignee. ap.name IS
-// NULL inside the lateral skips the lookup when a stored name already
-// decides the order. Eligibility matches the list chip (ticketWorkers /
-// isActiveSession): bound to the ticket, not stopped, and a stop reason
-// that is not an archive. Attention state leads, then a worker before a
-// coordinator, then the earliest start, then the session id. The partial
-// index harness_sessions_ticket_eta (tenant, ticket, stopped_at IS NULL)
-// probes one ticket, so a list that is not sorted by assignee never touches
-// the table. harnessAll, projects and members are the boolean and uuid[]
-// placeholders from assigneeSeen.
-func assigneeWorkerJoin(harnessAll, projects, members string) string {
-	shown := `CASE
-        WHEN ` + harnessAll + ` OR f.project_id = ANY(` + projects + `::uuid[])
+// assigneeShownExpr is the name this caller would see for session s: a
+// session label with harness.read on the ticket's project, a principal name
+// with harness.read or members.read, otherwise the harness label.
+func assigneeShownExpr(projectID, harnessAll, projects, members string) string {
+	return `CASE
+        WHEN ` + harnessAll + ` OR ` + projectID + ` = ANY(` + projects + `::uuid[])
             THEN coalesce(nullif(btrim(s.display_label), ''), nullif(btrim(agent.name), ''), ` + assigneeHarnessLabel + `)
         WHEN ` + members + `
             THEN coalesce(nullif(btrim(agent.name), ''), ` + assigneeHarnessLabel + `)
         ELSE ` + assigneeHarnessLabel + `
     END`
+}
+
+// assigneeWorkerJoin picks the lead worker and names it the way this caller
+// would see it. It is attached only while sorting by assignee. ap.name IS
+// NULL inside the lateral skips the lookup when a stored name already
+// decides the order. The partial index harness_sessions_ticket_eta
+// (tenant, ticket, stopped_at IS NULL) probes one ticket, so a list that is
+// not sorted by assignee never touches the table. The page's lead_worker
+// field uses the same order in loadLeadWorkers. harnessAll, projects and
+// members are the boolean and uuid[] placeholders from assigneeSeen.
+func assigneeWorkerJoin(harnessAll, projects, members string, yellow, red int) string {
+	shown := assigneeShownExpr("f.project_id", harnessAll, projects, members)
 	return ` LEFT JOIN LATERAL (
     SELECT ` + shown + ` AS shown_name
     FROM harness_sessions s
@@ -659,10 +875,8 @@ func assigneeWorkerJoin(harnessAll, projects, members string) string {
     WHERE ap.name IS NULL
       AND s.tenant_id=current_setting('aeon.tenant_id')::uuid
       AND s.ticket_node_id=f.id
-      AND s.stopped_at IS NULL
-      AND s.phase<>'stopped'
-      AND position('archived' in lower(coalesce(s.stop_reason, '')))=0
-    ORDER BY ` + assigneeLeadRank + `, (s.role='coordinator'), s.created_at, s.id
+      AND ` + assigneeWorkerEligible + `
+    ORDER BY ` + assigneeLeadOrder(yellow, red) + `
     LIMIT 1
 ) worker ON true `
 }
@@ -909,7 +1123,7 @@ func listSQL(q listQuery, anchor any) (string, []any) {
 		}
 		args = append(args, q.seen.harnessAll, projects, q.seen.members)
 		people = ` LEFT JOIN principals ap ON ap.tenant_id=current_setting('aeon.tenant_id')::uuid AND ap.id=f.assignee_id::uuid` +
-			assigneeWorkerJoin(fmt.Sprintf("$%d", len(args)-2), fmt.Sprintf("$%d", len(args)-1), fmt.Sprintf("$%d", len(args)))
+			assigneeWorkerJoin(fmt.Sprintf("$%d", len(args)-2), fmt.Sprintf("$%d", len(args)-1), fmt.Sprintf("$%d", len(args)), q.leadYellow, q.leadRed)
 	}
 	etaJoin := ""
 	if sortsBy(q, "eta_ready") || sortsBy(q, "progress") {

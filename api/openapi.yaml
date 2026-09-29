@@ -9544,6 +9544,13 @@ components:
             eta:
               description: Ready and live estimates when an active agent has reported one. Absent when unknown.
               $ref: '#/components/schemas/TicketEta'
+            lead_worker:
+              description: The live worker the Assignee cell leads with, when one is bound. name is the permission-projected label (session label, principal name, or harness label). key is a stable token for that worker. It carries a session id only when the caller may already open the session; otherwise it is public fields and does not contain the session id. Absent when no live worker is bound. The assignee sort uses this same worker.
+              type: object
+              required: [name, key]
+              properties:
+                name: {type: string}
+                key: {type: string}
     TreeEntry:
       type: object
       required: [node, depth]
@@ -9853,7 +9860,7 @@ components:
       in: query
       schema:
         type: string
-        description: 'Comma-separated sort keys; prefix a key with - for descending order. Keys are position, updated_at, created_at, key, title, state (workflow order: open, new, backlog, blocked, in progress and active, qa, accepted, delivered, done, cancelled, archived, then any other state), priority, kind, assignee (by name, unassigned work last in both directions), eta_ready (unknown last in both directions), progress (unknown last in both directions).'
+        description: 'Comma-separated sort keys; prefix a key with - for descending order. Keys are position, updated_at, created_at, key, title, state (workflow order: open, new, backlog, blocked, in progress and active, qa, accepted, delivered, done, cancelled, archived, then any other state), priority, kind, assignee (stored person, otherwise the lead live worker, unassigned work last in both directions), eta_ready (unknown last in both directions), progress (unknown last in both directions).'
         default: position
     Direction:
       name: direction

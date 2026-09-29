@@ -53,6 +53,59 @@ export function byLead(a: LiveAgent, b: LiveAgent) {
     || (a.session_id ?? a.since).localeCompare(b.session_id ?? b.since)
 }
 
+// The list API's lead, after attention rank: a worker before a coordinator,
+// then start, then heartbeat, then public session facts. A withheld session
+// id is not a tie-break. Other views keep byLead.
+export function compareServerLead(a: LiveAgent, b: LiveAgent) {
+  const rank = (agent: LiveAgent) => STATE_PRIORITY[agent.state ?? 'working']
+  const beat = (agent: LiveAgent) => {
+    const parsed = Date.parse(agent.heartbeat_at ?? '')
+    return Number.isNaN(parsed) ? Number.POSITIVE_INFINITY : parsed
+  }
+  return rank(a) - rank(b)
+    || Number(a.role === 'coordinator') - Number(b.role === 'coordinator')
+    || Date.parse(a.since) - Date.parse(b.since)
+    || beat(a) - beat(b)
+    || a.harness.localeCompare(b.harness)
+    || a.phase.localeCompare(b.phase)
+    || a.activity.localeCompare(b.activity)
+}
+
+// Same token the list API returns as lead_worker.key. A session id is used
+// only when this feed already includes one.
+export function leadWorkerKey(agent: Pick<LiveAgent, 'session_id' | 'harness' | 'since' | 'heartbeat_at' | 'role' | 'phase' | 'activity' | 'display_label' | 'name'>) {
+  const id = agent.session_id?.trim()
+  if (id) return `s:${id}`
+  const label = agent.display_label && agent.display_label.trim() ? agent.display_label : ''
+  return ['v', agent.harness, agent.since, agent.heartbeat_at ?? '', agent.role, agent.phase, agent.activity, label, agent.name ?? ''].join('\u0001')
+}
+
+const LEAD_HARNESS = new Set<LiveAgent['harness']>(['codex', 'claude', 'pi', 'cursor', 'grok'])
+
+// Assignee cell order: the server's lead first, then the other live workers.
+// A lead the feed has not listed yet still shows, under its projected name.
+export function withServerLead(workers: readonly LiveAgent[], lead?: { name: string; key: string } | null): LiveAgent[] {
+  if (!lead?.key || !lead.name) return workers.slice()
+  const index = workers.findIndex(agent => leadWorkerKey(agent) === lead.key)
+  if (index === 0) return workers.slice()
+  if (index > 0) return [workers[index]!, ...workers.slice(0, index), ...workers.slice(index + 1)]
+  const parts = lead.key.split('\u0001')
+  const harness = parts[0] === 'v' && LEAD_HARNESS.has(parts[1] as LiveAgent['harness']) ? parts[1] as LiveAgent['harness'] : 'claude'
+  const placeholder: LiveAgent = {
+    project_id: workers[0]?.project_id ?? '',
+    harness,
+    management_mode: 'unmanaged',
+    role: 'worker',
+    phase: 'working',
+    activity: 'busy',
+    ticket: workers[0]?.ticket ?? null,
+    since: parts[0] === 'v' ? (parts[2] ?? '') : '',
+    heartbeat_at: parts[0] === 'v' && parts[3] ? parts[3] : null,
+    name: lead.name,
+  }
+  return [placeholder, ...workers]
+}
+
 export function liveState(agent: LiveAgent, serverNow: number, preferences: AgentStatePreference = DEFAULT_AGENT_STATE): LiveBotState {
   return deriveAgentState({ ...agent, needs_attention: agent.needs_attention ?? (agent.state === 'waiting' ? true : undefined) }, serverNow, preferences)
 }
