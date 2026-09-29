@@ -666,7 +666,7 @@ func (m *Module) list(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, erro
 		out[i].StateEvidence = evidence[out[i].ID]
 		ptrs[i] = &out[i]
 	}
-	if err = stampSessions(r.Context(), tx, ptrs); err != nil {
+	if err = m.stampSessions(r.Context(), tx, ptrs); err != nil {
 		return nil, err
 	}
 	return out, nil
@@ -718,7 +718,7 @@ func (m *Module) status(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, er
 		return nil, err
 	}
 	s.StateEvidence = evidence[s.ID]
-	if err = stampSessions(r.Context(), tx, []*Session{&s}); err != nil {
+	if err = m.stampSessions(r.Context(), tx, []*Session{&s}); err != nil {
 		return nil, err
 	}
 	controls, err := readSessionRequests(r.Context(), tx, p, s)
@@ -921,7 +921,7 @@ func (m *Module) heartbeat(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 	if err = record(ctx, tx, p, s, "heartbeat", before, s); err != nil {
 		return nil, err
 	}
-	if err = stampSessions(ctx, tx, []*Session{&s}); err != nil {
+	if err = m.stampSessions(ctx, tx, []*Session{&s}); err != nil {
 		return nil, err
 	}
 	return s, nil

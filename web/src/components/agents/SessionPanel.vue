@@ -2,11 +2,13 @@
 <script setup lang="ts">
 import { brand } from '../../lib/brand'
 import { api, getNode } from '../../lib/api'
-import { computed, onMounted, ref, watch } from 'vue'
+import { can } from '../../lib/authz'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { Approval, HarnessSessionDetail, SessionControl } from '../../lib/agents'
 import { RUN_OUTCOME, approvalRun, cost, elapsed, runDuration, runModel, scopeLabel, stopReasonLabel, tokens } from '../../lib/agentState'
 import { absoluteTime, relativeTime, statusMeta } from '../../lib/work'
 import { useAgents, type SessionView } from '../../stores/agents'
+import { useSession } from '../../stores/session'
 import AppIcon from '../AppIcon.vue'
 import TicketPeekLink from '../TicketPeekLink.vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -31,8 +33,29 @@ import { etaFromSession } from '../../lib/eta'
 const props = defineProps<{ view: SessionView | undefined; loading: boolean; now: number; canWrite: boolean; controlBlock: (view: SessionView, kind: SessionControl['kind']) => string }>()
 const emit = defineEmits<{ close: []; control: [view: SessionView, kind: SessionControl['kind']]; review: [approval: Approval] }>()
 const agents = useAgents()
+const auth = useSession()
 const root = ref<HTMLElement>()
 const thread = ref<HTMLElement>()
+const recovery = ref<{ open: () => void }>()
+const removal = ref<{ remove: () => void }>()
+// Same breakpoint as the full-height sheet. Only a managed session with the
+// control capability collapses Recover, Remove and settings into one overflow.
+const phoneMedia = window.matchMedia('(max-width: 720px)')
+const phone = ref(phoneMedia.matches)
+function syncPhone() { phone.value = phoneMedia.matches }
+const managedControls = computed(() => {
+  const session = props.view?.session
+  return !!session && session.management_mode === 'managed' && session.advertised_capabilities.includes('managed_control_v1')
+})
+const compactControls = computed(() => phone.value && managedControls.value)
+const showRecover = computed(() => {
+  const session = props.view?.session
+  return !!session && !session.archived_at && (can('harness.recover', session.project_id) || can('harness.force_stop', session.project_id))
+})
+const showRemove = computed(() => {
+  const session = props.view?.session
+  return !!session && auth.identity?.principal.kind === 'person' && !session.archived_at && can('harness.read', session.project_id)
+})
 // The last tab is remembered per viewer; ?tab=messages deep-links (AEON-273).
 const route = useRoute()
 const router = useRouter()
@@ -100,7 +123,8 @@ watch(() => s.value?.id, async id => {
   thread.value?.scrollTo({ top: 0 })
   await agents.refreshAgentRuns(s.value.agent_principal_id)
 }, { immediate: true })
-onMounted(() => root.value?.focus({ preventScroll: true }))
+onMounted(() => { root.value?.focus({ preventScroll: true }); phoneMedia.addEventListener('change', syncPhone) })
+onBeforeUnmount(() => phoneMedia.removeEventListener('change', syncPhone))
 
 function control(kind: SessionControl['kind']) { if (props.view && !props.controlBlock(props.view, kind)) emit('control', props.view, kind) }
 defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
@@ -123,7 +147,7 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
         <TicketPeekLink v-if="view.ticket" class="ticket-detail" :ticket-key="view.ticket.key" :href="view.ticket.href" :tip="view.ticket.title"><span class="ticket-chip">{{ view.ticket.key }}</span><span class="head-ticket">{{ view.ticket.title }}</span></TicketPeekLink>
         <span v-if="ticketState" class="ticket-status">{{ ticketState }}</span>
       </div>
-      <div v-if="view && !loading" class="head-actions">
+      <div v-if="view && !loading && !compactControls" class="head-actions">
         <span class="host-meta">{{ view.harness }}<template v-if="view.session.host"> on {{ view.session.host }}</template></span>
         <span class="spacer" />
         <template v-if="view.session.phase !== 'stopped' && !view.session.advertised_capabilities.includes('managed_control_v1')">
@@ -133,7 +157,14 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
         <SessionRecovery :session="view.session" />
         <RemoveSessionDialog :session="view.session" :label="view.name" />
       </div>
-      <ManagedSessionControls v-if="view && !loading" :session="reported || view.session" :now="now" />
+      <ManagedSessionControls v-if="view && !loading" :session="reported || view.session" :now="now">
+        <template v-if="compactControls" #more>
+          <button v-if="showRecover" type="button" role="menuitem" class="menu-item" @click="recovery?.open()"><AppIcon name="wrench" :size="16" /><span class="mi-text"><span>Recover</span></span></button>
+          <button v-if="showRemove" type="button" role="menuitem" class="menu-item" :aria-label="`Remove ${view.name} from Agents`" @click="removal?.remove()"><AppIcon name="archive" :size="16" /><span class="mi-text"><span>Remove</span><small>Hides the record; does not stop the process</small></span></button>
+        </template>
+      </ManagedSessionControls>
+      <SessionRecovery v-if="view && !loading && compactControls" ref="recovery" hide-trigger :session="view.session" />
+      <RemoveSessionDialog v-if="view && !loading && compactControls" ref="removal" hide-trigger :session="view.session" :label="view.name" />
       <SessionTabs v-if="view && !loading" :selected="tab" :unread="tab === 'messages' ? 0 : unread" @select="selectTab" />
     </header>
 
@@ -344,7 +375,8 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
   .head-top .icon-btn { width: 40px; height: 40px; }
   /* While typing (keyboard open) the thread gets the room: controls and ticket step aside. */
   .session-panel:has(#session-panel-messages textarea:focus) .head-actions,
-  .session-panel:has(#session-panel-messages textarea:focus) .head-sub { display: none; }
+  .session-panel:has(#session-panel-messages textarea:focus) .head-sub,
+  .session-panel:has(#session-panel-messages textarea:focus) .managed-controls { display: none; }
   .scroll { padding: 16px 18px 24px; }
   .telemetry { grid-template-columns: 1fr 1fr; }
   .run-row { grid-template-columns: 88px minmax(0, 1fr) 56px; }
