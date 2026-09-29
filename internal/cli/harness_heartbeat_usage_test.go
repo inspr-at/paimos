@@ -303,6 +303,34 @@ func TestUsageLocatorsSkipVendorAuth(t *testing.T) {
 	}
 }
 
+func TestCodexTurnContextModelBeatsFallback(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "sessions", "rollout-model.jsonl")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	body := "{\"type\":\"turn_context\",\"payload\":{\"model\":\"gpt-5.4\"}}\n" +
+		"{\"type\":\"event_msg\",\"payload\":{\"type\":\"token_count\",\"info\":{\"total_token_usage\":{\"input_tokens\":150,\"cached_input_tokens\":80,\"output_tokens\":35,\"reasoning_output_tokens\":4,\"total_tokens\":185}}}}\n"
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	sums, _, _, _, err := scanUsageWindowSource(context.Background(), path, "gpt-5", 0, 1<<20, nil, false, "codex")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sums) != 1 || sums["gpt-5.4"].input != 150 || sums["gpt-5.4"].output != 35 || sums["gpt-5.4"].cached != 80 {
+		t.Fatalf("context model lost: %#v", sums)
+	}
+	bare := filepath.Join(dir, "sessions", "rollout-bare.jsonl")
+	if err := os.WriteFile(bare, []byte(body[strings.Index(body, "\n")+1:]), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	sums, _, _, _, err = scanUsageWindowSource(context.Background(), bare, "", 0, 1<<20, nil, false, "codex")
+	if err != nil || len(sums) != 0 {
+		t.Fatalf("model-less rollout reported %#v %v", sums, err)
+	}
+}
+
 func TestUsageFilePostsOnEveryBeat(t *testing.T) {
 	var calls []hbCall
 	srv := hbServer(t, &calls, nil)

@@ -467,6 +467,7 @@ func scanUsageWindowSource(ctx context.Context, path, fallback string, offset, m
 	poisoned := map[string]bool{}
 	seen := map[string]bool{}
 	ring := append([]string{}, recent...)
+	var codexModel string
 	for _, id := range ring {
 		seen[id] = true
 	}
@@ -535,7 +536,7 @@ func scanUsageWindowSource(ctx context.Context, path, fallback string, offset, m
 			if source == "" || source == "claude" {
 				lineErr = noteUsageLine(line, fallback, sums, poisoned, seen, &ring)
 			} else {
-				lineErr = noteHarnessLine(source, line, fallback, sums, poisoned, seen, &ring)
+				lineErr = noteHarnessLine(source, line, fallback, sums, poisoned, seen, &ring, &codexModel)
 			}
 			if lineErr != nil {
 				return nil, offset, recent, discarding, lineErr

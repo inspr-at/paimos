@@ -39,6 +39,32 @@ func CountReport(model string, input, output, cached int64, cachedKnown bool) (U
 // ParseHeartbeatLine reads one Codex rollout or Cursor result line.
 // ok is false when the line is not a usable usage record. The error is set
 // only when a counter overflows.
+// CodexContextModel returns the model recorded on a Codex turn_context line.
+// token_count events often omit the model; callers keep the latest context
+// model and pass it as the fallback for the next usage line.
+func CodexContextModel(line []byte) (string, bool) {
+	if len(line) == 0 || len(line) > 1<<20 {
+		return "", false
+	}
+	fields, err := decodeLine(line)
+	if err != nil {
+		return "", false
+	}
+	kind, err := parseString(fields["type"])
+	if err != nil || kind != "turn_context" {
+		return "", false
+	}
+	payload, err := objectField(fields, "payload")
+	if err != nil {
+		return "", false
+	}
+	model, err := modelFields(payload)
+	if err != nil || model == "" {
+		return "", false
+	}
+	return model, true
+}
+
 func ParseHeartbeatLine(source, fallback string, line []byte) (HeartbeatLine, bool, error) {
 	if len(line) == 0 || len(line) > 1<<20 {
 		return HeartbeatLine{}, false, nil

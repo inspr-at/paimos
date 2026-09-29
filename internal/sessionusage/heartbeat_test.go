@@ -76,6 +76,30 @@ func TestHeartbeatFixtures(t *testing.T) {
 	}
 }
 
+func TestCodexTurnContextModel(t *testing.T) {
+	contextLine := []byte(`{"type":"turn_context","payload":{"model":"gpt-5.4"}}`)
+	usageLine := []byte(`{"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":150,"cached_input_tokens":80,"output_tokens":35,"reasoning_output_tokens":4,"total_tokens":185}}}}`)
+	model, ok := CodexContextModel(contextLine)
+	if !ok || model != "gpt-5.4" {
+		t.Fatalf("context model %q ok %v", model, ok)
+	}
+	if _, contextUsage := CodexContextModel(usageLine); contextUsage {
+		t.Fatal("token_count was treated as turn_context")
+	}
+	got, ok, err := ParseHeartbeatLine("codex", "", usageLine)
+	if err != nil || ok {
+		t.Fatalf("model-less rollout without context: ok %v err %v", ok, err)
+	}
+	got, ok, err = ParseHeartbeatLine("codex", model, usageLine)
+	if err != nil || !ok || got.Model != "gpt-5.4" || got.Input != 150 || got.Output != 35 || got.Cached != 80 {
+		t.Fatalf("turn_context attribution: %+v ok %v err %v", got, ok, err)
+	}
+	got, ok, err = ParseHeartbeatLine("codex", "gpt-5", usageLine)
+	if err != nil || !ok || got.Model != "gpt-5" {
+		t.Fatalf("explicit fallback still applies when no context is passed: %+v", got)
+	}
+}
+
 func splitLines(raw []byte) [][]byte {
 	var lines [][]byte
 	start := 0

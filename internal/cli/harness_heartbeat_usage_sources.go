@@ -321,7 +321,18 @@ func pathInsideRoot(root, target string) bool {
 	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
-func noteHarnessLine(source string, line []byte, fallback string, sums map[string]usageSum, poisoned, seen map[string]bool, ring *[]string) error {
+func noteHarnessLine(source string, line []byte, fallback string, sums map[string]usageSum, poisoned, seen map[string]bool, ring *[]string, codexModel *string) error {
+	if source == "codex" {
+		if model, ok := sessionusage.CodexContextModel(line); ok {
+			if codexModel != nil {
+				*codexModel = model
+			}
+			return nil
+		}
+		if codexModel != nil && *codexModel != "" {
+			fallback = *codexModel
+		}
+	}
 	parsed, ok, err := sessionusage.ParseHeartbeatLine(source, fallback, line)
 	if err != nil {
 		return errUsageOverflow
