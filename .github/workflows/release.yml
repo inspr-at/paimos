@@ -20,7 +20,36 @@ permissions:
   actions: read
 
 jobs:
+  agentd-darwin:
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            arch: arm64
+          - runner: macos-15-intel
+            arch: amd64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.26"
+      - name: Build darwin paimos-agentd with LocalAuthentication
+        env:
+          AEON_DARWIN_ARCH: ${{ matrix.arch }}
+        run: bash scripts/build-release-binaries.sh darwin-agentd
+      - uses: actions/upload-artifact@v4
+        with:
+          name: agentd-darwin-${{ matrix.arch }}
+          path: dist/paimos-agentd-darwin-${{ matrix.arch }}
+          if-no-files-found: error
+
   release:
+    needs: agentd-darwin
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -68,38 +97,22 @@ jobs:
         with:
           go-version: "1.26"
 
-      # CGO off, -trimpath, and the same -X as the server image (Dockerfile).
-      # The coordinate is the version field of version.json, already matched to the tag.
-      - name: Build paimos-agentd
+      # Darwin paimos-agentd is built on the matching Mac with LocalAuthentication.
+      # Linux agentd and every CLI target stay static. -trimpath and the version
+      # -X match the server image (Dockerfile).
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: agentd-darwin-*
+          path: dist
+          merge-multiple: true
+      - name: Build linux paimos-agentd and aeon-cli
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           set -euo pipefail
-          version="$(node -p 'JSON.parse(require("fs").readFileSync("version.json","utf8")).version')"
-          if [ "$version" != "$VERSION" ]; then
-            echo "version.json ${version} does not match tag ${VERSION}" >&2
-            exit 1
-          fi
-          mkdir -p dist
-          ldflags="-X github.com/inspr-at/paimos/internal/version.Version=${version}"
-          for pair in darwin/arm64 darwin/amd64 linux/arm64 linux/amd64; do
-            goos="${pair%/*}"
-            goarch="${pair#*/}"
-            CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" go build \
-              -trimpath \
-              -ldflags "$ldflags" \
-              -o "dist/paimos-agentd-${goos}-${goarch}" \
-              ./cmd/aeon-agentd
-          done
-          for pair in darwin/arm64 darwin/amd64 linux/amd64 linux/arm64; do
-            goos="${pair%/*}"
-            goarch="${pair#*/}"
-            CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" go build \
-              -trimpath \
-              -ldflags "$ldflags" \
-              -o "dist/aeon-cli-${goos}-${goarch}" \
-              ./cmd/aeon
-          done
+          bash scripts/build-release-binaries.sh linux-agentd
+          bash scripts/build-release-binaries.sh cli
+          bash scripts/build-release-binaries.sh verify-darwin
           (
             cd dist
             sha256sum \
@@ -181,6 +194,7 @@ jobs:
           tag="v${VERSION}"
           notes="$(printf '%s\n' \
             "paimos-agentd ${VERSION} for darwin-arm64, darwin-amd64, linux-arm64 and linux-amd64." \
+            "darwin paimos-agentd links LocalAuthentication (CGO enabled); linux is static." \
             "aeon-cli ${VERSION} for darwin-arm64, darwin-amd64, linux-amd64 and linux-arm64." \
             "Install aeon-cli as aeon. A symlink named paimos selects the paimos-compatible CLI (PAIMOS_URL)." \
             "Verify SHA256SUMS before installing." \

@@ -208,10 +208,16 @@ The OS supplies Touch ID/device-password authentication (and other OS-supported
 owner factors); the reason names the harness session PID and host. Contexts
 are never reused. The prompt is asynchronous, remains revocable during polling,
 and times out after 90 seconds. These checks do not replace installer provenance
-or same-user OS isolation. **Current CGO-disabled Nix packages, unsigned/ad-hoc
-builds, and headless contexts fail closed with a specific local error**; no
-signing identity or release pipeline is changed by this feature. A real signed
-interactive-device acceptance check belongs to release qualification.
+or same-user OS isolation. Release darwin `paimos-agentd` is built with
+`CGO_ENABLED=1` and links LocalAuthentication. Linux `paimos-agentd`, `aeon-cli`,
+and the server image stay `CGO_ENABLED=0`. The Nix `aeon-agentd` package uses
+the same split. At watch registration the daemon reports a non-interactive
+capability: `available`, `unsupported`, `unsigned`, `no_gui`, or `policy`.
+An omitted report is stored as `unreported`. Settings lists that report for
+the signed-in person's connected computers and does not offer Mac confirmation
+unless one reports `available`. Unsigned, ad-hoc, and headless builds still
+fail closed. A signed interactive Touch ID acceptance check remains release
+qualification.
 
 The original pairing owner reviews the immutable host, harness, kernel process
 identity, physical cwd, transcript inode, project and ticket snapshot at the

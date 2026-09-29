@@ -32,6 +32,13 @@ func (m *Module) registerWatchKey(ctx context.Context, p tenant.Principal, in at
 	if !hashRE.MatchString(in.PollKey) || !hashRE.MatchString(in.DeviceProof) || in.PollKey == in.DeviceProof || in.Text != "" {
 		return fail(403, "forbidden", "fresh daemon poll key required")
 	}
+	capability := attachwatch.LocalAuthUnreported
+	if in.LocalAuthCapability != "" {
+		if !attachwatch.LocalAuthCapabilityReported(in.LocalAuthCapability) {
+			return fail(400, "invalid_request", "invalid local auth capability")
+		}
+		capability = in.LocalAuthCapability
+	}
 	m.watchKeys.Lock()
 	defer m.watchKeys.Unlock()
 	key := p.TenantID + "/" + in.ComputerID
@@ -45,12 +52,21 @@ func (m *Module) registerWatchKey(ctx context.Context, p tenant.Principal, in at
 		}
 		// Even a caller holding the lifecycle proof cannot take over a previous
 		// approval by registering another key. No pending/approved watch survives.
-		_, err = tx.Exec(ctx, `WITH ended AS (
+		if _, err = tx.Exec(ctx, `WITH ended AS (
  UPDATE harness_attach_requests SET state='detached',lease_until=NULL
  WHERE computer_id=$1 AND state IN ('pending','approved','active') RETURNING session_id)
  UPDATE harness_sessions SET phase='stopped',stopped_at=coalesce(stopped_at,clock_timestamp()),
- stop_reason='watch daemon restarted; process exit unconfirmed' WHERE id IN (SELECT session_id FROM ended)`, in.ComputerID)
-		return err
+ stop_reason='watch daemon restarted; process exit unconfirmed' WHERE id IN (SELECT session_id FROM ended)`, in.ComputerID); err != nil {
+			return err
+		}
+		tag, err := tx.Exec(ctx, `UPDATE agent_pairing_computers SET local_auth_capability=$2 WHERE id=$1`, in.ComputerID, capability)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() != 1 {
+			return fail(403, "forbidden", "computer proof rejected")
+		}
+		return nil
 	})
 	if err == nil {
 		if m.watchKeys.hashes == nil {
@@ -154,6 +170,12 @@ func (m *Module) attachDevice(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, 128<<10)
 	if workorders.Decode(r, &in) != nil || !uuidRE.MatchString(in.ComputerID) || len(in.Text) > attachwatch.MaxText || !inertText(in.Text) {
 		WriteError(w, fail(400, "invalid_request", "invalid attach request"))
+		return
+	}
+	// Explicit "unreported" is not a daemon report. Empty is stored only on register.
+	// A later poll cannot change the stored report.
+	if in.LocalAuthCapability != "" && !attachwatch.LocalAuthCapabilityReported(in.LocalAuthCapability) {
+		WriteError(w, fail(400, "invalid_request", "invalid local auth capability"))
 		return
 	}
 	if in.Operation == "register" {

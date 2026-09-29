@@ -7,6 +7,7 @@ package agentd
 #cgo CFLAGS: -x objective-c -fobjc-arc
 #cgo LDFLAGS: -framework Foundation -framework LocalAuthentication -framework Security
 #include <stdlib.h>
+int aeon_local_auth_capability(void);
 void *aeon_local_auth_start(const char *reason, int *failure);
 int aeon_local_auth_result(void *handle);
 void aeon_local_auth_close(void *handle);
@@ -18,7 +19,22 @@ import (
 	"errors"
 	"time"
 	"unsafe"
+
+	"github.com/inspr-at/paimos/internal/attachwatch"
 )
+
+func CurrentLocalAuthCapability() string {
+	switch C.aeon_local_auth_capability() {
+	case 0:
+		return attachwatch.LocalAuthAvailable
+	case 2:
+		return attachwatch.LocalAuthNoGUI
+	case 3:
+		return attachwatch.LocalAuthPolicy
+	default:
+		return attachwatch.LocalAuthUnsigned
+	}
+}
 
 func (systemLocalAuthenticator) Confirm(ctx context.Context, reason string) error {
 	if err := ctx.Err(); err != nil {

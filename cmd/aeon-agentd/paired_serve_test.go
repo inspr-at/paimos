@@ -44,7 +44,7 @@ func TestPairedAttachRegistersFreshMemoryOnlyKeyAtEveryStart(t *testing.T) {
 		mu.Lock()
 		defer mu.Unlock()
 		var in attachwatch.DeviceRequest
-		if r.Method != "POST" || r.URL.Path != "/api/agent-pairing/attach" || json.NewDecoder(r.Body).Decode(&in) != nil || in.Operation != "register" || in.ComputerID != computer || in.DeviceProof != lifecycle || len(in.PollKey) != 64 || in.PollKey == lifecycle || in.Text != "" {
+		if r.Method != "POST" || r.URL.Path != "/api/agent-pairing/attach" || json.NewDecoder(r.Body).Decode(&in) != nil || in.Operation != "register" || in.ComputerID != computer || in.DeviceProof != lifecycle || len(in.PollKey) != 64 || in.PollKey == lifecycle || in.Text != "" || !attachwatch.LocalAuthCapabilityReported(in.LocalAuthCapability) {
 			t.Error("invalid daemon-start registration")
 			w.WriteHeader(403)
 			return

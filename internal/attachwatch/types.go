@@ -18,6 +18,26 @@ import (
 const ConsentAeon = "aeon"
 const ConsentLocalAuth = "local_auth"
 
+// Daemon-reported LocalAuthentication capability. These values are advisory:
+// only an in-process confirmation activates a strict watch.
+const (
+	LocalAuthAvailable   = "available"
+	LocalAuthUnsupported = "unsupported"
+	LocalAuthUnsigned    = "unsigned"
+	LocalAuthNoGUI       = "no_gui"
+	LocalAuthPolicy      = "policy"
+	LocalAuthUnreported  = "unreported"
+)
+
+func LocalAuthCapabilityReported(s string) bool {
+	switch s {
+	case LocalAuthAvailable, LocalAuthUnsupported, LocalAuthUnsigned, LocalAuthNoGUI, LocalAuthPolicy:
+		return true
+	default:
+		return false
+	}
+}
+
 const MaxText = 16 << 10
 const Lease = 60 * time.Second
 
@@ -59,17 +79,18 @@ func (s Snapshot) Valid() bool {
 }
 
 type DeviceRequest struct {
-	ConsentDigest  string   `json:"consent_digest,omitempty"`
-	LocalConfirmed bool     `json:"local_confirmed,omitempty"`
-	Operation      string   `json:"operation"`
-	RequestID      string   `json:"request_id"`
-	ComputerID     string   `json:"computer_id"`
-	DeviceProof    string   `json:"device_proof,omitempty"`
-	PollKey        string   `json:"poll_key"`
-	Snapshot       Snapshot `json:"snapshot"`
-	Digest         string   `json:"request_digest"`
-	Sequence       int64    `json:"sequence,omitempty"`
-	Text           string   `json:"text,omitempty"`
+	ConsentDigest       string   `json:"consent_digest,omitempty"`
+	LocalConfirmed      bool     `json:"local_confirmed,omitempty"`
+	Operation           string   `json:"operation"`
+	RequestID           string   `json:"request_id"`
+	ComputerID          string   `json:"computer_id"`
+	DeviceProof         string   `json:"device_proof,omitempty"`
+	PollKey             string   `json:"poll_key"`
+	Snapshot            Snapshot `json:"snapshot"`
+	Digest              string   `json:"request_digest"`
+	Sequence            int64    `json:"sequence,omitempty"`
+	Text                string   `json:"text,omitempty"`
+	LocalAuthCapability string   `json:"local_auth_capability,omitempty"`
 }
 
 // ConsentDigest preserves the v1 snapshot digest for old mode-A clients while

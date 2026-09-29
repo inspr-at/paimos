@@ -43,6 +43,20 @@ done:
  return valid;
 }
 
+// No evaluatePolicy call: this must not open a system prompt.
+int aeon_local_auth_capability(void) {
+ @autoreleasepool {
+  if (!aeon_signed_daemon()) return 1;
+  SecuritySessionId session;
+  SessionAttributeBits attributes;
+  if (SessionGetInfo(callerSecuritySession, &session, &attributes) != errSecSuccess || !(attributes & sessionHasGraphicAccess)) return 2;
+  LAContext *context = [LAContext new];
+  context.touchIDAuthenticationAllowableReuseDuration = 0;
+  if (![context canEvaluatePolicy:LAPolicyDeviceOwnerAuthentication error:nil]) return 3;
+  return 0;
+ }
+}
+
 void *aeon_local_auth_start(const char *reason, int *failure) {
  @autoreleasepool {
   *failure = 1;

@@ -2,6 +2,8 @@
 import { api } from './api.ts'
 
 export type WatchConsentMode = 'aeon' | 'local_auth'
+export type LocalAuthCapability = 'available' | 'unsupported' | 'unsigned' | 'no_gui' | 'policy' | 'unreported'
+export interface LocalAuthComputer { computer_id: string; name: string; capability: LocalAuthCapability }
 export interface AttachStatus { request_id: string; owner_id: string; state: 'active' | 'detached' | 'unreachable'; lease_until: string | null }
 export interface AttachReview {
   consent_mode?: WatchConsentMode; consent_digest?: string

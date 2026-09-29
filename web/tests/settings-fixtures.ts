@@ -32,6 +32,7 @@ export function makePng(width: number, height: number, rgb: [number, number, num
 export function settingsData(options: SettingsMockOptions = {}) {
   return {
     watchConsent: 'aeon',
+    localAuthComputers: [] as { computer_id: string; name: string; capability: string }[],
     profile: {
       principal_id: '11111111-1111-4111-8111-111111111111', email: 'markus@barta.com', first_name: 'Markus', last_name: 'Barta', preferred_name: '', short_name: 'mba',
       initials: 'MB', timezone: 'Europe/Vienna', locale: 'de-AT', greeting_enabled: options.greeting ?? true, avatar_color: 'teal',
@@ -57,7 +58,7 @@ export async function mockSettings(page: Page, data: SettingsData, options: Sett
     const request = route.request(), path = new URL(request.url()).pathname, method = request.method()
     if (path === '/api/me/security/session-watching') {
       if (method === 'PUT') data.watchConsent = request.postDataJSON().consent_mode
-      return route.fulfill({ json: { consent_mode: data.watchConsent } })
+      return route.fulfill({ json: { consent_mode: data.watchConsent, local_auth_computers: data.localAuthComputers } })
     }
     if (path === '/api/me/profile') {
       if (method === 'PATCH') {
