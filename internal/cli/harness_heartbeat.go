@@ -275,7 +275,7 @@ func (o *heartbeatOptions) prepare() error {
 	if o.UsageID != "" && !usageID(o.UsageID) {
 		return usagef("invalid --usage-id")
 	}
-	if o.UsageFile != "" && forbiddenUsagePath(o.UsageFile) {
+	if o.UsageFile != "" && !allowedUsagePath(usageSourceOf(*o), o.UsageFile) {
 		return usagef("--usage-file is not a usage log")
 	}
 	return nil

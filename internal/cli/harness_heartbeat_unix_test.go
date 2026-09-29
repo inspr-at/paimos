@@ -5,8 +5,10 @@
 package cli
 
 import (
+	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"syscall"
 	"testing"
 	"time"
@@ -50,6 +52,48 @@ func TestOwnerStampRejectsZombie(t *testing.T) {
 	_ = cmd.Wait()
 	if !zombie {
 		t.Fatal("an exited unreaped process was still treated as alive")
+	}
+}
+
+func TestOpenNoFollowReadsRegularFileAndRejectsSymlinkParent(t *testing.T) {
+	dir := t.TempDir()
+	real := filepath.Join(dir, "real")
+	if err := os.Mkdir(real, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(real, "note.json")
+	if err := os.WriteFile(path, []byte("ok"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f, err := openNoFollow(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := io.ReadAll(f)
+	_ = f.Close()
+	if err != nil || string(got) != "ok" {
+		t.Fatalf("read %q %v", got, err)
+	}
+	if err := os.Symlink(real, filepath.Join(dir, "link")); err != nil {
+		t.Fatal(err)
+	}
+	f, err = openNoFollow(filepath.Join(dir, "link", "note.json"))
+	if f != nil {
+		_ = f.Close()
+	}
+	if err == nil {
+		t.Fatal("opened through a symlinked parent")
+	}
+	alias := filepath.Join(real, "alias.json")
+	if err := os.Symlink(path, alias); err != nil {
+		t.Fatal(err)
+	}
+	f, err = openNoFollow(alias)
+	if f != nil {
+		_ = f.Close()
+	}
+	if err == nil {
+		t.Fatal("opened a symlinked file")
 	}
 }
 

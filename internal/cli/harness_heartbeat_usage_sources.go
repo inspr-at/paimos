@@ -51,14 +51,7 @@ func resolveHeartbeatUsage(o heartbeatOptions) (usageTarget, error) {
 	if o.SubscriptionLabel != "" && o.BillingMode != "subscription" {
 		return usageTarget{}, usagef("--subscription-label requires subscription billing")
 	}
-	source := o.UsageSource
-	if source == "" {
-		if o.Transcript != "" {
-			source = "claude"
-		} else if o.Harness == "claude" || o.Harness == "codex" || o.Harness == "cursor" || o.Harness == "grok" {
-			source = o.Harness
-		}
-	}
+	source := usageSourceOf(o)
 	if source == "" {
 		return usageTarget{}, nil
 	}
@@ -77,10 +70,25 @@ func resolveHeartbeatUsage(o heartbeatOptions) (usageTarget, error) {
 	if path == "" {
 		return usageTarget{Source: source, Snapshot: source == "grok"}, nil
 	}
-	if forbiddenUsagePath(path) {
+	if !allowedUsagePath(source, path) {
 		return usageTarget{}, usagef("usage file is not a session log")
 	}
 	return usageTarget{Source: source, Path: path, Snapshot: source == "grok"}, nil
+}
+
+func usageSourceOf(o heartbeatOptions) string {
+	if o.UsageSource != "" {
+		return o.UsageSource
+	}
+	if o.Transcript != "" {
+		return "claude"
+	}
+	switch o.Harness {
+	case "claude", "codex", "cursor", "grok":
+		return o.Harness
+	default:
+		return ""
+	}
 }
 
 func locateUsageFile(o heartbeatOptions, source string) string {
@@ -99,7 +107,7 @@ func locateUsageFile(o heartbeatOptions, source string) string {
 			return ""
 		}
 		path := filepath.Join(o.StateDir, "cursor.jsonl")
-		if regularUsageFile(path) {
+		if regularUsageFile("cursor", path) {
 			return path
 		}
 		return ""
@@ -133,33 +141,77 @@ func usageID(id string) bool {
 	return true
 }
 
-func forbiddenUsagePath(path string) bool {
+// allowedUsagePath is the only gate that may name a file opened for usage.
+// Each harness accepts one vendor log shape. Credential, cookie and keychain
+// names are rejected in every path component, including directories.
+func allowedUsagePath(source, path string) bool {
 	cleaned := filepath.Clean(path)
-	if unsafeHeartbeatPath(cleaned) {
-		return true
+	if cleaned == "." || unsafeHeartbeatPath(cleaned) {
+		return false
 	}
-	for _, part := range strings.Split(filepath.ToSlash(cleaned), "/") {
-		if forbiddenUsageName(part) {
+	parts := usagePathParts(cleaned)
+	if len(parts) == 0 {
+		return false
+	}
+	for _, part := range parts {
+		if part == ".." || credentialUsageName(part) {
+			return false
+		}
+	}
+	base := parts[len(parts)-1]
+	switch source {
+	case "claude":
+		return strings.HasSuffix(base, ".jsonl") && usagePathHasDir(parts, "projects")
+	case "codex":
+		return strings.HasPrefix(base, "rollout-") && strings.HasSuffix(base, ".jsonl") && usagePathHasDir(parts, "sessions")
+	case "grok":
+		return base == "usage.json" && usagePathHasDir(parts, "sessions")
+	case "cursor":
+		return base == "cursor.jsonl"
+	default:
+		return false
+	}
+}
+
+func usagePathParts(path string) []string {
+	raw := strings.Split(filepath.ToSlash(path), "/")
+	parts := make([]string, 0, len(raw))
+	for _, part := range raw {
+		if part != "" && part != "." {
+			parts = append(parts, part)
+		}
+	}
+	return parts
+}
+
+func usagePathHasDir(parts []string, name string) bool {
+	for _, part := range parts[:len(parts)-1] {
+		if part == name {
 			return true
 		}
 	}
 	return false
 }
 
-func forbiddenUsageName(name string) bool {
+func credentialUsageName(name string) bool {
 	base := strings.ToLower(name)
 	switch base {
-	case "auth.json", "credentials", "credentials.json", "secrets", ".ssh":
+	case "auth.json", "cli-config.json", "cookies", "cookies.db", "cookies.binarycookies",
+		"keychain", "keychains", "login.keychain", "login.keychain-db",
+		"credentials", "credentials.json", "secrets", ".ssh":
 		return true
 	}
-	if strings.HasPrefix(base, ".env") || strings.HasSuffix(base, ".key") || strings.HasSuffix(base, ".age") || strings.Contains(base, "credential") || strings.HasPrefix(base, "id_") {
+	if strings.HasPrefix(base, ".credentials") || strings.HasPrefix(base, ".env") || strings.HasPrefix(base, "id_") {
 		return true
 	}
-	return false
+	if strings.HasSuffix(base, ".key") || strings.HasSuffix(base, ".age") {
+		return true
+	}
+	return strings.Contains(base, "credential") || strings.Contains(base, "keychain") || strings.Contains(base, "cookie")
 }
 
-func regularUsageFile(path string) bool {
-	if path == "" || forbiddenUsagePath(path) {
+func regularUsageFile(source, path string) bool {
+	if !allowedUsagePath(source, path) {
 		return false
 	}
 	info, err := os.Lstat(path)
@@ -199,7 +251,7 @@ func findCodexRollout(home, thread string) string {
 		}
 		return nil
 	})
-	if !regularUsageFile(found) || !pathInsideRoot(root, found) {
+	if !regularUsageFile("codex", found) || !pathInsideRoot(root, found) {
 		return ""
 	}
 	return found
@@ -216,7 +268,7 @@ func findGrokUsage(home, worktree, id string) string {
 	}
 	if strings.TrimSpace(worktree) != "" {
 		primary := filepath.Join(root, encodeURIComponent(worktree), id, "usage.json")
-		if regularUsageFile(primary) && pathInsideRoot(root, primary) {
+		if regularUsageFile("grok", primary) && pathInsideRoot(root, primary) {
 			return primary
 		}
 	}
@@ -233,7 +285,7 @@ func findGrokUsage(home, worktree, id string) string {
 			continue
 		}
 		candidate := filepath.Join(root, entry.Name(), id, "usage.json")
-		if regularUsageFile(candidate) && pathInsideRoot(root, candidate) && candidate > found {
+		if regularUsageFile("grok", candidate) && pathInsideRoot(root, candidate) && candidate > found {
 			found = candidate
 		}
 	}
@@ -364,7 +416,7 @@ func (rt *runtime) reportSnapshotUsage(ctx context.Context, projectID string, o 
 }
 
 func readGrokUsage(path, fallback string) ([]sessionusage.HeartbeatLine, error) {
-	if forbiddenUsagePath(path) {
+	if !allowedUsagePath("grok", path) {
 		return nil, usagef("usage file is not a session log")
 	}
 	f, err := openNoFollow(path)

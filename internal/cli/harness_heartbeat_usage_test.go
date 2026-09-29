@@ -18,7 +18,7 @@ func TestHarnessUsageSourcesReportMonotonicTotals(t *testing.T) {
 	defer srv.Close()
 	rt, _, _ := heartbeatRuntime(t, srv)
 
-	claudePath := filepath.Join(dir, "claude.jsonl")
+	claudePath := claudeUsagePath(t, dir, "claude.jsonl")
 	raw, err := os.ReadFile(filepath.Join("..", "sessionusage", "testdata", "claude_assistant.jsonl"))
 	if err != nil {
 		t.Fatal(err)
@@ -44,7 +44,11 @@ func TestHarnessUsageSourcesReportMonotonicTotals(t *testing.T) {
 		t.Fatal("claude transcript was reported twice")
 	}
 
-	codexPath := filepath.Join(dir, "rollout.jsonl")
+	codexDir := t.TempDir()
+	codexPath := filepath.Join(codexDir, "sessions", "rollout-test.jsonl")
+	if err = os.MkdirAll(filepath.Dir(codexPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
 	raw, err = os.ReadFile(filepath.Join("..", "sessionusage", "testdata", "codex_token_count.jsonl"))
 	if err != nil {
 		t.Fatal(err)
@@ -52,7 +56,7 @@ func TestHarnessUsageSourcesReportMonotonicTotals(t *testing.T) {
 	if err = os.WriteFile(codexPath, raw, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	opts = heartbeatTestOptions(t.TempDir())
+	opts = heartbeatTestOptions(codexDir)
 	opts.Harness = "codex"
 	opts.UsageSource = "codex"
 	opts.UsageFile = codexPath
@@ -123,7 +127,10 @@ func TestHarnessUsageSourcesReportMonotonicTotals(t *testing.T) {
 		}
 	}
 
-	grokPath := filepath.Join(dir, "usage.json")
+	grokPath := filepath.Join(dir, "sessions", "work", "usage.json")
+	if err = os.MkdirAll(filepath.Dir(grokPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
 	first := `{"session":{"inputTokens":10,"outputTokens":4,"cachedReadTokens":2,"cacheCreationTokens":1,"primaryModelId":"grok-4","costUsdTicks":11}}`
 	second := `{"session":{"inputTokens":20,"outputTokens":4,"cachedReadTokens":2,"cacheCreationTokens":1,"primaryModelId":"grok-4","costUsdTicks":11}}`
 	if len(first) != len(second) {
@@ -293,6 +300,119 @@ func TestUsageLocatorsSkipVendorAuth(t *testing.T) {
 	opts.SubscriptionLabel = "pro"
 	if err = opts.prepare(); err == nil {
 		t.Fatal("subscription label accepted with api billing")
+	}
+}
+
+func TestUsageAllowlistRefusesSecretFilesAndSymlinkParents(t *testing.T) {
+	dir := t.TempDir()
+	real := filepath.Join(dir, "real", "sessions", "work", "sid")
+	if err := os.MkdirAll(real, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	usage := filepath.Join(real, "usage.json")
+	body := []byte(`{"session":{"inputTokens":1,"outputTokens":1,"cachedReadTokens":0,"cacheCreationTokens":0,"primaryModelId":"grok-4"}}`)
+	if err := os.WriteFile(usage, body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	lines, err := readGrokUsage(usage, "grok-4")
+	if err != nil || len(lines) != 1 || lines[0].Input != 1 {
+		t.Fatalf("direct usage read: %+v %v", lines, err)
+	}
+	if err := os.Symlink(filepath.Join(dir, "real"), filepath.Join(dir, "link")); err != nil {
+		t.Fatal(err)
+	}
+	linked := filepath.Join(dir, "link", "sessions", "work", "sid", "usage.json")
+	if _, err := readGrokUsage(linked, "grok-4"); err == nil {
+		t.Fatal("opened grok usage through a symlinked parent")
+	}
+	cursorReal := filepath.Join(dir, "real", "cursor.jsonl")
+	if err := os.WriteFile(cursorReal, []byte("{}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, _, err := scanUsageWindowSource(context.Background(), filepath.Join(dir, "link", "cursor.jsonl"), "", 0, 1<<20, nil, false, "cursor"); err == nil {
+		t.Fatal("opened cursor.jsonl through a symlinked parent")
+	}
+
+	names := []string{
+		"cli-config.json", "auth.json", ".credentials.json", ".credentials",
+		"cookies", "cookies.db", "cookies.binarycookies",
+		"keychain", "login.keychain", "login.keychain-db",
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "sessions"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range names {
+		projects := filepath.Join(dir, "projects", name)
+		if err := os.MkdirAll(filepath.Dir(projects), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(projects, []byte("secret\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, _, _, _, err := scanUsageWindowSource(context.Background(), projects, "", 0, 1<<20, nil, false, "claude"); err == nil {
+			t.Fatalf("claude scan opened %s", name)
+		}
+		sessions := filepath.Join(dir, "sessions", name)
+		if err := os.WriteFile(sessions, []byte("secret\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := readGrokUsage(sessions, "grok-4"); err == nil {
+			t.Fatalf("grok read opened %s", name)
+		}
+		opts := heartbeatTestOptions(dir)
+		opts.Harness = "cursor"
+		opts.UsageSource = "cursor"
+		opts.UsageFile = projects
+		if _, err := resolveHeartbeatUsage(opts); err == nil {
+			t.Fatalf("resolve accepted %s", name)
+		}
+		if err := opts.prepare(); err == nil {
+			t.Fatalf("prepare accepted %s", name)
+		}
+	}
+	keydir := filepath.Join(dir, "projects", "Keychains")
+	if err := os.MkdirAll(keydir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	hidden := filepath.Join(keydir, "session.jsonl")
+	if err := os.WriteFile(hidden, []byte("{}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, _, err := scanUsageWindowSource(context.Background(), hidden, "", 0, 1<<20, nil, false, "claude"); err == nil {
+		t.Fatal("opened a transcript inside Keychains")
+	}
+	cookiedir := filepath.Join(dir, "cookie-home", "sessions", "Cookies")
+	if err := os.MkdirAll(cookiedir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	cookieUsage := filepath.Join(cookiedir, "usage.json")
+	if err := os.WriteFile(cookieUsage, body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readGrokUsage(cookieUsage, "grok-4"); err == nil {
+		t.Fatal("opened usage.json inside Cookies")
+	}
+	rollout := filepath.Join(dir, "sessions", "rollout-cli-config.jsonl")
+	if err := os.WriteFile(rollout, []byte("{}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	opts := heartbeatTestOptions(dir)
+	opts.Harness = "codex"
+	opts.UsageSource = "codex"
+	opts.UsageFile = filepath.Join(dir, "sessions", "cli-config.json")
+	if err := os.WriteFile(opts.UsageFile, []byte("{}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := resolveHeartbeatUsage(opts); err == nil {
+		t.Fatal("codex resolve accepted cli-config.json")
+	}
+	opts.UsageFile = rollout
+	target, err := resolveHeartbeatUsage(opts)
+	if err != nil || target.Path != rollout {
+		t.Fatalf("codex rollout %+v %v", target, err)
+	}
+	if _, _, _, _, err := scanUsageWindowSource(context.Background(), rollout, "gpt-5", 0, 1<<20, nil, false, "codex"); err != nil {
+		t.Fatalf("codex rollout scan: %v", err)
 	}
 }
 

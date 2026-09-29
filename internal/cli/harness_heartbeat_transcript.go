@@ -430,8 +430,11 @@ func scanUsageWindowSource(ctx context.Context, path, fallback string, offset, m
 	if ctx.Err() != nil {
 		return nil, offset, recent, discarding, ctx.Err()
 	}
-	if path == "" || unsafeHeartbeatPath(path) || maxBytes <= 0 {
+	if path == "" || maxBytes <= 0 {
 		return nil, offset, recent, discarding, nil
+	}
+	if unsafeHeartbeatPath(path) || !allowedUsagePath(source, path) {
+		return nil, offset, recent, discarding, usagef("usage file is not a session log")
 	}
 	f, err := openNoFollow(path)
 	if err != nil {
