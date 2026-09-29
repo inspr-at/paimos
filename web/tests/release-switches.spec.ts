@@ -36,11 +36,20 @@ function withTickets() {
 
 type Linked = { key: string; pill_en: string; pill_de: string; benefit_en: string; benefit_de: string }
 type Rel = History['releases'][number] & { presentation?: Record<string, unknown>; notes?: { items: Linked[] } }
-// 105 gets a CI run; the fallback variant leaves some texts untranslated.
-function history(fallback = false) {
+// 105 gets a CI run; the fallback variant leaves some texts untranslated; the
+// empty variant adds two older releases without any changes.
+const V101 = '260929020000.0.0'
+const V100 = '260929010000.0.0'
+function history(fallback = false, empty = false) {
   const h = structuredClone(historicHistory()) as History
   const [r105, r102] = h.releases as Rel[]
   r105!.evidence.ci = { name: 'ci', url: 'https://github.com/inspr-at/aeon/actions/runs/105', status: 'completed', conclusion: 'success' }
+  if (empty) {
+    for (const [version, sequence, at] of [[V101, 101, '2026-09-29T02:00:00Z'], [V100, 100, '2026-09-29T01:00:00Z']] as const) {
+      const { notes: _notes, presentation: _presentation, ...rest } = structuredClone(r102!)
+      h.releases.push({ ...rest, version, tag: `v${version}`, release_sequence: sequence, reserved_at: at, tagged_at: at, published_at: at, headline: '', tickets: [], changes: [] } as Rel)
+    }
+  }
   if (fallback) {
     for (const c of r105!.changes) {
       for (const t of (c as { linked_tickets?: Linked[] }).linked_tickets ?? []) {
@@ -55,9 +64,10 @@ function history(fallback = false) {
 }
 
 const ME = '11111111-1111-4111-8111-111111111111'
-async function open(page: Page, path: string, options: { locale?: string; fallback?: boolean } = {}) {
+type Options = { locale?: string; fallback?: boolean; empty?: boolean }
+async function open(page: Page, path: string, options: Options = {}) {
   await mockWork(page, withTickets())
-  await mockReleases(page, history(options.fallback))
+  await mockReleases(page, history(options.fallback, options.empty))
   if (options.locale) {
     const profile = { principal_id: ME, email: 'markus@barta.com', first_name: 'Markus', last_name: 'Barta', preferred_name: '', short_name: 'mba', initials: 'MB', timezone: 'Europe/Vienna', locale: options.locale, greeting_enabled: false, avatar_color: 'teal', avatar_hashes: {}, week_start: 1, revision: 1 }
     await page.route('**/api/me/profile', route => route.fulfill({ json: profile }))
@@ -65,7 +75,7 @@ async function open(page: Page, path: string, options: { locale?: string; fallba
   await page.goto(path)
   await expect(sheet(page)).toBeVisible()
 }
-async function openRelease(page: Page, version = V105, query = '', options: { locale?: string; fallback?: boolean } = {}) {
+async function openRelease(page: Page, version = V105, query = '', options: Options = {}) {
   await open(page, `/releases/${version}${query}`, options)
   await expect(detail(page).getByRole('heading', { level: 2 })).toBeVisible()
 }
@@ -257,6 +267,138 @@ test('Compare follows both switches', async ({ page }) => {
   await expect(compare.getByRole('article', { name: 'Deploy-Ziel im Blick' })).toHaveCount(0) // 102 is the older end, not in the range
   await expect(page).toHaveURL(/release_lang=de/)
   await expect(page).toHaveURL(/release_view=details/)
+})
+
+test('a choice that moves a filtered selection lands in the address with it, and survives a reload', async ({ page }) => {
+  await page.setViewportSize({ width: 1600, height: 1000 })
+  for (const [choice, key] of [['DE', 'release_lang=de'], ['Details', 'release_view=details']] as const) {
+    await openRelease(page, V105, '?release_lang=en&release_view=highlights')
+    // "file" is on both in English Highlights; after either choice only 102 has it.
+    await search(page).fill('file')
+    await expect(rows(page)).toHaveCount(2)
+    await radio(page, choice).click()
+    await expect(rows(page)).toHaveCount(1)
+    await expect(page).toHaveURL(new RegExp(`/releases/${esc(V102)}\\?.*${key}`))
+    await page.reload()
+    await expect(detail(page).getByRole('heading', { level: 2 })).toBeVisible()
+    await expect(radio(page, choice)).toHaveAttribute('aria-checked', 'true')
+    await expect(page).toHaveURL(new RegExp(`/releases/${esc(V102)}\\?.*${key}`))
+  }
+  // The other way round: a release and a choice in the same moment both land.
+  await openRelease(page, V105)
+  await sheet(page).evaluate(dialog => {
+    dialog.querySelectorAll<HTMLElement>('[role="option"]')[1]!.click()
+    ;[...dialog.querySelectorAll<HTMLButtonElement>('[role="radio"]')].find(b => b.textContent?.trim() === 'Details')!.click()
+  })
+  await expect(page).toHaveURL(new RegExp(`/releases/${esc(V102)}\\?release_view=details$`))
+  await expect(radio(page, 'Details')).toHaveAttribute('aria-checked', 'true')
+})
+
+test('the list and Compare badge a name shown in the other language', async ({ page }) => {
+  await page.setViewportSize({ width: 1600, height: 1000 })
+  await openRelease(page, V105, '?release_lang=de', { fallback: true })
+  // 105 names AEON-291, which has no German pill: English, with the badge.
+  const rail105 = rows(page).first().locator('.rail-name')
+  await expect(rail105.locator('.headline')).toContainText('Dead sessions tidy up')
+  await expect(rail105.locator('.headline')).toHaveAttribute('lang', 'en')
+  // Beside the two clamped lines, so a long name never hides it.
+  await expect(rail105.locator('.lang-badge')).toBeVisible()
+  await expect(rail105.locator('.lang-badge')).toHaveText('EN')
+  await expect(rail105.locator('.lang-badge')).toHaveAttribute('data-tip', 'Not translated yet, shown in English')
+  // 102's German theme needs none.
+  await expect(rows(page).nth(1).locator('.headline')).toHaveText('Deploy mit offenen Augen')
+  await expect(rows(page).nth(1).locator('.lang-badge')).toHaveCount(0)
+  // Compare's list of releases in the range says the same.
+  await sheet(page).getByRole('button', { name: 'Compare', exact: true }).click()
+  const included = sheet(page).locator('section.compare .included li')
+  await expect(included).toHaveCount(1)
+  await expect(included.locator('.inc-headline')).toContainText('Dead sessions tidy up')
+  await expect(included.locator('.inc-headline')).toHaveAttribute('lang', 'en')
+  await expect(included.locator('.lang-badge')).toHaveText('EN')
+  // In English nothing fell back.
+  await radio(page, 'EN').click()
+  await expect(included.locator('.lang-badge')).toHaveCount(0)
+  await expect(rows(page).locator('.lang-badge')).toHaveCount(0)
+})
+
+test('empty and compare lines switch language with the rest', async ({ page }) => {
+  await page.setViewportSize({ width: 1600, height: 1000 })
+  await openRelease(page, V101, '?release_lang=de', { empty: true })
+  const none = detail(page).locator('p.none')
+  await expect(none).toHaveText('Zwischen diesem und dem vorherigen Release sind keine Änderungen verzeichnet.')
+  await expect(none).toHaveAttribute('lang', 'de')
+  await radio(page, 'EN').click()
+  await expect(none).toHaveText('No changes are recorded between this release and the one before it.')
+
+  // Compare suggests 100 as the other end: nothing between them.
+  await sheet(page).getByRole('button', { name: 'Compare', exact: true }).click()
+  const compare = sheet(page).locator('section.compare')
+  await expect(compare.locator('p.none')).toHaveText('No changes are recorded between these releases.')
+  await expect(sheet(page).locator('.compare-hint')).toContainText('Comparing from')
+  await radio(page, 'DE').click()
+  await expect(compare.locator('p.none')).toHaveText('Zwischen diesen Releases sind keine Änderungen verzeichnet.')
+  await expect(sheet(page).locator('.compare-hint')).toContainText('Vergleich ab')
+  await expect(sheet(page).locator('.compare-hint')).toContainText('oder einem Klick wählen.')
+  await compare.getByRole('button', { name: 'Done' }).click()
+
+  // A search without hits says so in the chosen language.
+  await search(page).fill('zzzz')
+  await expect(sheet(page).getByRole('heading', { name: 'Kein Release passt' })).toBeVisible()
+  await expect(sheet(page).getByText('Nichts in 4 Releases passt zu „zzzz“.')).toBeVisible()
+  await radio(page, 'EN').click()
+  await expect(sheet(page).getByRole('heading', { name: 'No release matches' })).toBeVisible()
+  await sheet(page).getByRole('button', { name: 'Clear search and filters' }).click()
+  await expect(rows(page)).toHaveCount(4)
+})
+
+test('Details search finds the commit SHAs and the evidence it shows', async ({ page }) => {
+  await page.setViewportSize({ width: 1600, height: 1000 })
+  await openRelease(page, V105, '?release_view=details')
+  // 5a622e2 is 105's source commit under Evidence.
+  await search(page).fill('5a622e2')
+  await expect(rows(page)).toHaveCount(1)
+  await expect(rows(page).first()).toContainText('stable105')
+  // A commit listed under a ticket: found by its short SHA, which is marked.
+  await search(page).fill('')
+  const sha = (await block(page, 'Dead sessions tidy up').getByRole('link', { name: /^Commit [0-9a-f]{7} on GitHub$/ }).nth(3).textContent())!.trim()
+  await search(page).fill(sha)
+  await expect(rows(page)).toHaveCount(1)
+  await expect(block(page, 'Dead sessions tidy up').locator('.commit mark')).toHaveText(sha)
+  // Highlights shows the same commits folded and opens them on the hit.
+  await radio(page, 'Highlights').click()
+  await expect(rows(page)).toHaveCount(1)
+  await expect(block(page, 'Dead sessions tidy up').locator('details.commits')).toHaveAttribute('open', '')
+  // Evidence fields only where Details shows them: 102's snapshot hash and image.
+  const none = sheet(page).getByRole('heading', { name: 'No release matches' })
+  for (const q of ['c1c1c1c1', `ghcr.io/inspr-at/aeon:${V102}`]) {
+    await search(page).fill(q)
+    await expect(none).toBeVisible()
+    await radio(page, 'Details').click()
+    await expect(rows(page)).toHaveCount(1)
+    await expect(page).toHaveURL(new RegExp(`/releases/${esc(V102)}\\?`))
+    await radio(page, 'Highlights').click()
+  }
+  // A word inside a hash is no hit.
+  await radio(page, 'Details').click()
+  await search(page).fill(sha.slice(2))
+  await expect(none).toBeVisible()
+})
+
+test('arrow keys move focus and choice in both radio groups, all four directions', async ({ page }) => {
+  await page.setViewportSize({ width: 1600, height: 1000 })
+  await openRelease(page, V105, '?release_lang=en')
+  for (const [first, second] of [['EN', 'DE'], ['Highlights', 'Details']] as const) {
+    await radio(page, first).focus()
+    for (const [key, now] of [['ArrowDown', second], ['ArrowDown', first], ['ArrowUp', second], ['ArrowUp', first], ['ArrowRight', second], ['ArrowLeft', first], ['End', second], ['Home', first]] as const) {
+      await page.keyboard.press(key)
+      await expect(radio(page, now)).toHaveAttribute('aria-checked', 'true')
+      await expect(radio(page, now)).toBeFocused()
+      await expect(radio(page, now)).toHaveAttribute('tabindex', '0')
+    }
+  }
+  // The keys stay in the group: the release list's selection does not move.
+  await expect(page).toHaveURL(new RegExp(`/releases/${esc(V105)}\\?`))
+  await expect(rows(page).first()).toHaveAttribute('aria-selected', 'true')
 })
 
 test('the switches sit with search and Compare at 36 px on desktop and take their own row on phones', async ({ page }) => {

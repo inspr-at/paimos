@@ -1,6 +1,6 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import AppHeader from './components/AppHeader.vue'
 import ConfirmHost from './components/ConfirmHost.vue'
@@ -78,10 +78,31 @@ function openReleases(version?: string) {
   openedHere = true
   void router.push({ path: route.path, query: { ...route.query, releases: version ?? 'all' }, hash: route.hash })
 }
-function selectRelease(version: string) {
+// A release and a language or view chosen in quick succession (a choice whose
+// filter hides the selected release moves the selection) both land: each
+// replace carries what is still on its way, until the address has it.
+const releasesNext = reactive<{ version?: string; query: Record<string, string> }>({ query: {} })
+watch(() => route.fullPath, () => {
+  if (releasesNext.version === releasesTarget.value) delete releasesNext.version
+  for (const [key, value] of Object.entries(releasesNext.query)) if (route.query[key] === value) delete releasesNext.query[key]
+})
+watch(releasesOpen, open => { if (!open) { delete releasesNext.version; releasesNext.query = {} } })
+function replaceReleases() {
   // Keep the history's language and view (and any other query) across versions.
-  if (releasesRoute.value) { if (route.params.version !== version) void router.replace({ path: `/releases/${version}`, query: { ...route.query }, hash: route.hash }) }
-  else if (releasesQuery.value !== version) void router.replace({ path: route.path, query: { ...route.query, releases: version }, hash: route.hash })
+  const query = { ...route.query, ...releasesNext.query }
+  const version = releasesNext.version
+  if (releasesRoute.value) void router.replace({ path: version ? `/releases/${version}` : route.path, query, hash: route.hash })
+  else void router.replace({ path: route.path, query: version ? { ...query, releases: version } : query, hash: route.hash })
+}
+function selectRelease(version: string) {
+  if ((releasesNext.version ?? releasesTarget.value) === version) return
+  releasesNext.version = version
+  replaceReleases()
+}
+function setReleasesQuery(key: string, value: string) {
+  if ((releasesNext.query[key] ?? route.query[key]) === value) return
+  releasesNext.query[key] = value
+  replaceReleases()
 }
 function closeReleases() {
   if (openedHere && typeof window.history.state?.back === 'string') { openedHere = false; router.back(); return }
@@ -185,7 +206,7 @@ watch(() => [route.path, route.params.projectKey, route.params.ticketKey, route.
     </main>
     <!-- A row of the shell: the page, docked panels and toasts all end above it. -->
     <AppFooter v-if="!bare" :hidden="footerHidden" @releases="openReleases()" />
-    <ReleasesSheet v-if="releasesOpen" :target="releasesTarget" @select="selectRelease" @close="closeReleases" @home="goHome" @navigate="leaveReleasesFor" />
+    <ReleasesSheet v-if="releasesOpen" :target="releasesTarget" @select="selectRelease" @query="setReleasesQuery" @close="closeReleases" @home="goHome" @navigate="leaveReleasesFor" />
     <TicketPeekHost v-if="ticketPeek.openKey.value && !releasesOpen" :ref="ticketPeek.bind" :ticket-key="ticketPeek.openKey.value" :back-label="ticketPeek.backLabel.value" @close="ticketPeek.close()" />
     <ToastHost />
     <ConfirmHost />

@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { emptyNotesLine, hasUsableNotes, hiddenNoteLine, localizedPresentation, markParts, presentRelease, releasedAt, shortCommit, span, ticketsOf, writtenAfterLine, writtenAfterRelease, type Release, type ReleaseLang, type ReleaseView } from '../../lib/releases'
+import { emptyNotesLine, hasUsableNotes, hiddenNoteLine, localizedPresentation, markParts, presentRelease, releaseCopy, releasedAt, runWord, shortCommit, span, ticketsOf, writtenAfterLine, writtenAfterRelease, type Release, type ReleaseLang, type ReleaseView } from '../../lib/releases'
 import { absoluteTime, relativeTime } from '../../lib/work'
 import AppIcon from '../AppIcon.vue'
 import CalendarVersion from '../CalendarVersion.vue'
@@ -36,6 +36,7 @@ const presented = computed(() => localizedPresentation(props.release, locale.val
 const badge = (lang: ReleaseLang, own = false) => lang !== props.lang && (own || presented.value?.headlineLang === props.lang)
 const noted = computed(() => hasUsableNotes(props.release) ? props.release.notes : null)
 const parts = (text: string) => markParts(text, props.query)
+const copyText = computed(() => releaseCopy(locale.value))
 // A ticket already heading a block needs no chip.
 const lined = computed(() => new Set([...lines.value.features, ...lines.value.fixes].map(line => line.key)))
 const chipTickets = computed(() => tickets.value.filter(key => !lined.value.has(key)))
@@ -50,8 +51,6 @@ const soleTicket = computed(() => tickets.value.length === 1 ? tickets.value[0] 
 
 // ---------- Evidence ----------
 const ev = computed(() => props.release.evidence)
-const RUN_WORD: Record<string, string> = { success: 'passed', failure: 'failed', cancelled: 'cancelled', skipped: 'skipped', timed_out: 'timed out' }
-const runWord = (run: { status: string; conclusion: string }) => run.conclusion ? (RUN_WORD[run.conclusion] ?? run.conclusion.replace(/_/g, ' ')) : run.status.replace(/_/g, ' ')
 const summary = computed(() => {
   const bits: string[] = []
   if (ev.value.ci) bits.push(`CI ${runWord(ev.value.ci)}`)
@@ -102,12 +101,12 @@ defineExpose({ focus: () => heading.value?.focus({ preventScroll: false }) })
       <p v-if="noted && !noted.items.length && !noted.gaps.length" class="none">{{ emptyNotesLine(locale) }}</p>
       <TicketChips v-if="chipTickets.length" :tickets="chipTickets" class="tickets" />
       <ReleaseChanges v-if="counted" :presented="lines" :repository="repository" :query="query" :sole-ticket="soleTicket" :view="view" :lang="lang" />
-      <p v-else-if="!noted" class="none">{{ reserved ? 'Nothing shipped under this version.' : 'No changes are recorded between this release and the one before it.' }}</p>
+      <p v-else-if="!noted" class="none" :lang="lang">{{ reserved ? copyText.nothingShipped : copyText.noChanges }}</p>
       <template v-if="noted">
         <p v-for="gap in noted.gaps" :key="gap" class="none">{{ gap }}</p>
         <p v-if="noted.hidden" class="none">{{ hiddenNoteLine(noted.hidden, locale) }}</p>
       </template>
-      <p v-if="release.changes_omitted" class="none">And {{ release.changes_omitted }} more {{ release.changes_omitted === 1 ? 'change' : 'changes' }} not listed here.</p>
+      <p v-if="release.changes_omitted" class="none" :lang="lang">{{ copyText.omitted(release.changes_omitted) }}</p>
       <p v-if="writtenAfterRelease(release)" class="none written-after">{{ writtenAfterLine(locale) }}</p>
     </section>
 

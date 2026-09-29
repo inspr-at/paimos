@@ -254,25 +254,36 @@ export function localizedPresentation(r: Pick<Release, 'presentation'>, locale?:
   if (!headline.text) return null
   return { theme: theme.text, headline: headline.text, intro: intro.text, themeLang: theme.lang, headlineLang: headline.lang, introLang: intro.lang }
 }
-// The pills a release tells, features first, for its title and rail line.
+// The pills a release tells, features first, for its title and rail line, each
+// with the language it is shown in.
 function toldLabels(r: Pick<Release, 'notes' | 'changes'>, locale?: string | null) {
   const p = presentRelease(r, locale)
-  return [...p.features, ...p.fixes].map(line => line.pill || line.benefit)
+  return [...p.features, ...p.fixes].map(line => line.pill ? { text: line.pill, lang: line.pillLang } : { text: line.benefit, lang: line.benefitLang })
+}
+// A name shown in the chosen language, or in the other one when any part of it
+// had to fall back: that is the language its badge names.
+export interface NamedText { text: string; lang: ReleaseLang }
+function named(r: Pick<Release, 'changes' | 'notes' | 'presentation'>, locale: string | null | undefined, all: boolean): NamedText & { themed: boolean } {
+  const want = noteLocale(locale)
+  const presented = localizedPresentation(r, locale)
+  if (presented) return presented.theme ? { text: presented.theme, lang: presented.themeLang, themed: true } : { text: presented.headline, lang: presented.headlineLang, themed: true }
+  const labels = toldLabels(r, locale).slice(0, all ? undefined : 1)
+  return { text: labels.map(l => l.text).join(' · '), lang: labels.find(l => l.lang !== want)?.lang ?? want, themed: false }
 }
 // A short name for a release in toasts and lists: its theme (or headline), else
 // its first pill, else nothing, so callers show only version and date.
 // The Git tag message is evidence and never a name outside Evidence.
+export function releaseName(r: Pick<Release, 'changes' | 'notes' | 'presentation'>, locale?: string | null): NamedText {
+  const { text, lang } = named(r, locale, false)
+  return { text, lang }
+}
 export function releaseTitle(r: Pick<Release, 'changes' | 'notes' | 'presentation'>, locale?: string | null) {
-  const presented = localizedPresentation(r, locale)
-  if (presented) return presented.theme || presented.headline
-  return toldLabels(r, locale)[0] ?? ''
+  return releaseName(r, locale).text
 }
 // The rail's second line: the theme, else the pills. Git tag headlines are
 // evidence, not names, so they are not shown there.
-export function railLine(r: Release, locale?: string | null): { text: string; themed: boolean } {
-  const presented = localizedPresentation(r, locale)
-  if (presented) return { text: presented.theme || presented.headline, themed: true }
-  return { text: toldLabels(r, locale).join(' · '), themed: false }
+export function railLine(r: Release, locale?: string | null): { text: string; themed: boolean; lang: ReleaseLang } {
+  return named(r, locale, true)
 }
 // Text split around each case-insensitive hit of the search query, for <mark>.
 export function markParts(text: string, query?: string | null): { text: string; hit: boolean }[] {
@@ -305,6 +316,42 @@ export function historicalTagFallback(r: Pick<Release, 'notes' | 'headline'>): b
   if (hasUsableNotes(r)) return false
   if (!r.notes) return true
   return r.notes.fallback === HISTORICAL_TAG_FALLBACK || r.notes.source === 'unavailable'
+}
+// The sheet's empty and compare lines in the chosen language (AEON-323).
+export function releaseCopy(locale?: string | null) {
+  const de = noteLocale(locale) === 'de'
+  const plural = (n: number, one: string, many: string) => n === 1 ? one : many
+  return de ? {
+    nothingShipped: 'Unter dieser Version wurde nichts ausgeliefert.',
+    noChanges: 'Zwischen diesem und dem vorherigen Release sind keine Änderungen verzeichnet.',
+    omitted: (n: number) => `${plural(n, 'Eine weitere Änderung ist', `${n} weitere Änderungen sind`)} hier nicht aufgeführt.`,
+    compareNone: 'Zwischen diesen Releases sind keine Änderungen verzeichnet.',
+    comparePick: 'Zweites Release wählen',
+    compareHint: ['Mit', 'durch die Liste gehen und', ' drücken oder ein Release anklicken. Die Änderungen vom älteren zum neueren werden hier zusammengezählt.'],
+    comparingFrom: 'Vergleich ab',
+    compareTap: 'Das andere Ende antippen.',
+    compareOther: ['Das andere Ende mit', 'oder einem Klick wählen.'],
+    noMatch: 'Kein Release passt',
+    noMatchText: (count: number, q: string) => `Nichts in ${count} Releases passt zu ${q ? `„${q}“` : 'diesen Filtern'}.`,
+    clear: 'Suche und Filter zurücksetzen',
+    noHistory: 'Kein Release-Verlauf in diesem Build',
+    noHistoryText: (dev: boolean) => `Release-Builds enthalten den Verlauf aller Tags. Dieser wurde ohne ihn gebaut${dev ? ', wie Entwicklungs-Builds' : ''}.`,
+  } : {
+    nothingShipped: 'Nothing shipped under this version.',
+    noChanges: 'No changes are recorded between this release and the one before it.',
+    omitted: (n: number) => `And ${n} more ${plural(n, 'change', 'changes')} not listed here.`,
+    compareNone: 'No changes are recorded between these releases.',
+    comparePick: 'Pick a second release',
+    compareHint: ['Move through the list with', 'and press', ', or click a release. The changes from the older to the newer one are added up here.'],
+    comparingFrom: 'Comparing from',
+    compareTap: 'Tap the other end.',
+    compareOther: ['Pick the other end with', 'or a click.'],
+    noMatch: 'No release matches',
+    noMatchText: (count: number, q: string) => `Nothing in ${count} releases fits ${q ? `“${q}”` : 'these filters'}.`,
+    clear: 'Clear search and filters',
+    noHistory: 'No release history in this build',
+    noHistoryText: (dev: boolean) => `Release builds carry the history of every tag. This one was built without it${dev ? ', as development builds are' : ''}.`,
+  }
 }
 export function emptyNotesLine(locale?: string | null) {
   return noteLocale(locale) === 'de' ? 'Nur interne Änderungen.' : 'Internal changes only.'
@@ -389,9 +436,9 @@ export interface ReleaseFilter { q: string; features: boolean; fixes: boolean; t
 export const ticketsOf = (r: Release) => [...new Set(hasUsableNotes(r) ? r.notes.items.map(item => item.key) : [...r.tickets, ...r.changes.flatMap(c => c.tickets)])].sort(naturalKey)
 // The filters follow the blocks the detail and the row counts show. Search
 // looks at the text the chosen language and view show (AEON-323): both views
-// show the name, pills, ticket keys and commit subjects (Highlights opens a
-// folded list on a hit); Highlights adds the benefits, Details the evidence's
-// tag message.
+// show the name, pills, ticket keys, commit subjects and SHAs (Highlights opens
+// a folded list on a hit); Highlights adds the benefits, Details the evidence
+// it shows open.
 export function matches(r: Release, f: ReleaseFilter, locale?: string | null, view: ReleaseView = 'highlights') {
   const presented = presentRelease(r, locale)
   if (f.features && !presented.features.length) return false
@@ -406,10 +453,30 @@ export function matches(r: Release, f: ReleaseFilter, locale?: string | null, vi
     r.version, ...ticketsOf(r), ...r.tickets,
     ...(named ? [named.theme, named.headline, named.intro] : []),
     ...lines.map(line => line.pill || line.benefit),
-    ...(view === 'highlights' ? lines.map(line => line.benefit) : [r.headline]),
+    ...(view === 'highlights' ? lines.map(line => line.benefit) : evidenceSearch(r).texts),
     ...commits.flatMap(c => [plainSubject(c.subject, c.tickets), ...c.tickets]),
   ]
-  return texts.some(text => text.toLowerCase().includes(q))
+  const ids = [...commits.map(c => c.commit), ...(view === 'details' ? evidenceSearch(r).ids : [])]
+  return texts.some(text => text.toLowerCase().includes(q)) || ids.some(id => idMatches(id, q))
+}
+// Hashes match from their start, as people type them, and from four characters,
+// so a word like "dead" or "cafe" does not hit every hex string that holds it.
+export function idMatches(id: string, q: string) {
+  const needle = q.trim().toLowerCase().replace(/^sha256:/, '')
+  return needle.length >= 4 && id.toLowerCase().replace(/^sha256:/, '').startsWith(needle)
+}
+
+// A CI or release run's outcome in words: "passed", "failed", "in progress".
+const RUN_WORD: Record<string, string> = { success: 'passed', failure: 'failed', cancelled: 'cancelled', skipped: 'skipped', timed_out: 'timed out' }
+export const runWord = (run: { status: string; conclusion: string }) => run.conclusion ? (RUN_WORD[run.conclusion] ?? run.conclusion.replace(/_/g, ' ')) : run.status.replace(/_/g, ' ')
+// What Details shows open under Evidence, for search: words, and the hashes.
+export function evidenceSearch(r: Release): { texts: string[]; ids: string[] } {
+  const ev = r.evidence
+  const runs = [ev?.ci, ev?.release_run].flatMap(run => run ? [run.name, runWord(run)] : [])
+  return {
+    texts: [r.headline, r.tag, r.notes?.source ?? '', ...runs, ev?.image?.reference ?? '', ...(ev?.unavailable ?? [])].filter(Boolean),
+    ids: [r.notes?.snapshot_sha256 ?? '', ev?.source_commit ?? '', ev?.image?.digest ?? ''].filter(Boolean),
+  }
 }
 
 // ---------- New since the last visit ----------

@@ -152,7 +152,9 @@ test('a German language setting shows the German pill and sentence, and an empty
   partial.items[0]!.pill_de = ''
   partial.items[0]!.benefit_de = ' '
   await show(partial)
-  await expect(notes.locator('.pill-title')).toHaveText('Clear release notes')
+  // The English text carries one small badge on the title (AEON-323).
+  await expect(notes.locator('.pill-title')).toHaveText('Clear release notesEN')
+  await expect(notes.locator('.pill-title .lang-badge')).toHaveText('EN')
   await expect(notes.locator('.benefit')).toHaveText('Tickets explain what you gain.')
 })
 

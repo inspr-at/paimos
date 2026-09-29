@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed } from 'vue'
-import { plainSubject, shortCommit, type ChangeGroup, type PresentedChanges, type ReleaseChange, type ReleaseLang, type ReleaseView, type TicketChangeLine } from '../../lib/releases'
+import { idMatches, plainSubject, shortCommit, type ChangeGroup, type PresentedChanges, type ReleaseChange, type ReleaseLang, type ReleaseView, type TicketChangeLine } from '../../lib/releases'
 import AppIcon, { type IconName } from '../AppIcon.vue'
 import LangBadge from './LangBadge.vue'
 import TicketLink from './TicketLink.vue'
@@ -29,12 +29,12 @@ const shown = computed(() => GROUPS.filter(g => countOf(g.key)))
 const commitUrl = (sha: string) => props.repository ? `https://github.com/${props.repository}/commit/${sha}` : ''
 const titleId = (group: string, key: string) => `change-${group}-${key}`
 const commitWord = (n: number) => n === 1 ? '1 commit' : `${n} commits`
-// A subject hit is painted inside the disclosure. Open it for this query, then
+// A subject or SHA hit is painted inside the disclosure. Open it for this query, then
 // leave it alone so a later render does not slam a reader-closed disclosure shut.
 const revealed = new WeakMap<HTMLDetailsElement, string>()
 function commitsMatch(line: TicketChangeLine) {
   const q = props.query?.trim().toLowerCase()
-  return !!q && line.commits.some(c => plainSubject(c.subject, c.tickets).toLowerCase().includes(q))
+  return !!q && line.commits.some(c => plainSubject(c.subject, c.tickets).toLowerCase().includes(q) || idMatches(c.commit, q))
 }
 function revealCommits(el: unknown, line: TicketChangeLine) {
   if (!(el instanceof HTMLDetailsElement)) return
@@ -49,6 +49,13 @@ const showBenefit = (line: TicketChangeLine) => {
   if (details.value) return false
   const benefit = line.benefit.trim()
   return !!benefit && benefit.toLowerCase() !== line.pill.trim().toLowerCase()
+}
+// A SHA search marks the start of the short SHA it matched.
+function shaParts(sha: string) {
+  const short = shortCommit(sha), q = props.query?.trim().toLowerCase() ?? ''
+  if (!idMatches(sha, q)) return [{ text: short, hit: false }]
+  const n = Math.min(q.length, short.length)
+  return [{ text: short.slice(0, n), hit: true }, { text: short.slice(n), hit: false }].filter(p => p.text)
 }
 // Search terms stay marked in the list of changes.
 function parts(text: string) {
@@ -82,8 +89,8 @@ function parts(text: string) {
             <ul v-if="details && line.commits.length" class="commit-list open" :aria-label="`${commitWord(line.commits.length)}`">
               <li v-for="c in line.commits" :key="c.commit">
                 <p class="subject"><template v-for="(p, i) in parts(plainSubject(c.subject, c.tickets))" :key="i"><mark v-if="p.hit">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template></p>
-                <a v-if="commitUrl(c.commit)" class="mono commit" :href="commitUrl(c.commit)" target="_blank" rel="noopener" :aria-label="`Commit ${shortCommit(c.commit)} on GitHub`">{{ shortCommit(c.commit) }}</a>
-                <span v-else class="mono commit">{{ shortCommit(c.commit) }}</span>
+                <a v-if="commitUrl(c.commit)" class="mono commit" :href="commitUrl(c.commit)" target="_blank" rel="noopener" :aria-label="`Commit ${shortCommit(c.commit)} on GitHub`"><template v-for="(p, i) in shaParts(c.commit)" :key="i"><mark v-if="p.hit">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template></a>
+                <span v-else class="mono commit"><template v-for="(p, i) in shaParts(c.commit)" :key="i"><mark v-if="p.hit">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template></span>
               </li>
             </ul>
             <details v-else-if="line.commits.length" :ref="el => revealCommits(el, line)" class="commits">
@@ -91,8 +98,8 @@ function parts(text: string) {
               <ul class="commit-list">
                 <li v-for="c in line.commits" :key="c.commit">
                   <p class="subject"><template v-for="(p, i) in parts(plainSubject(c.subject, c.tickets))" :key="i"><mark v-if="p.hit">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template></p>
-                  <a v-if="commitUrl(c.commit)" class="mono commit" :href="commitUrl(c.commit)" target="_blank" rel="noopener" :aria-label="`Commit ${shortCommit(c.commit)} on GitHub`">{{ shortCommit(c.commit) }}</a>
-                  <span v-else class="mono commit">{{ shortCommit(c.commit) }}</span>
+                  <a v-if="commitUrl(c.commit)" class="mono commit" :href="commitUrl(c.commit)" target="_blank" rel="noopener" :aria-label="`Commit ${shortCommit(c.commit)} on GitHub`"><template v-for="(p, i) in shaParts(c.commit)" :key="i"><mark v-if="p.hit">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template></a>
+                  <span v-else class="mono commit"><template v-for="(p, i) in shaParts(c.commit)" :key="i"><mark v-if="p.hit">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template></span>
                 </li>
               </ul>
             </details>
@@ -105,8 +112,8 @@ function parts(text: string) {
           <p class="meta">
             <span v-if="TYPE_LABEL[c.type]" class="type">{{ TYPE_LABEL[c.type] }}</span>
             <TicketLink v-for="t in ticketsShown(c)" :key="t" :ticket-key="t" variant="inline" />
-            <a v-if="commitUrl(c.commit)" class="mono commit" :href="commitUrl(c.commit)" target="_blank" rel="noopener" :aria-label="`Commit ${shortCommit(c.commit)} on GitHub`">{{ shortCommit(c.commit) }}</a>
-            <span v-else class="mono commit">{{ shortCommit(c.commit) }}</span>
+            <a v-if="commitUrl(c.commit)" class="mono commit" :href="commitUrl(c.commit)" target="_blank" rel="noopener" :aria-label="`Commit ${shortCommit(c.commit)} on GitHub`"><template v-for="(p, i) in shaParts(c.commit)" :key="i"><mark v-if="p.hit">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template></a>
+            <span v-else class="mono commit"><template v-for="(p, i) in shaParts(c.commit)" :key="i"><mark v-if="p.hit">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template></span>
           </p>
         </li>
       </ul>
