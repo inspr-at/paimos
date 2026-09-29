@@ -10,7 +10,10 @@
 //    a write); an older one (a slow list page landing after a save or an
 //    event) is dropped.
 // 2. A deletion leaves a tombstone. Nothing at or before its revision brings
-//    the node back, then or after a restore; only a newer revision does.
+//    the node back, then or after a restore; only a newer revision does, and
+//    a restored node shows only once a copy from after the restore arrived.
+//    Reads sent before a stream gap are not trusted (they may have missed a
+//    deletion): views read again instead of showing them.
 // 3. This tab's writes are known by the exact revision the server answered
 //    with (a delete's comes in its Aeon-Revision header). Only those events
 //    are this tab's own; the node id alone never proves it.
@@ -18,8 +21,12 @@
 //    it, never older than what it shows. An editor pins it and keeps its own
 //    base: one copy, its revision and its values. Adopting a newer version
 //    rebases the editor onto the store's copy for the same id.
+// 5. Views change what they show only through the store: which rows (adopt
+//    returns a display object only while it may show), their values (show,
+//    optimistic), their projections (amend, for one revision and parent;
+//    child, once per child) and whether a node is gone (isDeleted).
 import { reactive, toRaw } from 'vue'
-import type { ListItem, WorkNode } from './api.ts'
+import type { ListItem, ListParent, WorkNode } from './api.ts'
 import { compareRevision } from './liveUpdates.ts'
 
 // The change an event names (liveNodes' NodeChange, the part the store reads).
@@ -42,8 +49,14 @@ interface Entry {
   tomb: Tomb | null
   // The newest revision a deletion had: no copy at or before it is ever kept.
   floor: string | null
+  // The newest copy a tombstone without revision held off (read while the
+  // deletion was not yet known): once the deletion's revision is, a copy
+  // after it is a restore.
+  held: { copy: ListItem; sent: number; full: boolean } | null
   // Revisions this tab's writes produced.
   own: string[]
+  // Children this tab counted in or out (child), so each counts once.
+  children: Map<string, boolean>
   pins: number
   // Clock of the newest news (a newer revision, a tombstone, a restore).
   touched: number
@@ -55,6 +68,7 @@ interface Entry {
 // without them clears them.
 const OPTIONAL = ['epic', 'eta', 'lead_worker', 'estimate'] as const
 const OWN_PER_NODE = 8
+const CHILDREN_PER_NODE = 64
 const LIMIT = 4000
 
 const clone = <T>(value: T): T => JSON.parse(JSON.stringify(toRaw(value))) as T
@@ -70,16 +84,28 @@ const frozen = (copy: ListItem): ListItem => freeze(clone(copy))
 
 // A node read (GET, a save answer) in list shape: the node's own attributes
 // over the newest copy, which keeps the list projections (project, parent,
-// epic, lead worker) that a node read does not carry.
-export function fromNode(previous: ListItem | null, node: WorkNode, name: (id: string) => string | undefined = () => undefined): ListItem {
+// epic, lead worker) that a node read does not carry. After a move the
+// parent chip and the epic come from the parent as the store knows it.
+export function fromNode(previous: ListItem | null, node: WorkNode, name: (id: string) => string | undefined = () => undefined, parentOf: (id: string) => ListParent | undefined = () => undefined): ListItem {
   const fields = node.fields ?? {}
   const assigneeId = typeof fields.assignee === 'string' && fields.assignee ? fields.assignee : null
   const base: ListItem = previous ?? { ...node, kind_slug: '', kind_label: '', priority: null, assignee: null, parent: null, children_count: 0, project: null }
+  const moved = !!previous && previous.parent_id !== node.parent_id
+  const parent = !moved ? {} : placed(node.parent_id, previous!.project, parentOf)
   return {
-    ...base, ...node,
+    ...base, ...node, ...parent,
     priority: typeof fields.priority === 'string' && fields.priority ? fields.priority : null,
     assignee: assigneeId ? (previous?.assignee?.id === assigneeId ? previous.assignee : { id: assigneeId, name: name(assigneeId) ?? 'Someone' }) : null,
   }
+}
+// The parent chip and the epic under a parent: the project, or a parent the
+// store has seen as one (an epic's are its own). Unknown: left to a list read.
+function placed(parentId: string | null, project: ListItem['project'], parentOf: (id: string) => ListParent | undefined): Partial<Pick<ListItem, 'parent' | 'epic'>> {
+  if (!parentId) return { parent: null, epic: null }
+  if (project?.id === parentId) return { parent: { id: project.id, key: project.key, title: project.title, kind_slug: 'project' }, epic: null }
+  const parent = parentOf(parentId)
+  if (!parent) return {}
+  return parent.kind_slug === 'epic' ? { parent, epic: { id: parent.id, key: parent.key, title: parent.title } } : { parent }
 }
 
 // An open editor on one node. Its base is one server copy: the revision a
@@ -117,6 +143,8 @@ export class RowStore {
   private clock = 0
   private gapAt = 0
   private names = new Map<string, string>()
+  // Parents as list copies and moves named them (their chip), for node reads after a move.
+  private parents = new Map<string, ListParent>()
   private holders = new Set<() => Iterable<string>>()
 
   // ---------- Clock ----------
@@ -127,6 +155,8 @@ export class RowStore {
   gapSince(mark: number): boolean { return this.gapAt > mark }
   // Something newer than a request sent at mark is known about this node.
   touchedSince(id: string, mark: number): boolean { return (this.entries.get(id)?.touched ?? 0) > mark }
+  // Every node with news after mark (a reload looks at those it does not show).
+  changedSince(mark: number): string[] { return [...this.entries].flatMap(([id, entry]) => entry.touched > mark ? [id] : []) }
 
   // ---------- Reads ----------
   // A copy read from the server (a list page, a create answer in list shape).
@@ -141,50 +171,68 @@ export class RowStore {
   adoptNode(node: WorkNode, sent = this.clock, options: { show?: boolean } = {}): ListItem | null {
     return this.take(node.id, sent, false, () => {
       const entry = this.entries.get(node.id)
-      return frozen(fromNode(entry?.latest ?? entry?.row ?? null, clone(node), id => this.names.get(id)))
+      return frozen(fromNode(entry?.latest ?? entry?.row ?? null, clone(node), id => this.names.get(id), id => this.parents.get(id)))
     }, node.updated_at, !!node.deleted_at, options.show ?? false)
   }
   private take(id: string, sent: number, full: boolean, make: () => ListItem, revision: string, deleted: boolean, show: boolean): ListItem | null {
     const entry = this.entry(id)
     if (deleted) { this.bury(entry, revision, sent); return null }
     // A copy from before a deletion never brings the node back, nor shows
-    // after a restore.
-    if (entry.floor && compareRevision(revision, entry.floor) <= 0) return entry.tomb ? null : entry.row
-    if (entry.tomb) {
-      // Without a revision, only a read sent after the deletion was known can.
-      if (!entry.tomb.revision && sent <= entry.tomb.at) return null
+    // after a restore: it is dropped, and the node shows only once a copy
+    // from after the restore arrived.
+    const early = !!entry.floor && compareRevision(revision, entry.floor) <= 0
+    if (entry.tomb && !early) {
+      // Without a revision, only a read sent after the deletion was known
+      // can; an earlier one waits until the deletion's revision is known.
+      if (!entry.tomb.revision && sent <= entry.tomb.at) {
+        if (!entry.held || compareRevision(revision, entry.held.copy.updated_at) > 0) entry.held = { copy: make(), sent, full }
+        return null
+      }
       entry.tomb = null
+      entry.held = null
       entry.touched = ++this.clock
     }
+    if (entry.tomb) return null
     const order = entry.latest ? compareRevision(revision, entry.latest.updated_at) : 1
     // Older than a revision the store already knows (an event, a write): dropped.
     // The first copy of a node is kept even so; the view reads it again.
     const behind = !!entry.latest && compareRevision(revision, entry.revision) < 0
-    if (order >= 0 && !behind) {
+    if (!early && order >= 0 && !behind) {
       // At least as new as the newest copy: this read confirms it.
       entry.readAt = Math.max(entry.readAt, sent)
       // The same revision from a list page refreshes the projections a node
       // read does not carry; older copies are dropped.
       if (order > 0 || full || !entry.full) {
         const copy = make()
+        const previous = entry.latest
         if (order > 0 && compareRevision(revision, entry.revision) > 0) { entry.revision = revision; entry.touched = ++this.clock }
         entry.latest = copy
         entry.full = full || (order === 0 && entry.full)
         if (copy.assignee?.name && copy.assignee.name !== 'Someone') this.names.set(copy.assignee.id, copy.assignee.name)
+        if (full && copy.parent?.kind_slug && copy.parent.key) this.learnParent(copy.parent)
+        // The same revision with the list projections (the parent chip a node
+        // read could only guess): the display object showing it takes them now.
+        if (order === 0 && entry.row && entry.shown === previous && entry.pins === 0) this.assign(entry, copy)
       }
     }
-    if (!entry.row && entry.latest) {
+    if (!entry.row && entry.latest && this.showable(entry)) {
       entry.row = reactive(clone(entry.latest)) as ListItem
       entry.shown = entry.latest
     } else if (show) this.show(id)
     this.trim()
-    return entry.row
+    return this.visible(entry) ? entry.row : null
+  }
+  // The display object shows a copy from after the node's last deletion (or
+  // an editor pins it: the editor decides what it shows).
+  private visible(entry: Entry): boolean {
+    return !!entry.row && !entry.tomb && (entry.pins > 0 || !entry.floor || compareRevision(entry.shown?.updated_at, entry.floor) > 0)
   }
   // A read found the node gone (404, or no longer readable).
   gone(id: string, sent = this.clock) {
     const entry = this.entry(id)
-    // Something newer arrived after the read was sent (a restore): not this read's to judge.
-    if (entry.touched > sent) return
+    // Something newer arrived after the read was sent (a restore): not this
+    // read's to judge. Nor is one sent before a gap (the resync reads again).
+    if (entry.touched > sent || this.gapAt > sent) return
     this.bury(entry, null, sent)
   }
   private bury(entry: Entry, revision: string | null, at: number) {
@@ -194,6 +242,14 @@ export class RowStore {
     entry.tomb = { revision, at: Math.max(at, this.clock) }
     if (revision) { entry.revision = revision; entry.floor = revision }
     entry.touched = ++this.clock
+    // A copy held off by a tombstone without revision that is newer than
+    // this deletion: the node was restored after it.
+    const held = entry.held
+    if (!revision || !held) return
+    entry.held = null
+    if (compareRevision(held.copy.updated_at, revision) <= 0) return
+    entry.tomb = null
+    this.take(held.copy.id, held.sent, held.full, () => held.copy, held.copy.updated_at, false, false)
   }
 
   // ---------- Events ----------
@@ -211,10 +267,14 @@ export class RowStore {
     if (order === 0 && !entry.tomb) return 'known'
     if (entry.tomb) {
       // Only a restore ends a deletion: a creation (a restore reads as one),
-      // or a revision newer than the tombstone's.
-      const restored = (change.change === 'created' && (!entry.floor || compareRevision(change.revision, entry.floor) > 0)) || (!!change.revision && !!entry.tomb.revision && compareRevision(change.revision, entry.tomb.revision) > 0)
+      // or a revision newer than the tombstone's. One without revision (a
+      // read found the node gone) cannot tell: a revision newer than any the
+      // store knows reads as a restore, and the views read the node again.
+      const newer = entry.tomb.revision ? compareRevision(change.revision, entry.tomb.revision) > 0 : order > 0
+      const restored = (change.change === 'created' && (!entry.floor || compareRevision(change.revision, entry.floor) > 0)) || (!!change.revision && newer)
       if (!restored) return 'older'
       entry.tomb = null
+      entry.held = null
     }
     if (change.revision) entry.revision = change.revision
     entry.touched = ++this.clock
@@ -250,11 +310,12 @@ export class RowStore {
   // The server copy the display object shows (values and revision of one copy).
   shown(id: string): ListItem | undefined { return this.entries.get(id)?.shown ?? undefined }
   latest(id: string): ListItem | undefined { return this.entries.get(id)?.latest ?? undefined }
-  // The display object takes the newest copy, unless an editor pins it.
+  // The display object takes the newest copy, unless an editor pins it or
+  // the node is deleted (it keeps what it showed when it went).
   // True when it changed to a newer revision.
   show(id: string): boolean {
     const entry = this.entries.get(id)
-    if (!entry?.row || !entry.latest || entry.pins > 0 || entry.shown === entry.latest) return false
+    if (!entry?.row || !entry.latest || !this.showable(entry) || entry.pins > 0 || entry.tomb || entry.shown === entry.latest) return false
     const newer = compareRevision(entry.latest.updated_at, entry.shown?.updated_at) > 0
     this.assign(entry, entry.latest)
     return newer
@@ -264,7 +325,7 @@ export class RowStore {
   reshow(id: string) {
     const entry = this.entries.get(id)
     if (!entry?.row) return
-    if (entry.pins === 0 && entry.latest) this.assign(entry, entry.latest)
+    if (entry.pins === 0 && this.showable(entry)) this.assign(entry, entry.latest!)
     else if (entry.shown) this.assign(entry, entry.shown)
   }
   // A newer copy than the one shown waits (a held row, a pinned editor).
@@ -272,17 +333,55 @@ export class RowStore {
     const entry = this.entries.get(id)
     return !!entry?.latest && !!entry.shown && compareRevision(entry.latest.updated_at, entry.shown.updated_at) > 0
   }
-  // Attributes a writer knows better than its answer carries (the parent
-  // chip after a move, a new child): they are not bound to a revision, so
-  // every copy and the row take them.
-  amend(id: string, projection: Partial<Pick<ListItem, 'parent' | 'epic' | 'assignee' | 'children_count'>>) {
+  // The parent chip and the epic a list groups by, which a writer knows
+  // better than its answer carries (after a move). They hold for one
+  // revision and one parent: a copy older than the revision never takes
+  // them, nor one with another parent (a newer move landed first), nor a
+  // newer list page, which carries its own.
+  amend(id: string, revision: string, projection: Partial<Pick<ListItem, 'parent' | 'epic'>>) {
+    if (projection.parent) this.learnParent(projection.parent)
     const entry = this.entries.get(id)
     if (!entry?.latest) return
+    const fits = (copy: ListItem | null, full: boolean) => {
+      if (!copy) return false
+      const order = compareRevision(copy.updated_at, revision)
+      if (order < 0 || (order > 0 && full)) return false
+      return !('parent' in projection) || copy.parent_id === (projection.parent?.id ?? null)
+    }
     const showing = entry.shown === entry.latest
-    entry.latest = frozen({ ...entry.latest, ...projection })
-    entry.shown = showing ? entry.latest : entry.shown && frozen({ ...entry.shown, ...projection })
+    if (fits(entry.latest, entry.full)) entry.latest = frozen({ ...entry.latest, ...projection })
+    const shown = showing ? entry.latest : fits(entry.shown, false) ? frozen({ ...entry.shown!, ...projection }) : entry.shown
+    if (shown === entry.shown) return
+    entry.shown = shown
     if (entry.row) Object.assign(entry.row, clone(projection))
-    if (projection.assignee?.name) this.names.set(projection.assignee.id, projection.assignee.name)
+  }
+  // A child this tab added under a node (present) or moved away from it:
+  // the node's children count follows once per child, whichever view says
+  // so first. A list page read later carries the server's count.
+  child(parentId: string, childId: string, present: boolean) {
+    const entry = this.entries.get(parentId)
+    if (!entry?.latest || entry.children.get(childId) === present) return
+    entry.children.delete(childId)
+    entry.children.set(childId, present)
+    if (entry.children.size > CHILDREN_PER_NODE) entry.children.delete(entry.children.keys().next().value!)
+    const count = (copy: ListItem) => frozen({ ...copy, children_count: Math.max(0, (copy.children_count ?? 0) + (present ? 1 : -1)) })
+    const showing = entry.shown === entry.latest
+    entry.latest = count(entry.latest)
+    entry.shown = showing ? entry.latest : entry.shown && count(entry.shown)
+    if (entry.row && entry.shown) entry.row.children_count = entry.shown.children_count
+  }
+  // A change a view shows before the server answers (a status choice): the
+  // display object takes it; reshow goes back to a server copy.
+  optimistic(id: string, values: Partial<Pick<ListItem, 'state' | 'fields'>>) {
+    const row = this.entries.get(id)?.row
+    if (row) Object.assign(row, clone(values))
+  }
+  // The newest copy may show: it is not from before a deletion (a restore
+  // shows only once a copy after it arrived), nor older than what shows (an
+  // editor's own save shows before a newer copy by someone else arrived).
+  private showable(entry: Entry): boolean {
+    return !!entry.latest && !(entry.floor && compareRevision(entry.latest.updated_at, entry.floor) <= 0)
+      && compareRevision(entry.latest.updated_at, entry.shown?.updated_at) >= 0
   }
   private assign(entry: Entry, copy: ListItem) {
     const row = entry.row!
@@ -296,10 +395,11 @@ export class RowStore {
   // The store knows a newer revision than this one.
   newer(id: string, revision: string | null | undefined): boolean { return compareRevision(this.entries.get(id)?.revision, revision) > 0 }
   isDeleted(id: string): boolean { return !!this.entries.get(id)?.tomb }
-  // The newest copy was read after the last gap: nothing it could have missed.
+  // The newest copy was read after the last gap (nothing it could have
+  // missed) and is from after the node's last deletion.
   current(id: string): boolean {
     const entry = this.entries.get(id)
-    return !!entry?.latest && !entry.tomb && entry.readAt > this.gapAt
+    return !!entry?.latest && !entry.tomb && entry.readAt > this.gapAt && this.showable(entry)
   }
 
   // ---------- Editors ----------
@@ -316,8 +416,8 @@ export class RowStore {
   promote(id: string): ListItem | null {
     const entry = this.entries.get(id)
     if (!entry?.row || !entry.latest) return null
-    if (entry.shown !== entry.latest) this.assign(entry, entry.latest)
-    return entry.latest
+    if (entry.shown !== entry.latest && this.showable(entry)) this.assign(entry, entry.latest)
+    return compareRevision(entry.latest.updated_at, entry.shown?.updated_at) >= 0 ? entry.latest : entry.shown
   }
   // An editor's own save: the copy at that revision shows under it (the
   // newest copy when it is that one, else the answer over the editor's base).
@@ -326,7 +426,7 @@ export class RowStore {
     if (!entry?.row) return base
     const copy = entry.latest && compareRevision(entry.latest.updated_at, node.updated_at) === 0
       ? entry.latest
-      : frozen(fromNode(base, clone(node), key => this.names.get(key)))
+      : frozen(fromNode(base, clone(node), key => this.names.get(key), key => this.parents.get(key)))
     if (compareRevision(copy.updated_at, entry.shown?.updated_at) >= 0) this.assign(entry, copy)
     return copy
   }
@@ -340,6 +440,7 @@ export class RowStore {
 
   // ---------- Names ----------
   learnName(id: string, name: string) { if (id && name) this.names.set(id, name) }
+  learnParent(parent: ListParent) { if (parent.id) this.parents.set(parent.id, { id: parent.id, key: parent.key, title: parent.title, kind_slug: parent.kind_slug }) }
   name(id: string): string | undefined { return this.names.get(id) }
 
   // ---------- Bounds ----------
@@ -360,12 +461,12 @@ export class RowStore {
       }
     }
   }
-  clear() { this.entries.clear(); this.names.clear(); this.holders.clear(); this.clock = 0; this.gapAt = 0 }
+  clear() { this.entries.clear(); this.names.clear(); this.parents.clear(); this.holders.clear(); this.clock = 0; this.gapAt = 0 }
 
   private entry(id: string): Entry {
     let entry = this.entries.get(id)
     if (!entry) {
-      entry = { row: null, shown: null, latest: null, full: false, revision: null, tomb: null, floor: null, own: [], pins: 0, touched: 0, readAt: 0 }
+      entry = { row: null, shown: null, latest: null, full: false, revision: null, tomb: null, floor: null, held: null, own: [], children: new Map(), pins: 0, touched: 0, readAt: 0 }
       this.entries.set(id, entry)
     }
     return entry

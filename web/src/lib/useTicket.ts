@@ -36,17 +36,16 @@ export interface TicketChange { title?: string; body?: string; state?: string; f
 // Move a ticket under another parent (an epic, or the project for "No epic").
 // The move carries the revision the person sees; the server checks it under
 // the row lock and answers 412 with the current node, which the row then shows.
-export async function guardedMove(item: ListItem, parent: ListParent, after?: (item: ListItem, fromParentId: string | null) => void, rows: RowStore = rowStore): Promise<SaveResult> {
+// It acts on the row store's display object for the node, which every view shows.
+export async function guardedMove(given: ListItem, parent: ListParent, after?: (item: ListItem, fromParentId: string | null) => void, rows: RowStore = rowStore): Promise<SaveResult> {
+  const item = rows.row(given.id) ?? rows.adopt(given, 0, { full: false }) ?? given
   const from = item.parent
   const fromParentId = item.parent_id
   const since = rows.shown(item.id)?.updated_at ?? item.updated_at
-  // A row the store does not keep (an Outline ancestor, say) takes the answer itself.
-  const kept = rows.row(item.id) === item
   const sent = rows.mark()
   const conflict = (latest: WorkNode) => {
     rows.adoptNode(latest, sent)
     rows.reshow(item.id)
-    if (!kept) Object.assign(item, { title: latest.title, body: latest.body, fields: latest.fields, state: latest.state, updated_at: latest.updated_at, parent_id: latest.parent_id })
     toast(`${item.key} was changed elsewhere, so it was not moved. The newer version is shown.`, { tone: 'error' })
     return 'conflict' as const
   }
@@ -59,16 +58,17 @@ export async function guardedMove(item: ListItem, parent: ListParent, after?: (i
       return conflict(current && typeof current.updated_at === 'string' ? current : await getNode(item.id))
     }
     // The answer is in the row store (this tab's write); the parent chip and
-    // the epic a list groups by are known here.
+    // the epic a list groups by are known here, for this answer's revision
+    // and parent only: a newer move that landed first keeps its own.
     rows.wrote(node, sent)
     const epic = parent.kind_slug === 'epic' ? { epic: { id: parent.id, key: parent.key, title: parent.title } } : parent.kind_slug === 'project' ? { epic: null } : {}
-    rows.amend(item.id, { parent, ...epic })
-    if (!kept) Object.assign(item, { parent_id: node.parent_id, updated_at: node.updated_at, parent, ...epic })
+    rows.amend(item.id, node.updated_at, { parent, ...epic })
     after?.(item, fromParentId)
     const where = parent.kind_slug === 'project' ? 'out of its epic' : `to ${parent.key} ${parent.title}`
     toast(`${item.key} moved ${where}`, from ? { action: { label: 'Undo', run: () => void guardedMove(item, from, after, rows) } } : {})
     return 'ok'
   } catch (e) {
+    if (e instanceof APIError && (e.status === 404 || e.status === 410)) rows.gone(item.id, sent)
     toast(`${item.key} could not be moved: ${message(e)}`, { tone: 'error' })
     return 'error'
   }
@@ -190,19 +190,28 @@ export function useTicket(item: Ref<ListItem | null>, context: {
     const request = ++generation
     loading.value = true; error.value = ''
     const sent = rows.mark()
+    // What the read found goes to the store even when the panel moved on,
+    // unless a gap makes it doubtful (the read after the gap answers then).
+    const trusted = () => !rows.gapSince(sent)
     try {
       const node = await getNode(target.id)
-      if (request !== generation || item.value?.id !== target.id) return 'stale'
       // Kept only when at least as new as what the store knows, and never
       // over a deletion that arrived meanwhile.
-      rows.adoptNode(node, sent)
+      if (trusted()) rows.adoptNode(node, sent)
+      if (request !== generation || item.value?.id !== target.id) return 'stale'
+      // Held off by a deletion the store learned after this read was sent
+      // (without knowing when): a read sent now can tell.
+      if (trusted() && rows.isDeleted(target.id) && rows.touchedSince(target.id, sent)) return refresh()
       sync(target, null)
       return 'ok'
     } catch (e) {
+      const missing = e instanceof APIError && (e.status === 404 || e.status === 410)
+      // Unless a restore arrived after the read was sent.
+      if (missing && trusted()) rows.gone(target.id, sent)
       if (request !== generation || item.value?.id !== target.id) return 'stale'
-      if (e instanceof APIError && (e.status === 404 || e.status === 410)) {
-        // Unless a restore arrived after the read was sent.
-        rows.gone(target.id, sent)
+      if (missing) {
+        // News arrived after the read was sent, so the store could not tell: read again.
+        if (trusted() && !rows.isDeleted(target.id)) return refresh()
         sync(target, null)
         return 'ok'
       }
@@ -215,16 +224,25 @@ export function useTicket(item: Ref<ListItem | null>, context: {
   // A gap read that failed waits, then tries again, including when the stream resumes.
   const gapRetry = new RefreshRetry(async () => (await refresh()) === 'failed')
 
-  async function loadChildren() {
+  // The children as the row store has them: its newest copy of each, none it
+  // knows deleted. A page read before a gap is read again, like any other.
+  // again: after a gap, the children shown stay until the new page lands.
+  async function loadChildren(again = false) {
     const target = item.value
-    children.value = []
+    if (!again) children.value = []
     if (!target || (target.kind_slug !== 'epic' && !target.children_count)) return
-    childrenLoading.value = true
+    if (!again) childrenLoading.value = true
     try {
-      const page = await listNodes({ parent_id: target.id, limit: 200, sort: 'position' })
-      if (item.value?.id === target.id) children.value = page.items
+      for (;;) {
+        const sent = rows.mark()
+        const page = await listNodes({ parent_id: target.id, limit: 200, sort: 'position' })
+        if (rows.gapSince(sent)) { if (item.value?.id === target.id) continue; return }
+        const shown = page.items.flatMap(child => rows.adopt(child, sent) && !rows.isDeleted(child.id) ? [rows.latest(child.id)!] : [])
+        if (item.value?.id === target.id) children.value = shown
+        return
+      }
     } catch { /* the section shows nothing rather than a broken list */ }
-    finally { childrenLoading.value = false }
+    finally { if (!again) childrenLoading.value = false }
   }
 
   async function loadRelations() {
@@ -308,8 +326,11 @@ export function useTicket(item: Ref<ListItem | null>, context: {
         return 'error'
       }
       if (e instanceof APIError && (e.status === 404 || e.status === 410)) {
+        // Gone as far as the store can tell; when something arrived after the
+        // save was sent, the store cannot, and the ticket is read again.
         rows.gone(target.id, sent)
-        gone.value = true
+        if (!rows.isDeleted(target.id)) void refresh()
+        sync(target, null)
         return 'error'
       }
       if (benefitGateError(e)) {
@@ -346,7 +367,8 @@ export function useTicket(item: Ref<ListItem | null>, context: {
   async function moveTo(epic: { id: string; key: string; title: string }) {
     const target = item.value
     if (!target || target.parent?.id === epic.id) return
-    await guardedMove(target, { id: epic.id, key: epic.key, title: epic.title, kind_slug: 'epic' }, context.onMoved, rows)
+    // A move that found the ticket gone told the store; the panel follows it.
+    if (await guardedMove(target, { id: epic.id, key: epic.key, title: epic.title, kind_slug: 'epic' }, context.onMoved, rows) === 'error') sync(target, null)
   }
 
   async function remove(): Promise<boolean> {
@@ -356,10 +378,22 @@ export function useTicket(item: Ref<ListItem | null>, context: {
     try {
       const { revision } = await deleteNode(target.id)
       rows.deleted(target.id, revision, sent)
+      // It leaves the views only when the store says it is gone: a restore
+      // that arrived before this answer keeps it open and listed.
+      if (!rows.isDeleted(target.id)) {
+        toast(`${target.key} was deleted and has been restored since`)
+        return true
+      }
       toast(`${target.key} was deleted`)
       context.onRemoved(target)
       return true
     } catch (e) {
+      // Already gone: the store learns it (or reads again when it cannot tell).
+      if (e instanceof APIError && (e.status === 404 || e.status === 410)) {
+        rows.gone(target.id, sent)
+        if (!rows.isDeleted(target.id)) void refresh()
+        sync(target, null)
+      }
       const text = e instanceof APIError && e.status === 409 ? 'it still has children. Move or delete them first.' : message(e)
       toast(`${target.key} was not deleted: ${text}`, { tone: 'error' })
       return false
@@ -427,11 +461,13 @@ export function useTicket(item: Ref<ListItem | null>, context: {
       const all = await kinds()
       const kind = all.find(k => k.slug === (target.kind_slug === 'epic' ? 'ticket' : 'task'))
       if (!kind) throw new Error('this workspace has no such kind')
+      const sent = rows.mark()
       const node = await createNode({ kind_id: kind.id, title: title.trim(), parent_id: target.id, state: 'new', key_prefix: keyPrefix(routeKey) })
       const created = asListItem(node, kind, { id: target.id, key: target.key, title: target.title, kind_slug: target.kind_slug }, target.project)
-      children.value = [...children.value, created]
-      rows.amend(target.id, { children_count: (target.children_count ?? 0) + 1 })
-      if (rows.row(target.id) !== target) target.children_count = (target.children_count ?? 0) + 1
+      // The child and the parent's count go through the row store: the count
+      // follows once for this child, however many views report it.
+      if (rows.adopt(created, sent, { full: false }) && item.value?.id === target.id) children.value = [...children.value, rows.latest(node.id)!]
+      rows.child(target.id, node.id, true)
       context.onCreated(created)
       return created
     } catch (e) {
@@ -450,7 +486,9 @@ export function useTicket(item: Ref<ListItem | null>, context: {
   // new epic (a task's ticket) by its preview. Every copy in the store takes it.
   async function resolveParent(target: ListItem) {
     const id = target.parent_id
-    const set = (parent: ListParent | null) => { rows.amend(target.id, { parent }); if (rows.row(target.id) !== target) target.parent = parent }
+    const revision = target.updated_at
+    // For the revision and parent it was resolved for: a newer move keeps its own chip.
+    const set = (parent: ListParent | null) => rows.amend(target.id, revision, { parent })
     if (!id) { set(null); return }
     if (target.project?.id === id) { set({ id, key: target.project.key, title: target.project.title, kind_slug: 'project' }); return }
     try {
@@ -465,9 +503,11 @@ export function useTicket(item: Ref<ListItem | null>, context: {
       const target = item.value
       if (!target || node === undefined) return
       if (change.id !== target.id) {
-        // Children take a newer copy in place; one that went away stays until the next load.
-        const child = children.value.find(entry => entry.id === change.id)
-        if (child && node && node.parent_id === target.id && compareRevision(node.updated_at, child.updated_at) > 0) Object.assign(child, JSON.parse(JSON.stringify(node)))
+        // A child takes the store's newer copy; one that went away (deleted,
+        // moved elsewhere) stays until the next load.
+        const at = children.value.findIndex(entry => entry.id === change.id)
+        const copy = at >= 0 && node && !rows.isDeleted(change.id) ? rows.latest(change.id) : undefined
+        if (copy && copy.parent_id === target.id && compareRevision(copy.updated_at, children.value[at].updated_at) > 0) children.value = children.value.map((child, i) => i === at ? copy : child)
         return
       }
       sync(target, change)
@@ -475,7 +515,7 @@ export function useTicket(item: Ref<ListItem | null>, context: {
     // After a gap nothing is known to have changed: read the ticket again.
     // While the viewer edits the answer waits like a live change. A failed
     // read is tried again, on the same schedule as the list, until one succeeds.
-    resync() { if (item.value) gapRetry.request() },
+    resync() { if (item.value) { gapRetry.request(); void loadChildren(true) } },
     resumed() { gapRetry.resume() },
   }
   onScopeDispose(store.subscribe(liveView))

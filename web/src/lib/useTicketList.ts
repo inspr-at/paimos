@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { reactive, ref, shallowRef, type Ref } from 'vue'
-import { APIError, bulkChange, getNode, listNodes, undoEvent, updateNode, type BulkChange, type BulkResult, type Facets, type ListItem } from './api'
+import { APIError, bulkChange, getNode, listNodes, undoEvent, updateNode, type BulkChange, type BulkResult, type Facets, type ListItem, type ListPage } from './api'
 import { rowStore } from './rowStore'
 import type { ListRead } from './useLiveList'
 import { activeDimensions, apiParams, DIMENSION_BY_KEY, LIST_FACETS, rowTags, WORK_KINDS, type Dimension, type EpicOption, type ListFilters } from './ticketList'
@@ -34,6 +34,8 @@ export function useTicketList(projectId: Ref<string | null>, filters: Ref<ListFi
   // The latest completed read (a load or the next page): a live list starts
   // over with a load, and looks again at rows read behind newer news.
   const reads = shallowRef<ListRead | null>(null)
+  // The last row of the last page as read: the next page starts after it.
+  const edge = shallowRef<ListItem | null>(null)
   // Counts asked for when a menu opens (labels, cost units, releases), per query.
   const extraFacets = ref<Record<string, Record<string, number>>>({})
   let generation = 0
@@ -58,6 +60,20 @@ export function useTicketList(projectId: Ref<string | null>, filters: Ref<ListFi
     return { rows: out, behind }
   }
 
+  // A page read before a gap may miss a change the stream did not deliver (a
+  // deletion, say): like every other read, it is read again before any of
+  // its rows can show. stale: a newer load replaced this one (no page); what
+  // it found still goes to the row store.
+  async function trusted(read: () => Promise<ListPage>, stale: () => boolean): Promise<{ page: ListPage | null; sent: number }> {
+    for (;;) {
+      const sent = rowStore.mark()
+      const page = await read()
+      const doubtful = rowStore.gapSince(sent)
+      if (stale()) { if (!doubtful) for (const item of page.items) rowStore.adopt(item, sent); return { page: null, sent } }
+      if (!doubtful) return { page, sent }
+    }
+  }
+
   // pageSize 1 fetches counts and facets only (the Outline builds its own rows then).
   let pageSize = 200
   async function load(options: { pageSize?: number } = {}) {
@@ -74,16 +90,16 @@ export function useTicketList(projectId: Ref<string | null>, filters: Ref<ListFi
       return [dimension, page.facets?.[facet] ?? {}] as const
     })
     try {
-      const sent = rowStore.mark()
-      const page = await listNodes(apiParams(within, current, { facets: FACETS, limit: pageSize }))
-      if (request !== generation) return
+      const { page, sent } = await trusted(() => listNodes(apiParams(within, current, { facets: FACETS, limit: pageSize })), () => request !== generation)
+      if (!page) return
       learn(page.items)
       const read = take(page.items, sent)
       rows.value = read.rows
       cursor.value = page.next_cursor
+      edge.value = page.items[page.items.length - 1] ?? null
       facets.value = page.facets ?? {}
       loadedOnce.value = true
-      reads.value = { kind: 'load', behind: read.behind }
+      reads.value = { kind: 'load', behind: read.behind, sent }
     } catch (e) {
       if (request === generation) { error.value = message(e); rows.value = []; cursor.value = null }
     } finally {
@@ -107,14 +123,15 @@ export function useTicketList(projectId: Ref<string | null>, filters: Ref<ListFi
     const request = generation
     loadingMore.value = true; moreError.value = ''
     try {
-      const sent = rowStore.mark()
-      const page = await listNodes(apiParams(within, filters.value, { facets: FACETS, cursor: cursor.value, limit: pageSize }))
-      if (request !== generation) return
+      const after = cursor.value
+      const { page, sent } = await trusted(() => listNodes(apiParams(within, filters.value, { facets: FACETS, cursor: after, limit: pageSize })), () => request !== generation)
+      if (!page) return
       const seen = new Set(rows.value.map(row => row.id))
       learn(page.items)
       const read = take(page.items.filter(item => !seen.has(item.id)), sent)
       rows.value = [...rows.value, ...read.rows]
       cursor.value = page.next_cursor
+      edge.value = page.items[page.items.length - 1] ?? edge.value
       reads.value = { kind: 'more', behind: read.behind }
     } catch (e) {
       if (request === generation) moreError.value = message(e)
@@ -211,8 +228,7 @@ export function useTicketList(projectId: Ref<string | null>, filters: Ref<ListFi
       fields = completionFields(before.fields, text)
     }
     // Optimistic: the row shows the choice at once; the store's copy is the fallback.
-    target.state = state
-    if (fields) target.fields = fields
+    rowStore.optimistic(target.id, fields ? { state, fields } : { state })
     shiftFacet(before.state, state)
     const sent = rowStore.mark()
     try {
@@ -248,6 +264,8 @@ export function useTicketList(projectId: Ref<string | null>, filters: Ref<ListFi
         return false
       }
       shiftFacet(state, before.state)
+      // Gone meanwhile: the store learns it (a restore after the change was sent keeps it).
+      if (e instanceof APIError && (e.status === 404 || e.status === 410)) rowStore.gone(target.id, sent)
       rowStore.reshow(target.id)
       if (!options.fields && benefitGateError(e)) {
         const text = await askDoneGate({ key: target.key, title: target.title, state, fields: before.fields ?? {} })
@@ -278,7 +296,8 @@ export function useTicketList(projectId: Ref<string | null>, filters: Ref<ListFi
     for (const node of result.items) {
       if (!parents.has(node.id) || node.parent_id === parents.get(node.id)) continue
       const epic = epics.value.find(e => e.id === node.parent_id)
-      rowStore.amend(node.id, {
+      // Only for this answer's revision and parent: a newer move that landed first keeps its chip.
+      rowStore.amend(node.id, node.updated_at, {
         parent: epic ? { id: epic.id, key: epic.key, title: epic.title, kind_slug: 'epic' } : projectRef && node.parent_id === projectRef.id ? { ...projectRef, kind_slug: 'project' } : null,
         epic: epic ? { id: epic.id, key: epic.key, title: epic.title } : null,
       })
@@ -307,9 +326,10 @@ export function useTicketList(projectId: Ref<string | null>, filters: Ref<ListFi
     const state = facets.value.state
     if (state) state[item.state] = (state[item.state] ?? 0) + 1
   }
+  // Only a row the row store knows deleted leaves (a restore since keeps it).
   function removeRow(id: string) {
     const row = rows.value.find(item => item.id === id)
-    if (!row) return
+    if (!row || !rowStore.isDeleted(id)) return
     rows.value = rows.value.filter(item => item.id !== id)
     const kind = facets.value.kind
     if (kind?.[row.kind_slug]) kind[row.kind_slug]--
@@ -317,5 +337,5 @@ export function useTicketList(projectId: Ref<string | null>, filters: Ref<ListFi
     if (state?.[row.state]) state[row.state]--
   }
 
-  return { rows, cursor, loading, loadingMore, error, moreError, facets, names, colors, loadedOnce, reads, load, loadMore, loadAll, counts, refreshCounts, requestFacet, facetCounts, epics, loadEpics, resolveNames, setStatus, invalidate, insertRow, removeRow, applyBulk, undoBulk }
+  return { rows, cursor, edge, loading, loadingMore, error, moreError, facets, names, colors, loadedOnce, reads, load, loadMore, loadAll, counts, refreshCounts, requestFacet, facetCounts, epics, loadEpics, resolveNames, setStatus, invalidate, insertRow, removeRow, applyBulk, undoBulk }
 }

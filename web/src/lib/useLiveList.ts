@@ -92,7 +92,8 @@ const browserEnv: LiveListEnv = {
 // A completed read of the list: a load (the rows start over) or the next
 // page. behind: rows it read that the row store already knew newer news of
 // (a save, an event or a panel read landed while it ran): they are looked at again.
-export interface ListRead { kind: 'load' | 'more'; behind: string[] }
+// sent: when a load was sent (the row store's clock).
+export interface ListRead { kind: 'load' | 'more'; behind: string[]; sent?: number }
 
 export interface LiveListOptions {
   projectId: Ref<string | null>
@@ -104,6 +105,9 @@ export interface LiveListOptions {
   loadedOnce: Ref<boolean>
   // Later pages exist: a new row that sorts after the loaded ones waits for them.
   more: () => boolean
+  // The last row of the last page as it was read: the next page starts after
+  // it, so a row that sorts before it belongs to the loaded ones.
+  edge?: () => ListItem | null
   // The list is on show (not the Outline, the graph or another tab).
   active: Ref<boolean>
   me: () => string | null
@@ -138,6 +142,9 @@ export function useLiveList(options: LiveListOptions) {
   // Rows Show brought in while an editor pinned them: they take the newer
   // copy once it lets go, with a tint.
   const afterEditor = new Set<string>()
+  // When each waiting update was classified (the row store's clock): news
+  // since then makes a removal stale.
+  const classified = new Map<string, number>()
   const flash = ref(new Set<string>())
   const message = ref('')
   let queue = new Map<string, Queued>()
@@ -184,9 +191,10 @@ export function useLiveList(options: LiveListOptions) {
     const row = rowById(change.id)
     if (!row && change.projectId !== project) return
     const own = mine(change)
-    // This tab's own change is already on the row; only a row that waits
-    // is looked at again (reopened after it closed, say).
-    if (own && !(row && pending.kind(row.id)) && !queue.has(change.id)) return
+    // This tab's own change is already on a row the list shows; only a row
+    // that waits is looked at again (reopened after it closed, say). A node
+    // the list does not show may have moved into it (changed from the panel).
+    if (own && row && !pending.kind(row.id) && !queue.has(change.id)) return
     const entry = queue.get(change.id)
     if (entry) {
       entry.change = mergeChanges(entry.change, change)
@@ -223,6 +231,11 @@ export function useLiveList(options: LiveListOptions) {
   }
 
   // ---------- Refetch and classify ----------
+  // A read the list no longer needs (a load replaced the rows meanwhile)
+  // still tells the row store what it found, unless a gap makes it doubtful.
+  function keep(items: ListItem[], sent: number) {
+    if (!nodes.gapSince(sent)) for (const item of items) nodes.adopt(item, sent)
+  }
   // True when a read failed: those rows went back to the queue.
   async function flush(): Promise<boolean> {
     // A load in flight replaces the rows: look once it has landed.
@@ -238,17 +251,22 @@ export function useLiveList(options: LiveListOptions) {
     for (let i = 0; i < ids.length; i += PAGE) {
       const chunk = ids.slice(i, i + PAGE)
       const sent = nodes.mark()
+      // What the store knew when the query was sent: a later copy that finds
+      // a row the query did not return changed after it (a restore, say).
+      const knew = new Map(chunk.map(id => [id, nodes.revision(id)]))
       let matched: Map<string, ListItem>
       let present = new Map<string, ListItem>()
       try {
         const page = await fetchList({ ...apiParams(project, filters.value, { limit: PAGE }), ids: chunk })
-        if (run !== generation) return false
+        if (run !== generation) { keep(page.items, sent); return false }
+        // The store has what the query found at once, not after the next read.
+        keep(page.items, sent)
         matched = new Map(page.items.map(item => [item.id, item]))
         // Shown rows that no longer match: closed, or gone from the project?
         const missing = chunk.filter(id => !matched.has(id) && rowById(id) && batch.get(id)!.change.change !== 'deleted')
         if (missing.length) {
           const found = await fetchList({ within: project, kind: WORK_KINDS, ids: missing, limit: PAGE })
-          if (run !== generation) return false
+          if (run !== generation) { keep(found.items, sent); return false }
           present = new Map(found.items.map(item => [item.id, item]))
         }
       } catch {
@@ -264,11 +282,16 @@ export function useLiveList(options: LiveListOptions) {
       for (const id of chunk) {
         const queued = batch.get(id)!
         const copy = matched.get(id) ?? present.get(id) ?? null
-        if (copy) nodes.adopt(copy, sent)
         // News since the read was sent (a newer revision, a deletion, a
         // restore, this tab's save) makes the answer stale: the row waits for
-        // the next read, which a queued change or this requeue asks for.
-        if (copy ? nodes.newer(id, copy.updated_at) : nodes.touchedSince(id, sent)) { requeue(id, queued); continue }
+        // the next read, which a queued change or this requeue asks for. A row
+        // the query did not return is judged by that read, not by the later
+        // one that found it: news since the first (a restore) makes it stale.
+        const overtaken = !matched.has(id) && (nodes.touchedSince(id, sent) || (!!copy && compareRevision(copy.updated_at, knew.get(id)) > 0))
+        if (copy) nodes.adopt(copy, sent)
+        // A copy the store holds off (a deletion it learned after the read
+        // was sent, without knowing when) cannot tell either: read again.
+        if (overtaken || (copy && (nodes.newer(id, copy.updated_at) || nodes.isDeleted(id)))) { requeue(id, queued); continue }
         const newer = queue.get(id)
         if (newer) {
           queue.delete(id)
@@ -287,11 +310,15 @@ export function useLiveList(options: LiveListOptions) {
   }
 
   function settle(id: string, queued: Queued, fresh: ListItem | null, present: ListItem | null) {
-    const { change, base } = queued
     const row = rowById(id)
-    // A write of this tab whose answer landed after its event: left to the code that made it.
+    // Queued before the row joined the list (a next page, a load): it is
+    // judged against the row as the person sees it now.
+    if (row && !queued.base) queued.base = held.get(id) ?? layoutOf(row)
+    const { change, base } = queued
+    // A write of this tab whose answer landed after its event: left to the
+    // code that made it, when the list shows the row.
     const own = queued.own || mine(change)
-    if (own && !queued.own && !pending.kind(id)) {
+    if (own && !queued.own && row && !pending.kind(id)) {
       queued.own = true
       held.delete(id)
       return { id, kind: 'ignore' as Classification, queued, row, newer: false }
@@ -299,7 +326,10 @@ export function useLiveList(options: LiveListOptions) {
     queued.own = own
     // A tombstone in the store outranks any copy: the node is gone.
     const current = nodes.isDeleted(id) ? null : fresh ?? present
-    let kind = classifyChange<Layout>({ change, shown: row ? base : null, node: current, matches: node => node === fresh })
+    // A deletion that a newer copy overtook (its restore went missing in a
+    // gap) reads as the restore it was.
+    const told = change.change === 'deleted' && current && compareRevision(current.updated_at, change.revision) > 0 ? { ...change, change: 'created' as const } : change
+    let kind = classifyChange<Layout>({ change: told, shown: row ? base : null, node: current, matches: node => node === fresh })
     // Moved out to another project reads as no longer matching, not deleted.
     if (kind === 'deleted' && change.fields.includes('project_id') && change.projectId && change.projectId !== projectId.value) kind = 'no_longer_matches'
     if (kind === 'patch' && fresh && base && placeKey(fresh, filters.value) !== placeKey(base, filters.value)) kind = 'moved'
@@ -313,17 +343,21 @@ export function useLiveList(options: LiveListOptions) {
       else if (kind === 'patch' && nodes.waiting(id)) kind = 'changed'
     }
     if (kind === 'patch' || kind === 'ignore') held.delete(id)
+    else classified.set(id, nodes.mark())
     // Past the cap the oldest updates go; the pill then offers a reload.
     pending.note(id, kind)
     if (row && newer && !own && !holding && (kind === 'patch' || kind === 'moved')) tint(id)
     return { id, kind, queued, row, newer }
   }
   // A new row joins the loaded ones when it sorts among them; one that sorts
-  // after the last loaded row comes with the next page.
+  // after where the next page starts comes with that page.
   function fitsLoaded(item: ListItem) {
     const list = rows.value
-    if (!options.more() || !list.length) return true
-    return compareRows(effectiveSort(filters.value))(item, list[list.length - 1]) <= 0
+    const edge = options.edge?.() ?? list[list.length - 1]
+    if (!options.more() || !edge) return true
+    const compare = compareRows(effectiveSort(filters.value))
+    // The edge itself, unmoved, is one of the loaded rows (ties sort by id, never equal).
+    return compare(item, edge) <= 0 || (item.id === edge.id && compare(edge, item) > 0)
   }
 
   function tint(id: string) {
@@ -373,7 +407,16 @@ export function useLiveList(options: LiveListOptions) {
         // read after the last gap. One a resync still has to read waits.
         if (nodes.isDeleted(id) || !nodes.row(id)) continue
         if (!nodes.current(id)) { pending.note(id, kind); continue }
+      } else if (kind === 'closed' || kind === 'no_longer_matches' || kind === 'deleted') {
+        // A row leaves only as the store has it now: none the store has news
+        // of since it was classified (a restore, a reopen, a newer revision).
+        // Such a row is read again instead.
+        if (nodes.touchedSince(id, classified.get(id) ?? 0)) {
+          if (rowById(id)) receive(reread(id))
+          continue
+        }
       }
+      classified.delete(id)
       all.push([id, kind])
     }
     if (!all.length) { watchPending(); return }
@@ -383,7 +426,7 @@ export function useLiveList(options: LiveListOptions) {
       let next = rows.value.filter(row => !removing.has(row.id))
       const place = (item: ListItem) => {
         const at = next.findIndex(row => compare(item, row) < 0)
-        if (at === -1) { if (!options.more()) next.push(item) }
+        if (at === -1) { if (fitsLoaded(item)) next.push(item) }
         else next.splice(at, 0, item)
       }
       for (const [id, kind] of all) {
@@ -463,7 +506,7 @@ export function useLiveList(options: LiveListOptions) {
     let page: ListPage
     try { page = await fetchList(apiParams(project, filters.value, { limit: Math.max(PAGE / 4, Math.min(PAGE, rows.value.length)) })) }
     catch { return run === generation }
-    if (run !== generation) return false
+    if (run !== generation) { keep(page.items, sent); return false }
     // Another gap after this read was sent: the resync it asked for reads again.
     if (nodes.gapSince(sent)) return false
     const fresh = new Map(page.items.map(item => [item.id, item]))
@@ -494,7 +537,7 @@ export function useLiveList(options: LiveListOptions) {
     clearTimeout(batchTimer); batchTimer = undefined
     // A load reads the list anew: a refresh that failed is not needed any more.
     flushRetry.clear(); resyncRetry.clear()
-    pending.clear(); held.clear(); afterEditor.clear()
+    pending.clear(); held.clear(); afterEditor.clear(); classified.clear()
     watchPending()
   }
   // A load starts over: the rows are the store's again, and changes that
@@ -512,6 +555,9 @@ export function useLiveList(options: LiveListOptions) {
       }
     }
     for (const id of read.behind) if (rowById(id)) receive(reread(id))
+    // A node with news since the load was sent (this tab's own change, say)
+    // may belong among the rows it read, or no longer: it is looked at again.
+    if (read.kind === 'load' && read.sent !== undefined) for (const id of nodes.changedSince(read.sent)) if (!rowById(id) && !queue.has(id)) receive(reread(id))
     if (read.kind === 'load' && resyncWanted) { resyncWanted = false; resyncRetry.request() }
     else if (queue.size) schedule()
   })

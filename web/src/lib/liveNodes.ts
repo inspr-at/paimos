@@ -260,6 +260,10 @@ export class LiveNodeStore {
       let node: WorkNode | null
       try { node = await this.options.fetchNode(id) }
       catch { this.retry(id); return }
+      // Sent before a gap: the answer may predate a change the stream missed,
+      // so the store does not take it. The resync reads what views show, and
+      // a change noted after the gap reads the node again.
+      if (this.rows.gapSince(sent)) continue
       // News after the request was sent (not this answer's own): the answer
       // may speak for an older state.
       const news = this.rows.touchedSince(id, sent)

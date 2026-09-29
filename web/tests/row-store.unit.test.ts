@@ -329,6 +329,7 @@ describe('RowStore: any delivery order ends at the server\'s state', () => {
       const failures = run(seed)
       if (failures.length) failed.push(`seed ${seed}: ${failures.slice(0, 3).join('; ')}`)
     }
+    if (failed.length) console.log(`ROW-STORE ${failed.length}/400 seeds failed`)
     expect(failed).toEqual([])
   })
 })

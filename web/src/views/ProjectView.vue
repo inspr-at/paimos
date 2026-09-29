@@ -22,6 +22,7 @@ import { apiParams, clearedFilters, effectiveSort, facetOptions, filtersFromQuer
 import type { TicketGraphState } from '../lib/ticketGraphRenderer'
 import { useTicketList } from '../lib/useTicketList'
 import { useLiveList } from '../lib/useLiveList'
+import { rowStore } from '../lib/rowStore'
 import { PROJECT_COLUMN_BY_ID, projectProgressTip } from '../lib/projectColumns'
 import { absoluteTime, cycleSort, plural, PRIORITIES, priorityLabel, relativeTime, statusMeta, type SortField, type SortKey } from '../lib/work'
 import { useProjects } from '../stores/projects'
@@ -193,7 +194,7 @@ const outline = useOutline(projectId, filters, outlineActive, list)
 const listActive = computed(() => section.value === 'tickets' && viewMode.value === 'list')
 const liveList = useLiveList({
   projectId, filters, rows: list.rows, loading: list.loading, reads: list.reads, loadedOnce: list.loadedOnce,
-  more: () => !!list.cursor.value, active: listActive, me: () => session.identity?.principal.id ?? null,
+  more: () => !!list.cursor.value, edge: () => list.edge.value, active: listActive, me: () => session.identity?.principal.id ?? null,
   quiet: id => !!ticketKey.value && panelItem.value?.id === id,
   // Rows the person works with keep the version they see, so an edit, a bulk
   // change or a status choice still meets a newer one as a conflict. The open
@@ -485,10 +486,12 @@ async function resolvePanel() {
   const request = ++panelGeneration
   panelLoading.value = true
   try {
+    const sent = rowStore.mark()
     const result = await listNodes({ within, q: key, sort: 'key', limit: 50 })
     if (request !== panelGeneration) return
     const hit = result.items.find(item => item.key.toLowerCase() === key.toLowerCase())
-    if (hit) fetched.value = hit
+    // The row store's display object for it; one it knows deleted opens as gone.
+    if (hit) fetched.value = rowStore.adopt(hit, sent) ?? hit
     else if (!list.rows.value.some(row => row.key.toLowerCase() === key.toLowerCase())) panelError.value = `${key.toUpperCase()} is not part of ${project.value?.title ?? 'this project'}.`
   } catch (e) {
     if (request === panelGeneration) panelError.value = e instanceof Error ? e.message : 'The ticket could not be loaded.'

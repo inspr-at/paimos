@@ -12,7 +12,7 @@ import { rowStore } from '../src/lib/rowStore'
 import { filtersFromQuery } from '../src/lib/ticketList'
 
 const api = vi.hoisted(() => ({
-  getNode: vi.fn(), updateNode: vi.fn(), deleteNode: vi.fn(),
+  getNode: vi.fn(), updateNode: vi.fn(), deleteNode: vi.fn(), moveNode: vi.fn(), bulkChange: vi.fn(),
   listNodes: vi.fn(async () => ({ items: [], next_cursor: null })),
   getRelations: vi.fn(async () => ({ items: [] })),
   lookupNodes: vi.fn(async () => ({ items: [] })),
@@ -36,19 +36,28 @@ function slow() {
   api.getNode.mockImplementationOnce(() => new Promise<WorkNode>((resolve, reject) => { answer = value => value instanceof Promise ? value.catch(reject) : resolve(value) }))
   return (value: WorkNode | Promise<never>) => answer(value)
 }
+// The event stream as the browser hands it over; ready() is a gap (or the first connection).
+class FakeSource {
+  readyState = 1
+  onerror = null
+  private listeners = new Map<string, ((event: MessageEvent) => void)[]>()
+  addEventListener(type: string, listener: (event: MessageEvent) => void) { this.listeners.set(type, [...(this.listeners.get(type) ?? []), listener]) }
+  close() { this.readyState = 2 }
+  ready(after: number) { for (const listener of this.listeners.get('stream.ready') ?? []) listener({ data: JSON.stringify({ after, resumed: false }), lastEventId: String(after) } as MessageEvent) }
+}
 const change = (over: Partial<NodeChange> = {}): NodeChange =>
   ({ eventId: 1, type: 'node.updated', actorId: 'mira', id: 'n1', projectId: 'p-1', change: 'updated', fields: ['title'], revision: at(5), ...over })
 const settle = async () => { for (let i = 0; i < 6; i++) await Promise.resolve(); await nextTick() }
 
 let scope: EffectScope | undefined
-function setup(fetchNode = vi.fn<(id: string) => Promise<WorkNode | null>>(), start: ListItem = item()) {
-  const store = new LiveNodeStore({ open: () => null, fetchNode, rows: rowStore })
+function setup(fetchNode = vi.fn<(id: string) => Promise<WorkNode | null>>(), start: ListItem = item(), context: { onRemoved?: (item: ListItem) => void; open?: () => FakeSource | null } = {}) {
+  const store = new LiveNodeStore({ open: context.open ?? (() => null), fetchNode, rows: rowStore })
   const busy = ref(false)
   // The panel shows the row store's object for the node, as the workspace resolves it.
   const current = ref<ListItem | null>(rowStore.row(start.id) ?? rowStore.adopt(start, rowStore.mark(), { show: true }))
   scope = effectScope()
   const ticket = scope.run(() => useTicket(current, {
-    names: new Map(), onRemoved: () => {}, onCreated: () => {}, onMoved: () => {},
+    names: new Map(), onRemoved: context.onRemoved ?? (() => {}), onCreated: () => {}, onMoved: () => {},
     live: { busy, me: () => 'me', store },
   }))!
   return { ticket, store, busy, target: current.value!, fetchNode }
@@ -407,5 +416,130 @@ describe('useTicket: this tab\'s delete', () => {
     expect(rowStore.isDeleted('n1')).toBe(true)
     expect(rowStore.isOwn('n1', at(4))).toBe(true)
     expect(rowStore.isOwn('n1', at(5))).toBe(false)
+  })
+})
+
+// Review 326f: no view changes what it shows without asking the row store.
+describe('review 326f: views ask the row store', () => {
+  const page = (items: ListItem[], next_cursor: string | null = null) => ({ items, next_cursor, facets: {} })
+  const second = (over: Partial<WorkNode> = {}) => item({ id: 'n2', key: 'PRJ-2', ...over })
+  const E1 = { id: 'e1', key: 'PRJ-101', title: 'Epic one' }, E2 = { id: 'e2', key: 'PRJ-102', title: 'Epic two' }
+  const under = (epic: typeof E1, over: Partial<WorkNode> = {}): ListItem => ({ ...item({ parent_id: epic.id, ...over }), parent: { ...epic, kind_slug: 'epic' }, epic: { ...epic } })
+  function listed(source: FakeSource | null = null) {
+    const local = effectScope()
+    const store = new LiveNodeStore({ open: () => source, rows: rowStore })
+    const off = store.subscribe({ shows: () => false, changed: () => {} })
+    const tickets = local.run(() => useTicketList(ref('p-1'), ref(filtersFromQuery({}))))!
+    return { tickets, stop: () => { off(); local.stop() } }
+  }
+  afterEach(() => { api.listNodes.mockReset(); api.listNodes.mockImplementation(async () => ({ items: [], next_cursor: null })) })
+
+  // #1: a load or a next page on its way while the stream bridges a gap
+  // (its first connection too) may predate a deletion the stream never
+  // delivers. It is read again before any of its rows show.
+  it('#1 a first load on its way when the stream connects is read again; the deletion it missed stays out', async () => {
+    const source = new FakeSource()
+    const { tickets, stop } = listed(source)
+    try {
+      let answer!: (value: unknown) => void
+      api.listNodes.mockImplementationOnce(() => new Promise(resolve => { answer = resolve }))
+      const loading = tickets.load()
+      // n2 is deleted meanwhile; the stream connects after that and never tells.
+      source.ready(10)
+      api.listNodes.mockResolvedValueOnce(page([item()]))
+      answer(page([item(), second()]))
+      await loading
+      expect(tickets.rows.value.map(row => row.id)).toEqual(['n1'])
+      expect(api.listNodes).toHaveBeenCalledTimes(2)
+    } finally { stop() }
+  })
+
+  it('#1 a next page on its way across a gap is read again', async () => {
+    const source = new FakeSource()
+    const { tickets, stop } = listed(source)
+    try {
+      source.ready(10)
+      api.listNodes.mockResolvedValueOnce(page([item()], 'c'))
+      await tickets.load()
+      let answer!: (value: unknown) => void
+      api.listNodes.mockImplementationOnce(() => new Promise(resolve => { answer = resolve }))
+      const more = tickets.loadMore()
+      // A later gap: n2 was deleted while the stream was away.
+      source.ready(20)
+      api.listNodes.mockResolvedValueOnce(page([item({ id: 'n3', key: 'PRJ-3' })]))
+      answer(page([second(), item({ id: 'n3', key: 'PRJ-3' })]))
+      await more
+      expect(tickets.rows.value.map(row => row.id)).toEqual(['n1', 'n3'])
+    } finally { stop() }
+  })
+
+  // #2: DELETE answers late, after its deletion and a newer restore arrived.
+  it('#2 a late DELETE answer after a restore keeps the ticket open and listed', async () => {
+    const onRemoved = vi.fn()
+    api.getNode.mockResolvedValueOnce(node())
+    const fetchNode = vi.fn<(id: string) => Promise<WorkNode | null>>()
+    const { ticket, store, target } = setup(fetchNode, item(), { onRemoved })
+    await settle()
+    let answer!: (value: { revision: string | null }) => void
+    api.deleteNode.mockImplementationOnce(() => new Promise(resolve => { answer = resolve }))
+    const removing = ticket.remove()
+    store.apply(change({ change: 'deleted', fields: ['deleted_at'], revision: at(4) }))
+    fetchNode.mockResolvedValueOnce(node({ title: 'Back', updated_at: at(5) }))
+    store.apply(change({ change: 'created', fields: [], revision: at(5) }))
+    await settle()
+    expect(ticket.gone.value).toBe(false)
+    answer({ revision: at(4) })
+    expect(await removing).toBe(true)
+    expect(onRemoved).not.toHaveBeenCalled()
+    expect(rowStore.isDeleted('n1')).toBe(false)
+    expect(ticket.gone.value).toBe(false)
+    expect(target.title).toBe('Back')
+  })
+
+  // #3: the answer of a move lands after a newer move by someone else was read.
+  it('#3 a stale move answer leaves the newer parent chip and epic', async () => {
+    const { tickets, stop } = listed()
+    try {
+      api.listNodes.mockResolvedValueOnce(page([{ ...item(), parent: { ...PROJECT, kind_slug: 'project' }, epic: null }]))
+      await tickets.load()
+      const row = tickets.rows.value[0]
+      api.getNode.mockResolvedValueOnce(node())
+      const { ticket } = setup()
+      await settle()
+      let answer!: (value: WorkNode) => void
+      api.moveNode.mockImplementationOnce(() => new Promise(resolve => { answer = value => { rowStore.wrote(value); resolve(value) } }))
+      const moving = ticket.moveTo(E1)
+      // Mira moves it under Epic two afterwards; the list reads that (r3).
+      api.listNodes.mockResolvedValueOnce(page([under(E2, { updated_at: at(3) })]))
+      await tickets.load()
+      expect(row.parent?.id).toBe('e2')
+      answer(node({ parent_id: 'e1', updated_at: at(2) }))
+      await moving
+      expect(row.parent_id).toBe('e2')
+      expect(row.parent?.id).toBe('e2')
+      expect(row.epic?.id).toBe('e2')
+    } finally { stop() }
+  })
+
+  it('#3 a stale bulk move answer leaves the newer parent chip and epic', async () => {
+    const { tickets, stop } = listed()
+    try {
+      api.listNodes.mockResolvedValueOnce(page([{ ...item(), parent: { ...PROJECT, kind_slug: 'project' }, epic: null }]))
+      await tickets.load()
+      tickets.epics.value = [E1, E2].map(epic => ({ ...epic, state: 'new' }))
+      const row = tickets.rows.value[0]
+      let answer!: (value: WorkNode) => void
+      api.bulkChange.mockImplementationOnce(() => new Promise(resolve => {
+        answer = value => { rowStore.wrote(value); resolve({ event_id: 1, items: [value], unchanged: [], skipped: [] }) }
+      }))
+      const moving = tickets.applyBulk({ ids: ['n1'], parent_id: 'e1' })
+      api.listNodes.mockResolvedValueOnce(page([under(E2, { updated_at: at(3) })]))
+      await tickets.load()
+      answer(node({ parent_id: 'e1', updated_at: at(2) }))
+      await moving
+      expect(row.parent_id).toBe('e2')
+      expect(row.parent?.id).toBe('e2')
+      expect(row.epic?.id).toBe('e2')
+    } finally { stop() }
   })
 })

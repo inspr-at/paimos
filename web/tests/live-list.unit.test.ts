@@ -461,7 +461,7 @@ describe('useLiveList: structural changes wait', () => {
   it('offers to reload the view past the cap instead of applying', async () => {
     const many = Array.from({ length: PENDING_CAP + 1 }, (_, i) => item(`n${i + 1}`, { state: 'backlog' }))
     const h = setup(many)
-    for (const row of many) { edit(h, row.id, { state: 'cancelled' }); h.send({ id: row.id, fields: ['state'] }) }
+    for (const row of many) { const node = edit(h, row.id, { state: 'cancelled' }); h.send({ id: row.id, fields: ['state'], revision: node.updated_at }) }
     await h.settle()
     expect(h.live.pill.value).toBe('Many updates · Reload view')
     h.live.apply()
@@ -606,7 +606,7 @@ describe('useLiveList: loads and gaps', () => {
     const h = setup(many)
     const seen = h.rows.value!.find(row => row.id === 'n1')!.updated_at
     const editor = h.nodes.edit('n1')!
-    for (const row of many) { edit(h, row.id, { state: 'cancelled' }); h.send({ id: row.id, fields: ['state'] }) }
+    for (const row of many) { const node = edit(h, row.id, { state: 'cancelled' }); h.send({ id: row.id, fields: ['state'], revision: node.updated_at }) }
     await h.settle()
     expect(h.live.pill.value).toBe('Many updates · Reload view')
     h.reload.mockImplementation(() => h.load(many.map(row => item(row.id, row.id === 'n1' ? { title: 'Remote', updated_at: at(80) } : { state: 'cancelled', updated_at: at(80) }))))
