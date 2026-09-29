@@ -49,25 +49,27 @@ func launchDefaultRev(ctx context.Context, workspace string) string {
 	return rev
 }
 
-// remoteDefaultRevs are the commits the remote default branch names now:
-// origin/HEAD's target, or else every existing remote-tracking candidate
-// (origin/<init.defaultBranch>, origin/main, origin/master, origin/trunk).
-// Local branches never shadow them. Empty when there is no remote ref.
+// remoteDefaultRevs are the commits the remote default branch may name now:
+// the union of origin/HEAD's target and every existing remote-tracking
+// candidate (origin/<init.defaultBranch>, origin/main, origin/master,
+// origin/trunk). origin/HEAD never suppresses a candidate: after a remote
+// rename and fetch --prune it can dangle at a branch that no longer exists,
+// and excluding one ref too many only undercounts. Names that do not resolve
+// to a commit are skipped. Local branches never shadow them. Empty when there
+// is no remote ref.
 func remoteDefaultRevs(ctx context.Context, workspace string) []string {
 	var names []string
 	if out, err := gitOutput(ctx, workspace, "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"); err == nil {
 		if name := strings.TrimSpace(out); branchRefName(name) && strings.HasPrefix(name, "origin/") {
-			names = []string{name}
+			names = append(names, name)
 		}
 	}
-	if len(names) == 0 {
-		if out, err := gitOutput(ctx, workspace, "config", "--local", "--get", "init.defaultBranch"); err == nil {
-			if name := strings.TrimSpace(out); branchRefName(name) {
-				names = append(names, "origin/"+name)
-			}
+	if out, err := gitOutput(ctx, workspace, "config", "--local", "--get", "init.defaultBranch"); err == nil {
+		if name := strings.TrimSpace(out); branchRefName(name) {
+			names = append(names, "origin/"+name)
 		}
-		names = append(names, "origin/main", "origin/master", "origin/trunk")
 	}
+	names = append(names, "origin/main", "origin/master", "origin/trunk")
 	var revs []string
 	seen := map[string]bool{}
 	for _, name := range names {

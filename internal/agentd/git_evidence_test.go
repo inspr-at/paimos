@@ -205,6 +205,86 @@ func TestRemoteDefaultNotShadowedByLocalFallback(t *testing.T) {
 	}
 }
 
+// Round 6 review case: a remote master -> main rename plus fetch --prune
+// leaves origin/HEAD dangling at origin/master. It must not suppress the
+// existing origin/main, so a foreign-only fast-forward stays no_commit.
+func TestDanglingOriginHEADDoesNotSuppressCandidates(t *testing.T) {
+	root, git := evidenceRepo(t)
+	origin := filepath.Join(root, "origin.git")
+	work := filepath.Join(root, "work")
+	upstream := filepath.Join(root, "upstream")
+	git(root, "init", "--bare", "-b", "master", origin)
+	git(root, "clone", "-q", origin, work)
+	git(work, "commit", "--allow-empty", "-m", "base")
+	git(work, "push", "-q", "origin", "HEAD:master")
+	git(work, "remote", "set-head", "origin", "master")
+	git(work, "checkout", "-b", "worker")
+	r := &launchedRepo{dir: work, git: git}
+	r.launchNow(t)
+	git(root, "clone", "-q", origin, upstream)
+	git(upstream, "branch", "-m", "main")
+	git(upstream, "commit", "--allow-empty", "-m", "foreign on renamed default")
+	git(upstream, "push", "-q", "origin", "main")
+	git(origin, "symbolic-ref", "HEAD", "refs/heads/main")
+	git(origin, "update-ref", "-d", "refs/heads/master")
+	r.run("fetch", "--prune", "-q", "origin")
+	r.run("merge", "--ff-only", "origin/main")
+	if refExists(t.Context(), work, "origin/master") {
+		t.Fatal("fixture: former default not pruned")
+	}
+	if target, err := gitOutput(t.Context(), work, "symbolic-ref", "--short", "refs/remotes/origin/HEAD"); err != nil || strings.TrimSpace(target) != "origin/master" {
+		t.Fatalf("fixture: origin/HEAD %q %v", target, err)
+	}
+	if revs := remoteDefaultRevs(t.Context(), work); len(revs) != 1 || revs[0] != workspaceHEAD(t.Context(), work) {
+		t.Fatalf("remote default revs %v", revs)
+	}
+	if got := r.evidence(t); got != "" {
+		t.Fatalf("foreign upstream credited: %s", got)
+	}
+	r.run("commit", "--allow-empty", "-m", "own work")
+	if got := r.evidence(t); got != "own work" {
+		t.Fatalf("own work: %s", got)
+	}
+}
+
+// origin/HEAD at an existing branch keeps its answers, and the other existing
+// candidates are excluded beside it.
+func TestOriginHEADUnionWithCandidates(t *testing.T) {
+	root, git := evidenceRepo(t)
+	origin := filepath.Join(root, "origin.git")
+	work := filepath.Join(root, "work")
+	upstream := filepath.Join(root, "upstream")
+	git(root, "init", "--bare", "-b", "trunk", origin)
+	git(root, "clone", "-q", origin, work)
+	git(work, "commit", "--allow-empty", "-m", "base")
+	git(work, "push", "-q", "origin", "HEAD:trunk", "HEAD:main")
+	git(work, "remote", "set-head", "origin", "trunk")
+	git(work, "checkout", "-b", "worker")
+	r := &launchedRepo{dir: work, git: git}
+	r.launchNow(t)
+	git(root, "clone", "-q", origin, upstream)
+	git(upstream, "commit", "--allow-empty", "-m", "foreign on trunk")
+	git(upstream, "push", "-q", "origin", "HEAD:trunk")
+	git(upstream, "commit", "--allow-empty", "-m", "foreign on main")
+	git(upstream, "push", "-q", "origin", "HEAD:main")
+	r.run("fetch", "-q", "origin")
+	r.run("merge", "--ff-only", "origin/trunk")
+	if got := r.evidence(t); got != "" {
+		t.Fatalf("foreign trunk credited: %s", got)
+	}
+	r.run("merge", "--ff-only", "origin/main")
+	if got := r.evidence(t); got != "" {
+		t.Fatalf("foreign main credited: %s", got)
+	}
+	if revs := remoteDefaultRevs(t.Context(), work); len(revs) != 2 {
+		t.Fatalf("remote default revs %v", revs)
+	}
+	r.run("commit", "--allow-empty", "-m", "own work")
+	if got := r.evidence(t); got != "own work" {
+		t.Fatalf("own work: %s", got)
+	}
+}
+
 // Earlier review cases keep their answers under the simpler rule.
 func TestRunCommitsEarlierReproductions(t *testing.T) {
 	t.Run("upstream merge synced beside unmerged work is committed", func(t *testing.T) {
