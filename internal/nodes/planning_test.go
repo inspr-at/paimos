@@ -186,6 +186,9 @@ func (w planningWorld) node(t *testing.T, key, kind, parent, state string, field
 	if fields == nil {
 		fields = map[string]any{}
 	}
+	if state == "done" && kind == "ticket" {
+		fields["pill_en"], fields["pill_de"], fields["benefit_en"], fields["benefit_de"] = "Done", "Fertig", "It works.", "Es geht."
+	}
 	raw, _ := json.Marshal(map[string]any{"kind_id": kindBySlug(t, w.admin, kind).ID, "key": key, "title": key, "state": state, "parent_id": parent, "fields": fields})
 	n := mustNode(t, w.admin, string(raw))
 	w.nodes[key] = n
