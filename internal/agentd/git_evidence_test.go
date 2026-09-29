@@ -11,126 +11,6 @@ import (
 	"testing"
 )
 
-func TestCommitsSinceLaunchRevision(t *testing.T) {
-	if _, err := exec.LookPath("git"); err != nil {
-		t.Skip("git is unavailable")
-	}
-	dir := t.TempDir()
-	git := func(args ...string) {
-		t.Helper()
-		cmd := exec.Command("git", args...)
-		cmd.Dir = dir
-		cmd.Env = append(os.Environ(),
-			"GIT_CONFIG_NOSYSTEM=1",
-			"GIT_CONFIG_GLOBAL="+os.DevNull,
-			"GIT_AUTHOR_NAME=Test",
-			"GIT_AUTHOR_EMAIL=test@example.com",
-			"GIT_COMMITTER_NAME=Test",
-			"GIT_COMMITTER_EMAIL=test@example.com",
-		)
-		out, err := cmd.CombinedOutput()
-		if err != nil {
-			t.Fatalf("git %v: %v\n%s", args, err, out)
-		}
-	}
-	git("init")
-	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("a\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	git("add", "a.txt")
-	git("commit", "-m", "base")
-	head := workspaceHEAD(t.Context(), dir)
-	if !fullSHA(head) {
-		t.Fatalf("head %q", head)
-	}
-	if commitsSince(t.Context(), dir, head) != nil {
-		t.Fatal("launch revision listed existing history")
-	}
-	if commitsSince(t.Context(), dir, "") != nil || commitsSince(t.Context(), "", head) != nil {
-		t.Fatal("missing workspace or start revision listed commits")
-	}
-	if err := os.WriteFile(filepath.Join(dir, "b.txt"), []byte("b\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	git("add", "b.txt")
-	git("commit", "-m", "Add usage\x07")
-	got := commitsSince(t.Context(), dir, head)
-	if len(got) != 1 || !fullSHA(got[0].SHA) || got[0].SHA == head || got[0].Subject != "Add usage" || got[0].Parents != 1 || !got[0].OnDefaultBranch {
-		t.Fatalf("commits since launch: %+v", got)
-	}
-}
-
-func TestMergeCommitOnDefaultBranch(t *testing.T) {
-	if _, err := exec.LookPath("git"); err != nil {
-		t.Skip("git is unavailable")
-	}
-	dir := t.TempDir()
-	git := func(args ...string) {
-		t.Helper()
-		cmd := exec.Command("git", args...)
-		cmd.Dir = dir
-		cmd.Env = append(os.Environ(),
-			"GIT_CONFIG_NOSYSTEM=1",
-			"GIT_CONFIG_GLOBAL="+os.DevNull,
-			"GIT_AUTHOR_NAME=Test",
-			"GIT_AUTHOR_EMAIL=test@example.com",
-			"GIT_COMMITTER_NAME=Test",
-			"GIT_COMMITTER_EMAIL=test@example.com",
-		)
-		out, err := cmd.CombinedOutput()
-		if err != nil {
-			t.Fatalf("git %v: %v\n%s", args, err, out)
-		}
-	}
-	git("init", "-b", "main")
-	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("a\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	git("add", "a.txt")
-	git("commit", "-m", "base")
-	launch := workspaceHEAD(t.Context(), dir)
-	git("checkout", "-b", "feature")
-	if err := os.WriteFile(filepath.Join(dir, "b.txt"), []byte("b\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	git("add", "b.txt")
-	git("commit", "-m", "feature")
-	git("checkout", "main")
-	git("merge", "--no-ff", "feature", "-m", "Merge feature")
-	got := commitsSince(t.Context(), dir, launch)
-	var merged bool
-	for _, c := range got {
-		if c.Parents >= 2 && c.OnDefaultBranch && c.Subject == "Merge feature" {
-			merged = true
-		}
-	}
-	if !merged {
-		t.Fatalf("default-branch merge: %+v", got)
-	}
-	git("checkout", "-b", "other", launch)
-	git("checkout", "-b", "side")
-	if err := os.WriteFile(filepath.Join(dir, "c.txt"), []byte("c\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	git("add", "c.txt")
-	git("commit", "-m", "side")
-	git("checkout", "other")
-	git("merge", "--no-ff", "side", "-m", "Merge side")
-	got = commitsSince(t.Context(), dir, launch)
-	var side bool
-	for _, c := range got {
-		if c.Subject == "Merge side" && c.Parents >= 2 && !c.OnDefaultBranch {
-			side = true
-		}
-		if c.Parents >= 2 && c.OnDefaultBranch {
-			t.Fatalf("side history counted as merged: %+v", got)
-		}
-	}
-	if !side {
-		t.Fatalf("side merge: %+v", got)
-	}
-}
-
 func evidenceRepo(t *testing.T) (string, func(dir string, args ...string)) {
 	t.Helper()
 	if _, err := exec.LookPath("git"); err != nil {
@@ -149,159 +29,196 @@ func evidenceRepo(t *testing.T) (string, func(dir string, args ...string)) {
 	return t.TempDir(), git
 }
 
-// Review case: no origin and no main/master. The worktree's own branch is
-// not the default branch, so a feature-only merge is never on it.
+// launchedRepo is a repository on main with one base commit, captured the
+// way the supervisor captures a launch.
+type launchedRepo struct {
+	dir                   string
+	git                   func(dir string, args ...string)
+	launch, launchDefault string
+}
+
+func newLaunchedRepo(t *testing.T) *launchedRepo {
+	t.Helper()
+	dir, git := evidenceRepo(t)
+	git(dir, "init", "-b", "main")
+	git(dir, "commit", "--allow-empty", "-m", "base")
+	return &launchedRepo{dir: dir, git: git}
+}
+
+func (r *launchedRepo) run(args ...string) { r.git(r.dir, args...) }
+
+func (r *launchedRepo) launchNow(t *testing.T) {
+	t.Helper()
+	r.launch, r.launchDefault = workspaceHEAD(t.Context(), r.dir), launchDefaultRev(t.Context(), r.dir)
+}
+
+func (r *launchedRepo) evidence(t *testing.T) string {
+	t.Helper()
+	var parts []string
+	for _, c := range runCommits(t.Context(), r.dir, r.launch, r.launchDefault) {
+		if !fullSHA(c.SHA) || c.Parents != 1 || c.OnDefaultBranch {
+			t.Fatalf("malformed evidence %+v", c)
+		}
+		parts = append(parts, c.Subject)
+	}
+	return strings.Join(parts, ",")
+}
+
+func TestRunCommitsSinceLaunch(t *testing.T) {
+	r := newLaunchedRepo(t)
+	r.launchNow(t)
+	if got := r.evidence(t); got != "" {
+		t.Fatalf("existing history listed: %s", got)
+	}
+	if runCommits(t.Context(), r.dir, "", r.launchDefault) != nil || runCommits(t.Context(), "", r.launch, r.launchDefault) != nil {
+		t.Fatal("missing workspace or launch revision listed commits")
+	}
+	if err := os.WriteFile(filepath.Join(r.dir, "b.txt"), []byte("b\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	r.run("add", "b.txt")
+	r.run("commit", "-m", "Add usage\x07")
+	if got := r.evidence(t); got != "Add usage" {
+		t.Fatalf("own commit: %s", got)
+	}
+}
+
+// Round 4 review cases, per the lead decision: local git yields committed or
+// no_commit only.
+func TestRunCommitsRound4Reproductions(t *testing.T) {
+	t.Run("reset backwards then fast-forward is no_commit", func(t *testing.T) {
+		r := newLaunchedRepo(t)
+		base := workspaceHEAD(t.Context(), r.dir)
+		r.run("checkout", "-b", "worker")
+		r.run("commit", "--allow-empty", "-m", "PREVIOUS RUN")
+		old := workspaceHEAD(t.Context(), r.dir)
+		r.run("branch", "-f", "main", old)
+		r.run("reset", "--soft", base)
+		r.launchNow(t)
+		r.run("merge", "--ff-only", "main")
+		if got := r.evidence(t); got != "" {
+			t.Fatalf("history from before launch credited: %s", got)
+		}
+	})
+	t.Run("upstream sync merge is no_commit", func(t *testing.T) {
+		r := newLaunchedRepo(t)
+		r.launchNow(t)
+		external := filepath.Join(t.TempDir(), "external")
+		r.git(r.dir, "clone", "-q", r.dir, external)
+		r.git(external, "commit", "--allow-empty", "-m", "external upstream")
+		r.run("remote", "add", "origin", external)
+		r.run("fetch", "-q", "origin")
+		r.run("merge", "--no-ff", "origin/main", "-m", "sync upstream")
+		if got := r.evidence(t); got != "" {
+			t.Fatalf("upstream commits credited: %s", got)
+		}
+	})
+	t.Run("ff-only merge of run work is committed", func(t *testing.T) {
+		r := newLaunchedRepo(t)
+		r.launchNow(t)
+		r.run("checkout", "-b", "worker")
+		r.run("commit", "--allow-empty", "-m", "THIS RUN")
+		r.run("checkout", "main")
+		r.run("merge", "--ff-only", "worker")
+		if got := r.evidence(t); got != "THIS RUN" {
+			t.Fatalf("run work lost: %s", got)
+		}
+	})
+	t.Run("detached reset to history that existed at launch is no_commit", func(t *testing.T) {
+		r := newLaunchedRepo(t)
+		base := workspaceHEAD(t.Context(), r.dir)
+		r.run("checkout", "-b", "elsewhere")
+		r.run("commit", "--allow-empty", "-m", "EXISTING ELSEWHERE")
+		old := workspaceHEAD(t.Context(), r.dir)
+		r.run("branch", "-f", "main", old)
+		r.run("checkout", "--detach", base)
+		r.launchNow(t)
+		r.run("reset", "--soft", old)
+		if got := r.evidence(t); got != "" {
+			t.Fatalf("history from before launch credited: %s", got)
+		}
+	})
+}
+
+// Earlier review cases keep their answers under the simpler rule.
+func TestRunCommitsEarlierReproductions(t *testing.T) {
+	t.Run("upstream merge synced beside unmerged work is committed", func(t *testing.T) {
+		r := newLaunchedRepo(t)
+		r.launchNow(t)
+		r.run("checkout", "-b", "feature")
+		r.run("commit", "--allow-empty", "-m", "worker change")
+		r.run("checkout", "-b", "upstream", r.launch)
+		r.run("commit", "--allow-empty", "-m", "unrelated")
+		r.run("checkout", "main")
+		r.run("merge", "--no-ff", "upstream", "-m", "upstream merge")
+		r.run("checkout", "feature")
+		r.run("merge", "--no-ff", "main", "-m", "sync main")
+		if got := r.evidence(t); got != "worker change" {
+			t.Fatalf("evidence: %s", got)
+		}
+	})
+	t.Run("fast-forward to an upstream merge only is no_commit", func(t *testing.T) {
+		r := newLaunchedRepo(t)
+		r.launchNow(t)
+		r.run("checkout", "-b", "worker")
+		r.run("checkout", "-b", "upstream")
+		r.run("commit", "--allow-empty", "-m", "unrelated upstream change")
+		r.run("checkout", "main")
+		r.run("merge", "--no-ff", "upstream", "-m", "unrelated upstream merge")
+		r.run("checkout", "worker")
+		r.run("merge", "--ff-only", "main")
+		if got := r.evidence(t); got != "" {
+			t.Fatalf("upstream credited: %s", got)
+		}
+	})
+	t.Run("many upstream commits do not hide own work", func(t *testing.T) {
+		r := newLaunchedRepo(t)
+		r.launchNow(t)
+		r.run("checkout", "-b", "worker")
+		r.run("commit", "--allow-empty", "-m", "OWN UNMERGED")
+		r.run("checkout", "-b", "upstream", r.launch)
+		for i := 0; i < 22; i++ {
+			r.run("commit", "--allow-empty", "-m", fmt.Sprint("unrelated ", i))
+		}
+		r.run("checkout", "main")
+		r.run("merge", "--no-ff", "upstream", "-m", "upstream merge")
+		r.run("checkout", "worker")
+		r.run("merge", "--no-ff", "main", "-m", "sync main")
+		if got := r.evidence(t); got != "OWN UNMERGED" {
+			t.Fatalf("evidence: %s", got)
+		}
+	})
+	t.Run("wire cap", func(t *testing.T) {
+		r := newLaunchedRepo(t)
+		r.launchNow(t)
+		for i := 0; i < 25; i++ {
+			r.run("commit", "--allow-empty", "-m", fmt.Sprint("own ", i))
+		}
+		if got := runCommits(t.Context(), r.dir, r.launch, r.launchDefault); len(got) != gitCommitsWire || got[0].Subject != "own 24" {
+			t.Fatalf("cap: %d", len(got))
+		}
+	})
+}
+
+// No origin and no main/master: the worktree's own branch is not the
+// default branch.
 func TestUnknownDefaultBranchIsNotHEAD(t *testing.T) {
 	dir, git := evidenceRepo(t)
 	git(dir, "init", "-b", "trunk")
 	git(dir, "commit", "--allow-empty", "-m", "base")
-	start := workspaceHEAD(t.Context(), dir)
-	git(dir, "checkout", "-b", "feature")
-	git(dir, "commit", "--allow-empty", "-m", "feature")
-	git(dir, "checkout", "-b", "side", start)
-	git(dir, "commit", "--allow-empty", "-m", "side")
-	git(dir, "checkout", "feature")
-	git(dir, "merge", "--no-ff", "side", "-m", "side into feature")
 	if ref := defaultBranchRef(t.Context(), dir); ref != "" {
 		t.Fatalf("default branch resolved to %q", ref)
 	}
-	for _, c := range commitsSince(t.Context(), dir, start) {
-		if c.OnDefaultBranch {
-			t.Fatalf("commit claimed on an unknown default branch: %+v", c)
-		}
+	if rev := launchDefaultRev(t.Context(), dir); rev != "" {
+		t.Fatalf("launch default %q", rev)
 	}
-	// A repository-configured default is honoured.
 	git(dir, "config", "--local", "init.defaultBranch", "trunk")
 	if ref := defaultBranchRef(t.Context(), dir); ref != "trunk" {
 		t.Fatalf("configured default: %q", ref)
 	}
 }
 
-// Review case: an unrelated upstream merge synced into the worker branch is
-// not the run's work; the worker's own change stays off the default branch.
-func TestUpstreamMergeLeavesWorkerChangeOffDefault(t *testing.T) {
-	dir, git := evidenceRepo(t)
-	git(dir, "init", "-b", "main")
-	git(dir, "commit", "--allow-empty", "-m", "base")
-	start := workspaceHEAD(t.Context(), dir)
-	git(dir, "checkout", "-b", "feature")
-	git(dir, "commit", "--allow-empty", "-m", "worker change")
-	git(dir, "checkout", "-b", "upstream", start)
-	git(dir, "commit", "--allow-empty", "-m", "unrelated")
-	git(dir, "checkout", "main")
-	git(dir, "merge", "--no-ff", "upstream", "-m", "upstream merge")
-	git(dir, "checkout", "feature")
-	git(dir, "merge", "--no-ff", "main", "-m", "sync main")
-	got := subjects(commitsSince(t.Context(), dir, start))
-	if got != "worker change:off,sync main:off" {
-		t.Fatalf("own commits: %s", got)
-	}
-}
-
-func subjects(commits []GitCommit) string {
-	var parts []string
-	for _, c := range commits {
-		state := "off"
-		if c.OnDefaultBranch {
-			state = "on"
-		}
-		parts = append(parts, c.Subject+":"+state)
-	}
-	return strings.Join(parts, ",")
-}
-
-// Round 3 review case: the run authored nothing and only fast-forwarded to
-// an upstream merge. It has no own commits.
-func TestUpstreamOnlySyncHasNoOwnCommits(t *testing.T) {
-	dir, git := evidenceRepo(t)
-	git(dir, "init", "-b", "main")
-	git(dir, "commit", "--allow-empty", "-m", "base")
-	start := workspaceHEAD(t.Context(), dir)
-	git(dir, "checkout", "-b", "worker")
-	git(dir, "checkout", "-b", "upstream")
-	git(dir, "commit", "--allow-empty", "-m", "unrelated upstream change")
-	git(dir, "checkout", "main")
-	git(dir, "merge", "--no-ff", "upstream", "-m", "unrelated upstream merge")
-	git(dir, "checkout", "worker")
-	git(dir, "merge", "--ff-only", "main")
-	if got := commitsSince(t.Context(), dir, start); len(got) != 0 {
-		t.Fatalf("upstream sync reported as the run's commits: %+v", got)
-	}
-}
-
-// Round 3 review case: one unmerged worker commit behind 22 upstream commits
-// and a sync merge is still reported, off the default branch.
-func TestManyUpstreamCommitsDoNotHideOwnCommit(t *testing.T) {
-	dir, git := evidenceRepo(t)
-	git(dir, "init", "-b", "main")
-	git(dir, "commit", "--allow-empty", "-m", "base")
-	start := workspaceHEAD(t.Context(), dir)
-	git(dir, "checkout", "-b", "worker")
-	git(dir, "commit", "--allow-empty", "-m", "OWN UNMERGED")
-	git(dir, "checkout", "-b", "upstream", start)
-	for i := 0; i < 22; i++ {
-		git(dir, "commit", "--allow-empty", "-m", fmt.Sprint("unrelated ", i))
-	}
-	git(dir, "checkout", "main")
-	git(dir, "merge", "--no-ff", "upstream", "-m", "upstream merge")
-	git(dir, "checkout", "worker")
-	git(dir, "merge", "--no-ff", "main", "-m", "sync main")
-	if got := subjects(commitsSince(t.Context(), dir, start)); got != "OWN UNMERGED:off,sync main:off" {
-		t.Fatalf("own commits: %s", got)
-	}
-}
-
-// More own commits than the wire cap: an unmerged one is always included.
-// Hitting the evidence bound reports nothing as on the default branch.
-func TestOwnCommitCapAndEvidenceBound(t *testing.T) {
-	dir, git := evidenceRepo(t)
-	git(dir, "init", "-b", "main")
-	git(dir, "commit", "--allow-empty", "-m", "base")
-	start := workspaceHEAD(t.Context(), dir)
-	git(dir, "checkout", "-b", "worker")
-	for i := 0; i < 25; i++ {
-		git(dir, "commit", "--allow-empty", "-m", fmt.Sprint("own ", i))
-	}
-	git(dir, "branch", "-f", "main", "worker^")
-	got := commitsSince(t.Context(), dir, start)
-	if len(got) != 20 || got[0].Subject != "own 24" || got[0].OnDefaultBranch || !got[1].OnDefaultBranch {
-		t.Fatalf("unmerged own commit not listed first: %s", subjects(got))
-	}
-	git(dir, "branch", "-f", "main", "worker")
-	for _, c := range commitsSince(t.Context(), dir, start) {
-		if !c.OnDefaultBranch {
-			t.Fatalf("merged own commit off default: %+v", c)
-		}
-	}
-	bounded := commitsSinceBounded(t.Context(), dir, start, 10)
-	if len(bounded) == 0 {
-		t.Fatal("bounded evidence dropped the run's commits")
-	}
-	for _, c := range bounded {
-		if c.OnDefaultBranch {
-			t.Fatalf("incomplete evidence reported on default: %s", subjects(bounded))
-		}
-	}
-}
-
-// A run that merges its feature into the default branch it ends on owns the
-// commits that merge brought in.
-func TestRunMergingIntoDefaultOwnsMergedCommits(t *testing.T) {
-	dir, git := evidenceRepo(t)
-	git(dir, "init", "-b", "main")
-	git(dir, "commit", "--allow-empty", "-m", "base")
-	start := workspaceHEAD(t.Context(), dir)
-	git(dir, "checkout", "-b", "feature")
-	git(dir, "commit", "--allow-empty", "-m", "feature work")
-	git(dir, "checkout", "main")
-	git(dir, "merge", "--no-ff", "feature", "-m", "Merge feature")
-	if got := subjects(commitsSince(t.Context(), dir, start)); got != "Merge feature:on,feature work:on" {
-		t.Fatalf("own commits: %s", got)
-	}
-}
-
-// origin/HEAD wins over local branches: the worker's change merged on the
-// remote default branch is on it; a local-only main commit is not.
+// origin/HEAD wins over local branches.
 func TestOriginHEADIsTheDefaultBranch(t *testing.T) {
 	root, git := evidenceRepo(t)
 	origin := filepath.Join(root, "origin.git")
@@ -311,24 +228,53 @@ func TestOriginHEADIsTheDefaultBranch(t *testing.T) {
 	git(work, "commit", "--allow-empty", "-m", "base")
 	git(work, "push", "-q", "origin", "HEAD:trunk")
 	git(work, "remote", "set-head", "origin", "trunk")
-	start := workspaceHEAD(t.Context(), work)
+	tip := workspaceHEAD(t.Context(), work)
 	git(work, "checkout", "-b", "main")
 	git(work, "commit", "--allow-empty", "-m", "local main only")
-	git(work, "checkout", "-b", "feature", start)
-	git(work, "commit", "--allow-empty", "-m", "worker change")
-	git(work, "push", "-q", "origin", "HEAD:trunk")
-	git(work, "fetch", "-q", "origin")
 	if ref := defaultBranchRef(t.Context(), work); ref != "origin/trunk" {
 		t.Fatalf("default branch %q", ref)
 	}
-	got := commitsSince(t.Context(), work, start)
-	if len(got) != 1 || got[0].Subject != "worker change" || !got[0].OnDefaultBranch {
-		t.Fatalf("worker change on origin default: %+v", got)
+	if rev := launchDefaultRev(t.Context(), work); rev != tip {
+		t.Fatalf("launch default %q want %q", rev, tip)
 	}
-	git(work, "checkout", "main")
-	for _, c := range commitsSince(t.Context(), work, start) {
-		if c.Subject == "local main only" && c.OnDefaultBranch {
-			t.Fatal("a local main commit counted as on the remote default branch")
+}
+
+// The supervisor persists the launch revisions with the run and reports
+// only the run's own commits when it finishes.
+func TestSupervisorPersistsLaunchAndReportsRunCommits(t *testing.T) {
+	s, a, p := testSupervisor(t)
+	_, git := evidenceRepo(t)
+	git(s.workspace, "init", "-b", "main")
+	git(s.workspace, "commit", "--allow-empty", "-m", "base")
+	launch := workspaceHEAD(t.Context(), s.workspace)
+	if err := s.PollOnce(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	var persisted bool
+	for _, rec := range s.journal.Snapshot() {
+		persisted = persisted || (rec.RunID == "run" && rec.LaunchRev == launch && rec.LaunchDefaultRev == launch)
+	}
+	if !persisted {
+		t.Fatalf("launch revisions not in the journal: %+v", s.journal.Snapshot())
+	}
+	git(s.workspace, "commit", "--allow-empty", "-m", "run work")
+	if err := p.Stop(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	entry := s.runs["run"]
+	entry.mu.Lock()
+	done := entry.monitorDone
+	entry.mu.Unlock()
+	<-done
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	var finished *Telemetry
+	for i := range a.reports {
+		if a.reports[i].Kind == "finished" {
+			finished = &a.reports[i]
 		}
+	}
+	if finished == nil || len(finished.GitCommits) != 1 || finished.GitCommits[0].Subject != "run work" || finished.GitCommits[0].OnDefaultBranch {
+		t.Fatalf("finished evidence: %+v", finished)
 	}
 }

@@ -8052,7 +8052,7 @@ components:
         outcome: {type: [string, 'null'], enum: [completed, failed, cancelled, ownership_lost, null]}
         duration_ms: {type: [integer, 'null'], format: int64, description: Whole elapsed milliseconds for terminal runs; null until both timestamps exist}
         active_ms: {type: [integer, 'null'], format: int64, description: Milliseconds not spent waiting. Null until the run is terminal and both timestamps exist. Equal to duration_ms when no waiting telemetry was recorded.}
-        outcome_detail: {type: [string, 'null'], enum: [no_commit, committed, pr_opened, merged, abandoned, null], description: Derived when the run becomes terminal. merged requires positive evidence, that is at least one of the run's own non-merge commits with every one of them an ancestor of the default branch. A pull-request URL is pr_opened. Null when the run is not terminal.}
+        outcome_detail: {type: [string, 'null'], enum: [no_commit, committed, pr_opened, merged, abandoned, null], description: Derived when the run becomes terminal. Local git evidence yields committed or no_commit only; merged is reserved for forge or release evidence. A pull-request URL is pr_opened. Null when the run is not terminal.}
         retry_of_run_id: {type: [string, 'null'], format: uuid, description: Earlier run of the same work order and agent that this run retries.}
         model_evidence: {type: string, enum: [unverified, vendor_reported]}
         input_tokens: {type: integer, format: int64}
@@ -8083,7 +8083,7 @@ components:
         git_commits:
           type: array
           maxItems: 20
-          description: Optional commits this run created after its launch revision (its own commits, from the reflog of the branch it ends on; upstream history synced in is not included). Unmerged non-merge commits are listed first. The server derives outcome_detail from these, from the run's harness session commits, and from this run's work evidence.
+          description: Optional commit evidence of this run, as non-merge commits on the first-parent history of its final HEAD that neither its launch commit nor the default branch as it was at launch contains (at most 20, newest first). The server derives committed or no_commit from these, from the run's harness session commits, and from this run's work evidence. Local git never yields merged.
           items:
             type: object
             required: [sha, subject]
@@ -8091,7 +8091,7 @@ components:
               sha: {type: string, pattern: '^[0-9a-f]{7,40}$'}
               subject: {type: string, minLength: 1, maxLength: 200}
               parents: {type: integer, minimum: 0, maximum: 64, description: Parent count from git. Optional. A merge commit has at least two.}
-              on_default_branch: {type: boolean, description: 'Optional. True when the commit is an ancestor of the default branch (origin/HEAD, else the configured or main/master branch; never the worktree HEAD). Omitted for every commit when the evidence was incomplete. merged requires at least one non-merge commit and every non-merge commit on the default branch.'}
+              on_default_branch: {type: boolean, description: 'Optional and ignored. Kept for compatibility; merged comes from forge or release evidence, never from local git.'}
     ApprovalProposal:
       type: object
       required: [scope, resource_kind, rationale, expires_at]

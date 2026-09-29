@@ -15,7 +15,9 @@
 // integer token/cost_micros counters. Missing terminal data stays null.
 // AEON-300 adds nullable active_ms (duration minus time spent in waiting
 // telemetry), outcome_detail (no_commit, committed, pr_opened, merged, or
-// abandoned, derived when the run becomes terminal), and retry_of_run_id.
+// abandoned, derived when the run becomes terminal; local git evidence yields
+// committed or no_commit only, merged is reserved for forge or release
+// evidence), and retry_of_run_id.
 // Direct SQL completion leaves the new fields null. A retry must name an
 // earlier run of the same work order and agent.
 // This extends New; no new plugin installation or server wiring is required.

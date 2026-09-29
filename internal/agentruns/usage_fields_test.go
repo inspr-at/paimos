@@ -128,8 +128,9 @@ func TestRunUsageFields(t *testing.T) {
 		"sequence": 1, "kind": "finished", "status": "completed",
 		"git_commits": []map[string]any{{"sha": "0123456789abcdef", "subject": "Merge feature", "parents": 2, "on_default_branch": true}, {"sha": "1123456789abcdef", "subject": "own change", "parents": 1, "on_default_branch": true}},
 	}, 200, &real)
-	if real.OutcomeDetail == nil || *real.OutcomeDetail != "merged" {
-		t.Fatalf("own commit merged: %+v", real)
+	// Local git evidence never yields merged; that is left to forge or release evidence.
+	if real.OutcomeDetail == nil || *real.OutcomeDetail != "committed" {
+		t.Fatalf("own commit on the default branch: %+v", real)
 	}
 	// A merge commit alone is no evidence that the run's own work merged.
 	mergeOnly := f.claim(t, f.run(t, o))

@@ -53,23 +53,27 @@ type Record struct {
 	BudgetStopUnconfirmed bool   `json:"budget_stop_unconfirmed,omitempty"`
 	// Only launchPrepared proves that adapter.Start has never been called.
 	// Empty is a legacy record, never evidence that no child was forked.
-	LaunchState   string            `json:"launch_state,omitempty"`
-	ClaimRoute    *Route            `json:"claim_route,omitempty"`
-	AccountID     string            `json:"account_id,omitempty"`
-	ExecutionMode string            `json:"execution_mode,omitempty"`
-	ExitObserved  bool              `json:"exit_observed,omitempty"`
-	Pending       []Telemetry       `json:"pending,omitempty"`
-	SettlementGap bool              `json:"settlement_gap,omitempty"`
-	TenantID      string            `json:"tenant_id"`
-	PrincipalID   string            `json:"principal_id"`
-	RunID         string            `json:"run_id"`
-	WorkOrderID   string            `json:"work_order_id,omitempty"`
-	Generation    string            `json:"generation"`
-	Workspace     string            `json:"workspace"`
-	PID           int               `json:"pid"`
-	State         string            `json:"state"`
-	Sequence      int64             `json:"sequence"`
-	Controls      map[string]replay `json:"controls,omitempty"`
+	LaunchState   string `json:"launch_state,omitempty"`
+	ClaimRoute    *Route `json:"claim_route,omitempty"`
+	AccountID     string `json:"account_id,omitempty"`
+	ExecutionMode string `json:"execution_mode,omitempty"`
+	ExitObserved  bool   `json:"exit_observed,omitempty"`
+	// LaunchRev and LaunchDefaultRev are the workspace HEAD and the default
+	// branch's commit at launch, the base of the run's commit evidence.
+	LaunchRev        string            `json:"launch_rev,omitempty"`
+	LaunchDefaultRev string            `json:"launch_default_rev,omitempty"`
+	Pending          []Telemetry       `json:"pending,omitempty"`
+	SettlementGap    bool              `json:"settlement_gap,omitempty"`
+	TenantID         string            `json:"tenant_id"`
+	PrincipalID      string            `json:"principal_id"`
+	RunID            string            `json:"run_id"`
+	WorkOrderID      string            `json:"work_order_id,omitempty"`
+	Generation       string            `json:"generation"`
+	Workspace        string            `json:"workspace"`
+	PID              int               `json:"pid"`
+	State            string            `json:"state"`
+	Sequence         int64             `json:"sequence"`
+	Controls         map[string]replay `json:"controls,omitempty"`
 }
 
 type owned struct {
@@ -104,7 +108,6 @@ type owned struct {
 	harnessArchived bool
 	protocolFailed  bool
 	protocolStopped bool
-	launchRev       string
 }
 
 type harnessMetadata struct {
@@ -703,9 +706,14 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 	// Commit the possible-fork boundary before handing control to an adapter.
 	// On a journal failure Start is never invoked; after success a crash is
 	// unconfirmed, even if no PID was subsequently persisted.
+	var launchRev, launchDefault string
+	if !verification {
+		launchRev, launchDefault = workspaceHEAD(ctx, s.workspace), launchDefaultRev(ctx, s.workspace)
+	}
 	entry.mu.Lock()
 	intent := entry.record
 	intent.LaunchState, intent.State = launchAttempted, "starting"
+	intent.LaunchRev, intent.LaunchDefaultRev = launchRev, launchDefault
 	err = s.journal.Put(intent)
 	if err == nil {
 		entry.record = intent
@@ -717,9 +725,6 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 		return err
 	}
 	launchedAt := time.Now()
-	if !verification {
-		entry.launchRev = workspaceHEAD(ctx, s.workspace)
-	}
 	proc, err := adapter.Start(ctx, StartRequest{TenantID: s.tenantID, PrincipalID: s.principalID, Run: run, Profile: profile,
 		AccountKey: route.AccountKey, Workspace: runWorkspace, StateRoot: filepath.Dir(s.journal.JournalPath()), Prompt: prompt, Generation: s.generation, Tools: runTools, Rules: ephemeralRules, MaxTurns: entry.turnBudget, MaxTokens: entry.tokenBudget}, observe)
 	if err != nil {
@@ -955,7 +960,10 @@ func (s *Supervisor) monitor(entry *owned) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	reportErr := s.update(ctx, entry, Telemetry{Kind: "finished", Status: status, ErrorCode: code, GitCommits: commitsSince(ctx, s.workspace, entry.launchRev)})
+	entry.mu.Lock()
+	launchRev, launchDefault := entry.record.LaunchRev, entry.record.LaunchDefaultRev
+	entry.mu.Unlock()
+	reportErr := s.update(ctx, entry, Telemetry{Kind: "finished", Status: status, ErrorCode: code, GitCommits: runCommits(ctx, s.workspace, launchRev, launchDefault)})
 	entry.mu.Lock()
 	doneRequested := entry.doneRequested
 	entry.mu.Unlock()

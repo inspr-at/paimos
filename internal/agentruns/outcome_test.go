@@ -30,15 +30,16 @@ func TestDeriveOutcomeDetail(t *testing.T) {
 		// A merge commit alone is no positive evidence that the run's own work merged.
 		{"completed", []GitCommit{{SHA: sha, Subject: "Add usage", Parents: 2, OnDefaultBranch: true}}, nil, nil, "committed"},
 		{"completed", []GitCommit{{SHA: sha, Subject: "Merge feature", Parents: 2, OnDefaultBranch: true}}, nil, []string{"https://github.com/acme/merged-tools/pull/4"}, "pr_opened"},
-		{"completed", []GitCommit{{SHA: sha, Subject: "own change", Parents: 1, OnDefaultBranch: true}}, nil, nil, "merged"},
-		{"completed", []GitCommit{{SHA: sha, Subject: "own change", Parents: 1, OnDefaultBranch: true}}, nil, []string{"https://github.com/acme/merged-tools/pull/4"}, "merged"},
+		// Local git never yields merged; on_default_branch is ignored (lead decision, round 4).
+		{"completed", []GitCommit{{SHA: sha, Subject: "own change", Parents: 1, OnDefaultBranch: true}}, nil, nil, "committed"},
+		{"completed", []GitCommit{{SHA: sha, Subject: "own change", Parents: 1, OnDefaultBranch: true}}, nil, []string{"https://github.com/acme/merged-tools/pull/4"}, "pr_opened"},
 		// Round 3 review case: no own commits is no_commit.
 		{"completed", []GitCommit{}, nil, nil, "no_commit"},
 		// Round 3 review case: an unmerged own commit keeps the run committed.
 		{"completed", []GitCommit{{SHA: "3123456789abcdef", Subject: "OWN UNMERGED", Parents: 1}, {SHA: sha, Subject: "sync main", Parents: 2}}, nil, nil, "committed"},
 		// An upstream merge synced into the worktree does not merge the run's own change.
 		{"completed", []GitCommit{{SHA: sha, Subject: "sync main", Parents: 2}, {SHA: "1123456789abcdef", Subject: "unrelated", Parents: 1, OnDefaultBranch: true}, {SHA: "2123456789abcdef", Subject: "upstream merge", Parents: 2, OnDefaultBranch: true}, {SHA: "3123456789abcdef", Subject: "worker change", Parents: 1}}, nil, nil, "committed"},
-		{"completed", []GitCommit{{SHA: sha, Subject: "Merge feature", Parents: 2, OnDefaultBranch: true}, {SHA: "3123456789abcdef", Subject: "worker change", Parents: 1, OnDefaultBranch: true}}, nil, nil, "merged"},
+		{"completed", []GitCommit{{SHA: sha, Subject: "Merge feature", Parents: 2, OnDefaultBranch: true}, {SHA: "3123456789abcdef", Subject: "worker change", Parents: 1, OnDefaultBranch: true}}, nil, nil, "committed"},
 		{"cancelled", nil, nil, nil, "abandoned"},
 		{"ownership_lost", nil, nil, nil, "abandoned"},
 		{"cancelled", nil, []string{"abc"}, nil, "abandoned"},

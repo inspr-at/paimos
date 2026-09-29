@@ -33,13 +33,12 @@ func commitSubject(s string) bool {
 	return true
 }
 
-// deriveOutcomeDetail classifies a run from its git evidence. The git
-// commits are the run's own commits. merged needs positive evidence: at
-// least one own non-merge commit, and every one of them on the default
-// branch. A merge commit alone, or upstream history synced into the
-// worktree, is not a merge of the run.
+// deriveOutcomeDetail classifies a run from its evidence. Local git yields
+// committed or no_commit only: the git commits are the run's own commits,
+// and on_default_branch is ignored. merged is reserved for forge or release
+// evidence; a pull-request URL in work evidence is pr_opened.
 func deriveOutcomeDetail(status string, commits []GitCommit, shas, refs []string) string {
-	merged, pr, committed := runMerged(commits), false, false
+	merged, pr, committed := false, false, false
 	for _, c := range commits {
 		if commitSHA(strings.ToLower(strings.TrimSpace(c.SHA))) {
 			committed = true
@@ -68,20 +67,6 @@ func deriveOutcomeDetail(status string, commits []GitCommit, shas, refs []string
 	default:
 		return "no_commit"
 	}
-}
-
-func runMerged(commits []GitCommit) bool {
-	own := 0
-	for _, c := range commits {
-		if !commitSHA(strings.ToLower(strings.TrimSpace(c.SHA))) || c.Parents >= 2 {
-			continue
-		}
-		if !c.OnDefaultBranch {
-			return false
-		}
-		own++
-	}
-	return own > 0
 }
 
 func classifyEvidenceRef(ref string) (merged, pr, committed bool) {
