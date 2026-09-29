@@ -299,10 +299,19 @@ export function isCalendarVersion(value: string | null | undefined): value is st
   return !!value && CALENDAR_VERSION.test(value)
 }
 
+// The history can still name the build this page loaded. The update poll may
+// already have seen a newer version on the server. Talk about the newer of the
+// two, so a cached history does not pretend the deploy is missing.
+export function liveServer(historyCurrent: string, available?: string | null): string {
+  if (isCalendarVersion(available) && (!isCalendarVersion(historyCurrent) || available > historyCurrent)) return available
+  return historyCurrent
+}
+
 // A page older than the server already says a newer version is live. That
 // version missing from this build's history is the same fact, so the history
 // shows one notice, never both.
-export function releaseNotice(pageVersion: string | null | undefined, serverVersion: string, missingVersion: string): 'update' | 'missing' | null {
-  if (isCalendarVersion(pageVersion) && isCalendarVersion(serverVersion) && serverVersion > pageVersion) return 'update'
+export function releaseNotice(pageVersion: string | null | undefined, serverVersion: string, missingVersion: string, available?: string | null): 'update' | 'missing' | null {
+  const server = liveServer(serverVersion, available)
+  if (isCalendarVersion(pageVersion) && isCalendarVersion(server) && server > pageVersion) return 'update'
   return missingVersion ? 'missing' : null
 }

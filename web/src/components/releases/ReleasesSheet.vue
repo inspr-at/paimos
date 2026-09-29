@@ -3,7 +3,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, provide, reactive, ref, watch } from 'vue'
 import mark from '../../assets/brand/aeon-mark.svg'
 import { brand, generationLabel, setOverlayTitle } from '../../lib/brand'
-import { displayHeadline, groupByDay, hasUsableNotes, HISTORICAL_TAG_LABEL, historicalTagFallback, matches, presentChanges, releasedAt, releaseNotice, stats as statsOf, ticketsOf, WRITTEN_AFTER_LABEL, writtenAfterRelease, type Release } from '../../lib/releases'
+import { displayHeadline, groupByDay, hasUsableNotes, HISTORICAL_TAG_LABEL, historicalTagFallback, liveServer, matches, presentChanges, releasedAt, releaseNotice, stats as statsOf, ticketsOf, WRITTEN_AFTER_LABEL, writtenAfterRelease, type Release } from '../../lib/releases'
 import { useProfile } from '../../stores/profile'
 import { normalKey } from '../../lib/ticketLinks'
 import { relativeTime } from '../../lib/work'
@@ -57,16 +57,24 @@ const indexOf = computed(() => new Map(order.value.map((r, i) => [r.version, i])
 const byVersion = computed(() => new Map(releases.value.map(r => [r.version, r])))
 const selected = computed(() => cursor.value ? byVersion.value.get(cursor.value) ?? null : null)
 const current = computed(() => history.value?.current ?? '')
+// The version this page loaded with. The history's current is the server, which
+// can already be newer while this page is still the old build.
+const pageRuns = computed(() => version.value?.version ?? '')
+const runningHere = computed(() => pageRuns.value || current.value)
+// live_since belongs to the server version. It does not describe an older page.
+const runningSince = computed(() => runningHere.value === current.value ? history.value?.live_since ?? null : null)
 const currentKnown = computed(() => byVersion.value.has(current.value))
-// The published release before the one running here: where a rollback would go.
+// The published release before the one the server runs: where a rollback would go.
 const rollbackTarget = computed(() => currentKnown.value ? releases.value.find(r => r.state === 'published' && r.version < current.value)?.version ?? null : null)
 const stats = computed(() => statsOf(releases.value, now.value))
 const filtering = computed(() => !!filter.q.trim() || filter.features || filter.fixes || filter.tickets)
 const reservedCount = computed(() => releases.value.filter(r => r.state === 'reserved').length)
 const compareTo = computed(() => mode.value === 'compare' && cursor.value && cursor.value !== compareFrom.value ? cursor.value : null)
 // One notice. An outdated page says a newer version is live; it does not also
-// warn that this build's history lacks that version.
-const notice = computed(() => releaseNotice(version.value?.version, current.value, missing.value))
+// warn that this build's history lacks that version. The server is the newer of
+// the cached history and the version the update poll already saw.
+const server = computed(() => liveServer(current.value, store.available))
+const notice = computed(() => releaseNotice(pageRuns.value, current.value, missing.value, store.available))
 const optionId = (v: string) => `release-${v.replace(/\./g, '-')}`
 
 // ---------- Selection ----------
@@ -287,22 +295,22 @@ const KINDS = [
         </div>
         <p v-if="notice === 'update'" class="notice" role="status">
           <AppIcon name="info" :size="14" />
-          <span>A newer version is live: this page still runs {{ version.value?.version }}, and the server runs {{ current }}.</span>
+          <span>A newer version is live: this page still runs <CalendarVersion v-if="pageRuns" :value="pageRuns" class="notice-version" />, and the server runs <CalendarVersion v-if="server" :value="server" class="notice-version" />.</span>
           <button type="button" class="btn sm" @click="reload"><AppIcon name="refresh" :size="12" />Reload</button>
         </p>
         <p v-else-if="notice === 'missing'" class="notice" role="status">
           <AppIcon name="info" :size="14" />
-          <span>{{ missing }} is not in this build’s release history.</span>
+          <span><CalendarVersion :value="missing" class="notice-version" /> is not in this build’s release history.</span>
           <button type="button" class="icon-btn flat sm" aria-label="Dismiss" @click="missing = ''"><AppIcon name="close" :size="12" /></button>
         </p>
-        <ReleaseStats v-if="releases.length && !phone" class="stats" :stats="stats" :current="current" :live-since="history?.live_since ?? null" :now="now" />
+        <ReleaseStats v-if="releases.length && !phone" class="stats" :stats="stats" :current="runningHere" :live-since="runningSince" :now="now" />
         <div v-else-if="!phone && !history && !store.error" class="stats-placeholder skeleton-body" aria-hidden="true"><span v-for="i in 6" :key="i" class="skeleton" /></div>
       </header>
 
       <div class="body">
         <section class="list-pane" aria-label="Releases" :inert="covered">
           <!-- Phones: the stats scroll away with the list, inside the gutter. -->
-          <ReleaseStats v-if="releases.length && phone" compact class="stats" :stats="stats" :current="current" :live-since="history?.live_since ?? null" :now="now" />
+          <ReleaseStats v-if="releases.length && phone" compact class="stats" :stats="stats" :current="runningHere" :live-since="runningSince" :now="now" />
           <div class="filters">
             <div class="toggles" role="group" aria-label="Show only releases with">
               <button type="button" class="toggle" :aria-pressed="filter.features" @click="filter.features = !filter.features"><AppIcon name="sparkle" :size="13" />Features</button>
@@ -453,7 +461,8 @@ const KINDS = [
 .compare-btn .keycap { margin-right: -5px; }
 .icon-btn { width: 36px; height: 36px; }
 .notice { display: flex; align-items: center; gap: 10px; padding: 8px 10px 8px 14px; border-radius: 12px; background: var(--glass); border: 1px solid var(--glass-edge); box-shadow: 0 0 0 1px var(--line); color: var(--ink); font-size: 13px; }
-.notice > span { flex: 1; min-width: 0; line-height: 1.35; }
+.notice > span { flex: 1; min-width: 0; line-height: 1.45; }
+.notice-version { font-size: inherit; vertical-align: baseline; }
 .notice .btn, .notice .icon-btn { flex: none; }
 .notice svg { color: var(--teal-ink); }
 .stats-placeholder { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px; height: 110px; }

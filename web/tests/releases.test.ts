@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { compare, displayHeadline, displayText, groupByDay, groupChanges, hasUsableNotes, isCalendarVersion, matches, newSince, plainSubject, presentChanges, releaseNotice, span, stats, ticketsOf, type Release } from '../src/lib/releases.ts'
+import { compare, displayHeadline, displayText, groupByDay, groupChanges, hasUsableNotes, isCalendarVersion, liveServer, matches, newSince, plainSubject, presentChanges, releaseNotice, span, stats, ticketsOf, type Release } from '../src/lib/releases.ts'
 
 const rel = (version: string, at: string, extra: Partial<Release> = {}): Release => ({
   version, tag: `v${version}`, release_channel: 'stable', release_sequence: 1, state: 'published', reserved_at: at, tagged_at: at, published_at: at,
@@ -205,4 +205,22 @@ test('an outdated page gets the update notice, including when the server version
   assert.equal(releaseNotice('dev', SERVER, 'nope'), 'missing')
   assert.equal(releaseNotice(null, SERVER, ''), null)
   assert.equal(releaseNotice(PAGE, 'dev', '260101120000.0.0'), 'missing')
+})
+
+test('a history cached before the deploy still says a newer version is live', () => {
+  assert.equal(liveServer(PAGE, SERVER), SERVER)
+  assert.equal(liveServer(SERVER, PAGE), SERVER)
+  assert.equal(liveServer(PAGE, null), PAGE)
+  assert.equal(liveServer(PAGE, ''), PAGE)
+  assert.equal(liveServer('dev', SERVER), SERVER)
+  assert.equal(liveServer(SERVER, 'dev'), SERVER)
+  // The poll already saw the deploy; the cached history still names this page.
+  assert.equal(releaseNotice(PAGE, PAGE, SERVER, SERVER), 'update')
+  assert.equal(releaseNotice(PAGE, PAGE, '', SERVER), 'update')
+  assert.equal(releaseNotice(PAGE, 'dev', SERVER, SERVER), 'update')
+  // A history that has already caught up stays ahead of an older poll.
+  assert.equal(releaseNotice(PAGE, SERVER, '', PAGE), 'update')
+  // Without the poll, a stale history still names a version it does not have.
+  assert.equal(releaseNotice(PAGE, PAGE, SERVER, null), 'missing')
+  assert.equal(releaseNotice(PAGE, PAGE, SERVER), 'missing')
 })

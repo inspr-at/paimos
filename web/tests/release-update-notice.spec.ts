@@ -36,10 +36,13 @@ test('an outdated page shows one newer-version notice when the server version is
   await expect(notices(page)).toHaveCount(1)
   const notice = notices(page)
   await expect(notice).toContainText('A newer version is live')
-  await expect(notice).toContainText(`this page still runs ${pageVersion}`)
-  await expect(notice).toContainText(`the server runs ${SERVER}`)
+  await expect(notice).toContainText('this page still runs')
+  await expect(notice).toContainText('the server runs')
+  await expect(notice.locator('.calendar-version').nth(0)).toHaveAttribute('aria-label', pageVersion)
+  await expect(notice.locator('.calendar-version').nth(1)).toHaveAttribute('aria-label', SERVER)
   await expect(notice.getByRole('button', { name: 'Reload' })).toBeVisible()
   await expect(sheet(page).getByText(/not in this build.s release history/)).toHaveCount(0)
+  await expect(sheet(page).locator('.running .calendar-version')).toHaveAttribute('aria-label', pageVersion)
   await expect(sheet(page).getByRole('option').first()).toHaveAttribute('aria-selected', 'true')
 })
 
@@ -55,7 +58,8 @@ test('a current page names a missing version and can dismiss it', async ({ page 
   const history = releaseHistory()
   await openHistory(page, history, history.current, ABSENT)
   await expect(notices(page)).toHaveCount(1)
-  await expect(notices(page)).toContainText(`${ABSENT} is not in this build`)
+  await expect(notices(page)).toContainText('is not in this build')
+  await expect(notices(page).locator('.calendar-version')).toHaveAttribute('aria-label', ABSENT)
   await expect(sheet(page).getByText(/newer version is live/)).toHaveCount(0)
   await notices(page).getByRole('button', { name: 'Dismiss' }).click()
   await expect(notices(page)).toHaveCount(0)
@@ -83,8 +87,72 @@ test('what’s new opens the one notice for a server version this build does not
   await expect(sheet(page)).toBeVisible()
   await expect(notices(page)).toHaveCount(1)
   await expect(notices(page)).toContainText('A newer version is live')
-  await expect(notices(page)).toContainText(`this page still runs ${pageVersion}`)
+  await expect(notices(page)).toContainText('this page still runs')
+  await expect(notices(page).locator('.calendar-version').nth(0)).toHaveAttribute('aria-label', pageVersion)
+  await expect(notices(page).locator('.calendar-version').nth(1)).toHaveAttribute('aria-label', SERVER)
   await expect(sheet(page).getByText(/not in this build.s release history/)).toHaveCount(0)
+})
+
+test('what’s new with the history cached before the deploy never shows the missing notice', async ({ page }) => {
+  const history = releaseHistory()
+  const pageVersion = history.current
+  await mockWork(page, fixtures())
+  const state = await mockReleases(page, history, { running: pageVersion })
+  const cached = page.waitForResponse(response => {
+    const path = new URL(response.url()).pathname
+    return path.endsWith('/api/releases') && response.ok()
+  })
+  await page.goto('/')
+  await expect(page.getByRole('list', { name: 'Projects' })).toBeVisible()
+  await cached
+  // The sheet refetches on open. Hold that response so it paints against the cache.
+  let releaseRefetch = () => {}
+  const held = new Promise<void>(resolve => { releaseRefetch = resolve })
+  let opened = false
+  await page.route('**/api/releases**', async route => {
+    const path = new URL(route.request().url()).pathname
+    if (/\/api\/releases\/[^/]+$/.test(path)) { await route.fallback(); return }
+    await held
+    opened = true
+    await route.fallback()
+  })
+  history.current = SERVER
+  state.server = SERVER
+  await page.evaluate(() => {
+    const seen: string[] = []
+    ;(window as unknown as { __notices?: string[] }).__notices = seen
+    const read = () => {
+      const text = document.querySelector('dialog .notice')?.textContent?.replace(/\s+/g, ' ').trim() ?? ''
+      if (text && seen[seen.length - 1] !== text) seen.push(text)
+    }
+    new MutationObserver(read).observe(document.body, { childList: true, subtree: true, characterData: true })
+  })
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+  const toast = page.locator('.toast').filter({ hasText: `updated to ${SERVER}` })
+  await expect(toast).toBeVisible()
+  try {
+    await toast.getByRole('button', { name: 'What’s new' }).click()
+    await expect(sheet(page)).toBeVisible()
+    await expect(notices(page)).toHaveCount(1)
+    await expect(notices(page)).toContainText('A newer version is live')
+    await expect(notices(page).locator('.calendar-version').nth(0)).toHaveAttribute('aria-label', pageVersion)
+    await expect(notices(page).locator('.calendar-version').nth(1)).toHaveAttribute('aria-label', SERVER)
+    await expect(sheet(page).getByText(/not in this build.s release history/)).toHaveCount(0)
+    await expect(sheet(page).locator('.running .calendar-version')).toHaveAttribute('aria-label', pageVersion)
+    const during = await page.evaluate(() => (window as unknown as { __notices?: string[] }).__notices ?? [])
+    expect(during.join('\n')).not.toMatch(/not in this build/)
+  } finally {
+    releaseRefetch()
+  }
+  await expect.poll(() => opened).toBe(true)
+  await expect(sheet(page).getByRole('listbox', { name: 'Releases, newest first' })).toBeVisible()
+  await expect(notices(page)).toHaveCount(1)
+  await expect(notices(page)).toContainText('A newer version is live')
+  await expect(notices(page).locator('.calendar-version').nth(1)).toHaveAttribute('aria-label', SERVER)
+  await expect(sheet(page).getByText(/not in this build.s release history/)).toHaveCount(0)
+  await expect(sheet(page).locator('.running .calendar-version')).toHaveAttribute('aria-label', pageVersion)
+  const after = await page.evaluate(() => (window as unknown as { __notices?: string[] }).__notices ?? [])
+  expect(after.join('\n')).not.toMatch(/not in this build/)
 })
 
 test.describe('screenshots', () => {
