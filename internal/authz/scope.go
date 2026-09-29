@@ -30,6 +30,7 @@ var ProjectFilteredRoutes = map[string]bool{
 	"GET /api/usage/dashboard":                    true,
 	"GET /api/projects":                           true,
 	"GET /api/nodes":                              true,
+	"GET /api/outcomes":                           true,
 	"GET /api/nodes/lookup":                       true,
 	"GET /api/nodes/tree":                         true,
 	"GET /api/search":                             true,
@@ -75,6 +76,7 @@ var ProjectDecidedRoutes = map[string]bool{
 	"GET /api/rules/merged":                          true,
 	"POST /api/rules/publish":                        true,
 	"POST /api/nodes":                                true,
+	"POST /api/outcomes":                             true,
 	"POST /api/relations":                            true,
 	"POST /api/knowledge":                            true,
 }

@@ -537,6 +537,7 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
       const hits = data.nodes.filter(n => n.title.toLowerCase().includes(q)).map(n => ({ node: { ...item(n, data) }, score: 0.9 }))
       return route.fulfill({ json: { items: hits, next_cursor: null } })
     }
+    if (path === '/api/outcomes' && method === 'GET') return route.fulfill({ json: { outcomes: [] } })
     return route.fulfill({ status: 404, json: { error: 'Unmocked route' } })
   })
   return calls
