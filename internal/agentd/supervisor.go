@@ -120,6 +120,7 @@ type Supervisor struct {
 	blockedAccounts   map[string]bool
 	probedAccounts    map[string]bool
 	loginRequired     map[string]bool
+	harnessFailed     map[string]bool
 	mu                sync.Mutex
 	api               API
 	journal           *localjournal.Journal[Record]
@@ -366,13 +367,28 @@ func (s *Supervisor) PollOnce(ctx context.Context) error {
 			continue
 		}
 		probe := adapters[account.Harness].(AccountProber)
-		available := probe.Probe(ctx, account.Key)
+		var available bool
+		var probeErr error
+		if detailed, ok := probe.(interface {
+			ProbeStatus(context.Context, string) (bool, error)
+		}); ok {
+			available, probeErr = detailed.ProbeStatus(ctx, account.Key)
+		} else {
+			available = probe.Probe(ctx, account.Key)
+		}
 		err := s.api.Probe(ctx, account.ID, s.daemonID, s.generation, available)
 		s.mu.Lock()
 		s.blockedAccounts[account.ID] = err != nil || !available
 		s.probedAccounts[account.ID] = err == nil && available
-		s.loginRequired[account.ID] = !available
+		s.loginRequired[account.ID] = !available && probeErr == nil
+		if s.harnessFailed == nil {
+			s.harnessFailed = map[string]bool{}
+		}
+		s.harnessFailed[account.ID] = probeErr != nil
 		s.mu.Unlock()
+		if probeErr != nil {
+			failures = append(failures, errors.New("harness failed to start"))
+		}
 		if err != nil {
 			failures = append(failures, errors.New("account probe unavailable"))
 		}

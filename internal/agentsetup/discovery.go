@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -123,15 +124,18 @@ type Candidate struct {
 	Login     string            `json:"-"`
 	Managed   bool              `json:"-"`
 	Grok      grokprobe.Binding `json:"-"`
+	PiNode    piprobe.Node      `json:"-"`
 }
 
 type Discovery struct {
 	Executor      Executor
 	LookPath      func(string) (string, error)
 	Home          string
+	NodePath      string
+	Workspace     string
 	CodexIdentity func(context.Context, string, string) (string, error)
 	GrokProbe     func(context.Context, grokprobe.Binding) (grokprobe.Identity, error)
-	PiProvider    func(context.Context, string, string, string) (string, error)
+	PiProvider    func(context.Context, string, string, string, string) (string, error)
 }
 
 var safeLabel = regexp.MustCompile(`^[^\x00-\x1f\x7f]{1,128}$`)
@@ -179,10 +183,17 @@ func (d Discovery) Detect(ctx context.Context, harness, accountContext string) (
 	c.Managed = strings.HasPrefix(physical, "/nix/store/") || strings.Contains(path, "/.nix-profile/")
 	versionCommand := Command{Path: physical, Args: []string{"--version"}}
 	if harness == "pi" {
-		versionCommand.Env = piprobe.Environment(c.Home)
+		c.PiNode, err = d.resolvePiNode(ctx, physical, c.Home)
+		if err != nil {
+			return c, err
+		}
+		versionCommand.Env = piprobe.Environment(c.Home, c.PiNode.Path)
 	}
 	raw, err := d.Executor.Run(ctx, versionCommand)
 	if err != nil {
+		if harness == "pi" {
+			return c, piprobe.ErrStart
+		}
 		return c, errors.New("harness version unavailable")
 	}
 	match := safeVersion.FindSubmatch(raw)
@@ -195,7 +206,10 @@ func (d Discovery) Detect(ctx context.Context, harness, accountContext string) (
 		if probe == nil {
 			probe = piprobe.Provider
 		}
-		provider, err := probe(ctx, c.Path, c.Home, accountContext)
+		provider, err := probe(ctx, c.Path, c.Home, accountContext, c.PiNode.Path)
+		if errors.Is(err, piprobe.ErrStart) {
+			return c, piprobe.ErrStart
+		}
 		if errors.Is(err, piprobe.ErrPrivateProfile) {
 			return c, piprobe.ErrPrivateProfile
 		}
@@ -261,6 +275,50 @@ func (d Discovery) Detect(ctx context.Context, harness, accountContext string) (
 	}
 	c.Login = "signed_in"
 	return c, nil
+}
+
+func (d Discovery) resolvePiNode(ctx context.Context, path, home string) (piprobe.Node, error) {
+	needed, err := piprobe.NeedsNode(path)
+	if err != nil || !needed {
+		return piprobe.Node{}, err
+	}
+	action := fmt.Errorf("%w; pi needs a pinned Node; pass --node-path to an installed Node executable outside the workspace", piprobe.ErrStart)
+	node := d.NodePath
+	if node == "" {
+		node, err = d.LookPath("node")
+		if err != nil {
+			return piprobe.Node{}, action
+		}
+	}
+	physical, err := pinnedRegular(node, d.Workspace, true)
+	if err != nil || filepath.Base(physical) != "node" {
+		return piprobe.Node{}, action
+	}
+	raw, err := d.Executor.Run(ctx, Command{Path: physical, Args: []string{"--version"}, Env: piprobe.Environment(home, physical)})
+	match := safeVersion.FindSubmatch(raw)
+	if err != nil || len(match) != 2 {
+		return piprobe.Node{}, action
+	}
+	return piprobe.Node{Path: physical, Version: string(match[1])}, nil
+}
+
+func validatePiNode(path, workspace string, node piprobe.Node) error {
+	needed, err := piprobe.NeedsNode(path)
+	if err != nil {
+		return err
+	}
+	if node.Path == "" && node.Version == "" && !needed {
+		return nil
+	}
+	physical, err := pinnedRegular(node.Path, workspace, true)
+	if err != nil || physical != node.Path || filepath.Base(physical) != "node" || node.Version == "" {
+		return piprobe.ErrStart
+	}
+	match := safeVersion.FindStringSubmatch(node.Version)
+	if len(match) != 2 || match[1] != node.Version {
+		return piprobe.ErrStart
+	}
+	return nil
 }
 
 func (d Discovery) detectGrok(ctx context.Context, accountContext string) (Candidate, error) {

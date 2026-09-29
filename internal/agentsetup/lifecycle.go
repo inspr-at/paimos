@@ -327,6 +327,11 @@ func (e *Engine) reconcile(ctx context.Context, s *snapshot) (Progress, error) {
 		local, err := e.Local.Status(ctx, "")
 		if err == nil && local.DaemonID == v.DaemonID {
 			observed := observedProgress(v, local)
+			if local.HarnessFailed {
+				p.Stage = "blocked"
+				p.Action = "An approved harness failed to start. Restore its pinned installation and interpreter, then resume setup."
+				return p, nil
+			}
 			if observed.State == "login_required" {
 				p.Stage = "login_required"
 				p.Action = "An approved vendor account is no longer signed in with its approved identity. Use normal vendor login, then resume setup."
@@ -430,6 +435,11 @@ func (e *Engine) AddHarness(ctx context.Context, candidates []Candidate) (Progre
 			return e.progress(s), errors.New("invalid Add harness account choice")
 		}
 		selected[c.Harness] = true
+		if c.Harness == "pi" {
+			if err := validatePiNode(c.Path, s.Request.Workspace, c.PiNode); err != nil {
+				return Progress{Stage: "blocked", Action: err.Error()}, err
+			}
+		}
 		for _, a := range s.View.Enrollments {
 			if a.State == "connected" && a.Harness == c.Harness && a.Label == c.Label {
 				return e.progress(s), errors.New("this harness account is already connected; no new request was created")
@@ -479,6 +489,11 @@ func (e *Engine) AddHarness(ctx context.Context, candidates []Candidate) (Progre
 
 func observedProgress(v View, local LocalStatus) *SetupProgress {
 	p := &SetupProgress{State: "provisioning"}
+	if local.HarnessFailed {
+		p.State = "setup_failed"
+		p.ErrorCode = "installation_failed"
+		return p
+	}
 	if local.LoginRequired {
 		p.State = "login_required"
 		p.ErrorCode = "login_required"

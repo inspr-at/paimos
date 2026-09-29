@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/grokprobe"
+	"github.com/inspr-at/paimos/internal/piprobe"
 )
 
 const snapshotName = "pairing.json"
@@ -32,20 +33,23 @@ func (c LocalCandidate) MarshalJSON() ([]byte, error) {
 	type plain LocalCandidate
 	return json.Marshal(struct {
 		plain
-		Grok grokprobe.Binding `json:"grok,omitempty"`
-	}{plain(c), c.Candidate.Grok})
+		Grok   grokprobe.Binding `json:"grok,omitempty"`
+		PiNode piprobe.Node      `json:"pi_node,omitempty"`
+	}{plain(c), c.Candidate.Grok, c.Candidate.PiNode})
 }
 func (c *LocalCandidate) UnmarshalJSON(raw []byte) error {
 	type plain LocalCandidate
 	var v struct {
 		plain
-		Grok grokprobe.Binding `json:"grok"`
+		Grok   grokprobe.Binding `json:"grok"`
+		PiNode piprobe.Node      `json:"pi_node"`
 	}
 	if err := json.Unmarshal(raw, &v); err != nil {
 		return err
 	}
 	*c = LocalCandidate(v.plain)
 	c.Candidate.Grok = v.Grok
+	c.Candidate.PiNode = v.PiNode
 	return nil
 }
 
@@ -57,6 +61,7 @@ type RuntimeAccount struct {
 	Identity  string            `json:"identity,omitempty"`
 	Path      string            `json:"path"`
 	Grok      grokprobe.Binding `json:"grok,omitempty"`
+	PiNode    piprobe.Node      `json:"pi_node,omitempty"`
 }
 type RuntimeConfig struct {
 	Schema        string           `json:"schema"`
@@ -114,6 +119,7 @@ type Progress struct {
 	RetryAfterSeconds int          `json:"retry_after_seconds,omitempty"`
 }
 type LocalStatus struct {
+	HarnessFailed                          bool
 	LoginRequired                          bool
 	VerificationUnavailable                []string
 	Ready                                  bool
@@ -243,6 +249,11 @@ func validateOptions(o Options) error {
 		}
 		if c.Harness == "claude" && (!filepath.IsAbs(o.NodePath) || !filepath.IsAbs(o.ClaudeSDKPath)) {
 			return errors.New("Claude requires pinned Node and Agent SDK paths")
+		}
+		if c.Harness == "pi" {
+			if err := validatePiNode(c.Path, o.Workspace, c.PiNode); err != nil {
+				return err
+			}
 		}
 		if c.Harness == "grok" {
 			if o.Platform.OS != "darwin" || o.Platform.Arch != "arm64" {
@@ -590,7 +601,7 @@ func (e *Engine) provision(ctx context.Context, s *snapshot) (result Progress, r
 						return e.progress(s), err
 					}
 				}
-				config.Accounts = append(config.Accounts, RuntimeAccount{a.Harness, a.AccountKey, a.AccountID, c.Home, c.Identity, c.Path, c.Candidate.Grok})
+				config.Accounts = append(config.Accounts, RuntimeAccount{a.Harness, a.AccountKey, a.AccountID, c.Home, c.Identity, c.Path, c.Candidate.Grok, c.Candidate.PiNode})
 				found = true
 				break
 			}
@@ -676,6 +687,18 @@ func ValidateRuntimeDependencies(c RuntimeConfig) error {
 	claude := false
 	for _, a := range c.Accounts {
 		claude = claude || a.Harness == "claude"
+		if a.Harness == "pi" {
+			if err := validatePiNode(a.Path, c.Workspace, a.PiNode); err != nil {
+				return err
+			}
+			if a.PiNode.Path != "" {
+				raw, err := (OSExecutor{}).Run(context.Background(), Command{Path: a.PiNode.Path, Args: []string{"--version"}, Env: piprobe.Environment(a.Home, a.PiNode.Path)})
+				match := safeVersion.FindSubmatch(raw)
+				if err != nil || len(match) != 2 || string(match[1]) != a.PiNode.Version {
+					return piprobe.ErrStart
+				}
+			}
+		}
 	}
 	if claude {
 		valid, err := (Discovery{}).ResolveClaudeDependencies(ClaudeDependencies{NodePath: c.NodePath, SDKPath: c.ClaudeSDKPath}, c.Workspace)

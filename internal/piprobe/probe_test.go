@@ -49,9 +49,18 @@ printf '%s\n' '{"id":"get_available_models","type":"response","command":"get_ava
 			}
 			t.Setenv("ANTHROPIC_API_KEY", "synthetic-not-a-credential")
 			t.Setenv("NODE_OPTIONS", "synthetic-not-an-option")
-			got, err := Provider(t.Context(), path, home, tc.expected)
+			got, err := Provider(t.Context(), path, home, tc.expected, "")
 			if got != tc.want || (err != nil) != (tc.want == "") {
 				t.Fatalf("provider=%q error=%v", got, err)
+			}
+			if tc.want == "" {
+				wantErr := ErrProviderUnavailable
+				if tc.name == "malformed" {
+					wantErr = ErrStart
+				}
+				if !errors.Is(err, wantErr) {
+					t.Fatal("probe failure classification changed", err)
+				}
 			}
 			if err != nil && strings.Contains(err.Error(), "private diagnostic") {
 				t.Fatal("RPC data leaked")
@@ -76,13 +85,13 @@ func TestProviderRefusesUnpinnedAndBoundsCancellation(t *testing.T) {
 	if err := os.Symlink(path, link); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Provider(t.Context(), link, home, ""); err == nil {
+	if _, err := Provider(t.Context(), link, home, "", ""); !errors.Is(err, ErrStart) {
 		t.Fatal("accepted unpinned executable")
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
 	defer cancel()
 	start := time.Now()
-	if _, err := Provider(ctx, path, home, ""); err == nil {
+	if _, err := Provider(ctx, path, home, "", ""); !errors.Is(err, ErrStart) {
 		t.Fatal("accepted silent RPC")
 	}
 	if time.Since(start) > 2*time.Second {
@@ -91,7 +100,7 @@ func TestProviderRefusesUnpinnedAndBoundsCancellation(t *testing.T) {
 	if err := os.Chmod(home, 0755); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Provider(t.Context(), path, home, ""); !errors.Is(err, ErrPrivateProfile) {
+	if _, err := Provider(t.Context(), path, home, "", ""); !errors.Is(err, ErrPrivateProfile) {
 		t.Fatal("public profile accepted")
 	}
 }

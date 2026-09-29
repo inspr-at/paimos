@@ -25,6 +25,7 @@ func pairedAdapters(c agentsetup.RuntimeConfig) ([]agentd.EnrolledAccount, []age
 	codexHomes, emails, claudeHomes, cursorIDs := map[string]string{}, map[string]string{}, map[string]string{}, map[string]string{}
 	claudeEmails := map[string]string{}
 	piHomes, piProviders := map[string]string{}, map[string]string{}
+	piNodes := map[string]piprobe.Node{}
 	grokBindings := map[string]agentd.GrokBinding{}
 	paths := map[string]string{}
 	accounts := []agentd.EnrolledAccount{}
@@ -48,6 +49,7 @@ func pairedAdapters(c agentsetup.RuntimeConfig) ([]agentd.EnrolledAccount, []age
 				return nil, nil, errors.New("pi private provider binding unavailable")
 			}
 			piHomes[a.Key], piProviders[a.Key] = a.Home, a.Identity
+			piNodes[a.Key] = a.PiNode
 		case agentd.Grok:
 			if a.Grok.BinaryPath != a.Path || a.Grok.PrincipalSHA256 != a.Identity || a.Grok.AuthPath == "" || a.Grok.ScratchRoot == "" {
 				return nil, nil, errors.New("native Grok private binding unavailable")
@@ -74,6 +76,7 @@ func pairedAdapters(c agentsetup.RuntimeConfig) ([]agentd.EnrolledAccount, []age
 	if p := paths[agentd.Pi]; p != "" {
 		a := agentd.NewPiAdapter(p, piHomes)
 		a.SetExpectedProviders(piProviders)
+		a.Nodes = piNodes
 		adapters = append(adapters, a)
 	}
 	if len(grokBindings) > 0 {
