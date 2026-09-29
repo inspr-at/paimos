@@ -11,7 +11,26 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+
+	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/tenant"
 )
+
+// maxLiveReplay bounds the backlog a live-mode reconnect replays (see stream).
+const maxLiveReplay = 1000
+
+// newest is the tenant's latest committed event ID (0 before the first).
+func (m *module) newest(ctx context.Context, p tenant.Principal) (int64, error) {
+	var id int64
+	err := db.InTenant(tenant.WithPrincipal(ctx, p), m.pool, p.TenantID, func(tx pgx.Tx) error {
+		err := tx.QueryRow(ctx, `SELECT last_id FROM event_counters WHERE tenant_id=$1`, p.TenantID).Scan(&id)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		return err
+	})
+	return id, err
+}
 
 func (m *module) stream(w http.ResponseWriter, r *http.Request) {
 	p, ok := principal(w, r)
@@ -19,6 +38,12 @@ func (m *module) stream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	after := int64(0)
+	// ?after= opts into live mode (AEON-326): "latest" starts at the newest
+	// event instead of replaying the log, and every connection opens with a
+	// stream.ready event naming the ID it resumes after. A browser reconnect
+	// sends Last-Event-ID, which wins over the query.
+	query := r.URL.Query()
+	live, latest := query.Has("after"), query.Get("after") == "latest"
 	if values, present := r.Header["Last-Event-Id"]; present {
 		var err error
 		if len(values) != 1 {
@@ -28,6 +53,13 @@ func (m *module) stream(w http.ResponseWriter, r *http.Request) {
 		after, err = parseID(values[0])
 		if err != nil {
 			writeError(w, 400, "invalid_request", "invalid Last-Event-ID")
+			return
+		}
+		latest = false
+	} else if live && !latest {
+		var err error
+		if after, err = parseID(query.Get("after")); err != nil {
+			writeError(w, 400, "invalid_request", "invalid after")
 			return
 		}
 	}
@@ -48,6 +80,22 @@ func (m *module) stream(w http.ResponseWriter, r *http.Request) {
 	if _, err = conn.Exec(r.Context(), "LISTEN aeon_events"); err != nil {
 		failure(w, err)
 		return
+	}
+	if live {
+		// Subscribed first, so nothing committed from here on is missed.
+		// Writers commit in ID order (they share the tenant counter).
+		newest, err := m.newest(r.Context(), p)
+		if err != nil {
+			failure(w, err)
+			return
+		}
+		// A resume point from another database, or one so far behind that a
+		// refetch is cheaper than the replay, restarts at the newest event;
+		// stream.ready then names an ID the client did not send, its cue to
+		// refetch what it shows.
+		if latest || after > newest || newest-after > maxLiveReplay {
+			after = newest
+		}
 	}
 	// Subscribe before replay to close the gap between reading and listening.
 	batch, err := m.read(r.Context(), p, "", after, 200)
@@ -71,6 +119,11 @@ func (m *module) stream(w http.ResponseWriter, r *http.Request) {
 	defer func() { _ = rc.SetWriteDeadline(time.Time{}) }()
 	if err := flush(": connected\n\n"); err != nil {
 		return
+	}
+	if live {
+		if err := flush(fmt.Sprintf("id: %d\nevent: stream.ready\ndata: {\"after\":%d}\n\n", after, after)); err != nil {
+			return
+		}
 	}
 	heartbeat := time.Now().Add(15 * time.Second)
 	for {
