@@ -42,27 +42,42 @@ ALTER TABLE inbox_message_deliveries ADD CONSTRAINT inbox_message_deliveries_rea
 -- policy), so events.Append's INSERT ... RETURNING would roll the caller back.
 -- Workspace-wide visibility is lifted for this one insert only and restored
 -- before returning (an error aborts the transaction, which discards it too);
--- it is limited to the current tenant, the System actor and these inbox types.
-CREATE FUNCTION aeon_inbox_system_event(target_tenant uuid, event_type text, event_after jsonb) RETURNS bigint
+-- it is limited to the current tenant, the System actor, these inbox types
+-- and a JSON object payload carrying each type's keys. search_path is pinned
+-- (pg_temp last) and every reference is schema-qualified, so a caller's
+-- temporary objects can never run while visibility is lifted.
+CREATE FUNCTION public.aeon_inbox_system_event(target_tenant uuid, event_type text, event_after jsonb) RETURNS bigint
 LANGUAGE plpgsql
+SET search_path = pg_catalog, public, pg_temp
 AS $$
 DECLARE
     actor uuid;
     event_id bigint;
-    visible text := coalesce(current_setting('aeon.visible_projects', true), '');
+    required text[];
+    visible text := coalesce(pg_catalog.current_setting('aeon.visible_projects', true), '');
 BEGIN
-    IF target_tenant IS DISTINCT FROM NULLIF(current_setting('aeon.tenant_id', true), '')::uuid THEN
+    IF target_tenant IS DISTINCT FROM nullif(pg_catalog.current_setting('aeon.tenant_id', true), '')::uuid THEN
         RAISE EXCEPTION 'system inbox event outside the current tenant' USING ERRCODE = '42501';
     END IF;
-    IF event_type NOT IN ('inbox.delivery_failed', 'inbox.receipt_failed', 'inbox.receipt_handed_off', 'inbox.sent', 'inbox.wake_queued') THEN
+    required := CASE event_type
+        WHEN 'inbox.delivery_failed' THEN ARRAY['message_id', 'reason', 'sender_principal_id', 'recipient_principal_id']
+        WHEN 'inbox.receipt_failed' THEN ARRAY['message_id', 'state', 'failure_reason']
+        WHEN 'inbox.receipt_handed_off' THEN ARRAY['message_id', 'state']
+        WHEN 'inbox.sent' THEN ARRAY['id', 'sender_principal_id', 'recipient_principal_id']
+        WHEN 'inbox.wake_queued' THEN ARRAY['message_id', 'target_id']
+    END;
+    IF required IS NULL THEN
         RAISE EXCEPTION 'system inbox event type % is not allowed', event_type USING ERRCODE = '42501';
     END IF;
-    actor := aeon_authz_system_actor(target_tenant);
-    PERFORM set_config('aeon.visible_projects', '*', true);
-    INSERT INTO events(tenant_id, actor_principal_id, type, after, at)
-    VALUES (target_tenant, actor, event_type, event_after, clock_timestamp())
+    IF event_after IS NULL OR pg_catalog.jsonb_typeof(event_after) <> 'object' OR NOT (event_after OPERATOR(pg_catalog.?&) required) THEN
+        RAISE EXCEPTION 'system inbox event % needs an object with %', event_type, required USING ERRCODE = '22023';
+    END IF;
+    actor := public.aeon_authz_system_actor(target_tenant);
+    PERFORM pg_catalog.set_config('aeon.visible_projects', '*', true);
+    INSERT INTO public.events(tenant_id, actor_principal_id, type, after, at)
+    VALUES (target_tenant, actor, event_type, event_after, pg_catalog.clock_timestamp())
     RETURNING id INTO event_id;
-    PERFORM set_config('aeon.visible_projects', visible, true);
+    PERFORM pg_catalog.set_config('aeon.visible_projects', visible, true);
     RETURN event_id;
 END;
 $$;

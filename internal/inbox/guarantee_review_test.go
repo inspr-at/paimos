@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 
@@ -323,5 +324,98 @@ func TestLegacyHealIsOneTime(t *testing.T) {
 	}
 	if state, _ := receiptState(t, w, stale.ID); state != "handed_off" || !sweeper.legacyHealed[w.sender.TenantID] {
 		t.Fatalf("legacy heal %s done=%t", state, sweeper.legacyHealed[w.sender.TenantID])
+	}
+}
+
+// Controlled interleaving (AEON-280 re-review): a session close holds the
+// session row, then fails its messages; an ack of one of them arrives in
+// between. Both take the session before the message, so the ack waits and
+// then reports the ended session: no 40P01 deadlock, no acknowledged message.
+func TestAckWaitsBehindSessionClose(t *testing.T) {
+	w, m, project, _ := messagingWorld(t)
+	session := messageTestSession(t, w, project, w.agent, "Closing worker")
+	msg := boundMessage(t, w, m, project, session, "closing")
+	ackDone := make(chan error, 1)
+	err := db.InTenant(dbtest.Seed(t.Context()), w.db.App, w.sender.TenantID, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `SELECT 1 FROM harness_sessions WHERE id=$1::uuid FOR UPDATE`, session); err != nil {
+			return err
+		}
+		go func() { _, err := m.base.ack(context.Background(), w.agent, msg.ID); ackDone <- err }()
+		// Wait until the ack is blocked on a lock, then continue the close.
+		for i := 0; ; i++ {
+			var waiting int
+			if err := w.db.Admin.QueryRow(t.Context(), `SELECT count(*) FROM pg_stat_activity WHERE datname=current_database() AND wait_event_type='Lock'`).Scan(&waiting); err != nil {
+				return err
+			}
+			if waiting > 0 {
+				break
+			}
+			if i > 400 {
+				return errors.New("ack never waited on the session lock")
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		if _, err := tx.Exec(t.Context(), `UPDATE harness_sessions SET phase='stopped',stopped_at=now() WHERE id=$1::uuid`, session); err != nil {
+			return err
+		}
+		return FailSessionMessages(t.Context(), tx, w.sender.TenantID, session)
+	})
+	if err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	ackErr := <-ackDone
+	var he *httpError
+	if !errors.As(ackErr, &he) || he.code != "session_ended" {
+		t.Fatalf("ack after close: %v", ackErr)
+	}
+	if state, reason := receiptState(t, w, msg.ID); state != "failed" || reason != ReasonSessionEnded {
+		t.Fatalf("receipt %s %s", state, reason)
+	}
+}
+
+// The System event helper runs with a pinned search_path and validates its
+// payload: a caller's temporary events table cannot capture the insert (or run
+// a default under lifted visibility), and non-object payloads are refused.
+func TestSystemEventHelperIsHardened(t *testing.T) {
+	w, _, project, _ := messagingWorld(t)
+	projectOnly(t, w, w.agent, project)
+	var captured, real int
+	err := db.InTenant(tenant.WithPrincipal(t.Context(), w.agent), w.db.App, w.agent.TenantID, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `CREATE FUNCTION pg_temp.probe() RETURNS bigint LANGUAGE sql AS 'SELECT count(*) FROM public.nodes'`); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `CREATE TEMP TABLE events (id bigserial, tenant_id uuid, actor_principal_id uuid, type text, after jsonb, at timestamptz, probe bigint DEFAULT pg_temp.probe()) ON COMMIT DROP`); err != nil {
+			return err
+		}
+		id, err := systemEvent(t.Context(), tx, w.agent.TenantID, "inbox.delivery_failed", map[string]any{"message_id": "m", "reason": "deadline", "sender_principal_id": "s", "recipient_principal_id": "r"})
+		if err != nil {
+			return err
+		}
+		if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM pg_temp.events`).Scan(&captured); err != nil {
+			return err
+		}
+		return w.db.Admin.QueryRow(t.Context(), `SELECT count(*) FROM public.events WHERE id=$1 AND type='inbox.delivery_failed'`, id).Scan(&real)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if captured != 0 {
+		t.Fatalf("temporary events table captured %d rows", captured)
+	}
+	for _, bad := range []any{42, "text", []string{"message_id"}, map[string]any{"message_id": "m"}} {
+		err := db.InTenant(dbtest.Seed(t.Context()), w.db.App, w.agent.TenantID, func(tx pgx.Tx) error {
+			_, err := systemEvent(t.Context(), tx, w.agent.TenantID, "inbox.delivery_failed", bad)
+			return err
+		})
+		if err == nil || !strings.Contains(err.Error(), "22023") {
+			t.Fatalf("payload %#v accepted: %v", bad, err)
+		}
+	}
+	err = db.InTenant(dbtest.Seed(t.Context()), w.db.App, w.agent.TenantID, func(tx pgx.Tx) error {
+		_, err := systemEvent(t.Context(), tx, w.agent.TenantID, "node.updated", map[string]any{"id": "x"})
+		return err
+	})
+	if err == nil || !strings.Contains(err.Error(), "42501") {
+		t.Fatalf("foreign event type accepted: %v", err)
 	}
 }
