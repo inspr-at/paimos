@@ -310,6 +310,17 @@ func TestDoubleBacktickCodeSpanIsNotEmphasis(t *testing.T) {
 	}
 }
 
+func TestIntrawordDoubleUnderscoreIsNotEmphasis(t *testing.T) {
+	if got := renderMarkdownInline("foo__bar"); got != "foo__bar" {
+		t.Fatalf("intraword underscores rendered %q", got)
+	}
+	assertNoDirectiveConflict(t, "Never delete foo__bar.", "Must delete foobar.")
+	same := directivePair(t, "Never delete foo__bar.", "Always delete foo__bar.")
+	if !hasCrossLayer(same, "delete foo__bar") {
+		t.Fatalf("identical intraword names missed: %+v", same.Contradictions)
+	}
+}
+
 func TestEmphasisStrippingKeepsIdentifiers(t *testing.T) {
 	assertNoDirectiveConflict(t, "Never delete foo_bar.", "Must delete foobar.")
 	assertNoDirectiveConflict(t, "Never delete `foo_bar`.", "Must delete `foobar`.")
