@@ -2,12 +2,13 @@
 <script setup lang="ts">
 import { computed, ref, useId } from 'vue'
 import BizIcon from '../business/BizIcon.vue'
-import { fileName, fileSummary, groupRules, lineLabel, setHeading, sourceText, type DoctrineFile } from '../../lib/doctrine'
+import { fileName, fileSummary, groupRules, lineLabel, setHeading, sourceText, type DoctrineFile, type DoctrineRule } from '../../lib/doctrine'
 
 // One doctrine file at the pinned commit, as a quiet collapsible row. Open, it
 // lists the rules under their headings: the TL;DR from git when there is one,
 // then the exact source lines, each linking to those lines at the commit.
-const props = defineProps<{ file: DoctrineFile }>()
+const props = defineProps<{ file: DoctrineFile; canPropose?: boolean }>()
+const emit = defineEmits<{ propose: [rule: DoctrineRule] }>()
 const open = ref(false)
 const id = useId()
 const groups = computed(() => open.value ? groupRules(props.file) : [])
@@ -39,7 +40,10 @@ const unmatched = computed(() => props.file.sidecar?.unmatched ?? [])
               <p v-if="rule.tldr" class="rule-tldr">{{ rule.tldr.en }}<span v-if="rule.tldr.check" class="check" data-tip="The rule changed after this TL;DR was written in git."> · may be outdated</span></p>
               <pre class="source" :class="{ quiet: !!rule.tldr }">{{ sourceText(rule) }}</pre>
             </div>
-            <a class="lines" :href="rule.url" target="_blank" rel="noopener noreferrer" :aria-label="`Open lines ${lineLabel(rule).slice(1)} of ${fileName(file.path)} in git`" :data-tip="`${file.path} ${lineLabel(rule)}`">{{ lineLabel(rule) }}</a>
+            <div class="rule-actions">
+              <button v-if="canPropose" class="btn sm ghost" type="button" @click="emit('propose', rule)">Propose change</button>
+              <a class="lines" :href="rule.url" target="_blank" rel="noopener noreferrer" :aria-label="`Open lines ${lineLabel(rule).slice(1)} of ${fileName(file.path)} in git`" :data-tip="`${file.path} ${lineLabel(rule)}`">{{ lineLabel(rule) }}</a>
+            </div>
           </li>
         </ol>
       </section>
@@ -82,10 +86,13 @@ const unmatched = computed(() => props.file.sidecar?.unmatched ?? [])
 .source { margin: 0; font-family: var(--mono); font-size: 12.5px; line-height: 1.55; color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; }
 .source.quiet { color: var(--ink-3); font-size: 12px; }
 .check { color: var(--ink-3); font-size: 12px; }
+.rule-actions { display: flex; align-items: center; flex-wrap: wrap; justify-content: flex-end; gap: 4px; }
 .lines { flex: none; padding: 1px 6px; border-radius: 6px; color: var(--ink-3); font-family: var(--mono); font-size: 11.5px; line-height: 20px; text-decoration: none; font-variant-numeric: tabular-nums; }
 @media (hover: hover) { .lines:hover { background: var(--surface-2); color: var(--teal-ink); } }
 .lines:focus-visible { box-shadow: var(--focus-ring); outline: none; }
 @media (max-width: 600px) {
+  .rule { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+  .rule-actions { justify-content: flex-start; }
   .names { flex-direction: column; align-items: flex-start; gap: 1px; }
   .name, .tldr { max-width: 100%; }
   .summary { margin-left: 0; }

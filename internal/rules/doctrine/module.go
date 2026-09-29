@@ -5,9 +5,9 @@
 // repositories it indexes and the commit each is pinned to. Rules are indexed
 // straight from the blobs at that commit with the AEON-250 importer grammar.
 // The only doctrine bytes Aeon holds are a cache keyed by that commit, which
-// the database empties when the pin moves. Nothing here edits doctrine;
-// proposing a change is a pull request (AEON-319). TL;DRs for these rules
-// live in git next to each file and are only displayed.
+// the database empties when the pin moves. Proposals edit the owning git
+// repository through a PR (AEON-319), never this cache. TL;DRs live in git
+// next to each file and are changed in the same proposal as their rule.
 package doctrine
 
 import (
@@ -36,6 +36,7 @@ import (
 type Options struct {
 	CredentialsDir string
 	Client         *http.Client
+	App            AppConfig
 }
 
 // Module serves the doctrine layer.
@@ -43,12 +44,13 @@ type Module struct {
 	pool        *pgxpool.Pool
 	credentials Credentials
 	client      *http.Client
+	app         AppConfig
 }
 
 var _ httpapi.Module = (*Module)(nil)
 
 func New(pool *pgxpool.Pool, opts Options) *Module {
-	return &Module{pool: pool, credentials: Credentials{Dir: opts.CredentialsDir}, client: opts.Client}
+	return &Module{pool: pool, credentials: Credentials{Dir: opts.CredentialsDir}, client: opts.Client, app: opts.App}
 }
 
 // fetchTimeout bounds one resolve or index against the repository host.
@@ -56,6 +58,11 @@ const fetchTimeout = 45 * time.Second
 
 func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/rules/doctrine", m.handle(m.layer))
+	mux.HandleFunc("GET /api/rules/doctrine/proposals", m.handle(m.listProposals))
+	mux.HandleFunc("POST /api/rules/doctrine/proposals", m.handle(m.propose))
+	mux.HandleFunc("POST /api/rules/doctrine/proposals/{proposalId}/refresh", m.handle(m.refreshProposal))
+	mux.HandleFunc("POST /api/rules/doctrine/proposals/{proposalId}/approve", m.handle(m.approveProposal))
+	mux.HandleFunc("POST /api/rules/doctrine/proposals/{proposalId}/pins", m.handle(m.reportPin))
 	mux.HandleFunc("POST /api/rules/doctrine/sources", m.handle(m.create))
 	mux.HandleFunc("PUT /api/rules/doctrine/sources/{sourceId}", m.handle(m.update))
 	mux.HandleFunc("DELETE /api/rules/doctrine/sources/{sourceId}", m.handle(m.remove))
@@ -92,6 +99,10 @@ func (m *Module) handle(fn func(*http.Request, tenant.Principal) (any, error)) h
 			writeFailure(w, fail(400, "invalid_request", "invalid source UUID"))
 			return
 		}
+		if id := r.PathValue("proposalId"); id != "" && (!workorders.UUID(id) || strings.ToLower(id) != id) {
+			writeFailure(w, fail(400, "invalid_request", "invalid proposal UUID"))
+			return
+		}
 		if m.pool == nil {
 			writeFailure(w, fail(503, "unavailable", "the doctrine layer is unavailable"))
 			return
@@ -99,6 +110,15 @@ func (m *Module) handle(fn func(*http.Request, tenant.Principal) (any, error)) h
 		r.Body = http.MaxBytesReader(w, r.Body, 16<<10)
 		out, err := fn(r, p)
 		if err != nil {
+			// A transaction timeout can follow a successful external write.
+			// Never promise "nothing changed" for a proposal operation.
+			if strings.HasPrefix(r.URL.Path, "/api/rules/doctrine/proposals") {
+				var known *failure
+				var decode *workorders.Error
+				if !errors.As(err, &known) && !errors.As(err, &decode) && !errors.Is(err, authz.ErrForbidden) && !errors.Is(err, errNoSource) && !errors.Is(err, ErrCredential) && !errors.Is(err, ErrGit) {
+					err = fail(503, "outcome_unknown", "The proposal outcome was not confirmed. Refresh, or retry the identical request UUID and input; GitHub may have accepted it.")
+				}
+			}
 			writeFailure(w, err)
 			return
 		}
@@ -136,7 +156,8 @@ func writeFailure(w http.ResponseWriter, err error) {
 // Layer is the git-backed doctrine layer: every configured repository at its
 // pinned commit.
 type Layer struct {
-	Sources []SourceView `json:"sources"`
+	Sources          []SourceView `json:"sources"`
+	ProposalsEnabled bool         `json:"proposals_enabled,omitempty"`
 }
 
 // SourceView is one repository at its pin. State is ready (indexed at the
@@ -194,6 +215,13 @@ func (m *Module) tx(ctx context.Context, p tenant.Principal, permission string, 
 		if _, err := tx.Exec(ctx, `SELECT set_config('lock_timeout','3s',true), set_config('statement_timeout','10s',true)`); err != nil {
 			return err
 		}
+		// Proposal mutations serialize with workspace access changes. Check
+		// authority after taking the same tenant lock used by role writers.
+		if permission == "rules.write" || permission == "rules.publish" {
+			if _, err := tx.Exec(ctx, `SELECT id FROM tenants WHERE id=$1 FOR UPDATE`, p.TenantID); err != nil {
+				return err
+			}
+		}
 		scope := authz.Scope{}
 		if permission == "rules.read" {
 			scope.AnyProject = true
@@ -238,7 +266,7 @@ func (m *Module) load(ctx context.Context, p tenant.Principal, permission string
 	if err != nil {
 		return Layer{}, err
 	}
-	out := Layer{Sources: []SourceView{}}
+	out := Layer{Sources: []SourceView{}, ProposalsEnabled: m.app.configured() && p.TenantID == m.app.TenantID}
 	for _, item := range all {
 		out.Sources = append(out.Sources, view(item.source, item.files))
 	}

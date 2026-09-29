@@ -31,10 +31,16 @@ type Config struct {
 	LinkKey []byte
 	// FilesDir is the attachment store root (AEON_FILES_DIR, default data/files).
 	FilesDir string
-	// DoctrineCredentialsDir holds host-provisioned read-only tokens for private
-	// doctrine repositories, one token file and <ref>.allowlist.json per reference
+	// DoctrineCredentialsDir holds host-provisioned doctrine read tokens and App
+	// keys, one credential file and <ref>.allowlist.json per reference
 	// (AEON_DOCTRINE_CREDENTIALS_DIR, AEON-318). Aeon stores only the names.
-	DoctrineCredentialsDir string
+	DoctrineCredentialsDir  string
+	DoctrineAppID           string
+	DoctrineInstallationID  string
+	DoctrineAppKeyRef       string
+	DoctrineAppTenantID     string
+	DoctrineGateLogin       string
+	DoctrineDCOAcknowledged bool
 }
 
 // FromEnv reads AEON_* variables. Empty optional values take their defaults.
@@ -52,7 +58,13 @@ func FromEnv() (Config, error) {
 		BootstrapTenantName: getenv("AEON_BOOTSTRAP_TENANT_NAME", "INSPR"),
 		FilesDir:            getenv("AEON_FILES_DIR", "data/files"),
 		// Only the directory path is read here; a token is read at fetch time.
-		DoctrineCredentialsDir: os.Getenv("AEON_DOCTRINE_CREDENTIALS_DIR"),
+		DoctrineCredentialsDir:  os.Getenv("AEON_DOCTRINE_CREDENTIALS_DIR"),
+		DoctrineAppID:           os.Getenv("AEON_DOCTRINE_APP_ID"),
+		DoctrineInstallationID:  os.Getenv("AEON_DOCTRINE_INSTALLATION_ID"),
+		DoctrineAppKeyRef:       os.Getenv("AEON_DOCTRINE_APP_KEY_REF"),
+		DoctrineAppTenantID:     os.Getenv("AEON_DOCTRINE_APP_TENANT_ID"),
+		DoctrineGateLogin:       os.Getenv("AEON_DOCTRINE_GATE_LOGIN"),
+		DoctrineDCOAcknowledged: os.Getenv("AEON_DOCTRINE_DCO_ACKNOWLEDGED") == "true",
 	}
 	switch cfg.Env {
 	case "dev", "prod":

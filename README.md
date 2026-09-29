@@ -137,6 +137,75 @@ token values in tenant configuration, API requests, logs or this repository.
 
 The dedicated `/api/rules` API stores layers, sets, rules and immutable version
 snapshots as nodes. Generic node/event APIs cannot read or mutate these resources.
+Git-backed doctrine rules (AEON-319) have **Propose change** when the server's
+GitHub App is enabled for the workspace. The editor creates a proposal branch
+and PR in the rule's owning public/private repo, changing its source and git
+TL;DR sidecar together. Public proposals run the `inspr-modules` leak patterns
+against the complete outgoing files and PR explanation before any GitHub write;
+identity-bearing public edits are refused, not silently copied across repos.
+Credential-shaped text is refused for either repository, including private.
+Git stays authoritative; the database holds request digests, PR references and
+audit metadata, never draft prose or credentials. Keep the same request UUID
+and input when retrying a lost response. Refresh reconciles an uncertain merge.
+
+Host provisioning (no App exists yet): set `AEON_DOCTRINE_APP_ID`,
+`AEON_DOCTRINE_INSTALLATION_ID`, `AEON_DOCTRINE_APP_KEY_REF`,
+`AEON_DOCTRINE_APP_TENANT_ID` and `AEON_DOCTRINE_GATE_LOGIN`. An operator must
+also set `AEON_DOCTRINE_DCO_ACKNOWLEDGED=true` after approving the App's
+contribution/sign-off policy; without it proposals stay disabled. The App's
+bot login and public noreply identity are resolved from GitHub, and commits
+carry that bot's matching DCO trailer (required by the public repo). No
+person's identity or address is copied into public commit metadata. The key reference
+names a PEM RSA key under `AEON_DOCTRINE_CREDENTIALS_DIR`, read only at call time.
+The operator must also provision `<key-ref>.allowlist.json` using the same
+`grants` format as read credentials above, with an explicit tenant/repository
+pair for each writable doctrine repo. Missing, invalid or revoked grants return
+`credential unavailable` before key use or any GitHub request. Proposal,
+refresh and approval operations recheck the grant. App configuration and tenant
+settings cannot grant access to a key by themselves. Every GitHub request,
+including PR writes, is pinned to `https://api.github.com` and refuses redirects.
+The App installation must select exactly `inspr-at/inspr-modules` and
+`inspr-at/inspr-doctrine-private`, with contents + pull requests write (and
+implicit metadata read). Each minted token is narrowed to the proposal
+repository alone and checked against that exact scope and live repository
+visibility. A private repo becoming public blocks publication. The configured tenant is the sole proposal writer; tenant settings
+cannot grant another workspace access to the central doctrine. The App must
+**not bypass branch protections**. Main must require CI and the independent
+cross-family gate so both remain enforced during a merge race. No direct-main
+write route exists.
+
+The independent repository gate account named by `AEON_DOCTRINE_GATE_LOGIN`
+must post an APPROVED PR review on the exact head, with its complete body:
+`aeon-doctrine-gate: {"verdict":"ok","head_sha":"<head>","checks_green":true,"author_family":"openai","reviewer_family":"anthropic"}`.
+It must independently verify required CI and the explicit cross-family review;
+Aeon cannot supply that evidence itself. Families must differ. Missing, stale,
+dismissed, same-family or negative evidence blocks approval. A person with
+workspace `rules.publish` approves that head; Aeon checks protected-main
+mergeability again and supplies the SHA to GitHub's merge endpoint. Branch
+protections remain the race-safe authority. This uses PR reviews because
+GitHub's checks/status APIs require extra App permissions beyond this ticket's
+scope ([GitHub permissions](https://docs.github.com/en/rest/commits/statuses#get-the-combined-status-for-a-specific-reference)).
+
+After a confirmed merge, Aeon sends `repository_dispatch` type
+`doctrine-release` with `proposal_id`, `merge_commit` and
+`requested_scheme: CalVer3`. The owning repo must install a receiver that
+deduplicates on proposal ID, performs its approved reservation/release flow,
+and publishes a release body line:
+`aeon-doctrine-release: {"proposal_id":"<id>","merge_commit":"<sha>","version_scheme":"CalVer3"}`.
+Aeon never reserves versions, changes consumer pins, or labels dispatch as a
+release. Refresh verifies release provenance and that its tag resolves to the
+merge or a descendant. Until the App, independent gate and release receiver
+are provisioned by the coordinator, the workflow remains disabled/pending.
+No foreign repository workflow was changed for this package.
+
+The state reads proposed → in review → merged → released. A person with
+`settings.manage` can report a verified machine pin through
+`POST /api/rules/doctrine/proposals/{id}/pins` using a SHA-256 machine identity
+and the observed release commit. The UI labels these as **reported** machines;
+this is operator evidence, not automatic fleet discovery, and never changes
+nixcfg, PHAROS or JANUS pins. New observations replace that machine's old pin
+for the repository. Review, merge, release and pin evidence is tenant-isolated.
+
 `rules.read` and `rules.write` are agent-grantable; `rules.publish` is high risk and
 person-only. Company edits require a person with workspace publish authority;
 project edits require that authority in the target project (or in an agent key's

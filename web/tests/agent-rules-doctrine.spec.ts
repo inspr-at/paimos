@@ -49,7 +49,7 @@ const PRIVATE_FAILED = {
 
 interface DoctrineMock { calls: { method: string; path: string; body?: unknown }[] }
 
-async function setup(page: Page, options: { manage: boolean; layer: { sources: unknown[] }; after?: { sources: unknown[] } }): Promise<DoctrineMock> {
+async function setup(page: Page, options: { manage: boolean; layer: { sources: unknown[]; proposals_enabled?: boolean }; after?: { sources: unknown[] } }): Promise<DoctrineMock> {
   await mockWork(page, fixtures())
   await mockSettings(page, settingsData())
   await mockRules(page)
@@ -191,4 +191,91 @@ test('screenshots of the doctrine layer at desk width', async ({ page }) => {
   await page.screenshot({ path: `${process.env.DOCTRINE_SHOTS}/page__1600__dark.png`, fullPage: true })
   await doctrine.getByRole('button', { name: 'Pin inspr-modules' }).click()
   await page.getByRole('dialog', { name: 'Pin inspr-modules' }).screenshot({ path: `${process.env.DOCTRINE_SHOTS}/doctrine-pin__1600__dark.png` })
+})
+
+test('propose a rule, recover a refused public edit, and approve a checked PR', async ({ page }) => {
+  await setup(page, { manage: true, layer: { sources: [READY], proposals_enabled: true } })
+  let proposal: Record<string, unknown> | undefined
+  const edits: Record<string, unknown>[] = []
+  let refused = false
+  await page.route('**/api/rules/doctrine/proposals**', route => {
+    const r = route.request()
+    const path = new URL(r.url()).pathname
+    if (r.method() === 'GET') return route.fulfill({ json: { proposals: proposal ? [proposal] : [] } })
+    if (path.endsWith('/refresh')) {
+      proposal = { ...proposal, state: 'in_review', gate_ready: true }
+      return route.fulfill({ json: proposal })
+    }
+    if (path.endsWith('/approve')) {
+      expect(r.postDataJSON()).toEqual({ head_sha: '2'.repeat(40) })
+      proposal = { ...proposal, state: 'merged', gate_ready: false, release_requested: true, merge_commit: '3'.repeat(40) }
+      return route.fulfill({ json: proposal })
+    }
+    const input = r.postDataJSON() as Record<string, unknown>
+    edits.push(input)
+    if (!refused) {
+      refused = true
+      return route.fulfill({ status: 422, json: { code: 'public_identity', error: 'This public proposal contains identity-bearing text. Generalise it or propose the private rule. Nothing was published.' } })
+    }
+    proposal = { id: input.request_id, source_id: READY.id, repository: READY.repository, path: input.path, rule_key: input.rule_key, state: 'proposed', head_sha: '2'.repeat(40), pr_number: 12, pr_url: 'https://github.com/inspr-at/inspr-modules/pull/12', proposed_by: 'person', created_at: '2026-09-29T10:00:00Z', gate_ready: false, pinned_machines: 0 }
+    return route.fulfill({ json: proposal })
+  })
+  await page.goto('/settings/agent-rules')
+  const doctrine = section(page)
+  await doctrine.getByRole('button', { name: /^AGENTS-KERNEL\.md/ }).click()
+  await doctrine.getByRole('button', { name: 'Propose change' }).first().click()
+  const dialog = page.getByRole('dialog', { name: 'Propose change' })
+  await expect(dialog.getByRole('textbox', { name: 'Rule', exact: true })).toHaveValue((READY.files[0]!.rules[0]!.source as string).replaceAll("\r\n", "\n"))
+  await dialog.getByRole('textbox', { name: 'TL;DR · English' }).fill('Keep credentials out of transcripts.')
+  await dialog.getByRole('textbox', { name: 'Why this change' }).fill('Contact operator@example.test')
+  await dialog.getByRole('button', { name: 'Create pull request' }).click()
+  await expect(dialog.getByRole('alert')).toContainText('Nothing was published')
+  await dialog.getByRole('textbox', { name: 'Why this change' }).fill('Clarify the reason.')
+  if (process.env.DOCTRINE_SHOTS) {
+    for (const width of [1600, 390]) {
+      await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
+      for (const theme of ['light', 'dark'] as const) {
+        await page.emulateMedia({ colorScheme: theme })
+        await dialog.screenshot({ path: `${process.env.DOCTRINE_SHOTS}/proposal__${width}__${theme}.png` })
+      }
+    }
+  }
+  await dialog.getByRole('button', { name: 'Create pull request' }).click()
+  await expect(dialog).toHaveCount(0)
+  expect(edits[0]?.request_id).toEqual(edits[1]?.request_id)
+  expect(edits[1]?.rule_sha256).toBe('a'.repeat(64))
+  await expect(doctrine.getByRole('link', { name: 'inspr-modules · PR #12' })).toBeVisible()
+  await expect(doctrine.getByRole('button', { name: 'Approve & merge' })).toHaveCount(0)
+  await doctrine.getByRole('button', { name: 'Refresh' }).click()
+  await doctrine.getByRole('button', { name: 'Approve & merge' }).click()
+  await expect(doctrine.getByText('Merged', { exact: true })).toBeVisible()
+  await expect(doctrine.getByText('Release requested; waiting for the repository.')).toBeVisible()
+  await expect(doctrine.getByText('Released', { exact: true })).toHaveCount(0)
+  if (process.env.DOCTRINE_SHOTS) {
+    for (const width of [1600, 390]) {
+      await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
+      for (const theme of ['light', 'dark'] as const) {
+        await page.emulateMedia({ colorScheme: theme })
+        await doctrine.locator('.proposals').scrollIntoViewIfNeeded()
+        await doctrine.locator('.proposals').screenshot({ path: `${process.env.DOCTRINE_SHOTS}/proposal-state__${width}__${theme}.png` })
+      }
+    }
+  }
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
+  expect(overflow).toBeLessThanOrEqual(1)
+  const axe = await new AxeBuilder({ page }).include('[aria-labelledby="doctrine-title"]').analyze()
+  expect(axe.violations.map(v => v.id)).toEqual([])
+})
+
+
+test('an agent can propose but never sees the human merge action', async ({ page }) => {
+  await setup(page, { manage: false, layer: { sources: [READY], proposals_enabled: true } })
+  await page.route('**/api/me', route => route.fulfill({ json: { principal: { id: 'agent-test', name: 'Builder', kind: 'agent', roles: ['admin'] }, tenant: { id: 't1', name: 'INSPR Studio' } } }))
+  await page.route('**/api/rules/doctrine/proposals', route => route.fulfill({ json: { proposals: [{ id: 'proposal', repository: READY.repository, pr_number: 12, pr_url: 'https://github.com/inspr-at/inspr-modules/pull/12', head_sha: '2'.repeat(40), state: 'in_review', gate_ready: true, pinned_machines: 0 }] } }))
+  await page.goto('/settings/agent-rules')
+  const doctrine = section(page)
+  await doctrine.getByRole('button', { name: /^AGENTS-KERNEL\.md/ }).click()
+  await expect(doctrine.getByRole('button', { name: 'Propose change' }).first()).toBeVisible()
+  await expect(doctrine.getByText('In review', { exact: true })).toBeVisible()
+  await expect(doctrine.getByRole('button', { name: 'Approve & merge' })).toHaveCount(0)
 })

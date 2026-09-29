@@ -261,7 +261,7 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 			inbox.New(pool),
 			harness.New(pool),
 			rules.New(pool),
-			doctrine.New(pool, doctrine.Options{CredentialsDir: cfg.DoctrineCredentialsDir}),
+			doctrine.New(pool, doctrine.Options{CredentialsDir: cfg.DoctrineCredentialsDir, App: doctrine.AppConfig{ID: cfg.DoctrineAppID, InstallationID: cfg.DoctrineInstallationID, KeyRef: cfg.DoctrineAppKeyRef, TenantID: cfg.DoctrineAppTenantID, GateLogin: cfg.DoctrineGateLogin, DCOAcknowledged: cfg.DoctrineDCOAcknowledged}}),
 			ticketwork.New(pool),
 			deliveryvote.New(pool),
 			usagedashboard.New(pool),

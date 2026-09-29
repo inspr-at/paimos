@@ -44,12 +44,14 @@ type Reader interface {
 	Blob(ctx context.Context, repository, sha string, size int) ([]byte, error)
 }
 
-// GitHub reads through the GitHub REST API. Token is a read-only credential
-// resolved from a reference for this one fetch; it is sent only to api.github.com and
+// GitHub uses the GitHub REST API. Token is resolved for this operation
+// through an operator-owned tenant/repository grant; it is sent only to api.github.com and
 // never logged, stored or put into an error.
 type GitHub struct {
-	Token  string
-	Client *http.Client
+	Token    string
+	Client   *http.Client
+	botName  string
+	botEmail string
 }
 
 // ErrGit is a failed read from the repository host. Its message is safe to
@@ -64,13 +66,13 @@ func (e *gitError) Unwrap() error { return ErrGit }
 func gitFail(format string, args ...any) error { return &gitError{msg: fmt.Sprintf(format, args...)} }
 
 const (
+	githubAPI   = "https://api.github.com"
 	maxTreeBody = 8 << 20
 	maxTreeRows = 20000
 )
 
-func (g *GitHub) get(ctx context.Context, path, what string, limit int64, into any) error {
-	// The only allowed origin is fixed. Tests inject a transport, never an origin.
-	const base = "https://api.github.com"
+// httpClient enforces the same redirect boundary for reads and PR writes.
+func (g *GitHub) httpClient() *http.Client {
 	client := http.Client{Timeout: 20 * time.Second}
 	if g.Client != nil {
 		client = *g.Client
@@ -78,7 +80,13 @@ func (g *GitHub) get(ctx context.Context, path, what string, limit int64, into a
 	// Copy the client so a supplied client's policy cannot weaken this boundary,
 	// and shared clients are not mutated. Redirect bodies/locations are not used.
 	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+path, nil)
+	return &client
+}
+
+func (g *GitHub) get(ctx context.Context, path, what string, limit int64, into any) error {
+	// The only allowed origin is fixed. Tests inject a transport, never an origin.
+	client := g.httpClient()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, githubAPI+path, nil)
 	if err != nil {
 		return gitFail("the %s request could not be built", what)
 	}
