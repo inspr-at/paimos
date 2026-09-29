@@ -6,9 +6,13 @@ package cli
 
 import (
 	"context"
+	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
 	"path/filepath"
-	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -198,34 +202,120 @@ func TestHarnessReadersRefuseCredentialFiles(t *testing.T) {
 }
 
 // TestHarnessReadersUseTheFence keeps every harness reader on the fence: no
-// heartbeat source file may open, read or stat a file any other way.
+// heartbeat source file may open, read or stat a file any other way, whether
+// by a direct call, an aliased os import or an os function value.
 func TestHarnessReadersUseTheFence(t *testing.T) {
-	files, err := filepath.Glob("harness_heartbeat*.go")
+	if bad := fenceGuardViolations(t, "."); len(bad) > 0 {
+		t.Errorf("files read outside openHarnessFile:\n%s", strings.Join(bad, "\n"))
+	}
+}
+
+// The guard itself catches the review's blind spots.
+func TestFenceGuardCatchesAliases(t *testing.T) {
+	dir := t.TempDir()
+	probes := map[string]string{
+		"harness_heartbeat_alias.go": "package cli\nimport files \"os\"\nfunc probeOpen(path string) (*files.File, error) { return files.Open(path) }\n",
+		"harness_heartbeat_value.go": "package cli\nimport \"os\"\nvar open = os.Open\n",
+		"harness_heartbeat_dot.go":   "package cli\nimport . \"os\"\nfunc probeRead(p string) ([]byte, error) { return ReadFile(p) }\n",
+		"harness_heartbeat_unix2.go": "package cli\nimport \"golang.org/x/sys/unix\"\nvar openat = unix.Openat\n",
+		"harness_heartbeat_raw.go":   "package cli\nfunc probeRaw(p string) { _, _ = openNoFollow(p) }\n",
+	}
+	for name, body := range probes {
+		fenceWrite(t, filepath.Join(dir, name), body)
+	}
+	bad := fenceGuardViolations(t, dir)
+	for name := range probes {
+		found := false
+		for _, line := range bad {
+			found = found || strings.HasPrefix(line, name+":")
+		}
+		if !found {
+			t.Errorf("guard missed %s: %v", name, bad)
+		}
+	}
+}
+
+func fenceGuardViolations(t *testing.T, dir string) []string {
+	t.Helper()
+	files, err := filepath.Glob(filepath.Join(dir, "harness_heartbeat*.go"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	direct := regexp.MustCompile(`\bos\.(Open|OpenFile|ReadFile|Stat|Lstat)\(|\bopenNoFollow\(`)
-	allowed := map[string]bool{
+	fenced := filepath.Join(dir, "harness_fence.go")
+	if _, err := os.Stat(fenced); err == nil {
+		files = append(files, fenced)
+	}
+	mechanics := map[string]bool{
 		// Definitions of the fence mechanics and the private state directory.
 		"harness_heartbeat_unix.go":  true,
 		"harness_heartbeat_other.go": true,
-		// /proc process identity, not a harness file.
-		"harness_heartbeat_linux.go": true,
+		// Process identity (/proc, proc_pidinfo), not a harness file.
+		"harness_heartbeat_linux.go":  true,
+		"harness_heartbeat_darwin.go": true,
 	}
-	for _, name := range files {
-		if strings.HasSuffix(name, "_test.go") || allowed[name] {
+	fileReaders := map[string]bool{"Open": true, "OpenFile": true, "ReadFile": true, "Stat": true, "Lstat": true, "ReadDir": true, "DirFS": true, "Readlink": true}
+	var bad []string
+	for _, path := range files {
+		name := filepath.Base(path)
+		if strings.HasSuffix(name, "_test.go") || mechanics[name] {
 			continue
 		}
-		raw, err := os.ReadFile(name)
+		fset := token.NewFileSet()
+		file, err := parser.ParseFile(fset, path, nil, 0)
 		if err != nil {
 			t.Fatal(err)
 		}
-		for i, line := range strings.Split(string(raw), "\n") {
-			if direct.MatchString(line) && !strings.Contains(line, "os.Lstat(root)") {
-				t.Errorf("%s:%d reads a file outside openHarnessFile: %s", name, i+1, strings.TrimSpace(line))
+		osNames := map[string]bool{}
+		dotOS := false
+		for _, imp := range file.Imports {
+			p, _ := strconv.Unquote(imp.Path.Value)
+			switch p {
+			case "os":
+				switch {
+				case imp.Name == nil:
+					osNames["os"] = true
+				case imp.Name.Name == ".":
+					dotOS = true
+				default:
+					osNames[imp.Name.Name] = true
+				}
+			case "syscall", "golang.org/x/sys/unix":
+				bad = append(bad, fmt.Sprintf("%s:%d imports %s", name, fset.Position(imp.Pos()).Line, p))
 			}
 		}
+		// Directory checks on a harness root (os.Lstat(root), os.ReadDir(root))
+		// list names only; every file they lead to is opened through the fence.
+		rootCall := map[ast.Node]bool{}
+		ast.Inspect(file, func(n ast.Node) bool {
+			call, ok := n.(*ast.CallExpr)
+			if !ok || len(call.Args) != 1 {
+				return true
+			}
+			sel, ok := call.Fun.(*ast.SelectorExpr)
+			arg, argOK := call.Args[0].(*ast.Ident)
+			if ok && argOK && arg.Name == "root" && (sel.Sel.Name == "Lstat" || sel.Sel.Name == "ReadDir") {
+				rootCall[sel] = true
+			}
+			return true
+		})
+		ast.Inspect(file, func(n ast.Node) bool {
+			switch v := n.(type) {
+			case *ast.SelectorExpr:
+				if x, ok := v.X.(*ast.Ident); ok && osNames[x.Name] && fileReaders[v.Sel.Name] && !rootCall[v] {
+					bad = append(bad, fmt.Sprintf("%s:%d uses %s.%s", name, fset.Position(v.Pos()).Line, x.Name, v.Sel.Name))
+				}
+			case *ast.Ident:
+				if dotOS && fileReaders[v.Name] {
+					bad = append(bad, fmt.Sprintf("%s:%d uses dot-imported os.%s", name, fset.Position(v.Pos()).Line, v.Name))
+				}
+				if v.Name == "openNoFollow" && name != "harness_fence.go" {
+					bad = append(bad, fmt.Sprintf("%s:%d uses openNoFollow outside the fence", name, fset.Position(v.Pos()).Line))
+				}
+			}
+			return true
+		})
 	}
+	return bad
 }
 
 // Round 3 review case: names a case- and normalization-insensitive
