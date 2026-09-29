@@ -303,6 +303,53 @@ test.describe('phones', () => {
       await expect(menu.getByRole('menuitemradio', { name: 'Dark' })).toHaveAttribute('aria-checked', 'true')
     })
   }
+  // Measured, not counted: every width × Business on/off × home and a ticket page.
+  for (const width of [375, 390]) for (const business of [false, true]) for (const path of ['/', '/p/PHAROS/PHAROS-11?view=full']) {
+    const ticket = path !== '/'
+    test(`${width} px, Business ${business ? 'on' : 'off'}, ${ticket ? 'ticket' : 'home'}: the key is whole and the moon shows whenever it fits`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 844 })
+      await page.emulateMedia({ colorScheme: 'light' })
+      await signIn(page, 'admin', { business })
+      await page.goto(path)
+      await expect(page.getByRole('navigation', { name: 'Places' }).getByRole('link')).toHaveCount(business ? 3 : 2)
+      if (ticket) {
+        const key = page.getByRole('navigation', { name: 'Breadcrumb' }).locator('.crumb.current')
+        await expect(key).toHaveText('PHAROS-11')
+        await expect.poll(() => key.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true)
+      } else await expect(page.getByRole('list', { name: 'Projects' })).toBeVisible()
+      const moon = page.getByRole('button', { name: 'Switch to dark theme' })
+      // Only three places beside a ticket key leave no room for it at these widths.
+      if (business && ticket) {
+        await expect(moon).toBeHidden()
+        // It truly would not fit: the free room is less than a button and its gap.
+        const room = await page.evaluate(() => {
+          const header = document.querySelector<HTMLElement>('.app-header')!
+          return document.querySelector<HTMLElement>('.app-header .spacer')!.getBoundingClientRect().width - (44 + parseFloat(getComputedStyle(header).columnGap))
+        })
+        expect(room).toBeLessThan(0)
+        await openAccount(page)
+        await expect(page.getByRole('menu', { name: 'Account' }).getByRole('menuitem').first()).toHaveAccessibleName('Switch to dark theme')
+      } else {
+        await expect(moon).toBeVisible()
+        const box = (await moon.boundingBox())!
+        expect(Math.round(box.width)).toBe(44)
+        expect(box.x + box.width).toBeLessThanOrEqual(width)
+        await openAccount(page)
+        await expect(page.getByRole('menu', { name: 'Account' }).getByRole('menuitem').first()).toHaveAccessibleName('Personal settings')
+      }
+      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width)
+    })
+  }
+  test('the moon comes back when the page leaves room for it', async ({ page }) => {
+    await page.setViewportSize({ width: 375, height: 844 })
+    await page.emulateMedia({ colorScheme: 'light' })
+    await signIn(page, 'admin', { business: true })
+    await page.goto('/p/PHAROS/PHAROS-11?view=full')
+    await expect(page.getByRole('button', { name: 'Switch to dark theme' })).toBeHidden()
+    await page.getByRole('navigation', { name: 'Places' }).getByRole('link', { name: 'Projects' }).click()
+    await expect(page).toHaveURL('/')
+    await expect(page.getByRole('button', { name: 'Switch to dark theme' })).toBeVisible()
+  })
   for (const [width, business] of [[390, false], [440, true], [1600, true]] as const) {
     test(`the moon stays in the header at ${width}${business ? ' with three places' : ''}`, async ({ page }) => {
       await page.setViewportSize({ width, height: 844 })

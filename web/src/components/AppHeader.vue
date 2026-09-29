@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { brand, pageName } from '../lib/brand'
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import mark from '../assets/brand/aeon-mark.svg'
 import { useSession } from '../stores/session'
@@ -103,15 +103,40 @@ watch(() => session.identity?.principal.id, id => {
   void agents.loadNeeds(true)
   void business.loadPlugins(true)
 }, { immediate: true })
+// Phones: the moon steps aside only when the breadcrumb's page (a ticket key) would
+// otherwise clip, and comes back as soon as the free room holds it (AEON-312). The
+// decision is measured, never guessed from the number of places; its quick toggle
+// then leads the avatar sheet.
+const header = ref<HTMLElement>()
+const moonAway = ref(false)
+const narrow = window.matchMedia('(max-width: 600px)')
+function fitMoon() {
+  const el = header.value
+  if (!el || !narrow.matches) { moonAway.value = false; return }
+  const crumb = el.querySelector<HTMLElement>('.crumbs > .crumb.current')
+  const overflow = crumb ? crumb.scrollWidth - crumb.clientWidth : 0
+  if (!moonAway.value) { if (overflow > 0.5) moonAway.value = true; return }
+  const spacer = el.querySelector<HTMLElement>('.spacer')
+  const gap = parseFloat(getComputedStyle(el).columnGap) || 0
+  if (spacer && spacer.getBoundingClientRect().width - Math.max(0, overflow) >= 44 + gap) moonAway.value = false
+}
+let fitFrame = 0
+function refit() { cancelAnimationFrame(fitFrame); fitFrame = requestAnimationFrame(() => { fitMoon(); fitFrame = requestAnimationFrame(fitMoon) }) }
+const resized = new ResizeObserver(refit)
+const crumbsChanged = new MutationObserver(refit)
+watch([() => route.fullPath, () => places.value.length, navReady], () => { void nextTick(refit) })
 onMounted(() => {
+  if (header.value) { resized.observe(header.value); crumbsChanged.observe(header.value, { childList: true, subtree: true, characterData: true }) }
+  narrow.addEventListener('change', refit)
+  refit()
   window.addEventListener('keydown', shortcut); window.addEventListener('keydown', placeKeys, true)
   needsPoll.start()
 })
-onBeforeUnmount(() => { window.removeEventListener('keydown', shortcut); window.removeEventListener('keydown', placeKeys, true); needsPoll.stop() })
+onBeforeUnmount(() => { resized.disconnect(); crumbsChanged.disconnect(); narrow.removeEventListener('change', refit); cancelAnimationFrame(fitFrame); window.removeEventListener('keydown', shortcut); window.removeEventListener('keydown', placeKeys, true); needsPoll.stop() })
 </script>
 
 <template>
-  <header class="app-header">
+  <header ref="header" class="app-header">
     <RouterLink class="lockup" to="/" :aria-label="`${brand.wordmark} home`" :class="{ compact: !!projectKey || !!pageTitle || !!settingsSection || businessCrumbs.length > 0 }">
       <span class="mark-backing"><img :src="mark" width="26" height="26" alt="" /></span>
       <span class="wordmark">{{ brand.product }}<sup>{{ brand.release_name }}</sup></span>
@@ -179,7 +204,7 @@ onBeforeUnmount(() => { window.removeEventListener('keydown', shortcut); window.
       <span class="pill-keys"><KeyCap k="mod" /><KeyCap k="K" /></span>
     </button>
     <!-- Quick light or dark; the avatar menu has the full choice, System included. -->
-    <button class="icon-btn header-btn theme-btn" type="button" :aria-label="dark ? 'Switch to light theme' : 'Switch to dark theme'" :data-tip="dark ? 'Light theme' : 'Dark theme'" @click="toggleTheme()">
+    <button class="icon-btn header-btn theme-btn" :class="{ away: moonAway }" type="button" :aria-label="dark ? 'Switch to light theme' : 'Switch to dark theme'" :data-tip="dark ? 'Light theme' : 'Dark theme'" @click="toggleTheme()">
       <AppIcon :name="dark ? 'sun' : 'moon'" />
     </button>
     <AppMenu />
@@ -285,11 +310,8 @@ onBeforeUnmount(() => { window.removeEventListener('keydown', shortcut); window.
   .pill-text, .pill-keys { display: none; }
   .app-header :deep(.header-btn) { width: 44px; height: 44px; }
 }
-/* The narrowest phones with all three places: the moon gives its room to the
-   breadcrumb (a ticket key stays whole) and becomes the first row of the avatar
-   sheet instead (AEON-312). With two places it stays in the header. */
-@media (max-width: 430px) {
-  .app-header:has(.places > .place:nth-child(3)) { gap: 2px; padding: 0 8px; }
-  .app-header:has(.places > .place:nth-child(3)) .theme-btn { display: none; }
-}
+/* The narrowest phones: round buttons sit close, as the places do, so a ticket
+   key keeps its room. The moon steps aside only when measured room runs out. */
+@media (max-width: 430px) { .app-header { gap: 2px; padding: 0 8px; } }
+@media (max-width: 600px) { .theme-btn.away { display: none; } }
 </style>
