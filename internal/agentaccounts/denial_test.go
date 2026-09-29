@@ -303,19 +303,19 @@ func (f *denialFixture) recover(start, finish time.Time, outcome string) {
 	w := windows[0]
 	run := insertRun(f.t, f.person, f.runner, f.profile)
 	f.seed(func(tx pgx.Tx) error {
+		status := "failed"
+		if outcome == "completed" {
+			status = "completed"
+		}
+		if _, err := tx.Exec(f.t.Context(), `UPDATE agent_runs SET account_id=$2,status=$3,started_at=$4,ended_at=$5 WHERE id=$1`, run, f.account.ID, status, start, finish); err != nil {
+			return err
+		}
 		var windowID string
 		if err := tx.QueryRow(f.t.Context(), `INSERT INTO account_allowance_windows(tenant_id,account_id,starts_at,ends_at,unit,allowance,pace_model,capacity_kind,capacity_read_at,capacity_bucket)
  VALUES($1,$2,$3,$4,'percent',1,'unrestricted','refresh',$3,$5) RETURNING id::text`, f.person.TenantID, f.account.ID, start, w.EndsAt, w.capacityBucket).Scan(&windowID); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(f.t.Context(), `INSERT INTO account_reservations(tenant_id,run_id,window_id,reserved_units,state) VALUES($1,$2,$3,1,'released')`, f.person.TenantID, run, windowID); err != nil {
-			return err
-		}
-		status := "failed"
-		if outcome == "completed" {
-			status = "completed"
-		}
-		if _, err := tx.Exec(f.t.Context(), `UPDATE agent_runs SET account_id=$2,status=$3,started_at=$4,ended_at=$5 WHERE id=$1`, run, f.account.ID, status, start, finish); err != nil {
 			return err
 		}
 		if outcome == "vendor_limit" {
