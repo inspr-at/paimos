@@ -990,7 +990,7 @@ paths:
     put:
       operationId: putReleasePresentation
       summary: Set how a release introduces itself (theme, headline, intro)
-      description: "AEON-305. Stores the theme (kicker), headline and intro in English and German for the served product project, keyed by version. Requires releases.deploy on that project from an active person. English theme and headline are required; German fields may be empty and readers fall back to English. Theme and headline are one line. Writing identical text changes nothing. Every change records one release.presentation_set event with before and after. The offline equivalent is aeon release-notes present."
+      description: "AEON-305. Stores the theme (kicker), headline and intro in English and German for the served product project, keyed by version. Requires an active person with releases.deploy on that project; agents are denied (403) whatever their role or key scopes. English theme and headline are required; German fields may be empty and readers fall back to English. Theme and headline are one line. Writing identical text changes nothing. Every change records one release.presentation_set event with before and after. The offline equivalent is aeon release-notes present."
       requestBody:
         required: true
         content:
@@ -1012,7 +1012,7 @@ paths:
     delete:
       operationId: deleteReleasePresentation
       summary: Remove a release's presentation
-      description: Requires releases.deploy on the served product project. Records one release.presentation_cleared event; removing nothing records nothing.
+      description: Requires an active person with releases.deploy on the served product project; agents are denied (403). Records one release.presentation_cleared event; removing nothing records nothing.
       responses:
         '200':
           description: The change

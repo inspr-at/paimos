@@ -62,7 +62,7 @@ var (
 	// ErrPresentationConflict means expected_revision no longer matches.
 	ErrPresentationConflict = errors.New("release presentation changed since it was read")
 	// ErrPresentationDenied means the actor may not present releases of this project.
-	ErrPresentationDenied = errors.New("presenting releases requires releases.deploy on the project")
+	ErrPresentationDenied = errors.New("presenting releases requires an active person with releases.deploy on the project")
 )
 
 func invalid(format string, args ...any) error {
@@ -121,9 +121,14 @@ func (in PresentationInput) same(p Presentation) bool {
 		in.HeadlineDE == p.HeadlineDE && in.IntroEN == p.IntroEN && in.IntroDE == p.IntroDE
 }
 
-// AuthorizePresentation admits an active person or agent holding
-// releases.deploy on the project, the same authority that ships its releases.
+// AuthorizePresentation admits only an active person holding releases.deploy
+// on the project, the same authority that ships its releases. Presentations are
+// person-authored copy: agents are denied whatever their role or key scopes,
+// and the stored principal kind decides, not the caller's claim.
 func AuthorizePresentation(ctx context.Context, tx pgx.Tx, actor tenant.Principal, projectID string) error {
+	if actor.Kind != tenant.Person {
+		return ErrPresentationDenied
+	}
 	var kind, status string
 	if err := tx.QueryRow(ctx, `SELECT kind,status FROM principals WHERE tenant_id=$1 AND id=$2`, actor.TenantID, actor.ID).Scan(&kind, &status); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -131,7 +136,7 @@ func AuthorizePresentation(ctx context.Context, tx pgx.Tx, actor tenant.Principa
 		}
 		return err
 	}
-	if status != "active" || (kind != string(tenant.Person) && kind != string(tenant.Agent)) {
+	if status != "active" || kind != string(tenant.Person) {
 		return ErrPresentationDenied
 	}
 	if err := authz.RequireTx(ctx, tx, actor, "releases.deploy", authz.Scope{ProjectID: projectID}); err != nil {

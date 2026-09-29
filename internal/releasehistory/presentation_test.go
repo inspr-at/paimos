@@ -50,6 +50,7 @@ type presentationFixture struct {
 	db       *dbtest.DB
 	admin    tenant.Principal
 	member   tenant.Principal
+	agent    tenant.Principal
 	stranger tenant.Principal
 	project  string
 }
@@ -59,6 +60,7 @@ func newPresentationFixture(t *testing.T) presentationFixture {
 	database := dbtest.Open(t)
 	ctx := dbtest.Seed(t.Context())
 	f := presentationFixture{db: database}
+	var agent string
 	mk := func(slug string) (tenantID, admin, member, project string) {
 		tenantID, err := tenantbootstrap.Create(ctx, database.App, slug, slug)
 		if err != nil {
@@ -71,6 +73,11 @@ func newPresentationFixture(t *testing.T) presentationFixture {
 			if err := tx.QueryRow(ctx, `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'person','Member') RETURNING id::text`, tenantID).Scan(&member); err != nil {
 				return err
 			}
+			if agent == "" {
+				if err := tx.QueryRow(ctx, `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'agent','Release agent') RETURNING id::text`, tenantID).Scan(&agent); err != nil {
+					return err
+				}
+			}
 			return tx.QueryRow(ctx, `INSERT INTO nodes(tenant_id,kind_id,key,title,fields) SELECT $1,id,'PRJ-1','Aeon','{"project_key":"AEON"}'::jsonb FROM node_kinds WHERE slug='project' RETURNING id::text`, tenantID).Scan(&project)
 		}); err != nil {
 			t.Fatal(err)
@@ -80,6 +87,9 @@ func newPresentationFixture(t *testing.T) presentationFixture {
 		return
 	}
 	tenantID, admin, member, project := mk("present-a")
+	// An admin agent whose key carries releases.deploy: still not a presenter.
+	dbtest.BindRole(t, database, tenantID, agent, "admin")
+	f.agent = tenant.Principal{ID: agent, TenantID: tenantID, Kind: tenant.Agent, Scopes: []string{"releases.deploy", "releases.read"}}
 	f.admin = tenant.Principal{ID: admin, TenantID: tenantID, Kind: tenant.Person}
 	f.member = tenant.Principal{ID: member, TenantID: tenantID, Kind: tenant.Person}
 	f.project = project
@@ -127,6 +137,17 @@ func TestPresentationAPIWritesEventsAndIsServedPerTenant(t *testing.T) {
 
 	if w := call(f.member, "PUT", "/api/releases/"+version+"/presentation", body); w.Code != http.StatusForbidden {
 		t.Fatalf("member: %d %s", w.Code, w.Body)
+	}
+	// Agents are denied even with the admin role and a releases.deploy key scope,
+	// and claiming to be a person does not help: the stored kind decides.
+	spoofed := f.agent
+	spoofed.Kind = tenant.Person
+	for _, p := range []tenant.Principal{f.agent, spoofed} {
+		for _, method := range []string{"PUT", "DELETE"} {
+			if w := call(p, method, "/api/releases/"+version+"/presentation", body); w.Code != http.StatusForbidden {
+				t.Fatalf("agent %s (kind %s): %d %s", method, p.Kind, w.Code, w.Body)
+			}
+		}
 	}
 	if presentationOf(f.admin) != nil {
 		t.Fatal("presentation before any write")
