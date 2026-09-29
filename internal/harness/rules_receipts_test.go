@@ -352,7 +352,7 @@ func TestRulesReceiptRejectsUnboundedOrAuthorityClaims(t *testing.T) {
 		func(m map[string]any) { m["version"] = "260230100000.0.0" },
 		func(m map[string]any) { m["body_sha256"] = "wrong" },
 		func(m map[string]any) { m["body_sha256"] = strings.Repeat("a", 9000) },
-		func(m map[string]any) { m["byte_size"] = 12001 },
+		func(m map[string]any) { m["byte_size"] = rules.CeilingBytes + 1 },
 		func(m map[string]any) { m["byte_size"] = 0 },
 		func(m map[string]any) { delete(m, "byte_size") },
 		func(m map[string]any) { m["source"] = "published" },

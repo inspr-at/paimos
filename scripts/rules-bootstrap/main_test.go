@@ -285,7 +285,7 @@ func TestUnsafeFiles(t *testing.T) {
 			case "state-bound":
 				write(t, f.b.State, bytes.Repeat([]byte("a"), rules.MaxCacheBytes+1))
 			case "output-bound":
-				write(t, f.b.Output, bytes.Repeat([]byte("a"), rules.MaxBytes+1))
+				write(t, f.b.Output, bytes.Repeat([]byte("a"), rules.CeilingBytes+1))
 			case "lease-bound":
 				write(t, f.b.LeaseFile, bytes.Repeat([]byte("a"), 64*1024+1))
 			case "owner":
