@@ -108,6 +108,121 @@ func TestCorrectionRejectsEncodedContact(t *testing.T) {
 	}
 }
 
+func TestCorrectionContactFilterFailsClosed(t *testing.T) {
+	good := correctionIntake{
+		Competitor: "Northwind",
+		Aspect:     "Owner assembly",
+		Statement:  "The public page quotes the wrong line.",
+		SourceURL:  "https://northwind.example/help",
+	}
+	with := func(edit func(*correctionIntake)) correctionIntake {
+		in := good
+		edit(&in)
+		return in
+	}
+	cases := []struct {
+		name   string
+		raw    string
+		in     correctionIntake
+		reject bool
+	}{
+		{
+			name:   "aspect mixed percent",
+			raw:    "100% reader%40example.com",
+			in:     with(func(in *correctionIntake) { in.Aspect = "100% reader%40example.com" }),
+			reject: true,
+		},
+		{
+			name:   "statement mixed percent",
+			raw:    "100% certain: contact reader%40example.com",
+			in:     with(func(in *correctionIntake) { in.Statement = "100% certain: contact reader%40example.com" }),
+			reject: true,
+		},
+		{
+			name: "source url mixed percent",
+			raw:  "https://northwind.example/?e=reader%40example.com&percent=100%",
+			in: with(func(in *correctionIntake) {
+				in.SourceURL = "https://northwind.example/?e=reader%40example.com&percent=100%"
+			}),
+			reject: true,
+		},
+		{
+			name:   "five-deep percent",
+			raw:    "reader%2525252540example.com",
+			in:     with(func(in *correctionIntake) { in.Aspect = "reader%2525252540example.com" }),
+			reject: true,
+		},
+		{
+			name:   "decimal entity",
+			raw:    "reader&#64;example.com",
+			in:     with(func(in *correctionIntake) { in.Aspect = "reader&#64;example.com" }),
+			reject: true,
+		},
+		{
+			name:   "named commat entity",
+			raw:    "reader&commat;example.com",
+			in:     with(func(in *correctionIntake) { in.Aspect = "reader&commat;example.com" }),
+			reject: true,
+		},
+		{
+			name:   "fullwidth at",
+			raw:    "reader\uFF20example.com",
+			in:     with(func(in *correctionIntake) { in.Aspect = "reader\uFF20example.com" }),
+			reject: true,
+		},
+		{
+			name:   "entity behind a broken percent",
+			raw:    "100% reader%26%2364%3Bexample.com",
+			in:     with(func(in *correctionIntake) { in.Statement = "100% reader%26%2364%3Bexample.com" }),
+			reject: true,
+		},
+		{
+			name:   "commat behind a broken percent",
+			raw:    "100% reader%26commat%3Bexample.com",
+			in:     with(func(in *correctionIntake) { in.Statement = "100% reader%26commat%3Bexample.com" }),
+			reject: true,
+		},
+		{
+			name:   "encoded fullwidth behind a broken percent",
+			raw:    "100% reader%EF%BC%A0example.com",
+			in:     with(func(in *correctionIntake) { in.Aspect = "100% reader%EF%BC%A0example.com" }),
+			reject: true,
+		},
+		{
+			name:   "percent word",
+			raw:    "100% uptime",
+			in:     with(func(in *correctionIntake) { in.Aspect = "100% uptime" }),
+			reject: false,
+		},
+		{
+			name:   "percent sentence",
+			raw:    "100% uptime is what the page claims.",
+			in:     with(func(in *correctionIntake) { in.Statement = "100% uptime is what the page claims." }),
+			reject: false,
+		},
+		{
+			name:   "percent query",
+			raw:    "https://northwind.example/help?q=100%",
+			in:     with(func(in *correctionIntake) { in.SourceURL = "https://northwind.example/help?q=100%" }),
+			reject: false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := hidesContact(tc.raw); got != tc.reject {
+				t.Fatalf("hidesContact(%q) = %v", tc.raw, got)
+			}
+			_, _, _, _, err := correctionText(tc.in)
+			if tc.reject && err == nil {
+				t.Fatal("accepted")
+			}
+			if !tc.reject && err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
 func TestMedianInts(t *testing.T) {
 	if _, ok := medianInts(nil); ok {
 		t.Fatal("empty median")

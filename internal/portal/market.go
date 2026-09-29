@@ -1116,8 +1116,10 @@ func correctionText(in correctionIntake) (competitor, aspect, statement, source 
 // A literal @ is rejected separately, including after percent and entity decoding.
 var obfuscatedEmail = regexp.MustCompile(`(?i)[a-z0-9._%+\-]{1,64}\s*(?:\(at\)|\[at\]|\{at\})\s*[a-z0-9][a-z0-9.-]*\.[a-z]{2,}`)
 
-// hidesContact reports an address in text that will be stored. Encoded forms
-// are decoded before the check, including a percent-encoded @ in a source URL.
+// hidesContact reports an address in text that will be stored. Each pass
+// decodes HTML entities and every well-formed %XX (a broken % stays literal),
+// then looks again. Past the budget, an escape that would still decode fails
+// closed so a deeper encoding cannot outlast the loop.
 func hidesContact(raw string) bool {
 	cur := raw
 	for i := 0; i < 4; i++ {
@@ -1130,14 +1132,12 @@ func hidesContact(raw string) bool {
 		}
 		cur = next
 	}
-	return contactMark(cur)
+	return contactMark(cur) || unfoldContact(cur) != cur
 }
 
 func unfoldContact(raw string) string {
 	next := html.UnescapeString(raw)
-	if decoded, err := url.PathUnescape(next); err == nil {
-		next = decoded
-	}
+	next = decodePercentTolerant(next)
 	return strings.Map(func(r rune) rune {
 		switch r {
 		case '\u200b', '\u200c', '\u200d', '\ufeff', '\u2060':
@@ -1146,6 +1146,46 @@ func unfoldContact(raw string) string {
 			return r
 		}
 	}, next)
+}
+
+// decodePercentTolerant decodes each %XX and leaves a malformed % in place.
+// url.PathUnescape drops every escape once any one of them is broken, which
+// let "100% reader%40example.com" through.
+func decodePercentTolerant(s string) string {
+	if !strings.Contains(s, "%") {
+		return s
+	}
+	var b strings.Builder
+	b.Grow(len(s))
+	changed := false
+	for i := 0; i < len(s); i++ {
+		if s[i] != '%' || i+2 >= len(s) || !isHex(s[i+1]) || !isHex(s[i+2]) {
+			b.WriteByte(s[i])
+			continue
+		}
+		b.WriteByte(unhex(s[i+1])<<4 | unhex(s[i+2]))
+		i += 2
+		changed = true
+	}
+	if !changed {
+		return s
+	}
+	return b.String()
+}
+
+func isHex(c byte) bool {
+	return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')
+}
+
+func unhex(c byte) byte {
+	switch {
+	case c >= '0' && c <= '9':
+		return c - '0'
+	case c >= 'a' && c <= 'f':
+		return c - 'a' + 10
+	default:
+		return c - 'A' + 10
+	}
 }
 
 func contactMark(s string) bool {
