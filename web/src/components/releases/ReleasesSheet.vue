@@ -122,10 +122,10 @@ const filtering = computed(() => !!filter.q.trim() || filter.features || filter.
 const reservedCount = computed(() => releases.value.filter(r => r.state === 'reserved').length)
 const compareTo = computed(() => mode.value === 'compare' && cursor.value && cursor.value !== compareFrom.value ? cursor.value : null)
 // One notice. An outdated page says a newer version is live; it does not also
-// warn that this build's history lacks that version. The server is the newer of
-// the cached history and the version the update poll already saw.
+// warn that this build's history lacks that version. The server is chosen once:
+// the newer of the cached history and the version the update poll already saw.
 const server = computed(() => liveServer(current.value, store.available))
-const notice = computed(() => releaseNotice(pageRuns.value, current.value, missing.value, store.available))
+const notice = computed(() => releaseNotice(pageRuns.value, server.value, missing.value))
 const optionId = (v: string) => `release-${v.replace(/\./g, '-')}`
 
 // ---------- Selection ----------
