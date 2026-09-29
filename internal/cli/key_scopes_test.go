@@ -66,3 +66,13 @@ func TestKeyScopesUsage(t *testing.T) {
 		}
 	}
 }
+
+func TestKeyScopesStdinErrorsNameSessionCookie(t *testing.T) {
+	isolate(t)
+	for _, input := range []string{"", strings.Repeat("x", 8<<10)} {
+		code, _, stderr := runCLI([]string{"aeon", "keys", "scopes", tagTranscriptID, "--add", "nodes.read", "--session-file", "-", "--url", "https://example.invalid"}, input)
+		if code != 2 || !strings.Contains(stderr, "session cookie") || strings.Contains(stderr, "API key") {
+			t.Fatalf("session input error has the wrong credential label: exit=%d stderr=%s", code, stderr)
+		}
+	}
+}

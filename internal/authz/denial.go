@@ -9,8 +9,10 @@ import (
 	"github.com/inspr-at/paimos/internal/httpapi"
 )
 
-// denial reports only the authenticated caller's own missing layer. It never
-// includes a target identifier or confirms that a requested resource exists.
+// denial reports the authenticated caller's missing layer in one permission
+// check, without target identifiers. When a target-project retry is forbidden,
+// the middleware retains the pre-resolution denial so the diagnostic does not
+// disclose whether the target exists.
 type denial struct {
 	reason string
 	scope  string

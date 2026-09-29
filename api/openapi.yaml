@@ -9035,10 +9035,10 @@ components:
         reason_code:
           type: string
           enum: [missing_role_permission, missing_key_scope, missing_project_access]
-          description: Optional denial layer based only on the authenticated caller's own access. Absent for generic denials; never confirms a resource exists.
+          description: Optional denial layer based on the authenticated caller's own access. If resolving a target's project still leaves the request forbidden, the denial from before resolution is retained so diagnostics do not disclose whether the target exists. Absent for generic denials.
         scope:
           type: string
-          description: Present only for missing_key_scope after role and project authority have passed. Never includes resource or principal data.
+          description: Present only for missing_key_scope after role and project authority have passed in the reported check. A failed target-project retry retains the pre-resolution denial instead. Never includes resource or principal data.
     NodeError:
       type: object
       required: [error]

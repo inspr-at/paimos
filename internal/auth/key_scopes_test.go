@@ -3,6 +3,7 @@
 package auth
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -270,5 +271,81 @@ func TestKeyScopesThroughBearerMiddleware(t *testing.T) {
 	}
 	if w := request("GET", "/api/events", true); w.Code != 204 {
 		t.Fatalf("same bearer did not recover immediately: %d", w.Code)
+	}
+}
+
+func TestProjectAgentDenialsDoNotDiscloseNodeTargets(t *testing.T) {
+	m, owner := keyFixture(t)
+	key := decodeKey(t, keyRequest(m, owner, map[string]any{"name": "project-worker", "scopes": []string{"nodes.read"}}))
+	ctx := dbtest.Seed(t.Context())
+	var projectID, nodeID string
+	if err := db.InTenant(ctx, m.pool, owner.TenantID, func(tx pgx.Tx) error {
+		if err := tx.QueryRow(ctx, `INSERT INTO nodes(tenant_id,key,title,state,kind_id)
+			SELECT $1::uuid,'PRJ-1','Project','active',id FROM node_kinds WHERE slug='project'
+			RETURNING id::text`, owner.TenantID).Scan(&projectID); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(ctx, `INSERT INTO nodes(tenant_id,key,title,parent_id,kind_id)
+			SELECT $1::uuid,'PRJ-2','Ticket',$2::uuid,id FROM node_kinds WHERE slug='ticket'
+			RETURNING id::text`, owner.TenantID, projectID).Scan(&nodeID); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO node_key_aliases(tenant_id,key,node_id) VALUES($1::uuid,'OLD-1',$2::uuid)`, owner.TenantID, nodeID); err != nil {
+			return err
+		}
+		// nodes.read is now granted only through this project's role.
+		_, err := tx.Exec(ctx, `UPDATE role_bindings SET scope_type='project',scope_id=$2::uuid WHERE principal_id=$1::uuid`, key.PrincipalID, projectID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	mux := http.NewServeMux()
+	for _, pattern := range []string{"GET /api/node-keys/{key}", "GET /api/nodes/{nodeId}"} {
+		mux.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) {
+			if authz.RouteScope(r.Context()).ProjectID != projectID {
+				t.Error("successful authorization lost the resolved project")
+			}
+			w.WriteHeader(http.StatusNoContent)
+		})
+	}
+	secured := m.Middleware(mux)
+	request := func(path string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest(http.MethodGet, path, nil)
+		r.Header.Set("Authorization", "Bearer "+key.Token)
+		_, r.Pattern = mux.Handler(r)
+		w := httptest.NewRecorder()
+		secured.ServeHTTP(w, r)
+		return w
+	}
+	targets := []struct{ existing, missing string }{
+		{"/api/node-keys/PRJ-2", "/api/node-keys/PRJ-999"},
+		{"/api/node-keys/OLD-1", "/api/node-keys/OLD-999"},
+		{"/api/nodes/" + nodeID, "/api/nodes/00000000-0000-4000-8000-000000000000"},
+	}
+	for _, target := range targets {
+		if w := request(target.existing); w.Code != http.StatusNoContent {
+			t.Fatalf("project role and key scope did not authorize %s: %d", target.existing, w.Code)
+		}
+	}
+	if w := scopesRequest(m, owner, key.ID, http.MethodPatch, `{"remove":["nodes.read"]}`); w.Code != http.StatusOK {
+		t.Fatalf("remove key scope: %d", w.Code)
+	}
+	for _, target := range targets {
+		t.Run(target.existing, func(t *testing.T) {
+			existing, missing := request(target.existing), request(target.missing)
+			if existing.Code != http.StatusForbidden || missing.Code != http.StatusForbidden {
+				t.Fatalf("denied target statuses: existing=%d missing=%d", existing.Code, missing.Code)
+			}
+			if !bytes.Equal(existing.Body.Bytes(), missing.Body.Bytes()) {
+				t.Fatalf("target existence changed denial: existing=%s missing=%s", existing.Body.String(), missing.Body.String())
+			}
+			var body map[string]any
+			if json.Unmarshal(existing.Body.Bytes(), &body) != nil || body["reason_code"] != "missing_role_permission" || body["scope"] != nil {
+				t.Fatal("denial did not retain the pre-resolution diagnostic")
+			}
+			if existing.Header().Get("Cache-Control") != "no-store" || missing.Header().Get("Cache-Control") != "no-store" {
+				t.Fatal("denial is cacheable")
+			}
+		})
 	}
 }

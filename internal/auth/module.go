@@ -153,7 +153,11 @@ func (m *Module) Middleware(next http.Handler) http.Handler {
 						permissionErr = err
 					} else if ok {
 						scope = resolved
-						permissionErr = authz.RequirePattern(ctx, r.Pattern, scope)
+						// A failed project retry must keep the original denial:
+						// its diagnostic must not reveal that the target exists.
+						if resolvedErr := authz.RequirePattern(ctx, r.Pattern, scope); !errors.Is(resolvedErr, authz.ErrForbidden) {
+							permissionErr = resolvedErr
+						}
 					}
 				}
 				ctx = authz.WithRouteScope(ctx, scope)

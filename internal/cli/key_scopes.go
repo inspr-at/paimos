@@ -70,7 +70,7 @@ func (rt *runtime) cmdKeys() *Command {
 					if err != nil {
 						return err
 					}
-					session, err := rt.readLoginKey(sessionFile)
+					session, err := rt.readSecret(sessionFile, "session cookie")
 					if err != nil {
 						return err
 					}
