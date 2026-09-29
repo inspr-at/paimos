@@ -11,7 +11,7 @@ import (
 
 func TestRulesAgentRouteCeiling(t *testing.T) {
 	for _, tc := range []struct{ method, path, want string }{
-		{"GET", "/api/rules/merged", "rules.read"}, {"GET", "/api/rules/comparisons", "rules.read"},
+		{"GET", "/api/rules/merged", "rules.read"}, {"GET", "/api/rules/channels", "rules.read"}, {"HEAD", "/api/rules/channels", "rules.read"}, {"POST", "/api/rules/channels", ""}, {"GET", "/api/rules/comparisons", "rules.read"},
 		{"GET", "/api/rules/doctrine", "rules.read"}, {"HEAD", "/api/rules/doctrine", "rules.read"},
 		{"POST", "/api/rules/doctrine/sources", ""}, {"PUT", "/api/rules/doctrine/sources/id", ""},
 		{"DELETE", "/api/rules/doctrine/sources/id", ""}, {"POST", "/api/rules/doctrine/sources/id/index", ""},
@@ -52,6 +52,10 @@ func TestDoctrineRulesReadKeyAtMiddleware(t *testing.T) {
 		want                int
 	}{
 		{"GET", "/api/rules/doctrine", reader.Token, http.StatusNoContent},
+		{"GET", "/api/rules/channels", reader.Token, http.StatusNoContent},
+		{"HEAD", "/api/rules/channels", reader.Token, http.StatusNoContent},
+		{"GET", "/api/rules/channels", writer.Token, http.StatusForbidden},
+		{"POST", "/api/rules/channels", reader.Token, http.StatusForbidden},
 		{"HEAD", "/api/rules/doctrine", reader.Token, http.StatusNoContent},
 		{"GET", "/api/rules/doctrine", writer.Token, http.StatusForbidden},
 		{"POST", "/api/rules/doctrine/sources", reader.Token, http.StatusForbidden},

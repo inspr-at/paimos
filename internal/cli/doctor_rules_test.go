@@ -3,6 +3,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -15,11 +16,12 @@ func TestDoctorReportsOneChannel(t *testing.T) {
 	isolate(t)
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Chdir(home)
 	t.Setenv("CLAUDE_CONFIG_DIR", "")
 	t.Setenv("CODEX_HOME", "")
 	const identity = "inspr-at/fixture-doctrine/docs/AGENTS-KERNEL.md#secrets"
 	const text = "Never print the environment."
-	doctrine := `{"sources":[{"repository":"inspr-at/fixture-doctrine","ref":"v260922101217.0.0","commit":"` + strings.Repeat("ab", 20) + `","files":[{"rules":[{"identity":"` + identity + `","key":"no-env-dump","text":"` + text + `"}]}]}]}`
+	doctrine := `{"sources":[{"state":"ready","repository":"inspr-at/fixture-doctrine","ref":"v260922101217.0.0","commit":"` + strings.Repeat("ab", 20) + `","files":[{"rules":[{"identity":"` + identity + `","key":"no-env-dump","text":"` + text + `"}]}]}]}`
 	channels := `{"releases":[{"repository":"inspr-at/fixture-doctrine","ref":"v260922101217.0.0","commit":"` + strings.Repeat("ab", 20) + `"}],"duplicates":[]}`
 	var paths []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -48,7 +50,13 @@ func TestDoctorReportsOneChannel(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(home, ".claude"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	hook := `{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"aeon hook claude Stop` + inboxHookMarker + `"}]}]}}`
+	sessionPath := filepath.Join(home, "received session.txt")
+	hookBytes, _ := json.Marshal(map[string]any{"hooks": map[string]any{"SessionStart": []any{map[string]any{"hooks": []any{map[string]string{"type": "command", "command": "aeon session start --rules-out " + shellHookQuote(sessionPath) + rulesHookMarker}}}}}})
+	hook := string(hookBytes)
+	cleanSession := "# Aeon session rules\n\n- [local] Project style.\n"
+	if err := os.WriteFile(sessionPath, []byte(cleanSession), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(filepath.Join(home, ".claude", "settings.json"), []byte(hook), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -71,5 +79,116 @@ func TestDoctorReportsOneChannel(t *testing.T) {
 	code, out, errOut = runCLI([]string{"aeon", "--config", filepath.Join(t.TempDir(), "missing"), "doctor"}, "")
 	if code != 2 || !strings.Contains(out, "harness file drifted") || !strings.Contains(out, identity) || strings.Contains(out, "Sometimes print") {
 		t.Fatalf("drift exit %d\n%s\n%s", code, out, errOut)
+	}
+	cleanDoctrine := doctrine
+	for _, mode := range []string{"empty harness", "removed marker", "failed source", "unindexed source", "missing state", "ready with error", "missing files", "changed pin", "empty response", "session duplicate", "empty session", "missing session", "unreadable session", "inbox only", "explicit session", "codex session"} {
+		t.Run(mode, func(t *testing.T) {
+			doctrine = cleanDoctrine
+			mustWrite := func(path, text string) {
+				t.Helper()
+				if err := os.WriteFile(path, []byte(text), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			mustWrite(filepath.Join(home, ".claude", "CLAUDE.md"), matched)
+			mustWrite(filepath.Join(home, ".claude", "settings.json"), hook)
+			mustWrite(sessionPath, cleanSession)
+			args := []string{"aeon", "--config", filepath.Join(t.TempDir(), "missing"), "doctor"}
+			want, phrase := 2, ""
+			switch mode {
+			case "empty harness":
+				mustWrite(filepath.Join(home, ".claude", "CLAUDE.md"), "")
+			case "removed marker":
+				mustWrite(filepath.Join(home, ".claude", "CLAUDE.md"), "# Kernel\n")
+			case "failed source":
+				doctrine = strings.Replace(doctrine, `"state":"ready"`, `"state":"failed"`, 1)
+			case "unindexed source":
+				doctrine = strings.Replace(doctrine, `"state":"ready"`, `"state":"not_indexed"`, 1)
+			case "missing state":
+				doctrine = strings.Replace(doctrine, `"state":"ready",`, "", 1)
+			case "ready with error":
+				doctrine = strings.Replace(doctrine, `"state":"ready"`, `"state":"ready","error":"index failed"`, 1)
+			case "missing files":
+				doctrine = `{"sources":[{"state":"ready","repository":"inspr-at/fixture-doctrine","commit":"` + strings.Repeat("ab", 20) + `"}]}`
+			case "changed pin":
+				doctrine = strings.Replace(doctrine, strings.Repeat("ab", 20), strings.Repeat("cd", 20), 1)
+			case "empty response":
+				doctrine = `{}`
+			case "session duplicate":
+				mustWrite(sessionPath, cleanSession+"- [copy] "+text+"\n")
+				phrase = "rule served twice"
+			case "empty session":
+				mustWrite(sessionPath, "")
+			case "missing session":
+				args = append(args, "--rules-harness", "claude", "--rules-out", filepath.Join(home, "missing.txt"))
+				want = 1
+			case "unreadable session":
+				dir := filepath.Join(t.TempDir(), "directory.txt")
+				if err := os.Mkdir(dir, 0o700); err != nil {
+					t.Fatal(err)
+				}
+				args = append(args, "--rules-harness", "claude", "--rules-out", dir)
+				want = 1
+			case "inbox only", "explicit session", "codex session":
+				mustWrite(filepath.Join(home, ".claude", "settings.json"), `{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"aeon hook claude Stop`+inboxHookMarker+`"}]}]}}`)
+				want, phrase = 0, "rules session hook not installed"
+				if mode != "inbox only" {
+					harness := "claude"
+					if mode == "codex session" {
+						harness = "codex"
+						if err := os.MkdirAll(filepath.Join(home, ".codex"), 0o700); err != nil {
+							t.Fatal(err)
+						}
+						mustWrite(filepath.Join(home, ".codex", "AGENTS.md"), matched)
+					}
+					args = append(args, "--rules-harness", harness, "--rules-out", sessionPath)
+					mustWrite(sessionPath, cleanSession+"- [copy] "+text+"\n")
+					want, phrase = 2, "rule served twice"
+				}
+			}
+			code, out, errOut := runCLI(args, "")
+			if code != want || !strings.Contains(out, phrase) || strings.Contains(out, "no rule served twice") {
+				t.Fatalf("%s: exit %d want %d\n%s\n%s", mode, code, want, out, errOut)
+			}
+		})
+	}
+
+}
+
+func TestDoctorRulesHookOutputs(t *testing.T) {
+	home := t.TempDir()
+	t.Chdir(home)
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	t.Setenv("CODEX_HOME", "")
+	write := func(path, command string) {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		raw, _ := json.Marshal(map[string]any{"hooks": map[string]any{"SessionStart": []any{map[string]any{"hooks": []any{map[string]string{"type": "command", "command": command}}}}}})
+		if err := os.WriteFile(path, raw, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	userPath := hookSettingsPath(home, "claude")
+	write(userPath, "aeon hook claude Stop"+inboxHookMarker)
+	if outputs, err := rulesSessionOutputs(home, doctorRulesOptions{}); err != nil || len(outputs) != 0 {
+		t.Fatalf("inbox treated as rules: %v %v", outputs, err)
+	}
+	write(userPath, "aeon session start --rules-out 'user file.txt'"+rulesHookMarker)
+	write(filepath.Join(home, ".claude", "settings.local.json"), "aeon session start --rules-out=project.txt"+rulesHookMarker)
+	outputs, err := rulesSessionOutputs(home, doctorRulesOptions{})
+	if err != nil || len(outputs) != 2 || outputs[0].Path != filepath.Join(home, "user file.txt") || outputs[1].Path != filepath.Join(home, "project.txt") {
+		t.Fatalf("outputs %v %v", outputs, err)
+	}
+	for _, command := range []string{"aeon session start", "aeon session start --rules-out '$TARGET'", "aeon session start --rules-out file.txt; touch unexpected", "aeon session start --rules-out file.env", "aeon session start --rules-out ~/file.txt", "aeon session start --rules-out *.txt", "aeon session start # --rules-out ignored.txt", "aeon session start --rules-out 'unterminated"} {
+		write(userPath, command+rulesHookMarker)
+		if _, err := rulesSessionOutputs(home, doctorRulesOptions{}); err == nil {
+			t.Fatalf("accepted unverified hook %q", command)
+		}
+	}
+	outputs, err = rulesSessionOutputs(home, doctorRulesOptions{Harness: "codex", Out: "manual.txt"})
+	if err != nil || len(outputs) != 1 || outputs[0].Harness != "codex" || outputs[0].Path != filepath.Join(home, "manual.txt") {
+		t.Fatalf("explicit output %v %v", outputs, err)
 	}
 }

@@ -75,6 +75,7 @@ var ProjectDecidedRoutes = map[string]bool{
 	"GET /api/rules/sets/{setId}/versions":           true,
 	"GET /api/rules/sets/{setId}/versions/{version}": true,
 	"GET /api/rules/merged":                          true,
+	"GET /api/rules/channels":                        true,
 	"GET /api/rules/comparisons":                     true,
 	"POST /api/rules/comparisons":                    true,
 	"POST /api/rules/publish":                        true,

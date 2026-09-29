@@ -5864,6 +5864,7 @@ components:
             "$ref": "#/components/schemas/AgentRule"
         floor:
           type: "string"
+          description: "Locked company floor lines present in body. A floor rule delivered through doctrine is represented by its identity and immutable commit, never repeated text. Changing the independently retained floor pin requires explicit review."
         valid_until:
           type: ["string", "null"]
           format: "date-time"

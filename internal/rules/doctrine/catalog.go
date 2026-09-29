@@ -44,6 +44,18 @@ func LoadCatalog(ctx context.Context, tx pgx.Tx) (Catalog, error) {
 	}
 	cat := Catalog{Releases: make([]Release, 0, len(sources)), Rules: []Indexed{}}
 	for _, s := range sources {
+		if s.CredentialRef != "" {
+			var tenantID string
+			if err := tx.QueryRow(ctx, `SELECT current_setting('aeon.tenant_id')`).Scan(&tenantID); err != nil {
+				return Catalog{}, err
+			}
+			credentials, _ := ctx.Value(catalogCredentialsKey{}).(Credentials)
+			if err := credentials.authorize(s.CredentialRef, tenantID, s.Repository); err != nil {
+				// Fail closed before reading the cache or exposing a matching
+				// identity. Publication cannot certify an inaccessible source.
+				return Catalog{}, err
+			}
+		}
 		cat.Releases = append(cat.Releases, Release{Repository: s.Repository, Ref: s.Ref, Commit: s.Commit})
 		if s.IndexedAt == nil {
 			continue
@@ -64,6 +76,17 @@ func LoadCatalog(ctx context.Context, tx pgx.Tx) (Catalog, error) {
 	slices.SortFunc(cat.Releases, func(a, b Release) int { return strings.Compare(a.Repository, b.Repository) })
 	slices.SortFunc(cat.Rules, func(a, b Indexed) int { return strings.Compare(a.Identity, b.Identity) })
 	return cat, nil
+}
+
+// FloorPointer keeps a doctrine-backed floor in the existing bounded floor
+// contract without copying doctrine text into a session, cache or bootstrap.
+func (c Catalog) FloorPointer(identity string, rule Indexed) string {
+	for _, rel := range c.Releases {
+		if strings.HasPrefix(rule.Identity, rel.Repository+"/") && shaPattern.MatchString(rel.Commit) {
+			return fmt.Sprintf("- [%s] Keep the harness safety floor %s at commit %s in force.\n", identity, rule.Identity, rel.Commit)
+		}
+	}
+	return ""
 }
 
 // Pointer is the session-file note that names the expected doctrine release.

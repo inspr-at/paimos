@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -74,6 +76,8 @@ func TestPublishBlocksDoctrineDuplicateAndSessionOmitsIt(t *testing.T) {
 	dbtest.BindRole(t, d, tid, admin.ID, "admin")
 	mux := http.NewServeMux()
 	New(d.App).Mount(mux)
+	creds := t.TempDir()
+	handler := (doctrine.Credentials{Dir: creds}).CatalogMiddleware(mux)
 	call := func(method, path string, in any, want int) []byte {
 		t.Helper()
 		body := ""
@@ -83,7 +87,7 @@ func TestPublishBlocksDoctrineDuplicateAndSessionOmitsIt(t *testing.T) {
 		req := httptest.NewRequest(method, path, strings.NewReader(body))
 		req = req.WithContext(tenant.WithPrincipal(req.Context(), admin))
 		w := httptest.NewRecorder()
-		mux.ServeHTTP(w, req)
+		handler.ServeHTTP(w, req)
 		if w.Code != want {
 			t.Fatalf("%s %s: status %d want %d: %s", method, path, w.Code, want, w.Body.String())
 		}
@@ -163,5 +167,108 @@ func TestPublishBlocksDoctrineDuplicateAndSessionOmitsIt(t *testing.T) {
 	batch := call("POST", "/api/rules/publish", map[string]any{"items": []any{map[string]any{"set_id": projectSet.ID, "expected_revision": 3, "version": "260928120003.0.0"}}}, 409)
 	if !strings.Contains(string(batch), "doctrine_duplicate") || !strings.Contains(string(batch), "Propose a change") {
 		t.Fatalf("batch %s", batch)
+	}
+	// A cached source needs the current tenant/repository grant even when its
+	// visibility says public. Revocation must close every catalog consumer.
+	if _, err := d.Admin.Exec(t.Context(), `UPDATE doctrine_sources SET credential_ref='catalog-read' WHERE tenant_id=$1`, tid); err != nil {
+		t.Fatal(err)
+	}
+	grant := func(tenantID, repository string) {
+		t.Helper()
+		raw := jsonBytes(map[string]any{"grants": []any{map[string]string{"tenant_id": tenantID, "repository": repository}}})
+		if err := os.WriteFile(filepath.Join(creds, "catalog-read.allowlist.json"), raw, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, denied := range []string{"missing", "wrong tenant", "wrong repository", "revoked"} {
+		switch denied {
+		case "wrong tenant":
+			grant(testTenant, repo)
+		case "wrong repository":
+			grant(tid, "other/repository")
+		case "revoked":
+			grant(tid, repo)
+			if got := call("GET", "/api/rules/channels", nil, 200); !strings.Contains(string(got), doctrineID) {
+				t.Fatal("authorized catalog lost index")
+			}
+			grant(tid, "other/repository")
+		}
+		for _, request := range []struct {
+			method, path string
+			body         any
+		}{
+			{"GET", "/api/rules/channels", nil},
+			{"GET", "/api/rules/merged?project_id=" + projectID + "&person_id=" + admin.ID + "&role=builder&harness=codex", nil},
+			{"POST", "/api/rules/sets/" + projectSet.ID + "/publish", map[string]any{"expected_revision": 3, "version": "260928120002.0.0"}},
+			{"POST", "/api/rules/sets/" + projectSet.ID + "/restore", map[string]any{"expected_revision": 3, "version": "260928120001.0.0", "new_version": "260928120004.0.0"}},
+			{"POST", "/api/rules/publish", map[string]any{"items": []any{map[string]any{"set_id": projectSet.ID, "expected_revision": 3, "version": "260928120003.0.0"}}}},
+		} {
+			got := call(request.method, request.path, request.body, 500)
+			if strings.Contains(string(got), doctrineID) || strings.Contains(string(got), copied.Text) || strings.Contains(string(got), "doctrine_duplicate") {
+				t.Fatalf("%s leaked cached matching identity", denied)
+			}
+		}
+	}
+	grant(tid, repo)
+	handler = mux // A missing server policy context must never grant access.
+	call("GET", "/api/rules/channels", nil, 500)
+}
+
+func TestDoctrineSelectionPreservesPrecedenceAndFloor(t *testing.T) {
+	now := time.Date(2026, 9, 29, 12, 0, 0, 0, time.UTC)
+	floor := floorSnapshot()
+	cat := doctrine.Catalog{
+		Releases: []doctrine.Release{{Repository: "org/repo", Commit: strings.Repeat("a", 40)}},
+		Rules:    []doctrine.Indexed{{Identity: "org/repo/kernel#safety", Text: floor.Rules[0].Text}},
+	}
+	project := testSnapshot("project", Scope{Layer: "project", ProjectID: testProject}, testRule("safety", "Weaken safety."), testRule("local", "Keep the project rule."))
+	m, err := MergeDelivered(testContext(), []Snapshot{project, floor}, now, cat)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(m.Body, "Weaken safety") || strings.Contains(m.Body, floor.Rules[0].Text) || !strings.Contains(m.Body, "Keep the project rule.") || !strings.Contains(m.Floor, "org/repo/kernel#safety at commit "+strings.Repeat("a", 40)) {
+		t.Fatalf("lost precedence or doctrine floor: %+v", m)
+	}
+	if err := ValidateMerged(m, testContext(), now); err != nil {
+		t.Fatal(err)
+	}
+	if stub, err := Stub(m); err != nil || !strings.Contains(stub, m.Floor) || strings.Contains(stub, floor.Rules[0].Text) {
+		t.Fatalf("stub %q %v", stub, err)
+	}
+	cache, err := EncodeCache("https://fixture.test", m, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if offline, err := Offline(cache, "https://fixture.test", testContext(), m.Floor, now); err != nil || offline.Body != m.Body {
+		t.Fatal("doctrine floor cache failed", err)
+	}
+	// Existing independently retained text pins are never silently weakened.
+	if _, err := Offline(cache, "https://fixture.test", testContext(), ruleLine(floor.Rules[0]), now); err == nil {
+		t.Fatal("old floor pin silently replaced")
+	}
+	if _, err := MergeDelivered(testContext(), []Snapshot{project, floor, testSnapshot("ambiguous", floor.Scope, floor.Rules[0])}, now, cat); err == nil {
+		t.Fatal("doctrine filtering hid ambiguity")
+	}
+	// A disabled doctrine copy still suppresses a lower rule. Expiry and
+	// selectors keep their original meaning before delivery-channel filtering.
+	for _, mode := range []string{"enabled", "disabled", "expired", "other-role"} {
+		r := testRule("preference", "Doctrine preference.")
+		cat.Rules = append(cat.Rules[:1], doctrine.Indexed{Identity: "org/repo/kernel#preference", Text: r.Text})
+		switch mode {
+		case "disabled":
+			r.Enabled = false
+		case "expired":
+			at := now.Add(-time.Second)
+			r.ExpiresAt = &at
+		case "other-role":
+			r.Roles = []string{"reviewer"}
+		}
+		m, err := MergeDelivered(testContext(), []Snapshot{floor, testSnapshot("company", floor.Scope, r), testSnapshot("project", project.Scope, testRule("preference", "Lower preference."))}, now, cat)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(m.Body, "Lower preference.") != (mode == "expired" || mode == "other-role") {
+			t.Fatalf("%s changed precedence: %s", mode, m.Body)
+		}
 	}
 }

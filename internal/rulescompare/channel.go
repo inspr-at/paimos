@@ -3,6 +3,7 @@
 package rulescompare
 
 import (
+	"encoding/hex"
 	"fmt"
 	"sort"
 	"strings"
@@ -22,6 +23,8 @@ type PinnedRelease struct {
 	Repository string
 	Ref        string
 	Commit     string
+	State      string
+	Error      string
 	Rules      []PinnedRule
 }
 
@@ -35,6 +38,8 @@ type ServedDuplicate struct {
 // the session hook is installed and the file is not there.
 type HarnessFile struct {
 	Harness string
+	Path    string
+	Session bool
 	Missing bool
 	Text    string
 }
@@ -44,22 +49,34 @@ type HarnessFile struct {
 // served twice. The ok detail is exactly "no rule served twice".
 func DeliveryReport(files []HarnessFile, releases []PinnedRelease, duplicates []ServedDuplicate) (status, detail string) {
 	sort.Slice(files, func(i, j int) bool { return files[i].Harness < files[j].Harness })
-	hasRules := false
+	var problems []string
 	for _, rel := range releases {
-		if len(rel.Rules) > 0 {
-			hasRules = true
-			break
+		_, commitErr := hex.DecodeString(rel.Commit)
+		if rel.State != "ready" || rel.Error != "" || rel.Repository == "" || len(rel.Commit) != 40 || commitErr != nil {
+			return "fail", "doctrine index unverified: " + rel.Repository
+		}
+		for _, rule := range rel.Rules {
+			if rule.Identity == "" || strings.TrimSpace(rule.Text) == "" {
+				return "fail", "doctrine index unverified: " + rel.Repository
+			}
 		}
 	}
-	var problems []string
+	if len(files) == 0 && len(releases) > 0 {
+		return "warn", "no delivered files available to verify"
+	}
 	for _, file := range files {
 		if file.Missing {
-			if hasRules {
-				problems = append(problems, file.Harness+": rendered harness file missing")
-			}
+			problems = append(problems, file.label()+": rendered harness file missing")
 			continue
 		}
-		problems = append(problems, driftLines(file, releases)...)
+		if strings.TrimSpace(file.Text) == "" {
+			problems = append(problems, file.label()+": delivered file is empty")
+		} else if file.Session && !strings.Contains(file.Text, "# Aeon session rules") {
+			problems = append(problems, file.label()+": session file is unverified")
+		}
+		if !file.Session {
+			problems = append(problems, driftLines(file, releases)...)
+		}
 		problems = append(problems, sessionDoubles(file, releases)...)
 	}
 	dups := append([]ServedDuplicate(nil), duplicates...)
@@ -83,6 +100,13 @@ func DeliveryReport(files []HarnessFile, releases []PinnedRelease, duplicates []
 	return "warn", strings.Join(problems, "; ")
 }
 
+func (f HarnessFile) label() string {
+	if f.Path != "" {
+		return f.Harness + " (" + f.Path + ")"
+	}
+	return f.Harness
+}
+
 func driftLines(file HarnessFile, releases []PinnedRelease) []string {
 	var lines []string
 	for _, rel := range releases {
@@ -91,9 +115,7 @@ func driftLines(file HarnessFile, releases []PinnedRelease) []string {
 			if rule.Text != "" && strings.Contains(file.Text, rule.Text) {
 				continue
 			}
-			if rule.Key != "" && strings.Contains(file.Text, "aeon-rule: "+rule.Key) {
-				ids = append(ids, rule.Identity)
-			}
+			ids = append(ids, rule.Identity)
 		}
 		if len(ids) == 0 {
 			continue
@@ -106,7 +128,7 @@ func driftLines(file HarnessFile, releases []PinnedRelease) []string {
 		if ref == "" {
 			ref = rel.Commit
 		}
-		lines = append(lines, fmt.Sprintf("%s: harness file drifted from %s@%s (%s)", file.Harness, rel.Repository, ref, strings.Join(ids, ", ")))
+		lines = append(lines, fmt.Sprintf("%s: harness file drifted from %s@%s (%s)", file.label(), rel.Repository, ref, strings.Join(ids, ", ")))
 	}
 	return lines
 }
@@ -114,7 +136,7 @@ func driftLines(file HarnessFile, releases []PinnedRelease) []string {
 // sessionDoubles reports doctrine text that was pasted into a session file
 // the harness is also loading. The doctrine file itself has no session header.
 func sessionDoubles(file HarnessFile, releases []PinnedRelease) []string {
-	if !strings.Contains(file.Text, "# Aeon session rules") {
+	if !file.Session && !strings.Contains(file.Text, "# Aeon session rules") {
 		return nil
 	}
 	var lines []string
@@ -125,7 +147,7 @@ func sessionDoubles(file HarnessFile, releases []PinnedRelease) []string {
 				continue
 			}
 			seen[rule.Identity] = true
-			lines = append(lines, fmt.Sprintf("rule served twice: doctrine %s is in the %s session file. Propose a change", rule.Identity, file.Harness))
+			lines = append(lines, fmt.Sprintf("rule served twice: doctrine %s is in the %s session file. Propose a change", rule.Identity, file.label()))
 		}
 	}
 	sort.Strings(lines)

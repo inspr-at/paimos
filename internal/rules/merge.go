@@ -76,9 +76,6 @@ func merge(c Context, snapshots []Snapshot, now time.Time, validated bool, stop 
 			out.Version = s.Version
 		}
 		for _, r := range s.Rules {
-			if _, copied := cat.Match(r.Text, r.Source.Identity, r.Source.Reference); copied {
-				continue
-			}
 			if len(r.Roles) > 0 && !slices.Contains(r.Roles, c.Role) || len(r.Harnesses) > 0 && !slices.Contains(r.Harnesses, c.Harness) {
 				continue
 			}
@@ -117,6 +114,17 @@ func merge(c Context, snapshots []Snapshot, now time.Time, validated bool, stop 
 	for _, k := range keys {
 		r := chosen[k]
 		if !r.Enabled {
+			continue
+		}
+		// Resolve precedence, selectors and expiry before choosing a delivery
+		// channel. An omitted doctrine copy must still suppress lower layers.
+		if hit, copied := cat.Match(r.Text, r.Source.Identity, r.Source.Reference); copied {
+			if _, locked := companyFloor[k]; locked {
+				if pin := cat.FloorPointer(r.Identity, hit); pin != "" {
+					body.WriteString(pin)
+					floor.WriteString(pin)
+				}
+			}
 			continue
 		}
 		out.Rules = append(out.Rules, r)

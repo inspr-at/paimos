@@ -13,7 +13,7 @@ func TestDeliveryReportOneChannel(t *testing.T) {
 		text     = "Never print the environment."
 	)
 	release := PinnedRelease{
-		Repository: "inspr-at/fixture-doctrine", Ref: "v260922101217.0.0", Commit: strings.Repeat("ab", 20),
+		State: "ready", Repository: "inspr-at/fixture-doctrine", Ref: "v260922101217.0.0", Commit: strings.Repeat("ab", 20),
 		Rules: []PinnedRule{{Identity: identity, Key: "no-env-dump", Text: text}},
 	}
 	matched := "# Kernel\n\n## Secrets\n\n<!-- aeon-rule: no-env-dump -->\n- Never print the environment.\n"
@@ -42,5 +42,47 @@ func TestDeliveryReportOneChannel(t *testing.T) {
 	status, detail = DeliveryReport(nil, nil, nil)
 	if status != "ok" || detail != "no rule served twice" {
 		t.Fatalf("empty %s %q", status, detail)
+	}
+}
+
+func TestDeliveryReportRejectsUnverifiedAndRemovedRules(t *testing.T) {
+	release := PinnedRelease{Repository: "org/repo", Commit: strings.Repeat("a", 40), State: "ready", Rules: []PinnedRule{{Identity: "org/repo/kernel#safe", Key: "safe", Text: "Preserve safety."}}}
+	for _, text := range []string{"", "# Kernel\n", "<!-- aeon-rule: safe -->\nChanged."} {
+		status, detail := DeliveryReport([]HarnessFile{{Harness: "codex", Text: text}}, []PinnedRelease{release}, nil)
+		if status != "fail" || !strings.Contains(detail, "harness file drifted") || strings.Contains(detail, "no rule served twice") {
+			t.Fatalf("removed rule: %s %q", status, detail)
+		}
+	}
+	for _, state := range []string{"", "failed", "not_indexed", "unknown"} {
+		release.State = state
+		status, _ := DeliveryReport([]HarnessFile{{Harness: "codex", Text: "Preserve safety."}}, []PinnedRelease{release}, nil)
+		if status == "ok" {
+			t.Fatalf("certified state %q", state)
+		}
+	}
+	release.State, release.Error = "ready", "index failed"
+	if status, _ := DeliveryReport(nil, []PinnedRelease{release}, nil); status == "ok" {
+		t.Fatal("certified index error")
+	}
+	release.Error = ""
+	if status, _ := DeliveryReport(nil, []PinnedRelease{release}, nil); status == "ok" {
+		t.Fatal("certified missing files")
+	}
+	for _, file := range []HarnessFile{
+		{Harness: "codex", Session: true, Missing: true},
+		{Harness: "codex", Session: true},
+		{Harness: "codex", Session: true, Text: "unrecognized file"},
+	} {
+		if status, _ := DeliveryReport([]HarnessFile{file}, nil, nil); status == "ok" {
+			t.Fatal("certified unverified session")
+		}
+	}
+	files := []HarnessFile{{Harness: "codex", Text: "Preserve safety."}, {Harness: "codex", Session: true, Path: "received.txt", Text: "# Aeon session rules\n\n- [local] Use local style.\n"}}
+	if status, _ := DeliveryReport(files, []PinnedRelease{release}, nil); status != "ok" {
+		t.Fatal("clean separate channels refused")
+	}
+	files[1].Text += "- [copy] Preserve safety.\n"
+	if status, detail := DeliveryReport(files, []PinnedRelease{release}, nil); status != "fail" || !strings.Contains(detail, "received.txt") {
+		t.Fatalf("missed actual session: %s %s", status, detail)
 	}
 }
