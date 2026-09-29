@@ -87,6 +87,20 @@ func TestProbeStatusSeparatesSignOutFromUnavailable(t *testing.T) {
 		{"cursor missing identity", cursor(`{"status":"authenticated","isAuthenticated":true}`, 0), ProbeStatus{Failure: ProbeUnavailable}},
 		{"cursor empty identity", cursor(`{"status":"authenticated","isAuthenticated":true,"userInfo":{"userId":""}}`, 0), ProbeStatus{Failure: ProbeUnavailable}},
 		{"codex other message", codex("Logged in using an API key", 0), ProbeStatus{Failure: ProbeUnavailable}},
+		// Round 3: the whole Codex answer must be one recognized line.
+		{"codex contradictory lines", codex("Not logged in\nLogged in using ChatGPT", 1), ProbeStatus{Failure: ProbeUnavailable}},
+		{"codex signed in then noise", codex("Logged in using ChatGPT\nwarning: update available", 0), ProbeStatus{Failure: ProbeUnavailable}},
+		{"codex signed out then noise", codex("Not logged in yet?", 1), ProbeStatus{Failure: ProbeUnavailable}},
+		{"codex signed out with spaces", codex("  Not logged in  ", 1), ProbeStatus{Failure: ProbeAuthFailed}},
+		// Round 3: Cursor identities are decoded and typed.
+		{"cursor object identity", cursor(`{"status":"authenticated","isAuthenticated":true,"userInfo":{"userId":{}}}`, 0), ProbeStatus{Failure: ProbeUnavailable}},
+		{"cursor array identity", cursor(`{"status":"authenticated","isAuthenticated":true,"userInfo":{"userId":[]}}`, 0), ProbeStatus{Failure: ProbeUnavailable}},
+		{"cursor boolean identity", cursor(`{"status":"authenticated","isAuthenticated":true,"userInfo":{"userId":false}}`, 0), ProbeStatus{Failure: ProbeUnavailable}},
+		{"cursor blank identity", cursor(`{"status":"authenticated","isAuthenticated":true,"userInfo":{"userId":"   "}}`, 0), ProbeStatus{Failure: ProbeUnavailable}},
+		{"cursor fractional identity", cursor(`{"status":"authenticated","isAuthenticated":true,"userInfo":{"userId":42.5}}`, 0), ProbeStatus{Failure: ProbeUnavailable}},
+		{"cursor numeric identity matches", cursor(`{"status":"authenticated","isAuthenticated":true,"userInfo":{"userId":42}}`, 0), ProbeStatus{OK: true}},
+		{"cursor string identity matches", cursor(`{"status":"authenticated","isAuthenticated":true,"userInfo":{"userId":" 42 "}}`, 0), ProbeStatus{OK: true}},
+		{"cursor numeric other account", cursor(`{"status":"authenticated","isAuthenticated":true,"userInfo":{"userId":7}}`, 0), ProbeStatus{Failure: ProbeAuthFailed}},
 	}
 	for _, c := range cases {
 		if c.got != c.want {

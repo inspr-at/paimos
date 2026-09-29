@@ -9,6 +9,7 @@ import (
 	"errors"
 	"io"
 	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -89,11 +90,14 @@ func (a *CodexAdapter) ProbeStatus(ctx context.Context, key string) ProbeStatus 
 	if err != nil {
 		return probeUnavailable
 	}
-	status := strings.TrimSpace(string(raw))
-	if code == 0 && status == "Logged in using ChatGPT" {
-		return probeOK
-	}
-	if strings.HasPrefix(strings.ToLower(status), "not logged in") {
+	// The whole output must be exactly one recognized answer; extra lines or a
+	// contradiction are unavailable, never a sign-out.
+	switch strings.TrimSpace(string(raw)) {
+	case "Logged in using ChatGPT":
+		if code == 0 {
+			return probeOK
+		}
+	case "Not logged in":
 		return probeAuthFailed
 	}
 	return probeUnavailable
@@ -145,17 +149,42 @@ func (a *CursorAdapter) ProbeStatus(ctx context.Context, key string) ProbeStatus
 	if *status.Status != "authenticated" || status.UserInfo == nil {
 		return probeUnavailable
 	}
-	id := strings.Trim(string(status.UserInfo.UserID), "\"")
-	if id == "" || id == "null" {
+	id, ok := cursorIdentity(status.UserInfo.UserID)
+	want := strings.TrimSpace(expected)
+	if !ok || want == "" {
 		return probeUnavailable
 	}
-	if id != expected {
+	if id != want {
 		return probeAuthFailed
 	}
 	if code != 0 {
 		return probeUnavailable
 	}
 	return probeOK
+}
+
+// cursorIdentity decodes a Cursor userId: a non-empty string or an integer,
+// normalized to its text ("42" and 42 are the same account). Anything else
+// (objects, arrays, booleans, null, blank or fractional values) is not an identity.
+func cursorIdentity(raw json.RawMessage) (string, bool) {
+	dec := json.NewDecoder(strings.NewReader(string(raw)))
+	dec.UseNumber()
+	var v any
+	if err := dec.Decode(&v); err != nil || dec.More() {
+		return "", false
+	}
+	switch id := v.(type) {
+	case string:
+		id = strings.TrimSpace(id)
+		return id, id != ""
+	case json.Number:
+		n, err := strconv.ParseInt(id.String(), 10, 64)
+		if err != nil {
+			return "", false
+		}
+		return strconv.FormatInt(n, 10), true
+	}
+	return "", false
 }
 
 // cursorSignedOut lists the status words cursor-agent uses for a signed-out
