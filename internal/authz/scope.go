@@ -25,6 +25,8 @@ import (
 // authorized by the workspace binding alone, so a project-only principal never
 // reaches workspace-wide data such as members, quotes, CRM or hours.
 var ProjectFilteredRoutes = map[string]bool{
+	"GET /api/me/security/session-watching":       true,
+	"PUT /api/me/security/session-watching":       true,
 	"GET /api/approvals":                          true,
 	"GET /api/harness-sessions/live":              true,
 	"GET /api/usage/dashboard":                    true,
@@ -89,6 +91,8 @@ var publicProductRoutes = map[string]bool{
 
 // Routes whose path names one node-scoped resource. The resource's project,
 // read under the caller's own visibility, is the scope of the decision.
+// A delivery rating names a harness session, not a node. Quote presence
+// session ids are a different resource and stay unresolved here.
 func routeTarget(pattern string, values map[string]string) (kind, id string) {
 	switch {
 	case values["nodeId"] != "":
@@ -105,6 +109,8 @@ func routeTarget(pattern string, values map[string]string) (kind, id string) {
 		return "inbox_receipt", values["messageId"]
 	case strings.HasSuffix(pattern, " /api/node-keys/{key}"):
 		return "node_key", values["key"]
+	case strings.HasSuffix(pattern, " /api/harness-sessions/{sessionId}/delivery-rating"):
+		return "session", values["sessionId"]
 	}
 	return "", ""
 }
@@ -125,10 +131,10 @@ func RouteScope(ctx context.Context) Scope {
 }
 
 // ResolveRouteScope finds the project a route acts in when its path does not
-// name one: the project of the node, attachment, relation or event it targets
-// (read with the caller's visibility, so an invisible target resolves to no
-// project), or AnyProject for ProjectFilteredRoutes. ok is false when the
-// route has no project scope beyond the workspace.
+// name one: the project of the node, attachment, relation, event or harness
+// session it targets (read with the caller's visibility, so an invisible
+// target resolves to no project), or AnyProject for ProjectFilteredRoutes.
+// ok is false when the route has no project scope beyond the workspace.
 func ResolveRouteScope(ctx context.Context, pool *pgxpool.Pool, pattern, path string) (Scope, bool, error) {
 	values := PatternValues(pattern, path)
 	if id := values["projectId"]; id != "" {
@@ -187,6 +193,13 @@ func targetProject(ctx context.Context, pool *pgxpool.Pool, kind, id string) (st
 		}
 		args = []any{n}
 		query = `SELECT n.project_id::text FROM events e JOIN nodes n ON n.tenant_id=e.tenant_id AND n.id=e.node_id WHERE e.id=$1`
+	case "session":
+		if !uuidPattern.MatchString(id) {
+			return "", nil
+		}
+		// harness_sessions project visibility hides a session the caller cannot
+		// see, so the route stays in the workspace and a project guest is denied.
+		query = `SELECT project_id::text FROM harness_sessions WHERE id=$1::uuid`
 	case "inbox_receipt":
 		if !uuidPattern.MatchString(id) {
 			return "", nil

@@ -11,7 +11,7 @@ export type IconName =
   | 'users' | 'history' | 'sparkle' | 'wrench' | 'bug' | 'gear' | 'commit' | 'tag' | 'box' | 'rollback'
   | 'command' | 'option' | 'backspace'
   | 'book' | 'runbook' | 'guideline' | 'memory' | 'server' | 'folders' | 'terminal' | 'hash' | 'graph'
-  | 'bookmark' | 'star' | 'calendar' | 'coin' | 'not' | 'sort' | 'select' | 'shift'
+  | 'bookmark' | 'star' | 'calendar' | 'coin' | 'not' | 'sort' | 'select' | 'shift' | 'thumbs-down'
   | 'cards' | 'columns' | 'grip' | 'sort-name' | 'progress'
 </script>
 <script setup lang="ts">
@@ -124,6 +124,7 @@ withDefaults(defineProps<{ name: IconName; size?: number }>(), { size: 16 })
     <path v-else-if="name === 'sort'" d="M4.8 2.6v10.8M2.4 11l2.4 2.4 2.4-2.4M11.2 13.4V2.6M8.8 5l2.4-2.4L13.6 5" />
     <template v-else-if="name === 'select'"><rect x="2.2" y="2.2" width="11.6" height="11.6" rx="3" /><path d="m5.2 8.2 2 2 3.6-4.2" /></template>
     <path v-else-if="name === 'shift'" d="M8 2.2 2.6 8h2.9v5.2h5V8h2.9Z" />
+    <template v-else-if="name === 'thumbs-down'"><path stroke-width="1.5" d="M11.3 9.4V1.7" /><path stroke-width="1.5" d="M6.1 12.2 6.8 9.4H2.9a1.3 1.3 0 0 1-1.2-1.7l1.5-5.2A1.3 1.3 0 0 1 4.4 1.4h8.8a1.3 1.3 0 0 1 1.3 1.3v5.4a1.3 1.3 0 0 1-1.3 1.3H11.3a1.3 1.3 0 0 0-1.2.8L8.2 14.5a2 2 0 0 1-2.1-2.3Z" /></template>
     <template v-else-if="name === 'info'"><circle cx="8" cy="8" r="6.2" /><path d="M8 7.4v3.8M8 4.9v.05" /></template>
     <template v-else><circle cx="8" cy="8" r="6.2" /><path d="M10.6 5.4 9.2 9.2l-3.8 1.4 1.4-3.8Z" /></template>
   </svg>

@@ -47,7 +47,21 @@
 //	tickets            ticket keys: version.json's ticket and keys in the headline
 //	changes            commits since the previous published release, each with
 //	                   commit, subject, type (feat, fix, test, docs, release,
-//	                   refactor, chore, other), scope and the ticket keys it names
+//	                   refactor, chore, other), scope and the ticket keys it names.
+//	                   When served, group is features, fixes or other: conventional
+//	                   feat and fix prefixes win, and test, docs, refactor and
+//	                   chore stay other. Otherwise a linked bug tag, type or kind
+//	                   is fixes, a visible release-note pill or benefit is
+//	                   features, and anything else is other. Several tickets take
+//	                   the strongest group and the commit is listed once. The
+//	                   version bump omits group. Older manifests without it stay
+//	                   valid; clients then derive the group from type. Group uses
+//	                   current ticket metadata, so past releases follow it
+//	                   without a migration. A features or fixes change also
+//	                   carries linked_tickets: key plus pill and benefit in
+//	                   English and German. Hidden tickets, and tickets with no
+//	                   pill or benefit, are omitted. The text is read when the
+//	                   history is served, so a later edit shows on past releases.
 //	changes_omitted    how many more changes there were beyond the listed ones
 //	evidence           source_commit and its URL, the OCI image reference and
 //	                   digest, the CI and Release runs (URL, conclusion), the
@@ -65,6 +79,12 @@
 //	GET /api/releases/{version}  one release (with or without the leading v)
 //
 // Both require an authenticated principal. The manifest is embedded in the
-// binary (data/history.json when generated, else data/empty.json), so the
-// endpoints never touch the database or the network.
+// binary (data/history.json when generated, else data/empty.json). WithBackfills
+// adds immutable database snapshots for the caller's tenant and visible product
+// project. Tagged snapshots win, followed by native journey snapshots, then
+// explicit manifest backfills; missing rows retain the historical fallback.
+// Note reads never capture live ticket fields and never contact the network.
+// Separately, serving reads linked-ticket kind and benefit fields for the
+// caller's tenant when a ticket source is configured to group the change list
+// (AEON-289); without one the changes are served unchanged.
 package releasehistory

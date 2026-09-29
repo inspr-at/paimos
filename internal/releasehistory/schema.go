@@ -58,6 +58,13 @@ type Change struct {
 	Scope   string   `json:"scope"`
 	Tickets []string `json:"tickets"`
 	At      string   `json:"at"`
+	// Group is the display group (features, fixes, other), set when the
+	// history is served. Empty on the version bump and on an unannotated manifest.
+	Group string `json:"group,omitempty"`
+	// Linked is the current pill and benefit of each visible linked ticket.
+	// Hidden tickets are omitted. Empty on other changes, the version bump,
+	// and when ticket lookup is off or failed.
+	Linked []TicketNote `json:"linked_tickets,omitempty"`
 }
 
 // Evidence is what proves a release: its source, its image and its runs.

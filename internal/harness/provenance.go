@@ -18,19 +18,30 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/inspr-at/paimos/internal/rules"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
 )
 
-// Instruction provenance is a separate record from registration and heartbeat.
-// Each revision stores allowlisted logical names, a hash kind, sha256 digests
-// of instruction or template bytes, and version identifiers. A prompt template
-// with no supplied digest stores hash kind absent and a null digest. Rows never
-// store file contents, secrets, local paths, or a hash of a version identifier.
+// Instruction provenance is append-only on the session. A worker may still post
+// allowlisted file and prompt-template identities. A report replaces only the
+// kinds it carries, so a heartbeat of root files keeps skills and prompt
+// templates from an earlier report. A rules receipt appends the merged rules
+// version and, when one served manifest proves them, that manifest's set
+// versions. Rows never store file contents, rule text, secrets, local paths,
+// or a hash of a version identifier. rules_merged and rules_set are
+// server-recorded; the worker POST rejects them.
 
 const maxProvenanceItems = 16
+
+// A worker post holds at most maxProvenanceItems identities. Root files and
+// the prompt template can be recorded by a later report that does not replace
+// a skill-only post, so a revision can also carry those three singleton kinds.
+const maxLocalProvenanceItems = maxProvenanceItems + 3
+
 const maxProvenanceRevisions = 32
 const maxProvenanceBytes int64 = 1 << 20
+const maxInstructionSourceHits = 200
 
 var (
 	provenanceSHA256 = regexp.MustCompile(`^[0-9a-f]{64}$`)
@@ -101,15 +112,37 @@ func (m *Module) recordProvenance(r *http.Request, tx pgx.Tx, p tenant.Principal
 	if err != nil {
 		return nil, err
 	}
+	// Replace only the kinds this report carries. A heartbeat of AGENTS.md and
+	// CLAUDE.md keeps skills and prompt templates, and a later full report
+	// still replaces the kinds it names. Server-recorded rule versions stay
+	// until a receipt replaces them.
+	kinds := map[string]bool{}
+	for _, item := range items {
+		kinds[item.Kind] = true
+	}
+	return appendInstructionSources(ctx, tx, p, s, items, kinds)
+}
+
+// automaticProvenanceLimit is one merged identity, every set the rules budget
+// allows in one serve, and the local instruction files that can share the
+// revision. A valid receipt must fit; the merged identity is kept if a
+// combined set still overflows.
+func automaticProvenanceLimit() int {
+	return maxLocalProvenanceItems + 1 + rules.MaxApplicableSets()
+}
+
+// insertProvenanceRevision appends one immutable set, or returns the latest
+// revision when that set digest is already current. Replay writes no audit row.
+func insertProvenanceRevision(ctx context.Context, tx pgx.Tx, p tenant.Principal, s Session, items []ProvenanceItem) (provenanceRecorded, error) {
 	digest := provenanceSetDigest(items)
 	var latestID string
 	var latestRevision int64
 	var latestDigest []byte
-	err = tx.QueryRow(ctx, `SELECT id::text, revision, set_digest FROM harness_instruction_provenance WHERE session_id=$1 ORDER BY revision DESC LIMIT 1 FOR UPDATE`, s.ID).Scan(&latestID, &latestRevision, &latestDigest)
+	err := tx.QueryRow(ctx, `SELECT id::text, revision, set_digest FROM harness_instruction_provenance WHERE session_id=$1 ORDER BY revision DESC LIMIT 1 FOR UPDATE`, s.ID).Scan(&latestID, &latestRevision, &latestDigest)
 	if err == nil && subtle.ConstantTimeCompare(latestDigest, digest) == 1 {
 		got, loadErr := provenanceRevision(ctx, tx, s.ID, latestID)
 		if loadErr != nil {
-			return nil, loadErr
+			return provenanceRecorded{}, loadErr
 		}
 		return provenanceRecorded{ProvenanceRevision: got, Replayed: true}, nil
 	}
@@ -118,29 +151,71 @@ func (m *Module) recordProvenance(r *http.Request, tx pgx.Tx, p tenant.Principal
 	if err == nil {
 		previous, loadErr := provenanceRevision(ctx, tx, s.ID, latestID)
 		if loadErr != nil {
-			return nil, loadErr
+			return provenanceRecorded{}, loadErr
 		}
 		before = previous
 		next = latestRevision + 1
 	} else if !errors.Is(err, pgx.ErrNoRows) {
-		return nil, err
+		return provenanceRecorded{}, err
 	}
 	var out ProvenanceRevision
 	err = tx.QueryRow(ctx, `INSERT INTO harness_instruction_provenance(tenant_id, session_id, revision, set_digest, recorded_by) VALUES($1,$2,$3,$4,$5) RETURNING id::text, revision, encode(set_digest, 'hex'), recorded_by::text, created_at`, p.TenantID, s.ID, next, digest, p.ID).Scan(&out.ID, &out.Revision, &out.SetSHA256, &out.RecordedBy, &out.RecordedAt)
 	if err != nil {
-		return nil, err
+		return provenanceRecorded{}, err
 	}
 	out.SessionID = s.ID
 	out.Items = items
 	for i, item := range items {
 		if _, err = tx.Exec(ctx, `INSERT INTO harness_instruction_provenance_items(tenant_id, provenance_id, ordinal, kind, logical_name, hash_kind, content_sha256, version, byte_size) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`, p.TenantID, out.ID, i, item.Kind, item.LogicalName, item.HashKind, item.ContentSHA256, item.Version, item.ByteSize); err != nil {
-			return nil, err
+			return provenanceRecorded{}, err
 		}
 	}
 	if err = record(ctx, tx, p, s, "provenance_recorded", before, out); err != nil {
-		return nil, err
+		return provenanceRecorded{}, err
 	}
 	return provenanceRecorded{ProvenanceRevision: out, Replayed: false}, nil
+}
+
+// appendInstructionSources keeps instruction-file items and replaces kinds in
+// replaceKinds, then appends one revision when the combined digest changed.
+// An empty incoming set records nothing. The stored rows are hashes and
+// version identifiers only.
+func appendInstructionSources(ctx context.Context, tx pgx.Tx, p tenant.Principal, s Session, incoming []ProvenanceItem, replaceKinds map[string]bool) (provenanceRecorded, error) {
+	if len(incoming) == 0 {
+		return provenanceRecorded{}, nil
+	}
+	var latestID string
+	err := tx.QueryRow(ctx, `SELECT id::text FROM harness_instruction_provenance WHERE session_id=$1 ORDER BY revision DESC LIMIT 1 FOR UPDATE`, s.ID).Scan(&latestID)
+	var latest []ProvenanceItem
+	if err == nil {
+		rev, loadErr := provenanceRevision(ctx, tx, s.ID, latestID)
+		if loadErr != nil {
+			return provenanceRecorded{}, loadErr
+		}
+		latest = rev.Items
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		return provenanceRecorded{}, err
+	}
+	items, err := normalizeAutomaticProvenance(combineProvenanceItems(latest, incoming, replaceKinds))
+	if err != nil {
+		return provenanceRecorded{}, err
+	}
+	return insertProvenanceRevision(ctx, tx, p, s, items)
+}
+
+func combineProvenanceItems(latest, incoming []ProvenanceItem, replaceKinds map[string]bool) []ProvenanceItem {
+	skip := map[string]bool{}
+	for _, item := range incoming {
+		skip[item.LogicalName] = true
+	}
+	out := make([]ProvenanceItem, 0, len(latest)+len(incoming))
+	for _, item := range latest {
+		if replaceKinds[item.Kind] || skip[item.LogicalName] {
+			continue
+		}
+		out = append(out, item)
+	}
+	return append(out, incoming...)
 }
 
 func provenancePage(ctx context.Context, tx pgx.Tx, sessionID string) (ProvenancePage, error) {
@@ -210,7 +285,42 @@ func queryProvenance(ctx context.Context, tx pgx.Tx, sessionID, onlyID string, l
 }
 
 func normalizeProvenanceItems(in []ProvenanceItem) ([]ProvenanceItem, error) {
-	if len(in) < 1 || len(in) > maxProvenanceItems {
+	return normalizeProvenance(in, maxProvenanceItems, false)
+}
+
+func normalizeAutomaticProvenance(in []ProvenanceItem) ([]ProvenanceItem, error) {
+	items, err := normalizeProvenance(keepMergedWithinLimit(in, automaticProvenanceLimit()), automaticProvenanceLimit(), true)
+	if err != nil {
+		return nil, errors.New("instruction provenance could not be recorded")
+	}
+	return items, nil
+}
+
+// keepMergedWithinLimit drops excess identities but never the merged-rules
+// row. The publication budget plus local files is the cap; this is the
+// backstop so a full receipt still commits its merged identity.
+func keepMergedWithinLimit(in []ProvenanceItem, limit int) []ProvenanceItem {
+	if len(in) <= limit || limit < 1 {
+		return in
+	}
+	merged := make([]ProvenanceItem, 0, 1)
+	rest := make([]ProvenanceItem, 0, len(in))
+	for _, item := range in {
+		if item.Kind == "rules_merged" && item.LogicalName == "merged-rules" && len(merged) == 0 {
+			merged = append(merged, item)
+			continue
+		}
+		rest = append(rest, item)
+	}
+	room := limit - len(merged)
+	if room < len(rest) {
+		rest = rest[:room]
+	}
+	return append(merged, rest...)
+}
+
+func normalizeProvenance(in []ProvenanceItem, limit int, serverKinds bool) ([]ProvenanceItem, error) {
+	if len(in) < 1 || len(in) > limit {
 		return nil, workorders.Fail(400, "invalid instruction provenance")
 	}
 	items := append([]ProvenanceItem(nil), in...)
@@ -223,7 +333,7 @@ func normalizeProvenanceItems(in []ProvenanceItem) ([]ProvenanceItem, error) {
 	seen := map[string]bool{}
 	for i := range items {
 		item := &items[i]
-		if !validProvenanceItem(item) || seen[item.LogicalName] {
+		if !validProvenanceShape(item, serverKinds) || seen[item.LogicalName] {
 			return nil, workorders.Fail(400, "invalid instruction provenance")
 		}
 		seen[item.LogicalName] = true
@@ -232,7 +342,12 @@ func normalizeProvenanceItems(in []ProvenanceItem) ([]ProvenanceItem, error) {
 }
 
 func validProvenanceItem(item *ProvenanceItem) bool {
-	if !validProvenanceVersion(item.Version, item.Kind == "prompt_template") || !validProvenanceDigest(item) {
+	return validProvenanceShape(item, false)
+}
+
+func validProvenanceShape(item *ProvenanceItem, serverKinds bool) bool {
+	versionRequired := item.Kind == "prompt_template" || item.Kind == "rules_merged" || item.Kind == "rules_set"
+	if !validProvenanceVersion(item.Version, versionRequired) || !validProvenanceDigest(item) {
 		return false
 	}
 	switch item.Kind {
@@ -244,6 +359,10 @@ func validProvenanceItem(item *ProvenanceItem) bool {
 		return provenanceSkill.MatchString(item.LogicalName) && validProvenanceSize(item.ByteSize)
 	case "prompt_template":
 		return item.LogicalName == "prompt-template" && item.ByteSize == nil
+	case "rules_merged":
+		return serverKinds && item.LogicalName == "merged-rules" && validProvenanceSize(item.ByteSize)
+	case "rules_set":
+		return serverKinds && workorders.UUID(item.LogicalName) && item.LogicalName == strings.ToLower(item.LogicalName) && item.ByteSize == nil
 	default:
 		return false
 	}

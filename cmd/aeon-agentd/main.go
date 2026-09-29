@@ -48,7 +48,7 @@ func main() {
 
 func run(args []string, out io.Writer) error {
 	if len(args) == 0 {
-		return errors.New("usage: paimos-agentd setup|status|disconnect|add-harness|serve|control")
+		return errors.New("usage: paimos-agentd setup|status|disconnect|add-harness|attach|serve|control")
 	}
 	switch args[0] {
 	case "--version", "version":
@@ -56,12 +56,14 @@ func run(args []string, out io.Writer) error {
 		return err
 	case "setup", "status", "disconnect", "add-harness":
 		return setupCommand(args[0], args[1:], out)
+	case "attach":
+		return attachCommand(args[1:], out)
 	case "serve":
 		return serve(args[1:])
 	case "control":
 		return control(args[1:], out)
 	default:
-		return errors.New("usage: paimos-agentd setup|status|disconnect|add-harness|serve|control")
+		return errors.New("usage: paimos-agentd setup|status|disconnect|add-harness|attach|serve|control")
 	}
 }
 
@@ -78,6 +80,8 @@ func serve(args []string) error {
 	var base, keyFile, workspace, state, daemonID, accountsPath, codexPath, claudePath, nodePath, sdkPath, piPath, cursorPath string
 	var estimateRequests, estimateTokens, estimateCost int64
 	var setupRoot string
+	var codexIdleTimeout time.Duration
+	f.DurationVar(&codexIdleTimeout, "codex-idle-timeout", 10*time.Minute, "complete a clean idle Codex run after this wake window")
 	f.StringVar(&setupRoot, "setup-root", "", "private approved pairing state")
 	f.StringVar(&base, "url", "", "AEON URL")
 	f.StringVar(&keyFile, "agent-key-file", "", "private scoped API key file")
@@ -105,6 +109,9 @@ func serve(args []string) error {
 	}
 	if len(f.Args()) != 0 || agentd.ValidateBaseURL(base) != nil {
 		return errors.New("invalid AEON URL or arguments")
+	}
+	if codexIdleTimeout <= 0 {
+		return errors.New("Codex idle timeout must be positive")
 	}
 	if estimateRequests < 0 || estimateTokens < 0 || estimateCost < 0 {
 		return errors.New("allowance estimates must be nonnegative")
@@ -184,6 +191,7 @@ func serve(args []string) error {
 	adapters := []agentd.Adapter{}
 	if codexPath != "" {
 		codex := agentd.NewCodexAdapter(codexPath, codexHomes)
+		codex.IdleTimeout = codexIdleTimeout
 		codex.SetExpectedEmails(codexEmails)
 		adapters = append(adapters, codex)
 	}

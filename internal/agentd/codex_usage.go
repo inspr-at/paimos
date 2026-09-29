@@ -11,6 +11,10 @@ import (
 	"github.com/inspr-at/paimos/internal/sessionusage"
 )
 
+var errCodexNoActiveTurn = errors.New("Codex steer rejected: no active turn")
+
+const defaultCodexIdleTimeout = 10 * time.Minute
+
 // notification is serialized with binding changes by wireProcess.eventMu.
 func (p *codexProcess) notification(raw json.RawMessage) {
 	if p.sealed || p.abandoned.Load() {
@@ -81,6 +85,9 @@ func (p *codexProcess) notification(raw json.RawMessage) {
 	}
 	if method == "turn/completed" || method == "turn/failed" {
 		terminal, err := sessionusage.ParseCodexTerminal(raw)
+		if p.persistent && p.terminalSeen && err == nil && p.terminal != nil && terminal == *p.terminal {
+			return // Repeated terminal evidence cannot end or wake a live session.
+		}
 		if p.terminalSeen || err != nil || terminal.ThreadID != p.threadID || p.threadID == "" {
 			p.invalid = true
 		} else {
@@ -100,13 +107,42 @@ func (p *codexProcess) signalTerminal() {
 	if p.terminal != nil && p.terminal.TurnID != p.turnID {
 		p.invalid = true
 	}
+	if p.persistent && !p.invalid && p.terminal != nil && p.terminal.Clean {
+		if !p.idlePublished {
+			p.idlePublished = true
+			p.armIdleCompletion()
+			p.observe(AdapterEvent{Activity: "idle", BudgetTurnsDelta: 1})
+		}
+		return
+	}
 	if p.terminalSeen || p.invalid {
 		p.once.Do(func() { p.done <- true })
 	}
 }
 
+// eventMu is held. Generation plus controlMu fences a timer that races a wake.
+func (p *codexProcess) armIdleCompletion() {
+	delay := p.idleTimeout
+	if delay <= 0 {
+		delay = defaultCodexIdleTimeout
+	}
+	p.idleGeneration++
+	generation := p.idleGeneration
+	p.idleTimer = time.AfterFunc(delay, func() {
+		p.controlMu.Lock()
+		defer p.controlMu.Unlock()
+		p.eventMu.Lock()
+		defer p.eventMu.Unlock()
+		if generation != p.idleGeneration || !p.idlePublished || p.invalid || p.sealed || p.abandoned.Load() {
+			return
+		}
+		p.finishing = true
+		p.once.Do(func() { p.done <- true })
+	})
+}
+
 func (p *codexProcess) startTurn(ctx context.Context, r StartRequest) error {
-	// This connection owns exactly one fresh thread and one turn/start RPC.
+	// Each request stays on the fresh thread owned by this connection.
 	thread := p.threadID
 	raw, err := p.request(ctx, "jsonrpc", "turn/start", map[string]any{"threadId": thread, "input": []map[string]string{{"type": "text", "text": r.Prompt}}, "model": r.Profile.Model, "effort": r.Profile.Effort})
 	turn, parseErr := sessionusage.CodexStartedTurn(raw)
@@ -125,11 +161,15 @@ func (p *codexProcess) startTurn(ctx context.Context, r StartRequest) error {
 		}
 	}
 	p.signalTerminal()
+	if !p.terminalSeen {
+		p.observe(AdapterEvent{Activity: "busy"})
+	}
 	return nil
 }
 
-// waitForTurn defines the irreversible finality boundary. After an acknowledged
-// candidate (or child/stream exit), stop the owned child and join BOTH its exit
+// waitForTurn defines the irreversible finality boundary. Persistent workers
+// keep clean turns idle; failures and child/stream exit still end their lifetime.
+// At that boundary, stop the owned child and join BOTH its exit
 // and the reader's actual EOF within one bounded interval. The reader remains
 // active through stop, including buffered frames; no quiet-time heuristic or
 // detached goroutine may upgrade a receipt later. Stop/drain errors fail closed.
@@ -183,6 +223,9 @@ func (p *codexProcess) sealUsage(clean bool) {
 		return
 	}
 	p.sealed = true
+	if p.idleTimer != nil {
+		p.idleTimer.Stop()
+	}
 	clean = clean && !p.abandoned.Load()
 	p.invalid = p.invalid || !clean
 	if p.usage != nil {
@@ -190,4 +233,34 @@ func (p *codexProcess) sealUsage(clean bool) {
 			p.observe(AdapterEvent{SessionUsage: &report})
 		}
 	}
+}
+
+// wakeTurn advances only a live inbox-enabled process, never a finished run.
+// eventMu fences buffered terminal/usage notifications against the new binding.
+func (p *codexProcess) wakeTurn(ctx context.Context, text string) error {
+	ctx, cancel := operationContext(ctx)
+	defer cancel()
+	p.eventMu.Lock()
+	if !p.persistent || p.finishing || p.sealed || p.invalid || !p.idlePublished || p.abandoned.Load() {
+		p.eventMu.Unlock()
+		return ErrNotOwned
+	}
+	if p.idleTimer != nil {
+		p.idleTimer.Stop()
+	}
+	p.idleGeneration++
+	if p.usage != nil {
+		// Preserve thread-wide cumulative totals; never reset them per turn.
+		_ = p.usage.NextTurn()
+	}
+	p.terminal, p.terminalSeen, p.acknowledged, p.idlePublished = nil, false, false, false
+	p.eventMu.Unlock()
+	if err := p.startTurn(ctx, StartRequest{Prompt: text, Profile: p.profile}); err != nil {
+		p.eventMu.Lock()
+		p.once.Do(func() { p.done <- true })
+		p.eventMu.Unlock()
+		return err
+	}
+	p.observe(AdapterEvent{Kind: "turn", TurnCountDelta: 1})
+	return nil
 }

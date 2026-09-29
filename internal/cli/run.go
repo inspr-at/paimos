@@ -153,6 +153,7 @@ func (rt *runtime) root() *Command {
 		rt.cmdModel(),
 		rt.cmdOnboard(),
 		rt.cmdSession(),
+		rt.cmdHook(),
 		rt.cmdTell(),
 		rt.cmdListen(),
 		rt.cmdMessage(),

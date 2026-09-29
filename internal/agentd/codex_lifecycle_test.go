@@ -58,7 +58,16 @@ func newCodexLifecycleFixtureWithStream(t *testing.T, stream func(io.Reader) io.
 	f.proc = &codexProcess{wireProcess: wire, usage: capture, done: make(chan bool, 1)}
 	wire.setOnEvent(func(raw json.RawMessage) { f.proc.notification(raw); f.processed <- struct{}{} })
 	go wire.read(stream(reader))
-	t.Cleanup(func() { _ = writer.Close(); _ = reader.Close(); <-wire.readDone })
+	t.Cleanup(func() {
+		_ = writer.Close()
+		_ = reader.Close()
+		<-wire.readDone
+		f.proc.eventMu.Lock()
+		if f.proc.idleTimer != nil {
+			f.proc.idleTimer.Stop()
+		}
+		f.proc.eventMu.Unlock()
+	})
 	go func() { f.start <- f.proc.startTurn(t.Context(), StartRequest{Profile: Profile{Model: "model-a"}}) }()
 	select {
 	case b := <-input.requests:

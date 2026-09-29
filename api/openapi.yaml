@@ -318,7 +318,7 @@ paths:
   /rules/merged:
     get:
       operationId: "mergeAgentRules"
-      description: "rules.read in exact project; tenant from authentication; person must be caller or agent key creator; named agent must be caller or owner controlled; role/harness are exact requested selectors, not permission grants; fails closed on ambiguous identities; no HTTP cache"
+      description: "rules.read in exact project; tenant from authentication; person must be caller or agent key creator; named agent must be caller or owner controlled; role/harness are exact requested selectors, not permission grants; fails closed on ambiguous identities; no HTTP cache. The rendered file stays at or below 12000 UTF-8 bytes. Loading the snapshots for that one file stops at the same store caps as publication: 2,000 rules or 2 MiB of rule text (422 budget_check_too_large). The 1,000 session-file cap remains on batch publication."
       responses:
         "200":
           description: "Authorized rule resource"
@@ -330,7 +330,7 @@ paths:
         "403": {"description":"Permission or scoped ownership denied; agents never publish or edit company rules","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "404": {"description":"Resource unavailable","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "409": {"description":"Revision/version conflict or ambiguous same-rank identity","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
-        "422": {"description":"Rendered rules exceed 12000 UTF-8 bytes; reduce always-on text or move content to details","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "422": {"description":"Rendered rules exceed 12000 UTF-8 bytes, or the snapshots for this session exceed 2,000 rules or 2 MiB of rule text","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "401": {"description":"Authentication required","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
       parameters:
         -
@@ -505,6 +505,147 @@ paths:
         '404': {description: Request or proof not found}
         '409': {description: Immutable choice or lifecycle conflict}
         '429': {description: Rate or attempt limit reached; honor Retry-After}
+  /me/security/session-watching:
+    get:
+      operationId: getSessionWatchingSecurity
+      summary: Read the signed-in person's session watching consent mode
+      responses:
+        '200':
+          description: Per-person setting; defaults to Aeon approval
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SessionWatchingSecurity'}
+        '403': {description: Signed-in person required}
+    put:
+      operationId: setSessionWatchingSecurity
+      summary: Change consent for future approvals without changing active watches
+      description: Same-origin person only. Local confirmation requires a signed macOS daemon with LocalAuthentication; Linux is unavailable and fails closed.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/SessionWatchingSecurity'}
+      responses:
+        '200':
+          description: Saved per-person setting
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SessionWatchingSecurity'}
+        '400': {description: Invalid mode}
+        '403': {description: Same-origin signed-in person required}
+  /agent-pairing/attach:
+    post:
+      operationId: attachDevice
+      summary: Paired daemon requests, activates, renews or detaches a read-only watch
+      description: >-
+        The single paired-runtime attach route. At daemon startup, register requires the
+        paired bearer, computer lifecycle proof and a fresh memory-only poll_key. Registration
+        invalidates all earlier watches on that computer, requiring new owner approval.
+        All other operations require the paired bearer and registered poll_key; lifecycle
+        proof alone is rejected. Neither daemon nor server persists the poll key. Codes never
+        appear in URLs. Requests, activation and every poll
+        repeat the immutable kernel-observed snapshot. Lease is 60 seconds and cannot
+        be resurrected. The server pins the owner's consent_mode at person approval.
+        local_auth remains approved (no session or lease) until the registered daemon
+        echoes consent_digest and local_confirmed after in-process macOS authentication.
+        Missing confirmation never activates; request-supplied policy overrides are refused.
+        Text is host-redacted and relayed in memory only, never stored.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/AttachDeviceRequest'}
+      responses:
+        '200':
+          description: Registration acknowledgement or attach state; user_code is returned only to the requesting daemon
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - {$ref: '#/components/schemas/AttachView'}
+                  - type: object
+                    required: [state]
+                    additionalProperties: false
+                    properties:
+                      state: {type: string, const: registered}
+        '403': {description: Registered memory-only poll key required; lifecycle proof only authorizes registration}
+        '409': {description: Snapshot mismatch or poll sequence rejected}
+        '410': {description: Expired or revoked; new owner approval required}
+        '429': {description: Attempt or stream quota exceeded}
+  /agent-pairing/attach/lookup:
+    post:
+      operationId: lookupAttach
+      summary: Paired computer owner reviews a nine-digit attach code
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [user_code]
+              properties:
+                user_code: {type: string, pattern: '^[0-9]{9}$'}
+      responses:
+        '200':
+          description: Immutable approval snapshot and digest, no conversation
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AttachView'}
+        '403': {description: Same-origin signed-in owner required}
+        '404': {description: Code unavailable}
+        '429': {description: Attempt cap reached}
+  /agent-pairing/attach/{requestId}/approve:
+    parameters:
+      - {name: requestId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: approveAttach
+      summary: Same-origin paired owner approves exactly the reviewed snapshot
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [request_digest]
+              properties:
+                request_digest: {type: string, pattern: '^[0-9a-f]{64}$'}
+                consent_digest: {type: string, pattern: '^[0-9a-f]{64}$', description: Required for local_auth; binds the mode the person reviewed}
+      responses:
+        '200': {description: 'Approved snapshot; activation requires the registered daemon poll key and, for local_auth, its local confirmation'}
+        '403': {description: Same-origin paired owner required}
+        '409': {description: Digest differs from reviewed snapshot}
+        '410': {description: Approval expired or revoked}
+  /agent-pairing/attach/{requestId}/revoke:
+    parameters:
+      - {name: requestId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: revokeAttach
+      summary: Paired owner ends a watch without stopping the process
+      responses:
+        '200': {description: Detached; conversation access ends}
+        '403': {description: Same-origin paired owner required}
+  /projects/{projectId}/harness-sessions/{sessionId}/watch:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: watchAttachedSession
+      summary: Live-only inert text; requires explicit harness.watch, never implied by read
+      description: >-
+        Person-only SSE. No replay or history. Authorization and lease are rechecked
+        on each chunk and every second. Events are text (JSON string), end, and keepalive.
+        Agent-written text is unverified; never interpret HTML, Markdown or terminal escapes.
+        Stream is no-store and bounded to 16 viewers per session, 256 per server.
+      responses:
+        '200':
+          description: Memory-only live stream
+          content:
+            text/event-stream:
+              schema: {type: string}
+        '403': {description: Explicit conversation-view permission required}
+        '410': {description: Watch unavailable or lease expired}
   /agent-pairing/self:
     get:
       operationId: getOwnPairing
@@ -573,7 +714,7 @@ paths:
     get:
       operationId: listMembers
       responses:
-        '200': {description: Workspace people, agents, invites and imported identities, content: {application/json: {schema: {$ref: '#/components/schemas/MemberDirectory'}}}}
+        '200': {description: 'Workspace people, agents, invites and imported identities', content: {application/json: {schema: {$ref: '#/components/schemas/MemberDirectory'}}}}
   /members/{principal_id}/workspace-role:
     put:
       operationId: setWorkspaceRole
@@ -606,7 +747,7 @@ paths:
                   invite: {$ref: '#/components/schemas/Invite'}
                   join_url: {type: string}
                   account: {$ref: '#/components/schemas/InviteAccountResult'}
-        '400': {description: Invalid email, expiry, role or project, or provisioning requested without a configured provisioner}
+        '400': {description: 'Invalid email, expiry, role or project, or provisioning requested without a configured provisioner'}
         '403': {description: Permission denied or the role exceeds the inviter}
         '409': {description: Email already belongs to an active member}
   /members/invites/{id}:
@@ -638,7 +779,7 @@ paths:
       responses:
         '200': {description: Deactivated member, content: {application/json: {schema: {$ref: '#/components/schemas/Member'}}}}
         '403': {description: Permission denied}
-        '409': {description: Last active owner, or already deactivated}
+        '409': {description: 'Last active owner, or already deactivated'}
   /members/{principal_id}/reactivate:
     post:
       operationId: reactivateMember
@@ -666,7 +807,7 @@ paths:
         '200': {description: Person with the new alias, content: {application/json: {schema: {$ref: '#/components/schemas/Member'}}}}
         '400': {description: Alias would form a chain or a self-link}
         '403': {description: Permission denied}
-        '409': {description: Already linked, or the alias is the last active owner}
+        '409': {description: 'Already linked, or the alias is the last active owner'}
   /members/{principal_id}/aliases/{from_principal_id}:
     delete:
       operationId: unlinkMemberAlias
@@ -797,7 +938,7 @@ paths:
     get:
       operationId: releaseNoteSnapshot
       summary: Capture linked ticket benefit fields in one database snapshot
-      description: Read-only project-scoped export using journey_tickets membership, not Git mentions. Requires releases.read and node visibility (nodes.read). A published release with a stored snapshot returns that snapshot (frozen true), so later ticket edits do not change it. A published release with no stored snapshot was published before snapshots existed and returns ReleaseNotes with fallback historical-tag-headline; current ticket fields are not read. The release sheet labels that fallback "Historical tag headline". Before publication the response is a live preview (frozen false). Save a ReleaseNoteSnapshot as release-notes/<version>.json before tagging for offline history generation; do not save the historical fallback as a snapshot. This request does not itself publish or freeze a release.
+      description: Read-only project-scoped export using journey_tickets membership, not Git mentions. Requires releases.read and node visibility (nodes.read). A published release with a stored snapshot returns that snapshot (frozen true), so later ticket edits do not change it. A published release with no stored snapshot was published before snapshots existed and returns ReleaseNotes with fallback historical-tag-headline; current ticket fields are not read. The release sheet labels that fallback "Historical tag headline". An operator backfill can insert one later, labelled backfilled, with the original released_at and captured_at set to that later time. The release sheet then says Notes written after release. Before publication the response is a live preview (frozen false). Save a ReleaseNoteSnapshot as release-notes/<version>.json before tagging for offline history generation; do not save the historical fallback as a snapshot. This request does not itself publish, freeze or backfill a release.
       parameters:
         - {in: path, name: projectId, required: true, schema: {type: string, format: uuid}}
         - {in: path, name: releaseId, required: true, schema: {type: string, format: uuid}}
@@ -817,6 +958,7 @@ paths:
     get:
       operationId: listReleases
       summary: The release history embedded in this build (inspr.release-history.v1)
+      description: Tagged snapshots win. Missing tagged notes may use an immutable version-keyed backfill for the caller tenant and visible AEON project; otherwise the historical headline remains. Backfilled notes are explicitly marked written_after_release.
       responses:
         '200':
           description: History, newest first
@@ -824,12 +966,14 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/ReleaseHistory'}
         '401': {description: Authentication required}
+        '500': {description: Stored release notes could not be read}
   /releases/{version}:
     get:
       operationId: getRelease
       summary: One release of the embedded history
+      description: Uses the same tenant/project-scoped backfill and tagged snapshot precedence as the list endpoint.
       parameters:
-        - {name: version, in: path, required: true, schema: {type: string}, description: The calendar version, with or without the leading v}
+        - {name: version, in: path, required: true, schema: {type: string}, description: 'The calendar version, with or without the leading v'}
       responses:
         '200':
           description: The release
@@ -838,6 +982,7 @@ paths:
               schema: {$ref: '#/components/schemas/Release'}
         '400': {description: Not an inspr-calendar-v2 version}
         '401': {description: Authentication required}
+        '500': {description: Stored release notes could not be read}
         '404': {description: No such release in this build's history}
   /auth/login:
     get:
@@ -986,7 +1131,7 @@ paths:
               type: object
               required: [file, crop]
               properties:
-                file: {type: string, format: binary, description: PNG, JPEG or WebP up to 8 MiB}
+                file: {type: string, format: binary, description: 'PNG, JPEG or WebP up to 8 MiB'}
                 crop: {$ref: '#/components/schemas/AvatarCrop'}
       responses:
         '200': {description: Updated profile, content: {application/json: {schema: {$ref: '#/components/schemas/PersonalProfile'}}}}
@@ -1385,8 +1530,8 @@ paths:
         - {name: date_field, in: query, description: 'Which date date_from and date_to bound. created and updated compare instants; start, end and accepted read fields.start_date, end_date and accepted_at by the calendar day of the bounds in their own offset. Alone it keeps work that has that date.', schema: {type: string, enum: [created, updated, start, end, accepted]}}
         - {name: date_from, in: query, description: Inclusive lower bound (RFC 3339), schema: {type: string, format: date-time}}
         - {name: date_to, in: query, description: Exclusive upper bound (RFC 3339), schema: {type: string, format: date-time}}
-        - {name: q, in: query, description: Matches keys (also earlier keys), titles and descriptions; key prefixes rank first and description-only matches last, schema: {type: string}}
-        - {name: within, in: query, description: Descendants of this node, excluding itself, schema: {type: string, format: uuid}}
+        - {name: q, in: query, description: 'Matches keys (also earlier keys), titles and descriptions; key prefixes rank first and description-only matches last', schema: {type: string}}
+        - {name: within, in: query, description: 'Descendants of this node, excluding itself', schema: {type: string, format: uuid}}
         - {name: hide_closed, in: query, schema: {type: boolean, default: false}}
         - {name: facets, in: query, description: 'Repeatable or comma-separated state, kind, priority, assignee, tag, cost_unit, release. Tag, cost unit and release counts are keyed by their display spelling; none counts work without one.', schema: {type: array, items: {type: string}}}
         - {name: parent_id, in: query, schema: {type: string, format: uuid}}
@@ -1983,7 +2128,7 @@ paths:
       parameters:
         - {name: project_id, in: query, schema: {type: string, format: uuid}}
         - {name: type, in: query, description: Comma-separated knowledge types, schema: {type: string}}
-        - {name: status, in: query, description: Comma-separated active, proposed, archived, schema: {type: string}}
+        - {name: status, in: query, description: 'Comma-separated active, proposed, archived', schema: {type: string}}
         - {name: q, in: query, schema: {type: string, maxLength: 200}}
         - {name: sort, in: query, schema: {type: string, enum: [relevance, updated, created, title, slug, type]}}
         - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 1000, default: 500}}
@@ -2042,7 +2187,7 @@ paths:
       parameters:
         - {name: project_id, in: query, required: true, schema: {type: string, format: uuid}}
         - {name: types, in: query, description: Comma-separated knowledge types, schema: {type: string}}
-        - {name: status, in: query, description: Comma-separated active, proposed, archived; omitted means all, schema: {type: string}}
+        - {name: status, in: query, description: 'Comma-separated active, proposed, archived; omitted means all', schema: {type: string}}
         - {name: include, in: query, schema: {type: string, enum: [tickets]}}
       responses:
         '200':
@@ -2290,11 +2435,12 @@ paths:
     get:
       operationId: listenInbox
       summary: List or long-poll the caller's durable inbox
-      description: Only the caller's principal is readable. Cursor is an exclusive sent event ID; wait_ms=0 returns immediately. Expired messages are omitted. Unacked messages may be delivered again.
+      description: Only the caller's principal is readable. Cursor is an exclusive sent event ID; wait_ms=0 returns immediately. Expired messages are omitted. Unacked messages may be delivered again. Returned messages count as delivered to their sender (AEON-280). With session, the pull records that generation as listening (hook for wait_ms=0, long_poll when waiting).
       security: *auth
       parameters:
         - {name: after, in: query, schema: {type: integer, format: int64, minimum: 0}}
         - {name: session, in: query, description: 'Only this active session of the caller plus unbound principal broadcasts. Omit to retain the principal inbox.', schema: {type: string, format: uuid}}
+        - {name: exact_session, in: query, description: 'AEON-280. With session, true returns only messages bound to that session and leaves out unbound principal broadcasts (for turn-boundary hooks). Requires session; omitted or false keeps the default.', schema: {type: boolean, default: false}}
         - {name: wait_ms, in: query, schema: {type: integer, minimum: 0, maximum: 30000, default: 0}}
         - {$ref: '#/components/parameters/Limit'}
       responses:
@@ -2317,14 +2463,38 @@ paths:
     get:
       operationId: streamInbox
       summary: SSE of messages addressed to the caller
-      description: Last-Event-ID is the sent event ID. Replay durable messages after that ID before listening; NOTIFY is only a wake hint. Each message event has its sent event ID as id and InboxMessage JSON as data. Heartbeats carry no message.
+      description: Last-Event-ID is the sent event ID. Replay durable messages after that ID before listening; NOTIFY is only a wake hint. Each message event has its sent event ID as id and InboxMessage JSON as data. Heartbeats carry no message. With session, the stream also carries messages bound to that active generation (with their session fields) and records the session as listening via stream on connect, on every wake and on every keepalive; a stopped session answers 409 or ends the stream.
       security: *auth
       parameters:
         - {name: after, in: query, schema: {type: integer, format: int64, minimum: 0}}
+        - {name: session, in: query, description: 'Only this active session of the caller plus unbound principal broadcasts. Omit to retain the principal inbox.', schema: {type: string, format: uuid}}
+        - {name: exact_session, in: query, description: 'AEON-280. With session, true returns only messages bound to that session and leaves out unbound principal broadcasts (for turn-boundary hooks). Requires session; omitted or false keeps the default.', schema: {type: boolean, default: false}}
         - {name: Last-Event-ID, in: header, schema: {type: integer, format: int64, minimum: 0}}
       responses:
         '200': {description: Inbox event stream, content: {text/event-stream: {schema: {type: string}}}}
         '400': {$ref: '#/components/responses/Error'}
+        '409': {description: 'session_ended — This session has ended.', content: {application/json: {schema: {$ref: '#/components/schemas/ApiError'}}}}
+  /inbox/message-status:
+    get:
+      operationId: getInboxMessageStatus
+      summary: Delivery progress of the caller's own sent messages
+      description: 'AEON-280. Sender only, same permission as the receipt (inbox.receipt). Unknown ids, other senders'' messages and messages without a receipt are omitted, never an error. sent = accepted; delivered = handed to the recipient by a pull, drain, stream or adapter claim; read = the recipient confirmed it (receipt handed_off); not_delivered = the receipt failed, with reason deadline, attempts, session_ended, no_listener or an adapter reason. Live changes arrive on /events/stream as inbox.message_fetched, inbox.receipt_handed_off, inbox.receipt_failed and inbox.delivery_failed.'
+      security: *auth
+      parameters:
+        - {name: ids, in: query, required: true, description: 'Comma-separated message ids, at most 100.', schema: {type: string}}
+      responses:
+        '200':
+          description: Status per visible message, in send order
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [items]
+                properties:
+                  items: {type: array, items: {$ref: '#/components/schemas/InboxMessageStatus'}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
   /inbox/messages/{messageId}/receipt:
     get:
       operationId: getInboxReceipt
@@ -2340,14 +2510,14 @@ paths:
     post:
       operationId: ackInboxMessage
       summary: Acknowledge a message addressed to the caller
-      description: Idempotent for the same recipient. Acknowledgement and inbox.acked event commit together.
+      description: Idempotent for the same recipient. Acknowledgement and inbox.acked event commit together. A message whose delivery already failed (AEON-280) answers 409 not_delivered and is neither acknowledged nor returned.
       security: *auth
       parameters: [{name: messageId, in: path, required: true, schema: {type: string, format: uuid}}]
       responses:
         '200': {description: Acknowledged message, content: {application/json: {schema: {$ref: '#/components/schemas/InboxMessage'}}}}
         '403': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
-        '409': {description: 'session_ended — This session has ended.', content: {application/json: {schema: {$ref: '#/components/schemas/ApiError'}}}}
+        '409': {description: 'session_ended — This session has ended. not_delivered — the delivery already failed.', content: {application/json: {schema: {$ref: '#/components/schemas/ApiError'}}}}
   /inbox/targets:
     get:
       operationId: listInboxTargets
@@ -2471,6 +2641,33 @@ paths:
       description: Session detail, including at most 20 recent activity notes and metadata changes, newest first.
       responses:
         '200': {description: Session detail, headers: {Aeon-Contract: {$ref: '#/components/headers/HarnessSessionContract'}}, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessSession'}}}}
+  /projects/{projectId}/harness-sessions/{sessionId}/complete-delivery:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: X-Aeon-Worker-Lease, in: header, required: true, schema: {type: string}, description: Private exact generation proof}
+    post:
+      security: *auth
+      operationId: completeHarnessDelivery
+      description: Settle an exact worker lease. Omitted outcome means handed_off; failed requires a bounded reason and advances the sender receipt without reinjecting uncertain input.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [delivery_id, cursor]
+              properties:
+                delivery_id: {type: string, format: uuid}
+                cursor: {type: integer, minimum: 1}
+                effective_level: {type: string, enum: [simple], default: simple}
+                outcome: {type: string, enum: [handed_off, failed], default: handed_off}
+                failure_reason: {type: string, enum: [outcome_unconfirmed, child_unavailable]}
+      responses:
+        '200': {description: Exact leased delivery settled idempotently}
+        '400': {description: Invalid settlement}
+        '409': {description: Lease cursor mismatch or released lease}
+        '410': {description: Archived generation}
   /projects/{projectId}/harness-sessions/{sessionId}/managed-controls:
     parameters:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -2496,7 +2693,7 @@ paths:
         '201': {description: Pending or identical replay; reason authorization_expired means expired., content: {application/json: {schema: {$ref: '#/components/schemas/HarnessManagedControl'}}}}
         '400': {description: Invalid typed value or model/effort outside the enrolled account catalog}
         '403': {description: Person with project harness.control required}
-        '409': {description: Unmanaged, unsupported, stale ownership, changed retry or session unavailable}
+        '409': {description: 'Unmanaged, unsupported, stale ownership, changed retry or session unavailable'}
         '429': {description: Session control quota reached}
   /projects/{projectId}/harness-sessions/{sessionId}/managed-settings:
     parameters:
@@ -2524,6 +2721,46 @@ paths:
                         efforts: {type: array, items: {type: string, enum: [low, medium, high, xhigh, max]}}
         '403': {description: Person with project harness.control required}
         '409': {description: Managed Claude session required}
+  /projects/{projectId}/harness-sessions/{sessionId}/read-marker:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: getSessionReadMarker
+      description: The signed-in person's read watermark for this session. Null fields mean nothing has been marked. Requires harness.read. Agents receive 403. Another person's marker is never returned. An invisible session is 404.
+      responses:
+        '200':
+          description: This person's marker, or nulls when unset
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SessionReadMarker'}
+        '401': {description: Authentication required}
+        '403': {description: Signed-in person with harness.read required}
+        '404': {description: Session is not visible}
+    put:
+      operationId: putSessionReadMarker
+      description: Move this person's watermark forward. last_read_message_id is a message in this session. last_read_event_id is that message's sent_event_id, or the sent_event_id of a later message in the same session. A lower or equal event leaves the stored marker unchanged and returns it. Requires harness.read. Agents receive 403. Does not change message resources.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [last_read_message_id, last_read_event_id]
+              properties:
+                last_read_message_id: {type: string, format: uuid}
+                last_read_event_id: {type: integer, format: int64, minimum: 0}
+      responses:
+        '200':
+          description: The stored marker, which may be ahead of the request
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SessionReadMarker'}
+        '400': {description: 'Invalid marker, or the message is not in this session'}
+        '401': {description: Authentication required}
+        '403': {description: Signed-in person with harness.read required}
+        '404': {description: Session is not visible}
   /projects/{projectId}/harness-sessions/{sessionId}/managed-context:
     parameters:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -2568,7 +2805,7 @@ paths:
         '201': {description: Requested; waiting for the session, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessSessionRequest'}}}}
         '400': {description: Invalid rename or catalog selection}
         '403': {description: Person with harness.control permission required}
-        '409': {description: Closed or managed generation, stale generation, or divergent replay}
+        '409': {description: 'Closed or managed generation, stale generation, or divergent replay'}
   /projects/{projectId}/harness-sessions/{sessionId}/controls/{controlId}/complete:
     parameters:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -2628,7 +2865,7 @@ paths:
       responses:
         '201': {description: Idempotent typed force control; inspect its state and outcome, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessRecoveryControl'}}}}
         '403': {description: Human force permission required}
-        '409': {description: Stale confirmation, offline host or unverified process generation}
+        '409': {description: 'Stale confirmation, offline host or unverified process generation'}
   /projects/{projectId}/harness-sessions/{sessionId}/remove:
     parameters:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -2678,7 +2915,7 @@ paths:
         '200': {description: Archived session, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessSession'}}}}
         '400': {description: Invalid confirmation or request}
         '403': {description: Human recovery permission required}
-        '409': {description: Stale observation, divergent retry, active force authorization or legacy managed daemon without safe detachment}
+        '409': {description: 'Stale observation, divergent retry, active force authorization or legacy managed daemon without safe detachment'}
   /projects/{projectId}/harness-sessions/{sessionId}/usage:
     parameters:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -2702,7 +2939,7 @@ paths:
         - {name: X-Aeon-Worker-Lease, in: header, required: true, schema: {type: string, minLength: 32, maxLength: 256}}
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessUsageReport'}}}}
       responses:
-        '410': {description: Authenticated archived generation; usage proof revoked, existing usage retained}
+        '410': {description: 'Authenticated archived generation; usage proof revoked, existing usage retained'}
         '200':
           description: Accepted cumulative report or exact replay
           content:
@@ -2715,7 +2952,7 @@ paths:
                   replayed: {type: boolean}
         '400': {description: Invalid or out-of-bounds report}
         '403': {description: Worker proof or scope rejected}
-        '409': {description: Conflicting replay, stale sequence, decreasing counters or changed final report}
+        '409': {description: 'Conflicting replay, stale sequence, decreasing counters or changed final report'}
     get:
       operationId: getHarnessSessionUsage
       security: *auth
@@ -2789,7 +3026,7 @@ paths:
                 brief: {$ref: '#/components/schemas/HarnessBrief'}
                 worktree: {$ref: '#/components/schemas/HarnessWorktree'}
                 branch: {$ref: '#/components/schemas/HarnessBranch'}
-                commits: {type: array, maxItems: 20, description: New commits to append, oldest first; duplicate SHAs are ignored and only the latest 20 are retained., items: {$ref: '#/components/schemas/HarnessCommit'}}
+                commits: {type: array, maxItems: 20, description: 'New commits to append, oldest first; duplicate SHAs are ignored and only the latest 20 are retained.', items: {$ref: '#/components/schemas/HarnessCommit'}}
                 eta_ready_at: {type: [string, 'null'], format: date-time, description: "Worker only. RFC3339 instant the bound ticket is ready for review, from 30 days ago through 365 days ahead. Omission preserves; null clears. A past instant inside that window is overdue."}
                 eta_live_at: {type: [string, 'null'], format: date-time, description: "Coordinator only. RFC3339 instant the bound ticket is live, from 30 days ago through 365 days ahead. Omission preserves; null clears. The ticket's current project is checked on every write."}
                 progress_pct: {type: [integer, 'null'], minimum: 0, maximum: 100, description: "Worker only. Percent done for the bound ticket, 0 through 100. Omission preserves; null clears."}
@@ -2798,6 +3035,19 @@ paths:
         '400': {description: Invalid note or heartbeat}
         '403': {description: Worker proof rejected}
         '410': {description: Authenticated archived generation; detach harness servicing without signaling the process}
+  /settings/inbox-delivery:
+    get:
+      operationId: getInboxDeliverySettings
+      description: 'AEON-280. Deadlines and the adapter attempt cap for inbox delivery; defaults when the workspace has not chosen (300, 1800, 8). A message to an agent not confirmed by its deadline fails with a system notice to its sender. Requires settings.read.'
+      responses:
+        '200': {description: Delivery settings, content: {application/json: {schema: {$ref: '#/components/schemas/InboxDeliverySettings'}}}}
+    put:
+      operationId: putInboxDeliverySettings
+      description: Requires settings.manage. Applies to messages sent afterwards; queued messages keep the deadline they were accepted with.
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/InboxDeliverySettings'}}}}
+      responses:
+        '200': {description: Saved settings, content: {application/json: {schema: {$ref: '#/components/schemas/InboxDeliverySettings'}}}}
+        '400': {$ref: '#/components/responses/Error'}
   /settings/eta-interval:
     get:
       operationId: getEtaInterval
@@ -2852,7 +3102,7 @@ paths:
                 eta_live_at: {type: [string, 'null'], format: date-time}
       responses:
         '200': {description: The ticket estimate after the write, content: {application/json: {schema: {$ref: '#/components/schemas/TicketEta'}}}}
-        '400': {description: Not a ticket or task, or the timestamp is not RFC3339}
+        '400': {description: 'Not a ticket or task, or the timestamp is not RFC3339'}
         '403': {description: No active coordinator session for this agent in the project}
         '404': {description: Node not found}
   /projects/{projectId}/harness-sessions/{sessionId}/rules-receipts:
@@ -2871,8 +3121,12 @@ paths:
     post:
       operationId: recordHarnessRulesReceipt
       description: >-
-        Explicit worker report of receiving particular merged bytes; never publishes rules, changes
-        instruction provenance, or proves model load, obedience or execution, and grants no authority.
+        Explicit worker report of receiving particular merged bytes; never publishes rules or proves
+        model load, obedience or execution, and grants no authority. A newly appended receipt also
+        appends session instruction provenance for that merged version and body hash, plus constituent
+        set versions from the one manifest served with those bytes. When that serve was not recorded, or
+        more than one set list was served for the same bytes, only the merged identity is stored. Replay does not append another provenance
+        revision. The receipt row itself stays free of rule text.
         Requires harness.worker and the exact active owning generation lease. Server verifies tenant,
         project, agent, canonical key creator, registered harness and any task's current session/project
         binding. Role, bytes, version and source remain worker-reported; publication is not verified.
@@ -2895,19 +3149,34 @@ paths:
         '403': {description: Worker proof or context binding rejected}
         '409': {description: Expected receipt revision conflict or divergent request reuse}
         '410': {description: Authenticated archived generation; receipt history remains readable}
+  /projects/{projectId}/instruction-provenance:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: queryHarnessInstructionProvenance
+      description: Requires harness.read and project visibility. Returns instruction-source identities (logical name, hash, version) for sessions in the project, newest first, at most 200. Filter by version, content_sha256, kind or logical_name. A session with no sources contributes nothing. No rule text, file contents or paths.
+      parameters:
+        - {name: version, in: query, schema: {type: string, maxLength: 80}}
+        - {name: content_sha256, in: query, schema: {type: string, pattern: '^[0-9a-f]{64}$'}}
+        - {name: kind, in: query, schema: {type: string, enum: [agents, claude, skill, prompt_template, rules_merged, rules_set]}}
+        - {name: logical_name, in: query, schema: {type: string, maxLength: 80}}
+      responses:
+        '200': {description: Matching instruction sources, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessInstructionSourcePage'}}}}
+        '400': {description: Unknown or invalid query}
+        '404': {description: Project is not visible}
   /projects/{projectId}/harness-sessions/{sessionId}/provenance:
     parameters:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
       - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
     get:
       operationId: getHarnessInstructionProvenance
-      description: Newest instruction-provenance revisions for a visible session. Each item is an allowlisted logical name, a hash_kind, and an optional version. content_sha256 is present only when hash_kind is content. A prompt template recorded without an explicit template digest uses hash_kind absent and a null digest; the version identifier is not hashed. Contents, secrets and local paths are not stored.
+      description: Newest instruction-provenance revisions for a visible session. Each item is an allowlisted logical name, a hash_kind, and an optional version. content_sha256 is present only when hash_kind is content. A prompt template recorded without an explicit template digest uses hash_kind absent and a null digest; the version identifier is not hashed. rules_merged and rules_set are appended when a rules receipt is recorded. Contents, rule text, secrets and local paths are not stored. Query across sessions with GET /projects/{projectId}/instruction-provenance.
       responses:
         '200': {description: Provenance revisions, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessProvenancePage'}}}}
         '404': {description: Session is not visible}
     post:
       operationId: recordHarnessInstructionProvenance
-      description: The attributed worker appends one provenance revision, or replays the latest revision when the canonical set digest matches. Separate from registration and heartbeat. Requires harness.worker and X-Aeon-Worker-Lease.
+      description: The attributed worker appends one provenance revision for allowlisted instruction files or a prompt template, or replays the latest revision when the canonical set digest matches. Requires harness.worker and X-Aeon-Worker-Lease. rules_merged and rules_set are rejected here; a rules receipt records them. Heartbeat registration may post AGENTS.md and CLAUDE.md hashes when those files are present in the worktree.
       parameters:
         - {name: X-Aeon-Worker-Lease, in: header, required: true, schema: {type: string}, description: Private per-generation proof; never returned or logged}
       requestBody:
@@ -2917,7 +3186,7 @@ paths:
             schema: {$ref: '#/components/schemas/HarnessProvenanceWrite'}
       responses:
         '200': {description: Created or replayed revision, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessProvenanceRecorded'}}}}
-        '400': {description: Item is not an allowlisted name, digest or version}
+        '400': {description: 'Item is not an allowlisted name, digest or version'}
         '403': {description: Worker proof rejected}
         '410': {description: Authenticated archived generation; existing provenance remains readable}
   /harness-sessions:
@@ -3000,8 +3269,14 @@ paths:
         A provisional window, including mixed settled evidence, returns null used, headroom and hard remaining.
         Declared allowance, explicit reservations and the pace-cap schedule stay numbers. Null is unknown, not zero.
         Project visibility follows harness sessions. The most expensive tickets are a ranking, not a session list.
+        by_harness groups the same usage rows by session harness. ratings count rework by exception
+        on the sessions in this read. A vote row is an exception; a session with none counts only
+        as a delivery. rework_rate is exceptions/deliveries. by_model and by_harness use the same
+        labels as the usage breakdown. average remains the mean of optional scores and is null when
+        no score was given. Token and list-price totals are unchanged. A missing vote table leaves
+        exception counts at zero rather than failing the read.
       parameters:
-        - {name: from, in: query, schema: {type: string}, description: RFC3339 or YYYY-MM-DD. Both from and to, or neither (then the last 30 UTC days).}
+        - {name: from, in: query, schema: {type: string}, description: 'RFC3339 or YYYY-MM-DD. Both from and to, or neither (then the last 30 UTC days).'}
         - {name: to, in: query, schema: {type: string}, description: Exclusive end. Span at most 366 days.}
         - {name: project, in: query, schema: {type: string, format: uuid}}
       responses:
@@ -3011,7 +3286,7 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [from, to, generated_at, attribution, trend_basis, list_price_currency, truncated, totals, by_project, by_model, by_subscription, trend, tickets, tickets_cost_unknown, allowance]
+                required: [from, to, generated_at, attribution, trend_basis, list_price_currency, truncated, totals, by_project, by_model, by_harness, by_subscription, trend, tickets, tickets_cost_unknown, allowance, ratings]
                 properties:
                   from: {type: string, format: date-time}
                   to: {type: string, format: date-time}
@@ -3023,11 +3298,13 @@ paths:
                   totals: {$ref: '#/components/schemas/UsageGroup'}
                   by_project: {type: array, items: {$ref: '#/components/schemas/UsageGroup'}}
                   by_model: {type: array, items: {$ref: '#/components/schemas/UsageGroup'}}
+                  by_harness: {type: array, items: {$ref: '#/components/schemas/UsageGroup'}}
                   by_subscription: {type: array, items: {$ref: '#/components/schemas/UsageGroup'}}
                   trend: {type: array, items: {$ref: '#/components/schemas/UsageTrend'}}
                   tickets: {type: array, maxItems: 12, items: {$ref: '#/components/schemas/UsageTicket'}}
                   tickets_cost_unknown: {type: integer, minimum: 0, description: Visible tickets whose list estimate is entirely unknown. They are not ranked.}
                   allowance: {$ref: '#/components/schemas/UsageAllowance'}
+                  ratings: {$ref: '#/components/schemas/DeliveryRatingSummary'}
         '400': {description: Invalid range or project}
         '401': {description: Authentication required}
         '403': {description: Permission denied}
@@ -4010,7 +4287,7 @@ paths:
       description: Admin or member person, while at least one business plugin is enabled at its compiled digest. A read model of principals (who logged time, whose period waits for approval); grants nothing.
       security: [{session: []}]
       responses:
-        '200': {description: Principals, people first, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/BusinessPrincipal'}}}}}
+        '200': {description: 'Principals, people first', content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/BusinessPrincipal'}}}}}
         '403': {$ref: '#/components/responses/Error'}
   /quotes:
     get:
@@ -4216,7 +4493,7 @@ paths:
       security: [{session: []}]
       parameters: [{name: quoteId, in: path, required: true, schema: {type: string, format: uuid}}, {name: Last-Event-ID, in: header, schema: {type: string, pattern: '^[0-9]+$'}}]
       responses:
-        '200': {description: text/event-stream with presence, quote_change and access_revoked events, content: {text/event-stream: {schema: {type: string}}}}
+        '200': {description: 'text/event-stream with presence, quote_change and access_revoked events', content: {text/event-stream: {schema: {type: string}}}}
         '403': {$ref: '#/components/responses/Error'}
   /quotes/{quoteId}/finalize:
     post:
@@ -4499,7 +4776,7 @@ paths:
       parameters: [{name: tenantSlug, in: path, required: true, schema: {type: string, pattern: '^[a-z][a-z0-9-]{0,62}$'}}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/PortalWishIntake'}}}}
       responses:
-        '201': {description: Accepted for review, or discarded by the honeypot, content: {application/json: {schema: {$ref: '#/components/schemas/PortalWishAccepted'}}}}
+        '201': {description: 'Accepted for review, or discarded by the honeypot', content: {application/json: {schema: {$ref: '#/components/schemas/PortalWishAccepted'}}}}
         '400': {$ref: '#/components/responses/Error'}
         '403': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
@@ -4530,9 +4807,42 @@ paths:
       parameters: [{name: tenantSlug, in: path, required: true, schema: {type: string, pattern: '^[a-z][a-z0-9-]{0,62}$'}}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/PortalCorrectionIntake'}}}}
       responses:
-        '201': {description: Accepted, or discarded without a stored row, content: {application/json: {schema: {$ref: '#/components/schemas/PortalWishAccepted'}}}}
+        '201': {description: 'Accepted, or discarded without a stored row', content: {application/json: {schema: {$ref: '#/components/schemas/PortalWishAccepted'}}}}
         '400': {$ref: '#/components/responses/Error'}
         '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '429': {$ref: '#/components/responses/Error'}
+  /public/portal/{tenantSlug}/catalog.json:
+    get:
+      operationId: readPublicPortalCatalogFile
+      summary: Read the published catalog as a file
+      description: Anonymous. The body is the same document as readPublicPortal. The site also serves this file at /portal/{tenantSlug}/catalog.json, outside this API. A disabled portal and an unknown tenant both answer 404 with the same JSON error. Shares the catalog read limit of 120 per minute, counted before the tenant is resolved.
+      security: []
+      parameters: [{name: tenantSlug, in: path, required: true, schema: {type: string, pattern: '^[a-z][a-z0-9-]{0,62}$'}}]
+      responses:
+        '200': {description: Published catalog, headers: {Cache-Control: {schema: {type: string}}}, content: {application/json: {schema: {$ref: '#/components/schemas/PortalPublic'}}}}
+        '404': {$ref: '#/components/responses/Error'}
+        '429': {$ref: '#/components/responses/Error'}
+  /public/portal/{tenantSlug}/llms.txt:
+    get:
+      operationId: readPublicPortalLlms
+      summary: Read a plain-text index of the public catalog
+      description: Anonymous. Public titles and summaries only. The site also serves this file at /portal/{tenantSlug}/llms.txt. A disabled portal and an unknown tenant both answer 404 with the same JSON error. Shares the catalog read limit of 120 per minute, counted before the tenant is resolved.
+      security: []
+      parameters: [{name: tenantSlug, in: path, required: true, schema: {type: string, pattern: '^[a-z][a-z0-9-]{0,62}$'}}]
+      responses:
+        '200': {description: Plain-text index, headers: {Cache-Control: {schema: {type: string}}}, content: {text/plain: {schema: {type: string}}}}
+        '404': {$ref: '#/components/responses/Error'}
+        '429': {$ref: '#/components/responses/Error'}
+  /public/portal/{tenantSlug}/releases:
+    get:
+      operationId: readPublicPortalReleases
+      summary: Read published release notes for the portal product
+      description: Anonymous. Notes are the frozen snapshot taken when a release shipped, for the one project linked on the portal pace screen, and only after that link turns release history on. A pace link alone returns an empty releases list. The project name is omitted. Only released and superseded releases with a frozen snapshot and at least one public note are included. A published release without a frozen snapshot, or with no public note, is omitted. Hidden tickets and incomplete benefit text are omitted. Ticket keys, node ids and later edits of ticket fields are not part of this document. A disabled portal and an unknown tenant both answer 404. An open portal with no published product returns product null and an empty releases list. Shares the catalog read limit of 120 per minute, counted before the tenant is resolved. The public page is /portal/{tenantSlug}/releases.
+      security: []
+      parameters: [{name: tenantSlug, in: path, required: true, schema: {type: string, pattern: '^[a-z][a-z0-9-]{0,62}$'}}]
+      responses:
+        '200': {description: Published release notes, headers: {Cache-Control: {schema: {type: string}}}, content: {application/json: {schema: {$ref: '#/components/schemas/PortalPublicReleases'}}}}
         '404': {$ref: '#/components/responses/Error'}
         '429': {$ref: '#/components/responses/Error'}
   /portal/market:
@@ -4672,7 +4982,8 @@ paths:
         '403': {$ref: '#/components/responses/Error'}
     put:
       operationId: writePortalPace
-      summary: Link one project whose release dates become the public count, or clear it
+      summary: Link one project whose release dates become the public count, clear it, or choose whether its frozen notes are public
+      description: settings.manage, people only. Sending project_id alone keeps release history when the project stays the same and turns it off when the project changes, and advances the link revision. Sending release_history also sends the project_id and revision from the read this publish is based on. That write is one update matching both, so it cannot publish notes for a project linked later; a mismatch is 409 and leaves the link as it is. Clearing the link deletes the row and keeps the issued revision, so linking again receives a new revision and a history write from before the clear does not match. Clearing the link and setting release history in one body is refused. Release history without that project and revision is refused.
       security: [{session: []}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/PortalPaceWrite'}}}}
       responses:
@@ -4680,6 +4991,7 @@ paths:
         '400': {$ref: '#/components/responses/Error'}
         '401': {$ref: '#/components/responses/Error'}
         '403': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
   /portal/wishes/{wishId}/fulfillment:
     put:
       operationId: writePortalFulfillment
@@ -4848,6 +5160,77 @@ paths:
         '400': {$ref: '#/components/responses/Error'}
         '403': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
+  /nodes/{nodeId}/delivery-ratings:
+    get:
+      operationId: listDeliveryRatings
+      summary: Rework marks and objective signals for sessions on a ticket, epic or task
+      description: >
+        Person session only. One row per visible session whose ticket is this node
+        or a visible descendant, newest first, at most 80. A vote row is an exception:
+        silence is not stored. mine is the caller's mark, or null. votes counts
+        exception rows. average is the mean of optional scores, null when none were
+        given, and is a two-decimal string, never a JSON number. Signals count review
+        rounds, CI failures and reverts from ticket events when those events exist.
+        Zero means none were recorded. An event that names a session counts only for
+        that session. An event that names none counts only while the session was running.
+        AEON-286 outcome events will replace that signal source.
+      security: [{session: []}]
+      parameters:
+        - {name: nodeId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: Ratings, content: {application/json: {schema: {$ref: '#/components/schemas/DeliveryRatingPage'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+  /harness-sessions/{sessionId}/delivery-rating:
+    parameters:
+      - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: getDeliveryRating
+      summary: The caller's rework mark, optional score average and objective signals
+      description: Person session only. 404 when the session or its ticket is not visible. 409 when the session has no ticket. harness, model and account_label are the session's current metadata. mine is null when this person has not marked the session.
+      security: [{session: []}]
+      responses:
+        '200': {description: Rating, content: {application/json: {schema: {$ref: '#/components/schemas/DeliveryRating'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+    put:
+      operationId: saveDeliveryRating
+      summary: Mark this session as needing rework
+      description: >
+        Person session only. One mark per person per session. A row means an exception;
+        silence is not stored. comment is the required reason. tags and score are
+        optional. A later save replaces them and refreshes the stored model, harness
+        and account from the session. Tags are quality, rework and taste.
+      security: [{session: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/DeliveryVoteWrite'}
+      responses:
+        '200': {description: Rating, content: {application/json: {schema: {$ref: '#/components/schemas/DeliveryRating'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+    delete:
+      operationId: clearDeliveryRating
+      summary: Withdraw the caller's rework mark
+      description: Person session only. Removes this person's exception and leaves other people's marks. Idempotent when they had not marked the session.
+      security: [{session: []}]
+      responses:
+        '200': {description: Rating, content: {application/json: {schema: {$ref: '#/components/schemas/DeliveryRating'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
   /nodes/{nodeId}/time-totals:
     get:
       operationId: getNodeTimeTotals
@@ -4904,15 +5287,83 @@ components:
     StageEvidenceContract: {description: Stage evidence response contract, schema: {type: string, enum: ['stage-evidence/1.0']}}
     StageResultContract: {description: Stage result response contract, schema: {type: string, enum: ['stage-result/1.0']}}
     StageLaunchContract: {description: Stage launch response contract, schema: {type: string, enum: ['stage-launch/1.0']}}
-    JourneyContract: {description: Journey read response contract, schema: {type: string, enum: ['journey/1.2']}}
+    JourneyContract: {description: Journey read response contract, schema: {type: string, enum: ['journey/1.3']}}
     MeContract: {description: Acting principal response contract, schema: {type: string, enum: ['me/1.0']}}
     BaselineBatchesContract: {description: Classic-compatible baseline batch response contract, schema: {type: string, enum: ['baseline-batches/1.0']}}
-    ApprovalsContract: {description: Approval response contract, schema: {type: string, enum: ['approvals/1.0']}}
-    HarnessSessionContract: {description: Harness status and heartbeat response contract, schema: {type: string, enum: ['harness-session/1.1']}}
+    ApprovalsContract: {description: Approval response contract, schema: {type: string, enum: ['approvals/1.1']}}
+    HarnessSessionContract: {description: Harness status and heartbeat response contract, schema: {type: string, enum: ['harness-session/1.3']}}
   securitySchemes:
     session: {type: apiKey, in: cookie, name: aeon_session}
     agentKey: {type: http, scheme: bearer, description: Bearer token aeon_<prefix>_<secret>}
   schemas:
+    SessionWatchingSecurity:
+      type: object
+      additionalProperties: false
+      required: [consent_mode]
+      properties:
+        consent_mode: {type: string, enum: [aeon, local_auth], default: aeon}
+    AttachProcess:
+      type: object
+      additionalProperties: false
+      required: [pid, uid, started, executable, cwd]
+      properties:
+        pid: {type: integer, minimum: 1}
+        uid: {type: integer, minimum: 0}
+        started: {type: string, maxLength: 128}
+        executable: {type: string, maxLength: 1024}
+        cwd: {type: string, maxLength: 1024}
+    AttachSnapshot:
+      type: object
+      additionalProperties: false
+      required: [computer_id, project_id, ticket_id, host, harness, process, transcript, file_id]
+      properties:
+        computer_id: {type: string, format: uuid}
+        project_id: {type: string, format: uuid}
+        ticket_id: {type: string, format: uuid}
+        host: {type: string, maxLength: 128}
+        harness: {type: string, enum: [codex, claude, cursor, grok]}
+        process: {$ref: '#/components/schemas/AttachProcess'}
+        transcript: {type: string, maxLength: 1024}
+        file_id: {type: string, maxLength: 128}
+        platform: {type: string, enum: [darwin, linux], description: Observed daemon platform; required for strict local authentication}
+    AttachDeviceRequest:
+      type: object
+      additionalProperties: false
+      required: [operation, computer_id, poll_key]
+      oneOf:
+        - properties:
+            operation: {const: register}
+          required: [device_proof]
+        - properties:
+            operation: {enum: [request, poll, detach]}
+          required: [request_id, snapshot, request_digest]
+      properties:
+        operation: {type: string, enum: [register, request, poll, detach]}
+        request_id: {type: string, format: uuid}
+        computer_id: {type: string, format: uuid}
+        device_proof: {type: string, writeOnly: true, description: 'Existing computer lifecycle proof; registration only, never watch authority'}
+        poll_key: {type: string, pattern: '^[a-f0-9]{64}$', writeOnly: true, description: Fresh daemon-start random key held only in memory; required for every operation}
+        snapshot: {$ref: '#/components/schemas/AttachSnapshot'}
+        request_digest: {type: string, description: 'Required with the snapshot for request, activation, poll and detachment'}
+        consent_digest: {type: string, description: Echo of the server-selected consent binding; required for strict activation}
+        local_confirmed: {type: boolean, description: Set only by the daemon after in-process LocalAuthentication; never accepted on the local socket}
+        sequence: {type: integer, minimum: 1}
+        text: {type: string, maxLength: 16384, description: Host-redacted new complete records only; no persistence or replay}
+    AttachView:
+      type: object
+      required: [request_id, request_digest, snapshot, state, expires_at]
+      properties:
+        request_id: {type: string, format: uuid}
+        request_digest: {type: string}
+        snapshot: {$ref: '#/components/schemas/AttachSnapshot'}
+        state: {type: string, enum: [pending, approved, active, detached, unreachable]}
+        expires_at: {type: string, format: date-time}
+        lease_until: {type: [string, 'null'], format: date-time}
+        session_id: {type: [string, 'null'], format: uuid}
+        user_code: {type: string, description: 'Nine digits, daemon response only'}
+        consent_mode: {type: string, enum: [aeon, local_auth]}
+        consent_digest: {type: string, description: 'SHA-256 binding of request ID, snapshot digest and server-selected mode; immutable after approval'}
+
     RuleError: {type: object, required: [error, code], properties: {error: {type: string}, code: {type: string}, actual_bytes: {type: integer}, max_bytes: {type: integer}}}
     RuleScope:
       type: "object"
@@ -5307,7 +5758,7 @@ components:
         id: {type: string}
         key: {type: string}
         label: {type: string}
-        billing_mode: {type: string, enum: [subscription, api, unknown, unreported, mixed], description: Present on subscription groups. Reported metadata, not verified coverage.}
+        billing_mode: {type: string, enum: [subscription, api, unknown, unreported, mixed], description: 'Present on subscription groups. Reported metadata, not verified coverage.'}
         sessions: {type: integer, minimum: 0, description: Distinct sessions. A session with several models counts once.}
         usage_rows: {type: integer, minimum: 0, description: Current model rows. Several models on one session are several rows.}
         unreported_sessions: {type: integer, minimum: 0}
@@ -5317,7 +5768,7 @@ components:
         output_tokens: {type: [string, 'null'], pattern: '^(0|[1-9][0-9]*)$'}
         output_known_rows: {type: integer, minimum: 0}
         output_unknown_rows: {type: integer, minimum: 0}
-        cached_input_tokens: {type: [string, 'null'], pattern: '^(0|[1-9][0-9]*)$', description: Sum of known cached input, which is a subset of input.}
+        cached_input_tokens: {type: [string, 'null'], pattern: '^(0|[1-9][0-9]*)$', description: 'Sum of known cached input, which is a subset of input.'}
         cached_input_known_rows: {type: integer, minimum: 0}
         cached_input_unknown_rows: {type: integer, minimum: 0}
         tokens_state: {type: string, enum: [known, partial, unknown]}
@@ -5361,14 +5812,14 @@ components:
               unit: {type: string, enum: [requests, tokens, cost_micros]}
               allowance: {type: integer, format: int64, minimum: 1, description: Declared window size.}
               used: {type: [integer, 'null'], format: int64, description: Measured ledger usage. Null while provisional. A present zero is measured zero.}
-              reserved: {type: integer, format: int64, minimum: 0, description: Explicit reservations. A hold, not measured usage.}
+              reserved: {type: integer, format: int64, minimum: 0, description: 'Explicit reservations. A hold, not measured usage.'}
               pace_model: {type: string, enum: [steady, frontload, unrestricted]}
               burst_ratio: {type: string}
               starts_at: {type: string, format: date-time}
               ends_at: {type: string, format: date-time}
-              provisional: {type: boolean, description: True when the window has no settled measurement, or any settled reservation recorded zero actual units.}
+              provisional: {type: boolean, description: 'True when the window has no settled measurement, or any settled reservation recorded zero actual units.'}
               pace_cap: {type: [integer, 'null'], format: int64, description: Schedule capacity at the read. Independent of measured usage.}
-              headroom: {type: [integer, 'null'], format: int64, description: Schedule capacity minus measured used and reserved. Null when usage or the cap is unknown, or the difference overflows.}
+              headroom: {type: [integer, 'null'], format: int64, description: 'Schedule capacity minus measured used and reserved. Null when usage or the cap is unknown, or the difference overflows.'}
               hard_remaining: {type: [integer, 'null'], format: int64, description: Declared allowance minus measured used and reserved. Null when usage is unknown or the difference overflows.}
     AuthzPermission:
       type: object
@@ -5605,7 +6056,7 @@ components:
         greeting_enabled: {type: boolean}
         avatar_color: {type: string, description: One of twelve muted palette tokens}
         avatar_hashes: {type: object, additionalProperties: {type: string, pattern: '^[a-f0-9]{64}$'}}
-        week_start: {type: integer, minimum: 0, maximum: 6, description: 0=Sunday, 1=Monday}
+        week_start: {type: integer, minimum: 0, maximum: 6, description: '0=Sunday, 1=Monday'}
         revision: {type: integer, minimum: 0}
     ProfileValidationError:
       type: object
@@ -5631,14 +6082,18 @@ components:
         schema: {type: string, const: aeon.release-note-snapshot.v1}
         tenant_id: {type: string, format: uuid}
         project_node_id: {type: string, format: uuid}
-        release_node_id: {type: string, format: uuid}
+        release_node_id: {type: string, description: Journey release UUID; empty for a version-keyed manifest backfill}
         version: {type: string, description: Empty until a version is assigned; tagged file path then declares the build binding and notes preserve that gap}
         version_scheme: {type: string}
         release_revision: {type: integer, minimum: 1}
         captured_at: {type: string, format: date-time}
-        membership_source: {type: string, const: journey_tickets.release_node_id}
+        membership_source: {type: string, enum: [journey_tickets.release_node_id, release-manifest-tickets]}
+        backfilled: {type: boolean, description: True for an explicit post-publication capture}
+        actor_principal_id: {type: string, format: uuid, description: Person who authorized the backfill}
         field_source: {type: string, const: nodes.fields}
         frozen: {type: boolean, description: True when publication stored this snapshot and later ticket edits no longer change it. False on a live preview. Absent on snapshots exported before this field existed.}
+        label: {type: string, enum: [backfilled], description: "Set only when an operator inserted this snapshot after publication because none was stored at release time. Absent on a live preview and on a snapshot frozen at publication."}
+        released_at: {type: string, format: date-time, description: "The release's original released_at. Present on a backfilled snapshot so the capture time is not mistaken for the release time."}
         tickets:
           type: array
           items:
@@ -5654,7 +6109,7 @@ components:
     ReleaseNotes:
       type: object
       required: [source, snapshot_sha256, captured_at, release_revision, items, gaps, hidden]
-      description: Additive v1 extension. Captured member benefits are authoritative, including an empty or hidden-only membership. When no snapshot was captured, fallback is historical-tag-headline and the git tag headline is only a labelled historical fallback for that release. Old manifests without notes keep the same labelled headline display. New builds always record notes, including gaps. Snapshot digest binds the exact tagged file bytes. Git headlines never replace captured benefits.
+      description: Additive v1 extension. Captured member benefits are authoritative, including an empty or hidden-only membership. When no snapshot was captured, fallback is historical-tag-headline and the git tag headline is only a labelled historical fallback for that release. Old manifests without notes keep the same labelled headline display. New builds always record notes, including gaps. Snapshot digest binds the exact tagged file bytes or the stored database snapshot JSON. Git headlines never replace captured benefits. written_after_release is true only when the captured snapshot was labelled backfilled.
       properties:
         source: {type: string}
         fallback: {type: string, enum: [historical-tag-headline], description: Set only when member benefits were not captured and the git tag headline is the labelled historical fallback}
@@ -5662,6 +6117,7 @@ components:
         captured_at: {type: [string, 'null'], format: date-time}
         release_revision: {type: integer}
         hidden: {type: integer, minimum: 0}
+        written_after_release: {type: boolean, description: "True when the captured snapshot was labelled backfilled. The release sheet says the notes were written after the release."}
         gaps: {type: array, items: {type: string}}
         items:
           type: array
@@ -5716,6 +6172,19 @@ components:
               scope: {type: string}
               tickets: {type: array, items: {type: string}}
               at: {type: string, format: date-time}
+              group: {type: string, enum: [features, fixes, other], description: "Additive display group, computed when the history is served. Conventional feat and fix prefixes win, and test, docs, refactor and chore stay other. Otherwise a linked ticket with a bug tag, type or kind is fixes, a ticket with a release-note pill or benefit that is not hidden is features, and anything else is other. Several tickets take the strongest group, fixes then features then other, and the commit is listed once. Omitted on the version bump and on older manifests, which derive the group from type."}
+              linked_tickets:
+                type: array
+                description: "Additive. Current pill and benefit of each linked ticket, from the same batched lookup as group, so past releases follow ticket text without a new manifest. Hidden-from-release-notes tickets are omitted, as are tickets with no pill and no benefit. Attached only on features and fixes changes. Omitted when lookup is off or failed. Older clients ignore it."
+                items:
+                  type: object
+                  required: [key, pill_en, pill_de, benefit_en, benefit_de]
+                  properties:
+                    key: {type: string}
+                    pill_en: {type: string}
+                    pill_de: {type: string}
+                    benefit_en: {type: string}
+                    benefit_de: {type: string}
         changes_omitted: {type: integer, minimum: 0}
         evidence:
           type: object
@@ -5729,7 +6198,7 @@ components:
             ci: {$ref: '#/components/schemas/ReleaseRun'}
             release_run: {$ref: '#/components/schemas/ReleaseRun'}
             release_url: {type: string}
-            unavailable: {type: array, items: {type: string}, description: What could not be established, in plain words}
+            unavailable: {type: array, items: {type: string}, description: 'What could not be established, in plain words'}
     ReleaseRun:
       type: [object, 'null']
       properties: {name: {type: string}, url: {type: string}, status: {type: string}, conclusion: {type: string}}
@@ -5737,7 +6206,7 @@ components:
       type: object
       required: [project_node_id, project_key, tenant_slug, profile, revision, stage, stage_source, disposable, stages, next_action, requirements_revision, requirements_digest_sha256, requirements_approval_scope, launch_readiness]
       properties:
-        project_node_id: {type: string, format: uuid, description: Project node id, read from the node. Not taken from the client.}
+        project_node_id: {type: string, format: uuid, description: 'Project node id, read from the node. Not taken from the client.'}
         project_key: {type: string, description: 'Route key used in /p/{project_key} links (e.g. PHAROS), read from the project node. Not a request field.'}
         node_key: {type: string, pattern: '^[A-Z][A-Z0-9]{1,9}-[1-9][0-9]*$', description: 'Immutable key of the project node (nodes.key, e.g. PRJ-17). Not a request field.'}
         tenant_slug: {type: string, minLength: 1, description: Slug of the tenant that owns the node. Not taken from the client.}
@@ -5775,6 +6244,8 @@ components:
         handoff_id: {type: [string, 'null'], format: uuid}
         handoff_attempt: {type: [integer, 'null'], minimum: 1}
         handoff_authority_epoch: {type: [integer, 'null'], minimum: 1}
+        target: {$ref: '#/components/schemas/DeployTarget', description: Recorded deployment target metadata}
+        target_digest_sha256: {type: string, pattern: '^[0-9a-f]{64}$', description: Informational target digest}
     JourneyNextAction:
       type: object
       required: [key, label, stage, available]
@@ -6024,6 +6495,7 @@ components:
         operation: {type: string, enum: [prepare, apply, deploy, verify]}
         expected_journey_revision: {type: integer, minimum: 1}
         idempotency_key: {type: string, minLength: 1, maxLength: 128}
+        target: {$ref: '#/components/schemas/DeployTarget', description: Optional for operation deploy; omit for other operations}
     StageHandoff:
       type: object
       required: [id, project_node_id, release_node_id, stage, operation, plugin_id, attempt, authority_epoch, superseded_by, authority_open, state, expires_at, evidence_ceiling, plan_digest, predecessor_digest, context_digest, prerequisite_seal_sha256]
@@ -6036,8 +6508,8 @@ components:
         plugin_id: {type: string}
         attempt: {type: integer, minimum: 1}
         authority_epoch: {type: integer, minimum: 1}
-        superseded_by: {type: [string, 'null'], format: uuid, description: Latest newer attempt for this release, stage and operation}
-        authority_open: {type: boolean, description: Whether this attempt can currently accept another action; read-only status, not a grant}
+        superseded_by: {type: [string, 'null'], format: uuid, description: 'Latest newer attempt for this release, stage and operation'}
+        authority_open: {type: boolean, description: 'Whether this attempt can currently accept another action; read-only status, not a grant'}
         state: {type: string, enum: [requested, active, blocked, succeeded, failed, revoked]}
         expires_at: {type: string, format: date-time}
         evidence_ceiling: {type: array, items: {type: string, enum: [deployment, verification, authorization, credential_handoff, launch_readiness]}}
@@ -6093,7 +6565,7 @@ components:
         target_build_passed: {type: boolean, description: Required for launch_readiness. A false value refuses admission.}
         backup_ready: {type: boolean, description: Required for launch_readiness. A false value refuses admission.}
         backup_observed_at: {type: string, format: date-time, description: Required for launch_readiness.}
-        restart_required: {type: boolean, description: Required for launch_readiness. Stored, and not an admission input.}
+        restart_required: {type: boolean, description: 'Required for launch_readiness. Stored, and not an admission input.'}
         running_kernel: {type: string, minLength: 1, maxLength: 128, description: Required for launch_readiness.}
         expected_kernel: {type: string, minLength: 1, maxLength: 128, description: Required for launch_readiness.}
     StageEvidence:
@@ -6380,7 +6852,7 @@ components:
         - type: object
           required: [key, title, customer_name, created_at, updated_at]
           properties:
-            key: {type: string, description: The quote node key, such as QUO-12}
+            key: {type: string, description: 'The quote node key, such as QUO-12'}
             title: {type: string}
             customer_name: {type: string, description: Current title of the customer organisation}
             currency: {type: string, pattern: '^[A-Z]{3}$'}
@@ -6388,7 +6860,7 @@ components:
             offer_date: {type: string, format: date}
             valid_until: {type: string, format: date}
             created_at: {type: string, format: date-time}
-            updated_at: {type: string, format: date-time, description: Latest of document, version, decision and archive changes}
+            updated_at: {type: string, format: date-time, description: 'Latest of document, version, decision and archive changes'}
             issued_at: {type: string, format: date-time, description: When the current version was issued}
             accepted_at: {type: string, format: date-time, description: When the current version was accepted}
     QuoteSettings:
@@ -6398,8 +6870,8 @@ components:
         revision: {type: integer, minimum: 0}
         numbering_time_zone: {type: string, description: Explicit IANA time zone such as Europe/Vienna}
         default_currency: {type: string, pattern: '^$|^[A-Z]{3}$', description: Empty only before first setup}
-        sender: {type: object, description: Tenant-owned company, address, contact, registration and bank fields}
-        defaults: {type: object, description: Tenant-owned intro, blocks, acceptance and VAT prose}
+        sender: {type: object, description: 'Tenant-owned company, address, contact, registration and bank fields'}
+        defaults: {type: object, description: 'Tenant-owned intro, blocks, acceptance and VAT prose'}
         layout: {type: object, description: Neutral rendering preferences and file references}
         smtp_confirmation_enabled: {type: boolean}
         smtp_configured: {type: boolean}
@@ -6456,11 +6928,11 @@ components:
         page: {type: object, description: A4 geometry and four exact decimal millimetre margins}
         cover: {type: object, description: Cover layout and spacing in exact decimal millimetres}
         sections: {type: object, description: Hierarchy and numbering style}
-        positions_table: {type: object, description: Ordered columns, exact millimetre widths, separators and repeated headings}
-        totals: {type: object, description: Net, VAT and discount display modes; amounts remain integer minor units}
+        positions_table: {type: object, description: 'Ordered columns, exact millimetre widths, separators and repeated headings'}
+        totals: {type: object, description: 'Net, VAT and discount display modes; amounts remain integer minor units'}
         payment_terms: {type: object, description: Payment block style and heading}
         acceptance: {type: object, description: Signature count and spacing}
-        footer: {type: object, description: Optional mark asset, width, offset, and page number template}
+        footer: {type: object, description: 'Optional mark asset, width, offset, and page number template'}
         labels: {type: object, additionalProperties: {type: string}, description: Localized document labels}
     QuoteDocument:
       type: object
@@ -6479,7 +6951,7 @@ components:
         recipient: {type: object}
         legal: {type: object}
         layout: {type: object}
-        profile: {type: object, description: Immutable selected profile id, revision, and full definition snapshot; included in the issued document digest}
+        profile: {type: object, description: 'Immutable selected profile id, revision, and full definition snapshot; included in the issued document digest'}
         sections: {type: array, maxItems: 20, items: {$ref: '#/components/schemas/QuoteDocumentSection'}}
         positions: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/QuoteDocumentPosition'}}
         net_total_cents: {type: integer, minimum: 0, description: Server-computed; input is ignored}
@@ -6835,6 +7307,32 @@ components:
           description: Present only when at least one competitor is published and at least one row exists
           items: {$ref: '#/components/schemas/PortalPublicComparison'}
         pace: {$ref: '#/components/schemas/PortalPublicPace'}
+        release_history: {type: boolean, description: True only when the linked project publishes release notes. Omitted otherwise. Notes themselves stay on the releases document.}
+    PortalPublicRelease:
+      type: object
+      additionalProperties: false
+      required: [released_at, notes]
+      properties:
+        released_at: {type: string, format: date-time}
+        version: {type: string, description: Present only when the frozen version is an inspr-calendar-v2 coordinate}
+        notes:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [pill_en, pill_de, benefit_en, benefit_de]
+            properties:
+              pill_en: {type: string}
+              pill_de: {type: string}
+              benefit_en: {type: string}
+              benefit_de: {type: string}
+    PortalPublicReleases:
+      type: object
+      additionalProperties: false
+      required: [product, releases]
+      properties:
+        product: {oneOf: [{type: 'null'}, {$ref: '#/components/schemas/PortalProduct'}]}
+        releases: {type: array, items: {$ref: '#/components/schemas/PortalPublicRelease'}}
     PortalVote:
       type: object
       additionalProperties: false
@@ -7009,6 +7507,8 @@ components:
       properties:
         project_id: {type: string, format: uuid}
         project_title: {type: string, description: Admin only. Never copied onto the public document.}
+        revision: {type: integer, minimum: 1, description: "Admin only. Present while a project is linked. Advances when the link or its release-history choice changes, and is not reused after the link is cleared. A release-history write must send this value."}
+        release_history: {type: boolean, default: false, description: Admin only. Frozen notes are public only when this is true. A new or existing link stays false until set.}
         releases_30d: {type: integer, minimum: 0}
         median_release_gap_days: {type: integer, minimum: 0}
         wish_to_live_median_days: {type: integer, minimum: 0}
@@ -7016,9 +7516,11 @@ components:
     PortalPaceWrite:
       type: object
       additionalProperties: false
-      required: [project_id]
+      minProperties: 1
       properties:
-        project_id: {oneOf: [{type: string, format: uuid}, {type: 'null'}]}
+        project_id: {oneOf: [{type: string, format: uuid}, {type: 'null'}], description: "A uuid links that project. Null clears the link. Together with release_history, it is the project the admin still expects to be linked and the write does not move the link."}
+        release_history: {type: boolean, description: "Publish frozen notes for the linked project. Requires project_id and revision from the read this publish is based on. Absent on a project write leaves the current choice when the project stays, and leaves a different project off."}
+        revision: {type: integer, minimum: 1, description: Required together with release_history and project_id. The link revision from the read this publish is based on.}
     PortalFulfillmentWrite:
       type: object
       additionalProperties: false
@@ -7107,7 +7609,7 @@ components:
         node_id: {type: string, format: uuid}
         kind: {type: string, enum: [ticket, epic, task]}
         currency: {type: string, enum: [USD]}
-        usage_available: {type: boolean, description: True when harness_session_usage was read. A missing relation is an error, not an empty cost. Null figures are unreported, not zero.}
+        usage_available: {type: boolean, description: 'True when harness_session_usage was read. A missing relation is an error, not an empty cost. Null figures are unreported, not zero.'}
         includes_descendants: {type: boolean}
         scope_truncated: {type: boolean}
         list_truncated: {type: boolean}
@@ -7180,6 +7682,71 @@ components:
         unknown_cost_sessions: {type: integer, minimum: 0}
         unknown_token_models: {type: integer, minimum: 0}
         unknown_cost_models: {type: integer, minimum: 0}
+    DeliveryRatingPage:
+      type: object
+      required: [node_id, sessions]
+      properties:
+        node_id: {type: string, format: uuid}
+        sessions: {type: array, maxItems: 80, items: {$ref: '#/components/schemas/DeliveryRating'}}
+    DeliveryRating:
+      type: object
+      description: One visible session. A missing mine means this person has not marked it. harness, model and account_label are current session metadata.
+      required: [session_id, ticket_node_id, harness, model, account_label, mine, votes, average, signals]
+      properties:
+        session_id: {type: string, format: uuid}
+        ticket_node_id: {type: string, format: uuid}
+        harness: {type: string}
+        model: {type: [string, 'null']}
+        account_label: {type: [string, 'null']}
+        mine: {oneOf: [{$ref: '#/components/schemas/DeliveryVote'}, {type: 'null'}]}
+        votes: {type: integer, minimum: 0, description: Exception rows on this session. Silence is not counted.}
+        average: {type: [string, 'null'], pattern: '^(?:[1-4]\.[0-9]{2}|5\.00)$', description: 'Mean of the optional scores, two decimal places, half up. Null when no score was given. Never a JSON number.'}
+        signals: {$ref: '#/components/schemas/DeliverySignals'}
+    DeliveryVote:
+      type: object
+      required: [score, tags, comment, updated_at]
+      properties:
+        score: {type: [integer, 'null'], minimum: 1, maximum: 5, description: Optional detail. Null when the mark has no score.}
+        tags: {type: array, maxItems: 3, uniqueItems: true, items: {type: string, enum: [quality, rework, taste]}}
+        comment: {type: string, minLength: 1, maxLength: 2000, description: Required reason.}
+        updated_at: {type: string, format: date-time}
+    DeliveryVoteWrite:
+      type: object
+      additionalProperties: false
+      required: [comment]
+      properties:
+        score: {type: [integer, 'null'], minimum: 1, maximum: 5, description: Optional detail. Omit or null when the mark has no score.}
+        tags: {type: array, maxItems: 3, uniqueItems: true, items: {type: string, enum: [quality, rework, taste]}}
+        comment: {type: string, minLength: 1, maxLength: 2000, description: Required reason.}
+    DeliverySignals:
+      type: object
+      description: Counts from ticket events (review.verdict, review.round, gate.finding, gate.verdict, ci.failed, ci.failure, check.failed, undone events, change.reverted, node.reverted, delivery.reverted). Zero means none of that kind were recorded. AEON-286 outcome events will replace this source.
+      required: [review_rounds, ci_failures, reverts]
+      properties:
+        review_rounds: {type: integer, minimum: 0, description: 'Distinct rounds of review.verdict, review.round, gate.finding or gate.verdict.'}
+        ci_failures: {type: integer, minimum: 0, description: 'Events of type ci.failed, ci.failure or check.failed.'}
+        reverts: {type: integer, minimum: 0, description: 'Undone events, or change.reverted, node.reverted or delivery.reverted. A delivery.rated event is not a signal.'}
+    DeliveryRatingSummary:
+      type: object
+      required: [votes, average, exceptions, deliveries, rework_rate, by_model, by_harness]
+      properties:
+        votes: {type: integer, minimum: 0, description: Exception rows. A row is a rework mark.}
+        average: {type: [string, 'null'], pattern: '^(?:[1-4]\.[0-9]{2}|5\.00)$', description: Mean of optional scores. Null when no score was given.}
+        exceptions: {type: integer, minimum: 0, description: Distinct sessions with at least one vote row.}
+        deliveries: {type: integer, minimum: 0, description: Distinct sessions in this read.}
+        rework_rate: {type: [string, 'null'], pattern: '^[1-9][0-9]*/[1-9][0-9]*$', description: exceptions/deliveries. Null when there are no exceptions.}
+        by_model: {type: array, items: {$ref: '#/components/schemas/DeliveryRatingGroup'}}
+        by_harness: {type: array, items: {$ref: '#/components/schemas/DeliveryRatingGroup'}}
+    DeliveryRatingGroup:
+      type: object
+      required: [label, votes, average, exceptions, deliveries, rework_rate]
+      properties:
+        label: {type: string, description: Same label as the usage breakdown for this model or harness.}
+        votes: {type: integer, minimum: 1}
+        average: {type: [string, 'null'], pattern: '^(?:[1-4]\.[0-9]{2}|5\.00)$'}
+        exceptions: {type: integer, minimum: 1}
+        deliveries: {type: integer, minimum: 1}
+        rework_rate: {type: string, pattern: '^[1-9][0-9]*/[1-9][0-9]*$'}
     NonNegativeIntString:
       type: [string, 'null']
       pattern: '^(0|[1-9][0-9]{0,18})$'
@@ -7209,14 +7776,33 @@ components:
         tenant: {type: string, description: Tenant slug}
         sender_principal_id: {type: string, format: uuid}
         recipient_principal_id: {type: string, format: uuid}
-        target_id: {type: [string, 'null'], format: uuid, description: Receiver target, null for direct inbox messages}
+        target_id: {type: [string, 'null'], format: uuid, description: 'Receiver target, null for direct inbox messages'}
         target_version: {type: [integer, 'null'], minimum: 1}
-        adapter: {type: string, description: Receiver adapter, for example grok_bot_routine}
+        adapter: {type: string, description: 'Receiver adapter, for example grok_bot_routine'}
         address: {type: string}
         effective_level: {type: string, description: Empty for a direct inbox acknowledgement; simple or steer for a managed adapter hand-off}
         state: {type: string, enum: [queued, handed_off, failed]}
-        handed_off_at: {type: [string, 'null'], format: date-time, description: RFC3339, set once when the direct recipient acknowledges or the managed adapter confirms}
+        handed_off_at: {type: [string, 'null'], format: date-time, description: 'RFC3339, set once when the direct recipient acknowledges or the managed adapter confirms'}
         failure_reason: {type: string}
+    InboxMessageStatus:
+      type: object
+      additionalProperties: false
+      required: [message_id, status, delivered_at, read_at, deliver_by]
+      properties:
+        message_id: {type: string, format: uuid}
+        status: {type: string, enum: [sent, delivered, read, not_delivered]}
+        reason: {type: string, description: 'Present only for not_delivered: deadline, attempts, session_ended, no_listener or an adapter reason.'}
+        delivered_at: {type: [string, 'null'], format: date-time, description: First hand-over to the recipient.}
+        read_at: {type: [string, 'null'], format: date-time, description: Receiver confirmation (receipt handed_off_at).}
+        deliver_by: {type: [string, 'null'], format: date-time, description: The deadline; null for messages to people and for messages sent before deadlines existed.}
+    InboxDeliverySettings:
+      type: object
+      additionalProperties: false
+      required: [session_deadline_seconds, unbound_deadline_seconds, max_attempts]
+      properties:
+        session_deadline_seconds: {type: integer, minimum: 60, maximum: 86400, description: Deadline for a message bound to one session. Default 300.}
+        unbound_deadline_seconds: {type: integer, minimum: 60, maximum: 604800, description: 'Deadline for any other message to an agent (adapter target, blocked or principal inbox). Default 1800.'}
+        max_attempts: {type: integer, minimum: 1, maximum: 50, description: Adapter claims before a delivery fails with reason attempts. Default 8.}
     InboxMessage:
       allOf:
         - {$ref: '#/components/schemas/InboxSend'}
@@ -7522,9 +8108,9 @@ components:
         cached_input_tokens: {$ref: '#/components/schemas/UsageTokenCount'}
         provisional: {type: boolean}
         account_id: {type: [string, 'null'], format: uuid}
-        account_label: {type: [string, 'null'], minLength: 1, maxLength: 128, description: Public self-reported label; trimmed, valid Unicode without control characters.}
+        account_label: {type: [string, 'null'], minLength: 1, maxLength: 128, description: 'Public self-reported label; trimmed, valid Unicode without control characters.'}
         billing_mode: {type: string, enum: [unknown, api, subscription]}
-        subscription_label: {type: [string, 'null'], minLength: 1, maxLength: 120, description: Allowed only with billing_mode subscription. Public self-reported label, not a credential.}
+        subscription_label: {type: [string, 'null'], minLength: 1, maxLength: 120, description: 'Allowed only with billing_mode subscription. Public self-reported label, not a credential.'}
     SessionModelUsage:
       type: object
       required: [session_id, model, sequence, input_tokens, output_tokens, cached_input_tokens, provisional, price_version, estimated_cost_usd, cost_status, currency, account_id, account_label, billing_mode, subscription_label, metadata_source, reported_at]
@@ -7571,6 +8157,15 @@ components:
         cached_input_usd_per_million: {$ref: '#/components/schemas/ModelPriceRate'}
         currency: {type: string, const: USD}
         created_at: {type: string, format: date-time}
+    SessionReadMarker:
+      type: object
+      additionalProperties: false
+      required: [session_id, last_read_message_id, last_read_event_id, read_at]
+      properties:
+        session_id: {type: string, format: uuid}
+        last_read_message_id: {type: [string, 'null'], format: uuid}
+        last_read_event_id: {type: [integer, 'null'], format: int64, minimum: 0}
+        read_at: {type: [string, 'null'], format: date-time}
     HarnessAttentionReason:
       type: object
       description: Content-free grouped evidence; no message body, rationale, request ID or private routing. Shared reasons belong to the principal inbox and never block a session. Detail requires harness.read and the underlying approval/message access.
@@ -7612,6 +8207,14 @@ components:
         controls: {type: array, description: Session requests on detail reads; outstanding requests plus the latest 20 completions and the last applied request of each kind. Expiry is terminal rejected with request_expired reason., items: {$ref: '#/components/schemas/HarnessSessionRequest'}}
         metadata_history: {type: array, description: 'Up to 20 display label, model, and reasoning effort changes, newest first; present on session detail.', items: {$ref: '#/components/schemas/HarnessMetadataChange'}}
         harness: {type: string, enum: [codex, claude, pi, cursor, grok]}
+        watch:
+          type: object
+          description: Content-free attach status, present on attached session detail only
+          properties:
+            request_id: {type: string, format: uuid}
+            owner_id: {type: string, format: uuid}
+            state: {type: string, enum: [active, detached, unreachable]}
+            lease_until: {type: [string, 'null'], format: date-time}
         host: {type: string}
         management_mode: {type: string, enum: [managed, unmanaged]}
         role: {type: string, enum: [worker, coordinator]}
@@ -7634,6 +8237,8 @@ components:
         progress_pct: {type: integer, minimum: 0, maximum: 100, description: Percent done. Zero is reported; omission means unknown.}
         eta_reported_at: {type: string, format: date-time, description: When the session last sent an estimate.}
         eta_stale: {type: boolean, description: True when the last estimate is older than two reporting intervals. Omitted when fresh or absent. Clients derive attention from this field.}
+        inbox_seen_at: {type: string, format: date-time, description: 'AEON-280. Last time this generation pulled its inbox (a session pull, drain, stream or ack). Omitted until it first pulls. Clients derive Listening from its age.'}
+        inbox_seen_via: {type: string, enum: [hook, drain, long_poll, stream, ack], description: 'How it last pulled: hook = one-shot session pull, long_poll = waiting pull, drain = managed harness drain, stream = inbox SSE, ack = acknowledgement. Omitted with inbox_seen_at.'}
     TicketEta:
       type: object
       description: Ready and live estimates for one ticket. Epics roll up the latest child instant and the average percent of direct children that have a percent. Unknown stays absent.
@@ -7683,7 +8288,7 @@ components:
         request_id: {type: string, format: uuid, description: Caller-generated idempotency ID scoped to the session; reuse only with the identical payload}
         expected_revision: {type: integer, format: int64, minimum: 0, maximum: 9223372036854775806}
         context: {$ref: '#/components/schemas/HarnessRulesReceiptContext'}
-        body_sha256: {type: string, pattern: '^[0-9a-f]{64}$', description: Worker-reported SHA256 of exact merged bytes, never a hash of a version label}
+        body_sha256: {type: string, pattern: '^[0-9a-f]{64}$', description: 'Worker-reported SHA256 of exact merged bytes, never a hash of a version label'}
         version: {type: string, maxLength: 16, pattern: '^(floor-only|[0-9]{12}\.0\.0)$', description: Worker-reported calendar version or floor-only; no assertion of publication}
         byte_size: {type: integer, minimum: 1, maximum: 12000}
         source: {type: string, enum: [online, cache, floor-only], description: Worker-reported source; cache/floor-only are stale fallback evidence and never fresh authority}
@@ -7724,11 +8329,11 @@ components:
       type: object
       required: [kind, logical_name, hash_kind]
       properties:
-        kind: {type: string, enum: [agents, claude, skill, prompt_template]}
-        logical_name: {type: string, maxLength: 80, description: AGENTS.md, CLAUDE.md, one skill slug plus /SKILL.md, or prompt-template. Not a filesystem path.}
+        kind: {type: string, enum: [agents, claude, skill, prompt_template, rules_merged, rules_set]}
+        logical_name: {type: string, maxLength: 80, description: 'AGENTS.md, CLAUDE.md, one skill slug plus /SKILL.md, prompt-template, merged-rules, or a published rule-set UUID. Not a filesystem path.'}
         hash_kind: {type: string, enum: [content, absent], description: content means content_sha256 is a digest of the instruction or template bytes. absent is only valid for a prompt template recorded with a version and no template digest.}
         content_sha256: {type: [string, 'null'], pattern: '^[0-9a-f]{64}$', description: Required when hash_kind is content. Null when hash_kind is absent. Never a hash of the version identifier.}
-        version: {type: [string, 'null'], maxLength: 80, description: Required for prompt_template. A version identifier, not prompt text.}
+        version: {type: [string, 'null'], maxLength: 80, description: 'Required for prompt_template. A version identifier, not prompt text.'}
         byte_size: {type: [integer, 'null'], minimum: 0, maximum: 1048576, description: Present for instruction files. Absent for a prompt template.}
     HarnessProvenanceRevision:
       type: object
@@ -7754,6 +8359,26 @@ components:
       properties:
         session_id: {type: string, format: uuid}
         revisions: {type: array, maxItems: 32, items: {$ref: '#/components/schemas/HarnessProvenanceRevision'}}
+        truncated: {type: boolean}
+    HarnessInstructionSource:
+      type: object
+      required: [session_id, revision, kind, logical_name, hash_kind, recorded_at]
+      properties:
+        session_id: {type: string, format: uuid}
+        revision: {type: integer, minimum: 1}
+        kind: {type: string, enum: [agents, claude, skill, prompt_template, rules_merged, rules_set]}
+        logical_name: {type: string, maxLength: 80, description: Allowlisted logical name or a published rule-set UUID. Not a filesystem path.}
+        hash_kind: {type: string, enum: [content, absent]}
+        content_sha256: {type: [string, 'null'], pattern: '^[0-9a-f]{64}$'}
+        version: {type: [string, 'null'], maxLength: 80}
+        byte_size: {type: [integer, 'null'], minimum: 0, maximum: 1048576}
+        recorded_at: {type: string, format: date-time}
+    HarnessInstructionSourcePage:
+      type: object
+      required: [project_id, items, truncated]
+      properties:
+        project_id: {type: string, format: uuid}
+        items: {type: array, maxItems: 200, items: {$ref: '#/components/schemas/HarnessInstructionSource'}}
         truncated: {type: boolean}
     HarnessModel: {type: [string, 'null'], maxLength: 128, description: Optional trimmed plain text; control characters stripped.}
     HarnessEffort: {type: [string, 'null'], maxLength: 40, description: Optional trimmed plain text; control characters stripped.}
@@ -7793,7 +8418,7 @@ components:
         run_status: {type: [string, 'null'], description: Status of the bound run when visible to the caller.}
         needs_attention: {type: boolean, description: "Bound run waiting or exact bound-run approval pending; yielded phase is separate session evidence. Shared inbox attention and nonblocking replies do not set this flag; stopped sessions are false."}
         attention_reasons: {type: array, description: "Authorized content-free reasons; withheld without harness.read at this project.", items: {$ref: '#/components/schemas/HarnessAttentionReason'}}
-        has_problem: {type: boolean, description: Bound run failed or lost ownership, or the stop reason reports an error or block. Normal stops are false.}
+        has_problem: {type: boolean, description: 'Bound run failed or lost ownership, or the stop reason reports an error or block. Normal stops are false.'}
         stopped_at: {type: [string, 'null'], format: date-time}
         stop_reason: {type: [string, 'null'], description: Present only with harness.read at the project.}
         project_id: {type: string, format: uuid}
@@ -7810,7 +8435,7 @@ components:
         reasoning_effort: {$ref: '#/components/schemas/HarnessEffort'}
         account_label: {$ref: '#/components/schemas/HarnessAccountLabel'}
         harness_version: {$ref: '#/components/schemas/HarnessVersion'}
-        activity_note: {type: [string, 'null'], maxLength: 120, description: Current step, present only with harness.read at the project}
+        activity_note: {type: [string, 'null'], maxLength: 120, description: 'Current step, present only with harness.read at the project'}
         activity_note_id: {type: integer, format: int64, description: Latest activity entry ID; present with the current step only where harness.read is granted.}
         ticket:
           description: The bound ticket and the project it lives in now
@@ -7882,6 +8507,21 @@ components:
         effective_model: {type: string}
         model_evidence: {type: string, enum: [unverified, vendor_reported]}
         error_code: {type: string, enum: [event_stream_bound, app_server_protocol, child_exit_failed, turn_failed, child_stop_failed, ownership_lost, reporter_unavailable, workspace_conflict, decision_refused]}
+    DeployTarget:
+      type: object
+      additionalProperties: false
+      required: [service, change]
+      description: When supplied, a target requires a nonempty hosts array or environment. Canonical hosts are sorted before digesting. All fields are explicit caller input; no destination is inferred.
+      anyOf:
+        - required: [hosts]
+          properties: {hosts: {minItems: 1}}
+        - required: [environment]
+      properties:
+        hosts: {type: array, maxItems: 32, uniqueItems: true, items: {type: string, minLength: 1, maxLength: 255}}
+        environment: {type: string, minLength: 1, maxLength: 128}
+        service: {type: string, minLength: 1, maxLength: 128}
+        image: {type: string, minLength: 1, maxLength: 512}
+        change: {type: string, minLength: 1, maxLength: 1000}
     ApprovalProposal:
       type: object
       required: [scope, resource_kind, rationale, expires_at]
@@ -7892,6 +8532,7 @@ components:
         run_id: {type: string, format: uuid}
         rationale: {type: string, minLength: 1}
         expires_at: {type: string, format: date-time}
+        target: {$ref: '#/components/schemas/DeployTarget', description: Optional for journey.deploy and stage.deploy; omit for other scopes. Omission preserves existing approval behavior}
     ApprovalDecisionWrite:
       type: object
       required: [decision]
@@ -7911,6 +8552,7 @@ components:
             proposed_at: {type: string, format: date-time}
             decision: {type: [string, 'null'], enum: [approved, denied, null]}
             decided_by_principal_id: {type: [string, 'null'], format: uuid}
+            target_digest_sha256: {type: string, pattern: '^[0-9a-f]{64}$', description: Digest of the recorded target; informational only}
     ModelProfileWrite:
       type: object
       required: [slug, version, harness, family, model, effort, tier]
@@ -8439,7 +9081,7 @@ components:
         body: {type: string}
         status: {$ref: '#/components/schemas/KnowledgeStatus'}
         metadata: {type: object, additionalProperties: true}
-        key_prefix: {type: string, pattern: '^[A-Z][A-Z0-9]{1,9}$', description: Key prefix, usually the project's key; default is the kind's prefix}
+        key_prefix: {type: string, pattern: '^[A-Z][A-Z0-9]{1,9}$', description: 'Key prefix, usually the project''s key; default is the kind''s prefix'}
     KnowledgePatch:
       type: object
       minProperties: 1

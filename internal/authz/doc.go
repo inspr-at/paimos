@@ -21,8 +21,8 @@
 // holds it, else none). The middleware decides a route in the workspace first;
 // a caller without the workspace permission may act through a project binding
 // in the project the route targets: the path's project, the project of the
-// node, attachment, relation or event it names (read under the caller's own
-// visibility), or any bound project for ProjectFilteredRoutes, whose data RLS
+// node, attachment, relation, event or harness session it names (read under
+// the caller's own visibility), or any bound project for ProjectFilteredRoutes, whose data RLS
 // confines. ProjectDecidedRoutes create items named in the body; their
 // handlers require the permission in the item's project. RouteScope carries
 // the decision to handlers that recheck. A write that changes several

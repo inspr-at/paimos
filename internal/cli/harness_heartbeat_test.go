@@ -6,6 +6,8 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -25,6 +27,7 @@ type hbCall struct {
 	method string
 	path   string
 	lease  string
+	query  string
 	body   map[string]any
 }
 
@@ -43,7 +46,7 @@ func heartbeatFixture(t *testing.T, calls *[]hbCall, status, inbox string) *http
 				t.Errorf("decode %s %s: %v", r.Method, r.URL.Path, err)
 			}
 		}
-		*calls = append(*calls, hbCall{method: r.Method, path: r.URL.Path, lease: r.Header.Get("X-Aeon-Worker-Lease"), body: body})
+		*calls = append(*calls, hbCall{method: r.Method, path: r.URL.Path, lease: r.Header.Get("X-Aeon-Worker-Lease"), query: r.URL.RawQuery, body: body})
 		w.Header().Set("Content-Type", "application/json")
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/api/kinds":
@@ -110,6 +113,79 @@ func hbWhere(calls []hbCall, method, suffix string) []hbCall {
 		}
 	}
 	return out
+}
+
+func TestRunHeartbeatRecordsWorktreeInstructionHashes(t *testing.T) {
+	dir := t.TempDir()
+	work := filepath.Join(dir, "work")
+	if err := os.Mkdir(work, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	agentsBody := []byte("do-not-leak-this-instruction-body")
+	claudeBody := []byte("claude-instruction-stays-local")
+	if err := os.WriteFile(filepath.Join(work, "AGENTS.md"), agentsBody, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(work, "CLAUDE.md"), claudeBody, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(work, "nested"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(work, "nested", "AGENTS.md"), []byte("nested-instruction-not-recorded"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var calls []hbCall
+	srv := heartbeatFixture(t, &calls, "", "")
+	defer srv.Close()
+	rt, _, stderr := heartbeatRuntime(t, srv)
+	opts := heartbeatTestOptions(dir)
+	opts.Worktree = work
+	if err := rt.runHeartbeat(context.Background(), opts, heartbeatDeps{alive: func(int) bool { return false }}); err != nil {
+		t.Fatalf("run: %v stderr %s", err, stderr.String())
+	}
+	posts := hbWhere(calls, http.MethodPost, "/provenance")
+	if len(posts) != 1 || posts[0].lease == "" {
+		t.Fatalf("provenance posts %d", len(posts))
+	}
+	raw, err := json.Marshal(posts[0].body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(raw)
+	agentsHash := sha256.Sum256(agentsBody)
+	claudeHash := sha256.Sum256(claudeBody)
+	nestedHash := sha256.Sum256([]byte("nested-instruction-not-recorded"))
+	if !strings.Contains(text, hex.EncodeToString(agentsHash[:])) || !strings.Contains(text, hex.EncodeToString(claudeHash[:])) || !strings.Contains(text, "AGENTS.md") || !strings.Contains(text, "CLAUDE.md") {
+		t.Fatal("instruction hashes were not recorded")
+	}
+	if strings.Contains(text, "do-not-leak-this-instruction-body") || strings.Contains(text, "claude-instruction-stays-local") || strings.Contains(text, "nested-instruction-not-recorded") || strings.Contains(text, hex.EncodeToString(nestedHash[:])) || strings.Contains(text, work) || strings.Contains(text, posts[0].lease) {
+		t.Fatal("provenance request leaked content, a nested file, a path, or the lease")
+	}
+	if strings.Contains(stderr.String(), work) || strings.Contains(stderr.String(), "do-not-leak") {
+		t.Fatal("stderr leaked the worktree")
+	}
+
+	emptyDir := filepath.Join(dir, "empty")
+	if err := os.Mkdir(emptyDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	var quiet []hbCall
+	quietSrv := heartbeatFixture(t, &quiet, "", "")
+	defer quietSrv.Close()
+	quietRT, _, _ := heartbeatRuntime(t, quietSrv)
+	quietRoot := filepath.Join(dir, "quiet-root")
+	if err := os.Mkdir(quietRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	quietOpts := heartbeatTestOptions(quietRoot)
+	quietOpts.Worktree = emptyDir
+	if err := quietRT.runHeartbeat(context.Background(), quietOpts, heartbeatDeps{alive: func(int) bool { return false }}); err != nil {
+		t.Fatal(err)
+	}
+	if len(hbWhere(quiet, http.MethodPost, "/provenance")) != 0 {
+		t.Fatal("a worktree without instruction files recorded provenance")
+	}
 }
 
 func TestRunHeartbeatOwnerExitMarksStopped(t *testing.T) {
@@ -385,6 +461,11 @@ func TestRunHeartbeatUsageAndControls(t *testing.T) {
 	if !strings.Contains(out, "control 22222222-2222-4222-8222-222222222222 stop pending\n") || strings.Contains(out, "completed") {
 		t.Fatalf("controls:\n%s", out)
 	}
+	// The inbox read names this generation so its bound messages are included (AEON-280).
+	pulls := hbWhere(calls, http.MethodGet, "/api/inbox/messages")
+	if len(pulls) == 0 || pulls[0].query != "wait_ms=0&session="+transcriptSessionID {
+		t.Fatalf("inbox pulls %#v", pulls)
+	}
 	if !strings.Contains(out, "message 55555555-5555-4555-8555-555555555555\n") || strings.Contains(out, "555555555556") || strings.Contains(out, "SECRET-BODY") {
 		t.Fatalf("messages:\n%s", out)
 	}
@@ -538,7 +619,7 @@ func hbServer(t *testing.T, calls *[]hbCall, handle func(r *http.Request, body m
 				t.Errorf("decode %s %s: %v", r.Method, r.URL.Path, err)
 			}
 		}
-		*calls = append(*calls, hbCall{method: r.Method, path: r.URL.Path, lease: r.Header.Get("X-Aeon-Worker-Lease"), body: body})
+		*calls = append(*calls, hbCall{method: r.Method, path: r.URL.Path, lease: r.Header.Get("X-Aeon-Worker-Lease"), query: r.URL.RawQuery, body: body})
 		w.Header().Set("Content-Type", "application/json")
 		if handle != nil && handle(r, body, w) {
 			return

@@ -114,6 +114,9 @@ func rulesReceiveFetch(api *client.Client, c rules.Context, o rulesOptions, floo
 		if err != nil {
 			return m, "floor-only", err.Error(), nil
 		}
+		if err = persistStaleCache(o.Cache, api.BaseURL, c, cache, now); err != nil {
+			return m, "", "", err
+		}
 		return m, "cache", "network unavailable; publication and generation not checked online", nil
 	}
 	if err = rules.ValidateMerged(m, c, now); err != nil {
@@ -314,7 +317,7 @@ func (rt *runtime) sessionRulesReceive(project, agent string, o rulesOptions, r 
 		}
 		return fmt.Errorf("bytes retained; receipt not confirmed; explicitly retry with identical flags plus --rules-retry: %w", rulesReceiveError(err))
 	}
-	result["receipt_recorded"], result["receipt_status"], result["complete"] = true, "recorded", true
+	result["receipt_recorded"], result["receipt_status"], result["complete"], result["provenance_recorded"] = true, "recorded", true, true
 	result["receipt_id"], result["receipt_revision"], result["replayed"] = recorded.Receipt.ID, recorded.Receipt.Revision, recorded.Replayed
 	return rt.printJSON(result)
 }

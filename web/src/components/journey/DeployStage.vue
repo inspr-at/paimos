@@ -4,6 +4,7 @@ import { computed } from 'vue'
 import { ACTION_LONG, gateApprovals, offeredApproval, PLUGIN_GATE } from '../../lib/journey'
 import { useJourneyContext } from '../../lib/journeyContext'
 import AppIcon from '../AppIcon.vue'
+import TargetSummary from '../deploy/TargetSummary.vue'
 import GateApprovals from './GateApprovals.vue'
 import GateCard from './GateCard.vue'
 import HandoffList from './HandoffList.vue'
@@ -41,6 +42,8 @@ const approvals = computed(() => gateApprovals(ctx.approvals.value, decisionGate
 const approval = computed(() => offeredApproval(ctx.approvals.value, journey.value, decisionGate.value, ctx.now.value))
 // The action names a request this screen does not have at all (not merely an expired one).
 const detailsMissing = computed(() => !!next.value.approval_request_id && !ctx.approvals.value.some(a => a.id === next.value.approval_request_id))
+const deployStage = computed(() => journey.value.stages.find(stage => stage.key === 'deploy'))
+const summaryApproval = computed(() => (decisionGate.value === 'deploy' ? approval.value : null) ?? (deployStage.value?.target ? { scope: 'journey.deploy', target: deployStage.value.target } : null))
 const state = computed(() => journey.value.stages.find(s => s.key === 'deploy')?.state ?? 'later')
 // Launch readiness: a blocker once the release is at Deploy; before that, what it waits for.
 const launch = computed(() => journey.value.launch_readiness ?? { can_admit: false, reason: 'This server does not report launch readiness.' })
@@ -68,8 +71,9 @@ const targetNote = computed(() => !pharos.value ? 'Pharos is not installed on th
     <div class="j-col">
       <section class="j-card" aria-labelledby="deploy-target">
         <header class="j-card-head"><p id="deploy-target" class="eyebrow">Target</p></header>
+        <TargetSummary required :approval="summaryApproval" />
         <dl class="j-kv">
-          <dt>Host</dt>
+          <dt>Plugin</dt>
           <dd><template v-if="pharos"><b class="host">{{ pluginName }}</b> <span class="faint">deploys and verifies</span></template><span v-if="targetNote" class="target-note" :class="{ faint: !pharos }"><template v-if="pharos"> · </template>{{ targetNote }}</span></dd>
           <dt>Release</dt><dd :class="{ faint: !ctx.release.value }">{{ ctx.release.value ? `${ctx.releaseLabel.value} · ${ctx.release.value.key}` : 'None is ready to deploy' }}</dd>
           <dt>Checks</dt>
@@ -104,7 +108,8 @@ const targetNote = computed(() => !pharos.value ? 'Pharos is not installed on th
         :action="{ label: ctx.next.value.label, disabled: ctx.next.value.disabled, busy: ctx.next.value.busy, tip: ctx.next.value.tip }" @act="ctx.runNext()"
       >
         <p>{{ decisionDescription }}</p>
-        <p v-if="ctx.release.value" class="goes-to"><AppIcon name="server" :size="13" /><span>{{ ctx.releaseLabel.value }} goes to <b>{{ pharos ? 'Pharos' : 'the host' }}</b></span></p>
+        <TargetSummary v-if="!approval || decisionGate !== 'deploy'" required :approval="summaryApproval" />
+        <p v-if="ctx.release.value" class="goes-to"><AppIcon name="server" :size="13" /><span><b>{{ pharos ? 'Pharos' : 'The deployment plugin' }}</b> deploys {{ ctx.releaseLabel.value }}</span></p>
         <GateApprovals :gate="decisionGate" :approvals="approvals" :on="ctx.releaseLabel.value" :can-decide="ctx.canAct.value" :now="ctx.now.value" :me="ctx.me.value" />
         <p v-if="!approval && !awaitingEvidence && (detailsMissing || !approvals.length)" class="j-note">{{ detailsMissing ? 'The gate details are missing. Refresh to check them.' : `An agent asks for a fresh ${decisionGate === 'candidate' ? 'candidate' : 'deployment'} gate; it appears here for you to approve.` }}</p>
       </GateCard>

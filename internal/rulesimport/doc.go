@@ -11,15 +11,32 @@
 // expected revision. No layer/set creation, publication, restore or retry occurs.
 // Output is a local JSON proposal, then a separate JSON receipt on success. A
 // failure leaves that local proposal intact; HTTP response bodies are not logged.
-// Identical imported identities are idempotent; different existing identities
-// require explicit resolution. Unrelated existing draft rules are preserved.
+// Identical imported identities are idempotent and reported unchanged. A draft
+// rule from an earlier import is updated when the source changed and the stored
+// rule still matches the baseline recorded for that source revision. The
+// baseline covers every user-editable field, including the draft identity and
+// source revision. A rule marked edited here, or whose stored content diverged
+// from that baseline, is left in place and reported as a conflict. Unannotated
+// rules whose text changed are matched by source path, the heading path below
+// the document title (empty when the rule sits directly under that title), and
+// position or similarity; an ambiguous replacement is reported and not written. Unrelated existing draft rules are preserved.
+// Publication is never requested.
 //
-// AR1 has no on-demand placement or unresolved-alternative fields. Those cases,
-// mixed layer/set groups, missing why, date-only expiry, unsupported selectors
-// and oversized values are refused without truncating the proposal. To apply,
-// supply a single group with explicit why and RFC3339 expiry (if any). Source
-// lineage is retained as JSON in details; file hashes identify raw bytes, while
-// source ranges and their hashes use BOM-stripped, LF-normalized parsing lines.
+// AR1 has no on-demand placement field. Packs are attached as draft details and
+// stay out of the session-file projection. Unresolved choices, mixed layer/set
+// groups, missing why, date-only expiry, unsupported selectors and oversized
+// values are refused without truncating the proposal. To apply, supply a single
+// group with explicit why and RFC3339 expiry (if any). Source lineage is
+// retained as JSON in details: source path, heading path and content hash on
+// every rule. File hashes identify raw bytes, while source ranges and their
+// hashes use BOM-stripped, LF-normalized parsing lines. --layer
+// PATH=company|project|person|agent overrides the classified layer. --report DIR
+// writes contradictions.md and contradictions.json. Contradictions are
+// same-identity differences and opposing directives (must/always versus
+// never/must-not) on the same action across layers. The action is CommonMark
+// text with emphasis removed and code spans kept verbatim. Heading paths are
+// provenance. Compatible tightening and disjoint role or harness selectors are
+// not conflicts. Long packs stay in details and out of the always-on projection.
 //
 // Generic AGENTS.md and CLAUDE.md require an explicit local context. Public
 // templates additionally need an aeon-context: template HTML comment; detected

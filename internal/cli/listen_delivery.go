@@ -65,6 +65,18 @@ func (rt *runtime) listenMessagingDelivery(project, projectKey, address, adapter
 		deliver = deliverLocalMessaging
 	}
 	seen := false
+	initialBackoff := min(interval, 30*time.Second)
+	backoff := initialBackoff
+	retry := func() bool {
+		waited := waitMessagingRetry(ctx, backoff)
+		if backoff < 30*time.Second {
+			backoff *= 2
+			if backoff > 30*time.Second {
+				backoff = 30 * time.Second
+			}
+		}
+		return waited
+	}
 	for {
 		var work inbox.DeliveryWork
 		if err := rt.doMessaging(ctx, http.MethodPost, "/api/projects/"+url.PathEscape(project)+"/messages/delivery-claim", map[string]string{"to": address, "adapter": adapter}, &work); err != nil {
@@ -89,8 +101,20 @@ func (rt *runtime) listenMessagingDelivery(project, projectKey, address, adapter
 		}
 		switch work.State {
 		case "foreign_worker", "leased":
+			if follow {
+				if !retry() {
+					return nil
+				}
+				continue
+			}
 			return &exitError{code: 5, msg: "delivery is pending for another local worker"}
 		case "blocked":
+			if follow {
+				if !retry() {
+					return nil
+				}
+				continue
+			}
 			return &exitError{code: 4, msg: "message has no usable receiver-owned harness target"}
 		case "pending":
 		default:
@@ -105,10 +129,23 @@ func (rt *runtime) listenMessagingDelivery(project, projectKey, address, adapter
 			var unavailable *localUnavailable
 			if errors.As(err, &unavailable) {
 				req := map[string]string{"delivery_id": work.ID, "lease_token": work.LeaseToken, "fallback_reason": unavailable.reason}
-				if rerouteErr := rt.doMessaging(ctx, http.MethodPost, "/api/projects/"+url.PathEscape(project)+"/messages/delivery-unavailable", req, nil); rerouteErr == nil {
+				rerouteErr := rt.doMessaging(ctx, http.MethodPost, "/api/projects/"+url.PathEscape(project)+"/messages/delivery-unavailable", req, nil)
+				if follow {
+					if !retry() {
+						return nil
+					}
+					continue
+				}
+				if rerouteErr == nil {
 					return &exitError{code: 5, msg: "delivery rerouted to its receiver-owned fallback worker"}
 				}
 				return &exitError{code: 4, msg: "local delivery unavailable; no usable fallback target"}
+			}
+			if follow {
+				if !retry() {
+					return nil
+				}
+				continue
 			}
 			return &exitError{code: 4, msg: "local delivery failed: " + redact(err.Error(), work.TargetRef)}
 		}
@@ -126,14 +163,15 @@ func (rt *runtime) listenMessagingDelivery(project, projectKey, address, adapter
 			return err
 		}
 		seen = true
+		backoff = initialBackoff
 		if !follow {
 			return nil
 		}
 	}
 }
 
-// The adapter process receives only a receiver-owned encrypted target after
-// an authenticated claim. Vendor output is discarded because it can echo the
+// The adapter receives a receiver-owned reference from an authenticated claim
+// or an explicit local session binding. Vendor output is discarded because it can echo the
 // message or reference. A nonzero exit is never treated as a handoff.
 func deliverLocalMessaging(ctx context.Context, adapter string, work inbox.DeliveryWork) (localDeliveryResult, error) {
 	if work.Message == nil {

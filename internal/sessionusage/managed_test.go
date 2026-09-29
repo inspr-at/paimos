@@ -221,3 +221,46 @@ func TestManagedCodexNativeRerouteNeedsMatchingInterval(t *testing.T) {
 		}
 	}
 }
+
+func TestManagedCodexNextTurnRetainsTotalsAndIdentityFence(t *testing.T) {
+	c := managedCapture(t)
+	if err := c.BindTurn("first"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Observe(managedFrame("model-a", 100, 20, 30, "")); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.NextTurn(); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.BindTurn("second"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Observe(managedFrame("model-a", 120, 25, 35, "")); err != nil {
+		t.Fatal(err)
+	}
+	final := c.Finish(true)
+	if len(final) != 1 || *final[0].InputTokens != 120 || *final[0].OutputTokens != 25 || *final[0].CachedInputTokens != 35 || final[0].Provisional {
+		t.Fatal("multi-turn totals did not settle once")
+	}
+	if err := c.NextTurn(); err == nil {
+		t.Fatal("resumed sealed capture")
+	}
+	for _, before := range []func(*ManagedCodex){
+		func(c *ManagedCodex) {},
+		func(c *ManagedCodex) { _ = c.BindTurn("first"); _ = c.BindTurn("conflicting") },
+	} {
+		c := managedCapture(t)
+		before(c)
+		if err := c.NextTurn(); err == nil {
+			t.Fatal("advanced unbound or invalid capture")
+		}
+	}
+	c = managedCapture(t)
+	_ = c.BindTurn("first")
+	_ = c.NextTurn()
+	_ = c.BindTurn("second")
+	if err := c.BindTurn("first"); err == nil {
+		t.Fatal("prior turn escaped new identity fence")
+	}
+}

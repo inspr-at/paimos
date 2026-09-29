@@ -5,8 +5,9 @@ import BizIcon from '../business/BizIcon.vue'
 import RowMenu from '../business/RowMenu.vue'
 import RuleEditRow from './RuleEditRow.vue'
 import RuleItem from './RuleItem.vue'
+import RuleTick from './RuleTick.vue'
 import type { RowAction } from '../../lib/rowActions'
-import type { AgentRule, RuleSet, SetState } from '../../lib/rules'
+import { canFlip, validateDraft, type AgentRule, type CheckState, type RuleSet, type SetState } from '../../lib/rules'
 
 // One rule set as a quiet collapsible card: its name, how many rules and locks,
 // a chip only when it is not live yet, and one menu for the rarer actions.
@@ -26,6 +27,11 @@ const props = defineProps<{
   lockReason: string | null
   saving: boolean
   error: string
+  /** null hides the set tick (nothing movable, or no permission to write). */
+  tick: CheckState | null
+  tickDisabled?: boolean
+  tickTip?: string
+  duplicateReason?: string
 }>()
 const emit = defineEmits<{
   toggle: []
@@ -34,12 +40,18 @@ const emit = defineEmits<{
   save: []
   publish: []
   history: []
+  duplicate: []
+  tick: [enabled: boolean]
+  'tick-rule': [identity: string, enabled: boolean]
   draft: [draft: SetDraft]
   'add-rule': []
+  'duplicate-rule': [index: number]
 }>()
 const id = useId()
 const menuAnchor = ref<HTMLElement | null>(null)
 const rules = computed(() => props.draft?.rules ?? props.set.rules)
+const draftWarning = computed(() => props.draft ? validateDraft(props.draft.name, props.draft.rules).warning ?? '' : '')
+const savedWarning = computed(() => !props.draft && props.open ? validateDraft(props.set.name, props.set.rules).warning ?? '' : '')
 const locked = computed(() => rules.value.filter(rule => rule.strength === 'locked').length)
 const summary = computed(() => {
   const count = rules.value.length
@@ -52,13 +64,18 @@ const chipTip = computed(() => props.state === 'new' ? 'Never published. Agents 
 const items = computed<RowAction[]>(() => [
   { id: 'edit', label: 'Edit rules', icon: 'edit', group: 0, reason: props.editReason ?? undefined },
   { id: 'publish', label: 'Publish this set', icon: 'upload', group: 0, reason: props.state === 'live' ? 'Already live.' : props.publishReason ?? undefined },
+  { id: 'duplicate', label: 'Duplicate set', icon: 'copy', group: 0, reason: props.duplicateReason },
   { id: 'history', label: 'Version history', icon: 'history', group: 1, reason: props.set.published_version ? undefined : 'Not published yet.' },
 ])
 function select(action: string) {
   menuAnchor.value = null
   if (action === 'edit') emit('edit')
   else if (action === 'publish') emit('publish')
+  else if (action === 'duplicate') emit('duplicate')
   else if (action === 'history') emit('history')
+}
+function switchable(rule: AgentRule) {
+  return !props.editReason && canFlip(rule, props.held)
 }
 function changeRule(index: number, rule: AgentRule) {
   if (!props.draft) return
@@ -88,25 +105,28 @@ function removeRule(index: number) {
         <input :id="`${id}-name`" class="field" :value="draft.name" maxlength="128" aria-label="Set name" @input="emit('draft', { name: ($event.target as HTMLInputElement).value, rules: draft.rules })">
       </label>
       <span v-if="chip" class="chip state" :data-tip="chipTip">{{ chip }}</span>
-      <button v-if="!draft" type="button" class="icon-btn sm flat" :aria-label="`Actions for ${set.name}`" aria-haspopup="menu" data-tip="Edit, publish, history" @click="menuAnchor = $event.currentTarget as HTMLElement"><BizIcon name="more" :size="16" /></button>
+      <span v-if="tick" class="set-tick"><RuleTick :state="tick" :label="`Turn ${set.name} rules on or off`" :disabled="tickDisabled || saving" :tip="tickTip" @toggle="emit('tick', $event)" /></span>
+      <button v-if="!draft" type="button" class="icon-btn sm flat" :aria-label="`Actions for ${set.name}`" aria-haspopup="menu" data-tip="Edit, duplicate, history" @click="menuAnchor = $event.currentTarget as HTMLElement"><BizIcon name="more" :size="16" /></button>
     </header>
 
     <ul v-if="!draft && open" :id="`${id}-rules`" class="rules">
-      <RuleItem v-for="rule in set.rules" :key="rule.identity" :rule="rule" :held-by="held.get(rule.identity)" :pending="pending?.has(rule.identity)" />
+      <RuleItem v-for="rule in set.rules" :key="rule.identity" :rule="rule" :set-name="set.name" :held-by="held.get(rule.identity)" :pending="pending?.has(rule.identity)" :switchable="switchable(rule)" :switch-disabled="saving || tickDisabled" @toggle="emit('tick-rule', rule.identity, $event)" />
       <li v-if="!set.rules.length" class="empty">No rules in this set yet.</li>
     </ul>
+    <p v-if="savedWarning" class="wording" role="status">{{ savedWarning }}</p>
 
     <template v-if="draft">
       <ul class="edit-rules">
         <RuleEditRow
-          v-for="(rule, index) in draft.rules" :key="index" :rule="rule" :held-by="held.get(rule.identity)"
-          :can-lock="!lockReason" :lock-reason="lockReason ?? undefined" @change="changeRule(index, $event)" @remove="removeRule(index)"
+          v-for="(rule, index) in draft.rules" :key="index" :rule="rule" :set-name="draft.name" :held-by="held.get(rule.identity)"
+          :can-lock="!lockReason" :lock-reason="lockReason ?? undefined" @change="changeRule(index, $event)" @remove="removeRule(index)" @duplicate="emit('duplicate-rule', index)"
         />
       </ul>
       <button type="button" class="add" @click="emit('add-rule')"><BizIcon name="plus" :size="14" />Add rule</button>
       <footer class="foot">
         <p v-if="error" class="error" role="alert"><BizIcon name="alert" :size="14" /><span>{{ error }}</span></p>
-        <p v-else class="hint">Saved as a draft. Agents keep the published version until you publish.</p>
+        <p v-if="draftWarning" class="wording" role="status">{{ draftWarning }}</p>
+        <p v-if="!error" class="hint">Saved as a draft. Agents keep the published version until you publish.</p>
         <div class="buttons">
           <button type="button" class="btn sm ghost" :disabled="saving" @click="emit('cancel')">Cancel</button>
           <button type="button" class="btn sm primary" :disabled="saving" @click="emit('save')">{{ saving ? 'Saving…' : 'Save draft' }}</button>
@@ -136,6 +156,7 @@ function removeRule(index: number) {
 .subtitle { color: var(--ink-3); font-size: 12.5px; white-space: nowrap; }
 .summary { flex: none; color: var(--ink-3); font-size: 12.5px; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .chip.state { flex: none; height: 20px; padding: 0 8px; font-family: var(--font); font-size: 11.5px; letter-spacing: 0; box-shadow: none; background: var(--surface-2); color: var(--ink-2); }
+.set-tick { flex: none; display: flex; align-items: center; }
 .name-edit { flex: 1; min-width: 0; padding: 4px 2px 4px 4px; }
 .name-edit .field { height: 34px; font-weight: 650; }
 .rules { list-style: none; margin: 0; padding: 0 8px 8px 30px; display: flex; flex-direction: column; }
@@ -146,15 +167,18 @@ function removeRule(index: number) {
 .foot { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-top: 8px; padding: 10px 12px 12px; border-top: 1px solid var(--line); }
 .foot .hint, .foot .error { flex: 1 1 240px; margin: 0; font-size: 12.5px; }
 .hint { color: var(--ink-3); }
+.wording { margin: 0 16px 10px 40px; color: var(--ink-2); font-size: 12.5px; line-height: 1.45; }
+.foot .wording { flex: 1 1 240px; margin: 0; }
 .error { display: flex; gap: 6px; align-items: flex-start; color: var(--danger); }
 .error svg { flex: none; margin-top: 2px; }
 .buttons { display: flex; gap: 8px; margin-left: auto; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 @media (max-width: 600px) {
   .rules { padding-left: 8px; }
+  .wording { margin-left: 8px; margin-right: 8px; }
   .toggle { min-height: 52px; }
-  .names { flex-direction: column; align-items: flex-start; gap: 1px; }
-  .name { max-width: 100%; }
+  .names { flex-direction: column; align-items: flex-start; gap: 1px; max-width: 100%; overflow: hidden; }
+  .name, .subtitle, .summary { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
   .names .summary { margin-left: 0; }
   .edit-rules { padding: 4px 8px 0; }
 }

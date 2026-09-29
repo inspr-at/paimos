@@ -40,6 +40,7 @@ import (
 	publicquotes "github.com/inspr-at/paimos/internal/business/quotes/public"
 	"github.com/inspr-at/paimos/internal/config"
 	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/deliveryvote"
 	"github.com/inspr-at/paimos/internal/embedding"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/fromclassic"
@@ -216,6 +217,8 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 	if err != nil {
 		return fmt.Errorf("release history: %w", err)
 	}
+	historyMod.UseTickets(releasehistory.DBTickets(pool))
+	historyMod.WithBackfills(pool, "AEON")
 	portalMod := portal.New(pool, cfg.Env != "dev", authCfg.SessionKey)
 	go portalMod.RunLimitSweep(ctx)
 	// AEON-178: invites can create the sign-in account through a configured identity
@@ -226,6 +229,9 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 	}
 	// R2: webhook wake for inbox deliveries.
 	go inbox.NewWorker(pool, inbox.WorkerOptions{}).Run(ctx)
+	// AEON-280: delivery deadlines and the attempt cap; one runner across
+	// processes through an advisory lock.
+	go inbox.NewSweeper(pool).Run(ctx)
 	api := &httpapi.Server{
 		Pool:  pool,
 		Brand: &productBrand,
@@ -255,6 +261,7 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 			rules.New(pool),
 			ticketwork.New(pool),
 			outcomes.New(pool),
+			deliveryvote.New(pool),
 			usagedashboard.New(pool),
 			workorders.New(pool),
 			agentruns.New(pool, settleUsage),

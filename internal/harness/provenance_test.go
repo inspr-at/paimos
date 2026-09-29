@@ -46,6 +46,8 @@ func TestProvenanceVisibilityIdempotencyAndTamper(t *testing.T) {
 	expect(t, f.call(f.agent, "POST", path, map[string]any{"items": []any{map[string]any{"kind": "prompt_template", "logical_name": "prompt-template", "hash_kind": "content", "content_sha256": hashA, "version": "v1", "byte_size": 40}}}, lease), 400)
 	expect(t, f.call(f.agent, "POST", path, map[string]any{"items": []any{map[string]any{"kind": "prompt_template", "logical_name": "prompt-template", "hash_kind": "absent", "content_sha256": hashA, "version": "260927120000.0.0"}}}, lease), 400)
 	expect(t, f.call(f.agent, "POST", path, map[string]any{"items": []any{map[string]any{"kind": "prompt_template", "logical_name": "prompt-template", "hash_kind": "content", "version": "260927120000.0.0"}}}, lease), 400)
+	expect(t, f.call(f.agent, "POST", path, map[string]any{"items": []any{map[string]any{"kind": "rules_merged", "logical_name": "merged-rules", "hash_kind": "content", "content_sha256": hashA, "version": "260927120000.0.0", "byte_size": 12}}}, lease), 400)
+	expect(t, f.call(f.agent, "POST", path, map[string]any{"items": []any{map[string]any{"kind": "rules_set", "logical_name": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "hash_kind": "content", "content_sha256": hashA, "version": "260927120000.0.0"}}}, lease), 400)
 
 	w = f.call(f.agent, "POST", path, body, lease)
 	expect(t, w, 200)

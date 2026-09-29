@@ -23,6 +23,7 @@ import LiveNow from '../components/agents/LiveNow.vue'
 import StartAgentDialog from '../components/agents/StartAgentDialog.vue'
 import RunQueue from '../components/agents/RunQueue.vue'
 import ConnectedComputers from '../components/agents/ConnectedComputers.vue'
+import AttachApproval from '../components/agents/AttachApproval.vue'
 
 // Markus's desk for agents: what waits on him first, then every live session grouped
 // by state, with accounts and pacing folded below them. A session opens in the docked panel.
@@ -229,7 +230,7 @@ function changed() {
 }
 onMounted(() => {
   void agents.loadAll()
-  stop = subscribeAgents(changed, value => { live.value = value })
+  stop = subscribeAgents(changed, value => { live.value = value }, () => agents.deliveryChanged())
   poller.start()
   clock = setInterval(() => agents.tick(), 1000)
   window.addEventListener('keydown', keydown)
@@ -263,6 +264,7 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
         <RouterLink class="context-link" to="/agents/usage">Usage</RouterLink>
         <RouterLink v-if="can('keys.manage')" class="context-link" to="/settings/access/agents">Agent keys</RouterLink>
         </div>
+        <AttachApproval />
         <RouterLink v-if="showConnect" class="btn connect" to="/agents/register-agent"><AppIcon name="monitor" :size="15" />Connect computer</RouterLink>
         <button v-if="canStart" type="button" class="btn primary start-agent" @click="startDialog?.open()"><AppIcon name="plus" :size="15" />Start agent</button>
       </div>
@@ -313,7 +315,7 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
 .page-head h1 { margin-top: 6px; }
 .head-side { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
 .start-agent { min-height: 40px; }
-.connect { min-height: 40px; }
+.connect, .head-side :deep(.attach-session) { min-height: 40px; }
 /* In-context links to the matching places: quiet text, no arrows. */
 .context-link { display: inline-flex; align-items: center; height: 40px; padding: 0 10px; border-radius: 999px; color: var(--ink-2); font-size: 13px; font-weight: 550; white-space: nowrap; text-decoration: none; }
 @media (hover: hover) { .context-link:hover { background: var(--row-hover); color: var(--ink); } }
@@ -356,7 +358,8 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
 }
 /* Phones: fixed cells, so a button that appears after permissions load moves nothing. */
 @media (max-width: 600px) {
-  .head-side { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-areas: "start connect" "links links"; gap: 6px 8px; }
+  .head-side { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-areas: "start connect" "attach attach" "links links"; gap: 6px 8px; }
+  .head-side :deep(.attach-session) { grid-area: attach; min-height: 44px; justify-content: center; }
   .start-agent { grid-area: start; }
   .connect { grid-area: connect; }
   .start-agent, .connect { min-height: 44px; justify-content: center; }

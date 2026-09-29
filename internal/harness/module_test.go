@@ -195,20 +195,32 @@ func TestHarnessGenerationAndOwnedControls(t *testing.T) {
 }
 
 func TestHarnessInboxLeaseAndExactAck(t *testing.T) {
+	for _, outcome := range []string{"", "failed"} {
+		for _, targeted := range []bool{false, true} {
+			t.Run(fmt.Sprintf("outcome=%s/targeted=%t", outcome, targeted), func(t *testing.T) { testHarnessInboxSettlement(t, outcome, targeted) })
+		}
+	}
+}
+func testHarnessInboxSettlement(t *testing.T, outcome string, targeted bool) {
 	f := fixture(t)
 	base := "/api/projects/" + f.project + "/harness-sessions"
 	lease := "generation-lease-000000000000000000000002"
 	registration := map[string]any{"agent_principal_id": f.agent.ID, "harness": "codex", "host": "build-host", "harness_session_ref": "vendor-ref-00000000000000002", "worker_lease": lease, "management_mode": "managed", "role": "worker", "advertised_capabilities": []string{"inbox"}}
 	w := f.call(f.person, "POST", base, registration, "")
 	expect(t, w, 201)
-	path := base + "/" + decode(t, w)["id"].(string)
+	sessionID := decode(t, w)["id"].(string)
+	path := base + "/" + sessionID
+	var recipientSession any
+	if targeted {
+		recipientSession = sessionID
+	}
 	messageID := uid()
 	f.tx(t, f.person, func(tx pgx.Tx) error {
 		e, err := events.Append(t.Context(), tx, f.person, events.Change{Type: "inbox.sent", After: map[string]any{"id": messageID}})
 		if err != nil {
 			return err
 		}
-		_, err = tx.Exec(t.Context(), `INSERT INTO inbox_messages(tenant_id,id,sender_principal_id,recipient_principal_id,sent_event_id,body,idempotency_key) VALUES($1,$2,$3,$4,$5,'first message',$6)`, f.person.TenantID, messageID, f.person.ID, f.agent.ID, e.ID, uid())
+		_, err = tx.Exec(t.Context(), `INSERT INTO inbox_messages(tenant_id,id,sender_principal_id,recipient_principal_id,sent_event_id,body,idempotency_key,recipient_session_id) VALUES($1,$2,$3,$4,$5,'first message',$6,$7)`, f.person.TenantID, messageID, f.person.ID, f.agent.ID, e.ID, uid(), recipientSession)
 		return err
 	})
 	w = f.call(f.agent, "POST", path+"/drain", map[string]any{}, lease)
@@ -228,10 +240,41 @@ func TestHarnessInboxLeaseAndExactAck(t *testing.T) {
 		t.Fatalf("lease replay %s: %v", w.Body.String(), err)
 	}
 	body := map[string]any{"delivery_id": d["delivery_id"], "cursor": d["cursor"], "effective_level": "simple"}
+	if outcome == "failed" {
+		body["outcome"], body["failure_reason"] = "failed", "outcome_unconfirmed"
+	}
+	expect(t, f.call(f.agent, "POST", path+"/complete-delivery", map[string]any{"delivery_id": d["delivery_id"], "cursor": d["cursor"], "outcome": "failed"}, lease), 400)
+	expect(t, f.call(f.foreign, "POST", path+"/complete-delivery", body, lease), 403)
 	expect(t, f.call(f.agent, "POST", path+"/complete-delivery", map[string]any{"delivery_id": d["delivery_id"], "cursor": 999, "effective_level": "simple"}, lease), 409)
 	w = f.call(f.agent, "POST", path+"/complete-delivery", body, lease)
 	expect(t, w, 200)
 	expect(t, f.call(f.agent, "POST", path+"/complete-delivery", body, lease), 200)
+	if outcome == "failed" {
+		// A conflicting late success cannot upgrade uncertainty to handoff.
+		delete(body, "outcome")
+		delete(body, "failure_reason")
+		expect(t, f.call(f.agent, "POST", path+"/complete-delivery", body, lease), 200)
+		f.tx(t, f.agent, func(tx pgx.Tx) error {
+			if !targeted {
+				var count int
+				if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM inbox_receipts WHERE message_id=$1`, messageID).Scan(&count); err != nil {
+					return err
+				}
+				if count != 0 {
+					t.Fatal("session failure created an unbound receipt")
+				}
+				return nil
+			}
+			var state, reason string
+			if err := tx.QueryRow(t.Context(), `SELECT state,failure_reason FROM inbox_receipts WHERE message_id=$1`, messageID).Scan(&state, &reason); err != nil {
+				return err
+			}
+			if state != "failed" || reason != "outcome_unconfirmed" {
+				t.Fatalf("lost failed receipt: %s %s", state, reason)
+			}
+			return nil
+		})
+	}
 	w = f.call(f.agent, "POST", path+"/drain", map[string]any{}, lease)
 	expect(t, w, 200)
 	if strings.TrimSpace(w.Body.String()) != "[]" {

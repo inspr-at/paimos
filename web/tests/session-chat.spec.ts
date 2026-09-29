@@ -12,7 +12,7 @@ const now = Date.parse('2026-09-29T06:00:00Z')
 const longUrl = 'https://ci.example.test/inspr-at/paimos/actions/runs/18446744073709551615/jobs/9223372036854775807/logs?attempt=3&filter=playwright-session-chat-overflow-check'
 const longId = 'sha256:4f9c2a7be1d04c55a3a6c7f1d2e9b8a7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b7c6'
 
-async function setup(page: Page, options: { theme?: 'light' | 'dark'; count?: number; storage?: Record<string, string> } = {}) {
+async function setup(page: Page, options: { theme?: 'light' | 'dark'; count?: number; storage?: Record<string, string>; readMark?: { event: number; id: string }; failReadMarks?: number } = {}) {
   await page.clock.install({ time: now })
   const work = fixtures(); work.preferences.theme = { choice: options.theme ?? 'light' }
   await mockWork(page, work, { admin: true })
@@ -46,21 +46,33 @@ async function setup(page: Page, options: { theme?: 'light' | 'dark'; count?: nu
     for (const [k, v] of Object.entries(entries)) localStorage.setItem(k, v)
     sessionStorage.setItem('seeded', '1')
   }, options.storage)
-  const calls = await mockAgents(page, data)
+  const calls = await mockAgents(page, data, {
+    ...(options.readMark ? { readMark: { sessionId: worker.id, ...options.readMark } } : {}),
+    ...(options.failReadMarks ? { failReadMarks: options.failReadMarks } : {}),
+  })
+  // AEON-280: one batched, sender-only status read replaces the per-message receipt.
   const receipts: string[] = []
-  await page.route('**/api/inbox/messages/*/receipt', route => {
-    const id = route.request().url().split('/').at(-2)!
-    receipts.push(id)
-    const index = messages.findIndex(m => m.id === id)
-    if (index < 0) return route.fulfill({ status: 404, json: { error: 'not found' } })
-    const handed = index < count - 3
-    return route.fulfill({ json: { message_id: id, state: handed ? 'handed_off' : 'queued', handed_off_at: handed ? new Date(now - 60_000).toISOString() : null, failure_reason: '' } })
+  await page.route('**/api/inbox/message-status?*', route => {
+    const ids = new URL(route.request().url()).searchParams.get('ids')!.split(',')
+    receipts.push(...ids)
+    const items = ids.flatMap(id => {
+      const index = messages.findIndex(m => m.id === id)
+      if (index < 0) return []
+      const read = index < count - 3
+      return [{ message_id: id, status: read ? 'read' : 'sent', delivered_at: read ? new Date(now - 90_000).toISOString() : null, read_at: read ? new Date(now - 60_000).toISOString() : null, deliver_by: new Date(now + 240_000).toISOString() }]
+    })
+    return route.fulfill({ json: { items } })
   })
   return { data, worker, calls, messages, receipts }
 }
 // The viewer has read up to the post with this sent_event_id (200 + index).
 const readUpTo = (sessionId: string, event: number) => ({ 'aeon.session-read.v1': JSON.stringify({ [`${me.id}:${sessionId}`]: { event, id: 'seen', at: 1 } }) })
 const worker0 = '5e000000-0000-4000-8000-000000000001'
+const markerPuts = (calls: { method: string; path: string; body: unknown }[]) => calls.filter(call => call.method === 'PUT' && call.path.endsWith('/read-marker'))
+const localEvent = (page: Page, sessionId: string) => page.evaluate(key => {
+  const raw = localStorage.getItem('aeon.session-read.v1')
+  return raw ? (JSON.parse(raw)[key]?.event as number | undefined) ?? 0 : 0
+}, `${me.id}:${sessionId}`)
 const panelOf = (page: Page) => page.getByRole('complementary', { name: 'Session details' })
 const messagesTab = (page: Page) => panelOf(page).getByRole('tab', { name: /Messages/ })
 const scroller = (page: Page) => panelOf(page).locator('.thread-scroll')
@@ -120,6 +132,141 @@ test('Messages is its own tab with an unread badge; seeing the posts clears it a
   await page.reload()
   await expect(panel.getByRole('tab', { name: 'Overview' })).toHaveAttribute('aria-selected', 'true')
   await expect(messagesTab(page).locator('.count')).toHaveCount(0)
+})
+
+for (const width of [1600, 390]) {
+  test(`the unread badge follows the server read marker at ${width}`, async ({ page }) => {
+    const seen = '3e000000-0000-4000-8000-000000000101'
+    const { worker, calls } = await setup(page, { count: 5, readMark: { event: 201, id: seen } })
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
+    await page.goto(`/agents/${worker.id}`)
+    const panel = panelOf(page)
+    const overview = panel.getByRole('tab', { name: 'Overview' })
+    const badge = messagesTab(page).locator('.count')
+    // No local watermark: the badge is the server marker (event 201 leaves two later posts).
+    await expect(overview).toHaveAttribute('aria-selected', 'true')
+    await expect(panel.locator('.msg')).toHaveCount(5)
+    await expect(badge).toHaveText('2')
+    await expect.poll(() => page.evaluate(() => localStorage.getItem('aeon.session-read.v1'))).toContain('"event":201')
+    await page.evaluate(() => localStorage.removeItem('aeon.session-read.v1'))
+    await page.reload()
+    await expect(overview).toHaveAttribute('aria-selected', 'true')
+    await expect(panel.locator('.msg')).toHaveCount(5)
+    await expect(badge).toHaveText('2')
+    await shot(page, `server-unread-${width}`)
+    // Reading the thread moves the server marker. The badge is read back on Overview,
+    // where selecting Messages cannot hide it or mark the posts again.
+    await messagesTab(page).click()
+    await expect(panel.locator('.msg').first()).toBeVisible()
+    await scroller(page).evaluate(el => el.scrollTo({ top: el.scrollHeight }))
+    await expect.poll(() => localEvent(page, worker.id)).toBe(204)
+    await page.clock.fastForward(1_600)
+    await expect.poll(() => markerPuts(calls).at(-1)?.body).toMatchObject({ last_read_event_id: 204 })
+    await page.evaluate(() => {
+      localStorage.removeItem('aeon.session-read.v1')
+      localStorage.setItem('aeon.session-tab', 'overview')
+    })
+    await page.reload()
+    await expect(overview).toHaveAttribute('aria-selected', 'true')
+    await expect(panel.locator('.msg')).toHaveCount(5)
+    await expect(badge).toHaveCount(0)
+    await shot(page, `server-read-${width}`)
+  })
+}
+
+for (const width of [1600, 390]) {
+  test(`scrolling a 40-message thread sends at most two read markers at ${width}`, async ({ page }) => {
+    const { worker, calls } = await setup(page, { count: 40, storage: { 'aeon.session-tab': 'messages' } })
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
+    await page.goto(`/agents/${worker.id}`)
+    const thread = scroller(page)
+    await expect(panelOf(page).locator('.msg').first()).toBeVisible()
+    await thread.evaluate(el => {
+      const step = Math.max(48, Math.floor(el.clientHeight * 0.7))
+      for (let top = 0; top < el.scrollHeight; top += step) el.scrollTop = top
+      el.scrollTop = el.scrollHeight
+    })
+    // The opening view can mark a post before the scroll's later observations land.
+    // The clock stays put, so the trailing timer cannot fire until that settles.
+    const lastEvent = 200 + 39
+    await expect.poll(() => localEvent(page, worker.id)).toBe(lastEvent)
+    expect(markerPuts(calls)).toHaveLength(0)
+    await page.clock.fastForward(1_600)
+    await expect.poll(() => (markerPuts(calls).at(-1)?.body as { last_read_event_id?: number } | undefined)?.last_read_event_id).toBe(lastEvent)
+    expect(markerPuts(calls).length).toBeGreaterThan(0)
+    expect(markerPuts(calls).length).toBeLessThanOrEqual(2)
+  })
+}
+
+test('the thread renders before the read marker answers', async ({ page }) => {
+  const { worker } = await setup(page, { count: 6, storage: { 'aeon.session-tab': 'messages' } })
+  let release: () => void = () => {}
+  const gate = new Promise<void>(resolve => { release = resolve })
+  await page.route('**/read-marker', async route => {
+    if (route.request().method() === 'GET') await gate
+    await route.fallback()
+  })
+  try {
+    const opened = page.goto(`/agents/${worker.id}`)
+    await expect(panelOf(page).locator('.msg').first()).toBeVisible()
+    release()
+    await opened
+  } finally { release() }
+})
+
+test('focusing the window picks up a read from another device', async ({ page }) => {
+  const seen = '3e000000-0000-4000-8000-000000000101'
+  const { worker } = await setup(page, { count: 5, readMark: { event: 201, id: seen } })
+  let event = 201
+  await page.route('**/read-marker', async route => {
+    if (route.request().method() !== 'GET') return route.fallback()
+    const sessionId = new URL(route.request().url()).pathname.split('/').at(-2)
+    return route.fulfill({ json: { session_id: sessionId, last_read_message_id: seen, last_read_event_id: event, read_at: '2026-09-29T06:10:00.000Z' } })
+  })
+  await page.setViewportSize({ width: 1600, height: 1000 })
+  await page.goto(`/agents/${worker.id}`)
+  const badge = messagesTab(page).locator('.count')
+  await expect(panelOf(page).locator('.msg')).toHaveCount(5)
+  await expect(badge).toHaveText('2')
+  event = 204
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+  await expect(badge).toHaveCount(0)
+})
+
+test('a failed read marker is sent again on the next flush, without an error', async ({ page }) => {
+  const { worker, calls } = await setup(page, { count: 8, storage: { 'aeon.session-tab': 'messages' }, failReadMarks: 1 })
+  await page.setViewportSize({ width: 1600, height: 1000 })
+  await page.goto(`/agents/${worker.id}`)
+  await expect(panelOf(page).locator('.msg').first()).toBeVisible()
+  await scroller(page).evaluate(el => el.scrollTo({ top: el.scrollHeight }))
+  await expect.poll(() => localEvent(page, worker.id)).toBeGreaterThan(200)
+  await page.clock.fastForward(1_600)
+  await expect.poll(() => markerPuts(calls).length).toBe(1)
+  await expect(panelOf(page).getByRole('alert')).toHaveCount(0)
+  await page.evaluate(() => {
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' })
+    document.dispatchEvent(new Event('visibilitychange'))
+  })
+  await expect.poll(() => markerPuts(calls).length).toBe(2)
+  await expect(panelOf(page).getByRole('alert')).toHaveCount(0)
+})
+
+test('an agent viewer does not write a read marker', async ({ page }) => {
+  const { worker, calls } = await setup(page, { count: 8, storage: { 'aeon.session-tab': 'messages' } })
+  await page.route('**/api/me', route => route.fulfill({
+    json: { principal: { id: me.id, name: me.name, kind: 'agent', roles: ['member'] }, tenant: { id: 't1', name: 'INSPR Studio' }, identity: null, dev_mode: true },
+  }))
+  await page.setViewportSize({ width: 1600, height: 1000 })
+  await page.goto(`/agents/${worker.id}`)
+  await expect(panelOf(page).locator('.msg').first()).toBeVisible()
+  await scroller(page).evaluate(el => el.scrollTo({ top: el.scrollHeight }))
+  await expect.poll(() => localEvent(page, worker.id)).toBeGreaterThan(200)
+  await page.clock.fastForward(1_600)
+  await page.evaluate(() => {
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' })
+    document.dispatchEvent(new Event('visibilitychange'))
+  })
+  expect(markerPuts(calls)).toHaveLength(0)
 })
 
 test('?tab=messages deep-links to the thread; an ended session starts read on a new browser', async ({ page }) => {
@@ -185,13 +332,14 @@ test('the thread stays pinned at the bottom, counts posts that arrive while scro
   await shot(page, 'focused-390')
 })
 
-test('own posts show quiet delivery ticks from the sender receipt', async ({ page }) => {
+test('own posts show quiet delivery ticks from the sender status', async ({ page }) => {
   const { worker, receipts, messages } = await setup(page, { count: 9, storage: { 'aeon.session-tab': 'messages' } })
   await page.goto(`/agents/${worker.id}`)
   const mine = panelOf(page).locator('.msg.mine')
   await expect(mine).toHaveCount(3)
-  await expect(mine.first().locator('.tick.handed_off')).toHaveAttribute('data-tip', /^Picked up by the session · /)
-  await expect(mine.last().locator('.tick.queued')).toHaveAttribute('data-tip', 'Sent · waiting for the session to pick it up')
+  await expect(mine.first().locator('.delivery.read')).toHaveAttribute('data-tip', /^Read by the session · /)
+  await expect(mine.first().locator('.delivery.read')).toContainText('Read')
+  await expect(mine.last().locator('.delivery.sent')).toHaveAttribute('data-tip', 'Sent · waiting for the session to pick it up')
   // Only the viewer's own posts are asked for, never the agent's.
   const own = new Set(messages.filter(m => m.sender_principal_id === me.id).map(m => m.id))
   expect(receipts.length).toBeGreaterThan(0)

@@ -38,6 +38,44 @@ func TestRulesRendererPreservesExactBytes(t *testing.T) {
 		}
 	}
 }
+
+func TestRulesHarnessRenderGolden(t *testing.T) {
+	root := filepath.Join("testdata", "rules-harness")
+	body, err := os.ReadFile(filepath.Join(root, "body.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var manifest struct {
+		Harnesses map[string]struct {
+			Path string `json:"path"`
+			File string `json:"file"`
+		} `json:"harnesses"`
+	}
+	raw, err := os.ReadFile(filepath.Join(root, "manifest.json"))
+	if err != nil || json.Unmarshal(raw, &manifest) != nil {
+		t.Fatal(err)
+	}
+	if len(manifest.Harnesses) != len(rules.Harnesses) {
+		t.Fatalf("golden harnesses %d, renderer %d", len(manifest.Harnesses), len(rules.Harnesses))
+	}
+	sum := sha256.Sum256(body)
+	hash := hex.EncodeToString(sum[:])
+	for _, harness := range rules.Harnesses {
+		spec, ok := manifest.Harnesses[harness]
+		if !ok || spec.Path == "" || spec.File == "" {
+			t.Fatal("missing golden", harness)
+		}
+		golden, err := os.ReadFile(filepath.Join(root, spec.File))
+		if err != nil {
+			t.Fatal(err)
+		}
+		m := rules.Merged{Context: rules.Context{Harness: harness}, Version: "260929080000.0.0", Body: string(body), ByteSize: len(body), SHA256: hash}
+		got, err := renderRulesThroughHarness(m)
+		if err != nil || got.Body != string(golden) || got.SuggestedPath != spec.Path || got.Rev != hash {
+			t.Fatalf("%s render %q %q: %v", harness, got.SuggestedPath, got.Body, err)
+		}
+	}
+}
 func TestRulesOfflineOnlyForNetworkFailure(t *testing.T) {
 	for _, code := range []int{400, 401, 403, 404, 409, 422, 500} {
 		if networkUnavailable(&client.StatusError{Status: code}) {
@@ -140,17 +178,44 @@ func TestRulesPreviewOnlineOfflineAndRefusedCache(t *testing.T) {
 	if code == 0 {
 		t.Fatal("403 used cached authorization")
 	}
+	cachePath := filepath.Join(dir, "cache.json")
+	fresh, err := rules.ReadFile(cachePath, rules.MaxCacheBytes)
+	if err != nil || strings.Contains(string(fresh), `"stale"`) {
+		t.Fatal("authorization failure marked the cache stale", err)
+	}
 	status = 503
 	code, out, stderr = runCLI(args, "")
 	if code != 0 || !strings.Contains(out, `"stale":true`) || !strings.Contains(out, "Preserve safety") {
 		t.Fatal("offline cache", stderr, out)
 	}
-	if err = os.WriteFile(filepath.Join(dir, "cache.json"), []byte("corrupt"), 0600); err != nil {
+	staleRaw, err := rules.ReadFile(cachePath, rules.MaxCacheBytes)
+	var marked rules.Cache
+	if err != nil || json.Unmarshal(staleRaw, &marked) != nil || !marked.Stale || marked.Bundle.SHA256 != m.SHA256 {
+		t.Fatal("cache not marked stale", err)
+	}
+	if _, err = rules.DecodeCache(staleRaw, srv.URL, c, time.Now()); err != nil {
+		t.Fatal("marked cache failed integrity", err)
+	}
+	status = 200
+	code, out, stderr = runCLI(args, "")
+	if code != 0 || !strings.Contains(out, `"stale":false`) {
+		t.Fatal("online refresh", stderr, out)
+	}
+	fresh, err = rules.ReadFile(cachePath, rules.MaxCacheBytes)
+	if err != nil || strings.Contains(string(fresh), `"stale"`) {
+		t.Fatal("online fetch left the cache stale", err)
+	}
+	if err = os.WriteFile(cachePath, []byte("corrupt"), 0600); err != nil {
 		t.Fatal(err)
 	}
+	status = 503
 	code, out, stderr = runCLI(args, "")
 	if code != 0 || !strings.Contains(out, "floor-only") || !strings.Contains(out, "Preserve safety") {
 		t.Fatal("floor lost", stderr, out)
+	}
+	left, err := os.ReadFile(cachePath)
+	if err != nil || string(left) != "corrupt" {
+		t.Fatal("unusable cache was rewritten", err, string(left))
 	}
 
 	select {

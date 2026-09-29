@@ -10,15 +10,28 @@ const props = defineProps<{ features: ListItem[]; wishes: ListItem[] }>()
 interface Pace {
   project_id?: string
   project_title?: string
+  revision?: number
+  release_history?: boolean
   releases_30d?: number
   median_release_gap_days?: number
   wish_to_live_median_days?: number
   fulfillments?: { wish_id: string; feature_id: string }[]
 }
 
+class PaceRequestError extends Error {
+  status: number
+  constructor(status: number, message: string) {
+    super(message)
+    this.status = status
+  }
+}
+
+const linkChanged = 'The linked project changed, so release history was not changed.'
+
 const loading = ref(true)
 const error = ref('')
 const saving = ref('')
+const historyEpoch = ref(0)
 const pace = ref<Pace>({ fulfillments: [] })
 const projects = ref<{ id: string; title: string }[]>([])
 
@@ -48,7 +61,7 @@ async function read<T>(path: string, method = 'GET', body?: unknown): Promise<T>
     const message = data && typeof data === 'object' && typeof (data as { error?: unknown }).error === 'string'
       ? (data as { error: string }).error
       : 'That was not saved.'
-    throw new Error(message)
+    throw new PaceRequestError(response.status, message)
   }
   return data as T
 }
@@ -88,6 +101,31 @@ async function chooseProject(id: string) {
   }
 }
 
+async function setHistory(on: boolean) {
+  const projectId = pace.value.project_id
+  const revision = pace.value.revision
+  if (saving.value || !projectId || typeof revision !== 'number') return
+  saving.value = 'history'
+  error.value = ''
+  try {
+    store(await read<Pace>('/portal/pace', 'PUT', { release_history: on, project_id: projectId, revision }))
+  } catch (cause) {
+    const failed = cause instanceof PaceRequestError ? cause : null
+    const serverMessage = failed?.message && failed.message !== 'That was not saved.' ? failed.message : ''
+    error.value = failed?.status === 409 ? (serverMessage || linkChanged) : (cause instanceof Error && cause.message ? cause.message : 'That was not saved.')
+    historyEpoch.value += 1
+    if (failed?.status === 409) {
+      try {
+        store(await read<Pace>('/portal/pace'))
+      } catch {
+        // The alert already says the link changed.
+      }
+    }
+  } finally {
+    saving.value = ''
+  }
+}
+
 async function chooseFeature(wishId: string, featureId: string) {
   if (saving.value) return
   saving.value = wishId
@@ -104,7 +142,7 @@ async function chooseFeature(wishId: string, featureId: string) {
 
 <template>
   <SettingsCard title="Pace" icon="gauge" anchor="pace">
-    <template #lead>Release count from one project, and days from a wish to the feature that went live.</template>
+    <template #lead>Counts from one project. Release notes stay off until you publish them.</template>
     <div v-if="loading" class="set-skeleton" role="status" aria-label="Loading pace"><span class="skeleton" /></div>
     <template v-else>
       <p v-if="error" class="set-note error" role="alert"><AppIcon name="alert" :size="14" />{{ error }}</p>
@@ -113,6 +151,10 @@ async function chooseFeature(wishId: string, featureId: string) {
           <option value="">None</option>
           <option v-for="project in projects" :key="project.id" :value="project.id" :title="project.title">{{ project.title }}</option>
         </select>
+      </label>
+      <label class="switch history">
+        <input :key="`${pace.project_id ?? ''}:${pace.revision ?? 0}:${pace.release_history === true}:${historyEpoch}`" type="checkbox" :checked="pace.release_history === true" :disabled="!!saving || !pace.project_id || typeof pace.revision !== 'number'" @change="setHistory(($event.target as HTMLInputElement).checked)" />
+        <span>Publish release history</span>
       </label>
       <div v-if="figures.length" class="figures">
         <p v-for="figure in figures" :key="figure.label" class="figure">
@@ -136,6 +178,7 @@ async function chooseFeature(wishId: string, featureId: string) {
 
 <style scoped>
 .choice { display: grid; gap: 4px; margin: 0 0 12px; font-size: 12.5px; color: var(--ink-2); }
+.history { margin: 0 0 14px; }
 .figures { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 12px; }
 .figure {
   flex: 1 1 140px;

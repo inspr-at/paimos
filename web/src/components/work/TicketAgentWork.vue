@@ -2,6 +2,8 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import AppIcon from '../AppIcon.vue'
+import DeliveryRating from './DeliveryRating.vue'
+import { loadNodeRatings, type SessionRating } from '../../lib/deliveryRating'
 import {
   formatTokenCount, formatUsd, formatWorkDuration, harnessLabel, loadTicketAgentWork,
   type TicketAgentSession, type TicketAgentUsageModel, type TicketAgentWork,
@@ -14,6 +16,7 @@ import {
 const props = defineProps<{ nodeId: string; kind: string }>()
 
 const report = ref<TicketAgentWork | null>(null)
+const ratings = ref(new Map<string, SessionRating>())
 const error = ref('')
 const loading = ref(false)
 let generation = 0
@@ -27,11 +30,20 @@ async function load(id: string) {
   abort?.abort()
   abort = new AbortController()
   report.value = null
+  ratings.value = new Map()
   error.value = ''
   loading.value = true
   try {
-    const next = await loadTicketAgentWork(id, abort.signal)
-    if (request === generation) report.value = next
+    const [next, rated] = await Promise.all([
+      loadTicketAgentWork(id, abort.signal),
+      loadNodeRatings(id, abort.signal),
+    ])
+    if (request === generation) {
+      report.value = next
+      const map = new Map<string, SessionRating>()
+      for (const row of rated ?? []) map.set(row.session_id, row)
+      ratings.value = map
+    }
   } catch (cause) {
     if (request !== generation || abort?.signal.aborted) return
     error.value = cause instanceof Error ? cause.message : 'Agent work could not be loaded.'
@@ -152,6 +164,7 @@ function rowName(session: TicketAgentSession): string {
                 <span v-if="modelFigures(model)">{{ modelFigures(model) }}</span>
               </li>
             </ul>
+            <DeliveryRating v-if="session.phase === 'stopped' && ratings.get(session.id)" :session-id="session.id" :initial="ratings.get(session.id)" />
           </li>
         </ul>
       </template>

@@ -35,6 +35,12 @@ func testPtr(s *string) string {
 }
 
 func TestJourneyGateKeyPharosHandoffRoundtrip(t *testing.T) {
+	for _, named := range []bool{false, true} {
+		t.Run(fmt.Sprint("target=", named), func(t *testing.T) { testJourneyTargetRoundtrip(t, named) })
+	}
+}
+func testJourneyTargetRoundtrip(t *testing.T, named bool) {
+	const targetJSON = `{"hosts":["edge-1"],"environment":"production","service":"pharos","change":"Update image"}`
 	f := newFixture(t)
 	project := f.node(t, "project", "PRJ-36", "Disposable Pharos fixture")
 	release := f.node(t, "release", "REL-1", "Release")
@@ -93,6 +99,9 @@ func TestJourneyGateKeyPharosHandoffRoundtrip(t *testing.T) {
 	}
 	for _, gate := range []struct{ scope, action string }{{"journey.candidate", "approve_candidate"}, {"journey.deploy", "approve_deploy"}} {
 		body := fmt.Sprintf(`{"scope":%q,"resource_kind":"node","resource_id":%q,"rationale":"Disposable Pharos roundtrip gate","expires_at":%q}`, gate.scope, release, time.Now().Add(time.Hour).UTC().Format(time.RFC3339))
+		if named && gate.scope == "journey.deploy" {
+			body = strings.TrimSuffix(body, "}") + `,"target":` + targetJSON + `}`
+		}
 		proposed := callAgent(http.MethodPost, "/api/approvals", body)
 		if proposed.Code != http.StatusCreated {
 			t.Fatalf("propose %s: %d %s", gate.scope, proposed.Code, proposed.Body.String())
@@ -122,7 +131,15 @@ func TestJourneyGateKeyPharosHandoffRoundtrip(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	for _, stage := range view.Stages {
+		if stage.Key == "deploy" && named && (stage.Target == nil || stage.Target.Hosts[0] != "edge-1" || len(stage.TargetDigestSHA256) != 64) {
+			t.Fatalf("stage lost approved target: %+v", stage)
+		}
+	}
 	request := fmt.Sprintf(`{"project_node_id":%q,"release_node_id":%q,"stage":"deploy","operation":"deploy","expected_journey_revision":%d,"idempotency_key":"pharos-roundtrip"}`, project, release, view.Revision)
+	if named {
+		request = strings.TrimSuffix(request, "}") + `,"target":` + targetJSON + `}`
+	}
 	handoff := callAgent(http.MethodPost, "/api/stage-handoffs", request)
 	if handoff.Code != http.StatusCreated {
 		t.Fatalf("Pharos deploy handoff: %d %s", handoff.Code, handoff.Body.String())
@@ -130,6 +147,44 @@ func TestJourneyGateKeyPharosHandoffRoundtrip(t *testing.T) {
 	var created stagehandoff.Handoff
 	if err := json.Unmarshal(handoff.Body.Bytes(), &created); err != nil {
 		t.Fatal(err)
+	}
+	// PHAROS strictly decodes 1.0. The accepted target is stored, but the
+	// handoff response must not expose it; the journey supplies it to the web.
+	if handoff.Header().Get("Aeon-Contract") != "stage-handoffs/1.0" {
+		t.Fatal("handoff contract changed")
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(handoff.Body.Bytes(), &fields); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"target", "target_digest_sha256"} {
+		if _, ok := fields[key]; ok {
+			t.Fatalf("PHAROS response contains %s", key)
+		}
+	}
+	if err := db.InTenant(dbtest.Seed(ctx), f.db.App, f.tenant, func(tx pgx.Tx) error {
+		var stored bool
+		if err := tx.QueryRow(ctx, `SELECT target IS NOT NULL AND target_digest_sha256 IS NOT NULL FROM stage_handoffs WHERE id=$1::uuid`, created.ID).Scan(&stored); err != nil {
+			return err
+		}
+		if stored != named {
+			t.Fatal("handoff storage lost or invented target")
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	view = f.journey(t, f.person, http.MethodGet, "/api/projects/"+project+"/journey", "")
+	for _, stage := range view.Stages {
+		if stage.Key != "deploy" {
+			continue
+		}
+		if named && (stage.Target == nil || stage.Target.Hosts[0] != "edge-1" || len(stage.TargetDigestSHA256) != 64) {
+			t.Fatal("journey lost handoff target")
+		}
+		if !named && (stage.Target != nil || stage.TargetDigestSHA256 != "") {
+			t.Fatal("journey invented target")
+		}
 	}
 	if created.ID == "" || created.PluginID != "pharos" || created.Stage != "deploy" || created.Operation != "deploy" {
 		t.Fatalf("wrong handoff: %+v", created)

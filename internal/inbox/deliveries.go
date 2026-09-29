@@ -450,7 +450,7 @@ func (m *messaging) readMessages(w http.ResponseWriter, r *http.Request, inspect
 			return err
 		}
 		if sessionID != nil && !inspect {
-			if _, err := messageSession(r.Context(), tx, sessionID, p.ID, project); err != nil {
+			if _, err := listeningSession(r.Context(), tx, sessionID, p.ID, project); err != nil {
 				return err
 			}
 		}
@@ -499,7 +499,34 @@ func (m *messaging) readMessages(w http.ResponseWriter, r *http.Request, inspect
 			page.Items = append(page.Items, v)
 			page.NextAfter = v.SentEventID
 		}
-		return rows.Err()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		rows.Close()
+		if inspect {
+			return nil
+		}
+		// A recipient pull hands these messages over; with a session it is also
+		// that generation listening at a turn boundary (AEON-280).
+		ids := make([]string, 0, len(page.Items))
+		for _, v := range page.Items {
+			ids = append(ids, v.ID)
+		}
+		alive, err := handOver(r.Context(), tx, p, SeenHook, ids)
+		if err != nil {
+			return err
+		}
+		kept := page.Items[:0]
+		for _, v := range page.Items {
+			if alive[v.ID] {
+				kept = append(kept, v)
+			}
+		}
+		page.Items = kept
+		if sessionID != nil {
+			return MarkSessionSeen(r.Context(), tx, *sessionID, SeenHook)
+		}
+		return nil
 	})
 	if err != nil {
 		messagingFailure(w, err)

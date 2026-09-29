@@ -314,7 +314,7 @@ func TestHarnessReporterOmitsUnusedEta(t *testing.T) {
 		{"heartbeat", decode(t, beat), beat.Header().Get("Aeon-Contract")},
 		{"status", decode(t, status), status.Header().Get("Aeon-Contract")},
 	} {
-		if tc.got != "harness-session/1.1" {
+		if tc.got != "harness-session/1.3" {
 			t.Fatalf("%s Aeon-Contract = %q", tc.name, tc.got)
 		}
 		for _, key := range []string{"eta_ready_at", "eta_live_at", "progress_pct", "eta_reported_at", "eta_stale"} {
@@ -600,5 +600,78 @@ func TestEtaMigrationLockAndValidation(t *testing.T) {
 	})
 	if !validated {
 		t.Fatal("progress check is not validated")
+	}
+}
+
+func TestSessionEtaStalenessUsesDatabaseClock(t *testing.T) {
+	// Same shape as AEON-271: production reads clock_timestamp(), and injected
+	// clocks on either side of the wall clock prove time.Now() is not consulted.
+	for _, year := range []int{0, 2001, 2099} {
+		name := "database"
+		now := time.Date(year, time.January, 1, 11, 0, 0, 0, time.UTC)
+		var clock func() time.Time
+		if year != 0 {
+			name = now.Format("2006")
+			clock = func() time.Time { return now }
+		}
+		t.Run(name, func(t *testing.T) {
+			f := fixtureWithOwnershipClock(t, clock)
+			if clock == nil {
+				f.tx(t, f.person, func(tx pgx.Tx) error {
+					return tx.QueryRow(t.Context(), `SELECT clock_timestamp()`).Scan(&now)
+				})
+			}
+			lease := "eta-clock-lease-000000000000000001"
+			session := f.registerSession(t, f.agent.ID, "worker", f.ticket, "eta-clock-ref-0000000000000001", lease)
+			path := "/api/projects/" + f.project + "/harness-sessions/" + session
+			setAge := func(age time.Duration, stopped bool) {
+				t.Helper()
+				f.tx(t, f.person, func(tx pgx.Tx) error {
+					_, err := tx.Exec(t.Context(), `UPDATE harness_sessions
+						SET eta_ready_at=$2, progress_pct=40, eta_reported_at=$3,
+						    phase=CASE WHEN $4 THEN 'stopped' ELSE 'working' END,
+						    stopped_at=CASE WHEN $4 THEN $5 ELSE NULL::timestamptz END,
+						    stop_reason=CASE WHEN $4 THEN 'completed' ELSE NULL END
+						WHERE id=$1`, session, now.Add(time.Hour), now.Add(-age), stopped, now)
+					return err
+				})
+			}
+			stale := func() bool {
+				t.Helper()
+				status := decode(t, f.call(f.person, "GET", path, nil, ""))
+				value, ok := status["eta_stale"]
+				if !ok {
+					return false
+				}
+				got, isBool := value.(bool)
+				if !isBool || !got {
+					t.Fatalf("eta_stale %#v", value)
+				}
+				return true
+			}
+			setAge(19*time.Minute, false)
+			if stale() {
+				t.Fatal("19 minutes is inside two intervals")
+			}
+			setAge(21*time.Minute, false)
+			if !stale() {
+				t.Fatal("21 minutes is past two intervals")
+			}
+			if clock == nil {
+				return
+			}
+			setAge(20*time.Minute, false)
+			if stale() {
+				t.Fatal("exactly two intervals is still fresh")
+			}
+			setAge(20*time.Minute+time.Millisecond, false)
+			if !stale() {
+				t.Fatal("one millisecond past two intervals is stale")
+			}
+			setAge(21*time.Minute, true)
+			if stale() {
+				t.Fatal("a stopped session is not stale")
+			}
+		})
 	}
 }

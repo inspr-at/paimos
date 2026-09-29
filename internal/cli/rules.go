@@ -2,6 +2,7 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -32,6 +33,20 @@ func (o *rulesOptions) flags(fs *flagSet) {
 	fs.string(&o.Floor, "rules-floor", 0, "independently retained private locked-floor .txt file")
 	fs.string(&o.FloorSHA, "rules-floor-sha256", 0, "trusted exact SHA256 of the retained company floor")
 	fs.string(&o.Out, "rules-out", 0, "optional new .txt preview output (never overwrites)")
+}
+
+// persistStaleCache marks a verified cache that was served because Aeon was
+// unreachable. A cache that was not used (corrupt, expired, wrong context)
+// is left untouched. An already-marked cache is not rewritten.
+func persistStaleCache(path, instance string, c rules.Context, raw []byte, now time.Time) error {
+	marked, err := rules.MarkStale(raw, instance, c, now)
+	if err != nil {
+		return err
+	}
+	if bytes.Equal(marked, raw) {
+		return nil
+	}
+	return rules.WriteFile(path, marked, true)
 }
 
 func networkUnavailable(err error) bool {
@@ -89,6 +104,8 @@ func (rt *runtime) sessionRules(project string, o rulesOptions) error {
 		m, err = rules.Offline(cache, api.BaseURL, c, floor, now)
 		if err != nil {
 			gap = err.Error()
+		} else if err = persistStaleCache(o.Cache, api.BaseURL, c, cache, now); err != nil {
+			return err
 		}
 		if m.Body == "" {
 			return err
