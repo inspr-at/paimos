@@ -5262,7 +5262,7 @@ paths:
     post:
       operationId: recordOutcome
       summary: Record a review, fix round, CI result or revert
-      description: Requires outcome.write in the ticket's project. Agents also need that scope on the key. Idempotency-Key replays the same outcome when the body matches and conflicts when it does not. Keys starting with auto: are reserved. ticket_done and release_included cannot be posted.
+      description: "Requires outcome.write in the ticket's project. Agents also need that scope on the key. Idempotency-Key replays the same outcome when the body matches and conflicts when it does not. Keys starting with auto: are reserved. ticket_done and release_included cannot be posted."
       security: *auth
       parameters:
         - {name: Idempotency-Key, in: header, required: true, schema: {type: string, minLength: 8, maxLength: 200}}
