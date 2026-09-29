@@ -21,10 +21,11 @@ import (
 
 const ownershipWindow = 45 * time.Second
 
-// Ownership observations and freshness checks must share the database clock.
-// Even millisecond skew between Postgres and an API host can otherwise make a
-// just-accepted report appear future-dated. Read after acquiring the session
-// lock; a transaction-start timestamp can predate a heartbeat we waited for.
+// Ownership freshness (AEON-271) and session ETA staleness (AEON-277) share the
+// database clock. Millisecond skew between Postgres and an API host can
+// otherwise make a just-accepted report look future-dated, or a fresh estimate
+// look stale. Read after acquiring locks; a transaction-start timestamp can
+// predate a row this transaction waited for.
 func (m *Module) ownershipNow(ctx context.Context, tx pgx.Tx) (time.Time, error) {
 	if m.ownershipClock != nil {
 		return m.ownershipClock(ctx, tx)

@@ -16,6 +16,10 @@ func TestInstructionProvenanceRoutePermissions(t *testing.T) {
 	if got, ok := PermissionForPattern(post); !ok || got != "harness.worker" {
 		t.Fatalf("POST permission %q ok=%v", got, ok)
 	}
+	query := "GET /api/projects/{projectId}/instruction-provenance"
+	if got, ok := PermissionForPattern(query); !ok || got != "harness.read" {
+		t.Fatalf("query permission %q ok=%v", got, ok)
+	}
 	for _, other := range []string{
 		"POST /api/projects/{projectId}/harness-sessions",
 		"POST /api/projects/{projectId}/harness-sessions/{sessionId}/heartbeat",

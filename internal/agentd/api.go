@@ -16,6 +16,7 @@ import (
 	"sync"
 
 	"github.com/inspr-at/paimos/internal/client"
+	"github.com/inspr-at/paimos/internal/deploytarget"
 )
 
 // Remote uses a scoped agent key through AEON's public HTTP contract.
@@ -55,7 +56,7 @@ type RunToolAPI interface {
 	SetWorkStatus(context.Context, string, int64, string) (WorkOrder, error)
 	CheckCriterion(context.Context, string, string, bool) error
 	Evidence(context.Context, string, string, string, string) error
-	RequestApproval(context.Context, string, string, string, string) error
+	RequestApproval(context.Context, string, ApprovalRequest) error
 	ReplyInbox(context.Context, string, string, string, string) error
 }
 
@@ -78,11 +79,46 @@ func (r *Remote) Evidence(ctx context.Context, orderID, runID, criterionID, refe
 		map[string]string{"kind": "text", "reference": reference, "criterion_id": criterionID, "run_id": runID}, nil)
 }
 
-func (r *Remote) RequestApproval(ctx context.Context, runID, scope, rationale, expiry string) error {
-	return r.Client.Do(ctx, "POST", "/api/approvals", map[string]string{
-		"scope": scope, "resource_kind": "run", "resource_id": runID,
-		"run_id": runID, "rationale": rationale, "expires_at": expiry,
-	}, nil)
+// ApprovalRequest retains the originating run. Deploy scopes may additionally provide
+// an explicit release node and target; the server checks the caller's key ceiling,
+// tenant visibility and run ownership. Requesting grants no authority.
+type ApprovalRequest struct {
+	Scope, Rationale, ExpiresAt string
+	ReleaseNodeID               string
+	Target                      *deploytarget.Target
+}
+
+func (in *ApprovalRequest) normalizeTarget() error {
+	if in.Scope == "journey.deploy" || in.Scope == "stage.deploy" {
+		if in.ReleaseNodeID != "" && !uuidPattern.MatchString(in.ReleaseNodeID) {
+			return errors.New("invalid release_node_id")
+		}
+		target, _, err := deploytarget.Normalize(in.Target)
+		if err != nil {
+			return err
+		}
+		in.Target = target
+	} else if in.ReleaseNodeID != "" || in.Target != nil {
+		return errors.New("release_node_id and target are only valid for deploy approvals")
+	}
+	return nil
+}
+
+func (r *Remote) RequestApproval(ctx context.Context, runID string, in ApprovalRequest) error {
+	if err := in.normalizeTarget(); err != nil {
+		return err
+	}
+	body := map[string]any{
+		"scope": in.Scope, "resource_kind": "run", "resource_id": runID,
+		"run_id": runID, "rationale": in.Rationale, "expires_at": in.ExpiresAt,
+	}
+	if in.Target != nil {
+		body["target"] = in.Target
+	}
+	if in.ReleaseNodeID != "" {
+		body["resource_kind"], body["resource_id"] = "node", in.ReleaseNodeID
+	}
+	return r.Client.Do(ctx, "POST", "/api/approvals", body, nil)
 }
 
 func (r *Remote) ReplyInbox(ctx context.Context, messageID, recipientID, body, key string) error {

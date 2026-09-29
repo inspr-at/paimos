@@ -11,6 +11,7 @@ import { relativeTime } from '../../lib/work'
 import { useAgents } from '../../stores/agents'
 import { useJourney } from '../../stores/journey'
 import AppIcon from '../AppIcon.vue'
+import TargetSummary from '../deploy/TargetSummary.vue'
 import { askerOf } from './asker'
 
 // A gate as approvals, in the agents workspace's "Needs you" pattern: who asks,
@@ -100,6 +101,7 @@ function destructive(approval: Approval) {
             <time class="expiry" :class="{ soon: expiresSoon(approval, now) }" :datetime="approval.expires_at" :data-tip="new Date(approval.expires_at).toLocaleString()"><AppIcon name="clock" :size="12" />{{ expiresIn(approval, now) }}</time>
           </p>
           <p class="line2"><span class="asks">Asked by</span><span v-if="who(approval).harness" class="harness mono">{{ who(approval).harness }}</span><strong :data-tip="who(approval).tip || undefined">{{ who(approval).name }}</strong></p>
+          <TargetSummary :approval="approval" compact />
           <p v-if="approval.rationale" class="why">“{{ approval.rationale }}”</p>
           <form v-if="open?.id === approval.id" class="decision" @submit.prevent="submit(approval)">
             <label :for="`gate-reason-${approval.id}`">{{ open.mode === 'approve' ? 'Reason (optional)' : 'Why not? The agent sees this.' }}</label>
@@ -120,9 +122,12 @@ function destructive(approval: Approval) {
     </ul>
     <ul v-if="past.length" class="records" aria-label="Earlier gate decisions">
       <li v-for="approval in past" :key="approval.id" class="record">
-        <AppIcon :name="stateOf(approval) === 'approved_live' ? 'check' : stateOf(approval) === 'rejected' || stateOf(approval) === 'revoked' ? 'close' : 'clock'" :size="12" :class="stateOf(approval)" />
-        <span>{{ outcome(approval) }}</span>
-        <span class="faint" :data-tip="`Asked by ${who(approval).name}`">· asked {{ relativeTime(approval.proposed_at, { now }) }}</span>
+        <div class="record-line">
+          <AppIcon :name="stateOf(approval) === 'approved_live' ? 'check' : stateOf(approval) === 'rejected' || stateOf(approval) === 'revoked' ? 'close' : 'clock'" :size="12" :class="stateOf(approval)" />
+          <span>{{ outcome(approval) }}</span>
+          <span class="faint" :data-tip="`Asked by ${who(approval).name}`">· asked {{ relativeTime(approval.proposed_at, { now }) }}</span>
+        </div>
+        <TargetSummary :approval="approval" compact />
       </li>
     </ul>
     <p v-if="needsFreshRequest" class="fresh-note">The agent asks again for a fresh gate request.</p>
@@ -140,7 +145,7 @@ function destructive(approval: Approval) {
 .what { font-size: 13.5px; font-weight: 600; color: var(--ink); }
 .risk-chip { display: inline-flex; align-items: center; gap: 3px; height: 18px; padding: 0 7px; border-radius: 999px; font: 600 10px/18px var(--mono); letter-spacing: .06em; text-transform: uppercase; background: var(--row-selected); color: var(--teal-ink); }
 .risk-chip.medium { background: transparent; box-shadow: inset 0 0 0 1px rgba(214, 155, 49, .55); color: var(--gold-ink); }
-.risk-chip.high { background: var(--gold-wash); color: var(--warn); box-shadow: inset 0 0 0 1px rgba(214, 155, 49, .55); }
+.risk-chip.high { background: var(--gold-wash); color: var(--warn-ink); box-shadow: inset 0 0 0 1px rgba(214, 155, 49, .55); }
 .risk-chip.high.destructive { background: var(--danger-bg); color: var(--danger); box-shadow: inset 0 0 0 1px var(--danger-line); }
 .expiry { display: inline-flex; align-items: center; gap: 4px; margin-left: auto; font-size: 12px; color: var(--ink-3); white-space: nowrap; }
 .expiry.soon { color: var(--gold-ink); }
@@ -157,7 +162,8 @@ function destructive(approval: Approval) {
 .decision textarea { height: auto; padding: 8px 10px; resize: vertical; }
 .decision-actions { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 6px; }
 .decision-actions .hint { margin-right: auto; font-size: 11.5px; color: var(--ink-3); }
-.record { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; font-size: 12.5px; color: var(--ink-2); }
+.record { display: grid; gap: 6px; }
+.record-line { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; font-size: 12.5px; color: var(--ink-2); }
 .record svg { flex-shrink: 0; color: var(--ink-3); }
 .record svg.approved_live { color: var(--ok); } .record svg.rejected { color: var(--danger); }
 .faint { color: var(--ink-3); }

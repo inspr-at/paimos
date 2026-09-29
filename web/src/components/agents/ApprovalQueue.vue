@@ -6,6 +6,7 @@ import { RISK_LABEL, expiresIn, expiresSoon, riskFor, scopeLabel, type Asker, ty
 import { confirmAction } from '../../lib/confirm'
 import { relativeTime } from '../../lib/work'
 import AppIcon from '../AppIcon.vue'
+import TargetSummary from '../deploy/TargetSummary.vue'
 import HarnessMark from './HarnessMark.vue'
 import AgentStateMark from '../indicators/AgentStateMark.vue'
 import { useAgentAppearance } from '../../lib/agentAppearance'
@@ -131,6 +132,7 @@ defineExpose({ begin, cancel, isOpen: () => !!open.value })
               <span v-if="resource(approval).title && resource(approval).key" class="res-title" :title="resource(approval).title">{{ resource(approval).title }}</span>
             </span>
           </p>
+          <TargetSummary :approval="approval" compact />
           <p v-if="approval.rationale" class="why">{{ approval.rationale }}</p>
           <form v-if="open?.id === approval.id" class="decision" @submit.prevent="submit(approval)" @click.stop>
             <label :for="`reason-${approval.id}`">{{ open.mode === 'approve' ? 'Reason (optional)' : 'Why not? The agent sees this.' }}</label>
@@ -208,6 +210,7 @@ defineExpose({ begin, cancel, isOpen: () => !!open.value })
           <span class="past-outcome">{{ outcome(approval) }}</span>
           <time class="past-time" :datetime="approval.proposed_at">{{ relativeTime(approval.proposed_at, { now }) }}</time>
           <button v-if="approval.decision === 'approved' && !revoked.has(approval.id) && canRevoke" type="button" class="btn sm ghost revoke" @click="revoke(approval)">Revoke</button>
+          <TargetSummary class="past-target" :approval="approval" compact />
         </li>
       </ul>
     </footer>
@@ -294,6 +297,7 @@ defineExpose({ begin, cancel, isOpen: () => !!open.value })
 .history-toggle .mono { font-size: 11px; color: var(--ink-3); font-weight: 500; }
 .chev { color: var(--ink-3); }
 .chev.turned { transform: rotate(90deg); }
+.past-target { grid-column: 1 / -1; width: 100%; }
 .history-list { margin: 2px 0 0; padding: 0; list-style: none; }
 .past { display: grid; grid-template-columns: 16px minmax(0, 1.4fr) minmax(0, 1fr) 76px 80px 64px; align-items: center; gap: 10px; min-height: 32px; padding: 0 8px; border-radius: 8px; font-size: 12.5px; color: var(--ink-2); }
 @media (hover: hover) { .past:hover { background: var(--row-hover); } }

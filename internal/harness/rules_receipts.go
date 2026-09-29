@@ -151,6 +151,9 @@ func (m *Module) recordRulesReceipt(r *http.Request, tx pgx.Tx, p tenant.Princip
 	if err = record(ctx, tx, p, s, "rules_received", nil, out); err != nil {
 		return nil, err
 	}
+	if err = recordReceiptProvenance(ctx, tx, p, s, in); err != nil {
+		return nil, err
+	}
 	return rulesReceiptRecorded{Receipt: out}, nil
 }
 

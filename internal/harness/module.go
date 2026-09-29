@@ -29,8 +29,10 @@
 // --brief, --worktree and --branch to paimos harness register|heartbeat,
 // plus repeated --commit SHA:subject on heartbeat. The coordinator can pass
 // these flags from worker scripts without changing server wiring.
-// PV1/AEON-219 records instruction provenance on its own route. Registration
-// and heartbeat schemas are unchanged. Writes use the existing worker lease.
+// PV1/AEON-219 records instruction provenance on its own route. A rules receipt
+// appends merged-rule and rule-set identities in that same transaction.
+// Heartbeat registration may post AGENTS.md and CLAUDE.md hashes. Registration
+// and heartbeat request schemas are unchanged. Writes use the existing worker lease.
 package harness
 
 import (
@@ -80,6 +82,8 @@ func (m *Module) Mount(mux *http.ServeMux) {
 		{"GET /api/projects/{projectId}/harness-sessions", "harness.read", false, 200, m.list},
 		{"GET /api/projects/{projectId}/harness-sessions/orchestrator", "harness.read", false, 200, m.orchestrator},
 		{"GET /api/projects/{projectId}/harness-sessions/{sessionId}", "harness.read", false, 200, m.status},
+		{"GET /api/projects/{projectId}/harness-sessions/{sessionId}/read-marker", "harness.read", false, 200, m.getReadMarker},
+		{"PUT /api/projects/{projectId}/harness-sessions/{sessionId}/read-marker", "harness.read", false, 200, m.putReadMarker},
 		{"PATCH /api/projects/{projectId}/harness-sessions/{sessionId}/binding", "harness.write", false, 200, m.bind},
 		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/usage", "harness.worker", true, 200, m.reportUsage},
 		{"GET /api/projects/{projectId}/harness-sessions/{sessionId}/usage", "harness.read", false, 200, m.sessionUsage},
@@ -91,6 +95,7 @@ func (m *Module) Mount(mux *http.ServeMux) {
 		{"PUT /api/nodes/{nodeId}/live-eta", "harness.worker", true, 200, m.setLiveEta},
 		{"GET /api/projects/{projectId}/harness-sessions/{sessionId}/provenance", "harness.read", false, 200, m.readProvenance},
 		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/provenance", "harness.worker", true, 200, m.recordProvenance},
+		{"GET /api/projects/{projectId}/instruction-provenance", "harness.read", false, 200, m.queryInstructionSources},
 		{"GET /api/projects/{projectId}/harness-sessions/{sessionId}/rules-receipts", "harness.read", false, 200, m.readRulesReceipts},
 		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/rules-receipts", "harness.worker", true, 200, m.recordRulesReceipt},
 		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/yield", "harness.worker", true, 200, m.yield},
@@ -667,7 +672,7 @@ func (m *Module) list(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, erro
 		out[i].StateEvidence = evidence[out[i].ID]
 		ptrs[i] = &out[i]
 	}
-	if err = stampSessions(r.Context(), tx, ptrs); err != nil {
+	if err = m.stampSessions(r.Context(), tx, ptrs); err != nil {
 		return nil, err
 	}
 	return out, nil
@@ -724,7 +729,7 @@ func (m *Module) status(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, er
 		return nil, err
 	}
 	s.StateEvidence = evidence[s.ID]
-	if err = stampSessions(r.Context(), tx, []*Session{&s}); err != nil {
+	if err = m.stampSessions(r.Context(), tx, []*Session{&s}); err != nil {
 		return nil, err
 	}
 	controls, err := readSessionRequests(r.Context(), tx, p, s)
@@ -927,7 +932,7 @@ func (m *Module) heartbeat(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 	if err = record(ctx, tx, p, s, "heartbeat", before, s); err != nil {
 		return nil, err
 	}
-	if err = stampSessions(ctx, tx, []*Session{&s}); err != nil {
+	if err = m.stampSessions(ctx, tx, []*Session{&s}); err != nil {
 		return nil, err
 	}
 	return s, nil

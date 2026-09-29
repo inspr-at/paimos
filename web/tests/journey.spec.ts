@@ -210,7 +210,7 @@ test('Deploy shows closed launch admission as a check with its reason, one decis
   await expect(page.getByText('The host policy refused it')).toBeVisible()
   await expect(page.getByText('Launch admission · closed')).toBeVisible()
   const card = page.getByRole('region', { name: 'Decision: The host did not apply it' })
-  await expect(card).toContainText('Release 2 goes to Pharos')
+  await expect(card).toContainText('Pharos deploys Release 2')
   await expect(page.locator('.btn.primary:visible')).toHaveCount(1)
 })
 

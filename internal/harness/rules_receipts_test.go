@@ -46,6 +46,11 @@ func receiptFixture(t *testing.T) (*harnessFixture, string, string, harness.Rule
 	return f, "/api/projects/" + f.project + "/harness-sessions/" + sessionID, lease, in
 }
 
+func fmtItems(rev map[string]any) string {
+	raw, _ := json.Marshal(rev["items"])
+	return string(raw)
+}
+
 func receiptResponse(t *testing.T, w *httptest.ResponseRecorder, replayed bool) harness.RulesReceipt {
 	t.Helper()
 	expect(t, w, 200)
@@ -109,8 +114,22 @@ func TestRulesReceiptAppendCASPreservesInstructionProvenance(t *testing.T) {
 	if got := receiptResponse(t, f.call(f.agent, "POST", path, in, lease), true); !reflect.DeepEqual(got, first) {
 		t.Fatal("historical replay changed receipt")
 	}
-	if got := f.call(f.person, "GET", session+"/provenance", nil, "").Body.String(); got != old {
-		t.Fatal("rules receipt replaced actual instruction provenance", got, old)
+	provenance := decode(t, f.call(f.person, "GET", session+"/provenance", nil, ""))
+	revisions := provenance["revisions"].([]any)
+	if len(revisions) != 3 || strings.Contains(old, "merged-rules") {
+		t.Fatalf("file provenance was not kept as its own revision: %s", old)
+	}
+	oldest := revisions[2].(map[string]any)
+	newest := revisions[0].(map[string]any)
+	if oldest["revision"].(float64) != 1 || !strings.Contains(fmtItems(oldest), "AGENTS.md") || strings.Contains(fmtItems(oldest), "merged-rules") {
+		t.Fatal("original instruction files were replaced", oldest)
+	}
+	if newest["revision"].(float64) != 3 || !strings.Contains(fmtItems(newest), "AGENTS.md") || !strings.Contains(fmtItems(newest), "merged-rules") || !strings.Contains(fmtItems(newest), strings.Repeat("c", 64)) {
+		t.Fatal("latest provenance dropped files or the receipt hash", newest)
+	}
+	rawPage, _ := json.Marshal(provenance)
+	if strings.Contains(string(rawPage), lease) {
+		t.Fatal("provenance response contains the worker lease")
 	}
 	if after := decode(t, f.call(f.person, "GET", session, nil, ""))["revision"]; after != sessionBefore {
 		t.Fatal("receipt altered session revision")

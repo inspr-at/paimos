@@ -241,7 +241,36 @@ var (
 var (
 	errHiddenBudget = &Error{Status: 422, Code: "rules_budget_exceeded", Message: "A session file for another person or agent would exceed the limit. Shorten always-on text or move it to details."}
 	errTooManyCtx   = &Error{Status: 422, Code: "budget_check_too_large", Message: "This publication touches more session files (limit 1,000) or rules (limit 2,000) than one check can cover. Publish fewer sets together."}
+	// One merged file is a single session file. The 1,000-file cap stays on
+	// budgetCheck. This read refuses the same store caps that check uses.
+	errMergeStoreTooLarge = &Error{Status: 422, Code: "budget_check_too_large", Message: "This session's rule snapshots exceed 2,000 rules or 2 MiB of rule text."}
 )
+
+// storeBudget applies the publication store caps (2,000 rules, 2 MiB of rule
+// text) to snapshots already in memory. An empty snapshot still counts as one
+// rule, matching budgetCheck. The merge handler calls admit after each read
+// so a crossing snapshot is the last one loaded.
+func storeBudget(ctx context.Context, snapshots []Snapshot) error {
+	w := &work{ctx: ctx}
+	for _, s := range snapshots {
+		if err := w.admit(s); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// admit counts one snapshot against the running store total. Crossing 2,000
+// rules or 2 MiB returns the merge refusal.
+func (w *work) admit(s Snapshot) error {
+	if err := w.load(s); err != nil {
+		if err == errTooManyCtx {
+			return errMergeStoreTooLarge
+		}
+		return err
+	}
+	return nil
+}
 
 // work tracks one budget check against the deadline and the store bounds.
 type work struct {

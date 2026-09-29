@@ -19,6 +19,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/deploytarget"
 	"github.com/inspr-at/paimos/internal/ownedprocess"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -91,8 +92,10 @@ type evidenceArgs struct {
 	Reference   string `json:"reference" jsonschema:"Bounded text evidence, for example a test result or commit ID"`
 }
 type approvalArgs struct {
-	Scope     string `json:"scope" jsonschema:"Requested run permission scope"`
-	Rationale string `json:"rationale" jsonschema:"Reason for the request"`
+	Scope         string               `json:"scope" jsonschema:"Requested permission scope"`
+	Rationale     string               `json:"rationale" jsonschema:"Reason for the request"`
+	ReleaseNodeID string               `json:"release_node_id,omitempty" jsonschema:"Explicit release node UUID, optional for journey.deploy or stage.deploy"`
+	Target        *deploytarget.Target `json:"target,omitempty" jsonschema:"Explicit deployment destination and change, optional for journey.deploy or stage.deploy; hosts or environment plus service and change; optional image"`
 }
 type replyArgs struct {
 	MessageID      string `json:"message_id" jsonschema:"Received inbox message ID"`
@@ -157,13 +160,17 @@ func addManagedTools(s *mcp.Server, b toolBinding) {
 			}
 			return nil, "evidence recorded", b.api.Evidence(ctx, b.workOrderID, b.runID, in.CriterionID, in.Reference)
 		})
-	mcp.AddTool(s, &mcp.Tool{Name: "aeon_request_approval", Description: "Ask a person for a scoped approval on this run; this does not grant permission."},
+	mcp.AddTool(s, &mcp.Tool{Name: "aeon_request_approval", Description: "Ask a person for a scoped approval originating from this run. journey.deploy and stage.deploy can include explicit release_node_id and target. This does not grant permission."},
 		func(ctx context.Context, _ *mcp.CallToolRequest, in approvalArgs) (*mcp.CallToolResult, string, error) {
 			if !b.active() || !scopePattern.MatchString(in.Scope) || len(in.Rationale) > 8000 || strings.TrimSpace(in.Rationale) == "" {
 				return nil, "", errors.New("approval request invalid")
 			}
 			expires := time.Now().Add(time.Hour).UTC().Format(time.RFC3339)
-			return nil, "approval requested", b.api.RequestApproval(ctx, b.runID, in.Scope, in.Rationale, expires)
+			request := ApprovalRequest{Scope: in.Scope, Rationale: in.Rationale, ExpiresAt: expires, ReleaseNodeID: in.ReleaseNodeID, Target: in.Target}
+			if err := request.normalizeTarget(); err != nil {
+				return nil, "", err
+			}
+			return nil, "approval requested", b.api.RequestApproval(ctx, b.runID, request)
 		})
 	mcp.AddTool(s, &mcp.Tool{Name: "aeon_reply", Description: "Reply to a received inbox message as this run's agent."},
 		func(ctx context.Context, _ *mcp.CallToolRequest, in replyArgs) (*mcp.CallToolResult, string, error) {

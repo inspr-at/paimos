@@ -93,20 +93,33 @@ export function agentData(world: AgentWorld) {
 }
 export type AgentData = ReturnType<typeof agentData>
 
-export interface AgentMockOptions { sessionsMissing?: boolean; messagesMissing?: boolean; accountsForbidden?: boolean; failDecision?: boolean }
+export interface AgentMockOptions {
+  sessionsMissing?: boolean
+  messagesMissing?: boolean
+  accountsForbidden?: boolean
+  failDecision?: boolean
+  readMark?: { sessionId: string; event: number; id: string }
+  // The next N marker PUTs fail. The call is still recorded.
+  failReadMarks?: number
+}
 // Routes only the agents surfaces; everything else falls through to earlier routes
 // or the real server.
 export async function mockAgents(page: Page, data: AgentData, options: AgentMockOptions = {}) {
   const calls: { path: string; method: string; body: unknown; query?: URLSearchParams }[] = []
+  const readMarkers = new Map<string, { last_read_message_id: string; last_read_event_id: number; read_at: string }>()
+  if (options.readMark) {
+    readMarkers.set(options.readMark.sessionId, { last_read_message_id: options.readMark.id, last_read_event_id: options.readMark.event, read_at: '2026-09-29T05:00:00.000Z' })
+  }
   const handler = async (route: Route) => {
     const request = route.request(), url = new URL(request.url()), path = url.pathname, method = request.method()
     let body: unknown = null
     try { body = request.postDataJSON() } catch { body = null }
     const provenancePath = /^\/api\/projects\/([^/]+)\/harness-sessions\/([^/]+)\/provenance$/.exec(path)
+    const readMarkerPath = /^\/api\/projects\/([^/]+)\/harness-sessions\/([^/]+)\/read-marker$/.exec(path)
     const sessionsPath = /^\/api\/projects\/([^/]+)\/harness-sessions(?:\/([^/]+)(?:\/controls\/([^/]+))?)?$/.exec(path)
     const messagesPath = /^\/api\/projects\/([^/]+)\/(messages|message-targets)$/.exec(path)
     const resolutionPath = /^\/api\/projects\/([^/]+)\/messages\/([^/]+)\/resolution$/.exec(path)
-    const known = provenancePath || sessionsPath || messagesPath || resolutionPath || path === '/api/harness-sessions' || path === '/api/runs' || path === '/api/approvals' || path.startsWith('/api/approvals/') || path.startsWith('/api/agent-accounts') || path.startsWith('/api/runs/')
+    const known = provenancePath || readMarkerPath || sessionsPath || messagesPath || resolutionPath || path === '/api/harness-sessions' || path === '/api/runs' || path === '/api/approvals' || path.startsWith('/api/approvals/') || path.startsWith('/api/agent-accounts') || path.startsWith('/api/runs/')
     if (!known) return route.fallback()
     calls.push({ path, method, body, query: url.searchParams })
     const q = url.searchParams
@@ -130,6 +143,25 @@ export async function mockAgents(page: Page, data: AgentData, options: AgentMock
       const decision = (body as { decision: string }).decision
       found.human_resolution_outcome = decision
       return route.fulfill({ json: { message_id: found.id, decision, created_at: new Date().toISOString() } })
+    }
+    if (readMarkerPath) {
+      const sessionId = readMarkerPath[2]!
+      const current = readMarkers.get(sessionId) ?? null
+      if (method === 'PUT') {
+        const input = body as { last_read_message_id?: string; last_read_event_id?: number }
+        if (typeof input?.last_read_message_id !== 'string' || typeof input.last_read_event_id !== 'number') {
+          return route.fulfill({ status: 400, json: { error: 'invalid read marker' } })
+        }
+        if ((options.failReadMarks ?? 0) > 0) {
+          options.failReadMarks! -= 1
+          return route.fulfill({ status: 503, json: { error: 'unavailable' } })
+        }
+        if (!current || input.last_read_event_id > current.last_read_event_id) {
+          readMarkers.set(sessionId, { last_read_message_id: input.last_read_message_id, last_read_event_id: input.last_read_event_id, read_at: '2026-09-29T06:10:00.000Z' })
+        }
+      } else if (method !== 'GET') return route.fulfill({ status: 405, json: { error: 'method not allowed' } })
+      const stored = readMarkers.get(sessionId)
+      return route.fulfill({ json: { session_id: sessionId, last_read_message_id: stored?.last_read_message_id ?? null, last_read_event_id: stored?.last_read_event_id ?? null, read_at: stored?.read_at ?? null } })
     }
     if (provenancePath) {
       return route.fulfill({ json: { session_id: provenancePath[2], revisions: [], truncated: false } })

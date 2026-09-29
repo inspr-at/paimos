@@ -171,7 +171,7 @@ func etaInterval(ctx context.Context, tx pgx.Tx) (time.Duration, error) {
 	return time.Duration(mins) * time.Minute, nil
 }
 
-func stampSessions(ctx context.Context, tx pgx.Tx, sessions []*Session) error {
+func (m *Module) stampSessions(ctx context.Context, tx pgx.Tx, sessions []*Session) error {
 	if len(sessions) == 0 {
 		return nil
 	}
@@ -179,7 +179,12 @@ func stampSessions(ctx context.Context, tx pgx.Tx, sessions []*Session) error {
 	if err != nil {
 		return err
 	}
-	now := time.Now()
+	// eta_reported_at is clock_timestamp(). The same database clock decides
+	// staleness; the API host's time.Now() does not.
+	now, err := m.ownershipNow(ctx, tx)
+	if err != nil {
+		return err
+	}
 	for _, s := range sessions {
 		stampSessionEta(s, interval, now)
 	}
