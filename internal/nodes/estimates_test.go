@@ -165,18 +165,25 @@ func TestEstimateSortRollupAndRevision(t *testing.T) {
 	if len(page.Items) != 1 || page.Items[0].Estimate == nil || *page.Items[0].Estimate.Hours != 2.5 {
 		t.Fatalf("list rollup %s", body)
 	}
-	// A stale bulk-plan revision cannot overwrite a concurrent estimate.
+	// A stale agent revision cannot overwrite or claim a person's estimate.
+	agent := estimateAgent(t, p)
 	code, body = call(t, &p, "PATCH", "/api/nodes/"+a.ID, `{"fields":{"estimate_hours":3}}`)
-	decode[nodeJSON](t, code, body, 200)
+	personEstimate := decode[nodeJSON](t, code, body, 200)
 	mux := http.NewServeMux()
 	New(appPool, nil).Mount(mux)
 	r := httptest.NewRequest("PATCH", "/api/nodes/"+a.ID, strings.NewReader(`{"fields":{"estimate_hours":4}}`))
-	r = r.WithContext(tenant.WithPrincipal(r.Context(), p))
+	r = r.WithContext(tenant.WithPrincipal(r.Context(), agent))
 	r.Header.Set("If-Unmodified-Since", a.UpdatedAt.Format(time.RFC3339Nano))
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, r)
 	if w.Code != 412 {
 		t.Fatalf("stale estimate: %d %s", w.Code, w.Body.String())
+	}
+	code, body = call(t, &p, "GET", "/api/nodes/"+a.ID, "")
+	preserved := decode[nodeJSON](t, code, body, 200)
+	f := estimateFieldsOf(t, preserved)
+	if f["estimate_hours"] != float64(3) || f["estimate_source"] != "person" || f["estimate_by"] != p.ID || !preserved.UpdatedAt.Equal(personEstimate.UpdatedAt) {
+		t.Fatalf("stale agent write changed person estimate: %s", body)
 	}
 }
 

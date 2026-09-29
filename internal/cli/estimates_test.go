@@ -8,7 +8,66 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
+
+func TestIssueEstimateRejectsConcurrentPersonEstimate(t *testing.T) {
+	for _, args := range [][]string{
+		{"issue", "update", "AEON-1", "--priority", "low"},
+		{"issue", "update", "AEON-1", "--estimate", "3h"},
+		{"issue", "estimate", "AEON-1", "--hours", "3h", "--source", "agent"},
+	} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			isolate(t)
+			revision := time.Date(2026, 9, 29, 10, 0, 0, 123456000, time.UTC)
+			ticket := apiNode{ID: transcriptEntryID, Key: "AEON-1", KindID: "ticket-kind", UpdatedAt: revision,
+				Fields: json.RawMessage(`{"estimate_hours":2,"estimate_source":"agent","estimate_by":"draft-worker"}`)}
+			personFields := json.RawMessage(`{"estimate_hours":5,"estimate_source":"person","estimate_by":"person","estimate_confirmed":true}`)
+			writes, rejected := 0, false
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch {
+				case r.Method == http.MethodGet && r.URL.Path == "/api/kinds":
+					json.NewEncoder(w).Encode(kindPage{Items: []apiKind{{ID: "ticket-kind", Slug: "ticket"}}})
+				case r.Method == http.MethodGet && r.URL.Path == "/api/nodes":
+					json.NewEncoder(w).Encode(nodePage{Items: []apiNode{ticket}})
+					// A person changes the estimate after the CLI's read snapshot.
+					ticket.Fields = personFields
+					ticket.UpdatedAt = revision.Add(time.Microsecond)
+				case r.Method == http.MethodPatch && r.URL.Path == "/api/nodes/"+ticket.ID:
+					writes++
+					if got := r.Header.Get("If-Unmodified-Since"); got != revision.Format(time.RFC3339Nano) {
+						t.Errorf("revision = %q, want original read timestamp", got)
+					}
+					if header := r.Header.Get("If-Unmodified-Since"); header != "" && header != ticket.UpdatedAt.Format(time.RFC3339Nano) {
+						rejected = true
+						w.WriteHeader(http.StatusPreconditionFailed)
+						w.Write([]byte(`{"error":"node has changed"}`))
+						return
+					}
+					var patch struct {
+						Fields json.RawMessage `json:"fields"`
+					}
+					json.NewDecoder(r.Body).Decode(&patch)
+					ticket.Fields = patch.Fields
+					json.NewEncoder(w).Encode(ticket)
+				default:
+					t.Errorf("unexpected %s %s", r.Method, r.URL)
+					http.NotFound(w, r)
+				}
+			}))
+			defer srv.Close()
+			t.Setenv("AEON_URL", srv.URL)
+			t.Setenv("AEON_API_KEY", testKey)
+			code, out, stderr := runCLI(append([]string{"aeon", "--config", filepath.Join(t.TempDir(), "missing")}, args...), "")
+			if code != 1 || !strings.Contains(stderr, "api 412: node has changed") || out != "" {
+				t.Fatalf("stale write: exit %d, stdout %q, stderr %q", code, out, stderr)
+			}
+			if writes != 1 || !rejected || string(ticket.Fields) != string(personFields) {
+				t.Fatalf("person estimate was not preserved: writes=%d rejected=%v fields=%s", writes, rejected, ticket.Fields)
+			}
+		})
+	}
+}
 
 func TestParseEstimate(t *testing.T) {
 	for value, want := range map[string]float64{"2h": 2, "90m": 1.5, "1.5": 1.5, "30m": .5, ".5h": .5, " 200 ": 200, "12000m": 200} {
