@@ -100,7 +100,7 @@ async function sendRequest() {
       <label :for="`${uid}-steer`">What should change?</label>
       <textarea :id="`${uid}-steer`" v-model="draft" rows="3" maxlength="8192" :disabled="waiting" :aria-describedby="`${uid}-help`" placeholder="Describe the next step…" />
       <p :id="`${uid}-help`" class="hint">{{ session.harness === 'claude' ? 'Queues your message for the next turn and interrupts the current one.' : 'Adds your message to the running turn.' }}</p>
-      <div class="control-row"><button type="submit" class="btn sm" :disabled="!canSteer || waiting || !!unavailable">Send steer</button><button type="button" class="btn sm ghost" :disabled="waiting" @click="composing = false">Cancel</button></div>
+      <div class="control-row"><button type="submit" class="btn sm primary" :disabled="!canSteer || waiting || !!unavailable">Send steer</button><button type="button" class="btn sm ghost" :disabled="waiting" @click="composing = false">Cancel</button></div>
     </form>
     <div v-if="confirmStop" class="stop-confirm"><span>End this session?</span><button type="button" class="btn sm" @click="submit('stop')">Confirm stop</button><button type="button" class="btn sm ghost" @click="confirmStop = false">Cancel</button></div>
     <p v-if="feedback" class="feedback" role="status">{{ feedback }}</p>
