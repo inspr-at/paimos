@@ -53,9 +53,11 @@ type portalWish struct {
 }
 
 type portalDocument struct {
-	Product *portalProduct  `json:"product"`
-	Catalog []portalFeature `json:"catalog"`
-	Wishes  []portalWish    `json:"wishes"`
+	Product    *portalProduct        `json:"product"`
+	Catalog    []portalFeature       `json:"catalog"`
+	Wishes     []portalWish          `json:"wishes"`
+	Comparison []portalComparisonRow `json:"comparison,omitempty"`
+	Pace       *portalPace           `json:"pace,omitempty"`
 }
 
 type voteResult struct {
@@ -214,7 +216,16 @@ func loadPortal(ctx context.Context, tx pgx.Tx) (portalDocument, error) {
 		item.Votes = int(votes)
 		doc.Wishes = append(doc.Wishes, item)
 	}
-	return doc, rows.Err()
+	if err := rows.Err(); err != nil {
+		return doc, err
+	}
+	if err := attachMarket(ctx, tx, id, &doc); err != nil {
+		return doc, err
+	}
+	if err := attachPace(ctx, tx, id, &doc); err != nil {
+		return doc, err
+	}
+	return doc, nil
 }
 
 func catalogState(state string) bool {

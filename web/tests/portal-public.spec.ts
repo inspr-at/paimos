@@ -26,6 +26,15 @@ const portal = {
   wishes: [
     { key: 'PWS-1', title: 'Owner assembly on a phone', summary: 'Join without installing an app.', votes: 3 },
   ],
+  pace: { releases_30d: 4, median_release_gap_days: 21, wish_to_live_median_days: 18 },
+  comparison: [{
+    aspect: 'Statutory deadlines',
+    cells: [
+      { competitor: 'Northwind', stance: 'yes', quote: 'Every deadline is on the public help page.', source_url: 'https://northwind.example/deadlines', retrieved_on: '2026-09-19' },
+      { competitor: 'Linden', stance: 'no', quote: 'The brochure still describes a paper archive.', source_url: 'https://linden.example/archive', retrieved_on: '2026-01-01', stale: true },
+      { competitor: 'Alden', stance: 'unknown' },
+    ],
+  }],
 }
 
 async function install(page: Page, missing = false) {
@@ -39,7 +48,8 @@ async function install(page: Page, missing = false) {
     if (url.pathname.startsWith('/api/public/portal/')) {
       if (route.request().method() === 'POST') {
         posted.push({ method: route.request().method(), body: route.request().postData(), path: url.pathname })
-        const body = url.pathname.endsWith('/wishes') ? { accepted: true } : { votes: 4 }
+        const accepted = url.pathname.endsWith('/wishes') || url.pathname.endsWith('/corrections')
+        const body = accepted ? { accepted: true } : { votes: 4 }
         await route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify(body) })
         return
       }
@@ -77,8 +87,8 @@ for (const width of [1600, 390]) {
     await expect(page.getByRole('group', { name: 'Feature status' })).toHaveCount(0)
     await expect(page.getByRole('heading', { name: 'Deadline radar' })).toBeVisible()
     await expect(page.getByText('Live', { exact: true })).toBeVisible()
-    await expect(page.getByRole('img', { name: '260926120000.0.0' })).toBeVisible()
-    await expect(page.getByText('260926120000.0.0')).toHaveCount(0)
+    await expect(page.getByRole('img', { name: '260926120000.0.0' })).toHaveCount(0)
+    await expect(page.getByTitle('260926120000.0.0')).toHaveText(/since 26 Sept? 2026/)
     await expect(page.getByText('§ 20 WEG')).toBeVisible()
     await expect(page.getByText('Declined', { exact: true })).toBeVisible()
     await expect(page.getByText('The record is already digital.')).toBeVisible()
@@ -90,8 +100,23 @@ for (const width of [1600, 390]) {
     expect(posted[0]).toMatchObject({ method: 'POST', body: '{}', path: '/api/public/portal/harbour/wishes/PWS-1/votes' })
     await expect(page.getByText('4 votes')).toBeVisible()
     await expect(page.getByRole('button', { name: 'Voted for Owner assembly on a phone' })).toBeDisabled()
+    await expect(page.getByRole('heading', { name: 'Pace' })).toBeVisible()
+    await expect(page.getByText('releases in 30 days')).toBeVisible()
+    await expect(page.getByRole('link', { name: /Every deadline is on the public help page/ })).toHaveAttribute('href', 'https://northwind.example/deadlines')
+    await expect(page.getByRole('link', { name: /Every deadline is on the public help page/ })).toHaveAttribute('rel', 'noopener noreferrer nofollow')
+    await expect(page.getByRole('link', { name: /The brochure still describes a paper archive/ })).toHaveAttribute('rel', 'noopener noreferrer nofollow')
+    await expect(page.getByText('Stale')).toBeVisible()
+    await expect(page.locator('[aria-label="Not sourced"]')).toBeVisible()
+    await expect(page.getByText('Unknown')).toHaveCount(0)
     await expectFits(page)
-    await capture(page, `public-catalog-${width}.png`)
+    await page.emulateMedia({ colorScheme: 'light' })
+    await capture(page, `public-catalog-${width}-light.png`)
+    await page.getByRole('link', { name: /Every deadline is on the public help page/ }).scrollIntoViewIfNeeded()
+    await capture(page, `public-comparison-${width}-light.png`)
+    await page.emulateMedia({ colorScheme: 'dark' })
+    await capture(page, `public-comparison-${width}-dark.png`)
+    await page.getByRole('heading', { name: 'Pace' }).scrollIntoViewIfNeeded()
+    await capture(page, `public-catalog-${width}-dark.png`)
   })
 }
 
@@ -144,6 +169,30 @@ test('status chips appear only past six features, and a wish is title and summar
   expect(posted).toHaveLength(1)
   expect(JSON.parse(posted[0].body ?? '')).toEqual({ title: 'A morning bell', summary: 'Ring once, before the office opens.', website: '' })
   expect(posted[0].path).toBe('/api/public/portal/harbour/wishes')
+})
+
+test('a correction sends the statement and no name', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  const posted = await install(page)
+  await page.goto('/portal/harbour')
+  await page.getByLabel('Competitor').fill('Northwind')
+  await page.getByLabel('Aspect').fill('Statutory deadlines')
+  await page.getByLabel('Statement').fill('The page quotes the wrong paragraph.')
+  await page.getByLabel('Source page').fill('https://northwind.example/correction')
+  await page.getByRole('button', { name: 'Send correction' }).click()
+  await expect(page.getByRole('status')).toHaveText('Sent.')
+  await expect(page.getByLabel('Email')).toHaveCount(0)
+  await expect(page.getByLabel('Name')).toHaveCount(0)
+  expect(posted).toHaveLength(1)
+  expect(posted[0].path).toBe('/api/public/portal/harbour/corrections')
+  expect(JSON.parse(posted[0].body ?? '')).toEqual({
+    competitor: 'Northwind',
+    aspect: 'Statutory deadlines',
+    statement: 'The page quotes the wrong paragraph.',
+    source_url: 'https://northwind.example/correction',
+    website: '',
+  })
+  await expectFits(page)
 })
 
 test('a closed portal reads as unavailable', async ({ page }) => {

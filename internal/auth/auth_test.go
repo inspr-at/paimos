@@ -84,6 +84,7 @@ func TestOnlyPublicQuoteCapabilityPathsBypassAuthentication(t *testing.T) {
 		{http.MethodHead, "/api/public/portal/harbour"},
 		{http.MethodPost, "/api/public/portal/harbour/wishes"},
 		{http.MethodPost, "/api/public/portal/harbour/wishes/PWS-1/votes"},
+		{http.MethodPost, "/api/public/portal/harbour/corrections"},
 	} {
 		rec := httptest.NewRecorder()
 		req := httptest.NewRequest(route.method, route.path, nil)
@@ -92,6 +93,8 @@ func TestOnlyPublicQuoteCapabilityPathsBypassAuthentication(t *testing.T) {
 			req.Pattern = portalCatalogPattern
 		case route.method == http.MethodPost && strings.HasSuffix(route.path, "/wishes"):
 			req.Pattern = portalWishPattern
+		case route.method == http.MethodPost && strings.HasSuffix(route.path, "/corrections"):
+			req.Pattern = portalCorrectionPattern
 		case route.method == http.MethodPost:
 			req.Pattern = portalVotePattern
 		}
@@ -143,6 +146,15 @@ func TestOnlyPublicQuoteCapabilityPathsBypassAuthentication(t *testing.T) {
 		{http.MethodPost, "/api/public/portal/harbour%2fwishes%2fPWS-1%2fvotes"},
 		{http.MethodGet, "/api/public/portal/Harbour"},
 		{http.MethodPost, "/api/public/portal/harbour/wishes/pws-1/votes"},
+		{http.MethodGet, "/api/public/portal/harbour/corrections"},
+		{http.MethodHead, "/api/public/portal/harbour/corrections"},
+		{http.MethodPut, "/api/public/portal/harbour/corrections"},
+		{http.MethodPatch, "/api/public/portal/harbour/corrections"},
+		{http.MethodDelete, "/api/public/portal/harbour/corrections"},
+		{http.MethodPost, "/api/public/portal/harbour/corrections/"},
+		{http.MethodPost, "/api/public/portal/harbour/corrections/extra"},
+		{http.MethodPost, "/api/public/portal/Harbour/corrections"},
+		{http.MethodPost, "/api/public/portal/harbour/corrections/../corrections"},
 	} {
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, httptest.NewRequest(route.method, route.path, nil))
@@ -156,6 +168,13 @@ func TestOnlyPublicQuoteCapabilityPathsBypassAuthentication(t *testing.T) {
 	handler.ServeHTTP(rec, matched)
 	if rec.Code != http.StatusUnauthorized {
 		t.Errorf("portal path with a foreign pattern: %d", rec.Code)
+	}
+	correction := httptest.NewRequest(http.MethodPost, "/api/public/portal/harbour/corrections", nil)
+	correction.Pattern = portalCatalogPattern
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, correction)
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("correction path with the catalog pattern: %d", rec.Code)
 	}
 }
 

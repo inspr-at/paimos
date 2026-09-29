@@ -5,6 +5,8 @@ import { APIError, api, createNode, getKinds, listNodes, type Kind, type ListIte
 import { calendarVersion, validVersion } from '../../lib/rules'
 import AppIcon from '../AppIcon.vue'
 import CalendarVersion from '../CalendarVersion.vue'
+import PortalMarket from './PortalMarket.vue'
+import PortalPace from './PortalPace.vue'
 import SettingsCard from './SettingsCard.vue'
 
 const FEATURE_STATUSES = [
@@ -430,6 +432,9 @@ async function setWish(node: ListItem, state: 'published' | 'hidden' | 'rejected
         </li>
       </ul>
     </SettingsCard>
+
+    <PortalPace v-if="product && ready" :features="features" :wishes="wishes" />
+    <PortalMarket v-if="product && ready" />
   </div>
 </template>
 

@@ -4401,8 +4401,8 @@ paths:
   /public/portal/{tenantSlug}:
     get:
       operationId: readPublicPortal
-      summary: Read one tenant's published product catalog and wishes
-      description: Anonymous. A disabled portal and an unknown tenant both answer 404. The document is a whitelist of public fields; internal notes, ticket keys and voter identity are omitted. At most one published product is returned.
+      summary: Read one tenant's published product catalog, wishes, sourced comparison and pace
+      description: Anonymous. A disabled portal and an unknown tenant both answer 404. The document is a whitelist of public fields; internal notes, ticket keys, voter identity, project names and wish titles that are not published are omitted. comparison and pace are absent when there is nothing public to say. A pace figure from fewer than five releases or five fulfilled wishes is omitted. An unapproved or unsourced comparison cell is stance unknown and carries no quote or source. At most one published product is returned.
       security: []
       parameters: [{name: tenantSlug, in: path, required: true, schema: {type: string, pattern: '^[a-z][a-z0-9-]{0,62}$'}}]
       responses:
@@ -4440,6 +4440,179 @@ paths:
         '403': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
         '429': {$ref: '#/components/responses/Error'}
+  /public/portal/{tenantSlug}/corrections:
+    post:
+      operationId: submitPublicPortalCorrection
+      summary: Send an anonymous factual correction
+      description: Competitor, aspect, statement and source only. No name and no email. Any of those fields is refused when it contains an address, including a percent-encoded or HTML-entity form, decoded before the check. The website field is a honeypot; a non-empty value is discarded and still answers 201. A competitor that is not on the public comparison is discarded the same way. Five corrections per address per minute, counted before the tenant is resolved, so an unknown address and a closed portal share one window. A disabled portal, unknown tenant or portal without a published product is 404. The correction stays off the public page; a person with settings.manage closes it.
+      security: []
+      parameters: [{name: tenantSlug, in: path, required: true, schema: {type: string, pattern: '^[a-z][a-z0-9-]{0,62}$'}}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/PortalCorrectionIntake'}}}}
+      responses:
+        '201': {description: Accepted, or discarded without a stored row, content: {application/json: {schema: {$ref: '#/components/schemas/PortalWishAccepted'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '429': {$ref: '#/components/responses/Error'}
+  /portal/market:
+    get:
+      operationId: readPortalMarket
+      summary: Read the comparison, its history and pending corrections
+      description: settings.manage, people only. Agents are refused. History and corrections are admin-only. Quotes stay off the public page until a cell is approved.
+      security: [{session: []}]
+      responses:
+        '200': {description: Comparison for the current product, content: {application/json: {schema: {$ref: '#/components/schemas/PortalMarket'}}}}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+  /portal/competitors:
+    post:
+      operationId: createPortalCompetitor
+      summary: Add a competitor that stays off the public page until it is published
+      security: [{session: []}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/PortalCompetitorWrite'}}}}
+      responses:
+        '200': {description: Stored competitor, content: {application/json: {schema: {$ref: '#/components/schemas/PortalCompetitor'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /portal/competitors/{competitorId}:
+    patch:
+      operationId: patchPortalCompetitor
+      summary: Rename a competitor or publish it on the comparison
+      security: [{session: []}]
+      parameters: [{name: competitorId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/PortalCompetitorPatch'}}}}
+      responses:
+        '200': {description: Stored competitor, content: {application/json: {schema: {$ref: '#/components/schemas/PortalCompetitor'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+    delete:
+      operationId: deletePortalCompetitor
+      summary: Remove a competitor and its cells
+      security: [{session: []}]
+      parameters: [{name: competitorId, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses:
+        '200': {description: Removed, content: {application/json: {schema: {$ref: '#/components/schemas/PortalDeleted'}}}}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+  /portal/aspects:
+    post:
+      operationId: createPortalAspect
+      summary: Add a row to the comparison
+      security: [{session: []}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/PortalAspectWrite'}}}}
+      responses:
+        '200': {description: Stored row, content: {application/json: {schema: {$ref: '#/components/schemas/PortalAspect'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /portal/aspects/{aspectId}:
+    patch:
+      operationId: patchPortalAspect
+      summary: Rename a comparison row
+      security: [{session: []}]
+      parameters: [{name: aspectId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/PortalAspectWrite'}}}}
+      responses:
+        '200': {description: Stored row, content: {application/json: {schema: {$ref: '#/components/schemas/PortalAspect'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+    delete:
+      operationId: deletePortalAspect
+      summary: Remove a comparison row and its cells
+      security: [{session: []}]
+      parameters: [{name: aspectId, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses:
+        '200': {description: Removed, content: {application/json: {schema: {$ref: '#/components/schemas/PortalDeleted'}}}}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+  /portal/cells:
+    put:
+      operationId: putPortalCell
+      summary: Save one comparison cell and clear its approval when the fact changes
+      description: settings.manage, people only. yes, no and partial need a short quote, an https page and the day it was read. An unchanged cell does not add a revision.
+      security: [{session: []}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/PortalCellWrite'}}}}
+      responses:
+        '200': {description: Stored cell, content: {application/json: {schema: {$ref: '#/components/schemas/PortalCell'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /portal/cells/{cellId}/approve:
+    post:
+      operationId: approvePortalCell
+      summary: Approve a sourced cell for the public comparison
+      description: settings.manage, people only. An empty JSON object is the whole body. Approving again is unchanged. A yes, no or partial cell without a quote, https page and read date is refused.
+      security: [{session: []}]
+      parameters: [{name: cellId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody: {required: false, content: {application/json: {schema: {type: object, additionalProperties: false}}}}
+      responses:
+        '200': {description: Approved cell, content: {application/json: {schema: {$ref: '#/components/schemas/PortalCell'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+  /portal/corrections/{correctionId}/close:
+    post:
+      operationId: closePortalCorrection
+      summary: Close a pending factual correction
+      description: settings.manage, people only. Closing does not change the comparison cell.
+      security: [{session: []}]
+      parameters: [{name: correctionId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody: {required: false, content: {application/json: {schema: {type: object, additionalProperties: false}}}}
+      responses:
+        '200': {description: Closed, content: {application/json: {schema: {$ref: '#/components/schemas/PortalClosed'}}}}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+  /portal/pace:
+    get:
+      operationId: readPortalPace
+      summary: Read the linked project and the aggregated pace figures
+      description: settings.manage, people only. The project title is admin-only. This read returns the exact counts and medians, including a sample smaller than five. The public document omits those small figures.
+      security: [{session: []}]
+      responses:
+        '200': {description: Pace for this portal, content: {application/json: {schema: {$ref: '#/components/schemas/PortalPace'}}}}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+    put:
+      operationId: writePortalPace
+      summary: Link one project whose release dates become the public count, or clear it
+      security: [{session: []}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/PortalPaceWrite'}}}}
+      responses:
+        '200': {description: Pace after the link, content: {application/json: {schema: {$ref: '#/components/schemas/PortalPace'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+  /portal/wishes/{wishId}/fulfillment:
+    put:
+      operationId: writePortalFulfillment
+      summary: Link a published or hidden wish to the live feature that fulfilled it, or clear the link
+      description: settings.manage, people only. The wish must have been opened before the feature went live. The public figure is a median of days once five wishes are fulfilled, never the wish title.
+      security: [{session: []}]
+      parameters: [{name: wishId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/PortalFulfillmentWrite'}}}}
+      responses:
+        '200': {description: Pace after the link, content: {application/json: {schema: {$ref: '#/components/schemas/PortalPace'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
   /quotes/readiness:
     get:
       operationId: quoteConfirmationReadiness
@@ -6541,6 +6714,11 @@ components:
         product: {oneOf: [{type: 'null'}, {$ref: '#/components/schemas/PortalProduct'}]}
         catalog: {type: array, items: {$ref: '#/components/schemas/PortalFeature'}}
         wishes: {type: array, items: {$ref: '#/components/schemas/PortalWish'}}
+        comparison:
+          type: array
+          description: Present only when at least one competitor is published and at least one row exists
+          items: {$ref: '#/components/schemas/PortalPublicComparison'}
+        pace: {$ref: '#/components/schemas/PortalPublicPace'}
     PortalVote:
       type: object
       additionalProperties: false
@@ -6561,6 +6739,176 @@ components:
       required: [accepted]
       properties:
         accepted: {const: true}
+    PortalPublicComparison:
+      type: object
+      additionalProperties: false
+      required: [aspect, cells]
+      properties:
+        aspect: {type: string}
+        cells: {type: array, items: {$ref: '#/components/schemas/PortalPublicCell'}}
+    PortalPublicCell:
+      type: object
+      additionalProperties: false
+      required: [competitor, stance]
+      properties:
+        competitor: {type: string}
+        stance: {type: string, enum: ['yes', 'no', partial, unknown]}
+        quote: {type: string, description: Omitted unless the cell is approved and sourced}
+        source_url: {type: string, format: uri}
+        retrieved_on: {type: string, format: date}
+        stale: {type: boolean, description: True only when the source is older than 180 days}
+    PortalPublicPace:
+      type: object
+      additionalProperties: false
+      description: Counts and medians only. releases_30d needs five releases in the trailing 30 days, the gap needs five releases, and the wish median needs five fulfilled wishes. A smaller sample is omitted, including a count of zero. The object is omitted when every figure is absent. The admin pace read still returns the exact figures.
+      properties:
+        releases_30d: {type: integer, minimum: 0}
+        median_release_gap_days: {type: integer, minimum: 0}
+        wish_to_live_median_days: {type: integer, minimum: 0}
+    PortalCompetitor:
+      type: object
+      additionalProperties: false
+      required: [id, name, published]
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string}
+        published: {type: boolean}
+    PortalCompetitorWrite:
+      type: object
+      additionalProperties: false
+      required: [name]
+      properties:
+        name: {type: string, minLength: 1, maxLength: 80}
+    PortalCompetitorPatch:
+      type: object
+      additionalProperties: false
+      properties:
+        name: {type: string, minLength: 1, maxLength: 80}
+        published: {type: boolean}
+    PortalAspect:
+      type: object
+      additionalProperties: false
+      required: [id, label]
+      properties:
+        id: {type: string, format: uuid}
+        label: {type: string}
+    PortalAspectWrite:
+      type: object
+      additionalProperties: false
+      required: [label]
+      properties:
+        label: {type: string, minLength: 1, maxLength: 120}
+    PortalCell:
+      type: object
+      additionalProperties: false
+      required: [id, aspect_id, competitor_id, stance, approved, stale, recheck]
+      properties:
+        id: {type: string, format: uuid}
+        aspect_id: {type: string, format: uuid}
+        competitor_id: {type: string, format: uuid}
+        stance: {type: string, enum: [unknown, 'yes', 'no', partial]}
+        quote: {type: string}
+        source_url: {type: string}
+        retrieved_on: {type: string, format: date}
+        approved: {type: boolean}
+        stale: {type: boolean}
+        recheck: {type: boolean, description: True when the source is 90 days old or older. Admin only.}
+    PortalCellWrite:
+      type: object
+      additionalProperties: false
+      required: [aspect_id, competitor_id, stance]
+      properties:
+        aspect_id: {type: string, format: uuid}
+        competitor_id: {type: string, format: uuid}
+        stance: {type: string, enum: [unknown, 'yes', 'no', partial]}
+        quote: {type: string, maxLength: 400}
+        source_url: {type: string, maxLength: 500}
+        retrieved_on: {type: string, format: date}
+    PortalCellRevision:
+      type: object
+      additionalProperties: false
+      required: [cell_id, stance, approved, at]
+      properties:
+        cell_id: {type: string, format: uuid}
+        stance: {type: string, enum: [unknown, 'yes', 'no', partial]}
+        quote: {type: string}
+        source_url: {type: string}
+        retrieved_on: {type: string, format: date}
+        approved: {type: boolean}
+        at: {type: string, format: date-time}
+    PortalCorrection:
+      type: object
+      additionalProperties: false
+      required: [id, competitor, aspect, statement, at]
+      properties:
+        id: {type: string, format: uuid}
+        competitor: {type: string}
+        aspect: {type: string}
+        statement: {type: string}
+        source_url: {type: string}
+        at: {type: string, format: date-time}
+    PortalMarket:
+      type: object
+      additionalProperties: false
+      required: [competitors, aspects, cells, history, corrections]
+      properties:
+        competitors: {type: array, items: {$ref: '#/components/schemas/PortalCompetitor'}}
+        aspects: {type: array, items: {$ref: '#/components/schemas/PortalAspect'}}
+        cells: {type: array, items: {$ref: '#/components/schemas/PortalCell'}}
+        history: {type: array, items: {$ref: '#/components/schemas/PortalCellRevision'}}
+        corrections: {type: array, items: {$ref: '#/components/schemas/PortalCorrection'}}
+    PortalCorrectionIntake:
+      type: object
+      additionalProperties: false
+      required: [competitor, aspect, statement]
+      properties:
+        competitor: {type: string, minLength: 1, maxLength: 80}
+        aspect: {type: string, minLength: 1, maxLength: 120}
+        statement: {type: string, minLength: 8, maxLength: 2000}
+        source_url: {type: string, maxLength: 500}
+        website: {type: string, maxLength: 500, description: Honeypot. Leave empty. A value discards the correction.}
+    PortalDeleted:
+      type: object
+      additionalProperties: false
+      required: [deleted]
+      properties:
+        deleted: {const: true}
+    PortalClosed:
+      type: object
+      additionalProperties: false
+      required: [closed]
+      properties:
+        closed: {const: true}
+    PortalFulfillment:
+      type: object
+      additionalProperties: false
+      required: [wish_id, feature_id]
+      properties:
+        wish_id: {type: string, format: uuid}
+        feature_id: {type: string, format: uuid}
+    PortalPace:
+      type: object
+      additionalProperties: false
+      required: [fulfillments]
+      properties:
+        project_id: {type: string, format: uuid}
+        project_title: {type: string, description: Admin only. Never copied onto the public document.}
+        releases_30d: {type: integer, minimum: 0}
+        median_release_gap_days: {type: integer, minimum: 0}
+        wish_to_live_median_days: {type: integer, minimum: 0}
+        fulfillments: {type: array, items: {$ref: '#/components/schemas/PortalFulfillment'}}
+    PortalPaceWrite:
+      type: object
+      additionalProperties: false
+      required: [project_id]
+      properties:
+        project_id: {oneOf: [{type: string, format: uuid}, {type: 'null'}]}
+    PortalFulfillmentWrite:
+      type: object
+      additionalProperties: false
+      required: [feature_id]
+      properties:
+        feature_id: {oneOf: [{type: string, format: uuid}, {type: 'null'}]}
     QuoteConfirmationJob:
       type: object
       required: [quote_node_id, version, state, attempts, next_attempt_at, updated_at]
