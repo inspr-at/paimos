@@ -29,6 +29,7 @@ type Command struct {
 	Args          []string
 	Input         []byte
 	Env           []string
+	Dir           string
 	StatusStderr  bool
 	OutputLimit   int
 }
@@ -36,7 +37,11 @@ type Executor interface {
 	Run(context.Context, Command) ([]byte, error)
 }
 type OSExecutor struct{}
-type CommandError struct{ ExitCode int }
+type CommandError struct {
+	ExitCode int
+	stderr   string
+	command  string
+}
 
 func (e *CommandError) Error() string { return "local command unavailable" }
 
@@ -64,6 +69,16 @@ func (OSExecutor) Run(ctx context.Context, c Command) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, c.Path, c.Args...)
 	cmd.Stdin = bytes.NewReader(c.Input)
 	cmd.Env = c.Env
+	if c.Dir != "" {
+		if !filepath.IsAbs(c.Dir) {
+			return nil, errors.New("command directory must be absolute")
+		}
+		info, err := os.Stat(c.Dir)
+		if err != nil || !info.IsDir() {
+			return nil, errors.New("command directory unavailable")
+		}
+		cmd.Dir = c.Dir
+	}
 	limit := c.OutputLimit
 	if limit < 0 || limit > 256<<10 {
 		return nil, errors.New("invalid output bound")
@@ -73,15 +88,16 @@ func (OSExecutor) Run(ctx context.Context, c Command) ([]byte, error) {
 	if c.DiscardOutput {
 		cmd.Stdout = io.Discard
 	}
-	cmd.Stderr = io.Discard
 	stderr := &boundedBuffer{}
+	snippet := &truncBuffer{max: 512}
+	cmd.Stderr = snippet
 	if c.StatusStderr {
-		cmd.Stderr = stderr
+		cmd.Stderr = io.MultiWriter(stderr, snippet)
 	}
 	if err := cmd.Run(); err != nil {
 		var exit *exec.ExitError
 		if errors.As(err, &exit) {
-			return nil, &CommandError{ExitCode: exit.ExitCode()}
+			return nil, &CommandError{ExitCode: exit.ExitCode(), stderr: capturedProbeLine(snippet.buf.Bytes(), snippet.truncated), command: probeCommandName(c.Path)}
 		}
 		return nil, errors.New("local command unavailable")
 	}
@@ -206,19 +222,23 @@ func (d Discovery) Detect(ctx context.Context, harness, accountContext string) (
 	}
 	c.Path = physical
 	c.Managed = strings.HasPrefix(physical, "/nix/store/") || strings.Contains(path, "/.nix-profile/")
+	probeDir, err := d.probeDirectory()
+	if err != nil {
+		return c, err
+	}
 	c.Node, err = d.ResolveNode(ctx, physical)
 	if err != nil {
 		return c, err
 	}
 	childEnv := harnesslaunch.Environment(os.Environ(), c.Node.Path)
-	versionCommand := Command{Path: physical, Args: []string{"--version"}, Env: childEnv}
+	versionCommand := Command{Path: physical, Args: []string{"--version"}, Env: childEnv, Dir: probeDir}
 	if harness == "pi" {
 		c.PiNode, c.Node = c.Node, harnesslaunch.Node{}
 		versionCommand.Env = piprobe.Environment(c.Home, c.PiNode.Path)
 	}
 	raw, err := d.Executor.Run(ctx, versionCommand)
 	if err != nil {
-		return c, fmt.Errorf("%w; the launcher must also work with the service PATH", harnesslaunch.ErrStart)
+		return c, annotateProbe(fmt.Errorf("%w; the launcher must also work with the service PATH", harnesslaunch.ErrStart), err, d.Home, d.Workspace)
 	}
 	match := safeVersion.FindSubmatch(raw)
 	if len(match) != 2 {
@@ -246,11 +266,11 @@ func (d Discovery) Detect(ctx context.Context, harness, accountContext string) (
 		c.Provider = provider
 		return c, nil
 	}
-	raw, err = d.Executor.Run(ctx, Command{Path: physical, Args: authArgs, Env: childEnv, StatusStderr: harness == "codex"})
+	raw, err = d.Executor.Run(ctx, Command{Path: physical, Args: authArgs, Env: childEnv, Dir: probeDir, StatusStderr: harness == "codex"})
 	if err != nil {
 		var exit *CommandError
 		if errors.As(err, &exit) && (exit.ExitCode == 126 || exit.ExitCode == 127) {
-			return c, harnesslaunch.ErrStart
+			return c, annotateProbe(harnesslaunch.ErrStart, err, d.Home, d.Workspace)
 		}
 		return c, errors.New("vendor sign-in unavailable; use the vendor's normal login, then resume setup")
 	}
@@ -262,7 +282,7 @@ func (d Discovery) Detect(ctx context.Context, harness, accountContext string) (
 		inspect := d.CodexIdentity
 		if inspect == nil {
 			inspect = func(ctx context.Context, path, home string) (string, error) {
-				return codexIdentity(ctx, path, home, c.Node.Path)
+				return codexIdentity(ctx, path, home, c.Node.Path, probeDir)
 			}
 		}
 		identity, err := inspect(ctx, physical, c.Home)
@@ -331,10 +351,10 @@ func (d Discovery) ResolveNode(ctx context.Context, path string) (harnesslaunch.
 	if err != nil || filepath.Base(physical) != "node" {
 		return harnesslaunch.Node{}, action
 	}
-	raw, err := d.Executor.Run(ctx, Command{Path: physical, Args: []string{"--version"}, Env: harnesslaunch.Environment(nil, physical)})
+	raw, err := d.Executor.Run(ctx, Command{Path: physical, Args: []string{"--version"}, Env: harnesslaunch.Environment(nil, physical), Dir: commandDir(d.Workspace, d.Home)})
 	match := safeVersion.FindSubmatch(raw)
 	if err != nil || len(match) != 2 {
-		return harnesslaunch.Node{}, action
+		return harnesslaunch.Node{}, annotateProbe(action, err, d.Home, d.Workspace)
 	}
 	return harnesslaunch.Node{Path: physical, Version: string(match[1])}, nil
 }

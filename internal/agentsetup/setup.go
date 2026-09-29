@@ -730,7 +730,7 @@ func ValidateHarnessRuntimeDependencies(c RuntimeConfig) error {
 			return err
 		}
 		if node.Path != "" {
-			raw, err := (OSExecutor{}).Run(context.Background(), Command{Path: node.Path, Args: []string{"--version"}, Env: harnesslaunch.Environment(nil, node.Path)})
+			raw, err := (OSExecutor{}).Run(context.Background(), Command{Path: node.Path, Args: []string{"--version"}, Env: harnesslaunch.Environment(nil, node.Path), Dir: commandDir(c.Workspace, userHome())})
 			match := safeVersion.FindSubmatch(raw)
 			if err != nil || len(match) != 2 || string(match[1]) != node.Version {
 				return piprobe.ErrStart
