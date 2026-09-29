@@ -84,6 +84,12 @@ func TestParseComparisonRejectsProseAndCountDrift(t *testing.T) {
 	dup["merged"] = map[string]any{"version": "260929120000.0.0", "sha256": cmpDigest, "rule_count": 1}
 	dup["local"] = map[string]any{"set_sha256": cmpDigest, "rule_count": 1}
 	rejectedComparison(t, jsonBytes(dup))
+
+	omitted := comparisonBody("10000000-0000-4000-8000-000000000002", "claude-code", "fixture")
+	omitted["gaps"] = []any{"imports_not_followed", "parents_above_repository_not_read"}
+	mustComparison(t, jsonBytes(omitted))
+	omitted["gaps"] = []any{"/tmp/secret"}
+	rejectedComparison(t, jsonBytes(omitted))
 }
 
 func TestComparisonsStoreHashesAndRefuseMutation(t *testing.T) {
@@ -231,5 +237,18 @@ func TestComparisonsStoreHashesAndRefuseMutation(t *testing.T) {
 	}
 	if events != 0 {
 		t.Fatal("comparison wrote a rules event")
+	}
+	withGap := comparisonBody(projectA, "claude-code", "gaps")
+	withGap["gaps"] = []any{"imports_not_followed"}
+	var gapView comparisonView
+	if err = json.Unmarshal(call(admin, "POST", "/api/rules/comparisons", withGap, 200), &gapView); err != nil {
+		t.Fatal(err)
+	}
+	if len(gapView.Gaps) != 1 || gapView.Gaps[0] != "imports_not_followed" || strings.Contains(string(jsonBytes(gapView)), comparisonProse) {
+		t.Fatalf("%+v", gapView.Gaps)
+	}
+	listedGap := call(admin, "GET", "/api/rules/comparisons?project_id="+projectA, nil, 200)
+	if !strings.Contains(string(listedGap), "imports_not_followed") || strings.Contains(string(listedGap), comparisonProse) {
+		t.Fatal("stored comparison dropped the omission warning")
 	}
 }

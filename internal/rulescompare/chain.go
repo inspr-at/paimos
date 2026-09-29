@@ -38,9 +38,10 @@ type ChainFile struct {
 }
 
 // LoadChain reads the allowlisted instruction chain for harness (claude-code
-// or codex). It does not list directories, follow imports, or read above the
-// git root. Home and repo are explicit; this function does not look up the
-// operator's home directory.
+// or codex). It does not list directories or read above the git root. Claude
+// @path imports are expanded inside the given repo or home root, with a depth,
+// count and byte bound. Home and repo are explicit; this function does not
+// look up the operator's home directory.
 func LoadChain(harness, home, repo string) (Chain, error) {
 	if harness != "claude-code" && harness != "codex" {
 		return Chain{}, fmt.Errorf("harness must be claude-code or codex")
@@ -67,7 +68,7 @@ func LoadChain(harness, home, repo string) (Chain, error) {
 	if logicalRoot == "" {
 		logicalRoot = abs
 	}
-	b := &builder{harness: harness, repo: logicalRoot}
+	b := &builder{harness: harness, repo: logicalRoot, home: home, seen: map[string]bool{}}
 	if harness == "claude-code" {
 		err = b.claude(home, dirs, abs)
 	} else {
@@ -87,15 +88,24 @@ func LoadChain(harness, home, repo string) (Chain, error) {
 }
 
 type builder struct {
-	harness string
-	repo    string
-	files   []ChainFile
-	used    int
-	capped  bool
+	harness       string
+	repo          string
+	home          string
+	files         []ChainFile
+	used          int
+	capped        bool
+	omittedImport bool
+	seen          map[string]bool
+	importCount   int
+	importBytes   int
 }
 
 func (b *builder) gaps() []string {
-	gaps := []string{"managed_policy_not_read", "imports_not_followed", "parents_above_repository_not_read"}
+	gaps := []string{"managed_policy_not_read"}
+	if b.omittedImport {
+		gaps = append(gaps, "imports_not_followed")
+	}
+	gaps = append(gaps, "parents_above_repository_not_read")
 	if b.harness == "codex" {
 		gaps = append(gaps, "codex_fallback_filenames_not_applied")
 		if b.capped {
@@ -216,6 +226,12 @@ func (b *builder) take(path, logical string, skipEmpty bool) (bool, error) {
 	}
 	if !b.add(logical, text, sum, size) {
 		return false, nil
+	}
+	if abs, err := filepath.Abs(path); err == nil {
+		b.seen[filepath.Clean(abs)] = true
+	}
+	if b.harness == "claude-code" {
+		b.expandImports(path, text, 1)
 	}
 	return true, nil
 }

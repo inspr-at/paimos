@@ -140,6 +140,47 @@ func TestRulesCompareLiveReportsHashesOnly(t *testing.T) {
 	}
 }
 
+func TestRulesCompareUploadsOmittedImport(t *testing.T) {
+	isolate(t)
+	base := t.TempDir()
+	home := t.TempDir()
+	repo := filepath.Join(base, "fixture")
+	if err := os.MkdirAll(repo, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(repo, ".git"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(base, "outside.md"), []byte("SYNTHETIC_OUTSIDE_251"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	body := "# Synthetic\n\n## Safety\n\n<!-- aeon-rule: safety -->\n- " + compareProse + "\n  Why: published\n"
+	if err := os.WriteFile(filepath.Join(repo, "AGENTS.md"), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "CLAUDE.md"), []byte("@AGENTS.md\n@../outside.md\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var posts []string
+	srv := compareServer(t, "person", http.StatusOK, &posts)
+	defer srv.Close()
+	t.Setenv("PAIMOS_URL", srv.URL)
+	t.Setenv("PAIMOS_API_KEY", testKey)
+	code, out, stderr := runCLI([]string{"paimos", "--config", filepath.Join(t.TempDir(), "missing"), "--json", "rules", "compare", "--harness", "claude", "--repo", repo, "--project", compareProject, "--role", "builder", "--home", home, "--upload"}, "")
+	if code != 0 {
+		t.Fatal(stderr)
+	}
+	if strings.Contains(out, compareProse) || strings.Contains(out, "SYNTHETIC_OUTSIDE_251") || strings.Contains(out, repo) || strings.Contains(out, home) {
+		t.Fatal("report leaked instruction text or a path")
+	}
+	if !strings.Contains(out, "imports_not_followed") || !strings.Contains(out, `"status":"both"`) {
+		t.Fatal(out)
+	}
+	if len(posts) != 1 || !strings.Contains(posts[0], "imports_not_followed") || strings.Contains(posts[0], compareProse) || strings.Contains(posts[0], "SYNTHETIC_OUTSIDE_251") || strings.Contains(posts[0], repo) {
+		t.Fatalf("upload %v", posts)
+	}
+}
+
 func TestRulesCompareLiveRefusesBeforeReadAndUpload(t *testing.T) {
 	isolate(t)
 	t.Setenv("HOME", "")

@@ -20,6 +20,12 @@ func openInstructionNoFollow(path string) (*os.File, error) {
 	return openInstructionAt(path, unix.Openat, unix.Readlinkat)
 }
 
+func openContainedNoFollow(path string, roots []string) (*os.File, error) {
+	return openChecked(path, unix.Openat, unix.Readlinkat, func(p string) (string, error) {
+		return validateContainedPath(p, roots)
+	}, true)
+}
+
 // Based on internal/harness/provenance_files_unix.go. Each lookup resolves one
 // component against a pinned parent. Hooks are syscall seams for race tests.
 func openDoctrineAt(path string, openat func(int, string, int, uint32) (int, error), readlinkat func(int, string, []byte) (int, error)) (*os.File, error) {

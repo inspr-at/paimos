@@ -27,6 +27,7 @@ var (
 	comparisonHex    = regexp.MustCompile(`^[0-9a-f]{64}$`)
 	comparisonName   = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`)
 	comparisonID     = regexp.MustCompile(`^[a-z][a-z0-9._-]{0,95}$`)
+	comparisonGap    = regexp.MustCompile(`^[a-z][a-z0-9_]{0,63}$`)
 	comparisonChange = map[string]bool{"text": true, "why": true, "strength": true, "enabled": true, "local_conflict": true}
 )
 
@@ -41,6 +42,7 @@ type comparisonUpload struct {
 	Local      comparisonLocal  `json:"local"`
 	Rules      []comparisonRule `json:"rules"`
 	Counts     comparisonCounts `json:"counts"`
+	Gaps       []string         `json:"gaps,omitempty"`
 }
 
 type comparisonMerged struct {
@@ -82,6 +84,7 @@ type comparisonView struct {
 	LocalSetSHA256 string           `json:"local_set_sha256"`
 	Counts         comparisonCounts `json:"counts"`
 	Rules          []comparisonRule `json:"rules"`
+	Gaps           []string         `json:"gaps,omitempty"`
 	CreatedAt      time.Time        `json:"created_at"`
 }
 
@@ -102,7 +105,7 @@ func (m *Module) listComparisons(r *http.Request, tx pgx.Tx, p tenant.Principal)
 	}
 	rows, err := tx.Query(r.Context(), `
 		SELECT DISTINCT ON (harness) id::text, harness, role, project_id::text, repo_name, repo_sha256,
-			merge_sha256, merge_version, local_set_sha256, counts, rules, created_at
+			merge_sha256, merge_version, local_set_sha256, counts, rules, gaps, created_at
 		FROM rules_comparisons WHERE project_id=$1::uuid
 		ORDER BY harness, created_at DESC, id DESC`, projectID)
 	if err != nil {
@@ -160,23 +163,30 @@ func (m *Module) createComparison(r *http.Request, tx pgx.Tx, p tenant.Principal
 	if err != nil {
 		return nil, err
 	}
+	if upload.Gaps == nil {
+		upload.Gaps = []string{}
+	}
+	gapsJSON, err := json.Marshal(upload.Gaps)
+	if err != nil {
+		return nil, err
+	}
 	var agent any
 	if agentID != "" {
 		agent = agentID
 	}
 	var view comparisonView
-	var countsRaw, rulesRaw []byte
+	var countsRaw, rulesRaw, gapsRaw []byte
 	err = tx.QueryRow(r.Context(), `
 		INSERT INTO rules_comparisons (
 			tenant_id, project_id, person_id, agent_id, harness, role, repo_sha256, repo_name,
-			merge_sha256, merge_version, local_set_sha256, counts, rules)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13::jsonb)
+			merge_sha256, merge_version, local_set_sha256, counts, rules, gaps)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13::jsonb,$14::jsonb)
 		RETURNING id::text, harness, role, project_id::text, repo_name, repo_sha256,
-			merge_sha256, merge_version, local_set_sha256, counts, rules, created_at`,
+			merge_sha256, merge_version, local_set_sha256, counts, rules, gaps, created_at`,
 		p.TenantID, upload.ProjectID, owner, agent, upload.Harness, upload.Role, upload.RepoSHA256, upload.RepoName,
-		upload.Merged.SHA256, upload.Merged.Version, upload.Local.SetSHA256, string(counts), string(rulesJSON),
+		upload.Merged.SHA256, upload.Merged.Version, upload.Local.SetSHA256, string(counts), string(rulesJSON), string(gapsJSON),
 	).Scan(&view.ID, &view.Harness, &view.Role, &view.ProjectID, &view.RepoName, &view.RepoSHA256,
-		&view.MergeSHA256, &view.MergeVersion, &view.LocalSetSHA256, &countsRaw, &rulesRaw, &view.CreatedAt)
+		&view.MergeSHA256, &view.MergeVersion, &view.LocalSetSHA256, &countsRaw, &rulesRaw, &gapsRaw, &view.CreatedAt)
 	if err != nil {
 		return nil, comparisonWriteErr(err)
 	}
@@ -184,6 +194,9 @@ func (m *Module) createComparison(r *http.Request, tx pgx.Tx, p tenant.Principal
 		return nil, err
 	}
 	if err = json.Unmarshal(rulesRaw, &view.Rules); err != nil {
+		return nil, err
+	}
+	if err = json.Unmarshal(gapsRaw, &view.Gaps); err != nil {
 		return nil, err
 	}
 	if view.Rules == nil {
@@ -245,9 +258,9 @@ func comparisonAgent(r *http.Request, tx pgx.Tx, p tenant.Principal, owner, requ
 
 func scanComparison(rows pgx.Rows) (comparisonView, error) {
 	var view comparisonView
-	var countsRaw, rulesRaw []byte
+	var countsRaw, rulesRaw, gapsRaw []byte
 	err := rows.Scan(&view.ID, &view.Harness, &view.Role, &view.ProjectID, &view.RepoName, &view.RepoSHA256,
-		&view.MergeSHA256, &view.MergeVersion, &view.LocalSetSHA256, &countsRaw, &rulesRaw, &view.CreatedAt)
+		&view.MergeSHA256, &view.MergeVersion, &view.LocalSetSHA256, &countsRaw, &rulesRaw, &gapsRaw, &view.CreatedAt)
 	if err != nil {
 		return comparisonView{}, err
 	}
@@ -255,6 +268,9 @@ func scanComparison(rows pgx.Rows) (comparisonView, error) {
 		return comparisonView{}, err
 	}
 	if err = json.Unmarshal(rulesRaw, &view.Rules); err != nil {
+		return comparisonView{}, err
+	}
+	if err = json.Unmarshal(gapsRaw, &view.Gaps); err != nil {
 		return comparisonView{}, err
 	}
 	if view.Rules == nil {
@@ -370,8 +386,15 @@ func validateComparison(upload comparisonUpload) error {
 	if !comparisonVersion(upload.Merged.Version) {
 		return reject
 	}
-	if len(upload.Rules) > maxComparisonRules || upload.Counts.Files < 0 || upload.Counts.Files > 64 {
+	if len(upload.Rules) > maxComparisonRules || upload.Counts.Files < 0 || upload.Counts.Files > 64 || len(upload.Gaps) > 16 {
 		return reject
+	}
+	seenGap := map[string]bool{}
+	for _, gap := range upload.Gaps {
+		if seenGap[gap] || !comparisonGap.MatchString(gap) {
+			return reject
+		}
+		seenGap[gap] = true
 	}
 	if upload.Local.RuleCount < 0 || upload.Local.RuleCount > maxComparisonRules || upload.Merged.RuleCount < 0 || upload.Merged.RuleCount > maxComparisonRules {
 		return reject

@@ -5,11 +5,13 @@ package rulescompare
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/inspr-at/paimos/internal/rules"
 	"github.com/inspr-at/paimos/internal/rulesimport"
 )
 
@@ -207,5 +209,127 @@ func TestCodexChainPrefersOverrideSkipsEmptyAndCapsBytes(t *testing.T) {
 	capped, err := LoadChain("codex", cappedHome, cappedRepo)
 	if err != nil || len(capped.Files) != 1 || !strings.Contains(strings.Join(capped.Gaps, ","), "codex_byte_cap") {
 		t.Fatalf("%v files %d gaps %v", err, len(capped.Files), capped.Gaps)
+	}
+}
+
+func TestClaudeImportExpandsInsideRootAndRefusesSecrets(t *testing.T) {
+	base := t.TempDir()
+	home := filepath.Join(base, "home")
+	repo := filepath.Join(base, "fixture")
+	if err := os.MkdirAll(repo, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	gitDir(t, repo)
+	writeFixture(t, filepath.Join(base, "outside.md"), "SYNTHETIC_OUTSIDE_251")
+	writeFixture(t, filepath.Join(base, "id_ed25519"), "SYNTHETIC_SECRET_251")
+	writeFixture(t, filepath.Join(repo, ".env"), "SYNTHETIC_SECRET_251")
+	writeFixture(t, filepath.Join(repo, ".ssh", "id_ed25519"), "SYNTHETIC_SECRET_251")
+	writeFixture(t, filepath.Join(repo, "id_rsa"), "SYNTHETIC_SECRET_251")
+	writeFixture(t, filepath.Join(repo, "secrets.key"), "SYNTHETIC_SECRET_251")
+	writeFixture(t, filepath.Join(repo, "credentials"), "SYNTHETIC_SECRET_251")
+	writeFixture(t, filepath.Join(home, ".ssh", "id_ed25519"), "SYNTHETIC_SECRET_251")
+	writeFixture(t, filepath.Join(repo, "AGENTS.md"), doc("safety", "Keep the floor.", "Synthetic."))
+	link := filepath.Join(repo, "linked.md")
+	if err := os.Symlink(filepath.Join(repo, ".env"), link); err != nil {
+		t.Fatal(err)
+	}
+	writeFixture(t, filepath.Join(repo, "CLAUDE.md"), "@AGENTS.md\n@../outside.md\n@.env\n@.ssh/id_ed25519\n@id_rsa\n@secrets.key\n@credentials\n@linked.md\n@~/../id_ed25519\n`@AGENTS.md`\n```\n@AGENTS.md\n```\n")
+
+	chain, err := LoadChain("claude-code", home, repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(logicals(chain), ",") != "repo/CLAUDE.md,repo/AGENTS.md" {
+		t.Fatalf("files %v", logicals(chain))
+	}
+	if strings.Contains(texts(chain), "SYNTHETIC_SECRET_251") || strings.Contains(texts(chain), "SYNTHETIC_OUTSIDE_251") {
+		t.Fatal("import read a secret or a file outside the root")
+	}
+	if !strings.Contains(strings.Join(chain.Gaps, ","), "imports_not_followed") {
+		t.Fatal(chain.Gaps)
+	}
+	merged := rules.Merged{Version: "260929120000.0.0", SHA256: strings.Repeat("ab", 32), Rules: []rules.Rule{{
+		Identity: "safety", Text: "Keep the floor.", Why: "Synthetic.", Strength: "normal", Enabled: true,
+	}}}
+	report, err := DiffChain(chain, "builder", "10000000-0000-4000-8000-000000000002", merged)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Counts.OnlyMerged != 0 || report.Counts.Both != 1 {
+		t.Fatalf("imported rule missing from the comparison: %+v", report.Rules)
+	}
+	if !strings.Contains(strings.Join(report.Gaps, ","), "imports_not_followed") {
+		t.Fatal(report.Gaps)
+	}
+
+	writeFixture(t, filepath.Join(base, "nope.md"), "SYNTHETIC_OUTSIDE_251")
+	writeFixture(t, filepath.Join(home, ".claude", "extra.md"), "home note\n")
+	writeFixture(t, filepath.Join(home, ".claude", "CLAUDE.md"), "@extra.md\n@../../nope.md\n")
+	userChain, err := LoadChain("claude-code", home, repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(logicals(userChain), ",")
+	if !strings.Contains(joined, "user/.claude/extra.md") || strings.Contains(texts(userChain), "SYNTHETIC_OUTSIDE_251") || !strings.Contains(strings.Join(userChain.Gaps, ","), "imports_not_followed") {
+		t.Fatalf("home import files %v gaps %v", logicals(userChain), userChain.Gaps)
+	}
+}
+
+func TestClaudeImportBoundsDepthCountAndBytes(t *testing.T) {
+	repo := filepath.Join(t.TempDir(), "fixture")
+	if err := os.MkdirAll(repo, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	gitDir(t, repo)
+	writeFixture(t, filepath.Join(repo, "CLAUDE.md"), "@a.md\n")
+	writeFixture(t, filepath.Join(repo, "a.md"), "@b.md\n")
+	writeFixture(t, filepath.Join(repo, "b.md"), "@c.md\n")
+	writeFixture(t, filepath.Join(repo, "c.md"), "@d.md\n")
+	writeFixture(t, filepath.Join(repo, "d.md"), "@e.md\n")
+	writeFixture(t, filepath.Join(repo, "e.md"), "SYNTHETIC_DEPTH_251\n")
+	got, err := LoadChain("claude-code", "", repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(texts(got), "SYNTHETIC_DEPTH_251") || len(got.Files) != 5 {
+		t.Fatalf("depth bound files %v", logicals(got))
+	}
+	if !strings.Contains(strings.Join(got.Gaps, ","), "imports_not_followed") {
+		t.Fatal(got.Gaps)
+	}
+
+	wide := filepath.Join(t.TempDir(), "wide")
+	if err = os.MkdirAll(wide, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	gitDir(t, wide)
+	var refs strings.Builder
+	for i := 0; i <= maxImportFiles; i++ {
+		name := fmt.Sprintf("n%02d.md", i)
+		writeFixture(t, filepath.Join(wide, name), "note\n")
+		fmt.Fprintf(&refs, "@%s\n", name)
+	}
+	writeFixture(t, filepath.Join(wide, "CLAUDE.md"), refs.String())
+	counted, err := LoadChain("claude-code", "", wide)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(counted.Files) != 1+maxImportFiles || !strings.Contains(strings.Join(counted.Gaps, ","), "imports_not_followed") {
+		t.Fatalf("count bound files %d gaps %v", len(counted.Files), counted.Gaps)
+	}
+
+	huge := filepath.Join(t.TempDir(), "huge")
+	if err = os.MkdirAll(huge, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	gitDir(t, huge)
+	writeFixture(t, filepath.Join(huge, "big.md"), strings.Repeat("x", maxImportBytes+1))
+	writeFixture(t, filepath.Join(huge, "CLAUDE.md"), "@big.md\n")
+	capped, err := LoadChain("claude-code", "", huge)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(capped.Files) != 1 || strings.Contains(texts(capped), "xxx") || !strings.Contains(strings.Join(capped.Gaps, ","), "imports_not_followed") {
+		t.Fatalf("byte bound files %d gaps %v", len(capped.Files), capped.Gaps)
 	}
 }

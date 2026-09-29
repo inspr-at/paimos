@@ -59,6 +59,48 @@ func TestInstructionAllowlistRefusesSecretsAndSymlinks(t *testing.T) {
 	}
 }
 
+func TestReadContainedRefusesSecretsAndOutsideRoots(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "notes.md"), []byte("safe\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, rel := range []string{".env", filepath.Join(".ssh", "id_ed25519"), "id_rsa", "secrets.key", "credentials"} {
+		path := filepath.Join(root, rel)
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("SYNTHETIC_SECRET_251"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		_, _, _, err := ReadContained(path, []string{root}, 1024)
+		if !errors.Is(err, ErrProhibitedPath) || strings.Contains(err.Error(), "SYNTHETIC_SECRET_251") || strings.Contains(err.Error(), root) {
+			t.Fatal(err)
+		}
+	}
+	outsideFile := filepath.Join(outside, "outside.md")
+	if err := os.WriteFile(outsideFile, []byte("SYNTHETIC_OUTSIDE_251"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err := ReadContained(outsideFile, []string{root}, 1024); !errors.Is(err, ErrProhibitedPath) || strings.Contains(err.Error(), "SYNTHETIC_OUTSIDE_251") {
+		t.Fatal(err)
+	}
+	got, _, _, err := ReadContained(filepath.Join(root, "notes.md"), []string{root}, 1024)
+	if err != nil || got != "safe\n" {
+		t.Fatalf("%v %q", err, got)
+	}
+	target := filepath.Join(root, "secret-target.md")
+	if err = os.WriteFile(target, []byte("SYNTHETIC_SECRET_251"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.Symlink(target, filepath.Join(root, "linked.md")); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err = ReadContained(filepath.Join(root, "linked.md"), []string{root}, 1024); !errors.Is(err, ErrSymlink) || strings.Contains(err.Error(), "SYNTHETIC_SECRET_251") {
+		t.Fatal(err)
+	}
+}
+
 func TestParseLoadedKeepsComparableFieldsOnly(t *testing.T) {
 	body := "# Synthetic\n\n## Safety\n\n<!-- aeon-rule: safety -->\n- Keep the floor.\n  Why: it is the floor.\n"
 	got, err := ParseLoaded("user/CLAUDE.local.md", body, strings.Repeat("ab", 32), len(body))

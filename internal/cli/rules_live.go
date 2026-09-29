@@ -222,6 +222,7 @@ type rulesComparisonUpload struct {
 	Local      rulesComparisonLocal    `json:"local"`
 	Rules      []rulescompare.LiveRule `json:"rules"`
 	Counts     rulescompare.LiveCounts `json:"counts"`
+	Gaps       []string                `json:"gaps,omitempty"`
 }
 
 type rulesComparisonLocal struct {
@@ -235,7 +236,7 @@ func comparisonUpload(report rulescompare.LiveReport, agentID string) rulesCompa
 		RepoSHA256: report.RepoSHA256, RepoName: report.RepoName,
 		Merged: report.Merged,
 		Local:  rulesComparisonLocal{SetSHA256: report.Local.SetSHA256, RuleCount: report.Local.RuleCount},
-		Rules:  report.Rules, Counts: report.Counts,
+		Rules:  report.Rules, Counts: report.Counts, Gaps: report.Gaps,
 	}
 }
 

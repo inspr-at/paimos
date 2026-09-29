@@ -150,6 +150,84 @@ func ReadInstruction(path string) (string, string, int, error) {
 	return readOpenedDoctrine(f)
 }
 
+// ReadContained reads one regular text file that stays inside one of roots.
+// The instruction basename allowlist does not apply. Secret-looking
+// components, symlinks and paths outside every root are refused before the
+// file is opened. maxBytes includes the file; a larger file is not returned.
+func ReadContained(path string, roots []string, maxBytes int) (string, string, int, error) {
+	if maxBytes <= 0 || maxBytes > MaxFileBytes {
+		return "", "", 0, ErrByteBound
+	}
+	f, err := openContainedNoFollow(path, roots)
+	if err != nil {
+		return "", "", 0, err
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil || !info.Mode().IsRegular() {
+		return "", "", 0, ErrNotRegular
+	}
+	if info.Size() > int64(maxBytes) {
+		return "", "", 0, ErrByteBound
+	}
+	return readOpenedDoctrine(f)
+}
+
+func validateContainedPath(path string, roots []string) (string, error) {
+	if path == "" || strings.ContainsRune(path, 0) || len(roots) == 0 {
+		return "", ErrProhibitedPath
+	}
+	for _, part := range strings.Split(filepath.ToSlash(path), "/") {
+		if part == ".." {
+			return "", ErrProhibitedPath
+		}
+	}
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", ErrProhibitedPath
+	}
+	abs = filepath.Clean(abs)
+	if !pathInsideRoots(abs, roots) {
+		return "", ErrProhibitedPath
+	}
+	parts := strings.Split(strings.TrimPrefix(filepath.ToSlash(abs), "/"), "/")
+	if len(parts) == 0 || parts[0] == "" {
+		return "", ErrProhibitedPath
+	}
+	for _, part := range parts {
+		if part == "." || part == ".." || secretImportComponent(part) {
+			return "", ErrProhibitedPath
+		}
+	}
+	return abs, nil
+}
+
+func secretImportComponent(part string) bool {
+	if componentProhibited(part, false) {
+		return true
+	}
+	return strings.Contains(strings.ToLower(part), "credential")
+}
+
+func pathInsideRoots(path string, roots []string) bool {
+	for _, root := range roots {
+		if root == "" {
+			continue
+		}
+		abs, err := filepath.Abs(root)
+		if err != nil {
+			continue
+		}
+		abs = filepath.Clean(abs)
+		rel, err := filepath.Rel(abs, path)
+		if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
 // readDoctrine uses a pinned descriptor walk, then checks that same descriptor
 // before reading. No pathname stat/open race or blocking FIFO read is possible.
 func readDoctrine(path string) (string, string, int, error) {

@@ -5493,6 +5493,11 @@ components:
           type: array
           maxItems: 500
           items: {"$ref": "#/components/schemas/RulesComparisonRule"}
+        gaps:
+          type: array
+          maxItems: 16
+          description: "Comparison limits. Tokens only; no paths or instruction text."
+          items: {type: string, pattern: "^[a-z][a-z0-9_]{0,63}$"}
         created_at: {type: string, format: date-time}
     RulesComparisonUpload:
       type: object
@@ -5525,6 +5530,11 @@ components:
           maxItems: 500
           items: {"$ref": "#/components/schemas/RulesComparisonRule"}
         counts: {"$ref": "#/components/schemas/RulesComparisonCounts"}
+        gaps:
+          type: array
+          maxItems: 16
+          description: "Comparison limits. Tokens only; no paths or instruction text."
+          items: {type: string, pattern: "^[a-z][a-z0-9_]{0,63}$"}
     PairingVerificationCapabilities:
       type: object
       description: Server-owned qualification of its matching helper release; a client cannot widen this map. Unsupported choices require explicit connect_only or exclusion.

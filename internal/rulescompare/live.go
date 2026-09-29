@@ -5,6 +5,7 @@ package rulescompare
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"regexp"
 	"sort"
@@ -109,7 +110,9 @@ func DiffChain(chain Chain, role, projectID string, merged rules.Merged) (LiveRe
 	h := sha256.New()
 	for _, file := range chain.Files {
 		parsed, err := rulesimport.ParseLoaded(file.Logical, file.Text, file.SHA256, file.Bytes)
-		if err != nil {
+		if errors.Is(err, rulesimport.ErrUnrecognizedFile) {
+			parsed = rulesimport.LoadedFile{Logical: file.Logical, SHA256: file.SHA256, Bytes: file.Bytes}
+		} else if err != nil {
 			return LiveReport{}, err
 		}
 		files = append(files, LiveFile{Logical: file.Logical, SHA256: file.SHA256, Bytes: file.Bytes, Rules: len(parsed.Rules), Unresolved: parsed.Unresolved})
