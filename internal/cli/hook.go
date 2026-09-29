@@ -77,7 +77,9 @@ func (rt *runtime) runInboxHook(ctx context.Context, event string) error {
 	if err != nil || session == "" {
 		return err
 	}
-	q := url.Values{"session": {session}, "wait_ms": {"0"}, "limit": {"10"}}
+	// exact_session (AEON-280) makes the server return only rows bound to this
+	// generation; the client-side check below stays as defense in depth.
+	q := url.Values{"session": {session}, "exact_session": {"true"}, "wait_ms": {"0"}, "limit": {"10"}}
 	var frame strings.Builder
 	var delivered []inbox.Message
 	var after int64
@@ -87,7 +89,8 @@ func (rt *runtime) runInboxHook(ctx context.Context, event string) error {
 			return err
 		}
 		for _, msg := range page.Items {
-			// The server also returns principal-wide rows; leave those for their consumer.
+			// Defense in depth: an older server ignores exact_session and also returns
+			// principal-wide rows; leave those for their consumer.
 			if msg.RecipientSessionID == nil || !strings.EqualFold(*msg.RecipientSessionID, session) {
 				continue
 			}

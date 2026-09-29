@@ -160,8 +160,8 @@ func TestSessionDeliveryAcknowledgesOnlyHandoff(t *testing.T) {
 				case r.URL.Path == harnessPath(hookProjectID, hookSessionID):
 					fmt.Fprint(w, `{"id":"`+hookSessionID+`","harness":"codex"}`)
 				case r.Method == http.MethodGet && r.URL.Path == "/api/inbox/messages":
-					if r.URL.Query().Get("session") != hookSessionID {
-						t.Error("session filter missing")
+					if r.URL.Query().Get("session") != hookSessionID || r.URL.Query().Get("exact_session") != "true" {
+						t.Error("exact session filter missing")
 					}
 					_ = json.NewEncoder(w).Encode(inbox.Page{Items: []inbox.Message{hookFixtureMessage()}, NextAfter: 42})
 				case r.Method == http.MethodPost && r.URL.Path == "/api/inbox/messages/"+hookMessageID+"/ack":

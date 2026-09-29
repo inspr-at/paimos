@@ -59,7 +59,7 @@ func (rt *runtime) listenSessionDelivery(projectID, project, session, adapter, r
 	initialBackoff := min(interval, 30*time.Second)
 	backoff := initialBackoff
 	for {
-		q := url.Values{"session": {session}, "limit": {strconv.Itoa(limit)}, "wait_ms": {"0"}}
+		q := url.Values{"session": {session}, "exact_session": {"true"}, "limit": {strconv.Itoa(limit)}, "wait_ms": {"0"}}
 		if follow {
 			q.Set("wait_ms", "25000")
 		}

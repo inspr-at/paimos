@@ -63,8 +63,8 @@ func TestInboxHookGoldenEvents(t *testing.T) {
 				srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					switch r.Method + " " + r.URL.Path {
 					case "GET /api/inbox/messages":
-						if r.URL.Query().Get("session") != hookSessionID || r.URL.Query().Get("wait_ms") != "0" {
-							t.Error("missing session-scoped nonblocking pull")
+						if r.URL.Query().Get("session") != hookSessionID || r.URL.Query().Get("wait_ms") != "0" || r.URL.Query().Get("exact_session") != "true" {
+							t.Error("missing exact session-scoped nonblocking pull")
 						}
 						_ = json.NewEncoder(w).Encode(inbox.Page{Items: []inbox.Message{hookFixtureMessage()}, NextAfter: 42})
 					case "POST /api/inbox/messages/" + hookMessageID + "/ack":
