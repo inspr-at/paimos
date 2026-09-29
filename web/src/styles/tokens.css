@@ -74,6 +74,7 @@
   /* Status (derived from the palette) */
   --st-new: #d69b31;
   --st-backlog: #8a9a9b;
+  --st-blocked: #c47a3a;
   --st-progress: #0e6f6c;
   --st-qa-fill: #a4e5df;
   --st-qa-ring: #0e6f6c;
@@ -157,7 +158,7 @@
   --avatar-bg: radial-gradient(circle at 30% 25%, rgba(164, 229, 223, 0.35), rgba(164, 229, 223, 0.1));
   --avatar-l-bg: .38; --avatar-l-ink: .93; --avatar-rim: rgba(255, 255, 255, .08);
   --presence-l: .78; --presence-c: .12; --presence-ink: #0d1d1d;
-  --st-new: #e2b45a; --st-backlog: #7f9a99; --st-progress: #a4e5df; --st-qa-fill: rgba(164, 229, 223, 0.4); --st-qa-ring: #a4e5df; --st-ok: #7fd1a8; --st-closed: #6f8a89;
+  --st-new: #e2b45a; --st-backlog: #7f9a99; --st-blocked: #e7a36a; --st-progress: #a4e5df; --st-qa-fill: rgba(164, 229, 223, 0.4); --st-qa-ring: #a4e5df; --st-ok: #7fd1a8; --st-closed: #6f8a89;
   --kind-runbook: #6fd6cb; --kind-guideline: #94b0f5; --kind-memory: #e4b25c; --kind-external-system: #c8a0ee; --kind-related-project: #f08db1; --kind-ticket: #8aa3a2;
   --wash-1: rgba(164, 229, 223, 0.12); --wash-2: transparent; --wash-3: rgba(214, 155, 49, 0.08); --wash-4: transparent;
   --grain-opacity: 0;
@@ -199,7 +200,7 @@
     --avatar-bg: radial-gradient(circle at 30% 25%, rgba(164, 229, 223, 0.35), rgba(164, 229, 223, 0.1));
     --avatar-l-bg: .38; --avatar-l-ink: .93; --avatar-rim: rgba(255, 255, 255, .08);
   --presence-l: .78; --presence-c: .12; --presence-ink: #0d1d1d;
-    --st-new: #e2b45a; --st-backlog: #7f9a99; --st-progress: #a4e5df; --st-qa-fill: rgba(164, 229, 223, 0.4); --st-qa-ring: #a4e5df; --st-ok: #7fd1a8; --st-closed: #6f8a89;
+    --st-new: #e2b45a; --st-backlog: #7f9a99; --st-blocked: #e7a36a; --st-progress: #a4e5df; --st-qa-fill: rgba(164, 229, 223, 0.4); --st-qa-ring: #a4e5df; --st-ok: #7fd1a8; --st-closed: #6f8a89;
     --kind-runbook: #6fd6cb; --kind-guideline: #94b0f5; --kind-memory: #e4b25c; --kind-external-system: #c8a0ee; --kind-related-project: #f08db1; --kind-ticket: #8aa3a2;
     --wash-1: rgba(164, 229, 223, 0.12); --wash-2: transparent; --wash-3: rgba(214, 155, 49, 0.08); --wash-4: transparent;
     --grain-opacity: 0;

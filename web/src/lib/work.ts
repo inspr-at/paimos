@@ -44,7 +44,7 @@ export function statusMeta(state: string): StatusMeta {
 export function statusOptions(knownStates: Iterable<string> = []): { value: string; meta: StatusMeta }[] {
   const known = new Set(knownStates)
   const progress = known.has('in-progress') && !known.has('in_progress') ? 'in-progress' : 'in_progress'
-  return ['new', 'backlog', progress, 'qa', 'accepted', 'delivered', 'done', 'cancelled'].map(value => ({ value, meta: statusMeta(value) }))
+  return ['new', 'backlog', 'blocked', progress, 'qa', 'accepted', 'delivered', 'done', 'cancelled'].map(value => ({ value, meta: statusMeta(value) }))
 }
 
 export const PRIORITIES = [

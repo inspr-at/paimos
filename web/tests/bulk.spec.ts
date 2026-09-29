@@ -64,7 +64,7 @@ test('keyboard: x toggles, Shift J grows, Cmd or Ctrl A selects all, s opens the
   await page.keyboard.press('s')
   const menu = page.getByRole('menu', { name: 'Status of 1 ticket' })
   await expect(menu).toBeVisible()
-  await page.keyboard.press('4')
+  await page.keyboard.press('5')
   await expect.poll(() => bulkCalls(calls).length).toBe(1)
   expect(bulkCalls(calls)[0].body).toMatchObject({ state: 'qa' })
 })
