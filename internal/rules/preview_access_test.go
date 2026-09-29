@@ -4,6 +4,7 @@ package rules
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -135,10 +136,173 @@ func TestNamedAgentPreviewReasonsStayBehindTheActiveKeyRule(t *testing.T) {
 	if status, code, body := call(member, http.MethodPost, "/api/rules/layers", Scope{Layer: "agent", OwnerID: member.ID, AgentID: held}); status != 200 {
 		t.Fatalf("own named layer: %d %s %s", status, code, body)
 	}
-	if status, code, body := call(member, http.MethodPost, "/api/rules/layers", Scope{Layer: "agent", OwnerID: member.ID, AgentID: foreign}); status != 403 || code != authz.PreviewNotKeyCreator {
-		t.Fatalf("foreign named layer: %d %s %s", status, code, body)
+	if status, code, body := call(member, http.MethodPost, "/api/rules/layers", Scope{Layer: "agent", OwnerID: member.ID, AgentID: foreign}); status != 403 || code != "forbidden" || strings.Contains(body, authz.PreviewNotKeyCreator) {
+		t.Fatalf("creating a layer stays a generic denial: %d %s %s", status, code, body)
+	}
+	if status, code, body := call(member, http.MethodPost, "/api/rules/layers", Scope{Layer: "agent", OwnerID: member.ID, AgentID: revoked}); status != 403 || code != "forbidden" || strings.Contains(body, "revoked") {
+		t.Fatalf("creating a layer hides a revoked key: %d %s %s", status, code, body)
 	}
 	if status, code, body := merge(member, ""); status != 409 || code != "floor_missing" {
 		t.Fatalf("role preview without a named agent: %d %s %s", status, code, body)
+	}
+}
+
+func TestAgentControlDenialStaysForbiddenUntilPreview(t *testing.T) {
+	err := &agentControlDenial{reason: authz.PreviewKeyRevoked}
+	if !isDenied(err) || !errors.Is(err, authz.ErrForbidden) {
+		t.Fatal("a named-agent reason must still be a skippable denial")
+	}
+	var leaked *Error
+	if errors.As(err, &leaked) {
+		t.Fatal("the denial itself must not be a response body")
+	}
+	surfaced := surfacePreviewReason(err)
+	if !errors.As(surfaced, &leaked) || leaked.Status != 403 || leaked.Code != authz.PreviewKeyRevoked {
+		t.Fatalf("preview: %#v", surfaced)
+	}
+	if other := surfacePreviewReason(authz.ErrForbidden); !errors.Is(other, authz.ErrForbidden) {
+		t.Fatal(other)
+	}
+}
+
+func TestProjectOnlyReaderCannotTellAgentsApart(t *testing.T) {
+	d := dbtest.Open(t)
+	ctx := t.Context()
+	var tid string
+	if err := db.InTenant(dbtest.Seed(ctx), d.App, "00000000-0000-0000-0000-000000000000", func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `INSERT INTO tenants(slug,name) VALUES('preview-visibility','Preview visibility') RETURNING id::text`).Scan(&tid)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	person := func(name, role string) tenant.Principal {
+		t.Helper()
+		p := tenant.Principal{TenantID: tid, Kind: tenant.Person, Name: name}
+		if err := db.InTenant(dbtest.Seed(ctx), d.App, tid, func(tx pgx.Tx) error {
+			return tx.QueryRow(ctx, `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'person',$2) RETURNING id::text`, tid, name).Scan(&p.ID)
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if role != "" {
+			dbtest.BindRole(t, d, tid, p.ID, role)
+		}
+		return p
+	}
+	owner := person("Ada Owner", "owner")
+	reader := person("Rae Reader", "")
+	maker := person("Mae Maker", "")
+	var project, roleID string
+	if err := db.InTenant(dbtest.Seed(ctx), d.App, tid, func(tx pgx.Tx) error {
+		if err := tx.QueryRow(ctx, `INSERT INTO nodes(tenant_id,kind_id,key,title) SELECT $1,id,'PV-2','Preview' FROM node_kinds WHERE tenant_id=$1 AND slug='project' RETURNING id::text`, tid).Scan(&project); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(ctx, `INSERT INTO roles(tenant_id,key,name) VALUES($1,'project_rules','Project rules') RETURNING id::text`, tid).Scan(&roleID); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO role_permissions(tenant_id,role_id,permission) VALUES($1,$2,'rules.read'),($1,$2,'nodes.read')`, tid, roleID); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,scope_id) VALUES($1,$2,$3,'project',$4),($1,$5,$3,'project',$4)`, tid, reader.ID, roleID, project, maker.ID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	agent := func(name, status string) string {
+		t.Helper()
+		var id string
+		if err := d.Admin.QueryRow(ctx, `INSERT INTO principals(tenant_id,kind,name,status) VALUES($1,'agent',$2,$3) RETURNING id::text`, tid, name, status).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	existing := agent("Existing", "active")
+	inactive := agent("Inactive", "deactivated")
+	own := agent("Own", "active")
+	missing := "99999999-9999-4999-8999-999999999999"
+	if _, err := d.Admin.Exec(ctx, `INSERT INTO agent_keys(tenant_id,principal_id,name,prefix,hash,created_by_principal_id,revoked_at) VALUES($1,$2,'preview','rules-visibility-own','fixture-not-a-credential',$3,clock_timestamp())`, tid, own, maker.ID); err != nil {
+		t.Fatal(err)
+	}
+	mux := http.NewServeMux()
+	New(d.App).Mount(mux)
+	merge := func(who tenant.Principal, agentID string) (int, string, string) {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodGet, "/api/rules/merged?project_id="+project+"&person_id="+who.ID+"&agent_id="+agentID+"&role=builder&harness=codex", nil)
+		req = req.WithContext(tenant.WithPrincipal(req.Context(), who))
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+		var parsed struct {
+			Code string `json:"code"`
+		}
+		_ = json.Unmarshal(rec.Body.Bytes(), &parsed)
+		return rec.Code, parsed.Code, rec.Body.String()
+	}
+	identical := func(who tenant.Principal, label string, ids ...string) string {
+		t.Helper()
+		var first string
+		for i, id := range ids {
+			status, code, body := merge(who, id)
+			if status != 403 || code != "forbidden" {
+				t.Fatalf("%s %s: %d %s %s", label, id, status, code, body)
+			}
+			if i == 0 {
+				first = body
+				continue
+			}
+			if body != first {
+				t.Fatalf("%s responses differ:\n%s\n%s", label, first, body)
+			}
+		}
+		return first
+	}
+	hidden := identical(reader, "project reader", existing, inactive, missing)
+	if strings.Contains(hidden, "not_key_creator") || strings.Contains(hidden, "agent_inactive") || strings.Contains(hidden, "Existing") || strings.Contains(hidden, "Inactive") {
+		t.Fatalf("restricted denial names the agent: %s", hidden)
+	}
+	if status, code, body := merge(owner, existing); status != 403 || code != authz.PreviewNotKeyCreator || !strings.Contains(body, authz.PreviewDenialMessage(authz.PreviewNotKeyCreator)) {
+		t.Fatalf("privileged existing agent: %d %s %s", status, code, body)
+	}
+	if status, code, body := merge(owner, inactive); status != 403 || code != authz.PreviewAgentInactive || !strings.Contains(body, authz.PreviewDenialMessage(authz.PreviewAgentInactive)) {
+		t.Fatalf("privileged inactive agent: %d %s %s", status, code, body)
+	}
+	if _, _, body := merge(owner, missing); body != hidden {
+		t.Fatalf("a missing agent changed shape:\n%s\n%s", body, hidden)
+	}
+	if status, code, body := merge(maker, own); status != 403 || code != authz.PreviewKeyRevoked {
+		t.Fatalf("key creator without members.read: %d %s %s", status, code, body)
+	}
+	if got := identical(maker, "key creator, other agents", existing, inactive, missing); got != hidden {
+		t.Fatalf("key creator learned about another agent:\n%s\n%s", got, hidden)
+	}
+}
+
+func TestRevokedNamedAgentLayerIsSkippedAndBudgetStillRuns(t *testing.T) {
+	w := newBatchWorld(t, "rules-revoke-skip")
+	admin := w.principal(tenant.Person, "owner", "owner")
+	worker := w.agentFor(admin, "worker")
+	named := w.layer(admin, Scope{Layer: "agent", OwnerID: admin.ID, AgentID: worker.ID})
+	company := w.layer(admin, Scope{Layer: "company"})
+	w.publish(admin, w.set(admin, named, "Persona", testRule("persona", "Stay in role.")), "260929120000.0.0")
+	companySet := w.set(admin, company, "Floor", lockedRule("safety", "Keep the locked company floor."))
+
+	before := string(w.call(admin, "GET", "/api/rules/layers", nil, 200))
+	if !strings.Contains(before, named.ID) || !strings.Contains(before, worker.ID) {
+		t.Fatalf("named layer missing before revocation: %s", before)
+	}
+	if _, err := w.d.Admin.Exec(t.Context(), `UPDATE agent_keys SET revoked_at=clock_timestamp() WHERE tenant_id=$1 AND principal_id=$2`, w.tid, worker.ID); err != nil {
+		t.Fatal(err)
+	}
+	after := string(w.call(admin, "GET", "/api/rules/layers", nil, 200))
+	if strings.Contains(after, named.ID) || strings.Contains(after, worker.ID) || strings.Contains(after, "key_revoked") {
+		t.Fatalf("revoked layer was not skipped: %s", after)
+	}
+	if !strings.Contains(after, company.ID) {
+		t.Fatalf("company layer dropped: %s", after)
+	}
+	preview := string(w.call(admin, "GET", "/api/rules/merged?project_id="+w.project+"&person_id="+admin.ID+"&agent_id="+worker.ID+"&role=builder&harness=codex", nil, 403))
+	if !strings.Contains(preview, `"code":"`+authz.PreviewKeyRevoked+`"`) {
+		t.Fatalf("preview hid the reason from the key creator: %s", preview)
+	}
+	published := string(w.call(admin, "POST", "/api/rules/publish", batch("", item(companySet, "auto")), 200))
+	if strings.Contains(published, authz.PreviewKeyRevoked) {
+		t.Fatalf("budget check failed closed on the revoked layer: %s", published)
 	}
 }
