@@ -495,8 +495,19 @@ func TestDashboardRatesByVoteSnapshot(t *testing.T) {
 	if len(page.Ratings.ByHarness) != 1 || page.Ratings.ByHarness[0].Label != "codex" || page.Ratings.ByHarness[0].Votes != 2 || page.Ratings.ByHarness[0].Exceptions != 1 {
 		t.Fatalf("rating harness %+v", page.Ratings.ByHarness)
 	}
-	if strings.Contains(body, "vote-model") || strings.Contains(body, "session-model-decoy") {
-		t.Fatalf("rate followed a vote snapshot or the session model instead of the delivery: %s", body)
+	if strings.Contains(body, "vote-model") {
+		t.Fatalf("rate followed a vote snapshot instead of the delivery: %s", body)
+	}
+	// The registered session model is only a work group (AEON-301), never a rating or usage label.
+	for _, g := range append(append([]usagedashboard.RatingGroup{}, page.Ratings.ByModel...), page.Ratings.ByHarness...) {
+		if g.Label == "session-model-decoy" {
+			t.Fatalf("rate followed the session model instead of the delivery: %+v", g)
+		}
+	}
+	for _, g := range page.ByModel {
+		if g.Label == "session-model-decoy" {
+			t.Fatalf("usage model followed the session model: %+v", g)
+		}
 	}
 }
 
