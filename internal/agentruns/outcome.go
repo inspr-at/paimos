@@ -83,26 +83,31 @@ func waitingMillis(ctx context.Context, tx pgx.Tx, runID string) (int64, error) 
 	}
 	defer rows.Close()
 	var waiting int64
-	var prevStatus string
-	var prevAt time.Time
-	var have bool
+	var waitingFrom time.Time
+	var waitingOpen bool
 	for rows.Next() {
 		var status *string
 		var at time.Time
 		if err := rows.Scan(&status, &at); err != nil {
 			return 0, err
 		}
-		if have && prevStatus == "waiting" {
-			if gap := at.Sub(prevAt).Milliseconds(); gap > 0 {
+		// A heartbeat stores no status. It must not end or restart a waiting span.
+		if status == nil || *status == "" {
+			continue
+		}
+		if *status == "waiting" {
+			if !waitingOpen {
+				waitingFrom = at
+				waitingOpen = true
+			}
+			continue
+		}
+		if waitingOpen {
+			if gap := at.Sub(waitingFrom).Milliseconds(); gap > 0 {
 				waiting += gap
 			}
+			waitingOpen = false
 		}
-		prevStatus = ""
-		if status != nil {
-			prevStatus = *status
-		}
-		prevAt = at
-		have = true
 	}
 	return waiting, rows.Err()
 }

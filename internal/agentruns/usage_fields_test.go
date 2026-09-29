@@ -129,3 +129,68 @@ func TestRunUsageFields(t *testing.T) {
 		t.Fatalf("session commits: %+v", sessionRun)
 	}
 }
+
+func TestHeartbeatKeepsWaiting(t *testing.T) {
+	f := setup(t)
+	o := f.order(t, nil)
+	v := f.claim(t, f.run(t, o))
+	path := "/api/runs/" + v.ID + "/telemetry"
+	f.call(t, f.agent, "POST", path, map[string]any{"sequence": 1, "kind": "status", "status": "running"}, 200, nil)
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `UPDATE agent_runs SET started_at=clock_timestamp()-interval '10 seconds' WHERE id=$1`, v.ID); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `UPDATE run_telemetry SET at=clock_timestamp()-interval '10 seconds' WHERE run_id=$1 AND sequence=1`, v.ID)
+		return err
+	})
+	f.call(t, f.agent, "POST", path, map[string]any{"sequence": 2, "kind": "status", "status": "waiting"}, 200, nil)
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE run_telemetry SET at=clock_timestamp()-interval '8 seconds' WHERE run_id=$1 AND sequence=2`, v.ID)
+		return err
+	})
+	f.call(t, f.agent, "POST", path, map[string]any{"sequence": 3, "kind": "heartbeat"}, 200, nil)
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE run_telemetry SET at=clock_timestamp()-interval '4 seconds' WHERE run_id=$1 AND sequence=3`, v.ID)
+		return err
+	})
+	f.call(t, f.agent, "POST", path, map[string]any{"sequence": 4, "kind": "finished", "status": "completed"}, 200, &v)
+	if v.ActiveMS == nil || v.DurationMS == nil {
+		t.Fatalf("usage: %+v", v)
+	}
+	var marks [4]time.Time
+	var heartbeatStatus *string
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		rows, err := tx.Query(t.Context(), `SELECT at, status FROM run_telemetry WHERE run_id=$1 ORDER BY sequence`, v.ID)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for i := 0; rows.Next(); i++ {
+			if i >= len(marks) {
+				t.Fatal("extra telemetry")
+			}
+			var status *string
+			if err = rows.Scan(&marks[i], &status); err != nil {
+				return err
+			}
+			if i == 2 {
+				heartbeatStatus = status
+			}
+		}
+		return rows.Err()
+	})
+	if heartbeatStatus != nil {
+		t.Fatalf("heartbeat stored status %q", *heartbeatStatus)
+	}
+	waiting := marks[3].Sub(marks[1]).Milliseconds()
+	if waiting <= 0 {
+		t.Fatalf("waiting gap %d marks %v", waiting, marks)
+	}
+	want := *v.DurationMS - waiting
+	if want < 0 {
+		want = 0
+	}
+	if *v.ActiveMS != want {
+		t.Fatalf("active %d want %d duration %d waiting %d", *v.ActiveMS, want, *v.DurationMS, waiting)
+	}
+}
