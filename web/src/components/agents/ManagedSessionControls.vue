@@ -40,9 +40,8 @@ const uncertain = ref(false)
 let epoch = 0, timer: ReturnType<typeof setTimeout> | undefined
 let request: { request_id: string; kind: Kind; text?: string; value?: string; expected_ownership: Ownership } | null = null
 const available = computed(() => managedControlSession(props.session))
-const allowed = computed(() => auth.identity?.principal.kind === 'person' && can('harness.control', props.session.project_id))
 // The same eligibility the row menu uses and the server enforces (AEON-291).
-const unavailable = computed(() => managedControlUnavailable(props.session, { now: props.now, allowed: allowed.value, runStatus: props.session.run_status !== undefined ? props.session.run_status : props.runStatus }))
+const unavailable = computed(() => managedControlUnavailable(props.session, { now: props.now, grant: { person: auth.identity?.principal.kind === 'person', can }, runStatus: props.session.run_status !== undefined ? props.session.run_status : props.runStatus }))
 const waiting = computed(() => busy.value || uncertain.value || (!!result.value && result.value.state !== 'completed'))
 const canSteer = computed(() => !!draft.value.trim() && new TextEncoder().encode(draft.value).length <= 8192)
 const feedback = computed(() => {

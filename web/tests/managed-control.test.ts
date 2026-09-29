@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import type { HarnessSession } from '../src/lib/agents.ts'
-import { managedControlAllowed, managedControlUnavailable } from '../src/lib/managedControl.ts'
+import { controlPermitted, managedControlAllowed, managedControlUnavailable } from '../src/lib/managedControl.ts'
 
 const now = Date.parse('2026-09-29T09:00:00Z')
 const ago = (ms: number) => new Date(now - ms).toISOString()
@@ -13,7 +13,9 @@ const session = (fields: Partial<HarnessSession> = {}) => ({
   advertised_capabilities: ['interrupt', 'stop', 'steer', 'managed_control_v1', 'rename'], process_ownership: ownership, process_observed_at: ago(5_000),
   ...fields,
 }) as HarnessSession
-const access = { now, allowed: true, runStatus: 'running' }
+// Grants are per project: this person holds harness.control in project p only.
+const projectOnly = { person: true, can: (permission: string, project?: string) => permission === 'harness.control' && project === 'p' }
+const access = { now, grant: projectOnly, runStatus: 'running' as string | undefined }
 
 test('a live owned Claude run takes every advertised managed control', () => {
   assert.equal(managedControlUnavailable(session(), access), '')
@@ -23,7 +25,8 @@ test('a live owned Claude run takes every advertised managed control', () => {
 
 test('each server prerequisite blocks on its own', () => {
   const blocked: [string, HarnessSession, typeof access][] = [
-    ['permission', session(), { ...access, allowed: false }],
+    ['no grant in this project', session({ project_id: 'other' }), access],
+    ['an agent, not a person', session(), { ...access, grant: { ...projectOnly, person: false } }],
     ['stopped', session({ phase: 'stopped', stopped_at: ago(0) }), access],
     ['archived', session({ archived_at: ago(0) }), access],
     ['not claude', session({ harness: 'codex' }), access],
@@ -47,8 +50,17 @@ test('each server prerequisite blocks on its own', () => {
 })
 
 test('reasons keep the panel wording', () => {
-  assert.equal(managedControlUnavailable(session(), { ...access, allowed: false }), 'You need permission to control this session.')
+  assert.equal(managedControlUnavailable(session({ project_id: 'other' }), access), 'You need permission to control this session.')
   assert.equal(managedControlUnavailable(session({ phase: 'stopped', stopped_at: ago(0) }), access), 'This session has stopped.')
   assert.equal(managedControlUnavailable(session({ process_observed_at: ago(60_000) }), access), 'Waiting for the owning daemon to confirm this process.')
   assert.equal(managedControlUnavailable(session(), { ...access, runStatus: 'failed' }), 'Its run is not running.')
+})
+
+test('authorization is the session project, not the workspace', () => {
+  // A project-only grant controls sessions in that project and nowhere else.
+  assert.equal(controlPermitted(session(), projectOnly), true)
+  assert.equal(controlPermitted(session({ project_id: 'other' }), projectOnly), false)
+  // A grant that answers only workspace-wide (no project) is not asked here.
+  const workspaceOnly = { person: true, can: (permission: string, project?: string) => permission === 'harness.control' && project === undefined }
+  assert.equal(controlPermitted(session(), workspaceOnly), false)
 })

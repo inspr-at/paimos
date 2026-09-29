@@ -18,6 +18,7 @@ import AppIcon from '../components/AppIcon.vue'
 import AccountsCard from '../components/agents/AccountsCard.vue'
 import ApprovalQueue from '../components/agents/ApprovalQueue.vue'
 import SessionList from '../components/agents/SessionList.vue'
+import { controlPermitted } from '../lib/managedControl'
 import SessionPanel from '../components/agents/SessionPanel.vue'
 import LiveNow from '../components/agents/LiveNow.vue'
 import StartAgentDialog from '../components/agents/StartAgentDialog.vue'
@@ -123,7 +124,8 @@ async function resolveHeld(request: HeldRequest, decision: 'resolved' | 'dismiss
   cursor.value = next ? `a:${next.id}` : nextHeld ? `m:${nextHeld.id}` : ''
   if (cursor.value) focusRow(cursor.value)
 }
-const controlBlock = (view: SessionView, kind: SessionControl['kind']) => controlBlocked(view.session, kind, view.name, writable.value, agents.controls[view.session.id])
+// Per session, like the server: harness.control in that session's project.
+const controlBlock = (view: SessionView, kind: SessionControl['kind']) => controlBlocked(view.session, kind, view.name, controlPermitted(view.session, { person: session.identity?.principal.kind === 'person', can }), agents.controls[view.session.id])
 async function control(view: SessionView, kind: SessionControl['kind']) {
   if (kind === 'stop') {
     const ok = await confirmAction({
@@ -292,7 +294,7 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
         <SessionList
           v-if="agents.loaded"
           :groups="agents.grouped" :history="agents.historyViews" :history-state="agents.historyState" :history-more="agents.historyMore" :now="agents.now" :cursor="cursor" :selected="sessionId" :state="agents.sessionsUpdatedAt !== null ? 'ready' : agents.sessionsState" :error="agents.sessionsError"
-          :loaded="agents.loaded" :controls="agents.controls" :can-control="writable" :can-start="canStart"
+          :loaded="agents.loaded" :controls="agents.controls" :can-start="canStart"
           @open="openSession" @control="control" @focus-row="id => cursor = id" @retry="agents.loadAll()" @start="startDialog?.open()" @history="agents.loadHistory(true)" @older="agents.loadOlderHistory()"
         />
         <p v-if="agents.sessionsUpdatedAt !== null && agents.sessionsState === 'error'" class="inline-error" role="alert"><AppIcon name="alert" :size="14" />Sessions could not be refreshed: {{ agents.sessionsError }} <button type="button" class="btn sm" @click="agents.loadAll()">Try again</button></p>

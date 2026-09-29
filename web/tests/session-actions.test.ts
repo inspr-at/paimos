@@ -22,7 +22,8 @@ function view(session: Partial<SessionView['session']> = {}, state: SessionView[
     ticket: ticket ? { id: 'n1', key: 'AEON-275', title: 'Worker', href: '/p/AEON/AEON-275' } : null,
   }
 }
-const access = { canControl: true, canRemove: true, product: 'Aeon', now }
+const grant = { person: true, can: (permission: string, project?: string) => permission === 'harness.control' && project === 'p1' }
+const access = { grant, canRemove: true, product: 'Aeon', now }
 
 test('Lost contact is an ended session, never a problem', () => {
   assert.equal(problemReason('heartbeat_lost'), false)
@@ -49,7 +50,7 @@ test('a managed session offers Interrupt, Stop and settings only when they work'
   assert.deepEqual(sessionMenu(view({ management_mode: 'managed', advertised_capabilities: caps }), access).control, ['interrupt', 'stop'])
   assert.deepEqual(sessionMenu(view({ management_mode: 'managed', advertised_capabilities: ['stop'] }), access).control, ['stop'])
   assert.deepEqual(sessionMenu(view({ management_mode: 'managed', advertised_capabilities: caps }), { ...access, pending: { state: 'claimed' } }).control, [])
-  assert.deepEqual(sessionMenu(view({ management_mode: 'managed', advertised_capabilities: caps }), { ...access, canControl: false }).control, [])
+  assert.deepEqual(sessionMenu(view({ management_mode: 'managed', advertised_capabilities: caps }), { ...access, grant: { ...grant, can: () => false } }).control, [])
   assert.deepEqual(sessionMenu(view({ management_mode: 'managed', advertised_capabilities: caps, phase: 'stopped', stopped_at: ago(0) }, 'stopped'), access).control, [])
   assert.equal(sessionMenu(view({ management_mode: 'managed' }), access).note, '')
   assert.equal(sessionMenu(view(), { ...access, canRemove: false }).remove, false)
@@ -75,6 +76,13 @@ test('managed_control_v1 offers controls only when the server would accept them'
   // The run read fills in a status the session read does not carry.
   const fromRun = { ...view({ ...fresh.session, run_status: undefined }), run: { status: 'running' } as SessionView['run'] }
   assert.deepEqual(sessionMenu(fromRun, access).control, ['interrupt', 'stop', 'settings'])
+})
+
+test('a project-only harness.control grant offers controls in that project only', () => {
+  const caps = ['interrupt', 'stop']
+  assert.deepEqual(sessionMenu(view({ management_mode: 'managed', advertised_capabilities: caps }), access).control, ['interrupt', 'stop'])
+  assert.deepEqual(sessionMenu(view({ management_mode: 'managed', advertised_capabilities: caps, project_id: 'p2' }), access).control, [])
+  assert.deepEqual(sessionMenu(view({ management_mode: 'managed', advertised_capabilities: caps }), { ...access, grant: { ...grant, person: false } }).control, [])
 })
 
 test('No heartbeat, Lost contact and stopped rows remove in one click; live rows ask', () => {

@@ -3,6 +3,7 @@
 import { test, expect, type Page } from '@playwright/test'
 import { fixtures, me, mockWork, watchErrors } from './work-fixtures'
 import { agentData, mockAgents, type AgentWorld } from './agents-fixtures'
+import { mockEffectivePermissions } from './authz-fixtures'
 
 const world: AgentWorld = { me: me.id, projects: { pharos: 'p-pharos', aeon: 'p-aeon', pai: 'p-frozen' }, tickets: { fleet: 'n-1', restore: 'n-2', web: 'n-a1', release: 'n-5', approvals: 'n-6' }, nodes: {
   'p-pharos': { key: 'PRJ-17', title: 'Pharos' }, 'p-aeon': { key: 'PRJ-35', title: 'Aeon' }, 'p-frozen': { key: 'PRJ-26', title: 'Studio infrastructure' },
@@ -184,6 +185,35 @@ for (const [state, change, rowItems, panelHint] of [
     expect([managed, legacy]).toEqual([[], []])
   })
 }
+
+test('a project-only harness.control grant controls that project in the row and the panel alike', async ({ page }) => {
+  const { data, lead, managed } = await setup(page)
+  // harness.control only in Pharos: not workspace-wide, not in Aeon.
+  await page.route('**/api/me/permissions*', route => {
+    const project = new URL(route.request().url()).searchParams.get('project_id') || undefined
+    const effective = mockEffectivePermissions('admin', project)
+    effective.workspace.permissions = effective.workspace.permissions.filter(p => p !== 'harness.control')
+    if (effective.project && project !== 'p-pharos') effective.project.permissions = effective.project.permissions.filter(p => p !== 'harness.control')
+    return route.fulfill({ json: effective })
+  })
+  const elsewhere = data.sessions.find(s => s.project_id === 'p-aeon' && s.phase === 'working' && s.management_mode === 'managed')!
+  Object.assign(elsewhere, { display_label: 'aeon-worker' })
+  await page.goto('/agents')
+  await row(page, lead.id).hover()
+  await row(page, lead.id).getByRole('button', { name: 'Actions for claude-lead' }).click()
+  await expect(page.getByRole('menu', { name: 'Actions for claude-lead' }).getByRole('menuitem', { name: /^(Interrupt|Stop session…)/ })).toHaveText([/^Interrupt/, 'Stop session…'])
+  await page.keyboard.press('Escape')
+  await row(page, elsewhere.id).hover()
+  await row(page, elsewhere.id).getByRole('button', { name: 'Actions for aeon-worker' }).click()
+  await expect(page.getByRole('menu', { name: 'Actions for aeon-worker' }).getByRole('menuitem', { name: /^(Interrupt|Stop session…)/ })).toHaveCount(0)
+  await page.keyboard.press('Escape')
+  // The panel agrees with the row.
+  await page.goto(`/agents/${lead.id}`)
+  const controls = page.getByRole('region', { name: 'Session controls' })
+  await expect(controls.getByRole('button', { name: 'Interrupt', exact: true })).toBeEnabled()
+  await controls.getByRole('button', { name: 'Interrupt', exact: true }).click()
+  await expect.poll(() => managed.length).toBe(1)
+})
 
 test('a managed_control_v1 session without fresh ownership offers no Interrupt or Stop', async ({ page }) => {
   const { lead } = await setup(page)

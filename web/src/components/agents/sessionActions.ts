@@ -2,13 +2,13 @@
 // AEON-291: a session menu offers only what works for that session. No disabled
 // items with excuses; a session outside Aeon gets one quiet line instead.
 import { HEARTBEAT_STALE_MS } from '../../lib/agentState.ts'
-import { managedControlAllowed, managedControlSession } from '../../lib/managedControl.ts'
+import { controlPermitted, managedControlAllowed, managedControlSession, type ControlGrant } from '../../lib/managedControl.ts'
 import type { HarnessSession } from '../../lib/agents'
 import type { SessionView } from '../../stores/agents'
 
 export type SessionAction = 'interrupt' | 'stop' | 'settings' | 'ticket' | 'copy' | 'remove'
 export interface SessionMenu { control: SessionAction[]; other: SessionAction[]; remove: boolean; note: string }
-export interface MenuAccess { canControl: boolean; canRemove: boolean; pending?: { state: string } | null; product: string; now: number }
+export interface MenuAccess { grant: ControlGrant; canRemove: boolean; pending?: { state: string } | null; product: string; now: number }
 
 const SETTINGS = ['rename', 'model', 'effort'] as const
 export const isLive = (s: HarnessSession) => s.phase !== 'stopped' && !s.stopped_at && !s.archived_at
@@ -33,10 +33,10 @@ export function sessionMenu(view: SessionView, access: MenuAccess): SessionMenu 
   const live = isLive(s)
   const control: SessionAction[] = []
   // managed_control_v1 eligibility is shared with the session panel (lib/managedControl).
-  if (live && s.management_mode === 'managed' && access.canControl) {
+  if (live && s.management_mode === 'managed' && controlPermitted(s, access.grant)) {
     const busy = !!access.pending && access.pending.state !== 'completed'
     if (managedControlSession(s)) {
-      const managed = { now: access.now, allowed: access.canControl, runStatus: s.run_status !== undefined ? s.run_status : view.run?.status }
+      const managed = { now: access.now, grant: access.grant, runStatus: s.run_status !== undefined ? s.run_status : view.run?.status }
       if (!busy && managedControlAllowed(s, 'interrupt', managed)) control.push('interrupt')
       if (!busy && managedControlAllowed(s, 'stop', managed)) control.push('stop')
       if (SETTINGS.some(kind => managedControlAllowed(s, kind, managed))) control.push('settings')

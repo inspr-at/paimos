@@ -22,12 +22,15 @@ import { etaFromSession } from '../../lib/eta'
 import { brand } from '../../lib/brand'
 import { toast } from '../../lib/toast'
 import { quickRemoval, sessionMenu, type SessionMenu } from './sessionActions'
+import { controlPermitted, type ControlGrant } from '../../lib/managedControl'
+import { can } from '../../lib/authz'
+import { useSession } from '../../stores/session'
 
 // Session families stay together across status groups. Each lead's history is
 // opt-in for this mounted list only; refreshes never open it or persist it.
 const props = defineProps<{
   history?: SessionView[]; historyState?: 'idle' | 'loading' | 'ready' | 'error'; historyMore?: boolean; groups: Record<SessionGroup, SessionView[]>; now: number; cursor: string; selected: string; state: Availability; error: string
-  loaded: boolean; controls: Record<string, SessionControl>; canControl: boolean; canStart: boolean
+  loaded: boolean; controls: Record<string, SessionControl>; canStart: boolean
 }>()
 const emit = defineEmits<{ open: [id: string]; control: [view: SessionView, kind: SessionControl['kind']]; focusRow: [id: string]; retry: []; start: []; history: []; older: [] }>()
 const showStopped = ref(false)
@@ -115,7 +118,10 @@ watch(selectedPath, path => {
   if (roots('stopped').some(containsSelected)) showStopped.value = true
 }, { immediate: true })
 
-const controlBlock = (view: SessionView, kind: SessionControl['kind']) => controlBlocked(view.session, kind, view.name, props.canControl, props.controls[view.session.id])
+// Control rights are per session: harness.control in that session's project.
+const identity = useSession()
+const grant = computed<ControlGrant>(() => ({ person: identity.identity?.principal.kind === 'person', can }))
+const controlBlock = (view: SessionView, kind: SessionControl['kind']) => controlBlocked(view.session, kind, view.name, controlPermitted(view.session, grant.value), props.controls[view.session.id])
 // A direct link to a session that already left the list shows it in History.
 // Removing the selected session here never flips the list.
 let seenCurrent = ''
@@ -129,7 +135,7 @@ watch([() => props.selected, () => props.history?.length, () => current.value.le
 // sessions get a bin right in the row: one click, then an undo toast. The
 // overflow holds the rest; it is hidden when the bin already says it all.
 const live = (view: SessionView) => view.session.phase !== 'stopped' && !view.session.archived_at
-const menuOf = (view: SessionView): SessionMenu => sessionMenu(view, { canControl: props.canControl, canRemove: removal.canRemove(view.session), pending: props.controls[view.session.id], product: brand.value.short_name, now: props.now })
+const menuOf = (view: SessionView): SessionMenu => sessionMenu(view, { grant: grant.value, canRemove: removal.canRemove(view.session), pending: props.controls[view.session.id], product: brand.value.short_name, now: props.now })
 const bin = (view: SessionView) => removal.canRemove(view.session) && quickRemoval(view)
 const hasMenu = (view: SessionView) => { const m = menuOf(view); return m.control.length > 0 || m.other.length > 0 || !!m.note || (m.remove && !bin(view)) }
 // The bound ticket's estimate sits under its key while the session runs; an ended

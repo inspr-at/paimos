@@ -7,10 +7,16 @@ import type { HarnessSession } from './agents.ts'
 
 export const MANAGED_OWNERSHIP_WINDOW_MS = 45_000
 export type ManagedKind = 'steer' | 'interrupt' | 'stop' | 'rename' | 'model' | 'effort'
+// Who is asking. can is lib/authz can(); injected so this stays pure.
+export interface ControlGrant { person: boolean; can: (permission: string, projectId?: string) => boolean }
+
+// Authorization is per session, never workspace-wide: a person holding
+// harness.control in the session's own project, as the server checks.
+export const controlPermitted = (s: HarnessSession, grant: ControlGrant) => grant.person && grant.can('harness.control', s.project_id)
+
 export interface ManagedAccess {
   now: number
-  // A person with harness.control in the session's project.
-  allowed: boolean
+  grant: ControlGrant
   // The bound run's status: the server requires it running on the owning daemon.
   runStatus?: string | null
 }
@@ -26,7 +32,7 @@ export function ownershipFresh(s: HarnessSession, now: number) {
 // Why no managed control can be sent right now, or '' when the session takes
 // them. Order: permission, ended, adapter, run, ownership.
 export function managedControlUnavailable(s: HarnessSession, access: ManagedAccess): string {
-  if (!access.allowed) return 'You need permission to control this session.'
+  if (!controlPermitted(s, access.grant)) return 'You need permission to control this session.'
   if (s.phase === 'stopped' || s.stopped_at || s.archived_at) return 'This session has stopped.'
   if (s.harness !== 'claude' || !s.run_id || !s.advertised_capabilities.includes('stop') || !managedControlSession(s)) return 'This session does not take controls from here.'
   if (access.runStatus !== 'running') return 'Its run is not running.'
