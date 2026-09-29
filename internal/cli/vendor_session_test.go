@@ -232,8 +232,18 @@ func TestTellFillsResolvedSenderSession(t *testing.T) {
 		sessionID = "00000000-0000-4000-8000-000000000091"
 		vendor    = "claude-session-tell-00001"
 	)
-	serve := func(t *testing.T, binding int) (string, *[]string) {
+	type sessionFixture struct {
+		projectID string
+		status    int
+		stopped   bool
+		archived  bool
+	}
+	serve := func(t *testing.T, binding int, fixtures ...sessionFixture) (string, *[]string) {
 		t.Helper()
+		session := sessionFixture{projectID: projectID, status: http.StatusOK}
+		if len(fixtures) > 0 {
+			session = fixtures[0]
+		}
 		seen := []string{}
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			body := map[string]any{}
@@ -256,6 +266,25 @@ func TestTellFillsResolvedSenderSession(t *testing.T) {
 					return
 				}
 				fmt.Fprintf(w, `{"session_id":%q}`, sessionID)
+			case r.Method == http.MethodGet && r.URL.Path == "/api/projects/"+projectID+"/harness-sessions/"+sessionID:
+				seen = append(seen, "session check")
+				if session.status != http.StatusOK || session.projectID != projectID {
+					status := session.status
+					if session.projectID != projectID {
+						status = http.StatusNotFound
+					}
+					w.WriteHeader(status)
+					fmt.Fprint(w, `{"error":"session unavailable"}`)
+					return
+				}
+				out := map[string]any{"id": sessionID, "project_id": session.projectID, "stopped_at": nil, "archived_at": nil}
+				if session.stopped {
+					out["stopped_at"] = "2026-09-29T12:00:00Z"
+				}
+				if session.archived {
+					out["archived_at"] = "2026-09-29T12:00:00Z"
+				}
+				_ = json.NewEncoder(w).Encode(out)
 			default:
 				item := r.Method + " " + r.URL.Path
 				if len(raw) > 0 {
@@ -265,6 +294,18 @@ func TestTellFillsResolvedSenderSession(t *testing.T) {
 				if strings.HasSuffix(r.URL.Path, "/receipt") {
 					fmt.Fprintf(w, `{"message_id":%q,"state":"queued"}`, messageID)
 					return
+				}
+				if body["sender_session_id"] != nil {
+					if session.projectID != projectID {
+						w.WriteHeader(http.StatusNotFound)
+						fmt.Fprint(w, `{"error":"not found"}`)
+						return
+					}
+					if session.stopped || session.archived {
+						w.WriteHeader(http.StatusConflict)
+						fmt.Fprint(w, `{"error":{"code":"session_ended","message":"This session has ended."}}`)
+						return
+					}
 				}
 				fmt.Fprintf(w, `{"id":%q,"sender_principal_id":"00000000-0000-4000-8000-000000000008","recipient_principal_id":"00000000-0000-4000-8000-000000000003","from":"paimos:sender","to":"codex:receiver","body":"hello","thread_id":%q,"hop":1,"sent_event_id":42,"is_action_request":false,"expects_reply":false,"delivery_level":"simple","status":"accepted","reply_obligation":"none","human_resolution_outcome":null,"created_at":"2026-09-25T00:00:00Z"}`, messageID, messageID)
 			}
@@ -286,13 +327,13 @@ func TestTellFillsResolvedSenderSession(t *testing.T) {
 	}
 	t.Run("reply", func(t *testing.T) {
 		code, out, errOut, seen := run(t, []string{"tell", "codex:receiver", "--project", "AEON", "--reply-to", messageID, "--idempotency-key", "retry", "-m", "hello"})
-		if code != 0 || strings.Contains(out+errOut, vendor) || len(seen) < 2 || seen[0] != "binding "+vendor || !strings.Contains(seen[1], `"sender_session_id":"`+sessionID+`"`) || strings.Contains(seen[1], vendor) {
+		if code != 0 || errOut != "" || strings.Contains(out, vendor) || len(seen) < 3 || seen[0] != "binding "+vendor || seen[1] != "session check" || !strings.Contains(seen[2], `"sender_session_id":"`+sessionID+`"`) || strings.Contains(seen[2], vendor) {
 			t.Fatalf("exit %d out %q err %q seen %q", code, out, errOut, seen)
 		}
 	})
 	t.Run("ordinary", func(t *testing.T) {
 		code, out, errOut, seen := run(t, []string{"tell", "codex:receiver", "--project", "AEON", "--idempotency-key", "retry", "-m", "hello"})
-		if code != 0 || strings.Contains(out+errOut, vendor) || len(seen) < 2 || seen[0] != "binding "+vendor || !strings.Contains(seen[1], `"sender_session_id":"`+sessionID+`"`) {
+		if code != 0 || errOut != "" || strings.Contains(out, vendor) || len(seen) < 3 || seen[0] != "binding "+vendor || seen[1] != "session check" || !strings.Contains(seen[2], `"sender_session_id":"`+sessionID+`"`) {
 			t.Fatalf("ordinary tell missed its binding: exit %d out %q err %q seen %q", code, out, errOut, seen)
 		}
 	})
@@ -367,6 +408,84 @@ func TestTellFillsResolvedSenderSession(t *testing.T) {
 				t.Fatalf("wrong attribution for %s", source)
 			}
 		})
+	}
+	for _, state := range []struct {
+		name    string
+		session sessionFixture
+		note    string
+		fail    bool
+	}{
+		{"same-project", sessionFixture{projectID: projectID, status: http.StatusOK}, "", false},
+		{"other-project", sessionFixture{projectID: "00000000-0000-4000-8000-000000000099", status: http.StatusOK}, "unavailable in the target project", false},
+		{"stopped", sessionFixture{projectID: projectID, status: http.StatusOK, stopped: true}, "has ended", false},
+		{"archived", sessionFixture{projectID: projectID, status: http.StatusOK, archived: true}, "has ended", false},
+		{"missing", sessionFixture{projectID: projectID, status: http.StatusNotFound}, "unavailable in the target project", false},
+		{"read-forbidden", sessionFixture{projectID: projectID, status: http.StatusForbidden}, "unavailable in the target project", false},
+		{"read-failed", sessionFixture{projectID: projectID, status: http.StatusServiceUnavailable}, "", true},
+	} {
+		for _, source := range []string{"id", "file", "state-dir", "claude", "codex-session", "codex-thread", "flag"} {
+			t.Run(state.name+"/"+source, func(t *testing.T) {
+				isolate(t)
+				dir := t.TempDir()
+				file := filepath.Join(dir, "session.id")
+				if err := os.WriteFile(file, []byte(sessionID+"\n"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				// A configured source must not fall through to this vendor binding.
+				t.Setenv("CLAUDE_CODE_SESSION_ID", vendor)
+				args := []string{"aeon", "--config", filepath.Join(dir, "missing"), "--json", "tell", "codex:receiver", "--project", "AEON", "-m", "hello"}
+				switch source {
+				case "id":
+					t.Setenv("AEON_SESSION_ID", sessionID)
+				case "file":
+					t.Setenv("AEON_SESSION_FILE", file)
+				case "state-dir":
+					t.Setenv("AEON_SESSION_STATE_DIR", dir)
+				case "codex-session", "codex-thread":
+					t.Setenv("CLAUDE_CODE_SESSION_ID", "")
+					if source == "codex-session" {
+						t.Setenv("CODEX_SESSION_ID", vendor)
+					} else {
+						t.Setenv("CODEX_THREAD_ID", vendor)
+					}
+				case "flag":
+					args = append(args, "--sender-session", sessionID)
+					t.Setenv("AEON_SESSION_ID", "invalid")
+				}
+				_, seen := serve(t, http.StatusOK, state.session)
+				var out, errOut bytes.Buffer
+				code := RunMessaging(args, strings.NewReader(""), &out, &errOut)
+				joined := strings.Join(*seen, "\n")
+				bound, fail, note := state.name == "same-project", state.fail, state.note
+				if source == "flag" {
+					bound, note = true, ""
+					fail = state.name == "other-project" || state.session.stopped || state.session.archived
+					if strings.Contains(joined, "session check") || strings.Contains(joined, "binding ") {
+						t.Fatal("explicit sender session used ambient resolution")
+					}
+					if fail && (!strings.Contains(errOut.String(), "--sender-session") || !strings.Contains(errOut.String(), "active session in the target project")) {
+						t.Fatalf("explicit session failure lacks context: %q", errOut.String())
+					}
+				}
+				if (code != 0) != fail || strings.Contains(joined, `"sender_session_id":"`+sessionID+`"`) != bound {
+					t.Fatalf("exit %d, out %q, stderr %q, calls %q", code, out.String(), errOut.String(), *seen)
+				}
+				if !fail {
+					if !json.Valid(out.Bytes()) || !strings.Contains(joined, "POST /api/projects/"+projectID+"/messages") || !strings.Contains(joined, "/receipt") {
+						t.Fatalf("tell did not succeed: out %q, calls %q", out.String(), *seen)
+					}
+					if note == "" && errOut.Len() != 0 || note != "" && (!strings.Contains(errOut.String(), note) || strings.Count(errOut.String(), "\n") != 1) {
+						t.Fatalf("unexpected note: %q", errOut.String())
+					}
+				} else if source != "flag" && strings.Contains(joined, "POST /api/projects/") {
+					t.Fatal("failed session check sent a message")
+				}
+				wantLookup := source == "claude" || strings.HasPrefix(source, "codex-")
+				if strings.Contains(joined, "binding ") != wantLookup || strings.Contains(out.String()+errOut.String(), vendor) {
+					t.Fatal("vendor binding lookup or output was incorrect")
+				}
+			})
+		}
 	}
 	t.Run("miss", func(t *testing.T) {
 		isolate(t)

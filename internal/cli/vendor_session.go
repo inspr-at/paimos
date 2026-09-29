@@ -5,9 +5,12 @@ package cli
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/inspr-at/paimos/internal/client"
 )
@@ -38,17 +41,48 @@ func ambientVendorSessionRef() string {
 	return vendorSessionRef("codex")
 }
 
-// Use the same explicit sources and precedence as the inbox hook. A configured
-// file that has not been written yet never falls through to another generation.
-func (rt *runtime) ambientSenderSession(ctx context.Context) (string, error) {
+// Use the inbox hook's source precedence, but only attach an active session in
+// the target project. A configured file never falls through to another generation.
+func (rt *runtime) ambientSenderSession(ctx context.Context, projectID string) (string, error) {
 	id, err := inboxHookSession()
-	if err != nil || id != "" || os.Getenv("AEON_SESSION_ID") != "" || os.Getenv("AEON_SESSION_FILE") != "" || os.Getenv("AEON_SESSION_STATE_DIR") != "" {
-		return id, err
+	if err != nil {
+		return "", err
 	}
-	if ref := ambientVendorSessionRef(); ref != "" {
-		return rt.lookupVendorSession(ctx, ref)
+	if id == "" && os.Getenv("AEON_SESSION_ID") == "" && os.Getenv("AEON_SESSION_FILE") == "" && os.Getenv("AEON_SESSION_STATE_DIR") == "" {
+		if ref := ambientVendorSessionRef(); ref != "" {
+			id, err = rt.lookupVendorSession(ctx, ref)
+		}
 	}
-	return "", nil
+	if err != nil || id == "" {
+		return "", err
+	}
+	c, err := rt.api()
+	if err != nil {
+		return "", err
+	}
+	var session struct {
+		ProjectID  string     `json:"project_id"`
+		StoppedAt  *time.Time `json:"stopped_at"`
+		ArchivedAt *time.Time `json:"archived_at"`
+	}
+	err = c.DoWithHeaders(ctx, http.MethodGet, "/api/projects/"+url.PathEscape(projectID)+"/harness-sessions/"+url.PathEscape(id), nil, &session, nil)
+	if err != nil {
+		var status *client.StatusError
+		if errors.As(err, &status) && (status.Status == http.StatusNotFound || status.Status == http.StatusForbidden) {
+			fmt.Fprintln(rt.stderr, "note: ambient sender session unavailable in the target project; sending without it")
+			return "", nil
+		}
+		return "", err
+	}
+	if !strings.EqualFold(session.ProjectID, projectID) {
+		fmt.Fprintln(rt.stderr, "note: ambient sender session belongs to another project; sending without it")
+		return "", nil
+	}
+	if session.StoppedAt != nil || session.ArchivedAt != nil {
+		fmt.Fprintln(rt.stderr, "note: ambient sender session has ended; sending without it")
+		return "", nil
+	}
+	return id, nil
 }
 
 func normalizeVendorRef(raw string) string {

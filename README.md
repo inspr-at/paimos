@@ -60,7 +60,10 @@ Session **Messages** shows both directions of that session's conversation, newes
 messages at the bottom. `aeon tell PERSON_UUID --project AEON -m 'Reply text'`
 automatically uses `AEON_SESSION_ID`, `AEON_SESSION_FILE` (or
 `AEON_SESSION_STATE_DIR/session.id`), then the registered harness binding when no
-explicit source is configured. `--sender-session` overrides these sources.
+explicit source is configured. Ambient sessions are attached only when active in
+the target project; an ended or unavailable session is omitted with a stderr note.
+`--sender-session` overrides these sources and strictly requires your active
+session in the target project.
 Use `--reply-to MESSAGE_UUID` to link an answer to the person's question; linked
 answers appear in the same thread even when sent without a session binding.
 “Read” means the session acknowledged receipt; “Answered” means an accepted
