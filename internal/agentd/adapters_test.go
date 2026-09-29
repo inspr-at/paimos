@@ -13,8 +13,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/inspr-at/paimos/internal/sessionusage"
 )
 
 // TestFakeVendorProcess is invoked only through a private test wrapper. It
@@ -109,11 +107,6 @@ func TestFakeVendorProcess(t *testing.T) {
 			}
 			time.Sleep(500 * time.Millisecond)
 			result = map[string]string{"stopReason": "end_turn"}
-			if vendor == "cursor_tokens" {
-				result = map[string]any{"stopReason": "end_turn", "usage": map[string]any{
-					"inputTokens": 30, "outputTokens": 8, "cacheReadTokens": 10, "cacheWriteTokens": 2,
-				}}
-			}
 		case "initialize":
 			if strings.HasPrefix(vendor, "cursor") {
 				result = map[string]int{"protocolVersion": 1}
@@ -309,7 +302,12 @@ func TestPiRPCStateAndSteer(t *testing.T) {
 	a := NewPiAdapter(fakeVendorPath(t, "pi"), map[string]string{"account": home})
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	p, err := a.Start(ctx, r, func(AdapterEvent) {})
+	var invented bool
+	p, err := a.Start(ctx, r, func(ev AdapterEvent) {
+		if ev.SessionUsage != nil || ev.InputTokensDelta != 0 || ev.OutputTokensDelta != 0 {
+			invented = true
+		}
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -334,6 +332,9 @@ func TestPiRPCStateAndSteer(t *testing.T) {
 	}
 	if err := p.Stop(ctx); err != nil {
 		t.Fatal(err)
+	}
+	if invented {
+		t.Fatal("Pi events invented token usage")
 	}
 }
 
@@ -513,39 +514,6 @@ func TestClaudeBridgeMapsSDKResultUsage(t *testing.T) {
 	}
 	if !turn || !usage || !models {
 		t.Fatalf("Claude bridge did not map result usage: turn=%t usage=%t models=%t output=%s", turn, usage, models, output)
-	}
-}
-
-func TestCursorPromptResultReportsTokens(t *testing.T) {
-	r := adapterRequest(t)
-	r.Profile.Harness = Cursor
-	a := NewCursorAdapter(fakeVendorPath(t, "cursor_tokens"), map[string]string{"account": "42"})
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	events := make(chan AdapterEvent, 16)
-	p, err := a.Start(ctx, r, func(ev AdapterEvent) { events <- ev })
-	if err != nil {
-		t.Fatal(err)
-	}
-	var cost int64
-	var report *sessionusage.UsageReport
-	for report == nil || cost < 8 {
-		select {
-		case ev := <-events:
-			cost += ev.CostMicrosDelta
-			if ev.SessionUsage != nil {
-				copied := *ev.SessionUsage
-				report = &copied
-			}
-		case <-ctx.Done():
-			t.Fatalf("Cursor token usage missing: cost=%d", cost)
-		}
-	}
-	if err := p.Stop(ctx); err != nil {
-		t.Fatal(err)
-	}
-	if report == nil || report.Model != "test-model" || report.BillingMode != "unknown" || !report.Provisional || report.InputTokens == nil || *report.InputTokens != 42 || report.CachedInputTokens == nil || *report.CachedInputTokens != 10 || report.OutputTokens == nil || *report.OutputTokens != 8 || cost != 8 {
-		t.Fatalf("cursor tokens cost=%d report=%+v", cost, report)
 	}
 }
 

@@ -480,15 +480,13 @@ func (a *CursorAdapter) Start(ctx context.Context, r StartRequest, observe func(
 		}
 		if len(frame.ID) > 0 && strings.Trim(string(frame.ID), "\"") == cp.promptID {
 			var result struct {
-				StopReason string                     `json:"stopReason"`
-				Usage      map[string]json.RawMessage `json:"usage"`
+				StopReason string `json:"stopReason"`
 			}
+			// A Cursor prompt result is only a stop reason. It carries no token
+			// usage; cost arrives separately as a usage_update.
 			if len(frame.Error) > 0 && string(frame.Error) != "null" || json.Unmarshal(frame.Result, &result) != nil || result.StopReason != "end_turn" {
 				cp.finish(errors.New("Cursor ACP prompt failed"))
 			} else {
-				if report, ok := sessionusage.CursorPromptUsage(result.Usage, r.Profile.Model); ok {
-					observe(AdapterEvent{SessionUsage: &report})
-				}
 				cp.finish(nil)
 			}
 			return
