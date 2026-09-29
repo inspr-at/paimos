@@ -4,7 +4,7 @@
 // watermark is the highest sent_event_id this person has had in view. The server
 // marker follows the person across devices; this browser's copy is the offline
 // fallback.
-import type { HarnessSession, MessageStatus } from '../../lib/agents.ts'
+import type { HarnessSession, MessageStatus, ProjectMessage } from '../../lib/agents.ts'
 import type { MessageGroup } from './sessionMessages.ts'
 
 export type SessionTab = 'overview' | 'messages'
@@ -128,8 +128,27 @@ export function awaitsInboxHook(session: Pick<HarnessSession, 'phase' | 'stopped
   return true
 }
 
+// This viewer's sends to the session, taken from the loaded thread. Receipts
+// are sender-only, so the outstanding set can be rebuilt after a reload.
+export function sessionBoundSends(
+  messages: readonly Pick<ProjectMessage, 'id' | 'sender_principal_id' | 'recipient_session_id'>[],
+  sessionId: string,
+  viewerId: string,
+): string[] {
+  if (!sessionId || !viewerId) return []
+  const ids: string[] = []
+  const seen = new Set<string>()
+  for (const message of messages) {
+    if (message.recipient_session_id !== sessionId || message.sender_principal_id !== viewerId || seen.has(message.id)) continue
+    seen.add(message.id)
+    ids.push(message.id)
+  }
+  return ids
+}
+
 // Receipts for sends this view is waiting on. Delivered and read are finished.
 // not_delivered is finished too: that message shows its own failure.
+// A missing receipt is still waiting.
 export interface HookReceipts { waiting: string[]; failed: MessageStatus[] }
 export function hookReceipts(pendingIds: readonly string[], statuses: Readonly<Record<string, MessageStatus | undefined>>): HookReceipts {
   const waiting: string[] = []

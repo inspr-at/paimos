@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { awaitsInboxHook, hookDeliveryNotice, hookNoticeVisible, hookReceipts, initialTab, keepFailedReadMark, loadReadMark, loadTab, markerFromServer, nearBottom, preferReadMark, queueReadMark, saveReadMark, saveTab, statusDone, statusLabel, statusTip, unreadGroups } from '../src/components/agents/sessionChat.ts'
+import { awaitsInboxHook, hookDeliveryNotice, hookNoticeVisible, hookReceipts, initialTab, keepFailedReadMark, loadReadMark, loadTab, markerFromServer, nearBottom, preferReadMark, queueReadMark, saveReadMark, saveTab, sessionBoundSends, statusDone, statusLabel, statusTip, unreadGroups } from '../src/components/agents/sessionChat.ts'
 import type { HarnessSession } from '../src/lib/agents.ts'
 import { collapseMessages } from '../src/components/agents/sessionMessages.ts'
 import type { ProjectMessage } from '../src/lib/agents.ts'
@@ -137,6 +137,31 @@ test('the hook notice follows each pending send, including a terminal failure (A
   assert.equal(hookNoticeVisible(true, mixed), true)
   assert.equal(hookNoticeVisible(false, afterDelivered), false)
   assert.equal(hookNoticeVisible(true, hookReceipts([], { old: delivered })), false)
+})
+
+test('a reload rebuilds the hook wait from the loaded thread and its receipts (AEON-369)', () => {
+  const send = (id: string, session = 's', sender = 'me') => ({ id, sender_principal_id: sender, recipient_session_id: session })
+  const thread = [
+    send('fail'), send('done'), send('wait'),
+    send('elsewhere', 'other'), send('from-agent', 's', 'agent'),
+    { id: 'unbound', sender_principal_id: 'me' },
+  ]
+  // Nothing in memory: the thread is the only source, as after a reload.
+  const ids = sessionBoundSends(thread, 's', 'me')
+  assert.deepEqual(ids, ['fail', 'done', 'wait'])
+  assert.deepEqual(sessionBoundSends(thread, 's', ''), [])
+  const base = { delivered_at: null, read_at: null, deliver_by: '2026-09-29T06:15:00Z' }
+  const fail = { ...base, message_id: 'fail', status: 'not_delivered' as const, reason: 'deadline' }
+  const done = { ...base, message_id: 'done', status: 'delivered' as const, delivered_at: '2026-09-29T06:09:00Z' }
+  const waiting = { ...base, message_id: 'wait', status: 'sent' as const }
+  const before = hookReceipts(ids, { fail, done, wait: waiting })
+  assert.deepEqual(before, { waiting: ['wait'], failed: [fail] })
+  assert.equal(hookNoticeVisible(true, before), true)
+  // A missing receipt is still outstanding. Delivering the pending one clears the notice.
+  assert.deepEqual(hookReceipts(ids, { fail, done }).waiting, ['wait'])
+  const after = hookReceipts(ids, { fail, done, wait: { ...done, message_id: 'wait' } })
+  assert.deepEqual(after.waiting, [])
+  assert.equal(hookNoticeVisible(true, after), false)
 })
 
 test('near the bottom allows a small slack', () => {

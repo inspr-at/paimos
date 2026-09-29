@@ -132,6 +132,70 @@ for (const older of ['delivered', 'read'] as const) {
   })
 }
 
+test('a reload keeps the hook wait for the one send that is still pending', async ({ page }) => {
+  await page.clock.install({ time: now })
+  await page.addInitScript(() => {
+    class Stream extends EventTarget {
+      onopen: ((event: Event) => void) | null = null
+      onerror: ((event: Event) => void) | null = null
+      closed = false
+      receive = (event: Event) => { this.dispatchEvent(new Event((event as CustomEvent<string>).detail)) }
+      constructor() {
+        super()
+        window.addEventListener('test:agents-signal', this.receive)
+        setTimeout(() => { if (!this.closed) this.onopen?.(new Event('open')) }, 0)
+      }
+      close() { this.closed = true; window.removeEventListener('test:agents-signal', this.receive) }
+    }
+    Object.assign(window, { EventSource: Stream })
+  })
+  const work = fixtures(); work.preferences.theme = { choice: 'light' }
+  await mockWork(page, work, { admin: true })
+  const data = agentData({ now, me: me.id, projects: { pharos: 'p-pharos', aeon: 'p-aeon', pai: 'p-frozen' }, tickets: { fleet: 'n-1', restore: 'n-2', web: 'n-a1', release: 'n-5', approvals: 'n-6' }, nodes: {} })
+  const first = data.sessions[0]!
+  Object.assign(first, { display_label: 'review-worker', role: 'worker', run_id: null, ticket_node_id: null, phase: 'working', activity: 'idle', heartbeat_at: new Date(now).toISOString(), stopped_at: null, stop_reason: null, management_mode: 'unmanaged', advertised_capabilities: ['inbox', 'status'] })
+  data.sessions.splice(0, data.sessions.length, first)
+  data.targets.splice(0); data.messages.splice(0); data.approvals.splice(0); data.runs.splice(0)
+  await mockAgents(page, data)
+  let deliverPending = false
+  await page.route('**/api/inbox/message-status?*', route => {
+    const ids = new URL(route.request().url()).searchParams.get('ids')!.split(',')
+    const known = new Map([...data.messages, ...data.sent].map(m => [m.id, m.body]))
+    const items = ids.flatMap(id => {
+      const body = known.get(id)
+      const status = body === 'Failed send' ? 'not_delivered'
+        : body === 'Delivered send' ? 'delivered'
+          : body === 'Pending send' ? (deliverPending ? 'delivered' : 'sent')
+            : ''
+      if (!status) return []
+      return [{ message_id: id, status, ...(status === 'not_delivered' ? { reason: 'deadline' } : {}), delivered_at: status === 'delivered' ? new Date(now).toISOString() : null, read_at: null, deliver_by: new Date(now + 240_000).toISOString() }]
+    })
+    return route.fulfill({ json: { items } })
+  })
+  await page.goto(`/agents/${first.id}?tab=messages`)
+  const panel = page.getByRole('complementary', { name: 'Session details' })
+  const notice = panel.getByRole('status').filter({ hasText: "Delivered when the session's inbox hook runs." })
+  for (const body of ['Failed send', 'Delivered send', 'Pending send']) {
+    await panel.getByRole('textbox', { name: 'Message to review-worker' }).fill(body)
+    await panel.getByRole('button', { name: 'Send', exact: true }).click()
+    await expect(panel.getByRole('list', { name: 'Messages', exact: true })).toContainText(body)
+  }
+  await expect(panel.locator('[data-status=not_delivered]')).toHaveCount(1)
+  await expect(panel.locator('.delivery.delivered')).toHaveCount(1)
+  await expect(panel.locator('.delivery.sent')).toHaveCount(1)
+  await expect(notice).toBeVisible()
+  await page.reload()
+  await expect(panel.locator('[data-status=not_delivered]')).toHaveCount(1)
+  await expect(panel.locator('.delivery.delivered')).toHaveCount(1)
+  await expect(panel.locator('.delivery.sent')).toHaveCount(1)
+  await expect(notice).toBeVisible()
+  deliverPending = true
+  await page.evaluate(() => window.dispatchEvent(new CustomEvent('test:agents-signal', { detail: 'inbox.message_fetched' })))
+  await expect(panel.locator('.delivery.delivered')).toHaveCount(2)
+  await expect(panel.locator('.delivery.sent')).toHaveCount(0)
+  await expect(notice).toHaveCount(0)
+})
+
 test('a send marked not_delivered shows that failure instead of the hook wait', async ({ page }) => {
   await page.clock.install({ time: now })
   const work = fixtures(); work.preferences.theme = { choice: 'light' }
