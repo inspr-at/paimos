@@ -2,8 +2,11 @@
 package agentruns_test
 
 import (
-	"github.com/jackc/pgx/v5"
+	"encoding/json"
 	"testing"
+
+	"github.com/inspr-at/paimos/internal/capacity"
+	"github.com/jackc/pgx/v5"
 )
 
 func TestCapacityClaimRechecksReadingAuthorityAndFreshness(t *testing.T) {
@@ -11,6 +14,16 @@ func TestCapacityClaimRechecksReadingAuthorityAndFreshness(t *testing.T) {
 	o := f.order(t, nil)
 	run := f.run(t, o)
 	ids := f.reserve(t, run)
+	// The run holds all 100 units, so Keep for you (AEON-375) would decide this
+	// claim during the owner's hours; this test is about authority and freshness.
+	off := capacity.DefaultSchedule()
+	off.Reserve = capacity.ReserveOff
+	raw, _ := json.Marshal(off)
+	f.tx(t, f.agent, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `WITH a AS (UPDATE agent_accounts SET capacity_owner=$2 WHERE id=(SELECT account_id FROM agent_runs WHERE id=$1) RETURNING tenant_id,id)
+ INSERT INTO account_capacity_schedules(tenant_id,principal_id,scope,scope_key,account_id,schedule) SELECT tenant_id,$2,'account',id::text,id,$3 FROM a`, run.ID, f.person.ID, raw)
+		return err
+	})
 	update := func(allowed bool, age string, used int) {
 		t.Helper()
 		f.tx(t, f.agent, func(tx pgx.Tx) error {
