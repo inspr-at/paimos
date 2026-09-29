@@ -92,3 +92,73 @@ func TestIssueRouteFlags(t *testing.T) {
 		t.Fatalf("epic: %d %s %#v", code, errOut, wrote)
 	}
 }
+
+func TestIssueRouteRepeatKeepsPersonProvenance(t *testing.T) {
+	isolate(t)
+	const (
+		personID = "11111111-1111-4111-8111-111111111111"
+		roleAt   = "2026-09-29T08:00:00Z"
+	)
+	revision := time.Date(2026, 9, 29, 12, 0, 0, 123456000, time.UTC)
+	ticket := apiNode{
+		ID: transcriptEntryID, Key: "AEON-1", KindID: "ticket-kind", Title: "Route", State: "open", UpdatedAt: revision,
+		Fields: json.RawMessage(`{"priority":"high","route_role":"build","route_role_source":"person","route_role_by":"` + personID + `","route_role_at":"` + roleAt + `","area":"backend","area_source":"person","area_by":"` + personID + `","area_at":"` + roleAt + `"}`),
+	}
+	var wrote map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/kinds":
+			_ = json.NewEncoder(w).Encode(kindPage{Items: []apiKind{{ID: "ticket-kind", Slug: "ticket"}, {ID: "task-kind", Slug: "task"}}})
+		case r.Method == http.MethodGet && r.URL.Path == "/api/nodes":
+			_ = json.NewEncoder(w).Encode(nodePage{Items: []apiNode{ticket}})
+		case r.Method == http.MethodPatch && r.URL.Path == "/api/nodes/"+ticket.ID:
+			var patch struct {
+				Fields map[string]any `json:"fields"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&patch); err != nil {
+				t.Error(err)
+			}
+			wrote = patch.Fields
+			raw, _ := json.Marshal(patch.Fields)
+			ticket.Fields = raw
+			_ = json.NewEncoder(w).Encode(ticket)
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL)
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	t.Setenv("AEON_URL", srv.URL)
+	t.Setenv("AEON_API_KEY", testKey)
+	args := []string{"aeon", "--config", filepath.Join(t.TempDir(), "missing"), "--json", "issue", "update", "AEON-1", "--role", "build"}
+	code, out, errOut := runCLI(args, "")
+	if code != 0 || errOut != "" {
+		t.Fatalf("repeat: %d %s %s", code, out, errOut)
+	}
+	if wrote["route_role"] != "build" || wrote["route_role_source"] != "person" || wrote["route_role_by"] != personID || wrote["route_role_at"] != roleAt {
+		t.Fatalf("repeat stripped person provenance: %#v", wrote)
+	}
+	if wrote["area_source"] != "person" || wrote["area_by"] != personID || wrote["area_at"] != roleAt {
+		t.Fatalf("repeat touched area provenance: %#v", wrote)
+	}
+	var view issueView
+	if err := json.Unmarshal([]byte(out), &view); err != nil || view.RouteRole != "build" || view.RouteRoleSource != "person" || view.RouteRoleBy != personID || view.RouteRoleAt != roleAt {
+		t.Fatalf("repeat json %s %v", out, err)
+	}
+
+	code, out, errOut = runCLI([]string{"aeon", "--config", filepath.Join(t.TempDir(), "missing"), "--json", "issue", "update", "AEON-1", "--role", "mechanical"}, "")
+	if code != 0 || errOut != "" {
+		t.Fatalf("change: %d %s %s", code, out, errOut)
+	}
+	if wrote["route_role"] != "mechanical" {
+		t.Fatalf("change role: %#v", wrote)
+	}
+	for _, key := range []string{"route_role_source", "route_role_by", "route_role_at"} {
+		if _, ok := wrote[key]; ok {
+			t.Fatalf("change kept %s so the server cannot restamp: %#v", key, wrote)
+		}
+	}
+	if wrote["area"] != "backend" || wrote["area_source"] != "person" || wrote["area_by"] != personID || wrote["area_at"] != roleAt {
+		t.Fatalf("role change restamped area: %#v", wrote)
+	}
+}

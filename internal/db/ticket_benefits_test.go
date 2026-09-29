@@ -65,8 +65,24 @@ func TestTicketBenefitMigrationPreservesHistoryAndCustomSchema(t *testing.T) {
 			if err := json.Unmarshal(schema, &parsed); err != nil {
 				return err
 			}
-			if len(parsed.Properties) != 6 || parsed.Additional {
+			custom, _ := parsed.Properties["custom"].(map[string]any)
+			want := []string{
+				"custom",
+				"pill_en", "pill_de", "benefit_en", "benefit_de", "hide_from_release_notes",
+				"route_role", "route_role_source", "route_role_by", "route_role_at",
+				"area", "area_source", "area_by", "area_at",
+			}
+			if len(parsed.Properties) != len(want) || parsed.Additional || custom["type"] != "string" {
 				t.Fatalf("custom schema lost: %s", schema)
+			}
+			have := map[string]bool{}
+			for key := range parsed.Properties {
+				have[key] = true
+			}
+			for _, key := range want {
+				if !have[key] {
+					t.Fatalf("missing %s: %s", key, schema)
+				}
 			}
 			return nil
 		})

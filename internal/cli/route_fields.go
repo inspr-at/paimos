@@ -18,20 +18,26 @@ func validateRouteFlags(role, area string) error {
 	return nil
 }
 
-// Drop provenance for a value this command sets. The server attributes it.
+// applyRouteFields sets route_role and area. An unchanged value keeps its
+// stored provenance. A new value drops provenance so the server re-stamps it.
 func applyRouteFields(fields map[string]any, role, area string) {
-	if role = strings.TrimSpace(role); role != "" {
-		fields["route_role"] = role
-		delete(fields, "route_role_source")
-		delete(fields, "route_role_by")
-		delete(fields, "route_role_at")
+	assignRouteValue(fields, "route_role", "route_role_source", "route_role_by", "route_role_at", role)
+	assignRouteValue(fields, "area", "area_source", "area_by", "area_at", area)
+}
+
+func assignRouteValue(fields map[string]any, valueKey, sourceKey, byKey, atKey, value string) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return
 	}
-	if area = strings.TrimSpace(area); area != "" {
-		fields["area"] = area
-		delete(fields, "area_source")
-		delete(fields, "area_by")
-		delete(fields, "area_at")
+	if current, ok := fields[valueKey].(string); ok && strings.TrimSpace(current) == value {
+		fields[valueKey] = strings.TrimSpace(current)
+		return
 	}
+	fields[valueKey] = value
+	delete(fields, sourceKey)
+	delete(fields, byKey)
+	delete(fields, atKey)
 }
 
 func routeProvenance(value, source string) string {

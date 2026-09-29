@@ -55,6 +55,28 @@ func TestCanonicalRouteFields(t *testing.T) {
 	if err != nil || string(project) != `{"area":"backend"}` {
 		t.Fatalf("project fields rewritten: %s %v", project, err)
 	}
+
+	before := []byte(`{"priority":"low","route_role":"build","route_role_source":"person","route_role_by":"` + person.ID + `","route_role_at":"2026-09-29T00:00:00Z","area":"backend","area_source":"person","area_by":"` + person.ID + `","area_at":"2026-09-29T00:00:00Z"}`)
+	forged, err := canonicalRouteFields(person, "ticket", []byte(`{"priority":"low","route_role":"build","route_role_source":"agent","route_role_by":"spoof","area":" backend "}`), before)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fields = routeFieldMap(t, forged)
+	if fields["route_role_source"] != "person" || fields["route_role_by"] != person.ID || fields["route_role_at"] != "2026-09-29T00:00:00Z" || fields["area_source"] != "person" || fields["area_by"] != person.ID || fields["area_at"] != "2026-09-29T00:00:00Z" || fields["area"] != "backend" {
+		t.Fatalf("unchanged value restamped: %#v", fields)
+	}
+	agent := tenant.Principal{ID: "22222222-2222-4222-8222-222222222222", Kind: tenant.Agent}
+	changed, err := canonicalRouteFields(agent, "ticket", []byte(`{"priority":"low","route_role":"mechanical","area":"backend"}`), before)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fields = routeFieldMap(t, changed)
+	if fields["route_role"] != "mechanical" || fields["route_role_source"] != "agent" || fields["route_role_by"] != agent.ID || fields["route_role_at"] == "2026-09-29T00:00:00Z" {
+		t.Fatalf("role change did not restamp: %#v", fields)
+	}
+	if fields["area_source"] != "person" || fields["area_by"] != person.ID || fields["area_at"] != "2026-09-29T00:00:00Z" {
+		t.Fatalf("unchanged area restamped: %#v", fields)
+	}
 }
 
 func TestRouteRoleAndAreaProvenance(t *testing.T) {
@@ -86,13 +108,20 @@ func TestRouteRoleAndAreaProvenance(t *testing.T) {
 	if code != 422 || !strings.Contains(string(raw), "route_role") {
 		t.Fatalf("invalid role: %d %s", code, raw)
 	}
-	code, raw = call(t, &p, "PATCH", "/api/nodes/"+n.ID, `{"fields":{"route_role":"build","route_role_source":"agent","priority":"high"}}`)
+	code, raw = call(t, &p, "PATCH", "/api/nodes/"+n.ID, `{"fields":{"route_role":"scout","route_role_source":"agent","priority":"high"}}`)
 	if code != 400 || !strings.Contains(string(raw), "route_role_source") {
 		t.Fatalf("spoofed source: %d %s", code, raw)
 	}
 	code, raw = call(t, &p, "GET", "/api/nodes/"+n.ID, "")
 	if got := decode[nodeJSON](t, code, raw, 200); string(got.Fields) != string(n.Fields) {
 		t.Fatalf("rejected patch changed fields: %s", got.Fields)
+	}
+
+	code, raw = call(t, &p, "PATCH", "/api/nodes/"+n.ID, `{"fields":{"priority":"high","route_role":"build","area":"backend","route_role_source":"agent","route_role_by":"spoof"}}`)
+	repeated := decode[nodeJSON](t, code, raw, 200)
+	fields = routeFieldMap(t, repeated.Fields)
+	if fields["route_role_source"] != "person" || fields["area_source"] != "person" || fields["route_role_by"] != p.ID || fields["area_by"] != p.ID || fields["route_role_at"] != roleAt || fields["area_at"] != areaAt {
+		t.Fatalf("repeat without provenance restamped: %#v", fields)
 	}
 
 	var same map[string]any
