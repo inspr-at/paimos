@@ -270,12 +270,11 @@ export const weekdayIn = (iso: string, timezone: string) => (parts(Date.parse(is
 /** The instant of a local wall time in a zone (DST gaps resolve forward). */
 export function zonedInstant(y: number, m: number, d: number, hour: number, timezone: string): number {
   const wall = Date.UTC(y, m, d, Math.floor(hour), Math.round((hour % 1) * 60))
-  let at = wall
-  for (let i = 0; i < 3; i++) {
-    const p = parts(at, timezone)
-    at += wall - Date.UTC(p.y, p.m, p.d, p.h, p.mi)
-  }
-  return at
+  const offset = (at: number) => { const p = parts(at, timezone); return Date.UTC(p.y, p.m, p.d, p.h, p.mi) - at }
+  const at = wall - offset(wall - offset(wall))
+  if (offset(at) + at === wall) return at
+  // The wall time falls into a DST gap: the earlier offset puts it after the change.
+  return wall - Math.min(offset(wall - 864e5), offset(wall + 864e5))
 }
 /**
  * The start of the person's hours on the first work day at least `days` days

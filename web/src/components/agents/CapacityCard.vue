@@ -198,9 +198,11 @@ function menuItems(pool: PoolView) {
 function holdOptions() {
   const later = new Date(Math.floor((now.value + 2 * 3600e3) / 60_000) * 60_000).toISOString()
   const tomorrow = new Date(workStart(schedule.value, now.value, 1)).toISOString()
+  // "tomorrow 08:00" or "Mon 08:00": the day in the label, the time as the hint.
+  const [day, time] = when(tomorrow, now.value).split(' ')
   return [
     { label: 'For 2 hours', hint: `until ${when(later, now.value)}`, name: 'Hold for 2 hours', until: later },
-    { label: "Until tomorrow's hours", hint: when(tomorrow, now.value), name: `Hold until ${when(tomorrow, now.value)}`, until: tomorrow },
+    { label: `Until ${day}`, hint: time ?? '', name: `Hold until ${when(tomorrow, now.value)}`, until: tomorrow },
     { label: 'Until I resume', hint: '', name: 'Hold until I resume', until: undefined },
   ]
 }

@@ -460,6 +460,7 @@ test('without account.manage the pacing controls stay visible but inert', async 
   await expect(cap(page).getByRole('radio', { name: '6' })).toBeDisabled()
   await expect(cap(page).getByRole('switch', { name: 'Agents at night' })).toBeDisabled()
   await expect(cap(page).getByRole('button', { name: 'Customize work week' })).toBeDisabled()
+  await expect(cap(page).getByRole('button', { name: /^Keep for you/ })).toBeDisabled()
   await expect(pool(page, 'codex').getByRole('button', { name: /sprint or hold/ })).toHaveCount(0)
 })
 
@@ -566,7 +567,7 @@ const SHOT_STATES: Shot[] = [
   { name: 'away', options: { away: true } },
   { name: 'hold-2h', act: async page => {
     await pool(page, 'grok').getByRole('button', { name: 'Grok: sprint or hold' }).click(); await page.getByRole('menuitem', { name: 'Hold for 2 hours' }).click()
-    await expect(pool(page, 'grok').locator('.override')).toContainText('until')
+    await expect(pool(page, 'grok').locator('.plan')).toContainText('On hold until')
   } },
   { name: 'plan-first', options: { planCard: 'first' } },
   { name: 'plan-new', options: { planCard: 'new' } },

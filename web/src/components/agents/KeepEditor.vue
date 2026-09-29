@@ -5,6 +5,7 @@ import {
   AUTO_RESERVE, RESERVE_MAX, RESERVE_MIN, RESERVE_STEP, buildPools, buildRows, clone, localDate, plainText, poolSentence, previewCapacity, reserveLabel, when, whenFull, withReserve, workStart, zonedInstant,
   type AccountInput, type CapacitySchedule, type Pool, type PoolReserve, type PoolView, type ReserveMode, type Sentence,
 } from '../../lib/capacity'
+import { brand } from '../../lib/brand'
 import AppIcon from '../AppIcon.vue'
 import HarnessMark from './HarnessMark.vue'
 import PlanSentence from './PlanSentence.vue'
@@ -155,7 +156,7 @@ const zoneNote = computed(() => { try { return Intl.DateTimeFormat().resolvedOpt
       <fieldset class="modes">
         <legend class="sr-only">How much agents leave you</legend>
         <div class="opt" :class="{ on: mode === 'auto' }">
-          <label><input v-model="mode" type="radio" name="keep-mode" value="auto"><span class="t">Auto</span><span class="d">What you usually use yourself; ~{{ AUTO_RESERVE }}% until Aeon has seen a week of it.</span></label>
+          <label><input v-model="mode" type="radio" name="keep-mode" value="auto"><span class="t">Auto</span><span class="d">What you usually use yourself; ~{{ AUTO_RESERVE }}% until {{ brand.short_name }} has seen a week of it.</span></label>
         </div>
         <div class="opt fixed" :class="{ on: mode === 'fixed' }">
           <label><input v-model="mode" type="radio" name="keep-mode" value="fixed"><span class="t">A fixed share</span></label>
