@@ -34,6 +34,8 @@ const VERIFICATION_MODES = ['one_per_harness', 'connect_only'] as const
 const DISCONNECT_MODES = ['drain', 'revoke_now'] as const
 const UNITS = ['requests', 'tokens', 'cost_micros'] as const
 const PACES = ['steady', 'frontload', 'unrestricted'] as const
+const HARNESS_STATES = ['ready', 'blocked', 'login_required', 'checking', 'draining'] as const
+export type HarnessStatus = (typeof HARNESS_STATES)[number]
 
 export type RequestState = (typeof REQUEST_STATES)[number]
 export type ComputerState = (typeof COMPUTER_STATES)[number]
@@ -130,6 +132,8 @@ export interface PairingView {
   interval_seconds?: number
   /** Local setup report. Absent or any value other than connected does not mean the daemon is connected. */
   setup_state?: SetupState
+  /** Status codes only. An absent report does not imply harness readiness. */
+  harness_statuses?: Partial<Record<string, HarnessStatus>>
   setup_error?: string | null
   last_seen_at?: string | null
   /** Recent probe evidence. Unknown and offline do not prove that local work stopped. */
@@ -910,6 +914,14 @@ export interface ComputerStatusCopy {
   next: string
 }
 
+export function describeHarnessStatus(view: Pick<PairingView, 'computer_state' | 'connectivity' | 'harness_statuses'>, harness: string): string {
+  if (view.computer_state !== 'connected') return ''
+  const status = view.harness_statuses?.[harness]
+  if (!status) return ''
+  const labels: Record<HarnessStatus, string> = { ready: 'Ready', blocked: 'Needs attention', login_required: 'Sign in required', checking: 'Checking', draining: 'Draining' }
+  return view.connectivity === 'online' ? labels[status] : `Last reported: ${labels[status].toLowerCase()}`
+}
+
 export function describeComputerStatus(view: Pick<PairingView, 'computer_state' | 'local_cleanup' | 'local_processes' | 'enrollments' | 'setup_state' | 'connectivity' | 'accounting_state'>, hints: { httpStatus?: number; heartbeatMissing?: boolean } = {}): ComputerStatusCopy {
   let stateLabel = view.computer_state === 'connected' ? 'Connected' : view.computer_state === 'draining' ? 'Draining' : view.computer_state === 'revoked' ? 'Revoked' : 'Not connected yet'
   const cleanupLabel = view.local_cleanup === 'confirmed' ? 'Local cleanup confirmed' : 'Local cleanup pending'
@@ -1382,6 +1394,16 @@ function parseView(data: unknown): PairingView {
   if (typeof record.interval_seconds === 'number' && record.interval_seconds > 0) view.interval_seconds = record.interval_seconds
   const setup = optionalEnum(record.setup_state, SETUP_STATES)
   if (setup) view.setup_state = setup
+  if (record.harness_statuses != null) {
+    const statuses = asRecord(record.harness_statuses, 'harness_statuses')
+    view.harness_statuses = {}
+    // Ignore future harnesses/states without inventing readiness. Never carry
+    // arbitrary diagnostics into the public computer projection.
+    for (const harness of ['claude', 'codex', 'cursor', 'grok']) {
+      const status = optionalEnum(statuses[harness], HARNESS_STATES)
+      if (status) view.harness_statuses[harness] = status
+    }
+  }
   if (typeof record.setup_error === 'string' && record.setup_error) view.setup_error = record.setup_error.slice(0, 500)
   else if (record.setup_error === null || record.setup_error === '') view.setup_error = null
   if (record.last_seen_at === null) view.last_seen_at = null

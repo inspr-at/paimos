@@ -3,7 +3,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import AppIcon from '../AppIcon.vue'
 import {
-  PairingError, activeRunIds, applyComputerListRefresh, describeComputerStatus, disconnectComputer, disconnectConfirm,
+  PairingError, activeRunIds, applyComputerListRefresh, describeComputerStatus, describeHarnessStatus, disconnectComputer, disconnectConfirm,
   disconnectEnrollment, getPairingComputer, lastActiveLabel, listPairingComputers, pairingReadGeneration, pairingScopeKey,
   platformCaption, type DisconnectMode, type PairingPermissions, type PairingView,
 } from '../../lib/agentPairing'
@@ -123,6 +123,15 @@ function statusOf(computer: PairingView) {
 function harnesses(computer: PairingView) {
   return computer.enrollments.filter(item => item.state !== 'revoked')
 }
+function reportedHarnesses(computer: PairingView) {
+  return [...new Set(harnesses(computer).map(item => item.harness))]
+}
+function hasHarnessReports(computer: PairingView) {
+  return reportedHarnesses(computer).some(harness => describeHarnessStatus(computer, harness))
+}
+function needsHarnessAttention(computer: PairingView) {
+  return computer.computer_state === 'connected' && reportedHarnesses(computer).some(harness => computer.harness_statuses?.[harness] === 'blocked')
+}
 function canChange(computer: PairingView) {
   return props.permissions.canDisconnect && (computer.computer_state === 'connected' || computer.computer_state === 'draining')
 }
@@ -212,7 +221,7 @@ function assign(error: unknown, fallback: string) {
       <div class="sheet" aria-hidden="true">
         <span>Computer</span><span>Harnesses</span><span>Status</span><span>Last active</span><span />
       </div>
-      <article v-for="computer in computers" :key="keyOf(computer)" class="computer" :class="{ open: openId === keyOf(computer) }">
+      <article v-for="computer in computers" :key="keyOf(computer)" class="computer" :class="{ open: openId === keyOf(computer), 'has-reports': hasHarnessReports(computer) }">
         <div class="identity">
           <span class="glyph"><AppIcon name="monitor" :size="16" /></span>
           <div class="identity-text">
@@ -226,7 +235,13 @@ function assign(error: unknown, fallback: string) {
             </p>
           </div>
         </div>
-        <p class="harness-line">
+        <div v-if="hasHarnessReports(computer)" class="harness-line reported">
+          <span v-for="harness in reportedHarnesses(computer)" :key="harness" class="harness-report">
+            <HarnessMark :harness="harness" :size="14" />
+            <span class="harness-report-text" :title="[harnessLabel(harness), describeHarnessStatus(computer, harness)].filter(Boolean).join(' · ')">{{ harnessLabel(harness) }}<span v-if="describeHarnessStatus(computer, harness)" class="harness-state"> · {{ describeHarnessStatus(computer, harness) }}</span></span>
+          </span>
+        </div>
+        <p v-else class="harness-line">
           <HarnessMark v-for="enrollment in harnesses(computer)" :key="enrollment.account_id" :harness="enrollment.harness" :size="14" />
           <span>{{ harnesses(computer).length }} {{ harnesses(computer).length === 1 ? 'harness' : 'harnesses' }}</span>
         </p>
@@ -241,11 +256,12 @@ function assign(error: unknown, fallback: string) {
         </div>
         <div v-if="openId === keyOf(computer)" class="detail">
           <p>{{ statusOf(computer).detail }} {{ statusOf(computer).next }}</p>
+          <p v-if="needsHarnessAttention(computer)">Run <code>aeon-agentd setup status</code> on this computer for the repair step.</p>
           <ul>
             <li v-for="enrollment in computer.enrollments" :key="enrollment.account_id">
               <HarnessMark :harness="enrollment.harness" :size="14" />
               <span class="enrollment-name">{{ harnessLabel(enrollment.harness) }} · {{ enrollment.label }}</span>
-              <span class="enrollment-meta">{{ enrollment.state }}<template v-if="enrollment.verification_state && enrollment.verification_state !== 'not_selected'"> · verification {{ enrollment.verification_state === 'unavailable' ? 'unavailable' : enrollment.verification_state.replace(/_/g, ' ') }}</template><template v-if="enrollment.local_processes"> · {{ enrollment.local_processes }} local processes</template><template v-if="enrollment.accounting_state === 'unconfirmed'"> · accounting unconfirmed</template></span>
+              <span class="enrollment-meta">{{ enrollment.state === 'connected' ? describeHarnessStatus(computer, enrollment.harness) || enrollment.state : enrollment.state }}<template v-if="enrollment.verification_state && enrollment.verification_state !== 'not_selected'"> · verification {{ enrollment.verification_state === 'unavailable' ? 'unavailable' : enrollment.verification_state.replace(/_/g, ' ') }}</template><template v-if="enrollment.local_processes"> · {{ enrollment.local_processes }} local processes</template><template v-if="enrollment.accounting_state === 'unconfirmed'"> · accounting unconfirmed</template></span>
               <span v-if="enrollment.verification_error && enrollment.verification_error !== 'verification_unavailable'" class="enrollment-meta">{{ enrollment.verification_error }}</span>
               <button v-if="canChange(computer) && enrollment.state !== 'revoked'" type="button" class="btn sm ghost remove" @click="openDialog(computer, 'enrollment', enrollment.account_id)">Remove<span class="sr-only"> {{ enrollment.label }} from {{ brand.short_name }}</span></button>
             </li>
@@ -311,6 +327,10 @@ function assign(error: unknown, fallback: string) {
 .path-head { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .path-tail { flex: none; white-space: nowrap; }
 .harness-line, .status { display: flex; align-items: center; gap: 6px; min-width: 0; color: var(--ink); font-size: 13px; white-space: nowrap; }
+.harness-line.reported { display: grid; gap: 4px; }
+.harness-report { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.harness-report-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.harness-state { color: var(--ink-2); }
 .last-active { font-size: 12.5px; }
 .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--st-backlog); }
 .dot[data-state="Connected"] { background: var(--ok); }
@@ -343,6 +363,7 @@ function assign(error: unknown, fallback: string) {
   .computers { padding: 4px 4px 6px; }
   .sheet { display: none; }
   .computer { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "id actions" "harness actions" "status actions"; row-gap: 4px; }
+  .computer.has-reports { grid-template-areas: "id actions" "harness harness" "status status"; }
   .identity { grid-area: id; }
   .harness-line { grid-area: harness; padding-left: 42px; }
   .status { grid-area: status; padding-left: 42px; }

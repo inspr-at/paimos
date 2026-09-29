@@ -5,7 +5,7 @@ import { sessionEnded } from '../src/lib/api.ts'
 import {
   DEFAULT_REVIEW_CHOICE, LOOKUP_DEBOUNCE_MS, MIN_POLL_INTERVAL_MS, PUBLIC_PAIRING_GUIDE_PATH, PairingError,
   agentRouteKind, canonicalUserCode, clearPairingClientState, createOngoingLimits, denyPairing,
-  describeComputerStatus, describeProgress, disconnectComputer, disconnectConfirm, disconnectEnrollment,
+  describeComputerStatus, describeHarnessStatus, describeProgress, disconnectComputer, disconnectConfirm, disconnectEnrollment,
   formatVerification, getPairingGuide, isPublicPairingGuide, listPairingComputers, lookupPairing,
   ongoingLimitError, pairingPermissions, planApproval, planLookup, planOngoingLimits, planPoll,
   registerAgentUrl, sessionFreezeApplies, submitApproval, verificationWarning, defaultSelectedAccountKeys,
@@ -783,3 +783,21 @@ function enrollment(overrides: Record<string, unknown> = {}) {
     ...overrides,
   }
 }
+
+test('harness status is scoped, optional and never claims readiness from stale evidence', async () => {
+  const connected = view({ state: 'redeemed', computer_state: 'connected', setup_state: 'connected', connectivity: 'online', harness_statuses: { claude: 'blocked', codex: 'ready' } })
+  assert.equal(describeHarnessStatus(connected, 'claude'), 'Needs attention')
+  assert.equal(describeHarnessStatus(connected, 'codex'), 'Ready')
+  assert.equal(describeHarnessStatus(connected, 'cursor'), '')
+  assert.equal(describeComputerStatus(connected).stateLabel, 'Connected')
+  assert.equal(describeProgress(connected).phase, 'connected')
+  assert.equal(describeHarnessStatus({ ...connected, connectivity: 'offline' }, 'codex'), 'Last reported: ready')
+  assert.equal(describeHarnessStatus({ ...connected, computer_state: 'revoked' }, 'codex'), '')
+  assert.equal(describeHarnessStatus({ ...connected, computer_state: 'draining' }, 'codex'), '')
+  globalThis.fetch = async () => jsonResponse({ computers: [connected] })
+  assert.deepEqual((await listPairingComputers())[0]?.harness_statuses, { claude: 'blocked', codex: 'ready' })
+  globalThis.fetch = async () => jsonResponse({ computers: [view({ harness_statuses: { claude: 'raw local diagnostics', future: 'ready', codex: 'ready' } })] })
+  assert.deepEqual((await listPairingComputers())[0]?.harness_statuses, { codex: 'ready' })
+  globalThis.fetch = async () => jsonResponse({ computers: [view()] })
+  assert.equal((await listPairingComputers())[0]?.harness_statuses, undefined)
+})
