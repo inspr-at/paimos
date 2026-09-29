@@ -111,21 +111,29 @@ client with `releases.read`/`nodes.read` to obtain the export. Keep the raw expo
 in its authorized local context: it may contain hidden text and tenant IDs and
 must not be committed as the public projection. The generated file contains
 only public ticket keys, pills, benefits, captured groups and capture provenance.
-Review and commit it with the reservation. Identical reruns are idempotent;
-conflicting entries fail instead of rewriting a reserved version.
+Review and commit it with the reservation. Identical reruns are idempotent
+only with that same export file: a fresh export has a new `captured_at` and
+conflicts. Restore the file before re-reserving; do not export the preview again.
+Conflicting entries fail instead of rewriting a reserved version.
 
 For historical backfill, export existing stored snapshots as `VERSION.json` in
 one directory and run the same command with `-snapshots DIRECTORY -tenant
 TENANT_UUID -project AEON_PROJECT_UUID`. A run with no exports imports only
 authoritative snapshots already in local tags and reports missing versions.
-Alternatively, save an authorized PPM `GET /api/releases` response locally and
-pass `-history HISTORY.json`. This consumes only `database-snapshot` or immutable
-tag-snapshot notes, never `changes.linked_tickets` from older live annotations.
+Alternatively, save an authorized PPM `GET /api/releases` response, record that
+workspace's `tenant_id` and `project_node_id` on the saved file, and pass
+`-history HISTORY.json -tenant TENANT_UUID -project AEON_PROJECT_UUID`. The two
+identifiers must match the flags; a file for another workspace is rejected.
+This consumes only `database-snapshot` or immutable tag-snapshot notes, never
+`changes.linked_tickets`. It records each ticket's group, including a group the
+server derived from the live classification when the snapshot itself had none.
 Never substitute live ticket fields, release PR bodies or pills.tsv files for
 missing snapshots. Existing tags and artifacts stay unchanged; the new binary
-carries the backfill. Migration `0996` captures future groups alongside the five
-note fields. Older snapshots without a group retain that gap; their historical
-commit types remain available, without consulting current ticket tags.
+carries the backfill. Migration `0997` captures future groups alongside the five
+note fields. Older snapshots have no group. Serving those takes only the group
+from the ticket's current classification (a bug is a fix, the same rule as
+AEON-289). The captured pill and benefit stay frozen. The history export above
+records that group, so other workspaces see Fixes from the embedded notes.
 
 `internal/releasehistory/generate` also reads legacy `release-notes/VERSION.json`
 files **from their matching annotated Git tags**, including under `-offline`.

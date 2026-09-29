@@ -14,6 +14,30 @@ const ProductNotesSchema = "aeon.product-release-notes.v1"
 const ProductNotesPath = "internal/releasehistory/data/product-notes.json"
 const ProductNotesSource = "embedded-product-notes"
 
+// productRepository reports this product's GitHub names. The release workflow
+// passes GITHUB_REPOSITORY, which is inspr-at/paimos; inspr-at/aeon is the
+// same repository.
+func productRepository(name string) bool {
+	return name == "inspr-at/aeon" || name == "inspr-at/paimos"
+}
+
+func aeonHistory(h History) bool {
+	return h.Product == "PAIMOS AEON" || productRepository(h.Repository)
+}
+
+func sameProductNotes(h History, bundle ProductNotes) bool {
+	return h.Product == bundle.Product && h.Product == "PAIMOS AEON" && productRepository(h.Repository) && productRepository(bundle.Repository)
+}
+
+// HistoryBindingError rejects a saved release export whose tenant or project
+// is missing or different from the explicit selection.
+func HistoryBindingError(gotTenant, gotProject, wantTenant, wantProject string) error {
+	if !noteUUID.MatchString(wantTenant) || !noteUUID.MatchString(wantProject) || gotTenant != wantTenant || gotProject != wantProject {
+		return fmt.Errorf("history does not match the explicitly selected tenant and project")
+	}
+	return nil
+}
+
 // ProductNotes is a reviewed public projection, not a copy of tenant records.
 // Only release-note text and its capture provenance enter the binary.
 type ProductNotes struct {
@@ -48,7 +72,7 @@ func ReadProductNotes(raw []byte) (ProductNotes, error) {
 	if d.Decode(new(any)) != io.EOF {
 		return bundle, fmt.Errorf("product notes must be one JSON object")
 	}
-	if bundle.Schema != ProductNotesSchema || bundle.Product != "PAIMOS AEON" || bundle.Repository != "inspr-at/aeon" || bundle.Releases == nil {
+	if bundle.Schema != ProductNotesSchema || bundle.Product != "PAIMOS AEON" || !productRepository(bundle.Repository) || bundle.Releases == nil {
 		return bundle, fmt.Errorf("product notes identity is invalid")
 	}
 	for version, notes := range bundle.Releases {
@@ -102,7 +126,7 @@ func publicNotes(notes *Notes) PublicNotes {
 // export (or a local tag build). Commit annotations and live linked text are
 // deliberately ignored. The caller supplies the reviewed export offline.
 func (bundle *ProductNotes) AddHistory(history History) error {
-	if history.Schema != Schema || history.Product != bundle.Product || history.Repository != bundle.Repository {
+	if history.Schema != Schema || !sameProductNotes(history, *bundle) {
 		return fmt.Errorf("release history does not identify the selected product")
 	}
 	for _, rel := range history.Releases {
@@ -145,7 +169,7 @@ func (bundle *ProductNotes) Add(version string, notes PublicNotes) error {
 }
 
 func withProductNotes(h History, bundle ProductNotes) History {
-	if h.Product != bundle.Product || h.Repository != bundle.Repository {
+	if !sameProductNotes(h, bundle) {
 		return h
 	}
 	h.Releases = append([]Release{}, h.Releases...)
@@ -164,13 +188,17 @@ func withProductNotes(h History, bundle ProductNotes) History {
 	return h
 }
 
-// withFrozenGroups makes the selected snapshot the only ticket metadata source.
-// A missing capture leaves commit-derived groups, never today's ticket fields.
-func withFrozenGroups(h History) History {
+// withFrozenGroups makes the selected snapshot the only ticket text source.
+// A missing capture leaves commit-derived groups. A capture without a group
+// takes only the group from live: a bug is fixes, a visible benefit is features.
+func withFrozenGroups(h History, live map[string]TicketMeta) History {
 	out := h
 	out.Releases = make([]Release, len(h.Releases))
 	for i, rel := range h.Releases {
 		meta := map[string]TicketMeta{}
+		if HasSnapshot(rel) && rel.Notes != nil {
+			rel.Notes = applyClassification(rel.Notes, live)
+		}
 		if HasSnapshot(rel) {
 			items := publicNotes(rel.Notes).Items
 			if rel.Notes.PublicItems != nil {
@@ -195,4 +223,108 @@ func withFrozenGroups(h History) History {
 		out.Releases[i] = withGroups(History{Releases: []Release{rel}}, meta).Releases[0]
 	}
 	return out
+}
+
+// groupFromClassification is the AEON-289 group. Live pill and benefit text is ignored.
+func groupFromClassification(meta TicketMeta) string {
+	if meta.Bug {
+		return GroupFixes
+	}
+	if meta.PublicBenefit {
+		return GroupFeatures
+	}
+	return GroupOther
+}
+
+// applyClassification records a derived group on a copy of notes. A group the
+// capture already has is left as captured. Other and unknown tickets stay unset.
+func applyClassification(notes *Notes, live map[string]TicketMeta) *Notes {
+	if notes == nil || len(live) == 0 {
+		return notes
+	}
+	derived := func(group, key string) string {
+		if group != "" {
+			return ""
+		}
+		meta, ok := live[key]
+		if !ok {
+			return ""
+		}
+		g := groupFromClassification(meta)
+		if g == GroupFixes || g == GroupFeatures {
+			return g
+		}
+		return ""
+	}
+	change := false
+	if notes.PublicItems != nil {
+		for _, item := range notes.PublicItems {
+			if derived(item.Group, item.Key) != "" {
+				change = true
+				break
+			}
+		}
+	} else {
+		for _, item := range notes.Items {
+			if derived(item.Group, item.Key) != "" {
+				change = true
+				break
+			}
+		}
+	}
+	if !change {
+		return notes
+	}
+	notes = cloneNotes(notes)
+	if notes.PublicItems != nil {
+		for i := range notes.PublicItems {
+			if g := derived(notes.PublicItems[i].Group, notes.PublicItems[i].Key); g != "" {
+				notes.PublicItems[i].Group = g
+			}
+		}
+		return notes
+	}
+	for i := range notes.Items {
+		if g := derived(notes.Items[i].Group, notes.Items[i].Key); g != "" {
+			notes.Items[i].Group = g
+		}
+	}
+	return notes
+}
+
+func cloneNotes(n *Notes) *Notes {
+	c := *n
+	if n.Items != nil {
+		c.Items = append([]NoteItem(nil), n.Items...)
+	}
+	if n.PublicItems != nil {
+		c.PublicItems = append([]TicketNote(nil), n.PublicItems...)
+	}
+	if n.Gaps != nil {
+		c.Gaps = append([]string(nil), n.Gaps...)
+	}
+	return &c
+}
+
+func unclassifiedTicketKeys(h History) []string {
+	var keys []string
+	for _, rel := range h.Releases {
+		if !HasSnapshot(rel) || rel.Notes == nil {
+			continue
+		}
+		if rel.Notes.PublicItems != nil {
+			for _, item := range rel.Notes.PublicItems {
+				if item.Group == "" {
+					keys = append(keys, item.Key)
+				}
+			}
+			continue
+		}
+		for _, item := range rel.Notes.Items {
+			if item.Group == "" {
+				keys = append(keys, item.Key)
+			}
+		}
+	}
+	return uniqueTicketKeys(keys)
 }

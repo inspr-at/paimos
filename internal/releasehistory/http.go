@@ -146,12 +146,13 @@ func (m *Module) one(w http.ResponseWriter, r *http.Request) {
 	httpapi.WriteError(w, http.StatusNotFound, "no such release in this build's history")
 }
 
-// annotated derives Aeon's groups from the selected frozen capture. Other
-// products retain their optional legacy ticket source; lookup errors leave
-// their embedded history unchanged.
+// annotated derives Aeon's groups from the selected frozen capture. A capture
+// without a group takes only that group from the live classification. Other
+// products retain their legacy ticket source; lookup errors leave their
+// embedded history unchanged.
 func (m *Module) annotated(ctx context.Context, h History) History {
-	if h.Product == "PAIMOS AEON" || h.Repository == "inspr-at/aeon" {
-		return withFrozenGroups(h)
+	if aeonHistory(h) {
+		return m.annotateAeon(ctx, h)
 	}
 	if m.tickets == nil {
 		return h
@@ -167,4 +168,22 @@ func (m *Module) annotated(ctx context.Context, h History) History {
 		return h
 	}
 	return withGroups(h, meta)
+}
+
+// annotateAeon keeps captured pill and benefit text. When the capture stored
+// no group, the caller's live classification supplies features or fixes only.
+func (m *Module) annotateAeon(ctx context.Context, h History) History {
+	keys := unclassifiedTicketKeys(h)
+	var live map[string]TicketMeta
+	if len(keys) > 0 && m != nil && m.tickets != nil {
+		if p, ok := tenant.PrincipalFrom(ctx); ok && p.TenantID != "" {
+			meta, err := m.tickets(ctx, p.TenantID, keys)
+			if err != nil {
+				slog.Warn("release change groups left without live classification", "err", err)
+			} else {
+				live = meta
+			}
+		}
+	}
+	return withFrozenGroups(h, live)
 }

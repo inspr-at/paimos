@@ -7502,7 +7502,7 @@ components:
               pill_de: {type: string}
               benefit_en: {type: string}
               benefit_de: {type: string}
-              group: {type: string, enum: [features, fixes, other], description: Frozen classification; omitted when an old snapshot did not capture it}
+              group: {type: string, enum: [features, fixes, other], description: "Frozen classification, including a group recorded at export when an older snapshot did not capture one. Omitted until then."}
         items:
           type: array
           items:
@@ -7511,7 +7511,7 @@ components:
             properties:
               id: {type: string, format: uuid}
               key: {type: string}
-              group: {type: string, enum: [features, fixes, other], description: Frozen classification when available; older snapshots omit it}
+              group: {type: string, enum: [features, fixes, other], description: "Frozen classification when the snapshot captured it. When an older snapshot omitted it, the server fills features or fixes from the ticket's current classification only (a bug is a fix) and leaves the captured pill and benefit unchanged."}
               pill_en: {type: string}
               pill_de: {type: string}
               benefit_en: {type: string}
@@ -7605,7 +7605,7 @@ components:
                     pill_de: {type: string}
                     benefit_en: {type: string}
                     benefit_de: {type: string}
-                    group: {type: string, enum: [features, fixes], description: "Additive. This ticket's own group: fixes for a bug tag, type or kind, else features. A commit naming several tickets takes the strongest group, so clients read this to place each ticket. Omitted by older servers."}
+                    group: {type: string, enum: [features, fixes], description: "Additive. This ticket's own group: the frozen capture when it has one, otherwise fixes for a live bug tag, type or kind and features for a visible benefit. Aeon never uses the live pill or benefit. A commit naming several tickets takes the strongest group, so clients read this to place each ticket. Omitted by older servers."}
         changes_omitted: {type: integer, minimum: 0}
         evidence:
           type: object

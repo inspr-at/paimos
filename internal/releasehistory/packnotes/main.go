@@ -26,7 +26,7 @@ func main() {
 func run() error {
 	repo := flag.String("repo", ".", "Aeon checkout")
 	snapshots := flag.String("snapshots", "", "directory of frozen VERSION.json snapshot exports")
-	historyFile := flag.String("history", "", "reviewed authenticated /api/releases export; frozen notes only")
+	historyFile := flag.String("history", "", "reviewed /api/releases export with tenant_id and project_node_id; frozen notes only")
 	snapshot := flag.String("snapshot", "", "one snapshot export for the reserved version")
 	reserve := flag.String("reserve", "", "explicitly freeze the preview for version.json's reserved coordinate")
 	tenant := flag.String("tenant", "", "expected source tenant UUID (required for exports)")
@@ -41,7 +41,7 @@ func run() error {
 	if flag.NArg() != 0 || ((*snapshot == "") != (*reserve == "")) || inputs > 1 {
 		return fmt.Errorf("use -snapshots DIR or -snapshot FILE -reserve VERSION; exports require -tenant UUID -project UUID")
 	}
-	if (*snapshots != "" || *snapshot != "") && (*tenant == "" || *project == "") {
+	if (*snapshots != "" || *snapshot != "" || *historyFile != "") && (*tenant == "" || *project == "") {
 		return fmt.Errorf("exports require -tenant UUID -project UUID")
 	}
 	path := filepath.Join(*repo, releasehistory.ProductNotesPath)
@@ -54,6 +54,8 @@ func run() error {
 	} else if !os.IsNotExist(err) {
 		return err
 	}
+	// Tag import uses the canonical name. A saved /api/releases export may name
+	// inspr-at/paimos; AddHistory accepts either alias of this product.
 	history, err := releasehistory.Build(context.Background(), releasehistory.Options{Repo: *repo, Repository: "inspr-at/aeon"})
 	if err != nil {
 		return err
@@ -71,11 +73,18 @@ func run() error {
 		if err != nil {
 			return err
 		}
-		var exported releasehistory.History
+		var exported struct {
+			releasehistory.History
+			TenantID  string `json:"tenant_id"`
+			ProjectID string `json:"project_node_id"`
+		}
 		if len(raw) > 16<<20 || json.Unmarshal(raw, &exported) != nil {
 			return fmt.Errorf("invalid release history export")
 		}
-		if err := bundle.AddHistory(exported); err != nil {
+		if err := releasehistory.HistoryBindingError(exported.TenantID, exported.ProjectID, *tenant, *project); err != nil {
+			return err
+		}
+		if err := bundle.AddHistory(exported.History); err != nil {
 			return err
 		}
 	}

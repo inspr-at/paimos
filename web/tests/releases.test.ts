@@ -33,6 +33,25 @@ test('portable public notes retain captured groups and language fallback without
   assert.equal(presentRelease(withPublicNoteItems(emptyTenant)).fixes.length, 0)
 })
 
+test('a capture without a group plus a bug ticket is a fix (AEON-372)', () => {
+  const item = { id: '44444444-4444-4444-8444-444444444444', key: 'AEON-7', pill_en: 'Frozen repair', pill_de: '', benefit_en: 'Captured benefit.', benefit_de: '' }
+  const notes = {
+    source: 'database-snapshot', snapshot_sha256: 'a'.repeat(64), captured_at: '2026-09-28T12:00:00Z', release_revision: 1, gaps: [], hidden: 0,
+    items: [item],
+  }
+  const live = { key: 'AEON-7', group: 'fixes' as const, pill_en: 'Live text', pill_de: '', benefit_en: 'Not the snapshot.', benefit_de: '' }
+  const bug = { ...change('a', 'other', 'AEON-7: repair the release', ['AEON-7']), group: 'fixes' as const, linked_tickets: [live] }
+  const shown = presentRelease(rel('260928120000.0.0', '2026-09-28T12:00:00Z', { notes, changes: [bug] }))
+  assert.equal(shown.features.length, 0)
+  assert.deepEqual(shown.fixes.map(line => [line.key, line.pill, line.benefit]), [['AEON-7', 'Frozen repair', 'Captured benefit.']])
+  const recorded = presentRelease(rel('260928120000.0.0', '2026-09-28T12:00:00Z', {
+    notes: { ...notes, items: [{ ...item, group: 'fixes' as const }] },
+    changes: [change('a', 'other', 'AEON-7: repair the release', ['AEON-7'])],
+  }))
+  assert.equal(recorded.features.length, 0)
+  assert.deepEqual(recorded.fixes.map(line => [line.key, line.pill]), [['AEON-7', 'Frozen repair']])
+})
+
 test('days group newest first with Today and Yesterday labels', () => {
   const now = new Date(2026, 8, 24, 16, 0).getTime()
   const days = groupByDay([
