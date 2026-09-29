@@ -279,7 +279,29 @@ func (a *ClaudeAdapter) Probe(ctx context.Context, key string) bool {
 
 // ProbeStatus reads `claude auth status --json`. loggedIn false, an API key
 // login, or a different email is an authentication failure for this account.
+// A local dependency failure (AEON-342) is unavailable, never a sign-out.
 func (a *ClaudeAdapter) ProbeStatus(ctx context.Context, key string) ProbeStatus {
+	status, _ := a.ProbeAccountStatus(ctx, key)
+	return status
+}
+
+// ProbeAccount separates local dependency failures from vendor sign-in state.
+// Dependency diagnostics are value-free; vendor output is never surfaced.
+func (a *ClaudeAdapter) ProbeAccount(ctx context.Context, key string) (bool, error) {
+	status, err := a.ProbeAccountStatus(ctx, key)
+	return status.OK, err
+}
+
+// ProbeAccountStatus is ProbeAccount with the probe's cause (AEON-298).
+func (a *ClaudeAdapter) ProbeAccountStatus(ctx context.Context, key string) (ProbeStatus, error) {
+	resolved, err := a.resolved("")
+	if err != nil {
+		return probeUnavailable, err
+	}
+	return resolved.probeResolved(ctx, key), nil
+}
+
+func (a *ClaudeAdapter) probeResolved(ctx context.Context, key string) ProbeStatus {
 	home, err := localHome(a.Homes, key)
 	if err != nil {
 		return probeUnavailable

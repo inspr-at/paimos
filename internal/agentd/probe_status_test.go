@@ -65,7 +65,9 @@ func TestProbeStatusSeparatesSignOutFromUnavailable(t *testing.T) {
 		return a.ProbeStatus(ctx, "k")
 	}
 	claude := func(out string, code int) ProbeStatus {
-		a := &ClaudeAdapter{ClaudePath: fakeStatus(t, out, code), Homes: map[string]string{"k": home}, Emails: map[string]string{"k": "a@example.com"}}
+		path := fakeStatus(t, out, code)
+		node, sdk := claudeAdapterDependencies(t, path) // AEON-342: a Claude probe needs valid dependencies
+		a := &ClaudeAdapter{NodePath: node, SDKPath: sdk, ClaudePath: path, Homes: map[string]string{"k": home}, Emails: map[string]string{"k": "a@example.com"}}
 		return a.ProbeStatus(ctx, "k")
 	}
 	cursor := func(out string, code int) ProbeStatus {
@@ -169,7 +171,9 @@ func TestProbeStatusRejectsDuplicateKeys(t *testing.T) {
 	ctx := context.Background()
 	home := privateHome(t)
 	claude := func(out string) ProbeStatus {
-		a := &ClaudeAdapter{ClaudePath: fakeStatus(t, out, 0), Homes: map[string]string{"k": home}, Emails: map[string]string{"k": "a@example.com"}}
+		path := fakeStatus(t, out, 0)
+		node, sdk := claudeAdapterDependencies(t, path) // AEON-342: a Claude probe needs valid dependencies
+		a := &ClaudeAdapter{NodePath: node, SDKPath: sdk, ClaudePath: path, Homes: map[string]string{"k": home}, Emails: map[string]string{"k": "a@example.com"}}
 		return a.ProbeStatus(ctx, "k")
 	}
 	cursor := func(out string) ProbeStatus {
@@ -243,7 +247,9 @@ func TestProbeStatusOutputCap(t *testing.T) {
 		return a.ProbeStatus(ctx, "k")
 	}
 	claude := func(body string) ProbeStatus {
-		a := &ClaudeAdapter{ClaudePath: fakeScript(t, body), Homes: map[string]string{"k": home}, Emails: map[string]string{"k": "a@example.com"}}
+		path := fakeScript(t, body)
+		node, sdk := claudeAdapterDependencies(t, path) // AEON-342: a Claude probe needs valid dependencies
+		a := &ClaudeAdapter{NodePath: node, SDKPath: sdk, ClaudePath: path, Homes: map[string]string{"k": home}, Emails: map[string]string{"k": "a@example.com"}}
 		return a.ProbeStatus(ctx, "k")
 	}
 	cursor := func(body string) ProbeStatus {

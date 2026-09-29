@@ -435,11 +435,8 @@ func TestClaudeBridgeControlProtocol(t *testing.T) {
 		t.Fatal(err)
 	}
 	path := fakeVendorPath(t, "claude")
-	sdk := filepath.Join(filepath.Dir(path), "sdk.mjs")
-	if err := os.WriteFile(sdk, []byte("export {};"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	a := NewClaudeAdapter(path, sdk, path, map[string]string{"account": home})
+	node, sdk := claudeAdapterDependencies(t, path)
+	a := NewClaudeAdapter(node, sdk, path, map[string]string{"account": home})
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	events := make(chan AdapterEvent, 16)
@@ -615,11 +612,8 @@ func TestClaudeRunTelemetryCarriesCachedTokens(t *testing.T) {
 		t.Fatal(err)
 	}
 	path := fakeVendorPath(t, "claude")
-	sdk := filepath.Join(filepath.Dir(path), "sdk.mjs")
-	if err := os.WriteFile(sdk, []byte("export {};"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	a := NewClaudeAdapter(path, sdk, path, map[string]string{"account": home})
+	node, sdk := claudeAdapterDependencies(t, path) // AEON-342: node and an installed SDK package
+	a := NewClaudeAdapter(node, sdk, path, map[string]string{"account": home})
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	events := make(chan AdapterEvent, 32)

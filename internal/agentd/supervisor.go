@@ -132,6 +132,8 @@ type Supervisor struct {
 	blockedAccounts   map[string]bool
 	probedAccounts    map[string]bool
 	loginRequired     map[string]bool
+	harnessHolds      map[string]string
+	dependencyErrors  map[string]string
 	mu                sync.Mutex
 	api               API
 	journal           *localjournal.Journal[Record]
@@ -183,6 +185,11 @@ func NewSupervisor(ctx context.Context, c Config) (*Supervisor, error) {
 	for _, a := range c.Adapters {
 		if a == nil || a.Name() == "" || adapters[a.Name()] != nil {
 			return nil, errors.New("duplicate or invalid adapter")
+		}
+		if claude, ok := a.(*ClaudeAdapter); ok {
+			bound := *claude
+			bound.Workspace = c.Workspace
+			a = &bound
 		}
 		adapters[a.Name()] = a
 	}
@@ -393,7 +400,22 @@ func (s *Supervisor) PollOnce(ctx context.Context) error {
 			s.mu.Unlock()
 			continue
 		}
-		status := probeAccount(ctx, adapters[account.Harness].(AccountProber), account.Key)
+		probe := adapters[account.Harness].(AccountProber)
+		s.mu.Lock()
+		hold := s.harnessHolds[account.Harness]
+		s.mu.Unlock()
+		// A held harness (AEON-342) is not probed and reports unavailable.
+		status := probeUnavailable
+		var dependencyErr error
+		if hold == "" {
+			if detailed, ok := probe.(interface {
+				ProbeAccountStatus(context.Context, string) (ProbeStatus, error)
+			}); ok {
+				status, dependencyErr = detailed.ProbeAccountStatus(ctx, account.Key)
+			} else {
+				status = probeAccount(ctx, probe, account.Key)
+			}
+		}
 		available := status.OK
 		var err error
 		if reporter, ok := s.api.(ProbeStatusReporter); ok {
@@ -402,10 +424,19 @@ func (s *Supervisor) PollOnce(ctx context.Context) error {
 			err = s.api.Probe(ctx, account.ID, s.daemonID, s.generation, available)
 		}
 		s.mu.Lock()
+		if s.dependencyErrors == nil {
+			s.dependencyErrors = map[string]string{}
+		}
+		if dependencyErr != nil {
+			s.dependencyErrors[account.Harness] = dependencyErr.Error()
+		} else if hold == "" {
+			delete(s.dependencyErrors, account.Harness)
+		}
 		s.blockedAccounts[account.ID] = err != nil || !available
 		s.probedAccounts[account.ID] = err == nil && available
-		// Only a confirmed sign-out asks the person to sign in again.
-		s.loginRequired[account.ID] = status.Failure == ProbeAuthFailed
+		// Only a confirmed sign-out asks the person to sign in again; a hold or a
+		// local dependency failure never does (AEON-342).
+		s.loginRequired[account.ID] = status.Failure == ProbeAuthFailed && hold == "" && dependencyErr == nil
 		s.mu.Unlock()
 		if err != nil {
 			failures = append(failures, errors.New("account probe unavailable"))
@@ -472,6 +503,14 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 	adapter := s.adapters[profile.Harness]
 	if adapter == nil || profile.ID == "" {
 		return ErrUnsupported
+	}
+	// A harness hold must also cover direct starts and runs whose account is
+	// chosen by routing, rather than only queued runs with an account ID.
+	s.mu.Lock()
+	held := s.harnessHolds[profile.Harness] != "" || s.dependencyErrors[profile.Harness] != ""
+	s.mu.Unlock()
+	if held {
+		return ErrDraining
 	}
 	if err := validQueuedExecutionMode(run, adapter); err != nil {
 		if errors.Is(err, ErrVerificationUnavailable) && entry == nil {
