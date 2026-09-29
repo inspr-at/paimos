@@ -131,7 +131,11 @@ const optionId = (v: string) => `release-${v.replace(/\./g, '-')}`
 // ---------- Selection ----------
 function initialSelection() {
   if (cursor.value && byVersion.value.has(cursor.value)) return
-  const wanted = props.target && props.target !== 'all' ? props.target.replace(/^v/, '') : ''
+  // The header opens the full history (`releases=all`): nothing is selected, and
+  // a phone stays on the list. Choosing the running version here rewrote that
+  // address as soon as the sheet opened.
+  if (props.target === 'all') { showDetail.value = false; return }
+  const wanted = props.target ? props.target.replace(/^v/, '') : ''
   if (wanted && byVersion.value.has(wanted)) { cursor.value = wanted; if (phone.value) showDetail.value = true; return }
   // A version this build does not have cannot open as detail. Stay on the list,
   // where the one notice explains it.

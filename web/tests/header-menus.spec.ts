@@ -70,6 +70,19 @@ async function openAccount(page: Page) {
 }
 const names = (page: Page, menu: string) => page.getByRole('menu', { name: menu }).getByRole('menuitem').evaluateAll(items => items.map(item => (item.getAttribute('aria-label') ?? item.querySelector('.hm-text')?.textContent ?? item.textContent ?? '').trim()))
 
+// The address is `releases=all` only on the way to the running version unless
+// the history stays there. Wait until the sheet's own requests have finished,
+// then read the settled URL and the heading that is actually on screen.
+async function expectFullHistory(page: Page) {
+  const history = page.getByRole('dialog', { name: 'PAIMOS AEON releases' })
+  await expect(history.getByRole('listbox', { name: 'Releases, newest first' })).toBeVisible()
+  await page.waitForLoadState('networkidle')
+  await expect(page).toHaveURL(/[?&]releases=all(?:&|#|$)/)
+  await expect(history.getByRole('heading', { level: 1, name: 'PAIMOS AEON releases' })).toBeVisible()
+  await expect(history.getByRole('option', { selected: true })).toHaveCount(0)
+  return history
+}
+
 test.describe('gear menu', () => {
   test('an admin sees the workspace, agents, help and a healthy system', async ({ page }) => {
     const errors = watchErrors(page)
@@ -267,7 +280,7 @@ test.describe('avatar menu', () => {
     await page.keyboard.press('ArrowDown')
     await expect(menu.getByRole('menuitem', { name: 'Release history' })).toBeFocused()
     await page.keyboard.press('Enter')
-    await expect(page).toHaveURL(/[?&]releases=all/)
+    await expectFullHistory(page)
   })
 
   test('one menu at a time', async ({ page }) => {
@@ -281,6 +294,17 @@ test.describe('avatar menu', () => {
 })
 
 test.describe('phones', () => {
+  test('release history from the account menu stays on the list', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 })
+    await signIn(page, 'member')
+    await home(page)
+    const menu = await openAccount(page)
+    await menu.getByRole('menuitem', { name: 'Release history', exact: true }).click()
+    const history = await expectFullHistory(page)
+    await expect(history.locator('.shell')).not.toHaveClass(/show-detail/)
+    await expect(history.getByRole('listbox', { name: 'Releases, newest first' })).toBeVisible()
+  })
+
   // AEON-312: a ticket key stays whole beside the places, search, gear and avatar;
   // the moon stays in the header when there is room and otherwise leads the avatar sheet.
   for (const width of [375, 390]) {

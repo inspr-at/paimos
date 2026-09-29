@@ -79,6 +79,9 @@ function openReleases(version?: string) {
   openedHere = true
   void router.push({ path: route.path, query: { ...route.query, releases: version ?? 'all' }, hash: route.hash })
 }
+// The version pill opens the release this page is running. Menus open the full
+// history (`all`), which stays unselected instead of being rewritten to that release.
+function openRunningRelease() { openReleases(releases.current || undefined) }
 // A release and a language or view chosen in quick succession (a choice whose
 // filter hides the selected release moves the selection) both land: each
 // replace carries what is still on its way, until the address has it.
@@ -213,7 +216,7 @@ watch(() => [route.path, route.params.projectKey, route.params.ticketKey, route.
       </div>
     </main>
     <!-- A row of the shell: the page, docked panels and toasts all end above it. -->
-    <AppFooter v-if="!bare" :hidden="footerHidden" @releases="openReleases()" @pill="onFlowPill" />
+    <AppFooter v-if="!bare" :hidden="footerHidden" @releases="openRunningRelease" @pill="onFlowPill" />
     <ReleasesSheet v-if="releasesOpen" :target="releasesTarget" @select="selectRelease" @query="setReleasesQuery" @close="closeReleases" @home="goHome" @navigate="leaveReleasesFor" />
     <TicketPeekHost v-if="ticketPeek.openKey.value && !releasesOpen" :ref="ticketPeek.bind" :ticket-key="ticketPeek.openKey.value" :back-label="ticketPeek.backLabel.value" @close="ticketPeek.close()" />
     <ToastHost />
