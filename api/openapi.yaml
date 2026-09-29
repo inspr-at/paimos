@@ -2706,6 +2706,38 @@ paths:
       description: Session detail, including at most 20 recent activity notes and metadata changes, newest first.
       responses:
         '200': {description: Session detail, headers: {Aeon-Contract: {$ref: '#/components/headers/HarnessSessionContract'}}, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessSession'}}}}
+  /projects/{projectId}/harness-sessions/{sessionId}/reparent:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: reparentHarnessSession
+      description: A person owning both registrations or an owner/admin in their project moves a live worker to a live coordinator in the same project. Requires harness.write; verifies expected_revision and prevents cycles. Emits harness.reparented. Undo rechecks permissions, liveness and subsequent hierarchy changes; heartbeats do not invalidate undo.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [expected_revision, parent_harness_session_id]
+              properties:
+                expected_revision: {type: integer, minimum: 1}
+                parent_harness_session_id: {type: string, format: uuid}
+      responses:
+        '200':
+          description: Updated worker and undo event
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [session, event_id, undoable]
+                properties:
+                  session: {$ref: '#/components/schemas/HarnessSession'}
+                  event_id: {type: integer, format: int64}
+                  undoable: {type: boolean}
+        '403': {description: Person must own both registrations or administer the project}
+        '404': {description: Session or destination not visible in this project}
+        '409': {description: Stale revision, ended session or invalid hierarchy}
   /projects/{projectId}/harness-sessions/{sessionId}/complete-delivery:
     parameters:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -8361,12 +8393,13 @@ components:
       description: State evidence is populated on reads and omitted when unknown in mutation responses and event snapshots.
       required: [id, project_id, agent_principal_id, harness, host, management_mode, role, work_shape, advertised_capabilities, phase, activity, activity_sequence, revision, created_at]
       properties:
+        can_reparent: {type: boolean, description: Caller may move this live session or select it as a lead; read-time hint rechecked on writes. Omitted in event snapshots.}
         run_status: {type: [string, 'null'], description: Status of the bound run when visible to the caller.}
         needs_attention: {type: boolean, description: "Bound run waiting or an exact bound-run approval pending. Yielded phase is separate session evidence. Principal-only requests and nonblocking replies never set this flag. False for stopped sessions; omitted when not loaded."}
         attention_reasons: {type: array, description: "Authorized session/run reasons and separately scoped shared inbox attention. Empty means loaded with no visible reasons; omitted when unloaded or withheld.", items: {$ref: '#/components/schemas/HarnessAttentionReason'}}
         has_problem: {type: boolean, description: "Bound run failed or lost ownership, or the stop reason reports an error or block. Normal stops are false. Omitted when not loaded."}
         handed_over_to_id: {type: string, format: uuid, description: Successor coordinator; omitted without a handover.}
-        adopted_from_id: {type: string, format: uuid, description: Previous lead from which this live child was adopted.}
+        adopted_from_id: {type: [string, 'null'], format: uuid, description: Previous lead from which this live child was adopted.}
         id: {type: string, format: uuid}
         project_id: {type: string, format: uuid}
         agent_principal_id: {type: string, format: uuid}
