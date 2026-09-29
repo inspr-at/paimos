@@ -2,6 +2,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import AppIcon from '../components/AppIcon.vue'
+import CalendarVersion from '../components/CalendarVersion.vue'
 import { setPageTitle } from '../lib/brand'
 import { resilientFetch } from '../lib/api'
 
@@ -38,6 +39,12 @@ const statusLabel: Record<string, string> = {
   live: 'Live',
   declined: 'Declined',
 }
+const FILTERS = [
+  { id: 'live', label: 'Live' },
+  { id: 'planned', label: 'Planned' },
+  { id: 'in_progress', label: 'In progress' },
+  { id: 'declined', label: 'Declined' },
+] as const
 
 const loading = ref(true)
 const missing = ref(false)
@@ -46,6 +53,19 @@ const voteError = ref('')
 const doc = ref<PortalDocument | null>(null)
 const voted = ref<Record<string, boolean>>({})
 const busy = ref('')
+const filter = ref('')
+const wishTitle = ref('')
+const wishSummary = ref('')
+const website = ref('')
+const wishSent = ref(false)
+const wishError = ref('')
+const wishing = ref(false)
+
+const showFilters = computed(() => (doc.value?.catalog.length ?? 0) > 6)
+const visibleCatalog = computed(() => {
+  const items = doc.value?.catalog ?? []
+  return filter.value ? items.filter(item => item.status === filter.value) : items
+})
 
 const base = computed(() => `/api/public/portal/${encodeURIComponent(props.tenantSlug)}`)
 
@@ -59,6 +79,12 @@ async function load() {
   missing.value = false
   voteError.value = ''
   voted.value = {}
+  filter.value = ''
+  wishTitle.value = ''
+  wishSummary.value = ''
+  website.value = ''
+  wishSent.value = false
+  wishError.value = ''
   try {
     const response = await resilientFetch(base.value, { credentials: 'omit', cache: 'no-store', referrerPolicy: 'no-referrer' })
     if (response.status === 404) {
@@ -76,6 +102,39 @@ async function load() {
     setPageTitle('Product portal')
   } finally {
     loading.value = false
+  }
+}
+
+function toggleFilter(id: string) {
+  filter.value = filter.value === id ? '' : id
+}
+
+async function sendWish() {
+  const title = wishTitle.value.trim()
+  const summary = wishSummary.value.trim()
+  if (!title || !summary || wishing.value) return
+  wishing.value = true
+  wishError.value = ''
+  try {
+    const response = await resilientFetch(`${base.value}/wishes`, {
+      method: 'POST',
+      credentials: 'same-origin',
+      cache: 'no-store',
+      referrerPolicy: 'no-referrer',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title, summary, website: website.value }),
+    })
+    if (response.status === 429) throw new Error('Too many wishes from this network. Try again in a minute.')
+    if (response.status === 404) throw new Error('This portal is not taking wishes.')
+    if (!response.ok) throw new Error('The wish was not sent.')
+    wishSent.value = true
+    wishTitle.value = ''
+    wishSummary.value = ''
+    website.value = ''
+  } catch (cause) {
+    wishError.value = cause instanceof Error ? cause.message : 'The wish was not sent.'
+  } finally {
+    wishing.value = false
   }
 }
 
@@ -135,15 +194,19 @@ watch(() => props.tenantSlug, () => { void load() }, { immediate: true })
 
         <section class="block" aria-labelledby="catalog-heading">
           <h2 id="catalog-heading">Catalog</h2>
+          <div v-if="showFilters" class="filters" role="group" aria-label="Feature status">
+            <button v-for="item in FILTERS" :key="item.id" type="button" :aria-pressed="filter === item.id" @click="toggleFilter(item.id)">{{ item.label }}</button>
+          </div>
           <p v-if="!doc.catalog.length" class="quiet">No public features yet.</p>
+          <p v-else-if="!visibleCatalog.length" class="quiet">No features with this status.</p>
           <ul v-else class="catalog">
-            <li v-for="item in doc.catalog" :key="item.key" class="card">
+            <li v-for="item in visibleCatalog" :key="item.key" class="card">
               <div class="card-top">
                 <h3>{{ item.title }}</h3>
                 <p :class="['status', item.status]">{{ statusLabel[item.status] || item.status }}</p>
               </div>
               <p v-if="item.summary" class="summary">{{ item.summary }}</p>
-              <p v-if="item.live_since" class="meta"><span>Live since</span> <span class="mono">{{ item.live_since }}</span></p>
+              <p v-if="item.live_since" class="meta"><span>Live since</span> <CalendarVersion :value="item.live_since" /></p>
               <p v-if="item.legal_basis" class="meta"><span>Legal basis</span> {{ item.legal_basis }}</p>
               <p v-if="item.decline_reason" class="meta">{{ item.decline_reason }}</p>
             </li>
@@ -174,6 +237,16 @@ watch(() => props.tenantSlug, () => { void load() }, { immediate: true })
               </button>
             </li>
           </ul>
+          <form v-if="!wishSent" class="wish-form" @submit.prevent="sendWish">
+            <label>Title<input v-model="wishTitle" class="field" name="title" required maxlength="300" autocomplete="off" /></label>
+            <label>Summary<textarea v-model="wishSummary" class="field" name="summary" required maxlength="4000" rows="3" autocomplete="off" /></label>
+            <div class="hp" aria-hidden="true">
+              <label>Website<input v-model="website" type="text" tabindex="-1" autocomplete="off" name="website" /></label>
+            </div>
+            <p v-if="wishError" class="alert" role="alert">{{ wishError }}</p>
+            <button class="vote" type="submit" :disabled="wishing || !wishTitle.trim() || !wishSummary.trim()"><AppIcon name="send" :size="14" />{{ wishing ? 'Sending…' : 'Send wish' }}</button>
+          </form>
+          <p v-else class="quiet" role="status">Sent for review.</p>
         </section>
       </template>
     </div>
@@ -223,13 +296,31 @@ h2 { margin: 0 0 8px; font: 650 22px/1.2 var(--serif); letter-spacing: -0.02em; 
 .wish-copy { min-width: 0; }
 h3 { margin: 0; font-size: 17px; line-height: 1.3; font-weight: 650; overflow-wrap: anywhere; }
 .summary { margin: 8px 0 0; color: var(--ink-2); font-size: 14.5px; line-height: 1.5; overflow-wrap: anywhere; }
-.meta { margin: 10px 0 0; color: var(--ink-2); font-size: 13.5px; line-height: 1.4; overflow-wrap: anywhere; }
+.meta { display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; margin: 10px 0 0; color: var(--ink-2); font-size: 13.5px; line-height: 1.4; overflow-wrap: anywhere; }
 .meta span:first-child { color: var(--ink-3); }
-.mono { font-family: var(--mono); font-variant-ligatures: none; }
 .count { margin: 8px 0 0; font: 600 13px/1.3 var(--mono); font-variant-numeric: tabular-nums; color: var(--ink); }
+.filters { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 14px; }
+.filters button {
+  min-height: 36px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--chip-bg);
+  box-shadow: inset 0 0 0 1px var(--chip-line);
+  color: var(--ink-2);
+  font: 600 13px/1 var(--font);
+  cursor: pointer;
+}
+.filters button[aria-pressed="true"] { background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); }
+.filters button:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.wish-form { position: relative; display: grid; gap: 10px; margin-top: 18px; }
+.wish-form label { display: grid; gap: 6px; font-size: 13px; color: var(--ink-2); }
+.wish-form textarea.field { height: auto; min-height: 88px; padding-block: 10px; line-height: 1.45; resize: vertical; }
+.hp { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .status {
   display: inline-flex;
   align-items: center;
+  align-self: flex-start;
   flex: 0 0 auto;
   min-height: 26px;
   padding: 0 10px;

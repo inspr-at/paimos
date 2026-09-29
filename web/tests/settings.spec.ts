@@ -26,7 +26,7 @@ test('the account menu opens Settings on Personal: theme, greeting and keys', as
   await page.getByRole('button', { name: 'Settings' }).click()
   await expect(page).toHaveURL('/settings/personal')
   await expect(page).toHaveTitle(/^Settings · /)
-  await expect(sections(page).getByRole('link')).toHaveText([/^Personal/, /^Workspace/, /^Access/, /^Business/, /^Projects/])
+  await expect(sections(page).getByRole('link')).toHaveText([/^Personal/, /^Workspace/, /^Access/, /^Business/, /^Projects/, /^Product portal/])
   await expect(sections(page).getByRole('link', { name: /^Personal/ })).toHaveAttribute('aria-current', 'page')
 
   await page.getByRole('radio', { name: 'Dark' }).click()
@@ -76,7 +76,7 @@ test('the section nav stays put when switching sections, including wide Access',
   for (const width of [1440, 1920]) {
     await page.setViewportSize({ width, height: 900 })
     const lefts: number[] = []
-    for (const section of ['personal', 'workspace', 'access', 'business', 'projects']) {
+    for (const section of ['personal', 'workspace', 'access', 'business', 'projects', 'portal']) {
       await page.goto(`/settings/${section}`)
       const nav = sections(page)
       await expect(nav).toBeVisible()
@@ -157,7 +157,7 @@ test('Agents links admins to the agent keys', async ({ page }) => {
 test('at 390 the sections sit in a grid and nothing is cut', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   await setup(page)
-  for (const section of ['personal', 'workspace', 'business', 'projects']) {
+  for (const section of ['personal', 'workspace', 'business', 'projects', 'portal']) {
     await page.goto(`/settings/${section}`)
     await expect(page.locator('.settings-card').first()).toBeVisible()
     await page.waitForTimeout(150)
@@ -172,7 +172,7 @@ test('at 390 the sections sit in a grid and nothing is cut', async ({ page }) =>
 })
 
 for (const colorScheme of ['light', 'dark'] as const) {
-  for (const section of ['personal', 'workspace', 'business', 'projects']) {
+  for (const section of ['personal', 'workspace', 'business', 'projects', 'portal']) {
     test(`axe: settings ${section} in ${colorScheme}`, async ({ page }) => {
       await page.emulateMedia({ colorScheme, reducedMotion: 'reduce' })
       await setup(page)

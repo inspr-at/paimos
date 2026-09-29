@@ -97,6 +97,7 @@ export async function mockSettings(page: Page, data: SettingsData, options: Sett
       data.greetings.push({ timezone: request.headers()['x-timezone'] ?? '' })
       return route.fulfill({ json: { salutation: 'Good afternoon', name: data.profile.preferred_name || data.profile.first_name, message: 'Small steps, shipped, beat big plans on paper.', id: 'g-small-steps' } })
     }
+    if (path === '/api/portal/settings' && method === 'GET') return route.fulfill({ json: { enabled: false, slug: 'inspr' } })
     if (path === '/api/agent-keys' && method === 'GET') return route.fulfill({ json: { keys: data.keys } })
     if (path === '/api/quotes/settings' && method === 'GET') {
       if (options.noQuotes) return route.fulfill({ status: 403, json: { code: 'forbidden', message: 'quotes plugin is not enabled' } })

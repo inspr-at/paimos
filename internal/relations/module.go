@@ -72,6 +72,8 @@ func failure(w http.ResponseWriter, err error) {
 		writeError(w, 409, "conflict", "relation kind or direction is not allowed")
 	case errors.Is(err, errForbiddenRelation):
 		writeError(w, 403, "forbidden", "linking and unlinking need the permission in both items' projects")
+	case errors.Is(err, events.ErrForbidden):
+		writeError(w, 403, "forbidden", "permission denied")
 	case errors.Is(err, events.ErrConflict):
 		writeError(w, 409, "conflict", "relation conflicts with current state")
 	case errors.As(err, &pe) && (pe.Code == "23505" || pe.Code == "40001" || pe.Code == "40P01"):

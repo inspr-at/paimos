@@ -94,6 +94,13 @@ func TestPublicPortalBoundary(t *testing.T) {
 	if rec := f.do(http.MethodGet, "/api/portal/settings", "", readIP, &member, nil, nil); rec.Code != http.StatusForbidden {
 		t.Fatalf("member settings: %d %s", rec.Code, rec.Body)
 	}
+	agent := tenant.Principal{ID: admin.ID, TenantID: tenantA, Kind: tenant.Agent, Name: "Portal agent", Scopes: []string{"settings.manage"}}
+	if rec := f.do(http.MethodGet, "/api/portal/settings", "", readIP, &agent, nil, nil); rec.Code != http.StatusForbidden {
+		t.Fatalf("agent settings: %d %s", rec.Code, rec.Body)
+	}
+	if rec := f.do(http.MethodPatch, "/api/portal/settings", `{"enabled":true}`, readIP, &agent, nil, nil); rec.Code != http.StatusForbidden {
+		t.Fatalf("agent enable: %d %s", rec.Code, rec.Body)
+	}
 	if rec := f.do(http.MethodPatch, "/api/portal/settings", `{"enabled":true}`, readIP, &member, nil, nil); rec.Code != http.StatusForbidden {
 		t.Fatalf("member enable: %d", rec.Code)
 	}
@@ -104,7 +111,7 @@ func TestPublicPortalBoundary(t *testing.T) {
 		t.Fatal("rejected settings write enabled the portal")
 	}
 	enabled := f.do(http.MethodPatch, "/api/portal/settings", `{"enabled":true}`, readIP, &admin, nil, nil)
-	if enabled.Code != http.StatusOK || !strings.Contains(enabled.Body.String(), `"enabled":true`) {
+	if enabled.Code != http.StatusOK || !strings.Contains(enabled.Body.String(), `"enabled":true`) || !strings.Contains(enabled.Body.String(), `"slug":"portal-a"`) {
 		t.Fatalf("enable: %d %s", enabled.Code, enabled.Body)
 	}
 	if rec := f.do(http.MethodPatch, "/api/portal/settings", `{"enabled":false}`, readIP, &admin, nil, nil); rec.Code != http.StatusOK {
@@ -284,6 +291,165 @@ func sameResponse(t *testing.T, a, b *httptest.ResponseRecorder) {
 		if strings.Join(values, "\n") != strings.Join(bh[key], "\n") {
 			t.Fatalf("header %s %v vs %v", key, values, bh[key])
 		}
+	}
+}
+
+func TestPublicWishIntake(t *testing.T) {
+	d := dbtest.Open(t)
+	m := New(d.App, false, bytes.Repeat([]byte{11}, 32))
+	mux := http.NewServeMux()
+	m.Mount(mux)
+	f := &fixture{t: t, m: m, d: d, h: mux}
+
+	tenantA := makeTenant(t, d, "wish-a", "Wish A")
+	tenantB := makeTenant(t, d, "wish-b", "Wish B")
+	productA := insertNode(t, d, tenantA, "PPR-1", "portal_product", "Harbour catalog", "Ready in the morning.", "published", "", "{}")
+	insertNode(t, d, tenantA, "PWS-9", "portal_wish", "SECRET-PENDING-A", "still in review", "pending", productA, "{}")
+	insertNode(t, d, tenantB, "PPR-1", "portal_product", "Other catalog", "Other summary.", "published", "", "{}")
+	setPortal(t, d, tenantA, true)
+	setPortal(t, d, tenantB, false)
+
+	const (
+		readA   = "/api/public/portal/wish-a"
+		postA   = "/api/public/portal/wish-a/wishes"
+		postB   = "/api/public/portal/wish-b/wishes"
+		missing = "/api/public/portal/no-such-portal/wishes"
+		ip      = "203.0.113.80:1000"
+	)
+	before := wishCount(t, d, tenantA)
+	created := f.do(http.MethodPost, postA, `{"title":"A morning bell","summary":"Ring once, before the office opens.","website":""}`, ip, nil, nil, nil)
+	if created.Code != http.StatusCreated || strings.TrimSpace(created.Body.String()) != `{"accepted":true}` {
+		t.Fatalf("intake: %d %s", created.Code, created.Body)
+	}
+	if got := wishCount(t, d, tenantA); got != before+1 {
+		t.Fatalf("stored wishes %d, want %d", got, before+1)
+	}
+	listed := f.do(http.MethodGet, readA, "", "203.0.113.81:1000", nil, nil, nil)
+	if listed.Code != http.StatusOK || strings.Contains(listed.Body.String(), "A morning bell") || strings.Contains(listed.Body.String(), "SECRET-PENDING-A") {
+		t.Fatalf("pending leaked: %d %s", listed.Code, listed.Body)
+	}
+	assertWishPending(t, d, tenantA, "A morning bell")
+
+	honeypot := f.do(http.MethodPost, postA, `{"title":"HONEYPOT-WISH","summary":"Should not be stored.","website":"https://evil.test"}`, "203.0.113.82:1000", nil, nil, nil)
+	if honeypot.Code != http.StatusCreated || strings.TrimSpace(honeypot.Body.String()) != strings.TrimSpace(created.Body.String()) {
+		t.Fatalf("honeypot: %d %s", honeypot.Code, honeypot.Body)
+	}
+	if got := wishCount(t, d, tenantA); got != before+1 {
+		t.Fatalf("honeypot stored a wish: %d", got)
+	}
+	if rec := f.do(http.MethodPost, postA, `{"title":"Named","summary":"No.","email":"leak@example.com"}`, "203.0.113.83:1000", nil, nil, nil); rec.Code != http.StatusBadRequest {
+		t.Fatalf("email field: %d %s", rec.Code, rec.Body)
+	}
+	if rec := f.do(http.MethodPost, postA, `{"title":"Named","summary":"No.","name":"Ada"}`, "203.0.113.84:1000", nil, nil, nil); rec.Code != http.StatusBadRequest {
+		t.Fatalf("name field: %d %s", rec.Code, rec.Body)
+	}
+	cross := f.do(http.MethodPost, postA, `{"title":"Cross","summary":"No."}`, "203.0.113.85:1000", nil, nil, map[string]string{"Origin": "https://evil.test"})
+	if cross.Code != http.StatusForbidden {
+		t.Fatalf("cross-site: %d %s", cross.Code, cross.Body)
+	}
+	if got := wishCount(t, d, tenantA); got != before+1 {
+		t.Fatalf("refused intake stored wishes: %d", got)
+	}
+
+	closed := f.do(http.MethodPost, postB, `{"title":"Closed","summary":"No."}`, "203.0.113.86:1000", nil, nil, nil)
+	unknown := f.do(http.MethodPost, missing, `{"title":"Missing","summary":"No."}`, "203.0.113.86:1000", nil, nil, nil)
+	if closed.Code != http.StatusNotFound {
+		t.Fatalf("closed intake: %d %s", closed.Code, closed.Body)
+	}
+	sameResponse(t, closed, unknown)
+
+	limitIP := "203.0.113.90:1000"
+	for i := 0; i < wishIntakeLimit; i++ {
+		rec := f.do(http.MethodPost, missing, `{"title":"Limit","summary":"No."}`, limitIP, nil, nil, nil)
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("limit attempt %d: %d %s", i, rec.Code, rec.Body)
+		}
+	}
+	blockedMissing := f.do(http.MethodPost, missing, `{"title":"Limit","summary":"No."}`, limitIP, nil, nil, nil)
+	blockedOpen := f.do(http.MethodPost, postA, `{"title":"Limit","summary":"No."}`, limitIP, nil, nil, nil)
+	if blockedMissing.Code != http.StatusTooManyRequests || blockedMissing.Header().Get("Retry-After") == "" {
+		t.Fatalf("intake limit: %d retry %q", blockedMissing.Code, blockedMissing.Header().Get("Retry-After"))
+	}
+	sameResponse(t, blockedMissing, blockedOpen)
+	if got := wishCount(t, d, tenantA); got != before+1 {
+		t.Fatalf("limited intake stored wishes: %d", got)
+	}
+
+	publishWish(t, d, tenantA, "A morning bell")
+	published := f.do(http.MethodGet, readA, "", "203.0.113.91:1000", nil, nil, nil)
+	if published.Code != http.StatusOK || !strings.Contains(published.Body.String(), "A morning bell") || strings.Contains(published.Body.String(), "SECRET-PENDING-A") || strings.Contains(published.Body.String(), "HONEYPOT-WISH") {
+		t.Fatalf("published wish: %d %s", published.Code, published.Body)
+	}
+	rejectWish(t, d, tenantA, "A morning bell")
+	rejected := f.do(http.MethodGet, readA, "", "203.0.113.92:1000", nil, nil, nil)
+	if rejected.Code != http.StatusOK || strings.Contains(rejected.Body.String(), "A morning bell") {
+		t.Fatalf("rejected wish still public: %s", rejected.Body)
+	}
+}
+
+func wishCount(t *testing.T, d *dbtest.DB, tenantID string) int {
+	t.Helper()
+	var n int
+	err := db.InTenant(dbtest.Seed(t.Context()), d.App, tenantID, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `SELECT count(*) FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE k.slug='portal_wish' AND n.deleted_at IS NULL`).Scan(&n)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
+func assertWishPending(t *testing.T, d *dbtest.DB, tenantID, title string) {
+	t.Helper()
+	err := db.InTenant(dbtest.Seed(t.Context()), d.App, tenantID, func(tx pgx.Tx) error {
+		var state, body string
+		if err := tx.QueryRow(t.Context(), `SELECT state, body FROM nodes WHERE title=$1`, title).Scan(&state, &body); err != nil {
+			return err
+		}
+		if state != "pending" || body == "" {
+			t.Fatalf("wish state %s body %q", state, body)
+		}
+		var payload string
+		if err := tx.QueryRow(t.Context(), `SELECT coalesce(string_agg(coalesce(after::text,''), ''), '') FROM events WHERE type='portal.wish_submitted'`).Scan(&payload); err != nil {
+			return err
+		}
+		if !strings.Contains(payload, `"state": "pending"`) || strings.Contains(payload, "leak@example.com") || strings.Contains(payload, title) {
+			t.Fatalf("wish event %s", payload)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func publishWish(t *testing.T, d *dbtest.DB, tenantID, title string) {
+	setWishState(t, d, tenantID, title, "published")
+}
+
+func rejectWish(t *testing.T, d *dbtest.DB, tenantID, title string) {
+	setWishState(t, d, tenantID, title, "rejected")
+}
+
+func setWishState(t *testing.T, d *dbtest.DB, tenantID, title, state string) {
+	t.Helper()
+	err := db.InTenant(dbtest.Seed(t.Context()), d.App, tenantID, func(tx pgx.Tx) error {
+		// Fixture stands in for a moderator transaction. The catalog trigger
+		// refuses this state change until that flag is set.
+		if _, err := tx.Exec(t.Context(), `SELECT set_config('aeon.portal_moderation','on',true)`); err != nil {
+			return err
+		}
+		tag, err := tx.Exec(t.Context(), `UPDATE nodes SET state=$2 WHERE title=$1 AND deleted_at IS NULL`, title, state)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() != 1 {
+			t.Fatalf("wish update %d", tag.RowsAffected())
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 }
 

@@ -219,6 +219,9 @@ func (m *Module) createNode(ctx context.Context, p tenant.Principal, in nodeCrea
 	}
 	var node nodeJSON
 	err = m.tx(ctx, p.TenantID, func(ctx context.Context, tx pgx.Tx) error {
+		if err := armPortalModeration(ctx, tx, p); err != nil {
+			return err
+		}
 		if err := lockTree(ctx, tx); err != nil {
 			return err
 		}
@@ -313,6 +316,9 @@ func (m *Module) updateNode(ctx context.Context, p tenant.Principal, id string, 
 	}
 	var node nodeJSON
 	err := m.tx(ctx, p.TenantID, func(ctx context.Context, tx pgx.Tx) error {
+		if err := armPortalModeration(ctx, tx, p); err != nil {
+			return err
+		}
 		current, err := loadNode(ctx, tx, id, true)
 		if err != nil {
 			return err
@@ -405,6 +411,9 @@ func (m *Module) updateNode(ctx context.Context, p tenant.Principal, id string, 
 
 func (m *Module) deleteNode(ctx context.Context, p tenant.Principal, id string) error {
 	return m.tx(ctx, p.TenantID, func(ctx context.Context, tx pgx.Tx) error {
+		if err := armPortalModeration(ctx, tx, p); err != nil {
+			return err
+		}
 		if err := lockTree(ctx, tx); err != nil {
 			return err
 		}
@@ -436,6 +445,9 @@ func (m *Module) deleteNode(ctx context.Context, p tenant.Principal, id string) 
 func (m *Module) moveNode(ctx context.Context, p tenant.Principal, id string, parentID, beforeID *string, expected *time.Time) (nodeJSON, error) {
 	var node nodeJSON
 	err := m.tx(ctx, p.TenantID, func(ctx context.Context, tx pgx.Tx) error {
+		if err := armPortalModeration(ctx, tx, p); err != nil {
+			return err
+		}
 		if err := lockTree(ctx, tx); err != nil {
 			return err
 		}
@@ -689,7 +701,7 @@ func applyPositions(ctx context.Context, tx pgx.Tx, updates []sibling) error {
 		SET position = u.pos::numeric
 		FROM (SELECT unnest($1::uuid[]) AS id, unnest($2::text[]) AS pos) AS u
 		WHERE n.id = u.id`, ids, pos)
-	return err
+	return dbErr("place siblings", err)
 }
 
 func scanNode(row pgx.Row) (nodeJSON, error) {

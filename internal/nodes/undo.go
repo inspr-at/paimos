@@ -87,6 +87,9 @@ func undoProjectMove(ctx context.Context, tx pgx.Tx, p tenant.Principal, e event
 // where it returns to (ADR-003 P2). An event's author or a project's admin
 // cannot reverse a move into a project where they hold less.
 func restoreMovedNode(ctx context.Context, tx pgx.Tx, p tenant.Principal, before, after nodeJSON) (nodeJSON, error) {
+	if err := armPortalModeration(ctx, tx, p); err != nil {
+		return nodeJSON{}, err
+	}
 	current, err := loadNode(ctx, tx, after.ID, true)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -117,7 +120,7 @@ func restoreMovedNode(ctx context.Context, tx pgx.Tx, p tenant.Principal, before
 	 updated_at=greatest(clock_timestamp(),date_trunc('second',updated_at)+interval '1 second')
 	 WHERE id=$4::uuid RETURNING `+nodeReturning, before.Key, before.ParentID, before.Position, before.ID))
 	if err != nil {
-		return nodeJSON{}, events.ErrConflict
+		return nodeJSON{}, undoWriteErr(err)
 	}
 	if before.Key != after.Key {
 		if _, err := tx.Exec(ctx, `INSERT INTO node_key_aliases(tenant_id,key,node_id) VALUES($1::uuid,$2,$3::uuid)`, p.TenantID, after.Key, after.ID); err != nil {
@@ -125,4 +128,13 @@ func restoreMovedNode(ctx context.Context, tx pgx.Tx, p tenant.Principal, before
 		}
 	}
 	return restored, nil
+}
+
+// undoWriteErr keeps a stale undo as a conflict and a portal-catalog refusal
+// as forbidden, so the events API does not report that refusal as 409.
+func undoWriteErr(err error) error {
+	if events.PortalCatalogDenied(err) {
+		return events.ErrForbidden
+	}
+	return events.ErrConflict
 }

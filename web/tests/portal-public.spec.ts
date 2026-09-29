@@ -1,5 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import { mkdirSync } from 'node:fs'
 import { expect, test, type Page } from '@playwright/test'
+
+// PORTAL_SHOTS names a directory. Unset, this file creates nothing at import.
+const shots = process.env.PORTAL_SHOTS ?? ''
+
+async function capture(page: Page, name: string) {
+  if (!shots) return
+  mkdirSync(shots, { recursive: true })
+  await page.screenshot({ path: `${shots}/${name}`, fullPage: true })
+}
 
 const portal = {
   product: { key: 'PPR-1', title: 'Harbour office', summary: 'Work that is ready before the morning opens.' },
@@ -29,7 +39,8 @@ async function install(page: Page, missing = false) {
     if (url.pathname.startsWith('/api/public/portal/')) {
       if (route.request().method() === 'POST') {
         posted.push({ method: route.request().method(), body: route.request().postData(), path: url.pathname })
-        await route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify({ votes: 4 }) })
+        const body = url.pathname.endsWith('/wishes') ? { accepted: true } : { votes: 4 }
+        await route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify(body) })
         return
       }
       if (missing) {
@@ -63,9 +74,11 @@ for (const width of [1600, 390]) {
     const posted = await install(page)
     await page.goto('/portal/harbour')
     await expect(page.getByRole('heading', { level: 1, name: 'Harbour office' })).toBeVisible()
+    await expect(page.getByRole('group', { name: 'Feature status' })).toHaveCount(0)
     await expect(page.getByRole('heading', { name: 'Deadline radar' })).toBeVisible()
     await expect(page.getByText('Live', { exact: true })).toBeVisible()
-    await expect(page.getByText('260926120000.0.0')).toBeVisible()
+    await expect(page.getByRole('img', { name: '260926120000.0.0' })).toBeVisible()
+    await expect(page.getByText('260926120000.0.0')).toHaveCount(0)
     await expect(page.getByText('§ 20 WEG')).toBeVisible()
     await expect(page.getByText('Declined', { exact: true })).toBeVisible()
     await expect(page.getByText('The record is already digital.')).toBeVisible()
@@ -78,8 +91,60 @@ for (const width of [1600, 390]) {
     await expect(page.getByText('4 votes')).toBeVisible()
     await expect(page.getByRole('button', { name: 'Voted for Owner assembly on a phone' })).toBeDisabled()
     await expectFits(page)
+    await capture(page, `public-catalog-${width}.png`)
   })
 }
+
+test('status chips appear only past six features, and a wish is title and summary', async ({ page }) => {
+  const posted: { method: string; body: string | null; path: string }[] = []
+  const catalog = ['live', 'planned', 'in_progress', 'declined', 'idea', 'reviewed', 'live'].map((status, index) => ({
+    key: `PCF-${index + 10}`,
+    title: `${status} feature ${index + 1}`,
+    summary: 'A public line.',
+    status,
+    ...(status === 'live' ? { live_since: '260926120000.0.0' } : {}),
+    ...(status === 'declined' ? { decline_reason: 'Not this one.' } : {}),
+  }))
+  await page.route('**/api/**', async route => {
+    const url = new URL(route.request().url())
+    if (url.pathname === '/api/me') {
+      await route.fulfill({ status: 401, contentType: 'application/json', body: '{}' })
+      return
+    }
+    if (url.pathname.startsWith('/api/public/portal/') && route.request().method() === 'POST' && url.pathname.endsWith('/wishes')) {
+      posted.push({ method: 'POST', body: route.request().postData(), path: url.pathname })
+      await route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify({ accepted: true }) })
+      return
+    }
+    if (url.pathname.startsWith('/api/public/portal/')) {
+      await route.fulfill({ json: { ...portal, catalog } })
+      return
+    }
+    await route.fulfill({ status: 404, contentType: 'application/json', body: '{}' })
+  })
+  for (const width of [1600, 390]) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
+    await page.emulateMedia({ colorScheme: width === 1600 ? 'light' : 'dark' })
+    await page.goto('/portal/harbour')
+    await expect(page.getByRole('group', { name: 'Feature status' }).getByRole('button')).toHaveText(['Live', 'Planned', 'In progress', 'Declined'])
+    await page.getByRole('button', { name: 'Planned', exact: true }).click()
+    await expect(page.getByRole('heading', { name: 'planned feature 2' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'live feature 1' })).toHaveCount(0)
+    await page.getByRole('button', { name: 'Planned', exact: true }).click()
+    await expect(page.getByRole('heading', { name: 'live feature 1' })).toBeVisible()
+    await expectFits(page)
+    await capture(page, `public-${width}-${width === 1600 ? 'light' : 'dark'}.png`)
+  }
+  await page.getByLabel('Title').fill('A morning bell')
+  await page.getByLabel('Summary').fill('Ring once, before the office opens.')
+  await page.getByRole('button', { name: 'Send wish' }).click()
+  await expect(page.getByRole('status')).toHaveText('Sent for review.')
+  await expect(page.getByLabel('Email')).toHaveCount(0)
+  await expect(page.getByLabel('Name')).toHaveCount(0)
+  expect(posted).toHaveLength(1)
+  expect(JSON.parse(posted[0].body ?? '')).toEqual({ title: 'A morning bell', summary: 'Ring once, before the office opens.', website: '' })
+  expect(posted[0].path).toBe('/api/public/portal/harbour/wishes')
+})
 
 test('a closed portal reads as unavailable', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
