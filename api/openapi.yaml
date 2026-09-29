@@ -986,7 +986,7 @@ paths:
     get:
       operationId: releaseNoteSnapshot
       summary: Capture linked ticket benefit fields in one database snapshot
-      description: Read-only project-scoped export using journey_tickets membership, not Git mentions. Requires releases.read and node visibility (nodes.read). A published release with a stored snapshot returns that snapshot (frozen true), so later ticket edits do not change it. A published release with no stored snapshot was published before snapshots existed and returns ReleaseNotes with fallback historical-tag-headline; current ticket fields are not read. The release sheet labels that fallback "Historical tag headline". Before publication the response is a live preview (frozen false). Save a ReleaseNoteSnapshot as release-notes/<version>.json before tagging for offline history generation; do not save the historical fallback as a snapshot. This request does not itself publish or freeze a release.
+      description: Read-only project-scoped export using journey_tickets membership, not Git mentions. Requires releases.read and node visibility (nodes.read). A published release with a stored snapshot returns that snapshot (frozen true), so later ticket edits do not change it. A published release with no stored snapshot was published before snapshots existed and returns ReleaseNotes with fallback historical-tag-headline; current ticket fields are not read. The release sheet labels that fallback "Historical tag headline". An operator backfill can insert one later, labelled backfilled, with the original released_at and captured_at set to that later time. The release sheet then says Notes written after release. Before publication the response is a live preview (frozen false). Save a ReleaseNoteSnapshot as release-notes/<version>.json before tagging for offline history generation; do not save the historical fallback as a snapshot. This request does not itself publish, freeze or backfill a release.
       parameters:
         - {in: path, name: projectId, required: true, schema: {type: string, format: uuid}}
         - {in: path, name: releaseId, required: true, schema: {type: string, format: uuid}}
@@ -1006,6 +1006,7 @@ paths:
     get:
       operationId: listReleases
       summary: The release history embedded in this build (inspr.release-history.v1)
+      description: Tagged snapshots win. Missing tagged notes may use an immutable version-keyed backfill for the caller tenant and visible AEON project; otherwise the historical headline remains. Backfilled notes are explicitly marked written_after_release.
       responses:
         '200':
           description: History, newest first
@@ -1013,10 +1014,12 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/ReleaseHistory'}
         '401': {description: Authentication required}
+        '500': {description: Stored release notes could not be read}
   /releases/{version}:
     get:
       operationId: getRelease
       summary: One release of the embedded history
+      description: Uses the same tenant/project-scoped backfill and tagged snapshot precedence as the list endpoint.
       parameters:
         - {name: version, in: path, required: true, schema: {type: string}, description: 'The calendar version, with or without the leading v'}
       responses:
@@ -1027,6 +1030,7 @@ paths:
               schema: {$ref: '#/components/schemas/Release'}
         '400': {description: Not an inspr-calendar-v2 version}
         '401': {description: Authentication required}
+        '500': {description: Stored release notes could not be read}
         '404': {description: No such release in this build's history}
   /auth/login:
     get:
@@ -2496,11 +2500,12 @@ paths:
     get:
       operationId: listenInbox
       summary: List or long-poll the caller's durable inbox
-      description: Only the caller's principal is readable. Cursor is an exclusive sent event ID; wait_ms=0 returns immediately. Expired messages are omitted. Unacked messages may be delivered again.
+      description: Only the caller's principal is readable. Cursor is an exclusive sent event ID; wait_ms=0 returns immediately. Expired messages are omitted. Unacked messages may be delivered again. Returned messages count as delivered to their sender (AEON-280). With session, the pull records that generation as listening (hook for wait_ms=0, long_poll when waiting).
       security: *auth
       parameters:
         - {name: after, in: query, schema: {type: integer, format: int64, minimum: 0}}
         - {name: session, in: query, description: 'Only this active session of the caller plus unbound principal broadcasts. Omit to retain the principal inbox.', schema: {type: string, format: uuid}}
+        - {name: exact_session, in: query, description: 'AEON-280. With session, true returns only messages bound to that session and leaves out unbound principal broadcasts (for turn-boundary hooks). Requires session; omitted or false keeps the default.', schema: {type: boolean, default: false}}
         - {name: wait_ms, in: query, schema: {type: integer, minimum: 0, maximum: 30000, default: 0}}
         - {$ref: '#/components/parameters/Limit'}
       responses:
@@ -2523,14 +2528,38 @@ paths:
     get:
       operationId: streamInbox
       summary: SSE of messages addressed to the caller
-      description: Last-Event-ID is the sent event ID. Replay durable messages after that ID before listening; NOTIFY is only a wake hint. Each message event has its sent event ID as id and InboxMessage JSON as data. Heartbeats carry no message.
+      description: Last-Event-ID is the sent event ID. Replay durable messages after that ID before listening; NOTIFY is only a wake hint. Each message event has its sent event ID as id and InboxMessage JSON as data. Heartbeats carry no message. With session, the stream also carries messages bound to that active generation (with their session fields) and records the session as listening via stream on connect, on every wake and on every keepalive; a stopped session answers 409 or ends the stream.
       security: *auth
       parameters:
         - {name: after, in: query, schema: {type: integer, format: int64, minimum: 0}}
+        - {name: session, in: query, description: 'Only this active session of the caller plus unbound principal broadcasts. Omit to retain the principal inbox.', schema: {type: string, format: uuid}}
+        - {name: exact_session, in: query, description: 'AEON-280. With session, true returns only messages bound to that session and leaves out unbound principal broadcasts (for turn-boundary hooks). Requires session; omitted or false keeps the default.', schema: {type: boolean, default: false}}
         - {name: Last-Event-ID, in: header, schema: {type: integer, format: int64, minimum: 0}}
       responses:
         '200': {description: Inbox event stream, content: {text/event-stream: {schema: {type: string}}}}
         '400': {$ref: '#/components/responses/Error'}
+        '409': {description: 'session_ended — This session has ended.', content: {application/json: {schema: {$ref: '#/components/schemas/ApiError'}}}}
+  /inbox/message-status:
+    get:
+      operationId: getInboxMessageStatus
+      summary: Delivery progress of the caller's own sent messages
+      description: 'AEON-280. Sender only, same permission as the receipt (inbox.receipt). Unknown ids, other senders'' messages and messages without a receipt are omitted, never an error. sent = accepted; delivered = handed to the recipient by a pull, drain, stream or adapter claim; read = the recipient confirmed it (receipt handed_off); not_delivered = the receipt failed, with reason deadline, attempts, session_ended, no_listener or an adapter reason. Live changes arrive on /events/stream as inbox.message_fetched, inbox.receipt_handed_off, inbox.receipt_failed and inbox.delivery_failed.'
+      security: *auth
+      parameters:
+        - {name: ids, in: query, required: true, description: 'Comma-separated message ids, at most 100.', schema: {type: string}}
+      responses:
+        '200':
+          description: Status per visible message, in send order
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [items]
+                properties:
+                  items: {type: array, items: {$ref: '#/components/schemas/InboxMessageStatus'}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
   /inbox/messages/{messageId}/receipt:
     get:
       operationId: getInboxReceipt
@@ -2546,14 +2575,14 @@ paths:
     post:
       operationId: ackInboxMessage
       summary: Acknowledge a message addressed to the caller
-      description: Idempotent for the same recipient. Acknowledgement and inbox.acked event commit together.
+      description: Idempotent for the same recipient. Acknowledgement and inbox.acked event commit together. A message whose delivery already failed (AEON-280) answers 409 not_delivered and is neither acknowledged nor returned.
       security: *auth
       parameters: [{name: messageId, in: path, required: true, schema: {type: string, format: uuid}}]
       responses:
         '200': {description: Acknowledged message, content: {application/json: {schema: {$ref: '#/components/schemas/InboxMessage'}}}}
         '403': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
-        '409': {description: 'session_ended — This session has ended.', content: {application/json: {schema: {$ref: '#/components/schemas/ApiError'}}}}
+        '409': {description: 'session_ended — This session has ended. not_delivered — the delivery already failed.', content: {application/json: {schema: {$ref: '#/components/schemas/ApiError'}}}}
   /inbox/targets:
     get:
       operationId: listInboxTargets
@@ -2677,6 +2706,33 @@ paths:
       description: Session detail, including at most 20 recent activity notes and metadata changes, newest first.
       responses:
         '200': {description: Session detail, headers: {Aeon-Contract: {$ref: '#/components/headers/HarnessSessionContract'}}, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessSession'}}}}
+  /projects/{projectId}/harness-sessions/{sessionId}/complete-delivery:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: X-Aeon-Worker-Lease, in: header, required: true, schema: {type: string}, description: Private exact generation proof}
+    post:
+      security: *auth
+      operationId: completeHarnessDelivery
+      description: Settle an exact worker lease. Omitted outcome means handed_off; failed requires a bounded reason and advances the sender receipt without reinjecting uncertain input.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [delivery_id, cursor]
+              properties:
+                delivery_id: {type: string, format: uuid}
+                cursor: {type: integer, minimum: 1}
+                effective_level: {type: string, enum: [simple], default: simple}
+                outcome: {type: string, enum: [handed_off, failed], default: handed_off}
+                failure_reason: {type: string, enum: [outcome_unconfirmed, child_unavailable]}
+      responses:
+        '200': {description: Exact leased delivery settled idempotently}
+        '400': {description: Invalid settlement}
+        '409': {description: Lease cursor mismatch or released lease}
+        '410': {description: Archived generation}
   /projects/{projectId}/harness-sessions/{sessionId}/managed-controls:
     parameters:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -3044,6 +3100,19 @@ paths:
         '400': {description: Invalid note or heartbeat}
         '403': {description: Worker proof rejected}
         '410': {description: Authenticated archived generation; detach harness servicing without signaling the process}
+  /settings/inbox-delivery:
+    get:
+      operationId: getInboxDeliverySettings
+      description: 'AEON-280. Deadlines and the adapter attempt cap for inbox delivery; defaults when the workspace has not chosen (300, 1800, 8). A message to an agent not confirmed by its deadline fails with a system notice to its sender. Requires settings.read.'
+      responses:
+        '200': {description: Delivery settings, content: {application/json: {schema: {$ref: '#/components/schemas/InboxDeliverySettings'}}}}
+    put:
+      operationId: putInboxDeliverySettings
+      description: Requires settings.manage. Applies to messages sent afterwards; queued messages keep the deadline they were accepted with.
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/InboxDeliverySettings'}}}}
+      responses:
+        '200': {description: Saved settings, content: {application/json: {schema: {$ref: '#/components/schemas/InboxDeliverySettings'}}}}
+        '400': {$ref: '#/components/responses/Error'}
   /settings/eta-interval:
     get:
       operationId: getEtaInterval
@@ -4849,6 +4918,39 @@ paths:
         '403': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
         '429': {$ref: '#/components/responses/Error'}
+  /public/portal/{tenantSlug}/catalog.json:
+    get:
+      operationId: readPublicPortalCatalogFile
+      summary: Read the published catalog as a file
+      description: Anonymous. The body is the same document as readPublicPortal. The site also serves this file at /portal/{tenantSlug}/catalog.json, outside this API. A disabled portal and an unknown tenant both answer 404 with the same JSON error. Shares the catalog read limit of 120 per minute, counted before the tenant is resolved.
+      security: []
+      parameters: [{name: tenantSlug, in: path, required: true, schema: {type: string, pattern: '^[a-z][a-z0-9-]{0,62}$'}}]
+      responses:
+        '200': {description: Published catalog, headers: {Cache-Control: {schema: {type: string}}}, content: {application/json: {schema: {$ref: '#/components/schemas/PortalPublic'}}}}
+        '404': {$ref: '#/components/responses/Error'}
+        '429': {$ref: '#/components/responses/Error'}
+  /public/portal/{tenantSlug}/llms.txt:
+    get:
+      operationId: readPublicPortalLlms
+      summary: Read a plain-text index of the public catalog
+      description: Anonymous. Public titles and summaries only. The site also serves this file at /portal/{tenantSlug}/llms.txt. A disabled portal and an unknown tenant both answer 404 with the same JSON error. Shares the catalog read limit of 120 per minute, counted before the tenant is resolved.
+      security: []
+      parameters: [{name: tenantSlug, in: path, required: true, schema: {type: string, pattern: '^[a-z][a-z0-9-]{0,62}$'}}]
+      responses:
+        '200': {description: Plain-text index, headers: {Cache-Control: {schema: {type: string}}}, content: {text/plain: {schema: {type: string}}}}
+        '404': {$ref: '#/components/responses/Error'}
+        '429': {$ref: '#/components/responses/Error'}
+  /public/portal/{tenantSlug}/releases:
+    get:
+      operationId: readPublicPortalReleases
+      summary: Read published release notes for the portal product
+      description: Anonymous. Notes are the frozen snapshot taken when a release shipped, for the one project linked on the portal pace screen, and only after that link turns release history on. A pace link alone returns an empty releases list. The project name is omitted. Only released and superseded releases with a frozen snapshot and at least one public note are included. A published release without a frozen snapshot, or with no public note, is omitted. Hidden tickets and incomplete benefit text are omitted. Ticket keys, node ids and later edits of ticket fields are not part of this document. A disabled portal and an unknown tenant both answer 404. An open portal with no published product returns product null and an empty releases list. Shares the catalog read limit of 120 per minute, counted before the tenant is resolved. The public page is /portal/{tenantSlug}/releases.
+      security: []
+      parameters: [{name: tenantSlug, in: path, required: true, schema: {type: string, pattern: '^[a-z][a-z0-9-]{0,62}$'}}]
+      responses:
+        '200': {description: Published release notes, headers: {Cache-Control: {schema: {type: string}}}, content: {application/json: {schema: {$ref: '#/components/schemas/PortalPublicReleases'}}}}
+        '404': {$ref: '#/components/responses/Error'}
+        '429': {$ref: '#/components/responses/Error'}
   /portal/market:
     get:
       operationId: readPortalMarket
@@ -4986,7 +5088,8 @@ paths:
         '403': {$ref: '#/components/responses/Error'}
     put:
       operationId: writePortalPace
-      summary: Link one project whose release dates become the public count, or clear it
+      summary: Link one project whose release dates become the public count, clear it, or choose whether its frozen notes are public
+      description: settings.manage, people only. Sending project_id alone keeps release history when the project stays the same and turns it off when the project changes, and advances the link revision. Sending release_history also sends the project_id and revision from the read this publish is based on. That write is one update matching both, so it cannot publish notes for a project linked later; a mismatch is 409 and leaves the link as it is. Clearing the link deletes the row and keeps the issued revision, so linking again receives a new revision and a history write from before the clear does not match. Clearing the link and setting release history in one body is refused. Release history without that project and revision is refused.
       security: [{session: []}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/PortalPaceWrite'}}}}
       responses:
@@ -4994,6 +5097,7 @@ paths:
         '400': {$ref: '#/components/responses/Error'}
         '401': {$ref: '#/components/responses/Error'}
         '403': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
   /portal/wishes/{wishId}/fulfillment:
     put:
       operationId: writePortalFulfillment
@@ -5258,7 +5362,7 @@ components:
     MeContract: {description: Acting principal response contract, schema: {type: string, enum: ['me/1.0']}}
     BaselineBatchesContract: {description: Classic-compatible baseline batch response contract, schema: {type: string, enum: ['baseline-batches/1.0']}}
     ApprovalsContract: {description: Approval response contract, schema: {type: string, enum: ['approvals/1.1']}}
-    HarnessSessionContract: {description: Harness status and heartbeat response contract, schema: {type: string, enum: ['harness-session/1.2']}}
+    HarnessSessionContract: {description: Harness status and heartbeat response contract, schema: {type: string, enum: ['harness-session/1.3']}}
   securitySchemes:
     session: {type: apiKey, in: cookie, name: aeon_session}
     agentKey: {type: http, scheme: bearer, description: Bearer token aeon_<prefix>_<secret>}
@@ -6154,14 +6258,18 @@ components:
         schema: {type: string, const: aeon.release-note-snapshot.v1}
         tenant_id: {type: string, format: uuid}
         project_node_id: {type: string, format: uuid}
-        release_node_id: {type: string, format: uuid}
+        release_node_id: {type: string, description: Journey release UUID; empty for a version-keyed manifest backfill}
         version: {type: string, description: Empty until a version is assigned; tagged file path then declares the build binding and notes preserve that gap}
         version_scheme: {type: string}
         release_revision: {type: integer, minimum: 1}
         captured_at: {type: string, format: date-time}
-        membership_source: {type: string, const: journey_tickets.release_node_id}
+        membership_source: {type: string, enum: [journey_tickets.release_node_id, release-manifest-tickets]}
+        backfilled: {type: boolean, description: True for an explicit post-publication capture}
+        actor_principal_id: {type: string, format: uuid, description: Person who authorized the backfill}
         field_source: {type: string, const: nodes.fields}
         frozen: {type: boolean, description: True when publication stored this snapshot and later ticket edits no longer change it. False on a live preview. Absent on snapshots exported before this field existed.}
+        label: {type: string, enum: [backfilled], description: "Set only when an operator inserted this snapshot after publication because none was stored at release time. Absent on a live preview and on a snapshot frozen at publication."}
+        released_at: {type: string, format: date-time, description: "The release's original released_at. Present on a backfilled snapshot so the capture time is not mistaken for the release time."}
         tickets:
           type: array
           items:
@@ -6177,7 +6285,7 @@ components:
     ReleaseNotes:
       type: object
       required: [source, snapshot_sha256, captured_at, release_revision, items, gaps, hidden]
-      description: Additive v1 extension. Captured member benefits are authoritative, including an empty or hidden-only membership. When no snapshot was captured, fallback is historical-tag-headline and the git tag headline is only a labelled historical fallback for that release. Old manifests without notes keep the same labelled headline display. New builds always record notes, including gaps. Snapshot digest binds the exact tagged file bytes. Git headlines never replace captured benefits.
+      description: Additive v1 extension. Captured member benefits are authoritative, including an empty or hidden-only membership. When no snapshot was captured, fallback is historical-tag-headline and the git tag headline is only a labelled historical fallback for that release. Old manifests without notes keep the same labelled headline display. New builds always record notes, including gaps. Snapshot digest binds the exact tagged file bytes or the stored database snapshot JSON. Git headlines never replace captured benefits. written_after_release is true only when the captured snapshot was labelled backfilled.
       properties:
         source: {type: string}
         fallback: {type: string, enum: [historical-tag-headline], description: Set only when member benefits were not captured and the git tag headline is the labelled historical fallback}
@@ -6185,6 +6293,7 @@ components:
         captured_at: {type: [string, 'null'], format: date-time}
         release_revision: {type: integer}
         hidden: {type: integer, minimum: 0}
+        written_after_release: {type: boolean, description: "True when the captured snapshot was labelled backfilled. The release sheet says the notes were written after the release."}
         gaps: {type: array, items: {type: string}}
         items:
           type: array
@@ -6239,6 +6348,19 @@ components:
               scope: {type: string}
               tickets: {type: array, items: {type: string}}
               at: {type: string, format: date-time}
+              group: {type: string, enum: [features, fixes, other], description: "Additive display group, computed when the history is served. Conventional feat and fix prefixes win, and test, docs, refactor and chore stay other. Otherwise a linked ticket with a bug tag, type or kind is fixes, a ticket with a release-note pill or benefit that is not hidden is features, and anything else is other. Several tickets take the strongest group, fixes then features then other, and the commit is listed once. Omitted on the version bump and on older manifests, which derive the group from type."}
+              linked_tickets:
+                type: array
+                description: "Additive. Current pill and benefit of each linked ticket, from the same batched lookup as group, so past releases follow ticket text without a new manifest. Hidden-from-release-notes tickets are omitted, as are tickets with no pill and no benefit. Attached only on features and fixes changes. Omitted when lookup is off or failed. Older clients ignore it."
+                items:
+                  type: object
+                  required: [key, pill_en, pill_de, benefit_en, benefit_de]
+                  properties:
+                    key: {type: string}
+                    pill_en: {type: string}
+                    pill_de: {type: string}
+                    benefit_en: {type: string}
+                    benefit_de: {type: string}
         changes_omitted: {type: integer, minimum: 0}
         evidence:
           type: object
@@ -7361,6 +7483,32 @@ components:
           description: Present only when at least one competitor is published and at least one row exists
           items: {$ref: '#/components/schemas/PortalPublicComparison'}
         pace: {$ref: '#/components/schemas/PortalPublicPace'}
+        release_history: {type: boolean, description: True only when the linked project publishes release notes. Omitted otherwise. Notes themselves stay on the releases document.}
+    PortalPublicRelease:
+      type: object
+      additionalProperties: false
+      required: [released_at, notes]
+      properties:
+        released_at: {type: string, format: date-time}
+        version: {type: string, description: Present only when the frozen version is an inspr-calendar-v2 coordinate}
+        notes:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [pill_en, pill_de, benefit_en, benefit_de]
+            properties:
+              pill_en: {type: string}
+              pill_de: {type: string}
+              benefit_en: {type: string}
+              benefit_de: {type: string}
+    PortalPublicReleases:
+      type: object
+      additionalProperties: false
+      required: [product, releases]
+      properties:
+        product: {oneOf: [{type: 'null'}, {$ref: '#/components/schemas/PortalProduct'}]}
+        releases: {type: array, items: {$ref: '#/components/schemas/PortalPublicRelease'}}
     PortalVote:
       type: object
       additionalProperties: false
@@ -7535,6 +7683,8 @@ components:
       properties:
         project_id: {type: string, format: uuid}
         project_title: {type: string, description: Admin only. Never copied onto the public document.}
+        revision: {type: integer, minimum: 1, description: "Admin only. Present while a project is linked. Advances when the link or its release-history choice changes, and is not reused after the link is cleared. A release-history write must send this value."}
+        release_history: {type: boolean, default: false, description: Admin only. Frozen notes are public only when this is true. A new or existing link stays false until set.}
         releases_30d: {type: integer, minimum: 0}
         median_release_gap_days: {type: integer, minimum: 0}
         wish_to_live_median_days: {type: integer, minimum: 0}
@@ -7542,9 +7692,11 @@ components:
     PortalPaceWrite:
       type: object
       additionalProperties: false
-      required: [project_id]
+      minProperties: 1
       properties:
-        project_id: {oneOf: [{type: string, format: uuid}, {type: 'null'}]}
+        project_id: {oneOf: [{type: string, format: uuid}, {type: 'null'}], description: "A uuid links that project. Null clears the link. Together with release_history, it is the project the admin still expects to be linked and the write does not move the link."}
+        release_history: {type: boolean, description: "Publish frozen notes for the linked project. Requires project_id and revision from the read this publish is based on. Absent on a project write leaves the current choice when the project stays, and leaves a different project off."}
+        revision: {type: integer, minimum: 1, description: Required together with release_history and project_id. The link revision from the read this publish is based on.}
     PortalFulfillmentWrite:
       type: object
       additionalProperties: false
@@ -7808,6 +7960,25 @@ components:
         state: {type: string, enum: [queued, handed_off, failed]}
         handed_off_at: {type: [string, 'null'], format: date-time, description: 'RFC3339, set once when the direct recipient acknowledges or the managed adapter confirms'}
         failure_reason: {type: string}
+    InboxMessageStatus:
+      type: object
+      additionalProperties: false
+      required: [message_id, status, delivered_at, read_at, deliver_by]
+      properties:
+        message_id: {type: string, format: uuid}
+        status: {type: string, enum: [sent, delivered, read, not_delivered]}
+        reason: {type: string, description: 'Present only for not_delivered: deadline, attempts, session_ended, no_listener or an adapter reason.'}
+        delivered_at: {type: [string, 'null'], format: date-time, description: First hand-over to the recipient.}
+        read_at: {type: [string, 'null'], format: date-time, description: Receiver confirmation (receipt handed_off_at).}
+        deliver_by: {type: [string, 'null'], format: date-time, description: The deadline; null for messages to people and for messages sent before deadlines existed.}
+    InboxDeliverySettings:
+      type: object
+      additionalProperties: false
+      required: [session_deadline_seconds, unbound_deadline_seconds, max_attempts]
+      properties:
+        session_deadline_seconds: {type: integer, minimum: 60, maximum: 86400, description: Deadline for a message bound to one session. Default 300.}
+        unbound_deadline_seconds: {type: integer, minimum: 60, maximum: 604800, description: 'Deadline for any other message to an agent (adapter target, blocked or principal inbox). Default 1800.'}
+        max_attempts: {type: integer, minimum: 1, maximum: 50, description: Adapter claims before a delivery fails with reason attempts. Default 8.}
     InboxMessage:
       allOf:
         - {$ref: '#/components/schemas/InboxSend'}
@@ -8244,6 +8415,8 @@ components:
         progress_pct: {type: integer, minimum: 0, maximum: 100, description: Percent done. Zero is reported; omission means unknown.}
         eta_reported_at: {type: string, format: date-time, description: When the session last sent an estimate.}
         eta_stale: {type: boolean, description: True when the last estimate is older than two reporting intervals. Omitted when fresh or absent. Clients derive attention from this field.}
+        inbox_seen_at: {type: string, format: date-time, description: 'AEON-280. Last time this generation pulled its inbox (a session pull, drain, stream or ack). Omitted until it first pulls. Clients derive Listening from its age.'}
+        inbox_seen_via: {type: string, enum: [hook, drain, long_poll, stream, ack], description: 'How it last pulled: hook = one-shot session pull, long_poll = waiting pull, drain = managed harness drain, stream = inbox SSE, ack = acknowledgement. Omitted with inbox_seen_at.'}
     TicketEta:
       type: object
       description: Ready and live estimates for one ticket. Epics roll up the latest child instant and the average percent of direct children that have a percent. Unknown stays absent.

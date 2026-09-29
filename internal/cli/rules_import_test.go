@@ -83,7 +83,7 @@ func TestRulesImportPreviewOfflineAndForbiddenFlags(t *testing.T) {
 }
 
 func TestRulesImportHTTPDraftMappingAndFailures(t *testing.T) {
-	for _, scenario := range []string{"authorized", "get403", "put403", "put409", "stale revision", "wrong layer", "redirect", "unchanged", "identity conflict"} {
+	for _, scenario := range []string{"authorized", "get403", "put403", "put409", "stale revision", "wrong layer", "redirect", "unchanged", "identity conflict", "hash update"} {
 		t.Run(scenario, func(t *testing.T) {
 			path := importFixturePath(t)
 			base := []string{"--context", "project", "--file", path}
@@ -104,13 +104,16 @@ func TestRulesImportHTTPDraftMappingAndFailures(t *testing.T) {
 			if scenario == "wrong layer" {
 				current.Scope.Layer = rulesimport.LayerCompany
 			}
-			if scenario == "unchanged" || scenario == "identity conflict" {
+			if scenario == "unchanged" || scenario == "identity conflict" || scenario == "hash update" {
 				mapped, err := rulesimport.MapDraft(plan)
 				if err != nil {
 					t.Fatal(err)
 				}
-				if scenario == "identity conflict" {
+				if scenario == "identity conflict" || scenario == "hash update" {
 					mapped[0].Why = "Locally edited on server."
+				}
+				if scenario == "identity conflict" {
+					mapped[0].Source.EditedHere = true
 				}
 				current.Rules = append(current.Rules, mapped...)
 			}
@@ -220,6 +223,16 @@ func TestRulesImportHTTPDraftMappingAndFailures(t *testing.T) {
 				if receipt.Revision != expectedRevision || receipt.Mode != expectedMode || receipt.PlanID != plan.PlanID {
 					t.Fatal("wrong draft receipt")
 				}
+				switch scenario {
+				case "authorized":
+					if receipt.Added != 1 || receipt.Updated != 0 || receipt.Unchanged != 0 {
+						t.Fatalf("receipt counts %+v", receipt)
+					}
+				case "unchanged":
+					if receipt.Added != 0 || receipt.Updated != 0 || receipt.Unchanged != 1 {
+						t.Fatalf("receipt counts %+v", receipt)
+					}
+				}
 			} else {
 				if err == nil {
 					t.Fatal("refusal succeeded")
@@ -230,6 +243,9 @@ func TestRulesImportHTTPDraftMappingAndFailures(t *testing.T) {
 				var receipt any
 				if e := dec.Decode(&receipt); e != io.EOF {
 					t.Fatal("failure printed a success receipt")
+				}
+				if scenario == "hash update" && !errors.Is(err, rulesimport.ErrDraftConflict) {
+					t.Fatalf("Aeon edit was overwritten or not reported: %v", err)
 				}
 				if scenario == "put403" || scenario == "get403" || scenario == "put409" {
 					var se *client.StatusError
@@ -250,5 +266,33 @@ func TestRulesImportHTTPDraftMappingAndFailures(t *testing.T) {
 				t.Fatalf("unexpected requests/fallback/retry: %v", calls)
 			}
 		})
+	}
+}
+
+func TestRulesImportReportAndLayerFlag(t *testing.T) {
+	path := importFixturePath(t)
+	dir := t.TempDir()
+	var out bytes.Buffer
+	if err := runImportCommand(t, []string{"--context", "project", "--file", path, "--layer", path + "=person", "--report", dir}, &out, nil); err != nil {
+		t.Fatal(err)
+	}
+	var p rulesimport.Proposal
+	if err := json.Unmarshal(out.Bytes(), &p); err != nil {
+		t.Fatal(err)
+	}
+	if len(p.Rules) != 1 || p.Rules[0].Layer != rulesimport.LayerPerson || !strings.HasPrefix(p.Rules[0].Identity, "person/") {
+		t.Fatalf("layer flag %+v", p.Rules)
+	}
+	if p.Rules[0].Sources[0].HeadingPath != "Workflow" {
+		t.Fatalf("heading %q", p.Rules[0].Sources[0].HeadingPath)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "contradictions.md")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "contradictions.json")); err != nil {
+		t.Fatal(err)
+	}
+	if err := runImportCommand(t, []string{"--context", "project", "--file", path, "--layer", path + "=workspace"}, io.Discard, nil); err == nil {
+		t.Fatal("unknown layer accepted")
 	}
 }

@@ -85,8 +85,8 @@ from authentication, not an input parameter. The export uses one SQL statement:
 `journey_tickets.release_node_id` is the sole membership source, joined by tenant
 and project; `nodes.fields` supplies exactly the five benefit properties.
 Backlog tickets, Git mentions and a project's other releases are not membership.
-Deleted/unavailable members remain explicit gap entries. `captured_at`, release
-revision and each member's `updated_at` record the observation. No live API or
+Deleted/unavailable public members remain explicit gap entries. `captured_at`,
+release revision and each member's `updated_at` record the observation. No live API or
 classic database is contacted by the history builder.
 
 The release coordinator reviews that export and records its exact JSON bytes at
@@ -113,7 +113,8 @@ from a ticket, timestamp or Git headline.
 Missing snapshot files produce empty notes with a membership/field-data gap.
 Incomplete visible tickets produce field-specific gaps; they get no invented
 translation or Git-headline benefit. Hidden tickets contribute no text or key to
-the public notes; incomplete hidden tickets still contribute a generic gap.
+the public notes; they contribute only to the hidden count, even when benefit
+fields are incomplete or the member was unavailable at capture.
 Technical Git headlines, legacy top-level `tickets` references and changes remain
 evidence; membership claims come only from the snapshot. The release detail shows
 English/German notes; Git evidence is expandable when a snapshot is available.
@@ -136,3 +137,58 @@ The writing-rule proposal is `docs/proposals/ticket-benefit-writing.json`, using
 AR1's draft Rule DTO. It must be imported as a draft at the fetched revision and
 published separately by an authorized human; it changes no effective harness
 files or company rules.
+
+## Historical note backfill (AEON-290)
+
+After migration `0939`, the deployed binary supports an offline maintenance
+command against its configured database (no Git checkout, API login or network
+history lookup). Both dry-run and apply require an explicit **active person**
+with workspace `roles.manage` authority. Agents and inactive people are denied;
+there is no implicit operator. Tenant and project visibility come from the
+person's live bindings. The command does not run migrations.
+
+```sh
+aeon release-notes backfill --tenant inspr --project AEON --actor-principal-id PERSON_UUID --all-missing
+aeon release-notes backfill --tenant inspr --project AEON --actor-principal-id PERSON_UUID --release VERSION --apply
+```
+
+The container entry point is `/paimos release-notes backfill` with the same
+flags. Omit `--apply` for a read-only plan. `--release` and `--all-missing` are
+mutually exclusive; omitting both means all missing snapshots in that project.
+The JSON report lists version, tickets found, notes count and hidden count for
+each planned/inserted capture, plus `excluded_keys` (resolved manifest tickets
+that are not completed) and `gap_keys` (captured public tickets with incomplete
+fields or unavailable members), plus unchanged and skipped counts. Hidden
+tickets never contribute gap keys.
+
+For historical tags, membership is the union of ticket keys in the embedded
+manifest's release and listed commits, resolved only within the selected tenant
+and project. Only completed tickets (`done`, `accepted`, `delivered`) are
+captured; other states are excluded and reported. This is an explicit
+approximation from Git evidence, recorded as
+`membership_source: release-manifest-tickets`; it is not original journey
+membership. Unresolved keys are not treated as tickets. The current five benefit
+fields and their update times are captured once, including hidden tickets for
+provenance. Public notes contain only the hidden count, never their benefit text
+or missing-field warnings; this is decided when reading the frozen snapshot.
+`released_at` uses the manifest publication time, or its tag time when publication
+time is absent; neither is replaced with the capture time. Captures without an
+original release time are skipped. Reservations are never captured.
+
+The version-keyed table is tenant/project protected and insert-only, with the
+same immutability trigger as native snapshots. Each insert records the person,
+`backfilled: true`, `label: backfilled`, capture time and one audit event. Apply
+is atomic across both paths. Reruns leave existing rows unchanged. Native journey
+releases still use their own membership and snapshot store, through the same
+person/admin authorization and project/version selectors.
+
+`GET /api/releases` and its detail route keep embedded tag snapshots first,
+then use stored journey snapshots where a native version exists, then explicit
+version-keyed backfills for the visible AEON project. Otherwise they retain the
+historical tag headline. The database overlay is computed per request and never
+changes the shared embedded manifest. A malformed database snapshot is logged
+without its payload and falls back for that release alone; other releases remain
+available. Releases with no public notes or gaps keep their tag headline in the
+list and show a quiet **Internal changes only** in the detail. Backfilled notes
+show **Notes written after release**. No original tag, artifact, published
+timestamp, or existing snapshot is rewritten. The coordinator owns production dry-run review and apply.

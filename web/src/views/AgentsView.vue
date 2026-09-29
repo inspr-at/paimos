@@ -239,7 +239,7 @@ function changed() {
 }
 onMounted(() => {
   void agents.loadAll()
-  stop = subscribeAgents(changed, value => { live.value = value })
+  stop = subscribeAgents(changed, value => { live.value = value }, () => agents.deliveryChanged())
   poller.start()
   clock = setInterval(() => agents.tick(), 1000)
   window.addEventListener('keydown', keydown)

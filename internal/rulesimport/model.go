@@ -6,8 +6,10 @@ import "errors"
 
 const (
 	// AlwaysOnBudget is the UTF-8 byte ceiling for the always-on projection.
-	// Packs over this size stay on demand. An always-on projection past the
-	// ceiling is refused whole; rule text is not trimmed to fit.
+	// It matches the shipped session-file cap (rules.MaxBytes, the AEON-263
+	// publish budget). Packs over this size stay on demand in details. An
+	// always-on projection past the ceiling is refused whole; rule text is not
+	// trimmed to fit.
 	AlwaysOnBudget = 12000
 
 	// MaxFileBytes is the largest doctrine file this importer will read.
@@ -66,10 +68,13 @@ var (
 )
 
 // Request is one explicit import. Paths are the only inputs; nothing is discovered.
+// Layers optionally overrides the classified layer for a file path. Keys may be
+// the same path passed in Files; they are cleaned before matching.
 type Request struct {
 	Context TrustContext
 	Section string
 	Files   []string
+	Layers  map[string]Layer
 }
 
 // SourceFile is the stable identity of one supplied file.
@@ -87,12 +92,16 @@ type SourceFile struct {
 
 // SourceRef identifies normalized parsing lines (BOM removed, CR/CRLF to LF).
 // FileSHA256 always identifies the exact raw file bytes, including BOM/newlines.
+// HeadingPath is the heading titles from the document title down to the rule's
+// section, joined with " / ". A rule directly under the document title keeps
+// the separator and an empty section, so a retitle still lines up.
 type SourceRef struct {
-	Path       string `json:"path"`
-	StartLine  int    `json:"start_line"`
-	EndLine    int    `json:"end_line"`
-	SHA256     string `json:"sha256"`
-	FileSHA256 string `json:"file_sha256"`
+	Path        string `json:"path"`
+	HeadingPath string `json:"heading_path"`
+	StartLine   int    `json:"start_line"`
+	EndLine     int    `json:"end_line"`
+	SHA256      string `json:"sha256"`
+	FileSHA256  string `json:"file_sha256"`
 }
 
 // Rule is one proposed rule. Identity is authoritative. ID is the replay key.
@@ -117,13 +126,18 @@ type Rule struct {
 	ExplicitID       string      `json:"explicit_id,omitempty"`
 }
 
-// Contradiction records same-identity differences. Both rules stay in the proposal.
+// Contradiction records same-identity differences or conflicting directives for
+// one action across layers. Headings are provenance for directive conflicts.
+// Both rules stay in the proposal.
 type Contradiction struct {
 	Identity string   `json:"identity"`
 	Kind     string   `json:"kind"`
 	RuleIDs  []string `json:"rule_ids"`
 	Fields   []string `json:"fields"`
 	Note     string   `json:"note"`
+	Topic    string   `json:"topic,omitempty"`
+	Layers   []string `json:"layers,omitempty"`
+	Headings []string `json:"headings,omitempty"`
 }
 
 // Duplicate records an identical replay. Every source lineage is kept.

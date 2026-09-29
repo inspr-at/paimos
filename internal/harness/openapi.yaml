@@ -146,9 +146,22 @@ paths:
         - $ref: '#/components/parameters/projectId'
         - $ref: '#/components/parameters/sessionId'
         - $ref: '#/components/parameters/workerLease'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [delivery_id, cursor]
+              properties:
+                delivery_id: {type: string, format: uuid}
+                cursor: {type: integer, minimum: 1}
+                effective_level: {type: string, enum: [simple], default: simple}
+                outcome: {type: string, enum: [handed_off, failed], default: handed_off}
+                failure_reason: {type: string, enum: [outcome_unconfirmed, child_unavailable]}
       responses:
         '410': {description: Authenticated archived generation; detach harness servicing without signaling a process}
-        '200': {description: Exact leased delivery acknowledged}
+        '200': {description: Exact leased delivery settled idempotently}
   /api/projects/{projectId}/harness-sessions/{sessionId}/managed-controls:
     post:
       operationId: requestManagedHarnessControl

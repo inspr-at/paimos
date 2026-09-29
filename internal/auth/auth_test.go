@@ -82,6 +82,12 @@ func TestOnlyPublicQuoteCapabilityPathsBypassAuthentication(t *testing.T) {
 		{http.MethodGet, "/api/public/quotes/tenant/token/pdf"},
 		{http.MethodGet, "/api/public/portal/harbour"},
 		{http.MethodHead, "/api/public/portal/harbour"},
+		{http.MethodGet, "/api/public/portal/harbour/releases"},
+		{http.MethodHead, "/api/public/portal/harbour/releases"},
+		{http.MethodGet, "/api/public/portal/harbour/llms.txt"},
+		{http.MethodHead, "/api/public/portal/harbour/llms.txt"},
+		{http.MethodGet, "/api/public/portal/harbour/catalog.json"},
+		{http.MethodHead, "/api/public/portal/harbour/catalog.json"},
 		{http.MethodPost, "/api/public/portal/harbour/wishes"},
 		{http.MethodPost, "/api/public/portal/harbour/wishes/PWS-1/votes"},
 		{http.MethodPost, "/api/public/portal/harbour/corrections"},
@@ -89,7 +95,13 @@ func TestOnlyPublicQuoteCapabilityPathsBypassAuthentication(t *testing.T) {
 		rec := httptest.NewRecorder()
 		req := httptest.NewRequest(route.method, route.path, nil)
 		switch {
-		case route.method == http.MethodHead || route.method == http.MethodGet && route.path == "/api/public/portal/harbour":
+		case (route.method == http.MethodGet || route.method == http.MethodHead) && strings.HasSuffix(route.path, "/releases"):
+			req.Pattern = portalReleasesPattern
+		case (route.method == http.MethodGet || route.method == http.MethodHead) && strings.HasSuffix(route.path, "/llms.txt"):
+			req.Pattern = portalLlmsPattern
+		case (route.method == http.MethodGet || route.method == http.MethodHead) && strings.HasSuffix(route.path, "/catalog.json"):
+			req.Pattern = portalCatalogFilePattern
+		case (route.method == http.MethodGet || route.method == http.MethodHead) && route.path == "/api/public/portal/harbour":
 			req.Pattern = portalCatalogPattern
 		case route.method == http.MethodPost && strings.HasSuffix(route.path, "/wishes"):
 			req.Pattern = portalWishPattern
@@ -155,6 +167,19 @@ func TestOnlyPublicQuoteCapabilityPathsBypassAuthentication(t *testing.T) {
 		{http.MethodPost, "/api/public/portal/harbour/corrections/extra"},
 		{http.MethodPost, "/api/public/portal/Harbour/corrections"},
 		{http.MethodPost, "/api/public/portal/harbour/corrections/../corrections"},
+		{http.MethodPost, "/api/public/portal/harbour/releases"},
+		{http.MethodPut, "/api/public/portal/harbour/releases"},
+		{http.MethodGet, "/api/public/portal/harbour/releases/extra"},
+		{http.MethodGet, "/api/public/portal/harbour/releases/"},
+		{http.MethodPost, "/api/public/portal/harbour/llms.txt"},
+		{http.MethodGet, "/api/public/portal/harbour/LLMS.TXT"},
+		{http.MethodGet, "/api/public/portal/harbour/llms.txt/"},
+		{http.MethodGet, "/api/public/portal/harbour/llms.txt/extra"},
+		{http.MethodGet, "/api/public/portal/Harbour/llms.txt"},
+		{http.MethodPost, "/api/public/portal/harbour/catalog.json"},
+		{http.MethodGet, "/api/public/portal/harbour/catalog.json.bak"},
+		{http.MethodGet, "/api/public/portal/harbour/catalog.json/"},
+		{http.MethodGet, "/api/public/portal/harbour/Catalog.json"},
 	} {
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, httptest.NewRequest(route.method, route.path, nil))
@@ -175,6 +200,13 @@ func TestOnlyPublicQuoteCapabilityPathsBypassAuthentication(t *testing.T) {
 	handler.ServeHTTP(rec, correction)
 	if rec.Code != http.StatusUnauthorized {
 		t.Errorf("correction path with the catalog pattern: %d", rec.Code)
+	}
+	releases := httptest.NewRequest(http.MethodGet, "/api/public/portal/harbour/releases", nil)
+	releases.Pattern = portalCatalogPattern
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, releases)
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("releases path with the catalog pattern: %d", rec.Code)
 	}
 }
 

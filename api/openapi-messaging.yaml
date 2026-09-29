@@ -41,9 +41,10 @@ paths:
       - {name: messageId, in: path, required: true, schema: {type: string, format: uuid}}
     post:
       operationId: ackCompatMessage
-      description: Recipient-only ACK of a compatibility message. Resolves its R2 inbox ID in the project and appends the inbox ACK event; exact replay is idempotent.
+      description: Recipient-only ACK of a compatibility message. Resolves its R2 inbox ID in the project and appends the inbox ACK event; exact replay is idempotent. A message whose delivery already failed (AEON-280) answers 409 not_delivered.
       responses:
         '200': {description: Redacted ACK result}
+        '409': {description: not_delivered — the delivery already failed; the sender was told}
   /api/projects/{projectId}/message-targets:
     parameters:
       - {$ref: '#/components/parameters/Project'}

@@ -145,6 +145,7 @@ var RoutePermissions = map[string]string{
 	"GET /api/projects/{projectId}/harness-sessions/orchestrator":            "harness.read",
 	"GET /api/projects/{projectId}/harness-sessions/{sessionId}":             "harness.read",
 	"GET /api/projects/{projectId}/harness-sessions/{sessionId}/read-marker": "harness.read",
+	"GET /api/inbox/message-status":                                          "inbox.receipt",
 	"GET /api/projects/{projectId}/harness-sessions/{sessionId}/controls/{controlId}": "harness.read",
 	"GET /api/projects/{projectId}/harness-sessions/{sessionId}/recovery":             "harness.read",
 	"POST /api/projects/{projectId}/harness-sessions/{sessionId}/remove":              "harness.read",
@@ -168,6 +169,9 @@ var RoutePermissions = map[string]string{
 	"GET /api/projects/{projectId}/releases/{releaseId}/ticket-options":               "releases.read",
 	"GET /api/projects/{projectId}/requirements":                                      "requirements.read",
 	"GET /api/public/portal/{tenantSlug}":                                             "public",
+	"GET /api/public/portal/{tenantSlug}/catalog.json":                                "public",
+	"GET /api/public/portal/{tenantSlug}/llms.txt":                                    "public",
+	"GET /api/public/portal/{tenantSlug}/releases":                                    "public",
 	"GET /api/public/quotes/{publicTenant}/{token}":                                   "public",
 	"GET /api/public/quotes/{publicTenant}/{token}/pdf":                               "public",
 	"GET /api/quote-profiles":                                                         "quotes.read",
@@ -383,6 +387,8 @@ var RoutePermissions = map[string]string{
 	"PUT /api/settings/heartbeat-lost":                                                          "settings.manage",
 	"PUT /api/nodes/{nodeId}/live-eta":                                                          "harness.worker",
 	"PUT /api/projects/{projectId}/harness-sessions/{sessionId}/read-marker":                    "harness.read",
+	"GET /api/settings/inbox-delivery":                                                          "settings.read",
+	"PUT /api/settings/inbox-delivery":                                                          "settings.manage",
 }
 
 func PermissionForPattern(pattern string) (string, bool) {

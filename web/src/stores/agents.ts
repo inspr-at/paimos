@@ -342,11 +342,14 @@ export const useAgents = defineStore('agents', () => {
     accounts.value = accounts.value.map(a => a.id === account.id ? { ...a, ...updated } : a)
   }
   function tick() { now.value = Math.max(now.value, Date.now()) }
+  // Bumped by delivery events (AEON-280); an open chat re-reads its message status.
+  const deliveryPulse = ref(0)
+  function deliveryChanged() { deliveryPulse.value++ }
 
   return {
     now, sessions, sessionsState, sessionsError, sessionsUpdatedAt, sessionsStale, refreshStale, approvals, approvalsState, approvalsError, approvalsHardError, accounts, accountsState, accountsUpdatedAt, messagingState, runs, nodes, controls, eventPulseFor,
     loading, loaded, pending, held, needsCount, views, removedViews, historyViews, historyState, historyMore, loadHistory, loadOlderHistory, recordRemoval, grouped,
-    loadAll, loadNeeds, ensureTicket, refreshApprovals, refreshSessions, refreshThread, refreshAgentRuns, tick,
+    loadAll, loadNeeds, ensureTicket, refreshApprovals, refreshSessions, refreshThread, refreshAgentRuns, tick, deliveryPulse, deliveryChanged,
     viewOf, byAgent, forTicket, recentRuns, askerName, thread, addressOf, decide, revoke, resolve, control, send, setAccount,
     invalidatePolls: () => { sessionsRead.invalidate(); approvalsRead.invalidate(); accountsRead.invalidate(); modelsRead.invalidate(); runsRead.invalidate() },
     recordRun: (run: AgentRun) => mergeRuns([run]),

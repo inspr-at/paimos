@@ -216,6 +216,8 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 	if err != nil {
 		return fmt.Errorf("release history: %w", err)
 	}
+	historyMod.UseTickets(releasehistory.DBTickets(pool))
+	historyMod.WithBackfills(pool, "AEON")
 	portalMod := portal.New(pool, cfg.Env != "dev", authCfg.SessionKey)
 	go portalMod.RunLimitSweep(ctx)
 	// AEON-178: invites can create the sign-in account through a configured identity
@@ -228,6 +230,9 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 	go inbox.NewWorker(pool, inbox.WorkerOptions{}).Run(ctx)
 	// AEON-291: silent unmanaged sessions become "Lost contact" (one runner per tenant).
 	go harness.RunLostContactSweeper(ctx, pool)
+	// AEON-280: delivery deadlines and the attempt cap; one runner across
+	// processes through an advisory lock.
+	go inbox.NewSweeper(pool).Run(ctx)
 	api := &httpapi.Server{
 		Pool:  pool,
 		Brand: &productBrand,

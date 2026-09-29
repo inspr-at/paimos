@@ -74,6 +74,7 @@ type Node struct {
 // HarnessSession is the public binding plus the private worker lease held only
 // by this daemon generation. The lease is never persisted in the run journal.
 type HarnessSession struct {
+	Activity         string                 `json:"-"`
 	Ownership        *ownedprocess.Identity `json:"-"`
 	ActivitySequence int64                  `json:"-"`
 	ID               string                 `json:"id"`
@@ -94,6 +95,8 @@ type HarnessControl struct {
 }
 
 type HarnessDelivery struct {
+	Outcome           string `json:"-"`
+	FailureReason     string `json:"-"`
 	ID                string `json:"delivery_id"`
 	MessageID         string `json:"message_id"`
 	Cursor            int64  `json:"cursor"`
@@ -180,18 +183,21 @@ type API interface {
 }
 
 type StartRequest struct {
-	Rules       string // Ephemeral ADR-004 merge, never a repository instruction file.
-	MaxTurns    int64
-	MaxTokens   int64
-	TenantID    string
-	PrincipalID string
-	Run         Run
-	Profile     Profile
-	AccountKey  string
-	Workspace   string
-	StateRoot   string
-	Prompt      string
-	Generation  string
+	ManagedPolicy bool
+	Capabilities  []string // Exact capabilities advertised for this session.
+	InboxEnabled  bool     // Keep the owned process alive between turns for leased inbox delivery.
+	Rules         string   // Ephemeral ADR-004 merge, never a repository instruction file.
+	MaxTurns      int64
+	MaxTokens     int64
+	TenantID      string
+	PrincipalID   string
+	Run           Run
+	Profile       Profile
+	AccountKey    string
+	Workspace     string
+	StateRoot     string
+	Prompt        string
+	Generation    string
 	// Tools is a loopback MCP capability for this run; the daemon key stays in
 	// the supervisor. It expires when the owned process exits.
 	Tools *RunTools
@@ -203,6 +209,7 @@ type RunTools struct {
 }
 
 type AdapterEvent struct {
+	Activity          string // busy or idle, independent of the run process lifetime.
 	BudgetExhausted   string
 	BudgetTurnsDelta  int64
 	SessionUsage      *sessionusage.UsageReport

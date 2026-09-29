@@ -6,7 +6,7 @@ import RuleItem from './RuleItem.vue'
 import RulesDialog from './RulesDialog.vue'
 import { ensurePermissions } from '../../lib/authz'
 import {
-  IMPORT_MAX_BYTES, draftImportProjects, importWrites, parseDraftImport, runDraftImport, scopeKey, utf8Length,
+  IMPORT_MAX_BYTES, draftImportProjects, importWrites, parseDraftImport, runDraftImport, scopeKey, utf8Length, validateDraft,
   type Caller, type DraftImportPlan, type DraftImportSet, type ExistingSet, type ImportReport, type RuleScope,
 } from '../../lib/rules'
 
@@ -38,6 +38,7 @@ const sets = computed(() => plan.value?.layers.reduce((n, layer) => n + layer.se
 const rules = computed(() => plan.value?.layers.reduce((n, layer) => n + layer.sets.reduce((m, set) => m + set.rules.length, 0), 0) ?? 0)
 const writes = computed(() => plan.value ? importWrites(plan.value) : 0)
 const skipped = computed(() => sets.value - writes.value)
+const duplicateWording = (set: DraftImportSet) => validateDraft(set.name, set.rules).warning ?? ''
 const size = computed(() => fileSize.value < 1024 ? `${fileSize.value} bytes` : `${(fileSize.value / 1024).toFixed(fileSize.value < 10240 ? 1 : 0)} KB`)
 const confirmLabel = computed(() => {
   if (phase.value === 'importing') return 'Importing…'
@@ -156,7 +157,8 @@ const byScope = computed(() => {
               <span class="set-name">{{ set.name }}</span>
               <span class="set-counts">{{ counts(set) }}</span>
             </summary>
-            <ul class="rules"><RuleItem v-for="rule in set.rules" :key="rule.identity" :rule="rule" /></ul>
+            <ul class="rules"><RuleItem v-for="rule in set.rules" :key="rule.identity" :set-name="set.name" :rule="rule" /></ul>
+            <p v-if="duplicateWording(set)" class="wording" role="status">{{ duplicateWording(set) }}</p>
           </details>
         </section>
       </div>
@@ -224,6 +226,7 @@ const byScope = computed(() => {
 .set-counts { margin-left: auto; flex: none; color: var(--ink-3); font-size: 12.5px; white-space: nowrap; }
 .skip .set-name { color: var(--ink-3); font-weight: 500; }
 .rules { list-style: none; margin: 0 0 6px; padding: 0 0 0 18px; }
+.wording { margin: 0 8px 8px 26px; color: var(--ink-2); font-size: 12.5px; line-height: 1.45; }
 .result-line { margin: 0; font-size: 14px; line-height: 1.5; }
 .outcomes { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
 .outcomes li { display: flex; align-items: center; gap: 8px; min-height: 32px; padding: 0 8px; border-radius: 8px; }

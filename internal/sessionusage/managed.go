@@ -40,6 +40,18 @@ func (c *ManagedCodex) BindTurn(turn string) error {
 	return nil
 }
 
+// NextTurn is called only after an acknowledged clean terminal on a live owned
+// thread and before its next turn/start. Cumulative counters remain unchanged.
+func (c *ManagedCodex) NextTurn() error {
+	if c.failed || c.ended || c.turn == "" || c.rerouteModel != "" {
+		c.failed = true
+		return ErrRejected
+	}
+	c.turn = ""
+	c.model = c.requested
+	return nil
+}
+
 // Observe accepts thread/tokenUsage/updated and model/rerouted. A model switch needs the
 // vendor's last-usage snapshot to equal the entire increase since the previous
 // total; otherwise attributing a thread-wide total to a new model is ambiguous.

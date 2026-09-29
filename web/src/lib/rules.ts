@@ -300,22 +300,51 @@ export function publishBlock(caller: Caller | null, scope: RuleScope): string | 
   return null
 }
 
-export function canFlip(rule: AgentRule, held: ReadonlySet<string>): boolean {
+export interface IdentitySet { has(identity: string): boolean }
+export interface CheckGroup { rules: readonly AgentRule[]; held: IdentitySet }
+
+export function canFlip(rule: AgentRule, held: IdentitySet): boolean {
   return rule.strength !== 'locked' && !held.has(rule.identity)
 }
 
-export function groupState(rules: AgentRule[], held: ReadonlySet<string>): CheckState {
-  if (!rules.length) return 'off'
-  const movable = rules.filter(rule => canFlip(rule, held))
-  const protectedOn = rules.some(rule => !canFlip(rule, held))
-  if (!movable.length) return 'on'
-  const ons = movable.filter(rule => rule.enabled).length
-  if (ons === movable.length) return 'on'
+/** on when every movable rule is on (or none can move); off when all are off; otherwise mixed. */
+export function groupsState(groups: readonly CheckGroup[]): CheckState {
+  let any = false
+  let movable = 0
+  let ons = 0
+  let protectedOn = false
+  for (const group of groups) {
+    for (const rule of group.rules) {
+      any = true
+      if (!canFlip(rule, group.held)) {
+        if (rule.enabled || rule.strength === 'locked') protectedOn = true
+        continue
+      }
+      movable += 1
+      if (rule.enabled) ons += 1
+    }
+  }
+  if (!any) return 'off'
+  if (!movable) return 'on'
+  if (ons === movable) return 'on'
   if (ons === 0 && !protectedOn) return 'off'
   return 'mixed'
 }
 
-export function applyEnabled(rules: AgentRule[], enabled: boolean, held: ReadonlySet<string>): AgentRule[] {
+export function hasMovable(groups: readonly CheckGroup[]): boolean {
+  return groups.some(group => group.rules.some(rule => canFlip(rule, group.held)))
+}
+
+export function groupState(rules: AgentRule[], held: ReadonlySet<string>): CheckState {
+  return groupsState([{ rules, held }])
+}
+
+/** A tick turns the group on unless it is already fully on. */
+export function tickTarget(state: CheckState): boolean {
+  return state !== 'on'
+}
+
+export function applyEnabled(rules: AgentRule[], enabled: boolean, held: IdentitySet): AgentRule[] {
   return rules.map(rule => {
     if (!canFlip(rule, held) || rule.enabled === enabled) return rule
     const next = normalizeRule({ ...rule, enabled })
@@ -345,16 +374,34 @@ export function blankRule(taken: Iterable<string>): AgentRule {
   }
 }
 
+const COPY_TAIL = / \(copy(?: \d+)?\)$/
+
+/** A set name for a duplicate, still one line, within 128 bytes, and not already used. */
+export function copyName(name: string, taken: Iterable<string> = []): string {
+  const used = new Set(taken)
+  const stem = (name.trim() || 'Set').replace(COPY_TAIL, '').trim() || 'Set'
+  const fit = (suffix: string) => {
+    const room = 128 - utf8Length(suffix)
+    let base = stem
+    while (base && utf8Length(base) > room) base = base.slice(0, -1)
+    base = base.trimEnd()
+    if (!base || utf8Length(base) > room) base = 'Set'
+    return `${base}${suffix}`
+  }
+  for (let n = 1; n <= 99; n++) {
+    const candidate = fit(n === 1 ? ' (copy)' : ` (copy ${n})`)
+    if (!used.has(candidate)) return candidate
+  }
+  return fit(' (copy 99)')
+}
+
+/** A new rule with its own identity. The wording stays, so agents do not receive a "(copy)" suffix. */
 export function duplicateRule(rule: AgentRule, taken: Iterable<string>): AgentRule {
   const copy = normalizeRule(rule)
-  const suffix = ' (copy)'
-  const room = Math.max(0, 512 - utf8Length(suffix))
-  let text = copy.text
-  while (utf8Length(text) > room) text = text.slice(0, -1)
   return {
     ...copy,
     identity: identityFromText(`${copy.identity}-copy`, new Set(taken)),
-    text: `${text}${suffix}`,
+    text: copy.text,
     strength: 'normal',
     enabled: true,
     expires_at: null,
@@ -395,16 +442,40 @@ export function validateRule(rule: AgentRule, seen: ReadonlySet<string>): string
   return null
 }
 
-export function validateDraft(name: string, rules: AgentRule[]): string | null {
-  if (oneLine(name, 128, true)) return 'The set name is one line, up to 128 bytes.'
-  if (rules.length > MAX_RULES) return 'A set holds at most 100 rules.'
+export interface DraftCheck { error: string | null; warning: string | null }
+
+/** Accessible name for one rule switch. The set distinguishes copies that keep the same wording. */
+export function ruleSwitchLabel(text: string, setName: string, enabled: boolean, empty = 'Untitled rule'): string {
+  const name = text.trim() || empty
+  const set = setName.trim()
+  const state = enabled ? 'on' : 'off'
+  return set ? `${name} in ${set} is ${state}` : `${name} is ${state}`
+}
+
+function duplicateTextWarning(rules: AgentRule[]): string | null {
   const seen = new Set<string>()
   for (const rule of rules) {
-    const issue = validateRule(rule, seen)
-    if (issue) return issue
-    seen.add(rule.identity)
+    if (rule.text.trim() === '') continue
+    if (seen.has(rule.text)) return 'This rule appears twice in this set; agents would get it twice.'
+    seen.add(rule.text)
   }
   return null
+}
+
+export function validateDraft(name: string, rules: AgentRule[]): DraftCheck {
+  let error: string | null = null
+  if (oneLine(name, 128, true)) error = 'The set name is one line, up to 128 bytes.'
+  else if (rules.length > MAX_RULES) error = 'A set holds at most 100 rules.'
+  else {
+    const seen = new Set<string>()
+    for (const rule of rules) {
+      const issue = validateRule(rule, seen)
+      if (issue) { error = issue; break }
+      seen.add(rule.identity)
+    }
+  }
+  // Identical wording warns and still saves: agents would receive that line twice.
+  return { error, warning: duplicateTextWarning(rules) }
 }
 
 export interface RuleChange { kind: 'added' | 'removed' | 'changed'; label: string }
@@ -424,10 +495,28 @@ export function diffRules(before: AgentRule[], after: AgentRule[]): RuleChange[]
 /** Reset only when an upstream original was actually supplied. The contract has no original text. */
 export function resetAvailability(rule: AgentRule, original?: AgentRule | null): { available: true; original: AgentRule } | { available: false; reason: string; show: boolean } {
   if (original && (original.identity === rule.source.identity || original.identity === rule.identity)) return { available: true, original: normalizeRule(original) }
-  if (rule.source.identity) {
-    return { available: false, show: true, reason: 'Reset needs the original wording. This rule records an upstream identity, not the original text.' }
+  if (rule.source.identity && rule.source.edited_here) {
+    return { available: false, show: true, reason: 'Reset needs the original template wording, which this rule does not store.' }
   }
   return { available: false, show: false, reason: '' }
+}
+
+/** Restores the supplied original's wording onto this rule and clears the local edit. */
+export function resetRule(rule: AgentRule, original: AgentRule): AgentRule | null {
+  const ready = resetAvailability(rule, original)
+  if (!ready.available) return null
+  return normalizeRule({
+    ...rule,
+    text: ready.original.text,
+    why: ready.original.why,
+    details: ready.original.details,
+    strength: ready.original.strength,
+    enabled: ready.original.enabled,
+    expires_at: ready.original.expires_at,
+    roles: ready.original.roles,
+    harnesses: ready.original.harnesses,
+    source: { ...rule.source, edited_here: false },
+  })
 }
 
 export function mergeQuery(ctx: RuleContext): { query: string } | { error: string } {
@@ -917,7 +1006,7 @@ export function parseDraftImport(
         rules.push(parsed.rule)
       }
       const issue = validateDraft(entry.name, rules)
-      if (issue) return { error: issue }
+      if (issue.error) return { error: issue.error }
       sets.push({ name: entry.name, rules })
     }
     layers.push({ scope: scope.scope, sets })
