@@ -11,15 +11,22 @@
 // expected revision. No layer/set creation, publication, restore or retry occurs.
 // Output is a local JSON proposal, then a separate JSON receipt on success. A
 // failure leaves that local proposal intact; HTTP response bodies are not logged.
-// Identical imported identities are idempotent; different existing identities
-// require explicit resolution. Unrelated existing draft rules are preserved.
+// Identical imported identities are idempotent and reported unchanged. A draft
+// rule from an earlier import is updated when its content hash differs. A rule
+// marked edited here is left in place and reported as a conflict. Unrelated
+// existing draft rules are preserved. Publication is never requested.
 //
 // AR1 has no on-demand placement or unresolved-alternative fields. Those cases,
 // mixed layer/set groups, missing why, date-only expiry, unsupported selectors
 // and oversized values are refused without truncating the proposal. To apply,
 // supply a single group with explicit why and RFC3339 expiry (if any). Source
-// lineage is retained as JSON in details; file hashes identify raw bytes, while
-// source ranges and their hashes use BOM-stripped, LF-normalized parsing lines.
+// lineage is retained as JSON in details: source path, heading path and content
+// hash on every rule. File hashes identify raw bytes, while source ranges and
+// their hashes use BOM-stripped, LF-normalized parsing lines. --layer
+// PATH=company|project|person|agent overrides the classified layer. --report DIR
+// writes contradictions.md and contradictions.json. Contradictions are
+// same-identity differences and same-topic directives that conflict across
+// layers. Long packs stay in details and out of the always-on projection.
 //
 // Generic AGENTS.md and CLAUDE.md require an explicit local context. Public
 // templates additionally need an aeon-context: template HTML comment; detected

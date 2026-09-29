@@ -95,7 +95,7 @@ func TestDraftMappingRetainsFieldsAndDuplicateLineage(t *testing.T) {
 	if err := json.Unmarshal([]byte(raw), &lineage); err != nil {
 		t.Fatal(err)
 	}
-	if len(lineage.Sources) != 2 || lineage.Identity != p.Rules[0].Identity || lineage.Sources[0].FileSHA256 != digest([]byte(body)) || r.Source.Revision != digest([]byte(raw)) {
+	if len(lineage.Sources) != 2 || lineage.Identity != p.Rules[0].Identity || lineage.Sources[0].FileSHA256 != digest([]byte(body)) || r.Source.Revision != digest([]byte(raw)) || lineage.Sources[0].HeadingPath != "Workflow" || lineage.Sources[1].HeadingPath != "Workflow" {
 		t.Fatal("duplicate lineage lost")
 	}
 }

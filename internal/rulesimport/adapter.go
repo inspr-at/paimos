@@ -71,10 +71,13 @@ type Target struct {
 	Revision int64
 }
 type DraftResult struct {
-	Mode     string `json:"mode"`
-	PlanID   string `json:"plan_id"`
-	SetID    string `json:"set_id"`
-	Revision int64  `json:"revision"`
+	Mode      string `json:"mode"`
+	PlanID    string `json:"plan_id"`
+	SetID     string `json:"set_id"`
+	Revision  int64  `json:"revision"`
+	Added     int    `json:"added"`
+	Updated   int    `json:"updated"`
+	Unchanged int    `json:"unchanged"`
 }
 
 // Lineage is appended as JSON in details, the only AR1 on-demand field capable
@@ -251,41 +254,51 @@ func ApplyDraft(ctx context.Context, c *client.Client, p Proposal, target Target
 		return DraftResult{}, ErrDraftConflict
 	}
 	merged := slices.Clone(current.Rules)
-	seen := map[string]DraftRule{}
-	for _, r := range current.Rules {
+	index := map[string]int{}
+	for i, r := range merged {
 		if err := validateDraftRule(r); err != nil {
 			return DraftResult{}, draftRefusal("existing draft is outside the frozen AR1 contract; refusing lossy replacement")
 		}
-		if _, ok := seen[r.Identity]; ok {
+		if _, ok := index[r.Identity]; ok {
 			return DraftResult{}, ErrDraftConflict
 		}
-		seen[r.Identity] = r
+		index[r.Identity] = i
 	}
+	added, updated, unchanged := 0, 0, 0
 	for _, r := range imported {
-		if prior, ok := seen[r.Identity]; ok {
-			if !sameDraftRule(prior, r) {
-				return DraftResult{}, fmt.Errorf("%w: existing identity differs; resolve it explicitly", ErrDraftConflict)
+		if i, ok := index[r.Identity]; ok {
+			if sameDraftRule(merged[i], r) {
+				unchanged++
+				continue
 			}
+			// A person marked this draft edited here. Re-import must not replace it.
+			if merged[i].Source.EditedHere {
+				return DraftResult{}, fmt.Errorf("%w: existing identity was edited here; resolve it explicitly", ErrDraftConflict)
+			}
+			merged[i] = r
+			updated++
 			continue
 		}
 		merged = append(merged, r)
+		index[r.Identity] = len(merged) - 1
+		added++
 	}
-	result := DraftResult{Mode: "unchanged", PlanID: p.PlanID, SetID: current.ID, Revision: current.Revision}
-	if len(merged) == len(current.Rules) {
+	result := DraftResult{Mode: "unchanged", PlanID: p.PlanID, SetID: current.ID, Revision: current.Revision, Added: added, Updated: updated, Unchanged: unchanged}
+	if added == 0 && updated == 0 {
 		return result, nil
 	}
 	if len(merged) > 100 {
 		return DraftResult{}, draftRefusal("combined draft exceeds 100 rules; existing rules were retained")
 	}
 	body := DraftBody{ExpectedRevision: target.Revision, Name: current.Name, Rules: merged}
-	var updated DraftSet
-	if err := api.Do(ctx, http.MethodPut, path+"/draft", body, &updated); err != nil {
+	var saved DraftSet
+	if err := api.Do(ctx, http.MethodPut, path+"/draft", body, &saved); err != nil {
 		return DraftResult{}, safeDraftError(err)
 	}
-	if updated.ID != current.ID || updated.Revision != current.Revision+1 || updated.Scope != current.Scope || updated.Name != current.Name || updated.PublishedVersion != current.PublishedVersion || !sameDraftRules(updated.Rules, merged) {
+	if saved.ID != current.ID || saved.Revision != current.Revision+1 || saved.Scope != current.Scope || saved.Name != current.Name || saved.PublishedVersion != current.PublishedVersion || !sameDraftRules(saved.Rules, merged) {
 		return DraftResult{}, draftRefusal("unexpected draft response; write outcome uncertain, inspect the set before retrying")
 	}
-	result.Mode, result.Revision = "draft", updated.Revision
+	result.Mode, result.Revision = "draft", saved.Revision
 	return result, nil
 }
 

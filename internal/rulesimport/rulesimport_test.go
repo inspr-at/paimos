@@ -101,6 +101,9 @@ func TestLineageAndReplay(t *testing.T) {
 	if rule.Sources[0].StartLine != 5 || rule.Sources[0].EndLine != 7 {
 		t.Fatalf("lines %d-%d", rule.Sources[0].StartLine, rule.Sources[0].EndLine)
 	}
+	if rule.Sources[0].HeadingPath != "Synthetic kernel / Git" {
+		t.Fatalf("heading path %q", rule.Sources[0].HeadingPath)
+	}
 	lines := strings.Split(strings.TrimSuffix(body, "\n"), "\n")
 	chunk := strings.Join(lines[4:7], "\n") + "\n"
 	sum := sha256.Sum256([]byte(chunk))

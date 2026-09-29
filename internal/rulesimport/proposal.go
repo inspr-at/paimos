@@ -30,6 +30,10 @@ func Build(ctx context.Context, in Request) (Proposal, error) {
 	if len(in.Files) == 0 {
 		return Proposal{}, fmt.Errorf("at least one explicit file is required")
 	}
+	overrides, err := layerOverrides(in.Layers)
+	if err != nil {
+		return Proposal{}, err
+	}
 	seenPath := map[string]bool{}
 	var files []SourceFile
 	var raws []built
@@ -61,6 +65,10 @@ func Build(ctx context.Context, in Request) (Proposal, error) {
 		if !contextAllowed(in.Context, file.Trust) {
 			return Proposal{}, fmt.Errorf("%w: %s is %s, plan context is %s", ErrMixedContext, file.Base, file.Trust, in.Context)
 		}
+		if layer, ok := overrides[clean]; ok {
+			file.Layer = layer
+			delete(overrides, clean)
+		}
 		parsed, err := parseDocument(file, body, section)
 		if err != nil {
 			return Proposal{}, err
@@ -71,6 +79,9 @@ func Build(ctx context.Context, in Request) (Proposal, error) {
 			raws = append(raws, built{file: file, rule: rule, lines: parsed.lines})
 		}
 	}
+	if len(overrides) > 0 {
+		return Proposal{}, fmt.Errorf("layer mapping does not match an explicit file")
+	}
 	proposal := assemble(in.Context, section, files, raws, unresolved)
 	proposal.PlanID = planID(proposal)
 	proposal.Adapter = AdapterReport{Ready: true, Reason: "AR1 draft mapping available; API authorization and explicit set/revision required"}
@@ -78,6 +89,29 @@ func Build(ctx context.Context, in Request) (Proposal, error) {
 		proposal.Adapter = AdapterReport{Reason: err.Error()}
 	}
 	return proposal, nil
+}
+
+func layerOverrides(in map[string]Layer) (map[string]Layer, error) {
+	if len(in) == 0 {
+		return nil, nil
+	}
+	out := make(map[string]Layer, len(in))
+	for raw, layer := range in {
+		switch layer {
+		case LayerCompany, LayerProject, LayerPerson, LayerAgent:
+		default:
+			return nil, fmt.Errorf("unknown layer %q", layer)
+		}
+		clean, err := cleanPath(raw)
+		if err != nil {
+			return nil, err
+		}
+		if _, ok := out[clean]; ok {
+			return nil, fmt.Errorf("duplicate layer mapping")
+		}
+		out[clean] = layer
+	}
+	return out, nil
 }
 
 func validContext(c TrustContext) bool {
@@ -185,6 +219,7 @@ func assemble(plan TrustContext, section string, files []SourceFile, raws []buil
 			rules = append(rules, rule)
 		}
 	}
+	contradictions = append(contradictions, crossLayerContradictions(rules)...)
 	slices.SortFunc(rules, func(a, b Rule) int {
 		if layerRank(a.Layer) != layerRank(b.Layer) {
 			return layerRank(a.Layer) - layerRank(b.Layer)
@@ -292,11 +327,12 @@ func toRule(item built) Rule {
 		Placement:  raw.placement,
 		ExplicitID: raw.explicitID,
 		Sources: []SourceRef{{
-			Path:       item.file.Path,
-			StartLine:  raw.start,
-			EndLine:    raw.end,
-			SHA256:     hashLines(item.lines, raw.start, raw.end),
-			FileSHA256: item.file.SHA256,
+			Path:        item.file.Path,
+			HeadingPath: raw.headingPath,
+			StartLine:   raw.start,
+			EndLine:     raw.end,
+			SHA256:      hashLines(item.lines, raw.start, raw.end),
+			FileSHA256:  item.file.SHA256,
 		}},
 	}
 	rule.ID = ruleID(identity, fingerprint(rule))
@@ -347,6 +383,135 @@ func differingFields(a, b Rule) []string {
 	}
 	slices.Sort(fields)
 	return fields
+}
+
+// directivePhrases are matched leftmost, and a longer phrase wins a tie, so
+// "must not" stays a prohibition rather than a requirement.
+var directivePhrases = []struct {
+	polarity string
+	phrase   string
+}{
+	{"prohibit", "must not"},
+	{"prohibit", "do not"},
+	{"prohibit", "don't"},
+	{"prohibit", "never"},
+	{"prohibit", "forbidden"},
+	{"require", "always"},
+	{"require", "required"},
+	{"require", "must"},
+	{"permit", "allowed"},
+	{"permit", "may"},
+}
+
+// crossLayerContradictions reports the same topic with opposing directives in
+// different layers. Same-direction rules are not conflicts. Precedence is not
+// applied; both rules stay in the proposal.
+func crossLayerContradictions(rules []Rule) []Contradiction {
+	type hit struct {
+		rules  []Rule
+		pols   map[string]bool
+		layers map[Layer]bool
+		order  []Layer
+	}
+	groups := map[string]*hit{}
+	var topics []string
+	for _, rule := range rules {
+		topic, polarity, ok := directiveTopic(rule)
+		if !ok {
+			continue
+		}
+		g := groups[topic]
+		if g == nil {
+			g = &hit{pols: map[string]bool{}, layers: map[Layer]bool{}}
+			groups[topic] = g
+			topics = append(topics, topic)
+		}
+		g.rules = append(g.rules, rule)
+		g.pols[polarity] = true
+		if !g.layers[rule.Layer] {
+			g.layers[rule.Layer] = true
+			g.order = append(g.order, rule.Layer)
+		}
+	}
+	var out []Contradiction
+	for _, topic := range topics {
+		g := groups[topic]
+		if len(g.layers) < 2 || len(g.pols) < 2 {
+			continue
+		}
+		ids := make([]string, 0, len(g.rules))
+		for _, rule := range g.rules {
+			ids = append(ids, rule.ID)
+		}
+		slices.Sort(ids)
+		layers := append([]Layer(nil), g.order...)
+		slices.SortFunc(layers, func(a, b Layer) int {
+			if d := layerRank(a) - layerRank(b); d != 0 {
+				return d
+			}
+			return strings.Compare(string(a), string(b))
+		})
+		names := make([]string, len(layers))
+		for i, layer := range layers {
+			names[i] = string(layer)
+		}
+		out = append(out, Contradiction{
+			Identity: topic,
+			Kind:     "cross_layer_directive",
+			RuleIDs:  ids,
+			Fields:   []string{"directive"},
+			Note:     "same topic has conflicting directives across layers; both rules are retained and layer precedence is not applied",
+			Topic:    topic,
+			Layers:   names,
+		})
+	}
+	return out
+}
+
+func directiveTopic(rule Rule) (topic, polarity string, ok bool) {
+	text := strings.ToLower(rule.Text)
+	text = strings.ReplaceAll(text, "🔴", "")
+	text = strings.ReplaceAll(text, "🟡", "")
+	text = collapseSpace(text)
+	at, n, polarity := -1, 0, ""
+	for _, phrase := range directivePhrases {
+		i := strings.Index(text, phrase.phrase)
+		if i < 0 || !phraseBounded(text, i, len(phrase.phrase)) {
+			continue
+		}
+		if at < 0 || i < at || (i == at && len(phrase.phrase) > n) {
+			at, n, polarity = i, len(phrase.phrase), phrase.polarity
+		}
+	}
+	if at < 0 {
+		return "", "", false
+	}
+	residue := collapseSpace(text[:at] + " " + text[at+n:])
+	residue = strings.Trim(residue, ".,;:!?\"'`")
+	residue = collapseSpace(residue)
+	if residue == "" || rule.Set == "" {
+		return "", "", false
+	}
+	return rule.Set + " | " + residue, polarity, true
+}
+
+func collapseSpace(s string) string {
+	return strings.Join(strings.Fields(s), " ")
+}
+
+func phraseBounded(s string, at, n int) bool {
+	if at > 0 && isTopicWord(s[at-1]) {
+		return false
+	}
+	end := at + n
+	if end < len(s) && isTopicWord(s[end]) {
+		return false
+	}
+	return true
+}
+
+func isTopicWord(b byte) bool {
+	return (b >= 'a' && b <= 'z') || (b >= '0' && b <= '9')
 }
 
 func heuristicsFor(rules []Rule) []HeuristicMatch {

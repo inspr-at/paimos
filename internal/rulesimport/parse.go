@@ -43,6 +43,7 @@ type rawRule struct {
 	end                 int
 	setSlug             string
 	setTitle            string
+	headingPath         string
 	layer               Layer
 	placement           string
 	extraWhy            bool
@@ -76,6 +77,7 @@ type parser struct {
 	section string
 
 	stack      []headingFrame
+	h1         string
 	setSlug    string
 	setTitle   string
 	personal   bool
@@ -239,6 +241,7 @@ func (p *parser) heading(n int, line string) {
 	title := strings.TrimSpace(m[2])
 	if level == 1 {
 		p.stack = nil
+		p.h1 = title
 		p.setSlug = "preamble"
 		p.setTitle = "Preamble"
 		p.personal = p.file.Kind == "profile" || p.headingPersonal(title)
@@ -306,23 +309,26 @@ func (p *parser) item(n, indent int, text string) {
 		start = p.pendingLn
 	}
 	rule := &rawRule{
-		explicitID: p.pendingID,
-		text:       text,
-		enabled:    true,
-		locked:     explicitLocked(text),
-		start:      start,
-		end:        n,
-		setSlug:    p.setSlug,
-		setTitle:   p.setTitle,
-		layer:      p.file.Layer,
-		placement:  p.file.Placement,
+		explicitID:  p.pendingID,
+		text:        text,
+		enabled:     true,
+		locked:      explicitLocked(text),
+		start:       start,
+		end:         n,
+		setSlug:     p.setSlug,
+		setTitle:    p.setTitle,
+		headingPath: p.headingPath(),
+		layer:       p.file.Layer,
+		placement:   p.file.Placement,
 	}
 	p.pendingID = ""
 	p.pendingLn = 0
 	if p.file.Role != "" {
 		rule.roles = append(rule.roles, p.file.Role)
 	}
-	if p.lockedHead && !rule.locked {
+	// 🟡 is an explicit normal-strength mark. The shipped model has only normal
+	// and locked, so caution does not become a third strength and does not lock.
+	if p.lockedHead && !rule.locked && !explicitCaution(text) {
 		rule.unspecifiedStrength = true
 	}
 	if strings.Contains(strings.ToLower(text), "[off]") || strings.Contains(strings.ToLower(text), "enabled: false") {
@@ -547,6 +553,20 @@ func (p *parser) finish() (fileParse, error) {
 		})
 	}
 	return fileParse{rules: p.rules, unresolved: p.unresolved, lines: p.lines}, nil
+}
+
+func (p *parser) headingPath() string {
+	if p.h1 == "" {
+		return p.setTitle
+	}
+	if len(p.stack) == 0 {
+		return p.h1
+	}
+	return p.h1 + " / " + p.setTitle
+}
+
+func explicitCaution(text string) bool {
+	return strings.Contains(text, "🟡")
 }
 
 func explicitLocked(text string) bool {
