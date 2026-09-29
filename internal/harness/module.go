@@ -49,6 +49,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/inspr-at/paimos/internal/httpapi"
@@ -71,6 +72,7 @@ var _ httpapi.Module = (*Module)(nil)
 func New(pool *pgxpool.Pool) httpapi.Module { return &Module{pool: pool} }
 
 func (m *Module) Mount(mux *http.ServeMux) {
+	mux.HandleFunc("POST /api/inbox/session-binding", m.resolveSessionBinding)
 	for _, route := range []struct {
 		pattern, scope string
 		agent          bool
@@ -135,45 +137,45 @@ type Session struct {
 	ArchivedAt           *time.Time             `json:"archived_at"`
 	RecoveryProcessState *string                `json:"recovery_process_state"`
 	StateEvidence
-	ID                                             string            `json:"id"`
-	ProjectID                                      string            `json:"project_id"`
-	AgentPrincipalID                               string            `json:"agent_principal_id"`
-	RunID                                          *string           `json:"run_id"`
-	TicketNodeID                                   *string           `json:"ticket_node_id"`
-	WorkOrderID                                    *string           `json:"work_order_id"`
-	ParentID                                       *string           `json:"parent_harness_session_id"`
-	Harness                                        string            `json:"harness"`
-	Host                                           string            `json:"host"`
-	DisplayLabel                                   *string           `json:"display_label"`
-	Model                                          *string           `json:"model"`
-	ReasoningEffort                                *string           `json:"reasoning_effort"`
-	AccountLabel                                   *string           `json:"account_label"`
-	HarnessVersion                                 *string           `json:"harness_version"`
-	Brief                                          *string           `json:"brief"`
-	Worktree                                       *string           `json:"worktree"`
-	Branch                                         *string           `json:"branch"`
-	Commits                                        []Commit          `json:"commits"`
-	ActivityNote                                   *string           `json:"activity_note"`
-	ActivityHistory                                []ActivityNote    `json:"activity_history,omitempty"`
-	MetadataHistory                                *[]MetadataChange `json:"metadata_history,omitempty"`
-	Management                                     string            `json:"management_mode"`
-	Role                                           string            `json:"role"`
-	WorkShape                                      string            `json:"work_shape"`
-	Capabilities                                   []string          `json:"advertised_capabilities"`
-	Phase                                          string            `json:"phase"`
-	Activity                                       string            `json:"activity"`
-	ActivitySequence                               int64             `json:"activity_sequence"`
-	Revision                                       int64             `json:"revision"`
-	HeartbeatAt                                    *time.Time        `json:"heartbeat_at"`
-	StoppedAt                                      *time.Time        `json:"stopped_at"`
-	StopReason                                     *string           `json:"stop_reason"`
-	CreatedAt                                      time.Time         `json:"created_at"`
-	EtaReadyAt                                     *time.Time        `json:"eta_ready_at,omitempty"`
-	EtaLiveAt                                      *time.Time        `json:"eta_live_at,omitempty"`
-	ProgressPct                                    *int              `json:"progress_pct,omitempty"`
-	EtaReportedAt                                  *time.Time        `json:"eta_reported_at,omitempty"`
-	EtaStale                                       bool              `json:"eta_stale,omitempty"`
-	refDigest, leaseDigest, registrationMetaDigest []byte
+	ID                                                              string            `json:"id"`
+	ProjectID                                                       string            `json:"project_id"`
+	AgentPrincipalID                                                string            `json:"agent_principal_id"`
+	RunID                                                           *string           `json:"run_id"`
+	TicketNodeID                                                    *string           `json:"ticket_node_id"`
+	WorkOrderID                                                     *string           `json:"work_order_id"`
+	ParentID                                                        *string           `json:"parent_harness_session_id"`
+	Harness                                                         string            `json:"harness"`
+	Host                                                            string            `json:"host"`
+	DisplayLabel                                                    *string           `json:"display_label"`
+	Model                                                           *string           `json:"model"`
+	ReasoningEffort                                                 *string           `json:"reasoning_effort"`
+	AccountLabel                                                    *string           `json:"account_label"`
+	HarnessVersion                                                  *string           `json:"harness_version"`
+	Brief                                                           *string           `json:"brief"`
+	Worktree                                                        *string           `json:"worktree"`
+	Branch                                                          *string           `json:"branch"`
+	Commits                                                         []Commit          `json:"commits"`
+	ActivityNote                                                    *string           `json:"activity_note"`
+	ActivityHistory                                                 []ActivityNote    `json:"activity_history,omitempty"`
+	MetadataHistory                                                 *[]MetadataChange `json:"metadata_history,omitempty"`
+	Management                                                      string            `json:"management_mode"`
+	Role                                                            string            `json:"role"`
+	WorkShape                                                       string            `json:"work_shape"`
+	Capabilities                                                    []string          `json:"advertised_capabilities"`
+	Phase                                                           string            `json:"phase"`
+	Activity                                                        string            `json:"activity"`
+	ActivitySequence                                                int64             `json:"activity_sequence"`
+	Revision                                                        int64             `json:"revision"`
+	HeartbeatAt                                                     *time.Time        `json:"heartbeat_at"`
+	StoppedAt                                                       *time.Time        `json:"stopped_at"`
+	StopReason                                                      *string           `json:"stop_reason"`
+	CreatedAt                                                       time.Time         `json:"created_at"`
+	EtaReadyAt                                                      *time.Time        `json:"eta_ready_at,omitempty"`
+	EtaLiveAt                                                       *time.Time        `json:"eta_live_at,omitempty"`
+	ProgressPct                                                     *int              `json:"progress_pct,omitempty"`
+	EtaReportedAt                                                   *time.Time        `json:"eta_reported_at,omitempty"`
+	EtaStale                                                        bool              `json:"eta_stale,omitempty"`
+	refDigest, leaseDigest, registrationMetaDigest, vendorRefDigest []byte
 
 	// AEON-280: when and how this generation last pulled its inbox. Omitted
 	// until it pulls once; clients derive Listening from the age.
@@ -304,12 +306,12 @@ func normalizeActivityNote(raw string) (string, bool) {
 	return clean, clean != "" && utf8.RuneCountInString(clean) <= 120
 }
 
-const sessionColumns = `id::text,project_id::text,agent_principal_id::text,run_id::text,ticket_node_id::text,work_order_id::text,parent_id::text,harness,host,management,role,work_shape,capabilities,phase,activity,activity_sequence,revision,heartbeat_at,stopped_at,stop_reason,created_at,ref_digest,lease_digest,display_label,activity_note,model,reasoning_effort,account_label,harness_version,brief,worktree,branch,commits,registration_metadata_digest,archived_at,recovery_process_state,process_ownership,process_observed_at,eta_ready_at,eta_live_at,progress_pct,eta_reported_at,inbox_seen_at,coalesce(inbox_seen_via,'')`
+const sessionColumns = `id::text,project_id::text,agent_principal_id::text,run_id::text,ticket_node_id::text,work_order_id::text,parent_id::text,harness,host,management,role,work_shape,capabilities,phase,activity,activity_sequence,revision,heartbeat_at,stopped_at,stop_reason,created_at,ref_digest,lease_digest,display_label,activity_note,model,reasoning_effort,account_label,harness_version,brief,worktree,branch,commits,registration_metadata_digest,archived_at,recovery_process_state,process_ownership,process_observed_at,eta_ready_at,eta_live_at,progress_pct,eta_reported_at,inbox_seen_at,coalesce(inbox_seen_via,''),vendor_ref_digest`
 
 func scanSession(row pgx.Row) (Session, error) {
 	var s Session
 	var progress *int16
-	err := row.Scan(&s.ID, &s.ProjectID, &s.AgentPrincipalID, &s.RunID, &s.TicketNodeID, &s.WorkOrderID, &s.ParentID, &s.Harness, &s.Host, &s.Management, &s.Role, &s.WorkShape, &s.Capabilities, &s.Phase, &s.Activity, &s.ActivitySequence, &s.Revision, &s.HeartbeatAt, &s.StoppedAt, &s.StopReason, &s.CreatedAt, &s.refDigest, &s.leaseDigest, &s.DisplayLabel, &s.ActivityNote, &s.Model, &s.ReasoningEffort, &s.AccountLabel, &s.HarnessVersion, &s.Brief, &s.Worktree, &s.Branch, &s.Commits, &s.registrationMetaDigest, &s.ArchivedAt, &s.RecoveryProcessState, &s.ProcessOwnership, &s.ProcessObservedAt, &s.EtaReadyAt, &s.EtaLiveAt, &progress, &s.EtaReportedAt, &s.InboxSeenAt, &s.InboxSeenVia)
+	err := row.Scan(&s.ID, &s.ProjectID, &s.AgentPrincipalID, &s.RunID, &s.TicketNodeID, &s.WorkOrderID, &s.ParentID, &s.Harness, &s.Host, &s.Management, &s.Role, &s.WorkShape, &s.Capabilities, &s.Phase, &s.Activity, &s.ActivitySequence, &s.Revision, &s.HeartbeatAt, &s.StoppedAt, &s.StopReason, &s.CreatedAt, &s.refDigest, &s.leaseDigest, &s.DisplayLabel, &s.ActivityNote, &s.Model, &s.ReasoningEffort, &s.AccountLabel, &s.HarnessVersion, &s.Brief, &s.Worktree, &s.Branch, &s.Commits, &s.registrationMetaDigest, &s.ArchivedAt, &s.RecoveryProcessState, &s.ProcessOwnership, &s.ProcessObservedAt, &s.EtaReadyAt, &s.EtaLiveAt, &progress, &s.EtaReportedAt, &s.InboxSeenAt, &s.InboxSeenVia, &s.vendorRefDigest)
 	if progress != nil {
 		value := int(*progress)
 		s.ProgressPct = &value
@@ -343,6 +345,44 @@ func load(ctx context.Context, tx pgx.Tx, projectID, id string, lock bool) (Sess
 func digest(domain, value string) []byte {
 	sum := sha256.Sum256([]byte("aeon.harness." + domain + "\x00" + value))
 	return sum[:]
+}
+
+// vendorRefDigest hashes a harness-native session id with the same domain as
+// harness_session_ref. The same value is not stored twice; lookup hits ref_digest.
+// A nil raw value means the client omitted the field and must not clear a stored one.
+func vendorRefDigest(sessionRef, lease string, raw *string) ([]byte, error) {
+	if raw == nil || *raw == sessionRef {
+		return nil, nil
+	}
+	if len(*raw) < 16 || len(*raw) > 4096 || strings.ContainsAny(*raw, "\r\n") || *raw == lease {
+		return nil, workorders.Fail(400, "invalid harness registration")
+	}
+	return digest("ref", *raw), nil
+}
+
+func fillVendorRef(ctx context.Context, tx pgx.Tx, existing *Session, vendor []byte) error {
+	if vendor == nil {
+		return nil
+	}
+	if existing.vendorRefDigest == nil {
+		if _, err := tx.Exec(ctx, `UPDATE harness_sessions SET vendor_ref_digest=$2 WHERE id=$1 AND vendor_ref_digest IS NULL`, existing.ID, vendor); err != nil {
+			return registrationConflict(err)
+		}
+		existing.vendorRefDigest = vendor
+		return nil
+	}
+	if subtle.ConstantTimeCompare(existing.vendorRefDigest, vendor) != 1 {
+		return workorders.Fail(409, "active generation conflicts with registration")
+	}
+	return nil
+}
+
+func registrationConflict(err error) error {
+	var pg *pgconn.PgError
+	if errors.As(err, &pg) && pg.Code == "23505" {
+		return workorders.Fail(409, "active generation conflicts with registration")
+	}
+	return err
 }
 func proof(s Session, r *http.Request, p tenant.Principal) error {
 	// Authenticate the worker before revealing that its generation was archived.
@@ -495,12 +535,13 @@ type registration struct {
 	Host             string  `json:"host"`
 	DisplayLabel     *string `json:"display_label"`
 	sessionText
-	Management   string   `json:"management_mode"`
-	Role         string   `json:"role"`
-	WorkShape    string   `json:"work_shape"`
-	Capabilities []string `json:"advertised_capabilities"`
-	SessionRef   string   `json:"harness_session_ref"`
-	WorkerLease  string   `json:"worker_lease"`
+	Management       string   `json:"management_mode"`
+	Role             string   `json:"role"`
+	WorkShape        string   `json:"work_shape"`
+	Capabilities     []string `json:"advertised_capabilities"`
+	SessionRef       string   `json:"harness_session_ref"`
+	VendorSessionRef *string  `json:"vendor_session_ref"`
+	WorkerLease      string   `json:"worker_lease"`
 }
 
 func (m *Module) register(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
@@ -588,10 +629,17 @@ func (m *Module) register(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, 
 		return nil, err
 	}
 	ref, lease := digest("ref", in.SessionRef), digest("lease", in.WorkerLease)
+	vendor, err := vendorRefDigest(in.SessionRef, in.WorkerLease, in.VendorSessionRef)
+	if err != nil {
+		return nil, err
+	}
 	existing, err := scanSession(tx.QueryRow(ctx, `SELECT `+sessionColumns+` FROM harness_sessions WHERE project_id=$1 AND ref_digest=$2 AND stopped_at IS NULL FOR UPDATE`, projectID, ref))
 	if err == nil {
 		if subtle.ConstantTimeCompare(existing.leaseDigest, lease) != 1 || existing.AgentPrincipalID != in.AgentPrincipalID || existing.Harness != in.Harness || existing.Host != in.Host || existing.Management != in.Management || existing.Role != in.Role || existing.WorkShape != in.WorkShape || !same(existing.DisplayLabel, in.DisplayLabel) || !sameRegistrationMetadata(existing, in.sessionText, metaDigest) || !same(existing.ParentID, in.ParentID) || !same(existing.TicketNodeID, in.TicketNodeID) || !same(existing.RunID, in.RunID) || !same(existing.WorkOrderID, in.WorkOrderID) || !sameCaps(existing.Capabilities, caps) {
 			return nil, workorders.Fail(409, "active generation conflicts with registration")
+		}
+		if err = fillVendorRef(ctx, tx, &existing, vendor); err != nil {
+			return nil, err
 		}
 		return existing, nil
 	}
@@ -611,9 +659,9 @@ func (m *Module) register(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, 
 			return nil, err
 		}
 	}
-	s, err := scanSession(tx.QueryRow(ctx, `INSERT INTO harness_sessions(tenant_id,project_id,agent_principal_id,run_id,ticket_node_id,work_order_id,parent_id,harness,host,management,role,work_shape,capabilities,ref_digest,lease_digest,display_label,model,reasoning_effort,account_label,harness_version,brief,worktree,branch,registration_metadata_digest) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24) RETURNING `+sessionColumns, p.TenantID, projectID, in.AgentPrincipalID, in.RunID, in.TicketNodeID, in.WorkOrderID, in.ParentID, in.Harness, in.Host, in.Management, in.Role, in.WorkShape, caps, ref, lease, in.DisplayLabel, in.Model, in.ReasoningEffort, in.AccountLabel, in.HarnessVersion, in.Brief, in.Worktree, in.Branch, metaDigest))
+	s, err := scanSession(tx.QueryRow(ctx, `INSERT INTO harness_sessions(tenant_id,project_id,agent_principal_id,run_id,ticket_node_id,work_order_id,parent_id,harness,host,management,role,work_shape,capabilities,ref_digest,lease_digest,display_label,model,reasoning_effort,account_label,harness_version,brief,worktree,branch,registration_metadata_digest,vendor_ref_digest) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25) RETURNING `+sessionColumns, p.TenantID, projectID, in.AgentPrincipalID, in.RunID, in.TicketNodeID, in.WorkOrderID, in.ParentID, in.Harness, in.Host, in.Management, in.Role, in.WorkShape, caps, ref, lease, in.DisplayLabel, in.Model, in.ReasoningEffort, in.AccountLabel, in.HarnessVersion, in.Brief, in.Worktree, in.Branch, metaDigest, vendor))
 	if err != nil {
-		return nil, err
+		return nil, registrationConflict(err)
 	}
 	return s, record(ctx, tx, p, s, "registered", nil, s)
 }

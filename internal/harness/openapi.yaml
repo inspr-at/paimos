@@ -399,6 +399,7 @@ components:
         work_shape: {type: string, enum: [unknown, ship, scout]}
         advertised_capabilities: {type: array, items: {type: string, enum: [inbox, status, steer, interrupt, stop]}}
         harness_session_ref: {type: string, writeOnly: true}
+        vendor_session_ref: {type: string, writeOnly: true, description: 'Optional harness-native session id. Digested like harness_session_ref. Omitted on replay does not clear a stored value.'}
         worker_lease: {type: string, writeOnly: true}
     HarnessBinding:
       type: object

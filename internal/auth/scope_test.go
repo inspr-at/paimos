@@ -206,7 +206,8 @@ func TestCoordinatorScopesReachWorkRoutes(t *testing.T) {
 	for _, route := range []string{
 		"POST /api/projects/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/harness-sessions/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb/heartbeat",
 		"GET /api/inbox/messages", "POST /api/inbox/messages/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb/ack",
-		"POST /api/inbox/messages", "GET /api/nodes/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+		"POST /api/inbox/messages", "POST /api/inbox/session-binding",
+		"GET /api/nodes/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
 		"GET /api/projects", "GET /api/projects/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/messages/listen",
 		"POST /api/projects/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/messages/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb/ack",
 	} {

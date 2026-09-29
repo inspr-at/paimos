@@ -3,14 +3,13 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { APIError, api } from '../../lib/api'
 import { messageStatuses, type MessageStatus, type ProjectMessage } from '../../lib/agents'
-import { attentionReasonText } from '../../lib/agentSignals'
 import { useAgents, type SessionView } from '../../stores/agents'
 import { useSession } from '../../stores/session'
 import AppIcon from '../AppIcon.vue'
 import KeyCap from '../KeyCap.vue'
 import SessionMessages from './SessionMessages.vue'
 import SessionRequests from './SessionRequests.vue'
-import { belongsToSession, collapseMessages } from './sessionMessages'
+import { collapseMessages } from './sessionMessages'
 import { keepFailedReadMark, loadReadMark, markerFromServer, nearBottom, preferReadMark, queueReadMark, readMarkFlushDelay, saveReadMark, statusDone, unreadGroups, type ReadMark } from './sessionChat'
 
 // The Messages tab of the session panel (AEON-273): the thread with a read
@@ -24,7 +23,7 @@ const person = computed(() => identity.identity?.principal.kind === 'person')
 const s = computed(() => props.view.session)
 const messages = computed(() => agents.thread(s.value))
 const address = computed(() => agents.addressOf(s.value.agent_principal_id))
-const current = computed(() => collapseMessages(messages.value.filter(m => belongsToSession(m, s.value.id))))
+const current = computed(() => collapseMessages(messages.value))
 const ended = computed(() => s.value.phase === 'stopped' || !!s.value.stopped_at || !!s.value.archived_at)
 // Managed sessions (AEON-260) take input only through the Session controls above:
 // no composer and no Reply here.
@@ -133,14 +132,6 @@ function repull() {
   void pullReadMark(s.value.project_id, s.value.id, me.value, readGeneration)
 }
 
-// Shared-inbox attention belongs to the agent principal, not this session: one quiet
-// line above the thread.
-const inboxNotes = computed(() => (s.value.attention_reasons ?? []).filter(r => r.scope === 'shared' || !r.blocking).map(r => {
-  if (r.scope !== 'shared' || r.kind !== 'reply') return { code: attentionReasonText(r).code, text: attentionReasonText(r).detail }
-  const actor = r.actor === 'agent' ? 'another agent' : r.actor === 'person' ? 'a person' : 'someone'
-  return { code: `${r.scope}-${r.kind}-${r.actor}`, text: `Shared inbox: ${r.count} ${r.count === 1 ? 'reply' : 'replies'} outstanding, waiting for ${actor}.` }
-}))
-
 // ---------- Scrolling ----------
 const scroller = ref<HTMLElement>()
 const textarea = ref<HTMLTextAreaElement>()
@@ -165,8 +156,8 @@ function toBottom(smooth = false) {
   el.scrollTo({ top: el.scrollHeight, behavior: smooth && !reduced() ? 'smooth' : 'auto' })
   if (!smooth || reduced()) onScroll()
 }
-// Opening the tab lands on the first unread message, or at the bottom. The "New"
-// divider marks where unread starts, unless everything is new.
+// Reopening resumes at the first unread message. A first visit shows the latest
+// exchange instead of stranding the reader at the beginning of a long thread.
 async function enter() {
   entered = true
   const first = unread.value[0]
@@ -175,7 +166,7 @@ async function enter() {
   await nextTick()
   const el = scroller.value
   if (!el) return
-  const target = el.querySelector<HTMLElement>('.new-divider') ?? (first ? el.querySelector<HTMLElement>(`.msg[data-id="${CSS.escape(first.id)}"]`) : null)
+  const target = mark.value ? el.querySelector<HTMLElement>('.new-divider') ?? (first ? el.querySelector<HTMLElement>(`.msg[data-id="${CSS.escape(first.id)}"]`) : null) : null
   if (target) {
     el.scrollTop = Math.max(0, target.getBoundingClientRect().top - el.getBoundingClientRect().top + el.scrollTop - 12)
     stick = nearBottom(el)
@@ -271,7 +262,7 @@ watch(() => agents.deliveryPulse, () => refreshReceipts())
 let refreshedAt = 0
 async function refresh() {
   refreshedAt = Date.now()
-  await agents.refreshThread(s.value.project_id)
+  await agents.refreshThread(s.value.project_id, s.value.id)
 }
 watch([() => me.value, () => s.value.id], async ([viewer, id]) => {
   const generation = ++readGeneration
@@ -334,10 +325,7 @@ defineExpose({ focusComposer: () => textarea.value?.focus() })
   <div class="session-chat">
     <div class="thread-wrap">
       <div ref="scroller" class="thread-scroll" @scroll.passive="onScroll">
-        <section v-if="inboxNotes.length" class="inbox-note" aria-label="Inbox attention">
-          <p v-for="note in inboxNotes" :key="note.code"><AppIcon name="inbox" :size="13" />{{ note.text }}</p>
-        </section>
-        <SessionMessages :messages="messages" :session-id="s.id" :principal-id="s.agent_principal_id" :address="address" :now="now"
+        <SessionMessages :messages="messages" :principal-id="s.agent_principal_id" :now="now"
           :can-reply="canWrite && !composeBlock && !managed" :new-from="newFrom" :new-count="newCount" :statuses="statuses" @reply="reply" />
       </div>
       <Transition name="jump">
@@ -376,9 +364,6 @@ defineExpose({ focusComposer: () => textarea.value?.focus() })
 .session-chat { flex: 1; display: flex; flex-direction: column; min-height: 0; min-width: 0; }
 .thread-wrap { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .thread-scroll { flex: 1; min-height: 0; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; padding: 18px 24px 20px; }
-.inbox-note { display: grid; gap: 4px; margin-bottom: 12px; }
-.inbox-note p { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 12.5px; color: var(--ink-2); overflow-wrap: anywhere; }
-.inbox-note svg { flex: none; color: var(--ink-3); }
 .jump { position: absolute; right: 16px; bottom: 12px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-width: 40px; height: 40px; padding: 0; border: 0; border-radius: 999px; background: var(--surface-raised); color: var(--ink-2); box-shadow: var(--shadow-pop); }
 .jump svg { flex: none; }
 .jump.labelled { padding: 0 12px 0 14px; color: var(--teal-ink); }

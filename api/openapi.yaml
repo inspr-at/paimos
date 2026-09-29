@@ -2785,6 +2785,35 @@ paths:
         '403': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
         '409': {$ref: '#/components/responses/Error'}
+  /inbox/session-binding:
+    post:
+      operationId: resolveInboxSessionBinding
+      summary: Resolve the caller's active generation from a harness-native session reference
+      description: Requires inbox.send. The reference is write-only and is matched as a digest against the caller's active harness_session_ref or vendor_session_ref. Exactly one active generation returns its Aeon session id. None or several is 404, including another principal's row. Stopped and archived generations are excluded.
+      security: *auth
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [harness_session_ref]
+              properties:
+                harness_session_ref: {type: string, minLength: 16, maxLength: 4096, writeOnly: true}
+      responses:
+        '200':
+          description: The caller's active generation
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [session_id]
+                properties:
+                  session_id: {type: string, format: uuid}
+        '400': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
   /inbox/stream:
     get:
       operationId: streamInbox
@@ -3084,7 +3113,7 @@ paths:
         '404': {description: Session is not visible}
     put:
       operationId: putSessionReadMarker
-      description: Move this person's watermark forward. last_read_message_id is a message in this session. last_read_event_id is that message's sent_event_id, or the sent_event_id of a later message in the same session. A lower or equal event leaves the stored marker unchanged and returns it. Requires harness.read. Agents receive 403. Does not change message resources.
+      description: Move this person's watermark forward. last_read_message_id is a message in this session, including an unbound reply linked to its messages. last_read_event_id is that message's sent_event_id, or the sent_event_id of a later message in the same session. A lower or equal event leaves the stored marker unchanged and returns it. Requires harness.read. Agents receive 403. Does not change message resources.
       requestBody:
         required: true
         content:
@@ -3727,7 +3756,7 @@ paths:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
     post:
       operationId: sendProjectMessage
-      description: Optional session bindings are additive; unbound sends preserve principal-inbox behavior. Session-bound messages never use principal-wide transport targets.
+      description: Optional session bindings are additive; unbound sends preserve principal-inbox behavior. Session-bound messages never use principal-wide transport targets. A reply may omit a session binding. An explicit different generation is not found. A held action request is not a visible parent, so a reply to it is not found.
       requestBody: {required: true, content: {application/json: {schema: {$ref: './openapi-messaging.yaml#/components/schemas/Send'}}}}
       responses:
         '201': {description: Durable message, content: {application/json: {schema: {$ref: '#/components/schemas/ProjectMessage'}}}}
@@ -3736,7 +3765,7 @@ paths:
       operationId: inspectProjectMessages
       description: Person admin or super_admin inspection including held messages. Ascending by sent event ID by default. In newest_first mode after is an exclusive upper bound; zero starts at the newest. Thread selects the root and all descendants of the supplied message's reply_to chain within this project. Pending selects unresolved held action requests. Resolution never releases or delivers a held message.
       parameters:
-        - {name: session, in: query, schema: {type: string, format: uuid}, description: Exact sender or recipient session; omitting includes unbound history}
+        - {name: session, in: query, schema: {type: string, format: uuid}, description: 'Exact sender or recipient session and unbound replies linked to its messages, in either direction. Other explicit generations and unrelated principal history are excluded. Omitting includes unbound history.'}
         - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 10}}
         - {name: after, in: query, schema: {type: integer, minimum: 0, default: 0}}
         - {name: newest_first, in: query, schema: {type: boolean, default: false}}
@@ -8713,6 +8742,12 @@ components:
         work_shape: {type: string, enum: [unknown, ship, scout]}
         advertised_capabilities: {type: array, items: {type: string, enum: [inbox, status, steer, interrupt, stop, managed_control_v1, rename, model, effort]}}
         harness_session_ref: {type: string, minLength: 16, maxLength: 4096, writeOnly: true}
+        vendor_session_ref:
+          type: string
+          minLength: 16
+          maxLength: 4096
+          writeOnly: true
+          description: Optional harness-native session id, digested like harness_session_ref. Omitted on replay does not clear a stored value. The same value as harness_session_ref is not stored again.
         worker_lease: {type: string, minLength: 32, maxLength: 256, writeOnly: true}
     HarnessProcessOwnership:
       type: object

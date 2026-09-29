@@ -56,6 +56,20 @@ Named instances and the default live in `~/.aeon/config.yaml`. The agent API key
 
 Versioning: INSPR Calendar Versioning v2 (`inspr-calendar-v2`, `YYMMDDhhmmss.0.0`); the version display uses the pinned INSPR presentation bundle, checked by `just release-check`.
 
+Session **Messages** shows both directions of that session's conversation, newest
+messages at the bottom. `aeon tell PERSON_UUID --project AEON -m 'Reply text'`
+automatically uses `AEON_SESSION_ID`, `AEON_SESSION_FILE` (or
+`AEON_SESSION_STATE_DIR/session.id`), then the registered harness binding when no
+explicit source is configured. Ambient sessions are attached only when active in
+the target project; an ended or unavailable session is omitted with a stderr note.
+`--sender-session` overrides these sources and strictly requires your active
+session in the target project.
+Use `--reply-to MESSAGE_UUID` to link an answer to the person's question; linked
+answers appear in the same thread even when sent without a session binding.
+“Read” means the session acknowledged receipt; “Answered” means an accepted
+counterpart reply exists in the loaded conversation. Unrelated principal history
+and shared-inbox obligations stay outside the session thread.
+
 ## Install the CLI
 
 Nix installs `bin/aeon` and a `bin/paimos` symlink:

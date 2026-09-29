@@ -41,7 +41,7 @@ func (rt *runtime) cmdMessagingTell() *Command {
 			fs.string(&messageFile, "message-file", 0, "message text file, or - for stdin")
 			fs.string(&level, "level", 0, "simple or steer")
 			fs.string(&recipientSession, "recipient-session", 0, "exact recipient session UUID")
-			fs.string(&senderSession, "sender-session", 0, "your session UUID for historical attribution")
+			fs.string(&senderSession, "sender-session", 0, "your session UUID (defaults to the current Aeon or harness binding)")
 			fs.string(&reply, "reply-to", 0, "exact counterpart message UUID")
 			fs.string(&thread, "thread", 0, "conversation thread ID")
 			fs.string(&key, "idempotency-key", 0, "stable retry key (generated if omitted)")
@@ -81,6 +81,13 @@ func (rt *runtime) cmdMessagingTell() *Command {
 			if err != nil {
 				return err
 			}
+			explicitSenderSession := senderSession != ""
+			if !explicitSenderSession {
+				senderSession, err = rt.ambientSenderSession(context.Background(), p.ID)
+				if err != nil {
+					return rt.fail(err, "")
+				}
+			}
 			me, err := rt.caller()
 			if err != nil {
 				return err
@@ -106,6 +113,9 @@ func (rt *runtime) cmdMessagingTell() *Command {
 			}
 			var sent inbox.CompatMessage
 			if err := rt.do(http.MethodPost, "/api/projects/"+url.PathEscape(p.ID)+"/messages", req, &sent); err != nil {
+				if explicitSenderSession {
+					return rt.fail(fmt.Errorf("send with --sender-session (must be your active session in the target project): %w", err), "")
+				}
 				return err
 			}
 			receipt, receiptErr := rt.tellReceipt(sent.ID)
