@@ -55,7 +55,7 @@ async function restore(snapshot: RuleSnapshot) {
         <p v-if="snapshot.note" class="note">{{ snapshot.note }}</p>
         <details class="rules">
           <summary><BizIcon name="chevron-right" :size="12" class="chev" />Rules in this version</summary>
-          <ul><RuleItem v-for="rule in snapshot.rules" :key="rule.identity" :rule="rule" /></ul>
+          <ul><RuleItem v-for="rule in snapshot.rules" :key="rule.identity" :set-name="set.name" :rule="rule" /></ul>
         </details>
         <div v-if="snapshot.version !== set.published_version" class="restore">
           <button v-if="restoring !== snapshot.version" type="button" class="btn sm" :disabled="!!publishReason" :data-tip="publishReason ?? undefined" @click="start(snapshot.version)"><BizIcon name="rollback" :size="13" />Restore as new version</button>

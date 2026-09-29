@@ -3,9 +3,9 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { RequestFailure } from '../src/lib/api.ts'
 import {
-  IMPORT_MAX_BYTES, RulesError, applyEnabled, blankRule, calendarVersion, diffRules, duplicateRule, groupState, heldIdentities,
-  identityFromText, layerInColumn, mergeQuery, parseDraftImport, publishBlock, replyUncertain, resetAvailability, rulePayload, rulesEqual,
-  runDraftImport, scopeFor, touchRule, validVersion, validateDraft, validateRule, writeBlock, importWrites, draftImportProjects,
+  IMPORT_MAX_BYTES, RulesError, applyEnabled, blankRule, calendarVersion, copyName, diffRules, duplicateRule, groupState, groupsState, hasMovable, heldIdentities,
+  identityFromText, layerInColumn, mergeQuery, parseDraftImport, publishBlock, replyUncertain, resetAvailability, resetRule, rulePayload, rulesEqual, tickTarget,
+  runDraftImport, ruleSwitchLabel, scopeFor, touchRule, validVersion, validateDraft, validateRule, writeBlock, importWrites, draftImportProjects,
   setState, projectedRules, projectedBytes, largestProjected,
   type AgentRule, type Caller, type ImportIO, type RuleScope, type RuleSet,
 } from '../src/lib/rules.ts'
@@ -41,6 +41,10 @@ test('locked rules and higher locks cannot be switched off', () => {
   assert.equal(off[2].enabled, true)
   assert.equal(groupState(off, held), 'mixed')
   assert.equal(applyEnabled(off, true, held)[1].enabled, true)
+  assert.equal(tickTarget('on'), false)
+  assert.equal(tickTarget('mixed'), true)
+  assert.equal(groupsState([{ rules, held }, { rules: [rule({ identity: 'other', enabled: false })], held: new Set() }]), 'mixed')
+  assert.equal(hasMovable([{ rules: [rule({ strength: 'locked' })], held: new Set() }]), false)
 })
 
 test('a lower layer does not treat a higher locked identity as its own switch', () => {
@@ -115,8 +119,16 @@ test('draft validation and payloads stay inside the contract', () => {
   assert.match(validateRule(locked, new Set()) ?? '', /stays on/)
   assert.equal(rulePayload(touchRule(locked, { strength: 'locked' })).enabled, true)
   assert.equal(rulePayload(touchRule(locked, { strength: 'locked' })).expires_at, undefined)
-  assert.match(validateDraft('Secrets', [rule({ text: '' })]) ?? '', /one line/)
-  assert.match(validateDraft('Secrets', [rule({ source: { reference: '', edited_here: false } })]) ?? '', /source/)
+  assert.match(validateDraft('Secrets', [rule({ text: '' })]).error ?? '', /one line/)
+  assert.equal(validateDraft('Secrets', [rule({ text: '' })]).warning, null)
+  assert.match(validateDraft('Secrets', [rule({ source: { reference: '', edited_here: false } })]).error ?? '', /source/)
+  const doubled = validateDraft('Secrets', [rule(), rule({ identity: 'keep-secrets-2' })])
+  assert.equal(doubled.error, null)
+  assert.equal(doubled.warning, 'This rule appears twice in this set; agents would get it twice.')
+  assert.equal(validateDraft('Secrets', [rule(), rule({ identity: 'other', text: 'Say which tests ran.' })]).warning, null)
+  assert.equal(ruleSwitchLabel('Record the source.', 'Secrets', true), 'Record the source. in Secrets is on')
+  assert.equal(ruleSwitchLabel('Record the source.', 'Secrets', false), 'Record the source. in Secrets is off')
+  assert.equal(ruleSwitchLabel('  ', 'Secrets (copy)', false), 'Untitled rule in Secrets (copy) is off')
   const edited = touchRule(rule({ source: { reference: 'AEON-252', identity: 'keep-secrets', edited_here: false } }), { text: 'Never print env.' })
   assert.equal(edited.source.edited_here, true)
   const payload = rulePayload(rule())
@@ -128,15 +140,34 @@ test('new identities stay unique and reset needs an original', () => {
   const taken = new Set(['new-rule'])
   assert.equal(identityFromText('New rule', taken), 'new-rule-2')
   assert.equal(blankRule(taken).identity, 'new-rule-2')
-  const copy = duplicateRule(rule({ strength: 'locked' }), ['keep-secrets'])
+  const copy = duplicateRule(rule({ strength: 'locked', text: 'Never print the environment.' }), ['keep-secrets'])
   assert.equal(copy.strength, 'normal')
+  assert.equal(copy.text, 'Never print the environment.')
+  assert.equal(copy.source.identity, undefined)
   assert.notEqual(copy.identity, 'keep-secrets')
-  const reset = resetAvailability(rule({ source: { reference: 'INSPR', identity: 'keep-secrets', edited_here: true } }))
+  assert.equal(copyName('Secrets'), 'Secrets (copy)')
+  assert.equal(copyName('Secrets', ['Secrets (copy)']), 'Secrets (copy 2)')
+  assert.equal(copyName('Secrets (copy)', ['Secrets (copy)']), 'Secrets (copy 2)')
+  assert.equal(copyName('Secrets', ['Secrets (copy)', 'Secrets (copy 2)']), 'Secrets (copy 3)')
+  assert.ok(new TextEncoder().encode(copyName(`${'n'.repeat(200)}`)).length <= 128)
+  assert.ok(new TextEncoder().encode(copyName('Secrets', ['Secrets (copy)', 'Secrets (copy 2)'])).length <= 128)
+  const edited = rule({ text: 'Changed.', source: { reference: 'INSPR', identity: 'keep-secrets', edited_here: true } })
+  const reset = resetAvailability(edited)
   assert.equal(reset.available, false)
   if (!reset.available) assert.equal(reset.show, true)
-  const supplied = rule({ identity: 'keep-secrets', text: 'Original.' })
-  const ready = resetAvailability(rule({ source: { reference: 'INSPR', identity: 'keep-secrets', edited_here: true } }), supplied)
+  const quiet = resetAvailability(rule({ source: { reference: 'INSPR', identity: 'keep-secrets', edited_here: false } }))
+  assert.equal(quiet.available, false)
+  if (!quiet.available) assert.equal(quiet.show, false)
+  assert.equal(resetRule(edited, rule({ identity: 'other' })), null)
+  const supplied = rule({ identity: 'keep-secrets', text: 'Original.', why: 'The template says so.' })
+  const ready = resetAvailability(edited, supplied)
   assert.equal(ready.available, true)
+  const restored = resetRule(edited, supplied)
+  assert.equal(restored?.text, 'Original.')
+  assert.equal(restored?.why, 'The template says so.')
+  assert.equal(restored?.identity, 'keep-secrets')
+  assert.equal(restored?.source.edited_here, false)
+  assert.equal(restored?.source.reference, 'INSPR')
 })
 
 test('merge query names the preview and refuses a loose project id', () => {
@@ -204,6 +235,8 @@ test('draft import accepts a person file and rejects anything it must not write'
   assert.match('error' in dupSet ? dupSet.error : '', /listed twice/)
   const dupId = parseDraftImport(draftFile([{ scope: { layer: 'person', owner_id: SELF }, sets: [{ name: 'Desk', rules: [importRule('same', 'One.'), importRule('same', 'Two.')] }] }]), 300, TENANT, admin)
   assert.match('error' in dupId ? dupId.error : '', /already used in this set/)
+  const dupText = parseDraftImport(draftFile([{ scope: { layer: 'person', owner_id: SELF }, sets: [{ name: 'Desk', rules: [importRule('one', 'Same line.'), importRule('two', 'Same line.')] }] }]), 300, TENANT, admin)
+  assert.equal('plan' in dupText, true)
   const dupAcross = parseDraftImport(draftFile([{ scope: { layer: 'person', owner_id: SELF }, sets: [
     { name: 'Desk', rules: [importRule('same', 'One.')] },
     { name: 'Hours', rules: [importRule('same', 'Two.')] },

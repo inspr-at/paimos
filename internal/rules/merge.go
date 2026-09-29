@@ -99,7 +99,7 @@ func merge(c Context, snapshots []Snapshot, now time.Time, validated bool, stop 
 	}
 	slices.Sort(keys)
 	var body, floor strings.Builder
-	body.WriteString("# Aeon session rules\n\n")
+	body.WriteString(SessionHeader)
 	for _, k := range keys {
 		r := chosen[k]
 		if !r.Enabled {

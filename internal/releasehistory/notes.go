@@ -18,13 +18,21 @@ import (
 
 const SnapshotSchema = "aeon.release-note-snapshot.v1"
 const MembershipSource = "journey_tickets.release_node_id"
+const ManifestMembershipSource = "release-manifest-tickets"
 const FieldSource = "nodes.fields"
 
 // HistoricalFallback labels a git tag headline used only because member
 // benefits were never captured.
 const HistoricalFallback = "historical-tag-headline"
 
+// BackfillLabel marks a snapshot an operator inserted after publication
+// because none was stored when the release was published. captured_at on
+// that row is the backfill time; released_at is the original release time.
+const BackfillLabel = "backfilled"
+
 type NoteSnapshot struct {
+	Backfilled       bool         `json:"backfilled,omitempty"`
+	ActorID          string       `json:"actor_principal_id,omitempty"`
 	Schema           string       `json:"schema"`
 	TenantID         string       `json:"tenant_id"`
 	ProjectID        string       `json:"project_node_id"`
@@ -36,6 +44,8 @@ type NoteSnapshot struct {
 	MembershipSource string       `json:"membership_source"`
 	FieldSource      string       `json:"field_source"`
 	Frozen           bool         `json:"frozen,omitempty"`
+	Label            string       `json:"label,omitempty"`
+	ReleasedAt       *time.Time   `json:"released_at,omitempty"`
 	Tickets          []NoteTicket `json:"tickets"`
 }
 type NoteTicket struct {
@@ -55,14 +65,15 @@ type NoteItem struct {
 	BenefitDE string `json:"benefit_de"`
 }
 type Notes struct {
-	Source     string     `json:"source"`
-	Fallback   string     `json:"fallback,omitempty"`
-	SHA256     string     `json:"snapshot_sha256"`
-	CapturedAt *time.Time `json:"captured_at"`
-	Revision   int64      `json:"release_revision"`
-	Items      []NoteItem `json:"items"`
-	Gaps       []string   `json:"gaps"`
-	Hidden     int        `json:"hidden"`
+	Source              string     `json:"source"`
+	Fallback            string     `json:"fallback,omitempty"`
+	SHA256              string     `json:"snapshot_sha256"`
+	CapturedAt          *time.Time `json:"captured_at"`
+	Revision            int64      `json:"release_revision"`
+	Items               []NoteItem `json:"items"`
+	Gaps                []string   `json:"gaps"`
+	Hidden              int        `json:"hidden"`
+	WrittenAfterRelease bool       `json:"written_after_release,omitempty"`
 }
 
 func MissingNotes() *Notes {
@@ -87,11 +98,20 @@ func NotesFromSnapshot(raw []byte, version, source string) (*Notes, error) {
 	if d.Decode(new(any)) != io.EOF {
 		return nil, fmt.Errorf("ticket snapshot must contain one JSON object")
 	}
-	if s.Schema != SnapshotSchema || (s.Version != "" && s.Version != version) || !ValidVersion(version) || (s.Version != "" && s.VersionScheme != "inspr-calendar-v2") || (s.Version == "" && s.VersionScheme != "") || s.Revision < 1 || s.CapturedAt.IsZero() || s.Tickets == nil || s.MembershipSource != MembershipSource || s.FieldSource != FieldSource || !noteUUID.MatchString(s.TenantID) || !noteUUID.MatchString(s.ProjectID) || !noteUUID.MatchString(s.ReleaseID) {
+	if s.Schema != SnapshotSchema || (s.Version != "" && s.Version != version) || !ValidVersion(version) || (s.Version != "" && s.VersionScheme != "inspr-calendar-v2") || (s.Version == "" && s.VersionScheme != "") || s.Revision < 1 || s.CapturedAt.IsZero() || s.Tickets == nil || (s.MembershipSource != MembershipSource && s.MembershipSource != ManifestMembershipSource) || s.FieldSource != FieldSource || !noteUUID.MatchString(s.TenantID) || !noteUUID.MatchString(s.ProjectID) || (s.MembershipSource == MembershipSource && !noteUUID.MatchString(s.ReleaseID)) {
 		return nil, fmt.Errorf("ticket snapshot identity, version or provenance is incomplete")
 	}
+	if s.MembershipSource == ManifestMembershipSource && (s.ReleaseID != "" || s.Version == "" || !s.Backfilled || s.Label != BackfillLabel || !noteUUID.MatchString(s.ActorID)) {
+		return nil, fmt.Errorf("manifest backfill identity or actor is incomplete")
+	}
+	if s.Label != "" && s.Label != BackfillLabel {
+		return nil, fmt.Errorf("ticket snapshot label is not recognised")
+	}
+	if s.Label == BackfillLabel && (!s.Frozen || s.ReleasedAt == nil || s.ReleasedAt.IsZero()) {
+		return nil, fmt.Errorf("backfilled ticket snapshot lacks its release time")
+	}
 	sum := sha256.Sum256(raw)
-	out := &Notes{Source: source, SHA256: hex.EncodeToString(sum[:]), CapturedAt: &s.CapturedAt, Revision: s.Revision, Items: []NoteItem{}, Gaps: []string{}}
+	out := &Notes{Source: source, SHA256: hex.EncodeToString(sum[:]), CapturedAt: &s.CapturedAt, Revision: s.Revision, Items: []NoteItem{}, Gaps: []string{}, WrittenAfterRelease: s.Label == BackfillLabel}
 	if s.Version == "" {
 		out.Gaps = append(out.Gaps, "The release had no assigned version when captured; its association with this build is declared by the tagged snapshot path.")
 	}
@@ -136,7 +156,6 @@ func NotesFromSnapshot(raw []byte, version, source string) (*Notes, error) {
 			_ = json.Unmarshal(t.Fields, &flags)
 			if flags.Hidden {
 				out.Hidden++
-				out.Gaps = append(out.Gaps, "A hidden member was unavailable at capture.")
 			} else {
 				out.Gaps = append(out.Gaps, label+": "+t.Unavailable)
 			}
@@ -151,14 +170,11 @@ func NotesFromSnapshot(raw []byte, version, source string) (*Notes, error) {
 			continue
 		}
 		hidden, _ := fields["hide_from_release_notes"].(bool)
-		issues := ticketbenefits.Issues(t.Fields)
 		if hidden {
 			out.Hidden++
-			if len(issues) > 0 {
-				out.Gaps = append(out.Gaps, "A hidden ticket has incomplete benefit fields.")
-			}
 			continue
 		}
+		issues := ticketbenefits.Issues(t.Fields)
 		if len(issues) > 0 {
 			out.Gaps = append(out.Gaps, label+": "+strings.Join(issues, "; "))
 			continue
