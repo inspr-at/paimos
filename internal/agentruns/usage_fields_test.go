@@ -111,8 +111,33 @@ func TestRunUsageFields(t *testing.T) {
 		return err
 	})
 	f.call(t, f.agent, "POST", "/api/runs/"+merged.ID+"/telemetry", map[string]any{"sequence": 1, "kind": "finished", "status": "completed"}, 200, &merged)
-	if merged.OutcomeDetail == nil || *merged.OutcomeDetail != "merged" {
-		t.Fatalf("merged: %+v", merged)
+	if merged.OutcomeDetail == nil || *merged.OutcomeDetail != "pr_opened" {
+		t.Fatalf("pull merge URL: %+v", merged)
+	}
+	word := f.claim(t, f.run(t, o))
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO work_evidence(tenant_id,work_order_id,submitted_by_principal_id,kind,reference,run_id) VALUES($1,$2,$3,'url',$4,$5)`, f.person.TenantID, o.NodeID, f.agent.ID, "https://github.com/acme/merged-tools/pull/4", word.ID)
+		return err
+	})
+	f.call(t, f.agent, "POST", "/api/runs/"+word.ID+"/telemetry", map[string]any{"sequence": 1, "kind": "finished", "status": "completed"}, 200, &word)
+	if word.OutcomeDetail == nil || *word.OutcomeDetail != "pr_opened" {
+		t.Fatalf("merged word in URL: %+v", word)
+	}
+	real := f.claim(t, f.run(t, o))
+	f.call(t, f.agent, "POST", "/api/runs/"+real.ID+"/telemetry", map[string]any{
+		"sequence": 1, "kind": "finished", "status": "completed",
+		"git_commits": []map[string]any{{"sha": "0123456789abcdef", "subject": "Merge feature", "parents": 2, "on_default_branch": true}},
+	}, 200, &real)
+	if real.OutcomeDetail == nil || *real.OutcomeDetail != "merged" {
+		t.Fatalf("merge commit: %+v", real)
+	}
+	subjectOnly := f.claim(t, f.run(t, o))
+	f.call(t, f.agent, "POST", "/api/runs/"+subjectOnly.ID+"/telemetry", map[string]any{
+		"sequence": 1, "kind": "finished", "status": "completed",
+		"git_commits": []map[string]any{{"sha": "0123456789abcdef", "subject": "Merge branch 'main'", "parents": 1, "on_default_branch": true}},
+	}, 200, &subjectOnly)
+	if subjectOnly.OutcomeDetail == nil || *subjectOnly.OutcomeDetail != "committed" {
+		t.Fatalf("merge subject: %+v", subjectOnly)
 	}
 
 	sessionRun := f.claim(t, f.run(t, o))

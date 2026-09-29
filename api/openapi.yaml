@@ -8049,7 +8049,7 @@ components:
         outcome: {type: [string, 'null'], enum: [completed, failed, cancelled, ownership_lost, null]}
         duration_ms: {type: [integer, 'null'], format: int64, description: Whole elapsed milliseconds for terminal runs; null until both timestamps exist}
         active_ms: {type: [integer, 'null'], format: int64, description: Milliseconds not spent waiting. Null until the run is terminal and both timestamps exist. Equal to duration_ms when no waiting telemetry was recorded.}
-        outcome_detail: {type: [string, 'null'], enum: [no_commit, committed, pr_opened, merged, abandoned, null], description: Derived when the run becomes terminal from this run's git commits, harness session commits, and work evidence. Null when the run is not terminal.}
+        outcome_detail: {type: [string, 'null'], enum: [no_commit, committed, pr_opened, merged, abandoned, null], description: Derived when the run becomes terminal. merged requires a git commit with at least two parents that is an ancestor of the default branch. A pull-request URL is pr_opened. Null when the run is not terminal.}
         retry_of_run_id: {type: [string, 'null'], format: uuid, description: Earlier run of the same work order and agent that this run retries.}
         model_evidence: {type: string, enum: [unverified, vendor_reported]}
         input_tokens: {type: integer, format: int64}
@@ -8083,6 +8083,8 @@ components:
             properties:
               sha: {type: string, pattern: '^[0-9a-f]{7,40}$'}
               subject: {type: string, minLength: 1, maxLength: 200}
+              parents: {type: integer, minimum: 0, maximum: 64, description: Parent count from git. Optional. A merge commit has at least two.}
+              on_default_branch: {type: boolean, description: Optional. True when the commit is an ancestor of the default branch. merged requires this together with parents >= 2.}
     ApprovalProposal:
       type: object
       required: [scope, resource_kind, rationale, expires_at]

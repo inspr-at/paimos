@@ -37,8 +37,10 @@ type Telemetry struct {
 
 // GitCommit is one commit this run introduced after its launch revision.
 type GitCommit struct {
-	SHA     string `json:"sha"`
-	Subject string `json:"subject"`
+	SHA             string `json:"sha"`
+	Subject         string `json:"subject"`
+	Parents         int    `json:"parents,omitempty"`
+	OnDefaultBranch bool   `json:"on_default_branch,omitempty"`
 }
 
 func identifier(s string) bool {
@@ -100,7 +102,7 @@ func (t Telemetry) validate() error {
 		return workorders.Fail(400, "too many git commits")
 	}
 	for _, c := range t.GitCommits {
-		if !commitSHA(c.SHA) || !commitSubject(c.Subject) {
+		if !commitSHA(c.SHA) || !commitSubject(c.Subject) || c.Parents < 0 || c.Parents > 64 {
 			return workorders.Fail(400, "invalid git commit")
 		}
 	}

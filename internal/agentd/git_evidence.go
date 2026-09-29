@@ -27,27 +27,61 @@ func commitsSince(ctx context.Context, workspace, start string) []GitCommit {
 	if strings.TrimSpace(workspace) == "" || !fullSHA(start) {
 		return nil
 	}
-	out, err := gitOutput(ctx, workspace, "log", "--format=%H%x1f%s", start+"..HEAD")
+	out, err := gitOutput(ctx, workspace, "log", "--format=%H%x1f%P%x1f%s", start+"..HEAD")
 	if err != nil {
 		return nil
 	}
+	def := defaultBranchRef(ctx, workspace)
 	var commits []GitCommit
 	for _, line := range strings.Split(out, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
 		}
-		sha, subject, ok := strings.Cut(line, "\x1f")
+		sha, rest, ok := strings.Cut(line, "\x1f")
+		parents, subject, ok2 := strings.Cut(rest, "\x1f")
 		sha = strings.ToLower(strings.TrimSpace(sha))
-		if !ok || !fullSHA(sha) {
+		if !ok || !ok2 || !fullSHA(sha) {
 			continue
 		}
-		commits = append(commits, GitCommit{SHA: sha, Subject: cleanCommitSubject(subject)})
+		count := 0
+		for _, parent := range strings.Fields(parents) {
+			if fullSHA(strings.ToLower(parent)) {
+				count++
+			}
+		}
+		commits = append(commits, GitCommit{
+			SHA: sha, Subject: cleanCommitSubject(subject),
+			Parents: count, OnDefaultBranch: commitOnDefaultBranch(ctx, workspace, sha, def),
+		})
 		if len(commits) == 20 {
 			break
 		}
 	}
 	return commits
+}
+
+func defaultBranchRef(ctx context.Context, workspace string) string {
+	if out, err := gitOutput(ctx, workspace, "rev-parse", "--abbrev-ref", "origin/HEAD"); err == nil {
+		name := strings.TrimSpace(out)
+		if name != "" && name != "HEAD" && !strings.Contains(name, " ") {
+			return name
+		}
+	}
+	for _, name := range []string{"main", "master"} {
+		if _, err := gitOutput(ctx, workspace, "rev-parse", "--verify", "--quiet", name); err == nil {
+			return name
+		}
+	}
+	return "HEAD"
+}
+
+func commitOnDefaultBranch(ctx context.Context, workspace, sha, ref string) bool {
+	if ref == "" || !fullSHA(sha) {
+		return false
+	}
+	_, err := gitOutput(ctx, workspace, "merge-base", "--is-ancestor", sha, ref)
+	return err == nil
 }
 
 func gitOutput(ctx context.Context, workspace string, args ...string) (string, error) {

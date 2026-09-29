@@ -133,8 +133,10 @@ type Telemetry struct {
 
 // GitCommit is one commit introduced after the run's launch revision.
 type GitCommit struct {
-	SHA     string `json:"sha"`
-	Subject string `json:"subject"`
+	SHA             string `json:"sha"`
+	Subject         string `json:"subject"`
+	Parents         int    `json:"parents,omitempty"`
+	OnDefaultBranch bool   `json:"on_default_branch,omitempty"`
 }
 
 type InboxMessage struct {

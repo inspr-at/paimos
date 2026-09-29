@@ -15,7 +15,6 @@ import (
 var (
 	commitSHARe  = regexp.MustCompile(`^[0-9a-f]{7,40}$`)
 	commitPathRe = regexp.MustCompile(`/commit/([0-9a-f]{7,40})(?:[^0-9a-f]|$)`)
-	mergedWordRe = regexp.MustCompile(`(?:^|[^a-z])merged(?:[^a-z]|$)`)
 )
 
 func commitSHA(s string) bool {
@@ -34,8 +33,16 @@ func commitSubject(s string) bool {
 	return true
 }
 
-func deriveOutcomeDetail(status string, shas, refs []string) string {
+func deriveOutcomeDetail(status string, commits []GitCommit, shas, refs []string) string {
 	merged, pr, committed := false, false, false
+	for _, c := range commits {
+		if commitSHA(strings.ToLower(strings.TrimSpace(c.SHA))) {
+			committed = true
+		}
+		if c.Parents >= 2 && c.OnDefaultBranch {
+			merged = true
+		}
+	}
 	for _, sha := range shas {
 		if commitSHA(strings.ToLower(strings.TrimSpace(sha))) {
 			committed = true
@@ -68,10 +75,6 @@ func classifyEvidenceRef(ref string) (merged, pr, committed bool) {
 	}
 	if strings.Contains(s, "/pull/") || strings.Contains(s, "/pulls/") || strings.Contains(s, "/merge_requests/") {
 		pr = true
-		cleaned := strings.ReplaceAll(s, "merge_requests", "")
-		if strings.Contains(cleaned, "/merge") || strings.Contains(s, "merged=true") || mergedWordRe.MatchString(s) {
-			merged = true
-		}
 	}
 	return merged, pr, committed
 }
@@ -167,7 +170,7 @@ func applyRunUsage(ctx context.Context, tx pgx.Tx, v *Run, t Telemetry) error {
 	if err != nil {
 		return err
 	}
-	detail := deriveOutcomeDetail(v.Status, shas, refs)
+	detail := deriveOutcomeDetail(v.Status, t.GitCommits, shas, refs)
 	next, err := scan(tx.QueryRow(ctx, `UPDATE agent_runs SET active_ms=$2, outcome_detail=$3 WHERE id=$1 RETURNING `+columns, v.ID, active, detail))
 	if err != nil {
 		return err

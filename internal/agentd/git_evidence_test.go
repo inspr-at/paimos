@@ -53,7 +53,78 @@ func TestCommitsSinceLaunchRevision(t *testing.T) {
 	git("add", "b.txt")
 	git("commit", "-m", "Add usage\x07")
 	got := commitsSince(t.Context(), dir, head)
-	if len(got) != 1 || !fullSHA(got[0].SHA) || got[0].SHA == head || got[0].Subject != "Add usage" {
+	if len(got) != 1 || !fullSHA(got[0].SHA) || got[0].SHA == head || got[0].Subject != "Add usage" || got[0].Parents != 1 || !got[0].OnDefaultBranch {
 		t.Fatalf("commits since launch: %+v", got)
+	}
+}
+
+func TestMergeCommitOnDefaultBranch(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git is unavailable")
+	}
+	dir := t.TempDir()
+	git := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(),
+			"GIT_CONFIG_NOSYSTEM=1",
+			"GIT_CONFIG_GLOBAL="+os.DevNull,
+			"GIT_AUTHOR_NAME=Test",
+			"GIT_AUTHOR_EMAIL=test@example.com",
+			"GIT_COMMITTER_NAME=Test",
+			"GIT_COMMITTER_EMAIL=test@example.com",
+		)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	git("init", "-b", "main")
+	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("a\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	git("add", "a.txt")
+	git("commit", "-m", "base")
+	launch := workspaceHEAD(t.Context(), dir)
+	git("checkout", "-b", "feature")
+	if err := os.WriteFile(filepath.Join(dir, "b.txt"), []byte("b\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	git("add", "b.txt")
+	git("commit", "-m", "feature")
+	git("checkout", "main")
+	git("merge", "--no-ff", "feature", "-m", "Merge feature")
+	got := commitsSince(t.Context(), dir, launch)
+	var merged bool
+	for _, c := range got {
+		if c.Parents >= 2 && c.OnDefaultBranch && c.Subject == "Merge feature" {
+			merged = true
+		}
+	}
+	if !merged {
+		t.Fatalf("default-branch merge: %+v", got)
+	}
+	git("checkout", "-b", "other", launch)
+	git("checkout", "-b", "side")
+	if err := os.WriteFile(filepath.Join(dir, "c.txt"), []byte("c\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	git("add", "c.txt")
+	git("commit", "-m", "side")
+	git("checkout", "other")
+	git("merge", "--no-ff", "side", "-m", "Merge side")
+	got = commitsSince(t.Context(), dir, launch)
+	var side bool
+	for _, c := range got {
+		if c.Subject == "Merge side" && c.Parents >= 2 && !c.OnDefaultBranch {
+			side = true
+		}
+		if c.Parents >= 2 && c.OnDefaultBranch {
+			t.Fatalf("side history counted as merged: %+v", got)
+		}
+	}
+	if !side {
+		t.Fatalf("side merge: %+v", got)
 	}
 }
