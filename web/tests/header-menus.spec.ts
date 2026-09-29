@@ -234,7 +234,7 @@ test.describe('avatar menu', () => {
     const menu = await openAccount(page)
     await expect(menu.getByRole('menuitem', { name: 'Personal settings' })).toBeFocused()
     await expect(menu.getByRole('menuitemradio', { name: 'System' })).toHaveAttribute('aria-checked', 'true')
-    await expect(menu.getByRole('menuitem', { name: /^Copy version \d{12}/ })).toBeVisible()
+    await expect(menu.getByRole('menuitem', { name: /^\d{12}\.0\.0 · .* — Copy version$/ })).toBeVisible()
     await expect(menu.getByRole('menuitem', { name: 'Release history' })).toBeVisible()
     await expect(menu.getByRole('menuitem', { name: 'Sign out' })).toBeVisible()
     // Workspace things are not here.
@@ -263,7 +263,7 @@ test.describe('avatar menu', () => {
     await page.keyboard.press('ArrowDown')
     await expect(menu.getByRole('menuitem', { name: 'Sign out' })).toBeFocused()
     await page.keyboard.press('ArrowDown')
-    await expect(menu.getByRole('menuitem', { name: /^Copy version/ })).toBeFocused()
+    await expect(menu.getByRole('menuitem', { name: /— Copy version$/ })).toBeFocused()
     await page.keyboard.press('ArrowDown')
     await expect(menu.getByRole('menuitem', { name: 'Release history' })).toBeFocused()
     await page.keyboard.press('Enter')

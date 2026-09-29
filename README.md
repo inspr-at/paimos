@@ -54,7 +54,7 @@ Named instances and the default live in `~/.aeon/config.yaml`. The agent API key
 
 `whoami` calls `GET /api/me`. Issue, knowledge, search and onboard exit 3 with `arrives in R1` until those endpoints exist. `model resolve` exits 3 with a not-yet message. `aeon mcp` serves those tools over stdio.
 
-Versioning: INSPR Calendar Versioning v2 (`inspr-calendar-v2`, `YYMMDDhhmmss.0.0`); the version display uses the pinned INSPR presentation bundle, checked by `just release-check`.
+Versioning: INSPR Calendar Versioning, INSPR-CalVer3 (`inspr-calver-3`, `YYMMDDhhmmss.0.0`); releases up to 260929113854.0.0 stay INSPR-CalVer2 history. The version display uses the pinned INSPR presentation bundle, checked by `just release-check`.
 
 Session **Messages** shows both directions of that session's conversation, newest
 messages at the bottom. `aeon tell PERSON_UUID --project AEON -m 'Reply text'`

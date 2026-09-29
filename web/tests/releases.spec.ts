@@ -381,3 +381,29 @@ test('the last 14 days show each day’s count above its bar, named for screen r
   expect(all.at(-1)!.label).toMatch(/, today$/)
   expect(all.some(day => day.count !== null)).toBe(true)
 })
+
+// INSPR-CalVer3 (AEON-309): history versions reserved under inspr-calendar-v2 and new
+// inspr-calver-3 ones render alike: six segments, no v, no .0.0, seconds hidden at rest,
+// and the accessible name keeps the exact canonical version with its UTC date-time.
+test('release history renders CalVer2 history and CalVer3 versions as six-segment Pretty', async ({ page }) => {
+  const { history } = await setup(page)
+  await page.goto('/')
+  await pill(page).click()
+  await expect(sheet(page)).toBeVisible()
+  const rows = sheet(page).locator('.row-version')
+  await expect(rows.first()).toBeVisible()
+  const count = await rows.count()
+  expect(count).toBe(history.releases.length)
+  for (let i = 0; i < count; i++) {
+    const row = rows.nth(i)
+    const canonical = history.releases[i].version
+    await expect(row).toHaveAttribute('aria-label', new RegExp(`^${escaped(canonical)} · 20\\d\\d-\\d\\d-\\d\\d \\d\\d:\\d\\d:\\d\\d UTC$`))
+    const drawn = await row.evaluate(el => el.textContent ?? '')
+    expect(drawn).not.toContain('.0.0')
+    expect((await row.locator('[data-collapsed="true"]').first().boundingBox())?.width ?? 0).toBe(0)
+  }
+  const footer = page.locator('footer.app-footer .pill-version')
+  const width = (await footer.boundingBox())!.width
+  // The loading skeleton (AppFooter .pill-skeleton) matches this rest width.
+  expect(Math.abs(width - 94)).toBeLessThanOrEqual(3)
+})

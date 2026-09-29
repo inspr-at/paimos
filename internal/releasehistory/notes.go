@@ -98,7 +98,7 @@ func NotesFromSnapshot(raw []byte, version, source string) (*Notes, error) {
 	if d.Decode(new(any)) != io.EOF {
 		return nil, fmt.Errorf("ticket snapshot must contain one JSON object")
 	}
-	if s.Schema != SnapshotSchema || (s.Version != "" && s.Version != version) || !ValidVersion(version) || (s.Version != "" && s.VersionScheme != "inspr-calendar-v2") || (s.Version == "" && s.VersionScheme != "") || s.Revision < 1 || s.CapturedAt.IsZero() || s.Tickets == nil || (s.MembershipSource != MembershipSource && s.MembershipSource != ManifestMembershipSource) || s.FieldSource != FieldSource || !noteUUID.MatchString(s.TenantID) || !noteUUID.MatchString(s.ProjectID) || (s.MembershipSource == MembershipSource && !noteUUID.MatchString(s.ReleaseID)) {
+	if s.Schema != SnapshotSchema || (s.Version != "" && s.Version != version) || !ValidVersion(version) || (s.Version != "" && !CalendarScheme(s.VersionScheme)) || (s.Version == "" && s.VersionScheme != "") || s.Revision < 1 || s.CapturedAt.IsZero() || s.Tickets == nil || (s.MembershipSource != MembershipSource && s.MembershipSource != ManifestMembershipSource) || s.FieldSource != FieldSource || !noteUUID.MatchString(s.TenantID) || !noteUUID.MatchString(s.ProjectID) || (s.MembershipSource == MembershipSource && !noteUUID.MatchString(s.ReleaseID)) {
 		return nil, fmt.Errorf("ticket snapshot identity, version or provenance is incomplete")
 	}
 	if s.MembershipSource == ManifestMembershipSource && (s.ReleaseID != "" || s.Version == "" || !s.Backfilled || s.Label != BackfillLabel || !noteUUID.MatchString(s.ActorID)) {

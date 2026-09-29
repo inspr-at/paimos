@@ -10,7 +10,7 @@
 // The manifest is generated at build time (see the generate command in this
 // package's generate directory) from the sources below; nothing is invented:
 //
-//   - Git: every annotated tag v<version> whose version is an inspr-calendar-v2
+//   - Git: every annotated tag v<version> whose version is a calendar
 //     coordinate. The tag message gives the headline and the release sequence,
 //     the tagger date gives tagged_at, the tagged commit is the source commit,
 //     and version.json at that tag gives reserved_at, the release channel and

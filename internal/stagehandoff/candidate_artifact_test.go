@@ -314,6 +314,7 @@ func TestCandidateVersionValidation(t *testing.T) {
 		valid           bool
 	}{
 		{"legacy", "1.0.0", true}, {"inspr-calendar-v2", "280229123456.0.0", true}, {"inspr-calendar-v2", "260229123456.0.0", false}, {"inspr-calendar-v1", "26.09.27", true}, {"inspr-calendar-v1", "26.09.27.12.00.00", true}, {"inspr-calendar-v1", "26.02.29", false}, {"inspr-calendar-v1", "26.09.27.25.00.00", false},
+		{"inspr-calver-3", "260929120000.0.0", false}, {"inspr-calver-4", "260929120000.0.0", false},
 	} {
 		if got := validCandidateVersion(tc.scheme, tc.version); got != tc.valid {
 			t.Errorf("%s %s: %v", tc.scheme, tc.version, got)
