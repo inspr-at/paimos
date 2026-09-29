@@ -39,7 +39,11 @@
 //	  inbox.read or inbox.send. GET /api/inbox/messages/{id}/receipt is
 //	  inbox.receipt.
 //	/api/models, /api/plugins: models.read or plugins.read; writes have no
-//	  agent mapping.
+//	  agent mapping. A coordinator key may resolve models even when its stored
+//	  scopes were minted before models.read.
+//	/api/rules: rules.read or rules.write. Publishing and restoring have no
+//	  agent mapping. A coordinator key's rules.read applies on projects it can
+//	  already read, not as a workspace permission.
 //	/api/work-orders: work_orders.read or work_orders.write; run creation
 //	  uses run.create. /api/runs: run.read, run.claim or run.telemetry.
 //	/api/harness-sessions, /api/projects/{id}/harness-sessions:

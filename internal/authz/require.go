@@ -123,7 +123,7 @@ func permitEffective(p tenant.Principal, permission string, effective Effective,
 	if !allowed {
 		return ErrForbidden
 	}
-	if p.Kind == tenant.Agent && !containsScope(p.Scopes, permission) {
+	if p.Kind == tenant.Agent && !containsScope(p.Scopes, permission) && !CoordinatorCeiling(p.Scopes, permission) {
 		return ErrForbidden
 	}
 	return nil
@@ -181,6 +181,7 @@ func loadTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, projectID string
 		result.Project.Permissions = unique(append(result.Project.Permissions, result.Workspace.Permissions...))
 	}
 	result.anyProject = unique(append(g.anyProject, result.Workspace.Permissions...))
+	applyCoordinatorReads(&result, p)
 	if p.Kind == tenant.Agent && p.KeyCreatorID != "" {
 		creator := tenant.Principal{ID: p.KeyCreatorID, TenantID: p.TenantID, Kind: tenant.Person}
 		ceiling, err := loadTx(ctx, tx, creator, projectID)
@@ -306,13 +307,16 @@ func ProjectsTx(ctx context.Context, tx pgx.Tx, p tenant.Principal) (ProjectChec
 		creator = &c
 	}
 	return func(permission, projectID string) bool {
-		if _, ok := Lookup(permission); !ok || !own.allows(permission, projectID) {
+		if _, ok := Lookup(permission); !ok {
+			return false
+		}
+		if !own.allows(permission, projectID) && !coordinatorAllows(p, own, permission, projectID) {
 			return false
 		}
 		if creator != nil && !creator.allows(permission, projectID) {
 			return false
 		}
-		return p.Kind != tenant.Agent || containsScope(p.Scopes, permission)
+		return p.Kind != tenant.Agent || containsScope(p.Scopes, permission) || CoordinatorCeiling(p.Scopes, permission)
 	}, nil
 }
 

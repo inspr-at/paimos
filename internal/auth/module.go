@@ -513,7 +513,7 @@ func agentHasScope(have []string, want string) bool {
 		}
 		return false
 	}
-	return hasScope(have, want)
+	return hasScope(have, want) || authz.CoordinatorCeiling(have, want)
 }
 
 func publicRequest(r *http.Request) bool {
