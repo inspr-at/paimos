@@ -11,6 +11,7 @@ import { absoluteTime, plural, relativeTime } from '../../lib/work'
 import AppIcon from '../AppIcon.vue'
 import FloatingPanel from '../work/FloatingPanel.vue'
 import KnowledgeCreateDialog from './KnowledgeCreateDialog.vue'
+import MethodLearnings from './MethodLearnings.vue'
 
 // The project's Knowledge tab: every entry grouped by kind (runbooks first), with
 // a kind rail, search that also reads the bodies, status and sort, and keys for
@@ -18,14 +19,14 @@ import KnowledgeCreateDialog from './KnowledgeCreateDialog.vue'
 // in the project toolbar (teleported), so the tab reads like the other views.
 const props = defineProps<{
   project: { id: string; routeKey: string; title: string }
-  state: KnowledgeState; filters: KnowledgeFilters; canWrite: boolean; now: number
+  state: KnowledgeState; filters: KnowledgeFilters; canWrite: boolean; person: boolean; now: number
   // An entry page is open over the tab: its keys belong to the entry.
   paused: boolean
   // Wide screens open an entry docked beside the list (U25); openEntry is the one docked now.
   dock?: boolean
   openEntry?: { type: KnowledgeType; slug: string } | null
 }>()
-const emit = defineEmits<{ update: [patch: Partial<KnowledgeFilters>] }>()
+const emit = defineEmits<{ update: [patch: Partial<KnowledgeFilters>]; accepted: [entry: KnowledgeEntry]; reverted: [] }>()
 const router = useRouter()
 const route = useRoute()
 const KnowledgeGraph = defineAsyncComponent(() => import('./KnowledgeGraph.vue'))
@@ -57,6 +58,7 @@ async function setMode(graph: boolean) {
 }
 // The page keeps the display (?mode=graph) and the docked entry (?entry=) while filters change.
 function updateFilters(patch: Partial<KnowledgeFilters>) { emit('update', patch) }
+function accepted(entry: KnowledgeEntry) { props.state.upsert(entry); emit('accepted', entry) }
 
 const input = ref<HTMLInputElement>()
 const draft = ref(props.filters.q)
@@ -174,6 +176,7 @@ function keydown(event: KeyboardEvent) {
   }
 }
 function focusSearch() { input.value?.focus(); input.value?.select() }
+function holdFocus() { input.value?.focus({ preventScroll: true }) }
 function openCreate(type?: KnowledgeType) { createDialog.value?.open(type ?? (props.filters.type || undefined)) }
 async function created(entry: KnowledgeEntry) {
   props.state.upsert(entry)
@@ -244,6 +247,7 @@ const who = (item: KnowledgeItem) => item.imported ? 'imported' : item.updated_b
   </Teleport>
 
   <div class="k-frame">
+  <MethodLearnings :project="project" :entries="state.items.value" :can-write="canWrite" :person="person" :now="now" @accepted="accepted" @reverted="emit('reverted')" @emptied="holdFocus" />
   <div class="k-layout">
     <nav class="k-rail" aria-label="Kinds of knowledge">
       <div class="k-kinds">

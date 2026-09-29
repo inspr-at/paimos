@@ -39,16 +39,32 @@
 //   - Status is the classic trio: active (stored as backlog), proposed and
 //     archived (stored as cancelled). Any other stored state reads as active and
 //     is kept until the status class changes.
+//   - GET /api/knowledge/learnings?project_id lists open method learnings for
+//     one project (AEON-275): live tickets, tasks and epics whose tags include
+//     process-learning, and comments on nodes in the project whose current text
+//     contains that tag as its own word (an optional # is allowed). Decided
+//     items stay out of the list. Accept (POST .../accept) is person-only: it
+//     appends one dated line to the chosen entry's changelog section (the last
+//     heading whose text contains "changelog", or a new Changelog section),
+//     links the source, and appends knowledge.learning_accepted. Dismiss
+//     (POST .../dismiss) is person-only and appends knowledge.learning_dismissed.
+//     Draft (POST .../draft) is person-only: it appends one rule to a chosen
+//     rule draft and records knowledge.learning_drafted. It does not publish.
+//     Agents may tag candidates; they cannot accept, dismiss, draft or undo.
+//     A daily tagger nominates closed tickets, review verdicts and incident
+//     comments. It never accepts them. paimos serve starts it.
 //   - Principals with a viewer or read-only role cannot write (403).
 //
 // Every write runs in db.InTenant and appends one event in the same
-// transaction: knowledge.created, knowledge.updated or knowledge.deleted, each
-// with complete node snapshots in the nodes package's JSON shape. Missing
+// transaction: knowledge.created, knowledge.updated, knowledge.deleted,
+// knowledge.learning_accepted or knowledge.learning_dismissed. The first four
+// carry complete node snapshots in the nodes package's JSON shape. Missing
 // external_system or related_project kinds are created on first use with a
-// kind.created event, like the CLI does. UndoHandlers makes all three
+// kind.created event, like the CLI does. UndoHandlers makes each of them
 // reversible through POST /api/events/{id}/undo: undo re-checks that the entry
 // is exactly as the event left it and that the restored slug is still free,
-// otherwise it answers 409.
+// otherwise it answers 409. Undoing an accept or dismiss also removes the
+// decision, and only a person may do it.
 //
 // Coordinator wiring (this package does not edit cmd/aeon):
 //
