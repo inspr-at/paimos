@@ -181,6 +181,7 @@ export async function mockRules(page: Page, options: { kind?: 'person' | 'agent'
       if (options.comparisonStatus) return route.fulfill({ status: options.comparisonStatus, json: { error: 'unavailable', code: 'not_found' } })
       return route.fulfill({ json: { comparisons: options.comparisons ?? [] } })
     }
+    if (path === '/api/rules/doctrine' && method === 'GET') return route.fulfill({ json: { sources: [] } })
     if (path === '/api/rules/merged' && method === 'GET') {
       return route.fulfill({ json: {
         context: { tenant_id: 't1', project_id: url.searchParams.get('project_id'), person_id: url.searchParams.get('person_id'), role: url.searchParams.get('role'), harness: url.searchParams.get('harness') },
