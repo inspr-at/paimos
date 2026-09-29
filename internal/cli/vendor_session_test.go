@@ -4,6 +4,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -13,6 +14,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/inspr-at/paimos/internal/inbox"
 )
@@ -105,7 +107,10 @@ func TestRunHeartbeatRecordsVendorSessionRef(t *testing.T) {
 	rt, stdout, stderr := heartbeatRuntime(t, srv)
 	t.Setenv("CLAUDE_CODE_SESSION_ID", vendor)
 	opts := heartbeatTestOptions(dir)
-	if err := rt.runHeartbeat(t.Context(), opts, heartbeatDeps{alive: func(int) bool { return false }}); err != nil {
+	if err := rt.runHeartbeat(t.Context(), opts, heartbeatDeps{
+		alive: func(int) bool { return true },
+		wait:  func(context.Context, int, time.Duration) error { return errOwnerExited },
+	}); err != nil {
 		t.Fatal(err)
 	}
 	var body map[string]any
