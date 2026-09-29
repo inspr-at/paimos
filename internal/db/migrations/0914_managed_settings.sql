@@ -1,4 +1,5 @@
 -- SPDX-License-Identifier: AGPL-3.0-only
+SET LOCAL lock_timeout = '5s';
 ALTER TABLE harness_controls DROP CONSTRAINT harness_controls_kind_check;
 ALTER TABLE harness_controls ADD CONSTRAINT harness_controls_kind_check
     CHECK (kind IN ('interrupt','stop','force_stop','steer','rename','model','effort'));
