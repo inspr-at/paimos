@@ -200,7 +200,7 @@ Mode A retains the original snapshot digest and accepts legacy A approvals.
 Native Mac confirmation needs `CGO_ENABLED=1`, Apple's Foundation,
 LocalAuthentication and Security frameworks, and an installed executable named
 `paimos-agentd` (the pairing installer) or `aeon-agentd` (the Nix package) with
-a valid Developer ID signature, hardened runtime and no
+a valid Developer ID signature by the team the build expects, hardened runtime and no
 get-task-allow, library-validation or DYLD-environment exceptions. It validates
 the running process through `SecCodeCopySelf`/`SecCodeCheckValidity`, checks for
 a graphical login, and evaluates a fresh `LAContext` with
@@ -219,6 +219,32 @@ the signed-in person's connected computers and does not offer Mac confirmation
 unless one reports `available`. Unsigned, ad-hoc, and headless builds still
 fail closed. A signed interactive Touch ID acceptance check remains release
 qualification.
+
+### Signed release daemon (AEON-285)
+
+Release darwin `paimos-agentd` is signed with **Developer ID Application:
+Markus Barta (P66J39QV6V)**, hardened runtime and a secure timestamp, then
+notarized, in the Release workflow's `agentd-darwin` job ("Sign and notarize
+paimos-agentd", `scripts/sign-notarize.sh`, vendored from the
+`markus-barta/apple-signing` vault). The certificate and notarization
+credentials come from that vault into the `release-signing` GitHub
+environment, which releases them only to `v*` tag runs; PR and branch CI never
+see them. Signing happens before `SHA256SUMS` is computed.
+
+`scripts/build-release-binaries.sh` embeds the expected team through
+`-X github.com/inspr-at/paimos/internal/agentd.expectedTeamID=P66J39QV6V`
+(`AEON_DEVELOPER_ID_TEAM` overrides it). The daemon compares the team of its own
+valid signature with that value. An empty value (development and Nix builds),
+an ad-hoc signature or another team reports `unsigned` and refuses Mac
+confirmation with an explicit message.
+
+Bare binaries cannot be stapled, so Gatekeeper looks the notarization ticket up
+online on first run. To verify a downloaded daemon:
+
+```sh
+codesign -dv paimos-agentd                        # Authority=Developer ID Application: Markus Barta (P66J39QV6V), TeamIdentifier=P66J39QV6V, flags=…runtime
+codesign --verify --strict --test-requirement="=notarized" paimos-agentd
+```
 
 The original pairing owner reviews the immutable host, harness, kernel process
 identity, physical cwd, transcript inode, project and ticket snapshot at the

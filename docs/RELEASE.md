@@ -18,7 +18,7 @@ A push of a `v*` tag runs `.github/workflows/release.yml`.
 
 1. Check out the repository with tags, so release history can see earlier coordinates.
 2. Validate the tag and run `scripts/verify-release.mjs --release`. Fail if `version.json` disagrees with the tag.
-3. Refuse a coordinate whose GitHub release already exists. macOS runners build darwin `paimos-agentd` with CGO enabled. The Ubuntu job builds Linux `paimos-agentd` statically and all `aeon-cli` targets with CGO off, then checks the darwin binaries.
+3. Refuse a coordinate whose GitHub release already exists. macOS runners build darwin `paimos-agentd` with CGO enabled, then sign it with Developer ID (team P66J39QV6V, hardened runtime) and notarize it in the `release-signing` environment before upload (docs/AGENT_INTEGRATION.md, Signed release daemon). The Ubuntu job builds Linux `paimos-agentd` statically and all `aeon-cli` targets with CGO off, then checks the darwin binaries.
 4. Generate the release-history manifest embedded in the server image. That file is produced at release time. It is not committed.
 5. Run the image smoke gate. Publishing waits for it.
 6. Refuse a coordinate whose GHCR image tag already exists, including a tag left by a partial earlier run. Push the image to `ghcr.io/inspr-at/aeon:<version>`. There is no `latest` tag.

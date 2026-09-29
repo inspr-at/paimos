@@ -29,6 +29,41 @@ func TestReleaseBuildsSplitDarwinCGO(t *testing.T) {
 	}
 }
 
+func TestReleaseSignsDarwinAgentdBeforeChecksums(t *testing.T) {
+	workflow := readRepo(t, ".github/workflows/release.yml")
+	script := readRepo(t, "scripts/build-release-binaries.sh")
+	darwin, rest, ok := strings.Cut(workflow, "\n  release:\n")
+	if !ok {
+		t.Fatal("release workflow has no release job after agentd-darwin")
+	}
+	for _, needle := range []string{"environment: release-signing", "AEON_DEVELOPER_ID_TEAM: P66J39QV6V", "bash scripts/sign-notarize.sh", "secrets.APPLE_CERTIFICATE"} {
+		if !strings.Contains(darwin, needle) {
+			t.Fatalf("agentd-darwin job missing %s", needle)
+		}
+	}
+	build := strings.Index(darwin, "build-release-binaries.sh darwin-agentd")
+	sign := strings.Index(darwin, "bash scripts/sign-notarize.sh")
+	upload := strings.Index(darwin, "actions/upload-artifact@")
+	if !(build < sign && sign < upload) {
+		t.Fatal("darwin agentd must be signed after the build and before upload")
+	}
+	if strings.Contains(rest, "secrets.APPLE_") || strings.Contains(rest, "release-signing") {
+		t.Fatal("signing secrets leak beyond the agentd-darwin job")
+	}
+	if !strings.Contains(rest, "SHA256SUMS") {
+		t.Fatal("checksums must be computed in the release job, after signing")
+	}
+	for _, name := range []string{"ci.yml", "pairing-platform.yml"} {
+		other := readRepo(t, ".github/workflows/"+name)
+		if strings.Contains(other, "APPLE_") || strings.Contains(other, "release-signing") || strings.Contains(other, "sign-notarize") {
+			t.Fatalf("%s must never reference signing secrets", name)
+		}
+	}
+	if !strings.Contains(script, "agentd.expectedTeamID=${team}") || !strings.Contains(script, "require_team") {
+		t.Fatal("build script does not embed and check the expected Developer ID team")
+	}
+}
+
 func readRepo(t *testing.T, rel string) string {
 	t.Helper()
 	b, err := os.ReadFile("../../" + rel)

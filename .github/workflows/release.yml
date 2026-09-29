@@ -32,16 +32,43 @@ jobs:
           - runner: macos-15-intel
             arch: amd64
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 20
+    # Apple signing secrets live only in this environment, which releases them
+    # to v* tag runs (synced from the markus-barta/apple-signing vault). PR and
+    # branch CI never reference it.
+    environment: release-signing
+    # Notarization waits on Apple; it usually takes a few minutes.
+    timeout-minutes: 45
+    env:
+      # Must match the signing identity; the daemon embeds it (expectedTeamID).
+      AEON_DEVELOPER_ID_TEAM: P66J39QV6V
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: "1.26"
       - name: Build darwin paimos-agentd with LocalAuthentication
         env:
           AEON_DARWIN_ARCH: ${{ matrix.arch }}
         run: bash scripts/build-release-binaries.sh darwin-agentd
+      # Before upload: SHA256SUMS in the release job is computed over the signed
+      # binary. Bare binaries cannot be stapled; Gatekeeper checks online.
+      - name: Sign and notarize paimos-agentd
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: |
+          set -euo pipefail
+          if [ "$APPLE_TEAM_ID" != "$AEON_DEVELOPER_ID_TEAM" ]; then
+            echo "::error::signing team does not match AEON_DEVELOPER_ID_TEAM; Mac confirmation would fail closed"
+            exit 1
+          fi
+          bash scripts/sign-notarize.sh --identifier paimos-agentd "dist/paimos-agentd-darwin-${{ matrix.arch }}"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: agentd-darwin-${{ matrix.arch }}
