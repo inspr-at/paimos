@@ -48,7 +48,7 @@ func main() {
 
 func run(args []string, out io.Writer) error {
 	if len(args) == 0 {
-		return errors.New("usage: paimos-agentd setup|status|disconnect|add-harness|attach|serve|control")
+		return errors.New("usage: paimos-agentd setup|status|disconnect|add-harness|attach|serve|control|capacity")
 	}
 	switch args[0] {
 	case "--version", "version":
@@ -60,10 +60,12 @@ func run(args []string, out io.Writer) error {
 		return attachCommand(args[1:], out)
 	case "serve":
 		return serve(args[1:])
+	case "capacity":
+		return capacityCommand(args[1:], out)
 	case "control":
 		return control(args[1:], out)
 	default:
-		return errors.New("usage: paimos-agentd setup|status|disconnect|add-harness|attach|serve|control")
+		return errors.New("usage: paimos-agentd setup|status|disconnect|add-harness|attach|serve|control|capacity")
 	}
 }
 
@@ -171,6 +173,7 @@ func serve(args []string) error {
 	codexEmails := map[string]string{}
 	claudeHomes := map[string]string{}
 	grokBindings := map[string]agentd.GrokBinding{}
+	grokHomes, cursorHomes := map[string]string{}, map[string]string{}
 	accounts := []agentd.EnrolledAccount{}
 	for _, a := range reg.Accounts {
 		if a.Key == "" || a.AccountID == "" {
@@ -185,9 +188,15 @@ func serve(args []string) error {
 			piHomes[a.Key] = a.Home
 		case agentd.Cursor:
 			cursorIDs[a.Key] = a.Identity
+			if a.Home != "" {
+				cursorHomes[a.Key] = a.Home
+			}
 		case agentd.Claude:
 			claudeHomes[a.Key] = a.Home
 		case agentd.Grok:
+			if a.Home != "" {
+				grokHomes[a.Key] = a.Home
+			}
 			if a.Grok == nil {
 				return errors.New("native Grok binding missing")
 			}
@@ -210,10 +219,16 @@ func serve(args []string) error {
 		adapters = append(adapters, agentd.NewPiAdapter(piPath, piHomes))
 	}
 	if cursorPath != "" {
-		adapters = append(adapters, agentd.NewCursorAdapter(cursorPath, cursorIDs))
+		cursor := agentd.NewCursorAdapter(cursorPath, cursorIDs)
+		if len(cursorHomes) > 0 {
+			cursor.Homes = cursorHomes
+		}
+		adapters = append(adapters, cursor)
 	}
 	if len(grokBindings) > 0 {
-		adapters = append(adapters, agentd.NewGrokAdapter(grokBindings))
+		grok := agentd.NewGrokAdapter(grokBindings)
+		grok.Homes = grokHomes
+		adapters = append(adapters, grok)
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

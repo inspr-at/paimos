@@ -122,6 +122,7 @@ func TestManagedCodexCapacityAtStartAndEnd(t *testing.T) {
 	}
 	a := NewCodexAdapter(fakeVendorPath(t, "codex_capacity"), map[string]string{"account": home})
 	a.SetExpectedEmails(map[string]string{"account": "agent@example.test"})
+	a.IdleTimeout = 10 * time.Millisecond
 	var mu sync.Mutex
 	var got []capacity.Reading
 	proc, err := a.Start(t.Context(), req, func(e AdapterEvent) { mu.Lock(); defer mu.Unlock(); got = append(got, e.Capacity...) })

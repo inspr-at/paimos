@@ -434,6 +434,7 @@ func (a *PiAdapter) Start(ctx context.Context, r StartRequest, observe func(Adap
 // CursorAdapter speaks ACP. Account identity is checked with Cursor's
 // bounded status JSON before a child is launched.
 type CursorAdapter struct {
+	Homes      map[string]string
 	Path       string
 	Identities map[string]string
 }
@@ -504,7 +505,11 @@ func (a *CursorAdapter) Start(ctx context.Context, r StartRequest, observe func(
 	op, cancel := operationContext(ctx)
 	defer cancel()
 	args := []string{"--trust", "--model", r.Profile.Model, "acp"}
-	p, err := launchWire(path, args, r.Workspace, nil, "jsonrpc", observe)
+	environment, err := a.accountEnvironment(r.AccountKey)
+	if err != nil {
+		return nil, err
+	}
+	p, err := launchWire(path, args, r.Workspace, environment, "jsonrpc", observe)
 	if err != nil {
 		return nil, err
 	}

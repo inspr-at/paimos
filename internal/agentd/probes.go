@@ -201,7 +201,11 @@ func (a *CursorAdapter) ProbeStatus(ctx context.Context, key string) ProbeStatus
 	if expected == "" {
 		return probeUnavailable
 	}
-	raw, code, err := probeRun(ctx, a.Path, nil, "status", "--format", "json")
+	environment, err := a.accountEnvironment(key)
+	if err != nil {
+		return probeUnavailable
+	}
+	raw, code, err := probeRun(ctx, a.Path, environment, "status", "--format", "json")
 	if err != nil {
 		return probeUnavailable
 	}

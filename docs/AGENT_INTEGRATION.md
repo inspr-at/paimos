@@ -386,3 +386,48 @@ environment assignments and private-key blocks. Lines containing Unicode
 nonspacing marks are dropped. Control/format characters are
 rejected. The browser displays text only and clears it on disconnect, permission
 change, hidden tab or navigation; it never reconnects automatically.
+
+### Local capacity fallback inventory (AEON-298)
+
+`paimos-agentd capacity --setup-root /absolute/pairing-root` (or `--socket
+/absolute/agentd.sock`, optionally `--account-id UUID`) reads the authenticated
+local daemon's `GET /v1/lifecycle?include_capacity=1` projection. Its opt-in `capacity_accounts`
+array enumerates **approved enrollments**, including separate accounts with the
+same vendor or display label. It returns account ID, harness, approved display
+label/plan when supplied, fallback capability and the last observation time.
+It never returns local config paths, account keys, provider IDs or credentials.
+Ordinary lifecycle requests retain their existing strict response shape.
+This is a capability inventory, not a claim that a login is valid or quota is
+available; a missing observation stays missing. Older daemons without the
+inventory report unavailable rather than an empty successful discovery.
+
+Idle capture follows fresh harness readings and never interrupts a live managed
+run. The default interval is five minutes (`serve --capacity-interval`); failures
+never become a zero-percent reading. Existing Codex app-server readings and
+Claude in-run stream readings remain the source paths from AEON-297.
+
+| Harness | Private home binding | Idle fallback |
+| --- | --- | --- |
+| Codex | Registry `home` → `CODEX_HOME` | `account/read` identity check, then `account/rateLimits/read` |
+| Claude | Registry `home` → `CLAUDE_CONFIG_DIR` | Not available idle; readings start with a run |
+| Grok | Registry `home` → `GROK_HOME` | Not available: billing capability unverified |
+| Cursor | Registry `home` → `CURSOR_CONFIG_DIR` | Not available headless |
+
+Homes come from each approved local registry/runtime account, not from directory
+crawling or credential extraction. Cursor uses the same explicit home for its
+identity probe and ACP child. Legacy Cursor registrations with no home retain
+their previous behavior; once homes are configured, unbound account keys fail
+closed. Codex idle capture and explicit Cursor homes use a restricted environment
+so parent API keys and alternate auth paths cannot select another account.
+
+The installed Grok artifact confirms `x.ai/billing` and the names
+`BillingConfigResponse`, `BillingPeriodUsage`, and `BillingCycle`, but does not
+establish their field names or quota-neutral initialization. Its fallback is
+therefore capability-gated **before any process launch**. The gated transport
+permits only `grok agent stdio` → `initialize` → `x.ai/billing`, with bounded
+requests and owned-child cleanup. Enabling a production capability requires a
+verified executable binding and an identity-checking decoder; there is currently
+no production capability or user switch to guess the schema. Tests use a clearly
+synthetic response, not invented vendor fields. No real Grok billing probe or
+Cursor TUI/cookie extraction is used. Native Grok execution bindings and approval
+requirements remain unchanged.
